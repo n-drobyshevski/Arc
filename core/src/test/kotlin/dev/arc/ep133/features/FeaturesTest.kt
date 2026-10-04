@@ -87,6 +87,7 @@ class FeaturesTest {
         val s = connect(dev)
         assertEquals(listOf(1, 2), DeviceBrowser.projectSounds(s, 1))
         assertEquals(listOf(150), DeviceBrowser.projectSounds(s, 4))
+        assertEquals(listOf(PadGroup("b", mapOf(5 to 150))), DeviceBrowser.projectLayout(s, 4).pads)
         // The download is followed by the handshake, so the next command still works.
         assertEquals(3, DeviceBrowser.contents(s).sounds.size)
         assertEquals(0, dev.dropped)

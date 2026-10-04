@@ -55,6 +55,7 @@ fun ContentsScreen(
     onShareProject: (Int) -> Unit,
     onSaveProject: (Int) -> Unit,
     onBack: () -> Unit,
+    onPads: (Int) -> Unit = {},
 ) {
     val c = LocalArcColors.current
     BackHandler(onBack = onBack)
@@ -130,7 +131,8 @@ fun ContentsScreen(
                     val slots = runCatching { PakExport.projectSlots(pak, n) }.getOrDefault(emptyList())
                     Text(FeatureText.projectUses(slots), style = ArcType.small, color = c.graphite)
                     if (open) {
-                        Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        ArcKey(FeatureText.PADS, { onPads(n) }, Modifier.fillMaxWidth().padding(top = 6.dp), size = KeySize.Small)
+                        Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             ArcKey(FeatureText.SHARE_PROJECT, { onShareProject(n) }, Modifier.weight(1f), size = KeySize.Small)
                             ArcKey(FeatureText.SAVE_PROJECT, { onSaveProject(n) }, Modifier.weight(1f), size = KeySize.Small)
                         }

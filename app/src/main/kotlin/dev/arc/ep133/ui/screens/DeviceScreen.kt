@@ -78,6 +78,7 @@ fun DeviceScreen(
     playing: String? = null,
     onPlay: (Int) -> Unit = {},
     onStop: () -> Unit = {},
+    onPads: (Int) -> Unit = {},
 ) {
     val c = LocalArcColors.current
     BackHandler(onBack = onBack)
@@ -153,6 +154,7 @@ fun DeviceScreen(
             items(contents.projects, key = { "p${it.project}" }) { p ->
                 ProjectRow(
                     p, b, open = openProject == p.project, enabled = !state.busy,
+                    onPads = { onPads(p.project) },
                     onClick = {
                         openProject = if (openProject == p.project) null else p.project
                         if (openProject == p.project && !b.projectSounds.containsKey(p.project)) onProjectSounds(p.project)
@@ -172,9 +174,9 @@ internal fun SectionTitle(text: String, count: Int) {
     }
 }
 
-/** A pale key-coloured plate with a flat pressed tint, like the backup rows. */
+/** A pale key-coloured plate with a flat pressed tint, like the backup rows; plain text when [onClick] is null. */
 @Composable
-internal fun Plate(onClick: () -> Unit, enabled: Boolean, content: @Composable ColumnScope.() -> Unit) {
+internal fun Plate(onClick: (() -> Unit)?, enabled: Boolean, content: @Composable ColumnScope.() -> Unit) {
     val c = LocalArcColors.current
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
@@ -188,7 +190,13 @@ internal fun Plate(onClick: () -> Unit, enabled: Boolean, content: @Composable C
             .background(c.key)
             .background(if (pressed) c.keyEdge.copy(alpha = 0.25f) else Color.Transparent)
             // Not while the device is busy: the read it starts would be skipped.
-            .clickable(interactionSource = source, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable(interactionSource = source, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
+                } else {
+                    Modifier
+                },
+            )
             .padding(vertical = 12.dp, horizontal = 14.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
         content = content,
@@ -257,7 +265,7 @@ private fun Details(d: SoundDetails) {
 }
 
 @Composable
-private fun ProjectRow(p: ProjectEntry, b: BrowserUi, open: Boolean, enabled: Boolean, onClick: () -> Unit) {
+private fun ProjectRow(p: ProjectEntry, b: BrowserUi, open: Boolean, enabled: Boolean, onPads: () -> Unit, onClick: () -> Unit) {
     val c = LocalArcColors.current
     Plate(onClick, enabled) {
         Text(Strings.projectLine(p.project), style = ArcType.bold, color = c.ink)
@@ -269,6 +277,10 @@ private fun ProjectRow(p: ProjectEntry, b: BrowserUi, open: Boolean, enabled: Bo
                 else -> FeatureText.TAP_FOR_SOUNDS
             }
             Text(text, style = ArcType.small, color = c.graphite)
+            // The pads come from the same download as the sounds.
+            if (b.projectPads.containsKey(p.project)) {
+                ArcKey(FeatureText.PADS, onPads, Modifier.padding(top = 6.dp), size = KeySize.Small)
+            }
         }
     }
 }

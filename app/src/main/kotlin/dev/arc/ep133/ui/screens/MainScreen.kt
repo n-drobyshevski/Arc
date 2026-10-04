@@ -70,6 +70,7 @@ fun MainScreen(
     onDebug: () -> Unit,
     onBrowse: () -> Unit = {},
     onGuide: () -> Unit = {},
+    onSearch: () -> Unit = {},
 ) {
     val c = LocalArcColors.current
     Box(Modifier.fillMaxSize().background(c.shell), contentAlignment = Alignment.TopCenter) {
@@ -115,7 +116,12 @@ fun MainScreen(
 
             Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text(Strings.BACKUPS, style = ArcType.heading, color = c.ink)
+                    Text(Strings.BACKUPS, style = ArcType.heading, color = c.ink, modifier = Modifier.weight(1f))
+                    // Addition to the web version: find sounds across backups.
+                    if (state.backups.isNotEmpty()) {
+                        ArcKey(FeatureText.SEARCH, onSearch, size = KeySize.Small)
+                        Spacer(Modifier.width(10.dp))
+                    }
                     ArcKey(Strings.IMPORT, onImport, size = KeySize.Small)
                 }
                 if (state.backups.isNotEmpty()) {
@@ -206,7 +212,7 @@ private fun Stat(num: String, label: String) {
 }
 
 @Composable
-private fun BackupList(list: List<BackupRecord>, freshId: String?, fmtDay: (Long) -> String, onOpen: (BackupRecord) -> Unit) {
+internal fun BackupList(list: List<BackupRecord>, freshId: String?, fmtDay: (Long) -> String, onOpen: (BackupRecord) -> Unit) {
     val c = LocalArcColors.current
     Column(
         Modifier

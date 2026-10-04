@@ -34,13 +34,18 @@ import dev.arc.ep133.backup.PakSound
 import dev.arc.ep133.controller.ArcController
 import dev.arc.ep133.files.Files
 import dev.arc.ep133.text.BackupRecord
+import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.text.LibraryRules
 import dev.arc.ep133.text.Strings
 import dev.arc.ep133.ui.components.ArcSheet
 import dev.arc.ep133.ui.components.ArcToast
 import dev.arc.ep133.ui.screens.ContentsScreen
+import dev.arc.ep133.ui.screens.CompareScreen
+import dev.arc.ep133.ui.screens.ComparePickerContent
 import dev.arc.ep133.ui.screens.DebugScreen
 import dev.arc.ep133.ui.screens.GuideScreen
+import dev.arc.ep133.ui.screens.PadsSheetContent
+import dev.arc.ep133.ui.screens.SearchScreen
 import dev.arc.ep133.ui.screens.DeviceScreen
 import dev.arc.ep133.ui.screens.TRIM_PLAY_KEY
 import dev.arc.ep133.ui.screens.TrimSheetContent
@@ -271,6 +276,12 @@ class MainActivity : ComponentActivity() {
         var debug by rememberSaveable { mutableStateOf(false) }
         var browse by rememberSaveable { mutableStateOf(false) }
         var guide by rememberSaveable { mutableStateOf(false) }
+        var search by rememberSaveable { mutableStateOf(false) }
+        // Comparing two backups: the backup whose "compare" picker is open, then "<idA>|<idB>".
+        var comparePickFor by rememberSaveable { mutableStateOf<String?>(null) }
+        var compareIds by rememberSaveable { mutableStateOf<String?>(null) }
+        // The pad sheet: "backup:<id>:<project>" or "device:<project>".
+        var padsFor by rememberSaveable { mutableStateOf<String?>(null) }
         var contentsId by rememberSaveable { mutableStateOf<String?>(null) }
         // The upload draft row being trimmed; the trim view replaces the upload sheet's content.
         var trimIndex by rememberSaveable { mutableStateOf<Int?>(null) }
@@ -304,12 +315,30 @@ class MainActivity : ComponentActivity() {
         // After a recreation (or process death) the opened backup has to be read again.
         LaunchedEffect(contentsBackup?.id) { contentsBackup?.let { controller.openContents(it) } }
         val playing by controller.player.playing.collectAsStateWithLifecycle()
+        val compareA = compareIds?.substringBefore('|')?.let { id -> state.backups.firstOrNull { it.id == id } }
+        val compareB = compareIds?.substringAfter('|')?.let { id -> state.backups.firstOrNull { it.id == id } }
+        // Also runs again after a recreation, when the result is gone.
+        LaunchedEffect(compareA?.id, compareB?.id) {
+            if (compareA != null && compareB != null) controller.compareBackups(compareA, compareB)
+        }
 
         Box(Modifier.fillMaxSize()) {
             if (debug) {
                 DebugScreen(controller.trafficLog, ::shareLog, ::saveLog, ::copyLog) { debug = false }
             } else if (guide) {
                 GuideScreen { guide = false }
+            } else if (compareA != null && compareB != null) {
+                val (old, new) = if (compareB.createdAt < compareA.createdAt) compareB to compareA else compareA to compareB
+                CompareScreen(
+                    old = old,
+                    new = new,
+                    compare = state.pakCompare?.takeIf { it.oldId == old.id && it.newId == new.id },
+                    fmtDay = controller::fmtDay,
+                    onBack = {
+                        compareIds = null
+                        controller.closeCompare()
+                    },
+                )
             } else if (contentsBackup != null) {
                 ContentsScreen(
                     b = contentsBackup,
@@ -323,8 +352,39 @@ class MainActivity : ComponentActivity() {
                     onSaveProject = { saveProject(contentsBackup, it) },
                     onBack = {
                         contentsId = null
+                        padsFor = null
                         controller.closeContents()
                     },
+                    onPads = { n -> padsFor = "backup:${contentsBackup.id}:$n" },
+                )
+                val pak = state.contents?.takeIf { it.backupId == contentsBackup.id }?.pak
+                val padsProject = padsFor?.takeIf { it.startsWith("backup:${contentsBackup.id}:") }?.substringAfterLast(':')?.toIntOrNull()
+                val tar = padsProject?.let { pak?.projects?.get(it) }
+                val groups = remember(tar) { tar?.let { dev.arc.ep133.features.ProjectPads.read(it) } }
+                val lastPads = remember { mutableStateOf<Pair<Int, List<dev.arc.ep133.features.PadGroup>>?>(null) }
+                    .apply { if (padsProject != null && groups != null) value = padsProject to groups }.value
+                val playingPrefix = "backup:${contentsBackup.id}:"
+                ArcSheet(visible = groups != null, onDismiss = { padsFor = null }) {
+                    lastPads?.let { (n, g) ->
+                        PadsSheetContent(
+                            title = FeatureText.padsTitle(n),
+                            groups = g,
+                            nameOf = { slot -> pak?.sounds?.get(slot)?.name },
+                            playingSlot = playing?.takeIf { it.startsWith(playingPrefix) }?.removePrefix(playingPrefix)?.toIntOrNull(),
+                            onPad = { slot ->
+                                if (playing == playingPrefix + slot) controller.stopPlayback() else controller.playBackupSound(slot)
+                            },
+                            onDone = { padsFor = null },
+                        )
+                    }
+                }
+            } else if (search) {
+                SearchScreen(
+                    search = state.search,
+                    fmtDay = controller::fmtDay,
+                    onQuery = controller::setSearch,
+                    onOpen = { b -> contentsId = b.id },
+                    onBack = { search = false },
                 )
             } else if (browse) {
                 DeviceScreen(
@@ -335,8 +395,10 @@ class MainActivity : ComponentActivity() {
                     onAddSamples = { samplesLauncher.launch(arrayOf("audio/*", "application/octet-stream")) },
                     onBack = {
                         browse = false
+                        padsFor = null
                         controller.stopPlayback()
                     },
+                    onPads = { n -> padsFor = "device:$n" },
                     playing = playing,
                     onPlay = { controller.playDeviceSound(it) },
                     onStop = controller::stopPlayback,
@@ -348,6 +410,28 @@ class MainActivity : ComponentActivity() {
                     if (draft == null) {
                         trimIndex = null
                         if (controller.player.playing.value == TRIM_PLAY_KEY) controller.stopPlayback()
+                    }
+                }
+                val devicePadsProject = padsFor?.takeIf { it.startsWith("device:") }?.removePrefix("device:")?.toIntOrNull()
+                val deviceGroups = devicePadsProject?.let { state.browser.projectPads[it] }
+                // A disconnect, refresh or process death drops the pads; forget the request then,
+                // or the sheet would pop up by itself when the project is read again. (The Pads
+                // key only shows once the pads are there, so a fresh tap never lands here.)
+                val devicePadsGone = devicePadsProject != null && deviceGroups == null
+                LaunchedEffect(devicePadsGone) { if (devicePadsGone) padsFor = null }
+                val lastDevicePads = remember { mutableStateOf<Pair<Int, List<dev.arc.ep133.features.PadGroup>>?>(null) }
+                    .apply { if (devicePadsProject != null && deviceGroups != null) value = devicePadsProject to deviceGroups }.value
+                ArcSheet(visible = deviceGroups != null, onDismiss = { padsFor = null }) {
+                    lastDevicePads?.let { (n, g) ->
+                        val names = state.browser.contents?.sounds?.associate { it.slot to it.name } ?: emptyMap()
+                        PadsSheetContent(
+                            title = FeatureText.padsTitle(n),
+                            groups = g,
+                            nameOf = { names[it] },
+                            playingSlot = null,
+                            onPad = null,
+                            onDone = { padsFor = null },
+                        )
                     }
                 }
                 fun closeTrim() {
@@ -408,6 +492,7 @@ class MainActivity : ComponentActivity() {
                         controller.refreshBrowser()
                     },
                     onGuide = { guide = true },
+                    onSearch = { search = true },
                 )
 
                 ArcSheet(visible = detail != null, onDismiss = { closeDetail(save = true) }) {
@@ -431,9 +516,33 @@ class MainActivity : ComponentActivity() {
                             closeDetail(save = true)
                             contentsId = b.id
                         },
+                        onCompareBackups = if (state.backups.size >= 2) {
+                            {
+                                closeDetail(save = true)
+                                comparePickFor = b.id
+                            }
+                        } else {
+                            null
+                        },
                         onDelete = { confirmDelete = true },
                         onDone = { closeDetail(save = true) },
                     )
+                }
+
+                val pickFor = state.backups.firstOrNull { it.id == comparePickFor }
+                val lastPickFor = remember { mutableStateOf<BackupRecord?>(null) }.apply { if (pickFor != null) value = pickFor }.value
+                ArcSheet(visible = pickFor != null, onDismiss = { comparePickFor = null }) {
+                    lastPickFor?.let { a ->
+                        ComparePickerContent(
+                            others = state.backups.filter { it.id != a.id },
+                            fmtDay = controller::fmtDay,
+                            onPick = { other ->
+                                comparePickFor = null
+                                compareIds = a.id + "|" + other.id
+                            },
+                            onCancel = { comparePickFor = null },
+                        )
+                    }
                 }
 
                 fun closeRestore() {
