@@ -140,4 +140,67 @@ object FeatureText {
 
     fun trimmed(seconds: Double) = "Trimmed to ${duration(seconds)}"
     fun selection(startS: Double, endS: Double) = "${duration(startS)} to ${duration(endS)}, ${duration(endS - startS)} long"
+
+    // ---------- pad layout ----------
+    const val PADS = "Pads"
+    const val EMPTY_PAD = "Empty"
+    const val NO_PADS = "No pad assignments found in this project."
+    const val PADS_NOTE = "Pads are shown by number, not by where they sit on the device."
+
+    /** "Group A"; a group with an unexpected name keeps it. */
+    fun group(name: String) = "Group ${groupLetter(name)}"
+
+    private fun groupLetter(name: String) = if (name.length == 1) name.uppercase() else name
+
+    fun padsTitle(project: Int) = "Project $project pads"
+
+    // ---------- library search ----------
+    const val SEARCH = "Search"
+    const val SEARCH_SOUNDS = "Search sounds"
+    const val SEARCH_HINT = "Find a sound by name in every saved backup."
+    const val NO_SOUND_MATCHES = "No sounds match."
+    const val INDEXING = "Indexing backups…"
+
+    fun matches(n: Int) = plural(n, "match", "matches")
+
+    // ---------- compare two backups ----------
+    const val COMPARE_BACKUPS = "Compare with another backup"
+    const val PICK_OTHER = "Compare with which backup?"
+    const val COMPARING_BACKUPS = "Comparing…"
+    const val SOUNDS_ADDED = "Sounds added"
+    const val SOUNDS_REMOVED = "Sounds removed"
+    const val SOUNDS_CHANGED = "Sounds changed"
+    const val PROJECTS_ADDED = "Projects added"
+    const val PROJECTS_REMOVED = "Projects removed"
+    const val PROJECTS_CHANGED = "Projects changed"
+    const val NOTHING_CHANGED = "Nothing changed: the same sounds and projects."
+    const val AUDIO_CHANGED = "Audio changed"
+    const val PATTERNS_CHANGED = "Patterns or settings changed; the pads are the same."
+
+    fun compareHeader(oldTitle: String, oldDay: String, newTitle: String, newDay: String) =
+        "From $oldTitle ($oldDay) to $newTitle ($newDay)"
+
+    fun unchanged(sounds: Int, projects: Int): String {
+        val parts = buildList {
+            if (sounds > 0) add(plural(sounds, "sound"))
+            if (projects > 0) add(plural(projects, "project"))
+        }
+        return if (parts.isEmpty()) "" else "Unchanged: ${parts.joinToString(" and ")}."
+    }
+
+    /** "Renamed from kick; audio changed; settings changed: Pitch, Volume" */
+    fun soundChange(c: dev.arc.ep133.features.SoundChange): String = buildList {
+        if (c.renamed && c.oldName != null) add("Renamed from ${c.oldName}")
+        if (c.audioChanged) add(if (isEmpty()) AUDIO_CHANGED else "audio changed")
+        if (c.settingsChanged.isNotEmpty()) {
+            val labels = c.settingsChanged.map(::settingLabel).joinToString(", ")
+            add(if (isEmpty()) "Settings changed: $labels" else "settings changed: $labels")
+        }
+    }.joinToString("; ")
+
+    /** "Pad A3: 001 kick, now 005 clap" */
+    fun padChange(c: dev.arc.ep133.features.PadChange, oldName: String?, newName: String?): String {
+        fun side(slot: Int?, name: String?) = if (slot == null) "empty" else slot(slot) + (name?.let { " $it" } ?: "")
+        return "Pad ${groupLetter(c.group)}${c.pad}: ${side(c.oldSlot, oldName)}, now ${side(c.newSlot, newName)}"
+    }
 }

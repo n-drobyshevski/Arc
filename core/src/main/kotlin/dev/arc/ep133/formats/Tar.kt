@@ -59,8 +59,9 @@ object Tar {
         return if (neg) -v else v
     }
 
-    // /(^|\/)pads\/.+\/p\d+$/ with JS meanings of `.`, `\d` and `$`.
-    private val PAD = Regex("(?:^|/)pads/$JS_DOT+/p[0-9]+\\z")
+    // /(^|\/)pads\/.+\/p\d+$/ with JS meanings of `.`, `\d` and `$`. The groups
+    // (pad group and pad number) are only read by ProjectPads; matching is unchanged.
+    internal val PAD = Regex("(?:^|/)pads/($JS_DOT+)/p([0-9]+)\\z")
 
     /** Sample slots (1..999) referenced by pads in a project TAR. */
     fun slotsUsedByProject(tar: ByteArray): List<Int> {
