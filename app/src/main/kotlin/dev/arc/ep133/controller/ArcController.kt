@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.text.format.DateFormat
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 import dev.arc.ep133.backup.Backup
 import dev.arc.ep133.backup.PakDescription
 import dev.arc.ep133.backup.Paks
@@ -640,7 +641,7 @@ class ArcController(
     fun mirrorName(pad: dev.arc.ep133.features.PhysicalPad): String? = mirror?.nameOf(pad)
 
     fun setPadOrder(order: dev.arc.ep133.features.PadOrder) {
-        mirrorPrefs.edit().putString("order", order.name).apply()
+        mirrorPrefs.edit { putString("order", order.name) }
         mirror?.let { m ->
             m.setPadOrder(order)
             _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(state = m.snapshot(System.nanoTime()))) } ?: cur }
@@ -670,7 +671,7 @@ class ArcController(
         }.toMap()
 
     private fun saveLearned(learned: Map<Int, Int>) {
-        mirrorPrefs.edit().putString("learned", learned.entries.joinToString(",") { "${it.key}:${it.value}" }).apply()
+        mirrorPrefs.edit { putString("learned", learned.entries.joinToString(",") { "${it.key}:${it.value}" }) }
     }
 
     fun setSearch(query: String) {
