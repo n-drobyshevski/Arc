@@ -2,24 +2,32 @@ package dev.arc.ep133.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -29,30 +37,44 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
+import dev.arc.ep133.text.GuideCombo
 import dev.arc.ep133.text.GuideEntry
 import dev.arc.ep133.text.GuideText
-import dev.arc.ep133.text.Strings
 import dev.arc.ep133.ui.components.ArcField
 import dev.arc.ep133.ui.components.ArcKey
-import dev.arc.ep133.ui.components.KeySize
-import dev.arc.ep133.ui.components.KeyStyle
+import dev.arc.ep133.ui.components.CloseKey
+import dev.arc.ep133.ui.components.ComboView
 import dev.arc.ep133.ui.theme.ArcType
 import dev.arc.ep133.ui.theme.LocalArcColors
 
 /**
  * Key combinations for the EP-133 (an addition to the web version), from
- * teenage engineering's official guide. Tap an entry for its note and source.
+ * teenage engineering's official guide, laid out like a printed guide: one
+ * tab per section, each entry's keys drawn as caps with what they do below.
+ * Tap an entry for the guide's own wording, a note and the source.
  */
 @Composable
 fun GuideScreen(onBack: () -> Unit) {
     val c = LocalArcColors.current
     BackHandler(onBack = onBack)
     val uri = LocalUriHandler.current
+    var tab by rememberSaveable { mutableIntStateOf(0) }
     var query by rememberSaveable { mutableStateOf("") }
     var open by rememberSaveable { mutableStateOf<String?>(null) }
-    val sections = remember(query) { GuideText.filter(query) }
+    val searching = query.isNotBlank()
+    val sections = remember(query, tab) {
+        if (searching) GuideText.filter(query) else listOf(GuideText.sections[tab])
+    }
+    val list = rememberLazyListState()
+    // A new tab starts at its top.
+    LaunchedEffect(tab) { list.scrollToItem(0) }
 
     fun openUrl(url: String) {
         // No browser installed: nothing to open, so do nothing.
@@ -60,64 +82,133 @@ fun GuideScreen(onBack: () -> Unit) {
     }
 
     Box(Modifier.fillMaxSize().background(c.shell), contentAlignment = Alignment.TopCenter) {
-        LazyColumn(
+        Column(
             Modifier
                 .widthIn(max = 560.dp)
                 .fillMaxWidth()
                 .windowInsetsPadding(WindowInsets.safeDrawing),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            item {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(GuideText.TITLE, style = ArcType.heading, color = c.ink, modifier = Modifier.weight(1f))
-                    ArcKey(Strings.DONE, onBack, size = KeySize.Small, style = KeyStyle.Quiet)
-                }
+            // Header: the title centred, the close key on the right.
+            Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Text(
+                    GuideText.HEADER,
+                    style = ArcType.heading.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium, letterSpacing = 0.08.em),
+                    color = c.graphite,
+                    modifier = Modifier.align(Alignment.Center),
+                )
+                CloseKey(onBack, GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
             }
-            item { Text(GuideText.INTRO, style = ArcType.body15, color = c.graphite) }
-            item { Text(GuideText.CHECK_NOTE, style = ArcType.small, color = c.graphite) }
-            item { ArcKey(GuideText.OPEN_OFFICIAL, { openUrl(GuideText.OFFICIAL_URL) }, Modifier.fillMaxWidth()) }
-            item { ArcField(GuideText.SEARCH, query, { query = it }) }
-            if (sections.isEmpty()) item { Text(GuideText.NO_MATCHES, style = ArcType.body15, color = c.graphite) }
-            for (s in sections) {
-                item(key = "t:" + s.title) { SectionTitle(s.title, s.entries.size) }
-                items(s.entries, key = { "e:" + s.title + ":" + it.action }) { e ->
-                    val id = s.title + ":" + e.action
-                    GuideRow(e, open = open == id, onClick = { open = if (open == id) null else id }, onSource = { openUrl(e.source) })
+            // The page: tabs on top, entries below, on the pale key colour.
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp))
+                    .background(c.key),
+            ) {
+                Tabs(selected = if (searching) -1 else tab, onSelect = {
+                    tab = it
+                    query = ""
+                })
+                LazyColumn(state = list, modifier = Modifier.fillMaxSize()) {
+                    item(key = "search") {
+                        ArcField(GuideText.SEARCH, query, { query = it }, Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
+                    }
+                    if (sections.isEmpty()) {
+                        item(key = "none") {
+                            Text(GuideText.NO_MATCHES, style = ArcType.body15, color = c.graphite, modifier = Modifier.padding(20.dp))
+                        }
+                    }
+                    for (s in sections) {
+                        if (searching) {
+                            item(key = "t:" + s.title) {
+                                Text(
+                                    GuideText.tab(s), style = ArcType.small.copy(fontFamily = FontFamily.Monospace), color = c.graphite,
+                                    modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp),
+                                )
+                            }
+                        }
+                        items(s.entries, key = { "e:" + s.title + ":" + it.action }) { e ->
+                            val id = s.title + ":" + e.action
+                            Entry(e, open = open == id, onClick = { open = if (open == id) null else id }, onSource = { openUrl(e.source) })
+                        }
+                    }
+                    item(key = "footer") {
+                        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Text(GuideText.INTRO, style = ArcType.small, color = c.graphite)
+                            Text(GuideText.CHECK_NOTE, style = ArcType.small, color = c.graphite)
+                            ArcKey(GuideText.OPEN_OFFICIAL, { openUrl(GuideText.OFFICIAL_URL) }, Modifier.fillMaxWidth())
+                        }
+                    }
                 }
             }
         }
     }
 }
 
+/** One tab per section; the selected one is ringed, as in the official guide. */
 @Composable
-private fun GuideRow(e: GuideEntry, open: Boolean, onClick: () -> Unit, onSource: () -> Unit) {
+private fun Tabs(selected: Int, onSelect: (Int) -> Unit) {
     val c = LocalArcColors.current
-    Plate(onClick, enabled = true) {
-        Text(e.action, style = ArcType.bold, color = c.ink)
-        // The keys on the dark display colours, like the device's own screen.
-        Text(
-            e.keys,
-            style = ArcType.small,
-            color = c.displayInk,
-            modifier = Modifier
-                .padding(top = 2.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .background(c.display)
-                .padding(vertical = 4.dp, horizontal = 8.dp),
-        )
-        if (open) {
-            e.note?.let { Text(it, style = ArcType.small, color = c.graphite, modifier = Modifier.padding(top = 4.dp)) }
-            Text(
-                GuideText.SOURCE,
-                style = ArcType.small.copy(textDecoration = TextDecoration.Underline),
-                color = c.graphite,
-                modifier = Modifier
-                    .padding(top = 2.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = onSource)
-                    .padding(vertical = 4.dp),
-            )
+    Column {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            GuideText.sections.forEachIndexed { i, s ->
+                val on = i == selected
+                Text(
+                    GuideText.tab(s),
+                    style = ArcType.small.copy(fontFamily = FontFamily.Monospace, fontSize = 14.sp, letterSpacing = 0.04.em),
+                    color = if (on) c.ink else c.graphite,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .then(if (on) Modifier.border(1.dp, c.graphite, RoundedCornerShape(50)) else Modifier)
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Tab) { onSelect(i) }
+                        .semantics { this.selected = on }
+                        .padding(horizontal = 14.dp, vertical = 8.dp),
+                )
+            }
         }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(c.keyEdge))
+    }
+}
+
+@Composable
+private fun Entry(e: GuideEntry, open: Boolean, onClick: () -> Unit, onSource: () -> Unit) {
+    val c = LocalArcColors.current
+    val combo = remember(e.combo) { e.combo?.let(GuideCombo::parse) }
+    Column {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = onClick)
+                .padding(horizontal = 20.dp, vertical = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            if (combo != null) {
+                ComboView(combo, spoken = e.keys)
+            } else {
+                // Not drawable as keys (power-up and setup steps): the guide's words instead.
+                Text(e.keys, style = ArcType.body15.copy(fontFamily = FontFamily.Monospace), color = c.ink)
+            }
+            Text(e.action, style = ArcType.body15.copy(fontSize = 18.sp), color = c.graphite)
+            if (open) {
+                if (combo != null) Text(e.keys, style = ArcType.small.copy(fontFamily = FontFamily.Monospace), color = c.graphite)
+                e.note?.let { Text(it, style = ArcType.small, color = c.graphite) }
+                Text(
+                    GuideText.SOURCE,
+                    style = ArcType.small.copy(textDecoration = TextDecoration.Underline),
+                    color = c.graphite,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = onSource)
+                        .padding(vertical = 4.dp),
+                )
+            }
+        }
+        Box(Modifier.padding(horizontal = 20.dp).fillMaxWidth().height(1.dp).background(c.keyEdge.copy(alpha = 0.7f)))
     }
 }
