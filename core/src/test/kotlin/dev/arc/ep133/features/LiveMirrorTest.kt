@@ -94,7 +94,7 @@ class LiveMirrorTest {
     private val ms = 1_000_000L
 
     private fun mirror(learned: Map<Int, Int> = emptyMap(), saved: MutableList<Map<Int, Int>> = ArrayList()) =
-        LiveMirror(learned) { saved.add(it) }.apply {
+        LiveMirror(learned, onLearned = { saved.add(it) }).apply {
             // Group A: p01 holds slot 5, p10 slot 1. Group B: p01 slot 20.
             setProject(1, listOf(PadGroup("a", mapOf(1 to 5, 10 to 1)), PadGroup("b", mapOf(1 to 20))))
             setNames(mapOf(1 to "kick", 5 to "snare", 20 to "bass"))

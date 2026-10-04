@@ -111,15 +111,7 @@ class Session(
             // device-originated requests with an id are ignored.
             // As in the JS, a listener that throws stops the rest for this frame
             // (the error is swallowed here so the collector keeps running).
-            if (!f.hasId) {
-                for (cb in pushListeners) {
-                    try {
-                        cb(f)
-                    } catch (_: Throwable) {
-                        break
-                    }
-                }
-            }
+            if (!f.hasId) notifyPush(f)
             return
         }
         // Fire-and-forget acks are matched before waiters and fire once.
@@ -128,7 +120,14 @@ class Session(
             runCatching { ack(f) }
             return
         }
-        val w = waiters[f.requestId] ?: return
+        val w = waiters[f.requestId]
+        if (w == null) {
+            // A reply-shaped frame nobody waits for. Community notes don't say how
+            // the device marks its FILE events, so these reach push listeners too
+            // (the live mirror); they never complete or disturb a request.
+            notifyPush(f)
+            return
+        }
         if (w.progress && f.status >= Status.SPECIFIC_SUCCESS_START) {
             // Intermediate progress: keep waiting, restart the full timeout.
             startTimer(w)
@@ -139,7 +138,20 @@ class Session(
         w.result.complete(f)
     }
 
-    /** Listen for unsolicited device pushes (file added / deleted / metadata changed). */
+    private fun notifyPush(f: Frame) {
+        for (cb in pushListeners) {
+            try {
+                cb(f)
+            } catch (_: Throwable) {
+                break
+            }
+        }
+    }
+
+    /**
+     * Listen for unsolicited device pushes (file added / deleted / metadata
+     * changed): request frames without an id, and replies no request waits for.
+     */
     fun onPush(cb: (Frame) -> Unit): () -> Unit {
         pushListeners.add(cb)
         return { pushListeners.remove(cb) }

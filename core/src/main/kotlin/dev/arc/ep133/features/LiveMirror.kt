@@ -24,6 +24,7 @@ data class MirrorState(
     val learned: Map<Int, Int> = emptyMap(),
     /** Whether a pad push has ever been seen this session. */
     val pushesSeen: Boolean = false,
+    val padOrder: PadOrder = PadOrder.FROM_TOP,
 )
 
 /**
@@ -43,7 +44,11 @@ data class MirrorState(
  * All times are nanoseconds on one clock (the MIDI receiver's timestamps and
  * System.nanoTime in the app).
  */
-class LiveMirror(learned: Map<Int, Int> = emptyMap(), private val onLearned: (Map<Int, Int>) -> Unit = {}) {
+class LiveMirror(
+    learned: Map<Int, Int> = emptyMap(),
+    padOrder: PadOrder = PadOrder.FROM_TOP,
+    private val onLearned: (Map<Int, Int>) -> Unit = {},
+) {
     companion object {
         /** How close a note and a pad push must be to belong to the same press. */
         const val MATCH_WINDOW_NS = 250_000_000L
@@ -65,6 +70,12 @@ class LiveMirror(learned: Map<Int, Int> = emptyMap(), private val onLearned: (Ma
     private var names: Map<Int, String> = emptyMap()
     private val learned = LinkedHashMap(learned)
     private var pushesSeen = false
+    private var padOrder = padOrder
+
+    @Synchronized
+    fun setPadOrder(order: PadOrder) {
+        padOrder = order
+    }
 
     // The latest note-on and pad push per group not yet paired, with their times.
     private val pendingNote = HashMap<Int, Pair<PhysicalPad, Long>>()
@@ -151,10 +162,17 @@ class LiveMirror(learned: Map<Int, Int> = emptyMap(), private val onLearned: (Ma
         }
     }
 
-    /** The slot on a physical pad in the active project, once its pad number is learned. */
+    /**
+     * The slot on a physical pad in the active project. Counted from the top,
+     * the pad's number is the learned pad file id term; counted from the
+     * bottom, it is the official note order plus one (see [PadOrder]).
+     */
     @Synchronized
     fun slotOf(pad: PhysicalPad): Int? {
-        val number = learned[pad.offset] ?: return null
+        val number = when (padOrder) {
+            PadOrder.FROM_TOP -> learned[pad.offset] ?: return null
+            PadOrder.FROM_BOTTOM -> pad.offset + 1
+        }
         return layout[('a' + pad.group).toString()]?.get(number)
     }
 
@@ -184,6 +202,7 @@ class LiveMirror(learned: Map<Int, Int> = emptyMap(), private val onLearned: (Ma
             activeProject = activeProject,
             learned = LinkedHashMap(learned),
             pushesSeen = pushesSeen,
+            padOrder = padOrder,
         )
     }
 }

@@ -4,6 +4,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.room)
+    alias(libs.plugins.compose.screenshot)
 }
 
 android {
@@ -49,6 +50,9 @@ android {
 
     buildFeatures { compose = true }
 
+    // Screenshots of @Preview screens (src/screenshotTest), rendered on the JVM; nothing ships in the app.
+    experimentalProperties["android.experimental.enableScreenshotTest"] = true
+
     testOptions {
         unitTests.all { it.useJUnitPlatform() }
     }
@@ -79,6 +83,10 @@ dependencies {
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
     ksp(libs.room.compiler)
+
+    screenshotTestImplementation(libs.screenshot.validation.api)
+    screenshotTestImplementation(platform(libs.compose.bom))
+    screenshotTestImplementation(libs.compose.ui.tooling)
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)

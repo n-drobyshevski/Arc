@@ -2,6 +2,8 @@
 agp = "9.4.1"
 kotlin = "2.3.21"
 ksp = "2.3.12"
+# Google's Compose Preview Screenshot Testing: renders @Preview screens to PNG on the JVM (test-only).
+screenshot = "0.0.1-alpha16"
 coroutines = "1.11.0"
 serialization = "1.11.0"
 composeBom = "2026.09.00"
@@ -33,6 +35,8 @@ junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 
+screenshot-validation-api = { module = "com.android.tools.screenshot:screenshot-validation-api", version.ref = "screenshot" }
+
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-lint = { id = "com.android.lint", version.ref = "agp" }
@@ -41,3 +45,4 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 room = { id = "androidx.room", version.ref = "room" }
+compose-screenshot = { id = "com.android.compose.screenshot", version.ref = "screenshot" }
