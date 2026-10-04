@@ -5,13 +5,14 @@ import dev.arc.ep133.backup.Pak
 import dev.arc.ep133.backup.PakSound
 import dev.arc.ep133.backup.Progress
 import dev.arc.ep133.backup.RestoreResult
+import dev.arc.ep133.formats.Wav
 import dev.arc.ep133.protocol.CancelSignal
 import dev.arc.ep133.protocol.Device
 import dev.arc.ep133.protocol.Session
 import kotlinx.serialization.json.JsonObject
 
-/** A WAV file to load into a sample slot. */
-class UploadItem(val slot: Int, val name: String, val wav: ByteArray)
+/** A WAV file to load into a sample slot, optionally only frames [trim] of it. */
+class UploadItem(val slot: Int, val name: String, val wav: ByteArray, val trim: IntRange? = null)
 
 class UploadError(message: String) : Exception(message)
 
@@ -47,8 +48,23 @@ object SampleUpload {
     /** The in-memory backup an upload is restored from. */
     fun asPak(items: List<UploadItem>): Pak {
         val sounds = LinkedHashMap<Int, PakSound>()
-        for (i in items) sounds[i.slot] = PakSound(i.slot, i.name, i.wav, null)
+        for (i in items) sounds[i.slot] = if (i.trim == null) PakSound(i.slot, i.name, i.wav, null) else trimmed(i, i.trim)
         return Pak(JsonObject(emptyMap()), JsonObject(emptyMap()), sounds, LinkedHashMap())
+    }
+
+    /**
+     * A trimmed file is cut at its own sample rate (the restore path resamples
+     * afterwards). Its embedded settings come along as the sound's settings,
+     * with loop points moved to the new start.
+     */
+    private fun trimmed(i: UploadItem, range: IntRange): PakSound {
+        val w = Wav.decode(i.wav)
+        val pcm = SampleTrim.cut(w.pcm, w.channels, range.first, range.last + 1)
+        if (pcm.isEmpty()) throw UploadError("The trimmed part of ${i.name} is empty.")
+        val frames = SampleTrim.frames(pcm, w.channels)
+        val settings = SampleTrim.shiftLoops(w.embedded ?: JsonObject(emptyMap()), range.first, frames)
+        val wav = Wav.encode(pcm, w.channels, w.sampleRate.toInt())
+        return PakSound(i.slot, i.name, wav, settings)
     }
 
     suspend fun upload(
