@@ -1,0 +1,35 @@
+package dev.arc.ep133.text
+
+import dev.arc.ep133.features.Hit
+import dev.arc.ep133.features.PadNotes
+import dev.arc.ep133.util.jsToFixed
+
+/** Text for the live mirror (an addition to the web version). */
+object MirrorText {
+    const val LIVE = "Live"
+    const val TITLE = "Live"
+    const val READING = "Reading the device\u2026"
+    const val NOT_CONNECTED = "Connect your EP-133 to see it live."
+    const val PLAYING = "Playing"
+    const val STOPPED = "Stopped"
+    const val NO_TRANSPORT = "Play/stop and tempo need MIDI clock out: SHIFT + ERASE, then 102."
+    const val WAITING = "Press a pad on the EP-133."
+    const val KEYS = "Keys"
+    const val LEARN_NOTE = "Sample names are learned as you press pads: each pad needs one press before its name shows."
+    const val COMMUNITY_NOTE = "Pads and transport follow the official MIDI note map. Naming the samples relies on community notes about the device's SysEx, not on the official guide."
+    const val NO_PUSHES = "No pad messages from the device yet, so samples can't be named. Pads still light up."
+    const val LISTEN_ONLY = "Nothing is sent to the device while you watch."
+
+    fun bpm(bpm: Double) = "${jsToFixed(bpm, 1)} BPM"
+
+    fun project(n: Int) = "Project $n"
+
+    /** "A 7 \u00B7 001 kick \u00B7 96", or "C#5 \u00B7 ch 1 \u00B7 80" for a note outside the pads. */
+    fun hit(h: Hit): String {
+        val where = h.pad?.let { "${it.groupLetter} ${it.label}" } ?: "${PadNotes.noteName(h.note)} \u00B7 ch ${h.channel}"
+        val sound = h.slot?.let { slot -> " \u00B7 " + FeatureText.slot(slot) + (h.name?.let { " $it" } ?: "") } ?: ""
+        return "$where$sound \u00B7 ${h.velocity}"
+    }
+
+    fun channel(ch: Int) = "ch $ch"
+}
