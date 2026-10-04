@@ -41,6 +41,8 @@ import dev.arc.ep133.ui.components.ArcToast
 import dev.arc.ep133.ui.screens.ContentsScreen
 import dev.arc.ep133.ui.screens.DebugScreen
 import dev.arc.ep133.ui.screens.DeviceScreen
+import dev.arc.ep133.ui.screens.TRIM_PLAY_KEY
+import dev.arc.ep133.ui.screens.TrimSheetContent
 import dev.arc.ep133.ui.screens.UploadSheetContent
 import dev.arc.ep133.ui.screens.DeleteDialog
 import dev.arc.ep133.ui.screens.DetailSheetContent
@@ -268,6 +270,8 @@ class MainActivity : ComponentActivity() {
         var debug by rememberSaveable { mutableStateOf(false) }
         var browse by rememberSaveable { mutableStateOf(false) }
         var contentsId by rememberSaveable { mutableStateOf<String?>(null) }
+        // The upload draft row being trimmed; the trim view replaces the upload sheet's content.
+        var trimIndex by rememberSaveable { mutableStateOf<Int?>(null) }
         var detailId by rememberSaveable { mutableStateOf<String?>(null) }
         var restoreId by rememberSaveable { mutableStateOf<String?>(null) }
         var confirmDelete by rememberSaveable { mutableStateOf(false) }
@@ -325,12 +329,47 @@ class MainActivity : ComponentActivity() {
                     onSoundDetails = { controller.loadSoundDetails(it) },
                     onProjectSounds = { controller.loadProjectSounds(it) },
                     onAddSamples = { samplesLauncher.launch(arrayOf("audio/*", "application/octet-stream")) },
-                    onBack = { browse = false },
+                    onBack = {
+                        browse = false
+                        controller.stopPlayback()
+                    },
+                    playing = playing,
+                    onPlay = { controller.playDeviceSound(it) },
+                    onStop = controller::stopPlayback,
                 )
                 val draft = state.browser.draft
                 val lastDraft = remember { mutableStateOf(draft) }.apply { if (draft != null) value = draft }.value
-                ArcSheet(visible = draft != null, onDismiss = { controller.dropDraft() }) {
-                    lastDraft?.let { d ->
+                // A new draft never opens straight into the trim view of an old one.
+                LaunchedEffect(draft == null) {
+                    if (draft == null) {
+                        trimIndex = null
+                        if (controller.player.playing.value == TRIM_PLAY_KEY) controller.stopPlayback()
+                    }
+                }
+                fun closeTrim() {
+                    trimIndex = null
+                    if (playing == TRIM_PLAY_KEY) controller.stopPlayback()
+                }
+                ArcSheet(
+                    visible = draft != null,
+                    onDismiss = {
+                        if (trimIndex != null) closeTrim() else controller.dropDraft()
+                    },
+                ) {
+                    val trimming = trimIndex?.let { lastDraft?.getOrNull(it) }
+                    if (trimming != null) {
+                        TrimSheetContent(
+                            item = trimming,
+                            playing = playing,
+                            onPlay = { pcm, ch, rate -> controller.player.play(TRIM_PLAY_KEY, pcm, ch, rate) },
+                            onStop = controller::stopPlayback,
+                            onDone = { range ->
+                                controller.setDraftTrim(trimIndex!!, range)
+                                closeTrim()
+                            },
+                            onCancel = { closeTrim() },
+                        )
+                    } else lastDraft?.let { d ->
                         UploadSheetContent(
                             draft = d,
                             occupied = state.browser.contents?.sounds?.associate { it.slot to it.name } ?: emptyMap(),
@@ -338,6 +377,7 @@ class MainActivity : ComponentActivity() {
                             onSlot = controller::setDraftSlot,
                             onUpload = { withNotifications { controller.uploadDraft() } },
                             onCancel = { controller.dropDraft() },
+                            onTrim = { trimIndex = it },
                         )
                     }
                 }

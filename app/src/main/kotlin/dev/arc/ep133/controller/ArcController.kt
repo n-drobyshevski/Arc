@@ -75,6 +75,8 @@ data class UploadDraftItem(
     val error: String?,
     /** Frames to upload; null means the whole file. */
     val trim: IntRange? = null,
+    /** The file's sample rate, for showing trim times (0 when unusable). */
+    val sampleRate: Long = 0,
 )
 
 /** A backup opened for its contents screen (sounds and projects, playback, export). */
@@ -365,10 +367,10 @@ class ArcController(
             val (fileName, _) = withContext(Dispatchers.IO) { dev.arc.ep133.files.Files.describe(context, uri) }
             try {
                 val bytes = withContext(Dispatchers.IO) { dev.arc.ep133.files.Files.read(context, uri) }
-                withContext(Dispatchers.Default) { Wav.decode(bytes) } // fail early on files that are not usable WAVs
+                val w = withContext(Dispatchers.Default) { Wav.decode(bytes) } // fail early on files that are not usable WAVs
                 val slot = SampleUpload.nextFree(occupied, taken)
                 if (slot != null) taken.add(slot)
-                items.add(UploadDraftItem(fileName, SampleUpload.nameFor(fileName), slot, bytes, null))
+                items.add(UploadDraftItem(fileName, SampleUpload.nameFor(fileName), slot, bytes, null, sampleRate = w.sampleRate))
             } catch (e: Throwable) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 items.add(UploadDraftItem(fileName, SampleUpload.nameFor(fileName), null, null, e.message ?: e.toString()))

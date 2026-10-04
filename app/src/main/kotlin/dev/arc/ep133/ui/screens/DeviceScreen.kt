@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import dev.arc.ep133.controller.BrowserUi
 import dev.arc.ep133.controller.UiState
 import dev.arc.ep133.controller.UploadDraftItem
+import dev.arc.ep133.features.SampleTrim
 import dev.arc.ep133.features.SampleUpload
 import dev.arc.ep133.features.SoundDetails
 import dev.arc.ep133.protocol.ProjectEntry
@@ -74,6 +75,9 @@ fun DeviceScreen(
     onProjectSounds: (Int) -> Unit,
     onAddSamples: () -> Unit,
     onBack: () -> Unit,
+    playing: String? = null,
+    onPlay: (Int) -> Unit = {},
+    onStop: () -> Unit = {},
 ) {
     val c = LocalArcColors.current
     BackHandler(onBack = onBack)
@@ -134,6 +138,9 @@ fun DeviceScreen(
             items(contents.sounds, key = { "s${it.slot}" }) { e ->
                 SoundRow(
                     e, b, open = openSlot == e.slot, enabled = !state.busy,
+                    playing = playing == "device:${e.slot}",
+                    onPlay = { onPlay(e.slot) },
+                    onStop = onStop,
                     onClick = {
                         openSlot = if (openSlot == e.slot) null else e.slot
                         if (openSlot == e.slot && !b.details.containsKey(e.slot)) onSoundDetails(e.slot)
@@ -189,7 +196,16 @@ internal fun Plate(onClick: () -> Unit, enabled: Boolean, content: @Composable C
 }
 
 @Composable
-private fun SoundRow(e: SoundEntry, b: BrowserUi, open: Boolean, enabled: Boolean, onClick: () -> Unit) {
+private fun SoundRow(
+    e: SoundEntry,
+    b: BrowserUi,
+    open: Boolean,
+    enabled: Boolean,
+    playing: Boolean,
+    onPlay: () -> Unit,
+    onStop: () -> Unit,
+    onClick: () -> Unit,
+) {
     val c = LocalArcColors.current
     Plate(onClick, enabled) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -200,7 +216,21 @@ private fun SoundRow(e: SoundEntry, b: BrowserUi, open: Boolean, enabled: Boolea
         if (open) {
             val d = b.details[e.slot]
             when {
-                d != null -> Details(d)
+                d != null -> {
+                    Details(d)
+                    // Downloads the sound, then plays it on the phone.
+                    ArcKey(
+                        when {
+                            playing -> FeatureText.STOP
+                            b.reading == "play:${e.slot}" -> FeatureText.READING
+                            else -> FeatureText.PLAY
+                        },
+                        { if (playing) onStop() else onPlay() },
+                        Modifier.padding(top = 6.dp),
+                        size = KeySize.Small,
+                        enabled = playing || enabled,
+                    )
+                }
                 b.reading == "slot:${e.slot}" -> Text(FeatureText.READING, style = ArcType.small, color = c.graphite)
                 else -> Text(FeatureText.TAP_FOR_DETAILS, style = ArcType.small, color = c.graphite)
             }
@@ -252,6 +282,7 @@ fun ColumnScope.UploadSheetContent(
     onSlot: (Int, Int?) -> Unit,
     onUpload: () -> Unit,
     onCancel: () -> Unit,
+    onTrim: (Int) -> Unit = {},
 ) {
     val c = LocalArcColors.current
     Text(FeatureText.UPLOAD_TITLE, style = ArcType.heading, color = c.ink)
@@ -291,6 +322,14 @@ fun ColumnScope.UploadSheetContent(
                     else -> ""
                 }
                 if (note.isNotEmpty()) Text(note, style = ArcType.small, color = c.graphite)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    val t = item.trim
+                    Text(
+                        if (t != null) FeatureText.trimmed(SampleTrim.seconds(t.last + 1 - t.first, item.sampleRate)) else "",
+                        style = ArcType.small, color = c.graphite, modifier = Modifier.weight(1f),
+                    )
+                    ArcKey(FeatureText.TRIM, { onTrim(i) }, size = KeySize.Small, enabled = !busy)
+                }
             }
         }
     }
