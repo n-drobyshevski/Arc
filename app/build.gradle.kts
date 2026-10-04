@@ -18,7 +18,23 @@ android {
         versionName = "0.1.0"
     }
 
+    signingConfigs {
+        // A fixed debug key, committed on purpose: every debug build (CI or local)
+        // is signed the same way, so a new test build installs over the old one
+        // and keeps the backups stored in the app. It only signs debug builds and
+        // must never sign a release.
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = true
             isShrinkResources = true

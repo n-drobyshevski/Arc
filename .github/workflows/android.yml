@@ -37,6 +37,15 @@ jobs:
       - name: Test, lint and build
         run: ./gradlew test :app:lintDebug :app:assembleDebug --stacktrace
 
+      # Every debug build is signed with app/debug.keystore, so test builds
+      # install over each other. Fail if that ever stops being true.
+      - name: Check the APK is signed with the shared debug key
+        run: |
+          tools="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          certs="$("$tools/apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk)"
+          echo "$certs"
+          grep -q "SHA-256 digest: 156dde54a742795f0dcccd03c5ff6cb0d1efd344de8aa8eea6095d3a70793fc0" <<< "$certs"
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
