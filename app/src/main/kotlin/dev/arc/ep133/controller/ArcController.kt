@@ -32,6 +32,7 @@ import dev.arc.ep133.protocol.Storage
 import dev.arc.ep133.protocol.TrafficLog
 import dev.arc.ep133.service.TransferService
 import dev.arc.ep133.text.BackupDevice
+import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.text.BackupRecord
 import dev.arc.ep133.text.Format
 import dev.arc.ep133.text.RestoreSelection
@@ -187,8 +188,17 @@ class ArcController(
                 .catch { e -> toast(Strings.libraryFailed(e.message ?: e.toString()), error = true) }
                 .collect { list -> _state.update { it.copy(backups = list, libraryLoaded = true, spaceLeft = runCatching { library.spaceLeft() }.getOrNull()) } }
         }
+        library.settings = {
+            buildMap {
+                mirrorPrefs.getString("learned", null)?.let { put("mirror.learned", it) }
+                mirrorPrefs.getString("order", null)?.let { put("mirror.order", it) }
+            }
+        }
+        library.onExternalError = { msg -> scope.launch { toast(FeatureText.copyFailed(msg), error = true) } }
         scope.launch {
             runCatching { library.sweep() }
+            // A library from before the Documents/arc copy is copied there once.
+            runCatching { library.exportOnce() }
             // Backups saved before search existed get their sound names indexed once.
             _state.update { it.copy(search = it.search.copy(indexing = true)) }
             runCatching { library.indexMissing() }
@@ -642,6 +652,7 @@ class ArcController(
 
     fun setPadOrder(order: dev.arc.ep133.features.PadOrder) {
         mirrorPrefs.edit { putString("order", order.name) }
+        scope.launch { library.syncIndex() }
         mirror?.let { m ->
             m.setPadOrder(order)
             _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(state = m.snapshot(System.nanoTime()))) } ?: cur }
@@ -672,6 +683,37 @@ class ArcController(
 
     private fun saveLearned(learned: Map<Int, Int>) {
         mirrorPrefs.edit { putString("learned", learned.entries.joinToString(",") { "${it.key}:${it.value}" }) }
+        scope.launch { library.syncIndex() }
+    }
+
+    /**
+     * Brings the library back from Documents/arc after a reinstall, through
+     * the folder the user picked (an addition). Settings kept there return too.
+     */
+    fun restoreFromFolder(tree: android.net.Uri): Job = scope.launch {
+        try {
+            val (n, settings) = library.restoreFrom(tree) { bytes ->
+                val d = Paks.describe(Paks.open(bytes))
+                dev.arc.ep133.data.RestoredPak(
+                    createdAt = d.generatedAt ?: System.currentTimeMillis(),
+                    device = BackupDevice(d.device.product, d.device.sku, "", d.device.osVersion),
+                    soundCount = d.soundCount,
+                    projectCount = d.projectCount,
+                    projects = d.projects,
+                    slots = d.slots,
+                    projectSlots = d.projectSlots,
+                    soundNames = d.soundNames,
+                )
+            }
+            mirrorPrefs.edit {
+                settings["mirror.learned"]?.let { putString("learned", it) }
+                settings["mirror.order"]?.let { putString("order", it) }
+            }
+            toast(if (n == 0) FeatureText.NOTHING_TO_RESTORE else FeatureText.restored(n))
+        } catch (e: Throwable) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            toast(e.message ?: e.toString(), error = true)
+        }
     }
 
     fun setSearch(query: String) {

@@ -11,6 +11,10 @@ This is a port of the web version in [`reference/`](reference/), which is kept r
 - Keep a library of backups with names and notes
 - Share a backup through the Android share sheet, or save the `.pak` file anywhere with the system file picker
 - Import `.pak` backups made by the official Sample Tool, by the web version or by a friend, and open them by tapping a `.pak` in the Files app
+- **Survive reinstalling arc:** every backup is also written to **Documents/arc**, with a `library.json` that keeps titles, notes, dates and the live mirror's settings. Edits update the copy, and deleting a backup in arc deletes its file there too.
+  - After a reinstall, tap **Restore from Documents/arc** on the empty library. Android makes you pick the folder once; the picker opens there.
+  - A library from before this version is copied to the folder once, on first start.
+  - Google's automatic app backup is not used, because it is capped well below the size of one backup.
 - Keep running when the phone is locked: transfers run in a foreground service with a progress notification and a Cancel action
 
 These go beyond the web version:
@@ -192,6 +196,10 @@ Not verified yet. Nobody has run this on a phone or an EP-133:
 - **OS 2.x firmware.** The protocol port follows the web version, which was written from captures of earlier firmware. Another EP-133 tool (cornerman) lists "updated transfer for firmware 2.0" in its changelog, so OS 2.0 or later may behave differently. Watch the debug log closely on a device running OS 2.x.
 - **Upgrading an installed build.** This version adds a table to the app's database. The migration was checked against Room's exported schemas, but it hasn't run on a phone that has backups. To check it, install a build from before the search feature signed with the shared key (`app/debug.keystore`), make some backups, then install a current build over it. Every CI build since the shared key was added includes the new table, so a CI artifact can't be the older build in that test.
 - **Pad numbers on the device.** The pad grid lists pads by their number in the project file. Which physical pad each number is hasn't been checked.
+- **Documents/arc on real phones:**
+  - Writing there goes through MediaStore with no permission. That is expected to work from Android 10 on, but it has only been built, not run.
+  - Restoring after a real uninstall and reinstall, through the folder picker, is also untested.
+  - Folder pickers differ between phone makers.
 - **The live mirror on a real unit:**
   - **The pad push:** its header and payload follow community notes (Ko-tool's parser), and no capture of it exists.
   - **Pad order:** whether project files count pads from the top or the bottom (community sources disagree).
@@ -223,8 +231,9 @@ Back up the EP-133 with the official Sample Tool first. Then, with the debug scr
 13. **Search** for a sound you know is in one of your backups. When you install a newer build over this one, check that every backup is still listed.
 14. Open **Pads** on a project in the device browser and compare it with the pads on the device. Note which number is which pad.
 15. Back up, change a pad's sound on the device, back up again, and **Compare with another backup**: it should show that pad change.
-16. Open **Live** and press pads in each group: the lit pad should be the one you pressed. After one press, its sample name should appear. Check the names against the device and try **From the bottom** if they look wrong.
-17. Play a pattern: check whether sequenced pads light up. Switch on clock out (SHIFT + ERASE, 102) and check play/stop and the tempo. Try KEYS mode.
+16. Check that Documents/arc (in the Files app) holds your backups and a `library.json`. Uninstall arc, reinstall it, tap **Restore from Documents/arc**, pick the folder, and check that titles and notes come back.
+17. Open **Live** and press pads in each group: the lit pad should be the one you pressed. After one press, its sample name should appear. Check the names against the device and try **From the bottom** if they look wrong.
+18. Play a pattern: check whether sequenced pads light up. Switch on clock out (SHIFT + ERASE, 102) and check play/stop and the tempo. Try KEYS mode.
 
 If anything fails, export the SysEx log from the debug screen (**Share log** or **Save log**) and attach it to an issue together with the error text.
 

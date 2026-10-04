@@ -109,3 +109,16 @@ fun MainConnectedPreview() {
         )
     }
 }
+
+@PreviewTest
+@Preview(name = "Main empty after reinstall", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun MainEmptyPreview() {
+    ArcTheme(dark = false) {
+        MainScreen(
+            state = UiState(libraryLoaded = true),
+            fmtDay = { "" },
+            onConnect = {}, onBackup = {}, onImport = {}, onOpen = {}, onDebug = {},
+        )
+    }
+}

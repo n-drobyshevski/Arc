@@ -97,6 +97,16 @@ class MainActivity : ComponentActivity() {
         writePending(uri)
     }
 
+    // After a reinstall: the user picks Documents/arc so the library can be read back.
+    private val folderLauncher = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            runCatching {
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            }
+            controller.restoreFromFolder(uri)
+        }
+    }
+
     // The transfer does not wait for the answer: it works without the notification.
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
@@ -514,6 +524,7 @@ class MainActivity : ComponentActivity() {
                     onGuide = { guide = true },
                     onSearch = { search = true },
                     onLive = { live = true },
+                    onRestoreFolder = { folderLauncher.launch(dev.arc.ep133.data.ExternalLibrary.INITIAL_FOLDER) },
                 )
 
                 ArcSheet(visible = detail != null, onDismiss = { closeDetail(save = true) }) {

@@ -72,6 +72,7 @@ fun MainScreen(
     onGuide: () -> Unit = {},
     onSearch: () -> Unit = {},
     onLive: () -> Unit = {},
+    onRestoreFolder: () -> Unit = {},
 ) {
     val c = LocalArcColors.current
     Box(Modifier.fillMaxSize().background(c.shell), contentAlignment = Alignment.TopCenter) {
@@ -136,10 +137,14 @@ fun MainScreen(
                         Text(Strings.EMPTY_TITLE, style = ArcType.bold, color = c.ink)
                         Text(Strings.EMPTY_TEXT, style = BaseText, color = c.graphite)
                     }
+                    // Addition: a reinstalled arc can read its library back from Documents/arc.
+                    Text(FeatureText.RESTORE_HINT, style = ArcType.small, color = c.graphite)
+                    ArcKey(FeatureText.RESTORE_FOLDER, onRestoreFolder, modifier = Modifier.fillMaxWidth())
                 }
                 val totalSize = state.backups.sumOf { it.size }
                 val note = Strings.storageNote(state.backups.size, totalSize, state.spaceLeft)
                 if (note.isNotEmpty()) Text(note, style = ArcType.tiny, color = c.graphite)
+                if (state.backups.isNotEmpty()) Text(FeatureText.FOLDER_NOTE, style = ArcType.tiny, color = c.graphite)
             }
 
             // Addition to the web version: key combinations for the device.
