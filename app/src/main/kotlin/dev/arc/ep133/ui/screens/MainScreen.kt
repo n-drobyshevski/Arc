@@ -39,7 +39,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.arc.ep133.controller.UiState
 import dev.arc.ep133.text.BackupRecord
+import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.text.Format
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import dev.arc.ep133.text.Strings
 import dev.arc.ep133.ui.components.ArcKey
 import dev.arc.ep133.ui.components.DashedBox
@@ -64,6 +67,7 @@ fun MainScreen(
     onImport: () -> Unit,
     onOpen: (BackupRecord) -> Unit,
     onDebug: () -> Unit,
+    onBrowse: () -> Unit = {},
 ) {
     val c = LocalArcColors.current
     Box(Modifier.fillMaxSize().background(c.shell), contentAlignment = Alignment.TopCenter) {
@@ -82,6 +86,12 @@ fun MainScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Wordmark(onLongPress = onDebug)
+                Spacer(Modifier.weight(1f))
+                // Addition to the web version: the device browser.
+                if (state.device != null) {
+                    ArcKey(FeatureText.BROWSE, onBrowse, size = KeySize.Small, enabled = !state.busy)
+                    Spacer(Modifier.width(10.dp))
+                }
                 ArcKey(
                     if (state.connected) Strings.DISCONNECT else Strings.CONNECT,
                     onConnect,

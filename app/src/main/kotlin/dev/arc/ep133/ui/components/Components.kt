@@ -382,6 +382,7 @@ fun ArcField(
     minLines: Int = 1,
     placeholder: String = "",
     maxLength: Int = Int.MAX_VALUE,
+    keyboardOptions: KeyboardOptions? = null,
 ) {
     val c = LocalArcColors.current
     val source = remember { MutableInteractionSource() }
@@ -396,7 +397,7 @@ fun ArcField(
             minLines = minLines,
             textStyle = style,
             cursorBrush = SolidColor(c.signal),
-            keyboardOptions = KeyboardOptions(imeAction = if (singleLine) ImeAction.Done else ImeAction.Default),
+            keyboardOptions = keyboardOptions ?: KeyboardOptions(imeAction = if (singleLine) ImeAction.Done else ImeAction.Default),
             interactionSource = source,
             modifier = Modifier
                 .fillMaxWidth()
