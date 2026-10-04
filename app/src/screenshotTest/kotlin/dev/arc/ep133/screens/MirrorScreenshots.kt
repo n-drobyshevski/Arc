@@ -58,9 +58,9 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
         MirrorScreen(
             mirror = MirrorUi(state, loading = loading),
             nameOf = { if (state.learned.isEmpty()) null else names[it] },
-            now = NOW,
             onPadOrder = {},
             onBack = {},
+            fixedNow = NOW,
         )
     }
 }

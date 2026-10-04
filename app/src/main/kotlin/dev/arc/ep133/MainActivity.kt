@@ -29,6 +29,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import dev.arc.ep133.backup.PakExport
 import dev.arc.ep133.backup.PakSound
 import dev.arc.ep133.controller.ArcController
@@ -312,7 +313,20 @@ class MainActivity : ComponentActivity() {
         }
         // The mirror (re)starts when it opens and whenever a device is (re)connected.
         val ready = state.device != null
-        LaunchedEffect(live, ready) { if (live && ready) controller.openMirror() }
+        // Only while the app is in front: in the background nothing listens or redraws.
+        val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+        LaunchedEffect(live, ready) {
+            if (live && ready) {
+                lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                    controller.openMirror()
+                    try {
+                        kotlinx.coroutines.awaitCancellation()
+                    } finally {
+                        controller.pauseMirror()
+                    }
+                }
+            }
+        }
 
         val detail = state.backups.firstOrNull { it.id == detailId }
         val restore = state.backups.firstOrNull { it.id == restoreId }
@@ -348,7 +362,6 @@ class MainActivity : ComponentActivity() {
                         null
                     },
                     nameOf = controller::mirrorName,
-                    now = System.nanoTime(),
                     onPadOrder = controller::setPadOrder,
                     onBack = {
                         live = false

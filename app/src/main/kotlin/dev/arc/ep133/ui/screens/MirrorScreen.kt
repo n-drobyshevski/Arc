@@ -23,6 +23,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -77,13 +83,21 @@ private val FADE_NS = 300_000_000L
 fun MirrorScreen(
     mirror: MirrorUi?,
     nameOf: (PhysicalPad) -> String?,
-    now: Long,
     onPadOrder: (PadOrder) -> Unit,
     onBack: () -> Unit,
+    /** A fixed time for screenshots; normally the screen's frame clock drives the fade. */
+    fixedNow: Long? = null,
 ) {
     val c = LocalArcColors.current
     BackHandler(onBack = onBack)
     val st = mirror?.state ?: MirrorState()
+    // The fade runs on the frame clock while a released pad is fading, and stops after.
+    val fading = fixedNow == null && st.pads.values.any { it.offAt != null }
+    var frame by remember { mutableLongStateOf(System.nanoTime()) }
+    LaunchedEffect(fading) {
+        while (fading) withFrameNanos { frame = System.nanoTime() }
+    }
+    val now = fixedNow ?: if (fading) frame else System.nanoTime()
     Box(Modifier.fillMaxSize().background(c.shell), contentAlignment = Alignment.TopCenter) {
         Column(
             Modifier
@@ -277,7 +291,7 @@ private fun Notes(st: MirrorState, mirror: MirrorUi?, onPadOrder: (PadOrder) -> 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (st.padOrder == PadOrder.FROM_TOP) {
             Text(MirrorText.LEARN_NOTE, style = ArcType.small, color = c.graphite)
-            if (!st.pushesSeen && st.lastHit?.pad != null && mirror?.loading == false) {
+            if (!st.pushesSeen && st.learned.isEmpty() && st.lastHit?.pad != null && mirror?.loading == false) {
                 Text(MirrorText.NO_PUSHES, style = ArcType.small, color = c.graphite)
             }
         }

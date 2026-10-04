@@ -29,13 +29,13 @@ These go beyond the web version:
 - **Pad layout:** a **Pads** key on a project, in a backup's contents or on the device, shows each group's pads with the sound on each. In a backup, tapping a pad plays its sound. Pads are listed by their number in the project file; how those numbers map to the physical pads isn't known, so the grid doesn't claim to match the device's layout.
 - **Search sounds:** a **Search** key next to **Import** finds sounds by name in every saved backup. Tapping a result opens that backup's contents.
 - **Compare two backups:** **Compare with another backup** in a backup's sheet shows what changed from the older one to the newer one: sounds added, removed or changed (audio, name or settings) and projects added, removed or changed, with the pads that moved. Audio counts as the same when the samples are the same, even in a differently written WAV file.
-- **Live mirror:** a **Live** key (when connected) shows the EP-133 as you play it. The page only listens; nothing is sent to the device while it's open.
+- **Live mirror:** a **Live** key (when connected) shows the EP-133 as you play it. The page reads the sound names and the active project's pads once (as the device browser does), then only listens; nothing on the device is changed.
   - Pads light up in the keypad layout as notes arrive, brighter with velocity, and fade on release. This follows the official MIDI note map: notes 36–83, one octave per group.
-  - Play/stop and tempo come from MIDI clock, which the device sends only with clock out switched on (SHIFT + ERASE, then 102).
+  - Play/stop and tempo come from MIDI clock, which the device sends only with clock out switched on (SHIFT + ERASE, then 102 and ENTER).
   - Notes outside the pads, from KEYS mode, show on a keyboard strip with their channel.
   - **Sample names on the pads** rely on community notes, not the official guide:
     - A physical pad press also makes the device send its pad file id over SysEx.
-    - arc pairs that with the note to learn which pad is which, then names the sample from the project's pads. A pad needs one press before its name shows; nothing is guessed.
+    - arc pairs that with the note to learn which pad is which, then names the sample from the project's pads. One press of a key, in any group, names that key in every group, and arc remembers it; nothing is guessed, and two pads of one group hit together don't count.
     - Community notes disagree on how project files number the pads, so the page has a switch to count them from the top or from the bottom.
 - **Shortcut guide:** 100 EP-133 key combinations in tabs by section, with search, laid out like a printed guide: each combination drawn as the device's keys (pale keys, dark keys, pads, knobs and the fader), with HOLD, DIAL, TURN and MOVE badges, and what it does below. A test checks that every key drawn is named in that entry's text from the official guide. Every entry is paraphrased from teenage engineering's official user guide for OS 2.5, and links to the section it comes from. Combos the guide doesn't document are left out.
 
@@ -233,7 +233,7 @@ Back up the EP-133 with the official Sample Tool first. Then, with the debug scr
 15. Back up, change a pad's sound on the device, back up again, and **Compare with another backup**: it should show that pad change.
 16. Check that Documents/arc (in the Files app) holds your backups and a `library.json`. Uninstall arc, reinstall it, tap **Restore from Documents/arc**, pick the folder, and check that titles and notes come back.
 17. Open **Live** and press pads in each group: the lit pad should be the one you pressed. After one press, its sample name should appear. Check the names against the device and try **From the bottom** if they look wrong.
-18. Play a pattern: check whether sequenced pads light up. Switch on clock out (SHIFT + ERASE, 102) and check play/stop and the tempo. Try KEYS mode.
+18. Play a pattern: check whether sequenced pads light up. Switch on clock out (SHIFT + ERASE, 102, ENTER) and check play/stop and the tempo. Try KEYS mode.
 
 If anything fails, export the SysEx log from the debug screen (**Share log** or **Save log**) and attach it to an issue together with the error text.
 

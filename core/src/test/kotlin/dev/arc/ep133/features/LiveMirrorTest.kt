@@ -203,4 +203,60 @@ class LiveMirrorTest {
         m.onMidi(MidiEvent.Clock(21))
         assertNull(m.snapshot(22).bpm)
     }
+
+    @Test
+    fun `two pads of one group close together are not linked`() {
+        val saved = ArrayList<Map<Int, Int>>()
+        val m = mirror(saved = saved)
+        // '7' and '1' in group A 5 ms apart (a flam, or a sequenced note during a press), then one push.
+        m.onMidi(MidiEvent.NoteOn(1, 45, 100, 0))
+        m.onMidi(MidiEvent.NoteOn(1, 39, 100, 5 * ms))
+        m.onPadPush(PadFid(1, 0, 1), 20 * ms)
+        assertTrue(m.snapshot(30 * ms).learned.isEmpty())
+        assertTrue(saved.isEmpty())
+        // A clean press afterwards links as usual.
+        m.onMidi(MidiEvent.NoteOn(1, 45, 100, 1000 * ms))
+        m.onPadPush(PadFid(1, 0, 1), 1010 * ms)
+        assertEquals(mapOf(9 to 1), m.snapshot(1020 * ms).learned)
+    }
+
+    @Test
+    fun `a pad number belongs to one key, and a relink renames the last hit`() {
+        val saved = ArrayList<Map<Int, Int>>()
+        // A wrong link from before: '8' (offset 10) said to be p01, and '7' said to be p10.
+        val m = mirror(learned = mapOf(10 to 1, 9 to 10), saved = saved)
+        m.onMidi(MidiEvent.NoteOn(1, 45, 100, 0)) // '7', named from the old link (p10 = slot 1)
+        assertEquals("kick", m.snapshot(1).lastHit!!.name)
+        m.onPadPush(PadFid(1, 0, 1), 10 * ms) // the device says '7' is p01
+        val s = m.snapshot(20 * ms)
+        assertEquals(mapOf(9 to 1), s.learned) // '8' no longer claims p01
+        assertEquals(listOf(mapOf(9 to 1)), saved)
+        assertEquals("snare", s.lastHit!!.name) // p01 = slot 5
+    }
+
+    @Test
+    fun `while another project's pads load, hits get no name`() {
+        val m = mirror(learned = mapOf(0 to 10))
+        m.onMidi(MidiEvent.NoteOn(1, 37, 100, 0))
+        m.onPadPush(PadFid(2, 0, 11), 10 * ms) // the device is on project 2 now
+        m.onMidi(MidiEvent.NoteOn(1, 36, 100, 2000 * ms))
+        assertNull(m.snapshot(2001 * ms).lastHit!!.name)
+        // Project 2's pads arrive: the last hit is named from them.
+        m.setProject(2, listOf(PadGroup("a", mapOf(10 to 20))))
+        assertEquals("bass", m.snapshot(2002 * ms).lastHit!!.name)
+    }
+
+    @Test
+    fun `a pause in the clock starts a fresh tempo`() {
+        val m = mirror()
+        val tick = 500 * ms / 24
+        for (i in 0..47) m.onMidi(MidiEvent.Clock(i * tick))
+        // 10 s pause, then Continue-less clocks at 120 BPM again.
+        val t0 = 47 * tick + 10_000 * ms
+        for (i in 0..30) m.onMidi(MidiEvent.Clock(t0 + i * tick))
+        assertEquals(120.0, m.snapshot(t0 + 30 * tick).bpm!!, 0.01)
+        // Continue also starts afresh.
+        m.onMidi(MidiEvent.Continue(t0 + 31 * tick))
+        assertNull(m.snapshot(t0 + 31 * tick).bpm)
+    }
 }

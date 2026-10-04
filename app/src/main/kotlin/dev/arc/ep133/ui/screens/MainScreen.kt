@@ -91,21 +91,27 @@ fun MainScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Wordmark(onLongPress = onDebug)
-                Spacer(Modifier.weight(1f))
-                // Addition to the web version: the device browser.
-                if (state.device != null) {
-                    ArcKey(FeatureText.BROWSE, onBrowse, size = KeySize.Small, enabled = !state.busy)
-                    Spacer(Modifier.width(10.dp))
-                    // Addition to the web version: the live mirror (only listens, so not tied to busy).
-                    ArcKey(dev.arc.ep133.text.MirrorText.LIVE, onLive, size = KeySize.Small)
-                    Spacer(Modifier.width(10.dp))
+                Spacer(Modifier.width(12.dp))
+                // The keys wrap to a second line as whole keys when a narrow phone or a
+                // large font leaves no room, rather than squeezing the last one.
+                androidx.compose.foundation.layout.FlowRow(
+                    Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    // Addition to the web version: the device browser and the live mirror
+                    // (the mirror only listens, so it is not tied to busy).
+                    if (state.device != null) {
+                        ArcKey(FeatureText.BROWSE, onBrowse, size = KeySize.Small, enabled = !state.busy)
+                        ArcKey(dev.arc.ep133.text.MirrorText.LIVE, onLive, size = KeySize.Small)
+                    }
+                    ArcKey(
+                        if (state.connected) Strings.DISCONNECT else Strings.CONNECT,
+                        onConnect,
+                        size = KeySize.Small,
+                        enabled = state.midiSupported && !state.busy,
+                    )
                 }
-                ArcKey(
-                    if (state.connected) Strings.DISCONNECT else Strings.CONNECT,
-                    onConnect,
-                    size = KeySize.Small,
-                    enabled = state.midiSupported && !state.busy,
-                )
             }
 
             DevicePanel(state)

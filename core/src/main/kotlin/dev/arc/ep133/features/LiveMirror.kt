@@ -75,16 +75,30 @@ class LiveMirror(
     @Synchronized
     fun setPadOrder(order: PadOrder) {
         padOrder = order
+        renameLastHit()
     }
 
     // The latest note-on and pad push per group not yet paired, with their times.
     private val pendingNote = HashMap<Int, Pair<PhysicalPad, Long>>()
     private val pendingPush = HashMap<Int, Pair<PadFid, Long>>()
+    // Groups where two different pads (or pushes) came close together: their pairing is unsure.
+    private val ambiguous = HashSet<Int>()
+    // The project the latest push named; until its pads are read, hits get no name.
+    private var pushedProject: Int? = null
 
     @Synchronized
     fun setProject(project: Int?, groups: List<PadGroup>) {
         activeProject = project
         layout = groups.associate { it.name to it.pads }
+        renameLastHit()
+    }
+
+    /** Names the last hit again from the current layout and links. */
+    private fun renameLastHit() {
+        val h = lastHit ?: return
+        val p = h.pad ?: return
+        val slot = slotOf(p)
+        lastHit = h.copy(slot = slot, name = slot?.let { names[it] })
     }
 
     @Synchronized
@@ -103,6 +117,10 @@ class LiveMirror(
                     lastHit = Hit(null, e.note, e.channel, e.velocity, null, null)
                 } else {
                     pads[pad] = PadLight(e.velocity, e.channel, e.time)
+                    // Two different pads of one group close together: which one the push
+                    // belongs to can't be told, so this group's pairing is dropped.
+                    val prev = pendingNote[pad.group]
+                    if (prev != null && prev.first != pad && e.time - prev.second <= MATCH_WINDOW_NS) ambiguous.add(pad.group)
                     pendingNote[pad.group] = pad to e.time
                     tryLink(pad.group)
                     val slot = slotOf(pad)
@@ -118,6 +136,9 @@ class LiveMirror(
                 }
             }
             is MidiEvent.Clock -> {
+                // After a gap (a pause, or Continue without Start) the old clocks would drag the tempo down.
+                val prev = clocks.lastOrNull()
+                if (prev != null && e.time - prev > CLOCK_TIMEOUT_NS) clocks.clear()
                 clocks.addLast(e.time)
                 while (clocks.size > CLOCK_WINDOW) clocks.removeFirst()
             }
@@ -125,7 +146,10 @@ class LiveMirror(
                 playing = true
                 clocks.clear()
             }
-            is MidiEvent.Continue -> playing = true
+            is MidiEvent.Continue -> {
+                playing = true
+                clocks.clear()
+            }
             is MidiEvent.Stop -> {
                 playing = false
                 // A note-off lost at stop would leave a pad lit forever: release what is held.
@@ -140,6 +164,9 @@ class LiveMirror(
     @Synchronized
     fun onPadPush(fid: PadFid, time: Long) {
         pushesSeen = true
+        pushedProject = fid.project
+        val prev = pendingPush[fid.group]
+        if (prev != null && prev.first != fid && time - prev.second <= MATCH_WINDOW_NS) ambiguous.add(fid.group)
         pendingPush[fid.group] = fid to time
         tryLink(fid.group)
     }
@@ -150,16 +177,14 @@ class LiveMirror(
         if (kotlin.math.abs(noteAt - pushAt) > MATCH_WINDOW_NS) return
         pendingNote.remove(group)
         pendingPush.remove(group)
-        if (learned[pad.offset] != fid.pad) {
-            learned[pad.offset] = fid.pad
-            onLearned(LinkedHashMap(learned))
-        }
-        // Name the hit that was just linked.
-        val hit = lastHit
-        if (hit?.pad == pad && hit.slot == null) {
-            val slot = slotOf(pad)
-            lastHit = hit.copy(slot = slot, name = slot?.let { names[it] })
-        }
+        // An unsure pairing is not learned: a wrong link would name pads wrongly in every project.
+        if (ambiguous.remove(group)) return
+        // The keypad numbering is one to one: a pad number belongs to one key only.
+        val dropped = learned.entries.removeAll { it.key != pad.offset && it.value == fid.pad }
+        val changed = learned.put(pad.offset, fid.pad) != fid.pad
+        if (dropped || changed) onLearned(LinkedHashMap(learned))
+        // Name the hit that was just linked (again, if the link changed).
+        if (lastHit?.pad == pad) renameLastHit()
     }
 
     /**
@@ -169,6 +194,8 @@ class LiveMirror(
      */
     @Synchronized
     fun slotOf(pad: PhysicalPad): Int? {
+        // The device moved to another project whose pads aren't read yet: no name rather than a wrong one.
+        if (pushedProject != null && pushedProject != activeProject) return null
         val number = when (padOrder) {
             PadOrder.FROM_TOP -> learned[pad.offset] ?: return null
             PadOrder.FROM_BOTTOM -> pad.offset + 1

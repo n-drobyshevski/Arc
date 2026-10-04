@@ -47,6 +47,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -169,6 +170,7 @@ class ArcController(
     private var mirror: dev.arc.ep133.features.LiveMirror? = null
     private var mirrorJobs: List<Job> = emptyList()
     private var mirrorPushOff: (() -> Unit)? = null
+    private var mirrorSession: Session? = null
     private val mirrorPrefs by lazy { context.getSharedPreferences("mirror", Context.MODE_PRIVATE) }
 
     @Volatile
@@ -261,7 +263,7 @@ class ArcController(
         openDeviceId = null
         stopMirror()
         liveEvents = null
-        if (_state.value.mirror != null) _state.update { it.copy(mirror = MirrorUi(loading = false, error = dev.arc.ep133.text.MirrorText.NOT_CONNECTED)) }
+        if (_state.value.mirror != null) _state.update { it.copy(mirror = notConnectedMirror()) }
         playToken++ // a device sound still downloading must not start after the device is gone
         if (player.playing.value?.startsWith("device:") == true) player.stop()
         _state.update { it.copy(connected = false, device = null, browser = BrowserUi(), diff = null) }
@@ -583,20 +585,22 @@ class ArcController(
      * MIDI and pad pushes. Nothing is sent while it runs.
      */
     fun openMirror(): Job = scope.launch {
+        // Already running for this connection (opened twice): keep it.
+        if (mirror != null && mirrorSession != null && mirrorSession === session) return@launch
         stopMirror()
         val s = session
         val events = liveEvents
         if (s == null || events == null) {
-            _state.update { it.copy(mirror = MirrorUi(loading = false, error = dev.arc.ep133.text.MirrorText.NOT_CONNECTED)) }
+            _state.update { it.copy(mirror = notConnectedMirror()) }
             return@launch
         }
         val m = dev.arc.ep133.features.LiveMirror(
             learned = loadLearned(),
-            padOrder = runCatching { dev.arc.ep133.features.PadOrder.valueOf(mirrorPrefs.getString("order", null) ?: "") }
-                .getOrDefault(dev.arc.ep133.features.PadOrder.FROM_TOP),
+            padOrder = savedPadOrder(),
             onLearned = ::saveLearned,
         )
         mirror = m
+        mirrorSession = s
         _state.update { it.copy(mirror = MirrorUi(m.snapshot(System.nanoTime()), loading = true)) }
         // Listen first, so nothing played while reading is missed.
         val dirty = java.util.concurrent.atomic.AtomicBoolean(true)
@@ -613,25 +617,35 @@ class ArcController(
             // Another project on the device: read its pads.
             if (fid.project != m.snapshot(System.nanoTime()).activeProject) loadMirrorProject(m, fid.project)
         }
-        // Redraw at most ~30 times a second, and only while something changes or fades.
+        // At most ~30 states a second. An unchanged state is equal to the last one, so
+        // StateFlow drops it and nothing redraws; time-based changes (pruned pads, a
+        // tempo gone stale) still get through. The fade itself runs on the screen's frame clock.
         val tick = scope.launch {
             while (true) {
                 kotlinx.coroutines.delay(33)
+                dirty.set(false)
                 val st = m.snapshot(System.nanoTime())
-                if (dirty.getAndSet(false) || st.pads.isNotEmpty()) {
-                    _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(state = st)) } ?: cur }
-                }
+                _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(state = st)) } ?: cur }
             }
         }
         mirrorJobs = listOf(listen, tick)
-        val ok = exclusive("mirror") { ss ->
-            val c = DeviceBrowser.contents(ss)
-            m.setNames(c.sounds.associate { it.slot to it.name })
-            val active = runCatching { Fs.getMetadata(ss, Device.PROJECTS_NODE).asObject()["active"] }.getOrNull()
-            val project = (active as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDoubleOrNull()?.toInt()?.let(Device::projectFromNode)
-            val groups = project?.let { p -> runCatching { DeviceBrowser.projectLayout(ss, p).pads }.getOrNull() } ?: emptyList()
-            m.setProject(project, groups)
-            true
+        // The names and pads are read once. If the device is busy (a transfer, or the
+        // read of a mirror opened just before), wait for it rather than give up.
+        // exclusive() also gives null when the read fails (the error is shown), so a few tries at most.
+        var ok: Boolean? = null
+        var tries = 0
+        while (mirror === m && ok == null && session === s && tries++ < 5) {
+            _state.first { !it.busy || it.mirror == null }
+            if (mirror !== m) break
+            ok = exclusive("mirror", quiet = tries > 1) { ss ->
+                val c = DeviceBrowser.contents(ss)
+                m.setNames(c.sounds.associate { it.slot to it.name })
+                val active = runCatching { Fs.getMetadata(ss, Device.PROJECTS_NODE).asObject()["active"] }.getOrNull()
+                val project = (active as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDoubleOrNull()?.toInt()?.let(Device::projectFromNode)
+                val groups = project?.let { p -> runCatching { DeviceBrowser.projectLayout(ss, p).pads }.getOrNull() } ?: emptyList()
+                m.setProject(project, groups)
+                true
+            }
         }
         if (mirror === m) {
             dirty.set(true)
@@ -643,7 +657,10 @@ class ArcController(
     private fun loadMirrorProject(m: dev.arc.ep133.features.LiveMirror, project: Int) {
         scope.launch {
             val groups = exclusive("mirror", quiet = true) { ss -> DeviceBrowser.projectLayout(ss, project).pads } ?: return@launch
-            if (mirror === m) m.setProject(project, groups)
+            if (mirror === m) {
+                m.setProject(project, groups)
+                _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(state = m.snapshot(System.nanoTime()))) } ?: cur }
+            }
         }
     }
 
@@ -653,11 +670,28 @@ class ArcController(
     fun setPadOrder(order: dev.arc.ep133.features.PadOrder) {
         mirrorPrefs.edit { putString("order", order.name) }
         scope.launch { library.syncIndex() }
-        mirror?.let { m ->
+        val m = mirror
+        if (m != null) {
             m.setPadOrder(order)
             _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(state = m.snapshot(System.nanoTime()))) } ?: cur }
+        } else {
+            // Not connected: still show the choice.
+            _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(state = it.state.copy(padOrder = order))) } ?: cur }
         }
     }
+
+    /** Stops listening while the app is in the background; the screen keeps its last state. */
+    fun pauseMirror() = stopMirror()
+
+    private fun savedPadOrder() =
+        runCatching { dev.arc.ep133.features.PadOrder.valueOf(mirrorPrefs.getString("order", null) ?: "") }
+            .getOrDefault(dev.arc.ep133.features.PadOrder.FROM_TOP)
+
+    private fun notConnectedMirror() = MirrorUi(
+        state = dev.arc.ep133.features.MirrorState(padOrder = savedPadOrder()),
+        loading = false,
+        error = dev.arc.ep133.text.MirrorText.NOT_CONNECTED,
+    )
 
     fun closeMirror() {
         stopMirror()
@@ -670,6 +704,7 @@ class ArcController(
         mirrorPushOff?.invoke()
         mirrorPushOff = null
         mirror = null
+        mirrorSession = null
     }
 
     /** Learned pad links, "offset:pad" pairs: the keypad's numbering is the same in every project. */
