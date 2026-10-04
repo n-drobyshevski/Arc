@@ -58,7 +58,11 @@ To install that build:
 2. Download the `arc-debug-apk` artifact and unzip it.
 3. Install `app-debug.apk`, either with `adb install -r app-debug.apk` or by opening the file on the phone and allowing installs from that source.
 
-Each CI run signs the APK with its own throwaway debug key. Android refuses to install a newer build over an older one, so uninstall arc first. That deletes the backups stored in the app, so share or save the ones you want to keep beforehand.
+Every debug build, from CI or a local machine, is signed with the same debug key: `app/debug.keystore`, committed on purpose. CI fails if an APK is ever signed with anything else. So a newer test build installs over an older one and keeps the backups stored in the app.
+
+The key is public, so it is only for test builds and never signs a release. Anyone with the repository could sign an APK that installs over a debug build of arc, so install test builds only from this repository's Actions runs.
+
+**One last uninstall:** builds made before the shared key was added were each signed with their own key. To move from one of those to a newer build, uninstall arc once more. That deletes the backups stored in the app, so share or save the ones you want to keep beforehand. After that, new builds install over old ones.
 
 The tests read `reference/test/fixtures/sample.pak` in place, so keep `reference/` next to the modules.
 
@@ -172,7 +176,7 @@ Not verified yet. Nobody has run this on a phone or an EP-133:
 - **The app UI on screen.** It was built and linted, but never launched: this environment has no emulator (no KVM).
 - **Audio playback** with `AudioTrack` on a real phone, including long stereo sounds.
 - **OS 2.x firmware.** The protocol port follows the web version, which was written from captures of earlier firmware. Another EP-133 tool (cornerman) lists "updated transfer for firmware 2.0" in its changelog, so OS 2.0 or later may behave differently. Watch the debug log closely on a device running OS 2.x.
-- **Upgrading an installed build.** This version adds a table to the app's database. The migration was checked against Room's exported schemas, but it hasn't run on a phone that has backups. Checking it takes two builds signed with the same key, for example two local builds from the same machine. CI builds can't be installed over each other, since each run uses its own key.
+- **Upgrading an installed build.** This version adds a table to the app's database. The migration was checked against Room's exported schemas, but it hasn't run on a phone that has backups. To check it, install a build from before the search feature signed with the shared key (`app/debug.keystore`), make some backups, then install a current build over it. Every CI build since the shared key was added includes the new table, so a CI artifact can't be the older build in that test.
 - **Pad numbers on the device.** The pad grid lists pads by their number in the project file. Which physical pad each number is hasn't been checked.
 - **The shortcut guide on a real unit.** It follows the official guide for OS 2.5. Combos can differ on other OS versions.
 - **Platform behaviour:**
@@ -197,7 +201,7 @@ Back up the EP-133 with the official Sample Tool first. Then, with the debug scr
 10. Under **Add samples**, trim a file to a short part, upload it, and play it on the device. Check the start and the length. If the file has loop points, check them too.
 11. In the device browser, tap **Play** on a sound and compare it with the pad on the device.
 12. Try a few entries of the **Shortcut guide** on the device, and note the OS version shown on the panel.
-13. **Search** for a sound you know is in one of your backups. If you can install over a previous build signed with the same key (see above), check first that every backup is still listed after the upgrade.
+13. **Search** for a sound you know is in one of your backups. When you install a newer build over this one, check that every backup is still listed.
 14. Open **Pads** on a project in the device browser and compare it with the pads on the device. Note which number is which pad.
 15. Back up, change a pad's sound on the device, back up again, and **Compare with another backup**: it should show that pad change.
 
