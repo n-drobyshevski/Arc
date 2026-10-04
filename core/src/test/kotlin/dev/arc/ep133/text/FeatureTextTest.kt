@@ -49,4 +49,17 @@ class FeatureTextTest {
         assertEquals("Also on the device and not in this backup, left as they are: sound 42 and projects 7 and 8.", FeatureText.untouched(r))
         assertEquals(FeatureText.NO_CHANGES, FeatureText.diffSummary(DiffResult(listOf(same), emptyList(), emptyList(), emptyList())))
     }
+
+    @Test
+    fun `durations and trim text`() {
+        assertEquals("850 ms", FeatureText.duration(0.85))
+        assertEquals("0 ms", FeatureText.duration(0.0))
+        assertEquals("1.5 s", FeatureText.duration(1.5))
+        assertEquals("12.3 s", FeatureText.duration(12.34))
+        // The unit follows the rounded value.
+        assertEquals("1.0 s", FeatureText.duration(46857.0 / 46875))
+        assertEquals("999 ms", FeatureText.duration(0.9994))
+        assertEquals("Trimmed to 1.4 s", FeatureText.trimmed(1.38))
+        assertEquals("120 ms to 1.5 s, 1.4 s long", FeatureText.selection(0.12, 1.5))
+    }
 }

@@ -11,13 +11,14 @@ import androidx.core.content.FileProvider
 import java.io.File
 import java.io.IOException
 
-/** .pak files are zips; FileProvider would otherwise report application/octet-stream. */
+/** .pak files are zips; FileProvider would otherwise report application/octet-stream (and it may not know .wav). */
 class PakFileProvider : FileProvider() {
     override fun getType(uri: Uri): String? {
         val path = uri.path.orEmpty()
         return when {
             path.endsWith(".pak", ignoreCase = true) -> "application/zip"
             path.endsWith(".txt", ignoreCase = true) -> "text/plain"
+            path.endsWith(".wav", ignoreCase = true) -> "audio/wav"
             else -> super.getType(uri)
         }
     }

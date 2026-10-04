@@ -17,6 +17,7 @@ import dev.arc.ep133.features.SampleUpload
 import dev.arc.ep133.features.SoundDetails
 import dev.arc.ep133.features.UploadItem
 import dev.arc.ep133.formats.Wav
+import dev.arc.ep133.features.SampleTrim
 import dev.arc.ep133.midi.MidiConnector
 import dev.arc.ep133.protocol.CancelSignal
 import dev.arc.ep133.protocol.CancelledError
@@ -66,7 +67,26 @@ data class BrowserUi(
 )
 
 /** One picked file. [error] is set when it can't be uploaded (not a usable WAV). */
-data class UploadDraftItem(val fileName: String, val name: String, val slot: Int?, val wav: ByteArray?, val error: String?)
+data class UploadDraftItem(
+    val fileName: String,
+    val name: String,
+    val slot: Int?,
+    val wav: ByteArray?,
+    val error: String?,
+    /** Frames to upload; null means the whole file. */
+    val trim: IntRange? = null,
+    /** The file's sample rate, for showing trim times (0 when unusable). */
+    val sampleRate: Long = 0,
+)
+
+/** A backup opened for its contents screen (sounds and projects, playback, export). */
+data class ContentsUi(
+    val backupId: String,
+    val pak: dev.arc.ep133.backup.Pak?,
+    val error: String? = null,
+    /** Length of each sound in seconds; missing when its WAV can't be read. */
+    val durations: Map<Int, Double> = emptyMap(),
+)
 
 /** The result of comparing a backup with the device, for the selection it was made with. */
 data class DiffUi(val backupId: String, val selection: RestoreSelection, val result: DiffResult)
@@ -85,6 +105,7 @@ data class UiState(
     val toast: ToastMsg? = null,
     val browser: BrowserUi = BrowserUi(),
     val diff: DiffUi? = null,
+    val contents: ContentsUi? = null,
 )
 
 /**
@@ -98,6 +119,7 @@ class ArcController(
     private val midi: MidiConnector,
     val trafficLog: TrafficLog,
     private val scope: CoroutineScope,
+    val player: dev.arc.ep133.audio.SoundPlayer = dev.arc.ep133.audio.SoundPlayer(),
 ) {
     private val _state = MutableStateFlow(UiState(midiSupported = midi.supported))
     val state: StateFlow<UiState> = _state.asStateFlow()
@@ -167,6 +189,8 @@ class ArcController(
         session?.close()
         session = null
         openDeviceId = null
+        playToken++ // a device sound still downloading must not start after the device is gone
+        if (player.playing.value?.startsWith("device:") == true) player.stop()
         _state.update { it.copy(connected = false, device = null, browser = BrowserUi(), diff = null) }
         if (message != null) toast(message, error = true)
     }
@@ -344,10 +368,10 @@ class ArcController(
             val (fileName, _) = withContext(Dispatchers.IO) { dev.arc.ep133.files.Files.describe(context, uri) }
             try {
                 val bytes = withContext(Dispatchers.IO) { dev.arc.ep133.files.Files.read(context, uri) }
-                withContext(Dispatchers.Default) { Wav.decode(bytes) } // fail early on files that are not usable WAVs
+                val w = withContext(Dispatchers.Default) { Wav.decode(bytes) } // fail early on files that are not usable WAVs
                 val slot = SampleUpload.nextFree(occupied, taken)
                 if (slot != null) taken.add(slot)
-                items.add(UploadDraftItem(fileName, SampleUpload.nameFor(fileName), slot, bytes, null))
+                items.add(UploadDraftItem(fileName, SampleUpload.nameFor(fileName), slot, bytes, null, sampleRate = w.sampleRate))
             } catch (e: Throwable) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 items.add(UploadDraftItem(fileName, SampleUpload.nameFor(fileName), null, null, e.message ?: e.toString()))
@@ -363,6 +387,106 @@ class ArcController(
         }
     }
 
+    fun setDraftTrim(index: Int, trim: IntRange?) {
+        _state.update { st ->
+            val d = st.browser.draft ?: return@update st
+            st.copy(browser = st.browser.copy(draft = d.mapIndexed { i, item -> if (i == index) item.copy(trim = trim) else item }))
+        }
+    }
+
+    /**
+     * Bumped by every play request and every stop. A request that took a while
+     * (a download, a decode) plays only if nothing stopped or replaced it
+     * meanwhile, so leaving a screen or the app can't start a sound later.
+     * Only touched from [scope], which runs on the main thread.
+     */
+    private var playToken = 0L
+
+    /** Downloads a sound from the device and plays it (an addition to the web version). */
+    fun playDeviceSound(slot: Int): Job = scope.launch {
+        val token = ++playToken
+        val d = _state.value.browser.details[slot] ?: return@launch
+        // Not cancelled on stop: an interrupted download would leave the session out of step.
+        val pcm = exclusive("play:$slot") { s -> dev.arc.ep133.protocol.Fs.download(s, slot) } ?: return@launch
+        if (token != playToken) return@launch
+        player.play("device:$slot", pcm, d.channels.toInt(), d.sampleRate.toInt())
+    }
+
+    // ---------- backup contents (additions) ----------
+
+    fun openContents(b: BackupRecord): Job = scope.launch {
+        if (_state.value.contents?.backupId == b.id && _state.value.contents?.pak != null) return@launch
+        _state.update { it.copy(contents = ContentsUi(b.id, null)) }
+        val result = runCatching {
+            val bytes = library.bytes(b.id)
+            withContext(Dispatchers.Default) {
+                val pak = Paks.open(bytes)
+                val durations = LinkedHashMap<Int, Double>()
+                for ((slot, snd) in pak.sounds) {
+                    val w = runCatching { Wav.decode(snd.wav) }.getOrNull() ?: continue
+                    durations[slot] = SampleTrim.seconds(SampleTrim.frames(w.pcm, w.channels), w.sampleRate)
+                }
+                pak to durations
+            }
+        }
+        _state.update { st ->
+            if (st.contents?.backupId != b.id) st
+            else st.copy(
+                contents = ContentsUi(
+                    b.id,
+                    result.getOrNull()?.first,
+                    result.exceptionOrNull()?.let { it.message ?: it.toString() },
+                    result.getOrNull()?.second ?: emptyMap(),
+                ),
+            )
+        }
+    }
+
+    fun closeContents() {
+        stopPlayback()
+        _state.update { it.copy(contents = null) }
+    }
+
+    /** Plays a sound from an opened backup; no device needed. */
+    fun playBackupSound(slot: Int): Job = scope.launch {
+        val token = ++playToken
+        val c = _state.value.contents ?: return@launch
+        val snd = c.pak?.sounds?.get(slot) ?: return@launch
+        try {
+            val w = withContext(Dispatchers.Default) { Wav.decode(snd.wav) }
+            if (token != playToken || _state.value.contents?.backupId != c.backupId) return@launch
+            player.play("backup:${c.backupId}:$slot", w.pcm, w.channels, w.sampleRate.toInt())
+        } catch (e: Throwable) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            toast(e.message ?: e.toString(), error = true)
+        }
+    }
+
+    fun stopPlayback() {
+        playToken++
+        player.stop()
+    }
+
+    /** Plays PCM that is already in memory (the trim preview). */
+    fun playNow(key: String, pcm: ByteArray, channels: Int, sampleRate: Int) {
+        playToken++
+        player.play(key, pcm, channels, sampleRate)
+    }
+
+    /** The bytes to export: a sound's WAV, or a project as a .pak. */
+    suspend fun exportBytes(backupId: String, what: String): ByteArray {
+        // The open contents screen already holds the parsed backup; after a recreation it is read again.
+        val pak = _state.value.contents?.takeIf { it.backupId == backupId }?.pak
+            ?: library.bytes(backupId).let { bytes -> withContext(Dispatchers.Default) { Paks.open(bytes) } }
+        return withContext(Dispatchers.Default) {
+            when {
+                what.startsWith("wav:") -> dev.arc.ep133.backup.PakExport.soundWav(pak, what.removePrefix("wav:").toInt())
+                what.startsWith("project:") -> dev.arc.ep133.backup.PakExport.project(pak, what.removePrefix("project:").toInt())
+                else -> throw IllegalArgumentException(what)
+            }
+        }
+    }
+
     fun dropDraft() {
         _state.update { it.copy(browser = it.browser.copy(draft = null)) }
     }
@@ -370,7 +494,7 @@ class ArcController(
     fun uploadDraft(): Job = scope.launch {
         val s = session ?: return@launch
         val draft = _state.value.browser.draft ?: return@launch
-        val items = draft.filter { it.wav != null && it.slot != null }.map { UploadItem(it.slot!!, it.name, it.wav!!) }
+        val items = draft.filter { it.wav != null && it.slot != null }.map { UploadItem(it.slot!!, it.name, it.wav!!, it.trim) }
         if (items.isEmpty()) return@launch
         _state.update { it.copy(browser = it.browser.copy(draft = null)) }
         val done = runTask(Strings.UPLOADING) { onProgress, signal -> SampleUpload.upload(s, items, onProgress, signal) }

@@ -61,11 +61,26 @@ object Backup {
     const val APP_VERSION = Arc.APP_VERSION
     private const val PROJECT_WEIGHT = 64 * 1024
 
-    private fun pad3(n: Int) = n.toString().padStart(3, '0')
-    private fun pad2(n: Int) = n.toString().padStart(2, '0')
+    internal fun pad3(n: Int) = n.toString().padStart(3, '0')
+    internal fun pad2(n: Int) = n.toString().padStart(2, '0')
 
     private val UNSAFE = Regex("[\\\\/:*?\"<>|\\u0000-\\u001f]")
-    private fun safeName(s: String) = s.replace(UNSAFE, "_").take(40)
+    internal fun safeName(s: String) = s.replace(UNSAFE, "_").take(40)
+
+    /** The .pak's /meta.json, as backup.js writes it. */
+    fun metaJson(product: String, sku: String, osVersion: String, createdAt: Long): JsonObject = JsonObject(
+        linkedMapOf(
+            "info" to JsonPrimitive("teenage engineering - pak file"),
+            "pak_version" to JsJson.number(1),
+            "pak_type" to JsonPrimitive("user"),
+            "pak_release" to JsonPrimitive("1.2.0"),
+            "device_name" to JsonPrimitive(product),
+            "device_sku" to JsonPrimitive(sku),
+            "device_version" to JsonPrimitive(osVersion),
+            "generated_at" to JsonPrimitive(isoString(createdAt)),
+            "author" to JsonPrimitive("$APP_NAME $APP_VERSION"),
+        ),
+    )
 
     /** `Date.prototype.toISOString()`: always milliseconds and Z. */
     private val ISO = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'").withZone(ZoneOffset.UTC)
@@ -139,18 +154,11 @@ object Backup {
         }
 
         val createdAt = clock()
-        val meta = JsonObject(
-            linkedMapOf(
-                "info" to JsonPrimitive("teenage engineering - pak file"),
-                "pak_version" to JsJson.number(1),
-                "pak_type" to JsonPrimitive("user"),
-                "pak_release" to JsonPrimitive("1.2.0"),
-                "device_name" to JsonPrimitive(info?.product.orEmpty().ifEmpty { "EP-133" }),
-                "device_sku" to JsonPrimitive(info?.sku.orEmpty()),
-                "device_version" to JsonPrimitive(info?.osVersion.orEmpty()),
-                "generated_at" to JsonPrimitive(isoString(createdAt)),
-                "author" to JsonPrimitive("$APP_NAME $APP_VERSION"),
-            ),
+        val meta = metaJson(
+            product = info?.product.orEmpty().ifEmpty { "EP-133" },
+            sku = info?.sku.orEmpty(),
+            osVersion = info?.osVersion.orEmpty(),
+            createdAt = createdAt,
         )
         val sidecar = JsonObject(
             linkedMapOf(

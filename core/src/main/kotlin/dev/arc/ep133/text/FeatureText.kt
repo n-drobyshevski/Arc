@@ -110,4 +110,34 @@ object FeatureText {
         if (r.deviceOnlyProjects.isNotEmpty()) parts.add("${if (r.deviceOnlyProjects.size == 1) "project" else "projects"} ${Format.list(r.deviceOnlyProjects.map(Int::toString))}")
         return if (parts.isEmpty()) "" else "Also on the device and not in this backup, left as they are: ${parts.joinToString(" and ")}."
     }
+
+    // ---------- backup contents, playback, export ----------
+    const val CONTENTS = "Contents"
+    const val OPENING = "Opening…"
+    const val PLAY = "Play"
+    const val STOP = "Stop"
+    const val SHARE_WAV = "Share WAV"
+    const val SAVE_WAV = "Save WAV"
+    const val SHARE_PROJECT = "Share project"
+    const val SAVE_PROJECT = "Save project"
+    const val NO_SOUNDS_IN_BACKUP = "No sounds in this backup."
+    const val NO_PROJECTS_IN_BACKUP = "No projects in this backup."
+    const val EXPORT_HINT = "A project is shared as its own .pak with the sounds it uses."
+
+    /** "1.5 s" or "850 ms" */
+    fun duration(seconds: Double): String {
+        // The unit follows the rounded value, so 0.9996 s reads "1.0 s", not "1000 ms".
+        val ms = dev.arc.ep133.util.jsRound(seconds * 1000)
+        return if (ms < 1000) "${ms.toLong()} ms" else "${dev.arc.ep133.util.jsToFixed(seconds, 1)} s"
+    }
+
+    // ---------- trim ----------
+    const val TRIM = "Trim"
+    const val PLAY_SELECTION = "Play selection"
+    const val RESET = "Reset"
+    const val START = "Start"
+    const val END = "End"
+
+    fun trimmed(seconds: Double) = "Trimmed to ${duration(seconds)}"
+    fun selection(startS: Double, endS: Double) = "${duration(startS)} to ${duration(endS)}, ${duration(endS - startS)} long"
 }

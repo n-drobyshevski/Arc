@@ -98,6 +98,7 @@ fun ColumnScope.DetailSheetContent(
     onSave: () -> Unit,
     onDelete: () -> Unit,
     onDone: () -> Unit,
+    onContents: () -> Unit = {},
 ) {
     val c = LocalArcColors.current
     ArcField(Strings.NAME, title, onTitle, maxLength = 80)
@@ -141,6 +142,8 @@ fun ColumnScope.DetailSheetContent(
         }
         half { m -> ArcKey(Strings.SHARE, onShare, m) }
         half { m -> ArcKey(Strings.SAVE_PAK, onSave, m) }
+        // Addition to the web version: play and export what is inside.
+        wide { m -> ArcKey(FeatureText.CONTENTS, onContents, m) }
         wide { m -> ArcKey(Strings.DELETE, onDelete, m, style = KeyStyle.Quiet, textColor = c.danger) }
     }
     Text(
