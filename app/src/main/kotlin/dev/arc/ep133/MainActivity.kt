@@ -43,6 +43,7 @@ import dev.arc.ep133.ui.screens.ContentsScreen
 import dev.arc.ep133.ui.screens.DebugScreen
 import dev.arc.ep133.ui.screens.GuideScreen
 import dev.arc.ep133.ui.screens.PadsSheetContent
+import dev.arc.ep133.ui.screens.SearchScreen
 import dev.arc.ep133.ui.screens.DeviceScreen
 import dev.arc.ep133.ui.screens.TRIM_PLAY_KEY
 import dev.arc.ep133.ui.screens.TrimSheetContent
@@ -273,6 +274,7 @@ class MainActivity : ComponentActivity() {
         var debug by rememberSaveable { mutableStateOf(false) }
         var browse by rememberSaveable { mutableStateOf(false) }
         var guide by rememberSaveable { mutableStateOf(false) }
+        var search by rememberSaveable { mutableStateOf(false) }
         // The pad sheet: "backup:<id>:<project>" or "device:<project>".
         var padsFor by rememberSaveable { mutableStateOf<String?>(null) }
         var contentsId by rememberSaveable { mutableStateOf<String?>(null) }
@@ -353,6 +355,14 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                 }
+            } else if (search) {
+                SearchScreen(
+                    search = state.search,
+                    fmtDay = controller::fmtDay,
+                    onQuery = controller::setSearch,
+                    onOpen = { b -> contentsId = b.id },
+                    onBack = { search = false },
+                )
             } else if (browse) {
                 DeviceScreen(
                     state = state,
@@ -454,6 +464,7 @@ class MainActivity : ComponentActivity() {
                         controller.refreshBrowser()
                     },
                     onGuide = { guide = true },
+                    onSearch = { search = true },
                 )
 
                 ArcSheet(visible = detail != null, onDismiss = { closeDetail(save = true) }) {

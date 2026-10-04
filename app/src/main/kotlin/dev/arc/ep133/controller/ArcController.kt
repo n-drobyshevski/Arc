@@ -41,6 +41,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -81,6 +83,13 @@ data class UploadDraftItem(
     val sampleRate: Long = 0,
 )
 
+/** Sound search across saved backups: the query, its results, and whether older backups are still being indexed. */
+data class SearchUi(
+    val query: String = "",
+    val results: List<dev.arc.ep133.features.SearchGroup> = emptyList(),
+    val indexing: Boolean = false,
+)
+
 /** A backup opened for its contents screen (sounds and projects, playback, export). */
 data class ContentsUi(
     val backupId: String,
@@ -108,6 +117,7 @@ data class UiState(
     val browser: BrowserUi = BrowserUi(),
     val diff: DiffUi? = null,
     val contents: ContentsUi? = null,
+    val search: SearchUi = SearchUi(),
 )
 
 /**
@@ -126,6 +136,8 @@ class ArcController(
     private val _state = MutableStateFlow(UiState(midiSupported = midi.supported))
     val state: StateFlow<UiState> = _state.asStateFlow()
 
+    private val searchQuery = MutableStateFlow("")
+
     @Volatile
     private var session: Session? = null
     private var openDeviceId: Int? = null
@@ -143,7 +155,21 @@ class ArcController(
                 .catch { e -> toast(Strings.libraryFailed(e.message ?: e.toString()), error = true) }
                 .collect { list -> _state.update { it.copy(backups = list, libraryLoaded = true, spaceLeft = runCatching { library.spaceLeft() }.getOrNull()) } }
         }
-        scope.launch { runCatching { library.sweep() } }
+        scope.launch {
+            runCatching { library.sweep() }
+            // Backups saved before search existed get their sound names indexed once.
+            _state.update { it.copy(search = it.search.copy(indexing = true)) }
+            runCatching { library.indexMissing() }
+            _state.update { it.copy(search = it.search.copy(indexing = false)) }
+        }
+        scope.launch {
+            combine(library.names, library.backups, searchQuery) { names, backups, q -> Triple(names, backups, q) }
+                .catch { /* the library error is already shown by the backups collector */ }
+                .collectLatest { (names, backups, q) ->
+                    val results = withContext(Dispatchers.Default) { dev.arc.ep133.features.LibrarySearch.search(names, backups, q) }
+                    _state.update { it.copy(search = it.search.copy(results = results)) }
+                }
+        }
         midi.watch(
             onAdded = { info ->
                 // Agreed addition: connect on its own when an EP-133 is plugged in.
@@ -282,6 +308,7 @@ class ArcController(
                     d = d,
                 ),
                 r.bytes,
+                d.soundNames,
             )
         }
         if (saved != null) {
@@ -471,6 +498,12 @@ class ArcController(
         }
     }
 
+    fun setSearch(query: String) {
+        // The field shows what was typed at once; results follow.
+        _state.update { it.copy(search = it.search.copy(query = query)) }
+        searchQuery.value = query
+    }
+
     fun stopPlayback() {
         playToken++
         player.stop()
@@ -561,6 +594,7 @@ class ArcController(
                     d = d,
                 ),
                 bytes,
+                d.soundNames,
             )
             _state.update { it.copy(freshId = saved.id) }
             toast(Strings.imported(saved.soundCount, saved.projectCount))
