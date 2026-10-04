@@ -14,7 +14,7 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -73,8 +73,8 @@ fun ColumnScope.TrimSheetContent(
     val n = SampleTrim.frames(w.pcm, w.channels)
     val peaks = remember(w) { SampleTrim.peaks(w.pcm, w.channels, COLUMNS) }
     // Start and end (exclusive) in frames, kept across rotation.
-    var startState by rememberSaveable(item.fileName) { mutableStateOf(item.trim?.first ?: 0) }
-    var endState by rememberSaveable(item.fileName) { mutableStateOf(item.trim?.let { it.last + 1 } ?: n) }
+    var startState by rememberSaveable(item.fileName) { mutableIntStateOf(item.trim?.first ?: 0) }
+    var endState by rememberSaveable(item.fileName) { mutableIntStateOf(item.trim?.let { it.last + 1 } ?: n) }
     val start = startState.coerceIn(0, n)
     val end = endState.coerceIn(start, n)
     val rate = w.sampleRate

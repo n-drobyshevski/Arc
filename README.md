@@ -17,6 +17,12 @@ These go beyond the web version:
 - **Browse the device:** see every sound slot (name, size, and on tap its channels, sample rate, settings and checksum), every project and which sounds it uses, and the free space. Tap **Browse** next to Connect.
 - **Add samples:** pick WAV files on the phone and load them into sample slots. Each file gets the next free slot, which you can change; an occupied slot is replaced. Uploads take exactly the restore path, so they get the same free-space check, resampling above 46875 Hz, checksum verification and Cancel.
 - **Compare with device:** in the restore sheet, see what a restore would change before running it: which sounds differ, are missing or have other settings, which projects differ, and what on the device the restore leaves alone. Nothing is written.
+- **Backup contents:** tap **Contents** in a backup's sheet to list its sounds and projects. No device is needed.
+  - Sounds play on the phone, and share or save as WAV files exactly as stored in the backup.
+  - Each project shares or saves as its own `.pak` with only the sounds it uses, in the same layout, so it restores like any other backup.
+- **Trim before upload:** each file picked under **Add samples** has a **Trim** key. It opens a waveform where you set the start and end, hear the selection, and reset. The cut happens at upload time, at the file's own sample rate, and loop points embedded in the WAV move with the new start.
+- **Play from the device:** in the device browser, a sound's details have a **Play** key that downloads the sound and plays it on the phone.
+- **Shortcut guide:** a list of 100 EP-133 key combinations, with search. Every entry is paraphrased from teenage engineering's official user guide for OS 2.5, and links to the section it comes from. Combos the guide doesn't document are left out.
 
 Backups use the same layout as the official Sample Tool's `.pak`: a zip with `/meta.json`, `/sounds/NNN name.wav` and `/projects/PNN.tar`. On top of that, an `arc.json` file keeps per-sound settings like play mode, pitch and envelope.
 
@@ -75,9 +81,9 @@ Apart from AndroidX, Kotlin and kotlinx libraries, the only third-party code is 
 core/   pure Kotlin/JVM, no Android imports, runs in plain JUnit
   protocol/  packed7, frame, session, fs, device (the SysEx protocol), SysEx reassembly, port matching, traffic log
   formats/   zip, wav, tar, crc32, and JsJson (JSON.parse / JSON.stringify with JavaScript's exact output)
-  backup/    backup, restore and the .pak layout
-  features/  device browser, sample upload and backup comparison (additions to the web version)
-  text/      every interface string and the small library/restore rules from app.js
+  backup/    backup, restore, the .pak layout, and exporting a sound or a project
+  features/  device browser, sample upload, trim and backup comparison (additions to the web version)
+  text/      every interface string, the small library/restore rules from app.js, and the shortcut guide
 app/    Android: MIDI transport, foreground service, Room library, files and sharing, Compose UI
 reference/   the web version (read only)
 ```
@@ -116,7 +122,7 @@ The behaviours above are commented where they happen in the code. The same goes 
 - **Hangs become errors:** two inputs that make the JS hang now fail with an error instead. These are a crafted `.pak` whose tar has a negative size, and a WAV with 0 channels.
 - **No stale ack handlers:** when an upload fails, its pending ack handlers are dropped, so they can never catch a later reply after the request id wraps.
 - **Different error wording for damaged zip data:** the browser's own wording can't be reproduced.
-- **New features:** the device browser, sample upload and compare screens have no web equivalent, so their wording is new. They use only commands the web version already uses (LIST, metadata get, file download, and the restore path for uploads).
+- **New features:** the device browser, sample upload, compare, contents, trim and guide screens have no web equivalent, so their wording is new. They use only commands the web version already uses (LIST, metadata get, file download, and the restore path for uploads). Playback, trimming and export happen on the phone.
 
 ## Tests
 
@@ -137,7 +143,13 @@ The behaviours above are commented where they happen in the code. The same goes 
   - Restores the JS fixture into the simulator.
 - **Quirks:** each protocol behaviour listed above, the id wrap, the 16-frame window limit, probing, and timing on virtual time.
 - **JavaScript semantics:** `JSON.stringify` output, number formatting, `toFixed`, `Number()` and the WAV, tar and resample arithmetic. The expected values were produced by running the reference under Node.
-- **Added features:** the device listing and project-sound lookup, uploads into free and occupied slots (including resampling, embedded settings, refusal when full and cancel), and every comparison outcome, including a device that reports no checksum.
+- **Added features:**
+  - the device listing and project-sound lookup
+  - uploads into free and occupied slots, including resampling, embedded settings, refusal when full and cancel
+  - trimming: cuts, loop points moved and clamped, waveform peaks, a trimmed upload with loops, and a trimmed 48 kHz file that is then resampled
+  - export: a sound's WAV, and a project `.pak` whose layout and contents are checked and which restores into the simulator
+  - every comparison outcome, including a device that reports no checksum
+  - the shortcut guide data: every entry links to the official guide, reads as plain text, and no combination is listed twice
 - **Other units:** interface text and restore-selection rules, SysEx reassembly (a reply split at every byte offset), port-name matching, the log export, and the Room converters.
 
 ## Status: what is verified and what still needs a real device
@@ -151,6 +163,9 @@ Not verified yet. Nobody has run this on a phone or an EP-133:
 - **USB MIDI on a real phone.** Discovery and the port names Android reports for the EP-133. Whether 16 back-to-back 510-byte upload frames survive the USB link. How Android splits incoming SysEx. Detach during a transfer.
 - **The real device's answers** to everything the simulator only imitates, for example whether it acks upload chunks, metadata paging, crc reporting and the active-project switch. Compare depends on the device reporting a checksum; without one it can only compare sizes, and says so.
 - **The app UI on screen.** It was built and linted, but never launched: this environment has no emulator (no KVM).
+- **Audio playback** with `AudioTrack` on a real phone, including long stereo sounds.
+- **OS 2.x firmware.** The protocol port follows the web version, which was written from captures of earlier firmware. Another EP-133 tool (cornerman) lists "updated transfer for firmware 2.0" in its changelog, so OS 2.0 or later may behave differently. Watch the debug log closely on a device running OS 2.x.
+- **The shortcut guide on a real unit.** It follows the official guide for OS 2.5. Combos can differ on other OS versions.
 - **Platform behaviour:**
   - the foreground service and notification on Android 14–16
   - the `.pak` intent filter with various file managers
@@ -169,6 +184,10 @@ Back up the EP-133 with the official Sample Tool first. Then, with the debug scr
 6. Open a `.pak` from the Files app, and import one made by the official Sample Tool.
 7. Tap **Browse**: check the slots, a sound's details and a project's sounds against the device. Add a WAV into a free slot and play it on the device.
 8. In the restore sheet, tap **Compare with device** right after a backup: it should report no changes. Change a sound on the device and compare again.
+9. Open a backup's **Contents**. Play a few sounds, save one as WAV and open it in another app. Save a project, import that `.pak`, and restore it.
+10. Under **Add samples**, trim a file to a short part, upload it, and play it on the device. Check the start and the length. If the file has loop points, check them too.
+11. In the device browser, tap **Play** on a sound and compare it with the pad on the device.
+12. Try a few entries of the **Shortcut guide** on the device, and note the OS version shown on the panel.
 
 If anything fails, export the SysEx log from the debug screen (**Share log** or **Save log**) and attach it to an issue together with the error text.
 
