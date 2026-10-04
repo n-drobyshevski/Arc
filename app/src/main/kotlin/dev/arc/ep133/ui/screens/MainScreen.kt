@@ -41,6 +41,7 @@ import dev.arc.ep133.controller.UiState
 import dev.arc.ep133.text.BackupRecord
 import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.text.Format
+import dev.arc.ep133.text.GuideText
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.width
 import dev.arc.ep133.text.Strings
@@ -68,6 +69,7 @@ fun MainScreen(
     onOpen: (BackupRecord) -> Unit,
     onDebug: () -> Unit,
     onBrowse: () -> Unit = {},
+    onGuide: () -> Unit = {},
 ) {
     val c = LocalArcColors.current
     Box(Modifier.fillMaxSize().background(c.shell), contentAlignment = Alignment.TopCenter) {
@@ -129,6 +131,9 @@ fun MainScreen(
                 val note = Strings.storageNote(state.backups.size, totalSize, state.spaceLeft)
                 if (note.isNotEmpty()) Text(note, style = ArcType.tiny, color = c.graphite)
             }
+
+            // Addition to the web version: key combinations for the device.
+            ArcKey(GuideText.TITLE, onGuide, modifier = Modifier.fillMaxWidth(), style = KeyStyle.Quiet)
 
             Text(Strings.FOOTER, style = ArcType.tiny, color = c.graphite, modifier = Modifier.padding(vertical = 8.dp, horizontal = 2.dp))
         }

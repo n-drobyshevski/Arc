@@ -40,6 +40,7 @@ import dev.arc.ep133.ui.components.ArcSheet
 import dev.arc.ep133.ui.components.ArcToast
 import dev.arc.ep133.ui.screens.ContentsScreen
 import dev.arc.ep133.ui.screens.DebugScreen
+import dev.arc.ep133.ui.screens.GuideScreen
 import dev.arc.ep133.ui.screens.DeviceScreen
 import dev.arc.ep133.ui.screens.TRIM_PLAY_KEY
 import dev.arc.ep133.ui.screens.TrimSheetContent
@@ -269,6 +270,7 @@ class MainActivity : ComponentActivity() {
         val state by controller.state.collectAsStateWithLifecycle()
         var debug by rememberSaveable { mutableStateOf(false) }
         var browse by rememberSaveable { mutableStateOf(false) }
+        var guide by rememberSaveable { mutableStateOf(false) }
         var contentsId by rememberSaveable { mutableStateOf<String?>(null) }
         // The upload draft row being trimmed; the trim view replaces the upload sheet's content.
         var trimIndex by rememberSaveable { mutableStateOf<Int?>(null) }
@@ -306,6 +308,8 @@ class MainActivity : ComponentActivity() {
         Box(Modifier.fillMaxSize()) {
             if (debug) {
                 DebugScreen(controller.trafficLog, ::shareLog, ::saveLog, ::copyLog) { debug = false }
+            } else if (guide) {
+                GuideScreen { guide = false }
             } else if (contentsBackup != null) {
                 ContentsScreen(
                     b = contentsBackup,
@@ -403,6 +407,7 @@ class MainActivity : ComponentActivity() {
                         browse = true
                         controller.refreshBrowser()
                     },
+                    onGuide = { guide = true },
                 )
 
                 ArcSheet(visible = detail != null, onDismiss = { closeDetail(save = true) }) {
