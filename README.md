@@ -22,6 +22,9 @@ These go beyond the web version:
   - Each project shares or saves as its own `.pak` with only the sounds it uses, in the same layout, so it restores like any other backup.
 - **Trim before upload:** each file picked under **Add samples** has a **Trim** key. It opens a waveform where you set the start and end, hear the selection, and reset. The cut happens at upload time, at the file's own sample rate, and loop points embedded in the WAV move with the new start.
 - **Play from the device:** in the device browser, a sound's details have a **Play** key that downloads the sound and plays it on the phone.
+- **Pad layout:** a **Pads** key on a project, in a backup's contents or on the device, shows each group's pads with the sound on each. In a backup, tapping a pad plays its sound. Pads are listed by their number in the project file; how those numbers map to the physical pads isn't known, so the grid doesn't claim to match the device's layout.
+- **Search sounds:** a **Search** key next to **Import** finds sounds by name in every saved backup. Tapping a result opens that backup's contents.
+- **Compare two backups:** **Compare with another backup** in a backup's sheet shows what changed from the older one to the newer one: sounds added, removed or changed (audio, name or settings) and projects added, removed or changed, with the pads that moved. Audio counts as the same when the samples are the same, even in a differently written WAV file.
 - **Shortcut guide:** a list of 100 EP-133 key combinations, with search. Every entry is paraphrased from teenage engineering's official user guide for OS 2.5, and links to the section it comes from. Combos the guide doesn't document are left out.
 
 Backups use the same layout as the official Sample Tool's `.pak`: a zip with `/meta.json`, `/sounds/NNN name.wav` and `/projects/PNN.tar`. On top of that, an `arc.json` file keeps per-sound settings like play mode, pitch and envelope.
@@ -82,9 +85,9 @@ core/   pure Kotlin/JVM, no Android imports, runs in plain JUnit
   protocol/  packed7, frame, session, fs, device (the SysEx protocol), SysEx reassembly, port matching, traffic log
   formats/   zip, wav, tar, crc32, and JsJson (JSON.parse / JSON.stringify with JavaScript's exact output)
   backup/    backup, restore, the .pak layout, and exporting a sound or a project
-  features/  device browser, sample upload, trim and backup comparison (additions to the web version)
+  features/  device browser, sample upload, trim, pad layouts, sound search, and comparing a backup with the device or another backup (additions to the web version)
   text/      every interface string, the small library/restore rules from app.js, and the shortcut guide
-app/    Android: MIDI transport, foreground service, Room library, files and sharing, Compose UI
+app/    Android: MIDI transport, foreground service, Room library (with a sound-name index for search), files and sharing, Compose UI
 reference/   the web version (read only)
 ```
 
@@ -122,7 +125,7 @@ The behaviours above are commented where they happen in the code. The same goes 
 - **Hangs become errors:** two inputs that make the JS hang now fail with an error instead. These are a crafted `.pak` whose tar has a negative size, and a WAV with 0 channels.
 - **No stale ack handlers:** when an upload fails, its pending ack handlers are dropped, so they can never catch a later reply after the request id wraps.
 - **Different error wording for damaged zip data:** the browser's own wording can't be reproduced.
-- **New features:** the device browser, sample upload, compare, contents, trim and guide screens have no web equivalent, so their wording is new. They use only commands the web version already uses (LIST, metadata get, file download, and the restore path for uploads). Playback, trimming and export happen on the phone.
+- **New features:** the device browser, sample upload, compare, contents, trim, pads, search and guide screens have no web equivalent, so their wording is new. They use only commands the web version already uses (LIST, metadata get, file download, and the restore path for uploads). Playback, trimming and export happen on the phone.
 
 ## Tests
 
@@ -150,6 +153,10 @@ The behaviours above are commented where they happen in the code. The same goes 
   - export: a sound's WAV, and a project `.pak` whose layout and contents are checked and which restores into the simulator
   - every comparison outcome, including a device that reports no checksum
   - the shortcut guide data: every entry links to the official guide, reads as plain text, and no combination is listed twice
+  - pad layouts: they agree with the slots each fixture project uses, and follow the same matching rules for odd entries
+  - comparing two backups: added, removed, renamed, audio and settings changes, the same audio in another WAV header, settings missing on one side, and project pad changes
+  - sound search: every word must match, case is ignored, results follow the library order
+- **The database upgrade:** the version 2 schema Room exports must equal version 1 plus exactly the two search tables, created with Room's own SQL. Room's own migration test needs a device, so this checks the exported schemas instead.
 - **Other units:** interface text and restore-selection rules, SysEx reassembly (a reply split at every byte offset), port-name matching, the log export, and the Room converters.
 
 ## Status: what is verified and what still needs a real device
@@ -165,6 +172,8 @@ Not verified yet. Nobody has run this on a phone or an EP-133:
 - **The app UI on screen.** It was built and linted, but never launched: this environment has no emulator (no KVM).
 - **Audio playback** with `AudioTrack` on a real phone, including long stereo sounds.
 - **OS 2.x firmware.** The protocol port follows the web version, which was written from captures of earlier firmware. Another EP-133 tool (cornerman) lists "updated transfer for firmware 2.0" in its changelog, so OS 2.0 or later may behave differently. Watch the debug log closely on a device running OS 2.x.
+- **Upgrading an installed build.** This version adds a table to the app's database. The migration was checked against Room's exported schemas, but it hasn't run on a phone that has backups. Checking it takes two builds signed with the same key, for example two local builds from the same machine. CI builds can't be installed over each other, since each run uses its own key.
+- **Pad numbers on the device.** The pad grid lists pads by their number in the project file. Which physical pad each number is hasn't been checked.
 - **The shortcut guide on a real unit.** It follows the official guide for OS 2.5. Combos can differ on other OS versions.
 - **Platform behaviour:**
   - the foreground service and notification on Android 14–16
@@ -188,6 +197,9 @@ Back up the EP-133 with the official Sample Tool first. Then, with the debug scr
 10. Under **Add samples**, trim a file to a short part, upload it, and play it on the device. Check the start and the length. If the file has loop points, check them too.
 11. In the device browser, tap **Play** on a sound and compare it with the pad on the device.
 12. Try a few entries of the **Shortcut guide** on the device, and note the OS version shown on the panel.
+13. **Search** for a sound you know is in one of your backups. If you can install over a previous build signed with the same key (see above), check first that every backup is still listed after the upgrade.
+14. Open **Pads** on a project in the device browser and compare it with the pads on the device. Note which number is which pad.
+15. Back up, change a pad's sound on the device, back up again, and **Compare with another backup**: it should show that pad change.
 
 If anything fails, export the SysEx log from the debug screen (**Share log** or **Save log**) and attach it to an issue together with the error text.
 
