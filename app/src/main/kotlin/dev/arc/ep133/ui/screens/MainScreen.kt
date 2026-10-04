@@ -212,7 +212,7 @@ private fun Stat(num: String, label: String) {
 }
 
 @Composable
-private fun BackupList(list: List<BackupRecord>, freshId: String?, fmtDay: (Long) -> String, onOpen: (BackupRecord) -> Unit) {
+internal fun BackupList(list: List<BackupRecord>, freshId: String?, fmtDay: (Long) -> String, onOpen: (BackupRecord) -> Unit) {
     val c = LocalArcColors.current
     Column(
         Modifier

@@ -90,6 +90,19 @@ data class SearchUi(
     val indexing: Boolean = false,
 )
 
+/**
+ * Two saved backups being compared, older first. The sound names stay for
+ * describing pad changes; the backups themselves are not kept.
+ */
+data class PakCompareUi(
+    val oldId: String,
+    val newId: String,
+    val result: dev.arc.ep133.features.PakCompareResult? = null,
+    val oldNames: Map<Int, String> = emptyMap(),
+    val newNames: Map<Int, String> = emptyMap(),
+    val error: String? = null,
+)
+
 /** A backup opened for its contents screen (sounds and projects, playback, export). */
 data class ContentsUi(
     val backupId: String,
@@ -118,6 +131,7 @@ data class UiState(
     val diff: DiffUi? = null,
     val contents: ContentsUi? = null,
     val search: SearchUi = SearchUi(),
+    val pakCompare: PakCompareUi? = null,
 )
 
 /**
@@ -496,6 +510,39 @@ class ArcController(
             if (e is kotlinx.coroutines.CancellationException) throw e
             toast(e.message ?: e.toString(), error = true)
         }
+    }
+
+    /** Compares two saved backups, the older one as the starting point (an addition). */
+    fun compareBackups(a: BackupRecord, b: BackupRecord): Job = scope.launch {
+        val (old, new) = if (b.createdAt < a.createdAt) b to a else a to b
+        val current = _state.value.pakCompare
+        if (current != null && current.oldId == old.id && current.newId == new.id && (current.result != null || current.error == null)) return@launch
+        _state.update { it.copy(pakCompare = PakCompareUi(old.id, new.id)) }
+        val ui = try {
+            val oldBytes = library.bytes(old.id)
+            val newBytes = library.bytes(new.id)
+            withContext(Dispatchers.Default) {
+                val o = Paks.open(oldBytes)
+                val n = Paks.open(newBytes)
+                PakCompareUi(
+                    old.id, new.id,
+                    result = dev.arc.ep133.features.PakCompare.compare(o, n),
+                    oldNames = o.sounds.mapValues { it.value.name },
+                    newNames = n.sounds.mapValues { it.value.name },
+                )
+            }
+        } catch (e: Throwable) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            PakCompareUi(old.id, new.id, error = e.message ?: e.toString())
+        }
+        _state.update { st ->
+            val c = st.pakCompare
+            if (c == null || c.oldId != old.id || c.newId != new.id) st else st.copy(pakCompare = ui)
+        }
+    }
+
+    fun closeCompare() {
+        _state.update { it.copy(pakCompare = null) }
     }
 
     fun setSearch(query: String) {

@@ -174,9 +174,9 @@ internal fun SectionTitle(text: String, count: Int) {
     }
 }
 
-/** A pale key-coloured plate with a flat pressed tint, like the backup rows. */
+/** A pale key-coloured plate with a flat pressed tint, like the backup rows; plain text when [onClick] is null. */
 @Composable
-internal fun Plate(onClick: () -> Unit, enabled: Boolean, content: @Composable ColumnScope.() -> Unit) {
+internal fun Plate(onClick: (() -> Unit)?, enabled: Boolean, content: @Composable ColumnScope.() -> Unit) {
     val c = LocalArcColors.current
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
@@ -190,7 +190,13 @@ internal fun Plate(onClick: () -> Unit, enabled: Boolean, content: @Composable C
             .background(c.key)
             .background(if (pressed) c.keyEdge.copy(alpha = 0.25f) else Color.Transparent)
             // Not while the device is busy: the read it starts would be skipped.
-            .clickable(interactionSource = source, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable(interactionSource = source, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
+                } else {
+                    Modifier
+                },
+            )
             .padding(vertical = 12.dp, horizontal = 14.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
         content = content,

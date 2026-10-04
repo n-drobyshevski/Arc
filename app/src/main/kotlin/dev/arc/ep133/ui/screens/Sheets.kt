@@ -99,6 +99,7 @@ fun ColumnScope.DetailSheetContent(
     onDelete: () -> Unit,
     onDone: () -> Unit,
     onContents: () -> Unit = {},
+    onCompareBackups: (() -> Unit)? = null,
 ) {
     val c = LocalArcColors.current
     ArcField(Strings.NAME, title, onTitle, maxLength = 80)
@@ -144,6 +145,7 @@ fun ColumnScope.DetailSheetContent(
         half { m -> ArcKey(Strings.SAVE_PAK, onSave, m) }
         // Addition to the web version: play and export what is inside.
         wide { m -> ArcKey(FeatureText.CONTENTS, onContents, m) }
+        if (onCompareBackups != null) wide { m -> ArcKey(FeatureText.COMPARE_BACKUPS, onCompareBackups, m) }
         wide { m -> ArcKey(Strings.DELETE, onDelete, m, style = KeyStyle.Quiet, textColor = c.danger) }
     }
     Text(
