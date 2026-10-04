@@ -31,6 +31,9 @@ class Library(
     /** Settings kept with the library in the folder (the live mirror's), read when the index is written. */
     var settings: () -> Map<String, String> = { emptyMap() }
 
+    /** Whether the user picked the library folder (after a reinstall). */
+    val folderPicked: Boolean get() = external?.tree != null
+
     /** Called with what went wrong when the folder copy could not be written. */
     var onExternalError: (String) -> Unit = {}
     private val dao get() = db.backups()
@@ -47,11 +50,12 @@ class Library(
 
     /**
      * Stores the file first, then the row, so a row never points at a missing
-     * file; then its sound names (a backup without them is indexed later).
+     * file; then its sound names (a backup without them is indexed later),
+     * then the copy in the folder. The result says if that copy failed.
      */
-    suspend fun save(record: BackupRecord, bytes: ByteArray, soundNames: Map<Int, String>): BackupRecord = withContext(Dispatchers.IO) {
+    suspend fun save(record: BackupRecord, bytes: ByteArray, soundNames: Map<Int, String>): Saved = withContext(Dispatchers.IO) {
         val row = record.copy(id = record.id.ifEmpty { UUID.randomUUID().toString() }, size = bytes.size.toLong())
-        files.withLock {
+        val copyError = files.withLock {
             store.write(row.id, bytes)
             dao.insert(BackupEntity.from(row))
             search.replace(row.id, soundNames)
@@ -60,108 +64,136 @@ class Library(
                 writeIndex(ext)
             }
         }
-        row
+        Saved(row, copyError)
     }
 
     private fun externalName(r: BackupRecord): String =
         external?.fileOverride(r.id) ?: LibraryIndex.fileFor(r.id, r.createdAt)
 
-    private suspend fun writeIndex(ext: ExternalLibrary) {
-        val entries = dao.all().map { e ->
-            val r = e.toRecord()
-            IndexEntry(r.id, externalName(r), r.title, r.notes, r.createdAt, r.source, r.fileName, r.device)
+    /**
+     * Rewrites library.json from the library. With a picked folder, entries of
+     * backups whose file is in the folder but not in the library (one a restore
+     * could not read, say) are kept, so their titles and notes aren't lost.
+     * [base] settings are kept where the app has none of its own.
+     */
+    private suspend fun writeIndex(ext: ExternalLibrary, base: Map<String, String> = emptyMap()) {
+        val rows = dao.all().map { it.toRecord() }
+        val ids = rows.mapTo(HashSet()) { it.id }
+        val entries = rows.map { r -> IndexEntry(r.id, externalName(r), r.title, r.notes, r.createdAt, r.source, r.fileName, r.device) }
+        val kept = if (ext.tree == null) emptyList() else {
+            val listing = ext.list()
+            readIndex(ext, listing).entries.filter { it.id !in ids && it.file in listing }
         }
-        ext.write(LibraryIndex.FILE, encodeUtf8(LibraryIndex.toJson(LibraryIndexData(entries, settings()))), ExternalLibrary.JSON_MIME)
+        val data = LibraryIndexData(entries + kept, base + settings())
+        ext.write(LibraryIndex.FILE, encodeUtf8(LibraryIndex.toJson(data)), ExternalLibrary.JSON_MIME)
     }
 
-    private suspend fun copyOut(block: suspend (ExternalLibrary) -> Unit) {
-        val ext = external ?: return
-        try {
+    /** Every index file in a folder listing, oldest first, merged so the newest wins. */
+    private fun readIndex(ext: ExternalLibrary, listing: Map<String, FolderFile>): LibraryIndexData =
+        LibraryIndex.merge(
+            listing.filterKeys(ExternalLibrary::isIndex).values.sortedBy { it.lastModified }.mapNotNull { f ->
+                runCatching { LibraryIndex.parse(decodeUtf8(ext.read(f.uri))) }.getOrNull()
+            },
+        )
+
+    /** Runs a copy to the folder; returns what went wrong, if anything. */
+    private suspend fun copyOut(block: suspend (ExternalLibrary) -> Unit): String? {
+        val ext = external ?: return null
+        return try {
             block(ext)
+            null
         } catch (e: Exception) {
-            onExternalError(e.message ?: e.toString())
+            e.message ?: e.toString()
         }
     }
 
     /** Rewrites the index in the folder (after a settings change). */
-    suspend fun syncIndex() = withContext(Dispatchers.IO) { files.withLock { copyOut { writeIndex(it) } } }
+    suspend fun syncIndex() = withContext(Dispatchers.IO) {
+        files.withLock { copyOut { writeIndex(it) } }?.let(onExternalError)
+    }
 
     /**
-     * Copies a library that predates the folder into it, once: every backup
-     * whose file is not there yet, then the index.
+     * On every start: copies to the folder whatever is missing there (a
+     * library from before the folder, or a copy that failed earlier), then the
+     * index. An empty library has nothing to protect, so a fresh reinstall
+     * writes nothing before the user can restore.
      */
-    suspend fun exportOnce() = withContext(Dispatchers.IO) {
+    suspend fun reconcile() = withContext(Dispatchers.IO) {
         val ext = external ?: return@withContext
-        if (ext.exported) return@withContext
         files.withLock {
-            var ok = true
-            for (e in dao.all()) {
-                val r = e.toRecord()
+            val rows = dao.all().map { it.toRecord() }
+            if (rows.isEmpty()) return@withLock
+            val present = runCatching { ext.names() }.getOrNull()
+            var error: String? = null
+            for (r in rows) {
                 val name = externalName(r)
-                try {
-                    if (!ext.exists(name)) ext.write(name, store.read(r.id), ExternalLibrary.PAK_MIME)
-                } catch (x: Exception) {
-                    ok = false
-                    onExternalError(x.message ?: x.toString())
+                val err = copyOut { e ->
+                    val there = present?.contains(name) ?: e.exists(name)
+                    if (!there) e.write(name, store.read(r.id), ExternalLibrary.PAK_MIME)
                 }
+                if (error == null) error = err
             }
-            copyOut { writeIndex(it) }
-            if (ok) ext.exported = true
+            val ixErr = copyOut { writeIndex(it) }
+            (error ?: ixErr)?.let(onExternalError)
         }
     }
+
+    private val restoring = Mutex()
 
     /**
      * Reads the library back from a folder the user picked (after a
      * reinstall): every .pak in it, with titles, notes and dates from the
-     * index files, and the settings. Backups already in the library are
-     * skipped. From now on the folder is where copies go. Returns how many
-     * backups came back, and the settings found.
+     * index files (the newest wins), and the settings. Backups already in the
+     * library are skipped. The folder becomes the copy target only if it is
+     * the library's (Documents/arc, or one holding arc files); otherwise this
+     * fails and nothing changes. Returns how many came back, and the settings.
      */
     suspend fun restoreFrom(tree: android.net.Uri, describe: (ByteArray) -> RestoredPak): Pair<Int, Map<String, String>> = withContext(Dispatchers.IO) {
         val ext = external ?: return@withContext 0 to emptyMap()
-        ext.setTree(tree)
-        val listing = ext.list()
-        val index = LibraryIndex.merge(
-            listing.filterKeys { it.startsWith("library") && it.endsWith(".json") }.values.mapNotNull { uri ->
-                runCatching { LibraryIndex.parse(decodeUtf8(ext.read(uri))) }.getOrNull()
-            },
-        )
-        val byFile = index.entries.associateBy { it.file }
-        var count = 0
-        for ((name, uri) in listing) {
-            if (!name.endsWith(".pak", ignoreCase = true)) continue
-            val entry = byFile[name]
-            if (entry != null && dao.get(entry.id) != null) continue
-            val bytes = runCatching { ext.read(uri) }.getOrNull() ?: continue
-            val d = runCatching { describe(bytes) }.getOrNull() ?: continue
-            val id = entry?.id ?: UUID.randomUUID().toString()
-            val record = BackupRecord(
-                id = id,
-                title = entry?.title ?: LibraryRules.importTitle(name),
-                notes = entry?.notes ?: "",
-                createdAt = entry?.createdAt ?: d.createdAt,
-                source = entry?.source ?: "import",
-                fileName = entry?.fileName ?: name,
-                device = entry?.device ?: d.device,
-                soundCount = d.soundCount,
-                projectCount = d.projectCount,
-                projects = d.projects,
-                slots = d.slots,
-                projectSlots = d.projectSlots,
-                size = bytes.size.toLong(),
-            )
-            files.withLock {
-                store.write(id, bytes)
-                dao.insert(BackupEntity.from(record))
-                search.replace(id, d.soundNames)
-                // The file keeps its name; remember it when it isn't the usual one.
-                if (name != LibraryIndex.fileFor(id, record.createdAt)) ext.setFileOverride(id, name)
+        restoring.withLock {
+            val listing = ext.list(tree)
+            if (!ExternalLibrary.isLibraryFolder(tree, listing.keys)) throw java.io.IOException(dev.arc.ep133.text.FeatureText.PICK_ARC_FOLDER)
+            val index = readIndex(ext, listing)
+            val byFile = index.entries.associateBy { it.file }
+            var count = 0
+            for ((name, file) in listing) {
+                if (!name.endsWith(".pak", ignoreCase = true)) continue
+                val entry = byFile[name]
+                val taken = files.withLock {
+                    (entry != null && dao.get(entry.id) != null) || dao.all().any { externalName(it.toRecord()) == name }
+                }
+                if (taken) continue
+                val bytes = runCatching { ext.read(file.uri) }.getOrNull() ?: continue
+                val d = runCatching { describe(bytes) }.getOrNull() ?: continue
+                val id = entry?.id ?: UUID.randomUUID().toString()
+                val record = BackupRecord(
+                    id = id,
+                    title = entry?.title ?: LibraryRules.importTitle(name),
+                    notes = entry?.notes ?: "",
+                    createdAt = entry?.createdAt ?: d.createdAt,
+                    source = entry?.source ?: "import",
+                    fileName = entry?.fileName ?: name,
+                    device = entry?.device ?: d.device,
+                    soundCount = d.soundCount,
+                    projectCount = d.projectCount,
+                    projects = d.projects,
+                    slots = d.slots,
+                    projectSlots = d.projectSlots,
+                    size = bytes.size.toLong(),
+                )
+                files.withLock {
+                    store.write(id, bytes)
+                    dao.insert(BackupEntity.from(record))
+                    search.replace(id, d.soundNames)
+                    // The file keeps its name; remember it when it isn't the usual one.
+                    if (name != LibraryIndex.fileFor(id, record.createdAt)) ext.setFileOverride(id, name)
+                }
+                count++
             }
-            count++
+            ext.setTree(tree)
+            files.withLock { copyOut { writeIndex(it, index.settings) } }?.let(onExternalError)
+            count to index.settings
         }
-        files.withLock { copyOut { writeIndex(it) } }
-        ext.exported = true
-        count to index.settings
     }
 
     /**
@@ -184,14 +216,15 @@ class Library(
 
     suspend fun update(id: String, title: String, notes: String) = withContext(Dispatchers.IO) {
         dao.updateText(id, title, notes)
-        files.withLock { copyOut { writeIndex(it) } }
+        files.withLock { copyOut { writeIndex(it) } }?.let(onExternalError)
     }
 
     suspend fun bytes(id: String): ByteArray = withContext(Dispatchers.IO) { store.read(id) }
 
     fun file(id: String) = store.file(id)
 
-    suspend fun delete(id: String) = withContext(Dispatchers.IO) {
+    /** Deletes a backup, and its file in the folder; returns what went wrong with the folder, if anything. */
+    suspend fun delete(id: String): String? = withContext(Dispatchers.IO) {
         files.withLock {
             val row = dao.get(id)?.toRecord()
             dao.delete(id)
@@ -209,6 +242,9 @@ class Library(
 
     fun spaceLeft(): Long = store.freeSpace()
 }
+
+/** A saved backup, and what went wrong copying it to the folder (null if nothing). */
+data class Saved(val record: BackupRecord, val copyError: String?)
 
 /** What restoring needs from a .pak (its description). */
 data class RestoredPak(

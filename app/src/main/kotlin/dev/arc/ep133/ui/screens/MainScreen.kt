@@ -150,7 +150,11 @@ fun MainScreen(
                 val totalSize = state.backups.sumOf { it.size }
                 val note = Strings.storageNote(state.backups.size, totalSize, state.spaceLeft)
                 if (note.isNotEmpty()) Text(note, style = ArcType.tiny, color = c.graphite)
-                if (state.backups.isNotEmpty()) Text(FeatureText.FOLDER_NOTE, style = ArcType.tiny, color = c.graphite)
+                if (state.backups.isNotEmpty()) {
+                    Text(FeatureText.FOLDER_NOTE, style = ArcType.tiny, color = c.graphite)
+                    // Until the folder is picked, a reinstalled arc can still bring older backups back.
+                    if (!state.folderPicked) ArcKey(FeatureText.RESTORE_FOLDER, onRestoreFolder, size = KeySize.Small, style = KeyStyle.Quiet)
+                }
             }
 
             // Addition to the web version: key combinations for the device.

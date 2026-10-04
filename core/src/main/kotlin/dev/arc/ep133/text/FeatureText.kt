@@ -211,6 +211,7 @@ object FeatureText {
     const val RESTORE_FOLDER = "Restore from Documents/arc"
     const val RESTORE_HINT = "Reinstalled arc? Pick the Documents/arc folder to bring your backups back."
     const val NOTHING_TO_RESTORE = "No backups found in that folder."
+    const val PICK_ARC_FOLDER = "That folder has no arc backups. Pick the arc folder inside Documents."
 
     fun restored(n: Int) = "Restored ${plural(n, "backup")}"
 

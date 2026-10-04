@@ -145,6 +145,8 @@ data class UiState(
     val search: SearchUi = SearchUi(),
     val pakCompare: PakCompareUi? = null,
     val mirror: MirrorUi? = null,
+    /** Whether the library folder has been picked (after a reinstall); until then restoring is offered. */
+    val folderPicked: Boolean = false,
 )
 
 /**
@@ -199,8 +201,9 @@ class ArcController(
         library.onExternalError = { msg -> scope.launch { toast(FeatureText.copyFailed(msg), error = true) } }
         scope.launch {
             runCatching { library.sweep() }
-            // A library from before the Documents/arc copy is copied there once.
-            runCatching { library.exportOnce() }
+            // Whatever is missing from Documents/arc (a library from before it, or a failed copy) goes there.
+            runCatching { library.reconcile() }
+            _state.update { it.copy(folderPicked = library.folderPicked) }
             // Backups saved before search existed get their sound names indexed once.
             _state.update { it.copy(search = it.search.copy(indexing = true)) }
             runCatching { library.indexMissing() }
@@ -360,8 +363,8 @@ class ArcController(
             )
         }
         if (saved != null) {
-            _state.update { it.copy(freshId = saved.id) }
-            toast(Strings.saved(saved.soundCount, saved.projectCount))
+            _state.update { it.copy(freshId = saved.record.id) }
+            toastSaved(Strings.saved(saved.record.soundCount, saved.record.projectCount), saved.copyError)
         }
         refreshAll(quiet = true) // refreshDevice().catch(() => {})
     }
@@ -744,6 +747,7 @@ class ArcController(
                 settings["mirror.learned"]?.let { putString("learned", it) }
                 settings["mirror.order"]?.let { putString("order", it) }
             }
+            _state.update { it.copy(folderPicked = library.folderPicked) }
             toast(if (n == 0) FeatureText.NOTHING_TO_RESTORE else FeatureText.restored(n))
         } catch (e: Throwable) {
             if (e is kotlinx.coroutines.CancellationException) throw e
@@ -849,8 +853,8 @@ class ArcController(
                 bytes,
                 d.soundNames,
             )
-            _state.update { it.copy(freshId = saved.id) }
-            toast(Strings.imported(saved.soundCount, saved.projectCount))
+            _state.update { it.copy(freshId = saved.record.id) }
+            toastSaved(Strings.imported(saved.record.soundCount, saved.record.projectCount), saved.copyError)
         } catch (e: Throwable) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             toast(Strings.importFailed(name, e.message ?: e.toString()), error = true)
@@ -867,13 +871,18 @@ class ArcController(
 
     /** Returns whether it worked; on failure the detail sheet stays open (as in the web version). */
     suspend fun delete(b: BackupRecord): Boolean = try {
-        library.delete(b.id)
-        toast(Strings.BACKUP_DELETED)
+        val copyError = library.delete(b.id)
+        toastSaved(Strings.BACKUP_DELETED, copyError)
         true
     } catch (e: Throwable) {
         if (e is kotlinx.coroutines.CancellationException) throw e
         toast(e.message ?: e.toString(), error = true)
         false
+    }
+
+    /** One toast for the result, so a failed copy to Documents/arc is not hidden behind it. */
+    private fun toastSaved(text: String, copyError: String?) {
+        if (copyError == null) toast(text) else toast(text + " " + FeatureText.copyFailed(copyError), error = true)
     }
 
     /** Import a document by URI. Runs in the app scope, so activity recreation cannot cut it short. */

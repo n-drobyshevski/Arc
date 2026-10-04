@@ -12,8 +12,10 @@ This is a port of the web version in [`reference/`](reference/), which is kept r
 - Share a backup through the Android share sheet, or save the `.pak` file anywhere with the system file picker
 - Import `.pak` backups made by the official Sample Tool, by the web version or by a friend, and open them by tapping a `.pak` in the Files app
 - **Survive reinstalling arc:** every backup is also written to **Documents/arc**, with a `library.json` that keeps titles, notes, dates and the live mirror's settings. Edits update the copy, and deleting a backup in arc deletes its file there too.
-  - After a reinstall, tap **Restore from Documents/arc** on the empty library. Android makes you pick the folder once; the picker opens there.
-  - A library from before this version is copied to the folder once, on first start.
+  - After a reinstall, tap **Restore from Documents/arc**: on the empty library, or under the list until the folder has been picked. Android makes you pick the folder once; the picker opens there.
+    - Only Documents/arc, or a folder that already holds arc backups, is taken as the library. Any other folder is refused.
+    - Backups already in arc are skipped.
+  - On every start, anything missing from the folder is copied there: a library from before this version, or a copy that failed earlier. A failed copy is reported with the result of the save or delete.
   - Google's automatic app backup is not used, because it is capped well below the size of one backup.
 - Keep running when the phone is locked: transfers run in a foreground service with a progress notification and a Cancel action
 
