@@ -14,7 +14,6 @@ import dev.arc.ep133.protocol.DeviceError
 import dev.arc.ep133.protocol.Fs
 import dev.arc.ep133.protocol.Session
 import dev.arc.ep133.protocol.checkAbort
-import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.json.JsonElement
 
 enum class SoundState {
@@ -104,8 +103,15 @@ object BackupDiff {
                 // for the settings the backup carries.
                 val frames = Math.floor(prepared.pcm.size / (2 * prepared.channels)).toLong()
                 val written = Device.soundMeta(prepared.channels, prepared.sampleRate, prepared.settings, frames)
-                val keys = Device.pickSoundSettings(prepared.settings).keys
-                val differ = keys.filter { k -> written[k] != null && !sameValue(written[k], meta[k]) }
+                // A restore writes defaults for settings the backup lacks (soundMeta), so
+                // every written setting counts. A key the device does not report can only
+                // be judged when the backup sets it explicitly.
+                val explicit = Device.pickSoundSettings(prepared.settings).keys
+                val differ = Device.SOUND_KEYS.filter { k ->
+                    val w = written[k] ?: return@filter false
+                    val d = meta[k]
+                    if (d == null) k in explicit else !sameValue(w, d)
+                }
                 sounds.add(SoundDiff(slot, snd.name, entry.name, state, differ))
             }
             done += 1024
@@ -120,9 +126,10 @@ object BackupDiff {
                 try {
                     Device.readProject(session, n, signal = signal)
                 } catch (e: DeviceError) {
+                    // Only while probing (the device lists no projects) does a failed
+                    // download mean "not there", as in the backup. Otherwise it is an error.
+                    if (deviceProjects.isNotEmpty()) throw e
                     null
-                } catch (e: CancellationException) {
-                    throw e
                 }
             } else {
                 null

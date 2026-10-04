@@ -81,8 +81,9 @@ fun DeviceScreen(
     val contents = b.contents
     var openSlot by rememberSaveable { mutableStateOf<Int?>(null) }
     var openProject by rememberSaveable { mutableStateOf<Int?>(null) }
-    // Read the contents when the screen opens.
-    LaunchedEffect(state.connected) { if (state.connected && contents == null) onRefresh() }
+    // Read the contents when the screen opens, and again once a reconnected device is ready.
+    val ready = state.device != null
+    LaunchedEffect(ready) { if (ready && contents == null) onRefresh() }
 
     Box(Modifier.fillMaxSize().background(c.shell), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
@@ -132,7 +133,7 @@ fun DeviceScreen(
             if (contents.sounds.isEmpty()) item { Text(FeatureText.NO_SOUNDS, style = ArcType.body15, color = c.graphite) }
             items(contents.sounds, key = { "s${it.slot}" }) { e ->
                 SoundRow(
-                    e, b, open = openSlot == e.slot,
+                    e, b, open = openSlot == e.slot, enabled = !state.busy,
                     onClick = {
                         openSlot = if (openSlot == e.slot) null else e.slot
                         if (openSlot == e.slot && !b.details.containsKey(e.slot)) onSoundDetails(e.slot)
@@ -144,7 +145,7 @@ fun DeviceScreen(
             if (contents.projects.isEmpty()) item { Text(FeatureText.NO_PROJECTS, style = ArcType.body15, color = c.graphite) }
             items(contents.projects, key = { "p${it.project}" }) { p ->
                 ProjectRow(
-                    p, b, open = openProject == p.project,
+                    p, b, open = openProject == p.project, enabled = !state.busy,
                     onClick = {
                         openProject = if (openProject == p.project) null else p.project
                         if (openProject == p.project && !b.projectSounds.containsKey(p.project)) onProjectSounds(p.project)
@@ -166,7 +167,7 @@ private fun SectionTitle(text: String, count: Int) {
 
 /** A pale key-coloured plate with a flat pressed tint, like the backup rows. */
 @Composable
-private fun Plate(onClick: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+private fun Plate(onClick: () -> Unit, enabled: Boolean, content: @Composable ColumnScope.() -> Unit) {
     val c = LocalArcColors.current
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
@@ -179,7 +180,8 @@ private fun Plate(onClick: () -> Unit, content: @Composable ColumnScope.() -> Un
             .clip(RoundedCornerShape(12.dp))
             .background(c.key)
             .background(if (pressed) c.keyEdge.copy(alpha = 0.25f) else Color.Transparent)
-            .clickable(interactionSource = source, indication = null, role = Role.Button, onClick = onClick)
+            // Not while the device is busy: the read it starts would be skipped.
+            .clickable(interactionSource = source, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
             .padding(vertical = 12.dp, horizontal = 14.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
         content = content,
@@ -187,9 +189,9 @@ private fun Plate(onClick: () -> Unit, content: @Composable ColumnScope.() -> Un
 }
 
 @Composable
-private fun SoundRow(e: SoundEntry, b: BrowserUi, open: Boolean, onClick: () -> Unit) {
+private fun SoundRow(e: SoundEntry, b: BrowserUi, open: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val c = LocalArcColors.current
-    Plate(onClick) {
+    Plate(onClick, enabled) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(FeatureText.slot(e.slot), style = ArcType.bold, color = c.graphite)
             OneLine(e.name, ArcType.bold, c.ink, Modifier.weight(1f))
@@ -225,9 +227,9 @@ private fun Details(d: SoundDetails) {
 }
 
 @Composable
-private fun ProjectRow(p: ProjectEntry, b: BrowserUi, open: Boolean, onClick: () -> Unit) {
+private fun ProjectRow(p: ProjectEntry, b: BrowserUi, open: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val c = LocalArcColors.current
-    Plate(onClick) {
+    Plate(onClick, enabled) {
         Text(Strings.projectLine(p.project), style = ArcType.bold, color = c.ink)
         if (open) {
             val slots = b.projectSounds[p.project]

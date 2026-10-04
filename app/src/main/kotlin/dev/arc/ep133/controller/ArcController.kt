@@ -262,7 +262,7 @@ class ArcController(
             _state.update { it.copy(freshId = saved.id) }
             toast(Strings.saved(saved.soundCount, saved.projectCount))
         }
-        runCatching { refreshDevice() }
+        refreshAll(quiet = true) // refreshDevice().catch(() => {})
     }
 
     fun restore(b: BackupRecord, sel: RestoreSelection): Job = scope.launch {
@@ -273,7 +273,7 @@ class ArcController(
             Backup.restorePak(s, pak, sel.slots, sel.projects, onProgress, signal)
         }
         if (done != null) toast(Strings.restored(done.sounds, done.projects))
-        runCatching { refreshDevice() }
+        refreshAll(quiet = true) // refreshDevice().catch(() => {})
     }
 
     // ---------- device browser, sample upload, compare (additions) ----------
@@ -282,7 +282,7 @@ class ArcController(
      * Runs a short device read that must not overlap a transfer (the device
      * handles one conversation at a time). Returns null if something else is busy.
      */
-    private suspend fun <T> exclusive(reading: String, block: suspend (Session) -> T): T? {
+    private suspend fun <T> exclusive(reading: String, quiet: Boolean = false, block: suspend (Session) -> T): T? {
         val s = session ?: return null
         if (_state.value.busy) return null
         _state.update { it.copy(busy = true, browser = it.browser.copy(reading = reading)) }
@@ -290,19 +290,37 @@ class ArcController(
             block(s)
         } catch (e: Throwable) {
             if (e is kotlinx.coroutines.CancellationException) throw e
-            toast(e.message ?: e.toString(), error = true)
+            if (!quiet) toast(e.message ?: e.toString(), error = true)
             null
         } finally {
             _state.update { it.copy(busy = false, browser = it.browser.copy(reading = null)) }
         }
     }
 
-    fun refreshBrowser(): Job = scope.launch {
-        val c = exclusive("contents") { DeviceBrowser.contents(it) } ?: return@launch
+    fun refreshBrowser(): Job = scope.launch { refreshAll(quiet = false) }
+
+    /**
+     * Reads storage, sounds and projects once and updates both the device
+     * panel and the browser. Runs inside the busy guard, so it never overlaps
+     * another device operation (the web version's refreshDevice after a task
+     * did not need this: it had no other screens that read the device).
+     */
+    private suspend fun refreshAll(quiet: Boolean) {
+        val c = exclusive("contents", quiet) { s ->
+            DeviceBrowser.contents(s).also { c ->
+                val info = s.info
+                if (session === s && info != null) {
+                    _state.update { it.copy(device = DeviceSummary(info, c.storage, c.sounds.size, c.projects.size)) }
+                }
+            }
+        } ?: return
         _state.update { st ->
-            // Details read earlier may be stale after a change; keep only slots still present.
-            val keep = c.occupiedSlots
-            st.copy(browser = st.browser.copy(contents = c, details = st.browser.details.filterKeys { it in keep }))
+            // Keep a slot's details only if the slot still holds the same sound;
+            // project contents may have changed with any restore, so read them again.
+            val before = st.browser.contents?.sounds?.associateBy { it.slot }.orEmpty()
+            val now = c.sounds.associateBy { it.slot }
+            val details = st.browser.details.filterKeys { slot -> now[slot] != null && now[slot] == before[slot] }
+            st.copy(browser = st.browser.copy(contents = c, details = details, projectSounds = emptyMap()))
         }
     }
 
@@ -357,8 +375,7 @@ class ArcController(
         _state.update { it.copy(browser = it.browser.copy(draft = null)) }
         val done = runTask(Strings.UPLOADING) { onProgress, signal -> SampleUpload.upload(s, items, onProgress, signal) }
         if (done != null) toast(Strings.uploaded(done.sounds))
-        runCatching { refreshDevice() }
-        refreshBrowser().join()
+        refreshAll(quiet = true)
     }
 
     /** Compares the backup with the device for this selection; the result shows in the restore sheet. */

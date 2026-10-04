@@ -241,6 +241,30 @@ class FeaturesTest {
     }
 
     @Test
+    fun `diff counts settings a restore would reset to defaults`() = runTest {
+        val src = device()
+        val pak = Paks.open(Backup.backupDevice(connect(src)).bytes)
+        val dst = device()
+        dst.sounds[1]!!.meta["sound.rootnote"] = JsJson.number(62) // backup has no rootnote: restore writes 60
+        val s = connect(dst)
+        val r = BackupDiff.compare(s, pak, projects = emptyList()).sounds.associateBy { it.slot }
+        assertEquals(listOf("sound.rootnote"), r[1]!!.settingsDiffer)
+        s.close()
+    }
+
+    @Test
+    fun `a failed project download is an error, not a missing project`() = runTest {
+        val src = device()
+        val pak = Paks.open(Backup.backupDevice(connect(src)).bytes)
+        val dst = device()
+        val s = connect(dst)
+        dst.emptyPages = 2
+        val e = assertThrows<dev.arc.ep133.protocol.DeviceError> { BackupDiff.compare(s, pak, slots = emptyList(), projects = listOf(1)) }
+        assertTrue(e.message!!.startsWith("Device stopped sending node 3000"), e.message)
+        s.close()
+    }
+
+    @Test
     fun `without a crc the diff falls back to size`() = runTest {
         val src = device()
         val pak = Paks.open(Backup.backupDevice(connect(src)).bytes)
