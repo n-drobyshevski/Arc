@@ -1,0 +1,215 @@
+package dev.arc.ep133.ui.screens
+
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.background
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import dev.arc.ep133.controller.TaskUi
+import dev.arc.ep133.text.BackupRecord
+import dev.arc.ep133.text.LibraryRules
+import dev.arc.ep133.text.RestoreSelection
+import dev.arc.ep133.text.Strings
+import dev.arc.ep133.ui.components.ArcField
+import dev.arc.ep133.ui.components.ArcKey
+import dev.arc.ep133.ui.components.ChoiceRow
+import dev.arc.ep133.ui.components.KeyStyle
+import dev.arc.ep133.ui.components.ProgressMeter
+import dev.arc.ep133.ui.theme.ArcType
+import dev.arc.ep133.ui.theme.LocalArcColors
+
+/** The two-column action grid of a sheet; signal and quiet keys span both columns. */
+@Composable
+private fun Actions(content: ActionsScope.() -> Unit) {
+    val scope = ActionsScope().apply(content)
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        var pending: (@Composable (Modifier) -> Unit)? = null
+        for ((wide, key) in scope.keys) {
+            if (wide) {
+                pending?.let { p -> Row(Modifier.fillMaxWidth()) { p(Modifier.weight(1f)) } }
+                pending = null
+                key(Modifier.fillMaxWidth())
+            } else if (pending == null) {
+                pending = key
+            } else {
+                val first = pending
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    first(Modifier.weight(1f))
+                    key(Modifier.weight(1f))
+                }
+                pending = null
+            }
+        }
+        pending?.let { p -> Row(Modifier.fillMaxWidth()) { p(Modifier.weight(1f)) } }
+    }
+}
+
+private class ActionsScope {
+    val keys = ArrayList<Pair<Boolean, @Composable (Modifier) -> Unit>>()
+    fun wide(k: @Composable (Modifier) -> Unit) = keys.add(true to k)
+    fun half(k: @Composable (Modifier) -> Unit) = keys.add(false to k)
+}
+
+/** The detail sheet's body (`#detail-sheet`). Title and notes are saved when the sheet closes. */
+@Composable
+fun ColumnScope.DetailSheetContent(
+    b: BackupRecord,
+    title: String,
+    onTitle: (String) -> Unit,
+    notes: String,
+    onNotes: (String) -> Unit,
+    madeText: String,
+    canRestore: Boolean,
+    connected: Boolean,
+    onRestore: () -> Unit,
+    onShare: () -> Unit,
+    onSave: () -> Unit,
+    onDelete: () -> Unit,
+    onDone: () -> Unit,
+) {
+    val c = LocalArcColors.current
+    ArcField(Strings.NAME, title, onTitle, maxLength = 80)
+    // Facts: a two-column definition list.
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        for ((k, v) in LibraryRules.facts(b, madeText)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(k, style = ArcType.body15, color = c.graphite, modifier = Modifier.width(76.dp))
+                Text(v, style = ArcType.body15.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold), color = c.ink, modifier = Modifier.weight(1f))
+            }
+        }
+    }
+    if (b.projects.isNotEmpty()) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            for (n in b.projects) {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(c.key)
+                        .padding(vertical = 10.dp, horizontal = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(Strings.projectLine(n), style = ArcType.body15.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = c.ink)
+                    Text(LibraryRules.projectSoundsDetail(b, n), style = ArcType.body15, color = c.graphite)
+                }
+            }
+        }
+    }
+    ArcField(Strings.NOTES, notes, onNotes, singleLine = false, minLines = 3, placeholder = Strings.NOTES_PLACEHOLDER)
+    Actions {
+        wide { m ->
+            ArcKey(
+                if (connected) Strings.RESTORE_TO_DEVICE else Strings.CONNECT_TO_RESTORE,
+                onRestore, m, style = KeyStyle.Signal, enabled = canRestore,
+            )
+        }
+        half { m -> ArcKey(Strings.SHARE, onShare, m) }
+        half { m -> ArcKey(Strings.SAVE_PAK, onSave, m) }
+        wide { m -> ArcKey(Strings.DELETE, onDelete, m, style = KeyStyle.Quiet, textColor = c.danger) }
+    }
+    Text(
+        Strings.DONE,
+        style = ArcType.bold,
+        color = c.graphite,
+        modifier = Modifier
+            .align(Alignment.CenterHorizontally)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(role = Role.Button, onClick = onDone)
+            .semantics { contentDescription = Strings.CLOSE }
+            .padding(vertical = 8.dp, horizontal = 16.dp),
+    )
+}
+
+@Composable
+fun DeleteDialog(title: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    val c = LocalArcColors.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = c.shell,
+        text = { Text(Strings.deleteConfirm(title), style = ArcType.body15, color = c.ink) },
+        confirmButton = { TextButton(onClick = onConfirm) { Text(Strings.DELETE, style = ArcType.bold, color = c.danger) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(Strings.CANCEL, style = ArcType.bold, color = c.graphite) } },
+    )
+}
+
+/** The restore sheet (`#restore-sheet`). */
+@Composable
+fun ColumnScope.RestoreSheetContent(b: BackupRecord, onRestore: (RestoreSelection) -> Unit, onCancel: () -> Unit) {
+    val c = LocalArcColors.current
+    var everything by rememberSaveable(b.id) { mutableStateOf(true) }
+    var other by rememberSaveable(b.id) { mutableStateOf(false) }
+    val picked = remember(b.id) { mutableStateListOf<Int>().apply { addAll(b.projects) } }
+    // Checked projects in display order.
+    val sel = LibraryRules.restoreSelection(b, everything, b.projects.filter { it in picked }, other)
+
+    Text(Strings.RESTORE_TO_DEVICE, style = ArcType.heading, color = c.ink)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        ChoiceRow(Strings.EVERYTHING, everything, { everything = true }, radio = true)
+        ChoiceRow(Strings.PICK_PROJECTS, !everything, { everything = false }, radio = true)
+    }
+    Column(
+        Modifier.padding(start = 4.dp).alpha(if (everything) 0.45f else 1f),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        for (n in b.projects) {
+            ChoiceRow(
+                Strings.projectLine(n),
+                n in picked,
+                { if (n in picked) picked.remove(n) else picked.add(n) },
+                radio = false,
+                enabled = !everything,
+                trailing = LibraryRules.projectSoundsRestore(b, n),
+            )
+        }
+        ChoiceRow(Strings.ALSO_OTHER_SOUNDS, other, { other = !other }, radio = false, enabled = !everything)
+    }
+    val warning = LibraryRules.restoreWarning(sel)
+    Text(warning, style = ArcType.small, color = c.graphite, modifier = Modifier.heightIn(min = 1.dp))
+    Actions {
+        wide { m -> ArcKey(LibraryRules.restoreButton(sel), { onRestore(sel) }, m, style = KeyStyle.Signal, enabled = LibraryRules.canRestore(sel)) }
+        wide { m -> ArcKey(Strings.CANCEL, onCancel, m, style = KeyStyle.Quiet) }
+    }
+}
+
+/** The progress sheet (`#progress-sheet`). It cannot be dismissed; Cancel stops after the current item. */
+@Composable
+fun ColumnScope.ProgressSheetContent(task: TaskUi, onCancel: () -> Unit) {
+    val c = LocalArcColors.current
+    Text(task.title, style = ArcType.heading, color = c.ink)
+    ProgressMeter(task.fraction)
+    Text(
+        task.label,
+        style = ArcType.bold,
+        color = c.ink,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.heightIn(min = 24.dp),
+    )
+    Text(Strings.KEEP_SCREEN_ON, style = ArcType.small, color = c.graphite)
+    ArcKey(Strings.CANCEL, onCancel, Modifier.fillMaxWidth(), style = KeyStyle.Quiet, enabled = !task.cancelling)
+}

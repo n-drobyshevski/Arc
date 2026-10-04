@@ -66,7 +66,7 @@ class MidiPartsTest {
 
     @Test
     fun `EP-133 port names`() {
-        for (n in listOf("EP-133", "EP133 MIDI", "ep 1320", "teenage engineering EP-40", "K.O. II", "KO II", "ko ii", "K.OII")) {
+        for (n in listOf("EP-133", "EP133 MIDI", "ep 1320", "teenage engineering EP-40", "K.O. II", "KO II", "ko\u00A0ii", "K.OII")) {
             assertTrue(PortMatch.matches(n), n)
         }
         for (n in listOf("OP-1", "EP-13", "Kontakt", "KoſII", null)) assertFalse(PortMatch.matches(n), n.toString())

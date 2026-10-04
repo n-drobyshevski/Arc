@@ -32,7 +32,7 @@ class JsJsonTest {
 
     @Test
     fun `Number of a string`() {
-        val ss = listOf("", "  12  ", "0x1f", "0X1F", "-0x10", "+0x10", "1e3", ".5", "5.", "Infinity", "-Infinity", "abc", "12abc", " 12﻿", "0b101", "0o17")
+        val ss = listOf("", "  12  ", "0x1f", "0X1F", "-0x10", "+0x10", "1e3", ".5", "5.", "Infinity", "-Infinity", "abc", "12abc", "\u00A012\uFEFF", "0b101", "0o17")
         val js = listOf(0.0, 12.0, 31.0, 31.0, Double.NaN, Double.NaN, 1000.0, 0.5, 5.0, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY,
             Double.NaN, Double.NaN, 12.0, 5.0, 15.0)
         assertEquals(js, ss.map(::jsStringToNumber))
