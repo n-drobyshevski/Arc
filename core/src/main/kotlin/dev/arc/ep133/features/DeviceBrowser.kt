@@ -21,6 +21,8 @@ data class DeviceContents(val storage: Storage, val sounds: List<SoundEntry>, va
 }
 
 /** One sound's metadata as the device reports it. */
+data class ProjectLayout(val slots: List<Int>, val pads: List<PadGroup>)
+
 data class SoundDetails(
     val slot: Int,
     val name: String,
@@ -64,5 +66,11 @@ object DeviceBrowser {
      * so it takes a few seconds; the transfer is followed by the usual handshake.
      */
     suspend fun projectSounds(session: Session, project: Int, signal: CancelSignal? = null): List<Int> =
-        Tar.slotsUsedByProject(Device.readProject(session, project, signal = signal))
+        projectLayout(session, project, signal).slots
+
+    /** The sounds a project uses and its pads, from one download. */
+    suspend fun projectLayout(session: Session, project: Int, signal: CancelSignal? = null): ProjectLayout {
+        val tar = Device.readProject(session, project, signal = signal)
+        return ProjectLayout(Tar.slotsUsedByProject(tar), ProjectPads.read(tar))
+    }
 }

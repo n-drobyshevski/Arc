@@ -60,6 +60,8 @@ data class BrowserUi(
     val contents: DeviceContents? = null,
     val details: Map<Int, SoundDetails> = emptyMap(),
     val projectSounds: Map<Int, List<Int>> = emptyMap(),
+    /** Pads of the projects whose sounds were read (same download). */
+    val projectPads: Map<Int, List<dev.arc.ep133.features.PadGroup>> = emptyMap(),
     /** What is being read right now: "contents", "slot:N" or "project:N". */
     val reading: String? = null,
     /** WAV files picked for upload, waiting for their slots to be confirmed. */
@@ -344,7 +346,7 @@ class ArcController(
             val before = st.browser.contents?.sounds?.associateBy { it.slot }.orEmpty()
             val now = c.sounds.associateBy { it.slot }
             val details = st.browser.details.filterKeys { slot -> now[slot] != null && now[slot] == before[slot] }
-            st.copy(browser = st.browser.copy(contents = c, details = details, projectSounds = emptyMap()))
+            st.copy(browser = st.browser.copy(contents = c, details = details, projectSounds = emptyMap(), projectPads = emptyMap()))
         }
     }
 
@@ -354,8 +356,15 @@ class ArcController(
     }
 
     fun loadProjectSounds(project: Int): Job = scope.launch {
-        val slots = exclusive("project:$project") { DeviceBrowser.projectSounds(it, project) } ?: return@launch
-        _state.update { it.copy(browser = it.browser.copy(projectSounds = it.browser.projectSounds + (project to slots))) }
+        val layout = exclusive("project:$project") { DeviceBrowser.projectLayout(it, project) } ?: return@launch
+        _state.update {
+            it.copy(
+                browser = it.browser.copy(
+                    projectSounds = it.browser.projectSounds + (project to layout.slots),
+                    projectPads = it.browser.projectPads + (project to layout.pads),
+                ),
+            )
+        }
     }
 
     /** Reads picked files and proposes a free slot for each. */

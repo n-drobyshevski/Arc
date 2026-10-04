@@ -34,6 +34,7 @@ import dev.arc.ep133.backup.PakSound
 import dev.arc.ep133.controller.ArcController
 import dev.arc.ep133.files.Files
 import dev.arc.ep133.text.BackupRecord
+import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.text.LibraryRules
 import dev.arc.ep133.text.Strings
 import dev.arc.ep133.ui.components.ArcSheet
@@ -41,6 +42,7 @@ import dev.arc.ep133.ui.components.ArcToast
 import dev.arc.ep133.ui.screens.ContentsScreen
 import dev.arc.ep133.ui.screens.DebugScreen
 import dev.arc.ep133.ui.screens.GuideScreen
+import dev.arc.ep133.ui.screens.PadsSheetContent
 import dev.arc.ep133.ui.screens.DeviceScreen
 import dev.arc.ep133.ui.screens.TRIM_PLAY_KEY
 import dev.arc.ep133.ui.screens.TrimSheetContent
@@ -271,6 +273,8 @@ class MainActivity : ComponentActivity() {
         var debug by rememberSaveable { mutableStateOf(false) }
         var browse by rememberSaveable { mutableStateOf(false) }
         var guide by rememberSaveable { mutableStateOf(false) }
+        // The pad sheet: "backup:<id>:<project>" or "device:<project>".
+        var padsFor by rememberSaveable { mutableStateOf<String?>(null) }
         var contentsId by rememberSaveable { mutableStateOf<String?>(null) }
         // The upload draft row being trimmed; the trim view replaces the upload sheet's content.
         var trimIndex by rememberSaveable { mutableStateOf<Int?>(null) }
@@ -323,9 +327,32 @@ class MainActivity : ComponentActivity() {
                     onSaveProject = { saveProject(contentsBackup, it) },
                     onBack = {
                         contentsId = null
+                        padsFor = null
                         controller.closeContents()
                     },
+                    onPads = { n -> padsFor = "backup:${contentsBackup.id}:$n" },
                 )
+                val pak = state.contents?.takeIf { it.backupId == contentsBackup.id }?.pak
+                val padsProject = padsFor?.takeIf { it.startsWith("backup:${contentsBackup.id}:") }?.substringAfterLast(':')?.toIntOrNull()
+                val tar = padsProject?.let { pak?.projects?.get(it) }
+                val groups = remember(tar) { tar?.let { dev.arc.ep133.features.ProjectPads.read(it) } }
+                val lastPads = remember { mutableStateOf<Pair<Int, List<dev.arc.ep133.features.PadGroup>>?>(null) }
+                    .apply { if (padsProject != null && groups != null) value = padsProject to groups }.value
+                val playingPrefix = "backup:${contentsBackup.id}:"
+                ArcSheet(visible = groups != null, onDismiss = { padsFor = null }) {
+                    lastPads?.let { (n, g) ->
+                        PadsSheetContent(
+                            title = FeatureText.padsTitle(n),
+                            groups = g,
+                            nameOf = { slot -> pak?.sounds?.get(slot)?.name },
+                            playingSlot = playing?.takeIf { it.startsWith(playingPrefix) }?.removePrefix(playingPrefix)?.toIntOrNull(),
+                            onPad = { slot ->
+                                if (playing == playingPrefix + slot) controller.stopPlayback() else controller.playBackupSound(slot)
+                            },
+                            onDone = { padsFor = null },
+                        )
+                    }
+                }
             } else if (browse) {
                 DeviceScreen(
                     state = state,
@@ -335,8 +362,10 @@ class MainActivity : ComponentActivity() {
                     onAddSamples = { samplesLauncher.launch(arrayOf("audio/*", "application/octet-stream")) },
                     onBack = {
                         browse = false
+                        padsFor = null
                         controller.stopPlayback()
                     },
+                    onPads = { n -> padsFor = "device:$n" },
                     playing = playing,
                     onPlay = { controller.playDeviceSound(it) },
                     onStop = controller::stopPlayback,
@@ -348,6 +377,23 @@ class MainActivity : ComponentActivity() {
                     if (draft == null) {
                         trimIndex = null
                         if (controller.player.playing.value == TRIM_PLAY_KEY) controller.stopPlayback()
+                    }
+                }
+                val devicePadsProject = padsFor?.takeIf { it.startsWith("device:") }?.removePrefix("device:")?.toIntOrNull()
+                val deviceGroups = devicePadsProject?.let { state.browser.projectPads[it] }
+                val lastDevicePads = remember { mutableStateOf<Pair<Int, List<dev.arc.ep133.features.PadGroup>>?>(null) }
+                    .apply { if (devicePadsProject != null && deviceGroups != null) value = devicePadsProject to deviceGroups }.value
+                ArcSheet(visible = deviceGroups != null, onDismiss = { padsFor = null }) {
+                    lastDevicePads?.let { (n, g) ->
+                        val names = state.browser.contents?.sounds?.associate { it.slot to it.name } ?: emptyMap()
+                        PadsSheetContent(
+                            title = FeatureText.padsTitle(n),
+                            groups = g,
+                            nameOf = { names[it] },
+                            playingSlot = null,
+                            onPad = null,
+                            onDone = { padsFor = null },
+                        )
                     }
                 }
                 fun closeTrim() {
