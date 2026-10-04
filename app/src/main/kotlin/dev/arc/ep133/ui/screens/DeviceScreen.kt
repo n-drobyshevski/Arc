@@ -157,7 +157,7 @@ fun DeviceScreen(
 }
 
 @Composable
-private fun SectionTitle(text: String, count: Int) {
+internal fun SectionTitle(text: String, count: Int) {
     val c = LocalArcColors.current
     Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.Bottom) {
         Text(text, style = ArcType.heading, color = c.ink, modifier = Modifier.weight(1f))
@@ -167,7 +167,7 @@ private fun SectionTitle(text: String, count: Int) {
 
 /** A pale key-coloured plate with a flat pressed tint, like the backup rows. */
 @Composable
-private fun Plate(onClick: () -> Unit, enabled: Boolean, content: @Composable ColumnScope.() -> Unit) {
+internal fun Plate(onClick: () -> Unit, enabled: Boolean, content: @Composable ColumnScope.() -> Unit) {
     val c = LocalArcColors.current
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()

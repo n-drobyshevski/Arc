@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,6 +29,8 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import dev.arc.ep133.backup.PakExport
+import dev.arc.ep133.backup.PakSound
 import dev.arc.ep133.controller.ArcController
 import dev.arc.ep133.files.Files
 import dev.arc.ep133.text.BackupRecord
@@ -35,6 +38,7 @@ import dev.arc.ep133.text.LibraryRules
 import dev.arc.ep133.text.Strings
 import dev.arc.ep133.ui.components.ArcSheet
 import dev.arc.ep133.ui.components.ArcToast
+import dev.arc.ep133.ui.screens.ContentsScreen
 import dev.arc.ep133.ui.screens.DebugScreen
 import dev.arc.ep133.ui.screens.DeviceScreen
 import dev.arc.ep133.ui.screens.UploadSheetContent
@@ -55,7 +59,8 @@ class MainActivity : ComponentActivity() {
     private val controller: ArcController get() = (application as ArcApp).controller
 
     /**
-     * What the open save picker is for: "pak:<id>" or "log". Kept in the saved
+     * What the open save picker is for: "pak:<id>", "wav:<id>:<slot>",
+     * "project:<id>:<n>" or "log". Kept in the saved
      * state, because the result can reach a recreated activity; the bytes are
      * read again then.
      */
@@ -72,6 +77,10 @@ class MainActivity : ComponentActivity() {
 
     // application/octet-stream: with application/zip some providers append ".zip" to "x.pak".
     private val savePakLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        writePending(uri)
+    }
+
+    private val saveWavLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("audio/wav")) { uri ->
         writePending(uri)
     }
 
@@ -93,6 +102,12 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleIntent(intent)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Nothing keeps playing in the background.
+        controller.stopPlayback()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -122,6 +137,12 @@ class MainActivity : ComponentActivity() {
                         val b = controller.state.value.backups.firstOrNull { it.id == what.removePrefix("pak:") }
                             ?: throw java.io.IOException(Strings.FILE_MISSING)
                         controller.pakBytes(b)
+                    }
+                    // "wav:<id>:<slot>" / "project:<id>:<n>": ids are UUIDs, so the last ':' splits.
+                    what != null && (what.startsWith("wav:") || what.startsWith("project:")) -> {
+                        val kind = what.substringBefore(':')
+                        val rest = what.substringAfter(':')
+                        controller.exportBytes(rest.substringBeforeLast(':'), kind + ":" + rest.substringAfterLast(':'))
                     }
                     else -> throw java.io.IOException(Strings.SAVE_FAILED)
                 }
@@ -158,18 +179,47 @@ class MainActivity : ComponentActivity() {
         savePakLauncher.launch(LibraryRules.fileNameFor(b.title))
     }
 
-    private fun sharePak(b: BackupRecord) {
+    private fun sharePak(b: BackupRecord) =
+        shareBytes(LibraryRules.fileNameFor(b.title), "application/zip", b.title) { controller.pakBytes(b) }
+
+    /** Shares [read]'s bytes as a file named [name] through the system share sheet. */
+    private fun shareBytes(name: String, mime: String, title: String, read: suspend () -> ByteArray) {
         lifecycleScope.launch {
             try {
-                val bytes = controller.pakBytes(b)
-                val uri = withContext(Dispatchers.IO) { Files.shareableUri(this@MainActivity, LibraryRules.fileNameFor(b.title), bytes) }
-                Files.share(this@MainActivity, uri, "application/zip", b.title, Strings.SHARE_TITLE_PREFIX + b.title)
+                val bytes = read()
+                val uri = withContext(Dispatchers.IO) { Files.shareableUri(this@MainActivity, name, bytes) }
+                Files.share(this@MainActivity, uri, mime, title, Strings.SHARE_TITLE_PREFIX + title)
             } catch (e: java.io.IOException) {
                 controller.toast(if (e.message == "no app to share with") Strings.SHARE_FAILED else e.message ?: Strings.SHARE_FAILED, error = true)
             } catch (e: SecurityException) {
                 controller.toast(Strings.SHARE_FAILED, error = true)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // A damaged backup (PakError and the like) while exporting a piece of it.
+                controller.toast(e.message ?: e.toString(), error = true)
             }
         }
+    }
+
+    private fun shareWav(b: BackupRecord, snd: PakSound) {
+        val name = PakExport.soundFileName(snd)
+        shareBytes(name, "audio/wav", name) { controller.exportBytes(b.id, "wav:${snd.slot}") }
+    }
+
+    private fun saveWav(b: BackupRecord, snd: PakSound) {
+        pendingSave = "wav:${b.id}:${snd.slot}"
+        saveWavLauncher.launch(PakExport.soundFileName(snd))
+    }
+
+    private fun shareProject(b: BackupRecord, n: Int) {
+        val name = PakExport.projectFileName(LibraryRules.fileNameFor(b.title), n)
+        shareBytes(name, "application/zip", name) { controller.exportBytes(b.id, "project:$n") }
+    }
+
+    private fun saveProject(b: BackupRecord, n: Int) {
+        pendingSave = "project:${b.id}:$n"
+        savePakLauncher.launch(PakExport.projectFileName(LibraryRules.fileNameFor(b.title), n))
     }
 
     private fun logText(): String = controller.trafficLog.export(
@@ -217,6 +267,7 @@ class MainActivity : ComponentActivity() {
         val state by controller.state.collectAsStateWithLifecycle()
         var debug by rememberSaveable { mutableStateOf(false) }
         var browse by rememberSaveable { mutableStateOf(false) }
+        var contentsId by rememberSaveable { mutableStateOf<String?>(null) }
         var detailId by rememberSaveable { mutableStateOf<String?>(null) }
         var restoreId by rememberSaveable { mutableStateOf<String?>(null) }
         var confirmDelete by rememberSaveable { mutableStateOf(false) }
@@ -243,9 +294,30 @@ class MainActivity : ComponentActivity() {
             detailId = null
         }
 
+        val contentsBackup = state.backups.firstOrNull { it.id == contentsId }
+        // After a recreation (or process death) the opened backup has to be read again.
+        LaunchedEffect(contentsBackup?.id) { contentsBackup?.let { controller.openContents(it) } }
+        val playing by controller.player.playing.collectAsStateWithLifecycle()
+
         Box(Modifier.fillMaxSize()) {
             if (debug) {
                 DebugScreen(controller.trafficLog, ::shareLog, ::saveLog, ::copyLog) { debug = false }
+            } else if (contentsBackup != null) {
+                ContentsScreen(
+                    b = contentsBackup,
+                    contents = state.contents?.takeIf { it.backupId == contentsBackup.id },
+                    playing = playing,
+                    onPlay = { controller.playBackupSound(it) },
+                    onStop = controller::stopPlayback,
+                    onShareWav = { shareWav(contentsBackup, it) },
+                    onSaveWav = { saveWav(contentsBackup, it) },
+                    onShareProject = { shareProject(contentsBackup, it) },
+                    onSaveProject = { saveProject(contentsBackup, it) },
+                    onBack = {
+                        contentsId = null
+                        controller.closeContents()
+                    },
+                )
             } else if (browse) {
                 DeviceScreen(
                     state = state,
@@ -310,6 +382,10 @@ class MainActivity : ComponentActivity() {
                         },
                         onShare = { sharePak(b) },
                         onSave = { savePak(b) },
+                        onContents = {
+                            closeDetail(save = true)
+                            contentsId = b.id
+                        },
                         onDelete = { confirmDelete = true },
                         onDone = { closeDetail(save = true) },
                     )
