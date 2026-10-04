@@ -1,0 +1,510 @@
+package dev.arc.ep133.ui.components
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.RadioButtonDefaults
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.PathOperation
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import dev.arc.ep133.ui.theme.ArcType
+import dev.arc.ep133.ui.theme.LocalArcColors
+import kotlinx.coroutines.delay
+import kotlin.math.floor
+import kotlin.math.max
+
+enum class KeyStyle { Normal, Signal, Quiet }
+
+enum class KeySize { Normal, Small, Wide }
+
+private val KeyEasing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
+
+/**
+ * A physical key: pale (or orange) top with a 3dp bottom edge that the key
+ * travels down onto while pressed (`.key` in styles.css).
+ */
+@Composable
+fun ArcKey(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    style: KeyStyle = KeyStyle.Normal,
+    size: KeySize = KeySize.Normal,
+    enabled: Boolean = true,
+    textColor: Color? = null,
+) {
+    val c = LocalArcColors.current
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val press by animateFloatAsState(
+        targetValue = if (pressed && enabled && style != KeyStyle.Quiet) 1f else 0f,
+        animationSpec = tween(60, easing = KeyEasing),
+        label = "key",
+    )
+    val (bg, fg, edge) = when (style) {
+        KeyStyle.Normal -> Triple(c.key, c.ink, c.keyEdge)
+        KeyStyle.Signal -> Triple(c.signal, c.onSignal, c.signalEdge)
+        KeyStyle.Quiet -> Triple(Color.Transparent, c.graphite, Color.Transparent)
+    }
+    val (minH, padV, padH, ts) = when (size) {
+        KeySize.Normal -> KeyDims(48.dp, 15.dp, 18.dp, ArcType.key)
+        KeySize.Small -> KeyDims(40.dp, 10.dp, 14.dp, ArcType.keySmall)
+        KeySize.Wide -> KeyDims(60.dp, 15.dp, 18.dp, ArcType.keyWide)
+    }
+    val shape = RoundedCornerShape(12.dp)
+    val alpha = if (enabled) 1f else 0.45f
+    Box(
+        modifier = modifier
+            .graphicsLayer { translationY = press * 3.dp.toPx() }
+            .drawBehind {
+                // box-shadow: 0 3px 0 edge. Only the strip below the face is drawn,
+                // outside the faded layer, so a disabled key keeps its (faded) edge.
+                if (style != KeyStyle.Quiet) {
+                    val edgePx = (1f - press) * 3.dp.toPx()
+                    if (edgePx > 0f) {
+                        val r = CornerRadius(12.dp.toPx())
+                        val face = Path().apply { addRoundRect(RoundRect(0f, 0f, this@drawBehind.size.width, this@drawBehind.size.height, r)) }
+                        val below = Path().apply { addRoundRect(RoundRect(0f, edgePx, this@drawBehind.size.width, this@drawBehind.size.height + edgePx, r)) }
+                        drawPath(Path().apply { op(below, face, PathOperation.Difference) }, edge.copy(alpha = edge.alpha * alpha))
+                    }
+                }
+            }
+            // opacity: .45 fades the face and label together
+            .graphicsLayer { this.alpha = alpha }
+            .clip(shape)
+            .background(bg)
+            .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
+            .heightIn(min = minH)
+            .padding(vertical = padV, horizontal = padH),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text, style = ts, color = textColor ?: fg, maxLines = 2, textAlign = TextAlign.Center)
+    }
+}
+
+private data class KeyDims(val minH: Dp, val padV: Dp, val padH: Dp, val style: TextStyle)
+
+/** "arc" followed by the orange dot. Long-press opens the hidden debug screen. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun Wordmark(onLongPress: () -> Unit) {
+    val c = LocalArcColors.current
+    val onePx = with(LocalDensity.current) { 1.dp.roundToPx() }
+    Row(
+        modifier = Modifier.combinedClickable(
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+            onClick = {},
+            onLongClick = onLongPress,
+        ),
+    ) {
+        Text("arc", style = ArcType.wordmark, color = c.ink, modifier = Modifier.alignByBaseline())
+        // ::after { 9px dot, margin-left 3px, vertical-align: 1px } (its bottom sits 1px above the baseline)
+        Box(
+            Modifier
+                .alignBy { it.measuredHeight + onePx }
+                .padding(start = 3.dp)
+                .size(9.dp)
+                .clip(CircleShape)
+                .background(c.signal),
+        )
+    }
+}
+
+/** The dark display panel: the one loud element on the page. */
+@Composable
+fun DisplayPanel(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    val c = LocalArcColors.current
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .drawBehind {
+                val r = CornerRadius(18.dp.toPx())
+                // 0 1px 0 rgba(255,255,255,.5) below the panel
+                drawRoundRect(Color.White.copy(alpha = 0.5f), topLeft = Offset(0f, 1.dp.toPx()), size = size, cornerRadius = r)
+                drawRoundRect(c.display, size = size, cornerRadius = r)
+            }
+            .drawWithContent {
+                drawContent()
+                // inset 0 2px 0 rgba(0,0,0,.35): a band along the top inner edge
+                val r = CornerRadius(18.dp.toPx())
+                val outer = Path().apply { addRoundRect(androidx.compose.ui.geometry.RoundRect(0f, 0f, size.width, size.height, r)) }
+                val inner = Path().apply { addRoundRect(androidx.compose.ui.geometry.RoundRect(0f, 2.dp.toPx(), size.width, size.height + 2.dp.toPx(), r)) }
+                val band = Path().apply { op(outer, inner, PathOperation.Difference) }
+                drawPath(band, Color.Black.copy(alpha = 0.35f))
+            }
+            .semantics { liveRegion = LiveRegionMode.Polite }
+            .padding(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+        content = content,
+    )
+}
+
+/**
+ * The 24-segment meter (renderMeter in app.js). With [tipHot] only the last lit
+ * segment is orange (progress); otherwise everything lit turns orange once the
+ * fraction reaches [hotAbove] (storage nearly full).
+ */
+@Composable
+fun Meter(
+    fraction: Double,
+    modifier: Modifier = Modifier,
+    segments: Int = 24,
+    hotAbove: Double = 0.9,
+    tipHot: Boolean = false,
+    height: Dp = 22.dp,
+) {
+    val c = LocalArcColors.current
+    val f = fraction.coerceIn(0.0, 1.0)
+    val lit = if (f > 0) max(1, floor(f * segments + 0.5).toInt()) else 0
+    Row(modifier.fillMaxWidth().height(height), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+        for (i in 0 until segments) {
+            val color = when {
+                i >= lit -> c.segmentOff
+                tipHot -> if (i == lit - 1) c.signal else c.displayInk
+                fraction >= hotAbove -> c.signal
+                else -> c.displayInk
+            }
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(color),
+            )
+        }
+    }
+}
+
+/** The progress meter: tip-hot segments in a small display-coloured box. */
+@Composable
+fun ProgressMeter(fraction: Double) {
+    val c = LocalArcColors.current
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(44.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(c.display)
+            .padding(10.dp)
+            .semantics { progressBarRangeInfo = ProgressBarRangeInfo(fraction.toFloat().coerceIn(0f, 1f), 0f..1f) },
+    ) {
+        Meter(fraction, tipHot = true, height = 24.dp)
+    }
+}
+
+private val SheetEasing = CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f)
+
+/**
+ * A bottom sheet over a scrim (the web version's <dialog class="sheet">).
+ * [onDismiss] null makes it modal: no scrim tap, no back (the progress sheet).
+ */
+@Composable
+fun ArcSheet(visible: Boolean, onDismiss: (() -> Unit)?, grip: Boolean = true, content: @Composable ColumnScope.() -> Unit) {
+    val c = LocalArcColors.current
+    BackHandler(enabled = visible) { onDismiss?.invoke() }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val wide = maxWidth >= 640.dp
+        val screenHeight = maxHeight
+        val rise = with(LocalDensity.current) { 40.dp.roundToPx() }
+        AnimatedVisibility(visible, enter = fadeIn(tween(220)), exit = ExitTransition.None) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(c.scrim)
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onDismiss?.invoke() },
+            )
+        }
+        // @keyframes rise: from translateY(40px) and opacity 0, 220ms; dialog.close() has no animation.
+        // On wide screens (min-width: 640px) the sheet is a centred dialog.
+        AnimatedVisibility(
+            visible,
+            modifier = Modifier.align(if (wide) Alignment.Center else Alignment.BottomCenter),
+            enter = slideInVertically(tween(220, easing = SheetEasing)) { rise } + fadeIn(tween(220, easing = SheetEasing)),
+            exit = ExitTransition.None,
+        ) {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
+                val shape = if (wide) RoundedCornerShape(24.dp) else RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+                Column(
+                    Modifier
+                        .widthIn(max = 560.dp)
+                        .fillMaxWidth()
+                        .heightIn(max = screenHeight * 0.92f)
+                        .clip(shape)
+                        .background(c.shell)
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+                        .imePadding()
+                        .verticalScroll(rememberScrollState())
+                        .windowInsetsPadding(WindowInsets.navigationBars)
+                        .padding(start = 18.dp, end = 18.dp, top = if (grip) 10.dp else 22.dp, bottom = 22.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    if (grip) {
+                        Box(
+                            Modifier
+                                .align(Alignment.CenterHorizontally)
+                                .size(40.dp, 5.dp)
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(c.keyEdge),
+                        )
+                    }
+                    content()
+                }
+            }
+        }
+    }
+}
+
+/** A toast at the bottom of the screen; errors get an orange left border and stay longer. */
+@Composable
+fun ArcToast(id: Long?, text: String, error: Boolean, onTimeout: (Long) -> Unit, modifier: Modifier = Modifier) {
+    val c = LocalArcColors.current
+    var shown by remember { mutableStateOf<Triple<Long, String, Boolean>?>(null) }
+    LaunchedEffect(id) {
+        if (id != null) {
+            shown = Triple(id, text, error)
+            delay(if (error) 7000 else 3200)
+            onTimeout(id)
+        }
+    }
+    AnimatedVisibility(id != null, modifier = modifier, enter = fadeIn(), exit = fadeOut()) {
+        val s = shown ?: return@AnimatedVisibility
+        Row(
+            Modifier
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(16.dp)
+                .widthIn(max = 528.dp)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(c.display)
+                .height(androidx.compose.foundation.layout.IntrinsicSize.Min)
+                .semantics { liveRegion = LiveRegionMode.Polite },
+        ) {
+            // .toast.error { border-left: 5px solid var(--signal) }
+            if (s.third) Box(Modifier.width(5.dp).fillMaxHeight().background(c.signal))
+            Text(
+                s.second,
+                style = ArcType.body15.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                color = c.displayInk,
+                modifier = Modifier.padding(vertical = 14.dp, horizontal = 16.dp),
+            )
+        }
+    }
+}
+
+/** A labelled text field (`.field` in styles.css). */
+@Composable
+fun ArcField(
+    label: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    singleLine: Boolean = true,
+    minLines: Int = 1,
+    placeholder: String = "",
+    maxLength: Int = Int.MAX_VALUE,
+) {
+    val c = LocalArcColors.current
+    val source = remember { MutableInteractionSource() }
+    val focused by source.collectIsFocusedAsState()
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, style = ArcType.fieldLabel, color = c.graphite)
+        val style = (if (singleLine) ArcType.fieldInput else ArcType.notesInput).copy(color = c.ink)
+        BasicTextField(
+            value = value,
+            onValueChange = { onValueChange(it.take(maxLength)) },
+            singleLine = singleLine,
+            minLines = minLines,
+            textStyle = style,
+            cursorBrush = SolidColor(c.signal),
+            keyboardOptions = KeyboardOptions(imeAction = if (singleLine) ImeAction.Done else ImeAction.Default),
+            interactionSource = source,
+            modifier = Modifier
+                .fillMaxWidth()
+                .drawBehind {
+                    // :focus-visible { outline: 3px solid signal; outline-offset: 2px }
+                    if (focused) {
+                        val o = 2.dp.toPx() + 1.5.dp.toPx()
+                        drawRoundRect(
+                            c.signal,
+                            topLeft = Offset(-o, -o),
+                            size = androidx.compose.ui.geometry.Size(size.width + 2 * o, size.height + 2 * o),
+                            cornerRadius = CornerRadius(10.dp.toPx() + o),
+                            style = Stroke(3.dp.toPx()),
+                        )
+                    }
+                }
+                .clip(RoundedCornerShape(10.dp))
+                .background(c.key)
+                .drawBehind {
+                    // inset 0 2px 0 key-edge at 60%
+                    drawRect(c.keyEdge.copy(alpha = 0.6f), size = androidx.compose.ui.geometry.Size(size.width, 2.dp.toPx()))
+                },
+            decorationBox = { inner ->
+                Box(Modifier.padding(vertical = 12.dp, horizontal = 14.dp)) {
+                    if (value.isEmpty() && placeholder.isNotEmpty()) Text(placeholder, style = style.copy(color = c.graphite))
+                    inner()
+                }
+            },
+        )
+    }
+}
+
+/** A radio or checkbox row on a pale key-coloured plate (`.radio` / `.check`). */
+@Composable
+fun ChoiceRow(
+    text: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    radio: Boolean,
+    enabled: Boolean = true,
+    trailing: String? = null,
+) {
+    val c = LocalArcColors.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(c.key)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null, // .radio / .check have no press styling
+                enabled = enabled,
+                role = if (radio) Role.RadioButton else Role.Checkbox,
+                onClick = onClick,
+            )
+            .padding(vertical = 12.dp, horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides 0.dp) {
+            if (radio) {
+                RadioButton(
+                    selected = selected, onClick = null, enabled = enabled, modifier = Modifier.size(20.dp),
+                    colors = RadioButtonDefaults.colors(selectedColor = c.signal, unselectedColor = c.graphite, disabledSelectedColor = c.signal, disabledUnselectedColor = c.graphite),
+                )
+            } else {
+                Checkbox(
+                    checked = selected, onCheckedChange = null, enabled = enabled, modifier = Modifier.size(20.dp),
+                    colors = CheckboxDefaults.colors(checkedColor = c.signal, uncheckedColor = c.graphite, checkmarkColor = c.onSignal, disabledCheckedColor = c.signal, disabledUncheckedColor = c.graphite),
+                )
+            }
+        }
+        Text(text, style = ArcType.semi, color = c.ink, modifier = Modifier.weight(1f))
+        if (trailing != null) Text(trailing, style = ArcType.small, color = c.graphite)
+    }
+}
+
+/** The dashed "No backups yet." box. */
+@Composable
+fun DashedBox(content: @Composable ColumnScope.() -> Unit) {
+    val c = LocalArcColors.current
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .drawBehind {
+                val w = 2.dp.toPx()
+                drawRoundRect(
+                    c.keyEdge,
+                    topLeft = Offset(w / 2, w / 2),
+                    size = androidx.compose.ui.geometry.Size(size.width - w, size.height - w),
+                    cornerRadius = CornerRadius(12.dp.toPx()),
+                    style = Stroke(width = w, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 6.dp.toPx()))),
+                )
+            }
+            .padding(vertical = 22.dp, horizontal = 18.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+        content = content,
+    )
+}
+
+/** Text with a one-line ellipsis. */
+@Composable
+fun OneLine(text: String, style: TextStyle, color: Color, modifier: Modifier = Modifier) {
+    Text(text, style = style, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = modifier)
+}
+
+@Composable
+fun Gap(h: Dp) = Spacer(Modifier.height(h))
+
+/** contentDescription helper for decorative groups. */
+fun Modifier.describe(text: String): Modifier = if (text.isEmpty()) this else semantics { contentDescription = text }

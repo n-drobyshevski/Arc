@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="shell">#DEDCD6</color>
+    <style name="Theme.Arc" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/shell</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>
