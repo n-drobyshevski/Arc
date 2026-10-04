@@ -120,13 +120,15 @@ fun ColumnScope.TrimSheetContent(
     )
     Text(FeatureText.selection(startS, endS), style = ArcType.small, color = c.graphite)
     val empty = end - start < 1
+    // The phone plays mono or stereo at 4 to 192 kHz; other files can still be trimmed and uploaded.
+    val playable = dev.arc.ep133.audio.SoundPlayer.canPlay(w.channels, rate)
     Row(Modifier.fillMaxWidth().padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         val isPlaying = playing == TRIM_PLAY_KEY
         ArcKey(
             if (isPlaying) FeatureText.STOP else FeatureText.PLAY_SELECTION,
             { if (isPlaying) onStop() else onPlay(SampleTrim.cut(w.pcm, w.channels, start, end), w.channels, rate.toInt()) },
             Modifier.weight(1f),
-            enabled = isPlaying || !empty,
+            enabled = isPlaying || (!empty && playable),
         )
         ArcKey(
             FeatureText.RESET,

@@ -29,17 +29,19 @@ object SampleTrim {
 
     /**
      * Loop points are frame positions, so they move with the start of the
-     * trim and are clamped into the trimmed length. Other settings are kept.
+     * trim and are clamped into the trimmed length. A loop start past the end
+     * (or a loop end before the start) means the loop was trimmed away; like
+     * device.js's out-of-range rule, that point then falls back to the whole
+     * sample (0 or the last frame) instead of collapsing to one frame.
+     * Other settings are kept.
      */
     fun shiftLoops(settings: JsonObject, start: Int, length: Int): JsonObject {
         val out = LinkedHashMap<String, JsonElement>(settings)
-        for (key in listOf("sound.loopstart", "sound.loopend")) {
-            val v = settings[key]
-            if (v != null && v.isJsNumber) {
-                val shifted = (v.numberOrNull!! - start).coerceIn(0.0, max(0, length - 1).toDouble())
-                out[key] = JsJson.number(shifted)
-            }
-        }
+        val last = max(0, length - 1).toDouble()
+        val ls = settings["sound.loopstart"]?.takeIf { it.isJsNumber }?.numberOrNull?.minus(start)
+        val le = settings["sound.loopend"]?.takeIf { it.isJsNumber }?.numberOrNull?.minus(start)
+        if (ls != null) out["sound.loopstart"] = JsJson.number((if (ls > last) 0.0 else ls).coerceIn(0.0, last))
+        if (le != null) out["sound.loopend"] = JsJson.number((if (le < 0) last else le).coerceIn(0.0, last))
         return JsonObject(out)
     }
 

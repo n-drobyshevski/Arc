@@ -109,8 +109,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        // Nothing keeps playing in the background.
-        controller.stopPlayback()
+        // Nothing keeps playing in the background (a rotation is not leaving the app).
+        if (!isChangingConfigurations) controller.stopPlayback()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -365,7 +365,7 @@ class MainActivity : ComponentActivity() {
                         TrimSheetContent(
                             item = trimming,
                             playing = playing,
-                            onPlay = { pcm, ch, rate -> controller.player.play(TRIM_PLAY_KEY, pcm, ch, rate) },
+                            onPlay = { pcm, ch, rate -> controller.playNow(TRIM_PLAY_KEY, pcm, ch, rate) },
                             onStop = controller::stopPlayback,
                             onDone = { range ->
                                 controller.setDraftTrim(trimIndex!!, range)

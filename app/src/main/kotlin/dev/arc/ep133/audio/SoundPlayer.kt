@@ -12,6 +12,11 @@ import kotlinx.coroutines.flow.StateFlow
  * playing, so lists can show a Stop key on the right row.
  */
 class SoundPlayer {
+    companion object {
+        /** What [play] accepts; anything else is not played. */
+        fun canPlay(channels: Int, sampleRate: Long) = channels in 1..2 && sampleRate in 4000L..192000L
+    }
+
     private var track: AudioTrack? = null
     private val _playing = MutableStateFlow<String?>(null)
     val playing: StateFlow<String?> = _playing
@@ -19,7 +24,7 @@ class SoundPlayer {
     @Synchronized
     fun play(key: String, pcm: ByteArray, channels: Int, sampleRate: Int) {
         stop()
-        if (pcm.isEmpty() || channels !in 1..2 || sampleRate !in 4000..192000) return
+        if (pcm.isEmpty() || !canPlay(channels, sampleRate.toLong())) return
         val frames = pcm.size / (2 * channels)
         val t = AudioTrack.Builder()
             .setAudioAttributes(

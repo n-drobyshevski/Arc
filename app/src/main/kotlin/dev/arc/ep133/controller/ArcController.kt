@@ -189,6 +189,7 @@ class ArcController(
         session?.close()
         session = null
         openDeviceId = null
+        playToken++ // a device sound still downloading must not start after the device is gone
         if (player.playing.value?.startsWith("device:") == true) player.stop()
         _state.update { it.copy(connected = false, device = null, browser = BrowserUi(), diff = null) }
         if (message != null) toast(message, error = true)
@@ -393,10 +394,21 @@ class ArcController(
         }
     }
 
+    /**
+     * Bumped by every play request and every stop. A request that took a while
+     * (a download, a decode) plays only if nothing stopped or replaced it
+     * meanwhile, so leaving a screen or the app can't start a sound later.
+     * Only touched from [scope], which runs on the main thread.
+     */
+    private var playToken = 0L
+
     /** Downloads a sound from the device and plays it (an addition to the web version). */
     fun playDeviceSound(slot: Int): Job = scope.launch {
+        val token = ++playToken
         val d = _state.value.browser.details[slot] ?: return@launch
+        // Not cancelled on stop: an interrupted download would leave the session out of step.
         val pcm = exclusive("play:$slot") { s -> dev.arc.ep133.protocol.Fs.download(s, slot) } ?: return@launch
+        if (token != playToken) return@launch
         player.play("device:$slot", pcm, d.channels.toInt(), d.sampleRate.toInt())
     }
 
@@ -431,16 +443,18 @@ class ArcController(
     }
 
     fun closeContents() {
-        player.stop()
+        stopPlayback()
         _state.update { it.copy(contents = null) }
     }
 
     /** Plays a sound from an opened backup; no device needed. */
     fun playBackupSound(slot: Int): Job = scope.launch {
+        val token = ++playToken
         val c = _state.value.contents ?: return@launch
         val snd = c.pak?.sounds?.get(slot) ?: return@launch
         try {
             val w = withContext(Dispatchers.Default) { Wav.decode(snd.wav) }
+            if (token != playToken || _state.value.contents?.backupId != c.backupId) return@launch
             player.play("backup:${c.backupId}:$slot", w.pcm, w.channels, w.sampleRate.toInt())
         } catch (e: Throwable) {
             if (e is kotlinx.coroutines.CancellationException) throw e
@@ -448,7 +462,16 @@ class ArcController(
         }
     }
 
-    fun stopPlayback() = player.stop()
+    fun stopPlayback() {
+        playToken++
+        player.stop()
+    }
+
+    /** Plays PCM that is already in memory (the trim preview). */
+    fun playNow(key: String, pcm: ByteArray, channels: Int, sampleRate: Int) {
+        playToken++
+        player.play(key, pcm, channels, sampleRate)
+    }
 
     /** The bytes to export: a sound's WAV, or a project as a .pak. */
     suspend fun exportBytes(backupId: String, what: String): ByteArray {

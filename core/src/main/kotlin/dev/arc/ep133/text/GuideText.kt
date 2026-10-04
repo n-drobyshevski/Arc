@@ -478,7 +478,7 @@ object GuideText {
                     "When you step sequence, this combo stores the fader position on the current step. The value stays (latches) and does not spring back.",
                 ),
                 GuideEntry(
-                    "Make finer adjustments: the fader moves in smaller increments, and the X/KNOB Ys respond more slowly",
+                    "Make finer adjustments: the fader moves in smaller increments, and KNOB X and KNOB Y respond more slowly",
                     "Hold SHIFT + move FADER (or turn KNOB X / KNOB Y)",
                     "https://teenage.engineering/guides/ep-133/play-and-record#9.4-fader",
                 ),
@@ -611,7 +611,7 @@ object GuideText {
                     "Format the internal drive: a full wipe, and also the fix for file-system error codes",
                     "With the unit off, hold SHIFT + ERASE and switch it on",
                     "https://teenage.engineering/guides/ep-133/erase-drive",
-                    "This removes all user work and all factory sounds, and the factory sounds cannot be recovered. FMT shows for about 10 seconds, then the unit starts up empty. This is the fix for error codes E.05, E.10, E.11 and E.12 and says to update to the latest OS afterwards. Don't confuse it with SHIFT + ERASE while the unit is running, which only opens system settings.",
+                    "This removes all user work and all factory sounds, and the factory sounds cannot be recovered. FMT shows for about 10 seconds, then the unit starts up empty. This is the fix for error codes E.05, E.10, E.11 and E.12; update to the latest OS afterwards. Don't confuse it with SHIFT + ERASE while the unit is running, which only opens system settings.",
                 ),
                 GuideEntry(
                     "Switch on, and the ways to power the unit",
@@ -623,7 +623,7 @@ object GuideText {
                     "Update the firmware (OS)",
                     "No button combo: connect over USB-C and use teenage engineering's web update utility (teenage.engineering/apps/update)",
                     "https://teenage.engineering/guides/ep-133/power-on",
-                    "There is no button combo at power-up for updating. Back up first, then use the official updater over USB-C.",
+                    "The guide documents no button combo at power-up for updating; the power-on page points to the official update utility, used over USB-C.",
                 ),
                 GuideEntry(
                     "Play the pads from a USB or TRS MIDI keyboard",

@@ -54,6 +54,14 @@ class TrimExportTest {
     }
 
     @Test
+    fun `a loop trimmed away falls back to the whole sample`() {
+        val late = JsJson.parse("""{"sound.loopstart":40000,"sound.loopend":44099}""") as JsonObject
+        assertEquals("""{"sound.loopstart":0,"sound.loopend":19999}""", JsJson.stringify(SampleTrim.shiftLoops(late, 0, 20000)))
+        val early = JsJson.parse("""{"sound.loopstart":10,"sound.loopend":99}""") as JsonObject
+        assertEquals("""{"sound.loopstart":0,"sound.loopend":899}""", JsJson.stringify(SampleTrim.shiftLoops(early, 100, 900)))
+    }
+
+    @Test
     fun `peaks follow the signal`() {
         val pcm = s16(0, 0, 32767, -32768, 0, 0, 16384, 0)
         val p = SampleTrim.peaks(pcm, 1, 2)

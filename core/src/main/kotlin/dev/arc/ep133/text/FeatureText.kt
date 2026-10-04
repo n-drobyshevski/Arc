@@ -125,8 +125,11 @@ object FeatureText {
     const val EXPORT_HINT = "A project is shared as its own .pak with the sounds it uses."
 
     /** "1.5 s" or "850 ms" */
-    fun duration(seconds: Double): String =
-        if (seconds < 1) "${dev.arc.ep133.util.jsRound(seconds * 1000).toLong()} ms" else "${dev.arc.ep133.util.jsToFixed(seconds, 1)} s"
+    fun duration(seconds: Double): String {
+        // The unit follows the rounded value, so 0.9996 s reads "1.0 s", not "1000 ms".
+        val ms = dev.arc.ep133.util.jsRound(seconds * 1000)
+        return if (ms < 1000) "${ms.toLong()} ms" else "${dev.arc.ep133.util.jsToFixed(seconds, 1)} s"
+    }
 
     // ---------- trim ----------
     const val TRIM = "Trim"
