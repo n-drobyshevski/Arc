@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>arc for EP-133 K.O. II</title>
+  <meta name="description" content="Free backup librarian for the EP-133 K.O. II. Back up, restore and share your projects and samples over USB-C.">
+  <meta name="theme-color" content="#DEDCD6" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#1C1D1E" media="(prefers-color-scheme: dark)">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="top">
+      <h1 class="wordmark">arc</h1>
+      <button class="key key-small" id="connect" type="button">Connect</button>
+    </header>
+
+    <section class="display" id="display" aria-live="polite">
+      <div class="display-head">
+        <span id="d-title">No device</span>
+        <span id="d-sub" class="display-sub"></span>
+      </div>
+      <div class="meter" id="meter" aria-hidden="true"></div>
+      <div class="display-stats" id="d-stats">
+        <p class="display-hint" id="d-hint">Plug in the EP-133 with a USB-C cable and turn it on, then tap Connect.</p>
+      </div>
+    </section>
+
+    <button class="key key-signal key-wide" id="backup" type="button" disabled>Back up device</button>
+
+    <section class="library">
+      <div class="library-head">
+        <h2>Backups</h2>
+        <label class="key key-small" for="import-file">Import .pak</label>
+        <input type="file" id="import-file" accept=".pak,.zip,application/zip" hidden>
+      </div>
+      <ul class="backups" id="backups"></ul>
+      <div class="empty" id="empty" hidden>
+        <p>No backups yet.</p>
+        <p class="muted">Connect your EP-133 and back it up, or import a .pak file from the official Sample Tool or a friend.</p>
+      </div>
+      <p class="storage-note muted" id="storage-note"></p>
+    </section>
+
+    <footer class="foot muted">
+      <p>Free and open source. Not affiliated with teenage engineering.</p>
+    </footer>
+  </div>
+
+  <dialog class="sheet" id="detail-sheet">
+    <form method="dialog" class="sheet-body" id="detail-form">
+      <div class="sheet-grip" aria-hidden="true" tabindex="-1" autofocus></div>
+      <label class="field">
+        <span>Name</span>
+        <input id="detail-title" maxlength="80" autocomplete="off">
+      </label>
+      <dl class="facts" id="detail-facts"></dl>
+      <div class="projects" id="detail-projects"></div>
+      <label class="field">
+        <span>Notes</span>
+        <textarea id="detail-notes" rows="3" placeholder="What's in this backup?"></textarea>
+      </label>
+      <div class="actions">
+        <button class="key key-signal" type="button" id="detail-restore">Restore to device</button>
+        <button class="key" type="button" id="detail-share">Share</button>
+        <button class="key" type="button" id="detail-download">Save .pak file</button>
+        <button class="key key-quiet" type="button" id="detail-delete">Delete</button>
+      </div>
+      <button class="sheet-close" value="close" aria-label="Close">Done</button>
+    </form>
+  </dialog>
+
+  <dialog class="sheet" id="restore-sheet">
+    <form method="dialog" class="sheet-body" id="restore-form">
+      <div class="sheet-grip" aria-hidden="true" tabindex="-1" autofocus></div>
+      <h3 class="sheet-title">Restore to device</h3>
+      <div class="choice">
+        <label class="radio"><input type="radio" name="scope" value="all" checked> <span>Everything in this backup</span></label>
+        <label class="radio"><input type="radio" name="scope" value="pick"> <span>Pick projects</span></label>
+      </div>
+      <fieldset class="pick" id="restore-pick" disabled>
+        <div id="restore-projects"></div>
+        <label class="check"><input type="checkbox" id="restore-other"> <span>Also restore sounds no picked project uses</span></label>
+      </fieldset>
+      <p class="warning" id="restore-warning"></p>
+      <div class="actions">
+        <button class="key key-signal" type="button" id="restore-go">Restore</button>
+        <button class="key key-quiet" value="cancel">Cancel</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="sheet sheet-progress" id="progress-sheet">
+    <div class="sheet-body">
+      <h3 class="sheet-title" id="progress-title">Backing up</h3>
+      <div class="meter meter-progress" id="progress-meter" role="progressbar" aria-valuemin="0" aria-valuemax="100"></div>
+      <p class="progress-label" id="progress-label"></p>
+      <p class="muted progress-hint">Keep the screen on and the cable plugged in.</p>
+      <div class="actions">
+        <button class="key key-quiet" type="button" id="progress-cancel">Cancel</button>
+      </div>
+    </div>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>
