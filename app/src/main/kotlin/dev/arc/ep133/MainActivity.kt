@@ -36,6 +36,8 @@ import dev.arc.ep133.text.Strings
 import dev.arc.ep133.ui.components.ArcSheet
 import dev.arc.ep133.ui.components.ArcToast
 import dev.arc.ep133.ui.screens.DebugScreen
+import dev.arc.ep133.ui.screens.DeviceScreen
+import dev.arc.ep133.ui.screens.UploadSheetContent
 import dev.arc.ep133.ui.screens.DeleteDialog
 import dev.arc.ep133.ui.screens.DetailSheetContent
 import dev.arc.ep133.ui.screens.MainScreen
@@ -58,6 +60,11 @@ class MainActivity : ComponentActivity() {
      * read again then.
      */
     private var pendingSave: String? = null
+
+    // Sample upload: pick one or more audio files (only WAV can be read; others are flagged).
+    private val samplesLauncher = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        controller.pickForUpload(uris)
+    }
 
     private val importLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) controller.importUri(uri)
@@ -209,6 +216,7 @@ class MainActivity : ComponentActivity() {
     private fun Root() {
         val state by controller.state.collectAsStateWithLifecycle()
         var debug by rememberSaveable { mutableStateOf(false) }
+        var browse by rememberSaveable { mutableStateOf(false) }
         var detailId by rememberSaveable { mutableStateOf<String?>(null) }
         var restoreId by rememberSaveable { mutableStateOf<String?>(null) }
         var confirmDelete by rememberSaveable { mutableStateOf(false) }
@@ -238,6 +246,34 @@ class MainActivity : ComponentActivity() {
         Box(Modifier.fillMaxSize()) {
             if (debug) {
                 DebugScreen(controller.trafficLog, ::shareLog, ::saveLog, ::copyLog) { debug = false }
+            } else if (browse) {
+                DeviceScreen(
+                    state = state,
+                    onRefresh = { controller.refreshBrowser() },
+                    onSoundDetails = { controller.loadSoundDetails(it) },
+                    onProjectSounds = { controller.loadProjectSounds(it) },
+                    onAddSamples = { samplesLauncher.launch(arrayOf("audio/*", "application/octet-stream")) },
+                    onBack = { browse = false },
+                )
+                val draft = state.browser.draft
+                val lastDraft = remember { mutableStateOf(draft) }.apply { if (draft != null) value = draft }.value
+                ArcSheet(visible = draft != null, onDismiss = { controller.dropDraft() }) {
+                    lastDraft?.let { d ->
+                        UploadSheetContent(
+                            draft = d,
+                            occupied = state.browser.contents?.sounds?.associate { it.slot to it.name } ?: emptyMap(),
+                            busy = state.busy,
+                            onSlot = controller::setDraftSlot,
+                            onUpload = { withNotifications { controller.uploadDraft() } },
+                            onCancel = { controller.dropDraft() },
+                        )
+                    }
+                }
+                val task = state.task
+                val lastTask = remember { mutableStateOf(task) }.apply { if (task != null) value = task }.value
+                ArcSheet(visible = task != null, onDismiss = null, grip = false) {
+                    lastTask?.let { ProgressSheetContent(it, onCancel = controller::cancelTask) }
+                }
             } else {
                 MainScreen(
                     state = state,
@@ -251,6 +287,10 @@ class MainActivity : ComponentActivity() {
                         detailId = b.id
                     },
                     onDebug = { debug = true },
+                    onBrowse = {
+                        browse = true
+                        controller.refreshBrowser()
+                    },
                 )
 
                 ArcSheet(visible = detail != null, onDismiss = { closeDetail(save = true) }) {
@@ -275,15 +315,22 @@ class MainActivity : ComponentActivity() {
                     )
                 }
 
-                ArcSheet(visible = restore != null, onDismiss = { restoreId = null }) {
+                fun closeRestore() {
+                    restoreId = null
+                    controller.clearDiff()
+                }
+                ArcSheet(visible = restore != null, onDismiss = { closeRestore() }) {
                     val b = shownRestore ?: return@ArcSheet
                     RestoreSheetContent(
                         b = b,
                         onRestore = { sel ->
-                            restoreId = null
+                            closeRestore()
                             withNotifications { controller.restore(b, sel) }
                         },
-                        onCancel = { restoreId = null },
+                        onCancel = { closeRestore() },
+                        diff = state.diff,
+                        canCompare = state.device != null && !state.busy,
+                        onCompare = { sel -> controller.compare(b, sel) },
                     )
                 }
 

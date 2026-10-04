@@ -33,7 +33,11 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.arc.ep133.controller.DiffUi
 import dev.arc.ep133.controller.TaskUi
+import dev.arc.ep133.features.DiffResult
+import dev.arc.ep133.features.ProjectState
+import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.text.BackupRecord
 import dev.arc.ep133.text.LibraryRules
 import dev.arc.ep133.text.RestoreSelection
@@ -166,7 +170,14 @@ fun DeleteDialog(title: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
 
 /** The restore sheet (`#restore-sheet`). */
 @Composable
-fun ColumnScope.RestoreSheetContent(b: BackupRecord, onRestore: (RestoreSelection) -> Unit, onCancel: () -> Unit) {
+fun ColumnScope.RestoreSheetContent(
+    b: BackupRecord,
+    onRestore: (RestoreSelection) -> Unit,
+    onCancel: () -> Unit,
+    diff: DiffUi? = null,
+    canCompare: Boolean = false,
+    onCompare: (RestoreSelection) -> Unit = {},
+) {
     val c = LocalArcColors.current
     var everything by rememberSaveable(b.id) { mutableStateOf(true) }
     var other by rememberSaveable(b.id) { mutableStateOf(false) }
@@ -202,9 +213,45 @@ fun ColumnScope.RestoreSheetContent(b: BackupRecord, onRestore: (RestoreSelectio
     val warning = LibraryRules.restoreWarning(sel)
     // An empty <p> takes no height.
     if (warning.isNotEmpty()) Text(warning, style = ArcType.small, color = c.graphite) else Spacer(Modifier)
+    // Addition to the web version: what this restore would change on the device.
+    // A result only shows while it matches the current selection.
+    val shown = diff?.takeIf { it.backupId == b.id && it.selection == sel }
+    if (shown != null) DiffResultView(shown.result)
     Actions {
         wide { m -> ArcKey(LibraryRules.restoreButton(sel), { onRestore(sel) }, m, style = KeyStyle.Signal, enabled = LibraryRules.canRestore(sel)) }
+        if (canCompare && shown == null) {
+            wide { m -> ArcKey(FeatureText.COMPARE, { onCompare(sel) }, m, enabled = LibraryRules.canRestore(sel)) }
+        }
         wide { m -> ArcKey(Strings.CANCEL, onCancel, m, style = KeyStyle.Quiet) }
+    }
+}
+
+@Composable
+private fun DiffResultView(r: DiffResult) {
+    val c = LocalArcColors.current
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(c.key)
+            .padding(vertical = 12.dp, horizontal = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(FeatureText.diffSummary(r), style = ArcType.semi, color = c.ink)
+        for (d in r.sounds.filter { !it.unchanged }) {
+            Column {
+                Text("Sound ${FeatureText.slot(d.slot)}, ${d.backupName}", style = ArcType.small.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = c.ink)
+                Text(FeatureText.soundState(d), style = ArcType.small, color = c.graphite)
+            }
+        }
+        for (p in r.projects.filter { it.state != ProjectState.SAME }) {
+            Column {
+                Text(Strings.projectLine(p.project), style = ArcType.small.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = c.ink)
+                Text(FeatureText.projectState(p.state), style = ArcType.small, color = c.graphite)
+            }
+        }
+        val untouched = FeatureText.untouched(r)
+        if (untouched.isNotEmpty()) Text(untouched, style = ArcType.small, color = c.graphite)
     }
 }
 

@@ -13,6 +13,11 @@ This is a port of the web version in [`reference/`](reference/), which is kept r
 - Import `.pak` backups made by the official Sample Tool, by the web version or by a friend, and open them by tapping a `.pak` in the Files app
 - Keep running when the phone is locked: transfers run in a foreground service with a progress notification and a Cancel action
 
+These go beyond the web version:
+- **Browse the device:** see every sound slot (name, size, and on tap its channels, sample rate, settings and checksum), every project and which sounds it uses, and the free space. Tap **Browse** next to Connect.
+- **Add samples:** pick WAV files on the phone and load them into sample slots. Each file gets the next free slot, which you can change; an occupied slot is replaced. Uploads take exactly the restore path, so they get the same free-space check, resampling above 46875 Hz, checksum verification and Cancel.
+- **Compare with device:** in the restore sheet, see what a restore would change before running it: which sounds differ, are missing or have other settings, which projects differ, and what on the device the restore leaves alone. Nothing is written.
+
 Backups use the same layout as the official Sample Tool's `.pak`: a zip with `/meta.json`, `/sounds/NNN name.wav` and `/projects/PNN.tar`. On top of that, an `arc.json` file keeps per-sound settings like play mode, pitch and envelope.
 
 A hidden debug screen (long-press the **arc** wordmark) shows every SysEx message sent and received, and can share, save or copy the log as a text file.
@@ -71,6 +76,7 @@ core/   pure Kotlin/JVM, no Android imports, runs in plain JUnit
   protocol/  packed7, frame, session, fs, device (the SysEx protocol), SysEx reassembly, port matching, traffic log
   formats/   zip, wav, tar, crc32, and JsJson (JSON.parse / JSON.stringify with JavaScript's exact output)
   backup/    backup, restore and the .pak layout
+  features/  device browser, sample upload and backup comparison (additions to the web version)
   text/      every interface string and the small library/restore rules from app.js
 app/    Android: MIDI transport, foreground service, Room library, files and sharing, Compose UI
 reference/   the web version (read only)
@@ -110,6 +116,7 @@ The behaviours above are commented where they happen in the code. The same goes 
 - **Hangs become errors:** two inputs that make the JS hang now fail with an error instead. These are a crafted `.pak` whose tar has a negative size, and a WAV with 0 channels.
 - **No stale ack handlers:** when an upload fails, its pending ack handlers are dropped, so they can never catch a later reply after the request id wraps.
 - **Different error wording for damaged zip data:** the browser's own wording can't be reproduced.
+- **New features:** the device browser, sample upload and compare screens have no web equivalent, so their wording is new. They use only commands the web version already uses (LIST, metadata get, file download, and the restore path for uploads).
 
 ## Tests
 
@@ -130,6 +137,7 @@ The behaviours above are commented where they happen in the code. The same goes 
   - Restores the JS fixture into the simulator.
 - **Quirks:** each protocol behaviour listed above, the id wrap, the 16-frame window limit, probing, and timing on virtual time.
 - **JavaScript semantics:** `JSON.stringify` output, number formatting, `toFixed`, `Number()` and the WAV, tar and resample arithmetic. The expected values were produced by running the reference under Node.
+- **Added features:** the device listing and project-sound lookup, uploads into free and occupied slots (including resampling, embedded settings, refusal when full and cancel), and every comparison outcome, including a device that reports no checksum.
 - **Other units:** interface text and restore-selection rules, SysEx reassembly (a reply split at every byte offset), port-name matching, the log export, and the Room converters.
 
 ## Status: what is verified and what still needs a real device
@@ -141,7 +149,7 @@ Verified here, on the JVM:
 
 Not verified yet. Nobody has run this on a phone or an EP-133:
 - **USB MIDI on a real phone.** Discovery and the port names Android reports for the EP-133. Whether 16 back-to-back 510-byte upload frames survive the USB link. How Android splits incoming SysEx. Detach during a transfer.
-- **The real device's answers** to everything the simulator only imitates, for example whether it acks upload chunks, metadata paging, crc reporting and the active-project switch.
+- **The real device's answers** to everything the simulator only imitates, for example whether it acks upload chunks, metadata paging, crc reporting and the active-project switch. Compare depends on the device reporting a checksum; without one it can only compare sizes, and says so.
 - **The app UI on screen.** It was built and linted, but never launched: this environment has no emulator (no KVM).
 - **Platform behaviour:**
   - the foreground service and notification on Android 14–16
@@ -159,6 +167,8 @@ Back up the EP-133 with the official Sample Tool first. Then, with the debug scr
 4. Restore a single project with its sounds, then the whole backup. Try **Cancel** during a restore.
 5. Unplug the cable during a transfer. You should see an error, and the app should recover after you plug it back in.
 6. Open a `.pak` from the Files app, and import one made by the official Sample Tool.
+7. Tap **Browse**: check the slots, a sound's details and a project's sounds against the device. Add a WAV into a free slot and play it on the device.
+8. In the restore sheet, tap **Compare with device** right after a backup: it should report no changes. Change a sound on the device and compare again.
 
 If anything fails, export the SysEx log from the debug screen (**Share log** or **Save log**) and attach it to an issue together with the error text.
 

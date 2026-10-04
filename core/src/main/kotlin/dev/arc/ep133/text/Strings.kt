@@ -93,4 +93,7 @@ object Strings {
     const val DEBUG_COPIED = "Log copied."
     const val DEBUG_COPY_TRUNCATED = "(older messages left out; use Save log or Share log for the full log)"
     const val SAVE_FAILED = "The file could not be saved. Try again."
+    const val UPLOADING = FeatureText.UPLOADING
+    const val COMPARING = FeatureText.COMPARING
+    fun uploaded(n: Int) = FeatureText.uploaded(n)
 }
