@@ -68,6 +68,8 @@ class MockEP133(
     var echoPagesBigEndian = false
     /** How many of the next sound uploads should report a wrong crc. */
     var corruptCrcUploads = 0
+    /** Whether sound metadata includes a crc (real firmware is not confirmed to report one). */
+    var reportCrc = true
     /** Ignore everything (to provoke timeouts). */
     var silent = false
     /** List /projects as empty (some firmware does), so the backup has to probe. */
@@ -96,7 +98,7 @@ class MockEP133(
             corruptCrcUploads--
             crc = crc xor 1
         }
-        m["crc"] = JsJson.number(crc)
+        if (reportCrc) m["crc"] = JsJson.number(crc)
         // Map.set on an existing slot keeps its position, like the JS Map.
         sounds[slot] = Sound(name, pcm, m)
     }
