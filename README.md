@@ -35,6 +35,17 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 
 Install the debug APK with `adb install app/build/outputs/apk/debug/app-debug.apk`, or open the project in Android Studio.
 
+### Get a test build
+
+Every pull request and every push to `main` runs [`.github/workflows/android.yml`](.github/workflows/android.yml). It runs the tests, then lint, then builds the debug APK.
+
+To install that build:
+1. Open the latest run under the repository's **Actions** tab.
+2. Download the `arc-debug-apk` artifact and unzip it.
+3. Install `app-debug.apk`, either with `adb install -r app-debug.apk` or by opening the file on the phone and allowing installs from that source.
+
+Each CI run signs the APK with its own throwaway debug key. Android refuses to install a newer build over an older one, so uninstall arc first. That deletes the backups stored in the app, so share or save the ones you want to keep beforehand.
+
 The tests read `reference/test/fixtures/sample.pak` in place, so keep `reference/` next to the modules.
 
 ### Versions
