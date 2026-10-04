@@ -191,8 +191,9 @@ class ArcController(
             null
         } finally {
             abortCurrent = null
+            // The service stops itself when it sees the task end. Stopping it from
+            // here could beat its startForeground() call, which Android punishes.
             _state.update { it.copy(busy = false, task = null) }
-            context.stopService(Intent(context, TransferService::class.java))
         }
     }
 
