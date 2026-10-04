@@ -414,6 +414,11 @@ class MainActivity : ComponentActivity() {
                 }
                 val devicePadsProject = padsFor?.takeIf { it.startsWith("device:") }?.removePrefix("device:")?.toIntOrNull()
                 val deviceGroups = devicePadsProject?.let { state.browser.projectPads[it] }
+                // A disconnect, refresh or process death drops the pads; forget the request then,
+                // or the sheet would pop up by itself when the project is read again. (The Pads
+                // key only shows once the pads are there, so a fresh tap never lands here.)
+                val devicePadsGone = devicePadsProject != null && deviceGroups == null
+                LaunchedEffect(devicePadsGone) { if (devicePadsGone) padsFor = null }
                 val lastDevicePads = remember { mutableStateOf<Pair<Int, List<dev.arc.ep133.features.PadGroup>>?>(null) }
                     .apply { if (devicePadsProject != null && deviceGroups != null) value = devicePadsProject to deviceGroups }.value
                 ArcSheet(visible = deviceGroups != null, onDismiss = { padsFor = null }) {

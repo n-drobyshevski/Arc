@@ -154,7 +154,7 @@ The behaviours above are commented where they happen in the code. The same goes 
   - every comparison outcome, including a device that reports no checksum
   - the shortcut guide data: every entry links to the official guide, reads as plain text, and no combination is listed twice
   - pad layouts: they agree with the slots each fixture project uses, and follow the same matching rules for odd entries
-  - comparing two backups: added, removed, renamed, audio and settings changes, the same audio in another WAV header, settings missing on one side, and project pad changes
+  - comparing two backups: added, removed, renamed, audio and settings changes (including settings embedded in the WAV, as the Sample Tool writes them), the same audio in another WAV header, settings missing on one side, and project pad changes in group order
   - sound search: every word must match, case is ignored, results follow the library order
 - **The database upgrade:** the version 2 schema Room exports must equal version 1 plus exactly the two search tables, created with Room's own SQL. Room's own migration test needs a device, so this checks the exported schemas instead.
 - **Other units:** interface text and restore-selection rules, SysEx reassembly (a reply split at every byte offset), port-name matching, the log export, and the Room converters.

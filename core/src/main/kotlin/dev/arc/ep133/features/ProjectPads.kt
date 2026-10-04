@@ -15,6 +15,10 @@ data class PadGroup(val name: String, val pads: Map<Int, Int?>)
 object ProjectPads {
     private val GROUP_ORDER = listOf("a", "b", "c", "d")
 
+    /** Groups a, b, c, d first, then any others by name. */
+    val groupOrder: Comparator<String> =
+        compareBy<String>({ GROUP_ORDER.indexOf(it).let { i -> if (i < 0) GROUP_ORDER.size else i } }, { it })
+
     fun read(tar: ByteArray): List<PadGroup> {
         val groups = LinkedHashMap<String, java.util.TreeMap<Int, Int?>>()
         try {
@@ -30,7 +34,7 @@ object ProjectPads {
             return emptyList()
         }
         return groups.entries
-            .sortedWith(compareBy({ GROUP_ORDER.indexOf(it.key).let { i -> if (i < 0) GROUP_ORDER.size else i } }, { it.key }))
+            .sortedWith(compareBy(groupOrder) { it.key })
             .map { PadGroup(it.key, it.value) }
     }
 

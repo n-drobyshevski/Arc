@@ -115,7 +115,8 @@ fun CompareScreen(
             }
             section(FeatureText.PROJECTS_CHANGED, projects(ChangeKind.CHANGED), { "pc${it.project}" }) { p ->
                 val lines = if (p.padChanges.isEmpty()) {
-                    listOf(FeatureText.PATTERNS_CHANGED)
+                    // Only claim the pads kept their sounds when both layouts could be read.
+                    listOf(if (p.padsRead) FeatureText.PATTERNS_CHANGED else FeatureText.PROJECT_CHANGED)
                 } else {
                     p.padChanges.map { pc ->
                         FeatureText.padChange(pc, pc.oldSlot?.let { compare.oldNames[it] }, pc.newSlot?.let { compare.newNames[it] })

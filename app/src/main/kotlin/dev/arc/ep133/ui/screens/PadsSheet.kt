@@ -57,12 +57,14 @@ fun ColumnScope.PadsSheetContent(
             for (row in g.pads.entries.toList().chunked(3)) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     for ((pad, slot) in row) {
+                        val name = slot?.let(nameOf)
                         PadCell(
                             pad = pad,
                             slot = slot,
-                            name = slot?.let(nameOf),
+                            name = name,
                             playing = slot != null && slot == playingSlot,
-                            onClick = if (slot != null && onPad != null) ({ onPad(slot) }) else null,
+                            // A pad pointing at a slot with no sound has nothing to play.
+                            onClick = if (slot != null && name != null && onPad != null) ({ onPad(slot) }) else null,
                             modifier = Modifier.weight(1f),
                         )
                     }
@@ -80,11 +82,12 @@ private fun PadCell(pad: Int, slot: Int?, name: String?, playing: Boolean, onCli
     val c = LocalArcColors.current
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
-    val base = if (slot == null) c.shell else c.key
+    val raised = slot != null && name != null
+    val base = if (raised) c.key else c.shell
     Column(
         modifier
             .drawBehind {
-                if (slot != null) {
+                if (raised) {
                     drawRoundRect(c.keyEdge, topLeft = Offset(0f, 3.dp.toPx()), size = size, cornerRadius = CornerRadius(10.dp.toPx()))
                 }
             }
@@ -106,8 +109,11 @@ private fun PadCell(pad: Int, slot: Int?, name: String?, playing: Boolean, onCli
         Text(pad.toString(), style = ArcType.small, color = dim)
         if (slot == null) {
             OneLine(FeatureText.EMPTY_PAD, ArcType.small, dim)
+        } else if (name == null) {
+            OneLine(FeatureText.slot(slot), ArcType.bold, ink)
+            Text(FeatureText.MISSING_PAD, style = ArcType.small, color = dim)
         } else {
-            OneLine(name ?: FeatureText.slot(slot), ArcType.bold, ink)
+            OneLine(name, ArcType.bold, ink)
             Text(FeatureText.slot(slot), style = ArcType.small, color = dim)
         }
     }

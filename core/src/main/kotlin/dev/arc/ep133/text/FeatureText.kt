@@ -144,6 +144,7 @@ object FeatureText {
     // ---------- pad layout ----------
     const val PADS = "Pads"
     const val EMPTY_PAD = "Empty"
+    const val MISSING_PAD = "Sound not found"
     const val NO_PADS = "No pad assignments found in this project."
     const val PADS_NOTE = "Pads are shown by number, not by where they sit on the device."
 
@@ -175,7 +176,8 @@ object FeatureText {
     const val PROJECTS_CHANGED = "Projects changed"
     const val NOTHING_CHANGED = "Nothing changed: the same sounds and projects."
     const val AUDIO_CHANGED = "Audio changed"
-    const val PATTERNS_CHANGED = "Patterns or settings changed; the pads are the same."
+    const val PATTERNS_CHANGED = "Patterns or settings changed; each pad still has the same sound."
+    const val PROJECT_CHANGED = "Changed."
 
     fun compareHeader(oldTitle: String, oldDay: String, newTitle: String, newDay: String) =
         "From $oldTitle ($oldDay) to $newTitle ($newDay)"

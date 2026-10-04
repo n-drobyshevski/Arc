@@ -123,6 +123,45 @@ class PadsCompareSearchTest {
         assertTrue(PakCompare.compare(broken, broken).nothingChanged)
     }
 
+    /** A WAV with its settings in a JSON chunk before the audio, as the Sample Tool writes them. */
+    private fun wavWithSettings(json: String, vararg samples: Int): ByteArray {
+        val plain = wav(*samples)
+        val body = json.toByteArray()
+        val chunk = "TNGE".toByteArray() + ByteArray(4).also { for (i in 0..3) it[i] = (body.size shr (8 * i)).toByte() } +
+            body + ByteArray(body.size and 1)
+        val out = plain.copyOfRange(0, 36) + chunk + plain.copyOfRange(36, plain.size)
+        val riffSize = out.size - 8
+        for (i in 0..3) out[4 + i] = (riffSize shr (8 * i)).toByte()
+        return out
+    }
+
+    @Test
+    fun `settings embedded in the WAV are compared, with arc json laid over them`() {
+        val a = wavWithSettings("""{"sound.pitch":0,"sound.playmode":"oneshot"}""", 1, 2)
+        val b = wavWithSettings("""{"sound.pitch":5,"sound.playmode":"oneshot"}""", 1, 2)
+        // Two Sample Tool backups (no arc.json): only the embedded pitch differs.
+        val r = PakCompare.compare(pak(listOf(snd(1, "x", a))), pak(listOf(snd(1, "x", b))))
+        assertEquals(listOf(SoundChange(1, ChangeKind.CHANGED, "x", "x", settingsChanged = listOf("sound.pitch"))), r.sounds)
+        // arc.json overrides the embedded value, as a restore does: pitch 5 on both sides.
+        val r2 = PakCompare.compare(
+            pak(listOf(snd(1, "x", a, settings("""{"sound.pitch":5}""")))),
+            pak(listOf(snd(1, "x", b))),
+        )
+        assertTrue(r2.nothingChanged, r2.toString())
+    }
+
+    @Test
+    fun `pad changes keep the group order when a group is new`() {
+        val old = pak(emptyList(), mapOf(1 to tarFile(listOf("pads/a/p01" to pad(1), "pads/c/p01" to pad(3)))))
+        val new = pak(emptyList(), mapOf(1 to tarFile(listOf("pads/a/p01" to pad(1), "pads/b/p02" to pad(2), "pads/c/p01" to pad(4)))))
+        val changes = PakCompare.compare(old, new).projects.single().padChanges
+        assertEquals(listOf(PadChange("b", 2, null, 2), PadChange("c", 1, 3, 4)), changes)
+        // Pads that can't be read are not claimed to be unchanged.
+        val unreadable = pak(emptyList(), mapOf(1 to noise(700)))
+        val p = PakCompare.compare(old, unreadable).projects.single()
+        assertEquals(false, p.padsRead)
+    }
+
     @Test
     fun `projects with pad changes`() {
         val p1 = tarFile(listOf("pads/a/p01" to pad(1), "pads/a/p02" to pad(2), "settings" to noise(10)))
