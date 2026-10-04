@@ -71,6 +71,7 @@ fun MainScreen(
     onBrowse: () -> Unit = {},
     onGuide: () -> Unit = {},
     onSearch: () -> Unit = {},
+    onLive: () -> Unit = {},
 ) {
     val c = LocalArcColors.current
     Box(Modifier.fillMaxSize().background(c.shell), contentAlignment = Alignment.TopCenter) {
@@ -93,6 +94,9 @@ fun MainScreen(
                 // Addition to the web version: the device browser.
                 if (state.device != null) {
                     ArcKey(FeatureText.BROWSE, onBrowse, size = KeySize.Small, enabled = !state.busy)
+                    Spacer(Modifier.width(10.dp))
+                    // Addition to the web version: the live mirror (only listens, so not tied to busy).
+                    ArcKey(dev.arc.ep133.text.MirrorText.LIVE, onLive, size = KeySize.Small)
                     Spacer(Modifier.width(10.dp))
                 }
                 ArcKey(

@@ -44,6 +44,7 @@ import dev.arc.ep133.ui.screens.CompareScreen
 import dev.arc.ep133.ui.screens.ComparePickerContent
 import dev.arc.ep133.ui.screens.DebugScreen
 import dev.arc.ep133.ui.screens.GuideScreen
+import dev.arc.ep133.ui.screens.MirrorScreen
 import dev.arc.ep133.ui.screens.PadsSheetContent
 import dev.arc.ep133.ui.screens.SearchScreen
 import dev.arc.ep133.ui.screens.DeviceScreen
@@ -276,6 +277,7 @@ class MainActivity : ComponentActivity() {
         var debug by rememberSaveable { mutableStateOf(false) }
         var browse by rememberSaveable { mutableStateOf(false) }
         var guide by rememberSaveable { mutableStateOf(false) }
+        var live by rememberSaveable { mutableStateOf(false) }
         var search by rememberSaveable { mutableStateOf(false) }
         // Comparing two backups: the backup whose "compare" picker is open, then "<idA>|<idB>".
         var comparePickFor by rememberSaveable { mutableStateOf<String?>(null) }
@@ -291,13 +293,16 @@ class MainActivity : ComponentActivity() {
         var titleField by rememberSaveable { mutableStateOf("") }
         var notesField by rememberSaveable { mutableStateOf("") }
 
-        // Keep the screen on while the progress sheet is open.
+        // Keep the screen on while the progress sheet or the live mirror is open.
         val view = LocalView.current
-        val transferring = state.task != null
-        DisposableEffect(transferring) {
-            view.keepScreenOn = transferring
+        val keepOn = state.task != null || live
+        DisposableEffect(keepOn) {
+            view.keepScreenOn = keepOn
             onDispose { view.keepScreenOn = false }
         }
+        // The mirror (re)starts when it opens and whenever a device is (re)connected.
+        val ready = state.device != null
+        LaunchedEffect(live, ready) { if (live && ready) controller.openMirror() }
 
         val detail = state.backups.firstOrNull { it.id == detailId }
         val restore = state.backups.firstOrNull { it.id == restoreId }
@@ -325,6 +330,21 @@ class MainActivity : ComponentActivity() {
         Box(Modifier.fillMaxSize()) {
             if (debug) {
                 DebugScreen(controller.trafficLog, ::shareLog, ::saveLog, ::copyLog) { debug = false }
+            } else if (live) {
+                MirrorScreen(
+                    mirror = state.mirror ?: if (!ready) {
+                        dev.arc.ep133.controller.MirrorUi(loading = false, error = dev.arc.ep133.text.MirrorText.NOT_CONNECTED)
+                    } else {
+                        null
+                    },
+                    nameOf = controller::mirrorName,
+                    now = System.nanoTime(),
+                    onPadOrder = controller::setPadOrder,
+                    onBack = {
+                        live = false
+                        controller.closeMirror()
+                    },
+                )
             } else if (guide) {
                 GuideScreen { guide = false }
             } else if (compareA != null && compareB != null) {
@@ -493,6 +513,7 @@ class MainActivity : ComponentActivity() {
                     },
                     onGuide = { guide = true },
                     onSearch = { search = true },
+                    onLive = { live = true },
                 )
 
                 ArcSheet(visible = detail != null, onDismiss = { closeDetail(save = true) }) {

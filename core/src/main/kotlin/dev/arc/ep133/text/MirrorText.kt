@@ -20,6 +20,12 @@ object MirrorText {
     const val NO_PUSHES = "No pad messages from the device yet, so samples can't be named. Pads still light up."
     const val LISTEN_ONLY = "Nothing is sent to the device while you watch."
 
+    const val PAD_ORDER = "Pad numbers in project files"
+    const val FROM_TOP = "From the top"
+    const val FROM_BOTTOM = "From the bottom"
+    const val ORDER_NOTE = "Community notes disagree on how project files number the pads. If the names look wrong, try the other way."
+    const val GROUP = "Group"
+
     fun bpm(bpm: Double) = "${jsToFixed(bpm, 1)} BPM"
 
     fun project(n: Int) = "Project $n"

@@ -111,7 +111,7 @@ fun GuideScreen(onBack: () -> Unit) {
                 })
                 LazyColumn(state = list, modifier = Modifier.fillMaxSize()) {
                     item(key = "search") {
-                        ArcField(GuideText.SEARCH, query, { query = it }, Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
+                        ArcField(GuideText.SEARCH, query, { query = it }, Modifier.padding(horizontal = 20.dp, vertical = 12.dp), background = c.shell)
                     }
                     if (sections.isEmpty()) {
                         item(key = "none") {

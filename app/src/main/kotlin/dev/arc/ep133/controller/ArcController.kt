@@ -22,6 +22,8 @@ import dev.arc.ep133.midi.MidiConnector
 import dev.arc.ep133.protocol.CancelSignal
 import dev.arc.ep133.protocol.CancelledError
 import dev.arc.ep133.protocol.Device
+import dev.arc.ep133.protocol.Fs
+import dev.arc.ep133.formats.asObject
 import dev.arc.ep133.protocol.DeviceInfo
 import dev.arc.ep133.protocol.LoggingTransport
 import dev.arc.ep133.protocol.Session
@@ -103,6 +105,13 @@ data class PakCompareUi(
     val error: String? = null,
 )
 
+/** The live mirror: what the device is playing, plus loading and errors. */
+data class MirrorUi(
+    val state: dev.arc.ep133.features.MirrorState = dev.arc.ep133.features.MirrorState(),
+    val loading: Boolean = true,
+    val error: String? = null,
+)
+
 /** A backup opened for its contents screen (sounds and projects, playback, export). */
 data class ContentsUi(
     val backupId: String,
@@ -132,6 +141,7 @@ data class UiState(
     val contents: ContentsUi? = null,
     val search: SearchUi = SearchUi(),
     val pakCompare: PakCompareUi? = null,
+    val mirror: MirrorUi? = null,
 )
 
 /**
@@ -151,6 +161,13 @@ class ArcController(
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private val searchQuery = MutableStateFlow("")
+
+    // ---------- live mirror (an addition) ----------
+    private var liveEvents: kotlinx.coroutines.flow.SharedFlow<dev.arc.ep133.protocol.MidiEvent>? = null
+    private var mirror: dev.arc.ep133.features.LiveMirror? = null
+    private var mirrorJobs: List<Job> = emptyList()
+    private var mirrorPushOff: (() -> Unit)? = null
+    private val mirrorPrefs by lazy { context.getSharedPreferences("mirror", Context.MODE_PRIVATE) }
 
     @Volatile
     private var session: Session? = null
@@ -231,6 +248,9 @@ class ArcController(
         session?.close()
         session = null
         openDeviceId = null
+        stopMirror()
+        liveEvents = null
+        if (_state.value.mirror != null) _state.update { it.copy(mirror = MirrorUi(loading = false, error = dev.arc.ep133.text.MirrorText.NOT_CONNECTED)) }
         playToken++ // a device sound still downloading must not start after the device is gone
         if (player.playing.value?.startsWith("device:") == true) player.stop()
         _state.update { it.copy(connected = false, device = null, browser = BrowserUi(), diff = null) }
@@ -253,6 +273,7 @@ class ArcController(
             trafficLog.note("connect $midiDescription")
             val s = Session(LoggingTransport(open.transport, trafficLog))
             session = s
+            liveEvents = open.transport.events
             _state.update { it.copy(connected = true) }
             s.handshake()
             refreshDevice()
@@ -543,6 +564,113 @@ class ArcController(
 
     fun closeCompare() {
         _state.update { it.copy(pakCompare = null) }
+    }
+
+    /**
+     * Starts the live mirror: reads the sound names, the active project and
+     * its pads (the reads the browser already makes), then only listens to
+     * MIDI and pad pushes. Nothing is sent while it runs.
+     */
+    fun openMirror(): Job = scope.launch {
+        stopMirror()
+        val s = session
+        val events = liveEvents
+        if (s == null || events == null) {
+            _state.update { it.copy(mirror = MirrorUi(loading = false, error = dev.arc.ep133.text.MirrorText.NOT_CONNECTED)) }
+            return@launch
+        }
+        val m = dev.arc.ep133.features.LiveMirror(
+            learned = loadLearned(),
+            padOrder = runCatching { dev.arc.ep133.features.PadOrder.valueOf(mirrorPrefs.getString("order", null) ?: "") }
+                .getOrDefault(dev.arc.ep133.features.PadOrder.FROM_TOP),
+            onLearned = ::saveLearned,
+        )
+        mirror = m
+        _state.update { it.copy(mirror = MirrorUi(m.snapshot(System.nanoTime()), loading = true)) }
+        // Listen first, so nothing played while reading is missed.
+        val dirty = java.util.concurrent.atomic.AtomicBoolean(true)
+        val listen = scope.launch(Dispatchers.Default) {
+            events.collect {
+                m.onMidi(it)
+                dirty.set(true)
+            }
+        }
+        mirrorPushOff = s.onPush { f ->
+            val fid = dev.arc.ep133.features.PadPush.parse(f) ?: return@onPush
+            m.onPadPush(fid, System.nanoTime())
+            dirty.set(true)
+            // Another project on the device: read its pads.
+            if (fid.project != m.snapshot(System.nanoTime()).activeProject) loadMirrorProject(m, fid.project)
+        }
+        // Redraw at most ~30 times a second, and only while something changes or fades.
+        val tick = scope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(33)
+                val st = m.snapshot(System.nanoTime())
+                if (dirty.getAndSet(false) || st.pads.isNotEmpty()) {
+                    _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(state = st)) } ?: cur }
+                }
+            }
+        }
+        mirrorJobs = listOf(listen, tick)
+        val ok = exclusive("mirror") { ss ->
+            val c = DeviceBrowser.contents(ss)
+            m.setNames(c.sounds.associate { it.slot to it.name })
+            val active = runCatching { Fs.getMetadata(ss, Device.PROJECTS_NODE).asObject()["active"] }.getOrNull()
+            val project = (active as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDoubleOrNull()?.toInt()?.let(Device::projectFromNode)
+            val groups = project?.let { p -> runCatching { DeviceBrowser.projectLayout(ss, p).pads }.getOrNull() } ?: emptyList()
+            m.setProject(project, groups)
+            true
+        }
+        if (mirror === m) {
+            dirty.set(true)
+            _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(loading = false, state = m.snapshot(System.nanoTime()))) } ?: cur }
+            if (ok == null) _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(loading = false)) } ?: cur }
+        }
+    }
+
+    private fun loadMirrorProject(m: dev.arc.ep133.features.LiveMirror, project: Int) {
+        scope.launch {
+            val groups = exclusive("mirror", quiet = true) { ss -> DeviceBrowser.projectLayout(ss, project).pads } ?: return@launch
+            if (mirror === m) m.setProject(project, groups)
+        }
+    }
+
+    /** The sample on a pad in the mirror, once it is known. */
+    fun mirrorName(pad: dev.arc.ep133.features.PhysicalPad): String? = mirror?.nameOf(pad)
+
+    fun setPadOrder(order: dev.arc.ep133.features.PadOrder) {
+        mirrorPrefs.edit().putString("order", order.name).apply()
+        mirror?.let { m ->
+            m.setPadOrder(order)
+            _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(state = m.snapshot(System.nanoTime()))) } ?: cur }
+        }
+    }
+
+    fun closeMirror() {
+        stopMirror()
+        _state.update { it.copy(mirror = null) }
+    }
+
+    private fun stopMirror() {
+        mirrorJobs.forEach { it.cancel() }
+        mirrorJobs = emptyList()
+        mirrorPushOff?.invoke()
+        mirrorPushOff = null
+        mirror = null
+    }
+
+    /** Learned pad links, "offset:pad" pairs: the keypad's numbering is the same in every project. */
+    private fun loadLearned(): Map<Int, Int> =
+        mirrorPrefs.getString("learned", "").orEmpty().split(',').mapNotNull { pair ->
+            val (o, p) = pair.split(':').takeIf { it.size == 2 } ?: return@mapNotNull null
+            val offset = o.toIntOrNull() ?: return@mapNotNull null
+            val pad = p.toIntOrNull() ?: return@mapNotNull null
+            if (offset in 0..11 && pad in 1..12) offset to pad else null
+        }.toMap()
+
+    private fun saveLearned(learned: Map<Int, Int>) {
+        mirrorPrefs.edit().putString("learned", learned.entries.joinToString(",") { "${it.key}:${it.value}" }).apply()
     }
 
     fun setSearch(query: String) {
