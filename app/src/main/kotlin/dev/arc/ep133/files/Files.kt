@@ -25,7 +25,9 @@ class PakFileProvider : FileProvider() {
 
 object Files {
     const val AUTHORITY = "dev.arc.ep133.files"
-    private const val MAX_IMPORT = 512L * 1024 * 1024
+    /** Larger than any EP-133 backup (64 MB of samples), small enough to read into memory. */
+    private const val MAX_IMPORT = 128L * 1024 * 1024
+    const val TOO_LARGE = "This file is too large to be a backup"
 
     /** A copy of [bytes] under cache/share/, named [name], as a content URI. */
     fun shareableUri(context: Context, name: String, bytes: ByteArray): Uri {
@@ -80,16 +82,21 @@ object Files {
     }
 
     fun read(context: Context, uri: Uri): ByteArray {
+        // Check the size first when the provider knows it, so a huge file fails with a clear message.
+        val known = runCatching {
+            context.contentResolver.openFileDescriptor(uri, "r")?.use { it.statSize }
+        }.getOrNull() ?: -1L
+        if (known > MAX_IMPORT) throw IOException(TOO_LARGE)
         val input = context.contentResolver.openInputStream(uri) ?: throw IOException("Could not open the file")
         return input.use { s ->
-            val out = java.io.ByteArrayOutputStream()
+            val out = java.io.ByteArrayOutputStream(if (known > 0) known.toInt() else 64 * 1024)
             val buf = ByteArray(64 * 1024)
             var total = 0L
             while (true) {
                 val n = s.read(buf)
                 if (n < 0) break
                 total += n
-                if (total > MAX_IMPORT) throw IOException("This file is too large to be a backup")
+                if (total > MAX_IMPORT) throw IOException(TOO_LARGE)
                 out.write(buf, 0, n)
             }
             out.toByteArray()

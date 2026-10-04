@@ -16,7 +16,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -94,11 +97,15 @@ fun ColumnScope.DetailSheetContent(
 ) {
     val c = LocalArcColors.current
     ArcField(Strings.NAME, title, onTitle, maxLength = 80)
-    // Facts: a two-column definition list.
+    // Facts: grid-template-columns: auto 1fr, so the label column is as wide as the widest label.
+    val facts = LibraryRules.facts(b, madeText)
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val labelWidth = with(density) { facts.maxOfOrNull { measurer.measure(it.first, ArcType.body15).size.width }?.toDp() ?: 0.dp }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        for ((k, v) in LibraryRules.facts(b, madeText)) {
+        for ((k, v) in facts) {
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(k, style = ArcType.body15, color = c.graphite, modifier = Modifier.width(76.dp))
+                Text(k, style = ArcType.body15, color = c.graphite, modifier = Modifier.width(labelWidth))
                 Text(v, style = ArcType.body15.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold), color = c.ink, modifier = Modifier.weight(1f))
             }
         }
@@ -139,7 +146,7 @@ fun ColumnScope.DetailSheetContent(
         modifier = Modifier
             .align(Alignment.CenterHorizontally)
             .clip(RoundedCornerShape(8.dp))
-            .clickable(role = Role.Button, onClick = onDone)
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = onDone)
             .semantics { contentDescription = Strings.CLOSE }
             .padding(vertical = 8.dp, horizontal = 16.dp),
     )
@@ -163,7 +170,8 @@ fun ColumnScope.RestoreSheetContent(b: BackupRecord, onRestore: (RestoreSelectio
     val c = LocalArcColors.current
     var everything by rememberSaveable(b.id) { mutableStateOf(true) }
     var other by rememberSaveable(b.id) { mutableStateOf(false) }
-    val picked = remember(b.id) { mutableStateListOf<Int>().apply { addAll(b.projects) } }
+    // Saved across rotation; the sheet resets to defaults each time it opens (openRestore).
+    var picked by rememberSaveable(b.id) { mutableStateOf(b.projects.toList()) }
     // Checked projects in display order.
     val sel = LibraryRules.restoreSelection(b, everything, b.projects.filter { it in picked }, other)
 
@@ -176,20 +184,24 @@ fun ColumnScope.RestoreSheetContent(b: BackupRecord, onRestore: (RestoreSelectio
         Modifier.padding(start = 4.dp).alpha(if (everything) 0.45f else 1f),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        for (n in b.projects) {
-            ChoiceRow(
-                Strings.projectLine(n),
-                n in picked,
-                { if (n in picked) picked.remove(n) else picked.add(n) },
-                radio = false,
-                enabled = !everything,
-                trailing = LibraryRules.projectSoundsRestore(b, n),
-            )
+        // #restore-projects is a plain block: its rows stack without gaps.
+        Column {
+            for (n in b.projects) {
+                ChoiceRow(
+                    Strings.projectLine(n),
+                    n in picked,
+                    { picked = if (n in picked) picked - n else picked + n },
+                    radio = false,
+                    enabled = !everything,
+                    trailing = LibraryRules.projectSoundsRestore(b, n),
+                )
+            }
         }
         ChoiceRow(Strings.ALSO_OTHER_SOUNDS, other, { other = !other }, radio = false, enabled = !everything)
     }
     val warning = LibraryRules.restoreWarning(sel)
-    Text(warning, style = ArcType.small, color = c.graphite, modifier = Modifier.heightIn(min = 1.dp))
+    // An empty <p> takes no height.
+    if (warning.isNotEmpty()) Text(warning, style = ArcType.small, color = c.graphite) else Spacer(Modifier)
     Actions {
         wide { m -> ArcKey(LibraryRules.restoreButton(sel), { onRestore(sel) }, m, style = KeyStyle.Signal, enabled = LibraryRules.canRestore(sel)) }
         wide { m -> ArcKey(Strings.CANCEL, onCancel, m, style = KeyStyle.Quiet) }

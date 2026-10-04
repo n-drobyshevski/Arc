@@ -52,6 +52,8 @@ data class UiState(
     val device: DeviceSummary? = null,
     val busy: Boolean = false,
     val backups: List<BackupRecord> = emptyList(),
+    /** False until the library has been read once (the empty state stays hidden until then). */
+    val libraryLoaded: Boolean = false,
     val freshId: String? = null,
     val task: TaskUi? = null,
     val spaceLeft: Long? = null,
@@ -88,7 +90,7 @@ class ArcController(
         scope.launch {
             library.backups
                 .catch { e -> toast(Strings.libraryFailed(e.message ?: e.toString()), error = true) }
-                .collect { list -> _state.update { it.copy(backups = list, spaceLeft = runCatching { library.spaceLeft() }.getOrNull()) } }
+                .collect { list -> _state.update { it.copy(backups = list, libraryLoaded = true, spaceLeft = runCatching { library.spaceLeft() }.getOrNull()) } }
         }
         scope.launch { runCatching { library.sweep() } }
         midi.watch(
@@ -299,14 +301,21 @@ class ArcController(
             .onFailure { toast(it.message ?: it.toString(), error = true) }
     }
 
-    fun delete(b: BackupRecord): Job = scope.launch {
-        try {
-            library.delete(b.id)
-            toast(Strings.BACKUP_DELETED)
-        } catch (e: Throwable) {
-            if (e is kotlinx.coroutines.CancellationException) throw e
-            toast(e.message ?: e.toString(), error = true)
-        }
+    /** Returns whether it worked; on failure the detail sheet stays open (as in the web version). */
+    suspend fun delete(b: BackupRecord): Boolean = try {
+        library.delete(b.id)
+        toast(Strings.BACKUP_DELETED)
+        true
+    } catch (e: Throwable) {
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        toast(e.message ?: e.toString(), error = true)
+        false
+    }
+
+    /** Import a document by URI. Runs in the app scope, so activity recreation cannot cut it short. */
+    fun importUri(uri: android.net.Uri): Job = scope.launch {
+        val (name, modified) = withContext(Dispatchers.IO) { dev.arc.ep133.files.Files.describe(context, uri) }
+        import(name, modified) { dev.arc.ep133.files.Files.read(context, uri) }.join()
     }
 
     fun pakFile(b: BackupRecord) = library.file(b.id)

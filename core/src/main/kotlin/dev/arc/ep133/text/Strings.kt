@@ -91,4 +91,6 @@ object Strings {
     const val DEBUG_TOGGLE = "Log traffic"
     const val DEBUG_EMPTY = "Nothing logged yet. Connect the EP-133 to see SysEx traffic."
     const val DEBUG_COPIED = "Log copied."
+    const val DEBUG_COPY_TRUNCATED = "(older messages left out; use Save log or Share log for the full log)"
+    const val SAVE_FAILED = "The file could not be saved. Try again."
 }

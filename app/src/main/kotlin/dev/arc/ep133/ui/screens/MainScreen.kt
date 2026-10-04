@@ -2,6 +2,13 @@ package dev.arc.ep133.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -101,7 +108,8 @@ fun MainScreen(
                 }
                 if (state.backups.isNotEmpty()) {
                     BackupList(state.backups, state.freshId, fmtDay, onOpen)
-                } else {
+                } else if (state.libraryLoaded) {
+                    // #empty starts hidden and only shows once the library has loaded.
                     DashedBox {
                         Text(Strings.EMPTY_TITLE, style = ArcType.bold, color = c.ink)
                         Text(Strings.EMPTY_TEXT, style = BaseText, color = c.graphite)
@@ -153,7 +161,11 @@ private fun DevicePanel(state: UiState) {
         }
         Meter(fraction, modifier = Modifier.describe(meterText))
         if (hint != null) {
-            Text(hint, style = ArcType.displayHint, color = c.displayDim, modifier = Modifier.widthIn(max = 306.dp))
+            // .display-hint { max-width: 34ch }: 34 widths of "0" in this font and size
+            val measurer = rememberTextMeasurer()
+            val density = LocalDensity.current
+            val maxW = with(density) { (measurer.measure("0", ArcType.displayHint).size.width * 34).toDp() }
+            Text(hint, style = ArcType.displayHint, color = c.displayDim, modifier = Modifier.widthIn(max = maxW))
         } else if (d != null) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(28.dp), verticalAlignment = Alignment.Bottom) {
                 Stat(d.sounds.toString(), Strings.soundsLabel(d.sounds))
@@ -192,10 +204,14 @@ private fun BackupList(list: List<BackupRecord>, freshId: String?, fmtDay: (Long
     ) {
         list.forEachIndexed { i, b ->
             if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(c.keyEdge.copy(alpha = 0.55f)))
+            // .backup-row:active { background: key-edge at 25% } instead of a ripple
+            val source = remember { MutableInteractionSource() }
+            val pressed by source.collectIsPressedAsState()
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .clickable(role = Role.Button) { onOpen(b) }
+                    .background(if (pressed) c.keyEdge.copy(alpha = 0.25f) else Color.Transparent)
+                    .clickable(interactionSource = source, indication = null, role = Role.Button) { onOpen(b) }
                     .padding(vertical = 14.dp, horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {

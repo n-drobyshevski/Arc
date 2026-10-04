@@ -52,12 +52,15 @@ import java.time.format.DateTimeFormatter
 class MainActivity : ComponentActivity() {
     private val controller: ArcController get() = (application as ArcApp).controller
 
-    /** Bytes waiting for the user to pick where to save them. */
-    private var pendingSave: ByteArray? = null
-    private var afterPermission: (() -> Unit)? = null
+    /**
+     * What the open save picker is for: "pak:<id>" or "log". Kept in the saved
+     * state, because the result can reach a recreated activity; the bytes are
+     * read again then.
+     */
+    private var pendingSave: String? = null
 
     private val importLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) importUri(uri)
+        if (uri != null) controller.importUri(uri)
     }
 
     // application/octet-stream: with application/zip some providers append ".zip" to "x.pak".
@@ -69,15 +72,13 @@ class MainActivity : ComponentActivity() {
         writePending(uri)
     }
 
-    private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
-        // Go ahead either way; the transfer works without the notification.
-        afterPermission?.invoke()
-        afterPermission = null
-    }
+    // The transfer does not wait for the answer: it works without the notification.
+    private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        pendingSave = savedInstanceState?.getString(KEY_PENDING_SAVE)
         if (savedInstanceState == null) handleIntent(intent)
         setContent { ArcTheme { Root() } }
     }
@@ -87,54 +88,67 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
     }
 
-    /** A .pak opened from Files (or another app) lands here. */
-    private fun handleIntent(intent: Intent?) {
-        if (intent?.action == Intent.ACTION_VIEW) {
-            intent.data?.let { importUri(it) }
-            setIntent(Intent(this, MainActivity::class.java))
-        }
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putString(KEY_PENDING_SAVE, pendingSave)
     }
 
-    private fun importUri(uri: Uri) {
-        lifecycleScope.launch {
-            val (name, modified) = withContext(Dispatchers.IO) { Files.describe(this@MainActivity, uri) }
-            controller.import(name, modified) { Files.read(this@MainActivity, uri) }
+    /** A .pak opened from Files (or another app) lands here. */
+    private fun handleIntent(intent: Intent?) {
+        if (intent?.action != Intent.ACTION_VIEW) return
+        // Reopening the task from Recents replays the original intent: don't import twice.
+        if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY == 0) {
+            intent.data?.let { controller.importUri(it) }
         }
+        setIntent(Intent(this, MainActivity::class.java))
     }
 
     private fun writePending(uri: Uri?) {
-        val bytes = pendingSave ?: return
+        val what = pendingSave
         pendingSave = null
         if (uri == null) return
         lifecycleScope.launch {
-            runCatching { withContext(Dispatchers.IO) { Files.writeTo(this@MainActivity, uri, bytes) } }
-                .onFailure { controller.toast(it.message ?: it.toString(), error = true) }
+            try {
+                val bytes = when {
+                    what == "log" -> logText().toByteArray()
+                    what != null && what.startsWith("pak:") -> {
+                        val b = controller.state.value.backups.firstOrNull { it.id == what.removePrefix("pak:") }
+                            ?: throw java.io.IOException(Strings.FILE_MISSING)
+                        controller.pakBytes(b)
+                    }
+                    else -> throw java.io.IOException(Strings.SAVE_FAILED)
+                }
+                withContext(Dispatchers.IO) { Files.writeTo(this@MainActivity, uri, bytes) }
+            } catch (e: Exception) {
+                // Don't leave an empty file behind.
+                runCatching { android.provider.DocumentsContract.deleteDocument(contentResolver, uri) }
+                controller.toast(e.message ?: e.toString(), error = true)
+            }
         }
     }
 
-    /** Ask for the notification permission once, on the first backup or restore (Android 13+). */
+    /**
+     * Asks for the notification permission once, on the first backup or
+     * restore (Android 13+), and starts the transfer straight away.
+     */
     private fun withNotifications(block: () -> Unit) {
         if (Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
             !getPreferences(MODE_PRIVATE).getBoolean("asked_notifications", false)
         ) {
             getPreferences(MODE_PRIVATE).edit { putBoolean("asked_notifications", true) }
-            afterPermission = block
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
-        } else {
-            block()
         }
+        block()
     }
 
     private fun savePak(b: BackupRecord) {
-        lifecycleScope.launch {
-            runCatching { controller.pakBytes(b) }
-                .onSuccess {
-                    pendingSave = it
-                    savePakLauncher.launch(LibraryRules.fileNameFor(b.title))
-                }
-                .onFailure { controller.toast(it.message ?: it.toString(), error = true) }
+        if (!controller.pakFile(b).isFile) {
+            controller.toast(Strings.FILE_MISSING, error = true)
+            return
         }
+        pendingSave = "pak:${b.id}"
+        savePakLauncher.launch(LibraryRules.fileNameFor(b.title))
     }
 
     private fun sharePak(b: BackupRecord) {
@@ -175,13 +189,20 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun saveLog() {
-        pendingSave = logText().toByteArray()
+        pendingSave = "log"
         saveLogLauncher.launch(logFileName())
     }
 
+    /** The clipboard goes through a 1 MB binder transaction: copy only the latest part of the log. */
     private fun copyLog() {
-        getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(Strings.DEBUG_TITLE, logText()))
-        controller.toast(Strings.DEBUG_COPIED)
+        val full = logText()
+        val text = if (full.length <= COPY_LIMIT) full else Strings.DEBUG_COPY_TRUNCATED + "\n" + full.takeLast(COPY_LIMIT)
+        try {
+            getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(Strings.DEBUG_TITLE, text))
+            controller.toast(Strings.DEBUG_COPIED)
+        } catch (e: RuntimeException) {
+            controller.toast(e.message ?: e.toString(), error = true)
+        }
     }
 
     @Composable
@@ -277,8 +298,10 @@ class MainActivity : ComponentActivity() {
                         title = detail.title,
                         onConfirm = {
                             confirmDelete = false
-                            controller.delete(detail)
-                            closeDetail(save = false)
+                            lifecycleScope.launch {
+                                // Close (without saving edits) only once the delete worked.
+                                if (controller.delete(detail)) closeDetail(save = false)
+                            }
                         },
                         onDismiss = { confirmDelete = false },
                     )
@@ -296,6 +319,9 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
+private const val KEY_PENDING_SAVE = "pending_save"
+private const val COPY_LIMIT = 200_000
 
 /** versionName without enabling the BuildConfig feature. */
 object BuildConfigCompat {

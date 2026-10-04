@@ -2,18 +2,19 @@ package dev.arc.ep133.ui.components
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -58,7 +59,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
@@ -71,6 +71,7 @@ import androidx.compose.ui.graphics.PathOperation
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.Role
@@ -80,7 +81,9 @@ import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.arc.ep133.ui.theme.ArcType
@@ -128,16 +131,25 @@ fun ArcKey(
         KeySize.Wide -> KeyDims(60.dp, 15.dp, 18.dp, ArcType.keyWide)
     }
     val shape = RoundedCornerShape(12.dp)
+    val alpha = if (enabled) 1f else 0.45f
     Box(
         modifier = modifier
-            .alpha(if (enabled) 1f else 0.45f)
             .graphicsLayer { translationY = press * 3.dp.toPx() }
             .drawBehind {
+                // box-shadow: 0 3px 0 edge. Only the strip below the face is drawn,
+                // outside the faded layer, so a disabled key keeps its (faded) edge.
                 if (style != KeyStyle.Quiet) {
                     val edgePx = (1f - press) * 3.dp.toPx()
-                    drawRoundRect(edge, topLeft = Offset(0f, edgePx), size = this.size, cornerRadius = CornerRadius(12.dp.toPx()))
+                    if (edgePx > 0f) {
+                        val r = CornerRadius(12.dp.toPx())
+                        val face = Path().apply { addRoundRect(RoundRect(0f, 0f, this@drawBehind.size.width, this@drawBehind.size.height, r)) }
+                        val below = Path().apply { addRoundRect(RoundRect(0f, edgePx, this@drawBehind.size.width, this@drawBehind.size.height + edgePx, r)) }
+                        drawPath(Path().apply { op(below, face, PathOperation.Difference) }, edge.copy(alpha = edge.alpha * alpha))
+                    }
                 }
             }
+            // opacity: .45 fades the face and label together
+            .graphicsLayer { this.alpha = alpha }
             .clip(shape)
             .background(bg)
             .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
@@ -145,7 +157,7 @@ fun ArcKey(
             .padding(vertical = padV, horizontal = padH),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text, style = ts, color = textColor ?: fg, maxLines = 2)
+        Text(text, style = ts, color = textColor ?: fg, maxLines = 2, textAlign = TextAlign.Center)
     }
 }
 
@@ -156,8 +168,8 @@ private data class KeyDims(val minH: Dp, val padV: Dp, val padH: Dp, val style: 
 @Composable
 fun Wordmark(onLongPress: () -> Unit) {
     val c = LocalArcColors.current
+    val onePx = with(LocalDensity.current) { 1.dp.roundToPx() }
     Row(
-        verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.combinedClickable(
             interactionSource = remember { MutableInteractionSource() },
             indication = null,
@@ -165,11 +177,12 @@ fun Wordmark(onLongPress: () -> Unit) {
             onLongClick = onLongPress,
         ),
     ) {
-        Text("arc", style = ArcType.wordmark, color = c.ink)
+        Text("arc", style = ArcType.wordmark, color = c.ink, modifier = Modifier.alignByBaseline())
+        // ::after { 9px dot, margin-left 3px, vertical-align: 1px } (its bottom sits 1px above the baseline)
         Box(
             Modifier
+                .alignBy { it.measuredHeight + onePx }
                 .padding(start = 3.dp)
-                .offset(y = 5.dp)
                 .size(9.dp)
                 .clip(CircleShape)
                 .background(c.signal),
@@ -269,8 +282,11 @@ private val SheetEasing = CubicBezierEasing(0.2f, 0.8f, 0.2f, 1f)
 fun ArcSheet(visible: Boolean, onDismiss: (() -> Unit)?, grip: Boolean = true, content: @Composable ColumnScope.() -> Unit) {
     val c = LocalArcColors.current
     BackHandler(enabled = visible) { onDismiss?.invoke() }
-    Box(Modifier.fillMaxSize()) {
-        AnimatedVisibility(visible, enter = fadeIn(tween(220)), exit = fadeOut(tween(150))) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val wide = maxWidth >= 640.dp
+        val screenHeight = maxHeight
+        val rise = with(LocalDensity.current) { 40.dp.roundToPx() }
+        AnimatedVisibility(visible, enter = fadeIn(tween(220)), exit = ExitTransition.None) {
             Box(
                 Modifier
                     .fillMaxSize()
@@ -278,21 +294,21 @@ fun ArcSheet(visible: Boolean, onDismiss: (() -> Unit)?, grip: Boolean = true, c
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onDismiss?.invoke() },
             )
         }
+        // @keyframes rise: from translateY(40px) and opacity 0, 220ms; dialog.close() has no animation.
+        // On wide screens (min-width: 640px) the sheet is a centred dialog.
         AnimatedVisibility(
             visible,
-            modifier = Modifier.align(Alignment.BottomCenter),
-            enter = slideInVertically(tween(220, easing = SheetEasing)) { it / 3 } + fadeIn(tween(220)),
-            exit = slideOutVertically(tween(180)) { it / 2 } + fadeOut(tween(180)),
+            modifier = Modifier.align(if (wide) Alignment.Center else Alignment.BottomCenter),
+            enter = slideInVertically(tween(220, easing = SheetEasing)) { rise } + fadeIn(tween(220, easing = SheetEasing)),
+            exit = ExitTransition.None,
         ) {
-            BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
-                val wide = maxWidth >= 640.dp
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
                 val shape = if (wide) RoundedCornerShape(24.dp) else RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
                 Column(
                     Modifier
                         .widthIn(max = 560.dp)
                         .fillMaxWidth()
-                        .heightIn(max = maxHeight * 0.92f)
-                        .padding(bottom = if (wide) 24.dp else 0.dp)
+                        .heightIn(max = screenHeight * 0.92f)
                         .clip(shape)
                         .background(c.shell)
                         .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
@@ -368,6 +384,8 @@ fun ArcField(
     maxLength: Int = Int.MAX_VALUE,
 ) {
     val c = LocalArcColors.current
+    val source = remember { MutableInteractionSource() }
+    val focused by source.collectIsFocusedAsState()
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(label, style = ArcType.fieldLabel, color = c.graphite)
         val style = (if (singleLine) ArcType.fieldInput else ArcType.notesInput).copy(color = c.ink)
@@ -379,8 +397,22 @@ fun ArcField(
             textStyle = style,
             cursorBrush = SolidColor(c.signal),
             keyboardOptions = KeyboardOptions(imeAction = if (singleLine) ImeAction.Done else ImeAction.Default),
+            interactionSource = source,
             modifier = Modifier
                 .fillMaxWidth()
+                .drawBehind {
+                    // :focus-visible { outline: 3px solid signal; outline-offset: 2px }
+                    if (focused) {
+                        val o = 2.dp.toPx() + 1.5.dp.toPx()
+                        drawRoundRect(
+                            c.signal,
+                            topLeft = Offset(-o, -o),
+                            size = androidx.compose.ui.geometry.Size(size.width + 2 * o, size.height + 2 * o),
+                            cornerRadius = CornerRadius(10.dp.toPx() + o),
+                            style = Stroke(3.dp.toPx()),
+                        )
+                    }
+                }
                 .clip(RoundedCornerShape(10.dp))
                 .background(c.key)
                 .drawBehind {
@@ -413,7 +445,13 @@ fun ChoiceRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
             .background(c.key)
-            .clickable(enabled = enabled, role = if (radio) Role.RadioButton else Role.Checkbox, onClick = onClick)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null, // .radio / .check have no press styling
+                enabled = enabled,
+                role = if (radio) Role.RadioButton else Role.Checkbox,
+                onClick = onClick,
+            )
             .padding(vertical = 12.dp, horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),

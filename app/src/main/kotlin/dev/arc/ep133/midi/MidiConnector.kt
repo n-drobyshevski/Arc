@@ -68,7 +68,10 @@ class MidiConnector(context: Context) {
         val info = find() ?: throw MidiError("No EP-133 found. Plug it in with a USB-C cable, turn it on, then connect again.")
         val device = withTimeoutOrNull(5000) {
             suspendCancellableCoroutine<MidiDevice?> { cont ->
-                m.openDevice(info, { d -> cont.resume(d) }, handler)
+                m.openDevice(info, { d ->
+                    // A device that arrives after the timeout is closed, not leaked.
+                    if (cont.isActive) cont.resume(d) else runCatching { d?.close() }
+                }, handler)
             }
         } ?: throw MidiError("MIDI access was blocked. Unplug the EP-133, plug it back in, then connect again.")
         val inPort = info.ports.firstOrNull { it.type == MidiDeviceInfo.PortInfo.TYPE_INPUT }?.portNumber ?: 0

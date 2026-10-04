@@ -16,6 +16,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import dev.arc.ep133.R
@@ -83,32 +84,39 @@ val Manrope = FontFamily(
     Font(R.font.manrope_800, FontWeight.ExtraBold),
 )
 
-/** `font: 500 16px/1.5 Manrope; font-variant-numeric: tabular-nums`. */
+/**
+ * `font: 500 16px/1.5 Manrope; font-variant-numeric: tabular-nums`.
+ * Line heights are proportional (em) like CSS, and not trimmed, so single
+ * lines get the full CSS line box (Compose trims by default).
+ */
 val BaseText = TextStyle(
     fontFamily = Manrope,
     fontWeight = FontWeight.Medium,
     fontSize = 16.sp,
-    lineHeight = 24.sp,
+    lineHeight = 1.5.em,
+    lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None),
     fontFeatureSettings = "tnum",
 )
 
 object ArcType {
-    val wordmark = BaseText.copy(fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.04).em, lineHeight = 32.sp)
-    val key = BaseText.copy(fontSize = 15.sp, fontWeight = FontWeight.Bold, lineHeight = 15.sp)
-    val keySmall = key.copy(fontSize = 14.sp, lineHeight = 14.sp)
-    val keyWide = key.copy(fontSize = 17.sp, lineHeight = 17.sp)
+    val wordmark = BaseText.copy(fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.04).em)
+    // .key { font: 700 15px/1 }
+    val key = BaseText.copy(fontSize = 15.sp, fontWeight = FontWeight.Bold, lineHeight = 1.em)
+    val keySmall = key.copy(fontSize = 14.sp)
+    val keyWide = key.copy(fontSize = 17.sp)
     val displayHead = BaseText.copy(fontSize = 17.sp, fontWeight = FontWeight.Bold)
     val displaySub = BaseText.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     val displayHint = BaseText.copy(fontSize = 15.sp)
-    val statNum = BaseText.copy(fontSize = 44.sp, fontWeight = FontWeight.ExtraBold, lineHeight = 44.sp, letterSpacing = (-0.03).em)
-    val statFree = statNum.copy(fontSize = 22.sp, lineHeight = 22.sp, letterSpacing = (-0.01).em)
+    val statNum = BaseText.copy(fontSize = 44.sp, fontWeight = FontWeight.ExtraBold, lineHeight = 1.em, letterSpacing = (-0.03).em)
+    val statFree = statNum.copy(fontSize = 22.sp, letterSpacing = (-0.01).em)
     val statLabel = BaseText.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
     val heading = BaseText.copy(fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.02).em)
     val small = BaseText.copy(fontSize = 14.sp)
     val tiny = BaseText.copy(fontSize = 13.sp)
     val fieldLabel = BaseText.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-    val fieldInput = BaseText.copy(fontSize = 17.sp, fontWeight = FontWeight.SemiBold, lineHeight = 24.sp)
-    val notesInput = BaseText.copy(fontSize = 15.sp)
+    // .field input { font: 600 17px/1.4 }
+    val fieldInput = BaseText.copy(fontSize = 17.sp, fontWeight = FontWeight.SemiBold, lineHeight = 1.4.em)
+    val notesInput = BaseText.copy(fontSize = 15.sp, lineHeight = 1.4.em)
     val body15 = BaseText.copy(fontSize = 15.sp)
     val bold = BaseText.copy(fontWeight = FontWeight.Bold)
     val semi = BaseText.copy(fontWeight = FontWeight.SemiBold)
