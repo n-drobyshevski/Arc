@@ -219,8 +219,9 @@ object Fs {
         val nameBytes = encodeUtf8(name)
         val jsonBytes = if (meta != null) encodeUtf8(JsJson.stringify(meta)) else ByteArray(0)
         if (jsonBytes.size > MAX_METADATA_BYTES) throw DeviceError("Sound settings too large to upload")
-        val chunks = (data.size + UPLOAD_CHUNK - 1) / UPLOAD_CHUNK
-        if (chunks > 0xFFFF) throw DeviceError("File too large to upload")
+        val chunkCount = (data.size.toLong() + UPLOAD_CHUNK - 1) / UPLOAD_CHUNK
+        if (chunkCount > 0xFFFF) throw DeviceError("File too large to upload")
+        val chunks = chunkCount.toInt()
 
         // The reply is not checked (check = false): if the device refuses the
         // file, the data chunks are rejected and that error is reported instead.

@@ -178,4 +178,46 @@ class SessionTest {
         assertEquals(0, s.request(5).status)
         s.close()
     }
+
+    @Test
+    fun `nothing is delivered after close`() = runTest {
+        val (s, t) = session { }
+        val pending = async { runCatching { s.request(5, label = "x") } }
+        testScheduler.advanceTimeBy(10)
+        // A reply that arrives after close() must not resolve the request.
+        val req = t.sent.last()
+        s.close()
+        t.reply(req, 0)
+        assertEquals("Disconnected", pending.await().exceptionOrNull()?.message)
+    }
+
+    @Test
+    fun `a timed out request removes its id even if a newer request reused it`() = runTest {
+        // JS deletes the waiter by id. With the id wrapped, the older request's
+        // timeout also drops the newer one, whose reply is then ignored.
+        val (s, t) = session(first = 9) { }
+        val old = async { runCatching { s.request(5, timeout = 100, label = "old") } } // id 10
+        testScheduler.advanceTimeBy(1)
+        // Use up the other 4095 ids so the next request gets id 10 again.
+        s.onLoop { repeat(4095) { s.send(11) } }
+        val young = async { runCatching { s.request(5, timeout = 300, label = "young") } } // id 10 again
+        testScheduler.advanceTimeBy(150)
+        assertEquals(10, idOf(t.sent.last()))
+        t.reply(t.sent.last(), 0)
+        assertEquals("The device did not answer (old). Check the cable and try again.", old.await().exceptionOrNull()?.message)
+        assertEquals("The device did not answer (young). Check the cable and try again.", young.await().exceptionOrNull()?.message)
+        s.close()
+    }
+
+    @Test
+    fun `a throwing push listener stops the rest for that frame`() = runTest {
+        val (s, t) = session { }
+        val calls = ArrayList<String>()
+        s.onPush { calls.add("a"); error("boom") }
+        s.onPush { calls.add("b") }
+        t.emit(hex("F0 00 20 76 33 40 40 00 05 00 07 F7"))
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("a"), calls)
+        s.close()
+    }
 }

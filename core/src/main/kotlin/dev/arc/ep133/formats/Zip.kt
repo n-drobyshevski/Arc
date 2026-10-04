@@ -20,6 +20,9 @@ class ZipEntryData(val path: String, val data: ByteArray, val compress: Boolean 
  * version: UTF-8 flag (0x0800) on every entry, no data descriptors, no extra
  * fields, version 20, and names with a leading "/".
  */
+/** The message JS (V8) gives when a DataView read falls outside the buffer. */
+const val DATAVIEW_RANGE = "Offset is outside the bounds of the DataView"
+
 object Zip {
     private const val LOCAL_SIG = 0x04034B50L
     private const val CENTRAL_SIG = 0x02014B50L
@@ -66,6 +69,9 @@ object Zip {
                 if (n == 0 && (inf.needsInput() || inf.needsDictionary())) throw IllegalArgumentException("Damaged data in $name")
                 out.write(buf, 0, n)
             }
+            // If the extra byte was needed to finish, the real data was truncated;
+            // the browser's DecompressionStream rejects that, so do we.
+            if (inf.remaining == 0 && raw.isNotEmpty()) throw IllegalArgumentException("Damaged data in $name")
             return out.toByteArray()
         } finally {
             inf.end()
@@ -184,7 +190,7 @@ object Zip {
     /** Little-endian reads that fail like DataView does when outside the buffer. */
     private class LeReader(val b: ByteArray) {
         private fun check(at: Int, n: Int) {
-            if (at < 0 || at + n > b.size) throw IllegalArgumentException("Damaged zip file")
+            if (at < 0 || at + n > b.size) throw IllegalArgumentException(DATAVIEW_RANGE)
         }
         fun u16(at: Int): Int {
             check(at, 2)

@@ -82,20 +82,27 @@ fun jsNumberToString(d: Double): String {
     if (d == 0.0) return "0" // also -0
     if (d.isInfinite()) return if (d > 0) "Infinity" else "-Infinity"
     if (d < 0) return "-" + jsNumberToString(-d)
-    // Shortest digit string that round-trips. Double.toString is not guaranteed
-    // shortest on every runtime (ART), so search the precision explicitly.
+    // Shortest digit string that round-trips (Number::toString). Double.toString
+    // is not guaranteed shortest on every runtime (ART), so search explicitly.
+    // At each precision try the nearest value and both neighbours: next to a
+    // power of two the gaps differ, and the nearest may miss while a neighbour fits.
     val exact = BigDecimal(d)
     var digits = ""
     var n = 0
     for (p in 1..17) {
-        val r = exact.round(MathContext(p, RoundingMode.HALF_EVEN))
-        if (r.toString().toDouble() == d) {
-            val unscaled = r.unscaledValue().toString().trimEnd('0').ifEmpty { "0" }
-            digits = unscaled
-            // value = 0.digits * 10^n
-            n = r.precision() - r.scale()
-            break
-        }
+        val mc = { m: RoundingMode -> exact.round(MathContext(p, m)) }
+        val fits = listOf(mc(RoundingMode.HALF_EVEN), mc(RoundingMode.FLOOR), mc(RoundingMode.CEILING))
+            .distinct()
+            .filter { it.toString().toDouble() == d }
+        if (fits.isEmpty()) continue
+        // Closest to the exact value; on a tie, the even last digit.
+        val r = fits.minWithOrNull(
+            compareBy<BigDecimal> { it.subtract(exact).abs() }.thenBy { it.unscaledValue().testBit(0) },
+        )!!
+        digits = r.unscaledValue().toString().trimEnd('0').ifEmpty { "0" }
+        // value = 0.digits * 10^n
+        n = r.precision() - r.scale()
+        break
     }
     val k = digits.length
     return when {

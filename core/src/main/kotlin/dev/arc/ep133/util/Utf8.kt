@@ -1,23 +1,74 @@
 package dev.arc.ep133.util
 
-import java.nio.ByteBuffer
 import java.nio.CharBuffer
 import java.nio.charset.CodingErrorAction
 
 // `new TextDecoder().decode(bytes)` / `new TextEncoder().encode(text)`.
 
 /**
- * UTF-8 decode like the WHATWG TextDecoder: one leading BOM is dropped and
- * malformed input becomes U+FFFD. (The exact number of U+FFFD for a malformed
- * sequence can differ from a browser; that only affects how broken text looks.)
+ * UTF-8 decode exactly like the WHATWG TextDecoder: one leading BOM is
+ * dropped, and every maximal invalid subpart becomes one U+FFFD (the Java and
+ * Android decoders group some invalid sequences differently, which would
+ * change names and error texts).
  */
 fun decodeUtf8(b: ByteArray): String {
-    val start = if (b.size >= 3 && b[0] == 0xEF.toByte() && b[1] == 0xBB.toByte() && b[2] == 0xBF.toByte()) 3 else 0
-    val dec = Charsets.UTF_8.newDecoder()
-        .onMalformedInput(CodingErrorAction.REPLACE)
-        .onUnmappableCharacter(CodingErrorAction.REPLACE)
-        .replaceWith("�")
-    return dec.decode(ByteBuffer.wrap(b, start, b.size - start)).toString()
+    var i = if (b.size >= 3 && b[0] == 0xEF.toByte() && b[1] == 0xBB.toByte() && b[2] == 0xBF.toByte()) 3 else 0
+    val sb = StringBuilder(b.size)
+    var cp = 0
+    var needed = 0
+    var seen = 0
+    var lower = 0x80
+    var upper = 0xBF
+    while (i < b.size) {
+        val byte = b[i].toInt() and 0xFF
+        if (needed == 0) {
+            when (byte) {
+                in 0x00..0x7F -> sb.append(byte.toChar())
+                in 0xC2..0xDF -> {
+                    needed = 1
+                    cp = byte and 0x1F
+                }
+                in 0xE0..0xEF -> {
+                    if (byte == 0xE0) lower = 0xA0
+                    if (byte == 0xED) upper = 0x9F
+                    needed = 2
+                    cp = byte and 0x0F
+                }
+                in 0xF0..0xF4 -> {
+                    if (byte == 0xF0) lower = 0x90
+                    if (byte == 0xF4) upper = 0x8F
+                    needed = 3
+                    cp = byte and 0x07
+                }
+                else -> sb.append('\uFFFD')
+            }
+            i++
+            continue
+        }
+        if (byte < lower || byte > upper) {
+            // Invalid continuation: emit U+FFFD and process this byte again as a lead byte.
+            cp = 0
+            needed = 0
+            seen = 0
+            lower = 0x80
+            upper = 0xBF
+            sb.append('\uFFFD')
+            continue
+        }
+        lower = 0x80
+        upper = 0xBF
+        cp = (cp shl 6) or (byte and 0x3F)
+        seen++
+        i++
+        if (seen == needed) {
+            sb.appendCodePoint(cp)
+            cp = 0
+            needed = 0
+            seen = 0
+        }
+    }
+    if (needed != 0) sb.append('\uFFFD')
+    return sb.toString()
 }
 
 /** UTF-8 encode like TextEncoder: a lone surrogate becomes U+FFFD (Java would write '?'). */

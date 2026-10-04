@@ -248,4 +248,14 @@ class QuirksTest {
         assertEquals(5000.0, dst.projectsMeta["active"]!!.numberOrNull)
         s.close()
     }
+
+    @Test
+    fun `a sound name that is not a string goes into arc json unchanged`() = runTest {
+        val src = device()
+        src.sounds[2]!!.meta["name"] = JsJson.number(7)
+        val pak = Paks.open(Backup.backupDevice(connect(src)).bytes)
+        val arc = JsJson.stringify(pak.sidecar["sounds"]!!)
+        assertTrue(arc.contains(""""2":{"name":7,"settings":{}}"""), arc)
+        assertEquals("7", pak.sounds[2]!!.name)
+    }
 }

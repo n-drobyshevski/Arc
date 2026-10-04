@@ -116,7 +116,7 @@ object Backup {
                     Wav.encode(snd.pcm, snd.channels, snd.sampleRate),
                 ),
             )
-            soundInfo[s.slot.toString()] = JsonObject(linkedMapOf("name" to JsonPrimitive(snd.name), "settings" to snd.settings))
+            soundInfo[s.slot.toString()] = JsonObject(linkedMapOf("name" to snd.nameValue, "settings" to snd.settings))
             doneWeight += weight
         }
 

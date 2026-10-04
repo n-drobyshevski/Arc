@@ -49,10 +49,11 @@ class Session(
 
     // Starts at a random id, like the JS (Math.random() * 4096); the first id used is that + 1.
     private var id = random.nextInt(4096)
-    private val waiters = HashMap<Int, Waiter>()
-    private val ackHandlers = HashMap<Int, (Frame) -> Unit>()
+    // Insertion-ordered like a JS Map (close() rejects in the order requests were made).
+    private val waiters = LinkedHashMap<Int, Waiter>()
+    private val ackHandlers = LinkedHashMap<Int, (Frame) -> Unit>()
     private var identityWaiter: CompletableDeferred<Identity>? = null
-    private val pushListeners = CopyOnWriteArraySet<(Frame) -> Unit>()
+    private val pushListeners = CopyOnWriteArraySet<(Frame) -> Unit>() // only used on loop
 
     @Volatile
     private var closed = false
@@ -83,14 +84,16 @@ class Session(
         w.timer = scope.launch {
             delay(w.timeout)
             if (w.result.isCompleted) return@launch
-            // JS deletes by key unconditionally; checking identity only avoids
-            // removing a newer waiter that reused the id after a wrap.
-            if (waiters[w.id] === w) waiters.remove(w.id)
+            // Deleted by id, as in the JS: after an id wrap this also drops a
+            // newer request that reused the id (it then times out too).
+            waiters.remove(w.id)
             w.result.completeExceptionally(TimeoutError(w.label))
         }
     }
 
     private fun dispatch(d: ByteArray) {
+        // JS unsubscribes from the transport inside close(); nothing is delivered after it.
+        if (closed) return
         if (d.size >= 2 && d[0] == 0xF0.toByte() && d[1] == 0x7E.toByte()) {
             // Every universal non-realtime message is consumed here, even if it
             // is not an identity reply or nobody is waiting for one.
@@ -106,7 +109,17 @@ class Session(
         if (f.isRequest) {
             // Only unsolicited pushes (request flag, no id) reach listeners;
             // device-originated requests with an id are ignored.
-            if (!f.hasId) for (cb in pushListeners) runCatching { cb(f) }
+            // As in the JS, a listener that throws stops the rest for this frame
+            // (the error is swallowed here so the collector keeps running).
+            if (!f.hasId) {
+                for (cb in pushListeners) {
+                    try {
+                        cb(f)
+                    } catch (_: Throwable) {
+                        break
+                    }
+                }
+            }
             return
         }
         // Fire-and-forget acks are matched before waiters and fire once.
@@ -207,7 +220,9 @@ class Session(
         identityWaiter = d
         transport.send(IDENTITY_REQUEST)
         val r = withTimeoutOrNull(timeout) { d.await() }
-        if (identityWaiter === d) identityWaiter = null
+        // Cleared unconditionally on timeout, as in the JS (even if another
+        // identify has installed its own waiter since).
+        if (r == null) identityWaiter = null
         return r
     }
 

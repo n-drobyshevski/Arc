@@ -10,17 +10,13 @@ import dev.arc.ep133.formats.jsTruthy
 import dev.arc.ep133.formats.prop
 import dev.arc.ep133.util.JS_DOT
 import dev.arc.ep133.util.JS_SPACE_CLASS
+import dev.arc.ep133.util.JsDate
 import dev.arc.ep133.util.decodeUtf8
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
-import java.time.Instant
-import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.OffsetDateTime
 import java.time.ZoneId
-import java.time.ZoneOffset
 
 /** A sound inside a .pak: the WAV file plus the settings and name from arc.json, if any. */
 class PakSound(val slot: Int, val name: String, val wav: ByteArray, val settings: JsonElement?)
@@ -119,16 +115,6 @@ object Paks {
         )
     }
 
-    /**
-     * `Date.parse` for the ISO 8601 forms a .pak can carry. A date-time without
-     * an offset is local time and a date on its own is UTC, as in JS. Other
-     * strings (which browsers parse in their own ways) give null.
-     */
-    fun parseDate(s: String, zone: ZoneId = ZoneId.systemDefault()): Long? {
-        runCatching { return OffsetDateTime.parse(s).toInstant().toEpochMilli() }
-        runCatching { return Instant.parse(s).toEpochMilli() }
-        runCatching { return LocalDateTime.parse(s).atZone(zone).toInstant().toEpochMilli() }
-        runCatching { return LocalDate.parse(s).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli() }
-        return null
-    }
+    /** `Date.parse` (see [JsDate]). */
+    fun parseDate(s: String, zone: ZoneId = ZoneId.systemDefault()): Long? = JsDate.parse(s, zone)
 }

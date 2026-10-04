@@ -64,7 +64,7 @@ object Wav {
         val bb = ByteBuffer.wrap(wav).order(ByteOrder.LITTLE_ENDIAN)
         fun tag(at: Int) = if (at + 4 <= wav.size) latin1(wav, at, at + 4) else ""
         fun need(at: Int, n: Int) {
-            if (at < 0 || at + n > wav.size) throw IllegalArgumentException("WAV file is damaged")
+            if (at < 0 || at + n > wav.size) throw IllegalArgumentException(DATAVIEW_RANGE)
         }
         fun u16(at: Int): Int { need(at, 2); return bb.getShort(at).toInt() and 0xFFFF }
         fun u32(at: Int): Long { need(at, 4); return bb.getInt(at).toLong() and 0xFFFFFFFFL }

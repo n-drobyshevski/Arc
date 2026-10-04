@@ -7,6 +7,7 @@ import dev.arc.ep133.formats.isJsNumber
 import dev.arc.ep133.formats.jsNum
 import dev.arc.ep133.formats.jsNumOr
 import dev.arc.ep133.formats.jsStringOr
+import dev.arc.ep133.formats.jsTruthy
 import dev.arc.ep133.formats.numberOrNull
 import dev.arc.ep133.util.utf8Length
 import kotlinx.coroutines.delay
@@ -38,6 +39,8 @@ class SoundData(
     val sampleRate: Double,
     val settings: JsonObject,
     val pcm: ByteArray,
+    /** The name as the device's JSON had it (it need not be a string); goes into arc.json unchanged. */
+    val nameValue: JsonElement = JsonPrimitive(name),
 )
 
 object Device {
@@ -119,7 +122,10 @@ object Device {
     ): SoundData {
         val meta = Fs.getMetadata(session, slot).asObject()
         val pcm = Fs.download(session, slot, onProgress, signal)
+        // meta.name || `sound ${slot}`: the raw value is kept for arc.json.
+        val nameValue = meta["name"].takeIf { it.jsTruthy() } ?: JsonPrimitive("sound $slot")
         return SoundData(
+            nameValue = nameValue,
             slot = slot,
             name = meta["name"].jsStringOr("sound $slot"),
             channels = meta["channels"].jsNumOr(1.0),

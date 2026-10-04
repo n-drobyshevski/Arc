@@ -51,16 +51,92 @@ object JsJson {
             while (i < s.length && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r')) i++
         }
 
+        private class Open(val map: LinkedHashMap<String, JsonElement>?, val list: ArrayList<JsonElement>?) {
+            var key: String = ""
+        }
+
+        private fun expect(c: Char) {
+            if (i >= s.length || s[i] != c) throw err()
+            i++
+        }
+
+        /** Reads `"key" :` and leaves [i] at the value. */
+        private fun key(): String {
+            ws()
+            if (i >= s.length || s[i] != '"') throw err()
+            val k = str()
+            ws()
+            expect(':')
+            ws()
+            return k
+        }
+
+        /**
+         * Iterative (an explicit stack instead of recursion), so nesting depth
+         * is limited by memory as in V8, not by the thread's stack.
+         */
         fun value(): JsonElement {
-            if (i >= s.length) throw err()
-            return when (val c = s[i]) {
-                '{' -> obj()
-                '[' -> arr()
-                '"' -> JsonPrimitive(str())
-                't' -> lit("true", JsonPrimitive(true))
-                'f' -> lit("false", JsonPrimitive(false))
-                'n' -> lit("null", JsonNull)
-                else -> if (c == '-' || c in '0'..'9') num() else throw err()
+            val stack = ArrayList<Open>()
+            while (true) {
+                if (i >= s.length) throw err()
+                var v: JsonElement
+                when (val c = s[i]) {
+                    '{' -> {
+                        i++
+                        ws()
+                        if (i < s.length && s[i] == '}') {
+                            i++
+                            v = JsonObject(emptyMap())
+                        } else {
+                            val o = Open(LinkedHashMap(), null)
+                            o.key = key()
+                            stack.add(o)
+                            continue
+                        }
+                    }
+                    '[' -> {
+                        i++
+                        ws()
+                        if (i < s.length && s[i] == ']') {
+                            i++
+                            v = JsonArray(emptyList())
+                        } else {
+                            stack.add(Open(null, ArrayList()))
+                            continue
+                        }
+                    }
+                    '"' -> v = JsonPrimitive(str())
+                    't' -> v = lit("true", JsonPrimitive(true))
+                    'f' -> v = lit("false", JsonPrimitive(false))
+                    'n' -> v = lit("null", JsonNull)
+                    else -> v = if (c == '-' || c in '0'..'9') num() else throw err()
+                }
+                // Attach the finished value to its parents, closing containers as they end.
+                while (true) {
+                    val top = stack.lastOrNull() ?: return v
+                    ws()
+                    if (top.map != null) {
+                        // Duplicate keys: last value wins, first position is kept (like JS).
+                        top.map[top.key] = v
+                        if (i < s.length && s[i] == ',') {
+                            i++
+                            top.key = key()
+                            break
+                        }
+                        expect('}')
+                        v = JsonObject(top.map)
+                    } else {
+                        top.list!!.add(v)
+                        if (i < s.length && s[i] == ',') {
+                            i++
+                            ws()
+                            break
+                        }
+                        expect(']')
+                        v = JsonArray(top.list)
+                    }
+                    stack.removeAt(stack.size - 1)
+                }
             }
         }
 
@@ -68,61 +144,6 @@ object JsJson {
             if (!s.startsWith(word, i)) throw err()
             i += word.length
             return v
-        }
-
-        fun obj(): JsonObject {
-            i++ // {
-            val m = LinkedHashMap<String, JsonElement>()
-            ws()
-            if (i < s.length && s[i] == '}') {
-                i++
-                return JsonObject(m)
-            }
-            while (true) {
-                ws()
-                if (i >= s.length || s[i] != '"') throw err()
-                val k = str()
-                ws()
-                if (i >= s.length || s[i] != ':') throw err()
-                i++
-                ws()
-                // Duplicate keys: last value wins, first position is kept (like JS).
-                m[k] = value()
-                ws()
-                if (i >= s.length) throw err()
-                when (s[i]) {
-                    ',' -> i++
-                    '}' -> {
-                        i++
-                        return JsonObject(m)
-                    }
-                    else -> throw err()
-                }
-            }
-        }
-
-        fun arr(): JsonArray {
-            i++ // [
-            val l = ArrayList<JsonElement>()
-            ws()
-            if (i < s.length && s[i] == ']') {
-                i++
-                return JsonArray(l)
-            }
-            while (true) {
-                ws()
-                l.add(value())
-                ws()
-                if (i >= s.length) throw err()
-                when (s[i]) {
-                    ',' -> i++
-                    ']' -> {
-                        i++
-                        return JsonArray(l)
-                    }
-                    else -> throw err()
-                }
-            }
         }
 
         fun str(): String {
