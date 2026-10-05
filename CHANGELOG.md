@@ -10,7 +10,8 @@ version fixes bugs. The version itself is set in `version.properties`.
 - Live: a one-group view, a large grid of one group with A–D keys to switch and Follow to jump to the group just played. It fits one screen without scrolling (checked at Pixel 7 and 360 dp sizes). The choice is kept in the settings.
 
 ### Changed
-- On phones narrower than 380 dp the top bar's Back up is a square dot (REC style), so the bar stays on one line.
+- Quieter controls after the pocket operator app: icon keys in the top bar (back up, connection, guide, settings) and in the Backups and Device headers (search, import, refresh, add samples), named on long-press and to screen readers; only the selected tab is a block; view switches are underlined words; play keys are outlines until they play; Follow is a target icon.
+- A guide overlay (**?**, and once on the first start) tags every control on screen with its name, like the PO app's tutorial.
 
 ## [0.2.0] - 2026-10-05
 

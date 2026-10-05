@@ -1,5 +1,12 @@
 package dev.arc.ep133.ui.screens
 
+import dev.arc.ep133.text.CoachText
+import dev.arc.ep133.ui.components.TextToggle
+import dev.arc.ep133.ui.components.CoachYellowInk
+import dev.arc.ep133.ui.components.CoachYellow
+import dev.arc.ep133.ui.components.coachMark
+import dev.arc.ep133.ui.components.ArcIcon
+import dev.arc.ep133.ui.components.IconBlock
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
@@ -138,9 +145,21 @@ fun DeviceScreen(
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
         ) {
             item(key = "head") {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                // The caption with its tools as icons: read again, and add samples (orange, the main action).
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Caption(FeatureText.DEVICE_TITLE, Modifier.weight(1f), align = TextAlign.Start)
-                    ArcKey(FeatureText.REFRESH, onRefresh, size = KeySize.Small, enabled = state.connected && !state.busy)
+                    IconBlock(
+                        ArcIcon.REFRESH, CoachText.REFRESH, c.tabOff, c.navy, onRefresh,
+                        Modifier.coachMark("device.refresh", CoachText.REFRESH, c.navy, c.onNavy),
+                        enabled = state.connected && !state.busy,
+                    )
+                    if (contents != null) {
+                        IconBlock(
+                            ArcIcon.PLUS, CoachText.ADD_SAMPLES, c.signal, c.onSignal, onAddSamples,
+                            Modifier.coachMark("device.add", CoachText.ADD_SAMPLES, c.signal, c.onSignal),
+                            enabled = !state.busy,
+                        )
+                    }
                     if (onBack != null) ArcKey(Strings.DONE, onBack, size = KeySize.Small, style = KeyStyle.Quiet)
                 }
             }
@@ -157,21 +176,17 @@ fun DeviceScreen(
             }
             item(key = "panel") { StoragePanel(contents, b.reading != null, Modifier.padding(top = 12.dp)) }
             if (contents == null) return@LazyColumn
-            item(key = "add") {
-                ArcKey(
-                    FeatureText.ADD_SAMPLES, onAddSamples, Modifier.fillMaxWidth().padding(top = 12.dp),
-                    style = KeyStyle.Signal, enabled = !state.busy,
-                )
-            }
             item(key = "switch") {
-                Segmented(
+                TextToggle(
                     listOf(
                         FeatureText.sectionLabel(FeatureText.SOUNDS, contents.sounds.size),
                         FeatureText.sectionLabel(FeatureText.PROJECTS, contents.projects.size),
                     ),
                     selected = section,
                     onSelect = { section = it },
-                    modifier = Modifier.padding(top = 20.dp),
+                    modifier = Modifier
+                        .padding(top = 12.dp)
+                        .coachMark("device.switch", CoachText.SOUNDS_PROJECTS, CoachYellow, CoachYellowInk),
                 )
             }
             if (section == 0) {
@@ -199,6 +214,8 @@ fun DeviceScreen(
                         itemsIndexed(list, key = { _, e -> "s${e.slot}" }) { i, e ->
                             SoundRow(
                                 e, b, first = i == 0, last = i == list.lastIndex,
+                                // The guide overlay points at the first row's play key.
+                                mark = range == groups.first().first && i == 0,
                                 open = openSlot == e.slot, enabled = !state.busy,
                                 playing = playing == "device:${e.slot}",
                                 onPlay = { onPlay(e.slot) },
@@ -306,6 +323,7 @@ private fun SoundRow(
     b: BrowserUi,
     first: Boolean,
     last: Boolean,
+    mark: Boolean = false,
     open: Boolean,
     enabled: Boolean,
     playing: Boolean,
@@ -336,6 +354,7 @@ private fun SoundRow(
                 enabled = enabled,
                 description = if (playing) FeatureText.stop(e.name) else FeatureText.play(e.name),
                 onClick = { if (playing) onStop() else onPlay() },
+                modifier = if (mark) Modifier.coachMark("device.play", CoachText.PLAY, CoachYellow, CoachYellowInk) else Modifier,
             )
         }
         if (b.reading == "play:${e.slot}") Text(FeatureText.READING, style = ArcType.small, color = c.graphite)

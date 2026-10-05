@@ -1,5 +1,11 @@
 package dev.arc.ep133.ui.screens
 
+import dev.arc.ep133.text.CoachText
+import dev.arc.ep133.ui.components.TextToggle
+import dev.arc.ep133.ui.components.CoachYellowInk
+import dev.arc.ep133.ui.components.CoachYellow
+import dev.arc.ep133.ui.components.coachMark
+import dev.arc.ep133.ui.components.ArcIcon
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -122,10 +128,11 @@ fun MirrorScreen(
     }
     val now = fixedNow ?: if (fading) frame else System.nanoTime()
     val viewSwitch = @Composable {
-        Segmented(
+        TextToggle(
             listOf(MirrorText.ALL_GROUPS, MirrorText.ONE_GROUP),
             selected = if (oneGroup) 1 else 0,
             onSelect = { onOneGroup(it == 1) },
+            modifier = Modifier.coachMark("live.view", CoachText.VIEW, CoachYellow, CoachYellowInk),
         )
     }
     Box(Modifier.fillMaxSize().background(c.shell), contentAlignment = Alignment.TopCenter) {
@@ -155,7 +162,11 @@ fun MirrorScreen(
                 }
                 Display(st, mirror, compact = true)
                 viewSwitch()
-                Group(group, st, nameOf, now, Modifier.fillMaxWidth().weight(1f), big = true)
+                Group(
+                    group, st, nameOf, now,
+                    Modifier.fillMaxWidth().weight(1f).coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
+                    big = true,
+                )
                 GroupKeys(group, st, now, onSelect = { group = it }, follow = follow, onFollow = onFollow)
             }
             return@Box
@@ -258,6 +269,7 @@ private fun GroupKeys(group: Int, st: MirrorState, now: Long, onSelect: (Int) ->
     val c = LocalArcColors.current
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         for (g in 0..3) {
+            val markA = if (g == 0) Modifier.coachMark("live.groups", CoachText.GROUPS, c.navy, c.onNavy) else Modifier
             val on = g == group
             val sounding = st.pads.filterKeys { it.group == g }.values.maxOfOrNull { glow(it, now) } ?: 0f
             val face = if (on) c.navy else lerp(c.tabOff, c.signal, sounding)
@@ -265,6 +277,7 @@ private fun GroupKeys(group: Int, st: MirrorState, now: Long, onSelect: (Int) ->
             Box(
                 Modifier
                     .weight(1f)
+                    .then(markA)
                     .heightIn(min = 52.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .background(face)
@@ -278,9 +291,11 @@ private fun GroupKeys(group: Int, st: MirrorState, now: Long, onSelect: (Int) ->
                 Text(MirrorText.groupKey(g), style = ArcType.tab.copy(fontSize = 22.sp), color = ink)
             }
         }
+        // Follow is an icon (a target), named on long-press, in the overlay and to screen readers.
         Box(
             Modifier
-                .weight(1.4f)
+                .weight(1f)
+                .coachMark("live.follow", CoachText.FOLLOW, c.navy, c.onNavy)
                 .heightIn(min = 52.dp)
                 .clip(RoundedCornerShape(10.dp))
                 .background(if (follow) c.navy else c.tabOff)
@@ -292,7 +307,7 @@ private fun GroupKeys(group: Int, st: MirrorState, now: Long, onSelect: (Int) ->
                 },
             contentAlignment = Alignment.Center,
         ) {
-            Text(MirrorText.FOLLOW.uppercase(), style = ArcType.capsKeySmall, color = if (follow) c.onNavy else c.onTabOff)
+            dev.arc.ep133.ui.components.Icon(ArcIcon.FOLLOW, if (follow) c.onNavy else c.graphite, size = 24.dp)
         }
     }
 }

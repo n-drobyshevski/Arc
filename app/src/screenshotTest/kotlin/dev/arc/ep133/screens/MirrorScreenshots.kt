@@ -21,6 +21,7 @@ import dev.arc.ep133.data.AppSettings
 import dev.arc.ep133.ui.screens.DeviceScreen
 import dev.arc.ep133.ui.screens.PadsSheetContent
 import dev.arc.ep133.ui.components.ArcFrame
+import dev.arc.ep133.ui.components.CoachHost
 import dev.arc.ep133.ui.components.ArcSheet
 import dev.arc.ep133.ui.components.Tab
 import dev.arc.ep133.ui.components.TabBar
@@ -70,20 +71,22 @@ private val playing = MirrorState(
     padOrder = PadOrder.FROM_TOP,
 )
 
-/** A tab inside the top bar and the tab bar, as the app shows it. */
+/** A tab inside the top bar and the tab bar, as the app shows it; [guide] opens the guide overlay. */
 @Composable
-private fun Framed(tab: Tab, connected: Boolean = true, dark: Boolean = false, content: @Composable () -> Unit) {
+private fun Framed(tab: Tab, connected: Boolean = true, dark: Boolean = false, guide: Boolean = false, content: @Composable () -> Unit) {
     ArcTheme(dark = dark) {
-        ArcFrame(
-            top = { TopBar(connected = connected, canConnect = true, canBackup = connected, onBackup = {}, onConnect = {}, onDebug = {}) },
-            bottom = { TabBar(tab) {} },
-        ) { content() }
+        CoachHost(visible = guide, onDismiss = {}) {
+            ArcFrame(
+                top = { TopBar(connected = connected, canConnect = true, canBackup = connected, onBackup = {}, onConnect = {}, onDebug = {}) },
+                bottom = { TabBar(tab) {} },
+            ) { content() }
+        }
     }
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false) {
-    Framed(Tab.LIVE, dark = dark) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false) {
+    Framed(Tab.LIVE, dark = dark, guide = guide) {
         MirrorScreen(
             mirror = MirrorUi(state, loading = loading),
             nameOf = { if (state.learned.isEmpty()) null else names[it] },
@@ -152,8 +155,8 @@ private val connectedState = UiState(
 )
 
 @Composable
-private fun Main(state: UiState, dark: Boolean = false) {
-    Framed(Tab.BACKUPS, connected = state.connected, dark = dark) {
+private fun Main(state: UiState, dark: Boolean = false, guide: Boolean = false) {
+    Framed(Tab.BACKUPS, connected = state.connected, dark = dark, guide = guide) {
         MainScreen(
             state = state,
             fmtDay = { if (it > 1_790_900_000_000L) "Oct 4, 2026" else if (it > 1_790_500_000_000L) "Oct 2, 2026" else "Sep 25, 2026" },
@@ -198,9 +201,9 @@ private val deviceState = connectedState.copy(
 )
 
 @Composable
-private fun Device(section: Int = 0, open: Int? = null, playing: String? = null, connected: Boolean = true, dark: Boolean = false) {
+private fun Device(section: Int = 0, open: Int? = null, playing: String? = null, connected: Boolean = true, dark: Boolean = false, guide: Boolean = false) {
     val state = if (connected) deviceState else UiState(libraryLoaded = true)
-    Framed(Tab.DEVICE, connected = connected, dark = dark) {
+    Framed(Tab.DEVICE, connected = connected, dark = dark, guide = guide) {
         DeviceScreen(
             state = state, onRefresh = {}, onSoundDetails = {}, onProjectSounds = {}, onAddSamples = {},
             playing = playing, initialSection = section, initialOpen = open,
@@ -271,3 +274,20 @@ fun SettingsPreview() = Settings(dark = false)
 @Preview(name = "Settings dark", widthDp = 393, heightDp = 1500, showBackground = true)
 @Composable
 fun SettingsDarkPreview() = Settings(dark = true)
+
+// The guide overlay (the ? key, and once on the first start), on each tab with tools.
+
+@PreviewTest
+@Preview(name = "Guide overlay Backups", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun GuideOverlayBackupsPreview() = Main(connectedState, guide = true)
+
+@PreviewTest
+@Preview(name = "Guide overlay Live", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun GuideOverlayLivePreview() = Live(playing, oneGroup = true, guide = true)
+
+@PreviewTest
+@Preview(name = "Guide overlay Device", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun GuideOverlayDevicePreview() = Device(guide = true)

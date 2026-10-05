@@ -4,7 +4,7 @@ A free, open-source backup librarian for the teenage engineering EP-133 K.O. II,
 
 This is a port of the web version in [`reference/`](reference/), which is kept read only as the spec. The two behave the same and their `.pak` files are interchangeable.
 
-The look keeps the web version's device panel, keys and orange signal, and borrows its layout from teenage engineering's pocket operator app. A top bar holds the wordmark, an orange **Back up** block and the connection block (green while connected). Four tabs run along the bottom: **Backups**, **Live**, **Device** and **Guide**. The page is cream with navy ink, labels are uppercase, and pads and lists sit on pale plates split by thin lines. Back on any other tab returns to Backups.
+The look keeps the web version's device panel, keys and orange signal, and borrows its layout from teenage engineering's pocket operator app. The controls are icons, as on the PO's top row. The top bar holds the wordmark, then an orange **●** (back up), the connection key (green with a dot while connected, where a tap disconnects; navy with a ring when not), **?** and the settings gear. Long-press any icon for its name; screen readers read it too. **?** opens a guide overlay, shown once by itself on the first start: the page fades and every control on screen gets a coloured tag with an arrow, like the PO app's tutorial. Four tabs run along the bottom: **Backups**, **Live**, **Device** and **Guide**. Only the selected tab is a block; the others are plain words. View switches are quiet words with an underline. Play keys are outlines until they play. The page is cream with navy ink, labels are uppercase, and pads and lists sit on pale plates split by thin lines. Back on any other tab returns to Backups.
 
 ## What it does
 
@@ -237,7 +237,7 @@ Not verified yet. Nobody has run this on a phone or an EP-133:
 Back up the EP-133 with the official Sample Tool first. Then, with the debug screen at hand (long-press **arc**):
 
 1. Plug in the EP-133 and turn it on. arc should connect by itself, or tap **Connect**. The panel shows the product, OS version, sound and project counts, free space and the meter.
-2. Tap **Back up** in the top bar (or **Back up device** under the panel, before the first backup). Lock the phone halfway through: the notification should keep updating and the backup should finish.
+2. Tap the orange **●** in the top bar (or **Back up device** under the panel, before the first backup). Lock the phone halfway through: the notification should keep updating and the backup should finish.
 3. Open the backup and check the counts against the device. Share it, and save it with **Save .pak file**.
 4. Restore a single project with its sounds, then the whole backup. Try **Cancel** during a restore.
 5. Unplug the cable during a transfer. You should see an error, and the app should recover after you plug it back in.
@@ -254,7 +254,7 @@ Back up the EP-133 with the official Sample Tool first. Then, with the debug scr
 16. Check that Documents/arc (in the Files app) holds your backups and a `library.json`. Uninstall arc, reinstall it, tap **Restore from Documents/arc**, pick the folder, and check that titles and notes come back.
 17. Open the **Live** tab and press pads in each group: the lit pad should be the one you pressed. After one press, its sample name should appear. Check the names against the device and try **From the bottom** if they look wrong.
 18. Play a pattern: check whether sequenced pads light up. Switch on clock out (SHIFT + ERASE, 102, ENTER) and check play/stop and the tempo. Try KEYS mode.
-19. Switch between the four tabs with a backup running and with Live open: the progress sheet should stay up, Live should stop listening when you leave it, and Back on any tab but Backups should return to Backups. Try a large system font: the top bar's blocks should wrap, not overlap.
+19. Switch between the four tabs with a backup running and with Live open: the progress sheet should stay up, Live should stop listening when you leave it, and Back on any tab but Backups should return to Backups. Open **?** on each tab: every tag should point at its control without covering another tag. Long-press each icon for its name, and check them with TalkBack.
 20. Play a sound from a backup's **Contents** through the phone speaker, wired headphones and Bluetooth. If one stays silent, export the debug log: it has a "play … -> output" line naming where Android sent the sound.
 21. In **Settings**: switch the theme; turn **Connect when plugged in** off and plug the EP-133 in (it should stay disconnected until you tap Connect); with 6 backups, set **Keep** to 5 and confirm (the oldest goes from the list and from Documents/arc); make a backup and check the oldest is removed again.
 

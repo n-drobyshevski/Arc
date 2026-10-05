@@ -11,6 +11,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -307,20 +308,49 @@ fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, mod
 }
 
 /**
+ * A quiet switch between views: words side by side, the chosen one in ink and
+ * underlined (like the pocket operator app's DRUMS / KEYPAD), the others grey.
+ */
+@Composable
+fun TextToggle(options: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
+    val c = LocalArcColors.current
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+        options.forEachIndexed { i, label ->
+            val on = i == selected
+            Column(
+                Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Tab) { onSelect(i) }
+                    .semantics { this.selected = on }
+                    .heightIn(min = 40.dp)
+                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                Text(label.uppercase(), style = ArcType.capsKeySmall, color = if (on) c.ink else c.graphite, maxLines = 1)
+                Box(Modifier.height(2.dp).width(18.dp).background(if (on) c.navy else Color.Transparent))
+            }
+        }
+    }
+}
+
+/**
  * A round play key for a list row: navy with a triangle, orange with a square
  * while playing, faded while the device is busy with something else.
  */
 @Composable
 fun PlayKey(playing: Boolean, enabled: Boolean, description: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val c = LocalArcColors.current
-    val face = if (playing) c.signal else c.navy
-    val ink = if (playing) c.onSignal else c.onNavy
+    // Quiet until it plays: an outline with a navy triangle, filled orange while playing.
+    val face = if (playing) c.signal else Color.Transparent
+    val ink = if (playing) c.onSignal else c.navy
     Box(
         modifier
             .size(40.dp)
             .graphicsLayer { alpha = if (enabled || playing) 1f else 0.4f }
             .clip(CircleShape)
             .background(face)
+            .then(if (playing) Modifier else Modifier.border(1.5.dp, c.navy.copy(alpha = 0.6f), CircleShape))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,

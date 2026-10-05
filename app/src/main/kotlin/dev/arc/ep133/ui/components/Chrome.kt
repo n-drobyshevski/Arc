@@ -46,6 +46,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dev.arc.ep133.text.CoachText
 import dev.arc.ep133.text.NavText
 import dev.arc.ep133.text.Strings
 import dev.arc.ep133.ui.theme.ArcType
@@ -88,9 +89,11 @@ fun ArcFrame(top: @Composable () -> Unit, bottom: @Composable () -> Unit, conten
 }
 
 /**
- * The wordmark, then the orange Back up block (REC in the pocket operator app),
- * the connection block (green and named EP-133 while connected; a tap
- * disconnects) and the settings gear.
+ * The wordmark, then icon keys as in the pocket operator app's top row: the
+ * orange REC-style dot backs up, the connection key is green with a dot while
+ * the EP-133 is connected (a tap disconnects) and navy with a ring when not,
+ * then the guide overlay (?) and settings. Their names show on long-press,
+ * in the overlay and to screen readers.
  */
 @Composable
 fun TopBar(
@@ -101,65 +104,47 @@ fun TopBar(
     onConnect: () -> Unit,
     onDebug: () -> Unit,
     onSettings: () -> Unit = {},
+    onHelp: () -> Unit = {},
 ) {
     val c = LocalArcColors.current
-    BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
-        // On a narrow phone Back up is a square REC-style dot (named for screen readers),
-        // so the bar stays one line and every tab keeps its height.
-        val narrow = maxWidth < 380.dp
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
         Row(
             Modifier.widthIn(max = 720.dp).fillMaxWidth().padding(start = 18.dp, end = 16.dp, top = 12.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Wordmark(onLongPress = onDebug)
-            Spacer(Modifier.width(12.dp))
-            // The blocks wrap as whole blocks when a large font leaves no room.
-            FlowRow(
-                Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Block(if (narrow) "" else NavText.BACK_UP, c.signal, c.onSignal, onBackup, enabled = canBackup, dot = true, description = Strings.BACK_UP)
-                if (connected) {
-                    // Green while connected, named after the device; tapping it disconnects.
-                    Block(NavText.DEVICE_CAPTION, c.ok, c.onOk, onConnect, enabled = canConnect, dot = true, description = Strings.DISCONNECT)
-                } else {
-                    Block(Strings.CONNECT, c.navy, c.onNavy, onConnect, enabled = canConnect)
-                }
-                GearKey(onSettings)
+            Spacer(Modifier.weight(1f))
+            IconBlock(
+                ArcIcon.DOT, CoachText.BACK_UP, c.signal, c.onSignal, onBackup,
+                Modifier.coachMark("top.backup", CoachText.BACK_UP, c.signal, c.onSignal),
+                enabled = canBackup,
+            )
+            if (connected) {
+                IconBlock(
+                    ArcIcon.DOT, CoachText.CONNECTED, c.ok, c.onOk, onConnect,
+                    Modifier.coachMark("top.connection", CoachText.CONNECTION, c.ok, c.onOk),
+                    enabled = canConnect, iconSize = 16.dp,
+                )
+            } else {
+                IconBlock(
+                    ArcIcon.RING, CoachText.DISCONNECTED, c.navy, c.onNavy, onConnect,
+                    Modifier.coachMark("top.connection", CoachText.CONNECTION, c.navy, c.onNavy),
+                    enabled = canConnect, iconSize = 18.dp,
+                )
             }
+            Spacer(Modifier.width(4.dp))
+            IconBlock(
+                ArcIcon.HELP, CoachText.HELP, c.tabOff, c.navy, onHelp,
+                Modifier.coachMark("top.help", CoachText.HELP, c.ink, c.shell),
+                round = true,
+            )
+            IconBlock(
+                ArcIcon.GEAR, CoachText.SETTINGS, c.tabOff, c.navy, onSettings,
+                Modifier.coachMark("top.settings", CoachText.SETTINGS, c.graphite, c.shell),
+                round = true, iconSize = 24.dp,
+            )
         }
-    }
-}
-
-/** A flat coloured block with an uppercase label (and a dot, like REC). */
-@Composable
-private fun Block(
-    text: String,
-    face: Color,
-    ink: Color,
-    onClick: () -> Unit,
-    enabled: Boolean,
-    dot: Boolean = false,
-    description: String? = null,
-) {
-    val source = remember { MutableInteractionSource() }
-    val pressed by source.collectIsPressedAsState()
-    Row(
-        Modifier
-            .graphicsLayer { alpha = if (enabled) 1f else 0.45f }
-            .clip(RoundedCornerShape(8.dp))
-            .background(face)
-            .background(if (pressed && enabled) Color.Black.copy(alpha = 0.12f) else Color.Transparent)
-            .clickable(interactionSource = source, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
-            .then(if (description != null) Modifier.semantics { contentDescription = description } else Modifier)
-            .heightIn(min = 44.dp)
-            .padding(horizontal = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        if (dot) Box(Modifier.size(if (text.isEmpty()) 16.dp else 12.dp).clip(CircleShape).background(ink))
-        if (text.isNotEmpty()) Text(text.uppercase(), style = ArcType.capsKeySmall, color = ink, maxLines = 1)
     }
 }
 
@@ -174,7 +159,8 @@ fun TabBar(tab: Tab, onTab: (Tab) -> Unit) {
                 .fillMaxWidth()
                 .height(TabBarHeight)
                 .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp)
-                .semantics { contentDescription = NavText.TABS },
+                .semantics { contentDescription = NavText.TABS }
+                .coachMark("tabs", CoachText.SECTIONS, c.navy, c.onNavy),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             for (t in Tab.entries) {
@@ -184,7 +170,8 @@ fun TabBar(tab: Tab, onTab: (Tab) -> Unit) {
                         .weight(1f)
                         .fillMaxSize()
                         .clip(RoundedCornerShape(10.dp))
-                        .background(if (on) c.navy else c.tabOff)
+                        // Only the selected tab is a block; the others are plain words.
+                        .background(if (on) c.navy else androidx.compose.ui.graphics.Color.Transparent)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
@@ -193,46 +180,9 @@ fun TabBar(tab: Tab, onTab: (Tab) -> Unit) {
                         .semantics { selected = on },
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(t.label.uppercase(), style = ArcType.tab, color = if (on) c.onNavy else c.onTabOff, textAlign = TextAlign.Center, maxLines = 1)
+                    Text(t.label.uppercase(), style = ArcType.tab, color = if (on) c.onNavy else c.graphite, textAlign = TextAlign.Center, maxLines = 1)
                 }
             }
-        }
-    }
-}
-
-/** The round grey gear that opens the settings (the pocket operator app has one in the same place). */
-@Composable
-private fun GearKey(onClick: () -> Unit) {
-    val c = LocalArcColors.current
-    val source = remember { MutableInteractionSource() }
-    val pressed by source.collectIsPressedAsState()
-    Box(
-        Modifier
-            .size(44.dp)
-            .clip(CircleShape)
-            .background(if (pressed) c.graphite else c.tabOff)
-            .clickable(interactionSource = source, indication = null, role = Role.Button, onClick = onClick)
-            .semantics { contentDescription = dev.arc.ep133.text.SettingsText.TITLE },
-        contentAlignment = Alignment.Center,
-    ) {
-        val ink = if (pressed) c.onNavy else c.navy
-        androidx.compose.foundation.Canvas(Modifier.size(24.dp)) {
-            val center = this.center
-            val outer = size.minDimension / 2
-            val body = outer * 0.72f
-            // Eight teeth, then the body over them, then the hole.
-            for (i in 0 until 8) {
-                rotate(i * 45f, center) {
-                    drawRoundRect(
-                        ink,
-                        topLeft = androidx.compose.ui.geometry.Offset(center.x - outer * 0.17f, center.y - outer),
-                        size = androidx.compose.ui.geometry.Size(outer * 0.34f, outer * 0.5f),
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(outer * 0.06f),
-                    )
-                }
-            }
-            drawCircle(ink, radius = body, center = center)
-            drawCircle(if (pressed) c.graphite else c.tabOff, radius = body * 0.45f, center = center)
         }
     }
 }

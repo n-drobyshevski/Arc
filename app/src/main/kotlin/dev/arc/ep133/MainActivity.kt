@@ -43,6 +43,7 @@ import dev.arc.ep133.text.LibraryRules
 import dev.arc.ep133.text.Strings
 import dev.arc.ep133.ui.components.ArcSheet
 import dev.arc.ep133.ui.components.ArcFrame
+import dev.arc.ep133.ui.components.CoachHost
 import dev.arc.ep133.ui.components.ArcToast
 import dev.arc.ep133.ui.components.Tab
 import dev.arc.ep133.ui.components.TabBar
@@ -305,6 +306,15 @@ class MainActivity : ComponentActivity() {
         var debug by rememberSaveable { mutableStateOf(false) }
         var settingsOpen by rememberSaveable { mutableStateOf(false) }
         var fontLicence by rememberSaveable { mutableStateOf(false) }
+        // The guide overlay: from the ? key, and once by itself on the first start.
+        var coach by rememberSaveable { mutableStateOf(false) }
+        LaunchedEffect(Unit) {
+            val prefs = getPreferences(MODE_PRIVATE)
+            if (!prefs.getBoolean("coach_seen", false)) {
+                prefs.edit { putBoolean("coach_seen", true) }
+                coach = true
+            }
+        }
         // The section under the top bar; the other screens stack over it without the bars.
         var tab by rememberSaveable { mutableStateOf(Tab.BACKUPS) }
         var search by rememberSaveable { mutableStateOf(false) }
@@ -480,7 +490,7 @@ class MainActivity : ComponentActivity() {
                     onOpen = { b -> contentsId = b.id },
                     onBack = { search = false },
                 )
-            } else {
+            } else CoachHost(visible = coach, onDismiss = { coach = false }) {
                 ArcFrame(
                     top = {
                         TopBar(
@@ -491,6 +501,7 @@ class MainActivity : ComponentActivity() {
                             onConnect = { controller.connect() },
                             onDebug = { debug = true },
                             onSettings = { settingsOpen = true },
+                            onHelp = { coach = true },
                         )
                     },
                     bottom = { TabBar(tab) { selectTab(it) } },
@@ -538,7 +549,9 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                 }
-
+            }
+            // The tab screens' sheets, over the frame (same condition as the branch above).
+            if (onTabs) {
                 if (tab == Tab.DEVICE) {
                     val draft = state.browser.draft
                     val lastDraft = remember { mutableStateOf(draft) }.apply { if (draft != null) value = draft }.value

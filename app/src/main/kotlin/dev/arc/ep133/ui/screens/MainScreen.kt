@@ -1,5 +1,11 @@
 package dev.arc.ep133.ui.screens
 
+import dev.arc.ep133.text.CoachText
+import dev.arc.ep133.ui.components.CoachYellowInk
+import dev.arc.ep133.ui.components.CoachYellow
+import dev.arc.ep133.ui.components.coachMark
+import dev.arc.ep133.ui.components.ArcIcon
+import dev.arc.ep133.ui.components.IconBlock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -96,16 +102,23 @@ fun MainScreen(
             }
 
             Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Caption(Strings.BACKUPS)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                // The caption with its tools as icons (named on long-press and in the guide overlay).
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Caption(Strings.BACKUPS, Modifier.weight(1f), align = androidx.compose.ui.text.style.TextAlign.Start)
                     // Addition to the web version: find sounds across backups.
                     if (state.backups.isNotEmpty()) {
-                        ArcKey(FeatureText.SEARCH, onSearch, Modifier.weight(1f), size = KeySize.Small)
+                        IconBlock(
+                            ArcIcon.SEARCH, CoachText.SEARCH, c.tabOff, c.navy, onSearch,
+                            Modifier.coachMark("backups.search", CoachText.SEARCH, c.navy, c.onNavy),
+                        )
                     }
-                    ArcKey(Strings.IMPORT, onImport, Modifier.weight(1f), size = KeySize.Small)
+                    IconBlock(
+                        ArcIcon.IMPORT, CoachText.IMPORT, c.tabOff, c.navy, onImport,
+                        Modifier.coachMark("backups.import", CoachText.IMPORT, c.navy, c.onNavy),
+                    )
                 }
                 if (state.backups.isNotEmpty()) {
-                    BackupList(state.backups, state.freshId, fmtDay, onOpen)
+                    BackupList(state.backups, state.freshId, fmtDay, onOpen, Modifier.coachMark("backups.open", CoachText.OPEN_BACKUP, CoachYellow, CoachYellowInk))
                 } else if (state.libraryLoaded) {
                     // #empty starts hidden and only shows once the library has loaded.
                     DashedBox {
@@ -197,9 +210,9 @@ private fun Stat(num: String, label: String) {
 }
 
 @Composable
-internal fun BackupList(list: List<BackupRecord>, freshId: String?, fmtDay: (Long) -> String, onOpen: (BackupRecord) -> Unit) {
+internal fun BackupList(list: List<BackupRecord>, freshId: String?, fmtDay: (Long) -> String, onOpen: (BackupRecord) -> Unit, modifier: Modifier = Modifier) {
     val c = LocalArcColors.current
-    GridPlate {
+    GridPlate(modifier) {
         list.forEachIndexed { i, b ->
             if (i > 0) PlateLine()
             // .backup-row:active { background: key-edge at 25% } instead of a ripple
