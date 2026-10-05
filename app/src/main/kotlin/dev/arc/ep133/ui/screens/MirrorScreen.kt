@@ -13,6 +13,7 @@ import dev.arc.ep133.ui.components.coachMark
 import dev.arc.ep133.ui.components.ArcIcon
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -89,6 +90,8 @@ import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.Keys
 import dev.arc.ep133.features.NoteNames
 import dev.arc.ep133.features.Scale
+import dev.arc.ep133.features.RecState
+import dev.arc.ep133.data.TakeInfo
 import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.ui.components.ArcKey
 import dev.arc.ep133.ui.components.Caption
@@ -137,6 +140,26 @@ class KeysActions(
     val onSelect: (PhysicalPad) -> Unit = {},
 )
 
+/** Live's REC key on the display line: its state, and the tap (null hides it). */
+data class RecUi(val state: RecState = RecState.Idle, val onRec: (() -> Unit)? = null)
+
+/** The takes in Live tools, and what their keys do. */
+class TakesUi(
+    val list: List<TakeInfo> = emptyList(),
+    /** The key of the sound playing in the player, to show Stop on its take. */
+    val playing: String? = null,
+    val keyOf: (TakeInfo) -> String = { it.name },
+    val fmtWhen: (Long) -> String = { "" },
+    /** "To EP-133" shows only while the device is connected. */
+    val connected: Boolean = false,
+    val onPlay: (TakeInfo) -> Unit = {},
+    val onStop: () -> Unit = {},
+    val onShare: (TakeInfo) -> Unit = {},
+    val onSave: (TakeInfo) -> Unit = {},
+    val onToDevice: (TakeInfo) -> Unit = {},
+    val onDelete: (TakeInfo) -> Unit = {},
+)
+
 /**
  * A live mirror of the EP-133 (an addition to the web version): the four
  * groups' pads light as the device plays them, with the sample on each once
@@ -177,6 +200,9 @@ fun MirrorScreen(
     /** KEYS: the pads become notes of one sound, like the EP-133's KEYS mode. */
     keys: KeysUi = KeysUi(),
     keysActions: KeysActions = KeysActions(),
+    /** REC: records what is played on the phone into a take. */
+    rec: RecUi = RecUi(),
+    takes: TakesUi = TakesUi(),
 ) {
     val c = LocalArcColors.current
     if (onBack != null) BackHandler(onBack = onBack)
@@ -209,6 +235,7 @@ fun MirrorScreen(
             panel = {
                 if (keys.on) {
                     KeysPanel(keys, keysActions)
+                    if (rec.onRec != null) TakesSection(takes)
                 } else {
                 Caption(MirrorText.VIEW, align = androidx.compose.ui.text.style.TextAlign.Start)
                 TextToggle(
@@ -220,6 +247,7 @@ fun MirrorScreen(
                     GridPlate { SwitchRow(MirrorText.FOLLOW, MirrorText.FOLLOW_NOTE, follow, onFollow) }
                 }
                 if (st.lastKeysNote != null) KeysStrip(st)
+                if (rec.onRec != null) TakesSection(takes)
                 Notes(st, mirror, onPadOrder, tapToPlay = onPad != null)
                 }
             },
@@ -244,14 +272,14 @@ fun MirrorScreen(
                             }
                         }
                         if (keys.on) {
-                            KeysDisplay(st, mirror, keys)
+                            KeysDisplay(st, mirror, keys, rec, still = fixedNow != null)
                             KeysGrid(
                                 st, keys, now, keysActions,
                                 Modifier.fillMaxWidth().weight(1f).coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
                             )
                             ModeRow(keys, keysActions)
                         } else {
-                            DisplayStrip(st, mirror)
+                            DisplayStrip(st, mirror, rec, still = fixedNow != null)
                             Group(
                                 group, st, nameOf, now,
                                 Modifier.fillMaxWidth().weight(1f).coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
@@ -280,7 +308,7 @@ fun MirrorScreen(
                             Caption(MirrorText.TITLE)
                             if (onBack != null) CloseKey(onBack, dev.arc.ep133.text.GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
                         }
-                        Display(st, mirror, initialNoteOpen = initialNoteOpen)
+                        Display(st, mirror, rec, still = fixedNow != null, initialNoteOpen = initialNoteOpen)
                         ModeRow(keys, keysActions)
                         BoxWithConstraints(Modifier.fillMaxWidth()) {
                             // Four groups in a row when there is room, two by two on a phone.
@@ -305,7 +333,7 @@ fun MirrorScreen(
  * project on the left, the pad just played on the right.
  */
 @Composable
-private fun DisplayStrip(st: MirrorState, mirror: MirrorUi?) {
+private fun DisplayStrip(st: MirrorState, mirror: MirrorUi?, rec: RecUi, still: Boolean) {
     val c = LocalArcColors.current
     val hit = st.lastHit
     Row(
@@ -319,6 +347,7 @@ private fun DisplayStrip(st: MirrorState, mirror: MirrorUi?) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        RecChip(rec, still)
         when (st.playing) {
             true -> Text("\u25B6", style = ArcType.displaySub, color = c.displayInk)
             false -> Text("\u25A0", style = ArcType.displaySub, color = c.displayDim)
@@ -345,11 +374,13 @@ private fun DisplayStrip(st: MirrorState, mirror: MirrorUi?) {
 }
 
 @Composable
-private fun Display(st: MirrorState, mirror: MirrorUi?, compact: Boolean = false, initialNoteOpen: Boolean = false) {
+private fun Display(st: MirrorState, mirror: MirrorUi?, rec: RecUi, still: Boolean, compact: Boolean = false, initialNoteOpen: Boolean = false) {
     val c = LocalArcColors.current
     val offline = mirror?.offline != null && st.playing == null
     // Why it is offline stays folded under the word until asked for, so the pads keep the room.
     var noteOpen by rememberSaveable { mutableStateOf(initialNoteOpen) }
+    // REC ends the top line, unless the transport fills it on a phone: then the big line below.
+    val recOnTop = st.playing == null
     DisplayPanel {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             if (offline) {
@@ -374,22 +405,27 @@ private fun Display(st: MirrorState, mirror: MirrorUi?, compact: Boolean = false
             }
             st.bpm?.let { Text(MirrorText.bpm(it), style = ArcType.displaySub, color = c.displayInk) }
             st.activeProject?.let { Text(MirrorText.project(it), style = ArcType.displaySub, color = c.displayDim) }
+            if (recOnTop) RecChip(rec, still)
         }
         val hit = st.lastHit
-        Text(
-            when {
-                mirror?.error != null -> mirror.error
-                mirror?.loading == true && hit == null -> MirrorText.READING
-                hit != null -> MirrorText.hit(hit)
-                mirror?.offline != null -> mirror.offline
-                else -> MirrorText.WAITING
-            },
-            // The offline line ("Last seen Oct 5, 2:02 PM") is longer than a hit; it fits a phone a size down.
-            style = ArcType.statFree.copy(fontSize = if (compact || mirror?.offline != null && hit == null) 22.sp else 26.sp),
-            color = c.displayInk,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                when {
+                    mirror?.error != null -> mirror.error
+                    mirror?.loading == true && hit == null -> MirrorText.READING
+                    hit != null -> MirrorText.hit(hit)
+                    mirror?.offline != null -> mirror.offline
+                    else -> MirrorText.WAITING
+                },
+                // The offline line ("Last seen Oct 5, 2:02 PM") is longer than a hit; it fits a phone a size down.
+                style = ArcType.statFree.copy(fontSize = if (compact || mirror?.offline != null && hit == null) 22.sp else 26.sp),
+                color = c.displayInk,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (!recOnTop) RecChip(rec, still)
+        }
         // The one-group view keeps to one screen; the all-groups view explains clock out.
         when {
             compact -> Unit
@@ -723,7 +759,7 @@ private fun <T> PickWord(
 
 /** The KEYS display line: KEYS and the last note on the left, the sound it plays on the right. */
 @Composable
-private fun KeysDisplay(st: MirrorState, mirror: MirrorUi?, keys: KeysUi) {
+private fun KeysDisplay(st: MirrorState, mirror: MirrorUi?, keys: KeysUi, rec: RecUi, still: Boolean) {
     val c = LocalArcColors.current
     Row(
         Modifier
@@ -736,6 +772,7 @@ private fun KeysDisplay(st: MirrorState, mirror: MirrorUi?, keys: KeysUi) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        RecChip(rec, still)
         Text(MirrorText.MODE_KEYS.uppercase(), style = ArcType.displaySub, color = c.displayDim, maxLines = 1)
         val note = keys.playingKeys.lastOrNull()?.let { Keys.notes(keys.root, keys.scale, keys.octave).getOrNull(it) } ?: st.lastNote
         note?.let { Text(MirrorText.noteName(it, keys.names), style = ArcType.displaySub, color = c.displayInk, maxLines = 1) }
@@ -923,3 +960,95 @@ private fun holdToPlay(onPress: (hold: Boolean) -> Unit, onRelease: () -> Unit, 
 
 /** How long a press in a scrolling page waits to tell a tap from a scroll (as Compose's own press feedback does). */
 private const val PRESS_DELAY_MS = 64L
+
+/**
+ * REC on the display line: a dot and the word, dim while off. Armed, the dot
+ * blinks until the first sound; recording, it is lit and the time runs.
+ * [still] keeps it from blinking (screenshots).
+ */
+@Composable
+private fun RecChip(rec: RecUi, still: Boolean) {
+    val onRec = rec.onRec ?: return
+    val c = LocalArcColors.current
+    val on = rec.state != RecState.Idle
+    val blink = if (rec.state == RecState.Armed && !still) {
+        val t = androidx.compose.animation.core.rememberInfiniteTransition(label = "rec")
+        t.animateFloat(
+            1f,
+            0.15f,
+            androidx.compose.animation.core.infiniteRepeatable(
+                androidx.compose.animation.core.tween(450),
+                androidx.compose.animation.core.RepeatMode.Reverse,
+            ),
+            label = "rec",
+        ).value
+    } else {
+        1f
+    }
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = onRec)
+            .semantics(mergeDescendants = true) { contentDescription = MirrorText.recDescription(rec.state) }
+            .border(1.dp, if (on) c.signal else c.displayDim.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Canvas(Modifier.size(10.dp)) { drawCircle(if (on) c.signal.copy(alpha = blink) else c.displayDim) }
+        val label = (rec.state as? RecState.Recording)?.let { MirrorText.takeLength(it.seconds.toDouble()) } ?: MirrorText.REC.uppercase()
+        Text(label, style = ArcType.displaySub, color = if (on) c.displayInk else c.displayDim, maxLines = 1)
+    }
+}
+
+/** Live tools' takes: each plays, and unfolds to share, save, send to the EP-133 or delete. */
+@Composable
+private fun TakesSection(t: TakesUi) {
+    val c = LocalArcColors.current
+    var open by rememberSaveable { mutableStateOf<String?>(null) }
+    var confirm by rememberSaveable { mutableStateOf<String?>(null) }
+    Caption(MirrorText.TAKES, align = androidx.compose.ui.text.style.TextAlign.Start)
+    if (t.list.isEmpty()) {
+        Text(MirrorText.NO_TAKES, style = ArcType.small, color = c.graphite)
+    }
+    for (take in t.list) {
+        val playing = t.playing == t.keyOf(take)
+        val unfolded = open == take.name
+        Plate(onClick = { open = if (unfolded) null else take.name; confirm = null }, enabled = true) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.weight(1f)) {
+                    dev.arc.ep133.ui.components.OneLine(t.fmtWhen(take.createdAt), ArcType.bold, c.ink)
+                    Text(MirrorText.takeLength(take.seconds), style = ArcType.small, color = c.graphite)
+                }
+                ArcKey(
+                    if (playing) dev.arc.ep133.text.FeatureText.STOP else dev.arc.ep133.text.FeatureText.PLAY,
+                    { if (playing) t.onStop() else t.onPlay(take) },
+                    size = KeySize.Small,
+                )
+            }
+            if (unfolded) {
+                if (confirm == take.name) {
+                    Text(MirrorText.DELETE_TAKE, style = ArcType.small, color = c.graphite, modifier = Modifier.padding(top = 6.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        ArcKey(dev.arc.ep133.text.Strings.DELETE, {
+                            confirm = null
+                            open = null
+                            t.onDelete(take)
+                        }, Modifier.weight(1f), size = KeySize.Small, style = KeyStyle.Signal)
+                        ArcKey(dev.arc.ep133.text.Strings.CANCEL, { confirm = null }, Modifier.weight(1f), size = KeySize.Small)
+                    }
+                } else {
+                    Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        ArcKey(dev.arc.ep133.text.FeatureText.SHARE_WAV, { t.onShare(take) }, Modifier.weight(1f), size = KeySize.Small)
+                        ArcKey(dev.arc.ep133.text.FeatureText.SAVE_WAV, { t.onSave(take) }, Modifier.weight(1f), size = KeySize.Small)
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (t.connected) ArcKey(MirrorText.TO_DEVICE, { t.onToDevice(take) }, Modifier.weight(1f), size = KeySize.Small)
+                        ArcKey(dev.arc.ep133.text.Strings.DELETE, { confirm = take.name }, Modifier.weight(1f), size = KeySize.Small)
+                    }
+                }
+            }
+        }
+    }
+    if (t.list.isNotEmpty()) Text(MirrorText.TAKES_NOTE, style = ArcType.small, color = c.graphite)
+}

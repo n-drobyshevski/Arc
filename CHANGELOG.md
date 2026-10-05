@@ -7,6 +7,7 @@ version fixes bugs. The version itself is set in `version.properties`.
 ## [Unreleased]
 
 ### Added
+- Live: **REC** records what you play on the phone (pads and keys, chords and KEYS pitch included), with or without the EP-133. It starts with the first sound after REC and stops at the next tap (or 10 minutes), leaving out the silence at the end. Takes are stereo WAVs listed in Live tools → Takes, where each plays, shares, saves, deletes, or goes **To EP-133** through the upload sheet while the device is connected.
 - Web app (`web/`, https://arc-pi-mauve.vercel.app): the whole Android app in the browser, for Chrome, Edge and other Chromium browsers on computers and Android, over USB-C with WebMIDI. Same `.pak` files and `library.json` as the Android app.
   - Live starts on one group (the large grid with A–D); the view switch in Live tools still shows all four.
   - Installable, works offline, and updates only when you tap Reload and no transfer is running.

@@ -202,9 +202,15 @@ class ArcController(
     /** The last backup a pad played from, opened, so the next taps are quick. */
     private var openPak: Pair<String, dev.arc.ep133.backup.Pak>? = null
     /** Live's own low-latency output, open while Live is on screen. */
-    private val liveAudio = dev.arc.ep133.audio.LiveAudio(context, ::liveStarted)
+    private val liveAudio = dev.arc.ep133.audio.LiveAudio(context, ::liveStarted, ::takeDone)
     /** The Live voices sounding on the phone (pad and key ids), for the rings. */
     val liveKeys: StateFlow<Set<String>> get() = liveAudio.keys
+    /** Live's REC key. */
+    val rec: StateFlow<dev.arc.ep133.features.RecState> get() = liveAudio.rec
+    private val takeStore by lazy { dev.arc.ep133.data.Takes(java.io.File(context.filesDir, "takes")) }
+    private val _takes = MutableStateFlow<List<dev.arc.ep133.data.TakeInfo>>(emptyList())
+    /** Live's recorded takes, newest first. */
+    val takes: StateFlow<List<dev.arc.ep133.data.TakeInfo>> = _takes.asStateFlow()
     // Live's pad samples decoded and ready ("slot:name"), so a press plays at once; the
     // least recently played go past PAD_MEMORY_BYTES. Main thread only.
     private val padMemory = LinkedHashMap<String, PadAudio>(16, 0.75f, true)
@@ -246,6 +252,7 @@ class ArcController(
             }
         }
         library.onExternalError = { msg -> scope.launch { toast(FeatureText.copyFailed(msg), error = true) } }
+        scope.launch { loadTakes() }
         _state.update { it.copy(keysPad = savedKeysPad()) }
         scope.launch {
             library.names.catch { /* shown by the backups collector */ }.collect { backupNames = it; openPak = null }
@@ -524,18 +531,27 @@ class ArcController(
         val items = ArrayList<UploadDraftItem>()
         for (uri in uris) {
             val (fileName, _) = withContext(Dispatchers.IO) { dev.arc.ep133.files.Files.describe(context, uri) }
-            try {
-                val bytes = withContext(Dispatchers.IO) { dev.arc.ep133.files.Files.read(context, uri) }
-                val w = withContext(Dispatchers.Default) { Wav.decode(bytes) } // fail early on files that are not usable WAVs
-                val slot = SampleUpload.nextFree(occupied, taken)
-                if (slot != null) taken.add(slot)
-                items.add(UploadDraftItem(fileName, SampleUpload.nameFor(fileName), slot, bytes, null, sampleRate = w.sampleRate))
+            val bytes = try {
+                withContext(Dispatchers.IO) { dev.arc.ep133.files.Files.read(context, uri) }
             } catch (e: Throwable) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
                 items.add(UploadDraftItem(fileName, SampleUpload.nameFor(fileName), null, null, e.message ?: e.toString()))
+                continue
             }
+            items.add(draftItem(fileName, bytes, occupied, taken))
         }
         _state.update { it.copy(browser = it.browser.copy(draft = items)) }
+    }
+
+    /** One file for the upload sheet, with the next free slot (marked [taken]); flagged when it isn't a usable WAV. */
+    private suspend fun draftItem(fileName: String, bytes: ByteArray, occupied: Set<Int>, taken: MutableSet<Int>): UploadDraftItem = try {
+        val w = withContext(Dispatchers.Default) { Wav.decode(bytes) } // fail early on files that are not usable WAVs
+        val slot = SampleUpload.nextFree(occupied, taken)
+        if (slot != null) taken.add(slot)
+        UploadDraftItem(fileName, SampleUpload.nameFor(fileName), slot, bytes, null, sampleRate = w.sampleRate)
+    } catch (e: Throwable) {
+        if (e is kotlinx.coroutines.CancellationException) throw e
+        UploadDraftItem(fileName, SampleUpload.nameFor(fileName), null, null, e.message ?: e.toString())
     }
 
     fun setDraftSlot(index: Int, slot: Int?) {
@@ -943,6 +959,76 @@ class ArcController(
             toldBluetooth = true
             scope.launch { toast(dev.arc.ep133.text.MirrorText.BLUETOOTH_DELAY) }
         }
+    }
+
+    // ---------- takes: Live recorded (an addition) ----------
+
+    private suspend fun loadTakes() {
+        _takes.value = withContext(Dispatchers.IO) { runCatching { takeStore.list() }.getOrDefault(emptyList()) }
+    }
+
+    /** REC: arms a take (the next sound starts it), or stops the one going. */
+    fun toggleRec() {
+        if (liveAudio.rec.value != dev.arc.ep133.features.RecState.Idle) {
+            liveAudio.stopRecording()
+            return
+        }
+        val file = takeStore.newFile(System.currentTimeMillis())
+        if (!liveAudio.arm(file)) toast(dev.arc.ep133.text.MirrorText.NO_OUTPUT, error = true)
+    }
+
+    /** A take ended (on its writer's thread): saved, nothing played, or not written. */
+    private fun takeDone(file: java.io.File?, seconds: Double, limit: Boolean, error: String?) {
+        scope.launch {
+            when {
+                error != null -> toast(dev.arc.ep133.text.MirrorText.takeFailed(error), error = true)
+                file == null -> Unit
+                else -> {
+                    trafficLog.note("take ${file.name}: ${"%.1f".format(seconds)} s")
+                    loadTakes()
+                    toast(if (limit) dev.arc.ep133.text.MirrorText.takeAtLimit(seconds) else dev.arc.ep133.text.MirrorText.takeSaved(seconds))
+                }
+            }
+        }
+    }
+
+    fun takeFile(t: dev.arc.ep133.data.TakeInfo): java.io.File = takeStore.file(t.name)
+
+    /** The player's key for a take, to show Stop on its row. */
+    fun takeKey(t: dev.arc.ep133.data.TakeInfo) = "take:" + t.name
+
+    /** Plays a take on the phone (a list's single sound: it stops the one before). */
+    fun playTake(t: dev.arc.ep133.data.TakeInfo): Job = scope.launch {
+        val token = ++playToken
+        val w = try {
+            withContext(Dispatchers.IO) { Wav.decode(takeFile(t).readBytes()) }
+        } catch (e: Exception) {
+            toast(e.message ?: e.toString(), error = true)
+            return@launch
+        }
+        if (token != playToken) return@launch
+        startSound(takeKey(t), w.pcm, w.channels, w.sampleRate.toInt())
+    }
+
+    fun deleteTake(t: dev.arc.ep133.data.TakeInfo): Job = scope.launch {
+        if (player.playing.value == takeKey(t)) stopPlayback()
+        withContext(Dispatchers.IO) { takeStore.delete(t.name) }
+        loadTakes()
+    }
+
+    /** Proposes a take for upload to a free slot (the Device tab's upload sheet, with its trim). */
+    fun takeToDevice(t: dev.arc.ep133.data.TakeInfo): Job = scope.launch {
+        val bytes = try {
+            withContext(Dispatchers.IO) { takeFile(t).readBytes() }
+        } catch (e: java.io.IOException) {
+            toast(e.message ?: e.toString(), error = true)
+            return@launch
+        }
+        // The Device tab reads the device as it opens; the free slot is picked once that is in.
+        val contents = _state.value.browser.contents
+            ?: kotlinx.coroutines.withTimeoutOrNull(10_000) { _state.first { it.browser.contents != null }.browser.contents }
+        val item = draftItem(t.name, bytes, contents?.occupiedSlots ?: emptySet(), HashSet())
+        _state.update { it.copy(browser = it.browser.copy(draft = listOf(item))) }
     }
 
     /** A pad's sample, ready to play: 16-bit PCM, [channels] interleaved. */
