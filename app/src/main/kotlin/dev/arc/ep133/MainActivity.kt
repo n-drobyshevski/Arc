@@ -314,7 +314,8 @@ class MainActivity : ComponentActivity() {
             }
         }
         // The section under the top bar; the other screens stack over it without the bars.
-        var tab by rememberSaveable { mutableStateOf(Tab.BACKUPS) }
+        // Live is the home section: the app opens on it.
+        var tab by rememberSaveable { mutableStateOf(Tab.LIVE) }
         var search by rememberSaveable { mutableStateOf(false) }
         // Comparing two backups: the backup whose "compare" picker is open, then "<idA>|<idB>".
         var comparePickFor by rememberSaveable { mutableStateOf<String?>(null) }
@@ -514,8 +515,8 @@ class MainActivity : ComponentActivity() {
                     onGuide = { guideOpen = it },
                     guide = { GuideScreen(onBack = { guideOpen = false }) },
                 ) {
-                    // Back from another tab returns to Backups first.
-                    BackHandler(enabled = tab != Tab.BACKUPS) { selectTab(Tab.BACKUPS) }
+                    // Back from another section returns to Live, the home section, first.
+                    BackHandler(enabled = tab != Tab.LIVE) { selectTab(Tab.LIVE) }
                     when (tab) {
                         Tab.LIVE -> MirrorScreen(
                             mirror = state.mirror ?: if (!ready) {
