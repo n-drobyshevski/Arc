@@ -36,7 +36,8 @@
   --line: #1E1F21;
   --ok: #17613F;
   --on-ok: #F4F2EE;
-  /* Live's landscape piano (ArcColors.piano*, keyOut*): no web UI draws it yet; kept so the tokens mirror ArcTheme.kt. */
+  /* Live's landscape piano: key faces, names and rings on black keys, dimmed keys
+   * (outside the scale), the line between keys, its signal orange, the octave digit. */
   --piano-white: #F5F4F0;
   --piano-black: #1E1F21;
   --on-piano-black: #AEB4F0;

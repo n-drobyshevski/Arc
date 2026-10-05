@@ -48,8 +48,10 @@ import { GuideScreen } from './ui/screens/GuideScreen'
 import { MainScreen } from './ui/screens/MainScreen'
 import { BackupsSheets } from './ui/sheets/BackupsSheets'
 import { ProgressSheet } from './ui/sheets/ProgressSheet'
-import { MirrorScreen } from './ui/screens/MirrorScreen'
-import { PICK_PREFIX as PICK, keysPickerOf } from './ui/live/keys'
+import { LivePill, MirrorScreen } from './ui/screens/MirrorScreen'
+import { PICK_PREFIX as PICK, keysPickerOf, type KeysUi } from './ui/live/keys'
+import { liveInBar, useArcWindow } from './ui/live/window'
+import type { NoteRange } from './core/features/piano'
 import { SearchScreen } from './ui/screens/SearchScreen'
 import { SettingsScreen } from './ui/screens/SettingsScreen'
 import { BackupPadsSheet, DevicePadsSheet } from './ui/sheets/PadsSheet'
@@ -112,6 +114,11 @@ function Root(): JSX.Element {
   const state = c.state.value
   const settings = c.settings.value
   const playing = c.playing.value
+  // On a phone on its side, Live's display line rides in the top bar; the piano's
+  // notes (while it shows) let it name a device note past them.
+  const win = useArcWindow()
+  const liveBar = v.tab === 'live' && liveInBar(win)
+  const [pianoRange, setPianoRange] = useState<NoteRange | null>(null)
 
   // The guide overlay, once by itself on the first start (coach_seen), over the
   // shell. Not for automated browsers (screenshots, e2e), where it would only be in the way.
@@ -241,8 +248,9 @@ function Root(): JSX.Element {
           guideOpen={v.guide}
           onGuide={(open) => (open ? nav.openScreen({ kind: 'guide' }) : nav.close(screenLayer({ kind: 'guide' })))}
           guide={<GuideScreen onBack={() => nav.close(screenLayer({ kind: 'guide' }))} />}
+          middle={liveBar ? <LiveBar pianoRange={pianoRange} /> : undefined}
         >
-          <TabScreen view={v} />
+          <TabScreen view={v} inBar={liveBar} onPianoRange={setPianoRange} />
         </Shell>
       </CoachHost>
     )
@@ -274,8 +282,38 @@ function Root(): JSX.Element {
   )
 }
 
+/** Live's display line in the top bar (a phone on its side); it alone re-renders as notes play. */
+function LiveBar(props: { pianoRange: NoteRange | null }): JSX.Element {
+  const c = useController()
+  return <LivePill mirror={liveMirror(c)} keys={keysUi(c)} pianoRange={props.pianoRange} />
+}
+
+/** What Live shows: the mirror, or offline its last read, or a note to connect. */
+function liveMirror(c: ArcController): MirrorUi | null {
+  const state = c.state.value
+  return state.mirror ?? (state.device === null
+    ? { state: emptyMirrorState(c.padOrder()), loading: false, error: MirrorText.NOT_CONNECTED }
+    : null)
+}
+
+/** KEYS as the settings and the controller have it (MainActivity's KeysUi). */
+function keysUi(c: ArcController): KeysUi {
+  const settings = c.settings.value
+  const state = c.state.value
+  return {
+    on: settings.liveKeys,
+    root: settings.keysRoot,
+    scale: settings.keysScale,
+    octave: settings.keysOctave,
+    names: settings.keysNames,
+    pad: state.keysPad,
+    padName: state.keysPad ? c.mirrorName(state.keysPad) : null,
+    playingNotes: c.playingNotes.value,
+  }
+}
+
 /** The section under the top bar (Root's `when (tab)`). */
-function TabScreen(props: { view: NavView }): JSX.Element {
+function TabScreen(props: { view: NavView; inBar: boolean; onPianoRange: (r: NoteRange | null) => void }): JSX.Element {
   const c = useController()
   const nav = useNav()
   const v = props.view
@@ -283,9 +321,7 @@ function TabScreen(props: { view: NavView }): JSX.Element {
   const settings = c.settings.value
   switch (v.tab) {
     case 'live': {
-      const mirror: MirrorUi | null = state.mirror ?? (state.device === null
-        ? { state: emptyMirrorState(c.padOrder()), loading: false, error: MirrorText.NOT_CONNECTED }
-        : null)
+      const mirror = liveMirror(c)
       return (
         <MirrorScreen
           mirror={mirror}
@@ -309,23 +345,16 @@ function TabScreen(props: { view: NavView }): JSX.Element {
           onPad={(pad, hold) => void c.playPad(pad, hold)}
           onPadUp={(pad) => c.releasePad(pad)}
           playingPads={c.playingPads.value}
-          keys={{
-            on: settings.liveKeys,
-            root: settings.keysRoot,
-            scale: settings.keysScale,
-            octave: settings.keysOctave,
-            names: settings.keysNames,
-            pad: state.keysPad,
-            padName: state.keysPad ? c.mirrorName(state.keysPad) : null,
-            playingKeys: c.playingKeys.value,
-          }}
+          keys={keysUi(c)}
+          inBar={props.inBar}
+          onPianoRange={props.onPianoRange}
           keysActions={{
             onMode: (on) => c.setLiveKeys(on),
             onRoot: (r) => c.setKeysRoot(r),
             onScale: (s) => c.setKeysScale(s),
             onOctave: (o) => c.setKeysOctave(o),
-            onKey: (k, hold) => void c.playKey(k, hold),
-            onKeyUp: (k) => c.releaseKey(k),
+            onNote: (n, hold) => void c.playNote(n, hold),
+            onNoteUp: (n) => c.releaseNote(n),
             onSelect: (pad) => c.selectKeysPad(pad),
           }}
         />

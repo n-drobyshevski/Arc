@@ -7,7 +7,7 @@ import { physicalPad } from '../../src/core/features/padNotes'
 import { MirrorText } from '../../src/core/text/mirrorText'
 import { emptyMirrorState, type MirrorUi } from '../../src/state/types'
 import { displayLine, displayLineSmall, glow, showOffline } from '../../src/ui/live/glow'
-import { DEFAULT_KEYS, PICK_PREFIX, keysDisplayNote, keysLit, keysPickerOf, octaves, upperOctave, type KeysUi } from '../../src/ui/live/keys'
+import { DEFAULT_KEYS, PICK_PREFIX, keysDisplayNote, keysLit, keysPickerOf, octaves, rootKey, type KeysUi } from '../../src/ui/live/keys'
 import { backStack, dialogLayer, initialStack, overlayLayer, push, viewOf } from '../../src/ui/nav'
 import { PRESS_DELAY_MS, PressTracker, type PressTimers } from '../../src/ui/live/press'
 
@@ -33,22 +33,22 @@ describe('KEYS grid', () => {
     expect(both.get(0)).toBeCloseTo(glow(light(120), 0))
   })
 
-  it('rings the chosen octave navy and the next orange, in turn', () => {
-    expect(upperOctave(60, 4)).toBe(false)
-    expect(upperOctave(72, 4)).toBe(true)
-    expect(upperOctave(84, 4)).toBe(false)
-    // The screenshot: C major from DO4, keys 7.. (DO5 up) orange.
-    expect(major4.map((n) => upperOctave(n, 4))).toEqual([
-      false, false, false, false, false, false, false, true, true, true, true, true,
+  it("rings the scale's root orange, as the piano does", () => {
+    // C major from DO4: DO4 (key 0) and DO5 (key 7) are the root.
+    expect(major4.map((_, k) => rootKey(k, Scale.MAJOR))).toEqual([
+      true, false, false, false, false, false, false, true, false, false, false, false,
     ])
+    // Pentatonic: every fifth key; chromatic: the first only.
+    expect([0, 5, 10].every((k) => rootKey(k, Scale.MINOR_PENTATONIC))).toBe(true)
+    expect(Array.from({ length: 12 }, (_, k) => rootKey(k, Scale.CHROMATIC)).filter(Boolean)).toHaveLength(1)
   })
 
-  it('names the key last pressed on the phone, else the device note', () => {
-    const keys: KeysUi = { ...DEFAULT_KEYS, on: true, scale: Scale.MAJOR, playingKeys: new Set([5, 7]) }
+  it('names the note last pressed on the phone, else the device note', () => {
+    const keys: KeysUi = { ...DEFAULT_KEYS, on: true, scale: Scale.MAJOR, playingNotes: new Set([65, 72]) }
     expect(keysDisplayNote(keys, 40)).toBe(72)
     expect(MirrorText.noteName(72, NoteNames.SOLFEGE)).toBe('DO5')
-    expect(keysDisplayNote({ ...keys, playingKeys: new Set() }, 40)).toBe(40)
-    expect(keysDisplayNote({ ...keys, playingKeys: new Set() }, null)).toBeNull()
+    expect(keysDisplayNote({ ...keys, playingNotes: new Set() }, 40)).toBe(40)
+    expect(keysDisplayNote({ ...keys, playingNotes: new Set() }, null)).toBeNull()
   })
 
   it('offers octaves 0 to 8', () => {
@@ -183,6 +183,7 @@ describe('KEYS lists as navigation layers', () => {
     expect(keysPickerOf(['forget'])).toBeNull()
     expect(keysPickerOf([PICK_PREFIX + 'scale'])).toBe('scale')
     expect(keysPickerOf(['delete', PICK_PREFIX + 'octave'])).toBe('octave')
+    expect(keysPickerOf([PICK_PREFIX + 'key'])).toBe('key')
     expect(keysPickerOf([PICK_PREFIX + 'tempo'])).toBeNull()
   })
 

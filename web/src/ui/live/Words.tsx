@@ -94,6 +94,10 @@ export interface PickWordProps<T> {
   description: string
   /** At the row's end: the list opens leftward, staying on screen. */
   alignEnd?: boolean
+  /** The list opens downward from the word (a row over the keys, as over the piano) instead of upward over them. */
+  down?: boolean
+  /** The choices in this many columns (a short window, or the twelve keys), else one. */
+  columns?: number
   coach?: { id: string; label: string }
   /** Whether the list is open, when the caller keeps it (a navigation layer, so Back closes it). */
   open?: boolean
@@ -102,7 +106,7 @@ export interface PickWordProps<T> {
 
 /** A word showing a choice ("MAJOR ▾"); a tap lists the choices over the grid, the chosen one marked. */
 export function PickWord<T>(props: PickWordProps<T>): JSX.Element {
-  const { label, options, selected, name, onPick, description, alignEnd = false, coach } = props
+  const { label, options, selected, name, onPick, description, alignEnd = false, down = false, columns = 1, coach } = props
   const [own, setOwn] = useState(false)
   const open = props.open ?? own
   const onOpen = useRef(props.onOpen)
@@ -149,8 +153,10 @@ export function PickWord<T>(props: PickWordProps<T>): JSX.Element {
     const items = [...(list.current?.querySelectorAll<HTMLElement>('[role=option]') ?? [])]
     const at = items.indexOf(document.activeElement as HTMLElement)
     let next: number | null = null
-    if (e.key === 'ArrowDown') next = Math.min(items.length - 1, at + 1)
-    else if (e.key === 'ArrowUp') next = Math.max(0, at - 1)
+    if (e.key === 'ArrowDown') next = Math.min(items.length - 1, at + columns)
+    else if (e.key === 'ArrowUp') next = Math.max(0, at - columns)
+    else if (columns > 1 && e.key === 'ArrowRight') next = Math.min(items.length - 1, at + 1)
+    else if (columns > 1 && e.key === 'ArrowLeft') next = Math.max(0, at - 1)
     else if (e.key === 'Home') next = 0
     else if (e.key === 'End') next = items.length - 1
     else if (e.key === 'Escape') {
@@ -174,7 +180,7 @@ export function PickWord<T>(props: PickWordProps<T>): JSX.Element {
         label={`${label} ▾`}
         onClick={() => setOpen(!open)}
         description={description}
-        top
+        top={!down}
         aria-haspopup="listbox"
         aria-expanded={open}
         data-coach={coach?.id}
@@ -185,7 +191,8 @@ export function PickWord<T>(props: PickWordProps<T>): JSX.Element {
       {open && (
         <div
           ref={list}
-          class={`pick__list${alignEnd ? ' pick__list--end' : ''}`}
+          class={`pick__list${alignEnd ? ' pick__list--end' : ''}${down ? ' pick__list--down' : ''}${columns > 1 ? ' pick__list--grid' : ''}`}
+          style={columns > 1 ? { gridTemplateColumns: `repeat(${columns}, auto)` } : undefined}
           role="listbox"
           aria-label={description}
           onKeyDown={onListKey}

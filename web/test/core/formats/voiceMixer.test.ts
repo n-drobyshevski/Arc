@@ -107,6 +107,32 @@ describe('VoiceMixer', () => {
     expect(new Set(m.keys)).toEqual(new Set(['b', 'c']))
   })
 
+  it('past the limit a voice let go of goes before an older held one', () => {
+    const m = mixer(2)
+    m.start('a', steady(1000), 1, 1000)
+    m.start('b', steady(1000), 1, 1000)
+    render(m, 1)
+    // b still sounds out its gate, but it was let go of.
+    m.release('b')
+    m.start('c', steady(1000), 1, 1000)
+    render(m, 1)
+    expect(new Set(m.keys)).toEqual(new Set(['a', 'c']))
+  })
+
+  it('a held chord survives a run of ten keys', () => {
+    const m = mixer()
+    for (const k of ['note:60', 'note:64', 'note:67']) m.start(k, steady(1000), 1, 1000)
+    render(m, 1)
+    // A glissando: each key let go of as the next plays, all still in their gates.
+    for (let n = 72; n < 82; n++) {
+      m.release(`note:${n - 1}`)
+      m.start(`note:${n}`, steady(1000), 1, 1000)
+      render(m, 1)
+    }
+    for (const k of ['note:60', 'note:64', 'note:67', 'note:81']) expect(m.keys.has(k), k).toBe(true)
+    expect(m.keys.size).toBe(VoiceMixer.MAX_VOICES)
+  })
+
   it('stop fades everything out', () => {
     const m = mixer()
     m.start('a', steady(1000), 1, 1000)

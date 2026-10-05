@@ -1,0 +1,161 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/PianoKeyboard.kt
+ * The keys are caps (theme/cap.css) in the device's grey body: white keys
+ * with a gap between them, black keys dark caps with a lighter side, outlined
+ * so the dark theme keeps its contrast; the scale's keys ringed at their foot
+ * and the others dimmed. A key sounding here is down on its edge. */
+
+.piano {
+  /* The key's root ring: the darker orange on light white keys (3:1 there), the piano's own in the dark. */
+  --piano-root: var(--signal-edge);
+  /* One white key's width, for the ring and the names. */
+  --white-w: calc(100cqw / var(--whites, 15));
+  display: flex;
+  container-type: inline-size;
+  min-height: 0;
+}
+:root[data-theme=dark] .piano { --piano-root: var(--piano-signal); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme=light]) .piano { --piano-root: var(--piano-signal); }
+}
+
+/* The body: the device's grey around the keys, 10 in (and the caps' edges, right
+ * and below); every touch on it is the piano's (no scroll, no zoom). */
+.piano__plate {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 10px calc(10px + var(--cap-dx)) calc(10px + var(--cap-dy)) 10px;
+  border-radius: var(--radius-plate);
+  background: var(--hw-body);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+/* The keys' own box: what Piano.layout lays out and what a touch is hit against. */
+.piano__keys {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.piano__key {
+  /* What glows: the device's notes; g > 0.3 picks the "on signal" ink (as the pads). */
+  --glow-pct: calc(var(--glow, 0) * 100%);
+  --hot-pct: calc(clamp(0, (var(--glow, 0) - 0.3) * 1000000, 1) * 100%);
+  position: absolute;
+  top: 0;
+  --cap-face: color-mix(in oklab, var(--signal) var(--glow-pct), var(--face));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 0 12px;
+  margin: 0;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.piano__key:focus-visible { outline: var(--focus-ring); outline-offset: -3px; z-index: 3; }
+
+/* A white key: a pale cap (dimmed outside the scale), lit orange by a device note,
+ * 2 in from each side of its place so the body shows between keys; radius 6. */
+.piano__key--white {
+  --face: var(--piano-white);
+  --ring: var(--navy);
+  --ink: var(--ink);
+  z-index: 0;
+  margin-left: 2px;
+  margin-right: 2px;
+  border-radius: 6px;
+}
+.piano__key--white.is-out { --face: var(--key-out); }
+.piano__key--white.is-root { --ring: var(--piano-root); }
+
+/* A black key: over the whites, 0.6 of one wide and 0.62 high; a dark cap with the
+ * K.O. II's lighter side, outlined in the line colour; radius 4. */
+.piano__key--black {
+  --face: var(--piano-black);
+  --cap-edge: color-mix(in oklab, var(--signal-edge) var(--glow-pct), var(--hw-dark-edge));
+  --ring: var(--on-piano-black);
+  --ink: var(--on-piano-black);
+  z-index: 1;
+  padding-bottom: 10px;
+  border-radius: 4px;
+  outline: 1px solid var(--piano-line);
+}
+.piano__key--black.is-out { --face: var(--key-out-black); }
+.piano__key--black.is-root { --ring: var(--signal); }
+
+/* Playing here: a 2px orange outline inside the key. */
+.piano__key.is-playing::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--piano-signal);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+/* The ring at the key's foot: a circle of most of the key's width (40 at most), the name in it.
+ * The root's is half as thick again. Lit, ring and name turn the "on signal" white. */
+.piano__ring {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: min(calc(var(--white-w) * 0.78), 40px);
+  aspect-ratio: 1;
+  border: max(2px, calc(min(var(--white-w) * 0.78, 40px) * 0.08)) solid
+    color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--ring));
+  border-radius: 50%;
+  pointer-events: none;
+}
+.piano__key--black .piano__ring { width: min(calc(var(--white-w) * 0.5), 26px); }
+.piano__key.is-root .piano__ring { border-width: max(3px, calc(min(var(--white-w) * 0.78, 40px) * 0.12)); }
+.piano__name {
+  font-size: min(calc(var(--white-w) * 0.3), 15px);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--ink));
+}
+.piano__key--black .piano__name { font-size: min(calc(var(--white-w) * 0.22), 11px); }
+
+/* The root's bar, under its ring. */
+.piano__bar {
+  width: min(calc(var(--white-w) * 0.42), 22px);
+  height: 3px;
+  margin-top: 5px;
+  margin-bottom: -8px;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--ring));
+  pointer-events: none;
+}
+
+/* The octave, on each C, over its ring: ink on OCT's own C (the sound's own pitch), grey on the others. */
+.piano__digit {
+  margin-bottom: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--piano-digit));
+  pointer-events: none;
+}
+.piano__digit--own { color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--ink)); font-weight: 700; }
+
+/* A note from the EP-133 past either end: an orange tick at that end's top. */
+.piano__tick {
+  position: absolute;
+  top: 12px;
+  z-index: 2;
+  width: 0;
+  height: 0;
+  border-top: 7px solid transparent;
+  border-bottom: 7px solid transparent;
+  pointer-events: none;
+}
+.piano__tick--below { left: 6px; border-right: 9px solid var(--piano-signal); }
+.piano__tick--above { right: 6px; border-left: 9px solid var(--piano-signal); }

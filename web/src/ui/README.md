@@ -16,7 +16,10 @@ ui/
   sheets/           the sheets/dialogs mounted by app.tsx (Backups, Device, progress, licence)
   live/             Live-tab helpers: glow.ts (pad fade maths), press.ts (hold-to-play
                     per pointer), keys.ts (KEYS grid, picker layers), Words.tsx (the
-                    PADS/KEYS word, SwapMark, PickWord lists); the .ts ones are tested
+                    PADS/KEYS word, SwapMark, PickWord lists), window.ts (landscape /
+                    short, the display line in the top bar), piano.ts (when the piano
+                    shows, what lights, PianoFingers: the fingers on its keys) and
+                    PianoKeyboard.tsx (the landscape piano); the .ts ones are tested
 ```
 
 File header: `// Port of app/src/main/kotlin/dev/arc/ep133/ui/<path>.kt`.
@@ -91,7 +94,7 @@ the overlay opens. Mark a control either way:
 
 Known ids (`COACH_IDS`, labels/colours from the Kotlin call sites):
 `top.*`, `edge.guide`, `backups.search|import|open`, `live.pads|groups`,
-`live.keys|mode|scale|octave`, `side.more`, `device.refresh|add|switch|play`.
+`live.keys|mode|scale|key|octave`, `side.more`, `device.refresh|add|switch|play`.
 A narrow control flush with the screen's left or right edge (the GUIDE tab,
 the more-tools strip) gets a side tag: a vertical tab on that edge with a
 hooked arrow (`coachPlace.ts` `edgeOf` / `sideHook`, Coach.kt's side tags). Yellow tip tags use

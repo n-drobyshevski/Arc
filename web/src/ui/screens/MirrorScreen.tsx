@@ -31,10 +31,16 @@
 //   stateDescription NOTE_SHOWN / NOTE_HIDDEN).
 // - The scale and octave lists (Kotlin's focusable Popups, which Back
 //   dismisses) are navigation layers too: [picker] / [onPicker] (dialog
-//   'pick:scale' / 'pick:octave'); without them each word keeps its own state.
+//   'pick:scale' / 'pick:octave' / 'pick:key'); without them each word keeps its own state.
+// - Landscape (Kotlin's ArcWindow): the window's size (live/window.ts) and
+//   the screen's own box decide whether KEYS is the piano (live/PianoKeyboard)
+//   or stays the grid; in a short landscape window the display line is in the
+//   top bar ([inBar], LivePill) instead of on the page.
 import { type ButtonHTMLAttributes, type ComponentChildren, type JSX } from 'preact'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { Keys, SCALES, type Scale } from '../../core/features/keys'
+import { Keys, MAX_OCTAVE, MIN_OCTAVE, SCALES, type Scale } from '../../core/features/keys'
+import { NoteTouches, type NoteEvent } from '../../core/features/noteTouches'
+import { Piano, inRange, type NoteRange } from '../../core/features/piano'
 import type { MirrorState, PadLight } from '../../core/features/liveMirror'
 import { PadOrder } from '../../core/features/padPush'
 import { ROWS, noteName, padKey, physicalPad, type PhysicalPad } from '../../core/features/padNotes'
@@ -65,7 +71,10 @@ import {
   showOffline,
   transportText,
 } from '../live/glow'
-import { DEFAULT_KEYS, keysDisplayNote, keysLit, octaves, upperOctave, type KeysPicker, type KeysUi } from '../live/keys'
+import { DEFAULT_KEYS, keysDisplayNote, keysLit, octaves, rootKey, type KeysPicker, type KeysUi } from '../live/keys'
+import { MAX_PIANO_HEIGHT, pianoLit, pianoWhites } from '../live/piano'
+import { PianoKeyboard } from '../live/PianoKeyboard'
+import { landscape, short, useArcWindow } from '../live/window'
 import { PressTracker, type PressTarget } from '../live/press'
 import { PickWord, WordButton } from '../live/Words'
 import './MirrorScreen.css'
@@ -78,9 +87,9 @@ export interface KeysActions {
   onRoot?: (root: number) => void
   onScale?: (scale: Scale) => void
   onOctave?: (octave: number) => void
-  /** A key pressed; it sounds until [onKeyUp]. A screen reader's Play passes hold = false. */
-  onKey?: (index: number, hold: boolean) => void
-  onKeyUp?: (index: number) => void
+  /** A note pressed (on the grid or the piano); it sounds until [onNoteUp]. A screen reader's Play passes hold = false. */
+  onNote?: (note: number, hold: boolean) => void
+  onNoteUp?: (note: number) => void
   /** A pad played on the device in the pads view becomes the KEYS sound. */
   onSelect?: (pad: PhysicalPad) => void
 }
@@ -120,6 +129,10 @@ export interface MirrorScreenProps {
   /** The KEYS list open over the grid (a navigation layer, so Back closes it); see [KeysPicker]. */
   picker?: KeysPicker | null
   onPicker?: (picker: KeysPicker | null) => void
+  /** The display line is in the top bar (a phone on its side, LivePill), so the page leaves it out. */
+  inBar?: boolean
+  /** The piano's notes while it shows (KEYS in a landscape window), null otherwise: the line in the bar names a device note it doesn't reach. */
+  onPianoRange?: (range: NoteRange | null) => void
 }
 
 
@@ -134,6 +147,7 @@ function applyGlow(
   pads: ReadonlyMap<number, PadLight>,
   notes: ReadonlyMap<number, PadLight>,
   keyNotes: readonly number[] | null,
+  piano: NoteRange | null,
   now: number,
 ): void {
   for (const el of root.querySelectorAll<HTMLElement>('[data-pad]')) {
@@ -149,7 +163,41 @@ function applyGlow(
       el.style.setProperty('--glow', glowCss(lit.get(Number(el.dataset.key)) ?? 0))
     }
   }
+  if (piano) {
+    const lit = pianoLit(notes, piano, now)
+    for (const el of root.querySelectorAll<HTMLElement>('[data-note]')) {
+      el.style.setProperty('--glow', glowCss(lit.get(Number(el.dataset.note)) ?? 0))
+    }
+  }
 }
+
+/** The screen's own box (the page under the top bar), measured as it changes. */
+function useBox(el: { current: HTMLElement | null }): { width: number; height: number } | null {
+  const [box, setBox] = useState<{ width: number; height: number } | null>(null)
+  useLayoutEffect(() => {
+    const node = el.current
+    if (!node) return
+    const measure = (): void => {
+      const r = node.getBoundingClientRect()
+      setBox((prev) => (prev && prev.width === r.width && prev.height === r.height ? prev : { width: r.width, height: r.height }))
+    }
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(measure)
+    ro.observe(node)
+    return () => ro.disconnect()
+  }, [])
+  return box
+}
+
+// The piano's frame (live__piano): the gutters either side, the controls row over it and
+// the gaps, so the plate's size can be told from the screen's box before laying it out.
+const PIANO_START = 30
+const PIANO_END = 24 + 12
+const PIANO_ROW = 44 + 6
+const PIANO_TOP = 4
+const PIANO_BOTTOM = 10
+const LINE = 48 + 10
 
 /**
  * The pointer handlers of a pad or key that sounds while held (Kotlin
@@ -203,6 +251,27 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   const st = mirror?.state ?? emptyMirrorState()
   const root = useRef<HTMLDivElement | null>(null)
   const now = fixedNow ?? perfNow()
+  const inBar = props.inBar ?? false
+
+  // KEYS in a window wider than tall is a piano, when one octave of 44px keys fits;
+  // else (upright, a narrow split screen) the 4×3 grid stays.
+  const win = useArcWindow()
+  const box = useBox(root) ?? win
+  const tall = !short(win)
+  const plateW = box.width - PIANO_START - PIANO_END
+  const plateH = Math.min(
+    box.height - PIANO_TOP - PIANO_BOTTOM - PIANO_ROW - (inBar ? 0 : LINE),
+    tall ? MAX_PIANO_HEIGHT : Number.POSITIVE_INFINITY,
+  )
+  const whites = keys.on ? pianoWhites(landscape(win), plateW, plateH) : 0
+  const piano: NoteRange | null = whites > 0 ? Piano.range(keys.octave, whites) : null
+  // The pads of one group on a phone on its side: A–D beside the grid, not under it.
+  const side = !keys.on && landscape(win) && !tall
+  const pianoKey = piano ? `${piano.first}:${piano.last}` : null
+  useEffect(() => {
+    props.onPianoRange?.(piano)
+  }, [pianoKey])
+  useEffect(() => () => props.onPianoRange?.(null), [])
 
   // Every finger on the pads or keys; all of them end when the screen goes.
   const tracker = useMemo(() => new PressTracker(), [])
@@ -217,7 +286,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     [keys.on, keys.root, keys.scale, keys.octave],
   )
   useLayoutEffect(() => {
-    if (fixedNow === null && root.current) applyGlow(root.current, pads, notes, keyNotes, perfNow())
+    if (fixedNow === null && root.current) applyGlow(root.current, pads, notes, keyNotes, piano, perfNow())
   })
   useEffect(() => {
     if (fixedNow !== null || typeof requestAnimationFrame === 'undefined') return
@@ -225,14 +294,14 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     let raf = 0
     const frame = (): void => {
       const t = perfNow()
-      if (root.current) applyGlow(root.current, pads, notes, keyNotes, t)
+      if (root.current) applyGlow(root.current, pads, notes, keyNotes, piano, t)
       raf = running(t) ? requestAnimationFrame(frame) : 0
     }
     if (running(perfNow())) raf = requestAnimationFrame(frame)
     return () => {
       if (raf) cancelAnimationFrame(raf)
     }
-  }, [pads, notes, keyNotes, fixedNow])
+  }, [pads, notes, keyNotes, pianoKey, fixedNow])
 
   // The group shown in the one-group view; Follow switches it to the group just played.
   const [group, setGroup] = useState(props.initialGroup ?? 0)
@@ -254,7 +323,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   }, [st.lastHit, keys.on])
 
   const panel = keys.on ? (
-    <KeysPanel keys={keys} actions={actions} />
+    <KeysPanel keys={keys} actions={actions} piano={piano !== null} hint={!landscape(win)} />
   ) : (
     <>
       <Caption text={MirrorText.VIEW} align="start" />
@@ -271,7 +340,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         </GridPlate>
       )}
       {st.lastKeysNote !== null && <KeysStrip st={st} last={st.lastKeysNote} />}
-      <Notes st={st} mirror={mirror} onPadOrder={onPadOrder} tapToPlay={onPad !== null} />
+      <Notes st={st} mirror={mirror} onPadOrder={onPadOrder} tapToPlay={onPad !== null} hint={!landscape(win)} transport={inBar} />
     </>
   )
 
@@ -286,16 +355,34 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   return (
     <div ref={root} class="live" data-screen="live">
       <SideZone
+        class={piano ? 'live--piano' : undefined}
         open={props.toolsOpen}
         onOpen={() => props.onTools(true)}
         onClose={() => props.onTools(false)}
         title={MirrorText.TOOLS}
         panel={panel}
       >
-        {oneGroup || keys.on ? (
+        {piano ? (
+          // The piano: the controls row over it (the keys' strike zone borders only the
+          // screen's edge), the display line over that unless it is in the top bar.
+          <div class={`live__piano${tall ? ' live__piano--tall' : ''}`}>
+            {!inBar && <KeysDisplay st={st} mirror={mirror} keys={keys} pianoRange={piano} />}
+            <ModeRow
+              keys={keys}
+              actions={actions}
+              picker={props.onPicker ? picker : undefined}
+              onPicker={props.onPicker}
+              landscape
+              narrow={plateW < 700}
+              tight={plateW < 560}
+            />
+            <PianoKeyboard range={piano} st={st} keys={keys} now={now} actions={actions} />
+          </div>
+        ) : oneGroup || keys.on ? (
           // One group (or the keys) fills the screen without scrolling: the display line, the grid
-          // (its rows share whatever height is left) and the group keys.
-          <div class="live__one">
+          // (its rows share whatever height is left) and the group keys. On a phone on its side
+          // the pads' row is on top and A–D stand in a column beside the grid.
+          <div class={`live__one${side ? ' live__one--side' : ''}`}>
             {onBack && (
               <div class="live__head">
                 <Caption text={MirrorText.TITLE} />
@@ -304,26 +391,30 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
             )}
             {keys.on && keyNotes ? (
               <>
-                <KeysDisplay st={st} mirror={mirror} keys={keys} />
+                {!inBar && <KeysDisplay st={st} mirror={mirror} keys={keys} />}
                 <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={actions} tracker={tracker} />
                 <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} />
               </>
             ) : (
               <>
-                <DisplayStrip st={st} mirror={mirror} />
-                <Group
-                  group={group}
-                  st={st}
-                  nameOf={nameOf}
-                  now={now}
-                  big
-                  coach
-                  press={padPress}
-                  playingPads={playingPads}
-                  tracker={tracker}
-                />
-                <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} />
-                <GroupKeys group={group} st={st} now={now} onSelect={setGroup} />
+                {!inBar && <DisplayStrip st={st} mirror={mirror} />}
+                {side && <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} />}
+                <div class="live__pads">
+                  <Group
+                    group={group}
+                    st={st}
+                    nameOf={nameOf}
+                    now={now}
+                    big
+                    coach
+                    press={padPress}
+                    playingPads={playingPads}
+                    tracker={tracker}
+                  />
+                  {side && <GroupKeys group={group} st={st} now={now} onSelect={setGroup} column />}
+                </div>
+                {!side && <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} />}
+                {!side && <GroupKeys group={group} st={st} now={now} onSelect={setGroup} />}
               </>
             )}
           </div>
@@ -333,7 +424,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
               <Caption text={MirrorText.TITLE} as="h1" />
               {onBack && <CloseKey class="live__close" onClick={onBack} description={GUIDE_CLOSE} />}
             </div>
-            <Display st={st} mirror={mirror} initialNoteOpen={props.initialNoteOpen ?? false} />
+            {!inBar && <Display st={st} mirror={mirror} initialNoteOpen={props.initialNoteOpen ?? false} />}
             <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} />
             {/* Four groups in a row when there is room, two by two on a phone. */}
             <div class="live__groups">
@@ -363,10 +454,10 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
  * The one-group view's display as a single dark line: play state, tempo and
  * project on the left, the pad just played on the right.
  */
-function DisplayStrip(props: { st: MirrorState; mirror: MirrorUi | null }): JSX.Element {
+function DisplayStrip(props: { st: MirrorState; mirror: MirrorUi | null; compact?: boolean }): JSX.Element {
   const { st, mirror } = props
   return (
-    <div class="live-strip" aria-live="polite">
+    <div class={`live-strip${props.compact ? ' live-strip--bar' : ''}`} aria-live="polite">
       {st.playing === true && <span class="live-strip__sub live-strip__ink" role="img" aria-label={MirrorText.PLAYING}>{'▶'}</span>}
       {st.playing === false && <span class="live-strip__sub live-strip__dim" role="img" aria-label={MirrorText.STOPPED}>{'■'}</span>}
       {st.playing === null && mirror?.offline != null && (
@@ -378,6 +469,20 @@ function DisplayStrip(props: { st: MirrorState; mirror: MirrorUi | null }): JSX.
       )}
       <span class="live-strip__line">{displayLine(st, mirror)}</span>
     </div>
+  )
+}
+
+/**
+ * Live's display line in the top bar's middle, on a phone on its side: the
+ * KEYS line or the pads' one-line display, one bar tall. [pianoRange] is the
+ * piano's notes, to name a device note it doesn't reach.
+ */
+export function LivePill(props: { mirror: MirrorUi | null; keys: KeysUi; pianoRange: NoteRange | null }): JSX.Element {
+  const st = props.mirror?.state ?? emptyMirrorState()
+  return props.keys.on ? (
+    <KeysDisplay st={st} mirror={props.mirror} keys={props.keys} compact pianoRange={props.pianoRange} />
+  ) : (
+    <DisplayStrip st={st} mirror={props.mirror} compact />
   )
 }
 
@@ -485,13 +590,14 @@ function Group(props: GroupProps): JSX.Element {
  * the group shown stays down with its LED lit; a group lights orange while one
  * of its pads sounds.
  */
-function GroupKeys(props: { group: number; st: MirrorState; now: number; onSelect: (g: number) => void }): JSX.Element {
+function GroupKeys(props: { group: number; st: MirrorState; now: number; onSelect: (g: number) => void; column?: boolean }): JSX.Element {
   const { group, st, now, onSelect } = props
   const row = useRef<HTMLDivElement | null>(null)
   return (
     <div
       ref={row}
-      class="live-keys"
+      class={`live-keys${props.column ? ' live-keys--column' : ''}`}
+      aria-orientation={props.column ? 'vertical' : undefined}
       role="tablist"
       aria-label={MirrorText.GROUP}
       onKeyDown={(e) => handleRovingKey(e, group, 4, row.current, onSelect)}
@@ -602,6 +708,10 @@ function Notes(props: {
   mirror: MirrorUi | null
   onPadOrder: (order: PadOrder) => void
   tapToPlay: boolean
+  /** Upright: the piano is a turn of the phone away. */
+  hint?: boolean
+  /** The display line is in the top bar: its clock-out hint moves here. */
+  transport?: boolean
 }): JSX.Element {
   const { st, mirror, onPadOrder } = props
   const orders: readonly [PadOrder, string][] = [
@@ -611,6 +721,8 @@ function Notes(props: {
   return (
     <div class="live-tools__notes">
       {props.tapToPlay && <p class="t-small live-tools__note">{WebText.LIVE_TAP_NOTE}</p>}
+      {props.tapToPlay && props.hint && <p class="t-small live-tools__note">{WebText.LIVE_PIANO_HINT}</p>}
+      {props.transport && st.playing === null && st.bpm === null && <p class="t-small live-tools__note">{MirrorText.NO_TRANSPORT}</p>}
       {mirror?.offline != null && <p class="t-small live-tools__note">{MirrorText.OFFLINE_NOTE}</p>}
       {st.padOrder === PadOrder.FROM_TOP && (
         <>
@@ -641,7 +753,10 @@ function Notes(props: {
 /**
  * The row right under the grid, as the PO app's DRUMS / KEYPAD: one word for
  * the mode that a tap switches (PADS ⇄ KEYS), and in KEYS the scale and the
- * octave, a tap on either of which lists the choices.
+ * octave, a tap on either of which lists the choices. Over the piano
+ * ([landscape]) it also has the key's own word, and − and + either side of the
+ * octave step it as the EP-133's KEYS + − / + do; on a [narrow] plate the key
+ * word drops "KEY", and on a [tight] one the scale shortens to its code.
  */
 function ModeRow(props: {
   keys: KeysUi
@@ -649,8 +764,11 @@ function ModeRow(props: {
   /** Kept by the caller when given (undefined: each word keeps its own). */
   picker?: KeysPicker | null
   onPicker?: (picker: KeysPicker | null) => void
+  landscape?: boolean
+  narrow?: boolean
+  tight?: boolean
 }): JSX.Element {
-  const { keys, actions, picker, onPicker } = props
+  const { keys, actions, picker, onPicker, landscape = false } = props
   const pick = (which: KeysPicker): { open?: boolean; onOpen?: (open: boolean) => void } =>
     onPicker
       ? {
@@ -661,16 +779,32 @@ function ModeRow(props: {
           },
         }
       : {}
+  const octave = (
+    <PickWord
+      label={MirrorText.octave(keys.octave)}
+      options={octaves()}
+      selected={keys.octave}
+      name={MirrorText.octave}
+      onPick={(o) => actions.onOctave?.(o)}
+      description={MirrorText.octaveChoice(keys.octave)}
+      coach={{ id: 'live.octave', label: CoachText.OCTAVE }}
+      {...pick('octave')}
+      alignEnd
+      down={landscape}
+      columns={landscape ? 3 : 1}
+    />
+  )
   return (
     // Spread across the row: mode at the start, octave at the end, scale between; pulled
-    // up close under the grid (the words keep their full touch height).
-    <div class="live-mode">
+    // up close under the grid (the words keep their full touch height). Over the piano,
+    // the words sit together at the start and the octave with − and + at the end.
+    <div class={`live-mode${landscape ? ' live-mode--piano' : ''}`}>
       <WordButton
         label={keys.on ? MirrorText.MODE_KEYS : MirrorText.MODE_PADS}
         onClick={() => actions.onMode?.(!keys.on)}
         mark
         description={MirrorText.modeSwitch(keys.on)}
-        top
+        top={!landscape}
         data-coach="live.mode"
         data-coach-label={CoachText.MODE}
         data-coach-face="var(--navy)"
@@ -679,7 +813,7 @@ function ModeRow(props: {
       {keys.on && (
         <>
           <PickWord
-            label={MirrorText.scaleName(keys.scale)}
+            label={props.tight ? MirrorText.scaleCode(keys.scale) : MirrorText.scaleName(keys.scale)}
             options={SCALES}
             selected={keys.scale}
             name={MirrorText.scaleName}
@@ -687,32 +821,92 @@ function ModeRow(props: {
             description={MirrorText.scaleChoice(keys.scale)}
             coach={{ id: 'live.scale', label: CoachText.SCALE }}
             {...pick('scale')}
+            down={landscape}
+            columns={landscape ? 2 : 1}
           />
-          <PickWord
-            label={MirrorText.octave(keys.octave)}
-            options={octaves()}
-            selected={keys.octave}
-            name={MirrorText.octave}
-            onPick={(o) => actions.onOctave?.(o)}
-            description={MirrorText.octaveChoice(keys.octave)}
-            coach={{ id: 'live.octave', label: CoachText.OCTAVE }}
-            {...pick('octave')}
-            alignEnd
-          />
+          {landscape && (
+            <PickWord
+              label={props.narrow ? Keys.name(keys.root, keys.names) : MirrorText.keyWord(keys.root, keys.names)}
+              options={ROOTS}
+              selected={keys.root}
+              name={(r) => Keys.name(r, keys.names)}
+              onPick={(r) => actions.onRoot?.(r)}
+              description={MirrorText.keyChoice(keys.root, keys.names)}
+              coach={{ id: 'live.key', label: CoachText.KEY }}
+              {...pick('key')}
+              down
+              columns={6}
+            />
+          )}
+          {landscape ? (
+            <span class="live-mode__octave">
+              <StepWord
+                glyph="−"
+                description={MirrorText.OCTAVE_DOWN}
+                enabled={keys.octave > MIN_OCTAVE}
+                onClick={() => actions.onOctave?.(keys.octave - 1)}
+              />
+              {octave}
+              <StepWord
+                glyph="+"
+                description={MirrorText.OCTAVE_UP}
+                enabled={keys.octave < MAX_OCTAVE}
+                onClick={() => actions.onOctave?.(keys.octave + 1)}
+              />
+            </span>
+          ) : (
+            octave
+          )}
         </>
       )}
     </div>
   )
 }
 
-/** The KEYS display line: KEYS and the last note on the left, the sound it plays on the right. */
-function KeysDisplay(props: { st: MirrorState; mirror: MirrorUi | null; keys: KeysUi }): JSX.Element {
-  const { st, mirror, keys } = props
-  const note = keysDisplayNote(keys, st.lastNote)
+/** The twelve keys the KEY word lists, DO (C) first. */
+const ROOTS: readonly number[] = Object.freeze([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+
+/** − or + by the octave word: one octave down or up, greyed (and disabled) at either end. */
+function StepWord(props: { glyph: string; description: string; enabled: boolean; onClick: () => void }): JSX.Element {
   return (
-    <div class="live-strip" aria-live="polite">
-      <span class="live-strip__sub live-strip__dim">{MirrorText.MODE_KEYS.toUpperCase()}</span>
-      {note !== null && <span class="live-strip__sub live-strip__ink">{MirrorText.noteName(note, keys.names)}</span>}
+    <button
+      type="button"
+      class="live-step"
+      aria-label={props.description}
+      disabled={!props.enabled}
+      onClick={props.onClick}
+    >
+      <span aria-hidden="true">{props.glyph}</span>
+    </button>
+  )
+}
+
+/**
+ * The KEYS display line: KEYS and the last note on the left, the sound it
+ * plays on the right. [compact]: one bar tall, in the top bar (LivePill),
+ * where the word KEYS (right under it) is left out. With the piano
+ * ([pianoRange]), a device note it doesn't reach is named as such.
+ */
+function KeysDisplay(props: {
+  st: MirrorState
+  mirror: MirrorUi | null
+  keys: KeysUi
+  compact?: boolean
+  pianoRange?: NoteRange | null
+}): JSX.Element {
+  const { st, mirror, keys, compact = false } = props
+  const note = keysDisplayNote(keys, st.lastNote)
+  const range = props.pianoRange ?? null
+  const noteText =
+    note === null
+      ? null
+      : range !== null && !inRange(range, note) && !keys.playingNotes.has(note)
+        ? MirrorText.outOfRange(note, keys.names, note < range.first)
+        : MirrorText.noteName(note, keys.names)
+  return (
+    <div class={`live-strip${compact ? ' live-strip--bar' : ''}`} aria-live="polite">
+      <span class={`live-strip__sub live-strip__dim${compact ? ' sr-only' : ''}`}>{MirrorText.MODE_KEYS.toUpperCase()}</span>
+      {noteText !== null && <span class="live-strip__sub live-strip__ink live-strip__note">{noteText}</span>}
       {mirror?.offline != null && <span class="live-strip__sub live-strip__dim">{MirrorText.OFFLINE}</span>}
       <span class="live-strip__line">
         {keys.pad !== null ? MirrorText.keysSound(keys.pad, keys.padName) : MirrorText.NO_SOUND}
@@ -723,8 +917,11 @@ function KeysDisplay(props: { st: MirrorState; mirror: MirrorUi | null; keys: Ke
 
 /**
  * The 12 pads as keys, in the keypad's layout: each shows its note in a ring,
- * navy for the first octave and orange for the next. Notes from the device
- * light their key; the key playing on the phone is ringed in signal orange.
+ * orange on the scale's root (the first key of each octave of it) and plain on
+ * the rest, as the piano marks them. Notes from the device light their key;
+ * the notes playing on the phone are outlined in signal orange. Each key
+ * plays the note it showed when pressed, even if the key, scale or octave
+ * change while it is held (NoteTouches, with the key as its finger).
  */
 function KeysGrid(props: {
   st: MirrorState
@@ -737,6 +934,15 @@ function KeysGrid(props: {
   const { st, keys, keyNotes, now, actions, tracker } = props
   // How lit each key is: the brightest device note that falls on it.
   const lit = keysLit(st.notes, keyNotes, now)
+  const touches = useMemo(() => new NoteTouches(), [])
+  const act = useRef(actions)
+  act.current = actions
+  const play = (events: readonly NoteEvent[]): void => {
+    for (const e of events) {
+      if (e.kind === 'press') act.current.onNote?.(e.note, true)
+      else act.current.onNoteUp?.(e.note)
+    }
+  }
   return (
     <div
       class="live-kgrid"
@@ -751,13 +957,14 @@ function KeysGrid(props: {
             {offsets.map((k) => {
               const note = keyNotes[k]!
               const target: PressTarget = {
-                press: (hold) => actions.onKey?.(k, hold),
-                release: () => actions.onKeyUp?.(k),
+                // A screen reader's Play sounds the whole note, outside the fingers' count.
+                press: (hold) => (hold ? play(touches.down(k, note)) : act.current.onNote?.(note, false)),
+                release: () => play(touches.up(k)),
               }
               const cls =
                 'live-key cap-3d' +
-                (upperOctave(note, keys.octave) ? ' live-key--upper' : '') +
-                (keys.playingKeys.has(k) ? ' is-playing' : '')
+                (rootKey(k, keys.scale) ? ' live-key--root' : '') +
+                (keys.playingNotes.has(note) ? ' is-playing' : '')
               return (
                 <button
                   key={k}
@@ -784,8 +991,12 @@ function KeysGrid(props: {
   )
 }
 
-/** The KEYS tools: the key (fixed-do names) and the scale. */
-function KeysPanel(props: { keys: KeysUi; actions: KeysActions }): JSX.Element {
+/**
+ * The KEYS tools: the key (fixed-do names) and the scale, and what the keys'
+ * colours mean (with the piano's own rows while it shows). Upright, a note
+ * that a turn of the phone shows the piano ([hint]).
+ */
+function KeysPanel(props: { keys: KeysUi; actions: KeysActions; piano: boolean; hint: boolean }): JSX.Element {
   const { keys, actions } = props
   const rows = [
     [0, 1, 2, 3, 4, 5],
@@ -804,26 +1015,43 @@ function KeysPanel(props: { keys: KeysUi; actions: KeysActions }): JSX.Element {
         />
       ))}
       <p class="t-small live-tools__note">{MirrorText.KEYS_NOTE}</p>
-      <KeysLegend />
+      {props.hint && <p class="t-small live-tools__note">{WebText.LIVE_PIANO_HINT}</p>}
+      <KeysLegend piano={props.piano} />
     </>
   )
 }
 
-/** What the keys' colours mean, each with a small key drawn as the grid draws it. */
-function KeysLegend(): JSX.Element {
+/**
+ * What the keys' colours mean, each with a small key drawn as the grid (or,
+ * with the piano showing, the piano) draws it.
+ */
+function KeysLegend(props: { piano: boolean }): JSX.Element {
+  const piano = props.piano
   return (
     <>
       <Caption text={MirrorText.LEGEND} align="start" />
       <ul class="live-legend">
-        <LegendRow text={MirrorText.LEGEND_OCTAVE}>
-          <LegendKey ring="var(--hw-ring)" />
-          <LegendKey ring="var(--signal)" />
+        <LegendRow text={MirrorText.LEGEND_ROOT}>
+          <LegendKey ring="var(--signal)" piano={piano} />
         </LegendRow>
+        <LegendRow text={WebText.LIVE_LEGEND_IN_SCALE}>
+          <LegendKey ring={piano ? 'var(--navy)' : 'var(--hw-ring)'} piano={piano} />
+        </LegendRow>
+        {piano && (
+          <>
+            <LegendRow text={MirrorText.LEGEND_OUT}>
+              <LegendKey piano out />
+            </LegendRow>
+            <LegendRow text={MirrorText.LEGEND_C}>
+              <LegendKey piano digit="4" />
+            </LegendRow>
+          </>
+        )}
         <LegendRow text={MirrorText.LEGEND_DEVICE}>
-          <LegendKey ring="var(--on-signal)" fill="var(--signal)" />
+          <LegendKey ring="var(--on-signal)" fill="var(--signal)" piano={piano} />
         </LegendRow>
         <LegendRow text={WebText.LIVE_LEGEND_HERE}>
-          <LegendKey ring="var(--hw-ring)" outline />
+          <LegendKey ring={piano ? 'var(--navy)' : 'var(--hw-ring)'} outline piano={piano} />
         </LegendRow>
       </ul>
     </>
@@ -840,16 +1068,26 @@ function LegendRow(props: { text: string; children: ComponentChildren }): JSX.El
   )
 }
 
-/** A key in miniature: its dark cap (lit orange when [fill]), its ring, and the phone's outline. */
-function LegendKey(props: { ring: string; fill?: string; outline?: boolean }): JSX.Element {
+/**
+ * A key in miniature: its dark cap (on the piano, a white key: dimmed when
+ * [out]) lit orange when [fill], its ring, the phone's outline, or a C's octave [digit].
+ */
+function LegendKey(props: { ring?: string; fill?: string; outline?: boolean; piano?: boolean; out?: boolean; digit?: string }): JSX.Element {
+  const face = props.fill ?? (props.piano ? (props.out ? 'var(--key-out)' : 'var(--piano-white)') : 'var(--hw-dark-face)')
   return (
     <span
-      class={`live-legend__key${props.outline ? ' live-legend__key--outline' : ''}`}
-      style={{ background: props.fill ?? 'var(--hw-dark-face)' }}
+      class={`live-legend__key${props.outline ? ' live-legend__key--outline' : ''}${props.piano ? ' live-legend__key--piano' : ''}`}
+      style={{ background: face }}
     >
-      <svg viewBox="0 0 100 100" focusable="false">
-        <circle cx="50" cy="50" r="43" fill="none" stroke={props.ring} stroke-width="14" />
-      </svg>
+      {props.digit !== undefined ? (
+        <span class="live-legend__digit">{props.digit}</span>
+      ) : (
+        props.ring !== undefined && (
+          <svg viewBox="0 0 100 100" focusable="false">
+            <circle cx="50" cy="50" r="43" fill="none" stroke={props.ring} stroke-width="14" />
+          </svg>
+        )
+      )}
     </span>
   )
 }

@@ -18,6 +18,8 @@ export const CoachText = {
   MODE: 'Pads or keys',
   OCTAVE: 'Octave',
   SCALE: 'Scale',
+  KEY: 'Key',
+  PIANO: 'Play, or slide across the keys',
 
   SEARCH: 'Search sounds',
   IMPORT: 'Import a .pak',

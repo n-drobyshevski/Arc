@@ -57,6 +57,7 @@ export const COACH_IDS = [
   'live.keys',
   'live.mode',
   'live.scale',
+  'live.key',
   'live.octave',
   'live.groups',
   'side.more',
@@ -98,6 +99,8 @@ export const COACH_MARKS: Readonly<Record<CoachId, CoachMarkSpec>> = Object.free
   'live.keys': yellowTag(CoachText.PADS),
   'live.mode': navyTag(CoachText.MODE),
   'live.scale': navyTag(CoachText.SCALE),
+  // The piano's key word (landscape KEYS).
+  'live.key': navyTag(CoachText.KEY),
   'live.octave': navyTag(CoachText.OCTAVE),
   'live.groups': navyTag(CoachText.GROUPS),
   'side.more': { label: CoachText.MORE_TOOLS, face: 'var(--ink)', ink: 'var(--shell)' },
