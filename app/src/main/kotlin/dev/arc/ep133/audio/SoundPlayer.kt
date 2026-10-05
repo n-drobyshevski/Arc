@@ -22,12 +22,10 @@ sealed interface PlayResult {
 }
 
 /**
- * Plays sounds on the phone (16-bit PCM, mono or stereo). [play] plays one
- * at a time: starting a sound stops the others, as lists want. [playVoice]
- * plays alongside what is playing, for Live's pads and keys (chords): the
- * same key starts over, and past [MAX_VOICES] the oldest stops. [playing] is
- * the key of the latest sound playing, so lists can show a Stop key on the
- * right row; [playingKeys] are all of them.
+ * Plays sounds on the phone (16-bit PCM, mono or stereo), one at a time:
+ * starting a sound stops the one before, as lists want. [playing] is the key
+ * of the sound playing, so lists can show a Stop key on the right row. Live's
+ * pads and keys play through [LiveAudio] instead.
  *
  * The PCM is streamed to the output from a small thread, as media players do,
  * rather than handed over as one static buffer: a whole sample can be several
@@ -42,8 +40,11 @@ class SoundPlayer(context: Context? = null) {
 
         private const val CHUNK = 16 * 1024
 
-        /** Sounds at once; Android allows an app a few dozen tracks in all. */
-        const val MAX_VOICES = 8
+        @android.annotation.SuppressLint("InlinedApi")
+        fun isBluetooth(type: Int): Boolean = type in setOf(
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+            AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER, AudioDeviceInfo.TYPE_BLE_BROADCAST,
+        )
 
         /**
          * A short name for where the sound goes. Newer device types are plain
@@ -90,12 +91,9 @@ class SoundPlayer(context: Context? = null) {
     private val voices = LinkedHashMap<String, Playback>()
     private val _playing = MutableStateFlow<String?>(null)
     val playing: StateFlow<String?> = _playing
-    private val _playingKeys = MutableStateFlow<Set<String>>(emptySet())
-    val playingKeys: StateFlow<Set<String>> = _playingKeys
 
     private fun publish() {
         _playing.value = voices.keys.lastOrNull()
-        _playingKeys.value = voices.keys.toSet()
         if (voices.isEmpty()) focus?.let { audio?.abandonAudioFocusRequest(it) }
     }
 
@@ -105,14 +103,6 @@ class SoundPlayer(context: Context? = null) {
     @Synchronized
     fun play(key: String, pcm: ByteArray, channels: Int, sampleRate: Int): PlayResult {
         stop()
-        return start(key, pcm, channels, sampleRate)
-    }
-
-    /** Plays alongside the sounds already playing (a chord); the same [key] starts over. */
-    @Synchronized
-    fun playVoice(key: String, pcm: ByteArray, channels: Int, sampleRate: Int): PlayResult {
-        voices[key]?.let { halt(it) }
-        while (voices.size >= MAX_VOICES) halt(voices.values.first())
         return start(key, pcm, channels, sampleRate)
     }
 

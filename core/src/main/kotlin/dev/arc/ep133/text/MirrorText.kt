@@ -29,7 +29,7 @@ object MirrorText {
     const val LISTEN_ONLY = "arc only reads from the device here (sound names, the active project's pads, and the samples on them, to keep a copy); nothing on it is changed."
 
     // Tapping a pad plays its sample on the phone.
-    const val TAP_NOTE = "Tap a pad to hear its sample on the phone: from arc's copy of the device's sounds, a backup, or the device."
+    const val TAP_NOTE = "Hold a pad to hear its sample on the phone (it stops when you let go): from arc's copy of the device's sounds, a backup, or the device."
     const val NO_SAMPLE = "arc doesn't know this pad's sample yet."
     const val NO_COPY = "This sample isn't saved on the phone or in a backup yet."
     const val SOUNDS_CLEARED = "Saved pad sounds cleared."
@@ -47,7 +47,11 @@ object MirrorText {
     fun modeSwitch(keysOn: Boolean) = if (keysOn) "Keys. Tap for pads." else "Pads. Tap for keys."
 
     fun scaleChoice(s: dev.arc.ep133.features.Scale) = "Scale: ${scaleName(s)}. Tap to change."
-    const val KEYS_NOTE = "Keys plays the pad last tapped (or played on the EP-133 in Pads) as notes. Notes the EP-133 sends in its own KEYS mode light their key. Navy keys are the first octave, orange the next."
+    const val KEYS_NOTE = "Keys plays the pad last tapped (or played on the EP-133 in Pads) as notes. Notes the EP-133 sends in its own KEYS mode light their key."
+    const val LEGEND = "Colours"
+    const val LEGEND_OCTAVE = "Ring: the octave, navy and orange in turn (its number is in the corner)"
+    const val LEGEND_DEVICE = "Filled: played on the EP-133"
+    const val LEGEND_PHONE = "Outlined: playing on the phone"
 
     fun scaleName(s: dev.arc.ep133.features.Scale) = when (s) {
         dev.arc.ep133.features.Scale.CHROMATIC -> "Chromatic"
@@ -67,8 +71,20 @@ object MirrorText {
 
     fun octaveChoice(n: Int) = "Octave $n. Tap to change."
 
-    /** "MI4". */
-    fun noteName(note: Int) = dev.arc.ep133.features.Keys.solfege(note) + dev.arc.ep133.features.Keys.octaveOf(note)
+    /** "MI4", or "E4" with letter names. */
+    fun noteName(note: Int, names: dev.arc.ep133.features.NoteNames = dev.arc.ep133.features.NoteNames.SOLFEGE) =
+        dev.arc.ep133.features.Keys.name(note, names) + dev.arc.ep133.features.Keys.octaveOf(note)
+
+    const val NOTE_NAMES = "Note names on the keys"
+
+    /** The debug log's line for a Live sound: "live:0:3 heard 31 ms after the press (phone speaker)". */
+    fun latencyNote(key: String, ms: Double, route: String) = "$key heard ${"%.0f".format(ms)} ms after the press ($route)"
+    const val BLUETOOTH_DELAY = "Sound goes to Bluetooth, which plays late (often 0.2 s or more). Wired headphones or the phone speaker are much quicker."
+    fun noteNames(n: dev.arc.ep133.features.NoteNames) = when (n) {
+        dev.arc.ep133.features.NoteNames.SOLFEGE -> "DO RE MI"
+        dev.arc.ep133.features.NoteNames.LETTERS -> "C D E"
+    }
+    const val NOTE_NAMES_NOTE = "How KEYS names its notes and the key picker: fixed-do solfège (DO is C) or letters, sharps as C#, D#."
 
     /** "A 7 · kick", the KEYS sound. */
     fun keysSound(pad: dev.arc.ep133.features.PhysicalPad, name: String?) = "${pad.groupLetter} ${pad.label}" + (name?.let { " \u00B7 $it" } ?: "")

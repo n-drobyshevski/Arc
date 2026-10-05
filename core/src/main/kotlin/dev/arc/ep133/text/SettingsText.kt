@@ -9,6 +9,8 @@ enum class ThemeChoice { SYSTEM, LIGHT, DARK }
 object SettingsText {
     const val TITLE = "Settings"
     const val CLOSE = "Close settings"
+    /** A screen reader's action on a toast. */
+    const val DISMISS = "Dismiss"
 
     const val APPEARANCE = "Appearance"
     const val THEME = "Theme"

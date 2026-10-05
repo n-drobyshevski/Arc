@@ -21,6 +21,8 @@ class PadSoundCache(private val dir: File, private val capBytes: Long = 256L * 1
 
     private val indexFile get() = File(dir, "index.json")
     private var index: MutableMap<Int, Entry>? = null
+    // When copies were played changed since index.json was written.
+    private var dirty = false
 
     private fun file(slot: Int) = File(dir, "s$slot.wav")
 
@@ -51,6 +53,7 @@ class PadSoundCache(private val dir: File, private val capBytes: Long = 256L * 1
             })
         }.toString()
         writeAtomically(indexFile, text.toByteArray())
+        dirty = false
     }
 
     private fun writeAtomically(f: File, bytes: ByteArray) {
@@ -69,9 +72,16 @@ class PadSoundCache(private val dir: File, private val capBytes: Long = 256L * 1
         val e = entries()[slot] ?: return null
         if (!sameName(e.name, name)) return null
         val bytes = runCatching { file(slot).readBytes() }.getOrNull() ?: return null
+        // Noted now, written with the next change or [flush]: a play doesn't wait for a write.
         entries()[slot] = e.copy(usedAt = now())
-        runCatching { save() }
+        dirty = true
         return bytes
+    }
+
+    /** Writes when each copy was last played, if that changed. */
+    @Synchronized
+    fun flush() {
+        if (dirty) save()
     }
 
     /** Whether the copy of a slot is the device's current sound ([size] as the device lists it). */

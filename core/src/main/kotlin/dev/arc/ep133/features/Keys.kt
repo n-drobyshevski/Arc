@@ -14,6 +14,9 @@ enum class Scale(val intervals: List<Int>) {
     BLUES(listOf(0, 3, 5, 6, 7, 10)),
 }
 
+/** How KEYS names its notes: fixed-do solfège (DO RE MI) or letters (C D E). */
+enum class NoteNames { SOLFEGE, LETTERS }
+
 /**
  * KEYS mode in Live (an addition), after the EP-133's: the 12 pads play one
  * sound as notes of a scale. Key i is the pad at offset i in the official
@@ -26,6 +29,7 @@ object Keys {
     const val MAX_OCTAVE = 8
 
     private val SOLFEGE = listOf("DO", "DI", "RE", "RI", "MI", "FA", "FI", "SO", "SI", "LA", "LI", "TI")
+    private val LETTERS = listOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
 
     /** The MIDI note of each key, lowest first: [scale] from [root] (0 = C) in [octave] (4 = C4 octave). */
     fun notes(root: Int, scale: Scale, octave: Int): List<Int> {
@@ -36,6 +40,15 @@ object Keys {
 
     /** Fixed-do name of a note: DO is C, sharps are DI, RI, FI, SI, LI. */
     fun solfege(note: Int): String = SOLFEGE[((note % 12) + 12) % 12]
+
+    /** Letter name of a note, sharps for the black keys: C, C#, D … B. */
+    fun letter(note: Int): String = LETTERS[((note % 12) + 12) % 12]
+
+    /** A note's name (no octave) the way [names] says. */
+    fun name(note: Int, names: NoteNames): String = when (names) {
+        NoteNames.SOLFEGE -> solfege(note)
+        NoteNames.LETTERS -> letter(note)
+    }
 
     /** The note's octave number as the guide's note table counts it (C4 = 60). */
     fun octaveOf(note: Int): Int = note / 12 - 1

@@ -47,6 +47,22 @@ class PadSoundsTest {
     }
 
     @Test
+    fun `a play is noted in memory and written on flush, not on every play`() {
+        val c = cache(cap = 25)
+        c.put(1, "a", 1, ByteArray(10))
+        c.put(2, "b", 1, ByteArray(10))
+        val written = dir.resolve("index.json").readText()
+        c.get(1, "a")
+        assertEquals(written, dir.resolve("index.json").readText())
+        c.flush()
+        // After a restart, 1 is still the newer one: 2 goes first.
+        val again = cache(cap = 25)
+        again.put(3, "c", 1, ByteArray(10))
+        assertNull(again.get(2, "b"))
+        assertTrue(again.fresh(1, "a", 1))
+    }
+
+    @Test
     fun `a broken index reads as empty, and clear empties it`() {
         dir.resolve("index.json").writeText("not json")
         val c = cache()

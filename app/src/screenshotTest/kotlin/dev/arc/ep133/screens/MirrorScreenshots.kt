@@ -110,7 +110,7 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
             follow = true,
             initialToolsOpen = tools,
             initialNoteOpen = noteOpen,
-            onPad = if (playingPads.isNotEmpty()) ({}) else null,
+            onPad = if (playingPads.isNotEmpty()) ({ _, _ -> }) else null,
             playingPads = playingPads,
             keys = keys,
         )
@@ -191,6 +191,16 @@ fun LiveKeysSmallPreview() = Live(keysPlaying, keys = keysUi.copy(scale = dev.ar
 @Preview(name = "Live keys tools", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
 fun LiveKeysToolsPreview() = Live(keysPlaying, keys = keysUi, tools = true)
+
+@PreviewTest
+@Preview(name = "Live keys letters", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveKeysLettersPreview() = Live(keysPlaying, keys = keysUi.copy(root = 9, scale = dev.arc.ep133.features.Scale.MINOR, names = dev.arc.ep133.features.NoteNames.LETTERS), tools = true)
+
+@PreviewTest
+@Preview(name = "Live keys letters grid", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveKeysLettersGridPreview() = Live(keysPlaying, keys = keysUi.copy(root = 9, scale = dev.arc.ep133.features.Scale.MINOR, names = dev.arc.ep133.features.NoteNames.LETTERS))
 
 // Tapping "Offline" unfolds why.
 @PreviewTest
