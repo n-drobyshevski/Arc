@@ -54,6 +54,19 @@ data class ArcColors(
     /** The "connected" block. */
     val ok: Color,
     val onOk: Color,
+    /**
+     * Live's landscape piano: its key faces, the names and rings on black
+     * keys, and the faces of keys outside the scale (dimmed: each face pulled
+     * the same way toward a mid grey, to 1.4:1 from its own colour). The line
+     * between white keys also outlines the black ones, so every key's edge is
+     * 3:1 or more against its neighbours.
+     */
+    val pianoWhite: Color,
+    val pianoBlack: Color,
+    val onPianoBlack: Color,
+    val keyOut: Color,
+    val keyOutBlack: Color,
+    val pianoLine: Color,
 ) {
     val scrim: Color get() = Color(20, 20, 18).copy(alpha = 0.45f)
 }
@@ -80,6 +93,13 @@ val LightArcColors = ArcColors(
     line = Color(0xFF1E1F21),
     ok = Color(0xFF17613F),
     onOk = Color(0xFFF4F2EE),
+    pianoWhite = Color(0xFFF5F4F0),
+    pianoBlack = Color(0xFF1E1F21),
+    // The dark theme's navy: pale enough to read on a black key.
+    onPianoBlack = Color(0xFFAEB4F0),
+    keyOut = Color(0xFFCDCCCC),
+    keyOutBlack = Color(0xFF3A3B3F),
+    pianoLine = Color(0xFF1E1F21),
 )
 
 val DarkArcColors = LightArcColors.copy(
@@ -102,6 +122,13 @@ val DarkArcColors = LightArcColors.copy(
     line = Color(0xFF0E0F10),
     ok = Color(0xFF3FA877),
     onOk = Color(0xFF0E1A14),
+    // White keys lifted off the shell; black keys darker than it, held apart from the
+    // white ones by a graphite outline (their faces alone are only 2:1).
+    pianoWhite = Color(0xFF4A4B52),
+    pianoBlack = Color(0xFF121314),
+    keyOut = Color(0xFF333439),
+    keyOutBlack = Color(0xFF303135),
+    pianoLine = Color(0xFF9A9B9D),
 )
 
 val LocalArcColors = staticCompositionLocalOf { LightArcColors }

@@ -82,6 +82,8 @@ class FeatureTextTest {
         assertEquals("Keyboard, C7 to G9", MirrorText.pianoRange(96, 127, NoteNames.LETTERS))
         assertEquals("DO2, below the keys", MirrorText.outOfRange(36, solfege, below = true))
         assertEquals("E6, above the keys", MirrorText.outOfRange(88, NoteNames.LETTERS, below = false))
+        assertEquals("One group. Tap for all groups.", MirrorText.viewSwitch(oneGroup = true))
+        assertEquals("All groups. Tap for one group.", MirrorText.viewSwitch(oneGroup = false))
         // Short scale words, still told apart once upper-cased, and never wider than five.
         val codes = Scale.entries.map { MirrorText.scaleCode(it).uppercase() }
         assertEquals(listOf("CHR", "MAJ", "MIN", "DOR", "PHR", "LYD", "MIX", "MAJ.P", "MIN.P", "BLU"), codes)

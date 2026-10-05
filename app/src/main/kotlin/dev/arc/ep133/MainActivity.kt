@@ -421,6 +421,25 @@ class MainActivity : ComponentActivity() {
         }
 
         val onTabs = !debug && !settingsOpen && (compareA == null || compareB == null) && contentsBackup == null && !search
+        // Live's view of the device and of KEYS, for its screen and (on a phone on its side) the top bar.
+        val mirror = state.mirror ?: if (!ready) {
+            dev.arc.ep133.controller.MirrorUi(loading = false, error = dev.arc.ep133.text.MirrorText.NOT_CONNECTED)
+        } else {
+            null
+        }
+        val keys = dev.arc.ep133.ui.screens.KeysUi(
+            on = appSettings.liveKeys,
+            root = appSettings.keysRoot,
+            scale = appSettings.keysScale,
+            octave = appSettings.keysOctave,
+            names = appSettings.keysNames,
+            pad = state.keysPad,
+            padName = state.keysPad?.let(controller::mirrorName),
+            playingNotes = voices.mapNotNullTo(LinkedHashSet()) { v -> if (v.startsWith("note:")) v.removePrefix("note:").toIntOrNull() else null },
+        )
+        // The piano's notes while it shows, so the bar's display line can name a device note past its ends.
+        var pianoRange by remember { mutableStateOf<IntRange?>(null) }
+        val liveBar = tab == Tab.LIVE && dev.arc.ep133.ui.screens.liveInBar(dev.arc.ep133.ui.components.LocalArcWindow.current)
         Box(Modifier.fillMaxSize()) {
             if (debug) {
                 DebugScreen(controller.trafficLog, ::shareLog, ::saveLog, ::copyLog) { debug = false }
@@ -531,30 +550,19 @@ class MainActivity : ComponentActivity() {
                     guideOpen = guideOpen,
                     onGuide = { guideOpen = it },
                     guide = { GuideScreen(onBack = { guideOpen = false }) },
+                    // On a phone on its side, Live's display line rides in the top bar.
+                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, pianoRange) }) else null,
                 ) {
                     // Back from another section returns to Live, the home section, first.
                     BackHandler(enabled = tab != Tab.LIVE) { selectTab(Tab.LIVE) }
                     when (tab) {
                         Tab.LIVE -> MirrorScreen(
-                            mirror = state.mirror ?: if (!ready) {
-                                dev.arc.ep133.controller.MirrorUi(loading = false, error = dev.arc.ep133.text.MirrorText.NOT_CONNECTED)
-                            } else {
-                                null
-                            },
+                            mirror = mirror,
                             nameOf = controller::mirrorName,
                             onPadOrder = controller::setPadOrder,
                             onPad = { pad, hold -> controller.playPad(pad, hold) },
                             onPadUp = controller::releasePad,
-                            keys = dev.arc.ep133.ui.screens.KeysUi(
-                                on = appSettings.liveKeys,
-                                root = appSettings.keysRoot,
-                                scale = appSettings.keysScale,
-                                octave = appSettings.keysOctave,
-                                names = appSettings.keysNames,
-                                pad = state.keysPad,
-                                padName = state.keysPad?.let(controller::mirrorName),
-                                playingNotes = voices.mapNotNullTo(LinkedHashSet()) { v -> if (v.startsWith("note:")) v.removePrefix("note:").toIntOrNull() else null },
-                            ),
+                            keys = keys,
                             keysActions = remember(controller) {
                                 dev.arc.ep133.ui.screens.KeysActions(
                                     onMode = controller::setLiveKeys,
@@ -577,6 +585,7 @@ class MainActivity : ComponentActivity() {
                             onOneGroup = controller::setLiveOneGroup,
                             follow = appSettings.liveFollow,
                             onFollow = controller::setLiveFollow,
+                            onPianoRange = { pianoRange = it },
                         )
                         Tab.DEVICE -> DeviceScreen(
                             state = state,
