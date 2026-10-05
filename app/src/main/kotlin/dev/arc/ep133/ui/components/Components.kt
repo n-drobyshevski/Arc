@@ -369,39 +369,45 @@ fun TextToggle(options: List<String>, selected: Int, onSelect: (Int) -> Unit, mo
 
 /**
  * A choice of modes as the pocket operator app shows DRUMS / KEYPAD under its
- * grid: large uppercase words, the chosen one in navy with the two-squares
- * mark before it, the others pale. The words wrap onto more lines when they
- * don't fit (the scale picker).
+ * grid: small uppercase words, the chosen one in navy with the two-squares
+ * mark before it, the others pale. With [spread] each word takes an equal
+ * share of the width (the PO's KEYPAD starts mid-row); otherwise the words
+ * wrap onto more lines when they don't fit (the scale picker).
  */
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-fun WordToggle(options: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
+fun WordToggle(options: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier, spread: Boolean = false) {
     val c = LocalArcColors.current
+    @Composable
+    fun Word(i: Int, label: String, m: Modifier) {
+        val on = i == selected
+        Row(
+            m
+                .clip(RoundedCornerShape(6.dp))
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Tab) { onSelect(i) }
+                .semantics { this.selected = on }
+                .heightIn(min = 44.dp)
+                .padding(vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (on) Icon(ArcIcon.SWAP, c.navy, size = 14.dp)
+            Text(label.uppercase(), style = ArcType.word, color = if (on) c.navy else c.graphite.copy(alpha = 0.45f), maxLines = 1)
+        }
+    }
+    if (spread) {
+        Row(modifier.fillMaxWidth()) {
+            options.forEachIndexed { i, label -> Word(i, label, Modifier.weight(1f)) }
+        }
+        return
+    }
     androidx.compose.foundation.layout.FlowRow(
         modifier,
         horizontalArrangement = Arrangement.spacedBy(20.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
         options.forEachIndexed { i, label ->
-            val on = i == selected
-            Row(
-                Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Tab) { onSelect(i) }
-                    .semantics { this.selected = on }
-                    .heightIn(min = 44.dp)
-                    .padding(vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                if (on) Icon(ArcIcon.SWAP, c.navy, size = 18.dp)
-                Text(
-                    label.uppercase(),
-                    style = ArcType.word,
-                    color = if (on) c.navy else c.graphite.copy(alpha = 0.45f),
-                    maxLines = 1,
-                )
-            }
+            Word(i, label, Modifier)
         }
     }
 }

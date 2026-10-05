@@ -236,6 +236,7 @@ fun MirrorScreen(
                                 st, keys, now, keysActions.onKey,
                                 Modifier.fillMaxWidth().weight(1f).coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
                             )
+                            ModeToggle(true, keysActions.onMode)
                             OctaveKeys(keys, keysActions.onOctave)
                         } else {
                             DisplayStrip(st, mirror)
@@ -246,9 +247,9 @@ fun MirrorScreen(
                                 onPad = onPad,
                                 playingPads = playingPads,
                             )
+                            ModeToggle(false, keysActions.onMode)
                             GroupKeys(group, st, now, onSelect = { group = it })
                         }
-                        ModeToggle(keys.on, keysActions.onMode)
                     }
                 }
             } else {
@@ -612,7 +613,7 @@ private fun Notes(st: MirrorState, mirror: MirrorUi?, onPadOrder: (PadOrder) -> 
     }
 }
 
-/** PADS / KEYS under the grid, like the PO app's DRUMS / KEYPAD. */
+/** PADS / KEYS right under the grid, small, like the PO app's DRUMS / KEYPAD (the group keys below). */
 @Composable
 private fun ModeToggle(keysOn: Boolean, onMode: (Boolean) -> Unit) {
     val c = LocalArcColors.current
@@ -620,7 +621,9 @@ private fun ModeToggle(keysOn: Boolean, onMode: (Boolean) -> Unit) {
         listOf(MirrorText.MODE_PADS, MirrorText.MODE_KEYS),
         selected = if (keysOn) 1 else 0,
         onSelect = { onMode(it == 1) },
-        modifier = Modifier.coachMark("live.mode", CoachText.MODE, c.navy, c.onNavy),
+        // Close under the grid, as the PO app's DRUMS / KEYPAD.
+        modifier = Modifier.padding(start = 4.dp).coachMark("live.mode", CoachText.MODE, c.navy, c.onNavy),
+        spread = true,
     )
 }
 

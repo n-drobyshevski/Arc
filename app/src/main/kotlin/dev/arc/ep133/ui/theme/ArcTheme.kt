@@ -155,7 +155,7 @@ object ArcType {
     val capsKeySmall = capsKey.copy(fontSize = 13.sp)
     val capsKeyWide = capsKey.copy(fontSize = 16.sp)
     /** The PO app's mode words under its grid (DRUMS / KEYPAD). */
-    val word = BaseText.copy(fontSize = 22.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.01.em, lineHeight = 1.1.em)
+    val word = BaseText.copy(fontSize = 16.sp, fontWeight = FontWeight.Medium, letterSpacing = 0.02.em, lineHeight = 1.1.em)
     val tab = BaseText.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.05.em, lineHeight = 1.em)
     val semi = BaseText.copy(fontWeight = FontWeight.SemiBold)
 }
