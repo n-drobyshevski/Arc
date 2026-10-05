@@ -124,6 +124,8 @@ fun MirrorScreen(
     initialGroup: Int = 0,
     /** For screenshots: start with the tools panel open. */
     initialToolsOpen: Boolean = false,
+    /** For screenshots: start with the offline note unfolded. */
+    initialNoteOpen: Boolean = false,
 ) {
     val c = LocalArcColors.current
     if (onBack != null) BackHandler(onBack = onBack)
@@ -206,7 +208,7 @@ fun MirrorScreen(
                             Caption(MirrorText.TITLE)
                             if (onBack != null) CloseKey(onBack, dev.arc.ep133.text.GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
                         }
-                        Display(st, mirror)
+                        Display(st, mirror, initialNoteOpen = initialNoteOpen)
                         BoxWithConstraints(Modifier.fillMaxWidth()) {
                             // Four groups in a row when there is room, two by two on a phone.
                             val perRow = if (maxWidth >= 640.dp) 4 else 2
@@ -270,16 +272,33 @@ private fun DisplayStrip(st: MirrorState, mirror: MirrorUi?) {
 }
 
 @Composable
-private fun Display(st: MirrorState, mirror: MirrorUi?, compact: Boolean = false) {
+private fun Display(st: MirrorState, mirror: MirrorUi?, compact: Boolean = false, initialNoteOpen: Boolean = false) {
     val c = LocalArcColors.current
+    val offline = mirror?.offline != null && st.playing == null
+    // Why it is offline stays folded under the word until asked for, so the pads keep the room.
+    var noteOpen by rememberSaveable { mutableStateOf(initialNoteOpen) }
     DisplayPanel {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            val transport = when (st.playing) {
-                true -> "\u25B6 " + MirrorText.PLAYING
-                false -> "\u25A0 " + MirrorText.STOPPED
-                null -> if (mirror?.offline != null) MirrorText.OFFLINE else ""
+            if (offline) {
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button) { noteOpen = !noteOpen }
+                        .semantics { stateDescription = if (noteOpen) MirrorText.NOTE_SHOWN else MirrorText.NOTE_HIDDEN },
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(MirrorText.OFFLINE, style = ArcType.displayHead, color = c.displayInk)
+                    Text(if (noteOpen) "\u25B4" else "\u25BE", style = ArcType.displaySub, color = c.displayDim)
+                }
+            } else {
+                val transport = when (st.playing) {
+                    true -> "\u25B6 " + MirrorText.PLAYING
+                    false -> "\u25A0 " + MirrorText.STOPPED
+                    null -> ""
+                }
+                Text(transport, style = ArcType.displayHead, color = c.displayInk, modifier = Modifier.weight(1f))
             }
-            Text(transport, style = ArcType.displayHead, color = c.displayInk, modifier = Modifier.weight(1f))
             st.bpm?.let { Text(MirrorText.bpm(it), style = ArcType.displaySub, color = c.displayInk) }
             st.activeProject?.let { Text(MirrorText.project(it), style = ArcType.displaySub, color = c.displayDim) }
         }
@@ -301,7 +320,13 @@ private fun Display(st: MirrorState, mirror: MirrorUi?, compact: Boolean = false
         // The one-group view keeps to one screen; the all-groups view explains clock out.
         when {
             compact -> Unit
-            mirror?.offline != null -> Text(MirrorText.OFFLINE_NOTE, style = ArcType.displayHint, color = c.displayDim)
+            offline -> androidx.compose.animation.AnimatedVisibility(
+                noteOpen,
+                enter = androidx.compose.animation.expandVertically() + androidx.compose.animation.fadeIn(),
+                exit = androidx.compose.animation.shrinkVertically() + androidx.compose.animation.fadeOut(),
+            ) {
+                Text(MirrorText.OFFLINE_NOTE, style = ArcType.displayHint, color = c.displayDim)
+            }
             st.playing == null && st.bpm == null -> Text(MirrorText.NO_TRANSPORT, style = ArcType.displayHint, color = c.displayDim)
         }
     }

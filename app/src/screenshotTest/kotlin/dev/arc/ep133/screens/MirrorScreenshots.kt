@@ -98,7 +98,7 @@ private fun Framed(
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false) {
     Framed(Tab.LIVE, connected = offline == null, dark = dark, guide = guide) {
         MirrorScreen(
             mirror = MirrorUi(state, loading = loading, offline = offline),
@@ -109,6 +109,7 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
             // The last hit (A 7) is in group A; B is sounding too.
             follow = true,
             initialToolsOpen = tools,
+            initialNoteOpen = noteOpen,
         )
     }
 }
@@ -147,6 +148,12 @@ fun LiveOfflinePreview() = Live(lastRead, oneGroup = true, offline = "Last seen 
 @Preview(name = "Live offline all groups", widthDp = 393, heightDp = 1180, showBackground = true)
 @Composable
 fun LiveOfflineAllPreview() = Live(lastRead, offline = "Last seen Oct 5, 2:02 PM")
+
+// Tapping "Offline" unfolds why.
+@PreviewTest
+@Preview(name = "Live offline note open", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun LiveOfflineNotePreview() = Live(lastRead, offline = "Last seen Oct 5, 2:02 PM", noteOpen = true)
 
 @PreviewTest
 @Preview(name = "Live playing", widthDp = 393, heightDp = 1180, showBackground = true)
