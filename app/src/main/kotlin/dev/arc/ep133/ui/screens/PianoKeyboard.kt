@@ -1,7 +1,9 @@
 package dev.arc.ep133.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -13,7 +15,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -53,7 +55,12 @@ import dev.arc.ep133.features.NoteTouches
 import dev.arc.ep133.features.Piano
 import dev.arc.ep133.features.PianoKey
 import dev.arc.ep133.text.MirrorText
+import dev.arc.ep133.ui.components.CapDx
+import dev.arc.ep133.ui.components.CapDy
+import dev.arc.ep133.ui.components.HwColors
+import dev.arc.ep133.ui.components.LocalHwColors
 import dev.arc.ep133.ui.components.PlateRadius
+import dev.arc.ep133.ui.components.capEdge
 import dev.arc.ep133.ui.theme.ArcColors
 import dev.arc.ep133.ui.theme.ArcType
 import dev.arc.ep133.ui.theme.LocalArcColors
@@ -65,10 +72,24 @@ import kotlin.math.roundToInt
  * them, as the grid's rings do: orange for the root, navy for the scale's
  * other notes, dimmed and unnamed outside it. A finger slides from key to
  * key (a glissando), and several fingers make a chord.
+ *
+ * The keys are caps, as every key in the app (see Cap.kt): each a flat face
+ * over a flat edge offset down and to the right, sitting in the device's grey
+ * body with a gap between white keys; a key sounding on the phone is down on
+ * its edge.
  */
 
 /** How far past a key's edge a sliding finger keeps it, so it doesn't flicker between two keys. */
 private val SlideSlop = 6.dp
+
+/** The body around the keys; on the right and below, the caps' edges sit in it too. */
+private val DeckInset = 10.dp
+
+/** The body showing between two white keys. */
+private val WhiteGap = 4.dp
+
+private val WhiteRadius = 6.dp
+private val BlackRadius = 4.dp
 
 /**
  * The piano over [range]: device notes light their own key (and one the
@@ -94,6 +115,7 @@ internal fun PianoKeyboard(
 @Composable
 private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> Long, actions: KeysActions, modifier: Modifier) {
     val c = LocalArcColors.current
+    val hw = LocalHwColors.current
     val density = LocalDensity.current
     val measurer = rememberTextMeasurer()
     // The names stay legible at large text sizes, but never outgrow the keys.
@@ -130,6 +152,9 @@ private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> 
         },
         modifier = modifier
             .clip(RoundedCornerShape(PlateRadius))
+            .background(hw.body)
+            // The keys, their touches and their screen-reader nodes all live inside the body.
+            .padding(start = DeckInset, top = DeckInset, end = DeckInset + CapDx, bottom = DeckInset + CapDy)
             .semantics {
                 isTraversalGroup = true
                 contentDescription = MirrorText.pianoRange(range.first, range.last, keys.names)
@@ -180,7 +205,7 @@ private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> 
             }
             .drawBehind {
                 val laid = geometry.keys(range, size.width, size.height)
-                drawPiano(laid, range, st, keys, now(), c, labels)
+                drawPiano(laid, range, st, keys, now(), c, hw, labels)
             },
     ) { measurables, constraints ->
         val w = if (constraints.hasBoundedWidth) constraints.maxWidth else constraints.minWidth
@@ -256,6 +281,7 @@ private fun DrawScope.drawPiano(
     keys: KeysUi,
     now: Long,
     c: ArcColors,
+    hw: HwColors,
     labels: Labels,
 ) {
     if (laid.isEmpty()) return
@@ -276,76 +302,71 @@ private fun DrawScope.drawPiano(
     val line = 1.dp.toPx()
     val held = 2.dp.toPx()
     val rootOnWhite = c.rootOn(c.pianoWhite)
-    // A held key at either end follows the plate's rounded corners.
-    val plateCorner = PlateRadius.toPx() - held / 2
-    val edge = 0.5f
+    // A key down on its edge: the face, and all drawn on it, moved by the edge's offset.
+    val travel = Offset(CapDx.toPx(), CapDy.toPx())
+    val gap = WhiteGap.toPx()
+    val whiteCorner = CornerRadius(WhiteRadius.toPx())
 
-    // White keys: faces, the lines between them, then their marks (under the black keys).
+    // White keys: caps with the body between them, then their marks (under the black keys).
     val white = laid.first { !it.black }.rect
+    val faceWidth = white.width - gap
     val foot = 14.dp.toPx()
     val spare = white.height * (1f - Piano.BLACK_HEIGHT) - foot - labels.digitHeight - 8.dp.toPx()
     // Round the name with room to spare, within the key.
-    val ring = minOf(34.dp.toPx(), white.width - 14.dp.toPx(), spare)
+    val ring = minOf(34.dp.toPx(), faceWidth - 14.dp.toPx(), spare)
         .coerceAtLeast(labels.widestWhite + 14.dp.toPx())
-        .coerceAtMost(white.width - 6.dp.toPx())
+        .coerceAtMost(faceWidth - 6.dp.toPx())
     for (k in laid) {
         if (k.black) continue
         val r = k.rect
         val mark = Piano.mark(k.note, keys.root, keys.scale)
         val g = lit[k.note] ?: 0f
-        drawRect(lerp(if (mark == KeyMark.OUT) c.keyOut else c.pianoWhite, c.signal, g), Offset(r.left, r.top), Size(r.width, r.height))
-        if (r.left > 0f) drawRect(c.pianoLine, Offset(r.left - line / 2, 0f), Size(line, r.height))
-        val cx = r.left + r.width / 2
-        val cy = r.bottom - foot - ring / 2
+        val playing = k.note in keys.playingNotes
+        val color = lerp(if (mark == KeyMark.OUT) c.keyOut else c.pianoWhite, c.signal, g)
+        val face = drawCap(Rect(r.left + gap / 2, r.top, r.right - gap / 2, r.bottom), whiteCorner, color, capEdge(color), playing, travel)
+        val cx = face.center.x
+        val cy = face.bottom - foot - ring / 2
         val onLit = g > 0.3f
         if (mark != KeyMark.OUT) {
-            val color = if (onLit) c.onSignal else if (mark == KeyMark.ROOT) rootOnWhite else c.navy
-            drawMark(mark, color, Offset(cx, cy), ring, r.bottom)
+            val ink = if (onLit) c.onSignal else if (mark == KeyMark.ROOT) rootOnWhite else c.navy
+            drawMark(mark, ink, Offset(cx, cy), ring, face.bottom)
             drawLabel(labels.name(k.note), if (onLit) c.onSignal else c.ink, Offset(cx, cy))
         }
         // Each C carries its octave; OCT's own C in ink.
         labels.digit(k.note)?.let { d ->
             val own = k.note == Piano.lowest(keys.octave) + 12
-            val color = if (onLit) c.onSignal else if (own) c.ink else c.pianoDigit
-            drawText(d, color, Offset(cx - d.size.width / 2f, cy - ring / 2 - 4.dp.toPx() - d.size.height))
+            val ink = if (onLit) c.onSignal else if (own) c.ink else c.pianoDigit
+            drawText(d, ink, Offset(cx - d.size.width / 2f, cy - ring / 2 - 4.dp.toPx() - d.size.height))
         }
-        if (k.note in keys.playingNotes) {
-            drawHeld(
-                r.left, r.top, r.width, r.height, held, c.pianoSignal,
-                roundLeft = if (r.left <= edge) plateCorner else 0f,
-                roundRight = if (r.right >= size.width - edge) plateCorner else 0f,
-            )
-        }
+        if (playing) drawHeld(face, whiteCorner, held, c.pianoSignal)
     }
 
-    // Black keys over them: a face with rounded feet, outlined (in the dark theme the outline
-    // is what holds a black key apart from its white neighbours).
+    // Black keys over them: dark caps, outlined (in the dark theme the outline is what
+    // holds a black key apart from its white neighbours).
     val black = laid.firstOrNull { it.black }?.rect
     val blackRing = black?.let {
         minOf(24.dp.toPx(), it.width - 6.dp.toPx()).coerceAtLeast(labels.widestBlack + 10.dp.toPx()).coerceAtMost(it.width - 4.dp.toPx())
     } ?: 0f
-    val corner = CornerRadius(3.dp.toPx())
+    val blackCorner = CornerRadius(BlackRadius.toPx())
     for (k in laid) {
         if (!k.black) continue
         val r = k.rect
         val mark = Piano.mark(k.note, keys.root, keys.scale)
         val g = lit[k.note] ?: 0f
-        val shape = Path().apply {
-            addRoundRect(RoundRect(r.left, r.top, r.right, r.bottom, CornerRadius.Zero, CornerRadius.Zero, corner, corner))
-        }
-        drawPath(shape, lerp(if (mark == KeyMark.OUT) c.keyOutBlack else c.pianoBlack, c.signal, g))
-        drawPath(shape, c.pianoLine, style = Stroke(line))
-        val onLit = g > 0.3f
         val playing = k.note in keys.playingNotes
+        val color = lerp(if (mark == KeyMark.OUT) c.keyOutBlack else c.pianoBlack, c.signal, g)
+        val face = drawCap(Rect(r.left, r.top, r.right, r.bottom), blackCorner, color, lerp(hw.darkEdge, c.signalEdge, g), playing, travel)
+        drawRoundRect(c.pianoLine, face.topLeft, face.size, blackCorner, style = Stroke(line))
+        val onLit = g > 0.3f
         if (mark != KeyMark.OUT) {
-            val cx = r.left + r.width / 2
-            val cy = r.bottom - 12.dp.toPx() - blackRing / 2
-            val color = if (onLit) c.onSignal else if (mark == KeyMark.ROOT) c.signal else c.onPianoBlack
-            drawMark(mark, color, Offset(cx, cy), blackRing, r.bottom)
+            val cx = face.center.x
+            val cy = face.bottom - 12.dp.toPx() - blackRing / 2
+            val ink = if (onLit) c.onSignal else if (mark == KeyMark.ROOT) c.signal else c.onPianoBlack
+            drawMark(mark, ink, Offset(cx, cy), blackRing, face.bottom)
             // Narrow keys: the name only while the note sounds.
             if (g > 0f || playing) drawLabel(labels.name(k.note), if (onLit) c.onSignal else c.onPianoBlack, Offset(cx, cy))
         }
-        if (playing) drawHeld(r.left, r.top, r.width, r.height, held, c.pianoSignal)
+        if (playing) drawHeld(face, blackCorner, held, c.pianoSignal)
     }
 
     // A device note the piano doesn't reach: an orange tick at that end.
@@ -385,35 +406,30 @@ private fun DrawScope.drawLabel(text: TextLayoutResult, color: Color, center: Of
     drawText(text, color, Offset(center.x - text.size.width / 2f, center.y - text.size.height / 2f))
 
 /**
- * Playing on the phone: the signal orange inside the key's edge, as on the
- * grid; [roundLeft] and [roundRight] round its corners on that side, where
- * the key meets the plate's rounded corners.
+ * A key as a cap: its [edge] offset by [travel] under a [color] face in [rect]
+ * with [corner] corners, or, [down], the face moved onto the edge. Returns
+ * where the face is drawn, for what goes on it.
  */
-private fun DrawScope.drawHeld(
-    left: Float,
-    top: Float,
-    width: Float,
-    height: Float,
-    stroke: Float,
-    color: Color,
-    roundLeft: Float = 0f,
-    roundRight: Float = 0f,
-) {
-    val l = left + stroke / 2
-    val t = top + stroke / 2
-    val r = left + width - stroke / 2
-    val b = top + height - stroke / 2
-    if (roundLeft == 0f && roundRight == 0f) {
-        drawRect(color, Offset(l, t), Size(r - l, b - t), style = Stroke(stroke))
-    } else {
-        val outline = Path().apply {
-            addRoundRect(RoundRect(l, t, r, b, CornerRadius(roundLeft), CornerRadius(roundRight), CornerRadius(roundRight), CornerRadius(roundLeft)))
-        }
-        drawPath(outline, color, style = Stroke(stroke))
-    }
+private fun DrawScope.drawCap(rect: Rect, corner: CornerRadius, color: Color, edge: Color, down: Boolean, travel: Offset): Rect {
+    if (!down) drawRoundRect(edge, rect.topLeft + travel, rect.size, corner)
+    val face = if (down) rect.translate(travel) else rect
+    drawRoundRect(color, face.topLeft, face.size, corner)
+    return face
 }
 
-/** ◂ or ▸ near the top of the plate's end: a note sounding past the keys that way. */
+/** Playing on the phone: the signal orange inside the key's face, as on the grid. */
+private fun DrawScope.drawHeld(face: Rect, corner: CornerRadius, stroke: Float, color: Color) {
+    val inset = stroke / 2
+    drawRoundRect(
+        color,
+        Offset(face.left + inset, face.top + inset),
+        Size(face.width - stroke, face.height - stroke),
+        CornerRadius((corner.x - inset).coerceAtLeast(0f)),
+        style = Stroke(stroke),
+    )
+}
+
+/** ◂ or ▸ near the top of the piano's end: a note sounding past the keys that way. */
 private fun DrawScope.drawTick(height: Float, left: Boolean, alpha: Float, color: Color) {
     val w = 8.dp.toPx()
     val h = 12.dp.toPx()

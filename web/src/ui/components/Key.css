@@ -1,5 +1,5 @@
 /* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt (ArcKey)
- * Web: a hardware cap (theme/cap.css) rather than Compose's face over a 2px strip. */
+ * A hardware cap (theme/cap.css, Cap.kt). */
 
 .key {
   --cap-face: var(--key);
@@ -38,7 +38,7 @@
 
 /* ---- KeyStyle ---- */
 .key--signal { --cap-face: var(--signal); --cap-ink: var(--on-signal); --cap-edge: var(--signal-edge); }
-/* The navy edge: the face 35% darker (Compose's 55%-alpha strip would show the page through a 3D edge). */
+/* The navy edge: the face 35% darker (capEdge), opaque so the page doesn't show through it. */
 .key--navy { --cap-face: var(--navy); --cap-ink: var(--on-navy); --cap-edge: color-mix(in oklab, var(--navy) 65%, black); }
 /* Quiet keys are flat text, no cap (Key.tsx leaves cap-3d off). */
 .key--quiet { background: transparent; color: var(--graphite); }

@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -283,8 +284,8 @@ private fun SectionTag(section: Tab, onClick: () -> Unit, onLongPress: () -> Uni
 }
 
 /**
- * The sections, as blocks stacked under the section tag (drawn in place, not
- * in a popup window): the current one navy. A tap outside closes the list.
+ * The sections, as caps stacked under the section tag (drawn in place, not
+ * in a popup window): the current one navy and down. A tap outside closes the list.
  */
 @Composable
 fun SectionMenu(open: Boolean, current: Tab, onPick: (Tab) -> Unit, onDismiss: () -> Unit) {
@@ -302,13 +303,19 @@ fun SectionMenu(open: Boolean, current: Tab, onPick: (Tab) -> Unit, onDismiss: (
             ) {
                 for (t in Tab.entries) {
                     val on = t == current
+                    val source = remember { MutableInteractionSource() }
+                    val pressed by source.collectIsPressedAsState()
                     Box(
                         Modifier
                             .widthIn(min = 150.dp)
                             .heightIn(min = 48.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (on) c.navy else c.key)
-                            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Tab) { onPick(t) }
+                            .cap(
+                                if (on) c.navy else c.key,
+                                if (on) capEdge(c.navy) else c.keyEdge,
+                                RoundedCornerShape(8.dp),
+                                capPress(on || pressed),
+                            )
+                            .clickable(interactionSource = source, indication = null, role = Role.Tab) { onPick(t) }
                             .semantics { selected = on }
                             .padding(horizontal = 16.dp),
                         contentAlignment = Alignment.CenterStart,
