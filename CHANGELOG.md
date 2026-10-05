@@ -16,6 +16,7 @@ version fixes bugs. The version itself is set in `version.properties`.
 - Live: a one-group view, a large grid of one group with A–D keys to switch and Follow to jump to the group just played. It fits one screen without scrolling (checked at Pixel 7 and 360 dp sizes). The choice is kept in the settings.
 
 ### Changed
+- Live: much less delay between a press and its sound. Live keeps one low-latency output open while it is on screen and mixes the pads and keys into it itself (no new audio track per press, the phone's own sample rate, KEYS pitched as it plays), and loads the active project's pad samples into memory when it opens. Arc's pad-sound copies no longer rewrite their index on every press. The debug log shows each press's delay; Bluetooth's own delay is pointed out once.
 - Messages at the bottom of the screen can be swiped away, sideways or down, as a notification is; they spring back on a short drag. Screen readers get a Dismiss action.
 - Live: pads and keys sound only while held, as in the EP-133's gate mode, and fade out quickly when the finger lifts, instead of playing the whole sample on a tap. On the scrolling all-groups page a press waits a moment so a scroll plays nothing. A screen reader's Play still plays the whole sample.
 - The guide overlay tags the edge controls (the GUIDE tab, the more-tools strip) as the PO app's tutorial does: a vertical tab on that edge with its word turned and a hooked arrow above.

@@ -379,6 +379,20 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // Live's sound output stays open while Live is in front, so a press doesn't wait for one.
+        LaunchedEffect(live) {
+            if (live) {
+                lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                    controller.openLiveAudio()
+                    try {
+                        kotlinx.coroutines.awaitCancellation()
+                    } finally {
+                        controller.closeLiveAudio()
+                    }
+                }
+            }
+        }
+
         val detail = state.backups.firstOrNull { it.id == detailId }
         val restore = state.backups.firstOrNull { it.id == restoreId }
         // Keep showing the last record while a sheet animates out.
@@ -396,7 +410,7 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(contentsBackup?.id) { contentsBackup?.let { controller.openContents(it) } }
         val playing by controller.player.playing.collectAsStateWithLifecycle()
         // Everything sounding, for Live's rings (several pads or keys for a chord).
-        val playingKeys by controller.player.playingKeys.collectAsStateWithLifecycle()
+        val playingKeys by controller.liveKeys.collectAsStateWithLifecycle()
         val compareA = compareIds?.substringBefore('|')?.let { id -> state.backups.firstOrNull { it.id == id } }
         val compareB = compareIds?.substringAfter('|')?.let { id -> state.backups.firstOrNull { it.id == id } }
         // Also runs again after a recreation, when the result is gone.

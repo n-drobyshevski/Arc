@@ -76,6 +76,10 @@ object MirrorText {
         dev.arc.ep133.features.Keys.name(note, names) + dev.arc.ep133.features.Keys.octaveOf(note)
 
     const val NOTE_NAMES = "Note names on the keys"
+
+    /** The debug log's line for a Live sound: "live:0:3 heard 31 ms after the press (phone speaker)". */
+    fun latencyNote(key: String, ms: Double, route: String) = "$key heard ${"%.0f".format(ms)} ms after the press ($route)"
+    const val BLUETOOTH_DELAY = "Sound goes to Bluetooth, which plays late (often 0.2 s or more). Wired headphones or the phone speaker are much quicker."
     fun noteNames(n: dev.arc.ep133.features.NoteNames) = when (n) {
         dev.arc.ep133.features.NoteNames.SOLFEGE -> "DO RE MI"
         dev.arc.ep133.features.NoteNames.LETTERS -> "C D E"
