@@ -307,10 +307,10 @@ class MainActivity : ComponentActivity() {
         // The guide overlay: from the ? key, and once by itself on the first start.
         var coach by rememberSaveable { mutableStateOf(false) }
         LaunchedEffect(Unit) {
-            val prefs = getPreferences(MODE_PRIVATE)
-            if (!prefs.getBoolean("coach_seen", false)) {
-                prefs.edit { putBoolean("coach_seen", true) }
-                coach = true
+            // Kept with the settings (and so in Documents/arc); "coach_seen" is where it was before.
+            if (!controller.settings.value.guideSeen) {
+                if (!getPreferences(MODE_PRIVATE).getBoolean("coach_seen", false)) coach = true
+                controller.setGuideSeen()
             }
         }
         // The section under the top bar; the other screens stack over it without the bars.
@@ -357,12 +357,13 @@ class MainActivity : ComponentActivity() {
             view.keepScreenOn = keepOn
             onDispose { view.keepScreenOn = false }
         }
-        // The mirror (re)starts when it opens and whenever a device is (re)connected.
+        // The mirror (re)starts when it opens and whenever a device is (re)connected or
+        // goes away; without one it shows the last read.
         val ready = state.device != null
         // Only while the app is in front: in the background nothing listens or redraws.
         val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
         LaunchedEffect(live, ready) {
-            if (live && ready) {
+            if (live) {
                 lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
                     controller.openMirror()
                     try {

@@ -98,10 +98,10 @@ private fun Framed(
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false) {
-    Framed(Tab.LIVE, dark = dark, guide = guide) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false) {
+    Framed(Tab.LIVE, connected = offline == null, dark = dark, guide = guide) {
         MirrorScreen(
-            mirror = MirrorUi(state, loading = loading),
+            mirror = MirrorUi(state, loading = loading, offline = offline),
             nameOf = { if (state.learned.isEmpty()) null else names[it] },
             onPadOrder = {},
             fixedNow = NOW,
@@ -109,6 +109,7 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
             // The last hit (A 7) is in group A; B is sounding too.
             follow = true,
             initialToolsOpen = tools,
+            initialNoteOpen = noteOpen,
         )
     }
 }
@@ -134,6 +135,25 @@ fun LiveToolsOpenPreview() = Live(playing, oneGroup = true, tools = true)
 @Preview(name = "Live one group small", widthDp = 360, heightDp = 668, showBackground = true)
 @Composable
 fun LiveOneGroupSmallPreview() = Live(playing, oneGroup = true)
+
+// Not connected: the pads and names as arc last read them, nothing lit.
+private val lastRead = MirrorState(activeProject = 3, learned = (0..11).associateWith { it + 1 })
+
+@PreviewTest
+@Preview(name = "Live offline", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveOfflinePreview() = Live(lastRead, oneGroup = true, offline = "Last seen Oct 5, 2:02 PM")
+
+@PreviewTest
+@Preview(name = "Live offline all groups", widthDp = 393, heightDp = 1180, showBackground = true)
+@Composable
+fun LiveOfflineAllPreview() = Live(lastRead, offline = "Last seen Oct 5, 2:02 PM")
+
+// Tapping "Offline" unfolds why.
+@PreviewTest
+@Preview(name = "Live offline note open", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun LiveOfflineNotePreview() = Live(lastRead, offline = "Last seen Oct 5, 2:02 PM", noteOpen = true)
 
 @PreviewTest
 @Preview(name = "Live playing", widthDp = 393, heightDp = 1180, showBackground = true)

@@ -176,5 +176,11 @@ class ExternalLibrary(private val context: Context) {
 
         /** library.json, and the "library (1).json" an install may have written next to an earlier one. */
         fun isIndex(name: String) = name.startsWith("library") && name.endsWith(".json")
+
+        /** Live's last read of the device (an addition), shown while it is not connected. */
+        const val LIVE_FILE = "live.json"
+
+        /** live.json, and the "live (1).json" an install may have written next to an earlier one. */
+        fun isLive(name: String) = name.startsWith("live") && name.endsWith(".json")
     }
 }
