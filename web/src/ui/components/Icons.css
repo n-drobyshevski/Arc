@@ -1,0 +1,19 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Icons.kt */
+
+.arc-icon {
+  display: block;
+  flex: none;
+  overflow: visible;
+}
+
+/* HELP: "?" in ArcType.tab (700, line-height 1), centred in the icon box. */
+.arc-icon-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
+  user-select: none;
+}
