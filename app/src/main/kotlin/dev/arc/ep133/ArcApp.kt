@@ -3,6 +3,7 @@ package dev.arc.ep133
 import android.app.Application
 import dev.arc.ep133.controller.ArcController
 import dev.arc.ep133.data.ArcDatabase
+import dev.arc.ep133.data.ExternalLibrary
 import dev.arc.ep133.data.Library
 import dev.arc.ep133.data.PakStore
 import dev.arc.ep133.midi.MidiConnector
@@ -18,7 +19,7 @@ class ArcApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        val library = Library(ArcDatabase.open(this), PakStore(filesDir))
+        val library = Library(ArcDatabase.open(this), PakStore(filesDir), ExternalLibrary(this))
         controller = ArcController(
             context = this,
             library = library,

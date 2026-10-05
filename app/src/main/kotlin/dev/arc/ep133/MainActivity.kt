@@ -29,6 +29,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import dev.arc.ep133.backup.PakExport
 import dev.arc.ep133.backup.PakSound
 import dev.arc.ep133.controller.ArcController
@@ -44,6 +45,7 @@ import dev.arc.ep133.ui.screens.CompareScreen
 import dev.arc.ep133.ui.screens.ComparePickerContent
 import dev.arc.ep133.ui.screens.DebugScreen
 import dev.arc.ep133.ui.screens.GuideScreen
+import dev.arc.ep133.ui.screens.MirrorScreen
 import dev.arc.ep133.ui.screens.PadsSheetContent
 import dev.arc.ep133.ui.screens.SearchScreen
 import dev.arc.ep133.ui.screens.DeviceScreen
@@ -94,6 +96,16 @@ class MainActivity : ComponentActivity() {
 
     private val saveLogLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
         writePending(uri)
+    }
+
+    // After a reinstall: the user picks Documents/arc so the library can be read back.
+    private val folderLauncher = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            runCatching {
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            }
+            controller.restoreFromFolder(uri)
+        }
     }
 
     // The transfer does not wait for the answer: it works without the notification.
@@ -276,6 +288,7 @@ class MainActivity : ComponentActivity() {
         var debug by rememberSaveable { mutableStateOf(false) }
         var browse by rememberSaveable { mutableStateOf(false) }
         var guide by rememberSaveable { mutableStateOf(false) }
+        var live by rememberSaveable { mutableStateOf(false) }
         var search by rememberSaveable { mutableStateOf(false) }
         // Comparing two backups: the backup whose "compare" picker is open, then "<idA>|<idB>".
         var comparePickFor by rememberSaveable { mutableStateOf<String?>(null) }
@@ -291,12 +304,28 @@ class MainActivity : ComponentActivity() {
         var titleField by rememberSaveable { mutableStateOf("") }
         var notesField by rememberSaveable { mutableStateOf("") }
 
-        // Keep the screen on while the progress sheet is open.
+        // Keep the screen on while the progress sheet or the live mirror is open.
         val view = LocalView.current
-        val transferring = state.task != null
-        DisposableEffect(transferring) {
-            view.keepScreenOn = transferring
+        val keepOn = state.task != null || live
+        DisposableEffect(keepOn) {
+            view.keepScreenOn = keepOn
             onDispose { view.keepScreenOn = false }
+        }
+        // The mirror (re)starts when it opens and whenever a device is (re)connected.
+        val ready = state.device != null
+        // Only while the app is in front: in the background nothing listens or redraws.
+        val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+        LaunchedEffect(live, ready) {
+            if (live && ready) {
+                lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                    controller.openMirror()
+                    try {
+                        kotlinx.coroutines.awaitCancellation()
+                    } finally {
+                        controller.pauseMirror()
+                    }
+                }
+            }
         }
 
         val detail = state.backups.firstOrNull { it.id == detailId }
@@ -325,6 +354,20 @@ class MainActivity : ComponentActivity() {
         Box(Modifier.fillMaxSize()) {
             if (debug) {
                 DebugScreen(controller.trafficLog, ::shareLog, ::saveLog, ::copyLog) { debug = false }
+            } else if (live) {
+                MirrorScreen(
+                    mirror = state.mirror ?: if (!ready) {
+                        dev.arc.ep133.controller.MirrorUi(loading = false, error = dev.arc.ep133.text.MirrorText.NOT_CONNECTED)
+                    } else {
+                        null
+                    },
+                    nameOf = controller::mirrorName,
+                    onPadOrder = controller::setPadOrder,
+                    onBack = {
+                        live = false
+                        controller.closeMirror()
+                    },
+                )
             } else if (guide) {
                 GuideScreen { guide = false }
             } else if (compareA != null && compareB != null) {
@@ -493,6 +536,8 @@ class MainActivity : ComponentActivity() {
                     },
                     onGuide = { guide = true },
                     onSearch = { search = true },
+                    onLive = { live = true },
+                    onRestoreFolder = { folderLauncher.launch(dev.arc.ep133.data.ExternalLibrary.INITIAL_FOLDER) },
                 )
 
                 ArcSheet(visible = detail != null, onDismiss = { closeDetail(save = true) }) {

@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.text.format.DateFormat
 import androidx.core.content.ContextCompat
+import androidx.core.content.edit
 import dev.arc.ep133.backup.Backup
 import dev.arc.ep133.backup.PakDescription
 import dev.arc.ep133.backup.Paks
@@ -22,6 +23,8 @@ import dev.arc.ep133.midi.MidiConnector
 import dev.arc.ep133.protocol.CancelSignal
 import dev.arc.ep133.protocol.CancelledError
 import dev.arc.ep133.protocol.Device
+import dev.arc.ep133.protocol.Fs
+import dev.arc.ep133.formats.asObject
 import dev.arc.ep133.protocol.DeviceInfo
 import dev.arc.ep133.protocol.LoggingTransport
 import dev.arc.ep133.protocol.Session
@@ -29,6 +32,7 @@ import dev.arc.ep133.protocol.Storage
 import dev.arc.ep133.protocol.TrafficLog
 import dev.arc.ep133.service.TransferService
 import dev.arc.ep133.text.BackupDevice
+import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.text.BackupRecord
 import dev.arc.ep133.text.Format
 import dev.arc.ep133.text.RestoreSelection
@@ -43,6 +47,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -103,6 +108,13 @@ data class PakCompareUi(
     val error: String? = null,
 )
 
+/** The live mirror: what the device is playing, plus loading and errors. */
+data class MirrorUi(
+    val state: dev.arc.ep133.features.MirrorState = dev.arc.ep133.features.MirrorState(),
+    val loading: Boolean = true,
+    val error: String? = null,
+)
+
 /** A backup opened for its contents screen (sounds and projects, playback, export). */
 data class ContentsUi(
     val backupId: String,
@@ -132,6 +144,9 @@ data class UiState(
     val contents: ContentsUi? = null,
     val search: SearchUi = SearchUi(),
     val pakCompare: PakCompareUi? = null,
+    val mirror: MirrorUi? = null,
+    /** Whether the library folder has been picked (after a reinstall); until then restoring is offered. */
+    val folderPicked: Boolean = false,
 )
 
 /**
@@ -152,6 +167,14 @@ class ArcController(
 
     private val searchQuery = MutableStateFlow("")
 
+    // ---------- live mirror (an addition) ----------
+    private var liveEvents: kotlinx.coroutines.flow.SharedFlow<dev.arc.ep133.protocol.MidiEvent>? = null
+    private var mirror: dev.arc.ep133.features.LiveMirror? = null
+    private var mirrorJobs: List<Job> = emptyList()
+    private var mirrorPushOff: (() -> Unit)? = null
+    private var mirrorSession: Session? = null
+    private val mirrorPrefs by lazy { context.getSharedPreferences("mirror", Context.MODE_PRIVATE) }
+
     @Volatile
     private var session: Session? = null
     private var openDeviceId: Int? = null
@@ -169,8 +192,18 @@ class ArcController(
                 .catch { e -> toast(Strings.libraryFailed(e.message ?: e.toString()), error = true) }
                 .collect { list -> _state.update { it.copy(backups = list, libraryLoaded = true, spaceLeft = runCatching { library.spaceLeft() }.getOrNull()) } }
         }
+        library.settings = {
+            buildMap {
+                mirrorPrefs.getString("learned", null)?.let { put("mirror.learned", it) }
+                mirrorPrefs.getString("order", null)?.let { put("mirror.order", it) }
+            }
+        }
+        library.onExternalError = { msg -> scope.launch { toast(FeatureText.copyFailed(msg), error = true) } }
         scope.launch {
             runCatching { library.sweep() }
+            // Whatever is missing from Documents/arc (a library from before it, or a failed copy) goes there.
+            runCatching { library.reconcile() }
+            _state.update { it.copy(folderPicked = library.folderPicked) }
             // Backups saved before search existed get their sound names indexed once.
             _state.update { it.copy(search = it.search.copy(indexing = true)) }
             runCatching { library.indexMissing() }
@@ -231,6 +264,9 @@ class ArcController(
         session?.close()
         session = null
         openDeviceId = null
+        stopMirror()
+        liveEvents = null
+        if (_state.value.mirror != null) _state.update { it.copy(mirror = notConnectedMirror()) }
         playToken++ // a device sound still downloading must not start after the device is gone
         if (player.playing.value?.startsWith("device:") == true) player.stop()
         _state.update { it.copy(connected = false, device = null, browser = BrowserUi(), diff = null) }
@@ -253,6 +289,7 @@ class ArcController(
             trafficLog.note("connect $midiDescription")
             val s = Session(LoggingTransport(open.transport, trafficLog))
             session = s
+            liveEvents = open.transport.events
             _state.update { it.copy(connected = true) }
             s.handshake()
             refreshDevice()
@@ -326,8 +363,8 @@ class ArcController(
             )
         }
         if (saved != null) {
-            _state.update { it.copy(freshId = saved.id) }
-            toast(Strings.saved(saved.soundCount, saved.projectCount))
+            _state.update { it.copy(freshId = saved.record.id) }
+            toastSaved(Strings.saved(saved.record.soundCount, saved.record.projectCount), saved.copyError)
         }
         refreshAll(quiet = true) // refreshDevice().catch(() => {})
     }
@@ -545,6 +582,179 @@ class ArcController(
         _state.update { it.copy(pakCompare = null) }
     }
 
+    /**
+     * Starts the live mirror: reads the sound names, the active project and
+     * its pads (the reads the browser already makes), then only listens to
+     * MIDI and pad pushes. Nothing is sent while it runs.
+     */
+    fun openMirror(): Job = scope.launch {
+        // Already running for this connection (opened twice): keep it.
+        if (mirror != null && mirrorSession != null && mirrorSession === session) return@launch
+        stopMirror()
+        val s = session
+        val events = liveEvents
+        if (s == null || events == null) {
+            _state.update { it.copy(mirror = notConnectedMirror()) }
+            return@launch
+        }
+        val m = dev.arc.ep133.features.LiveMirror(
+            learned = loadLearned(),
+            padOrder = savedPadOrder(),
+            onLearned = ::saveLearned,
+        )
+        mirror = m
+        mirrorSession = s
+        _state.update { it.copy(mirror = MirrorUi(m.snapshot(System.nanoTime()), loading = true)) }
+        // Listen first, so nothing played while reading is missed.
+        val dirty = java.util.concurrent.atomic.AtomicBoolean(true)
+        val listen = scope.launch(Dispatchers.Default) {
+            events.collect {
+                m.onMidi(it)
+                dirty.set(true)
+            }
+        }
+        mirrorPushOff = s.onPush { f ->
+            val fid = dev.arc.ep133.features.PadPush.parse(f) ?: return@onPush
+            m.onPadPush(fid, System.nanoTime())
+            dirty.set(true)
+            // Another project on the device: read its pads.
+            if (fid.project != m.snapshot(System.nanoTime()).activeProject) loadMirrorProject(m, fid.project)
+        }
+        // At most ~30 states a second. An unchanged state is equal to the last one, so
+        // StateFlow drops it and nothing redraws; time-based changes (pruned pads, a
+        // tempo gone stale) still get through. The fade itself runs on the screen's frame clock.
+        val tick = scope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(33)
+                dirty.set(false)
+                val st = m.snapshot(System.nanoTime())
+                _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(state = st)) } ?: cur }
+            }
+        }
+        mirrorJobs = listOf(listen, tick)
+        // The names and pads are read once. If the device is busy (a transfer, or the
+        // read of a mirror opened just before), wait for it rather than give up.
+        // exclusive() also gives null when the read fails (the error is shown), so a few tries at most.
+        var ok: Boolean? = null
+        var tries = 0
+        while (mirror === m && ok == null && session === s && tries++ < 5) {
+            _state.first { !it.busy || it.mirror == null }
+            if (mirror !== m) break
+            ok = exclusive("mirror", quiet = tries > 1) { ss ->
+                val c = DeviceBrowser.contents(ss)
+                m.setNames(c.sounds.associate { it.slot to it.name })
+                val active = runCatching { Fs.getMetadata(ss, Device.PROJECTS_NODE).asObject()["active"] }.getOrNull()
+                val project = (active as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDoubleOrNull()?.toInt()?.let(Device::projectFromNode)
+                val groups = project?.let { p -> runCatching { DeviceBrowser.projectLayout(ss, p).pads }.getOrNull() } ?: emptyList()
+                m.setProject(project, groups)
+                true
+            }
+        }
+        if (mirror === m) {
+            dirty.set(true)
+            _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(loading = false, state = m.snapshot(System.nanoTime()))) } ?: cur }
+            if (ok == null) _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(loading = false)) } ?: cur }
+        }
+    }
+
+    private fun loadMirrorProject(m: dev.arc.ep133.features.LiveMirror, project: Int) {
+        scope.launch {
+            val groups = exclusive("mirror", quiet = true) { ss -> DeviceBrowser.projectLayout(ss, project).pads } ?: return@launch
+            if (mirror === m) {
+                m.setProject(project, groups)
+                _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(state = m.snapshot(System.nanoTime()))) } ?: cur }
+            }
+        }
+    }
+
+    /** The sample on a pad in the mirror, once it is known. */
+    fun mirrorName(pad: dev.arc.ep133.features.PhysicalPad): String? = mirror?.nameOf(pad)
+
+    fun setPadOrder(order: dev.arc.ep133.features.PadOrder) {
+        mirrorPrefs.edit { putString("order", order.name) }
+        scope.launch { library.syncIndex() }
+        val m = mirror
+        if (m != null) {
+            m.setPadOrder(order)
+            _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(state = m.snapshot(System.nanoTime()))) } ?: cur }
+        } else {
+            // Not connected: still show the choice.
+            _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(state = it.state.copy(padOrder = order))) } ?: cur }
+        }
+    }
+
+    /** Stops listening while the app is in the background; the screen keeps its last state. */
+    fun pauseMirror() = stopMirror()
+
+    private fun savedPadOrder() =
+        runCatching { dev.arc.ep133.features.PadOrder.valueOf(mirrorPrefs.getString("order", null) ?: "") }
+            .getOrDefault(dev.arc.ep133.features.PadOrder.FROM_TOP)
+
+    private fun notConnectedMirror() = MirrorUi(
+        state = dev.arc.ep133.features.MirrorState(padOrder = savedPadOrder()),
+        loading = false,
+        error = dev.arc.ep133.text.MirrorText.NOT_CONNECTED,
+    )
+
+    fun closeMirror() {
+        stopMirror()
+        _state.update { it.copy(mirror = null) }
+    }
+
+    private fun stopMirror() {
+        mirrorJobs.forEach { it.cancel() }
+        mirrorJobs = emptyList()
+        mirrorPushOff?.invoke()
+        mirrorPushOff = null
+        mirror = null
+        mirrorSession = null
+    }
+
+    /** Learned pad links, "offset:pad" pairs: the keypad's numbering is the same in every project. */
+    private fun loadLearned(): Map<Int, Int> =
+        mirrorPrefs.getString("learned", "").orEmpty().split(',').mapNotNull { pair ->
+            val (o, p) = pair.split(':').takeIf { it.size == 2 } ?: return@mapNotNull null
+            val offset = o.toIntOrNull() ?: return@mapNotNull null
+            val pad = p.toIntOrNull() ?: return@mapNotNull null
+            if (offset in 0..11 && pad in 1..12) offset to pad else null
+        }.toMap()
+
+    private fun saveLearned(learned: Map<Int, Int>) {
+        mirrorPrefs.edit { putString("learned", learned.entries.joinToString(",") { "${it.key}:${it.value}" }) }
+        scope.launch { library.syncIndex() }
+    }
+
+    /**
+     * Brings the library back from Documents/arc after a reinstall, through
+     * the folder the user picked (an addition). Settings kept there return too.
+     */
+    fun restoreFromFolder(tree: android.net.Uri): Job = scope.launch {
+        try {
+            val (n, settings) = library.restoreFrom(tree) { bytes ->
+                val d = Paks.describe(Paks.open(bytes))
+                dev.arc.ep133.data.RestoredPak(
+                    createdAt = d.generatedAt ?: System.currentTimeMillis(),
+                    device = BackupDevice(d.device.product, d.device.sku, "", d.device.osVersion),
+                    soundCount = d.soundCount,
+                    projectCount = d.projectCount,
+                    projects = d.projects,
+                    slots = d.slots,
+                    projectSlots = d.projectSlots,
+                    soundNames = d.soundNames,
+                )
+            }
+            mirrorPrefs.edit {
+                settings["mirror.learned"]?.let { putString("learned", it) }
+                settings["mirror.order"]?.let { putString("order", it) }
+            }
+            _state.update { it.copy(folderPicked = library.folderPicked) }
+            toast(if (n == 0) FeatureText.NOTHING_TO_RESTORE else FeatureText.restored(n))
+        } catch (e: Throwable) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            toast(e.message ?: e.toString(), error = true)
+        }
+    }
+
     fun setSearch(query: String) {
         // The field shows what was typed at once; results follow.
         _state.update { it.copy(search = it.search.copy(query = query)) }
@@ -643,8 +853,8 @@ class ArcController(
                 bytes,
                 d.soundNames,
             )
-            _state.update { it.copy(freshId = saved.id) }
-            toast(Strings.imported(saved.soundCount, saved.projectCount))
+            _state.update { it.copy(freshId = saved.record.id) }
+            toastSaved(Strings.imported(saved.record.soundCount, saved.record.projectCount), saved.copyError)
         } catch (e: Throwable) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             toast(Strings.importFailed(name, e.message ?: e.toString()), error = true)
@@ -661,13 +871,18 @@ class ArcController(
 
     /** Returns whether it worked; on failure the detail sheet stays open (as in the web version). */
     suspend fun delete(b: BackupRecord): Boolean = try {
-        library.delete(b.id)
-        toast(Strings.BACKUP_DELETED)
+        val copyError = library.delete(b.id)
+        toastSaved(Strings.BACKUP_DELETED, copyError)
         true
     } catch (e: Throwable) {
         if (e is kotlinx.coroutines.CancellationException) throw e
         toast(e.message ?: e.toString(), error = true)
         false
+    }
+
+    /** One toast for the result, so a failed copy to Documents/arc is not hidden behind it. */
+    private fun toastSaved(text: String, copyError: String?) {
+        if (copyError == null) toast(text) else toast(text + " " + FeatureText.copyFailed(copyError), error = true)
     }
 
     /** Import a document by URI. Runs in the app scope, so activity recreation cannot cut it short. */

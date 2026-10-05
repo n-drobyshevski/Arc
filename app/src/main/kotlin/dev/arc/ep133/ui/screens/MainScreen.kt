@@ -71,6 +71,8 @@ fun MainScreen(
     onBrowse: () -> Unit = {},
     onGuide: () -> Unit = {},
     onSearch: () -> Unit = {},
+    onLive: () -> Unit = {},
+    onRestoreFolder: () -> Unit = {},
 ) {
     val c = LocalArcColors.current
     Box(Modifier.fillMaxSize().background(c.shell), contentAlignment = Alignment.TopCenter) {
@@ -89,18 +91,27 @@ fun MainScreen(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Wordmark(onLongPress = onDebug)
-                Spacer(Modifier.weight(1f))
-                // Addition to the web version: the device browser.
-                if (state.device != null) {
-                    ArcKey(FeatureText.BROWSE, onBrowse, size = KeySize.Small, enabled = !state.busy)
-                    Spacer(Modifier.width(10.dp))
+                Spacer(Modifier.width(12.dp))
+                // The keys wrap to a second line as whole keys when a narrow phone or a
+                // large font leaves no room, rather than squeezing the last one.
+                androidx.compose.foundation.layout.FlowRow(
+                    Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    // Addition to the web version: the device browser and the live mirror
+                    // (the mirror only listens, so it is not tied to busy).
+                    if (state.device != null) {
+                        ArcKey(FeatureText.BROWSE, onBrowse, size = KeySize.Small, enabled = !state.busy)
+                        ArcKey(dev.arc.ep133.text.MirrorText.LIVE, onLive, size = KeySize.Small)
+                    }
+                    ArcKey(
+                        if (state.connected) Strings.DISCONNECT else Strings.CONNECT,
+                        onConnect,
+                        size = KeySize.Small,
+                        enabled = state.midiSupported && !state.busy,
+                    )
                 }
-                ArcKey(
-                    if (state.connected) Strings.DISCONNECT else Strings.CONNECT,
-                    onConnect,
-                    size = KeySize.Small,
-                    enabled = state.midiSupported && !state.busy,
-                )
             }
 
             DevicePanel(state)
@@ -132,10 +143,18 @@ fun MainScreen(
                         Text(Strings.EMPTY_TITLE, style = ArcType.bold, color = c.ink)
                         Text(Strings.EMPTY_TEXT, style = BaseText, color = c.graphite)
                     }
+                    // Addition: a reinstalled arc can read its library back from Documents/arc.
+                    Text(FeatureText.RESTORE_HINT, style = ArcType.small, color = c.graphite)
+                    ArcKey(FeatureText.RESTORE_FOLDER, onRestoreFolder, modifier = Modifier.fillMaxWidth())
                 }
                 val totalSize = state.backups.sumOf { it.size }
                 val note = Strings.storageNote(state.backups.size, totalSize, state.spaceLeft)
                 if (note.isNotEmpty()) Text(note, style = ArcType.tiny, color = c.graphite)
+                if (state.backups.isNotEmpty()) {
+                    Text(FeatureText.FOLDER_NOTE, style = ArcType.tiny, color = c.graphite)
+                    // Until the folder is picked, a reinstalled arc can still bring older backups back.
+                    if (!state.folderPicked) ArcKey(FeatureText.RESTORE_FOLDER, onRestoreFolder, size = KeySize.Small, style = KeyStyle.Quiet)
+                }
             }
 
             // Addition to the web version: key combinations for the device.

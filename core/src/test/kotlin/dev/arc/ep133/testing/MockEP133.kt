@@ -119,6 +119,24 @@ class MockEP133(
         out.trySend(bytes)
     }
 
+    /**
+     * A pad press, as community notes describe the push: a FILE event
+     * [0x03, group dir be16, {"active": pad fid}, 0x00]. Sent request-shaped
+     * (request bit, no id) or, with [replyShaped], like a reply with a status
+     * byte and an id nobody waits for, since the real header is not documented.
+     */
+    fun pushPadActive(project: Int, group: Int, pad: Int, replyShaped: Boolean = false) {
+        val dir = 3200 + (project - 1) * 1000 + group * 100
+        val payload = byteArrayOf(0x03) + be16(dir) + encodeUtf8("{\"active\":${dir + pad}}") + byteArrayOf(0)
+        if (replyShaped) {
+            emit(responseFrame(deviceId, 4000, 5, 0, payload))
+            return
+        }
+        val packed = dev.arc.ep133.protocol.Packed7.pack(payload)
+        val head = intArrayOf(0xF0, 0x00, 0x20, 0x76, deviceId, 0x40, 0x40, 0x00, 0x05)
+        emit(ByteArray(head.size) { head[it].toByte() } + packed + byteArrayOf(0xF7.toByte()))
+    }
+
     private fun reply(req: Frame, status: Int, payload: ByteArray = ByteArray(0)) {
         emit(responseFrame(deviceId, req.requestId, req.command, status, payload))
     }

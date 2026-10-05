@@ -383,6 +383,8 @@ fun ArcField(
     placeholder: String = "",
     maxLength: Int = Int.MAX_VALUE,
     keyboardOptions: KeyboardOptions? = null,
+    /** The field's colour; the pale key colour unless it sits on a pale page. */
+    background: Color? = null,
 ) {
     val c = LocalArcColors.current
     val source = remember { MutableInteractionSource() }
@@ -415,7 +417,7 @@ fun ArcField(
                     }
                 }
                 .clip(RoundedCornerShape(10.dp))
-                .background(c.key)
+                .background(background ?: c.key)
                 .drawBehind {
                     // inset 0 2px 0 key-edge at 60%
                     drawRect(c.keyEdge.copy(alpha = 0.6f), size = androidx.compose.ui.geometry.Size(size.width, 2.dp.toPx()))

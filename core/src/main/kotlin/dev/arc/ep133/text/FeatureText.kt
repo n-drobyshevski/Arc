@@ -205,4 +205,15 @@ object FeatureText {
         fun side(slot: Int?, name: String?) = if (slot == null) "empty" else slot(slot) + (name?.let { " $it" } ?: "")
         return "Pad ${groupLetter(c.group)}${c.pad}: ${side(c.oldSlot, oldName)}, now ${side(c.newSlot, newName)}"
     }
+
+    // ---------- library folder (kept across reinstalls) ----------
+    const val FOLDER_NOTE = "Backups are also kept in Documents/arc, so they survive reinstalling arc."
+    const val RESTORE_FOLDER = "Restore from Documents/arc"
+    const val RESTORE_HINT = "Reinstalled arc? Pick the Documents/arc folder to bring your backups back."
+    const val NOTHING_TO_RESTORE = "No backups found in that folder."
+    const val PICK_ARC_FOLDER = "That folder has no arc backups. Pick the arc folder inside Documents."
+
+    fun restored(n: Int) = "Restored ${plural(n, "backup")}"
+
+    fun copyFailed(message: String) = "Could not copy to Documents/arc: $message"
 }

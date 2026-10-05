@@ -107,7 +107,8 @@ private fun Step(step: ComboStep) {
 @Composable
 private fun Joiner(text: String, small: Boolean) {
     val c = LocalArcColors.current
-    Box(Modifier.height(44.dp), contentAlignment = Alignment.Center) {
+    // As tall as a dark key, so the joiner sits on its middle (rows align at the bottom).
+    Box(Modifier.height(35.dp), contentAlignment = Alignment.Center) {
         Text(
             text,
             style = if (small) ArcType.small else BaseText.copy(fontSize = 28.sp, fontWeight = FontWeight.Normal),

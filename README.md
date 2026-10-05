@@ -11,6 +11,12 @@ This is a port of the web version in [`reference/`](reference/), which is kept r
 - Keep a library of backups with names and notes
 - Share a backup through the Android share sheet, or save the `.pak` file anywhere with the system file picker
 - Import `.pak` backups made by the official Sample Tool, by the web version or by a friend, and open them by tapping a `.pak` in the Files app
+- **Survive reinstalling arc:** every backup is also written to **Documents/arc**, with a `library.json` that keeps titles, notes, dates and the live mirror's settings. Edits update the copy, and deleting a backup in arc deletes its file there too.
+  - After a reinstall, tap **Restore from Documents/arc**: on the empty library, or under the list until the folder has been picked. Android makes you pick the folder once; the picker opens there.
+    - Only Documents/arc, or a folder that already holds arc backups, is taken as the library. Any other folder is refused.
+    - Backups already in arc are skipped.
+  - On every start, anything missing from the folder is copied there: a library from before this version, or a copy that failed earlier. A failed copy is reported with the result of the save or delete.
+  - Google's automatic app backup is not used, because it is capped well below the size of one backup.
 - Keep running when the phone is locked: transfers run in a foreground service with a progress notification and a Cancel action
 
 These go beyond the web version:
@@ -25,6 +31,14 @@ These go beyond the web version:
 - **Pad layout:** a **Pads** key on a project, in a backup's contents or on the device, shows each group's pads with the sound on each. In a backup, tapping a pad plays its sound. Pads are listed by their number in the project file; how those numbers map to the physical pads isn't known, so the grid doesn't claim to match the device's layout.
 - **Search sounds:** a **Search** key next to **Import** finds sounds by name in every saved backup. Tapping a result opens that backup's contents.
 - **Compare two backups:** **Compare with another backup** in a backup's sheet shows what changed from the older one to the newer one: sounds added, removed or changed (audio, name or settings) and projects added, removed or changed, with the pads that moved. Audio counts as the same when the samples are the same, even in a differently written WAV file.
+- **Live mirror:** a **Live** key (when connected) shows the EP-133 as you play it. The page reads the sound names and the active project's pads once (as the device browser does), then only listens; nothing on the device is changed.
+  - Pads light up in the keypad layout as notes arrive, brighter with velocity, and fade on release. This follows the official MIDI note map: notes 36–83, one octave per group.
+  - Play/stop and tempo come from MIDI clock, which the device sends only with clock out switched on (SHIFT + ERASE, then 102 and ENTER).
+  - Notes outside the pads, from KEYS mode, show on a keyboard strip with their channel.
+  - **Sample names on the pads** rely on community notes, not the official guide:
+    - A physical pad press also makes the device send its pad file id over SysEx.
+    - arc pairs that with the note to learn which pad is which, then names the sample from the project's pads. One press of a key, in any group, names that key in every group, and arc remembers it; nothing is guessed, and two pads of one group hit together don't count.
+    - Community notes disagree on how project files number the pads, so the page has a switch to count them from the top or from the bottom.
 - **Shortcut guide:** 100 EP-133 key combinations in tabs by section, with search, laid out like a printed guide: each combination drawn as the device's keys (pale keys, dark keys, pads, knobs and the fader), with HOLD, DIAL, TURN and MOVE badges, and what it does below. A test checks that every key drawn is named in that entry's text from the official guide. Every entry is paraphrased from teenage engineering's official user guide for OS 2.5, and links to the section it comes from. Combos the guide doesn't document are left out.
 
 Backups use the same layout as the official Sample Tool's `.pak`: a zip with `/meta.json`, `/sounds/NNN name.wav` and `/projects/PNN.tar`. On top of that, an `arc.json` file keeps per-sound settings like play mode, pitch and envelope.
@@ -45,6 +59,7 @@ echo "sdk.dir=$ANDROID_HOME" > local.properties
 ./gradlew test                  # all unit tests (core + app)
 ./gradlew :app:assembleDebug    # app/build/outputs/apk/debug/app-debug.apk
 ./gradlew :app:lintDebug        # Android lint, including the core module against minSdk 29
+./gradlew :app:updateDebugScreenshotTest  # renders the screens in app/src/screenshotTest to PNGs
 ```
 
 Install the debug APK with `adb install app/build/outputs/apk/debug/app-debug.apk`, or open the project in Android Studio.
@@ -80,7 +95,7 @@ The tests read `reference/test/fixtures/sample.pak` in place, so keep `reference
 | kotlinx.coroutines / kotlinx.serialization | 1.11.0 |
 | Tests | JUnit 5, kotlinx-coroutines-test |
 
-Apart from AndroidX, Kotlin and kotlinx libraries, the only third-party code is the bundled Manrope font (SIL OFL, `app/src/main/assets/OFL-Manrope.txt`).
+Apart from AndroidX, Kotlin and kotlinx libraries, the only third-party code is the bundled Manrope font. For tests only, Google's Compose Preview Screenshot Testing plugin renders screens to PNG (`app/src/screenshotTestDebug/reference/`); nothing from it ships in the app (SIL OFL, `app/src/main/assets/OFL-Manrope.txt`).
 
 ## Layout
 
@@ -160,6 +175,11 @@ The behaviours above are commented where they happen in the code. The same goes 
   - pad layouts: they agree with the slots each fixture project uses, and follow the same matching rules for odd entries
   - comparing two backups: added, removed, renamed, audio and settings changes (including settings embedded in the WAV, as the Sample Tool writes them), the same audio in another WAV header, settings missing on one side, and project pad changes in group order
   - sound search: every word must match, case is ignored, results follow the library order
+  - live mirror:
+    - MIDI parsing: running status, real-time bytes inside messages, velocity 0, SysEx skipped, split packets
+    - the official note map and keypad layout
+    - pad push parsing, end to end through the session in both possible header forms
+    - learning pads from a note and a push in either order, sequenced notes named after learning, both pad orders, project changes, tempo from clock, transport, and the fade
 - **The database upgrade:** the version 2 schema Room exports must equal version 1 plus exactly the two search tables, created with Room's own SQL. Room's own migration test needs a device, so this checks the exported schemas instead.
 - **Other units:** interface text and restore-selection rules, SysEx reassembly (a reply split at every byte offset), port-name matching, the log export, and the Room converters.
 
@@ -178,6 +198,15 @@ Not verified yet. Nobody has run this on a phone or an EP-133:
 - **OS 2.x firmware.** The protocol port follows the web version, which was written from captures of earlier firmware. Another EP-133 tool (cornerman) lists "updated transfer for firmware 2.0" in its changelog, so OS 2.0 or later may behave differently. Watch the debug log closely on a device running OS 2.x.
 - **Upgrading an installed build.** This version adds a table to the app's database. The migration was checked against Room's exported schemas, but it hasn't run on a phone that has backups. To check it, install a build from before the search feature signed with the shared key (`app/debug.keystore`), make some backups, then install a current build over it. Every CI build since the shared key was added includes the new table, so a CI artifact can't be the older build in that test.
 - **Pad numbers on the device.** The pad grid lists pads by their number in the project file. Which physical pad each number is hasn't been checked.
+- **Documents/arc on real phones:**
+  - Writing there goes through MediaStore with no permission. That is expected to work from Android 10 on, but it has only been built, not run.
+  - Restoring after a real uninstall and reinstall, through the folder picker, is also untested.
+  - Folder pickers differ between phone makers.
+- **The live mirror on a real unit:**
+  - **The pad push:** its header and payload follow community notes (Ko-tool's parser), and no capture of it exists.
+  - **Pad order:** whether project files count pads from the top or the bottom (community sources disagree).
+  - **Sequenced pads:** whether pads played by the sequencer light up. The guide doesn't say whether every pad sends notes by default.
+  - **Transfers:** whether a pad pressed during a transfer disturbs it.
 - **The shortcut guide on a real unit.** It follows the official guide for OS 2.5. Combos can differ on other OS versions.
 - **Platform behaviour:**
   - the foreground service and notification on Android 14–16
@@ -204,6 +233,9 @@ Back up the EP-133 with the official Sample Tool first. Then, with the debug scr
 13. **Search** for a sound you know is in one of your backups. When you install a newer build over this one, check that every backup is still listed.
 14. Open **Pads** on a project in the device browser and compare it with the pads on the device. Note which number is which pad.
 15. Back up, change a pad's sound on the device, back up again, and **Compare with another backup**: it should show that pad change.
+16. Check that Documents/arc (in the Files app) holds your backups and a `library.json`. Uninstall arc, reinstall it, tap **Restore from Documents/arc**, pick the folder, and check that titles and notes come back.
+17. Open **Live** and press pads in each group: the lit pad should be the one you pressed. After one press, its sample name should appear. Check the names against the device and try **From the bottom** if they look wrong.
+18. Play a pattern: check whether sequenced pads light up. Switch on clock out (SHIFT + ERASE, 102, ENTER) and check play/stop and the tempo. Try KEYS mode.
 
 If anything fails, export the SysEx log from the debug screen (**Share log** or **Save log**) and attach it to an issue together with the error text.
 
