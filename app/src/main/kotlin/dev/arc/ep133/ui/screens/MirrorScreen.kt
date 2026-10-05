@@ -616,7 +616,7 @@ private fun Notes(st: MirrorState, mirror: MirrorUi?, onPadOrder: (PadOrder) -> 
 @Composable
 private fun ModeToggle(keysOn: Boolean, onMode: (Boolean) -> Unit) {
     val c = LocalArcColors.current
-    TextToggle(
+    dev.arc.ep133.ui.components.WordToggle(
         listOf(MirrorText.MODE_PADS, MirrorText.MODE_KEYS),
         selected = if (keysOn) 1 else 0,
         onSelect = { onMode(it == 1) },
@@ -758,9 +758,11 @@ private fun KeysPanel(keys: KeysUi, actions: KeysActions) {
         Segmented(row.map { Keys.solfege(it) }, selected = row.indexOf(keys.root), onSelect = { actions.onRoot(row[it]) })
     }
     Caption(MirrorText.SCALE, Modifier.padding(top = 8.dp), align = androidx.compose.ui.text.style.TextAlign.Start)
-    for (row in Scale.entries.chunked(2)) {
-        Segmented(row.map { MirrorText.scaleName(it) }, selected = row.indexOf(keys.scale), onSelect = { actions.onScale(row[it]) })
-    }
+    dev.arc.ep133.ui.components.WordToggle(
+        Scale.entries.map { MirrorText.scaleName(it) },
+        selected = keys.scale.ordinal,
+        onSelect = { actions.onScale(Scale.entries[it]) },
+    )
     Text(MirrorText.KEYS_NOTE, style = ArcType.small, color = c.graphite)
 }
 

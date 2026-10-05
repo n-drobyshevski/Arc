@@ -368,6 +368,45 @@ fun TextToggle(options: List<String>, selected: Int, onSelect: (Int) -> Unit, mo
 }
 
 /**
+ * A choice of modes as the pocket operator app shows DRUMS / KEYPAD under its
+ * grid: large uppercase words, the chosen one in navy with the two-squares
+ * mark before it, the others pale. The words wrap onto more lines when they
+ * don't fit (the scale picker).
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+fun WordToggle(options: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
+    val c = LocalArcColors.current
+    androidx.compose.foundation.layout.FlowRow(
+        modifier,
+        horizontalArrangement = Arrangement.spacedBy(20.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        options.forEachIndexed { i, label ->
+            val on = i == selected
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Tab) { onSelect(i) }
+                    .semantics { this.selected = on }
+                    .heightIn(min = 44.dp)
+                    .padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (on) Icon(ArcIcon.SWAP, c.navy, size = 18.dp)
+                Text(
+                    label.uppercase(),
+                    style = ArcType.word,
+                    color = if (on) c.navy else c.graphite.copy(alpha = 0.45f),
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+/**
  * A round play key for a list row: navy with a triangle, orange with a square
  * while playing, faded while the device is busy with something else.
  */
