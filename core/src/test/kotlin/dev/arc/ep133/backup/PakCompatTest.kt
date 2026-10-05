@@ -73,7 +73,11 @@ class PakCompatTest {
         val dev = DemoData.device()
         val s = Session(dev.transport(this), StandardTestDispatcher(testScheduler))
         s.handshake()
-        val ours = Backup.backupDevice(s, clock = { fixtureTime }, zone = ZoneOffset.UTC).bytes
+        // The fixture names the web version that wrote it in meta.json; arc names its own
+        // version (version.properties), so build ours with the web version's to compare.
+        val webVersion = Regex("""APP_VERSION = '([^']+)'""")
+            .find(java.io.File(System.getProperty("arc.referenceDir"), "src/backup.js").readText())!!.groupValues[1]
+        val ours = Backup.backupDevice(s, clock = { fixtureTime }, zone = ZoneOffset.UTC, appVersion = webVersion).bytes
         s.close()
         val theirs = Fixtures.samplePak()
 

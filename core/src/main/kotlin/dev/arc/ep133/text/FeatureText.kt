@@ -29,6 +29,48 @@ object FeatureText {
     const val TAP_FOR_SOUNDS = "Tap to see which sounds it uses"
     const val NO_CHECKSUM = "not reported"
 
+    // The Device tab's layout (sections, find, groups of slots, project tiles).
+    const val NO_DEVICE_TITLE = "No EP-133"
+    const val FIND_SOUND = "Find a sound"
+    const val FIND_HINT = "Name or slot number"
+    const val NO_FIND_MATCHES = "No sounds match."
+    const val PROJECT = "Project"
+    const val PICK_PROJECT = "Tap a project to see its sounds and pads."
+
+    /** "001–099". */
+    fun range(r: IntRange) = slot(r.first) + "\u2013" + slot(r.last)
+
+    /** "212 sounds · 6 projects". */
+    fun counts(sounds: Int, projects: Int) =
+        "$sounds ${Strings.soundsLabel(sounds)} \u00B7 $projects ${Strings.projectsLabel(projects)}"
+
+    /** "Sounds 212", for the section switch. */
+    fun sectionLabel(name: String, n: Int) = "$name $n"
+
+    /**
+     * "001 kick · 004 hat closed", or the slot alone when no sound is there. The
+     * slot and the name are joined by a no-break space so a line never splits them.
+     */
+    fun projectSoundNames(slots: List<Int>, names: Map<Int, String>) =
+        if (slots.isEmpty()) "Uses no sounds" else slots.joinToString(" \u00B7 ") { s -> slot(s) + (names[s]?.let { "\u00A0$it" } ?: "") }
+
+    // Playing on the phone (an addition): what to say when nothing can be heard.
+    const val SILENT_SOUND = "This sound is silent."
+    const val VOLUME_OFF = "Media volume is off. Turn it up to hear the sound."
+    const val NO_AUDIO_OUTPUT = "No audio output is available."
+
+    fun cantPlay(reason: String) = "Can't play this sound: $reason"
+
+    fun unplayableFormat(channels: Int, sampleRate: Int) = "$channels channels at $sampleRate Hz can't be played."
+
+    /** The debug log's line for a sound that started: "play backup:…:3: 46875 Hz, 1 ch, 0.52 s -> Bluetooth (Buds)". */
+    fun playNote(key: String, sampleRate: Int, channels: Int, seconds: Double, route: String) =
+        "play $key: $sampleRate Hz, $channels ch, ${jsNumberToString(kotlin.math.round(seconds * 100) / 100)} s -> $route"
+
+    fun play(name: String) = "$PLAY $name"
+
+    fun stop(name: String) = "$STOP $name"
+
     fun storage(free: Double, total: Double) =
         if (total != 0.0) "${Format.bytes(free)} free of ${Format.bytes(total)}" else ""
 

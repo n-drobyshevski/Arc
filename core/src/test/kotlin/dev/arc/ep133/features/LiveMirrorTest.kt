@@ -135,6 +135,22 @@ class LiveMirrorTest {
     }
 
     @Test
+    fun `forgetting learned pads drops their names and saves the empty map`() {
+        val saved = ArrayList<Map<Int, Int>>()
+        val m = mirror(learned = mapOf(0 to 10), saved = saved)
+        m.onMidi(MidiEvent.NoteOn(1, 36, 90, 5 * ms))
+        assertEquals("kick", m.snapshot(6 * ms).lastHit!!.name)
+        m.forgetLearned()
+        val s = m.snapshot(7 * ms)
+        assertTrue(s.learned.isEmpty())
+        assertEquals(null, s.lastHit!!.name)
+        assertEquals(listOf(emptyMap<Int, Int>()), saved)
+        // Nothing learned: nothing to save again.
+        m.forgetLearned()
+        assertEquals(1, saved.size)
+    }
+
+    @Test
     fun `sequenced notes use what was learned, and far-apart events do not link`() {
         val m = mirror(learned = mapOf(0 to 10))
         m.onMidi(MidiEvent.NoteOn(1, 36, 90, 5 * ms))

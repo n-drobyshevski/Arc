@@ -34,6 +34,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.semantics.Role
@@ -49,7 +50,9 @@ import dev.arc.ep133.text.GuideEntry
 import dev.arc.ep133.text.GuideText
 import dev.arc.ep133.ui.components.ArcField
 import dev.arc.ep133.ui.components.ArcKey
+import dev.arc.ep133.ui.components.Caption
 import dev.arc.ep133.ui.components.CloseKey
+import dev.arc.ep133.ui.components.PlateRadius
 import dev.arc.ep133.ui.components.ComboView
 import dev.arc.ep133.ui.theme.ArcType
 import dev.arc.ep133.ui.theme.LocalArcColors
@@ -61,9 +64,12 @@ import dev.arc.ep133.ui.theme.LocalArcColors
  * Tap an entry for the guide's own wording, a note and the source.
  */
 @Composable
-fun GuideScreen(onBack: () -> Unit) {
+fun GuideScreen(
+    /** Null on the Guide tab, which has no close key. */
+    onBack: (() -> Unit)? = null,
+) {
     val c = LocalArcColors.current
-    BackHandler(onBack = onBack)
+    if (onBack != null) BackHandler(onBack = onBack)
     val uri = LocalUriHandler.current
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -89,20 +95,16 @@ fun GuideScreen(onBack: () -> Unit) {
                 .windowInsetsPadding(WindowInsets.safeDrawing),
         ) {
             // Header: the title centred, the close key on the right.
-            Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
-                Text(
-                    GuideText.HEADER,
-                    style = ArcType.heading.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Medium, letterSpacing = 0.08.em),
-                    color = c.graphite,
-                    modifier = Modifier.align(Alignment.Center),
-                )
-                CloseKey(onBack, GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
+            Box(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp), contentAlignment = Alignment.Center) {
+                Caption(GuideText.HEADER)
+                if (onBack != null) CloseKey(onBack, GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
             }
             // The page: tabs on top, entries below, on the pale key colour.
             Column(
                 Modifier
                     .fillMaxSize()
-                    .clip(RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp))
+                    .padding(horizontal = 16.dp)
+                    .clip(RoundedCornerShape(topStart = PlateRadius, topEnd = PlateRadius))
                     .background(c.key),
             ) {
                 Tabs(selected = if (searching) -1 else tab, onSelect = {
@@ -145,7 +147,7 @@ fun GuideScreen(onBack: () -> Unit) {
     }
 }
 
-/** One tab per section; the selected one is ringed, as in the official guide. */
+/** One tab per section; the selected one is a navy block, like the tabs along the bottom. */
 @Composable
 private fun Tabs(selected: Int, onSelect: (Int) -> Unit) {
     val c = LocalArcColors.current
@@ -162,17 +164,17 @@ private fun Tabs(selected: Int, onSelect: (Int) -> Unit) {
                 Text(
                     GuideText.tab(s),
                     style = ArcType.small.copy(fontFamily = FontFamily.Monospace, fontSize = 14.sp, letterSpacing = 0.04.em),
-                    color = if (on) c.ink else c.graphite,
+                    color = if (on) c.onNavy else c.graphite,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .then(if (on) Modifier.border(1.dp, c.graphite, RoundedCornerShape(50)) else Modifier)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(if (on) c.navy else Color.Transparent)
                         .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Tab) { onSelect(i) }
                         .semantics { this.selected = on }
                         .padding(horizontal = 14.dp, vertical = 8.dp),
                 )
             }
         }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(c.keyEdge))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
     }
 }
 

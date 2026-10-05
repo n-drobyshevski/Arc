@@ -41,6 +41,16 @@ object Wav {
         return out
     }
 
+    /** Whether s16le PCM holds no sound at all: every sample is 0, or there are no samples. */
+    fun isSilent(pcm: ByteArray): Boolean {
+        var i = 0
+        while (i + 1 < pcm.size) {
+            if (pcm[i].toInt() != 0 || pcm[i + 1].toInt() != 0) return false
+            i += 2
+        }
+        return true
+    }
+
     fun encode(pcm: ByteArray, channels: Int, sampleRate: Int): ByteArray =
         encode(pcm, channels.toDouble(), sampleRate.toDouble())
 

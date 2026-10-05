@@ -73,4 +73,21 @@ object DeviceBrowser {
         val tar = Device.readProject(session, project, signal = signal)
         return ProjectLayout(Tar.slotsUsedByProject(tar), ProjectPads.read(tar))
     }
+
+    /**
+     * The sounds whose name contains [query] (ignoring case), or whose slot is
+     * the number typed ("12" and "012" both find slot 12). A blank query keeps all.
+     */
+    fun findSounds(sounds: List<SoundEntry>, query: String): List<SoundEntry> {
+        val q = query.trim()
+        if (q.isEmpty()) return sounds
+        val slot = q.takeIf { it.all(Char::isDigit) }?.toIntOrNull()
+        return sounds.filter { it.name.contains(q, ignoreCase = true) || it.slot == slot }
+    }
+
+    /** Sounds in slot order, grouped by hundreds of slots: 1..99, 100..199, and so on. */
+    fun hundreds(sounds: List<SoundEntry>): List<Pair<IntRange, List<SoundEntry>>> =
+        sounds.sortedBy { it.slot }
+            .groupBy { it.slot / 100 }
+            .map { (h, list) -> (if (h == 0) 1 else h * 100)..(h * 100 + 99) to list }
 }

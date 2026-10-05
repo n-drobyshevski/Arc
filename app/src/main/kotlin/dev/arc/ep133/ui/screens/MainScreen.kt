@@ -31,9 +31,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -41,37 +38,35 @@ import dev.arc.ep133.controller.UiState
 import dev.arc.ep133.text.BackupRecord
 import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.text.Format
-import dev.arc.ep133.text.GuideText
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.width
 import dev.arc.ep133.text.Strings
 import dev.arc.ep133.ui.components.ArcKey
+import dev.arc.ep133.ui.components.Caption
+import dev.arc.ep133.ui.components.GridPlate
+import dev.arc.ep133.ui.components.PlateLine
+import dev.arc.ep133.text.NavText
 import dev.arc.ep133.ui.components.DashedBox
 import dev.arc.ep133.ui.components.DisplayPanel
 import dev.arc.ep133.ui.components.KeySize
 import dev.arc.ep133.ui.components.KeyStyle
 import dev.arc.ep133.ui.components.Meter
 import dev.arc.ep133.ui.components.OneLine
-import dev.arc.ep133.ui.components.Wordmark
 import dev.arc.ep133.ui.components.describe
 import dev.arc.ep133.ui.theme.ArcType
 import dev.arc.ep133.ui.theme.BaseText
 import dev.arc.ep133.ui.theme.LocalArcColors
 
-/** The single main screen (index.html .app). */
+/**
+ * The Backups tab (index.html .app): the device panel and the library. The
+ * header's keys live in the top bar now.
+ */
 @Composable
 fun MainScreen(
     state: UiState,
     fmtDay: (Long) -> String,
-    onConnect: () -> Unit,
     onBackup: () -> Unit,
     onImport: () -> Unit,
     onOpen: (BackupRecord) -> Unit,
-    onDebug: () -> Unit,
-    onBrowse: () -> Unit = {},
-    onGuide: () -> Unit = {},
     onSearch: () -> Unit = {},
-    onLive: () -> Unit = {},
     onRestoreFolder: () -> Unit = {},
 ) {
     val c = LocalArcColors.current
@@ -82,58 +77,32 @@ fun MainScreen(
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
                 .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+                .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Row(
-                Modifier.fillMaxWidth().padding(vertical = 4.dp, horizontal = 2.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Wordmark(onLongPress = onDebug)
-                Spacer(Modifier.width(12.dp))
-                // The keys wrap to a second line as whole keys when a narrow phone or a
-                // large font leaves no room, rather than squeezing the last one.
-                androidx.compose.foundation.layout.FlowRow(
-                    Modifier.weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End),
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    // Addition to the web version: the device browser and the live mirror
-                    // (the mirror only listens, so it is not tied to busy).
-                    if (state.device != null) {
-                        ArcKey(FeatureText.BROWSE, onBrowse, size = KeySize.Small, enabled = !state.busy)
-                        ArcKey(dev.arc.ep133.text.MirrorText.LIVE, onLive, size = KeySize.Small)
-                    }
-                    ArcKey(
-                        if (state.connected) Strings.DISCONNECT else Strings.CONNECT,
-                        onConnect,
-                        size = KeySize.Small,
-                        enabled = state.midiSupported && !state.busy,
-                    )
-                }
-            }
-
+            Caption(NavText.DEVICE_CAPTION)
             DevicePanel(state)
 
-            ArcKey(
-                Strings.BACK_UP,
-                onBackup,
-                modifier = Modifier.fillMaxWidth(),
-                style = KeyStyle.Signal,
-                size = KeySize.Wide,
-                enabled = state.midiSupported && state.device != null && !state.busy,
-            )
+            // The top bar's Back up block does this too; the big key stays until the first backup.
+            if (state.backups.isEmpty()) {
+                ArcKey(
+                    Strings.BACK_UP,
+                    onBackup,
+                    modifier = Modifier.fillMaxWidth(),
+                    style = KeyStyle.Signal,
+                    size = KeySize.Wide,
+                    enabled = state.midiSupported && state.device != null && !state.busy,
+                )
+            }
 
             Column(Modifier.padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text(Strings.BACKUPS, style = ArcType.heading, color = c.ink, modifier = Modifier.weight(1f))
+                Caption(Strings.BACKUPS)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     // Addition to the web version: find sounds across backups.
                     if (state.backups.isNotEmpty()) {
-                        ArcKey(FeatureText.SEARCH, onSearch, size = KeySize.Small)
-                        Spacer(Modifier.width(10.dp))
+                        ArcKey(FeatureText.SEARCH, onSearch, Modifier.weight(1f), size = KeySize.Small)
                     }
-                    ArcKey(Strings.IMPORT, onImport, size = KeySize.Small)
+                    ArcKey(Strings.IMPORT, onImport, Modifier.weight(1f), size = KeySize.Small)
                 }
                 if (state.backups.isNotEmpty()) {
                     BackupList(state.backups, state.freshId, fmtDay, onOpen)
@@ -156,9 +125,6 @@ fun MainScreen(
                     if (!state.folderPicked) ArcKey(FeatureText.RESTORE_FOLDER, onRestoreFolder, size = KeySize.Small, style = KeyStyle.Quiet)
                 }
             }
-
-            // Addition to the web version: key combinations for the device.
-            ArcKey(GuideText.TITLE, onGuide, modifier = Modifier.fillMaxWidth(), style = KeyStyle.Quiet)
 
             Text(Strings.FOOTER, style = ArcType.tiny, color = c.graphite, modifier = Modifier.padding(vertical = 8.dp, horizontal = 2.dp))
         }
@@ -233,24 +199,16 @@ private fun Stat(num: String, label: String) {
 @Composable
 internal fun BackupList(list: List<BackupRecord>, freshId: String?, fmtDay: (Long) -> String, onOpen: (BackupRecord) -> Unit) {
     val c = LocalArcColors.current
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .drawBehind {
-                drawRoundRect(c.keyEdge, topLeft = Offset(0f, 3.dp.toPx()), size = size, cornerRadius = CornerRadius(12.dp.toPx()))
-            }
-            .clip(RoundedCornerShape(12.dp))
-            .background(c.key),
-    ) {
+    GridPlate {
         list.forEachIndexed { i, b ->
-            if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(c.keyEdge.copy(alpha = 0.55f)))
+            if (i > 0) PlateLine()
             // .backup-row:active { background: key-edge at 25% } instead of a ripple
             val source = remember { MutableInteractionSource() }
             val pressed by source.collectIsPressedAsState()
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .background(if (pressed) c.keyEdge.copy(alpha = 0.25f) else Color.Transparent)
+                    .background(if (pressed) c.keyEdge.copy(alpha = 0.35f) else Color.Transparent)
                     .clickable(interactionSource = source, indication = null, role = Role.Button) { onOpen(b) }
                     .padding(vertical = 14.dp, horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),

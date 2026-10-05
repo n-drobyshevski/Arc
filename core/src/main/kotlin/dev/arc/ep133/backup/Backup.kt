@@ -68,7 +68,7 @@ object Backup {
     internal fun safeName(s: String) = s.replace(UNSAFE, "_").take(40)
 
     /** The .pak's /meta.json, as backup.js writes it. */
-    fun metaJson(product: String, sku: String, osVersion: String, createdAt: Long): JsonObject = JsonObject(
+    fun metaJson(product: String, sku: String, osVersion: String, createdAt: Long, appVersion: String = APP_VERSION): JsonObject = JsonObject(
         linkedMapOf(
             "info" to JsonPrimitive("teenage engineering - pak file"),
             "pak_version" to JsJson.number(1),
@@ -78,7 +78,7 @@ object Backup {
             "device_sku" to JsonPrimitive(sku),
             "device_version" to JsonPrimitive(osVersion),
             "generated_at" to JsonPrimitive(isoString(createdAt)),
-            "author" to JsonPrimitive("$APP_NAME $APP_VERSION"),
+            "author" to JsonPrimitive("$APP_NAME $appVersion"),
         ),
     )
 
@@ -96,6 +96,8 @@ object Backup {
         signal: CancelSignal? = null,
         clock: () -> Long = System::currentTimeMillis,
         zone: ZoneId = ZoneId.systemDefault(),
+        /** The version named in meta.json's author; tests pass the web version's to compare byte for byte. */
+        appVersion: String = APP_VERSION,
     ): BackupResult = session.onLoop {
         val info = session.info
         onProgress(Progress(0.0, "Reading device contents"))
@@ -159,6 +161,7 @@ object Backup {
             sku = info?.sku.orEmpty(),
             osVersion = info?.osVersion.orEmpty(),
             createdAt = createdAt,
+            appVersion = appVersion,
         )
         val sidecar = JsonObject(
             linkedMapOf(

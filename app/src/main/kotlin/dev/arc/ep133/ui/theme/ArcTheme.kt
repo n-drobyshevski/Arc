@@ -22,8 +22,10 @@ import androidx.compose.ui.unit.sp
 import dev.arc.ep133.R
 
 /**
- * Colour tokens from reference/styles.css, taken from the device itself: a grey
- * shell, pale keys, one orange key and a dark display panel.
+ * Colour tokens from reference/styles.css, taken from the device itself: a
+ * shell, pale keys, one orange key and a dark display panel. The page, ink and
+ * the navy/grey tab blocks lean towards teenage engineering's pocket operator
+ * app (an addition to the web version).
  */
 @Immutable
 data class ArcColors(
@@ -40,16 +42,28 @@ data class ArcColors(
     val displayDim: Color,
     val segmentOff: Color,
     val danger: Color,
+    /** Selected tab and choice keys. */
+    val navy: Color,
+    val onNavy: Color,
+    /** Tabs that are not selected. */
+    val tabOff: Color,
+    val onTabOff: Color,
+    /** The pad-grid plate and its thin lines. */
+    val plate: Color,
+    val line: Color,
+    /** The "connected" block. */
+    val ok: Color,
+    val onOk: Color,
 ) {
     val scrim: Color get() = Color(20, 20, 18).copy(alpha = 0.45f)
 }
 
 val LightArcColors = ArcColors(
-    shell = Color(0xFFDEDCD6),
-    key = Color(0xFFF3F2EE),
-    keyEdge = Color(0xFFC3C0B8),
-    ink = Color(0xFF1E1F21),
-    graphite = Color(0xFF66676A),
+    shell = Color(0xFFE6E2DB),
+    key = Color(0xFFF4F2EE),
+    keyEdge = Color(0xFFC6C2B9),
+    ink = Color(0xFF1F2558),
+    graphite = Color(0xFF6B6A72),
     signal = Color(0xFFFF4C00),
     signalEdge = Color(0xFFC23A00),
     onSignal = Color(0xFFFFFFFF),
@@ -58,6 +72,14 @@ val LightArcColors = ArcColors(
     displayDim = Color(0xFF8A8C83),
     segmentOff = Color(0xFF3A3D36),
     danger = Color(0xFFB3261E),
+    navy = Color(0xFF1F2558),
+    onNavy = Color(0xFFF4F2EE),
+    tabOff = Color(0xFFD3D2DA),
+    onTabOff = Color(0xFF5C5B6C),
+    plate = Color(0xFFD7D8D4),
+    line = Color(0xFF1E1F21),
+    ok = Color(0xFF17613F),
+    onOk = Color(0xFFF4F2EE),
 )
 
 val DarkArcColors = LightArcColors.copy(
@@ -72,6 +94,14 @@ val DarkArcColors = LightArcColors.copy(
     segmentOff = Color(0xFF2A2D27),
     signalEdge = Color(0xFFA83200),
     danger = Color(0xFFFF8A80),
+    navy = Color(0xFFAEB4F0),
+    onNavy = Color(0xFF14162B),
+    tabOff = Color(0xFF3A3B44),
+    onTabOff = Color(0xFFA3A4AE),
+    plate = Color(0xFF2E2F33),
+    line = Color(0xFF0E0F10),
+    ok = Color(0xFF3FA877),
+    onOk = Color(0xFF0E1A14),
 )
 
 val LocalArcColors = staticCompositionLocalOf { LightArcColors }
@@ -119,6 +149,12 @@ object ArcType {
     val notesInput = BaseText.copy(fontSize = 15.sp, lineHeight = 1.4.em)
     val body15 = BaseText.copy(fontSize = 15.sp)
     val bold = BaseText.copy(fontWeight = FontWeight.Bold)
+    // Uppercase, letter-spaced labels after the pocket operator app (callers uppercase the text).
+    val caps = BaseText.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.12.em, lineHeight = 1.2.em)
+    val capsKey = BaseText.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.06.em, lineHeight = 1.1.em)
+    val capsKeySmall = capsKey.copy(fontSize = 13.sp)
+    val capsKeyWide = capsKey.copy(fontSize = 16.sp)
+    val tab = BaseText.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.05.em, lineHeight = 1.em)
     val semi = BaseText.copy(fontWeight = FontWeight.SemiBold)
 }
 

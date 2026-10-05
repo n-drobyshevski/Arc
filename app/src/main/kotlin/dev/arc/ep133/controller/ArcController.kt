@@ -33,6 +33,7 @@ import dev.arc.ep133.protocol.TrafficLog
 import dev.arc.ep133.service.TransferService
 import dev.arc.ep133.text.BackupDevice
 import dev.arc.ep133.text.FeatureText
+import dev.arc.ep133.text.LibraryRules
 import dev.arc.ep133.text.BackupRecord
 import dev.arc.ep133.text.Format
 import dev.arc.ep133.text.RestoreSelection
@@ -160,7 +161,7 @@ class ArcController(
     private val midi: MidiConnector,
     val trafficLog: TrafficLog,
     private val scope: CoroutineScope,
-    val player: dev.arc.ep133.audio.SoundPlayer = dev.arc.ep133.audio.SoundPlayer(),
+    val player: dev.arc.ep133.audio.SoundPlayer = dev.arc.ep133.audio.SoundPlayer(context),
 ) {
     private val _state = MutableStateFlow(UiState(midiSupported = midi.supported))
     val state: StateFlow<UiState> = _state.asStateFlow()
@@ -174,6 +175,10 @@ class ArcController(
     private var mirrorPushOff: (() -> Unit)? = null
     private var mirrorSession: Session? = null
     private val mirrorPrefs by lazy { context.getSharedPreferences("mirror", Context.MODE_PRIVATE) }
+
+    // ---------- settings (an addition) ----------
+    private val settingsStore = dev.arc.ep133.data.SettingsStore(context)
+    val settings: StateFlow<dev.arc.ep133.data.AppSettings> = settingsStore.settings
 
     @Volatile
     private var session: Session? = null
@@ -196,6 +201,7 @@ class ArcController(
             buildMap {
                 mirrorPrefs.getString("learned", null)?.let { put("mirror.learned", it) }
                 mirrorPrefs.getString("order", null)?.let { put("mirror.order", it) }
+                putAll(settingsStore.toIndex())
             }
         }
         library.onExternalError = { msg -> scope.launch { toast(FeatureText.copyFailed(msg), error = true) } }
@@ -220,7 +226,7 @@ class ArcController(
         midi.watch(
             onAdded = { info ->
                 // Agreed addition: connect on its own when an EP-133 is plugged in.
-                if (midi.looksLikeEp(info)) scope.launch {
+                if (midi.looksLikeEp(info) && settingsStore.settings.value.autoConnect) scope.launch {
                     delay(300)
                     val s = _state.value
                     if (session == null && !s.busy) connect()
@@ -364,7 +370,7 @@ class ArcController(
         }
         if (saved != null) {
             _state.update { it.copy(freshId = saved.record.id) }
-            toastSaved(Strings.saved(saved.record.soundCount, saved.record.projectCount), saved.copyError)
+            toastSaved(Strings.saved(saved.record.soundCount, saved.record.projectCount) + pruneOld(saved.record.id), saved.copyError)
         }
         refreshAll(quiet = true) // refreshDevice().catch(() => {})
     }
@@ -492,11 +498,35 @@ class ArcController(
     /** Downloads a sound from the device and plays it (an addition to the web version). */
     fun playDeviceSound(slot: Int): Job = scope.launch {
         val token = ++playToken
-        val d = _state.value.browser.details[slot] ?: return@launch
+        // Played straight from the list: read the channels and rate first when they aren't known yet.
+        val d = _state.value.browser.details[slot]
+            ?: exclusive("play:$slot") { DeviceBrowser.soundDetails(it, slot) }
+                ?.also { d -> _state.update { it.copy(browser = it.browser.copy(details = it.browser.details + (slot to d))) } }
+            ?: return@launch
+        if (token != playToken) return@launch
         // Not cancelled on stop: an interrupted download would leave the session out of step.
         val pcm = exclusive("play:$slot") { s -> dev.arc.ep133.protocol.Fs.download(s, slot) } ?: return@launch
         if (token != playToken) return@launch
-        player.play("device:$slot", pcm, d.channels.toInt(), d.sampleRate.toInt())
+        startSound("device:$slot", pcm, d.channels.toInt(), d.sampleRate.toInt())
+    }
+
+    /**
+     * Plays on the phone and says so when nothing will be heard: a sound that
+     * can't play, or media volume at zero. Where the sound went is noted in the
+     * debug log, for reports of a sound that plays but isn't heard.
+     */
+    private fun startSound(key: String, pcm: ByteArray, channels: Int, sampleRate: Int) {
+        when (val r = player.play(key, pcm, channels, sampleRate)) {
+            is dev.arc.ep133.audio.PlayResult.Failed -> {
+                trafficLog.note("play $key failed: ${r.reason}")
+                toast(FeatureText.cantPlay(r.reason), error = true)
+            }
+            is dev.arc.ep133.audio.PlayResult.Started -> {
+                val seconds = pcm.size / (2.0 * channels) / sampleRate
+                trafficLog.note(FeatureText.playNote(key, sampleRate, channels, seconds, r.route))
+                if (player.volumeOff()) toast(FeatureText.VOLUME_OFF)
+            }
+        }
     }
 
     // ---------- backup contents (additions) ----------
@@ -542,7 +572,7 @@ class ArcController(
         try {
             val w = withContext(Dispatchers.Default) { Wav.decode(snd.wav) }
             if (token != playToken || _state.value.contents?.backupId != c.backupId) return@launch
-            player.play("backup:${c.backupId}:$slot", w.pcm, w.channels, w.sampleRate.toInt())
+            startSound("backup:${c.backupId}:$slot", w.pcm, w.channels, w.sampleRate.toInt())
         } catch (e: Throwable) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             toast(e.message ?: e.toString(), error = true)
@@ -686,6 +716,9 @@ class ArcController(
     /** Stops listening while the app is in the background; the screen keeps its last state. */
     fun pauseMirror() = stopMirror()
 
+    /** The pad order Live uses (for the settings page). */
+    fun padOrder() = mirror?.snapshot(System.nanoTime())?.padOrder ?: savedPadOrder()
+
     private fun savedPadOrder() =
         runCatching { dev.arc.ep133.features.PadOrder.valueOf(mirrorPrefs.getString("order", null) ?: "") }
             .getOrDefault(dev.arc.ep133.features.PadOrder.FROM_TOP)
@@ -747,6 +780,7 @@ class ArcController(
                 settings["mirror.learned"]?.let { putString("learned", it) }
                 settings["mirror.order"]?.let { putString("order", it) }
             }
+            settingsStore.fromIndex(settings)
             _state.update { it.copy(folderPicked = library.folderPicked) }
             toast(if (n == 0) FeatureText.NOTHING_TO_RESTORE else FeatureText.restored(n))
         } catch (e: Throwable) {
@@ -769,7 +803,7 @@ class ArcController(
     /** Plays PCM that is already in memory (the trim preview). */
     fun playNow(key: String, pcm: ByteArray, channels: Int, sampleRate: Int) {
         playToken++
-        player.play(key, pcm, channels, sampleRate)
+        startSound(key, pcm, channels, sampleRate)
     }
 
     /** The bytes to export: a sound's WAV, or a project as a .pak. */
@@ -854,7 +888,7 @@ class ArcController(
                 d.soundNames,
             )
             _state.update { it.copy(freshId = saved.record.id) }
-            toastSaved(Strings.imported(saved.record.soundCount, saved.record.projectCount), saved.copyError)
+            toastSaved(Strings.imported(saved.record.soundCount, saved.record.projectCount) + pruneOld(saved.record.id), saved.copyError)
         } catch (e: Throwable) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             toast(Strings.importFailed(name, e.message ?: e.toString()), error = true)
@@ -878,6 +912,56 @@ class ArcController(
         if (e is kotlinx.coroutines.CancellationException) throw e
         toast(e.message ?: e.toString(), error = true)
         false
+    }
+
+    /**
+     * Deletes the oldest backups beyond the Keep setting (never [keepId], the
+     * one just saved). Returns " Removed N old backups." for the toast, or "".
+     */
+    private suspend fun pruneOld(keepId: String? = null): String {
+        val keep = settingsStore.settings.value.keepLast ?: return ""
+        val drop = LibraryRules.toPrune(library.backups.first(), keep).filter { it.id != keepId }
+        var removed = 0
+        for (b in drop) {
+            val ok = runCatching { library.delete(b.id) }
+                .onFailure { e -> if (e is kotlinx.coroutines.CancellationException) throw e }
+                .isSuccess
+            if (ok) removed++
+        }
+        return if (removed > 0) " " + dev.arc.ep133.text.SettingsText.pruned(removed) else ""
+    }
+
+    fun setTheme(t: dev.arc.ep133.text.ThemeChoice) = changeSettings { it.copy(theme = t) }
+
+    fun setAutoConnect(on: Boolean) = changeSettings { it.copy(autoConnect = on) }
+
+    fun setKeepScreenOn(on: Boolean) = changeSettings { it.copy(keepScreenOn = on) }
+
+    /** How many backups [setKeepLast] would delete now, for the confirmation. */
+    fun pruneCount(keep: Int?): Int = LibraryRules.toPrune(_state.value.backups, keep).size
+
+    /** Sets how many backups to keep and deletes the older ones now (after the page confirmed). */
+    fun setKeepLast(keep: Int?): Job = scope.launch {
+        changeSettings { it.copy(keepLast = keep) }
+        val note = pruneOld()
+        if (note.isNotEmpty()) toast(note.trim())
+    }
+
+    /** Forgets which pad is which in Live (names are learned again as pads are pressed). */
+    fun forgetLearned() {
+        val m = mirror
+        if (m != null) {
+            m.forgetLearned()
+            _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(state = m.snapshot(System.nanoTime()))) } ?: cur }
+        }
+        mirrorPrefs.edit { remove("learned") }
+        scope.launch { library.syncIndex() }
+        toast(dev.arc.ep133.text.SettingsText.FORGOTTEN)
+    }
+
+    private fun changeSettings(change: (dev.arc.ep133.data.AppSettings) -> dev.arc.ep133.data.AppSettings) {
+        settingsStore.update(change)
+        scope.launch { library.syncIndex() }
     }
 
     /** One toast for the result, so a failed copy to Documents/arc is not hidden behind it. */

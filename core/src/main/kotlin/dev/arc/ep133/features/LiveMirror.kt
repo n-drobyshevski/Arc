@@ -72,6 +72,15 @@ class LiveMirror(
     private var pushesSeen = false
     private var padOrder = padOrder
 
+    /** Drops every learned pad number; names come back as pads are pressed again. */
+    @Synchronized
+    fun forgetLearned() {
+        if (learned.isEmpty()) return
+        learned.clear()
+        renameLastHit()
+        onLearned(LinkedHashMap(learned))
+    }
+
     @Synchronized
     fun setPadOrder(order: PadOrder) {
         padOrder = order
