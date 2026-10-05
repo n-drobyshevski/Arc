@@ -29,6 +29,32 @@ object FeatureText {
     const val TAP_FOR_SOUNDS = "Tap to see which sounds it uses"
     const val NO_CHECKSUM = "not reported"
 
+    // The Device tab's layout (sections, find, groups of slots, project tiles).
+    const val NO_DEVICE_TITLE = "No EP-133"
+    const val FIND_SOUND = "Find a sound"
+    const val FIND_HINT = "Name or slot number"
+    const val NO_FIND_MATCHES = "No sounds match."
+    const val PROJECT = "Project"
+    const val PICK_PROJECT = "Tap a project to see its sounds and pads."
+
+    /** "001–099". */
+    fun range(r: IntRange) = slot(r.first) + "\u2013" + slot(r.last)
+
+    /** "212 sounds · 6 projects". */
+    fun counts(sounds: Int, projects: Int) =
+        "$sounds ${Strings.soundsLabel(sounds)} \u00B7 $projects ${Strings.projectsLabel(projects)}"
+
+    /** "Sounds 212", for the section switch. */
+    fun sectionLabel(name: String, n: Int) = "$name $n"
+
+    /** "001 kick · 004 hat closed", or the slot alone when no sound is there. */
+    fun projectSoundNames(slots: List<Int>, names: Map<Int, String>) =
+        if (slots.isEmpty()) "Uses no sounds" else slots.joinToString(" \u00B7 ") { s -> slot(s) + (names[s]?.let { " $it" } ?: "") }
+
+    fun play(name: String) = "$PLAY $name"
+
+    fun stop(name: String) = "$STOP $name"
+
     fun storage(free: Double, total: Double) =
         if (total != 0.0) "${Format.bytes(free)} free of ${Format.bytes(total)}" else ""
 

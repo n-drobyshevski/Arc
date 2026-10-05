@@ -26,6 +26,9 @@ import dev.arc.ep133.ui.components.TopBar
 import dev.arc.ep133.controller.BrowserUi
 import dev.arc.ep133.features.DeviceContents
 import dev.arc.ep133.features.PadGroup
+import dev.arc.ep133.features.SoundDetails
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import dev.arc.ep133.protocol.ProjectEntry
 import dev.arc.ep133.protocol.SoundEntry
 import dev.arc.ep133.text.FeatureText
@@ -152,25 +155,56 @@ fun MainConnectedDarkPreview() = Main(connectedState, dark = true)
 @Composable
 fun MainEmptyPreview() = Main(UiState(libraryLoaded = true))
 
-@PreviewTest
-@Preview(name = "Device tab", widthDp = 393, heightDp = 852, showBackground = true)
-@Composable
-fun DeviceTabPreview() {
-    val sounds = listOf("kick", "kick 2", "snare", "hat closed", "hat open", "clap", "rim", "tom low")
-        .mapIndexed { i, n -> SoundEntry(i + 1, n, 120_000L + i * 9_000L) }
-    val state = connectedState.copy(
-        browser = BrowserUi(
-            contents = DeviceContents(
-                Storage(64e6, 21e6, 43e6),
-                sounds,
-                listOf(ProjectEntry(1, 0, "", 180_000L), ProjectEntry(3, 0, "", 420_000L)),
-            ),
+private val deviceSounds = listOf(
+    1 to "kick", 2 to "kick 2", 3 to "snare", 4 to "hat closed", 5 to "hat open", 6 to "clap", 7 to "rim",
+    101 to "bass c1", 102 to "bass d1", 140 to "vox chop", 205 to "stab", 206 to "riser",
+).map { (slot, n) -> SoundEntry(slot, n, 120_000L + slot * 900L) }
+
+private val deviceState = connectedState.copy(
+    browser = BrowserUi(
+        contents = DeviceContents(
+            Storage(64e6, 21e6, 43e6),
+            deviceSounds,
+            listOf(1, 2, 3, 5, 7).map { ProjectEntry(it, 0, "", 180_000L + it * 60_000L) },
         ),
-    )
-    Framed(Tab.DEVICE) {
-        DeviceScreen(state = state, onRefresh = {}, onSoundDetails = {}, onProjectSounds = {}, onAddSamples = {})
+        details = mapOf(
+            2 to SoundDetails(2, "kick 2", 1.0, 46875.0, JsonObject(mapOf("sound.playmode" to JsonPrimitive("oneshot"))), 0x1A2B3C4DL),
+        ),
+        projectSounds = mapOf(3 to listOf(1, 3, 4, 6, 101, 140, 300)),
+        projectPads = mapOf(3 to listOf(PadGroup("A", mapOf(1 to 1)))),
+    ),
+)
+
+@Composable
+private fun Device(section: Int = 0, open: Int? = null, playing: String? = null, connected: Boolean = true, dark: Boolean = false) {
+    val state = if (connected) deviceState else UiState(libraryLoaded = true)
+    Framed(Tab.DEVICE, connected = connected, dark = dark) {
+        DeviceScreen(
+            state = state, onRefresh = {}, onSoundDetails = {}, onProjectSounds = {}, onAddSamples = {},
+            playing = playing, initialSection = section, initialOpen = open,
+        )
     }
 }
+
+@PreviewTest
+@Preview(name = "Device tab", widthDp = 393, heightDp = 1180, showBackground = true)
+@Composable
+fun DeviceTabPreview() = Device(open = 2, playing = "device:3")
+
+@PreviewTest
+@Preview(name = "Device tab dark", widthDp = 393, heightDp = 1180, showBackground = true)
+@Composable
+fun DeviceTabDarkPreview() = Device(open = 2, playing = "device:3", dark = true)
+
+@PreviewTest
+@Preview(name = "Device projects", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun DeviceProjectsPreview() = Device(section = 1, open = 3)
+
+@PreviewTest
+@Preview(name = "Device disconnected", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun DeviceDisconnectedPreview() = Device(connected = false)
 
 @PreviewTest
 @Preview(name = "Pads sheet", widthDp = 393, heightDp = 852, showBackground = true)

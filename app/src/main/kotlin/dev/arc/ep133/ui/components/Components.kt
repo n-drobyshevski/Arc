@@ -79,6 +79,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.progressBarRangeInfo
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
@@ -266,6 +267,86 @@ fun PlateLine() {
 }
 
 val PlateRadius = 18.dp
+
+/**
+ * One row of a plate drawn row by row (for lazy lists): only the plate's
+ * outer corners are rounded, and a thin line sits above every row but the first.
+ */
+fun Modifier.plateRow(first: Boolean, last: Boolean, plate: Color, line: Color): Modifier =
+    clip(
+        RoundedCornerShape(
+            topStart = if (first) PlateRadius else 0.dp, topEnd = if (first) PlateRadius else 0.dp,
+            bottomStart = if (last) PlateRadius else 0.dp, bottomEnd = if (last) PlateRadius else 0.dp,
+        ),
+    )
+        .background(plate)
+        .drawBehind { if (!first) drawRect(line, size = androidx.compose.ui.geometry.Size(size.width, 1.dp.toPx())) }
+
+/** A row of blocks to switch between views: navy when selected, pale grey otherwise (like the tabs). */
+@Composable
+fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
+    val c = LocalArcColors.current
+    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        options.forEachIndexed { i, label ->
+            val on = i == selected
+            Box(
+                Modifier
+                    .weight(1f)
+                    .heightIn(min = 44.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(if (on) c.navy else c.tabOff)
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Tab) { onSelect(i) }
+                    .semantics { this.selected = on }
+                    .padding(horizontal = 10.dp, vertical = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(label.uppercase(), style = ArcType.capsKeySmall, color = if (on) c.onNavy else c.onTabOff, maxLines = 1, textAlign = TextAlign.Center)
+            }
+        }
+    }
+}
+
+/**
+ * A round play key for a list row: navy with a triangle, orange with a square
+ * while playing, faded while the device is busy with something else.
+ */
+@Composable
+fun PlayKey(playing: Boolean, enabled: Boolean, description: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val c = LocalArcColors.current
+    val face = if (playing) c.signal else c.navy
+    val ink = if (playing) c.onSignal else c.onNavy
+    Box(
+        modifier
+            .size(40.dp)
+            .graphicsLayer { alpha = if (enabled || playing) 1f else 0.4f }
+            .clip(CircleShape)
+            .background(face)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                enabled = enabled || playing,
+                role = Role.Button,
+                onClick = onClick,
+            )
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        androidx.compose.foundation.Canvas(Modifier.size(14.dp)) {
+            if (playing) {
+                drawRect(ink)
+            } else {
+                // A triangle nudged right so it looks centred.
+                val p = Path().apply {
+                    moveTo(size.width * 0.12f, 0f)
+                    lineTo(size.width, size.height / 2)
+                    lineTo(size.width * 0.12f, size.height)
+                    close()
+                }
+                drawPath(p, ink)
+            }
+        }
+    }
+}
 
 /** Diagonal hatching in [color], as on the pocket operator app's empty side panels. */
 fun Modifier.hatch(color: Color, spacing: Dp = 9.dp, width: Dp = 1.dp): Modifier = clipToBounds().drawBehind {

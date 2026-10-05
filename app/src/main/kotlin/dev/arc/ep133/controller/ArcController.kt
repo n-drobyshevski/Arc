@@ -492,7 +492,12 @@ class ArcController(
     /** Downloads a sound from the device and plays it (an addition to the web version). */
     fun playDeviceSound(slot: Int): Job = scope.launch {
         val token = ++playToken
-        val d = _state.value.browser.details[slot] ?: return@launch
+        // Played straight from the list: read the channels and rate first when they aren't known yet.
+        val d = _state.value.browser.details[slot]
+            ?: exclusive("play:$slot") { DeviceBrowser.soundDetails(it, slot) }
+                ?.also { d -> _state.update { it.copy(browser = it.browser.copy(details = it.browser.details + (slot to d))) } }
+            ?: return@launch
+        if (token != playToken) return@launch
         // Not cancelled on stop: an interrupted download would leave the session out of step.
         val pcm = exclusive("play:$slot") { s -> dev.arc.ep133.protocol.Fs.download(s, slot) } ?: return@launch
         if (token != playToken) return@launch

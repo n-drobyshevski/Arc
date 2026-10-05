@@ -22,7 +22,7 @@ The look keeps the web version's device panel, keys and orange signal, and borro
 - Keep running when the phone is locked: transfers run in a foreground service with a progress notification and a Cancel action
 
 These go beyond the web version:
-- **Browse the device:** see every sound slot (name, size, and on tap its channels, sample rate, settings and checksum), every project and which sounds it uses, and the free space. Open the **Device** tab.
+- **Browse the device:** the **Device** tab shows the storage meter and switches between **Sounds** and **Projects**. Sounds are grouped by hundreds of slots (001–099, 100–199, …), can be found by name or slot number, and each row has a round **Play** key that downloads the sound and plays it on the phone in one tap. Tap a row for its channels, sample rate, settings and checksum. Projects are tiles: tap one to see the sounds it uses, by name, and its **Pads**.
 - **Add samples:** pick WAV files on the phone and load them into sample slots. Each file gets the next free slot, which you can change; an occupied slot is replaced. Uploads take exactly the restore path, so they get the same free-space check, resampling above 46875 Hz, checksum verification and Cancel.
 - **Compare with device:** in the restore sheet, see what a restore would change before running it: which sounds differ, are missing or have other settings, which projects differ, and what on the device the restore leaves alone. Nothing is written.
 - **Backup contents:** tap **Contents** in a backup's sheet to list its sounds and projects. No device is needed.
@@ -226,11 +226,11 @@ Back up the EP-133 with the official Sample Tool first. Then, with the debug scr
 4. Restore a single project with its sounds, then the whole backup. Try **Cancel** during a restore.
 5. Unplug the cable during a transfer. You should see an error, and the app should recover after you plug it back in.
 6. Open a `.pak` from the Files app, and import one made by the official Sample Tool.
-7. Open the **Device** tab: check the slots, a sound's details and a project's sounds against the device. Add a WAV into a free slot and play it on the device.
+7. Open the **Device** tab: check the slots, a sound's details and a project's sounds against the device. Find a sound by name and by slot number. Add a WAV into a free slot and play it on the device.
 8. In the restore sheet, tap **Compare with device** right after a backup: it should report no changes. Change a sound on the device and compare again.
 9. Open a backup's **Contents**. Play a few sounds, save one as WAV and open it in another app. Save a project, import that `.pak`, and restore it.
 10. Under **Add samples**, trim a file to a short part, upload it, and play it on the device. Check the start and the length. If the file has loop points, check them too.
-11. In the device browser, tap **Play** on a sound and compare it with the pad on the device.
+11. On the **Device** tab, tap a sound's round **Play** key without opening the row first, and compare it with the pad on the device.
 12. Try a few entries of the **Guide** tab on the device, and note the OS version shown on the panel.
 13. **Search** for a sound you know is in one of your backups. When you install a newer build over this one, check that every backup is still listed.
 14. Open **Pads** on a project in the device browser and compare it with the pads on the device. Note which number is which pad.
