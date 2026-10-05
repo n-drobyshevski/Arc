@@ -140,9 +140,9 @@ fun DeviceScreen(
     Box(Modifier.fillMaxSize().background(c.shell), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
             Modifier
+                .windowInsetsPadding(WindowInsets.safeDrawing)
                 .widthIn(max = 560.dp)
-                .fillMaxWidth()
-                .windowInsetsPadding(WindowInsets.safeDrawing),
+                .fillMaxWidth(),
             // The left gutter keeps clear of the guide tab on the edge.
             contentPadding = PaddingValues(start = EdgeTabWidth + 8.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
         ) {

@@ -373,7 +373,8 @@ class MainActivity : ComponentActivity() {
                     try {
                         kotlinx.coroutines.awaitCancellation()
                     } finally {
-                        controller.pauseMirror()
+                        // A recreation (dark mode, language) keeps the mirror; the new activity takes it over.
+                        if (!isChangingConfigurations) controller.pauseMirror()
                     }
                 }
             }
@@ -387,7 +388,8 @@ class MainActivity : ComponentActivity() {
                     try {
                         kotlinx.coroutines.awaitCancellation()
                     } finally {
-                        controller.closeLiveAudio()
+                        // Nor does it cut the notes still sounding.
+                        if (!isChangingConfigurations) controller.closeLiveAudio()
                     }
                 }
             }

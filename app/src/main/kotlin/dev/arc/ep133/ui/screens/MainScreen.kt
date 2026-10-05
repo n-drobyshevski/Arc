@@ -80,10 +80,10 @@ fun MainScreen(
     Box(Modifier.fillMaxSize().background(c.shell), contentAlignment = Alignment.TopCenter) {
         Column(
             Modifier
+                .windowInsetsPadding(WindowInsets.safeDrawing)
                 .widthIn(max = 560.dp)
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .windowInsetsPadding(WindowInsets.safeDrawing)
                 // The left gutter keeps clear of the guide tab on the edge.
                 .padding(start = EdgeTabWidth + 8.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),

@@ -9,8 +9,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -90,6 +92,8 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
     val measurer = rememberTextMeasurer()
     val tagStyle = ArcType.capsKeySmall
     val hintStyle = ArcType.caps.copy(color = c.graphite)
+    // The edges of the safe area: on its side, a phone's navigation bar or cutout comes first.
+    val safe = WindowInsets.safeDrawing
     AnimatedVisibility(visible, enter = fadeIn(), exit = fadeOut()) {
         Canvas(
             Modifier
@@ -120,10 +124,12 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
             // gets the PO tutorial's side tag: a vertical tab on that edge, its word
             // turned, with a hooked arrow above pointing at the edge.
             val edgeSlack = 2.dp.toPx()
+            val safeLeft = safe.getLeft(this, layoutDirection).toFloat()
+            val safeRight = size.width - safe.getRight(this, layoutDirection)
             fun edge(m: Mark): Int = when {
                 m.bounds.width > 48.dp.toPx() || m.bounds.height < m.bounds.width * 2 -> 0
-                m.bounds.left <= edgeSlack -> -1
-                m.bounds.right >= size.width - edgeSlack -> 1
+                m.bounds.left <= safeLeft + edgeSlack -> -1
+                m.bounds.right >= safeRight - edgeSlack -> 1
                 else -> 0
             }
             class Side(val m: Mark, val text: androidx.compose.ui.text.TextLayoutResult, val rect: Rect, val side: Int)
@@ -135,7 +141,7 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
                 val w = text.size.height + 2 * padY
                 val h = text.size.width + 2 * padX
                 val top = (m.bounds.center.y - h / 2).coerceIn(margin + 40.dp.toPx(), size.height - margin - h)
-                val left = if (side < 0) 0f else size.width - w
+                val left = if (side < 0) safeLeft else safeRight - w
                 val rect = Rect(Offset(left, top), Size(w, h))
                 sides += Side(m, text, rect, side)
                 // Room for the hook above it too, so other tags keep clear.
@@ -221,7 +227,7 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
                 // The hook above: up from the tab's inner side, then across to an arrowhead at the edge.
                 val stroke = 3.dp.toPx()
                 val inner = if (sd.side < 0) r.right - 6.dp.toPx() else r.left + 6.dp.toPx()
-                val outer = if (sd.side < 0) 6.dp.toPx() else size.width - 6.dp.toPx()
+                val outer = if (sd.side < 0) safeLeft + 6.dp.toPx() else safeRight - 6.dp.toPx()
                 val bottom = r.top - 8.dp.toPx()
                 val bend = bottom - 18.dp.toPx()
                 val turn = 6.dp.toPx()
@@ -248,8 +254,25 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
                 )
             }
             val hint = measurer.measure(CoachText.CLOSE_HINT.uppercase(), hintStyle)
-            // Below the middle, clear of a tag in the middle of the pad grid.
-            drawText(hint, topLeft = Offset((size.width - hint.size.width) / 2, size.height * 0.72f))
+            // Below the middle, clear of a tag in the middle of the pad grid. Where a tag is there
+            // anyway (a short window), in the middle of the tallest gap between the tags instead.
+            val hintLeft = (size.width - hint.size.width) / 2
+            var hintTop = size.height * 0.72f
+            val tags = placed.map { it.rect.inflate(clearance) }
+            if (tags.any { it.overlaps(Rect(Offset(hintLeft, hintTop), Size(hint.size.width.toFloat(), hint.size.height.toFloat()))) }) {
+                val top = safe.getTop(this) + margin
+                val bottom = size.height - safe.getBottom(this) - margin
+                var from = top
+                var best = top to top
+                for (r in tags.filter { it.left < hintLeft + hint.size.width && it.right > hintLeft }.sortedBy { it.top }) {
+                    val to = r.top.coerceAtMost(bottom)
+                    if (to - from > best.second - best.first) best = from to to
+                    from = maxOf(from, r.bottom)
+                }
+                if (bottom - from > best.second - best.first) best = from to bottom
+                if (best.second - best.first >= hint.size.height) hintTop = (best.first + best.second - hint.size.height) / 2
+            }
+            drawText(hint, topLeft = Offset(hintLeft, hintTop))
         }
     }
 }

@@ -90,9 +90,9 @@ fun GuideScreen(
     Box(Modifier.fillMaxSize().background(c.shell), contentAlignment = Alignment.TopCenter) {
         Column(
             Modifier
+                .windowInsetsPadding(WindowInsets.safeDrawing)
                 .widthIn(max = 560.dp)
-                .fillMaxWidth()
-                .windowInsetsPadding(WindowInsets.safeDrawing),
+                .fillMaxWidth(),
         ) {
             // Header: the title centred, the close key on the right.
             Box(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp), contentAlignment = Alignment.Center) {

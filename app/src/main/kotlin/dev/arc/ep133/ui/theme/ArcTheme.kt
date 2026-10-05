@@ -195,7 +195,9 @@ fun ArcTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> U
         CompositionLocalProvider(
             LocalArcColors provides c,
             LocalTextSelectionColors provides TextSelectionColors(handleColor = c.signal, backgroundColor = c.signal.copy(alpha = 0.3f)),
-            content = content,
-        )
+        ) {
+            // Here, so the app and every screenshot get the window's size.
+            dev.arc.ep133.ui.components.ProvideArcWindow(content)
+        }
     }
 }
