@@ -118,4 +118,9 @@ export class PianoFingers {
   has(id: number): boolean {
     return this.fingers.has(id)
   }
+
+  /** The notes some finger is on. */
+  get held(): ReadonlySet<number> {
+    return this.touches.held
+  }
 }

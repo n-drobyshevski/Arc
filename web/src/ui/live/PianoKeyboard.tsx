@@ -8,8 +8,8 @@
 //
 // The keys are caps, as every key in the app (theme/cap.css): each a flat
 // face over a flat edge offset down and to the right, sitting in the
-// device's grey body with a gap between white keys; a key sounding here is
-// down on its edge.
+// device's grey body with a gap between white keys; a key under a finger, or
+// sounding here, is down on its edge.
 //
 // Every finger is followed across the keys: sliding onto the next key lets go
 // of one note and plays the next (a glissando), several fingers make a chord,
@@ -63,15 +63,21 @@ export function PianoKeyboard(props: {
   const fingers = useMemo(() => new PianoFingers(), [])
   const act = useRef(actions)
   act.current = actions
-  const play = (events: readonly NoteEvent[]): void => {
+  const sound = (events: readonly NoteEvent[]): void => {
     for (const e of events) {
       if (e.kind === 'press') act.current.onNote?.(e.note, true)
       else act.current.onNoteUp?.(e.note)
     }
   }
+  // The keys under a finger, down on their edge whether or not they sound (the pads' data-down).
+  const [held, setHeld] = useState<ReadonlySet<number>>(() => fingers.held)
+  const play = (events: readonly NoteEvent[]): void => {
+    sound(events)
+    if (events.length > 0) setHeld(fingers.held)
+  }
   useEffect(() => fingers.relayout(), [range.first, range.last])
   // Leaving the keys (the screen goes, KEYS goes off, the window turns upright) lets go of every note.
-  useEffect(() => () => play(fingers.releaseAll()), [fingers])
+  useEffect(() => () => sound(fingers.releaseAll()), [fingers])
 
   // The keys in px now, and a pointer's place among them (inside the body around them).
   const at = (e: TargetedPointerEvent<HTMLDivElement>): { x: number; y: number; keys: PianoKey[] } | null => {
@@ -170,6 +176,7 @@ export function PianoKeyboard(props: {
               type="button"
               class={cls}
               data-note={k.note}
+              data-down={held.has(k.note) ? '' : undefined}
               tabIndex={k.note === tabNote ? 0 : -1}
               aria-label={MirrorText.pianoKey(k.note, keys.names, mark)}
               aria-description={MirrorText.PLAY}

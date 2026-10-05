@@ -132,7 +132,7 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
     await expect(page.locator('[data-pad].is-playing')).toHaveCount(0)
   })
 
-  await test.step('7c. sideways, KEYS is a piano: a held key sounds, a slide plays the next, a device note lights its own key', async () => {
+  await test.step('7c. sideways, KEYS is a piano: a held key sounds, a slide plays the next, fingers push keys down, a device note lights its own key', async () => {
     const upright = page.viewportSize()
     await page.setViewportSize({ width: 867, height: 388 })
     // The pad just played (A ".", the kick) is the sound KEYS plays.
@@ -165,6 +165,18 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
     await expect.poll(played, { timeout: 5_000 }).toContain('64')
     await page.mouse.up()
     await expect(page.locator('.piano__key.is-playing')).toHaveCount(0)
+    // Fingers: each key under one is down on its edge, and a slide takes the press along.
+    const cdp = await page.context().newCDPSession(page)
+    const down = (): Promise<string[]> => piano.locator('[data-down]').evaluateAll((els) => els.map((el) => el.getAttribute('data-note') ?? '').sort())
+    const finger = (id: number, whites: number): { id: number; x: number; y: number } => ({ id, x: box.x + white * whites, y })
+    // FA4 (65) and LA4 (69), then the first finger slides onto SOL4 (67).
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [finger(1, 10.5), finger(2, 12.5)] })
+    await expect.poll(down).toEqual(['65', '69'])
+    await expect.poll(() => piano.locator('[data-note="69"]').evaluate((el) => getComputedStyle(el).transform)).toBe('matrix(1, 0, 0, 1, 2, 3)')
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [finger(1, 11.5), finger(2, 12.5)] })
+    await expect.poll(down).toEqual(['67', '69'])
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+    await expect.poll(down).toEqual([])
     // The device's DO4 lights DO4 itself (not a key with its name, as the grid does).
     const glowOf = (note: number): Promise<number> =>
       piano.locator(`[data-note="${note}"]`).evaluate((el) => Number((el as HTMLElement).style.getPropertyValue('--glow')))

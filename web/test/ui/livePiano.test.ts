@@ -97,8 +97,11 @@ describe('the fingers on the piano', () => {
       Press(52),
       Press(55),
     ])
+    expect([...f.held]).toEqual([48, 52, 55])
     expect(f.up(2)).toEqual([Release(52)])
+    expect([...f.held]).toEqual([48, 55])
     expect(f.releaseAll()).toEqual([Release(48), Release(55)])
+    expect(f.held.size).toBe(0)
   })
 
   it('after − or + a resting finger keeps its note until it moves on', () => {
@@ -108,6 +111,8 @@ describe('the fingers on the piano', () => {
     const up = Piano.layout(Piano.range(5, 15), 15 * white, h)
     f.relayout()
     expect(f.move(1, white * 0.5 + 2, low, up)).toEqual([])
+    expect([...f.held]).toEqual([48])
     expect(f.move(1, white * 0.5 + 20, low, up)).toEqual([Release(48), Press(60)])
+    expect([...f.held]).toEqual([60])
   })
 })
