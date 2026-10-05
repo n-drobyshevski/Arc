@@ -383,7 +383,8 @@ fun WordButton(
     description: String? = null,
 ) {
     val c = LocalArcColors.current
-    val ink = if (dim) c.graphite.copy(alpha = 0.45f) else c.navy
+    // Quiet: caption grey, so the pads stay the loudest thing on the page.
+    val ink = if (dim) c.graphite.copy(alpha = 0.45f) else c.graphite
     Row(
         modifier
             .clip(RoundedCornerShape(6.dp))
@@ -392,9 +393,9 @@ fun WordButton(
             .heightIn(min = 44.dp)
             .padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        if (mark) Icon(ArcIcon.SWAP, ink, size = 14.dp)
+        if (mark) Icon(ArcIcon.SWAP, ink, size = 12.dp)
         Text(label.uppercase(), style = ArcType.word, color = ink, maxLines = 1)
     }
 }
