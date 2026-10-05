@@ -92,15 +92,16 @@ import kotlinx.coroutines.delay
 import kotlin.math.floor
 import kotlin.math.max
 
-enum class KeyStyle { Normal, Signal, Quiet }
+enum class KeyStyle { Normal, Signal, Quiet, Navy }
 
 enum class KeySize { Normal, Small, Wide }
 
 private val KeyEasing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
 
 /**
- * A physical key: pale (or orange) top with a 3dp bottom edge that the key
- * travels down onto while pressed (`.key` in styles.css).
+ * A physical key: pale (or orange) top with a bottom edge that the key
+ * travels down onto while pressed (`.key` in styles.css). Flatter than the
+ * web version's, with an uppercase label, after the pocket operator app.
  */
 @Composable
 fun ArcKey(
@@ -124,24 +125,25 @@ fun ArcKey(
         KeyStyle.Normal -> Triple(c.key, c.ink, c.keyEdge)
         KeyStyle.Signal -> Triple(c.signal, c.onSignal, c.signalEdge)
         KeyStyle.Quiet -> Triple(Color.Transparent, c.graphite, Color.Transparent)
+        KeyStyle.Navy -> Triple(c.navy, c.onNavy, c.navy.copy(alpha = 0.55f))
     }
     val (minH, padV, padH, ts) = when (size) {
-        KeySize.Normal -> KeyDims(48.dp, 15.dp, 18.dp, ArcType.key)
-        KeySize.Small -> KeyDims(40.dp, 10.dp, 14.dp, ArcType.keySmall)
-        KeySize.Wide -> KeyDims(60.dp, 15.dp, 18.dp, ArcType.keyWide)
+        KeySize.Normal -> KeyDims(48.dp, 15.dp, 18.dp, ArcType.capsKey)
+        KeySize.Small -> KeyDims(40.dp, 10.dp, 14.dp, ArcType.capsKeySmall)
+        KeySize.Wide -> KeyDims(60.dp, 15.dp, 18.dp, ArcType.capsKeyWide)
     }
-    val shape = RoundedCornerShape(12.dp)
+    val shape = RoundedCornerShape(KeyRadius)
     val alpha = if (enabled) 1f else 0.45f
     Box(
         modifier = modifier
-            .graphicsLayer { translationY = press * 3.dp.toPx() }
+            .graphicsLayer { translationY = press * KeyTravel.toPx() }
             .drawBehind {
                 // box-shadow: 0 3px 0 edge. Only the strip below the face is drawn,
                 // outside the faded layer, so a disabled key keeps its (faded) edge.
                 if (style != KeyStyle.Quiet) {
-                    val edgePx = (1f - press) * 3.dp.toPx()
+                    val edgePx = (1f - press) * KeyTravel.toPx()
                     if (edgePx > 0f) {
-                        val r = CornerRadius(12.dp.toPx())
+                        val r = CornerRadius(KeyRadius.toPx())
                         val face = Path().apply { addRoundRect(RoundRect(0f, 0f, this@drawBehind.size.width, this@drawBehind.size.height, r)) }
                         val below = Path().apply { addRoundRect(RoundRect(0f, edgePx, this@drawBehind.size.width, this@drawBehind.size.height + edgePx, r)) }
                         drawPath(Path().apply { op(below, face, PathOperation.Difference) }, edge.copy(alpha = edge.alpha * alpha))
@@ -157,9 +159,12 @@ fun ArcKey(
             .padding(vertical = padV, horizontal = padH),
         contentAlignment = Alignment.Center,
     ) {
-        Text(text, style = ts, color = textColor ?: fg, maxLines = 2, textAlign = TextAlign.Center)
+        Text(text.uppercase(), style = ts, color = textColor ?: fg, maxLines = 2, textAlign = TextAlign.Center)
     }
 }
+
+private val KeyRadius = 8.dp
+private val KeyTravel = 2.dp
 
 private data class KeyDims(val minH: Dp, val padV: Dp, val padH: Dp, val style: TextStyle)
 
@@ -198,7 +203,7 @@ fun DisplayPanel(modifier: Modifier = Modifier, content: @Composable ColumnScope
         modifier = modifier
             .fillMaxWidth()
             .drawBehind {
-                val r = CornerRadius(18.dp.toPx())
+                val r = CornerRadius(PanelRadius.toPx())
                 // 0 1px 0 rgba(255,255,255,.5) below the panel
                 drawRoundRect(Color.White.copy(alpha = 0.5f), topLeft = Offset(0f, 1.dp.toPx()), size = size, cornerRadius = r)
                 drawRoundRect(c.display, size = size, cornerRadius = r)
@@ -206,7 +211,7 @@ fun DisplayPanel(modifier: Modifier = Modifier, content: @Composable ColumnScope
             .drawWithContent {
                 drawContent()
                 // inset 0 2px 0 rgba(0,0,0,.35): a band along the top inner edge
-                val r = CornerRadius(18.dp.toPx())
+                val r = CornerRadius(PanelRadius.toPx())
                 val outer = Path().apply { addRoundRect(androidx.compose.ui.geometry.RoundRect(0f, 0f, size.width, size.height, r)) }
                 val inner = Path().apply { addRoundRect(androidx.compose.ui.geometry.RoundRect(0f, 2.dp.toPx(), size.width, size.height + 2.dp.toPx(), r)) }
                 val band = Path().apply { op(outer, inner, PathOperation.Difference) }
@@ -217,6 +222,59 @@ fun DisplayPanel(modifier: Modifier = Modifier, content: @Composable ColumnScope
         verticalArrangement = Arrangement.spacedBy(16.dp),
         content = content,
     )
+}
+
+private val PanelRadius = 22.dp
+
+/** A small centred uppercase label above a panel ("VIDEO", "KEYPAD" in the pocket operator app). */
+@Composable
+fun Caption(text: String, modifier: Modifier = Modifier, color: Color? = null, align: TextAlign = TextAlign.Center) {
+    val c = LocalArcColors.current
+    Text(
+        text.uppercase(),
+        style = ArcType.caps,
+        color = color ?: c.graphite,
+        textAlign = align,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier.fillMaxWidth(),
+    )
+}
+
+/**
+ * A rounded pale plate whose rows are split by thin lines, like the pocket
+ * operator app's pad grid. Put [PlateLine] between rows.
+ */
+@Composable
+fun GridPlate(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    val c = LocalArcColors.current
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(PlateRadius))
+            .background(c.plate),
+        content = content,
+    )
+}
+
+/** The 1dp line between two rows of a [GridPlate]. */
+@Composable
+fun PlateLine() {
+    val c = LocalArcColors.current
+    Box(Modifier.fillMaxWidth().height(1.dp).background(c.line))
+}
+
+val PlateRadius = 18.dp
+
+/** Diagonal hatching in [color], as on the pocket operator app's empty side panels. */
+fun Modifier.hatch(color: Color, spacing: Dp = 9.dp, width: Dp = 1.dp): Modifier = drawBehind {
+    val step = spacing.toPx()
+    val stroke = width.toPx()
+    var x = -size.height
+    while (x < size.width) {
+        drawLine(color, Offset(x, size.height), Offset(x + size.height, 0f), strokeWidth = stroke)
+        x += step
+    }
 }
 
 /**
@@ -303,7 +361,7 @@ fun ArcSheet(visible: Boolean, onDismiss: (() -> Unit)?, grip: Boolean = true, c
             exit = ExitTransition.None,
         ) {
             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
-                val shape = if (wide) RoundedCornerShape(24.dp) else RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+                val shape = if (wide) RoundedCornerShape(22.dp) else RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)
                 Column(
                     Modifier
                         .widthIn(max = 560.dp)
@@ -336,7 +394,15 @@ fun ArcSheet(visible: Boolean, onDismiss: (() -> Unit)?, grip: Boolean = true, c
 
 /** A toast at the bottom of the screen; errors get an orange left border and stay longer. */
 @Composable
-fun ArcToast(id: Long?, text: String, error: Boolean, onTimeout: (Long) -> Unit, modifier: Modifier = Modifier) {
+fun ArcToast(
+    id: Long?,
+    text: String,
+    error: Boolean,
+    onTimeout: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+    /** Room left at the bottom, above the tab bar. */
+    bottomInset: Dp = 0.dp,
+) {
     val c = LocalArcColors.current
     var shown by remember { mutableStateOf<Triple<Long, String, Boolean>?>(null) }
     LaunchedEffect(id) {
@@ -351,6 +417,7 @@ fun ArcToast(id: Long?, text: String, error: Boolean, onTimeout: (Long) -> Unit,
         Row(
             Modifier
                 .windowInsetsPadding(WindowInsets.safeDrawing)
+                .padding(bottom = bottomInset)
                 .padding(16.dp)
                 .widthIn(max = 528.dp)
                 .fillMaxWidth()
@@ -390,7 +457,7 @@ fun ArcField(
     val source = remember { MutableInteractionSource() }
     val focused by source.collectIsFocusedAsState()
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(label, style = ArcType.fieldLabel, color = c.graphite)
+        Text(label.uppercase(), style = ArcType.caps, color = c.graphite)
         val style = (if (singleLine) ArcType.fieldInput else ArcType.notesInput).copy(color = c.ink)
         BasicTextField(
             value = value,
@@ -419,8 +486,9 @@ fun ArcField(
                 .clip(RoundedCornerShape(10.dp))
                 .background(background ?: c.key)
                 .drawBehind {
-                    // inset 0 2px 0 key-edge at 60%
-                    drawRect(c.keyEdge.copy(alpha = 0.6f), size = androidx.compose.ui.geometry.Size(size.width, 2.dp.toPx()))
+                    // A thin rule along the bottom, in place of the web version's inset shadow.
+                    val h = 1.dp.toPx()
+                    drawRect(c.line.copy(alpha = 0.5f), topLeft = Offset(0f, size.height - h), size = androidx.compose.ui.geometry.Size(size.width, h))
                 },
             decorationBox = { inner ->
                 Box(Modifier.padding(vertical = 12.dp, horizontal = 14.dp)) {
@@ -477,7 +545,7 @@ fun ChoiceRow(
     }
 }
 
-/** The dashed "No backups yet." box. */
+/** The "No backups yet." box: a dashed outline with a hatched strip, after the pocket operator app. */
 @Composable
 fun DashedBox(content: @Composable ColumnScope.() -> Unit) {
     val c = LocalArcColors.current

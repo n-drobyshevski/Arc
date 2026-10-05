@@ -7,6 +7,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
@@ -54,6 +57,9 @@ import dev.arc.ep133.features.PadOrder
 import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.ui.components.ArcKey
+import dev.arc.ep133.ui.components.Caption
+import dev.arc.ep133.ui.components.GridPlate
+import dev.arc.ep133.ui.components.PlateLine
 import dev.arc.ep133.ui.components.CloseKey
 import dev.arc.ep133.ui.components.DisplayPanel
 import dev.arc.ep133.ui.components.KeySize
@@ -62,13 +68,12 @@ import dev.arc.ep133.ui.theme.ArcType
 import dev.arc.ep133.ui.theme.LocalArcColors
 
 /*
- * The device's own colours for the pads, as in the guide's key caps; a lit
- * pad turns the signal orange, brighter with velocity, and fades on release.
+ * Pads are drawn as the pocket operator app draws its pad grid: one pale
+ * plate split by thin lines. A lit pad turns the signal orange, brighter with
+ * velocity, and fades on release.
  */
-private val PadFace = Color(0xFF4A4B4D)
-private val PadEdge = Color(0xFF1E1F21)
-private val PadInk = Color(0xFFEDECE8)
-private val PadDim = Color(0xFFA9AAAC)
+private val KeyBlack = Color(0xFF1E1F21)
+private val KeyWhite = Color(0xFFF3F2EE)
 private val FADE_NS = 300_000_000L
 
 /**
@@ -84,12 +89,13 @@ fun MirrorScreen(
     mirror: MirrorUi?,
     nameOf: (PhysicalPad) -> String?,
     onPadOrder: (PadOrder) -> Unit,
-    onBack: () -> Unit,
+    /** Null on the Live tab, which has no close key. */
+    onBack: (() -> Unit)? = null,
     /** A fixed time for screenshots; normally the screen's frame clock drives the fade. */
     fixedNow: Long? = null,
 ) {
     val c = LocalArcColors.current
-    BackHandler(onBack = onBack)
+    if (onBack != null) BackHandler(onBack = onBack)
     val st = mirror?.state ?: MirrorState()
     // The fade runs on the frame clock while a released pad is fading, and stops after.
     val fading = fixedNow == null && st.pads.values.any { it.offAt != null }
@@ -105,25 +111,20 @@ fun MirrorScreen(
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
                 .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+                .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Box(Modifier.fillMaxWidth()) {
-                Text(
-                    MirrorText.TITLE.uppercase(),
-                    style = ArcType.heading.copy(fontWeight = FontWeight.Medium, letterSpacing = 0.08.em),
-                    color = c.graphite,
-                    modifier = Modifier.align(Alignment.Center),
-                )
-                CloseKey(onBack, dev.arc.ep133.text.GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Caption(MirrorText.TITLE)
+                if (onBack != null) CloseKey(onBack, dev.arc.ep133.text.GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
             }
             Display(st, mirror)
             BoxWithConstraints(Modifier.fillMaxWidth()) {
                 // Four groups in a row when there is room, two by two on a phone.
                 val perRow = if (maxWidth >= 640.dp) 4 else 2
-                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     for (row in (0..3).chunked(perRow)) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                             for (g in row) Group(g, st, nameOf, now, Modifier.weight(1f))
                         }
                     }
@@ -171,25 +172,18 @@ private fun Group(group: Int, st: MirrorState, nameOf: (PhysicalPad) -> String?,
     val c = LocalArcColors.current
     val lit = st.pads.filterKeys { it.group == group }
     val groupGlow = lit.values.maxOfOrNull { glow(it, now) } ?: 0f
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            // The group key, lit while one of its pads sounds.
-            Box(
-                Modifier
-                    .size(34.dp, 26.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(lerp(PadFace, c.signal, groupGlow)),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(('A' + group).toString(), style = ArcType.bold.copy(fontFamily = FontFamily.Monospace), color = PadInk)
-            }
-            Text(MirrorText.GROUP + " " + ('A' + group), style = ArcType.small, color = c.graphite)
-        }
-        for (rowOffsets in PadNotes.ROWS) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (o in rowOffsets) {
-                    val pad = PhysicalPad(group, o)
-                    Pad(pad, lit[pad], nameOf(pad), now, Modifier.weight(1f))
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // The caption turns orange while one of the group's pads sounds.
+        Caption(MirrorText.GROUP + " " + ('A' + group), color = lerp(c.graphite, c.signal, groupGlow))
+        GridPlate {
+            PadNotes.ROWS.forEachIndexed { r, rowOffsets ->
+                if (r > 0) PlateLine()
+                Row(Modifier.height(IntrinsicSize.Min)) {
+                    rowOffsets.forEachIndexed { i, o ->
+                        if (i > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(c.line))
+                        val pad = PhysicalPad(group, o)
+                        Pad(pad, lit[pad], nameOf(pad), now, Modifier.weight(1f))
+                    }
                 }
             }
         }
@@ -208,35 +202,31 @@ private fun glow(l: PadLight, now: Long): Float {
 private fun Pad(pad: PhysicalPad, light: PadLight?, name: String?, now: Long, modifier: Modifier) {
     val c = LocalArcColors.current
     val g = light?.let { glow(it, now) } ?: 0f
-    val face = lerp(PadFace, c.signal, g)
+    val ink = if (g > 0.3f) c.onSignal else c.ink
     Box(
         modifier
             .aspectRatio(1f)
+            .background(lerp(c.plate, c.signal, g))
             .semantics { contentDescription = "${pad.groupLetter} ${pad.label}" + (name?.let { ", $it" } ?: "") }
-            .drawBehind {
-                val r = CornerRadius(7.dp.toPx())
-                val edge = 3.dp.toPx()
-                drawRoundRect(PadEdge, topLeft = Offset(1.dp.toPx(), edge), size = Size(size.width - 1.dp.toPx(), size.height - edge), cornerRadius = r)
-                drawRoundRect(face, size = Size(size.width - 1.dp.toPx(), size.height - edge), cornerRadius = r)
-            }
-            .padding(start = 6.dp, top = 4.dp, end = 6.dp, bottom = 7.dp),
+            .padding(start = 6.dp, top = 5.dp, end = 7.dp, bottom = 5.dp),
     ) {
-        Text(
-            pad.label,
-            style = ArcType.tiny.copy(fontFamily = FontFamily.Monospace, fontSize = if (pad.label.length > 1) 9.sp else 12.sp),
-            color = PadInk,
-            modifier = Modifier.align(Alignment.TopStart),
-        )
         if (name != null) {
             Text(
                 name,
                 style = ArcType.tiny.copy(fontSize = 10.sp, lineHeight = 1.1.em),
-                color = if (g > 0.3f) c.onSignal else PadDim,
+                color = if (g > 0.3f) c.onSignal else c.graphite,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.align(Alignment.BottomStart),
+                modifier = Modifier.align(Alignment.TopStart),
             )
         }
+        // The key's own label in the corner, like the pocket operator app's pad numbers.
+        Text(
+            pad.label,
+            style = ArcType.semi.copy(fontSize = if (pad.label.length > 1) 10.sp else 15.sp, lineHeight = 1.em, letterSpacing = 0.04.em),
+            color = ink,
+            modifier = Modifier.align(Alignment.BottomEnd),
+        )
     }
 }
 
@@ -264,7 +254,7 @@ private fun KeysStrip(st: MirrorState) {
             whites.forEachIndexed { i, n ->
                 val on = st.keysHeld.containsKey(n)
                 drawRoundRect(
-                    if (on) c.signal else Color(0xFFF3F2EE),
+                    if (on) c.signal else KeyWhite,
                     topLeft = Offset(i * w + 1, 0f),
                     size = Size(w - 2, size.height),
                     cornerRadius = CornerRadius(3.dp.toPx()),
@@ -275,7 +265,7 @@ private fun KeysStrip(st: MirrorState) {
                 val leftWhites = whites.count { it < n }
                 val on = st.keysHeld.containsKey(n)
                 drawRoundRect(
-                    if (on) c.signal else PadEdge,
+                    if (on) c.signal else KeyBlack,
                     topLeft = Offset(leftWhites * w - w * 0.3f, 0f),
                     size = Size(w * 0.6f, size.height * 0.6f),
                     cornerRadius = CornerRadius(2.dp.toPx()),
@@ -295,7 +285,7 @@ private fun Notes(st: MirrorState, mirror: MirrorUi?, onPadOrder: (PadOrder) -> 
                 Text(MirrorText.NO_PUSHES, style = ArcType.small, color = c.graphite)
             }
         }
-        Text(MirrorText.PAD_ORDER, style = ArcType.fieldLabel, color = c.ink, modifier = Modifier.padding(top = 4.dp))
+        Caption(MirrorText.PAD_ORDER, Modifier.padding(top = 8.dp), align = androidx.compose.ui.text.style.TextAlign.Start)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             for ((order, label) in listOf(PadOrder.FROM_TOP to MirrorText.FROM_TOP, PadOrder.FROM_BOTTOM to MirrorText.FROM_BOTTOM)) {
                 ArcKey(
@@ -303,7 +293,7 @@ private fun Notes(st: MirrorState, mirror: MirrorUi?, onPadOrder: (PadOrder) -> 
                     { onPadOrder(order) },
                     Modifier.weight(1f),
                     size = KeySize.Small,
-                    style = if (st.padOrder == order) KeyStyle.Signal else KeyStyle.Normal,
+                    style = if (st.padOrder == order) KeyStyle.Navy else KeyStyle.Normal,
                 )
             }
         }

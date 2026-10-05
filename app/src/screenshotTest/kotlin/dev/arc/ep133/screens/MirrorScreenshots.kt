@@ -16,6 +16,19 @@ import dev.arc.ep133.protocol.Storage
 import dev.arc.ep133.text.BackupDevice
 import dev.arc.ep133.text.BackupRecord
 import dev.arc.ep133.ui.screens.MainScreen
+import dev.arc.ep133.ui.screens.DeviceScreen
+import dev.arc.ep133.ui.screens.PadsSheetContent
+import dev.arc.ep133.ui.components.ArcFrame
+import dev.arc.ep133.ui.components.ArcSheet
+import dev.arc.ep133.ui.components.Tab
+import dev.arc.ep133.ui.components.TabBar
+import dev.arc.ep133.ui.components.TopBar
+import dev.arc.ep133.controller.BrowserUi
+import dev.arc.ep133.features.DeviceContents
+import dev.arc.ep133.features.PadGroup
+import dev.arc.ep133.protocol.ProjectEntry
+import dev.arc.ep133.protocol.SoundEntry
+import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.ui.screens.MirrorScreen
 import dev.arc.ep133.ui.theme.ArcTheme
 
@@ -52,14 +65,24 @@ private val playing = MirrorState(
     padOrder = PadOrder.FROM_TOP,
 )
 
+/** A tab inside the top bar and the tab bar, as the app shows it. */
+@Composable
+private fun Framed(tab: Tab, connected: Boolean = true, dark: Boolean = false, content: @Composable () -> Unit) {
+    ArcTheme(dark = dark) {
+        ArcFrame(
+            top = { TopBar(connected = connected, canConnect = true, canBackup = connected, onBackup = {}, onConnect = {}, onDebug = {}) },
+            bottom = { TabBar(tab) {} },
+        ) { content() }
+    }
+}
+
 @Composable
 private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false) {
-    ArcTheme(dark = dark) {
+    Framed(Tab.LIVE, dark = dark) {
         MirrorScreen(
             mirror = MirrorUi(state, loading = loading),
             nameOf = { if (state.learned.isEmpty()) null else names[it] },
             onPadOrder = {},
-            onBack = {},
             fixedNow = NOW,
         )
     }
@@ -85,40 +108,86 @@ fun LiveFirstOpenPreview() = Live(MirrorState(activeProject = 3, lastHit = Hit(P
 @Composable
 fun LiveTabletPreview() = Live(playing)
 
-@PreviewTest
-@Preview(name = "Main connected", widthDp = 393, heightDp = 852, showBackground = true)
+private val device = BackupDevice("EP-133", "TE032AS001", "", "2.5.1")
+
+private fun backup(id: String, title: String, at: Long, sounds: Int, projects: Int) = BackupRecord(
+    id, title, "", at, "device", null, device, sounds, projects, (1..projects).toList(), (1..sounds).toList(), emptyMap(), 48_000_000L,
+)
+
+private val connectedState = UiState(
+    connected = true,
+    device = DeviceSummary(DeviceInfo("EP-133", "TE032AS001", "2.5.1", "", ""), Storage(64e6, 21e6, 43e6), 212, 6),
+    backups = listOf(
+        backup("1", "Before the gig", 1_791_000_000_000L, 212, 6),
+        backup("2", "Backup Oct 2", 1_790_700_000_000L, 198, 5),
+        backup("3", "Jam with Ana", 1_790_100_000_000L, 187, 4),
+    ),
+    freshId = "1",
+    libraryLoaded = true,
+)
+
 @Composable
-fun MainConnectedPreview() {
-    val device = BackupDevice("EP-133", "TE032AS001", "", "2.5.1")
-    fun backup(id: String, title: String, at: Long, sounds: Int, projects: Int) = BackupRecord(
-        id, title, "", at, "device", null, device, sounds, projects, (1..projects).toList(), (1..sounds).toList(), emptyMap(), 48_000_000L,
-    )
-    ArcTheme(dark = false) {
+private fun Main(state: UiState, dark: Boolean = false) {
+    Framed(Tab.BACKUPS, connected = state.connected, dark = dark) {
         MainScreen(
-            state = UiState(
-                connected = true,
-                device = DeviceSummary(DeviceInfo("EP-133", "TE032AS001", "2.5.1", "", ""), Storage(64e6, 21e6, 43e6), 212, 6),
-                backups = listOf(
-                    backup("1", "Before the gig", 1_791_000_000_000L, 212, 6),
-                    backup("2", "Backup Oct 2", 1_790_700_000_000L, 198, 5),
-                ),
-                libraryLoaded = true,
-            ),
-            fmtDay = { if (it > 1_790_900_000_000L) "Oct 4, 2026" else "Oct 2, 2026" },
-            onConnect = {}, onBackup = {}, onImport = {}, onOpen = {}, onDebug = {},
+            state = state,
+            fmtDay = { if (it > 1_790_900_000_000L) "Oct 4, 2026" else if (it > 1_790_500_000_000L) "Oct 2, 2026" else "Sep 25, 2026" },
+            onBackup = {}, onImport = {}, onOpen = {},
         )
     }
 }
 
 @PreviewTest
+@Preview(name = "Main connected", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun MainConnectedPreview() = Main(connectedState)
+
+@PreviewTest
+@Preview(name = "Main connected dark", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun MainConnectedDarkPreview() = Main(connectedState, dark = true)
+
+@PreviewTest
 @Preview(name = "Main empty after reinstall", widthDp = 393, heightDp = 852, showBackground = true)
 @Composable
-fun MainEmptyPreview() {
-    ArcTheme(dark = false) {
-        MainScreen(
-            state = UiState(libraryLoaded = true),
-            fmtDay = { "" },
-            onConnect = {}, onBackup = {}, onImport = {}, onOpen = {}, onDebug = {},
-        )
+fun MainEmptyPreview() = Main(UiState(libraryLoaded = true))
+
+@PreviewTest
+@Preview(name = "Device tab", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun DeviceTabPreview() {
+    val sounds = listOf("kick", "kick 2", "snare", "hat closed", "hat open", "clap", "rim", "tom low")
+        .mapIndexed { i, n -> SoundEntry(i + 1, n, 120_000L + i * 9_000L) }
+    val state = connectedState.copy(
+        browser = BrowserUi(
+            contents = DeviceContents(
+                Storage(64e6, 21e6, 43e6),
+                sounds,
+                listOf(ProjectEntry(1, 0, "", 180_000L), ProjectEntry(3, 0, "", 420_000L)),
+            ),
+        ),
+    )
+    Framed(Tab.DEVICE) {
+        DeviceScreen(state = state, onRefresh = {}, onSoundDetails = {}, onProjectSounds = {}, onAddSamples = {})
+    }
+}
+
+@PreviewTest
+@Preview(name = "Pads sheet", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun PadsSheetPreview() {
+    val pads = (1..12).associateWith { p -> if (p <= 8) p else if (p == 10) 40 else null }
+    Framed(Tab.BACKUPS) {
+        MainScreen(state = connectedState, fmtDay = { "" }, onBackup = {}, onImport = {}, onOpen = {})
+        ArcSheet(visible = true, onDismiss = {}) {
+            PadsSheetContent(
+                title = FeatureText.padsTitle(3),
+                groups = listOf(PadGroup("A", pads)),
+                nameOf = { slot -> listOf("kick", "kick 2", "snare", "hat closed", "hat open", "clap", "rim", "tom low").getOrNull(slot - 1) },
+                playingSlot = 3,
+                onPad = {},
+                onDone = {},
+            )
+        }
     }
 }

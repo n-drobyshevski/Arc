@@ -1,5 +1,13 @@
 package dev.arc.ep133.ui.screens
 
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.IntrinsicSize
+import dev.arc.ep133.ui.components.hatch
+import dev.arc.ep133.ui.components.PlateLine
+import dev.arc.ep133.ui.components.GridPlate
+import dev.arc.ep133.ui.components.Caption
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -52,11 +60,14 @@ fun ColumnScope.PadsSheetContent(
     Text(FeatureText.PADS_NOTE, style = ArcType.small, color = c.graphite)
     if (groups.isEmpty()) Text(FeatureText.NO_PADS, style = ArcType.body15, color = c.graphite)
     for (g in groups) {
-        Text(FeatureText.group(g.name), style = ArcType.bold, color = c.ink, modifier = Modifier.padding(top = 6.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            for (row in g.pads.entries.toList().chunked(3)) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    for ((pad, slot) in row) {
+        Caption(FeatureText.group(g.name), Modifier.padding(top = 6.dp))
+        // One plate split by thin lines, like the pocket operator app's pad grid.
+        GridPlate {
+            g.pads.entries.toList().chunked(3).forEachIndexed { r, row ->
+                if (r > 0) PlateLine()
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+                    row.forEachIndexed { i, (pad, slot) ->
+                        if (i > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(c.line))
                         val name = slot?.let(nameOf)
                         PadCell(
                             pad = pad,
@@ -69,7 +80,10 @@ fun ColumnScope.PadsSheetContent(
                         )
                     }
                     // Keep cells the same width on a short last row.
-                    repeat(3 - row.size) { Box(Modifier.weight(1f)) }
+                    repeat(3 - row.size) {
+                        Box(Modifier.width(1.dp).fillMaxHeight().background(c.line))
+                        Box(Modifier.weight(1f).fillMaxHeight().hatch(c.keyEdge))
+                    }
                 }
             }
         }
@@ -82,18 +96,14 @@ private fun PadCell(pad: Int, slot: Int?, name: String?, playing: Boolean, onCli
     val c = LocalArcColors.current
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
-    val raised = slot != null && name != null
-    val base = if (raised) c.key else c.shell
+    // A pad with nothing to play is hatched, as the pocket operator app marks unused space.
+    val empty = slot == null || name == null
     Column(
         modifier
-            .drawBehind {
-                if (raised) {
-                    drawRoundRect(c.keyEdge, topLeft = Offset(0f, 3.dp.toPx()), size = size, cornerRadius = CornerRadius(10.dp.toPx()))
-                }
-            }
-            .clip(RoundedCornerShape(10.dp))
-            .background(if (playing) c.signal else base)
-            .background(if (pressed) c.keyEdge.copy(alpha = 0.25f) else Color.Transparent)
+            .fillMaxHeight()
+            .background(if (playing) c.signal else Color.Transparent)
+            .then(if (empty && !playing) Modifier.hatch(c.keyEdge) else Modifier)
+            .background(if (pressed) c.keyEdge.copy(alpha = 0.35f) else Color.Transparent)
             .then(
                 if (onClick != null) {
                     Modifier.clickable(interactionSource = source, indication = null, role = Role.Button, onClick = onClick)

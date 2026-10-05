@@ -4,6 +4,8 @@ A free, open-source backup librarian for the teenage engineering EP-133 K.O. II,
 
 This is a port of the web version in [`reference/`](reference/), which is kept read only as the spec. The two behave the same and their `.pak` files are interchangeable.
 
+The look keeps the web version's device panel, keys and orange signal, and borrows its layout from teenage engineering's pocket operator app. A top bar holds the wordmark, an orange **Back up** block and the connection block (green while connected). Four tabs run along the bottom: **Backups**, **Live**, **Device** and **Guide**. The page is cream with navy ink, labels are uppercase, and pads and lists sit on pale plates split by thin lines. Back on any other tab returns to Backups.
+
 ## What it does
 
 - Back up every sound and project on the device to a `.pak` file stored on your phone
@@ -20,7 +22,7 @@ This is a port of the web version in [`reference/`](reference/), which is kept r
 - Keep running when the phone is locked: transfers run in a foreground service with a progress notification and a Cancel action
 
 These go beyond the web version:
-- **Browse the device:** see every sound slot (name, size, and on tap its channels, sample rate, settings and checksum), every project and which sounds it uses, and the free space. Tap **Browse** next to Connect.
+- **Browse the device:** see every sound slot (name, size, and on tap its channels, sample rate, settings and checksum), every project and which sounds it uses, and the free space. Open the **Device** tab.
 - **Add samples:** pick WAV files on the phone and load them into sample slots. Each file gets the next free slot, which you can change; an occupied slot is replaced. Uploads take exactly the restore path, so they get the same free-space check, resampling above 46875 Hz, checksum verification and Cancel.
 - **Compare with device:** in the restore sheet, see what a restore would change before running it: which sounds differ, are missing or have other settings, which projects differ, and what on the device the restore leaves alone. Nothing is written.
 - **Backup contents:** tap **Contents** in a backup's sheet to list its sounds and projects. No device is needed.
@@ -31,7 +33,7 @@ These go beyond the web version:
 - **Pad layout:** a **Pads** key on a project, in a backup's contents or on the device, shows each group's pads with the sound on each. In a backup, tapping a pad plays its sound. Pads are listed by their number in the project file; how those numbers map to the physical pads isn't known, so the grid doesn't claim to match the device's layout.
 - **Search sounds:** a **Search** key next to **Import** finds sounds by name in every saved backup. Tapping a result opens that backup's contents.
 - **Compare two backups:** **Compare with another backup** in a backup's sheet shows what changed from the older one to the newer one: sounds added, removed or changed (audio, name or settings) and projects added, removed or changed, with the pads that moved. Audio counts as the same when the samples are the same, even in a differently written WAV file.
-- **Live mirror:** a **Live** key (when connected) shows the EP-133 as you play it. The page reads the sound names and the active project's pads once (as the device browser does), then only listens; nothing on the device is changed.
+- **Live mirror:** the **Live** tab shows the EP-133 as you play it. The page reads the sound names and the active project's pads once (as the device browser does), then only listens; nothing on the device is changed.
   - Pads light up in the keypad layout as notes arrive, brighter with velocity, and fade on release. This follows the official MIDI note map: notes 36–83, one octave per group.
   - Play/stop and tempo come from MIDI clock, which the device sends only with clock out switched on (SHIFT + ERASE, then 102 and ENTER).
   - Notes outside the pads, from KEYS mode, show on a keyboard strip with their channel.
@@ -219,23 +221,24 @@ Not verified yet. Nobody has run this on a phone or an EP-133:
 Back up the EP-133 with the official Sample Tool first. Then, with the debug screen at hand (long-press **arc**):
 
 1. Plug in the EP-133 and turn it on. arc should connect by itself, or tap **Connect**. The panel shows the product, OS version, sound and project counts, free space and the meter.
-2. Tap **Back up device**. Lock the phone halfway through: the notification should keep updating and the backup should finish.
+2. Tap **Back up** in the top bar (or **Back up device** under the panel, before the first backup). Lock the phone halfway through: the notification should keep updating and the backup should finish.
 3. Open the backup and check the counts against the device. Share it, and save it with **Save .pak file**.
 4. Restore a single project with its sounds, then the whole backup. Try **Cancel** during a restore.
 5. Unplug the cable during a transfer. You should see an error, and the app should recover after you plug it back in.
 6. Open a `.pak` from the Files app, and import one made by the official Sample Tool.
-7. Tap **Browse**: check the slots, a sound's details and a project's sounds against the device. Add a WAV into a free slot and play it on the device.
+7. Open the **Device** tab: check the slots, a sound's details and a project's sounds against the device. Add a WAV into a free slot and play it on the device.
 8. In the restore sheet, tap **Compare with device** right after a backup: it should report no changes. Change a sound on the device and compare again.
 9. Open a backup's **Contents**. Play a few sounds, save one as WAV and open it in another app. Save a project, import that `.pak`, and restore it.
 10. Under **Add samples**, trim a file to a short part, upload it, and play it on the device. Check the start and the length. If the file has loop points, check them too.
 11. In the device browser, tap **Play** on a sound and compare it with the pad on the device.
-12. Try a few entries of the **Shortcut guide** on the device, and note the OS version shown on the panel.
+12. Try a few entries of the **Guide** tab on the device, and note the OS version shown on the panel.
 13. **Search** for a sound you know is in one of your backups. When you install a newer build over this one, check that every backup is still listed.
 14. Open **Pads** on a project in the device browser and compare it with the pads on the device. Note which number is which pad.
 15. Back up, change a pad's sound on the device, back up again, and **Compare with another backup**: it should show that pad change.
 16. Check that Documents/arc (in the Files app) holds your backups and a `library.json`. Uninstall arc, reinstall it, tap **Restore from Documents/arc**, pick the folder, and check that titles and notes come back.
-17. Open **Live** and press pads in each group: the lit pad should be the one you pressed. After one press, its sample name should appear. Check the names against the device and try **From the bottom** if they look wrong.
+17. Open the **Live** tab and press pads in each group: the lit pad should be the one you pressed. After one press, its sample name should appear. Check the names against the device and try **From the bottom** if they look wrong.
 18. Play a pattern: check whether sequenced pads light up. Switch on clock out (SHIFT + ERASE, 102, ENTER) and check play/stop and the tempo. Try KEYS mode.
+19. Switch between the four tabs with a backup running and with Live open: the progress sheet should stay up, Live should stop listening when you leave it, and Back on any tab but Backups should return to Backups. Try a large system font: the top bar's blocks should wrap, not overlap.
 
 If anything fails, export the SysEx log from the debug screen (**Share log** or **Save log**) and attach it to an issue together with the error text.
 

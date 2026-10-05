@@ -1,5 +1,7 @@
 package dev.arc.ep133.ui.screens
 
+import androidx.compose.ui.text.style.TextAlign
+import dev.arc.ep133.ui.components.Caption
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -74,21 +76,30 @@ fun DeviceScreen(
     onSoundDetails: (Int) -> Unit,
     onProjectSounds: (Int) -> Unit,
     onAddSamples: () -> Unit,
-    onBack: () -> Unit,
+    /** Null on the Device tab, which has no Done key. */
+    onBack: (() -> Unit)? = null,
     playing: String? = null,
     onPlay: (Int) -> Unit = {},
     onStop: () -> Unit = {},
     onPads: (Int) -> Unit = {},
 ) {
     val c = LocalArcColors.current
-    BackHandler(onBack = onBack)
+    if (onBack != null) BackHandler(onBack = onBack)
     val b = state.browser
     val contents = b.contents
     var openSlot by rememberSaveable { mutableStateOf<Int?>(null) }
     var openProject by rememberSaveable { mutableStateOf<Int?>(null) }
-    // Read the contents when the screen opens, and again once a reconnected device is ready.
+    // Read the contents when the screen opens, and again once a reconnected device is ready
+    // (or once a transfer that kept the device busy has finished).
+    // Once per connection, so a read that fails is not retried in a loop (Refresh retries).
     val ready = state.device != null
-    LaunchedEffect(ready) { if (ready && contents == null) onRefresh() }
+    var asked by remember(ready) { mutableStateOf(false) }
+    LaunchedEffect(ready, state.busy) {
+        if (ready && !state.busy && contents == null && !asked) {
+            asked = true
+            onRefresh()
+        }
+    }
 
     Box(Modifier.fillMaxSize().background(c.shell), contentAlignment = Alignment.TopCenter) {
         LazyColumn(
@@ -101,9 +112,9 @@ fun DeviceScreen(
         ) {
             item {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(FeatureText.DEVICE_TITLE, style = ArcType.heading, color = c.ink, modifier = Modifier.weight(1f))
+                    Caption(FeatureText.DEVICE_TITLE, Modifier.weight(1f), align = TextAlign.Start)
                     ArcKey(FeatureText.REFRESH, onRefresh, size = KeySize.Small, enabled = state.connected && !state.busy)
-                    ArcKey(Strings.DONE, onBack, size = KeySize.Small, style = KeyStyle.Quiet)
+                    if (onBack != null) ArcKey(Strings.DONE, onBack, size = KeySize.Small, style = KeyStyle.Quiet)
                 }
             }
             if (!state.connected) {
@@ -169,12 +180,12 @@ fun DeviceScreen(
 internal fun SectionTitle(text: String, count: Int) {
     val c = LocalArcColors.current
     Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.Bottom) {
-        Text(text, style = ArcType.heading, color = c.ink, modifier = Modifier.weight(1f))
-        Text(count.toString(), style = ArcType.small, color = c.graphite)
+        Caption(text, Modifier.weight(1f), align = TextAlign.Start)
+        Text(count.toString(), style = ArcType.caps, color = c.graphite)
     }
 }
 
-/** A pale key-coloured plate with a flat pressed tint, like the backup rows; plain text when [onClick] is null. */
+/** A flat pale plate with a pressed tint, like the backup rows; plain text when [onClick] is null. */
 @Composable
 internal fun Plate(onClick: (() -> Unit)?, enabled: Boolean, content: @Composable ColumnScope.() -> Unit) {
     val c = LocalArcColors.current
@@ -183,12 +194,9 @@ internal fun Plate(onClick: (() -> Unit)?, enabled: Boolean, content: @Composabl
     Column(
         Modifier
             .fillMaxWidth()
-            .drawBehind {
-                drawRoundRect(c.keyEdge, topLeft = Offset(0f, 3.dp.toPx()), size = size, cornerRadius = CornerRadius(12.dp.toPx()))
-            }
             .clip(RoundedCornerShape(12.dp))
-            .background(c.key)
-            .background(if (pressed) c.keyEdge.copy(alpha = 0.25f) else Color.Transparent)
+            .background(c.plate)
+            .background(if (pressed) c.keyEdge.copy(alpha = 0.35f) else Color.Transparent)
             // Not while the device is busy: the read it starts would be skipped.
             .then(
                 if (onClick != null) {

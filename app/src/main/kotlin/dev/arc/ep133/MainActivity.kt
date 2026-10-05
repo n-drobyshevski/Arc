@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -25,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -39,7 +41,12 @@ import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.text.LibraryRules
 import dev.arc.ep133.text.Strings
 import dev.arc.ep133.ui.components.ArcSheet
+import dev.arc.ep133.ui.components.ArcFrame
 import dev.arc.ep133.ui.components.ArcToast
+import dev.arc.ep133.ui.components.Tab
+import dev.arc.ep133.ui.components.TabBar
+import dev.arc.ep133.ui.components.TabBarHeight
+import dev.arc.ep133.ui.components.TopBar
 import dev.arc.ep133.ui.screens.ContentsScreen
 import dev.arc.ep133.ui.screens.CompareScreen
 import dev.arc.ep133.ui.screens.ComparePickerContent
@@ -286,9 +293,8 @@ class MainActivity : ComponentActivity() {
     private fun Root() {
         val state by controller.state.collectAsStateWithLifecycle()
         var debug by rememberSaveable { mutableStateOf(false) }
-        var browse by rememberSaveable { mutableStateOf(false) }
-        var guide by rememberSaveable { mutableStateOf(false) }
-        var live by rememberSaveable { mutableStateOf(false) }
+        // The section under the top bar; the other screens stack over it without the bars.
+        var tab by rememberSaveable { mutableStateOf(Tab.BACKUPS) }
         var search by rememberSaveable { mutableStateOf(false) }
         // Comparing two backups: the backup whose "compare" picker is open, then "<idA>|<idB>".
         var comparePickFor by rememberSaveable { mutableStateOf<String?>(null) }
@@ -303,6 +309,23 @@ class MainActivity : ComponentActivity() {
         var confirmDelete by rememberSaveable { mutableStateOf(false) }
         var titleField by rememberSaveable { mutableStateOf("") }
         var notesField by rememberSaveable { mutableStateOf("") }
+        // The mirror listens only while its tab is in front (not under the debug screen).
+        val live = tab == Tab.LIVE && !debug
+
+        fun selectTab(t: Tab) {
+            if (t == tab) return
+            // Leaving a tab does what its Done key used to.
+            when (tab) {
+                Tab.LIVE -> controller.closeMirror()
+                Tab.DEVICE -> {
+                    padsFor = null
+                    controller.stopPlayback()
+                }
+                else -> {}
+            }
+            tab = t
+            if (t == Tab.DEVICE) controller.refreshBrowser()
+        }
 
         // Keep the screen on while the progress sheet or the live mirror is open.
         val view = LocalView.current
@@ -351,25 +374,10 @@ class MainActivity : ComponentActivity() {
             if (compareA != null && compareB != null) controller.compareBackups(compareA, compareB)
         }
 
+        val onTabs = !debug && (compareA == null || compareB == null) && contentsBackup == null && !search
         Box(Modifier.fillMaxSize()) {
             if (debug) {
                 DebugScreen(controller.trafficLog, ::shareLog, ::saveLog, ::copyLog) { debug = false }
-            } else if (live) {
-                MirrorScreen(
-                    mirror = state.mirror ?: if (!ready) {
-                        dev.arc.ep133.controller.MirrorUi(loading = false, error = dev.arc.ep133.text.MirrorText.NOT_CONNECTED)
-                    } else {
-                        null
-                    },
-                    nameOf = controller::mirrorName,
-                    onPadOrder = controller::setPadOrder,
-                    onBack = {
-                        live = false
-                        controller.closeMirror()
-                    },
-                )
-            } else if (guide) {
-                GuideScreen { guide = false }
             } else if (compareA != null && compareB != null) {
                 val (old, new) = if (compareB.createdAt < compareA.createdAt) compareB to compareA else compareA to compareB
                 CompareScreen(
@@ -429,204 +437,218 @@ class MainActivity : ComponentActivity() {
                     onOpen = { b -> contentsId = b.id },
                     onBack = { search = false },
                 )
-            } else if (browse) {
-                DeviceScreen(
-                    state = state,
-                    onRefresh = { controller.refreshBrowser() },
-                    onSoundDetails = { controller.loadSoundDetails(it) },
-                    onProjectSounds = { controller.loadProjectSounds(it) },
-                    onAddSamples = { samplesLauncher.launch(arrayOf("audio/*", "application/octet-stream")) },
-                    onBack = {
-                        browse = false
-                        padsFor = null
-                        controller.stopPlayback()
-                    },
-                    onPads = { n -> padsFor = "device:$n" },
-                    playing = playing,
-                    onPlay = { controller.playDeviceSound(it) },
-                    onStop = controller::stopPlayback,
-                )
-                val draft = state.browser.draft
-                val lastDraft = remember { mutableStateOf(draft) }.apply { if (draft != null) value = draft }.value
-                // A new draft never opens straight into the trim view of an old one.
-                LaunchedEffect(draft == null) {
-                    if (draft == null) {
-                        trimIndex = null
-                        if (controller.player.playing.value == TRIM_PLAY_KEY) controller.stopPlayback()
-                    }
-                }
-                val devicePadsProject = padsFor?.takeIf { it.startsWith("device:") }?.removePrefix("device:")?.toIntOrNull()
-                val deviceGroups = devicePadsProject?.let { state.browser.projectPads[it] }
-                // A disconnect, refresh or process death drops the pads; forget the request then,
-                // or the sheet would pop up by itself when the project is read again. (The Pads
-                // key only shows once the pads are there, so a fresh tap never lands here.)
-                val devicePadsGone = devicePadsProject != null && deviceGroups == null
-                LaunchedEffect(devicePadsGone) { if (devicePadsGone) padsFor = null }
-                val lastDevicePads = remember { mutableStateOf<Pair<Int, List<dev.arc.ep133.features.PadGroup>>?>(null) }
-                    .apply { if (devicePadsProject != null && deviceGroups != null) value = devicePadsProject to deviceGroups }.value
-                ArcSheet(visible = deviceGroups != null, onDismiss = { padsFor = null }) {
-                    lastDevicePads?.let { (n, g) ->
-                        val names = state.browser.contents?.sounds?.associate { it.slot to it.name } ?: emptyMap()
-                        PadsSheetContent(
-                            title = FeatureText.padsTitle(n),
-                            groups = g,
-                            nameOf = { names[it] },
-                            playingSlot = null,
-                            onPad = null,
-                            onDone = { padsFor = null },
-                        )
-                    }
-                }
-                fun closeTrim() {
-                    trimIndex = null
-                    if (playing == TRIM_PLAY_KEY) controller.stopPlayback()
-                }
-                ArcSheet(
-                    visible = draft != null,
-                    onDismiss = {
-                        if (trimIndex != null) closeTrim() else controller.dropDraft()
-                    },
-                ) {
-                    val trimming = trimIndex?.let { lastDraft?.getOrNull(it) }
-                    if (trimming != null) {
-                        TrimSheetContent(
-                            item = trimming,
-                            playing = playing,
-                            onPlay = { pcm, ch, rate -> controller.playNow(TRIM_PLAY_KEY, pcm, ch, rate) },
-                            onStop = controller::stopPlayback,
-                            onDone = { range ->
-                                controller.setDraftTrim(trimIndex!!, range)
-                                closeTrim()
-                            },
-                            onCancel = { closeTrim() },
-                        )
-                    } else lastDraft?.let { d ->
-                        UploadSheetContent(
-                            draft = d,
-                            occupied = state.browser.contents?.sounds?.associate { it.slot to it.name } ?: emptyMap(),
-                            busy = state.busy,
-                            onSlot = controller::setDraftSlot,
-                            onUpload = { withNotifications { controller.uploadDraft() } },
-                            onCancel = { controller.dropDraft() },
-                            onTrim = { trimIndex = it },
-                        )
-                    }
-                }
-                val task = state.task
-                val lastTask = remember { mutableStateOf(task) }.apply { if (task != null) value = task }.value
-                ArcSheet(visible = task != null, onDismiss = null, grip = false) {
-                    lastTask?.let { ProgressSheetContent(it, onCancel = controller::cancelTask) }
-                }
             } else {
-                MainScreen(
-                    state = state,
-                    fmtDay = controller::fmtDay,
-                    onConnect = { controller.connect() },
-                    onBackup = { withNotifications { controller.backup() } },
-                    onImport = { importLauncher.launch(arrayOf("*/*")) },
-                    onOpen = { b ->
-                        titleField = b.title
-                        notesField = b.notes
-                        detailId = b.id
+                ArcFrame(
+                    top = {
+                        TopBar(
+                            connected = state.connected,
+                            canConnect = state.midiSupported && !state.busy,
+                            canBackup = state.midiSupported && state.device != null && !state.busy,
+                            onBackup = { withNotifications { controller.backup() } },
+                            onConnect = { controller.connect() },
+                            onDebug = { debug = true },
+                        )
                     },
-                    onDebug = { debug = true },
-                    onBrowse = {
-                        browse = true
-                        controller.refreshBrowser()
-                    },
-                    onGuide = { guide = true },
-                    onSearch = { search = true },
-                    onLive = { live = true },
-                    onRestoreFolder = { folderLauncher.launch(dev.arc.ep133.data.ExternalLibrary.INITIAL_FOLDER) },
-                )
-
-                ArcSheet(visible = detail != null, onDismiss = { closeDetail(save = true) }) {
-                    val b = shownDetail ?: return@ArcSheet
-                    DetailSheetContent(
-                        b = b,
-                        title = titleField,
-                        onTitle = { titleField = it },
-                        notes = notesField,
-                        onNotes = { notesField = it },
-                        madeText = controller.fmtDateTime(b.createdAt),
-                        canRestore = state.device != null && !state.busy,
-                        connected = state.device != null,
-                        onRestore = {
-                            closeDetail(save = true)
-                            restoreId = b.id
-                        },
-                        onShare = { sharePak(b) },
-                        onSave = { savePak(b) },
-                        onContents = {
-                            closeDetail(save = true)
-                            contentsId = b.id
-                        },
-                        onCompareBackups = if (state.backups.size >= 2) {
-                            {
-                                closeDetail(save = true)
-                                comparePickFor = b.id
-                            }
-                        } else {
-                            null
-                        },
-                        onDelete = { confirmDelete = true },
-                        onDone = { closeDetail(save = true) },
-                    )
-                }
-
-                val pickFor = state.backups.firstOrNull { it.id == comparePickFor }
-                val lastPickFor = remember { mutableStateOf<BackupRecord?>(null) }.apply { if (pickFor != null) value = pickFor }.value
-                ArcSheet(visible = pickFor != null, onDismiss = { comparePickFor = null }) {
-                    lastPickFor?.let { a ->
-                        ComparePickerContent(
-                            others = state.backups.filter { it.id != a.id },
-                            fmtDay = controller::fmtDay,
-                            onPick = { other ->
-                                comparePickFor = null
-                                compareIds = a.id + "|" + other.id
+                    bottom = { TabBar(tab) { selectTab(it) } },
+                ) {
+                    // Back from another tab returns to Backups first.
+                    BackHandler(enabled = tab != Tab.BACKUPS) { selectTab(Tab.BACKUPS) }
+                    when (tab) {
+                        Tab.LIVE -> MirrorScreen(
+                            mirror = state.mirror ?: if (!ready) {
+                                dev.arc.ep133.controller.MirrorUi(loading = false, error = dev.arc.ep133.text.MirrorText.NOT_CONNECTED)
+                            } else {
+                                null
                             },
-                            onCancel = { comparePickFor = null },
+                            nameOf = controller::mirrorName,
+                            onPadOrder = controller::setPadOrder,
+                        )
+                        Tab.GUIDE -> GuideScreen()
+                        Tab.DEVICE -> DeviceScreen(
+                            state = state,
+                            onRefresh = { controller.refreshBrowser() },
+                            onSoundDetails = { controller.loadSoundDetails(it) },
+                            onProjectSounds = { controller.loadProjectSounds(it) },
+                            onAddSamples = { samplesLauncher.launch(arrayOf("audio/*", "application/octet-stream")) },
+                            onPads = { n -> padsFor = "device:$n" },
+                            playing = playing,
+                            onPlay = { controller.playDeviceSound(it) },
+                            onStop = controller::stopPlayback,
+                        )
+                        Tab.BACKUPS -> MainScreen(
+                            state = state,
+                            fmtDay = controller::fmtDay,
+                            onBackup = { withNotifications { controller.backup() } },
+                            onImport = { importLauncher.launch(arrayOf("*/*")) },
+                            onOpen = { b ->
+                                titleField = b.title
+                                notesField = b.notes
+                                detailId = b.id
+                            },
+                            onSearch = { search = true },
+                            onRestoreFolder = { folderLauncher.launch(dev.arc.ep133.data.ExternalLibrary.INITIAL_FOLDER) },
                         )
                     }
                 }
 
-                fun closeRestore() {
-                    restoreId = null
-                    controller.clearDiff()
-                }
-                ArcSheet(visible = restore != null, onDismiss = { closeRestore() }) {
-                    val b = shownRestore ?: return@ArcSheet
-                    RestoreSheetContent(
-                        b = b,
-                        onRestore = { sel ->
-                            closeRestore()
-                            withNotifications { controller.restore(b, sel) }
+                if (tab == Tab.DEVICE) {
+                    val draft = state.browser.draft
+                    val lastDraft = remember { mutableStateOf(draft) }.apply { if (draft != null) value = draft }.value
+                    // A new draft never opens straight into the trim view of an old one.
+                    LaunchedEffect(draft == null) {
+                        if (draft == null) {
+                            trimIndex = null
+                            if (controller.player.playing.value == TRIM_PLAY_KEY) controller.stopPlayback()
+                        }
+                    }
+                    val devicePadsProject = padsFor?.takeIf { it.startsWith("device:") }?.removePrefix("device:")?.toIntOrNull()
+                    val deviceGroups = devicePadsProject?.let { state.browser.projectPads[it] }
+                    // A disconnect, refresh or process death drops the pads; forget the request then,
+                    // or the sheet would pop up by itself when the project is read again. (The Pads
+                    // key only shows once the pads are there, so a fresh tap never lands here.)
+                    val devicePadsGone = devicePadsProject != null && deviceGroups == null
+                    LaunchedEffect(devicePadsGone) { if (devicePadsGone) padsFor = null }
+                    val lastDevicePads = remember { mutableStateOf<Pair<Int, List<dev.arc.ep133.features.PadGroup>>?>(null) }
+                        .apply { if (devicePadsProject != null && deviceGroups != null) value = devicePadsProject to deviceGroups }.value
+                    ArcSheet(visible = deviceGroups != null, onDismiss = { padsFor = null }) {
+                        lastDevicePads?.let { (n, g) ->
+                            val names = state.browser.contents?.sounds?.associate { it.slot to it.name } ?: emptyMap()
+                            PadsSheetContent(
+                                title = FeatureText.padsTitle(n),
+                                groups = g,
+                                nameOf = { names[it] },
+                                playingSlot = null,
+                                onPad = null,
+                                onDone = { padsFor = null },
+                            )
+                        }
+                    }
+                    fun closeTrim() {
+                        trimIndex = null
+                        if (playing == TRIM_PLAY_KEY) controller.stopPlayback()
+                    }
+                    ArcSheet(
+                        visible = draft != null,
+                        onDismiss = {
+                            if (trimIndex != null) closeTrim() else controller.dropDraft()
                         },
-                        onCancel = { closeRestore() },
-                        diff = state.diff,
-                        canCompare = state.device != null && !state.busy,
-                        onCompare = { sel -> controller.compare(b, sel) },
-                    )
+                    ) {
+                        val trimming = trimIndex?.let { lastDraft?.getOrNull(it) }
+                        if (trimming != null) {
+                            TrimSheetContent(
+                                item = trimming,
+                                playing = playing,
+                                onPlay = { pcm, ch, rate -> controller.playNow(TRIM_PLAY_KEY, pcm, ch, rate) },
+                                onStop = controller::stopPlayback,
+                                onDone = { range ->
+                                    controller.setDraftTrim(trimIndex!!, range)
+                                    closeTrim()
+                                },
+                                onCancel = { closeTrim() },
+                            )
+                        } else lastDraft?.let { d ->
+                            UploadSheetContent(
+                                draft = d,
+                                occupied = state.browser.contents?.sounds?.associate { it.slot to it.name } ?: emptyMap(),
+                                busy = state.busy,
+                                onSlot = controller::setDraftSlot,
+                                onUpload = { withNotifications { controller.uploadDraft() } },
+                                onCancel = { controller.dropDraft() },
+                                onTrim = { trimIndex = it },
+                            )
+                        }
+                    }
+                }
+                if (tab == Tab.BACKUPS) {
+                    ArcSheet(visible = detail != null, onDismiss = { closeDetail(save = true) }) {
+                        val b = shownDetail ?: return@ArcSheet
+                        DetailSheetContent(
+                            b = b,
+                            title = titleField,
+                            onTitle = { titleField = it },
+                            notes = notesField,
+                            onNotes = { notesField = it },
+                            madeText = controller.fmtDateTime(b.createdAt),
+                            canRestore = state.device != null && !state.busy,
+                            connected = state.device != null,
+                            onRestore = {
+                                closeDetail(save = true)
+                                restoreId = b.id
+                            },
+                            onShare = { sharePak(b) },
+                            onSave = { savePak(b) },
+                            onContents = {
+                                closeDetail(save = true)
+                                contentsId = b.id
+                            },
+                            onCompareBackups = if (state.backups.size >= 2) {
+                                {
+                                    closeDetail(save = true)
+                                    comparePickFor = b.id
+                                }
+                            } else {
+                                null
+                            },
+                            onDelete = { confirmDelete = true },
+                            onDone = { closeDetail(save = true) },
+                        )
+                    }
+
+                    val pickFor = state.backups.firstOrNull { it.id == comparePickFor }
+                    val lastPickFor = remember { mutableStateOf<BackupRecord?>(null) }.apply { if (pickFor != null) value = pickFor }.value
+                    ArcSheet(visible = pickFor != null, onDismiss = { comparePickFor = null }) {
+                        lastPickFor?.let { a ->
+                            ComparePickerContent(
+                                others = state.backups.filter { it.id != a.id },
+                                fmtDay = controller::fmtDay,
+                                onPick = { other ->
+                                    comparePickFor = null
+                                    compareIds = a.id + "|" + other.id
+                                },
+                                onCancel = { comparePickFor = null },
+                            )
+                        }
+                    }
+
+                    fun closeRestore() {
+                        restoreId = null
+                        controller.clearDiff()
+                    }
+                    ArcSheet(visible = restore != null, onDismiss = { closeRestore() }) {
+                        val b = shownRestore ?: return@ArcSheet
+                        RestoreSheetContent(
+                            b = b,
+                            onRestore = { sel ->
+                                closeRestore()
+                                withNotifications { controller.restore(b, sel) }
+                            },
+                            onCancel = { closeRestore() },
+                            diff = state.diff,
+                            canCompare = state.device != null && !state.busy,
+                            onCompare = { sel -> controller.compare(b, sel) },
+                        )
+                    }
+
+                    if (confirmDelete && detail != null) {
+                        DeleteDialog(
+                            title = detail.title,
+                            onConfirm = {
+                                confirmDelete = false
+                                lifecycleScope.launch {
+                                    // Close (without saving edits) only once the delete worked.
+                                    if (controller.delete(detail)) closeDetail(save = false)
+                                }
+                            },
+                            onDismiss = { confirmDelete = false },
+                        )
+                    }
                 }
 
+                // Transfers can start from any tab (Back up is in the top bar).
                 val task = state.task
                 val lastTask = remember { mutableStateOf(task) }.apply { if (task != null) value = task }.value
                 ArcSheet(visible = task != null, onDismiss = null, grip = false) {
                     lastTask?.let { ProgressSheetContent(it, onCancel = controller::cancelTask) }
-                }
-
-                if (confirmDelete && detail != null) {
-                    DeleteDialog(
-                        title = detail.title,
-                        onConfirm = {
-                            confirmDelete = false
-                            lifecycleScope.launch {
-                                // Close (without saving edits) only once the delete worked.
-                                if (controller.delete(detail)) closeDetail(save = false)
-                            }
-                        },
-                        onDismiss = { confirmDelete = false },
-                    )
                 }
             }
 
@@ -637,6 +659,8 @@ class MainActivity : ComponentActivity() {
                 error = toast?.error ?: false,
                 onTimeout = controller::dismissToast,
                 modifier = Modifier.align(Alignment.BottomCenter),
+                // Above the tab bar while it shows.
+                bottomInset = if (onTabs) TabBarHeight else 0.dp,
             )
         }
     }
