@@ -76,9 +76,10 @@ import kotlin.math.roundToInt
 /*
  * Live's KEYS on a phone on its side (an addition): a chromatic piano in place
  * of the EP-133's 4×3 keypad. Every key plays; the key and scale only mark
- * them, as the grid's rings do: orange for the root, navy for the scale's
- * other notes, dimmed and unnamed outside it. A finger slides from key to
- * key (a glissando), and several fingers make a chord.
+ * them, as the grid does: the root orange, the scale's other notes in ink
+ * (navy rings while names are off), dimmed and unnamed outside it; the root
+ * also has a bar at its foot. A named key shows only its name, no ring. A
+ * finger slides from key to key (a glissando), and several fingers make a chord.
  *
  * The keys are caps, as every key in the app (see Cap.kt): each a flat face
  * over a flat edge offset down and to the right, sitting in the device's grey
@@ -375,9 +376,11 @@ private fun DrawScope.drawPiano(
         val cy = face.bottom - foot - ring / 2
         val onLit = g > 0.3f
         if (mark != KeyMark.OUT) {
-            val ink = if (onLit) c.onSignal else if (mark == KeyMark.ROOT) rootOnWhite else c.navy
-            drawMark(mark, ink, Offset(cx, cy), ring, face.bottom)
-            if (keys.showNames) drawLabel(labels.name(k.note), if (onLit) c.onSignal else c.ink, Offset(cx, cy))
+            // Named, the name alone (the root's in orange); unnamed, the ring.
+            val root = mark == KeyMark.ROOT
+            val ink = if (onLit) c.onSignal else if (root) rootOnWhite else c.navy
+            drawMark(mark, ink, Offset(cx, cy), ring, face.bottom, circle = !keys.showNames)
+            if (keys.showNames) drawLabel(labels.name(k.note), if (onLit) c.onSignal else if (root) rootOnWhite else c.ink, Offset(cx, cy))
         }
         // Each C carries its octave; OCT's own C in ink.
         labels.digit(k.note)?.let { d ->
@@ -409,9 +412,9 @@ private fun DrawScope.drawPiano(
             val cx = face.center.x
             val cy = face.bottom - 12.dp.toPx() - blackRing / 2
             val ink = if (onLit) c.onSignal else if (mark == KeyMark.ROOT) c.signal else c.onPianoBlack
-            drawMark(mark, ink, Offset(cx, cy), blackRing, face.bottom)
-            // Narrow keys: the name only while the note sounds (and names are on).
-            if (keys.showNames && (g > 0f || playing)) drawLabel(labels.name(k.note), if (onLit) c.onSignal else c.onPianoBlack, Offset(cx, cy))
+            // Named, the name alone, in the ring's colour; unnamed, the ring.
+            drawMark(mark, ink, Offset(cx, cy), blackRing, face.bottom, circle = !keys.showNames)
+            if (keys.showNames) drawLabel(labels.name(k.note), ink, Offset(cx, cy))
         }
         if (playing) drawHeld(face, blackCorner, held, c.pianoSignal)
     }
@@ -437,11 +440,14 @@ private fun contrast(a: Color, b: Color): Float {
     return (hi + 0.05f) / (lo + 0.05f)
 }
 
-/** A key's ring around [center]: navy in the scale; thicker on the root, with a bar at the key's foot. */
-private fun DrawScope.drawMark(mark: KeyMark, color: Color, center: Offset, d: Float, bottom: Float) {
+/**
+ * A key's mark: a ring around [center] (with [circle]; navy in the scale, thicker on the root),
+ * and on the root a bar at the key's foot.
+ */
+private fun DrawScope.drawMark(mark: KeyMark, color: Color, center: Offset, d: Float, bottom: Float, circle: Boolean = true) {
     val root = mark == KeyMark.ROOT
     val stroke = (if (root) 3.dp else 2.dp).toPx()
-    drawCircle(color, radius = d / 2 - stroke / 2, center = center, style = Stroke(stroke))
+    if (circle) drawCircle(color, radius = d / 2 - stroke / 2, center = center, style = Stroke(stroke))
     if (root) {
         val w = d * 0.6f
         val h = 3.dp.toPx()

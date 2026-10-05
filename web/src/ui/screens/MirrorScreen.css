@@ -352,6 +352,8 @@
   white-space: nowrap;
   color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--hw-dark-ink));
 }
+/* An octave up, the name is orange, as the ring would be. */
+.live-key--upper .live-key__name { color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--signal)); }
 /* The octave number, bottom end (tiny 11sp, 6 / 4 in). */
 .live-key__octave {
   position: absolute;
@@ -494,4 +496,16 @@
   border-radius: 4px;
 }
 .live-legend__key svg { display: block; width: 100%; height: 100%; }
+/* A named key in miniature: its name, 9px semibold, centred. */
+.live-legend__name {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
 .live-legend__key--outline { box-shadow: inset 0 0 0 2px var(--signal); }

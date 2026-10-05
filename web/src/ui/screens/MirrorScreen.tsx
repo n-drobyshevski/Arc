@@ -34,7 +34,7 @@
 //   'pick:scale' / 'pick:octave'); without them each word keeps its own state.
 import { type ButtonHTMLAttributes, type ComponentChildren, type JSX } from 'preact'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { Keys, SCALES, type Scale } from '../../core/features/keys'
+import { Keys, SCALES, type NoteNames, type Scale } from '../../core/features/keys'
 import type { MirrorState, PadLight } from '../../core/features/liveMirror'
 import { PadOrder } from '../../core/features/padPush'
 import { ROWS, noteName, padKey, physicalPad, type PhysicalPad } from '../../core/features/padNotes'
@@ -769,10 +769,14 @@ function KeysGrid(props: {
                   style={{ '--glow': glowCss(lit.get(k) ?? 0) }}
                   {...holdHandlers(tracker, target, false)}
                 >
-                  <svg class="live-key__ring" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
-                    <circle cx="50" cy="50" r="45.5" fill="none" stroke-width="9" />
-                  </svg>
-                  {keys.showNames && <span class="live-key__name">{Keys.name(note, keys.names)}</span>}
+                  {/* Named, the name alone, in the ring's colour; unnamed, the ring. */}
+                  {keys.showNames ? (
+                    <span class="live-key__name">{Keys.name(note, keys.names)}</span>
+                  ) : (
+                    <svg class="live-key__ring" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+                      <circle cx="50" cy="50" r="45.5" fill="none" stroke-width="9" />
+                    </svg>
+                  )}
                   <span class="live-key__octave">{Keys.octaveOf(note)}</span>
                 </button>
               )
@@ -804,26 +808,31 @@ function KeysPanel(props: { keys: KeysUi; actions: KeysActions }): JSX.Element {
         />
       ))}
       <p class="t-small live-tools__note">{MirrorText.KEYS_NOTE}</p>
-      <KeysLegend />
+      <KeysLegend names={keys.showNames ? keys.names : null} />
     </>
   )
 }
 
-/** What the keys' colours mean, each with a small key drawn as the grid draws it. */
-function KeysLegend(): JSX.Element {
+/**
+ * What the keys' colours mean, each with a small key drawn as the grid draws it.
+ * With [names] (the keys show them), the small keys carry a name in place of a ring.
+ */
+function KeysLegend(props: { names: NoteNames | null }): JSX.Element {
+  const name = props.names === null ? undefined : Keys.name(0, props.names)
+  const first = props.names === null ? 'var(--hw-ring)' : 'var(--hw-dark-ink)'
   return (
     <>
       <Caption text={MirrorText.LEGEND} align="start" />
       <ul class="live-legend">
-        <LegendRow text={MirrorText.LEGEND_OCTAVE}>
-          <LegendKey ring="var(--hw-ring)" />
-          <LegendKey ring="var(--signal)" />
+        <LegendRow text={props.names === null ? MirrorText.LEGEND_OCTAVE : MirrorText.LEGEND_OCTAVE_NAMED}>
+          <LegendKey ring={first} name={name} />
+          <LegendKey ring="var(--signal)" name={name} />
         </LegendRow>
         <LegendRow text={MirrorText.LEGEND_DEVICE}>
-          <LegendKey ring="var(--on-signal)" fill="var(--signal)" />
+          <LegendKey ring="var(--on-signal)" fill="var(--signal)" name={name} />
         </LegendRow>
         <LegendRow text={WebText.LIVE_LEGEND_HERE}>
-          <LegendKey ring="var(--hw-ring)" outline />
+          <LegendKey ring={first} outline name={name} />
         </LegendRow>
       </ul>
     </>
@@ -840,16 +849,25 @@ function LegendRow(props: { text: string; children: ComponentChildren }): JSX.El
   )
 }
 
-/** A key in miniature: its dark cap (lit orange when [fill]), its ring, and the phone's outline. */
-function LegendKey(props: { ring: string; fill?: string; outline?: boolean }): JSX.Element {
+/**
+ * A key in miniature: its dark cap (lit orange when [fill]), its ring (or, with
+ * a [name], that name in the ring's colour), and the phone's outline.
+ */
+function LegendKey(props: { ring: string; fill?: string; outline?: boolean; name?: string | undefined }): JSX.Element {
   return (
     <span
       class={`live-legend__key${props.outline ? ' live-legend__key--outline' : ''}`}
       style={{ background: props.fill ?? 'var(--hw-dark-face)' }}
     >
-      <svg viewBox="0 0 100 100" focusable="false">
-        <circle cx="50" cy="50" r="43" fill="none" stroke={props.ring} stroke-width="14" />
-      </svg>
+      {props.name !== undefined ? (
+        <span class="live-legend__name" style={{ color: props.ring }}>
+          {props.name}
+        </span>
+      ) : (
+        <svg viewBox="0 0 100 100" focusable="false">
+          <circle cx="50" cy="50" r="43" fill="none" stroke={props.ring} stroke-width="14" />
+        </svg>
+      )}
     </span>
   )
 }

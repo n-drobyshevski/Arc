@@ -1337,8 +1337,10 @@ private fun KeysGrid(st: MirrorState, keys: KeysUi, now: Long, actions: KeysActi
                     rowOffsets.forEach { k ->
                         val note = notes[k]
                         val g = lit[k] ?: 0f
-                        // Dark caps: the root's ring orange, the scale's pale (navy would sink into the cap).
-                        val ring = if (k % keys.scale.intervals.size == 0) c.signal else hw.ring
+                        // Dark caps: the root orange, the scale's other notes pale (navy would sink into
+                        // the cap). A named key shows its name in that colour, without the ring.
+                        val root = k % keys.scale.intervals.size == 0
+                        val ring = if (root) c.signal else hw.ring
                         val held = remember { mutableStateOf(false) }
                         Box(
                             Modifier
@@ -1358,17 +1360,18 @@ private fun KeysGrid(st: MirrorState, keys: KeysUi, now: Long, actions: KeysActi
                                 .semantics { contentDescription = MirrorText.noteName(note, keys.names) },
                             contentAlignment = Alignment.Center,
                         ) {
-                            val ink = if (g > 0.3f) c.onSignal else hw.darkInk
-                            Canvas(Modifier.fillMaxSize().padding(8.dp)) {
-                                val d = minOf(size.width, size.height)
-                                val stroke = d * 0.09f
-                                drawCircle(
-                                    color = if (g > 0.3f) c.onSignal else ring,
-                                    radius = d / 2 - stroke / 2,
-                                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke),
-                                )
-                            }
-                            if (keys.showNames) {
+                            val ink = if (g > 0.3f) c.onSignal else if (root) c.signal else hw.darkInk
+                            if (!keys.showNames) {
+                                Canvas(Modifier.fillMaxSize().padding(8.dp)) {
+                                    val d = minOf(size.width, size.height)
+                                    val stroke = d * 0.09f
+                                    drawCircle(
+                                        color = if (g > 0.3f) c.onSignal else ring,
+                                        radius = d / 2 - stroke / 2,
+                                        style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke),
+                                    )
+                                }
+                            } else {
                                 Text(Keys.name(note, keys.names), style = ArcType.semi.copy(fontSize = nameSize, letterSpacing = 0.02.em), color = ink, maxLines = 1)
                             }
                             Text(
@@ -1396,31 +1399,38 @@ private fun KeysPanel(keys: KeysUi, actions: KeysActions, piano: Boolean = false
     Text(MirrorText.KEYS_NOTE, style = ArcType.small, color = c.graphite)
     // Sideways already, the piano is there (or there's no room for one).
     if (!LocalArcWindow.current.landscape) Text(MirrorText.PIANO_HINT, style = ArcType.small, color = c.graphite)
-    KeysLegend(piano)
+    KeysLegend(piano, if (keys.showNames) keys.names else null)
 }
 
 /**
  * What the keys' colours mean, each with a small key drawn as the grid draws
  * it. One legend for the grid and the piano; the [piano] adds the keys only
- * it has (those outside the scale) and its octave numbers.
+ * it has (those outside the scale) and its octave numbers. With [names] (the
+ * keys show them), the small keys carry a name in place of a ring.
  */
 @Composable
-private fun KeysLegend(piano: Boolean = false) {
+private fun KeysLegend(piano: Boolean = false, names: NoteNames? = null) {
     val c = LocalArcColors.current
     val hw = LocalHwColors.current
     // The piano's white key, or the grid's dark cap (its rings orange and pale, as the grid draws them).
     val face = if (piano) c.pianoWhite else hw.darkFace
     val inScale = if (piano) c.navy else hw.ring
+    // A named key's name: the root's in its ring's colour, the others in ink (the cap's on the grid).
+    val nameInk = if (piano) c.ink else hw.darkInk
+    val rootName = names?.let { Keys.name(0, it) }
+    val scaleName = names?.let { Keys.name(2, it) }
     Caption(MirrorText.LEGEND, align = androidx.compose.ui.text.style.TextAlign.Start)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        LegendRow(MirrorText.LEGEND_ROOT) { LegendKey(ring = if (piano) c.rootOn(face) else c.signal, fill = face) }
-        LegendRow(MirrorText.LEGEND_IN_SCALE) { LegendKey(ring = inScale, fill = face) }
+        LegendRow(if (names != null) MirrorText.LEGEND_ROOT_NAMED else MirrorText.LEGEND_ROOT) { LegendKey(ring = if (piano) c.rootOn(face) else c.signal, fill = face, name = rootName) }
+        LegendRow(if (names != null) MirrorText.LEGEND_IN_SCALE_NAMED else MirrorText.LEGEND_IN_SCALE) { LegendKey(ring = if (names != null) nameInk else inScale, fill = face, name = scaleName) }
         if (piano) {
             LegendRow(MirrorText.LEGEND_OUT) { LegendKey(ring = null, fill = c.keyOut) }
             LegendRow(MirrorText.LEGEND_C) { LegendKey(ring = null, fill = face, digit = "4") }
         }
-        LegendRow(MirrorText.LEGEND_DEVICE) { LegendKey(ring = c.onSignal, fill = c.signal) }
-        LegendRow(MirrorText.LEGEND_PHONE) { LegendKey(ring = inScale, fill = face, outline = if (piano) c.pianoSignal else c.signal) }
+        LegendRow(MirrorText.LEGEND_DEVICE) { LegendKey(ring = c.onSignal, fill = c.signal, name = scaleName) }
+        LegendRow(MirrorText.LEGEND_PHONE) {
+            LegendKey(ring = if (names != null) nameInk else inScale, fill = face, outline = if (piano) c.pianoSignal else c.signal, name = scaleName)
+        }
     }
 }
 
@@ -1436,10 +1446,11 @@ private fun LegendRow(text: String, keys: @Composable () -> Unit) {
 
 /**
  * A key in miniature: its face (lit orange, or dimmed, as [fill] says), its
- * ring if it has one, the phone's outline, and an octave [digit] in the corner.
+ * ring if it has one (or, with a [name], that name in the ring's colour), the
+ * phone's outline, and an octave [digit] in the corner.
  */
 @Composable
-private fun LegendKey(ring: Color?, fill: Color? = null, outline: Color? = null, digit: String? = null) {
+private fun LegendKey(ring: Color?, fill: Color? = null, outline: Color? = null, digit: String? = null, name: String? = null) {
     val c = LocalArcColors.current
     Box(
         Modifier
@@ -1449,7 +1460,9 @@ private fun LegendKey(ring: Color?, fill: Color? = null, outline: Color? = null,
             .then(if (outline != null) Modifier.border(2.dp, outline, RoundedCornerShape(4.dp)) else Modifier)
             .padding(if (digit != null) 3.dp else 5.dp),
     ) {
-        if (ring != null) {
+        if (ring != null && name != null) {
+            Text(name, style = ArcType.semi.copy(fontSize = 9.sp, lineHeight = 1.em), color = ring, maxLines = 1, softWrap = false, modifier = Modifier.align(Alignment.Center))
+        } else if (ring != null) {
             Canvas(Modifier.fillMaxSize()) {
                 val stroke = size.minDimension * 0.14f
                 drawCircle(ring, radius = size.minDimension / 2 - stroke / 2, style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke))
