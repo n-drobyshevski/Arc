@@ -11,6 +11,7 @@ import dev.arc.ep133.ui.components.CoachYellowInk
 import dev.arc.ep133.ui.components.CoachYellow
 import dev.arc.ep133.ui.components.coachMark
 import dev.arc.ep133.ui.components.coachClear
+import dev.arc.ep133.ui.components.wordInk
 import dev.arc.ep133.ui.components.ArcIcon
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
@@ -35,6 +36,7 @@ import androidx.compose.ui.semantics.stateDescription
 import dev.arc.ep133.ui.components.Segmented
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -247,12 +249,12 @@ fun MirrorScreen(
         val roomH = maxHeight - (if (inBar) 0.dp else DisplayLineHeight + 10.dp) - SidewaysBottom - ControlsRow
         val piano = if (sideways && keys.on) pianoRange(keys.octave, roomW, if (window.short) roomH else minOf(roomH, PianoMaxTablet)) else null
         LaunchedEffect(piano) { reportRange(piano) }
-        // Four groups side by side while their pad rows keep 40 dp, and no taller than square
-        // pads. Off the height first: each group's caption (a 1.2 em line and its gap) and the
+        // Four groups side by side while their pads keep 40 dp both ways (rows no taller than
+        // square pads). Off the height: each group's caption (a 1.2 em line and its gap) and the
         // plate's three lines; off the width, the three gaps and each plate's two lines.
         val caption = with(LocalDensity.current) { ArcType.caps.fontSize.toDp() * 1.2f } + 8.dp
-        val allGroupsSideways = sideways && (roomH - caption - 3.dp) / 4 >= 40.dp
         val padW = ((roomW - 42.dp) / 4 - 2.dp) / 3
+        val allGroupsSideways = sideways && minOf((roomH - caption - 3.dp) / 4, padW) >= 40.dp
         SideZone(
             open = toolsOpen,
             onOpen = { toolsOpen = true },
@@ -720,43 +722,52 @@ private fun Pad(
     val c = LocalArcColors.current
     val g = light?.let { glow(it, now) } ?: 0f
     val ink = if (g > 0.3f) c.onSignal else c.ink
-    Box(
-        modifier
-            .background(lerp(c.plate, c.signal, g))
-            // Playing on the phone: a signal-orange ring inside the pad.
-            .then(if (playing) Modifier.border(2.dp, c.signal) else Modifier)
-            // The big grid doesn't scroll: it plays on touch-down. The all-groups page
-            // scrolls, so there a drag across the pads must not play them.
-            .then(if (onPress == null) Modifier else holdToPlay(onPress, onRelease, inScroll = inScroll))
-            .semantics { contentDescription = "${pad.groupLetter} ${pad.label}" + (name?.let { ", $it" } ?: "") }
-            .padding(if (big) PaddingValues(10.dp) else PaddingValues(start = 6.dp, top = 5.dp, end = 7.dp, bottom = 5.dp)),
-    ) {
+    val labelStyle = ArcType.semi.copy(
+        fontSize = when {
+            big -> if (pad.label.length > 1) 15.sp else 28.sp
+            else -> if (pad.label.length > 1) 10.sp else 15.sp
+        },
+        lineHeight = 1.em,
+        letterSpacing = 0.04.em,
+    )
+    val nameStyle = ArcType.tiny.copy(fontSize = if (big) 14.sp else 10.sp, lineHeight = 1.1.em)
+    // (Only the big pads measure their number.)
+    val measurer = if (big) rememberTextMeasurer() else null
+    val density = LocalDensity.current
+    // [room]: a big pad's height inside its padding. On a phone on its side the rows are short,
+    // and a name across the pad would run into the number in its corner: there it keeps clear
+    // of the number's column, in as many lines as fit.
+    val content: @Composable BoxScope.(room: Dp?) -> Unit = { room ->
+        val short = room != null && room < BigPadRoom
         if (name != null) {
+            val clear = if (short && measurer != null) with(density) { measurer.measure(pad.label, labelStyle).size.width.toDp() } + 4.dp else 0.dp
+            val lines = if (short) with(density) { (room!! / (nameStyle.fontSize.toDp() * 1.1f)).toInt() }.coerceIn(1, 3) else if (big) 3 else 2
             Text(
                 name,
-                style = ArcType.tiny.copy(fontSize = if (big) 14.sp else 10.sp, lineHeight = 1.1.em),
+                style = nameStyle,
                 color = if (g > 0.3f) c.onSignal else c.graphite,
-                maxLines = if (big) 3 else 2,
+                maxLines = lines,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.align(Alignment.TopStart),
+                modifier = Modifier.align(Alignment.TopStart).padding(end = clear),
             )
         }
         // The key's own label in the corner, like the pocket operator app's pad numbers.
-        Text(
-            pad.label,
-            style = ArcType.semi.copy(
-                fontSize = when {
-                    big -> if (pad.label.length > 1) 15.sp else 28.sp
-                    else -> if (pad.label.length > 1) 10.sp else 15.sp
-                },
-                lineHeight = 1.em,
-                letterSpacing = 0.04.em,
-            ),
-            color = ink,
-            modifier = Modifier.align(Alignment.BottomEnd),
-        )
+        Text(pad.label, style = labelStyle, color = ink, modifier = Modifier.align(Alignment.BottomEnd))
     }
+    val box = modifier
+        .background(lerp(c.plate, c.signal, g))
+        // Playing on the phone: a signal-orange ring inside the pad.
+        .then(if (playing) Modifier.border(2.dp, c.signal) else Modifier)
+        // The big grid doesn't scroll: it plays on touch-down. The all-groups page
+        // scrolls, so there a drag across the pads must not play them.
+        .then(if (onPress == null) Modifier else holdToPlay(onPress, onRelease, inScroll = inScroll))
+        .semantics { contentDescription = "${pad.groupLetter} ${pad.label}" + (name?.let { ", $it" } ?: "") }
+        .padding(if (big) PaddingValues(10.dp) else PaddingValues(start = 6.dp, top = 5.dp, end = 7.dp, bottom = 5.dp))
+    if (big) BoxWithConstraints(box) { content(maxHeight) } else Box(box) { content(null) }
 }
+
+/** A big pad shorter than this inside its padding (about 80 dp in all) keeps its name clear of its number. */
+private val BigPadRoom = 60.dp
 
 /** Two octaves around the last note outside the pads, with held notes lit. */
 @Composable
@@ -925,12 +936,13 @@ private fun SidewaysRow(keys: KeysUi, actions: KeysActions, oneGroup: Boolean, o
     if (!keys.on) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(WordGap)) {
             ModeWord(keys, actions, top = false)
-            dev.arc.ep133.ui.components.WordButton(
-                if (oneGroup) MirrorText.ONE_GROUP else MirrorText.ALL_GROUPS,
-                { onOneGroup(!oneGroup) },
+            // The view is a view switch, an underlined pair of words as in the tools; only the
+            // mode word carries the swap mark.
+            TextToggle(
+                listOf(MirrorText.ALL_GROUPS, MirrorText.ONE_GROUP),
+                selected = if (oneGroup) 1 else 0,
+                onSelect = { onOneGroup(it == 1) },
                 Modifier.coachMark("live.view", CoachText.VIEW, c.navy, c.onNavy),
-                mark = true,
-                description = MirrorText.viewSwitch(oneGroup),
             )
         }
         return
@@ -1020,7 +1032,7 @@ private fun StepWord(glyph: String, description: String, id: String, enabled: Bo
             .heightIn(min = 44.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(glyph, style = ArcType.word.copy(fontSize = 22.sp, lineHeight = 1.em), color = if (enabled) c.graphite else c.graphite.copy(alpha = 0.45f))
+        Text(glyph, style = ArcType.word.copy(fontSize = 22.sp, lineHeight = 1.em), color = c.wordInk(dim = !enabled))
     }
 }
 

@@ -106,6 +106,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
+import dev.arc.ep133.ui.theme.ArcColors
 import dev.arc.ep133.ui.theme.ArcType
 import dev.arc.ep133.ui.theme.LocalArcColors
 import kotlinx.coroutines.delay
@@ -403,6 +404,9 @@ fun TextToggle(options: List<String>, selected: Int, onSelect: (Int) -> Unit, mo
     }
 }
 
+/** A word's ink: quiet caption grey, so the pads stay the loudest thing on the page; paler when [dim] (not taken, or not available). */
+fun ArcColors.wordInk(dim: Boolean = false): Color = if (dim) graphite.copy(alpha = 0.45f) else graphite
+
 /**
  * A word under the grid as the pocket operator app shows DRUMS / KEYPAD:
  * small and uppercase. [mark] puts the two-squares mark before it (a word
@@ -421,8 +425,7 @@ fun WordButton(
     top: Boolean = false,
 ) {
     val c = LocalArcColors.current
-    // Quiet: caption grey, so the pads stay the loudest thing on the page.
-    val ink = if (dim) c.graphite.copy(alpha = 0.45f) else c.graphite
+    val ink = c.wordInk(dim)
     // The touch area is 44dp tall; the mark and the word stay centred on each other,
     // at its middle or (with [top]) its top.
     Box(

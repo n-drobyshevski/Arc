@@ -145,9 +145,6 @@ object MirrorText {
     const val TOOLS = "Live tools"
     const val VIEW = "View"
     const val FOLLOW_NOTE = "Follow switches to the group of the pad just played."
-
-    /** The view word over the pads on a phone on its side, for screen readers: what it shows and what a tap does. */
-    fun viewSwitch(oneGroup: Boolean) = if (oneGroup) "$ONE_GROUP. Tap for all groups." else "$ALL_GROUPS. Tap for one group."
     fun groupKey(group: Int) = ('A' + group).toString()
 
     fun bpm(bpm: Double) = "${jsToFixed(bpm, 1)} BPM"
