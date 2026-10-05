@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+.vercel/
+test-results/
+playwright-report/
+test/e2e/.build/
+*.tsbuildinfo

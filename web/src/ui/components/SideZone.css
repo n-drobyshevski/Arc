@@ -1,0 +1,94 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/SideZone.kt */
+
+/* BoxWithConstraints(fillMaxSize): the page, the strip over its right edge, the panel over both. */
+.side-zone {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.side-zone__content {
+  position: absolute;
+  inset: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* The strip: 24 wide, half the height, centred on the end edge. */
+.side-zone__strip {
+  position: absolute;
+  right: 0;
+  top: 25%;
+  z-index: 2;
+  display: block;
+  width: var(--side-strip-width);
+  height: 50%;
+  background: transparent;
+}
+.side-zone__strip:focus-visible { outline-offset: -3px; }
+
+/* A 10 wide hatched bar, rounded on its start side (6), lines every 7px. */
+.side-zone__hatch {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  border-radius: var(--radius-tag) 0 0 var(--radius-tag);
+}
+
+/* An 8×12 graphite triangle pointing in, at the strip's start, centred. */
+.side-zone__arrow {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  margin-top: -6px;
+  fill: var(--graphite);
+}
+
+.side-zone__scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  background: var(--scrim);
+  opacity: 0;
+  transition: opacity var(--side-slide, 300ms) linear;
+}
+.side-zone__scrim.is-shown { opacity: 1; }
+
+/* The panel: min(320, 85%) wide, full height, rounded 18 on its start side, scrolls. */
+.side-zone__panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  width: min(320px, 85%);
+  padding: 12px 16px 24px 18px;
+  border-radius: var(--radius-plate) 0 0 var(--radius-plate);
+  background: var(--shell);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  transform: translateX(100%);
+  transition: transform var(--side-slide, 300ms) var(--sheet-ease);
+}
+.side-zone__panel.is-shown { transform: none; }
+.side-zone__panel > * { flex: none; }
+
+.side-zone__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+.side-zone__title { flex: 1 1 auto; }
+
+@media (prefers-reduced-motion: reduce) {
+  .side-zone__scrim,
+  .side-zone__panel { transition: none; }
+}

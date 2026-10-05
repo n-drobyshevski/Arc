@@ -1,0 +1,60 @@
+/* Port of Material3 AlertDialog as arc uses it (containerColor = shell, body15 text,
+ * bold TextButtons): 28px corners, 24px padding, 280..560px wide, over the scrim. */
+
+.arc-dialog {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: var(--space-24);
+  border: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--scrim);
+  color: var(--ink);
+  animation: arc-dialog-fade var(--sheet-ms) linear;
+}
+.arc-dialog:not([open]) { display: none; }
+.arc-dialog::backdrop { background: transparent; }
+
+.arc-dialog__card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-24);
+  min-width: min(280px, 100%);
+  max-width: 560px;
+  padding: var(--space-24) var(--space-24) var(--space-18);
+  border-radius: 28px;
+  background: var(--shell);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+  animation: arc-dialog-in var(--sheet-ms) var(--sheet-ease);
+}
+
+.arc-dialog__text { color: var(--ink); }
+
+.arc-dialog__buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-8);
+}
+
+/* TextButton: 40px high, 12px side padding, a pill-shaped press tint. */
+.arc-dialog__button {
+  min-height: 40px;
+  padding: 0 var(--space-12);
+  border-radius: 20px;
+  color: var(--graphite);
+}
+.arc-dialog__button--confirm { color: var(--danger); }
+.arc-dialog__button:active { background: color-mix(in srgb, currentColor 12%, transparent); }
+
+@keyframes arc-dialog-fade { from { background-color: transparent; } }
+@keyframes arc-dialog-in { from { transform: scale(0.94); opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .arc-dialog, .arc-dialog__card { animation: none; }
+}

@@ -1,0 +1,295 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/theme/ArcTheme.kt
+ * (+ the fixed colours and metrics of ui/components/*.kt).
+ *
+ * Design tokens. Colours are the Android values (not reference/styles.css),
+ * named after the Kotlin ArcColors properties in kebab-case.
+ *
+ * Theme selection (theme.ts sets html[data-theme] to the resolved 'light' or
+ * 'dark' before the first render):
+ *   :root                                   light (LightArcColors)
+ *   :root[data-theme=dark]                  dark  (DarkArcColors)
+ *   @media dark + :root:not([data-theme=light])  dark before JS runs / SYSTEM
+ * The two dark blocks must stay identical (test/ui/theme.test.ts checks it).
+ */
+
+/* ---- Colours: LightArcColors (ArcTheme.kt) ---- */
+:root {
+  color-scheme: light;
+  --shell: #E6E2DB;
+  --key: #F4F2EE;
+  --key-edge: #C6C2B9;
+  --ink: #1F2558;
+  --graphite: #6B6A72;
+  --signal: #FF4C00;
+  --signal-edge: #C23A00;
+  --on-signal: #FFFFFF;
+  --display: #262823;
+  --display-ink: #E9E7DF;
+  --display-dim: #8A8C83;
+  --segment-off: #3A3D36;
+  --danger: #B3261E;
+  --navy: #1F2558;
+  --on-navy: #F4F2EE;
+  --tab-off: #D3D2DA;
+  --on-tab-off: #5C5B6C;
+  --plate: #D7D8D4;
+  --line: #1E1F21;
+  --ok: #17613F;
+  --on-ok: #F4F2EE;
+  /* Hatching (Components.kt Modifier.hatch): "/" lines in keyEdge, 1px wide.
+   * An SVG tile, so the step is exactly 9px horizontally (and 7px for the side
+   * strip, SideZone.kt); a CSS gradient's period would be off by sqrt(2).
+   * Data URIs cannot read custom properties, so the colour is baked in per theme. */
+  --hatch: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='9'%3E%3Cpath d='M-1 1L1 -1M0 9L9 0M8 10L10 8' stroke='%23C6C2B9' stroke-width='1'/%3E%3C/svg%3E");
+  --hatch-7: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='7'%3E%3Cpath d='M-1 1L1 -1M0 7L7 0M6 8L8 6' stroke='%23C6C2B9' stroke-width='1'/%3E%3C/svg%3E");
+}
+
+/* ---- Colours: DarkArcColors (ArcTheme.kt), chosen explicitly ---- */
+:root[data-theme=dark] {
+  color-scheme: dark;
+  --shell: #1C1D1E;
+  --key: #2B2C2E;
+  --key-edge: #0E0F10;
+  --ink: #ECEBE6;
+  --graphite: #9A9B9D;
+  --signal-edge: #A83200;
+  --display: #121410;
+  --display-ink: #E9E7DF;
+  --display-dim: #7C7E76;
+  --segment-off: #2A2D27;
+  --danger: #FF8A80;
+  --navy: #AEB4F0;
+  --on-navy: #14162B;
+  --tab-off: #3A3B44;
+  --on-tab-off: #A3A4AE;
+  --plate: #2E2F33;
+  --line: #0E0F10;
+  --ok: #3FA877;
+  --on-ok: #0E1A14;
+  --hatch: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='9'%3E%3Cpath d='M-1 1L1 -1M0 9L9 0M8 10L10 8' stroke='%230E0F10' stroke-width='1'/%3E%3C/svg%3E");
+  --hatch-7: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='7'%3E%3Cpath d='M-1 1L1 -1M0 7L7 0M6 8L8 6' stroke='%230E0F10' stroke-width='1'/%3E%3C/svg%3E");
+}
+
+/* ---- Colours: DarkArcColors, following the system (SYSTEM, or before theme.ts runs) ---- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme=light]) {
+    color-scheme: dark;
+    --shell: #1C1D1E;
+    --key: #2B2C2E;
+    --key-edge: #0E0F10;
+    --ink: #ECEBE6;
+    --graphite: #9A9B9D;
+    --signal-edge: #A83200;
+    --display: #121410;
+    --display-ink: #E9E7DF;
+    --display-dim: #7C7E76;
+    --segment-off: #2A2D27;
+    --danger: #FF8A80;
+    --navy: #AEB4F0;
+    --on-navy: #14162B;
+    --tab-off: #3A3B44;
+    --on-tab-off: #A3A4AE;
+    --plate: #2E2F33;
+    --line: #0E0F10;
+    --ok: #3FA877;
+    --on-ok: #0E1A14;
+    --hatch: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='9'%3E%3Cpath d='M-1 1L1 -1M0 9L9 0M8 10L10 8' stroke='%230E0F10' stroke-width='1'/%3E%3C/svg%3E");
+    --hatch-7: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='7'%3E%3Cpath d='M-1 1L1 -1M0 7L7 0M6 8L8 6' stroke='%230E0F10' stroke-width='1'/%3E%3C/svg%3E");
+  }
+}
+
+:root {
+  /* ---- Derived colours (theme-independent definitions over the tokens above) ---- */
+  /* "page" is the Kotlin shell: page and sheet background. */
+  --page: var(--shell);
+  /* ArcColors.scrim: Color(20, 20, 18) at 45%. */
+  --scrim: rgba(20, 20, 18, 0.45);
+  /* Material outlineVariant = keyEdge at 55% (ArcTheme.kt). */
+  --outline-variant: color-mix(in srgb, var(--key-edge) 55%, transparent);
+  /* Text selection: signal at 30% (ArcTheme.kt LocalTextSelectionColors). */
+  --selection: color-mix(in srgb, var(--signal) 30%, transparent);
+  /* Field bottom rule: line at 50% (Components.kt ArcField). */
+  --field-rule: color-mix(in srgb, var(--line) 50%, transparent);
+  /* Pressed row tint: keyEdge at 35% (MainScreen/DeviceScreen/PadsSheet rows). */
+  --row-pressed: color-mix(in srgb, var(--key-edge) 35%, transparent);
+  /* Guide divider: keyEdge at 70% (GuideScreen.kt). */
+  --guide-divider: color-mix(in srgb, var(--key-edge) 70%, transparent);
+  /* Coach overlay veil: shell at 86% (Coach.kt CoachOverlay). */
+  --coach-veil: color-mix(in srgb, var(--shell) 86%, transparent);
+  /* Trim waveform outside the selection: displayDim at 50% (TrimSheet.kt). */
+  --display-dim-50: color-mix(in srgb, var(--display-dim) 50%, transparent);
+
+  /* ---- Fixed colours (do not change with the theme) ---- */
+  /* Section tag (Chrome.kt TagFace / TagInk). */
+  --tag-face: #C9A227;
+  --tag-ink: #1E1F21;
+  /* Coach marks (Coach.kt CoachYellow / CoachYellowInk). */
+  --coach-yellow: #D4A300;
+  --coach-yellow-ink: #1E1F21;
+  /* Guide key caps (GuideKeys.kt). */
+  --guide-light-face: #DAD9D5;
+  --guide-light-edge: #A9A8A2;
+  --guide-light-ink: #55575A;
+  --guide-dark-face: #4A4B4D;
+  --guide-dark-edge: #1E1F21;
+  --guide-dark-ink: #EDECE8;
+  --guide-hold-face: #B8E2EE;
+  --guide-hold-ink: #1D6577;
+  --guide-close-face: #8C8D8F;
+  --guide-close-edge: #5E5F61;
+  /* Live keyboard strip (MirrorScreen.kt KeyBlack / KeyWhite). */
+  --keys-black: #1E1F21;
+  --keys-white: #F3F2EE;
+
+  /* ---- Typography (ArcTheme.kt Manrope, BaseText, ArcType) ---- */
+  --font: 'Manrope', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  /* FontFamily.Monospace: guide key caps, badges, guide tabs, debug log. */
+  --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, 'Roboto Mono', 'DejaVu Sans Mono', monospace;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semi: 600;
+  --weight-bold: 700;
+  --weight-extra: 800;
+  /* BaseText: 500 16px/1.5, tnum. */
+  --base-size: 16px;
+  --base-line: 1.5;
+  /* ArcType sizes (sp = px). */
+  --size-wordmark: 26px;
+  --size-key: 15px;
+  --size-key-small: 14px;
+  --size-key-wide: 17px;
+  --size-display-head: 17px;
+  --size-display-sub: 14px;
+  --size-display-hint: 15px;
+  --size-stat-num: 44px;
+  --size-stat-free: 22px;
+  --size-stat-label: 14px;
+  --size-heading: 20px;
+  --size-small: 14px;
+  --size-tiny: 13px;
+  --size-field-label: 14px;
+  --size-field-input: 17px;
+  --size-notes-input: 15px;
+  --size-body15: 15px;
+  --size-caps: 13px;
+  --size-caps-key: 14px;
+  --size-caps-key-small: 13px;
+  --size-caps-key-wide: 16px;
+  --size-tab: 14px;
+  /* ArcType.word: the PO app's mode words under its grid (DRUMS / KEYPAD). */
+  --size-word: 13px;
+  /* ArcType letter-spacing (em). */
+  --track-wordmark: -0.04em;
+  --track-stat-num: -0.03em;
+  --track-stat-free: -0.01em;
+  --track-heading: -0.02em;
+  --track-caps: 0.12em;
+  --track-caps-key: 0.06em;
+  --track-tab: 0.05em;
+  --track-word: 0.04em;
+  /* Guide tabs (GuideScreen.kt: mono 14sp, 0.04em). */
+  --track-guide-tab: 0.04em;
+
+  /* ---- Corner radii (Components.kt, Chrome.kt, SideZone.kt, MirrorScreen.kt) ---- */
+  --radius-key: 8px;        /* KeyRadius, IconBlock, section menu blocks, guide edge tab */
+  --radius-display: 22px;   /* DisplayPanel PanelRadius */
+  --radius-plate: 18px;     /* PlateRadius: GridPlate, side panel, guide page */
+  --radius-sheet: 22px;     /* ArcSheet */
+  --radius-field: 10px;     /* ArcField, ChoiceRow, Segmented, GroupKeys, trim waveform */
+  --radius-small-plate: 12px; /* Plate, ProgressMeter, dashed box, debug list */
+  --radius-toast: 12px;     /* ArcToast */
+  --radius-strip: 14px;     /* Live DisplayStrip */
+  --radius-tag: 6px;        /* coach tags, side strip hatch bar */
+  --radius-segment: 2px;    /* Meter segments */
+  --radius-grip: 3px;       /* sheet grip */
+
+  /* ---- Spacing scale (dp = px; the values the Compose code uses) ---- */
+  --space-1: 1px;
+  --space-2: 2px;
+  --space-3: 3px;
+  --space-4: 4px;
+  --space-6: 6px;
+  --space-8: 8px;
+  --space-10: 10px;
+  --space-12: 12px;
+  --space-14: 14px;
+  --space-16: 16px;
+  --space-18: 18px;
+  --space-20: 20px;
+  --space-22: 22px;
+  --space-24: 24px;
+
+  /* ---- Layout constants (screens/*.kt, Chrome.kt, SideZone.kt) ---- */
+  --column-max: 560px;      /* Backups, Device, Settings, Guide, Contents, Compare, Search, sheets */
+  --wide-max: 720px;        /* top bar, Live all groups */
+  --one-group-max: 520px;   /* Live one group */
+  --toast-max: 528px;
+  --edge-tab-width: 22px;   /* Chrome.kt EdgeTabWidth */
+  --edge-tab-height: 112px;
+  --side-strip-width: 24px; /* SideZone.kt */
+  --gutter-start: calc(var(--edge-tab-width) + 8px);
+  --gutter-end: 16px;
+  --tap-min: 44px;          /* IconBlock / minimum touch target */
+  --sheet-wide-min: 640px;  /* sheets become centred dialogs at this width (media queries cannot use it) */
+
+  /* ---- Keys and motion (Components.kt ArcKey, ArcSheet; the caps' geometry is in cap.css) ---- */
+  --key-press-ms: 60ms;     /* tween(60, KeyEasing) */
+  --key-ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+  --key-disabled: 0.45;
+  --icon-disabled: 0.4;     /* IconBlock, PlayKey */
+  --sheet-ms: 220ms;
+  --sheet-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --sheet-rise: 40px;
+  /* DisplayPanel: 0 1px 0 rgba(255,255,255,.5) + inset 0 2px 0 rgba(0,0,0,.35). */
+  --display-shadow: 0 1px 0 rgba(255, 255, 255, 0.5), inset 0 2px 0 rgba(0, 0, 0, 0.35);
+  /* :focus-visible ring (Components.kt ArcField / styles.css). */
+  --focus-ring: 3px solid var(--signal);
+  --focus-offset: 2px;
+}
+
+/* ---- Typography utilities: one class per ArcType style ---- */
+/* Longhands only: the `font` shorthand would reset font-variant-numeric.
+ * Styles whose line height is below Manrope's own (ascent + descent = 1.366em)
+ * also get padding-block: Compose (LineHeightStyle Trim.None) keeps the font's
+ * full ascent above the first line and descent below the last, so a 1.1em
+ * caps label still takes ~1.366em on Android (measured on the reference PNGs).
+ * Inner lines keep the tight spacing. --trim-1 for 1em, --trim-1-1 for 1.1em,
+ * --trim-1-2 for 1.2em: use the same padding in component
+ * CSS that re-declares one of these styles for free-flowing text. */
+:root {
+  --trim-1: 0.183em;
+  --trim-1-1: 0.133em;
+  --trim-1-2: 0.083em;
+}
+.t-wordmark { font-size: var(--size-wordmark); font-weight: 800; line-height: 1.5; letter-spacing: var(--track-wordmark); }
+.t-key { font-size: var(--size-key); font-weight: 700; line-height: 1; padding-block: var(--trim-1); }
+.t-key-small { font-size: var(--size-key-small); font-weight: 700; line-height: 1; padding-block: var(--trim-1); }
+.t-key-wide { font-size: var(--size-key-wide); font-weight: 700; line-height: 1; padding-block: var(--trim-1); }
+.t-display-head { font-size: var(--size-display-head); font-weight: 700; line-height: 1.5; }
+.t-display-sub { font-size: var(--size-display-sub); font-weight: 600; line-height: 1.5; }
+.t-display-hint { font-size: var(--size-display-hint); font-weight: 500; line-height: 1.5; }
+.t-stat-num { font-size: var(--size-stat-num); font-weight: 800; line-height: 1; letter-spacing: var(--track-stat-num); padding-block: var(--trim-1); }
+.t-stat-free { font-size: var(--size-stat-free); font-weight: 800; line-height: 1; letter-spacing: var(--track-stat-free); padding-block: var(--trim-1); }
+.t-stat-label { font-size: var(--size-stat-label); font-weight: 600; line-height: 1.5; }
+.t-heading { font-size: var(--size-heading); font-weight: 800; line-height: 1.5; letter-spacing: var(--track-heading); }
+.t-small { font-size: var(--size-small); font-weight: 500; line-height: 1.5; }
+.t-tiny { font-size: var(--size-tiny); font-weight: 500; line-height: 1.5; }
+.t-field-label { font-size: var(--size-field-label); font-weight: 600; line-height: 1.5; }
+.t-field-input { font-size: var(--size-field-input); font-weight: 600; line-height: 1.4; }
+.t-notes-input { font-size: var(--size-notes-input); font-weight: 500; line-height: 1.4; }
+.t-body15 { font-size: var(--size-body15); font-weight: 500; line-height: 1.5; }
+.t-bold { font-size: var(--base-size); font-weight: 700; line-height: 1.5; }
+.t-semi { font-size: var(--base-size); font-weight: 600; line-height: 1.5; }
+/* Uppercase, letter-spaced labels after the pocket operator app. Android callers
+ * uppercase the string; here the class does it, so pass the text as written. */
+.t-caps { font-size: var(--size-caps); font-weight: 600; line-height: 1.2; letter-spacing: var(--track-caps); text-transform: uppercase; padding-block: var(--trim-1-2); }
+.t-caps-key { font-size: var(--size-caps-key); font-weight: 700; line-height: 1.1; letter-spacing: var(--track-caps-key); text-transform: uppercase; padding-block: var(--trim-1-1); }
+.t-caps-key-small { font-size: var(--size-caps-key-small); font-weight: 700; line-height: 1.1; letter-spacing: var(--track-caps-key); text-transform: uppercase; padding-block: var(--trim-1-1); }
+.t-caps-key-wide { font-size: var(--size-caps-key-wide); font-weight: 700; line-height: 1.1; letter-spacing: var(--track-caps-key); text-transform: uppercase; padding-block: var(--trim-1-1); }
+.t-tab { font-size: var(--size-tab); font-weight: 700; line-height: 1; letter-spacing: var(--track-tab); text-transform: uppercase; padding-block: var(--trim-1); }
+.t-word { font-size: var(--size-word); font-weight: 400; line-height: 1.1; letter-spacing: var(--track-word); text-transform: uppercase; padding-block: var(--trim-1-1); }
+.t-mono { font-family: var(--font-mono); }
+
+/* ---- Hatching utilities (Components.kt Modifier.hatch, SideZone.kt strip) ---- */
+.hatch { background-image: var(--hatch); background-repeat: repeat; background-position: 0 0; }
+.hatch-7 { background-image: var(--hatch-7); background-repeat: repeat; background-position: 0 0; }

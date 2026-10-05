@@ -54,6 +54,15 @@ object Wav {
     fun encode(pcm: ByteArray, channels: Int, sampleRate: Int): ByteArray =
         encode(pcm, channels.toDouble(), sampleRate.toDouble())
 
+    /** The 44-byte header of a 16-bit file holding [dataBytes] of audio, for one written as it is recorded. */
+    fun header(dataBytes: Long, channels: Int, sampleRate: Int): ByteArray {
+        val out = encode(ByteArray(0), channels, sampleRate)
+        val bb = ByteBuffer.wrap(out).order(ByteOrder.LITTLE_ENDIAN)
+        bb.putInt(4, toUint32(36.0 + dataBytes).toInt())
+        bb.putInt(40, toUint32(dataBytes.toDouble()).toInt())
+        return out
+    }
+
     private fun ascii(out: ByteArray, s: String, at: Int) {
         for (i in s.indices) out[at + i] = s[i].code.toByte()
     }

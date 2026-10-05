@@ -1,8 +1,8 @@
-# arc for EP-133 K.O. II (Android)
+# arc for EP-133 K.O. II (Android and web)
 
-A free, open-source backup librarian for the teenage engineering EP-133 K.O. II, as a native Android app. It talks to the device over USB-C with Android's MIDI API (`android.media.midi`). No account, no server, nothing leaves your phone unless you share it.
+A free, open-source backup librarian for the teenage engineering EP-133 K.O. II, as a native Android app. It talks to the device over USB-C with Android's MIDI API (`android.media.midi`). No account, no server, nothing leaves your phone unless you share it. The same app also runs in the browser: see [Web app](#web-app).
 
-This is a port of the web version in [`reference/`](reference/), which is kept read only as the spec. The two behave the same and their `.pak` files are interchangeable.
+This is a port of the web version in [`reference/`](reference/), which is kept read only as the spec. The two behave the same and their `.pak` files are interchangeable. [`web/`](web/) is a port of this Android app back to the browser, with every feature below; it also reads and writes the same `.pak` files.
 
 The look keeps the web version's device panel, keys and orange signal, and borrows its layout from teenage engineering's pocket operator app. There is no bar along the bottom. The top left holds a tag naming the section, like the PO app's EDIT tag; tap it for **Backups**, **Live** or **Device** (long-press opens the debug screen). The EP-133 shortcut guide is a **GUIDE** tab on the left edge, like the PO's TUTORIAL tab, that slides the guide in over the page. The controls are icons, as on the PO's top row. The top bar holds the section tag, then an orange **●** (back up), the connection key (green with a dot while connected, where a tap disconnects; navy with a ring when not), **?** and the settings gear. Long-press any icon for its name; screen readers read it too. **?** opens a guide overlay, shown once by itself on the first start: the page fades and every control on screen gets a coloured tag with an arrow, like the PO app's tutorial. View switches are quiet words with an underline. Play keys are outlines until they play. The page is cream with navy ink, labels are uppercase, and pads and lists sit on pale plates split by thin lines. arc opens on **Live**, and Back on any other section returns to it.
 
@@ -44,12 +44,63 @@ These go beyond the web version:
     - A physical pad press also makes the device send its pad file id over SysEx.
     - arc pairs that with the note to learn which pad is which, then names the sample from the project's pads. One press of a key, in any group, names that key in every group, and arc remembers it; nothing is guessed, and two pads of one group hit together don't count.
     - Community notes disagree on how project files number the pads, so the page has a switch to count them from the top or from the bottom.
+- **Record what you play (REC):** the **REC** key on Live's display (in the top bar, with the display line, on a phone on its side) records the pads and keys played on the phone into a take, with or without the EP-133. Tap it to arm (the dot blinks): recording starts with the first sound, so a take has no silence in front, and the display counts the time. Tap again to stop; silence after the last sound is left out, and if nothing was played nothing is saved. Leaving Live stops and saves a take too, and one stops by itself at 10 minutes. A take is a stereo 16-bit WAV at the phone's output rate (usually 48 kHz), copied from Live's own mix as it is played, so it sounds exactly as you heard it (gates, chords and KEYS pitch included) but holds nothing the EP-133 itself plays. **Live tools → Takes** lists them, newest first: play one, or tap it to share or save the WAV, delete it, or, while the EP-133 is connected, send it **To EP-133**, which opens the Device tab's upload sheet with the take (pick the slot, trim it, upload; above 46875 Hz it is resampled as any upload is). Takes stay in arc's own storage until deleted.
 - **Settings:** the gear at the top right. Theme (system, light or dark); whether arc connects by itself when an EP-133 is plugged in; whether the screen stays on in Live; how many backups to keep (all, 5, 10 or 20: after each backup or import the oldest beyond that are deleted, here and in Documents/arc, and lowering it asks first); Live's pad numbering and forgetting learned sample names; the version, source, font licence and the debug log. The settings are saved in Documents/arc with the library, so they come back after a reinstall.
 - **Shortcut guide:** 100 EP-133 key combinations in tabs by section, with search, laid out like a printed guide: each combination drawn as the device's keys (pale keys, dark keys, pads, knobs and the fader), with HOLD, DIAL, TURN and MOVE badges, and what it does below. A test checks that every key drawn is named in that entry's text from the official guide. Every entry is paraphrased from teenage engineering's official user guide for OS 2.5, and links to the section it comes from. Combos the guide doesn't document are left out.
 
 Backups use the same layout as the official Sample Tool's `.pak`: a zip with `/meta.json`, `/sounds/NNN name.wav` and `/projects/PNN.tar`. On top of that, an `arc.json` file keeps per-sound settings like play mode, pitch and envelope.
 
 A debug screen (Settings → **Debug log**, or long-press the section tag) shows every SysEx message sent and received, and can share, save or copy the log as a text file.
+
+## Web app
+
+The same app runs in Chrome or Edge, on a computer or an Android phone, at **https://arc-pi-mauve.vercel.app**. It talks to the EP-133 over USB-C with WebMIDI. Everything above is there: backup, restore, the library, contents, compare, search, the device browser, sample upload with trim, pads, the live mirror (opening on Live, shown as one group with A–D by default where Android starts on all four groups, pads that sound while held, chords of up to 8 sounds, KEYS with solfège or letter note names, and Offline from the last read), settings, the shortcut guide and the debug log. It reads like the Android app and looks like it too, except that its pads and buttons are drawn as raised EP-133 keys, the way the official Sample Tool draws the K.O. II, and its `.pak` files and `library.json` are the same files the Android app writes, so a library moves between the two.
+
+The browser asks once for MIDI access when you connect. It can be installed from the install icon in the address bar or the browser's menu (**Add to Home screen** on Android), and then opens in its own window like an app. After the first visit it works offline. A new version is downloaded in the background and shows **Reload**; arc never reloads in the middle of a transfer.
+
+| Browser | EP-133 over USB |
+|---|---|
+| Chrome, Edge, Opera, Brave on Windows, macOS, Linux and ChromeOS | Yes |
+| Chrome on Android | Yes |
+| Firefox on a computer | Only after you accept Firefox's prompt to install its site permission add-on for MIDI |
+| Safari, and every browser on iPhone and iPad | No. The library still works: import, contents, playback, export, compare, search and the guide |
+
+Where WebMIDI is missing, arc says so on the panel and the controls that need the device are disabled; the rest works as usual. The page needs HTTPS (or `localhost` during development) for MIDI.
+
+How it differs from the Android app:
+- **No background transfers.** A browser has no foreground service. Keep the tab in front and the cable plugged in until a backup or restore is done: in a background tab timers slow down and the transfer can stall. While a task runs the screen is kept on, the tab title shows the progress, leaving the page asks first, and hiding the tab shows a reminder. Cancel is on the progress sheet.
+- **The library lives in the browser** (IndexedDB), so clearing the site's data deletes it. arc asks the browser to keep it.
+  - On Chrome, Edge and other Chromium browsers on a computer, **Pick a library folder** keeps a copy of every backup outside the browser, the same `.pak` files and `library.json` as Documents/arc on Android. Pick a folder named `arc`, or one that already holds arc backups. After a browser restart, one tap on **Reconnect library folder** gives arc access again.
+  - Elsewhere, including Chrome on Android, **Export library** saves every backup and `library.json` as one zip (`arc-library.zip`); export now and then to keep a copy.
+  - **Restore from a folder** also works without a library folder: pick an arc folder (one written by this app, Documents/arc copied from a phone, or an unzipped export) and its backups, titles, notes and settings come in. Backups already in the library are skipped.
+- **Opening a `.pak`:** double-clicking a `.pak` opens it in arc only with the installed app on a computer with a Chromium browser. Everywhere else, use **Import** or drag the file onto the page.
+- **Sharing** uses the browser's share sheet where it can take files; otherwise the file is saved instead, and arc says so.
+- **Live's sound** comes from Web Audio: one low-latency output (an AudioWorklet that mixes the pads and keys, at the output's own rate) while Live is on screen. How quickly a press is heard depends on the browser and the system's audio stack, not on arc; the debug log shows each press's delay. A browser only starts sound after a tap, so on a phone the very first touch on a fresh page may sound only briefly; the next ones play normally.
+  - Browsers don't say where the sound goes, so arc can't see Bluetooth: when the output's own delay is long (120 ms or more), it points the delay out once, as Android does for Bluetooth.
+  - Arc's copies of the pad sounds are kept in the browser (IndexedDB), next to the library; Settings shows their size and clears them. Live's last read (`live.json`) goes to the library folder or the export zip, like Documents/arc.
+- **One tab at a time** talks to the EP-133. Another tab or window says so when you connect; the library stays in step across tabs.
+- **Try it without an EP-133:** add `?demo` to the address (https://arc-pi-mauve.vercel.app/?demo). A simulated EP-133 with 12 sounds and 3 projects is plugged in, so you can back up, restore, compare, browse the device and upload samples. It is the simulator the tests use, not a real device, and nothing leaves the page. The demo keeps its own library and settings, so it never touches your real ones.
+
+### Develop
+
+Node 22 or newer.
+
+```sh
+cd web
+npm ci
+npm run dev        # http://localhost:5173, add ?demo for the simulated device
+npm run check      # typecheck, unit tests (Vitest), production build
+npm run e2e        # Playwright smoke test of the built app in Chromium (once: npx playwright install chromium)
+npm run gen:guide  # regenerate src/core/text/guideData.ts from core's GuideText.kt
+```
+
+[`web/README.md`](web/README.md) has the layout of the code and how it maps to the Kotlin. [`.github/workflows/web.yml`](.github/workflows/web.yml) runs the typecheck, tests, build and smoke test on every pull request and push to `main` that touches `web/`.
+
+### Deploy
+
+The Vercel project `arc` builds from `vercel.json` at the repository root: it installs and builds `web/` and serves `web/dist`. The same file sets the cache headers for `sw.js`, the manifest and `assets/`, allows MIDI for the site, and sets a strict Content-Security-Policy that also keeps arc out of other sites' frames. A push to `main` deploys to production at https://arc-pi-mauve.vercel.app; a push to any other branch gets its own preview deployment. Production builds show the version exactly (`0.2.0`), previews and local builds add `-dev`. The version comes from `version.properties`, as for Android, and `.pak` files name it the same way (`arc 0.2.0`).
+
+**Status:** the web app has been tested against the simulator (unit tests and the Playwright smoke test with `?demo`), not yet with a physical EP-133. The open questions under [Status](#status-what-is-verified-and-what-still-needs-a-real-device) apply to it too, plus WebMIDI's own: how Chrome splits incoming SysEx, and whether the upload window survives Chrome's MIDI send buffer.
 
 ## Build
 
@@ -128,7 +179,9 @@ core/   pure Kotlin/JVM, no Android imports, runs in plain JUnit
   features/  device browser, sample upload, trim, pad layouts, sound search, and comparing a backup with the device or another backup (additions to the web version)
   text/      every interface string, the small library/restore rules from app.js, and the shortcut guide
 app/    Android: MIDI transport, foreground service, Room library (with a sound-name index for search), files and sharing, Compose UI
-reference/   the web version (read only)
+reference/   the web version (read only, the spec)
+web/    the browser app: a TypeScript port of core/ and app/ (Vite, Preact), see web/README.md
+vercel.json  Vercel build and headers for web/
 ```
 
 Each core file is a port of the matching JS file and says so at the top. The UI follows `reference/styles.css`: a grey shell, pale keys whose bottom edge presses down, one orange key (#FF4C00) and a dark display panel. Light and dark themes come from the same tokens.
@@ -256,6 +309,7 @@ Back up the EP-133 with the official Sample Tool first. Then, with the debug scr
 15. Back up, change a pad's sound on the device, back up again, and **Compare with another backup**: it should show that pad change.
 16. Check that Documents/arc (in the Files app) holds your backups and a `library.json`. Uninstall arc, reinstall it, tap **Restore from Documents/arc**, pick the folder, and check that titles and notes come back, along with the settings, Live's sample names and pad order, Live's offline view, and no guide overlay on the next start. Do it once more after changing a setting and pressing a pad in Live before restoring: the old settings and names should still come back.
 17. Open the **Live** tab and press pads in each group: the lit pad should be the one you pressed. After one press, its sample name should appear. Check the names against the device and, if they look wrong, tap the strip on the right edge and try **From the bottom**. Tap pads while connected and hear them; hold a long sample and let go: it should stop at once; open the debug log and check the "heard … ms after the press" lines (on the phone speaker or wired headphones they should be well under 50 ms on a recent phone); hold three pads, then three keys, at once: all should sound together, each ringed; tap a pad, switch to **Keys** and play: the pitch should rise across the keys, the octave word should move them an octave, and a scale should change the names. Put the EP-133 in KEYS and play: the matching keys should light; start a backup while Live is still copying sounds and check it starts within a moment. Unplug the device with Live open: the display should say **Offline** with the time, and the pads should keep their names and still play when tapped; open Live with no device after restarting arc and the same should show. Clear the pad sounds in Settings: pads should still play when a backup has their sound, and say so when none has.
+17a. With the EP-133 unplugged, open Live, tap **REC** (the dot should blink), wait a moment, then play a few pads and a KEYS chord and tap REC again: a toast should say the take was saved, and **Live tools → Takes** should list it with its length. Play it: it should start straight on the first sound and match what you played. Share it to another app and save it to Files; delete one. Connect the device, tap a take, then **To EP-133**: the Device tab's upload sheet should open with the take in a free slot; upload it and play it on the device.
 18. Play a pattern: check whether sequenced pads light up. Switch on clock out (SHIFT + ERASE, 102, ENTER) and check play/stop and the tempo. Try KEYS mode.
 19. Switch sections from the tag with a backup running and with Live open: the progress sheet should stay up, Live should stop listening when you leave it, arc should open on Live, and Back on any other section should return to Live. Open the guide from its tab on the left edge and close it with Back. Open **?** on each tab: every tag should point at its control without covering another tag (on a phone on its side, nor another control or another tag's arrow). Long-press each icon for its name, and check them with TalkBack.
 20. Play a sound from a backup's **Contents** through the phone speaker, wired headphones and Bluetooth. If one stays silent, export the debug log: it has a "play … -> output" line naming where Android sent the sound.

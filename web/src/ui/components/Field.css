@@ -1,0 +1,65 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt (ArcField) */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+/* ArcType.caps, graphite, uppercased */
+.field__label {
+  color: var(--graphite);
+  font-size: var(--size-caps);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  /* Compose's untrimmed first/last line (see tokens.css --trim-*). */
+  padding-block: var(--trim-1-2);
+}
+
+.field__input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: var(--radius-field);
+  background: var(--key);
+  color: var(--ink);
+  caret-color: var(--signal);
+  /* A thin rule along the bottom, in place of the web version's inset shadow. */
+  box-shadow: inset 0 -1px 0 var(--field-rule);
+  appearance: none;
+  -webkit-appearance: none;
+  /* ArcType.fieldInput */
+  font-size: var(--size-field-input);
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.field__input--multi {
+  /* ArcType.notesInput; grows with its text where the browser can. */
+  font-size: var(--size-notes-input);
+  font-weight: 500;
+  line-height: 1.4;
+  /* BasicTextField has no resize handle; the field grows with its text where
+   * the browser can. field-sizing ignores rows, so minLines is a min-height. */
+  resize: none;
+  field-sizing: content;
+  min-height: calc(var(--min-lines, 1) * 1.4em + 24px);
+}
+.field__input::placeholder { color: var(--graphite); opacity: 1; }
+.field__input::-webkit-search-decoration,
+.field__input::-webkit-search-cancel-button { -webkit-appearance: none; }
+.field__input:disabled { opacity: var(--key-disabled); }
+
+/* The Kotlin ring shows on any focus (not only keyboard focus): 3px signal, offset 2. */
+.field__input:focus,
+.field__input:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}

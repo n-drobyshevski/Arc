@@ -1,0 +1,11 @@
+/* Port of the font licence sheet in app/src/main/kotlin/dev/arc/ep133/MainActivity.kt
+ * (opened from SettingsScreen.kt): Text(licenceText, ArcType.tiny, graphite). */
+
+.licence-sheet__text {
+  margin: 0;
+  color: var(--graphite);
+  font-family: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  tab-size: 4;
+}

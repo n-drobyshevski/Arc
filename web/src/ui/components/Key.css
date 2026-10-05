@@ -1,0 +1,61 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt (ArcKey)
+ * Web: a hardware cap (theme/cap.css) rather than Compose's face over a 2px strip. */
+
+.key {
+  --cap-face: var(--key);
+  --cap-ink: var(--ink);
+  --cap-edge: var(--key-edge);
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 48px;
+  padding: 15px 18px;
+  border-radius: var(--radius-key);
+  text-align: center;
+  user-select: none;
+  -webkit-user-select: none;
+  /* capsKey */
+  font-size: var(--size-caps-key);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: var(--track-caps-key);
+  text-transform: uppercase;
+}
+
+.key__label {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.key--block { display: flex; width: 100%; }
+
+/* ---- KeyStyle ---- */
+.key--signal { --cap-face: var(--signal); --cap-ink: var(--on-signal); --cap-edge: var(--signal-edge); }
+/* The navy edge: the face 35% darker (Compose's 55%-alpha strip would show the page through a 3D edge). */
+.key--navy { --cap-face: var(--navy); --cap-ink: var(--on-navy); --cap-edge: color-mix(in oklab, var(--navy) 65%, black); }
+/* Quiet keys are flat text, no cap (Key.tsx leaves cap-3d off). */
+.key--quiet { background: transparent; color: var(--graphite); }
+
+/* ---- KeySize ---- */
+.key--small {
+  min-height: 40px;
+  padding: 10px 14px;
+  font-size: var(--size-caps-key-small);
+}
+.key--wide {
+  min-height: 60px;
+  padding: 15px 18px;
+  font-size: var(--size-caps-key-wide);
+}
+
+/* Pressed: theme/cap.css (the face travels onto its edge). */
+
+/* opacity .45 fades the face, label and edge together. */
+.key:disabled { opacity: var(--key-disabled); }

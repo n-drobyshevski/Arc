@@ -1,0 +1,193 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/DeviceScreen.kt */
+
+/* LazyColumn(widthIn(max = 560)) with contentPadding(start = EdgeTab + 8, end = 16, top = 4, bottom = 24).
+ * Items have no spacing of their own; each one's top padding is a margin here. */
+.device {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: calc(var(--column-max) + var(--gutter-start) + var(--gutter-end));
+  margin: 0 auto;
+  padding: var(--space-4) var(--gutter-end) var(--space-24) var(--gutter-start);
+  background: var(--shell);
+}
+
+.device__gap-12 { margin-top: var(--space-12); }
+.device__gap-14 { margin-top: var(--space-14); }
+.device__ink { color: var(--ink); }
+.device__dim { color: var(--graphite); }
+.device__display-ink { color: var(--display-ink); }
+.device__display-dim { color: var(--display-dim); }
+
+.device__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+.device__title { flex: 1 1 0; min-width: 0; }
+.device__head > .key { flex: none; }
+
+/* A wrapper the guide overlay measures (data-coach): exactly the control's box. */
+.device__mark { display: inline-flex; flex: none; }
+
+/* Storage panel: free space on the left, counts on the right, 12 apart. */
+.device__stats {
+  display: flex;
+  gap: var(--space-12);
+}
+.device__stats > :first-child { flex: 1 1 0; min-width: 0; }
+.device__stats > :last-child { flex: none; text-align: end; }
+
+/* The toggle is as wide as its words, so the guide tag points at them. */
+.device__switch { align-self: flex-start; }
+
+.device__section { display: flex; flex-direction: column; }
+
+/* ---------- sounds ---------- */
+
+.device__block { display: flex; flex-direction: column; }
+.device__range {
+  display: flex;
+  align-items: center;
+  padding: var(--space-18) 0 var(--space-8);
+}
+.device__range-name { flex: 1 1 0; min-width: 0; }
+
+.device__rows { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+
+.sound-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-8) var(--space-10) var(--space-8) var(--space-16);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.sound-row.is-disabled { cursor: default; }
+.sound-row:not(.is-disabled):active { background-image: linear-gradient(var(--row-pressed), var(--row-pressed)); }
+.sound-row:not(.is-disabled):has(.play-key:active) { background-image: none; }
+
+.sound-row__line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+}
+.sound-row__main {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: inherit;
+  border-radius: var(--radius-key);
+}
+.sound-row__main:disabled { color: inherit; }
+.sound-row__slot { flex: none; color: var(--graphite); }
+.sound-row__name {
+  flex: 1 1 0;
+  min-width: 0;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sound-row__size { flex: none; color: var(--graphite); }
+
+.sound-details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding-top: var(--space-6);
+}
+.sound-details__row {
+  display: flex;
+  gap: var(--space-12);
+}
+.sound-details__key { flex: none; width: 96px; color: var(--graphite); }
+.sound-details__value {
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0;
+  color: var(--ink);
+  font-weight: var(--weight-semi);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- projects ---------- */
+
+.project-grid__row {
+  display: flex;
+  align-items: stretch;
+}
+.project-grid__rule {
+  flex: none;
+  width: 1px;
+  background: var(--line);
+}
+/* Same padding as a tile, so flex-basis 0 shares the row equally. */
+.project-grid__fill { flex: 1 1 0; min-width: 0; padding-inline: var(--space-12); }
+
+.project-tile {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: var(--space-10) var(--space-12);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.project-tile:disabled { cursor: default; }
+.project-tile:focus-visible { outline-offset: -3px; }
+.project-tile.is-on { background: var(--navy); color: var(--on-navy); }
+.project-tile__label { color: var(--graphite); }
+.project-tile__num { margin-top: var(--space-2); }
+.project-tile__size { align-self: flex-end; color: var(--graphite); }
+.project-tile.is-on .project-tile__label,
+.project-tile.is-on .project-tile__size { color: var(--on-navy); }
+
+.project-panel__pads { margin-top: var(--space-6); }
+
+/* ---------- shared: SectionTitle and Plate (Kotlin internal helpers) ---------- */
+
+.section-title {
+  display: flex;
+  align-items: flex-end;
+  width: 100%;
+  padding-top: var(--space-8);
+}
+.section-title__text { flex: 1 1 0; min-width: 0; }
+.section-title__count { color: var(--graphite); }
+
+.plate {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: 100%;
+  padding: var(--space-12) var(--space-14);
+  border-radius: var(--radius-small-plate);
+  background: var(--plate);
+  color: var(--ink);
+}
+.plate--button {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.plate--button:active:not([aria-disabled=true]) {
+  background-image: linear-gradient(var(--row-pressed), var(--row-pressed));
+}
+.plate--button[aria-disabled=true] { cursor: default; }

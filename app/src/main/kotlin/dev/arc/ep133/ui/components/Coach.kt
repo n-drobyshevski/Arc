@@ -218,8 +218,9 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
                     placed += Placed(m, text, rect, null, null)
                     return
                 }
-                val x = m.bounds.center.x
-                val left = (x - w / 2).coerceIn(margin, size.width - margin - w)
+                // Where the arrow meets the control: its middle, or (see below) towards one end.
+                var x = m.bounds.center.x
+                var left = (x - w / 2).coerceIn(margin, size.width - margin - w)
                 // On a tag placed, or (in a short window) on its arrow.
                 val arrowRoom = 3.dp.toPx()
                 fun hits(r: Rect) = placed.any {
@@ -246,8 +247,14 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
                         (p?.tip == null || p.tail == null || crosses(p.tip, p.tail, r.inflate(clearance)))
                 }
                 val step = 2.dp.toPx()
-                val from = maxOf(margin, x - w + padX)
-                val to = minOf(size.width - margin - w, x - padX)
+                var from = maxOf(margin, x - w + padX)
+                var to = minOf(size.width - margin - w, x - padX)
+                fun aim(at: Float) {
+                    x = at
+                    left = (x - w / 2).coerceIn(margin, size.width - margin - w)
+                    from = maxOf(margin, x - w + padX)
+                    to = minOf(size.width - margin - w, x - padX)
+                }
                 // Pushed further out, below or above the control, until it clears the tags placed and
                 // the other controls (sliding sideways off them where it still meets its arrow).
                 fun out(below: Boolean): Rect {
@@ -312,7 +319,7 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
                     val crossed = placed.count { crosses(s.tip, s.tail, it.rect) } +
                         controls.count { it !== m && crosses(s.tip, s.tail, it.bounds.deflate(inset)) } + untagged.count { crosses(s.tip, s.tail, it) }
                     val off = r.top < margin || r.bottom > size.height - margin || r.left < margin || r.right > size.width - margin
-                    return (if (off) 1000f else 0f) + (if (hits(r)) 100f else 0f) + 100f * onControls(r, m) + 10f * (crossed + under(r).size) +
+                    return (if (off) 1000f else 0f) + (if (hits(r)) 100f else 0f) + 100f * onControls(r, m) + 10f * (crossed + under(r).size + lines(r)) +
                         (abs(s.tail.x - s.tip.x) + abs(s.tail.y - s.tip.y)) / size.height
                 }
                 // Below a control in the top half, above one in the bottom half; in a short window (its
@@ -328,6 +335,20 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
                         if (f + 5f < fit) {
                             spot = other
                             fit = f
+                        }
+                    }
+                    // Or its arrow meets the control towards one end, so the tag can hang clear of the
+                    // arrow of a control just over or under it (the section tag over the row of words).
+                    val end = 12.dp.toPx()
+                    if (m.bounds.width > 4 * end) {
+                        for (at in listOf(m.bounds.right - end, m.bounds.left + end)) {
+                            aim(at)
+                            val other = vertical(below)
+                            val f = misfit(other)
+                            if (f + 5f < fit) {
+                                spot = other
+                                fit = f
+                            }
                         }
                     }
                 }

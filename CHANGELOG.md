@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to arc for Android. Versions follow [Semantic Versioning](https://semver.org/):
+All notable changes to arc (Android and web). Versions follow [Semantic Versioning](https://semver.org/):
 a major version breaks `.pak` or library compatibility, a minor version adds features, a patch
 version fixes bugs. The version itself is set in `version.properties`.
 
@@ -8,6 +8,18 @@ version fixes bugs. The version itself is set in `version.properties`.
 
 ### Added
 - Live on its side: turn the phone and KEYS becomes a piano with every semitone, from the C an octave under OCT's C and as far as fits with white keys at least 44 dp wide: one octave on the narrowest phones, 1½ or 2 on phones (on a Pixel 7, DO3 to DO5 at OCT 4, the sample's own pitch in the middle), 3 on a tablet. The scale's notes are ringed navy and the key's root orange; the other keys are dimmed and unnamed but still play. Slide across the keys to run through the notes, hold several for a chord, and step the octave with − and + as on the EP-133; a KEY word over the keys picks the root. Notes from the EP-133 light their exact key, and one past either end is marked there and, when nothing is playing on the phone, named in the display line. Screen readers read each key with its note and whether it is the root, in the scale or outside it, with Play to hear it. PADS lays one group, or all four in a row (where their pads keep 40 dp), across the screen. Checked at Pixel 7 and 360 dp sizes on their side, and on a tablet.
+- Live: **REC** records what you play on the phone (pads and keys, chords and KEYS pitch included), with or without the EP-133. It starts with the first sound after REC and stops at the next tap (or 10 minutes), leaving out the silence at the end. Takes are stereo WAVs listed in Live tools → Takes, where each plays, shares, saves, deletes, or goes **To EP-133** through the upload sheet while the device is connected.
+- Web app (`web/`, https://arc-pi-mauve.vercel.app): the whole Android app in the browser, for Chrome, Edge and other Chromium browsers on computers and Android, over USB-C with WebMIDI. Same `.pak` files and `library.json` as the Android app.
+  - Live starts on one group (the large grid with A–D); the view switch in Live tools still shows all four.
+  - Pads and keys look like the K.O. II in the Sample Tool: flat raised caps (a solid face over a solid edge) on the device's grey body, dark number pads with the label top left, pale A–D keys under small LEDs (the group shown stays down with its LED lit). Every button in the app is a raised key that travels down when pressed.
+  - Installable, works offline, and updates only when you tap Reload and no transfer is running.
+  - The library is kept in the browser. On Chromium desktop an optional library folder keeps the same files as Documents/arc; elsewhere, Export library saves them as one zip, and Restore from a folder reads any arc folder back.
+  - No background transfers: keep the tab in front. The screen stays on, the tab title shows progress and leaving the page asks first.
+  - `.pak` files open with the installed app on Chromium desktop; elsewhere, Import or drag and drop.
+  - Safari, iOS browsers and Firefox without its MIDI add-on get the library without the device.
+  - Live as on Android: arc opens on it, pads and keys sound while held (chords of up to 8 sounds, KEYS with solfège or letter note names), from arc's pad sound copies kept in the browser, a backup or the device, and Live shows the last read offline. How quickly a press is heard depends on the browser and the system's audio stack; since browsers don't name the output, a long output delay is pointed out once in place of Android's Bluetooth notice, and on a phone the very first touch may sound only briefly, as browsers start audio when the finger lifts.
+  - `?demo` runs it against a simulated EP-133, with its own library and settings, so it never touches the real ones.
+  - Built from the same `version.properties`, tested with Vitest and a Playwright smoke test in CI (`.github/workflows/web.yml`), and deployed on Vercel from `vercel.json`. Not yet tried with a physical EP-133.
 - Live tools in KEYS: a small legend of the keys' colours (the orange ring of the key's root and the navy one of its other notes, filled for a note from the EP-133, outlined for one playing on the phone; with the piano showing, also the dimmed keys outside the scale and the C that carries the octave).
 - Settings → Live → **Note names on the keys**: KEYS names its notes in fixed-do solfège (DO RE MI, as before) or letters (C D E, sharps as C#, D#), on the keys, the display and the key picker. The choice is kept with the settings.
 - Live: chords. Pads and keys play alongside each other (up to 8 sounds at once) instead of cutting each other off, and in the one-group and KEYS grids they play on touch-down, a finger per pad. Every pad or key sounding is ringed. Play in the lists still plays one sound at a time.

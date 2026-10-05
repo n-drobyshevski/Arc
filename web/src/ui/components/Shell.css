@@ -1,0 +1,59 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Chrome.kt (ArcFrame, ArcShell) */
+
+/* ArcFrame: top bar, a weighted body, the bottom slot; one screen high. */
+.shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  background: var(--shell);
+  overflow: hidden;
+}
+
+.shell__top {
+  position: relative;
+  z-index: 30;
+  flex: none;
+  background: var(--shell);
+}
+
+.shell__body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* The section's page: scrolls by itself, under a fixed top bar. */
+.shell__page {
+  position: absolute;
+  inset: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* GuideEdgeTab: start edge, vertically centred, 80px up. */
+.shell__edge-tab {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(calc(-50% - 80px));
+  z-index: 10;
+}
+
+/* The guide slides in from the left over everything (top bar too). */
+.shell__guide {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  background: var(--shell);
+  transform: translateX(-100%);
+  transition: transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  overflow: hidden;
+}
+.shell__guide.is-shown { transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .shell__guide { transition: none; }
+}

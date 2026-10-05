@@ -1,0 +1,24 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt (Meter, ProgressMeter) */
+
+.meter {
+  display: flex;
+  gap: 3px;
+  width: 100%;
+}
+.meter__seg {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 100%;
+  border-radius: var(--radius-segment);
+  background: var(--segment-off);
+}
+.meter__seg--on { background: var(--display-ink); }
+.meter__seg--hot { background: var(--signal); }
+
+.progress-meter {
+  width: 100%;
+  height: 44px;
+  padding: 10px;
+  border-radius: var(--radius-small-plate);
+  background: var(--display);
+}

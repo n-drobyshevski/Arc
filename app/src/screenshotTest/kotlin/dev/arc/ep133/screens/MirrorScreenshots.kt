@@ -139,14 +139,15 @@ private fun Framed(
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null) {
     val mirror = MirrorUi(state, loading = loading, offline = offline)
+    val recUi = dev.arc.ep133.ui.screens.RecUi(rec) {}
     // The piano's notes, for the display line in the bar to name a device note past them. The
     // piano reports them a frame late, after the screenshot, so [piano] gives them up front.
     var pianoRange by remember { mutableStateOf(piano) }
     Framed(
         Tab.LIVE, connected = offline == null, dark = dark, guide = guide,
-        pill = { LivePill(mirror, keys, pianoRange) }, toast = toast, barMiddle = barMiddle,
+        pill = { LivePill(mirror, keys, recUi, still = true, pianoRange = pianoRange) }, toast = toast, barMiddle = barMiddle,
     ) {
         MirrorScreen(
             mirror = mirror,
@@ -162,6 +163,13 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
             playingPads = playingPads,
             keys = keys,
             onPianoRange = { pianoRange = it },
+            rec = recUi,
+            takes = dev.arc.ep133.ui.screens.TakesUi(
+                list = takes,
+                playing = takes.firstOrNull()?.name,
+                fmtWhen = { if (it == TAKE_AT) "Oct 5, 2:23 PM" else "Oct 4, 9:41 PM" },
+                connected = offline == null,
+            ),
         )
     }
 }
@@ -252,6 +260,28 @@ fun LiveKeysLettersPreview() = Live(keysPlaying, keys = keysUi.copy(root = 9, sc
 fun LiveKeysLettersGridPreview() = Live(keysPlaying, keys = keysUi.copy(root = 9, scale = dev.arc.ep133.features.Scale.MINOR, names = dev.arc.ep133.features.NoteNames.LETTERS))
 
 // Tapping "Offline" unfolds why.
+private const val TAKE_AT = 1_791_200_000_000L
+
+private val someTakes = listOf(
+    dev.arc.ep133.data.TakeInfo("take-20261005-142301.wav", TAKE_AT, 12.4, 2_380_844),
+    dev.arc.ep133.data.TakeInfo("take-20261004-214102.wav", TAKE_AT - 60_000_000, 73.0, 14_016_044),
+)
+
+@PreviewTest
+@Preview(name = "Live rec armed", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveRecArmedPreview() = Live(playing, oneGroup = true, rec = dev.arc.ep133.features.RecState.Armed)
+
+@PreviewTest
+@Preview(name = "Live recording keys", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun LiveRecordingKeysPreview() = Live(keysPlaying, keys = keysUi, rec = dev.arc.ep133.features.RecState.Recording(12))
+
+@PreviewTest
+@Preview(name = "Live tools takes", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsTakesPreview() = Live(lastRead, oneGroup = true, tools = true, offline = "Last seen Oct 5, 2:02 PM", takes = someTakes)
+
 @PreviewTest
 @Preview(name = "Live offline note open", widthDp = 393, heightDp = 852, showBackground = true)
 @Composable

@@ -1,0 +1,119 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/ContentsScreen.kt */
+
+/* Box(fillMaxSize, shell, TopCenter) > LazyColumn(widthIn(max 560), contentPadding 16,
+ * 10 between items). Full screens scroll the page (app.css); the body already
+ * keeps out of the safe areas. */
+.contents {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  min-height: inherit;
+  background: var(--shell);
+}
+.contents:focus { outline: none; }
+
+.contents__column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  width: 100%;
+  max-width: var(--column-max);
+  min-width: 0;
+  padding: var(--space-16);
+}
+
+.contents__head {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+.contents__title {
+  flex: 1 1 0;
+  min-width: 0;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.contents__head > .key { flex: none; }
+
+.contents__ink { color: var(--ink); }
+.contents__dim { color: var(--graphite); }
+.contents__error { color: var(--danger); }
+
+/* The section's items keep the column's 10 apart. */
+.contents__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+}
+/* item { Box(height 6) }: 10 + 6 + 10 between the last sound and PROJECTS. */
+.contents__section--projects { margin-top: calc(var(--space-6) + var(--space-10)); }
+
+/* Plate (DeviceScreen.css .plate) with its own tap: the pressed tint, but not
+ * while one of its keys is the one pressed. */
+.contents__plate {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.contents__plate:active:not(:has(.key:active)) {
+  background-image: linear-gradient(var(--row-pressed), var(--row-pressed));
+}
+
+/* Row(CenterVertically, spacedBy 12): slot, name (weight 1), length, Play. */
+.contents__line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+}
+.contents__line > .key { flex: none; }
+
+.contents__main {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-key);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: inherit;
+}
+/* A project: its line and the sounds it uses, 4 apart (the plate's column). */
+.contents__main--project {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-4);
+}
+
+.contents__slot { flex: none; color: var(--graphite); }
+.contents__name {
+  flex: 1 1 0;
+  min-width: 0;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.contents__meta { flex: none; color: var(--graphite); }
+
+/* The opened row's keys: two of equal width, 10 apart. */
+.contents__keys {
+  display: flex;
+  gap: var(--space-10);
+}
+.contents__keys > .key { flex: 1 1 0; min-width: 0; }
+/* padding(top = 6) on top of the plate's 4. */
+.contents__keys--first { margin-top: var(--space-6); }
+
+/* Pads (padding top 6), then the export keys (padding top 4), on top of the plate's 4. */
+.contents__open {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin-top: var(--space-6);
+}

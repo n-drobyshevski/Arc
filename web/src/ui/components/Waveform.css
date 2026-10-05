@@ -1,0 +1,8 @@
+/* Port of the waveform Canvas in app/src/main/kotlin/dev/arc/ep133/ui/screens/TrimSheet.kt */
+
+.waveform {
+  display: block;
+  width: 100%;
+  border-radius: var(--radius-field);
+  background: var(--display);
+}

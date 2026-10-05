@@ -1,0 +1,23 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt (PlayKey)
+ * Web: a round hardware cap (theme/cap.css) rather than a navy ring. */
+
+.play-key {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  --cap-face: var(--key);
+  --cap-ink: var(--navy);
+  --cap-edge: var(--key-edge);
+}
+.play-key.is-playing {
+  --cap-face: var(--signal);
+  --cap-ink: var(--on-signal);
+  --cap-edge: var(--signal-edge);
+}
+.play-key:disabled { opacity: var(--icon-disabled); }
+
+.play-key__glyph { display: block; }

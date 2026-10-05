@@ -65,6 +65,12 @@ object Files {
         out.use { it.write(bytes) }
     }
 
+    /** Copies [file] to a document the user picked with the Storage Access Framework. */
+    fun copyTo(context: Context, uri: Uri, file: File) {
+        val out = context.contentResolver.openOutputStream(uri, "wt") ?: throw IOException("Could not open the file for writing")
+        out.use { o -> file.inputStream().use { it.copyTo(o, 64 * 1024) } }
+    }
+
     /** Display name and last-modified time of a picked or opened document, if the provider knows them. */
     fun describe(context: Context, uri: Uri): Pair<String, Long?> {
         var name: String? = null

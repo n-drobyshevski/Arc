@@ -1,0 +1,42 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt (Segmented)
+ * Web: each block is a hardware cap (theme/cap.css); the chosen one is navy and stays down. */
+
+.segmented {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.segmented__block {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* 4 at the sides (Components.kt), so six note names fit a row. */
+  padding: 12px 4px;
+  border-radius: var(--radius-field);
+  --cap-face: var(--tab-off);
+  --cap-ink: var(--on-tab-off);
+  text-align: center;
+  user-select: none;
+  -webkit-user-select: none;
+  /* capsKeySmall */
+  font-size: var(--size-caps-key-small);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: var(--track-caps-key);
+  text-transform: uppercase;
+}
+.segmented__block.is-on {
+  --cap-face: var(--navy);
+  --cap-ink: var(--on-navy);
+}
+
+.segmented__text {
+  min-width: 0;
+  /* One line whenever it fits (the Kotlin maxLines = 1). On very narrow screens
+   * the words wrap inside the block rather than being cut off mid-word. */
+  overflow-wrap: break-word;
+}

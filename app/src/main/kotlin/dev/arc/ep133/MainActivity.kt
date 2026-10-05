@@ -167,6 +167,13 @@ class MainActivity : ComponentActivity() {
         if (uri == null) return
         lifecycleScope.launch {
             try {
+                // A take is copied straight from its file: it can be long.
+                if (what != null && what.startsWith("take:")) {
+                    val f = controller.takes.value.firstOrNull { it.name == what.removePrefix("take:") }?.let(controller::takeFile)
+                        ?: throw java.io.IOException(Strings.FILE_MISSING)
+                    withContext(Dispatchers.IO) { Files.copyTo(this@MainActivity, uri, f) }
+                    return@launch
+                }
                 val bytes = when {
                     what == "log" -> logText().toByteArray()
                     what != null && what.startsWith("pak:") -> {
@@ -236,6 +243,22 @@ class MainActivity : ComponentActivity() {
                 controller.toast(e.message ?: e.toString(), error = true)
             }
         }
+    }
+
+    private fun shareTake(t: dev.arc.ep133.data.TakeInfo) {
+        try {
+            val uri = androidx.core.content.FileProvider.getUriForFile(this, Files.AUTHORITY, controller.takeFile(t))
+            Files.share(this, uri, "audio/wav", t.name, t.name)
+        } catch (e: java.io.IOException) {
+            controller.toast(dev.arc.ep133.text.MirrorText.SHARE_TAKE_FAILED, error = true)
+        } catch (e: IllegalArgumentException) {
+            controller.toast(dev.arc.ep133.text.MirrorText.SHARE_TAKE_FAILED, error = true)
+        }
+    }
+
+    private fun saveTake(t: dev.arc.ep133.data.TakeInfo) {
+        pendingSave = "take:${t.name}"
+        saveWavLauncher.launch(t.name)
     }
 
     private fun shareWav(b: BackupRecord, snd: PakSound) {
@@ -413,6 +436,10 @@ class MainActivity : ComponentActivity() {
         val playing by controller.player.playing.collectAsStateWithLifecycle()
         // Everything sounding, for Live's rings (several pads or notes for a chord).
         val voices by controller.liveKeys.collectAsStateWithLifecycle()
+        val rec by controller.rec.collectAsStateWithLifecycle()
+        val takes by controller.takes.collectAsStateWithLifecycle()
+        // REC on Live's display line, on the page or in the top bar.
+        val liveRec = dev.arc.ep133.ui.screens.RecUi(rec, controller::toggleRec)
         val compareA = compareIds?.substringBefore('|')?.let { id -> state.backups.firstOrNull { it.id == id } }
         val compareB = compareIds?.substringAfter('|')?.let { id -> state.backups.firstOrNull { it.id == id } }
         // Also runs again after a recreation, when the result is gone.
@@ -551,7 +578,7 @@ class MainActivity : ComponentActivity() {
                     onGuide = { guideOpen = it },
                     guide = { GuideScreen(onBack = { guideOpen = false }) },
                     // On a phone on its side, Live's display line rides in the top bar.
-                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, pianoRange) }) else null,
+                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, liveRec, pianoRange = pianoRange) }) else null,
                 ) {
                     // Back from another section returns to Live, the home section, first.
                     BackHandler(enabled = tab != Tab.LIVE) { selectTab(Tab.LIVE) }
@@ -586,6 +613,23 @@ class MainActivity : ComponentActivity() {
                             follow = appSettings.liveFollow,
                             onFollow = controller::setLiveFollow,
                             onPianoRange = { pianoRange = it },
+                            rec = liveRec,
+                            takes = dev.arc.ep133.ui.screens.TakesUi(
+                                list = takes,
+                                playing = playing,
+                                keyOf = controller::takeKey,
+                                fmtWhen = controller::fmtDateTime,
+                                connected = state.device != null,
+                                onPlay = { controller.playTake(it) },
+                                onStop = controller::stopPlayback,
+                                onShare = ::shareTake,
+                                onSave = ::saveTake,
+                                onToDevice = {
+                                    controller.takeToDevice(it)
+                                    selectTab(Tab.DEVICE)
+                                },
+                                onDelete = { controller.deleteTake(it) },
+                            ),
                         )
                         Tab.DEVICE -> DeviceScreen(
                             state = state,
