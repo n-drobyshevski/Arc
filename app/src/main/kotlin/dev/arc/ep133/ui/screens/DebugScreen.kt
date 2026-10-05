@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.sp
 import dev.arc.ep133.protocol.TrafficLog
 import dev.arc.ep133.text.Strings
 import dev.arc.ep133.ui.components.ArcKey
+import dev.arc.ep133.ui.components.ArcWindow
 import dev.arc.ep133.ui.components.ChoiceRow
 import dev.arc.ep133.ui.components.KeySize
 import dev.arc.ep133.ui.components.KeyStyle
@@ -57,17 +58,29 @@ fun DebugScreen(log: TrafficLog, onShare: () -> Unit, onSave: () -> Unit, onCopy
     val entries = remember(version) { log.snapshot() }
     var logging by remember { mutableStateOf(log.enabled) }
     val listState = rememberLazyListState()
-    // On a phone on its side the header is the list's first row and scrolls away with the log,
-    // which would otherwise get a few lines; upright it stays above the log's dark plate.
-    val short = LocalArcWindow.current.short
+    // On a phone on its side only the title and Done stay above the log; the switch and the keys
+    // are the list's first row and scroll away with it, or the log would get a few lines. Upright
+    // they all stay above the log's dark plate.
+    val window = LocalArcWindow.current
+    val short = window.short
     val rowsAbove = if (short) 1 else 0
-    LaunchedEffect(entries.size) { if (entries.isNotEmpty()) listState.scrollToItem(rowsAbove + entries.size - 1) }
+    // Opened, or the window changed (the phone turned): at the newest entry. Upright each new
+    // entry scrolls to it; on its side only while the list is at the end, so reading further
+    // up (or reaching the keys) isn't cut short.
+    var shownIn by remember { mutableStateOf<ArcWindow?>(null) }
+    LaunchedEffect(entries.size, window) {
+        if (entries.isEmpty()) return@LaunchedEffect
+        if (!short || shownIn != window || !listState.canScrollForward) listState.scrollToItem(rowsAbove + entries.size - 1)
+        shownIn = window
+    }
     val fmt = remember { DateTimeFormatter.ofPattern("HH:mm:ss.SSS").withZone(ZoneId.systemDefault()) }
-    val header: @Composable () -> Unit = {
+    val title: @Composable () -> Unit = {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text(Strings.DEBUG_TITLE, style = ArcType.heading, color = c.ink)
             ArcKey(Strings.DONE, onBack, size = KeySize.Small, style = KeyStyle.Quiet)
         }
+    }
+    val controls: @Composable () -> Unit = {
         ChoiceRow(Strings.DEBUG_TOGGLE, logging, {
             logging = !logging
             log.enabled = logging
@@ -90,7 +103,8 @@ fun DebugScreen(log: TrafficLog, onShare: () -> Unit, onSave: () -> Unit, onCopy
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        if (!short) header()
+        title()
+        if (!short) controls()
         LazyColumn(
             state = listState,
             modifier = Modifier
@@ -101,7 +115,7 @@ fun DebugScreen(log: TrafficLog, onShare: () -> Unit, onSave: () -> Unit, onCopy
         ) {
             if (short) {
                 item(key = "head") {
-                    Column(Modifier.padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { header() }
+                    Column(Modifier.padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { controls() }
                 }
             }
             if (entries.isEmpty()) {
