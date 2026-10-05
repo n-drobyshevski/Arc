@@ -1,5 +1,6 @@
 package dev.arc.ep133.backup
 
+import dev.arc.ep133.features.LearnedLinks
 import dev.arc.ep133.formats.JsJson
 import dev.arc.ep133.formats.isJsNumber
 import dev.arc.ep133.formats.jsStringOr
@@ -120,14 +121,25 @@ object LibraryIndex {
         return LibraryIndexData(entries, settings)
     }
 
-    /** Several indexes (an old one the new install couldn't overwrite, and a new one) merged by id; later ones win. */
+    /**
+     * Several indexes (an old one the new install couldn't overwrite, and a new
+     * one) merged by id; later ones win. Live's learned pad links are combined,
+     * so a few pads learned in a new install don't drop the rest.
+     */
     fun merge(indexes: List<LibraryIndexData>): LibraryIndexData {
         val byId = LinkedHashMap<String, IndexEntry>()
         val settings = LinkedHashMap<String, String>()
         for (ix in indexes) {
             for (e in ix.entries) byId[e.id] = e
+            val before = settings[LEARNED]
             settings.putAll(ix.settings)
+            val now = ix.settings[LEARNED]
+            if (before != null && now != null) {
+                settings[LEARNED] = LearnedLinks.format(LearnedLinks.merge(LearnedLinks.parse(before), LearnedLinks.parse(now)))
+            }
         }
         return LibraryIndexData(byId.values.toList(), settings)
     }
+
+    private const val LEARNED = "mirror.learned"
 }

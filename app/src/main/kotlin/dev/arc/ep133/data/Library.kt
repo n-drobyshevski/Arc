@@ -107,6 +107,11 @@ class Library(
         }
     }
 
+    /** Copies Live's last read of the device to the folder (as live.json). */
+    suspend fun saveLive(json: String) = withContext(Dispatchers.IO) {
+        files.withLock { copyOut { it.write(ExternalLibrary.LIVE_FILE, encodeUtf8(json), ExternalLibrary.JSON_MIME) } }?.let(onExternalError)
+    }
+
     /** Rewrites the index in the folder (after a settings change). */
     suspend fun syncIndex() = withContext(Dispatchers.IO) {
         files.withLock { copyOut { writeIndex(it) } }?.let(onExternalError)
@@ -146,10 +151,11 @@ class Library(
      * index files (the newest wins), and the settings. Backups already in the
      * library are skipped. The folder becomes the copy target only if it is
      * the library's (Documents/arc, or one holding arc files); otherwise this
-     * fails and nothing changes. Returns how many came back, and the settings.
+     * fails and nothing changes. Returns how many came back, the settings and
+     * Live's last read.
      */
-    suspend fun restoreFrom(tree: android.net.Uri, describe: (ByteArray) -> RestoredPak): Pair<Int, Map<String, String>> = withContext(Dispatchers.IO) {
-        val ext = external ?: return@withContext 0 to emptyMap()
+    suspend fun restoreFrom(tree: android.net.Uri, describe: (ByteArray) -> RestoredPak): Restored = withContext(Dispatchers.IO) {
+        val ext = external ?: return@withContext Restored(0, emptyMap(), null)
         restoring.withLock {
             val listing = ext.list(tree)
             if (!ExternalLibrary.isLibraryFolder(tree, listing.keys)) throw java.io.IOException(dev.arc.ep133.text.FeatureText.PICK_ARC_FOLDER)
@@ -190,9 +196,12 @@ class Library(
                 }
                 count++
             }
+            // The newest of live.json and any "live (1).json" next to it.
+            val live = listing.filterKeys(ExternalLibrary::isLive).values.sortedByDescending { it.lastModified }
+                .firstNotNullOfOrNull { f -> runCatching { decodeUtf8(ext.read(f.uri)) }.getOrNull() }
             ext.setTree(tree)
             files.withLock { copyOut { writeIndex(it, index.settings) } }?.let(onExternalError)
-            count to index.settings
+            Restored(count, index.settings, live)
         }
     }
 
@@ -257,3 +266,6 @@ data class RestoredPak(
     val projectSlots: Map<Int, List<Int>>,
     val soundNames: Map<Int, String>,
 )
+
+/** What a restore from the folder brought back. */
+data class Restored(val count: Int, val settings: Map<String, String>, val live: String?)

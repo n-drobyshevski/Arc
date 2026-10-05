@@ -735,6 +735,20 @@ class ArcController(
         val snap = m.saved(System.currentTimeMillis())
         // A read that found nothing (no project, no names) would only hide a useful one.
         if (snap.names.isEmpty() && snap.groups.isEmpty()) return
+        writeLastRead(snap)
+        // And to Documents/arc, so it comes back after a reinstall.
+        scope.launch { library.saveLive(snap.toJson()) }
+    }
+
+    /** Live's last read from the folder after a reinstall, unless this install has a newer one. */
+    private suspend fun restoreLastRead(json: String?) {
+        val snap = json?.let(dev.arc.ep133.features.LiveSnapshot::fromJson) ?: return
+        val cur = loadLastRead()
+        if (cur != null && cur.savedAt >= snap.savedAt) return
+        writeLastRead(snap)
+    }
+
+    private fun writeLastRead(snap: dev.arc.ep133.features.LiveSnapshot) {
         lastRead = snap
         lastReadLoaded = true
         scope.launch(Dispatchers.IO) {
@@ -807,16 +821,10 @@ class ArcController(
     }
 
     /** Learned pad links, "offset:pad" pairs: the keypad's numbering is the same in every project. */
-    private fun loadLearned(): Map<Int, Int> =
-        mirrorPrefs.getString("learned", "").orEmpty().split(',').mapNotNull { pair ->
-            val (o, p) = pair.split(':').takeIf { it.size == 2 } ?: return@mapNotNull null
-            val offset = o.toIntOrNull() ?: return@mapNotNull null
-            val pad = p.toIntOrNull() ?: return@mapNotNull null
-            if (offset in 0..11 && pad in 1..12) offset to pad else null
-        }.toMap()
+    private fun loadLearned(): Map<Int, Int> = dev.arc.ep133.features.LearnedLinks.parse(mirrorPrefs.getString("learned", null))
 
     private fun saveLearned(learned: Map<Int, Int>) {
-        mirrorPrefs.edit { putString("learned", learned.entries.joinToString(",") { "${it.key}:${it.value}" }) }
+        mirrorPrefs.edit { putString("learned", dev.arc.ep133.features.LearnedLinks.format(learned)) }
         scope.launch { library.syncIndex() }
     }
 
@@ -826,7 +834,7 @@ class ArcController(
      */
     fun restoreFromFolder(tree: android.net.Uri): Job = scope.launch {
         try {
-            val (n, settings) = library.restoreFrom(tree) { bytes ->
+            val restored = library.restoreFrom(tree) { bytes ->
                 val d = Paks.describe(Paks.open(bytes))
                 dev.arc.ep133.data.RestoredPak(
                     createdAt = d.generatedAt ?: System.currentTimeMillis(),
@@ -839,11 +847,19 @@ class ArcController(
                     soundNames = d.soundNames,
                 )
             }
+            val settings = restored.settings
+            val n = restored.count
+            // Pads learned since the reinstall stay; the folder's fill in the rest.
+            val learned = settings["mirror.learned"]?.let { dev.arc.ep133.features.LearnedLinks.merge(dev.arc.ep133.features.LearnedLinks.parse(it), loadLearned()) }
             mirrorPrefs.edit {
-                settings["mirror.learned"]?.let { putString("learned", it) }
-                settings["mirror.order"]?.let { putString("order", it) }
+                learned?.let { putString("learned", dev.arc.ep133.features.LearnedLinks.format(it)) }
+                // A pad order chosen since the reinstall stays too.
+                if (!mirrorPrefs.contains("order")) settings["mirror.order"]?.let { putString("order", it) }
             }
             settingsStore.fromIndex(settings)
+            restoreLastRead(restored.live)
+            // library.json was rewritten before these were applied: write them into it now.
+            library.syncIndex()
             _state.update { it.copy(folderPicked = library.folderPicked) }
             toast(if (n == 0) FeatureText.NOTHING_TO_RESTORE else FeatureText.restored(n))
         } catch (e: Throwable) {
@@ -1003,6 +1019,9 @@ class ArcController(
     fun setLiveOneGroup(on: Boolean) = changeSettings { it.copy(liveOneGroup = on) }
 
     fun setLiveFollow(on: Boolean) = changeSettings { it.copy(liveFollow = on) }
+
+    /** The guide overlay was shown (it opens by itself only once, also across reinstalls). */
+    fun setGuideSeen() = changeSettings { it.copy(guideSeen = true) }
 
     /** How many backups [setKeepLast] would delete now, for the confirmation. */
     fun pruneCount(keep: Int?): Int = LibraryRules.toPrune(_state.value.backups, keep).size

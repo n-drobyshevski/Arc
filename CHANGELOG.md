@@ -17,6 +17,10 @@ version fixes bugs. The version itself is set in `version.properties`.
 - Live's secondary controls (view switch, Follow, KEYS strip, pad numbering and notes) moved into a side panel, opened from a hatched strip on the right edge like the PO app's "more tools", so the page is just the display, the pads and A–D.
 - Live's one-group view shows the display as one line (play state, tempo, project and the pad just played), so the pads get the room.
 
+### Fixed
+- All of arc's config now survives uninstalling: Live's last read (`live.json`) and the guide overlay's "already shown" flag join the settings and Live's pad names in Documents/arc.
+- Restoring from Documents/arc no longer writes the defaults back over the restored settings, and a fresh install no longer overrides the old settings before restoring: only settings you changed are written. Live's pad names learned before and after a reinstall are combined instead of replaced.
+
 ## [0.2.0] - 2026-10-05
 
 ### Added
