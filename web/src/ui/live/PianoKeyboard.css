@@ -1,7 +1,8 @@
 /* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/PianoKeyboard.kt
- * Flat keys on one plate, as Android draws them (the grid's keys are caps; a
- * piano's are not): white keys split by thin lines, black keys outlined, the
- * scale's keys ringed at their foot and the others dimmed. */
+ * The keys are caps (theme/cap.css) in the device's grey body: white keys
+ * with a gap between them, black keys dark caps with a lighter side, outlined
+ * so the dark theme keeps its contrast; the scale's keys ringed at their foot
+ * and the others dimmed. A key sounding here is down on its edge. */
 
 .piano {
   /* The key's root ring: the darker orange on light white keys (3:1 there), the piano's own in the dark. */
@@ -17,18 +18,25 @@
   :root:not([data-theme=light]) .piano { --piano-root: var(--piano-signal); }
 }
 
-/* The plate: radius 14, its keys inside; every touch is the piano's (no scroll, no zoom). */
+/* The body: the device's grey around the keys, 10 in (and the caps' edges, right
+ * and below); every touch on it is the piano's (no scroll, no zoom). */
 .piano__plate {
-  position: relative;
+  display: flex;
   flex: 1 1 auto;
   min-height: 0;
-  border-radius: var(--radius-plate, 14px);
-  background: var(--piano-line);
-  overflow: hidden;
+  padding: 10px calc(10px + var(--cap-dx)) calc(10px + var(--cap-dy)) 10px;
+  border-radius: var(--radius-plate);
+  background: var(--hw-body);
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
+}
+/* The keys' own box: what Piano.layout lays out and what a touch is hit against. */
+.piano__keys {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .piano__key {
@@ -37,6 +45,7 @@
   --hot-pct: calc(clamp(0, (var(--glow, 0) - 0.3) * 1000000, 1) * 100%);
   position: absolute;
   top: 0;
+  --cap-face: color-mix(in oklab, var(--signal) var(--glow-pct), var(--face));
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -50,32 +59,31 @@
 }
 .piano__key:focus-visible { outline: var(--focus-ring); outline-offset: -3px; z-index: 3; }
 
-/* A white key: its face (dimmed outside the scale), lit orange by a device note; a 1px line on its right. */
+/* A white key: a pale cap (dimmed outside the scale), lit orange by a device note,
+ * 2 in from each side of its place so the body shows between keys; radius 6. */
 .piano__key--white {
   --face: var(--piano-white);
   --ring: var(--navy);
   --ink: var(--ink);
   z-index: 0;
-  background: color-mix(in oklab, var(--signal) var(--glow-pct), var(--face));
-  box-shadow: inset -1px 0 0 var(--piano-line);
+  margin-left: 2px;
+  margin-right: 2px;
+  border-radius: 6px;
 }
 .piano__key--white.is-out { --face: var(--key-out); }
 .piano__key--white.is-root { --ring: var(--piano-root); }
-.piano__key--last { box-shadow: none; }
-/* The plate's corners: the first and last keys round with it, so an outline follows them. */
-.piano__key--first { border-radius: var(--radius-plate, 14px) 0 0 var(--radius-plate, 14px); }
-.piano__key--last { border-radius: 0 var(--radius-plate, 14px) var(--radius-plate, 14px) 0; }
 
-/* A black key: over the whites, 0.6 of one wide and 0.62 high, outlined in the line colour. */
+/* A black key: over the whites, 0.6 of one wide and 0.62 high; a dark cap with the
+ * K.O. II's lighter side, outlined in the line colour; radius 4. */
 .piano__key--black {
   --face: var(--piano-black);
+  --cap-edge: color-mix(in oklab, var(--signal-edge) var(--glow-pct), var(--hw-dark-edge));
   --ring: var(--on-piano-black);
   --ink: var(--on-piano-black);
   z-index: 1;
   padding-bottom: 10px;
-  border-radius: 0 0 3px 3px;
-  background: color-mix(in oklab, var(--signal) var(--glow-pct), var(--face));
-  box-shadow: 0 0 0 1px var(--piano-line);
+  border-radius: 4px;
+  outline: 1px solid var(--piano-line);
 }
 .piano__key--black.is-out { --face: var(--key-out-black); }
 .piano__key--black.is-root { --ring: var(--signal); }

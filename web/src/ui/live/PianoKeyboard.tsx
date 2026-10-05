@@ -6,6 +6,11 @@
 // still play. Notes from the EP-133 light their exact key; one past either
 // end puts an orange tick at that end. A note playing here is outlined.
 //
+// The keys are caps, as every key in the app (theme/cap.css): each a flat
+// face over a flat edge offset down and to the right, sitting in the
+// device's grey body with a gap between white keys; a key sounding here is
+// down on its edge.
+//
 // Every finger is followed across the keys: sliding onto the next key lets go
 // of one note and plays the next (a glissando), several fingers make a chord,
 // and a note is let go of when its last finger lifts or leaves (NoteTouches).
@@ -48,6 +53,7 @@ export function PianoKeyboard(props: {
 }): JSX.Element {
   const { range, st, keys, now, actions } = props
   const plate = useRef<HTMLDivElement | null>(null)
+  const area = useRef<HTMLDivElement | null>(null)
   const notes = useMemo(() => rangeNotes(range), [range.first, range.last])
   // The keys in unit space (0..1 of the plate), drawn as percentages; hits scale them to the plate's box.
   const unit = useMemo(() => Piano.layout(range, 1, 1), [range.first, range.last])
@@ -67,9 +73,9 @@ export function PianoKeyboard(props: {
   // Leaving the keys (the screen goes, KEYS goes off, the window turns upright) lets go of every note.
   useEffect(() => () => play(fingers.releaseAll()), [fingers])
 
-  // The keys in the plate's px now, and a pointer's place on the plate.
+  // The keys in px now, and a pointer's place among them (inside the body around them).
   const at = (e: TargetedPointerEvent<HTMLDivElement>): { x: number; y: number; keys: PianoKey[] } | null => {
-    const box = plate.current?.getBoundingClientRect()
+    const box = area.current?.getBoundingClientRect()
     if (!box || box.width === 0) return null
     return { x: e.clientX - box.left, y: e.clientY - box.top, keys: Piano.layout(range, box.width, box.height) }
   }
@@ -145,7 +151,8 @@ export function PianoKeyboard(props: {
         onContextMenu={(e) => e.preventDefault()}
         onKeyDown={onKeyDown}
       >
-        {unit.map((k, i) => {
+        <div ref={area} class="piano__keys">
+        {unit.map((k) => {
           const mark = Piano.mark(k.note, keys.root, keys.scale)
           const g = lit.get(k.note) ?? 0
           const playing = keys.playingNotes.has(k.note)
@@ -153,12 +160,10 @@ export function PianoKeyboard(props: {
           // Names on the white keys of the scale; a black key's only while it sounds, where it fits.
           const named = mark !== KeyMark.OUT && (!k.black || g > 0 || playing)
           const cls =
-            'piano__key' +
+            'piano__key cap-3d' +
             (k.black ? ' piano__key--black' : ' piano__key--white') +
             (mark === KeyMark.OUT ? ' is-out' : mark === KeyMark.ROOT ? ' is-root' : ' is-in') +
-            (playing ? ' is-playing' : '') +
-            (!k.black && k.rect.left === 0 ? ' piano__key--first' : '') +
-            (!k.black && i === unit.length - 1 ? ' piano__key--last' : '')
+            (playing ? ' is-playing is-down' : '')
           return (
             <button
               key={k.note}
@@ -170,7 +175,8 @@ export function PianoKeyboard(props: {
               aria-description={MirrorText.PLAY}
               style={{
                 left: `${k.rect.left * 100}%`,
-                width: `${k.rect.width * 100}%`,
+                // A white key gives 2px either side to the gap between keys (its margins).
+                width: k.black ? `${k.rect.width * 100}%` : `calc(${k.rect.width * 100}% - 4px)`,
                 height: `${k.rect.height * 100}%`,
                 '--glow': glowCss(g),
               }}
@@ -196,6 +202,7 @@ export function PianoKeyboard(props: {
         })}
         {past.below !== null && <span class="piano__tick piano__tick--below" aria-hidden="true" />}
         {past.above !== null && <span class="piano__tick piano__tick--above" aria-hidden="true" />}
+        </div>
       </div>
     </div>
   )
