@@ -168,7 +168,7 @@ data class UiState(
 /** How much of Live's pad samples is kept decoded in memory (16-bit, so 32M samples). */
 private const val PAD_MEMORY_BYTES = 64L * 1024 * 1024
 
-/** A Live press let go of while its sound loaded for longer than this plays nothing at all. */
+/** A Live press let go of while its sound loaded for longer than this sounds only if no press came after it. */
 private const val LATE_LOAD_NS = 120_000_000L
 
 class ArcController(
@@ -216,6 +216,13 @@ class ArcController(
     // A sample on its way to memory for a press, by the same key: the presses that come
     // meanwhile (a glissando over the keys) wait for that one load. Main thread only.
     private val padLoads = HashMap<String, kotlinx.coroutines.Deferred<PadAudio?>>()
+    // The slot the background copy is reading and its sound once kept, so a press on it waits
+    // for that read instead of reading it again. Main thread only.
+    private var copying: Pair<Int, kotlinx.coroutines.CompletableDeferred<PadAudio?>>? = null
+    // Counts the sounds presses read from the device, so the copy notices one it was about to read.
+    private var pressReads = 0
+    // When the latest Live press (pad or key) was made, for the late-load rule in startHeld.
+    private var lastPressAt = 0L
     private var preloadGen = 0
     private var preloadJob: Job? = null
     // Bluetooth's delay is pointed out once a run.
@@ -860,42 +867,66 @@ class ArcController(
                 // The KEYS sound first (asked again each round, as it changes with the pad tapped).
                 val keysSlot = _state.value.keysPad?.let(m::slotOf)
                 val slots = (listOfNotNull(keysSlot) + m.saved(0).groups.flatMap { it.pads.values }.filterNotNull().sorted()).distinct()
+                // A sound a press is loading is left to that press (it keeps what it reads).
+                val pressing = slots.filter(::pressLoading).toSet()
+                val reads = pressReads
                 val todo = withContext(Dispatchers.IO) {
                     slots.firstNotNullOfOrNull { slot ->
-                        deviceSounds[slot]?.takeIf { e -> !padSounds.fresh(slot, e.name, e.size) }
+                        deviceSounds[slot]?.takeIf { e -> slot !in pressing && !padSounds.fresh(slot, e.name, e.size) }
                     }
-                } ?: break
+                }
+                if (todo == null) {
+                    // Only sounds presses are loading left: look again once they have.
+                    if (pressing.isEmpty()) break
+                    padLoads.values.toList().forEach { it.join() }
+                    continue
+                }
                 // The device must be free, and nobody waiting for it.
                 combine(_state, deviceWaiters) { st, w -> !st.busy && !st.backgroundRead && w == 0 }.first { it }
                 if (gen != cacheGen || mirror !== m || session !== s) break
+                // A press took this sound meanwhile (or read one from the device): look again.
+                if (pressLoading(todo.slot) || pressReads != reads) continue
                 _state.update { it.copy(backgroundRead = true) }
-                val pcm = try {
-                    val d = DeviceBrowser.soundDetails(s, todo.slot)
-                    d to dev.arc.ep133.protocol.Fs.download(s, todo.slot)
-                } catch (e: Throwable) {
-                    if (e is kotlinx.coroutines.CancellationException) throw e
-                    trafficLog.note("live copy of ${todo.slot} failed: ${e.message}")
-                    null
+                val read = kotlinx.coroutines.CompletableDeferred<PadAudio?>()
+                copying = todo.slot to read
+                try {
+                    val pcm = try {
+                        val d = DeviceBrowser.soundDetails(s, todo.slot)
+                        d to dev.arc.ep133.protocol.Fs.download(s, todo.slot)
+                    } catch (e: Throwable) {
+                        if (e is kotlinx.coroutines.CancellationException) throw e
+                        trafficLog.note("live copy of ${todo.slot} failed: ${e.message}")
+                        null
+                    } finally {
+                        _state.update { it.copy(backgroundRead = false) }
+                    }
+                    if (pcm == null) break
+                    read.complete(keepPadSound(todo.slot, todo.name, todo.size, pcm.second, pcm.first.channels, pcm.first.sampleRate))
                 } finally {
-                    _state.update { it.copy(backgroundRead = false) }
+                    read.complete(null)
+                    if (copying?.second === read) copying = null
                 }
-                if (pcm == null) break
-                keepPadSound(todo.slot, todo.name, todo.size, pcm.second, pcm.first.channels, pcm.first.sampleRate)
             }
         }
     }
 
-    private suspend fun keepPadSound(slot: Int, name: String, size: Long, pcm: ByteArray, channels: Double, sampleRate: Double) {
+    /** Saves a sound read from the device; with Live open it goes into memory too, and is returned. */
+    private suspend fun keepPadSound(slot: Int, name: String, size: Long, pcm: ByteArray, channels: Double, sampleRate: Double): PadAudio? {
         // Live is open: ready to play too.
-        if (mirror != null) {
-            val a = withContext(Dispatchers.Default) { PadAudio.of(pcm, channels.toInt(), sampleRate.toInt()) }
-            keepInMemory(slot, name, a)
+        val a = if (mirror != null) {
+            withContext(Dispatchers.Default) { PadAudio.of(pcm, channels.toInt(), sampleRate.toInt()) }.also { keepInMemory(slot, name, it) }
+        } else {
+            null
         }
         withContext(Dispatchers.IO) {
             runCatching { padSounds.put(slot, name, size, Wav.encode(pcm, channels, sampleRate)) }
                 .onFailure { trafficLog.note("saving pad sound $slot failed: ${it.message}") }
         }
+        return a
     }
+
+    /** Whether a press is loading [slot]'s sound now. */
+    private fun pressLoading(slot: Int) = padLoads.keys.any { it.startsWith("$slot:") }
 
     // Live's pads and keys sound while held (a gate): the voices whose finger is still down.
     private val held = HashSet<String>()
@@ -922,6 +953,7 @@ class ArcController(
      */
     fun playPad(pad: dev.arc.ep133.features.PhysicalPad, hold: Boolean = true): Job {
         val pressedAt = System.nanoTime()
+        lastPressAt = pressedAt
         val key = "live:${pad.group}:${pad.offset}"
         if (hold) held += key
         // Main.immediate: with the sample in memory this runs to the end before returning.
@@ -944,13 +976,14 @@ class ArcController(
 
     /**
      * Starts a Live voice. One let go of while it was loading still sounds,
-     * briefly, after a quick load; after a slow one ([LATE_LOAD_NS]) it
-     * doesn't start at all, or a first glissando over a sound not in memory
-     * yet would end in a burst of every note it slid over.
+     * briefly, after a quick load. After a slow one ([LATE_LOAD_NS]) only the
+     * latest press does: a single quick tap on a sound not in memory yet is
+     * still heard, but a first glissando over one doesn't end in a burst of
+     * every note it slid over.
      */
     private fun startHeld(key: String, hold: Boolean, a: PadAudio, semitones: Int, pressedAt: Long) {
         val lifted = hold && key !in held
-        if (lifted && System.nanoTime() - pressedAt > LATE_LOAD_NS) return
+        if (lifted && pressedAt != lastPressAt && System.nanoTime() - pressedAt > LATE_LOAD_NS) return
         when {
             a.silent -> toastOnce(FeatureText.SILENT_SOUND)
             !liveAudio.play(key, a.pcm, a.channels, a.sampleRate, semitones, pressedAt) -> toastOnce(FeatureText.NO_AUDIO_OUTPUT, error = true)
@@ -1067,11 +1100,14 @@ class ArcController(
     /** What [padAudio] waits for: arc's copy or a backup, else the device; null after a toast says why. */
     private suspend fun loadForPress(slot: Int, name: String): PadAudio? {
         return try {
-            val audio = loadPadAudio(slot, name) ?: if (session != null && _state.value.device != null) {
+            // The background copy reading this very sound: wait for it rather than read it twice.
+            val copied = loadPadAudio(slot, name) ?: copying?.takeIf { it.first == slot }?.second?.await()
+            val audio = copied ?: padMemory[memoryKey(slot, name)] ?: if (session != null && _state.value.device != null) {
                 val (d, pcm) = exclusive("play:$slot") { s -> DeviceBrowser.soundDetails(s, slot) to dev.arc.ep133.protocol.Fs.download(s, slot) }
                     ?: return null
+                pressReads++
                 deviceSounds[slot]?.let { keepPadSound(slot, it.name, it.size, pcm, d.channels, d.sampleRate) }
-                withContext(Dispatchers.Default) { PadAudio.of(pcm, d.channels.toInt(), d.sampleRate.toInt()) }
+                    ?: withContext(Dispatchers.Default) { PadAudio.of(pcm, d.channels.toInt(), d.sampleRate.toInt()) }
             } else {
                 toastOnce(dev.arc.ep133.text.MirrorText.NO_COPY)
                 return null
@@ -1109,6 +1145,7 @@ class ArcController(
      */
     fun playNote(note: Int, hold: Boolean = true): Job {
         val pressedAt = System.nanoTime()
+        lastPressAt = pressedAt
         val key = "note:$note"
         if (hold) held += key
         return scope.launch {
