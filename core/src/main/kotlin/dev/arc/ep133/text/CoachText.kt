@@ -24,6 +24,7 @@ object CoachText {
     const val GROUPS = "Pick a group"
     const val FOLLOW = "Follow the group played"
     const val PADS = "Pads light as you play"
+    const val MORE_TOOLS = "More tools"
 
     const val REFRESH = "Read the device again"
     const val ADD_SAMPLES = "Add samples"

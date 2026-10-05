@@ -12,6 +12,7 @@ version fixes bugs. The version itself is set in `version.properties`.
 ### Changed
 - Quieter controls after the pocket operator app: icon keys in the top bar (back up, connection, guide, settings) and in the Backups and Device headers (search, import, refresh, add samples), named on long-press and to screen readers; only the selected tab is a block; view switches are underlined words; play keys are outlines until they play; Follow is a target icon.
 - A guide overlay (**?**, and once on the first start) tags every control on screen with its name, like the PO app's tutorial.
+- Live's secondary controls (view switch, Follow, KEYS strip, pad numbering and notes) moved into a side panel, opened from a hatched strip on the right edge like the PO app's "more tools", so the page is just the display, the pads and A–D.
 - Live's one-group view shows the display as one line (play state, tempo, project and the pad just played), so the pads get the room.
 
 ## [0.2.0] - 2026-10-05

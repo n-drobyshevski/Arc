@@ -1,5 +1,7 @@
 package dev.arc.ep133.ui.components
 
+import androidx.compose.ui.semantics.stateDescription
+import dev.arc.ep133.text.SettingsText
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExitTransition
@@ -303,6 +305,37 @@ fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, mod
             ) {
                 Text(label.uppercase(), style = ArcType.capsKeySmall, color = if (on) c.onNavy else c.onTabOff, maxLines = 1, textAlign = TextAlign.Center)
             }
+        }
+    }
+}
+
+/** A setting that is on or off: its name and note, and an ON / OFF block (navy when on). */
+@Composable
+fun SwitchRow(title: String, note: String, on: Boolean, onChange: (Boolean) -> Unit) {
+    val c = LocalArcColors.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Switch) { onChange(!on) }
+            .semantics { stateDescription = if (on) SettingsText.ON else SettingsText.OFF }
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, style = ArcType.bold, color = c.ink)
+            Text(note, style = ArcType.small, color = c.graphite)
+        }
+        Box(
+            Modifier
+                .widthIn(min = 56.dp)
+                .heightIn(min = 34.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(if (on) c.navy else c.tabOff)
+                .padding(horizontal = 10.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text((if (on) SettingsText.ON else SettingsText.OFF).uppercase(), style = ArcType.capsKeySmall, color = if (on) c.onNavy else c.onTabOff)
         }
     }
 }

@@ -52,6 +52,7 @@ import dev.arc.ep133.ui.components.KeySize
 import dev.arc.ep133.ui.components.KeyStyle
 import dev.arc.ep133.ui.components.PlateLine
 import dev.arc.ep133.ui.components.Segmented
+import dev.arc.ep133.ui.components.SwitchRow
 import dev.arc.ep133.ui.theme.ArcType
 import dev.arc.ep133.ui.theme.LocalArcColors
 
@@ -113,9 +114,9 @@ fun SettingsScreen(
 
             Section(SettingsText.DEVICE)
             GridPlate {
-                ToggleRow(SettingsText.AUTO_CONNECT, SettingsText.AUTO_CONNECT_NOTE, settings.autoConnect, onAutoConnect)
+                SwitchRow(SettingsText.AUTO_CONNECT, SettingsText.AUTO_CONNECT_NOTE, settings.autoConnect, onAutoConnect)
                 PlateLine()
-                ToggleRow(SettingsText.KEEP_SCREEN_ON, SettingsText.KEEP_SCREEN_ON_NOTE, settings.keepScreenOn, onKeepScreenOn)
+                SwitchRow(SettingsText.KEEP_SCREEN_ON, SettingsText.KEEP_SCREEN_ON_NOTE, settings.keepScreenOn, onKeepScreenOn)
             }
 
             Section(SettingsText.LIBRARY)
@@ -191,37 +192,6 @@ private fun Section(text: String) {
 @Composable
 private fun Label(text: String) {
     Text(text, style = ArcType.semi, color = LocalArcColors.current.ink)
-}
-
-/** A setting that is on or off: its name and note, and an ON / OFF block (navy when on). */
-@Composable
-private fun ToggleRow(title: String, note: String, on: Boolean, onChange: (Boolean) -> Unit) {
-    val c = LocalArcColors.current
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Switch) { onChange(!on) }
-            .semantics { stateDescription = if (on) SettingsText.ON else SettingsText.OFF }
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, style = ArcType.bold, color = c.ink)
-            Text(note, style = ArcType.small, color = c.graphite)
-        }
-        Box(
-            Modifier
-                .widthIn(min = 56.dp)
-                .heightIn(min = 34.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(if (on) c.navy else c.tabOff)
-                .padding(horizontal = 10.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text((if (on) SettingsText.ON else SettingsText.OFF).uppercase(), style = ArcType.capsKeySmall, color = if (on) c.onNavy else c.onTabOff)
-        }
-    }
 }
 
 @Composable

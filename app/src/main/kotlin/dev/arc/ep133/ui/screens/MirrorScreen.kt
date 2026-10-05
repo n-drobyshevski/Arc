@@ -1,5 +1,9 @@
 package dev.arc.ep133.ui.screens
 
+import androidx.compose.runtime.mutableStateOf
+import dev.arc.ep133.ui.components.SwitchRow
+import dev.arc.ep133.ui.components.SideStripWidth
+import dev.arc.ep133.ui.components.SideZone
 import dev.arc.ep133.text.CoachText
 import dev.arc.ep133.ui.components.TextToggle
 import dev.arc.ep133.ui.components.CoachYellowInk
@@ -117,6 +121,8 @@ fun MirrorScreen(
     follow: Boolean = true,
     onFollow: (Boolean) -> Unit = {},
     initialGroup: Int = 0,
+    /** For screenshots: start with the tools panel open. */
+    initialToolsOpen: Boolean = false,
 ) {
     val c = LocalArcColors.current
     if (onBack != null) BackHandler(onBack = onBack)
@@ -128,78 +134,92 @@ fun MirrorScreen(
         while (fading) withFrameNanos { frame = System.nanoTime() }
     }
     val now = fixedNow ?: if (fading) frame else System.nanoTime()
-    val viewSwitch = @Composable {
-        TextToggle(
-            listOf(MirrorText.ALL_GROUPS, MirrorText.ONE_GROUP),
-            selected = if (oneGroup) 1 else 0,
-            onSelect = { onOneGroup(it == 1) },
-            modifier = Modifier.coachMark("live.view", CoachText.VIEW, CoachYellow, CoachYellowInk),
-        )
+    // The secondary controls live in a side panel, opened from the strip on the right.
+    var toolsOpen by rememberSaveable { mutableStateOf(initialToolsOpen) }
+    // The group shown in the one-group view; Follow switches it to the group just played.
+    var group by rememberSaveable { mutableIntStateOf(initialGroup) }
+    val hitGroup = st.lastHit?.pad?.group
+    LaunchedEffect(hitGroup, st.lastHit, follow, oneGroup) {
+        if (oneGroup && follow && hitGroup != null) group = hitGroup
     }
     Box(Modifier.fillMaxSize().background(c.shell), contentAlignment = Alignment.TopCenter) {
-        if (oneGroup) {
-            // One group fills the screen without scrolling: the display, the switch, the
-            // grid (its rows share whatever height is left) and the group keys.
-            var group by rememberSaveable { mutableIntStateOf(initialGroup) }
-            // Follow: show the group of the pad just played.
-            val hitGroup = st.lastHit?.pad?.group
-            LaunchedEffect(hitGroup, st.lastHit, follow) {
-                if (follow && hitGroup != null) group = hitGroup
-            }
-            Column(
-                Modifier
-                    // Not much wider than a phone, so a tablet's pads don't turn into long bars.
-                    .widthIn(max = 520.dp)
-                    .fillMaxSize()
-                    .windowInsetsPadding(WindowInsets.safeDrawing)
-                    .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                if (onBack != null) {
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        Caption(MirrorText.TITLE)
-                        CloseKey(onBack, dev.arc.ep133.text.GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
+        SideZone(
+            open = toolsOpen,
+            onOpen = { toolsOpen = true },
+            onClose = { toolsOpen = false },
+            title = MirrorText.TOOLS,
+            panel = {
+                Caption(MirrorText.VIEW, align = androidx.compose.ui.text.style.TextAlign.Start)
+                TextToggle(
+                    listOf(MirrorText.ALL_GROUPS, MirrorText.ONE_GROUP),
+                    selected = if (oneGroup) 1 else 0,
+                    onSelect = { onOneGroup(it == 1) },
+                )
+                if (oneGroup) {
+                    GridPlate { SwitchRow(MirrorText.FOLLOW, MirrorText.FOLLOW_NOTE, follow, onFollow) }
+                }
+                if (st.lastKeysNote != null) KeysStrip(st)
+                Notes(st, mirror, onPadOrder)
+            },
+        ) {
+            if (oneGroup) {
+                // One group fills the screen without scrolling: the display line, the grid
+                // (its rows share whatever height is left) and the group keys.
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                    Column(
+                        Modifier
+                            // Not much wider than a phone, so a tablet's pads don't turn into long bars.
+                            .widthIn(max = 520.dp)
+                            .fillMaxSize()
+                            .windowInsetsPadding(WindowInsets.safeDrawing)
+                            .padding(start = 16.dp, end = SideStripWidth + 4.dp, top = 4.dp, bottom = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        if (onBack != null) {
+                            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                Caption(MirrorText.TITLE)
+                                CloseKey(onBack, dev.arc.ep133.text.GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
+                            }
+                        }
+                        DisplayStrip(st, mirror)
+                        Group(
+                            group, st, nameOf, now,
+                            Modifier.fillMaxWidth().weight(1f).coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
+                            big = true,
+                        )
+                        GroupKeys(group, st, now, onSelect = { group = it })
                     }
                 }
-                DisplayStrip(st, mirror)
-                viewSwitch()
-                Group(
-                    group, st, nameOf, now,
-                    Modifier.fillMaxWidth().weight(1f).coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
-                    big = true,
-                )
-                GroupKeys(group, st, now, onSelect = { group = it }, follow = follow, onFollow = onFollow)
-            }
-            return@Box
-        }
-        Column(
-            Modifier
-                .widthIn(max = 720.dp)
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Caption(MirrorText.TITLE)
-                if (onBack != null) CloseKey(onBack, dev.arc.ep133.text.GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
-            }
-            Display(st, mirror)
-            viewSwitch()
-            BoxWithConstraints(Modifier.fillMaxWidth()) {
-                // Four groups in a row when there is room, two by two on a phone.
-                val perRow = if (maxWidth >= 640.dp) 4 else 2
-                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    for (row in (0..3).chunked(perRow)) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                            for (g in row) Group(g, st, nameOf, now, Modifier.weight(1f))
+            } else {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                    Column(
+                        Modifier
+                            .widthIn(max = 720.dp)
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState())
+                            .windowInsetsPadding(WindowInsets.safeDrawing)
+                            .padding(start = 16.dp, end = SideStripWidth + 4.dp, top = 4.dp, bottom = 24.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            Caption(MirrorText.TITLE)
+                            if (onBack != null) CloseKey(onBack, dev.arc.ep133.text.GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
+                        }
+                        Display(st, mirror)
+                        BoxWithConstraints(Modifier.fillMaxWidth()) {
+                            // Four groups in a row when there is room, two by two on a phone.
+                            val perRow = if (maxWidth >= 640.dp) 4 else 2
+                            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                for (row in (0..3).chunked(perRow)) {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                        for (g in row) Group(g, st, nameOf, now, Modifier.weight(1f))
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
-            if (st.lastKeysNote != null) KeysStrip(st)
-            Notes(st, mirror, onPadOrder)
         }
     }
 }
@@ -306,10 +326,10 @@ private fun Group(group: Int, st: MirrorState, nameOf: (PhysicalPad) -> String?,
 
 /**
  * The group keys under the single grid: navy for the group shown, lit orange
- * while one of a group's pads sounds, and Follow (navy when on).
+ * while one of a group's pads sounds.
  */
 @Composable
-private fun GroupKeys(group: Int, st: MirrorState, now: Long, onSelect: (Int) -> Unit, follow: Boolean, onFollow: (Boolean) -> Unit) {
+private fun GroupKeys(group: Int, st: MirrorState, now: Long, onSelect: (Int) -> Unit) {
     val c = LocalArcColors.current
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         for (g in 0..3) {
@@ -334,24 +354,6 @@ private fun GroupKeys(group: Int, st: MirrorState, now: Long, onSelect: (Int) ->
             ) {
                 Text(MirrorText.groupKey(g), style = ArcType.tab.copy(fontSize = 22.sp), color = ink)
             }
-        }
-        // Follow is an icon (a target), named on long-press, in the overlay and to screen readers.
-        Box(
-            Modifier
-                .weight(1f)
-                .coachMark("live.follow", CoachText.FOLLOW, c.navy, c.onNavy)
-                .heightIn(min = 52.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(if (follow) c.navy else c.tabOff)
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Switch) { onFollow(!follow) }
-                .semantics {
-                    // The note is spoken, since the screen has no room to show it.
-                    contentDescription = MirrorText.FOLLOW + ". " + MirrorText.FOLLOW_NOTE
-                    stateDescription = if (follow) dev.arc.ep133.text.SettingsText.ON else dev.arc.ep133.text.SettingsText.OFF
-                },
-            contentAlignment = Alignment.Center,
-        ) {
-            dev.arc.ep133.ui.components.Icon(ArcIcon.FOLLOW, if (follow) c.onNavy else c.graphite, size = 24.dp)
         }
     }
 }

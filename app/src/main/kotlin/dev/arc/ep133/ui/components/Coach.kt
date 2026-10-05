@@ -117,9 +117,11 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
                 val text = tag(m)
                 val w = text.size.width + 2 * padX
                 val h = text.size.height + 2 * padY
-                // A large area (the pad grid) gets its tag in its middle, with no arrow.
+                // A tall area (the pad grid, the side strip) gets its tag in its middle, with no
+                // arrow; kept on screen, so a strip at the edge still shows its whole tag.
                 if (m.bounds.height > size.height * 0.25f) {
-                    placed += Placed(m, text, Rect(Offset(m.bounds.center.x - w / 2, m.bounds.center.y - h / 2), Size(w, h)), null, null)
+                    val left = (m.bounds.center.x - w / 2).coerceIn(margin, size.width - margin - w)
+                    placed += Placed(m, text, Rect(Offset(left, m.bounds.center.y - h / 2), Size(w, h)), null, null)
                     continue
                 }
                 val below = m.bounds.center.y < size.height / 2

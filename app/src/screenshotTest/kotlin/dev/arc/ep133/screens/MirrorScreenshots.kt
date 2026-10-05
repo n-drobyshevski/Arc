@@ -85,7 +85,7 @@ private fun Framed(tab: Tab, connected: Boolean = true, dark: Boolean = false, g
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false) {
     Framed(Tab.LIVE, dark = dark, guide = guide) {
         MirrorScreen(
             mirror = MirrorUi(state, loading = loading),
@@ -95,6 +95,7 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
             oneGroup = oneGroup,
             // The last hit (A 7) is in group A; B is sounding too.
             follow = true,
+            initialToolsOpen = tools,
         )
     }
 }
@@ -109,6 +110,11 @@ fun LiveOneGroupPreview() = Live(playing, oneGroup = true)
 @Preview(name = "Live one group dark", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
 fun LiveOneGroupDarkPreview() = Live(playing, dark = true, oneGroup = true)
+
+@PreviewTest
+@Preview(name = "Live tools open", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsOpenPreview() = Live(playing, oneGroup = true, tools = true)
 
 // A smaller phone (360 x 740 dp, less the bars): still one screen, the pads just get shorter.
 @PreviewTest

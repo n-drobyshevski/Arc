@@ -30,6 +30,8 @@ object MirrorText {
     const val ALL_GROUPS = "All groups"
     const val ONE_GROUP = "One group"
     const val FOLLOW = "Follow"
+    const val TOOLS = "Live tools"
+    const val VIEW = "View"
     const val FOLLOW_NOTE = "Follow switches to the group of the pad just played."
     fun groupKey(group: Int) = ('A' + group).toString()
 
