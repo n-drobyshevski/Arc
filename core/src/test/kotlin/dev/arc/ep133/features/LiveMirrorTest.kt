@@ -135,6 +135,13 @@ class LiveMirrorTest {
     }
 
     @Test
+    fun `project labels`() {
+        assertEquals("Project 3", MirrorText.project(3))
+        assertEquals("P3", MirrorText.projectShort(3))
+        assertEquals("P12", MirrorText.projectShort(12))
+    }
+
+    @Test
     fun `forgetting learned pads drops their names and saves the empty map`() {
         val saved = ArrayList<Map<Int, Int>>()
         val m = mirror(learned = mapOf(0 to 10), saved = saved)

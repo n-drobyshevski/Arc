@@ -37,6 +37,9 @@ object MirrorText {
 
     fun project(n: Int) = "Project $n"
 
+    /** "P3", for the one-group view's one-line display. */
+    fun projectShort(n: Int) = "P$n"
+
     /** "A 7 \u00B7 001 kick \u00B7 96", or "C#5 \u00B7 ch 1 \u00B7 80" for a note outside the pads. */
     fun hit(h: Hit): String {
         val where = h.pad?.let { "${it.groupLetter} ${it.label}" } ?: "${PadNotes.noteName(h.note)} \u00B7 ch ${h.channel}"

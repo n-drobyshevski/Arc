@@ -58,6 +58,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -160,7 +161,7 @@ fun MirrorScreen(
                         CloseKey(onBack, dev.arc.ep133.text.GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
                     }
                 }
-                Display(st, mirror, compact = true)
+                DisplayStrip(st, mirror)
                 viewSwitch()
                 Group(
                     group, st, nameOf, now,
@@ -200,6 +201,49 @@ fun MirrorScreen(
             if (st.lastKeysNote != null) KeysStrip(st)
             Notes(st, mirror, onPadOrder)
         }
+    }
+}
+
+/**
+ * The one-group view's display as a single dark line: play state, tempo and
+ * project on the left, the pad just played on the right.
+ */
+@Composable
+private fun DisplayStrip(st: MirrorState, mirror: MirrorUi?) {
+    val c = LocalArcColors.current
+    val hit = st.lastHit
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(c.display)
+            .semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite }
+            .heightIn(min = 48.dp)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        when (st.playing) {
+            true -> Text("\u25B6", style = ArcType.displaySub, color = c.displayInk)
+            false -> Text("\u25A0", style = ArcType.displaySub, color = c.displayDim)
+            null -> Unit
+        }
+        st.bpm?.let { Text(MirrorText.bpm(it), style = ArcType.displaySub, color = c.displayInk, maxLines = 1) }
+        st.activeProject?.let { Text(MirrorText.projectShort(it), style = ArcType.displaySub, color = c.displayDim, maxLines = 1) }
+        Text(
+            when {
+                mirror?.error != null -> mirror.error
+                mirror?.loading == true && hit == null -> MirrorText.READING
+                hit != null -> MirrorText.hit(hit)
+                else -> MirrorText.WAITING
+            },
+            style = ArcType.displayHead,
+            color = c.displayInk,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+            modifier = Modifier.weight(1f),
+        )
     }
 }
 
