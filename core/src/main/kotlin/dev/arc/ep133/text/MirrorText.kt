@@ -40,8 +40,6 @@ object MirrorText {
     const val MODE_KEYS = "Keys"
     const val KEY = "Key"
     const val SCALE = "Scale"
-    const val OCTAVE_DOWN = "Octave down"
-    const val OCTAVE_UP = "Octave up"
     const val PICK_SOUND = "Tap a pad in Pads first: Keys plays that pad's sample."
     const val NO_SOUND = "No sound picked"
 
@@ -64,8 +62,10 @@ object MirrorText {
         dev.arc.ep133.features.Scale.BLUES -> "Blues"
     }
 
-    /** "DO · OCT 4": the key and the octave, between − and + (the scale is the word above). */
-    fun keysSummary(root: Int, octave: Int) = "${dev.arc.ep133.features.Keys.solfege(root)} \u00B7 OCT $octave"
+    /** "OCT 4", the octave word under the keys. */
+    fun octave(n: Int) = "Oct $n"
+
+    fun octaveChoice(n: Int) = "Octave $n. Tap to change."
 
     /** "MI4". */
     fun noteName(note: Int) = dev.arc.ep133.features.Keys.solfege(note) + dev.arc.ep133.features.Keys.octaveOf(note)

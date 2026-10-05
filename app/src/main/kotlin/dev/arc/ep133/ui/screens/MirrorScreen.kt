@@ -237,7 +237,6 @@ fun MirrorScreen(
                                 Modifier.fillMaxWidth().weight(1f).coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
                             )
                             ModeRow(keys, keysActions)
-                            OctaveKeys(keys, keysActions.onOctave)
                         } else {
                             DisplayStrip(st, mirror)
                             Group(
@@ -615,64 +614,88 @@ private fun Notes(st: MirrorState, mirror: MirrorUi?, onPadOrder: (PadOrder) -> 
 
 /**
  * The row right under the grid, as the PO app's DRUMS / KEYPAD: one word for
- * the mode that a tap switches (PADS ⇄ KEYS), and in KEYS the scale, a tap
- * on which lists the scales.
+ * the mode that a tap switches (PADS ⇄ KEYS), and in KEYS the scale and the
+ * octave, a tap on either of which lists the choices.
  */
 @Composable
 private fun ModeRow(keys: KeysUi, actions: KeysActions) {
     val c = LocalArcColors.current
-    Row(Modifier.fillMaxWidth().padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.weight(1f)) {
-            dev.arc.ep133.ui.components.WordButton(
-                if (keys.on) MirrorText.MODE_KEYS else MirrorText.MODE_PADS,
-                { actions.onMode(!keys.on) },
-                Modifier.coachMark("live.mode", CoachText.MODE, c.navy, c.onNavy),
-                mark = true,
-                description = MirrorText.modeSwitch(keys.on),
+    Row(
+        Modifier.fillMaxWidth().padding(start = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(22.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        dev.arc.ep133.ui.components.WordButton(
+            if (keys.on) MirrorText.MODE_KEYS else MirrorText.MODE_PADS,
+            { actions.onMode(!keys.on) },
+            Modifier.coachMark("live.mode", CoachText.MODE, c.navy, c.onNavy),
+            mark = true,
+            description = MirrorText.modeSwitch(keys.on),
+        )
+        if (keys.on) {
+            PickWord(
+                label = MirrorText.scaleName(keys.scale),
+                options = Scale.entries,
+                selected = keys.scale,
+                name = MirrorText::scaleName,
+                onPick = actions.onScale,
+                description = MirrorText.scaleChoice(keys.scale),
+                mark = Modifier.coachMark("live.scale", CoachText.SCALE, c.navy, c.onNavy),
             )
-        }
-        Box(Modifier.weight(1f)) {
-            if (keys.on) ScaleWord(keys.scale, actions.onScale)
+            PickWord(
+                label = MirrorText.octave(keys.octave),
+                options = (Keys.MIN_OCTAVE..Keys.MAX_OCTAVE).toList(),
+                selected = keys.octave,
+                name = MirrorText::octave,
+                onPick = actions.onOctave,
+                description = MirrorText.octaveChoice(keys.octave),
+                mark = Modifier.coachMark("live.octave", CoachText.OCTAVE, c.navy, c.onNavy),
+            )
         }
     }
 }
 
-/** The scale as a word; a tap lists the scales over the grid, the chosen one marked. */
+/** A word showing a choice ("MAJOR ▾"); a tap lists the choices over the grid, the chosen one marked. */
 @Composable
-private fun ScaleWord(scale: Scale, onScale: (Scale) -> Unit) {
+private fun <T> PickWord(
+    label: String,
+    options: List<T>,
+    selected: T,
+    name: (T) -> String,
+    onPick: (T) -> Unit,
+    description: String,
+    mark: Modifier = Modifier,
+) {
     val c = LocalArcColors.current
     var open by remember { mutableStateOf(false) }
-    dev.arc.ep133.ui.components.WordButton(
-        MirrorText.scaleName(scale) + " \u25BE",
-        { open = true },
-        Modifier.coachMark("live.scale", CoachText.SCALE, c.navy, c.onNavy),
-        description = MirrorText.scaleChoice(scale),
-    )
-    if (open) {
-        androidx.compose.ui.window.Popup(
-            alignment = Alignment.BottomStart,
-            onDismissRequest = { open = false },
-            properties = androidx.compose.ui.window.PopupProperties(focusable = true),
-        ) {
-            Column(
-                Modifier
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(c.shell)
-                    .border(1.dp, c.line, RoundedCornerShape(14.dp))
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+    Box {
+        dev.arc.ep133.ui.components.WordButton("$label \u25BE", { open = true }, mark, description = description)
+        if (open) {
+            androidx.compose.ui.window.Popup(
+                alignment = Alignment.BottomStart,
+                onDismissRequest = { open = false },
+                properties = androidx.compose.ui.window.PopupProperties(focusable = true),
             ) {
-                for (s in Scale.entries) {
-                    val on = s == scale
-                    dev.arc.ep133.ui.components.WordButton(
-                        MirrorText.scaleName(s),
-                        {
-                            onScale(s)
-                            open = false
-                        },
-                        Modifier.semantics { selected = on },
-                        mark = on,
-                        dim = !on,
-                    )
+                Column(
+                    Modifier
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(c.shell)
+                        .border(1.dp, c.line, RoundedCornerShape(14.dp))
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                ) {
+                    for (o in options) {
+                        val on = o == selected
+                        dev.arc.ep133.ui.components.WordButton(
+                            name(o),
+                            {
+                                onPick(o)
+                                open = false
+                            },
+                            Modifier.semantics { this.selected = on },
+                            mark = on,
+                            dim = !on,
+                        )
+                    }
                 }
             }
         }
@@ -766,41 +789,6 @@ private fun KeysGrid(st: MirrorState, keys: KeysUi, now: Long, onKey: (Int) -> U
                 }
             }
         }
-    }
-}
-
-/** Under the keys: octave down, the key, scale and octave, octave up. */
-@Composable
-private fun OctaveKeys(keys: KeysUi, onOctave: (Int) -> Unit) {
-    val c = LocalArcColors.current
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        @Composable
-        fun Step(label: String, spoken: String, to: Int, mark: Modifier = Modifier) {
-            val enabled = to in Keys.MIN_OCTAVE..Keys.MAX_OCTAVE
-            Box(
-                Modifier
-                    .then(mark)
-                    .size(width = 64.dp, height = 52.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(c.tabOff)
-                    .clickable(enabled = enabled, interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button) { onOctave(to) }
-                    .semantics { contentDescription = spoken },
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(label, style = ArcType.tab.copy(fontSize = 24.sp), color = if (enabled) c.onTabOff else c.graphite.copy(alpha = 0.4f))
-            }
-        }
-        Step("\u2212", MirrorText.OCTAVE_DOWN, keys.octave - 1, Modifier.coachMark("live.octave", CoachText.OCTAVE, c.navy, c.onNavy))
-        Text(
-            MirrorText.keysSummary(keys.root, keys.octave),
-            style = ArcType.tab,
-            color = c.ink,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            modifier = Modifier.weight(1f),
-        )
-        Step("+", MirrorText.OCTAVE_UP, keys.octave + 1)
     }
 }
 

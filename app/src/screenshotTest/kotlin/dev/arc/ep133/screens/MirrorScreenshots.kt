@@ -185,7 +185,7 @@ fun LiveKeysDarkPreview() = Live(keysPlaying, dark = true, keys = keysUi)
 @PreviewTest
 @Preview(name = "Live keys small", widthDp = 360, heightDp = 668, showBackground = true)
 @Composable
-fun LiveKeysSmallPreview() = Live(keysPlaying, keys = keysUi)
+fun LiveKeysSmallPreview() = Live(keysPlaying, keys = keysUi.copy(scale = dev.arc.ep133.features.Scale.MINOR_PENTATONIC))
 
 @PreviewTest
 @Preview(name = "Live keys tools", widthDp = 412, heightDp = 843, showBackground = true)
