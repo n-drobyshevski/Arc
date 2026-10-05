@@ -24,7 +24,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -36,6 +35,8 @@ import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,6 +57,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.arc.ep133.text.CoachText
@@ -123,6 +125,8 @@ fun ArcShell(
     guideOpen: Boolean,
     onGuide: (Boolean) -> Unit,
     guide: @Composable () -> Unit,
+    /** Fills the top bar's middle (Live's display line, in a short window). */
+    middle: (@Composable BoxScope.() -> Unit)? = null,
     /** For screenshots: start with the section list open. */
     initialMenuOpen: Boolean = false,
     content: @Composable () -> Unit,
@@ -143,11 +147,12 @@ fun ArcShell(
                     onDebug = onDebug,
                     onSettings = onSettings,
                     onHelp = onHelp,
+                    middle = middle,
                 )
             },
         ) {
             content()
-            GuideEdgeTab({ onGuide(true) }, Modifier.align(Alignment.CenterStart).offset(y = (-80).dp))
+            GuideEdgeTab({ onGuide(true) }, Modifier.align(Alignment.CenterStart).aboveMiddle())
             // Under the top bar, so the tag stays in view above the list.
             SectionMenu(menuOpen, tab, onPick = { menuOpen = false; onTab(it) }, onDismiss = { menuOpen = false })
         }
@@ -163,7 +168,8 @@ fun ArcShell(
  * the EP-133 is connected (a tap disconnects) and navy with a ring when not,
  * then the guide overlay (?) and settings. Their names show on long-press,
  * in the overlay and to screen readers. Long-pressing the tag opens the
- * debug screen (as the wordmark did).
+ * debug screen (as the wordmark did). The room between the tag and the keys
+ * holds [middle]; a toast in a short window takes its place.
  */
 @Composable
 fun TopBar(
@@ -177,11 +183,20 @@ fun TopBar(
     onDebug: () -> Unit,
     onSettings: () -> Unit = {},
     onHelp: () -> Unit = {},
+    middle: (@Composable BoxScope.() -> Unit)? = null,
 ) {
     val c = LocalArcColors.current
+    val window = LocalArcWindow.current
+    val slot = LocalBarSlot.current
+    DisposableEffect(slot) { onDispose { slot?.bounds = null } }
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
         Row(
-            Modifier.widthIn(max = 720.dp).fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 10.dp),
+            Modifier
+                // Wider on a phone on its side, where the middle holds Live's display line.
+                .widthIn(max = if (window.landscape) 1200.dp else 720.dp)
+                .fillMaxWidth()
+                // 56 dp tall instead of 66 when the window is short.
+                .padding(start = 16.dp, end = 16.dp, top = if (window.short) 6.dp else 12.dp, bottom = if (window.short) 6.dp else 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -189,7 +204,16 @@ fun TopBar(
                 section, onSections, onDebug,
                 Modifier.coachMark("top.sections", CoachText.SECTIONS, c.navy, c.onNavy),
             )
-            Spacer(Modifier.weight(1f))
+            // As tall as the keys; empty, it is just the space between.
+            Box(
+                Modifier
+                    .weight(1f)
+                    .heightIn(min = 44.dp)
+                    .onGloballyPositioned { slot?.bounds = it.boundsInRoot() },
+                contentAlignment = Alignment.Center,
+            ) {
+                middle?.invoke(this)
+            }
             IconBlock(
                 ArcIcon.DOT, CoachText.BACK_UP, c.signal, c.onSignal, onBackup,
                 Modifier.coachMark("top.backup", CoachText.BACK_UP, c.signal, c.onSignal),
@@ -303,6 +327,8 @@ fun GuideEdgeTab(onClick: () -> Unit, modifier: Modifier = Modifier) {
     val c = LocalArcColors.current
     Box(
         modifier
+            // Clear of a navigation bar or a cutout on that side.
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Start))
             .width(EdgeTabWidth)
             .height(112.dp)
             .clip(RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp))
@@ -316,16 +342,30 @@ fun GuideEdgeTab(onClick: () -> Unit, modifier: Modifier = Modifier) {
             .coachMark("edge.guide", CoachText.GUIDE_TAB, c.navy, c.onNavy),
         contentAlignment = Alignment.Center,
     ) {
-        // The word reads bottom to top, as on the PO's side tabs.
-        Text(
-            NavText.GUIDE_TAB.uppercase(),
-            style = ArcType.capsKeySmall,
-            color = c.onTabOff,
-            maxLines = 1,
-            softWrap = false,
-            modifier = Modifier.rotateVertical(),
-        )
+        // The word reads bottom to top, as on the PO's side tabs. The tab is only so wide, so
+        // the word grows with the text size only so far.
+        val density = LocalDensity.current
+        CompositionLocalProvider(LocalDensity provides Density(density.density, minOf(density.fontScale, 1.3f))) {
+            Text(
+                NavText.GUIDE_TAB.uppercase(),
+                style = ArcType.capsKeySmall,
+                color = c.onTabOff,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.rotateVertical(),
+            )
+        }
     }
+}
+
+/**
+ * Lifts the guide tab 80 dp above the page's middle, or less on a short page,
+ * so it keeps 8 dp clear of the top bar.
+ */
+private fun Modifier.aboveMiddle(): Modifier = layout { measurable, constraints ->
+    val p = measurable.measure(constraints)
+    val lift = if (constraints.hasBoundedHeight) minOf(80.dp.roundToPx(), constraints.maxHeight / 2 - 64.dp.roundToPx()) else 80.dp.roundToPx()
+    layout(p.width, p.height) { p.place(0, -lift) }
 }
 
 /** Turns a single line of text a quarter turn anticlockwise, swapping its width and height for layout. */

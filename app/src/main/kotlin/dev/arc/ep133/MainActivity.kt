@@ -396,7 +396,8 @@ class MainActivity : ComponentActivity() {
                     try {
                         kotlinx.coroutines.awaitCancellation()
                     } finally {
-                        controller.pauseMirror()
+                        // A recreation (dark mode, language) keeps the mirror; the new activity takes it over.
+                        if (!isChangingConfigurations) controller.pauseMirror()
                     }
                 }
             }
@@ -410,7 +411,8 @@ class MainActivity : ComponentActivity() {
                     try {
                         kotlinx.coroutines.awaitCancellation()
                     } finally {
-                        controller.closeLiveAudio()
+                        // Nor does it cut the notes still sounding.
+                        if (!isChangingConfigurations) controller.closeLiveAudio()
                     }
                 }
             }
@@ -432,10 +434,12 @@ class MainActivity : ComponentActivity() {
         // After a recreation (or process death) the opened backup has to be read again.
         LaunchedEffect(contentsBackup?.id) { contentsBackup?.let { controller.openContents(it) } }
         val playing by controller.player.playing.collectAsStateWithLifecycle()
-        // Everything sounding, for Live's rings (several pads or keys for a chord).
-        val playingKeys by controller.liveKeys.collectAsStateWithLifecycle()
+        // Everything sounding, for Live's rings (several pads or notes for a chord).
+        val voices by controller.liveKeys.collectAsStateWithLifecycle()
         val rec by controller.rec.collectAsStateWithLifecycle()
         val takes by controller.takes.collectAsStateWithLifecycle()
+        // REC on Live's display line, on the page or in the top bar.
+        val liveRec = dev.arc.ep133.ui.screens.RecUi(rec, controller::toggleRec)
         val compareA = compareIds?.substringBefore('|')?.let { id -> state.backups.firstOrNull { it.id == id } }
         val compareB = compareIds?.substringAfter('|')?.let { id -> state.backups.firstOrNull { it.id == id } }
         // Also runs again after a recreation, when the result is gone.
@@ -444,6 +448,25 @@ class MainActivity : ComponentActivity() {
         }
 
         val onTabs = !debug && !settingsOpen && (compareA == null || compareB == null) && contentsBackup == null && !search
+        // Live's view of the device and of KEYS, for its screen and (on a phone on its side) the top bar.
+        val mirror = state.mirror ?: if (!ready) {
+            dev.arc.ep133.controller.MirrorUi(loading = false, error = dev.arc.ep133.text.MirrorText.NOT_CONNECTED)
+        } else {
+            null
+        }
+        val keys = dev.arc.ep133.ui.screens.KeysUi(
+            on = appSettings.liveKeys,
+            root = appSettings.keysRoot,
+            scale = appSettings.keysScale,
+            octave = appSettings.keysOctave,
+            names = appSettings.keysNames,
+            pad = state.keysPad,
+            padName = state.keysPad?.let(controller::mirrorName),
+            playingNotes = voices.mapNotNullTo(LinkedHashSet()) { v -> if (v.startsWith("note:")) v.removePrefix("note:").toIntOrNull() else null },
+        )
+        // The piano's notes while it shows, so the bar's display line can name a device note past its ends.
+        var pianoRange by remember { mutableStateOf<IntRange?>(null) }
+        val liveBar = tab == Tab.LIVE && dev.arc.ep133.ui.screens.liveInBar(dev.arc.ep133.ui.components.LocalArcWindow.current)
         Box(Modifier.fillMaxSize()) {
             if (debug) {
                 DebugScreen(controller.trafficLog, ::shareLog, ::saveLog, ::copyLog) { debug = false }
@@ -554,42 +577,31 @@ class MainActivity : ComponentActivity() {
                     guideOpen = guideOpen,
                     onGuide = { guideOpen = it },
                     guide = { GuideScreen(onBack = { guideOpen = false }) },
+                    // On a phone on its side, Live's display line rides in the top bar.
+                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, liveRec, pianoRange = pianoRange) }) else null,
                 ) {
                     // Back from another section returns to Live, the home section, first.
                     BackHandler(enabled = tab != Tab.LIVE) { selectTab(Tab.LIVE) }
                     when (tab) {
                         Tab.LIVE -> MirrorScreen(
-                            mirror = state.mirror ?: if (!ready) {
-                                dev.arc.ep133.controller.MirrorUi(loading = false, error = dev.arc.ep133.text.MirrorText.NOT_CONNECTED)
-                            } else {
-                                null
-                            },
+                            mirror = mirror,
                             nameOf = controller::mirrorName,
                             onPadOrder = controller::setPadOrder,
                             onPad = { pad, hold -> controller.playPad(pad, hold) },
                             onPadUp = controller::releasePad,
-                            keys = dev.arc.ep133.ui.screens.KeysUi(
-                                on = appSettings.liveKeys,
-                                root = appSettings.keysRoot,
-                                scale = appSettings.keysScale,
-                                octave = appSettings.keysOctave,
-                                names = appSettings.keysNames,
-                                pad = state.keysPad,
-                                padName = state.keysPad?.let(controller::mirrorName),
-                                playingKeys = playingKeys.mapNotNullTo(LinkedHashSet()) { it.removePrefix("keys:").takeIf { _ -> it.startsWith("keys:") }?.toIntOrNull() },
-                            ),
+                            keys = keys,
                             keysActions = remember(controller) {
                                 dev.arc.ep133.ui.screens.KeysActions(
                                     onMode = controller::setLiveKeys,
                                     onRoot = controller::setKeysRoot,
                                     onScale = controller::setKeysScale,
                                     onOctave = controller::setKeysOctave,
-                                    onKey = { k, hold -> controller.playKey(k, hold) },
-                                    onKeyUp = controller::releaseKey,
+                                    onNote = { note, hold -> controller.playNote(note, hold) },
+                                    onNoteUp = controller::releaseNote,
                                     onSelect = controller::selectKeysPad,
                                 )
                             },
-                            playingPads = playingKeys.mapNotNullTo(HashSet()) { k ->
+                            playingPads = voices.mapNotNullTo(HashSet()) { k ->
                                 k.split(':').takeIf { it.size == 3 && it[0] == "live" }?.let { p ->
                                     val g = p[1].toIntOrNull()
                                     val o = p[2].toIntOrNull()
@@ -600,7 +612,8 @@ class MainActivity : ComponentActivity() {
                             onOneGroup = controller::setLiveOneGroup,
                             follow = appSettings.liveFollow,
                             onFollow = controller::setLiveFollow,
-                            rec = dev.arc.ep133.ui.screens.RecUi(rec, controller::toggleRec),
+                            onPianoRange = { pianoRange = it },
+                            rec = liveRec,
                             takes = dev.arc.ep133.ui.screens.TakesUi(
                                 list = takes,
                                 playing = playing,

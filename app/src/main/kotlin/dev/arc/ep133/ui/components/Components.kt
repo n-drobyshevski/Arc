@@ -20,13 +20,16 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -34,13 +37,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -60,12 +64,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import kotlinx.coroutines.launch
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
@@ -95,12 +103,16 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
+import dev.arc.ep133.ui.theme.ArcColors
 import dev.arc.ep133.ui.theme.ArcType
 import dev.arc.ep133.ui.theme.LocalArcColors
 import kotlinx.coroutines.delay
 import kotlin.math.floor
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 enum class KeyStyle { Normal, Signal, Quiet, Navy }
 
@@ -235,6 +247,26 @@ fun DisplayPanel(modifier: Modifier = Modifier, content: @Composable ColumnScope
 }
 
 private val PanelRadius = 22.dp
+
+/**
+ * The display as one dark line: Live's display line, and the device on a
+ * phone on its side. [compact] fits it in the top bar.
+ */
+@Composable
+fun DisplayLine(modifier: Modifier = Modifier, compact: Boolean = false, content: @Composable RowScope.() -> Unit) {
+    val c = LocalArcColors.current
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(if (compact) 12.dp else 14.dp))
+            .background(c.display)
+            .heightIn(min = if (compact) 44.dp else 48.dp)
+            .padding(horizontal = if (compact) 12.dp else 14.dp, vertical = if (compact) 4.dp else 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        content = content,
+    )
+}
 
 /** A small centred uppercase label above a panel ("VIDEO", "KEYPAD" in the pocket operator app). */
 @Composable
@@ -372,6 +404,9 @@ fun TextToggle(options: List<String>, selected: Int, onSelect: (Int) -> Unit, mo
     }
 }
 
+/** A word's ink: quiet caption grey, so the pads stay the loudest thing on the page; paler when [dim] (not taken, or not available). */
+fun ArcColors.wordInk(dim: Boolean = false): Color = if (dim) graphite.copy(alpha = 0.45f) else graphite
+
 /**
  * A word under the grid as the pocket operator app shows DRUMS / KEYPAD:
  * small and uppercase. [mark] puts the two-squares mark before it (a word
@@ -390,8 +425,7 @@ fun WordButton(
     top: Boolean = false,
 ) {
     val c = LocalArcColors.current
-    // Quiet: caption grey, so the pads stay the loudest thing on the page.
-    val ink = if (dim) c.graphite.copy(alpha = 0.45f) else c.graphite
+    val ink = c.wordInk(dim)
     // The touch area is 44dp tall; the mark and the word stay centred on each other,
     // at its middle or (with [top]) its top.
     Box(
@@ -530,7 +564,6 @@ fun ArcSheet(visible: Boolean, onDismiss: (() -> Unit)?, grip: Boolean = true, c
     BackHandler(enabled = visible) { onDismiss?.invoke() }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 640.dp
-        val screenHeight = maxHeight
         val rise = with(LocalDensity.current) { 40.dp.roundToPx() }
         AnimatedVisibility(visible, enter = fadeIn(tween(220)), exit = ExitTransition.None) {
             Box(
@@ -540,50 +573,65 @@ fun ArcSheet(visible: Boolean, onDismiss: (() -> Unit)?, grip: Boolean = true, c
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onDismiss?.invoke() },
             )
         }
-        // @keyframes rise: from translateY(40px) and opacity 0, 220ms; dialog.close() has no animation.
-        // On wide screens (min-width: 640px) the sheet is a centred dialog.
-        AnimatedVisibility(
-            visible,
-            modifier = Modifier.align(if (wide) Alignment.Center else Alignment.BottomCenter),
-            enter = slideInVertically(tween(220, easing = SheetEasing)) { rise } + fadeIn(tween(220, easing = SheetEasing)),
-            exit = ExitTransition.None,
-        ) {
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
-                val shape = if (wide) RoundedCornerShape(22.dp) else RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)
-                Column(
-                    Modifier
-                        .widthIn(max = 560.dp)
-                        .fillMaxWidth()
-                        .heightIn(max = screenHeight * 0.92f)
-                        .clip(shape)
-                        .background(c.shell)
-                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
-                        .imePadding()
-                        .verticalScroll(rememberScrollState())
-                        .windowInsetsPadding(WindowInsets.navigationBars)
-                        .padding(start = 18.dp, end = 18.dp, top = if (grip) 10.dp else 22.dp, bottom = 22.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    if (grip) {
-                        Box(
-                            Modifier
-                                .align(Alignment.CenterHorizontally)
-                                .size(40.dp, 5.dp)
-                                .clip(RoundedCornerShape(3.dp))
-                                .background(c.keyEdge),
-                        )
+        // The sheet keeps to the safe area, so its height cap counts from under the status bar and it
+        // centres between side bars. A bottom sheet's face still reaches under the navigation bar (its
+        // content keeps clear of it); the dialog keeps clear of it, and of the keyboard, altogether.
+        val insets = if (wide) WindowInsets.safeDrawing else WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
+        BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(insets)) {
+            val screenHeight = maxHeight
+            // @keyframes rise: from translateY(40px) and opacity 0, 220ms; dialog.close() has no animation.
+            // On wide screens (min-width: 640px) the sheet is a centred dialog.
+            AnimatedVisibility(
+                visible,
+                modifier = Modifier.align(if (wide) Alignment.Center else Alignment.BottomCenter),
+                enter = slideInVertically(tween(220, easing = SheetEasing)) { rise } + fadeIn(tween(220, easing = SheetEasing)),
+                exit = ExitTransition.None,
+            ) {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
+                    val shape = if (wide) RoundedCornerShape(22.dp) else RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)
+                    Column(
+                        Modifier
+                            .widthIn(max = 560.dp)
+                            .fillMaxWidth()
+                            .heightIn(max = screenHeight * 0.92f)
+                            .clip(shape)
+                            .background(c.shell)
+                            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+                            .imePadding()
+                            .verticalScroll(rememberScrollState())
+                            // Nothing left to add in the dialog: its box took the bars.
+                            .windowInsetsPadding(WindowInsets.navigationBars)
+                            .padding(start = 18.dp, end = 18.dp, top = if (grip) 10.dp else 22.dp, bottom = 22.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        if (grip) {
+                            Box(
+                                Modifier
+                                    .align(Alignment.CenterHorizontally)
+                                    .size(40.dp, 5.dp)
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .background(c.keyEdge),
+                            )
+                        }
+                        content()
                     }
-                    content()
                 }
             }
         }
     }
 }
 
+/** The narrowest top-bar middle a toast takes: two lines of a message still read there. */
+private val BarToastMin = 200.dp
+
 /**
  * A toast at the bottom of the screen; errors get an orange left border and
  * stay longer. Swiping it sideways or down dismisses it at once, as with a
- * notification.
+ * notification. In a short window (a phone on its side) it takes the top
+ * bar's middle instead, so it never covers the keys: two lines at most until
+ * a tap unfolds the rest, and it is swiped away up or sideways. Where that
+ * middle is too narrow to read (a split screen) or there is no top bar (a
+ * full-screen page), it stays at the bottom.
  */
 @Composable
 fun ArcToast(
@@ -596,44 +644,69 @@ fun ArcToast(
     bottomInset: Dp = 0.dp,
 ) {
     val c = LocalArcColors.current
-    var shown by remember { mutableStateOf<Triple<Long, String, Boolean>?>(null) }
-    LaunchedEffect(id) {
+    val density = LocalDensity.current
+    // In the bar: over its middle, measured from where this toast's own box sits.
+    val slot = LocalBarSlot.current?.bounds?.takeIf { LocalArcWindow.current.short && it.width >= with(density) { BarToastMin.toPx() } }
+    val inBar = slot != null
+    // One already up when this is first drawn (a screenshot) shows in that first frame.
+    var shown by remember { mutableStateOf(id?.let { Triple(it, text, error) }) }
+    // Unfolding a toast in the bar starts its time again, to read the rest.
+    var unfolded by remember(shown?.first) { mutableStateOf(false) }
+    LaunchedEffect(id, unfolded) {
         if (id != null) {
             shown = Triple(id, text, error)
             delay(if (error) 7000 else 3200)
             onTimeout(id)
         }
     }
-    AnimatedVisibility(id != null, modifier = modifier, enter = fadeIn(), exit = fadeOut()) {
+    var origin by remember { mutableStateOf(Offset.Zero) }
+    AnimatedVisibility(
+        id != null,
+        modifier = if (inBar) modifier.fillMaxSize().onPlaced { origin = it.positionInRoot() } else modifier,
+        enter = fadeIn(),
+        exit = fadeOut(),
+    ) {
         val s = shown ?: return@AnimatedVisibility
         val scope = androidx.compose.runtime.rememberCoroutineScope()
         // How far the toast has been dragged; each toast starts in place.
         val dx = remember(s.first) { androidx.compose.animation.core.Animatable(0f) }
         val dy = remember(s.first) { androidx.compose.animation.core.Animatable(0f) }
         var box by remember { mutableStateOf(androidx.compose.ui.unit.IntSize(1, 1)) }
-        val fling = with(LocalDensity.current) { 700.dp.toPx() }
+        val fling = with(density) { 700.dp.toPx() }
+        // Which way it leaves along the height: down at the bottom, up out of the bar.
+        val away = if (inBar) -1f else 1f
         val dismiss = {
             scope.launch {
                 // Off the way it was going, then gone.
-                if (kotlin.math.abs(dx.value) >= dy.value) {
+                if (kotlin.math.abs(dx.value) >= kotlin.math.abs(dy.value)) {
                     dx.animateTo(if (dx.value < 0) -box.width * 1.2f else box.width * 1.2f, tween(160))
                 } else {
-                    dy.animateTo(box.height * 1.5f, tween(160))
+                    dy.animateTo(away * box.height * 1.5f, tween(160))
                 }
                 onTimeout(s.first)
             }
             Unit
         }
-        Row(
+        val place = if (slot == null) {
             Modifier
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(bottom = bottomInset)
                 .padding(16.dp)
                 .widthIn(max = 528.dp)
                 .fillMaxWidth()
+        } else {
+            // (Its box fills the screen, so it measures loose from the top left.) The slot is
+            // where it is on screen, so it is placed left to right in a right-to-left layout too.
+            Modifier
+                .wrapContentSize(AbsoluteAlignment.TopLeft)
+                .absoluteOffset { IntOffset((slot.left - origin.x).roundToInt(), (slot.center.y - origin.y).roundToInt() - 22.dp.roundToPx()) }
+                .width(with(density) { slot.width.toDp() })
+        }
+        Row(
+            place
                 .onSizeChanged { box = it }
                 // Read before the layer moves the toast, so the finger's speed is measured on screen.
-                .pointerInput(s.first) {
+                .pointerInput(s.first, inBar) {
                     val tracker = androidx.compose.ui.input.pointer.util.VelocityTracker()
                     detectDragGestures(
                         onDragStart = { tracker.resetTracking() },
@@ -642,16 +715,16 @@ fun ArcToast(
                             tracker.addPosition(change.uptimeMillis, change.position)
                             scope.launch {
                                 dx.snapTo(dx.value + drag.x)
-                                // Down only: up would cover the page.
-                                dy.snapTo((dy.value + drag.y).coerceAtLeast(0f))
+                                // Down only: up would cover the page. In the bar, up only: down would cover the keys.
+                                dy.snapTo(if (inBar) (dy.value + drag.y).coerceAtMost(0f) else (dy.value + drag.y).coerceAtLeast(0f))
                             }
                         },
                         onDragEnd = {
                             val v = tracker.calculateVelocity()
                             val sideways = kotlin.math.abs(dx.value) > box.width * 0.3f ||
                                 kotlin.math.abs(v.x) > fling && kotlin.math.abs(v.x) > kotlin.math.abs(v.y)
-                            val down = dy.value > box.height * 0.5f || v.y > fling && v.y > kotlin.math.abs(v.x)
-                            if (sideways || down) {
+                            val off = away * dy.value > box.height * 0.5f || away * v.y > fling && away * v.y > kotlin.math.abs(v.x)
+                            if (sideways || off) {
                                 dismiss()
                             } else {
                                 scope.launch { dx.animateTo(0f) }
@@ -664,16 +737,24 @@ fun ArcToast(
                         },
                     )
                 }
+                .then(if (inBar) Modifier.pointerInput(s.first) { detectTapGestures { unfolded = !unfolded } } else Modifier)
                 .graphicsLayer {
                     translationX = dx.value
                     translationY = dy.value
                     // Fades as it leaves.
-                    val gone = maxOf(kotlin.math.abs(dx.value) / box.width, dy.value / box.height)
+                    val gone = maxOf(kotlin.math.abs(dx.value) / box.width, kotlin.math.abs(dy.value) / box.height)
                     alpha = 1f - 0.7f * gone.coerceIn(0f, 1f)
                 }
                 .clip(RoundedCornerShape(12.dp))
                 .background(c.display)
-                .height(androidx.compose.foundation.layout.IntrinsicSize.Min)
+                .then(
+                    when {
+                        !inBar -> Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)
+                        // Unfolded, as tall as the text, growing down from the bar.
+                        unfolded -> Modifier.heightIn(min = 44.dp).height(androidx.compose.foundation.layout.IntrinsicSize.Min)
+                        else -> Modifier.height(44.dp)
+                    },
+                )
                 .semantics {
                     liveRegion = LiveRegionMode.Polite
                     customActions = listOf(
@@ -683,15 +764,28 @@ fun ArcToast(
                         },
                     )
                 },
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             // .toast.error { border-left: 5px solid var(--signal) }
             if (s.third) Box(Modifier.width(5.dp).fillMaxHeight().background(c.signal))
-            Text(
-                s.second,
-                style = ArcType.body15.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
-                color = c.displayInk,
-                modifier = Modifier.padding(vertical = 14.dp, horizontal = 16.dp),
-            )
+            if (inBar) {
+                // Two lines of 13 sp fit the bar's 44 dp; what doesn't fit ends in an ellipsis.
+                Text(
+                    s.second,
+                    style = ArcType.tiny.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, lineHeight = 1.2.em),
+                    color = c.displayInk,
+                    maxLines = if (unfolded) Int.MAX_VALUE else 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(vertical = 4.dp, horizontal = 12.dp),
+                )
+            } else {
+                Text(
+                    s.second,
+                    style = ArcType.body15.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                    color = c.displayInk,
+                    modifier = Modifier.padding(vertical = 14.dp, horizontal = 16.dp),
+                )
+            }
         }
     }
 }
