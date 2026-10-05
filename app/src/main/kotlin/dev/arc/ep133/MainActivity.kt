@@ -411,8 +411,8 @@ class MainActivity : ComponentActivity() {
         // After a recreation (or process death) the opened backup has to be read again.
         LaunchedEffect(contentsBackup?.id) { contentsBackup?.let { controller.openContents(it) } }
         val playing by controller.player.playing.collectAsStateWithLifecycle()
-        // Everything sounding, for Live's rings (several pads or keys for a chord).
-        val playingKeys by controller.liveKeys.collectAsStateWithLifecycle()
+        // Everything sounding, for Live's rings (several pads or notes for a chord).
+        val voices by controller.liveKeys.collectAsStateWithLifecycle()
         val compareA = compareIds?.substringBefore('|')?.let { id -> state.backups.firstOrNull { it.id == id } }
         val compareB = compareIds?.substringAfter('|')?.let { id -> state.backups.firstOrNull { it.id == id } }
         // Also runs again after a recreation, when the result is gone.
@@ -553,7 +553,7 @@ class MainActivity : ComponentActivity() {
                                 names = appSettings.keysNames,
                                 pad = state.keysPad,
                                 padName = state.keysPad?.let(controller::mirrorName),
-                                playingKeys = playingKeys.mapNotNullTo(LinkedHashSet()) { it.removePrefix("keys:").takeIf { _ -> it.startsWith("keys:") }?.toIntOrNull() },
+                                playingNotes = voices.mapNotNullTo(LinkedHashSet()) { v -> if (v.startsWith("note:")) v.removePrefix("note:").toIntOrNull() else null },
                             ),
                             keysActions = remember(controller) {
                                 dev.arc.ep133.ui.screens.KeysActions(
@@ -561,12 +561,12 @@ class MainActivity : ComponentActivity() {
                                     onRoot = controller::setKeysRoot,
                                     onScale = controller::setKeysScale,
                                     onOctave = controller::setKeysOctave,
-                                    onKey = { k, hold -> controller.playKey(k, hold) },
-                                    onKeyUp = controller::releaseKey,
+                                    onNote = { note, hold -> controller.playNote(note, hold) },
+                                    onNoteUp = controller::releaseNote,
                                     onSelect = controller::selectKeysPad,
                                 )
                             },
-                            playingPads = playingKeys.mapNotNullTo(HashSet()) { k ->
+                            playingPads = voices.mapNotNullTo(HashSet()) { k ->
                                 k.split(':').takeIf { it.size == 3 && it[0] == "live" }?.let { p ->
                                     val g = p[1].toIntOrNull()
                                     val o = p[2].toIntOrNull()

@@ -159,7 +159,7 @@ fun LiveOfflineAllPreview() = Live(lastRead, offline = "Last seen Oct 5, 2:02 PM
 fun LiveOfflinePlayingPreview() = Live(lastRead, oneGroup = true, offline = "Last seen Oct 5, 2:02 PM", playingPads = setOf(PhysicalPad(0, 9), PhysicalPad(0, 6), PhysicalPad(0, 3)))
 
 // KEYS: the kick played as notes, C major from octave 4. The device holds MI4 and SO5
-// (lit); the phone plays LA4 (ringed).
+// (lit); the phone plays FA4, LA4 and DO5 (outlined).
 private val keysPlaying = playing.copy(
     notes = mapOf(64 to PadLight(110, 1, NOW - 20_000_000), 79 to PadLight(80, 1, NOW - 200_000_000, offAt = NOW - 100_000_000)),
     lastNote = 64,
@@ -169,7 +169,7 @@ private val keysUi = dev.arc.ep133.ui.screens.KeysUi(
     scale = dev.arc.ep133.features.Scale.MAJOR,
     pad = PhysicalPad(0, 9),
     padName = "kick",
-    playingKeys = linkedSetOf(3, 5, 7),
+    playingNotes = linkedSetOf(65, 69, 72),
 )
 
 @PreviewTest

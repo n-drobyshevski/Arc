@@ -50,8 +50,6 @@ object MirrorText {
     const val KEYS_NOTE = "Keys plays the pad last tapped (or played on the EP-133 in Pads) as notes. Notes the EP-133 sends in its own KEYS mode light their key."
     const val PIANO_HINT = "Turn the phone sideways for a piano (with auto-rotate off, tap the rotate button Android shows)."
     const val LEGEND = "Colours"
-    // Replaced by LEGEND_ROOT/LEGEND_IN_SCALE; removed when the grid switches.
-    const val LEGEND_OCTAVE = "Ring: the octave, navy and orange in turn (its number is in the corner)"
     const val LEGEND_ROOT = "Orange ring: the key's root"
     const val LEGEND_IN_SCALE = "Navy ring: in the scale"
     // The piano's rows: it shows every note, so the ones outside the scale too.

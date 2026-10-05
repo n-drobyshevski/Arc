@@ -87,6 +87,8 @@ import dev.arc.ep133.features.PadNotes
 import dev.arc.ep133.features.PadOrder
 import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.Keys
+import dev.arc.ep133.features.NoteEvent
+import dev.arc.ep133.features.NoteTouches
 import dev.arc.ep133.features.NoteNames
 import dev.arc.ep133.features.Scale
 import dev.arc.ep133.text.MirrorText
@@ -98,6 +100,7 @@ import dev.arc.ep133.ui.components.CloseKey
 import dev.arc.ep133.ui.components.DisplayPanel
 import dev.arc.ep133.ui.components.KeySize
 import dev.arc.ep133.ui.components.KeyStyle
+import dev.arc.ep133.ui.components.LocalArcWindow
 import dev.arc.ep133.ui.theme.ArcType
 import dev.arc.ep133.ui.theme.LocalArcColors
 
@@ -121,8 +124,8 @@ data class KeysUi(
     /** The sound KEYS plays, and its sample's name when known. */
     val pad: PhysicalPad? = null,
     val padName: String? = null,
-    /** The keys playing on the phone (a chord), latest last, ringed. */
-    val playingKeys: Set<Int> = emptySet(),
+    /** The MIDI notes playing on the phone (a chord), latest last; their keys are outlined. */
+    val playingNotes: Set<Int> = emptySet(),
 )
 
 class KeysActions(
@@ -130,9 +133,9 @@ class KeysActions(
     val onRoot: (Int) -> Unit = {},
     val onScale: (Scale) -> Unit = {},
     val onOctave: (Int) -> Unit = {},
-    /** A key pressed; it sounds until [onKeyUp]. A screen reader's Play passes hold = false. */
-    val onKey: (index: Int, hold: Boolean) -> Unit = { _, _ -> },
-    val onKeyUp: (Int) -> Unit = {},
+    /** A MIDI note pressed; it sounds until [onNoteUp]. A screen reader's Play passes hold = false. */
+    val onNote: (note: Int, hold: Boolean) -> Unit = { _, _ -> },
+    val onNoteUp: (note: Int) -> Unit = {},
     /** A pad played on the device in the pads view becomes the KEYS sound. */
     val onSelect: (PhysicalPad) -> Unit = {},
 )
@@ -592,6 +595,8 @@ private fun Notes(st: MirrorState, mirror: MirrorUi?, onPadOrder: (PadOrder) -> 
     val c = LocalArcColors.current
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (tapToPlay) Text(MirrorText.TAP_NOTE, style = ArcType.small, color = c.graphite)
+        // Pads that play on the phone mean keys that do too, and sideways they are a piano.
+        if (tapToPlay && !LocalArcWindow.current.landscape) Text(MirrorText.PIANO_HINT, style = ArcType.small, color = c.graphite)
         if (mirror?.offline != null) Text(MirrorText.OFFLINE_NOTE, style = ArcType.small, color = c.graphite)
         if (st.padOrder == PadOrder.FROM_TOP) {
             Text(MirrorText.LEARN_NOTE, style = ArcType.small, color = c.graphite)
@@ -737,7 +742,7 @@ private fun KeysDisplay(st: MirrorState, mirror: MirrorUi?, keys: KeysUi) {
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(MirrorText.MODE_KEYS.uppercase(), style = ArcType.displaySub, color = c.displayDim, maxLines = 1)
-        val note = keys.playingKeys.lastOrNull()?.let { Keys.notes(keys.root, keys.scale, keys.octave).getOrNull(it) } ?: st.lastNote
+        val note = keys.playingNotes.lastOrNull() ?: st.lastNote
         note?.let { Text(MirrorText.noteName(it, keys.names), style = ArcType.displaySub, color = c.displayInk, maxLines = 1) }
         if (mirror?.offline != null) Text(MirrorText.OFFLINE, style = ArcType.displaySub, color = c.displayDim, maxLines = 1)
         Text(
@@ -754,13 +759,23 @@ private fun KeysDisplay(st: MirrorState, mirror: MirrorUi?, keys: KeysUi) {
 
 /**
  * The 12 pads as keys, in the keypad's layout: each shows its note in a ring,
- * navy for the first octave and orange for the next. Notes from the device
- * light their key; the key playing on the phone is ringed in signal orange.
+ * orange on the scale's root (the first key of each octave of it) and navy on
+ * the rest, as the piano marks them. Notes from the device light their key;
+ * the notes playing on the phone are outlined in signal orange.
  */
 @Composable
 private fun KeysGrid(st: MirrorState, keys: KeysUi, now: Long, actions: KeysActions, modifier: Modifier) {
     val c = LocalArcColors.current
     val notes = Keys.notes(keys.root, keys.scale, keys.octave)
+    // Each key is a finger of its own, holding the note it had when pressed: a new key,
+    // scale or octave under a held key still lets go of the note that sounds.
+    val touches = remember { NoteTouches() }
+    fun play(events: List<NoteEvent>) = events.forEach { e ->
+        when (e) {
+            is NoteEvent.Press -> actions.onNote(e.note, true)
+            is NoteEvent.Release -> actions.onNoteUp(e.note)
+        }
+    }
     // How lit each key is: the brightest device note that falls on it.
     val lit = HashMap<Int, Float>()
     for ((n, l) in st.notes) {
@@ -775,15 +790,20 @@ private fun KeysGrid(st: MirrorState, keys: KeysUi, now: Long, actions: KeysActi
                     if (i > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(c.line))
                     val note = notes[k]
                     val g = lit[k] ?: 0f
-                    val upper = (Keys.octaveOf(note) - keys.octave) % 2 == 1
-                    val ring = if (upper) c.signal else c.navy
+                    val ring = if (k % keys.scale.intervals.size == 0) c.signal else c.navy
                     Box(
                         Modifier
                             .weight(1f)
                             .fillMaxHeight()
                             .background(lerp(c.plate, c.signal, g))
-                            .then(if (k in keys.playingKeys) Modifier.border(2.dp, c.signal) else Modifier)
-                            .then(holdToPlay({ hold -> actions.onKey(k, hold) }, { actions.onKeyUp(k) }))
+                            .then(if (note in keys.playingNotes) Modifier.border(2.dp, c.signal) else Modifier)
+                            .then(
+                                holdToPlay(
+                                    // A screen reader's Play sounds the note to its end: no finger to keep count of.
+                                    { hold -> if (hold) play(touches.down(k.toLong(), notes[k])) else actions.onNote(notes[k], false) },
+                                    { play(touches.up(k.toLong())) },
+                                ),
+                            )
                             .semantics { contentDescription = MirrorText.noteName(note, keys.names) },
                         contentAlignment = Alignment.Center,
                     ) {
@@ -820,18 +840,26 @@ private fun KeysPanel(keys: KeysUi, actions: KeysActions) {
         Segmented(row.map { Keys.name(it, keys.names) }, selected = row.indexOf(keys.root), onSelect = { actions.onRoot(row[it]) })
     }
     Text(MirrorText.KEYS_NOTE, style = ArcType.small, color = c.graphite)
+    // Sideways already, the piano is there (or there's no room for one).
+    if (!LocalArcWindow.current.landscape) Text(MirrorText.PIANO_HINT, style = ArcType.small, color = c.graphite)
     KeysLegend()
 }
 
-/** What the keys' colours mean, each with a small key drawn as the grid draws it. */
+/**
+ * What the keys' colours mean, each with a small key drawn as the grid draws
+ * it. One legend for the grid and the piano; the [piano] adds the keys only
+ * it has (those outside the scale) and its octave numbers.
+ */
 @Composable
-private fun KeysLegend() {
+private fun KeysLegend(piano: Boolean = false) {
     val c = LocalArcColors.current
     Caption(MirrorText.LEGEND, align = androidx.compose.ui.text.style.TextAlign.Start)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        LegendRow(MirrorText.LEGEND_OCTAVE) {
-            LegendKey(ring = c.navy)
-            LegendKey(ring = c.signal)
+        LegendRow(MirrorText.LEGEND_ROOT) { LegendKey(ring = c.signal) }
+        LegendRow(MirrorText.LEGEND_IN_SCALE) { LegendKey(ring = c.navy) }
+        if (piano) {
+            LegendRow(MirrorText.LEGEND_OUT) { LegendKey(ring = null, fill = lerp(c.plate, c.line, 0.15f)) }
+            LegendRow(MirrorText.LEGEND_C) { LegendKey(ring = null, digit = "4") }
         }
         LegendRow(MirrorText.LEGEND_DEVICE) { LegendKey(ring = c.onSignal, fill = c.signal) }
         LegendRow(MirrorText.LEGEND_PHONE) { LegendKey(ring = c.navy, outline = true) }
@@ -848,9 +876,12 @@ private fun LegendRow(text: String, keys: @Composable () -> Unit) {
     }
 }
 
-/** A key in miniature: its plate (lit orange when [fill]), its ring, and the phone's outline. */
+/**
+ * A key in miniature: its plate (lit orange, or dimmed, as [fill] says), its
+ * ring if it has one, the phone's outline, and an octave [digit] in the corner.
+ */
 @Composable
-private fun LegendKey(ring: Color, fill: Color? = null, outline: Boolean = false) {
+private fun LegendKey(ring: Color?, fill: Color? = null, outline: Boolean = false, digit: String? = null) {
     val c = LocalArcColors.current
     Box(
         Modifier
@@ -858,11 +889,16 @@ private fun LegendKey(ring: Color, fill: Color? = null, outline: Boolean = false
             .clip(RoundedCornerShape(4.dp))
             .background(fill ?: c.plate)
             .then(if (outline) Modifier.border(2.dp, c.signal, RoundedCornerShape(4.dp)) else Modifier)
-            .padding(5.dp),
+            .padding(if (digit != null) 3.dp else 5.dp),
     ) {
-        Canvas(Modifier.fillMaxSize()) {
-            val stroke = size.minDimension * 0.14f
-            drawCircle(ring, radius = size.minDimension / 2 - stroke / 2, style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke))
+        if (ring != null) {
+            Canvas(Modifier.fillMaxSize()) {
+                val stroke = size.minDimension * 0.14f
+                drawCircle(ring, radius = size.minDimension / 2 - stroke / 2, style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke))
+            }
+        }
+        if (digit != null) {
+            Text(digit, style = ArcType.tiny.copy(fontSize = 10.sp, lineHeight = 1.em), color = c.ink, modifier = Modifier.align(Alignment.BottomEnd))
         }
     }
 }
