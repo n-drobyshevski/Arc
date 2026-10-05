@@ -137,12 +137,13 @@ private fun Cap(k: KeyCap, badgeSpace: Boolean) {
             KeyKind.PAD -> Key(50.dp, 50.dp, DarkFace, DarkEdge, alignment = Alignment.TopStart) {
                 Text(
                     when (k.label) {
-                        "pad" -> ""
+                        // Any pad: named, so the cap doesn't read as a blank key.
+                        "pad" -> "PAD"
                         "0-9" -> "0\u20139"
                         "1-9" -> "1\u20139"
                         else -> k.label
                     },
-                    style = CapText.copy(fontSize = if (k.label == "ENTER") 10.sp else 13.sp),
+                    style = CapText.copy(fontSize = if (k.label == "ENTER" || k.label == "pad") 10.sp else 13.sp),
                     color = DarkInk,
                     modifier = Modifier.padding(start = 7.dp, top = 5.dp),
                 )
@@ -197,7 +198,9 @@ private fun Knob(axis: String) {
 
 @Composable
 private fun Fader() {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    // Named above the drawing (rows of keys line up at the bottom).
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Text("FADER", style = CapText.copy(fontSize = 10.sp), color = LocalArcColors.current.graphite)
         Box(
             Modifier.width(22.dp).height(50.dp).clip(RoundedCornerShape(11.dp)).background(DarkEdge),
             contentAlignment = Alignment.Center,
