@@ -186,7 +186,6 @@
   padding: var(--deck-pad) calc(var(--deck-pad) + var(--cap-dx)) calc(var(--deck-pad) + var(--cap-dy)) var(--deck-pad);
   border-radius: var(--radius-plate);
   background: var(--hw-body);
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.18);
 }
 .live-group:not(.live-group--big) .live-deck {
   --deck-gap: 6px;

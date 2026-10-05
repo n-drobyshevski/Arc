@@ -545,7 +545,7 @@ function Pad(props: PadProps): JSX.Element {
   const g = light ? glow(light, props.now) : 0
   const wide = pad.label.length > 1
   const label = `${pad.groupLetter} ${pad.label}` + (name !== null ? `, ${name}` : '')
-  const cls = `live-pad cap-3d cap-3d--dark${big ? ' live-pad--big' : ''}${playing ? ' is-playing' : ''}`
+  const cls = `live-pad cap-3d${big ? ' live-pad--big' : ''}${playing ? ' is-playing' : ''}`
   const content = (
     <>
       {/* The key's own label in the corner (web: top left, where the K.O. II prints it). */}
@@ -757,7 +757,7 @@ function KeysGrid(props: {
                 release: () => actions.onKeyUp?.(k),
               }
               const cls =
-                'live-key cap-3d cap-3d--dark' +
+                'live-key cap-3d' +
                 (upperOctave(note, keys.octave) ? ' live-key--upper' : '') +
                 (keys.playingKeys.has(k) ? ' is-playing' : '')
               return (
