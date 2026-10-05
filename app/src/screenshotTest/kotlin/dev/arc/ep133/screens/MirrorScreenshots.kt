@@ -98,7 +98,7 @@ private fun Framed(
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPad: PhysicalPad? = null) {
     Framed(Tab.LIVE, connected = offline == null, dark = dark, guide = guide) {
         MirrorScreen(
             mirror = MirrorUi(state, loading = loading, offline = offline),
@@ -110,6 +110,8 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
             follow = true,
             initialToolsOpen = tools,
             initialNoteOpen = noteOpen,
+            onPad = if (playingPad != null) ({}) else null,
+            playingPad = playingPad,
         )
     }
 }
@@ -148,6 +150,12 @@ fun LiveOfflinePreview() = Live(lastRead, oneGroup = true, offline = "Last seen 
 @Preview(name = "Live offline all groups", widthDp = 393, heightDp = 1180, showBackground = true)
 @Composable
 fun LiveOfflineAllPreview() = Live(lastRead, offline = "Last seen Oct 5, 2:02 PM")
+
+// Offline, a tapped pad plays its sample on the phone: ringed while it plays.
+@PreviewTest
+@Preview(name = "Live offline pad playing", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveOfflinePlayingPreview() = Live(lastRead, oneGroup = true, offline = "Last seen Oct 5, 2:02 PM", playingPad = PhysicalPad(0, 9))
 
 // Tapping "Offline" unfolds why.
 @PreviewTest

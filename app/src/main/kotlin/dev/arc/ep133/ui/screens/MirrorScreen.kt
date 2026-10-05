@@ -14,6 +14,7 @@ import dev.arc.ep133.ui.components.ArcIcon
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.PaddingValues
@@ -126,6 +127,10 @@ fun MirrorScreen(
     initialToolsOpen: Boolean = false,
     /** For screenshots: start with the offline note unfolded. */
     initialNoteOpen: Boolean = false,
+    /** Tapping a pad plays its sample on the phone; null leaves the pads still. */
+    onPad: ((PhysicalPad) -> Unit)? = null,
+    /** The pad whose sample is playing on the phone, ringed. */
+    playingPad: PhysicalPad? = null,
 ) {
     val c = LocalArcColors.current
     if (onBack != null) BackHandler(onBack = onBack)
@@ -162,7 +167,7 @@ fun MirrorScreen(
                     GridPlate { SwitchRow(MirrorText.FOLLOW, MirrorText.FOLLOW_NOTE, follow, onFollow) }
                 }
                 if (st.lastKeysNote != null) KeysStrip(st)
-                Notes(st, mirror, onPadOrder)
+                Notes(st, mirror, onPadOrder, tapToPlay = onPad != null)
             },
         ) {
             if (oneGroup) {
@@ -189,6 +194,8 @@ fun MirrorScreen(
                             group, st, nameOf, now,
                             Modifier.fillMaxWidth().weight(1f).coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
                             big = true,
+                            onPad = onPad,
+                            playingPad = playingPad,
                         )
                         GroupKeys(group, st, now, onSelect = { group = it })
                     }
@@ -215,7 +222,7 @@ fun MirrorScreen(
                             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                                 for (row in (0..3).chunked(perRow)) {
                                     Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                                        for (g in row) Group(g, st, nameOf, now, Modifier.weight(1f))
+                                        for (g in row) Group(g, st, nameOf, now, Modifier.weight(1f), onPad = onPad, playingPad = playingPad)
                                     }
                                 }
                             }
@@ -333,7 +340,16 @@ private fun Display(st: MirrorState, mirror: MirrorUi?, compact: Boolean = false
 }
 
 @Composable
-private fun Group(group: Int, st: MirrorState, nameOf: (PhysicalPad) -> String?, now: Long, modifier: Modifier, big: Boolean = false) {
+private fun Group(
+    group: Int,
+    st: MirrorState,
+    nameOf: (PhysicalPad) -> String?,
+    now: Long,
+    modifier: Modifier,
+    big: Boolean = false,
+    onPad: ((PhysicalPad) -> Unit)? = null,
+    playingPad: PhysicalPad? = null,
+) {
     val c = LocalArcColors.current
     val lit = st.pads.filterKeys { it.group == group }
     val groupGlow = lit.values.maxOfOrNull { glow(it, now) } ?: 0f
@@ -349,7 +365,13 @@ private fun Group(group: Int, st: MirrorState, nameOf: (PhysicalPad) -> String?,
                     rowOffsets.forEachIndexed { i, o ->
                         if (i > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(c.line))
                         val pad = PhysicalPad(group, o)
-                        Pad(pad, lit[pad], nameOf(pad), now, Modifier.weight(1f).then(if (big) Modifier.fillMaxHeight() else Modifier.aspectRatio(1f)), big)
+                        Pad(
+                            pad, lit[pad], nameOf(pad), now,
+                            Modifier.weight(1f).then(if (big) Modifier.fillMaxHeight() else Modifier.aspectRatio(1f)),
+                            big,
+                            onTap = onPad?.let { f -> { f(pad) } },
+                            playing = pad == playingPad,
+                        )
                     }
                 }
             }
@@ -400,13 +422,37 @@ private fun glow(l: PadLight, now: Long): Float {
 }
 
 @Composable
-private fun Pad(pad: PhysicalPad, light: PadLight?, name: String?, now: Long, modifier: Modifier, big: Boolean = false) {
+private fun Pad(
+    pad: PhysicalPad,
+    light: PadLight?,
+    name: String?,
+    now: Long,
+    modifier: Modifier,
+    big: Boolean = false,
+    onTap: (() -> Unit)? = null,
+    playing: Boolean = false,
+) {
     val c = LocalArcColors.current
     val g = light?.let { glow(it, now) } ?: 0f
     val ink = if (g > 0.3f) c.onSignal else c.ink
     Box(
         modifier
             .background(lerp(c.plate, c.signal, g))
+            // Playing on the phone: a signal-orange ring inside the pad.
+            .then(if (playing) Modifier.border(2.dp, c.signal) else Modifier)
+            .then(
+                if (onTap != null) {
+                    Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        role = Role.Button,
+                        onClickLabel = MirrorText.PLAY,
+                        onClick = onTap,
+                    )
+                } else {
+                    Modifier
+                },
+            )
             .semantics { contentDescription = "${pad.groupLetter} ${pad.label}" + (name?.let { ", $it" } ?: "") }
             .padding(if (big) PaddingValues(10.dp) else PaddingValues(start = 6.dp, top = 5.dp, end = 7.dp, bottom = 5.dp)),
     ) {
@@ -483,9 +529,10 @@ private fun KeysStrip(st: MirrorState) {
 }
 
 @Composable
-private fun Notes(st: MirrorState, mirror: MirrorUi?, onPadOrder: (PadOrder) -> Unit) {
+private fun Notes(st: MirrorState, mirror: MirrorUi?, onPadOrder: (PadOrder) -> Unit, tapToPlay: Boolean = false) {
     val c = LocalArcColors.current
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (tapToPlay) Text(MirrorText.TAP_NOTE, style = ArcType.small, color = c.graphite)
         if (mirror?.offline != null) Text(MirrorText.OFFLINE_NOTE, style = ArcType.small, color = c.graphite)
         if (st.padOrder == PadOrder.FROM_TOP) {
             Text(MirrorText.LEARN_NOTE, style = ArcType.small, color = c.graphite)

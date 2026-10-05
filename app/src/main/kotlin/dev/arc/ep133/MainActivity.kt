@@ -339,7 +339,10 @@ class MainActivity : ComponentActivity() {
             if (t == tab) return
             // Leaving a tab does what its Done key used to.
             when (tab) {
-                Tab.LIVE -> controller.closeMirror()
+                Tab.LIVE -> {
+                    controller.closeMirror()
+                    controller.stopPlayback()
+                }
                 Tab.DEVICE -> {
                     padsFor = null
                     controller.stopPlayback()
@@ -416,6 +419,8 @@ class MainActivity : ComponentActivity() {
                     onKeepLast = { controller.setKeepLast(it) },
                     onPadOrder = controller::setPadOrder,
                     onForgetNames = controller::forgetLearned,
+                    padSoundsSize = controller::padSoundsSize,
+                    onClearPadSounds = { controller.clearPadSounds() },
                     onRestoreFolder = { folderLauncher.launch(dev.arc.ep133.data.ExternalLibrary.INITIAL_FOLDER) },
                     // No browser installed: nothing to open.
                     onSource = { runCatching { uri.openUri(dev.arc.ep133.text.SettingsText.SOURCE_URL) } },
@@ -518,6 +523,12 @@ class MainActivity : ComponentActivity() {
                             },
                             nameOf = controller::mirrorName,
                             onPadOrder = controller::setPadOrder,
+                            onPad = { controller.playPad(it) },
+                            playingPad = playing?.takeIf { it.startsWith("live:") }?.split(':')?.let { p ->
+                                val g = p.getOrNull(1)?.toIntOrNull()
+                                val o = p.getOrNull(2)?.toIntOrNull()
+                                if (g != null && o != null) dev.arc.ep133.features.PhysicalPad(g, o) else null
+                            },
                             oneGroup = appSettings.liveOneGroup,
                             onOneGroup = controller::setLiveOneGroup,
                             follow = appSettings.liveFollow,
