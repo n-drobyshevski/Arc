@@ -13,7 +13,8 @@ import kotlin.math.pow
  * A voice sounds until it is released (a gate), then fades out over
  * [FADE_MS]; it sounds at least [MIN_GATE_MS], so the quickest tap is heard.
  * The same key again cuts the old voice short with a click-free fade, and past
- * [maxVoices] the oldest does the same.
+ * [maxVoices] the oldest does the same: the oldest let go of first, then the
+ * oldest still held, so a run up the keys keeps the other hand's chord.
  *
  * [start], [release] and [stopAll] may be called from any thread; they take
  * effect at the next [render], which only the output's thread calls.
@@ -106,7 +107,9 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
             is Command.Start -> {
                 if (c.pcm.size < c.channels) return
                 voices.filter { it.key == c.key && !it.choked }.forEach(::cut)
-                while (voices.count { !it.choked } >= maxVoices) cut(voices.first { !it.choked })
+                while (voices.count { !it.choked } >= maxVoices) {
+                    cut(voices.firstOrNull { !it.choked && it.fadeAt != Long.MAX_VALUE } ?: voices.first { !it.choked })
+                }
                 voices += Voice(c.key, c.pcm, c.channels, c.step, frame)
                 started += Started(c.key, c.tag, frame)
             }

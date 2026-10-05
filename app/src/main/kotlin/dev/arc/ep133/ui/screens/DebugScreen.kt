@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -26,15 +26,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.arc.ep133.protocol.TrafficLog
 import dev.arc.ep133.text.Strings
 import dev.arc.ep133.ui.components.ArcKey
+import dev.arc.ep133.ui.components.ArcWindow
 import dev.arc.ep133.ui.components.ChoiceRow
 import dev.arc.ep133.ui.components.KeySize
 import dev.arc.ep133.ui.components.KeyStyle
+import dev.arc.ep133.ui.components.LocalArcWindow
 import dev.arc.ep133.ui.theme.ArcType
 import dev.arc.ep133.ui.theme.LocalArcColors
 import dev.arc.ep133.util.toHex
@@ -55,21 +58,29 @@ fun DebugScreen(log: TrafficLog, onShare: () -> Unit, onSave: () -> Unit, onCopy
     val entries = remember(version) { log.snapshot() }
     var logging by remember { mutableStateOf(log.enabled) }
     val listState = rememberLazyListState()
-    LaunchedEffect(entries.size) { if (entries.isNotEmpty()) listState.scrollToItem(entries.size - 1) }
+    // On a phone on its side only the title and Done stay above the log; the switch and the keys
+    // are the list's first row and scroll away with it, or the log would get a few lines. Upright
+    // they all stay above the log's dark plate.
+    val window = LocalArcWindow.current
+    val short = window.short
+    val rowsAbove = if (short) 1 else 0
+    // Opened, or the window changed (the phone turned): at the newest entry. Upright each new
+    // entry scrolls to it; on its side only while the list is at the end, so reading further
+    // up (or reaching the keys) isn't cut short.
+    var shownIn by remember { mutableStateOf<ArcWindow?>(null) }
+    LaunchedEffect(entries.size, window) {
+        if (entries.isEmpty()) return@LaunchedEffect
+        if (!short || shownIn != window || !listState.canScrollForward) listState.scrollToItem(rowsAbove + entries.size - 1)
+        shownIn = window
+    }
     val fmt = remember { DateTimeFormatter.ofPattern("HH:mm:ss.SSS").withZone(ZoneId.systemDefault()) }
-
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(c.shell)
-            .windowInsetsPadding(WindowInsets.safeDrawing)
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
+    val title: @Composable () -> Unit = {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
             Text(Strings.DEBUG_TITLE, style = ArcType.heading, color = c.ink)
             ArcKey(Strings.DONE, onBack, size = KeySize.Small, style = KeyStyle.Quiet)
         }
+    }
+    val controls: @Composable () -> Unit = {
         ChoiceRow(Strings.DEBUG_TOGGLE, logging, {
             logging = !logging
             log.enabled = logging
@@ -82,20 +93,40 @@ fun DebugScreen(log: TrafficLog, onShare: () -> Unit, onSave: () -> Unit, onCopy
             ArcKey(Strings.DEBUG_COPY, onCopy, Modifier.weight(1f), size = KeySize.Small)
             ArcKey(Strings.DEBUG_CLEAR, { log.clear() }, Modifier.weight(1f), size = KeySize.Small)
         }
+    }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(c.shell)
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        title()
+        if (!short) controls()
         LazyColumn(
             state = listState,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(c.display)
-                .padding(10.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+                .then(if (short) Modifier else Modifier.clip(RoundedCornerShape(12.dp)).background(c.display).padding(10.dp)),
+            verticalArrangement = Arrangement.spacedBy(if (short) 0.dp else 6.dp),
         ) {
-            if (entries.isEmpty()) {
-                item { Text(Strings.DEBUG_EMPTY, style = ArcType.small, color = c.displayDim) }
+            if (short) {
+                item(key = "head") {
+                    Column(Modifier.padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { controls() }
+                }
             }
-            items(entries) { e ->
+            if (entries.isEmpty()) {
+                item {
+                    Text(
+                        Strings.DEBUG_EMPTY, style = ArcType.small, color = c.displayDim,
+                        modifier = if (short) Modifier.logRow(true, true, c.display) else Modifier,
+                    )
+                }
+            }
+            itemsIndexed(entries) { i, e ->
                 val time = fmt.format(Instant.ofEpochMilli(e.time))
                 val head = when (e.dir) {
                     TrafficLog.Dir.OUT -> "OUT"
@@ -112,8 +143,21 @@ fun DebugScreen(log: TrafficLog, onShare: () -> Unit, onSave: () -> Unit, onCopy
                     fontFamily = FontFamily.Monospace,
                     fontSize = 11.sp,
                     lineHeight = 15.sp,
+                    modifier = if (short) Modifier.logRow(i == 0, i == entries.lastIndex, c.display) else Modifier,
                 )
             }
         }
     }
+}
+
+/**
+ * One row of the log's dark plate drawn row by row (under the header in a
+ * short window): rounded at its ends, with the plate's padding and gaps.
+ */
+private fun Modifier.logRow(first: Boolean, last: Boolean, plate: Color): Modifier {
+    val r = 12.dp
+    return fillMaxWidth()
+        .clip(RoundedCornerShape(topStart = if (first) r else 0.dp, topEnd = if (first) r else 0.dp, bottomStart = if (last) r else 0.dp, bottomEnd = if (last) r else 0.dp))
+        .background(plate)
+        .padding(start = 10.dp, end = 10.dp, top = if (first) 10.dp else 3.dp, bottom = if (last) 10.dp else 3.dp)
 }

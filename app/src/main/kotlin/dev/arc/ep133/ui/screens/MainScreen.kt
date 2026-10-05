@@ -38,7 +38,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.arc.ep133.controller.UiState
@@ -52,9 +55,11 @@ import dev.arc.ep133.ui.components.GridPlate
 import dev.arc.ep133.ui.components.PlateLine
 import dev.arc.ep133.text.NavText
 import dev.arc.ep133.ui.components.DashedBox
+import dev.arc.ep133.ui.components.DisplayLine
 import dev.arc.ep133.ui.components.DisplayPanel
 import dev.arc.ep133.ui.components.KeySize
 import dev.arc.ep133.ui.components.KeyStyle
+import dev.arc.ep133.ui.components.LocalArcWindow
 import dev.arc.ep133.ui.components.Meter
 import dev.arc.ep133.ui.components.OneLine
 import dev.arc.ep133.ui.components.describe
@@ -80,16 +85,17 @@ fun MainScreen(
     Box(Modifier.fillMaxSize().background(c.shell), contentAlignment = Alignment.TopCenter) {
         Column(
             Modifier
+                .windowInsetsPadding(WindowInsets.safeDrawing)
                 .widthIn(max = 560.dp)
                 .fillMaxWidth()
                 .verticalScroll(rememberScrollState())
-                .windowInsetsPadding(WindowInsets.safeDrawing)
                 // The left gutter keeps clear of the guide tab on the edge.
                 .padding(start = EdgeTabWidth + 8.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Caption(NavText.DEVICE_CAPTION)
-            DevicePanel(state)
+            // On a phone on its side the panel is one line, so the backups show without scrolling.
+            DevicePanel(state, line = LocalArcWindow.current.short)
 
             // The top bar's Back up block does this too; the big key stays until the first backup.
             if (state.backups.isEmpty()) {
@@ -147,7 +153,7 @@ fun MainScreen(
 }
 
 @Composable
-private fun DevicePanel(state: UiState) {
+private fun DevicePanel(state: UiState, line: Boolean = false) {
     val c = LocalArcColors.current
     val d = state.device
     val title: String
@@ -173,6 +179,25 @@ private fun DevicePanel(state: UiState) {
             fraction = if (d.storage.total != 0.0) d.storage.used / d.storage.total else 0.0
             meterText = Strings.meterDescription(d.storage.used, d.storage.total)
         }
+    }
+    if (line) {
+        // Live's display line: the name and OS, then the meter and free space, or the hint in their place.
+        DisplayLine(Modifier.semantics { liveRegion = LiveRegionMode.Polite }) {
+            Text(title, style = ArcType.displayHead, color = c.displayInk, maxLines = 1)
+            if (sub.isNotEmpty()) Text(sub, style = ArcType.displaySub, color = c.displayDim, maxLines = 1)
+            if (hint != null) {
+                Text(hint, style = ArcType.displayHint, color = c.displayDim, modifier = Modifier.weight(1f))
+            } else {
+                Meter(fraction, modifier = Modifier.weight(1f).describe(meterText), height = 14.dp)
+                if (d != null && d.storage.total != 0.0) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(Format.bytes(d.storage.free), style = ArcType.displaySub, color = c.displayInk, maxLines = 1)
+                        Text(Strings.FREE, style = ArcType.displaySub, color = c.displayDim, maxLines = 1)
+                    }
+                }
+            }
+        }
+        return
     }
     DisplayPanel {
         // .display-head: space-between, aligned on the text baseline

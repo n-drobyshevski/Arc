@@ -1,12 +1,16 @@
 package dev.arc.ep133.text
 
 import dev.arc.ep133.features.DiffResult
+import dev.arc.ep133.features.KeyMark
+import dev.arc.ep133.features.NoteNames
 import dev.arc.ep133.features.ProjectDiff
 import dev.arc.ep133.features.ProjectState
+import dev.arc.ep133.features.Scale
 import dev.arc.ep133.features.SoundDiff
 import dev.arc.ep133.features.SoundState
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class FeatureTextTest {
@@ -61,5 +65,27 @@ class FeatureTextTest {
         assertEquals("999 ms", FeatureText.duration(0.9994))
         assertEquals("Trimmed to 1.4 s", FeatureText.trimmed(1.38))
         assertEquals("120 ms to 1.5 s, 1.4 s long", FeatureText.selection(0.12, 1.5))
+    }
+
+    @Test
+    fun `piano and key text`() {
+        val solfege = NoteNames.SOLFEGE
+        assertEquals("KEY DO", MirrorText.keyWord(0, solfege).uppercase())
+        assertEquals("Key A#", MirrorText.keyWord(10, NoteNames.LETTERS))
+        assertEquals("Key: DO. Tap to change.", MirrorText.keyChoice(0, solfege))
+        assertEquals("Key: F#. Tap to change.", MirrorText.keyChoice(6, NoteNames.LETTERS))
+        assertEquals("LA4, root", MirrorText.pianoKey(69, solfege, KeyMark.ROOT))
+        assertEquals("LA4, in the scale", MirrorText.pianoKey(69, solfege, KeyMark.IN))
+        assertEquals("FA4, outside the scale", MirrorText.pianoKey(65, solfege, KeyMark.OUT))
+        assertEquals("F#4, outside the scale", MirrorText.pianoKey(66, NoteNames.LETTERS, KeyMark.OUT))
+        assertEquals("Keyboard, DO3 to DO5", MirrorText.pianoRange(48, 72, solfege))
+        assertEquals("Keyboard, C7 to G9", MirrorText.pianoRange(96, 127, NoteNames.LETTERS))
+        assertEquals("DO2, below the keys", MirrorText.outOfRange(36, solfege, below = true))
+        assertEquals("E6, above the keys", MirrorText.outOfRange(88, NoteNames.LETTERS, below = false))
+        // Short scale words, still told apart once upper-cased, and never wider than five.
+        val codes = Scale.entries.map { MirrorText.scaleCode(it).uppercase() }
+        assertEquals(listOf("CHR", "MAJ", "MIN", "DOR", "PHR", "LYD", "MIX", "MAJ.P", "MIN.P", "BLU"), codes)
+        assertEquals(codes.size, codes.toSet().size)
+        assertTrue(codes.all { it.length <= 5 })
     }
 }

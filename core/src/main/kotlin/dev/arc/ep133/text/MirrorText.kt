@@ -48,10 +48,53 @@ object MirrorText {
 
     fun scaleChoice(s: dev.arc.ep133.features.Scale) = "Scale: ${scaleName(s)}. Tap to change."
     const val KEYS_NOTE = "Keys plays the pad last tapped (or played on the EP-133 in Pads) as notes. Notes the EP-133 sends in its own KEYS mode light their key."
+    const val PIANO_HINT = "Turn the phone sideways for a piano (with auto-rotate off, tap the rotate button Android shows)."
     const val LEGEND = "Colours"
-    const val LEGEND_OCTAVE = "Ring: the octave, navy and orange in turn (its number is in the corner)"
+    const val LEGEND_ROOT = "Orange ring: the key's root"
+    const val LEGEND_IN_SCALE = "Navy ring: in the scale"
+    // The piano's rows: it shows every note, so the ones outside the scale too.
+    const val LEGEND_OUT = "Dimmed: outside the scale (still plays)"
+    const val LEGEND_C = "Number: the octave, on each C"
     const val LEGEND_DEVICE = "Filled: played on the EP-133"
     const val LEGEND_PHONE = "Outlined: playing on the phone"
+
+    // The piano in landscape: − and + step the octave, and the key gets its own word.
+    const val OCTAVE_DOWN = "Octave down"
+    const val OCTAVE_UP = "Octave up"
+
+    /** "KEY DO", the key word above the piano. */
+    fun keyWord(root: Int, names: dev.arc.ep133.features.NoteNames) = "$KEY ${dev.arc.ep133.features.Keys.name(root, names)}"
+
+    fun keyChoice(root: Int, names: dev.arc.ep133.features.NoteNames) = "$KEY: ${dev.arc.ep133.features.Keys.name(root, names)}. Tap to change."
+
+    /** "MAJ", the scale word when the row above the piano runs out of room. */
+    fun scaleCode(s: dev.arc.ep133.features.Scale) = when (s) {
+        dev.arc.ep133.features.Scale.CHROMATIC -> "Chr"
+        dev.arc.ep133.features.Scale.MAJOR -> "Maj"
+        dev.arc.ep133.features.Scale.MINOR -> "Min"
+        dev.arc.ep133.features.Scale.DORIAN -> "Dor"
+        dev.arc.ep133.features.Scale.PHRYGIAN -> "Phr"
+        dev.arc.ep133.features.Scale.LYDIAN -> "Lyd"
+        dev.arc.ep133.features.Scale.MIXOLYDIAN -> "Mix"
+        // The word is upper-cased, so the two pentatonics differ in letters, not case.
+        dev.arc.ep133.features.Scale.MAJOR_PENTATONIC -> "Maj.P"
+        dev.arc.ep133.features.Scale.MINOR_PENTATONIC -> "Min.P"
+        dev.arc.ep133.features.Scale.BLUES -> "Blu"
+    }
+
+    /** A piano key for screen readers: "LA4, root", "LA4, in the scale" or "FA4, outside the scale". */
+    fun pianoKey(note: Int, names: dev.arc.ep133.features.NoteNames, mark: dev.arc.ep133.features.KeyMark) = noteName(note, names) + when (mark) {
+        dev.arc.ep133.features.KeyMark.ROOT -> ", root"
+        dev.arc.ep133.features.KeyMark.IN -> ", in the scale"
+        dev.arc.ep133.features.KeyMark.OUT -> ", outside the scale"
+    }
+
+    /** "Keyboard, DO3 to DO5", the piano as a whole for screen readers. */
+    fun pianoRange(lo: Int, hi: Int, names: dev.arc.ep133.features.NoteNames) = "Keyboard, ${noteName(lo, names)} to ${noteName(hi, names)}"
+
+    /** "DO2, below the keys": a note from the EP-133 the piano doesn't reach, for the display and the tick at that end. */
+    fun outOfRange(note: Int, names: dev.arc.ep133.features.NoteNames, below: Boolean) =
+        noteName(note, names) + if (below) ", below the keys" else ", above the keys"
 
     fun scaleName(s: dev.arc.ep133.features.Scale) = when (s) {
         dev.arc.ep133.features.Scale.CHROMATIC -> "Chromatic"

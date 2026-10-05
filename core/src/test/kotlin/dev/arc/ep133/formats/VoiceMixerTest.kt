@@ -111,6 +111,34 @@ class VoiceMixerTest {
     }
 
     @Test
+    fun `past the limit a voice let go of goes before an older held one`() {
+        val m = mixer(max = 2)
+        m.start("a", steady(1000), 1, 1000)
+        m.start("b", steady(1000), 1, 1000)
+        render(m, 1)
+        // b still sounds out its gate, but it was let go of.
+        m.release("b")
+        m.start("c", steady(1000), 1, 1000)
+        render(m, 1)
+        assertEquals(setOf("a", "c"), m.keys)
+    }
+
+    @Test
+    fun `a held chord survives a run of ten keys`() {
+        val m = mixer()
+        for (k in listOf("note:60", "note:64", "note:67")) m.start(k, steady(1000), 1, 1000)
+        render(m, 1)
+        // A glissando: each key let go of as the next plays, all still in their gates.
+        for (n in 72 until 82) {
+            m.release("note:${n - 1}")
+            m.start("note:$n", steady(1000), 1, 1000)
+            render(m, 1)
+        }
+        assertTrue(m.keys.containsAll(listOf("note:60", "note:64", "note:67", "note:81")))
+        assertEquals(VoiceMixer.MAX_VOICES, m.keys.size)
+    }
+
+    @Test
     fun `stop fades everything out`() {
         val m = mixer()
         m.start("a", steady(1000), 1, 1000)

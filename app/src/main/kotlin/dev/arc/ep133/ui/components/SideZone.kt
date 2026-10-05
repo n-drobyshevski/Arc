@@ -16,12 +16,17 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -49,7 +54,8 @@ val SideStripWidth = 24.dp
  * strip along the right edge that opens a panel of secondary controls, so the
  * page itself needs no buttons for them. It opens on a tap (an edge swipe
  * would be Android's back gesture). The panel closes on Back, on a tap
- * outside it, or with its close key.
+ * outside it, or with its close key. Strip and panel keep clear of a
+ * navigation bar or cutout on that side.
  */
 @Composable
 fun SideZone(
@@ -58,6 +64,9 @@ fun SideZone(
     onClose: () -> Unit,
     title: String,
     panel: @Composable ColumnScope.() -> Unit,
+    /** Where the strip sits on the edge (CenterEnd or TopEnd), and how much of the height it takes. */
+    stripAlignment: Alignment = Alignment.CenterEnd,
+    stripHeight: Float = 0.5f,
     content: @Composable () -> Unit,
 ) {
     val c = LocalArcColors.current
@@ -67,9 +76,10 @@ fun SideZone(
         // The strip: hatched like the PO's side panels, with a small arrow pointing in.
         Box(
             Modifier
-                .align(Alignment.CenterEnd)
+                .align(stripAlignment)
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.End))
                 .width(SideStripWidth)
-                .fillMaxHeight(0.5f)
+                .fillMaxHeight(stripHeight)
                 .coachMark("side.more", CoachText.MORE_TOOLS, c.ink, c.shell)
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onOpen)
                 .semantics {
@@ -113,11 +123,13 @@ fun SideZone(
         ) {
             Column(
                 Modifier
-                    .width(min(320.dp, maxWidth * 0.85f))
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(topStart = PlateRadius, bottomStart = PlateRadius))
                     .background(c.shell)
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+                    // Its face reaches under a side navigation bar; the close key and controls stay clear of it.
+                    .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.End))
+                    .width(min(320.dp, maxWidth * 0.85f))
                     .verticalScroll(rememberScrollState())
                     .padding(start = 18.dp, end = 16.dp, top = 12.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
