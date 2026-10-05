@@ -7,8 +7,9 @@
   width: var(--edge-tab-width);
   height: var(--edge-tab-height);
   border-radius: 0 var(--radius-key) var(--radius-key) 0;
-  background: var(--navy);
-  color: var(--on-navy);
+  /* Quiet, like an unselected key: always there, never the loudest thing on the page. */
+  background: var(--tab-off);
+  color: var(--on-tab-off);
   overflow: hidden;
 }
 .guide-edge-tab:focus-visible { outline-offset: 2px; }

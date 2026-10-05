@@ -17,11 +17,13 @@ import { openMidi, probePermission, requestMidiAccess, watchMidi, webMidiSupport
 import { nullChannel } from '../../src/platform/storage/channel'
 import { MemoryTarget } from '../../src/platform/storage/external'
 import { Library } from '../../src/platform/storage/library'
-import { CoachPrefs, MirrorPrefs, SettingsStore, memoryStorage } from '../../src/platform/storage/settings'
+import { CoachPrefs, LastReadPrefs, MirrorPrefs, SettingsStore, memoryStorage } from '../../src/platform/storage/settings'
 import { connectionPhase } from '../../src/state/connection'
 import { createController, type ArcController } from '../../src/state/controller'
 import { unavailableLibrary, type Deps } from '../../src/state/deps'
 import type { ToastMsg, UiState } from '../../src/state/types'
+import { memoryPadSoundStore } from '../../src/core/features/padSoundCache'
+import { fakeLiveAudio, type FakeLiveAudio } from './fakeLiveAudio'
 import { DemoData, tone } from '../helpers/demoData'
 import { connectMock, fakeNavigator, type FakeEp } from '../helpers/fakeMidiAccess'
 import { samplePak } from '../helpers/fixtures'
@@ -44,6 +46,9 @@ interface Harness {
   setVisible(v: boolean): void
   launch(files: File[]): void
   lockHeld: { value: boolean }
+  liveAudio: FakeLiveAudio
+  padSounds: ReturnType<typeof memoryPadSoundStore>
+  storage: ReturnType<typeof memoryStorage>
 }
 
 const harnesses: Harness[] = []
@@ -64,6 +69,8 @@ async function harness(
   const library = await Library.open({ dbOptions: { name: `arc-state-${++dbCount}-${Math.random().toString(36).slice(2)}` }, channel: nullChannel(), storage: null })
   const storage = memoryStorage(opts.storage)
   const player = new NullPlayer()
+  const liveAudio = fakeLiveAudio()
+  const padSounds = memoryPadSoundStore()
   const visListeners = new Set<(v: boolean) => void>()
   let visible = true
   const titles: string[] = []
@@ -106,6 +113,9 @@ async function harness(
     },
     share: { share: async () => 'shared' },
     player,
+    liveAudio,
+    padSounds,
+    lastRead: new LastReadPrefs(storage),
     wakeLock: {
       set: async (on) => {
         wake.push(on)
@@ -161,6 +171,9 @@ async function harness(
     guards,
     saved,
     lockHeld,
+    liveAudio,
+    padSounds,
+    storage,
     setVisible(v) {
       visible = v
       for (const l of [...visListeners]) l(v)

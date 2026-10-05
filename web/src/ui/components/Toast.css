@@ -18,9 +18,14 @@
   pointer-events: none;
 }
 
-.toast-live {
+.toast-frame {
+  position: relative;
   width: 100%;
   max-width: calc(var(--toast-max) + 32px);
+}
+
+.toast-live {
+  width: 100%;
   padding: 16px;
 }
 .toast-live:empty { padding: 0; }
@@ -34,8 +39,48 @@
   overflow: hidden;
   opacity: 0;
   transition: opacity 150ms ease-out;
+  /* It can be swiped away: it takes the pointer (taps on it no longer reach the page). */
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
 }
 .toast.is-visible { opacity: 1; animation: toast-in 150ms ease-out; }
+/* Swiping: follows the finger; a short drag springs back; a swipe leaves in 160 ms. */
+.toast.is-dragging { transition: none; }
+.toast.is-returning { transition: transform 300ms cubic-bezier(0.34, 1.4, 0.64, 1), opacity 300ms ease-out; }
+.toast.is-leaving { transition: transform 160ms ease-in, opacity 160ms ease-in; }
+
+/* The screen reader's Dismiss (Kotlin's custom action): unseen until focused,
+ * then a small key at the toast's top right. */
+.toast__dismiss {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  pointer-events: auto;
+}
+.toast__dismiss:focus-visible {
+  width: auto;
+  height: auto;
+  clip-path: none;
+  right: 16px;
+  top: 16px;
+  padding: 6px 12px;
+  border-radius: 0 var(--radius-toast) 0 var(--radius-tag);
+  background: var(--display-ink);
+  color: var(--display);
+  font-size: var(--size-caps-key-small);
+  font-weight: 700;
+  letter-spacing: var(--track-caps-key);
+  text-transform: uppercase;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast.is-returning, .toast.is-leaving { transition: none; }
+}
 
 @keyframes toast-in {
   from { opacity: 0; }

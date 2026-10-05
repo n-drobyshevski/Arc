@@ -21,6 +21,7 @@ export const ArcIcon = {
   SEARCH: 'SEARCH',
   IMPORT: 'IMPORT',
   FOLLOW: 'FOLLOW',
+  SWAP: 'SWAP',
 } as const
 export type ArcIcon = (typeof ArcIcon)[keyof typeof ArcIcon]
 
@@ -219,6 +220,22 @@ export function Follow(props: IconProps): JSX.Element {
   )
 }
 
+/**
+ * Two overlapping squares, the PO app's mark beside its chosen mode (DRUMS /
+ * KEYPAD): sides w * 0.5 at (0.1w, 0.1w) and (0.4w, 0.4w), Stroke(w * 0.08).
+ */
+export function Swap(props: IconProps): JSX.Element {
+  const side = n(W * 0.5)
+  return (
+    <Svg {...props} name="SWAP">
+      <g stroke="currentColor" stroke-width={n(W * 0.08)}>
+        <rect x={n(W * 0.1)} y={n(W * 0.1)} width={side} height={side} />
+        <rect x={n(W * 0.4)} y={n(W * 0.4)} width={side} height={side} />
+      </g>
+    </Svg>
+  )
+}
+
 const BY_NAME: Readonly<Record<ArcIcon, (p: IconProps) => JSX.Element>> = {
   DOT: Dot,
   RING: Ring,
@@ -229,6 +246,7 @@ const BY_NAME: Readonly<Record<ArcIcon, (p: IconProps) => JSX.Element>> = {
   SEARCH: Search,
   IMPORT: Import,
   FOLLOW: Follow,
+  SWAP: Swap,
 }
 
 /** `Icon(icon, color, modifier, size)`: draws [icon] by name. */

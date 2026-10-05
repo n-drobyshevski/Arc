@@ -6,6 +6,7 @@
 // settings. A library rebuilt from that folder reads this index back.
 
 import { APP_NAME } from '../../version'
+import { LearnedLinks } from '../features/learnedLinks'
 import { isJsonObject } from '../protocol/fs'
 import type { BackupDevice } from '../text/libraryRules'
 
@@ -157,15 +158,26 @@ export function parse(text: string): LibraryIndexData | null {
   return { entries, settings }
 }
 
-/** Several indexes (an old one the new install couldn't overwrite, and a new one) merged by id; later ones win. */
+const LEARNED = 'mirror.learned'
+
+/**
+ * Several indexes (an old one the new install couldn't overwrite, and a new
+ * one) merged by id; later ones win. Live's learned pad links are combined,
+ * so a few pads learned in a new install don't drop the rest.
+ */
 export function merge(indexes: readonly LibraryIndexData[]): LibraryIndexData {
   // Map.set: a later entry replaces the value but keeps the first position.
   const byId = new Map<string, IndexEntry>()
   const settings: Record<string, string> = {}
   for (const ix of indexes) {
     for (const e of ix.entries) byId.set(e.id, e)
+    const before = Object.hasOwn(settings, LEARNED) ? settings[LEARNED]! : null
     for (const [k, v] of Object.entries(ix.settings)) {
       Object.defineProperty(settings, k, { value: v, writable: true, enumerable: true, configurable: true })
+    }
+    const now = Object.hasOwn(ix.settings, LEARNED) ? ix.settings[LEARNED]! : null
+    if (before !== null && now !== null) {
+      settings[LEARNED] = LearnedLinks.format(LearnedLinks.merge(LearnedLinks.parse(before), LearnedLinks.parse(now)))
     }
   }
   return { entries: [...byId.values()], settings }

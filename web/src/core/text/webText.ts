@@ -93,6 +93,27 @@ export const WebText = {
   // ---------- coach (CoachText.PLAY "Play on the phone") ----------
   COACH_PLAY: 'Play it here',
 
+  // ---------- Live (MirrorText / SettingsText sentences about "the phone") ----------
+  /** Replaces MirrorText.TAP_NOTE "Hold a pad to hear its sample on the phone …". */
+  LIVE_TAP_NOTE:
+    "Hold a pad to hear its sample here (it stops when you let go): from arc's copy of the device's sounds, a backup, or the device.",
+  /** Replaces MirrorText.NO_COPY "This sample isn't saved on the phone or in a backup yet." */
+  LIVE_NO_COPY: "This sample isn't saved in this browser or in a backup yet.",
+  /** Replaces MirrorText.LEGEND_PHONE "Outlined: playing on the phone". */
+  LIVE_LEGEND_HERE: 'Outlined: playing here',
+  /**
+   * Replaces MirrorText.BLUETOOTH_DELAY. Browsers don't say where the sound
+   * goes, so this is a guess from the output's delay, and names no phone speaker.
+   */
+  LIVE_SLOW_OUTPUT:
+    'Sound plays late here (often 0.2 s or more), as it does over Bluetooth. A wired output or the built-in speakers are much quicker.',
+  /** Replaces SettingsText.PAD_SOUNDS "Pad sounds saved on the phone". */
+  PAD_SOUNDS: 'Pad sounds saved in this browser',
+  /** SettingsText.padSounds with [PAD_SOUNDS]. */
+  padSounds(size: string): string {
+    return `${WebText.PAD_SOUNDS}: ${size}`
+  },
+
   // ---------- library folder (FeatureText folder text; Documents/arc → File System Access) ----------
   LIBRARY_FOLDER: 'Library folder',
   PICK_FOLDER: 'Pick a library folder',

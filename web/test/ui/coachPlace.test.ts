@@ -6,12 +6,14 @@ import {
   COACH_METRICS,
   arrowHead,
   coerceIn,
+  edgeOf,
   hintTop,
   inflate,
   isTall,
   overlaps,
   placeTags,
   placementOrder,
+  sideHook,
   type Box,
   type CoachMarkInput,
   type MeasureTag,
@@ -22,7 +24,7 @@ const VP = { width: 400, height: 800 }
 /** Every label measures 10px per character (capped at the max width), 16px per line. */
 const measure: MeasureTag = (text, maxWidth) => {
   const full = text.length * 10
-  const lines = Math.ceil(full / maxWidth)
+  const lines = Math.max(1, Math.ceil(full / maxWidth))
   return { width: Math.min(full, maxWidth), height: 16 * lines }
 }
 
@@ -120,7 +122,7 @@ describe('placeTags', () => {
 
   it('keeps tags 8px inside the screen, while the arrow stays on the control', () => {
     const [l, r] = placeTags(
-      [mark('l', at(0, 10, 20, 20), 'long label'), mark('r', at(390, 400, 10, 20), 'long label')],
+      [mark('l', at(0, 10, 20, 20), 'long label'), mark('r', at(380, 400, 20, 20), 'long label')],
       VP,
       measure,
     )
@@ -129,7 +131,7 @@ describe('placeTags', () => {
     expect(l!.tip!.x).toBe(10)
     expect(r!.rect.right).toBe(400 - 8)
     expect(r!.rect.left).toBe(400 - 8 - 118)
-    expect(r!.tip!.x).toBe(395)
+    expect(r!.tip!.x).toBe(390)
   })
 
   it('sticks to the left margin when the screen is narrower than the tag', () => {
@@ -176,8 +178,9 @@ describe('placeTags', () => {
     expect(p!.tail).toBeNull()
   })
 
-  it('keeps a tall strip at the edge on screen (the side zone)', () => {
-    const [p] = placeTags([mark('side.more', at(376, 200, 24, 400), 'More tools')], VP, measure)
+  it('keeps a wide tall strip at the edge on screen', () => {
+    const [p] = placeTags([mark('wide', at(340, 200, 60, 400), 'More tools')], VP, measure)
+    expect(p!.side).toBe(0)
     expect(p!.rect.right).toBe(400 - 8)
   })
 
@@ -228,5 +231,75 @@ describe('arrowHead', () => {
     const [, a, b] = arrowHead({ x: 50, y: 698 }, { x: 50, y: 690 })
     expect(a.y).toBeCloseTo(698 - 8.4)
     expect(b.y).toBeCloseTo(698 - 8.4)
+  })
+})
+
+describe('side tags (narrow controls on an edge)', () => {
+  it('finds the edge of a narrow, tall control', () => {
+    expect(edgeOf(mark('g', at(0, 300, 24, 112)), VP)).toBe(-1)
+    expect(edgeOf(mark('g', at(2, 300, 24, 112)), VP)).toBe(-1)
+    expect(edgeOf(mark('s', at(376, 200, 24, 400)), VP)).toBe(1)
+    expect(edgeOf(mark('s', at(340, 200, 48, 96)), VP)).toBe(0) // not on the edge
+    expect(edgeOf(mark('s', at(398 - 48, 200, 48, 96)), VP)).toBe(1) // 48 wide, twice as tall: still one
+    expect(edgeOf(mark('w', at(0, 200, 49, 400)), VP)).toBe(0) // too wide
+    expect(edgeOf(mark('f', at(0, 200, 40, 79)), VP)).toBe(0) // not twice as tall
+    expect(edgeOf(mark('i', at(3, 200, 24, 112)), VP)).toBe(0) // off the edge
+  })
+
+  it('stands a turned tab on the left edge, centred on the control, measured on one line', () => {
+    const widths: number[] = []
+    const m: MeasureTag = (text, max) => {
+      widths.push(max)
+      return measure(text, max)
+    }
+    const [p] = placeTags([mark('edge.guide', at(0, 300, 24, 112), 'EP-133 shortcuts')], VP, m)
+    expect(widths).toEqual([Number.POSITIVE_INFINITY])
+    // 16 chars → 160×16 on one line: the tab is 16+12 wide, 160+18 tall.
+    expect(p!.side).toBe(-1)
+    expect(p!.rect).toEqual(at(0, 356 - 89, 28, 178))
+    expect(p!.tip).toBeNull()
+    expect(p!.room).toEqual({ left: 0, top: 356 - 89 - 30, right: 28, bottom: 356 + 89 })
+  })
+
+  it('stands a tab on the right edge for the more-tools strip, though it is tall', () => {
+    const [p] = placeTags([mark('side.more', at(376, 200, 24, 400), 'More tools')], VP, measure)
+    expect(p!.side).toBe(1)
+    // 100×16 → 28×118, flush with the right edge.
+    expect(p!.rect).toEqual(at(400 - 28, 400 - 59, 28, 118))
+  })
+
+  it('keeps a side tab 48px below the top and 8px above the bottom', () => {
+    const [top] = placeTags([mark('a', at(0, 0, 24, 60), 'ab')], VP, measure)
+    expect(top!.rect.top).toBe(8 + 40)
+    const [bottom] = placeTags([mark('b', at(0, 770, 24, 60), 'ab')], VP, measure)
+    expect(bottom!.rect.bottom).toBe(800 - 8)
+  })
+
+  it('places side tags first, and the others keep clear of their hook', () => {
+    const guide = mark('edge.guide', at(0, 300, 24, 112), 'ab')
+    // A control in the upper half whose tag would hang into the hook's room.
+    const near = mark('near', at(0, 240, 40, 10), 'ab')
+    const ps = placeTags([near, guide], VP, measure)
+    expect(ps.map((p) => p.mark.id)).toEqual(['edge.guide', 'near'])
+    // Guide tab: 28×38 at top 356-19 = 337; room from 307. Near's tag would start at 260..288 (clear).
+    expect(ps[1]!.rect.top).toBe(250 + 10)
+    const lower = mark('lower', at(0, 270, 40, 10), 'ab')
+    const qs = placeTags([lower, guide], VP, measure)
+    // 290..318 touches the room (307..375, inflated by 6): out three steps, past the tab.
+    expect(qs[1]!.rect.top).toBe(280 + 10 + 3 * STEP)
+  })
+
+  it('draws the hook up from the inner side and across to an arrowhead at the edge', () => {
+    const left = sideHook(at(0, 300, 28, 178), -1, 400)
+    // inner 22, bottom 292, bend 274, turn 6, ends 7 short of the tip at 6.
+    expect(left.line).toBe('M22 292L22 280Q22 274 16 274L13 274')
+    expect(left.head[0]).toEqual({ x: 6, y: 274 })
+    expect(left.head[1].x).toBeCloseTo(6 + 9.1)
+    expect(left.head[1].y).toBe(267)
+    expect(left.head[2].y).toBe(281)
+    const right = sideHook(at(372, 300, 28, 178), 1, 400)
+    expect(right.line).toBe('M378 292L378 280Q378 274 384 274L387 274')
+    expect(right.head[0]).toEqual({ x: 394, y: 274 })
+    expect(right.head[1].x).toBeCloseTo(394 - 9.1)
   })
 })

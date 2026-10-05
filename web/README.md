@@ -32,17 +32,17 @@ pwa.ts          service worker registration; reloads for an update only when no 
 version.ts      APP_VERSION, PAK_AUTHOR (Arc.kt)
 core/           pure TypeScript port of the Kotlin core/ module: no DOM, no browser APIs
   protocol/       packed7, frame, session, fs, device, SysEx reassembly, port matching, traffic log
-  formats/        zip, wav, tar, crc32
+  formats/        zip, wav, tar, crc32, Live's voice mixer
   backup/         backup, restore, the .pak layout, export, library.json
-  features/       device browser, upload, trim, pads, search, compare, live mirror
+  features/       device browser, upload, trim, pads, search, compare, live mirror, KEYS, pad sound copies
   text/           every user-visible string; webText.ts holds the browser rewordings
   util/           bytes, and the Kotlin string behaviours the ports rely on
 platform/       the browser behind small interfaces (the Android parts of app/)
   midi/           WebMIDI transport and device discovery; Web Locks so only one tab connects
-  storage/        IndexedDB library and settings, the library folder (File System Access), cross-tab sync
+  storage/        IndexedDB library, settings and Live's pad sound copies, the library folder (File System Access), cross-tab sync
   files/          pick, save, drag and drop, launchQueue (.pak file handler)
   share/          navigator.share with a save fallback
-  audio/          playback (SoundPlayer)
+  audio/          playback (SoundPlayer); Live's low-latency output (LiveAudio, an AudioWorklet mixer)
   wakelock/       screen wake lock (TransferService, keepScreenOn)
 state/          the controller the UI talks to (ArcController.kt); see state/README.md
 boot/           browserDeps.ts: wires platform/ into the controller's Deps
@@ -61,7 +61,7 @@ Each file is a port of one Kotlin file (sometimes a few) and says so on its firs
 ```
 
 - `core/src/main/kotlin/dev/arc/ep133/<pkg>/X.kt` becomes `src/core/<pkg>/x.ts`, line by line where the protocol is concerned. The Kotlin core is itself a port of `../reference/`, which stays the read-only spec; when they disagree, the header comment says which one this file follows.
-- `app/.../controller/ArcController.kt` is `src/state/` (split into controller, connection, tasks, mirror). `app/.../midi`, `data`, `files` and `audio` are `src/platform/`. Compose screens in `app/.../ui/` are `src/ui/` with the same names.
+- `app/.../controller/ArcController.kt` is `src/state/` (split into controller, connection, tasks, mirror, live). `app/.../midi`, `data`, `files` and `audio` are `src/platform/`. Compose screens in `app/.../ui/` are `src/ui/` with the same names.
 - Text is never retyped: screens use `core/text/*`, which copy the Kotlin strings. Only sentences about the phone, Android, Documents/arc or the share sheet are reworded, all in `webText.ts`. The guide data is generated from `GuideText.kt` (`npm run gen:guide`), and a test fails when it is stale.
 - Web stand-ins for Android features (foreground service, Documents/arc, the VIEW intent, share sheet) are listed in the header of the file that replaces them.
 
@@ -79,7 +79,7 @@ Unit tests run in UTC (`TZ=UTC` in the npm scripts); the smoke test also pins th
 
 ## Demo mode
 
-Add `?demo` to the URL (`http://localhost:5173/?demo#/backups`). `main.tsx` then loads `src/dev/demo.ts` as its own chunk, before any MIDI code runs. It replaces `navigator.requestMIDIAccess` with a fake backed by `MockEP133`, holding 12 sounds and 3 projects, and answers the MIDI permission as granted, so arc connects by itself. The library starts empty. Replies arrive as separate tasks, like real MIDI events, so progress shows.
+Add `?demo` to the URL (`http://localhost:5173/?demo`; arc opens on Live, as on Android). `main.tsx` then loads `src/dev/demo.ts` as its own chunk, before any MIDI code runs. It replaces `navigator.requestMIDIAccess` with a fake backed by `MockEP133`, holding 12 sounds and 3 projects, and answers the MIDI permission as granted, so arc connects by itself. The library starts empty and is the demo's own: an IndexedDB database `arc-demo`, settings and Live's preferences in memory, and its own device lock, so a demo never touches the real library and a real tab can still connect. Replies arrive as separate tasks, like real MIDI events, so progress shows.
 
 From the console (and from Playwright), `window.__arcDemo` drives it:
 
@@ -87,6 +87,7 @@ From the console (and from Playwright), `window.__arcDemo` drives it:
 __arcDemo.unplug(); __arcDemo.plug()           // the USB cable
 __arcDemo.noteOn(36, 100); __arcDemo.noteOff(36) // pad notes (36-83) for the Live tab
 __arcDemo.pushPadActive(project, group, pad)    // the device's "pad selected" push
+__arcDemo.noteOn(36, 127); __arcDemo.pushPadActive(1, 0, 1) // both at once: Live learns pad A "." (001 kick), which then plays when held
 __arcDemo.clock('start' | 'stop' | 'tick' | 120)
 __arcDemo.mock                                  // the simulator itself
 ```

@@ -14,7 +14,9 @@ ui/
   components/       primitives + the shell (one .tsx + .css each)
   screens/          one file per Kotlin screen (+ its .css)
   sheets/           the sheets/dialogs mounted by app.tsx (Backups, Device, progress, licence)
-  live/             Live-tab helpers (glow.ts: pad fade maths, tested)
+  live/             Live-tab helpers: glow.ts (pad fade maths), press.ts (hold-to-play
+                    per pointer), keys.ts (KEYS grid, picker layers), Words.tsx (the
+                    PADS/KEYS word, SwapMark, PickWord lists); the .ts ones are tested
 ```
 
 File header: `// Port of app/src/main/kotlin/dev/arc/ep133/ui/<path>.kt`.
@@ -58,7 +60,8 @@ nav.back()                                     // a Done/close key: same as syst
 `compare`, `menu`, `side`, `coach`, `sheets: string[]`, `dialogs: string[]`.
 Sheet/dialog ids in use: `detail:<id>`, `restore:<id>`, `comparePick:<id>`,
 `pads:backup:<id>:<n>`, `pads:device:<n>`, `upload`, `trim:<i>`, `licence`,
-`progress` (owned by app.tsx), dialogs `delete`, `prune:<keep>`, `forget`.
+`progress` (owned by app.tsx), dialogs `delete`, `prune:<keep>`, `forget`,
+`pick:scale` / `pick:octave` (Live's KEYS lists, owned by app.tsx).
 
 Mounting a sheet (in `app.tsx`, under `tabs` = `onTabs(v)` for tab sheets):
 
@@ -88,7 +91,10 @@ the overlay opens. Mark a control either way:
 
 Known ids (`COACH_IDS`, labels/colours from the Kotlin call sites):
 `top.*`, `edge.guide`, `backups.search|import|open`, `live.pads|groups`,
-`side.more`, `device.refresh|add|switch|play`. Yellow tip tags use
+`live.keys|mode|scale|octave`, `side.more`, `device.refresh|add|switch|play`.
+A narrow control flush with the screen's left or right edge (the GUIDE tab,
+the more-tools strip) gets a side tag: a vertical tab on that edge with a
+hooked arrow (`coachPlace.ts` `edgeOf` / `sideHook`, Coach.kt's side tags). Yellow tip tags use
 `COACH_YELLOW` / `COACH_YELLOW_INK`. A custom tag: `data-coach-label`,
 `data-coach-face`, `data-coach-ink`. Mark only what is on screen.
 
@@ -117,7 +123,7 @@ Common optional props on most: `class`, `id`, `ref`. Colours are CSS values
 | `Waveform` | TrimSheet waveform | `pcm`, `channels`, `start`, `end`, `label`, `height?`, `columns?` |
 | `Sheet` | ArcSheet | `open`, `onDismiss: (() => void) \| null`, `grip?`, `label?` / `labelledBy?`, `children` |
 | `Dialog` | AlertDialog (Delete/Confirm) | `open`, `text`, `confirm`, `cancel?`, `confirmColor?`, `onConfirm`, `onDismiss` |
-| `Toast` / `ControllerToast` | ArcToast | `toast`, `onTimeout(id)`, `bottomInset?` / `controller` (app.tsx mounts it) |
+| `Toast` / `ControllerToast` | ArcToast | `toast`, `onTimeout(id)`, `bottomInset?` / `controller` (app.tsx mounts it). Swipe sideways or down to dismiss (`swipeOutcome`); a Dismiss key outside the live region is shown on focus for screen readers |
 | `SideZone` | SideZone (Live tools) | `open`, `onOpen`, `onClose`, `title`, `panel`, `children` |
 | `ComboView`, `Cap`, `CloseKey` | GuideKeys | `combo`, `spoken` / `cap`, `badgeSpace` / `onClick`, `description` |
 | `Shell`, `TopBar`, `SectionTag`, `SectionMenu`, `GuideEdgeTab` | Chrome.kt | mounted by app.tsx; screens don't use them |

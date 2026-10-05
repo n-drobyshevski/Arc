@@ -15,6 +15,9 @@ export const CoachText = {
   SETTINGS: 'Settings',
   SECTIONS: 'Sections',
   GUIDE_TAB: 'EP-133 shortcuts',
+  MODE: 'Pads or keys',
+  OCTAVE: 'Octave',
+  SCALE: 'Scale',
 
   SEARCH: 'Search sounds',
   IMPORT: 'Import a .pak',

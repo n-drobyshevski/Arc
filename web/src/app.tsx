@@ -26,6 +26,7 @@ import {
   Nav,
   bindViewHooks,
   browserNavEnv,
+  dialogLayer,
   onTabs,
   overlayLayer,
   rootView,
@@ -48,6 +49,7 @@ import { MainScreen } from './ui/screens/MainScreen'
 import { BackupsSheets } from './ui/sheets/BackupsSheets'
 import { ProgressSheet } from './ui/sheets/ProgressSheet'
 import { MirrorScreen } from './ui/screens/MirrorScreen'
+import { PICK_PREFIX as PICK, keysPickerOf } from './ui/live/keys'
 import { SearchScreen } from './ui/screens/SearchScreen'
 import { SettingsScreen } from './ui/screens/SettingsScreen'
 import { BackupPadsSheet, DevicePadsSheet } from './ui/sheets/PadsSheet'
@@ -160,6 +162,9 @@ function Root(): JSX.Element {
         onKeepLast={(keep) => void c.setKeepLast(keep)}
         onPadOrder={(o) => c.setPadOrder(o)}
         onForgetNames={() => c.forgetLearned()}
+        padSoundsSize={() => c.padSoundsSize()}
+        onClearPadSounds={() => void c.clearPadSounds()}
+        onNoteNames={(n) => c.setKeysNames(n)}
         onRestoreFolder={() => void c.pickFolder()}
         onReconnectFolder={() => void c.reconnectFolder()}
         onExportLibrary={() => void c.exportLibrary()}
@@ -292,6 +297,37 @@ function TabScreen(props: { view: NavView }): JSX.Element {
           onFollow={(on) => c.setLiveFollow(on)}
           toolsOpen={v.side}
           onTools={(open) => (open ? nav.open(overlayLayer('side')) : nav.close(overlayLayer('side')))}
+          picker={keysPickerOf(v.dialogs)}
+          onPicker={(p) => {
+            // One list at a time: a dialog layer 'pick:<what>', so Back closes it (Kotlin's focusable Popup).
+            const cur = nav.current.dialogs.find((d) => d.startsWith(PICK))
+            if (p === null) {
+              if (cur !== undefined) nav.close(dialogLayer(cur))
+            } else if (cur === undefined) nav.open(dialogLayer(PICK + p))
+            else if (cur !== PICK + p) nav.replace(dialogLayer(cur), dialogLayer(PICK + p))
+          }}
+          onPad={(pad, hold) => void c.playPad(pad, hold)}
+          onPadUp={(pad) => c.releasePad(pad)}
+          playingPads={c.playingPads.value}
+          keys={{
+            on: settings.liveKeys,
+            root: settings.keysRoot,
+            scale: settings.keysScale,
+            octave: settings.keysOctave,
+            names: settings.keysNames,
+            pad: state.keysPad,
+            padName: state.keysPad ? c.mirrorName(state.keysPad) : null,
+            playingKeys: c.playingKeys.value,
+          }}
+          keysActions={{
+            onMode: (on) => c.setLiveKeys(on),
+            onRoot: (r) => c.setKeysRoot(r),
+            onScale: (s) => c.setKeysScale(s),
+            onOctave: (o) => c.setKeysOctave(o),
+            onKey: (k, hold) => void c.playKey(k, hold),
+            onKeyUp: (k) => c.releaseKey(k),
+            onSelect: (pad) => c.selectKeysPad(pad),
+          }}
         />
       )
     }

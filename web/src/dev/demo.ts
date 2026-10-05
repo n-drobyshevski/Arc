@@ -9,6 +9,12 @@
 //     installDemo(window)
 //   }
 //
+// main.tsx then opens the browser deps with `demo: true`: the demo's library is
+// its own IndexedDB database ("arc-demo", DEMO_DB_NAME) and its settings,
+// Live preferences and last read live in memory, so ?demo never touches the
+// real library or settings (and its device lock and library channel have
+// their own names). installDemo itself only touches the navigator.
+//
 // installDemo puts a fake `navigator.requestMIDIAccess` on the page, backed by
 // the test simulator (MockEP133 holding the demo sounds and projects), and makes
 // `navigator.permissions.query({name: 'midi'})` answer 'granted'. The device is

@@ -6,11 +6,11 @@
 // entry per layer, and every entry carries the whole stack in history.state
 // (so a reload restores it, as rememberSaveable does):
 //
-//   [ {tab backups} , {tab live}? , screens / overlays ... ]
+//   [ {tab live} , {tab backups|device}? , screens / overlays ... ]
 //
-// - Layer 0 is always the Backups tab. Another tab is one layer on top of it,
-//   so Back from a non-Backups tab lands on Backups (Root's
-//   BackHandler(tab != BACKUPS) { selectTab(BACKUPS) }).
+// - Layer 0 is always the home tab, Live ([HOME_TAB]: the app opens on it).
+//   Another tab is one layer on top of it, so Back from Backups or Device
+//   lands on Live (Root's BackHandler(tab != LIVE) { selectTab(LIVE) }).
 // - Full screens (settings, debug, search, guide, contents, compare) are
 //   layers with their own hash route; the render priority stays Root's
 //   if-chain (see [viewOf] and app.tsx), whatever order they were opened in.
@@ -23,7 +23,7 @@
 // window.history (an injected [NavEnv], so it is tested with a fake too).
 
 import { computed, signal, type ReadonlySignal } from '@preact/signals'
-import type { Tab } from '../state/types'
+import { HOME_TAB, type Tab } from '../state/types'
 
 export const TABS: readonly Tab[] = ['backups', 'live', 'device']
 
@@ -40,7 +40,7 @@ export type Screen =
  * The overlay layers. [id] says which one, for sheets and dialogs:
  * 'detail:<backupId>', 'restore:<backupId>', 'comparePick:<backupId>',
  * 'pads:backup:<id>:<n>', 'pads:device:<n>', 'upload', 'trim:<i>', 'licence', 'progress' (app.tsx keeps it in step with state.task);
- * dialogs: 'delete', 'prune:<keep>', 'forget'.
+ * dialogs: 'delete', 'prune:<keep>', 'forget', 'pick:scale' / 'pick:octave' (Live's KEYS lists).
  */
 export type OverlayKind = 'dialog' | 'side' | 'menu' | 'coach' | 'sheet'
 
@@ -51,7 +51,8 @@ export type Layer =
 
 export type Stack = readonly Layer[]
 
-const BASE: Layer = Object.freeze({ kind: 'tab', tab: 'backups' }) as Layer
+/** The bottom layer: the home section, Live. */
+const BASE: Layer = Object.freeze({ kind: 'tab', tab: HOME_TAB }) as Layer
 
 // ---------- layer helpers ----------
 
@@ -137,19 +138,22 @@ export function hashOf(stack: Stack): string {
     if (l.kind === 'tab') return `#/${l.tab}`
     if (l.kind === 'screen') return screenHash(l.screen)
   }
-  return '#/backups'
+  return `#/${HOME_TAB}`
 }
 
-/** The stack a fresh page load (or a typed-in hash) starts with: Backups, then the route. */
+/** The stack a fresh page load (or a typed-in hash) starts with: Live (the home tab), then the route. */
 export function initialStack(hash: string): Stack {
   const route = parseHash(hash)
   if (!route || sameLayer(route, BASE)) return [BASE]
   return [BASE, route]
 }
 
-/** Puts the Backups tab at the bottom whatever came in (a damaged history.state). */
+/** Puts the home tab at the bottom whatever came in (a damaged history.state, or one saved when Backups was home). */
 export function normalize(stack: Stack): Stack {
-  const rest = stack.filter((l, i) => !(i === 0 && sameLayer(l, BASE)))
+  // Only one tab sits on the home tab: of the tabs at the bottom, the last one counts.
+  let lead = 0
+  while (lead + 1 < stack.length && stack[lead]?.kind === 'tab' && stack[lead + 1]?.kind === 'tab') lead++
+  const rest = stack.slice(lead).filter((l, i) => !(i === 0 && sameLayer(l, BASE)))
   return [BASE, ...rest]
 }
 
@@ -227,7 +231,7 @@ export interface NavView {
 }
 
 export function viewOf(stack: Stack): NavView {
-  let tab: Tab = 'backups'
+  let tab: Tab = HOME_TAB
   let debug = false
   let settings = false
   let search = false
@@ -284,7 +288,7 @@ export function rootView(v: NavView, hasBackup: (id: string) => boolean): RootVi
 
 /** selectTab: the section switch from the menu; closes everything above the shell. */
 export function selectTab(_stack: Stack, t: Tab): Stack {
-  return t === 'backups' ? [BASE] : [BASE, tabLayer(t)]
+  return t === HOME_TAB ? [BASE] : [BASE, tabLayer(t)]
 }
 
 export function push(stack: Stack, layer: Layer): Stack {
@@ -381,7 +385,7 @@ export class Nav {
       if (this.env.location.hash !== hashOf(saved)) h.replaceState(stateOf(saved), '', hashOf(saved))
       this.set(saved)
     } else {
-      // A fresh load: Backups underneath, so Back from any route lands there first.
+      // A fresh load: Live underneath, so Back from any route lands there first.
       const target = initialStack(this.env.location.hash)
       h.replaceState(stateOf([BASE]), '', hashOf([BASE]))
       this.applied = [BASE]
@@ -572,12 +576,12 @@ export interface ViewHooks {
  * Wires the stack to the controller: every tab switch calls tabChanged (selectTab's
  * side effects), setLive follows Root's `live`, and a contents or compare screen
  * leaving the stack (by its Done key or the browser Back alike) runs its onBack's
- * controller call. A page loaded on another tab counts as a switch from Backups
+ * controller call. A page loaded on another tab counts as a switch from Live
  * (Android always starts there). Returns the unsubscribe.
  */
 export function bindViewHooks(nav: Nav, hooks: ViewHooks): () => void {
   const start = nav.current
-  if (start.tab !== 'backups') hooks.tabChanged('backups', start.tab)
+  if (start.tab !== HOME_TAB) hooks.tabChanged(HOME_TAB, start.tab)
   hooks.setLive(isLive(start))
   return nav.subscribe((prev, next) => {
     const a = viewOf(prev)

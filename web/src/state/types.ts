@@ -11,12 +11,14 @@
 // - UiState has two web additions for the library folder: [folderStatus]
 //   (a remembered folder may need a tap to be used again) and
 //   [canPickFolder] (File System Access is Chromium only).
+// - UiState.keysPad is a PhysicalPad (compare with padKey(), not ===).
 
 import type { Pak } from '../core/backup/pak'
 import type { DiffResult } from '../core/features/backupDiff'
 import type { DeviceContents, SoundDetails } from '../core/features/deviceBrowser'
 import type { SearchGroup } from '../core/features/librarySearch'
 import type { MirrorState } from '../core/features/liveMirror'
+import type { PhysicalPad } from '../core/features/padNotes'
 import { PadOrder } from '../core/features/padPush'
 import type { PakCompareResult } from '../core/features/pakCompare'
 import type { PadGroup } from '../core/features/projectPads'
@@ -104,6 +106,8 @@ export interface MirrorUi {
   readonly state: MirrorState
   readonly loading: boolean
   readonly error: string | null
+  /** Not connected, showing the last read instead: when it was made ("Last seen 5 Oct, 14:02"). */
+  readonly offline?: string | null | undefined
 }
 
 /** A backup opened for its contents screen (sounds and projects, playback, export). */
@@ -140,6 +144,13 @@ export interface UiState {
   readonly search: SearchUi
   readonly pakCompare: PakCompareUi | null
   readonly mirror: MirrorUi | null
+  /**
+   * Live is copying a pad's sound from the device in the background. Unlike
+   * [busy] it leaves every key enabled: an action waits for that one sound.
+   */
+  readonly backgroundRead: boolean
+  /** The sound Live's KEYS plays: a pad, its sample as the mirror names it. */
+  readonly keysPad: PhysicalPad | null
   /** Whether the library folder has been picked; until then restoring is offered. */
   readonly folderPicked: boolean
   /** Web: the remembered library folder's permission ('prompt' shows the "Reconnect library folder" banner). */
@@ -152,6 +163,9 @@ export interface UiState {
 
 /** The three tabs under the top bar (ui/components Tab). */
 export type Tab = 'backups' | 'live' | 'device'
+
+/** Live is the home section: the app opens on it, and Back from another section returns to it (MainActivity). */
+export const HOME_TAB: Tab = 'live'
 
 export const emptyBrowser: BrowserUi = Object.freeze({
   contents: null,
@@ -177,6 +191,8 @@ export function emptyMirrorState(padOrder: PadOrder = PadOrder.FROM_TOP): Mirror
     learned: new Map(),
     pushesSeen: false,
     padOrder,
+    notes: new Map(),
+    lastNote: null,
   }
 }
 
@@ -199,6 +215,8 @@ export function initialState(midiSupported = true, canPickFolder = false): UiSta
     search: emptySearch,
     pakCompare: null,
     mirror: null,
+    backgroundRead: false,
+    keysPad: null,
     folderPicked: false,
     folderStatus: 'none',
     canPickFolder,

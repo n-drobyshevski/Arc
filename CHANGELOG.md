@@ -13,7 +13,8 @@ version fixes bugs. The version itself is set in `version.properties`.
   - No background transfers: keep the tab in front. The screen stays on, the tab title shows progress and leaving the page asks first.
   - `.pak` files open with the installed app on Chromium desktop; elsewhere, Import or drag and drop.
   - Safari, iOS browsers and Firefox without its MIDI add-on get the library without the device.
-  - `?demo` runs it against a simulated EP-133.
+  - Live as on Android: arc opens on it, pads and keys sound while held (chords of up to 8 sounds, KEYS with solfège or letter note names), from arc's pad sound copies kept in the browser, a backup or the device, and Live shows the last read offline. How quickly a press is heard depends on the browser and the system's audio stack; since browsers don't name the output, a long output delay is pointed out once in place of Android's Bluetooth notice, and on a phone the very first touch may sound only briefly, as browsers start audio when the finger lifts.
+  - `?demo` runs it against a simulated EP-133, with its own library and settings, so it never touches the real ones.
   - Built from the same `version.properties`, tested with Vitest and a Playwright smoke test in CI (`.github/workflows/web.yml`), and deployed on Vercel from `vercel.json`. Not yet tried with a physical EP-133.
 - Live tools in KEYS: a small legend of the keys' colours (the ring's octave colours, filled for a note from the EP-133, outlined for one playing on the phone).
 - Settings → Live → **Note names on the keys**: KEYS names its notes in fixed-do solfège (DO RE MI, as before) or letters (C D E, sharps as C#, D#), on the keys, the display and the key picker. The choice is kept with the settings.

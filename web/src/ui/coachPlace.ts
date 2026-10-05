@@ -16,6 +16,13 @@
 //   and moves out by its height plus the clearance while it touches a placed
 //   tag, at most 8 times. Its x is centred on the control, kept 8px inside the
 //   screen; the arrow runs from the tag's edge to 2px off the control.
+// - A narrow control on the screen's edge (at most 48px wide, at least twice as
+//   tall as wide, within 2px of the left or right edge: the GUIDE tab, the
+//   more-tools strip) gets the PO tutorial's side tag instead, placed first: a
+//   vertical tab on that edge, its word turned (one line), centred on the
+//   control and kept 48px below the top, with a hooked arrow above it pointing
+//   at the edge ([sideHook]). The tab and 30px above it (the hook) are kept
+//   clear by the other tags.
 
 /** A rectangle in px (Compose Rect: left, top, right, bottom). */
 export interface Box {
@@ -64,6 +71,13 @@ export interface PlacedTag {
   readonly tip: Point | null
   /** Where the arrow leaves the tag; null for a tall area. */
   readonly tail: Point | null
+  /**
+   * 0 for an ordinary tag; -1 / 1 for a side tag on the left / right edge
+   * ([rect] is then the vertical tab, its text turned; the hook is [sideHook]).
+   */
+  readonly side: -1 | 0 | 1
+  /** The room the tag keeps from the others (a side tag's hook too); [rect] when absent. */
+  readonly room?: Box
 }
 
 /** CoachOverlay's metrics (dp = px). */
@@ -92,6 +106,28 @@ export const COACH_METRICS = Object.freeze({
   tallFraction: 0.25,
   /** The close hint's top, as a fraction of the screen height. */
   hintAt: 0.72,
+  /** A control this close to the screen's left or right edge is on it. */
+  edgeSlack: 2,
+  /** A control wider than this never gets a side tag. */
+  edgeMaxWidth: 48,
+  /** A side tag stays this far below the top margin. */
+  sideTop: 40,
+  /** Room above a side tag for its hook. */
+  hookRoom: 30,
+  /** The side tag's corner radius on its inner side. */
+  sideRadius: 8,
+  /** The hook's line width. */
+  hookWidth: 3,
+  /** The hook's vertical line stands this far inside the tab's inner side; its arrowhead tip is this far from the edge. */
+  hookInset: 6,
+  /** The hook starts this far above the tab. */
+  hookGap: 8,
+  /** The hook rises this far before it turns. */
+  hookRise: 18,
+  /** The radius of the hook's turn. */
+  hookTurn: 6,
+  /** Half the hook's arrowhead height; its length is 1.3 times this. */
+  hookHead: 7,
 })
 
 const M = COACH_METRICS
@@ -134,6 +170,15 @@ export function isTall(m: CoachMarkInput, viewport: Size): boolean {
   return boxHeight(m.bounds) > viewport.height * M.tallFraction
 }
 
+/** Which screen edge [m] sits on for a side tag: -1 left, 1 right, 0 none (an ordinary tag). */
+export function edgeOf(m: CoachMarkInput, viewport: Size): -1 | 0 | 1 {
+  const w = m.bounds.right - m.bounds.left
+  if (w > M.edgeMaxWidth || boxHeight(m.bounds) < w * 2) return 0
+  if (m.bounds.left <= M.edgeSlack) return -1
+  if (m.bounds.right >= viewport.width - M.edgeSlack) return 1
+  return 0
+}
+
 /** The order tags are placed in: tall areas last, then by centre y, then centre x (stable). */
 export function placementOrder(marks: readonly CoachMarkInput[], viewport: Size): CoachMarkInput[] {
   return marks
@@ -145,8 +190,25 @@ export function placementOrder(marks: readonly CoachMarkInput[], viewport: Size)
 /** Places every mark's tag (CoachOverlay's first pass), in placement order. */
 export function placeTags(marks: readonly CoachMarkInput[], viewport: Size, measure: MeasureTag): PlacedTag[] {
   const placed: PlacedTag[] = []
-  const hits = (r: Box): boolean => placed.some((p) => overlaps(inflate(p.rect, M.clearance), r))
-  for (const m of placementOrder(marks, viewport)) {
+  const hits = (r: Box): boolean => placed.some((p) => overlaps(inflate(p.room ?? p.rect, M.clearance), r))
+  const order = placementOrder(marks, viewport)
+  // Side tags first: the others keep clear of them.
+  for (const m of order) {
+    const side = edgeOf(m, viewport)
+    if (side === 0) continue
+    const text = m.label.toUpperCase()
+    // One line, however long: it runs along the edge.
+    const textSize = measure(text, Number.POSITIVE_INFINITY)
+    const w = textSize.height + 2 * M.padY
+    const h = textSize.width + 2 * M.padX
+    const top = coerceIn(centerY(m.bounds) - h / 2, M.margin + M.sideTop, viewport.height - M.margin - h)
+    const left = side < 0 ? 0 : viewport.width - w
+    const rect = box(left, top, w, h)
+    const room = { left: rect.left, top: rect.top - M.hookRoom, right: rect.right, bottom: rect.bottom }
+    placed.push({ mark: m, text, textSize, rect, tip: null, tail: null, side, room })
+  }
+  for (const m of order) {
+    if (edgeOf(m, viewport) !== 0) continue
     const text = m.label.toUpperCase()
     const textSize = measure(text, M.maxText)
     const w = textSize.width + 2 * M.padX
@@ -157,7 +219,7 @@ export function placeTags(marks: readonly CoachMarkInput[], viewport: Size, meas
       let rect = box(left, centerY(m.bounds) - h / 2, w, h)
       let tries = 0
       while (hits(rect) && tries++ < M.maxTries) rect = translateY(rect, h + M.clearance)
-      placed.push({ mark: m, text, textSize, rect, tip: null, tail: null })
+      placed.push({ mark: m, text, textSize, rect, tip: null, tail: null, side: 0 })
       continue
     }
     const below = centerY(m.bounds) < viewport.height / 2
@@ -172,7 +234,7 @@ export function placeTags(marks: readonly CoachMarkInput[], viewport: Size, meas
     }
     const tip = below ? { x: cx, y: m.bounds.bottom + M.tipGap } : { x: cx, y: m.bounds.top - M.tipGap }
     const tail = below ? { x: cx, y: rect.top } : { x: cx, y: rect.bottom }
-    placed.push({ mark: m, text, textSize, rect, tip, tail })
+    placed.push({ mark: m, text, textSize, rect, tip, tail, side: 0 })
   }
   return placed
 }
@@ -187,4 +249,26 @@ export function arrowHead(tip: Point, tail: Point, head: number = M.head): [Poin
 /** The close hint's top edge: below the middle, clear of a tag in the middle of the pad grid. */
 export function hintTop(viewport: Size): number {
   return viewport.height * M.hintAt
+}
+
+/** A side tag's hook: the stroked line (an SVG path) and its filled arrowhead. */
+export interface SideHook {
+  /** Up from the tab's inner side, a rounded turn, then across towards the edge. */
+  readonly line: string
+  /** The arrowhead: its tip at the edge, then the two back corners. */
+  readonly head: readonly [Point, Point, Point]
+}
+
+/** The hooked arrow above a side tag [tab] on edge [side], pointing at that edge. */
+export function sideHook(tab: Box, side: -1 | 1, viewportWidth: number): SideHook {
+  const inner = side < 0 ? tab.right - M.hookInset : tab.left + M.hookInset
+  const outer = side < 0 ? M.hookInset : viewportWidth - M.hookInset
+  const bottom = tab.top - M.hookGap
+  const bend = bottom - M.hookRise
+  const turn = M.hookTurn
+  const dir = side < 0 ? -1 : 1
+  const end = outer - dir * M.hookHead
+  const line = `M${inner} ${bottom}L${inner} ${bend + turn}Q${inner} ${bend} ${inner + dir * turn} ${bend}L${end} ${bend}`
+  const back = outer - dir * M.hookHead * 1.3
+  return { line, head: [{ x: outer, y: bend }, { x: back, y: bend - M.hookHead }, { x: back, y: bend + M.hookHead }] }
 }

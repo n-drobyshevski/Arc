@@ -1,8 +1,9 @@
 // Port of app/src/main/kotlin/dev/arc/ep133/audio/SoundPlayer.kt
 //
-// Plays one sound at a time (16-bit PCM, mono or stereo). Starting a sound
-// stops the previous one. [playing] is the key of what is playing, so lists can
-// show a Stop key on the right row.
+// Plays sounds (16-bit PCM, mono or stereo), one at a time: starting a sound
+// stops the one before, as lists want. [playing] is the key of the sound
+// playing, so lists can show a Stop key on the right row. Live's pads and keys
+// play through LiveAudio (liveAudio.ts) instead.
 //
 // Web delta: Web Audio replaces AudioTrack. The whole sound goes into one
 // AudioBuffer (s16 / 32768) and plays through an AudioBufferSourceNode, whose
@@ -11,6 +12,12 @@
 // always false and the route is "default output". Browsers only play audio
 // after a tap, so resumeInGesture() must run synchronously in click handlers,
 // before any await (playDeviceSound downloads first).
+//
+// Kotlin keeps its sounds in an ordered map (voices) since Live moved to its
+// own output; play() still stops them all first, so there is only ever one,
+// which [current] is. SoundPlayer.isBluetooth has no counterpart (the web
+// can't see the route); Live guesses Bluetooth from the output latency
+// (liveAudio.ts isSlowOutput).
 
 import { signal, type ReadonlySignal } from '@preact/signals'
 import { isSilent } from '../../core/formats/wav'

@@ -45,3 +45,17 @@
   gap: var(--space-10);
 }
 .settings__row > * { flex: 1 1 0; min-width: 0; }
+
+/* Row(CenterVertically, spacedBy 10): the copies' size (body15, ink, weight 1f) and Clear. */
+.settings__sounds {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+}
+.settings__sounds-size {
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0;
+  color: var(--ink);
+}
+.settings__sounds > :last-child { flex: none; }

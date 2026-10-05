@@ -71,4 +71,11 @@ describe('LibraryIndexTest', () => {
     expect(m.entries.map((e) => e.title)).toEqual(['Renamed', 'my set'])
     expect(m.settings).toEqual({ 'mirror.order': 'FROM_BOTTOM' })
   })
+
+  it('learned pad links from an old and a new index are combined', () => {
+    const old: LibraryIndexData = { entries: [], settings: { 'mirror.learned': '0:10,1:11,2:12', 'app.theme': 'DARK' } }
+    const newer: LibraryIndexData = { entries: [], settings: { 'mirror.learned': '5:12' } }
+    const m = merge([old, newer])
+    expect(m.settings).toEqual({ 'mirror.learned': '0:10,1:11,5:12', 'app.theme': 'DARK' })
+  })
 })

@@ -22,7 +22,7 @@
 // - restoreFrom takes any ExternalTarget, including a read-only FileListTarget
 //   (<input webkitdirectory>), which is read but never adopted.
 // - [exportZip] (no Android equivalent): the folder's content as one zip, for
-//   browsers that cannot pick a folder.
+//   browsers that cannot pick a folder (with live.json, from [live]).
 
 import { describePak, openPak } from '../../core/backup/pak'
 import {
@@ -54,7 +54,18 @@ import {
   type NameRow,
   type OpenOptions,
 } from './db'
-import { FsaTarget, MemoryTarget, isIndex, isLibraryFolder, isPak, type DirHandleLike, type ExternalTarget, type FolderFile } from './external'
+import {
+  FsaTarget,
+  LIVE_FILE,
+  MemoryTarget,
+  isIndex,
+  isLibraryFolder,
+  isLive,
+  isPak,
+  type DirHandleLike,
+  type ExternalTarget,
+  type FolderFile,
+} from './external'
 
 /** A saved backup, and what went wrong copying it to the folder (null if nothing). */
 export interface Saved {
@@ -89,6 +100,14 @@ export async function describeForRestore(bytes: Uint8Array, now: () => number = 
     projectSlots: d.projectSlots,
     soundNames: d.soundNames,
   }
+}
+
+/** What a restore from the folder brought back (Library.kt Restored). */
+export interface Restored {
+  count: number
+  settings: Record<string, string>
+  /** Live's last read (live.json), when the folder had one. */
+  live: string | null
 }
 
 /** navigator.storage, as far as used here. */
@@ -160,6 +179,9 @@ export class Library {
 
   /** Called with what went wrong when the folder copy could not be written. */
   onExternalError: (message: string) => void = () => {}
+
+  /** Live's last read as live.json text, for [exportZip] (null when there is none). */
+  live: () => string | null | Promise<string | null> = () => null
 
   readonly db: IDBDatabase
   private external: ExternalTarget | null
@@ -602,6 +624,12 @@ export class Library {
     }
   }
 
+  /** Copies Live's last read of the device to the folder (as live.json). */
+  async saveLive(json: string): Promise<void> {
+    const err = await this.files.run(() => this.copyOut((ext) => ext.write(LIVE_FILE, json)))
+    if (err !== null) this.onExternalError(err)
+  }
+
   /** Rewrites the index in the folder (after a settings change). */
   async syncIndex(): Promise<void> {
     const err = await this.files.run(() => this.copyOut((ext) => this.writeIndex(ext)))
@@ -646,12 +674,10 @@ export class Library {
    * settings. Backups already in the library are skipped. The folder must be
    * the library's (named arc, or holding arc files); otherwise this throws
    * FeatureText.PICK_ARC_FOLDER and nothing changes. A writable folder then
-   * becomes the copy target. Returns how many came back, and the settings.
+   * becomes the copy target. Returns how many came back, the settings and
+   * Live's last read.
    */
-  async restoreFrom(
-    target: ExternalTarget,
-    describe: Describe = (b) => describeForRestore(b, this.now),
-  ): Promise<{ count: number; settings: Record<string, string> }> {
+  async restoreFrom(target: ExternalTarget, describe: Describe = (b) => describeForRestore(b, this.now)): Promise<Restored> {
     return this.restoring.run(async () => {
       const listing = new Map<string, FolderFile>()
       for (const f of await target.list()) listing.set(f.name, f)
@@ -705,10 +731,21 @@ export class Library {
         this.changed()
         count++
       }
+      // The newest of live.json and any "live (1).json" next to it.
+      const lives = [...listing.values()].filter((f) => isLive(f.name)).sort((a, b) => b.lastModified - a.lastModified)
+      let live: string | null = null
+      for (const f of lives) {
+        try {
+          live = new TextDecoder().decode(await target.read(f.name))
+          break
+        } catch {
+          // Unreadable: the next one.
+        }
+      }
       await this.adoptFolder(target)
       const err = await this.files.run(() => this.copyOut((ext) => this.writeIndex(ext, index.settings)))
       if (err !== null) this.onExternalError(err)
-      return { count, settings: index.settings }
+      return { count, settings: index.settings, live }
     })
   }
 
@@ -731,7 +768,14 @@ export class Library {
       }
       await this.writeIndex(mem)
     })
-    const entries = [...mem.files].map(([path, f]) => ({ path, data: f.data, compress: path === INDEX_FILE }))
+    let live: string | null = null
+    try {
+      live = await this.live()
+    } catch {
+      live = null
+    }
+    if (live !== null) await mem.write(LIVE_FILE, live)
+    const entries = [...mem.files].map(([path, f]) => ({ path, data: f.data, compress: path === INDEX_FILE || path === LIVE_FILE }))
     return writeZip(entries, { date: this.now() })
   }
 

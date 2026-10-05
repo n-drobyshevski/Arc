@@ -15,6 +15,8 @@
 //   Live open with keepScreenOn); the controller drives it from the state, see
 //   [keepScreenOn] in platform/wakelock.
 // - Coroutine CancellationException has no equivalent; every error is caught.
+// - ArcController.deviceWaiters (a MutableStateFlow) is [Tasks.waiters] plus
+//   [Tasks.waitTurn], which Live's background copy waits on.
 
 import type { Progress } from '../core/backup/backup'
 import { CancelledError } from '../core/protocol/errors'
@@ -55,8 +57,57 @@ export interface TaskHost {
 export class Tasks {
   /** The running task's cancel signal (ArcController.abortCurrent). */
   abortCurrent: AbortController | null = null
+  /** Actions waiting for the background copy's current sound to finish; the copy lets them go first. */
+  private waiting = 0
+  private wakeTurn: (() => void)[] = []
 
   constructor(private readonly host: TaskHost) {}
+
+  /** How many actions wait for the device (ArcController.deviceWaiters). */
+  get waiters(): number {
+    return this.waiting
+  }
+
+  /**
+   * Takes the device for an action ([mark] sets busy) when it is free: not
+   * while another action runs (false). Live's background copy only makes it
+   * wait for the sound being read (a read can't be cut short without the
+   * session falling out of step). Answers at once (no await, so two taps in
+   * one task can't both pass) unless it has to wait for the copy; then
+   * [mark] runs before the copy hears it may go on (ArcController.awaitDevice).
+   */
+  acquire(mark: () => void): boolean | Promise<boolean> {
+    const { store } = this.host
+    if (store.get().busy) return false
+    if (!store.get().backgroundRead) {
+      mark()
+      return true
+    }
+    this.waiting++
+    return store.waitFor((st) => !st.backgroundRead).then(() => {
+      const ok = !store.get().busy
+      if (ok) mark()
+      this.waiting--
+      if (this.waiting === 0) for (const wake of this.wakeTurn.splice(0)) wake()
+      return ok
+    })
+  }
+
+  /**
+   * Waits until the device is free and no action waits for it (the
+   * background copy's turn), then calls [take] in the same step, so no
+   * action can take the device between the check and [take] marking
+   * UiState.backgroundRead (an `await` in between would leave that gap).
+   * Resolves with what [take] returned (false: the copy no longer wants it).
+   */
+  async waitTurn(take: () => boolean = () => true): Promise<boolean> {
+    const { store } = this.host
+    for (;;) {
+      await store.waitFor((st) => !st.busy && !st.backgroundRead)
+      if (this.waiting === 0 && !store.get().busy && !store.get().backgroundRead) return take()
+      if (this.waiting > 0) await new Promise<void>((r) => this.wakeTurn.push(r))
+    }
+  }
 
   /**
    * Runs a long transfer. Returns null without doing anything when something
@@ -65,8 +116,9 @@ export class Tasks {
    */
   async runTask<T>(title: string, fn: (onProgress: OnProgress, signal: AbortSignal) => Promise<T>): Promise<T | null> {
     const { store } = this.host
-    if (store.get().busy) return null
-    store.update((s) => ({ ...s, busy: true, task: { title, label: '', fraction: 0, cancelling: false } }))
+    let free = this.acquire(() => store.update((s) => ({ ...s, busy: true, task: { title, label: '', fraction: 0, cancelling: false } })))
+    if (typeof free !== 'boolean') free = await free
+    if (!free) return null
     const signal = new AbortController()
     this.abortCurrent = signal
     const guard = this.guard(title)
@@ -108,8 +160,9 @@ export class Tasks {
     const { store } = this.host
     const s = this.host.session()
     if (!s) return null
-    if (store.get().busy) return null
-    store.update((st) => ({ ...st, busy: true, browser: { ...st.browser, reading } }))
+    let free = this.acquire(() => store.update((st) => ({ ...st, busy: true, browser: { ...st.browser, reading } })))
+    if (typeof free !== 'boolean') free = await free
+    if (!free) return null
     try {
       return await block(s)
     } catch (e) {

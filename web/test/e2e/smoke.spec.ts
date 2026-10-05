@@ -7,15 +7,18 @@ import { demo, expect, importPak, notAutomated, SAMPLE_PAK, selectTab, test } fr
 test('back up, look inside, restore, browse the device, live pads, import, no MIDI', async ({ page, context }) => {
   await notAutomated(page)
 
-  await test.step('1. load: the top bar renders, the first-run guide overlay is dismissed', async () => {
-    await page.goto('/?demo#/backups')
+  await test.step('1. load: the app opens on Live, the first-run guide overlay is dismissed, the top bar renders', async () => {
+    await page.goto('/?demo')
+    await expect(page).toHaveURL(/#\/live$/)
     const bar = page.getByRole('banner')
-    await expect(bar.getByRole('button', { name: 'Backups, Sections' })).toBeVisible()
-    await expect(bar.getByRole('button', { name: 'Settings' })).toBeVisible()
+    await expect(bar.getByRole('button', { name: 'Live, Sections' })).toBeVisible()
     const coach = page.getByRole('dialog', { name: "What's what" })
     await expect(coach).toBeVisible()
     await coach.getByRole('button', { name: 'Tap anywhere to close' }).click()
     await expect(coach).toBeHidden()
+    await selectTab(page, 'Backups')
+    await expect(page).toHaveURL(/#\/backups$/)
+    await expect(bar.getByRole('button', { name: 'Settings' })).toBeVisible()
   })
 
   await test.step('2. auto-connect: the device panel shows the EP-133 and its 12 sounds', async () => {
@@ -82,9 +85,10 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
     await expect(page.getByRole('region', { name: '100–199' }).getByRole('listitem')).toHaveCount(4)
   })
 
-  await test.step('7. Live tab: a note-on from the device lights a pad', async () => {
-    await selectTab(page, 'Live')
+  await test.step('7. Back from Device lands on Live: a note-on from the device lights a pad', async () => {
+    await page.goBack()
     await expect(page).toHaveURL(/#\/live$/)
+    await expect(page.getByRole('banner').getByRole('button', { name: 'Live, Sections' })).toBeVisible()
     const pads = page.locator('[data-pad]')
     await expect(pads).toHaveCount(48)
     const litPads = (): Promise<number> =>
@@ -96,13 +100,45 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
     await expect.poll(litPads).toBe(0)
   })
 
+  await test.step('7b. Live tab: a pad the device named plays in the browser while held', async () => {
+    // A note-on with the device's pad push at the same moment links pad A "." to its sound (001 kick).
+    await demo(page, (d) => {
+      d.noteOn(36, 127)
+      d.pushPadActive(1, 0, 1)
+    })
+    await demo(page, (d) => d.noteOff(36))
+    const pad = page.locator('[data-pad]', { hasText: 'kick' }).first()
+    await expect(pad).toBeVisible()
+    // Held, the pad is ringed while its sample sounds. The demo's samples are short, so the ring
+    // can come and go between two polls: a MutationObserver counts every time it is drawn.
+    await page.evaluate(() => {
+      const w = window as unknown as { __arcRings: number }
+      w.__arcRings = 0
+      new MutationObserver(() => {
+        if (document.querySelector('[data-pad].is-playing')) w.__arcRings++
+      }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] })
+    })
+    const rings = (): Promise<number> => page.evaluate(() => (window as unknown as { __arcRings: number }).__arcRings)
+    const box = await pad.boundingBox()
+    if (box === null) throw new Error('the pad has no box')
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+    // As on Android, a press that needs the device while it is busy reading plays nothing: press again then.
+    for (let attempt = 0; attempt < 3 && (await rings()) === 0; attempt++) {
+      await page.mouse.down()
+      await expect.poll(rings, { timeout: 5_000 }).toBeGreaterThan(0).catch(() => undefined)
+      await page.mouse.up()
+    }
+    expect(await rings()).toBeGreaterThan(0)
+    await expect(page.locator('[data-pad].is-playing')).toHaveCount(0)
+  })
+
   await test.step('8. import sample.pak: a second row', async () => {
     await selectTab(page, 'Backups')
     await importPak(page, SAMPLE_PAK)
     await expect(rows).toHaveCount(2)
   })
 
-  await test.step('9. a browser without Web MIDI: the no-MIDI panel, and the library still renders', async () => {
+  await test.step('9. a browser without Web MIDI: the no-MIDI panel, and the real library, untouched by the demo', async () => {
     const plain = await context.newPage()
     await plain.addInitScript(() => {
       delete (Navigator.prototype as { requestMIDIAccess?: unknown }).requestMIDIAccess
@@ -114,9 +150,15 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
     const bar = plain.getByRole('banner')
     await expect(bar.getByRole('button', { name: 'Back up', exact: true })).toBeDisabled()
     await expect(bar.getByRole('button', { name: 'Connect the EP-133' })).toBeDisabled()
-    // Same browser profile: the two backups saved above are in its library.
-    await expect(plain.getByRole('region', { name: 'Backups' }).getByRole('listitem')).toHaveCount(2)
-    await plain.getByRole('region', { name: 'Backups' }).getByRole('listitem').first().getByRole('button').click()
+    // Same browser profile, but the backups saved above were the demo's: ?demo keeps its own
+    // library ("arc-demo") and settings, so the real library is still empty...
+    await expect(plain.getByText('No backups yet.')).toBeVisible()
+    const plainRows = plain.getByRole('region', { name: 'Backups' }).getByRole('listitem')
+    await expect(plainRows).toHaveCount(0)
+    // ...and works without MIDI: an import makes its one row, which opens.
+    await importPak(plain, SAMPLE_PAK)
+    await expect(plainRows).toHaveCount(1)
+    await plainRows.first().getByRole('button').click()
     await expect(plain.getByRole('dialog', { name: /./ }).getByRole('button', { name: 'Contents', exact: true })).toBeVisible()
     await plain.close()
   })

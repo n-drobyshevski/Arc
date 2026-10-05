@@ -27,7 +27,7 @@ import {
 import type { Tab } from '../../src/state/types'
 
 const keys = (s: Stack | null): string[] | null => (s ? s.map(layerKey) : null)
-const BASE = tabLayer('backups')
+const BASE = tabLayer('live')
 
 describe('routes', () => {
   it('parses every route', () => {
@@ -54,16 +54,19 @@ describe('routes', () => {
   })
 
   it('overlays keep the hash of the layer below', () => {
-    const s: Stack = [BASE, tabLayer('live'), overlayLayer('side')]
-    expect(hashOf(s)).toBe('#/live')
+    const s: Stack = [BASE, tabLayer('device'), overlayLayer('side')]
+    expect(hashOf(s)).toBe('#/device')
+    expect(hashOf([BASE, overlayLayer('side')])).toBe('#/live')
     expect(hashOf([BASE, screenLayer({ kind: 'contents', id: 'q' }), sheetLayer('pads:backup:q:1')])).toBe('#/contents/q')
   })
 
-  it('a fresh load puts Backups underneath', () => {
-    expect(keys(initialStack('#/live'))).toEqual(['tab:backups', 'tab:live'])
-    expect(keys(initialStack('#/settings'))).toEqual(['tab:backups', 'screen:#/settings'])
-    expect(keys(initialStack('#/backups'))).toEqual(['tab:backups'])
-    expect(keys(initialStack('#/garbage'))).toEqual(['tab:backups'])
+  it('a fresh load puts Live (the home tab) underneath', () => {
+    expect(keys(initialStack('#/backups'))).toEqual(['tab:live', 'tab:backups'])
+    expect(keys(initialStack('#/settings'))).toEqual(['tab:live', 'screen:#/settings'])
+    expect(keys(initialStack('#/live'))).toEqual(['tab:live'])
+    expect(keys(initialStack('#/garbage'))).toEqual(['tab:live'])
+    expect(keys(initialStack(''))).toEqual(['tab:live'])
+    expect(hashOf([])).toBe('#/live')
   })
 
   it('history.state round-trips and rejects foreign state', () => {
@@ -74,7 +77,15 @@ describe('routes', () => {
     expect(stackFromState({ arc: 1, stack: [{ kind: 'tab', tab: 'nope' }] })).toBeNull()
     expect(stackFromState({ arc: 1, stack: [{ kind: 'overlay', overlay: 'sheet', id: 3 }] })).toBeNull()
     // A stack without the base gets one.
-    expect(keys(stackFromState({ arc: 1, stack: [{ kind: 'tab', tab: 'live' }] }))).toEqual(['tab:backups', 'tab:live'])
+    expect(keys(stackFromState({ arc: 1, stack: [{ kind: 'tab', tab: 'device' }] }))).toEqual(['tab:live', 'tab:device'])
+    // One saved when Backups was home: one tab on Live, the rest kept.
+    const old = { arc: 1, stack: [{ kind: 'tab', tab: 'backups' }, { kind: 'tab', tab: 'live' }, { kind: 'overlay', overlay: 'side' }] }
+    expect(keys(stackFromState(old))).toEqual(['tab:live', 'overlay:side'])
+    expect(keys(stackFromState({ arc: 1, stack: [{ kind: 'tab', tab: 'backups' }, { kind: 'tab', tab: 'device' }] }))).toEqual([
+      'tab:live',
+      'tab:device',
+    ])
+    expect(keys(stackFromState({ arc: 1, stack: [{ kind: 'tab', tab: 'backups' }] }))).toEqual(['tab:live', 'tab:backups'])
   })
 })
 
@@ -109,13 +120,15 @@ describe('view (Root flags)', () => {
   })
 
   it('live only while the Live tab is in front', () => {
-    const live: Stack = [BASE, tabLayer('live')]
+    const live: Stack = [BASE]
     expect(isLive(viewOf(live))).toBe(true)
     expect(isLive(viewOf([...live, overlayLayer('side')]))).toBe(true)
     expect(isLive(viewOf([...live, screenLayer({ kind: 'guide' })]))).toBe(false)
     expect(isLive(viewOf([...live, screenLayer({ kind: 'settings' })]))).toBe(false)
     expect(isLive(viewOf([...live, screenLayer({ kind: 'settings' }), screenLayer({ kind: 'debug' })]))).toBe(false)
-    expect(isLive(viewOf([BASE]))).toBe(false)
+    expect(isLive(viewOf([BASE, tabLayer('backups')]))).toBe(false)
+    expect(isLive(viewOf([BASE, tabLayer('device')]))).toBe(false)
+    expect(viewOf([BASE]).tab).toBe('live')
   })
 
   it('the guide does not leave the tabs (it slides over the shell)', () => {
@@ -124,10 +137,10 @@ describe('view (Root flags)', () => {
 })
 
 describe('transitions', () => {
-  it('selectTab keeps one tab layer over Backups and closes everything else', () => {
-    const s: Stack = [BASE, tabLayer('live'), overlayLayer('menu')]
-    expect(keys(selectTab(s, 'device'))).toEqual(['tab:backups', 'tab:device'])
-    expect(keys(selectTab(s, 'backups'))).toEqual(['tab:backups'])
+  it('selectTab keeps one tab layer over Live and closes everything else', () => {
+    const s: Stack = [BASE, tabLayer('backups'), overlayLayer('menu')]
+    expect(keys(selectTab(s, 'device'))).toEqual(['tab:live', 'tab:device'])
+    expect(keys(selectTab(s, 'live'))).toEqual(['tab:live'])
   })
 
   it('push ignores a repeat of the top layer', () => {
@@ -137,32 +150,33 @@ describe('transitions', () => {
 
   it('close removes only that layer', () => {
     const s: Stack = [BASE, sheetLayer('detail:a'), dialogLayer('delete')]
-    expect(keys(close(s, sheetLayer('detail:a')))).toEqual(['tab:backups', 'overlay:dialog:delete'])
+    expect(keys(close(s, sheetLayer('detail:a')))).toEqual(['tab:live', 'overlay:dialog:delete'])
     expect(close(s, sheetLayer('detail:zzz'))).toBe(s)
   })
 
   it('Back closes side panel, then menu, then sheet, then full screen, then tab', () => {
     // An order that the history would get wrong: the sheet was opened after the side panel.
-    let s: Stack | null = [BASE, tabLayer('live'), overlayLayer('side'), overlayLayer('menu'), sheetLayer('x')]
+    let s: Stack | null = [BASE, tabLayer('device'), overlayLayer('side'), overlayLayer('menu'), sheetLayer('x')]
     s = backStack(s)
-    expect(keys(s)).toEqual(['tab:backups', 'tab:live', 'overlay:menu', 'overlay:sheet:x'])
+    expect(keys(s)).toEqual(['tab:live', 'tab:device', 'overlay:menu', 'overlay:sheet:x'])
     s = backStack(s!)
-    expect(keys(s)).toEqual(['tab:backups', 'tab:live', 'overlay:sheet:x'])
+    expect(keys(s)).toEqual(['tab:live', 'tab:device', 'overlay:sheet:x'])
     s = backStack(s!)
-    expect(keys(s)).toEqual(['tab:backups', 'tab:live'])
-    // From a non-Backups tab Back goes to Backups.
+    expect(keys(s)).toEqual(['tab:live', 'tab:device'])
+    // From Backups or Device Back goes to Live, the home section.
     s = backStack(s!)
-    expect(keys(s)).toEqual(['tab:backups'])
-    // From Backups Back leaves the app.
+    expect(keys(s)).toEqual(['tab:live'])
+    expect(keys(backStack([BASE, tabLayer('backups')]))).toEqual(['tab:live'])
+    // From Live Back leaves the app.
     expect(backStack(s!)).toBeNull()
   })
 
   it('Back closes a dialog before the sheet under it, and a sheet before its screen', () => {
-    expect(keys(backStack([BASE, sheetLayer('detail:a'), dialogLayer('delete')]))).toEqual(['tab:backups', 'overlay:sheet:detail:a'])
+    expect(keys(backStack([BASE, sheetLayer('detail:a'), dialogLayer('delete')]))).toEqual(['tab:live', 'overlay:sheet:detail:a'])
     const s: Stack = [BASE, screenLayer({ kind: 'contents', id: 'a' }), sheetLayer('pads:backup:a:1')]
-    expect(keys(backStack(s))).toEqual(['tab:backups', 'screen:#/contents/a'])
+    expect(keys(backStack(s))).toEqual(['tab:live', 'screen:#/contents/a'])
     expect(keys(backStack([BASE, screenLayer({ kind: 'settings' }), screenLayer({ kind: 'debug' })]))).toEqual([
-      'tab:backups',
+      'tab:live',
       'screen:#/settings',
     ])
   })
@@ -247,12 +261,21 @@ class FakeWindow implements NavEnv {
 const stackKeys = (nav: Nav): string[] => nav.stack.value.map(layerKey)
 
 describe('Nav', () => {
-  it('a fresh load of a deep route seeds Backups underneath', () => {
-    const w = new FakeWindow('#/live')
+  it('a fresh load of a deep route seeds Live underneath', () => {
+    const w = new FakeWindow('#/backups')
     const nav = new Nav(w)
     nav.start()
-    expect(w.urls()).toEqual(['#/backups', '#/live'])
+    expect(w.urls()).toEqual(['#/live', '#/backups'])
+    expect(nav.current.tab).toBe('backups')
+  })
+
+  it('a fresh load opens on Live', () => {
+    const w = new FakeWindow('')
+    const nav = new Nav(w)
+    nav.start()
+    expect(w.urls()).toEqual(['#/live'])
     expect(nav.current.tab).toBe('live')
+    expect(isLive(nav.current)).toBe(true)
   })
 
   it('a reload restores the whole stack from history.state', () => {
@@ -265,25 +288,25 @@ describe('Nav', () => {
   })
 
   it('one history entry per layer; the app Back pops it', async () => {
-    const w = new FakeWindow('#/backups')
+    const w = new FakeWindow('#/live')
     const nav = new Nav(w)
     nav.start()
     nav.open(overlayLayer('menu'))
     await nav.settled()
-    expect(w.urls()).toEqual(['#/backups', '#/backups'])
-    nav.selectTab('live')
+    expect(w.urls()).toEqual(['#/live', '#/live'])
+    nav.selectTab('backups')
     await nav.settled()
-    expect(w.urls()).toEqual(['#/backups', '#/live'])
-    expect(stackKeys(nav)).toEqual(['tab:backups', 'tab:live'])
+    expect(w.urls()).toEqual(['#/live', '#/backups'])
+    expect(stackKeys(nav)).toEqual(['tab:live', 'tab:backups'])
     nav.open(overlayLayer('menu'))
     await nav.settled()
     nav.selectTab('device')
     expect(nav.current.tab).toBe('device') // at once
     await nav.settled()
-    expect(w.urls()).toEqual(['#/backups', '#/device'])
-    nav.selectTab('backups')
+    expect(w.urls()).toEqual(['#/live', '#/device'])
+    nav.selectTab('live')
     await nav.settled()
-    expect(w.urls()).toEqual(['#/backups'])
+    expect(w.urls()).toEqual(['#/live'])
   })
 
   it('replace swaps a sheet for a screen without leaving the sheet in history', async () => {
@@ -294,13 +317,13 @@ describe('Nav', () => {
     await nav.settled()
     nav.replace(sheetLayer('detail:b1'), screenLayer({ kind: 'contents', id: 'b1' }))
     await nav.settled()
-    expect(w.urls()).toEqual(['#/backups', '#/contents/b1'])
+    expect(w.urls()).toEqual(['#/live', '#/contents/b1'])
     await w.back()
-    expect(stackKeys(nav)).toEqual(['tab:backups'])
+    expect(stackKeys(nav)).toEqual(['tab:live'])
   })
 
   it('the browser Back closes layers in Android order', async () => {
-    const w = new FakeWindow('#/live')
+    const w = new FakeWindow('#/device')
     const nav = new Nav(w)
     nav.start()
     nav.open(overlayLayer('side'))
@@ -308,13 +331,13 @@ describe('Nav', () => {
     await nav.settled()
     await w.back()
     // The side panel went first, although the sheet is on top of the history.
-    expect(stackKeys(nav)).toEqual(['tab:backups', 'tab:live', 'overlay:sheet:x'])
+    expect(stackKeys(nav)).toEqual(['tab:live', 'tab:device', 'overlay:sheet:x'])
     expect(stackFromState(w.history.state)!.map(layerKey)).toEqual(stackKeys(nav))
     await w.back()
-    expect(stackKeys(nav)).toEqual(['tab:backups', 'tab:live'])
+    expect(stackKeys(nav)).toEqual(['tab:live', 'tab:device'])
     await w.back()
-    expect(stackKeys(nav)).toEqual(['tab:backups'])
-    expect(w.location.hash).toBe('#/backups')
+    expect(stackKeys(nav)).toEqual(['tab:live'])
+    expect(w.location.hash).toBe('#/live')
   })
 
   it('the back guard keeps a modal in place', async () => {
@@ -324,21 +347,21 @@ describe('Nav', () => {
     let modal = true
     nav.setBackGuard(() => modal)
     await w.back()
-    expect(stackKeys(nav)).toEqual(['tab:backups', 'screen:#/settings'])
+    expect(stackKeys(nav)).toEqual(['tab:live', 'screen:#/settings'])
     expect(w.location.hash).toBe('#/settings')
     modal = false
     await w.back()
-    expect(stackKeys(nav)).toEqual(['tab:backups'])
+    expect(stackKeys(nav)).toEqual(['tab:live'])
   })
 
   it('a typed-in hash starts a stack for it', () => {
-    const w = new FakeWindow('#/backups')
+    const w = new FakeWindow('#/live')
     const nav = new Nav(w)
     nav.start()
     w.entries.push({ state: null, url: '#/search' })
     w.index++
     w.fire()
-    expect(stackKeys(nav)).toEqual(['tab:backups', 'screen:#/search'])
+    expect(stackKeys(nav)).toEqual(['tab:live', 'screen:#/search'])
   })
 
   it('calls tabChanged and setLive as the stack moves', async () => {
@@ -350,17 +373,15 @@ describe('Nav', () => {
       tabChanged: (a: Tab, b: Tab) => calls.push(`tab ${a}>${b}`),
       setLive: (l) => calls.push(`live ${l}`),
     })
-    nav.selectTab('live')
     nav.openScreen({ kind: 'guide' })
     nav.back()
     nav.openScreen({ kind: 'settings' })
     nav.back()
     nav.selectTab('device')
+    nav.selectTab('backups')
     await nav.settled()
     await w.back()
     expect(calls).toEqual([
-      'live false',
-      'tab backups>live',
       'live true',
       'live false',
       'live true',
@@ -369,10 +390,13 @@ describe('Nav', () => {
       'tab live>device',
       'live false',
       'tab device>backups',
+      // Back from Backups returns to Live.
+      'tab backups>live',
+      'live true',
     ])
   })
 
-  it('a page loaded on another tab counts as a switch from Backups', () => {
+  it('a page loaded on another tab counts as a switch from Live', () => {
     const w = new FakeWindow('#/device')
     const nav = new Nav(w)
     nav.start()
@@ -381,7 +405,7 @@ describe('Nav', () => {
       tabChanged: (a: Tab, b: Tab) => calls.push(`tab ${a}>${b}`),
       setLive: (l) => calls.push(`live ${l}`),
     })
-    expect(calls).toEqual(['tab backups>device', 'live false'])
+    expect(calls).toEqual(['tab live>device', 'live false'])
   })
 
   it('closing the contents or compare screen, by Done or Back, runs its onBack', async () => {

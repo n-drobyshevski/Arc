@@ -76,6 +76,21 @@
   padding-block: 0.133em;
 }
 
+/* A side tag (PO tutorial): a vertical tab flush with the screen's edge, square
+ * there and rounded 8 on the inner side; its one-line word turned to read bottom
+ * to top on the left edge, top to bottom on the right. */
+.coach__tag--side { padding: 0; }
+.coach__tag--left { border-radius: 0 var(--coach-side-radius, 8px) var(--coach-side-radius, 8px) 0; }
+.coach__tag--right { border-radius: var(--coach-side-radius, 8px) 0 0 var(--coach-side-radius, 8px); }
+.coach__tag--side .coach__tag-text {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  white-space: nowrap;
+  transform: translate(-50%, -50%) rotate(-90deg);
+}
+.coach__tag--right .coach__tag-text { transform: translate(-50%, -50%) rotate(90deg); }
+
 /* Lays the labels out unseen, to measure them (max-width set per label). */
 .coach__measure {
   position: absolute;

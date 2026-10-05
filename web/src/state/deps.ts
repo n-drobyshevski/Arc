@@ -10,7 +10,15 @@
 // wake lock (TransferService / keepScreenOn), the beforeunload guard, tab
 // visibility (the activity lifecycle), the document title (the progress
 // notification) and the launch queue (VIEW intents).
+//
+// Live (ported from main's Live KEYS / pad playback delta): [LiveAudioDeps] is
+// Android's LiveAudio (one low-latency output mixing the pads and keys),
+// [Deps.padSounds] the folder PadSoundCache keeps its copies in, and
+// [Deps.lastRead] Live's last read of the device (files/live-last.json).
 
+import type { ReadonlySignal } from '@preact/signals'
+import { signal } from '@preact/signals'
+import type { PadSoundStore } from '../core/features/padSoundCache'
 import type { TrafficLog } from '../core/protocol/trafficLog'
 import type { MidiAccessLike, MidiDeviceEvent, MidiPermission, OpenMidi } from '../platform/midi/webmidi'
 import type { ReleaseLock } from '../platform/midi/owner'
@@ -54,6 +62,8 @@ export type LibraryApi = Pick<
   | 'reconcile'
   | 'indexMissing'
   | 'syncIndex'
+  | 'saveLive'
+  | 'live'
   | 'restoreFrom'
   | 'estimate'
   | 'persist'
@@ -66,6 +76,84 @@ export type LibraryApi = Pick<
   | 'settings'
   | 'onExternalError'
 >
+
+/** The press options of [LiveAudioDeps.press]. */
+export interface LivePress {
+  /** Semitones from the sample's own pitch (KEYS; 0 for a pad). */
+  readonly pitch: number
+  /** True: sounds until release(id), then fades quickly (the EP-133's gate). False: plays to the end. */
+  readonly gate: boolean
+  /** When the finger came down (Deps.perfNow, ms), for the latency note. */
+  readonly pressedAt?: number
+}
+
+/**
+ * Live's sound output (Android LiveAudio + VoiceMixer): one output, open
+ * while Live is in front, that mixes the pads and keys being played (up to 8
+ * voices). Samples are loaded once under a key ([preload]) so a press only
+ * names one. Implemented by platform/audio/liveAudio (wired in boot/browserDeps).
+ */
+export interface LiveAudioDeps {
+  /**
+   * Opens the output (Live came on screen); nothing is heard until a voice
+   * starts. [sampleRate]: a rate to ask for (default: the output's own).
+   * False when there is no output.
+   */
+  open(sampleRate?: number): boolean | Promise<boolean>
+  /** Closes it (Live left the screen); what was sounding stops. Loaded samples may be dropped. */
+  close(): void
+  /** Wakes the output: call synchronously from a tap, before any await (browsers start audio only after one). */
+  resumeInGesture(): void
+  /** Loads a decoded sample (s16 interleaved, 1 or 2 channels) under [key]. */
+  preload(key: string, pcm: Int16Array, channels: number, sampleRate: number): void
+  /** Whether [key] is loaded (a press of it can start now). */
+  has(key: string): boolean
+  /** Drops the sample under [key], or every sample when no key is given. */
+  unload(key?: string): void
+  /**
+   * Starts voice [id] (a pad "live:g:o" or key "keys:i") playing sample [key].
+   * False when there is no output or [key] isn't loaded.
+   */
+  press(id: string, key: string, options: LivePress): boolean
+  /** The finger left: voice [id] fades out (it still sounds a moment when the tap was very short). */
+  release(id: string): void
+  stopAll(): void
+  /** The voices sounding (pad and key ids), for the rings (ArcController.liveKeys). */
+  readonly voices: ReadonlySignal<ReadonlySet<string>>
+  /** How the output was set up, for the debug log ("48000 Hz, …"), "" before it opens. */
+  readonly description: string
+  /** Each voice's delay from its press to its first frame leaving the output, and where the output goes. */
+  onStarted(listener: (id: string, latencyMs: number, route: string) => void): () => void
+  /** The output looks like Bluetooth (its own delay, [outputMs]); the controller says so once. */
+  onSlowOutput?(listener: (outputMs: number) => void): () => void
+  /** Lines for the debug log (how the output was set up, or why there is none). */
+  onLog?(listener: (line: string) => void): () => void
+}
+
+/** A Live output that never opens (tests, or a browser without Web Audio). */
+export function nullLiveAudio(): LiveAudioDeps {
+  const voices = signal<ReadonlySet<string>>(new Set())
+  return {
+    open: () => false,
+    close: () => {},
+    resumeInGesture: () => {},
+    preload: () => {},
+    has: () => false,
+    unload: () => {},
+    press: () => false,
+    release: () => {},
+    stopAll: () => {},
+    voices,
+    description: '',
+    onStarted: () => () => {},
+  }
+}
+
+/** Live's last read of the device (LiveSnapshot JSON): Android's files/live-last.json. */
+export interface LastReadDeps {
+  load(): string | null | Promise<string | null>
+  save(json: string): void | Promise<void>
+}
 
 /** Files.kt and the activity's pickers. */
 export interface FileDeps {
@@ -106,11 +194,17 @@ export interface Deps {
   settings: SettingsStore
   /** SharedPreferences "mirror": learned pads and pad order. */
   mirrorPrefs: MirrorPrefs
-  /** The first-run coach (MainActivity coach_seen); for the UI. */
+  /** Where the first-run guide's flag was before AppSettings.guideSeen (MainActivity coach_seen), read to carry it over. */
   coach: CoachPrefs
   files: FileDeps
   share: ShareDeps
   player: SoundPlayer
+  /** Live's pads and keys (Android LiveAudio). */
+  liveAudio: LiveAudioDeps
+  /** Where Live's copies of the device's pad sounds are kept (Android files/pad-sounds). */
+  padSounds: PadSoundStore
+  /** Live's last read, shown while the device is not connected. */
+  lastRead: LastReadDeps
   /** Screen wake lock: on while a task runs, or Live is open with keepScreenOn. */
   wakeLock: { set(on: boolean): Promise<void> }
   trafficLog: TrafficLog
@@ -160,6 +254,8 @@ export function unavailableLibrary(error: unknown): LibraryApi {
     reconcile: nothing,
     indexMissing: nothing,
     syncIndex: nothing,
+    saveLive: nothing,
+    live: () => null,
     estimate: async () => null,
     persist: async () => false,
     loadFolder: async () => 'none',

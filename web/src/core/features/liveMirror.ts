@@ -20,8 +20,9 @@
 
 import type { MidiEvent } from '../protocol/midiInput'
 import { pad as padOfNote, padKey, type PhysicalPad } from './padNotes'
+import type { LiveSnapshot } from './liveSnapshot'
 import { PadOrder } from './padPush'
-import type { PadGroup } from './projectPads'
+import { groupOrder, type PadGroup } from './projectPads'
 
 /** A pad file id from a pad push: project 1..99, group 0..3 (A..D) and the pad's number in the project file (pNN). */
 export interface PadFid {
@@ -63,6 +64,10 @@ export interface MirrorState {
   /** Whether a pad push has ever been seen this session. */
   pushesSeen: boolean
   padOrder: PadOrder
+  /** Every note held or fading, pads or not, for the KEYS view (the device's KEYS mode sends any note). */
+  notes: Map<number, PadLight>
+  /** The latest note played, any note. */
+  lastNote: number | null
 }
 
 /** How close a note and a pad push must be to belong to the same press. */
@@ -80,6 +85,8 @@ export class LiveMirror {
 
   private readonly onLearned: (learned: Map<number, number>) => void
   private readonly pads = new Map<number, PadLight>()
+  private readonly notes = new Map<number, PadLight>()
+  private lastNote: number | null = null
   private readonly keysHeld = new Map<number, number>()
   private lastKeysNote: number | null = null
   private lastHit: Hit | null = null
@@ -143,9 +150,29 @@ export class LiveMirror {
     this.names = slotNames
   }
 
+  /** What was read from the device (project, pads, names), to show again while it is away. */
+  saved(savedAt: number): LiveSnapshot {
+    return {
+      savedAt,
+      activeProject: this.activeProject,
+      groups: [...this.layout.entries()]
+        .sort((a, b) => groupOrder(a[0], b[0]))
+        .map(([name, pads]) => ({ name, pads: new Map(pads) })),
+      names: this.names,
+    }
+  }
+
+  /** Loads a saved read: the device's last project, pads and names. */
+  load(s: LiveSnapshot): void {
+    this.names = s.names
+    this.setProject(s.activeProject, s.groups)
+  }
+
   onMidi(e: MidiEvent): void {
     switch (e.type) {
       case 'NoteOn': {
+        this.notes.set(e.note, { velocity: e.velocity, channel: e.channel, onAt: e.time, offAt: null })
+        this.lastNote = e.note
         const pad = padOfNote(e.note)
         if (pad == null) {
           this.keysHeld.set(e.note, e.channel)
@@ -174,6 +201,8 @@ export class LiveMirror {
         break
       }
       case 'NoteOff': {
+        const n = this.notes.get(e.note)
+        if (n && n.offAt == null) this.notes.set(e.note, { ...n, offAt: e.time })
         const pad = padOfNote(e.note)
         if (pad == null) {
           this.keysHeld.delete(e.note)
@@ -201,6 +230,7 @@ export class LiveMirror {
         this.playing = false
         // A note-off lost at stop would leave a pad lit forever: release what is held.
         for (const [k, l] of [...this.pads.entries()]) if (l.offAt == null) this.pads.set(k, { ...l, offAt: e.time })
+        for (const [n, l] of [...this.notes.entries()]) if (l.offAt == null) this.notes.set(n, { ...l, offAt: e.time })
         this.keysHeld.clear()
         break
       case 'ControlChange':
@@ -273,6 +303,7 @@ export class LiveMirror {
   /** The state at [now] (ms): released pads past their fade are dropped, and a stale tempo is cleared. */
   snapshot(now: number): MirrorState {
     for (const [k, l] of [...this.pads.entries()]) if (l.offAt != null && now - l.offAt > FADE_MS) this.pads.delete(k)
+    for (const [n, l] of [...this.notes.entries()]) if (l.offAt != null && now - l.offAt > FADE_MS) this.notes.delete(n)
     const first = this.clocks[0]
     const lastClock = this.clocks[this.clocks.length - 1]
     let bpm: number | null = null
@@ -293,6 +324,8 @@ export class LiveMirror {
       learned: new Map(this.learned),
       pushesSeen: this.pushesSeen,
       padOrder: this.padOrder,
+      notes: new Map(this.notes),
+      lastNote: this.lastNote,
     }
   }
 }

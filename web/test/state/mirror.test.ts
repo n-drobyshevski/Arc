@@ -2,7 +2,7 @@
 // MockEP133 behind fakeMidiAccess plays the device: notes arrive as MIDI on the
 // input, pad pushes as SysEx through the session.
 import 'fake-indexeddb/auto'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { padKey as padKeyOf } from '../../src/core/features/padNotes'
 import { TrafficLog } from '../../src/core/protocol/trafficLog'
 import { MirrorText } from '../../src/core/text/mirrorText'
@@ -12,11 +12,13 @@ import { readFile } from '../../src/platform/files/pick'
 import { openMidi, probePermission, requestMidiAccess, watchMidi, webMidiSupported } from '../../src/platform/midi/webmidi'
 import { nullChannel } from '../../src/platform/storage/channel'
 import { Library } from '../../src/platform/storage/library'
-import { CoachPrefs, MirrorPrefs, SettingsStore, memoryStorage, type KeyValueStorage } from '../../src/platform/storage/settings'
+import { CoachPrefs, LastReadPrefs, MirrorPrefs, SettingsStore, memoryStorage, type KeyValueStorage } from '../../src/platform/storage/settings'
 import { createController, type ArcController } from '../../src/state/controller'
 import type { Deps } from '../../src/state/deps'
 import { activeProject, sameBpm, sameMirrorState } from '../../src/state/mirror'
 import { emptyMirrorState as emptyMirrorStateFor, type UiState } from '../../src/state/types'
+import { memoryPadSoundStore } from '../../src/core/features/padSoundCache'
+import { fakeLiveAudio } from './fakeLiveAudio'
 import { DemoData } from '../helpers/demoData'
 import { connectMock, fakeNavigator, type FakeEp } from '../helpers/fakeMidiAccess'
 import type { MockEP133 } from '../helpers/mockDevice'
@@ -30,6 +32,7 @@ interface Harness {
   library: Library
   storage: KeyValueStorage
   prefs: MirrorPrefs
+  padSounds: ReturnType<typeof memoryPadSoundStore>
   setVisible(v: boolean): void
 }
 
@@ -49,6 +52,7 @@ async function harness(storage: KeyValueStorage = memoryStorage()): Promise<Harn
   const visListeners = new Set<(v: boolean) => void>()
   let visible = true
   const prefs = new MirrorPrefs(storage)
+  const padSounds = memoryPadSoundStore()
   const deps: Deps = {
     midi: {
       supported: () => webMidiSupported(nav),
@@ -65,6 +69,9 @@ async function harness(storage: KeyValueStorage = memoryStorage()): Promise<Harn
     files: { pick: async () => [], read: (f) => readFile(f), save: async () => 'saved', canPickFolder: () => false, pickFolder: async () => null },
     share: { share: async () => 'shared' },
     player: new NullPlayer(),
+    liveAudio: fakeLiveAudio(),
+    padSounds,
+    lastRead: new LastReadPrefs(storage),
     wakeLock: { set: async () => {} },
     trafficLog: new TrafficLog(),
     now: () => Date.now(),
@@ -91,6 +98,7 @@ async function harness(storage: KeyValueStorage = memoryStorage()): Promise<Harn
     library,
     storage,
     prefs,
+    padSounds,
     setVisible(v) {
       visible = v
       for (const l of [...visListeners]) l(v)
@@ -124,12 +132,24 @@ const NOTE_A7 = 36 + 9
 const A7 = { group: 0, offset: 9 }
 
 describe('live mirror', () => {
-  it('reads names, the active project and its pads first, without sending anything after', async () => {
+  it('reads names, the active project and its pads first, copies the pads\' sounds once, then sends nothing', async () => {
     const h = await live()
     const m = h.c.state.value.mirror!
     expect(m.error).toBeNull()
+    expect(m.offline ?? null).toBeNull()
     expect(m.state.activeProject).toBe(1)
     expect(h.c.state.value.browser.reading).toBeNull()
+    // The background copy reads each sound on the project's pads once.
+    await vi.waitFor(async () => expect(await h.padSounds.has('index.json')).toBe(true), { timeout: 3000 })
+    await vi.waitFor(
+      async () => {
+        const sent = h.ep.output.sent.length
+        await sleep(60)
+        expect(h.c.state.value.backgroundRead).toBe(false)
+        expect(h.ep.output.sent.length).toBe(sent)
+      },
+      { timeout: 5000 },
+    )
     const sent = h.ep.output.sent.length
     await sleep(100)
     expect(h.ep.output.sent.length).toBe(sent)
@@ -209,9 +229,14 @@ describe('live mirror', () => {
     h.c.closeMirror()
     expect(h.c.state.value.mirror).toBeNull()
 
+    // With a read kept, Live shows it offline instead.
     const g = await live()
     g.ep.access.unplug(g.ep.input, g.ep.output)
-    expect(g.c.state.value.mirror).toMatchObject({ loading: false, error: MirrorText.NOT_CONNECTED })
+    await until(g, (st) => st.mirror?.offline != null)
+    const off = g.c.state.value.mirror!
+    expect(off).toMatchObject({ loading: false, error: null })
+    expect(off.offline).toMatch(/^Last seen /)
+    expect(off.state.activeProject).toBe(1)
   })
 
   it('leaving the Live tab closes the mirror', async () => {
@@ -272,9 +297,11 @@ describe('mirror lifecycle', () => {
   it('reconnecting while Live is open starts the mirror again for the new session', async () => {
     const h = await live()
     await h.c.connect() // the toggle: disconnect
-    expect(h.c.state.value.mirror).toMatchObject({ error: MirrorText.NOT_CONNECTED })
+    // The last read, offline.
+    await until(h, (st) => st.mirror?.offline != null)
+    expect(h.c.state.value.mirror).toMatchObject({ error: null })
     await h.c.connect()
-    await until(h, (st) => st.mirror !== null && st.mirror.error === null && !st.mirror.loading && !st.busy)
+    await until(h, (st) => st.mirror !== null && st.mirror.error === null && st.mirror.offline == null && !st.mirror.loading && !st.busy)
     h.ep.input.receive([0x90, NOTE_A7, 90])
     await until(h, (st) => st.mirror?.state.pads.has(padKeyOf(A7)) === true)
   })

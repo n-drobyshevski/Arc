@@ -13,6 +13,11 @@
 //   StateFlow drops an equal state; here [sameMirrorState] does, so an idle
 //   mirror does not redraw 30 times a second.
 // - SharedPreferences "mirror" is MirrorPrefs (localStorage arc.mirror.*).
+// - Live's sounds and last read (openOfflineMirror, saveLastRead,
+//   preloadPads, copyPadSounds, forgetPadMemory) live in live.ts; the
+//   mirror calls them at the same points ArcController does.
+// - [openOffline] has a generation token: an offline open still loading the
+//   last read gives way to any later open or stop.
 
 import { getMetadata, isJsonObject, type JsonValue } from '../core/protocol/fs'
 import { PROJECTS_NODE, projectFromNode } from '../core/protocol/device'
@@ -26,6 +31,7 @@ import { MirrorText } from '../core/text/mirrorText'
 import { SettingsText } from '../core/text/settingsText'
 import type { MirrorPrefs } from '../platform/storage/settings'
 import type { LiveEvents } from './connection'
+import type { LiveSounds } from './live'
 import type { Store } from './store'
 import type { Tasks } from './tasks'
 import { emptyMirrorState, type MirrorUi, type UiState } from './types'
@@ -48,6 +54,10 @@ export interface MirrorHost {
   /** library.syncIndex(), fire and forget. */
   syncIndex(): void
   toast(text: string, error?: boolean): void
+  /** Live's sounds and last read. */
+  live: LiveSounds
+  /** "5 Oct, 14:02" for the offline line. */
+  fmtDateTime(ms: number): string
 }
 
 /** Kotlin String.toDoubleOrNull (Java's float syntax, no surrounding blanks). */
@@ -126,7 +136,9 @@ export function sameMirrorState(a: MirrorState, b: MirrorState): boolean {
     sameHit(a.lastHit, b.lastHit) &&
     sameMap(a.pads, b.pads, sameLight) &&
     sameMap(a.keysHeld, b.keysHeld, (x, y) => x === y) &&
-    sameMap(a.learned, b.learned, (x, y) => x === y)
+    sameMap(a.learned, b.learned, (x, y) => x === y) &&
+    a.lastNote === b.lastNote &&
+    sameMap(a.notes, b.notes, sameLight)
   )
 }
 
@@ -136,12 +148,18 @@ export class MirrorController {
   private unlisten: (() => void) | null = null
   private pushOff: (() => void) | null = null
   private tick: unknown = null
+  private openGen = 0
 
   constructor(private readonly host: MirrorHost) {}
 
-  /** Whether the mirror listens right now. */
+  /** Whether the mirror listens right now (connected or offline). */
   get running(): boolean {
     return this.mirror !== null
+  }
+
+  /** The mirror Live shows, connected or offline. */
+  get current(): LiveMirror | null {
+    return this.mirror
   }
 
   /** Sets mirror.state to the snapshot, unless it equals the one shown. */
@@ -152,7 +170,7 @@ export class MirrorController {
       if (!mi) return cur
       const state = sameMirrorState(mi.state, st) ? mi.state : st
       const next: MirrorUi = { ...mi, state, ...patch }
-      if (next.state === mi.state && next.loading === mi.loading && next.error === mi.error) return cur
+      if (next.state === mi.state && next.loading === mi.loading && next.error === mi.error && next.offline === mi.offline) return cur
       return { ...cur, mirror: next }
     })
   }
@@ -164,14 +182,15 @@ export class MirrorController {
     this.stop()
     const s = host.session()
     const events = host.liveEvents()
-    if (s === null || events === null) {
-      host.store.update((st) => ({ ...st, mirror: this.notConnected() }))
+    // Not connected (or still connecting): the last read, if there is one.
+    if (s === null || events === null || host.store.get().device === null) {
+      await this.openOffline()
       return
     }
     const m = new LiveMirror(host.prefs.loadLearned(), host.prefs.savedPadOrder(), (learned) => this.saveLearned(learned))
     this.mirror = m
     this.mirrorSession = s
-    host.store.update((st) => ({ ...st, mirror: { state: m.snapshot(host.perfNow()), loading: true, error: null } }))
+    host.store.update((st) => ({ ...st, mirror: { state: m.snapshot(host.perfNow()), loading: true, error: null, offline: null } }))
     // Listen first, so nothing played while reading is missed.
     this.unlisten = events((e) => m.onMidi(e))
     this.pushOff = s.onPush((f) => {
@@ -198,6 +217,7 @@ export class MirrorController {
       if (this.mirror !== m) break
       ok = await host.tasks.exclusive('mirror', tries > 1, async (ss) => {
         const c = await contents(ss)
+        host.live.setDeviceSounds(c.sounds)
         m.setNames(new Map(c.sounds.map((snd) => [snd.slot, snd.name])))
         let active: JsonValue | undefined
         try {
@@ -219,7 +239,39 @@ export class MirrorController {
         return true
       })
     }
-    if (this.mirror === m) this.publish(m, { loading: false })
+    if (this.mirror === m) {
+      if (ok === true) {
+        host.live.saveLastRead(m)
+        void host.live.preloadPads(m)
+        void host.live.copyPadSounds(m, s)
+      }
+      this.publish(m, { loading: false })
+    }
+  }
+
+  /**
+   * Live without the device: the pads and sample names of the last read,
+   * marked offline. Nothing lights, as nothing is listened to.
+   */
+  async openOffline(): Promise<void> {
+    const { host } = this
+    this.stop()
+    const gen = this.openGen
+    const snap = await host.live.loadLastRead()
+    if (gen !== this.openGen) return
+    if (snap === null || (host.session() !== null && host.store.get().device !== null)) {
+      if (snap === null) host.store.update((st) => ({ ...st, mirror: this.notConnected() }))
+      return
+    }
+    const m = new LiveMirror(host.prefs.loadLearned(), host.prefs.savedPadOrder(), (learned) => this.saveLearned(learned))
+    m.load(snap)
+    this.mirror = m
+    this.mirrorSession = null
+    void host.live.preloadPads(m)
+    host.store.update((st) => ({
+      ...st,
+      mirror: { state: m.snapshot(host.perfNow()), loading: false, error: null, offline: MirrorText.lastSeen(host.fmtDateTime(snap.savedAt)) },
+    }))
   }
 
   private loadProject(m: LiveMirror, project: number): void {
@@ -228,6 +280,10 @@ export class MirrorController {
       if (groups === null) return
       if (this.mirror === m) {
         m.setProject(project, groups)
+        this.host.live.saveLastRead(m)
+        void this.host.live.preloadPads(m)
+        const s = this.host.session()
+        if (s !== null) void this.host.live.copyPadSounds(m, s)
         this.publish(m)
       }
     })()
@@ -264,15 +320,20 @@ export class MirrorController {
   }
 
   notConnected(): MirrorUi {
-    return { state: emptyMirrorState(this.host.prefs.savedPadOrder()), loading: false, error: MirrorText.NOT_CONNECTED }
+    return { state: emptyMirrorState(this.host.prefs.savedPadOrder()), loading: false, error: MirrorText.NOT_CONNECTED, offline: null }
   }
 
   close(): void {
     this.stop()
+    this.host.live.forgetPadMemory()
+    // When each copy was last played, kept for choosing what to drop when the copies fill up.
+    this.host.live.flush()
     this.host.store.update((st) => ({ ...st, mirror: null }))
   }
 
   stop(): void {
+    this.openGen++
+    this.host.live.stopCopy()
     if (this.tick !== null) this.host.clearTimeout(this.tick)
     this.tick = null
     this.unlisten?.()

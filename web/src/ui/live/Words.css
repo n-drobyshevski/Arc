@@ -1,0 +1,59 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt (WordButton) and MirrorScreen.kt (PickWord) */
+
+/* 44 high to touch; the word at its middle, or (--top) its top; radius 6. */
+.word {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 6px 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--graphite);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.word--top {
+  align-items: flex-start;
+  padding-top: 0;
+}
+/* A choice not taken: graphite at 45%. */
+.word--dim { color: color-mix(in srgb, var(--graphite) 45%, transparent); }
+.word:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+
+.word__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.word__mark { flex: none; }
+/* ArcType.word: 13sp, normal weight, 0.04em, line height 1.1, uppercase. */
+.word__text {
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.1;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  padding-block: var(--trim-1-1);
+}
+
+/* The choices, over the grid: bottom on the word's bottom, so it opens upward. */
+.pick { position: relative; }
+.pick__list {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 8px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--shell);
+}
+.pick__list--end { left: auto; right: 0; }

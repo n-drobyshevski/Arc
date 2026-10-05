@@ -9,6 +9,7 @@
 //   test/core/protocol/midiParts.test.ts ("LiveMirrorTest: MIDI input").
 import { describe, expect, it } from 'vitest'
 import { LiveMirror, type PadFid } from '../../../src/core/features/liveMirror'
+import { LiveSnapshot } from '../../../src/core/features/liveSnapshot'
 import { LABELS, note, noteName, pad, padKey, physicalPad, ROWS } from '../../../src/core/features/padNotes'
 import type { PadGroup } from '../../../src/core/features/projectPads'
 import type { MidiEvent } from '../../../src/core/protocol/midiInput'
@@ -234,5 +235,27 @@ describe('LiveMirrorTest', () => {
     // Continue also starts afresh.
     m.onMidi(Continue(t0 + 31 * tick))
     expect(m.snapshot(t0 + 31 * tick).bpm).toBeNull()
+  })
+
+  it('the last read is saved and names pads again without the device', () => {
+    const json = LiveSnapshot.toJson(mirror().saved(1_700_000_000_000))
+    const back = LiveSnapshot.fromJson(json)!
+    expect(back.savedAt).toBe(1_700_000_000_000)
+    expect(back.activeProject).toBe(1)
+    expect(back.groups).toEqual([group('a', [[1, 5], [10, 1]]), group('b', [[1, 20]])])
+    expect(back.names).toEqual(new Map([[1, 'kick'], [5, 'snare'], [20, 'bass']]))
+    // A fresh mirror (no device) with the learned links names the pads from it.
+    const offline = new LiveMirror(new Map([[9, 10], [0, 1]]))
+    offline.load(back)
+    expect(offline.nameOf(physicalPad(0, 9))).toBe('kick')
+    expect(offline.nameOf(physicalPad(1, 0))).toBe('bass')
+    expect(offline.snapshot(0).activeProject).toBe(1)
+  })
+
+  it('an empty pad survives the round trip, and junk reads as nothing', () => {
+    const s: LiveSnapshot = { savedAt: 5, activeProject: null, groups: [group('c', [[3, null]])], names: new Map() }
+    expect(LiveSnapshot.fromJson(LiveSnapshot.toJson(s))).toEqual(s)
+    expect(LiveSnapshot.fromJson('not json')).toBeNull()
+    expect(LiveSnapshot.fromJson('{"v":2,"savedAt":1}')).toBeNull()
   })
 })

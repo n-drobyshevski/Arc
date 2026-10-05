@@ -90,13 +90,27 @@ export function keysLayout(last: number): KeyRect[] {
 
 // ---------- the display ----------
 
-/** The display's main line: the error, "Reading…", the hit, or "Press a pad". */
+/**
+ * The display's main line: the error, "Reading…", the hit, offline the time
+ * of the last read ("Last seen Oct 5, 2:02 PM"), or "Press a pad".
+ */
 export function displayLine(st: MirrorState, mirror: MirrorUi | null): string {
   const hit: Hit | null = st.lastHit
   if (mirror?.error != null) return mirror.error
   if (mirror?.loading === true && hit === null) return MirrorText.READING
   if (hit !== null) return MirrorText.hit(hit)
+  if (mirror?.offline != null) return mirror.offline
   return MirrorText.WAITING
+}
+
+/** Whether the all-groups display shows Offline (and its folded note) in place of the transport. */
+export function showOffline(st: MirrorState, mirror: MirrorUi | null): boolean {
+  return mirror?.offline != null && st.playing === null
+}
+
+/** The offline line ("Last seen …") is longer than a hit: the display draws it a size down (22 for 26). */
+export function displayLineSmall(st: MirrorState, mirror: MirrorUi | null): boolean {
+  return mirror?.offline != null && st.lastHit === null
 }
 
 /** The all-groups display's transport word: "▶ Playing", "■ Stopped", or nothing before any clock. */

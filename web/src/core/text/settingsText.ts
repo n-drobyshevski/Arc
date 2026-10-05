@@ -25,6 +25,8 @@ const KEEP_CHOICES: readonly (number | null)[] = Object.freeze([null, 5, 10, 20]
 export const SettingsText = {
   TITLE: 'Settings',
   CLOSE: 'Close settings',
+  /** A screen reader's action on a toast. */
+  DISMISS: 'Dismiss',
 
   APPEARANCE: 'Appearance',
   THEME: 'Theme',
@@ -70,6 +72,12 @@ export const SettingsText = {
   FORGET_CONFIRM: 'Forget which pad is which? Names come back as you press pads in Live.',
   FORGET: 'Forget',
   FORGOTTEN: 'Learned sample names forgotten.',
+  PAD_SOUNDS: 'Pad sounds saved on the phone',
+  PAD_SOUNDS_NOTE: 'Live keeps a copy of the samples on your pads, so they play without the EP-133.',
+  CLEAR: 'Clear',
+  padSounds(size: string): string {
+    return `${SettingsText.PAD_SOUNDS}: ${size}`
+  },
 
   ABOUT: 'About',
   version(v: string): string {

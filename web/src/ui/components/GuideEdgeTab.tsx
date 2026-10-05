@@ -1,7 +1,7 @@
 // Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Chrome.kt (GuideEdgeTab)
 //
 // The vertical tab on the left edge that opens the EP-133 shortcut guide (the
-// PO's TUTORIAL tab): 22×112, navy, rounded on its right, "GUIDE" reading
+// PO's TUTORIAL tab): 22×112, the quiet grey of an unselected key, rounded on its right, "GUIDE" reading
 // bottom to top.
 import type { JSX } from 'preact'
 import { CoachText } from '../../core/text/coachText'

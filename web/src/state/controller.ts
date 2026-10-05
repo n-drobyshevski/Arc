@@ -29,8 +29,15 @@
 // - Playback needs a tap to wake the audio output: the play actions call
 //   player.resumeInGesture() before their first await, so call them straight
 //   from click handlers.
+// - Live (main's Live KEYS delta): the mirror runs whenever Live is in front
+//   and the tab visible, connected or not (offline it shows the last read);
+//   Live's output (LiveAudioDeps) is open on the same terms. Pads and keys
+//   play through live.ts. The first-run guide's flag is AppSettings.guideSeen
+//   ([coach] keeps the old seen/markSeen shape for the UI).
 
 import { computed, signal, type ReadonlySignal, type Signal } from '@preact/signals'
+import { MAX_OCTAVE, MIN_OCTAVE, type NoteNames, type Scale } from '../core/features/keys'
+import { padKey, type PhysicalPad } from '../core/features/padNotes'
 import { backupDevice, restorePak } from '../core/backup/backup'
 import { describePak, openPak, type PakDescription, type PakSound } from '../core/backup/pak'
 import { project as exportProject, projectFileName, soundFileName, soundWav } from '../core/backup/pakExport'
@@ -58,10 +65,11 @@ import { logFileName } from '../platform/files/save'
 import type { FileData } from '../platform/files/save'
 import { FileListTarget, type ExternalTarget } from '../platform/storage/external'
 import { describeForRestore } from '../platform/storage/library'
-import { indexSettings, type AppSettings, type CoachPrefs } from '../platform/storage/settings'
+import { indexSettings, type AppSettings } from '../platform/storage/settings'
 import { keepScreenOn } from '../platform/wakelock/wakeLock'
 import { Connection, connectionPhase, type ConnectionPhase } from './connection'
 import type { Deps } from './deps'
+import { LiveSounds } from './live'
 import { MirrorController } from './mirror'
 import { createStore, type Store } from './store'
 import { errorText, Tasks, type OnProgress } from './tasks'
@@ -75,6 +83,14 @@ const PAK_SHARE_MIME = 'application/zip'
 const WAV_MIME = 'audio/wav'
 const TEXT_MIME = 'text/plain'
 const LIBRARY_ZIP = 'arc-library.zip'
+
+/** The first-run guide's "already shown" flag, as the UI reads it (useCoachFirstRun). */
+export interface GuidePrefs {
+  readonly seen: boolean
+  markSeen(): void
+}
+
+const coerceIn = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
 
 const sameSound = (a: SoundEntry | undefined, b: SoundEntry | undefined): boolean =>
   a !== undefined && b !== undefined && a.slot === b.slot && a.name === b.name && a.size === b.size
@@ -102,13 +118,23 @@ export class ArcController {
   /** Where the connection is (plan §3), derived from the state. */
   readonly phase: ReadonlySignal<ConnectionPhase>
   readonly trafficLog: TrafficLog
-  /** The first-run coach marks (MainActivity coach_seen), for the UI. */
-  readonly coach: CoachPrefs
+  /**
+   * The guide overlay's first-run flag, for the UI: seen once AppSettings.guideSeen
+   * is set (or the flag from before it, MainActivity's coach_seen); markSeen sets guideSeen.
+   */
+  readonly coach: GuidePrefs
+  /** The Live voices sounding on the phone (pad "live:g:o" and key "keys:i" ids), for the rings (ArcController.liveKeys). */
+  readonly liveVoices: ReadonlySignal<ReadonlySet<string>>
+  /** The pads sounding on the phone, as padKey numbers (MainActivity's playingPads). */
+  readonly playingPads: ReadonlySignal<ReadonlySet<number>>
+  /** The keys sounding on the phone, by index (MainActivity's playingKeys). */
+  readonly playingKeys: ReadonlySignal<ReadonlySet<number>>
 
   private readonly settingsSignal: Signal<AppSettings>
   private readonly tasks: Tasks
   private readonly conn: Connection
   private readonly mirror: MirrorController
+  private readonly live: LiveSounds
   private toastIds = 0
   /**
    * Bumped by every play request and every stop. A request that took a while
@@ -118,9 +144,11 @@ export class ArcController {
   private searchGen = 0
   private libraryGen = 0
   private names: readonly NameEntry[] = []
-  private live = false
+  private liveTab = false
   private visible: boolean
-  private mirrorWanted = false
+  /** What syncMirror last decided: null (closed or paused), else the mirror runs for a ready device or not. */
+  private mirrorWanted: 'ready' | 'offline' | null = null
+  private audioWanted = false
   private keepOn = false
   private started = false
   private disposed = false
@@ -134,7 +162,34 @@ export class ArcController {
     this.playing = deps.player.playing
     this.phase = computed(() => connectionPhase(this.state.value))
     this.trafficLog = deps.trafficLog
-    this.coach = deps.coach
+    const self = this
+    this.coach = {
+      get seen() {
+        return deps.settings.settings.guideSeen || deps.coach.seen
+      },
+      markSeen: () => this.setGuideSeen(),
+    }
+    this.liveVoices = deps.liveAudio.voices
+    this.playingPads = computed(() => {
+      const out = new Set<number>()
+      for (const k of this.liveVoices.value) {
+        const p = k.split(':')
+        if (p.length !== 3 || p[0] !== 'live') continue
+        const g = Number(p[1])
+        const o = Number(p[2])
+        if (Number.isInteger(g) && Number.isInteger(o)) out.add(padKey({ group: g, offset: o }))
+      }
+      return out
+    })
+    this.playingKeys = computed(() => {
+      const out = new Set<number>()
+      for (const k of this.liveVoices.value) {
+        if (!k.startsWith('keys:')) continue
+        const i = Number(k.slice(5))
+        if (Number.isInteger(i)) out.add(i)
+      }
+      return out
+    })
     this.visible = deps.visibility.visible()
     const toast = (text: string, error?: boolean): void => this.toast(text, error)
     this.tasks = new Tasks({ store: this.store, deps, toast, session: () => this.conn.session })
@@ -145,6 +200,17 @@ export class ArcController {
       toast,
       onDropped: () => this.onDropped(),
     })
+    this.live = new LiveSounds({
+      store: this.store,
+      deps,
+      tasks: this.tasks,
+      session: () => this.conn.session,
+      mirror: () => this.mirror.current,
+      names: () => this.names,
+      playToken: () => this.playToken,
+      toast,
+    })
+    this.store.update((s) => ({ ...s, keysPad: deps.mirrorPrefs.savedKeysPad() }))
     this.mirror = new MirrorController({
       store: this.store,
       prefs: deps.mirrorPrefs,
@@ -156,6 +222,8 @@ export class ArcController {
       clearTimeout: (h) => deps.clearTimeout(h),
       syncIndex: () => void this.syncIndex(),
       toast,
+      live: this.live,
+      fmtDateTime: (ms) => this.fmtDateTime(ms),
     })
   }
 
@@ -175,6 +243,11 @@ export class ArcController {
     const lib = deps.library
     lib.settings = indexSettings(deps.settings, deps.mirrorPrefs)
     lib.onExternalError = (msg) => this.toast(WebText.copyFailed(msg), true)
+    lib.live = () => this.live.lastReadJson()
+    const audio = deps.liveAudio
+    this.cleanups.push(audio.onStarted((id, ms, route) => this.live.onStarted(id, ms, route)))
+    if (audio.onSlowOutput) this.cleanups.push(audio.onSlowOutput(() => this.live.slowOutput()))
+    if (audio.onLog) this.cleanups.push(audio.onLog((line) => this.trafficLog.note(line)))
     this.cleanups.push(lib.subscribe(() => void this.reloadLibrary()))
     this.cleanups.push(
       deps.settings.subscribe((s) => {
@@ -183,6 +256,8 @@ export class ArcController {
       }),
     )
     if (deps.onStorageChange) this.cleanups.push(deps.onStorageChange(() => deps.settings.reload()))
+    // The guide's flag from before it joined the settings (and so library.json).
+    if (!deps.settings.settings.guideSeen && deps.coach.seen) this.setGuideSeen()
     this.cleanups.push(deps.visibility.subscribe((v) => this.onVisibility(v)))
     this.cleanups.push(
       this.store.subscribe(() => {
@@ -201,6 +276,7 @@ export class ArcController {
     this.disposed = true
     for (const c of this.cleanups.splice(0)) c()
     this.mirror.stop()
+    this.live.closeAudio()
     this.conn.dispose()
     this.deps.player.stop()
     if (this.keepOn) {
@@ -251,6 +327,7 @@ export class ArcController {
       }
       if (gen !== this.libraryGen || this.disposed) return
       this.names = names
+      this.live.libraryChanged()
       this.store.update((s) => ({ ...s, backups: list, libraryLoaded: true, spaceLeft }))
       void this.runSearch()
     } catch (e) {
@@ -272,16 +349,19 @@ export class ArcController {
   // ---------- view (MainActivity Root: tabs, live, keep-screen-on, lifecycle) ----------
 
   /**
-   * selectTab's side effects: leaving Live closes the mirror, leaving Device
-   * stops playback (the UI also clears its pads sheet), entering Device reads it.
+   * selectTab's side effects: leaving Live closes the mirror and stops its
+   * sounds, leaving Device stops playback (the UI also clears its pads
+   * sheet), entering Device reads it.
    */
   tabChanged(prev: Tab, next: Tab): void {
     if (prev === next) return
     if (prev === 'live') {
-      this.live = false
+      this.liveTab = false
       this.closeMirror()
+      this.stopPlayback()
       // closeMirror leaves [mirrorWanted] alone; settle it now, even when no state changed.
       this.syncMirror()
+      this.syncLiveAudio()
     } else if (prev === 'device') {
       this.stopPlayback()
     }
@@ -295,33 +375,50 @@ export class ArcController {
    * visible; the screen stays on while live with keepScreenOn.
    */
   setLive(live: boolean): void {
-    if (this.live === live) return
-    this.live = live
+    if (this.liveTab === live) return
+    this.liveTab = live
     this.syncMirror()
+    this.syncLiveAudio()
     this.syncKeepOn()
   }
 
-  /** MainActivity.onStop: nothing keeps playing in the background; the mirror pauses. */
+  /** MainActivity.onStop: nothing keeps playing in the background; the mirror pauses, Live's output closes. */
   private onVisibility(visible: boolean): void {
     this.visible = visible
     if (!visible) this.stopPlayback()
     this.syncMirror()
+    this.syncLiveAudio()
   }
 
-  /** LaunchedEffect(live, ready) + repeatOnLifecycle(STARTED): openMirror / pauseMirror. */
+  /**
+   * LaunchedEffect(live, ready) + repeatOnLifecycle(STARTED): openMirror /
+   * pauseMirror. The mirror runs while Live is in front, connected or not
+   * (offline it shows the last read), and starts again when a device is
+   * (re)connected or goes away.
+   */
   private syncMirror(): void {
     if (this.disposed) return
-    const wanted = this.live && this.store.get().device !== null && this.visible
+    const wanted = this.liveTab && this.visible ? (this.store.get().device !== null ? 'ready' : 'offline') : null
     if (wanted === this.mirrorWanted) return
     this.mirrorWanted = wanted
-    if (wanted) void this.mirror.open()
+    if (wanted !== null) void this.mirror.open()
     else this.mirror.pause()
+  }
+
+  /** LaunchedEffect(live) + repeatOnLifecycle(STARTED): openLiveAudio / closeLiveAudio. */
+  private syncLiveAudio(): void {
+    if (this.disposed) return
+    const wanted = this.liveTab && this.visible
+    if (wanted === this.audioWanted) return
+    this.audioWanted = wanted
+    if (wanted) void this.live.openAudio()
+    else this.live.closeAudio()
   }
 
   /** keepOn = task != null || (live && keepScreenOn). */
   private syncKeepOn(): void {
     if (this.disposed) return
-    const on = keepScreenOn(this.store.get().task !== null, this.live, this.settingsSignal.peek().keepScreenOn)
+    const on = keepScreenOn(this.store.get().task !== null, this.liveTab, this.settingsSignal.peek().keepScreenOn)
     if (on === this.keepOn) return
     this.keepOn = on
     void this.deps.wakeLock.set(on).catch(() => undefined)
@@ -360,7 +457,8 @@ export class ArcController {
   /** dropSession's controller part (the session is already closed). */
   private onDropped(): void {
     this.mirror.stop()
-    if (this.store.get().mirror !== null) this.store.update((s) => ({ ...s, mirror: this.mirror.notConnected() }))
+    // Live shows the last read instead.
+    if (this.store.get().mirror !== null) void this.mirror.openOffline()
     this.playToken++ // a device sound still downloading must not start after the device is gone
     if (this.deps.player.playing.peek()?.startsWith('device:') === true) this.deps.player.stop()
   }
@@ -566,6 +664,9 @@ export class ArcController {
     // Not cancelled on stop: an interrupted download would leave the session out of step.
     const pcm = await this.tasks.exclusive(`play:${slot}`, false, (s) => download(s, slot))
     if (pcm === null) return
+    // Live can play it later without the device.
+    const listed = this.store.get().browser.contents?.sounds.find((snd) => snd.slot === slot) ?? this.live.deviceSound(slot)
+    if (listed !== undefined) void this.live.keepPadSound(slot, listed.name, listed.size, pcm, d.channels, d.sampleRate)
     if (token !== this.playToken) return
     await this.startSound(`device:${slot}`, pcm, Math.trunc(d.channels), Math.trunc(d.sampleRate))
   }
@@ -588,6 +689,7 @@ export class ArcController {
 
   stopPlayback(): void {
     this.playToken++
+    this.live.stopAll()
     this.deps.player.stop()
   }
 
@@ -725,6 +827,56 @@ export class ArcController {
     this.mirror.forgetLearned()
   }
 
+  /** Opens Live's sound output (Live came on screen); driven by [setLive] / [tabChanged]. */
+  openLiveAudio(): Promise<void> {
+    return this.live.openAudio()
+  }
+
+  /** Closes it (Live left the screen); driven by [setLive] / [tabChanged]. */
+  closeLiveAudio(): void {
+    this.live.closeAudio()
+  }
+
+  /**
+   * Plays a Live pad's sample on the phone (arc's copy, else the newest
+   * backup holding it, else, connected, the device) alongside whatever else
+   * sounds, until [releasePad]; [hold] false (a screen reader's Play) plays
+   * it to the end. The pad also becomes the KEYS sound. Call from the press.
+   */
+  playPad(pad: PhysicalPad, hold = true): Promise<void> {
+    return this.live.playPad(pad, hold)
+  }
+
+  /** The finger left the pad: its sound fades out. */
+  releasePad(pad: PhysicalPad): void {
+    this.live.releasePad(pad)
+  }
+
+  /** Plays KEYS key [index] (0 = '.', the lowest) until [releaseKey]; [hold] false plays to the end. Call from the press. */
+  playKey(index: number, hold = true): Promise<void> {
+    return this.live.playKey(index, hold)
+  }
+
+  /** The finger left the key: its note fades out. */
+  releaseKey(index: number): void {
+    this.live.releaseKey(index)
+  }
+
+  /** The sound KEYS plays: the pad last tapped, or last played on the device in the pads view. */
+  selectKeysPad(pad: PhysicalPad): void {
+    this.live.selectKeysPad(pad)
+  }
+
+  /** Space taken by Live's copies of the device's sounds, in bytes (for Settings). */
+  padSoundsSize(): Promise<number> {
+    return this.live.padSoundsSize()
+  }
+
+  /** Clears Live's copies of the device's sounds (Settings). */
+  clearPadSounds(): Promise<void> {
+    return this.live.clearPadSounds()
+  }
+
   // ---------- library folder ----------
 
   /**
@@ -736,9 +888,13 @@ export class ArcController {
   async restoreFromFolder(target: ExternalTarget): Promise<void> {
     const lib = this.deps.library
     try {
-      const { count, settings } = await lib.restoreFrom(target, (bytes) => describeForRestore(bytes, () => this.deps.now()))
+      const { count, settings, live } = await lib.restoreFrom(target, (bytes) => describeForRestore(bytes, () => this.deps.now()))
+      // Pads learned since the reinstall stay (the folder's fill in the rest), as does a pad order chosen since.
       this.deps.mirrorPrefs.fromIndex(settings)
       this.deps.settings.fromIndex(settings)
+      await this.live.restoreLastRead(live)
+      // library.json was rewritten before these were applied: write them into it now.
+      await this.syncIndex()
       // Its own failure must not hide that the restore worked.
       if (!target.readOnly && lib.target === target) await this.reconcile()
       this.store.update((s) => ({ ...s, folderPicked: lib.folderPicked, folderStatus: lib.target ? 'granted' : s.folderStatus, folderName: lib.target?.name ?? null }))
@@ -934,6 +1090,35 @@ export class ArcController {
     this.changeSettings((s) => ({ ...s, liveFollow: on }))
   }
 
+  /** Live plays the keys (one sound as notes) instead of the pads. */
+  setLiveKeys(on: boolean): void {
+    this.changeSettings((s) => ({ ...s, liveKeys: on }))
+  }
+
+  /** KEYS' key, 0 (DO / C) to 11. */
+  setKeysRoot(root: number): void {
+    this.changeSettings((s) => ({ ...s, keysRoot: coerceIn(Math.trunc(root), 0, 11) }))
+  }
+
+  setKeysScale(scale: Scale): void {
+    this.changeSettings((s) => ({ ...s, keysScale: scale }))
+  }
+
+  /** KEYS' octave, MIN_OCTAVE (0) to MAX_OCTAVE (8). */
+  setKeysOctave(octave: number): void {
+    this.changeSettings((s) => ({ ...s, keysOctave: coerceIn(Math.trunc(octave), MIN_OCTAVE, MAX_OCTAVE) }))
+  }
+
+  /** How KEYS names its notes (Settings → Live → Note names on the keys). */
+  setKeysNames(names: NoteNames): void {
+    this.changeSettings((s) => ({ ...s, keysNames: names }))
+  }
+
+  /** The guide overlay was shown (it opens by itself only once, also across reinstalls). */
+  setGuideSeen(): void {
+    this.changeSettings((s) => ({ ...s, guideSeen: true }))
+  }
+
   /** How many backups [setKeepLast] would delete now, for the confirmation. */
   pruneCount(keep: number | null): number {
     return toPrune(this.store.get().backups, keep).length
@@ -947,7 +1132,9 @@ export class ArcController {
   }
 
   private changeSettings(change: (s: AppSettings) => AppSettings): void {
-    this.deps.settings.update(change)
+    const before = this.deps.settings.settings
+    // Only a change is written (and copied to library.json).
+    if (this.deps.settings.update(change) === before) return
     void this.syncIndex()
   }
 

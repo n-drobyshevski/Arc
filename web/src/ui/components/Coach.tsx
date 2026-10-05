@@ -5,6 +5,9 @@
 // Tags above the middle of the screen hang below their control and the others
 // stand above it; neighbours on one line take turns at two heights so they
 // don't overlap (the placement is the pure placeTags in ui/coachPlace.ts).
+// A narrow control on the screen's edge (the GUIDE tab, the more-tools strip)
+// gets the PO tutorial's side tag: a vertical tab on that edge, its word
+// turned, with a hooked arrow above pointing at the edge.
 // Tap anywhere (or Escape) to close.
 //
 // Marking a control, two ways:
@@ -28,6 +31,7 @@ import {
   arrowHead,
   hintTop,
   placeTags,
+  sideHook,
   type CoachMarkInput,
   type PlacedTag,
   type Size,
@@ -50,6 +54,10 @@ export const COACH_IDS = [
   'backups.import',
   'backups.open',
   'live.pads',
+  'live.keys',
+  'live.mode',
+  'live.scale',
+  'live.octave',
   'live.groups',
   'side.more',
   'device.refresh',
@@ -86,6 +94,11 @@ export const COACH_MARKS: Readonly<Record<CoachId, CoachMarkSpec>> = Object.free
   'backups.import': navyTag(CoachText.IMPORT),
   'backups.open': yellowTag(CoachText.OPEN_BACKUP),
   'live.pads': yellowTag(CoachText.PADS),
+  // The KEYS grid: the same tip as the pads (MirrorScreen.kt).
+  'live.keys': yellowTag(CoachText.PADS),
+  'live.mode': navyTag(CoachText.MODE),
+  'live.scale': navyTag(CoachText.SCALE),
+  'live.octave': navyTag(CoachText.OCTAVE),
   'live.groups': navyTag(CoachText.GROUPS),
   'side.more': { label: CoachText.MORE_TOOLS, face: 'var(--ink)', ink: 'var(--shell)' },
   'device.refresh': navyTag(CoachText.REFRESH),
@@ -210,7 +223,8 @@ function collectMarks(root: Element | null, reg: CoachRegistry, origin: DOMRect)
  */
 function measureWith(el: HTMLElement | null, text: string, maxWidth: number): Size {
   if (!el) return { width: Math.min(text.length * 9, maxWidth), height: 15 }
-  el.style.maxWidth = `${maxWidth}px`
+  // A side tag's word: one line, however long.
+  el.style.maxWidth = Number.isFinite(maxWidth) ? `${maxWidth}px` : 'none'
   el.textContent = text
   const box = el.getBoundingClientRect()
   return { width: Math.min(Math.ceil(box.width), maxWidth), height: Math.ceil(box.height) }
@@ -358,6 +372,16 @@ export function CoachOverlay(props: CoachOverlayProps): JSX.Element | null {
       {layout && vp && (
         <svg class="coach__arrows" width={vp.width} height={vp.height} viewBox={`0 0 ${vp.width} ${vp.height}`} aria-hidden="true">
           {layout.placed.map((p) => {
+            if (p.side !== 0) {
+              const hook = sideHook(p.rect, p.side, vp.width)
+              const [a, b, c] = hook.head
+              return (
+                <g key={p.mark.id} style={{ fill: p.mark.face, stroke: p.mark.face }}>
+                  <path d={hook.line} fill="none" stroke-width={COACH_METRICS.hookWidth} stroke-linecap="round" />
+                  <polygon points={`${a.x},${a.y} ${b.x},${b.y} ${c.x},${c.y}`} stroke="none" />
+                </g>
+              )
+            }
             if (!p.tip || !p.tail) return null
             const [a, b, c] = arrowHead(p.tip, p.tail)
             return (
@@ -374,7 +398,7 @@ export function CoachOverlay(props: CoachOverlayProps): JSX.Element | null {
           {layout.placed.map((p) => (
             <li
               key={p.mark.id}
-              class="coach__tag"
+              class={p.side === 0 ? 'coach__tag' : `coach__tag coach__tag--side coach__tag--${p.side < 0 ? 'left' : 'right'}`}
               data-coach-tag={p.mark.id}
               style={{
                 left: `${p.rect.left}px`,

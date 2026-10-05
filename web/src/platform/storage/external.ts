@@ -48,6 +48,14 @@ export function isIndex(name: string): boolean {
   return name.startsWith('library') && name.endsWith('.json')
 }
 
+/** Live's last read of the device (an addition), shown while it is not connected. */
+export const LIVE_FILE = 'live.json'
+
+/** live.json, and the "live (1).json" an install may have written next to an earlier one. */
+export function isLive(name: string): boolean {
+  return name.startsWith('live') && name.endsWith('.json')
+}
+
 /** Kotlin endsWith(".pak", ignoreCase = true). */
 export function isPak(name: string): boolean {
   return name.length >= 4 && name.slice(-4).toLowerCase() === '.pak'

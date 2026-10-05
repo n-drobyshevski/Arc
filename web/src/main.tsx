@@ -4,15 +4,17 @@
 // Order: the theme first (settings are read synchronously, so the first paint
 // already has the right colours), then the demo device when the URL asks for it
 // (?demo, before any MIDI code runs), then the browser deps (the library
-// database opens here), the controller, and the app.
+// database opens here), the controller, and the app. ?demo keeps its settings
+// in memory and its library in its own database ("arc-demo"), so it never
+// touches the real ones (boot/browserDeps).
 import { effect } from '@preact/signals'
 import { render } from 'preact'
 import './ui/theme/fonts'
 import './ui/theme/tokens.css'
 import './ui/theme/base.css'
 import { App, CrashMessage } from './app'
-import { createBrowserDeps } from './boot/browserDeps'
-import { browserStorage, SettingsStore } from './platform/storage/settings'
+import { createBrowserDeps, pageStorage } from './boot/browserDeps'
+import { SettingsStore } from './platform/storage/settings'
 import { createController, type ArcController } from './state/controller'
 import { whenIdle } from './ui/components/UpdatePrompt'
 import { applyTheme } from './ui/theme/theme'
@@ -45,14 +47,18 @@ function reloadWhenIdle(): void {
 }
 
 async function boot(): Promise<void> {
-  applyTheme(new SettingsStore(browserStorage()).settings.theme)
-  if (new URLSearchParams(location.search).has('demo')) {
+  const demo = new URLSearchParams(location.search).has('demo')
+  const storage = pageStorage(demo)
+  applyTheme(new SettingsStore(storage).settings.theme)
+  if (demo) {
     const { installDemo } = await import('./dev/demo')
     installDemo(window)
   }
   const deps = await createBrowserDeps({
     onLibraryBlocked: () => showMessage(LIBRARY_BLOCKED),
     onLibraryVersionChange: reloadWhenIdle,
+    demo,
+    storage,
   })
   const c = createController(deps)
   controller = c

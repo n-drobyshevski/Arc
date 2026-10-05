@@ -1,8 +1,8 @@
 // Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/SettingsScreen.kt
 //
 // The settings (an addition to the web version): theme, connecting, the
-// screen in Live, how many backups to keep, Live's pad numbering and learned
-// names, and about arc.
+// screen in Live, how many backups to keep, Live's pad numbering, note names
+// on the keys, learned names and pad sound copies, and about arc.
 //
 // Web deltas:
 // - Texts that talk about the phone or Documents/arc use WebText: the storage
@@ -16,11 +16,16 @@
 // - The two confirm dialogs (rememberSaveable confirmKeep / confirmForget) are
 //   navigation layers, dialog 'prune:<keep>' and 'forget', so Back closes them
 //   and a reload keeps them.
+// - "Pad sounds saved on the phone" counts arc's copies in this browser
+//   (IndexedDB store padSounds); the size is read when the screen opens and
+//   Clear sets it to nothing, as in Kotlin.
 // - The pad order is not a signal (c.padOrder() is read when Root renders), so
 //   the screen keeps its own copy from here on, as the Kotlin does.
 import type { JSX } from 'preact'
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'preact/hooks'
+import { NOTE_NAMES, type NoteNames } from '../../core/features/keys'
 import type { PadOrder } from '../../core/features/padPush'
+import { Format } from '../../core/text/format'
 import { MirrorText } from '../../core/text/mirrorText'
 import { SettingsText, THEME_CHOICES, type ThemeChoice } from '../../core/text/settingsText'
 import { WebText } from '../../core/text/webText'
@@ -51,6 +56,11 @@ export interface SettingsScreenProps {
   onPadOrder: (order: PadOrder) => void
   onForgetNames: () => void
   onRestoreFolder: () => void
+  /** Space taken by Live's copies of the pad sounds (bytes). */
+  padSoundsSize?: () => Promise<number>
+  onClearPadSounds?: () => void
+  /** Note names on the keys: solfège or letters. */
+  onNoteNames?: (names: NoteNames) => void
   /** Web: give the remembered library folder's permission back. */
   onReconnectFolder: () => void
   /** Web: zip of the library where no folder can be picked. */
@@ -124,6 +134,25 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
   const themeId = useId()
   const keepId = useId()
   const orderId = useId()
+  const namesId = useId()
+
+  // Read when the page opens; Clear sets it to nothing.
+  const [soundsSize, setSoundsSize] = useState<number | null>(null)
+  const readSize = useRef(props.padSoundsSize)
+  readSize.current = props.padSoundsSize
+  useEffect(() => {
+    let alive = true
+    const read = readSize.current
+    if (read) {
+      read().then(
+        (n) => alive && setSoundsSize(n),
+        () => undefined,
+      )
+    } else setSoundsSize(0)
+    return () => {
+      alive = false
+    }
+  }, [])
 
   // The pad order is shown from here on (Live keeps its own copy).
   const [order, setOrder] = useState<PadOrder>(props.padOrder)
@@ -224,7 +253,33 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
           labelledBy={orderId}
         />
         <p class="t-small settings__note">{MirrorText.ORDER_NOTE}</p>
+        <Label text={MirrorText.NOTE_NAMES} id={namesId} />
+        <Segmented
+          options={NOTE_NAMES.map((n) => MirrorText.noteNames(n))}
+          selected={Math.max(0, NOTE_NAMES.indexOf(settings.keysNames))}
+          onSelect={(i) => {
+            const n = NOTE_NAMES[i]
+            if (n !== undefined) props.onNoteNames?.(n)
+          }}
+          labelledBy={namesId}
+        />
+        <p class="t-small settings__note">{MirrorText.NOTE_NAMES_NOTE}</p>
         <Key text={SettingsText.FORGET_NAMES} size="small" block onClick={() => nav.open(dialogLayer(FORGET))} />
+        <div class="settings__sounds">
+          <p class="t-body15 settings__sounds-size">
+            {WebText.padSounds(Format.bytes(soundsSize ?? 0))}
+          </p>
+          <Key
+            text={SettingsText.CLEAR}
+            size="small"
+            disabled={(soundsSize ?? 0) <= 0}
+            onClick={() => {
+              props.onClearPadSounds?.()
+              setSoundsSize(0)
+            }}
+          />
+        </div>
+        <p class="t-small settings__note">{SettingsText.PAD_SOUNDS_NOTE}</p>
 
         <Section text={SettingsText.ABOUT} />
         <p class="t-bold settings__version">{SettingsText.version(props.version)}</p>
