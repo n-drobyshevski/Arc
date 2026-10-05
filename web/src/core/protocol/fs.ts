@@ -64,7 +64,12 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
  * (null, a number, a string, an array) reads as empty, like Kotlin's `asObject()`.
  */
 export function asObject(v: unknown): JsonObject {
-  return typeof v === 'object' && v !== null && !Array.isArray(v) ? (v as JsonObject) : {}
+  return isJsonObject(v) ? v : {}
+}
+
+/** True for a JSON object (not null, not an array): Kotlin `is JsonObject`. */
+export function isJsonObject(v: unknown): v is JsonObject {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
 export function parseListPage(payload: Uint8Array): ListEntry[] {

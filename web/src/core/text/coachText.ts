@@ -1,0 +1,33 @@
+// Port of core/src/main/kotlin/dev/arc/ep133/text/CoachText.kt
+//
+// The guide overlay's tags and the icon keys' names (an addition to the web
+// version). The icons carry no words, so these are what long-press, screen
+// readers and the overlay say.
+
+export const CoachText = {
+  HELP: "What's what",
+  CLOSE_HINT: 'Tap anywhere to close',
+
+  BACK_UP: 'Back up',
+  CONNECTED: 'EP-133 connected: tap to disconnect',
+  CONNECTION: 'Connection',
+  DISCONNECTED: 'Connect the EP-133',
+  SETTINGS: 'Settings',
+  SECTIONS: 'Sections',
+  GUIDE_TAB: 'EP-133 shortcuts',
+
+  SEARCH: 'Search sounds',
+  IMPORT: 'Import a .pak',
+  OPEN_BACKUP: 'Tap a backup to open it',
+
+  VIEW: 'All groups or one',
+  GROUPS: 'Pick a group',
+  FOLLOW: 'Follow the group played',
+  PADS: 'Pads light as you play',
+  MORE_TOOLS: 'More tools',
+
+  REFRESH: 'Read the device again',
+  ADD_SAMPLES: 'Add samples',
+  PLAY: 'Play on the phone',
+  SOUNDS_PROJECTS: 'Sounds or projects',
+} as const
