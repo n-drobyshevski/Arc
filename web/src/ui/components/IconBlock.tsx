@@ -160,8 +160,8 @@ export function IconBlock(props: IconBlockProps): JSX.Element {
   const style: CSSProperties = {
     width: `${size}px`,
     height: `${size}px`,
-    background: face,
-    color: ink,
+    '--cap-face': face,
+    '--cap-ink': ink,
   }
   return (
     <span class={`icon-block-wrap${props.class ? ` ${props.class}` : ''}`}>
@@ -174,7 +174,7 @@ export function IconBlock(props: IconBlockProps): JSX.Element {
           if (typeof r === 'function') r(el)
           else if (r) r.current = el
         }}
-        class={`icon-block${round ? ' icon-block--round' : ''}`}
+        class={`icon-block cap-3d${round ? ' icon-block--round cap-3d--round' : ''}`}
         style={style}
         disabled={disabled}
         aria-label={label}

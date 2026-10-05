@@ -6,9 +6,11 @@
 // sample on the phone; KEYS turns the 12 pads into notes of one sound. Not
 // connected, it shows the last read ("Offline").
 //
-// Pads are drawn as the pocket operator app draws its pad grid: one pale
-// plate split by thin lines. A lit pad turns the signal orange, brighter with
-// velocity, and fades on release.
+// A lit pad turns the signal orange, brighter with velocity, and fades on
+// release. Web delta: where Compose draws the pocket operator app's pad grid
+// (one pale plate split by thin lines), the web draws the K.O. II itself:
+// dark caps on the device's grey body with the label top left, pale group
+// keys under LEDs (theme/cap.css).
 //
 // Web deltas:
 // - The glow is a CSS custom property (--glow, 0..1) on each pad, key, group
@@ -32,7 +34,7 @@
 // - The scale and octave lists (Kotlin's focusable Popups, which Back
 //   dismisses) are navigation layers too: [picker] / [onPicker] (dialog
 //   'pick:scale' / 'pick:octave'); without them each word keeps its own state.
-import { Fragment, type ButtonHTMLAttributes, type ComponentChildren, type JSX } from 'preact'
+import { type ButtonHTMLAttributes, type ComponentChildren, type JSX } from 'preact'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { Keys, SCALES, type Scale } from '../../core/features/keys'
 import type { MirrorState, PadLight } from '../../core/features/liveMirror'
@@ -46,7 +48,7 @@ import { emptyMirrorState, type MirrorUi } from '../../state/types'
 import { Caption } from '../components/Caption'
 import { COACH_YELLOW, COACH_YELLOW_INK } from '../components/Coach'
 import { DisplayPanel } from '../components/DisplayPanel'
-import { GridPlate, PlateLine } from '../components/GridPlate'
+import { GridPlate } from '../components/GridPlate'
 import { CloseKey } from '../components/GuideKeys'
 import { Key } from '../components/Key'
 import { Segmented, handleRovingKey } from '../components/Segmented'
@@ -161,16 +163,30 @@ function holdHandlers(
   target: PressTarget,
   inScroll: boolean,
 ): ButtonHTMLAttributes<HTMLButtonElement> {
+  // Web: the cap stays down while a finger holds it (data-down, theme/cap.css), as
+  // :active is not reliable for several fingers or with touch-action: none.
+  // An attribute, not a class, so a re-render's class string leaves it alone.
+  const lift = (el: HTMLElement): void => el.removeAttribute('data-down')
   return {
     onPointerDown: (e) => {
       // The mouse's other buttons (and a pen's barrel button) don't play.
       if (e.pointerType === 'mouse' && e.button !== 0) return
+      e.currentTarget.setAttribute('data-down', '')
       tracker.down(e.pointerId, e.clientX, e.clientY, target, inScroll)
     },
     onPointerMove: (e) => tracker.move(e.pointerId, e.clientX, e.clientY),
-    onPointerUp: (e) => tracker.up(e.pointerId),
-    onPointerCancel: (e) => tracker.cancel(e.pointerId),
-    onPointerLeave: (e) => tracker.cancel(e.pointerId),
+    onPointerUp: (e) => {
+      lift(e.currentTarget)
+      tracker.up(e.pointerId)
+    },
+    onPointerCancel: (e) => {
+      lift(e.currentTarget)
+      tracker.cancel(e.pointerId)
+    },
+    onPointerLeave: (e) => {
+      lift(e.currentTarget)
+      tracker.cancel(e.pointerId)
+    },
     // A screen reader's or the keyboard's Play: the whole sound.
     onClick: (e) => {
       if (e.detail === 0) target.press(false)
@@ -439,40 +455,37 @@ function Group(props: GroupProps): JSX.Element {
           <Caption text={`${MirrorText.GROUP} ${letter}`} as="h2" color="var(--live-caption)" />
         </div>
       )}
-      <GridPlate class="live-group__plate" role="group" aria-label={`${MirrorText.GROUP} ${letter}`}>
+      {/* Web: the pads are caps sitting in the device's body (a deck), not cells of a plate. */}
+      <div class="live-deck" role="group" aria-label={`${MirrorText.GROUP} ${letter}`}>
         {ROWS.map((offsets, r) => (
-          <Fragment key={r}>
-            {r > 0 && <PlateLine />}
-            <div class="live-group__row">
-              {offsets.map((o, i) => {
-                const pad = physicalPad(group, o)
-                return (
-                  <Fragment key={o}>
-                    {i > 0 && <div class="live-group__divider" aria-hidden="true" />}
-                    <Pad
-                      pad={pad}
-                      light={st.pads.get(padKey(pad))}
-                      name={nameOf(pad)}
-                      now={now}
-                      big={big}
-                      press={press(pad)}
-                      playing={playingPads.has(padKey(pad))}
-                      tracker={tracker}
-                    />
-                  </Fragment>
-                )
-              })}
-            </div>
-          </Fragment>
+          <div class="live-deck__row" key={r}>
+            {offsets.map((o) => {
+              const pad = physicalPad(group, o)
+              return (
+                <Pad
+                  key={o}
+                  pad={pad}
+                  light={st.pads.get(padKey(pad))}
+                  name={nameOf(pad)}
+                  now={now}
+                  big={big}
+                  press={press(pad)}
+                  playing={playingPads.has(padKey(pad))}
+                  tracker={tracker}
+                />
+              )
+            })}
+          </div>
         ))}
-      </GridPlate>
+      </div>
     </div>
   )
 }
 
 /**
  * The group keys under the single grid: navy for the group shown, lit orange
- * while one of a group's pads sounds.
+ * while one of a group's pads sounds. Web: pale hardware caps; the group shown
+ * stays down and the LED above it lights, as on the K.O. II.
  */
 function GroupKeys(props: { group: number; st: MirrorState; now: number; onSelect: (g: number) => void }): JSX.Element {
   const { group, st, now, onSelect } = props
@@ -488,22 +501,27 @@ function GroupKeys(props: { group: number; st: MirrorState; now: number; onSelec
       {[0, 1, 2, 3].map((g) => {
         const on = g === group
         return (
-          <button
+          <div
             key={g}
-            type="button"
-            role="tab"
-            aria-selected={on}
-            aria-label={`${MirrorText.GROUP} ${MirrorText.groupKey(g)}`}
-            tabIndex={on ? 0 : -1}
-            data-roving=""
+            class={`live-keys__slot${on ? ' is-on' : ''}`}
             data-group={g}
-            data-coach={g === 0 ? 'live.groups' : undefined}
-            class={`live-keys__key${on ? ' is-on' : ''}`}
             style={{ '--glow': glowCss(groupGlow(st.pads, g, now)) }}
-            onClick={() => onSelect(g)}
           >
-            {MirrorText.groupKey(g)}
-          </button>
+            <span class="live-keys__led" aria-hidden="true" />
+            <button
+              type="button"
+              role="tab"
+              aria-selected={on}
+              aria-label={`${MirrorText.GROUP} ${MirrorText.groupKey(g)}`}
+              tabIndex={on ? 0 : -1}
+              data-roving=""
+              data-coach={g === 0 ? 'live.groups' : undefined}
+              class={`live-keys__key cap-3d${on ? ' is-on is-down' : ''}`}
+              onClick={() => onSelect(g)}
+            >
+              {MirrorText.groupKey(g)}
+            </button>
+          </div>
         )
       })}
     </div>
@@ -527,12 +545,12 @@ function Pad(props: PadProps): JSX.Element {
   const g = light ? glow(light, props.now) : 0
   const wide = pad.label.length > 1
   const label = `${pad.groupLetter} ${pad.label}` + (name !== null ? `, ${name}` : '')
-  const cls = `live-pad${big ? ' live-pad--big' : ''}${playing ? ' is-playing' : ''}`
+  const cls = `live-pad cap-3d cap-3d--dark${big ? ' live-pad--big' : ''}${playing ? ' is-playing' : ''}`
   const content = (
     <>
-      {name !== null && <span class="live-pad__name">{name}</span>}
-      {/* The key's own label in the corner, like the pocket operator app's pad numbers. */}
+      {/* The key's own label in the corner (web: top left, where the K.O. II prints it). */}
       <span class={`live-pad__label${wide ? ' live-pad__label--wide' : ''}`}>{pad.label}</span>
+      {name !== null && <span class="live-pad__name">{name}</span>}
     </>
   )
   if (press === null) {
@@ -729,46 +747,41 @@ function KeysGrid(props: {
       data-coach-face={COACH_YELLOW}
       data-coach-ink={COACH_YELLOW_INK}
     >
-      <GridPlate class="live-kgrid__plate" role="group" aria-label={MirrorText.MODE_KEYS}>
+      <div class="live-deck live-kgrid__plate" role="group" aria-label={MirrorText.MODE_KEYS}>
         {ROWS.map((offsets, r) => (
-          <Fragment key={r}>
-            {r > 0 && <PlateLine />}
-            <div class="live-group__row">
-              {offsets.map((k, i) => {
-                const note = keyNotes[k]!
-                const target: PressTarget = {
-                  press: (hold) => actions.onKey?.(k, hold),
-                  release: () => actions.onKeyUp?.(k),
-                }
-                const cls =
-                  'live-key' +
-                  (upperOctave(note, keys.octave) ? ' live-key--upper' : '') +
-                  (keys.playingKeys.has(k) ? ' is-playing' : '')
-                return (
-                  <Fragment key={k}>
-                    {i > 0 && <div class="live-group__divider" aria-hidden="true" />}
-                    <button
-                      type="button"
-                      class={cls}
-                      aria-label={MirrorText.noteName(note, keys.names)}
-                      aria-description={MirrorText.PLAY}
-                      data-key={k}
-                      style={{ '--glow': glowCss(lit.get(k) ?? 0) }}
-                      {...holdHandlers(tracker, target, false)}
-                    >
-                      <svg class="live-key__ring" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
-                        <circle cx="50" cy="50" r="45.5" fill="none" stroke-width="9" />
-                      </svg>
-                      <span class="live-key__name">{Keys.name(note, keys.names)}</span>
-                      <span class="live-key__octave">{Keys.octaveOf(note)}</span>
-                    </button>
-                  </Fragment>
-                )
-              })}
-            </div>
-          </Fragment>
+          <div class="live-deck__row" key={r}>
+            {offsets.map((k) => {
+              const note = keyNotes[k]!
+              const target: PressTarget = {
+                press: (hold) => actions.onKey?.(k, hold),
+                release: () => actions.onKeyUp?.(k),
+              }
+              const cls =
+                'live-key cap-3d cap-3d--dark' +
+                (upperOctave(note, keys.octave) ? ' live-key--upper' : '') +
+                (keys.playingKeys.has(k) ? ' is-playing' : '')
+              return (
+                <button
+                  key={k}
+                  type="button"
+                  class={cls}
+                  aria-label={MirrorText.noteName(note, keys.names)}
+                  aria-description={MirrorText.PLAY}
+                  data-key={k}
+                  style={{ '--glow': glowCss(lit.get(k) ?? 0) }}
+                  {...holdHandlers(tracker, target, false)}
+                >
+                  <svg class="live-key__ring" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+                    <circle cx="50" cy="50" r="45.5" fill="none" stroke-width="9" />
+                  </svg>
+                  <span class="live-key__name">{Keys.name(note, keys.names)}</span>
+                  <span class="live-key__octave">{Keys.octaveOf(note)}</span>
+                </button>
+              )
+            })}
+          </div>
         ))}
-      </GridPlate>
+      </div>
     </div>
   )
 }
@@ -805,14 +818,14 @@ function KeysLegend(): JSX.Element {
       <Caption text={MirrorText.LEGEND} align="start" />
       <ul class="live-legend">
         <LegendRow text={MirrorText.LEGEND_OCTAVE}>
-          <LegendKey ring="var(--navy)" />
+          <LegendKey ring="var(--hw-ring)" />
           <LegendKey ring="var(--signal)" />
         </LegendRow>
         <LegendRow text={MirrorText.LEGEND_DEVICE}>
           <LegendKey ring="var(--on-signal)" fill="var(--signal)" />
         </LegendRow>
         <LegendRow text={WebText.LIVE_LEGEND_HERE}>
-          <LegendKey ring="var(--navy)" outline />
+          <LegendKey ring="var(--hw-ring)" outline />
         </LegendRow>
       </ul>
     </>
@@ -829,12 +842,12 @@ function LegendRow(props: { text: string; children: ComponentChildren }): JSX.El
   )
 }
 
-/** A key in miniature: its plate (lit orange when [fill]), its ring, and the phone's outline. */
+/** A key in miniature: its dark cap (lit orange when [fill]), its ring, and the phone's outline. */
 function LegendKey(props: { ring: string; fill?: string; outline?: boolean }): JSX.Element {
   return (
     <span
       class={`live-legend__key${props.outline ? ' live-legend__key--outline' : ''}`}
-      style={{ background: props.fill ?? 'var(--plate)' }}
+      style={{ background: props.fill ?? 'var(--hw-dark-face)' }}
     >
       <svg viewBox="0 0 100 100" focusable="false">
         <circle cx="50" cy="50" r="43" fill="none" stroke={props.ring} stroke-width="14" />

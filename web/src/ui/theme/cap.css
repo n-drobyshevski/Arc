@@ -1,0 +1,89 @@
+/* Web only: hardware key caps (diverges from Compose's flat keys).
+ *
+ * A cap is a raised face over an edge offset down and to the right, the way
+ * the EP-133 Sample Tool draws the K.O. II and as the real keys look from
+ * above: a faint gradient and a 1px highlight on top, a soft shadow under it.
+ * Pressed (:active, [data-down] set while a finger holds it, or latched: .is-down,
+ * [aria-pressed=true]), the face travels onto its edge and the shadows collapse.
+ *
+ * Per element: --cap-face (required), --cap-ink, --cap-edge (default: the face
+ * 30% darker), --cap-hi (the highlight), --cap-dx / --cap-dy (the edge offset), and
+ * --cap-glow / --cap-glow-blur (a light around a lit pad).
+ * .cap-3d--dark: a fainter highlight. .cap-3d--round: a knob's shorter edge.
+ * Import after tokens.css. */
+
+/* ---- Cap tokens (web only, so they live here rather than in tokens.css,
+ * which mirrors ArcTheme.kt exactly) ---- */
+:root {
+  --cap-dx: 2px;            /* the edge, right of the face (the guide's caps: 2 right, 3 down) */
+  --cap-dy: 3px;            /* and below it; also how far the face travels when pressed */
+  --cap-ambient: rgba(0, 0, 0, 0.22);
+  --cap-hi-light: rgba(255, 255, 255, 0.45);
+  --cap-hi-dark: rgba(255, 255, 255, 0.09);
+  /* The K.O. II's keys, the same in both themes: dark number pads with pale
+   * labels, pale group keys (A-D) with grey labels (the guide caps' colours). */
+  --hw-dark-face: #2C2D2F;
+  --hw-dark-edge: #0E0F10;
+  --hw-dark-ink: #EDECE8;
+  --hw-dark-dim: #A9AAA6;
+  --hw-light-face: var(--guide-light-face);
+  --hw-light-edge: var(--guide-light-edge);
+  --hw-light-ink: var(--guide-light-ink);
+  --hw-led-on: var(--signal);
+  /* A KEYS key's ring for the first octave (the next is signal orange). */
+  --hw-ring: color-mix(in oklab, var(--hw-dark-ink) 70%, transparent);
+  /* The body the pads sit in, and an unlit LED. */
+  --hw-body: #C9CAC5;
+  --hw-led-off: #9C9C97;
+}
+:root[data-theme=dark] {
+  --hw-body: #3A3B3F;
+  --hw-led-off: #55565A;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme=light]) {
+    --hw-body: #3A3B3F;
+    --hw-led-off: #55565A;
+  }
+}
+
+/* The defaults weigh nothing, so a component's own --cap-* always wins. */
+:where(.cap-3d) {
+  --cap-edge: color-mix(in oklab, var(--cap-face) 70%, black);
+  --cap-hi: var(--cap-hi-light);
+  --cap-ink: currentColor;
+  --cap-glow: transparent;
+  --cap-glow-blur: 0px;
+}
+:where(.cap-3d--dark) { --cap-hi: var(--cap-hi-dark); }
+:where(.cap-3d--round) { --cap-dx: 1px; --cap-dy: 2px; }
+
+.cap-3d {
+  position: relative;
+  background: linear-gradient(180deg, color-mix(in oklab, var(--cap-face) 93%, white), var(--cap-face));
+  color: var(--cap-ink);
+  box-shadow:
+    inset 0 1px 0 var(--cap-hi),
+    var(--cap-dx) var(--cap-dy) 0 var(--cap-edge),
+    var(--cap-dx) calc(var(--cap-dy) + 2px) 6px 0 var(--cap-ambient),
+    0 0 var(--cap-glow-blur) var(--cap-glow);
+  transition:
+    transform var(--key-press-ms) var(--key-ease),
+    box-shadow var(--key-press-ms) var(--key-ease);
+}
+
+.cap-3d:not(:disabled):active,
+.cap-3d[data-down],
+.cap-3d[aria-pressed='true'],
+.cap-3d.is-down {
+  transform: translate(var(--cap-dx), var(--cap-dy));
+  box-shadow:
+    inset 0 1px 0 var(--cap-hi),
+    0 0 0 var(--cap-edge),
+    0 0 0 0 var(--cap-ambient),
+    0 0 var(--cap-glow-blur) var(--cap-glow);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cap-3d { transition: none; }
+}

@@ -56,7 +56,7 @@ export function SectionMenu(props: SectionMenuProps): JSX.Element {
             <button
               key={t}
               type="button"
-              class={`section-menu__item${on ? ' is-current' : ''}`}
+              class={`section-menu__item cap-3d${on ? ' is-current is-down' : ''}`}
               aria-current={on ? 'page' : undefined}
               tabIndex={open ? 0 : -1}
               onClick={() => onPick(t)}
