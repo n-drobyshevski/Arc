@@ -1,7 +1,6 @@
 package dev.arc.ep133.ui.components
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -20,7 +19,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -134,8 +132,9 @@ private fun DrawScope.draw(icon: ArcIcon, color: Color) {
 }
 
 /**
- * A square icon key. Long-press shows its name; screen readers read [label].
- * The touch area stays at least 44dp even when the face is drawn smaller.
+ * A square (or round) icon key, drawn as a cap (see [cap]) whose face travels
+ * onto its edge while pressed. Long-press shows its name; screen readers read
+ * [label]. The touch area stays at least 44dp even when the face is drawn smaller.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -161,10 +160,14 @@ fun IconBlock(
         Box(
             modifier
                 .size(size)
-                .graphicsLayer { alpha = if (enabled) 1f else 0.4f }
-                .clip(if (round) androidx.compose.foundation.shape.CircleShape else RoundedCornerShape(8.dp))
-                .background(face)
-                .background(if (pressed && enabled) Color.Black.copy(alpha = 0.12f) else Color.Transparent)
+                .cap(
+                    face, capEdge(face),
+                    if (round) androidx.compose.foundation.shape.CircleShape else RoundedCornerShape(8.dp),
+                    capPress(pressed && enabled),
+                    dx = if (round) RoundCapDx else CapDx,
+                    dy = if (round) RoundCapDy else CapDy,
+                    alpha = if (enabled) 1f else 0.4f,
+                )
                 .clickable(interactionSource = source, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
                 .semantics { contentDescription = label },
             contentAlignment = Alignment.Center,

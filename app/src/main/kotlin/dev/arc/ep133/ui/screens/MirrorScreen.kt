@@ -37,7 +37,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Row
@@ -48,7 +48,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
@@ -95,8 +97,16 @@ import dev.arc.ep133.data.TakeInfo
 import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.ui.components.ArcKey
 import dev.arc.ep133.ui.components.Caption
+import dev.arc.ep133.ui.components.CapDx
+import dev.arc.ep133.ui.components.CapDy
 import dev.arc.ep133.ui.components.GridPlate
-import dev.arc.ep133.ui.components.PlateLine
+import dev.arc.ep133.ui.components.LocalHwColors
+import dev.arc.ep133.ui.components.cap
+import dev.arc.ep133.ui.components.capPress
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.runtime.MutableState
+import androidx.compose.ui.draw.dropShadow
+import androidx.compose.ui.graphics.shadow.Shadow
 import dev.arc.ep133.ui.components.CloseKey
 import dev.arc.ep133.ui.components.DisplayPanel
 import dev.arc.ep133.ui.components.KeySize
@@ -460,13 +470,11 @@ private fun Group(
         // The caption turns orange while one of the group's pads sounds (the big grid's
         // group shows on its key below instead).
         if (!big) Caption(MirrorText.GROUP + " " + ('A' + group), color = lerp(c.graphite, c.signal, groupGlow))
-        GridPlate(if (big) Modifier.weight(1f) else Modifier) {
-            PadNotes.ROWS.forEachIndexed { r, rowOffsets ->
-                if (r > 0) PlateLine()
+        Deck(if (big) Modifier.weight(1f) else Modifier, big) { gap ->
+            PadNotes.ROWS.forEach { rowOffsets ->
                 // The big grid's rows share the height left on screen; the small ones are square.
-                Row(if (big) Modifier.weight(1f) else Modifier.height(IntrinsicSize.Min)) {
-                    rowOffsets.forEachIndexed { i, o ->
-                        if (i > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(c.line))
+                Row(if (big) Modifier.weight(1f) else Modifier, horizontalArrangement = Arrangement.spacedBy(gap)) {
+                    rowOffsets.forEach { o ->
                         val pad = PhysicalPad(group, o)
                         Pad(
                             pad, lit[pad], nameOf(pad), now,
@@ -484,34 +492,71 @@ private fun Group(
 }
 
 /**
- * The group keys under the single grid: navy for the group shown, lit orange
- * while one of a group's pads sounds.
+ * The device's body around the pads (or keys): the pads are caps sitting in it,
+ * as on the K.O. II, 10 apart (6 in the small grids). The padding leaves room
+ * on the right and below for the caps' edges. [content] gets the gap.
+ */
+@Composable
+private fun Deck(modifier: Modifier, big: Boolean, content: @Composable ColumnScope.(gap: androidx.compose.ui.unit.Dp) -> Unit) {
+    val hw = LocalHwColors.current
+    val gap = if (big) 10.dp else 6.dp
+    val inset = if (big) 12.dp else 8.dp
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(if (big) 18.dp else 14.dp))
+            .background(hw.body)
+            .padding(start = inset, top = inset, end = inset + CapDx, bottom = inset + CapDy),
+        verticalArrangement = Arrangement.spacedBy(gap),
+    ) { content(gap) }
+}
+
+/** A light around a lit pad or key: [g] 0..1. */
+private fun Modifier.litGlow(g: Float, color: Color, shape: androidx.compose.ui.graphics.Shape): Modifier =
+    if (g <= 0f) this else dropShadow(shape, Shadow(radius = 18.dp * g, color = color.copy(alpha = 0.6f * g)))
+
+/**
+ * The group keys under the single grid, pale caps under LEDs as on the K.O. II:
+ * the group shown stays down with its LED lit; a group lights orange while one
+ * of its pads sounds.
  */
 @Composable
 private fun GroupKeys(group: Int, st: MirrorState, now: Long, onSelect: (Int) -> Unit) {
     val c = LocalArcColors.current
+    val hw = LocalHwColors.current
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         for (g in 0..3) {
             val markA = if (g == 0) Modifier.coachMark("live.groups", CoachText.GROUPS, c.navy, c.onNavy) else Modifier
             val on = g == group
             val sounding = st.pads.filterKeys { it.group == g }.values.maxOfOrNull { glow(it, now) } ?: 0f
-            val face = if (on) c.navy else lerp(c.tabOff, c.signal, sounding)
-            val ink = if (on) c.onNavy else if (sounding > 0.3f) c.onSignal else c.onTabOff
-            Box(
-                Modifier
-                    .weight(1f)
-                    .then(markA)
-                    .heightIn(min = 52.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(face)
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Tab) { onSelect(g) }
-                    .semantics {
-                        selected = on
-                        contentDescription = MirrorText.GROUP + " " + MirrorText.groupKey(g)
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(MirrorText.groupKey(g), style = ArcType.tab.copy(fontSize = 22.sp), color = ink)
+            val face = lerp(hw.lightFace, c.signal, sounding)
+            val edge = lerp(hw.lightEdge, c.signalEdge, sounding)
+            val ink = if (sounding > 0.3f) c.onSignal else if (on) hw.darkFace else hw.lightInk
+            val source = remember { MutableInteractionSource() }
+            val pressed by source.collectIsPressedAsState()
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Box(
+                    Modifier
+                        .size(6.dp)
+                        .then(if (on) Modifier.dropShadow(CircleShape, Shadow(radius = 6.dp, color = c.signal)) else Modifier)
+                        .clip(CircleShape)
+                        .background(if (on) c.signal else lerp(hw.ledOff, c.signal, sounding)),
+                )
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .then(markA)
+                        .heightIn(min = 52.dp)
+                        .cap(face, edge, RoundedCornerShape(10.dp), capPress(on || pressed))
+                        .clickable(interactionSource = source, indication = null, role = Role.Tab) { onSelect(g) }
+                        .semantics {
+                            selected = on
+                            contentDescription = MirrorText.GROUP + " " + MirrorText.groupKey(g)
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(MirrorText.groupKey(g), style = ArcType.tab.copy(fontSize = 22.sp), color = ink)
+                }
             }
         }
     }
@@ -538,43 +583,54 @@ private fun Pad(
     playing: Boolean = false,
 ) {
     val c = LocalArcColors.current
+    val hw = LocalHwColors.current
     val g = light?.let { glow(it, now) } ?: 0f
-    val ink = if (g > 0.3f) c.onSignal else c.ink
+    val ink = if (g > 0.3f) c.onSignal else hw.darkInk
+    val shape = RoundedCornerShape(if (big) 8.dp else 6.dp)
+    val held = remember { mutableStateOf(false) }
     Box(
         modifier
-            .background(lerp(c.plate, c.signal, g))
+            // A dark cap, lit orange (its edge with it, and a light around it), down while held.
+            .litGlow(g, c.signal, shape)
+            .cap(lerp(hw.darkFace, c.signal, g), lerp(hw.darkEdge, c.signalEdge, g), shape, capPress(held.value))
             // Playing on the phone: a signal-orange ring inside the pad.
-            .then(if (playing) Modifier.border(2.dp, c.signal) else Modifier)
+            .then(if (playing) Modifier.border(2.dp, c.signal, shape) else Modifier)
             // The big grid doesn't scroll: it plays on touch-down. The all-groups page
             // scrolls, so there a drag across the pads must not play them.
-            .then(if (onPress == null) Modifier else holdToPlay(onPress, onRelease, inScroll = !big))
+            .then(if (onPress == null) Modifier else holdToPlay(onPress, onRelease, inScroll = !big, held = held))
             .semantics { contentDescription = "${pad.groupLetter} ${pad.label}" + (name?.let { ", $it" } ?: "") }
             .padding(if (big) PaddingValues(10.dp) else PaddingValues(start = 6.dp, top = 5.dp, end = 7.dp, bottom = 5.dp)),
     ) {
-        if (name != null) {
+        // The key's own label top left, where the K.O. II prints it, and the sample
+        // at the bottom; stacked, so on a small pad the name shortens rather than
+        // running into the label.
+        Column(Modifier.fillMaxSize()) {
             Text(
-                name,
-                style = ArcType.tiny.copy(fontSize = if (big) 14.sp else 10.sp, lineHeight = 1.1.em),
-                color = if (g > 0.3f) c.onSignal else c.graphite,
-                maxLines = if (big) 3 else 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.align(Alignment.TopStart),
+                pad.label,
+                style = ArcType.semi.copy(
+                    // ENTER on a small pad: 9sp and tighter, so it fits on one line.
+                    fontSize = when {
+                        big -> if (pad.label.length > 1) 15.sp else 28.sp
+                        else -> if (pad.label.length > 1) 9.sp else 15.sp
+                    },
+                    lineHeight = 1.em,
+                    letterSpacing = if (!big && pad.label.length > 1) 0.em else 0.04.em,
+                ),
+                color = ink,
+                maxLines = 1,
+                softWrap = false,
             )
+            Spacer(Modifier.weight(1f))
+            if (name != null) {
+                Text(
+                    name,
+                    style = ArcType.tiny.copy(fontSize = if (big) 14.sp else 10.sp, lineHeight = 1.1.em),
+                    color = if (g > 0.3f) c.onSignal else hw.darkDim,
+                    maxLines = if (big) 3 else 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
-        // The key's own label in the corner, like the pocket operator app's pad numbers.
-        Text(
-            pad.label,
-            style = ArcType.semi.copy(
-                fontSize = when {
-                    big -> if (pad.label.length > 1) 15.sp else 28.sp
-                    else -> if (pad.label.length > 1) 10.sp else 15.sp
-                },
-                lineHeight = 1.em,
-                letterSpacing = 0.04.em,
-            ),
-            color = ink,
-            modifier = Modifier.align(Alignment.BottomEnd),
-        )
     }
 }
 
@@ -644,6 +700,7 @@ private fun Notes(st: MirrorState, mirror: MirrorUi?, onPadOrder: (PadOrder) -> 
                     Modifier.weight(1f),
                     size = KeySize.Small,
                     style = if (st.padOrder == order) KeyStyle.Navy else KeyStyle.Normal,
+                    down = st.padOrder == order,
                 )
             }
         }
@@ -790,9 +847,9 @@ private fun KeysDisplay(st: MirrorState, mirror: MirrorUi?, keys: KeysUi, rec: R
 }
 
 /**
- * The 12 pads as keys, in the keypad's layout: each shows its note in a ring,
- * navy for the first octave and orange for the next. Notes from the device
- * light their key; the key playing on the phone is ringed in signal orange.
+ * The 12 pads as keys, in the keypad's layout: dark caps, each showing its note
+ * in a ring, pale for the first octave and orange for the next. Notes from the
+ * device light their key; the key playing on the phone is ringed in signal orange.
  */
 @Composable
 private fun KeysGrid(st: MirrorState, keys: KeysUi, now: Long, actions: KeysActions, modifier: Modifier) {
@@ -804,27 +861,29 @@ private fun KeysGrid(st: MirrorState, keys: KeysUi, now: Long, actions: KeysActi
         val k = Keys.keyFor(n, notes) ?: continue
         lit[k] = maxOf(lit[k] ?: 0f, glow(l, now))
     }
-    GridPlate(modifier) {
-        PadNotes.ROWS.forEachIndexed { r, rowOffsets ->
-            if (r > 0) PlateLine()
-            Row(Modifier.weight(1f)) {
-                rowOffsets.forEachIndexed { i, k ->
-                    if (i > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(c.line))
+    val hw = LocalHwColors.current
+    val shape = RoundedCornerShape(8.dp)
+    Deck(modifier, big = true) { gap ->
+        PadNotes.ROWS.forEach { rowOffsets ->
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                rowOffsets.forEach { k ->
                     val note = notes[k]
                     val g = lit[k] ?: 0f
                     val upper = (Keys.octaveOf(note) - keys.octave) % 2 == 1
-                    val ring = if (upper) c.signal else c.navy
+                    val ring = if (upper) c.signal else hw.ring
+                    val held = remember { mutableStateOf(false) }
                     Box(
                         Modifier
                             .weight(1f)
                             .fillMaxHeight()
-                            .background(lerp(c.plate, c.signal, g))
-                            .then(if (k in keys.playingKeys) Modifier.border(2.dp, c.signal) else Modifier)
-                            .then(holdToPlay({ hold -> actions.onKey(k, hold) }, { actions.onKeyUp(k) }))
+                            .litGlow(g, c.signal, shape)
+                            .cap(lerp(hw.darkFace, c.signal, g), lerp(hw.darkEdge, c.signalEdge, g), shape, capPress(held.value))
+                            .then(if (k in keys.playingKeys) Modifier.border(2.dp, c.signal, shape) else Modifier)
+                            .then(holdToPlay({ hold -> actions.onKey(k, hold) }, { actions.onKeyUp(k) }, held = held))
                             .semantics { contentDescription = MirrorText.noteName(note, keys.names) },
                         contentAlignment = Alignment.Center,
                     ) {
-                        val ink = if (g > 0.3f) c.onSignal else c.ink
+                        val ink = if (g > 0.3f) c.onSignal else hw.darkInk
                         Canvas(Modifier.fillMaxSize().padding(8.dp)) {
                             val d = minOf(size.width, size.height)
                             val stroke = d * 0.09f
@@ -838,7 +897,7 @@ private fun KeysGrid(st: MirrorState, keys: KeysUi, now: Long, actions: KeysActi
                         Text(
                             Keys.octaveOf(note).toString(),
                             style = ArcType.tiny.copy(fontSize = 11.sp),
-                            color = if (g > 0.3f) c.onSignal else c.graphite,
+                            color = if (g > 0.3f) c.onSignal else hw.darkDim,
                             modifier = Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 4.dp),
                         )
                     }
@@ -866,12 +925,13 @@ private fun KeysLegend() {
     val c = LocalArcColors.current
     Caption(MirrorText.LEGEND, align = androidx.compose.ui.text.style.TextAlign.Start)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        val ring = LocalHwColors.current.ring
         LegendRow(MirrorText.LEGEND_OCTAVE) {
-            LegendKey(ring = c.navy)
+            LegendKey(ring = ring)
             LegendKey(ring = c.signal)
         }
         LegendRow(MirrorText.LEGEND_DEVICE) { LegendKey(ring = c.onSignal, fill = c.signal) }
-        LegendRow(MirrorText.LEGEND_PHONE) { LegendKey(ring = c.navy, outline = true) }
+        LegendRow(MirrorText.LEGEND_PHONE) { LegendKey(ring = ring, outline = true) }
     }
 }
 
@@ -885,7 +945,7 @@ private fun LegendRow(text: String, keys: @Composable () -> Unit) {
     }
 }
 
-/** A key in miniature: its plate (lit orange when [fill]), its ring, and the phone's outline. */
+/** A key in miniature: its dark cap (lit orange when [fill]), its ring, and the phone's outline. */
 @Composable
 private fun LegendKey(ring: Color, fill: Color? = null, outline: Boolean = false) {
     val c = LocalArcColors.current
@@ -893,7 +953,7 @@ private fun LegendKey(ring: Color, fill: Color? = null, outline: Boolean = false
         Modifier
             .size(26.dp)
             .clip(RoundedCornerShape(4.dp))
-            .background(fill ?: c.plate)
+            .background(fill ?: LocalHwColors.current.darkFace)
             .then(if (outline) Modifier.border(2.dp, c.signal, RoundedCornerShape(4.dp)) else Modifier)
             .padding(5.dp),
     ) {
@@ -910,10 +970,16 @@ private fun LegendKey(ring: Color, fill: Color? = null, outline: Boolean = false
  * over). Each finger is its own press, so several pads or keys held together
  * make a chord. [inScroll]: in a scrolling page the press waits a moment, and
  * a drag that starts then is a scroll that plays nothing. Screen readers get a
- * plain Play action, which plays the whole sound.
+ * plain Play action, which plays the whole sound. [held] is true while a finger
+ * holds it (the cap stays down).
  */
 @Composable
-private fun holdToPlay(onPress: (hold: Boolean) -> Unit, onRelease: () -> Unit, inScroll: Boolean = false): Modifier {
+private fun holdToPlay(
+    onPress: (hold: Boolean) -> Unit,
+    onRelease: () -> Unit,
+    inScroll: Boolean = false,
+    held: MutableState<Boolean>? = null,
+): Modifier {
     val press by androidx.compose.runtime.rememberUpdatedState(onPress)
     val release by androidx.compose.runtime.rememberUpdatedState(onRelease)
     return Modifier
@@ -937,6 +1003,7 @@ private fun holdToPlay(onPress: (hold: Boolean) -> Unit, onRelease: () -> Unit, 
                     if (drag) return@awaitEachGesture
                 }
                 press(true)
+                held?.value = true
                 try {
                     while (!lifted) {
                         val ch = awaitPointerEvent(PointerEventPass.Final).changes.firstOrNull { it.id == down.id } ?: break
@@ -945,6 +1012,7 @@ private fun holdToPlay(onPress: (hold: Boolean) -> Unit, onRelease: () -> Unit, 
                     }
                 } finally {
                     // Also when the pad leaves the screen with the finger still on it.
+                    held?.value = false
                     release()
                 }
             }

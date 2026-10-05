@@ -6,11 +6,9 @@
 // sample on the phone; KEYS turns the 12 pads into notes of one sound. Not
 // connected, it shows the last read ("Offline").
 //
-// A lit pad turns the signal orange, brighter with velocity, and fades on
-// release. Web delta: where Compose draws the pocket operator app's pad grid
-// (one pale plate split by thin lines), the web draws the K.O. II itself:
-// dark caps on the device's grey body with the label top left, pale group
-// keys under LEDs (theme/cap.css).
+// Pads are drawn as the K.O. II itself: dark caps on the device's grey body
+// with the label top left, pale group keys under LEDs (theme/cap.css). A lit
+// pad turns the signal orange, brighter with velocity, and fades on release.
 //
 // Web deltas:
 // - The glow is a CSS custom property (--glow, 0..1) on each pad, key, group
@@ -455,7 +453,7 @@ function Group(props: GroupProps): JSX.Element {
           <Caption text={`${MirrorText.GROUP} ${letter}`} as="h2" color="var(--live-caption)" />
         </div>
       )}
-      {/* Web: the pads are caps sitting in the device's body (a deck), not cells of a plate. */}
+      {/* The pads are caps sitting in the device's body (Deck). */}
       <div class="live-deck" role="group" aria-label={`${MirrorText.GROUP} ${letter}`}>
         {ROWS.map((offsets, r) => (
           <div class="live-deck__row" key={r}>
@@ -483,9 +481,9 @@ function Group(props: GroupProps): JSX.Element {
 }
 
 /**
- * The group keys under the single grid: navy for the group shown, lit orange
- * while one of a group's pads sounds. Web: pale hardware caps; the group shown
- * stays down and the LED above it lights, as on the K.O. II.
+ * The group keys under the single grid, pale caps under LEDs as on the K.O. II:
+ * the group shown stays down with its LED lit; a group lights orange while one
+ * of its pads sounds.
  */
 function GroupKeys(props: { group: number; st: MirrorState; now: number; onSelect: (g: number) => void }): JSX.Element {
   const { group, st, now, onSelect } = props

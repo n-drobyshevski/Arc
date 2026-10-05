@@ -20,6 +20,9 @@ import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import dev.arc.ep133.R
+import dev.arc.ep133.ui.components.DarkHwColors
+import dev.arc.ep133.ui.components.LightHwColors
+import dev.arc.ep133.ui.components.LocalHwColors
 
 /**
  * Colour tokens from reference/styles.css, taken from the device itself: a
@@ -194,6 +197,7 @@ fun ArcTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> U
     MaterialTheme(colorScheme = scheme, typography = typography) {
         CompositionLocalProvider(
             LocalArcColors provides c,
+            LocalHwColors provides if (dark) DarkHwColors else LightHwColors,
             LocalTextSelectionColors provides TextSelectionColors(handleColor = c.signal, backgroundColor = c.signal.copy(alpha = 0.3f)),
             content = content,
         )

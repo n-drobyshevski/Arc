@@ -36,7 +36,7 @@
 }
 
 /* A block: min 150×48, radius 8, 16px sides, ArcType.tab uppercase; current one navy.
- * Web: a hardware cap (theme/cap.css); the current one stays down. */
+ * A hardware cap (theme/cap.css); the current one stays down. */
 .section-menu__item {
   display: flex;
   align-items: center;
