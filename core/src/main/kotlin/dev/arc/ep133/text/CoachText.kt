@@ -18,6 +18,7 @@ object CoachText {
     const val GUIDE_TAB = "EP-133 shortcuts"
     const val MODE = "Pads or keys"
     const val OCTAVE = "Octave"
+    const val SCALE = "Scale"
 
     const val SEARCH = "Search sounds"
     const val IMPORT = "Import a .pak"

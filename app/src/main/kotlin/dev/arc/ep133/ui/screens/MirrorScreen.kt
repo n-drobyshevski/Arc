@@ -236,7 +236,7 @@ fun MirrorScreen(
                                 st, keys, now, keysActions.onKey,
                                 Modifier.fillMaxWidth().weight(1f).coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
                             )
-                            ModeToggle(true, keysActions.onMode)
+                            ModeRow(keys, keysActions)
                             OctaveKeys(keys, keysActions.onOctave)
                         } else {
                             DisplayStrip(st, mirror)
@@ -247,7 +247,7 @@ fun MirrorScreen(
                                 onPad = onPad,
                                 playingPads = playingPads,
                             )
-                            ModeToggle(false, keysActions.onMode)
+                            ModeRow(keys, keysActions)
                             GroupKeys(group, st, now, onSelect = { group = it })
                         }
                     }
@@ -268,7 +268,7 @@ fun MirrorScreen(
                             if (onBack != null) CloseKey(onBack, dev.arc.ep133.text.GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
                         }
                         Display(st, mirror, initialNoteOpen = initialNoteOpen)
-                        ModeToggle(false, keysActions.onMode)
+                        ModeRow(keys, keysActions)
                         BoxWithConstraints(Modifier.fillMaxWidth()) {
                             // Four groups in a row when there is room, two by two on a phone.
                             val perRow = if (maxWidth >= 640.dp) 4 else 2
@@ -613,18 +613,70 @@ private fun Notes(st: MirrorState, mirror: MirrorUi?, onPadOrder: (PadOrder) -> 
     }
 }
 
-/** PADS / KEYS right under the grid, small, like the PO app's DRUMS / KEYPAD (the group keys below). */
+/**
+ * The row right under the grid, as the PO app's DRUMS / KEYPAD: one word for
+ * the mode that a tap switches (PADS ⇄ KEYS), and in KEYS the scale, a tap
+ * on which lists the scales.
+ */
 @Composable
-private fun ModeToggle(keysOn: Boolean, onMode: (Boolean) -> Unit) {
+private fun ModeRow(keys: KeysUi, actions: KeysActions) {
     val c = LocalArcColors.current
-    dev.arc.ep133.ui.components.WordToggle(
-        listOf(MirrorText.MODE_PADS, MirrorText.MODE_KEYS),
-        selected = if (keysOn) 1 else 0,
-        onSelect = { onMode(it == 1) },
-        // Close under the grid, as the PO app's DRUMS / KEYPAD.
-        modifier = Modifier.padding(start = 4.dp).coachMark("live.mode", CoachText.MODE, c.navy, c.onNavy),
-        spread = true,
+    Row(Modifier.fillMaxWidth().padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.weight(1f)) {
+            dev.arc.ep133.ui.components.WordButton(
+                if (keys.on) MirrorText.MODE_KEYS else MirrorText.MODE_PADS,
+                { actions.onMode(!keys.on) },
+                Modifier.coachMark("live.mode", CoachText.MODE, c.navy, c.onNavy),
+                mark = true,
+                description = MirrorText.modeSwitch(keys.on),
+            )
+        }
+        Box(Modifier.weight(1f)) {
+            if (keys.on) ScaleWord(keys.scale, actions.onScale)
+        }
+    }
+}
+
+/** The scale as a word; a tap lists the scales over the grid, the chosen one marked. */
+@Composable
+private fun ScaleWord(scale: Scale, onScale: (Scale) -> Unit) {
+    val c = LocalArcColors.current
+    var open by remember { mutableStateOf(false) }
+    dev.arc.ep133.ui.components.WordButton(
+        MirrorText.scaleName(scale) + " \u25BE",
+        { open = true },
+        Modifier.coachMark("live.scale", CoachText.SCALE, c.navy, c.onNavy),
+        description = MirrorText.scaleChoice(scale),
     )
+    if (open) {
+        androidx.compose.ui.window.Popup(
+            alignment = Alignment.BottomStart,
+            onDismissRequest = { open = false },
+            properties = androidx.compose.ui.window.PopupProperties(focusable = true),
+        ) {
+            Column(
+                Modifier
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(c.shell)
+                    .border(1.dp, c.line, RoundedCornerShape(14.dp))
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                for (s in Scale.entries) {
+                    val on = s == scale
+                    dev.arc.ep133.ui.components.WordButton(
+                        MirrorText.scaleName(s),
+                        {
+                            onScale(s)
+                            open = false
+                        },
+                        Modifier.semantics { selected = on },
+                        mark = on,
+                        dim = !on,
+                    )
+                }
+            }
+        }
+    }
 }
 
 /** The KEYS display line: KEYS and the last note on the left, the sound it plays on the right. */
@@ -740,7 +792,7 @@ private fun OctaveKeys(keys: KeysUi, onOctave: (Int) -> Unit) {
         }
         Step("\u2212", MirrorText.OCTAVE_DOWN, keys.octave - 1, Modifier.coachMark("live.octave", CoachText.OCTAVE, c.navy, c.onNavy))
         Text(
-            MirrorText.keysSummary(keys.root, keys.scale, keys.octave),
+            MirrorText.keysSummary(keys.root, keys.octave),
             style = ArcType.tab,
             color = c.ink,
             maxLines = 1,
@@ -760,12 +812,6 @@ private fun KeysPanel(keys: KeysUi, actions: KeysActions) {
     for (row in (0..11).chunked(6)) {
         Segmented(row.map { Keys.solfege(it) }, selected = row.indexOf(keys.root), onSelect = { actions.onRoot(row[it]) })
     }
-    Caption(MirrorText.SCALE, Modifier.padding(top = 8.dp), align = androidx.compose.ui.text.style.TextAlign.Start)
-    dev.arc.ep133.ui.components.WordToggle(
-        Scale.entries.map { MirrorText.scaleName(it) },
-        selected = keys.scale.ordinal,
-        onSelect = { actions.onScale(Scale.entries[it]) },
-    )
     Text(MirrorText.KEYS_NOTE, style = ArcType.small, color = c.graphite)
 }
 

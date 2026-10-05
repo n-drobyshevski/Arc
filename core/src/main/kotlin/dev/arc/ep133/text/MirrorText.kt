@@ -44,6 +44,11 @@ object MirrorText {
     const val OCTAVE_UP = "Octave up"
     const val PICK_SOUND = "Tap a pad in Pads first: Keys plays that pad's sample."
     const val NO_SOUND = "No sound picked"
+
+    /** The mode word under the grid, for screen readers: what it shows and what a tap does. */
+    fun modeSwitch(keysOn: Boolean) = if (keysOn) "Keys. Tap for pads." else "Pads. Tap for keys."
+
+    fun scaleChoice(s: dev.arc.ep133.features.Scale) = "Scale: ${scaleName(s)}. Tap to change."
     const val KEYS_NOTE = "Keys plays the pad last tapped (or played on the EP-133 in Pads) as notes. Notes the EP-133 sends in its own KEYS mode light their key. Navy keys are the first octave, orange the next."
 
     fun scaleName(s: dev.arc.ep133.features.Scale) = when (s) {
@@ -59,9 +64,8 @@ object MirrorText {
         dev.arc.ep133.features.Scale.BLUES -> "Blues"
     }
 
-    /** "DO MAJOR · 4": the key, the scale and the octave, under the keys. */
-    fun keysSummary(root: Int, s: dev.arc.ep133.features.Scale, octave: Int) =
-        "${dev.arc.ep133.features.Keys.solfege(root)} ${scaleName(s).uppercase()} \u00B7 $octave"
+    /** "DO · OCT 4": the key and the octave, between − and + (the scale is the word above). */
+    fun keysSummary(root: Int, octave: Int) = "${dev.arc.ep133.features.Keys.solfege(root)} \u00B7 OCT $octave"
 
     /** "MI4". */
     fun noteName(note: Int) = dev.arc.ep133.features.Keys.solfege(note) + dev.arc.ep133.features.Keys.octaveOf(note)
