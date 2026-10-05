@@ -14,6 +14,7 @@ version fixes bugs. The version itself is set in `version.properties`.
 - Live: a one-group view, a large grid of one group with A–D keys to switch and Follow to jump to the group just played. It fits one screen without scrolling (checked at Pixel 7 and 360 dp sizes). The choice is kept in the settings.
 
 ### Changed
+- The guide overlay tags the edge controls (the GUIDE tab, the more-tools strip) as the PO app's tutorial does: a vertical tab on that edge with its word turned and a hooked arrow above.
 - arc opens on **Live**, and Back from Backups or Device returns to it (it was Backups).
 - The GUIDE tab on the left edge is quiet grey, like an unselected key, instead of solid navy.
 - No bar along the bottom: the top left shows the section as a tag (like the PO app's EDIT tag) that lists Backups, Live and Device on a tap, and the EP-133 shortcut guide is a GUIDE tab on the left edge that slides it in. Long-press the tag for the debug screen.
