@@ -1,0 +1,47 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/SettingsScreen.kt */
+
+/* Box(fillMaxSize, shell, TopCenter) > Column(widthIn(max 560), verticalScroll,
+ * padding 16 / 16, top 12, bottom 32; 10 between children). Full screens scroll
+ * the page (app.css); the body already keeps out of the safe areas. */
+.settings {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  min-height: inherit;
+  background: var(--shell);
+}
+.settings:focus { outline: none; }
+
+.settings__column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  width: 100%;
+  max-width: var(--column-max);
+  min-width: 0;
+  padding: var(--space-12) var(--space-16) 32px;
+}
+
+/* Box(fillMaxWidth, Center): the caption centred, the close key at the end. */
+.settings__head {
+  display: grid;
+  grid-template-areas: 'head';
+  align-items: center;
+}
+.settings__head > * { grid-area: head; }
+.settings__title { padding-inline: 54px; }
+.settings__close { justify-self: end; }
+
+/* Section: Caption with padding(top = 18). */
+.settings__section { margin-top: var(--space-18); }
+
+.settings__label { margin: 0; color: var(--ink); }
+.settings__note { margin: 0; color: var(--graphite); }
+.settings__version { margin: 0; color: var(--ink); }
+
+/* Row(spacedBy 10) of keys with weight(1f). */
+.settings__row {
+  display: flex;
+  gap: var(--space-10);
+}
+.settings__row > * { flex: 1 1 0; min-width: 0; }

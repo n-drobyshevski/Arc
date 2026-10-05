@@ -54,6 +54,7 @@ export function TopBar(props: TopBarProps): JSX.Element {
             disabled={!props.canBackup}
           />
         </span>
+        <span class="top-bar__gap" />
         <span data-coach="top.connection" class="top-bar__item">
           {props.connected ? (
             <IconBlock
@@ -79,7 +80,7 @@ export function TopBar(props: TopBarProps): JSX.Element {
             />
           )}
         </span>
-        <span class="top-bar__gap" />
+        <span class="top-bar__gap top-bar__gap--wide" />
         <span data-coach="top.help" class="top-bar__item">
           <IconBlock
             icon={ArcIcon.HELP}
@@ -90,6 +91,7 @@ export function TopBar(props: TopBarProps): JSX.Element {
             round
           />
         </span>
+        <span class="top-bar__gap" />
         <span data-coach="top.settings" class="top-bar__item">
           <IconBlock
             icon={ArcIcon.GEAR}

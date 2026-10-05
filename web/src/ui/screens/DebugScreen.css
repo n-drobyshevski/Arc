@@ -1,0 +1,65 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/DebugScreen.kt */
+
+/* Column(fillMaxSize, shell, padding 16; 12 between children): the screen's own
+ * height, the list takes what is left and scrolls. */
+.debug {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  padding: var(--space-16);
+  background: var(--shell);
+}
+.debug:focus { outline: none; }
+
+/* Row(SpaceBetween, CenterVertically): heading, then a quiet Done. */
+.debug__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-12);
+}
+.debug__title { margin: 0; color: var(--ink); min-width: 0; }
+
+/* Row(spacedBy 8) of keys with weight(1f). */
+.debug__keys {
+  display: flex;
+  gap: var(--space-8);
+}
+.debug__keys > * { flex: 1 1 0; min-width: 0; }
+
+/* LazyColumn(weight 1, radius 12, display, padding 10; 6 between lines). */
+.debug__list {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  padding: var(--space-10);
+  border-radius: var(--radius-small-plate);
+  background: var(--display);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.debug__list:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+
+.debug__empty { margin: 0; color: var(--display-dim); }
+
+/* Monospace 11sp, line height 15sp; OUT displayInk, IN displayInk at 80%, notes signal.
+ * The Text has no style, so the rest is MaterialTheme's bodyLarge (weight 400,
+ * letterSpacing 0.5sp). */
+.debug__line {
+  flex: none;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 15px;
+  letter-spacing: 0.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--display-ink);
+}
+.debug__line--in { color: color-mix(in srgb, var(--display-ink) 80%, transparent); }
+.debug__line--note { color: var(--signal); }

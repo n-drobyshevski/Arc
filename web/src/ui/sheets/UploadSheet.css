@@ -1,0 +1,32 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/DeviceScreen.kt (UploadSheetContent) */
+
+.upload-sheet__title { color: var(--ink); }
+.upload-sheet__dim { color: var(--graphite); }
+.upload-sheet__danger { color: var(--danger); }
+
+/* One key-coloured card per picked file. */
+.upload-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  width: 100%;
+  padding: var(--space-12);
+  border-radius: var(--radius-field);
+  background: var(--key);
+}
+.upload-row__name,
+.upload-row__file {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.upload-row__name { color: var(--ink); }
+.upload-row__file { color: var(--graphite); }
+
+.upload-row__trim {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+}
+.upload-row__trimmed { flex: 1 1 0; min-width: 0; }
+.upload-row__trim > .key { flex: none; }

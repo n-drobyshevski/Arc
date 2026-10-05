@@ -1,0 +1,299 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/MirrorScreen.kt */
+
+/* Box(fillMaxSize, shell): the side zone fills the section's page. */
+.live {
+  height: 100%;
+  background: var(--shell);
+}
+
+/* What glows: pads, group captions and group keys carry --glow (0..1, see live/glow.ts).
+ * Declared on those elements, so var(--glow) resolves there; their children inherit the result.
+ * Compose's lerp(start, stop, f) mixes in Oklab; g > 0.3 picks the "on signal" ink. */
+.live [data-pad],
+.live [data-group] {
+  --glow-pct: calc(var(--glow, 0) * 100%);
+  --hot-pct: calc(clamp(0, (var(--glow, 0) - 0.3) * 1000000, 1) * 100%);
+}
+
+/* ---------- the two layouts ---------- */
+
+/* One group: not much wider than a phone (520 with its padding), one screen high. */
+.live__one {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  width: 100%;
+  max-width: var(--one-group-max);
+  height: 100%;
+  margin: 0 auto;
+  padding: var(--space-4) calc(var(--side-strip-width) + var(--space-4)) var(--space-12) var(--gutter-start);
+}
+.live__one > * { flex: none; }
+
+/* All groups: 720 wide at most (padding included), scrolls inside the zone. */
+.live__all {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  width: 100%;
+  max-width: var(--wide-max);
+  margin: 0 auto;
+  padding: var(--space-4) calc(var(--side-strip-width) + var(--space-4)) var(--space-24) var(--gutter-start);
+}
+
+/* The title, centred, with the close key (when there is one) at the end. */
+.live__head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+}
+.live__close {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* BoxWithConstraints: four groups a row from 640 wide, else two by two. */
+.live__groups { container-type: inline-size; }
+.live__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: var(--space-14);
+  row-gap: var(--space-16);
+}
+@container (min-width: 640px) {
+  .live__grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+/* ---------- displays ---------- */
+
+/* The all-groups display: transport, tempo and project, the hit, the clock hint. */
+.live-display__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+}
+.live-display__transport { flex: 1 1 0; min-width: 0; color: var(--display-ink); white-space: nowrap; }
+.live-display__ink { color: var(--display-ink); white-space: nowrap; }
+.live-display__dim { color: var(--display-dim); white-space: nowrap; }
+/* statFree at 26sp, one line with an ellipsis. */
+.live-display__line {
+  margin: 0;
+  font-size: 26px;
+  color: var(--display-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.live-display__hint { margin: 0; color: var(--display-dim); }
+
+/* The one-group view's display: one dark line, radius 14, min 48 high, padding 10/14. */
+.live-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  width: 100%;
+  min-height: 48px;
+  padding: var(--space-10) var(--space-14);
+  border-radius: var(--radius-strip);
+  background: var(--display);
+}
+/* ArcType.displaySub */
+.live-strip__sub {
+  flex: none;
+  font-size: var(--size-display-sub);
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.live-strip__ink { color: var(--display-ink); }
+.live-strip__dim { color: var(--display-dim); }
+/* ArcType.displayHead, end-aligned, takes what is left. */
+.live-strip__line {
+  flex: 1 1 0;
+  min-width: 0;
+  color: var(--display-ink);
+  font-size: var(--size-display-head);
+  font-weight: 700;
+  line-height: 1.5;
+  text-align: end;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------- a group of pads ---------- */
+
+.live-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  min-width: 0;
+}
+/* The big grid takes the height left on screen. */
+.live-group--big {
+  flex: 1 1 0 !important;
+  min-height: 0;
+}
+
+/* lerp(graphite, signal, groupGlow) */
+.live-group__caption {
+  --live-caption: color-mix(in oklab, var(--signal) var(--glow-pct), var(--graphite));
+}
+
+.live-group--big .live-group__plate { flex: 1 1 0; min-height: 0; }
+
+.live-group__row {
+  display: flex;
+  align-items: stretch;
+}
+.live-group--big .live-group__row { flex: 1 1 0; min-height: 0; }
+
+.live-group__divider {
+  flex: none;
+  width: 1px;
+  background: var(--line);
+}
+
+/* ---------- a pad ---------- */
+
+.live-pad {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  aspect-ratio: 1;
+  padding: 5px 7px 5px 6px;
+  background: color-mix(in oklab, var(--signal) var(--glow-pct), var(--plate));
+  overflow: hidden;
+}
+.live-pad--big {
+  aspect-ratio: auto;
+  padding: var(--space-10);
+}
+
+/* The sample: tiny 10sp (14 on the big grid), line height 1.1em, two lines (three). */
+.live-pad__name {
+  position: absolute;
+  top: 5px;
+  left: 6px;
+  right: 7px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  padding-block: var(--trim-1-1);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--graphite));
+}
+.live-pad--big .live-pad__name {
+  top: var(--space-10);
+  left: var(--space-10);
+  right: var(--space-10);
+  -webkit-line-clamp: 3;
+  font-size: 14px;
+}
+
+/* The key's label, bottom end: semi 15sp (10 for ENTER), 28 / 15 on the big grid. */
+.live-pad__label {
+  position: absolute;
+  right: 7px;
+  bottom: 5px;
+  padding-block: var(--trim-1);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--ink));
+}
+.live-pad__label--wide { font-size: 10px; }
+.live-pad--big .live-pad__label {
+  right: var(--space-10);
+  bottom: var(--space-10);
+  font-size: 28px;
+}
+.live-pad--big .live-pad__label--wide { font-size: 15px; }
+
+/* ---------- the group keys ---------- */
+
+.live-keys {
+  display: flex;
+  gap: var(--space-8);
+}
+/* navy for the group shown, else lerp(tabOff, signal, sounding); ArcType.tab at 22sp. */
+.live-keys__key {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 52px;
+  border-radius: var(--radius-field);
+  background: color-mix(in oklab, var(--signal) var(--glow-pct), var(--tab-off));
+  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--on-tab-off));
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: var(--track-tab);
+  text-transform: uppercase;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.live-keys__key.is-on {
+  background: var(--navy);
+  color: var(--on-navy);
+}
+
+/* ---------- the tools panel ---------- */
+
+.live-tools__view { align-self: flex-start; }
+
+.live-tools__note { margin: 0; color: var(--graphite); }
+
+.live-tools__keys {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+/* Two octaves: white keys 1px in from each side, radius 3; black keys 0.6 high, radius 2. */
+.keys-strip {
+  position: relative;
+  width: 100%;
+  height: 56px;
+}
+.keys-strip__key {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--keys-white);
+  /* 1px in from both sides of its slot (drawRoundRect at i*w + 1, w - 2). */
+  box-shadow: none;
+  clip-path: inset(0 1px 0 1px round 3px);
+}
+.keys-strip__key--black {
+  height: 60%;
+  border-radius: 2px;
+  background: var(--keys-black);
+  clip-path: none;
+}
+.keys-strip__key.is-on { background: var(--signal); }
+
+.live-tools__notes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+.live-tools__order-caption { margin-top: var(--space-8); }
+.live-tools__orders {
+  display: flex;
+  gap: var(--space-10);
+}
+.live-tools__orders > .key { flex: 1 1 0; min-width: 0; }

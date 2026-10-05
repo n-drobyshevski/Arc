@@ -48,7 +48,7 @@ state until true), `freshId` (just-saved backup to highlight), `task`
 `durations`, `error`), `search` (`query`, `results`, `indexing`), `pakCompare`,
 `mirror` (`{state: MirrorState, loading, error}`), `folderPicked`, `folderStatus`
 (`'none' \| 'granted' \| 'prompt' \| 'denied'`; `'prompt'` shows the "Reconnect
-library folder" banner), `canPickFolder`.
+library folder" banner), `canPickFolder`, `folderName` (the folder in use, for `WebText.folderNote`).
 
 ## Actions
 

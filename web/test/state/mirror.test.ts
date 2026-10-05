@@ -15,7 +15,7 @@ import { Library } from '../../src/platform/storage/library'
 import { CoachPrefs, MirrorPrefs, SettingsStore, memoryStorage, type KeyValueStorage } from '../../src/platform/storage/settings'
 import { createController, type ArcController } from '../../src/state/controller'
 import type { Deps } from '../../src/state/deps'
-import { activeProject, sameMirrorState } from '../../src/state/mirror'
+import { activeProject, sameBpm, sameMirrorState } from '../../src/state/mirror'
 import { emptyMirrorState as emptyMirrorStateFor, type UiState } from '../../src/state/types'
 import { DemoData } from '../helpers/demoData'
 import { connectMock, fakeNavigator, type FakeEp } from '../helpers/fakeMidiAccess'
@@ -303,5 +303,15 @@ describe('mirror helpers', () => {
     a.pads.set(1, { velocity: 1, channel: 1, onAt: 0, offAt: null })
     expect(sameMirrorState(a, b)).toBe(true)
     expect(sameMirrorState(a, { ...b, padOrder: 'FROM_BOTTOM' })).toBe(false)
+    expect(sameMirrorState({ ...a, bpm: 122.01 }, { ...b, bpm: 122.04 })).toBe(true)
+    expect(sameMirrorState({ ...a, bpm: 122.04 }, { ...b, bpm: 122.06 })).toBe(false)
+  })
+
+  it('compares tempos at display precision', () => {
+    expect(sameBpm(null, null)).toBe(true)
+    expect(sameBpm(120, null)).toBe(false)
+    expect(sameBpm(null, 120)).toBe(false)
+    expect(sameBpm(119.96, 120.04)).toBe(true)
+    expect(sameBpm(120.04, 120.06)).toBe(false)
   })
 })

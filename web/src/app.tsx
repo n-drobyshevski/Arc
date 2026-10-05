@@ -9,8 +9,8 @@
 // then the tab screens' sheets (only while no full screen is open, Root's
 // `onTabs`), the modal progress sheet, and the toast over everything.
 //
-// Hook points for phase P5 are marked "P5:" (the tab sheets, the font licence
-// sheet, the real progress sheet).
+// Sheets live in ui/sheets (Device: pads / upload / trim; Backups: detail,
+// compare picker, restore, delete; the font licence and progress sheets).
 import { Component, type ComponentChildren, type JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { MirrorText } from './core/text/mirrorText'
@@ -20,7 +20,7 @@ import { WebText } from './core/text/webText'
 import { attachDrop, isPakName } from './platform/files/pick'
 import type { ArcController } from './state/controller'
 import { emptyMirrorState, type MirrorUi, type TaskUi } from './state/types'
-import { APP_VERSION } from './version'
+import { APP_BUILD } from './version'
 import { AppProvider, useController, useNav } from './ui/AppContext'
 import {
   Nav,
@@ -35,7 +35,6 @@ import {
 } from './ui/nav'
 import { CoachHost, useCoachFirstRun } from './ui/components/Coach'
 import { Key } from './ui/components/Key'
-import { ProgressMeter } from './ui/components/Meter'
 import { Sheet } from './ui/components/Sheet'
 import { Shell } from './ui/components/Shell'
 import { ControllerToast } from './ui/components/Toast'
@@ -45,9 +44,14 @@ import { DebugScreen } from './ui/screens/DebugScreen'
 import { DeviceScreen } from './ui/screens/DeviceScreen'
 import { GuideScreen } from './ui/screens/GuideScreen'
 import { MainScreen } from './ui/screens/MainScreen'
+import { BackupsSheets } from './ui/sheets/BackupsSheets'
+import { ProgressSheet } from './ui/sheets/ProgressSheet'
 import { MirrorScreen } from './ui/screens/MirrorScreen'
 import { SearchScreen } from './ui/screens/SearchScreen'
 import { SettingsScreen } from './ui/screens/SettingsScreen'
+import { BackupPadsSheet, DevicePadsSheet } from './ui/sheets/PadsSheet'
+import { FontLicenceSheet } from './ui/sheets/FontLicenceSheet'
+import { DeviceUploadSheet } from './ui/sheets/UploadSheet'
 import './app.css'
 
 /** The progress sheet's layer id. */
@@ -147,7 +151,7 @@ function Root(): JSX.Element {
         settings={settings}
         state={state}
         padOrder={c.padOrder()}
-        version={APP_VERSION}
+        version={APP_BUILD}
         onTheme={(t) => c.setTheme(t)}
         onAutoConnect={(on) => c.setAutoConnect(on)}
         onKeepScreenOn={(on) => c.setKeepScreenOn(on)}
@@ -164,7 +168,13 @@ function Root(): JSX.Element {
         onBack={closeScreen(screenLayer({ kind: 'settings' }))}
       />
     )
-    // P5: the font licence sheet, <Sheet open={v.sheets.includes('licence')} ...>.
+    // The font licence sheet over Settings (Root's fontLicence, the sheet 'licence').
+    page = (
+      <>
+        {page}
+        <FontLicenceSheet open={v.sheets.includes('licence')} onDismiss={() => nav.close(sheetLayer('licence'))} />
+      </>
+    )
   } else if (view === 'compare' && compareA && compareB && v.compare) {
     const [older, newer] = compareB.createdAt < compareA.createdAt ? [compareB, compareA] : [compareA, compareB]
     const pc = state.pakCompare
@@ -194,7 +204,8 @@ function Root(): JSX.Element {
         onPads={(n) => nav.open(sheetLayer(`pads:backup:${b.id}:${n}`))}
       />
     )
-    // P5: the backup's pads sheet (v.sheets 'pads:backup:<id>:<n>', playable).
+    // The backup's pads sheet (v.sheets 'pads:backup:<id>:<n>', playable).
+    page = <>{page}<BackupPadsSheet view={v} backupId={b.id} /></>
   } else if (view === 'search') {
     page = (
       <SearchScreen
@@ -243,9 +254,11 @@ function Root(): JSX.Element {
   return (
     <div class="app">
       <div class="app__screen" data-view={view}>{page}</div>
-      {/* P5: the tab screens' sheets, while `tabs`: Device (pads 'pads:device:<n>', upload / trim
-          from state.browser.draft), Backups (detail 'detail:<id>', compare picker
-          'comparePick:<id>', restore 'restore:<id>', the delete dialog 'delete'). */}
+      {/* The Device tab's sheets: pads 'pads:device:<n>', upload / trim from state.browser.draft. */}
+      {tabs && v.tab === 'device' && <><DevicePadsSheet view={v} /><DeviceUploadSheet view={v} /></>}
+      {/* The Backups tab's sheets: detail 'detail:<id>', compare picker 'comparePick:<id>',
+          restore 'restore:<id>', the delete dialog 'delete'. */}
+      {tabs && v.tab === 'backups' && <BackupsSheets view={v} />}
       <ProgressSlot task={progressShown ? state.task : null} onCancel={() => c.cancelTask()} />
       <ToastLayer raise={state.toast?.id ?? null}>
         <ControllerToast controller={c} />
@@ -311,27 +324,9 @@ function TabScreen(props: { view: NavView }): JSX.Element {
   }
 }
 
-/**
- * The progress sheet: modal (no Escape, no scrim, no Back), over any tab.
- * P5: ProgressSheet replaces the content; it is ProgressSheetContent as it stands.
- */
+/** The progress sheet: modal (no Escape, no scrim, no Back), over any tab (ui/sheets/ProgressSheet). */
 function ProgressSlot(props: { task: TaskUi | null; onCancel: () => void }): JSX.Element {
-  const last = useRef<TaskUi | null>(null)
-  if (props.task) last.current = props.task
-  const t = last.current
-  return (
-    <Sheet open={props.task !== null} onDismiss={null} grip={false} labelledBy="arc-progress-title" class="progress-sheet">
-      {t && (
-        <>
-          <h2 id="arc-progress-title" class="t-heading">{t.title}</h2>
-          <ProgressMeter fraction={t.fraction} label={t.title} />
-          <p class="t-bold progress-sheet__label">{t.label}</p>
-          <p class="t-small progress-sheet__hint">{WebText.KEEP_TAB_OPEN}</p>
-          <Key text={Strings.CANCEL} variant="quiet" block disabled={t.cancelling} onClick={props.onCancel} />
-        </>
-      )}
-    </Sheet>
-  )
+  return <ProgressSheet task={props.task} onCancel={props.onCancel} />
 }
 
 /**

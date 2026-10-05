@@ -1,0 +1,49 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/PadsSheet.kt */
+
+.pads-sheet__title { color: var(--ink); }
+.pads-sheet__note { color: var(--graphite); }
+.pads-sheet__group { padding-top: var(--space-6); }
+.pads-sheet__done { margin-top: var(--space-6); }
+
+.pad-grid__row {
+  display: flex;
+  align-items: stretch;
+}
+.pad-grid__rule {
+  flex: none;
+  width: 1px;
+  background: var(--line);
+}
+/* Same padding as a cell, so flex-basis 0 shares the row equally. */
+.pad-grid__fill { flex: 1 1 0; min-width: 0; padding-inline: var(--space-10); }
+
+.pad-cell {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-2);
+  padding: var(--space-8) var(--space-10);
+  border: 0;
+  border-radius: 0;
+  background-color: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: start;
+}
+.pad-cell.is-playing { background-color: var(--signal); color: var(--on-signal); }
+.pad-cell__dim { color: var(--graphite); }
+.pad-cell.is-playing .pad-cell__dim { color: color-mix(in srgb, var(--on-signal) 80%, transparent); }
+.pad-cell__main,
+.pad-cell__one {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pad-cell--button {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.pad-cell--button:active { background-image: linear-gradient(var(--row-pressed), var(--row-pressed)); }
+.pad-cell--button:focus-visible { outline-offset: -3px; }

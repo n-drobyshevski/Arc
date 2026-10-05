@@ -1,0 +1,58 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/CompareScreen.kt */
+
+/* Box(fillMaxSize, shell, TopCenter) > LazyColumn(widthIn(max 560), contentPadding 16,
+ * 10 between items). Full screens scroll the page (app.css). */
+.compare {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  min-height: inherit;
+  background: var(--shell);
+}
+.compare:focus { outline: none; }
+
+.compare__column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  width: 100%;
+  max-width: var(--column-max);
+  min-width: 0;
+  padding: var(--space-16);
+}
+
+.compare__head {
+  display: flex;
+  align-items: center;
+}
+.compare__title { flex: 1 1 0; min-width: 0; color: var(--ink); }
+.compare__head > .key { flex: none; }
+
+.compare__ink { color: var(--ink); }
+.compare__dim { color: var(--graphite); }
+.compare__error { color: var(--danger); }
+
+/* A section's rows keep the column's 10 apart; item(Box(height 4)) after each,
+ * itself an item: 10 + 4 (+ the column's 10 to the next item). */
+.compare__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  margin-bottom: calc(var(--space-10) + var(--space-4));
+}
+
+/* Row(CenterVertically, spacedBy 12): slot (graphite), name (one line). */
+.compare__line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+}
+.compare__slot { flex: none; color: var(--graphite); }
+.compare__name {
+  flex: 1 1 0;
+  min-width: 0;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

@@ -12,7 +12,9 @@ ui/
   coachPlace.ts     pure coach-tag placement (tested)
   theme/            tokens.css, base.css, theme.ts (applyTheme), fonts.ts
   components/       primitives + the shell (one .tsx + .css each)
-  screens/          one file per Kotlin screen (P5 fills the STUB ones)
+  screens/          one file per Kotlin screen (+ its .css)
+  sheets/           the sheets/dialogs mounted by app.tsx (Backups, Device, progress, licence)
+  live/             Live-tab helpers (glow.ts: pad fade maths, tested)
 ```
 
 File header: `// Port of app/src/main/kotlin/dev/arc/ep133/ui/<path>.kt`.
@@ -27,10 +29,11 @@ mounts the sheets. Screens stay props-driven, so they render in tests without
 a controller. A screen may call `useController()` / `useNav()` itself only for
 something the props don't cover.
 
-The STUB screens (`MainScreen`, `MirrorScreen`, `DeviceScreen`,
-`SettingsScreen`, `ContentsScreen`, `CompareScreen`, `SearchScreen`,
-`DebugScreen`) already have their final props; P5 replaces the bodies. Search
-`app.tsx` for `P5:` for the sheet hook points.
+All screens are ported (no stubs left). Tab sheets mount in `App` under
+`tabs`: `BackupsSheets` (detail, compare picker, restore, delete) and
+`DevicePadsSheet` / `DeviceUploadSheet` (pads, upload, trim); `FontLicenceSheet`
+mounts over Settings and `ProgressSheet` (modal) over any tab. Pure logic the
+screens factored out is tested under `test/ui/`.
 
 ## Navigation (`nav.ts`)
 
@@ -68,7 +71,10 @@ const id = v.sheets.find((s) => s.startsWith('detail:'))?.slice(7) ?? null
 
 Always dismiss through `nav.close` (never local state), so Back, Escape and
 the scrim agree. `onDismiss={null}` makes a sheet modal (no Escape/scrim/Back).
-`Sheet` and `Dialog` return focus to the opener themselves.
+`Sheet` and `Dialog` return focus to the opener themselves. On open, `Sheet`
+focuses its panel (no outline), not the first field, so phones don't pop the
+keyboard; give a field `autoFocus` to override. A sheet that swaps its own
+content (upload ↔ trim) moves focus itself (see `UploadSheet`).
 
 ## Coach marks (the "?" overlay)
 
@@ -117,6 +123,9 @@ Common optional props on most: `class`, `id`, `ref`. Colours are CSS values
 | `Shell`, `TopBar`, `SectionTag`, `SectionMenu`, `GuideEdgeTab` | Chrome.kt | mounted by app.tsx; screens don't use them |
 | `CoachHost`, `CoachOverlay`, `useCoachMark` | Coach.kt | see above |
 
+The top bar's 8dp spacing is drawn by shrinkable gap spans (not `gap`), so
+it matches Android at 360px and gives way only when the tag is long.
+
 ## CSS conventions
 
 - **Tokens** (`theme/tokens.css`): colours named after Kotlin `ArcColors` in
@@ -155,3 +164,7 @@ node scripts/shot.mjs <out.png> '/backups' --query=demo [--dark] [--size=412x843
 (`src/dev/demo.ts`). Compare with the Android PNG of the same screen in
 `app/src/screenshotTestDebug/reference/dev/arc/ep133/screens/` (Android px ÷
 2.625 = dp; web shot px ÷ 2 = CSS px). `shot.mjs` prints page errors.
+The demo starts with an empty library and plays short (85–400 ms) samples, so
+a Playwright check for a Play→Stop key must poll, not sleep. Headless Chromium
+leaves `requestMIDIAccess()` pending (the permission prompt is never answered)
+without `?demo`; the library (import a .pak, contents, search) works there.

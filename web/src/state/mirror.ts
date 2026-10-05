@@ -104,12 +104,22 @@ function sameMap<V>(a: ReadonlyMap<number, V>, b: ReadonlyMap<number, V>, eq: (x
   return true
 }
 
-/** MirrorState data-class equality (what lets StateFlow drop an unchanged state). */
+/**
+ * Tempos are equal when they read the same on screen (MirrorText.bpm, one
+ * decimal): the clock estimate wobbles in the hundredths on every tick, which
+ * would otherwise redraw (and re-announce the live display line) ~30 times a second.
+ */
+export function sameBpm(a: number | null, b: number | null): boolean {
+  if (a === null || b === null) return a === b
+  return a.toFixed(1) === b.toFixed(1)
+}
+
+/** MirrorState data-class equality (what lets StateFlow drop an unchanged state), tempo at display precision. */
 export function sameMirrorState(a: MirrorState, b: MirrorState): boolean {
   return (
     a.lastKeysNote === b.lastKeysNote &&
     a.playing === b.playing &&
-    a.bpm === b.bpm &&
+    sameBpm(a.bpm, b.bpm) &&
     a.activeProject === b.activeProject &&
     a.pushesSeen === b.pushesSeen &&
     a.padOrder === b.padOrder &&

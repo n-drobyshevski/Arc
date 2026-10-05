@@ -44,6 +44,7 @@ function reducedMotion(): boolean {
 export function Sheet(props: SheetProps): JSX.Element | null {
   const { open, onDismiss, grip = true } = props
   const ref = useRef<HTMLDialogElement | null>(null)
+  const panelRef = useRef<HTMLDivElement | null>(null)
   const [phase, setPhase] = useState<Phase>(open ? 'open' : 'closed')
   // The content last shown while open, for the close transition.
   const last = useRef<ComponentChildren>(null)
@@ -104,6 +105,10 @@ export function Sheet(props: SheetProps): JSX.Element | null {
       } catch {
         d.setAttribute('open', '')
       }
+      // Start on the panel, not its first field: showModal would focus a text
+      // field (and raise the soft keyboard) whenever the content fits without
+      // scrolling. ArcSheet focuses nothing.
+      if (!d.querySelector('[autofocus]')) panelRef.current?.focus({ preventScroll: true })
     } else if (phase === 'closed' && d.open) {
       d.close()
     }
@@ -160,7 +165,7 @@ export function Sheet(props: SheetProps): JSX.Element | null {
       onPointerDown={onPointerDown}
       onClick={onClick}
     >
-      <div class={`sheet__panel${grip ? '' : ' sheet__panel--no-grip'}`}>
+      <div ref={panelRef} tabIndex={-1} class={`sheet__panel${grip ? '' : ' sheet__panel--no-grip'}`}>
         {grip && <div class="sheet__grip" aria-hidden="true" />}
         {content}
       </div>

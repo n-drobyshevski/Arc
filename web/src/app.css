@@ -1,5 +1,4 @@
-/* Port of the layout of app/src/main/kotlin/dev/arc/ep133/MainActivity.kt (Root's Box(fillMaxSize)),
- * plus the placeholders that phase P5 replaces (.screen-stub). */
+/* Port of the layout of app/src/main/kotlin/dev/arc/ep133/MainActivity.kt (Root's Box(fillMaxSize)). */
 
 .app {
   position: relative;
@@ -37,48 +36,6 @@
   text-overflow: ellipsis;
 }
 .progress-sheet__hint { color: var(--graphite); }
-
-/* ---------- stub screens (phase P5 replaces them) ---------- */
-
-.screen-stub {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-10);
-  width: 100%;
-  max-width: calc(var(--column-max) + var(--edge-tab-width) + var(--space-8) + var(--space-16));
-  margin: 0 auto;
-  padding: var(--space-4) var(--space-16) var(--space-24) calc(var(--edge-tab-width) + var(--space-8));
-}
-.screen-stub--full {
-  min-height: 100%;
-  padding: var(--space-16);
-  background: var(--shell);
-}
-.screen-stub__head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-12);
-}
-.screen-stub__head > .key { flex: none; }
-.screen-stub__note { color: var(--graphite); }
-.screen-stub__list {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  border-radius: var(--radius-plate);
-  background: var(--plate);
-}
-.screen-stub__list > li + li { border-top: 1px solid var(--line); }
-.screen-stub__row {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--space-12);
-  width: 100%;
-  padding: 14px var(--space-16);
-  color: var(--ink);
-}
-.screen-stub__row .t-small { color: var(--graphite); }
 
 /* ---------- start-up and crash messages ---------- */
 

@@ -1,0 +1,117 @@
+/* Port of the sheet bodies in app/src/main/kotlin/dev/arc/ep133/ui/screens/Sheets.kt
+ * (Actions, DetailSheetContent, RestoreSheetContent, DiffResultView, ProgressSheetContent). */
+
+/* ---------- Actions: rows 10 apart, two keys a row 10 apart ---------- */
+
+.sheet-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+}
+.sheet-actions__row {
+  display: flex;
+  gap: var(--space-10);
+}
+.sheet-actions__cell {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* The Done text button: bold graphite, centred, padding 8 / 16, radius 8. */
+.sheet-done {
+  align-self: center;
+  padding: var(--space-8) var(--space-16);
+  border: 0;
+  border-radius: var(--radius-key);
+  background: transparent;
+  color: var(--graphite);
+  cursor: pointer;
+}
+.sheet-done:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+
+/* ---------- detail ---------- */
+
+/* Facts: auto 1fr columns, 16 apart, rows 6 apart. */
+.detail-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--space-16);
+  row-gap: var(--space-6);
+  margin: 0;
+}
+.detail-facts__row { display: contents; }
+.detail-facts__key { color: var(--graphite); margin: 0; }
+.detail-facts__value {
+  margin: 0;
+  min-width: 0;
+  color: var(--ink);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* Project lines: key-coloured, radius 10, padding 10 / 12, 6 apart. */
+.detail-projects {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.detail-projects__row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-12);
+  padding: var(--space-10) var(--space-12);
+  border-radius: var(--radius-field);
+  background: var(--key);
+}
+.detail-projects__name { color: var(--ink); font-weight: 700; }
+.detail-projects__sounds { color: var(--graphite); }
+
+/* ---------- restore ---------- */
+
+.restore-choices {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+.restore-picks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding-inline-start: var(--space-4);
+}
+.restore-picks.is-off { opacity: 0.45; }
+.restore-picks__projects { display: flex; flex-direction: column; }
+.restore-warning { color: var(--graphite); }
+.restore-warning:empty { display: block; height: 0; padding: 0; }
+
+/* ---------- DiffResultView: key-coloured card, radius 10, padding 12 / 14, 6 apart ---------- */
+
+.diff-result {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  width: 100%;
+  padding: var(--space-12) var(--space-14);
+  border-radius: var(--radius-field);
+  background: var(--key);
+}
+.diff-result__summary { color: var(--ink); }
+.diff-result__item { display: flex; flex-direction: column; }
+.diff-result__name { color: var(--ink); font-weight: 700; }
+.diff-result__state { color: var(--graphite); }
+
+/* ---------- progress ---------- */
+
+.progress-sheet__title { color: var(--ink); }
+.progress-sheet__label {
+  min-height: 24px;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.progress-sheet__hint { color: var(--graphite); }

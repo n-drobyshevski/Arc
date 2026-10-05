@@ -1,0 +1,152 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/MainScreen.kt */
+
+/* Box(fillMaxSize, shell, TopCenter) > Column(widthIn(max 560), padding start EdgeTabWidth + 8,
+ * end 16, top 4, bottom 24; 12 between children). The padding is inside the 560. */
+.main-screen {
+  display: flex;
+  justify-content: center;
+  min-height: 100%;
+  background: var(--shell);
+}
+.main-screen__column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  width: 100%;
+  max-width: var(--column-max);
+  min-width: 0;
+  padding:
+    var(--space-4)
+    calc(var(--space-16) + env(safe-area-inset-right, 0px))
+    calc(var(--space-24) + env(safe-area-inset-bottom, 0px))
+    calc(var(--edge-tab-width) + var(--space-8) + env(safe-area-inset-left, 0px));
+}
+.main-screen__muted { color: var(--graphite); }
+
+/* ---------- the device panel ---------- */
+
+.device-panel__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-12);
+}
+.device-panel__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--display-ink);
+}
+.device-panel__sub {
+  flex: none;
+  color: var(--display-dim);
+}
+.device-panel__hint {
+  max-width: 34ch;
+  color: var(--display-dim);
+}
+/* Row(spacedBy 28, Alignment.Bottom): two stats, then the free space at the end. */
+.device-panel__stats {
+  display: flex;
+  align-items: flex-end;
+  gap: 28px;
+}
+.device-panel__stat,
+.device-panel__free {
+  display: flex;
+  flex-direction: column;
+}
+.device-panel__free {
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: flex-end;
+  text-align: end;
+}
+.device-panel__num { color: var(--display-ink); }
+.device-panel__label { color: var(--display-dim); }
+
+/* ---------- the library ---------- */
+
+/* Column(padding top 8, spacedBy 10) */
+.main-screen__library {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  padding-top: var(--space-8);
+}
+.main-screen__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+.main-screen__caption { flex: 1 1 auto; }
+.main-screen__tool { flex: none; display: inline-flex; }
+
+/* Web: the "Reconnect library folder" banner. */
+.main-screen__banner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  padding: var(--space-12) var(--space-14);
+  border-radius: var(--radius-field);
+  background: var(--key);
+}
+.main-screen__banner-text { color: var(--ink); }
+
+.main-screen__quiet {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+.main-screen__footer { padding: var(--space-8) var(--space-2); }
+
+/* ---------- BackupList ---------- */
+
+.backup-list__item { display: flex; flex-direction: column; }
+
+/* Column(padding 14 / 16, spacedBy 2); pressed: keyEdge at 35% instead of a ripple. */
+.backup-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 14px var(--space-16);
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.backup-row:active { background: var(--row-pressed); }
+.backup-row:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: calc(-1 * var(--focus-offset) - 2px);
+}
+.backup-row__top {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+}
+.backup-row__title {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.backup-row__fresh {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin-inline-end: var(--space-8);
+  border-radius: 50%;
+  background: var(--signal);
+}
+.backup-row__name {
+  min-width: 0;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.backup-row__day { flex: none; color: var(--graphite); }
+.backup-row__meta { color: var(--graphite); }

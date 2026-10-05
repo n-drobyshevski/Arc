@@ -225,7 +225,7 @@ export class ArcController {
     } catch {
       // The folder stays unused this session.
     }
-    this.store.update((s) => ({ ...s, folderPicked: lib.folderPicked, folderStatus: status }))
+    this.store.update((s) => ({ ...s, folderPicked: lib.folderPicked, folderStatus: status, folderName: lib.target?.name ?? null }))
     void lib.persist().catch(() => false)
     // Backups saved before search existed get their sound names indexed once.
     this.store.update((s) => ({ ...s, search: { ...s.search, indexing: true } }))
@@ -741,7 +741,7 @@ export class ArcController {
       this.deps.settings.fromIndex(settings)
       // Its own failure must not hide that the restore worked.
       if (!target.readOnly && lib.target === target) await this.reconcile()
-      this.store.update((s) => ({ ...s, folderPicked: lib.folderPicked, folderStatus: lib.target ? 'granted' : s.folderStatus }))
+      this.store.update((s) => ({ ...s, folderPicked: lib.folderPicked, folderStatus: lib.target ? 'granted' : s.folderStatus, folderName: lib.target?.name ?? null }))
       this.toast(count === 0 ? FeatureText.NOTHING_TO_RESTORE : FeatureText.restored(count))
     } catch (e) {
       const msg = errorText(e)
@@ -781,7 +781,7 @@ export class ArcController {
       this.toast(errorText(e), true)
       return
     }
-    this.store.update((s) => ({ ...s, folderStatus: status, folderPicked: lib.folderPicked }))
+    this.store.update((s) => ({ ...s, folderStatus: status, folderPicked: lib.folderPicked, folderName: lib.target?.name ?? null }))
     if (status === 'granted') await this.reconcile()
   }
 

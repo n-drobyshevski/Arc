@@ -44,6 +44,8 @@
   animation: sheet-rise var(--sheet-ms) var(--sheet-ease);
 }
 .sheet__panel--no-grip { padding-top: var(--space-22); }
+/* The panel takes focus when the sheet opens (a starting point, not a control). */
+.sheet__panel:focus { outline: none; }
 
 .sheet__grip {
   flex: none;

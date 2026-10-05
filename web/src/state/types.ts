@@ -146,6 +146,8 @@ export interface UiState {
   readonly folderStatus: FolderStatus
   /** Web: whether this browser can pick a writable folder (else "Export library" and a read-only restore). */
   readonly canPickFolder: boolean
+  /** Web: the library folder's name while it is in use (folderStatus 'granted'), for WebText.folderNote. */
+  readonly folderName: string | null
 }
 
 /** The three tabs under the top bar (ui/components Tab). */
@@ -200,5 +202,6 @@ export function initialState(midiSupported = true, canPickFolder = false): UiSta
     folderPicked: false,
     folderStatus: 'none',
     canPickFolder,
+    folderName: null,
   }
 }
