@@ -47,7 +47,11 @@ object MirrorText {
     fun modeSwitch(keysOn: Boolean) = if (keysOn) "Keys. Tap for pads." else "Pads. Tap for keys."
 
     fun scaleChoice(s: dev.arc.ep133.features.Scale) = "Scale: ${scaleName(s)}. Tap to change."
-    const val KEYS_NOTE = "Keys plays the pad last tapped (or played on the EP-133 in Pads) as notes. Notes the EP-133 sends in its own KEYS mode light their key. Navy keys are the first octave, orange the next."
+    const val KEYS_NOTE = "Keys plays the pad last tapped (or played on the EP-133 in Pads) as notes. Notes the EP-133 sends in its own KEYS mode light their key."
+    const val LEGEND = "Colours"
+    const val LEGEND_OCTAVE = "Ring: the octave, navy and orange in turn (its number is in the corner)"
+    const val LEGEND_DEVICE = "Filled: played on the EP-133"
+    const val LEGEND_PHONE = "Outlined: playing on the phone"
 
     fun scaleName(s: dev.arc.ep133.features.Scale) = when (s) {
         dev.arc.ep133.features.Scale.CHROMATIC -> "Chromatic"

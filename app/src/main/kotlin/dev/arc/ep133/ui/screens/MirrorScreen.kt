@@ -820,6 +820,51 @@ private fun KeysPanel(keys: KeysUi, actions: KeysActions) {
         Segmented(row.map { Keys.name(it, keys.names) }, selected = row.indexOf(keys.root), onSelect = { actions.onRoot(row[it]) })
     }
     Text(MirrorText.KEYS_NOTE, style = ArcType.small, color = c.graphite)
+    KeysLegend()
+}
+
+/** What the keys' colours mean, each with a small key drawn as the grid draws it. */
+@Composable
+private fun KeysLegend() {
+    val c = LocalArcColors.current
+    Caption(MirrorText.LEGEND, align = androidx.compose.ui.text.style.TextAlign.Start)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LegendRow(MirrorText.LEGEND_OCTAVE) {
+            LegendKey(ring = c.navy)
+            LegendKey(ring = c.signal)
+        }
+        LegendRow(MirrorText.LEGEND_DEVICE) { LegendKey(ring = c.onSignal, fill = c.signal) }
+        LegendRow(MirrorText.LEGEND_PHONE) { LegendKey(ring = c.navy, outline = true) }
+    }
+}
+
+@Composable
+private fun LegendRow(text: String, keys: @Composable () -> Unit) {
+    val c = LocalArcColors.current
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        // The swatches share one width, so the words line up.
+        Row(Modifier.width(56.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) { keys() }
+        Text(text, style = ArcType.small, color = c.graphite, modifier = Modifier.weight(1f))
+    }
+}
+
+/** A key in miniature: its plate (lit orange when [fill]), its ring, and the phone's outline. */
+@Composable
+private fun LegendKey(ring: Color, fill: Color? = null, outline: Boolean = false) {
+    val c = LocalArcColors.current
+    Box(
+        Modifier
+            .size(26.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(fill ?: c.plate)
+            .then(if (outline) Modifier.border(2.dp, c.signal, RoundedCornerShape(4.dp)) else Modifier)
+            .padding(5.dp),
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            val stroke = size.minDimension * 0.14f
+            drawCircle(ring, radius = size.minDimension / 2 - stroke / 2, style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke))
+        }
+    }
 }
 
 /**
