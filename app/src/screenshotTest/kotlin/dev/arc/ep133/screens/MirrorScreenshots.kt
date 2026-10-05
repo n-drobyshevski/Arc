@@ -328,7 +328,9 @@ fun LiveAllGroupsSidewaysPreview() = Live(playing)
 @Composable
 fun GuideOverlayLiveSidewaysPreview() = Live(sideways, keys = chord, guide = true, piano = 48..72)
 
-// Gesture navigation: the bar's 20 dp at the bottom instead of 48 at the side.
+// Gesture navigation: the bar's 20 dp at the bottom instead of 48 at the side. Only the window's
+// size: previews have no system bars, so the gutters stay at their least here, as with the
+// three-button bar (the back-swipe edges are a device check, README step 22).
 @PreviewTest
 @Preview(name = "Live keys gesture nav", widthDp = 915, heightDp = 368, showBackground = true)
 @Composable
@@ -365,6 +367,15 @@ fun GuideOverlayLiveSidewaysSmallPreview() = Live(sideways, keys = chord.copy(sc
 @Composable
 fun LiveKeysSidewaysSmallFontPreview() = Live(sideways, keys = chord.copy(scale = dev.arc.ep133.features.Scale.MAJOR), piano = 48..67)
 
+// A 360 x 640 dp phone on its side (592 x 336 less the bars) at font scale 2, with a long
+// scale: one octave of keys, the display line on the page (the bar's middle is too narrow for
+// it), and the row over the keys drops the key word's KEY, then shortens the scale to its code;
+// − and + keep their size.
+@PreviewTest
+@Preview(name = "Live keys sideways narrow font 2", widthDp = 592, heightDp = 336, fontScale = 2f, showBackground = true)
+@Composable
+fun LiveKeysSidewaysNarrowFontPreview() = Live(sideways, keys = chord.copy(root = 9, scale = dev.arc.ep133.features.Scale.MINOR_PENTATONIC), piano = 48..60)
+
 // A tablet on its side is tall enough for the display line on the page and the full bar; the
 // piano stops at a hand's span.
 @PreviewTest
@@ -372,13 +383,24 @@ fun LiveKeysSidewaysSmallFontPreview() = Live(sideways, keys = chord.copy(scale 
 @Composable
 fun LiveKeysTabletPreview() = Live(sideways, keys = chord)
 
+// Live tools beside the piano: the legend's piano rows (a dimmed key, the C with its octave).
+@PreviewTest
+@Preview(name = "Live keys tablet tools", widthDp = 1280, heightDp = 752, showBackground = true)
+@Composable
+fun LiveKeysTabletToolsPreview() = Live(sideways, keys = chord.copy(root = 9, scale = dev.arc.ep133.features.Scale.MINOR), tools = true)
+
 // Wider than tall but short of 8 white keys: the grid stays.
 @PreviewTest
 @Preview(name = "Live keys grid fallback", widthDp = 400, heightDp = 360, showBackground = true)
 @Composable
 fun LiveKeysGridFallbackPreview() = Live(sideways, keys = chord)
 
-/** The 692 dp bar's middle, between the LIVE tag and the icons, where the display line is. */
+/**
+ * The 692 dp bar's middle, between the LIVE tag and the icons, where the display line is:
+ * measured off a render, since the bar reports it a frame after a screenshot is taken. So the
+ * toast preview checks the toast's look and fit in that place, not that the bar reports it
+ * (a device check).
+ */
 private val SmallBarMiddle = DpRect(101.dp, 6.dp, 455.dp, 50.dp)
 
 private val device = BackupDevice("EP-133", "TE032AS001", "", "2.5.1")
