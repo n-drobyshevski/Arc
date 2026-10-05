@@ -12,12 +12,13 @@ sealed interface NoteEvent {
 }
 
 /**
- * The fingers on Live's piano (an addition): the note under each pointer,
- * and how many fingers are on each note. A finger sliding across the keys
- * lets go of one note and plays the next (a glissando); a second finger on a
- * held note strikes it again; a note is let go of only when its last finger
- * lifts or leaves. Pure bookkeeping: the screen feeds it pointer changes and
- * plays the events that come back.
+ * The fingers on Live's KEYS (an addition), on the piano and on the grid:
+ * the note under each pointer (on the grid, each key is a pointer of its
+ * own), and how many fingers are on each note. A finger sliding across the
+ * keys lets go of one note and plays the next (a glissando); a second finger
+ * on a held note strikes it again; a note is let go of only when its last
+ * finger lifts or leaves. Pure bookkeeping: the screen feeds it pointer
+ * changes and plays the events that come back.
  */
 class NoteTouches {
     private val fingers = HashMap<Long, Int>()

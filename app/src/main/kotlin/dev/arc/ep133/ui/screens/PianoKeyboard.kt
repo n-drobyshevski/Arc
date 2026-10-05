@@ -68,7 +68,7 @@ import kotlin.math.roundToInt
  */
 
 /** How far past a key's edge a sliding finger keeps it, so it doesn't flicker between two keys. */
-private val SLIDE_SLOP = 6.dp
+private val SlideSlop = 6.dp
 
 /**
  * The piano over [range]: device notes light their own key (and one the
@@ -135,7 +135,7 @@ private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> 
                 contentDescription = MirrorText.pianoRange(range.first, range.last, keys.names)
             }
             .pointerInput(Unit) {
-                val slop = SLIDE_SLOP.toPx()
+                val slop = SlideSlop.toPx()
                 awaitEachGesture {
                     // Each finger: the note under it, where it was, and which layout that was in.
                     val fingers = HashMap<PointerId, Finger>()
@@ -275,7 +275,10 @@ private fun DrawScope.drawPiano(
     }
     val line = 1.dp.toPx()
     val held = 2.dp.toPx()
-    val rootOnWhite = c.pianoRoot()
+    val rootOnWhite = c.rootOn(c.pianoWhite)
+    // A held key at either end follows the plate's rounded corners.
+    val plateCorner = PlateRadius.toPx() - held / 2
+    val edge = 0.5f
 
     // White keys: faces, the lines between them, then their marks (under the black keys).
     val white = laid.first { !it.black }.rect
@@ -300,13 +303,19 @@ private fun DrawScope.drawPiano(
             drawMark(mark, color, Offset(cx, cy), ring, r.bottom)
             drawLabel(labels.name(k.note), if (onLit) c.onSignal else c.ink, Offset(cx, cy))
         }
-        // Each C carries its octave; OCT's own C (the sound's pitch) in ink.
+        // Each C carries its octave; OCT's own C in ink.
         labels.digit(k.note)?.let { d ->
             val own = k.note == Piano.lowest(keys.octave) + 12
-            val color = if (onLit) c.onSignal else if (own) c.ink else c.graphite
+            val color = if (onLit) c.onSignal else if (own) c.ink else c.pianoDigit
             drawText(d, color, Offset(cx - d.size.width / 2f, cy - ring / 2 - 4.dp.toPx() - d.size.height))
         }
-        if (k.note in keys.playingNotes) drawHeld(r.left, r.top, r.width, r.height, held, c.signal)
+        if (k.note in keys.playingNotes) {
+            drawHeld(
+                r.left, r.top, r.width, r.height, held, c.pianoSignal,
+                roundLeft = if (r.left <= edge) plateCorner else 0f,
+                roundRight = if (r.right >= size.width - edge) plateCorner else 0f,
+            )
+        }
     }
 
     // Black keys over them: a face with rounded feet, outlined (in the dark theme the outline
@@ -336,16 +345,29 @@ private fun DrawScope.drawPiano(
             // Narrow keys: the name only while the note sounds.
             if (g > 0f || playing) drawLabel(labels.name(k.note), if (onLit) c.onSignal else c.onPianoBlack, Offset(cx, cy))
         }
-        if (playing) drawHeld(r.left, r.top, r.width, r.height, held, c.signal)
+        if (playing) drawHeld(r.left, r.top, r.width, r.height, held, c.pianoSignal)
     }
 
     // A device note the piano doesn't reach: an orange tick at that end.
-    if (below > 0f) drawTick(white.height, left = true, alpha = below, color = c.signal)
-    if (above > 0f) drawTick(white.height, left = false, alpha = above, color = c.signal)
+    if (below > 0f) drawTick(white.height, left = true, alpha = below, color = c.pianoSignal)
+    if (above > 0f) drawTick(white.height, left = false, alpha = above, color = c.pianoSignal)
 }
 
-/** The root's ring on a white key: on a pale key the signal orange is under 3:1, so it takes its darker edge there. */
-internal fun ArcColors.pianoRoot(): Color = if (pianoWhite.luminance() > 0.5f) signalEdge else signal
+/**
+ * The root's orange ring on [face], 3:1 or more: the signal orange where it
+ * holds that, its darker edge on a pale face (the light theme's keys and
+ * plate), the lighter piano orange on a mid one (the dark theme's white keys).
+ */
+internal fun ArcColors.rootOn(face: Color): Color = when {
+    face.luminance() > 0.5f -> signalEdge
+    contrast(signal, face) >= 3f -> signal
+    else -> pianoSignal
+}
+
+private fun contrast(a: Color, b: Color): Float {
+    val (hi, lo) = a.luminance().let { la -> b.luminance().let { lb -> maxOf(la, lb) to minOf(la, lb) } }
+    return (hi + 0.05f) / (lo + 0.05f)
+}
 
 /** A key's ring around [center]: navy in the scale; thicker on the root, with a bar at the key's foot. */
 private fun DrawScope.drawMark(mark: KeyMark, color: Color, center: Offset, d: Float, bottom: Float) {
@@ -362,9 +384,34 @@ private fun DrawScope.drawMark(mark: KeyMark, color: Color, center: Offset, d: F
 private fun DrawScope.drawLabel(text: TextLayoutResult, color: Color, center: Offset) =
     drawText(text, color, Offset(center.x - text.size.width / 2f, center.y - text.size.height / 2f))
 
-/** Playing on the phone: the signal orange inside the key's edge, as on the grid. */
-private fun DrawScope.drawHeld(left: Float, top: Float, width: Float, height: Float, stroke: Float, color: Color) =
-    drawRect(color, Offset(left + stroke / 2, top + stroke / 2), Size(width - stroke, height - stroke), style = Stroke(stroke))
+/**
+ * Playing on the phone: the signal orange inside the key's edge, as on the
+ * grid; [roundLeft] and [roundRight] round its corners on that side, where
+ * the key meets the plate's rounded corners.
+ */
+private fun DrawScope.drawHeld(
+    left: Float,
+    top: Float,
+    width: Float,
+    height: Float,
+    stroke: Float,
+    color: Color,
+    roundLeft: Float = 0f,
+    roundRight: Float = 0f,
+) {
+    val l = left + stroke / 2
+    val t = top + stroke / 2
+    val r = left + width - stroke / 2
+    val b = top + height - stroke / 2
+    if (roundLeft == 0f && roundRight == 0f) {
+        drawRect(color, Offset(l, t), Size(r - l, b - t), style = Stroke(stroke))
+    } else {
+        val outline = Path().apply {
+            addRoundRect(RoundRect(l, t, r, b, CornerRadius(roundLeft), CornerRadius(roundRight), CornerRadius(roundRight), CornerRadius(roundLeft)))
+        }
+        drawPath(outline, color, style = Stroke(stroke))
+    }
+}
 
 /** ◂ or ▸ near the top of the plate's end: a note sounding past the keys that way. */
 private fun DrawScope.drawTick(height: Float, left: Boolean, alpha: Float, color: Color) {

@@ -244,7 +244,7 @@ fun MirrorScreen(
         // less the display line when it is on the page.
         val safe = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal).asPaddingValues()
         val roomW = maxWidth - safe.calculateLeftPadding(LayoutDirection.Ltr) - safe.calculateRightPadding(LayoutDirection.Ltr) - startGutter - endGutter
-        val roomH = maxHeight - (if (inBar) 0.dp else DisplayLine + 10.dp) - SidewaysBottom - ControlsRow
+        val roomH = maxHeight - (if (inBar) 0.dp else DisplayLineHeight + 10.dp) - SidewaysBottom - ControlsRow
         val piano = if (sideways && keys.on) pianoRange(keys.octave, roomW, if (window.short) roomH else minOf(roomH, PianoMaxTablet)) else null
         LaunchedEffect(piano) { reportRange(piano) }
         // Four groups side by side while their pad rows keep 40 dp, and no taller than square
@@ -307,7 +307,7 @@ fun MirrorScreen(
                 BoxWithConstraints(sidewaysColumn, contentAlignment = Alignment.TopCenter) {
                     // The grid as tall as the room and at most 1.4 times as wide, the group keys
                     // in a column on its right; the row above lines up with the grid.
-                    val gridH = maxHeight - (if (inBar) 0.dp else DisplayLine + 10.dp) - ControlsRow
+                    val gridH = maxHeight - (if (inBar) 0.dp else DisplayLineHeight + 10.dp) - ControlsRow
                     val gridW = minOf(gridH * 1.4f, maxWidth - GroupColumn - 12.dp)
                     Column(Modifier.width(gridW + 12.dp + GroupColumn).fillMaxHeight()) {
                         if (!inBar) {
@@ -426,7 +426,7 @@ fun MirrorScreen(
 private val ControlsRow = 44.dp
 
 /** The display line's height, on the page when it isn't in the top bar. */
-private val DisplayLine = 48.dp
+private val DisplayLineHeight = 48.dp
 
 /** What is left under the keys or pads on a phone on its side. */
 private val SidewaysBottom = 8.dp
@@ -1210,7 +1210,7 @@ private fun KeysGrid(st: MirrorState, keys: KeysUi, now: Long, actions: KeysActi
                         if (i > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(c.line))
                         val note = notes[k]
                         val g = lit[k] ?: 0f
-                        val ring = if (k % keys.scale.intervals.size == 0) c.signal else c.navy
+                        val ring = if (k % keys.scale.intervals.size == 0) c.rootOn(c.plate) else c.navy
                         Box(
                             Modifier
                                 .weight(1f)
@@ -1278,14 +1278,14 @@ private fun KeysLegend(piano: Boolean = false) {
     val face = if (piano) c.pianoWhite else c.plate
     Caption(MirrorText.LEGEND, align = androidx.compose.ui.text.style.TextAlign.Start)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        LegendRow(MirrorText.LEGEND_ROOT) { LegendKey(ring = if (piano) c.pianoRoot() else c.signal, fill = face) }
+        LegendRow(MirrorText.LEGEND_ROOT) { LegendKey(ring = c.rootOn(face), fill = face) }
         LegendRow(MirrorText.LEGEND_IN_SCALE) { LegendKey(ring = c.navy, fill = face) }
         if (piano) {
             LegendRow(MirrorText.LEGEND_OUT) { LegendKey(ring = null, fill = c.keyOut) }
             LegendRow(MirrorText.LEGEND_C) { LegendKey(ring = null, fill = face, digit = "4") }
         }
         LegendRow(MirrorText.LEGEND_DEVICE) { LegendKey(ring = c.onSignal, fill = c.signal) }
-        LegendRow(MirrorText.LEGEND_PHONE) { LegendKey(ring = c.navy, fill = face, outline = true) }
+        LegendRow(MirrorText.LEGEND_PHONE) { LegendKey(ring = c.navy, fill = face, outline = if (piano) c.pianoSignal else c.signal) }
     }
 }
 
@@ -1304,14 +1304,14 @@ private fun LegendRow(text: String, keys: @Composable () -> Unit) {
  * ring if it has one, the phone's outline, and an octave [digit] in the corner.
  */
 @Composable
-private fun LegendKey(ring: Color?, fill: Color? = null, outline: Boolean = false, digit: String? = null) {
+private fun LegendKey(ring: Color?, fill: Color? = null, outline: Color? = null, digit: String? = null) {
     val c = LocalArcColors.current
     Box(
         Modifier
             .size(26.dp)
             .clip(RoundedCornerShape(4.dp))
             .background(fill ?: c.plate)
-            .then(if (outline) Modifier.border(2.dp, c.signal, RoundedCornerShape(4.dp)) else Modifier)
+            .then(if (outline != null) Modifier.border(2.dp, outline, RoundedCornerShape(4.dp)) else Modifier)
             .padding(if (digit != null) 3.dp else 5.dp),
     ) {
         if (ring != null) {
