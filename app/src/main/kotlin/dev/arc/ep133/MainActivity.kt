@@ -524,6 +524,25 @@ class MainActivity : ComponentActivity() {
                             nameOf = controller::mirrorName,
                             onPadOrder = controller::setPadOrder,
                             onPad = { controller.playPad(it) },
+                            keys = dev.arc.ep133.ui.screens.KeysUi(
+                                on = appSettings.liveKeys,
+                                root = appSettings.keysRoot,
+                                scale = appSettings.keysScale,
+                                octave = appSettings.keysOctave,
+                                pad = state.keysPad,
+                                padName = state.keysPad?.let(controller::mirrorName),
+                                playingKey = playing?.takeIf { it.startsWith("keys:") }?.removePrefix("keys:")?.toIntOrNull(),
+                            ),
+                            keysActions = remember(controller) {
+                                dev.arc.ep133.ui.screens.KeysActions(
+                                    onMode = controller::setLiveKeys,
+                                    onRoot = controller::setKeysRoot,
+                                    onScale = controller::setKeysScale,
+                                    onOctave = controller::setKeysOctave,
+                                    onKey = { controller.playKey(it) },
+                                    onSelect = controller::selectKeysPad,
+                                )
+                            },
                             playingPad = playing?.takeIf { it.startsWith("live:") }?.split(':')?.let { p ->
                                 val g = p.getOrNull(1)?.toIntOrNull()
                                 val o = p.getOrNull(2)?.toIntOrNull()

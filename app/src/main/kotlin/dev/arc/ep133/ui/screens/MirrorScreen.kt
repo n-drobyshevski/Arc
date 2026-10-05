@@ -78,6 +78,8 @@ import dev.arc.ep133.features.PadLight
 import dev.arc.ep133.features.PadNotes
 import dev.arc.ep133.features.PadOrder
 import dev.arc.ep133.features.PhysicalPad
+import dev.arc.ep133.features.Keys
+import dev.arc.ep133.features.Scale
 import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.ui.components.ArcKey
 import dev.arc.ep133.ui.components.Caption
@@ -98,6 +100,29 @@ import dev.arc.ep133.ui.theme.LocalArcColors
 private val KeyBlack = Color(0xFF1E1F21)
 private val KeyWhite = Color(0xFFF3F2EE)
 private val FADE_NS = 300_000_000L
+
+/** What the KEYS view shows: whether it is on, the key, scale and octave, and the sound it plays. */
+data class KeysUi(
+    val on: Boolean = false,
+    val root: Int = 0,
+    val scale: Scale = Scale.CHROMATIC,
+    val octave: Int = 4,
+    /** The sound KEYS plays, and its sample's name when known. */
+    val pad: PhysicalPad? = null,
+    val padName: String? = null,
+    /** The key playing on the phone, ringed. */
+    val playingKey: Int? = null,
+)
+
+class KeysActions(
+    val onMode: (Boolean) -> Unit = {},
+    val onRoot: (Int) -> Unit = {},
+    val onScale: (Scale) -> Unit = {},
+    val onOctave: (Int) -> Unit = {},
+    val onKey: (Int) -> Unit = {},
+    /** A pad played on the device in the pads view becomes the KEYS sound. */
+    val onSelect: (PhysicalPad) -> Unit = {},
+)
 
 /**
  * A live mirror of the EP-133 (an addition to the web version): the four
@@ -131,12 +156,15 @@ fun MirrorScreen(
     onPad: ((PhysicalPad) -> Unit)? = null,
     /** The pad whose sample is playing on the phone, ringed. */
     playingPad: PhysicalPad? = null,
+    /** KEYS: the pads become notes of one sound, like the EP-133's KEYS mode. */
+    keys: KeysUi = KeysUi(),
+    keysActions: KeysActions = KeysActions(),
 ) {
     val c = LocalArcColors.current
     if (onBack != null) BackHandler(onBack = onBack)
     val st = mirror?.state ?: MirrorState()
     // The fade runs on the frame clock while a released pad is fading, and stops after.
-    val fading = fixedNow == null && st.pads.values.any { it.offAt != null }
+    val fading = fixedNow == null && (st.pads.values.any { it.offAt != null } || keys.on && st.notes.values.any { it.offAt != null })
     var frame by remember { mutableLongStateOf(System.nanoTime()) }
     LaunchedEffect(fading) {
         while (fading) withFrameNanos { frame = System.nanoTime() }
@@ -150,6 +178,10 @@ fun MirrorScreen(
     LaunchedEffect(hitGroup, st.lastHit, follow, oneGroup) {
         if (oneGroup && follow && hitGroup != null) group = hitGroup
     }
+    // In the pads view, the pad just played on the device is the sound KEYS will play.
+    LaunchedEffect(st.lastHit, keys.on) {
+        if (!keys.on) st.lastHit?.pad?.let(keysActions.onSelect)
+    }
     Box(Modifier.fillMaxSize().background(c.shell), contentAlignment = Alignment.TopCenter) {
         SideZone(
             open = toolsOpen,
@@ -157,6 +189,9 @@ fun MirrorScreen(
             onClose = { toolsOpen = false },
             title = MirrorText.TOOLS,
             panel = {
+                if (keys.on) {
+                    KeysPanel(keys, keysActions)
+                } else {
                 Caption(MirrorText.VIEW, align = androidx.compose.ui.text.style.TextAlign.Start)
                 TextToggle(
                     listOf(MirrorText.ALL_GROUPS, MirrorText.ONE_GROUP),
@@ -168,10 +203,11 @@ fun MirrorScreen(
                 }
                 if (st.lastKeysNote != null) KeysStrip(st)
                 Notes(st, mirror, onPadOrder, tapToPlay = onPad != null)
+                }
             },
         ) {
-            if (oneGroup) {
-                // One group fills the screen without scrolling: the display line, the grid
+            if (oneGroup || keys.on) {
+                // One group (or the keys) fills the screen without scrolling: the display line, the grid
                 // (its rows share whatever height is left) and the group keys.
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
                     Column(
@@ -189,15 +225,25 @@ fun MirrorScreen(
                                 CloseKey(onBack, dev.arc.ep133.text.GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
                             }
                         }
-                        DisplayStrip(st, mirror)
-                        Group(
-                            group, st, nameOf, now,
-                            Modifier.fillMaxWidth().weight(1f).coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
-                            big = true,
-                            onPad = onPad,
-                            playingPad = playingPad,
-                        )
-                        GroupKeys(group, st, now, onSelect = { group = it })
+                        if (keys.on) {
+                            KeysDisplay(st, mirror, keys)
+                            KeysGrid(
+                                st, keys, now, keysActions.onKey,
+                                Modifier.fillMaxWidth().weight(1f).coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
+                            )
+                            OctaveKeys(keys, keysActions.onOctave)
+                        } else {
+                            DisplayStrip(st, mirror)
+                            Group(
+                                group, st, nameOf, now,
+                                Modifier.fillMaxWidth().weight(1f).coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
+                                big = true,
+                                onPad = onPad,
+                                playingPad = playingPad,
+                            )
+                            GroupKeys(group, st, now, onSelect = { group = it })
+                        }
+                        ModeToggle(keys.on, keysActions.onMode)
                     }
                 }
             } else {
@@ -216,6 +262,7 @@ fun MirrorScreen(
                             if (onBack != null) CloseKey(onBack, dev.arc.ep133.text.GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
                         }
                         Display(st, mirror, initialNoteOpen = initialNoteOpen)
+                        ModeToggle(false, keysActions.onMode)
                         BoxWithConstraints(Modifier.fillMaxWidth()) {
                             // Four groups in a row when there is room, two by two on a phone.
                             val perRow = if (maxWidth >= 640.dp) 4 else 2
@@ -556,4 +603,161 @@ private fun Notes(st: MirrorState, mirror: MirrorUi?, onPadOrder: (PadOrder) -> 
         Text(MirrorText.COMMUNITY_NOTE, style = ArcType.small, color = c.graphite)
         Text(MirrorText.LISTEN_ONLY, style = ArcType.small, color = c.graphite)
     }
+}
+
+/** PADS / KEYS under the grid, like the PO app's DRUMS / KEYPAD. */
+@Composable
+private fun ModeToggle(keysOn: Boolean, onMode: (Boolean) -> Unit) {
+    val c = LocalArcColors.current
+    TextToggle(
+        listOf(MirrorText.MODE_PADS, MirrorText.MODE_KEYS),
+        selected = if (keysOn) 1 else 0,
+        onSelect = { onMode(it == 1) },
+        modifier = Modifier.coachMark("live.mode", CoachText.MODE, c.navy, c.onNavy),
+    )
+}
+
+/** The KEYS display line: KEYS and the last note on the left, the sound it plays on the right. */
+@Composable
+private fun KeysDisplay(st: MirrorState, mirror: MirrorUi?, keys: KeysUi) {
+    val c = LocalArcColors.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(c.display)
+            .semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite }
+            .heightIn(min = 48.dp)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(MirrorText.MODE_KEYS.uppercase(), style = ArcType.displaySub, color = c.displayDim, maxLines = 1)
+        val note = keys.playingKey?.let { Keys.notes(keys.root, keys.scale, keys.octave).getOrNull(it) } ?: st.lastNote
+        note?.let { Text(MirrorText.noteName(it), style = ArcType.displaySub, color = c.displayInk, maxLines = 1) }
+        if (mirror?.offline != null) Text(MirrorText.OFFLINE, style = ArcType.displaySub, color = c.displayDim, maxLines = 1)
+        Text(
+            keys.pad?.let { MirrorText.keysSound(it, keys.padName) } ?: MirrorText.NO_SOUND,
+            style = ArcType.displayHead,
+            color = c.displayInk,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+/**
+ * The 12 pads as keys, in the keypad's layout: each shows its note in a ring,
+ * navy for the first octave and orange for the next. Notes from the device
+ * light their key; the key playing on the phone is ringed in signal orange.
+ */
+@Composable
+private fun KeysGrid(st: MirrorState, keys: KeysUi, now: Long, onKey: (Int) -> Unit, modifier: Modifier) {
+    val c = LocalArcColors.current
+    val notes = Keys.notes(keys.root, keys.scale, keys.octave)
+    // How lit each key is: the brightest device note that falls on it.
+    val lit = HashMap<Int, Float>()
+    for ((n, l) in st.notes) {
+        val k = Keys.keyFor(n, notes) ?: continue
+        lit[k] = maxOf(lit[k] ?: 0f, glow(l, now))
+    }
+    GridPlate(modifier) {
+        PadNotes.ROWS.forEachIndexed { r, rowOffsets ->
+            if (r > 0) PlateLine()
+            Row(Modifier.weight(1f)) {
+                rowOffsets.forEachIndexed { i, k ->
+                    if (i > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(c.line))
+                    val note = notes[k]
+                    val g = lit[k] ?: 0f
+                    val upper = (Keys.octaveOf(note) - keys.octave) % 2 == 1
+                    val ring = if (upper) c.signal else c.navy
+                    Box(
+                        Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .background(lerp(c.plate, c.signal, g))
+                            .then(if (keys.playingKey == k) Modifier.border(2.dp, c.signal) else Modifier)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                role = Role.Button,
+                                onClickLabel = MirrorText.PLAY,
+                            ) { onKey(k) }
+                            .semantics { contentDescription = MirrorText.noteName(note) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        val ink = if (g > 0.3f) c.onSignal else c.ink
+                        Canvas(Modifier.fillMaxSize().padding(8.dp)) {
+                            val d = minOf(size.width, size.height)
+                            val stroke = d * 0.09f
+                            drawCircle(
+                                color = if (g > 0.3f) c.onSignal else ring,
+                                radius = d / 2 - stroke / 2,
+                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke),
+                            )
+                        }
+                        Text(Keys.solfege(note), style = ArcType.semi.copy(fontSize = 22.sp, letterSpacing = 0.02.em), color = ink, maxLines = 1)
+                        Text(
+                            Keys.octaveOf(note).toString(),
+                            style = ArcType.tiny.copy(fontSize = 11.sp),
+                            color = if (g > 0.3f) c.onSignal else c.graphite,
+                            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 4.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Under the keys: octave down, the key, scale and octave, octave up. */
+@Composable
+private fun OctaveKeys(keys: KeysUi, onOctave: (Int) -> Unit) {
+    val c = LocalArcColors.current
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        @Composable
+        fun Step(label: String, spoken: String, to: Int, mark: Modifier = Modifier) {
+            val enabled = to in Keys.MIN_OCTAVE..Keys.MAX_OCTAVE
+            Box(
+                Modifier
+                    .then(mark)
+                    .size(width = 64.dp, height = 52.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(c.tabOff)
+                    .clickable(enabled = enabled, interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button) { onOctave(to) }
+                    .semantics { contentDescription = spoken },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(label, style = ArcType.tab.copy(fontSize = 24.sp), color = if (enabled) c.onTabOff else c.graphite.copy(alpha = 0.4f))
+            }
+        }
+        Step("\u2212", MirrorText.OCTAVE_DOWN, keys.octave - 1, Modifier.coachMark("live.octave", CoachText.OCTAVE, c.navy, c.onNavy))
+        Text(
+            MirrorText.keysSummary(keys.root, keys.scale, keys.octave),
+            style = ArcType.tab,
+            color = c.ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            modifier = Modifier.weight(1f),
+        )
+        Step("+", MirrorText.OCTAVE_UP, keys.octave + 1)
+    }
+}
+
+/** The KEYS tools: the key (fixed-do names) and the scale. */
+@Composable
+private fun KeysPanel(keys: KeysUi, actions: KeysActions) {
+    val c = LocalArcColors.current
+    Caption(MirrorText.KEY, align = androidx.compose.ui.text.style.TextAlign.Start)
+    for (row in (0..11).chunked(6)) {
+        Segmented(row.map { Keys.solfege(it) }, selected = row.indexOf(keys.root), onSelect = { actions.onRoot(row[it]) })
+    }
+    Caption(MirrorText.SCALE, Modifier.padding(top = 8.dp), align = androidx.compose.ui.text.style.TextAlign.Start)
+    for (row in Scale.entries.chunked(2)) {
+        Segmented(row.map { MirrorText.scaleName(it) }, selected = row.indexOf(keys.scale), onSelect = { actions.onScale(row[it]) })
+    }
+    Text(MirrorText.KEYS_NOTE, style = ArcType.small, color = c.graphite)
 }

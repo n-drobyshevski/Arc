@@ -35,6 +35,40 @@ object MirrorText {
     const val SOUNDS_CLEARED = "Saved pad sounds cleared."
     const val PLAY = "Play"
 
+    // KEYS: one sound played as notes across the pads, like the EP-133's KEYS mode.
+    const val MODE_PADS = "Pads"
+    const val MODE_KEYS = "Keys"
+    const val KEY = "Key"
+    const val SCALE = "Scale"
+    const val OCTAVE_DOWN = "Octave down"
+    const val OCTAVE_UP = "Octave up"
+    const val PICK_SOUND = "Tap a pad in Pads first: Keys plays that pad's sample."
+    const val NO_SOUND = "No sound picked"
+    const val KEYS_NOTE = "Keys plays the pad last tapped (or played on the EP-133 in Pads) as notes. Notes the EP-133 sends in its own KEYS mode light their key. Navy keys are the first octave, orange the next."
+
+    fun scaleName(s: dev.arc.ep133.features.Scale) = when (s) {
+        dev.arc.ep133.features.Scale.CHROMATIC -> "Chromatic"
+        dev.arc.ep133.features.Scale.MAJOR -> "Major"
+        dev.arc.ep133.features.Scale.MINOR -> "Minor"
+        dev.arc.ep133.features.Scale.DORIAN -> "Dorian"
+        dev.arc.ep133.features.Scale.PHRYGIAN -> "Phrygian"
+        dev.arc.ep133.features.Scale.LYDIAN -> "Lydian"
+        dev.arc.ep133.features.Scale.MIXOLYDIAN -> "Mixolydian"
+        dev.arc.ep133.features.Scale.MAJOR_PENTATONIC -> "Major penta"
+        dev.arc.ep133.features.Scale.MINOR_PENTATONIC -> "Minor penta"
+        dev.arc.ep133.features.Scale.BLUES -> "Blues"
+    }
+
+    /** "DO MAJOR · 4": the key, the scale and the octave, under the keys. */
+    fun keysSummary(root: Int, s: dev.arc.ep133.features.Scale, octave: Int) =
+        "${dev.arc.ep133.features.Keys.solfege(root)} ${scaleName(s).uppercase()} \u00B7 $octave"
+
+    /** "MI4". */
+    fun noteName(note: Int) = dev.arc.ep133.features.Keys.solfege(note) + dev.arc.ep133.features.Keys.octaveOf(note)
+
+    /** "A 7 · kick", the KEYS sound. */
+    fun keysSound(pad: dev.arc.ep133.features.PhysicalPad, name: String?) = "${pad.groupLetter} ${pad.label}" + (name?.let { " \u00B7 $it" } ?: "")
+
     const val PAD_ORDER = "Pad numbers in project files"
     const val FROM_TOP = "From the top"
     const val FROM_BOTTOM = "From the bottom"
