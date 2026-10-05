@@ -306,7 +306,8 @@ fun GuideEdgeTab(onClick: () -> Unit, modifier: Modifier = Modifier) {
             .width(EdgeTabWidth)
             .height(112.dp)
             .clip(RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp))
-            .background(c.navy)
+            // Quiet, like an unselected key: always there, never the loudest thing on the page.
+            .background(c.tabOff)
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
             .semantics {
                 role = Role.Button
@@ -319,7 +320,7 @@ fun GuideEdgeTab(onClick: () -> Unit, modifier: Modifier = Modifier) {
         Text(
             NavText.GUIDE_TAB.uppercase(),
             style = ArcType.capsKeySmall,
-            color = c.onNavy,
+            color = c.onTabOff,
             maxLines = 1,
             softWrap = false,
             modifier = Modifier.rotateVertical(),
