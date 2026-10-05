@@ -307,14 +307,15 @@ class MainActivity : ComponentActivity() {
         // The guide overlay: from the ? key, and once by itself on the first start.
         var coach by rememberSaveable { mutableStateOf(false) }
         LaunchedEffect(Unit) {
-            val prefs = getPreferences(MODE_PRIVATE)
-            if (!prefs.getBoolean("coach_seen", false)) {
-                prefs.edit { putBoolean("coach_seen", true) }
-                coach = true
+            // Kept with the settings (and so in Documents/arc); "coach_seen" is where it was before.
+            if (!controller.settings.value.guideSeen) {
+                if (!getPreferences(MODE_PRIVATE).getBoolean("coach_seen", false)) coach = true
+                controller.setGuideSeen()
             }
         }
         // The section under the top bar; the other screens stack over it without the bars.
-        var tab by rememberSaveable { mutableStateOf(Tab.BACKUPS) }
+        // Live is the home section: the app opens on it.
+        var tab by rememberSaveable { mutableStateOf(Tab.LIVE) }
         var search by rememberSaveable { mutableStateOf(false) }
         // Comparing two backups: the backup whose "compare" picker is open, then "<idA>|<idB>".
         var comparePickFor by rememberSaveable { mutableStateOf<String?>(null) }
@@ -339,7 +340,10 @@ class MainActivity : ComponentActivity() {
             if (t == tab) return
             // Leaving a tab does what its Done key used to.
             when (tab) {
-                Tab.LIVE -> controller.closeMirror()
+                Tab.LIVE -> {
+                    controller.closeMirror()
+                    controller.stopPlayback()
+                }
                 Tab.DEVICE -> {
                     padsFor = null
                     controller.stopPlayback()
@@ -357,18 +361,33 @@ class MainActivity : ComponentActivity() {
             view.keepScreenOn = keepOn
             onDispose { view.keepScreenOn = false }
         }
-        // The mirror (re)starts when it opens and whenever a device is (re)connected.
+        // The mirror (re)starts when it opens and whenever a device is (re)connected or
+        // goes away; without one it shows the last read.
         val ready = state.device != null
         // Only while the app is in front: in the background nothing listens or redraws.
         val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
         LaunchedEffect(live, ready) {
-            if (live && ready) {
+            if (live) {
                 lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
                     controller.openMirror()
                     try {
                         kotlinx.coroutines.awaitCancellation()
                     } finally {
                         controller.pauseMirror()
+                    }
+                }
+            }
+        }
+
+        // Live's sound output stays open while Live is in front, so a press doesn't wait for one.
+        LaunchedEffect(live) {
+            if (live) {
+                lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+                    controller.openLiveAudio()
+                    try {
+                        kotlinx.coroutines.awaitCancellation()
+                    } finally {
+                        controller.closeLiveAudio()
                     }
                 }
             }
@@ -390,6 +409,8 @@ class MainActivity : ComponentActivity() {
         // After a recreation (or process death) the opened backup has to be read again.
         LaunchedEffect(contentsBackup?.id) { contentsBackup?.let { controller.openContents(it) } }
         val playing by controller.player.playing.collectAsStateWithLifecycle()
+        // Everything sounding, for Live's rings (several pads or keys for a chord).
+        val playingKeys by controller.liveKeys.collectAsStateWithLifecycle()
         val compareA = compareIds?.substringBefore('|')?.let { id -> state.backups.firstOrNull { it.id == id } }
         val compareB = compareIds?.substringAfter('|')?.let { id -> state.backups.firstOrNull { it.id == id } }
         // Also runs again after a recreation, when the result is gone.
@@ -415,6 +436,9 @@ class MainActivity : ComponentActivity() {
                     onKeepLast = { controller.setKeepLast(it) },
                     onPadOrder = controller::setPadOrder,
                     onForgetNames = controller::forgetLearned,
+                    padSoundsSize = controller::padSoundsSize,
+                    onClearPadSounds = { controller.clearPadSounds() },
+                    onNoteNames = controller::setKeysNames,
                     onRestoreFolder = { folderLauncher.launch(dev.arc.ep133.data.ExternalLibrary.INITIAL_FOLDER) },
                     // No browser installed: nothing to open.
                     onSource = { runCatching { uri.openUri(dev.arc.ep133.text.SettingsText.SOURCE_URL) } },
@@ -506,8 +530,8 @@ class MainActivity : ComponentActivity() {
                     onGuide = { guideOpen = it },
                     guide = { GuideScreen(onBack = { guideOpen = false }) },
                 ) {
-                    // Back from another tab returns to Backups first.
-                    BackHandler(enabled = tab != Tab.BACKUPS) { selectTab(Tab.BACKUPS) }
+                    // Back from another section returns to Live, the home section, first.
+                    BackHandler(enabled = tab != Tab.LIVE) { selectTab(Tab.LIVE) }
                     when (tab) {
                         Tab.LIVE -> MirrorScreen(
                             mirror = state.mirror ?: if (!ready) {
@@ -517,6 +541,36 @@ class MainActivity : ComponentActivity() {
                             },
                             nameOf = controller::mirrorName,
                             onPadOrder = controller::setPadOrder,
+                            onPad = { pad, hold -> controller.playPad(pad, hold) },
+                            onPadUp = controller::releasePad,
+                            keys = dev.arc.ep133.ui.screens.KeysUi(
+                                on = appSettings.liveKeys,
+                                root = appSettings.keysRoot,
+                                scale = appSettings.keysScale,
+                                octave = appSettings.keysOctave,
+                                names = appSettings.keysNames,
+                                pad = state.keysPad,
+                                padName = state.keysPad?.let(controller::mirrorName),
+                                playingKeys = playingKeys.mapNotNullTo(LinkedHashSet()) { it.removePrefix("keys:").takeIf { _ -> it.startsWith("keys:") }?.toIntOrNull() },
+                            ),
+                            keysActions = remember(controller) {
+                                dev.arc.ep133.ui.screens.KeysActions(
+                                    onMode = controller::setLiveKeys,
+                                    onRoot = controller::setKeysRoot,
+                                    onScale = controller::setKeysScale,
+                                    onOctave = controller::setKeysOctave,
+                                    onKey = { k, hold -> controller.playKey(k, hold) },
+                                    onKeyUp = controller::releaseKey,
+                                    onSelect = controller::selectKeysPad,
+                                )
+                            },
+                            playingPads = playingKeys.mapNotNullTo(HashSet()) { k ->
+                                k.split(':').takeIf { it.size == 3 && it[0] == "live" }?.let { p ->
+                                    val g = p[1].toIntOrNull()
+                                    val o = p[2].toIntOrNull()
+                                    if (g != null && o != null) dev.arc.ep133.features.PhysicalPad(g, o) else null
+                                }
+                            },
                             oneGroup = appSettings.liveOneGroup,
                             onOneGroup = controller::setLiveOneGroup,
                             follow = appSettings.liveFollow,

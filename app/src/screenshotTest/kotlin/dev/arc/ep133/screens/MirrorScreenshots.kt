@@ -98,10 +98,10 @@ private fun Framed(
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false) {
-    Framed(Tab.LIVE, dark = dark, guide = guide) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi()) {
+    Framed(Tab.LIVE, connected = offline == null, dark = dark, guide = guide) {
         MirrorScreen(
-            mirror = MirrorUi(state, loading = loading),
+            mirror = MirrorUi(state, loading = loading, offline = offline),
             nameOf = { if (state.learned.isEmpty()) null else names[it] },
             onPadOrder = {},
             fixedNow = NOW,
@@ -109,6 +109,10 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
             // The last hit (A 7) is in group A; B is sounding too.
             follow = true,
             initialToolsOpen = tools,
+            initialNoteOpen = noteOpen,
+            onPad = if (playingPads.isNotEmpty()) ({ _, _ -> }) else null,
+            playingPads = playingPads,
+            keys = keys,
         )
     }
 }
@@ -134,6 +138,75 @@ fun LiveToolsOpenPreview() = Live(playing, oneGroup = true, tools = true)
 @Preview(name = "Live one group small", widthDp = 360, heightDp = 668, showBackground = true)
 @Composable
 fun LiveOneGroupSmallPreview() = Live(playing, oneGroup = true)
+
+// Not connected: the pads and names as arc last read them, nothing lit.
+private val lastRead = MirrorState(activeProject = 3, learned = (0..11).associateWith { it + 1 })
+
+@PreviewTest
+@Preview(name = "Live offline", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveOfflinePreview() = Live(lastRead, oneGroup = true, offline = "Last seen Oct 5, 2:02 PM")
+
+@PreviewTest
+@Preview(name = "Live offline all groups", widthDp = 393, heightDp = 1180, showBackground = true)
+@Composable
+fun LiveOfflineAllPreview() = Live(lastRead, offline = "Last seen Oct 5, 2:02 PM")
+
+// Offline, a tapped pad plays its sample on the phone: ringed while it plays.
+@PreviewTest
+@Preview(name = "Live offline pad playing", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveOfflinePlayingPreview() = Live(lastRead, oneGroup = true, offline = "Last seen Oct 5, 2:02 PM", playingPads = setOf(PhysicalPad(0, 9), PhysicalPad(0, 6), PhysicalPad(0, 3)))
+
+// KEYS: the kick played as notes, C major from octave 4. The device holds MI4 and SO5
+// (lit); the phone plays LA4 (ringed).
+private val keysPlaying = playing.copy(
+    notes = mapOf(64 to PadLight(110, 1, NOW - 20_000_000), 79 to PadLight(80, 1, NOW - 200_000_000, offAt = NOW - 100_000_000)),
+    lastNote = 64,
+)
+private val keysUi = dev.arc.ep133.ui.screens.KeysUi(
+    on = true,
+    scale = dev.arc.ep133.features.Scale.MAJOR,
+    pad = PhysicalPad(0, 9),
+    padName = "kick",
+    playingKeys = linkedSetOf(3, 5, 7),
+)
+
+@PreviewTest
+@Preview(name = "Live keys", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveKeysPreview() = Live(keysPlaying, keys = keysUi)
+
+@PreviewTest
+@Preview(name = "Live keys dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveKeysDarkPreview() = Live(keysPlaying, dark = true, keys = keysUi)
+
+@PreviewTest
+@Preview(name = "Live keys small", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun LiveKeysSmallPreview() = Live(keysPlaying, keys = keysUi.copy(scale = dev.arc.ep133.features.Scale.MINOR_PENTATONIC))
+
+@PreviewTest
+@Preview(name = "Live keys tools", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveKeysToolsPreview() = Live(keysPlaying, keys = keysUi, tools = true)
+
+@PreviewTest
+@Preview(name = "Live keys letters", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveKeysLettersPreview() = Live(keysPlaying, keys = keysUi.copy(root = 9, scale = dev.arc.ep133.features.Scale.MINOR, names = dev.arc.ep133.features.NoteNames.LETTERS), tools = true)
+
+@PreviewTest
+@Preview(name = "Live keys letters grid", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveKeysLettersGridPreview() = Live(keysPlaying, keys = keysUi.copy(root = 9, scale = dev.arc.ep133.features.Scale.MINOR, names = dev.arc.ep133.features.NoteNames.LETTERS))
+
+// Tapping "Offline" unfolds why.
+@PreviewTest
+@Preview(name = "Live offline note open", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun LiveOfflineNotePreview() = Live(lastRead, offline = "Last seen Oct 5, 2:02 PM", noteOpen = true)
 
 @PreviewTest
 @Preview(name = "Live playing", widthDp = 393, heightDp = 1180, showBackground = true)

@@ -56,4 +56,12 @@ class LibraryIndexTest {
         assertEquals(listOf("Renamed", "my set"), m.entries.map { it.title })
         assertEquals(mapOf("mirror.order" to "FROM_BOTTOM"), m.settings)
     }
+
+    @Test
+    fun `learned pad links from an old and a new index are combined`() {
+        val old = LibraryIndexData(emptyList(), mapOf("mirror.learned" to "0:10,1:11,2:12", "app.theme" to "DARK"))
+        val newer = LibraryIndexData(emptyList(), mapOf("mirror.learned" to "5:12"))
+        val m = LibraryIndex.merge(listOf(old, newer))
+        assertEquals(mapOf("mirror.learned" to "0:10,1:11,5:12", "app.theme" to "DARK"), m.settings)
+    }
 }

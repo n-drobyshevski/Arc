@@ -9,6 +9,8 @@ enum class ThemeChoice { SYSTEM, LIGHT, DARK }
 object SettingsText {
     const val TITLE = "Settings"
     const val CLOSE = "Close settings"
+    /** A screen reader's action on a toast. */
+    const val DISMISS = "Dismiss"
 
     const val APPEARANCE = "Appearance"
     const val THEME = "Theme"
@@ -44,6 +46,10 @@ object SettingsText {
     const val FORGET_CONFIRM = "Forget which pad is which? Names come back as you press pads in Live."
     const val FORGET = "Forget"
     const val FORGOTTEN = "Learned sample names forgotten."
+    const val PAD_SOUNDS = "Pad sounds saved on the phone"
+    const val PAD_SOUNDS_NOTE = "Live keeps a copy of the samples on your pads, so they play without the EP-133."
+    const val CLEAR = "Clear"
+    fun padSounds(size: String) = "$PAD_SOUNDS: $size"
 
     const val ABOUT = "About"
     fun version(v: String) = "arc $v"

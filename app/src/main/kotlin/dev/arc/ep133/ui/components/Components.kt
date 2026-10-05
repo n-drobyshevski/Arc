@@ -61,6 +61,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import kotlinx.coroutines.launch
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
@@ -300,7 +305,7 @@ fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, mod
                     .background(if (on) c.navy else c.tabOff)
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Tab) { onSelect(i) }
                     .semantics { this.selected = on }
-                    .padding(horizontal = 10.dp, vertical = 12.dp),
+                    .padding(horizontal = 4.dp, vertical = 12.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(label.uppercase(), style = ArcType.capsKeySmall, color = if (on) c.onNavy else c.onTabOff, maxLines = 1, textAlign = TextAlign.Center)
@@ -363,6 +368,44 @@ fun TextToggle(options: List<String>, selected: Int, onSelect: (Int) -> Unit, mo
                 Text(label.uppercase(), style = ArcType.capsKeySmall, color = if (on) c.ink else c.graphite, maxLines = 1)
                 Box(Modifier.height(2.dp).width(18.dp).background(if (on) c.navy else Color.Transparent))
             }
+        }
+    }
+}
+
+/**
+ * A word under the grid as the pocket operator app shows DRUMS / KEYPAD:
+ * small and uppercase. [mark] puts the two-squares mark before it (a word
+ * that switches modes); [dim] draws it pale (a choice not taken). Screen
+ * readers read [description] when given.
+ */
+@Composable
+fun WordButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    mark: Boolean = false,
+    dim: Boolean = false,
+    description: String? = null,
+    /** Text at the top of the touch area rather than its middle (a row hugging the grid above). */
+    top: Boolean = false,
+) {
+    val c = LocalArcColors.current
+    // Quiet: caption grey, so the pads stay the loudest thing on the page.
+    val ink = if (dim) c.graphite.copy(alpha = 0.45f) else c.graphite
+    // The touch area is 44dp tall; the mark and the word stay centred on each other,
+    // at its middle or (with [top]) its top.
+    Box(
+        modifier
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = onClick)
+            .then(if (description != null) Modifier.semantics(mergeDescendants = true) { contentDescription = description } else Modifier)
+            .heightIn(min = 44.dp)
+            .padding(top = if (top) 0.dp else 6.dp, bottom = 6.dp),
+        contentAlignment = if (top) Alignment.TopStart else Alignment.CenterStart,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (mark) Icon(ArcIcon.SWAP, ink, size = 12.dp)
+            Text(label.uppercase(), style = ArcType.word, color = ink, maxLines = 1)
         }
     }
 }
@@ -537,7 +580,11 @@ fun ArcSheet(visible: Boolean, onDismiss: (() -> Unit)?, grip: Boolean = true, c
     }
 }
 
-/** A toast at the bottom of the screen; errors get an orange left border and stay longer. */
+/**
+ * A toast at the bottom of the screen; errors get an orange left border and
+ * stay longer. Swiping it sideways or down dismisses it at once, as with a
+ * notification.
+ */
 @Composable
 fun ArcToast(
     id: Long?,
@@ -559,6 +606,24 @@ fun ArcToast(
     }
     AnimatedVisibility(id != null, modifier = modifier, enter = fadeIn(), exit = fadeOut()) {
         val s = shown ?: return@AnimatedVisibility
+        val scope = androidx.compose.runtime.rememberCoroutineScope()
+        // How far the toast has been dragged; each toast starts in place.
+        val dx = remember(s.first) { androidx.compose.animation.core.Animatable(0f) }
+        val dy = remember(s.first) { androidx.compose.animation.core.Animatable(0f) }
+        var box by remember { mutableStateOf(androidx.compose.ui.unit.IntSize(1, 1)) }
+        val fling = with(LocalDensity.current) { 700.dp.toPx() }
+        val dismiss = {
+            scope.launch {
+                // Off the way it was going, then gone.
+                if (kotlin.math.abs(dx.value) >= dy.value) {
+                    dx.animateTo(if (dx.value < 0) -box.width * 1.2f else box.width * 1.2f, tween(160))
+                } else {
+                    dy.animateTo(box.height * 1.5f, tween(160))
+                }
+                onTimeout(s.first)
+            }
+            Unit
+        }
         Row(
             Modifier
                 .windowInsetsPadding(WindowInsets.safeDrawing)
@@ -566,10 +631,58 @@ fun ArcToast(
                 .padding(16.dp)
                 .widthIn(max = 528.dp)
                 .fillMaxWidth()
+                .onSizeChanged { box = it }
+                // Read before the layer moves the toast, so the finger's speed is measured on screen.
+                .pointerInput(s.first) {
+                    val tracker = androidx.compose.ui.input.pointer.util.VelocityTracker()
+                    detectDragGestures(
+                        onDragStart = { tracker.resetTracking() },
+                        onDrag = { change, drag ->
+                            change.consume()
+                            tracker.addPosition(change.uptimeMillis, change.position)
+                            scope.launch {
+                                dx.snapTo(dx.value + drag.x)
+                                // Down only: up would cover the page.
+                                dy.snapTo((dy.value + drag.y).coerceAtLeast(0f))
+                            }
+                        },
+                        onDragEnd = {
+                            val v = tracker.calculateVelocity()
+                            val sideways = kotlin.math.abs(dx.value) > box.width * 0.3f ||
+                                kotlin.math.abs(v.x) > fling && kotlin.math.abs(v.x) > kotlin.math.abs(v.y)
+                            val down = dy.value > box.height * 0.5f || v.y > fling && v.y > kotlin.math.abs(v.x)
+                            if (sideways || down) {
+                                dismiss()
+                            } else {
+                                scope.launch { dx.animateTo(0f) }
+                                scope.launch { dy.animateTo(0f) }
+                            }
+                        },
+                        onDragCancel = {
+                            scope.launch { dx.animateTo(0f) }
+                            scope.launch { dy.animateTo(0f) }
+                        },
+                    )
+                }
+                .graphicsLayer {
+                    translationX = dx.value
+                    translationY = dy.value
+                    // Fades as it leaves.
+                    val gone = maxOf(kotlin.math.abs(dx.value) / box.width, dy.value / box.height)
+                    alpha = 1f - 0.7f * gone.coerceIn(0f, 1f)
+                }
                 .clip(RoundedCornerShape(12.dp))
                 .background(c.display)
                 .height(androidx.compose.foundation.layout.IntrinsicSize.Min)
-                .semantics { liveRegion = LiveRegionMode.Polite },
+                .semantics {
+                    liveRegion = LiveRegionMode.Polite
+                    customActions = listOf(
+                        androidx.compose.ui.semantics.CustomAccessibilityAction(SettingsText.DISMISS) {
+                            onTimeout(s.first)
+                            true
+                        },
+                    )
+                },
         ) {
             // .toast.error { border-left: 5px solid var(--signal) }
             if (s.third) Box(Modifier.width(5.dp).fillMaxHeight().background(c.signal))

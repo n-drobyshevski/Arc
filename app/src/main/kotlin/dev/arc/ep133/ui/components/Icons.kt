@@ -41,7 +41,7 @@ import dev.arc.ep133.ui.theme.ArcType
  * Small geometric icons, drawn rather than taken from an icon set, so they
  * match the pocket operator app's flat shapes (REC dot, play triangle, gear).
  */
-enum class ArcIcon { DOT, RING, GEAR, HELP, REFRESH, PLUS, SEARCH, IMPORT, FOLLOW }
+enum class ArcIcon { DOT, RING, GEAR, HELP, REFRESH, PLUS, SEARCH, IMPORT, FOLLOW, SWAP }
 
 @Composable
 fun Icon(icon: ArcIcon, color: Color, modifier: Modifier = Modifier, size: Dp = 22.dp) {
@@ -117,6 +117,13 @@ private fun DrawScope.draw(icon: ArcIcon, color: Color) {
                 lineTo(w * 0.88f, w * 0.62f)
             }
             drawPath(tray, color, style = Stroke(stroke, cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+        }
+        ArcIcon.SWAP -> {
+            // Two overlapping squares, the PO app's mark beside its chosen mode (DRUMS / KEYPAD).
+            val side = w * 0.5f
+            val line = Stroke(w * 0.08f)
+            drawRect(color, topLeft = Offset(w * 0.1f, w * 0.1f), size = Size(side, side), style = line)
+            drawRect(color, topLeft = Offset(w * 0.4f, w * 0.4f), size = Size(side, side), style = line)
         }
         ArcIcon.FOLLOW -> {
             // A target: follow the group being played.

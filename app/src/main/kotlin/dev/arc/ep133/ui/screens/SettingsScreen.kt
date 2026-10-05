@@ -76,6 +76,10 @@ fun SettingsScreen(
     onPadOrder: (PadOrder) -> Unit,
     onForgetNames: () -> Unit,
     onRestoreFolder: () -> Unit,
+    /** Space taken by Live's copies of the pad sounds. */
+    padSoundsSize: suspend () -> Long = { 0L },
+    onClearPadSounds: () -> Unit = {},
+    onNoteNames: (dev.arc.ep133.features.NoteNames) -> Unit = {},
     onSource: () -> Unit,
     onFontLicence: () -> Unit,
     onDebug: () -> Unit,
@@ -88,6 +92,9 @@ fun SettingsScreen(
     // A Keep value that would delete backups, waiting for the confirmation.
     var confirmKeep by rememberSaveable { mutableStateOf<Int?>(null) }
     var confirmForget by rememberSaveable { mutableStateOf(false) }
+    // Read when the page opens; Clear sets it to nothing.
+    var soundsSize by remember { mutableStateOf<Long?>(null) }
+    androidx.compose.runtime.LaunchedEffect(Unit) { soundsSize = padSoundsSize() }
 
     Box(Modifier.fillMaxSize().background(c.shell), contentAlignment = Alignment.TopCenter) {
         Column(
@@ -147,7 +154,32 @@ fun SettingsScreen(
                 },
             )
             Text(MirrorText.ORDER_NOTE, style = ArcType.small, color = c.graphite)
+            Label(MirrorText.NOTE_NAMES)
+            Segmented(
+                dev.arc.ep133.features.NoteNames.entries.map(MirrorText::noteNames),
+                selected = settings.keysNames.ordinal,
+                onSelect = { onNoteNames(dev.arc.ep133.features.NoteNames.entries[it]) },
+            )
+            Text(MirrorText.NOTE_NAMES_NOTE, style = ArcType.small, color = c.graphite)
             ArcKey(SettingsText.FORGET_NAMES, { confirmForget = true }, Modifier.fillMaxWidth(), size = KeySize.Small)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    SettingsText.padSounds(dev.arc.ep133.text.Format.bytes(soundsSize ?: 0L)),
+                    style = ArcType.body15,
+                    color = c.ink,
+                    modifier = Modifier.weight(1f),
+                )
+                ArcKey(
+                    SettingsText.CLEAR,
+                    {
+                        onClearPadSounds()
+                        soundsSize = 0L
+                    },
+                    size = KeySize.Small,
+                    enabled = (soundsSize ?: 0L) > 0L,
+                )
+            }
+            Text(SettingsText.PAD_SOUNDS_NOTE, style = ArcType.small, color = c.graphite)
 
             Section(SettingsText.ABOUT)
             Text(SettingsText.version(version), style = ArcType.bold, color = c.ink)
