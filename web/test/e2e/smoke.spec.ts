@@ -132,6 +132,50 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
     await expect(page.locator('[data-pad].is-playing')).toHaveCount(0)
   })
 
+  await test.step('7c. sideways, KEYS is a piano: a held key sounds, a slide plays the next, a device note lights its own key', async () => {
+    const upright = page.viewportSize()
+    await page.setViewportSize({ width: 867, height: 388 })
+    // The pad just played (A ".", the kick) is the sound KEYS plays.
+    await page.getByRole('button', { name: 'Pads. Tap for keys.' }).click()
+    const piano = page.getByRole('group', { name: 'Keyboard, DO3 to DO5' })
+    await expect(piano).toBeVisible()
+    await expect(piano.locator('[data-note]')).toHaveCount(25)
+    // Every note drawn as playing, counted as it happens (the demo's kick is short).
+    await page.evaluate(() => {
+      const w = window as unknown as { __arcNotes: Set<string> }
+      w.__arcNotes = new Set()
+      new MutationObserver(() => {
+        for (const el of document.querySelectorAll('.piano__key.is-playing')) w.__arcNotes.add(el.getAttribute('data-note') ?? '')
+      }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] })
+    })
+    const played = (): Promise<string[]> => page.evaluate(() => [...(window as unknown as { __arcNotes: Set<string> }).__arcNotes].sort())
+    const box = await piano.locator('.piano__plate').boundingBox()
+    if (box === null) throw new Error('the piano has no box')
+    const white = box.width / 15
+    const y = box.y + box.height * 0.9
+    // DO4 (60), the 8th white key, then a slide up to MI4 (64).
+    await page.mouse.move(box.x + white * 7.5, y)
+    for (let attempt = 0; attempt < 3 && !(await played()).includes('60'); attempt++) {
+      await page.mouse.down()
+      await expect.poll(played, { timeout: 5_000 }).toContain('60').catch(() => undefined)
+      if (!(await played()).includes('60')) await page.mouse.up()
+    }
+    expect(await played()).toContain('60')
+    await page.mouse.move(box.x + white * 9.5, y, { steps: 12 })
+    await expect.poll(played, { timeout: 5_000 }).toContain('64')
+    await page.mouse.up()
+    await expect(page.locator('.piano__key.is-playing')).toHaveCount(0)
+    // The device's DO4 lights DO4 itself (not a key with its name, as the grid does).
+    const glowOf = (note: number): Promise<number> =>
+      piano.locator(`[data-note="${note}"]`).evaluate((el) => Number((el as HTMLElement).style.getPropertyValue('--glow')))
+    await demo(page, (d) => d.noteOn(60, 127))
+    await expect.poll(() => glowOf(60)).toBeGreaterThan(0.5)
+    expect(await glowOf(72)).toBe(0)
+    await demo(page, (d) => d.noteOff(60))
+    await page.getByRole('button', { name: 'Keys. Tap for pads.' }).click()
+    if (upright) await page.setViewportSize(upright)
+  })
+
   await test.step('8. import sample.pak: a second row', async () => {
     await selectTab(page, 'Backups')
     await importPak(page, SAMPLE_PAK)
@@ -167,6 +211,7 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
 const SIZES = [
   { name: 'phone', width: 393, height: 852 },
   { name: 'tablet', width: 840, height: 1200 },
+  { name: 'sideways', width: 867, height: 388 },
 ] as const
 const SCHEMES = ['light', 'dark'] as const
 
@@ -197,6 +242,11 @@ for (const size of SIZES) {
         await demo(page, (d) => d.noteOn(36, 127))
         await shot('live')
         await demo(page, (d) => d.noteOff(36))
+        if (size.width > size.height) {
+          await page.getByRole('button', { name: 'Pads. Tap for keys.' }).click()
+          await expect(page.locator('.piano')).toBeVisible()
+          await shot('live-keys')
+        }
       })
     })
   }

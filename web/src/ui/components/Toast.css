@@ -103,3 +103,28 @@
   font-weight: 600;
   line-height: 1.5;
 }
+
+/* A short window wider than tall (a phone on its side): at the top, over the top bar's
+ * middle between the tag and the keys, never over the keys of the piano or the bar's
+ * icons. Two lines at most there, a size down. */
+@media (orientation: landscape) and (max-height: 479px) and (min-width: 600px) {
+  .toast-host {
+    top: 0;
+    bottom: auto;
+    padding:
+      6px
+      calc(244px + env(safe-area-inset-right, 0px))
+      0
+      calc(148px + env(safe-area-inset-left, 0px));
+  }
+  .toast-live { padding: 0; }
+  .toast-frame { max-width: 560px; }
+  .toast__text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    font-size: 13px;
+  }
+  .toast { min-height: 44px; }
+}

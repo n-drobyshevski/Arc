@@ -31,6 +31,8 @@ export interface ShellProps {
   onGuide: (open: boolean) => void
   /** The guide screen, slid in while [guideOpen]. */
   guide: ComponentChildren
+  /** The top bar's middle, between the tag and the keys (Live's display line on a phone on its side). */
+  middle?: ComponentChildren
   children?: ComponentChildren
 }
 
@@ -61,6 +63,7 @@ export function Shell(props: ShellProps): JSX.Element {
           onDebug={props.onDebug}
           onSettings={props.onSettings}
           onHelp={props.onHelp}
+          middle={props.middle}
         />
       </div>
       <div class="shell__body" inert={guideOpen || undefined}>

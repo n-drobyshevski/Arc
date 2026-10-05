@@ -1,5 +1,5 @@
 // Port of app/src/main/kotlin/dev/arc/ep133/controller/ArcController.kt (Live's sounds and its last read:
-// openOfflineMirror … clearPadSounds, playPad, playKey, selectKeysPad, the KEYS settings' use)
+// openOfflineMirror … clearPadSounds, playPad, playNote, selectKeysPad, the KEYS settings' use)
 //
 // What Live plays on the phone and what it remembers of the device:
 // - the last read (project, pads, sound names), kept so Live still shows
@@ -12,7 +12,8 @@
 // - the samples on the pads decoded in memory (padMemory) and loaded into
 //   Live's output, so a press plays at once; a pad or key sounds while held
 //   (a gate) and several make a chord (LiveAudioDeps mixes them);
-// - KEYS: the pad whose sample the keys play, repitched to each key's note.
+// - KEYS: the pad whose sample the keys play, repitched to each note (the
+//   grid's keys and the piano's are both played by MIDI note).
 //
 // Web deltas:
 // - Coroutines become promises; a generation counter ends a loop (cacheGen,
@@ -32,7 +33,7 @@
 
 import { openPak, type Pak } from '../core/backup/pak'
 import { soundDetails, type SoundDetails } from '../core/features/deviceBrowser'
-import { Keys, notes as keyNotes } from '../core/features/keys'
+import { Keys } from '../core/features/keys'
 import type { NameEntry } from '../core/features/librarySearch'
 import type { LiveMirror } from '../core/features/liveMirror'
 import { fromJson as snapshotFromJson, toJson as snapshotToJson, type LiveSnapshot } from '../core/features/liveSnapshot'
@@ -81,8 +82,11 @@ export function memoryKey(slot: number, name: string): string {
 
 /** Live's voice id for a pad: "live:<group>:<offset>". */
 export const padVoice = (pad: { readonly group: number; readonly offset: number }): string => `live:${pad.group}:${pad.offset}`
-/** Live's voice id for key [index]: "keys:<index>". */
-export const keyVoice = (index: number): string => `keys:${index}`
+/** Live's voice id for a KEYS note: "note:<midi>". */
+export const noteVoice = (note: number): string => `note:${note}`
+
+/** A Live press let go of while its sound loaded for longer than this sounds only if no press came after it. */
+export const LATE_LOAD_MS = 120
 
 /** The slots on a read's pads, each once, in order. */
 function padSlots(snap: LiveSnapshot): number[] {
@@ -103,6 +107,8 @@ export interface LiveHost {
   /** The play token: a request plays only if no stop or newer request came meanwhile. */
   playToken(): number
   toast(text: string, error?: boolean): void
+  /** A toast, unless the same text is already showing (a press can raise one, and a slide presses many). */
+  toastOnce(text: string, error?: boolean): void
 }
 
 export class LiveSounds {
@@ -120,6 +126,11 @@ export class LiveSounds {
   private cacheGen = 0
   // Live's pads and keys sound while held (a gate): the voices whose finger is still down.
   private readonly held = new Set<string>()
+  // A sample on its way to memory for a press, by the same key: the presses that come
+  // meanwhile (a glissando over the keys) wait for that one load.
+  private readonly padLoads = new Map<string, Promise<{ key: string; audio: PadAudio } | null>>()
+  // When the latest Live press (pad or key) was made, for the late-load rule in startHeld.
+  private lastPressAt = 0
   // The device's project, pads and names as Live last read them, shown while it is not connected.
   private lastRead: LiveSnapshot | null = null
   private lastReadLoaded = false
@@ -396,13 +407,25 @@ export class LiveSounds {
     const { host } = this
     const sample = this.padSample(pad)
     if (sample === null) {
-      host.toast(MirrorText.NO_SAMPLE)
+      host.toastOnce(MirrorText.NO_SAMPLE)
       return null
     }
     const { slot, name } = sample
     const key = memoryKey(slot, name)
     const mem = this.fromMemory(key)
     if (mem) return { key, audio: mem }
+    // One load for every press waiting on this sound.
+    let load = this.padLoads.get(key)
+    if (load === undefined) {
+      load = this.loadForPress(slot, name, key).finally(() => this.padLoads.delete(key))
+      this.padLoads.set(key, load)
+    }
+    return load
+  }
+
+  /** What [padAudio] waits for: arc's copy or a backup, else the device; null after a toast says why. */
+  private async loadForPress(slot: number, name: string, key: string): Promise<{ key: string; audio: PadAudio } | null> {
+    const { host } = this
     try {
       let audio = await this.loadPadAudio(slot, name)
       if (audio === null) {
@@ -416,7 +439,7 @@ export class LiveSounds {
           if (e) await this.keepPadSound(slot, e.name, e.size, r.pcm, r.d.channels, r.d.sampleRate)
           audio = this.padMemory.get(key) ?? padAudioOf(r.pcm, Math.trunc(r.d.channels), Math.trunc(r.d.sampleRate))
         } else {
-          host.toast(WebText.LIVE_NO_COPY)
+          host.toastOnce(WebText.LIVE_NO_COPY)
           return null
         }
       }
@@ -478,6 +501,7 @@ export class LiveSounds {
     const { host } = this
     host.deps.liveAudio.resumeInGesture()
     const pressedAt = host.deps.perfNow()
+    this.lastPressAt = pressedAt
     const id = padVoice(pad)
     if (hold) this.held.add(id)
     const token = host.playToken()
@@ -502,25 +526,23 @@ export class LiveSounds {
   }
 
   /**
-   * Plays key [index] (0 = '.', the lowest): the KEYS sound, repitched to
-   * that key's note as it is mixed, until [releaseKey] (or to the end, with
-   * [hold] false). Call from the press.
+   * Plays [note] on the KEYS sound, repitched to it as it is mixed, until
+   * [releaseNote] (or to the end, with [hold] false). The grid's keys and the
+   * piano's both play by note. Call from the press.
    */
-  playKey(index: number, hold = true): Promise<void> {
+  playNote(note: number, hold = true): Promise<void> {
     const { host } = this
     host.deps.liveAudio.resumeInGesture()
     const pressedAt = host.deps.perfNow()
-    const id = keyVoice(index)
+    this.lastPressAt = pressedAt
+    const id = noteVoice(note)
     if (hold) this.held.add(id)
     const token = host.playToken()
     const pad = host.store.get().keysPad
     if (pad === null) {
-      host.toast(MirrorText.PICK_SOUND)
+      host.toastOnce(MirrorText.PICK_SOUND)
       return Promise.resolve()
     }
-    const st = host.deps.settings.settings
-    const note = keyNotes(st.keysRoot, st.keysScale, st.keysOctave)[index]
-    if (note === undefined) return Promise.resolve()
     const pitch = note - Keys.ROOT_NOTE
     const sample = this.padSample(pad)
     const mem = sample ? this.fromMemory(memoryKey(sample.slot, sample.name)) : null
@@ -534,9 +556,9 @@ export class LiveSounds {
     })()
   }
 
-  /** The finger left the key: its note fades out. */
-  releaseKey(index: number): void {
-    this.release(keyVoice(index))
+  /** The finger left the note: it fades out. */
+  releaseNote(note: number): void {
+    this.release(noteVoice(note))
   }
 
   private release(id: string): void {
@@ -544,21 +566,29 @@ export class LiveSounds {
     this.host.deps.liveAudio.release(id)
   }
 
-  /** Starts a Live voice; one let go while it was loading still sounds, briefly. */
+  /**
+   * Starts a Live voice. One let go of while it was loading still sounds,
+   * briefly, after a quick load. After a slow one ([LATE_LOAD_MS]) only the
+   * latest press does: a single quick tap on a sound not in memory yet is
+   * still heard, but a first glissando over one doesn't end in a burst of
+   * every note it slid over.
+   */
   private startHeld(id: string, hold: boolean, key: string, a: PadAudio, semitones: number, pressedAt: number): void {
     const { host } = this
     const out = host.deps.liveAudio
+    const lifted = hold && !this.held.has(id)
+    if (lifted && pressedAt !== this.lastPressAt && host.deps.perfNow() - pressedAt > LATE_LOAD_MS) return
     if (a.silent) {
-      host.toast(FeatureText.SILENT_SOUND)
+      host.toastOnce(FeatureText.SILENT_SOUND)
       return
     }
     if (!out.has(key)) out.preload(key, a.pcm, a.channels, a.sampleRate)
     if (!out.press(id, key, { pitch: semitones, gate: hold, pressedAt })) {
-      host.toast(FeatureText.NO_AUDIO_OUTPUT, true)
+      host.toastOnce(FeatureText.NO_AUDIO_OUTPUT, true)
       return
     }
-    if (hold && !this.held.has(id)) out.release(id)
-    if (host.deps.player.volumeOff()) host.toast(FeatureText.VOLUME_OFF)
+    if (lifted) out.release(id)
+    if (host.deps.player.volumeOff()) host.toastOnce(FeatureText.VOLUME_OFF)
   }
 
   // ---------- KEYS ----------

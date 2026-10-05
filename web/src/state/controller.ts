@@ -123,12 +123,12 @@ export class ArcController {
    * is set (or the flag from before it, MainActivity's coach_seen); markSeen sets guideSeen.
    */
   readonly coach: GuidePrefs
-  /** The Live voices sounding on the phone (pad "live:g:o" and key "keys:i" ids), for the rings (ArcController.liveKeys). */
+  /** The Live voices sounding on the phone (pad "live:g:o" and KEYS note "note:<midi>" ids), for the rings (ArcController.liveKeys). */
   readonly liveVoices: ReadonlySignal<ReadonlySet<string>>
   /** The pads sounding on the phone, as padKey numbers (MainActivity's playingPads). */
   readonly playingPads: ReadonlySignal<ReadonlySet<number>>
-  /** The keys sounding on the phone, by index (MainActivity's playingKeys). */
-  readonly playingKeys: ReadonlySignal<ReadonlySet<number>>
+  /** The KEYS notes sounding on the phone, as MIDI notes, latest last (MainActivity's playingNotes). */
+  readonly playingNotes: ReadonlySignal<ReadonlySet<number>>
 
   private readonly settingsSignal: Signal<AppSettings>
   private readonly tasks: Tasks
@@ -181,12 +181,12 @@ export class ArcController {
       }
       return out
     })
-    this.playingKeys = computed(() => {
+    this.playingNotes = computed(() => {
       const out = new Set<number>()
       for (const k of this.liveVoices.value) {
-        if (!k.startsWith('keys:')) continue
-        const i = Number(k.slice(5))
-        if (Number.isInteger(i)) out.add(i)
+        if (!k.startsWith('note:')) continue
+        const n = Number(k.slice(5))
+        if (Number.isInteger(n)) out.add(n)
       }
       return out
     })
@@ -209,6 +209,7 @@ export class ArcController {
       names: () => this.names,
       playToken: () => this.playToken,
       toast,
+      toastOnce: (text, error) => this.toastOnce(text, error),
     })
     this.store.update((s) => ({ ...s, keysPad: deps.mirrorPrefs.savedKeysPad() }))
     this.mirror = new MirrorController({
@@ -428,6 +429,12 @@ export class ArcController {
 
   toast(text: string, error = false): void {
     this.store.update((s) => ({ ...s, toast: { id: ++this.toastIds, text, error } }))
+  }
+
+  /** A toast, unless the same text is already showing (a slide over the keys presses many times). */
+  toastOnce(text: string, error = false): void {
+    if (this.store.get().toast?.text === text) return
+    this.toast(text, error)
   }
 
   dismissToast(id: number): void {
@@ -852,14 +859,14 @@ export class ArcController {
     this.live.releasePad(pad)
   }
 
-  /** Plays KEYS key [index] (0 = '.', the lowest) until [releaseKey]; [hold] false plays to the end. Call from the press. */
-  playKey(index: number, hold = true): Promise<void> {
-    return this.live.playKey(index, hold)
+  /** Plays MIDI [note] on the KEYS sound until [releaseNote]; [hold] false plays to the end. Call from the press. */
+  playNote(note: number, hold = true): Promise<void> {
+    return this.live.playNote(note, hold)
   }
 
-  /** The finger left the key: its note fades out. */
-  releaseKey(index: number): void {
-    this.live.releaseKey(index)
+  /** The finger left the note: it fades out. */
+  releaseNote(note: number): void {
+    this.live.releaseNote(note)
   }
 
   /** The sound KEYS plays: the pad last tapped, or last played on the device in the pads view. */

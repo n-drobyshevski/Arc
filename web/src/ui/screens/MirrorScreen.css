@@ -33,6 +33,31 @@
 }
 .live__one > * { flex: none; }
 
+/* The piano (KEYS in a landscape window): the display line (unless it is in the top
+ * bar), the controls row over the keys, the keys taking the rest. The keys' lower
+ * edge borders only the screen's: that is where thumbs strike. */
+.live__piano {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  max-width: 1480px;
+  height: 100%;
+  margin: 0 auto;
+  padding:
+    4px
+    calc(var(--side-strip-width) + 12px + env(safe-area-inset-right, 0px))
+    calc(10px + env(safe-area-inset-bottom, 0px))
+    calc(var(--gutter-start) + env(safe-area-inset-left, 0px));
+}
+.live__piano > * { flex: none; }
+.live__piano > .piano { flex: 1 1 0; }
+/* A tall window (a tablet, a computer): the keys stop at 340. */
+.live__piano--tall > .piano { max-height: 340px; }
+/* The more-tools strip beside the piano: up by the bar and the black keys, away from
+ * where the white keys are struck. */
+.live--piano > .side-zone__strip { top: 4%; height: 40%; }
+
 /* All groups: 720 wide at most (padding included), scrolls inside the zone. */
 .live__all {
   display: flex;
@@ -141,6 +166,14 @@
   white-space: nowrap;
 }
 .live-strip__ink { color: var(--display-ink); }
+/* In the top bar: one bar tall (44), radius 12, a little tighter. The note takes at
+ * most half the line, so a long one ("DO6, above the keys") never squeezes out the sound. */
+.live-strip--bar {
+  min-height: 44px;
+  padding: 4px 12px;
+  border-radius: 12px;
+}
+.live-strip--bar .live-strip__note { max-width: 50%; overflow: hidden; text-overflow: ellipsis; }
 .live-strip__dim { color: var(--display-dim); }
 /* ArcType.displayHead, end-aligned, takes what is left. */
 .live-strip__line {
@@ -169,6 +202,38 @@
   flex: 1 1 0 !important;
   min-height: 0;
 }
+/* The grid's box (with A–D beside it on a phone on its side) takes that height. */
+.live__pads {
+  flex: 1 1 0 !important;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* On its side: the grid at most 1.4 times as wide as tall, A–D in a column on its
+ * right (each 44 high at least, 6 apart), the two centred as one. */
+.live__one--side { max-width: 900px; }
+.live__one--side .live__pads {
+  flex-direction: row;
+  justify-content: center;
+  gap: 12px;
+}
+.live__one--side .live-group--big {
+  flex: 0 1 auto !important;
+  height: 100%;
+  aspect-ratio: 1.4;
+  min-width: 0;
+}
+.live-keys--column {
+  flex: none;
+  flex-direction: column;
+  gap: 6px;
+  width: 88px;
+}
+.live-keys--column .live-keys__slot {
+  flex-direction: row;
+  align-items: center;
+}
+.live-keys--column .live-keys__key { flex: 1 1 0; min-height: 44px; height: 100%; }
 
 /* lerp(graphite, signal, groupGlow) */
 .live-group__caption {
@@ -309,6 +374,37 @@
   margin-top: -4px;
   padding: 0 var(--space-4);
 }
+/* Over the piano: the words together at the start, 24 apart; − OCT + at the end. */
+.live-mode--piano {
+  justify-content: flex-start;
+  gap: 24px;
+  margin-top: 0;
+}
+.live-mode__octave {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+}
+/* − and +: 48 wide, never squeezed, quiet as the words; greyed at the octave's ends. */
+.live-step {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--graphite);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.live-step:disabled { color: color-mix(in srgb, var(--graphite) 35%, transparent); cursor: default; }
+.live-step:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
 
 /* ---------- the KEYS grid ---------- */
 
@@ -321,7 +417,7 @@
 .live-kgrid__plate { flex: 1 1 0; min-height: 0; }
 .live-kgrid .live-deck__row { flex: 1 1 0; min-height: 0; }
 
-/* A key: a dark cap, lerp(dark face, signal, glow); its ring pale (orange an octave up), onSignal when lit.
+/* A key: a dark cap, lerp(dark face, signal, glow); its ring pale (orange on the scale's root), onSignal when lit.
  * (Compose: the plate, and a navy ring, which a dark cap would hide.) */
 .live-key {
   --key-ring: var(--hw-ring);
@@ -338,7 +434,7 @@
   border-radius: var(--radius-key);
   overflow: hidden;
 }
-.live-key--upper { --key-ring: var(--signal); }
+.live-key--root { --key-ring: var(--signal); }
 /* Canvas(fillMaxSize.padding(8)): a circle of the smaller side, stroke 9% of it. */
 .live-key__ring {
   position: absolute;
@@ -503,3 +599,16 @@
 }
 .live-legend__key svg { display: block; width: 100%; height: 100%; }
 .live-legend__key--outline { box-shadow: inset 0 0 0 2px var(--signal); }
+/* The piano's keys in miniature: flat, outlined in its line colour. */
+.live-legend__key--piano { box-shadow: inset 0 0 0 1px var(--piano-line); }
+.live-legend__key--piano.live-legend__key--outline { box-shadow: inset 0 0 0 2px var(--piano-signal); }
+.live-legend__digit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ink);
+}

@@ -308,27 +308,31 @@ describe('Live: playing pads', () => {
 })
 
 describe('Live: KEYS', () => {
-  it('asks for a pad first, then plays its sample at each key\'s note', async () => {
+  it('asks for a pad first, then plays its sample at each note', async () => {
     const h = await liveOn()
     await copied(h)
-    await h.c.playKey(0)
+    await h.c.playNote(60)
     expect(h.toasts.at(-1)?.text).toBe(MirrorText.PICK_SOUND)
     h.c.selectKeysPad(A1)
-    await h.c.playKey(0)
-    await h.c.playKey(4)
+    await h.c.playNote(60)
+    await h.c.playNote(64)
     expect(h.liveAudio.presses.map((p) => [p.id, p.key, p.options.pitch])).toEqual([
-      ['keys:0', '1:kick', 0],
-      ['keys:4', '1:kick', 4],
+      ['note:60', '1:kick', 0],
+      ['note:64', '1:kick', 4],
     ])
-    expect(h.c.playingKeys.value).toEqual(new Set([0, 4]))
-    h.c.releaseKey(4)
-    expect(h.liveAudio.releases).toEqual(['keys:4'])
-    h.c.setKeysOctave(5)
-    h.c.setKeysScale('MAJOR')
-    h.c.setKeysRoot(2)
-    await h.c.playKey(2)
-    // D major from D5: D E F# → +2 semitones from C4, +12, +4.
-    expect(h.liveAudio.presses.at(-1)?.options.pitch).toBe(12 + 2 + 4)
+    expect(h.c.playingNotes.value).toEqual(new Set([60, 64]))
+    h.c.releaseNote(64)
+    expect(h.liveAudio.releases).toEqual(['note:64'])
+    // D5 (74), as the grid's D major from D5 or the piano plays it: 14 semitones over C4.
+    await h.c.playNote(74)
+    expect(h.liveAudio.presses.at(-1)?.options.pitch).toBe(14)
+  })
+
+  it('a slide over the keys says why it is quiet once, not once a key', async () => {
+    const h = await liveOn()
+    await copied(h)
+    for (const n of [60, 62, 64, 65, 67]) await h.c.playNote(n)
+    expect(h.toasts.filter((t) => t.text === MirrorText.PICK_SOUND)).toHaveLength(1)
   })
 
   it('keeps the KEYS choices with the settings, clamped, written only when they change', async () => {

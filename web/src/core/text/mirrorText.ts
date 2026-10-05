@@ -5,6 +5,7 @@
 // Web delta: jsToFixed and String.format("%.0f") are native toFixed.
 
 import { Keys, NoteNames, Scale } from '../features/keys'
+import { KeyMark } from '../features/piano'
 import type { Hit } from '../features/liveMirror'
 import { noteName, type PhysicalPad } from '../features/padNotes'
 import { FeatureText } from './featureText'
@@ -64,10 +65,71 @@ export const MirrorText = {
   },
   KEYS_NOTE:
     'Keys plays the pad last tapped (or played on the EP-133 in Pads) as notes. Notes the EP-133 sends in its own KEYS mode light their key.',
+  PIANO_HINT: 'Turn the phone sideways for a piano (with auto-rotate off, tap the rotate button Android shows).',
   LEGEND: 'Colours',
-  LEGEND_OCTAVE: 'Ring: the octave, navy and orange in turn (its number is in the corner)',
+  LEGEND_ROOT: "Orange ring: the key's root",
+  LEGEND_IN_SCALE: 'Navy ring: in the scale',
+  // The piano's rows: it shows every note, so the ones outside the scale too.
+  LEGEND_OUT: 'Dimmed: outside the scale (still plays)',
+  LEGEND_C: 'Number: the octave, on each C',
   LEGEND_DEVICE: 'Filled: played on the EP-133',
   LEGEND_PHONE: 'Outlined: playing on the phone',
+
+  // The piano in landscape: − and + step the octave, and the key gets its own word.
+  OCTAVE_DOWN: 'Octave down',
+  OCTAVE_UP: 'Octave up',
+
+  /** "KEY DO", the key word above the piano. */
+  keyWord(root: number, names: NoteNames): string {
+    return `${MirrorText.KEY} ${Keys.name(root, names)}`
+  },
+
+  keyChoice(root: number, names: NoteNames): string {
+    return `${MirrorText.KEY}: ${Keys.name(root, names)}. Tap to change.`
+  },
+
+  /** "MAJ", the scale word when the row above the piano runs out of room. */
+  scaleCode(s: Scale): string {
+    switch (s) {
+      case Scale.CHROMATIC:
+        return 'Chr'
+      case Scale.MAJOR:
+        return 'Maj'
+      case Scale.MINOR:
+        return 'Min'
+      case Scale.DORIAN:
+        return 'Dor'
+      case Scale.PHRYGIAN:
+        return 'Phr'
+      case Scale.LYDIAN:
+        return 'Lyd'
+      case Scale.MIXOLYDIAN:
+        return 'Mix'
+      // The word is upper-cased, so the two pentatonics differ in letters, not case.
+      case Scale.MAJOR_PENTATONIC:
+        return 'Maj.P'
+      case Scale.MINOR_PENTATONIC:
+        return 'Min.P'
+      case Scale.BLUES:
+        return 'Blu'
+    }
+  },
+
+  /** A piano key for screen readers: "LA4, root", "LA4, in the scale" or "FA4, outside the scale". */
+  pianoKey(note: number, names: NoteNames, mark: KeyMark): string {
+    const where = mark === KeyMark.ROOT ? ', root' : mark === KeyMark.IN ? ', in the scale' : ', outside the scale'
+    return MirrorText.noteName(note, names) + where
+  },
+
+  /** "Keyboard, DO3 to DO5", the piano as a whole for screen readers. */
+  pianoRange(lo: number, hi: number, names: NoteNames): string {
+    return `Keyboard, ${MirrorText.noteName(lo, names)} to ${MirrorText.noteName(hi, names)}`
+  },
+
+  /** "DO2, below the keys": a note from the EP-133 the piano doesn't reach, for the display and the tick at that end. */
+  outOfRange(note: number, names: NoteNames, below: boolean): string {
+    return MirrorText.noteName(note, names) + (below ? ', below the keys' : ', above the keys')
+  },
 
   scaleName(s: Scale): string {
     switch (s) {

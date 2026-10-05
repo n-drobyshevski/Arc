@@ -36,6 +36,16 @@
   --line: #1E1F21;
   --ok: #17613F;
   --on-ok: #F4F2EE;
+  /* Live's landscape piano: key faces, names and rings on black keys, dimmed keys
+   * (outside the scale), the line between keys, its signal orange, the octave digit. */
+  --piano-white: #F5F4F0;
+  --piano-black: #1E1F21;
+  --on-piano-black: #AEB4F0;
+  --key-out: #CDCCCC;
+  --key-out-black: #3A3B3F;
+  --piano-line: #1E1F21;
+  --piano-signal: #FF4C00;
+  --piano-digit: #55545C;
   /* Hatching (Components.kt Modifier.hatch): "/" lines in keyEdge, 1px wide.
    * An SVG tile, so the step is exactly 9px horizontally (and 7px for the side
    * strip, SideZone.kt); a CSS gradient's period would be off by sqrt(2).
@@ -66,6 +76,13 @@
   --line: #0E0F10;
   --ok: #3FA877;
   --on-ok: #0E1A14;
+  --piano-white: #5D5E65;
+  --piano-black: #121314;
+  --key-out: #46474C;
+  --key-out-black: #303135;
+  --piano-line: #B2B3B5;
+  --piano-signal: #FFA070;
+  --piano-digit: #BCBDBF;
   --hatch: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='9'%3E%3Cpath d='M-1 1L1 -1M0 9L9 0M8 10L10 8' stroke='%230E0F10' stroke-width='1'/%3E%3C/svg%3E");
   --hatch-7: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='7'%3E%3Cpath d='M-1 1L1 -1M0 7L7 0M6 8L8 6' stroke='%230E0F10' stroke-width='1'/%3E%3C/svg%3E");
 }
@@ -93,6 +110,13 @@
     --line: #0E0F10;
     --ok: #3FA877;
     --on-ok: #0E1A14;
+    --piano-white: #5D5E65;
+    --piano-black: #121314;
+    --key-out: #46474C;
+    --key-out-black: #303135;
+    --piano-line: #B2B3B5;
+    --piano-signal: #FFA070;
+    --piano-digit: #BCBDBF;
     --hatch: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='9'%3E%3Cpath d='M-1 1L1 -1M0 9L9 0M8 10L10 8' stroke='%230E0F10' stroke-width='1'/%3E%3C/svg%3E");
     --hatch-7: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='7' height='7'%3E%3Cpath d='M-1 1L1 -1M0 7L7 0M6 8L8 6' stroke='%230E0F10' stroke-width='1'/%3E%3C/svg%3E");
   }

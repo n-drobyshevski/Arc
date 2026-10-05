@@ -174,7 +174,7 @@ describe('tokens.css', () => {
   const darkDelta = kotlinColors('val DarkArcColors = LightArcColors.copy(')
 
   it('has every light colour of ArcTheme.kt with the exact value', () => {
-    expect(light.size).toBe(21)
+    expect(light.size).toBe(29)
     const root = cssBlock(':root')
     for (const [name, hex] of light) expect(root.get(name), name).toBe(hex)
   })

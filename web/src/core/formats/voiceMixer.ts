@@ -9,7 +9,8 @@
 // A voice sounds until it is released (a gate), then fades out over
 // FADE_MS; it sounds at least MIN_GATE_MS, so the quickest tap is heard.
 // The same key again cuts the old voice short with a click-free fade, and past
-// maxVoices the oldest does the same.
+// maxVoices the oldest does the same: the oldest let go of first, then the
+// oldest still held, so a run up the keys keeps the other hand's chord.
 //
 // Web deltas:
 // - No threads: start/release/stopAll queue commands that take effect at the
@@ -177,8 +178,9 @@ export class VoiceMixer {
       case 'start': {
         if (c.pcm.length < c.channels) return
         this.voices.filter((v) => v.key === c.key && !v.choked).forEach((v) => this.cut(v))
+        // Past the cap: the oldest let go of first, then the oldest still held.
         while (this.voices.filter((v) => !v.choked).length >= this.maxVoices) {
-          this.cut(this.voices.find((v) => !v.choked)!)
+          this.cut(this.voices.find((v) => !v.choked && v.fadeAt !== HELD) ?? this.voices.find((v) => !v.choked)!)
         }
         this.voices.push(new Voice(c.key, c.pcm, c.channels, c.step, this.frameCount))
         this.started.push({ key: c.key, tag: c.tag, frame: this.frameCount })
