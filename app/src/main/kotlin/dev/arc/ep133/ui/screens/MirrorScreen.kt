@@ -1406,7 +1406,9 @@ private fun KeysPanel(keys: KeysUi, actions: KeysActions, piano: Boolean = false
  * What the keys' colours mean, each with a small key drawn as the grid draws
  * it. One legend for the grid and the piano; the [piano] adds the keys only
  * it has (those outside the scale) and its octave numbers. With [names] (the
- * keys show them), the small keys carry a name in place of a ring.
+ * keys show them), the small keys carry a name in place of a ring. The piano
+ * has no rings at all: its root has a bar at its foot, and with names off its
+ * scale is told by the dimmed keys outside it.
  */
 @Composable
 private fun KeysLegend(piano: Boolean = false, names: NoteNames? = null) {
@@ -1420,16 +1422,25 @@ private fun KeysLegend(piano: Boolean = false, names: NoteNames? = null) {
     val rootName = names?.let { Keys.name(0, it) }
     val scaleName = names?.let { Keys.name(2, it) }
     Caption(MirrorText.LEGEND, align = androidx.compose.ui.text.style.TextAlign.Start)
+    // The piano without names draws nothing in its keys' middles.
+    val bare = piano && names == null
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        LegendRow(if (names != null) MirrorText.LEGEND_ROOT_NAMED else MirrorText.LEGEND_ROOT) { LegendKey(ring = if (piano) c.rootOn(face) else c.signal, fill = face, name = rootName) }
-        LegendRow(if (names != null) MirrorText.LEGEND_IN_SCALE_NAMED else MirrorText.LEGEND_IN_SCALE) { LegendKey(ring = if (names != null) nameInk else inScale, fill = face, name = scaleName) }
+        if (piano) {
+            LegendRow(MirrorText.LEGEND_ROOT_BAR) { LegendKey(ring = c.rootOn(face), fill = face, name = rootName, bar = c.rootOn(face), bare = bare) }
+        } else {
+            LegendRow(if (names != null) MirrorText.LEGEND_ROOT_NAMED else MirrorText.LEGEND_ROOT) { LegendKey(ring = c.signal, fill = face, name = rootName) }
+        }
+        // (The bare piano's scale shows by the dimmed keys alone: its row is the next.)
+        if (!bare) {
+            LegendRow(if (names != null) MirrorText.LEGEND_IN_SCALE_NAMED else MirrorText.LEGEND_IN_SCALE) { LegendKey(ring = if (names != null) nameInk else inScale, fill = face, name = scaleName) }
+        }
         if (piano) {
             LegendRow(MirrorText.LEGEND_OUT) { LegendKey(ring = null, fill = c.keyOut) }
             LegendRow(MirrorText.LEGEND_C) { LegendKey(ring = null, fill = face, digit = "4") }
         }
-        LegendRow(MirrorText.LEGEND_DEVICE) { LegendKey(ring = c.onSignal, fill = c.signal, name = scaleName) }
+        LegendRow(MirrorText.LEGEND_DEVICE) { LegendKey(ring = c.onSignal, fill = c.signal, name = scaleName, bare = bare) }
         LegendRow(MirrorText.LEGEND_PHONE) {
-            LegendKey(ring = if (names != null) nameInk else inScale, fill = face, outline = if (piano) c.pianoSignal else c.signal, name = scaleName)
+            LegendKey(ring = if (names != null) nameInk else inScale, fill = face, outline = if (piano) c.pianoSignal else c.signal, name = scaleName, bare = bare)
         }
     }
 }
@@ -1446,11 +1457,20 @@ private fun LegendRow(text: String, keys: @Composable () -> Unit) {
 
 /**
  * A key in miniature: its face (lit orange, or dimmed, as [fill] says), its
- * ring if it has one (or, with a [name], that name in the ring's colour), the
- * phone's outline, and an octave [digit] in the corner.
+ * ring if it has one (or, with a [name], that name in the ring's colour; [bare],
+ * neither), a root's [bar] at its foot, the phone's outline, and an octave
+ * [digit] in the corner.
  */
 @Composable
-private fun LegendKey(ring: Color?, fill: Color? = null, outline: Color? = null, digit: String? = null, name: String? = null) {
+private fun LegendKey(
+    ring: Color?,
+    fill: Color? = null,
+    outline: Color? = null,
+    digit: String? = null,
+    name: String? = null,
+    bar: Color? = null,
+    bare: Boolean = false,
+) {
     val c = LocalArcColors.current
     Box(
         Modifier
@@ -1460,7 +1480,12 @@ private fun LegendKey(ring: Color?, fill: Color? = null, outline: Color? = null,
             .then(if (outline != null) Modifier.border(2.dp, outline, RoundedCornerShape(4.dp)) else Modifier)
             .padding(if (digit != null) 3.dp else 5.dp),
     ) {
-        if (ring != null && name != null) {
+        if (bar != null) {
+            Box(Modifier.align(Alignment.BottomCenter).size(width = 10.dp, height = 2.dp).clip(RoundedCornerShape(1.dp)).background(bar))
+        }
+        if (bare) {
+            // Nothing in the middle.
+        } else if (ring != null && name != null) {
             Text(name, style = ArcType.semi.copy(fontSize = 9.sp, lineHeight = 1.em), color = ring, maxLines = 1, softWrap = false, modifier = Modifier.align(Alignment.Center))
         } else if (ring != null) {
             Canvas(Modifier.fillMaxSize()) {

@@ -55,6 +55,8 @@ object MirrorText {
     /** The same, when the keys show their names (and no rings). */
     const val LEGEND_ROOT_NAMED = "Orange name: the key's root"
     const val LEGEND_IN_SCALE_NAMED = "Name: in the scale"
+    /** The piano's root, which has no ring. */
+    const val LEGEND_ROOT_BAR = "Orange bar: the key's root"
     // The piano's rows: it shows every note, so the ones outside the scale too.
     const val LEGEND_OUT = "Dimmed: outside the scale (still plays)"
     const val LEGEND_C = "Number: the octave, on each C"

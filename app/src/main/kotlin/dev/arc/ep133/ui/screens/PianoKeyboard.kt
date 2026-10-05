@@ -76,10 +76,10 @@ import kotlin.math.roundToInt
 /*
  * Live's KEYS on a phone on its side (an addition): a chromatic piano in place
  * of the EP-133's 4×3 keypad. Every key plays; the key and scale only mark
- * them, as the grid does: the root orange, the scale's other notes in ink
- * (navy rings while names are off), dimmed and unnamed outside it; the root
- * also has a bar at its foot. A named key shows only its name, no ring. A
- * finger slides from key to key (a glissando), and several fingers make a chord.
+ * them: the root with an orange bar at its foot (and its name in orange), the
+ * scale's other notes named in ink, dimmed and unnamed outside it. No rings,
+ * names on or off. A finger slides from key to key (a glissando), and several
+ * fingers make a chord.
  *
  * The keys are caps, as every key in the app (see Cap.kt): each a flat face
  * over a flat edge offset down and to the right, sitting in the device's grey
@@ -376,10 +376,9 @@ private fun DrawScope.drawPiano(
         val cy = face.bottom - foot - ring / 2
         val onLit = g > 0.3f
         if (mark != KeyMark.OUT) {
-            // Named, the name alone (the root's in orange); unnamed, the ring.
+            // The name (the root's in orange) and the root's bar; no ring.
             val root = mark == KeyMark.ROOT
-            val ink = if (onLit) c.onSignal else if (root) rootOnWhite else c.navy
-            drawMark(mark, ink, Offset(cx, cy), ring, face.bottom, circle = !keys.showNames)
+            if (root) drawRootBar(if (onLit) c.onSignal else rootOnWhite, cx, ring, face.bottom)
             if (keys.showNames) drawLabel(labels.name(k.note), if (onLit) c.onSignal else if (root) rootOnWhite else c.ink, Offset(cx, cy))
         }
         // Each C carries its octave; OCT's own C in ink.
@@ -412,8 +411,8 @@ private fun DrawScope.drawPiano(
             val cx = face.center.x
             val cy = face.bottom - 12.dp.toPx() - blackRing / 2
             val ink = if (onLit) c.onSignal else if (mark == KeyMark.ROOT) c.signal else c.onPianoBlack
-            // Named, the name alone, in the ring's colour; unnamed, the ring.
-            drawMark(mark, ink, Offset(cx, cy), blackRing, face.bottom, circle = !keys.showNames)
+            // The name, in the mark's colour, and the root's bar; no ring.
+            if (mark == KeyMark.ROOT) drawRootBar(ink, cx, blackRing, face.bottom)
             if (keys.showNames) drawLabel(labels.name(k.note), ink, Offset(cx, cy))
         }
         if (playing) drawHeld(face, blackCorner, held, c.pianoSignal)
@@ -425,7 +424,7 @@ private fun DrawScope.drawPiano(
 }
 
 /**
- * The root's orange ring on [face], 3:1 or more: the signal orange where it
+ * The root's orange (its name and bar) on [face], 3:1 or more: the signal orange where it
  * holds that, its darker edge on a pale face (the light theme's keys and
  * plate), the lighter piano orange on a mid one (the dark theme's white keys).
  */
@@ -440,19 +439,11 @@ private fun contrast(a: Color, b: Color): Float {
     return (hi + 0.05f) / (lo + 0.05f)
 }
 
-/**
- * A key's mark: a ring around [center] (with [circle]; navy in the scale, thicker on the root),
- * and on the root a bar at the key's foot.
- */
-private fun DrawScope.drawMark(mark: KeyMark, color: Color, center: Offset, d: Float, bottom: Float, circle: Boolean = true) {
-    val root = mark == KeyMark.ROOT
-    val stroke = (if (root) 3.dp else 2.dp).toPx()
-    if (circle) drawCircle(color, radius = d / 2 - stroke / 2, center = center, style = Stroke(stroke))
-    if (root) {
-        val w = d * 0.6f
-        val h = 3.dp.toPx()
-        drawRoundRect(color, Offset(center.x - w / 2, bottom - 7.dp.toPx() - h), Size(w, h), CornerRadius(h / 2))
-    }
+/** The root's mark: a bar at the key's foot, [d] × 0.6 wide, centred on [cx]. */
+private fun DrawScope.drawRootBar(color: Color, cx: Float, d: Float, bottom: Float) {
+    val w = d * 0.6f
+    val h = 3.dp.toPx()
+    drawRoundRect(color, Offset(cx - w / 2, bottom - 7.dp.toPx() - h), Size(w, h), CornerRadius(h / 2))
 }
 
 private fun DrawScope.drawLabel(text: TextLayoutResult, color: Color, center: Offset) =
