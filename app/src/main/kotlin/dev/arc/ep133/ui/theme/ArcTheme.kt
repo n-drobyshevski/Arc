@@ -74,8 +74,8 @@ val LightArcColors = ArcColors(
     danger = Color(0xFFB3261E),
     navy = Color(0xFF1F2558),
     onNavy = Color(0xFFF4F2EE),
-    tabOff = Color(0xFFC9C8D0),
-    onTabOff = Color(0xFFF4F2EE),
+    tabOff = Color(0xFFD3D2DA),
+    onTabOff = Color(0xFF5C5B6C),
     plate = Color(0xFFD7D8D4),
     line = Color(0xFF1E1F21),
     ok = Color(0xFF17613F),
@@ -97,7 +97,7 @@ val DarkArcColors = LightArcColors.copy(
     navy = Color(0xFFAEB4F0),
     onNavy = Color(0xFF14162B),
     tabOff = Color(0xFF3A3B44),
-    onTabOff = Color(0xFF8E8F99),
+    onTabOff = Color(0xFFA3A4AE),
     plate = Color(0xFF2E2F33),
     line = Color(0xFF0E0F10),
     ok = Color(0xFF3FA877),
@@ -154,7 +154,7 @@ object ArcType {
     val capsKey = BaseText.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.06.em, lineHeight = 1.1.em)
     val capsKeySmall = capsKey.copy(fontSize = 13.sp)
     val capsKeyWide = capsKey.copy(fontSize = 16.sp)
-    val tab = BaseText.copy(fontSize = 15.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.05.em, lineHeight = 1.em)
+    val tab = BaseText.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.05.em, lineHeight = 1.em)
     val semi = BaseText.copy(fontWeight = FontWeight.SemiBold)
 }
 

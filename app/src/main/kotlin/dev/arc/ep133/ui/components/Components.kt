@@ -60,6 +60,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
@@ -267,7 +268,7 @@ fun PlateLine() {
 val PlateRadius = 18.dp
 
 /** Diagonal hatching in [color], as on the pocket operator app's empty side panels. */
-fun Modifier.hatch(color: Color, spacing: Dp = 9.dp, width: Dp = 1.dp): Modifier = drawBehind {
+fun Modifier.hatch(color: Color, spacing: Dp = 9.dp, width: Dp = 1.dp): Modifier = clipToBounds().drawBehind {
     val step = spacing.toPx()
     val stroke = width.toPx()
     var x = -size.height

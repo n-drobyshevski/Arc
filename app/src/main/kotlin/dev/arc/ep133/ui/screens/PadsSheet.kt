@@ -96,8 +96,8 @@ private fun PadCell(pad: Int, slot: Int?, name: String?, playing: Boolean, onCli
     val c = LocalArcColors.current
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
-    // A pad with nothing to play is hatched, as the pocket operator app marks unused space.
-    val empty = slot == null || name == null
+    // An empty pad is hatched, as the pocket operator app marks unused space.
+    val empty = slot == null
     Column(
         modifier
             .fillMaxHeight()
