@@ -10,6 +10,7 @@ import dev.arc.ep133.ui.components.TextToggle
 import dev.arc.ep133.ui.components.CoachYellowInk
 import dev.arc.ep133.ui.components.CoachYellow
 import dev.arc.ep133.ui.components.coachMark
+import dev.arc.ep133.ui.components.coachClear
 import dev.arc.ep133.ui.components.ArcIcon
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
@@ -976,7 +977,7 @@ private fun SidewaysRow(keys: KeysUi, actions: KeysActions, oneGroup: Boolean, o
                 top = false,
             )
             Spacer(Modifier.weight(1f).widthIn(min = WordGap))
-            StepWord("\u2212", MirrorText.OCTAVE_DOWN, enabled = keys.octave > Keys.MIN_OCTAVE) { actions.onOctave(keys.octave - 1) }
+            StepWord("\u2212", MirrorText.OCTAVE_DOWN, "live.down", enabled = keys.octave > Keys.MIN_OCTAVE) { actions.onOctave(keys.octave - 1) }
             PickWord(
                 label = MirrorText.octave(keys.octave),
                 options = (Keys.MIN_OCTAVE..Keys.MAX_OCTAVE).toList(),
@@ -988,7 +989,7 @@ private fun SidewaysRow(keys: KeysUi, actions: KeysActions, oneGroup: Boolean, o
                 alignEnd = true,
                 top = false,
             )
-            StepWord("+", MirrorText.OCTAVE_UP, enabled = keys.octave < Keys.MAX_OCTAVE) { actions.onOctave(keys.octave + 1) }
+            StepWord("+", MirrorText.OCTAVE_UP, "live.up", enabled = keys.octave < Keys.MAX_OCTAVE) { actions.onOctave(keys.octave + 1) }
         }
     }
 }
@@ -999,12 +1000,13 @@ private val WordGap = 24.dp
 /** − and + are this wide, however tight the row. */
 private val StepWidth = 48.dp
 
-/** − or + by the octave word: one octave down or up, greyed (and disabled) at either end. */
+/** − or + by the octave word: one octave down or up, greyed (and disabled) at either end. [id]: the guide overlay's tags keep off it. */
 @Composable
-private fun StepWord(glyph: String, description: String, enabled: Boolean, onClick: () -> Unit) {
+private fun StepWord(glyph: String, description: String, id: String, enabled: Boolean, onClick: () -> Unit) {
     val c = LocalArcColors.current
     Box(
         Modifier
+            .coachClear(id)
             .clip(RoundedCornerShape(6.dp))
             .clickable(
                 enabled = enabled,
