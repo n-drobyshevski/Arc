@@ -2,8 +2,14 @@ name: Android
 
 on:
   pull_request:
+    paths-ignore:
+      - 'web/**'
+      - '.github/workflows/web.yml'
   push:
     branches: [main]
+    paths-ignore:
+      - 'web/**'
+      - '.github/workflows/web.yml'
   workflow_dispatch:
 
 concurrency:
