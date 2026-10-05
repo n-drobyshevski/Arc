@@ -721,8 +721,8 @@ private fun Group(
 @Composable
 private fun Deck(modifier: Modifier, big: Boolean, content: @Composable ColumnScope.(gap: Dp) -> Unit) {
     val hw = LocalHwColors.current
-    val gap = if (big) 10.dp else 6.dp
-    val inset = if (big) 12.dp else 8.dp
+    val gap = if (big) DeckGapBig else 6.dp
+    val inset = if (big) DeckInsetBig else 8.dp
     Column(
         modifier
             .fillMaxWidth()
@@ -732,6 +732,9 @@ private fun Deck(modifier: Modifier, big: Boolean, content: @Composable ColumnSc
         verticalArrangement = Arrangement.spacedBy(gap),
     ) { content(gap) }
 }
+
+private val DeckGapBig = 10.dp
+private val DeckInsetBig = 12.dp
 
 /** A light around a lit pad or key: [g] 0..1. */
 private fun Modifier.litGlow(g: Float, color: Color, shape: androidx.compose.ui.graphics.Shape): Modifier =
@@ -1318,7 +1321,11 @@ private fun KeysGrid(st: MirrorState, keys: KeysUi, now: Long, actions: KeysActi
     }
     // The names keep inside their rings where the grid is squeezed (a small window on its side).
     BoxWithConstraints(modifier) {
-        val circle = minOf((maxHeight - 3.dp) / 4, (maxWidth - 2.dp) / 3) - 16.dp
+        // A key's room: the deck's share, less its padding, the caps' edges and the gaps.
+        val circle = minOf(
+            (maxHeight - DeckInsetBig * 2 - CapDy - DeckGapBig * 3) / 4,
+            (maxWidth - DeckInsetBig * 2 - CapDx - DeckGapBig * 2) / 3,
+        ) - 16.dp
         val nameSize = with(LocalDensity.current) { minOf(22.sp.toDp(), circle / 1.9f).toSp() }
         val hw = LocalHwColors.current
         val shape = RoundedCornerShape(8.dp)
