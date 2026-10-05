@@ -22,6 +22,7 @@ import { createContext, type ComponentChildren, type JSX } from 'preact'
 import { signal, type Signal } from '@preact/signals'
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { CoachText } from '../../core/text/coachText'
+import { WebText } from '../../core/text/webText'
 import {
   COACH_METRICS,
   arrowHead,
@@ -90,7 +91,8 @@ export const COACH_MARKS: Readonly<Record<CoachId, CoachMarkSpec>> = Object.free
   'device.refresh': navyTag(CoachText.REFRESH),
   'device.add': { label: CoachText.ADD_SAMPLES, face: 'var(--signal)', ink: 'var(--on-signal)' },
   'device.switch': yellowTag(CoachText.SOUNDS_PROJECTS),
-  'device.play': yellowTag(CoachText.PLAY),
+  // Web: "Play it here" replaces CoachText.PLAY "Play on the phone".
+  'device.play': yellowTag(WebText.COACH_PLAY),
 })
 
 const isCoachId = (id: string): id is CoachId => (COACH_IDS as readonly string[]).includes(id)

@@ -10,6 +10,15 @@ import { crc32 } from './crc32'
 /** The message JS (V8) gives when a DataView read falls outside the buffer. */
 export const DATAVIEW_RANGE = 'Offset is outside the bounds of the DataView'
 
+/**
+ * Web addition: the most [readZip] unpacks from one file, all entries
+ * together (the EP-133 holds 128 MB of sounds). Without it a small crafted
+ * zip (one deflated entry, or many directory entries sharing one) could
+ * unpack to gigabytes and take the tab down.
+ */
+export const MAX_UNZIPPED = 512 * 1024 * 1024
+export const TOO_BIG = 'This file is too big to be a .pak'
+
 /** One file inside a .pak. [path] keeps the leading "/" that the Sample Tool layout uses. */
 export interface ZipEntry {
   path: string
@@ -57,14 +66,36 @@ export function deflateRaw(data: Uint8Array): Promise<Uint8Array> {
 
 /**
  * Raw inflate. Damaged or truncated data throws `Damaged data in <name>`,
- * the Android message, instead of the browser's TypeError.
+ * the Android message, instead of the browser's TypeError. So does data that
+ * inflates past [limit] bytes (web addition: its declared size, so a crafted
+ * entry can't inflate without bound); the stream stops there.
  */
-export async function inflateRaw(raw: Uint8Array, name: string): Promise<Uint8Array> {
+export async function inflateRaw(raw: Uint8Array, name: string, limit: number = Infinity): Promise<Uint8Array> {
+  const chunks: Uint8Array[] = []
+  let total = 0
   try {
-    return await pipe(raw, new DecompressionStream('deflate-raw'))
+    const reader = new Blob([raw as Uint8Array<ArrayBuffer>]).stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader()
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      total += value.length
+      if (total > limit) {
+        reader.cancel().catch(() => {})
+        throw new Error('over limit')
+      }
+      chunks.push(value)
+    }
   } catch {
     throw new Error(`Damaged data in ${name}`)
   }
+  if (chunks.length === 1) return chunks[0]!
+  const out = new Uint8Array(total)
+  let o = 0
+  for (const c of chunks) {
+    out.set(c, o)
+    o += c.length
+  }
+  return out
 }
 
 class Le {
@@ -157,7 +188,8 @@ async function zipParts(entries: ZipEntry[], { date = Date.now(), offsetMin }: W
 /**
  * Reads a zip into path → bytes, in central directory order. Any leading "/"
  * is removed from the keys; directory entries are skipped. A repeated name
- * keeps its first position and the last data (Map.set).
+ * keeps its first position and the last data (Map.set). Throws [TOO_BIG]
+ * when the entries would unpack to more than [MAX_UNZIPPED] bytes in all.
  */
 export async function readZip(buf: Uint8Array): Promise<Map<string, Uint8Array>> {
   const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
@@ -185,10 +217,15 @@ export async function readZip(buf: Uint8Array): Promise<Map<string, Uint8Array>>
   let p = u32(eocd + 16)
   const dec = new TextDecoder()
   const out = new Map<string, Uint8Array>()
+  // First the directory alone: what every entry would unpack to (stored:
+  // its bytes; deflated: its declared size, which inflateRaw then enforces).
+  const entries: { name: string; method: number; raw: Uint8Array; usize: number }[] = []
+  let total = 0
   for (let n = 0; n < count; n++) {
     if (u32(p) !== CENTRAL_SIG) throw new Error('Damaged zip directory')
     const method = u16(p + 10)
     const csize = u32(p + 20)
+    const usize = u32(p + 24)
     const nameLen = u16(p + 28)
     const extraLen = u16(p + 30)
     const commentLen = u16(p + 32)
@@ -201,9 +238,14 @@ export async function readZip(buf: Uint8Array): Promise<Map<string, Uint8Array>>
     const start = localAt + 30 + lNameLen + lExtraLen
     // The central size, so zips with data descriptors (flag 0x08) work too.
     const raw = buf.subarray(start, start + csize)
+    total += method === 0 ? raw.length : method === 8 ? usize : 0
+    if (total > MAX_UNZIPPED) throw new Error(TOO_BIG)
+    entries.push({ name, method, raw, usize })
+  }
+  for (const { name, method, raw, usize } of entries) {
     let data: Uint8Array
     if (method === 0) data = raw.slice()
-    else if (method === 8) data = await inflateRaw(raw, name)
+    else if (method === 8) data = await inflateRaw(raw, name, usize)
     else throw new Error(`Unsupported compression in ${name}`)
     out.set(name.replace(/^\/+/, ''), data)
   }

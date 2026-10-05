@@ -11,3 +11,11 @@ captures/
 .idea/
 *.iml
 .DS_Store
+
+# Web app (web/)
+node_modules/
+web/dist/
+web/coverage/
+web/test-results/
+web/playwright-report/
+.vercel/

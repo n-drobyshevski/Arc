@@ -1,12 +1,20 @@
 # Changelog
 
-All notable changes to arc for Android. Versions follow [Semantic Versioning](https://semver.org/):
+All notable changes to arc (Android and web). Versions follow [Semantic Versioning](https://semver.org/):
 a major version breaks `.pak` or library compatibility, a minor version adds features, a patch
 version fixes bugs. The version itself is set in `version.properties`.
 
 ## [Unreleased]
 
 ### Added
+- Web app (`web/`, https://arc-pi-mauve.vercel.app): the whole Android app in the browser, for Chrome, Edge and other Chromium browsers on computers and Android, over USB-C with WebMIDI. Same `.pak` files and `library.json` as the Android app.
+  - Installable, works offline, and updates only when you tap Reload and no transfer is running.
+  - The library is kept in the browser. On Chromium desktop an optional library folder keeps the same files as Documents/arc; elsewhere, Export library saves them as one zip, and Restore from a folder reads any arc folder back.
+  - No background transfers: keep the tab in front. The screen stays on, the tab title shows progress and leaving the page asks first.
+  - `.pak` files open with the installed app on Chromium desktop; elsewhere, Import or drag and drop.
+  - Safari, iOS browsers and Firefox without its MIDI add-on get the library without the device.
+  - `?demo` runs it against a simulated EP-133.
+  - Built from the same `version.properties`, tested with Vitest and a Playwright smoke test in CI (`.github/workflows/web.yml`), and deployed on Vercel from `vercel.json`. Not yet tried with a physical EP-133.
 - Live: a one-group view, a large grid of one group with A–D keys to switch and Follow to jump to the group just played. It fits one screen without scrolling (checked at Pixel 7 and 360 dp sizes). The choice is kept in the settings.
 
 ### Changed

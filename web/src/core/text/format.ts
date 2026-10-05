@@ -56,7 +56,9 @@ export const DAY_PATTERN: Readonly<Intl.DateTimeFormatOptions> = Object.freeze({
 /**
  * A date in the given (default: the browser's) locale and time zone.
  * Narrow and no-break spaces become plain spaces, so titles and file names
- * do not depend on the ICU version.
+ * do not depend on the ICU version. A time outside the Date range (a
+ * crafted library.json's createdAt, say) gives "" instead of Intl's
+ * RangeError, which would take down every render that shows it.
  */
 export function date(
   ms: number,
@@ -64,6 +66,7 @@ export function date(
   locale: string | readonly string[] | undefined = undefined,
   timeZone: string | undefined = undefined,
 ): string {
+  if (Number.isNaN(new Date(ms).getTime())) return ''
   const options: Intl.DateTimeFormatOptions = timeZone === undefined ? { ...pattern } : { ...pattern, timeZone }
   return new Intl.DateTimeFormat(locale as string | string[] | undefined, options)
     .format(ms)

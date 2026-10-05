@@ -14,6 +14,7 @@ import { App, CrashMessage } from './app'
 import { createBrowserDeps } from './boot/browserDeps'
 import { browserStorage, SettingsStore } from './platform/storage/settings'
 import { createController, type ArcController } from './state/controller'
+import { whenIdle } from './ui/components/UpdatePrompt'
 import { applyTheme } from './ui/theme/theme'
 
 /** While the library waits for another tab (no text module has these sentences yet). */
@@ -35,15 +36,12 @@ let controller: ArcController | null = null
 /** Another tab opened a newer database: reload, but not in the middle of a transfer. */
 function reloadWhenIdle(): void {
   const c = controller
-  if (!c || c.state.peek().task === null) {
+  if (!c) {
     location.reload()
     return
   }
-  const off = c.store.subscribe(() => {
-    if (c.state.peek().task !== null) return
-    off()
-    location.reload()
-  })
+  // Same wait as the app update's reload (settles after the transfer's own history step).
+  whenIdle(c, () => location.reload())
 }
 
 async function boot(): Promise<void> {

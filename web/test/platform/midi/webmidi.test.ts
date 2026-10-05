@@ -5,6 +5,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { MidiEvent } from '../../../src/core/protocol/midiInput'
 import { Session } from '../../../src/core/protocol/session'
+import { WebText } from '../../../src/core/text/webText'
 import { acquireDeviceLock, DEVICE_LOCK_NAME, type LocksLike } from '../../../src/platform/midi/owner'
 import {
   MIDI_TEXT,
@@ -77,6 +78,19 @@ describe('support and permission', () => {
     expect(nav.requests).toEqual([{ sysex: true }])
     await rejectsWith(requestMidiAccess(fakeNavigator({ access, deny: true })), 'denied')
     await rejectsWith(requestMidiAccess({}), 'unsupported')
+  })
+
+  it('gives Firefox its add-on hint when access is refused', async () => {
+    const ff: NavigatorLike = {
+      ...fakeNavigator({ deny: true }),
+      userAgent: 'Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0',
+    }
+    const e = await requestMidiAccess(ff).catch((err: unknown) => err)
+    expect(e).toBeInstanceOf(MidiError)
+    expect((e as MidiError).code).toBe('denied')
+    expect((e as MidiError).message).toBe(WebText.FIREFOX_MIDI_HINT)
+    const chrome: NavigatorLike = { ...fakeNavigator({ deny: true }), userAgent: 'Mozilla/5.0 Chrome/140.0 Safari/537.36' }
+    await rejectsWith(requestMidiAccess(chrome), 'denied')
   })
 
   it('maps a synchronous throw from the browser too', async () => {

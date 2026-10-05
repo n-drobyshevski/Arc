@@ -24,6 +24,7 @@
 import { MidiInput, type MidiEvent } from '../../core/protocol/midiInput'
 import { matches } from '../../core/protocol/portMatch'
 import type { Transport } from '../../core/protocol/transport'
+import { WebText } from '../../core/text/webText'
 
 // ---------------------------------------------------------------------------
 // Structural subset of the Web MIDI API (a real MIDIAccess satisfies it).
@@ -71,6 +72,7 @@ export interface MidiAccessLike {
 export interface NavigatorLike {
   requestMIDIAccess?(options: { sysex: boolean }): Promise<MidiAccessLike>
   permissions?: { query(desc: { name: string; sysex?: boolean }): Promise<{ state: string }> }
+  userAgent?: string
 }
 
 // Compile-time proof that the browser types fit the interfaces above.
@@ -88,10 +90,15 @@ export type MidiErrorCode = 'unsupported' | 'denied' | 'notFound' | 'blocked'
 
 /** User-facing texts. notFound and blocked are MidiConnector.kt's; the others are web wording. */
 export const MIDI_TEXT: Record<MidiErrorCode, string> = {
-  unsupported: "This browser can't connect to your EP-133. Your saved backups still work here.",
-  denied: 'MIDI access was blocked. Allow MIDI for this site in the browser settings, then connect again.',
-  notFound: 'No EP-133 found. Plug it in with a USB-C cable, turn it on, then connect again.',
-  blocked: 'MIDI access was blocked. Unplug the EP-133, plug it back in, then connect again.',
+  unsupported: WebText.MIDI_UNSUPPORTED,
+  denied: WebText.MIDI_DENIED,
+  notFound: WebText.MIDI_NOT_FOUND,
+  blocked: WebText.MIDI_BLOCKED,
+}
+
+/** Whether [nav] is Firefox, whose MIDI access goes through a site permission add-on. */
+function isFirefox(nav: NavigatorLike): boolean {
+  return /\bFirefox\//.test(nav.userAgent ?? '')
 }
 
 /** A failure to find or open the EP-133 (webmidi.js MidiError, MidiConnector.kt MidiError). */
@@ -139,7 +146,8 @@ export async function requestMidiAccess(nav: NavigatorLike | undefined = browser
   try {
     return await request.call(nav, { sysex: true })
   } catch {
-    throw new MidiError('denied')
+    // Firefox: declining (or not finishing) the add-on prompt lands here.
+    throw new MidiError('denied', isFirefox(nav) ? WebText.FIREFOX_MIDI_HINT : MIDI_TEXT.denied)
   }
 }
 

@@ -1,8 +1,8 @@
-# arc for EP-133 K.O. II (Android)
+# arc for EP-133 K.O. II (Android and web)
 
-A free, open-source backup librarian for the teenage engineering EP-133 K.O. II, as a native Android app. It talks to the device over USB-C with Android's MIDI API (`android.media.midi`). No account, no server, nothing leaves your phone unless you share it.
+A free, open-source backup librarian for the teenage engineering EP-133 K.O. II, as a native Android app. It talks to the device over USB-C with Android's MIDI API (`android.media.midi`). No account, no server, nothing leaves your phone unless you share it. The same app also runs in the browser: see [Web app](#web-app).
 
-This is a port of the web version in [`reference/`](reference/), which is kept read only as the spec. The two behave the same and their `.pak` files are interchangeable.
+This is a port of the web version in [`reference/`](reference/), which is kept read only as the spec. The two behave the same and their `.pak` files are interchangeable. [`web/`](web/) is a port of this Android app back to the browser, with every feature below; it also reads and writes the same `.pak` files.
 
 The look keeps the web version's device panel, keys and orange signal, and borrows its layout from teenage engineering's pocket operator app. There is no bar along the bottom. The top left holds a tag naming the section, like the PO app's EDIT tag; tap it for **Backups**, **Live** or **Device** (long-press opens the debug screen). The EP-133 shortcut guide is a **GUIDE** tab on the left edge, like the PO's TUTORIAL tab, that slides the guide in over the page. The controls are icons, as on the PO's top row. The top bar holds the section tag, then an orange **●** (back up), the connection key (green with a dot while connected, where a tap disconnects; navy with a ring when not), **?** and the settings gear. Long-press any icon for its name; screen readers read it too. **?** opens a guide overlay, shown once by itself on the first start: the page fades and every control on screen gets a coloured tag with an arrow, like the PO app's tutorial. View switches are quiet words with an underline. Play keys are outlines until they play. The page is cream with navy ink, labels are uppercase, and pads and lists sit on pale plates split by thin lines. Back on any other tab returns to Backups.
 
@@ -47,6 +47,53 @@ These go beyond the web version:
 Backups use the same layout as the official Sample Tool's `.pak`: a zip with `/meta.json`, `/sounds/NNN name.wav` and `/projects/PNN.tar`. On top of that, an `arc.json` file keeps per-sound settings like play mode, pitch and envelope.
 
 A debug screen (Settings → **Debug log**, or long-press the section tag) shows every SysEx message sent and received, and can share, save or copy the log as a text file.
+
+## Web app
+
+The same app runs in Chrome or Edge, on a computer or an Android phone, at **https://arc-pi-mauve.vercel.app**. It talks to the EP-133 over USB-C with WebMIDI. Everything above is there: backup, restore, the library, contents, compare, search, the device browser, sample upload with trim, pads, the live mirror, settings, the shortcut guide and the debug log. It looks and reads like the Android app, and its `.pak` files and `library.json` are the same files the Android app writes, so a library moves between the two.
+
+The browser asks once for MIDI access when you connect. It can be installed from the install icon in the address bar or the browser's menu (**Add to Home screen** on Android), and then opens in its own window like an app. After the first visit it works offline. A new version is downloaded in the background and shows **Reload**; arc never reloads in the middle of a transfer.
+
+| Browser | EP-133 over USB |
+|---|---|
+| Chrome, Edge, Opera, Brave on Windows, macOS, Linux and ChromeOS | Yes |
+| Chrome on Android | Yes |
+| Firefox on a computer | Only after you accept Firefox's prompt to install its site permission add-on for MIDI |
+| Safari, and every browser on iPhone and iPad | No. The library still works: import, contents, playback, export, compare, search and the guide |
+
+Where WebMIDI is missing, arc says so on the panel and the controls that need the device are disabled; the rest works as usual. The page needs HTTPS (or `localhost` during development) for MIDI.
+
+How it differs from the Android app:
+- **No background transfers.** A browser has no foreground service. Keep the tab in front and the cable plugged in until a backup or restore is done: in a background tab timers slow down and the transfer can stall. While a task runs the screen is kept on, the tab title shows the progress, leaving the page asks first, and hiding the tab shows a reminder. Cancel is on the progress sheet.
+- **The library lives in the browser** (IndexedDB), so clearing the site's data deletes it. arc asks the browser to keep it.
+  - On Chrome, Edge and other Chromium browsers on a computer, **Pick a library folder** keeps a copy of every backup outside the browser, the same `.pak` files and `library.json` as Documents/arc on Android. Pick a folder named `arc`, or one that already holds arc backups. After a browser restart, one tap on **Reconnect library folder** gives arc access again.
+  - Elsewhere, including Chrome on Android, **Export library** saves every backup and `library.json` as one zip (`arc-library.zip`); export now and then to keep a copy.
+  - **Restore from a folder** also works without a library folder: pick an arc folder (one written by this app, Documents/arc copied from a phone, or an unzipped export) and its backups, titles, notes and settings come in. Backups already in the library are skipped.
+- **Opening a `.pak`:** double-clicking a `.pak` opens it in arc only with the installed app on a computer with a Chromium browser. Everywhere else, use **Import** or drag the file onto the page.
+- **Sharing** uses the browser's share sheet where it can take files; otherwise the file is saved instead, and arc says so.
+- **One tab at a time** talks to the EP-133. Another tab or window says so when you connect; the library stays in step across tabs.
+- **Try it without an EP-133:** add `?demo` to the address (https://arc-pi-mauve.vercel.app/?demo). A simulated EP-133 with 12 sounds and 3 projects is plugged in, so you can back up, restore, compare, browse the device and upload samples. It is the simulator the tests use, not a real device, and nothing leaves the page.
+
+### Develop
+
+Node 22 or newer.
+
+```sh
+cd web
+npm ci
+npm run dev        # http://localhost:5173, add ?demo for the simulated device
+npm run check      # typecheck, unit tests (Vitest), production build
+npm run e2e        # Playwright smoke test of the built app in Chromium (once: npx playwright install chromium)
+npm run gen:guide  # regenerate src/core/text/guideData.ts from core's GuideText.kt
+```
+
+[`web/README.md`](web/README.md) has the layout of the code and how it maps to the Kotlin. [`.github/workflows/web.yml`](.github/workflows/web.yml) runs the typecheck, tests, build and smoke test on every pull request and push to `main` that touches `web/`.
+
+### Deploy
+
+The Vercel project `arc` builds from `vercel.json` at the repository root: it installs and builds `web/` and serves `web/dist`. The same file sets the cache headers for `sw.js`, the manifest and `assets/`, allows MIDI for the site, and sets a strict Content-Security-Policy that also keeps arc out of other sites' frames. A push to `main` deploys to production at https://arc-pi-mauve.vercel.app; a push to any other branch gets its own preview deployment. Production builds show the version exactly (`0.2.0`), previews and local builds add `-dev`. The version comes from `version.properties`, as for Android, and `.pak` files name it the same way (`arc 0.2.0`).
+
+**Status:** the web app has been tested against the simulator (unit tests and the Playwright smoke test with `?demo`), not yet with a physical EP-133. The open questions under [Status](#status-what-is-verified-and-what-still-needs-a-real-device) apply to it too, plus WebMIDI's own: how Chrome splits incoming SysEx, and whether the upload window survives Chrome's MIDI send buffer.
 
 ## Build
 
@@ -125,7 +172,9 @@ core/   pure Kotlin/JVM, no Android imports, runs in plain JUnit
   features/  device browser, sample upload, trim, pad layouts, sound search, and comparing a backup with the device or another backup (additions to the web version)
   text/      every interface string, the small library/restore rules from app.js, and the shortcut guide
 app/    Android: MIDI transport, foreground service, Room library (with a sound-name index for search), files and sharing, Compose UI
-reference/   the web version (read only)
+reference/   the web version (read only, the spec)
+web/    the browser app: a TypeScript port of core/ and app/ (Vite, Preact), see web/README.md
+vercel.json  Vercel build and headers for web/
 ```
 
 Each core file is a port of the matching JS file and says so at the top. The UI follows `reference/styles.css`: a grey shell, pale keys whose bottom edge presses down, one orange key (#FF4C00) and a dark display panel. Light and dark themes come from the same tokens.

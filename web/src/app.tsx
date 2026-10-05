@@ -38,6 +38,7 @@ import { Key } from './ui/components/Key'
 import { Sheet } from './ui/components/Sheet'
 import { Shell } from './ui/components/Shell'
 import { ControllerToast } from './ui/components/Toast'
+import { UpdatePrompt } from './ui/components/UpdatePrompt'
 import { CompareScreen } from './ui/screens/CompareScreen'
 import { ContentsScreen } from './ui/screens/ContentsScreen'
 import { DebugScreen } from './ui/screens/DebugScreen'
@@ -262,6 +263,7 @@ function Root(): JSX.Element {
       <ProgressSlot task={progressShown ? state.task : null} onCancel={() => c.cancelTask()} />
       <ToastLayer raise={state.toast?.id ?? null}>
         <ControllerToast controller={c} />
+        <UpdatePrompt />
       </ToastLayer>
     </div>
   )
