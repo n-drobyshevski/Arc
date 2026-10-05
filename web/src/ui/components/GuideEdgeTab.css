@@ -1,0 +1,27 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Chrome.kt (GuideEdgeTab) */
+
+.guide-edge-tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--edge-tab-width);
+  height: var(--edge-tab-height);
+  border-radius: 0 var(--radius-key) var(--radius-key) 0;
+  /* Quiet, like an unselected key: always there, never the loudest thing on the page. */
+  background: var(--tab-off);
+  color: var(--on-tab-off);
+  overflow: hidden;
+}
+.guide-edge-tab:focus-visible { outline-offset: 2px; }
+
+/* capsKeySmall, a quarter turn anticlockwise (reads bottom to top). */
+.guide-edge-tab__text {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  white-space: nowrap;
+  font-size: var(--size-caps-key-small);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: var(--track-caps-key);
+  text-transform: uppercase;
+}

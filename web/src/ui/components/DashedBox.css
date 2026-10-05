@@ -1,0 +1,28 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt (DashedBox) */
+
+.dashed-box {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 22px 18px;
+}
+
+/* The svg is 2px smaller than the box, so its 100% rect at (1,1) runs from 1 to
+ * size-1: a 2px stroke centred there fills the box edge to edge, like the
+ * Kotlin drawRoundRect(topLeft = w/2, size = size - w, cornerRadius = 12). */
+.dashed-box__outline {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: calc(100% - 2px);
+  height: calc(100% - 2px);
+  max-width: none;
+  overflow: visible;
+  pointer-events: none;
+  fill: none;
+  stroke: var(--key-edge);
+  stroke-width: 2;
+  stroke-dasharray: 6 6;
+}

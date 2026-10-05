@@ -1,0 +1,35 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Chrome.kt (TopBar) */
+
+.top-bar {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+}
+
+/* Row: max 720, padding 16 / 12 top / 16 / 10 bottom. Android's 8dp item
+ * spacing is drawn by the gap spans (and the spacer's minimum), so it can give
+ * way on narrow screens instead of overflowing. */
+.top-bar__row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  max-width: var(--wide-max);
+  padding: var(--space-12) var(--space-16) var(--space-10);
+}
+
+/* weight(1f) plus the 8dp gap on each side of it. */
+.top-bar__spacer { flex: 1 1 var(--space-16); min-width: var(--space-8); }
+/* 8dp between keys; Spacer(width 4.dp) plus both gaps (20) between the connection key and ?. */
+.top-bar__gap { flex: 0 1 var(--space-8); min-width: var(--space-4); }
+.top-bar__gap--wide { flex-basis: 20px; }
+.top-bar__item { display: inline-flex; flex: none; }
+
+/* Narrow phones. Android's row squeezes the settings key out when the tag is
+ * long (BACKUPS needs 386px); here the gaps shrink first (proportionally, so
+ * the wide one gives way most), then below 356px the tag tightens, so every
+ * key keeps its 44px target and nothing overflows at 320px. */
+@media (max-width: 355px) {
+  .top-bar__row { padding-left: var(--space-10); padding-right: var(--space-10); }
+  .top-bar__row .section-tag__face { padding: 0 20px 0 10px; }
+  .top-bar__row .section-tag__text { font-size: var(--size-tab); }
+}

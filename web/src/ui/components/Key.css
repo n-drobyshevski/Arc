@@ -1,0 +1,70 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt (ArcKey) */
+
+.key {
+  --key-face: var(--key);
+  --key-ink: var(--ink);
+  --key-edge-color: var(--key-edge);
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 48px;
+  padding: 15px 18px;
+  border-radius: var(--radius-key);
+  background: var(--key-face);
+  color: var(--key-ink);
+  /* box-shadow: 0 2px 0 edge, the strip below the face. */
+  box-shadow: 0 var(--key-travel) 0 var(--key-edge-color);
+  text-align: center;
+  user-select: none;
+  -webkit-user-select: none;
+  transition:
+    transform var(--key-press-ms) var(--key-ease),
+    box-shadow var(--key-press-ms) var(--key-ease);
+  /* capsKey */
+  font-size: var(--size-caps-key);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: var(--track-caps-key);
+  text-transform: uppercase;
+}
+
+.key__label {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.key--block { display: flex; width: 100%; }
+
+/* ---- KeyStyle ---- */
+.key--signal { --key-face: var(--signal); --key-ink: var(--on-signal); --key-edge-color: var(--signal-edge); }
+.key--navy { --key-face: var(--navy); --key-ink: var(--on-navy); --key-edge-color: var(--navy-edge); }
+.key--quiet { --key-face: transparent; --key-ink: var(--graphite); box-shadow: none; }
+
+/* ---- KeySize ---- */
+.key--small {
+  min-height: 40px;
+  padding: 10px 14px;
+  font-size: var(--size-caps-key-small);
+}
+.key--wide {
+  min-height: 60px;
+  padding: 15px 18px;
+  font-size: var(--size-caps-key-wide);
+}
+
+/* Pressed: the face travels down onto its edge (the strip disappears under it). */
+.key:not(.key--quiet):not(:disabled):active,
+.key:not(.key--quiet):not(:disabled).is-pressed {
+  transform: translateY(var(--key-travel));
+  box-shadow: 0 0 0 var(--key-edge-color);
+}
+
+/* opacity .45 fades the face, label and edge together. */
+.key:disabled { opacity: var(--key-disabled); }

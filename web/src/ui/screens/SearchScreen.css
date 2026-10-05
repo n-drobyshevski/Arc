@@ -1,0 +1,71 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/SearchScreen.kt */
+
+/* Box(fillMaxSize, shell, TopCenter) > LazyColumn(widthIn(max 560), contentPadding 16,
+ * 10 between items). Full screens scroll the page (app.css). */
+.search {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  min-height: inherit;
+  background: var(--shell);
+}
+.search:focus { outline: none; }
+
+.search__column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  width: 100%;
+  max-width: var(--column-max);
+  min-width: 0;
+  padding: var(--space-16);
+}
+
+.search__head {
+  display: flex;
+  align-items: center;
+}
+.search__title { flex: 1 1 0; min-width: 0; color: var(--ink); }
+.search__head > .key { flex: none; }
+
+.search__dim { color: var(--graphite); }
+
+/* A backup's title row and its hits keep the column's 10 apart. */
+.search__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+}
+
+/* Row(padding top 8, Bottom, spacedBy 12): title (one line, weight 1), day. */
+.search__group-head {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-12);
+  padding-top: var(--space-8);
+}
+.search__group-title {
+  flex: 1 1 0;
+  min-width: 0;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.search__day { flex: none; }
+
+/* Row(CenterVertically, spacedBy 12): slot (graphite), name (one line). */
+.search__line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+}
+.search__slot { flex: none; color: var(--graphite); }
+.search__name {
+  flex: 1 1 0;
+  min-width: 0;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

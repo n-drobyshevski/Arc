@@ -1,0 +1,61 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Chrome.kt (SectionMenu) */
+
+.section-menu {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  opacity: 0;
+  visibility: hidden;
+  /* fadeOut() */
+  transition: opacity 150ms linear, visibility 0s linear 150ms;
+}
+.section-menu.is-open {
+  opacity: 1;
+  visibility: visible;
+  /* fadeIn() */
+  transition: opacity 150ms linear;
+}
+
+.section-menu__scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--scrim);
+}
+
+.section-menu__list {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-6);
+  /* Under the tag: the top bar's row is centred at 720 wide, so on wide screens
+     the list moves in with it (Android pins it 16 from the edge, under a tag that isn't there). */
+  width: max-content;
+  margin-left: calc(max(0px, (100% - var(--wide-max)) / 2) + var(--space-16));
+  padding-top: var(--space-4);
+}
+
+/* A block: min 150×48, radius 8, 16px sides, ArcType.tab uppercase; current one navy. */
+.section-menu__item {
+  display: flex;
+  align-items: center;
+  min-width: 150px;
+  min-height: 48px;
+  padding: 0 var(--space-16);
+  border-radius: var(--radius-key);
+  background: var(--key);
+  color: var(--ink);
+  font-size: var(--size-tab);
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: var(--track-tab);
+  text-transform: uppercase;
+}
+.section-menu__item.is-current {
+  background: var(--navy);
+  color: var(--on-navy);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .section-menu, .section-menu.is-open { transition: none; }
+}

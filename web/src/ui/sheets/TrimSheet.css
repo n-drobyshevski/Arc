@@ -1,0 +1,18 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/TrimSheet.kt */
+
+.trim-sheet__title { color: var(--ink); }
+.trim-sheet__name {
+  color: var(--graphite);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.trim-sheet__dim { color: var(--graphite); }
+
+/* Play selection and Reset share the row, 10 apart, 2 below the selection text. */
+.trim-sheet__row {
+  display: flex;
+  gap: var(--space-10);
+  margin-top: var(--space-2);
+}
+.trim-sheet__row > .key { flex: 1 1 0; min-width: 0; }

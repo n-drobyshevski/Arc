@@ -1,0 +1,70 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Icons.kt (IconBlock) */
+
+.icon-block-wrap {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+}
+
+.icon-block {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  border-radius: var(--radius-key);
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.icon-block--round { border-radius: 50%; }
+
+/* Pressed: black at 12% over the face. */
+.icon-block::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  pointer-events: none;
+}
+.icon-block:not(:disabled):active::after { background: var(--press-overlay); }
+
+.icon-block:disabled { opacity: var(--icon-disabled); }
+
+/* PlainTooltip (inverseSurface = display, inverseOnSurface = displayInk), below the anchor. */
+.icon-block__tip {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  min-height: 24px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--display);
+  color: var(--display-ink);
+  white-space: nowrap;
+  pointer-events: none;
+  /* capsKeySmall, uppercased */
+  font-size: var(--size-caps-key-small);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: var(--track-caps-key);
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  animation: icon-block-tip 150ms ease-out;
+}
+
+@keyframes icon-block-tip {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.icon-block__tip--start { left: 0; transform: none; }
+.icon-block__tip--end { left: auto; right: 0; transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .icon-block__tip { animation: none; }
+}

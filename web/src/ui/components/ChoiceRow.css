@@ -1,0 +1,73 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt (ChoiceRow) */
+
+.choice-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: var(--radius-field);
+  background: var(--key);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.choice-row.is-disabled { cursor: default; }
+
+/* Material RadioButton / Checkbox at 20dp: graphite unselected, signal selected. */
+.choice-row__control {
+  flex: none;
+  position: relative;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 2px solid var(--graphite);
+  background: transparent;
+  cursor: inherit;
+}
+.choice-row__control--radio { border-radius: 50%; }
+.choice-row__control--radio:checked {
+  border-color: var(--signal);
+  background: radial-gradient(circle, var(--signal) 0 5px, transparent 5.5px);
+}
+.choice-row__control--check {
+  border-radius: 2px;
+  width: 18px;
+  height: 18px;
+  margin: 1px;
+}
+.choice-row__control--check:checked {
+  border-color: var(--signal);
+  background: var(--signal);
+}
+.choice-row__control--check:checked::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 0px;
+  width: 5px;
+  height: 10px;
+  border: solid var(--on-signal);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+
+/* ArcType.semi */
+.choice-row__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--ink);
+  font-size: var(--base-size);
+  font-weight: 600;
+  line-height: 1.5;
+}
+/* ArcType.small */
+.choice-row__trailing {
+  flex: none;
+  color: var(--graphite);
+  font-size: var(--size-small);
+  font-weight: 500;
+  line-height: 1.5;
+}

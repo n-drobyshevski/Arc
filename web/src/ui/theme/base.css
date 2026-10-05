@@ -1,0 +1,119 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/theme/ArcTheme.kt (BaseText, MaterialTheme
+ * background/onBackground, text selection) and the global rules of reference/styles.css.
+ * Import after tokens.css. */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  background: var(--shell);
+}
+
+body, h1, h2, h3, h4, h5, h6, p, figure, blockquote, dl, dd, ul, ol { margin: 0; }
+ul[role=list], ol[role=list] { list-style: none; padding: 0; }
+
+/* BaseText: `font: 500 16px/1.5 Manrope; font-variant-numeric: tabular-nums`. */
+body {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--shell);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: var(--base-size);
+  font-weight: 500;
+  line-height: var(--base-line);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-wrap: break-word;
+  /* Safe-area insets (Android WindowInsets.safeDrawing); index.html sets viewport-fit=cover. */
+  padding:
+    env(safe-area-inset-top, 0px)
+    env(safe-area-inset-right, 0px)
+    env(safe-area-inset-bottom, 0px)
+    env(safe-area-inset-left, 0px);
+}
+
+/* Form controls inherit the type (and tnum) instead of the UA defaults. */
+button, input, select, textarea {
+  font: inherit;
+  font-variant-numeric: inherit;
+  font-feature-settings: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  margin: 0;
+}
+button {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: inherit;
+  touch-action: manipulation;
+}
+button:disabled { cursor: default; }
+input, textarea { caret-color: var(--signal); }
+/* Native radio and checkbox in signal (ChoiceRow). */
+input[type=radio], input[type=checkbox], input[type=range], progress { accent-color: var(--signal); }
+img, svg, canvas, video { display: block; max-width: 100%; }
+svg { flex-shrink: 0; }
+a { color: inherit; }
+[hidden] { display: none !important; }
+
+::selection { background: var(--selection); }
+
+/* Focus ring: 3px signal, offset 2 (styles.css :focus-visible, ArcField). */
+:focus { outline: none; }
+:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}
+
+/* Visually hidden, still read by screen readers. */
+.sr-only {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Scrollbars: thin, in keyEdge on the page colour. */
+html { scrollbar-color: var(--key-edge) transparent; }
+* { scrollbar-width: thin; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--key-edge); border-radius: 4px; }
+
+/* <dialog> base (ArcSheet / AlertDialog replacements style the rest). */
+dialog {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  max-width: none;
+  max-height: none;
+  background: var(--shell);
+  color: var(--ink);
+}
+dialog::backdrop { background: var(--scrim); }
+
+/* Reduced motion: no key travel, sheet rise or fades. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  :root { --key-press-ms: 0ms; --sheet-ms: 0ms; }
+}

@@ -1,0 +1,57 @@
+/* Port of the layout of app/src/main/kotlin/dev/arc/ep133/MainActivity.kt (Root's Box(fillMaxSize)). */
+
+.app {
+  position: relative;
+  min-height: 100%;
+}
+
+/* One screen at a time; full screens scroll the page, the shell keeps its own height. */
+.app__screen {
+  position: relative;
+  min-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+}
+
+/* ---------- the toast's top-layer popover (ToastLayer) ---------- */
+
+.toast-layer {
+  position: fixed;
+  inset: auto 0 0 0;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  overflow: visible;
+  pointer-events: none;
+}
+
+/* ---------- the progress sheet (ProgressSheetContent) ---------- */
+
+.progress-sheet__label {
+  min-height: 24px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.progress-sheet__hint { color: var(--graphite); }
+
+/* ---------- start-up and crash messages ---------- */
+
+.boot-message,
+.crash {
+  max-width: var(--column-max);
+  margin: 0 auto;
+  padding: var(--space-24) var(--space-16);
+  color: var(--ink);
+}
+.crash { display: flex; flex-direction: column; gap: var(--space-12); }
+.crash__reload {
+  align-self: flex-start;
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: var(--radius-key);
+  background: var(--key);
+  color: var(--ink);
+}
