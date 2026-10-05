@@ -146,13 +146,13 @@ it matches Android at 360px and gives way only when the tag is long.
   radii `--radius-*`, spacing `--space-N` (N = dp), layout (`--column-max`
   560, `--wide-max` 720, `--gutter-start`, `--gutter-end`, `--tap-min`),
   motion (`--key-*`, `--sheet-*`), `--focus-ring` / `--focus-offset`.
-- **Caps** (`theme/cap.css`, web only): `.cap-3d` draws a key as the K.O. II's
+- **Caps** (`theme/cap.css`, from `Cap.kt`): `.cap-3d` draws a key as the K.O. II's
   hardware cap, a face over an edge offset 2px right and 3px down (as the
   Sample Tool draws it), pressed on `:active`, `[data-down]`, `.is-down` and
   `[aria-pressed=true]`. Each element sets `--cap-face` (and `--cap-ink`,
   `--cap-edge`, `--cap-glow`); `--hw-*` are the hardware colours. Key,
   IconBlock, Segmented, SectionMenu, PlayKey and the Live pads, keys and
-  group keys use it, where Compose draws flat keys.
+  group keys use it.
   Never hard-code a theme colour: both themes switch by redefining tokens.
 - **Type**: `.t-<arctype>` utilities (`t-heading`, `t-small`, `t-tiny`,
   `t-body15`, `t-bold`, `t-caps`, `t-caps-key`, `t-tab`, `t-stat-num`, ...).

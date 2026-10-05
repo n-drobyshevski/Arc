@@ -1,6 +1,6 @@
 /* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/MirrorScreen.kt
- * Web: the pads, the KEYS keys and the group keys are hardware caps
- * (theme/cap.css) sitting in the device's body, where Compose draws flat cells. */
+ * The pads, the KEYS keys and the group keys are hardware caps
+ * (theme/cap.css) sitting in the device's body (Deck). */
 
 /* Box(fillMaxSize, shell): the side zone fills the section's page. */
 .live {
@@ -274,6 +274,11 @@
   --cap-edge: color-mix(in oklab, var(--signal-edge) var(--glow-pct), var(--hw-dark-edge));
   --cap-glow: color-mix(in oklab, var(--signal) calc(var(--glow-pct) * 0.6), transparent);
   --cap-glow-blur: calc(var(--glow, 0) * 18px);
+  /* The label on top, the sample at the bottom: stacked, so on a small pad the
+   * name shortens rather than running into the label. */
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   flex: 1 1 0;
   min-width: 0;
   aspect-ratio: 1;
@@ -289,9 +294,7 @@
 
 /* The key's label, top left as on the K.O. II: semi 15sp (10 for ENTER), 28 / 15 on the big grid. */
 .live-pad__label {
-  position: absolute;
-  top: 5px;
-  left: 6px;
+  flex: none;
   padding-block: var(--trim-1);
   font-size: 15px;
   font-weight: 600;
@@ -301,19 +304,13 @@
   color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--hw-dark-ink));
 }
 .live-pad__label--wide { font-size: 10px; }
-.live-pad--big .live-pad__label {
-  top: var(--space-10);
-  left: var(--space-10);
-  font-size: 28px;
-}
+.live-pad--big .live-pad__label { font-size: 28px; }
 .live-pad--big .live-pad__label--wide { font-size: 15px; }
 
 /* The sample, bottom left: tiny 10sp (14 on the big grid), line height 1.1em, two lines (three). */
 .live-pad__name {
-  position: absolute;
-  bottom: 5px;
-  left: 6px;
-  right: 7px;
+  margin-top: auto;
+  min-height: 0;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -326,9 +323,6 @@
   color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--hw-dark-dim));
 }
 .live-pad--big .live-pad__name {
-  bottom: var(--space-10);
-  left: var(--space-10);
-  right: var(--space-10);
   -webkit-line-clamp: 3;
   font-size: 14px;
 }
@@ -337,7 +331,6 @@
  * The big grid takes every touch (it never scrolls); the all-groups page lets a vertical drag scroll. */
 .live-pad--press,
 .live-key {
-  display: block;
   border: 0;
   margin: 0;
   font: inherit;
@@ -418,7 +411,6 @@
 .live-kgrid .live-deck__row { flex: 1 1 0; min-height: 0; }
 
 /* A key: a dark cap, lerp(dark face, signal, glow); its ring pale (orange on the scale's root), onSignal when lit.
- * (Compose: the plate, and a navy ring, which a dark cap would hide.) */
 .live-key {
   --key-ring: var(--hw-ring);
   --cap-face: color-mix(in oklab, var(--signal) var(--glow-pct), var(--hw-dark-face));
@@ -473,7 +465,7 @@
   display: flex;
   gap: var(--space-8);
 }
-/* Web: an LED over a pale cap, as on the K.O. II. The group shown: the cap stays
+/* An LED over a pale cap, as on the K.O. II. The group shown: the cap stays
  * down and its LED is lit; a sounding group tints both toward signal. */
 .live-keys__slot {
   display: flex;

@@ -1,5 +1,5 @@
 /* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt (PlayKey)
- * Web: a round hardware cap (theme/cap.css) rather than a navy ring. */
+ * A round hardware cap (theme/cap.css). */
 
 .play-key {
   flex: none;

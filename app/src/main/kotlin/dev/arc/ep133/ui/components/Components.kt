@@ -6,14 +6,12 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -101,7 +99,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -118,12 +115,11 @@ enum class KeyStyle { Normal, Signal, Quiet, Navy }
 
 enum class KeySize { Normal, Small, Wide }
 
-private val KeyEasing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
-
 /**
- * A physical key: pale (or orange) top with a bottom edge that the key
- * travels down onto while pressed (`.key` in styles.css). Flatter than the
- * web version's, with an uppercase label, after the pocket operator app.
+ * A physical key: a pale (or orange, or navy) cap whose face travels onto its
+ * edge while pressed (see [cap]), with an uppercase label, after the pocket
+ * operator app. [down] keeps it pressed (a choice that is on). Quiet keys are
+ * flat graphite text.
  */
 @Composable
 fun ArcKey(
@@ -134,20 +130,18 @@ fun ArcKey(
     size: KeySize = KeySize.Normal,
     enabled: Boolean = true,
     textColor: Color? = null,
+    down: Boolean = false,
 ) {
     val c = LocalArcColors.current
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val press by animateFloatAsState(
-        targetValue = if (pressed && enabled && style != KeyStyle.Quiet) 1f else 0f,
-        animationSpec = tween(60, easing = KeyEasing),
-        label = "key",
-    )
+    val press = capPress((down || pressed && enabled) && style != KeyStyle.Quiet)
     val (bg, fg, edge) = when (style) {
         KeyStyle.Normal -> Triple(c.key, c.ink, c.keyEdge)
         KeyStyle.Signal -> Triple(c.signal, c.onSignal, c.signalEdge)
         KeyStyle.Quiet -> Triple(Color.Transparent, c.graphite, Color.Transparent)
-        KeyStyle.Navy -> Triple(c.navy, c.onNavy, c.navy.copy(alpha = 0.55f))
+        // Opaque: a see-through edge would show the page through the cap's side.
+        KeyStyle.Navy -> Triple(c.navy, c.onNavy, capEdge(c.navy))
     }
     val (minH, padV, padH, ts) = when (size) {
         KeySize.Normal -> KeyDims(48.dp, 15.dp, 18.dp, ArcType.capsKey)
@@ -158,24 +152,11 @@ fun ArcKey(
     val alpha = if (enabled) 1f else 0.45f
     Box(
         modifier = modifier
-            .graphicsLayer { translationY = press * KeyTravel.toPx() }
-            .drawBehind {
-                // box-shadow: 0 3px 0 edge. Only the strip below the face is drawn,
-                // outside the faded layer, so a disabled key keeps its (faded) edge.
-                if (style != KeyStyle.Quiet) {
-                    val edgePx = (1f - press) * KeyTravel.toPx()
-                    if (edgePx > 0f) {
-                        val r = CornerRadius(KeyRadius.toPx())
-                        val face = Path().apply { addRoundRect(RoundRect(0f, 0f, this@drawBehind.size.width, this@drawBehind.size.height, r)) }
-                        val below = Path().apply { addRoundRect(RoundRect(0f, edgePx, this@drawBehind.size.width, this@drawBehind.size.height + edgePx, r)) }
-                        drawPath(Path().apply { op(below, face, PathOperation.Difference) }, edge.copy(alpha = edge.alpha * alpha))
-                    }
-                }
-            }
-            // opacity: .45 fades the face and label together
-            .graphicsLayer { this.alpha = alpha }
-            .clip(shape)
-            .background(bg)
+            // opacity: .45 fades the face, label and edge together
+            .then(
+                if (style == KeyStyle.Quiet) Modifier.graphicsLayer { this.alpha = alpha }
+                else Modifier.cap(bg, edge, shape, press, alpha = alpha),
+            )
             .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
             .heightIn(min = minH)
             .padding(vertical = padV, horizontal = padH),
@@ -186,7 +167,6 @@ fun ArcKey(
 }
 
 private val KeyRadius = 8.dp
-private val KeyTravel = 2.dp
 
 private data class KeyDims(val minH: Dp, val padV: Dp, val padH: Dp, val style: TextStyle)
 
@@ -322,20 +302,23 @@ fun Modifier.plateRow(first: Boolean, last: Boolean, plate: Color, line: Color):
         .background(plate)
         .drawBehind { if (!first) drawRect(line, size = androidx.compose.ui.geometry.Size(size.width, 1.dp.toPx())) }
 
-/** A row of blocks to switch between views: navy when selected, pale grey otherwise (like the tabs). */
+/** A row of blocks to switch between views: navy and down when selected, pale grey otherwise (like the tabs). */
 @Composable
 fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
     val c = LocalArcColors.current
     Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         options.forEachIndexed { i, label ->
             val on = i == selected
+            val source = remember { MutableInteractionSource() }
+            val pressed by source.collectIsPressedAsState()
+            val face = if (on) c.navy else c.tabOff
             Box(
                 Modifier
                     .weight(1f)
                     .heightIn(min = 44.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(if (on) c.navy else c.tabOff)
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Tab) { onSelect(i) }
+                    // A cap; the chosen one stays down.
+                    .cap(face, capEdge(face), RoundedCornerShape(10.dp), capPress(on || pressed))
+                    .clickable(interactionSource = source, indication = null, role = Role.Tab) { onSelect(i) }
                     .semantics { this.selected = on }
                     .padding(horizontal = 4.dp, vertical = 12.dp),
                 contentAlignment = Alignment.Center,
@@ -445,24 +428,26 @@ fun WordButton(
 }
 
 /**
- * A round play key for a list row: navy with a triangle, orange with a square
- * while playing, faded while the device is busy with something else.
+ * A round play key for a list row: a pale cap with a navy triangle, orange with
+ * a square while playing, faded while the device is busy with something else.
  */
 @Composable
 fun PlayKey(playing: Boolean, enabled: Boolean, description: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val c = LocalArcColors.current
-    // Quiet until it plays: an outline with a navy triangle, filled orange while playing.
-    val face = if (playing) c.signal else Color.Transparent
+    val face = if (playing) c.signal else c.key
+    val edge = if (playing) c.signalEdge else c.keyEdge
     val ink = if (playing) c.onSignal else c.navy
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
     Box(
         modifier
             .size(40.dp)
-            .graphicsLayer { alpha = if (enabled || playing) 1f else 0.4f }
-            .clip(CircleShape)
-            .background(face)
-            .then(if (playing) Modifier else Modifier.border(1.5.dp, c.navy.copy(alpha = 0.6f), CircleShape))
+            .cap(
+                face, edge, CircleShape, capPress(pressed && (enabled || playing)),
+                dx = RoundCapDx, dy = RoundCapDy, alpha = if (enabled || playing) 1f else 0.4f,
+            )
             .clickable(
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = source,
                 indication = null,
                 enabled = enabled || playing,
                 role = Role.Button,

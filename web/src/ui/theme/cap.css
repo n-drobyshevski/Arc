@@ -1,4 +1,4 @@
-/* Web only: hardware key caps (diverges from Compose's flat keys).
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Cap.kt: hardware key caps.
  *
  * A cap is a flat face over a flat edge offset down and to the right, the way
  * the EP-133 Sample Tool draws the K.O. II: two solid layers, no gradient,
@@ -11,7 +11,7 @@
  * --cap-glow-blur (a light around a lit pad). .cap-3d--round: a knob's shorter edge.
  * Import after tokens.css. */
 
-/* ---- Cap tokens (web only, so they live here rather than in tokens.css,
+/* ---- Cap tokens (Cap.kt HwColors, kept here rather than in tokens.css,
  * which mirrors ArcTheme.kt exactly) ---- */
 :root {
   --cap-dx: 2px;            /* the edge, right of the face (the guide's caps: 2 right, 3 down) */

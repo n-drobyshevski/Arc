@@ -1,5 +1,5 @@
 /* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt (Segmented)
- * Web: each block is a hardware cap (theme/cap.css); the chosen one is navy and stays down. */
+ * Each block is a hardware cap (theme/cap.css); the chosen one is navy and stays down. */
 
 .segmented {
   display: flex;
