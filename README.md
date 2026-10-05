@@ -239,6 +239,7 @@ Back up the EP-133 with the official Sample Tool first. Then, with the debug scr
 17. Open the **Live** tab and press pads in each group: the lit pad should be the one you pressed. After one press, its sample name should appear. Check the names against the device and try **From the bottom** if they look wrong.
 18. Play a pattern: check whether sequenced pads light up. Switch on clock out (SHIFT + ERASE, 102, ENTER) and check play/stop and the tempo. Try KEYS mode.
 19. Switch between the four tabs with a backup running and with Live open: the progress sheet should stay up, Live should stop listening when you leave it, and Back on any tab but Backups should return to Backups. Try a large system font: the top bar's blocks should wrap, not overlap.
+20. Play a sound from a backup's **Contents** through the phone speaker, wired headphones and Bluetooth. If one stays silent, export the debug log: it has a "play … -> output" line naming where Android sent the sound.
 
 If anything fails, export the SysEx log from the debug screen (**Share log** or **Save log**) and attach it to an issue together with the error text.
 

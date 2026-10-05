@@ -160,7 +160,7 @@ class ArcController(
     private val midi: MidiConnector,
     val trafficLog: TrafficLog,
     private val scope: CoroutineScope,
-    val player: dev.arc.ep133.audio.SoundPlayer = dev.arc.ep133.audio.SoundPlayer(),
+    val player: dev.arc.ep133.audio.SoundPlayer = dev.arc.ep133.audio.SoundPlayer(context),
 ) {
     private val _state = MutableStateFlow(UiState(midiSupported = midi.supported))
     val state: StateFlow<UiState> = _state.asStateFlow()
@@ -501,7 +501,26 @@ class ArcController(
         // Not cancelled on stop: an interrupted download would leave the session out of step.
         val pcm = exclusive("play:$slot") { s -> dev.arc.ep133.protocol.Fs.download(s, slot) } ?: return@launch
         if (token != playToken) return@launch
-        player.play("device:$slot", pcm, d.channels.toInt(), d.sampleRate.toInt())
+        startSound("device:$slot", pcm, d.channels.toInt(), d.sampleRate.toInt())
+    }
+
+    /**
+     * Plays on the phone and says so when nothing will be heard: a sound that
+     * can't play, or media volume at zero. Where the sound went is noted in the
+     * debug log, for reports of a sound that plays but isn't heard.
+     */
+    private fun startSound(key: String, pcm: ByteArray, channels: Int, sampleRate: Int) {
+        when (val r = player.play(key, pcm, channels, sampleRate)) {
+            is dev.arc.ep133.audio.PlayResult.Failed -> {
+                trafficLog.note("play $key failed: ${r.reason}")
+                toast(FeatureText.cantPlay(r.reason), error = true)
+            }
+            is dev.arc.ep133.audio.PlayResult.Started -> {
+                val seconds = pcm.size / (2.0 * channels) / sampleRate
+                trafficLog.note(FeatureText.playNote(key, sampleRate, channels, seconds, r.route))
+                if (player.volumeOff()) toast(FeatureText.VOLUME_OFF)
+            }
+        }
     }
 
     // ---------- backup contents (additions) ----------
@@ -547,7 +566,7 @@ class ArcController(
         try {
             val w = withContext(Dispatchers.Default) { Wav.decode(snd.wav) }
             if (token != playToken || _state.value.contents?.backupId != c.backupId) return@launch
-            player.play("backup:${c.backupId}:$slot", w.pcm, w.channels, w.sampleRate.toInt())
+            startSound("backup:${c.backupId}:$slot", w.pcm, w.channels, w.sampleRate.toInt())
         } catch (e: Throwable) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             toast(e.message ?: e.toString(), error = true)
@@ -774,7 +793,7 @@ class ArcController(
     /** Plays PCM that is already in memory (the trim preview). */
     fun playNow(key: String, pcm: ByteArray, channels: Int, sampleRate: Int) {
         playToken++
-        player.play(key, pcm, channels, sampleRate)
+        startSound(key, pcm, channels, sampleRate)
     }
 
     /** The bytes to export: a sound's WAV, or a project as a .pak. */
