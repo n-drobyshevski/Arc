@@ -97,14 +97,21 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
 }
 
 @PreviewTest
-@Preview(name = "Live one group", widthDp = 393, heightDp = 1100, showBackground = true)
+// Pixel 7: 412 x 915 dp, less the status bar and three-button navigation (24 + 48).
+@Preview(name = "Live one group", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
 fun LiveOneGroupPreview() = Live(playing, oneGroup = true)
 
 @PreviewTest
-@Preview(name = "Live one group dark", widthDp = 393, heightDp = 1100, showBackground = true)
+@Preview(name = "Live one group dark", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
 fun LiveOneGroupDarkPreview() = Live(playing, dark = true, oneGroup = true)
+
+// A smaller phone (360 x 740 dp, less the bars): still one screen, the pads just get shorter.
+@PreviewTest
+@Preview(name = "Live one group small", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun LiveOneGroupSmallPreview() = Live(playing, oneGroup = true)
 
 @PreviewTest
 @Preview(name = "Live playing", widthDp = 393, heightDp = 1180, showBackground = true)

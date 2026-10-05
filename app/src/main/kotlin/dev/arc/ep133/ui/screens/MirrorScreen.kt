@@ -121,7 +121,45 @@ fun MirrorScreen(
         while (fading) withFrameNanos { frame = System.nanoTime() }
     }
     val now = fixedNow ?: if (fading) frame else System.nanoTime()
+    val viewSwitch = @Composable {
+        Segmented(
+            listOf(MirrorText.ALL_GROUPS, MirrorText.ONE_GROUP),
+            selected = if (oneGroup) 1 else 0,
+            onSelect = { onOneGroup(it == 1) },
+        )
+    }
     Box(Modifier.fillMaxSize().background(c.shell), contentAlignment = Alignment.TopCenter) {
+        if (oneGroup) {
+            // One group fills the screen without scrolling: the display, the switch, the
+            // grid (its rows share whatever height is left) and the group keys.
+            var group by rememberSaveable { mutableIntStateOf(initialGroup) }
+            // Follow: show the group of the pad just played.
+            val hitGroup = st.lastHit?.pad?.group
+            LaunchedEffect(hitGroup, st.lastHit, follow) {
+                if (follow && hitGroup != null) group = hitGroup
+            }
+            Column(
+                Modifier
+                    // Not much wider than a phone, so a tablet's pads don't turn into long bars.
+                    .widthIn(max = 520.dp)
+                    .fillMaxSize()
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                if (onBack != null) {
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Caption(MirrorText.TITLE)
+                        CloseKey(onBack, dev.arc.ep133.text.GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
+                    }
+                }
+                Display(st, mirror, compact = true)
+                viewSwitch()
+                Group(group, st, nameOf, now, Modifier.fillMaxWidth().weight(1f), big = true)
+                GroupKeys(group, st, now, onSelect = { group = it }, follow = follow, onFollow = onFollow)
+            }
+            return@Box
+        }
         Column(
             Modifier
                 .widthIn(max = 720.dp)
@@ -136,27 +174,8 @@ fun MirrorScreen(
                 if (onBack != null) CloseKey(onBack, dev.arc.ep133.text.GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
             }
             Display(st, mirror)
-            Segmented(
-                listOf(MirrorText.ALL_GROUPS, MirrorText.ONE_GROUP),
-                selected = if (oneGroup) 1 else 0,
-                onSelect = { onOneGroup(it == 1) },
-            )
-            if (oneGroup) {
-                var group by rememberSaveable { mutableIntStateOf(initialGroup) }
-                // Follow: show the group of the pad just played.
-                val hitGroup = st.lastHit?.pad?.group
-                LaunchedEffect(hitGroup, st.lastHit, follow) {
-                    if (follow && hitGroup != null) group = hitGroup
-                }
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
-                    // Not wider than a phone screen is tall, so the whole grid stays in view on a tablet.
-                    Column(Modifier.widthIn(max = 480.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Group(group, st, nameOf, now, Modifier.fillMaxWidth(), big = true)
-                        GroupKeys(group, st, now, onSelect = { group = it }, follow = follow, onFollow = onFollow)
-                    }
-                }
-                Text(MirrorText.FOLLOW_NOTE, style = ArcType.small, color = c.graphite)
-            } else BoxWithConstraints(Modifier.fillMaxWidth()) {
+            viewSwitch()
+            BoxWithConstraints(Modifier.fillMaxWidth()) {
                 // Four groups in a row when there is room, two by two on a phone.
                 val perRow = if (maxWidth >= 640.dp) 4 else 2
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -174,7 +193,7 @@ fun MirrorScreen(
 }
 
 @Composable
-private fun Display(st: MirrorState, mirror: MirrorUi?) {
+private fun Display(st: MirrorState, mirror: MirrorUi?, compact: Boolean = false) {
     val c = LocalArcColors.current
     DisplayPanel {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -195,12 +214,13 @@ private fun Display(st: MirrorState, mirror: MirrorUi?) {
                 hit != null -> MirrorText.hit(hit)
                 else -> MirrorText.WAITING
             },
-            style = ArcType.statFree.copy(fontSize = 26.sp),
+            style = ArcType.statFree.copy(fontSize = if (compact) 22.sp else 26.sp),
             color = c.displayInk,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        if (st.playing == null && st.bpm == null) Text(MirrorText.NO_TRANSPORT, style = ArcType.displayHint, color = c.displayDim)
+        // The one-group view keeps to one screen; the all-groups view explains clock out.
+        if (!compact && st.playing == null && st.bpm == null) Text(MirrorText.NO_TRANSPORT, style = ArcType.displayHint, color = c.displayDim)
     }
 }
 
@@ -210,16 +230,18 @@ private fun Group(group: Int, st: MirrorState, nameOf: (PhysicalPad) -> String?,
     val lit = st.pads.filterKeys { it.group == group }
     val groupGlow = lit.values.maxOfOrNull { glow(it, now) } ?: 0f
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        // The caption turns orange while one of the group's pads sounds.
-        Caption(MirrorText.GROUP + " " + ('A' + group), color = lerp(c.graphite, c.signal, groupGlow))
-        GridPlate {
+        // The caption turns orange while one of the group's pads sounds (the big grid's
+        // group shows on its key below instead).
+        if (!big) Caption(MirrorText.GROUP + " " + ('A' + group), color = lerp(c.graphite, c.signal, groupGlow))
+        GridPlate(if (big) Modifier.weight(1f) else Modifier) {
             PadNotes.ROWS.forEachIndexed { r, rowOffsets ->
                 if (r > 0) PlateLine()
-                Row(Modifier.height(IntrinsicSize.Min)) {
+                // The big grid's rows share the height left on screen; the small ones are square.
+                Row(if (big) Modifier.weight(1f) else Modifier.height(IntrinsicSize.Min)) {
                     rowOffsets.forEachIndexed { i, o ->
                         if (i > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(c.line))
                         val pad = PhysicalPad(group, o)
-                        Pad(pad, lit[pad], nameOf(pad), now, Modifier.weight(1f), big)
+                        Pad(pad, lit[pad], nameOf(pad), now, Modifier.weight(1f).then(if (big) Modifier.fillMaxHeight() else Modifier.aspectRatio(1f)), big)
                     }
                 }
             }
@@ -263,7 +285,11 @@ private fun GroupKeys(group: Int, st: MirrorState, now: Long, onSelect: (Int) ->
                 .clip(RoundedCornerShape(10.dp))
                 .background(if (follow) c.navy else c.tabOff)
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Switch) { onFollow(!follow) }
-                .semantics { stateDescription = if (follow) dev.arc.ep133.text.SettingsText.ON else dev.arc.ep133.text.SettingsText.OFF },
+                .semantics {
+                    // The note is spoken, since the screen has no room to show it.
+                    contentDescription = MirrorText.FOLLOW + ". " + MirrorText.FOLLOW_NOTE
+                    stateDescription = if (follow) dev.arc.ep133.text.SettingsText.ON else dev.arc.ep133.text.SettingsText.OFF
+                },
             contentAlignment = Alignment.Center,
         ) {
             Text(MirrorText.FOLLOW.uppercase(), style = ArcType.capsKeySmall, color = if (follow) c.onNavy else c.onTabOff)
@@ -286,7 +312,6 @@ private fun Pad(pad: PhysicalPad, light: PadLight?, name: String?, now: Long, mo
     val ink = if (g > 0.3f) c.onSignal else c.ink
     Box(
         modifier
-            .aspectRatio(1f)
             .background(lerp(c.plate, c.signal, g))
             .semantics { contentDescription = "${pad.groupLetter} ${pad.label}" + (name?.let { ", $it" } ?: "") }
             .padding(if (big) PaddingValues(10.dp) else PaddingValues(start = 6.dp, top = 5.dp, end = 7.dp, bottom = 5.dp)),

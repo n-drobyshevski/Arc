@@ -7,7 +7,10 @@ version fixes bugs. The version itself is set in `version.properties`.
 ## [Unreleased]
 
 ### Added
-- Live: a one-group view, a large grid of one group with A–D keys to switch and Follow to jump to the group just played. The choice is kept in the settings.
+- Live: a one-group view, a large grid of one group with A–D keys to switch and Follow to jump to the group just played. It fits one screen without scrolling (checked at Pixel 7 and 360 dp sizes). The choice is kept in the settings.
+
+### Changed
+- On phones narrower than 380 dp the top bar's Back up is a square dot (REC style), so the bar stays on one line.
 
 ## [0.2.0] - 2026-10-05
 

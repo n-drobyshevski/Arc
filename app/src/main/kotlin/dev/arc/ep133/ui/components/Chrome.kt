@@ -6,6 +6,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -102,7 +103,10 @@ fun TopBar(
     onSettings: () -> Unit = {},
 ) {
     val c = LocalArcColors.current
-    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+    BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+        // On a narrow phone Back up is a square REC-style dot (named for screen readers),
+        // so the bar stays one line and every tab keeps its height.
+        val narrow = maxWidth < 380.dp
         Row(
             Modifier.widthIn(max = 720.dp).fillMaxWidth().padding(start = 18.dp, end = 16.dp, top = 12.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -115,7 +119,7 @@ fun TopBar(
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Block(NavText.BACK_UP, c.signal, c.onSignal, onBackup, enabled = canBackup, dot = true, description = Strings.BACK_UP)
+                Block(if (narrow) "" else NavText.BACK_UP, c.signal, c.onSignal, onBackup, enabled = canBackup, dot = true, description = Strings.BACK_UP)
                 if (connected) {
                     // Green while connected, named after the device; tapping it disconnects.
                     Block(NavText.DEVICE_CAPTION, c.ok, c.onOk, onConnect, enabled = canConnect, dot = true, description = Strings.DISCONNECT)
@@ -154,8 +158,8 @@ private fun Block(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        if (dot) Box(Modifier.size(12.dp).clip(CircleShape).background(ink))
-        Text(text.uppercase(), style = ArcType.capsKeySmall, color = ink, maxLines = 1)
+        if (dot) Box(Modifier.size(if (text.isEmpty()) 16.dp else 12.dp).clip(CircleShape).background(ink))
+        if (text.isNotEmpty()) Text(text.uppercase(), style = ArcType.capsKeySmall, color = ink, maxLines = 1)
     }
 }
 
