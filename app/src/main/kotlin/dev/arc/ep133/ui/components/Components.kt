@@ -20,6 +20,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -36,7 +37,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -45,7 +45,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.wrapContentSize
-import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -65,6 +64,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import kotlinx.coroutines.launch
 import androidx.compose.ui.semantics.customActions
@@ -618,12 +618,17 @@ fun ArcSheet(visible: Boolean, onDismiss: (() -> Unit)?, grip: Boolean = true, c
     }
 }
 
+/** The narrowest top-bar middle a toast takes: two lines of a message still read there. */
+private val BarToastMin = 200.dp
+
 /**
  * A toast at the bottom of the screen; errors get an orange left border and
  * stay longer. Swiping it sideways or down dismisses it at once, as with a
  * notification. In a short window (a phone on its side) it takes the top
  * bar's middle instead, so it never covers the keys: two lines at most until
- * a tap unfolds the rest, and it is swiped away up or sideways.
+ * a tap unfolds the rest, and it is swiped away up or sideways. Where that
+ * middle is too narrow to read (a split screen) or there is no top bar (a
+ * full-screen page), it stays at the bottom.
  */
 @Composable
 fun ArcToast(
@@ -636,7 +641,10 @@ fun ArcToast(
     bottomInset: Dp = 0.dp,
 ) {
     val c = LocalArcColors.current
-    val inBar = LocalArcWindow.current.short
+    val density = LocalDensity.current
+    // In the bar: over its middle, measured from where this toast's own box sits.
+    val slot = LocalBarSlot.current?.bounds?.takeIf { LocalArcWindow.current.short && it.width >= with(density) { BarToastMin.toPx() } }
+    val inBar = slot != null
     // One already up when this is first drawn (a screenshot) shows in that first frame.
     var shown by remember { mutableStateOf(id?.let { Triple(it, text, error) }) }
     // Unfolding a toast in the bar starts its time again, to read the rest.
@@ -648,8 +656,6 @@ fun ArcToast(
             onTimeout(id)
         }
     }
-    // In the bar: over its middle, measured from where this toast's own box sits.
-    val slot = if (inBar) LocalBarSlot.current?.bounds else null
     var origin by remember { mutableStateOf(Offset.Zero) }
     AnimatedVisibility(
         id != null,
@@ -663,7 +669,6 @@ fun ArcToast(
         val dx = remember(s.first) { androidx.compose.animation.core.Animatable(0f) }
         val dy = remember(s.first) { androidx.compose.animation.core.Animatable(0f) }
         var box by remember { mutableStateOf(androidx.compose.ui.unit.IntSize(1, 1)) }
-        val density = LocalDensity.current
         val fling = with(density) { 700.dp.toPx() }
         // Which way it leaves along the height: down at the bottom, up out of the bar.
         val away = if (inBar) -1f else 1f
@@ -679,27 +684,20 @@ fun ArcToast(
             }
             Unit
         }
-        val place = when {
-            !inBar -> Modifier
+        val place = if (slot == null) {
+            Modifier
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(bottom = bottomInset)
                 .padding(16.dp)
                 .widthIn(max = 528.dp)
                 .fillMaxWidth()
-            // (Its box fills the screen, so it measures loose from the top left.)
-            slot != null -> Modifier
-                .wrapContentSize(Alignment.TopStart)
-                .offset { IntOffset((slot.left - origin.x).roundToInt(), (slot.center.y - origin.y).roundToInt() - 22.dp.roundToPx()) }
+        } else {
+            // (Its box fills the screen, so it measures loose from the top left.) The slot is
+            // where it is on screen, so it is placed left to right in a right-to-left layout too.
+            Modifier
+                .wrapContentSize(AbsoluteAlignment.TopLeft)
+                .absoluteOffset { IntOffset((slot.left - origin.x).roundToInt(), (slot.center.y - origin.y).roundToInt() - 22.dp.roundToPx()) }
                 .width(with(density) { slot.width.toDp() })
-            // No top bar on screen (a full-screen page): where its middle would be.
-            else -> Modifier
-                .wrapContentSize(Alignment.TopStart)
-                .fillMaxWidth()
-                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))
-                .padding(horizontal = 16.dp, vertical = 6.dp)
-                .wrapContentWidth()
-                .widthIn(max = 480.dp)
-                .fillMaxWidth()
         }
         Row(
             place

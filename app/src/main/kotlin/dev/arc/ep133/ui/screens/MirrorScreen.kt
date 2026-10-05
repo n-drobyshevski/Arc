@@ -459,8 +459,15 @@ private fun gutters(sideways: Boolean): Pair<Dp, Dp> {
     return maxOf(EdgeTabWidth + 8.dp, start) to maxOf(SideStripWidth + 12.dp, end)
 }
 
-/** Whether Live's display line sits in the top bar ([LivePill]): a short window wider than tall, a phone on its side. */
-internal fun liveInBar(window: ArcWindow): Boolean = window.landscape && window.short
+/**
+ * Whether Live's display line sits in the top bar ([LivePill]): a short
+ * window wider than tall, a phone on its side, with room in the bar's middle
+ * for the line to read (not a narrow split screen: there it stays on the page).
+ */
+internal fun liveInBar(window: ArcWindow): Boolean = window.landscape && window.short && window.width >= LivePillWindow
+
+/** The narrowest window whose top bar takes Live's display line: its middle is still about 200 dp. */
+private val LivePillWindow = 600.dp
 
 /**
  * Live's display line in the top bar's middle, on a phone on its side: the
@@ -1135,25 +1142,32 @@ private fun KeysDisplay(st: MirrorState, mirror: MirrorUi?, keys: KeysUi, compac
     val offline = if (mirror?.offline != null) MirrorText.OFFLINE else null
     val sound = keys.pad?.let { MirrorText.keysSound(it, keys.padName) } ?: MirrorText.NO_SOUND
     val said = spoken(listOfNotNull(MirrorText.MODE_KEYS, noteText, offline, sound).joinToString(", "))
-    DisplayLine(
-        Modifier.clearAndSetSemantics {
-            contentDescription = said
-            liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite
-        },
-        compact,
-    ) {
-        if (!compact) Text(MirrorText.MODE_KEYS.uppercase(), style = ArcType.displaySub, color = c.displayDim, maxLines = 1)
-        noteText?.let { Text(it, style = ArcType.displaySub, color = c.displayInk, maxLines = 1) }
-        offline?.let { Text(it, style = ArcType.displaySub, color = c.displayDim, maxLines = 1) }
-        Text(
-            sound,
-            style = ArcType.displayHead,
-            color = c.displayInk,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            textAlign = androidx.compose.ui.text.style.TextAlign.End,
-            modifier = Modifier.weight(1f),
-        )
+    // In the bar the note takes at most half the line, so a long one ("DO6, above the keys")
+    // never squeezes out the sound's name.
+    BoxWithConstraints {
+        val noteMax = if (compact) maxWidth / 2 else Dp.Unspecified
+        DisplayLine(
+            Modifier.clearAndSetSemantics {
+                contentDescription = said
+                liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite
+            },
+            compact,
+        ) {
+            if (!compact) Text(MirrorText.MODE_KEYS.uppercase(), style = ArcType.displaySub, color = c.displayDim, maxLines = 1)
+            noteText?.let {
+                Text(it, style = ArcType.displaySub, color = c.displayInk, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = noteMax))
+            }
+            offline?.let { Text(it, style = ArcType.displaySub, color = c.displayDim, maxLines = 1) }
+            Text(
+                sound,
+                style = ArcType.displayHead,
+                color = c.displayInk,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                modifier = Modifier.weight(1f),
+            )
+        }
     }
 }
 
@@ -1182,48 +1196,53 @@ private fun KeysGrid(st: MirrorState, keys: KeysUi, now: Long, actions: KeysActi
         val k = Keys.keyFor(n, notes) ?: continue
         lit[k] = maxOf(lit[k] ?: 0f, glow(l, now))
     }
-    GridPlate(modifier) {
-        PadNotes.ROWS.forEachIndexed { r, rowOffsets ->
-            if (r > 0) PlateLine()
-            Row(Modifier.weight(1f)) {
-                rowOffsets.forEachIndexed { i, k ->
-                    if (i > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(c.line))
-                    val note = notes[k]
-                    val g = lit[k] ?: 0f
-                    val ring = if (k % keys.scale.intervals.size == 0) c.signal else c.navy
-                    Box(
-                        Modifier
-                            .weight(1f)
-                            .fillMaxHeight()
-                            .background(lerp(c.plate, c.signal, g))
-                            .then(if (note in keys.playingNotes) Modifier.border(2.dp, c.signal) else Modifier)
-                            .then(
-                                holdToPlay(
-                                    // A screen reader's Play sounds the note to its end: no finger to keep count of.
-                                    { hold -> if (hold) play(touches.down(k.toLong(), notes[k])) else actions.onNote(notes[k], false) },
-                                    { play(touches.up(k.toLong())) },
-                                ),
-                            )
-                            .semantics { contentDescription = MirrorText.noteName(note, keys.names) },
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        val ink = if (g > 0.3f) c.onSignal else c.ink
-                        Canvas(Modifier.fillMaxSize().padding(8.dp)) {
-                            val d = minOf(size.width, size.height)
-                            val stroke = d * 0.09f
-                            drawCircle(
-                                color = if (g > 0.3f) c.onSignal else ring,
-                                radius = d / 2 - stroke / 2,
-                                style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke),
+    // The names keep inside their rings where the grid is squeezed (a small window on its side).
+    BoxWithConstraints(modifier) {
+        val circle = minOf((maxHeight - 3.dp) / 4, (maxWidth - 2.dp) / 3) - 16.dp
+        val nameSize = with(LocalDensity.current) { minOf(22.sp.toDp(), circle / 1.9f).toSp() }
+        GridPlate(Modifier.fillMaxSize()) {
+            PadNotes.ROWS.forEachIndexed { r, rowOffsets ->
+                if (r > 0) PlateLine()
+                Row(Modifier.weight(1f)) {
+                    rowOffsets.forEachIndexed { i, k ->
+                        if (i > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(c.line))
+                        val note = notes[k]
+                        val g = lit[k] ?: 0f
+                        val ring = if (k % keys.scale.intervals.size == 0) c.signal else c.navy
+                        Box(
+                            Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .background(lerp(c.plate, c.signal, g))
+                                .then(if (note in keys.playingNotes) Modifier.border(2.dp, c.signal) else Modifier)
+                                .then(
+                                    holdToPlay(
+                                        // A screen reader's Play sounds the note to its end: no finger to keep count of.
+                                        { hold -> if (hold) play(touches.down(k.toLong(), notes[k])) else actions.onNote(notes[k], false) },
+                                        { play(touches.up(k.toLong())) },
+                                    ),
+                                )
+                                .semantics { contentDescription = MirrorText.noteName(note, keys.names) },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            val ink = if (g > 0.3f) c.onSignal else c.ink
+                            Canvas(Modifier.fillMaxSize().padding(8.dp)) {
+                                val d = minOf(size.width, size.height)
+                                val stroke = d * 0.09f
+                                drawCircle(
+                                    color = if (g > 0.3f) c.onSignal else ring,
+                                    radius = d / 2 - stroke / 2,
+                                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke),
+                                )
+                            }
+                            Text(Keys.name(note, keys.names), style = ArcType.semi.copy(fontSize = nameSize, letterSpacing = 0.02.em), color = ink, maxLines = 1)
+                            Text(
+                                Keys.octaveOf(note).toString(),
+                                style = ArcType.tiny.copy(fontSize = 11.sp),
+                                color = if (g > 0.3f) c.onSignal else c.graphite,
+                                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 4.dp),
                             )
                         }
-                        Text(Keys.name(note, keys.names), style = ArcType.semi.copy(fontSize = 22.sp, letterSpacing = 0.02.em), color = ink, maxLines = 1)
-                        Text(
-                            Keys.octaveOf(note).toString(),
-                            style = ArcType.tiny.copy(fontSize = 11.sp),
-                            color = if (g > 0.3f) c.onSignal else c.graphite,
-                            modifier = Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 4.dp),
-                        )
                     }
                 }
             }
