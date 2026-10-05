@@ -47,9 +47,12 @@ object FeatureText {
     /** "Sounds 212", for the section switch. */
     fun sectionLabel(name: String, n: Int) = "$name $n"
 
-    /** "001 kick · 004 hat closed", or the slot alone when no sound is there. */
+    /**
+     * "001 kick · 004 hat closed", or the slot alone when no sound is there. The
+     * slot and the name are joined by a no-break space so a line never splits them.
+     */
     fun projectSoundNames(slots: List<Int>, names: Map<Int, String>) =
-        if (slots.isEmpty()) "Uses no sounds" else slots.joinToString(" \u00B7 ") { s -> slot(s) + (names[s]?.let { " $it" } ?: "") }
+        if (slots.isEmpty()) "Uses no sounds" else slots.joinToString(" \u00B7 ") { s -> slot(s) + (names[s]?.let { "\u00A0$it" } ?: "") }
 
     fun play(name: String) = "$PLAY $name"
 

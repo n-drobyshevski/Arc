@@ -38,7 +38,7 @@ class DeviceListTest {
     fun `labels for the device panel and project sounds`() {
         assertEquals("212 sounds \u00B7 1 project", FeatureText.counts(212, 1))
         assertEquals("1 sound \u00B7 6 projects", FeatureText.counts(1, 6))
-        assertEquals("001 kick \u00B7 040", FeatureText.projectSoundNames(listOf(1, 40), mapOf(1 to "kick")))
+        assertEquals("001\u00A0kick \u00B7 040", FeatureText.projectSoundNames(listOf(1, 40), mapOf(1 to "kick")))
         assertEquals("Uses no sounds", FeatureText.projectSoundNames(emptyList(), emptyMap()))
         assertEquals("Sounds 212", FeatureText.sectionLabel(FeatureText.SOUNDS, 212))
     }
