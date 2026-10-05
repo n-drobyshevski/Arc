@@ -1,0 +1,75 @@
+name: Release
+
+# Push a tag vX.Y.Z (matching version.properties) to build arc-X.Y.Z.apk and
+# publish it as a GitHub Release, with that version's CHANGELOG.md notes.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish the release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag, version and changelog agree
+        id: version
+        run: |
+          version="$(sed -n 's/^version=//p' version.properties | tr -d '[:space:]')"
+          tag="${GITHUB_REF_NAME}"
+          if [ "$tag" != "v$version" ]; then
+            echo "::error::Tag $tag does not match version.properties ($version). Tag v$version instead, or bump the file."
+            exit 1
+          fi
+          # The notes are that version's section of CHANGELOG.md, up to the next one.
+          awk -v v="$version" '
+            $0 ~ "^## \\[" v "\\]" { on = 1; next }
+            on && /^## \[/ { exit }
+            on { print }
+          ' CHANGELOG.md > notes.md
+          if ! grep -q '[^[:space:]]' notes.md; then
+            echo "::error::CHANGELOG.md has no notes under ## [$version]."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Accept Android SDK licences
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+
+      # ARC_RELEASE names the build exactly X.Y.Z (no -dev suffix).
+      - name: Test, lint and build
+        env:
+          ARC_RELEASE: 'true'
+        run: ./gradlew test :app:lintDebug :app:assembleDebug --stacktrace
+
+      # The release APK is the debug-signed build (the same key as every CI build),
+      # so it installs over test builds. There is no release key yet.
+      - name: Check the APK is signed with the shared debug key
+        run: |
+          tools="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          certs="$("$tools/apksigner" verify --print-certs app/build/outputs/apk/debug/app-debug.apk)"
+          echo "$certs"
+          grep -q "SHA-256 digest: 156dde54a742795f0dcccd03c5ff6cb0d1efd344de8aa8eea6095d3a70793fc0" <<< "$certs"
+
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk "arc-$VERSION.apk"
+          gh release create "$GITHUB_REF_NAME" "arc-$VERSION.apk" \
+            --title "arc $VERSION" \
+            --notes-file notes.md \
+            --verify-tag

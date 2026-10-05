@@ -84,7 +84,22 @@ The key is public, so it is only for test builds and never signs a release. Anyo
 
 The tests read `reference/test/fixtures/sample.pak` in place, so keep `reference/` next to the modules.
 
-### Versions
+### Versions and releases
+
+arc follows [Semantic Versioning](https://semver.org/). A major version breaks `.pak` or library compatibility, a minor version adds features, a patch version fixes bugs. Changes are listed in [`CHANGELOG.md`](CHANGELOG.md).
+
+- **One place:** `version.properties` (`version=0.2.0`) sets the version. The build fails if it isn't `MAJOR.MINOR.PATCH` with minor and patch below 100.
+- **versionCode** is computed from it: `major*10000 + minor*100 + patch` (0.2.0 is 200), so every new version installs over the previous one.
+- **versionName:** local builds are `0.2.0-dev`; CI builds add the run number and commit, `0.2.0-dev.57+abc1234`; release builds are exactly `0.2.0`. It shows in **Settings** and at the top of the debug log.
+- **.pak files** name the version that wrote them in `meta.json` (`"author": "arc 0.2.0"`, without the `-dev` part). The compatibility test builds its backup with the web version's own version string so it can still compare byte for byte.
+- **To release:**
+  1. Bump `version.properties` and move the `Unreleased` notes in `CHANGELOG.md` under `## [X.Y.Z] - date`. Commit and merge.
+  2. `git tag vX.Y.Z && git push origin vX.Y.Z`.
+  3. The **Release** workflow checks that the tag matches `version.properties` and that the changelog has that section. It then runs the tests, lint and build, and publishes `arc-X.Y.Z.apk` as a GitHub Release with those notes.
+
+  The release APK is signed with the same shared debug key as every CI build, so it installs over test builds. There is no separate release key yet.
+
+### Toolchain
 
 | | |
 |---|---|

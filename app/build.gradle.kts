@@ -15,8 +15,9 @@ android {
         applicationId = "dev.arc.ep133"
         minSdk = 29
         targetSdk = 37
-        versionCode = 1
-        versionName = "0.1.0"
+        // From version.properties (see the root build file).
+        versionCode = rootProject.extra["arcVersionCode"] as Int
+        versionName = rootProject.extra["arcVersionName"] as String
     }
 
     signingConfigs {
