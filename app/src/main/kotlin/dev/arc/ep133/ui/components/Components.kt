@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -245,6 +246,26 @@ fun DisplayPanel(modifier: Modifier = Modifier, content: @Composable ColumnScope
 }
 
 private val PanelRadius = 22.dp
+
+/**
+ * The display as one dark line: Live's display line, and the device on a
+ * phone on its side. [compact] fits it in the top bar.
+ */
+@Composable
+fun DisplayLine(modifier: Modifier = Modifier, compact: Boolean = false, content: @Composable RowScope.() -> Unit) {
+    val c = LocalArcColors.current
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(if (compact) 12.dp else 14.dp))
+            .background(c.display)
+            .heightIn(min = if (compact) 44.dp else 48.dp)
+            .padding(horizontal = if (compact) 12.dp else 14.dp, vertical = if (compact) 4.dp else 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        content = content,
+    )
+}
 
 /** A small centred uppercase label above a panel ("VIDEO", "KEYPAD" in the pocket operator app). */
 @Composable

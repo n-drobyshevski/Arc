@@ -98,6 +98,7 @@ import dev.arc.ep133.ui.components.GridPlate
 import dev.arc.ep133.ui.components.PlateLine
 import dev.arc.ep133.ui.components.CloseKey
 import dev.arc.ep133.ui.components.DisplayPanel
+import dev.arc.ep133.ui.components.DisplayLine
 import dev.arc.ep133.ui.components.KeySize
 import dev.arc.ep133.ui.components.KeyStyle
 import dev.arc.ep133.ui.components.LocalArcWindow
@@ -512,19 +513,12 @@ private fun DisplayStrip(st: MirrorState, mirror: MirrorUi?, compact: Boolean = 
         null -> if (mirror?.offline != null) MirrorText.OFFLINE else null
     }
     val said = spoken(listOfNotNull(transport, st.bpm?.let(MirrorText::bpm), st.activeProject?.let(MirrorText::project), main).joinToString(", "))
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(if (compact) 12.dp else 14.dp))
-            .background(c.display)
-            .clearAndSetSemantics {
-                contentDescription = said
-                liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite
-            }
-            .heightIn(min = if (compact) 44.dp else 48.dp)
-            .padding(horizontal = if (compact) 12.dp else 14.dp, vertical = if (compact) 4.dp else 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    DisplayLine(
+        Modifier.clearAndSetSemantics {
+            contentDescription = said
+            liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite
+        },
+        compact,
     ) {
         when (st.playing) {
             true -> Text("\u25B6", style = ArcType.displaySub, color = c.displayInk)
@@ -1141,19 +1135,12 @@ private fun KeysDisplay(st: MirrorState, mirror: MirrorUi?, keys: KeysUi, compac
     val offline = if (mirror?.offline != null) MirrorText.OFFLINE else null
     val sound = keys.pad?.let { MirrorText.keysSound(it, keys.padName) } ?: MirrorText.NO_SOUND
     val said = spoken(listOfNotNull(MirrorText.MODE_KEYS, noteText, offline, sound).joinToString(", "))
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(if (compact) 12.dp else 14.dp))
-            .background(c.display)
-            .clearAndSetSemantics {
-                contentDescription = said
-                liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite
-            }
-            .heightIn(min = if (compact) 44.dp else 48.dp)
-            .padding(horizontal = if (compact) 12.dp else 14.dp, vertical = if (compact) 4.dp else 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    DisplayLine(
+        Modifier.clearAndSetSemantics {
+            contentDescription = said
+            liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite
+        },
+        compact,
     ) {
         if (!compact) Text(MirrorText.MODE_KEYS.uppercase(), style = ArcType.displaySub, color = c.displayDim, maxLines = 1)
         noteText?.let { Text(it, style = ArcType.displaySub, color = c.displayInk, maxLines = 1) }
