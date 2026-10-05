@@ -25,14 +25,14 @@ import {
 } from '../../../src/platform/storage/settings'
 
 describe('SettingsStore', () => {
-  it('starts with the Android defaults', () => {
+  it('starts with the Android defaults, except one group in Live', () => {
     const s = new SettingsStore(memoryStorage())
     expect(s.settings).toEqual({
       theme: 'SYSTEM',
       autoConnect: true,
       keepScreenOn: true,
       keepLast: null,
-      liveOneGroup: false,
+      liveOneGroup: true,
       liveFollow: true,
       guideSeen: false,
       liveKeys: false,
@@ -47,17 +47,17 @@ describe('SettingsStore', () => {
   it('persists only the fields that changed, synchronously, keepLast null as 0', () => {
     const storage = memoryStorage()
     const s = new SettingsStore(storage)
-    s.update((c) => ({ ...c, theme: 'DARK', autoConnect: false, liveOneGroup: true }))
+    s.update((c) => ({ ...c, theme: 'DARK', autoConnect: false, liveOneGroup: false }))
     expect(JSON.parse(storage.getItem(SETTINGS_KEY)!)).toEqual({
       theme: 'DARK',
       autoConnect: false,
-      liveOneGroup: true,
+      liveOneGroup: false,
     })
     s.update((c) => ({ ...c, keepLast: 10 }))
     s.update((c) => ({ ...c, keepLast: null }))
-    expect(JSON.parse(storage.getItem(SETTINGS_KEY)!)).toEqual({ theme: 'DARK', autoConnect: false, liveOneGroup: true, keepLast: 0 })
+    expect(JSON.parse(storage.getItem(SETTINGS_KEY)!)).toEqual({ theme: 'DARK', autoConnect: false, liveOneGroup: false, keepLast: 0 })
     s.update((c) => ({ ...c, keepLast: 10 }))
-    expect(new SettingsStore(storage).settings).toEqual({ ...DEFAULT_SETTINGS, theme: 'DARK', autoConnect: false, liveOneGroup: true, keepLast: 10 })
+    expect(new SettingsStore(storage).settings).toEqual({ ...DEFAULT_SETTINGS, theme: 'DARK', autoConnect: false, liveOneGroup: false, keepLast: 10 })
   })
 
   it('reads odd stored values as defaults', () => {
