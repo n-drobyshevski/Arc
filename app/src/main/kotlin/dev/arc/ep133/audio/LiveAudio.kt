@@ -8,9 +8,12 @@ import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTimestamp
 import android.media.AudioTrack
+import dev.arc.ep133.features.RecState
+import dev.arc.ep133.features.TakeRecorder
 import dev.arc.ep133.formats.VoiceMixer
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import java.io.File
 import java.util.concurrent.Executors
 
 /**
@@ -27,10 +30,16 @@ import java.util.concurrent.Executors
  * [onStarted] gets each voice's latency: from the press ([VoiceMixer.start]'s
  * tag, System.nanoTime) to when its first frame leaves the output, and where
  * the output goes. It is called on the audio thread.
+ *
+ * REC ([arm]) records the mix into a take: from the first sound after it to
+ * [stopRecording], Live closing or [TakeRecorder.MAX_SECONDS]. [onTake] gets
+ * the file (null when nothing was played or it couldn't be written), and
+ * whether the limit stopped it, on the take's writer thread.
  */
 class LiveAudio(
     context: Context,
     private val onStarted: (key: String, latencyMs: Double, route: AudioDeviceInfo?) -> Unit = { _, _, _ -> },
+    private val onTake: (file: File?, seconds: Double, limit: Boolean, error: String?) -> Unit = { _, _, _, _ -> },
 ) {
     private val audio = context.getSystemService(AudioManager::class.java)
     private val attributes = AudioAttributes.Builder()
@@ -57,6 +66,17 @@ class LiveAudio(
     }
 
     @Volatile private var stream: Stream? = null
+
+    private class Take(val recorder: TakeRecorder, val writer: TakeWriter) {
+        @Volatile var limit = false
+    }
+
+    private val _rec = MutableStateFlow<RecState>(RecState.Idle)
+    /** The REC key's state. */
+    val rec: StateFlow<RecState> = _rec
+    // A take armed but not yet picked up by the audio thread, and a stop asked for.
+    @Volatile private var armed: Take? = null
+    @Volatile private var stopAsked = false
 
     /** How the output was set up, for the debug log: "48000 Hz, 192-frame bursts, low-latency path". */
     var description = ""
@@ -110,6 +130,7 @@ class LiveAudio(
         val s = synchronized(this) { stream.also { stream = null } } ?: return
         s.running = false
         _keys.value = emptySet()
+        _rec.value = RecState.Idle
         letGoOfFocus()
     }
 
@@ -127,6 +148,33 @@ class LiveAudio(
             focusThread.execute { audio.requestAudioFocus(focus) }
         }
         return true
+    }
+
+    /**
+     * Arms REC: the next sound starts a take, written to [file]. Opens the
+     * output first if Live hasn't. False when there is no output.
+     */
+    @Synchronized
+    fun arm(file: File): Boolean {
+        if (_rec.value != RecState.Idle) return true
+        if (stream == null && !open()) return false
+        val s = stream ?: return false
+        val rate = s.track.sampleRate
+        lateinit var take: Take
+        take = Take(
+            TakeRecorder(rate),
+            TakeWriter(file, rate) { f, frames, error -> onTake(f, frames.toDouble() / rate, take.limit, error) },
+        )
+        take.recorder.arm()
+        stopAsked = false
+        armed = take
+        _rec.value = RecState.Armed
+        return true
+    }
+
+    /** Stops the take: what was recorded is saved (nothing, if nothing was played). */
+    fun stopRecording() {
+        if (_rec.value != RecState.Idle) stopAsked = true
     }
 
     fun release(key: String) {
@@ -152,10 +200,36 @@ class LiveAudio(
         val ts = AudioTimestamp()
         var underruns = 0
         var quietSince = 0L
+        var take: Take? = null
         try {
             while (s.running) {
+                armed?.let {
+                    armed = null
+                    take?.let { t -> end(t) }
+                    take = it
+                }
+                if (stopAsked) {
+                    stopAsked = false
+                    take?.let { end(it) }
+                    take = null
+                    if (armed == null) _rec.value = RecState.Idle
+                }
+                val at = s.mixer.frame
                 s.mixer.render(out, s.burst)
                 val started = s.mixer.started.toList()
+                take?.let { t ->
+                    val k = t.recorder.onBurst(out, s.burst, at, started.minOfOrNull { it.frame })
+                    if (k != null) t.writer.write(out, k.from, k.frames)
+                    if (k?.last == true) {
+                        t.limit = true
+                        end(t)
+                        take = null
+                        _rec.value = RecState.Idle
+                    } else if (t.recorder.state == TakeRecorder.State.RECORDING) {
+                        val now = RecState.Recording(t.recorder.seconds)
+                        if (s.running && _rec.value != now) _rec.value = now
+                    }
+                }
                 if (s.track.write(out, 0, out.size, AudioTrack.WRITE_BLOCKING) < 0) break
                 if (started.isNotEmpty()) report(s, started, ts)
                 val keys = s.mixer.keys
@@ -176,12 +250,23 @@ class LiveAudio(
                 }
             }
         } finally {
+            // Live closing ends the take; it is saved like any other.
+            take?.let { end(it) }
+            armed?.let {
+                armed = null
+                end(it)
+            }
             runCatching {
                 s.track.pause()
                 s.track.flush()
             }
             s.track.release()
         }
+    }
+
+    /** Ends [t]: its writer keeps what was recorded up to the last sound. */
+    private fun end(t: Take) {
+        t.writer.finish(t.recorder.stop())
     }
 
     /** When each new voice's first frame is heard, from the output's timestamp. */
