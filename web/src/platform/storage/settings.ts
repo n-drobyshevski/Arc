@@ -57,7 +57,8 @@ export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
   autoConnect: true,
   keepScreenOn: true,
   keepLast: null,
-  liveOneGroup: false,
+  // The web opens Live on one group (a large grid with A-D); Android starts on all four.
+  liveOneGroup: true,
   liveFollow: true,
   guideSeen: false,
   liveKeys: false,
@@ -229,7 +230,7 @@ export function readSettings(raw: string | null): AppSettings {
     keepScreenOn: bool('keepScreenOn', true),
     // getInt("keepLast", 0).takeIf { it > 0 }
     keepLast: isInt(keep) && keep > 0 ? keep : null,
-    liveOneGroup: bool('liveOneGroup', false),
+    liveOneGroup: bool('liveOneGroup', DEFAULT_SETTINGS.liveOneGroup),
     liveFollow: bool('liveFollow', true),
     guideSeen: bool('guideSeen', false),
     liveKeys: bool('liveKeys', false),

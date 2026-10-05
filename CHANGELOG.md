@@ -8,6 +8,7 @@ version fixes bugs. The version itself is set in `version.properties`.
 
 ### Added
 - Web app (`web/`, https://arc-pi-mauve.vercel.app): the whole Android app in the browser, for Chrome, Edge and other Chromium browsers on computers and Android, over USB-C with WebMIDI. Same `.pak` files and `library.json` as the Android app.
+  - Live starts on one group (the large grid with A–D); the view switch in Live tools still shows all four.
   - Installable, works offline, and updates only when you tap Reload and no transfer is running.
   - The library is kept in the browser. On Chromium desktop an optional library folder keeps the same files as Documents/arc; elsewhere, Export library saves them as one zip, and Restore from a folder reads any arc folder back.
   - No background transfers: keep the tab in front. The screen stays on, the tab title shows progress and leaving the page asks first.

@@ -90,7 +90,7 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
     await expect(page).toHaveURL(/#\/live$/)
     await expect(page.getByRole('banner').getByRole('button', { name: 'Live, Sections' })).toBeVisible()
     const pads = page.locator('[data-pad]')
-    await expect(pads).toHaveCount(48)
+    await expect(pads).toHaveCount(12) // one group (A) by default on the web
     const litPads = (): Promise<number> =>
       pads.evaluateAll((els) => els.filter((el) => Number((el as HTMLElement).style.getPropertyValue('--glow')) > 0.5).length)
     expect(await litPads()).toBe(0)
@@ -193,7 +193,7 @@ for (const size of SIZES) {
         await expect(page.getByRole('region', { name: '001–099' })).toBeVisible()
         await shot('device')
         await selectTab(page, 'Live')
-        await expect(page.locator('[data-pad]')).toHaveCount(48)
+        await expect(page.locator('[data-pad]')).toHaveCount(12)
         await demo(page, (d) => d.noteOn(36, 127))
         await shot('live')
         await demo(page, (d) => d.noteOff(36))
