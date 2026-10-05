@@ -7,11 +7,16 @@ version fixes bugs. The version itself is set in `version.properties`.
 ## [Unreleased]
 
 ### Added
+- Live: chords. Pads and keys play alongside each other (up to 8 sounds at once) instead of cutting each other off, and in the one-group and KEYS grids they play on touch-down, a finger per pad. Every pad or key sounding is ringed. Play in the lists still plays one sound at a time.
+- Live: KEYS, like the EP-133's KEYS mode. one word right under the grid, as the PO app's DRUMS / KEYPAD (small, navy, with its two-squares mark), switches **Pads** ⇄ **Keys** on a tap and turns the 12 pads into notes of one sound (the pad last tapped, or last played on the device): tap a key to hear that sample repitched on the phone, offline too. Keys are named in fixed-do solfège (DO RE MI…), navy for the first octave and orange for the next; beside it the scale and the octave are words too (a tap lists the ten scales, or octaves 0 to 8), and the Live tools panel picks the key. Notes the EP-133 sends in its own KEYS mode light their key. The choices are kept with the settings.
 - Live: tap a pad to hear its sample on the phone, connected or offline. arc copies the samples on the active project's pads from the device in the background (any action waits at most for the sound being copied), and otherwise plays them from the newest backup holding them or from the device. The playing pad is ringed; Settings shows and clears the space the copies take.
 - Live works without the EP-133: it keeps the device's last read (the active project, its pads and the sound names) and shows them, marked offline with when they were read, until the device is connected again.
 - Live: a one-group view, a large grid of one group with A–D keys to switch and Follow to jump to the group just played. It fits one screen without scrolling (checked at Pixel 7 and 360 dp sizes). The choice is kept in the settings.
 
 ### Changed
+- The guide overlay tags the edge controls (the GUIDE tab, the more-tools strip) as the PO app's tutorial does: a vertical tab on that edge with its word turned and a hooked arrow above.
+- arc opens on **Live**, and Back from Backups or Device returns to it (it was Backups).
+- The GUIDE tab on the left edge is quiet grey, like an unselected key, instead of solid navy.
 - No bar along the bottom: the top left shows the section as a tag (like the PO app's EDIT tag) that lists Backups, Live and Device on a tap, and the EP-133 shortcut guide is a GUIDE tab on the left edge that slides it in. Long-press the tag for the debug screen.
 - Quieter controls after the pocket operator app: icon keys in the top bar (back up, connection, guide, settings) and in the Backups and Device headers (search, import, refresh, add samples), named on long-press and to screen readers; only the selected tab is a block; view switches are underlined words; play keys are outlines until they play; Follow is a target icon.
 - A guide overlay (**?**, and once on the first start) tags every control on screen with its name, like the PO app's tutorial.

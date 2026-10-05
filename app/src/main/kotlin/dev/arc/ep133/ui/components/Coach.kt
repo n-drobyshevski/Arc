@@ -31,6 +31,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -115,7 +116,33 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
             class Placed(val m: Mark, val text: androidx.compose.ui.text.TextLayoutResult, val rect: Rect, val tip: Offset?, val tail: Offset?)
             val placed = ArrayList<Placed>()
             val clearance = 6.dp.toPx()
+            // A narrow control on the screen's edge (the GUIDE tab, the more-tools strip)
+            // gets the PO tutorial's side tag: a vertical tab on that edge, its word
+            // turned, with a hooked arrow above pointing at the edge.
+            val edgeSlack = 2.dp.toPx()
+            fun edge(m: Mark): Int = when {
+                m.bounds.width > 48.dp.toPx() || m.bounds.height < m.bounds.width * 2 -> 0
+                m.bounds.left <= edgeSlack -> -1
+                m.bounds.right >= size.width - edgeSlack -> 1
+                else -> 0
+            }
+            class Side(val m: Mark, val text: androidx.compose.ui.text.TextLayoutResult, val rect: Rect, val side: Int)
+            val sides = ArrayList<Side>()
             for (m in list) {
+                val side = edge(m)
+                if (side == 0) continue
+                val text = measurer.measure(m.label.uppercase(), tagStyle.copy(color = m.ink))
+                val w = text.size.height + 2 * padY
+                val h = text.size.width + 2 * padX
+                val top = (m.bounds.center.y - h / 2).coerceIn(margin + 40.dp.toPx(), size.height - margin - h)
+                val left = if (side < 0) 0f else size.width - w
+                val rect = Rect(Offset(left, top), Size(w, h))
+                sides += Side(m, text, rect, side)
+                // Room for the hook above it too, so other tags keep clear.
+                placed += Placed(m, text, Rect(rect.left, rect.top - 30.dp.toPx(), rect.right, rect.bottom), null, null)
+            }
+            for (m in list) {
+                if (edge(m) != 0) continue
                 val text = tag(m)
                 val w = text.size.width + 2 * padX
                 val h = text.size.height + 2 * padY
@@ -165,8 +192,60 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
                 )
             }
             for (p in placed) {
+                if (sides.any { it.m === p.m }) continue
                 drawRoundRect(p.m.face, p.rect.topLeft, p.rect.size, CornerRadius(6.dp.toPx()))
                 drawText(p.text, topLeft = Offset(p.rect.left + padX, p.rect.top + padY))
+            }
+            for (sd in sides) {
+                val r = sd.rect
+                val radius = 8.dp.toPx()
+                // Square on the screen's edge, rounded on the inner side, like the tab itself.
+                drawPath(
+                    Path().apply {
+                        addRoundRect(
+                            androidx.compose.ui.geometry.RoundRect(
+                                r,
+                                topLeft = CornerRadius(if (sd.side < 0) 0f else radius),
+                                bottomLeft = CornerRadius(if (sd.side < 0) 0f else radius),
+                                topRight = CornerRadius(if (sd.side < 0) radius else 0f),
+                                bottomRight = CornerRadius(if (sd.side < 0) radius else 0f),
+                            ),
+                        )
+                    },
+                    sd.m.face,
+                )
+                // The word reads bottom to top on the left edge, top to bottom on the right.
+                rotate(if (sd.side < 0) -90f else 90f, r.center) {
+                    drawText(sd.text, topLeft = Offset(r.center.x - sd.text.size.width / 2f, r.center.y - sd.text.size.height / 2f))
+                }
+                // The hook above: up from the tab's inner side, then across to an arrowhead at the edge.
+                val stroke = 3.dp.toPx()
+                val inner = if (sd.side < 0) r.right - 6.dp.toPx() else r.left + 6.dp.toPx()
+                val outer = if (sd.side < 0) 6.dp.toPx() else size.width - 6.dp.toPx()
+                val bottom = r.top - 8.dp.toPx()
+                val bend = bottom - 18.dp.toPx()
+                val turn = 6.dp.toPx()
+                val dir = if (sd.side < 0) -1f else 1f
+                drawPath(
+                    Path().apply {
+                        moveTo(inner, bottom)
+                        lineTo(inner, bend + turn)
+                        quadraticTo(inner, bend, inner + dir * turn, bend)
+                        lineTo(outer - dir * 7.dp.toPx(), bend)
+                    },
+                    sd.m.face,
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(stroke, cap = androidx.compose.ui.graphics.StrokeCap.Round),
+                )
+                val h = 7.dp.toPx()
+                drawPath(
+                    Path().apply {
+                        moveTo(outer, bend)
+                        lineTo(outer - dir * h * 1.3f, bend - h)
+                        lineTo(outer - dir * h * 1.3f, bend + h)
+                        close()
+                    },
+                    sd.m.face,
+                )
             }
             val hint = measurer.measure(CoachText.CLOSE_HINT.uppercase(), hintStyle)
             // Below the middle, clear of a tag in the middle of the pad grid.

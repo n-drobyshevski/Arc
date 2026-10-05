@@ -368,6 +368,44 @@ fun TextToggle(options: List<String>, selected: Int, onSelect: (Int) -> Unit, mo
 }
 
 /**
+ * A word under the grid as the pocket operator app shows DRUMS / KEYPAD:
+ * small and uppercase. [mark] puts the two-squares mark before it (a word
+ * that switches modes); [dim] draws it pale (a choice not taken). Screen
+ * readers read [description] when given.
+ */
+@Composable
+fun WordButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    mark: Boolean = false,
+    dim: Boolean = false,
+    description: String? = null,
+    /** Text at the top of the touch area rather than its middle (a row hugging the grid above). */
+    top: Boolean = false,
+) {
+    val c = LocalArcColors.current
+    // Quiet: caption grey, so the pads stay the loudest thing on the page.
+    val ink = if (dim) c.graphite.copy(alpha = 0.45f) else c.graphite
+    // The touch area is 44dp tall; the mark and the word stay centred on each other,
+    // at its middle or (with [top]) its top.
+    Box(
+        modifier
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = onClick)
+            .then(if (description != null) Modifier.semantics(mergeDescendants = true) { contentDescription = description } else Modifier)
+            .heightIn(min = 44.dp)
+            .padding(top = if (top) 0.dp else 6.dp, bottom = 6.dp),
+        contentAlignment = if (top) Alignment.TopStart else Alignment.CenterStart,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (mark) Icon(ArcIcon.SWAP, ink, size = 12.dp)
+            Text(label.uppercase(), style = ArcType.word, color = ink, maxLines = 1)
+        }
+    }
+}
+
+/**
  * A round play key for a list row: navy with a triangle, orange with a square
  * while playing, faded while the device is busy with something else.
  */

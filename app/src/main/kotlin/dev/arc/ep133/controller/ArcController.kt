@@ -153,6 +153,8 @@ data class UiState(
      * [busy] it leaves every key enabled: an action waits for that one sound.
      */
     val backgroundRead: Boolean = false,
+    /** The sound Live's KEYS plays: a pad, its sample as the mirror names it. */
+    val keysPad: dev.arc.ep133.features.PhysicalPad? = null,
     /** Whether the library folder has been picked (after a reinstall); until then restoring is offered. */
     val folderPicked: Boolean = false,
 )
@@ -230,6 +232,7 @@ class ArcController(
             }
         }
         library.onExternalError = { msg -> scope.launch { toast(FeatureText.copyFailed(msg), error = true) } }
+        _state.update { it.copy(keysPad = savedKeysPad()) }
         scope.launch {
             library.names.catch { /* shown by the backups collector */ }.collect { backupNames = it; openPak = null }
         }
@@ -566,8 +569,9 @@ class ArcController(
      * can't play, or media volume at zero. Where the sound went is noted in the
      * debug log, for reports of a sound that plays but isn't heard.
      */
-    private fun startSound(key: String, pcm: ByteArray, channels: Int, sampleRate: Int) {
-        when (val r = player.play(key, pcm, channels, sampleRate)) {
+    private fun startSound(key: String, pcm: ByteArray, channels: Int, sampleRate: Int, voice: Boolean = false) {
+        val result = if (voice) player.playVoice(key, pcm, channels, sampleRate) else player.play(key, pcm, channels, sampleRate)
+        when (val r = result) {
             is dev.arc.ep133.audio.PlayResult.Failed -> {
                 trafficLog.note("play $key failed: ${r.reason}")
                 toast(FeatureText.cantPlay(r.reason), error = true)
@@ -858,38 +862,87 @@ class ArcController(
      * Plays a Live pad's sample on the phone: arc's copy of the device's
      * sound, else the newest backup holding it, else (connected) the device.
      */
+    /**
+     * Plays a Live pad alongside whatever else is sounding, so several pads
+     * make a chord. Only a stop (leaving Live) drops one still loading; other
+     * taps don't, unlike the lists' one-at-a-time Play.
+     */
     fun playPad(pad: dev.arc.ep133.features.PhysicalPad): Job = scope.launch {
-        val token = ++playToken
+        val token = playToken
+        // The pad tapped is also the sound KEYS plays.
+        selectKeysPad(pad)
+        val a = padAudio(pad) ?: return@launch
+        if (token == playToken) startSound("live:${pad.group}:${pad.offset}", a.pcm, a.channels, a.sampleRate, voice = true)
+    }
+
+    /** A pad's sample, ready to play. */
+    private class PadAudio(val pcm: ByteArray, val channels: Int, val sampleRate: Int)
+
+    // The KEYS sound, decoded once ("slot:name"), so playing keys is quick.
+    private var keysAudio: Pair<String, PadAudio>? = null
+
+    /** A pad's sample from the first place that has it; null after a toast says why. */
+    private suspend fun padAudio(pad: dev.arc.ep133.features.PhysicalPad): PadAudio? {
         val m = mirror
         val slot = m?.slotOf(pad)
         val name = m?.nameOf(pad)
         if (slot == null || name == null) {
             toast(dev.arc.ep133.text.MirrorText.NO_SAMPLE)
-            return@launch
+            return null
         }
-        val key = "live:${pad.group}:${pad.offset}"
-        try {
+        keysAudio?.takeIf { it.first == "$slot:$name" }?.let { return it.second }
+        return try {
             val wav = withContext(Dispatchers.IO) { padSounds.get(slot, name) }
                 ?: fromBackup(slot, name)
-            if (wav != null) {
+            val audio = if (wav != null) {
                 val w = withContext(Dispatchers.Default) { Wav.decode(wav) }
-                if (token == playToken) startSound(key, w.pcm, w.channels, w.sampleRate.toInt())
-                return@launch
-            }
-            if (session != null && _state.value.device != null) {
-                val got = exclusive("play:$slot") { s -> DeviceBrowser.soundDetails(s, slot) to dev.arc.ep133.protocol.Fs.download(s, slot) }
-                    ?: return@launch
-                val (d, pcm) = got
+                PadAudio(w.pcm, w.channels, w.sampleRate.toInt())
+            } else if (session != null && _state.value.device != null) {
+                val (d, pcm) = exclusive("play:$slot") { s -> DeviceBrowser.soundDetails(s, slot) to dev.arc.ep133.protocol.Fs.download(s, slot) }
+                    ?: return null
                 deviceSounds[slot]?.let { keepPadSound(slot, it.name, it.size, pcm, d.channels, d.sampleRate) }
-                if (token == playToken) startSound(key, pcm, d.channels.toInt(), d.sampleRate.toInt())
-                return@launch
+                PadAudio(pcm, d.channels.toInt(), d.sampleRate.toInt())
+            } else {
+                toast(dev.arc.ep133.text.MirrorText.NO_COPY)
+                return null
             }
-            toast(dev.arc.ep133.text.MirrorText.NO_COPY)
+            keysAudio = "$slot:$name" to audio
+            audio
         } catch (e: Throwable) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             toast(e.message ?: e.toString(), error = true)
+            null
         }
     }
+
+    /** The sound KEYS plays: the pad last tapped, or last played on the device in the pads view. */
+    fun selectKeysPad(pad: dev.arc.ep133.features.PhysicalPad) {
+        if (_state.value.keysPad == pad) return
+        _state.update { it.copy(keysPad = pad) }
+        mirrorPrefs.edit { putString("keysPad", "${pad.group}:${pad.offset}") }
+    }
+
+    /** Plays key [index] (0 = '.', the lowest): the KEYS sound, repitched to that key's note. */
+    fun playKey(index: Int): Job = scope.launch {
+        val token = playToken
+        val pad = _state.value.keysPad
+        if (pad == null) {
+            toast(dev.arc.ep133.text.MirrorText.PICK_SOUND)
+            return@launch
+        }
+        val st = settingsStore.settings.value
+        val note = dev.arc.ep133.features.Keys.notes(st.keysRoot, st.keysScale, st.keysOctave).getOrNull(index) ?: return@launch
+        val a = padAudio(pad) ?: return@launch
+        val pcm = withContext(Dispatchers.Default) {
+            dev.arc.ep133.formats.Pitch.shift(a.pcm, a.channels, note - dev.arc.ep133.features.Keys.ROOT_NOTE)
+        }
+        if (token == playToken) startSound("keys:$index", pcm, a.channels, a.sampleRate, voice = true)
+    }
+
+    private fun savedKeysPad(): dev.arc.ep133.features.PhysicalPad? =
+        mirrorPrefs.getString("keysPad", null)?.split(':')?.mapNotNull { it.toIntOrNull() }
+            ?.takeIf { it.size == 2 && it[0] in 0..3 && it[1] in 0..11 }
+            ?.let { dev.arc.ep133.features.PhysicalPad(it[0], it[1]) }
 
     /** The WAV of a sound from the newest backup that has it, if any. */
     private suspend fun fromBackup(slot: Int, name: String): ByteArray? {
@@ -1165,6 +1218,16 @@ class ArcController(
     fun setLiveOneGroup(on: Boolean) = changeSettings { it.copy(liveOneGroup = on) }
 
     fun setLiveFollow(on: Boolean) = changeSettings { it.copy(liveFollow = on) }
+
+    fun setLiveKeys(on: Boolean) = changeSettings { it.copy(liveKeys = on) }
+
+    fun setKeysRoot(root: Int) = changeSettings { it.copy(keysRoot = root.coerceIn(0, 11)) }
+
+    fun setKeysScale(scale: dev.arc.ep133.features.Scale) = changeSettings { it.copy(keysScale = scale) }
+
+    fun setKeysOctave(octave: Int) = changeSettings {
+        it.copy(keysOctave = octave.coerceIn(dev.arc.ep133.features.Keys.MIN_OCTAVE, dev.arc.ep133.features.Keys.MAX_OCTAVE))
+    }
 
     /** The guide overlay was shown (it opens by itself only once, also across reinstalls). */
     fun setGuideSeen() = changeSettings { it.copy(guideSeen = true) }

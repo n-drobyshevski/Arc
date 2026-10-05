@@ -314,7 +314,8 @@ class MainActivity : ComponentActivity() {
             }
         }
         // The section under the top bar; the other screens stack over it without the bars.
-        var tab by rememberSaveable { mutableStateOf(Tab.BACKUPS) }
+        // Live is the home section: the app opens on it.
+        var tab by rememberSaveable { mutableStateOf(Tab.LIVE) }
         var search by rememberSaveable { mutableStateOf(false) }
         // Comparing two backups: the backup whose "compare" picker is open, then "<idA>|<idB>".
         var comparePickFor by rememberSaveable { mutableStateOf<String?>(null) }
@@ -394,6 +395,8 @@ class MainActivity : ComponentActivity() {
         // After a recreation (or process death) the opened backup has to be read again.
         LaunchedEffect(contentsBackup?.id) { contentsBackup?.let { controller.openContents(it) } }
         val playing by controller.player.playing.collectAsStateWithLifecycle()
+        // Everything sounding, for Live's rings (several pads or keys for a chord).
+        val playingKeys by controller.player.playingKeys.collectAsStateWithLifecycle()
         val compareA = compareIds?.substringBefore('|')?.let { id -> state.backups.firstOrNull { it.id == id } }
         val compareB = compareIds?.substringAfter('|')?.let { id -> state.backups.firstOrNull { it.id == id } }
         // Also runs again after a recreation, when the result is gone.
@@ -512,8 +515,8 @@ class MainActivity : ComponentActivity() {
                     onGuide = { guideOpen = it },
                     guide = { GuideScreen(onBack = { guideOpen = false }) },
                 ) {
-                    // Back from another tab returns to Backups first.
-                    BackHandler(enabled = tab != Tab.BACKUPS) { selectTab(Tab.BACKUPS) }
+                    // Back from another section returns to Live, the home section, first.
+                    BackHandler(enabled = tab != Tab.LIVE) { selectTab(Tab.LIVE) }
                     when (tab) {
                         Tab.LIVE -> MirrorScreen(
                             mirror = state.mirror ?: if (!ready) {
@@ -524,10 +527,31 @@ class MainActivity : ComponentActivity() {
                             nameOf = controller::mirrorName,
                             onPadOrder = controller::setPadOrder,
                             onPad = { controller.playPad(it) },
-                            playingPad = playing?.takeIf { it.startsWith("live:") }?.split(':')?.let { p ->
-                                val g = p.getOrNull(1)?.toIntOrNull()
-                                val o = p.getOrNull(2)?.toIntOrNull()
-                                if (g != null && o != null) dev.arc.ep133.features.PhysicalPad(g, o) else null
+                            keys = dev.arc.ep133.ui.screens.KeysUi(
+                                on = appSettings.liveKeys,
+                                root = appSettings.keysRoot,
+                                scale = appSettings.keysScale,
+                                octave = appSettings.keysOctave,
+                                pad = state.keysPad,
+                                padName = state.keysPad?.let(controller::mirrorName),
+                                playingKeys = playingKeys.mapNotNullTo(LinkedHashSet()) { it.removePrefix("keys:").takeIf { _ -> it.startsWith("keys:") }?.toIntOrNull() },
+                            ),
+                            keysActions = remember(controller) {
+                                dev.arc.ep133.ui.screens.KeysActions(
+                                    onMode = controller::setLiveKeys,
+                                    onRoot = controller::setKeysRoot,
+                                    onScale = controller::setKeysScale,
+                                    onOctave = controller::setKeysOctave,
+                                    onKey = { controller.playKey(it) },
+                                    onSelect = controller::selectKeysPad,
+                                )
+                            },
+                            playingPads = playingKeys.mapNotNullTo(HashSet()) { k ->
+                                k.split(':').takeIf { it.size == 3 && it[0] == "live" }?.let { p ->
+                                    val g = p[1].toIntOrNull()
+                                    val o = p[2].toIntOrNull()
+                                    if (g != null && o != null) dev.arc.ep133.features.PhysicalPad(g, o) else null
+                                }
                             },
                             oneGroup = appSettings.liveOneGroup,
                             onOneGroup = controller::setLiveOneGroup,

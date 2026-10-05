@@ -25,6 +25,10 @@ data class MirrorState(
     /** Whether a pad push has ever been seen this session. */
     val pushesSeen: Boolean = false,
     val padOrder: PadOrder = PadOrder.FROM_TOP,
+    /** Every note held or fading, pads or not, for the KEYS view (the device's KEYS mode sends any note). */
+    val notes: Map<Int, PadLight> = emptyMap(),
+    /** The latest note played, any note. */
+    val lastNote: Int? = null,
 )
 
 /**
@@ -60,6 +64,8 @@ class LiveMirror(
     }
 
     private val pads = LinkedHashMap<PhysicalPad, PadLight>()
+    private val notes = LinkedHashMap<Int, PadLight>()
+    private var lastNote: Int? = null
     private val keysHeld = LinkedHashMap<Int, Int>()
     private var lastKeysNote: Int? = null
     private var lastHit: Hit? = null
@@ -135,6 +141,8 @@ class LiveMirror(
     fun onMidi(e: MidiEvent) {
         when (e) {
             is MidiEvent.NoteOn -> {
+                notes[e.note] = PadLight(e.velocity, e.channel, e.time)
+                lastNote = e.note
                 val pad = PadNotes.pad(e.note)
                 if (pad == null) {
                     keysHeld[e.note] = e.channel
@@ -153,6 +161,7 @@ class LiveMirror(
                 }
             }
             is MidiEvent.NoteOff -> {
+                notes[e.note]?.let { if (it.offAt == null) notes[e.note] = it.copy(offAt = e.time) }
                 val pad = PadNotes.pad(e.note)
                 if (pad == null) {
                     keysHeld.remove(e.note)
@@ -179,6 +188,7 @@ class LiveMirror(
                 playing = false
                 // A note-off lost at stop would leave a pad lit forever: release what is held.
                 for ((p, l) in pads.entries.toList()) if (l.offAt == null) pads[p] = l.copy(offAt = e.time)
+                for ((n, l) in notes.entries.toList()) if (l.offAt == null) notes[n] = l.copy(offAt = e.time)
                 keysHeld.clear()
             }
             is MidiEvent.ControlChange -> Unit
@@ -235,6 +245,7 @@ class LiveMirror(
     @Synchronized
     fun snapshot(now: Long): MirrorState {
         pads.entries.removeAll { (_, l) -> l.offAt != null && now - l.offAt > FADE_NS }
+        notes.entries.removeAll { (_, l) -> l.offAt != null && now - l.offAt > FADE_NS }
         val lastClock = clocks.lastOrNull()
         val bpm = if (lastClock == null || now - lastClock > CLOCK_TIMEOUT_NS || clocks.size < 25) {
             null
@@ -255,6 +266,8 @@ class LiveMirror(
             learned = LinkedHashMap(learned),
             pushesSeen = pushesSeen,
             padOrder = padOrder,
+            notes = LinkedHashMap(notes),
+            lastNote = lastNote,
         )
     }
 }

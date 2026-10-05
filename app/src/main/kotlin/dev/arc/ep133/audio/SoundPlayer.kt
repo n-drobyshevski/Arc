@@ -22,9 +22,12 @@ sealed interface PlayResult {
 }
 
 /**
- * Plays one sound at a time on the phone (16-bit PCM, mono or stereo).
- * Starting a sound stops the previous one. [playing] is the key of what is
- * playing, so lists can show a Stop key on the right row.
+ * Plays sounds on the phone (16-bit PCM, mono or stereo). [play] plays one
+ * at a time: starting a sound stops the others, as lists want. [playVoice]
+ * plays alongside what is playing, for Live's pads and keys (chords): the
+ * same key starts over, and past [MAX_VOICES] the oldest stops. [playing] is
+ * the key of the latest sound playing, so lists can show a Stop key on the
+ * right row; [playingKeys] are all of them.
  *
  * The PCM is streamed to the output from a small thread, as media players do,
  * rather than handed over as one static buffer: a whole sample can be several
@@ -38,6 +41,9 @@ class SoundPlayer(context: Context? = null) {
         fun canPlay(channels: Int, sampleRate: Long) = channels in 1..2 && sampleRate in 4000L..192000L
 
         private const val CHUNK = 16 * 1024
+
+        /** Sounds at once; Android allows an app a few dozen tracks in all. */
+        const val MAX_VOICES = 8
 
         /**
          * A short name for where the sound goes. Newer device types are plain
@@ -75,14 +81,23 @@ class SoundPlayer(context: Context? = null) {
     }
 
     /** One sound being played; the thread that feeds it owns (and releases) the track. */
-    private class Playback(val track: AudioTrack) {
+    private class Playback(val key: String, val track: AudioTrack) {
         @Volatile var stopped = false
         var released = false
     }
 
-    private var current: Playback? = null
+    // What is playing, oldest first.
+    private val voices = LinkedHashMap<String, Playback>()
     private val _playing = MutableStateFlow<String?>(null)
     val playing: StateFlow<String?> = _playing
+    private val _playingKeys = MutableStateFlow<Set<String>>(emptySet())
+    val playingKeys: StateFlow<Set<String>> = _playingKeys
+
+    private fun publish() {
+        _playing.value = voices.keys.lastOrNull()
+        _playingKeys.value = voices.keys.toSet()
+        if (voices.isEmpty()) focus?.let { audio?.abandonAudioFocusRequest(it) }
+    }
 
     /** Whether media volume is at zero (then nothing is heard even when the sound plays). */
     fun volumeOff(): Boolean = audio?.getStreamVolume(AudioManager.STREAM_MUSIC) == 0
@@ -90,6 +105,18 @@ class SoundPlayer(context: Context? = null) {
     @Synchronized
     fun play(key: String, pcm: ByteArray, channels: Int, sampleRate: Int): PlayResult {
         stop()
+        return start(key, pcm, channels, sampleRate)
+    }
+
+    /** Plays alongside the sounds already playing (a chord); the same [key] starts over. */
+    @Synchronized
+    fun playVoice(key: String, pcm: ByteArray, channels: Int, sampleRate: Int): PlayResult {
+        voices[key]?.let { halt(it) }
+        while (voices.size >= MAX_VOICES) halt(voices.values.first())
+        return start(key, pcm, channels, sampleRate)
+    }
+
+    private fun start(key: String, pcm: ByteArray, channels: Int, sampleRate: Int): PlayResult {
         if (!canPlay(channels, sampleRate.toLong())) return PlayResult.Failed(FeatureText.unplayableFormat(channels, sampleRate))
         val frameBytes = 2 * channels
         val length = pcm.size - pcm.size % frameBytes
@@ -119,17 +146,17 @@ class SoundPlayer(context: Context? = null) {
         }
         // Denied focus (during a call, say) still plays: the user asked for the sound.
         focus?.let { audio?.requestAudioFocus(it) }
-        val p = Playback(track)
+        val p = Playback(key, track)
         try {
             // Fill the buffer first so the output starts with sound, not an underrun.
             val first = track.write(pcm, 0, min(length, minBuffer * 4), AudioTrack.WRITE_NON_BLOCKING).coerceAtLeast(0)
             track.play()
-            current = p
-            _playing.value = key
+            voices[key] = p
+            publish()
             Thread({ feed(p, pcm, first, length, frameBytes) }, "arc-player").apply { isDaemon = true }.start()
         } catch (e: Exception) {
             track.release()
-            focus?.let { audio?.abandonAudioFocusRequest(it) }
+            if (voices.isEmpty()) focus?.let { audio?.abandonAudioFocusRequest(it) }
             return PlayResult.Failed(e.message ?: FeatureText.NO_AUDIO_OUTPUT)
         }
         val out = track.routedDevice
@@ -163,10 +190,9 @@ class SoundPlayer(context: Context? = null) {
 
     @Synchronized
     private fun finish(p: Playback) {
-        if (current === p) {
-            current = null
-            _playing.value = null
-            focus?.let { audio?.abandonAudioFocusRequest(it) }
+        if (voices[p.key] === p) {
+            voices.remove(p.key)
+            publish()
         }
         if (!p.released) {
             p.released = true
@@ -175,17 +201,21 @@ class SoundPlayer(context: Context? = null) {
         }
     }
 
+    /** Stops everything playing. */
     @Synchronized
     fun stop() {
-        val p = current ?: return
+        if (voices.isEmpty()) return
+        for (p in voices.values.toList()) halt(p)
+    }
+
+    /** Silences one sound now; the feeding thread releases its track when it sees the flag. */
+    private fun halt(p: Playback) {
         p.stopped = true
-        // Silence now; the feeding thread releases the track when it sees the flag.
         if (!p.released) runCatching {
             p.track.pause()
             p.track.flush()
         }
-        current = null
-        _playing.value = null
-        focus?.let { audio?.abandonAudioFocusRequest(it) }
+        if (voices[p.key] === p) voices.remove(p.key)
+        publish()
     }
 }

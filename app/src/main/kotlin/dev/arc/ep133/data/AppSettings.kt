@@ -2,6 +2,8 @@ package dev.arc.ep133.data
 
 import android.content.Context
 import androidx.core.content.edit
+import dev.arc.ep133.features.Keys
+import dev.arc.ep133.features.Scale
 import dev.arc.ep133.text.ThemeChoice
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,6 +22,12 @@ data class AppSettings(
     val liveFollow: Boolean = true,
     /** The guide overlay has been shown once (it opens by itself on the first start only). */
     val guideSeen: Boolean = false,
+    /** Live plays the keys (one sound as notes) instead of the pads. */
+    val liveKeys: Boolean = false,
+    /** KEYS: the key (0 = DO), the scale and the octave (4 starts at C4). */
+    val keysRoot: Int = 0,
+    val keysScale: Scale = Scale.CHROMATIC,
+    val keysOctave: Int = 4,
 )
 
 /**
@@ -43,6 +51,10 @@ class SettingsStore(context: Context) {
         liveOneGroup = prefs.getBoolean("liveOneGroup", false),
         liveFollow = prefs.getBoolean("liveFollow", true),
         guideSeen = prefs.getBoolean("guideSeen", false),
+        liveKeys = prefs.getBoolean("liveKeys", false),
+        keysRoot = prefs.getInt("keysRoot", 0).coerceIn(0, 11),
+        keysScale = runCatching { Scale.valueOf(prefs.getString("keysScale", null) ?: "") }.getOrDefault(Scale.CHROMATIC),
+        keysOctave = prefs.getInt("keysOctave", 4).coerceIn(Keys.MIN_OCTAVE, Keys.MAX_OCTAVE),
     )
 
     /** Each setting as its key and stored text. */
@@ -54,6 +66,10 @@ class SettingsStore(context: Context) {
         "liveOneGroup" to liveOneGroup.toString(),
         "liveFollow" to liveFollow.toString(),
         "guideSeen" to guideSeen.toString(),
+        "liveKeys" to liveKeys.toString(),
+        "keysRoot" to keysRoot.toString(),
+        "keysScale" to keysScale.name,
+        "keysOctave" to keysOctave.toString(),
     )
 
     fun update(change: (AppSettings) -> AppSettings) {
@@ -65,8 +81,8 @@ class SettingsStore(context: Context) {
         prefs.edit {
             for ((k, v) in changed) {
                 when (k) {
-                    "theme" -> putString(k, v)
-                    "keepLast" -> putInt(k, v.toInt())
+                    "theme", "keysScale" -> putString(k, v)
+                    "keepLast", "keysRoot", "keysOctave" -> putInt(k, v.toInt())
                     else -> putBoolean(k, v.toBooleanStrict())
                 }
             }
@@ -88,6 +104,10 @@ class SettingsStore(context: Context) {
             liveOneGroup = map["app.liveOneGroup"]?.toBooleanStrictOrNull() ?: cur.liveOneGroup,
             liveFollow = map["app.liveFollow"]?.toBooleanStrictOrNull() ?: cur.liveFollow,
             guideSeen = map["app.guideSeen"]?.toBooleanStrictOrNull() ?: cur.guideSeen,
+            liveKeys = map["app.liveKeys"]?.toBooleanStrictOrNull() ?: cur.liveKeys,
+            keysRoot = map["app.keysRoot"]?.toIntOrNull()?.takeIf { it in 0..11 } ?: cur.keysRoot,
+            keysScale = map["app.keysScale"]?.let { v -> runCatching { Scale.valueOf(v) }.getOrNull() } ?: cur.keysScale,
+            keysOctave = map["app.keysOctave"]?.toIntOrNull()?.takeIf { it in Keys.MIN_OCTAVE..Keys.MAX_OCTAVE } ?: cur.keysOctave,
         )
     }
 }
