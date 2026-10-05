@@ -8,6 +8,12 @@
 //
 // Like the Android panel it covers only the zone: what is outside the zone
 // (the top bar) stays usable, so the panel is a non-modal dialog.
+//
+// Web only, the desktop layout: [docked] (the page passes useDesk()) shows the
+// panel for good as a paper column on the zone's right, a complementary
+// region under the title's name, with no strip, scrim, slide or close key
+// (and no side.more mark, as there is no strip to point at). An open overlay
+// left from a narrower window is closed then, so Back has nothing hidden to undo.
 import type { ComponentChildren, JSX } from 'preact'
 import { useEffect, useId, useRef, useState } from 'preact/hooks'
 import { CoachText } from '../../core/text/coachText'
@@ -34,10 +40,12 @@ export interface SideZoneProps {
   /** The page under the strip. It fills the zone and scrolls inside it. */
   children?: ComponentChildren
   class?: string
+  /** Web only (the desk): the panel always shown as a column beside the page, no strip. */
+  docked?: boolean
 }
 
 export function SideZone(props: SideZoneProps): JSX.Element {
-  const { open, title } = props
+  const { open, title, docked = false } = props
   const panelId = useId()
   const titleId = useId()
   const more = COACH_MARKS['side.more']
@@ -66,9 +74,14 @@ export function SideZone(props: SideZoneProps): JSX.Element {
     return () => window.clearTimeout(t)
   }, [open])
 
+  // Docked, the overlay means nothing: a layer left open closes.
+  useEffect(() => {
+    if (docked && open) props.onClose()
+  }, [docked, open])
+
   // Focus moves into the panel when it opens and back to the strip when it closes.
   useEffect(() => {
-    if (!open || !mounted) return
+    if (!open || !mounted || docked) return
     closeKey.current?.focus({ preventScroll: true })
     return () => {
       const inside = panel.current?.contains(document.activeElement) ?? false
@@ -81,7 +94,7 @@ export function SideZone(props: SideZoneProps): JSX.Element {
   const close = useRef(props.onClose)
   close.current = props.onClose
   useEffect(() => {
-    if (!open) return
+    if (!open || docked) return
     const onKey = (e: KeyboardEvent): void => {
       if (e.key !== 'Escape' || e.defaultPrevented) return
       const t = e.target instanceof Element ? e.target : null
@@ -92,7 +105,18 @@ export function SideZone(props: SideZoneProps): JSX.Element {
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [open])
+  }, [open, docked])
+
+  if (docked) {
+    return (
+      <div class={`side-zone side-zone--docked${props.class ? ` ${props.class}` : ''}`}>
+        <div class="side-zone__content">{props.children}</div>
+        <aside class="side-zone__dock desk-paper" aria-label={title}>
+          {props.panel}
+        </aside>
+      </div>
+    )
+  }
 
   return (
     <div class={`side-zone${props.class ? ` ${props.class}` : ''}`}>

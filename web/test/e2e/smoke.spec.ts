@@ -2,6 +2,8 @@
 // of ?demo (src/dev/demo.ts) standing in for the device. One pass through the
 // main flows, a browser without Web MIDI, and screenshots for a manual look
 // next to the Android reference PNGs (attached to the report; no pixel diff).
+// The main flow runs at Playwright's 1280x720, which is the web-only desktop
+// layout (ui/useDesk.ts, from 1024px wide); the screenshots add a 1440x900 one.
 import { demo, expect, importPak, notAutomated, SAMPLE_PAK, selectTab, test } from './fixtures'
 
 test('back up, look inside, restore, browse the device, live pads, import, no MIDI', async ({ page, context }) => {
@@ -167,6 +169,7 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
 const SIZES = [
   { name: 'phone', width: 393, height: 852 },
   { name: 'tablet', width: 840, height: 1200 },
+  { name: 'desktop', width: 1440, height: 900 },
 ] as const
 const SCHEMES = ['light', 'dark'] as const
 

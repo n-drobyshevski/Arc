@@ -11,6 +11,16 @@
 //
 // Sheets live in ui/sheets (Device: pads / upload / trim; Backups: detail,
 // compare picker, restore, delete; the font licence and progress sheets).
+//
+// Web only, the desktop layout (from 1024px wide, ui/useDesk.ts): every screen
+// sits in the page column of a "desk" (theme/desk.css) right of the nav rail
+// (ui/components/NavRail.tsx), between the ruled edge columns:
+//
+//   div.app.is-desk > CoachHost > div.desk [ NavRail | div.app__screen ]
+//
+// The guide overlay's host then holds the rail too (its Guide key carries the
+// edge.guide mark); it shows over the shell only, as on the phone. Below
+// 1024px the tree is the phone's, unchanged.
 import { Component, type ComponentChildren, type JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { MirrorText } from './core/text/mirrorText'
@@ -31,11 +41,13 @@ import {
   overlayLayer,
   rootView,
   screenLayer,
+  selectTab as tabStack,
   sheetLayer,
   type NavView,
 } from './ui/nav'
 import { CoachHost, useCoachFirstRun } from './ui/components/Coach'
 import { Key } from './ui/components/Key'
+import { NavRail } from './ui/components/NavRail'
 import { Sheet } from './ui/components/Sheet'
 import { Shell } from './ui/components/Shell'
 import { ControllerToast } from './ui/components/Toast'
@@ -55,6 +67,7 @@ import { SettingsScreen } from './ui/screens/SettingsScreen'
 import { BackupPadsSheet, DevicePadsSheet } from './ui/sheets/PadsSheet'
 import { FontLicenceSheet } from './ui/sheets/FontLicenceSheet'
 import { DeviceUploadSheet } from './ui/sheets/UploadSheet'
+import { useDesk } from './ui/useDesk'
 import './app.css'
 
 /** The progress sheet's layer id. */
@@ -112,6 +125,7 @@ function Root(): JSX.Element {
   const state = c.state.value
   const settings = c.settings.value
   const playing = c.playing.value
+  const desk = useDesk()
 
   // The guide overlay, once by itself on the first start (coach_seen), over the
   // shell. Not for automated browsers (screenshots, e2e), where it would only be in the way.
@@ -225,28 +239,29 @@ function Root(): JSX.Element {
     )
   } else {
     page = (
-      <CoachHost visible={v.coach} onDismiss={() => nav.close(overlayLayer('coach'))}>
-        <Shell
-          tab={v.tab}
-          onTab={(t) => nav.selectTab(t)}
-          menuOpen={v.menu}
-          onMenu={(open) => (open ? nav.open(overlayLayer('menu')) : nav.close(overlayLayer('menu')))}
-          connected={state.connected}
-          canConnect={state.midiSupported && !state.busy}
-          canBackup={state.midiSupported && state.device !== null && !state.busy}
-          onBackup={() => void c.backup()}
-          onConnect={() => void c.connect()}
-          onDebug={() => nav.openScreen({ kind: 'debug' })}
-          onSettings={() => nav.openScreen({ kind: 'settings' })}
-          onHelp={() => nav.open(overlayLayer('coach'))}
-          guideOpen={v.guide}
-          onGuide={(open) => (open ? nav.openScreen({ kind: 'guide' }) : nav.close(screenLayer({ kind: 'guide' })))}
-          guide={<GuideScreen onBack={() => nav.close(screenLayer({ kind: 'guide' }))} />}
-        >
-          <TabScreen view={v} />
-        </Shell>
-      </CoachHost>
+      <Shell
+        tab={v.tab}
+        onTab={(t) => nav.selectTab(t)}
+        menuOpen={v.menu}
+        onMenu={(open) => (open ? nav.open(overlayLayer('menu')) : nav.close(overlayLayer('menu')))}
+        connected={state.connected}
+        canConnect={state.midiSupported && !state.busy}
+        canBackup={state.midiSupported && state.device !== null && !state.busy}
+        onBackup={() => void c.backup()}
+        onConnect={() => void c.connect()}
+        onDebug={() => nav.openScreen({ kind: 'debug' })}
+        onSettings={() => nav.openScreen({ kind: 'settings' })}
+        onHelp={() => nav.open(overlayLayer('coach'))}
+        guideOpen={v.guide}
+        onGuide={(open) => (open ? nav.openScreen({ kind: 'guide' }) : nav.close(screenLayer({ kind: 'guide' })))}
+        guide={<GuideScreen onBack={() => nav.close(screenLayer({ kind: 'guide' }))} />}
+        desk={desk}
+      >
+        <TabScreen view={v} />
+      </Shell>
     )
+    // On the desk the overlay's host is around the whole desk instead (the rail's marks too).
+    if (!desk) page = <CoachHost visible={v.coach} onDismiss={() => nav.close(overlayLayer('coach'))}>{page}</CoachHost>
   }
 
   const tabs = onTabs(v)
@@ -258,9 +273,34 @@ function Root(): JSX.Element {
     if (progressShown && !has) nav.open(sheetLayer(PROGRESS))
     else if (!progressShown && has) nav.close(sheetLayer(PROGRESS))
   }, [progressShown])
+  const screen = <div class="app__screen" data-view={view}>{page}</div>
+  const guide = screenLayer({ kind: 'guide' })
   return (
-    <div class="app">
-      <div class="app__screen" data-view={view}>{page}</div>
+    <div class={desk ? 'app is-desk' : 'app'}>
+      {desk ? (
+        <CoachHost visible={v.coach && view === 'shell'} onDismiss={() => nav.close(overlayLayer('coach'))}>
+          <div class="desk desk-edges">
+            <NavRail
+              current={view === 'settings' ? 'settings' : v.tab}
+              guideOpen={view === 'shell' && v.guide}
+              // The section list covers the page and holds the focus: the rail waits under it.
+              inert={view === 'shell' && v.menu}
+              onTab={(t) => nav.selectTab(t)}
+              onGuide={() => {
+                if (view === 'shell') {
+                  if (v.guide) nav.close(guide)
+                  else nav.open(guide)
+                } else {
+                  // From a full screen: back to its section, the guide over it.
+                  nav.go([...tabStack(nav.stack.peek(), v.tab), guide])
+                }
+              }}
+              onSettings={() => nav.openScreen({ kind: 'settings' })}
+            />
+            {screen}
+          </div>
+        </CoachHost>
+      ) : screen}
       {/* The Device tab's sheets: pads 'pads:device:<n>', upload / trim from state.browser.draft. */}
       {tabs && v.tab === 'device' && <><DevicePadsSheet view={v} /><DeviceUploadSheet view={v} /></>}
       {/* The Backups tab's sheets: detail 'detail:<id>', compare picker 'comparePick:<id>',

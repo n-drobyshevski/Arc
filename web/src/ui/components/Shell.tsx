@@ -5,6 +5,13 @@
 // the top bar, so the tag stays in view). The guide slides in from the left
 // over everything. The page box has a fixed height; [children] scroll inside
 // .shell__page (screens that fill it, like Live's one-group view, use height: 100%).
+//
+// Web only, on the desk ([desk], from 1024px wide; app.tsx puts the shell in
+// the page column right of the nav rail): no GUIDE edge tab (the rail's Guide
+// key opens the guide, and gets the focus back), the guide is a panel docked
+// on the left of the page column instead of covering it, and the top bar's row
+// widens to 1200 (Shell.css, TopBar.css). The shell's own --shell page goes
+// transparent, so the desk shows through.
 import type { ComponentChildren, JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type { Tab } from '../../state/types'
@@ -32,6 +39,8 @@ export interface ShellProps {
   /** The guide screen, slid in while [guideOpen]. */
   guide: ComponentChildren
   children?: ComponentChildren
+  /** The desktop layout (ui/useDesk.ts): the nav rail's Guide key opens the guide, not the edge tab. */
+  desk?: boolean
 }
 
 /** slideInHorizontally / slideOutHorizontally: Compose's default spring settles in about this long. */
@@ -44,7 +53,7 @@ export function Shell(props: ShellProps): JSX.Element {
   // Focus goes back to what opened a layer once it closes (the list's items
   // hide and the guide unmounts, which would drop focus onto <body>).
   useReturnFocus(root, menuOpen, '.section-tag', '.section-menu')
-  useReturnFocus(root, guideOpen, '.guide-edge-tab', '.shell__guide')
+  useReturnFocus(root, guideOpen, props.desk ? '.nav-rail__guide' : '.guide-edge-tab', '.shell__guide')
   return (
     <div class="shell" ref={root}>
       <div class="shell__top" inert={guideOpen || undefined}>
@@ -83,7 +92,8 @@ export function Shell(props: ShellProps): JSX.Element {
 
 /**
  * When [open] turns false and focus was inside [inside] (or already dropped to
- * <body>), focuses [opener]. Both are selectors under [root].
+ * <body>), focuses [opener]. Both are selectors; [inside] under [root], [opener]
+ * under [root] or, failing that, anywhere in the document (the desk's rail is outside the shell).
  */
 function useReturnFocus(root: { current: HTMLElement | null }, open: boolean, opener: string, inside: string): void {
   const was = useRef(open)
@@ -93,7 +103,9 @@ function useReturnFocus(root: { current: HTMLElement | null }, open: boolean, op
     if (!closed || typeof document === 'undefined') return
     const active = document.activeElement
     const lost = active === null || active === document.body || (active instanceof Element && active.closest(inside) !== null)
-    if (lost) root.current?.querySelector<HTMLElement>(opener)?.focus({ preventScroll: true })
+    if (!lost) return
+    const el = root.current?.querySelector<HTMLElement>(opener) ?? document.querySelector<HTMLElement>(opener)
+    el?.focus({ preventScroll: true })
   }, [open])
 }
 

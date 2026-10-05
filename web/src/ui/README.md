@@ -165,6 +165,14 @@ it matches Android at 360px and gives way only when the tag is long.
   wrap transitions in `@media (prefers-reduced-motion: reduce)`.
 - **Layout**: phone first (393dp reference). Columns cap at `--column-max`
   and centre; no horizontal page scroll at 320px.
+  Web only, the desk: from `@media (min-width: 1024px)` (repeat the literal in
+  every query; media queries can't read custom properties) the app is a grid
+  of the nav rail (`components/NavRail.tsx`, hardware keys with LEDs, in place
+  of the Sections menu and the Guide edge tab) and the page column, on the
+  desk colours of `theme/desk.css` (`--desk-*`, `--rail-width`, `--desk-pad`,
+  `.desk-paper` for paper cards; its two dark blocks identical, as in
+  cap.css). Script asks `useDesk()` (`ui/useDesk.ts`). Below 1024px nothing
+  may change.
 
 ## Checking your screen
 

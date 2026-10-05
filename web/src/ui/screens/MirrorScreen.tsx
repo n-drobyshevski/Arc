@@ -32,6 +32,22 @@
 // - The scale and octave lists (Kotlin's focusable Popups, which Back
 //   dismisses) are navigation layers too: [picker] / [onPicker] (dialog
 //   'pick:scale' / 'pick:octave'); without them each word keeps its own state.
+//
+// Web only, the desktop layout (from 1024px wide, ui/useDesk.ts), after the
+// EP-133 Sample Tool's K.O. II and Android's sideways layout:
+// - One group (and KEYS) is a K.O. II panel on the desk: the device's body
+//   with the display line on top, the mode row above the grid (Android's
+//   sideways order) and the pads as near square as the window allows, the
+//   panel sized by the room's height (container units, MirrorScreen.css) so
+//   nothing scrolls. The A-D group keys are a vertical column LEFT of the
+//   pads, as the Sample Tool draws them (Android's sideways column is on the
+//   right: a deliberate web delta); arrow keys up / down move along it.
+// - All groups: the four in one row that doesn't scroll while every pad keeps
+//   40 px (Android's allGroupsSideways, live/desk.ts rowPadSize, measured with
+//   a ResizeObserver); in a room too small for that, the phone's scrolling grid
+//   on a paper card.
+// - The tools panel is docked: a column beside the panel (SideZone docked),
+//   no strip.
 import { type ButtonHTMLAttributes, type ComponentChildren, type JSX } from 'preact'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { Keys, SCALES, type NoteNames, type Scale } from '../../core/features/keys'
@@ -65,9 +81,11 @@ import {
   showOffline,
   transportText,
 } from '../live/glow'
+import { rowPadSize } from '../live/desk'
 import { DEFAULT_KEYS, keysDisplayNote, keysLit, octaves, upperOctave, type KeysPicker, type KeysUi } from '../live/keys'
 import { PressTracker, type PressTarget } from '../live/press'
 import { PickWord, WordButton } from '../live/Words'
+import { useDesk } from '../useDesk'
 import './MirrorScreen.css'
 
 export type { KeysPicker, KeysUi } from '../live/keys'
@@ -194,6 +212,25 @@ function holdHandlers(
   }
 }
 
+/** The size of [el]'s box, kept up to date (web: the desk's BoxWithConstraints); 0 x 0 while [on] is false. */
+function useBoxSize(el: { readonly current: HTMLElement | null }, on: boolean): { width: number; height: number } {
+  const [size, setSize] = useState({ width: 0, height: 0 })
+  useLayoutEffect(() => {
+    const node = el.current
+    if (!on || !node) return
+    const read = (): void => {
+      const r = node.getBoundingClientRect()
+      setSize((s) => (s.width === r.width && s.height === r.height ? s : { width: r.width, height: r.height }))
+    }
+    read()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(read)
+    ro.observe(node)
+    return () => ro.disconnect()
+  }, [on])
+  return size
+}
+
 export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   const { mirror, nameOf, onPadOrder, onBack = null, fixedNow = null, oneGroup, follow } = props
   const keys = props.keys ?? DEFAULT_KEYS
@@ -203,6 +240,11 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   const st = mirror?.state ?? emptyMirrorState()
   const root = useRef<HTMLDivElement | null>(null)
   const now = fixedNow ?? perfNow()
+  const desk = useDesk()
+  // The desk's room for the page (beside the docked tools): whether all four groups fit in one row.
+  const box = useRef<HTMLDivElement | null>(null)
+  const room = useBoxSize(box, desk)
+  const rowPad = desk && !oneGroup && !keys.on ? rowPadSize(room.width, room.height) : null
 
   // Every finger on the pads or keys; all of them end when the screen goes.
   const tracker = useMemo(() => new PressTracker(), [])
@@ -283,6 +325,150 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           release: () => props.onPadUp?.(pad),
         }
 
+  const modeRow = (
+    <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} />
+  )
+  const allGroups = (
+    <div class="live__all">
+      <div class="live__head">
+        <Caption text={MirrorText.TITLE} as="h1" />
+        {onBack && <CloseKey class="live__close" onClick={onBack} description={GUIDE_CLOSE} />}
+      </div>
+      <Display st={st} mirror={mirror} initialNoteOpen={props.initialNoteOpen ?? false} />
+      {modeRow}
+      {/* Four groups in a row when there is room, two by two on a phone. */}
+      <div class="live__groups">
+        <div class="live__grid">
+          {[0, 1, 2, 3].map((g) => (
+            <Group
+              key={g}
+              group={g}
+              st={st}
+              nameOf={nameOf}
+              now={now}
+              press={padPress}
+              playingPads={playingPads}
+              tracker={tracker}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+
+  let page: JSX.Element
+  if (desk) {
+    // The desk: the K.O. II (or the row of groups) in the room left of the docked tools.
+    let body: JSX.Element
+    if (keys.on && keyNotes) {
+      body = (
+        <div class="live-ko live-ko--keys">
+          <KeysDisplay st={st} mirror={mirror} keys={keys} />
+          {modeRow}
+          <div class="live-ko__body">
+            <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={actions} tracker={tracker} />
+          </div>
+        </div>
+      )
+    } else if (oneGroup) {
+      body = (
+        <div class="live-ko">
+          <DisplayStrip st={st} mirror={mirror} />
+          {modeRow}
+          <div class="live-ko__body">
+            <GroupKeys group={group} st={st} now={now} onSelect={setGroup} vertical />
+            <Group
+              group={group}
+              st={st}
+              nameOf={nameOf}
+              now={now}
+              big
+              coach
+              press={padPress}
+              playingPads={playingPads}
+              tracker={tracker}
+            />
+          </div>
+        </div>
+      )
+    } else if (rowPad !== null) {
+      // All four in one row, nothing to scroll, so a press plays at once.
+      body = (
+        <div class="live-row desk-paper" style={{ '--row-pad': `${rowPad}px` }}>
+          <DisplayStrip st={st} mirror={mirror} />
+          {modeRow}
+          <div class="live-row__groups">
+            {[0, 1, 2, 3].map((g) => (
+              <Group
+                key={g}
+                group={g}
+                st={st}
+                nameOf={nameOf}
+                now={now}
+                fill
+                press={padPress}
+                playingPads={playingPads}
+                tracker={tracker}
+              />
+            ))}
+          </div>
+        </div>
+      )
+    } else {
+      body = <div class="live-scroll desk-paper">{allGroups}</div>
+    }
+    page = (
+      <div class="live-stage">
+        {onBack && (
+          <div class="live__head">
+            <Caption text={MirrorText.TITLE} />
+            <CloseKey class="live__close" onClick={onBack} description={GUIDE_CLOSE} />
+          </div>
+        )}
+        <div ref={box} class="live-stage__box">{body}</div>
+      </div>
+    )
+  } else if (oneGroup || keys.on) {
+    page = (
+      // One group (or the keys) fills the screen without scrolling: the display line, the grid
+      // (its rows share whatever height is left) and the group keys.
+      <div class="live__one">
+        {onBack && (
+          <div class="live__head">
+            <Caption text={MirrorText.TITLE} />
+            <CloseKey class="live__close" onClick={onBack} description={GUIDE_CLOSE} />
+          </div>
+        )}
+        {keys.on && keyNotes ? (
+          <>
+            <KeysDisplay st={st} mirror={mirror} keys={keys} />
+            <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={actions} tracker={tracker} />
+            {modeRow}
+          </>
+        ) : (
+          <>
+            <DisplayStrip st={st} mirror={mirror} />
+            <Group
+              group={group}
+              st={st}
+              nameOf={nameOf}
+              now={now}
+              big
+              coach
+              press={padPress}
+              playingPads={playingPads}
+              tracker={tracker}
+            />
+            {modeRow}
+            <GroupKeys group={group} st={st} now={now} onSelect={setGroup} />
+          </>
+        )}
+      </div>
+    )
+  } else {
+    page = allGroups
+  }
+
   return (
     <div ref={root} class="live" data-screen="live">
       <SideZone
@@ -291,69 +477,9 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         onClose={() => props.onTools(false)}
         title={MirrorText.TOOLS}
         panel={panel}
+        docked={desk}
       >
-        {oneGroup || keys.on ? (
-          // One group (or the keys) fills the screen without scrolling: the display line, the grid
-          // (its rows share whatever height is left) and the group keys.
-          <div class="live__one">
-            {onBack && (
-              <div class="live__head">
-                <Caption text={MirrorText.TITLE} />
-                <CloseKey class="live__close" onClick={onBack} description={GUIDE_CLOSE} />
-              </div>
-            )}
-            {keys.on && keyNotes ? (
-              <>
-                <KeysDisplay st={st} mirror={mirror} keys={keys} />
-                <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={actions} tracker={tracker} />
-                <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} />
-              </>
-            ) : (
-              <>
-                <DisplayStrip st={st} mirror={mirror} />
-                <Group
-                  group={group}
-                  st={st}
-                  nameOf={nameOf}
-                  now={now}
-                  big
-                  coach
-                  press={padPress}
-                  playingPads={playingPads}
-                  tracker={tracker}
-                />
-                <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} />
-                <GroupKeys group={group} st={st} now={now} onSelect={setGroup} />
-              </>
-            )}
-          </div>
-        ) : (
-          <div class="live__all">
-            <div class="live__head">
-              <Caption text={MirrorText.TITLE} as="h1" />
-              {onBack && <CloseKey class="live__close" onClick={onBack} description={GUIDE_CLOSE} />}
-            </div>
-            <Display st={st} mirror={mirror} initialNoteOpen={props.initialNoteOpen ?? false} />
-            <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} />
-            {/* Four groups in a row when there is room, two by two on a phone. */}
-            <div class="live__groups">
-              <div class="live__grid">
-                {[0, 1, 2, 3].map((g) => (
-                  <Group
-                    key={g}
-                    group={g}
-                    st={st}
-                    nameOf={nameOf}
-                    now={now}
-                    press={padPress}
-                    playingPads={playingPads}
-                    tracker={tracker}
-                  />
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
+        {page}
       </SideZone>
     </div>
   )
@@ -430,6 +556,8 @@ interface GroupProps {
   nameOf: (pad: PhysicalPad) => string | null
   now: number
   big?: boolean
+  /** Web (the desk's all-groups row): a small grid that doesn't scroll, its pads [--row-pad] high. */
+  fill?: boolean
   /** The guide overlay's "pads light as you play" tag (the big grid only). */
   coach?: boolean
   /** What a press on a pad plays (null: the pads stay still). */
@@ -439,11 +567,11 @@ interface GroupProps {
 }
 
 function Group(props: GroupProps): JSX.Element {
-  const { group, st, nameOf, now, big = false, press, playingPads, tracker } = props
+  const { group, st, nameOf, now, big = false, fill = false, press, playingPads, tracker } = props
   const letter = MirrorText.groupKey(group)
   return (
     <div
-      class={`live-group${big ? ' live-group--big' : ''}`}
+      class={`live-group${big ? ' live-group--big' : ''}${fill ? ' live-group--fill' : ''}`}
       data-coach={props.coach ? 'live.pads' : undefined}
     >
       {/* The caption turns orange while one of the group's pads sounds (the big grid's
@@ -467,6 +595,7 @@ function Group(props: GroupProps): JSX.Element {
                   name={nameOf(pad)}
                   now={now}
                   big={big}
+                  scroll={!big && !fill}
                   press={press(pad)}
                   playing={playingPads.has(padKey(pad))}
                   tracker={tracker}
@@ -483,17 +612,25 @@ function Group(props: GroupProps): JSX.Element {
 /**
  * The group keys under the single grid, pale caps under LEDs as on the K.O. II:
  * the group shown stays down with its LED lit; a group lights orange while one
- * of its pads sounds.
+ * of its pads sounds. [vertical] (the desk): a column beside the grid, each key
+ * a pad row high (the roving keys take up / down as well as left / right).
  */
-function GroupKeys(props: { group: number; st: MirrorState; now: number; onSelect: (g: number) => void }): JSX.Element {
-  const { group, st, now, onSelect } = props
+function GroupKeys(props: {
+  group: number
+  st: MirrorState
+  now: number
+  onSelect: (g: number) => void
+  vertical?: boolean
+}): JSX.Element {
+  const { group, st, now, onSelect, vertical = false } = props
   const row = useRef<HTMLDivElement | null>(null)
   return (
     <div
       ref={row}
-      class="live-keys"
+      class={`live-keys${vertical ? ' live-keys--vertical' : ''}`}
       role="tablist"
       aria-label={MirrorText.GROUP}
+      aria-orientation={vertical ? 'vertical' : undefined}
       onKeyDown={(e) => handleRovingKey(e, group, 4, row.current, onSelect)}
     >
       {[0, 1, 2, 3].map((g) => {
@@ -532,6 +669,8 @@ interface PadProps {
   name: string | null
   now: number
   big: boolean
+  /** On the scrolling all-groups page: a drag across the pads scrolls rather than plays. */
+  scroll: boolean
   press: PressTarget | null
   /** Playing on the phone: a signal-orange ring inside the pad. */
   playing: boolean
@@ -539,7 +678,7 @@ interface PadProps {
 }
 
 function Pad(props: PadProps): JSX.Element {
-  const { pad, light, name, big, press, playing, tracker } = props
+  const { pad, light, name, big, scroll, press, playing, tracker } = props
   const g = light ? glow(light, props.now) : 0
   const wide = pad.label.length > 1
   const label = `${pad.groupLetter} ${pad.label}` + (name !== null ? `, ${name}` : '')
@@ -558,17 +697,17 @@ function Pad(props: PadProps): JSX.Element {
       </div>
     )
   }
-  // The big grid doesn't scroll: it plays on touch-down. The all-groups page
-  // scrolls, so there a drag across the pads must not play them.
+  // The big grid (and the desk's row) doesn't scroll: it plays on touch-down. The
+  // all-groups page scrolls, so there a drag across the pads must not play them.
   return (
     <button
       type="button"
-      class={`${cls} live-pad--press${big ? '' : ' live-pad--scroll'}`}
+      class={`${cls} live-pad--press${scroll ? ' live-pad--scroll' : ''}`}
       aria-label={label}
       aria-description={MirrorText.PLAY}
       data-pad={padKey(pad)}
       style={{ '--glow': glowCss(g) }}
-      {...holdHandlers(tracker, press, !big)}
+      {...holdHandlers(tracker, press, scroll)}
     >
       {content}
     </button>

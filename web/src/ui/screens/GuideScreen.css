@@ -1,4 +1,8 @@
-/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/GuideScreen.kt */
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/GuideScreen.kt
+ *
+ * Web only, from 1024px wide (the desk, theme/desk.css): the guide is the
+ * shell's panel docked beside the nav rail, itself the paper card (the
+ * screen's --shell face); the column may widen to 720 to fill it. */
 
 /* Box(fillMaxSize, shell, TopCenter): fills its positioned parent. */
 .guide {
@@ -164,4 +168,10 @@
   gap: var(--space-10);
   padding: 20px;
   color: var(--graphite);
+}
+
+/* ---------- the desk (web only) ---------- */
+
+@media (min-width: 1024px) {
+  .guide__column { max-width: var(--wide-max); }
 }

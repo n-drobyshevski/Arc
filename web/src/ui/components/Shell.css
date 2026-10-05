@@ -1,4 +1,8 @@
-/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Chrome.kt (ArcFrame, ArcShell) */
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Chrome.kt (ArcFrame, ArcShell)
+ *
+ * Web only, from 1024px wide (the desk, theme/desk.css): the shell fills the
+ * page column, transparent over the desk; no GUIDE edge tab (the nav rail has
+ * the Guide key); the guide is a panel docked on the left of the column. */
 
 /* ArcFrame: top bar, a weighted body, the bottom slot; one screen high. */
 .shell {
@@ -56,4 +60,25 @@
 
 @media (prefers-reduced-motion: reduce) {
   .shell__guide { transition: none; }
+}
+
+/* ---------- the desk (web only) ---------- */
+
+@media (min-width: 1024px) {
+  .shell,
+  .shell__top { background: transparent; }
+
+  .shell__edge-tab { display: none; }
+
+  /* Docked beside the rail, a paper panel lifted off the desk; it slides out
+   * from under the rail (the shell clips it) and leaves the rest of the page in view.
+   * 560 wide at every desk width: the guide's five tabs fit in one row (the page
+   * column is at least 920, so 360 of the page stays in view at 1024). */
+  .shell__guide {
+    right: auto;
+    width: 560px;
+    border-radius: 0 var(--radius-plate) var(--radius-plate) 0;
+    box-shadow: 4px 0 0 var(--desk-shade);
+  }
+  .shell__guide:not(.is-shown) { box-shadow: none; }
 }

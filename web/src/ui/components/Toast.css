@@ -1,4 +1,7 @@
-/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt (ArcToast) */
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt (ArcToast)
+ *
+ * Web only, from 1024px wide (the desk): the host spans the page column (right
+ * of the nav rail, inside the ruled edges), so the toast centres over the page. */
 
 .toast-host {
   position: fixed;
@@ -76,6 +79,13 @@
   font-weight: 700;
   letter-spacing: var(--track-caps-key);
   text-transform: uppercase;
+}
+
+@media (min-width: 1024px) {
+  .toast-host {
+    left: calc(var(--desk-gutter) + var(--rail-width));
+    right: var(--desk-gutter);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

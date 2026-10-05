@@ -1,4 +1,7 @@
-/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Chrome.kt (SectionMenu) */
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Chrome.kt (SectionMenu)
+ *
+ * Web only, from 1024px wide (the desk): the top bar's row is up to 1200 wide
+ * with --desk-pad sides, and the list follows the tag there. */
 
 .section-menu {
   position: absolute;
@@ -28,10 +31,10 @@
   flex-direction: column;
   align-items: flex-start;
   gap: var(--space-6);
-  /* Under the tag: the top bar's row is centred at 720 wide, so on wide screens
+  /* Under the tag: the top bar's row is centred at 720 (--top-bar-max) wide, so on wide screens
      the list moves in with it (Android pins it 16 from the edge, under a tag that isn't there). */
   width: max-content;
-  margin-left: calc(max(0px, (100% - var(--wide-max)) / 2) + var(--space-16));
+  margin-left: calc(max(0px, (100% - var(--top-bar-max, var(--wide-max))) / 2) + var(--space-16));
   padding-top: var(--space-4);
 }
 
@@ -61,4 +64,11 @@
 
 @media (prefers-reduced-motion: reduce) {
   .section-menu, .section-menu.is-open { transition: none; }
+}
+
+/* The desk: the row's sides are --desk-pad (TopBar.css). */
+@media (min-width: 1024px) {
+  .section-menu__list {
+    margin-left: calc(max(0px, (100% - var(--top-bar-max)) / 2) + var(--desk-pad));
+  }
 }

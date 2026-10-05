@@ -21,6 +21,10 @@
 //   Clear sets it to nothing, as in Kotlin.
 // - The pad order is not a signal (c.padOrder() is read when Root renders), so
 //   the screen keeps its own copy from here on, as the Kotlin does.
+// - Web only, the desktop page (from 1024px wide, theme/desk.css): each
+//   section's lines are wrapped in a .settings__group (display: contents below
+//   the breakpoint, so the column is unchanged there), which lets the desk set
+//   the sections in two columns on a paper card without splitting one.
 import type { JSX } from 'preact'
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { NOTE_NAMES, type NoteNames } from '../../core/features/keys'
@@ -193,111 +197,121 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
           <CloseKey class="settings__close" onClick={props.onBack} description={SettingsText.CLOSE} />
         </header>
 
-        <Section text={SettingsText.APPEARANCE} />
-        <Label text={SettingsText.THEME} id={themeId} />
-        <Segmented
-          options={THEME_CHOICES.map((t) => SettingsText.theme(t))}
-          selected={Math.max(0, THEME_CHOICES.indexOf(settings.theme))}
-          onSelect={(i) => {
-            const t = THEME_CHOICES[i]
-            if (t !== undefined) props.onTheme(t)
-          }}
-          labelledBy={themeId}
-        />
-
-        <Section text={SettingsText.DEVICE} />
-        <GridPlate>
-          <SwitchRow
-            title={SettingsText.AUTO_CONNECT}
-            note={SettingsText.AUTO_CONNECT_NOTE}
-            on={settings.autoConnect}
-            onChange={props.onAutoConnect}
-          />
-          <PlateLine />
-          <SwitchRow
-            title={SettingsText.KEEP_SCREEN_ON}
-            note={WebText.KEEP_SCREEN_ON_NOTE}
-            on={settings.keepScreenOn}
-            onChange={props.onKeepScreenOn}
-          />
-        </GridPlate>
-
-        <Section text={SettingsText.LIBRARY} />
-        {note.length !== 0 && <p class="t-small settings__note">{note}</p>}
-        {folder.note.length !== 0 && <p class="t-small settings__note">{folder.note}</p>}
-        <div class="settings__row">{folder.keys.map(folderKey)}</div>
-        <Label text={SettingsText.KEEP} id={keepId} />
-        <Segmented
-          options={SettingsText.KEEP_CHOICES.map((k) => SettingsText.keepLabel(k))}
-          selected={keepIndex(settings.keepLast)}
-          onSelect={(i) => {
-            const keep = SettingsText.KEEP_CHOICES[i] ?? null
-            // Fewer than are saved now deletes the oldest: ask first.
-            if (keep !== null && props.pruneCount(keep) > 0) nav.open(dialogLayer(pruneDialogId(keep)))
-            else props.onKeepLast(keep)
-          }}
-          labelledBy={keepId}
-        />
-        <p class="t-small settings__note">{WebText.keepNote(folderInUse)}</p>
-
-        <Section text={SettingsText.LIVE} />
-        <Label text={MirrorText.PAD_ORDER} id={orderId} />
-        <Segmented
-          options={[MirrorText.FROM_TOP, MirrorText.FROM_BOTTOM]}
-          selected={Math.max(0, PAD_ORDERS.indexOf(order))}
-          onSelect={(i) => {
-            const o = PAD_ORDERS[i]
-            if (o === undefined) return
-            setOrder(o)
-            props.onPadOrder(o)
-          }}
-          labelledBy={orderId}
-        />
-        <p class="t-small settings__note">{MirrorText.ORDER_NOTE}</p>
-        <Label text={MirrorText.NOTE_NAMES} id={namesId} />
-        <Segmented
-          options={NOTE_NAMES.map((n) => MirrorText.noteNames(n))}
-          selected={Math.max(0, NOTE_NAMES.indexOf(settings.keysNames))}
-          onSelect={(i) => {
-            const n = NOTE_NAMES[i]
-            if (n !== undefined) props.onNoteNames?.(n)
-          }}
-          labelledBy={namesId}
-        />
-        <p class="t-small settings__note">{MirrorText.NOTE_NAMES_NOTE}</p>
-        <GridPlate>
-          <SwitchRow
-            title={MirrorText.SHOW_NAMES}
-            note={MirrorText.SHOW_NAMES_NOTE}
-            on={settings.keysShowNames}
-            onChange={(on) => props.onShowNames?.(on)}
-          />
-        </GridPlate>
-        <Key text={SettingsText.FORGET_NAMES} size="small" block onClick={() => nav.open(dialogLayer(FORGET))} />
-        <div class="settings__sounds">
-          <p class="t-body15 settings__sounds-size">
-            {WebText.padSounds(Format.bytes(soundsSize ?? 0))}
-          </p>
-          <Key
-            text={SettingsText.CLEAR}
-            size="small"
-            disabled={(soundsSize ?? 0) <= 0}
-            onClick={() => {
-              props.onClearPadSounds?.()
-              setSoundsSize(0)
+        <div class="settings__group">
+          <Section text={SettingsText.APPEARANCE} />
+          <Label text={SettingsText.THEME} id={themeId} />
+          <Segmented
+            options={THEME_CHOICES.map((t) => SettingsText.theme(t))}
+            selected={Math.max(0, THEME_CHOICES.indexOf(settings.theme))}
+            onSelect={(i) => {
+              const t = THEME_CHOICES[i]
+              if (t !== undefined) props.onTheme(t)
             }}
+            labelledBy={themeId}
           />
         </div>
-        <p class="t-small settings__note">{SettingsText.PAD_SOUNDS_NOTE}</p>
 
-        <Section text={SettingsText.ABOUT} />
-        <p class="t-bold settings__version">{SettingsText.version(props.version)}</p>
-        <p class="t-small settings__note">{SettingsText.LICENCE_NOTE}</p>
-        <div class="settings__row">
-          <Key text={SettingsText.SOURCE} size="small" block onClick={props.onSource} />
-          <Key text={SettingsText.FONT_LICENCE} size="small" block onClick={props.onFontLicence} />
+        <div class="settings__group">
+          <Section text={SettingsText.DEVICE} />
+          <GridPlate>
+            <SwitchRow
+              title={SettingsText.AUTO_CONNECT}
+              note={SettingsText.AUTO_CONNECT_NOTE}
+              on={settings.autoConnect}
+              onChange={props.onAutoConnect}
+            />
+            <PlateLine />
+            <SwitchRow
+              title={SettingsText.KEEP_SCREEN_ON}
+              note={WebText.KEEP_SCREEN_ON_NOTE}
+              on={settings.keepScreenOn}
+              onChange={props.onKeepScreenOn}
+            />
+          </GridPlate>
         </div>
-        <Key text={SettingsText.DEBUG_LOG} size="small" variant="quiet" block onClick={props.onDebug} />
+
+        <div class="settings__group">
+          <Section text={SettingsText.LIBRARY} />
+          {note.length !== 0 && <p class="t-small settings__note">{note}</p>}
+          {folder.note.length !== 0 && <p class="t-small settings__note">{folder.note}</p>}
+          <div class="settings__row">{folder.keys.map(folderKey)}</div>
+          <Label text={SettingsText.KEEP} id={keepId} />
+          <Segmented
+            options={SettingsText.KEEP_CHOICES.map((k) => SettingsText.keepLabel(k))}
+            selected={keepIndex(settings.keepLast)}
+            onSelect={(i) => {
+              const keep = SettingsText.KEEP_CHOICES[i] ?? null
+              // Fewer than are saved now deletes the oldest: ask first.
+              if (keep !== null && props.pruneCount(keep) > 0) nav.open(dialogLayer(pruneDialogId(keep)))
+              else props.onKeepLast(keep)
+            }}
+            labelledBy={keepId}
+          />
+          <p class="t-small settings__note">{WebText.keepNote(folderInUse)}</p>
+        </div>
+
+        <div class="settings__group">
+          <Section text={SettingsText.LIVE} />
+          <Label text={MirrorText.PAD_ORDER} id={orderId} />
+          <Segmented
+            options={[MirrorText.FROM_TOP, MirrorText.FROM_BOTTOM]}
+            selected={Math.max(0, PAD_ORDERS.indexOf(order))}
+            onSelect={(i) => {
+              const o = PAD_ORDERS[i]
+              if (o === undefined) return
+              setOrder(o)
+              props.onPadOrder(o)
+            }}
+            labelledBy={orderId}
+          />
+          <p class="t-small settings__note">{MirrorText.ORDER_NOTE}</p>
+          <Label text={MirrorText.NOTE_NAMES} id={namesId} />
+          <Segmented
+            options={NOTE_NAMES.map((n) => MirrorText.noteNames(n))}
+            selected={Math.max(0, NOTE_NAMES.indexOf(settings.keysNames))}
+            onSelect={(i) => {
+              const n = NOTE_NAMES[i]
+              if (n !== undefined) props.onNoteNames?.(n)
+            }}
+            labelledBy={namesId}
+          />
+          <p class="t-small settings__note">{MirrorText.NOTE_NAMES_NOTE}</p>
+          <GridPlate>
+            <SwitchRow
+              title={MirrorText.SHOW_NAMES}
+              note={MirrorText.SHOW_NAMES_NOTE}
+              on={settings.keysShowNames}
+              onChange={(on) => props.onShowNames?.(on)}
+            />
+          </GridPlate>
+          <Key text={SettingsText.FORGET_NAMES} size="small" block onClick={() => nav.open(dialogLayer(FORGET))} />
+          <div class="settings__sounds">
+            <p class="t-body15 settings__sounds-size">
+              {WebText.padSounds(Format.bytes(soundsSize ?? 0))}
+            </p>
+            <Key
+              text={SettingsText.CLEAR}
+              size="small"
+              disabled={(soundsSize ?? 0) <= 0}
+              onClick={() => {
+                props.onClearPadSounds?.()
+                setSoundsSize(0)
+              }}
+            />
+          </div>
+          <p class="t-small settings__note">{SettingsText.PAD_SOUNDS_NOTE}</p>
+        </div>
+
+        <div class="settings__group">
+          <Section text={SettingsText.ABOUT} />
+          <p class="t-bold settings__version">{SettingsText.version(props.version)}</p>
+          <p class="t-small settings__note">{SettingsText.LICENCE_NOTE}</p>
+          <div class="settings__row">
+            <Key text={SettingsText.SOURCE} size="small" block onClick={props.onSource} />
+            <Key text={SettingsText.FONT_LICENCE} size="small" block onClick={props.onFontLicence} />
+          </div>
+          <Key text={SettingsText.DEBUG_LOG} size="small" variant="quiet" block onClick={props.onDebug} />
+        </div>
       </div>
 
       <Dialog

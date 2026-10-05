@@ -1,0 +1,86 @@
+/* Web only: the desktop page (no Kotlin counterpart; the Android app has no
+ * desktop window). From 1024px wide the app sits on a "desk", the cool grey
+ * page the EP-133 Sample Tool draws the K.O. II on, with ruled grid columns in
+ * the outer gutters; the sections sit on paper cards (.desk-paper) on it, and
+ * a rail of hardware keys (NavRail) runs down the left. Below 1024px nothing
+ * here applies: the tokens are defined but unused, the rules are all inside
+ * the desktop media query.
+ *
+ * The desktop breakpoint is `@media (min-width: 1024px)` (ui/useDesk.ts
+ * DESK_QUERY in script). Media queries cannot read custom properties, so every
+ * query repeats the literal.
+ *
+ * Theme blocks as in cap.css (kept out of tokens.css, which mirrors
+ * ArcTheme.kt exactly): :root light, then the two dark blocks, identical.
+ * Import after cap.css and base.css (its page background wins over base.css). */
+
+:root {
+  --desk-page: #ADB4B7;
+  /* The gutters' grid rules. */
+  --desk-rule: rgba(255, 255, 255, 0.5);
+  /* A paper card's face (the sections' own page colour). */
+  --desk-paper: var(--shell);
+  /* The edge under a panel lifted off the desk (the docked guide). */
+  --desk-shade: color-mix(in oklab, var(--desk-page) 72%, black);
+  /* The ruled columns at both page edges: none below 1280px, where the room
+   * goes to the page. */
+  --desk-gutter: 0px;
+  /* The nav rail's column. */
+  --rail-width: 104px;
+  /* Space between the page column's edges and its content (the top bar's row
+   * and the screens line up on it). */
+  --desk-pad: 8px;
+  /* The top bar's row: 720 (Chrome.kt TopBar) below the desktop breakpoint,
+   * 1200 on the desk (Android widens it to 1200dp in landscape). */
+  --top-bar-max: var(--wide-max);
+}
+:root[data-theme=dark] {
+  --desk-page: #26292C;
+  --desk-rule: rgba(255, 255, 255, 0.07);
+  --desk-shade: rgba(0, 0, 0, 0.45);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme=light]) {
+    --desk-page: #26292C;
+    --desk-rule: rgba(255, 255, 255, 0.07);
+    --desk-shade: rgba(0, 0, 0, 0.45);
+  }
+}
+
+@media (min-width: 1024px) {
+  :root { --top-bar-max: 1200px; }
+}
+@media (min-width: 1280px) {
+  :root { --desk-gutter: 56px; }
+}
+
+@media (min-width: 1024px) {
+  /* The desk under everything (overscroll, a full screen shorter than the window). */
+  html, body { background: var(--desk-page); }
+
+  /* The ruled edge columns: a 50px grid, a rule down each side of each
+   * column, painted on the element that spans the window (the app's .desk). */
+  .desk-edges {
+    background:
+      linear-gradient(var(--desk-rule), var(--desk-rule)) left 0 top 0 / 1px 100% no-repeat,
+      linear-gradient(var(--desk-rule), var(--desk-rule)) left calc(var(--desk-gutter) - 1px) top 0 / 1px 100% no-repeat,
+      linear-gradient(var(--desk-rule), var(--desk-rule)) right 0 top 0 / 1px 100% no-repeat,
+      linear-gradient(var(--desk-rule), var(--desk-rule)) right calc(var(--desk-gutter) - 1px) top 0 / 1px 100% no-repeat,
+      repeating-linear-gradient(to bottom, transparent 0 49px, var(--desk-rule) 49px 50px) left top / var(--desk-gutter) 100% no-repeat,
+      repeating-linear-gradient(to bottom, transparent 0 49px, var(--desk-rule) 49px 50px) right top / var(--desk-gutter) 100% no-repeat,
+      var(--desk-page);
+  }
+
+  /* The sections' own --shell page would cover the desk: on the desk the
+   * screens are transparent, and their content goes on .desk-paper cards. */
+  .desk :is(.live, .main-screen, .device, .settings, .contents, .compare, .search, .debug) {
+    background: transparent;
+  }
+}
+
+/* A paper card on the desk: the page colour, the plates' radius. Any width;
+ * meant for the desktop layouts (it means nothing on the phone's plain page). */
+.desk-paper {
+  background: var(--desk-paper);
+  border-radius: var(--radius-plate);
+}

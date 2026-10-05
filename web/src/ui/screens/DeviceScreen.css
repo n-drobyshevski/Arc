@@ -1,4 +1,10 @@
-/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/DeviceScreen.kt */
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/DeviceScreen.kt
+ *
+ * Web only, from 1024px wide (the desk, theme/desk.css): .device--desk, two
+ * columns up to 1200 on the top bar's sides (--desk-pad): a 360 side column
+ * and the binder, a paper sheet with a signal bar and spine that scrolls by
+ * itself, its range tabs down the right edge; the groups in two columns from
+ * 1280px; sound rows as ruled lines on the paper instead of plate rows. */
 
 /* LazyColumn(widthIn(max = 560)) with contentPadding(start = EdgeTab + 8, end = 16, top = 4, bottom = 24).
  * Items have no spacing of their own; each one's top padding is a margin here. */
@@ -191,3 +197,106 @@
   background-image: linear-gradient(var(--row-pressed), var(--row-pressed));
 }
 .plate--button[aria-disabled=true] { cursor: default; }
+
+/* ---------- the desk (web only) ---------- */
+
+@media (min-width: 1024px) {
+  /* One window high in the page column (.shell__page), so only the sheet scrolls;
+   * a short window scrolls the page instead. */
+  .device--desk {
+    display: grid;
+    grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    column-gap: 22px;
+    max-width: var(--top-bar-max);
+    height: 100%;
+    min-height: 440px;
+    padding: var(--space-4) var(--desk-pad) 22px;
+  }
+  .device__side {
+    position: sticky;
+    top: var(--space-4);
+    align-self: start;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .device__binder {
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+    max-width: 900px;
+  }
+  /* The sheet: a 10px signal spine down its left, the bar across its top. */
+  .device--desk .device__sheet {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-left: 10px solid var(--signal);
+    border-radius: 6px var(--radius-plate) var(--radius-plate) 6px;
+  }
+  .device__bar {
+    flex: none;
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-12);
+    padding: var(--space-12) 18px;
+    background: var(--signal);
+    color: var(--on-signal);
+  }
+  .device__leaves {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0 18px 18px;
+  }
+  .device--desk .device__block { break-inside: avoid; }
+
+  /* Ruled lines on the paper, not plate rows. */
+  .device--desk .sound-row {
+    background-color: transparent;
+    border-radius: 0;
+    box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--line) 18%, transparent);
+    padding-inline: var(--space-4) 0;
+  }
+
+  /* The binder tabs, under the bar, sticking out of the sheet's right edge. */
+  .device__tabs {
+    flex: none;
+    min-width: 84px;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-4);
+    padding-top: 52px;
+  }
+  .device__tab {
+    padding: 7px 10px;
+    border: 1px solid color-mix(in srgb, var(--line) 30%, transparent);
+    border-left: 0;
+    border-radius: 0 6px 6px 0;
+    background: var(--plate);
+    color: var(--graphite);
+    font-family: inherit;
+    text-align: start;
+    cursor: pointer;
+  }
+  .device__tab.is-on {
+    border-color: var(--ink);
+    background: var(--ink);
+    color: var(--shell);
+  }
+
+  .device__section--projects { padding-top: var(--space-4); }
+}
+
+@media (min-width: 1280px) {
+  .device__groups {
+    columns: 2;
+    column-gap: 28px;
+  }
+}

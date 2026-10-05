@@ -10,9 +10,18 @@
 // beside it is its own button, so they are not nested). Plate and SectionTitle
 // are Kotlin `internal` helpers shared with the Contents, Compare and Search
 // screens, so they are exported here.
+//
+// Web only, from 1024px wide (the desk, theme/desk.css; useDesk): two columns.
+// On the left the caption with its tools, the storage panel, the switch and
+// Find; on the right a binder, a paper sheet with a signal bar (the view and
+// what it shows: count and size) and a signal spine, holding the range groups
+// (two columns from 1280px) or the project tiles (six to a row) and the picked
+// project. Binder tabs down the sheet's right edge, one per range shown, jump
+// to their group; the one in view is dark. The sheet scrolls by itself, so
+// the left column and the tabs stay put. Below 1024px the screen is unchanged.
 import { Fragment, type ComponentChildren, type JSX, type TargetedMouseEvent } from 'preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { findSounds, hundreds, type SoundDetails } from '../../core/features/deviceBrowser'
+import { findSounds, hundreds, type SlotBlock, type SoundDetails } from '../../core/features/deviceBrowser'
 import type { ProjectEntry, SoundEntry } from '../../core/protocol/device'
 import { CoachText } from '../../core/text/coachText'
 import { FeatureText } from '../../core/text/featureText'
@@ -31,6 +40,7 @@ import { Key } from '../components/Key'
 import { Meter } from '../components/Meter'
 import { PlayKey } from '../components/PlayKey'
 import { TextToggle } from '../components/TextToggle'
+import { useDesk } from '../useDesk'
 import './DeviceScreen.css'
 
 export interface DeviceScreenProps {
@@ -82,6 +92,25 @@ export function soundNames(sounds: readonly SoundEntry[] | undefined): Map<numbe
 
 // ---------- the screen ----------
 
+/** Where the desk's binder takes two columns of groups and six project tiles (DeviceScreen.css). */
+const WIDE_QUERY = '(min-width: 1280px)'
+
+/** Whether [query] matches now, following its changes; false without matchMedia. */
+function useMatch(query: string): boolean {
+  const media = (): MediaQueryList | null =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function' ? window.matchMedia(query) : null
+  const [on, setOn] = useState(() => media()?.matches ?? false)
+  useEffect(() => {
+    const m = media()
+    if (!m) return
+    const sync = (): void => setOn(m.matches)
+    sync()
+    m.addEventListener('change', sync)
+    return () => m.removeEventListener('change', sync)
+  }, [query])
+  return on
+}
+
 export function DeviceScreen(props: DeviceScreenProps): JSX.Element {
   const { state, onRefresh, onSoundDetails, onProjectSounds, onAddSamples, onBack = null, playing, onPlay, onStop, onPads } = props
   const initialSection = props.initialSection ?? 0
@@ -114,6 +143,15 @@ export function DeviceScreen(props: DeviceScreenProps): JSX.Element {
 
   const switchMark = useCoachMark('device.switch', CoachText.SOUNDS_PROJECTS, COACH_YELLOW, COACH_YELLOW_INK)
 
+  const desk = useDesk()
+  // Six project tiles to a row once the binder is wide enough (the desk from 1280px).
+  const wide = useMatch(WIDE_QUERY) && desk
+  const leaves = useRef<HTMLDivElement | null>(null)
+  const [tabbed, setTabbed] = useState<number | null>(null)
+  const jumping = useRef<number | undefined>(undefined)
+  const picked = useRef<number | null>(null)
+  useEffect(() => () => window.clearTimeout(jumping.current), [])
+
   const toggleSlot = (slot: number): void => {
     const next = openSlot === slot ? null : slot
     setOpenSlot(next)
@@ -125,141 +163,258 @@ export function DeviceScreen(props: DeviceScreenProps): JSX.Element {
     if (next === p && !b.projectSounds.has(p)) onProjectSounds(p)
   }
 
-  const body: ComponentChildren[] = []
-  if (!state.connected) {
-    body.push(
-      <div key="none" class="device__gap-12">
-        <DashedBox>
-          <p class="t-bold device__ink">{FeatureText.NO_DEVICE_TITLE}</p>
-          <p class="t-body15 device__dim">{FeatureText.NOT_CONNECTED}</p>
-        </DashedBox>
-      </div>,
+  // The caption with its tools as icons: read again, and add samples (orange, the main action).
+  const head = (
+    <div key="head" class="device__head">
+      <Caption as="h2" text={FeatureText.DEVICE_TITLE} align="start" class="device__title" />
+      <span class="device__mark" data-coach="device.refresh">
+        <IconBlock
+          icon={ArcIcon.REFRESH}
+          label={CoachText.REFRESH}
+          face="var(--tab-off)"
+          ink="var(--navy)"
+          onClick={onRefresh}
+          disabled={!state.connected || state.busy}
+        />
+      </span>
+      {contents !== null && (
+        <span class="device__mark" data-coach="device.add">
+          <IconBlock
+            icon={ArcIcon.PLUS}
+            label={CoachText.ADD_SAMPLES}
+            face="var(--signal)"
+            ink="var(--on-signal)"
+            onClick={onAddSamples}
+            disabled={state.busy}
+          />
+        </span>
+      )}
+      {onBack !== null && <Key text={Strings.DONE} onClick={onBack} size="small" variant="quiet" />}
+    </div>
+  )
+
+  // Desk only: the binder tab of the group in view (null: the first one). While a
+  // tab's smooth scroll runs, the scroll does not pick another.
+  const current = groups.some((g) => g.from === tabbed) ? tabbed : (groups[0]?.from ?? null)
+  const groupAt = (from: number): HTMLElement | null =>
+    leaves.current?.querySelector<HTMLElement>(`#device-g${from}`) ?? null
+  const jumpTo = (from: number): void => {
+    setTabbed(from)
+    picked.current = from
+    const box = leaves.current
+    const el = groupAt(from)
+    if (!box || !el) return
+    const smooth = !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    window.clearTimeout(jumping.current)
+    jumping.current = window.setTimeout(() => { jumping.current = undefined }, smooth ? 800 : 100)
+    const top = el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop
+    box.scrollTo({ top, behavior: smooth ? 'smooth' : 'auto' })
+    el.focus({ preventScroll: true })
+  }
+  // A picked tab stays while its group shows (in two columns it may never reach the
+  // top); otherwise the first group showing gets the tab, or the last one at the end.
+  const followScroll = (): void => {
+    const box = leaves.current
+    if (!box || jumping.current !== undefined) return
+    const view = box.getBoundingClientRect()
+    const inView = (from: number): boolean => {
+      const r = groupAt(from)?.getBoundingClientRect()
+      return r !== undefined && r.bottom > view.top + 24 && r.top < view.bottom - 24
+    }
+    if (picked.current !== null && inView(picked.current)) return
+    picked.current = null
+    const showing = groups.filter((g) => inView(g.from))
+    const atEnd = box.scrollTop > 0 && box.scrollTop + box.clientHeight >= box.scrollHeight - 2
+    const next = atEnd ? showing[showing.length - 1] : showing[0]
+    if (next) setTabbed(next.from)
+  }
+
+  const groupBlocks = groups.map((g, gi) => {
+    const headId = `device-h${g.from}`
+    return (
+      <section
+        key={`h${g.from}`}
+        // The binder tabs jump here (and move focus to the group).
+        id={desk ? `device-g${g.from}` : undefined}
+        tabIndex={desk ? -1 : undefined}
+        class="device__block"
+        aria-labelledby={headId}
+      >
+        <div class="device__range">
+          <Caption as="h3" id={headId} text={FeatureText.range(g)} align="start" class="device__range-name" />
+          <span class="t-caps device__dim">{g.sounds.length}</span>
+        </div>
+        <ul class="device__rows">
+          {g.sounds.map((e, i) => (
+            <SoundRow
+              key={`s${e.slot}`}
+              e={e}
+              b={b}
+              first={i === 0}
+              last={i === g.sounds.length - 1}
+              // The guide overlay points at the first row's play key.
+              mark={gi === 0 && i === 0}
+              open={openSlot === e.slot}
+              enabled={!state.busy}
+              playing={playing === `device:${e.slot}`}
+              onPlay={() => onPlay(e.slot)}
+              onStop={onStop}
+              onClick={() => toggleSlot(e.slot)}
+            />
+          ))}
+        </ul>
+      </section>
     )
-  } else {
-    body.push(<StoragePanel key="panel" contents={contents} reading={b.reading !== null} />)
-    if (contents) {
-      body.push(
-        <TextToggle
-          key="switch"
-          ref={switchMark}
-          class="device__switch device__gap-12"
-          options={[
-            FeatureText.sectionLabel(FeatureText.SOUNDS, contents.sounds.length),
-            FeatureText.sectionLabel(FeatureText.PROJECTS, contents.projects.length),
-          ]}
-          selected={section}
-          onSelect={setSection}
-          label={CoachText.SOUNDS_PROJECTS}
-          controls="device-section"
-        />,
-      )
-      const list: ComponentChildren[] = []
-      if (section === 0) {
-        if (contents.sounds.length === 0) {
-          list.push(
-            <div key="no-sounds" class="device__gap-14">
-              <DashedBox><p class="t-body15 device__dim">{FeatureText.NO_SOUNDS}</p></DashedBox>
-            </div>,
-          )
-        } else {
-          list.push(
-            <Field
-              key="find"
-              class="device__gap-14"
-              label={FeatureText.FIND_SOUND}
-              value={query}
-              onValueChange={setQuery}
-              placeholder={FeatureText.FIND_HINT}
-              maxLength={40}
-              type="search"
-              enterKeyHint="search"
-            />,
-          )
-          if (groups.length === 0) {
-            list.push(<p key="no-match" class="t-body15 device__dim device__gap-14" role="status">{FeatureText.NO_FIND_MATCHES}</p>)
-          }
-          groups.forEach((g, gi) => {
-            const headId = `device-h${g.from}`
-            list.push(
-              <section key={`h${g.from}`} class="device__block" aria-labelledby={headId}>
-                <div class="device__range">
-                  <Caption as="h3" id={headId} text={FeatureText.range(g)} align="start" class="device__range-name" />
-                  <span class="t-caps device__dim">{g.sounds.length}</span>
-                </div>
-                <ul class="device__rows">
-                  {g.sounds.map((e, i) => (
-                    <SoundRow
-                      key={`s${e.slot}`}
-                      e={e}
-                      b={b}
-                      first={i === 0}
-                      last={i === g.sounds.length - 1}
-                      // The guide overlay points at the first row's play key.
-                      mark={gi === 0 && i === 0}
-                      open={openSlot === e.slot}
-                      enabled={!state.busy}
-                      playing={playing === `device:${e.slot}`}
-                      onPlay={() => onPlay(e.slot)}
-                      onStop={onStop}
-                      onClick={() => toggleSlot(e.slot)}
-                    />
-                  ))}
-                </ul>
-              </section>,
-            )
-          })
-        }
-      } else if (contents.projects.length === 0) {
+  })
+
+  // The switch, Find, and the section's own items (the phone puts Find first in them).
+  let switchKey: JSX.Element | null = null
+  let find: JSX.Element | null = null
+  const list: ComponentChildren[] = []
+  if (state.connected && contents) {
+    switchKey = (
+      <TextToggle
+        key="switch"
+        ref={switchMark}
+        class="device__switch device__gap-12"
+        options={[
+          FeatureText.sectionLabel(FeatureText.SOUNDS, contents.sounds.length),
+          FeatureText.sectionLabel(FeatureText.PROJECTS, contents.projects.length),
+        ]}
+        selected={section}
+        onSelect={setSection}
+        label={CoachText.SOUNDS_PROJECTS}
+        controls="device-section"
+      />
+    )
+    if (section === 0) {
+      if (contents.sounds.length === 0) {
         list.push(
-          <div key="no-projects" class="device__gap-14">
-            <DashedBox><p class="t-body15 device__dim">{FeatureText.NO_PROJECTS}</p></DashedBox>
+          <div key="no-sounds" class="device__gap-14">
+            <DashedBox><p class="t-body15 device__dim">{FeatureText.NO_SOUNDS}</p></DashedBox>
           </div>,
         )
       } else {
-        const p = contents.projects.find((x) => x.project === openProject) ?? null
-        list.push(
-          <ProjectGrid key="projects" projects={contents.projects} selected={openProject} enabled={!state.busy} onSelect={toggleProject} />,
-          <div key="project" class="device__gap-12">
-            {p === null
-              ? <p class="t-small device__dim">{FeatureText.PICK_PROJECT}</p>
-              : <ProjectPanel p={p} b={b} names={names} onPads={() => onPads(p.project)} />}
-          </div>,
+        find = (
+          <Field
+            key="find"
+            class="device__gap-14"
+            label={FeatureText.FIND_SOUND}
+            value={query}
+            onValueChange={setQuery}
+            placeholder={FeatureText.FIND_HINT}
+            maxLength={40}
+            type="search"
+            enterKeyHint="search"
+          />
         )
+        if (groups.length === 0) {
+          list.push(<p key="no-match" class="t-body15 device__dim device__gap-14" role="status">{FeatureText.NO_FIND_MATCHES}</p>)
+        }
+        // On the desk the groups flow in the binder's columns.
+        if (desk) list.push(<div key="groups" class="device__groups">{groupBlocks}</div>)
+        else list.push(...groupBlocks)
       }
-      body.push(<div key="section" id="device-section" role="tabpanel" class="device__section">{list}</div>)
+    } else if (contents.projects.length === 0) {
+      list.push(
+        <div key="no-projects" class="device__gap-14">
+          <DashedBox><p class="t-body15 device__dim">{FeatureText.NO_PROJECTS}</p></DashedBox>
+        </div>,
+      )
+    } else {
+      const p = contents.projects.find((x) => x.project === openProject) ?? null
+      list.push(
+        <ProjectGrid
+          key="projects"
+          projects={contents.projects}
+          perRow={wide ? 6 : 3}
+          selected={openProject}
+          enabled={!state.busy}
+          onSelect={toggleProject}
+        />,
+        <div key="project" class="device__gap-12">
+          {p === null
+            ? <p class="t-small device__dim">{FeatureText.PICK_PROJECT}</p>
+            : <ProjectPanel p={p} b={b} names={names} onPads={() => onPads(p.project)} />}
+        </div>,
+      )
     }
   }
 
-  return (
-    <div class="device" data-screen="device">
-      {/* The caption with its tools as icons: read again, and add samples (orange, the main action). */}
-      <div class="device__head">
-        <Caption as="h2" text={FeatureText.DEVICE_TITLE} align="start" class="device__title" />
-        <span class="device__mark" data-coach="device.refresh">
-          <IconBlock
-            icon={ArcIcon.REFRESH}
-            label={CoachText.REFRESH}
-            face="var(--tab-off)"
-            ink="var(--navy)"
-            onClick={onRefresh}
-            disabled={!state.connected || state.busy}
-          />
-        </span>
-        {contents !== null && (
-          <span class="device__mark" data-coach="device.add">
-            <IconBlock
-              icon={ArcIcon.PLUS}
-              label={CoachText.ADD_SAMPLES}
-              face="var(--signal)"
-              ink="var(--on-signal)"
-              onClick={onAddSamples}
-              disabled={state.busy}
-            />
-          </span>
-        )}
-        {onBack !== null && <Key text={Strings.DONE} onClick={onBack} size="small" variant="quiet" />}
+  const missing = (
+    <div key="none" class="device__gap-12">
+      <DashedBox>
+        <p class="t-bold device__ink">{FeatureText.NO_DEVICE_TITLE}</p>
+        <p class="t-body15 device__dim">{FeatureText.NOT_CONNECTED}</p>
+      </DashedBox>
+    </div>
+  )
+  const panel = <StoragePanel key="panel" contents={contents} reading={b.reading !== null} />
+
+  if (!desk) {
+    const body: ComponentChildren[] = []
+    if (!state.connected) {
+      body.push(missing)
+    } else {
+      body.push(panel)
+      if (contents) {
+        body.push(switchKey, <div key="section" id="device-section" role="tabpanel" class="device__section">{find}{list}</div>)
+      }
+    }
+    return (
+      <div class="device" data-screen="device">
+        {head}
+        {body}
       </div>
-      {body}
+    )
+  }
+
+  // The binder's bar: the view on the left, what it shows on the right (count and size).
+  let barName = ''
+  let barCount = ''
+  if (contents) {
+    const shown: readonly { size: number }[] = section === 0 ? groups.flatMap((g) => g.sounds) : contents.projects
+    barName = section === 0 ? FeatureText.SOUNDS : FeatureText.PROJECTS
+    barCount = `${shown.length} · ${Format.bytes(shown.reduce((n, x) => n + x.size, 0))}`
+  }
+  const tabs: readonly SlotBlock[] = section === 0 ? groups : []
+  return (
+    <div class="device device--desk" data-screen="device">
+      <div class="device__side">
+        {head}
+        {state.connected ? [panel, switchKey, find] : missing}
+      </div>
+      {state.connected && contents && (
+        <div class="device__binder">
+          <div id="device-section" role="tabpanel" class="device__sheet desk-paper">
+            <div class="device__bar">
+              <span class="t-caps">{barName}</span>
+              <span class="t-caps">{barCount}</span>
+            </div>
+            <div ref={leaves} class="device__leaves" onScroll={followScroll}>
+              <div class={`device__section${section === 1 ? ' device__section--projects' : ''}`}>{list}</div>
+            </div>
+          </div>
+          {/* Always there, so the sheet keeps its width when the view switches. */}
+          <div class="device__tabs">
+            {tabs.map((g) => {
+              const on = g.from === current
+              return (
+                <button
+                  key={g.from}
+                  type="button"
+                  class={`t-caps-key-small device__tab${on ? ' is-on' : ''}`}
+                  aria-controls={`device-g${g.from}`}
+                  aria-current={on || undefined}
+                  onClick={() => jumpTo(g.from)}
+                >
+                  {FeatureText.range(g)}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -407,9 +562,15 @@ function Details(props: { d: SoundDetails }): JSX.Element {
   )
 }
 
-/** The projects as tiles on one plate split by thin lines, three to a row; the picked one is navy. */
-function ProjectGrid(props: { projects: readonly ProjectEntry[]; selected: number | null; enabled: boolean; onSelect: (p: number) => void }): JSX.Element {
-  const rows = chunked(props.projects, 3)
+/** The projects as tiles on one plate split by thin lines, three to a row (six on the desk); the picked one is navy. */
+function ProjectGrid(props: {
+  projects: readonly ProjectEntry[]
+  perRow: number
+  selected: number | null
+  enabled: boolean
+  onSelect: (p: number) => void
+}): JSX.Element {
+  const rows = chunked(props.projects, props.perRow)
   return (
     <GridPlate class="device__gap-14 project-grid">
       {rows.map((row, r) => (
@@ -437,7 +598,7 @@ function ProjectGrid(props: { projects: readonly ProjectEntry[]; selected: numbe
               )
             })}
             {/* Keep tiles the same width on a short last row. */}
-            {Array.from({ length: 3 - row.length }, (_, k) => (
+            {Array.from({ length: props.perRow - row.length }, (_, k) => (
               <Fragment key={`f${k}`}>
                 <span class="project-grid__rule" aria-hidden="true" />
                 <span class="project-grid__fill hatch" aria-hidden="true" />

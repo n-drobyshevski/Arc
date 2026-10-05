@@ -1,6 +1,10 @@
 /* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/MirrorScreen.kt
  * The pads, the KEYS keys and the group keys are hardware caps
- * (theme/cap.css) sitting in the device's body (Deck). */
+ * (theme/cap.css) sitting in the device's body (Deck).
+ *
+ * Web only, from 1024px wide (the desk, see the end): the K.O. II panel sized
+ * by the room with container units, its group keys a column on the left; the
+ * all-groups row (live/desk.ts holds its numbers too); the tools docked. */
 
 /* Box(fillMaxSize, shell): the side zone fills the section's page. */
 .live {
@@ -509,3 +513,162 @@
   white-space: nowrap;
 }
 .live-legend__key--outline { box-shadow: inset 0 0 0 2px var(--signal); }
+
+/* ---------- the desk (web only) ---------- */
+
+@media (min-width: 1024px) {
+  /* The page column's row, lined up with the top bar's (--top-bar-max, --desk-pad);
+   * the tools docked on its right (SideZone.css). */
+  .live {
+    max-width: var(--top-bar-max);
+    margin: 0 auto;
+    padding: var(--space-4) var(--desk-pad) var(--space-22);
+  }
+
+  .live-stage {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-10);
+    height: 100%;
+  }
+  .live-stage > * { flex: none; }
+  /* The room for the panel: a size container (the K.O. II measures itself on it). */
+  .live-stage__box {
+    flex: 1 1 0;
+    min-height: 0;
+    container-type: size;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+  }
+
+  /* The K.O. II: the device's body, radius 26, its edge offset like a cap's. Its pads are
+   * [--ko-wide] times as wide as high, as big as the room lets them: the panel is
+   * 4 pads high and 3 wide plus what isn't pads ([--ko-v] down, [--ko-h] across). */
+  .live-ko {
+    --ko-pad-top: 18px;
+    --ko-pad-x: 20px;
+    --ko-pad-bottom: 22px;
+    /* Display line, 6, mode row (44 to touch), 6, grid: Android's 10 between line and row, about. */
+    --ko-gap: 6px;
+    --ko-strip: 56px;
+    --ko-mode: 44px;
+    --ko-col: 72px;
+    --ko-col-gap: 18px;
+    --ko-deck-gap: 12px;
+    --ko-wide: 1.1;
+    --ko-edge: color-mix(in oklab, var(--hw-body) 70%, black);
+    --ko-v: calc(var(--ko-pad-top) + var(--ko-pad-bottom) + var(--ko-strip) + var(--ko-mode) + 2 * var(--ko-gap) + 3 * var(--ko-deck-gap) + var(--cap-dy));
+    --ko-h: calc(2 * var(--ko-pad-x) + var(--ko-col) + var(--ko-col-gap) + 2 * var(--ko-deck-gap) + var(--cap-dx));
+    /* One pad's height: what the room's height gives, or its width if that is less. */
+    --ko-pad: max(0px, min((100cqh - var(--ko-v) - 6px) / 4, (100cqw - var(--ko-h) - 6px) / (3 * var(--ko-wide))));
+    display: flex;
+    flex-direction: column;
+    gap: var(--ko-gap);
+    width: calc(3 * var(--ko-wide) * var(--ko-pad) + var(--ko-h));
+    height: calc(4 * var(--ko-pad) + var(--ko-v));
+    padding: var(--ko-pad-top) var(--ko-pad-x) var(--ko-pad-bottom);
+    border-radius: 26px;
+    background: var(--hw-body);
+    box-shadow: 4px 6px 0 var(--ko-edge);
+  }
+  /* KEYS: no group keys. */
+  .live-ko--keys {
+    --ko-col: 0px;
+    --ko-col-gap: 0px;
+  }
+  .live-ko > * { flex: none; }
+  .live-ko > .live-strip {
+    height: var(--ko-strip);
+    padding-inline: 18px;
+  }
+  .live-ko__body {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    gap: var(--ko-col-gap);
+  }
+
+  /* The mode row over the grid (Android's sideways order): mode and scale at the start, the
+   * octave at the end, the words in the middle of their touch height; the lists open down. */
+  .live-ko .live-mode,
+  .live-row .live-mode {
+    justify-content: flex-start;
+    gap: var(--space-24);
+    height: var(--ko-mode, 44px);
+    margin-top: 0;
+  }
+  .live-ko .live-mode > :nth-child(3) { margin-inline-start: auto; }
+  .live-ko .live-mode .word--top,
+  .live-row .live-mode .word--top {
+    align-items: center;
+    padding-top: 6px;
+  }
+  .live-ko .pick__list,
+  .live-row .pick__list {
+    top: 0;
+    bottom: auto;
+  }
+
+  /* The pads sit straight on the body (the deck is the panel), 12 apart. */
+  .live-ko .live-group--big { flex: 1 1 0 !important; min-width: 0; }
+  .live-ko .live-deck {
+    --deck-gap: var(--ko-deck-gap);
+    padding: 0 var(--cap-dx) var(--cap-dy) 0;
+    border-radius: 0;
+    background: none;
+  }
+  .live-ko .live-kgrid { min-width: 0; }
+
+  /* The group keys: a column left of the grid, each slot a pad row high (LED over its cap). */
+  .live-keys--vertical {
+    flex: none;
+    flex-direction: column;
+    gap: var(--ko-deck-gap);
+    width: var(--ko-col);
+    padding-bottom: var(--cap-dy);
+  }
+  .live-keys--vertical .live-keys__slot {
+    flex: 1 1 0;
+    min-height: 0;
+  }
+  .live-keys--vertical .live-keys__key {
+    flex: 1 1 0;
+    min-height: 0;
+    border-radius: var(--radius-key);
+  }
+
+  /* All groups in one row on a paper card, as wide as the room; pads [--row-pad] high
+   * (live/desk.ts rowPadSize: square at most, 40 at least). */
+  .live-row {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
+    width: 100%;
+    padding: var(--space-20);
+  }
+  .live-row > * { flex: none; }
+  .live-row > .live-strip {
+    height: 56px;
+    padding-inline: 18px;
+  }
+  .live-row__groups {
+    display: flex;
+    gap: var(--space-14);
+  }
+  .live-row .live-group { flex: 1 1 0; }
+  .live-row .live-pad {
+    aspect-ratio: auto;
+    height: var(--row-pad);
+  }
+
+  /* Too small a room for that: the phone's scrolling page on a paper card. */
+  .live-scroll {
+    width: 100%;
+    height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .live-scroll .live__all { padding: var(--space-4) var(--space-16) var(--space-24); }
+}

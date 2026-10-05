@@ -1,4 +1,8 @@
-/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Chrome.kt (TopBar) */
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Chrome.kt (TopBar)
+ *
+ * Web only, from 1024px wide (the desk): the row spans the page column up to
+ * 1200 (--top-bar-max, theme/desk.css; Android's landscape TopBar is 1200dp
+ * wide too), its sides on the desk's --desk-pad. */
 
 .top-bar {
   display: flex;
@@ -6,14 +10,14 @@
   width: 100%;
 }
 
-/* Row: max 720, padding 16 / 12 top / 16 / 10 bottom. Android's 8dp item
+/* Row: max 720 (--top-bar-max), padding 16 / 12 top / 16 / 10 bottom. Android's 8dp item
  * spacing is drawn by the gap spans (and the spacer's minimum), so it can give
  * way on narrow screens instead of overflowing. */
 .top-bar__row {
   display: flex;
   align-items: center;
   width: 100%;
-  max-width: var(--wide-max);
+  max-width: var(--top-bar-max, var(--wide-max));
   padding: var(--space-12) var(--space-16) var(--space-10);
 }
 
@@ -32,4 +36,9 @@
   .top-bar__row { padding-left: var(--space-10); padding-right: var(--space-10); }
   .top-bar__row .section-tag__face { padding: 0 20px 0 10px; }
   .top-bar__row .section-tag__text { font-size: var(--size-tab); }
+}
+
+/* The desk: the page column's row (SectionMenu.css lines its list up with these numbers). */
+@media (min-width: 1024px) {
+  .top-bar__row { padding: var(--space-18) var(--desk-pad) var(--space-12); }
 }
