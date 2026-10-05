@@ -22,6 +22,9 @@ class KeysTest {
     @Test
     fun `fixed-do names and octaves`() {
         assertEquals(listOf("DO", "DI", "RE", "MI", "SI", "TI"), listOf(60, 61, 62, 64, 68, 71).map(Keys::solfege))
+        assertEquals(listOf("C", "C#", "D", "E", "G#", "B"), listOf(60, 61, 62, 64, 68, 71).map(Keys::letter))
+        assertEquals("A", Keys.name(57, NoteNames.LETTERS))
+        assertEquals("LA", Keys.name(57, NoteNames.SOLFEGE))
         assertEquals(4, Keys.octaveOf(60))
         assertEquals(2, Keys.octaveOf(36))
     }

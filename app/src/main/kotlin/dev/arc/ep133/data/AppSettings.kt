@@ -3,6 +3,7 @@ package dev.arc.ep133.data
 import android.content.Context
 import androidx.core.content.edit
 import dev.arc.ep133.features.Keys
+import dev.arc.ep133.features.NoteNames
 import dev.arc.ep133.features.Scale
 import dev.arc.ep133.text.ThemeChoice
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,6 +29,8 @@ data class AppSettings(
     val keysRoot: Int = 0,
     val keysScale: Scale = Scale.CHROMATIC,
     val keysOctave: Int = 4,
+    /** KEYS names notes in solfège (DO RE MI) or letters (C D E). */
+    val keysNames: NoteNames = NoteNames.SOLFEGE,
 )
 
 /**
@@ -55,6 +58,7 @@ class SettingsStore(context: Context) {
         keysRoot = prefs.getInt("keysRoot", 0).coerceIn(0, 11),
         keysScale = runCatching { Scale.valueOf(prefs.getString("keysScale", null) ?: "") }.getOrDefault(Scale.CHROMATIC),
         keysOctave = prefs.getInt("keysOctave", 4).coerceIn(Keys.MIN_OCTAVE, Keys.MAX_OCTAVE),
+        keysNames = runCatching { NoteNames.valueOf(prefs.getString("keysNames", null) ?: "") }.getOrDefault(NoteNames.SOLFEGE),
     )
 
     /** Each setting as its key and stored text. */
@@ -70,6 +74,7 @@ class SettingsStore(context: Context) {
         "keysRoot" to keysRoot.toString(),
         "keysScale" to keysScale.name,
         "keysOctave" to keysOctave.toString(),
+        "keysNames" to keysNames.name,
     )
 
     fun update(change: (AppSettings) -> AppSettings) {
@@ -81,7 +86,7 @@ class SettingsStore(context: Context) {
         prefs.edit {
             for ((k, v) in changed) {
                 when (k) {
-                    "theme", "keysScale" -> putString(k, v)
+                    "theme", "keysScale", "keysNames" -> putString(k, v)
                     "keepLast", "keysRoot", "keysOctave" -> putInt(k, v.toInt())
                     else -> putBoolean(k, v.toBooleanStrict())
                 }
@@ -108,6 +113,7 @@ class SettingsStore(context: Context) {
             keysRoot = map["app.keysRoot"]?.toIntOrNull()?.takeIf { it in 0..11 } ?: cur.keysRoot,
             keysScale = map["app.keysScale"]?.let { v -> runCatching { Scale.valueOf(v) }.getOrNull() } ?: cur.keysScale,
             keysOctave = map["app.keysOctave"]?.toIntOrNull()?.takeIf { it in Keys.MIN_OCTAVE..Keys.MAX_OCTAVE } ?: cur.keysOctave,
+            keysNames = map["app.keysNames"]?.let { v -> runCatching { NoteNames.valueOf(v) }.getOrNull() } ?: cur.keysNames,
         )
     }
 }

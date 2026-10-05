@@ -79,6 +79,7 @@ fun SettingsScreen(
     /** Space taken by Live's copies of the pad sounds. */
     padSoundsSize: suspend () -> Long = { 0L },
     onClearPadSounds: () -> Unit = {},
+    onNoteNames: (dev.arc.ep133.features.NoteNames) -> Unit = {},
     onSource: () -> Unit,
     onFontLicence: () -> Unit,
     onDebug: () -> Unit,
@@ -153,6 +154,13 @@ fun SettingsScreen(
                 },
             )
             Text(MirrorText.ORDER_NOTE, style = ArcType.small, color = c.graphite)
+            Label(MirrorText.NOTE_NAMES)
+            Segmented(
+                dev.arc.ep133.features.NoteNames.entries.map(MirrorText::noteNames),
+                selected = settings.keysNames.ordinal,
+                onSelect = { onNoteNames(dev.arc.ep133.features.NoteNames.entries[it]) },
+            )
+            Text(MirrorText.NOTE_NAMES_NOTE, style = ArcType.small, color = c.graphite)
             ArcKey(SettingsText.FORGET_NAMES, { confirmForget = true }, Modifier.fillMaxWidth(), size = KeySize.Small)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(

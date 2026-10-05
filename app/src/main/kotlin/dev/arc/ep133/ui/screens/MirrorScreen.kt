@@ -87,6 +87,7 @@ import dev.arc.ep133.features.PadNotes
 import dev.arc.ep133.features.PadOrder
 import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.Keys
+import dev.arc.ep133.features.NoteNames
 import dev.arc.ep133.features.Scale
 import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.ui.components.ArcKey
@@ -115,6 +116,8 @@ data class KeysUi(
     val root: Int = 0,
     val scale: Scale = Scale.CHROMATIC,
     val octave: Int = 4,
+    /** Solfège (DO RE MI) or letter (C D E) note names. */
+    val names: NoteNames = NoteNames.SOLFEGE,
     /** The sound KEYS plays, and its sample's name when known. */
     val pad: PhysicalPad? = null,
     val padName: String? = null,
@@ -735,7 +738,7 @@ private fun KeysDisplay(st: MirrorState, mirror: MirrorUi?, keys: KeysUi) {
     ) {
         Text(MirrorText.MODE_KEYS.uppercase(), style = ArcType.displaySub, color = c.displayDim, maxLines = 1)
         val note = keys.playingKeys.lastOrNull()?.let { Keys.notes(keys.root, keys.scale, keys.octave).getOrNull(it) } ?: st.lastNote
-        note?.let { Text(MirrorText.noteName(it), style = ArcType.displaySub, color = c.displayInk, maxLines = 1) }
+        note?.let { Text(MirrorText.noteName(it, keys.names), style = ArcType.displaySub, color = c.displayInk, maxLines = 1) }
         if (mirror?.offline != null) Text(MirrorText.OFFLINE, style = ArcType.displaySub, color = c.displayDim, maxLines = 1)
         Text(
             keys.pad?.let { MirrorText.keysSound(it, keys.padName) } ?: MirrorText.NO_SOUND,
@@ -781,7 +784,7 @@ private fun KeysGrid(st: MirrorState, keys: KeysUi, now: Long, actions: KeysActi
                             .background(lerp(c.plate, c.signal, g))
                             .then(if (k in keys.playingKeys) Modifier.border(2.dp, c.signal) else Modifier)
                             .then(holdToPlay({ hold -> actions.onKey(k, hold) }, { actions.onKeyUp(k) }))
-                            .semantics { contentDescription = MirrorText.noteName(note) },
+                            .semantics { contentDescription = MirrorText.noteName(note, keys.names) },
                         contentAlignment = Alignment.Center,
                     ) {
                         val ink = if (g > 0.3f) c.onSignal else c.ink
@@ -794,7 +797,7 @@ private fun KeysGrid(st: MirrorState, keys: KeysUi, now: Long, actions: KeysActi
                                 style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke),
                             )
                         }
-                        Text(Keys.solfege(note), style = ArcType.semi.copy(fontSize = 22.sp, letterSpacing = 0.02.em), color = ink, maxLines = 1)
+                        Text(Keys.name(note, keys.names), style = ArcType.semi.copy(fontSize = 22.sp, letterSpacing = 0.02.em), color = ink, maxLines = 1)
                         Text(
                             Keys.octaveOf(note).toString(),
                             style = ArcType.tiny.copy(fontSize = 11.sp),
@@ -814,7 +817,7 @@ private fun KeysPanel(keys: KeysUi, actions: KeysActions) {
     val c = LocalArcColors.current
     Caption(MirrorText.KEY, align = androidx.compose.ui.text.style.TextAlign.Start)
     for (row in (0..11).chunked(6)) {
-        Segmented(row.map { Keys.solfege(it) }, selected = row.indexOf(keys.root), onSelect = { actions.onRoot(row[it]) })
+        Segmented(row.map { Keys.name(it, keys.names) }, selected = row.indexOf(keys.root), onSelect = { actions.onRoot(row[it]) })
     }
     Text(MirrorText.KEYS_NOTE, style = ArcType.small, color = c.graphite)
 }

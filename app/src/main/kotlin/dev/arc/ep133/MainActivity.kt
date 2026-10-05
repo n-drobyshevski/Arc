@@ -424,6 +424,7 @@ class MainActivity : ComponentActivity() {
                     onForgetNames = controller::forgetLearned,
                     padSoundsSize = controller::padSoundsSize,
                     onClearPadSounds = { controller.clearPadSounds() },
+                    onNoteNames = controller::setKeysNames,
                     onRestoreFolder = { folderLauncher.launch(dev.arc.ep133.data.ExternalLibrary.INITIAL_FOLDER) },
                     // No browser installed: nothing to open.
                     onSource = { runCatching { uri.openUri(dev.arc.ep133.text.SettingsText.SOURCE_URL) } },
@@ -533,6 +534,7 @@ class MainActivity : ComponentActivity() {
                                 root = appSettings.keysRoot,
                                 scale = appSettings.keysScale,
                                 octave = appSettings.keysOctave,
+                                names = appSettings.keysNames,
                                 pad = state.keysPad,
                                 padName = state.keysPad?.let(controller::mirrorName),
                                 playingKeys = playingKeys.mapNotNullTo(LinkedHashSet()) { it.removePrefix("keys:").takeIf { _ -> it.startsWith("keys:") }?.toIntOrNull() },

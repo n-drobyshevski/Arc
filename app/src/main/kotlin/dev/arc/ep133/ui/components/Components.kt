@@ -300,7 +300,7 @@ fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, mod
                     .background(if (on) c.navy else c.tabOff)
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Tab) { onSelect(i) }
                     .semantics { this.selected = on }
-                    .padding(horizontal = 10.dp, vertical = 12.dp),
+                    .padding(horizontal = 4.dp, vertical = 12.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(label.uppercase(), style = ArcType.capsKeySmall, color = if (on) c.onNavy else c.onTabOff, maxLines = 1, textAlign = TextAlign.Center)

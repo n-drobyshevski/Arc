@@ -67,8 +67,16 @@ object MirrorText {
 
     fun octaveChoice(n: Int) = "Octave $n. Tap to change."
 
-    /** "MI4". */
-    fun noteName(note: Int) = dev.arc.ep133.features.Keys.solfege(note) + dev.arc.ep133.features.Keys.octaveOf(note)
+    /** "MI4", or "E4" with letter names. */
+    fun noteName(note: Int, names: dev.arc.ep133.features.NoteNames = dev.arc.ep133.features.NoteNames.SOLFEGE) =
+        dev.arc.ep133.features.Keys.name(note, names) + dev.arc.ep133.features.Keys.octaveOf(note)
+
+    const val NOTE_NAMES = "Note names on the keys"
+    fun noteNames(n: dev.arc.ep133.features.NoteNames) = when (n) {
+        dev.arc.ep133.features.NoteNames.SOLFEGE -> "DO RE MI"
+        dev.arc.ep133.features.NoteNames.LETTERS -> "C D E"
+    }
+    const val NOTE_NAMES_NOTE = "How KEYS names its notes and the key picker: fixed-do solfège (DO is C) or letters, sharps as C#, D#."
 
     /** "A 7 · kick", the KEYS sound. */
     fun keysSound(pad: dev.arc.ep133.features.PhysicalPad, name: String?) = "${pad.groupLetter} ${pad.label}" + (name?.let { " \u00B7 $it" } ?: "")
