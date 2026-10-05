@@ -381,22 +381,27 @@ fun WordButton(
     mark: Boolean = false,
     dim: Boolean = false,
     description: String? = null,
+    /** Text at the top of the touch area rather than its middle (a row hugging the grid above). */
+    top: Boolean = false,
 ) {
     val c = LocalArcColors.current
     // Quiet: caption grey, so the pads stay the loudest thing on the page.
     val ink = if (dim) c.graphite.copy(alpha = 0.45f) else c.graphite
-    Row(
+    // The touch area is 44dp tall; the mark and the word stay centred on each other,
+    // at its middle or (with [top]) its top.
+    Box(
         modifier
             .clip(RoundedCornerShape(6.dp))
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = onClick)
             .then(if (description != null) Modifier.semantics(mergeDescendants = true) { contentDescription = description } else Modifier)
             .heightIn(min = 44.dp)
-            .padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+            .padding(top = if (top) 0.dp else 6.dp, bottom = 6.dp),
+        contentAlignment = if (top) Alignment.TopStart else Alignment.CenterStart,
     ) {
-        if (mark) Icon(ArcIcon.SWAP, ink, size = 12.dp)
-        Text(label.uppercase(), style = ArcType.word, color = ink, maxLines = 1)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (mark) Icon(ArcIcon.SWAP, ink, size = 12.dp)
+            Text(label.uppercase(), style = ArcType.word, color = ink, maxLines = 1)
+        }
     }
 }
 

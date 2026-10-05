@@ -61,6 +61,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
@@ -622,7 +623,16 @@ private fun ModeRow(keys: KeysUi, actions: KeysActions) {
     val c = LocalArcColors.current
     Row(
         // Spread across the row: mode at the start, octave at the end, scale between.
-        Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+        // Pulled up close under the grid, as the PO's DRUMS / KEYPAD; the words keep
+        // their full touch height, only the gap above them shrinks.
+        Modifier
+            .layout { measurable, constraints ->
+                val p = measurable.measure(constraints)
+                val lift = 4.dp.roundToPx()
+                layout(p.width, p.height - lift) { p.place(0, -lift) }
+            }
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -632,6 +642,7 @@ private fun ModeRow(keys: KeysUi, actions: KeysActions) {
             Modifier.coachMark("live.mode", CoachText.MODE, c.navy, c.onNavy),
             mark = true,
             description = MirrorText.modeSwitch(keys.on),
+            top = true,
         )
         if (keys.on) {
             PickWord(
@@ -673,7 +684,7 @@ private fun <T> PickWord(
     val c = LocalArcColors.current
     var open by remember { mutableStateOf(false) }
     Box {
-        dev.arc.ep133.ui.components.WordButton("$label \u25BE", { open = true }, mark, description = description)
+        dev.arc.ep133.ui.components.WordButton("$label \u25BE", { open = true }, mark, description = description, top = true)
         if (open) {
             androidx.compose.ui.window.Popup(
                 alignment = listAlignment,
