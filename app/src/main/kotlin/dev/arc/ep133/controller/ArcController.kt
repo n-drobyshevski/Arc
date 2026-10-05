@@ -114,6 +114,8 @@ data class MirrorUi(
     val state: dev.arc.ep133.features.MirrorState = dev.arc.ep133.features.MirrorState(),
     val loading: Boolean = true,
     val error: String? = null,
+    /** Not connected, showing the last read instead: when it was made ("Last seen 5 Oct, 14:02"). */
+    val offline: String? = null,
 )
 
 /** A backup opened for its contents screen (sounds and projects, playback, export). */
@@ -175,6 +177,11 @@ class ArcController(
     private var mirrorPushOff: (() -> Unit)? = null
     private var mirrorSession: Session? = null
     private val mirrorPrefs by lazy { context.getSharedPreferences("mirror", Context.MODE_PRIVATE) }
+    // The device's project, pads and names as Live last read them, shown while it is not connected.
+    private val lastReadFile by lazy { java.io.File(context.filesDir, "live-last.json") }
+    @Volatile
+    private var lastRead: dev.arc.ep133.features.LiveSnapshot? = null
+    private var lastReadLoaded = false
 
     // ---------- settings (an addition) ----------
     private val settingsStore = dev.arc.ep133.data.SettingsStore(context)
@@ -272,7 +279,7 @@ class ArcController(
         openDeviceId = null
         stopMirror()
         liveEvents = null
-        if (_state.value.mirror != null) _state.update { it.copy(mirror = notConnectedMirror()) }
+        if (_state.value.mirror != null) scope.launch { openOfflineMirror() }
         playToken++ // a device sound still downloading must not start after the device is gone
         if (player.playing.value?.startsWith("device:") == true) player.stop()
         _state.update { it.copy(connected = false, device = null, browser = BrowserUi(), diff = null) }
@@ -623,8 +630,9 @@ class ArcController(
         stopMirror()
         val s = session
         val events = liveEvents
-        if (s == null || events == null) {
-            _state.update { it.copy(mirror = notConnectedMirror()) }
+        // Not connected (or still connecting): the last read, if there is one.
+        if (s == null || events == null || _state.value.device == null) {
+            openOfflineMirror()
             return@launch
         }
         val m = dev.arc.ep133.features.LiveMirror(
@@ -682,8 +690,62 @@ class ArcController(
         }
         if (mirror === m) {
             dirty.set(true)
+            if (ok == true) saveLastRead(m)
             _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(loading = false, state = m.snapshot(System.nanoTime()))) } ?: cur }
             if (ok == null) _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(loading = false)) } ?: cur }
+        }
+    }
+
+    /**
+     * Live without the device: the pads and sample names of the last read,
+     * marked offline. Nothing lights, as nothing is listened to.
+     */
+    private suspend fun openOfflineMirror() {
+        stopMirror()
+        val snap = loadLastRead()
+        if (snap == null || session != null && _state.value.device != null) {
+            if (snap == null) _state.update { it.copy(mirror = notConnectedMirror()) }
+            return
+        }
+        val m = dev.arc.ep133.features.LiveMirror(
+            learned = loadLearned(),
+            padOrder = savedPadOrder(),
+            onLearned = ::saveLearned,
+        )
+        m.load(snap)
+        mirror = m
+        _state.update {
+            it.copy(mirror = MirrorUi(m.snapshot(System.nanoTime()), loading = false, offline = dev.arc.ep133.text.MirrorText.lastSeen(fmtDateTime(snap.savedAt))))
+        }
+    }
+
+    private suspend fun loadLastRead(): dev.arc.ep133.features.LiveSnapshot? {
+        if (!lastReadLoaded) {
+            val read = withContext(Dispatchers.IO) {
+                runCatching { dev.arc.ep133.features.LiveSnapshot.fromJson(lastReadFile.readText()) }.getOrNull()
+            }
+            // A read saved meanwhile is newer than the file was.
+            if (!lastReadLoaded) lastRead = read
+            lastReadLoaded = true
+        }
+        return lastRead
+    }
+
+    private fun saveLastRead(m: dev.arc.ep133.features.LiveMirror) {
+        val snap = m.saved(System.currentTimeMillis())
+        // A read that found nothing (no project, no names) would only hide a useful one.
+        if (snap.names.isEmpty() && snap.groups.isEmpty()) return
+        lastRead = snap
+        lastReadLoaded = true
+        scope.launch(Dispatchers.IO) {
+            synchronized(lastReadFile) {
+                if (lastRead !== snap) return@synchronized // a newer read is on its way
+                val tmp = java.io.File(lastReadFile.path + ".tmp")
+                runCatching {
+                    tmp.writeText(snap.toJson())
+                    if (!tmp.renameTo(lastReadFile)) tmp.delete()
+                }
+            }
         }
     }
 
@@ -692,6 +754,7 @@ class ArcController(
             val groups = exclusive("mirror", quiet = true) { ss -> DeviceBrowser.projectLayout(ss, project).pads } ?: return@launch
             if (mirror === m) {
                 m.setProject(project, groups)
+                saveLastRead(m)
                 _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(state = m.snapshot(System.nanoTime()))) } ?: cur }
             }
         }

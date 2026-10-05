@@ -357,12 +357,13 @@ class MainActivity : ComponentActivity() {
             view.keepScreenOn = keepOn
             onDispose { view.keepScreenOn = false }
         }
-        // The mirror (re)starts when it opens and whenever a device is (re)connected.
+        // The mirror (re)starts when it opens and whenever a device is (re)connected or
+        // goes away; without one it shows the last read.
         val ready = state.device != null
         // Only while the app is in front: in the background nothing listens or redraws.
         val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
         LaunchedEffect(live, ready) {
-            if (live && ready) {
+            if (live) {
                 lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
                     controller.openMirror()
                     try {

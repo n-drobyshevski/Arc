@@ -115,6 +115,22 @@ class LiveMirror(
         names = slotNames
     }
 
+    /** What was read from the device (project, pads, names), to show again while it is away. */
+    @Synchronized
+    fun saved(savedAt: Long): LiveSnapshot = LiveSnapshot(
+        savedAt = savedAt,
+        activeProject = activeProject,
+        groups = layout.entries.sortedWith(compareBy(ProjectPads.groupOrder) { it.key }).map { PadGroup(it.key, it.value) },
+        names = names,
+    )
+
+    /** Loads a saved read: the device's last project, pads and names. */
+    @Synchronized
+    fun load(s: LiveSnapshot) {
+        names = s.names
+        setProject(s.activeProject, s.groups)
+    }
+
     @Synchronized
     fun onMidi(e: MidiEvent) {
         when (e) {

@@ -7,6 +7,7 @@ version fixes bugs. The version itself is set in `version.properties`.
 ## [Unreleased]
 
 ### Added
+- Live works without the EP-133: it keeps the device's last read (the active project, its pads and the sound names) and shows them, marked offline with when they were read, until the device is connected again.
 - Live: a one-group view, a large grid of one group with A–D keys to switch and Follow to jump to the group just played. It fits one screen without scrolling (checked at Pixel 7 and 360 dp sizes). The choice is kept in the settings.
 
 ### Changed

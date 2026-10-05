@@ -10,6 +10,11 @@ object MirrorText {
     const val TITLE = "Live"
     const val READING = "Reading the device\u2026"
     const val NOT_CONNECTED = "Connect your EP-133 to see it live."
+    // Not connected, with the last read kept: the pads and names as they were then.
+    const val OFFLINE = "Offline"
+    const val OFFLINE_NOTE = "Not connected: the pads and sample names are as arc last read them. Connect your EP-133 to see it live."
+    /** "Last seen 5 Oct, 14:02", for the display while offline. */
+    fun lastSeen(at: String) = "Last seen $at"
     const val PLAYING = "Playing"
     const val STOPPED = "Stopped"
     const val NO_TRANSPORT = "Play/stop and tempo need MIDI clock out: SHIFT + ERASE, then 102 and ENTER."

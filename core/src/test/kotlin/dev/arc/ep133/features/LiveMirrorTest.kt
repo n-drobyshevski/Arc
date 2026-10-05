@@ -282,4 +282,26 @@ class LiveMirrorTest {
         m.onMidi(MidiEvent.Continue(t0 + 31 * tick))
         assertNull(m.snapshot(t0 + 31 * tick).bpm)
     }
+    @Test
+    fun `the last read is saved and names pads again without the device`() {
+        val json = mirror().saved(1_700_000_000_000L).toJson()
+        val back = LiveSnapshot.fromJson(json)!!
+        assertEquals(1_700_000_000_000L, back.savedAt)
+        assertEquals(1, back.activeProject)
+        assertEquals(listOf(PadGroup("a", mapOf(1 to 5, 10 to 1)), PadGroup("b", mapOf(1 to 20))), back.groups)
+        assertEquals(mapOf(1 to "kick", 5 to "snare", 20 to "bass"), back.names)
+        // A fresh mirror (no device) with the learned links names the pads from it.
+        val offline = LiveMirror(learned = mapOf(9 to 10, 0 to 1)).apply { load(back) }
+        assertEquals("kick", offline.nameOf(PhysicalPad(0, 9)))
+        assertEquals("bass", offline.nameOf(PhysicalPad(1, 0)))
+        assertEquals(1, offline.snapshot(0).activeProject)
+    }
+
+    @Test
+    fun `an empty pad survives the round trip, and junk reads as nothing`() {
+        val s = LiveSnapshot(5, null, listOf(PadGroup("c", mapOf(3 to null))), emptyMap())
+        assertEquals(s, LiveSnapshot.fromJson(s.toJson()))
+        assertNull(LiveSnapshot.fromJson("not json"))
+        assertNull(LiveSnapshot.fromJson("""{"v":2,"savedAt":1}"""))
+    }
 }
