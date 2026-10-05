@@ -35,7 +35,8 @@
   padding-top: var(--space-4);
 }
 
-/* A block: min 150×48, radius 8, 16px sides, ArcType.tab uppercase; current one navy. */
+/* A block: min 150×48, radius 8, 16px sides, ArcType.tab uppercase; current one navy.
+ * Web: a hardware cap (theme/cap.css); the current one stays down. */
 .section-menu__item {
   display: flex;
   align-items: center;
@@ -43,8 +44,9 @@
   min-height: 48px;
   padding: 0 var(--space-16);
   border-radius: var(--radius-key);
-  background: var(--key);
-  color: var(--ink);
+  --cap-face: var(--key);
+  --cap-ink: var(--ink);
+  --cap-edge: var(--key-edge);
   font-size: var(--size-tab);
   font-weight: 700;
   line-height: 1;
@@ -52,8 +54,9 @@
   text-transform: uppercase;
 }
 .section-menu__item.is-current {
-  background: var(--navy);
-  color: var(--on-navy);
+  --cap-face: var(--navy);
+  --cap-ink: var(--on-navy);
+  --cap-edge: color-mix(in oklab, var(--navy) 65%, black);
 }
 
 @media (prefers-reduced-motion: reduce) {

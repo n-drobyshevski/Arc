@@ -108,16 +108,10 @@
   --outline-variant: color-mix(in srgb, var(--key-edge) 55%, transparent);
   /* Text selection: signal at 30% (ArcTheme.kt LocalTextSelectionColors). */
   --selection: color-mix(in srgb, var(--signal) 30%, transparent);
-  /* Navy key edge: navy at 55% (Components.kt ArcKey KeyStyle.Navy). */
-  --navy-edge: color-mix(in srgb, var(--navy) 55%, transparent);
-  /* PlayKey idle ring: navy at 60% (Components.kt PlayKey). */
-  --navy-ring: color-mix(in srgb, var(--navy) 60%, transparent);
   /* Field bottom rule: line at 50% (Components.kt ArcField). */
   --field-rule: color-mix(in srgb, var(--line) 50%, transparent);
   /* Pressed row tint: keyEdge at 35% (MainScreen/DeviceScreen/PadsSheet rows). */
   --row-pressed: color-mix(in srgb, var(--key-edge) 35%, transparent);
-  /* IconBlock pressed overlay: black at 12% (Icons.kt IconBlock). */
-  --press-overlay: rgba(0, 0, 0, 0.12);
   /* Guide divider: keyEdge at 70% (GuideScreen.kt). */
   --guide-divider: color-mix(in srgb, var(--key-edge) 70%, transparent);
   /* Coach overlay veil: shell at 86% (Coach.kt CoachOverlay). */
@@ -238,8 +232,7 @@
   --tap-min: 44px;          /* IconBlock / minimum touch target */
   --sheet-wide-min: 640px;  /* sheets become centred dialogs at this width (media queries cannot use it) */
 
-  /* ---- Keys and motion (Components.kt ArcKey, ArcSheet) ---- */
-  --key-travel: 2px;        /* KeyTravel: edge strip below the face, face moves down while pressed */
+  /* ---- Keys and motion (Components.kt ArcKey, ArcSheet; the caps' geometry is in cap.css) ---- */
   --key-press-ms: 60ms;     /* tween(60, KeyEasing) */
   --key-ease: cubic-bezier(0.25, 0.1, 0.25, 1);
   --key-disabled: 0.45;

@@ -1,7 +1,8 @@
 // Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt (ArcKey, KeyStyle, KeySize)
 //
-// A physical key: a pale (or orange, or navy) face over a 2px edge strip that
-// the face travels down onto while pressed (60 ms, KeyEasing). The label is
+// A physical key: a pale (or orange, or navy) face over its edge that the face
+// travels down onto while pressed (60 ms, KeyEasing). Web: a hardware cap
+// (theme/cap.css), its edge down and to the right, rather than a 2px strip. The label is
 // uppercase capsKey, at most two lines, after the pocket operator app. Quiet
 // keys are flat graphite text with no travel. A disabled key fades to .45,
 // edge and all.
@@ -38,6 +39,7 @@ export function Key(props: KeyProps): JSX.Element {
     class: cls, style, children, type = 'button', ...rest
   } = props
   const classes = ['key', `key--${variant}`, `key--${size}`]
+  if (variant !== 'quiet') classes.push('cap-3d')
   if (block) classes.push('key--block')
   if (cls) classes.push(cls)
   const merged: CSSProperties | undefined = textColor ? { ...style, color: textColor } : style

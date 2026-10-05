@@ -86,7 +86,7 @@ export function Segmented(props: SegmentedProps): JSX.Element {
             aria-checked={on}
             tabIndex={on || (selected < 0 && i === 0) ? 0 : -1}
             data-roving=""
-            class={`segmented__block${on ? ' is-on' : ''}`}
+            class={`segmented__block cap-3d${on ? ' is-on is-down' : ''}`}
             onClick={() => onSelect(i)}
           >
             <span class="segmented__text">{text}</span>

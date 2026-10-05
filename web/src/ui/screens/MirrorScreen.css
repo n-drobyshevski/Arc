@@ -1,4 +1,6 @@
-/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/MirrorScreen.kt */
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/MirrorScreen.kt
+ * Web: the pads, the KEYS keys and the group keys are hardware caps
+ * (theme/cap.css) sitting in the device's body, where Compose draws flat cells. */
 
 /* Box(fillMaxSize, shell): the side zone fills the section's page. */
 .live {
@@ -173,40 +175,78 @@
   --live-caption: color-mix(in oklab, var(--signal) var(--glow-pct), var(--graphite));
 }
 
-.live-group--big .live-group__plate { flex: 1 1 0; min-height: 0; }
+/* The deck: the device's body around the caps. Its padding leaves room on the
+ * right and below for the caps' edges. 10 between caps (6 in the small grids). */
+.live-deck {
+  --deck-gap: 10px;
+  --deck-pad: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--deck-gap);
+  padding: var(--deck-pad) calc(var(--deck-pad) + var(--cap-dx)) calc(var(--deck-pad) + var(--cap-dy)) var(--deck-pad);
+  border-radius: var(--radius-plate);
+  background: var(--hw-body);
+}
+.live-group:not(.live-group--big) .live-deck {
+  --deck-gap: 6px;
+  --deck-pad: 8px;
+  border-radius: var(--radius-strip);
+}
+.live-group--big .live-deck { flex: 1 1 0; min-height: 0; }
 
-.live-group__row {
+.live-deck__row {
   display: flex;
   align-items: stretch;
+  gap: var(--deck-gap);
 }
-.live-group--big .live-group__row { flex: 1 1 0; min-height: 0; }
-
-.live-group__divider {
-  flex: none;
-  width: 1px;
-  background: var(--line);
-}
+.live-group--big .live-deck__row { flex: 1 1 0; min-height: 0; }
 
 /* ---------- a pad ---------- */
 
+/* A dark cap: lerp(dark face, signal, glow), its edge with it, and a light around it while lit. */
 .live-pad {
-  position: relative;
+  --cap-face: color-mix(in oklab, var(--signal) var(--glow-pct), var(--hw-dark-face));
+  --cap-edge: color-mix(in oklab, var(--signal-edge) var(--glow-pct), var(--hw-dark-edge));
+  --cap-glow: color-mix(in oklab, var(--signal) calc(var(--glow-pct) * 0.6), transparent);
+  --cap-glow-blur: calc(var(--glow, 0) * 18px);
   flex: 1 1 0;
   min-width: 0;
   aspect-ratio: 1;
   padding: 5px 7px 5px 6px;
-  background: color-mix(in oklab, var(--signal) var(--glow-pct), var(--plate));
+  border-radius: 6px;
   overflow: hidden;
 }
 .live-pad--big {
   aspect-ratio: auto;
   padding: var(--space-10);
+  border-radius: var(--radius-key);
 }
 
-/* The sample: tiny 10sp (14 on the big grid), line height 1.1em, two lines (three). */
-.live-pad__name {
+/* The key's label, top left as on the K.O. II: semi 15sp (10 for ENTER), 28 / 15 on the big grid. */
+.live-pad__label {
   position: absolute;
   top: 5px;
+  left: 6px;
+  padding-block: var(--trim-1);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--hw-dark-ink));
+}
+.live-pad__label--wide { font-size: 10px; }
+.live-pad--big .live-pad__label {
+  top: var(--space-10);
+  left: var(--space-10);
+  font-size: 28px;
+}
+.live-pad--big .live-pad__label--wide { font-size: 15px; }
+
+/* The sample, bottom left: tiny 10sp (14 on the big grid), line height 1.1em, two lines (three). */
+.live-pad__name {
+  position: absolute;
+  bottom: 5px;
   left: 6px;
   right: 7px;
   display: -webkit-box;
@@ -218,30 +258,15 @@
   font-weight: 500;
   line-height: 1.1;
   overflow-wrap: anywhere;
-  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--graphite));
+  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--hw-dark-dim));
 }
 .live-pad--big .live-pad__name {
-  top: var(--space-10);
+  bottom: var(--space-10);
   left: var(--space-10);
   right: var(--space-10);
   -webkit-line-clamp: 3;
   font-size: 14px;
 }
-
-/* The key's label, bottom end: semi 15sp (10 for ENTER), 28 / 15 on the big grid. */
-.live-pad__label {
-  position: absolute;
-  right: 7px;
-  bottom: 5px;
-  padding-block: var(--trim-1);
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 1;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--ink));
-}
-.live-pad__label--wide { font-size: 10px; }
 
 /* A pad that plays while held: a real button, no browser chrome, no long-press menu or selection.
  * The big grid takes every touch (it never scrolls); the all-groups page lets a vertical drag scroll. */
@@ -249,7 +274,6 @@
 .live-key {
   display: block;
   border: 0;
-  border-radius: 0;
   margin: 0;
   font: inherit;
   text-align: start;
@@ -271,14 +295,9 @@
   position: absolute;
   inset: 0;
   border: 2px solid var(--signal);
+  border-radius: inherit;
   pointer-events: none;
 }
-.live-pad--big .live-pad__label {
-  right: var(--space-10);
-  bottom: var(--space-10);
-  font-size: 28px;
-}
-.live-pad--big .live-pad__label--wide { font-size: 15px; }
 
 /* ---------- the mode row (PADS / KEYS, scale, octave) ---------- */
 
@@ -300,19 +319,23 @@
   flex-direction: column;
 }
 .live-kgrid__plate { flex: 1 1 0; min-height: 0; }
-.live-kgrid .live-group__row { flex: 1 1 0; min-height: 0; }
+.live-kgrid .live-deck__row { flex: 1 1 0; min-height: 0; }
 
-/* A key: lerp(plate, signal, glow); its ring navy (orange an octave up), onSignal when lit. */
+/* A key: a dark cap, lerp(dark face, signal, glow); its ring pale (orange an octave up), onSignal when lit.
+ * (Compose: the plate, and a navy ring, which a dark cap would hide.) */
 .live-key {
-  --key-ring: var(--navy);
-  position: relative;
+  --key-ring: var(--hw-ring);
+  --cap-face: color-mix(in oklab, var(--signal) var(--glow-pct), var(--hw-dark-face));
+  --cap-edge: color-mix(in oklab, var(--signal-edge) var(--glow-pct), var(--hw-dark-edge));
+  --cap-glow: color-mix(in oklab, var(--signal) calc(var(--glow-pct) * 0.6), transparent);
+  --cap-glow-blur: calc(var(--glow, 0) * 18px);
   display: flex;
   align-items: center;
   justify-content: center;
   flex: 1 1 0;
   min-width: 0;
   padding: 0;
-  background: color-mix(in oklab, var(--signal) var(--glow-pct), var(--plate));
+  border-radius: var(--radius-key);
   overflow: hidden;
 }
 .live-key--upper { --key-ring: var(--signal); }
@@ -323,6 +346,8 @@
   width: calc(100% - 2 * var(--space-8));
   height: calc(100% - 2 * var(--space-8));
   stroke: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--key-ring));
+  /* The stroke reaches the viewBox's edge: don't shave it. */
+  overflow: visible;
   pointer-events: none;
 }
 /* semi 22sp, 0.02em. */
@@ -333,7 +358,7 @@
   line-height: 1.5;
   letter-spacing: 0.02em;
   white-space: nowrap;
-  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--ink));
+  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--hw-dark-ink));
 }
 /* The octave number, bottom end (tiny 11sp, 6 / 4 in). */
 .live-key__octave {
@@ -343,7 +368,7 @@
   font-size: 11px;
   font-weight: 500;
   line-height: 1.5;
-  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--graphite));
+  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--hw-dark-dim));
 }
 
 /* ---------- the group keys ---------- */
@@ -352,17 +377,39 @@
   display: flex;
   gap: var(--space-8);
 }
-/* navy for the group shown, else lerp(tabOff, signal, sounding); ArcType.tab at 22sp. */
+/* Web: an LED over a pale cap, as on the K.O. II. The group shown: the cap stays
+ * down and its LED is lit; a sounding group tints both toward signal. */
+.live-keys__slot {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-6);
+  flex: 1 1 0;
+  min-width: 0;
+}
+.live-keys__led {
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--hw-led-on) var(--glow-pct), var(--hw-led-off));
+}
+.live-keys__slot.is-on .live-keys__led {
+  background: var(--hw-led-on);
+  box-shadow: 0 0 6px var(--hw-led-on);
+}
+/* lerp(pale face, signal, sounding); ArcType.tab at 22sp. */
 .live-keys__key {
+  --cap-face: color-mix(in oklab, var(--signal) var(--glow-pct), var(--hw-light-face));
+  --cap-edge: color-mix(in oklab, var(--signal-edge) var(--glow-pct), var(--hw-light-edge));
+  --cap-ink: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--hw-light-ink));
   display: flex;
   align-items: center;
   justify-content: center;
-  flex: 1 1 0;
   min-width: 0;
   min-height: 52px;
+  border: 0;
   border-radius: var(--radius-field);
-  background: color-mix(in oklab, var(--signal) var(--glow-pct), var(--tab-off));
-  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--on-tab-off));
   font-size: 22px;
   font-weight: 700;
   line-height: 1;
@@ -372,8 +419,7 @@
   -webkit-user-select: none;
 }
 .live-keys__key.is-on {
-  background: var(--navy);
-  color: var(--on-navy);
+  --cap-ink: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--hw-dark-face));
 }
 
 /* ---------- the tools panel ---------- */
