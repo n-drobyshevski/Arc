@@ -1,0 +1,60 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt (ArcToast) */
+
+.toast-host {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  display: flex;
+  justify-content: center;
+  /* windowInsetsPadding(safeDrawing) */
+  padding:
+    0
+    env(safe-area-inset-right, 0px)
+    env(safe-area-inset-bottom, 0px)
+    env(safe-area-inset-left, 0px);
+  /* Compose's Row does not consume taps: they reach the page under it. */
+  pointer-events: none;
+}
+
+.toast-live {
+  width: 100%;
+  max-width: calc(var(--toast-max) + 32px);
+  padding: 16px;
+}
+.toast-live:empty { padding: 0; }
+
+.toast {
+  display: flex;
+  width: 100%;
+  border-radius: var(--radius-toast);
+  background: var(--display);
+  color: var(--display-ink);
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 150ms ease-out;
+}
+.toast.is-visible { opacity: 1; animation: toast-in 150ms ease-out; }
+
+@keyframes toast-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* .toast.error { border-left: 5px solid var(--signal) } */
+.toast--error::before {
+  content: '';
+  flex: none;
+  width: 5px;
+  background: var(--signal);
+}
+
+/* ArcType.body15 at SemiBold */
+.toast__text {
+  min-width: 0;
+  padding: 14px 16px;
+  font-size: var(--size-body15);
+  font-weight: 600;
+  line-height: 1.5;
+}

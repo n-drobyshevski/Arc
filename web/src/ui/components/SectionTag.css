@@ -1,0 +1,39 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Chrome.kt (SectionTag, TagShape) */
+
+.section-tag {
+  --tag-h: 44px;
+  display: inline-flex;
+  flex: none;
+  min-height: var(--tag-h);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.section-tag:focus-visible { outline-offset: 3px; }
+
+/* TagShape: a block with an arrow point on its right, .38 × height deep. */
+.section-tag__face {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tag-h);
+  padding: 0 26px 0 14px;
+  background: var(--tag-face);
+  color: var(--tag-ink);
+  clip-path: polygon(
+    0 0,
+    calc(100% - var(--tag-h) * 0.38) 0,
+    100% 50%,
+    calc(100% - var(--tag-h) * 0.38) 100%,
+    0 100%
+  );
+}
+
+/* ArcType.tab at 17sp, uppercase, one line. */
+.section-tag__text {
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: var(--track-tab);
+  text-transform: uppercase;
+  white-space: nowrap;
+}

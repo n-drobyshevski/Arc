@@ -1,0 +1,47 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt (SwitchRow) */
+
+.switch-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 16px;
+  text-align: start;
+  background: transparent;
+}
+.switch-row:disabled { opacity: var(--key-disabled); }
+
+.switch-row__text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* ArcType.bold */
+.switch-row__title { color: var(--ink); font-size: var(--base-size); font-weight: 700; line-height: 1.5; }
+/* ArcType.small */
+.switch-row__note { color: var(--graphite); font-size: var(--size-small); font-weight: 500; line-height: 1.5; }
+
+.switch-row__block {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 56px;
+  min-height: 34px;
+  padding: 0 10px;
+  border-radius: var(--radius-key);
+  background: var(--tab-off);
+  color: var(--on-tab-off);
+  /* capsKeySmall, uppercased */
+  font-size: var(--size-caps-key-small);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: var(--track-caps-key);
+  text-transform: uppercase;
+}
+.switch-row.is-on .switch-row__block {
+  background: var(--navy);
+  color: var(--on-navy);
+}

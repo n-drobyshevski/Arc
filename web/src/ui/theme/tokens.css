@@ -252,16 +252,28 @@
 }
 
 /* ---- Typography utilities: one class per ArcType style ---- */
-/* Longhands only: the `font` shorthand would reset font-variant-numeric. */
+/* Longhands only: the `font` shorthand would reset font-variant-numeric.
+ * Styles whose line height is below Manrope's own (ascent + descent = 1.366em)
+ * also get padding-block: Compose (LineHeightStyle Trim.None) keeps the font's
+ * full ascent above the first line and descent below the last, so a 1.1em
+ * caps label still takes ~1.366em on Android (measured on the reference PNGs).
+ * Inner lines keep the tight spacing. --trim-1 for 1em, --trim-1-1 for 1.1em,
+ * --trim-1-2 for 1.2em: use the same padding in component
+ * CSS that re-declares one of these styles for free-flowing text. */
+:root {
+  --trim-1: 0.183em;
+  --trim-1-1: 0.133em;
+  --trim-1-2: 0.083em;
+}
 .t-wordmark { font-size: var(--size-wordmark); font-weight: 800; line-height: 1.5; letter-spacing: var(--track-wordmark); }
-.t-key { font-size: var(--size-key); font-weight: 700; line-height: 1; }
-.t-key-small { font-size: var(--size-key-small); font-weight: 700; line-height: 1; }
-.t-key-wide { font-size: var(--size-key-wide); font-weight: 700; line-height: 1; }
+.t-key { font-size: var(--size-key); font-weight: 700; line-height: 1; padding-block: var(--trim-1); }
+.t-key-small { font-size: var(--size-key-small); font-weight: 700; line-height: 1; padding-block: var(--trim-1); }
+.t-key-wide { font-size: var(--size-key-wide); font-weight: 700; line-height: 1; padding-block: var(--trim-1); }
 .t-display-head { font-size: var(--size-display-head); font-weight: 700; line-height: 1.5; }
 .t-display-sub { font-size: var(--size-display-sub); font-weight: 600; line-height: 1.5; }
 .t-display-hint { font-size: var(--size-display-hint); font-weight: 500; line-height: 1.5; }
-.t-stat-num { font-size: var(--size-stat-num); font-weight: 800; line-height: 1; letter-spacing: var(--track-stat-num); }
-.t-stat-free { font-size: var(--size-stat-free); font-weight: 800; line-height: 1; letter-spacing: var(--track-stat-free); }
+.t-stat-num { font-size: var(--size-stat-num); font-weight: 800; line-height: 1; letter-spacing: var(--track-stat-num); padding-block: var(--trim-1); }
+.t-stat-free { font-size: var(--size-stat-free); font-weight: 800; line-height: 1; letter-spacing: var(--track-stat-free); padding-block: var(--trim-1); }
 .t-stat-label { font-size: var(--size-stat-label); font-weight: 600; line-height: 1.5; }
 .t-heading { font-size: var(--size-heading); font-weight: 800; line-height: 1.5; letter-spacing: var(--track-heading); }
 .t-small { font-size: var(--size-small); font-weight: 500; line-height: 1.5; }
@@ -274,11 +286,11 @@
 .t-semi { font-size: var(--base-size); font-weight: 600; line-height: 1.5; }
 /* Uppercase, letter-spaced labels after the pocket operator app. Android callers
  * uppercase the string; here the class does it, so pass the text as written. */
-.t-caps { font-size: var(--size-caps); font-weight: 600; line-height: 1.2; letter-spacing: var(--track-caps); text-transform: uppercase; }
-.t-caps-key { font-size: var(--size-caps-key); font-weight: 700; line-height: 1.1; letter-spacing: var(--track-caps-key); text-transform: uppercase; }
-.t-caps-key-small { font-size: var(--size-caps-key-small); font-weight: 700; line-height: 1.1; letter-spacing: var(--track-caps-key); text-transform: uppercase; }
-.t-caps-key-wide { font-size: var(--size-caps-key-wide); font-weight: 700; line-height: 1.1; letter-spacing: var(--track-caps-key); text-transform: uppercase; }
-.t-tab { font-size: var(--size-tab); font-weight: 700; line-height: 1; letter-spacing: var(--track-tab); text-transform: uppercase; }
+.t-caps { font-size: var(--size-caps); font-weight: 600; line-height: 1.2; letter-spacing: var(--track-caps); text-transform: uppercase; padding-block: var(--trim-1-2); }
+.t-caps-key { font-size: var(--size-caps-key); font-weight: 700; line-height: 1.1; letter-spacing: var(--track-caps-key); text-transform: uppercase; padding-block: var(--trim-1-1); }
+.t-caps-key-small { font-size: var(--size-caps-key-small); font-weight: 700; line-height: 1.1; letter-spacing: var(--track-caps-key); text-transform: uppercase; padding-block: var(--trim-1-1); }
+.t-caps-key-wide { font-size: var(--size-caps-key-wide); font-weight: 700; line-height: 1.1; letter-spacing: var(--track-caps-key); text-transform: uppercase; padding-block: var(--trim-1-1); }
+.t-tab { font-size: var(--size-tab); font-weight: 700; line-height: 1; letter-spacing: var(--track-tab); text-transform: uppercase; padding-block: var(--trim-1); }
 .t-mono { font-family: var(--font-mono); }
 
 /* ---- Hatching utilities (Components.kt Modifier.hatch, SideZone.kt strip) ---- */

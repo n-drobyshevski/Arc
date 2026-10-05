@@ -1,0 +1,23 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt (Caption) */
+
+.caption {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  color: var(--graphite);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* ArcType.caps */
+  font-size: var(--size-caps);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  /* Compose's untrimmed first/last line (see tokens.css --trim-*). */
+  padding-block: var(--trim-1-2);
+}
+.caption--center { text-align: center; }
+.caption--start { text-align: start; }
+.caption--end { text-align: end; }

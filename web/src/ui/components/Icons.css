@@ -16,4 +16,8 @@
   line-height: 1;
   letter-spacing: 0;
   user-select: none;
+  /* Android draws the glyph lower than CSS centring does (measured on the
+   * reference screenshots: about 3dp at the default 22dp size), so the box is
+   * padded at the top: the line box moves down by half of it, 0.15em. */
+  padding-top: 0.3em;
 }

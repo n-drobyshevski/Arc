@@ -1,0 +1,167 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/GuideScreen.kt */
+
+/* Box(fillMaxSize, shell, TopCenter): fills its positioned parent. */
+.guide {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  background: var(--shell);
+  overflow: hidden;
+}
+/* Focus lands on the screen itself when it opens (no ring: nothing was picked yet). */
+.guide:focus { outline: none; }
+
+.guide__column {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: var(--column-max);
+  height: 100%;
+  min-height: 0;
+}
+
+/* Header: padding 16 / 16, top 4, bottom 12; the title centred, the close key at the end. */
+.guide__head {
+  flex: none;
+  display: grid;
+  grid-template-areas: 'head';
+  align-items: center;
+  padding: 4px 16px 12px;
+}
+.guide__head > * { grid-area: head; }
+.guide__head .guide__title { padding: 0 54px; }
+.guide__close { justify-self: end; }
+
+/* The page: 16 in from the sides, top corners 18, the pale key colour. */
+.guide__page {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  margin: 0 16px;
+  border-radius: var(--radius-plate) var(--radius-plate) 0 0;
+  background: var(--key);
+  overflow: hidden;
+}
+
+/* ---- Tabs: a scrolling row (padding 10 / 12, gap 6), then a 1px line ---- */
+.guide-tabs {
+  flex: none;
+  border-bottom: 1px solid var(--line);
+}
+.guide-tabs__row {
+  display: flex;
+  gap: var(--space-6);
+  padding: 10px 0 10px 12px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.guide-tabs__row::-webkit-scrollbar { display: none; }
+/* The end padding as a spacer (gap 6 + 6): a scroller's own end padding is not always scrollable. */
+.guide-tabs__row::after { content: ''; flex: none; width: 6px; }
+.guide-tabs__tab {
+  flex: none;
+  padding: 8px 14px;
+  border-radius: var(--radius-key);
+  background: transparent;
+  color: var(--graphite);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.5;
+  letter-spacing: var(--track-guide-tab);
+  white-space: nowrap;
+}
+.guide-tabs__tab.is-on {
+  background: var(--navy);
+  color: var(--on-navy);
+}
+.guide-tabs__tab:focus-visible { outline-offset: -3px; }
+
+/* ---- The list ---- */
+.guide__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
+.guide__list:focus-visible { outline-offset: -3px; }
+
+.guide__search { padding: 12px 20px; }
+
+.guide__none {
+  padding: 20px;
+  color: var(--graphite);
+}
+
+.guide__section-title {
+  margin: 0;
+  padding: 16px 20px 0;
+  color: var(--graphite);
+  font-weight: 500;
+}
+
+/* ---- Entry: padding 20 / 18, gap 12; a keyEdge 70% divider, 20 in ---- */
+.guide-entry {
+  position: relative;
+  padding: 0 20px;
+}
+.guide-entry::after {
+  content: '';
+  display: block;
+  height: 1px;
+  background: var(--guide-divider);
+}
+.guide-entry__main {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-12);
+  width: 100%;
+  padding: 18px 0;
+  color: inherit;
+  text-align: start;
+}
+.guide-entry.is-open .guide-entry__main { padding-bottom: 0; }
+.guide-entry__main:focus-visible { outline-offset: 4px; border-radius: var(--radius-key); }
+
+.guide-entry__keys { color: var(--ink); }
+
+/* body15 at 18sp */
+.guide-entry__action {
+  color: var(--graphite);
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.guide-entry__more {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-12);
+  padding: 12px 0 18px;
+  color: var(--graphite);
+  cursor: pointer;
+}
+.guide-entry__more p { margin: 0; }
+
+.guide-entry__source {
+  padding: 4px 0;
+  border-radius: 6px;
+  color: var(--graphite);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* ---- Footer: padding 20, gap 10 ---- */
+.guide__footer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  padding: 20px;
+  color: var(--graphite);
+}

@@ -1,0 +1,84 @@
+/* Port of the Material3 RangeSlider in app/src/main/kotlin/dev/arc/ep133/ui/screens/TrimSheet.kt */
+
+.range-slider {
+  /* --a / --b: start and end as fractions of the range (set inline). */
+  --thumb-w: 4px;
+  --thumb-h: 44px;
+  --track-h: 16px;
+  --gap: 6px;
+  /* Thumb centres run over [2px, 100% - 2px]. */
+  --xa: calc(var(--thumb-w) / 2 + var(--a) * (100% - var(--thumb-w)));
+  --xb: calc(var(--thumb-w) / 2 + var(--b) * (100% - var(--thumb-w)));
+  --clear: calc(var(--thumb-w) / 2 + var(--gap));
+  position: relative;
+  width: 100%;
+  height: var(--thumb-h);
+  touch-action: none;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.range-slider.is-disabled { opacity: var(--key-disabled); cursor: default; }
+
+.range-slider__track {
+  position: absolute;
+  top: calc(50% - var(--track-h) / 2);
+  height: var(--track-h);
+  background: var(--key-edge);
+  pointer-events: none;
+}
+.range-slider__track--before {
+  left: 0;
+  width: max(0px, calc(var(--xa) - var(--clear)));
+  border-radius: 8px 2px 2px 8px;
+}
+.range-slider__track--active {
+  left: calc(var(--xa) + var(--clear));
+  width: max(0px, calc(var(--xb) - var(--xa) - 2 * var(--clear)));
+  border-radius: 2px;
+  background: var(--signal);
+}
+.range-slider__track--after {
+  left: calc(var(--xb) + var(--clear));
+  right: 0;
+  border-radius: 2px 8px 8px 2px;
+}
+/* Stop indicators: 4px dots at the ends of the track. */
+.range-slider__stop {
+  position: absolute;
+  top: calc(50% - 2px);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--signal);
+  pointer-events: none;
+}
+.range-slider__stop--start { left: 6px; }
+.range-slider__stop--end { right: 6px; }
+
+.range-slider__thumb {
+  position: absolute;
+  top: 0;
+  left: calc(var(--thumb-w) / 2 + var(--at) * (100% - var(--thumb-w)));
+  width: var(--thumb-w);
+  height: var(--thumb-h);
+  margin-left: calc(var(--thumb-w) / -2);
+  border-radius: 2px;
+  background: var(--signal);
+  transition: width 100ms ease-out, margin-left 100ms ease-out;
+}
+/* A wider invisible grip, so the thumb is easy to hit. */
+.range-slider__thumb::before {
+  content: '';
+  position: absolute;
+  inset: 0 -10px;
+}
+/* Pressed: the thumb narrows to 2px (Material's pressed thumb). */
+.range-slider__thumb.is-dragging {
+  width: 2px;
+  margin-left: -1px;
+}
+.range-slider__thumb:focus-visible {
+  outline: var(--focus-ring);
+  outline-offset: var(--focus-offset);
+}

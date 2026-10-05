@@ -1,0 +1,110 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Coach.kt (CoachOverlay, CoachHost) */
+
+/* CoachHost's Box: no box of its own, so the screen's layout is unchanged. */
+.coach-host { display: contents; }
+
+/* The overlay: fills the screen, over the shell and its sheets' layer. */
+.coach {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity var(--coach-fade, 200ms) linear;
+}
+.coach.is-shown { opacity: 1; }
+
+/* The page fades: shell at 86%. The whole veil is the close key. */
+.coach__veil {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--coach-veil);
+  cursor: pointer;
+}
+.coach__veil:focus-visible { outline: none; }
+/* Keyboard focus shows on the hint instead of around the whole screen (only after
+ * keyboard use: the overlay opens by itself on the first start). */
+.coach.is-keyed .coach__veil:focus-visible ~ .coach__hint {
+  outline: var(--focus-ring);
+  outline-offset: 6px;
+  border-radius: 2px;
+}
+
+.coach__arrows {
+  position: absolute;
+  left: 0;
+  top: 0;
+  max-width: none;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.coach__tags {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  pointer-events: none;
+}
+
+/* A tag: rounded 6, padding 9×6, the label in capsKeySmall. */
+.coach__tag {
+  position: absolute;
+  display: block;
+  padding: 6px 9px;
+  border-radius: var(--radius-tag);
+}
+
+.coach__tag-text {
+  display: block;
+  font-size: var(--size-caps-key-small);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: var(--track-caps-key);
+  text-transform: uppercase;
+  white-space: normal;
+  overflow-wrap: break-word;
+  text-align: start;
+  /* Compose (LineHeightStyle Trim.None) keeps the font's own ascent above the
+   * first line and descent below the last, so a 1.1em line still makes a
+   * ~1.366em box (Manrope's metrics): measured 29dp tags in the Android PNGs.
+   * The difference, split above and below. */
+  padding-block: 0.133em;
+}
+
+/* Lays the labels out unseen, to measure them (max-width set per label). */
+.coach__measure {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: max-content;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* "TAP ANYWHERE TO CLOSE": ArcType.caps in graphite, centred at 72% of the height. */
+.coach__hint {
+  position: absolute;
+  left: 50%;
+  top: 72%;
+  transform: translateX(-50%);
+  margin: 0;
+  white-space: nowrap;
+  color: var(--graphite);
+  font-size: var(--size-caps);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+  /* As the tags: Compose's untrimmed box around a 1.2em line (Manrope 1.366em). */
+  padding-block: 0.083em;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coach { transition: none; }
+}
