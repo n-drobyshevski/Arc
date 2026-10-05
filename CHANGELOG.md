@@ -6,6 +6,9 @@ version fixes bugs. The version itself is set in `version.properties`.
 
 ## [Unreleased]
 
+### Added
+- Live: a one-group view, a large grid of one group with A–D keys to switch and Follow to jump to the group just played. The choice is kept in the settings.
+
 ## [0.2.0] - 2026-10-05
 
 ### Added

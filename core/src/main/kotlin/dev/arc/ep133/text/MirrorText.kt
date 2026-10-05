@@ -26,6 +26,13 @@ object MirrorText {
     const val ORDER_NOTE = "Community notes disagree on how project files number the pads. If the names look wrong, try the other way."
     const val GROUP = "Group"
 
+    // One group at a time (like the pocket operator app's single grid with its track keys).
+    const val ALL_GROUPS = "All groups"
+    const val ONE_GROUP = "One group"
+    const val FOLLOW = "Follow"
+    const val FOLLOW_NOTE = "Follow switches to the group of the pad just played."
+    fun groupKey(group: Int) = ('A' + group).toString()
+
     fun bpm(bpm: Double) = "${jsToFixed(bpm, 1)} BPM"
 
     fun project(n: Int) = "Project $n"

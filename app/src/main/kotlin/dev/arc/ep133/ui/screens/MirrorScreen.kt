@@ -3,6 +3,16 @@ package dev.arc.ep133.ui.screens
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.stateDescription
+import dev.arc.ep133.ui.components.Segmented
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -93,6 +103,13 @@ fun MirrorScreen(
     onBack: (() -> Unit)? = null,
     /** A fixed time for screenshots; normally the screen's frame clock drives the fade. */
     fixedNow: Long? = null,
+    /** One group at a time, large, with A–D keys to switch (like the pocket operator app's grid). */
+    oneGroup: Boolean = false,
+    onOneGroup: (Boolean) -> Unit = {},
+    /** In that view, switch to the group of the pad just played. */
+    follow: Boolean = true,
+    onFollow: (Boolean) -> Unit = {},
+    initialGroup: Int = 0,
 ) {
     val c = LocalArcColors.current
     if (onBack != null) BackHandler(onBack = onBack)
@@ -119,7 +136,27 @@ fun MirrorScreen(
                 if (onBack != null) CloseKey(onBack, dev.arc.ep133.text.GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
             }
             Display(st, mirror)
-            BoxWithConstraints(Modifier.fillMaxWidth()) {
+            Segmented(
+                listOf(MirrorText.ALL_GROUPS, MirrorText.ONE_GROUP),
+                selected = if (oneGroup) 1 else 0,
+                onSelect = { onOneGroup(it == 1) },
+            )
+            if (oneGroup) {
+                var group by rememberSaveable { mutableIntStateOf(initialGroup) }
+                // Follow: show the group of the pad just played.
+                val hitGroup = st.lastHit?.pad?.group
+                LaunchedEffect(hitGroup, st.lastHit, follow) {
+                    if (follow && hitGroup != null) group = hitGroup
+                }
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                    // Not wider than a phone screen is tall, so the whole grid stays in view on a tablet.
+                    Column(Modifier.widthIn(max = 480.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Group(group, st, nameOf, now, Modifier.fillMaxWidth(), big = true)
+                        GroupKeys(group, st, now, onSelect = { group = it }, follow = follow, onFollow = onFollow)
+                    }
+                }
+                Text(MirrorText.FOLLOW_NOTE, style = ArcType.small, color = c.graphite)
+            } else BoxWithConstraints(Modifier.fillMaxWidth()) {
                 // Four groups in a row when there is room, two by two on a phone.
                 val perRow = if (maxWidth >= 640.dp) 4 else 2
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -168,7 +205,7 @@ private fun Display(st: MirrorState, mirror: MirrorUi?) {
 }
 
 @Composable
-private fun Group(group: Int, st: MirrorState, nameOf: (PhysicalPad) -> String?, now: Long, modifier: Modifier) {
+private fun Group(group: Int, st: MirrorState, nameOf: (PhysicalPad) -> String?, now: Long, modifier: Modifier, big: Boolean = false) {
     val c = LocalArcColors.current
     val lit = st.pads.filterKeys { it.group == group }
     val groupGlow = lit.values.maxOfOrNull { glow(it, now) } ?: 0f
@@ -182,10 +219,54 @@ private fun Group(group: Int, st: MirrorState, nameOf: (PhysicalPad) -> String?,
                     rowOffsets.forEachIndexed { i, o ->
                         if (i > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(c.line))
                         val pad = PhysicalPad(group, o)
-                        Pad(pad, lit[pad], nameOf(pad), now, Modifier.weight(1f))
+                        Pad(pad, lit[pad], nameOf(pad), now, Modifier.weight(1f), big)
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * The group keys under the single grid: navy for the group shown, lit orange
+ * while one of a group's pads sounds, and Follow (navy when on).
+ */
+@Composable
+private fun GroupKeys(group: Int, st: MirrorState, now: Long, onSelect: (Int) -> Unit, follow: Boolean, onFollow: (Boolean) -> Unit) {
+    val c = LocalArcColors.current
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        for (g in 0..3) {
+            val on = g == group
+            val sounding = st.pads.filterKeys { it.group == g }.values.maxOfOrNull { glow(it, now) } ?: 0f
+            val face = if (on) c.navy else lerp(c.tabOff, c.signal, sounding)
+            val ink = if (on) c.onNavy else if (sounding > 0.3f) c.onSignal else c.onTabOff
+            Box(
+                Modifier
+                    .weight(1f)
+                    .heightIn(min = 52.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(face)
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Tab) { onSelect(g) }
+                    .semantics {
+                        selected = on
+                        contentDescription = MirrorText.GROUP + " " + MirrorText.groupKey(g)
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(MirrorText.groupKey(g), style = ArcType.tab.copy(fontSize = 22.sp), color = ink)
+            }
+        }
+        Box(
+            Modifier
+                .weight(1.4f)
+                .heightIn(min = 52.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(if (follow) c.navy else c.tabOff)
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Switch) { onFollow(!follow) }
+                .semantics { stateDescription = if (follow) dev.arc.ep133.text.SettingsText.ON else dev.arc.ep133.text.SettingsText.OFF },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(MirrorText.FOLLOW.uppercase(), style = ArcType.capsKeySmall, color = if (follow) c.onNavy else c.onTabOff)
         }
     }
 }
@@ -199,7 +280,7 @@ private fun glow(l: PadLight, now: Long): Float {
 }
 
 @Composable
-private fun Pad(pad: PhysicalPad, light: PadLight?, name: String?, now: Long, modifier: Modifier) {
+private fun Pad(pad: PhysicalPad, light: PadLight?, name: String?, now: Long, modifier: Modifier, big: Boolean = false) {
     val c = LocalArcColors.current
     val g = light?.let { glow(it, now) } ?: 0f
     val ink = if (g > 0.3f) c.onSignal else c.ink
@@ -208,14 +289,14 @@ private fun Pad(pad: PhysicalPad, light: PadLight?, name: String?, now: Long, mo
             .aspectRatio(1f)
             .background(lerp(c.plate, c.signal, g))
             .semantics { contentDescription = "${pad.groupLetter} ${pad.label}" + (name?.let { ", $it" } ?: "") }
-            .padding(start = 6.dp, top = 5.dp, end = 7.dp, bottom = 5.dp),
+            .padding(if (big) PaddingValues(10.dp) else PaddingValues(start = 6.dp, top = 5.dp, end = 7.dp, bottom = 5.dp)),
     ) {
         if (name != null) {
             Text(
                 name,
-                style = ArcType.tiny.copy(fontSize = 10.sp, lineHeight = 1.1.em),
+                style = ArcType.tiny.copy(fontSize = if (big) 14.sp else 10.sp, lineHeight = 1.1.em),
                 color = if (g > 0.3f) c.onSignal else c.graphite,
-                maxLines = 2,
+                maxLines = if (big) 3 else 2,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.align(Alignment.TopStart),
             )
@@ -223,7 +304,14 @@ private fun Pad(pad: PhysicalPad, light: PadLight?, name: String?, now: Long, mo
         // The key's own label in the corner, like the pocket operator app's pad numbers.
         Text(
             pad.label,
-            style = ArcType.semi.copy(fontSize = if (pad.label.length > 1) 10.sp else 15.sp, lineHeight = 1.em, letterSpacing = 0.04.em),
+            style = ArcType.semi.copy(
+                fontSize = when {
+                    big -> if (pad.label.length > 1) 15.sp else 28.sp
+                    else -> if (pad.label.length > 1) 10.sp else 15.sp
+                },
+                lineHeight = 1.em,
+                letterSpacing = 0.04.em,
+            ),
             color = ink,
             modifier = Modifier.align(Alignment.BottomEnd),
         )

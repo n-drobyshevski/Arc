@@ -82,16 +82,29 @@ private fun Framed(tab: Tab, connected: Boolean = true, dark: Boolean = false, c
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false) {
     Framed(Tab.LIVE, dark = dark) {
         MirrorScreen(
             mirror = MirrorUi(state, loading = loading),
             nameOf = { if (state.learned.isEmpty()) null else names[it] },
             onPadOrder = {},
             fixedNow = NOW,
+            oneGroup = oneGroup,
+            // The last hit (A 7) is in group A; B is sounding too.
+            follow = true,
         )
     }
 }
+
+@PreviewTest
+@Preview(name = "Live one group", widthDp = 393, heightDp = 1100, showBackground = true)
+@Composable
+fun LiveOneGroupPreview() = Live(playing, oneGroup = true)
+
+@PreviewTest
+@Preview(name = "Live one group dark", widthDp = 393, heightDp = 1100, showBackground = true)
+@Composable
+fun LiveOneGroupDarkPreview() = Live(playing, dark = true, oneGroup = true)
 
 @PreviewTest
 @Preview(name = "Live playing", widthDp = 393, heightDp = 1180, showBackground = true)

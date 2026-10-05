@@ -506,6 +506,10 @@ class MainActivity : ComponentActivity() {
                             },
                             nameOf = controller::mirrorName,
                             onPadOrder = controller::setPadOrder,
+                            oneGroup = appSettings.liveOneGroup,
+                            onOneGroup = controller::setLiveOneGroup,
+                            follow = appSettings.liveFollow,
+                            onFollow = controller::setLiveFollow,
                         )
                         Tab.GUIDE -> GuideScreen()
                         Tab.DEVICE -> DeviceScreen(

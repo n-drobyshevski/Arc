@@ -14,6 +14,10 @@ data class AppSettings(
     val keepScreenOn: Boolean = true,
     /** How many backups to keep; null keeps all. */
     val keepLast: Int? = null,
+    /** Live shows one group at a time, large, instead of all four. */
+    val liveOneGroup: Boolean = false,
+    /** In that view, switch to the group of the pad just played. */
+    val liveFollow: Boolean = true,
 )
 
 /**
@@ -30,6 +34,8 @@ class SettingsStore(context: Context) {
         autoConnect = prefs.getBoolean("autoConnect", true),
         keepScreenOn = prefs.getBoolean("keepScreenOn", true),
         keepLast = prefs.getInt("keepLast", 0).takeIf { it > 0 },
+        liveOneGroup = prefs.getBoolean("liveOneGroup", false),
+        liveFollow = prefs.getBoolean("liveFollow", true),
     )
 
     fun update(change: (AppSettings) -> AppSettings) {
@@ -39,6 +45,8 @@ class SettingsStore(context: Context) {
             putBoolean("autoConnect", next.autoConnect)
             putBoolean("keepScreenOn", next.keepScreenOn)
             putInt("keepLast", next.keepLast ?: 0)
+            putBoolean("liveOneGroup", next.liveOneGroup)
+            putBoolean("liveFollow", next.liveFollow)
         }
         _settings.value = next
     }
@@ -50,6 +58,8 @@ class SettingsStore(context: Context) {
             "app.autoConnect" to it.autoConnect.toString(),
             "app.keepScreenOn" to it.keepScreenOn.toString(),
             "app.keepLast" to (it.keepLast ?: 0).toString(),
+            "app.liveOneGroup" to it.liveOneGroup.toString(),
+            "app.liveFollow" to it.liveFollow.toString(),
         )
     }
 
@@ -60,6 +70,8 @@ class SettingsStore(context: Context) {
             autoConnect = map["app.autoConnect"]?.toBooleanStrictOrNull() ?: cur.autoConnect,
             keepScreenOn = map["app.keepScreenOn"]?.toBooleanStrictOrNull() ?: cur.keepScreenOn,
             keepLast = map["app.keepLast"]?.toIntOrNull()?.let { n -> n.takeIf { it > 0 } } ?: if (map.containsKey("app.keepLast")) null else cur.keepLast,
+            liveOneGroup = map["app.liveOneGroup"]?.toBooleanStrictOrNull() ?: cur.liveOneGroup,
+            liveFollow = map["app.liveFollow"]?.toBooleanStrictOrNull() ?: cur.liveFollow,
         )
     }
 }

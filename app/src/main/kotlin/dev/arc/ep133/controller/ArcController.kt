@@ -937,6 +937,10 @@ class ArcController(
 
     fun setKeepScreenOn(on: Boolean) = changeSettings { it.copy(keepScreenOn = on) }
 
+    fun setLiveOneGroup(on: Boolean) = changeSettings { it.copy(liveOneGroup = on) }
+
+    fun setLiveFollow(on: Boolean) = changeSettings { it.copy(liveFollow = on) }
+
     /** How many backups [setKeepLast] would delete now, for the confirmation. */
     fun pruneCount(keep: Int?): Int = LibraryRules.toPrune(_state.value.backups, keep).size
 
