@@ -569,8 +569,9 @@ class ArcController(
      * can't play, or media volume at zero. Where the sound went is noted in the
      * debug log, for reports of a sound that plays but isn't heard.
      */
-    private fun startSound(key: String, pcm: ByteArray, channels: Int, sampleRate: Int) {
-        when (val r = player.play(key, pcm, channels, sampleRate)) {
+    private fun startSound(key: String, pcm: ByteArray, channels: Int, sampleRate: Int, voice: Boolean = false) {
+        val result = if (voice) player.playVoice(key, pcm, channels, sampleRate) else player.play(key, pcm, channels, sampleRate)
+        when (val r = result) {
             is dev.arc.ep133.audio.PlayResult.Failed -> {
                 trafficLog.note("play $key failed: ${r.reason}")
                 toast(FeatureText.cantPlay(r.reason), error = true)
@@ -861,12 +862,17 @@ class ArcController(
      * Plays a Live pad's sample on the phone: arc's copy of the device's
      * sound, else the newest backup holding it, else (connected) the device.
      */
+    /**
+     * Plays a Live pad alongside whatever else is sounding, so several pads
+     * make a chord. Only a stop (leaving Live) drops one still loading; other
+     * taps don't, unlike the lists' one-at-a-time Play.
+     */
     fun playPad(pad: dev.arc.ep133.features.PhysicalPad): Job = scope.launch {
-        val token = ++playToken
+        val token = playToken
         // The pad tapped is also the sound KEYS plays.
         selectKeysPad(pad)
         val a = padAudio(pad) ?: return@launch
-        if (token == playToken) startSound("live:${pad.group}:${pad.offset}", a.pcm, a.channels, a.sampleRate)
+        if (token == playToken) startSound("live:${pad.group}:${pad.offset}", a.pcm, a.channels, a.sampleRate, voice = true)
     }
 
     /** A pad's sample, ready to play. */
@@ -918,7 +924,7 @@ class ArcController(
 
     /** Plays key [index] (0 = '.', the lowest): the KEYS sound, repitched to that key's note. */
     fun playKey(index: Int): Job = scope.launch {
-        val token = ++playToken
+        val token = playToken
         val pad = _state.value.keysPad
         if (pad == null) {
             toast(dev.arc.ep133.text.MirrorText.PICK_SOUND)
@@ -930,7 +936,7 @@ class ArcController(
         val pcm = withContext(Dispatchers.Default) {
             dev.arc.ep133.formats.Pitch.shift(a.pcm, a.channels, note - dev.arc.ep133.features.Keys.ROOT_NOTE)
         }
-        if (token == playToken) startSound("keys:$index", pcm, a.channels, a.sampleRate)
+        if (token == playToken) startSound("keys:$index", pcm, a.channels, a.sampleRate, voice = true)
     }
 
     private fun savedKeysPad(): dev.arc.ep133.features.PhysicalPad? =

@@ -22,6 +22,11 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.stateDescription
 import dev.arc.ep133.ui.components.Segmented
@@ -110,8 +115,8 @@ data class KeysUi(
     /** The sound KEYS plays, and its sample's name when known. */
     val pad: PhysicalPad? = null,
     val padName: String? = null,
-    /** The key playing on the phone, ringed. */
-    val playingKey: Int? = null,
+    /** The keys playing on the phone (a chord), latest last, ringed. */
+    val playingKeys: Set<Int> = emptySet(),
 )
 
 class KeysActions(
@@ -154,8 +159,8 @@ fun MirrorScreen(
     initialNoteOpen: Boolean = false,
     /** Tapping a pad plays its sample on the phone; null leaves the pads still. */
     onPad: ((PhysicalPad) -> Unit)? = null,
-    /** The pad whose sample is playing on the phone, ringed. */
-    playingPad: PhysicalPad? = null,
+    /** The pads whose samples are playing on the phone (several at once for a chord), ringed. */
+    playingPads: Set<PhysicalPad> = emptySet(),
     /** KEYS: the pads become notes of one sound, like the EP-133's KEYS mode. */
     keys: KeysUi = KeysUi(),
     keysActions: KeysActions = KeysActions(),
@@ -239,7 +244,7 @@ fun MirrorScreen(
                                 Modifier.fillMaxWidth().weight(1f).coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
                                 big = true,
                                 onPad = onPad,
-                                playingPad = playingPad,
+                                playingPads = playingPads,
                             )
                             GroupKeys(group, st, now, onSelect = { group = it })
                         }
@@ -269,7 +274,7 @@ fun MirrorScreen(
                             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                                 for (row in (0..3).chunked(perRow)) {
                                     Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                                        for (g in row) Group(g, st, nameOf, now, Modifier.weight(1f), onPad = onPad, playingPad = playingPad)
+                                        for (g in row) Group(g, st, nameOf, now, Modifier.weight(1f), onPad = onPad, playingPads = playingPads)
                                     }
                                 }
                             }
@@ -395,7 +400,7 @@ private fun Group(
     modifier: Modifier,
     big: Boolean = false,
     onPad: ((PhysicalPad) -> Unit)? = null,
-    playingPad: PhysicalPad? = null,
+    playingPads: Set<PhysicalPad> = emptySet(),
 ) {
     val c = LocalArcColors.current
     val lit = st.pads.filterKeys { it.group == group }
@@ -417,7 +422,7 @@ private fun Group(
                             Modifier.weight(1f).then(if (big) Modifier.fillMaxHeight() else Modifier.aspectRatio(1f)),
                             big,
                             onTap = onPad?.let { f -> { f(pad) } },
-                            playing = pad == playingPad,
+                            playing = pad in playingPads,
                         )
                     }
                 }
@@ -488,16 +493,18 @@ private fun Pad(
             // Playing on the phone: a signal-orange ring inside the pad.
             .then(if (playing) Modifier.border(2.dp, c.signal) else Modifier)
             .then(
-                if (onTap != null) {
-                    Modifier.clickable(
+                when {
+                    onTap == null -> Modifier
+                    // The big grid doesn't scroll: play on touch-down, a finger per pad.
+                    big -> pressToPlay(onTap)
+                    // The all-groups page scrolls: a drag across the pads must not play them.
+                    else -> Modifier.clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
                         role = Role.Button,
                         onClickLabel = MirrorText.PLAY,
                         onClick = onTap,
                     )
-                } else {
-                    Modifier
                 },
             )
             .semantics { contentDescription = "${pad.groupLetter} ${pad.label}" + (name?.let { ", $it" } ?: "") }
@@ -633,7 +640,7 @@ private fun KeysDisplay(st: MirrorState, mirror: MirrorUi?, keys: KeysUi) {
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Text(MirrorText.MODE_KEYS.uppercase(), style = ArcType.displaySub, color = c.displayDim, maxLines = 1)
-        val note = keys.playingKey?.let { Keys.notes(keys.root, keys.scale, keys.octave).getOrNull(it) } ?: st.lastNote
+        val note = keys.playingKeys.lastOrNull()?.let { Keys.notes(keys.root, keys.scale, keys.octave).getOrNull(it) } ?: st.lastNote
         note?.let { Text(MirrorText.noteName(it), style = ArcType.displaySub, color = c.displayInk, maxLines = 1) }
         if (mirror?.offline != null) Text(MirrorText.OFFLINE, style = ArcType.displaySub, color = c.displayDim, maxLines = 1)
         Text(
@@ -678,13 +685,8 @@ private fun KeysGrid(st: MirrorState, keys: KeysUi, now: Long, onKey: (Int) -> U
                             .weight(1f)
                             .fillMaxHeight()
                             .background(lerp(c.plate, c.signal, g))
-                            .then(if (keys.playingKey == k) Modifier.border(2.dp, c.signal) else Modifier)
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                                role = Role.Button,
-                                onClickLabel = MirrorText.PLAY,
-                            ) { onKey(k) }
+                            .then(if (k in keys.playingKeys) Modifier.border(2.dp, c.signal) else Modifier)
+                            .then(pressToPlay { onKey(k) })
                             .semantics { contentDescription = MirrorText.noteName(note) },
                         contentAlignment = Alignment.Center,
                     ) {
@@ -760,4 +762,28 @@ private fun KeysPanel(keys: KeysUi, actions: KeysActions) {
         Segmented(row.map { MirrorText.scaleName(it) }, selected = row.indexOf(keys.scale), onSelect = { actions.onScale(row[it]) })
     }
     Text(MirrorText.KEYS_NOTE, style = ArcType.small, color = c.graphite)
+}
+
+/**
+ * Plays on touch-down, as an instrument does, and each finger on its own:
+ * several pads or keys held together make a chord. Screen readers get a
+ * plain Play action.
+ */
+@Composable
+private fun pressToPlay(onPress: () -> Unit): Modifier {
+    val press by androidx.compose.runtime.rememberUpdatedState(onPress)
+    return Modifier
+        .pointerInput(Unit) {
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false)
+                press()
+            }
+        }
+        .semantics {
+            role = Role.Button
+            onClick(label = MirrorText.PLAY) {
+                press()
+                true
+            }
+        }
 }

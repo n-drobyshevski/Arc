@@ -98,7 +98,7 @@ private fun Framed(
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPad: PhysicalPad? = null, keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi()) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi()) {
     Framed(Tab.LIVE, connected = offline == null, dark = dark, guide = guide) {
         MirrorScreen(
             mirror = MirrorUi(state, loading = loading, offline = offline),
@@ -110,8 +110,8 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
             follow = true,
             initialToolsOpen = tools,
             initialNoteOpen = noteOpen,
-            onPad = if (playingPad != null) ({}) else null,
-            playingPad = playingPad,
+            onPad = if (playingPads.isNotEmpty()) ({}) else null,
+            playingPads = playingPads,
             keys = keys,
         )
     }
@@ -156,7 +156,7 @@ fun LiveOfflineAllPreview() = Live(lastRead, offline = "Last seen Oct 5, 2:02 PM
 @PreviewTest
 @Preview(name = "Live offline pad playing", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
-fun LiveOfflinePlayingPreview() = Live(lastRead, oneGroup = true, offline = "Last seen Oct 5, 2:02 PM", playingPad = PhysicalPad(0, 9))
+fun LiveOfflinePlayingPreview() = Live(lastRead, oneGroup = true, offline = "Last seen Oct 5, 2:02 PM", playingPads = setOf(PhysicalPad(0, 9), PhysicalPad(0, 6), PhysicalPad(0, 3)))
 
 // KEYS: the kick played as notes, C major from octave 4. The device holds MI4 and SO5
 // (lit); the phone plays LA4 (ringed).
@@ -169,7 +169,7 @@ private val keysUi = dev.arc.ep133.ui.screens.KeysUi(
     scale = dev.arc.ep133.features.Scale.MAJOR,
     pad = PhysicalPad(0, 9),
     padName = "kick",
-    playingKey = 5,
+    playingKeys = linkedSetOf(3, 5, 7),
 )
 
 @PreviewTest
