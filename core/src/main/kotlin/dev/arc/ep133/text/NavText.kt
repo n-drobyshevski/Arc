@@ -12,6 +12,10 @@ object NavText {
     const val GUIDE = "Guide"
     const val BACK_UP = "Back up"
     const val TABS = "Sections"
+    /** The section tag's spoken name: "Live, sections". */
+    fun sectionTag(section: String) = "$section, $TABS"
+    /** The left-edge tab that slides the EP-133 shortcut guide in. */
+    const val GUIDE_TAB = "Guide"
 
     /** The device panel's caption on the Backups tab. */
     const val DEVICE_CAPTION = "EP-133"
