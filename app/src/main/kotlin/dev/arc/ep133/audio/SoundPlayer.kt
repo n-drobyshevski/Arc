@@ -25,7 +25,8 @@ sealed interface PlayResult {
  * Plays sounds on the phone (16-bit PCM, mono or stereo). [play] plays one
  * at a time: starting a sound stops the others, as lists want. [playVoice]
  * plays alongside what is playing, for Live's pads and keys (chords): the
- * same key starts over, and past [MAX_VOICES] the oldest stops. [playing] is
+ * same key starts over, and past [MAX_VOICES] the oldest stops; [release]
+ * ends a voice when its pad or key is let go (a gate). [playing] is
  * the key of the latest sound playing, so lists can show a Stop key on the
  * right row; [playingKeys] are all of them.
  *
@@ -44,6 +45,13 @@ class SoundPlayer(context: Context? = null) {
 
         /** Sounds at once; Android allows an app a few dozen tracks in all. */
         const val MAX_VOICES = 8
+
+        /** A voice sounds at least this long, so the quickest tap is still heard. */
+        const val MIN_GATE_NS = 60_000_000L
+
+        /** A released voice fades out over this long rather than cutting off with a click. */
+        private const val FADE_MS = 24L
+        private const val FADE_STEPS = 6
 
         /**
          * A short name for where the sound goes. Newer device types are plain
@@ -84,6 +92,9 @@ class SoundPlayer(context: Context? = null) {
     private class Playback(val key: String, val track: AudioTrack) {
         @Volatile var stopped = false
         var released = false
+        val startedAt = System.nanoTime()
+        /** When the voice is let go (a gate); it then fades out. */
+        @Volatile var gateAt = Long.MAX_VALUE
     }
 
     // What is playing, oldest first.
@@ -168,6 +179,7 @@ class SoundPlayer(context: Context? = null) {
         val t = p.track
         var off = start
         while (!p.stopped && off < length) {
+            if (gated(p)) return fadeOut(p)
             val n = t.write(pcm, off, min(CHUNK, length - off), AudioTrack.WRITE_NON_BLOCKING)
             if (n < 0) break
             if (n == 0) Thread.sleep(5) else off += n
@@ -178,6 +190,7 @@ class SoundPlayer(context: Context? = null) {
         var last = -1
         var still = 0
         while (!p.stopped) {
+            if (gated(p)) return fadeOut(p)
             val head = runCatching { t.playbackHeadPosition }.getOrDefault(frames)
             if (head >= frames) break
             still = if (head == last) still + 1 else 0
@@ -199,6 +212,29 @@ class SoundPlayer(context: Context? = null) {
             runCatching { p.track.stop() }
             p.track.release()
         }
+    }
+
+    /**
+     * Lets go of the voice [key]: it fades out now, or once it has sounded
+     * [MIN_GATE_NS]. A voice that has not started yet is not affected.
+     */
+    @Synchronized
+    fun release(key: String) {
+        val p = voices[key] ?: return
+        p.gateAt = maxOf(System.nanoTime(), p.startedAt + MIN_GATE_NS)
+    }
+
+    private fun gated(p: Playback) = System.nanoTime() >= p.gateAt
+
+    /** Turns a let-go voice down in a few steps, then silences it. */
+    private fun fadeOut(p: Playback) {
+        for (i in FADE_STEPS - 1 downTo 0) {
+            if (p.stopped) break
+            runCatching { p.track.setVolume(i.toFloat() / FADE_STEPS) }
+            Thread.sleep(FADE_MS / FADE_STEPS)
+        }
+        synchronized(this) { if (!p.stopped) halt(p) }
+        finish(p)
     }
 
     /** Stops everything playing. */

@@ -29,7 +29,7 @@ object MirrorText {
     const val LISTEN_ONLY = "arc only reads from the device here (sound names, the active project's pads, and the samples on them, to keep a copy); nothing on it is changed."
 
     // Tapping a pad plays its sample on the phone.
-    const val TAP_NOTE = "Tap a pad to hear its sample on the phone: from arc's copy of the device's sounds, a backup, or the device."
+    const val TAP_NOTE = "Hold a pad to hear its sample on the phone (it stops when you let go): from arc's copy of the device's sounds, a backup, or the device."
     const val NO_SAMPLE = "arc doesn't know this pad's sample yet."
     const val NO_COPY = "This sample isn't saved on the phone or in a backup yet."
     const val SOUNDS_CLEARED = "Saved pad sounds cleared."

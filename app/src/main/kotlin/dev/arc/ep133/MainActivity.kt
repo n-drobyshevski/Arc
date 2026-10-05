@@ -526,7 +526,8 @@ class MainActivity : ComponentActivity() {
                             },
                             nameOf = controller::mirrorName,
                             onPadOrder = controller::setPadOrder,
-                            onPad = { controller.playPad(it) },
+                            onPad = { pad, hold -> controller.playPad(pad, hold) },
+                            onPadUp = controller::releasePad,
                             keys = dev.arc.ep133.ui.screens.KeysUi(
                                 on = appSettings.liveKeys,
                                 root = appSettings.keysRoot,
@@ -542,7 +543,8 @@ class MainActivity : ComponentActivity() {
                                     onRoot = controller::setKeysRoot,
                                     onScale = controller::setKeysScale,
                                     onOctave = controller::setKeysOctave,
-                                    onKey = { controller.playKey(it) },
+                                    onKey = { k, hold -> controller.playKey(k, hold) },
+                                    onKeyUp = controller::releaseKey,
                                     onSelect = controller::selectKeysPad,
                                 )
                             },
