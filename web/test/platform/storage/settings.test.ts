@@ -40,6 +40,7 @@ describe('SettingsStore', () => {
       keysScale: 'CHROMATIC',
       keysOctave: 4,
       keysNames: 'SOLFEGE',
+      keysShowNames: true,
     })
     expect(DEFAULT_SETTINGS).toEqual(s.settings)
   })
@@ -88,12 +89,13 @@ describe('SettingsStore', () => {
     const s = new SettingsStore(memoryStorage())
     // A fresh install has chosen nothing: its library.json can't override an earlier install's.
     expect(s.toIndex()).toEqual({})
-    s.update((c) => ({ ...c, keepLast: 20, theme: 'LIGHT', keysScale: 'BLUES', keysNames: 'LETTERS' }))
+    s.update((c) => ({ ...c, keepLast: 20, theme: 'LIGHT', keysScale: 'BLUES', keysNames: 'LETTERS', keysShowNames: false }))
     expect(Object.entries(s.toIndex())).toEqual([
       ['app.theme', 'LIGHT'],
       ['app.keepLast', '20'],
       ['app.keysScale', 'BLUES'],
       ['app.keysNames', 'LETTERS'],
+      ['app.keysShowNames', 'false'],
     ])
     // Set back to the default it stays chosen (Android's prefs.contains).
     s.update((c) => ({ ...c, theme: 'SYSTEM' }))
@@ -113,6 +115,7 @@ describe('SettingsStore', () => {
       'app.keysScale',
       'app.keysOctave',
       'app.keysNames',
+      'app.keysShowNames',
     ])
   })
 
@@ -192,7 +195,7 @@ describe('fromIndex', () => {
     expect(settingsFromIndex({ 'app.theme': 'LIGHT' }, cur).keepLast).toBe(5)
   })
 
-  it('takes the new settings: guide flag, KEYS mode, key, scale, octave, note names', () => {
+  it('takes the new settings: guide flag, KEYS mode, key, scale, octave, note names, names on the keys', () => {
     const map = {
       'app.guideSeen': 'true',
       'app.liveKeys': 'true',
@@ -200,6 +203,7 @@ describe('fromIndex', () => {
       'app.keysScale': 'MINOR_PENTATONIC',
       'app.keysOctave': '2',
       'app.keysNames': 'LETTERS',
+      'app.keysShowNames': 'false',
     }
     expect(settingsFromIndex(map, cur)).toEqual({
       ...cur,
@@ -209,9 +213,10 @@ describe('fromIndex', () => {
       keysScale: 'MINOR_PENTATONIC',
       keysOctave: 2,
       keysNames: 'LETTERS',
+      keysShowNames: false,
     })
     // Out of range or unknown: the current value stays (Android takeIf, not coerceIn).
-    const odd = { 'app.keysRoot': '12', 'app.keysOctave': '9', 'app.keysScale': 'minor', 'app.keysNames': 'NUMBERS', 'app.liveKeys': 'TRUE' }
+    const odd = { 'app.keysRoot': '12', 'app.keysOctave': '9', 'app.keysScale': 'minor', 'app.keysNames': 'NUMBERS', 'app.liveKeys': 'TRUE', 'app.keysShowNames': 'no' }
     expect(settingsFromIndex(odd, cur)).toEqual(cur)
   })
 

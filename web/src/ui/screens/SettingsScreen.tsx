@@ -61,6 +61,7 @@ export interface SettingsScreenProps {
   onClearPadSounds?: () => void
   /** Note names on the keys: solfège or letters. */
   onNoteNames?: (names: NoteNames) => void
+  onShowNames?: (on: boolean) => void
   /** Web: give the remembered library folder's permission back. */
   onReconnectFolder: () => void
   /** Web: zip of the library where no folder can be picked. */
@@ -264,6 +265,14 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
           labelledBy={namesId}
         />
         <p class="t-small settings__note">{MirrorText.NOTE_NAMES_NOTE}</p>
+        <GridPlate>
+          <SwitchRow
+            title={MirrorText.SHOW_NAMES}
+            note={MirrorText.SHOW_NAMES_NOTE}
+            on={settings.keysShowNames}
+            onChange={(on) => props.onShowNames?.(on)}
+          />
+        </GridPlate>
         <Key text={SettingsText.FORGET_NAMES} size="small" block onClick={() => nav.open(dialogLayer(FORGET))} />
         <div class="settings__sounds">
           <p class="t-body15 settings__sounds-size">

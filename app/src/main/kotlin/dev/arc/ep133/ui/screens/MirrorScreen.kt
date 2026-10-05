@@ -157,6 +157,8 @@ data class KeysUi(
     val octave: Int = 4,
     /** Solfège (DO RE MI) or letter (C D E) note names. */
     val names: NoteNames = NoteNames.SOLFEGE,
+    /** The keys write their note names in their rings (off: rings and octave numbers only). */
+    val showNames: Boolean = true,
     /** The sound KEYS plays, and its sample's name when known. */
     val pad: PhysicalPad? = null,
     val padName: String? = null,
@@ -1366,7 +1368,9 @@ private fun KeysGrid(st: MirrorState, keys: KeysUi, now: Long, actions: KeysActi
                                     style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke),
                                 )
                             }
-                            Text(Keys.name(note, keys.names), style = ArcType.semi.copy(fontSize = nameSize, letterSpacing = 0.02.em), color = ink, maxLines = 1)
+                            if (keys.showNames) {
+                                Text(Keys.name(note, keys.names), style = ArcType.semi.copy(fontSize = nameSize, letterSpacing = 0.02.em), color = ink, maxLines = 1)
+                            }
                             Text(
                                 Keys.octaveOf(note).toString(),
                                 style = ArcType.tiny.copy(fontSize = 11.sp),

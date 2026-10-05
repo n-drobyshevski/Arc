@@ -1114,6 +1114,10 @@ export class ArcController {
     this.changeSettings((s) => ({ ...s, keysNames: names }))
   }
 
+  setKeysShowNames(on: boolean): void {
+    this.changeSettings((s) => ({ ...s, keysShowNames: on }))
+  }
+
   /** The guide overlay was shown (it opens by itself only once, also across reinstalls). */
   setGuideSeen(): void {
     this.changeSettings((s) => ({ ...s, guideSeen: true }))

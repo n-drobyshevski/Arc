@@ -314,7 +314,7 @@
 .live-kgrid__plate { flex: 1 1 0; min-height: 0; }
 .live-kgrid .live-deck__row { flex: 1 1 0; min-height: 0; }
 
-/* A key: a dark cap, lerp(dark face, signal, glow); its ring pale (orange an octave up), onSignal when lit.
+/* A key: a dark cap, lerp(dark face, signal, glow); its ring pale (orange an octave up), onSignal when lit. */
 .live-key {
   --key-ring: var(--hw-ring);
   --cap-face: color-mix(in oklab, var(--signal) var(--glow-pct), var(--hw-dark-face));

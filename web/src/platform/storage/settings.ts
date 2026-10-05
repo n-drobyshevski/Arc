@@ -50,6 +50,8 @@ export interface AppSettings {
   readonly keysOctave: number
   /** KEYS names notes in solfège (DO RE MI) or letters (C D E). */
   readonly keysNames: NoteNames
+  /** KEYS writes each key's note name in its ring (off: rings and octave numbers only). */
+  readonly keysShowNames: boolean
 }
 
 export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
@@ -66,6 +68,7 @@ export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
   keysScale: Scale.CHROMATIC,
   keysOctave: 4,
   keysNames: NoteNames.SOLFEGE,
+  keysShowNames: true,
 })
 
 /** Every setting's key, in Android's order (SettingsStore.values()). */
@@ -82,6 +85,7 @@ export const SETTING_KEYS = Object.freeze([
   'keysScale',
   'keysOctave',
   'keysNames',
+  'keysShowNames',
 ] as const)
 export type SettingKey = (typeof SETTING_KEYS)[number]
 
@@ -238,6 +242,7 @@ export function readSettings(raw: string | null): AppSettings {
     keysScale: scaleOf(typeof o.keysScale === 'string' ? o.keysScale : null) ?? Scale.CHROMATIC,
     keysOctave: coerceIn(int('keysOctave', 4), MIN_OCTAVE, MAX_OCTAVE),
     keysNames: noteNamesOf(typeof o.keysNames === 'string' ? o.keysNames : null) ?? NoteNames.SOLFEGE,
+    keysShowNames: bool('keysShowNames', true),
   }
 }
 
@@ -272,6 +277,7 @@ export function settingValues(s: AppSettings): Record<SettingKey, string> {
     keysScale: s.keysScale,
     keysOctave: String(s.keysOctave),
     keysNames: s.keysNames,
+    keysShowNames: String(s.keysShowNames),
   }
 }
 
@@ -321,6 +327,7 @@ export function settingsFromIndex(map: Readonly<Record<string, string>>, cur: Ap
     keysScale: scaleOf(get(map, 'app.keysScale')) ?? cur.keysScale,
     keysOctave: octave !== null && octave >= MIN_OCTAVE && octave <= MAX_OCTAVE ? octave : cur.keysOctave,
     keysNames: noteNamesOf(get(map, 'app.keysNames')) ?? cur.keysNames,
+    keysShowNames: b('app.keysShowNames') ?? cur.keysShowNames,
   }
 }
 

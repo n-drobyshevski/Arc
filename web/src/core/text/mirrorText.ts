@@ -124,6 +124,8 @@ export const MirrorText = {
         return 'C D E'
     }
   },
+  SHOW_NAMES: 'Names on the keys',
+  SHOW_NAMES_NOTE: 'Off, the keys show only their rings and octave numbers; the display line still names the note.',
   NOTE_NAMES_NOTE: 'How KEYS names its notes and the key picker: fixed-do solfège (DO is C) or letters, sharps as C#, D#.',
 
   /** "A 7 · kick", the KEYS sound. */

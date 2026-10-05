@@ -1550,6 +1550,8 @@ class ArcController(
 
     fun setKeysNames(names: dev.arc.ep133.features.NoteNames) = changeSettings { it.copy(keysNames = names) }
 
+    fun setKeysShowNames(on: Boolean) = changeSettings { it.copy(keysShowNames = on) }
+
     /** The guide overlay was shown (it opens by itself only once, also across reinstalls). */
     fun setGuideSeen() = changeSettings { it.copy(guideSeen = true) }
 

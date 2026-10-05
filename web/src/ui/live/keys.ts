@@ -17,6 +17,8 @@ export interface KeysUi {
   readonly octave: number
   /** Solfège (DO RE MI) or letter (C D E) note names. */
   readonly names: NoteNames
+  /** The keys write their note names in their rings (off: rings and octave numbers only). */
+  readonly showNames: boolean
   /** The sound KEYS plays, and its sample's name when known. */
   readonly pad: PhysicalPad | null
   readonly padName: string | null
@@ -31,6 +33,7 @@ export const DEFAULT_KEYS: KeysUi = Object.freeze({
   scale: 'CHROMATIC',
   octave: 4,
   names: 'SOLFEGE',
+  showNames: true,
   pad: null,
   padName: null,
   playingKeys: new Set<number>(),

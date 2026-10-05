@@ -31,6 +31,8 @@ data class AppSettings(
     val keysOctave: Int = 4,
     /** KEYS names notes in solfège (DO RE MI) or letters (C D E). */
     val keysNames: NoteNames = NoteNames.SOLFEGE,
+    /** KEYS writes each key's note name in its ring (off: rings and octave numbers only). */
+    val keysShowNames: Boolean = true,
 )
 
 /**
@@ -59,6 +61,7 @@ class SettingsStore(context: Context) {
         keysScale = runCatching { Scale.valueOf(prefs.getString("keysScale", null) ?: "") }.getOrDefault(Scale.CHROMATIC),
         keysOctave = prefs.getInt("keysOctave", 4).coerceIn(Keys.MIN_OCTAVE, Keys.MAX_OCTAVE),
         keysNames = runCatching { NoteNames.valueOf(prefs.getString("keysNames", null) ?: "") }.getOrDefault(NoteNames.SOLFEGE),
+        keysShowNames = prefs.getBoolean("keysShowNames", true),
     )
 
     /** Each setting as its key and stored text. */
@@ -75,6 +78,7 @@ class SettingsStore(context: Context) {
         "keysScale" to keysScale.name,
         "keysOctave" to keysOctave.toString(),
         "keysNames" to keysNames.name,
+        "keysShowNames" to keysShowNames.toString(),
     )
 
     fun update(change: (AppSettings) -> AppSettings) {
@@ -114,6 +118,7 @@ class SettingsStore(context: Context) {
             keysScale = map["app.keysScale"]?.let { v -> runCatching { Scale.valueOf(v) }.getOrNull() } ?: cur.keysScale,
             keysOctave = map["app.keysOctave"]?.toIntOrNull()?.takeIf { it in Keys.MIN_OCTAVE..Keys.MAX_OCTAVE } ?: cur.keysOctave,
             keysNames = map["app.keysNames"]?.let { v -> runCatching { NoteNames.valueOf(v) }.getOrNull() } ?: cur.keysNames,
+            keysShowNames = map["app.keysShowNames"]?.toBooleanStrictOrNull() ?: cur.keysShowNames,
         )
     }
 }

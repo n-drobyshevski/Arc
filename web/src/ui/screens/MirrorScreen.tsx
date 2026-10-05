@@ -772,7 +772,7 @@ function KeysGrid(props: {
                   <svg class="live-key__ring" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
                     <circle cx="50" cy="50" r="45.5" fill="none" stroke-width="9" />
                   </svg>
-                  <span class="live-key__name">{Keys.name(note, keys.names)}</span>
+                  {keys.showNames && <span class="live-key__name">{Keys.name(note, keys.names)}</span>}
                   <span class="live-key__octave">{Keys.octaveOf(note)}</span>
                 </button>
               )

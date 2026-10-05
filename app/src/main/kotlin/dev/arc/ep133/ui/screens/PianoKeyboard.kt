@@ -377,7 +377,7 @@ private fun DrawScope.drawPiano(
         if (mark != KeyMark.OUT) {
             val ink = if (onLit) c.onSignal else if (mark == KeyMark.ROOT) rootOnWhite else c.navy
             drawMark(mark, ink, Offset(cx, cy), ring, face.bottom)
-            drawLabel(labels.name(k.note), if (onLit) c.onSignal else c.ink, Offset(cx, cy))
+            if (keys.showNames) drawLabel(labels.name(k.note), if (onLit) c.onSignal else c.ink, Offset(cx, cy))
         }
         // Each C carries its octave; OCT's own C in ink.
         labels.digit(k.note)?.let { d ->
@@ -410,8 +410,8 @@ private fun DrawScope.drawPiano(
             val cy = face.bottom - 12.dp.toPx() - blackRing / 2
             val ink = if (onLit) c.onSignal else if (mark == KeyMark.ROOT) c.signal else c.onPianoBlack
             drawMark(mark, ink, Offset(cx, cy), blackRing, face.bottom)
-            // Narrow keys: the name only while the note sounds.
-            if (g > 0f || playing) drawLabel(labels.name(k.note), if (onLit) c.onSignal else c.onPianoBlack, Offset(cx, cy))
+            // Narrow keys: the name only while the note sounds (and names are on).
+            if (keys.showNames && (g > 0f || playing)) drawLabel(labels.name(k.note), if (onLit) c.onSignal else c.onPianoBlack, Offset(cx, cy))
         }
         if (playing) drawHeld(face, blackCorner, held, c.pianoSignal)
     }

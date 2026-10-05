@@ -165,6 +165,7 @@ function Root(): JSX.Element {
         padSoundsSize={() => c.padSoundsSize()}
         onClearPadSounds={() => void c.clearPadSounds()}
         onNoteNames={(n) => c.setKeysNames(n)}
+        onShowNames={(on) => c.setKeysShowNames(on)}
         onRestoreFolder={() => void c.pickFolder()}
         onReconnectFolder={() => void c.reconnectFolder()}
         onExportLibrary={() => void c.exportLibrary()}
@@ -315,6 +316,7 @@ function TabScreen(props: { view: NavView }): JSX.Element {
             scale: settings.keysScale,
             octave: settings.keysOctave,
             names: settings.keysNames,
+            showNames: settings.keysShowNames,
             pad: state.keysPad,
             padName: state.keysPad ? c.mirrorName(state.keysPad) : null,
             playingKeys: c.playingKeys.value,

@@ -82,6 +82,7 @@ fun SettingsScreen(
     padSoundsSize: suspend () -> Long = { 0L },
     onClearPadSounds: () -> Unit = {},
     onNoteNames: (dev.arc.ep133.features.NoteNames) -> Unit = {},
+    onShowNames: (Boolean) -> Unit = {},
     onSource: () -> Unit,
     onFontLicence: () -> Unit,
     onDebug: () -> Unit,
@@ -166,6 +167,7 @@ fun SettingsScreen(
                 onSelect = { onNoteNames(dev.arc.ep133.features.NoteNames.entries[it]) },
             )
             Text(MirrorText.NOTE_NAMES_NOTE, style = ArcType.small, color = c.graphite)
+            GridPlate { SwitchRow(MirrorText.SHOW_NAMES, MirrorText.SHOW_NAMES_NOTE, settings.keysShowNames, onShowNames) }
             ArcKey(SettingsText.FORGET_NAMES, { confirmForget = true }, Modifier.fillMaxWidth(), size = KeySize.Small)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(

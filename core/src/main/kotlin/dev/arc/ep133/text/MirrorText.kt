@@ -127,6 +127,8 @@ object MirrorText {
         dev.arc.ep133.features.NoteNames.SOLFEGE -> "DO RE MI"
         dev.arc.ep133.features.NoteNames.LETTERS -> "C D E"
     }
+    const val SHOW_NAMES = "Names on the keys"
+    const val SHOW_NAMES_NOTE = "Off, the keys show only their rings and octave numbers; the display line still names the note."
     const val NOTE_NAMES_NOTE = "How KEYS names its notes and the key picker: fixed-do solfège (DO is C) or letters, sharps as C#, D#."
 
     /** "A 7 · kick", the KEYS sound. */
