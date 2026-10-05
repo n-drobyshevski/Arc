@@ -19,6 +19,8 @@ object CoachText {
     const val MODE = "Pads or keys"
     const val OCTAVE = "Octave"
     const val SCALE = "Scale"
+    const val KEY = "Key"
+    const val PIANO = "Play, or slide across the keys"
 
     const val SEARCH = "Search sounds"
     const val IMPORT = "Import a .pak"
