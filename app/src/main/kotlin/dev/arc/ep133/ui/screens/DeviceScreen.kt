@@ -1,5 +1,6 @@
 package dev.arc.ep133.ui.screens
 
+import dev.arc.ep133.ui.components.EdgeTabWidth
 import dev.arc.ep133.text.CoachText
 import dev.arc.ep133.ui.components.TextToggle
 import dev.arc.ep133.ui.components.CoachYellowInk
@@ -142,7 +143,8 @@ fun DeviceScreen(
                 .widthIn(max = 560.dp)
                 .fillMaxWidth()
                 .windowInsetsPadding(WindowInsets.safeDrawing),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
+            // The left gutter keeps clear of the guide tab on the edge.
+            contentPadding = PaddingValues(start = EdgeTabWidth + 8.dp, end = 16.dp, top = 4.dp, bottom = 24.dp),
         ) {
             item(key = "head") {
                 // The caption with its tools as icons: read again, and add samples (orange, the main action).

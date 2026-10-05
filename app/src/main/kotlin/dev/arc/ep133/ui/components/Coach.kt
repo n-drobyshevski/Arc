@@ -102,7 +102,9 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
             val margin = 8.dp.toPx()
             val padX = 9.dp.toPx()
             val padY = 6.dp.toPx()
-            val list = marks.marks.values.sortedWith(compareBy({ it.bounds.center.y }, { it.bounds.center.x }))
+            // Tall areas go last: their tags sit in their middle and make way for the others.
+            val tall = { m: Mark -> m.bounds.height > size.height * 0.25f }
+            val list = marks.marks.values.sortedWith(compareBy<Mark>({ tall(it) }, { it.bounds.center.y }, { it.bounds.center.x }))
             fun tag(m: Mark): androidx.compose.ui.text.TextLayoutResult = measurer.measure(
                 m.label.uppercase(),
                 tagStyle.copy(color = m.ink),
@@ -119,9 +121,14 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
                 val h = text.size.height + 2 * padY
                 // A tall area (the pad grid, the side strip) gets its tag in its middle, with no
                 // arrow; kept on screen, so a strip at the edge still shows its whole tag.
-                if (m.bounds.height > size.height * 0.25f) {
+                if (tall(m)) {
                     val left = (m.bounds.center.x - w / 2).coerceIn(margin, size.width - margin - w)
-                    placed += Placed(m, text, Rect(Offset(left, m.bounds.center.y - h / 2), Size(w, h)), null, null)
+                    var rect = Rect(Offset(left, m.bounds.center.y - h / 2), Size(w, h))
+                    var tries = 0
+                    while (placed.any { it.rect.inflate(clearance).overlaps(rect) } && tries++ < 8) {
+                        rect = rect.translate(0f, h + clearance)
+                    }
+                    placed += Placed(m, text, rect, null, null)
                     continue
                 }
                 val below = m.bounds.center.y < size.height / 2
@@ -163,7 +170,7 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
             }
             val hint = measurer.measure(CoachText.CLOSE_HINT.uppercase(), hintStyle)
             // Below the middle, clear of a tag in the middle of the pad grid.
-            drawText(hint, topLeft = Offset((size.width - hint.size.width) / 2, size.height * 0.62f))
+            drawText(hint, topLeft = Offset((size.width - hint.size.width) / 2, size.height * 0.72f))
         }
     }
 }

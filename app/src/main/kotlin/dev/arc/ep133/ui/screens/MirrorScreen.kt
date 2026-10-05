@@ -1,5 +1,6 @@
 package dev.arc.ep133.ui.screens
 
+import dev.arc.ep133.ui.components.EdgeTabWidth
 import androidx.compose.runtime.mutableStateOf
 import dev.arc.ep133.ui.components.SwitchRow
 import dev.arc.ep133.ui.components.SideStripWidth
@@ -172,7 +173,7 @@ fun MirrorScreen(
                             .widthIn(max = 520.dp)
                             .fillMaxSize()
                             .windowInsetsPadding(WindowInsets.safeDrawing)
-                            .padding(start = 16.dp, end = SideStripWidth + 4.dp, top = 4.dp, bottom = 12.dp),
+                            .padding(start = EdgeTabWidth + 8.dp, end = SideStripWidth + 4.dp, top = 4.dp, bottom = 12.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         if (onBack != null) {
@@ -198,7 +199,7 @@ fun MirrorScreen(
                             .fillMaxWidth()
                             .verticalScroll(rememberScrollState())
                             .windowInsetsPadding(WindowInsets.safeDrawing)
-                            .padding(start = 16.dp, end = SideStripWidth + 4.dp, top = 4.dp, bottom = 24.dp),
+                            .padding(start = EdgeTabWidth + 8.dp, end = SideStripWidth + 4.dp, top = 4.dp, bottom = 24.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {

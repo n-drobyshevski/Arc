@@ -15,6 +15,7 @@ object CoachText {
     const val DISCONNECTED = "Connect the EP-133"
     const val SETTINGS = "Settings"
     const val SECTIONS = "Sections"
+    const val GUIDE_TAB = "EP-133 shortcuts"
 
     const val SEARCH = "Search sounds"
     const val IMPORT = "Import a .pak"

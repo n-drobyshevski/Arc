@@ -46,9 +46,7 @@ import dev.arc.ep133.ui.components.ArcFrame
 import dev.arc.ep133.ui.components.CoachHost
 import dev.arc.ep133.ui.components.ArcToast
 import dev.arc.ep133.ui.components.Tab
-import dev.arc.ep133.ui.components.TabBar
-import dev.arc.ep133.ui.components.TabBarHeight
-import dev.arc.ep133.ui.components.TopBar
+import dev.arc.ep133.ui.components.ArcShell
 import dev.arc.ep133.ui.screens.ContentsScreen
 import dev.arc.ep133.ui.screens.CompareScreen
 import dev.arc.ep133.ui.screens.ComparePickerContent
@@ -331,8 +329,10 @@ class MainActivity : ComponentActivity() {
         var confirmDelete by rememberSaveable { mutableStateOf(false) }
         var titleField by rememberSaveable { mutableStateOf("") }
         var notesField by rememberSaveable { mutableStateOf("") }
-        // The mirror listens only while its tab is in front (not under the debug or settings screen).
-        val live = tab == Tab.LIVE && !debug && !settingsOpen
+        // The EP-133 shortcut guide, slid in from the left-edge tab.
+        var guideOpen by rememberSaveable { mutableStateOf(false) }
+        // The mirror listens only while its tab is in front (not under the debug, settings or guide screen).
+        val live = tab == Tab.LIVE && !debug && !settingsOpen && !guideOpen
         val appSettings by controller.settings.collectAsStateWithLifecycle()
 
         fun selectTab(t: Tab) {
@@ -491,20 +491,20 @@ class MainActivity : ComponentActivity() {
                     onBack = { search = false },
                 )
             } else CoachHost(visible = coach, onDismiss = { coach = false }) {
-                ArcFrame(
-                    top = {
-                        TopBar(
-                            connected = state.connected,
-                            canConnect = state.midiSupported && !state.busy,
-                            canBackup = state.midiSupported && state.device != null && !state.busy,
-                            onBackup = { withNotifications { controller.backup() } },
-                            onConnect = { controller.connect() },
-                            onDebug = { debug = true },
-                            onSettings = { settingsOpen = true },
-                            onHelp = { coach = true },
-                        )
-                    },
-                    bottom = { TabBar(tab) { selectTab(it) } },
+                ArcShell(
+                    tab = tab,
+                    onTab = { selectTab(it) },
+                    connected = state.connected,
+                    canConnect = state.midiSupported && !state.busy,
+                    canBackup = state.midiSupported && state.device != null && !state.busy,
+                    onBackup = { withNotifications { controller.backup() } },
+                    onConnect = { controller.connect() },
+                    onDebug = { debug = true },
+                    onSettings = { settingsOpen = true },
+                    onHelp = { coach = true },
+                    guideOpen = guideOpen,
+                    onGuide = { guideOpen = it },
+                    guide = { GuideScreen(onBack = { guideOpen = false }) },
                 ) {
                     // Back from another tab returns to Backups first.
                     BackHandler(enabled = tab != Tab.BACKUPS) { selectTab(Tab.BACKUPS) }
@@ -522,7 +522,6 @@ class MainActivity : ComponentActivity() {
                             follow = appSettings.liveFollow,
                             onFollow = controller::setLiveFollow,
                         )
-                        Tab.GUIDE -> GuideScreen()
                         Tab.DEVICE -> DeviceScreen(
                             state = state,
                             onRefresh = { controller.refreshBrowser() },
@@ -720,8 +719,6 @@ class MainActivity : ComponentActivity() {
                 error = toast?.error ?: false,
                 onTimeout = controller::dismissToast,
                 modifier = Modifier.align(Alignment.BottomCenter),
-                // Above the tab bar while it shows.
-                bottomInset = if (onTabs) TabBarHeight else 0.dp,
             )
         }
     }

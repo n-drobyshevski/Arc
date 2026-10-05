@@ -24,8 +24,8 @@ import dev.arc.ep133.ui.components.ArcFrame
 import dev.arc.ep133.ui.components.CoachHost
 import dev.arc.ep133.ui.components.ArcSheet
 import dev.arc.ep133.ui.components.Tab
-import dev.arc.ep133.ui.components.TabBar
-import dev.arc.ep133.ui.components.TopBar
+import dev.arc.ep133.ui.components.ArcShell
+import dev.arc.ep133.ui.screens.GuideScreen
 import dev.arc.ep133.controller.BrowserUi
 import dev.arc.ep133.features.DeviceContents
 import dev.arc.ep133.features.PadGroup
@@ -71,15 +71,28 @@ private val playing = MirrorState(
     padOrder = PadOrder.FROM_TOP,
 )
 
-/** A tab inside the top bar and the tab bar, as the app shows it; [guide] opens the guide overlay. */
+/** A section as the app shows it: the top bar with its section tag, and the guide tab on the left edge. */
 @Composable
-private fun Framed(tab: Tab, connected: Boolean = true, dark: Boolean = false, guide: Boolean = false, content: @Composable () -> Unit) {
+private fun Framed(
+    tab: Tab,
+    connected: Boolean = true,
+    dark: Boolean = false,
+    guide: Boolean = false,
+    menu: Boolean = false,
+    guideOpen: Boolean = false,
+    content: @Composable () -> Unit,
+) {
     ArcTheme(dark = dark) {
         CoachHost(visible = guide, onDismiss = {}) {
-            ArcFrame(
-                top = { TopBar(connected = connected, canConnect = true, canBackup = connected, onBackup = {}, onConnect = {}, onDebug = {}) },
-                bottom = { TabBar(tab) {} },
-            ) { content() }
+            ArcShell(
+                tab = tab, onTab = {},
+                connected = connected, canConnect = true, canBackup = connected,
+                onBackup = {}, onConnect = {}, onDebug = {}, onSettings = {}, onHelp = {},
+                guideOpen = guideOpen, onGuide = {},
+                guide = { GuideScreen(onBack = {}) },
+                initialMenuOpen = menu,
+                content = content,
+            )
         }
     }
 }
@@ -297,3 +310,23 @@ fun GuideOverlayLivePreview() = Live(playing, oneGroup = true, guide = true)
 @Preview(name = "Guide overlay Device", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
 fun GuideOverlayDevicePreview() = Device(guide = true)
+
+// Sections without the bottom bar: the section list open, and the guide slid in from its edge tab.
+
+@PreviewTest
+@Preview(name = "Section list open", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun SectionListPreview() {
+    Framed(Tab.LIVE, menu = true) {
+        MirrorScreen(mirror = MirrorUi(playing), nameOf = { names[it] }, onPadOrder = {}, fixedNow = NOW, oneGroup = true)
+    }
+}
+
+@PreviewTest
+@Preview(name = "Guide open from the edge", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun GuideFromEdgePreview() {
+    Framed(Tab.BACKUPS, guideOpen = true) {
+        MainScreen(state = connectedState, fmtDay = { "" }, onBackup = {}, onImport = {}, onOpen = {})
+    }
+}
