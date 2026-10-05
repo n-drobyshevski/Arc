@@ -621,8 +621,9 @@ private fun Notes(st: MirrorState, mirror: MirrorUi?, onPadOrder: (PadOrder) -> 
 private fun ModeRow(keys: KeysUi, actions: KeysActions) {
     val c = LocalArcColors.current
     Row(
-        Modifier.fillMaxWidth().padding(start = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(22.dp),
+        // Spread across the row: mode at the start, octave at the end, scale between.
+        Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         dev.arc.ep133.ui.components.WordButton(
@@ -650,6 +651,8 @@ private fun ModeRow(keys: KeysUi, actions: KeysActions) {
                 onPick = actions.onOctave,
                 description = MirrorText.octaveChoice(keys.octave),
                 mark = Modifier.coachMark("live.octave", CoachText.OCTAVE, c.navy, c.onNavy),
+                // At the row's end: the list opens leftward, staying on screen.
+                listAlignment = Alignment.BottomEnd,
             )
         }
     }
@@ -665,6 +668,7 @@ private fun <T> PickWord(
     onPick: (T) -> Unit,
     description: String,
     mark: Modifier = Modifier,
+    listAlignment: Alignment = Alignment.BottomStart,
 ) {
     val c = LocalArcColors.current
     var open by remember { mutableStateOf(false) }
@@ -672,7 +676,7 @@ private fun <T> PickWord(
         dev.arc.ep133.ui.components.WordButton("$label \u25BE", { open = true }, mark, description = description)
         if (open) {
             androidx.compose.ui.window.Popup(
-                alignment = Alignment.BottomStart,
+                alignment = listAlignment,
                 onDismissRequest = { open = false },
                 properties = androidx.compose.ui.window.PopupProperties(focusable = true),
             ) {
