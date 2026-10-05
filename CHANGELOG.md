@@ -7,6 +7,7 @@ version fixes bugs. The version itself is set in `version.properties`.
 ## [Unreleased]
 
 ### Added
+- Live: tap a pad to hear its sample on the phone, connected or offline. arc copies the samples on the active project's pads from the device in the background (any action waits at most for the sound being copied), and otherwise plays them from the newest backup holding them or from the device. The playing pad is ringed; Settings shows and clears the space the copies take.
 - Live works without the EP-133: it keeps the device's last read (the active project, its pads and the sound names) and shows them, marked offline with when they were read, until the device is connected again.
 - Live: a one-group view, a large grid of one group with A–D keys to switch and Follow to jump to the group just played. It fits one screen without scrolling (checked at Pixel 7 and 360 dp sizes). The choice is kept in the settings.
 

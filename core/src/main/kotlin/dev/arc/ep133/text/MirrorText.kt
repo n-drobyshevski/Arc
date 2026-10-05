@@ -26,7 +26,14 @@ object MirrorText {
     const val LEARN_NOTE = "Sample names are learned as you press pads: one press of a key, in any group, names that key in every group, and arc remembers it."
     const val COMMUNITY_NOTE = "Pads follow the official MIDI note map; play/stop and tempo are standard MIDI clock messages. Naming the samples relies on community notes about the device's SysEx, not on the official guide."
     const val NO_PUSHES = "No pad messages from the device yet, so samples can't be named. Pads still light up."
-    const val LISTEN_ONLY = "arc only reads from the device here (sound names and the active project's pads); nothing on it is changed."
+    const val LISTEN_ONLY = "arc only reads from the device here (sound names, the active project's pads, and the samples on them, to keep a copy); nothing on it is changed."
+
+    // Tapping a pad plays its sample on the phone.
+    const val TAP_NOTE = "Tap a pad to hear its sample on the phone: from arc's copy of the device's sounds, a backup, or the device."
+    const val NO_SAMPLE = "arc doesn't know this pad's sample yet."
+    const val NO_COPY = "This sample isn't saved on the phone or in a backup yet."
+    const val SOUNDS_CLEARED = "Saved pad sounds cleared."
+    const val PLAY = "Play"
 
     const val PAD_ORDER = "Pad numbers in project files"
     const val FROM_TOP = "From the top"
