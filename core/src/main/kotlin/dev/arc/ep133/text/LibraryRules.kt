@@ -28,6 +28,15 @@ data class RestoreSelection(val slots: List<Int>, val projects: List<Int>)
 
 /** The small rules app.js applies around the library and restore sheet. */
 object LibraryRules {
+    /**
+     * The backups to delete so only the newest [keep] remain (an addition to
+     * the web version); none when [keep] is null (keep all).
+     */
+    fun toPrune(backups: List<BackupRecord>, keep: Int?): List<BackupRecord> {
+        if (keep == null || backups.size <= keep) return emptyList()
+        return backups.sortedWith(compareByDescending<BackupRecord> { it.createdAt }.thenByDescending { it.id }).drop(keep)
+    }
+
     /** `fileNameFor(b)`: "my-backup.pak". JS \w is ASCII only, spelled out here. */
     fun fileNameFor(title: String): String {
         val base = title.replace(Regex("[^A-Za-z0-9_\\- ]+"), "")

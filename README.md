@@ -41,11 +41,12 @@ These go beyond the web version:
     - A physical pad press also makes the device send its pad file id over SysEx.
     - arc pairs that with the note to learn which pad is which, then names the sample from the project's pads. One press of a key, in any group, names that key in every group, and arc remembers it; nothing is guessed, and two pads of one group hit together don't count.
     - Community notes disagree on how project files number the pads, so the page has a switch to count them from the top or from the bottom.
+- **Settings:** the gear at the top right. Theme (system, light or dark); whether arc connects by itself when an EP-133 is plugged in; whether the screen stays on in Live; how many backups to keep (all, 5, 10 or 20: after each backup or import the oldest beyond that are deleted, here and in Documents/arc, and lowering it asks first); Live's pad numbering and forgetting learned sample names; the version, source, font licence and the debug log. The settings are saved in Documents/arc with the library, so they come back after a reinstall.
 - **Shortcut guide:** 100 EP-133 key combinations in tabs by section, with search, laid out like a printed guide: each combination drawn as the device's keys (pale keys, dark keys, pads, knobs and the fader), with HOLD, DIAL, TURN and MOVE badges, and what it does below. A test checks that every key drawn is named in that entry's text from the official guide. Every entry is paraphrased from teenage engineering's official user guide for OS 2.5, and links to the section it comes from. Combos the guide doesn't document are left out.
 
 Backups use the same layout as the official Sample Tool's `.pak`: a zip with `/meta.json`, `/sounds/NNN name.wav` and `/projects/PNN.tar`. On top of that, an `arc.json` file keeps per-sound settings like play mode, pitch and envelope.
 
-A hidden debug screen (long-press the **arc** wordmark) shows every SysEx message sent and received, and can share, save or copy the log as a text file.
+A debug screen (Settings → **Debug log**, or long-press the **arc** wordmark) shows every SysEx message sent and received, and can share, save or copy the log as a text file.
 
 ## Build
 
@@ -240,6 +241,7 @@ Back up the EP-133 with the official Sample Tool first. Then, with the debug scr
 18. Play a pattern: check whether sequenced pads light up. Switch on clock out (SHIFT + ERASE, 102, ENTER) and check play/stop and the tempo. Try KEYS mode.
 19. Switch between the four tabs with a backup running and with Live open: the progress sheet should stay up, Live should stop listening when you leave it, and Back on any tab but Backups should return to Backups. Try a large system font: the top bar's blocks should wrap, not overlap.
 20. Play a sound from a backup's **Contents** through the phone speaker, wired headphones and Bluetooth. If one stays silent, export the debug log: it has a "play … -> output" line naming where Android sent the sound.
+21. In **Settings**: switch the theme; turn **Connect when plugged in** off and plug the EP-133 in (it should stay disconnected until you tap Connect); with 6 backups, set **Keep** to 5 and confirm (the oldest goes from the list and from Documents/arc); make a backup and check the oldest is removed again.
 
 If anything fails, export the SysEx log from the debug screen (**Share log** or **Save log**) and attach it to an issue together with the error text.
 

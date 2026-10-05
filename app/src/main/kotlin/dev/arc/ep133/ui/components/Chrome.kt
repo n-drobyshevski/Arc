@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -86,8 +87,9 @@ fun ArcFrame(top: @Composable () -> Unit, bottom: @Composable () -> Unit, conten
 }
 
 /**
- * The wordmark, then the orange Back up block (REC in the pocket operator app)
- * and the connection block, green while the EP-133 is connected.
+ * The wordmark, then the orange Back up block (REC in the pocket operator app),
+ * the connection block (green and named EP-133 while connected; a tap
+ * disconnects) and the settings gear.
  */
 @Composable
 fun TopBar(
@@ -97,6 +99,7 @@ fun TopBar(
     onBackup: () -> Unit,
     onConnect: () -> Unit,
     onDebug: () -> Unit,
+    onSettings: () -> Unit = {},
 ) {
     val c = LocalArcColors.current
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
@@ -114,10 +117,12 @@ fun TopBar(
             ) {
                 Block(NavText.BACK_UP, c.signal, c.onSignal, onBackup, enabled = canBackup, dot = true, description = Strings.BACK_UP)
                 if (connected) {
-                    Block(Strings.DISCONNECT, c.ok, c.onOk, onConnect, enabled = canConnect, dot = true)
+                    // Green while connected, named after the device; tapping it disconnects.
+                    Block(NavText.DEVICE_CAPTION, c.ok, c.onOk, onConnect, enabled = canConnect, dot = true, description = Strings.DISCONNECT)
                 } else {
                     Block(Strings.CONNECT, c.navy, c.onNavy, onConnect, enabled = canConnect)
                 }
+                GearKey(onSettings)
             }
         }
     }
@@ -187,6 +192,43 @@ fun TabBar(tab: Tab, onTab: (Tab) -> Unit) {
                     Text(t.label.uppercase(), style = ArcType.tab, color = if (on) c.onNavy else c.onTabOff, textAlign = TextAlign.Center, maxLines = 1)
                 }
             }
+        }
+    }
+}
+
+/** The round grey gear that opens the settings (the pocket operator app has one in the same place). */
+@Composable
+private fun GearKey(onClick: () -> Unit) {
+    val c = LocalArcColors.current
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    Box(
+        Modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .background(if (pressed) c.graphite else c.tabOff)
+            .clickable(interactionSource = source, indication = null, role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = dev.arc.ep133.text.SettingsText.TITLE },
+        contentAlignment = Alignment.Center,
+    ) {
+        val ink = if (pressed) c.onNavy else c.navy
+        androidx.compose.foundation.Canvas(Modifier.size(24.dp)) {
+            val center = this.center
+            val outer = size.minDimension / 2
+            val body = outer * 0.72f
+            // Eight teeth, then the body over them, then the hole.
+            for (i in 0 until 8) {
+                rotate(i * 45f, center) {
+                    drawRoundRect(
+                        ink,
+                        topLeft = androidx.compose.ui.geometry.Offset(center.x - outer * 0.17f, center.y - outer),
+                        size = androidx.compose.ui.geometry.Size(outer * 0.34f, outer * 0.5f),
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(outer * 0.06f),
+                    )
+                }
+            }
+            drawCircle(ink, radius = body, center = center)
+            drawCircle(if (pressed) c.graphite else c.tabOff, radius = body * 0.45f, center = center)
         }
     }
 }

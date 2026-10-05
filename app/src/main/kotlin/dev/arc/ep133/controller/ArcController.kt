@@ -33,6 +33,7 @@ import dev.arc.ep133.protocol.TrafficLog
 import dev.arc.ep133.service.TransferService
 import dev.arc.ep133.text.BackupDevice
 import dev.arc.ep133.text.FeatureText
+import dev.arc.ep133.text.LibraryRules
 import dev.arc.ep133.text.BackupRecord
 import dev.arc.ep133.text.Format
 import dev.arc.ep133.text.RestoreSelection
@@ -175,6 +176,10 @@ class ArcController(
     private var mirrorSession: Session? = null
     private val mirrorPrefs by lazy { context.getSharedPreferences("mirror", Context.MODE_PRIVATE) }
 
+    // ---------- settings (an addition) ----------
+    private val settingsStore = dev.arc.ep133.data.SettingsStore(context)
+    val settings: StateFlow<dev.arc.ep133.data.AppSettings> = settingsStore.settings
+
     @Volatile
     private var session: Session? = null
     private var openDeviceId: Int? = null
@@ -196,6 +201,7 @@ class ArcController(
             buildMap {
                 mirrorPrefs.getString("learned", null)?.let { put("mirror.learned", it) }
                 mirrorPrefs.getString("order", null)?.let { put("mirror.order", it) }
+                putAll(settingsStore.toIndex())
             }
         }
         library.onExternalError = { msg -> scope.launch { toast(FeatureText.copyFailed(msg), error = true) } }
@@ -220,7 +226,7 @@ class ArcController(
         midi.watch(
             onAdded = { info ->
                 // Agreed addition: connect on its own when an EP-133 is plugged in.
-                if (midi.looksLikeEp(info)) scope.launch {
+                if (midi.looksLikeEp(info) && settingsStore.settings.value.autoConnect) scope.launch {
                     delay(300)
                     val s = _state.value
                     if (session == null && !s.busy) connect()
@@ -364,7 +370,7 @@ class ArcController(
         }
         if (saved != null) {
             _state.update { it.copy(freshId = saved.record.id) }
-            toastSaved(Strings.saved(saved.record.soundCount, saved.record.projectCount), saved.copyError)
+            toastSaved(Strings.saved(saved.record.soundCount, saved.record.projectCount) + pruneOld(saved.record.id), saved.copyError)
         }
         refreshAll(quiet = true) // refreshDevice().catch(() => {})
     }
@@ -710,6 +716,9 @@ class ArcController(
     /** Stops listening while the app is in the background; the screen keeps its last state. */
     fun pauseMirror() = stopMirror()
 
+    /** The pad order Live uses (for the settings page). */
+    fun padOrder() = mirror?.snapshot(System.nanoTime())?.padOrder ?: savedPadOrder()
+
     private fun savedPadOrder() =
         runCatching { dev.arc.ep133.features.PadOrder.valueOf(mirrorPrefs.getString("order", null) ?: "") }
             .getOrDefault(dev.arc.ep133.features.PadOrder.FROM_TOP)
@@ -771,6 +780,7 @@ class ArcController(
                 settings["mirror.learned"]?.let { putString("learned", it) }
                 settings["mirror.order"]?.let { putString("order", it) }
             }
+            settingsStore.fromIndex(settings)
             _state.update { it.copy(folderPicked = library.folderPicked) }
             toast(if (n == 0) FeatureText.NOTHING_TO_RESTORE else FeatureText.restored(n))
         } catch (e: Throwable) {
@@ -878,7 +888,7 @@ class ArcController(
                 d.soundNames,
             )
             _state.update { it.copy(freshId = saved.record.id) }
-            toastSaved(Strings.imported(saved.record.soundCount, saved.record.projectCount), saved.copyError)
+            toastSaved(Strings.imported(saved.record.soundCount, saved.record.projectCount) + pruneOld(saved.record.id), saved.copyError)
         } catch (e: Throwable) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             toast(Strings.importFailed(name, e.message ?: e.toString()), error = true)
@@ -902,6 +912,56 @@ class ArcController(
         if (e is kotlinx.coroutines.CancellationException) throw e
         toast(e.message ?: e.toString(), error = true)
         false
+    }
+
+    /**
+     * Deletes the oldest backups beyond the Keep setting (never [keepId], the
+     * one just saved). Returns " Removed N old backups." for the toast, or "".
+     */
+    private suspend fun pruneOld(keepId: String? = null): String {
+        val keep = settingsStore.settings.value.keepLast ?: return ""
+        val drop = LibraryRules.toPrune(library.backups.first(), keep).filter { it.id != keepId }
+        var removed = 0
+        for (b in drop) {
+            val ok = runCatching { library.delete(b.id) }
+                .onFailure { e -> if (e is kotlinx.coroutines.CancellationException) throw e }
+                .isSuccess
+            if (ok) removed++
+        }
+        return if (removed > 0) " " + dev.arc.ep133.text.SettingsText.pruned(removed) else ""
+    }
+
+    fun setTheme(t: dev.arc.ep133.text.ThemeChoice) = changeSettings { it.copy(theme = t) }
+
+    fun setAutoConnect(on: Boolean) = changeSettings { it.copy(autoConnect = on) }
+
+    fun setKeepScreenOn(on: Boolean) = changeSettings { it.copy(keepScreenOn = on) }
+
+    /** How many backups [setKeepLast] would delete now, for the confirmation. */
+    fun pruneCount(keep: Int?): Int = LibraryRules.toPrune(_state.value.backups, keep).size
+
+    /** Sets how many backups to keep and deletes the older ones now (after the page confirmed). */
+    fun setKeepLast(keep: Int?): Job = scope.launch {
+        changeSettings { it.copy(keepLast = keep) }
+        val note = pruneOld()
+        if (note.isNotEmpty()) toast(note.trim())
+    }
+
+    /** Forgets which pad is which in Live (names are learned again as pads are pressed). */
+    fun forgetLearned() {
+        val m = mirror
+        if (m != null) {
+            m.forgetLearned()
+            _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(state = m.snapshot(System.nanoTime()))) } ?: cur }
+        }
+        mirrorPrefs.edit { remove("learned") }
+        scope.launch { library.syncIndex() }
+        toast(dev.arc.ep133.text.SettingsText.FORGOTTEN)
+    }
+
+    private fun changeSettings(change: (dev.arc.ep133.data.AppSettings) -> dev.arc.ep133.data.AppSettings) {
+        settingsStore.update(change)
+        scope.launch { library.syncIndex() }
     }
 
     /** One toast for the result, so a failed copy to Documents/arc is not hidden behind it. */

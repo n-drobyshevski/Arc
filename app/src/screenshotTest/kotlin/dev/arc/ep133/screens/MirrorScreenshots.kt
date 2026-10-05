@@ -16,6 +16,8 @@ import dev.arc.ep133.protocol.Storage
 import dev.arc.ep133.text.BackupDevice
 import dev.arc.ep133.text.BackupRecord
 import dev.arc.ep133.ui.screens.MainScreen
+import dev.arc.ep133.ui.screens.SettingsScreen
+import dev.arc.ep133.data.AppSettings
 import dev.arc.ep133.ui.screens.DeviceScreen
 import dev.arc.ep133.ui.screens.PadsSheetContent
 import dev.arc.ep133.ui.components.ArcFrame
@@ -225,3 +227,27 @@ fun PadsSheetPreview() {
         }
     }
 }
+
+@Composable
+private fun Settings(dark: Boolean) {
+    ArcTheme(dark = dark) {
+        SettingsScreen(
+            settings = AppSettings(keepLast = 10),
+            state = connectedState,
+            padOrder = PadOrder.FROM_TOP,
+            version = "1.0",
+            onTheme = {}, onAutoConnect = {}, onKeepScreenOn = {}, pruneCount = { 0 }, onKeepLast = {},
+            onPadOrder = {}, onForgetNames = {}, onRestoreFolder = {}, onSource = {}, onFontLicence = {}, onDebug = {}, onBack = {},
+        )
+    }
+}
+
+@PreviewTest
+@Preview(name = "Settings", widthDp = 393, heightDp = 1500, showBackground = true)
+@Composable
+fun SettingsPreview() = Settings(dark = false)
+
+@PreviewTest
+@Preview(name = "Settings dark", widthDp = 393, heightDp = 1500, showBackground = true)
+@Composable
+fun SettingsDarkPreview() = Settings(dark = true)

@@ -15,6 +15,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -55,6 +56,7 @@ import dev.arc.ep133.ui.screens.GuideScreen
 import dev.arc.ep133.ui.screens.MirrorScreen
 import dev.arc.ep133.ui.screens.PadsSheetContent
 import dev.arc.ep133.ui.screens.SearchScreen
+import dev.arc.ep133.ui.screens.SettingsScreen
 import dev.arc.ep133.ui.screens.DeviceScreen
 import dev.arc.ep133.ui.screens.TRIM_PLAY_KEY
 import dev.arc.ep133.ui.screens.TrimSheetContent
@@ -123,7 +125,15 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         pendingSave = savedInstanceState?.getString(KEY_PENDING_SAVE)
         if (savedInstanceState == null) handleIntent(intent)
-        setContent { ArcTheme { Root() } }
+        setContent {
+            val settings by controller.settings.collectAsStateWithLifecycle()
+            val dark = when (settings.theme) {
+                dev.arc.ep133.text.ThemeChoice.SYSTEM -> androidx.compose.foundation.isSystemInDarkTheme()
+                dev.arc.ep133.text.ThemeChoice.LIGHT -> false
+                dev.arc.ep133.text.ThemeChoice.DARK -> true
+            }
+            ArcTheme(dark = dark) { Root() }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -293,6 +303,8 @@ class MainActivity : ComponentActivity() {
     private fun Root() {
         val state by controller.state.collectAsStateWithLifecycle()
         var debug by rememberSaveable { mutableStateOf(false) }
+        var settingsOpen by rememberSaveable { mutableStateOf(false) }
+        var fontLicence by rememberSaveable { mutableStateOf(false) }
         // The section under the top bar; the other screens stack over it without the bars.
         var tab by rememberSaveable { mutableStateOf(Tab.BACKUPS) }
         var search by rememberSaveable { mutableStateOf(false) }
@@ -309,8 +321,9 @@ class MainActivity : ComponentActivity() {
         var confirmDelete by rememberSaveable { mutableStateOf(false) }
         var titleField by rememberSaveable { mutableStateOf("") }
         var notesField by rememberSaveable { mutableStateOf("") }
-        // The mirror listens only while its tab is in front (not under the debug screen).
-        val live = tab == Tab.LIVE && !debug
+        // The mirror listens only while its tab is in front (not under the debug or settings screen).
+        val live = tab == Tab.LIVE && !debug && !settingsOpen
+        val appSettings by controller.settings.collectAsStateWithLifecycle()
 
         fun selectTab(t: Tab) {
             if (t == tab) return
@@ -329,7 +342,7 @@ class MainActivity : ComponentActivity() {
 
         // Keep the screen on while the progress sheet or the live mirror is open.
         val view = LocalView.current
-        val keepOn = state.task != null || live
+        val keepOn = state.task != null || (live && appSettings.keepScreenOn)
         DisposableEffect(keepOn) {
             view.keepScreenOn = keepOn
             onDispose { view.keepScreenOn = false }
@@ -374,10 +387,40 @@ class MainActivity : ComponentActivity() {
             if (compareA != null && compareB != null) controller.compareBackups(compareA, compareB)
         }
 
-        val onTabs = !debug && (compareA == null || compareB == null) && contentsBackup == null && !search
+        val onTabs = !debug && !settingsOpen && (compareA == null || compareB == null) && contentsBackup == null && !search
         Box(Modifier.fillMaxSize()) {
             if (debug) {
                 DebugScreen(controller.trafficLog, ::shareLog, ::saveLog, ::copyLog) { debug = false }
+            } else if (settingsOpen) {
+                val uri = androidx.compose.ui.platform.LocalUriHandler.current
+                SettingsScreen(
+                    settings = appSettings,
+                    state = state,
+                    padOrder = controller.padOrder(),
+                    version = BuildConfigCompat.versionName(this@MainActivity),
+                    onTheme = controller::setTheme,
+                    onAutoConnect = controller::setAutoConnect,
+                    onKeepScreenOn = controller::setKeepScreenOn,
+                    pruneCount = controller::pruneCount,
+                    onKeepLast = { controller.setKeepLast(it) },
+                    onPadOrder = controller::setPadOrder,
+                    onForgetNames = controller::forgetLearned,
+                    onRestoreFolder = { folderLauncher.launch(dev.arc.ep133.data.ExternalLibrary.INITIAL_FOLDER) },
+                    // No browser installed: nothing to open.
+                    onSource = { runCatching { uri.openUri(dev.arc.ep133.text.SettingsText.SOURCE_URL) } },
+                    onFontLicence = { fontLicence = true },
+                    onDebug = { debug = true },
+                    onBack = { settingsOpen = false },
+                )
+                val licenceText = remember { runCatching { assets.open("OFL-Manrope.txt").bufferedReader().use { it.readText() } }.getOrDefault("") }
+                ArcSheet(visible = fontLicence, onDismiss = { fontLicence = false }) {
+                    androidx.compose.material3.Text(
+                        licenceText,
+                        style = dev.arc.ep133.ui.theme.ArcType.tiny,
+                        color = dev.arc.ep133.ui.theme.LocalArcColors.current.graphite,
+                    )
+                    dev.arc.ep133.ui.components.ArcKey(Strings.DONE, { fontLicence = false }, Modifier.fillMaxWidth(), style = dev.arc.ep133.ui.components.KeyStyle.Quiet)
+                }
             } else if (compareA != null && compareB != null) {
                 val (old, new) = if (compareB.createdAt < compareA.createdAt) compareB to compareA else compareA to compareB
                 CompareScreen(
@@ -447,6 +490,7 @@ class MainActivity : ComponentActivity() {
                             onBackup = { withNotifications { controller.backup() } },
                             onConnect = { controller.connect() },
                             onDebug = { debug = true },
+                            onSettings = { settingsOpen = true },
                         )
                     },
                     bottom = { TabBar(tab) { selectTab(it) } },
