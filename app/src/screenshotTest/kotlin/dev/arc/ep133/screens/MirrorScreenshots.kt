@@ -1,6 +1,20 @@
 package dev.arc.ep133.screens
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.DpRect
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.tooling.preview.Preview
 import com.android.tools.screenshot.PreviewTest
 import dev.arc.ep133.controller.DeviceSummary
@@ -25,6 +39,15 @@ import dev.arc.ep133.ui.components.CoachHost
 import dev.arc.ep133.ui.components.ArcSheet
 import dev.arc.ep133.ui.components.Tab
 import dev.arc.ep133.ui.components.ArcShell
+import dev.arc.ep133.ui.components.ArcToast
+import dev.arc.ep133.ui.components.BarSlot
+import dev.arc.ep133.ui.components.LocalArcWindow
+import dev.arc.ep133.ui.components.LocalBarSlot
+import dev.arc.ep133.controller.UploadDraftItem
+import dev.arc.ep133.text.MirrorText
+import dev.arc.ep133.ui.screens.LivePill
+import dev.arc.ep133.ui.screens.TrimSheetContent
+import dev.arc.ep133.ui.screens.liveInBar
 import dev.arc.ep133.ui.screens.GuideScreen
 import dev.arc.ep133.controller.BrowserUi
 import dev.arc.ep133.features.DeviceContents
@@ -71,7 +94,10 @@ private val playing = MirrorState(
     padOrder = PadOrder.FROM_TOP,
 )
 
-/** A section as the app shows it: the top bar with its section tag, and the guide tab on the left edge. */
+/**
+ * A section as the app shows it: the top bar with its section tag, and the guide tab on the left edge.
+ * On a phone on its side Live's display line ([pill]) rides in the top bar, as MainActivity puts it.
+ */
 @Composable
 private fun Framed(
     tab: Tab,
@@ -80,28 +106,50 @@ private fun Framed(
     guide: Boolean = false,
     menu: Boolean = false,
     guideOpen: Boolean = false,
+    pill: (@Composable BoxScope.() -> Unit)? = null,
+    /** A toast showing, and (in a short window) where the bar's middle is: the bar reports it a frame late. */
+    toast: String? = null,
+    barMiddle: DpRect? = null,
     content: @Composable () -> Unit,
 ) {
     ArcTheme(dark = dark) {
-        CoachHost(visible = guide, onDismiss = {}) {
-            ArcShell(
-                tab = tab, onTab = {},
-                connected = connected, canConnect = true, canBackup = connected,
-                onBackup = {}, onConnect = {}, onDebug = {}, onSettings = {}, onHelp = {},
-                guideOpen = guideOpen, onGuide = {},
-                guide = { GuideScreen(onBack = {}) },
-                initialMenuOpen = menu,
-                content = content,
-            )
+        val density = LocalDensity.current
+        val slot = LocalBarSlot.current
+        val placed = remember(barMiddle) {
+            barMiddle?.let { m -> BarSlot().apply { bounds = with(density) { Rect(m.left.toPx(), m.top.toPx(), m.right.toPx(), m.bottom.toPx()) } } }
+        }
+        CompositionLocalProvider(LocalBarSlot provides (placed ?: slot)) {
+            Box(Modifier.fillMaxSize()) {
+                CoachHost(visible = guide, onDismiss = {}) {
+                    ArcShell(
+                        tab = tab, onTab = {},
+                        connected = connected, canConnect = true, canBackup = connected,
+                        onBackup = {}, onConnect = {}, onDebug = {}, onSettings = {}, onHelp = {},
+                        guideOpen = guideOpen, onGuide = {},
+                        guide = { GuideScreen(onBack = {}) },
+                        middle = pill.takeIf { tab == Tab.LIVE && liveInBar(LocalArcWindow.current) },
+                        initialMenuOpen = menu,
+                        content = content,
+                    )
+                }
+                ArcToast(id = toast?.let { 1L }, text = toast.orEmpty(), error = false, onTimeout = {}, modifier = Modifier.align(Alignment.BottomCenter))
+            }
         }
     }
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi()) {
-    Framed(Tab.LIVE, connected = offline == null, dark = dark, guide = guide) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null) {
+    val mirror = MirrorUi(state, loading = loading, offline = offline)
+    // The piano's notes, for the display line in the bar to name a device note past them. The
+    // piano reports them a frame late, after the screenshot, so [piano] gives them up front.
+    var pianoRange by remember { mutableStateOf(piano) }
+    Framed(
+        Tab.LIVE, connected = offline == null, dark = dark, guide = guide,
+        pill = { LivePill(mirror, keys, pianoRange) }, toast = toast, barMiddle = barMiddle,
+    ) {
         MirrorScreen(
-            mirror = MirrorUi(state, loading = loading, offline = offline),
+            mirror = mirror,
             nameOf = { if (state.learned.isEmpty()) null else names[it] },
             onPadOrder = {},
             fixedNow = NOW,
@@ -113,6 +161,7 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
             onPad = if (playingPads.isNotEmpty()) ({ _, _ -> }) else null,
             playingPads = playingPads,
             keys = keys,
+            onPianoRange = { pianoRange = it },
         )
     }
 }
@@ -228,6 +277,110 @@ fun LiveFirstOpenPreview() = Live(MirrorState(activeProject = 3, lastHit = Hit(P
 @Composable
 fun LiveTabletPreview() = Live(playing)
 
+// On its side (Pixel 7 at 915 x 412 dp, less the status bar and the three-button bar at the
+// side: 24 and 48). KEYS is a piano from DO3 to DO5 at OCT 4, 15 white keys. The device holds
+// MI4 (lit) and DO6, past the keys' right end (an orange tick there); the phone plays LA3, DO4
+// and SO4 (outlined). The display line rides in the top bar.
+private val sideways = playing.copy(
+    notes = mapOf(64 to PadLight(110, 1, NOW - 20_000_000), 84 to PadLight(96, 1, NOW - 40_000_000)),
+    lastNote = 84,
+)
+private val chord = keysUi.copy(scale = dev.arc.ep133.features.Scale.CHROMATIC, playingNotes = linkedSetOf(57, 60, 67))
+
+@PreviewTest
+@Preview(name = "Live keys sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveKeysSidewaysPreview() = Live(sideways, keys = chord, piano = 48..72)
+
+// Nothing playing on the phone: the display line names the device's DO6, past the keys.
+@PreviewTest
+@Preview(name = "Live keys sideways E major", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveKeysSidewaysEMajorPreview() = Live(sideways, keys = keysUi.copy(root = 4, playingNotes = emptySet()), piano = 48..72)
+
+@PreviewTest
+@Preview(name = "Live keys sideways dark", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveKeysSidewaysDarkPreview() = Live(sideways, dark = true, keys = chord.copy(root = 9, scale = dev.arc.ep133.features.Scale.MINOR_PENTATONIC), piano = 48..72)
+
+@PreviewTest
+@Preview(name = "Live keys sideways letters", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveKeysSidewaysLettersPreview() = Live(sideways, keys = keysUi.copy(root = 9, scale = dev.arc.ep133.features.Scale.MINOR, names = dev.arc.ep133.features.NoteNames.LETTERS, playingNotes = emptySet()), piano = 48..72)
+
+@PreviewTest
+@Preview(name = "Live keys sideways tools", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveKeysSidewaysToolsPreview() = Live(sideways, keys = chord, tools = true, piano = 48..72)
+
+@PreviewTest
+@Preview(name = "Live one group sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveOneGroupSidewaysPreview() = Live(playing, oneGroup = true)
+
+@PreviewTest
+@Preview(name = "Live all groups sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveAllGroupsSidewaysPreview() = Live(playing)
+
+@PreviewTest
+@Preview(name = "Guide overlay Live sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun GuideOverlayLiveSidewaysPreview() = Live(sideways, keys = chord, guide = true, piano = 48..72)
+
+// Gesture navigation: the bar's 20 dp at the bottom instead of 48 at the side.
+@PreviewTest
+@Preview(name = "Live keys gesture nav", widthDp = 915, heightDp = 368, showBackground = true)
+@Composable
+fun LiveKeysGestureNavPreview() = Live(sideways, keys = chord, piano = 48..72)
+
+// A 360 x 740 dp phone on its side: 12 white keys, DO3 to SO4, so the device's MI4 is the
+// one lit key and DO6 is past the end.
+@PreviewTest
+@Preview(name = "Live keys sideways small", widthDp = 692, heightDp = 336, showBackground = true)
+@Composable
+fun LiveKeysSidewaysSmallPreview() = Live(sideways, keys = chord.copy(scale = dev.arc.ep133.features.Scale.MAJOR), piano = 48..67)
+
+// A toast over the bar's middle, never over the keys: two lines, then an ellipsis until tapped.
+@PreviewTest
+@Preview(name = "Live toast sideways small", widthDp = 692, heightDp = 336, showBackground = true)
+@Composable
+fun LiveToastSidewaysSmallPreview() = Live(
+    sideways, keys = chord.copy(scale = dev.arc.ep133.features.Scale.MAJOR), piano = 48..67,
+    toast = MirrorText.BLUETOOTH_DELAY, barMiddle = SmallBarMiddle,
+)
+
+@PreviewTest
+@Preview(name = "Live one group sideways small", widthDp = 692, heightDp = 336, showBackground = true)
+@Composable
+fun LiveOneGroupSidewaysSmallPreview() = Live(playing, oneGroup = true)
+
+@PreviewTest
+@Preview(name = "Guide overlay Live sideways small", widthDp = 692, heightDp = 336, showBackground = true)
+@Composable
+fun GuideOverlayLiveSidewaysSmallPreview() = Live(sideways, keys = chord.copy(scale = dev.arc.ep133.features.Scale.MAJOR), guide = true, piano = 48..67)
+
+@PreviewTest
+@Preview(name = "Live keys sideways small font 2", widthDp = 692, heightDp = 336, fontScale = 2f, showBackground = true)
+@Composable
+fun LiveKeysSidewaysSmallFontPreview() = Live(sideways, keys = chord.copy(scale = dev.arc.ep133.features.Scale.MAJOR), piano = 48..67)
+
+// A tablet on its side is tall enough for the display line on the page and the full bar; the
+// piano stops at a hand's span.
+@PreviewTest
+@Preview(name = "Live keys tablet", widthDp = 1280, heightDp = 752, showBackground = true)
+@Composable
+fun LiveKeysTabletPreview() = Live(sideways, keys = chord)
+
+// Wider than tall but short of 8 white keys: the grid stays.
+@PreviewTest
+@Preview(name = "Live keys grid fallback", widthDp = 400, heightDp = 360, showBackground = true)
+@Composable
+fun LiveKeysGridFallbackPreview() = Live(sideways, keys = chord)
+
+/** The 692 dp bar's middle, between the LIVE tag and the icons, where the display line is. */
+private val SmallBarMiddle = DpRect(101.dp, 6.dp, 455.dp, 50.dp)
+
 private val device = BackupDevice("EP-133", "TE032AS001", "", "2.5.1")
 
 private fun backup(id: String, title: String, at: Long, sounds: Int, projects: Int) = BackupRecord(
@@ -271,6 +424,12 @@ fun MainConnectedDarkPreview() = Main(connectedState, dark = true)
 @Preview(name = "Main empty after reinstall", widthDp = 393, heightDp = 852, showBackground = true)
 @Composable
 fun MainEmptyPreview() = Main(UiState(libraryLoaded = true))
+
+// On its side, the device is one line, so the backups show without scrolling.
+@PreviewTest
+@Preview(name = "Main connected sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun MainConnectedSidewaysPreview() = Main(connectedState)
 
 private val deviceSounds = listOf(
     1 to "kick", 2 to "kick 2", 3 to "snare", 4 to "hat closed", 5 to "hat open", 6 to "clap", 7 to "rim",
@@ -343,6 +502,43 @@ fun PadsSheetPreview() {
     }
 }
 
+// Half a second of a made-up kick (a falling sine, fading out), as a picked file to trim.
+private val kickWav: ByteArray = run {
+    val rate = 46875
+    val n = rate / 2
+    val pcm = ByteArray(n * 2)
+    var phase = 0.0
+    for (i in 0 until n) {
+        val t = i.toDouble() / rate
+        phase += 2 * Math.PI * (45 + 120 * Math.exp(-t * 30)) / rate
+        val v = (Math.sin(phase) * Math.exp(-t * 7) * 30_000).toInt()
+        pcm[i * 2] = v.toByte()
+        pcm[i * 2 + 1] = (v shr 8).toByte()
+    }
+    dev.arc.ep133.formats.Wav.encode(pcm, 1, rate)
+}
+
+// On its side the trim sheet is two columns, so it fits without scrolling.
+@PreviewTest
+@Preview(name = "Trim sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun TrimSidewaysPreview() {
+    Framed(Tab.DEVICE) {
+        DeviceScreen(state = deviceState, onRefresh = {}, onSoundDetails = {}, onProjectSounds = {}, onAddSamples = {})
+        ArcSheet(visible = true, onDismiss = {}) {
+            TrimSheetContent(
+                item = UploadDraftItem("kick 808.wav", "kick 808", 8, kickWav, null, trim = 2_000 until 18_000, sampleRate = 46875),
+                playing = null,
+                onPlay = { _, _, _ -> },
+                onStop = {},
+                onDone = {},
+                onCancel = {},
+                decoded = dev.arc.ep133.formats.Wav.decode(kickWav),
+            )
+        }
+    }
+}
+
 @Composable
 private fun Settings(dark: Boolean) {
     ArcTheme(dark = dark) {
@@ -366,6 +562,11 @@ fun SettingsPreview() = Settings(dark = false)
 @Preview(name = "Settings dark", widthDp = 393, heightDp = 1500, showBackground = true)
 @Composable
 fun SettingsDarkPreview() = Settings(dark = true)
+
+@PreviewTest
+@Preview(name = "Settings sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun SettingsSidewaysPreview() = Settings(dark = false)
 
 // The guide overlay (the ? key, and once on the first start), on each tab with tools.
 

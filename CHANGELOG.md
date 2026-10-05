@@ -7,6 +7,7 @@ version fixes bugs. The version itself is set in `version.properties`.
 ## [Unreleased]
 
 ### Added
+- Live on its side: turn the phone and KEYS becomes a piano with every semitone, centred on the octave's C (DO3 to DO5 at OCT 4, so the sample's own pitch is in the middle; 1½ octaves on a small phone). The scale's notes are ringed navy and the key's root orange; the other keys are dimmed and unnamed but still play. Slide across the keys to run through the notes, hold several for a chord, and step the octave with − and + as on the EP-133; a KEY word over the keys picks the root. Notes from the EP-133 light their exact key, and one past either end is marked there and named in the display line. PADS lays one group, or all four in a row, across the screen. Checked at Pixel 7 and 360 dp sizes on their side, and on a tablet.
 - Live tools in KEYS: a small legend of the keys' colours (the ring's octave colours, filled for a note from the EP-133, outlined for one playing on the phone).
 - Settings → Live → **Note names on the keys**: KEYS names its notes in fixed-do solfège (DO RE MI, as before) or letters (C D E, sharps as C#, D#), on the keys, the display and the key picker. The choice is kept with the settings.
 - Live: chords. Pads and keys play alongside each other (up to 8 sounds at once) instead of cutting each other off, and in the one-group and KEYS grids they play on touch-down, a finger per pad. Every pad or key sounding is ringed. Play in the lists still plays one sound at a time.
@@ -16,6 +17,12 @@ version fixes bugs. The version itself is set in `version.properties`.
 - Live: a one-group view, a large grid of one group with A–D keys to switch and Follow to jump to the group just played. It fits one screen without scrolling (checked at Pixel 7 and 360 dp sizes). The choice is kept in the settings.
 
 ### Changed
+- Turning the phone no longer restarts Live: the device isn't read again (so pads keep their names and don't say they don't know their sample), lights, tempo, the open tools and the group stay, and notes you hold fade out instead of cutting off.
+- On a phone on its side the top bar is slimmer and holds Live's display line; messages show there too, two lines at most (tap for the rest, swipe up or sideways to dismiss), never over the keys. Backups shows the device as one line above the list, the trim view puts its keys beside the waveform, and the debug log's header scrolls with it.
+- Live: KEYS plays by note rather than by key, on the grid as on the piano: a key held while the key, scale or octave changes lets go of the note it started. A sound not yet loaded is loaded once for every press waiting on it, and a quick slide over keys still loading no longer ends in a burst of notes. Messages such as "Media volume is off" show once instead of stacking up.
+- Live: KEYS' orange ring marks the key's root and navy its other notes, as on the piano, instead of the octaves in turn; the legend in Live tools says so.
+- On a phone on its side the scale, octave and key lists open as a grid of columns, so they fit the room above or below their word.
+- The guide overlay on a phone on its side keeps each tag by its control: the edge tabs' tags make way for the top bar's, a tag slides aside rather than hide where another arrow points, and one with no room below its control goes above it.
 - Live: much less delay between a press and its sound. Live keeps one low-latency output open while it is on screen and mixes the pads and keys into it itself (no new audio track per press, the phone's own sample rate, KEYS pitched as it plays), and loads the active project's pad samples into memory when it opens. Arc's pad-sound copies no longer rewrite their index on every press. The debug log shows each press's delay; Bluetooth's own delay is pointed out once.
 - Messages at the bottom of the screen can be swiped away, sideways or down, as a notification is; they spring back on a short drag. Screen readers get a Dismiss action.
 - Live: pads and keys sound only while held, as in the EP-133's gate mode, and fade out quickly when the finger lifts, instead of playing the whole sample on a tap. On the scrolling all-groups page a press waits a moment so a scroll plays nothing. A screen reader's Play still plays the whole sample.
@@ -29,6 +36,9 @@ version fixes bugs. The version itself is set in `version.properties`.
 - Live's one-group view shows the display as one line (play state, tempo, project and the pad just played), so the pads get the room.
 
 ### Fixed
+- On a phone on its side the more-tools strip, its panel's close key and the GUIDE tab sat under a navigation bar or camera cutout on that side.
+- Turning the phone sent the shortcut guide back to its top.
+- With large text the **?** key's mark and the GUIDE tab's word outgrew their keys and were cut off.
 - All of arc's config now survives uninstalling: Live's last read (`live.json`) and the guide overlay's "already shown" flag join the settings and Live's pad names in Documents/arc.
 - Restoring from Documents/arc no longer writes the defaults back over the restored settings, and a fresh install no longer overrides the old settings before restoring: only settings you changed are written. Live's pad names learned before and after a reinstall are combined instead of replaced.
 
