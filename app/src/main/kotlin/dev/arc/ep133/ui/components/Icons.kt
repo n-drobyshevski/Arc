@@ -46,9 +46,11 @@ enum class ArcIcon { DOT, RING, GEAR, HELP, REFRESH, PLUS, SEARCH, IMPORT, FOLLO
 @Composable
 fun Icon(icon: ArcIcon, color: Color, modifier: Modifier = Modifier, size: Dp = 22.dp) {
     if (icon == ArcIcon.HELP) {
-        // The font's own question mark, heavier than a drawn one would be.
+        // The font's own question mark, heavier than a drawn one would be. Sized as the icon
+        // it is, not as text: with large text it would outgrow its key and be cut off.
+        val fontSize = with(androidx.compose.ui.platform.LocalDensity.current) { (size * 0.95f).toSp() }
         Box(modifier.size(size), contentAlignment = Alignment.Center) {
-            Text("?", style = ArcType.tab.copy(fontSize = (size.value * 0.95f).let { androidx.compose.ui.unit.TextUnit(it, androidx.compose.ui.unit.TextUnitType.Sp) }), color = color)
+            Text("?", style = ArcType.tab.copy(fontSize = fontSize), color = color)
         }
         return
     }

@@ -61,13 +61,15 @@ fun ColumnScope.TrimSheetContent(
     onStop: () -> Unit,
     onDone: (IntRange?) -> Unit,
     onCancel: () -> Unit,
+    /** For screenshots: the file already decoded (it is otherwise decoded after the first frame). */
+    decoded: DecodedWav? = null,
 ) {
     val c = LocalArcColors.current
     // On a phone on its side the sheet is two columns, so it fits the height without scrolling: the
     // heading and the selection on the left, the keys stacked on the right.
     val short = LocalArcWindow.current.short
-    val wav by produceState<DecodedWav?>(null, item.wav) {
-        value = item.wav?.let { bytes -> withContext(Dispatchers.Default) { runCatching { Wav.decode(bytes) }.getOrNull() } }
+    val wav by produceState(decoded, item.wav) {
+        if (decoded == null) value = item.wav?.let { bytes -> withContext(Dispatchers.Default) { runCatching { Wav.decode(bytes) }.getOrNull() } }
     }
     val w = wav
     if (w == null || !short) {

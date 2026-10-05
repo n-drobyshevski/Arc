@@ -35,6 +35,7 @@ import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -56,6 +57,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.arc.ep133.text.CoachText
@@ -340,15 +342,19 @@ fun GuideEdgeTab(onClick: () -> Unit, modifier: Modifier = Modifier) {
             .coachMark("edge.guide", CoachText.GUIDE_TAB, c.navy, c.onNavy),
         contentAlignment = Alignment.Center,
     ) {
-        // The word reads bottom to top, as on the PO's side tabs.
-        Text(
-            NavText.GUIDE_TAB.uppercase(),
-            style = ArcType.capsKeySmall,
-            color = c.onTabOff,
-            maxLines = 1,
-            softWrap = false,
-            modifier = Modifier.rotateVertical(),
-        )
+        // The word reads bottom to top, as on the PO's side tabs. The tab is only so wide, so
+        // the word grows with the text size only so far.
+        val density = LocalDensity.current
+        CompositionLocalProvider(LocalDensity provides Density(density.density, minOf(density.fontScale, 1.3f))) {
+            Text(
+                NavText.GUIDE_TAB.uppercase(),
+                style = ArcType.capsKeySmall,
+                color = c.onTabOff,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.rotateVertical(),
+            )
+        }
     }
 }
 

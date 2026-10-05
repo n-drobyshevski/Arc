@@ -107,6 +107,7 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
             val margin = 8.dp.toPx()
             val padX = 9.dp.toPx()
             val padY = 6.dp.toPx()
+            val short = size.height < 480.dp.toPx()
             // Tall areas go last: their tags sit in their middle and make way for the others.
             val tall = { m: Mark -> m.bounds.height > size.height * 0.25f }
             val list = marks.marks.values.sortedWith(compareBy<Mark>({ tall(it) }, { it.bounds.center.y }, { it.bounds.center.x }))
@@ -134,21 +135,39 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
             }
             class Side(val m: Mark, val text: androidx.compose.ui.text.TextLayoutResult, val rect: Rect, val side: Int)
             val sides = ArrayList<Side>()
-            for (m in list) {
-                val side = edge(m)
-                if (side == 0) continue
+            val hookRoom = 30.dp.toPx()
+            /** Whether the tag found room clear of the tags already placed. */
+            fun placeSide(m: Mark, side: Int): Boolean {
                 val text = measurer.measure(m.label.uppercase(), tagStyle.copy(color = m.ink))
                 val w = text.size.height + 2 * padY
                 val h = text.size.width + 2 * padX
-                val top = (m.bounds.center.y - h / 2).coerceIn(margin + 40.dp.toPx(), size.height - margin - h)
+                val lo = margin + 40.dp.toPx()
+                val hi = size.height - margin - h
                 val left = if (side < 0) safeLeft else safeRight - w
-                val rect = Rect(Offset(left, top), Size(w, h))
-                sides += Side(m, text, rect, side)
-                // Room for the hook above it too, so other tags keep clear.
-                placed += Placed(m, text, Rect(rect.left, rect.top - 30.dp.toPx(), rect.right, rect.bottom), null, null)
+                // With room for the hook above it, so other tags keep clear.
+                fun room(top: Float) = Rect(left, top - hookRoom, left + w, top + h)
+                fun clear(top: Float) = placed.none { it.rect.inflate(clearance).overlaps(room(top)) }
+                val centred = (m.bounds.center.y - h / 2).coerceIn(lo, hi)
+                // On a phone on its side the edge controls sit high, where the top bar's tags
+                // hang: the side tag slides down clear of them while its hook (26 dp over the
+                // tag) still meets the control, or up while the tag still runs beside it.
+                val step = 4.dp.toPx()
+                val reach = 12.dp.toPx()
+                val top = if (clear(centred)) {
+                    centred
+                } else {
+                    generateSequence(centred) { it + step }
+                        .takeWhile { it <= hi && it - 26.dp.toPx() <= m.bounds.bottom - reach }
+                        .firstOrNull(::clear)
+                        ?: generateSequence(centred) { it - step }
+                            .takeWhile { it >= lo && it + h >= m.bounds.top + reach }
+                            .firstOrNull(::clear)
+                }
+                sides += Side(m, text, Rect(Offset(left, top ?: centred), Size(w, h)), side)
+                placed += Placed(m, text, room(top ?: centred), null, null)
+                return top != null
             }
-            for (m in list) {
-                if (edge(m) != 0) continue
+            fun placeTag(m: Mark) {
                 val text = tag(m)
                 val w = text.size.width + 2 * padX
                 val h = text.size.height + 2 * padY
@@ -162,24 +181,97 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
                         rect = rect.translate(0f, h + clearance)
                     }
                     placed += Placed(m, text, rect, null, null)
-                    continue
+                    return
                 }
-                val below = m.bounds.center.y < size.height / 2
                 val x = m.bounds.center.x
                 val left = (x - w / 2).coerceIn(margin, size.width - margin - w)
-                var reach = gap
-                var rect: Rect
-                var tries = 0
-                while (true) {
-                    val top = if (below) m.bounds.bottom + reach else m.bounds.top - reach - h
-                    rect = Rect(Offset(left, top), Size(w, h))
-                    val hit = placed.any { it.rect.inflate(clearance).overlaps(rect) }
-                    if (!hit || ++tries > 8) break
-                    reach += h + clearance
+                fun hits(r: Rect) = placed.any { it.rect.inflate(clearance).overlaps(r) }
+                fun hitsSide(r: Rect) = sides.any { s -> placed.any { it.m === s.m && it.rect.inflate(clearance).overlaps(r) } }
+                // In a short window (a phone on its side) the top bar's tags hang over the row of
+                // words under it, and a tag there would hide where another control's arrow points
+                // (just under or over it): the tag slides sideways off that point if it can and
+                // still meet its own arrow, or else hangs lower. (A control its own arrow runs over
+                // anyway doesn't count.) It slides off an edge tab's tag too, rather than hang far
+                // below it.
+                val tipGap = 2.dp.toPx()
+                fun under(r: Rect) = if (!short) emptyList() else list.filter {
+                    val b = it.bounds
+                    it !== m && !tall(it) && edge(it) == 0 && x !in b.left..b.right &&
+                        (r.inflate(clearance).contains(Offset(b.center.x, b.bottom + tipGap)) || r.inflate(clearance).contains(Offset(b.center.x, b.top - tipGap)))
                 }
-                val tip = if (below) Offset(x, m.bounds.bottom + 2.dp.toPx()) else Offset(x, m.bounds.top - 2.dp.toPx())
+                val step = 2.dp.toPx()
+                val from = maxOf(margin, x - w + padX)
+                val to = minOf(size.width - margin - w, x - padX)
+                // Pushed further out, below or above the control, until it clears the tags placed.
+                fun out(below: Boolean): Rect {
+                    var reach = gap
+                    var rect: Rect
+                    var tries = 0
+                    while (true) {
+                        val top = if (below) m.bounds.bottom + reach else m.bounds.top - reach - h
+                        rect = Rect(Offset(left, top), Size(w, h))
+                        var blocked = hits(rect)
+                        val covered = under(rect)
+                        val edgeTag = hitsSide(rect)
+                        if (covered.isNotEmpty() || edgeTag) {
+                            val slid = (1..((to - from) / step).toInt()).asSequence()
+                                .flatMap { sequenceOf(left - it * step, left + it * step) }
+                                .filter { it in from..to }
+                                .map { Rect(Offset(it, top), Size(w, h)) }
+                            val off = slid.firstOrNull { under(it).isEmpty() && !hits(it) }
+                                ?: slid.takeIf { edgeTag }?.firstOrNull { !hits(it) && under(it).size <= covered.size }
+                            if (off != null) {
+                                rect = off
+                                blocked = false
+                            } else if (covered.isNotEmpty()) {
+                                blocked = true
+                            }
+                        }
+                        if (!blocked || ++tries > 8) break
+                        reach += h + clearance
+                    }
+                    return rect
+                }
+                // How badly a place fits: off the screen, on another tag, its arrow across other
+                // tags, over where other arrows point, and (a little) a long arrow.
+                fun misfit(r: Rect, below: Boolean): Float {
+                    val tipY = if (below) m.bounds.bottom + tipGap else m.bounds.top - tipGap
+                    val tailY = if (below) r.top else r.bottom
+                    val crossed = placed.count {
+                        x in it.rect.left..it.rect.right && it.rect.top < maxOf(tipY, tailY) && it.rect.bottom > minOf(tipY, tailY)
+                    }
+                    val off = r.top < margin || r.bottom > size.height - margin
+                    return (if (off) 1000f else 0f) + (if (hits(r)) 100f else 0f) + 10f * (crossed + under(r).size) +
+                        abs(tailY - tipY) / size.height
+                }
+                // Below a control in the top half, above one in the bottom half; in a short window
+                // (its top bar crowded with tags) the other way where that fits better.
+                var below = m.bounds.center.y < size.height / 2
+                var rect = out(below)
+                if (short) {
+                    val other = out(!below)
+                    if (misfit(other, !below) + 5f < misfit(rect, below)) {
+                        rect = other
+                        below = !below
+                    }
+                }
+                val tip = if (below) Offset(x, m.bounds.bottom + tipGap) else Offset(x, m.bounds.top - tipGap)
                 val tail = if (below) Offset(x, rect.top) else Offset(x, rect.bottom)
                 placed += Placed(m, text, rect, tip, tail)
+            }
+            // The tags beside their controls first, then the edge tabs' tags around them, then
+            // the tall areas' tags in whatever room is left. An edge tab's tag that finds no
+            // room that way (a short window) goes first instead, and the others make way for it.
+            val early = HashSet<Mark>()
+            while (true) {
+                placed.clear()
+                sides.clear()
+                for (m in list) if (m in early) placeSide(m, edge(m))
+                for (m in list) if (edge(m) == 0 && !tall(m)) placeTag(m)
+                val cramped = list.filter { edge(it) != 0 && it !in early && !placeSide(it, edge(it)) }
+                for (m in list) if (edge(m) == 0 && tall(m)) placeTag(m)
+                if (cramped.isEmpty()) break
+                early += cramped
             }
             val head = 7.dp.toPx()
             for (p in placed) {

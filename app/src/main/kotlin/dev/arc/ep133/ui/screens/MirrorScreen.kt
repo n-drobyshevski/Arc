@@ -1271,9 +1271,9 @@ private fun KeysLegend(piano: Boolean = false) {
 @Composable
 private fun LegendRow(text: String, keys: @Composable () -> Unit) {
     val c = LocalArcColors.current
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        // The swatches share one width, so the words line up.
-        Row(Modifier.width(56.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) { keys() }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        // One key in miniature a row, so the words line up.
+        keys()
         Text(text, style = ArcType.small, color = c.graphite, modifier = Modifier.weight(1f))
     }
 }
