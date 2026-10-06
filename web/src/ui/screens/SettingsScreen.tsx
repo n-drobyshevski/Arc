@@ -29,6 +29,10 @@
 //   window. The piano's real width is only known in Live, so it is estimated
 //   from the window ([pianoRoomEstimate]: the window less Live's chrome); on a
 //   portrait phone, which plays on the grid, from the window turned sideways.
+// - "Haptic feedback" shows only where the browser can vibrate
+//   ([SettingsScreenProps.hapticsSupported]): iOS Safari has no vibration
+//   API and desktop browsers no motor, so the row is hidden there rather than
+//   left dead.
 // - The keys view (keysViewWide / keysViewTall) has no row here: Live's
 //   Pads / Piano switch remembers it per window shape.
 // - Web only, the desktop page (from 1024px wide, theme/desk.css): one paper
@@ -80,6 +84,9 @@ export interface SettingsScreenProps {
   onShowNames?: (on: boolean) => void
   /** Live's piano size: white keys (Piano.CHOICES), null for Auto. */
   onPianoWhites?: (whites: number | null) => void
+  /** Web: whether this browser can vibrate (platform/haptics.ts); the Haptic feedback row shows only then. */
+  hapticsSupported?: boolean
+  onHaptics?: (on: boolean) => void
   /** Web: give the remembered library folder's permission back. */
   onReconnectFolder: () => void
   /** Web: zip of the library where no folder can be picked. */
@@ -512,6 +519,20 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
                     />
                   )}
                 />
+                {props.hapticsSupported === true && (
+                  <SettingRow
+                    title={SettingsText.HAPTICS}
+                    note={SettingsText.HAPTICS_NOTE}
+                    control={(ids) => (
+                      <HwToggle
+                        on={settings.haptics}
+                        onChange={(on) => props.onHaptics?.(on)}
+                        labelledBy={ids.titleId}
+                        describedBy={ids.noteId}
+                      />
+                    )}
+                  />
+                )}
               </RowCard>
             </Section>
 

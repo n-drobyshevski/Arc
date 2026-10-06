@@ -165,7 +165,7 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
             follow = true,
             initialToolsOpen = tools,
             initialNoteOpen = noteOpen,
-            onPad = if (playingPads.isNotEmpty()) ({ _, _ -> }) else null,
+            onPad = if (playingPads.isNotEmpty()) ({ _, _, _ -> }) else null,
             playingPads = playingPads,
             keys = keys,
             onPianoRange = { pianoRange = it },

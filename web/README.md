@@ -44,6 +44,7 @@ platform/       the browser behind small interfaces (the Android parts of app/)
   share/          navigator.share with a save fallback
   audio/          playback (SoundPlayer); Live's low-latency output (LiveAudio, an AudioWorklet mixer)
   wakelock/       screen wake lock (TransferService, keepScreenOn)
+  haptics.ts      the pads' and keys' haptic tick (navigator.vibrate, where there is one)
 state/          the controller the UI talks to (ArcController.kt); see state/README.md
 boot/           browserDeps.ts: wires platform/ into the controller's Deps
 ui/             components, screens, sheets, navigation, theme; see ui/README.md

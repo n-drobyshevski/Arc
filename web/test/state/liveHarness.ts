@@ -30,6 +30,8 @@ export interface LiveHarness {
   liveAudio: FakeLiveAudio
   toasts: ToastMsg[]
   setVisible(v: boolean): void
+  /** The page is going away (pagehide). */
+  pageHide(): void
 }
 
 export interface LiveHarnessOptions {
@@ -65,6 +67,7 @@ export async function liveHarness(opts: LiveHarnessOptions = {}): Promise<LiveHa
   const padSounds = opts.padSounds ?? memoryPadSoundStore()
   const liveAudio = fakeLiveAudio()
   const visListeners = new Set<(v: boolean) => void>()
+  const hideListeners = new Set<() => void>()
   let visible = true
   const deps: Deps = {
     midi: {
@@ -98,6 +101,10 @@ export async function liveHarness(opts: LiveHarnessOptions = {}): Promise<LiveHa
         visListeners.add(l)
         return () => visListeners.delete(l)
       },
+      onPageHide: (l) => {
+        hideListeners.add(l)
+        return () => hideListeners.delete(l)
+      },
     },
     title: { get: () => 'arc', set: () => {} },
     launchFiles: () => false,
@@ -121,6 +128,9 @@ export async function liveHarness(opts: LiveHarnessOptions = {}): Promise<LiveHa
     setVisible(v) {
       visible = v
       for (const l of [...visListeners]) l(v)
+    },
+    pageHide() {
+      for (const l of [...hideListeners]) l()
     },
   }
   all.push(h)

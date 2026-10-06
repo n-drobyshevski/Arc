@@ -34,7 +34,22 @@ export type ToMixer =
       readonly tag: number
     }
   | { readonly t: 'release'; readonly key: string }
+  /** VoiceMixer.cut: the voice ends in CHOKE_MS, minimum gate or not (a press that became a scroll). */
+  | { readonly t: 'cut'; readonly key: string }
   | { readonly t: 'stopAll' }
+
+/**
+ * [m] as it is posted to the worklet, and what moves with it: a 'load' takes
+ * a copy of just its samples (a view's whole buffer would be cloned
+ * otherwise) whose buffer is transferred, so the main thread's own array is
+ * never detached and no second clone waits in the port. Every other command
+ * is posted as it is.
+ */
+export function transferable(m: ToMixer): [ToMixer, Transferable[]] {
+  if (m.t !== 'load') return [m, []]
+  const pcm = m.pcm.slice()
+  return [{ t: 'load', id: m.id, pcm }, [pcm.buffer]]
+}
 
 /** A voice that began: its press [tag] and the context time ([time], s) its first frame plays at. */
 export interface StartedVoice {
@@ -85,13 +100,19 @@ export class MixerHost {
       case 'release':
         this.mixer.release(m.key)
         return
+      case 'cut':
+        this.mixer.cut(m.key)
+        return
       case 'stopAll':
         this.mixer.stopAll()
         return
     }
   }
 
-  /** Mixes [frames] frames into [left]/[right]; [time] is the context time the first one plays at. */
+  /**
+   * Mixes [frames] frames into [left]/[right]; [time] is the context time the
+   * first one plays at. A quantum allocates only when it has news to post.
+   */
   render(left: Float32Array, right: Float32Array, frames: number, time: number): void {
     const before = this.mixer.frame
     this.mixer.renderPlanar(left, right, frames)

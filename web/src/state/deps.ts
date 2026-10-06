@@ -95,12 +95,19 @@ export interface LivePress {
  */
 export interface LiveAudioDeps {
   /**
-   * Opens the output (Live came on screen); nothing is heard until a voice
-   * starts. [sampleRate]: a rate to ask for (default: the output's own).
-   * False when there is no output.
+   * Opens the output (Live came on screen) or wakes a suspended one, ready
+   * before the first press; nothing is heard until a voice starts.
+   * [sampleRate]: a rate to ask for (default: the output's own). False when
+   * there is no output.
    */
   open(sampleRate?: number): boolean | Promise<boolean>
-  /** Closes it (Live left the screen); what was sounding stops. Loaded samples may be dropped. */
+  /**
+   * Live left the screen or the tab was hidden: what was sounding stops, and
+   * the output is suspended but kept, with its samples, for a quick return
+   * (absent: [close]).
+   */
+  suspend?(): void
+  /** Lets the output go (long away, or the page unloads); what was sounding stops. Loaded samples may be dropped. */
   close(): void
   /** Wakes the output: call synchronously from a tap, before any await (browsers start audio only after one). */
   resumeInGesture(): void
@@ -117,6 +124,8 @@ export interface LiveAudioDeps {
   press(id: string, key: string, options: LivePress): boolean
   /** The finger left: voice [id] fades out (it still sounds a moment when the tap was very short). */
   release(id: string): void
+  /** The press became a scroll: voice [id] ends at once (a short fade, however short the press was). */
+  cut(id: string): void
   stopAll(): void
   /** The voices sounding (pad and key ids), for the rings (ArcController.liveKeys). */
   readonly voices: ReadonlySignal<ReadonlySet<string>>
@@ -142,6 +151,7 @@ export function nullLiveAudio(): LiveAudioDeps {
     unload: () => {},
     press: () => false,
     release: () => {},
+    cut: () => {},
     stopAll: () => {},
     voices,
     description: '',
@@ -178,6 +188,8 @@ export interface ShareDeps {
 export interface VisibilityDeps {
   visible(): boolean
   subscribe(listener: (visible: boolean) => void): () => void
+  /** The page is being unloaded or put in the back-forward cache (pagehide): onDestroy's stand-in. */
+  onPageHide?(listener: () => void): () => void
 }
 
 /** The document title (the progress notification's stand-in). */
@@ -214,6 +226,12 @@ export interface Deps {
   perfNow(): number
   setTimeout(fn: () => void, ms: number): unknown
   clearTimeout(handle: unknown): void
+  /**
+   * Runs [fn] at the display's next frame (requestAnimationFrame), or after a
+   * short timer where frames don't come (no window, a hidden tab); returns
+   * a cancel. Absent: the short timer.
+   */
+  requestFrame?: ((fn: () => void) => () => void) | undefined
   /** Adds a beforeunload guard (preventDefault) until the returned function is called. */
   guardUnload(): () => void
   visibility: VisibilityDeps

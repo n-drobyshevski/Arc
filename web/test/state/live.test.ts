@@ -12,8 +12,10 @@ import { FeatureText } from '../../src/core/text/featureText'
 import { BackupDevice, type BackupRecord } from '../../src/core/text/libraryRules'
 import { MirrorText } from '../../src/core/text/mirrorText'
 import { WebText } from '../../src/core/text/webText'
+import { NullPlayer } from '../../src/platform/audio/player'
 import { MemoryTarget } from '../../src/platform/storage/external'
 import { LIVE_KEY, memoryStorage, SETTINGS_KEY } from '../../src/platform/storage/settings'
+import { LIVE_AUDIO_KEEP_MS } from '../../src/state/controller'
 import { createStore } from '../../src/state/store'
 import { Tasks } from '../../src/state/tasks'
 import { HOME_TAB, initialState } from '../../src/state/types'
@@ -216,6 +218,31 @@ describe('Live: copies of the pad sounds', () => {
     await vi.waitFor(async () => expect(await h.padSounds.has('s108.wav')).toBe(true))
   })
 
+  it("a device sound Live holds plays from memory: the device isn't asked", async () => {
+    const h = await liveOn()
+    await copied(h)
+    await vi.waitFor(() => expect(h.liveAudio.loaded.has('1:kick')).toBe(true))
+    const player = h.deps.player as NullPlayer
+    const traffic = h.mock.log.length
+    await h.c.playDeviceSound(1)
+    expect(player.plays.at(-1)).toMatchObject({ key: 'device:1', channels: 1 })
+    expect(h.mock.log.length).toBe(traffic)
+  })
+
+  it("without Live, it plays arc's copy, decoded once: the device isn't asked", async () => {
+    const h = await liveOn()
+    await copied(h)
+    // Live's samples are let go with the mirror; the copies stay.
+    h.c.closeMirror()
+    const player = h.deps.player as NullPlayer
+    const traffic = h.mock.log.length
+    await h.c.playDeviceSound(5)
+    await h.c.playDeviceSound(5)
+    expect(player.plays.map((p) => p.key)).toEqual(['device:5', 'device:5'])
+    expect(player.plays[1]?.pcm).toBe(player.plays[0]?.pcm)
+    expect(h.mock.log.length).toBe(traffic)
+  })
+
   it('clears the copies: the size goes to 0, the pads then play from a backup, else say there is none', async () => {
     const h = await liveOn()
     await copied(h)
@@ -256,6 +283,103 @@ describe('Live: playing pads', () => {
     // The pad tapped is also the KEYS sound, kept for next time.
     expect(h.c.state.value.keysPad).toMatchObject({ group: 0, offset: 4 })
     expect(h.storage.getItem('arc.mirror.keysPad')).toBe('0:4')
+  })
+
+  it('starts the sound before noting the KEYS pad', async () => {
+    const h = await liveOn()
+    await copied(h)
+    await vi.waitFor(() => expect(h.liveAudio.loaded.has('5:clap')).toBe(true))
+    const order: string[] = []
+    const press = h.liveAudio.press.bind(h.liveAudio)
+    h.liveAudio.press = (id, key, options) => {
+      order.push('press')
+      return press(id, key, options)
+    }
+    const setKeysPad = h.deps.mirrorPrefs.setKeysPad.bind(h.deps.mirrorPrefs)
+    h.deps.mirrorPrefs.setKeysPad = (pad) => {
+      order.push('keys pad')
+      setKeysPad(pad)
+    }
+    await h.c.playPad(A5)
+    expect(order).toEqual(['press', 'keys pad'])
+    expect(h.c.state.value.keysPad).toMatchObject({ group: 0, offset: 4 })
+  })
+
+  it('a press that became a scroll is cut, not released', async () => {
+    const h = await liveOn()
+    await copied(h)
+    await vi.waitFor(() => expect(h.liveAudio.loaded.has('1:kick')).toBe(true))
+    await h.c.playPad(A1)
+    h.c.cutPad(A1)
+    expect(h.liveAudio.cuts).toEqual(['live:0:0'])
+    expect(h.liveAudio.releases).toEqual([])
+    expect(h.c.playingPads.value.size).toBe(0)
+    // The next press of that pad plays as usual.
+    await h.c.playPad(A1)
+    expect(h.liveAudio.presses.map((p) => p.id)).toEqual(['live:0:0', 'live:0:0'])
+  })
+
+  it('a pad cut while its sound was loading never starts', async () => {
+    const h = await liveOn()
+    await copied(h)
+    await h.c.clearPadSounds()
+    await backupWith(h, 'b', 1, 'kick')
+    const playing = h.c.playPad(A1)
+    h.c.cutPad(A1)
+    await playing
+    expect(h.liveAudio.presses).toEqual([])
+  })
+
+  it('an unsure press (the scrolling page) sounds from memory at once, but becomes the KEYS sound only once kept', async () => {
+    const h = await liveOn()
+    await copied(h)
+    await vi.waitFor(() => expect(h.liveAudio.loaded.has('5:clap')).toBe(true))
+    const before = h.c.state.value.keysPad
+    await h.c.playPad(A5, true, true)
+    expect(h.liveAudio.presses.at(-1)).toMatchObject({ id: 'live:0:4', key: '5:clap' })
+    expect(h.c.state.value.keysPad).toBe(before)
+    await h.c.keepPad(A5)
+    expect(h.c.state.value.keysPad).toMatchObject({ group: 0, offset: 4 })
+    expect(h.storage.getItem('arc.mirror.keysPad')).toBe('0:4')
+    // Kept once: a second keep does nothing.
+    await h.c.keepPad(A5)
+    expect(h.liveAudio.presses).toHaveLength(1)
+  })
+
+  it('an unsure press cut by a scroll leaves the KEYS sound alone', async () => {
+    const h = await liveOn()
+    await copied(h)
+    await vi.waitFor(() => expect(h.liveAudio.loaded.has('5:clap')).toBe(true))
+    await h.c.playPad(A1)
+    await h.c.playPad(A5, true, true)
+    h.c.cutPad(A5)
+    await h.c.keepPad(A5)
+    expect(h.liveAudio.cuts).toEqual(['live:0:4'])
+    expect(h.c.state.value.keysPad).toMatchObject({ group: 0, offset: 0 })
+  })
+
+  it('an unsure press not in memory loads nothing, and says nothing, until kept', async () => {
+    const h = await liveOn()
+    await copied(h)
+    await h.c.clearPadSounds()
+    await backupWith(h, 'b', 1, 'kick')
+    const toasts = h.toasts.length
+    // Cut: never loads, never sounds, no toast; an empty pad doesn't say "no sample" either.
+    await h.c.playPad(A1, true, true)
+    await h.c.playPad(D12, true, true)
+    h.c.cutPad(A1)
+    h.c.cutPad(D12)
+    await h.c.keepPad(A1)
+    expect(h.liveAudio.presses).toEqual([])
+    expect(h.toasts.length).toBe(toasts)
+    // Kept (the window closed): it loads and plays now.
+    await h.c.playPad(A1, true, true)
+    expect(h.liveAudio.presses).toEqual([])
+    await h.c.keepPad(A1)
+    expect(h.liveAudio.presses.map((p) => p.id)).toEqual(['live:0:0'])
+    await h.c.playPad(D12, true, true)
+    await h.c.keepPad(D12)
+    expect(h.toasts.at(-1)?.text).toBe(MirrorText.NO_SAMPLE)
   })
 
   it("a screen reader's Play plays the whole sample: no gate, no release", async () => {
@@ -494,18 +618,49 @@ describe('Live offline', () => {
 })
 
 describe('Live lifecycle', () => {
-  it('opens its output while in front, closes it when left or hidden, and stops its sounds on leaving', async () => {
+  it('opens its output while in front; left or hidden it is suspended, stops its sounds, and is let go after a while away', async () => {
     const h = await liveHarness()
+    // The controller's timers, run by hand.
+    const timers: { fn: () => void; ms: number; cleared: boolean }[] = []
+    h.deps.setTimeout = (fn, ms) => {
+      const t = { fn, ms, cleared: false }
+      timers.push(t)
+      return t
+    }
+    h.deps.clearTimeout = (t) => {
+      if (t) (t as { cleared: boolean }).cleared = true
+    }
+    const keep = () => timers.filter((t) => t.ms === LIVE_AUDIO_KEEP_MS)
     h.c.setLive(true)
     expect(h.liveAudio.opened).toBe(1)
     h.setVisible(false)
+    expect(h.liveAudio.suspended).toBe(1)
+    expect(h.liveAudio.closed).toBe(0)
+    expect(keep()).toHaveLength(1)
+    // Back within the minute: woken, the close called off.
+    h.setVisible(true)
+    expect(h.liveAudio.opened).toBe(2)
+    expect(keep()[0]?.cleared).toBe(true)
+    h.c.tabChanged('live', 'backups')
+    expect(h.liveAudio.suspended).toBe(2)
+    expect(h.liveAudio.closed).toBe(0)
+    expect(h.liveAudio.log).toContain('stopAll')
+    expect(h.c.state.value.mirror).toBeNull()
+    // A minute away: let go.
+    const t = keep().at(-1)!
+    expect(t.cleared).toBe(false)
+    t.fn()
+    expect(h.liveAudio.closed).toBe(1)
+  })
+
+  it('lets the output go at once when the page goes, and opens it again on coming back', async () => {
+    const h = await liveHarness()
+    h.c.setLive(true)
+    h.setVisible(false)
+    h.pageHide()
     expect(h.liveAudio.closed).toBe(1)
     h.setVisible(true)
     expect(h.liveAudio.opened).toBe(2)
-    h.c.tabChanged('live', 'backups')
-    expect(h.liveAudio.closed).toBe(2)
-    expect(h.liveAudio.log).toContain('stopAll')
-    expect(h.c.state.value.mirror).toBeNull()
   })
 
   it('Live is the home section', () => {

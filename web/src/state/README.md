@@ -120,9 +120,12 @@ library folder), `restoreFromFolder(target)`, `reconnectFolder()`* (the banner t
 **Live**: `mirrorName(pad)`, `setPadOrder(order)`, `padOrder()`, `forgetLearned()`.
 (`openMirror`/`pauseMirror`/`closeMirror` exist but are driven by `setLive`/`tabChanged`.)
 - Pads sound while held (a gate) and play alongside each other (chords, up
-  to 8): `playPad(pad, hold = true)`* on pointerdown, `releasePad(pad)` on
-  pointerup/cancel; `hold: false` (a screen reader's Play) plays the whole
-  sample. The sound comes from arc's copy of the device's sound, else the
+  to 8): `playPad(pad, hold = true, unsure = false)`* on pointerdown,
+  `releasePad(pad)` on pointerup, `cutPad(pad)` when the press turned into a
+  scroll (a short fade, minimum gate or not; the all-groups page); `hold: false` (a screen reader's Play) plays the whole
+  sample. On the all-groups page the press is `unsure`: a sample in memory
+  sounds at once, but the KEYS pad, a load and its toasts wait for
+  `keepPad(pad)` (no scroll within the window), and a cut drops them. The sound comes from arc's copy of the device's sound, else the
   newest backup holding it, else (connected) the device; errors and "no
   copy" / "no sample yet" are toasts. A tapped pad becomes the KEYS sound.
 - KEYS: `playKey(index, hold = true)`* / `releaseKey(index)` (0 = '.', the
@@ -137,7 +140,8 @@ library folder), `restoreFromFolder(target)`, `reconnectFolder()`* (the banner t
 `setLiveOneGroup(on)`, `setLiveFollow(on)`, `setKeysNames(names)` (Note names
 on the keys), `padSoundsSize(): Promise<number>` (bytes, for
 `SettingsText.padSounds(Format.bytes(n))`) and `clearPadSounds()`,
-`setGuideSeen()`, `pruneCount(keep)` (for the confirm dialog), then `setKeepLast(keep)`.
+`setHaptics(on)` (the pads' and keys' tick; show the row only where
+`platform/haptics` `supported()`), `setGuideSeen()`, `pruneCount(keep)` (for the confirm dialog), then `setKeepLast(keep)`.
 
 **Debug log**: `logText()`, `logFileName()`, `saveLog()`*, `shareLog()`*, `copyLog()`*.
 
@@ -152,10 +156,12 @@ need transient activation.
 - A running task sets a leave-page guard, the document title shows progress,
   and the screen wake lock is held; tell the user to keep the tab in front.
 - Another tab may own the device (`Connection` toasts it); only one tab connects.
-- Hiding the page stops playback, pauses the mirror and closes Live's output.
-- Browsers start audio only after a tap: Live's output is set up on the first
-  press when the page had none yet, so call `playPad`/`playKey` synchronously
-  from the pointerdown handler.
+- Hiding the page stops playback, pauses the mirror and suspends Live's output
+  (as leaving Live does); it is closed after `LIVE_AUDIO_KEEP_MS` away, or on
+  pagehide.
+- Browsers start audio only after a tap: Live's output is set up when Live
+  opens and the first press wakes it, so call `playPad`/`playKey`
+  synchronously from the pointerdown handler.
 - Restoring from a folder brings back the settings, Live's learned pads
   (combined with those learned since), the pad order (unless one was chosen
   since), the guide flag and live.json (unless this browser's read is newer),

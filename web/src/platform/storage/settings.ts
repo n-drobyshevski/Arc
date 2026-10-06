@@ -58,6 +58,8 @@ export interface AppSettings {
   readonly keysViewTall: KeysView
   /** The piano's white keys (Piano.WHITES); null is Auto, the widest that fits. */
   readonly pianoWhites: number | null
+  /** A light tick (navigator.vibrate) when a pad or key goes down under a finger. */
+  readonly haptics: boolean
 }
 
 export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
@@ -78,6 +80,7 @@ export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
   keysViewWide: KeysView.AUTO,
   keysViewTall: KeysView.AUTO,
   pianoWhites: null,
+  haptics: true,
 })
 
 /** Every setting's key, in Android's order (SettingsStore.values()). */
@@ -98,6 +101,7 @@ export const SETTING_KEYS = Object.freeze([
   'keysViewWide',
   'keysViewTall',
   'pianoWhites',
+  'haptics',
 ] as const)
 export type SettingKey = (typeof SETTING_KEYS)[number]
 
@@ -259,6 +263,7 @@ export function readSettings(raw: string | null): AppSettings {
     keysViewTall: keysViewOf(typeof o.keysViewTall === 'string' ? o.keysViewTall : null) ?? KeysView.AUTO,
     // getInt("pianoWhites", 0): 0 (or any size arc doesn't offer) is Auto.
     pianoWhites: pianoChoiceOf(int('pianoWhites', 0)),
+    haptics: bool('haptics', true),
   }
 }
 
@@ -300,6 +305,7 @@ export function settingValues(s: AppSettings): Record<SettingKey, string> {
     keysViewTall: s.keysViewTall,
     // Stored like keepLast: 0 for Auto.
     pianoWhites: String(s.pianoWhites ?? 0),
+    haptics: String(s.haptics),
   }
 }
 
@@ -355,6 +361,7 @@ export function settingsFromIndex(map: Readonly<Record<string, string>>, cur: Ap
     keysViewWide: keysViewOf(get(map, 'app.keysViewWide')) ?? cur.keysViewWide,
     keysViewTall: keysViewOf(get(map, 'app.keysViewTall')) ?? cur.keysViewTall,
     pianoWhites: whites === null ? cur.pianoWhites : whites === 0 ? null : (pianoChoiceOf(whites) ?? cur.pianoWhites),
+    haptics: b('app.haptics') ?? cur.haptics,
   }
 }
 

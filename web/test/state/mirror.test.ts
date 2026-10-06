@@ -177,6 +177,39 @@ describe('live mirror', () => {
     await until(h, (st) => st.mirror?.state.pads.has(padKeyOf(A7)) === false)
   })
 
+  it('publishes at the next frame, once for a burst of notes, and nothing while idle', async () => {
+    const h = await live()
+    let last = h.c.state.value.mirror
+    let publishes = 0
+    const off = h.c.store.subscribe((st) => {
+      if (st.mirror === last) return
+      last = st.mirror
+      publishes++
+    })
+    try {
+      // No polling: an idle mirror publishes nothing.
+      await sleep(120)
+      expect(publishes).toBe(0)
+      h.ep.input.receive([0x90, NOTE_A7, 100])
+      h.ep.input.receive([0x90, 40, 90])
+      h.ep.input.receive([0x90, 41, 80])
+      const s = await until(h, (st) => st.mirror?.state.notes.size === 3)
+      expect(s.mirror!.state.pads.has(padKeyOf(A7))).toBe(true)
+      expect(publishes).toBe(1)
+      // Held notes have nothing left to time out: still nothing more.
+      await sleep(120)
+      expect(publishes).toBe(1)
+      // Released, each drops once faded (one timer, no loop).
+      h.ep.input.receive([0x80, NOTE_A7, 0])
+      h.ep.input.receive([0x80, 40, 0])
+      h.ep.input.receive([0x80, 41, 0])
+      await until(h, (st) => st.mirror?.state.notes.size === 0)
+      expect(publishes).toBe(3)
+    } finally {
+      off()
+    }
+  })
+
   it('names pads straight away with links learned in an earlier session', async () => {
     const storage = memoryStorage({ 'arc.mirror.learned': '9:1,99:3,x' })
     const h = await live(storage)

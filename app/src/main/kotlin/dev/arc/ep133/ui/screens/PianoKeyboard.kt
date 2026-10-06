@@ -86,7 +86,8 @@ import kotlin.math.roundToInt
  * body with a gap between white keys. A key goes down on its edge under a
  * finger (whether or not it has a sound) and while it sounds on the phone,
  * and each key a finger lands or slides onto gives a key tap of haptic
- * feedback (as the phone's settings allow).
+ * feedback, just after its note starts (when Settings has it on, and as the
+ * phone's settings allow).
  */
 
 /** How far past a key's edge a sliding finger keeps it, so it doesn't flicker between two keys. */
@@ -118,15 +119,17 @@ internal fun PianoKeyboard(
     now: () -> Long,
     actions: KeysActions,
     modifier: Modifier = Modifier,
+    /** A light tick as a key goes down (Settings → Haptic feedback). */
+    haptics: Boolean = true,
 ) {
     // Low notes on the left in every language, as on the instrument.
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-        Keyboard(range, st, keys, now, actions, modifier)
+        Keyboard(range, st, keys, now, actions, modifier, haptics)
     }
 }
 
 @Composable
-private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> Long, actions: KeysActions, modifier: Modifier) {
+private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> Long, actions: KeysActions, modifier: Modifier, haptics: Boolean) {
     val c = LocalArcColors.current
     val hw = LocalHwColors.current
     val density = LocalDensity.current
@@ -139,7 +142,7 @@ private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> 
     val touches = remember { NoteTouches() }
     val currentRange by rememberUpdatedState(range)
     val currentActions by rememberUpdatedState(actions)
-    val haptics by rememberUpdatedState(LocalHapticFeedback.current)
+    val tick by rememberUpdatedState(if (haptics) LocalHapticFeedback.current else null)
     // The notes a finger is on, and how far down each key is (0..1, read while drawing).
     val fingered = remember { mutableStateOf(emptySet<Int>()) }
     val down = remember { mutableStateMapOf<Int, Float>() }
@@ -147,8 +150,9 @@ private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> 
         events.forEach { e ->
             when (e) {
                 is NoteEvent.Press -> {
-                    haptics.performHapticFeedback(HapticFeedbackType.KeyboardTap)
+                    // The sound first, then the tick.
                     currentActions.onNote(e.note, true)
+                    tick?.performHapticFeedback(HapticFeedbackType.KeyboardTap)
                 }
                 is NoteEvent.Release -> currentActions.onNoteUp(e.note)
             }

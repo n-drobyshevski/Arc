@@ -4,10 +4,8 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
-import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTimestamp
-import android.media.AudioTrack
 import dev.arc.ep133.features.RecState
 import dev.arc.ep133.features.TakeRecorder
 import dev.arc.ep133.formats.VoiceMixer
@@ -22,14 +20,18 @@ import java.util.concurrent.Executors
  * A press only adds a voice, so it is heard after one or two of the output's
  * buffers (a few milliseconds each) rather than after a new track is set up.
  *
- * The stream runs at the phone's own sample rate with Android's low-latency
- * mode, which is what lets it take the fast mixer path; the EP-133's 46875 Hz
- * sounds are converted as they are mixed. It starts with a buffer of two
- * bursts and grows by one whenever the output runs dry.
+ * The stream ([BurstOutput]) runs at the phone's own sample rate with
+ * Android's low-latency mode, which is what lets it take the fast mixer path;
+ * the EP-133's 46875 Hz sounds are converted as they are mixed. Each burst is
+ * mixed just before the output has room for it, so a press waits for no
+ * burst already mixed. The buffer starts at two bursts, grows by one whenever
+ * the output runs dry, and shrinks back after a quiet while. The audio thread
+ * allocates nothing per burst.
  *
  * [onStarted] gets each voice's latency: from the press ([VoiceMixer.start]'s
- * tag, System.nanoTime) to when its first frame leaves the output, and where
- * the output goes. It is called on the audio thread.
+ * tag, System.nanoTime) to when its first frame leaves the output, from the
+ * output's timestamp, and where the output goes. It is called on the audio
+ * thread with the bare numbers: it should hand them on, not format them there.
  *
  * REC ([arm]) records the mix into a take: from the first sound after it to
  * [stopRecording], Live closing or [TakeRecorder.MAX_SECONDS]. [onTake] gets
@@ -60,7 +62,7 @@ class LiveAudio(
     /** The voices sounding (pad and key ids), for the rings. */
     val keys: StateFlow<Set<String>> = _keys
 
-    private class Stream(val track: AudioTrack, val mixer: VoiceMixer, val burst: Int) {
+    private class Stream(val output: BurstOutput, val mixer: VoiceMixer) {
         @Volatile var running = true
         lateinit var thread: Thread
     }
@@ -86,38 +88,10 @@ class LiveAudio(
     @Synchronized
     fun open(): Boolean {
         if (stream != null) return true
-        val rate = audio.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)?.toIntOrNull() ?: 48000
-        val burst = audio.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER)?.toIntOrNull()?.takeIf { it > 0 } ?: 256
-        val mask = AudioFormat.CHANNEL_OUT_STEREO
-        val minBuffer = AudioTrack.getMinBufferSize(rate, mask, AudioFormat.ENCODING_PCM_16BIT)
-        if (minBuffer <= 0) return false
-        val track = runCatching {
-            AudioTrack.Builder()
-                .setAudioAttributes(attributes)
-                .setAudioFormat(
-                    AudioFormat.Builder()
-                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                        .setSampleRate(rate)
-                        .setChannelMask(mask)
-                        .build(),
-                )
-                .setTransferMode(AudioTrack.MODE_STREAM)
-                .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
-                // Room to grow into when the output runs dry; what is used is set below.
-                .setBufferSizeInBytes(maxOf(minBuffer, burst * 8 * 4))
-                .build()
-        }.getOrNull() ?: return false
-        if (track.state != AudioTrack.STATE_INITIALIZED) {
-            track.release()
-            return false
-        }
-        // Two bursts on the fast path; a phone that doesn't grant it gets its usual buffer.
-        val fast = track.performanceMode == AudioTrack.PERFORMANCE_MODE_LOW_LATENCY
-        track.setBufferSizeInFrames(if (fast) burst * 2 else minBuffer / 4)
-        description = "${track.sampleRate} Hz, $burst-frame bursts, " + if (fast) "low-latency path" else "normal path (no low-latency output)"
-        val s = Stream(track, VoiceMixer(track.sampleRate), burst)
+        val output = BurstOutput.open(audio, attributes) ?: return false
+        description = output.description
+        val s = Stream(output, VoiceMixer(output.rate))
         stream = s
-        track.play()
         s.thread = Thread({ run(s) }, "arc-live-audio").apply {
             isDaemon = true
             start()
@@ -159,7 +133,7 @@ class LiveAudio(
         if (_rec.value != RecState.Idle) return true
         if (stream == null && !open()) return false
         val s = stream ?: return false
-        val rate = s.track.sampleRate
+        val rate = s.output.rate
         lateinit var take: Take
         take = Take(
             TakeRecorder(rate),
@@ -181,12 +155,17 @@ class LiveAudio(
         stream?.mixer?.release(key)
     }
 
+    /** Ends voice [key] at once, in a few milliseconds: the press turned out to be a scroll. */
+    fun cut(key: String) {
+        stream?.mixer?.cut(key)
+    }
+
     fun stopAll() {
         stream?.mixer?.stopAll()
     }
 
     /** Where the output goes now, once it is open. */
-    fun route(): AudioDeviceInfo? = stream?.track?.routedDevice
+    fun route(): AudioDeviceInfo? = stream?.output?.route
 
     private fun letGoOfFocus() {
         if (!focused) return
@@ -196,13 +175,16 @@ class LiveAudio(
 
     private fun run(s: Stream) {
         android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
-        val out = ShortArray(s.burst * 2)
+        val o = s.output
+        val out = ShortArray(o.burst * 2)
         val ts = AudioTimestamp()
-        var underruns = 0
         var quietSince = 0L
+        var shown: Set<String> = emptySet()
         var take: Take? = null
         try {
             while (s.running) {
+                // Mixed only once the output has room for it, so a press made meanwhile is in it.
+                if (!o.ready()) continue
                 armed?.let {
                     armed = null
                     take?.let { t -> end(t) }
@@ -215,10 +197,13 @@ class LiveAudio(
                     if (armed == null) _rec.value = RecState.Idle
                 }
                 val at = s.mixer.frame
-                s.mixer.render(out, s.burst)
-                val started = s.mixer.started.toList()
+                s.mixer.render(out, o.burst)
+                // The mixer's own list, read here on its thread: no copy.
+                val started = s.mixer.started
                 take?.let { t ->
-                    val k = t.recorder.onBurst(out, s.burst, at, started.minOfOrNull { it.frame })
+                    var first = Long.MAX_VALUE
+                    for (i in started.indices) first = minOf(first, started[i].frame)
+                    val k = t.recorder.onBurst(out, o.burst, at, if (started.isEmpty()) null else first)
                     if (k != null) t.writer.write(out, k.from, k.frames)
                     if (k?.last == true) {
                         t.limit = true
@@ -226,14 +211,19 @@ class LiveAudio(
                         take = null
                         _rec.value = RecState.Idle
                     } else if (t.recorder.state == TakeRecorder.State.RECORDING) {
-                        val now = RecState.Recording(t.recorder.seconds)
-                        if (s.running && _rec.value != now) _rec.value = now
+                        // A new state only when the seconds shown change.
+                        val seconds = t.recorder.seconds
+                        if (s.running && (_rec.value as? RecState.Recording)?.seconds != seconds) _rec.value = RecState.Recording(seconds)
                     }
                 }
-                if (s.track.write(out, 0, out.size, AudioTrack.WRITE_BLOCKING) < 0) break
-                if (started.isNotEmpty()) report(s, started, ts)
+                if (!o.write(out)) break
+                if (started.isNotEmpty()) report(o, started, ts)
+                // The mixer makes a new set only when the voices change.
                 val keys = s.mixer.keys
-                if (s.running && keys != _keys.value) _keys.value = keys
+                if (keys !== shown) {
+                    shown = keys
+                    if (s.running) _keys.value = keys
+                }
                 // Quiet for two seconds: other apps may have the output back.
                 if (keys.isEmpty()) {
                     if (quietSince == 0L) quietSince = System.nanoTime()
@@ -241,13 +231,7 @@ class LiveAudio(
                 } else {
                     quietSince = 0L
                 }
-                // The output ran dry: a burst more of buffer, while there is room.
-                val u = s.track.underrunCount
-                if (u > underruns) {
-                    underruns = u
-                    val size = s.track.bufferSizeInFrames
-                    if (size + s.burst <= s.track.bufferCapacityInFrames) s.track.setBufferSizeInFrames(size + s.burst)
-                }
+                o.adjust()
             }
         } finally {
             // Live closing ends the take; it is saved like any other.
@@ -256,11 +240,7 @@ class LiveAudio(
                 armed = null
                 end(it)
             }
-            runCatching {
-                s.track.pause()
-                s.track.flush()
-            }
-            s.track.release()
+            o.release()
         }
     }
 
@@ -269,18 +249,16 @@ class LiveAudio(
         t.writer.finish(t.recorder.stop())
     }
 
-    /** When each new voice's first frame is heard, from the output's timestamp. */
-    private fun report(s: Stream, started: List<VoiceMixer.Started>, ts: AudioTimestamp) {
-        val rate = s.track.sampleRate.toDouble()
-        val now = System.nanoTime()
-        val (atNanos, atFrame) = if (s.track.getTimestamp(ts)) {
-            ts.nanoTime to ts.framePosition
-        } else {
-            // No timestamp yet (the output just opened): what is written but not played.
-            now to s.track.playbackHeadPosition.toLong()
-        }
-        val route = s.track.routedDevice
-        for (v in started) {
+    /** When each new voice's first frame is heard, from the output's timestamp; the numbers go to [onStarted]. */
+    private fun report(o: BurstOutput, started: List<VoiceMixer.Started>, ts: AudioTimestamp) {
+        val rate = o.rate.toDouble()
+        // No timestamp yet (the output just opened): what is written but not played.
+        val stamped = o.track.getTimestamp(ts)
+        val atNanos = if (stamped) ts.nanoTime else System.nanoTime()
+        val atFrame = if (stamped) ts.framePosition else o.track.playbackHeadPosition.toLong()
+        val route = o.route
+        for (i in started.indices) {
+            val v = started[i]
             if (v.tag == 0L) continue
             val heardAt = atNanos + ((v.frame - atFrame) / rate * 1e9).toLong()
             onStarted(v.key, (heardAt - v.tag) / 1e6, route)

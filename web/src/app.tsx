@@ -33,6 +33,7 @@ import { SettingsText } from './core/text/settingsText'
 import { Strings } from './core/text/strings'
 import { WebText } from './core/text/webText'
 import { attachDrop, isPakName } from './platform/files/pick'
+import { supported as hapticsSupported } from './platform/haptics'
 import type { ArcController } from './state/controller'
 import { emptyMirrorState, type MirrorUi, type TaskUi } from './state/types'
 import { APP_BUILD } from './version'
@@ -194,6 +195,8 @@ function Root(): JSX.Element {
         onNoteNames={(n) => c.setKeysNames(n)}
         onShowNames={(on) => c.setKeysShowNames(on)}
         onPianoWhites={(w) => c.setPianoWhites(w)}
+        hapticsSupported={hapticsSupported()}
+        onHaptics={(on) => c.setHaptics(on)}
         onRestoreFolder={() => void c.pickFolder()}
         onReconnectFolder={() => void c.reconnectFolder()}
         onExportLibrary={() => void c.exportLibrary()}
@@ -364,9 +367,13 @@ function TabScreen(props: { view: NavView; editPads: boolean; onEditPads: (on: b
             } else if (cur === undefined) nav.open(dialogLayer(PICK + p))
             else if (cur !== PICK + p) nav.replace(dialogLayer(cur), dialogLayer(PICK + p))
           }}
-          onPad={(pad, hold) => void c.playPad(pad, hold)}
+          onPad={(pad, hold, unsure) => void c.playPad(pad, hold, unsure)}
+          onPadKept={(pad) => void c.keepPad(pad)}
           onPadUp={(pad) => c.releasePad(pad)}
-          playingPads={c.playingPads.value}
+          onPadCut={(pad) => c.cutPad(pad)}
+          // Signals, read by each pad and key: a voice doesn't re-render this screen.
+          playing={{ pads: c.playingPads, keys: c.playingKeys, notes: c.playingNotes }}
+          haptics={settings.haptics}
           keys={{
             on: settings.liveKeys,
             root: settings.keysRoot,
@@ -376,8 +383,6 @@ function TabScreen(props: { view: NavView; editPads: boolean; onEditPads: (on: b
             showNames: settings.keysShowNames,
             pad: state.keysPad,
             padName: state.keysPad ? c.mirrorName(state.keysPad) : null,
-            playingKeys: c.playingKeys.value,
-            playingNotes: c.playingNotes.value,
             pianoWhites: settings.pianoWhites,
           }}
           keysViewWide={settings.keysViewWide}

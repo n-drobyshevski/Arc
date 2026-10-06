@@ -11,6 +11,7 @@ import {
   isSlowOutput,
   outputLatency,
   s16leToInt16,
+  transferable,
   type FromMixer,
   type LiveBackend,
   type LiveContextLike,
@@ -30,11 +31,17 @@ class FakeContext implements LiveContextLike {
   baseLatency: number | undefined = 0.005
   outputLatency: number | undefined = 0.02
   resumes = 0
+  suspends = 0
   closed = false
   timestamp: { contextTime?: number; performanceTime?: number } | null = null
   private listeners: (() => void)[] = []
   resume(): Promise<void> {
     this.resumes++
+    return Promise.resolve()
+  }
+  suspend(): Promise<void> {
+    this.suspends++
+    this.state = 'suspended'
     return Promise.resolve()
   }
   close(): Promise<void> {
@@ -221,6 +228,22 @@ describe('MixerHost', () => {
     expect(l[frames - 1]).toBe(0)
     expect(out.at(-1)).toEqual({ t: 'keys', keys: [] })
   })
+  it('cut: a voice inside its minimum gate ends within the choke, the others play on', () => {
+    const out: FromMixer[] = []
+    const h = new MixerHost(RATE, (m) => out.push(m))
+    h.handle({ t: 'load', id: 1, pcm: tone(RATE) })
+    h.handle({ t: 'start', key: 'a', id: 1, channels: 1, sampleRate: RATE, semitones: 0, tag: 0 })
+    h.handle({ t: 'start', key: 'b', id: 1, channels: 1, sampleRate: RATE, semitones: 0, tag: 0 })
+    h.render(new Float32Array(128), new Float32Array(128), 128, 0)
+    h.handle({ t: 'cut', key: 'a' })
+    h.handle({ t: 'cut', key: 'nothing' })
+    const frames = Math.ceil(((VoiceMixer.CHOKE_MS + 1) * RATE) / 1000)
+    const l = new Float32Array(frames)
+    h.render(l, new Float32Array(frames), frames, 128 / RATE)
+    // Only b is left, at its own level.
+    expect(l[frames - 1]).toBeCloseTo(10000 / 32768, 6)
+    expect(out.at(-1)).toEqual({ t: 'keys', keys: ['b'] })
+  })
   it('KEYS pitch: twelve semitones up reads the sample twice as fast', () => {
     const h = new MixerHost(RATE, () => undefined)
     const ramp = Int16Array.from({ length: 1000 }, (_, i) => i * 10)
@@ -294,16 +317,149 @@ describe('LiveAudio', () => {
     expect(backend.rates).toEqual([44100])
   })
 
-  it('waits for a tap: open sets nothing up, the press does', () => {
+  it('warms up before the first tap: open makes the output and sends the samples; the press only wakes it', async () => {
     const backend = new FakeBackend()
     backend.gesture = false
     const live = new LiveAudio(backend)
+    live.preload('s', tone(), 1, RATE)
     expect(live.open()).toBe(true)
-    expect(backend.contexts).toHaveLength(0)
-    expect(live.isOpen).toBe(false)
-    live.resumeInGesture()
     expect(backend.contexts).toHaveLength(1)
+    expect(live.isOpen).toBe(true)
+    // Not woken outside a tap: it waits, suspended.
+    expect(backend.ctx.resumes).toBe(0)
+    expect(backend.ctx.state).toBe('suspended')
+    await flush()
+    // The worklet is running and holds the sample before anything is pressed.
+    expect(backend.link.sent.map((m) => m.t)).toEqual(['load'])
+    expect(backend.link.host.loaded).toBe(1)
+    live.resumeInGesture()
     expect(backend.ctx.resumes).toBe(1)
+    expect(live.press('live:0:0', 's', PAD)).toBe(true)
+    // Nothing made or sent again: just the start.
+    expect(backend.contexts).toHaveLength(1)
+    expect(backend.link.sent.map((m) => m.t)).toEqual(['load', 'start'])
+  })
+
+  it('a page that has had a tap is woken at open', async () => {
+    const { backend } = await opened()
+    expect(backend.ctx.resumes).toBe(1)
+  })
+
+  it('suspend keeps the output, its worklet and samples; open wakes the same one', async () => {
+    const { live, backend } = await opened()
+    backend.ctx.state = 'running'
+    live.preload('s', tone(RATE), 1, RATE)
+    live.press('k', 's', PAD)
+    backend.link.render(0)
+    expect(live.voices.value.size).toBe(1)
+    const resumes = backend.ctx.resumes
+    live.suspend()
+    expect(backend.ctx.suspends).toBe(1)
+    expect(backend.ctx.closed).toBe(false)
+    expect(backend.link.closed).toBe(false)
+    expect(backend.link.sent.at(-1)).toEqual({ t: 'stopAll' })
+    expect(live.voices.value.size).toBe(0)
+    expect(live.isOpen).toBe(true)
+    // A late pointerup doesn't wake an output Live left.
+    live.release('k')
+    expect(backend.ctx.resumes).toBe(resumes)
+    expect(live.open()).toBe(true)
+    expect(backend.contexts).toHaveLength(1)
+    expect(backend.links).toHaveLength(1)
+    expect(backend.ctx.resumes).toBe(resumes + 1)
+    // The sample is still there: a press sends no load.
+    live.press('k', 's', PAD)
+    expect(backend.link.sent.filter((m) => m.t === 'load')).toHaveLength(1)
+    // close, by contrast, lets everything go.
+    live.close()
+    expect(backend.ctx.closed).toBe(true)
+    expect(backend.link.closed).toBe(true)
+    expect(live.isOpen).toBe(false)
+  })
+
+  it('open right after suspend, before it settles, wakes the output once it has', async () => {
+    const { live, backend } = await opened()
+    backend.ctx.state = 'running'
+    let settle = (): void => undefined
+    backend.ctx.suspend = () => {
+      backend.ctx.suspends++
+      // The state changes only when the promise settles.
+      return new Promise<void>((resolve) => {
+        settle = () => {
+          backend.ctx.state = 'suspended'
+          resolve()
+        }
+      })
+    }
+    const resumes = backend.ctx.resumes
+    live.suspend()
+    live.open()
+    expect(backend.ctx.resumes).toBe(resumes)
+    settle()
+    await flush()
+    expect(backend.ctx.resumes).toBe(resumes + 1)
+    // Still away when it settles: it stays suspended.
+    backend.ctx.state = 'running'
+    live.suspend()
+    settle()
+    await flush()
+    expect(backend.ctx.resumes).toBe(resumes + 1)
+  })
+
+  it('suspend before any output, or after close, does nothing', () => {
+    const backend = new FakeBackend()
+    const live = new LiveAudio(backend)
+    live.suspend()
+    expect(backend.contexts).toHaveLength(0)
+    live.open()
+    live.close()
+    live.suspend()
+    expect(backend.ctx.suspends).toBe(0)
+  })
+
+  it('cut ends a voice at once, inside its minimum gate', async () => {
+    const { live, backend } = await opened()
+    live.preload('s', tone(RATE), 1, RATE)
+    live.press('live:0:1', 's', PAD)
+    live.press('live:0:2', 's', PAD)
+    backend.link.render(0)
+    live.cut('live:0:1')
+    expect(backend.link.sent.at(-1)).toEqual({ t: 'cut', key: 'live:0:1' })
+    const frames = Math.ceil(((VoiceMixer.CHOKE_MS + 1) * RATE) / 1000)
+    backend.link.render(128 / RATE, frames)
+    expect([...live.voices.value]).toEqual(['live:0:2'])
+  })
+
+  it("while the mixer starts, a press's own sample and its start go over before the others", async () => {
+    const backend = new FakeBackend()
+    backend.deferred = true
+    const live = new LiveAudio(backend)
+    live.preload('a', tone(), 1, RATE)
+    live.preload('b', tone(), 1, RATE)
+    live.preload('c', tone(), 1, RATE)
+    live.open()
+    live.press('k', 'c', PAD)
+    backend.settle()
+    await flush()
+    const sent = backend.link.sent.map((m) => (m.t === 'load' ? `load ${m.id}` : m.t))
+    expect(sent).toEqual(['load 3', 'start', 'load 1', 'load 2'])
+  })
+
+  it('while the mixer starts, the commands keep their order, and a sample dropped meanwhile never goes over', async () => {
+    const backend = new FakeBackend()
+    backend.deferred = true
+    const live = new LiveAudio(backend)
+    live.preload('a', tone(), 1, RATE)
+    live.preload('b', tone(), 1, RATE)
+    live.open()
+    live.press('k', 'b', PAD)
+    live.suspend()
+    live.press('k', 'b', PAD)
+    live.unload('a')
+    backend.settle()
+    await flush()
+    const sent = backend.link.sent.map((m) => (m.t === 'load' ? `load ${m.id}` : m.t))
+    expect(sent).toEqual(['load 2', 'start', 'stopAll', 'start'])
   })
 
   it('a touch: the release (pointerup, which browsers count as the tap) wakes the output the press made', async () => {
@@ -355,7 +511,7 @@ describe('LiveAudio', () => {
       { t: 'start', key: 'live:0:1', id: 1, channels: 1, sampleRate: 46875, semitones: 0, tag: 900 },
       { t: 'start', key: 'live:0:1', id: 1, channels: 1, sampleRate: 46875, semitones: 0, tag: 950 },
     ])
-    expect(backend.ctx.resumes).toBe(2) // each press wakes a suspended output
+    expect(backend.ctx.resumes).toBe(3) // open, then each press, wakes a suspended output
   })
 
   it('a new sample under the same key replaces the old one', async () => {
@@ -374,16 +530,35 @@ describe('LiveAudio', () => {
     expect(backend.link.sent.at(-1)).toEqual({ t: 'start', key: 'keys:4', id: 1, channels: 2, sampleRate: RATE, semitones: -5, tag: 1234 })
   })
 
-  it('sends a view as just its samples', async () => {
+  it('posts a copy of just the samples, moved, never the array the main thread keeps', () => {
+    const big = Int16Array.from({ length: 1000 }, (_, i) => i)
+    const view = big.subarray(10, 20)
+    const [msg, transfer] = transferable({ t: 'load', id: 4, pcm: view })
+    expect(msg.t).toBe('load')
+    if (msg.t !== 'load') return
+    expect(msg.id).toBe(4)
+    expect([...msg.pcm]).toEqual([...view])
+    expect(msg.pcm.buffer.byteLength).toBe(20)
+    expect(msg.pcm.buffer).not.toBe(big.buffer)
+    expect(transfer).toEqual([msg.pcm.buffer])
+    // Other commands go as they are, nothing transferred.
+    const start: ToMixer = { t: 'start', key: 'k', id: 4, channels: 1, sampleRate: RATE, semitones: 0, tag: 0 }
+    expect(transferable(start)).toEqual([start, []])
+    // A real transfer detaches only the copy.
+    const ch = new MessageChannel()
+    ch.port1.postMessage(msg, transfer)
+    ch.port1.close()
+    expect(msg.pcm.length).toBe(0)
+    expect(view.length).toBe(10)
+    expect(big.length).toBe(1000)
+  })
+
+  it("the link gets the main thread's own samples (the ScriptProcessor mixer shares them)", async () => {
     const { live, backend } = await opened()
-    const big = new Int16Array(1000)
-    live.preload('s', big.subarray(10, 20), 1, RATE)
+    const pcm = tone()
+    live.preload('s', pcm, 1, RATE)
     const load = backend.link.sent[0]
-    expect(load?.t).toBe('load')
-    if (load?.t === 'load') {
-      expect(load.pcm.length).toBe(10)
-      expect(load.pcm.buffer.byteLength).toBe(20)
-    }
+    expect(load?.t === 'load' && load.pcm).toBe(pcm)
   })
 
   it('a sample loaded before the output opens goes over when it does', async () => {

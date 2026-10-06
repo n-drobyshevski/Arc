@@ -107,6 +107,32 @@ describe('VoiceMixer', () => {
     expect(new Set(m.keys)).toEqual(new Set(['b', 'c']))
   })
 
+  it('past the limit a voice let go of goes before an older held one', () => {
+    const m = mixer(2)
+    m.start('a', steady(1000), 1, 1000)
+    m.start('b', steady(1000), 1, 1000)
+    render(m, 1)
+    // b still sounds out its gate, but it was let go of.
+    m.release('b')
+    m.start('c', steady(1000), 1, 1000)
+    render(m, 1)
+    expect(new Set(m.keys)).toEqual(new Set(['a', 'c']))
+  })
+
+  it('a held chord survives a run of ten keys', () => {
+    const m = mixer()
+    for (const k of ['note:60', 'note:64', 'note:67']) m.start(k, steady(1000), 1, 1000)
+    render(m, 1)
+    // A glissando: each key let go of as the next plays, all still in their gates.
+    for (let n = 72; n < 82; n++) {
+      m.release(`note:${n - 1}`)
+      m.start(`note:${n}`, steady(1000), 1, 1000)
+      render(m, 1)
+    }
+    for (const k of ['note:60', 'note:64', 'note:67', 'note:81']) expect(m.keys.has(k)).toBe(true)
+    expect(m.keys.size).toBe(VoiceMixer.MAX_VOICES)
+  })
+
   it('stop fades everything out', () => {
     const m = mixer()
     m.start('a', steady(1000), 1, 1000)
@@ -133,6 +159,87 @@ describe('VoiceMixer', () => {
     m.release('nothing')
     m.start('a', steady(10), 1, 1000)
     expect(left(render(m, 1))[0]).toBe(1000)
+  })
+
+  it('a cut ends the voice within the choke, not the minimum gate', () => {
+    const m = mixer()
+    m.start('a', steady(1000), 1, 1000)
+    render(m, 10)
+    // Well inside MIN_GATE_MS: the press turned into a scroll.
+    m.cut('a')
+    const out = left(render(m, 20))
+    expect(out[0]).toBeGreaterThanOrEqual(1)
+    expect(out[0]).toBeLessThanOrEqual(1000)
+    expect(out[VoiceMixer.CHOKE_MS + 1]).toBe(0)
+    expect([...m.keys]).toEqual([])
+  })
+
+  it('a cut in the same render as its start still fades, without a click', () => {
+    const m = mixer()
+    m.start('a', steady(1000), 1, 1000)
+    m.cut('a')
+    const out = left(render(m, 10))
+    expect(out[0]).toBe(1000)
+    expect(out[VoiceMixer.CHOKE_MS + 1]).toBe(0)
+    expect(m.started.map((s) => s.key)).toEqual(['a'])
+  })
+
+  it('a cut of a voice already let go of ends it at once', () => {
+    const m = mixer()
+    m.start('a', steady(1000), 1, 1000)
+    m.release('a')
+    render(m, 5)
+    m.cut('a')
+    expect(left(render(m, 10))[VoiceMixer.CHOKE_MS + 1]).toBe(0)
+  })
+
+  it('a cut leaves the other voices alone', () => {
+    const m = mixer()
+    m.start('a', steady(1000, 1000), 1, 1000)
+    m.start('b', steady(1000, 2000), 1, 1000)
+    render(m, 5)
+    m.cut('a')
+    const out = left(render(m, 10))
+    expect(out[VoiceMixer.CHOKE_MS + 1]).toBe(2000)
+    expect([...m.keys]).toEqual(['b'])
+  })
+
+  it('a cut of a key not playing does nothing', () => {
+    const m = mixer()
+    m.start('a', steady(1000), 1, 1000)
+    render(m, 1)
+    m.cut('nothing')
+    expect(left(render(m, 10))[9]).toBe(1000)
+    expect([...m.keys]).toEqual(['a'])
+  })
+
+  it('keys and started stay right over many renders', () => {
+    const m = mixer()
+    const out = new Int16Array(200 * 2)
+    for (let n = 0; n < 300; n++) {
+      const at = m.frame
+      m.start('a', steady(1000), 1, 1000, 0, n)
+      m.start('b', steady(1000), 1, 1000)
+      m.render(out, 10)
+      expect(m.started).toEqual([
+        { key: 'a', tag: n, frame: at },
+        { key: 'b', tag: 0, frame: at },
+      ])
+      expect([...m.keys]).toEqual(['a', 'b'])
+      // Unchanged keys are the same set, not a new one per render.
+      const held = m.keys
+      m.render(out, 10)
+      expect(m.started).toEqual([])
+      expect(m.keys).toBe(held)
+      m.cut('b')
+      m.render(out, 10)
+      expect([...m.keys]).toEqual(['a'])
+      m.release('a')
+      m.render(out, 200)
+      expect(m.keys.size).toBe(0)
+      expect(out[2 * 199]).toBe(0)
+    }
+    expect(m.frame).toBe(300 * 230)
   })
 
   // Web cases.

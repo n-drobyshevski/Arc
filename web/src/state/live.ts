@@ -1,5 +1,5 @@
 // Port of app/src/main/kotlin/dev/arc/ep133/controller/ArcController.kt (Live's sounds and its last read:
-// openOfflineMirror … clearPadSounds, playPad, playKey, playNote, selectKeysPad, the KEYS settings' use)
+// openOfflineMirror … clearPadSounds, playPad, cutPad, playKey, playNote, selectKeysPad, the KEYS settings' use)
 //
 // What Live plays on the phone and what it remembers of the device:
 // - the last read (project, pads, sound names), kept so Live still shows
@@ -27,8 +27,8 @@
 //   output (LiveAudioDeps.onSlowOutput): browsers don't tell where the sound
 //   goes, so the output guesses from its own latency, and the toast is
 //   WebText.LIVE_SLOW_OUTPUT. Toasts that say "on the phone" use WebText too.
-// - A copy kept from the device list's Play (playDeviceSound) is written
-//   without making the playback wait for the write.
+// - Leaving Live suspends its output ([suspendAudio]) where Kotlin closes
+//   it; the controller closes it after a while away.
 // - The background copy reads each sound at most once a run, so a copy the
 //   store refuses (quota) is not downloaded over and over.
 
@@ -76,6 +76,18 @@ export function padAudioOf(pcm: Uint8Array, channels: number, sampleRate: number
 
 const padBytes = (a: PadAudio): number => a.pcm.length * 2
 
+/** Whether this platform stores 16-bit numbers little end first (every browser in practice). */
+const LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1
+
+/** 16-bit samples as s16le bytes: a view of the same memory where the platform is little-endian, else a copy. */
+export function s16leBytes(pcm: Int16Array): Uint8Array {
+  if (LITTLE_ENDIAN) return new Uint8Array(pcm.buffer, pcm.byteOffset, pcm.byteLength)
+  const out = new Uint8Array(pcm.length * 2)
+  const dv = new DataView(out.buffer)
+  for (let i = 0; i < pcm.length; i++) dv.setInt16(i * 2, pcm[i]!, true)
+  return out
+}
+
 /** The key a pad's sample is kept under, in memory and in Live's output: "slot:name". */
 export function memoryKey(slot: number, name: string): string {
   return `${slot}:${ktTrim(name).toLowerCase()}`
@@ -119,11 +131,18 @@ export class LiveSounds {
   // Live's pad samples decoded and ready ("slot:name"), least recently played first.
   private readonly padMemory = new Map<string, PadAudio>()
   private padMemoryBytes = 0
+  // A sample's bytes for a preview, made once per sample.
+  private readonly previewBytes = new WeakMap<PadAudio, Uint8Array>()
   private preloadGen = 0
   // Bumped to end the copying loop (mirror closed, project changed).
   private cacheGen = 0
   // Live's pads and keys sound while held (a gate): the voices whose finger is still down.
   private readonly held = new Set<string>()
+  // Presses that turned into a scroll while their sound was still loading: it doesn't start.
+  private readonly cuts = new Set<string>()
+  // Presses on the scrolling page that may still turn into a scroll ([playPad] unsure), until
+  // [keepPad] or [cutPad]: whether their sound already started (from memory) or waits to load.
+  private readonly unsure = new Map<string, { readonly started: boolean; readonly pressedAt: number; readonly token: number }>()
   // The device's project, pads and names as Live last read them, shown while it is not connected.
   private lastRead: LiveSnapshot | null = null
   private lastReadLoaded = false
@@ -339,6 +358,30 @@ export class LiveSounds {
     return this.padMemory.has(memoryKey(slot, name))
   }
 
+  /**
+   * [slot]'s sample with this name from memory, as s16le bytes for a preview
+   * (SoundPlayer.play), or null. The same bytes come back for the same sample.
+   */
+  memorySound(slot: number, name: string): { pcm: Uint8Array; channels: number; sampleRate: number } | null {
+    const a = this.padMemory.get(memoryKey(slot, name))
+    if (a === undefined) return null
+    let pcm = this.previewBytes.get(a)
+    if (pcm === undefined) {
+      pcm = s16leBytes(a.pcm)
+      this.previewBytes.set(a, pcm)
+    }
+    return { pcm, channels: a.channels, sampleRate: a.sampleRate }
+  }
+
+  /** arc's copy of [slot]'s sound (a WAV) while it is the device's current one ([size] as listed); else null. */
+  async currentCopy(slot: number, name: string, size: number): Promise<Uint8Array | null> {
+    try {
+      return (await this.cache.fresh(slot, name, size)) ? await this.cache.get(slot, name) : null
+    } catch {
+      return null
+    }
+  }
+
   forgetPadMemory(): void {
     this.preloadGen++
     this.padMemory.clear()
@@ -452,15 +495,26 @@ export class LiveSounds {
     if (!a.onLog) this.host.deps.trafficLog.note('live audio: ' + (ok ? a.description : 'no output'))
   }
 
-  /** Closes it (Live left the screen). */
+  /** Live left the screen or the tab was hidden: its output is suspended, kept ready for coming back. */
+  suspendAudio(): void {
+    this.held.clear()
+    this.unsure.clear()
+    const a = this.host.deps.liveAudio
+    if (a.suspend) a.suspend()
+    else a.close()
+  }
+
+  /** Lets the output go (long away, or the page goes). */
   closeAudio(): void {
     this.held.clear()
+    this.unsure.clear()
     this.host.deps.liveAudio.close()
   }
 
   /** Stops every Live voice (stopPlayback). */
   stopAll(): void {
     this.held.clear()
+    this.unsure.clear()
     this.host.deps.liveAudio.stopAll()
   }
 
@@ -482,32 +536,69 @@ export class LiveSounds {
    * whatever else is sounding, so several pads make a chord. It sounds until
    * [releasePad]; with [hold] false (a screen reader's Play) it plays to the
    * end. Call from the press (pointerdown): it wakes the output.
+   *
+   * [unsure]: a press on the scrolling page, which may still turn into a
+   * scroll. A sample in memory sounds at once all the same; the rest (the
+   * KEYS pad, a load from the device, the "no sample" toast) waits for
+   * [keepPad], and [cutPad] drops it.
    */
-  playPad(pad: PhysicalPad, hold = true): Promise<void> {
+  playPad(pad: PhysicalPad, hold = true, unsure = false): Promise<void> {
     const { host } = this
     host.deps.liveAudio.resumeInGesture()
     const pressedAt = host.deps.perfNow()
     const id = padVoice(pad)
     if (hold) this.held.add(id)
+    this.cuts.delete(id)
+    this.unsure.delete(id)
     const token = host.playToken()
-    // The pad tapped is also the sound KEYS plays.
-    this.selectKeysPad(pad)
     // In memory: plays now, without waiting a turn.
     const sample = this.padSample(pad)
     const mem = sample ? this.fromMemory(memoryKey(sample.slot, sample.name)) : null
-    if (sample && mem) {
-      this.startHeld(id, hold, memoryKey(sample.slot, sample.name), mem, 0, pressedAt)
+    if (sample && mem) this.startHeld(id, hold, memoryKey(sample.slot, sample.name), mem, 0, pressedAt)
+    if (unsure && hold) {
+      this.unsure.set(id, { started: mem !== null, pressedAt, token })
       return Promise.resolve()
     }
-    return (async () => {
-      const got = await this.padAudio(pad)
-      if (got !== null && token === host.playToken()) this.startHeld(id, hold, got.key, got.audio, 0, pressedAt)
-    })()
+    const done = mem !== null ? Promise.resolve() : this.loadAndStart(pad, id, hold, pressedAt, token)
+    // The pad tapped is also the sound KEYS plays: noted (and stored) once the sound is on its way.
+    this.selectKeysPad(pad)
+    return done
+  }
+
+  /**
+   * The press on the scrolling page was a press after all (the scroll window
+   * closed, or the finger lifted inside it): the pad becomes the KEYS sound,
+   * and one not in memory loads and plays now.
+   */
+  keepPad(pad: PhysicalPad): Promise<void> {
+    const id = padVoice(pad)
+    const u = this.unsure.get(id)
+    if (u === undefined) return Promise.resolve()
+    this.unsure.delete(id)
+    const done = u.started ? Promise.resolve() : this.loadAndStart(pad, id, true, u.pressedAt, u.token)
+    this.selectKeysPad(pad)
+    return done
+  }
+
+  /** Loads [pad]'s sample (copy, backup or device) and starts its voice, unless a stop came meanwhile. */
+  private async loadAndStart(pad: PhysicalPad, id: string, hold: boolean, pressedAt: number, token: number): Promise<void> {
+    const got = await this.padAudio(pad)
+    if (got !== null && token === this.host.playToken()) this.startHeld(id, hold, got.key, got.audio, 0, pressedAt)
   }
 
   /** The finger left the pad: its sound fades out. */
   releasePad(pad: { readonly group: number; readonly offset: number }): void {
     this.release(padVoice(pad))
+  }
+
+  /** The press on the pad turned into a scroll: its sound ends at once (and one still loading never starts). */
+  cutPad(pad: { readonly group: number; readonly offset: number }): void {
+    const id = padVoice(pad)
+    this.held.delete(id)
+    this.cuts.add(id)
+    // One still unsure never loads, nor becomes the KEYS sound.
+    if (this.unsure.delete(id)) this.cuts.delete(id)
+    this.host.deps.liveAudio.cut(id)
   }
 
   /**
@@ -594,6 +685,7 @@ export class LiveSounds {
   private startHeld(id: string, hold: boolean, key: string, a: PadAudio, semitones: number, pressedAt: number): void {
     const { host } = this
     const out = host.deps.liveAudio
+    if (this.cuts.delete(id)) return
     if (a.silent) {
       host.toast(FeatureText.SILENT_SOUND)
       return

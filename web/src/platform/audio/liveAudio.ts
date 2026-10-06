@@ -18,18 +18,32 @@
 //   converted as they are mixed. The mixer runs in an AudioWorklet
 //   (liveWorklet.ts), or, where there is none, under a ScriptProcessorNode on
 //   the main thread; both are a MixerHost (liveMixer.ts). The browser sizes the
-//   output's buffers, so Kotlin's grow-on-underrun has no counterpart.
+//   output's buffers and paces the render, so Kotlin's just-in-time write loop
+//   and its buffer sizing (grow on underrun, shrink after a quiet while) have
+//   no counterpart.
 // - Samples are kept in memory on the audio side: [preload] gives a decoded
-//   sample a key, it is sent over once, and a press only names it. Kotlin's
-//   play() takes the PCM itself (the controller's padMemory holds it); here
-//   the controller loads and [unload]s by key instead. A reopened output gets
-//   the loaded samples again.
-// - Browsers only start audio after a tap: [open] (Live came on screen) sets
-//   the output up only when the page has already had one
-//   (navigator.userActivation.hasBeenActive); otherwise the first press does,
-//   through [resumeInGesture] (call it synchronously in the press handler) or
-//   [press]. A touch only counts as a tap when the finger lifts, so [release]
-//   (pointerup) wakes a suspended output too.
+//   sample a key, it is sent over once (as soon as it is decoded, a copy
+//   moved to the worklet: liveMixer's transferable), and a press only names
+//   it. Kotlin's play() takes the PCM itself (the controller's padMemory
+//   holds it); here the controller loads and [unload]s by key instead. A
+//   reopened output gets the loaded samples again; while the mixer is still
+//   starting, a press's own sample and its start go over before the other
+//   samples.
+// - Browsers only start audio after a tap, but a context may be made before
+//   one (it starts suspended). [open] (Live came on screen) sets everything
+//   up at once, the worklet loaded and the samples sent, and wakes it only
+//   when the page has already had a tap (navigator.userActivation
+//   .hasBeenActive); otherwise the first press only wakes it, through
+//   [resumeInGesture] (call it synchronously in the press handler) or
+//   [press]. A touch only counts as a tap when the finger lifts, so
+//   [release] (pointerup) wakes a suspended output too, but not one
+//   [suspend]ed because Live is away.
+// - Leaving Live or hiding the tab [suspend]s the output (Kotlin closes its
+//   track): the context, the worklet and the samples stay, so coming back
+//   is as quick as the first press. The controller [close]s it after a while
+//   away, or when the page unloads.
+// - [cut]: a press that turned into a scroll (the all-groups page) ends in
+//   VoiceMixer.CHOKE_MS, whatever the minimum gate.
 // - No audio focus. A context the system suspends or interrupts (a call,
 //   another app, iOS) stops the voices, as losing focus does.
 // - No output route: a press's latency comes from the context's output
@@ -42,14 +56,14 @@
 
 import { signal, type ReadonlySignal } from '@preact/signals'
 import { WebText } from '../../core/text/webText'
-import { LIVE_PROCESSOR, MixerHost, type FromMixer, type ToMixer } from './liveMixer'
+import { LIVE_PROCESSOR, MixerHost, transferable, type FromMixer, type ToMixer } from './liveMixer'
 // The AudioWorklet module's URL: Vite bundles liveWorklet.ts (with the core
 // mixer) into one self-contained script. (`new URL('./liveWorklet.ts',
 // import.meta.url)` would copy the TypeScript unbuilt: Vite only bundles that
 // form inside `new Worker(...)`.)
 import workletUrl from './liveWorklet?worker&url'
 
-export { LIVE_PROCESSOR, MixerHost, type FromMixer, type StartedVoice, type ToMixer } from './liveMixer'
+export { LIVE_PROCESSOR, MixerHost, transferable, type FromMixer, type StartedVoice, type ToMixer } from './liveMixer'
 
 /**
  * An output latency (baseLatency + outputLatency) at least this long is taken
@@ -77,6 +91,8 @@ export interface LiveContextLike {
   /** Seconds from the context to the speaker (0 or absent where unknown). */
   readonly outputLatency?: number
   resume(): Promise<void>
+  /** Stops the output's clock, keeping everything (absent on very old browsers). */
+  suspend?(): Promise<void>
   close(): Promise<void>
   getOutputTimestamp?(): { contextTime?: number; performanceTime?: number }
   addEventListener?(type: 'statechange', listener: () => void): void
@@ -96,14 +112,14 @@ export interface LiveBackend {
   supported(): boolean
   /**
    * A new output context ([sampleRate]: one to ask for, else the device's
-   * own), or null. Only called once a tap has happened.
+   * own), or null. Before a tap it starts suspended.
    */
   createContext(sampleRate?: number): LiveContextLike | null
   /** Starts a mixer on [ctx] whose reports go to [onMessage]. */
   connect(ctx: LiveContextLike, onMessage: (m: FromMixer) => void): Promise<MixerLink>
   /** performance.now(): the clock press times are on. */
   now(): number
-  /** Whether the page has had a tap, so an output started now is allowed to sound. */
+  /** Whether the page has had a tap, so an output woken now (outside a tap) is allowed to sound. */
   gestureSeen(): boolean
 }
 
@@ -177,12 +193,18 @@ interface Sample {
 interface Stream {
   readonly ctx: LiveContextLike
   link: MixerLink | null
-  /** Commands sent before the mixer was ready. */
+  /** Commands sent before the mixer was ready, in order (samples' loads apart, below). */
   readonly pending: ToMixer[]
+  /** Samples' loads waiting for the mixer, by sample id. */
+  readonly pendingLoads: Map<number, ToMixer>
+  /** Of those, the ones a press waits for: they go over first. */
+  readonly urgent: Set<number>
   /** Sample ids sent over. */
   readonly loaded: Set<number>
   closed: boolean
   ran: boolean
+  /** Suspended because Live is away: a late release doesn't wake it. */
+  parked: boolean
 }
 
 const EMPTY: ReadonlySet<string> = new Set()
@@ -237,19 +259,45 @@ export class LiveAudio {
   }
 
   /**
-   * Live came on screen. Sets the output up when the page has had a tap
-   * (else the first press does). [sampleRate]: a rate to ask for. False when
-   * there is no audio output at all.
+   * Live came on screen: sets the output up now, before any press (the
+   * worklet loaded, the samples sent), or wakes a suspended one. Before the
+   * page's first tap it stays suspended and the first press wakes it.
+   * [sampleRate]: a rate to ask for. False when there is no audio output at all.
    */
   open(sampleRate?: number): boolean {
     if (sampleRate !== undefined) this.rate = sampleRate
-    if (this.stream) return true
-    if (!this.backend.supported()) return false
-    if (!this.backend.gestureSeen()) return true
-    return this.ensure() !== null
+    if (!this.stream && !this.backend.supported()) return false
+    const s = this.ensure()
+    if (!s) return false
+    s.parked = false
+    if (this.backend.gestureSeen()) wake(s.ctx)
+    return true
   }
 
-  /** Live left the screen: the output is let go and what was sounding stops. The samples stay loaded. */
+  /**
+   * Live left the screen or the tab was hidden: what was sounding stops and
+   * the output is suspended, its worklet and samples kept for [open].
+   */
+  suspend(): void {
+    const s = this.stream
+    this.ungated.clear()
+    this._voices.value = EMPTY
+    if (!s || s.closed) return
+    s.parked = true
+    send(s, { t: 'stopAll' })
+    if (s.ctx.suspend && s.ctx.state !== 'closed') {
+      // The state reads 'running' until the suspend settles: Live back meanwhile (a quick tab
+      // switch) found nothing to wake, so it is woken now, as [open] would have.
+      s.ctx.suspend().then(
+        () => {
+          if (!s.closed && !s.parked && this.stream === s && this.backend.gestureSeen()) wake(s.ctx)
+        },
+        () => undefined,
+      )
+    }
+  }
+
+  /** Lets the output go (long away, or the page unloads); what was sounding stops. The samples stay loaded. */
   close(): void {
     const s = this.stream
     this.stream = null
@@ -258,6 +306,8 @@ export class LiveAudio {
     if (!s) return
     s.closed = true
     s.pending.length = 0
+    s.pendingLoads.clear()
+    s.urgent.clear()
     if (s.link) quietly(() => s.link?.close())
     s.ctx.close().catch(() => undefined)
   }
@@ -265,7 +315,9 @@ export class LiveAudio {
   /** Creates or wakes the output. Call synchronously in a press handler, before any await. */
   resumeInGesture(): void {
     const s = this.ensure()
-    if (s) wake(s.ctx)
+    if (!s) return
+    s.parked = false
+    wake(s.ctx)
   }
 
   /** Loads a decoded sample (16-bit, [channels] interleaved) under [key], ready for [press]. */
@@ -305,8 +357,10 @@ export class LiveAudio {
     if (!sample || !(sample.channels >= 1 && sample.channels <= 2)) return false
     const s = this.ensure()
     if (!s) return false
+    s.parked = false
     wake(s.ctx)
     this.load(s, sample)
+    first(s, sample.id)
     if (options.gate) this.ungated.delete(id)
     else this.ungated.add(id)
     const pressedAt = options.pressedAt ?? this.backend.now()
@@ -327,9 +381,15 @@ export class LiveAudio {
     // On a touch screen the browser lets a page start audio when the finger
     // lifts, not when it lands: the first press on a fresh page made the
     // output, and the release (called from pointerup) is what wakes it.
-    if (this.stream && !this.stream.closed) wake(this.stream.ctx)
+    if (this.stream && !this.stream.closed && !this.stream.parked) wake(this.stream.ctx)
     if (this.ungated.has(id)) return
     if (this.stream) send(this.stream, { t: 'release', key: id })
+  }
+
+  /** The press became a scroll: voice [id] ends in VoiceMixer.CHOKE_MS, minimum gate or not. */
+  cut(id: string): void {
+    this.ungated.delete(id)
+    if (this.stream) send(this.stream, { t: 'cut', key: id })
   }
 
   stopAll(): void {
@@ -339,19 +399,25 @@ export class LiveAudio {
 
   private drop(sample: Sample): void {
     const s = this.stream
-    if (s?.loaded.delete(sample.id)) send(s, { t: 'unload', id: sample.id })
+    if (!s?.loaded.delete(sample.id)) return
+    // Not sent over yet: it simply isn't.
+    if (s.pendingLoads.delete(sample.id)) {
+      s.urgent.delete(sample.id)
+      return
+    }
+    send(s, { t: 'unload', id: sample.id })
   }
 
   private load(s: Stream, sample: Sample): void {
     if (s.loaded.has(sample.id)) return
     s.loaded.add(sample.id)
-    const pcm = sample.pcm
-    // Posting a view clones its whole buffer: send just the samples.
-    const own = pcm.byteOffset === 0 && pcm.byteLength === pcm.buffer.byteLength
-    send(s, { t: 'load', id: sample.id, pcm: own ? pcm : pcm.slice() })
+    // The link copies what crosses to the audio thread (transferable): this one stays the main thread's.
+    const m: ToMixer = { t: 'load', id: sample.id, pcm: sample.pcm }
+    if (s.link) s.link.send(m)
+    else s.pendingLoads.set(sample.id, m)
   }
 
-  /** The open output, set up first if there is none. Only called once a tap has happened. */
+  /** The open output, set up first if there is none (suspended until a tap wakes it). */
   private ensure(): Stream | null {
     if (this.stream) return this.stream
     let ctx: LiveContextLike | null = null
@@ -362,7 +428,17 @@ export class LiveAudio {
       this.note(`live audio: no output (${message(e)})`)
     }
     if (!ctx) return null
-    const s: Stream = { ctx, link: null, pending: [], loaded: new Set(), closed: false, ran: false }
+    const s: Stream = {
+      ctx,
+      link: null,
+      pending: [],
+      pendingLoads: new Map(),
+      urgent: new Set(),
+      loaded: new Set(),
+      closed: false,
+      ran: false,
+      parked: false,
+    }
     this.stream = s
     // The samples loaded, ready again.
     for (const sample of this.samples.values()) this.load(s, sample)
@@ -374,7 +450,7 @@ export class LiveAudio {
           return
         }
         s.link = link
-        for (const m of s.pending.splice(0)) link.send(m)
+        flush(s, link)
         this._description = describeOutput(ctx, link.kind)
         this.note(`live audio: ${this._description}`)
         if (ctx.state === 'running') this.ran(s)
@@ -454,6 +530,29 @@ function send(s: Stream, m: ToMixer): void {
   else s.pending.push(m)
 }
 
+/** While the mixer is still starting, sample [id]'s load goes first (a press waits for it, not for every sample). */
+function first(s: Stream, id: number): void {
+  if (!s.link && s.pendingLoads.has(id)) s.urgent.add(id)
+}
+
+/**
+ * The mixer is ready: the loads presses wait for, then the commands in their
+ * order (a stopAll still before a later start), then the other samples, so a
+ * press's start crosses (and is mixed) before every other sample is copied over.
+ */
+function flush(s: Stream, link: MixerLink): void {
+  for (const id of s.urgent) {
+    const m = s.pendingLoads.get(id)
+    if (m === undefined) continue
+    s.pendingLoads.delete(id)
+    link.send(m)
+  }
+  s.urgent.clear()
+  for (const m of s.pending.splice(0)) link.send(m)
+  for (const m of s.pendingLoads.values()) link.send(m)
+  s.pendingLoads.clear()
+}
+
 function wake(ctx: LiveContextLike): void {
   if (ctx.state === 'suspended' || ctx.state === 'interrupted') {
     // Not awaited: outside a tap the promise may only settle on the next one.
@@ -479,7 +578,7 @@ function message(e: unknown): string {
 /** ScriptProcessorNode's buffer where there is no AudioWorklet: its smallest. */
 export const FALLBACK_FRAMES = 256
 
-/** The worklet mixer: commands go over the node's port (each sample copied once). */
+/** The worklet mixer: commands go over the node's port (a sample's copy moved, not cloned). */
 async function workletLink(ctx: AudioContext, onMessage: (m: FromMixer) => void): Promise<MixerLink> {
   await ctx.audioWorklet.addModule(workletUrl)
   const node = new AudioWorkletNode(ctx, LIVE_PROCESSOR, {
@@ -491,7 +590,10 @@ async function workletLink(ctx: AudioContext, onMessage: (m: FromMixer) => void)
   node.connect(ctx.destination)
   return {
     kind: 'AudioWorklet',
-    send: (m) => node.port.postMessage(m),
+    send: (m) => {
+      const [msg, transfer] = transferable(m)
+      node.port.postMessage(msg, transfer)
+    },
     close: () => {
       node.port.onmessage = null
       node.disconnect()

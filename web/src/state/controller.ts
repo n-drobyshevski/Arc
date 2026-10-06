@@ -31,8 +31,9 @@
 //   from click handlers.
 // - Live (main's Live KEYS delta): the mirror runs whenever Live is in front
 //   and the tab visible, connected or not (offline it shows the last read);
-//   Live's output (LiveAudioDeps) is open on the same terms. Pads and keys
-//   play through live.ts. The first-run guide's flag is AppSettings.guideSeen
+//   Live's output (LiveAudioDeps) is open on the same terms; away from them
+//   it is suspended, and let go after LIVE_AUDIO_KEEP_MS or when the page
+//   goes (pagehide). Pads and keys play through live.ts. The first-run guide's flag is AppSettings.guideSeen
 //   ([coach] keeps the old seen/markSeen shape for the UI).
 // - Live's EDIT (an addition): [assignPad] writes a pad's sound at
 //   once and offers UNDO on the toast ([toastWith] / [runToastAction]; the
@@ -79,12 +80,19 @@ import { Connection, connectionPhase, type ConnectionPhase } from './connection'
 import type { Deps } from './deps'
 import { LiveSounds } from './live'
 import { MirrorController } from './mirror'
+import { PreviewCache, type DecodedSound } from './previewCache'
 import { createStore, type Store } from './store'
 import { errorText, Tasks, type OnProgress } from './tasks'
 import { initialState, type Tab, type UiState, type UploadDraftItem } from './types'
 
 /** MainActivity COPY_LIMIT: the clipboard gets the latest part of a long log. */
 export const COPY_LIMIT = 200_000
+
+/** How long Live's output stays suspended (ready) after Live was left or hidden, before it is let go. */
+export const LIVE_AUDIO_KEEP_MS = 60_000
+
+/** The previews' cache keys for arc's pad copies ("pad:<slot>:<size>:<name>"); backups are "backup:<id>:<slot>". */
+const PAD_PREVIEW = 'pad:'
 
 const PAK_SAVE_MIME = 'application/octet-stream'
 const PAK_SHARE_MIME = 'application/zip'
@@ -153,6 +161,8 @@ export class ArcController {
    * (a download, a decode) plays only if nothing stopped or replaced it meanwhile.
    */
   private playToken = 0
+  /** The previews' decoded sounds (backups, pad copies), so playing one again starts at once. */
+  private readonly previews = new PreviewCache()
   private searchGen = 0
   private libraryGen = 0
   private names: readonly NameEntry[] = []
@@ -161,6 +171,8 @@ export class ArcController {
   /** What syncMirror last decided: null (closed or paused), else the mirror runs for a ready device or not. */
   private mirrorWanted: 'ready' | 'offline' | null = null
   private audioWanted = false
+  /** Lets Live's suspended output go after a while away ([LIVE_AUDIO_KEEP_MS]). */
+  private audioClose: unknown = null
   private keepOn = false
   private started = false
   private disposed = false
@@ -241,6 +253,7 @@ export class ArcController {
       perfNow: () => deps.perfNow(),
       setTimeout: (fn, ms) => deps.setTimeout(fn, ms),
       clearTimeout: (h) => deps.clearTimeout(h),
+      requestFrame: deps.requestFrame,
       syncIndex: () => void this.syncIndex(),
       toast,
       live: this.live,
@@ -280,6 +293,8 @@ export class ArcController {
     // The guide's flag from before it joined the settings (and so library.json).
     if (!deps.settings.settings.guideSeen && deps.coach.seen) this.setGuideSeen()
     this.cleanups.push(deps.visibility.subscribe((v) => this.onVisibility(v)))
+    // The page is going away (or into the back-forward cache): Live's output is let go now.
+    if (deps.visibility.onPageHide) this.cleanups.push(deps.visibility.onPageHide(() => this.dropLiveAudio()))
     this.cleanups.push(
       this.store.subscribe(() => {
         this.syncKeepOn()
@@ -297,7 +312,7 @@ export class ArcController {
     this.disposed = true
     for (const c of this.cleanups.splice(0)) c()
     this.mirror.stop()
-    this.live.closeAudio()
+    this.dropLiveAudio()
     this.conn.dispose()
     this.deps.player.stop()
     if (this.keepOn) {
@@ -403,7 +418,7 @@ export class ArcController {
     this.syncKeepOn()
   }
 
-  /** MainActivity.onStop: nothing keeps playing in the background; the mirror pauses, Live's output closes. */
+  /** MainActivity.onStop: nothing keeps playing in the background; the mirror pauses, Live's output is suspended. */
   private onVisibility(visible: boolean): void {
     this.visible = visible
     if (!visible) this.stopPlayback()
@@ -426,14 +441,41 @@ export class ArcController {
     else this.mirror.pause()
   }
 
-  /** LaunchedEffect(live) + repeatOnLifecycle(STARTED): openLiveAudio / closeLiveAudio. */
+  /**
+   * LaunchedEffect(live) + repeatOnLifecycle(STARTED): openLiveAudio /
+   * closeLiveAudio. Web: away from Live (or hidden), the output is suspended
+   * rather than closed, so coming back plays at once; it is let go after
+   * [LIVE_AUDIO_KEEP_MS] away, or when the page goes.
+   */
   private syncLiveAudio(): void {
     if (this.disposed) return
     const wanted = this.liveTab && this.visible
     if (wanted === this.audioWanted) return
     this.audioWanted = wanted
-    if (wanted) void this.live.openAudio()
-    else this.live.closeAudio()
+    this.cancelAudioClose()
+    if (wanted) {
+      void this.live.openAudio()
+      return
+    }
+    this.live.suspendAudio()
+    this.audioClose = this.deps.setTimeout(() => {
+      this.audioClose = null
+      if (!this.audioWanted) this.live.closeAudio()
+    }, LIVE_AUDIO_KEEP_MS)
+  }
+
+  private cancelAudioClose(): void {
+    if (this.audioClose === null) return
+    this.deps.clearTimeout(this.audioClose)
+    this.audioClose = null
+  }
+
+  /** Live's output let go at once (the page goes away, or the controller is disposed). */
+  private dropLiveAudio(): void {
+    this.cancelAudioClose()
+    this.live.closeAudio()
+    // Coming back (from the back-forward cache) opens it again.
+    this.audioWanted = false
   }
 
   /** keepOn = task != null || (live && keepScreenOn). */
@@ -698,10 +740,22 @@ export class ArcController {
 
   // ---------- playback ----------
 
-  /** Downloads a sound from the device and plays it. Call from a tap. */
+  /**
+   * Plays a sound of the device: Live's sample in memory, else arc's current
+   * copy, else downloaded from the device (played first, then kept for Live).
+   * Call from a tap.
+   */
   async playDeviceSound(slot: number): Promise<void> {
     this.deps.player.resumeInGesture()
     const token = ++this.playToken
+    const listed = this.store.get().browser.contents?.sounds.find((snd) => snd.slot === slot) ?? this.live.deviceSound(slot)
+    // Already held here: no device needed.
+    const held = listed === undefined ? null : await this.heldSound(slot, listed)
+    if (token !== this.playToken) return
+    if (held !== null) {
+      await this.startSound(`device:${slot}`, held.pcm, held.channels, held.sampleRate)
+      return
+    }
     // Played straight from the list: read the channels and rate first when they aren't known yet.
     let d = this.store.get().browser.details.get(slot) ?? null
     if (d === null) {
@@ -716,11 +770,32 @@ export class ArcController {
     // Not cancelled on stop: an interrupted download would leave the session out of step.
     const pcm = await this.tasks.exclusive(`play:${slot}`, false, (s) => download(s, slot))
     if (pcm === null) return
-    // Live can play it later without the device.
-    const listed = this.store.get().browser.contents?.sounds.find((snd) => snd.slot === slot) ?? this.live.deviceSound(slot)
-    if (listed !== undefined) void this.live.keepPadSound(slot, listed.name, listed.size, pcm, d.channels, d.sampleRate)
-    if (token !== this.playToken) return
-    await this.startSound(`device:${slot}`, pcm, Math.trunc(d.channels), Math.trunc(d.sampleRate))
+    // It plays first; then it is kept, so Live (and the next Play) has it without the device.
+    const playing = token === this.playToken ? this.startSound(`device:${slot}`, pcm, Math.trunc(d.channels), Math.trunc(d.sampleRate)) : null
+    const kept = this.store.get().browser.contents?.sounds.find((snd) => snd.slot === slot) ?? this.live.deviceSound(slot)
+    if (kept !== undefined) void this.live.keepPadSound(slot, kept.name, kept.size, pcm, d.channels, d.sampleRate)
+    await playing
+  }
+
+  /** A device sound held here, newest first: Live's sample in memory, else arc's copy while it is current. */
+  private async heldSound(slot: number, e: SoundEntry): Promise<DecodedSound | null> {
+    const mem = this.live.memorySound(slot, e.name)
+    if (mem !== null) return mem
+    const key = `${PAD_PREVIEW}${slot}:${e.size}:${e.name}`
+    const hit = this.previews.get(key)
+    if (hit !== null) return hit
+    const wav = await this.live.currentCopy(slot, e.name, e.size)
+    if (wav === null) return null
+    let d: DecodedSound
+    try {
+      const w = decodeWav(wav)
+      d = { pcm: w.pcm, channels: w.channels, sampleRate: Math.trunc(w.sampleRate) }
+    } catch {
+      // A copy that doesn't read: the device has the sound.
+      return null
+    }
+    this.previews.put(key, d)
+    return d
   }
 
   /**
@@ -792,11 +867,18 @@ export class ArcController {
     if (!c) return
     const snd = c.pak?.sounds.get(slot)
     if (!snd) return
+    const key = `backup:${c.backupId}:${slot}`
     try {
-      const w = decodeWav(snd.wav)
+      // Decoded once: playing it again starts at once.
+      let d = this.previews.get(key)
+      if (d === null) {
+        const w = decodeWav(snd.wav)
+        d = { pcm: w.pcm, channels: w.channels, sampleRate: w.sampleRate }
+        this.previews.put(key, d)
+      }
       await Promise.resolve()
       if (token !== this.playToken || this.store.get().contents?.backupId !== c.backupId) return
-      await this.startSound(`backup:${c.backupId}:${slot}`, w.pcm, w.channels, w.sampleRate)
+      await this.startSound(key, d.pcm, d.channels, d.sampleRate)
     } catch (e) {
       this.toast(errorText(e), true)
     }
@@ -894,14 +976,25 @@ export class ArcController {
    * backup holding it, else, connected, the device) alongside whatever else
    * sounds, until [releasePad]; [hold] false (a screen reader's Play) plays
    * it to the end. The pad also becomes the KEYS sound. Call from the press.
+   * [unsure]: a press on the scrolling page, settled by [keepPad] or [cutPad].
    */
-  playPad(pad: PhysicalPad, hold = true): Promise<void> {
-    return this.live.playPad(pad, hold)
+  playPad(pad: PhysicalPad, hold = true, unsure = false): Promise<void> {
+    return this.live.playPad(pad, hold, unsure)
+  }
+
+  /** The unsure press on the pad was a press after all: it becomes the KEYS sound (and one not in memory loads). */
+  keepPad(pad: PhysicalPad): Promise<void> {
+    return this.live.keepPad(pad)
   }
 
   /** The finger left the pad: its sound fades out. */
   releasePad(pad: PhysicalPad): void {
     this.live.releasePad(pad)
+  }
+
+  /** The press on the pad turned into a scroll (the all-groups page): its sound ends at once. */
+  cutPad(pad: PhysicalPad): void {
+    this.live.cutPad(pad)
   }
 
   /** Plays KEYS key [index] (0 = '.', the lowest) until [releaseKey]; [hold] false plays to the end. Call from the press. */
@@ -1073,6 +1166,7 @@ export class ArcController {
 
   /** Clears Live's copies of the device's sounds (Settings). */
   clearPadSounds(): Promise<void> {
+    this.previews.clear(PAD_PREVIEW)
     return this.live.clearPadSounds()
   }
 
@@ -1325,6 +1419,11 @@ export class ArcController {
   /** Live's piano size (Settings → Live → Piano keys): white keys, null for Auto (as many as fit). */
   setPianoWhites(whites: number | null): void {
     this.changeSettings((s) => ({ ...s, pianoWhites: pianoChoiceOf(whites) }))
+  }
+
+  /** A light tick when a pad or key goes down (Settings → Live → Haptic feedback). */
+  setHaptics(on: boolean): void {
+    this.changeSettings((s) => ({ ...s, haptics: on }))
   }
 
   /** The guide overlay was shown (it opens by itself only once, also across reinstalls). */

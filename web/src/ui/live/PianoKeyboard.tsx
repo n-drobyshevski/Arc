@@ -20,22 +20,29 @@
 //   whole note (hold = false). The keys stay out of the Tab order (37 stops
 //   at most); the computer keyboard plays them instead.
 // - Device notes light a key through --glow on [data-note] (MirrorScreen's
-//   applyGlow, by exact pitch); the press travel is the caps' 60 ms one.
-// - A key under the mouse is tinted (hover); no haptics.
+//   applyGlow, by exact pitch); the press travel is the caps' 60 ms one. A
+//   pressed key goes down at once (data-down set on the element in the
+//   handler, as the pads do), not at the next render.
+// - A key under the mouse is tinted (hover). The haptic tick ([haptics],
+//   platform/haptics.ts) follows a finger's press, not the computer keyboard's.
+// - [playingNotes] is the controller's signal, read here, so a voice starting
+//   or ending re-renders the piano, not Live's whole screen.
 // - [computer] (a desktop or a fine pointer): the letter row plays it
 //   (live/keyboard.ts), a small letter on each key it reaches; Z / X step
 //   the octave. Ignored while typing in a field, in a dialog, or with a
 //   modifier held.
 import type { JSX, TargetedPointerEvent } from 'preact'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
+import type { ReadonlySignal } from '@preact/signals'
 import { Keys, MAX_OCTAVE, MIN_OCTAVE } from '../../core/features/keys'
 import type { MirrorState } from '../../core/features/liveMirror'
 import { NoteTouches, type NoteEvent } from '../../core/features/noteTouches'
 import { KeyMark, Piano, type NoteRange, type PianoKey } from '../../core/features/piano'
 import { MirrorText } from '../../core/text/mirrorText'
+import { tick } from '../../platform/haptics'
 import { glow, glowCss } from './glow'
 import { COMPUTER_KEYS, computerHint, computerNote, octaveStep, playsKeys } from './keyboard'
-import type { KeysUi } from './keys'
+import type { KeysShown } from './keys'
 import './PianoKeyboard.css'
 
 /** How far past a key's edge a sliding finger keeps it, so it doesn't flicker between two keys. */
@@ -48,9 +55,11 @@ const WHITE_GAP = 4
 export interface PianoKeyboardProps {
   range: NoteRange
   st: MirrorState
-  keys: KeysUi
+  keys: KeysShown
   /** The notes sounding here, outlined and down. */
-  playingNotes: ReadonlySet<number>
+  playingNotes: ReadonlySignal<ReadonlySet<number>>
+  /** A light tick when a finger presses a key. */
+  haptics?: boolean
   /** The fade's clock (fixed in screenshots). */
   now: number
   /** A note pressed; it sounds until [onNoteUp]. A screen reader's Play passes hold = false. */
@@ -79,7 +88,8 @@ function inField(t: EventTarget | null): boolean {
 }
 
 export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
-  const { range, st, keys, playingNotes, now, computer = false } = props
+  const { range, st, keys, now, computer = false } = props
+  const playingNotes = props.playingNotes.value
   const plate = useRef<HTMLDivElement | null>(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
   useLayoutEffect(() => {
@@ -114,11 +124,24 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
   const touches = useMemo(() => new NoteTouches(), [])
   const fingers = useRef(new Map<number, Finger>())
   const [fingered, setFingered] = useState<ReadonlySet<number>>(() => new Set())
-  const play = (events: readonly NoteEvent[]): void => {
+  /** The key element of [note], if it shows. */
+  const keyOf = (note: number): HTMLElement | null => plate.current?.querySelector<HTMLElement>(`[data-note="${note}"]`) ?? null
+  /** [events] played; [finger]: by a finger (a tick on each press, where on). */
+  const play = (events: readonly NoteEvent[], finger = false): void => {
+    let pressed = false
     for (const e of events) {
-      if (e.type === 'Press') cb.current.onNote(e.note, true)
-      else cb.current.onNoteUp(e.note)
+      if (e.type === 'Press') {
+        cb.current.onNote(e.note, true)
+        // Down now, not at the next render.
+        keyOf(e.note)?.setAttribute('data-down', '')
+        pressed = true
+      } else {
+        cb.current.onNoteUp(e.note)
+        // Up now unless it still sounds or another finger holds it (the render agrees either way).
+        if (!touches.held.has(e.note) && !cb.current.playingNotes.peek().has(e.note)) keyOf(e.note)?.removeAttribute('data-down')
+      }
     }
+    if (pressed && finger && cb.current.haptics) tick()
     if (events.length > 0) setFingered(touches.held)
   }
   // Also when the keys leave the screen (PADS, a narrower window) under a finger.
@@ -144,7 +167,7 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
     const { x, y } = local(e)
     const note = Piano.keyAt(laidRef.current, x, y, null, 0)
     fingers.current.set(e.pointerId, { note, x, y, generation: generation.current })
-    if (note !== null) play(touches.down(e.pointerId, note))
+    if (note !== null) play(touches.down(e.pointerId, note), true)
   }
   const onPointerMove = (e: TargetedPointerEvent<HTMLDivElement>): void => {
     const f = fingers.current.get(e.pointerId)
@@ -154,7 +177,7 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
     if (f.generation !== generation.current && Math.hypot(x - f.x, y - f.y) <= TOUCH_SLOP) return
     const note = Piano.keyAt(laidRef.current, x, y, f.note, SLIDE_SLOP)
     fingers.current.set(e.pointerId, { note, x, y, generation: generation.current })
-    play(touches.move(e.pointerId, note))
+    play(touches.move(e.pointerId, note), true)
   }
   const onPointerEnd = (e: TargetedPointerEvent<HTMLDivElement>): void => {
     if (!fingers.current.delete(e.pointerId)) return

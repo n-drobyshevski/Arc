@@ -455,8 +455,6 @@ class MainActivity : ComponentActivity() {
         // After a recreation (or process death) the opened backup has to be read again.
         LaunchedEffect(contentsBackup?.id) { contentsBackup?.let { controller.openContents(it) } }
         val playing by controller.player.playing.collectAsStateWithLifecycle()
-        // Everything sounding, for Live's rings (several pads or notes for a chord).
-        val voices by controller.liveKeys.collectAsStateWithLifecycle()
         val rec by controller.rec.collectAsStateWithLifecycle()
         val takes by controller.takes.collectAsStateWithLifecycle()
         // REC on Live's display line, on the page or in the top bar.
@@ -487,7 +485,6 @@ class MainActivity : ComponentActivity() {
             viewTall = appSettings.keysViewTall,
             pad = state.keysPad,
             padName = state.keysPad?.let(controller::mirrorName),
-            playingNotes = voices.mapNotNullTo(LinkedHashSet()) { v -> if (v.startsWith("note:")) v.removePrefix("note:").toIntOrNull() else null },
         )
         // The piano's notes while it shows, so the bar's display line can name a device note past its ends.
         var pianoRange by remember { mutableStateOf<IntRange?>(null) }
@@ -514,6 +511,7 @@ class MainActivity : ComponentActivity() {
                     onNoteNames = controller::setKeysNames,
                     onShowNames = controller::setKeysShowNames,
                     onPianoWhites = controller::setPianoWhites,
+                    onHaptics = controller::setHaptics,
                     onRestoreFolder = { folderLauncher.launch(dev.arc.ep133.data.ExternalLibrary.INITIAL_FOLDER) },
                     // No browser installed: nothing to open.
                     onSource = { runCatching { uri.openUri(dev.arc.ep133.text.SettingsText.SOURCE_URL) } },
@@ -605,7 +603,7 @@ class MainActivity : ComponentActivity() {
                     onGuide = { guideOpen = it },
                     guide = { GuideScreen(onBack = { guideOpen = false }) },
                     // On a phone on its side, Live's display line rides in the top bar.
-                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, liveRec, pianoRange = pianoRange, editing = liveEdit) }) else null,
+                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, liveRec, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys) }) else null,
                 ) {
                     // Back from another section returns to Live, the home section, first.
                     BackHandler(enabled = tab != Tab.LIVE) { selectTab(Tab.LIVE) }
@@ -613,8 +611,10 @@ class MainActivity : ComponentActivity() {
                         Tab.LIVE -> MirrorScreen(
                             mirror = mirror,
                             nameOf = controller::mirrorName,
-                            onPad = { pad, hold -> controller.playPad(pad, hold) },
+                            onPad = { pad, hold, unsure -> controller.playPad(pad, hold, unsure) },
+                            onPadKept = { pad -> controller.keepPad(pad) },
                             onPadUp = controller::releasePad,
+                            onPadCut = controller::cutPad,
                             keys = keys,
                             keysActions = remember(controller) {
                                 dev.arc.ep133.ui.screens.KeysActions(
@@ -628,13 +628,10 @@ class MainActivity : ComponentActivity() {
                                     onView = controller::setKeysView,
                                 )
                             },
-                            playingPads = voices.mapNotNullTo(HashSet()) { k ->
-                                k.split(':').takeIf { it.size == 3 && it[0] == "live" }?.let { p ->
-                                    val g = p[1].toIntOrNull()
-                                    val o = p[2].toIntOrNull()
-                                    if (g != null && o != null) dev.arc.ep133.features.PhysicalPad(g, o) else null
-                                }
-                            },
+                            // Everything sounding, for the rings (several pads or notes for a chord):
+                            // collected inside Live, so a voice starting doesn't recompose the whole app.
+                            voices = controller.liveKeys,
+                            haptics = appSettings.haptics,
                             oneGroup = appSettings.liveOneGroup,
                             onOneGroup = controller::setLiveOneGroup,
                             follow = appSettings.liveFollow,

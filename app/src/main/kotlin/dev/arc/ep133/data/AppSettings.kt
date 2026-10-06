@@ -40,6 +40,8 @@ data class AppSettings(
     val keysViewTall: KeysView = KeysView.AUTO,
     /** The piano's white keys (Piano.WHITES); null is Auto, the widest that fits. */
     val pianoWhites: Int? = null,
+    /** A light tick when a pad or key is pressed in Live (the phone's own touch feedback setting still applies). */
+    val haptics: Boolean = true,
 )
 
 /**
@@ -72,27 +74,7 @@ class SettingsStore(context: Context) {
         keysViewWide = runCatching { KeysView.valueOf(prefs.getString("keysViewWide", null) ?: "") }.getOrDefault(KeysView.AUTO),
         keysViewTall = runCatching { KeysView.valueOf(prefs.getString("keysViewTall", null) ?: "") }.getOrDefault(KeysView.AUTO),
         pianoWhites = Piano.choiceOf(prefs.getInt("pianoWhites", 0)),
-    )
-
-    /** Each setting as its key and stored text. */
-    private fun AppSettings.values(): Map<String, String> = linkedMapOf(
-        "theme" to theme.name,
-        "autoConnect" to autoConnect.toString(),
-        "keepScreenOn" to keepScreenOn.toString(),
-        "keepLast" to (keepLast ?: 0).toString(),
-        "liveOneGroup" to liveOneGroup.toString(),
-        "liveFollow" to liveFollow.toString(),
-        "guideSeen" to guideSeen.toString(),
-        "liveKeys" to liveKeys.toString(),
-        "keysRoot" to keysRoot.toString(),
-        "keysScale" to keysScale.name,
-        "keysOctave" to keysOctave.toString(),
-        "keysNames" to keysNames.name,
-        "keysShowNames" to keysShowNames.toString(),
-        "keysViewWide" to keysViewWide.name,
-        "keysViewTall" to keysViewTall.name,
-        // Stored like keepLast: 0 for Auto.
-        "pianoWhites" to (pianoWhites ?: 0).toString(),
+        haptics = prefs.getBoolean("haptics", true),
     )
 
     fun update(change: (AppSettings) -> AppSettings) {
@@ -118,29 +100,53 @@ class SettingsStore(context: Context) {
         _settings.value.values().filterKeys { prefs.contains(it) }.mapKeys { "app." + it.key }
 
     /** Takes back what library.json held; anything missing or unreadable stays as it is. */
-    fun fromIndex(map: Map<String, String>) = update { cur ->
-        cur.copy(
-            theme = map["app.theme"]?.let { v -> runCatching { ThemeChoice.valueOf(v) }.getOrNull() } ?: cur.theme,
-            autoConnect = map["app.autoConnect"]?.toBooleanStrictOrNull() ?: cur.autoConnect,
-            keepScreenOn = map["app.keepScreenOn"]?.toBooleanStrictOrNull() ?: cur.keepScreenOn,
-            keepLast = map["app.keepLast"]?.toIntOrNull()?.let { n -> n.takeIf { it > 0 } } ?: if (map.containsKey("app.keepLast")) null else cur.keepLast,
-            liveOneGroup = map["app.liveOneGroup"]?.toBooleanStrictOrNull() ?: cur.liveOneGroup,
-            liveFollow = map["app.liveFollow"]?.toBooleanStrictOrNull() ?: cur.liveFollow,
-            guideSeen = map["app.guideSeen"]?.toBooleanStrictOrNull() ?: cur.guideSeen,
-            liveKeys = map["app.liveKeys"]?.toBooleanStrictOrNull() ?: cur.liveKeys,
-            keysRoot = map["app.keysRoot"]?.toIntOrNull()?.takeIf { it in 0..11 } ?: cur.keysRoot,
-            keysScale = map["app.keysScale"]?.let { v -> runCatching { Scale.valueOf(v) }.getOrNull() } ?: cur.keysScale,
-            keysOctave = map["app.keysOctave"]?.toIntOrNull()?.takeIf { it in Keys.MIN_OCTAVE..Keys.MAX_OCTAVE } ?: cur.keysOctave,
-            keysNames = map["app.keysNames"]?.let { v -> runCatching { NoteNames.valueOf(v) }.getOrNull() } ?: cur.keysNames,
-            keysShowNames = map["app.keysShowNames"]?.toBooleanStrictOrNull() ?: cur.keysShowNames,
-            keysViewWide = map["app.keysViewWide"]?.let { v -> runCatching { KeysView.valueOf(v) }.getOrNull() } ?: cur.keysViewWide,
-            keysViewTall = map["app.keysViewTall"]?.let { v -> runCatching { KeysView.valueOf(v) }.getOrNull() } ?: cur.keysViewTall,
-            // 0 is Auto; a size arc doesn't offer leaves the choice as it is.
-            pianoWhites = when (val n = map["app.pianoWhites"]?.toIntOrNull()) {
-                null -> cur.pianoWhites
-                0 -> null
-                else -> Piano.choiceOf(n) ?: cur.pianoWhites
-            },
-        )
-    }
+    fun fromIndex(map: Map<String, String>) = update { it.withIndex(map) }
 }
+
+/** Each setting as its key and stored text (library.json adds "app." to the key). */
+internal fun AppSettings.values(): Map<String, String> = linkedMapOf(
+    "theme" to theme.name,
+    "autoConnect" to autoConnect.toString(),
+    "keepScreenOn" to keepScreenOn.toString(),
+    "keepLast" to (keepLast ?: 0).toString(),
+    "liveOneGroup" to liveOneGroup.toString(),
+    "liveFollow" to liveFollow.toString(),
+    "guideSeen" to guideSeen.toString(),
+    "liveKeys" to liveKeys.toString(),
+    "keysRoot" to keysRoot.toString(),
+    "keysScale" to keysScale.name,
+    "keysOctave" to keysOctave.toString(),
+    "keysNames" to keysNames.name,
+    "keysShowNames" to keysShowNames.toString(),
+    "keysViewWide" to keysViewWide.name,
+    "keysViewTall" to keysViewTall.name,
+    // Stored like keepLast: 0 for Auto.
+    "pianoWhites" to (pianoWhites ?: 0).toString(),
+    "haptics" to haptics.toString(),
+)
+
+/** These settings with what library.json held ("app.*" keys) taken back; anything missing or unreadable stays as it is. */
+internal fun AppSettings.withIndex(map: Map<String, String>): AppSettings = copy(
+    theme = map["app.theme"]?.let { v -> runCatching { ThemeChoice.valueOf(v) }.getOrNull() } ?: theme,
+    autoConnect = map["app.autoConnect"]?.toBooleanStrictOrNull() ?: autoConnect,
+    keepScreenOn = map["app.keepScreenOn"]?.toBooleanStrictOrNull() ?: keepScreenOn,
+    keepLast = map["app.keepLast"]?.toIntOrNull()?.let { n -> n.takeIf { it > 0 } } ?: if (map.containsKey("app.keepLast")) null else keepLast,
+    liveOneGroup = map["app.liveOneGroup"]?.toBooleanStrictOrNull() ?: liveOneGroup,
+    liveFollow = map["app.liveFollow"]?.toBooleanStrictOrNull() ?: liveFollow,
+    guideSeen = map["app.guideSeen"]?.toBooleanStrictOrNull() ?: guideSeen,
+    liveKeys = map["app.liveKeys"]?.toBooleanStrictOrNull() ?: liveKeys,
+    keysRoot = map["app.keysRoot"]?.toIntOrNull()?.takeIf { it in 0..11 } ?: keysRoot,
+    keysScale = map["app.keysScale"]?.let { v -> runCatching { Scale.valueOf(v) }.getOrNull() } ?: keysScale,
+    keysOctave = map["app.keysOctave"]?.toIntOrNull()?.takeIf { it in Keys.MIN_OCTAVE..Keys.MAX_OCTAVE } ?: keysOctave,
+    keysNames = map["app.keysNames"]?.let { v -> runCatching { NoteNames.valueOf(v) }.getOrNull() } ?: keysNames,
+    keysShowNames = map["app.keysShowNames"]?.toBooleanStrictOrNull() ?: keysShowNames,
+    keysViewWide = map["app.keysViewWide"]?.let { v -> runCatching { KeysView.valueOf(v) }.getOrNull() } ?: keysViewWide,
+    keysViewTall = map["app.keysViewTall"]?.let { v -> runCatching { KeysView.valueOf(v) }.getOrNull() } ?: keysViewTall,
+    // 0 is Auto; a size arc doesn't offer leaves the choice as it is.
+    pianoWhites = when (val n = map["app.pianoWhites"]?.toIntOrNull()) {
+        null -> pianoWhites
+        0 -> null
+        else -> Piano.choiceOf(n) ?: pianoWhites
+    },
+    haptics = map["app.haptics"]?.toBooleanStrictOrNull() ?: haptics,
+)

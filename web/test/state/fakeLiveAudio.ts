@@ -6,8 +6,10 @@ export interface FakeLiveAudio extends LiveAudioDeps {
   readonly loaded: Map<string, { pcm: Int16Array; channels: number; sampleRate: number }>
   readonly presses: { id: string; key: string; options: LivePress }[]
   readonly releases: string[]
+  readonly cuts: string[]
   readonly log: string[]
   opened: number
+  suspended: number
   closed: number
   gestures: number
   /** What open() and press() answer. */
@@ -31,8 +33,10 @@ export function fakeLiveAudio(): FakeLiveAudio {
     loaded: new Map(),
     presses: [],
     releases: [],
+    cuts: [],
     log: [],
     opened: 0,
+    suspended: 0,
     closed: 0,
     gestures: 0,
     available: true,
@@ -41,6 +45,10 @@ export function fakeLiveAudio(): FakeLiveAudio {
     open() {
       a.opened++
       return a.available
+    },
+    suspend() {
+      a.suspended++
+      voices.value = new Set()
     },
     close() {
       a.closed++
@@ -65,6 +73,10 @@ export function fakeLiveAudio(): FakeLiveAudio {
     },
     release(id) {
       a.releases.push(id)
+      set((s) => s.delete(id))
+    },
+    cut(id) {
+      a.cuts.push(id)
       set((s) => s.delete(id))
     },
     stopAll() {

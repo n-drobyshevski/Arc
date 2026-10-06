@@ -32,6 +32,13 @@ export interface KeysUi {
   readonly pianoWhites: number | null
 }
 
+/**
+ * KeysUi less what plays on the phone: Live reads that from its own signals
+ * (MirrorScreen's LivePlaying), so a voice starting or ending re-renders only
+ * the keys it rings, not the screen.
+ */
+export type KeysShown = Omit<KeysUi, 'playingKeys' | 'playingNotes'>
+
 /** KeysUi() with its defaults. */
 export const DEFAULT_KEYS: KeysUi = Object.freeze({
   on: false,

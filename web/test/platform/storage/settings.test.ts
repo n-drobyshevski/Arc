@@ -44,6 +44,7 @@ describe('SettingsStore', () => {
       keysViewWide: 'AUTO',
       keysViewTall: 'AUTO',
       pianoWhites: null,
+      haptics: true,
     })
     expect(DEFAULT_SETTINGS).toEqual(s.settings)
   })
@@ -122,7 +123,22 @@ describe('SettingsStore', () => {
       'app.keysViewWide',
       'app.keysViewTall',
       'app.pianoWhites',
+      'app.haptics',
     ])
+  })
+
+  it('keeps haptics on by default, stores it only once turned off, and reads it back', () => {
+    const storage = memoryStorage()
+    const s = new SettingsStore(storage)
+    expect(s.settings.haptics).toBe(true)
+    s.update((c) => ({ ...c, haptics: false }))
+    expect(JSON.parse(storage.getItem(SETTINGS_KEY)!)).toEqual({ haptics: false })
+    expect(s.toIndex()).toEqual({ 'app.haptics': 'false' })
+    expect(new SettingsStore(storage).settings.haptics).toBe(false)
+    // Odd stored values read as on.
+    expect(readSettings(JSON.stringify({ haptics: 'no' })).haptics).toBe(true)
+    expect(settingsFromIndex({ 'app.haptics': 'true' }, s.settings).haptics).toBe(true)
+    expect(settingsFromIndex({ 'app.haptics': 'off' }, s.settings).haptics).toBe(false)
   })
 
   it('keeps the Keys view per window shape and the piano size, Auto stored as 0', () => {

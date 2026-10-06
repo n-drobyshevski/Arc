@@ -131,6 +131,8 @@ export const SettingsText = {
   },
   /** Why a piano size is greyed out. */
   DOESNT_FIT: 'Too wide for this window',
+  HAPTICS: 'Haptic feedback',
+  HAPTICS_NOTE: 'A light tick when a pad or key goes down.',
 
   SAVED_HERE: 'Saved on the phone',
   LEARNED_NAMES: 'Learned sample names',

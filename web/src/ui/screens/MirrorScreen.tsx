@@ -13,20 +13,30 @@
 // Web deltas:
 // - The glow is a CSS custom property (--glow, 0..1) on each pad, key, group
 //   caption and group key; the colours are color-mix()es of it in Oklab (as
-//   Compose's lerp). Renders set it (at most ~30 a second: the controller
-//   publishes a mirror state every 33 ms at most, and only when it changed),
-//   and while a released pad or note is fading a requestAnimationFrame loop
-//   updates it in the DOM without rendering (Kotlin's withFrameNanos loop),
+//   Compose's lerp). Renders set it (at most once a frame: the controller
+//   publishes a mirror state at the next frame after a note, and only when it
+//   changed), and while a released pad or note is fading a
+//   requestAnimationFrame loop updates it in the DOM without rendering
+//   (Kotlin's withFrameNanos loop), writing only the values that changed and
 //   stopping once the fade is over.
+// - What plays on the phone comes as signals ([LivePlaying]): each pad and
+//   KEYS key reads its own ring from them, so a voice starting or ending
+//   re-renders only the pads and keys it rings, not the screen.
+// - Pads and KEYS keys are memoized ([memo], the props compared by value,
+//   their handlers read from the latest props through a ref): a note from
+//   the device re-renders the pads and keys whose light changed, not all 48.
 // - The tools side panel is a navigation layer (overlay 'side'), so Back closes
 //   it: [toolsOpen] / [onTools] replace Kotlin's rememberSaveable toolsOpen
 //   (and initialToolsOpen). The Live tab has no BackHandler of its own; a Back
 //   key, when given, is the CloseKey only.
 // - The four-or-two groups per row is a container query (BoxWithConstraints).
 // - holdToPlay is live/press.ts fed by pointer events (a finger per pad or
-//   key; on the scrolling all-groups page the press waits PRESS_DELAY_MS and
-//   a scroll plays nothing). A screen reader's / keyboard's Play is a click
-//   with detail 0: it plays the whole sound (hold = false).
+//   key; on the scrolling all-groups page the press sounds at once and a
+//   scroll that starts within PRESS_DELAY_MS cuts it, [onPadCut]). A screen
+//   reader's / keyboard's Play is a click with detail 0: it plays the whole
+//   sound (hold = false).
+// - The haptic tick ([haptics]) is navigator.vibrate (platform/haptics.ts),
+//   after a finger's press only: not for a screen reader's Play.
 // - The offline note's fold is a button with aria-expanded (Kotlin's
 //   stateDescription NOTE_SHOWN / NOTE_HIDDEN).
 // - The scale and octave lists (Kotlin's focusable Popups, which Back
@@ -77,8 +87,9 @@
 // it on, the display line says so, the pads get a signal outline and a ⇄
 // badge, and a tap opens the pad sheet ([EditUi.onPad]); a long press still
 // plays the pad while held.
-import { type ButtonHTMLAttributes, type ComponentChildren, type JSX, type TargetedDragEvent } from 'preact'
+import { h, type ButtonHTMLAttributes, type Component, type ComponentChildren, type FunctionComponent, type JSX, type TargetedDragEvent } from 'preact'
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { computed, signal, type ReadonlySignal } from '@preact/signals'
 import { Keys, MAX_OCTAVE, MIN_OCTAVE, SCALES, type NoteNames, type Scale } from '../../core/features/keys'
 import type { MirrorState, PadLight } from '../../core/features/liveMirror'
 import { KeysView, type NoteRange } from '../../core/features/piano'
@@ -115,16 +126,29 @@ import {
 } from '../live/glow'
 import { rowPadSize } from '../live/desk'
 import { chosenView, pianoFor, type PianoPlan } from '../live/keyboard'
-import { DEFAULT_KEYS, keysLit, keysNoteText, octaves, upperOctave, type KeysPicker, type KeysUi } from '../live/keys'
+import { DEFAULT_KEYS, keysLit, keysNoteText, octaves, upperOctave, type KeysPicker, type KeysShown } from '../live/keys'
 import { PianoKeyboard } from '../live/PianoKeyboard'
-import { PressTracker, type PressTarget } from '../live/press'
+import { PressTracker, ticking, type PressTarget } from '../live/press'
 import { SLOT_MIME, SoundPicker } from '../live/SoundPicker'
 import { dragMayHaveAudio, isAudioFile } from '../../platform/files/pick'
+import { tick } from '../../platform/haptics'
 import { PickWord, WordButton } from '../live/Words'
 import { useDesk, useFinePointer, useWindowSize } from '../useDesk'
 import './MirrorScreen.css'
 
-export type { KeysPicker, KeysUi } from '../live/keys'
+export type { KeysPicker, KeysShown, KeysUi } from '../live/keys'
+
+/**
+ * What sounds on the phone, as signals (the controller's playingPads,
+ * playingKeys and playingNotes): the pads as padKey(), the KEYS keys by
+ * index, the piano's notes first pressed first. Each pad and key reads its
+ * own ring from them.
+ */
+export interface LivePlaying {
+  readonly pads: ReadonlySignal<ReadonlySet<number>>
+  readonly keys: ReadonlySignal<ReadonlySet<number>>
+  readonly notes: ReadonlySignal<ReadonlySet<number>>
+}
 
 /** What the KEYS controls do (Kotlin KeysActions). */
 export interface KeysActions {
@@ -189,13 +213,21 @@ export interface MirrorScreenProps {
    * Pressing a pad plays its sample on the phone until [onPadUp] (hold is
    * false for a screen reader's Play, which plays to the end); null leaves
    * the pads still. Called from pointerdown (it wakes the audio output).
+   * [unsure]: a press on the scrolling all-groups page, which [onPadKept] or
+   * [onPadCut] settles.
    */
-  onPad?: ((pad: PhysicalPad, hold: boolean) => void) | null
+  onPad?: ((pad: PhysicalPad, hold: boolean, unsure?: boolean) => void) | null
+  /** The unsure press on a pad was a press after all (no scroll within PRESS_DELAY_MS, or a lift inside it). */
+  onPadKept?: (pad: PhysicalPad) => void
   onPadUp?: (pad: PhysicalPad) => void
-  /** The pads whose samples are playing on the phone (several at once for a chord), as padKey(), ringed. */
-  playingPads?: ReadonlySet<number>
+  /** The press on a pad turned into a scroll (the all-groups page): its sound ends at once (default: [onPadUp]). */
+  onPadCut?: (pad: PhysicalPad) => void
+  /** What sounds on the phone (several pads at once for a chord), ringed; none by default. */
+  playing?: LivePlaying | null
+  /** A light tick (navigator.vibrate) when a finger presses a pad or key (Settings → Haptic feedback). */
+  haptics?: boolean
   /** KEYS: the pads become notes of one sound, like the EP-133's KEYS mode. */
-  keys?: KeysUi
+  keys?: KeysShown
   keysActions?: KeysActions
   /** The KEYS list open over the grid (a navigation layer, so Back closes it); see [KeysPicker]. */
   picker?: KeysPicker | null
@@ -211,9 +243,35 @@ export interface MirrorScreenProps {
 /** The MIDI event clock the mirror's times are on (MIDIMessageEvent.timeStamp). */
 const perfNow = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now())
 
-const NO_PADS: ReadonlySet<number> = new Set()
+const NOTHING: ReadonlySignal<ReadonlySet<number>> = signal<ReadonlySet<number>>(new Set())
+const NOTHING_PLAYS: LivePlaying = { pads: NOTHING, keys: NOTHING, notes: NOTHING }
 
-/** Writes every pad's, key's and group's glow at [now] straight into the DOM (the frame loop's step). */
+/** Whether [key] is in [set], read so that only a change of that answer re-renders the caller. */
+function useHas(set: ReadonlySignal<ReadonlySet<number>>, key: number): boolean {
+  return useMemo(() => computed(() => set.value.has(key)), [set, key]).value
+}
+
+/**
+ * [render] as a component that renders again only when [same] says its props
+ * changed (preact/compat's memo, without the rest of compat).
+ */
+function memo<P extends object>(render: FunctionComponent<P>, same: (a: P, b: P) => boolean): FunctionComponent<P> {
+  function shouldUpdate(this: Component<P>, next: P): boolean {
+    return !same(this.props, next)
+  }
+  function Memoed(this: Component<P>, props: P): JSX.Element {
+    this.shouldComponentUpdate = shouldUpdate
+    return h(render, props)
+  }
+  return Memoed as FunctionComponent<P>
+}
+
+/** Sets [el]'s --glow to [value] unless it already has it (the frame loop runs 60 times a second). */
+function setGlow(el: HTMLElement, value: string): void {
+  if (el.style.getPropertyValue('--glow') !== value) el.style.setProperty('--glow', value)
+}
+
+/** Writes every pad's, key's and group's glow at [now] straight into the DOM (the frame loop's step), only where it changed. */
 function applyGlow(
   root: HTMLElement,
   pads: ReadonlyMap<number, PadLight>,
@@ -223,33 +281,34 @@ function applyGlow(
 ): void {
   for (const el of root.querySelectorAll<HTMLElement>('[data-pad]')) {
     const l = pads.get(Number(el.dataset.pad))
-    el.style.setProperty('--glow', glowCss(l ? glow(l, now) : 0))
+    setGlow(el, glowCss(l ? glow(l, now) : 0))
   }
   for (const el of root.querySelectorAll<HTMLElement>('[data-group]')) {
-    el.style.setProperty('--glow', glowCss(groupGlow(pads, Number(el.dataset.group), now)))
+    setGlow(el, glowCss(groupGlow(pads, Number(el.dataset.group), now)))
   }
   if (keyNotes) {
     const lit = keysLit(notes, keyNotes, now)
     for (const el of root.querySelectorAll<HTMLElement>('[data-key]')) {
-      el.style.setProperty('--glow', glowCss(lit.get(Number(el.dataset.key)) ?? 0))
+      setGlow(el, glowCss(lit.get(Number(el.dataset.key)) ?? 0))
     }
     // The piano: each key by its own note.
     for (const el of root.querySelectorAll<HTMLElement>('[data-note]')) {
       const l = notes.get(Number(el.dataset.note))
-      el.style.setProperty('--glow', glowCss(l ? glow(l, now) : 0))
+      setGlow(el, glowCss(l ? glow(l, now) : 0))
     }
   }
 }
 
 /**
  * The pointer handlers of a pad or key that sounds while held (Kotlin
- * holdToPlay). [inScroll]: the all-groups page scrolls, so a press waits a
- * moment and a drag plays nothing.
+ * holdToPlay). [inScroll]: the all-groups page scrolls, so a drag that
+ * starts at once cuts the sound. [haptic]: a tick after each finger's press.
  */
 function holdHandlers(
   tracker: PressTracker,
   target: PressTarget,
   inScroll: boolean,
+  haptic: boolean,
   /** Where the pad keeps the pointers it gave the tracker, to end them when EDIT turns on. */
   ids?: Set<number>,
 ): ButtonHTMLAttributes<HTMLButtonElement> {
@@ -257,24 +316,31 @@ function holdHandlers(
   // :active is not reliable for several fingers or with touch-action: none.
   // An attribute, not a class, so a re-render's class string leaves it alone.
   const lift = (el: HTMLElement): void => el.removeAttribute('data-down')
+  // The tick comes after the press is handed on, so the sound never waits for it.
+  const pressed = ticking(target, haptic, tick)
   return {
     onPointerDown: (e) => {
       // The mouse's other buttons (and a pen's barrel button) don't play.
       if (e.pointerType === 'mouse' && e.button !== 0) return
       e.currentTarget.setAttribute('data-down', '')
       ids?.add(e.pointerId)
-      tracker.down(e.pointerId, e.clientX, e.clientY, target, inScroll)
+      tracker.down(e.pointerId, e.clientX, e.clientY, pressed, inScroll)
     },
-    onPointerMove: (e) => tracker.move(e.pointerId, e.clientX, e.clientY),
+    onPointerMove: (e) => {
+      tracker.move(e.pointerId, e.clientX, e.clientY)
+      // A press the drag turned into a scroll lets the cap up.
+      if (!tracker.has(e.pointerId) && ids?.delete(e.pointerId)) lift(e.currentTarget)
+    },
     onPointerUp: (e) => {
       lift(e.currentTarget)
       ids?.delete(e.pointerId)
       tracker.up(e.pointerId)
     },
+    // The browser took the pointer for a scroll.
     onPointerCancel: (e) => {
       lift(e.currentTarget)
       ids?.delete(e.pointerId)
-      tracker.cancel(e.pointerId)
+      tracker.cancel(e.pointerId, true)
     },
     onPointerLeave: (e) => {
       lift(e.currentTarget)
@@ -314,8 +380,13 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   const keys = props.keys ?? DEFAULT_KEYS
   const actions = props.keysActions ?? {}
   const onPad = props.onPad ?? null
-  const playingPads = props.playingPads ?? NO_PADS
+  const playing = props.playing ?? NOTHING_PLAYS
+  const haptic = props.haptics ?? false
   const edit = props.edit ?? null
+  // The pads and keys are memoized, so what they call must not change with every render
+  // (the caller's callbacks do): it reads the latest props instead.
+  const latest = useRef(props)
+  latest.current = props
   const st = mirror?.state ?? emptyMirrorState()
   const root = useRef<HTMLDivElement | null>(null)
   const now = fixedNow ?? perfNow()
@@ -402,26 +473,35 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   // A device sound being dragged from the Sounds tab, and the pad it is over (padKey).
   const [dragged, setDragged] = useState<SoundEntry | null>(null)
   const [dropAt, setDropAt] = useState<number | null>(null)
-  const drop: DropUi | null =
-    edit !== null && desk && !keys.on
-      ? {
-          at: dropAt,
-          name: dragged?.name ?? null,
-          nameNow: edit.nameNow,
-          onOver: setDropAt,
-          onDrop: (pad, e) => {
-            setDropAt(null)
-            setDragged(null)
-            const slot = Number(e.dataTransfer?.getData(SLOT_MIME) ?? '')
-            if (Number.isInteger(slot) && slot > 0) {
-              edit.onDropSlot(pad, slot)
-              return
-            }
-            const file = e.dataTransfer?.files?.[0]
-            if (file) edit.onDropFile(pad, file)
-          },
-        }
-      : null
+  const dropOn = edit !== null && desk && !keys.on
+  const draggedName = dragged?.name ?? null
+  // Kept while nothing about it changes, so the memoized pads don't all re-render (the edit
+  // callbacks are read from the latest props).
+  const drop: DropUi | null = useMemo(
+    () =>
+      dropOn
+        ? {
+            at: dropAt,
+            name: draggedName,
+            nameNow: (pad) => latest.current.edit?.nameNow(pad) ?? null,
+            onOver: setDropAt,
+            onDrop: (pad, e) => {
+              setDropAt(null)
+              setDragged(null)
+              const ed = latest.current.edit
+              if (!ed) return
+              const slot = Number(e.dataTransfer?.getData(SLOT_MIME) ?? '')
+              if (Number.isInteger(slot) && slot > 0) {
+                ed.onDropSlot(pad, slot)
+                return
+              }
+              const file = e.dataTransfer?.files?.[0]
+              if (file) ed.onDropFile(pad, file)
+            },
+          }
+        : null,
+    [dropOn, dropAt, draggedName],
+  )
 
   const tools = keys.on ? (
     <KeysPanel keys={keys} actions={actions} piano={pianoRange !== null} />
@@ -471,14 +551,34 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   )
   const dockHead = tabbed ? <ToolsTabs tab={toolsTab} onTab={setToolsTab} /> : undefined
 
-  const padPress = (pad: PhysicalPad): PressTarget | null =>
-    onPad === null
-      ? null
-      : {
-          press: (hold) => onPad(pad, hold),
-          release: () => props.onPadUp?.(pad),
+  const hasPad = onPad !== null
+  const padPress = useMemo(
+    () =>
+      (pad: PhysicalPad): PressTarget | null => {
+        if (!hasPad) return null
+        return {
+          // Unsure only when something will settle it.
+          press: (hold, unsure) => latest.current.onPad?.(pad, hold, (unsure ?? false) && latest.current.onPadKept !== undefined),
+          release: () => latest.current.onPadUp?.(pad),
+          cut: () => (latest.current.onPadCut ?? latest.current.onPadUp)?.(pad),
+          keep: () => latest.current.onPadKept?.(pad),
         }
-  const padUi: PadUi = { press: padPress, edit: edit !== null ? edit.onPad : null, editing, drop }
+      },
+    [hasPad],
+  )
+  const hasEdit = edit !== null
+  const editPad = useMemo(() => (hasEdit ? (pad: PhysicalPad) => latest.current.edit?.onPad(pad) : null), [hasEdit])
+  const padUi: PadUi = useMemo(
+    () => ({ press: padPress, edit: editPad, editing, drop, haptic, playing: playing.pads, fixedNow }),
+    [padPress, editPad, editing, drop, haptic, playing.pads, fixedNow],
+  )
+  const keyPress = useMemo(
+    () => ({
+      onKey: (k: number, hold: boolean) => latest.current.keysActions?.onKey?.(k, hold),
+      onKeyUp: (k: number) => latest.current.keysActions?.onKeyUp?.(k),
+    }),
+    [],
+  )
 
   const modeRow = (
     <ModeRow
@@ -502,7 +602,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
       <div class="live__groups">
         <div class="live__grid">
           {[0, 1, 2, 3].map((g) => (
-            <Group key={g} group={g} st={st} nameOf={nameOf} now={now} ui={padUi} playingPads={playingPads} tracker={tracker} />
+            <Group key={g} group={g} st={st} nameOf={nameOf} now={now} ui={padUi} tracker={tracker} />
           ))}
         </div>
       </div>
@@ -526,7 +626,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           </div>
         )}
         <div class="live-piano__body">
-          <KeysDisplay st={st} mirror={mirror} keys={keys} pianoRange={pianoRange} />
+          <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={pianoRange} />
           {modeRow}
           <div
             class="live-piano__keys"
@@ -540,7 +640,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
               range={pianoRange}
               st={st}
               keys={keys}
-              playingNotes={keys.playingNotes}
+              playingNotes={playing.notes}
+              haptics={haptic}
               now={now}
               onNote={(n, hold) => actions.onNote?.(n, hold)}
               onNoteUp={(n) => actions.onNoteUp?.(n)}
@@ -558,10 +659,10 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     if (keys.on && keyNotes) {
       body = (
         <div class="live-ko live-ko--keys">
-          <KeysDisplay st={st} mirror={mirror} keys={keys} pianoRange={null} />
+          <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={null} />
           {modeRow}
           <div class="live-ko__body">
-            <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={actions} tracker={tracker} />
+            <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.keys} haptic={haptic} />
           </div>
         </div>
       )
@@ -573,7 +674,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           {modeRow}
           <div class="live-ko__body">
             <GroupKeys group={group} st={st} now={now} onSelect={setGroup} vertical />
-            <Group group={group} st={st} nameOf={nameOf} now={now} big coach ui={padUi} playingPads={playingPads} tracker={tracker} />
+            <Group group={group} st={st} nameOf={nameOf} now={now} big coach ui={padUi} tracker={tracker} />
           </div>
         </div>
       )
@@ -586,7 +687,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           {modeRow}
           <div class="live-row__groups">
             {[0, 1, 2, 3].map((g) => (
-              <Group key={g} group={g} st={st} nameOf={nameOf} now={now} fill ui={padUi} playingPads={playingPads} tracker={tracker} />
+              <Group key={g} group={g} st={st} nameOf={nameOf} now={now} fill ui={padUi} tracker={tracker} />
             ))}
           </div>
         </div>
@@ -623,8 +724,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         )}
         {keys.on && keyNotes ? (
           <>
-            <KeysDisplay st={st} mirror={mirror} keys={keys} pianoRange={null} />
-            <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={actions} tracker={tracker} />
+            <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={null} />
+            <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.keys} haptic={haptic} />
             {modeRow}
           </>
         ) : sideways ? (
@@ -633,7 +734,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           <>
             {displayStrip}
             <div class="live__side">
-              <Group group={group} st={st} nameOf={nameOf} now={now} big coach ui={padUi} playingPads={playingPads} tracker={tracker} />
+              <Group group={group} st={st} nameOf={nameOf} now={now} big coach ui={padUi} tracker={tracker} />
               <GroupKeys group={group} st={st} now={now} onSelect={setGroup} vertical />
             </div>
             {modeRow}
@@ -641,7 +742,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         ) : (
           <>
             {displayStrip}
-            <Group group={group} st={st} nameOf={nameOf} now={now} big coach ui={padUi} playingPads={playingPads} tracker={tracker} />
+            <Group group={group} st={st} nameOf={nameOf} now={now} big coach ui={padUi} tracker={tracker} />
             {modeRow}
             <GroupKeys group={group} st={st} now={now} onSelect={setGroup} />
           </>
@@ -864,6 +965,12 @@ interface PadUi {
   editing: boolean
   /** The desk: sounds and WAVs dropped on the pads; null elsewhere. */
   drop: DropUi | null
+  /** A tick after a finger's press. */
+  haptic: boolean
+  /** The pads sounding on the phone (padKey), each pad reading its own ring. */
+  playing: ReadonlySignal<ReadonlySet<number>>
+  /** A fixed time for screenshots; null: a pad's glow is taken at the time it renders. */
+  fixedNow: number | null
 }
 
 /** Dropping on the pads (the desk). */
@@ -889,12 +996,11 @@ interface GroupProps {
   /** The guide overlay's "pads light as you play" tag (the big grid only). */
   coach?: boolean
   ui: PadUi
-  playingPads: ReadonlySet<number>
   tracker: PressTracker
 }
 
 function Group(props: GroupProps): JSX.Element {
-  const { group, st, nameOf, now, big = false, fill = false, ui, playingPads, tracker } = props
+  const { group, st, nameOf, now, big = false, fill = false, ui, tracker } = props
   const letter = MirrorText.groupKey(group)
   return (
     <div
@@ -920,11 +1026,9 @@ function Group(props: GroupProps): JSX.Element {
                   pad={pad}
                   light={st.pads.get(padKey(pad))}
                   name={nameOf(pad)}
-                  now={now}
                   big={big}
                   scroll={!big && !fill}
                   ui={ui}
-                  playing={playingPads.has(padKey(pad))}
                   tracker={tracker}
                 />
               )
@@ -994,13 +1098,10 @@ interface PadProps {
   pad: PhysicalPad
   light: PadLight | undefined
   name: string | null
-  now: number
   big: boolean
   /** On the scrolling all-groups page: a drag across the pads scrolls rather than plays. */
   scroll: boolean
   ui: PadUi
-  /** Playing on the phone: a signal-orange ring inside the pad. */
-  playing: boolean
   tracker: PressTracker
 }
 
@@ -1037,7 +1138,7 @@ function stopEditPress(st: EditPress): void {
  * it plays until let go, as outside EDIT. A drag that turns into a scroll
  * (the all-groups page) cancels it, opening nothing.
  */
-function editHandlers(st: EditPress, press: PressTarget | null, open: () => void): ButtonHTMLAttributes<HTMLButtonElement> {
+function editHandlers(st: EditPress, press: PressTarget | null, open: () => void, haptic: boolean): ButtonHTMLAttributes<HTMLButtonElement> {
   const end = (el: HTMLElement, tap: boolean): void => {
     el.removeAttribute('data-down')
     const tapped = st.timer !== null
@@ -1049,7 +1150,8 @@ function editHandlers(st: EditPress, press: PressTarget | null, open: () => void
       if (e.pointerType === 'mouse' && e.button !== 0) return
       if (st.id !== null) return
       st.id = e.pointerId
-      st.target = press
+      // The long press ticks after its press, as outside EDIT.
+      st.target = press !== null ? ticking(press, haptic, tick) : null
       e.currentTarget.setAttribute('data-down', '')
       st.timer = setTimeout(() => {
         st.timer = null
@@ -1073,8 +1175,23 @@ function editHandlers(st: EditPress, press: PressTarget | null, open: () => void
   }
 }
 
-function Pad(props: PadProps): JSX.Element {
-  const { pad, light, name, big, scroll, ui, playing, tracker } = props
+/** A pad renders again only when what it shows or does changed (not with every mirror state). */
+const Pad = memo(
+  PadCap,
+  (a: PadProps, b: PadProps) =>
+    padKey(a.pad) === padKey(b.pad) &&
+    a.light === b.light &&
+    a.name === b.name &&
+    a.big === b.big &&
+    a.scroll === b.scroll &&
+    a.ui === b.ui &&
+    a.tracker === b.tracker,
+)
+
+function PadCap(props: PadProps): JSX.Element {
+  const { pad, light, name, big, scroll, ui, tracker } = props
+  // Playing on the phone: a signal-orange ring inside the pad (only this pad re-renders when it changes).
+  const playing = useHas(ui.playing, padKey(pad))
   const press = ui.press(pad)
   const edit = useRef<EditPress>(newEditPress())
   const holds = useRef(new Set<number>())
@@ -1090,7 +1207,8 @@ function Pad(props: PadProps): JSX.Element {
     holds.current.clear()
     btn.current?.removeAttribute('data-down')
   }, [editMode, tracker])
-  const g = light ? glow(light, props.now) : 0
+  // The glow at this render (the screen's frame loop keeps it moving while it fades).
+  const g = light ? glow(light, ui.fixedNow ?? perfNow()) : 0
   const wide = pad.label.length > 1
   const label = `${pad.groupLetter} ${pad.label}` + (name !== null ? `, ${name}` : '')
   const key = padKey(pad)
@@ -1155,7 +1273,8 @@ function Pad(props: PadProps): JSX.Element {
       </div>
     )
   }
-  const handlers = ui.editing && open ? editHandlers(edit.current, press, () => open(pad)) : holdHandlers(tracker, press!, scroll, holds.current)
+  const handlers =
+    ui.editing && open ? editHandlers(edit.current, press, () => open(pad), ui.haptic) : holdHandlers(tracker, press!, scroll, ui.haptic, holds.current)
   // A right-click with the mouse opens the pad's sheet (a long press on a touch screen still plays).
   const onPointerDown = handlers.onPointerDown
   return (
@@ -1237,7 +1356,7 @@ function Notes(props: { st: MirrorState; mirror: MirrorUi | null; tapToPlay: boo
  * the choices. Over the piano it is Android's SidewaysRow ([SidewaysRow]).
  */
 function ModeRow(props: {
-  keys: KeysUi
+  keys: KeysShown
   actions: KeysActions
   /** Kept by the caller when given (undefined: each word keeps its own). */
   picker?: KeysPicker | null
@@ -1329,7 +1448,7 @@ const SCALE_NAME_ROOM = 470
  * key word drops its KEY, then the scale shortens to its code.
  */
 function SidewaysRow(props: {
-  keys: KeysUi
+  keys: KeysShown
   actions: KeysActions
   pick: (which: KeysPicker) => { open?: boolean; onOpen?: (open: boolean) => void }
   mode: JSX.Element
@@ -1490,9 +1609,17 @@ function PianoIcon(): JSX.Element {
  * plays on the right. A device note past the piano's ends ([pianoRange]) is
  * named as such: there's no key to light for it.
  */
-function KeysDisplay(props: { st: MirrorState; mirror: MirrorUi | null; keys: KeysUi; pianoRange: NoteRange | null }): JSX.Element {
-  const { st, mirror, keys } = props
-  const note = keysNoteText(keys, st.lastNote, props.pianoRange)
+function KeysDisplay(props: {
+  st: MirrorState
+  mirror: MirrorUi | null
+  keys: KeysShown
+  playing: LivePlaying
+  pianoRange: NoteRange | null
+}): JSX.Element {
+  const { st, mirror, keys, playing } = props
+  // The note last pressed here: this line re-renders with what plays, not the screen.
+  const shown = { ...keys, playingKeys: playing.keys.value, playingNotes: playing.notes.value }
+  const note = keysNoteText(shown, st.lastNote, props.pianoRange)
   return (
     <div class="live-strip" aria-live="polite">
       <span class="live-strip__sub live-strip__dim">{MirrorText.MODE_KEYS.toUpperCase()}</span>
@@ -1512,11 +1639,14 @@ function KeysDisplay(props: { st: MirrorState; mirror: MirrorUi | null; keys: Ke
  */
 function KeysGrid(props: {
   st: MirrorState
-  keys: KeysUi
+  keys: KeysShown
   keyNotes: readonly number[]
   now: number
   actions: KeysActions
   tracker: PressTracker
+  /** The keys sounding on the phone, by index. */
+  playing: ReadonlySignal<ReadonlySet<number>>
+  haptic: boolean
 }): JSX.Element {
   const { st, keys, keyNotes, now, actions, tracker } = props
   // How lit each key is: the brightest device note that falls on it.
@@ -1532,43 +1662,83 @@ function KeysGrid(props: {
       <div class="live-deck live-kgrid__plate" role="group" aria-label={MirrorText.MODE_KEYS}>
         {ROWS.map((offsets, r) => (
           <div class="live-deck__row" key={r}>
-            {offsets.map((k) => {
-              const note = keyNotes[k]!
-              const target: PressTarget = {
-                press: (hold) => actions.onKey?.(k, hold),
-                release: () => actions.onKeyUp?.(k),
-              }
-              const cls =
-                'live-key cap-3d' +
-                (upperOctave(note, keys.octave) ? ' live-key--upper' : '') +
-                (keys.playingKeys.has(k) ? ' is-playing' : '')
-              return (
-                <button
-                  key={k}
-                  type="button"
-                  class={cls}
-                  aria-label={MirrorText.noteName(note, keys.names)}
-                  aria-description={MirrorText.PLAY}
-                  data-key={k}
-                  style={{ '--glow': glowCss(lit.get(k) ?? 0) }}
-                  {...holdHandlers(tracker, target, false)}
-                >
-                  {/* Named, the name alone, in the ring's colour; unnamed, the ring. */}
-                  {keys.showNames ? (
-                    <span class="live-key__name">{Keys.name(note, keys.names)}</span>
-                  ) : (
-                    <svg class="live-key__ring" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
-                      <circle cx="50" cy="50" r="45.5" fill="none" stroke-width="9" />
-                    </svg>
-                  )}
-                  <span class="live-key__octave">{Keys.octaveOf(note)}</span>
-                </button>
-              )
-            })}
+            {offsets.map((k) => (
+              <KeyCap
+                key={k}
+                index={k}
+                note={keyNotes[k]!}
+                keys={keys}
+                lit={lit.get(k) ?? 0}
+                actions={actions}
+                tracker={tracker}
+                playing={props.playing}
+                haptic={props.haptic}
+              />
+            ))}
           </div>
         ))}
       </div>
     </div>
+  )
+}
+
+interface KeyCapProps {
+  index: number
+  note: number
+  keys: KeysShown
+  lit: number
+  /** Kept the same across renders by the screen (it reads the latest callbacks). */
+  actions: KeysActions
+  tracker: PressTracker
+  playing: ReadonlySignal<ReadonlySet<number>>
+  haptic: boolean
+}
+
+/** A key renders again only when what it shows or does changed (not with every mirror state). */
+const KeyCap = memo(
+  KeyCapView,
+  (a: KeyCapProps, b: KeyCapProps) =>
+    a.index === b.index &&
+    a.note === b.note &&
+    a.lit === b.lit &&
+    a.keys.octave === b.keys.octave &&
+    a.keys.names === b.keys.names &&
+    a.keys.showNames === b.keys.showNames &&
+    a.actions === b.actions &&
+    a.tracker === b.tracker &&
+    a.playing === b.playing &&
+    a.haptic === b.haptic,
+)
+
+/** One KEYS key: its note in a ring, ringed in signal orange while it sounds here (read by the key itself). */
+function KeyCapView(props: KeyCapProps): JSX.Element {
+  const { index: k, note, keys, actions } = props
+  const playing = useHas(props.playing, k)
+  const target: PressTarget = {
+    press: (hold) => actions.onKey?.(k, hold),
+    release: () => actions.onKeyUp?.(k),
+  }
+  const cls = 'live-key cap-3d' + (upperOctave(note, keys.octave) ? ' live-key--upper' : '') + (playing ? ' is-playing' : '')
+  return (
+    <button
+      type="button"
+      class={cls}
+      aria-label={MirrorText.noteName(note, keys.names)}
+      aria-description={MirrorText.PLAY}
+      data-key={k}
+      style={{ '--glow': glowCss(props.lit) }}
+      {...holdHandlers(props.tracker, target, false, props.haptic)}
+    >
+      {/* Named, the name alone, in the ring's colour; unnamed, the ring. */}
+      {keys.showNames ? (
+        <span class="live-key__name">{Keys.name(note, keys.names)}</span>
+      ) : (
+        <svg class="live-key__ring" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
+          <circle cx="50" cy="50" r="45.5" fill="none" stroke-width="9" />
+        </svg>
+      )}
+      <span class="live-key__octave">{Keys.octaveOf(note)}</span>
+    </button>
   )
 }
 
@@ -1577,7 +1747,7 @@ function KeysGrid(props: {
  * how Keys works (its note and the long legend) under a disclosure.
  * [piano]: the piano is showing, and its two chips with it.
  */
-function KeysPanel(props: { keys: KeysUi; actions: KeysActions; piano?: boolean }): JSX.Element {
+function KeysPanel(props: { keys: KeysShown; actions: KeysActions; piano?: boolean }): JSX.Element {
   const { keys, actions, piano = false } = props
   const keyId = useId()
   return (

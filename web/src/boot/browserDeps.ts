@@ -40,6 +40,9 @@ import { unavailableLibrary, type Deps, type LibraryApi } from '../state/deps'
 
 type Timer = ReturnType<typeof globalThis.setTimeout>
 
+/** Deps.requestFrame's timer where the display gives no frames (a hidden tab): about one frame. */
+const FRAME_MS = 16
+
 /** ?demo's library channel (BroadcastChannel) and device lock, apart from the real ones. */
 export const DEMO_CHANNEL_NAME = `${CHANNEL_NAME}-demo`
 export const DEMO_LOCK_NAME = `${DEVICE_LOCK_NAME}-demo`
@@ -148,6 +151,15 @@ export async function createBrowserDeps(options: BrowserDepsOptions = {}): Promi
     perfNow: () => performance.now(),
     setTimeout: (fn, ms) => globalThis.setTimeout(fn, ms),
     clearTimeout: (h) => globalThis.clearTimeout(h as Timer),
+    requestFrame: (fn) => {
+      // A hidden tab gets no frames: a short timer then.
+      if (!win || typeof win.requestAnimationFrame !== 'function' || doc?.visibilityState === 'hidden') {
+        const t = globalThis.setTimeout(fn, FRAME_MS)
+        return () => globalThis.clearTimeout(t)
+      }
+      const h = win.requestAnimationFrame(() => fn())
+      return () => win.cancelAnimationFrame(h)
+    },
     guardUnload() {
       if (!win) return () => {}
       const onBeforeUnload = (e: BeforeUnloadEvent): void => {
@@ -165,6 +177,11 @@ export async function createBrowserDeps(options: BrowserDepsOptions = {}): Promi
         const on = (): void => listener(doc.visibilityState === 'visible')
         doc.addEventListener('visibilitychange', on)
         return () => doc.removeEventListener('visibilitychange', on)
+      },
+      onPageHide(listener) {
+        if (!win) return () => {}
+        win.addEventListener('pagehide', listener)
+        return () => win.removeEventListener('pagehide', listener)
       },
     },
     title: {

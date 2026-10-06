@@ -86,6 +86,8 @@ object SettingsText {
     }
     /** Why a piano size is greyed out. */
     const val DOESNT_FIT = "Too wide for this window"
+    const val HAPTICS = "Haptic feedback"
+    const val HAPTICS_NOTE = "A light tick when a pad or key goes down."
 
     const val SAVED_HERE = "Saved on the phone"
     const val LEARNED_NAMES = "Learned sample names"

@@ -139,7 +139,9 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -147,7 +149,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import dev.arc.ep133.features.Piano
 import dev.arc.ep133.ui.components.ArcWindow
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.StateFlow
 import dev.arc.ep133.ui.theme.ArcType
 import dev.arc.ep133.ui.theme.LocalArcColors
 
@@ -258,12 +262,26 @@ fun MirrorScreen(
     /**
      * Pressing a pad plays its sample on the phone until [onPadUp] (hold is
      * false for a screen reader's Play, which plays to the end); null leaves
-     * the pads still.
+     * the pads still. [unsure]: a press on the scrolling all-groups page,
+     * which [onPadKept] or [onPadCut] settles.
      */
-    onPad: ((pad: PhysicalPad, hold: Boolean) -> Unit)? = null,
+    onPad: ((pad: PhysicalPad, hold: Boolean, unsure: Boolean) -> Unit)? = null,
+    /** The unsure press on a pad was a press after all (no scroll within [PRESS_DELAY_MS], or a lift inside it). */
+    onPadKept: (PhysicalPad) -> Unit = {},
     onPadUp: (PhysicalPad) -> Unit = {},
+    /**
+     * The press on a pad of the scrolling page turned into a scroll: its sound
+     * is cut short, rather than let go of ([onPadUp]).
+     */
+    onPadCut: (PhysicalPad) -> Unit = onPadUp,
     /** The pads whose samples are playing on the phone (several at once for a chord), ringed. */
     playingPads: Set<PhysicalPad> = emptySet(),
+    /**
+     * The voices sounding on the phone, collected here where the rings are
+     * drawn, so a voice starting or ending recomposes Live rather than the
+     * whole app. When given, it sets [playingPads] and the KEYS notes outlined.
+     */
+    voices: StateFlow<Set<String>>? = null,
     /** KEYS: the pads become notes of one sound, like the EP-133's KEYS mode. */
     keys: KeysUi = KeysUi(),
     keysActions: KeysActions = KeysActions(),
@@ -277,7 +295,12 @@ fun MirrorScreen(
     takes: TakesUi = TakesUi(),
     /** EDIT: tapping a pad gives it another sound. */
     edit: EditUi = EditUi(),
+    /** A light tick as a pad or key goes down (Settings → Haptic feedback). */
+    haptics: Boolean = true,
 ) {
+    val sounding = voices?.collectAsStateWithLifecycle()?.value
+    val ringed = if (sounding == null) playingPads else remember(sounding) { LiveVoices.pads(sounding) }
+    val keysNow = soundingKeys(keys, sounding)
     val c = LocalArcColors.current
     val window = LocalArcWindow.current
     // EDIT works on the pads only, and only on the Live tab (where the tab is).
@@ -378,7 +401,7 @@ fun MirrorScreen(
             if (piano != null) {
                 Column(sidewaysColumn) {
                     if (!inBar) {
-                        KeysDisplay(st, mirror, keys, rec, still = fixedNow != null, pianoRange = piano)
+                        KeysDisplay(st, mirror, keysNow, rec, still = fixedNow != null, pianoRange = piano)
                         Spacer(Modifier.height(10.dp))
                     }
                     // The row over the piano and the piano; upright (a tablet) they sit right
@@ -387,12 +410,13 @@ fun MirrorScreen(
                         ModeRow(keys, keysActions, landscape = true, viewSwitch = viewSwitch)
                         // The rest of the room; on a tablet no taller than a hand spans.
                         PianoKeyboard(
-                            piano, st, keys, clock, keysActions,
+                            piano, st, keysNow, clock, keysActions,
                             Modifier
                                 .fillMaxWidth()
                                 .weight(1f, fill = false)
                                 .then(if (window.short) Modifier else Modifier.heightIn(max = PianoMaxTablet))
                                 .coachMark("live.keys", CoachText.PIANO, CoachYellow, CoachYellowInk),
+                            haptics = haptics,
                         )
                     }
                 }
@@ -415,9 +439,12 @@ fun MirrorScreen(
                                 Modifier.width(gridW).fillMaxHeight().coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
                                 big = true,
                                 onPad = onPad,
+                                onPadKept = onPadKept,
                                 onPadUp = onPadUp,
-                                playingPads = playingPads,
+                                onPadCut = onPadCut,
+                                playingPads = ringed,
                                 onEdit = onEdit,
+                                haptics = haptics,
                             )
                             GroupKeys(group, st, now, onSelect = { group = it }, Modifier.width(GroupColumn).fillMaxHeight(), vertical = true)
                         }
@@ -436,7 +463,7 @@ fun MirrorScreen(
                         Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = caption + 3.dp + padW * 4),
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
-                        for (g in 0..3) Group(g, st, nameOf, now, Modifier.weight(1f).fillMaxHeight(), fill = true, onPad = onPad, onPadUp = onPadUp, playingPads = playingPads, onEdit = onEdit)
+                        for (g in 0..3) Group(g, st, nameOf, now, Modifier.weight(1f).fillMaxHeight(), fill = true, onPad = onPad, onPadKept = onPadKept, onPadUp = onPadUp, onPadCut = onPadCut, playingPads = ringed, onEdit = onEdit, haptics = haptics)
                     }
                 }
             } else if (oneGroup || keys.on) {
@@ -460,10 +487,11 @@ fun MirrorScreen(
                             }
                         }
                         if (keys.on) {
-                            if (!inBar) KeysDisplay(st, mirror, keys, rec, still = fixedNow != null)
+                            if (!inBar) KeysDisplay(st, mirror, keysNow, rec, still = fixedNow != null)
                             KeysGrid(
-                                st, keys, now, keysActions,
+                                st, keysNow, now, keysActions,
                                 Modifier.fillMaxWidth().weight(1f).coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
+                                haptics = haptics,
                             )
                             ModeRow(keys, keysActions, viewSwitch = viewSwitch)
                         } else {
@@ -475,9 +503,12 @@ fun MirrorScreen(
                                 Modifier.fillMaxWidth().weight(1f).coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
                                 big = true,
                                 onPad = onPad,
+                                onPadKept = onPadKept,
                                 onPadUp = onPadUp,
-                                playingPads = playingPads,
+                                onPadCut = onPadCut,
+                                playingPads = ringed,
                                 onEdit = onEdit,
+                                haptics = haptics,
                             )
                             ModeRow(keys, keysActions)
                             GroupKeys(group, st, now, onSelect = { group = it })
@@ -510,7 +541,7 @@ fun MirrorScreen(
                             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                                 for (row in (0..3).chunked(perRow)) {
                                     Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                                        for (g in row) Group(g, st, nameOf, now, Modifier.weight(1f), onPad = onPad, onPadUp = onPadUp, playingPads = playingPads, onEdit = onEdit)
+                                        for (g in row) Group(g, st, nameOf, now, Modifier.weight(1f), onPad = onPad, onPadKept = onPadKept, onPadUp = onPadUp, onPadCut = onPadCut, playingPads = ringed, onEdit = onEdit, haptics = haptics)
                                     }
                                 }
                             }
@@ -524,6 +555,14 @@ fun MirrorScreen(
             EditEdgeTab(edit.on, { edit.onEdit(!edit.on) }, Modifier.align(Alignment.CenterStart).underGuide())
         }
     }
+}
+
+/** [keys] with the notes [sounding] on the phone outlined; without that (screenshots), [keys] as given. */
+@Composable
+private fun soundingKeys(keys: KeysUi, sounding: Set<String>?): KeysUi {
+    if (sounding == null) return keys
+    val notes = remember(sounding) { LiveVoices.notes(sounding) }
+    return remember(keys, notes) { keys.copy(playingNotes = notes) }
 }
 
 /** The controls row's height over the keys (its words' touch height). */
@@ -590,10 +629,20 @@ private val LivePillWindow = 600.dp
  * piano's notes, to name a device note it doesn't reach.
  */
 @Composable
-internal fun LivePill(mirror: MirrorUi?, keys: KeysUi, rec: RecUi = RecUi(), still: Boolean = false, pianoRange: IntRange? = null, editing: Boolean = false) {
+internal fun LivePill(
+    mirror: MirrorUi?,
+    keys: KeysUi,
+    rec: RecUi = RecUi(),
+    still: Boolean = false,
+    pianoRange: IntRange? = null,
+    editing: Boolean = false,
+    /** The voices sounding on the phone, as [MirrorScreen] takes them: the note playing is named. */
+    voices: StateFlow<Set<String>>? = null,
+) {
     val st = mirror?.state ?: MirrorState()
+    val keysNow = soundingKeys(keys, voices?.collectAsStateWithLifecycle()?.value)
     when {
-        keys.on -> KeysDisplay(st, mirror, keys, rec, still, compact = true, pianoRange = pianoRange)
+        keys.on -> KeysDisplay(st, mirror, keysNow, rec, still, compact = true, pianoRange = pianoRange)
         editing -> EditLine(compact = true)
         else -> DisplayStrip(st, mirror, rec, still, compact = true)
     }
@@ -784,11 +833,14 @@ private fun Group(
     big: Boolean = false,
     /** The rows share the group's height (the big grid, and all four side by side on a phone on its side). */
     fill: Boolean = big,
-    onPad: ((pad: PhysicalPad, hold: Boolean) -> Unit)? = null,
+    onPad: ((pad: PhysicalPad, hold: Boolean, unsure: Boolean) -> Unit)? = null,
+    onPadKept: (PhysicalPad) -> Unit = {},
     onPadUp: (PhysicalPad) -> Unit = {},
+    onPadCut: (PhysicalPad) -> Unit = onPadUp,
     playingPads: Set<PhysicalPad> = emptySet(),
     /** EDIT is on: a tap gives the pad another sound. */
     onEdit: ((PhysicalPad) -> Unit)? = null,
+    haptics: Boolean = false,
 ) {
     val c = LocalArcColors.current
     val lit = st.pads.filterKeys { it.group == group }
@@ -807,12 +859,15 @@ private fun Group(
                             pad, lit[pad], nameOf(pad), now,
                             Modifier.weight(1f).then(if (fill) Modifier.fillMaxHeight() else Modifier.aspectRatio(1f)),
                             big,
-                            onPress = onPad?.let { f -> { hold: Boolean -> f(pad, hold) } },
+                            onPress = onPad?.let { f -> { hold: Boolean, unsure: Boolean -> f(pad, hold, unsure) } },
+                            onKept = { onPadKept(pad) },
                             onRelease = { onPadUp(pad) },
+                            onCut = { onPadCut(pad) },
                             playing = pad in playingPads,
                             // Only the all-groups page scrolls.
                             inScroll = !fill,
                             onEdit = onEdit?.let { f -> { f(pad) } },
+                            haptics = haptics,
                         )
                     }
                 }
@@ -923,11 +978,14 @@ private fun Pad(
     now: Long,
     modifier: Modifier,
     big: Boolean = false,
-    onPress: ((hold: Boolean) -> Unit)? = null,
+    onPress: ((hold: Boolean, unsure: Boolean) -> Unit)? = null,
+    onKept: () -> Unit = {},
     onRelease: () -> Unit = {},
+    onCut: () -> Unit = onRelease,
     playing: Boolean = false,
     inScroll: Boolean = !big,
     onEdit: (() -> Unit)? = null,
+    haptics: Boolean = false,
 ) {
     val c = LocalArcColors.current
     val hw = LocalHwColors.current
@@ -983,10 +1041,10 @@ private fun Pad(
         .then(
             when {
                 // EDIT: a tap opens the pad sheet; held, it still plays.
-                onEdit != null -> tapToEdit(onEdit, onPress, onRelease, held = held)
-                // The big grid doesn't scroll: it plays on touch-down. The all-groups page
-                // scrolls, so there a drag across the pads must not play them.
-                onPress != null -> holdToPlay(onPress, onRelease, inScroll = inScroll, held = held)
+                onEdit != null -> tapToEdit(onEdit, onPress, onRelease, held = held, haptics = haptics)
+                // Both play on touch-down. The all-groups page scrolls, so there a press that
+                // turns into a drag across the pads is cut short.
+                onPress != null -> holdToPlay(onPress, onRelease, onKept = onKept, onCut = onCut, inScroll = inScroll, held = held, haptics = haptics)
                 else -> Modifier
             },
         )
@@ -1538,7 +1596,7 @@ private fun KeysDisplay(st: MirrorState, mirror: MirrorUi?, keys: KeysUi, rec: R
  * the notes playing on the phone are outlined in signal orange.
  */
 @Composable
-private fun KeysGrid(st: MirrorState, keys: KeysUi, now: Long, actions: KeysActions, modifier: Modifier) {
+private fun KeysGrid(st: MirrorState, keys: KeysUi, now: Long, actions: KeysActions, modifier: Modifier, haptics: Boolean = false) {
     val c = LocalArcColors.current
     val notes = Keys.notes(keys.root, keys.scale, keys.octave)
     // Each key is a finger of its own, holding the note it had when pressed: a new key,
@@ -1587,9 +1645,10 @@ private fun KeysGrid(st: MirrorState, keys: KeysUi, now: Long, actions: KeysActi
                                 .then(
                                     holdToPlay(
                                         // A screen reader's Play sounds the note to its end: no finger to keep count of.
-                                        { hold -> if (hold) play(touches.down(k.toLong(), notes[k])) else actions.onNote(notes[k], false) },
+                                        { hold, _ -> if (hold) play(touches.down(k.toLong(), notes[k])) else actions.onNote(notes[k], false) },
                                         { play(touches.up(k.toLong())) },
                                         held = held,
+                                        haptics = haptics,
                                     ),
                                 )
                                 .semantics { contentDescription = MirrorText.noteName(note, keys.names) },
@@ -1752,44 +1811,59 @@ private fun LegendKey(
  * Sounds while held, as an instrument in gate mode does: [onPress] on
  * touch-down, [onRelease] when the finger lifts (or the gesture is taken
  * over). Each finger is its own press, so several pads or keys held together
- * make a chord. [inScroll]: in a scrolling page the press waits a moment, and
- * a drag that starts then is a scroll that plays nothing. Screen readers get a
- * plain Play action, which plays the whole sound. [held] is true while a finger
- * holds it (the cap stays down).
+ * make a chord. [inScroll]: in a scrolling page the press still plays at
+ * once, and a drag that starts within [PRESS_DELAY_MS] (or the scroll taking
+ * the finger then) is a scroll after all: [onCut] ends the sound in a few
+ * milliseconds instead. Such a press is handed on unsure, and [onKept] says
+ * when it was a press after all (the window closed, or the finger lifted
+ * inside it). Screen readers get a plain Play action, which plays
+ * the whole sound. [held] is true while a finger holds it (the cap stays
+ * down). [haptics]: a light tick once the press is handed on (a cut keeps it).
  */
 @Composable
 private fun holdToPlay(
-    onPress: (hold: Boolean) -> Unit,
+    onPress: (hold: Boolean, unsure: Boolean) -> Unit,
     onRelease: () -> Unit,
+    onKept: () -> Unit = {},
+    onCut: () -> Unit = onRelease,
     inScroll: Boolean = false,
     held: MutableState<Boolean>? = null,
+    haptics: Boolean = false,
 ): Modifier {
     val press by androidx.compose.runtime.rememberUpdatedState(onPress)
     val release by androidx.compose.runtime.rememberUpdatedState(onRelease)
+    val cut by androidx.compose.runtime.rememberUpdatedState(onCut)
+    val kept by androidx.compose.runtime.rememberUpdatedState(onKept)
+    val tick by androidx.compose.runtime.rememberUpdatedState(if (haptics) LocalHapticFeedback.current else null)
     return Modifier
         .pointerInput(inScroll) {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
-                var lifted = false
-                if (inScroll) {
-                    var drag = false
-                    withTimeoutOrNull(PRESS_DELAY_MS) {
-                        while (!lifted && !drag) {
-                            // The Final pass sees what the scroll above took.
-                            val ch = awaitPointerEvent(PointerEventPass.Final).changes.firstOrNull { it.id == down.id }
-                            when {
-                                ch == null -> drag = true
-                                ch.changedToUp() -> lifted = true
-                                ch.isConsumed || (ch.position - down.position).getDistance() > viewConfiguration.touchSlop -> drag = true
+                press(true, inScroll)
+                tick?.performHapticFeedback(HapticFeedbackType.KeyboardTap)
+                held?.value = true
+                var scrolled = false
+                var unsure = inScroll
+                try {
+                    var lifted = false
+                    if (inScroll) {
+                        withTimeoutOrNull(PRESS_DELAY_MS) {
+                            while (!lifted && !scrolled) {
+                                // The Final pass sees what the scroll above took.
+                                val ch = awaitPointerEvent(PointerEventPass.Final).changes.firstOrNull { it.id == down.id }
+                                when {
+                                    ch == null -> scrolled = true
+                                    ch.changedToUp() -> lifted = true
+                                    ch.isConsumed || (ch.position - down.position).getDistance() > viewConfiguration.touchSlop -> scrolled = true
+                                }
                             }
                         }
+                        if (!scrolled) {
+                            unsure = false
+                            kept()
+                        }
                     }
-                    if (drag) return@awaitEachGesture
-                }
-                press(true)
-                held?.value = true
-                try {
-                    while (!lifted) {
+                    while (!lifted && !scrolled) {
                         val ch = awaitPointerEvent(PointerEventPass.Final).changes.firstOrNull { it.id == down.id } ?: break
                         // Lifted, or a scroll took the finger over.
                         if (!ch.pressed || inScroll && ch.isConsumed) break
@@ -1797,38 +1871,47 @@ private fun holdToPlay(
                 } finally {
                     // Also when the pad leaves the screen with the finger still on it.
                     held?.value = false
-                    release()
+                    if (scrolled) {
+                        cut()
+                    } else {
+                        // Ended inside the window some other way (the pad left the screen): kept, then let go of.
+                        if (unsure) kept()
+                        release()
+                    }
                 }
             }
         }
         .semantics {
             role = Role.Button
             onClick(label = MirrorText.PLAY) {
-                press(false)
+                press(false, false)
                 true
             }
         }
 }
 
-/** How long a press in a scrolling page waits to tell a tap from a scroll (as Compose's own press feedback does). */
+/** How long a press in a scrolling page may still turn out to be a scroll (as Compose's own press feedback waits). */
 private const val PRESS_DELAY_MS = 64L
 
 /**
  * A pad while EDIT is on: a tap calls [onTap] (the pad sheet); held past a
  * long press it plays, as [holdToPlay] does, until the finger lifts ([onPress]
- * null: it doesn't play). A drag (a scroll) does neither. Screen readers get
- * the tap as the pad's click and Play as an action of its own.
+ * null: it doesn't play), with the same tick when [haptics]. A drag (a scroll)
+ * does neither. Screen readers get the tap as the pad's click and Play as an
+ * action of its own.
  */
 @Composable
 private fun tapToEdit(
     onTap: () -> Unit,
-    onPress: ((hold: Boolean) -> Unit)?,
+    onPress: ((hold: Boolean, unsure: Boolean) -> Unit)?,
     onRelease: () -> Unit,
     held: MutableState<Boolean>,
+    haptics: Boolean = false,
 ): Modifier {
     val tap by androidx.compose.runtime.rememberUpdatedState(onTap)
     val press by androidx.compose.runtime.rememberUpdatedState(onPress)
     val release by androidx.compose.runtime.rememberUpdatedState(onRelease)
+    val tick by androidx.compose.runtime.rememberUpdatedState(if (haptics) LocalHapticFeedback.current else null)
     return Modifier
         .pointerInput(Unit) {
             awaitEachGesture {
@@ -1854,7 +1937,8 @@ private fun tapToEdit(
                     }
                     val play = press
                     if (moved || play == null) return@awaitEachGesture
-                    play(true)
+                    play(true, false)
+                    tick?.performHapticFeedback(HapticFeedbackType.KeyboardTap)
                     try {
                         while (true) {
                             val ch = awaitPointerEvent(PointerEventPass.Final).changes.firstOrNull { it.id == down.id } ?: break
@@ -1877,7 +1961,7 @@ private fun tapToEdit(
             if (press != null) {
                 customActions = listOf(
                     androidx.compose.ui.semantics.CustomAccessibilityAction(MirrorText.PLAY) {
-                        press?.invoke(false)
+                        press?.invoke(false, false)
                         true
                     },
                 )
