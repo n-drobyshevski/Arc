@@ -6,6 +6,8 @@ version fixes bugs. The version itself is set in `version.properties`.
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-10-06
+
 ### Added
 - **Live offline**, on Android and the web: with the EP-133 unplugged, EDIT and its pad sheet (and the web's desktop **Sounds** tab) work on the last read, changing the pads in arc only. A **Sounds from Device / Factory** switch picks the list: the device's sounds as last read (no sizes) or the saved factory pack's. Device sounds arc has no copy or backup of are dimmed, marked **Needs the EP-133**, and neither play nor go on a pad, except a pad's own sound, which takes its change back; everything else previews on the phone or in the browser. A sound put on a pad names and plays it at once, a factory sound from the pack even where the device holds another sound in that slot, and the changes are kept across restarts (Android: `live-pads.json` in the app's own files, not Documents/arc; the web: the browser's storage) until **Live tools → Offline pad changes → Reset pads** puts the pads back to the read. Once the EP-133 is connected and read again, arc asks **Put N offline pad changes on the EP-133?**: **Write** puts on, one after another, each change made on the device's active project whose sound is still in that slot (a factory sound also where the device lists it unnamed), skips the rest and says how many of each; **Discard** leaves the device as it is. Either way the changes are cleared; unplugging before an answer keeps them for the next connection.
 - Web, on a computer: **keyboard control** of Live and the app. In PADS the number pad plays the 12 pads laid out as the EP-133's keypad (7 8 9 / 4 5 6 / 1 2 3 / . 0 ENTER, NumLock off too), and the number row and . play them by the numbers printed on them; held keys sound while held and make chords. A–D pick the group (in the all-groups view the group the keys play is underlined), E switches EDIT (a pad key then opens that pad's sound), V all groups or one, F Follow, / the Sounds tab's search. In KEYS the same keys play the grid, Z X step the octave there too, [ ] the key, Shift+[ ] the scale, V grid or piano; the piano's letters are unchanged. M switches pads and keys. ? opens **Keyboard keys**, listing the keys that work where it is opened; Esc closes the full screen in front (never a section), and in Live leaves EDIT or stops the sound; Ctrl/Cmd+Z runs a new pad sound's UNDO while it shows. Single keys pause while typing in a field or with a sheet open, never use Ctrl, Cmd or Alt, and are announced to screen readers; pads, group keys and the EDIT tab say their keys. Settings → Live → **Computer keyboard** (on; kept in this browser only, not in library.json) turns every single key off, the piano's letters included, and shows the keys.
@@ -125,6 +127,8 @@ version fixes bugs. The version itself is set in `version.properties`.
 - Share or save `.pak` files, import them from other apps, and a SysEx debug log.
 - `.pak` files interchangeable with the web version.
 
-[Unreleased]: https://github.com/n-drobyshevski/arc/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/n-drobyshevski/arc/compare/v0.3.5...HEAD
+[0.3.5]: https://github.com/n-drobyshevski/arc/compare/v0.3.0...v0.3.5
+[0.3.0]: https://github.com/n-drobyshevski/arc/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/n-drobyshevski/arc/releases/tag/v0.2.0
 [0.1.0]: https://github.com/n-drobyshevski/arc/commits/main
