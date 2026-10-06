@@ -117,6 +117,8 @@ export function useLiveKeys(enabled: boolean, host: LiveKeysHost): void {
       takes: (target, input) => {
         const root = latest.current.root()
         if (root === null || !(target instanceof Node) || !root.contains(target) || outOfReach()) return false
+        // As the window layer: never from a field (a dialog or listbox inside the screen counts as one).
+        if (input.inField) return false
         return liveCommand(input, latest.current.context()) !== null
       },
     }
