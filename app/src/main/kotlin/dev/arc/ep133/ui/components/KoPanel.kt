@@ -423,30 +423,12 @@ private class KoDraw(
         cap(r, ko.lightFace.d(dim), ko.lightEdge.d(dim))
         val ink = ko.lightInk.d(dim)
         text(GuideText.panelLabel(k), 18f, ink, r.left + 8f, r.top + 4f, align = -1, top = true)
-        // The glyph printed under the letter, in a 12-unit box: A ✳ (fill), B ↩ (repeat), C ⤒ (copy), D ↓ (paste).
+        // The glyph printed under the letter, in a 12-unit box (GroupGlyphs).
         val g = ink.copy(alpha = ink.alpha * 0.8f)
         val x = r.left + 8f
         val y = r.bottom - 18f
-        val w = 1.2f * s
-        fun line(x1: Float, y1: Float, x2: Float, y2: Float) = drawLine(g, o(x + x1, y + y1), o(x + x2, y + y2), strokeWidth = w, cap = StrokeCap.Round)
-        when (k) {
-            PanelKey.A -> {
-                line(6f, 1.5f, 6f, 10.5f); line(1.5f, 6f, 10.5f, 6f)
-                line(2.8f, 2.8f, 9.2f, 9.2f); line(9.2f, 2.8f, 2.8f, 9.2f)
-            }
-            PanelKey.B -> {
-                line(10f, 2f, 10f, 7f); line(10f, 7f, 2f, 7f)
-                line(2f, 7f, 4.5f, 4.5f); line(2f, 7f, 4.5f, 9.5f)
-            }
-            PanelKey.C -> {
-                line(2f, 1.5f, 10f, 1.5f); line(6f, 11f, 6f, 4f)
-                line(6f, 4f, 3.5f, 6.5f); line(6f, 4f, 8.5f, 6.5f)
-            }
-            else -> {
-                line(6f, 1.5f, 6f, 10.5f)
-                line(6f, 10.5f, 3.5f, 8f); line(6f, 10.5f, 8.5f, 8f)
-            }
-        }
+        val glyph = GroupGlyphs[listOf(PanelKey.A, PanelKey.B, PanelKey.C, PanelKey.D).indexOf(k)]
+        for (l in glyph) drawLine(g, o(x + l[0], y + l[1]), o(x + l[2], y + l[3]), strokeWidth = 1.2f * s, cap = StrokeCap.Round)
     }
 
     /** − and +, pale and pad-sized, the sign drawn in the middle. */
@@ -520,3 +502,15 @@ private class KoDraw(
         }
     }
 }
+
+/**
+ * The glyph printed under a group key's letter, as lines (x1, y1, x2, y2) in a
+ * 12-unit box: A ✳ (fill), B ↩ (repeat), C ⤒ (copy), D ↓ (paste). The Guide's
+ * K.O. II draws it, and so do Live's group keys.
+ */
+internal val GroupGlyphs: List<List<FloatArray>> = listOf(
+    listOf(floatArrayOf(6f, 1.5f, 6f, 10.5f), floatArrayOf(1.5f, 6f, 10.5f, 6f), floatArrayOf(2.8f, 2.8f, 9.2f, 9.2f), floatArrayOf(9.2f, 2.8f, 2.8f, 9.2f)),
+    listOf(floatArrayOf(10f, 2f, 10f, 7f), floatArrayOf(10f, 7f, 2f, 7f), floatArrayOf(2f, 7f, 4.5f, 4.5f), floatArrayOf(2f, 7f, 4.5f, 9.5f)),
+    listOf(floatArrayOf(2f, 1.5f, 10f, 1.5f), floatArrayOf(6f, 11f, 6f, 4f), floatArrayOf(6f, 4f, 3.5f, 6.5f), floatArrayOf(6f, 4f, 8.5f, 6.5f)),
+    listOf(floatArrayOf(6f, 1.5f, 6f, 10.5f), floatArrayOf(6f, 10.5f, 3.5f, 8f), floatArrayOf(6f, 10.5f, 8.5f, 8f)),
+)

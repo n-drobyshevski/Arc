@@ -105,7 +105,7 @@
 // it on, the display line says so, the pads get a signal outline and a ⇄
 // badge, and a tap opens the pad sheet ([EditUi.onPad]); a long press still
 // plays the pad while held.
-import { h, type ButtonHTMLAttributes, type Component, type ComponentChildren, type FunctionComponent, type JSX, type TargetedDragEvent } from 'preact'
+import { Fragment, h, type ButtonHTMLAttributes, type Component, type ComponentChildren, type FunctionComponent, type JSX, type TargetedDragEvent } from 'preact'
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { computed, signal, type ReadonlySignal } from '@preact/signals'
 import { Keys, MAX_OCTAVE, MIN_OCTAVE, SCALES, type NoteNames, type Scale } from '../../core/features/keys'
@@ -116,7 +116,7 @@ import type { SoundEntry } from '../../core/protocol/device'
 import { PadOrder } from '../../core/features/padPush'
 import { ROWS, noteName, padKey, physicalPad, type PhysicalPad } from '../../core/features/padNotes'
 import { CoachText } from '../../core/text/coachText'
-import { CLOSE as GUIDE_CLOSE } from '../../core/text/guideText'
+import { CLOSE as GUIDE_CLOSE, LED_ROWS } from '../../core/text/guideText'
 import { MirrorText } from '../../core/text/mirrorText'
 import { FeatureText } from '../../core/text/featureText'
 import { WebText } from '../../core/text/webText'
@@ -143,6 +143,8 @@ import {
   showOffline,
   transportText,
 } from '../live/glow'
+import { GLYPHS } from '../components/KoPanel'
+import { capDown, capUp } from '../live/capDown'
 import { rowPadSize } from '../live/desk'
 import { chosenView, pianoFor, type PianoPlan } from '../live/keyboard'
 import { DEFAULT_KEYS, keysLit, keysNoteText, octaves, upperOctave, type KeysPicker, type KeysShown } from '../live/keys'
@@ -343,15 +345,16 @@ function holdHandlers(
 ): ButtonHTMLAttributes<HTMLButtonElement> {
   // Web: the cap stays down while a finger holds it (data-down, theme/cap.css), as
   // :active is not reliable for several fingers or with touch-action: none.
-  // An attribute, not a class, so a re-render's class string leaves it alone.
-  const lift = (el: HTMLElement): void => el.removeAttribute('data-down')
+  // An attribute, not a class, so a re-render's class string leaves it alone;
+  // a quick tap keeps it a moment (live/capDown.ts).
+  const lift = (el: HTMLElement): void => capUp(el)
   // The tick comes after the press is handed on, so the sound never waits for it.
   const pressed = ticking(target, haptic, tick)
   return {
     onPointerDown: (e) => {
       // The mouse's other buttons (and a pen's barrel button) don't play.
       if (e.pointerType === 'mouse' && e.button !== 0) return
-      e.currentTarget.setAttribute('data-down', '')
+      capDown(e.currentTarget)
       ids?.add(e.pointerId)
       tracker.down(e.pointerId, e.clientX, e.clientY, pressed, inScroll, e.timeStamp)
     },
@@ -645,6 +648,9 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
       plan={plan}
     />
   )
+  // The KEYS grid on a phone on its side: the row's two halves, either side of the keys.
+  const modeLead = <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} plan={plan} part="lead" />
+  const modePicks = <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} plan={plan} part="picks" />
   const late = props.outputLate ?? null
   // On a phone on its side the line is in the top bar instead.
   const displayStrip = inBar ? null : editing ? <EditStrip /> : <DisplayStrip st={st} mirror={mirror} late={late} />
@@ -773,29 +779,44 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     page = (
       // One group (or the keys) fills the screen without scrolling: the display line, the grid
       // (its rows share whatever height is left) and the group keys.
-      <div class={`live__one${sideways && !keys.on ? ' live__one--side' : ''}`}>
+      <div class={`live__one${sideways ? ' live__one--side' : ''}`}>
         {onBack && (
           <div class="live__head">
             <Caption text={MirrorText.TITLE} />
             <CloseKey class="live__close" onClick={onBack} description={GUIDE_CLOSE} />
           </div>
         )}
-        {keys.on && keyNotes ? (
+        {keys.on && keyNotes && sideways ? (
+          // KEYS on the pads on a phone on its side: the keys on the K.O. II's body as big as the
+          // room, the mode word (turned) and the view switch a column on their left, the scale and
+          // the octave one on their right.
+          <>
+            {!inBar && <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={null} />}
+            <div class="live__side live__side--keys">
+              <div class="live__side-tools">{modeLead}</div>
+              <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} haptic={haptic} />
+              <div class="live__side-end">{modePicks}</div>
+            </div>
+          </>
+        ) : keys.on && keyNotes ? (
           <>
             {!inBar && <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={null} />}
             <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} haptic={haptic} />
             {modeRow}
           </>
         ) : sideways ? (
-          // A phone on its side (Android's sideways grid): the grid as tall as the room, the
-          // group keys a column on its right.
+          // A phone on its side (Android's sideways grid): the K.O. II's body as big as the room,
+          // the group keys a column left of the pads, as on the device, and the mode word turned
+          // a quarter turn left of the body rather than a row under it, so the pads get its height.
           <>
             {displayStrip}
             <div class="live__side">
-              <Group group={group} st={st} nameOf={nameOf} now={now} big coach ui={padUi} tracker={tracker} />
-              <GroupKeys group={group} st={st} now={now} onSelect={setGroup} vertical />
+              <div class="live__side-tools">{modeRow}</div>
+              <div class="ko-body">
+                <GroupKeys group={group} st={st} now={now} onSelect={setGroup} vertical />
+                <Group group={group} st={st} nameOf={nameOf} now={now} big coach ui={padUi} tracker={tracker} />
+              </div>
             </div>
-            {modeRow}
           </>
         ) : (
           <>
@@ -1085,26 +1106,39 @@ function Group(props: GroupProps): JSX.Element {
           <Caption text={`${MirrorText.GROUP} ${letter}`} as="h2" color="var(--live-caption)" />
         </div>
       )}
-      {/* The pads are caps sitting in the device's body (Deck). */}
-      <div class="live-deck" role="group" aria-label={`${MirrorText.GROUP} ${letter}`}>
+      {/* The pads are caps sitting in the device's body (Deck). The big grid is the K.O. II's
+          own: over each row of pads the words printed on the body, each after its LED. */}
+      <div class={`live-deck${big ? ' live-deck--ko' : ''}`} role="group" aria-label={`${MirrorText.GROUP} ${letter}`}>
         {ROWS.map((offsets, r) => (
-          <div class="live-deck__row" key={r}>
-            {offsets.map((o) => {
-              const pad = physicalPad(group, o)
-              return (
-                <Pad
-                  key={o}
-                  pad={pad}
-                  light={st.pads.get(padKey(pad))}
-                  name={nameOf(pad)}
-                  big={big}
-                  scroll={!big && !fill}
-                  ui={ui}
-                  tracker={tracker}
-                />
-              )
-            })}
-          </div>
+          <Fragment key={r}>
+            {big && (
+              <div class="live-deck__print" aria-hidden="true">
+                {LED_ROWS[r]!.map((word) => (
+                  <span key={word} class="live-deck__word">
+                    <span class="ko-led" />
+                    {word}
+                  </span>
+                ))}
+              </div>
+            )}
+            <div class="live-deck__row">
+              {offsets.map((o) => {
+                const pad = physicalPad(group, o)
+                return (
+                  <Pad
+                    key={o}
+                    pad={pad}
+                    light={st.pads.get(padKey(pad))}
+                    name={nameOf(pad)}
+                    big={big}
+                    scroll={!big && !fill}
+                    ui={ui}
+                    tracker={tracker}
+                  />
+                )
+              })}
+            </div>
+          </Fragment>
         ))}
       </div>
     </div>
@@ -1158,7 +1192,11 @@ function GroupKeys(props: {
               class={`live-keys__key cap-3d${on ? ' is-on is-down' : ''}`}
               onClick={() => onSelect(g)}
             >
-              {MirrorText.groupKey(g)}
+              {/* As printed on the K.O. II: the letter in the corner, its function's glyph under it. */}
+              <span class="live-keys__letter">{MirrorText.groupKey(g)}</span>
+              <svg class="live-keys__glyph" viewBox="0 0 12 12" aria-hidden="true">
+                <path d={GLYPHS[MirrorText.groupKey(g) as 'A' | 'B' | 'C' | 'D']} />
+              </svg>
             </button>
           </div>
         )
@@ -1213,7 +1251,7 @@ function stopEditPress(st: EditPress): void {
  */
 function editHandlers(st: EditPress, press: PressTarget | null, open: () => void, haptic: boolean): ButtonHTMLAttributes<HTMLButtonElement> {
   const end = (el: HTMLElement, tap: boolean): void => {
-    el.removeAttribute('data-down')
+    capUp(el)
     const tapped = st.timer !== null
     stopEditPress(st)
     if (tapped && tap) open()
@@ -1225,7 +1263,7 @@ function editHandlers(st: EditPress, press: PressTarget | null, open: () => void
       st.id = e.pointerId
       // The long press ticks after its press, as outside EDIT.
       st.target = press !== null ? ticking(press, haptic, tick) : null
-      e.currentTarget.setAttribute('data-down', '')
+      capDown(e.currentTarget)
       // The press is the hold's end, so the latency note counts from there (a late timer included).
       const at = e.timeStamp + EDIT_HOLD_MS
       st.timer = setTimeout(() => {
@@ -1280,7 +1318,7 @@ function PadCap(props: PadProps): JSX.Element {
     stopEditPress(edit.current)
     for (const id of holds.current) tracker.cancel(id)
     holds.current.clear()
-    btn.current?.removeAttribute('data-down')
+    if (btn.current) capUp(btn.current)
   }, [editMode, tracker])
   // The glow at this render (the screen's frame loop keeps it moving while it fades).
   const g = light ? glow(light, ui.fixedNow ?? perfNow()) : 0
@@ -1297,7 +1335,10 @@ function PadCap(props: PadProps): JSX.Element {
   const content = (
     <>
       {/* The key's own label in the corner (web: top left, where the K.O. II prints it). */}
-      <span class={`live-pad__label${wide ? ' live-pad__label--wide' : ''}`}>{pad.label}</span>
+      <span class={`live-pad__label${wide ? ' live-pad__label--wide' : ''}`}>
+        {/* The dot key's label is a dot, drawn as the K.O. II prints it. */}
+        {pad.label === '.' ? <span class="live-pad__dot" /> : pad.label}
+      </span>
       {shown !== null && <span class="live-pad__name">{shown}</span>}
       {ui.editing && !dropping && <span class="live-pad__swap" aria-hidden="true">{'\u21C4'}</span>}
       {dropping && <span class="live-pad__drop" aria-hidden="true">{WebText.DROP}</span>}
@@ -1458,8 +1499,15 @@ function ModeRow(props: {
   onPicker?: (picker: KeysPicker | null) => void
   /** Whether the piano shows (and the switch is offered) in this window. */
   plan: PianoPlan
+  /**
+   * The KEYS grid on a phone on its side: only the mode word (turned) and the
+   * view switch ('lead', a column left of the keys), or only the scale and the
+   * octave, turned too ('picks', a column on their right; the scale's list
+   * opens down, the octave's up).
+   */
+  part?: 'lead' | 'picks'
 }): JSX.Element {
-  const { keys, actions, picker, onPicker, plan } = props
+  const { keys, actions, picker, onPicker, plan, part } = props
   const pick = (which: KeysPicker): { open?: boolean; onOpen?: (open: boolean) => void } =>
     onPicker
       ? {
@@ -1485,8 +1533,47 @@ function ModeRow(props: {
     />
   )
   const viewSwitch = keys.on && plan.switchShown && (
-    <KeysViewSwitch piano={piano} room={plan.room} onView={(p) => actions.onView?.(plan.wide, chosenView(p))} />
+    <KeysViewSwitch piano={piano} room={plan.room} onView={(p) => actions.onView?.(plan.wide, chosenView(p))} vertical={part === 'lead'} />
   )
+  if (part === 'lead') {
+    return (
+      <div class="live-mode live-mode--lead">
+        <span class="live-mode__turned">{modeWord}</span>
+        {viewSwitch}
+      </div>
+    )
+  }
+  if (part === 'picks') {
+    return (
+      <div class="live-mode live-mode--picks">
+        <PickWord
+          label={MirrorText.scaleName(keys.scale)}
+          options={SCALES}
+          selected={keys.scale}
+          name={MirrorText.scaleName}
+          onPick={(s) => actions.onScale?.(s)}
+          description={MirrorText.scaleChoice(keys.scale)}
+          coach={{ id: 'live.scale', label: CoachText.SCALE }}
+          {...pick('scale')}
+          alignEnd
+          down
+          middle
+        />
+        <PickWord
+          label={MirrorText.octave(keys.octave)}
+          options={octaves()}
+          selected={keys.octave}
+          name={MirrorText.octave}
+          onPick={(o) => actions.onOctave?.(o)}
+          description={MirrorText.octaveChoice(keys.octave)}
+          coach={{ id: 'live.octave', label: CoachText.OCTAVE }}
+          {...pick('octave')}
+          alignEnd
+          middle
+        />
+      </div>
+    )
+  }
   if (piano) return <SidewaysRow keys={keys} actions={actions} pick={pick} mode={modeWord} view={viewSwitch} />
   return (
     // Spread across the row: mode at the start, octave at the end, scale between; pulled
@@ -1626,12 +1713,15 @@ function StepWord(props: { glyph: string; description: string; enabled: boolean;
 }
 
 /**
- * KEYS on the pads or the piano: two small icon caps after the KEYS word, a
- * radio group (the arrows move between them). The piano's is greyed out
- * where it has no room.
+ * KEYS on the pads or the piano: no caps, the two words printed as on the
+ * K.O. II's body, each after its LED, the LED of the view shown lit. A tap
+ * on a word shows that view. A radio group (each word a radio, the arrows
+ * move between them). The piano's word is greyed out where it has no room.
+ * [vertical]: one word over the other, each turned as the mode word is (a
+ * column beside the keys on a phone on its side), else side by side.
  */
-function KeysViewSwitch(props: { piano: boolean; room: boolean; onView: (piano: boolean) => void }): JSX.Element {
-  const { piano, room } = props
+function KeysViewSwitch(props: { piano: boolean; room: boolean; onView: (piano: boolean) => void; vertical?: boolean }): JSX.Element {
+  const { piano, room, vertical = false } = props
   const group = useRef<HTMLDivElement | null>(null)
   const choose = (p: boolean): void => {
     if (p && !room) return
@@ -1640,9 +1730,10 @@ function KeysViewSwitch(props: { piano: boolean; room: boolean; onView: (piano: 
   return (
     <div
       ref={group}
-      class="live-view"
+      class={`live-view${vertical ? ' live-view--vertical' : ''}`}
       role="radiogroup"
       aria-label={MirrorText.KEYS_VIEW}
+      aria-orientation={vertical ? 'vertical' : undefined}
       data-coach="live.view"
       onKeyDown={(e) => {
         if (!room) return
@@ -1660,44 +1751,19 @@ function KeysViewSwitch(props: { piano: boolean; room: boolean; onView: (piano: 
             aria-checked={on}
             aria-label={MirrorText.keysView(p)}
             aria-description={off ? MirrorText.PIANO_NO_ROOM : undefined}
-            title={off ? MirrorText.PIANO_NO_ROOM : MirrorText.keysView(p)}
+            title={off ? MirrorText.PIANO_NO_ROOM : undefined}
             disabled={off}
             tabIndex={on ? 0 : -1}
             data-roving=""
-            class={`live-view__key cap-3d${on ? ' is-on is-down' : ''}`}
+            class={`live-view__word${on ? ' is-on' : ''}`}
             onClick={() => choose(p)}
           >
-            {p ? <PianoIcon /> : <GridIcon />}
+            <span class="live-view__led" aria-hidden="true" />
+            {p ? MirrorText.VIEW_PIANO : MirrorText.VIEW_PADS}
           </button>
         )
       })}
     </div>
-  )
-}
-
-/** The pads: a 3×3 grid of small squares. */
-function GridIcon(): JSX.Element {
-  return (
-    <svg width="20" height="16" viewBox="0 0 20 16" aria-hidden="true" focusable="false">
-      <g fill="currentColor">
-        {[1, 6, 11].map((y) => [1, 7.5, 14].map((x) => <rect key={`${x}:${y}`} x={x} y={y} width="5" height="4" rx="1" />))}
-      </g>
-    </svg>
-  )
-}
-
-/** The piano: an outlined keyboard with three black keys. */
-function PianoIcon(): JSX.Element {
-  return (
-    <svg width="20" height="16" viewBox="0 0 20 16" aria-hidden="true" focusable="false">
-      <rect x="1" y="1" width="18" height="14" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6" />
-      <g fill="currentColor">
-        <rect x="4.5" y="1" width="2.4" height="8" />
-        <rect x="9" y="1" width="2.4" height="8" />
-        <rect x="13.5" y="1" width="2.4" height="8" />
-      </g>
-      <path d="M6 9v6M10.2 9v6M14.7 9v6" stroke="currentColor" stroke-width="1.2" />
-    </svg>
   )
 }
 
@@ -1754,8 +1820,10 @@ export function LivePill(props: {
 }
 
 /**
- * The 12 pads as keys, in the keypad's layout: each shows its note in a ring
- * (or its name), pale for the first octave and orange for the next. Notes
+ * The 12 pads as keys, in the keypad's layout and drawn as the big grid's pads
+ * are (the K.O. II's body): each shows its name (or a ring) where a pad prints
+ * its digit, pale for the first octave and orange for the next, its octave
+ * under it. Notes
  * from the device light their key; the notes playing on the phone are ringed
  * in signal orange. Each key plays the note it showed when pressed, even if
  * the key, scale or octave change while it is held (NoteTouches, with the key
@@ -1809,23 +1877,34 @@ function KeysGrid(props: {
       data-coach-face={COACH_YELLOW}
       data-coach-ink={COACH_YELLOW_INK}
     >
-      <div class="live-deck live-kgrid__plate" role="group" aria-label={MirrorText.MODE_KEYS}>
+      {/* On the K.O. II's body as the big grid's pads are (live-deck--ko), the words printed over each row. */}
+      <div class="live-deck live-deck--ko live-kgrid__plate" role="group" aria-label={MirrorText.MODE_KEYS}>
         {ROWS.map((offsets, r) => (
-          <div class="live-deck__row" key={r}>
-            {offsets.map((k) => (
-              <KeyCap
-                key={k}
-                index={k}
-                note={keyNotes[k]!}
-                keys={keys}
-                lit={lit.get(k) ?? 0}
-                press={press}
-                tracker={tracker}
-                playing={props.playing}
-                haptic={props.haptic}
-              />
-            ))}
-          </div>
+          <Fragment key={r}>
+            <div class="live-deck__print" aria-hidden="true">
+              {LED_ROWS[r]!.map((word) => (
+                <span key={word} class="live-deck__word">
+                  <span class="ko-led" />
+                  {word}
+                </span>
+              ))}
+            </div>
+            <div class="live-deck__row">
+              {offsets.map((k) => (
+                <KeyCap
+                  key={k}
+                  index={k}
+                  note={keyNotes[k]!}
+                  keys={keys}
+                  lit={lit.get(k) ?? 0}
+                  press={press}
+                  tracker={tracker}
+                  playing={props.playing}
+                  haptic={props.haptic}
+                />
+              ))}
+            </div>
+          </Fragment>
         ))}
       </div>
     </div>
@@ -1885,7 +1964,8 @@ function KeyCapView(props: KeyCapProps): JSX.Element {
       style={{ '--glow': glowCss(props.lit) }}
       {...holdHandlers(props.tracker, target, false, props.haptic)}
     >
-      {/* Named, the name alone, in the ring's colour; unnamed, the ring. */}
+      {/* Named, the name alone, in the ring's colour; unnamed, a ring the digit's height. Both where
+          a pad prints its digit, the octave where a pad shows its sample. */}
       {keys.showNames ? (
         <span class="live-key__name">{Keys.name(note, keys.names)}</span>
       ) : (

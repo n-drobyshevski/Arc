@@ -399,33 +399,6 @@ private fun SegmentKey(label: String, on: Boolean, can: Boolean, description: St
     }
 }
 
-/**
- * A quiet switch between views: words side by side, the chosen one in ink and
- * underlined (like the pocket operator app's DRUMS / KEYPAD), the others grey.
- */
-@Composable
-fun TextToggle(options: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
-    val c = LocalArcColors.current
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-        options.forEachIndexed { i, label ->
-            val on = i == selected
-            Column(
-                Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Tab) { onSelect(i) }
-                    .semantics { this.selected = on }
-                    .heightIn(min = 40.dp)
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text(label.uppercase(), style = ArcType.capsKeySmall, color = if (on) c.ink else c.graphite, maxLines = 1)
-                Box(Modifier.height(2.dp).width(18.dp).background(if (on) c.navy else Color.Transparent))
-            }
-        }
-    }
-}
-
 /** A word's ink: quiet caption grey, so the pads stay the loudest thing on the page; paler when [dim] (not taken, or not available). */
 fun ArcColors.wordInk(dim: Boolean = false): Color = if (dim) graphite.copy(alpha = 0.45f) else graphite
 

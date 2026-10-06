@@ -30,9 +30,12 @@
 //   a glissando reaches the next key without waiting for the frame's
 //   pointermove; a finger seen there skips its pointermove (the same move again).
 // - Device notes light a key through --glow on [data-note] (MirrorScreen's
-//   applyGlow, by exact pitch); the press travel is the caps' 60 ms one. A
-//   pressed key goes down at once (data-down set on the element in the
-//   handler, as the pads do), not at the next render.
+//   applyGlow, by exact pitch); the press travel is the caps' (core
+//   KeyMotion: straight down, a spring back up). A pressed key goes down at
+//   once (data-down set on the element in the handler, as the pads do), not
+//   at the next render, and a quick tap keeps it a moment (live/capDown.ts);
+//   each render then brings every key's data-down in line with what holds or
+//   sounds, so it isn't in the markup Preact diffs.
 // - A key under the mouse is tinted (hover). The haptic tick ([haptics],
 //   platform/haptics.ts) follows a finger's press, not the computer keyboard's.
 // - A press hands on its event's timeStamp ([onNote]'s at: the pointerdown,
@@ -56,6 +59,7 @@ import { tick } from '../../platform/haptics'
 import { glow, glowCss } from './glow'
 import { COMPUTER_KEYS, computerHint, computerNote, octaveStep, playsKeys } from './keyboard'
 import type { KeysShown } from './keys'
+import { capDown, capUp } from './capDown'
 import { rawMovesSupported } from './press'
 import './PianoKeyboard.css'
 
@@ -155,12 +159,14 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
       if (e.type === 'Press') {
         cb.current.onNote(e.note, true, at)
         // Down now, not at the next render.
-        keyOf(e.note)?.setAttribute('data-down', '')
+        const el = keyOf(e.note)
+        if (el) capDown(el)
         pressed = true
       } else {
         cb.current.onNoteUp(e.note)
         // Up now unless it still sounds or another finger holds it (the render agrees either way).
-        if (!touches.held.has(e.note) && !cb.current.playingNotes.peek().has(e.note)) keyOf(e.note)?.removeAttribute('data-down')
+        const el = keyOf(e.note)
+        if (el && !touches.held.has(e.note) && !cb.current.playingNotes.peek().has(e.note)) capUp(el)
       }
     }
     if (pressed && finger && cb.current.haptics) tick()
@@ -309,6 +315,14 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
   }
   const white = laid.find((k) => !k.black)?.rect.width ?? 0
   const own = Piano.lowest(keys.octave) + 12
+  // Each key down while a finger holds it or it sounds here, as this render has it (live/capDown.ts).
+  useLayoutEffect(() => {
+    for (const el of plate.current?.querySelectorAll<HTMLElement>('[data-note]') ?? []) {
+      const n = Number(el.dataset.note)
+      if (fingered.has(n) || playingNotes.has(n)) capDown(el)
+      else capUp(el)
+    }
+  })
   return (
     <div class={`piano${props.class ? ` ${props.class}` : ''}`}>
       <div
@@ -328,7 +342,6 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
       >
         {laid.map((k) => {
           const mark = Piano.mark(k.note, keys.root, keys.scale)
-          const down = fingered.has(k.note) || playingNotes.has(k.note)
           const cls =
             `piano__key piano__key--${k.black ? 'black' : 'white'} cap-3d` +
             (mark === KeyMark.ROOT ? ' is-root' : mark === KeyMark.OUT ? ' is-out' : '') +
@@ -342,7 +355,6 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
               type="button"
               class={cls}
               data-note={k.note}
-              data-down={down ? '' : undefined}
               aria-label={MirrorText.pianoKey(k.note, keys.names, mark)}
               aria-description={MirrorText.PLAY}
               tabIndex={k.note === tabNote ? 0 : -1}

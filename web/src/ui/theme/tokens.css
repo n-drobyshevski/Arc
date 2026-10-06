@@ -263,8 +263,13 @@
   --sheet-wide-min: 640px;  /* sheets become centred dialogs at this width (media queries cannot use it) */
 
   /* ---- Keys and motion (Components.kt ArcKey, ArcSheet; the caps' geometry is in cap.css) ---- */
-  --key-press-ms: 60ms;     /* tween(60, KeyEasing) */
+  --key-press-ms: 60ms;     /* tween(60, KeyEasing): a chevron's turn and other small moves */
   --key-ease: cubic-bezier(0.25, 0.1, 0.25, 1);
+  /* A cap's travel (core KeyMotion, keyMotion.ts): straight down in PRESS_MS, back up on the
+   * switch's spring over RELEASE_MS, sampled by springCss() (a test holds the two together). */
+  --key-down-ms: 24ms;
+  --key-up-ms: 200ms;
+  --key-spring: linear(0, 0.069, 0.237, 0.449, 0.662, 0.849, 0.994, 1.092, 1.146, 1.163, 1.153, 1.127, 1.092, 1.057, 1.026, 1.002, 0.986, 0.977, 0.973, 0.975, 0.979, 0.985, 0.99, 0.995, 0.999, 1);
   --key-disabled: 0.45;
   --icon-disabled: 0.4;     /* IconBlock, PlayKey */
   --sheet-ms: 220ms;

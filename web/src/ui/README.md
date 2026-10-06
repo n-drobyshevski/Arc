@@ -137,7 +137,6 @@ Common optional props on most: `class`, `id`, `ref`. Colours are CSS values
 | `HwToggle` | HwToggle | `on`, `onChange(on)`, `label?` / `labelledBy?`, `describedBy?`, `disabled?` (role=switch; a cap with an LED, navy + lit when on) |
 | `SettingRow`, `RowCard`, `RowAction`, `LinkRow`, `Disclosure`, `InfoKey` | SettingRow / InfoButton | row: `title`, `note?`, `info?` (the ⓘ key's long note, in a tip box), `stack?`, `control?(ids)` (gets `titleId` / `noteId` to label itself); card: `danger?`; action: `text`, `onClick`, `danger?`, `disabled?`; link row: `title`, `onClick` (chevron); disclosure: `title`, `children` |
 | `MiniPiano` | KEYS tools key picker | `selected` (0-11), `onSelect(pc)`, `names`, `labelledBy?` / `label?`, `describedBy?` (one octave, radiogroup) |
-| `TextToggle` | TextToggle | `options`, `selected`, `onSelect(i)`, `label?`, `controls?` (unused since the Step 1d Device switch: Segmented) |
 | `SwitchRow` | SwitchRow | `title`, `note`, `on`, `onChange(on)`, `disabled?` (unused since the Step 1c rows: SettingRow + HwToggle) |
 | `ChoiceRow` | ChoiceRow | `text`, `selected`, `onClick`, `radio`, `disabled?`, `trailing?`, `name?` |
 | `Caption` | Caption | `text`, `color?`, `align?: 'center'\|'start'\|'end'`, `as?` |

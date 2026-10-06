@@ -87,4 +87,4 @@
   opacity: var(--key-disabled);
   cursor: not-allowed;
 }
-.segmented__block.is-disabled:active { transform: none; box-shadow: var(--cap-dx) var(--cap-dy) 0 var(--cap-edge); }
+.segmented__block.is-disabled:active { --cap-p: 0; }

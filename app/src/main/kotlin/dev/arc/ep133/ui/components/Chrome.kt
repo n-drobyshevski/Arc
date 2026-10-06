@@ -462,7 +462,7 @@ private fun androidx.compose.ui.layout.MeasureScope.guideLift(constraints: andro
     if (constraints.hasBoundedHeight) minOf(80.dp.roundToPx(), constraints.maxHeight / 2 - 64.dp.roundToPx()) else 80.dp.roundToPx()
 
 /** Turns a single line of text a quarter turn anticlockwise, swapping its width and height for layout. */
-private fun Modifier.rotateVertical(): Modifier = layout { measurable, constraints ->
+internal fun Modifier.rotateVertical(): Modifier = layout { measurable, constraints ->
     val p = measurable.measure(constraints.copy(minWidth = 0, maxWidth = androidx.compose.ui.unit.Constraints.Infinity, minHeight = 0))
     layout(p.height, p.width) {
         p.placeWithLayer(-(p.width - p.height) / 2, (p.width - p.height) / 2) { rotationZ = -90f }

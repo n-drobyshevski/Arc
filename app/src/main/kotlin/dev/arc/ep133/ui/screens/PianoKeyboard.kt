@@ -54,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import dev.arc.ep133.features.KeyMark
+import dev.arc.ep133.features.KeyMotion
 import dev.arc.ep133.features.Keys
 import dev.arc.ep133.features.MirrorState
 import dev.arc.ep133.audio.PressTime
@@ -69,6 +70,7 @@ import dev.arc.ep133.ui.components.HwColors
 import dev.arc.ep133.ui.components.LocalHwColors
 import dev.arc.ep133.ui.components.PlateRadius
 import dev.arc.ep133.ui.components.capEdge
+import dev.arc.ep133.ui.components.frameMs
 import dev.arc.ep133.ui.theme.ArcColors
 import dev.arc.ep133.ui.theme.ArcType
 import dev.arc.ep133.ui.theme.LocalArcColors
@@ -96,9 +98,6 @@ private val SlideSlop = 6.dp
 
 /** The body around the keys; on the right and below, the caps' edges sit in it too. */
 private val DeckInset = 10.dp
-
-/** How long a key takes to go down onto its edge, or come back up (the keys' press, as Cap.kt's). */
-private const val PRESS_NS = 60_000_000f
 
 /** The body showing between two white keys. */
 private val WhiteGap = 4.dp
@@ -161,25 +160,28 @@ private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> 
         }
         fingered.value = touches.held
     }
-    // Down under a finger or while sounding; each key moves the whole way in PRESS_NS.
+    // Down under a finger or while sounding; each key moves as the caps do (core KeyMotion).
+    val motion = remember { HashMap<Int, KeyMotion.Key>() }
     val target = fingered.value + keys.playingNotes
     val still = LocalInspectionMode.current
     LaunchedEffect(target) {
-        var last = withFrameNanos { it }
-        while (true) {
+        var last = System.nanoTime()
+        do {
             val t = withFrameNanos { it }
-            val step = (t - last) / PRESS_NS
+            val dt = frameMs(t - last)
             last = t
             var moving = false
-            for (n in down.keys.toSet() + target) {
-                val goal = if (n in target) 1f else 0f
-                val at = down[n] ?: 0f
-                val next = if (goal > at) minOf(goal, at + step) else maxOf(goal, at - step)
-                if (next == 0f) down.remove(n) else down[n] = next
-                if (next != goal) moving = true
+            for (n in motion.keys.toList() + target) {
+                val key = motion.getOrPut(n) { KeyMotion.Key() }
+                if (KeyMotion.step(key, n in target, dt)) moving = true
+                if (key.still && key.pos == 0f) {
+                    motion.remove(n)
+                    down.remove(n)
+                } else {
+                    down[n] = key.pos
+                }
             }
-            if (!moving) break
-        }
+        } while (moving)
     }
     Layout(
         content = {
@@ -457,12 +459,13 @@ private fun DrawScope.drawLabel(text: TextLayoutResult, color: Color, center: Of
 
 /**
  * A key as a cap: its [edge] offset by [travel] under a [color] face in [rect]
- * with [corner] corners, the face moved [down] (0..1) of the way onto the edge.
+ * with [corner] corners, the face moved [down] (0..1) of the way onto the edge
+ * (under 0 as it springs back past rest).
  * Returns where the face is drawn, for what goes on it.
  */
 private fun DrawScope.drawCap(rect: Rect, corner: CornerRadius, color: Color, edge: Color, down: Float, travel: Offset): Rect {
     if (down < 1f) drawRoundRect(edge, rect.topLeft + travel, rect.size, corner)
-    val face = if (down > 0f) rect.translate(travel * down) else rect
+    val face = if (down != 0f) rect.translate(travel * down) else rect
     drawRoundRect(color, face.topLeft, face.size, corner)
     return face
 }
