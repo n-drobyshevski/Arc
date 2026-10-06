@@ -6,6 +6,9 @@ version fixes bugs. The version itself is set in `version.properties`.
 
 ## [Unreleased]
 
+### Changed
+- Web, desktop layout: the guide's panel spans the page to its right edge, not 1160px at most; the shortcut list takes the room the K.O. II leaves, and the device grows with the window (as tall as it fits, up to half the panel's width) instead of stopping at 560px.
+
 ## [0.3.0] - 2026-10-06
 
 ### Added
