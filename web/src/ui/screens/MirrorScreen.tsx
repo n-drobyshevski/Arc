@@ -620,6 +620,8 @@ function GroupKeys(props: { group: number; st: MirrorState; now: number; onSelec
               tabIndex={on ? 0 : -1}
               data-roving=""
               data-coach={g === 0 ? 'live.groups' : undefined}
+              // A's tag points at the row; the guide overlay's tags keep off the others.
+              data-coach-clear={g === 0 ? undefined : ''}
               class={`live-keys__key cap-3d${on ? ' is-on is-down' : ''}`}
               onClick={() => onSelect(g)}
             >
@@ -866,12 +868,13 @@ function ModeRow(props: {
 /** The twelve keys the KEY word lists, DO (C) first. */
 const ROOTS: readonly number[] = Object.freeze([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
 
-/** − or + by the octave word: one octave down or up, greyed (and disabled) at either end. */
+/** − or + by the octave word: one octave down or up, greyed (and disabled) at either end. The guide overlay's tags keep off it. */
 function StepWord(props: { glyph: string; description: string; enabled: boolean; onClick: () => void }): JSX.Element {
   return (
     <button
       type="button"
       class="live-step"
+      data-coach-clear=""
       aria-label={props.description}
       disabled={!props.enabled}
       onClick={props.onClick}

@@ -4,11 +4,17 @@
 // and every marked control gets a coloured tag with an arrow pointing at it.
 // Tags above the middle of the screen hang below their control and the others
 // stand above it; neighbours on one line take turns at two heights so they
-// don't overlap (the placement is the pure placeTags in ui/coachPlace.ts).
+// don't overlap. In a short window (a phone on its side, the top bar's tags
+// crowding the row of words under it) no tag sits on another control or on
+// another tag's arrow: it goes to the other side of its control, beside it or
+// further out (the placement is the pure layoutTags in ui/coachPlace.ts).
 // A narrow control on the screen's edge (the GUIDE tab, the more-tools strip)
 // gets the PO tutorial's side tag: a vertical tab on that edge, its word
 // turned, with a hooked arrow above pointing at the edge.
 // Tap anywhere (or Escape) to close.
+//
+// A control scrolled out of view gets no tag. Where a marked element's touch
+// area reaches past what shows (a word), its data-coach-box part is pointed at.
 //
 // Marking a control, two ways:
 // - useCoachMark(id, label, face, ink) returns a ref callback (Kotlin's
@@ -17,10 +23,16 @@
 //   COACH_MARKS (the Kotlin call sites' labels and colours), or from
 //   data-coach-label / data-coach-face / data-coach-ink when present.
 //   A hook registration wins over an attribute with the same id.
+// A control with no tag that the tags should still keep off (Kotlin's
+// Modifier.coachClear: the octave's − and +) carries data-coach-clear.
 //
 // The overlay measures the tags with the real font (after document.fonts.ready),
 // reads the controls' bounds and places everything before the first paint; it
 // recomputes on resize, scroll and when the marked controls change.
+//
+// Web delta: outside a short window too, a placement that leaves a tag on a
+// control or an arrow across one gives way to the short window's rules when
+// they fit better (layoutTags): Device's keys under the top bar, upright.
 import { createContext, type ComponentChildren, type JSX } from 'preact'
 import { signal, type Signal } from '@preact/signals'
 import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
@@ -28,11 +40,14 @@ import { CoachText } from '../../core/text/coachText'
 import { WebText } from '../../core/text/webText'
 import {
   COACH_METRICS,
+  NO_INSETS,
   arrowHead,
   hintTop,
-  placeTags,
+  layoutTags,
   sideHook,
+  type Box,
   type CoachMarkInput,
+  type Insets,
   type PlacedTag,
   type Size,
 } from '../coachPlace'
@@ -205,8 +220,12 @@ function collectMarks(root: Element | null, reg: CoachRegistry, origin: DOMRect)
   const out: CoachMarkInput[] = []
   for (const [id, { el, spec }] of byId) {
     if (!el.isConnected) continue
-    const r = el.getBoundingClientRect()
+    // A word's touch area reaches past its letters: its data-coach-box part is what shows.
+    const part = el.querySelector('[data-coach-box]')
+    const r = (part && part.closest('[data-coach]') === el ? part : el).getBoundingClientRect()
     if (r.width === 0 && r.height === 0) continue
+    // Scrolled out of view: no tag pointing off the screen.
+    if (r.bottom <= origin.top || r.top >= origin.bottom || r.right <= origin.left || r.left >= origin.right) continue
     out.push({
       id,
       bounds: { left: r.left - origin.left, top: r.top - origin.top, right: r.right - origin.left, bottom: r.bottom - origin.top },
@@ -216,6 +235,29 @@ function collectMarks(root: Element | null, reg: CoachRegistry, origin: DOMRect)
     })
   }
   return out
+}
+
+/** The controls with no tag that the tags keep off (data-coach-clear under [root]), in the overlay's coordinates. */
+function collectClear(root: Element | null, origin: DOMRect): Box[] {
+  if (!root) return []
+  const out: Box[] = []
+  for (const el of Array.from(root.querySelectorAll('[data-coach-clear]'))) {
+    const r = el.getBoundingClientRect()
+    if (r.width === 0 && r.height === 0) continue
+    out.push({ left: r.left - origin.left, top: r.top - origin.top, right: r.right - origin.left, bottom: r.bottom - origin.top })
+  }
+  return out
+}
+
+/** The safe area's insets, read off an element padded by env(safe-area-inset-*). */
+function readInsets(el: HTMLElement | null): Insets {
+  if (!el || typeof getComputedStyle !== 'function') return NO_INSETS
+  const s = getComputedStyle(el)
+  const px = (v: string): number => {
+    const n = parseFloat(v)
+    return Number.isFinite(n) ? n : 0
+  }
+  return { left: px(s.paddingLeft), top: px(s.paddingTop), right: px(s.paddingRight), bottom: px(s.paddingBottom) }
 }
 
 /**
@@ -252,6 +294,8 @@ export const COACH_FADE_MS = 200
 interface Layout {
   readonly placed: readonly PlacedTag[]
   readonly vp: Size
+  /** The close hint's top edge. */
+  readonly hint: number
 }
 
 export interface CoachOverlayProps {
@@ -271,6 +315,8 @@ export function CoachOverlay(props: CoachOverlayProps): JSX.Element | null {
   const [keyed, setKeyed] = useState(false)
   const overlay = useRef<HTMLDivElement | null>(null)
   const measurer = useRef<HTMLSpanElement | null>(null)
+  const insets = useRef<HTMLSpanElement | null>(null)
+  const hint = useRef<HTMLParagraphElement | null>(null)
   const closeKey = useRef<HTMLButtonElement | null>(null)
   const dismiss = useRef(props.onDismiss)
   dismiss.current = props.onDismiss
@@ -287,14 +333,25 @@ export function CoachOverlay(props: CoachOverlayProps): JSX.Element | null {
     return () => window.clearTimeout(t)
   }, [visible])
 
-  const recompute = useCallback(() => {
+  // What the last placement was made from: a pad's light changing its style every frame
+  // moves nothing, and placing again (tens of ms on a phone) would only stall the page.
+  const placedFrom = useRef('')
+  /** Places the tags again if anything they depend on moved; [force]: the font changed. */
+  const recompute = useCallback((force = false) => {
     const ov = overlay.current
     if (!ov) return
     const origin = ov.getBoundingClientRect()
     const vp = { width: origin.width, height: origin.height }
     const marks = collectMarks(root.current, registry, origin)
-    const placed = placeTags(marks, vp, (text, max) => measureWith(measurer.current, text, max))
-    setLayout({ placed, vp })
+    const clear = collectClear(root.current, origin)
+    const safe = readInsets(insets.current)
+    const from = JSON.stringify([vp, safe, clear, marks])
+    if (!force && from === placedFrom.current) return
+    placedFrom.current = from
+    const placed = layoutTags(marks, vp, (text, max) => measureWith(measurer.current, text, max), { clear, safe })
+    const h = hint.current?.getBoundingClientRect()
+    const hintSize = h && h.width > 0 ? { width: h.width, height: h.height } : undefined
+    setLayout({ placed, vp, hint: hintTop(vp, placed, hintSize, safe) })
   }, [registry, root])
 
   // Place before the first paint, and again whenever something moves.
@@ -312,7 +369,7 @@ export function CoachOverlay(props: CoachOverlayProps): JSX.Element | null {
       raf = requestAnimationFrame(() => alive && recompute())
     }
     // The tags' text width changes once Manrope has loaded.
-    document.fonts?.ready.then(() => alive && recompute(), () => undefined)
+    document.fonts?.ready.then(() => alive && recompute(true), () => undefined)
     window.addEventListener('resize', schedule)
     window.addEventListener('scroll', schedule, true)
     const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null
@@ -322,7 +379,7 @@ export function CoachOverlay(props: CoachOverlayProps): JSX.Element | null {
       for (const child of Array.from(host.children)) ro.observe(child)
     }
     const mo = typeof MutationObserver === 'function' && host ? new MutationObserver(schedule) : null
-    mo?.observe(host as Element, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-coach', 'aria-label', 'class', 'style'] })
+    mo?.observe(host as Element, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-coach', 'data-coach-clear', 'aria-label', 'class', 'style'] })
     return () => {
       alive = false
       cancelAnimationFrame(raf)
@@ -376,10 +433,10 @@ export function CoachOverlay(props: CoachOverlayProps): JSX.Element | null {
         <svg class="coach__arrows" width={vp.width} height={vp.height} viewBox={`0 0 ${vp.width} ${vp.height}`} aria-hidden="true">
           {layout.placed.map((p) => {
             if (p.side !== 0) {
-              const hook = sideHook(p.rect, p.side, vp.width)
+              const hook = sideHook(p.rect, p.side, p.edge ?? (p.side < 0 ? 0 : vp.width))
               const [a, b, c] = hook.head
               return (
-                <g key={p.mark.id} style={{ fill: p.mark.face, stroke: p.mark.face }}>
+                <g key={p.mark.id} data-coach-arrow={p.mark.id} style={{ fill: p.mark.face, stroke: p.mark.face }}>
                   <path d={hook.line} fill="none" stroke-width={COACH_METRICS.hookWidth} stroke-linecap="round" />
                   <polygon points={`${a.x},${a.y} ${b.x},${b.y} ${c.x},${c.y}`} stroke="none" />
                 </g>
@@ -388,7 +445,7 @@ export function CoachOverlay(props: CoachOverlayProps): JSX.Element | null {
             if (!p.tip || !p.tail) return null
             const [a, b, c] = arrowHead(p.tip, p.tail)
             return (
-              <g key={p.mark.id} style={{ fill: p.mark.face, stroke: p.mark.face }}>
+              <g key={p.mark.id} data-coach-arrow={p.mark.id} style={{ fill: p.mark.face, stroke: p.mark.face }}>
                 <line x1={p.tail.x} y1={p.tail.y} x2={p.tip.x} y2={p.tip.y} stroke-width={COACH_METRICS.arrowWidth} />
                 <polygon points={`${a.x},${a.y} ${b.x},${b.y} ${c.x},${c.y}`} stroke="none" />
               </g>
@@ -417,10 +474,11 @@ export function CoachOverlay(props: CoachOverlayProps): JSX.Element | null {
           ))}
         </ul>
       )}
-      <p class="coach__hint" style={vp ? { top: `${hintTop(vp)}px` } : undefined} aria-hidden="true">
+      <p ref={hint} class="coach__hint" style={layout ? { top: `${layout.hint}px` } : undefined} aria-hidden="true">
         {CoachText.CLOSE_HINT}
       </p>
       <span ref={measurer} class="coach__tag-text coach__measure" aria-hidden="true" />
+      <span ref={insets} class="coach__insets" aria-hidden="true" />
     </div>
   )
 }

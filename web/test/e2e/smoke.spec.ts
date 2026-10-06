@@ -2,7 +2,7 @@
 // of ?demo (src/dev/demo.ts) standing in for the device. One pass through the
 // main flows, a browser without Web MIDI, and screenshots for a manual look
 // next to the Android reference PNGs (attached to the report; no pixel diff).
-import { demo, expect, importPak, notAutomated, SAMPLE_PAK, selectTab, test } from './fixtures'
+import { coachHides, demo, expect, importPak, notAutomated, SAMPLE_PAK, selectTab, test } from './fixtures'
 
 test('back up, look inside, restore, browse the device, live pads, import, no MIDI', async ({ page, context }) => {
   await notAutomated(page)
@@ -76,13 +76,20 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
     expect(after.handled).toBeGreaterThan(before)
   })
 
-  await test.step('6. Device tab: the sounds are grouped, 001–099 first', async () => {
+  await test.step('6. Device tab: the sounds are grouped, 001–099 first; the guide overlay leaves its keys in view', async () => {
     await selectTab(page, 'Device')
     await expect(page).toHaveURL(/#\/device$/)
     const group = page.getByRole('region', { name: '001–099' })
     await expect(group).toBeVisible()
     await expect(group.getByRole('listitem')).toHaveCount(8)
     await expect(page.getByRole('region', { name: '100–199' }).getByRole('listitem')).toHaveCount(4)
+    // Refresh and add sit right under the top bar's keys: no tag of theirs covers them.
+    const coach = page.getByRole('dialog', { name: "What's what" })
+    await page.getByRole('banner').getByRole('button', { name: "What's what" }).click()
+    await expect(coach.locator('[data-coach-tag="device.add"]')).toBeVisible()
+    await expect.poll(() => coachHides(page)).toEqual([])
+    await page.keyboard.press('Escape')
+    await expect(coach).toBeHidden()
   })
 
   await test.step('7. Back from Device lands on Live: a note-on from the device lights a pad', async () => {
@@ -184,6 +191,14 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
     await expect.poll(() => glowOf(60)).toBeGreaterThan(0.5)
     expect(await glowOf(72)).toBe(0)
     await demo(page, (d) => d.noteOff(60))
+    // The guide overlay over the piano: every tag in view, none on another or over a control
+    // (the row of words under the top bar, the octave's − and +, the GUIDE tab).
+    const coach = page.getByRole('dialog', { name: "What's what" })
+    await page.getByRole('banner').getByRole('button', { name: "What's what" }).click()
+    await expect(coach.locator('[data-coach-tag="live.octave"]')).toBeVisible()
+    await expect.poll(() => coachHides(page)).toEqual([])
+    await page.keyboard.press('Escape')
+    await expect(coach).toBeHidden()
     await page.getByRole('button', { name: 'Keys. Tap for pads.' }).click()
     if (upright) await page.setViewportSize(upright)
   })

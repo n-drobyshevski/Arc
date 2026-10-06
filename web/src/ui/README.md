@@ -99,7 +99,18 @@ A narrow control flush with the screen's left or right edge (the GUIDE tab,
 the more-tools strip) gets a side tag: a vertical tab on that edge with a
 hooked arrow (`coachPlace.ts` `edgeOf` / `sideHook`, Coach.kt's side tags). Yellow tip tags use
 `COACH_YELLOW` / `COACH_YELLOW_INK`. A custom tag: `data-coach-label`,
-`data-coach-face`, `data-coach-ink`. Mark only what is on screen.
+`data-coach-face`, `data-coach-ink`. Mark only what is on screen (a control
+scrolled out of view gets no tag).
+
+Placement is `layoutTags` in `coachPlace.ts`: Coach.kt's rules, crowded in a
+window under 480 high (no tag on another control or another tag's arrow), and
+crowded in a taller one too where the plain places would hide a control.
+Two attributes help it:
+
+```tsx
+<button class="live-step" data-coach-clear="">−</button>                 // no tag, but tags keep off it (Kotlin coachClear)
+<span class="word__row" data-coach-box="">…</span>                       // inside a marked word: what shows, not the touch area
+```
 
 ## Component catalogue (`components/`)
 
