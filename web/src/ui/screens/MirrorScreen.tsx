@@ -791,8 +791,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           </>
         ) : sideways ? (
           // A phone on its side (Android's sideways grid): the K.O. II's body as big as the room,
-          // the group keys a column left of the pads, as on the device, and the mode row a
-          // column left of the body rather than a row under it, so the pads get its height.
+          // the group keys a column left of the pads, as on the device, and the mode word turned
+          // a quarter turn left of the body rather than a row under it, so the pads get its height.
           <>
             {displayStrip}
             <div class="live__side">
@@ -1780,8 +1780,10 @@ export function LivePill(props: {
 }
 
 /**
- * The 12 pads as keys, in the keypad's layout: each shows its note in a ring
- * (or its name), pale for the first octave and orange for the next. Notes
+ * The 12 pads as keys, in the keypad's layout and drawn as the big grid's pads
+ * are (the K.O. II's body): each shows its name (or a ring) where a pad prints
+ * its digit, pale for the first octave and orange for the next, its octave
+ * under it. Notes
  * from the device light their key; the notes playing on the phone are ringed
  * in signal orange. Each key plays the note it showed when pressed, even if
  * the key, scale or octave change while it is held (NoteTouches, with the key
@@ -1835,23 +1837,34 @@ function KeysGrid(props: {
       data-coach-face={COACH_YELLOW}
       data-coach-ink={COACH_YELLOW_INK}
     >
-      <div class="live-deck live-kgrid__plate" role="group" aria-label={MirrorText.MODE_KEYS}>
+      {/* On the K.O. II's body as the big grid's pads are (live-deck--ko), the words printed over each row. */}
+      <div class="live-deck live-deck--ko live-kgrid__plate" role="group" aria-label={MirrorText.MODE_KEYS}>
         {ROWS.map((offsets, r) => (
-          <div class="live-deck__row" key={r}>
-            {offsets.map((k) => (
-              <KeyCap
-                key={k}
-                index={k}
-                note={keyNotes[k]!}
-                keys={keys}
-                lit={lit.get(k) ?? 0}
-                press={press}
-                tracker={tracker}
-                playing={props.playing}
-                haptic={props.haptic}
-              />
-            ))}
-          </div>
+          <Fragment key={r}>
+            <div class="live-deck__print" aria-hidden="true">
+              {LED_ROWS[r]!.map((word) => (
+                <span key={word} class="live-deck__word">
+                  <span class="ko-led" />
+                  {word}
+                </span>
+              ))}
+            </div>
+            <div class="live-deck__row">
+              {offsets.map((k) => (
+                <KeyCap
+                  key={k}
+                  index={k}
+                  note={keyNotes[k]!}
+                  keys={keys}
+                  lit={lit.get(k) ?? 0}
+                  press={press}
+                  tracker={tracker}
+                  playing={props.playing}
+                  haptic={props.haptic}
+                />
+              ))}
+            </div>
+          </Fragment>
         ))}
       </div>
     </div>
@@ -1911,7 +1924,8 @@ function KeyCapView(props: KeyCapProps): JSX.Element {
       style={{ '--glow': glowCss(props.lit) }}
       {...holdHandlers(props.tracker, target, false, props.haptic)}
     >
-      {/* Named, the name alone, in the ring's colour; unnamed, the ring. */}
+      {/* Named, the name alone, in the ring's colour; unnamed, a ring the digit's height. Both where
+          a pad prints its digit, the octave where a pad shows its sample. */}
       {keys.showNames ? (
         <span class="live-key__name">{Keys.name(note, keys.names)}</span>
       ) : (

@@ -399,40 +399,6 @@ private fun SegmentKey(label: String, on: Boolean, can: Boolean, description: St
     }
 }
 
-/**
- * A quiet switch between views: words side by side, the chosen one in ink and
- * underlined (like the pocket operator app's DRUMS / KEYPAD), the others grey.
- * [vertical]: one under another, each word and its line at the start (a column
- * beside the pads), a long word wrapping rather than cut.
- */
-@Composable
-fun TextToggle(options: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier, vertical: Boolean = false) {
-    val c = LocalArcColors.current
-    val words: @Composable () -> Unit = {
-        options.forEachIndexed { i, label ->
-            val on = i == selected
-            Column(
-                Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Tab) { onSelect(i) }
-                    .semantics { this.selected = on }
-                    .heightIn(min = 40.dp)
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                horizontalAlignment = if (vertical) Alignment.Start else Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text(label.uppercase(), style = ArcType.capsKeySmall, color = if (on) c.ink else c.graphite, maxLines = if (vertical) 2 else 1)
-                Box(Modifier.height(2.dp).width(18.dp).background(if (on) c.navy else Color.Transparent))
-            }
-        }
-    }
-    if (vertical) {
-        Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) { words() }
-    } else {
-        Row(modifier, horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) { words() }
-    }
-}
-
 /** A word's ink: quiet caption grey, so the pads stay the loudest thing on the page; paler when [dim] (not taken, or not available). */
 fun ArcColors.wordInk(dim: Boolean = false): Color = if (dim) graphite.copy(alpha = 0.45f) else graphite
 
