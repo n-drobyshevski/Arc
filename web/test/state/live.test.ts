@@ -1010,6 +1010,37 @@ describe('Factory sounds', () => {
     await until(h, (s) => s.device !== null)
   })
 
+  it('an EP-133 plugged in and out again during the download is not connected afterwards', async () => {
+    const pak = await factoryPak()
+    let release: () => void = () => {}
+    const gate = new Promise<void>((r) => (release = r))
+    const h = await liveHarness({
+      factory: {
+        ...site(pak),
+        bytes: async () => {
+          await gate
+          return pak
+        },
+      },
+    })
+    await h.c.connect()
+    await until(h, (s) => s.device !== null && !s.busy)
+    h.ep.access.unplug(h.ep.input, h.ep.output)
+    await until(h, (s) => s.device === null)
+    const before = h.toasts.length
+    const done = h.c.getFactorySounds()
+    await until(h, (s) => s.task !== null)
+    h.ep.access.plug(h.ep.input, h.ep.output)
+    await sleep(400)
+    h.ep.access.unplug(h.ep.input, h.ep.output)
+    release()
+    await done
+    await sleep(100)
+    expect(h.c.isConnected).toBe(false)
+    // No "No EP-133 found" from a connect nobody wanted.
+    expect(h.toasts.slice(before).filter((t) => t.error)).toEqual([])
+  })
+
   it('a download starts at once while Live copies pad sounds (it never uses the device)', async () => {
     const h = await liveHarness({ storage: memoryStorage(ORDER), factory: site(await factoryPak()) })
     await h.c.connect()

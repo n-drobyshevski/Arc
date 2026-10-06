@@ -72,6 +72,8 @@ export class Connection {
   private events: LiveEvents | null = null
   private releaseLock: ReleaseLock | null = null
   private access: MidiAccessLike | null = null
+  // An EP-133 plugged in during a task that doesn't use it waits to connect until it ends.
+  private connectAfterTask = false
   private unwatch: (() => void) | null = null
   private disposed = false
 
@@ -133,11 +135,18 @@ export class Connection {
     if (!ev.looksLikeEp || !this.host.deps.settings.settings.autoConnect) return
     // watchMidi already waited its 300 ms (ArcController's delay(300)).
     if (this.session === null && !this.host.store.get().busy) void this.connect()
-    else if (this.session === null && this.host.tasks.deviceless) {
-      // The factory download holds busy without the device: connect once it ends.
-      void this.host.store.waitFor((st) => !st.busy).then(() => {
-        if (this.session === null && !this.disposed) void this.connect()
-      })
+    else if (this.session === null && this.host.tasks.deviceless && !this.connectAfterTask) {
+      // The factory download holds busy without the device: connect once it ends, if the
+      // EP-133 is still there and auto-connect still on (one waiter at most).
+      this.connectAfterTask = true
+      void this.host.store
+        .waitFor((st) => !st.busy)
+        .then(() => {
+          this.connectAfterTask = false
+          const pair = this.access === null ? null : pickPair(this.access)
+          const there = pair !== null && portLooksLikeEp(pair.input) && portLooksLikeEp(pair.output)
+          if (this.session === null && !this.disposed && there && this.host.deps.settings.settings.autoConnect) void this.connect()
+        })
     }
   }
 

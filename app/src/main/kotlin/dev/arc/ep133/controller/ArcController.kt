@@ -299,6 +299,8 @@ class ArcController(
     /** The running task doesn't use the EP-133 (the factory download): unplugging it doesn't cancel it. */
     @Volatile
     private var deviceless = false
+    /** An EP-133 plugged in during such a task waits to connect until it ends. Main thread only. */
+    private var connectAfterTask = false
     private val toastIds = AtomicLong()
 
     /** Device description for the debug log export. */
@@ -357,10 +359,16 @@ class ArcController(
                     val s = _state.value
                     if (session == null && !s.busy) {
                         connect()
-                    } else if (session == null && deviceless) {
-                        // The factory download holds busy without the device: connect once it ends.
-                        _state.first { !it.busy }
-                        if (session == null) connect()
+                    } else if (session == null && deviceless && !connectAfterTask) {
+                        // The factory download holds busy without the device: connect once it ends,
+                        // if the EP-133 is still there and auto-connect still on (one waiter at most).
+                        connectAfterTask = true
+                        try {
+                            _state.first { !it.busy }
+                        } finally {
+                            connectAfterTask = false
+                        }
+                        if (session == null && settingsStore.settings.value.autoConnect && midi.find() != null) connect()
                     }
                 }
             },
