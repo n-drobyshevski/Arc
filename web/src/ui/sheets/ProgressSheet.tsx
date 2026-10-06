@@ -8,6 +8,7 @@
 // after the current item.
 import type { JSX } from 'preact'
 import { useRef } from 'preact/hooks'
+import { FeatureText } from '../../core/text/featureText'
 import { Strings } from '../../core/text/strings'
 import { WebText } from '../../core/text/webText'
 import type { TaskUi } from '../../state/types'
@@ -26,7 +27,7 @@ export function ProgressSheetContent(props: { task: TaskUi; onCancel: () => void
       <h2 id={TITLE_ID} class="t-heading progress-sheet__title">{t.title}</h2>
       <ProgressMeter fraction={t.fraction} label={t.title} />
       <p class="t-bold progress-sheet__label" title={t.label || undefined}>{t.label}</p>
-      <p class="t-small progress-sheet__hint">{WebText.KEEP_TAB_OPEN}</p>
+      <p class="t-small progress-sheet__hint">{t.title === FeatureText.GETTING_FACTORY ? FeatureText.FACTORY_KEEP_OPEN : WebText.KEEP_TAB_OPEN}</p>
       <Key text={Strings.CANCEL} variant="quiet" block disabled={t.cancelling} onClick={props.onCancel} />
     </>
   )

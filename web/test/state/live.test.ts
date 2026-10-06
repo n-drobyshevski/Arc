@@ -23,6 +23,9 @@ import { Tasks } from '../../src/state/tasks'
 import { HOME_TAB, initialState } from '../../src/state/types'
 import type { Session } from '../../src/core/protocol/session'
 import { tone } from '../helpers/demoData'
+import { pad, tarFile } from '../helpers/bytes'
+import { FactorySounds } from '../../src/core/features/factorySounds'
+import type { FactoryDeps } from '../../src/state/deps'
 import { disposeAll, freshLibrary, liveHarness, sleep, until, type LiveHarness } from './liveHarness'
 
 afterEach(() => disposeAll())
@@ -896,5 +899,118 @@ describe('Live: the latency test', () => {
     h.liveAudio.engine.value = zero
     expect(h.c.liveEngine.value).toEqual(zero)
     expect(latencyRows(h.c.liveLatency.value)).toEqual([zero.label])
+  })
+})
+
+describe('Factory sounds', () => {
+  const PAGE_HTML = '<script type="module" crossorigin src="/apps/ep-sample-tool/assets/index-C1wBjhTa.js"></script>'
+  const SCRIPT = 'x="/apps/ep-sample-tool/assets/ep-133-factory-content-T3st.pak"'
+  const PAK_PATH = '/apps/ep-sample-tool/assets/ep-133-factory-content-T3st.pak'
+
+  /** A small factory pack: kick (1) on a/p01 and clap (5) on a/p05 of project 1. */
+  async function factoryPak(meta: Record<string, string> = { pak_type: 'factory', device_name: 'EP-133' }): Promise<Uint8Array> {
+    const wav = encodeWav(tone(2000, 220), 1, 46875)
+    return writeZip(
+      [
+        { path: 'meta.json', data: new TextEncoder().encode(JSON.stringify({ ...meta, generated_at: '2023-11-24T00:00:00.000Z' })), compress: false },
+        { path: 'sounds/001 micro kick.wav', data: wav, compress: false },
+        { path: 'sounds/005 nt clap.wav', data: wav, compress: false },
+        { path: 'projects/P01.tar', data: tarFile([['pads/a/p01', pad(1)], ['pads/a/p05', pad(5)]]), compress: false },
+      ],
+      { date: 0, offsetMin: 0 },
+    )
+  }
+
+  /** teenage engineering's site serving [pak]; [asked] lists the paths read. */
+  function site(pak: Uint8Array, asked: string[] = []): FactoryDeps {
+    return {
+      text: async (path) => {
+        asked.push(path)
+        return path === FactorySounds.PAGE ? PAGE_HTML : SCRIPT
+      },
+      bytes: async (path, _signal, onProgress) => {
+        asked.push(path)
+        onProgress(pak.length / 2, pak.length)
+        onProgress(pak.length, pak.length)
+        return pak
+      },
+    }
+  }
+
+  it('downloads the pack into the library, and Live without a read plays its project 1', async () => {
+    const asked: string[] = []
+    const h = await liveHarness({ storage: memoryStorage(ORDER), unplugged: true, factory: site(await factoryPak(), asked) })
+    h.c.setLive(true)
+    await until(h, (s) => s.mirror?.error === MirrorText.NOT_CONNECTED)
+    await h.c.getFactorySounds()
+    expect(asked).toEqual([FactorySounds.PAGE, '/apps/ep-sample-tool/assets/index-C1wBjhTa.js', PAK_PATH])
+    await until(h, (s) => s.backups.length === 1)
+    const b = h.c.state.value.backups.find((r) => r.source === FactorySounds.SOURCE)!
+    expect(b).toMatchObject({ title: FeatureText.FACTORY_TITLE, fileName: FactorySounds.FILE_NAME, soundCount: 2, projectCount: 1 })
+    expect(h.toasts.at(-1)?.text).toBe(FeatureText.factorySaved(2))
+    // Live, showing "connect" before, opens on the factory sounds.
+    await until(h, (s) => s.mirror?.offline === MirrorText.FACTORY)
+    expect(h.c.state.value.mirror!.state.activeProject).toBe(1)
+    expect(h.c.mirrorName(A1)).toBe('micro kick')
+    expect(h.c.mirrorName(A5)).toBe('nt clap')
+    await vi.waitFor(() => expect(h.liveAudio.loaded.has('5:nt clap')).toBe(true))
+    await h.c.playPad(A5)
+    expect(h.liveAudio.presses.at(-1)).toMatchObject({ id: 'live:0:4', key: '5:nt clap' })
+    // Not downloaded twice.
+    await h.c.getFactorySounds()
+    expect(asked).toHaveLength(3)
+    // Deleted, Live says to connect again.
+    await h.c.delete(b)
+    await until(h, (s) => s.mirror?.error === MirrorText.NOT_CONNECTED)
+  })
+
+  it('with pads counted from the top and none learned, numbers them from the top row', async () => {
+    const h = await liveHarness({ unplugged: true, factory: site(await factoryPak()) })
+    await until(h, (s) => s.libraryLoaded)
+    await h.c.getFactorySounds()
+    h.c.setLive(true)
+    await until(h, (s) => s.mirror?.offline === MirrorText.FACTORY)
+    // p01 is '7' (offset 9), p05 is '5' (offset 7); nothing learned is saved.
+    expect(h.c.mirrorName(physicalPad(0, 9))).toBe('micro kick')
+    expect(h.c.mirrorName(physicalPad(0, 7))).toBe('nt clap')
+    expect(h.c.mirrorName(A1)).toBeNull()
+    expect(h.storage.getItem('arc.mirror.learned')).toBeNull()
+  })
+
+  it('refuses a file that is not an EP-133 factory pack, and keeps nothing', async () => {
+    const h = await liveHarness({ unplugged: true, factory: site(await factoryPak({ pak_type: 'user', device_name: 'EP-133' })) })
+    await until(h, (s) => s.libraryLoaded)
+    await h.c.getFactorySounds()
+    expect(h.toasts.at(-1)).toMatchObject({ text: FeatureText.factoryFailed(FeatureText.NOT_FACTORY), error: true })
+    expect(h.c.state.value.backups).toEqual([])
+    expect(h.c.state.value.task).toBeNull()
+  })
+
+  it("falls back to the last known path when the tool's page can't be read", async () => {
+    const asked: string[] = []
+    const pak = await factoryPak()
+    const h = await liveHarness({
+      unplugged: true,
+      factory: { ...site(pak, asked), text: () => Promise.reject(new Error('HTTP 404')) },
+    })
+    await until(h, (s) => s.libraryLoaded)
+    await h.c.getFactorySounds()
+    expect(asked).toEqual([FactorySounds.KNOWN_PAK])
+    await until(h, (s) => s.backups.length === 1)
+    expect(h.c.state.value.backups.map((r) => r.source)).toEqual([FactorySounds.SOURCE])
+  })
+
+  it('a last read comes before the factory sounds', async () => {
+    const first = await liveOn()
+    const { storage } = first
+    disposeAll()
+    const h = await liveHarness({ storage, unplugged: true, factory: site(await factoryPak()) })
+    await until(h, (s) => s.libraryLoaded)
+    await h.c.getFactorySounds()
+    await until(h, (s) => s.backups.length === 1)
+    h.c.setLive(true)
+    await until(h, (s) => s.mirror?.offline != null)
+    expect(h.c.state.value.mirror!.offline).not.toBe(MirrorText.FACTORY)
+    expect(h.c.mirrorName(A5)).toBe('clap')
   })
 })

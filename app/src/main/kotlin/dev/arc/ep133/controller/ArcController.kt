@@ -16,6 +16,7 @@ import dev.arc.ep133.features.BackupDiff
 import dev.arc.ep133.features.DeviceBrowser
 import dev.arc.ep133.features.DeviceContents
 import dev.arc.ep133.features.DiffResult
+import dev.arc.ep133.features.FactorySounds
 import dev.arc.ep133.features.SampleUpload
 import dev.arc.ep133.features.SoundDetails
 import dev.arc.ep133.features.UploadItem
@@ -243,6 +244,8 @@ class ArcController(
     private var backupNames: List<dev.arc.ep133.features.NameEntry> = emptyList()
     /** The last backup a pad played from, opened, so the next taps are quick. */
     private var openPak: Pair<String, dev.arc.ep133.backup.Pak>? = null
+    /** The factory sounds' first project as Live shows it, by the library entry it came from. */
+    private var factorySnap: Pair<String, dev.arc.ep133.features.LiveSnapshot?>? = null
     /** Live's own low-latency output, open while Live is on screen. */
     private val liveAudio = dev.arc.ep133.audio.LiveAudio(context, ::liveStarted, ::takeDone, ::liveOutput)
     /** The Live voices sounding on the phone ("live:<group>:<offset>" pads, "note:<midi>" keys), for the rings. */
@@ -302,7 +305,10 @@ class ArcController(
         scope.launch {
             library.backups
                 .catch { e -> toast(Strings.libraryFailed(e.message ?: e.toString()), error = true) }
-                .collect { list -> _state.update { it.copy(backups = list, libraryLoaded = true, spaceLeft = runCatching { library.spaceLeft() }.getOrNull()) } }
+                .collect { list ->
+                    _state.update { it.copy(backups = list, libraryLoaded = true, spaceLeft = runCatching { library.spaceLeft() }.getOrNull()) }
+                    factoryChanged()
+                }
         }
         library.settings = {
             buildMap {
@@ -432,8 +438,14 @@ class ArcController(
 
     // ---------- long-running tasks ----------
 
-    private suspend fun <T> runTask(title: String, wait: Boolean = false, fn: suspend (onProgress: (Progress) -> Unit, signal: CancelSignal) -> T): T? {
-        if (!(if (wait) awaitDeviceWaiting() else awaitDevice())) return null
+    /** [device] false: a task that doesn't use the EP-133 (a download), which only waits for nothing else to run. */
+    private suspend fun <T> runTask(
+        title: String,
+        wait: Boolean = false,
+        device: Boolean = true,
+        fn: suspend (onProgress: (Progress) -> Unit, signal: CancelSignal) -> T,
+    ): T? {
+        if (if (device) !(if (wait) awaitDeviceWaiting() else awaitDevice()) else _state.value.busy) return null
         _state.update { it.copy(busy = true, task = TaskUi(title, "", 0.0, cancelling = false)) }
         val signal = CancelSignal()
         abortCurrent = signal
@@ -905,21 +917,54 @@ class ArcController(
      */
     private suspend fun openOfflineMirror() {
         stopMirror()
-        val snap = loadLastRead()
+        val lastRead = loadLastRead()
+        // Never read: the factory sounds, if the library has them.
+        val snap = lastRead ?: factorySnapshot()
         if (snap == null || session != null && _state.value.device != null) {
             if (snap == null) _state.update { it.copy(mirror = notConnectedMirror()) }
             return
         }
-        val m = dev.arc.ep133.features.LiveMirror(
-            learned = loadLearned(),
-            padOrder = savedPadOrder(),
-            onLearned = ::saveLearned,
-        )
+        // The factory sounds can't be learned (no device): pads unlearned are numbered from the top, and nothing is saved.
+        val m = if (lastRead != null) {
+            dev.arc.ep133.features.LiveMirror(learned = loadLearned(), padOrder = savedPadOrder(), onLearned = ::saveLearned)
+        } else {
+            dev.arc.ep133.features.LiveMirror(learned = FactorySounds.links(loadLearned()), padOrder = savedPadOrder(), onLearned = {})
+        }
         m.load(snap)
         mirror = m
         preloadPads(m)
-        _state.update {
-            it.copy(mirror = MirrorUi(m.snapshot(System.nanoTime()), loading = false, offline = dev.arc.ep133.text.MirrorText.lastSeen(fmtDateTime(snap.savedAt))))
+        val offline = if (lastRead != null) dev.arc.ep133.text.MirrorText.lastSeen(fmtDateTime(lastRead.savedAt)) else dev.arc.ep133.text.MirrorText.FACTORY
+        _state.update { it.copy(mirror = MirrorUi(m.snapshot(System.nanoTime()), loading = false, offline = offline)) }
+    }
+
+    /**
+     * What Live shows while no EP-133 has been read: the factory sounds' first
+     * project, when the library has them (FactorySounds); else null.
+     */
+    private suspend fun factorySnapshot(): dev.arc.ep133.features.LiveSnapshot? {
+        val b = FactorySounds.inLibrary(_state.value.backups) ?: return null
+        factorySnap?.takeIf { it.first == b.id }?.let { return it.second }
+        val snap = try {
+            FactorySounds.snapshot(pakOf(b.id), b.createdAt)
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            null
+        }
+        factorySnap = b.id to snap
+        return snap
+    }
+
+    /**
+     * Live without a device shows the factory sounds once they are in the
+     * library, and stops when they are deleted: it opens offline again.
+     */
+    private fun factoryChanged() {
+        val st = _state.value
+        val mi = st.mirror ?: return
+        if (session != null && st.device != null) return
+        val has = FactorySounds.inLibrary(st.backups) != null
+        if (has && mi.error == dev.arc.ep133.text.MirrorText.NOT_CONNECTED || !has && mi.offline == dev.arc.ep133.text.MirrorText.FACTORY) {
+            scope.launch { openOfflineMirror() }
         }
     }
 
@@ -1486,10 +1531,13 @@ class ArcController(
     /** The WAV of a sound from the newest backup that has it, if any. */
     private suspend fun fromBackup(slot: Int, name: String): ByteArray? {
         val b = dev.arc.ep133.features.PadSounds.newestBackupWith(slot, name, backupNames, _state.value.backups) ?: return null
-        val pak = openPak?.takeIf { it.first == b.id }?.second
-            ?: withContext(Dispatchers.Default) { Paks.open(library.bytes(b.id)) }.also { openPak = b.id to it }
-        return pak.sounds[slot]?.wav
+        return pakOf(b.id).sounds[slot]?.wav
     }
+
+    /** A library entry opened, the last one kept open. */
+    private suspend fun pakOf(id: String): dev.arc.ep133.backup.Pak =
+        openPak?.takeIf { it.first == id }?.second
+            ?: withContext(Dispatchers.Default) { Paks.open(library.bytes(id)) }.also { openPak = id to it }
 
     /** Space taken by Live's copies of the device's sounds, in bytes. */
     suspend fun padSoundsSize(): Long = withContext(Dispatchers.IO) { padSounds.bytes() }
@@ -1856,6 +1904,46 @@ class ArcController(
             if (e is kotlinx.coroutines.CancellationException) throw e
             toast(Strings.importFailed(name, e.message ?: e.toString()), error = true)
         }
+    }
+
+    /**
+     * Downloads the EP-133's factory sounds from teenage engineering's EP
+     * Sample Tool and keeps them in the library (FactorySounds), as a task:
+     * the progress sheet shows how much has come, and Cancel stops it.
+     */
+    fun getFactorySounds(): Job = scope.launch {
+        if (FactorySounds.inLibrary(_state.value.backups) != null) return@launch
+        val saved = runTask(FeatureText.GETTING_FACTORY, device = false) { onProgress, signal ->
+            try {
+                withContext(Dispatchers.IO) {
+                    val path = FactorySounds.locate { p -> dev.arc.ep133.data.FactoryDownload.text(p, signal) }
+                    val bytes = dev.arc.ep133.data.FactoryDownload.bytes(path, signal) { done, total ->
+                        val all = maxOf(total ?: FactorySounds.KNOWN_SIZE, done)
+                        onProgress(Progress(done.toDouble() / all, FeatureText.factoryProgress(done, all)))
+                    }
+                    val pak = Paks.open(bytes)
+                    if (!FactorySounds.isFactory(pak)) throw java.io.IOException(FeatureText.NOT_FACTORY)
+                    val d = Paks.describe(pak)
+                    library.save(
+                        record(
+                            title = FeatureText.FACTORY_TITLE,
+                            createdAt = d.generatedAt ?: System.currentTimeMillis(),
+                            source = FactorySounds.SOURCE,
+                            fileName = FactorySounds.FILE_NAME,
+                            device = BackupDevice(d.device.product, d.device.sku, "", d.device.osVersion),
+                            d = d,
+                        ),
+                        bytes,
+                        d.soundNames,
+                    )
+                }
+            } catch (e: Throwable) {
+                if (e is kotlinx.coroutines.CancellationException || e is CancelledError) throw e
+                throw java.io.IOException(FeatureText.factoryFailed(e.message ?: e.toString()), e)
+            }
+        } ?: return@launch
+        _state.update { it.copy(freshId = saved.record.id) }
+        toastSaved(FeatureText.factorySaved(saved.record.soundCount), saved.copyError)
     }
 
     /** Saves edits made in the detail sheet (`saveDetailEdits`). */

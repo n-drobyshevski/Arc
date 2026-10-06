@@ -129,7 +129,7 @@ import { HwToggle } from '../components/HwToggle'
 import { EditEdgeTab } from '../components/EditEdgeTab'
 import { MiniPiano } from '../components/MiniPiano'
 import { Segmented, handleRovingKey } from '../components/Segmented'
-import { Disclosure, RowCard, SettingRow } from '../components/SettingRow'
+import { Disclosure, RowAction, RowCard, SettingRow } from '../components/SettingRow'
 import { SideZone } from '../components/SideZone'
 import {
   displayLine,
@@ -229,6 +229,8 @@ export interface MirrorScreenProps {
   onTools: (open: boolean) => void
   /** For screenshots: start with the offline note unfolded. */
   initialNoteOpen?: boolean
+  /** Not connected and nothing to show: download the factory sounds (FactorySounds); null when they can't be, or are in the library. */
+  onGetFactory?: (() => void) | null
   /**
    * Pressing a pad plays its sample on the phone until [onPadUp] (hold is
    * false for a screen reader's Play, which plays to the end); null leaves
@@ -562,10 +564,25 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     [dropOn, dropAt, draggedName],
   )
 
+  // Not connected and never read: the factory sounds to get, first in the tools.
+  const getFactory = mirror?.error === MirrorText.NOT_CONNECTED ? (props.onGetFactory ?? null) : null
+  const factoryRow = getFactory !== null && (
+    <RowCard>
+      <SettingRow
+        title={FeatureText.FACTORY_SOUNDS}
+        note={FeatureText.FACTORY_NOTE}
+        control={(ids) => <RowAction text={FeatureText.GET} describedBy={ids.titleId} onClick={getFactory} />}
+      />
+    </RowCard>
+  )
   const tools = keys.on ? (
-    <KeysPanel keys={keys} actions={actions} piano={pianoRange !== null} hint={!plan.switchShown} />
+    <>
+      {factoryRow}
+      <KeysPanel keys={keys} actions={actions} piano={pianoRange !== null} hint={!plan.switchShown} />
+    </>
   ) : (
     <>
+      {factoryRow}
       <RowCard>
         <SettingRow
           title={MirrorText.VIEW}
@@ -660,7 +677,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         <Caption text={MirrorText.TITLE} as="h1" />
         {onBack && <CloseKey class="live__close" onClick={onBack} description={GUIDE_CLOSE} />}
       </div>
-      {inBar ? null : editing ? <EditStrip /> : <Display st={st} mirror={mirror} late={late} initialNoteOpen={props.initialNoteOpen ?? false} />}
+      {inBar ? null : editing ? <EditStrip /> : <Display st={st} mirror={mirror} late={late} initialNoteOpen={props.initialNoteOpen ?? false} onGetFactory={props.onGetFactory ?? null} />}
       {modeRow}
       {/* Four groups in a row when there is room, two by two on a phone. */}
       <div class="live__groups">
@@ -1000,10 +1017,12 @@ function Display(props: {
   mirror: MirrorUi | null
   late: ReadonlySignal<number | null> | null
   initialNoteOpen: boolean
+  onGetFactory: (() => void) | null
 }): JSX.Element {
   const { st, mirror } = props
   const late = props.late?.value ?? null
   const offline = showOffline(st, mirror)
+  const getFactory = mirror?.error === MirrorText.NOT_CONNECTED ? props.onGetFactory : null
   // Why it is offline stays folded under the word until asked for, so the pads keep the room.
   const [noteOpen, setNoteOpen] = useState(props.initialNoteOpen)
   return (
@@ -1031,15 +1050,20 @@ function Display(props: {
       <p class={`live-display__line t-stat-free${displayLineSmall(st, mirror, late) ? ' live-display__line--small' : ''}`}>
         {displayLine(st, mirror, late)}
       </p>
-      {/* Offline, the folded note; else the all-groups view explains clock out. */}
-      {offline
-        ? noteOpen && (
-            <p id="live-offline-note" class="live-display__hint live-display__note t-display-hint">
-              {MirrorText.OFFLINE_NOTE}
-            </p>
-          )
-        : st.playing === null &&
-          st.bpm === null && <p class="live-display__hint t-display-hint">{MirrorText.NO_TRANSPORT}</p>}
+      {/* Offline, the folded note; never read, the factory sounds to get; else the all-groups view explains clock out. */}
+      {offline ? (
+        noteOpen && (
+          <p id="live-offline-note" class="live-display__hint live-display__note t-display-hint">
+            {MirrorText.offlineNote(mirror?.offline ?? '')}
+          </p>
+        )
+      ) : getFactory !== null ? (
+        <button type="button" class="live-display__get t-display-hint" onClick={getFactory}>
+          {MirrorText.GET_FACTORY}
+        </button>
+      ) : (
+        st.playing === null && st.bpm === null && <p class="live-display__hint t-display-hint">{MirrorText.NO_TRANSPORT}</p>
+      )}
     </DisplayPanel>
   )
 }
@@ -1472,7 +1496,7 @@ function NotesFold(props: { st: MirrorState; mirror: MirrorUi | null; tapToPlay:
       {props.tapToPlay && <p>{WebText.LIVE_TAP_NOTE}</p>}
       {/* Pads that play here mean keys that do too, and sideways they are a piano. */}
       {props.tapToPlay && props.hint && <p>{WebText.LIVE_PIANO_HINT}</p>}
-      {mirror?.offline != null && <p>{MirrorText.OFFLINE_NOTE}</p>}
+      {mirror?.offline != null && <p>{MirrorText.offlineNote(mirror.offline)}</p>}
       {st.padOrder === PadOrder.FROM_TOP && (
         <>
           <p>{MirrorText.LEARN_NOTE}</p>

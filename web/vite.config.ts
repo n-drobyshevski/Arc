@@ -99,9 +99,22 @@ const pwa = VitePWA({
   },
 })
 
+// teenage engineering's EP Sample Tool, where the factory sounds come from
+// (platform/net/factory): their server sends no CORS headers, so arc reads it
+// through its own origin. vercel.json forwards the same path in production.
+const sampleTool = {
+  '/te/apps/ep-sample-tool': {
+    target: 'https://teenage.engineering',
+    changeOrigin: true,
+    rewrite: (path: string) => path.replace(/^\/te/, ''),
+  },
+}
+
 export default defineConfig({
   plugins: [preact(), pwa],
   base: './',
+  server: { proxy: sampleTool },
+  preview: { proxy: sampleTool },
   define: {
     __ARC_VERSION__: JSON.stringify(version),
     __ARC_BUILD__: JSON.stringify(buildName(version)),

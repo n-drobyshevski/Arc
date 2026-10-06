@@ -56,6 +56,7 @@ import { describePak, openPak, type PakDescription, type PakSound } from '../cor
 import { project as exportProject, projectFileName, soundFileName, soundWav } from '../core/backup/pakExport'
 import { compare as compareWithDevice } from '../core/features/backupDiff'
 import { contents as deviceContents, projectLayout, soundDetails, type DeviceContents } from '../core/features/deviceBrowser'
+import { FactorySounds } from '../core/features/factorySounds'
 import { search as searchLibrary, type NameEntry } from '../core/features/librarySearch'
 import type { PadOrder } from '../core/features/padPush'
 import { compare as comparePaks } from '../core/features/pakCompare'
@@ -63,6 +64,7 @@ import { frames, seconds, type TrimRange } from '../core/features/sampleTrim'
 import { nameFor, nextFree, upload, UploadItem } from '../core/features/sampleUpload'
 import { decodeWav } from '../core/formats/wav'
 import { assignPad as writePadSound, type SoundEntry } from '../core/protocol/device'
+import { CancelledError } from '../core/protocol/errors'
 import { download } from '../core/protocol/fs'
 import type { TrafficLog } from '../core/protocol/trafficLog'
 import { FeatureText } from '../core/text/featureText'
@@ -88,7 +90,7 @@ import { LiveSounds, type LiveLatency } from './live'
 import { MirrorController } from './mirror'
 import { PreviewCache, type DecodedSound } from './previewCache'
 import { createStore, type Store } from './store'
-import { errorText, Tasks, type OnProgress } from './tasks'
+import { errorText, isCancelled, Tasks, type OnProgress } from './tasks'
 import { initialState, type Tab, type UiState, type UploadDraftItem } from './types'
 
 /** MainActivity COPY_LIMIT: the clipboard gets the latest part of a long log. */
@@ -378,6 +380,18 @@ export class ArcController {
     this.store.update((s) => ({ ...s, search: { ...s.search, indexing: false } }))
   }
 
+  /**
+   * Live without a device shows the factory sounds once they are in the
+   * library, and stops when they are deleted: it opens offline again.
+   */
+  private factoryChanged(): void {
+    const st = this.store.get()
+    const mi = st.mirror
+    if (mi === null || (this.conn.session !== null && st.device !== null)) return
+    const has = FactorySounds.inLibrary(st.backups) !== null
+    if ((has && mi.error === MirrorText.NOT_CONNECTED) || (!has && mi.offline === MirrorText.FACTORY)) void this.mirror.openOffline()
+  }
+
   /** library.backups collected: the list, the names for search, and the free space. */
   private async reloadLibrary(): Promise<void> {
     const gen = ++this.libraryGen
@@ -395,6 +409,7 @@ export class ArcController {
       this.live.libraryChanged()
       this.store.update((s) => ({ ...s, backups: list, libraryLoaded: true, spaceLeft }))
       void this.runSearch()
+      this.factoryChanged()
     } catch (e) {
       this.toast(Strings.libraryFailed(errorText(e)), true)
     }
@@ -1355,6 +1370,51 @@ export class ArcController {
     } catch (e) {
       this.toast(Strings.importFailed(name, errorText(e)), true)
     }
+  }
+
+  /** Whether the factory sounds can be downloaded here (FactorySounds). */
+  get canGetFactory(): boolean {
+    return this.deps.factory !== undefined
+  }
+
+  /**
+   * Downloads the EP-133's factory sounds from teenage engineering's EP
+   * Sample Tool and keeps them in the library (FactorySounds), as a task:
+   * the progress sheet shows how much has come, and Cancel stops it.
+   */
+  async getFactorySounds(): Promise<void> {
+    const net = this.deps.factory
+    if (net === undefined || FactorySounds.inLibrary(this.store.get().backups) !== null) return
+    const saved = await this.tasks.runTask(FeatureText.GETTING_FACTORY, async (onProgress, signal) => {
+      try {
+        const path = await FactorySounds.locate((p) => net.text(p, signal))
+        const bytes = await net.bytes(path, signal, (done, total) => {
+          const all = Math.max(total ?? FactorySounds.KNOWN_SIZE, done)
+          onProgress({ fraction: done / all, label: FeatureText.factoryProgress(done, all) })
+        })
+        const pak = await openPak(bytes)
+        if (!FactorySounds.isFactory(pak)) throw new Error(FeatureText.NOT_FACTORY)
+        const d = describePak(pak)
+        return await this.deps.library.save(
+          this.record(
+            FeatureText.FACTORY_TITLE,
+            d.generatedAt ?? this.deps.now(),
+            FactorySounds.SOURCE,
+            FactorySounds.FILE_NAME,
+            BackupDevice(d.device.product, d.device.sku, '', d.device.osVersion),
+            d,
+          ),
+          bytes,
+          d.soundNames,
+        )
+      } catch (e) {
+        if (signal.aborted || isCancelled(e)) throw new CancelledError()
+        throw new Error(FeatureText.factoryFailed(errorText(e)))
+      }
+    })
+    if (saved === null) return
+    this.store.update((st) => ({ ...st, freshId: saved.record.id }))
+    this.toastSaved(FeatureText.factorySaved(saved.record.soundCount), saved.copyError)
   }
 
   /** Saves edits made in the detail sheet (saveDetailEdits). */

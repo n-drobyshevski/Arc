@@ -54,6 +54,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import dev.arc.ep133.controller.UiState
 import dev.arc.ep133.data.AppSettings
+import dev.arc.ep133.features.FactorySounds
 import dev.arc.ep133.features.NoteNames
 import dev.arc.ep133.features.PadOrder
 import dev.arc.ep133.features.Piano
@@ -110,6 +111,8 @@ fun SettingsScreen(
     onShowNames: (Boolean) -> Unit = {},
     onPianoWhites: (Int?) -> Unit = {},
     onHaptics: (Boolean) -> Unit = {},
+    /** Downloads the factory sounds (FactorySounds); null hides the row. */
+    onGetFactory: (() -> Unit)? = null,
     onSource: () -> Unit,
     onFontLicence: () -> Unit,
     onDebug: () -> Unit,
@@ -211,6 +214,19 @@ fun SettingsScreen(
                 }
                 PlateLine()
                 SwitchRow(SettingsText.HAPTICS, SettingsText.HAPTICS_NOTE, settings.haptics, onHaptics)
+                if (onGetFactory != null) {
+                    val saved = FactorySounds.inLibrary(state.backups) != null
+                    PlateLine()
+                    SettingRow(FeatureText.FACTORY_SOUNDS, note = if (saved) FeatureText.FACTORY_SAVED else FeatureText.FACTORY_NOTE) {
+                        ArcKey(
+                            if (saved) FeatureText.SAVED else FeatureText.GET,
+                            onGetFactory,
+                            size = KeySize.Small,
+                            style = KeyStyle.Quiet,
+                            enabled = !saved && !state.busy,
+                        )
+                    }
+                }
             }
         },
         Section(SettingsText.SAVED_HERE) {

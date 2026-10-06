@@ -211,6 +211,17 @@ export interface ShareDeps {
   share(name: string, data: FileData, mime: string, title: string, text?: string): Promise<ShareResult>
 }
 
+/**
+ * teenage engineering's site, for the factory sounds (FactorySounds): [path]s
+ * on its origin, read through arc's own (platform/net/factory). A cancel
+ * rejects with CancelledError.
+ */
+export interface FactoryDeps {
+  text(path: string, signal: AbortSignal): Promise<string>
+  /** The file, with its progress as it arrives ([total] null when the server doesn't say). */
+  bytes(path: string, signal: AbortSignal, onProgress: (done: number, total: number | null) => void): Promise<Uint8Array>
+}
+
 /** The activity lifecycle: started/stopped becomes tab visible/hidden. */
 export interface VisibilityDeps {
   visible(): boolean
@@ -244,6 +255,8 @@ export interface Deps {
   padSounds: PadSoundStore
   /** Live's last read, shown while the device is not connected. */
   lastRead: LastReadDeps
+  /** Where the factory sounds are downloaded from; absent: they can't be. */
+  factory?: FactoryDeps | undefined
   /** Screen wake lock: on while a task runs, or Live is open with keepScreenOn. */
   wakeLock: { set(on: boolean): Promise<void> }
   trafficLog: TrafficLog

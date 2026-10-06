@@ -274,6 +274,10 @@ fun ColumnScope.ProgressSheetContent(task: TaskUi, onCancel: () -> Unit) {
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier.heightIn(min = 24.dp),
     )
-    Text(Strings.KEEP_SCREEN_ON, style = ArcType.small, color = c.graphite)
+    Text(
+        if (task.title == dev.arc.ep133.text.FeatureText.GETTING_FACTORY) dev.arc.ep133.text.FeatureText.FACTORY_KEEP_OPEN else Strings.KEEP_SCREEN_ON,
+        style = ArcType.small,
+        color = c.graphite,
+    )
     ArcKey(Strings.CANCEL, onCancel, Modifier.fillMaxWidth(), style = KeyStyle.Quiet, enabled = !task.cancelling)
 }

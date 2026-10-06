@@ -26,6 +26,16 @@ export const MirrorText = {
   lastSeen(at: string): string {
     return `Last seen ${at}`
   },
+  // Not connected and never read, with the factory sounds in the library: their first project.
+  FACTORY: 'Factory sounds',
+  FACTORY_NOTE:
+    "Not connected: these are the EP-133's factory sounds, project 1 as it ships. Connect your EP-133 to see it live.",
+  // Not connected and never read: a way to play without it.
+  GET_FACTORY: 'Get the factory sounds to play without it',
+  /** The note under "Offline" for the display's offline line ([lastSeen] or [FACTORY]). */
+  offlineNote(offline: string): string {
+    return offline === MirrorText.FACTORY ? MirrorText.FACTORY_NOTE : MirrorText.OFFLINE_NOTE
+  },
   PLAYING: 'Playing',
   STOPPED: 'Stopped',
   NO_TRANSPORT: 'Play/stop and tempo need MIDI clock out: SHIFT + ERASE, then 102 and ENTER.',

@@ -145,14 +145,14 @@ private fun Framed(
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false) {
-    val mirror = MirrorUi(state, loading = loading, offline = offline)
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false) {
+    val mirror = MirrorUi(state, loading = loading, error = error, offline = offline)
     val recUi = dev.arc.ep133.ui.screens.RecUi(rec) {}
     // The piano's notes, for the display line in the bar to name a device note past them. The
     // piano reports them a frame late, after the screenshot, so [piano] gives them up front.
     var pianoRange by remember { mutableStateOf(piano) }
     Framed(
-        Tab.LIVE, connected = offline == null, dark = dark, guide = guide,
+        Tab.LIVE, connected = offline == null && error == null, dark = dark, guide = guide,
         pill = { LivePill(mirror, keys, recUi, still = true, pianoRange = pianoRange, editing = edit == true, wireless = wireless) }, toast = toast, barMiddle = barMiddle,
         toastAction = toastAction,
     ) {
@@ -165,6 +165,7 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
             follow = true,
             initialToolsOpen = tools,
             initialNoteOpen = noteOpen,
+            onGetFactory = if (getFactory) ({}) else null,
             onPad = if (playingPads.isNotEmpty()) ({ _, _, _, _ -> }) else null,
             playingPads = playingPads,
             keys = keys,
@@ -219,6 +220,23 @@ fun LiveOfflinePreview() = Live(lastRead, oneGroup = true, offline = "Last seen 
 fun LiveOfflineAllPreview() = Live(lastRead, offline = "Last seen Oct 5, 2:02 PM")
 
 // Offline, a tapped pad plays its sample on the phone: ringed while it plays.
+// Never read, not connected: the factory sounds to get, on the display and first in the tools.
+@PreviewTest
+@Preview(name = "Live get factory sounds", widthDp = 393, heightDp = 1180, showBackground = true)
+@Composable
+fun LiveGetFactoryPreview() = Live(MirrorState(), error = dev.arc.ep133.text.MirrorText.NOT_CONNECTED, getFactory = true)
+
+@PreviewTest
+@Preview(name = "Live get factory sounds tools", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveGetFactoryToolsPreview() = Live(MirrorState(), oneGroup = true, tools = true, error = dev.arc.ep133.text.MirrorText.NOT_CONNECTED, getFactory = true)
+
+// The factory sounds' project 1, shown before any read, its note unfolded.
+@PreviewTest
+@Preview(name = "Live factory sounds", widthDp = 393, heightDp = 1180, showBackground = true)
+@Composable
+fun LiveFactoryPreview() = Live(lastRead.copy(activeProject = 1), offline = dev.arc.ep133.text.MirrorText.FACTORY, noteOpen = true)
+
 @PreviewTest
 @Preview(name = "Live offline pad playing", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
@@ -718,6 +736,7 @@ private fun Settings(dark: Boolean) {
             version = "1.0",
             onTheme = {}, onAutoConnect = {}, onKeepScreenOn = {}, pruneCount = { 0 }, onKeepLast = {},
             onPadOrder = {}, onForgetNames = {}, onRestoreFolder = {}, onSource = {}, onFontLicence = {}, onDebug = {}, onBack = {},
+            onGetFactory = {},
         )
     }
 }

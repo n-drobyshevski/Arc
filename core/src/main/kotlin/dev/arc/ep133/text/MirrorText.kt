@@ -18,6 +18,13 @@ object MirrorText {
     const val NOTE_HIDDEN = "Tap for a note"
     /** "Last seen 5 Oct, 14:02", for the display while offline. */
     fun lastSeen(at: String) = "Last seen $at"
+    // Not connected and never read, with the factory sounds in the library: their first project.
+    const val FACTORY = "Factory sounds"
+    const val FACTORY_NOTE = "Not connected: these are the EP-133's factory sounds, project 1 as it ships. Connect your EP-133 to see it live."
+    // Not connected and never read: a way to play without it.
+    const val GET_FACTORY = "Get the factory sounds to play without it"
+    /** The note under "Offline" for the display's offline line ([lastSeen] or [FACTORY]). */
+    fun offlineNote(offline: String) = if (offline == FACTORY) FACTORY_NOTE else OFFLINE_NOTE
     const val PLAYING = "Playing"
     const val STOPPED = "Stopped"
     const val NO_TRANSPORT = "Play/stop and tempo need MIDI clock out: SHIFT + ERASE, then 102 and ENTER."

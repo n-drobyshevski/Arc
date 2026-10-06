@@ -10,7 +10,7 @@ import { nullChannel } from '../../src/platform/storage/channel'
 import { Library } from '../../src/platform/storage/library'
 import { CoachPrefs, LastReadPrefs, MirrorPrefs, SettingsStore, memoryStorage } from '../../src/platform/storage/settings'
 import { createController, type ArcController } from '../../src/state/controller'
-import type { Deps } from '../../src/state/deps'
+import type { Deps, FactoryDeps } from '../../src/state/deps'
 import type { ToastMsg, UiState } from '../../src/state/types'
 import { DemoData } from '../helpers/demoData'
 import { connectMock, fakeNavigator, type FakeEp } from '../helpers/fakeMidiAccess'
@@ -43,6 +43,8 @@ export interface LiveHarnessOptions {
   now?: () => number
   /** The fake output has a `late` signal of its own, as the real LiveAudio. */
   late?: boolean
+  /** teenage engineering's site, for the factory sounds. */
+  factory?: FactoryDeps
 }
 
 const all: LiveHarness[] = []
@@ -90,6 +92,7 @@ export async function liveHarness(opts: LiveHarnessOptions = {}): Promise<LiveHa
     liveAudio,
     padSounds,
     lastRead: new LastReadPrefs(storage),
+    factory: opts.factory,
     wakeLock: { set: async () => {} },
     trafficLog: new TrafficLog(),
     now: opts.now ?? (() => Date.now()),

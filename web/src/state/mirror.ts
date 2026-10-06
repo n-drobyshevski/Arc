@@ -27,6 +27,7 @@ import { getMetadata, isJsonObject, type JsonValue } from '../core/protocol/fs'
 import { PROJECTS_NODE, projectFromNode, type SoundEntry } from '../core/protocol/device'
 import type { Session } from '../core/protocol/session'
 import { contents, projectLayout } from '../core/features/deviceBrowser'
+import { FactorySounds } from '../core/features/factorySounds'
 import { CLOCK_TIMEOUT_MS, FADE_MS, LiveMirror, type Hit, type MirrorState, type PadLight, type PadTarget } from '../core/features/liveMirror'
 import type { PhysicalPad } from '../core/features/padNotes'
 import { parse as parsePadPush, type PadOrder } from '../core/features/padPush'
@@ -296,27 +297,35 @@ export class MirrorController {
   }
 
   /**
-   * Live without the device: the pads and sample names of the last read,
-   * marked offline. Nothing lights, as nothing is listened to.
+   * Live without the device: the pads and sample names of the last read
+   * (before any, the factory sounds' first project), marked offline. Nothing
+   * lights, as nothing is listened to.
    */
   async openOffline(): Promise<void> {
     const { host } = this
     this.stop()
     const gen = this.openGen
-    const snap = await host.live.loadLastRead()
+    const lastRead = await host.live.loadLastRead()
+    // Never read: the factory sounds, if the library has them.
+    const snap = lastRead ?? (await host.live.factorySnapshot())
     if (gen !== this.openGen) return
     if (snap === null || (host.session() !== null && host.store.get().device !== null)) {
       if (snap === null) host.store.update((st) => ({ ...st, mirror: this.notConnected() }))
       return
     }
-    const m = new LiveMirror(host.prefs.loadLearned(), host.prefs.savedPadOrder(), (learned) => this.saveLearned(learned))
+    // The factory sounds can't be learned (no device): pads unlearned are numbered from the top, and nothing is saved.
+    const m =
+      lastRead !== null
+        ? new LiveMirror(host.prefs.loadLearned(), host.prefs.savedPadOrder(), (learned) => this.saveLearned(learned))
+        : new LiveMirror(FactorySounds.links(host.prefs.loadLearned()), host.prefs.savedPadOrder(), () => {})
     m.load(snap)
     this.mirror = m
     this.mirrorSession = null
     void host.live.preloadPads(m)
+    const offline = lastRead !== null ? MirrorText.lastSeen(host.fmtDateTime(lastRead.savedAt)) : MirrorText.FACTORY
     host.store.update((st) => ({
       ...st,
-      mirror: { state: m.snapshot(host.perfNow()), loading: false, error: null, offline: MirrorText.lastSeen(host.fmtDateTime(snap.savedAt)) },
+      mirror: { state: m.snapshot(host.perfNow()), loading: false, error: null, offline },
     }))
   }
 

@@ -120,6 +120,20 @@
   -webkit-tap-highlight-color: transparent;
 }
 .live-display__fold:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+/* Never read: the factory sounds to get, a link in the display's ink. */
+.live-display__get {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--display-ink);
+  text-align: start;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.live-display__get:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
 /* AnimatedVisibility(expandVertically + fadeIn). */
 .live-display__note { animation: live-note-in 220ms ease-out; }
 @keyframes live-note-in {

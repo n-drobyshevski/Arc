@@ -5,6 +5,12 @@
   "buildCommand": "npm run build --prefix web",
   "outputDirectory": "web/dist",
   "ignoreCommand": "git diff --quiet HEAD^ HEAD -- web reference version.properties vercel.json",
+  "rewrites": [
+    {
+      "source": "/te/apps/ep-sample-tool/:path*",
+      "destination": "https://teenage.engineering/apps/ep-sample-tool/:path*"
+    }
+  ],
   "headers": [
     {
       "source": "/sw.js",
