@@ -164,6 +164,15 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* In the top bar (a phone on its side, LivePill): one bar tall (44), radius 12, a little
+ * tighter. The note takes at most half the line, so a long one ("DO6, above the keys")
+ * never squeezes out the sound. */
+.live-strip--bar {
+  min-height: 44px;
+  padding: var(--space-4) var(--space-12);
+  border-radius: 12px;
+}
+.live-strip--bar .live-strip__note { max-width: 50%; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---------- a group of pads ---------- */
 
@@ -545,6 +554,8 @@
   font-size: var(--size-tiny);
   font-weight: var(--weight-regular);
 }
+/* A short note among the tools (no piano upright, what clock out is for). */
+.live-tools__note { margin: 0; color: var(--graphite); }
 
 /* The colours as chips: a 12 square swatch and the words, pale pills that wrap. */
 .live-chips {

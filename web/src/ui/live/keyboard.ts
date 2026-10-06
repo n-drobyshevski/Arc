@@ -8,6 +8,8 @@
 // - The room is Live's own box less its chrome, in CSS px: the numbers are
 //   MirrorScreen.css's (.live-piano); change both together. Settings
 //   estimates the same width from the window (SettingsScreen pianoRoomEstimate).
+// - A phone on its side with the display line in the top bar ([inBar]) gives
+//   the keys that line's height too.
 // - On the desk (from 1024px) the piano spans the page column under the
 //   display line and the controls row, with the colours' legend under it,
 //   and is no taller than [PIANO_MAX_DESK].
@@ -36,15 +38,21 @@ const PLATE_Y_DESK = 18 + 22 + 3
 /** Down the page, all but the keys: the padding, the display line, the controls row and their gaps (and the desk's legend). */
 const PHONE_Y = 4 + 12 + 48 + 10 + 44 + 10
 const DESK_Y = 4 + 22 + 56 + 14 + 44 + 14 + 40
+/** The phone's display line and its gap, which a phone on its side has in the top bar instead (window.ts liveInBar). */
+const LINE_Y = 48 + 10
 
 /** The piano's width (its keys' plate inside the body) in Live's box [liveWidth] wide. */
 export function pianoWidth(liveWidth: number, desk: boolean): number {
   return Math.max(0, liveWidth - (desk ? DESK_X + PLATE_X_DESK : PHONE_X + PLATE_X_PHONE))
 }
 
-/** The height the piano's keys can take in Live's box [liveHeight] high (not yet capped). */
-export function pianoHeight(liveHeight: number, desk: boolean): number {
-  return Math.max(0, liveHeight - (desk ? DESK_Y + PLATE_Y_DESK : PHONE_Y + PLATE_Y_PHONE))
+/**
+ * The height the piano's keys can take in Live's box [liveHeight] high (not
+ * yet capped); [inBar]: the display line is in the top bar, not over the keys.
+ */
+export function pianoHeight(liveHeight: number, desk: boolean, inBar = false): number {
+  const chrome = desk ? DESK_Y + PLATE_Y_DESK : PHONE_Y + PLATE_Y_PHONE - (inBar ? LINE_Y : 0)
+  return Math.max(0, liveHeight - chrome)
 }
 
 /** What Live's KEYS shows in a window, from [pianoFor]. */
@@ -67,7 +75,8 @@ export interface PianoPlan {
  * window whose Live box is [liveWidth] × [liveHeight] (Android: pianoRange
  * and the view switch's rule): the view remembered for the window's shape
  * ([viewWide] or [viewTall]), the piano's room, and [choice] white keys
- * (null: as many as fit) at [octave].
+ * (null: as many as fit) at [octave]. [inBar]: the display line is in the
+ * top bar (a phone on its side), so the keys get its height too.
  */
 export function pianoFor(
   windowWidth: number,
@@ -79,11 +88,12 @@ export function pianoFor(
   viewTall: KeysView,
   choice: number | null,
   octave: number,
+  inBar = false,
 ): PianoPlan {
   const wide = windowWidth > windowHeight
   const view = wide ? viewWide : viewTall
   const w = pianoWidth(liveWidth, desk)
-  const h = Math.min(pianoHeight(liveHeight, desk), desk ? PIANO_MAX_DESK : PIANO_MAX_TABLET)
+  const h = Math.min(pianoHeight(liveHeight, desk, inBar), desk ? PIANO_MAX_DESK : PIANO_MAX_TABLET)
   const room = Piano.hasRoom(w, h, choice)
   const shown = Piano.showsPiano(view, wide, windowWidth, room)
   return {

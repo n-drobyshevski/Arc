@@ -21,7 +21,8 @@
 //   stopping once the fade is over.
 // - What plays on the phone comes as signals ([LivePlaying]): each pad and
 //   KEYS key reads its own ring from them, so a voice starting or ending
-//   re-renders only the pads and keys it rings, not the screen.
+//   re-renders only the pads and keys it rings, not the screen. KEYS plays
+//   by MIDI note (Kotlin's playingNotes), on the grid and the piano alike.
 // - Pads and KEYS keys are memoized ([memo], the props compared by value,
 //   their handlers read from the latest props through a ref): a note from
 //   the device re-renders the pads and keys whose light changed, not all 48.
@@ -49,9 +50,9 @@
 //   EDIT_HOLD_MS).
 // - The offline note's fold is a button with aria-expanded (Kotlin's
 //   stateDescription NOTE_SHOWN / NOTE_HIDDEN).
-// - The scale and octave lists (Kotlin's focusable Popups, which Back
+// - The scale, octave and key lists (Kotlin's focusable Popups, which Back
 //   dismisses) are navigation layers too: [picker] / [onPicker] (dialog
-//   'pick:scale' / 'pick:octave'); without them each word keeps its own state.
+//   'pick:scale' / 'pick:octave' / 'pick:key'); without them each word keeps its own state.
 // - The tools (the Step 1c redesign) are SettingRow cards: the View as small
 //   caps with a Follow row and its LED toggle (its note behind the row's ⓘ
 //   key), the last note in a small dark
@@ -91,8 +92,14 @@
 // key, − OCT +) over a piano across the page; on the desk on the device's
 // body with the colours' legend under it. The view switch (two icon caps
 // after the KEYS word) is not shown on a portrait phone, which plays on the
-// grid. On a desktop (or with a fine pointer) the computer keyboard plays it.
-// Piano keys carry [data-note] (their MIDI note) for the glow, by exact pitch.
+// grid; its KEYS tools say a turn of the screen gives the piano
+// (WebText.LIVE_PIANO_HINT). On a desktop (or with a fine pointer) the
+// computer keyboard plays it. Piano keys carry [data-note] (their MIDI note)
+// for the glow, by exact pitch.
+//
+// On a phone on its side (ui/live/window.ts liveInBar, never the desk) the
+// display line is in the top bar ([inBar], [LivePill]) and the page leaves it
+// out; the tools then say what clock out is for (MirrorText.NO_TRANSPORT).
 //
 // EDIT (giving a pad another sound, Kotlin's EditEdgeTab and pad sheet): with
 // it on, the display line says so, the pads get a signal outline and a ⇄
@@ -104,6 +111,7 @@ import { computed, signal, type ReadonlySignal } from '@preact/signals'
 import { Keys, MAX_OCTAVE, MIN_OCTAVE, SCALES, type NoteNames, type Scale } from '../../core/features/keys'
 import type { MirrorState, PadLight } from '../../core/features/liveMirror'
 import { KeysView, type NoteRange } from '../../core/features/piano'
+import { NoteTouches, type NoteEvent } from '../../core/features/noteTouches'
 import type { SoundEntry } from '../../core/protocol/device'
 import { PadOrder } from '../../core/features/padPush'
 import { ROWS, noteName, padKey, physicalPad, type PhysicalPad } from '../../core/features/padNotes'
@@ -150,14 +158,12 @@ import './MirrorScreen.css'
 export type { KeysPicker, KeysShown, KeysUi } from '../live/keys'
 
 /**
- * What sounds on the phone, as signals (the controller's playingPads,
- * playingKeys and playingNotes): the pads as padKey(), the KEYS keys by
- * index, the piano's notes first pressed first. Each pad and key reads its
- * own ring from them.
+ * What sounds on the phone, as signals (the controller's playingPads and
+ * playingNotes): the pads as padKey(), the KEYS notes (grid and piano) as
+ * MIDI notes, first pressed first. Each pad and key reads its own ring from them.
  */
 export interface LivePlaying {
   readonly pads: ReadonlySignal<ReadonlySet<number>>
-  readonly keys: ReadonlySignal<ReadonlySet<number>>
   readonly notes: ReadonlySignal<ReadonlySet<number>>
 }
 
@@ -168,12 +174,10 @@ export interface KeysActions {
   onScale?: (scale: Scale) => void
   onOctave?: (octave: number) => void
   /**
-   * A key pressed; it sounds until [onKeyUp]. A screen reader's Play passes
-   * hold = false. [at]: the press's event timeStamp (absent for a screen reader's Play).
+   * A note pressed (MIDI), on the grid or the piano; it sounds until
+   * [onNoteUp]. A screen reader's Play passes hold = false. [at]: the
+   * press's event timeStamp (absent for a screen reader's Play).
    */
-  onKey?: (index: number, hold: boolean, at?: number) => void
-  onKeyUp?: (index: number) => void
-  /** A piano note pressed (MIDI); it sounds until [onNoteUp]. A screen reader's Play passes hold = false. [at]: as onKey's. */
   onNote?: (note: number, hold: boolean, at?: number) => void
   onNoteUp?: (note: number) => void
   /** The Pads ⇄ Piano switch, for a wide window ([wide]) or a tall one. */
@@ -258,6 +262,10 @@ export interface MirrorScreenProps {
    * a new delay doesn't re-render this screen.
    */
   outputLate?: ReadonlySignal<number | null> | null
+  /** The display line is in the top bar (a phone on its side, [LivePill]), so the page leaves it out. */
+  inBar?: boolean
+  /** The piano's notes while it shows, null otherwise: the line in the top bar names a device note past them. */
+  onPianoRange?: (range: NoteRange | null) => void
 }
 
 
@@ -265,7 +273,7 @@ export interface MirrorScreenProps {
 const perfNow = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now())
 
 const NOTHING: ReadonlySignal<ReadonlySet<number>> = signal<ReadonlySet<number>>(new Set())
-const NOTHING_PLAYS: LivePlaying = { pads: NOTHING, keys: NOTHING, notes: NOTHING }
+const NOTHING_PLAYS: LivePlaying = { pads: NOTHING, notes: NOTHING }
 
 /** Whether [key] is in [set], read so that only a change of that answer re-renders the caller. */
 function useHas(set: ReadonlySignal<ReadonlySet<number>>, key: number): boolean {
@@ -404,6 +412,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   const playing = props.playing ?? NOTHING_PLAYS
   const haptic = props.haptics ?? false
   const edit = props.edit ?? null
+  const inBar = props.inBar ?? false
   // The pads and keys are memoized, so what they call must not change with every render
   // (the caller's callbacks do): it reads the latest props instead.
   const latest = useRef(props)
@@ -431,8 +440,15 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     props.keysViewTall ?? KeysView.AUTO,
     keys.pianoWhites,
     keys.octave,
+    inBar,
   )
   const pianoRange = keys.on ? plan.range : null
+  // The line in the top bar names a device note past the piano's ends.
+  const rangeKey = pianoRange ? `${pianoRange.first}:${pianoRange.last}` : null
+  useEffect(() => {
+    latest.current.onPianoRange?.(pianoRange)
+  }, [rangeKey])
+  useEffect(() => () => latest.current.onPianoRange?.(null), [])
   // In KEYS the tools go behind the strip, so the keys get the page's width.
   const docked = desk && !keys.on
   // EDIT is for the pads (the tab shows in PADS only).
@@ -544,7 +560,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   )
 
   const tools = keys.on ? (
-    <KeysPanel keys={keys} actions={actions} piano={pianoRange !== null} />
+    <KeysPanel keys={keys} actions={actions} piano={pianoRange !== null} hint={!plan.switchShown} />
   ) : (
     <>
       <RowCard>
@@ -573,7 +589,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         )}
       </RowCard>
       {st.lastKeysNote !== null && <KeysStrip st={st} last={st.lastKeysNote} names={keys.names} />}
-      <Notes st={st} mirror={mirror} tapToPlay={onPad !== null} />
+      <Notes st={st} mirror={mirror} tapToPlay={onPad !== null} hint={!plan.switchShown} transport={inBar} />
     </>
   )
   const tabbed = docked && edit !== null
@@ -614,8 +630,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   )
   const keyPress = useMemo(
     () => ({
-      onKey: (k: number, hold: boolean, at?: number) => latest.current.keysActions?.onKey?.(k, hold, at),
-      onKeyUp: (k: number) => latest.current.keysActions?.onKeyUp?.(k),
+      onNote: (n: number, hold: boolean, at?: number) => latest.current.keysActions?.onNote?.(n, hold, at),
+      onNoteUp: (n: number) => latest.current.keysActions?.onNoteUp?.(n),
     }),
     [],
   )
@@ -630,14 +646,15 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     />
   )
   const late = props.outputLate ?? null
-  const displayStrip = editing ? <EditStrip /> : <DisplayStrip st={st} mirror={mirror} late={late} />
+  // On a phone on its side the line is in the top bar instead.
+  const displayStrip = inBar ? null : editing ? <EditStrip /> : <DisplayStrip st={st} mirror={mirror} late={late} />
   const allGroups = (
     <div class="live__all">
       <div class="live__head">
         <Caption text={MirrorText.TITLE} as="h1" />
         {onBack && <CloseKey class="live__close" onClick={onBack} description={GUIDE_CLOSE} />}
       </div>
-      {editing ? <EditStrip /> : <Display st={st} mirror={mirror} late={late} initialNoteOpen={props.initialNoteOpen ?? false} />}
+      {inBar ? null : editing ? <EditStrip /> : <Display st={st} mirror={mirror} late={late} initialNoteOpen={props.initialNoteOpen ?? false} />}
       {modeRow}
       {/* Four groups in a row when there is room, two by two on a phone. */}
       <div class="live__groups">
@@ -667,7 +684,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           </div>
         )}
         <div class="live-piano__body">
-          <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={pianoRange} />
+          {!inBar && <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={pianoRange} />}
           {modeRow}
           <div
             class="live-piano__keys"
@@ -703,7 +720,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={null} />
           {modeRow}
           <div class="live-ko__body">
-            <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.keys} haptic={haptic} />
+            <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} haptic={haptic} />
           </div>
         </div>
       )
@@ -765,8 +782,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         )}
         {keys.on && keyNotes ? (
           <>
-            <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={null} />
-            <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.keys} haptic={haptic} />
+            {!inBar && <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={null} />}
+            <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} haptic={haptic} />
             {modeRow}
           </>
         ) : sideways ? (
@@ -811,10 +828,10 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   )
 }
 
-/** The display line while EDIT is on: EDIT, and what a tap on a pad does now. */
-function EditStrip(): JSX.Element {
+/** The display line while EDIT is on: EDIT, and what a tap on a pad does now. [compact]: in the top bar ([LivePill]). */
+function EditStrip(props: { compact?: boolean }): JSX.Element {
   return (
-    <div class="live-strip live-strip--edit" aria-live="polite">
+    <div class={`live-strip live-strip--edit${props.compact ? ' live-strip--bar' : ''}`} aria-live="polite">
       <span class="live-strip__sub">{MirrorText.EDIT_TAB}</span>
       <span class="live-strip__line live-strip__line--start">{MirrorText.EDIT_LINE}</span>
     </div>
@@ -930,13 +947,19 @@ function PianoLegend(): JSX.Element {
 
 /**
  * The one-group view's display as a single dark line: play state, tempo and
- * project on the left, the pad just played (or that the sound plays late) on the right.
+ * project on the left, the pad just played (or that the sound plays late) on
+ * the right. [compact]: one bar tall, in the top bar ([LivePill]).
  */
-function DisplayStrip(props: { st: MirrorState; mirror: MirrorUi | null; late: ReadonlySignal<number | null> | null }): JSX.Element {
+function DisplayStrip(props: {
+  st: MirrorState
+  mirror: MirrorUi | null
+  late: ReadonlySignal<number | null> | null
+  compact?: boolean
+}): JSX.Element {
   const { st, mirror } = props
   const late = props.late?.value ?? null
   return (
-    <div class="live-strip" aria-live="polite">
+    <div class={`live-strip${props.compact ? ' live-strip--bar' : ''}`} aria-live="polite">
       {st.playing === true && <span class="live-strip__sub live-strip__ink" role="img" aria-label={MirrorText.PLAYING}>{'▶'}</span>}
       {st.playing === false && <span class="live-strip__sub live-strip__dim" role="img" aria-label={MirrorText.STOPPED}>{'■'}</span>}
       {st.playing === null && mirror?.offline != null && (
@@ -1380,12 +1403,32 @@ function KeysStrip(props: { st: MirrorState; last: number; names: NoteNames }): 
   )
 }
 
-/** The long notes on how Live reads the device, folded under one disclosure. */
-function Notes(props: { st: MirrorState; mirror: MirrorUi | null; tapToPlay: boolean }): JSX.Element {
+/**
+ * The long notes on how Live reads the device, folded under one disclosure.
+ * [hint]: no piano in this window (a portrait phone), so a turn of the screen
+ * is pointed out; [transport]: the display line is in the top bar, so what
+ * clock out is for is told here.
+ */
+function Notes(props: { st: MirrorState; mirror: MirrorUi | null; tapToPlay: boolean; hint?: boolean; transport?: boolean }): JSX.Element {
+  const { st, mirror } = props
+  return (
+    <>
+      {props.transport && mirror?.offline == null && st.playing === null && st.bpm === null && (
+        <p class="t-small live-tools__note">{MirrorText.NO_TRANSPORT}</p>
+      )}
+      <NotesFold st={st} mirror={mirror} tapToPlay={props.tapToPlay} hint={props.hint ?? false} />
+    </>
+  )
+}
+
+/** The notes themselves, under "How Live reads the EP-133". */
+function NotesFold(props: { st: MirrorState; mirror: MirrorUi | null; tapToPlay: boolean; hint: boolean }): JSX.Element {
   const { st, mirror } = props
   return (
     <Disclosure title={MirrorText.HOW_LIVE_READS}>
       {props.tapToPlay && <p>{WebText.LIVE_TAP_NOTE}</p>}
+      {/* Pads that play here mean keys that do too, and sideways they are a piano. */}
+      {props.tapToPlay && props.hint && <p>{WebText.LIVE_PIANO_HINT}</p>}
       {mirror?.offline != null && <p>{MirrorText.OFFLINE_NOTE}</p>}
       {st.padOrder === PadOrder.FROM_TOP && (
         <>
@@ -1535,6 +1578,7 @@ function SidewaysRow(props: {
         onPick={(r) => actions.onRoot?.(r)}
         description={MirrorText.keyChoice(keys.root, keys.names)}
         coach={{ id: 'live.key', label: CoachText.KEY }}
+        {...pick('key')}
         columns={6}
         // Six columns wide: lined up with the word's end, so it stays on a narrow screen.
         alignEnd
@@ -1657,7 +1701,9 @@ function PianoIcon(): JSX.Element {
 /**
  * The KEYS display line: KEYS and the last note on the left, the sound it
  * plays on the right. A device note past the piano's ends ([pianoRange]) is
- * named as such: there's no key to light for it.
+ * named as such: there's no key to light for it. [compact]: one bar tall, in
+ * the top bar ([LivePill]), where the word KEYS (right under it) is left to
+ * screen readers.
  */
 function KeysDisplay(props: {
   st: MirrorState
@@ -1665,14 +1711,15 @@ function KeysDisplay(props: {
   keys: KeysShown
   playing: LivePlaying
   pianoRange: NoteRange | null
+  compact?: boolean
 }): JSX.Element {
-  const { st, mirror, keys, playing } = props
+  const { st, mirror, keys, playing, compact = false } = props
   // The note last pressed here: this line re-renders with what plays, not the screen.
-  const shown = { ...keys, playingKeys: playing.keys.value, playingNotes: playing.notes.value }
+  const shown = { ...keys, playingNotes: playing.notes.value }
   const note = keysNoteText(shown, st.lastNote, props.pianoRange)
   return (
-    <div class="live-strip" aria-live="polite">
-      <span class="live-strip__sub live-strip__dim">{MirrorText.MODE_KEYS.toUpperCase()}</span>
+    <div class={`live-strip${compact ? ' live-strip--bar' : ''}`} aria-live="polite">
+      <span class={`live-strip__sub live-strip__dim${compact ? ' sr-only' : ''}`}>{MirrorText.MODE_KEYS.toUpperCase()}</span>
       {note !== null && <span class="live-strip__sub live-strip__ink live-strip__note">{note}</span>}
       {mirror?.offline != null && <span class="live-strip__sub live-strip__dim">{MirrorText.OFFLINE}</span>}
       <span class="live-strip__line">
@@ -1683,9 +1730,33 @@ function KeysDisplay(props: {
 }
 
 /**
- * The 12 pads as keys, in the keypad's layout: each shows its note in a ring,
- * navy for the first octave and orange for the next. Notes from the device
- * light their key; the key playing on the phone is ringed in signal orange.
+ * Live's display line in the top bar's middle, on a phone on its side
+ * (Kotlin LivePill): the KEYS line, EDIT's line or the pads' one-line
+ * display, one bar tall. [pianoRange] is the piano's notes, to name a device
+ * note it doesn't reach.
+ */
+export function LivePill(props: {
+  mirror: MirrorUi | null
+  keys: KeysShown
+  playing: LivePlaying
+  late: ReadonlySignal<number | null> | null
+  editing: boolean
+  pianoRange: NoteRange | null
+}): JSX.Element {
+  const { mirror, keys } = props
+  const st = mirror?.state ?? emptyMirrorState()
+  if (keys.on) return <KeysDisplay st={st} mirror={mirror} keys={keys} playing={props.playing} pianoRange={props.pianoRange} compact />
+  if (props.editing) return <EditStrip compact />
+  return <DisplayStrip st={st} mirror={mirror} late={props.late} compact />
+}
+
+/**
+ * The 12 pads as keys, in the keypad's layout: each shows its note in a ring
+ * (or its name), pale for the first octave and orange for the next. Notes
+ * from the device light their key; the notes playing on the phone are ringed
+ * in signal orange. Each key plays the note it showed when pressed, even if
+ * the key, scale or octave change while it is held (NoteTouches, with the key
+ * as its finger), and lets go of that note.
  */
 function KeysGrid(props: {
   st: MirrorState
@@ -1694,13 +1765,39 @@ function KeysGrid(props: {
   now: number
   actions: KeysActions
   tracker: PressTracker
-  /** The keys sounding on the phone, by index. */
+  /** The notes sounding on the phone, as MIDI notes. */
   playing: ReadonlySignal<ReadonlySet<number>>
   haptic: boolean
 }): JSX.Element {
-  const { st, keys, keyNotes, now, actions, tracker } = props
+  const { st, keys, keyNotes, now, tracker } = props
   // How lit each key is: the brightest device note that falls on it.
   const lit = keysLit(st.notes, keyNotes, now)
+  // Each key is a finger of its own: it lets go of the note it pressed, whatever the grid shows by then.
+  const touches = useMemo(() => new NoteTouches(), [])
+  const act = useRef(props.actions)
+  act.current = props.actions
+  const press = useMemo(
+    () => ({
+      down: (k: number, note: number, hold: boolean, at?: number): void => {
+        // A screen reader's Play sounds the whole note, outside the fingers' count.
+        if (!hold) {
+          act.current.onNote?.(note, false)
+          return
+        }
+        play(touches.down(k, note), at)
+      },
+      up: (k: number): void => play(touches.up(k)),
+    }),
+    [touches],
+  )
+  function play(events: readonly NoteEvent[], at?: number): void {
+    for (const e of events) {
+      if (e.type === 'Press') act.current.onNote?.(e.note, true, at)
+      else act.current.onNoteUp?.(e.note)
+    }
+  }
+  // The grid leaves the screen (PADS, the piano) under a finger: its notes go too.
+  useEffect(() => () => play(touches.releaseAll()), [touches])
   return (
     <div
       class="live-kgrid"
@@ -1719,7 +1816,7 @@ function KeysGrid(props: {
                 note={keyNotes[k]!}
                 keys={keys}
                 lit={lit.get(k) ?? 0}
-                actions={actions}
+                press={press}
                 tracker={tracker}
                 playing={props.playing}
                 haptic={props.haptic}
@@ -1732,13 +1829,19 @@ function KeysGrid(props: {
   )
 }
 
+/** A grid key's press and release, through the grid's NoteTouches (kept the same across renders). */
+interface KeyPress {
+  down: (index: number, note: number, hold: boolean, at?: number) => void
+  up: (index: number) => void
+}
+
 interface KeyCapProps {
   index: number
   note: number
   keys: KeysShown
   lit: number
-  /** Kept the same across renders by the screen (it reads the latest callbacks). */
-  actions: KeysActions
+  /** Kept the same across renders by the grid (it reads the latest callbacks). */
+  press: KeyPress
   tracker: PressTracker
   playing: ReadonlySignal<ReadonlySet<number>>
   haptic: boolean
@@ -1754,19 +1857,19 @@ const KeyCap = memo(
     a.keys.octave === b.keys.octave &&
     a.keys.names === b.keys.names &&
     a.keys.showNames === b.keys.showNames &&
-    a.actions === b.actions &&
+    a.press === b.press &&
     a.tracker === b.tracker &&
     a.playing === b.playing &&
     a.haptic === b.haptic,
 )
 
-/** One KEYS key: its note in a ring, ringed in signal orange while it sounds here (read by the key itself). */
+/** One KEYS key: its note in a ring, ringed in signal orange while its note sounds here (read by the key itself). */
 function KeyCapView(props: KeyCapProps): JSX.Element {
-  const { index: k, note, keys, actions } = props
-  const playing = useHas(props.playing, k)
+  const { index: k, note, keys, press } = props
+  const playing = useHas(props.playing, note)
   const target: PressTarget = {
-    press: (hold, _unsure, at) => actions.onKey?.(k, hold, at),
-    release: () => actions.onKeyUp?.(k),
+    press: (hold, _unsure, at) => press.down(k, note, hold, at),
+    release: () => press.up(k),
   }
   const cls = 'live-key cap-3d' + (upperOctave(note, keys.octave) ? ' live-key--upper' : '') + (playing ? ' is-playing' : '')
   return (
@@ -1795,9 +1898,10 @@ function KeyCapView(props: KeyCapProps): JSX.Element {
 /**
  * The KEYS tools: the key on a one-octave piano, the colours as chips, and
  * how Keys works (its note and the long legend) under a disclosure.
- * [piano]: the piano is showing, and its two chips with it.
+ * [piano]: the piano is showing, and its two chips with it. [hint]: no piano
+ * in this window (a portrait phone): a turn of the screen gives one.
  */
-function KeysPanel(props: { keys: KeysShown; actions: KeysActions; piano?: boolean }): JSX.Element {
+function KeysPanel(props: { keys: KeysShown; actions: KeysActions; piano?: boolean; hint?: boolean }): JSX.Element {
   const { keys, actions, piano = false } = props
   const keyId = useId()
   return (
@@ -1819,6 +1923,7 @@ function KeysPanel(props: { keys: KeysShown; actions: KeysActions; piano?: boole
         <p class="live-tools__title" id={`${keyId}-c`}>{MirrorText.LEGEND}</p>
         <KeysChips piano={piano} labelledBy={`${keyId}-c`} />
       </div>
+      {props.hint && <p class="t-small live-tools__note">{WebText.LIVE_PIANO_HINT}</p>}
       <Disclosure title={MirrorText.HOW_KEYS_WORKS}>
         <p>{MirrorText.KEYS_NOTE}</p>
         <KeysLegend names={keys.showNames ? keys.names : null} />

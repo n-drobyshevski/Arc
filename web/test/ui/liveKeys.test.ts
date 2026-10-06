@@ -43,12 +43,12 @@ describe('KEYS grid', () => {
     ])
   })
 
-  it('names the key last pressed on the phone, else the device note', () => {
-    const keys: KeysUi = { ...DEFAULT_KEYS, on: true, scale: Scale.MAJOR, playingKeys: new Set([5, 7]) }
+  it('names the note last pressed on the phone (a grid key or a piano key), else the device note', () => {
+    const keys: KeysUi = { ...DEFAULT_KEYS, on: true, scale: Scale.MAJOR, playingNotes: new Set([65, 72]) }
     expect(keysDisplayNote(keys, 40)).toBe(72)
     expect(MirrorText.noteName(72, NoteNames.SOLFEGE)).toBe('DO5')
-    expect(keysDisplayNote({ ...keys, playingKeys: new Set() }, 40)).toBe(40)
-    expect(keysDisplayNote({ ...keys, playingKeys: new Set() }, null)).toBeNull()
+    expect(keysDisplayNote({ ...keys, playingNotes: new Set() }, 40)).toBe(40)
+    expect(keysDisplayNote({ ...keys, playingNotes: new Set() }, null)).toBeNull()
   })
 
   it('offers octaves 0 to 8', () => {
@@ -321,6 +321,7 @@ describe('KEYS lists as navigation layers', () => {
     expect(keysPickerOf(['forget'])).toBeNull()
     expect(keysPickerOf([PICK_PREFIX + 'scale'])).toBe('scale')
     expect(keysPickerOf(['delete', PICK_PREFIX + 'octave'])).toBe('octave')
+    expect(keysPickerOf([PICK_PREFIX + 'key'])).toBe('key')
     expect(keysPickerOf([PICK_PREFIX + 'tempo'])).toBeNull()
   })
 

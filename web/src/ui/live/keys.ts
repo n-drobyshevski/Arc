@@ -24,9 +24,10 @@ export interface KeysUi {
   /** The sound KEYS plays, and its sample's name when known. */
   readonly pad: PhysicalPad | null
   readonly padName: string | null
-  /** The keys playing on the phone (a chord), latest last, ringed. */
-  readonly playingKeys: ReadonlySet<number>
-  /** The piano's notes playing on the phone, first pressed first, outlined (Kotlin playingNotes). */
+  /**
+   * The notes playing on the phone (a chord), grid and piano alike, as MIDI
+   * notes, first pressed first: ringed on the grid, outlined on the piano (Kotlin playingNotes).
+   */
   readonly playingNotes: ReadonlySet<number>
   /** The piano's white keys as chosen in Settings (Piano.CHOICES); null is Auto, the widest that fits. */
   readonly pianoWhites: number | null
@@ -37,7 +38,7 @@ export interface KeysUi {
  * (MirrorScreen's LivePlaying), so a voice starting or ending re-renders only
  * the keys it rings, not the screen.
  */
-export type KeysShown = Omit<KeysUi, 'playingKeys' | 'playingNotes'>
+export type KeysShown = Omit<KeysUi, 'playingNotes'>
 
 /** KeysUi() with its defaults. */
 export const DEFAULT_KEYS: KeysUi = Object.freeze({
@@ -49,7 +50,6 @@ export const DEFAULT_KEYS: KeysUi = Object.freeze({
   showNames: true,
   pad: null,
   padName: null,
-  playingKeys: new Set<number>(),
   playingNotes: new Set<number>(),
   pianoWhites: null,
 })
@@ -71,20 +71,13 @@ export function upperOctave(note: number, octave: number): boolean {
 }
 
 /**
- * The note the KEYS display names: the key (or piano note) last pressed on
- * the phone, else the device's last note.
+ * The note the KEYS display names: the note (grid key or piano key) last
+ * pressed on the phone, else the device's last note.
  */
 export function keysDisplayNote(keys: KeysUi, lastNote: number | null): number | null {
   let note: number | undefined
   for (const n of keys.playingNotes) note = n
-  if (note !== undefined) return note
-  let last: number | undefined
-  for (const k of keys.playingKeys) last = k
-  if (last !== undefined) {
-    const n = Keys.notes(keys.root, keys.scale, keys.octave)[last]
-    if (n !== undefined) return n
-  }
-  return lastNote
+  return note ?? lastNote
 }
 
 /** The octave word's choices, lowest first. */
@@ -95,10 +88,10 @@ export function octaves(): number[] {
 }
 
 
-/** Which of the mode row's lists is open over the grid. */
-export type KeysPicker = 'scale' | 'octave'
+/** Which of the mode row's lists is open over the grid (the key's own word only shows over the piano). */
+export type KeysPicker = 'scale' | 'octave' | 'key'
 
-/** The dialog layer id prefix of those lists ('pick:scale', 'pick:octave'): Back closes them. */
+/** The dialog layer id prefix of those lists ('pick:scale', 'pick:octave', 'pick:key'): Back closes them. */
 export const PICK_PREFIX = 'pick:'
 
 /** The KEYS list open, from the navigation stack's open dialogs. */
@@ -106,6 +99,7 @@ export function keysPickerOf(dialogs: readonly string[]): KeysPicker | null {
   for (const d of dialogs) {
     if (d === PICK_PREFIX + 'scale') return 'scale'
     if (d === PICK_PREFIX + 'octave') return 'octave'
+    if (d === PICK_PREFIX + 'key') return 'key'
   }
   return null
 }

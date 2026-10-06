@@ -18,9 +18,11 @@ ui/
                     per pointer), keys.ts (KEYS grid, picker layers), keyboard.ts (the
                     piano's room, the keys view rule, the computer keyboard), Words.tsx
                     (the PADS/KEYS word, SwapMark, PickWord lists), PianoKeyboard.tsx
-                    (KEYS on a wide window), SoundPicker.tsx (EDIT's device sounds:
-                    the pad sheet, the desk's Sounds tab; its RangeKey is the Device
-                    tab's too, as Kotlin's in PadSheet.kt); the .ts ones are tested
+                    (KEYS on a wide window; its keyboard access: tabStop, stepNote),
+                    window.ts (landscape / short, the display line in the top bar),
+                    SoundPicker.tsx (EDIT's device sounds: the pad sheet, the desk's
+                    Sounds tab; its RangeKey is the Device tab's too, as Kotlin's in
+                    PadSheet.kt); the .ts ones are tested
 ```
 
 File header: `// Port of app/src/main/kotlin/dev/arc/ep133/ui/<path>.kt`.

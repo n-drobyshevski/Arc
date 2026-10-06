@@ -44,6 +44,8 @@ export interface ShellProps {
   onGuide: (open: boolean) => void
   /** The guide screen, slid in while [guideOpen]. */
   guide: ComponentChildren
+  /** The top bar's middle, between the tag and the keys (Live's display line on a phone on its side). */
+  middle?: ComponentChildren
   children?: ComponentChildren
   /** The desktop layout (ui/useDesk.ts): the nav rail's Guide key opens the guide, not the edge tab. */
   desk?: boolean
@@ -79,6 +81,7 @@ export function Shell(props: ShellProps): JSX.Element {
           onSettings={props.onSettings}
           onHelp={props.onHelp}
           {...(props.desk ? { themeSwitch: { theme: props.theme, onTheme: props.onTheme } } : {})}
+          middle={props.middle}
         />
       </div>
       <div class="shell__body" inert={guideOpen || undefined}>

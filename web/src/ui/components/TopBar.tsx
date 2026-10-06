@@ -10,7 +10,7 @@
 // Web only, on the desk (from 1024px wide, [themeSwitch] set by Shell): the
 // theme switch (ThemeSwitch.tsx: System / Light / Dark) in the settings key's
 // place; the nav rail's Settings key opens Settings there.
-import type { JSX } from 'preact'
+import type { ComponentChildren, JSX } from 'preact'
 import { CoachText } from '../../core/text/coachText'
 import type { Tab } from '../../state/types'
 import { ArcIcon } from './Icons'
@@ -37,6 +37,8 @@ export interface TopBarProps {
   onHelp: () => void
   /** The desk: the theme switch in place of the settings key. */
   themeSwitch?: ThemeSwitchProps
+  /** In place of the gap after the tag: Live's display line on a phone on its side. */
+  middle?: ComponentChildren
 }
 
 export function TopBar(props: TopBarProps): JSX.Element {
@@ -50,7 +52,7 @@ export function TopBar(props: TopBarProps): JSX.Element {
           expanded={props.sectionsOpen ?? false}
           {...(props.sectionsId ? { controls: props.sectionsId } : {})}
         />
-        <span class="top-bar__spacer" />
+        {props.middle ? <div class="top-bar__middle">{props.middle}</div> : <span class="top-bar__spacer" />}
         <span data-coach="top.backup" class="top-bar__item">
           <IconBlock
             icon={ArcIcon.DOT}

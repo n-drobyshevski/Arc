@@ -133,3 +133,31 @@
   -webkit-tap-highlight-color: transparent;
 }
 .toast__action:focus-visible { outline: var(--focus-ring); outline-offset: -3px; }
+
+/* A short window wider than tall (a phone on its side, where Live's display line is in
+ * the top bar: ui/live/window.ts liveInBar): at the top, over the top bar's middle
+ * between the tag and the keys, never over the keys of the piano or the bar's icons.
+ * Two lines at most there, a size down. Not on the desk (its own column, above). */
+@media (orientation: landscape) and (max-height: 479px) and (min-width: 600px) and (max-width: 1023px) {
+  .toast-host {
+    top: 0;
+    bottom: auto;
+    padding:
+      6px
+      calc(244px + env(safe-area-inset-right, 0px))
+      0
+      calc(148px + env(safe-area-inset-left, 0px));
+  }
+  .toast-live { padding: 0; }
+  .toast-frame { max-width: 560px; }
+  .toast__text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    padding-block: 12px;
+    font-size: 13px;
+  }
+  /* One line is as tall as the display line beside it (44). */
+  .toast { min-height: 44px; }
+}

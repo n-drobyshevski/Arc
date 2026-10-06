@@ -17,8 +17,14 @@
 //   one pointer handler on the plate takes every finger (setPointerCapture,
 //   Piano.keyAt with a slide slop) and feeds NoteTouches, as Kotlin's
 //   pointerInput does. A screen reader's Play is a click with detail 0: the
-//   whole note (hold = false). The keys stay out of the Tab order (37 stops
-//   at most); the computer keyboard plays them instead.
+//   whole note (hold = false).
+// - Each key is a button for the keyboard and screen readers (Compose's
+//   semantics children): one at a time is in the Tab order (a roving
+//   tabindex, on the root until a key is focused), the arrow keys, Home and
+//   End move along the keys (without scrolling the page), and Enter or Space
+//   plays the focused key's whole sound (its click, detail 0; a held Enter
+//   doesn't repeat it). Neither is a computer-keyboard key (below), so a
+//   focused key is never played twice by one press.
 // - Where the browser sends pointerrawupdate (Chrome, press.ts
 //   rawMovesSupported), a held finger's moves come from it as they arrive, so
 //   a glissando reaches the next key without waiting for the frame's
@@ -38,13 +44,13 @@
 //   (live/keyboard.ts), a small letter on each key it reaches; Z / X step
 //   the octave. Ignored while typing in a field, in a dialog, or with a
 //   modifier held.
-import type { JSX, TargetedPointerEvent } from 'preact'
+import type { JSX, TargetedKeyboardEvent, TargetedPointerEvent } from 'preact'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import type { ReadonlySignal } from '@preact/signals'
-import { Keys, MAX_OCTAVE, MIN_OCTAVE } from '../../core/features/keys'
+import { Keys, MAX_OCTAVE, MIN_OCTAVE, type Scale } from '../../core/features/keys'
 import type { MirrorState } from '../../core/features/liveMirror'
 import { NoteTouches, type NoteEvent } from '../../core/features/noteTouches'
-import { KeyMark, Piano, type NoteRange, type PianoKey } from '../../core/features/piano'
+import { KeyMark, Piano, rangeNotes, type NoteRange, type PianoKey } from '../../core/features/piano'
 import { MirrorText } from '../../core/text/mirrorText'
 import { tick } from '../../platform/haptics'
 import { glow, glowCss } from './glow'
@@ -271,6 +277,25 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
     }
   }, [computer, touches])
 
+  // One key at a time is in the Tab order (the one last focused, else the root); the arrow
+  // keys, Home and End move along the keys.
+  const notes = useMemo(() => rangeNotes(range), [range.first, range.last])
+  const [focusNote, setFocusNote] = useState<number | null>(null)
+  const tabNote = tabStop(notes, focusNote, keys.root, keys.scale)
+  const onKeyDown = (e: TargetedKeyboardEvent<HTMLDivElement>): void => {
+    // A held Enter would click again and again: one press, one note.
+    if (e.key === 'Enter' && e.repeat) {
+      e.preventDefault()
+      return
+    }
+    const next = stepNote(notes, tabNote, e.key)
+    if (next === null) return
+    // The page doesn't scroll under the arrows.
+    e.preventDefault()
+    setFocusNote(next)
+    keyOf(next)?.focus()
+  }
+
   // How lit each key is (the device's notes, by exact pitch), and the brightest note past either end.
   let below = 0
   let above = 0
@@ -299,6 +324,7 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
         onLostPointerCapture={onPointerEnd}
         // A long press is a held note, not a context menu.
         onContextMenu={(e) => e.preventDefault()}
+        onKeyDown={onKeyDown}
       >
         {laid.map((k) => {
           const mark = Piano.mark(k.note, keys.root, keys.scale)
@@ -319,7 +345,8 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
               data-down={down ? '' : undefined}
               aria-label={MirrorText.pianoKey(k.note, keys.names, mark)}
               aria-description={MirrorText.PLAY}
-              tabIndex={-1}
+              tabIndex={k.note === tabNote ? 0 : -1}
+              onFocus={() => setFocusNote(k.note)}
               style={{
                 left: `${r.left + gap}px`,
                 top: `${r.top}px`,
@@ -327,6 +354,7 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
                 height: `${r.height}px`,
                 '--glow': glowCss(lit.get(k.note) ?? 0),
               }}
+              // The keyboard's (Enter, Space) or a screen reader's Play: the whole sound.
               onClick={(e) => {
                 if (e.detail === 0) cb.current.onNote(k.note, false)
               }}
@@ -353,3 +381,30 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
   )
 }
 
+
+/**
+ * The key in the Tab order among [notes] (the piano's, lowest first): the
+ * one last focused while it still shows, else the first root of [root]'s
+ * [scale], else the lowest.
+ */
+export function tabStop(notes: readonly number[], focused: number | null, root: number, scale: Scale): number | null {
+  if (focused !== null && notes.includes(focused)) return focused
+  return notes.find((n) => Piano.mark(n, root, scale) === KeyMark.ROOT) ?? notes[0] ?? null
+}
+
+/**
+ * The key a [key] press moves the focus to from [from]: the arrows one key
+ * along (right and up go higher), Home and End to either end; null for any
+ * other key (or none to move to).
+ */
+export function stepNote(notes: readonly number[], from: number | null, key: string): number | null {
+  if (notes.length === 0) return null
+  const at = from === null ? 0 : Math.max(0, notes.indexOf(from))
+  let next: number
+  if (key === 'ArrowRight' || key === 'ArrowUp') next = Math.min(notes.length - 1, at + 1)
+  else if (key === 'ArrowLeft' || key === 'ArrowDown') next = Math.max(0, at - 1)
+  else if (key === 'Home') next = 0
+  else if (key === 'End') next = notes.length - 1
+  else return null
+  return notes[next]!
+}

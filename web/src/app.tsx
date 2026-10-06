@@ -27,6 +27,10 @@
 // shell's second edge tab (on the desk, MirrorScreen hangs it on the K.O. II
 // panel), its pad sheet 'edit:<group>:<offset>' (ui/sheets/PadEditSheet), and
 // a new sample goes through the Device tab's upload sheet, mounted on Live too.
+//
+// On a phone on its side (ui/live/window.ts liveInBar; never on the desk),
+// Live's display line rides in the top bar's middle (LiveBar, MirrorScreen's
+// LivePill) and the page leaves it out.
 import { Component, type ComponentChildren, type JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { MirrorText } from './core/text/mirrorText'
@@ -68,15 +72,17 @@ import { GuideScreen } from './ui/screens/GuideScreen'
 import { MainScreen } from './ui/screens/MainScreen'
 import { BackupsSheets } from './ui/sheets/BackupsSheets'
 import { ProgressSheet } from './ui/sheets/ProgressSheet'
-import { MirrorScreen } from './ui/screens/MirrorScreen'
-import { PICK_PREFIX as PICK, keysPickerOf } from './ui/live/keys'
+import { LivePill, MirrorScreen, type LivePlaying } from './ui/screens/MirrorScreen'
+import { PICK_PREFIX as PICK, keysPickerOf, type KeysShown } from './ui/live/keys'
+import { liveInBar } from './ui/live/window'
+import type { NoteRange } from './core/features/piano'
 import { SearchScreen } from './ui/screens/SearchScreen'
 import { SettingsScreen } from './ui/screens/SettingsScreen'
 import { EDIT_PREFIX, PadEditSheet } from './ui/sheets/PadEditSheet'
 import { BackupPadsSheet, DevicePadsSheet } from './ui/sheets/PadsSheet'
 import { FontLicenceSheet } from './ui/sheets/FontLicenceSheet'
 import { DeviceUploadSheet } from './ui/sheets/UploadSheet'
-import { useDesk } from './ui/useDesk'
+import { useDesk, useWindowSize } from './ui/useDesk'
 import './app.css'
 
 /** The progress sheet's layer id. */
@@ -141,6 +147,11 @@ function Root(): JSX.Element {
   useEffect(() => {
     if (!canEdit && editPads) setEditPads(false)
   }, [canEdit, editPads])
+  // On a phone on its side, Live's display line rides in the top bar; the piano's
+  // notes (while it shows) let it name a device note past them.
+  const win = useWindowSize()
+  const liveBar = v.tab === 'live' && !desk && liveInBar(win)
+  const [pianoRange, setPianoRange] = useState<NoteRange | null>(null)
 
   // The guide overlay, once by itself on the first start (coach_seen), over the
   // shell. Not for automated browsers (screenshots, e2e), where it would only be in the way.
@@ -285,8 +296,9 @@ function Root(): JSX.Element {
         desk={desk}
         // Live's EDIT tab under GUIDE (on the desk it hangs on the K.O. II panel instead).
         edgeTab={canEdit && !desk ? <EditEdgeTab on={editPads} onChange={setEditPads} inert={v.menu} /> : undefined}
+        middle={liveBar ? <LiveBar pianoRange={pianoRange} editing={editPads} /> : undefined}
       >
-        <TabScreen view={v} editPads={editPads} onEditPads={setEditPads} />
+        <TabScreen view={v} editPads={editPads} onEditPads={setEditPads} inBar={liveBar} onPianoRange={setPianoRange} />
       </Shell>
     )
     // On the desk the overlay's host is around the whole desk instead (the rail's marks too).
@@ -346,8 +358,61 @@ function Root(): JSX.Element {
   )
 }
 
+/** Live's display line in the top bar (a phone on its side); it alone re-renders as notes play. */
+function LiveBar(props: { pianoRange: NoteRange | null; editing: boolean }): JSX.Element {
+  const c = useController()
+  return (
+    <LivePill
+      mirror={liveMirror(c)}
+      keys={liveKeys(c)}
+      playing={livePlaying(c)}
+      late={c.liveLate}
+      editing={props.editing}
+      pianoRange={props.pianoRange}
+    />
+  )
+}
+
+/** What Live shows: the mirror, or offline its last read, or a note to connect. */
+function liveMirror(c: ArcController): MirrorUi | null {
+  const state = c.state.value
+  return state.mirror ?? (state.device === null
+    ? { state: emptyMirrorState(c.padOrder()), loading: false, error: MirrorText.NOT_CONNECTED }
+    : null)
+}
+
+/** KEYS as the settings and the controller have it (MainActivity's KeysUi, less what plays). */
+function liveKeys(c: ArcController): KeysShown {
+  const settings = c.settings.value
+  const state = c.state.value
+  return {
+    on: settings.liveKeys,
+    root: settings.keysRoot,
+    scale: settings.keysScale,
+    octave: settings.keysOctave,
+    names: settings.keysNames,
+    showNames: settings.keysShowNames,
+    pad: state.keysPad,
+    padName: state.keysPad ? c.mirrorName(state.keysPad) : null,
+    pianoWhites: settings.pianoWhites,
+  }
+}
+
+/** What sounds on the phone, as signals read by each pad and key: a voice doesn't re-render the screen. */
+function livePlaying(c: ArcController): LivePlaying {
+  return { pads: c.playingPads, notes: c.playingNotes }
+}
+
 /** The section under the top bar (Root's `when (tab)`). */
-function TabScreen(props: { view: NavView; editPads: boolean; onEditPads: (on: boolean) => void }): JSX.Element {
+function TabScreen(props: {
+  view: NavView
+  editPads: boolean
+  onEditPads: (on: boolean) => void
+  /** Live's display line is in the top bar (a phone on its side). */
+  inBar: boolean
+  /** The piano's notes while it shows, for the line in the top bar. */
+  onPianoRange: (r: NoteRange | null) => void
+}): JSX.Element {
   const c = useController()
   const nav = useNav()
   const v = props.view
@@ -355,12 +420,9 @@ function TabScreen(props: { view: NavView; editPads: boolean; onEditPads: (on: b
   const settings = c.settings.value
   switch (v.tab) {
     case 'live': {
-      const mirror: MirrorUi | null = state.mirror ?? (state.device === null
-        ? { state: emptyMirrorState(c.padOrder()), loading: false, error: MirrorText.NOT_CONNECTED }
-        : null)
       return (
         <MirrorScreen
-          mirror={mirror}
+          mirror={liveMirror(c)}
           nameOf={(pad) => c.mirrorName(pad)}
           oneGroup={settings.liveOneGroup}
           onOneGroup={(on) => c.setLiveOneGroup(on)}
@@ -382,21 +444,13 @@ function TabScreen(props: { view: NavView; editPads: boolean; onEditPads: (on: b
           onPadUp={(pad) => c.releasePad(pad)}
           onPadCut={(pad) => c.cutPad(pad)}
           // Signals, read by each pad and key: a voice doesn't re-render this screen.
-          playing={{ pads: c.playingPads, keys: c.playingKeys, notes: c.playingNotes }}
+          playing={livePlaying(c)}
           haptics={settings.haptics}
           // Read by the display line alone, so a new delay re-renders only that.
           outputLate={c.liveLate}
-          keys={{
-            on: settings.liveKeys,
-            root: settings.keysRoot,
-            scale: settings.keysScale,
-            octave: settings.keysOctave,
-            names: settings.keysNames,
-            showNames: settings.keysShowNames,
-            pad: state.keysPad,
-            padName: state.keysPad ? c.mirrorName(state.keysPad) : null,
-            pianoWhites: settings.pianoWhites,
-          }}
+          keys={liveKeys(c)}
+          inBar={props.inBar}
+          onPianoRange={props.onPianoRange}
           keysViewWide={settings.keysViewWide}
           keysViewTall={settings.keysViewTall}
           edit={{
@@ -420,8 +474,6 @@ function TabScreen(props: { view: NavView; editPads: boolean; onEditPads: (on: b
             onRoot: (r) => c.setKeysRoot(r),
             onScale: (s) => c.setKeysScale(s),
             onOctave: (o) => c.setKeysOctave(o),
-            onKey: (k, hold, at) => void c.playKey(k, hold, at),
-            onKeyUp: (k) => c.releaseKey(k),
             onNote: (n, hold, at) => void c.playNote(n, hold, at),
             onNoteUp: (n) => c.releaseNote(n),
             onView: (wide, view) => c.setKeysView(wide, view),

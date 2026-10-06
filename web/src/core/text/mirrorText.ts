@@ -77,6 +77,7 @@ export const MirrorText = {
   },
   KEYS_NOTE:
     'Keys plays the pad last tapped (or played on the EP-133 in Pads) as notes. Notes the EP-133 sends in its own KEYS mode light their key.',
+  PIANO_HINT: 'Turn the phone sideways for a piano (with auto-rotate off, tap the rotate button Android shows).',
   LEGEND: 'Colours',
   LEGEND_OCTAVE: 'Ring: the octave, pale and orange in turn (its number is in the corner)',
   LEGEND_OCTAVE_NAMED: 'Name: the octave, pale and orange in turn (its number is in the corner)',

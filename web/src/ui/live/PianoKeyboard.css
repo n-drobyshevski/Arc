@@ -51,7 +51,9 @@
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
-.piano__key:focus-visible { outline: var(--focus-ring); outline-offset: -3px; z-index: 3; }
+/* The key in the Tab order (a roving tabindex): a white key's ring stays under the black
+ * keys beside it, a black key's rises over its neighbours. */
+.piano__key:focus-visible { outline: var(--focus-ring); outline-offset: -3px; }
 
 /* White keys: the piano's white (dimmed outside the scale), radius 6 at the foot. */
 .piano__key--white {
@@ -77,7 +79,7 @@
   color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--on-piano-black));
 }
 .piano__key--black.is-out { --piano-base: var(--key-out-black); }
-.piano__key--black:focus-visible { outline: var(--focus-ring); }
+.piano__key--black:focus-visible { outline: var(--focus-ring); z-index: 3; }
 
 @media (hover: hover) {
   .piano__key--white:hover { --piano-base: color-mix(in oklab, var(--piano-white) 86%, var(--signal)); }

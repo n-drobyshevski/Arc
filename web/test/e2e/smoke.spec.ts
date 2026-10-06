@@ -3,7 +3,9 @@
 // main flows, a browser without Web MIDI, and screenshots for a manual look
 // next to the Android reference PNGs (attached to the report; no pixel diff).
 // The main flow runs at Playwright's 1280x720, which is the web-only desktop
-// layout (ui/useDesk.ts, from 1024px wide); the screenshots add a 1440x900 one.
+// layout (ui/useDesk.ts, from 1024px wide); the screenshots add a 1440x900 one
+// and a phone on its side (867x388), where a test of its own checks Live's
+// top bar, the piano's keyboard access and Back on the key list.
 import { demo, expect, importPak, notAutomated, SAMPLE_PAK, selectTab, test } from './fixtures'
 
 test('back up, look inside, restore, browse the device, live pads, import, no MIDI', async ({ page, context }) => {
@@ -183,10 +185,49 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
   })
 })
 
+test('a phone on its side: the display line and toasts in the top bar, the piano by keyboard, Back closes the key list', async ({ page }) => {
+  await page.setViewportSize({ width: 867, height: 388 })
+  await page.goto('/?demo#/live')
+  await expect(page.locator('[data-pad]')).toHaveCount(12)
+  const bar = page.getByRole('banner')
+  // The pads' one-line display rides in the top bar, and the page leaves it out.
+  await expect(bar.locator('.live-strip--bar')).toBeVisible()
+  await expect(page.locator('.live .live-strip')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Pads. Tap for keys.' }).click()
+  const piano = page.getByRole('group', { name: /^Keyboard, / })
+  await expect(piano).toBeVisible()
+  await expect(bar.locator('.live-strip--bar')).toContainText(/./)
+  // One key in the Tab order (the root, DO), the arrows move along without scrolling, Enter plays.
+  await expect(piano.locator('[data-note][tabindex="0"]')).toHaveCount(1)
+  await piano.locator('[data-note][tabindex="0"]').focus()
+  const focused = (): Promise<string | null> => page.evaluate(() => document.activeElement?.getAttribute('data-note') ?? null)
+  const first = Number(await focused())
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(focused).toBe(String(first + 1))
+  await page.keyboard.press('End')
+  await page.keyboard.press('Home')
+  await expect.poll(focused).toBe(String(await piano.locator('[data-note]').first().getAttribute('data-note')))
+  expect(await page.evaluate(() => document.scrollingElement?.scrollTop ?? 0)).toBe(0)
+  // No KEYS sound yet: the press says so once, in a toast at the top over the bar's middle.
+  await page.keyboard.press('Enter')
+  const toast = page.getByRole('status').filter({ hasText: 'Tap a pad in Pads first' })
+  await expect(toast).toBeVisible()
+  expect((await toast.boundingBox())!.y).toBeLessThan(56)
+  await page.keyboard.press('Enter')
+  await expect(toast).toHaveCount(1)
+  // The key word's list is a navigation layer: Back closes it.
+  await page.getByRole('button', { name: /^Key: DO\. Tap to change\./ }).click()
+  await expect(page.getByRole('listbox', { name: /^Key: / })).toBeVisible()
+  await page.goBack()
+  await expect(page.getByRole('listbox', { name: /^Key: / })).toHaveCount(0)
+  await expect(piano).toBeVisible()
+})
+
 const SIZES = [
   { name: 'phone', width: 393, height: 852 },
   { name: 'tablet', width: 840, height: 1200 },
   { name: 'desktop', width: 1440, height: 900 },
+  { name: 'sideways', width: 867, height: 388 },
 ] as const
 const SCHEMES = ['light', 'dark'] as const
 
@@ -217,6 +258,11 @@ for (const size of SIZES) {
         await demo(page, (d) => d.noteOn(36, 127))
         await shot('live')
         await demo(page, (d) => d.noteOff(36))
+        if (size.width > size.height) {
+          await page.getByRole('button', { name: 'Pads. Tap for keys.' }).click()
+          await expect(page.locator('.piano')).toBeVisible()
+          await shot('live-keys')
+        }
       })
     })
   }

@@ -99,6 +99,8 @@ export const WebText = {
     "Hold a pad to hear its sample here (it stops when you let go): from arc's copy of the device's sounds, a backup, or the device.",
   /** Replaces MirrorText.NO_COPY "This sample isn't saved on the phone or in a backup yet." */
   LIVE_NO_COPY: "This sample isn't saved in this browser or in a backup yet.",
+  /** Replaces MirrorText.PIANO_HINT "Turn the phone sideways for a piano (with auto-rotate off, …)". */
+  LIVE_PIANO_HINT: 'Turn the screen sideways, or make the window wider than it is tall, for a piano.',
   /** Replaces MirrorText.LEGEND_PHONE "Outlined: playing on the phone". */
   LIVE_LEGEND_HERE: 'Outlined: playing here',
   /**

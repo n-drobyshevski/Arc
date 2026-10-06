@@ -39,7 +39,6 @@
 //   once and offers UNDO on the toast ([toastWith] / [runToastAction]; the
 //   closure stays here, the state only holds the word); [uploadForPad] goes
 //   through the Device tab's upload sheet (draft + draftPad), then assigns.
-//   The piano plays MIDI notes ([playNote]); the KEYS grid keeps [playKey].
 // - [liveLate]: Live's output delay, for the display line's note, from the
 //   output's latency (LiveAudioDeps.late); Android names Bluetooth from the route (liveWireless).
 // - The debug screen's latency test: [liveLatency] / [resetLatency] (live.ts),
@@ -150,9 +149,7 @@ export class ArcController {
   readonly liveVoices: ReadonlySignal<ReadonlySet<string>>
   /** The pads sounding on the phone, as padKey numbers (MainActivity's playingPads). */
   readonly playingPads: ReadonlySignal<ReadonlySet<number>>
-  /** The keys sounding on the phone, by index (MainActivity's playingKeys). */
-  readonly playingKeys: ReadonlySignal<ReadonlySet<number>>
-  /** The piano's notes sounding on the phone, first pressed first (MainActivity's playingNotes). */
+  /** The KEYS notes sounding on the phone (grid and piano), first pressed first (MainActivity's playingNotes). */
   readonly playingNotes: ReadonlySignal<ReadonlySet<number>>
   /**
    * Live's output delay in ms while it is long enough to be heard against the
@@ -225,15 +222,6 @@ export class ArcController {
       }
       return out
     })
-    this.playingKeys = computed(() => {
-      const out = new Set<number>()
-      for (const k of this.liveVoices.value) {
-        if (!k.startsWith('keys:')) continue
-        const i = Number(k.slice(5))
-        if (Number.isInteger(i)) out.add(i)
-      }
-      return out
-    })
     this.playingNotes = computed(() => {
       const out = new Set<number>()
       for (const k of this.liveVoices.value) {
@@ -266,6 +254,7 @@ export class ArcController {
       names: () => this.names,
       playToken: () => this.playToken,
       toast,
+      toastOnce: (text, error) => this.toastOnce(text, error),
     })
     this.liveLatency = this.live.latency
     this.store.update((s) => ({ ...s, keysPad: deps.mirrorPrefs.savedKeysPad() }))
@@ -532,6 +521,12 @@ export class ArcController {
   toast(text: string, error = false): void {
     this.toastRun = null
     this.store.update((s) => ({ ...s, toast: { id: ++this.toastIds, text, error } }))
+  }
+
+  /** A toast, unless the same text is already showing (a slide over the keys presses many times). */
+  toastOnce(text: string, error = false): void {
+    if (this.store.get().toast?.text === text) return
+    this.toast(text, error)
   }
 
   /** A toast with a key ([label], e.g. UNDO) that runs [run] once, if pressed before it goes. */
@@ -1038,22 +1033,12 @@ export class ArcController {
     this.live.cutPad(pad)
   }
 
-  /** Plays KEYS key [index] (0 = '.', the lowest) until [releaseKey]; [hold] false plays to the end. Call from the press ([at]: its timeStamp). */
-  playKey(index: number, hold = true, at?: number): Promise<void> {
-    return this.live.playKey(index, hold, at)
-  }
-
-  /** The finger left the key: its note fades out. */
-  releaseKey(index: number): void {
-    this.live.releaseKey(index)
-  }
-
   /** The sound KEYS plays: the pad last tapped, or last played on the device in the pads view. */
   selectKeysPad(pad: PhysicalPad): void {
     this.live.selectKeysPad(pad)
   }
 
-  /** Plays MIDI [note] on the KEYS sound (the piano) until [releaseNote]; [hold] false plays to the end. Call from the press ([at]: its timeStamp). */
+  /** Plays MIDI [note] on the KEYS sound (a grid key or a piano key) until [releaseNote]; [hold] false plays to the end. Call from the press ([at]: its timeStamp). */
   playNote(note: number, hold = true, at?: number): Promise<void> {
     return this.live.playNote(note, hold, at)
   }

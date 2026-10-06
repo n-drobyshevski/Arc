@@ -1,5 +1,5 @@
 // Port of app/src/main/kotlin/dev/arc/ep133/controller/ArcController.kt (Live's sounds and its last read:
-// openOfflineMirror … clearPadSounds, playPad, cutPad, playKey, playNote, selectKeysPad, the KEYS settings' use)
+// openOfflineMirror … clearPadSounds, playPad, cutPad, playNote, selectKeysPad, the KEYS settings' use)
 //
 // What Live plays on the phone and what it remembers of the device:
 // - the last read (project, pads, sound names), kept so Live still shows
@@ -12,11 +12,14 @@
 // - the samples on the pads decoded in memory (padMemory) and loaded into
 //   Live's output, so a press plays at once; a pad or key sounds while held
 //   (a gate) and several make a chord (LiveAudioDeps mixes them);
-// - KEYS: the pad whose sample the keys play, repitched to each key's note.
+// - KEYS: the pad whose sample the keys play, repitched to each note (the
+//   grid's keys and the piano's are both played by MIDI note, so a held key
+//   keeps its note when the key, scale or octave changes);
+// - presses during a slide: one load per sound, shared by every press that
+//   waits on it (padLoads); after a slow one only the latest lifted press
+//   sounds (LATE_LOAD_MS); a toast a press raises shows once (toastOnce).
 //
 // Web deltas:
-// - The KEYS grid's voices are still "keys:<index>" (playKey); only the piano
-//   plays "note:<midi>" voices (playNote), which Kotlin uses for both.
 // - Coroutines become promises; a generation counter ends a loop (cacheGen,
 //   preloadGen) where Kotlin cancels a Job.
 // - padMemory is a Map kept in access order by hand (LinkedHashMap with
@@ -41,7 +44,7 @@
 import { signal, type ReadonlySignal } from '@preact/signals'
 import { openPak, type Pak } from '../core/backup/pak'
 import { soundDetails, type SoundDetails } from '../core/features/deviceBrowser'
-import { Keys, notes as keyNotes } from '../core/features/keys'
+import { Keys } from '../core/features/keys'
 import { LatencyStats } from '../core/features/latencyStats'
 import type { NameEntry } from '../core/features/librarySearch'
 import type { LiveMirror } from '../core/features/liveMirror'
@@ -134,10 +137,11 @@ const NO_LATENCY: LiveLatency = { stats: new LatencyStats(), engines: new Map() 
 
 /** Live's voice id for a pad: "live:<group>:<offset>". */
 export const padVoice = (pad: { readonly group: number; readonly offset: number }): string => `live:${pad.group}:${pad.offset}`
-/** Live's voice id for key [index]: "keys:<index>". */
-export const keyVoice = (index: number): string => `keys:${index}`
-/** Live's voice id for a piano note: "note:<midi>" (Kotlin's id for every KEYS note). */
+/** Live's voice id for a KEYS note, on the grid or the piano: "note:<midi>". */
 export const noteVoice = (note: number): string => `note:${note}`
+
+/** A Live press let go of while its sound loaded for longer than this sounds only if no press came after it (Kotlin LATE_LOAD_NS). */
+export const LATE_LOAD_MS = 120
 
 /** The slots on a read's pads, each once, in order. */
 function padSlots(snap: LiveSnapshot): number[] {
@@ -158,6 +162,8 @@ export interface LiveHost {
   /** The play token: a request plays only if no stop or newer request came meanwhile. */
   playToken(): number
   toast(text: string, error?: boolean): void
+  /** A toast, unless the same text is already showing (a press can raise one, and a slide presses many). */
+  toastOnce(text: string, error?: boolean): void
 }
 
 export class LiveSounds {
@@ -185,6 +191,11 @@ export class LiveSounds {
   // Voices started after their sample had to load (or wait out the scroll window): their latency
   // is logged, but kept out of the latency test, which times only presses played from memory.
   private readonly unmeasured = new Set<string>()
+  // A sample on its way to memory for a press, by the same key: the presses that come
+  // meanwhile (a glissando over the keys) wait for that one load.
+  private readonly padLoads = new Map<string, Promise<{ key: string; audio: PadAudio } | null>>()
+  // When the latest settled Live press (pad or key) was made, for the late-load rule in startHeld.
+  private lastPressAt = 0
   // The device's project, pads and names as Live last read them, shown while it is not connected.
   private lastRead: LiveSnapshot | null = null
   private lastReadLoaded = false
@@ -447,7 +458,7 @@ export class LiveSounds {
         if (gen !== this.preloadGen || this.host.mirror() !== m) return
         const name = snap.names.get(slot)
         if (name === undefined) continue
-        if (this.padMemory.has(memoryKey(slot, name))) continue
+        if (this.padMemory.has(memoryKey(slot, name)) || this.padLoads.has(memoryKey(slot, name))) continue
         let a: PadAudio | null
         try {
           a = await this.loadPadAudio(slot, name)
@@ -493,13 +504,25 @@ export class LiveSounds {
     const { host } = this
     const sample = this.padSample(pad)
     if (sample === null) {
-      host.toast(MirrorText.NO_SAMPLE)
+      host.toastOnce(MirrorText.NO_SAMPLE)
       return null
     }
     const { slot, name } = sample
     const key = memoryKey(slot, name)
     const mem = this.fromMemory(key)
     if (mem) return { key, audio: mem }
+    // One load for every press waiting on this sound.
+    let load = this.padLoads.get(key)
+    if (load === undefined) {
+      load = this.loadForPress(slot, name, key).finally(() => this.padLoads.delete(key))
+      this.padLoads.set(key, load)
+    }
+    return load
+  }
+
+  /** What [padAudio] waits for: arc's copy or a backup, else the device; null after a toast says why. */
+  private async loadForPress(slot: number, name: string, key: string): Promise<{ key: string; audio: PadAudio } | null> {
+    const { host } = this
     try {
       let audio = await this.loadPadAudio(slot, name)
       if (audio === null) {
@@ -513,7 +536,7 @@ export class LiveSounds {
           if (e) await this.keepPadSound(slot, e.name, e.size, r.pcm, r.d.channels, r.d.sampleRate)
           audio = this.padMemory.get(key) ?? padAudioOf(r.pcm, Math.trunc(r.d.channels), Math.trunc(r.d.sampleRate))
         } else {
-          host.toast(WebText.LIVE_NO_COPY)
+          host.toastOnce(WebText.LIVE_NO_COPY)
           return null
         }
       }
@@ -628,9 +651,11 @@ export class LiveSounds {
     const mem = sample ? this.fromMemory(memoryKey(sample.slot, sample.name)) : null
     if (sample && mem) this.startHeld(id, hold, memoryKey(sample.slot, sample.name), mem, 0, pressedAt, true)
     if (unsure && hold) {
+      // Not yet the latest press either: a scroll mustn't drop another press's late load.
       this.unsure.set(id, { started: mem !== null, pressedAt, token })
       return Promise.resolve()
     }
+    this.lastPressAt = pressedAt
     const done = mem !== null ? Promise.resolve() : this.loadAndStart(pad, id, hold, pressedAt, token)
     // The pad tapped is also the sound KEYS plays: noted (and stored) once the sound is on its way.
     this.selectKeysPad(pad)
@@ -647,6 +672,7 @@ export class LiveSounds {
     const u = this.unsure.get(id)
     if (u === undefined) return Promise.resolve()
     this.unsure.delete(id)
+    this.lastPressAt = Math.max(this.lastPressAt, u.pressedAt)
     const done = u.started ? Promise.resolve() : this.loadAndStart(pad, id, true, u.pressedAt, u.token)
     this.selectKeysPad(pad)
     return done
@@ -674,60 +700,23 @@ export class LiveSounds {
   }
 
   /**
-   * Plays key [index] (0 = '.', the lowest): the KEYS sound, repitched to
-   * that key's note as it is mixed, until [releaseKey] (or to the end, with
-   * [hold] false). Call from the press; [at]: its event timeStamp ([pressTime]).
-   */
-  playKey(index: number, hold = true, at?: number): Promise<void> {
-    const { host } = this
-    host.deps.liveAudio.resumeInGesture()
-    const pressedAt = pressTime(at, host.deps.perfNow())
-    const id = keyVoice(index)
-    if (hold) this.held.add(id)
-    const token = host.playToken()
-    const pad = host.store.get().keysPad
-    if (pad === null) {
-      host.toast(MirrorText.PICK_SOUND)
-      return Promise.resolve()
-    }
-    const st = host.deps.settings.settings
-    const note = keyNotes(st.keysRoot, st.keysScale, st.keysOctave)[index]
-    if (note === undefined) return Promise.resolve()
-    const pitch = note - Keys.ROOT_NOTE
-    const sample = this.padSample(pad)
-    const mem = sample ? this.fromMemory(memoryKey(sample.slot, sample.name)) : null
-    if (sample && mem) {
-      this.startHeld(id, hold, memoryKey(sample.slot, sample.name), mem, pitch, pressedAt, true)
-      return Promise.resolve()
-    }
-    return (async () => {
-      const got = await this.padAudio(pad)
-      if (got !== null && token === host.playToken()) this.startHeld(id, hold, got.key, got.audio, pitch, pressedAt, false)
-    })()
-  }
-
-  /** The finger left the key: its note fades out. */
-  releaseKey(index: number): void {
-    this.release(keyVoice(index))
-  }
-
-  /**
-   * Plays MIDI [note] on the KEYS sound (the piano), repitched from its own
-   * pitch (C4) as it is mixed, until [releaseNote] (or to the end, with
-   * [hold] false). The piano names the note as the finger lands, so a change
-   * of octave under a held key still lets go of the note it plays. Call from
-   * the press; [at]: its event timeStamp ([pressTime]).
+   * Plays MIDI [note] on the KEYS sound (a grid key or a piano key),
+   * repitched from its own pitch (C4) as it is mixed, until [releaseNote] (or
+   * to the end, with [hold] false). The screen names the note as the finger
+   * lands, so a change of key, scale or octave under a held key still lets go
+   * of the note it plays. Call from the press; [at]: its event timeStamp ([pressTime]).
    */
   playNote(note: number, hold = true, at?: number): Promise<void> {
     const { host } = this
     host.deps.liveAudio.resumeInGesture()
     const pressedAt = pressTime(at, host.deps.perfNow())
+    this.lastPressAt = pressedAt
     const id = noteVoice(note)
     if (hold) this.held.add(id)
     const token = host.playToken()
     const pad = host.store.get().keysPad
     if (pad === null) {
-      host.toast(MirrorText.PICK_SOUND)
+      host.toastOnce(MirrorText.PICK_SOUND)
       return Promise.resolve()
     }
     const pitch = note - Keys.ROOT_NOTE
@@ -754,16 +743,23 @@ export class LiveSounds {
   }
 
   /**
-   * Starts a Live voice; one let go while it was loading still sounds,
-   * briefly. [measured]: the sample was in memory at the press, so its latency
-   * goes into the latency test; a load's time would only blur it.
+   * Starts a Live voice. One let go of while it was loading still sounds,
+   * briefly, after a quick load. After a slow one ([LATE_LOAD_MS]) only the
+   * latest press does: a single quick tap on a sound not in memory yet is
+   * still heard, but a first glissando over one doesn't end in a burst of
+   * every note it slid over.
+   *
+   * [measured]: the sample was in memory at the press, so its latency goes
+   * into the latency test; a load's time would only blur it.
    */
   private startHeld(id: string, hold: boolean, key: string, a: PadAudio, semitones: number, pressedAt: number, measured: boolean): void {
     const { host } = this
     const out = host.deps.liveAudio
     if (this.cuts.delete(id)) return
+    const lifted = hold && !this.held.has(id)
+    if (lifted && pressedAt !== this.lastPressAt && host.deps.perfNow() - pressedAt > LATE_LOAD_MS) return
     if (a.silent) {
-      host.toast(FeatureText.SILENT_SOUND)
+      host.toastOnce(FeatureText.SILENT_SOUND)
       return
     }
     if (!out.has(key)) out.preload(key, a.pcm, a.channels, a.sampleRate)
@@ -773,11 +769,11 @@ export class LiveSounds {
     else this.unmeasured.add(id)
     if (!out.press(id, key, { pitch: semitones, gate: hold, pressedAt })) {
       this.unmeasured.delete(id)
-      host.toast(FeatureText.NO_AUDIO_OUTPUT, true)
+      host.toastOnce(FeatureText.NO_AUDIO_OUTPUT, true)
       return
     }
-    if (hold && !this.held.has(id)) out.release(id)
-    if (host.deps.player.volumeOff()) host.toast(FeatureText.VOLUME_OFF)
+    if (lifted) out.release(id)
+    if (host.deps.player.volumeOff()) host.toastOnce(FeatureText.VOLUME_OFF)
   }
 
   // ---------- KEYS ----------

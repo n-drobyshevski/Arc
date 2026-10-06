@@ -16,7 +16,7 @@ import { NullPlayer } from '../../src/platform/audio/player'
 import { MemoryTarget } from '../../src/platform/storage/external'
 import { LIVE_KEY, memoryStorage, SETTINGS_KEY } from '../../src/platform/storage/settings'
 import { LIVE_AUDIO_KEEP_MS } from '../../src/state/controller'
-import { latencyRows, PRESS_STAMP_MAX_MS, pressTime } from '../../src/state/live'
+import { LATE_LOAD_MS, latencyRows, PRESS_STAMP_MAX_MS, pressTime } from '../../src/state/live'
 import { WebLatencyHint } from '../../src/core/text/latencyText'
 import { createStore } from '../../src/state/store'
 import { Tasks } from '../../src/state/tasks'
@@ -449,27 +449,72 @@ describe('Live: playing pads', () => {
 })
 
 describe('Live: KEYS', () => {
-  it('asks for a pad first, then plays its sample at each key\'s note', async () => {
+  it('asks for a pad first, then plays its sample at each note', async () => {
     const h = await liveOn()
     await copied(h)
-    await h.c.playKey(0)
+    await h.c.playNote(60)
     expect(h.toasts.at(-1)?.text).toBe(MirrorText.PICK_SOUND)
     h.c.selectKeysPad(A1)
-    await h.c.playKey(0)
-    await h.c.playKey(4)
+    await h.c.playNote(60)
+    await h.c.playNote(64)
     expect(h.liveAudio.presses.map((p) => [p.id, p.key, p.options.pitch])).toEqual([
-      ['keys:0', '1:kick', 0],
-      ['keys:4', '1:kick', 4],
+      ['note:60', '1:kick', 0],
+      ['note:64', '1:kick', 4],
     ])
-    expect(h.c.playingKeys.value).toEqual(new Set([0, 4]))
-    h.c.releaseKey(4)
-    expect(h.liveAudio.releases).toEqual(['keys:4'])
-    h.c.setKeysOctave(5)
-    h.c.setKeysScale('MAJOR')
-    h.c.setKeysRoot(2)
-    await h.c.playKey(2)
-    // D major from D5: D E F# → +2 semitones from C4, +12, +4.
-    expect(h.liveAudio.presses.at(-1)?.options.pitch).toBe(12 + 2 + 4)
+    expect(h.c.playingNotes.value).toEqual(new Set([60, 64]))
+    h.c.releaseNote(64)
+    expect(h.liveAudio.releases).toEqual(['note:64'])
+    // D5 (74), as the grid's D major from D5 or the piano plays it: 14 semitones over C4.
+    await h.c.playNote(74)
+    expect(h.liveAudio.presses.at(-1)?.options.pitch).toBe(14)
+  })
+
+  it('a slide over the keys says why it is quiet once, not once a key', async () => {
+    const h = await liveOn()
+    await copied(h)
+    for (const n of [60, 62, 64, 65, 67]) await h.c.playNote(n)
+    expect(h.toasts.filter((t) => t.text === MirrorText.PICK_SOUND)).toHaveLength(1)
+  })
+
+  it('a first slide over a sound still loading: one load, and after a slow one only the latest lifted press sounds', async () => {
+    const h = await liveOn()
+    await copied(h)
+    await h.c.clearPadSounds()
+    await backupWith(h, 'b', 1, 'kick')
+    h.c.selectKeysPad(A1)
+    let t = 10_000
+    const deps = h.deps as { perfNow: () => number }
+    deps.perfNow = () => t
+    // Three keys slid over, each let go of before the sound is in memory; the load takes long.
+    const slide: Promise<void>[] = []
+    for (const n of [60, 62, 64]) {
+      slide.push(h.c.playNote(n))
+      h.c.releaseNote(n)
+      t += 10
+    }
+    t += LATE_LOAD_MS + 50
+    await Promise.all(slide)
+    expect(h.liveAudio.presses.map((p) => p.id)).toEqual(['note:64'])
+    // Let go of already: it sounds briefly.
+    expect(h.liveAudio.releases.at(-1)).toBe('note:64')
+  })
+
+  it('after a quick load every lifted press of a slide still sounds, briefly', async () => {
+    const h = await liveOn()
+    await copied(h)
+    await h.c.clearPadSounds()
+    await backupWith(h, 'b', 1, 'kick')
+    h.c.selectKeysPad(A1)
+    const t = 10_000
+    const deps = h.deps as { perfNow: () => number }
+    deps.perfNow = () => t
+    const slide: Promise<void>[] = []
+    for (const n of [60, 62]) {
+      slide.push(h.c.playNote(n))
+      h.c.releaseNote(n)
+    }
+    await Promise.all(slide)
+    expect(h.liveAudio.presses.map((p) => p.id).sort()).toEqual(['note:60', 'note:62'])
   })
 
   it('keeps the KEYS choices with the settings, clamped, written only when they change', async () => {
@@ -511,8 +556,6 @@ describe('Live: the piano', () => {
       ['note:67', '1:kick', 7],
     ])
     expect(h.c.playingNotes.value).toEqual(new Set([60, 67]))
-    // The grid's keys are not the piano's notes.
-    expect(h.c.playingKeys.value).toEqual(new Set())
     h.c.releaseNote(67)
     expect(h.liveAudio.releases).toEqual(['note:67'])
   })
@@ -752,8 +795,8 @@ describe('Live: press times from the input event', () => {
     await h.c.playPad(A1, true, false, at)
     expect(h.liveAudio.presses.at(-1)?.options.pressedAt).toBe(at)
     // A1 is now the KEYS sound.
-    await h.c.playKey(3, true, at - 1)
-    expect(h.liveAudio.presses.at(-1)).toMatchObject({ id: 'keys:3', options: { pressedAt: at - 1 } })
+    await h.c.playNote(63, true, at - 1)
+    expect(h.liveAudio.presses.at(-1)).toMatchObject({ id: 'note:63', options: { pressedAt: at - 1 } })
     await h.c.playNote(64, true, at - 2)
     expect(h.liveAudio.presses.at(-1)).toMatchObject({ id: 'note:64', options: { pressedAt: at - 2 } })
     // An unsure press keeps its time for when it is kept.
@@ -828,8 +871,8 @@ describe('Live: the latency test', () => {
     h.liveAudio.started('live:0:0', 20, undefined, zero)
     expect(h.c.liveLatency.value.stats.summary(zero.label)).toMatchObject({ count: 1, median: 20 })
     // The KEYS keys and the piano alike (A1 is the KEYS sound, in memory).
-    await h.c.playKey(2)
-    h.liveAudio.started('keys:2', 22, undefined, zero)
+    await h.c.playNote(67)
+    h.liveAudio.started('note:67', 22, undefined, zero)
     await h.c.playNote(62)
     h.liveAudio.started('note:62', 24, undefined, zero)
     expect(h.c.liveLatency.value.stats.summary(zero.label)).toMatchObject({ count: 3 })
