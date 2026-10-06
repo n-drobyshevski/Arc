@@ -63,3 +63,80 @@
 }
 .debug__line--in { color: color-mix(in srgb, var(--display-ink) 80%, transparent); }
 .debug__line--note { color: var(--signal); }
+
+/* The latency test (an addition): a disclosure card over the log. Open, it
+ * gives way (and scrolls) before the log is squeezed out. */
+.debug__latency {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.debug__latency + .debug__list { min-height: 120px; }
+
+.debug__engine-choice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+.debug__label {
+  color: var(--ink);
+  font-size: var(--size-body15);
+  font-weight: var(--weight-semi);
+  line-height: 1.4;
+}
+.debug__note {
+  color: var(--graphite);
+  font-size: var(--size-tiny);
+  line-height: 1.4;
+}
+
+.debug__empty-rows { margin: 0; color: var(--graphite); font-size: var(--size-small); }
+
+/* A row per engine: a small display panel, its numbers in mono. */
+.debug__engines {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.debug__engine {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-10);
+  border-radius: var(--radius-small-plate);
+  background: var(--display);
+  color: var(--display-ink);
+}
+.debug__engine .debug__note { color: var(--display-dim); }
+.debug__engine-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-8);
+}
+.debug__engine-name {
+  min-width: 0;
+  font-size: var(--size-small);
+  font-weight: var(--weight-semi);
+  overflow-wrap: anywhere;
+}
+.debug__tag {
+  padding: 0 var(--space-6);
+  border-radius: var(--radius-tag);
+  background: var(--signal);
+  color: var(--display);
+  font-size: var(--size-tiny);
+  font-weight: var(--weight-semi);
+  line-height: 1.5;
+  letter-spacing: var(--track-caps);
+  text-transform: uppercase;
+}
+.debug__stats {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 16px;
+}

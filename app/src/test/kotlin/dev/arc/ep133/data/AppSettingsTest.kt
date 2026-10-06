@@ -1,5 +1,6 @@
 package dev.arc.ep133.data
 
+import dev.arc.ep133.text.LiveEngine
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -35,5 +36,23 @@ class AppSettingsTest {
         )
         val index = chosen.values().mapKeys { "app." + it.key }
         assertEquals(chosen, AppSettings().withIndex(index))
+    }
+
+    @Test
+    fun `the engine choice is Auto by default and stays out of library json`() {
+        assertEquals(LiveEngine.AUTO, AppSettings().liveEngine)
+        val chosen = AppSettings(liveEngine = LiveEngine.TRACK_OLD)
+        assertFalse(chosen.values().keys.any { it.contains("ngine") })
+        assertEquals(AppSettings().values(), chosen.values())
+        // library.json from another phone leaves this phone's choice alone.
+        assertEquals(LiveEngine.TRACK_OLD, chosen.withIndex(mapOf("app.liveEngine" to "AUTO")).liveEngine)
+    }
+
+    @Test
+    fun `the engine choice is read back by name, anything else is Auto`() {
+        for (e in LiveEngine.entries) assertEquals(e, liveEngineOf(e.name))
+        assertEquals(LiveEngine.AUTO, liveEngineOf(null))
+        assertEquals(LiveEngine.AUTO, liveEngineOf("track"))
+        assertEquals("liveEngine", LIVE_ENGINE)
     }
 }

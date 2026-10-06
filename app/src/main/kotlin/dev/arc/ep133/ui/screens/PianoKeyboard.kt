@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.sp
 import dev.arc.ep133.features.KeyMark
 import dev.arc.ep133.features.Keys
 import dev.arc.ep133.features.MirrorState
+import dev.arc.ep133.audio.PressTime
 import dev.arc.ep133.features.NoteEvent
 import dev.arc.ep133.features.NoteNames
 import dev.arc.ep133.features.NoteTouches
@@ -146,12 +147,13 @@ private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> 
     // The notes a finger is on, and how far down each key is (0..1, read while drawing).
     val fingered = remember { mutableStateOf(emptySet<Int>()) }
     val down = remember { mutableStateMapOf<Int, Float>() }
-    fun play(events: List<NoteEvent>) {
+    // [at]: when the finger came down or slid onto the key, for the presses among [events].
+    fun play(events: List<NoteEvent>, at: Long = System.nanoTime()) {
         events.forEach { e ->
             when (e) {
                 is NoteEvent.Press -> {
                     // The sound first, then the tick.
-                    currentActions.onNote(e.note, true)
+                    currentActions.onNote(e.note, true, at)
                     tick?.performHapticFeedback(HapticFeedbackType.KeyboardTap)
                 }
                 is NoteEvent.Release -> currentActions.onNoteUp(e.note)
@@ -190,7 +192,7 @@ private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> 
                         contentDescription = MirrorText.pianoKey(note, keys.names, mark)
                         role = Role.Button
                         onClick(label = MirrorText.PLAY) {
-                            currentActions.onNote(note, false)
+                            currentActions.onNote(note, false, System.nanoTime())
                             true
                         }
                     },
@@ -222,7 +224,7 @@ private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> 
                                     ch.changedToDownIgnoreConsumed() -> {
                                         val note = Piano.keyAt(laid, ch.position.x, ch.position.y, null, 0f)
                                         fingers[ch.id] = Finger(note, ch.position, geometry.generation)
-                                        if (note != null) play(touches.down(id, note))
+                                        if (note != null) play(touches.down(id, note), PressTime.of(ch.uptimeMillis))
                                     }
                                     // Lifted, or taken over (a cancel lifts it too).
                                     !ch.pressed -> {
@@ -237,7 +239,7 @@ private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> 
                                         if (!resting) {
                                             val note = Piano.keyAt(laid, ch.position.x, ch.position.y, f?.note, slop)
                                             fingers[ch.id] = Finger(note, ch.position, geometry.generation)
-                                            play(touches.move(id, note))
+                                            play(touches.move(id, note), PressTime.of(ch.uptimeMillis))
                                         }
                                     }
                                 }

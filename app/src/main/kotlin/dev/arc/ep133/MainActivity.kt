@@ -360,6 +360,8 @@ class MainActivity : ComponentActivity() {
     private fun Root() {
         val state by controller.state.collectAsStateWithLifecycle()
         var debug by rememberSaveable { mutableStateOf(false) }
+        // The debug screen's latency test folded out, kept while Live is played in between.
+        var latencyOpen by rememberSaveable { mutableStateOf(false) }
         var settingsOpen by rememberSaveable { mutableStateOf(false) }
         var fontLicence by rememberSaveable { mutableStateOf(false) }
         // The guide overlay: from the ? key, and once by itself on the first start.
@@ -523,7 +525,18 @@ class MainActivity : ComponentActivity() {
         val liveBar = tab == Tab.LIVE && dev.arc.ep133.ui.screens.liveInBar(dev.arc.ep133.ui.components.LocalArcWindow.current)
         Box(Modifier.fillMaxSize()) {
             if (debug) {
-                DebugScreen(controller.trafficLog, ::shareLog, ::saveLog, ::copyLog) { debug = false }
+                val latency by controller.latency.collectAsStateWithLifecycle()
+                DebugScreen(
+                    controller.trafficLog, ::shareLog, ::saveLog, ::copyLog,
+                    latency = dev.arc.ep133.ui.screens.LatencyUi(
+                        state = latency,
+                        engine = appSettings.liveEngine,
+                        onEngine = controller::setLiveEngine,
+                        onReset = controller::resetLatency,
+                        open = latencyOpen,
+                        onOpen = { latencyOpen = it },
+                    ),
+                ) { debug = false }
             } else if (settingsOpen) {
                 val uri = androidx.compose.ui.platform.LocalUriHandler.current
                 SettingsScreen(
@@ -643,7 +656,7 @@ class MainActivity : ComponentActivity() {
                         Tab.LIVE -> MirrorScreen(
                             mirror = mirror,
                             nameOf = controller::mirrorName,
-                            onPad = { pad, hold, unsure -> controller.playPad(pad, hold, unsure) },
+                            onPad = { pad, hold, unsure, pressedAt -> controller.playPad(pad, hold, unsure, pressedAt) },
                             onPadKept = { pad -> controller.keepPad(pad) },
                             onPadUp = controller::releasePad,
                             onPadCut = controller::cutPad,
@@ -654,7 +667,7 @@ class MainActivity : ComponentActivity() {
                                     onRoot = controller::setKeysRoot,
                                     onScale = controller::setKeysScale,
                                     onOctave = controller::setKeysOctave,
-                                    onNote = { note, hold -> controller.playNote(note, hold) },
+                                    onNote = { note, hold, pressedAt -> controller.playNote(note, hold, pressedAt) },
                                     onNoteUp = controller::releaseNote,
                                     onSelect = controller::selectKeysPad,
                                     onView = controller::setKeysView,

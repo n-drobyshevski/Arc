@@ -149,6 +149,8 @@ export function Disclosure(props: {
   title: string
   children: ComponentChildren
   initialOpen?: boolean
+  /** Told each time it opens or closes (to open it the same way next time). */
+  onToggle?: (open: boolean) => void
   class?: string
 }): JSX.Element {
   const id = useId()
@@ -160,7 +162,10 @@ export function Disclosure(props: {
         class="disclosure__head"
         aria-expanded={open}
         aria-controls={open ? id : undefined}
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          setOpen(!open)
+          props.onToggle?.(!open)
+        }}
       >
         <span class="info-key info-key--static" aria-hidden="true">i</span>
         <span class="disclosure__title">{props.title}</span>

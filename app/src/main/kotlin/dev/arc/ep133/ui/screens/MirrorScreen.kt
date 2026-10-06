@@ -4,6 +4,7 @@ import dev.arc.ep133.ui.components.EdgeTabWidth
 import dev.arc.ep133.ui.components.EditEdgeTab
 import dev.arc.ep133.ui.components.underGuide
 import dev.arc.ep133.features.KeysView
+import dev.arc.ep133.audio.PressTime
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.foundation.selection.selectable
@@ -189,8 +190,12 @@ class KeysActions(
     val onRoot: (Int) -> Unit = {},
     val onScale: (Scale) -> Unit = {},
     val onOctave: (Int) -> Unit = {},
-    /** A MIDI note pressed; it sounds until [onNoteUp]. A screen reader's Play passes hold = false. */
-    val onNote: (note: Int, hold: Boolean) -> Unit = { _, _ -> },
+    /**
+     * A MIDI note pressed; it sounds until [onNoteUp]. A screen reader's Play
+     * passes hold = false. [pressedAt] (System.nanoTime) is when the finger
+     * came down, from the touch event ([PressTime]).
+     */
+    val onNote: (note: Int, hold: Boolean, pressedAt: Long) -> Unit = { _, _, _ -> },
     val onNoteUp: (note: Int) -> Unit = {},
     /** A pad played on the device in the pads view becomes the KEYS sound. */
     val onSelect: (PhysicalPad) -> Unit = {},
@@ -263,9 +268,10 @@ fun MirrorScreen(
      * Pressing a pad plays its sample on the phone until [onPadUp] (hold is
      * false for a screen reader's Play, which plays to the end); null leaves
      * the pads still. [unsure]: a press on the scrolling all-groups page,
-     * which [onPadKept] or [onPadCut] settles.
+     * which [onPadKept] or [onPadCut] settles. [pressedAt] (System.nanoTime):
+     * when the finger came down, from the touch event ([PressTime]).
      */
-    onPad: ((pad: PhysicalPad, hold: Boolean, unsure: Boolean) -> Unit)? = null,
+    onPad: ((pad: PhysicalPad, hold: Boolean, unsure: Boolean, pressedAt: Long) -> Unit)? = null,
     /** The unsure press on a pad was a press after all (no scroll within [PRESS_DELAY_MS], or a lift inside it). */
     onPadKept: (PhysicalPad) -> Unit = {},
     onPadUp: (PhysicalPad) -> Unit = {},
@@ -848,7 +854,7 @@ private fun Group(
     big: Boolean = false,
     /** The rows share the group's height (the big grid, and all four side by side on a phone on its side). */
     fill: Boolean = big,
-    onPad: ((pad: PhysicalPad, hold: Boolean, unsure: Boolean) -> Unit)? = null,
+    onPad: ((pad: PhysicalPad, hold: Boolean, unsure: Boolean, pressedAt: Long) -> Unit)? = null,
     onPadKept: (PhysicalPad) -> Unit = {},
     onPadUp: (PhysicalPad) -> Unit = {},
     onPadCut: (PhysicalPad) -> Unit = onPadUp,
@@ -874,7 +880,7 @@ private fun Group(
                             pad, lit[pad], nameOf(pad), now,
                             Modifier.weight(1f).then(if (fill) Modifier.fillMaxHeight() else Modifier.aspectRatio(1f)),
                             big,
-                            onPress = onPad?.let { f -> { hold: Boolean, unsure: Boolean -> f(pad, hold, unsure) } },
+                            onPress = onPad?.let { f -> { hold: Boolean, unsure: Boolean, at: Long -> f(pad, hold, unsure, at) } },
                             onKept = { onPadKept(pad) },
                             onRelease = { onPadUp(pad) },
                             onCut = { onPadCut(pad) },
@@ -993,7 +999,7 @@ private fun Pad(
     now: Long,
     modifier: Modifier,
     big: Boolean = false,
-    onPress: ((hold: Boolean, unsure: Boolean) -> Unit)? = null,
+    onPress: ((hold: Boolean, unsure: Boolean, pressedAt: Long) -> Unit)? = null,
     onKept: () -> Unit = {},
     onRelease: () -> Unit = {},
     onCut: () -> Unit = onRelease,
@@ -1617,9 +1623,10 @@ private fun KeysGrid(st: MirrorState, keys: KeysUi, now: Long, actions: KeysActi
     // Each key is a finger of its own, holding the note it had when pressed: a new key,
     // scale or octave under a held key still lets go of the note that sounds.
     val touches = remember { NoteTouches() }
-    fun play(events: List<NoteEvent>) = events.forEach { e ->
+    // [at]: when the finger came down, for the presses among [events].
+    fun play(events: List<NoteEvent>, at: Long = System.nanoTime()) = events.forEach { e ->
         when (e) {
-            is NoteEvent.Press -> actions.onNote(e.note, true)
+            is NoteEvent.Press -> actions.onNote(e.note, true, at)
             is NoteEvent.Release -> actions.onNoteUp(e.note)
         }
     }
@@ -1660,7 +1667,7 @@ private fun KeysGrid(st: MirrorState, keys: KeysUi, now: Long, actions: KeysActi
                                 .then(
                                     holdToPlay(
                                         // A screen reader's Play sounds the note to its end: no finger to keep count of.
-                                        { hold, _ -> if (hold) play(touches.down(k.toLong(), notes[k])) else actions.onNote(notes[k], false) },
+                                        { hold, _, at -> if (hold) play(touches.down(k.toLong(), notes[k]), at) else actions.onNote(notes[k], false, at) },
                                         { play(touches.up(k.toLong())) },
                                         held = held,
                                         haptics = haptics,
@@ -1834,10 +1841,12 @@ private fun LegendKey(
  * inside it). Screen readers get a plain Play action, which plays
  * the whole sound. [held] is true while a finger holds it (the cap stays
  * down). [haptics]: a light tick once the press is handed on (a cut keeps it).
+ * The press's time is the touch-down event's ([PressTime]), so Live's
+ * latency counts from the touch itself.
  */
 @Composable
 private fun holdToPlay(
-    onPress: (hold: Boolean, unsure: Boolean) -> Unit,
+    onPress: (hold: Boolean, unsure: Boolean, pressedAt: Long) -> Unit,
     onRelease: () -> Unit,
     onKept: () -> Unit = {},
     onCut: () -> Unit = onRelease,
@@ -1854,7 +1863,7 @@ private fun holdToPlay(
         .pointerInput(inScroll) {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
-                press(true, inScroll)
+                press(true, inScroll, PressTime.of(down.uptimeMillis))
                 tick?.performHapticFeedback(HapticFeedbackType.KeyboardTap)
                 held?.value = true
                 var scrolled = false
@@ -1899,7 +1908,7 @@ private fun holdToPlay(
         .semantics {
             role = Role.Button
             onClick(label = MirrorText.PLAY) {
-                press(false, false)
+                press(false, false, System.nanoTime())
                 true
             }
         }
@@ -1913,12 +1922,13 @@ private const val PRESS_DELAY_MS = 64L
  * long press it plays, as [holdToPlay] does, until the finger lifts ([onPress]
  * null: it doesn't play), with the same tick when [haptics]. A drag (a scroll)
  * does neither. Screen readers get the tap as the pad's click and Play as an
- * action of its own.
+ * action of its own. The press's time is when the hold became a long press
+ * (the touch-down event's time and the timeout, [PressTime]).
  */
 @Composable
 private fun tapToEdit(
     onTap: () -> Unit,
-    onPress: ((hold: Boolean, unsure: Boolean) -> Unit)?,
+    onPress: ((hold: Boolean, unsure: Boolean, pressedAt: Long) -> Unit)?,
     onRelease: () -> Unit,
     held: MutableState<Boolean>,
     haptics: Boolean = false,
@@ -1952,7 +1962,7 @@ private fun tapToEdit(
                     }
                     val play = press
                     if (moved || play == null) return@awaitEachGesture
-                    play(true, false)
+                    play(true, false, PressTime.of(down.uptimeMillis + viewConfiguration.longPressTimeoutMillis))
                     tick?.performHapticFeedback(HapticFeedbackType.KeyboardTap)
                     try {
                         while (true) {
@@ -1976,7 +1986,7 @@ private fun tapToEdit(
             if (press != null) {
                 customActions = listOf(
                     androidx.compose.ui.semantics.CustomAccessibilityAction(MirrorText.PLAY) {
-                        press?.invoke(false, false)
+                        press?.invoke(false, false, System.nanoTime())
                         true
                     },
                 )

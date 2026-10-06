@@ -9,6 +9,7 @@ import android.media.AudioManager
 import dev.arc.ep133.features.RecState
 import dev.arc.ep133.features.TakeRecorder
 import dev.arc.ep133.formats.VoiceMixer
+import dev.arc.ep133.text.LiveEngine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
@@ -32,18 +33,24 @@ import java.util.concurrent.Executors
  * Native is preferred; AudioTrack is used when the library doesn't load (as in
  * the JVM tests), when a native stream won't open, and for the rest of the
  * run once the native one has died or stalled while playing ([EngineChoice]),
- * which then hands over to AudioTrack at once. Both are tagged as a game's
+ * which then hands over to AudioTrack at once. The debug screen's latency
+ * test can ask for AudioTrack instead ([engine]), as it is now or as it was
+ * before the latency work (blocking writes). Both are tagged as a game's
  * sound (USAGE_GAME, music content), which is what Live is: sound that answers
  * a touch. Its volume is still media's, audio focus is asked for with the
- * same attributes, and previews ([SoundPlayer]) stay media.
+ * same attributes, and previews ([SoundPlayer]) stay media. The old AudioTrack
+ * way is tagged media (USAGE_MEDIA), as Live was then, focus included; touch
+ * input is still delivered unbuffered while Live is shown, so it measures the
+ * output as it was, not the whole of the old press path.
  *
  * [wireless] says when the output goes to Bluetooth or a hearing aid, which
  * plays late whatever the app does; Live's display line says so. It follows
  * the route as it changes (a headset connecting while Live is open).
  *
  * [onStarted] gets each voice's latency: from the press ([play]'s pressedAt)
- * to when its first frame leaves the output, from the output's timestamp, and
- * where the output goes. It is called on the output's thread with the bare
+ * to when its first frame leaves the output, from the output's timestamp,
+ * where the output goes and which engine played it ([LiveEngineInfo.label],
+ * also in [engineInfo]). It is called on the output's thread with the bare
  * numbers: it should hand them on, not format them there. [onOutput] gets the
  * output's [description] again whenever it changes after [open] (a native
  * stream reopened or tuned its buffer, or the switch to AudioTrack), also on
@@ -57,24 +64,22 @@ import java.util.concurrent.Executors
  */
 class LiveAudio(
     context: Context,
-    private val onStarted: (key: String, latencyMs: Double, route: AudioDeviceInfo?) -> Unit = { _, _, _ -> },
+    private val onStarted: (key: String, latencyMs: Double, route: AudioDeviceInfo?, engine: String) -> Unit = { _, _, _, _ -> },
     private val onTake: (file: File?, seconds: Double, limit: Boolean, error: String?) -> Unit = { _, _, _, _ -> },
     private val onOutput: (description: String) -> Unit = {},
 ) {
     private val audio = context.getSystemService(AudioManager::class.java)
-    private val attributes = AudioAttributes.Builder()
-        .setUsage(AudioAttributes.USAGE_GAME)
-        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-        .build()
+    private val attributes = attributes(AudioAttributes.USAGE_GAME)
+    // The old AudioTrack way's ([LiveEngine.TRACK_OLD]): media, as Live was before the latency work.
+    private val oldAttributes = attributes(AudioAttributes.USAGE_MEDIA)
     // Focus is asked for when something sounds and let go once all is quiet, off the
     // UI and audio threads: a press must not wait for it.
     private val focusThread = Executors.newSingleThreadExecutor { r -> Thread(r, "arc-focus").apply { isDaemon = true } }
-    private val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
-        .setAudioAttributes(attributes)
-        // A call or another app taking the output over stops the sounds.
-        .setOnAudioFocusChangeListener { change -> if (change < 0) stopAll() }
-        .build()
-    @Volatile private var focused = false
+    private val gameFocus = focusRequest(attributes)
+    private val oldFocus = focusRequest(oldAttributes)
+    // The request for the open output's attributes; the one held is let go of as it was asked for.
+    @Volatile private var focus = gameFocus
+    @Volatile private var focused: AudioFocusRequest? = null
 
     private val _keys = MutableStateFlow<Set<String>>(emptySet())
     /** The voices sounding (pad and key ids), for the rings. */
@@ -84,7 +89,26 @@ class LiveAudio(
     /** Whether the open output goes to a wireless device ([isWireless]); false while closed. */
     val wireless: StateFlow<Boolean> = _wireless
 
+    private val _engine = MutableStateFlow<LiveEngineInfo?>(null)
+    /**
+     * The engine the output opened on and its buffer now, for the latency
+     * test; the last one stays after Live closes (null before the first open).
+     */
+    val engineInfo: StateFlow<LiveEngineInfo?> = _engine
+
     private val engines = EngineChoice { NativeAudio.loaded }
+
+    /**
+     * The debug screen's engine choice: [LiveEngine.AUTO] (native, else
+     * AudioTrack), or AudioTrack as now or the old way. It applies from the
+     * next [open]: the caller reopens an open output.
+     */
+    var engine: LiveEngine
+        get() = engines.engine
+        set(value) {
+            engines.engine = value
+        }
+
     // Key numbers for the native engine, kept across outputs.
     private val keyIds = LiveKeys()
 
@@ -103,7 +127,18 @@ class LiveAudio(
     @Volatile private var armed: Take? = null
     @Volatile private var stopAsked = false
 
+    private fun focusRequest(attributes: AudioAttributes) = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+        .setAudioAttributes(attributes)
+        // A call or another app taking the output over stops the sounds.
+        .setOnAudioFocusChangeListener { change -> if (change < 0) stopAll() }
+        .build()
+
     companion object {
+        private fun attributes(usage: Int) = AudioAttributes.Builder()
+            .setUsage(usage)
+            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+            .build()
+
         /**
          * Whether output device [type] is wireless, and so heard late: Bluetooth
          * (classic or LE) or a hearing aid. The newer types are plain numbers on
@@ -134,10 +169,13 @@ class LiveAudio(
     fun open(): Boolean {
         if (output != null) return true
         val s = Session()
-        val o = openNative(s) ?: TrackLiveOutput.open(audio, attributes, s) ?: return false
+        val old = engines.old
+        val o = openNative(s) ?: TrackLiveOutput.open(audio, if (old) oldAttributes else attributes, s, old) ?: return false
+        focus = if (old && o is TrackLiveOutput) oldFocus else gameFocus
         description = o.description
         session = s
         output = o
+        _engine.value = o.engine
         // After [output]: a route the thread reports meanwhile is no older than this one.
         _wireless.value = isWireless(o.route?.type)
         return true
@@ -190,9 +228,10 @@ class LiveAudio(
         if (output == null && !openLate()) return false
         val o = output ?: return false
         if (!o.start(key, pcm, channels, sampleRate, semitones, pressedAt)) return false
-        if (!focused) {
-            focused = true
-            focusThread.execute { audio.requestAudioFocus(focus) }
+        if (focused == null) {
+            val f = focus
+            focused = f
+            focusThread.execute { audio.requestAudioFocus(f) }
         }
         return true
     }
@@ -242,9 +281,9 @@ class LiveAudio(
     fun route(): AudioDeviceInfo? = output?.route
 
     private fun letGoOfFocus() {
-        if (!focused) return
-        focused = false
-        focusThread.execute { audio.abandonAudioFocusRequest(focus) }
+        val f = focused ?: return
+        focused = null
+        focusThread.execute { audio.abandonAudioFocusRequest(f) }
     }
 
     /** The native engine gave out under [s]: what plays next goes through AudioTrack. */
@@ -318,7 +357,7 @@ class LiveAudio(
             }
         }
 
-        override fun started(key: String, latencyMs: Double, route: AudioDeviceInfo?) = onStarted(key, latencyMs, route)
+        override fun started(key: String, latencyMs: Double, route: AudioDeviceInfo?, engine: String) = onStarted(key, latencyMs, route, engine)
 
         override fun keys(keys: Set<String>) {
             if (keys !== shown) {
@@ -328,7 +367,7 @@ class LiveAudio(
             // Quiet for two seconds: other apps may have the output back.
             if (keys.isEmpty()) {
                 if (quietSince == 0L) quietSince = System.nanoTime()
-                if (focused && System.nanoTime() - quietSince > 2_000_000_000L) letGoOfFocus()
+                if (focused != null && System.nanoTime() - quietSince > 2_000_000_000L) letGoOfFocus()
             } else {
                 quietSince = 0L
             }
@@ -342,6 +381,10 @@ class LiveAudio(
             if (!running || session !== this) return
             this@LiveAudio.description = description
             onOutput(description)
+        }
+
+        override fun tuned(engine: LiveEngineInfo) {
+            if (running && session === this) _engine.value = engine
         }
 
         override fun ended() {

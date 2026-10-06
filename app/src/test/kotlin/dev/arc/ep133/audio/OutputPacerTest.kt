@@ -99,4 +99,17 @@ class OutputPacerTest {
         now += OutputPacer.DECAY_NS + 1
         assertEquals(384, p.resize(384, cap, 3, now))
     }
+
+    @Test
+    fun `old writes every burst blocking from the start, and its buffer only grows`() {
+        // As Live wrote before the pacing: the latency test's "AudioTrack, old".
+        val p = OutputPacer(burst = 192, rate = 48000, floor = 384, old = true)
+        assertTrue(p.blocking)
+        assertEquals(OutputPacer.BLOCK, p.next(0, 384, 0))
+        p.wrote(192)
+        assertEquals(OutputPacer.BLOCK, p.next(192, 384, 0))
+        val cap = 192 * 8
+        assertEquals(576, p.resize(384, cap, 1, 0))
+        assertEquals(576, p.resize(576, cap, 1, OutputPacer.DECAY_NS * 3))
+    }
 }

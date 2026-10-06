@@ -29,6 +29,9 @@
 //   handler, as the pads do), not at the next render.
 // - A key under the mouse is tinted (hover). The haptic tick ([haptics],
 //   platform/haptics.ts) follows a finger's press, not the computer keyboard's.
+// - A press hands on its event's timeStamp ([onNote]'s at: the pointerdown,
+//   the move that slid onto the key, or the keydown; Kotlin's uptimeMillis),
+//   for the latency note.
 // - [playingNotes] is the controller's signal, read here, so a voice starting
 //   or ending re-renders the piano, not Live's whole screen.
 // - [computer] (a desktop or a fine pointer): the letter row plays it
@@ -67,8 +70,11 @@ export interface PianoKeyboardProps {
   haptics?: boolean
   /** The fade's clock (fixed in screenshots). */
   now: number
-  /** A note pressed; it sounds until [onNoteUp]. A screen reader's Play passes hold = false. */
-  onNote: (note: number, hold: boolean) => void
+  /**
+   * A note pressed; it sounds until [onNoteUp]. A screen reader's Play passes
+   * hold = false. [at]: the press's event timeStamp (absent for a screen reader's Play).
+   */
+  onNote: (note: number, hold: boolean, at?: number) => void
   onNoteUp: (note: number) => void
   /** Web: the computer keyboard plays it, with letter hints on the keys. */
   computer?: boolean
@@ -136,12 +142,12 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
   const [fingered, setFingered] = useState<ReadonlySet<number>>(() => new Set())
   /** The key element of [note], if it shows. */
   const keyOf = (note: number): HTMLElement | null => plate.current?.querySelector<HTMLElement>(`[data-note="${note}"]`) ?? null
-  /** [events] played; [finger]: by a finger (a tick on each press, where on). */
-  const play = (events: readonly NoteEvent[], finger = false): void => {
+  /** [events] played; [finger]: by a finger (a tick on each press, where on); [at]: their input event's timeStamp. */
+  const play = (events: readonly NoteEvent[], finger = false, at?: number): void => {
     let pressed = false
     for (const e of events) {
       if (e.type === 'Press') {
-        cb.current.onNote(e.note, true)
+        cb.current.onNote(e.note, true, at)
         // Down now, not at the next render.
         keyOf(e.note)?.setAttribute('data-down', '')
         pressed = true
@@ -177,7 +183,7 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
     const { x, y } = local(e, e.currentTarget)
     const note = Piano.keyAt(laidRef.current, x, y, null, 0)
     fingers.current.set(e.pointerId, { note, x, y, generation: generation.current, raw: false })
-    if (note !== null) play(touches.down(e.pointerId, note), true)
+    if (note !== null) play(touches.down(e.pointerId, note), true, e.timeStamp)
   }
   /** A finger moved on [el] (the plate, which captures it); [raw]: from pointerrawupdate. */
   const moved = (e: PointerEvent, el: HTMLElement, raw: boolean): void => {
@@ -194,7 +200,7 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
     if (f.generation !== generation.current && Math.hypot(x - f.x, y - f.y) <= TOUCH_SLOP) return
     const note = Piano.keyAt(laidRef.current, x, y, f.note, SLIDE_SLOP)
     fingers.current.set(e.pointerId, { note, x, y, generation: generation.current, raw: f.raw })
-    play(touches.move(e.pointerId, note), true)
+    play(touches.move(e.pointerId, note), true, e.timeStamp)
   }
   const onPointerMove = (e: TargetedPointerEvent<HTMLDivElement>): void => moved(e, e.currentTarget, false)
   const movedRef = useRef(moved)
@@ -245,7 +251,7 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
       if (e.repeat || ids.has(e.code)) return
       const id = -1 - COMPUTER_KEYS.indexOf(e.code)
       ids.set(e.code, id)
-      play(touches.down(id, note))
+      play(touches.down(id, note), false, e.timeStamp)
     }
     const onUp = (e: KeyboardEvent): void => {
       if (e.key === 'Meta') releaseAll()

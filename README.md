@@ -53,7 +53,7 @@ These go beyond the web version:
 
 Backups use the same layout as the official Sample Tool's `.pak`: a zip with `/meta.json`, `/sounds/NNN name.wav` and `/projects/PNN.tar`. On top of that, an `arc.json` file keeps per-sound settings like play mode, pitch and envelope.
 
-A debug screen (Settings → **Debug log**, or long-press the section tag) shows every SysEx message sent and received, and can share, save or copy the log as a text file.
+A debug screen (Settings → **Debug log**, or long-press the section tag) shows every SysEx message sent and received, and can share, save or copy the log as a text file. Its **Latency** test compares Live's audio engines on your own phone or browser (see [Measuring latency](#measuring-latency)).
 
 ## Web app
 
@@ -268,7 +268,7 @@ The behaviours above are commented where they happen in the code. The same goes 
     - pad push parsing, end to end through the session in both possible header forms
     - learning pads from a note and a push in either order, sequenced notes named after learning, both pad orders, project changes, tempo from clock, transport, and the fade
 - **The database upgrade:** the version 2 schema Room exports must equal version 1 plus exactly the two search tables, created with Room's own SQL. Room's own migration test needs a device, so this checks the exported schemas instead.
-- **Live's native engine** (`:app:hostMixerTest`, built with the machine's own C++ compiler, with AddressSanitizer where it has one): the C++ mixer replays 28 scenarios recorded from the Kotlin mixer (`app/src/test/cpp/voice-mixer.golden`, all of `VoiceMixerTest`'s cases plus long random ones at real rates and pitches) and must match every sample exactly; LiveCore (sounds unloaded while playing, restarts, REC blocks, full queues, three threads at once), the buffer sizing and the lock-free queues are tested too. The Oboe stream and the JNI need a phone and aren't in it. When the Kotlin mixer changes on purpose, regenerate the vectors with `./gradlew :app:testDebugUnitTest -Parc.updateGolden=true`. On the JVM, `LiveEngineTest` covers the choice between the native and AudioTrack outputs and `LiveRouteTest` which routes count as Bluetooth.
+- **Live's native engine** (`:app:hostMixerTest`, built with the machine's own C++ compiler, with AddressSanitizer where it has one): the C++ mixer replays 28 scenarios recorded from the Kotlin mixer (`app/src/test/cpp/voice-mixer.golden`, all of `VoiceMixerTest`'s cases plus long random ones at real rates and pitches) and must match every sample exactly; LiveCore (sounds unloaded while playing, restarts, REC blocks, full queues, three threads at once), the buffer sizing and the lock-free queues are tested too. The Oboe stream and the JNI need a phone and aren't in it. When the Kotlin mixer changes on purpose, regenerate the vectors with `./gradlew :app:testDebugUnitTest -Parc.updateGolden=true`. On the JVM, `LiveEngineTest` covers the choice between the native and AudioTrack outputs (the debug screen's engine choice too) and `LiveRouteTest` which routes count as Bluetooth; for the latency test, `PressTimeTest` checks the touch time's move onto Live's clock and `LatencyStatsTest` (ported to the web) the median, best and worst.
 - **Other units:** interface text and restore-selection rules, SysEx reassembly (a reply split at every byte offset), port-name matching, the log export, and the Room converters.
 
 ## Status: what is verified and what still needs a real device
@@ -303,6 +303,12 @@ Not verified yet. Nobody has run this on a phone or an EP-133:
   - the `.pak` intent filter with various file managers
   - SAF save and import with different providers
   - sharing to other apps
+
+### Measuring latency
+
+How quickly Live sounds can only be measured on a real phone or browser, so the debug screen (Settings → **Debug log**, or long-press the section tag) has a **Latency** test for comparing before and after. Fold it out above the log, pick an **Audio engine**, open Live, tap one pad 20 times, come back and compare. Each engine tried keeps a row with the median, best and worst of its last 20 presses and an estimate from what its output reports (Android: its buffer and burst in frames over its rate; web: `baseLatency` + `outputLatency`). Only presses whose sample was already in memory count (one that had to load it is still in the debug log); every engine opened this session keeps its row, and **Reset** clears the times. A press is timed from the touch event's own timestamp (Android: the pointer event's uptime, moved onto Live's clock; web: the event's `timeStamp`), so the times include the input's way to the app, up to the first sound leaving the output; Bluetooth adds its own delay on top. The debug log's "heard … after the press" lines count the same way.
+
+The engines: on Android, **Auto** (the native Oboe engine, AudioTrack where it won't open, as normally used), **AudioTrack** (each burst mixed just before it is due) and **AudioTrack, old** (mix, then a blocking write, no pacing, tagged as media, as before the latency work; touch input stays unbuffered as now, so it compares the output only); on the web, `latencyHint` **0** (now) and **'interactive'** (before; each row's estimate shows the base and output delay the browser reports, so a browser that quietly refuses 0 shows the same numbers on both). Changing it while Live is open reopens Live's output. The choice is a debug option kept on that phone or browser only, never in `library.json`, and starts at Auto or 0. On Android it has only been built and unit-tested so far.
 
 ### First run checklist
 

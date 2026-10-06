@@ -23,8 +23,12 @@
 //   [LATENCY_GLITCHES]) is replaced by one at 'interactive' at the next quiet
 //   moment: once nothing sounds and nothing was pressed for a moment
 //   ([REPLACE_QUIET_MS]), or when Live leaves. The step back holds for the
-//   rest of the tab's session (sessionStorage, so a reload keeps it). The
-//   mixer runs in an AudioWorklet (liveWorklet.ts), or, where there is none,
+//   rest of the tab's session (sessionStorage, so a reload keeps it).
+//   [setLatencyHint] is the debug screen's choice between 0 and 'interactive'
+//   (LatencyText.hint, kept in localStorage: Kotlin's LiveEngine choice
+//   between its outputs), for comparing the two; a choice reopens the output
+//   and forgets a step back, and the step back applies to the 0 choice only.
+//   The mixer runs in an AudioWorklet (liveWorklet.ts), or, where there is none,
 //   under a ScriptProcessorNode on the main thread;
 //   both are a MixerHost (liveMixer.ts). The browser sizes the output's
 //   buffers and paces the render, so Kotlin's output loops (the native
@@ -65,8 +69,15 @@
 //   where Android names Bluetooth from the route (LiveAudio.wireless).
 // - Listeners are added after construction (the controller is made after its
 //   deps); the debug-log lines ("live audio: …") come through [onLog].
+// - The latency test's row ([engine], [OutputEngine]) is named from the
+//   output's latencyHint and rate (LatencyText.webEngine; Android: its mode
+//   and burst), so one choice's presses share a row however often it reopens.
+//   The delay the browser reports drifts (and often reads 0 just after a
+//   start), so it is only carried along for the estimate line, read again
+//   when the output is set up and at each [onStarted] report, which carries it.
 
-import { signal, type ReadonlySignal } from '@preact/signals'
+import { signal, type ReadonlySignal, type Signal } from '@preact/signals'
+import { LatencyText, WebLatencyHint } from '../../core/text/latencyText'
 import { WebText } from '../../core/text/webText'
 import { LIVE_PROCESSOR, MixerHost, transferable, type FromMixer, type ToMixer } from './liveMixer'
 // The AudioWorklet module's URL: Vite bundles liveWorklet.ts (with the core
@@ -115,6 +126,38 @@ export const REPLACE_QUIET_MS = 100
 
 /** The latencyHint Live asks for: 0 (the smallest buffer the browser allows), or 'interactive' after glitches. */
 export type LiveLatencyHint = 0 | 'interactive'
+
+/** The debug choice [choice] as the latencyHint it asks for. */
+export function hintOf(choice: WebLatencyHint): LiveLatencyHint {
+  return choice === WebLatencyHint.INTERACTIVE ? 'interactive' : 0
+}
+
+/** The latencyHint [hint] as the debug choice it is. */
+export function choiceOf(hint: LiveLatencyHint): WebLatencyHint {
+  return hint === 'interactive' ? WebLatencyHint.INTERACTIVE : WebLatencyHint.ZERO
+}
+
+/**
+ * An output as the latency test names it (state/deps.ts LiveEngineInfo): its
+ * row's label (LatencyText.webEngine, the key in LatencyStats) and the delay
+ * it reported last, for the estimate line.
+ */
+export interface OutputEngine {
+  readonly label: string
+  readonly baseMs: number
+  /** Null where the browser doesn't report the output's own delay. */
+  readonly outputMs: number | null
+}
+
+/** [ctx]'s engine at latencyHint [hint]: an output delay of 0 is one the browser hasn't reported. */
+export function outputEngine(
+  hint: LiveLatencyHint,
+  ctx: Pick<LiveContextLike, 'sampleRate' | 'baseLatency' | 'outputLatency'>,
+): OutputEngine {
+  const l = outputLatency(ctx)
+  const outputMs = l.outputMs > 0 ? l.outputMs : null
+  return { label: LatencyText.webEngine(choiceOf(hint), ctx.sampleRate), baseMs: l.baseMs, outputMs }
+}
 
 /** Little-endian 16-bit PCM bytes to samples (ArcController's PadAudio.of). A partial last sample is dropped. */
 export function s16leToInt16(pcm: Uint8Array): Int16Array {
@@ -172,6 +215,10 @@ export interface LiveBackend {
   savedHint?(): LiveLatencyHint
   /** Keeps [hint] for the rest of the tab's session. */
   saveHint?(hint: LiveLatencyHint): void
+  /** The debug screen's latencyHint choice, as kept; absent: ZERO. */
+  savedChoice?(): WebLatencyHint
+  /** Keeps the debug screen's choice (across sessions). */
+  saveChoice?(choice: WebLatencyHint): void
 }
 
 /** [LiveAudio.press]'s options (state/deps.ts LivePress). */
@@ -180,7 +227,7 @@ export interface LivePressOptions {
   readonly pitch: number
   /** True: sounds until release(id), then fades quickly. False: plays to the end. */
   readonly gate: boolean
-  /** When the finger came down (performance.now() ms), for the latency note; default: now. */
+  /** When the finger came down (performance.now() ms: the input event's timeStamp), for the latency note; default: now. */
   readonly pressedAt?: number
 }
 
@@ -281,6 +328,8 @@ interface Stream {
   pressedAt: number
   /** A [LiveAudio.replaceStale] check is due. */
   recheck: boolean
+  /** Its row in the latency test as last read ([LiveAudio.engineOf]); null before it is set up. */
+  engine: OutputEngine | null
 }
 
 const EMPTY: ReadonlySet<string> = new Set()
@@ -298,22 +347,35 @@ export class LiveAudio {
    * and changed only by [LATE_STEP_MS] or more.
    */
   readonly late: ReadonlySignal<number | null> = this._late
+  private readonly _latencyHint: Signal<WebLatencyHint>
+  /** The debug screen's latencyHint choice ([setLatencyHint]); ZERO unless changed there. */
+  readonly latencyHint: ReadonlySignal<WebLatencyHint>
+  private readonly _engine = signal<OutputEngine | null>(null)
+  /** The open output's row in the latency test, once it is set up; null before, or with none open. */
+  readonly engine: ReadonlySignal<OutputEngine | null> = this._engine
   private _description = ''
   private stream: Stream | null = null
   private rate: number | undefined = undefined
-  /** 0 until an output glitched there; then 'interactive' for the tab's session. */
-  private hint: LiveLatencyHint
+  /** An output at 0 glitched ([checkGlitches]): 'interactive' for the tab's session, or until a new choice. */
+  private steppedBack: boolean
   private toldSlow = false
   private nextId = 1
   private readonly samples = new Map<string, Sample>()
   /** Voices pressed with gate false: a release doesn't cut them short. */
   private readonly ungated = new Set<string>()
-  private readonly startedListeners = new Set<(id: string, latencyMs: number, route: string) => void>()
+  private readonly startedListeners = new Set<(id: string, latencyMs: number, route: string, engine: OutputEngine) => void>()
   private readonly slowListeners = new Set<(outputMs: number) => void>()
   private readonly logListeners = new Set<(line: string) => void>()
 
   constructor(private readonly backend: LiveBackend = browserLiveBackend()) {
-    this.hint = backend.savedHint?.() ?? 0
+    this.steppedBack = backend.savedHint?.() === 'interactive'
+    this._latencyHint = signal(backend.savedChoice?.() ?? WebLatencyHint.ZERO)
+    this.latencyHint = this._latencyHint
+  }
+
+  /** The latencyHint the next output asks for: the choice, or 'interactive' after a step back from 0. */
+  private get hint(): LiveLatencyHint {
+    return this.steppedBack ? 'interactive' : hintOf(this._latencyHint.peek())
   }
 
   /** How the output was set up, for the debug log; "" before it opens. */
@@ -331,9 +393,33 @@ export class LiveAudio {
     return this.stream ? outputLatency(this.stream.ctx) : null
   }
 
-  /** Each voice heard: [latencyMs] from its press to its first frame leaving the output. */
-  onStarted(listener: (id: string, latencyMs: number, route: string) => void): () => void {
+  /** Each voice heard: [latencyMs] from its press to its first frame leaving the output ([engine]: the latency test's row). */
+  onStarted(listener: (id: string, latencyMs: number, route: string, engine: OutputEngine) => void): () => void {
     return add(this.startedListeners, listener)
+  }
+
+  /**
+   * The debug screen's latencyHint choice: kept, and an open output that asks
+   * for another hint is replaced at once (a suspended one is let go, and
+   * [open] makes the new one). A step back after glitches is forgotten, so 0
+   * is tried afresh.
+   */
+  setLatencyHint(choice: WebLatencyHint): void {
+    if (choice === this._latencyHint.peek()) return
+    this._latencyHint.value = choice
+    this.backend.saveChoice?.(choice)
+    if (this.steppedBack) {
+      this.steppedBack = false
+      this.backend.saveHint?.(0)
+    }
+    this.note(`live audio: ${LatencyText.hint(choice)} chosen`)
+    const s = this.stream
+    if (!s || s.hint === this.hint) return
+    const away = s.parked
+    this.close()
+    if (away) return
+    const next = this.ensure()
+    if (next && this.backend.gestureSeen()) wake(next.ctx)
   }
 
   /** The output looks like Bluetooth ([outputMs] of latency): once per LiveAudio. */
@@ -399,6 +485,7 @@ export class LiveAudio {
     this.ungated.clear()
     this._voices.value = EMPTY
     this._late.value = null
+    this._engine.value = null
     if (!s) return
     this.checkGlitches(s)
     s.closed = true
@@ -540,6 +627,7 @@ export class LiveAudio {
       parked: false,
       pressedAt: Number.NEGATIVE_INFINITY,
       recheck: false,
+      engine: null,
     }
     this.stream = s
     // The samples loaded, ready again.
@@ -555,6 +643,8 @@ export class LiveAudio {
         flush(s, link)
         this._description = describeOutput(ctx, link.kind)
         this.note(`live audio: ${this._description}`)
+        // Its row shows from now, before the first press.
+        this.engineOf(s)
         if (ctx.state === 'running') this.ran(s)
       },
       (e: unknown) => {
@@ -611,8 +701,8 @@ export class LiveAudio {
     if (s.hint !== 0 || this.hint !== 0 || s.underrunsAtRun === null) return
     const n = underruns(s.ctx)
     if (n === null || n - s.underrunsAtRun < LATENCY_GLITCHES) return
-    this.hint = 'interactive'
-    this.backend.saveHint?.(this.hint)
+    this.steppedBack = true
+    this.backend.saveHint?.('interactive')
     this.note(`live audio: ${n - s.underrunsAtRun} glitches at the lowest latency; the next output asks for 'interactive'`)
   }
 
@@ -653,7 +743,8 @@ export class LiveAudio {
         for (const v of m.voices) {
           if (v.tag <= 0) continue
           const ms = heardAt(v.time, now, s.ctx) - v.tag
-          for (const f of [...this.startedListeners]) f(v.key, ms, WebText.ROUTE)
+          const engine = this.engineOf(s)
+          for (const f of [...this.startedListeners]) f(v.key, ms, WebText.ROUTE, engine)
         }
         // An output that changed (Bluetooth headphones connected) shows in the latency.
         this.checkSlow(s)
@@ -661,6 +752,16 @@ export class LiveAudio {
         return
       }
     }
+  }
+
+  /** [s]'s row in the latency test, with the delay it reports now: a new value only when that changed. */
+  private engineOf(s: Stream): OutputEngine {
+    const e = outputEngine(s.hint, s.ctx)
+    const was = s.engine
+    if (was !== null && was.label === e.label && was.baseMs === e.baseMs && was.outputMs === e.outputMs) return was
+    s.engine = e
+    if (this.stream === s) this._engine.value = e
+    return e
   }
 
   private note(line: string): void {
@@ -727,6 +828,9 @@ function message(e: unknown): string {
 
 /** Where [browserLiveBackend] keeps the latencyHint stepped back to, for the tab's session. */
 export const HINT_KEY = 'arc.liveLatencyHint'
+
+/** Where it keeps the debug screen's latencyHint choice (localStorage: a debug option, not in library.json). */
+export const CHOICE_KEY = 'arc.liveLatencyChoice'
 
 /** ScriptProcessorNode's buffer where there is no AudioWorklet: its smallest. */
 export const FALLBACK_FRAMES = 256
@@ -830,6 +934,20 @@ export function browserLiveBackend(): LiveBackend {
         globalThis.sessionStorage?.setItem(HINT_KEY, String(hint))
       } catch {
         // Storage blocked or full: the step back lasts the page.
+      }
+    },
+    savedChoice: () => {
+      try {
+        return globalThis.localStorage?.getItem(CHOICE_KEY) === WebLatencyHint.INTERACTIVE ? WebLatencyHint.INTERACTIVE : WebLatencyHint.ZERO
+      } catch {
+        return WebLatencyHint.ZERO
+      }
+    },
+    saveChoice: (choice) => {
+      try {
+        globalThis.localStorage?.setItem(CHOICE_KEY, choice)
+      } catch {
+        // Storage blocked or full: the choice lasts the page.
       }
     },
   }

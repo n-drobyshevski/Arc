@@ -120,7 +120,8 @@ library folder), `restoreFromFolder(target)`, `reconnectFolder()`* (the banner t
 **Live**: `mirrorName(pad)`, `setPadOrder(order)`, `padOrder()`, `forgetLearned()`.
 (`openMirror`/`pauseMirror`/`closeMirror` exist but are driven by `setLive`/`tabChanged`.)
 - Pads sound while held (a gate) and play alongside each other (chords, up
-  to 8): `playPad(pad, hold = true, unsure = false)`* on pointerdown,
+  to 8): `playPad(pad, hold = true, unsure = false, at?)`* on pointerdown
+  (`at`: the event's `timeStamp`, so the latency note counts from the touch),
   `releasePad(pad)` on pointerup, `cutPad(pad)` when the press turned into a
   scroll (a short fade, minimum gate or not; the all-groups page); `hold: false` (a screen reader's Play) plays the whole
   sample. On the all-groups page the press is `unsure`: a sample in memory
@@ -128,7 +129,7 @@ library folder), `restoreFromFolder(target)`, `reconnectFolder()`* (the banner t
   `keepPad(pad)` (no scroll within the window), and a cut drops them. The sound comes from arc's copy of the device's sound, else the
   newest backup holding it, else (connected) the device; errors and "no
   copy" / "no sample yet" are toasts. A tapped pad becomes the KEYS sound.
-- KEYS: `playKey(index, hold = true)`* / `releaseKey(index)` (0 = '.', the
+- KEYS: `playKey(index, hold = true, at?)`* / `releaseKey(index)` (0 = '.', the
   lowest), `selectKeysPad(pad)` (also for a pad played on the device),
   `setLiveKeys(on)`, `setKeysRoot(0..11)`, `setKeysScale(scale)`,
   `setKeysOctave(0..8)`; values are clamped. `Keys.notes(root, scale, octave)`
@@ -144,6 +145,11 @@ on the keys), `padSoundsSize(): Promise<number>` (bytes, for
 `platform/haptics` `supported()`), `setGuideSeen()`, `pruneCount(keep)` (for the confirm dialog), then `setKeepLast(keep)`.
 
 **Debug log**: `logText()`, `logFileName()`, `saveLog()`*, `shareLog()`*, `copyLog()`*.
+Its latency test: `liveLatency` (signal: `LatencyStats` per engine row, and each
+output opened with its latest reported delay; `latencyRows` lists the rows), `liveEngine` (signal: the row in use, or null),
+`liveLatencyHint` (signal, or null without a choice) / `setLiveLatencyHint(choice)`
+(kept in localStorage `arc.liveLatencyChoice`, not in library.json; reopens
+Live's output), `resetLatency()`.
 
 **Formatting**: `fmtDay(ms)`, `fmtDateTime(ms)`.
 

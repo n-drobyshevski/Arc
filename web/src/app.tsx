@@ -174,6 +174,13 @@ function Root(): JSX.Element {
         onSave={() => void c.saveLog()}
         onCopy={() => void c.copyLog()}
         onBack={closeScreen(screenLayer({ kind: 'debug' }))}
+        latency={{
+          latency: c.liveLatency.value,
+          inUse: c.liveEngine.value?.label ?? null,
+          hint: c.liveLatencyHint?.value ?? null,
+          onHint: (h) => c.setLiveLatencyHint(h),
+          onReset: () => c.resetLatency(),
+        }}
       />
     )
   } else if (view === 'settings') {
@@ -367,7 +374,7 @@ function TabScreen(props: { view: NavView; editPads: boolean; onEditPads: (on: b
             } else if (cur === undefined) nav.open(dialogLayer(PICK + p))
             else if (cur !== PICK + p) nav.replace(dialogLayer(cur), dialogLayer(PICK + p))
           }}
-          onPad={(pad, hold, unsure) => void c.playPad(pad, hold, unsure)}
+          onPad={(pad, hold, unsure, at) => void c.playPad(pad, hold, unsure, at)}
           onPadKept={(pad) => void c.keepPad(pad)}
           onPadUp={(pad) => c.releasePad(pad)}
           onPadCut={(pad) => c.cutPad(pad)}
@@ -410,9 +417,9 @@ function TabScreen(props: { view: NavView; editPads: boolean; onEditPads: (on: b
             onRoot: (r) => c.setKeysRoot(r),
             onScale: (s) => c.setKeysScale(s),
             onOctave: (o) => c.setKeysOctave(o),
-            onKey: (k, hold) => void c.playKey(k, hold),
+            onKey: (k, hold, at) => void c.playKey(k, hold, at),
             onKeyUp: (k) => c.releaseKey(k),
-            onNote: (n, hold) => void c.playNote(n, hold),
+            onNote: (n, hold, at) => void c.playNote(n, hold, at),
             onNoteUp: (n) => c.releaseNote(n),
             onView: (wide, view) => c.setKeysView(wide, view),
             onSelect: (pad) => c.selectKeysPad(pad),

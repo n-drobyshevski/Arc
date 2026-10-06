@@ -251,6 +251,10 @@ class ArcController(
     val rec: StateFlow<dev.arc.ep133.features.RecState> get() = liveAudio.rec
     /** Whether Live's sound goes to Bluetooth or a hearing aid, which plays late: its display line says so. */
     val liveWireless: StateFlow<Boolean> get() = liveAudio.wireless
+    // The debug screen's latency test: Live's press-to-sound times by engine.
+    private val latencyTest = dev.arc.ep133.audio.LiveLatency()
+    /** The latency test's times and engines, for the debug screen. */
+    val latency: StateFlow<dev.arc.ep133.audio.LiveLatency.State> get() = latencyTest.state
     private val takeStore by lazy { dev.arc.ep133.data.Takes(java.io.File(context.filesDir, "takes")) }
     private val _takes = MutableStateFlow<List<dev.arc.ep133.data.TakeInfo>>(emptyList())
     /** Live's recorded takes, newest first. */
@@ -308,6 +312,9 @@ class ArcController(
             }
         }
         library.onExternalError = { msg -> scope.launch { toast(FeatureText.copyFailed(msg), error = true) } }
+        // The debug screen's engine choice, from the next time Live opens its output.
+        liveAudio.engine = settingsStore.settings.value.liveEngine
+        scope.launch { liveAudio.engineInfo.collect { info -> info?.let(latencyTest::opened) } }
         scope.launch { loadTakes() }
         _state.update { it.copy(keysPad = savedKeysPad()) }
         scope.launch {
@@ -1044,6 +1051,10 @@ class ArcController(
 
     private class UnsurePress(val started: Boolean, val pressedAt: Long, val token: Long)
 
+    // Voices started after their sample had to load (or wait out the scroll window): their latency
+    // is logged, but kept out of the latency test, which times only presses played from memory.
+    private val unmeasured = HashSet<String>()
+
     // Whether Live's output is open (and so watches the volume for the presses).
     private var liveAudioOpen = false
 
@@ -1083,6 +1094,7 @@ class ArcController(
         held.clear()
         cut.clear()
         unsure.clear()
+        unmeasured.clear()
         liveAudio.close()
         if (liveAudioOpen) {
             liveAudioOpen = false
@@ -1103,9 +1115,16 @@ class ArcController(
      * scroll. A sample in memory sounds at once all the same; the rest (the
      * KEYS pad, a load from the device, the "no sample" toast) waits for
      * [keepPad], and [cutPad] drops it.
+     *
+     * [pressedAt] (System.nanoTime) is when the finger came down, from the
+     * touch event ([dev.arc.ep133.audio.PressTime]): the latency is counted from it.
      */
-    fun playPad(pad: dev.arc.ep133.features.PhysicalPad, hold: Boolean = true, unsure: Boolean = false): Job? {
-        val pressedAt = System.nanoTime()
+    fun playPad(
+        pad: dev.arc.ep133.features.PhysicalPad,
+        hold: Boolean = true,
+        unsure: Boolean = false,
+        pressedAt: Long = System.nanoTime(),
+    ): Job? {
         val key = "live:${pad.group}:${pad.offset}"
         if (hold) held += key
         cut -= key
@@ -1114,12 +1133,12 @@ class ArcController(
         val ready = padInMemory(pad)
         if (unsure && hold) {
             // Not yet the latest press either: a scroll mustn't drop another press's late load.
-            if (ready != null) startHeld(key, hold, ready, 0, pressedAt)
+            if (ready != null) startHeld(key, hold, ready, 0, pressedAt, measured = true)
             this.unsure[key] = UnsurePress(ready != null, pressedAt, playToken)
             return null
         }
         lastPressAt = pressedAt
-        if (ready != null) startHeld(key, hold, ready, 0, pressedAt)
+        if (ready != null) startHeld(key, hold, ready, 0, pressedAt, measured = true)
         // The pad tapped is also the sound KEYS plays; it is loaded right here, so no preload for it.
         setKeysPad(pad)
         return if (ready != null) null else loadAndStart(pad, key, hold, pressedAt, playToken)
@@ -1141,7 +1160,7 @@ class ArcController(
     /** Loads [pad]'s sample (copy, backup or device) and starts its voice, unless a stop came meanwhile. */
     private fun loadAndStart(pad: dev.arc.ep133.features.PhysicalPad, key: String, hold: Boolean, pressedAt: Long, token: Long): Job = scope.launch {
         val a = padAudio(pad) ?: return@launch
-        if (token == playToken) startHeld(key, hold, a, 0, pressedAt)
+        if (token == playToken) startHeld(key, hold, a, 0, pressedAt, measured = false)
     }
 
     /** The finger left the pad: its sound fades out. */
@@ -1167,8 +1186,11 @@ class ArcController(
      * latest press does: a single quick tap on a sound not in memory yet is
      * still heard, but a first glissando over one doesn't end in a burst of
      * every note it slid over.
+     *
+     * [measured]: the sample was in memory at the press, so its latency goes
+     * into the latency test; a load's time would only blur it.
      */
-    private fun startHeld(key: String, hold: Boolean, a: PcmSound, semitones: Int, pressedAt: Long) {
+    private fun startHeld(key: String, hold: Boolean, a: PcmSound, semitones: Int, pressedAt: Long, measured: Boolean) {
         if (key in cut) return
         val lifted = hold && key !in held
         if (lifted && pressedAt != lastPressAt && System.nanoTime() - pressedAt > LATE_LOAD_NS) return
@@ -1176,6 +1198,8 @@ class ArcController(
             a.silent -> toastOnce(FeatureText.SILENT_SOUND)
             !liveAudio.play(key, a.pcm, a.channels, a.sampleRate, semitones, pressedAt) -> toastOnce(FeatureText.NO_AUDIO_OUTPUT, error = true)
             else -> {
+                // One from memory clears a mark left by a loaded voice that was never heard (cut first).
+                if (measured) unmeasured -= key else unmeasured += key
                 if (lifted) liveAudio.release(key)
                 if (player.volumeOff()) toastOnce(FeatureText.VOLUME_OFF)
             }
@@ -1183,12 +1207,15 @@ class ArcController(
     }
 
     /**
-     * A voice was heard: how long after the press, in the debug log; Bluetooth's
-     * delay pointed out once. Called on the audio thread with the bare numbers,
-     * so the words are made here, on the main thread.
+     * A voice was heard: how long after the press, in the debug log and (when
+     * it played from memory) the latency test's times for [engine];
+     * Bluetooth's delay pointed out once.
+     * Called on the audio thread with the bare numbers, so the words are made
+     * here, on the main thread.
      */
-    private fun liveStarted(key: String, latencyMs: Double, route: android.media.AudioDeviceInfo?) {
+    private fun liveStarted(key: String, latencyMs: Double, route: android.media.AudioDeviceInfo?, engine: String) {
         scope.launch {
+            if (!unmeasured.remove(key)) latencyTest.heard(engine, latencyMs)
             val where = dev.arc.ep133.audio.SoundPlayer.routeName(route?.type, route?.productName?.toString())
             trafficLog.note(dev.arc.ep133.text.MirrorText.latencyNote(key, latencyMs, where))
             if (!toldBluetooth && route != null && dev.arc.ep133.audio.SoundPlayer.isBluetooth(route.type)) {
@@ -1207,6 +1234,30 @@ class ArcController(
             prepareLive(padMemory.sounds())
         }
     }
+
+    /**
+     * The debug screen's engine choice for Live ([dev.arc.ep133.text.LiveEngine]),
+     * kept in the preferences only. An output open now reopens on it; what
+     * was sounding stops, as when Live closes.
+     */
+    fun setLiveEngine(engine: dev.arc.ep133.text.LiveEngine) {
+        // Not changeSettings: the choice stays out of library.json.
+        settingsStore.update { it.copy(liveEngine = engine) }
+        if (liveAudio.engine == engine) return
+        liveAudio.engine = engine
+        if (!liveAudio.isOpen) return
+        held.clear()
+        cut.clear()
+        unsure.clear()
+        unmeasured.clear()
+        liveAudio.close()
+        val opened = liveAudio.open()
+        trafficLog.note("live audio: " + if (opened) liveAudio.description else "no output")
+        if (opened) prepareLive(padMemory.sounds())
+    }
+
+    /** Forgets the latency test's times. */
+    fun resetLatency() = latencyTest.reset()
 
     // ---------- takes: Live recorded (an addition) ----------
 
@@ -1404,12 +1455,14 @@ class ArcController(
      * as it is mixed, until [releaseNote] (or to the end, with [hold] false).
      * The screen names the note as the finger lands, so a change of key,
      * scale or octave under a held key still lets go of the note it plays.
+     * [pressedAt]: as [playPad]'s.
      */
-    fun playNote(note: Int, hold: Boolean = true): Job {
-        val pressedAt = System.nanoTime()
+    fun playNote(note: Int, hold: Boolean = true, pressedAt: Long = System.nanoTime()): Job {
         lastPressAt = pressedAt
         val key = "note:$note"
         if (hold) held += key
+        // Timed for the latency test only when the KEYS sound is in memory already.
+        val measured = _state.value.keysPad?.let(::padInMemory) != null
         return scope.launch {
             val token = playToken
             val pad = _state.value.keysPad
@@ -1418,7 +1471,7 @@ class ArcController(
                 return@launch
             }
             val a = padAudio(pad) ?: return@launch
-            if (token == playToken) startHeld(key, hold, a, note - dev.arc.ep133.features.Keys.ROOT_NOTE, pressedAt)
+            if (token == playToken) startHeld(key, hold, a, note - dev.arc.ep133.features.Keys.ROOT_NOTE, pressedAt, measured)
         }
     }
 
@@ -1705,6 +1758,7 @@ class ArcController(
         held.clear()
         cut.clear()
         unsure.clear()
+        unmeasured.clear()
         liveAudio.stopAll()
         player.stop()
     }

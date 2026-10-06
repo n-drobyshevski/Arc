@@ -20,11 +20,23 @@ import java.util.concurrent.locks.LockSupport
  * burst is made just before the output needs it, not made and then held in a
  * blocking write for a burst. Where the play head can't be trusted it falls
  * back to that blocking write. Neither allocates.
+ *
+ * [old] (Live's debug choice, for the latency test) writes every burst the
+ * way it was before this pacing: rendered as soon as the last write
+ * returned, then a blocking write, the buffer only growing.
  */
-internal class BurstOutput private constructor(val track: AudioTrack, val burst: Int, fast: Boolean, private val capacity: Int, initial: Int) {
+internal class BurstOutput private constructor(
+    val track: AudioTrack,
+    val burst: Int,
+    /** Whether Android granted the low-latency (fast mixer) path. */
+    val fast: Boolean,
+    private val capacity: Int,
+    initial: Int,
+    val old: Boolean,
+) {
     companion object {
-        /** Opens and starts an output; null when the phone gives none. */
-        fun open(audio: AudioManager?, attributes: AudioAttributes): BurstOutput? {
+        /** Opens and starts an output ([old]: blocking writes, as before the pacing); null when the phone gives none. */
+        fun open(audio: AudioManager?, attributes: AudioAttributes, old: Boolean = false): BurstOutput? {
             val rate = audio?.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)?.toIntOrNull() ?: 48000
             val burst = audio?.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER)?.toIntOrNull()?.takeIf { it > 0 } ?: 256
             val mask = AudioFormat.CHANNEL_OUT_STEREO
@@ -53,7 +65,7 @@ internal class BurstOutput private constructor(val track: AudioTrack, val burst:
             // Two bursts on the fast path; a phone that doesn't grant it gets its usual buffer.
             val fast = track.performanceMode == AudioTrack.PERFORMANCE_MODE_LOW_LATENCY
             val size = track.setBufferSizeInFrames(if (fast) burst * 2 else minBuffer / 4)
-            val out = BurstOutput(track, burst, fast, track.bufferCapacityInFrames, if (size > 0) size else track.bufferSizeInFrames)
+            val out = BurstOutput(track, burst, fast, track.bufferCapacityInFrames, if (size > 0) size else track.bufferSizeInFrames, old)
             runCatching { track.play() }.onFailure {
                 track.release()
                 return null
@@ -64,12 +76,18 @@ internal class BurstOutput private constructor(val track: AudioTrack, val burst:
 
     val rate = track.sampleRate
 
-    /** How it was set up, for the debug log: "48000 Hz, 192-frame bursts, AudioTrack low-latency path". */
-    val description = "$rate Hz, $burst-frame bursts, AudioTrack " + if (fast) "low-latency path" else "normal path (no low-latency output)"
+    /**
+     * How it was set up, for the debug log: "48000 Hz, 192-frame bursts,
+     * AudioTrack low-latency path"; "…, AudioTrack, old, low-latency path" when [old].
+     */
+    val description = "$rate Hz, $burst-frame bursts, AudioTrack" + (if (old) ", old, " else " ") +
+        if (fast) "low-latency path" else "normal path (no low-latency output)"
 
-    private val pacer = OutputPacer(burst, rate, floor = if (fast) burst * 2 else initial)
-    // The buffer size in use: only this class sets it.
-    private var size = initial
+    private val pacer = OutputPacer(burst, rate, floor = if (fast) burst * 2 else initial, old = old)
+
+    /** The buffer size in use, in frames: only this class sets it (the owning thread). */
+    var size = initial
+        private set
     // Whether the burst [ready] let through is to be written blocking.
     private var blockNext = false
 

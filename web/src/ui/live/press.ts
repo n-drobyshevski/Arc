@@ -23,7 +23,8 @@
 // pointermove, the same move again ([PressTracker.move]'s raw). The screen
 // listens for them only while a scroll window is open
 // ([PressTracker.onWindows]): they come at the device's rate, and only those
-// moves matter.
+// moves matter. A press carries its pointerdown's timeStamp ([PressTarget.press]'s
+// at; Kotlin's PointerInputChange.uptimeMillis), for the latency note.
 
 /** How long a press in a scrolling page can still turn into a scroll (as Compose's own press feedback waits). */
 export const PRESS_DELAY_MS = 64
@@ -41,9 +42,10 @@ export function rawMovesSupported(): boolean {
 export interface PressTarget {
   /**
    * The sound starts; hold is true here (a gate). [unsure]: pressed in a
-   * scrolling page, so [keep] or [cut] follows.
+   * scrolling page, so [keep] or [cut] follows. [at]: when the finger came
+   * down (the event's timeStamp, performance.now()'s clock); absent: now.
    */
-  press: (hold: boolean, unsure?: boolean) => void
+  press: (hold: boolean, unsure?: boolean, at?: number) => void
   /** The unsure press was a press after all: the scroll window closed without a scroll, or the finger lifted inside it. */
   keep?: () => void
   /** The finger lifted, left, or a scroll took it over after the scroll window. */
@@ -61,8 +63,8 @@ export function ticking(target: PressTarget, on: boolean, tick: () => void): Pre
   if (!on) return target
   return {
     ...target,
-    press: (hold, unsure) => {
-      target.press(hold, unsure)
+    press: (hold, unsure, at) => {
+      target.press(hold, unsure, at)
       tick()
     },
   }
@@ -115,13 +117,14 @@ export class PressTracker {
   /**
    * A finger (or the mouse) went down on [target]: it sounds at once.
    * [inScroll]: the page scrolls, so for PRESS_DELAY_MS a drag is a scroll.
+   * [at]: the pointerdown's timeStamp, handed to the press.
    */
-  down(id: number, x: number, y: number, target: PressTarget, inScroll: boolean): void {
+  down(id: number, x: number, y: number, target: PressTarget, inScroll: boolean, at?: number): void {
     // A pointer id seen again without its end: finish the old press first.
     this.end(id, false)
     const p: Pointer = { target, x, y, inScroll, timer: null, raw: false }
     this.pointers.set(id, p)
-    target.press(true, inScroll)
+    target.press(true, inScroll, at)
     if (inScroll) {
       p.timer = this.timers.set(() => {
         p.timer = null

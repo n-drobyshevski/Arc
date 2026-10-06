@@ -3,6 +3,7 @@ package dev.arc.ep133.audio
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import dev.arc.ep133.formats.VoiceMixer
+import dev.arc.ep133.text.LatencyText
 import java.util.concurrent.locks.LockSupport
 
 /**
@@ -74,6 +75,13 @@ internal class NativeLiveOutput private constructor(
             val tuned = if (xruns > 0) ", $xruns xruns, $buffer-frame buffer" else ""
             return "${info[NativeAudio.RATE]} Hz, ${info[NativeAudio.BURST]}-frame bursts, $mode$path$tuned"
         }
+
+        /** The engine as the latency test shows it, from [info]: "AAudio exclusive (MMAP), 96-frame bursts", its buffer [buffer] frames. */
+        fun engineOf(info: IntArray, buffer: Int): LiveEngineInfo {
+            val mode = LatencyText.nativeMode(info[NativeAudio.AAUDIO] != 0, info[NativeAudio.EXCLUSIVE] != 0, info[NativeAudio.MMAP] != 0)
+            val burst = info[NativeAudio.BURST]
+            return LiveEngineInfo(LatencyText.nativeEngine(mode, burst, info[NativeAudio.LOW_LATENCY] != 0), info[NativeAudio.RATE], burst, buffer)
+        }
     }
 
     // The stream's set-up, refreshed when it reopens (poll thread).
@@ -86,6 +94,9 @@ internal class NativeLiveOutput private constructor(
         private set
 
     @Volatile override var route: AudioDeviceInfo? = findRoute(info[NativeAudio.DEVICE])
+        private set
+
+    @Volatile override var engine = engineOf(info, info[NativeAudio.BUFFER])
         private set
 
     @Volatile private var running = true
@@ -165,8 +176,10 @@ internal class NativeLiveOutput private constructor(
                         rate = info[NativeAudio.RATE]
                         route = findRoute(info[NativeAudio.DEVICE])
                         description = describe(info, 0, info[NativeAudio.BUFFER])
+                        engine = engineOf(info, info[NativeAudio.BUFFER])
                         listener.routed(route)
                         listener.changed(description)
+                        listener.tuned(engine)
                     }
                 }
                 var heard = 0
@@ -192,7 +205,9 @@ internal class NativeLiveOutput private constructor(
                         NativeAudio.OUTPUT -> {
                             // The callback grew or shrank its buffer, or ran dry.
                             description = describe(info, reports[i + 1].toInt(), reports[i + 2].toInt())
+                            engine = engine.copy(buffer = reports[i + 2].toInt())
                             listener.changed(description)
+                            listener.tuned(engine)
                             i += 3
                         }
                         else -> i = n
@@ -227,7 +242,7 @@ internal class NativeLiveOutput private constructor(
         val atFrame = stamp?.get(0) ?: frame
         val atNanos = stamp?.get(1) ?: System.nanoTime()
         val heardAt = atNanos + ((frame - atFrame) / rate.toDouble() * 1e9).toLong()
-        listener.started(name, (heardAt - tag) / 1e6, route)
+        listener.started(name, (heardAt - tag) / 1e6, route, engine.label)
     }
 
     /** The output device with id [id], if Android lists it. */

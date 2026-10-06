@@ -5,6 +5,7 @@ import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.media.AudioTimestamp
 import dev.arc.ep133.formats.VoiceMixer
+import dev.arc.ep133.text.LatencyText
 
 /**
  * Live's AudioTrack output (an addition), the fallback for the native one
@@ -19,13 +20,19 @@ import dev.arc.ep133.formats.VoiceMixer
  *
  * Each new voice's latency is from the press (its tag) to when its first
  * frame leaves the output, from the output's timestamp. A new route (Android
- * tells [BurstOutput]) reaches the listener from this thread, at the next burst.
+ * tells [BurstOutput]) reaches the listener from this thread, at the next burst,
+ * and so does a buffer grown or shrunk ([LiveListener.tuned]).
+ *
+ * Opened with old (the debug screen's "AudioTrack, old"), it writes as Live
+ * did before the latency work: each burst mixed as soon as the last write
+ * returned, then written blocking, the buffer only growing ([BurstOutput.old]);
+ * [LiveAudio] then opens it with media attributes, as Live had then.
  */
 internal class TrackLiveOutput private constructor(private val output: BurstOutput, private val listener: LiveListener) : LiveOutput {
     companion object {
         /** Opens the output and starts its thread; null when the phone gives none. */
-        fun open(audio: AudioManager?, attributes: AudioAttributes, listener: LiveListener): TrackLiveOutput? =
-            BurstOutput.open(audio, attributes)?.let { TrackLiveOutput(it, listener).apply { thread.start() } }
+        fun open(audio: AudioManager?, attributes: AudioAttributes, listener: LiveListener, old: Boolean = false): TrackLiveOutput? =
+            BurstOutput.open(audio, attributes, old)?.let { TrackLiveOutput(it, listener).apply { thread.start() } }
     }
 
     private val mixer = VoiceMixer(output.rate)
@@ -35,6 +42,9 @@ internal class TrackLiveOutput private constructor(private val output: BurstOutp
     override val rate = output.rate
     override val description = output.description
     override val route: AudioDeviceInfo? get() = output.route
+
+    @Volatile override var engine = LiveEngineInfo(LatencyText.trackEngine(output.fast, output.burst, output.old), output.rate, output.burst, output.size)
+        private set
 
     override fun start(key: String, pcm: ShortArray, channels: Int, sampleRate: Int, semitones: Int, tag: Long): Boolean {
         mixer.start(key, pcm, channels, sampleRate, semitones, tag)
@@ -85,6 +95,10 @@ internal class TrackLiveOutput private constructor(private val output: BurstOutp
                 // The mixer makes a new set only when the voices change.
                 listener.keys(mixer.keys)
                 o.adjust()
+                if (o.size != engine.buffer) {
+                    engine = engine.copy(buffer = o.size)
+                    listener.tuned(engine)
+                }
             }
         } finally {
             listener.ended()
@@ -101,11 +115,12 @@ internal class TrackLiveOutput private constructor(private val output: BurstOutp
         val atNanos = if (stamped) ts.nanoTime else System.nanoTime()
         val atFrame = if (stamped) ts.framePosition else o.track.playbackHeadPosition.toLong()
         val route = o.route
+        val label = engine.label
         for (i in started.indices) {
             val v = started[i]
             if (v.tag == 0L) continue
             val heardAt = atNanos + ((v.frame - atFrame) / rate * 1e9).toLong()
-            listener.started(v.key, (heardAt - v.tag) / 1e6, route)
+            listener.started(v.key, (heardAt - v.tag) / 1e6, route, label)
         }
     }
 }

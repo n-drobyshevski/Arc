@@ -22,7 +22,13 @@
 // - padMemory is a Map kept in access order by hand (LinkedHashMap with
 //   accessOrder). Each sample is also loaded into LiveAudioDeps under the same
 //   key ("slot:name"), so a press sends only names to the audio thread.
-// - Times are Deps.perfNow ms (System.nanoTime on Android).
+// - Times are Deps.perfNow ms (System.nanoTime on Android). A press's time
+//   is its input event's timeStamp (PointerEvent / KeyboardEvent, on the same
+//   clock) where the screen passes one ([pressTime]; Android converts the
+//   touch's uptimeMillis), so the latency note counts the input's dispatch.
+// - The latency test ([latency], [latencyOpened], [resetLatency]) keeps,
+//   beside LatencyStats, each row's LiveEngineInfo (the output's reported
+//   delay) for its estimate line, in one signal (Android's LiveLatency).
 // - Bluetooth's delay is pointed out when Live's output reports a slow
 //   output (LiveAudioDeps.onSlowOutput): browsers don't tell where the sound
 //   goes, so the output guesses from its own latency, and the toast is
@@ -32,9 +38,11 @@
 // - The background copy reads each sound at most once a run, so a copy the
 //   store refuses (quota) is not downloaded over and over.
 
+import { signal, type ReadonlySignal } from '@preact/signals'
 import { openPak, type Pak } from '../core/backup/pak'
 import { soundDetails, type SoundDetails } from '../core/features/deviceBrowser'
 import { Keys, notes as keyNotes } from '../core/features/keys'
+import { LatencyStats } from '../core/features/latencyStats'
 import type { NameEntry } from '../core/features/librarySearch'
 import type { LiveMirror } from '../core/features/liveMirror'
 import { fromJson as snapshotFromJson, toJson as snapshotToJson, type LiveSnapshot } from '../core/features/liveSnapshot'
@@ -49,7 +57,7 @@ import { FeatureText } from '../core/text/featureText'
 import { MirrorText } from '../core/text/mirrorText'
 import { WebText } from '../core/text/webText'
 import { ktTrim } from '../core/util/kotlinText'
-import type { Deps } from './deps'
+import type { Deps, LiveEngineInfo } from './deps'
 import type { Store } from './store'
 import { errorText, type Tasks } from './tasks'
 import type { UiState } from './types'
@@ -92,6 +100,37 @@ export function s16leBytes(pcm: Int16Array): Uint8Array {
 export function memoryKey(slot: number, name: string): string {
   return `${slot}:${ktTrim(name).toLowerCase()}`
 }
+
+/**
+ * An input event's timeStamp further than this before the press's handler
+ * runs is not taken for its time: an old browser's epoch timeStamp, or one
+ * on another clock.
+ */
+export const PRESS_STAMP_MAX_MS = 1000
+
+/**
+ * When the finger came down, on Deps.perfNow's clock: [at] (the input event's
+ * timeStamp) where it is one, so the latency note counts the input's dispatch
+ * too; else [now]. A stamp after [now] or over [PRESS_STAMP_MAX_MS] before it
+ * is on another clock.
+ */
+export function pressTime(at: number | undefined, now: number): number {
+  return at !== undefined && Number.isFinite(at) && at > 0 && at <= now && now - at <= PRESS_STAMP_MAX_MS ? at : now
+}
+
+/** The latency test's numbers: each engine's press-to-sound times, and the delay each one's output reported. */
+export interface LiveLatency {
+  readonly stats: LatencyStats
+  /** Every engine opened, by row label (the keys in [stats]), first opened first. */
+  readonly engines: ReadonlyMap<string, LiveEngineInfo>
+}
+
+/** The rows of [l]: every engine opened or measured, first first (Kotlin's LiveLatency.State.engines). */
+export function latencyRows(l: LiveLatency): string[] {
+  return [...new Set([...l.engines.keys(), ...l.stats.engines])]
+}
+
+const NO_LATENCY: LiveLatency = { stats: new LatencyStats(), engines: new Map() }
 
 /** Live's voice id for a pad: "live:<group>:<offset>". */
 export const padVoice = (pad: { readonly group: number; readonly offset: number }): string => `live:${pad.group}:${pad.offset}`
@@ -143,11 +182,17 @@ export class LiveSounds {
   // Presses on the scrolling page that may still turn into a scroll ([playPad] unsure), until
   // [keepPad] or [cutPad]: whether their sound already started (from memory) or waits to load.
   private readonly unsure = new Map<string, { readonly started: boolean; readonly pressedAt: number; readonly token: number }>()
+  // Voices started after their sample had to load (or wait out the scroll window): their latency
+  // is logged, but kept out of the latency test, which times only presses played from memory.
+  private readonly unmeasured = new Set<string>()
   // The device's project, pads and names as Live last read them, shown while it is not connected.
   private lastRead: LiveSnapshot | null = null
   private lastReadLoaded = false
   // Bluetooth's delay is pointed out once a run.
   private toldBluetooth = false
+  private readonly _latency = signal<LiveLatency>(NO_LATENCY)
+  /** The debug screen's latency test: each engine's last LatencyStats.KEEP press-to-sound times this session. */
+  readonly latency: ReadonlySignal<LiveLatency> = this._latency
 
   constructor(private readonly host: LiveHost) {
     this.cache = new PadSoundCache(host.deps.padSounds)
@@ -499,6 +544,7 @@ export class LiveSounds {
   suspendAudio(): void {
     this.held.clear()
     this.unsure.clear()
+    this.unmeasured.clear()
     const a = this.host.deps.liveAudio
     if (a.suspend) a.suspend()
     else a.close()
@@ -508,6 +554,7 @@ export class LiveSounds {
   closeAudio(): void {
     this.held.clear()
     this.unsure.clear()
+    this.unmeasured.clear()
     this.host.deps.liveAudio.close()
   }
 
@@ -515,12 +562,37 @@ export class LiveSounds {
   stopAll(): void {
     this.held.clear()
     this.unsure.clear()
+    this.unmeasured.clear()
     this.host.deps.liveAudio.stopAll()
   }
 
-  /** A voice was heard: how long after the press, in the debug log. */
-  onStarted(id: string, latencyMs: number, route: string): void {
+  /**
+   * A voice was heard: how long after the press, in the debug log, and (when
+   * it played from memory) on [engine]'s row of the latency test.
+   */
+  onStarted(id: string, latencyMs: number, route: string, engine?: LiveEngineInfo): void {
     this.host.deps.trafficLog.note(MirrorText.latencyNote(id, latencyMs, route))
+    if (this.unmeasured.delete(id) || engine === undefined) return
+    const cur = this._latency.peek()
+    const stats = cur.stats.add(engine.label, latencyMs)
+    // A time the clocks got wrong is left out.
+    if (stats === cur.stats) return
+    this._latency.value = { stats, engines: new Map(cur.engines).set(engine.label, engine) }
+  }
+
+  /**
+   * Live's output set up on [engine], or its reported delay changed: its row
+   * shows it (keeping its place when that engine opens again).
+   */
+  latencyOpened(engine: LiveEngineInfo): void {
+    const cur = this._latency.peek()
+    this._latency.value = { stats: cur.stats, engines: new Map(cur.engines).set(engine.label, engine) }
+  }
+
+  /** The latency test's Reset: every row's times go; the engines tried keep their rows. */
+  resetLatency(): void {
+    const cur = this._latency.peek()
+    this._latency.value = { stats: cur.stats.reset(), engines: cur.engines }
   }
 
   /** The output looks like Bluetooth: its delay is pointed out once a run. */
@@ -540,12 +612,12 @@ export class LiveSounds {
    * [unsure]: a press on the scrolling page, which may still turn into a
    * scroll. A sample in memory sounds at once all the same; the rest (the
    * KEYS pad, a load from the device, the "no sample" toast) waits for
-   * [keepPad], and [cutPad] drops it.
+   * [keepPad], and [cutPad] drops it. [at]: the press's event timeStamp ([pressTime]).
    */
-  playPad(pad: PhysicalPad, hold = true, unsure = false): Promise<void> {
+  playPad(pad: PhysicalPad, hold = true, unsure = false, at?: number): Promise<void> {
     const { host } = this
     host.deps.liveAudio.resumeInGesture()
-    const pressedAt = host.deps.perfNow()
+    const pressedAt = pressTime(at, host.deps.perfNow())
     const id = padVoice(pad)
     if (hold) this.held.add(id)
     this.cuts.delete(id)
@@ -554,7 +626,7 @@ export class LiveSounds {
     // In memory: plays now, without waiting a turn.
     const sample = this.padSample(pad)
     const mem = sample ? this.fromMemory(memoryKey(sample.slot, sample.name)) : null
-    if (sample && mem) this.startHeld(id, hold, memoryKey(sample.slot, sample.name), mem, 0, pressedAt)
+    if (sample && mem) this.startHeld(id, hold, memoryKey(sample.slot, sample.name), mem, 0, pressedAt, true)
     if (unsure && hold) {
       this.unsure.set(id, { started: mem !== null, pressedAt, token })
       return Promise.resolve()
@@ -583,7 +655,7 @@ export class LiveSounds {
   /** Loads [pad]'s sample (copy, backup or device) and starts its voice, unless a stop came meanwhile. */
   private async loadAndStart(pad: PhysicalPad, id: string, hold: boolean, pressedAt: number, token: number): Promise<void> {
     const got = await this.padAudio(pad)
-    if (got !== null && token === this.host.playToken()) this.startHeld(id, hold, got.key, got.audio, 0, pressedAt)
+    if (got !== null && token === this.host.playToken()) this.startHeld(id, hold, got.key, got.audio, 0, pressedAt, false)
   }
 
   /** The finger left the pad: its sound fades out. */
@@ -604,12 +676,12 @@ export class LiveSounds {
   /**
    * Plays key [index] (0 = '.', the lowest): the KEYS sound, repitched to
    * that key's note as it is mixed, until [releaseKey] (or to the end, with
-   * [hold] false). Call from the press.
+   * [hold] false). Call from the press; [at]: its event timeStamp ([pressTime]).
    */
-  playKey(index: number, hold = true): Promise<void> {
+  playKey(index: number, hold = true, at?: number): Promise<void> {
     const { host } = this
     host.deps.liveAudio.resumeInGesture()
-    const pressedAt = host.deps.perfNow()
+    const pressedAt = pressTime(at, host.deps.perfNow())
     const id = keyVoice(index)
     if (hold) this.held.add(id)
     const token = host.playToken()
@@ -625,12 +697,12 @@ export class LiveSounds {
     const sample = this.padSample(pad)
     const mem = sample ? this.fromMemory(memoryKey(sample.slot, sample.name)) : null
     if (sample && mem) {
-      this.startHeld(id, hold, memoryKey(sample.slot, sample.name), mem, pitch, pressedAt)
+      this.startHeld(id, hold, memoryKey(sample.slot, sample.name), mem, pitch, pressedAt, true)
       return Promise.resolve()
     }
     return (async () => {
       const got = await this.padAudio(pad)
-      if (got !== null && token === host.playToken()) this.startHeld(id, hold, got.key, got.audio, pitch, pressedAt)
+      if (got !== null && token === host.playToken()) this.startHeld(id, hold, got.key, got.audio, pitch, pressedAt, false)
     })()
   }
 
@@ -644,12 +716,12 @@ export class LiveSounds {
    * pitch (C4) as it is mixed, until [releaseNote] (or to the end, with
    * [hold] false). The piano names the note as the finger lands, so a change
    * of octave under a held key still lets go of the note it plays. Call from
-   * the press.
+   * the press; [at]: its event timeStamp ([pressTime]).
    */
-  playNote(note: number, hold = true): Promise<void> {
+  playNote(note: number, hold = true, at?: number): Promise<void> {
     const { host } = this
     host.deps.liveAudio.resumeInGesture()
-    const pressedAt = host.deps.perfNow()
+    const pressedAt = pressTime(at, host.deps.perfNow())
     const id = noteVoice(note)
     if (hold) this.held.add(id)
     const token = host.playToken()
@@ -662,12 +734,12 @@ export class LiveSounds {
     const sample = this.padSample(pad)
     const mem = sample ? this.fromMemory(memoryKey(sample.slot, sample.name)) : null
     if (sample && mem) {
-      this.startHeld(id, hold, memoryKey(sample.slot, sample.name), mem, pitch, pressedAt)
+      this.startHeld(id, hold, memoryKey(sample.slot, sample.name), mem, pitch, pressedAt, true)
       return Promise.resolve()
     }
     return (async () => {
       const got = await this.padAudio(pad)
-      if (got !== null && token === host.playToken()) this.startHeld(id, hold, got.key, got.audio, pitch, pressedAt)
+      if (got !== null && token === host.playToken()) this.startHeld(id, hold, got.key, got.audio, pitch, pressedAt, false)
     })()
   }
 
@@ -681,8 +753,12 @@ export class LiveSounds {
     this.host.deps.liveAudio.release(id)
   }
 
-  /** Starts a Live voice; one let go while it was loading still sounds, briefly. */
-  private startHeld(id: string, hold: boolean, key: string, a: PadAudio, semitones: number, pressedAt: number): void {
+  /**
+   * Starts a Live voice; one let go while it was loading still sounds,
+   * briefly. [measured]: the sample was in memory at the press, so its latency
+   * goes into the latency test; a load's time would only blur it.
+   */
+  private startHeld(id: string, hold: boolean, key: string, a: PadAudio, semitones: number, pressedAt: number, measured: boolean): void {
     const { host } = this
     const out = host.deps.liveAudio
     if (this.cuts.delete(id)) return
@@ -691,7 +767,12 @@ export class LiveSounds {
       return
     }
     if (!out.has(key)) out.preload(key, a.pcm, a.channels, a.sampleRate)
+    // Marked before the press, which may report at once; one from memory clears a mark left by a
+    // loaded voice that was never heard (cut first).
+    if (measured) this.unmeasured.delete(id)
+    else this.unmeasured.add(id)
     if (!out.press(id, key, { pitch: semitones, gate: hold, pressedAt })) {
+      this.unmeasured.delete(id)
       host.toast(FeatureText.NO_AUDIO_OUTPUT, true)
       return
     }

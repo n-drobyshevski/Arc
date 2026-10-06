@@ -1,5 +1,6 @@
 package dev.arc.ep133.audio
 
+import dev.arc.ep133.text.LiveEngine
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
@@ -49,6 +50,21 @@ class LiveEngineTest {
         choice.opened(true)
         choice.gaveOut()
         assertFalse(choice.native())
+    }
+
+    @Test
+    fun `the debug screen's choice of AudioTrack keeps native closed`() {
+        val choice = EngineChoice { true }
+        assertEquals(LiveEngine.AUTO, choice.engine)
+        choice.engine = LiveEngine.TRACK
+        assertFalse(choice.native())
+        assertFalse(choice.old)
+        choice.engine = LiveEngine.TRACK_OLD
+        assertFalse(choice.native())
+        assertTrue(choice.old)
+        // Back to Auto: native again, unless it gave out meanwhile.
+        choice.engine = LiveEngine.AUTO
+        assertTrue(choice.native())
     }
 
     @Test
@@ -155,5 +171,25 @@ class LiveEngineTest {
             "48000 Hz, 96-frame bursts, AAudio shared, normal path (no low-latency output), 2 xruns, 384-frame buffer",
             NativeLiveOutput.describe(info(0, 0, low = 0), 2, 384),
         )
+    }
+
+    @Test
+    fun `the latency test names the native engine without its buffer`() {
+        val info = IntArray(NativeAudio.INFO_SIZE).also {
+            it[NativeAudio.RATE] = 48000
+            it[NativeAudio.BURST] = 96
+            it[NativeAudio.EXCLUSIVE] = 1
+            it[NativeAudio.MMAP] = 1
+            it[NativeAudio.LOW_LATENCY] = 1
+            it[NativeAudio.AAUDIO] = 1
+        }
+        assertEquals(
+            LiveEngineInfo("AAudio exclusive (MMAP), 96-frame bursts", 48000, 96, 192),
+            NativeLiveOutput.engineOf(info, 192),
+        )
+        info[NativeAudio.EXCLUSIVE] = 0
+        info[NativeAudio.LOW_LATENCY] = 0
+        // A buffer grown after xruns keeps the label, so its presses stay on one row.
+        assertEquals("AAudio shared (MMAP), 96-frame bursts, normal path", NativeLiveOutput.engineOf(info, 384).label)
     }
 }

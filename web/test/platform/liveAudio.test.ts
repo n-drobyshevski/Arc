@@ -6,6 +6,7 @@ import {
   LATE_OUTPUT_MS,
   LATE_STEP_MS,
   LATENCY_GLITCHES,
+  CHOICE_KEY,
   HINT_KEY,
   LiveAudio,
   MixerHost,
@@ -15,7 +16,10 @@ import {
   describeOutput,
   heardAt,
   isSlowOutput,
+  choiceOf,
+  hintOf,
   lateBy,
+  outputEngine,
   outputLatency,
   s16leToInt16,
   transferable,
@@ -25,8 +29,10 @@ import {
   type LiveContextLike,
   type LiveLatencyHint,
   type MixerLink,
+  type OutputEngine,
   type ToMixer,
 } from '../../src/platform/audio/liveAudio'
+import { WebLatencyHint } from '../../src/core/text/latencyText'
 import { VoiceMixer } from '../../src/core/formats/voiceMixer'
 import { WebText } from '../../src/core/text/webText'
 import type { LiveAudioDeps } from '../../src/state/deps'
@@ -138,6 +144,8 @@ class FakeBackend implements LiveBackend {
   }
   savedHint?: () => LiveLatencyHint
   saveHint?: (hint: LiveLatencyHint) => void
+  savedChoice?: () => WebLatencyHint
+  saveChoice?: (choice: WebLatencyHint) => void
   get ctx(): FakeContext {
     return this.contexts[this.contexts.length - 1]!
   }
@@ -1060,6 +1068,190 @@ describe('browserLiveBackend', () => {
       expect(() => backend.saveHint?.('interactive')).not.toThrow()
     } finally {
       store.sessionStorage = before
+    }
+  })
+})
+
+describe('LiveAudio latency test', () => {
+  it('hintOf and choiceOf map the debug choice to the latencyHint and back', () => {
+    expect(hintOf(WebLatencyHint.ZERO)).toBe(0)
+    expect(hintOf(WebLatencyHint.INTERACTIVE)).toBe('interactive')
+    expect(choiceOf(0)).toBe(WebLatencyHint.ZERO)
+    expect(choiceOf('interactive')).toBe(WebLatencyHint.INTERACTIVE)
+  })
+
+  it("outputEngine names the row from the hint and rate, and carries the output's reported delay", () => {
+    expect(outputEngine(0, { sampleRate: 48000, baseLatency: 0.0053, outputLatency: 0.021 })).toEqual({
+      label: 'latencyHint 0, 48000 Hz',
+      baseMs: 5.3,
+      outputMs: 21,
+    })
+    // An output delay of 0 (or none) is one the browser hasn't reported; the row is the same.
+    expect(outputEngine(0, { sampleRate: 48000, baseLatency: 0.0053, outputLatency: 0 })).toEqual({
+      label: 'latencyHint 0, 48000 Hz',
+      baseMs: 5.3,
+      outputMs: null,
+    })
+    expect(outputEngine('interactive', { sampleRate: 44100 })).toEqual({
+      label: "latencyHint 'interactive', 44100 Hz",
+      baseMs: 0,
+      outputMs: null,
+    })
+  })
+
+  it('defaults to latencyHint 0, and a kept choice of interactive opens at it', async () => {
+    const { live, backend } = await opened()
+    expect(live.latencyHint.value).toBe(WebLatencyHint.ZERO)
+    expect(backend.hints).toEqual([0])
+    const kept = new FakeBackend()
+    kept.savedChoice = () => WebLatencyHint.INTERACTIVE
+    const other = await opened(kept)
+    expect(other.live.latencyHint.value).toBe(WebLatencyHint.INTERACTIVE)
+    expect(kept.hints).toEqual(['interactive'])
+  })
+
+  it('a new choice while Live is open is kept and reopens the output at once, the samples sent again', async () => {
+    const chosen: WebLatencyHint[] = []
+    const backend = new FakeBackend()
+    backend.saveChoice = (c) => chosen.push(c)
+    const { live, log } = await opened(backend)
+    live.preload('s', tone(), 1, RATE)
+    const old = backend.ctx
+    live.setLatencyHint(WebLatencyHint.INTERACTIVE)
+    expect(chosen).toEqual([WebLatencyHint.INTERACTIVE])
+    expect(live.latencyHint.value).toBe(WebLatencyHint.INTERACTIVE)
+    expect(log).toContain("live audio: latencyHint 'interactive' chosen")
+    expect(old.closed).toBe(true)
+    expect(live.isOpen).toBe(true)
+    expect(backend.hints).toEqual([0, 'interactive'])
+    expect(backend.ctx.resumes).toBe(1)
+    await flush()
+    expect(backend.link.sent.map((m) => m.t)).toEqual(['load'])
+    expect(live.press('k', 's', PAD)).toBe(true)
+    // The same choice again changes nothing.
+    live.setLatencyHint(WebLatencyHint.INTERACTIVE)
+    expect(chosen).toHaveLength(1)
+    expect(backend.contexts).toHaveLength(2)
+  })
+
+  it('a new choice while Live is away lets the suspended output go; coming back opens one at the new hint', async () => {
+    const { live, backend } = await opened()
+    live.suspend()
+    await flush()
+    live.setLatencyHint(WebLatencyHint.INTERACTIVE)
+    expect(backend.ctx.closed).toBe(true)
+    expect(live.isOpen).toBe(false)
+    expect(live.open()).toBe(true)
+    expect(backend.hints).toEqual([0, 'interactive'])
+    // Before any output, a choice only sets the next one's hint.
+    const fresh = new LiveAudio(new FakeBackend())
+    fresh.setLatencyHint(WebLatencyHint.INTERACTIVE)
+    expect(fresh.isOpen).toBe(false)
+  })
+
+  it('choosing forgets a step back after glitches, so 0 is tried afresh; the step back applies to 0 only', async () => {
+    const saved: LiveLatencyHint[] = []
+    const backend = new FakeBackend()
+    backend.savedHint = () => 'interactive'
+    backend.saveHint = (h) => saved.push(h)
+    const { live } = await opened(backend)
+    expect(backend.hints).toEqual(['interactive'])
+    live.setLatencyHint(WebLatencyHint.INTERACTIVE)
+    expect(saved).toEqual([0])
+    // Already at 'interactive': nothing to reopen.
+    expect(backend.contexts).toHaveLength(1)
+    live.setLatencyHint(WebLatencyHint.ZERO)
+    expect(backend.hints).toEqual(['interactive', 0])
+    // Glitches at the 'interactive' choice step nothing back.
+    live.setLatencyHint(WebLatencyHint.INTERACTIVE)
+    backend.ctx.playbackStats = { underrunEvents: 0 }
+    backend.ctx.setState('running')
+    backend.ctx.playbackStats = { underrunEvents: LATENCY_GLITCHES * 2 }
+    live.suspend()
+    expect(saved).toEqual([0])
+    // At 0 they do, as before.
+    live.setLatencyHint(WebLatencyHint.ZERO)
+    live.open()
+    await flush()
+    backend.ctx.playbackStats = { underrunEvents: 0 }
+    backend.ctx.setState('running')
+    backend.ctx.playbackStats = { underrunEvents: LATENCY_GLITCHES }
+    live.suspend()
+    expect(saved).toEqual([0, 'interactive'])
+    live.open()
+    expect(backend.hints.at(-1)).toBe('interactive')
+  })
+
+  it("the output's row shows once it is set up, keeps its name as the reported delay wanders, and each heard voice carries it", async () => {
+    const backend = new FakeBackend()
+    const live = new LiveAudio(backend)
+    const got: { ms: number; engine: OutputEngine }[] = []
+    live.onStarted((_id, ms, _route, engine) => got.push({ ms, engine }))
+    expect(live.engine.value).toBeNull()
+    live.open()
+    await flush()
+    const label = `latencyHint 0, ${RATE} Hz`
+    const first: OutputEngine = { label, baseMs: 5, outputMs: 20 }
+    // Before any press.
+    expect(live.engine.value).toEqual(first)
+    live.preload('s', tone(), 1, RATE)
+    backend.ctx.state = 'running'
+    backend.ctx.timestamp = { contextTime: 1, performanceTime: 1020 }
+    live.press('a', 's', { ...PAD, pressedAt: 1000 })
+    backend.link.render(1)
+    expect(got).toEqual([{ ms: 20, engine: first }])
+    expect(got[0]?.engine).toBe(live.engine.value)
+    // The output's delay wanders: the same row, with the latest delay for its estimate.
+    backend.ctx.outputLatency = 0.023
+    live.press('b', 's', { ...PAD, pressedAt: 1000 })
+    backend.link.render(1)
+    expect(got[1]?.engine).toEqual({ label, baseMs: 5, outputMs: 23 })
+    expect(live.engine.value).toBe(got[1]?.engine)
+    // Unchanged, the same value.
+    live.press('c', 's', { ...PAD, pressedAt: 1000 })
+    backend.link.render(1)
+    expect(got[2]?.engine).toBe(got[1]?.engine)
+    // None while closed; the same choice reopened is the same row, another choice another.
+    live.close()
+    expect(live.engine.value).toBeNull()
+    live.open()
+    await flush()
+    expect(live.engine.value?.label).toBe(label)
+    live.setLatencyHint(WebLatencyHint.INTERACTIVE)
+    await flush()
+    expect(live.engine.value?.label).toBe(`latencyHint 'interactive', ${RATE} Hz`)
+  })
+})
+
+describe('browserLiveBackend latency choice', () => {
+  it('keeps the choice in localStorage, and carries on where storage is blocked', () => {
+    const store = globalThis as unknown as { localStorage?: unknown }
+    const before = store.localStorage
+    try {
+      const items = new Map<string, string>()
+      store.localStorage = {
+        getItem: (k: string) => items.get(k) ?? null,
+        setItem: (k: string, v: string) => items.set(k, v),
+      }
+      const backend = browserLiveBackend()
+      expect(backend.savedChoice?.()).toBe(WebLatencyHint.ZERO)
+      backend.saveChoice?.(WebLatencyHint.INTERACTIVE)
+      expect(items.get(CHOICE_KEY)).toBe('INTERACTIVE')
+      expect(browserLiveBackend().savedChoice?.()).toBe(WebLatencyHint.INTERACTIVE)
+      items.set(CHOICE_KEY, 'something else')
+      expect(backend.savedChoice?.()).toBe(WebLatencyHint.ZERO)
+      store.localStorage = {
+        getItem: () => {
+          throw new Error('SecurityError')
+        },
+        setItem: () => {
+          throw new Error('SecurityError')
+        },
+      }
+      expect(backend.savedChoice?.()).toBe(WebLatencyHint.ZERO)
+      expect(() => backend.saveChoice?.(WebLatencyHint.INTERACTIVE)).not.toThrow()
+    } finally {
+      store.localStorage = before
     }
   })
 })

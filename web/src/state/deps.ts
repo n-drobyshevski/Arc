@@ -19,6 +19,7 @@
 import type { ReadonlySignal } from '@preact/signals'
 import { signal } from '@preact/signals'
 import type { PadSoundStore } from '../core/features/padSoundCache'
+import type { WebLatencyHint } from '../core/text/latencyText'
 import type { TrafficLog } from '../core/protocol/trafficLog'
 import type { MidiAccessLike, MidiDeviceEvent, MidiPermission, OpenMidi } from '../platform/midi/webmidi'
 import type { ReleaseLock } from '../platform/midi/owner'
@@ -83,8 +84,20 @@ export interface LivePress {
   readonly pitch: number
   /** True: sounds until release(id), then fades quickly (the EP-133's gate). False: plays to the end. */
   readonly gate: boolean
-  /** When the finger came down (Deps.perfNow, ms), for the latency note. */
+  /** When the finger came down (Deps.perfNow, ms: the input event's own time), for the latency note. */
   readonly pressedAt?: number
+}
+
+/**
+ * Live's output as the debug screen's latency test names it: [label] is its
+ * row (LatencyText.webEngine: the latencyHint and rate, the key in
+ * LatencyStats), with the delay the output reported last, for the estimate line.
+ */
+export interface LiveEngineInfo {
+  readonly label: string
+  readonly baseMs: number
+  /** Null where the browser doesn't report the output's own delay. */
+  readonly outputMs: number | null
 }
 
 /**
@@ -131,8 +144,11 @@ export interface LiveAudioDeps {
   readonly voices: ReadonlySignal<ReadonlySet<string>>
   /** How the output was set up, for the debug log ("48000 Hz, …"), "" before it opens. */
   readonly description: string
-  /** Each voice's delay from its press to its first frame leaving the output, and where the output goes. */
-  onStarted(listener: (id: string, latencyMs: number, route: string) => void): () => void
+  /**
+   * Each voice's delay from its press to its first frame leaving the output,
+   * where the output goes, and (where the output names it) its latency-test row.
+   */
+  onStarted(listener: (id: string, latencyMs: number, route: string, engine?: LiveEngineInfo) => void): () => void
   /** The output looks like Bluetooth (its own delay, [outputMs]); the controller says so once. */
   onSlowOutput?(listener: (outputMs: number) => void): () => void
   /**
@@ -142,6 +158,12 @@ export interface LiveAudioDeps {
   readonly late?: ReadonlySignal<number | null>
   /** Lines for the debug log (how the output was set up, or why there is none). */
   onLog?(listener: (line: string) => void): () => void
+  /** The debug screen's latencyHint choice (absent: no choice to make). */
+  readonly latencyHint?: ReadonlySignal<WebLatencyHint>
+  /** Changes it: kept, and an open output is reopened at the new hint. */
+  setLatencyHint?(choice: WebLatencyHint): void
+  /** The open output's latency-test row once it is set up (again whenever its reported delay changes), else null. */
+  readonly engine?: ReadonlySignal<LiveEngineInfo | null>
 }
 
 /** A Live output that never opens (tests, or a browser without Web Audio). */

@@ -42,6 +42,10 @@
 //   The piano plays MIDI notes ([playNote]); the KEYS grid keeps [playKey].
 // - [liveLate]: Live's output delay, for the display line's note, from the
 //   output's latency (LiveAudioDeps.late); Android names Bluetooth from the route (liveWireless).
+// - The debug screen's latency test: [liveLatency] / [resetLatency] (live.ts),
+//   [liveEngine] (the row in use) and [liveLatencyHint] / [setLiveLatencyHint],
+//   the web's stand-in for Android's audio engine choice (LatencyText). Play
+//   actions take the press's event timeStamp ([at]) for the latency note.
 
 import { computed, signal, type ReadonlySignal, type Signal } from '@preact/signals'
 import { MAX_OCTAVE, MIN_OCTAVE, type NoteNames, type Scale } from '../core/features/keys'
@@ -63,6 +67,7 @@ import { assignPad as writePadSound, type SoundEntry } from '../core/protocol/de
 import { download } from '../core/protocol/fs'
 import type { TrafficLog } from '../core/protocol/trafficLog'
 import { FeatureText } from '../core/text/featureText'
+import type { WebLatencyHint } from '../core/text/latencyText'
 import { MirrorText } from '../core/text/mirrorText'
 import { DATE_TIME_PATTERN, DAY_PATTERN, date as formatDate } from '../core/text/format'
 import { BackupDevice, fileNameFor, importTitle, toPrune, type BackupRecord, type RestoreSelection } from '../core/text/libraryRules'
@@ -79,8 +84,8 @@ import { describeForRestore } from '../platform/storage/library'
 import { indexSettings, type AppSettings } from '../platform/storage/settings'
 import { keepScreenOn } from '../platform/wakelock/wakeLock'
 import { Connection, connectionPhase, type ConnectionPhase } from './connection'
-import type { Deps } from './deps'
-import { LiveSounds } from './live'
+import type { Deps, LiveEngineInfo } from './deps'
+import { LiveSounds, type LiveLatency } from './live'
 import { MirrorController } from './mirror'
 import { PreviewCache, type DecodedSound } from './previewCache'
 import { createStore, type Store } from './store'
@@ -156,6 +161,12 @@ export class ArcController {
    */
   readonly liveLate: ReadonlySignal<number | null>
   private readonly slowMs = signal<number | null>(null)
+  /** The debug screen's latency test: each engine's press-to-sound times this session. */
+  readonly liveLatency: ReadonlySignal<LiveLatency>
+  /** The row of the output Live plays through now (once heard), for "In use". */
+  readonly liveEngine: ReadonlySignal<LiveEngineInfo | null>
+  /** The debug screen's latencyHint choice; null where the output has none. */
+  readonly liveLatencyHint: ReadonlySignal<WebLatencyHint> | null
 
   private readonly settingsSignal: Signal<AppSettings>
   private readonly tasks: Tasks
@@ -234,6 +245,8 @@ export class ArcController {
     })
     const late = deps.liveAudio.late
     this.liveLate = late ?? this.slowMs
+    this.liveEngine = deps.liveAudio.engine ?? signal(null)
+    this.liveLatencyHint = deps.liveAudio.latencyHint ?? null
     this.visible = deps.visibility.visible()
     const toast = (text: string, error?: boolean): void => this.toast(text, error)
     this.tasks = new Tasks({ store: this.store, deps, toast, session: () => this.conn.session })
@@ -254,6 +267,7 @@ export class ArcController {
       playToken: () => this.playToken,
       toast,
     })
+    this.liveLatency = this.live.latency
     this.store.update((s) => ({ ...s, keysPad: deps.mirrorPrefs.savedKeysPad() }))
     this.mirror = new MirrorController({
       store: this.store,
@@ -290,7 +304,15 @@ export class ArcController {
     lib.onExternalError = (msg) => this.toast(WebText.copyFailed(msg), true)
     lib.live = () => this.live.lastReadJson()
     const audio = deps.liveAudio
-    this.cleanups.push(audio.onStarted((id, ms, route) => this.live.onStarted(id, ms, route)))
+    this.cleanups.push(audio.onStarted((id, ms, route, engine) => this.live.onStarted(id, ms, route, engine)))
+    // Each output set up gets its row in the latency test, before its first press.
+    if (audio.engine) {
+      this.cleanups.push(
+        audio.engine.subscribe((e) => {
+          if (e) this.live.latencyOpened(e)
+        }),
+      )
+    }
     if (audio.onSlowOutput) {
       this.cleanups.push(
         audio.onSlowOutput((ms) => {
@@ -995,9 +1017,10 @@ export class ArcController {
    * sounds, until [releasePad]; [hold] false (a screen reader's Play) plays
    * it to the end. The pad also becomes the KEYS sound. Call from the press.
    * [unsure]: a press on the scrolling page, settled by [keepPad] or [cutPad].
+   * [at]: the press's event timeStamp, for the latency note.
    */
-  playPad(pad: PhysicalPad, hold = true, unsure = false): Promise<void> {
-    return this.live.playPad(pad, hold, unsure)
+  playPad(pad: PhysicalPad, hold = true, unsure = false, at?: number): Promise<void> {
+    return this.live.playPad(pad, hold, unsure, at)
   }
 
   /** The unsure press on the pad was a press after all: it becomes the KEYS sound (and one not in memory loads). */
@@ -1015,9 +1038,9 @@ export class ArcController {
     this.live.cutPad(pad)
   }
 
-  /** Plays KEYS key [index] (0 = '.', the lowest) until [releaseKey]; [hold] false plays to the end. Call from the press. */
-  playKey(index: number, hold = true): Promise<void> {
-    return this.live.playKey(index, hold)
+  /** Plays KEYS key [index] (0 = '.', the lowest) until [releaseKey]; [hold] false plays to the end. Call from the press ([at]: its timeStamp). */
+  playKey(index: number, hold = true, at?: number): Promise<void> {
+    return this.live.playKey(index, hold, at)
   }
 
   /** The finger left the key: its note fades out. */
@@ -1030,9 +1053,19 @@ export class ArcController {
     this.live.selectKeysPad(pad)
   }
 
-  /** Plays MIDI [note] on the KEYS sound (the piano) until [releaseNote]; [hold] false plays to the end. Call from the press. */
-  playNote(note: number, hold = true): Promise<void> {
-    return this.live.playNote(note, hold)
+  /** Plays MIDI [note] on the KEYS sound (the piano) until [releaseNote]; [hold] false plays to the end. Call from the press ([at]: its timeStamp). */
+  playNote(note: number, hold = true, at?: number): Promise<void> {
+    return this.live.playNote(note, hold, at)
+  }
+
+  /** The debug screen's latencyHint choice: Live's output reopens at the new hint. */
+  setLiveLatencyHint(choice: WebLatencyHint): void {
+    this.deps.liveAudio.setLatencyHint?.(choice)
+  }
+
+  /** The latency test's Reset: every engine's times go (the engines tried keep their rows). */
+  resetLatency(): void {
+    this.live.resetLatency()
   }
 
   /** The last finger left the note: it fades out. */

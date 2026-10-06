@@ -1,12 +1,14 @@
 package dev.arc.ep133.data
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.core.content.edit
 import dev.arc.ep133.features.Keys
 import dev.arc.ep133.features.KeysView
 import dev.arc.ep133.features.NoteNames
 import dev.arc.ep133.features.Piano
 import dev.arc.ep133.features.Scale
+import dev.arc.ep133.text.LiveEngine
 import dev.arc.ep133.text.ThemeChoice
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -42,6 +44,11 @@ data class AppSettings(
     val pianoWhites: Int? = null,
     /** A light tick when a pad or key is pressed in Live (the phone's own touch feedback setting still applies). */
     val haptics: Boolean = true,
+    /**
+     * Which output Live plays through, a debug choice for the latency test
+     * (Debug screen): kept on this phone only, never copied into library.json.
+     */
+    val liveEngine: LiveEngine = LiveEngine.AUTO,
 )
 
 /**
@@ -50,10 +57,12 @@ data class AppSettings(
  *
  * Only values that were chosen are stored (and copied out): a default is
  * never written, so a fresh install's library.json can't override the
- * choices an earlier install left in the folder.
+ * choices an earlier install left in the folder. The debug screen's engine
+ * choice ([AppSettings.liveEngine]) stays in the preferences alone.
  */
-class SettingsStore(context: Context) {
-    private val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+class SettingsStore internal constructor(private val prefs: SharedPreferences) {
+    constructor(context: Context) : this(context.getSharedPreferences("settings", Context.MODE_PRIVATE))
+
     private val _settings = MutableStateFlow(read())
     val settings: StateFlow<AppSettings> = _settings.asStateFlow()
 
@@ -75,6 +84,7 @@ class SettingsStore(context: Context) {
         keysViewTall = runCatching { KeysView.valueOf(prefs.getString("keysViewTall", null) ?: "") }.getOrDefault(KeysView.AUTO),
         pianoWhites = Piano.choiceOf(prefs.getInt("pianoWhites", 0)),
         haptics = prefs.getBoolean("haptics", true),
+        liveEngine = liveEngineOf(prefs.getString(LIVE_ENGINE, null)),
     )
 
     fun update(change: (AppSettings) -> AppSettings) {
@@ -82,8 +92,13 @@ class SettingsStore(context: Context) {
         val next = change(cur)
         val before = cur.values()
         val changed = next.values().filter { (k, v) -> before[k] != v }
-        if (changed.isEmpty()) return
+        val engine = next.liveEngine != cur.liveEngine
+        if (changed.isEmpty() && !engine) return
         prefs.edit {
+            // Not one of [values]: not in library.json. The default isn't kept either.
+            if (engine) {
+                if (next.liveEngine == LiveEngine.AUTO) remove(LIVE_ENGINE) else putString(LIVE_ENGINE, next.liveEngine.name)
+            }
             for ((k, v) in changed) {
                 when (k) {
                     "theme", "keysScale", "keysNames", "keysViewWide", "keysViewTall" -> putString(k, v)
@@ -103,7 +118,16 @@ class SettingsStore(context: Context) {
     fun fromIndex(map: Map<String, String>) = update { it.withIndex(map) }
 }
 
-/** Each setting as its key and stored text (library.json adds "app." to the key). */
+/** The preference that keeps [AppSettings.liveEngine]. */
+internal const val LIVE_ENGINE = "liveEngine"
+
+/** The engine choice as kept ([LiveEngine]'s name); anything else is [LiveEngine.AUTO]. */
+internal fun liveEngineOf(stored: String?): LiveEngine = LiveEngine.entries.firstOrNull { it.name == stored } ?: LiveEngine.AUTO
+
+/**
+ * Each setting as its key and stored text (library.json adds "app." to the
+ * key); all but the debug screen's [AppSettings.liveEngine].
+ */
 internal fun AppSettings.values(): Map<String, String> = linkedMapOf(
     "theme" to theme.name,
     "autoConnect" to autoConnect.toString(),

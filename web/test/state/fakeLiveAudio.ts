@@ -1,6 +1,7 @@
 // A LiveAudioDeps that records what the controller asks of Live's output (state tests).
 import { signal, type Signal } from '@preact/signals'
-import type { LiveAudioDeps, LivePress } from '../../src/state/deps'
+import { WebLatencyHint } from '../../src/core/text/latencyText'
+import type { LiveAudioDeps, LiveEngineInfo, LivePress } from '../../src/state/deps'
 
 export interface FakeLiveAudio extends LiveAudioDeps {
   readonly loaded: Map<string, { pcm: Int16Array; channels: number; sampleRate: number }>
@@ -14,18 +15,22 @@ export interface FakeLiveAudio extends LiveAudioDeps {
   gestures: number
   /** What open() and press() answer. */
   available: boolean
-  /** Reports a voice heard (as the output would). */
-  started(id: string, ms: number, route?: string): void
+  /** Reports a voice heard (as the output would), on [engine]'s latency-test row. */
+  started(id: string, ms: number, route?: string, engine?: LiveEngineInfo): void
   /** Reports a slow (Bluetooth-like) output. */
   slow(ms: number): void
   /** The output's own delay signal, as the real LiveAudio has it ([withLate]); absent otherwise. */
   readonly late?: Signal<number | null>
+  readonly latencyHint: Signal<WebLatencyHint>
+  readonly engine: Signal<LiveEngineInfo | null>
+  /** The latencyHint choices made, in order. */
+  readonly hints: WebLatencyHint[]
 }
 
 /** [withLate]: with a `late` signal of its own, as the real LiveAudio (the controller then follows it). */
 export function fakeLiveAudio(withLate = false): FakeLiveAudio {
   const voices = signal<ReadonlySet<string>>(new Set())
-  const startedL = new Set<(id: string, ms: number, route: string) => void>()
+  const startedL = new Set<(id: string, ms: number, route: string, engine?: LiveEngineInfo) => void>()
   const slowL = new Set<(ms: number) => void>()
   const set = (f: (s: Set<string>) => void): void => {
     const next = new Set(voices.peek())
@@ -94,11 +99,18 @@ export function fakeLiveAudio(withLate = false): FakeLiveAudio {
       slowL.add(l)
       return () => slowL.delete(l)
     },
-    started(id, ms, route = 'default output') {
-      for (const l of startedL) l(id, ms, route)
+    started(id, ms, route = 'default output', engine) {
+      for (const l of startedL) l(id, ms, route, engine)
     },
     slow(ms) {
       for (const l of slowL) l(ms)
+    },
+    latencyHint: signal<WebLatencyHint>(WebLatencyHint.ZERO),
+    engine: signal<LiveEngineInfo | null>(null),
+    hints: [],
+    setLatencyHint(choice) {
+      a.hints.push(choice)
+      a.latencyHint.value = choice
     },
     ...(withLate ? { late: signal<number | null>(null) } : {}),
   }

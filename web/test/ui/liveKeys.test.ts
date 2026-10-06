@@ -265,6 +265,19 @@ describe('hold to play', () => {
   })
 })
 
+describe('press time', () => {
+  it("hands the pointerdown's timeStamp to the press, through the haptic tick too", () => {
+    const got: (number | undefined)[] = []
+    const target: PressTarget = { press: (_hold, _unsure, at) => got.push(at), release: () => undefined }
+    const t = new PressTracker(fakeTimers())
+    t.down(1, 0, 0, target, false, 1234.5)
+    t.down(2, 0, 0, ticking(target, true, () => undefined), true, 1240)
+    // A press without one (a screen reader's Play) is timed when handled.
+    t.down(3, 0, 0, target, false)
+    expect(got).toEqual([1234.5, 1240, undefined])
+  })
+})
+
 describe('haptic tick', () => {
   it('ticks after the press is handed on, and only when on', () => {
     const log: string[] = []

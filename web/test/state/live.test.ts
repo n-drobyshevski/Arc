@@ -16,6 +16,8 @@ import { NullPlayer } from '../../src/platform/audio/player'
 import { MemoryTarget } from '../../src/platform/storage/external'
 import { LIVE_KEY, memoryStorage, SETTINGS_KEY } from '../../src/platform/storage/settings'
 import { LIVE_AUDIO_KEEP_MS } from '../../src/state/controller'
+import { latencyRows, PRESS_STAMP_MAX_MS, pressTime } from '../../src/state/live'
+import { WebLatencyHint } from '../../src/core/text/latencyText'
 import { createStore } from '../../src/state/store'
 import { Tasks } from '../../src/state/tasks'
 import { HOME_TAB, initialState } from '../../src/state/types'
@@ -725,5 +727,131 @@ describe('the guide flag and restoring from the folder', () => {
     const older = new MemoryTarget('arc', { 'live.json': live.replace('5000', '10'), 'y.pak': folder.files.get('x.pak')!.data })
     await h.c.restoreFromFolder(older)
     expect(JSON.parse(storage.getItem(LIVE_KEY)!)).toMatchObject({ savedAt: 5000 })
+  })
+})
+
+describe('Live: press times from the input event', () => {
+  it("pressTime takes the event's timeStamp where it is on the same clock, else now", () => {
+    expect(pressTime(4990, 5000)).toBe(4990)
+    expect(pressTime(5000, 5000)).toBe(5000)
+    expect(pressTime(5000 - PRESS_STAMP_MAX_MS, 5000)).toBe(5000 - PRESS_STAMP_MAX_MS)
+    expect(pressTime(undefined, 5000)).toBe(5000)
+    // After now, too long before it, an epoch timeStamp, or not a time at all.
+    expect(pressTime(5001, 5000)).toBe(5000)
+    expect(pressTime(4999 - PRESS_STAMP_MAX_MS, 5000)).toBe(5000)
+    expect(pressTime(1.7e12, 5000)).toBe(5000)
+    expect(pressTime(0, 5000)).toBe(5000)
+    expect(pressTime(Number.NaN, 5000)).toBe(5000)
+  })
+
+  it("pads, KEYS keys and piano notes pass the press's timeStamp to the output", async () => {
+    const h = await liveOn()
+    await copied(h)
+    await vi.waitFor(() => expect(h.liveAudio.loaded.has('1:kick')).toBe(true))
+    const at = performance.now() - 7
+    await h.c.playPad(A1, true, false, at)
+    expect(h.liveAudio.presses.at(-1)?.options.pressedAt).toBe(at)
+    // A1 is now the KEYS sound.
+    await h.c.playKey(3, true, at - 1)
+    expect(h.liveAudio.presses.at(-1)).toMatchObject({ id: 'keys:3', options: { pressedAt: at - 1 } })
+    await h.c.playNote(64, true, at - 2)
+    expect(h.liveAudio.presses.at(-1)).toMatchObject({ id: 'note:64', options: { pressedAt: at - 2 } })
+    // An unsure press keeps its time for when it is kept.
+    h.c.releasePad(A1)
+    await h.c.playPad(A5, true, true, at - 3)
+    expect(h.liveAudio.presses.at(-1)?.options.pressedAt).toBe(at - 3)
+  })
+
+  it('a press without a usable timeStamp is timed at the handler', async () => {
+    const h = await liveOn()
+    await copied(h)
+    await vi.waitFor(() => expect(h.liveAudio.loaded.has('1:kick')).toBe(true))
+    const before = performance.now()
+    await h.c.playPad(A1, true, false, before - PRESS_STAMP_MAX_MS - 500)
+    const t = h.liveAudio.presses.at(-1)?.options.pressedAt ?? 0
+    expect(t).toBeGreaterThanOrEqual(before)
+    expect(t).toBeLessThanOrEqual(performance.now())
+  })
+})
+
+describe('Live: the latency test', () => {
+  const zero = { label: 'latencyHint 0, 48000 Hz', baseMs: 5.3, outputMs: 21 }
+  const interactive = { label: "latencyHint 'interactive', 48000 Hz", baseMs: 10.7, outputMs: null }
+
+  it("feeds each heard voice's delay to its engine's row, keeping the engine's reported delay", async () => {
+    const h = await liveOn()
+    expect(h.c.liveLatency.value.stats.isEmpty).toBe(true)
+    h.liveAudio.started('live:0:0', 30, undefined, zero)
+    h.liveAudio.started('live:0:0', 24, undefined, { ...zero, outputMs: 22 })
+    h.liveAudio.started('live:0:0', 48, undefined, interactive)
+    // The debug log line stays.
+    expect(h.c.logText()).toContain(MirrorText.latencyNote('live:0:0', 48, 'default output'))
+    const { stats, engines } = h.c.liveLatency.value
+    expect(stats.engines).toEqual([zero.label, interactive.label])
+    expect(stats.summary(zero.label)).toMatchObject({ count: 2, median: 27, best: 24, worst: 30 })
+    // The latest delay the output reported, for the estimate.
+    expect(engines.get(zero.label)).toEqual({ ...zero, outputMs: 22 })
+    expect(engines.get(interactive.label)).toEqual(interactive)
+    // An output that names no row, or a time the clocks got wrong, adds nothing.
+    h.liveAudio.started('live:0:0', 12)
+    h.liveAudio.started('live:0:0', -3, undefined, { ...zero, label: 'other' })
+    expect(h.c.liveLatency.value.stats.engines).toEqual([zero.label, interactive.label])
+    expect(h.c.liveLatency.value.engines.has('other')).toBe(false)
+  })
+
+  it('each output set up gets its row before its first press, keeping its place', async () => {
+    const h = await liveOn()
+    h.liveAudio.engine.value = zero
+    h.liveAudio.engine.value = interactive
+    h.liveAudio.engine.value = null
+    h.liveAudio.engine.value = { ...zero, outputMs: 25 }
+    const l = h.c.liveLatency.value
+    expect(latencyRows(l)).toEqual([zero.label, interactive.label])
+    expect(l.engines.get(zero.label)).toEqual({ ...zero, outputMs: 25 })
+    expect(l.stats.isEmpty).toBe(true)
+  })
+
+  it('presses that had to load their sample are logged but not timed', async () => {
+    const h = await liveOn()
+    await copied(h)
+    await h.c.clearPadSounds()
+    await backupWith(h, 'b', 1, 'kick')
+    // Loaded from the backup: the load's time is not the output's.
+    await h.c.playPad(A1)
+    expect(h.liveAudio.presses.at(-1)?.id).toBe('live:0:0')
+    h.liveAudio.started('live:0:0', 180, undefined, zero)
+    expect(h.c.logText()).toContain(MirrorText.latencyNote('live:0:0', 180, 'default output'))
+    expect(h.c.liveLatency.value.stats.isEmpty).toBe(true)
+    // In memory now: timed.
+    h.c.releasePad(A1)
+    await h.c.playPad(A1)
+    h.liveAudio.started('live:0:0', 20, undefined, zero)
+    expect(h.c.liveLatency.value.stats.summary(zero.label)).toMatchObject({ count: 1, median: 20 })
+    // The KEYS keys and the piano alike (A1 is the KEYS sound, in memory).
+    await h.c.playKey(2)
+    h.liveAudio.started('keys:2', 22, undefined, zero)
+    await h.c.playNote(62)
+    h.liveAudio.started('note:62', 24, undefined, zero)
+    expect(h.c.liveLatency.value.stats.summary(zero.label)).toMatchObject({ count: 3 })
+  })
+
+  it('Reset clears every row\'s times; the engines tried keep their rows', async () => {
+    const h = await liveOn()
+    h.liveAudio.started('live:0:0', 30, undefined, zero)
+    h.c.resetLatency()
+    expect(h.c.liveLatency.value.stats.isEmpty).toBe(true)
+    expect(latencyRows(h.c.liveLatency.value)).toEqual([zero.label])
+  })
+
+  it("the latencyHint choice and the engine in use come from Live's output", async () => {
+    const h = await liveOn()
+    expect(h.c.liveLatencyHint?.value).toBe(WebLatencyHint.ZERO)
+    h.c.setLiveLatencyHint(WebLatencyHint.INTERACTIVE)
+    expect(h.liveAudio.hints).toEqual([WebLatencyHint.INTERACTIVE])
+    expect(h.c.liveLatencyHint?.value).toBe(WebLatencyHint.INTERACTIVE)
+    expect(h.c.liveEngine.value).toBeNull()
+    h.liveAudio.engine.value = zero
+    expect(h.c.liveEngine.value).toEqual(zero)
+    expect(latencyRows(h.c.liveLatency.value)).toEqual([zero.label])
   })
 })

@@ -43,6 +43,10 @@
 //   MirrorText.slowOutput from its latency; Android says Bluetooth from the route).
 // - The haptic tick ([haptics]) is navigator.vibrate (platform/haptics.ts),
 //   after a finger's press only: not for a screen reader's Play.
+// - A finger's press hands on its pointerdown's timeStamp (onPad's, onKey's
+//   and onNote's [at]; Kotlin's uptimeMillis) for the latency note; EDIT's
+//   long press, the moment the hold became a press (that timeStamp plus
+//   EDIT_HOLD_MS).
 // - The offline note's fold is a button with aria-expanded (Kotlin's
 //   stateDescription NOTE_SHOWN / NOTE_HIDDEN).
 // - The scale and octave lists (Kotlin's focusable Popups, which Back
@@ -162,11 +166,14 @@ export interface KeysActions {
   onRoot?: (root: number) => void
   onScale?: (scale: Scale) => void
   onOctave?: (octave: number) => void
-  /** A key pressed; it sounds until [onKeyUp]. A screen reader's Play passes hold = false. */
-  onKey?: (index: number, hold: boolean) => void
+  /**
+   * A key pressed; it sounds until [onKeyUp]. A screen reader's Play passes
+   * hold = false. [at]: the press's event timeStamp (absent for a screen reader's Play).
+   */
+  onKey?: (index: number, hold: boolean, at?: number) => void
   onKeyUp?: (index: number) => void
-  /** A piano note pressed (MIDI); it sounds until [onNoteUp]. A screen reader's Play passes hold = false. */
-  onNote?: (note: number, hold: boolean) => void
+  /** A piano note pressed (MIDI); it sounds until [onNoteUp]. A screen reader's Play passes hold = false. [at]: as onKey's. */
+  onNote?: (note: number, hold: boolean, at?: number) => void
   onNoteUp?: (note: number) => void
   /** The Pads ⇄ Piano switch, for a wide window ([wide]) or a tall one. */
   onView?: (wide: boolean, view: KeysView) => void
@@ -220,9 +227,10 @@ export interface MirrorScreenProps {
    * false for a screen reader's Play, which plays to the end); null leaves
    * the pads still. Called from pointerdown (it wakes the audio output).
    * [unsure]: a press on the scrolling all-groups page, which [onPadKept] or
-   * [onPadCut] settles.
+   * [onPadCut] settles. [at]: the press's event timeStamp, for the latency
+   * note (absent for a screen reader's Play).
    */
-  onPad?: ((pad: PhysicalPad, hold: boolean, unsure?: boolean) => void) | null
+  onPad?: ((pad: PhysicalPad, hold: boolean, unsure?: boolean, at?: number) => void) | null
   /** The unsure press on a pad was a press after all (no scroll within PRESS_DELAY_MS, or a lift inside it). */
   onPadKept?: (pad: PhysicalPad) => void
   onPadUp?: (pad: PhysicalPad) => void
@@ -336,7 +344,7 @@ function holdHandlers(
       if (e.pointerType === 'mouse' && e.button !== 0) return
       e.currentTarget.setAttribute('data-down', '')
       ids?.add(e.pointerId)
-      tracker.down(e.pointerId, e.clientX, e.clientY, pressed, inScroll)
+      tracker.down(e.pointerId, e.clientX, e.clientY, pressed, inScroll, e.timeStamp)
     },
     onPointerMove: (e) => {
       tracker.move(e.pointerId, e.clientX, e.clientY)
@@ -589,7 +597,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         if (!hasPad) return null
         return {
           // Unsure only when something will settle it.
-          press: (hold, unsure) => latest.current.onPad?.(pad, hold, (unsure ?? false) && latest.current.onPadKept !== undefined),
+          press: (hold, unsure, at) => latest.current.onPad?.(pad, hold, (unsure ?? false) && latest.current.onPadKept !== undefined, at),
           release: () => latest.current.onPadUp?.(pad),
           cut: () => (latest.current.onPadCut ?? latest.current.onPadUp)?.(pad),
           keep: () => latest.current.onPadKept?.(pad),
@@ -605,7 +613,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   )
   const keyPress = useMemo(
     () => ({
-      onKey: (k: number, hold: boolean) => latest.current.keysActions?.onKey?.(k, hold),
+      onKey: (k: number, hold: boolean, at?: number) => latest.current.keysActions?.onKey?.(k, hold, at),
       onKeyUp: (k: number) => latest.current.keysActions?.onKeyUp?.(k),
     }),
     [],
@@ -675,7 +683,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
               playingNotes={playing.notes}
               haptics={haptic}
               now={now}
-              onNote={(n, hold) => actions.onNote?.(n, hold)}
+              onNote={(n, hold, at) => actions.onNote?.(n, hold, at)}
               onNoteUp={(n) => actions.onNoteUp?.(n)}
               computer={desk || fine}
               onOctave={(o) => actions.onOctave?.(o)}
@@ -1192,10 +1200,12 @@ function editHandlers(st: EditPress, press: PressTarget | null, open: () => void
       // The long press ticks after its press, as outside EDIT.
       st.target = press !== null ? ticking(press, haptic, tick) : null
       e.currentTarget.setAttribute('data-down', '')
+      // The press is the hold's end, so the latency note counts from there (a late timer included).
+      const at = e.timeStamp + EDIT_HOLD_MS
       st.timer = setTimeout(() => {
         st.timer = null
         st.held = st.target !== null
-        st.target?.press(true)
+        st.target?.press(true, false, at)
       }, EDIT_HOLD_MS)
     },
     onPointerUp: (e) => {
@@ -1754,7 +1764,7 @@ function KeyCapView(props: KeyCapProps): JSX.Element {
   const { index: k, note, keys, actions } = props
   const playing = useHas(props.playing, k)
   const target: PressTarget = {
-    press: (hold) => actions.onKey?.(k, hold),
+    press: (hold, _unsure, at) => actions.onKey?.(k, hold, at),
     release: () => actions.onKeyUp?.(k),
   }
   const cls = 'live-key cap-3d' + (upperOctave(note, keys.octave) ? ' live-key--upper' : '') + (playing ? ' is-playing' : '')

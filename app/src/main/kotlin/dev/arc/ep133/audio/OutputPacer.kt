@@ -14,8 +14,12 @@ package dev.arc.ep133.audio
  *
  * The buffer grows a burst when the output runs dry, and after [DECAY_NS]
  * without that steps back down a burst, never under [floor].
+ *
+ * [old]: the way it was before this pacing, for the debug screen's latency
+ * test: every burst written blocking from the start, and a buffer that only
+ * grows.
  */
-internal class OutputPacer(val burst: Int, val rate: Int, private val floor: Int) {
+internal class OutputPacer(val burst: Int, val rate: Int, private val floor: Int, private val old: Boolean = false) {
     companion object {
         /** [next]: write a burst now, without blocking. */
         const val WRITE = 0L
@@ -42,8 +46,8 @@ internal class OutputPacer(val burst: Int, val rate: Int, private val floor: Int
     var written = 0L
         private set
 
-    /** The play head can't be trusted: every burst is written blocking from now on. */
-    var blocking = false
+    /** The play head can't be trusted (or [old]): every burst is written blocking from now on. */
+    var blocking = old
         private set
 
     // The play head, unwrapped (the output's counter is 32 bits), and its last raw value.
@@ -99,7 +103,8 @@ internal class OutputPacer(val burst: Int, val rate: Int, private val floor: Int
     /**
      * The buffer size to use, the output having run dry [underruns] times so
      * far: a burst more after a new one (within [capacity]), a burst less after
-     * [DECAY_NS] without one (down to [floor]), else [size] as it is.
+     * [DECAY_NS] without one (down to [floor], and never when [old]), else
+     * [size] as it is.
      */
     fun resize(size: Int, capacity: Int, underruns: Int, now: Long): Int {
         if (changedAt == NONE) changedAt = now
@@ -108,7 +113,7 @@ internal class OutputPacer(val burst: Int, val rate: Int, private val floor: Int
             changedAt = now
             return if (size + burst <= capacity) size + burst else size
         }
-        if (size - burst >= floor && now - changedAt > DECAY_NS) {
+        if (!old && size - burst >= floor && now - changedAt > DECAY_NS) {
             changedAt = now
             return size - burst
         }
