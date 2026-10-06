@@ -7,8 +7,12 @@
   "ignoreCommand": "git diff --quiet HEAD^ HEAD -- web reference version.properties vercel.json",
   "rewrites": [
     {
-      "source": "/te/apps/ep-sample-tool/:path*",
-      "destination": "https://teenage.engineering/apps/ep-sample-tool/:path*"
+      "source": "/te/apps/ep-sample-tool",
+      "destination": "https://teenage.engineering/apps/ep-sample-tool"
+    },
+    {
+      "source": "/te/apps/ep-sample-tool/:path+",
+      "destination": "https://teenage.engineering/apps/ep-sample-tool/:path+"
     }
   ],
   "headers": [
