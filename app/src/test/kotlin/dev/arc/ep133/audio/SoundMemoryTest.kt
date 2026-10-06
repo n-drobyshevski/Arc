@@ -33,6 +33,20 @@ class SoundMemoryTest {
     }
 
     @Test
+    fun `listing what is kept leaves the order of play alone`() {
+        val m = SoundMemory<String>(capBytes = 1000)
+        val a = sound(200)
+        val b = sound(200)
+        m.put("a", a)
+        m.put("b", b)
+        assertEquals(listOf(a, b), m.sounds())
+        // Listing isn't playing: "a" is still the oldest and goes first.
+        m.put("c", sound(200))
+        assertNull(m["a"])
+        assertSame(b, m["b"])
+    }
+
+    @Test
     fun `replacing, removing and clearing keep the count right`() {
         val m = SoundMemory<String>(capBytes = 10_000)
         m.put("a", sound(100))

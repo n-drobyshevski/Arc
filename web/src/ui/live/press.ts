@@ -17,12 +17,26 @@
 // injectable so the logic tests without a DOM. A screen reader's Play
 // (Kotlin's semantics onClick) is a click with detail 0, handled by the
 // screen, not here. The haptic tick after a press is [ticking] (Kotlin
-// performs it right after press() in the same gesture loop).
+// performs it right after press() in the same gesture loop). Where the
+// browser has pointerrawupdate (Chrome, [rawMovesSupported]), moves come from
+// it as they arrive, not at the next frame; a pointer seen there skips its
+// pointermove, the same move again ([PressTracker.move]'s raw). The screen
+// listens for them only while a scroll window is open
+// ([PressTracker.onWindows]): they come at the device's rate, and only those
+// moves matter.
 
 /** How long a press in a scrolling page can still turn into a scroll (as Compose's own press feedback waits). */
 export const PRESS_DELAY_MS = 64
 /** How far a finger may move before the press is a drag (Compose's touch slop, 8dp). */
 export const TOUCH_SLOP = 8
+
+/**
+ * Whether the browser sends pointerrawupdate (Chrome, on a secure page): each
+ * move as it arrives, where pointermove waits for the next frame.
+ */
+export function rawMovesSupported(): boolean {
+  return typeof window !== 'undefined' && 'onpointerrawupdate' in window
+}
 
 export interface PressTarget {
   /**
@@ -72,6 +86,8 @@ interface Pointer {
   readonly inScroll: boolean
   /** The scroll window still open (a move past the slop cuts), or null once it closed. */
   timer: unknown
+  /** Its moves come from pointerrawupdate: its pointermove repeats one already seen. */
+  raw: boolean
 }
 
 /**
@@ -80,6 +96,15 @@ interface Pointer {
  */
 export class PressTracker {
   private readonly pointers = new Map<number, Pointer>()
+  // Pointers whose scroll window is open.
+  private windows = 0
+
+  /**
+   * Told true when a scroll window opens with none open before, false when
+   * the last one closes: the only time moves can cut, so the screen listens
+   * for raw moves only then.
+   */
+  onWindows: ((open: boolean) => void) | null = null
 
   constructor(
     private readonly timers: PressTimers = browserTimers,
@@ -94,21 +119,30 @@ export class PressTracker {
   down(id: number, x: number, y: number, target: PressTarget, inScroll: boolean): void {
     // A pointer id seen again without its end: finish the old press first.
     this.end(id, false)
-    const p: Pointer = { target, x, y, inScroll, timer: null }
+    const p: Pointer = { target, x, y, inScroll, timer: null, raw: false }
     this.pointers.set(id, p)
     target.press(true, inScroll)
     if (inScroll) {
       p.timer = this.timers.set(() => {
         p.timer = null
+        this.windowClosed()
         target.keep?.()
       }, this.delayMs)
+      if (this.windows++ === 0) this.onWindows?.(true)
     }
   }
 
-  /** The finger moved: within the scroll window, a move past the slop is a scroll, and the sound is cut. */
-  move(id: number, x: number, y: number): void {
+  /**
+   * The finger moved: within the scroll window, a move past the slop is a
+   * scroll, and the sound is cut. [raw]: from pointerrawupdate; once a
+   * pointer has one, its pointermoves (the same moves, a frame later) are skipped.
+   */
+  move(id: number, x: number, y: number, raw = false): void {
     const p = this.pointers.get(id)
-    if (!p || p.timer === null) return
+    if (!p) return
+    if (raw) p.raw = true
+    else if (p.raw) return
+    if (p.timer === null) return
     if (Math.hypot(x - p.x, y - p.y) > this.slop) this.end(id, true)
   }
 
@@ -138,11 +172,18 @@ export class PressTracker {
     return this.pointers.has(id)
   }
 
+  private windowClosed(): void {
+    if (--this.windows === 0) this.onWindows?.(false)
+  }
+
   private end(id: number, cut: boolean): void {
     const p = this.pointers.get(id)
     if (!p) return
     const open = p.timer !== null
-    if (open) this.timers.clear(p.timer)
+    if (open) {
+      this.timers.clear(p.timer)
+      this.windowClosed()
+    }
     p.timer = null
     this.pointers.delete(id)
     // Also when the pad leaves the screen with the finger still on it.

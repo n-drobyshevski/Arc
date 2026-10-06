@@ -145,7 +145,7 @@ private fun Framed(
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false) {
     val mirror = MirrorUi(state, loading = loading, offline = offline)
     val recUi = dev.arc.ep133.ui.screens.RecUi(rec) {}
     // The piano's notes, for the display line in the bar to name a device note past them. The
@@ -153,7 +153,7 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
     var pianoRange by remember { mutableStateOf(piano) }
     Framed(
         Tab.LIVE, connected = offline == null, dark = dark, guide = guide,
-        pill = { LivePill(mirror, keys, recUi, still = true, pianoRange = pianoRange, editing = edit == true) }, toast = toast, barMiddle = barMiddle,
+        pill = { LivePill(mirror, keys, recUi, still = true, pianoRange = pianoRange, editing = edit == true, wireless = wireless) }, toast = toast, barMiddle = barMiddle,
         toastAction = toastAction,
     ) {
         MirrorScreen(
@@ -178,6 +178,7 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
             ),
             // The EDIT tab shows where [edit] is given: on or off.
             edit = if (edit == null) dev.arc.ep133.ui.screens.EditUi() else dev.arc.ep133.ui.screens.EditUi(on = edit, onEdit = {}),
+            wireless = wireless,
         )
     }
 }
@@ -222,6 +223,20 @@ fun LiveOfflineAllPreview() = Live(lastRead, offline = "Last seen Oct 5, 2:02 PM
 @Preview(name = "Live offline pad playing", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
 fun LiveOfflinePlayingPreview() = Live(lastRead, oneGroup = true, offline = "Last seen Oct 5, 2:02 PM", playingPads = setOf(PhysicalPad(0, 9), PhysicalPad(0, 6), PhysicalPad(0, 3)))
+
+// Live's sound goes to Bluetooth, and no pad has been hit on the device yet: the display
+// line says the sound plays late (a size down on the all-groups display).
+private val wirelessState = playing.copy(lastHit = null)
+
+@PreviewTest
+@Preview(name = "Live bluetooth", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveBluetoothPreview() = Live(wirelessState, oneGroup = true, wireless = true)
+
+@PreviewTest
+@Preview(name = "Live bluetooth all groups", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun LiveBluetoothAllPreview() = Live(wirelessState, wireless = true)
 
 // KEYS: the kick played as notes, C major from octave 4. The device holds MI4 and SO5
 // (lit); the phone plays FA4, LA4 and DO5 (outlined).

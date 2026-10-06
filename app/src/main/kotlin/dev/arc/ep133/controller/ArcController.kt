@@ -244,11 +244,13 @@ class ArcController(
     /** The last backup a pad played from, opened, so the next taps are quick. */
     private var openPak: Pair<String, dev.arc.ep133.backup.Pak>? = null
     /** Live's own low-latency output, open while Live is on screen. */
-    private val liveAudio = dev.arc.ep133.audio.LiveAudio(context, ::liveStarted, ::takeDone)
+    private val liveAudio = dev.arc.ep133.audio.LiveAudio(context, ::liveStarted, ::takeDone, ::liveOutput)
     /** The Live voices sounding on the phone ("live:<group>:<offset>" pads, "note:<midi>" keys), for the rings. */
     val liveKeys: StateFlow<Set<String>> get() = liveAudio.keys
     /** Live's REC key. */
     val rec: StateFlow<dev.arc.ep133.features.RecState> get() = liveAudio.rec
+    /** Whether Live's sound goes to Bluetooth or a hearing aid, which plays late: its display line says so. */
+    val liveWireless: StateFlow<Boolean> get() = liveAudio.wireless
     private val takeStore by lazy { dev.arc.ep133.data.Takes(java.io.File(context.filesDir, "takes")) }
     private val _takes = MutableStateFlow<List<dev.arc.ep133.data.TakeInfo>>(emptyList())
     /** Live's recorded takes, newest first. */
@@ -1047,14 +1049,33 @@ class ArcController(
 
     /**
      * Opens Live's sound output (Live came on screen), so the first press is as
-     * quick as the rest; the volume is watched meanwhile, so a press doesn't ask for it.
+     * quick as the rest; the volume is watched meanwhile, so a press doesn't ask for it,
+     * and the pad sounds already in memory are handed to it ([prepareLive]).
+     * The debug log gets how it was set up (native or AudioTrack) once per
+     * open: not again for a recreated activity that finds it open.
      */
     fun openLiveAudio() {
         if (!liveAudioOpen) {
             liveAudioOpen = true
             player.volume.start()
         }
-        trafficLog.note("live audio: " + if (liveAudio.open()) liveAudio.description else "no output")
+        if (liveAudio.isOpen) return
+        val opened = liveAudio.open()
+        trafficLog.note("live audio: " + if (opened) liveAudio.description else "no output")
+        if (opened) prepareLive(padMemory.sounds())
+    }
+
+    /**
+     * Hands [sounds] to Live's output off the main thread, so their first press
+     * finds them ready (the native engine copies each into its own memory).
+     * Nothing while Live's output is closed: [openLiveAudio] hands over all of
+     * [padMemory] when it opens.
+     */
+    private fun prepareLive(sounds: List<PcmSound>) {
+        if (!liveAudio.isOpen || sounds.isEmpty()) return
+        scope.launch(Dispatchers.Default) {
+            for (a in sounds) if (!a.silent) liveAudio.prepare(a.pcm, a.channels)
+        }
     }
 
     /** Closes it (Live left the screen). */
@@ -1177,6 +1198,16 @@ class ArcController(
         }
     }
 
+    /** Live's output changed while open (a native stream reopened or retuned, or the switch to AudioTrack): in the debug log. */
+    private fun liveOutput(description: String) {
+        scope.launch {
+            trafficLog.note("live audio: $description")
+            // A press or REC may have opened it ([openLiveAudio] had failed), or the switch to
+            // AudioTrack: the sounds kept go to it too (those it holds already are only found).
+            prepareLive(padMemory.sounds())
+        }
+    }
+
     // ---------- takes: Live recorded (an addition) ----------
 
     private suspend fun loadTakes() {
@@ -1253,6 +1284,7 @@ class ArcController(
 
     private fun keepInMemory(slot: Int, name: String, a: PcmSound) {
         padMemory.put(memoryKey(slot, name), a)
+        prepareLive(listOf(a))
     }
 
     private fun forgetPadMemory() {

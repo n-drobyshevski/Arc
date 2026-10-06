@@ -7,6 +7,7 @@ import { emptyMirrorState, type MirrorUi } from '../../src/state/types'
 import {
   FADE_MS,
   displayLine,
+  displayLineSmall,
   fading,
   glow,
   glowCss,
@@ -103,6 +104,22 @@ describe('display', () => {
     expect(displayLine(st({ lastHit: hit }), ui({ loading: true }))).toBe('A 7 · 001 kick · 124')
     expect(displayLine(st(), ui())).toBe(MirrorText.WAITING)
     expect(displayLine(st(), null)).toBe(MirrorText.WAITING)
+  })
+
+  it('says the sound plays late after the hit, before offline and waiting, a size down', () => {
+    const offline = ui({ offline: MirrorText.lastSeen('5 Oct, 14:02') })
+    expect(displayLine(st(), ui(), 140)).toBe('Sound plays 140 ms late: wired output is quicker')
+    expect(displayLine(st(), offline, 140)).toBe(MirrorText.slowOutput(140))
+    expect(displayLine(st(), null, 140)).toBe(MirrorText.slowOutput(140))
+    expect(displayLine(st({ lastHit: hit }), ui(), 140)).toBe('A 7 · 001 kick · 124')
+    expect(displayLine(st(), ui({ loading: true }), 140)).toBe(MirrorText.READING)
+    expect(displayLine(st(), ui({ error: 'Nope' }), 140)).toBe('Nope')
+    expect(displayLine(st(), offline, null)).toBe(MirrorText.lastSeen('5 Oct, 14:02'))
+    expect(displayLineSmall(st(), ui(), 140)).toBe(true)
+    expect(displayLineSmall(st(), ui(), null)).toBe(false)
+    expect(displayLineSmall(st({ lastHit: hit }), ui(), 140)).toBe(false)
+    expect(displayLineSmall(st(), ui({ loading: true }), 140)).toBe(false)
+    expect(displayLineSmall(st(), offline)).toBe(true)
   })
 
   it('shows the transport only once the clock said something', () => {

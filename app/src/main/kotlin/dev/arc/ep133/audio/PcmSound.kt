@@ -39,6 +39,9 @@ class SoundMemory<K>(private val capBytes: Long) {
 
     fun containsKey(key: K) = map.containsKey(key)
 
+    /** What is kept, as a list of its own (the order of play left as it is). */
+    fun sounds(): List<PcmSound> = map.values.toList()
+
     fun put(key: K, sound: PcmSound) {
         map.put(key, sound)?.let { bytes -= it.bytes }
         bytes += sound.bytes

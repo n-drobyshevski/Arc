@@ -10,7 +10,8 @@ import java.util.concurrent.locks.LockSupport
 /**
  * A stereo 16-bit output at the phone's own sample rate, in Android's
  * low-latency mode, written one burst at a time from the thread that owns it
- * (an addition, shared by [LiveAudio] and [SoundPlayer]).
+ * (an addition, shared by [SoundPlayer] and Live's AudioTrack output,
+ * [TrackLiveOutput]).
  *
  * It starts with a buffer of two bursts on the fast path (the phone's usual
  * one otherwise), grows by a burst whenever the output runs dry and shrinks
@@ -63,8 +64,8 @@ internal class BurstOutput private constructor(val track: AudioTrack, val burst:
 
     val rate = track.sampleRate
 
-    /** How it was set up, for the debug log: "48000 Hz, 192-frame bursts, low-latency path". */
-    val description = "$rate Hz, $burst-frame bursts, " + if (fast) "low-latency path" else "normal path (no low-latency output)"
+    /** How it was set up, for the debug log: "48000 Hz, 192-frame bursts, AudioTrack low-latency path". */
+    val description = "$rate Hz, $burst-frame bursts, AudioTrack " + if (fast) "low-latency path" else "normal path (no low-latency output)"
 
     private val pacer = OutputPacer(burst, rate, floor = if (fast) burst * 2 else initial)
     // The buffer size in use: only this class sets it.

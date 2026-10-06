@@ -19,6 +19,10 @@
 //   pointerInput does. A screen reader's Play is a click with detail 0: the
 //   whole note (hold = false). The keys stay out of the Tab order (37 stops
 //   at most); the computer keyboard plays them instead.
+// - Where the browser sends pointerrawupdate (Chrome, press.ts
+//   rawMovesSupported), a held finger's moves come from it as they arrive, so
+//   a glissando reaches the next key without waiting for the frame's
+//   pointermove; a finger seen there skips its pointermove (the same move again).
 // - Device notes light a key through --glow on [data-note] (MirrorScreen's
 //   applyGlow, by exact pitch); the press travel is the caps' 60 ms one. A
 //   pressed key goes down at once (data-down set on the element in the
@@ -43,6 +47,7 @@ import { tick } from '../../platform/haptics'
 import { glow, glowCss } from './glow'
 import { COMPUTER_KEYS, computerHint, computerNote, octaveStep, playsKeys } from './keyboard'
 import type { KeysShown } from './keys'
+import { rawMovesSupported } from './press'
 import './PianoKeyboard.css'
 
 /** How far past a key's edge a sliding finger keeps it, so it doesn't flicker between two keys. */
@@ -72,12 +77,17 @@ export interface PianoKeyboardProps {
   class?: string
 }
 
-/** One finger on the keys: its note (null off them), where it last moved, and the layout it was in. */
+/**
+ * One finger on the keys: its note (null off them), where it last moved, the
+ * layout it was in, and whether its moves come from pointerrawupdate (its
+ * pointermoves are then skipped).
+ */
 interface Finger {
   readonly note: number | null
   readonly x: number
   readonly y: number
   readonly generation: number
+  readonly raw: boolean
 }
 
 /** Whether [t] is a field (typing) or inside a dialog, where letters don't play. */
@@ -150,9 +160,9 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
     for (const e of touches.releaseAll()) if (e.type === 'Release') cb.current.onNoteUp(e.note)
   }, [touches])
 
-  const local = (e: TargetedPointerEvent<HTMLDivElement>): { x: number; y: number } => {
-    const r = e.currentTarget.getBoundingClientRect()
-    return { x: e.clientX - r.left - e.currentTarget.clientLeft, y: e.clientY - r.top - e.currentTarget.clientTop }
+  const local = (e: PointerEvent, el: HTMLElement): { x: number; y: number } => {
+    const r = el.getBoundingClientRect()
+    return { x: e.clientX - r.left - el.clientLeft, y: e.clientY - r.top - el.clientTop }
   }
   const onPointerDown = (e: TargetedPointerEvent<HTMLDivElement>): void => {
     // The mouse's other buttons (and a pen's barrel button) don't play.
@@ -164,21 +174,39 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
     } catch {
       // Already gone.
     }
-    const { x, y } = local(e)
+    const { x, y } = local(e, e.currentTarget)
     const note = Piano.keyAt(laidRef.current, x, y, null, 0)
-    fingers.current.set(e.pointerId, { note, x, y, generation: generation.current })
+    fingers.current.set(e.pointerId, { note, x, y, generation: generation.current, raw: false })
     if (note !== null) play(touches.down(e.pointerId, note), true)
   }
-  const onPointerMove = (e: TargetedPointerEvent<HTMLDivElement>): void => {
-    const f = fingers.current.get(e.pointerId)
+  /** A finger moved on [el] (the plate, which captures it); [raw]: from pointerrawupdate. */
+  const moved = (e: PointerEvent, el: HTMLElement, raw: boolean): void => {
+    let f = fingers.current.get(e.pointerId)
     if (!f) return
-    const { x, y } = local(e)
+    // Its pointermove is a move pointerrawupdate already brought.
+    if (!raw && f.raw) return
+    if (raw && !f.raw) {
+      f = { ...f, raw: true }
+      fingers.current.set(e.pointerId, f)
+    }
+    const { x, y } = local(e, el)
     // After − or +, a finger resting on a key keeps the note it pressed until it really moves.
     if (f.generation !== generation.current && Math.hypot(x - f.x, y - f.y) <= TOUCH_SLOP) return
     const note = Piano.keyAt(laidRef.current, x, y, f.note, SLIDE_SLOP)
-    fingers.current.set(e.pointerId, { note, x, y, generation: generation.current })
+    fingers.current.set(e.pointerId, { note, x, y, generation: generation.current, raw: f.raw })
     play(touches.move(e.pointerId, note), true)
   }
+  const onPointerMove = (e: TargetedPointerEvent<HTMLDivElement>): void => moved(e, e.currentTarget, false)
+  const movedRef = useRef(moved)
+  movedRef.current = moved
+  // Chrome: the moves as they arrive (the plate holds every finger's capture, so they come here).
+  useEffect(() => {
+    const el = plate.current
+    if (!el || !rawMovesSupported()) return
+    const onRaw = (e: Event): void => movedRef.current(e as PointerEvent, el, true)
+    el.addEventListener('pointerrawupdate', onRaw)
+    return () => el.removeEventListener('pointerrawupdate', onRaw)
+  }, [])
   const onPointerEnd = (e: TargetedPointerEvent<HTMLDivElement>): void => {
     if (!fingers.current.delete(e.pointerId)) return
     play(touches.up(e.pointerId))

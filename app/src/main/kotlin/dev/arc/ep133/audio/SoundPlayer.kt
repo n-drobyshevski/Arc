@@ -25,9 +25,9 @@ sealed interface PlayResult {
  * of the sound playing, so lists can show a Stop key on the right row. Live's
  * pads and keys play through [LiveAudio] instead.
  *
- * Its output works as Live's does ([BurstOutput]): one low-latency stream at
- * the phone's own rate, opened by the first sound and kept while sounds
- * follow, let go of after [IDLE_NS] without one. A sound is a single
+ * Its output works as Live's AudioTrack output does ([BurstOutput]): one
+ * low-latency stream at the phone's own rate, opened by the first sound and
+ * kept while sounds follow, let go of after [IDLE_NS] without one. A sound is a single
  * [VoiceMixer] voice on it, read at its own rate (converted as it is mixed)
  * straight from memory, so a several-MB sample needs no buffer of its own and
  * a replay starts within a burst. While a sound plays arc holds transient

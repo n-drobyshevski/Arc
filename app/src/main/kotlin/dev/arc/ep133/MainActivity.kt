@@ -8,6 +8,9 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.InputDevice
+import android.view.MotionEvent
+import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -127,6 +130,29 @@ class MainActivity : ComponentActivity() {
 
     // The transfer does not wait for the answer: it works without the notification.
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+
+    // Whether Live is in front, so its touches go unbuffered ([unbufferedTouch]); main thread only.
+    private var liveTouch = false
+
+    /**
+     * While Live is in front ([on]), touches reach the pads and keys as they
+     * come rather than batched to the next frame, so a press or a slide onto a
+     * key sounds up to a frame sooner. Elsewhere the app keeps Android's
+     * batching. Android 11 and later take it for all pointer input (the
+     * touchscreen, a mouse or stylus) on [view]; Android 10 only gesture by
+     * gesture, asked at each first touch ([dispatchTouchEvent]).
+     */
+    private fun unbufferedTouch(view: View, on: Boolean) {
+        liveTouch = on
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) view.requestUnbufferedDispatch(if (on) InputDevice.SOURCE_CLASS_POINTER else InputDevice.SOURCE_CLASS_NONE)
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (liveTouch && Build.VERSION.SDK_INT < Build.VERSION_CODES.R && ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            window.decorView.requestUnbufferedDispatch(ev)
+        }
+        return super.dispatchTouchEvent(ev)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -398,6 +424,10 @@ class MainActivity : ComponentActivity() {
             view.keepScreenOn = keepOn
             onDispose { view.keepScreenOn = false }
         }
+        DisposableEffect(live) {
+            unbufferedTouch(view, live)
+            onDispose { unbufferedTouch(view, false) }
+        }
         // The mirror (re)starts when it opens and whenever a device is (re)connected or
         // goes away; without one it shows the last read.
         val ready = state.device != null
@@ -456,6 +486,8 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(contentsBackup?.id) { contentsBackup?.let { controller.openContents(it) } }
         val playing by controller.player.playing.collectAsStateWithLifecycle()
         val rec by controller.rec.collectAsStateWithLifecycle()
+        // Live's sound goes to Bluetooth: its display line says it plays late.
+        val liveWireless by controller.liveWireless.collectAsStateWithLifecycle()
         val takes by controller.takes.collectAsStateWithLifecycle()
         // REC on Live's display line, on the page or in the top bar.
         val liveRec = dev.arc.ep133.ui.screens.RecUi(rec, controller::toggleRec)
@@ -603,7 +635,7 @@ class MainActivity : ComponentActivity() {
                     onGuide = { guideOpen = it },
                     guide = { GuideScreen(onBack = { guideOpen = false }) },
                     // On a phone on its side, Live's display line rides in the top bar.
-                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, liveRec, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys) }) else null,
+                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, liveRec, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys, wireless = liveWireless) }) else null,
                 ) {
                     // Back from another section returns to Live, the home section, first.
                     BackHandler(enabled = tab != Tab.LIVE) { selectTab(Tab.LIVE) }
@@ -632,6 +664,7 @@ class MainActivity : ComponentActivity() {
                             // collected inside Live, so a voice starting doesn't recompose the whole app.
                             voices = controller.liveKeys,
                             haptics = appSettings.haptics,
+                            wireless = liveWireless,
                             oneGroup = appSettings.liveOneGroup,
                             onOneGroup = controller::setLiveOneGroup,
                             follow = appSettings.liveFollow,

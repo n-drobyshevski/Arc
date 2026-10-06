@@ -135,6 +135,11 @@ export interface LiveAudioDeps {
   onStarted(listener: (id: string, latencyMs: number, route: string) => void): () => void
   /** The output looks like Bluetooth (its own delay, [outputMs]); the controller says so once. */
   onSlowOutput?(listener: (outputMs: number) => void): () => void
+  /**
+   * The output's whole delay in ms while it is long enough to be heard against
+   * the finger, else null (absent: from [onSlowOutput] only): Live's display line says so.
+   */
+  readonly late?: ReadonlySignal<number | null>
   /** Lines for the debug log (how the output was set up, or why there is none). */
   onLog?(listener: (line: string) => void): () => void
 }

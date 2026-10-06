@@ -425,9 +425,24 @@ describe('Live: playing pads', () => {
     const h = await liveOn()
     h.liveAudio.started('live:0:0', 12.4)
     expect(h.c.logText()).toContain(MirrorText.latencyNote('live:0:0', 12.4, 'default output'))
-    h.liveAudio.slow(200)
+    expect(h.c.liveLate.value).toBeNull()
+    h.liveAudio.slow(200.4)
     h.liveAudio.slow(220)
     expect(h.toasts.filter((t) => t.text === WebText.LIVE_SLOW_OUTPUT)).toHaveLength(1)
+    // An output without its own late signal: the display line's delay is the slow one reported.
+    expect(h.c.liveLate.value).toBe(220)
+  })
+
+  it("follows the output's own late signal where it has one (the real LiveAudio), not the slow reports", async () => {
+    const h = await liveOn({ late: true })
+    const late = h.liveAudio.late!
+    expect(h.c.liveLate.value).toBeNull()
+    late.value = 140
+    expect(h.c.liveLate.value).toBe(140)
+    h.liveAudio.slow(220)
+    expect(h.c.liveLate.value).toBe(140)
+    late.value = null
+    expect(h.c.liveLate.value).toBeNull()
   })
 })
 

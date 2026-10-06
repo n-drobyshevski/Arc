@@ -374,6 +374,8 @@ function TabScreen(props: { view: NavView; editPads: boolean; onEditPads: (on: b
           // Signals, read by each pad and key: a voice doesn't re-render this screen.
           playing={{ pads: c.playingPads, keys: c.playingKeys, notes: c.playingNotes }}
           haptics={settings.haptics}
+          // Read by the display line alone, so a new delay re-renders only that.
+          outputLate={c.liveLate}
           keys={{
             on: settings.liveKeys,
             root: settings.keysRoot,

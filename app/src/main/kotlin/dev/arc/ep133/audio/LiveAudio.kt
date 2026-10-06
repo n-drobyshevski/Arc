@@ -1,11 +1,11 @@
 package dev.arc.ep133.audio
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
-import android.media.AudioTimestamp
 import dev.arc.ep133.features.RecState
 import dev.arc.ep133.features.TakeRecorder
 import dev.arc.ep133.formats.VoiceMixer
@@ -16,22 +16,39 @@ import java.util.concurrent.Executors
 
 /**
  * Live's sound output (an addition): one low-latency stream, open while Live
- * is on screen, that [VoiceMixer] fills with the pads and keys being played.
+ * is on screen, that a [VoiceMixer] fills with the pads and keys being played.
  * A press only adds a voice, so it is heard after one or two of the output's
- * buffers (a few milliseconds each) rather than after a new track is set up.
+ * bursts (a few milliseconds each) rather than after a new track is set up.
  *
- * The stream ([BurstOutput]) runs at the phone's own sample rate with
- * Android's low-latency mode, which is what lets it take the fast mixer path;
- * the EP-133's 46875 Hz sounds are converted as they are mixed. Each burst is
- * mixed just before the output has room for it, so a press waits for no
- * burst already mixed. The buffer starts at two bursts, grows by one whenever
- * the output runs dry, and shrinks back after a quiet while. The audio thread
- * allocates nothing per burst.
+ * It runs on one of two outputs ([LiveOutput]), both at the phone's own
+ * sample rate (the EP-133's 46875 Hz sounds are converted as they are mixed),
+ * both starting at a two-burst buffer that grows after the output runs dry
+ * and shrinks back after a quiet while:
+ * - native ([NativeLiveOutput]): an Oboe (AAudio) stream, exclusive (MMAP)
+ *   where the phone grants it, mixed in its own audio callback by the C++ port
+ *   of the mixer; it reopens on the new route after a headphone plug or unplug.
+ * - AudioTrack ([TrackLiveOutput]): Android's low-latency AudioTrack mode,
+ *   mixed on a Kotlin thread just before each burst is due.
+ * Native is preferred; AudioTrack is used when the library doesn't load (as in
+ * the JVM tests), when a native stream won't open, and for the rest of the
+ * run once the native one has died or stalled while playing ([EngineChoice]),
+ * which then hands over to AudioTrack at once. Both are tagged as a game's
+ * sound (USAGE_GAME, music content), which is what Live is: sound that answers
+ * a touch. Its volume is still media's, audio focus is asked for with the
+ * same attributes, and previews ([SoundPlayer]) stay media.
  *
- * [onStarted] gets each voice's latency: from the press ([VoiceMixer.start]'s
- * tag, System.nanoTime) to when its first frame leaves the output, from the
- * output's timestamp, and where the output goes. It is called on the audio
- * thread with the bare numbers: it should hand them on, not format them there.
+ * [wireless] says when the output goes to Bluetooth or a hearing aid, which
+ * plays late whatever the app does; Live's display line says so. It follows
+ * the route as it changes (a headset connecting while Live is open).
+ *
+ * [onStarted] gets each voice's latency: from the press ([play]'s pressedAt)
+ * to when its first frame leaves the output, from the output's timestamp, and
+ * where the output goes. It is called on the output's thread with the bare
+ * numbers: it should hand them on, not format them there. [onOutput] gets the
+ * output's [description] again whenever it changes after [open] (a native
+ * stream reopened or tuned its buffer, or the switch to AudioTrack), also on
+ * that thread; and on the caller's when a press or REC opened it after [open]
+ * had failed.
  *
  * REC ([arm]) records the mix into a take: from the first sound after it to
  * [stopRecording], Live closing or [TakeRecorder.MAX_SECONDS]. [onTake] gets
@@ -42,10 +59,11 @@ class LiveAudio(
     context: Context,
     private val onStarted: (key: String, latencyMs: Double, route: AudioDeviceInfo?) -> Unit = { _, _, _ -> },
     private val onTake: (file: File?, seconds: Double, limit: Boolean, error: String?) -> Unit = { _, _, _, _ -> },
+    private val onOutput: (description: String) -> Unit = {},
 ) {
     private val audio = context.getSystemService(AudioManager::class.java)
     private val attributes = AudioAttributes.Builder()
-        .setUsage(AudioAttributes.USAGE_MEDIA)
+        .setUsage(AudioAttributes.USAGE_GAME)
         .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
         .build()
     // Focus is asked for when something sounds and let go once all is quiet, off the
@@ -62,12 +80,17 @@ class LiveAudio(
     /** The voices sounding (pad and key ids), for the rings. */
     val keys: StateFlow<Set<String>> = _keys
 
-    private class Stream(val output: BurstOutput, val mixer: VoiceMixer) {
-        @Volatile var running = true
-        lateinit var thread: Thread
-    }
+    private val _wireless = MutableStateFlow(false)
+    /** Whether the open output goes to a wireless device ([isWireless]); false while closed. */
+    val wireless: StateFlow<Boolean> = _wireless
 
-    @Volatile private var stream: Stream? = null
+    private val engines = EngineChoice { NativeAudio.loaded }
+    // Key numbers for the native engine, kept across outputs.
+    private val keyIds = LiveKeys()
+
+    @Volatile private var output: LiveOutput? = null
+    // What the open output's thread reports into; a new one for each output.
+    @Volatile private var session: Session? = null
 
     private class Take(val recorder: TakeRecorder, val writer: TakeWriter) {
         @Volatile var limit = false
@@ -76,36 +99,86 @@ class LiveAudio(
     private val _rec = MutableStateFlow<RecState>(RecState.Idle)
     /** The REC key's state. */
     val rec: StateFlow<RecState> = _rec
-    // A take armed but not yet picked up by the audio thread, and a stop asked for.
+    // A take armed but not yet picked up by the output's thread, and a stop asked for.
     @Volatile private var armed: Take? = null
     @Volatile private var stopAsked = false
 
-    /** How the output was set up, for the debug log: "48000 Hz, 192-frame bursts, low-latency path". */
+    companion object {
+        /**
+         * Whether output device [type] is wireless, and so heard late: Bluetooth
+         * (classic or LE) or a hearing aid. The newer types are plain numbers on
+         * older Android versions, where they simply never occur.
+         */
+        @SuppressLint("InlinedApi")
+        fun isWireless(type: Int?): Boolean = when (type) {
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER,
+            AudioDeviceInfo.TYPE_BLE_BROADCAST, AudioDeviceInfo.TYPE_HEARING_AID,
+            -> true
+            else -> false
+        }
+    }
+
+    /**
+     * How the output was set up, for the debug log: "48000 Hz, 96-frame
+     * bursts, AAudio exclusive (MMAP)", "…, AAudio shared", or "48000 Hz,
+     * 192-frame bursts, AudioTrack low-latency path".
+     */
     var description = ""
         private set
+
+    /** Whether the output is open. */
+    val isOpen: Boolean get() = output != null
 
     /** Opens the output (Live came on screen); nothing is heard until a voice starts. */
     @Synchronized
     fun open(): Boolean {
-        if (stream != null) return true
-        val output = BurstOutput.open(audio, attributes) ?: return false
-        description = output.description
-        val s = Stream(output, VoiceMixer(output.rate))
-        stream = s
-        s.thread = Thread({ run(s) }, "arc-live-audio").apply {
-            isDaemon = true
-            start()
-        }
+        if (output != null) return true
+        val s = Session()
+        val o = openNative(s) ?: TrackLiveOutput.open(audio, attributes, s) ?: return false
+        description = o.description
+        session = s
+        output = o
+        // After [output]: a route the thread reports meanwhile is no older than this one.
+        _wireless.value = isWireless(o.route?.type)
         return true
+    }
+
+    /** Opened by a press or REC, not by Live coming on screen ([open] had failed): told to [onOutput] like a change. */
+    @Synchronized
+    private fun openLate(): Boolean {
+        if (output != null) return true
+        if (!open()) return false
+        onOutput(description)
+        return true
+    }
+
+    private fun openNative(s: Session): LiveOutput? {
+        if (!engines.native()) return null
+        return NativeLiveOutput.open(audio, keyIds, s).also { engines.opened(it != null) }
     }
 
     /** Closes the output (Live left the screen); what was sounding stops. */
     fun close() {
-        val s = synchronized(this) { stream.also { stream = null } } ?: return
-        s.running = false
+        val o = synchronized(this) {
+            session?.running = false
+            session = null
+            output.also { output = null }
+        } ?: return
+        o.close()
         _keys.value = emptySet()
         _rec.value = RecState.Idle
+        _wireless.value = false
         letGoOfFocus()
+    }
+
+    /**
+     * Gets [pcm] ready to [play], so its first press doesn't copy it (the
+     * native output copies a sound into the engine's memory; AudioTrack needs
+     * nothing). It may take a few milliseconds: not on the main thread. Does
+     * nothing while closed, so call it again for what's kept after [open].
+     */
+    fun prepare(pcm: ShortArray, channels: Int) {
+        output?.prepare(pcm, channels)
     }
 
     /**
@@ -114,9 +187,9 @@ class LiveAudio(
      * Opens the output first if Live hasn't. False when there is no output.
      */
     fun play(key: String, pcm: ShortArray, channels: Int, sampleRate: Int, semitones: Int, pressedAt: Long): Boolean {
-        if (stream == null && !open()) return false
-        val s = stream ?: return false
-        s.mixer.start(key, pcm, channels, sampleRate, semitones, pressedAt)
+        if (output == null && !openLate()) return false
+        val o = output ?: return false
+        if (!o.start(key, pcm, channels, sampleRate, semitones, pressedAt)) return false
         if (!focused) {
             focused = true
             focusThread.execute { audio.requestAudioFocus(focus) }
@@ -131,9 +204,9 @@ class LiveAudio(
     @Synchronized
     fun arm(file: File): Boolean {
         if (_rec.value != RecState.Idle) return true
-        if (stream == null && !open()) return false
-        val s = stream ?: return false
-        val rate = s.output.rate
+        if (output == null && !openLate()) return false
+        val o = output ?: return false
+        val rate = o.rate
         lateinit var take: Take
         take = Take(
             TakeRecorder(rate),
@@ -142,6 +215,7 @@ class LiveAudio(
         take.recorder.arm()
         stopAsked = false
         armed = take
+        o.recordFromNow()
         _rec.value = RecState.Armed
         return true
     }
@@ -152,20 +226,20 @@ class LiveAudio(
     }
 
     fun release(key: String) {
-        stream?.mixer?.release(key)
+        output?.release(key)
     }
 
     /** Ends voice [key] at once, in a few milliseconds: the press turned out to be a scroll. */
     fun cut(key: String) {
-        stream?.mixer?.cut(key)
+        output?.cut(key)
     }
 
     fun stopAll() {
-        stream?.mixer?.stopAll()
+        output?.stopAll()
     }
 
     /** Where the output goes now, once it is open. */
-    fun route(): AudioDeviceInfo? = stream?.output?.route
+    fun route(): AudioDeviceInfo? = output?.route
 
     private fun letGoOfFocus() {
         if (!focused) return
@@ -173,75 +247,20 @@ class LiveAudio(
         focusThread.execute { audio.abandonAudioFocusRequest(focus) }
     }
 
-    private fun run(s: Stream) {
-        android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
-        val o = s.output
-        val out = ShortArray(o.burst * 2)
-        val ts = AudioTimestamp()
-        var quietSince = 0L
-        var shown: Set<String> = emptySet()
-        var take: Take? = null
-        try {
-            while (s.running) {
-                // Mixed only once the output has room for it, so a press made meanwhile is in it.
-                if (!o.ready()) continue
-                armed?.let {
-                    armed = null
-                    take?.let { t -> end(t) }
-                    take = it
-                }
-                if (stopAsked) {
-                    stopAsked = false
-                    take?.let { end(it) }
-                    take = null
-                    if (armed == null) _rec.value = RecState.Idle
-                }
-                val at = s.mixer.frame
-                s.mixer.render(out, o.burst)
-                // The mixer's own list, read here on its thread: no copy.
-                val started = s.mixer.started
-                take?.let { t ->
-                    var first = Long.MAX_VALUE
-                    for (i in started.indices) first = minOf(first, started[i].frame)
-                    val k = t.recorder.onBurst(out, o.burst, at, if (started.isEmpty()) null else first)
-                    if (k != null) t.writer.write(out, k.from, k.frames)
-                    if (k?.last == true) {
-                        t.limit = true
-                        end(t)
-                        take = null
-                        _rec.value = RecState.Idle
-                    } else if (t.recorder.state == TakeRecorder.State.RECORDING) {
-                        // A new state only when the seconds shown change.
-                        val seconds = t.recorder.seconds
-                        if (s.running && (_rec.value as? RecState.Recording)?.seconds != seconds) _rec.value = RecState.Recording(seconds)
-                    }
-                }
-                if (!o.write(out)) break
-                if (started.isNotEmpty()) report(o, started, ts)
-                // The mixer makes a new set only when the voices change.
-                val keys = s.mixer.keys
-                if (keys !== shown) {
-                    shown = keys
-                    if (s.running) _keys.value = keys
-                }
-                // Quiet for two seconds: other apps may have the output back.
-                if (keys.isEmpty()) {
-                    if (quietSince == 0L) quietSince = System.nanoTime()
-                    if (focused && System.nanoTime() - quietSince > 2_000_000_000L) letGoOfFocus()
-                } else {
-                    quietSince = 0L
-                }
-                o.adjust()
-            }
-        } finally {
-            // Live closing ends the take; it is saved like any other.
-            take?.let { end(it) }
-            armed?.let {
-                armed = null
-                end(it)
-            }
-            o.release()
+    /** The native engine gave out under [s]: what plays next goes through AudioTrack. */
+    private fun gaveOut(s: Session) {
+        // All under the lock: a press's [openLate] can't open another native engine in between,
+        // nor can [close] slip in and leave the AudioTrack output open after Live left.
+        val reopened = synchronized(this) {
+            if (session !== s) return
+            engines.gaveOut()
+            session = null
+            output = null
+            open().also { if (!it) _wireless.value = false }
         }
+        _keys.value = emptySet()
+        _rec.value = RecState.Idle
+        if (reopened) onOutput(description)
     }
 
     /** Ends [t]: its writer keeps what was recorded up to the last sound. */
@@ -249,19 +268,92 @@ class LiveAudio(
         t.writer.finish(t.recorder.stop())
     }
 
-    /** When each new voice's first frame is heard, from the output's timestamp; the numbers go to [onStarted]. */
-    private fun report(o: BurstOutput, started: List<VoiceMixer.Started>, ts: AudioTimestamp) {
-        val rate = o.rate.toDouble()
-        // No timestamp yet (the output just opened): what is written but not played.
-        val stamped = o.track.getTimestamp(ts)
-        val atNanos = if (stamped) ts.nanoTime else System.nanoTime()
-        val atFrame = if (stamped) ts.framePosition else o.track.playbackHeadPosition.toLong()
-        val route = o.route
-        for (i in started.indices) {
-            val v = started[i]
-            if (v.tag == 0L) continue
-            val heardAt = atNanos + ((v.frame - atFrame) / rate * 1e9).toLong()
-            onStarted(v.key, (heardAt - v.tag) / 1e6, route)
+    /**
+     * One output's side of Live (the same for both): REC's take, the keys and
+     * focus, all on that output's thread. [running] goes false when Live
+     * closes, so a late report doesn't overwrite the closed state.
+     */
+    private inner class Session : LiveListener {
+        @Volatile var running = true
+        private var take: Take? = null
+        private var shown: Set<String> = emptySet()
+        private var quietSince = 0L
+
+        override val recording: Boolean get() = take != null || armed != null
+
+        override fun beforeBlock() {
+            armed?.let {
+                armed = null
+                take?.let { t -> end(t) }
+                take = it
+            }
+            if (stopAsked) {
+                stopAsked = false
+                take?.let { end(it) }
+                take = null
+                if (armed == null) _rec.value = RecState.Idle
+            }
         }
+
+        override fun mixed(out: ShortArray, frames: Int, at: Long, firstStart: Long?, rate: Int) {
+            val t = take ?: return
+            // A native stream reopened at another rate: the take so far is kept, at its own.
+            if (rate != t.recorder.outRate) {
+                end(t)
+                take = null
+                if (running) _rec.value = RecState.Idle
+                return
+            }
+            val k = t.recorder.onBurst(out, frames, at, firstStart)
+            if (k != null) t.writer.write(out, k.from, k.frames)
+            if (k?.last == true) {
+                t.limit = true
+                end(t)
+                take = null
+                _rec.value = RecState.Idle
+            } else if (t.recorder.state == TakeRecorder.State.RECORDING) {
+                // A new state only when the seconds shown change.
+                val seconds = t.recorder.seconds
+                if (running && (_rec.value as? RecState.Recording)?.seconds != seconds) _rec.value = RecState.Recording(seconds)
+            }
+        }
+
+        override fun started(key: String, latencyMs: Double, route: AudioDeviceInfo?) = onStarted(key, latencyMs, route)
+
+        override fun keys(keys: Set<String>) {
+            if (keys !== shown) {
+                shown = keys
+                if (running) _keys.value = keys
+            }
+            // Quiet for two seconds: other apps may have the output back.
+            if (keys.isEmpty()) {
+                if (quietSince == 0L) quietSince = System.nanoTime()
+                if (focused && System.nanoTime() - quietSince > 2_000_000_000L) letGoOfFocus()
+            } else {
+                quietSince = 0L
+            }
+        }
+
+        override fun routed(route: AudioDeviceInfo?) {
+            if (running && session === this) _wireless.value = isWireless(route?.type)
+        }
+
+        override fun changed(description: String) {
+            if (!running || session !== this) return
+            this@LiveAudio.description = description
+            onOutput(description)
+        }
+
+        override fun ended() {
+            // Live closing ends the take; it is saved like any other.
+            take?.let { end(it) }
+            take = null
+            armed?.let {
+                armed = null
+                end(it)
+            }
+        }
+
+        override fun gaveOut() = gaveOut(this)
     }
 }

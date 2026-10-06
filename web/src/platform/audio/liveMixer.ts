@@ -4,10 +4,12 @@
 // ScriptProcessorNode; either way the main thread only sends ToMixer commands
 // and hears back FromMixer reports.
 //
-// Web delta from LiveAudio.kt: Kotlin's stream thread both renders and
-// reports; here the render loop lives where the browser runs audio, so the
-// samples are sent over once ('load', by id) and a press only names one
-// ('start'), which keeps a press cheap. Each render reports the voices that
+// Web delta from LiveAudio.kt: Kotlin's output renders on its own thread
+// (the native engine's callback, or the AudioTrack loop) with the samples it
+// was handed in memory, and reports back to Kotlin (the native one through
+// queues a poll thread reads); here the render loop lives where the browser
+// runs audio, so the samples are sent over once ('load', by id) and a press
+// only names one ('start'), which keeps a press cheap. Each render reports the voices that
 // began, with the context time of their first frame, and the keys sounding
 // when they change.
 //

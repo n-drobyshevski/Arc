@@ -1,20 +1,29 @@
 // Tests for platform/audio/liveAudio.ts (port of LiveAudio.kt) and liveMixer.ts,
 // with a fake backend whose mixer runs in-process.
 
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import {
+  LATE_OUTPUT_MS,
+  LATE_STEP_MS,
+  LATENCY_GLITCHES,
+  HINT_KEY,
   LiveAudio,
   MixerHost,
+  REPLACE_QUIET_MS,
   SLOW_OUTPUT_MS,
+  browserLiveBackend,
   describeOutput,
   heardAt,
   isSlowOutput,
+  lateBy,
   outputLatency,
   s16leToInt16,
   transferable,
+  underruns,
   type FromMixer,
   type LiveBackend,
   type LiveContextLike,
+  type LiveLatencyHint,
   type MixerLink,
   type ToMixer,
 } from '../../src/platform/audio/liveAudio'
@@ -34,6 +43,7 @@ class FakeContext implements LiveContextLike {
   suspends = 0
   closed = false
   timestamp: { contextTime?: number; performanceTime?: number } | null = null
+  playbackStats: { underrunEvents?: number } | null = null
   private listeners: (() => void)[] = []
   resume(): Promise<void> {
     this.resumes++
@@ -97,9 +107,11 @@ class FakeBackend implements LiveBackend {
     return this.hasAudio
   }
   rates: (number | undefined)[] = []
-  createContext(rate?: number): LiveContextLike | null {
+  hints: LiveLatencyHint[] = []
+  createContext(rate: number | undefined, hint: LiveLatencyHint): LiveContextLike | null {
     if (!this.hasAudio) return null
     this.rates.push(rate)
+    this.hints.push(hint)
     const c = new FakeContext()
     if (rate) c.sampleRate = rate
     this.contexts.push(c)
@@ -124,6 +136,8 @@ class FakeBackend implements LiveBackend {
   gestureSeen(): boolean {
     return this.gesture
   }
+  savedHint?: () => LiveLatencyHint
+  saveHint?: (hint: LiveLatencyHint) => void
   get ctx(): FakeContext {
     return this.contexts[this.contexts.length - 1]!
   }
@@ -160,6 +174,26 @@ describe('latency helpers', () => {
     expect(isSlowOutput({ baseMs: 5, outputMs: 30 })).toBe(false)
     expect(isSlowOutput({ baseMs: 10, outputMs: SLOW_OUTPUT_MS - 10 })).toBe(true)
     expect(isSlowOutput({ baseMs: 5, outputMs: 250 })).toBe(true)
+  })
+
+  it('lateBy is the whole delay once it can be heard, rounded', () => {
+    expect(lateBy({ baseMs: 5, outputMs: 30 })).toBeNull()
+    expect(lateBy({ baseMs: 3, outputMs: LATE_OUTPUT_MS - 3.4 })).toBeNull()
+    expect(lateBy({ baseMs: 3, outputMs: LATE_OUTPUT_MS - 3 })).toBe(LATE_OUTPUT_MS)
+    expect(lateBy({ baseMs: 2.6, outputMs: 140 })).toBe(143)
+  })
+
+  it('underruns reads playbackStats where the browser has it', () => {
+    expect(underruns({})).toBeNull()
+    expect(underruns({ playbackStats: null })).toBeNull()
+    expect(underruns({ playbackStats: {} })).toBeNull()
+    expect(underruns({ playbackStats: { underrunEvents: 4 } })).toBe(4)
+    const throwing = {
+      get playbackStats(): { underrunEvents: number } {
+        throw new Error('not allowed')
+      },
+    }
+    expect(underruns(throwing)).toBeNull()
   })
   it('heardAt uses the output timestamp when there is one', () => {
     const ctx = { currentTime: 2, getOutputTimestamp: () => ({ contextTime: 1.9, performanceTime: 5000 }) }
@@ -301,6 +335,7 @@ describe('LiveAudio', () => {
     const { live, backend, log } = await opened()
     expect(backend.contexts).toHaveLength(1)
     expect(backend.rates).toEqual([undefined]) // the device's own rate
+    expect(backend.hints).toEqual([0]) // the smallest buffer the browser allows
     expect(live.isOpen).toBe(true)
     expect(live.description).toBe('48000 Hz, FakeWorklet, base latency 5 ms, output latency 20 ms')
     expect(log).toEqual(['live audio: 48000 Hz, FakeWorklet, base latency 5 ms, output latency 20 ms'])
@@ -767,11 +802,264 @@ describe('LiveAudio', () => {
     expect(log).toEqual(['live audio: no output (NotAllowedError)'])
   })
 
+  it('late follows a delay long enough to be heard, and clears when the output goes', async () => {
+    const { live, backend } = await opened()
+    expect(live.late.value).toBeNull()
+    backend.ctx.outputLatency = 0.09
+    backend.ctx.setState('running')
+    expect(live.late.value).toBe(95)
+    // Wired headphones plugged in: the next press finds it quick again.
+    backend.ctx.outputLatency = 0.02
+    live.preload('s', tone(), 1, RATE)
+    live.press('k', 's', PAD)
+    backend.link.render(0)
+    expect(live.late.value).toBeNull()
+    backend.ctx.outputLatency = 0.2
+    live.press('k2', 's', PAD)
+    backend.link.render(0.01)
+    expect(live.late.value).toBe(205)
+    live.close()
+    expect(live.late.value).toBeNull()
+  })
+
+  it('late moves only by LATE_STEP_MS or more, or across LATE_OUTPUT_MS', async () => {
+    const { live, backend } = await opened()
+    live.preload('s', tone(), 1, RATE)
+    backend.ctx.outputLatency = 0.135
+    backend.ctx.setState('running')
+    expect(live.late.value).toBe(140)
+    // The estimate wanders a few ms: the line stays as it is.
+    let t = 0
+    const pressAt = (seconds: number) => {
+      backend.ctx.outputLatency = seconds
+      live.press('k', 's', PAD)
+      t += 0.01
+      backend.link.render(t)
+    }
+    pressAt(0.139)
+    expect(live.late.value).toBe(140)
+    pressAt(0.131)
+    expect(live.late.value).toBe(140)
+    pressAt(0.135 + (LATE_STEP_MS + 1) / 1000)
+    expect(live.late.value).toBe(140 + LATE_STEP_MS + 1)
+    // Quick enough again: cleared at once.
+    pressAt(0.07)
+    expect(live.late.value).toBeNull()
+    pressAt(0.076)
+    expect(live.late.value).toBe(LATE_OUTPUT_MS + 1)
+  })
+
+  it('glitches at latencyHint 0 make the next output ask for interactive, for good', async () => {
+    const { live, backend, log } = await opened()
+    backend.ctx.playbackStats = { underrunEvents: 2 } // from starting up: not counted
+    backend.ctx.setState('running')
+    live.preload('s', tone(), 1, RATE)
+    backend.ctx.playbackStats = { underrunEvents: 2 + LATENCY_GLITCHES - 1 }
+    live.press('k', 's', PAD)
+    backend.link.render(0)
+    live.close()
+    live.open()
+    await flush()
+    expect(backend.hints).toEqual([0, 0])
+    backend.ctx.playbackStats = { underrunEvents: 0 }
+    backend.ctx.setState('running')
+    backend.ctx.playbackStats = { underrunEvents: LATENCY_GLITCHES }
+    live.press('k', 's', PAD)
+    backend.link.render(0)
+    expect(log.at(-1)).toBe(`live audio: ${LATENCY_GLITCHES} glitches at the lowest latency; the next output asks for 'interactive'`)
+    // The open output plays on; the next one asks for 'interactive', and so does every one after.
+    expect(live.isOpen).toBe(true)
+    live.close()
+    live.open()
+    await flush()
+    live.close()
+    live.open()
+    await flush()
+    expect(backend.hints).toEqual([0, 0, 'interactive', 'interactive'])
+  })
+
+  it('glitches count from each wake, and are weighed when Live leaves', async () => {
+    const { live, backend, log } = await opened()
+    backend.ctx.playbackStats = { underrunEvents: 0 }
+    backend.ctx.setState('running')
+    // A glitch with each wake: many wakes don't add up.
+    for (let i = 1; i <= LATENCY_GLITCHES + 1; i++) {
+      live.suspend()
+      await flush()
+      backend.ctx.playbackStats = { underrunEvents: i }
+      live.open()
+      backend.ctx.setState('running')
+    }
+    live.close()
+    live.open()
+    await flush()
+    expect(backend.hints).toEqual([0, 0])
+    // Glitches while playing, then Live leaves: the next output steps back.
+    backend.ctx.playbackStats = { underrunEvents: 0 }
+    backend.ctx.setState('running')
+    backend.ctx.playbackStats = { underrunEvents: LATENCY_GLITCHES }
+    live.suspend()
+    expect(log.at(-1)).toContain('glitches at the lowest latency')
+    live.close()
+    live.open()
+    expect(backend.hints).toEqual([0, 0, 'interactive'])
+  })
+
+  it('after glitches, leaving Live and coming back brings an interactive output without a close', async () => {
+    const { live, backend } = await opened()
+    live.preload('s', tone(), 1, RATE)
+    backend.ctx.playbackStats = { underrunEvents: 0 }
+    backend.ctx.setState('running')
+    backend.ctx.playbackStats = { underrunEvents: LATENCY_GLITCHES }
+    const old = backend.ctx
+    live.suspend()
+    // Let go of rather than parked; coming back makes the next one, the samples sent again.
+    expect(old.closed).toBe(true)
+    expect(live.isOpen).toBe(false)
+    expect(live.open()).toBe(true)
+    await flush()
+    expect(backend.hints).toEqual([0, 'interactive'])
+    expect(backend.link.sent.map((m) => m.t)).toEqual(['load'])
+    expect(backend.ctx.resumes).toBe(1)
+    // Parked again later: an output at 'interactive' is kept as usual.
+    backend.ctx.setState('running')
+    live.suspend()
+    expect(backend.ctx.closed).toBe(false)
+  })
+
+  it('while Live stays open, a glitching output is replaced once nothing sounds', async () => {
+    const { live, backend } = await opened()
+    live.preload('s', tone(256), 1, RATE)
+    backend.ctx.playbackStats = { underrunEvents: 0 }
+    backend.ctx.setState('running')
+    backend.ctx.playbackStats = { underrunEvents: LATENCY_GLITCHES }
+    live.press('k', 's', { pitch: 0, gate: false })
+    backend.link.render(0)
+    expect(live.voices.value.has('k')).toBe(true)
+    const old = backend.ctx
+    // The voice ends just after its press: too soon to be sure no press is on its way.
+    backend.link.render(128 / RATE, 1024)
+    expect(live.voices.value.size).toBe(0)
+    expect(old.closed).toBe(false)
+    // A while later, still quiet: the output makes way for one at 'interactive', woken at once.
+    backend.clock += REPLACE_QUIET_MS
+    await new Promise((r) => setTimeout(r, REPLACE_QUIET_MS + 20))
+    expect(old.closed).toBe(true)
+    expect(live.isOpen).toBe(true)
+    expect(backend.hints).toEqual([0, 'interactive'])
+    expect(backend.ctx.resumes).toBe(1)
+    await flush()
+    expect(backend.link.sent.map((m) => m.t)).toEqual(['load'])
+    expect(live.press('k', 's', PAD)).toBe(true)
+  })
+
+  it('a quiet report long after the last press replaces the output at once', async () => {
+    const { live, backend } = await opened()
+    live.preload('s', tone(), 1, RATE)
+    backend.ctx.playbackStats = { underrunEvents: 0 }
+    backend.ctx.setState('running')
+    backend.ctx.playbackStats = { underrunEvents: LATENCY_GLITCHES }
+    live.press('k', 's', PAD)
+    backend.link.render(0)
+    const old = backend.ctx
+    backend.clock += 1000
+    live.release('k')
+    backend.link.render(128 / RATE, RATE)
+    expect(old.closed).toBe(true)
+    expect(backend.hints).toEqual([0, 'interactive'])
+  })
+
+  it('the step back is kept for the tab, and a new LiveAudio starts from it', async () => {
+    const saved: LiveLatencyHint[] = []
+    const backend = new FakeBackend()
+    backend.saveHint = (h: LiveLatencyHint) => saved.push(h)
+    const { live } = await opened(backend)
+    backend.ctx.playbackStats = { underrunEvents: 0 }
+    backend.ctx.setState('running')
+    backend.ctx.playbackStats = { underrunEvents: LATENCY_GLITCHES }
+    live.suspend()
+    expect(saved).toEqual(['interactive'])
+    const reloaded = new FakeBackend()
+    reloaded.savedHint = () => 'interactive'
+    await opened(reloaded)
+    expect(reloaded.hints).toEqual(['interactive'])
+  })
+
+  it('a browser that does not count glitches keeps latencyHint 0', async () => {
+    const { live, backend } = await opened()
+    backend.ctx.setState('running')
+    live.close()
+    live.open()
+    expect(backend.hints).toEqual([0, 0])
+  })
+
   it('refuses a channel count the mixer cannot play', async () => {
     const { live, backend } = await opened()
     live.preload('s', tone(), 3, RATE)
     backend.link.sent.length = 0
     expect(live.press('k', 's', PAD)).toBe(false)
     expect(backend.link.sent).toEqual([])
+  })
+})
+
+describe('browserLiveBackend', () => {
+  const g = globalThis as unknown as { AudioContext?: unknown }
+  const saved = g.AudioContext
+  afterEach(() => {
+    g.AudioContext = saved
+  })
+
+  it('asks for latencyHint 0 at the device\'s own rate, or the hint given', () => {
+    const made: AudioContextOptions[] = []
+    g.AudioContext = class {
+      constructor(options?: AudioContextOptions) {
+        made.push(options ?? {})
+      }
+    }
+    const backend = browserLiveBackend()
+    expect(backend.createContext(undefined, 0)).not.toBeNull()
+    backend.createContext(44100, 'interactive')
+    expect(made).toEqual([{ latencyHint: 0 }, { latencyHint: 'interactive', sampleRate: 44100 }])
+  })
+
+  it("falls back to 'interactive' where a number can't be made", () => {
+    const made: AudioContextOptions[] = []
+    g.AudioContext = class {
+      constructor(options?: AudioContextOptions) {
+        if (typeof options?.latencyHint === 'number') throw new TypeError('latencyHint')
+        made.push(options ?? {})
+      }
+    }
+    expect(browserLiveBackend().createContext(undefined, 0)).not.toBeNull()
+    expect(made).toEqual([{ latencyHint: 'interactive' }])
+  })
+
+  it('keeps the step back in sessionStorage, and carries on where storage is blocked', () => {
+    const store = globalThis as unknown as { sessionStorage?: unknown }
+    const before = store.sessionStorage
+    try {
+      const items = new Map<string, string>()
+      store.sessionStorage = {
+        getItem: (k: string) => items.get(k) ?? null,
+        setItem: (k: string, v: string) => items.set(k, v),
+      }
+      const backend = browserLiveBackend()
+      expect(backend.savedHint?.()).toBe(0)
+      backend.saveHint?.('interactive')
+      expect(items.get(HINT_KEY)).toBe('interactive')
+      expect(browserLiveBackend().savedHint?.()).toBe('interactive')
+      store.sessionStorage = {
+        getItem: () => {
+          throw new Error('SecurityError')
+        },
+        setItem: () => {
+          throw new Error('SecurityError')
+        },
+      }
+      expect(backend.savedHint?.()).toBe(0)
+      expect(() => backend.saveHint?.('interactive')).not.toThrow()
+    } finally {
+      store.sessionStorage = before
+    }
   })
 })

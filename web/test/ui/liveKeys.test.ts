@@ -176,6 +176,55 @@ describe('hold to play', () => {
     expect(log).toEqual(['a press true', 'a release'])
   })
 
+  it('raw moves (pointerrawupdate) cut as they come; that pointer\'s pointermoves are skipped', () => {
+    const log: string[] = []
+    const timers = fakeTimers()
+    const t = new PressTracker(timers, PRESS_DELAY_MS, 8)
+    t.down(1, 0, 0, recorder(log, 'a'), true)
+    t.down(2, 0, 0, recorder(log, 'b'), true)
+    t.move(1, 0, 5, true) // raw, within the slop
+    t.move(1, 0, 12) // its frame's pointermove (or a coalesced one): already seen, skipped
+    expect(log).toEqual(['a press true unsure', 'b press true unsure'])
+    t.move(1, 0, 12, true)
+    expect(log).toEqual(['a press true unsure', 'b press true unsure', 'a cut'])
+    // A pointer with no raw moves (a browser without them for its kind) still cuts on pointermove.
+    t.move(2, 0, 12)
+    expect(log).toEqual(['a press true unsure', 'b press true unsure', 'a cut', 'b cut'])
+    // A raw move of a pointer not held: nothing.
+    t.move(3, 0, 40, true)
+    expect(log).toHaveLength(4)
+    // The same id pressed again starts without raw moves seen.
+    t.down(1, 0, 0, recorder(log, 'c'), true)
+    t.move(1, 0, 12)
+    expect(log.at(-1)).toBe('c cut')
+  })
+
+  it('onWindows says when the first scroll window opens and the last one closes', () => {
+    const log: string[] = []
+    const windows: boolean[] = []
+    const timers = fakeTimers()
+    const t = new PressTracker(timers, PRESS_DELAY_MS, 8)
+    t.onWindows = (open) => windows.push(open)
+    // Outside a scrolling page there is no window to watch.
+    t.down(1, 0, 0, recorder(log, 'a'), false)
+    t.up(1)
+    expect(windows).toEqual([])
+    t.down(2, 0, 0, recorder(log, 'b'), true)
+    t.down(3, 0, 0, recorder(log, 'c'), true)
+    expect(windows).toEqual([true])
+    t.move(2, 0, 12) // b scrolls: c's window is still open
+    expect(windows).toEqual([true])
+    timers.run() // c's window closes: none open
+    expect(windows).toEqual([true, false])
+    t.up(3)
+    // Opened again, then ended by a lift inside it, or the screen going.
+    t.down(4, 0, 0, recorder(log, 'd'), true)
+    t.up(4)
+    t.down(5, 0, 0, recorder(log, 'e'), true)
+    t.releaseAll()
+    expect(windows).toEqual([true, false, true, false, true, false])
+  })
+
   it('a target without cut is released instead', () => {
     const log: string[] = []
     const t = new PressTracker(fakeTimers())

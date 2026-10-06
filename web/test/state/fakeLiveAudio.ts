@@ -1,5 +1,5 @@
 // A LiveAudioDeps that records what the controller asks of Live's output (state tests).
-import { signal } from '@preact/signals'
+import { signal, type Signal } from '@preact/signals'
 import type { LiveAudioDeps, LivePress } from '../../src/state/deps'
 
 export interface FakeLiveAudio extends LiveAudioDeps {
@@ -18,9 +18,12 @@ export interface FakeLiveAudio extends LiveAudioDeps {
   started(id: string, ms: number, route?: string): void
   /** Reports a slow (Bluetooth-like) output. */
   slow(ms: number): void
+  /** The output's own delay signal, as the real LiveAudio has it ([withLate]); absent otherwise. */
+  readonly late?: Signal<number | null>
 }
 
-export function fakeLiveAudio(): FakeLiveAudio {
+/** [withLate]: with a `late` signal of its own, as the real LiveAudio (the controller then follows it). */
+export function fakeLiveAudio(withLate = false): FakeLiveAudio {
   const voices = signal<ReadonlySet<string>>(new Set())
   const startedL = new Set<(id: string, ms: number, route: string) => void>()
   const slowL = new Set<(ms: number) => void>()
@@ -97,6 +100,7 @@ export function fakeLiveAudio(): FakeLiveAudio {
     slow(ms) {
       for (const l of slowL) l(ms)
     },
+    ...(withLate ? { late: signal<number | null>(null) } : {}),
   }
   return a
 }

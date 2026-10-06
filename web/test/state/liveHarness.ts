@@ -41,6 +41,8 @@ export interface LiveHarnessOptions {
   /** No EP-133 plugged in. */
   unplugged?: boolean
   now?: () => number
+  /** The fake output has a `late` signal of its own, as the real LiveAudio. */
+  late?: boolean
 }
 
 const all: LiveHarness[] = []
@@ -65,7 +67,7 @@ export async function liveHarness(opts: LiveHarnessOptions = {}): Promise<LiveHa
   const library = opts.library ?? (await freshLibrary())
   const storage = opts.storage ?? memoryStorage()
   const padSounds = opts.padSounds ?? memoryPadSoundStore()
-  const liveAudio = fakeLiveAudio()
+  const liveAudio = fakeLiveAudio(opts.late ?? false)
   const visListeners = new Set<(v: boolean) => void>()
   const hideListeners = new Set<() => void>()
   let visible = true

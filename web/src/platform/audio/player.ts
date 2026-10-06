@@ -8,9 +8,9 @@
 // Web delta: Web Audio replaces AudioTrack. The whole sound goes into one
 // AudioBuffer (s16 / 32768) and plays through an AudioBufferSourceNode, whose
 // onended replaces the output loop's report that the voice has ended. The
-// context asks for the interactive (lowest) latency, as Live's does. The
-// silence check is made once per PCM array (kept while the caller keeps the
-// array), and the buffers of the last few sounds played are kept
+// context asks for the interactive latency (Live's asks for 0, the smallest:
+// liveAudio.ts). The silence check is made once per PCM array (kept while the
+// caller keeps the array), and the buffers of the last few sounds played are kept
 // (BUILT_KEEP, within BUILT_BYTES of float data), so playing a sound again
 // only starts a new source node. There is
 // no audio focus, media volume or output route on the web: volumeOff() is

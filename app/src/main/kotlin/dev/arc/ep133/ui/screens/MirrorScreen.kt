@@ -297,6 +297,8 @@ fun MirrorScreen(
     edit: EditUi = EditUi(),
     /** A light tick as a pad or key goes down (Settings → Haptic feedback). */
     haptics: Boolean = true,
+    /** Live's sound goes to Bluetooth or a hearing aid ([LiveAudio.wireless]): the display line says it plays late. */
+    wireless: Boolean = false,
 ) {
     val sounding = voices?.collectAsStateWithLifecycle()?.value
     val ringed = if (sounding == null) playingPads else remember(sounding) { LiveVoices.pads(sounding) }
@@ -429,7 +431,7 @@ fun MirrorScreen(
                     val gridW = minOf(gridH * 1.4f, maxWidth - GroupColumn - 12.dp)
                     Column(Modifier.width(gridW + 12.dp + GroupColumn).fillMaxHeight()) {
                         if (!inBar) {
-                            if (editing) EditLine() else DisplayStrip(st, mirror, rec, still = fixedNow != null)
+                            if (editing) EditLine() else DisplayStrip(st, mirror, rec, still = fixedNow != null, wireless = wireless)
                             Spacer(Modifier.height(10.dp))
                         }
                         ModeRow(keys, keysActions, landscape = true, oneGroup = true, onOneGroup = onOneGroup)
@@ -454,7 +456,7 @@ fun MirrorScreen(
                 val now = clock()
                 Column(sidewaysColumn) {
                     if (!inBar) {
-                        if (editing) EditLine() else DisplayStrip(st, mirror, rec, still = fixedNow != null)
+                        if (editing) EditLine() else DisplayStrip(st, mirror, rec, still = fixedNow != null, wireless = wireless)
                         Spacer(Modifier.height(10.dp))
                     }
                     ModeRow(keys, keysActions, landscape = true, onOneGroup = onOneGroup)
@@ -496,7 +498,7 @@ fun MirrorScreen(
                             ModeRow(keys, keysActions, viewSwitch = viewSwitch)
                         } else {
                             if (!inBar) {
-                                if (editing) EditLine() else DisplayStrip(st, mirror, rec, still = fixedNow != null)
+                                if (editing) EditLine() else DisplayStrip(st, mirror, rec, still = fixedNow != null, wireless = wireless)
                             }
                             Group(
                                 group, st, nameOf, now,
@@ -532,7 +534,7 @@ fun MirrorScreen(
                             if (onBack != null) CloseKey(onBack, dev.arc.ep133.text.GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
                         }
                         if (!inBar) {
-                            if (editing) EditLine() else Display(st, mirror, rec, still = fixedNow != null, compact = sideways, initialNoteOpen = initialNoteOpen)
+                            if (editing) EditLine() else Display(st, mirror, rec, still = fixedNow != null, compact = sideways, initialNoteOpen = initialNoteOpen, wireless = wireless)
                         }
                         ModeRow(keys, keysActions)
                         BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -626,7 +628,8 @@ private val LivePillWindow = 600.dp
 /**
  * Live's display line in the top bar's middle, on a phone on its side: the
  * KEYS line or the pads' one-line display, one bar tall. [pianoRange] is the
- * piano's notes, to name a device note it doesn't reach.
+ * piano's notes, to name a device note it doesn't reach; [wireless] as
+ * [MirrorScreen] takes it.
  */
 @Composable
 internal fun LivePill(
@@ -638,13 +641,14 @@ internal fun LivePill(
     editing: Boolean = false,
     /** The voices sounding on the phone, as [MirrorScreen] takes them: the note playing is named. */
     voices: StateFlow<Set<String>>? = null,
+    wireless: Boolean = false,
 ) {
     val st = mirror?.state ?: MirrorState()
     val keysNow = soundingKeys(keys, voices?.collectAsStateWithLifecycle()?.value)
     when {
         keys.on -> KeysDisplay(st, mirror, keysNow, rec, still, compact = true, pianoRange = pianoRange)
         editing -> EditLine(compact = true)
-        else -> DisplayStrip(st, mirror, rec, still, compact = true)
+        else -> DisplayStrip(st, mirror, rec, still, compact = true, wireless = wireless)
     }
 }
 
@@ -694,21 +698,39 @@ private fun spoken(text: String): String {
 private const val SPOKEN_MS = 1000L
 
 /**
- * The one-group view's display as a single dark line: play state, tempo and
- * project on the left, the pad just played on the right. [compact]: one bar
- * tall, in the top bar ([LivePill]).
+ * The display's main line: the error, "Reading…", the hit, that Live's sound
+ * plays late ([wireless]: it goes to Bluetooth), offline the time of the last
+ * read ("Last seen Oct 5, 2:02 PM"), or "Press a pad". A device hit hides the
+ * note while it shows.
  */
-@Composable
-private fun DisplayStrip(st: MirrorState, mirror: MirrorUi?, rec: RecUi, still: Boolean, compact: Boolean = false) {
-    val c = LocalArcColors.current
+private fun displayLine(st: MirrorState, mirror: MirrorUi?, wireless: Boolean): String {
     val hit = st.lastHit
-    val main = when {
+    return when {
         mirror?.error != null -> mirror.error
         mirror?.loading == true && hit == null -> MirrorText.READING
         hit != null -> MirrorText.hit(hit)
+        wireless -> MirrorText.WIRELESS_DELAY
         mirror?.offline != null -> mirror.offline
         else -> MirrorText.WAITING
     }
+}
+
+/** The offline line ("Last seen …") and the late note are longer than a hit: the all-groups display draws them a size down (22 for 26). */
+private fun displayLineSmall(st: MirrorState, mirror: MirrorUi?, wireless: Boolean): Boolean = when {
+    st.lastHit != null -> false
+    mirror?.offline != null -> true
+    else -> wireless && mirror?.error == null && mirror?.loading != true
+}
+
+/**
+ * The one-group view's display as a single dark line: play state, tempo and
+ * project on the left, the pad just played (or that the sound plays late) on
+ * the right. [compact]: one bar tall, in the top bar ([LivePill]).
+ */
+@Composable
+private fun DisplayStrip(st: MirrorState, mirror: MirrorUi?, rec: RecUi, still: Boolean, compact: Boolean = false, wireless: Boolean = false) {
+    val c = LocalArcColors.current
+    val main = displayLine(st, mirror, wireless)
     val transport = when (st.playing) {
         true -> MirrorText.PLAYING
         false -> MirrorText.STOPPED
@@ -756,7 +778,7 @@ private fun RowScope.SpokenLine(said: String, content: @Composable RowScope.() -
 }
 
 @Composable
-private fun Display(st: MirrorState, mirror: MirrorUi?, rec: RecUi, still: Boolean, compact: Boolean = false, initialNoteOpen: Boolean = false) {
+private fun Display(st: MirrorState, mirror: MirrorUi?, rec: RecUi, still: Boolean, compact: Boolean = false, initialNoteOpen: Boolean = false, wireless: Boolean = false) {
     val c = LocalArcColors.current
     val offline = mirror?.offline != null && st.playing == null
     // Why it is offline stays folded under the word until asked for, so the pads keep the room.
@@ -789,18 +811,11 @@ private fun Display(st: MirrorState, mirror: MirrorUi?, rec: RecUi, still: Boole
             st.activeProject?.let { Text(MirrorText.project(it), style = ArcType.displaySub, color = c.displayDim) }
             if (recOnTop) RecChip(rec, still)
         }
-        val hit = st.lastHit
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                when {
-                    mirror?.error != null -> mirror.error
-                    mirror?.loading == true && hit == null -> MirrorText.READING
-                    hit != null -> MirrorText.hit(hit)
-                    mirror?.offline != null -> mirror.offline
-                    else -> MirrorText.WAITING
-                },
-                // The offline line ("Last seen Oct 5, 2:02 PM") is longer than a hit; it fits a phone a size down.
-                style = ArcType.statFree.copy(fontSize = if (compact || mirror?.offline != null && hit == null) 22.sp else 26.sp),
+                displayLine(st, mirror, wireless),
+                // The offline line ("Last seen Oct 5, 2:02 PM") and the late note fit a phone a size down.
+                style = ArcType.statFree.copy(fontSize = if (compact || displayLineSmall(st, mirror, wireless)) 22.sp else 26.sp),
                 color = c.displayInk,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,

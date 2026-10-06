@@ -40,6 +40,18 @@ jobs:
       - name: Accept Android SDK licences
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 
+      # Live's native audio engine (app/src/main/cpp) needs the NDK and CMake
+      # versions app/build.gradle.kts names. AGP would fetch them too; installing
+      # them here keeps that out of the build and fails early if one is gone.
+      # The engine's host test (part of ./gradlew test) uses the runner's g++/clang++.
+      - name: Install the NDK and CMake
+        run: |
+          ndk="$(sed -n 's/^ *ndkVersion = "\(.*\)"/\1/p' app/build.gradle.kts)"
+          cmake="$(sed -n 's/^ *version = "\([0-9.]*\)"/\1/p' app/build.gradle.kts)"
+          test -n "$ndk" -a -n "$cmake" || { echo "::error::ndkVersion or the CMake version not found in app/build.gradle.kts"; exit 1; }
+          echo "NDK $ndk, CMake $cmake"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ndk" "cmake;$cmake" > /dev/null
+
       - name: Test, lint and build
         run: ./gradlew test :app:lintDebug :app:assembleDebug --stacktrace
 

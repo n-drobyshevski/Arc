@@ -35,6 +35,12 @@
 //   scroll that starts within PRESS_DELAY_MS cuts it, [onPadCut]). A screen
 //   reader's / keyboard's Play is a click with detail 0: it plays the whole
 //   sound (hold = false).
+// - Where the browser sends pointerrawupdate (Chrome), the scroll-cut check
+//   reads each move as it arrives, not at the next frame's pointermove
+//   (PressTracker.move's raw moves; one listener on the document, there only
+//   while a press's scroll window is open: PressTracker.onWindows).
+// - The display line says when the output plays late ([outputLate]:
+//   MirrorText.slowOutput from its latency; Android says Bluetooth from the route).
 // - The haptic tick ([haptics]) is navigator.vibrate (platform/haptics.ts),
 //   after a finger's press only: not for a screen reader's Play.
 // - The offline note's fold is a button with aria-expanded (Kotlin's
@@ -128,7 +134,7 @@ import { rowPadSize } from '../live/desk'
 import { chosenView, pianoFor, type PianoPlan } from '../live/keyboard'
 import { DEFAULT_KEYS, keysLit, keysNoteText, octaves, upperOctave, type KeysPicker, type KeysShown } from '../live/keys'
 import { PianoKeyboard } from '../live/PianoKeyboard'
-import { PressTracker, ticking, type PressTarget } from '../live/press'
+import { PressTracker, rawMovesSupported, ticking, type PressTarget } from '../live/press'
 import { SLOT_MIME, SoundPicker } from '../live/SoundPicker'
 import { dragMayHaveAudio, isAudioFile } from '../../platform/files/pick'
 import { tick } from '../../platform/haptics'
@@ -237,6 +243,12 @@ export interface MirrorScreenProps {
   keysViewTall?: KeysView
   /** Live's EDIT; null (screenshots, tests): no editing. */
   edit?: EditUi | null
+  /**
+   * Live's output delay in ms while it is long enough to be heard (the display
+   * line says so); null by default. A signal, read by the display line alone:
+   * a new delay doesn't re-render this screen.
+   */
+  outputLate?: ReadonlySignal<number | null> | null
 }
 
 
@@ -422,6 +434,25 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   // Every finger on the pads or keys; all of them end when the screen goes.
   const tracker = useMemo(() => new PressTracker(), [])
   useEffect(() => () => tracker.releaseAll(), [tracker])
+  // Chrome: each move as it arrives, so a press that turns into a scroll is cut a frame sooner.
+  // The tracker skips pointers it doesn't hold, and those pointers' frame-aligned pointermove.
+  // Listened for only while a press's scroll window is open: raw moves come at the device's
+  // rate (up to 1000 a second for a mouse), and a hover the rest of the time needs none.
+  useEffect(() => {
+    if (!rawMovesSupported()) return
+    const onRaw = (e: Event): void => {
+      const p = e as PointerEvent
+      tracker.move(p.pointerId, p.clientX, p.clientY, true)
+    }
+    tracker.onWindows = (open) => {
+      if (open) document.addEventListener('pointerrawupdate', onRaw)
+      else document.removeEventListener('pointerrawupdate', onRaw)
+    }
+    return () => {
+      tracker.onWindows = null
+      document.removeEventListener('pointerrawupdate', onRaw)
+    }
+  }, [tracker])
 
   // The fade runs on the frame clock while a released pad (or, in KEYS, note) is fading,
   // and stops after. Each render writes the glow too, so the DOM never keeps a value from a stopped loop.
@@ -589,14 +620,15 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
       plan={plan}
     />
   )
-  const displayStrip = editing ? <EditStrip /> : <DisplayStrip st={st} mirror={mirror} />
+  const late = props.outputLate ?? null
+  const displayStrip = editing ? <EditStrip /> : <DisplayStrip st={st} mirror={mirror} late={late} />
   const allGroups = (
     <div class="live__all">
       <div class="live__head">
         <Caption text={MirrorText.TITLE} as="h1" />
         {onBack && <CloseKey class="live__close" onClick={onBack} description={GUIDE_CLOSE} />}
       </div>
-      {editing ? <EditStrip /> : <Display st={st} mirror={mirror} initialNoteOpen={props.initialNoteOpen ?? false} />}
+      {editing ? <EditStrip /> : <Display st={st} mirror={mirror} late={late} initialNoteOpen={props.initialNoteOpen ?? false} />}
       {modeRow}
       {/* Four groups in a row when there is room, two by two on a phone. */}
       <div class="live__groups">
@@ -889,10 +921,11 @@ function PianoLegend(): JSX.Element {
 
 /**
  * The one-group view's display as a single dark line: play state, tempo and
- * project on the left, the pad just played on the right.
+ * project on the left, the pad just played (or that the sound plays late) on the right.
  */
-function DisplayStrip(props: { st: MirrorState; mirror: MirrorUi | null }): JSX.Element {
+function DisplayStrip(props: { st: MirrorState; mirror: MirrorUi | null; late: ReadonlySignal<number | null> | null }): JSX.Element {
   const { st, mirror } = props
+  const late = props.late?.value ?? null
   return (
     <div class="live-strip" aria-live="polite">
       {st.playing === true && <span class="live-strip__sub live-strip__ink" role="img" aria-label={MirrorText.PLAYING}>{'▶'}</span>}
@@ -904,13 +937,19 @@ function DisplayStrip(props: { st: MirrorState; mirror: MirrorUi | null }): JSX.
       {st.activeProject !== null && (
         <span class="live-strip__sub live-strip__dim">{MirrorText.projectShort(st.activeProject)}</span>
       )}
-      <span class="live-strip__line">{displayLine(st, mirror)}</span>
+      <span class="live-strip__line">{displayLine(st, mirror, late)}</span>
     </div>
   )
 }
 
-function Display(props: { st: MirrorState; mirror: MirrorUi | null; initialNoteOpen: boolean }): JSX.Element {
+function Display(props: {
+  st: MirrorState
+  mirror: MirrorUi | null
+  late: ReadonlySignal<number | null> | null
+  initialNoteOpen: boolean
+}): JSX.Element {
   const { st, mirror } = props
+  const late = props.late?.value ?? null
   const offline = showOffline(st, mirror)
   // Why it is offline stays folded under the word until asked for, so the pads keep the room.
   const [noteOpen, setNoteOpen] = useState(props.initialNoteOpen)
@@ -936,8 +975,8 @@ function Display(props: { st: MirrorState; mirror: MirrorUi | null; initialNoteO
           <span class="t-display-sub live-display__dim">{MirrorText.project(st.activeProject)}</span>
         )}
       </div>
-      <p class={`live-display__line t-stat-free${displayLineSmall(st, mirror) ? ' live-display__line--small' : ''}`}>
-        {displayLine(st, mirror)}
+      <p class={`live-display__line t-stat-free${displayLineSmall(st, mirror, late) ? ' live-display__line--small' : ''}`}>
+        {displayLine(st, mirror, late)}
       </p>
       {/* Offline, the folded note; else the all-groups view explains clock out. */}
       {offline

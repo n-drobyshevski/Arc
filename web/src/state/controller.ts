@@ -40,6 +40,8 @@
 //   closure stays here, the state only holds the word); [uploadForPad] goes
 //   through the Device tab's upload sheet (draft + draftPad), then assigns.
 //   The piano plays MIDI notes ([playNote]); the KEYS grid keeps [playKey].
+// - [liveLate]: Live's output delay, for the display line's note, from the
+//   output's latency (LiveAudioDeps.late); Android names Bluetooth from the route (liveWireless).
 
 import { computed, signal, type ReadonlySignal, type Signal } from '@preact/signals'
 import { MAX_OCTAVE, MIN_OCTAVE, type NoteNames, type Scale } from '../core/features/keys'
@@ -147,6 +149,13 @@ export class ArcController {
   readonly playingKeys: ReadonlySignal<ReadonlySet<number>>
   /** The piano's notes sounding on the phone, first pressed first (MainActivity's playingNotes). */
   readonly playingNotes: ReadonlySignal<ReadonlySet<number>>
+  /**
+   * Live's output delay in ms while it is long enough to be heard against the
+   * finger, else null: the display line says so (MirrorText.slowOutput).
+   * From LiveAudioDeps.late, or, without it, the slow output it reports.
+   */
+  readonly liveLate: ReadonlySignal<number | null>
+  private readonly slowMs = signal<number | null>(null)
 
   private readonly settingsSignal: Signal<AppSettings>
   private readonly tasks: Tasks
@@ -223,6 +232,8 @@ export class ArcController {
       }
       return out
     })
+    const late = deps.liveAudio.late
+    this.liveLate = late ?? this.slowMs
     this.visible = deps.visibility.visible()
     const toast = (text: string, error?: boolean): void => this.toast(text, error)
     this.tasks = new Tasks({ store: this.store, deps, toast, session: () => this.conn.session })
@@ -280,7 +291,14 @@ export class ArcController {
     lib.live = () => this.live.lastReadJson()
     const audio = deps.liveAudio
     this.cleanups.push(audio.onStarted((id, ms, route) => this.live.onStarted(id, ms, route)))
-    if (audio.onSlowOutput) this.cleanups.push(audio.onSlowOutput(() => this.live.slowOutput()))
+    if (audio.onSlowOutput) {
+      this.cleanups.push(
+        audio.onSlowOutput((ms) => {
+          this.slowMs.value = Math.round(ms)
+          this.live.slowOutput()
+        }),
+      )
+    }
     if (audio.onLog) this.cleanups.push(audio.onLog((line) => this.trafficLog.note(line)))
     this.cleanups.push(lib.subscribe(() => void this.reloadLibrary()))
     this.cleanups.push(
