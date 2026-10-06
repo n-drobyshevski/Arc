@@ -33,6 +33,7 @@
 // LivePill) and the page leaves it out.
 import { Component, type ComponentChildren, type JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
+import { FactorySounds } from './core/features/factorySounds'
 import { MirrorText } from './core/text/mirrorText'
 import { SettingsText } from './core/text/settingsText'
 import { Strings } from './core/text/strings'
@@ -211,6 +212,9 @@ function Root(): JSX.Element {
         onForgetNames={() => c.forgetLearned()}
         padSoundsSize={() => c.padSoundsSize()}
         onClearPadSounds={() => void c.clearPadSounds()}
+        factorySounds={
+          c.canGetFactory ? { saved: FactorySounds.inLibrary(state.backups) !== null, onGet: () => void c.getFactorySounds() } : undefined
+        }
         onNoteNames={(n) => c.setKeysNames(n)}
         onShowNames={(on) => c.setKeysShowNames(on)}
         onPianoWhites={(w) => c.setPianoWhites(w)}
@@ -423,6 +427,7 @@ function TabScreen(props: {
       return (
         <MirrorScreen
           mirror={liveMirror(c)}
+          onGetFactory={c.canGetFactory && FactorySounds.inLibrary(state.backups) === null ? () => void c.getFactorySounds() : null}
           nameOf={(pad) => c.mirrorName(pad)}
           oneGroup={settings.liveOneGroup}
           onOneGroup={(on) => c.setLiveOneGroup(on)}

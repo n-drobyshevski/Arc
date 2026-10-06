@@ -423,4 +423,30 @@ export const FeatureText = {
   copyFailed(message: string): string {
     return `Could not copy to Documents/arc: ${message}`
   },
+
+  // ---------- factory sounds (FactorySounds) ----------
+  FACTORY_SOUNDS: 'Factory sounds',
+  FACTORY_TITLE: 'EP-133 factory sounds',
+  FACTORY_NOTE:
+    "The EP-133's factory sounds, from teenage engineering's EP Sample Tool. Live plays them until it has read your EP-133.",
+  FACTORY_SAVED: 'In your backups. Live plays them until it has read your EP-133.',
+  GET: 'Get',
+  SAVED: 'Saved',
+  GETTING_FACTORY: 'Getting factory sounds',
+  /** The progress sheet's note while they download (no cable involved). */
+  FACTORY_KEEP_OPEN: "Keep arc open until they're saved.",
+  NOT_FACTORY: "teenage engineering's file isn't an EP-133 factory pack.",
+
+  /** The download's progress: "12.3 MB of 27.4 MB". */
+  factoryProgress(done: number, total: number): string {
+    return `${Format.bytes(done)} of ${Format.bytes(total)}`
+  },
+
+  factorySaved(sounds: number): string {
+    return `Factory sounds saved: ${plural(sounds, 'sound')}. Live plays them until it has read your EP-133.`
+  },
+
+  factoryFailed(message: string): string {
+    return `Couldn't get the factory sounds: ${message}`
+  },
 } as const

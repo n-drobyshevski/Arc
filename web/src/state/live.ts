@@ -4,7 +4,8 @@
 // What Live plays on the phone and what it remembers of the device:
 // - the last read (project, pads, sound names), kept so Live still shows
 //   the pads while the EP-133 is not connected, and copied to the library
-//   folder as live.json;
+//   folder as live.json; before any read, the factory sounds' first project
+//   when the library has them (factorySnapshot);
 // - arc's copies of the samples on the active project's pads, read from the
 //   device one at a time in the background while Live is open and connected
 //   (PadSoundCache); an action started meanwhile waits at most for the sound
@@ -44,6 +45,7 @@
 import { signal, type ReadonlySignal } from '@preact/signals'
 import { openPak, type Pak } from '../core/backup/pak'
 import { soundDetails, type SoundDetails } from '../core/features/deviceBrowser'
+import { FactorySounds } from '../core/features/factorySounds'
 import { Keys } from '../core/features/keys'
 import { LatencyStats } from '../core/features/latencyStats'
 import type { NameEntry } from '../core/features/librarySearch'
@@ -173,6 +175,8 @@ export class LiveSounds {
   private deviceSounds = new Map<number, SoundEntry>()
   /** The last backup a pad played from, opened, so the next taps are quick. */
   private openPak: { id: string; pak: Pak } | null = null
+  // The factory sounds' first project as Live shows it, by the library entry it came from.
+  private factorySnap: { id: string; snap: LiveSnapshot | null } | null = null
   // Live's pad samples decoded and ready ("slot:name"), least recently played first.
   private readonly padMemory = new Map<string, PadAudio>()
   private padMemoryBytes = 0
@@ -483,12 +487,33 @@ export class LiveSounds {
   private async fromBackup(slot: number, name: string): Promise<Uint8Array | null> {
     const b = newestBackupWith(slot, name, this.host.names(), this.host.store.get().backups)
     if (b === null) return null
-    let pak = this.openPak?.id === b.id ? this.openPak.pak : null
-    if (pak === null) {
-      pak = await openPak(await this.host.deps.library.bytes(b.id))
-      this.openPak = { id: b.id, pak }
+    return (await this.pakOf(b.id)).sounds.get(slot)?.wav ?? null
+  }
+
+  /** A library entry opened, the last one kept open. */
+  private async pakOf(id: string): Promise<Pak> {
+    if (this.openPak?.id === id) return this.openPak.pak
+    const pak = await openPak(await this.host.deps.library.bytes(id))
+    this.openPak = { id, pak }
+    return pak
+  }
+
+  /**
+   * What Live shows while no EP-133 has been read: the factory sounds' first
+   * project, when the library has them (FactorySounds); else null.
+   */
+  async factorySnapshot(): Promise<LiveSnapshot | null> {
+    const b = FactorySounds.inLibrary(this.host.store.get().backups)
+    if (b === null) return null
+    if (this.factorySnap?.id === b.id) return this.factorySnap.snap
+    let snap: LiveSnapshot | null
+    try {
+      snap = FactorySounds.snapshot(await this.pakOf(b.id), b.createdAt)
+    } catch {
+      snap = null
     }
-    return pak.sounds.get(slot)?.wav ?? null
+    this.factorySnap = { id: b.id, snap }
+    return snap
   }
 
   /** The slot and name on [pad], when the mirror knows them. */

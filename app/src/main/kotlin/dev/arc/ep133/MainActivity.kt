@@ -553,6 +553,7 @@ class MainActivity : ComponentActivity() {
                     onForgetNames = controller::forgetLearned,
                     padSoundsSize = controller::padSoundsSize,
                     onClearPadSounds = { controller.clearPadSounds() },
+                    onGetFactory = { controller.getFactorySounds() },
                     onNoteNames = controller::setKeysNames,
                     onShowNames = controller::setKeysShowNames,
                     onPianoWhites = controller::setPianoWhites,
@@ -656,6 +657,7 @@ class MainActivity : ComponentActivity() {
                         Tab.LIVE -> MirrorScreen(
                             mirror = mirror,
                             nameOf = controller::mirrorName,
+                            onGetFactory = if (dev.arc.ep133.features.FactorySounds.inLibrary(state.backups) == null) ({ controller.getFactorySounds() }) else null,
                             onPad = { pad, hold, unsure, pressedAt -> controller.playPad(pad, hold, unsure, pressedAt) },
                             onPadKept = { pad -> controller.keepPad(pad) },
                             onPadUp = controller::releasePad,

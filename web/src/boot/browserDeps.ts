@@ -36,6 +36,7 @@ import { shareFile } from '../platform/share/share'
 import { WebAudioPlayer } from '../platform/audio/player'
 import { LiveAudio } from '../platform/audio/liveAudio'
 import { createWakeLock } from '../platform/wakelock/wakeLock'
+import { browserFactory } from '../platform/net/factory'
 import { unavailableLibrary, type Deps, type LibraryApi } from '../state/deps'
 
 type Timer = ReturnType<typeof globalThis.setTimeout>
@@ -145,6 +146,7 @@ export async function createBrowserDeps(options: BrowserDepsOptions = {}): Promi
     liveAudio,
     padSounds,
     lastRead: new LastReadPrefs(storage),
+    factory: browserFactory(() => doc?.baseURI ?? globalThis.location.href),
     wakeLock,
     trafficLog: new TrafficLog(),
     now: () => Date.now(),

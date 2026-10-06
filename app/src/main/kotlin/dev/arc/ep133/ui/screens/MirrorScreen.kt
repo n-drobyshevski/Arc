@@ -111,6 +111,7 @@ import dev.arc.ep133.features.NoteNames
 import dev.arc.ep133.features.Scale
 import dev.arc.ep133.features.RecState
 import dev.arc.ep133.data.TakeInfo
+import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.text.GuideText
 import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.ui.components.ArcKey
@@ -269,6 +270,8 @@ fun MirrorScreen(
     initialToolsOpen: Boolean = false,
     /** For screenshots: start with the offline note unfolded. */
     initialNoteOpen: Boolean = false,
+    /** Not connected and nothing to show: download the factory sounds (FactorySounds); null when they are in the library. */
+    onGetFactory: (() -> Unit)? = null,
     /**
      * Pressing a pad plays its sample on the phone until [onPadUp] (hold is
      * false for a screen reader's Play, which plays to the end); null leaves
@@ -379,6 +382,7 @@ fun MirrorScreen(
             onClose = { toolsOpen = false },
             title = MirrorText.TOOLS,
             panel = {
+                FactoryRow(mirror, onGetFactory)
                 if (keys.on) {
                     KeysPanel(keys, keysActions, piano = piano != null)
                     if (rec.onRec != null) TakesSection(takes)
@@ -568,7 +572,7 @@ fun MirrorScreen(
                             if (onBack != null) CloseKey(onBack, dev.arc.ep133.text.GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
                         }
                         if (!inBar) {
-                            if (editing) EditLine() else Display(st, mirror, rec, still = fixedNow != null, compact = sideways, initialNoteOpen = initialNoteOpen, wireless = wireless)
+                            if (editing) EditLine() else Display(st, mirror, rec, still = fixedNow != null, compact = sideways, initialNoteOpen = initialNoteOpen, wireless = wireless, onGetFactory = onGetFactory)
                         }
                         ModeRow(keys, keysActions)
                         BoxWithConstraints(Modifier.fillMaxWidth()) {
@@ -808,10 +812,31 @@ private fun RowScope.SpokenLine(said: String, content: @Composable RowScope.() -
     )
 }
 
+/** Not connected and never read: the factory sounds to get, first in the tools. */
 @Composable
-private fun Display(st: MirrorState, mirror: MirrorUi?, rec: RecUi, still: Boolean, compact: Boolean = false, initialNoteOpen: Boolean = false, wireless: Boolean = false) {
+private fun FactoryRow(mirror: MirrorUi?, onGetFactory: (() -> Unit)?) {
+    if (onGetFactory == null || mirror?.error != MirrorText.NOT_CONNECTED) return
+    GridPlate {
+        SettingRow(FeatureText.FACTORY_SOUNDS, note = FeatureText.FACTORY_NOTE) {
+            ArcKey(FeatureText.GET, onGetFactory, size = KeySize.Small, style = KeyStyle.Quiet)
+        }
+    }
+}
+
+@Composable
+private fun Display(
+    st: MirrorState,
+    mirror: MirrorUi?,
+    rec: RecUi,
+    still: Boolean,
+    compact: Boolean = false,
+    initialNoteOpen: Boolean = false,
+    wireless: Boolean = false,
+    onGetFactory: (() -> Unit)? = null,
+) {
     val c = LocalArcColors.current
     val offline = mirror?.offline != null && st.playing == null
+    val getFactory = onGetFactory.takeIf { mirror?.error == MirrorText.NOT_CONNECTED }
     // Why it is offline stays folded under the word until asked for, so the pads keep the room.
     var noteOpen by rememberSaveable { mutableStateOf(initialNoteOpen) }
     // REC ends the top line, unless the transport fills it on a phone: then the big line below.
@@ -862,8 +887,15 @@ private fun Display(st: MirrorState, mirror: MirrorUi?, rec: RecUi, still: Boole
                 enter = androidx.compose.animation.expandVertically() + androidx.compose.animation.fadeIn(),
                 exit = androidx.compose.animation.shrinkVertically() + androidx.compose.animation.fadeOut(),
             ) {
-                Text(MirrorText.OFFLINE_NOTE, style = ArcType.displayHint, color = c.displayDim)
+                Text(MirrorText.offlineNote(mirror.offline), style = ArcType.displayHint, color = c.displayDim)
             }
+            // Never read: the factory sounds to get.
+            getFactory != null -> Text(
+                MirrorText.GET_FACTORY,
+                style = ArcType.displayHint.copy(textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline),
+                color = c.displayInk,
+                modifier = Modifier.clickable(role = Role.Button, onClick = getFactory),
+            )
             st.playing == null && st.bpm == null -> Text(MirrorText.NO_TRANSPORT, style = ArcType.displayHint, color = c.displayDim)
         }
     }
@@ -1366,7 +1398,7 @@ private fun Notes(st: MirrorState, mirror: MirrorUi?, tapToPlay: Boolean = false
         // Pads that play on the phone mean keys that do too, and sideways they are a piano.
         if (tapToPlay && !sideways) Text(MirrorText.PIANO_HINT, style = ArcType.small, color = c.graphite)
         // Offline the display line says so too, with this note under a tap.
-        if (mirror?.offline != null) Text(MirrorText.OFFLINE_NOTE, style = ArcType.small, color = c.graphite)
+        if (mirror?.offline != null) Text(MirrorText.offlineNote(mirror.offline), style = ArcType.small, color = c.graphite)
         if (learning) Text(MirrorText.LEARN_NOTE, style = ArcType.small, color = c.graphite)
         if (learning && !st.pushesSeen && st.learned.isEmpty() && st.lastHit?.pad != null && mirror?.loading == false) {
             Text(MirrorText.NO_PUSHES, style = ArcType.small, color = c.graphite)

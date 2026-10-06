@@ -45,6 +45,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { NOTE_NAMES, type NoteNames } from '../../core/features/keys'
 import type { PadOrder } from '../../core/features/padPush'
 import { choiceOf as pianoChoiceOf, fits as pianoFits, switchShown } from '../../core/features/piano'
+import { FeatureText } from '../../core/text/featureText'
 import { Format } from '../../core/text/format'
 import { MirrorText } from '../../core/text/mirrorText'
 import { SettingsText, THEME_CHOICES, type ThemeChoice } from '../../core/text/settingsText'
@@ -86,6 +87,8 @@ export interface SettingsScreenProps {
   onShowNames?: (on: boolean) => void
   /** Live's piano size: white keys (Piano.CHOICES), null for Auto. */
   onPianoWhites?: (whites: number | null) => void
+  /** The factory sounds (FactorySounds): whether the library has them, and the download; absent where they can't be downloaded. */
+  factorySounds?: { saved: boolean; onGet: () => void } | undefined
   /** Web: whether this browser can vibrate (platform/haptics.ts); the Haptics row shows only then. */
   hapticsSupported?: boolean
   onHaptics?: (on: boolean) => void
@@ -237,6 +240,7 @@ export function pruneDialogId(keep: number): string {
 
 export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
   const { settings, state } = props
+  const factory = props.factorySounds
   const nav = useNav()
   const v = nav.view.value
   const desk = useDesk()
@@ -531,6 +535,20 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
                         onChange={(on) => props.onHaptics?.(on)}
                         labelledBy={ids.titleId}
                         describedBy={ids.noteId}
+                      />
+                    )}
+                  />
+                )}
+                {factory !== undefined && (
+                  <SettingRow
+                    title={FeatureText.FACTORY_SOUNDS}
+                    note={factory.saved ? FeatureText.FACTORY_SAVED : FeatureText.FACTORY_NOTE}
+                    control={(ids) => (
+                      <RowAction
+                        text={factory.saved ? FeatureText.SAVED : FeatureText.GET}
+                        describedBy={ids.titleId}
+                        disabled={factory.saved || state.busy}
+                        onClick={factory.onGet}
                       />
                     )}
                   />
