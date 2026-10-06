@@ -1093,6 +1093,23 @@ describe('Factory sounds', () => {
     expect(h.liveAudio.presses.at(-1)).toMatchObject({ id: 'live:0:0', key: '1:001.pcm' })
   })
 
+  it('offline with pads counted from the top and none learned, a last read still names and plays its pads', async () => {
+    // Pad numbers from the top (the default), nothing learned: p01 is '7', numbered as arc writes pads.
+    const lastRead = JSON.stringify({ v: 1, savedAt: 1, project: 1, groups: { a: { '1': 1 } }, names: { '1': '001.pcm' } })
+    const h = await liveHarness({ storage: memoryStorage({ [LIVE_KEY]: lastRead }), unplugged: true, factory: site(await factoryPak()) })
+    await until(h, (s) => s.libraryLoaded)
+    await h.c.getFactorySounds()
+    await until(h, (s) => s.backups.length === 1)
+    h.c.setLive(true)
+    await until(h, (s) => s.mirror?.offline != null)
+    const seven = physicalPad(0, 9)
+    expect(h.c.mirrorName(seven)).toBe('001.pcm')
+    await h.c.playPad(seven)
+    expect(h.liveAudio.presses.at(-1)).toMatchObject({ id: 'live:0:9', key: '1:001.pcm' })
+    // The guess isn't kept as learned.
+    expect(h.storage.getItem('arc.mirror.learned')).toBeNull()
+  })
+
   it('a last read comes before the factory sounds', async () => {
     const first = await liveOn()
     const { storage } = first

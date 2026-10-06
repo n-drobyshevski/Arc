@@ -948,12 +948,12 @@ class ArcController(
             if (snap == null) _state.update { it.copy(mirror = notConnectedMirror()) }
             return
         }
-        // The factory sounds can't be learned (no device): pads unlearned are numbered from the top, and nothing is saved.
-        val m = if (lastRead != null) {
-            dev.arc.ep133.features.LiveMirror(learned = loadLearned(), padOrder = savedPadOrder(), onLearned = ::saveLearned)
-        } else {
-            dev.arc.ep133.features.LiveMirror(learned = FactorySounds.links(loadLearned()), padOrder = savedPadOrder(), onLearned = {})
-        }
+        // Nothing can be learned without the device: pads unlearned are numbered from the top, and nothing is saved.
+        val m = dev.arc.ep133.features.LiveMirror(
+            learned = dev.arc.ep133.features.LearnedLinks.offline(loadLearned()),
+            padOrder = savedPadOrder(),
+            onLearned = {},
+        )
         m.load(snap)
         mirror = m
         preloadPads(m)

@@ -79,20 +79,6 @@ class FactorySoundsTest {
     }
 
     @Test
-    fun `unlearned pads are numbered from the top row, never over a learned number`() {
-        val top = FactorySounds.links(emptyMap())
-        assertEquals(12, top.size)
-        assertEquals(1, top[9]) // '7'
-        assertEquals(10, top[0]) // '.'
-        assertEquals(12, top[2]) // ENTER
-        // '7' learned as p02: '8' (p02 from the top) is left unlinked; the rest as before.
-        val some = FactorySounds.links(mapOf(9 to 2))
-        assertEquals(2, some[9])
-        assertFalse(10 in some)
-        assertEquals(10, some[0])
-    }
-
-    @Test
     fun `a sound is unnamed when the device lists it as its slot's file`() {
         assertTrue(FactorySounds.unnamed(343, "343.pcm"))
         assertTrue(FactorySounds.unnamed(1, "001.pcm"))
