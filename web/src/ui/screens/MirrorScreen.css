@@ -494,8 +494,49 @@
   flex: none;
   margin-top: 0;
   padding: 0;
-  white-space: nowrap;
-  transform: rotate(-90deg);
+}
+/* The word read from the bottom up, as the edge tabs' are, its mark turned with it (and on the
+ * right, the scale and the octave words; their lists stay level). */
+.live__side-tools .word,
+.live__side-end .pick > .word {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  min-height: 0;
+  min-width: 44px;
+  padding: 0 6px;
+  justify-content: center;
+}
+.live__side-tools .word svg { transform: rotate(90deg); }
+
+/* KEYS' grid on its side: the turned word over the view switch on the left, the scale and the
+ * octave on the right, both in the middle of the keys' height; the body as big as what's left. */
+.live__side--keys {
+  --side-tools: 76px;
+  --side-end: 44px;
+}
+.live-mode--lead {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-8);
+}
+.live__side-end {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--side-end);
+  align-self: stretch;
+}
+.live-mode--picks {
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-16);
+  margin-top: 0;
+  padding: 0;
+}
+.live__side--keys > .live-kgrid { flex: none !important; }
+.live__one--side > .live__side--keys > .live-kgrid > .live-deck--ko {
+  --u: clamp(0px, min((100cqw - var(--side-tools) - var(--side-end) - 2 * var(--space-12) - var(--cap-dx) - 2px) / 4.046, (100cqh - var(--cap-dy) - 2px) / 5.72), 170px);
 }
 .live__side > .ko-body {
   --ko-cols: 4;
@@ -531,7 +572,8 @@
  * (0.215 + 0.077 + 0.926) + three gaps + 0.31 + the edge. */
 .ko-body,
 .live__one > .live-group--big > .live-deck--ko,
-.live__one > .live-kgrid > .live-deck--ko {
+.live__one > .live-kgrid > .live-deck--ko,
+.live__side--keys > .live-kgrid > .live-deck--ko {
   --ko-cols: 3;
   --u: clamp(0px, min((100cqw - var(--cap-dx) - 2px) / (var(--ko-cols) * 1.215 + 0.401), (100cqh - var(--cap-dy) - 2px) / 5.72), 170px);
   flex: none;
@@ -866,38 +908,52 @@
   gap: var(--space-12);
 }
 
-/* Two small icon caps in a tray: the pads' grid, the piano. The one shown is navy, held down. */
+/* The view words, printed as on the K.O. II's body: each after its LED, the view shown lit and in
+ * ink, the other grey. 44 high to touch. On the desk's body, the body's own label ink. */
 .live-view {
+  --view-on: var(--ink);
+  --view-off: var(--graphite);
   flex: none;
   display: inline-flex;
   gap: var(--space-4);
-  padding: 3px calc(3px + 1px) calc(3px + 2px) 3px;
-  border-radius: 9px;
-  background: color-mix(in oklab, var(--hw-body) 88%, black);
 }
-.live-view__key {
-  --cap-face: var(--key);
-  --cap-edge: var(--key-edge);
-  --cap-ink: var(--graphite);
-  --cap-dx: 1px;
-  --cap-dy: 2px;
-  display: grid;
-  place-items: center;
-  width: 38px;
-  height: 28px;
-  padding: 0;
+.live-ko .live-view { --view-on: var(--ko-label); --view-off: color-mix(in oklab, var(--ko-label) 55%, var(--ko-body)); }
+.live-view--vertical {
+  flex-direction: column;
+  gap: 0;
+}
+.live-view__word {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 44px;
+  padding: 0 var(--space-2);
   border: 0;
-  border-radius: 7px;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--view-off);
   cursor: pointer;
 }
-.live-view__key.is-on {
-  --cap-face: var(--navy);
-  --cap-edge: color-mix(in oklab, var(--navy) 70%, black);
-  --cap-ink: var(--on-navy);
+.live-view__word.is-on { color: var(--view-on); }
+.live-view__led {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--hw-led-off);
 }
-.live-view__key:disabled { opacity: 0.45; cursor: default; }
-.live-view__key:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
-.live-view svg { display: block; }
+.live-view__word.is-on .live-view__led {
+  background: var(--hw-led-on);
+  box-shadow: 0 0 6px var(--hw-led-on);
+}
+.live-view__word:disabled { opacity: 0.45; cursor: default; }
+.live-view__word:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
 
 /* Over the piano (Android's SidewaysRow): mode, switch, scale and key at the start, − OCT + at the end. */
 .live-mode.live-mode--sideways {

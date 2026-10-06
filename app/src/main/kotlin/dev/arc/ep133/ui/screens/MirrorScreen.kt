@@ -5,7 +5,6 @@ import dev.arc.ep133.ui.components.EditEdgeTab
 import dev.arc.ep133.ui.components.underGuide
 import dev.arc.ep133.features.KeysView
 import dev.arc.ep133.audio.PressTime
-import androidx.compose.material3.PlainTooltip
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -82,6 +81,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -504,7 +504,25 @@ fun MirrorScreen(
                                 CloseKey(onBack, dev.arc.ep133.text.GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
                             }
                         }
-                        if (keys.on) {
+                        if (keys.on && sideways) {
+                            // On its side: the keys on the K.O. II's body as big as the room, the mode
+                            // word (turned) and the view switch on their left, the scale and the octave
+                            // on their right.
+                            if (!inBar) KeysDisplay(st, mirror, keysNow, rec, still = fixedNow != null)
+                            BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+                                val k = KoGeom.fit(maxWidth - SideLead - SidePicks - SideGap * 2, maxHeight, 3)
+                                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(SideGap, Alignment.CenterHorizontally)) {
+                                    SidewaysKeysLead(keys, keysActions, viewSwitch)
+                                    KeysGrid(
+                                        st, keysNow, now, keysActions,
+                                        Modifier.width(k.u * (3 * 1.215f + 0.401f) + CapDx + 2.dp).fillMaxHeight()
+                                            .coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
+                                        haptics = haptics,
+                                    )
+                                    SidewaysKeysPicks(keys, keysActions)
+                                }
+                            }
+                        } else if (keys.on) {
                             if (!inBar) KeysDisplay(st, mirror, keysNow, rec, still = fixedNow != null)
                             KeysGrid(
                                 st, keysNow, now, keysActions,
@@ -1455,15 +1473,17 @@ private fun SidewaysRow(keys: KeysUi, actions: KeysActions, viewSwitch: ViewSwit
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val measurer = rememberTextMeasurer()
         val density = LocalDensity.current
-        fun width(text: String) = with(density) {
-            measurer.measure(text.uppercase(), ArcType.word, maxLines = 1, softWrap = false).size.width.toDp()
+        fun width(text: String, style: androidx.compose.ui.text.TextStyle = ArcType.word) = with(density) {
+            measurer.measure(text.uppercase(), style, maxLines = 1, softWrap = false).size.width.toDp()
         }
+        val viewStyle = viewWordStyle()
         val pick = " \u25BE"
         val scaleName = MirrorText.scaleName(keys.scale)
         // Everything but the scale and key words: the mode word and its mark, the octave
         // word between − and +, and the gaps (the one before − at its narrowest).
         val fixed = width(MirrorText.MODE_KEYS) + 18.dp + width(MirrorText.octave(keys.octave) + pick) + StepWidth * 2 + WordGap * 3 +
-            (if (viewSwitch != null) SwitchGap + SwitchWidth else 0.dp)
+            // The view words: each its LED, the gap after it and its 2 dp either side.
+            (if (viewSwitch != null) SwitchGap + width(MirrorText.VIEW_PADS, viewStyle) + width(MirrorText.VIEW_PIANO, viewStyle) + (6.dp + 5.dp + 4.dp) * 2 + ViewWordGap else 0.dp)
         val key = MirrorText.keyWord(keys.root, keys.names).takeIf {
             fixed + width(scaleName + pick) + width(it + pick) <= maxWidth
         } ?: Keys.name(keys.root, keys.names)
@@ -1536,83 +1556,129 @@ private fun SidewaysPadsControls(keys: KeysUi, actions: KeysActions) {
 private val SideControls = 44.dp
 private val SideControlsGap = 12.dp
 
-/** The KEYS view switch: two keys of [SwitchKey] wide, [SwitchGap] after the mode word. */
-private val SwitchKey = 44.dp
-private val SwitchWidth = SwitchKey * 2 + 2.dp
+/** The KEYS view switch, [SwitchGap] after the mode word; its words' gap. */
 private val SwitchGap = 8.dp
+private val ViewWordGap = 4.dp
 
 /**
- * KEYS on the grid or the piano: two small icon caps in a recessed tray
- * right after the KEYS word, the one showing navy and down. The piano key
- * is greyed out where no piano fits (fewer than 8 white keys, or under
- * 120 dp tall). Long-press shows each key's name.
+ * KEYS on the grid or the piano: no caps, the two words printed as on the
+ * K.O. II's body, each after its LED, the LED of the view shown lit and its
+ * word in ink, the other grey. A tap on a word shows that view. The piano's
+ * word is greyed out where no piano fits (fewer than 8 white keys, or under
+ * 120 dp tall). [vertical]: one word over the other (the column beside the
+ * keys on a phone on its side).
  */
 @Composable
-private fun KeysViewSwitch(ui: ViewSwitch) {
+private fun KeysViewSwitch(ui: ViewSwitch, vertical: Boolean = false) {
+    val c = LocalArcColors.current
+    val group = Modifier
+        .coachMark("live.keysView", CoachText.KEYS_VIEW, c.navy, c.onNavy)
+        .semantics { contentDescription = MirrorText.KEYS_VIEW }
+        .selectableGroup()
+    val pads: @Composable () -> Unit = {
+        ViewWord(MirrorText.VIEW_PADS, on = !ui.piano, enabled = true, MirrorText.keysView(false)) { ui.onPick(KeysView.PADS) }
+    }
+    val piano: @Composable () -> Unit = {
+        ViewWord(
+            MirrorText.VIEW_PIANO, on = ui.piano, enabled = ui.pianoEnabled,
+            if (ui.pianoEnabled) MirrorText.keysView(true) else MirrorText.keysView(true) + ". " + MirrorText.PIANO_NO_ROOM,
+        ) { ui.onPick(KeysView.PIANO) }
+    }
+    if (vertical) {
+        Column(group) { pads(); piano() }
+    } else {
+        Row(group, horizontalArrangement = Arrangement.spacedBy(ViewWordGap)) { pads(); piano() }
+    }
+}
+
+/** One word of [KeysViewSwitch]: its LED, lit while it is the view shown, and the word, 44 dp high to touch. */
+@Composable
+private fun ViewWord(word: String, on: Boolean, enabled: Boolean, description: String, onClick: () -> Unit) {
     val c = LocalArcColors.current
     val hw = LocalHwColors.current
     Row(
         Modifier
-            .coachMark("live.keysView", CoachText.KEYS_VIEW, c.navy, c.onNavy)
-            .semantics { contentDescription = MirrorText.KEYS_VIEW }
-            .selectableGroup()
-            // The tray, a little taller than the caps, inside the keys' touch height.
-            .drawBehind {
-                val inset = (size.height - 36.dp.toPx()) / 2
-                drawRoundRect(hw.body, topLeft = Offset(0f, inset), size = Size(size.width, size.height - inset * 2), cornerRadius = CornerRadius(9.dp.toPx()))
-            }
-            .padding(horizontal = 1.dp),
-    ) {
-        ViewKey(dev.arc.ep133.ui.components.ArcIcon.GRID, on = !ui.piano, enabled = true, label = MirrorText.VIEW_PADS, description = MirrorText.keysView(false)) {
-            ui.onPick(KeysView.PADS)
-        }
-        ViewKey(
-            dev.arc.ep133.ui.components.ArcIcon.PIANO, on = ui.piano, enabled = ui.pianoEnabled, label = MirrorText.VIEW_PIANO,
-            description = if (ui.pianoEnabled) MirrorText.keysView(true) else MirrorText.keysView(true) + ". " + MirrorText.PIANO_NO_ROOM,
-        ) {
-            ui.onPick(KeysView.PIANO)
-        }
-    }
-}
-
-/** One key of [KeysViewSwitch]: a 38 × 28 cap in a 44 dp touch square. */
-@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-@Composable
-private fun ViewKey(icon: dev.arc.ep133.ui.components.ArcIcon, on: Boolean, enabled: Boolean, label: String, description: String, onClick: () -> Unit) {
-    val c = LocalArcColors.current
-    val source = remember { MutableInteractionSource() }
-    val pressed by source.collectIsPressedAsState()
-    androidx.compose.material3.TooltipBox(
-        positionProvider = androidx.compose.material3.TooltipDefaults.rememberTooltipPositionProvider(androidx.compose.material3.TooltipAnchorPosition.Above),
-        tooltip = { PlainTooltip { Text(label.uppercase(), style = ArcType.capsKeySmall) } },
-        state = androidx.compose.material3.rememberTooltipState(),
+            .clip(RoundedCornerShape(6.dp))
+            .selectable(selected = on, enabled = enabled, role = Role.RadioButton, interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+            .semantics { contentDescription = description }
+            .heightIn(min = 44.dp)
+            .padding(horizontal = 2.dp)
+            .alpha(if (enabled) 1f else 0.45f),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         Box(
             Modifier
-                .size(SwitchKey)
-                .selectable(selected = on, enabled = enabled, role = Role.RadioButton, interactionSource = source, indication = null, onClick = onClick)
-                .semantics { contentDescription = description },
-            contentAlignment = Alignment.Center,
-        ) {
-            Box(
-                Modifier
-                    .size(width = 38.dp, height = 28.dp)
-                    .cap(
-                        if (on) c.navy else c.key,
-                        if (on) dev.arc.ep133.ui.components.capEdge(c.navy) else c.keyEdge,
-                        RoundedCornerShape(7.dp),
-                        capPress(on || pressed && enabled),
-                        dx = 1.dp,
-                        dy = 2.dp,
-                        alpha = if (enabled) 1f else 0.4f,
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                dev.arc.ep133.ui.components.Icon(icon, if (on) c.onNavy else c.graphite, size = 18.dp)
-            }
-        }
+                .size(6.dp)
+                .then(if (on) Modifier.dropShadow(CircleShape, Shadow(radius = 6.dp, color = c.signal)) else Modifier)
+                .clip(CircleShape)
+                .background(if (on) c.signal else hw.ledOff),
+        )
+        Text(word.uppercase(), style = viewWordStyle(), color = if (on) c.ink else c.graphite, maxLines = 1, softWrap = false)
     }
 }
+
+/** The view words' print: 11 dp whatever the font size, as the words printed on the body are. */
+@Composable
+private fun viewWordStyle(): androidx.compose.ui.text.TextStyle =
+    ArcType.capsKeySmall.copy(fontSize = with(LocalDensity.current) { 11.dp.toSp() }, fontWeight = FontWeight.Bold, letterSpacing = 0.07.em)
+
+/**
+ * KEYS' grid on a phone on its side: the mode word turned over the view
+ * switch (its tiers one over the other), a column left of the keys.
+ */
+@Composable
+private fun SidewaysKeysLead(keys: KeysUi, actions: KeysActions, viewSwitch: ViewSwitch?) {
+    Column(
+        Modifier.width(SideLead).fillMaxHeight(),
+        verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
+    ) {
+        ModeWord(keys, actions, top = false, Modifier.rotateVertical())
+        if (viewSwitch != null) KeysViewSwitch(viewSwitch, vertical = true)
+    }
+}
+
+/**
+ * KEYS' grid on a phone on its side: the scale and the octave, turned as the
+ * mode word is, a column right of the keys.
+ */
+@Composable
+private fun SidewaysKeysPicks(keys: KeysUi, actions: KeysActions) {
+    val c = LocalArcColors.current
+    Column(
+        Modifier.width(SidePicks).fillMaxHeight(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+    ) {
+        PickWord(
+            label = MirrorText.scaleName(keys.scale),
+            options = Scale.entries,
+            selected = keys.scale,
+            name = MirrorText::scaleName,
+            onPick = actions.onScale,
+            description = MirrorText.scaleChoice(keys.scale),
+            mark = Modifier.rotateVertical().coachMark("live.scale", CoachText.SCALE, c.navy, c.onNavy),
+            alignEnd = true,
+            top = false,
+        )
+        PickWord(
+            label = MirrorText.octave(keys.octave),
+            options = (Keys.MIN_OCTAVE..Keys.MAX_OCTAVE).toList(),
+            selected = keys.octave,
+            name = MirrorText::octave,
+            onPick = actions.onOctave,
+            description = MirrorText.octaveChoice(keys.octave),
+            mark = Modifier.rotateVertical().coachMark("live.octave", CoachText.OCTAVE, c.navy, c.onNavy),
+            alignEnd = true,
+            top = false,
+        )
+    }
+}
+
+/** KEYS' columns either side of the grid on a phone on its side, and the room between them and it. */
+private val SideLead = 76.dp
+private val SidePicks = 44.dp
+private val SideGap = 12.dp
 
 /** − and + are this wide, however tight the row. */
 private val StepWidth = 48.dp

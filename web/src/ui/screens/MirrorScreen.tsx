@@ -648,6 +648,9 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
       plan={plan}
     />
   )
+  // The KEYS grid on a phone on its side: the row's two halves, either side of the keys.
+  const modeLead = <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} plan={plan} part="lead" />
+  const modePicks = <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} plan={plan} part="picks" />
   const late = props.outputLate ?? null
   // On a phone on its side the line is in the top bar instead.
   const displayStrip = inBar ? null : editing ? <EditStrip /> : <DisplayStrip st={st} mirror={mirror} late={late} />
@@ -776,14 +779,26 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     page = (
       // One group (or the keys) fills the screen without scrolling: the display line, the grid
       // (its rows share whatever height is left) and the group keys.
-      <div class={`live__one${sideways && !keys.on ? ' live__one--side' : ''}`}>
+      <div class={`live__one${sideways ? ' live__one--side' : ''}`}>
         {onBack && (
           <div class="live__head">
             <Caption text={MirrorText.TITLE} />
             <CloseKey class="live__close" onClick={onBack} description={GUIDE_CLOSE} />
           </div>
         )}
-        {keys.on && keyNotes ? (
+        {keys.on && keyNotes && sideways ? (
+          // KEYS on the pads on a phone on its side: the keys on the K.O. II's body as big as the
+          // room, the mode word (turned) and the view switch a column on their left, the scale and
+          // the octave one on their right.
+          <>
+            {!inBar && <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={null} />}
+            <div class="live__side live__side--keys">
+              <div class="live__side-tools">{modeLead}</div>
+              <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} haptic={haptic} />
+              <div class="live__side-end">{modePicks}</div>
+            </div>
+          </>
+        ) : keys.on && keyNotes ? (
           <>
             {!inBar && <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={null} />}
             <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} haptic={haptic} />
@@ -1484,8 +1499,15 @@ function ModeRow(props: {
   onPicker?: (picker: KeysPicker | null) => void
   /** Whether the piano shows (and the switch is offered) in this window. */
   plan: PianoPlan
+  /**
+   * The KEYS grid on a phone on its side: only the mode word (turned) and the
+   * view switch ('lead', a column left of the keys), or only the scale and the
+   * octave, turned too ('picks', a column on their right; the scale's list
+   * opens down, the octave's up).
+   */
+  part?: 'lead' | 'picks'
 }): JSX.Element {
-  const { keys, actions, picker, onPicker, plan } = props
+  const { keys, actions, picker, onPicker, plan, part } = props
   const pick = (which: KeysPicker): { open?: boolean; onOpen?: (open: boolean) => void } =>
     onPicker
       ? {
@@ -1511,8 +1533,47 @@ function ModeRow(props: {
     />
   )
   const viewSwitch = keys.on && plan.switchShown && (
-    <KeysViewSwitch piano={piano} room={plan.room} onView={(p) => actions.onView?.(plan.wide, chosenView(p))} />
+    <KeysViewSwitch piano={piano} room={plan.room} onView={(p) => actions.onView?.(plan.wide, chosenView(p))} vertical={part === 'lead'} />
   )
+  if (part === 'lead') {
+    return (
+      <div class="live-mode live-mode--lead">
+        <span class="live-mode__turned">{modeWord}</span>
+        {viewSwitch}
+      </div>
+    )
+  }
+  if (part === 'picks') {
+    return (
+      <div class="live-mode live-mode--picks">
+        <PickWord
+          label={MirrorText.scaleName(keys.scale)}
+          options={SCALES}
+          selected={keys.scale}
+          name={MirrorText.scaleName}
+          onPick={(s) => actions.onScale?.(s)}
+          description={MirrorText.scaleChoice(keys.scale)}
+          coach={{ id: 'live.scale', label: CoachText.SCALE }}
+          {...pick('scale')}
+          alignEnd
+          down
+          middle
+        />
+        <PickWord
+          label={MirrorText.octave(keys.octave)}
+          options={octaves()}
+          selected={keys.octave}
+          name={MirrorText.octave}
+          onPick={(o) => actions.onOctave?.(o)}
+          description={MirrorText.octaveChoice(keys.octave)}
+          coach={{ id: 'live.octave', label: CoachText.OCTAVE }}
+          {...pick('octave')}
+          alignEnd
+          middle
+        />
+      </div>
+    )
+  }
   if (piano) return <SidewaysRow keys={keys} actions={actions} pick={pick} mode={modeWord} view={viewSwitch} />
   return (
     // Spread across the row: mode at the start, octave at the end, scale between; pulled
@@ -1652,12 +1713,15 @@ function StepWord(props: { glyph: string; description: string; enabled: boolean;
 }
 
 /**
- * KEYS on the pads or the piano: two small icon caps after the KEYS word, a
- * radio group (the arrows move between them). The piano's is greyed out
- * where it has no room.
+ * KEYS on the pads or the piano: no caps, the two words printed as on the
+ * K.O. II's body, each after its LED, the LED of the view shown lit. A tap
+ * on a word shows that view. A radio group (each word a radio, the arrows
+ * move between them). The piano's word is greyed out where it has no room.
+ * [vertical]: one word over the other (a column beside the keys on a phone
+ * on its side), else side by side.
  */
-function KeysViewSwitch(props: { piano: boolean; room: boolean; onView: (piano: boolean) => void }): JSX.Element {
-  const { piano, room } = props
+function KeysViewSwitch(props: { piano: boolean; room: boolean; onView: (piano: boolean) => void; vertical?: boolean }): JSX.Element {
+  const { piano, room, vertical = false } = props
   const group = useRef<HTMLDivElement | null>(null)
   const choose = (p: boolean): void => {
     if (p && !room) return
@@ -1666,9 +1730,10 @@ function KeysViewSwitch(props: { piano: boolean; room: boolean; onView: (piano: 
   return (
     <div
       ref={group}
-      class="live-view"
+      class={`live-view${vertical ? ' live-view--vertical' : ''}`}
       role="radiogroup"
       aria-label={MirrorText.KEYS_VIEW}
+      aria-orientation={vertical ? 'vertical' : undefined}
       data-coach="live.view"
       onKeyDown={(e) => {
         if (!room) return
@@ -1686,44 +1751,19 @@ function KeysViewSwitch(props: { piano: boolean; room: boolean; onView: (piano: 
             aria-checked={on}
             aria-label={MirrorText.keysView(p)}
             aria-description={off ? MirrorText.PIANO_NO_ROOM : undefined}
-            title={off ? MirrorText.PIANO_NO_ROOM : MirrorText.keysView(p)}
+            title={off ? MirrorText.PIANO_NO_ROOM : undefined}
             disabled={off}
             tabIndex={on ? 0 : -1}
             data-roving=""
-            class={`live-view__key cap-3d${on ? ' is-on is-down' : ''}`}
+            class={`live-view__word${on ? ' is-on' : ''}`}
             onClick={() => choose(p)}
           >
-            {p ? <PianoIcon /> : <GridIcon />}
+            <span class="live-view__led" aria-hidden="true" />
+            {p ? MirrorText.VIEW_PIANO : MirrorText.VIEW_PADS}
           </button>
         )
       })}
     </div>
-  )
-}
-
-/** The pads: a 3×3 grid of small squares. */
-function GridIcon(): JSX.Element {
-  return (
-    <svg width="20" height="16" viewBox="0 0 20 16" aria-hidden="true" focusable="false">
-      <g fill="currentColor">
-        {[1, 6, 11].map((y) => [1, 7.5, 14].map((x) => <rect key={`${x}:${y}`} x={x} y={y} width="5" height="4" rx="1" />))}
-      </g>
-    </svg>
-  )
-}
-
-/** The piano: an outlined keyboard with three black keys. */
-function PianoIcon(): JSX.Element {
-  return (
-    <svg width="20" height="16" viewBox="0 0 20 16" aria-hidden="true" focusable="false">
-      <rect x="1" y="1" width="18" height="14" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6" />
-      <g fill="currentColor">
-        <rect x="4.5" y="1" width="2.4" height="8" />
-        <rect x="9" y="1" width="2.4" height="8" />
-        <rect x="13.5" y="1" width="2.4" height="8" />
-      </g>
-      <path d="M6 9v6M10.2 9v6M14.7 9v6" stroke="currentColor" stroke-width="1.2" />
-    </svg>
   )
 }
 
