@@ -11,6 +11,8 @@
 // [disabledNote]), and [descriptions] give the screen-reader names.
 import type { JSX, TargetedKeyboardEvent } from 'preact'
 import { useRef } from 'preact/hooks'
+import { keyScope } from '../appKeys'
+import { computerKeys } from '../keyPrefs'
 import './Segmented.css'
 
 /**
@@ -72,6 +74,9 @@ export function handleRovingKey(
   onSelect: (i: number) => void,
   skip?: (i: number) => boolean,
 ): void {
+  // Web: with NumLock off the number pad sends arrows, Home and End; while Live's keys play the
+  // pads (a key scope is in, single keys on), those are pad keys, not moves.
+  if (e.code.startsWith('Numpad') && keyScope() !== null && computerKeys.peek()) return
   const rtl = container ? getComputedStyle(container).direction === 'rtl' : false
   const next = skip ? rovingIndexSkipping(current, e.key, count, skip, rtl) : rovingIndex(current, e.key, count, rtl)
   if (next === null) return

@@ -6,7 +6,7 @@ import type { LiveContext } from '../../src/ui/live/liveKeyboard'
 import { screenLayer, sheetLayer, tabLayer, overlayLayer, viewOf, type Layer } from '../../src/ui/nav'
 
 function key(code: string, k: string, more: Partial<KeyInput> = {}): KeyInput {
-  return { code, key: k, shift: false, ctrl: false, meta: false, alt: false, repeat: false, composing: false, prevented: false, inField: false, onControl: false, ...more }
+  return { code, key: k, shift: false, ctrl: false, meta: false, alt: false, altGraph: false, repeat: false, composing: false, prevented: false, inField: false, onControl: false, ...more }
 }
 
 const live = tabLayer('live')
@@ -51,14 +51,37 @@ describe('the app-wide keys', () => {
 
   it('lists only the keys that work now, Everywhere last', () => {
     const pads: LiveContext = { keys: false, pianoShown: false, editAvailable: true, editOn: false, oneGroup: false, viewSwitchable: false, soundsTab: false }
-    const groups = keyHelp(pads)
-    expect(groups.map((g) => g.title)).toEqual([WebText.KEYS_PADS, WebText.KEYS_EDIT, WebText.KEYS_EVERYWHERE])
-    // No Follow in the all-groups view, no find without the Sounds tab.
-    expect(groups[0]!.rows.some((r) => r.label === WebText.KEY_FOLLOW)).toBe(false)
-    expect(groups[1]!.rows.some((r) => r.label === WebText.KEY_FIND)).toBe(false)
-    expect(keyHelp({ ...pads, keys: true, pianoShown: true }).map((g) => g.title)).toEqual([WebText.KEYS_PIANO, WebText.KEYS_EVERYWHERE])
-    expect(keyHelp({ ...pads, keys: true }).map((g) => g.title)).toEqual([WebText.KEYS_GRID, WebText.KEYS_EVERYWHERE])
-    expect(keyHelp(null).map((g) => g.title)).toEqual([WebText.KEYS_EVERYWHERE])
+    const titles = (groups: { title: string }[]): string[] => groups.map((g) => g.title)
+    const labels = (rows: readonly { label: string }[]): string[] => rows.map((r) => r.label)
+    const groups = keyHelp({ live: pads, enabled: true })
+    expect(titles(groups)).toEqual([WebText.KEYS_PADS, WebText.KEYS_EDIT, WebText.KEYS_EVERYWHERE])
+    // No Follow in the all-groups view, no find without the Sounds tab; EDIT off: only E there.
+    expect(labels(groups[0]!.rows)).not.toContain(WebText.KEY_FOLLOW)
+    expect(labels(groups[1]!.rows)).toEqual([WebText.KEY_EDIT])
+    // EDIT on: the pad keys open sounds, so the pads' playing rows give way.
+    const editing = keyHelp({ live: { ...pads, editOn: true, soundsTab: true }, enabled: true })
+    expect(labels(editing[0]!.rows)).not.toContain(WebText.KEY_PADS)
+    expect(labels(editing[0]!.rows)).not.toContain(WebText.KEY_PADS_ROW)
+    expect(labels(editing[1]!.rows)).toEqual([WebText.KEY_EDIT, WebText.KEY_EDIT_PAD, WebText.KEY_FIND])
+    expect(titles(keyHelp({ live: { ...pads, keys: true, pianoShown: true }, enabled: true }))).toEqual([WebText.KEYS_PIANO, WebText.KEYS_EVERYWHERE])
+    expect(titles(keyHelp({ live: { ...pads, keys: true }, enabled: true }))).toEqual([WebText.KEYS_GRID, WebText.KEYS_EVERYWHERE])
+    // Away from Live (Settings' Show keys): all of Live's keys.
+    expect(titles(keyHelp({ live: null, enabled: true }))).toEqual([
+      WebText.KEYS_PADS,
+      WebText.KEYS_EDIT,
+      WebText.KEYS_GRID,
+      WebText.KEYS_PIANO,
+      WebText.KEYS_EVERYWHERE,
+    ])
+    // Single keys off: only Esc and Ctrl/Cmd+Z (? doesn't open anything then).
+    const off = keyHelp({ live: pads, enabled: false })
+    expect(titles(off)).toEqual([WebText.KEYS_EVERYWHERE])
+    expect(labels(off[0]!.rows)).toEqual([WebText.KEY_ESCAPE, WebText.KEY_UNDO])
+  })
+
+  it('acts once per press of Esc, and leaves AltGr combinations alone', () => {
+    expect(appCommand(key('Escape', 'Escape', { repeat: true }), ctx([screenLayer({ kind: 'settings' })]))).toBeNull()
+    expect(appCommand(key('Slash', '?', { shift: true, altGraph: true }), ctx())).toBeNull()
   })
 })
 

@@ -34,6 +34,8 @@ export interface KeyInput {
   readonly ctrl: boolean
   readonly meta: boolean
   readonly alt: boolean
+  /** AltGr held (Linux reports it without altKey or ctrlKey): a layout's third level, not a single key. */
+  readonly altGraph: boolean
   readonly repeat: boolean
   /** An input method is composing (or the key is a dead key). */
   readonly composing: boolean
@@ -43,6 +45,15 @@ export interface KeyInput {
   readonly inField: boolean
   /** The target is a control ([inControl]). */
   readonly onControl: boolean
+}
+
+/** Whether AltGr is held (getModifierState; false where it isn't known). */
+export function altGraph(e: Pick<KeyboardEvent, 'getModifierState'>): boolean {
+  try {
+    return typeof e.getModifierState === 'function' && e.getModifierState('AltGraph')
+  } catch {
+    return false
+  }
 }
 
 /** Whether [e] comes while an input method composes, or is a dead key. */
@@ -58,6 +69,7 @@ export function toKeyInput(e: KeyboardEvent): KeyInput {
     ctrl: e.ctrlKey,
     meta: e.metaKey,
     alt: e.altKey,
+    altGraph: altGraph(e),
     repeat: e.repeat,
     composing: composing(e),
     prevented: e.defaultPrevented,

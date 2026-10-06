@@ -148,6 +148,7 @@ import { capDown, capUp } from '../live/capDown'
 import { rowPadSize } from '../live/desk'
 import { chosenView, pianoFor, type PianoPlan } from '../live/keyboard'
 import { useLiveKeys } from '../live/useLiveKeys'
+import { computerKeys } from '../keyPrefs'
 import { DEFAULT_KEYS, keysLit, keysNoteText, octaves, upperOctave, type KeysPicker, type KeysShown } from '../live/keys'
 import { PianoKeyboard } from '../live/PianoKeyboard'
 import { PressTracker, rawMovesSupported, ticking, type PressTarget } from '../live/press'
@@ -461,8 +462,10 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   const docked = desk && !keys.on
   // EDIT is for the pads (the tab shows in PADS only).
   const editing = edit !== null && edit.on && !keys.on
-  // Web: a computer keyboard is at hand (a desktop, or a fine pointer): its keys play and say so.
+  // Web: a computer keyboard is at hand (a desktop, or a fine pointer): its keys play. They say so
+  // (hints, aria-keyshortcuts, the target group) only while Settings → Computer keyboard is on.
   const keyboard = desk || fine
+  const keyHints = keyboard && computerKeys.value
   // A phone on its side: too short for the upright grid with its group keys under it.
   const sideways = !desk && win.width > win.height && win.height < SIDEWAYS_MAX_HEIGHT
 
@@ -583,7 +586,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   const tools = keys.on ? (
     <>
       {factoryRow}
-      <KeysPanel keys={keys} actions={actions} piano={pianoRange !== null} hint={!plan.switchShown} keyboard={keyboard} />
+      <KeysPanel keys={keys} actions={actions} piano={pianoRange !== null} hint={!plan.switchShown} keyboard={keyHints} />
     </>
   ) : (
     <>
@@ -614,7 +617,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         )}
       </RowCard>
       {st.lastKeysNote !== null && <KeysStrip st={st} last={st.lastKeysNote} names={keys.names} />}
-      {keyboard && <p class="t-small live-tools__note">{WebText.LIVE_PADS_KEYS_HINT}</p>}
+      {keyHints && <p class="t-small live-tools__note">{WebText.LIVE_PADS_KEYS_HINT}</p>}
       <Notes st={st} mirror={mirror} tapToPlay={onPad !== null} hint={!plan.switchShown} transport={inBar} />
     </>
   )
@@ -651,8 +654,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   const hasEdit = edit !== null
   const editPad = useMemo(() => (hasEdit ? (pad: PhysicalPad) => latest.current.edit?.onPad(pad) : null), [hasEdit])
   const padUi: PadUi = useMemo(
-    () => ({ press: padPress, edit: editPad, editing, drop, haptic, playing: playing.pads, fixedNow, keyboard }),
-    [padPress, editPad, editing, drop, haptic, playing.pads, fixedNow, keyboard],
+    () => ({ press: padPress, edit: editPad, editing, drop, haptic, playing: playing.pads, fixedNow }),
+    [padPress, editPad, editing, drop, haptic, playing.pads, fixedNow],
   )
   const keyPress = useMemo(
     () => ({
@@ -665,7 +668,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   // The computer keyboard (web, desktop): the pads, the grid's keys and Live's controls
   // (live/liveKeyboard.ts). The grid hands its keys over here; key changes are announced.
   const gridKeys = useRef<GridKeys | null>(null)
-  const [announce, setAnnounce] = useState('')
+  const [spoken, setSpoken] = useState({ text: '', n: 0 })
+  const setAnnounce = (text: string): void => setSpoken((a) => ({ text, n: a.n + 1 }))
   const soundsTab = docked && edit !== null
   useLiveKeys(keyboard, {
     root: () => root.current,
@@ -683,35 +687,36 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
       const target = padPress(pad)
       if (target === null) return null
       const key = padKey(pad)
-      const cap = (): Element | null => root.current?.querySelector(`[data-pad="${key}"]`) ?? null
+      // The cap pressed, kept: a group change reuses the button for another pad meanwhile.
+      let el: Element | null = null
       return {
         id: `pad:${key}`,
         down: (at) => {
           target.press(true, false, at)
-          const el = cap()
+          el = root.current?.querySelector(`[data-pad="${key}"]`) ?? null
           if (el) capDown(el)
         },
         up: () => {
           target.release()
-          const el = cap()
           if (el) capUp(el)
         },
       }
     },
     gridKey: (offset) => {
       const grid = gridKeys.current
-      if (grid === null || pianoRange !== null) return null
-      const cap = (): Element | null => root.current?.querySelector(`.live-kgrid [data-key="${offset}"]`) ?? null
+      const note = keyNotes?.[offset]
+      if (grid === null || pianoRange !== null || note === undefined) return null
+      let el: Element | null = null
       return {
-        id: `key:${offset}`,
+        // By note too: after an octave or key change the same key is another note, a press of its own.
+        id: `key:${offset}:${note}`,
         down: (at) => {
           grid.down(offset, at)
-          const el = cap()
+          el = root.current?.querySelector(`.live-kgrid [data-key="${offset}"]`) ?? null
           if (el) capDown(el)
         },
         up: () => {
           grid.up(offset)
-          const el = cap()
           if (el) capUp(el)
         },
       }
@@ -814,7 +819,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
       <div class="live__groups">
         <div class="live__grid">
           {[0, 1, 2, 3].map((g) => (
-            <Group key={g} group={g} st={st} nameOf={nameOf} now={now} ui={padUi} tracker={tracker} target={keyboard && g === group} />
+            <Group key={g} group={g} st={st} nameOf={nameOf} now={now} ui={padUi} tracker={tracker} target={keyHints && g === group} keyHints={keyHints && g === group} />
           ))}
         </div>
       </div>
@@ -822,7 +827,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   )
   // On the desk, EDIT's tab on the panel's left side (the shell draws it on a phone).
   const editTab = desk && edit !== null && !keys.on ? (
-    <EditEdgeTab class="live-edit-tab" on={edit.on} onChange={edit.onChange} keyShortcut={keyboard ? 'E' : undefined} />
+    <EditEdgeTab class="live-edit-tab" on={edit.on} onChange={edit.onChange} keyShortcut={keyHints ? 'E' : undefined} />
   ) : null
 
   let page: JSX.Element
@@ -885,8 +890,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           {displayStrip}
           {modeRow}
           <div class="live-ko__body">
-            <GroupKeys keyboard={keyboard} group={group} st={st} now={now} onSelect={setGroup} vertical />
-            <Group group={group} st={st} nameOf={nameOf} now={now} big coach ui={padUi} tracker={tracker} />
+            <GroupKeys keyboard={keyHints} group={group} st={st} now={now} onSelect={setGroup} vertical />
+            <Group group={group} st={st} nameOf={nameOf} now={now} big coach ui={padUi} tracker={tracker} keyHints={keyHints} />
           </div>
         </div>
       )
@@ -899,7 +904,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           {modeRow}
           <div class="live-row__groups">
             {[0, 1, 2, 3].map((g) => (
-              <Group key={g} group={g} st={st} nameOf={nameOf} now={now} fill ui={padUi} tracker={tracker} target={keyboard && g === group} />
+              <Group key={g} group={g} st={st} nameOf={nameOf} now={now} fill ui={padUi} tracker={tracker} target={keyHints && g === group} keyHints={keyHints && g === group} />
             ))}
           </div>
         </div>
@@ -961,17 +966,17 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
             <div class="live__side">
               <div class="live__side-tools">{modeRow}</div>
               <div class="ko-body">
-                <GroupKeys keyboard={keyboard} group={group} st={st} now={now} onSelect={setGroup} vertical />
-                <Group group={group} st={st} nameOf={nameOf} now={now} big coach ui={padUi} tracker={tracker} />
+                <GroupKeys keyboard={keyHints} group={group} st={st} now={now} onSelect={setGroup} vertical />
+                <Group group={group} st={st} nameOf={nameOf} now={now} big coach ui={padUi} tracker={tracker} keyHints={keyHints} />
               </div>
             </div>
           </>
         ) : (
           <>
             {displayStrip}
-            <Group group={group} st={st} nameOf={nameOf} now={now} big coach ui={padUi} tracker={tracker} />
+            <Group group={group} st={st} nameOf={nameOf} now={now} big coach ui={padUi} tracker={tracker} keyHints={keyHints} />
             {modeRow}
-            <GroupKeys keyboard={keyboard} group={group} st={st} now={now} onSelect={setGroup} />
+            <GroupKeys keyboard={keyHints} group={group} st={st} now={now} onSelect={setGroup} />
           </>
         )}
       </div>
@@ -996,7 +1001,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
       {/* What a computer keyboard key just changed, for screen readers. */}
       {keyboard && (
         <span class="sr-only" aria-live="polite">
-          {announce}
+          {/* A new node for each change, so the same words twice are spoken twice. */}
+          <span key={spoken.n}>{spoken.text}</span>
         </span>
       )}
     </div>
@@ -1224,8 +1230,6 @@ interface PadUi {
   playing: ReadonlySignal<ReadonlySet<number>>
   /** A fixed time for screenshots; null: a pad's glow is taken at the time it renders. */
   fixedNow: number | null
-  /** Web: the computer keyboard plays the pads (each says its key). */
-  keyboard: boolean
 }
 
 /** Dropping on the pads (the desk). */
@@ -1252,6 +1256,8 @@ interface GroupProps {
   coach?: boolean
   /** Web: the group the computer keyboard's pad keys play (all groups shown); its caption is marked. */
   target?: boolean
+  /** Web: the computer keyboard's pad keys play this group's pads (they say their keys). */
+  keyHints?: boolean
   ui: PadUi
   tracker: PressTracker
 }
@@ -1305,6 +1311,7 @@ function Group(props: GroupProps): JSX.Element {
                     scroll={!big && !fill}
                     ui={ui}
                     tracker={tracker}
+                    keyHint={props.keyHints ?? false}
                   />
                 )
               })}
@@ -1388,6 +1395,8 @@ interface PadProps {
   scroll: boolean
   ui: PadUi
   tracker: PressTracker
+  /** Web: the computer keyboard's pad keys play this pad (it says its key). */
+  keyHint: boolean
 }
 
 /** A press on a pad in EDIT, kept across renders (the mirror re-renders the pads while a finger is down). */
@@ -1472,7 +1481,8 @@ const Pad = memo(
     a.big === b.big &&
     a.scroll === b.scroll &&
     a.ui === b.ui &&
-    a.tracker === b.tracker,
+    a.tracker === b.tracker &&
+    a.keyHint === b.keyHint,
 )
 
 function PadCap(props: PadProps): JSX.Element {
@@ -1576,7 +1586,7 @@ function PadCap(props: PadProps): JSX.Element {
       class={`${cls} live-pad--press${scroll ? ' live-pad--scroll' : ''}`}
       aria-label={label}
       aria-description={ui.editing ? MirrorText.EDIT_LINE : MirrorText.PLAY}
-      aria-keyshortcuts={ui.keyboard ? (pad.label === 'ENTER' ? 'Enter' : pad.label) : undefined}
+      aria-keyshortcuts={props.keyHint ? (pad.label === 'ENTER' ? 'Enter' : pad.label) : undefined}
       data-pad={key}
       style={{ '--glow': glowCss(g) }}
       {...handlers}

@@ -12,8 +12,10 @@
 // - KEYS: the pad keys play the grid's keys; Z X the octave (the piano does
 //   its own), [ ] the key, Shift+[ ] the scale, V grid or piano.
 // - Both: M pads or keys.
-// - Nothing with Ctrl, Cmd or Alt, nothing while composing, and nothing the
-//   piano plays while it shows (its letters, Z and X, by code).
+// - Nothing with Ctrl, Cmd, Alt or AltGr, nothing while composing (but [ ]
+//   on a dead key's place step), and nothing the piano plays while it shows
+//   (its letters, Z and X, by code). Letters by what they type, by place
+//   only for another script's letters.
 
 import { COMPUTER_KEYS } from './keyboard'
 import type { KeyInput } from '../keyGuard'
@@ -52,15 +54,24 @@ export const ROW_OFFSET: Readonly<Record<string, number>> = Object.freeze({
 /** The pad offset (0..11) a key plays, or null; Shift held plays none, main Enter only off a control. */
 export function padOffset(input: KeyInput): number | null {
   if (input.shift) return null
-  const n = NUMPAD_OFFSET[input.code] ?? ROW_OFFSET[input.code]
+  const pad = NUMPAD_OFFSET[input.code]
+  if (pad !== undefined) return pad
+  // The full stop's place types a letter on some layouts (Dvorak's V): that key keeps its letter.
+  if (input.code === 'Period' && /^[a-zA-Z]$/.test(input.key)) return null
+  const n = ROW_OFFSET[input.code]
   if (n !== undefined) return n
   if (input.code === 'Enter' && !input.onControl) return 2
   return null
 }
 
-/** The Latin letter a key means: what it types, else (a Cyrillic or Greek layout) its place's. */
+/**
+ * The Latin letter a key means: what it types, else, when it types a letter
+ * of another script (Cyrillic, Greek), its place's. Punctuation on a letter's
+ * place (AZERTY's comma, Dvorak's full stop) means no letter.
+ */
 export function latinLetter(key: string, code: string): string | null {
   if (/^[a-zA-Z]$/.test(key)) return key.toLowerCase()
+  if (!/^\p{L}$/u.test(key) || /^\p{Script=Latin}$/u.test(key)) return null
   const m = /^Key([A-Z])$/.exec(code)
   return m ? m[1]!.toLowerCase() : null
 }
@@ -97,18 +108,22 @@ export type LiveCommand =
 
 /** What [input] does in Live as [ctx] shows it, or null (the key is someone else's, or nobody's). */
 export function liveCommand(input: KeyInput, ctx: LiveContext): LiveCommand | null {
-  if (input.ctrl || input.meta || input.alt || input.composing) return null
+  if (input.ctrl || input.meta || input.alt || input.altGraph) return null
+  // [ ] by place, also where that place is a dead key (AZERTY's ^, Nordic ¨): the step is
+  // taken there, not the accent. Anything else composing is the input method's.
+  const bracket = input.code === 'BracketLeft' || input.code === 'BracketRight'
+  if (input.composing && !(bracket && input.key === 'Dead')) return null
   // The piano's own keys, by place, while it shows.
   if (ctx.pianoShown && (COMPUTER_KEYS.includes(input.code) || input.code === 'KeyZ' || input.code === 'KeyX')) return null
   // The app's: help and Escape.
   if (input.key === '?' || input.key === 'Escape') return null
-  if (input.code === 'BracketLeft' || input.code === 'BracketRight') {
+  // '/' is Shift+7 on some layouts, and on [ 's place on Dvorak: by what it types.
+  if (input.key === '/') return !ctx.keys && ctx.soundsTab ? { kind: 'find' } : null
+  if (bracket) {
     if (!ctx.keys) return null
     const step = input.code === 'BracketLeft' ? -1 : 1
     return input.shift ? { kind: 'scale', step } : { kind: 'root', step }
   }
-  // '/' is Shift+7 on some layouts: by what it types.
-  if (input.key === '/') return !ctx.keys && ctx.soundsTab ? { kind: 'find' } : null
   if (input.shift) return null
   const offset = padOffset(input)
   if (offset !== null) {

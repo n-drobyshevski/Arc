@@ -67,6 +67,11 @@ test('KEYS: M switches, the piano keeps its letters, the grid plays the pad keys
   // A wide window: the piano. Its letters play as before.
   const piano = page.locator('.live-piano__keys')
   await expect(piano).toBeVisible()
+  // A plays a piano key while held, as before.
+  await page.keyboard.down('KeyA')
+  await expect(piano.locator('[data-note][data-down]')).toHaveCount(1)
+  await page.keyboard.up('KeyA')
+  await expect(piano.locator('[data-note][data-down]')).toHaveCount(0)
   const keyWord = page.getByRole('button', { name: /^Key: / })
   const before = await keyWord.getAttribute('aria-label')
   await page.keyboard.press('BracketRight')
@@ -127,6 +132,59 @@ test('? lists the keys, Esc closes screens but never leaves a section, and the S
   await page.waitForTimeout(120)
   expect(await downPads(page)).toEqual([])
   await page.keyboard.up('Digit5')
+  // No key hints for keys that don't work.
+  await expect(page.locator('[data-pad][aria-keyshortcuts]')).toHaveCount(0)
+  // The piano's letters are single keys too.
+  await page.getByRole('button', { name: 'Pads. Tap for keys.' }).click()
+  const piano = page.locator('.live-piano__keys')
+  await expect(piano).toBeVisible()
+  await page.keyboard.down('KeyA')
+  await page.waitForTimeout(120)
+  await expect(piano.locator('[data-note][data-down]')).toHaveCount(0)
+  await page.keyboard.up('KeyA')
+})
+
+test('Ctrl+Z runs a new pad sound\'s UNDO', async ({ page }) => {
+  await page.keyboard.press('KeyE')
+  const sheet = page.getByRole('dialog')
+  // EDIT needs the device's project read: try until the pad's sheet opens.
+  await expect(async () => {
+    await page.keyboard.press('Digit7')
+    await expect(sheet).toBeVisible({ timeout: 1000 })
+  }).toPass()
+  // The first row is the pad's own sound: pick another.
+  await sheet.locator('button.snd__pick').nth(1).click()
+  const undo = page.getByRole('button', { name: 'Undo' })
+  await expect(undo).toBeVisible()
+  // Once the sheet has gone (until then the key is the sheet's).
+  await expect(sheet).toBeHidden()
+  await page.keyboard.press('Control+z')
+  await expect(undo).toHaveCount(0)
+  await expect(page.locator('.toast')).toContainText('Pad A 7: back to')
+})
+
+test('with NumLock off the number pad still plays pads, also with a group key focused', async ({ page }) => {
+  await page.getByRole('tab', { name: 'Group B' }).click()
+  await expect(page.getByRole('tab', { name: 'Group B' })).toBeFocused()
+  // NumLock off: Numpad4 sends ArrowLeft, which would move the group tabs.
+  const send = (type: string): Promise<void> =>
+    page.evaluate((t) => {
+      document.activeElement?.dispatchEvent(new KeyboardEvent(t, { key: 'ArrowLeft', code: 'Numpad4', bubbles: true, cancelable: true }))
+    }, type)
+  await send('keydown')
+  await expect.poll(() => downPads(page)).toEqual(['B 4'])
+  await expect(page.getByRole('tab', { name: 'Group B' })).toHaveAttribute('aria-selected', 'true')
+  await send('keyup')
+  await expect.poll(() => downPads(page)).toEqual([])
+})
+
+test('in the all-groups view only the group the keys play says its keys', async ({ page }) => {
+  await page.keyboard.press('KeyC')
+  await page.keyboard.press('KeyV')
+  await expect(page.locator('[data-pad]')).toHaveCount(48)
+  const hinted = page.locator('[data-pad][aria-keyshortcuts]')
+  await expect(hinted).toHaveCount(12)
+  await expect(hinted.first()).toHaveAttribute('aria-label', /^C /)
 })
 
 test('a pad held while the window loses focus is let go', async ({ page }) => {

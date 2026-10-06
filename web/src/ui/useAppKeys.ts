@@ -46,6 +46,11 @@ export function useAppKeys(enabled: boolean, host: AppKeysHost): void {
       const scope = keyScope()
       if (scope === null) return
       if (input.key === 'Escape') {
+        // Once a press: a held Esc leaves EDIT, not then stop the sound too.
+        if (input.repeat) {
+          e.preventDefault()
+          return
+        }
         if (!input.ctrl && !input.meta && !input.alt && scope.escape()) e.preventDefault()
         return
       }

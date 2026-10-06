@@ -49,8 +49,9 @@ export function appCommand(input: KeyInput, ctx: AppContext): AppCommand | null 
     return ctx.toastAction && !input.inField ? 'undo' : null
   }
   if (mod || input.alt) return null
-  if (input.key === '?') return ctx.enabled && !input.inField && !overlaid(ctx.view) ? 'help' : null
-  if (input.key === 'Escape' && !input.shift) return ctx.canBack && !input.inField && escapeCloses(ctx.view) ? 'back' : null
+  if (input.key === '?') return ctx.enabled && !input.altGraph && !input.inField && !overlaid(ctx.view) ? 'help' : null
+  // Once a press: a held Esc doesn't close the screens under it one after another.
+  if (input.key === 'Escape' && !input.shift && !input.repeat) return ctx.canBack && !input.inField && escapeCloses(ctx.view) ? 'back' : null
   return null
 }
 
@@ -119,23 +120,47 @@ export interface KeyGroup {
   readonly rows: readonly KeyRow[]
 }
 
+/** Where the sheet was opened: Live (what it shows), elsewhere (all of Live's keys), and whether single keys are on. */
+export interface KeyHelpContext {
+  /** What Live shows when its keys are plugged in; null away from Live. */
+  live: LiveContext | null
+  /** Settings → Computer keyboard. */
+  enabled: boolean
+}
+
 /**
- * What the Keyboard keys sheet lists: the keys that work now. [live] is what
- * Live shows when it is in front (null elsewhere); Everywhere comes last.
+ * What the Keyboard keys sheet lists. In Live, the keys that work now; away
+ * from Live (Settings' Show keys), all of Live's keys; with single keys off,
+ * only Esc and Ctrl/Cmd+Z. Everywhere comes last.
  */
-export function keyHelp(live: LiveContext | null): KeyGroup[] {
+export function keyHelp(ctx: KeyHelpContext): KeyGroup[] {
   const of = (s: KeyRow['scope']): KeyRow[] => KEY_ROWS.filter((r) => r.scope === s)
+  const everywhere = of('everywhere').filter((r) => ctx.enabled || r.label !== WebText.KEY_HELP)
+  if (!ctx.enabled) return [{ title: WebText.KEYS_EVERYWHERE, rows: everywhere }]
+  const live = ctx.live
   const groups: KeyGroup[] = []
-  if (live !== null) {
-    if (!live.keys) {
-      groups.push({ title: WebText.KEYS_PADS, rows: of('pads').filter((r) => r.label !== WebText.KEY_FOLLOW || live.oneGroup) })
-      if (live.editAvailable) groups.push({ title: WebText.KEYS_EDIT, rows: of('edit').filter((r) => r.label !== WebText.KEY_FIND || live.soundsTab) })
-    } else if (live.pianoShown) {
-      groups.push({ title: WebText.KEYS_PIANO, rows: of('piano').filter((r) => r.label !== WebText.KEY_VIEW_KEYS || live.viewSwitchable) })
-    } else {
-      groups.push({ title: WebText.KEYS_GRID, rows: of('grid').filter((r) => r.label !== WebText.KEY_VIEW_KEYS || live.viewSwitchable) })
+  if (live === null) {
+    groups.push(
+      { title: WebText.KEYS_PADS, rows: of('pads') },
+      { title: WebText.KEYS_EDIT, rows: of('edit') },
+      { title: WebText.KEYS_GRID, rows: of('grid') },
+      { title: WebText.KEYS_PIANO, rows: of('piano') },
+    )
+  } else if (!live.keys) {
+    // In EDIT the pad keys open sounds: the pads' playing rows give way to EDIT's.
+    const playRow = (r: KeyRow): boolean => r.label === WebText.KEY_PADS || r.label === WebText.KEY_PADS_ROW
+    groups.push({ title: WebText.KEYS_PADS, rows: of('pads').filter((r) => (r.label !== WebText.KEY_FOLLOW || live.oneGroup) && !(live.editOn && playRow(r))) })
+    if (live.editAvailable) {
+      groups.push({
+        title: WebText.KEYS_EDIT,
+        rows: of('edit').filter((r) => (r.label !== WebText.KEY_FIND || live.soundsTab) && (r.label !== WebText.KEY_EDIT_PAD || live.editOn)),
+      })
     }
+  } else if (live.pianoShown) {
+    groups.push({ title: WebText.KEYS_PIANO, rows: of('piano').filter((r) => r.label !== WebText.KEY_VIEW_KEYS || live.viewSwitchable) })
+  } else {
+    groups.push({ title: WebText.KEYS_GRID, rows: of('grid').filter((r) => r.label !== WebText.KEY_VIEW_KEYS || live.viewSwitchable) })
   }
-  groups.push({ title: WebText.KEYS_EVERYWHERE, rows: of('everywhere') })
+  groups.push({ title: WebText.KEYS_EVERYWHERE, rows: everywhere })
   return groups
 }

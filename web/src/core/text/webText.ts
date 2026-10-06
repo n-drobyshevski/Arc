@@ -190,6 +190,10 @@ export const WebText = {
   // Never "shortcuts": that word is the EP-133's own, in the Guide.
   KEYS_TITLE: 'Keyboard keys',
   KEYS_NOW: 'Keys that work here now. Single keys pause while you type in a field.',
+  /** The sheet opened away from Live (Settings): all of Live's keys. */
+  KEYS_ALL: "Live's keys, and the ones that work everywhere. Single keys pause while you type in a field.",
+  /** The sheet with single keys switched off. */
+  KEYS_OFF: 'Single keys are off: Settings → Live → Computer keyboard turns them on.',
   KEYS_PADS: 'Live, pads',
   KEYS_EDIT: 'Live, EDIT',
   KEYS_GRID: 'Live, keys',
@@ -218,7 +222,7 @@ export const WebText = {
   /** The KEYS tools panel's line. */
   LIVE_KEYS_KEYS_HINT: 'Keyboard: M pads · Z X octave · [ ] key · Shift+[ ] scale · ? all keys',
   COMPUTER_KEYS: 'Computer keyboard',
-  COMPUTER_KEYS_NOTE: 'Single keys play Live and run its controls. Press ? to see them.',
+  COMPUTER_KEYS_NOTE: 'Single keys play Live and run its controls. Show keys lists them.',
   SHOW_KEYS: 'Show keys',
   /** What a key just switched, for screen readers: "Follow, on". */
   switched(label: string, on: boolean): string {

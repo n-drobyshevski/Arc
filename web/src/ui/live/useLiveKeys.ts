@@ -34,20 +34,22 @@ export interface LiveKeysHost {
 export function useLiveKeys(enabled: boolean, host: LiveKeysHost): void {
   const latest = useRef(host)
   latest.current = host
-  const held = useMemo(() => new Map<string, Held>(), [])
-  const counts = useMemo(() => new Map<string, number>(), [])
+  // The key (code) to what it holds, and what each held pad or key's first press holds, with how many keys hold it.
+  const held = useMemo(() => new Map<string, string>(), [])
+  const counts = useMemo(() => new Map<string, { target: Held; n: number }>(), [])
 
   const handler = useMemo((): KeyScopeHandler => {
     const release = (code: string): void => {
-      const h = held.get(code)
-      if (!h) return
+      const id = held.get(code)
+      if (id === undefined) return
       held.delete(code)
-      const n = (counts.get(h.id) ?? 1) - 1
-      if (n > 0) counts.set(h.id, n)
-      else {
-        counts.delete(h.id)
-        h.up()
-      }
+      const c = counts.get(id)
+      if (!c) return
+      c.n--
+      if (c.n > 0) return
+      counts.delete(id)
+      // Let go by the press that pressed it.
+      c.target.up()
     }
     const releaseAll = (): void => {
       for (const code of [...held.keys()]) release(code)
@@ -67,10 +69,13 @@ export function useLiveKeys(enabled: boolean, host: LiveKeysHost): void {
           if (input.repeat || held.has(input.code)) return true
           const target = cmd.kind === 'pad' ? h.pad(cmd.offset) : h.gridKey(cmd.offset)
           if (target === null) return true
-          held.set(input.code, target)
-          const n = counts.get(target.id) ?? 0
-          counts.set(target.id, n + 1)
-          if (n === 0) target.down(e.timeStamp)
+          held.set(input.code, target.id)
+          const c = counts.get(target.id)
+          if (c) c.n++
+          else {
+            counts.set(target.id, { target, n: 1 })
+            target.down(e.timeStamp)
+          }
           return true
         }
         // Toggles and steps act once a press, not again while the key repeats.

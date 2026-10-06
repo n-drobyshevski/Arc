@@ -62,7 +62,7 @@ import type { KeysShown } from './keys'
 import { capDown, capUp } from './capDown'
 import { rawMovesSupported } from './press'
 import './PianoKeyboard.css'
-import { composing, inField } from '../keyGuard'
+import { altGraph, composing, inField } from '../keyGuard'
 import { computerKeys } from '../keyPrefs'
 
 /** How far past a key's edge a sliding finger keeps it, so it doesn't flicker between two keys. */
@@ -244,7 +244,7 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
         return
       }
       // Settings → Computer keyboard off, or an input method composing: no letters play.
-      if (!computerKeys.peek() || composing(e)) return
+      if (!computerKeys.peek() || composing(e) || altGraph(e)) return
       if (e.defaultPrevented || !playsKeys({ ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, inField: inField(e.target) })) return
       const step = octaveStep(e.code)
       if (step !== null) {

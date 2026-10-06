@@ -6,12 +6,39 @@ import { latinLetter, liveCommand, NUMPAD_OFFSET, padOffset, ROW_OFFSET, type Li
 
 /** A key press off fields and controls, no modifiers, unless said. */
 function key(code: string, k: string, more: Partial<KeyInput> = {}): KeyInput {
-  return { code, key: k, shift: false, ctrl: false, meta: false, alt: false, repeat: false, composing: false, prevented: false, inField: false, onControl: false, ...more }
+  return { code, key: k, shift: false, ctrl: false, meta: false, alt: false, altGraph: false, repeat: false, composing: false, prevented: false, inField: false, onControl: false, ...more }
 }
 
 const PADS: LiveContext = { keys: false, pianoShown: false, editAvailable: true, editOn: false, oneGroup: true, viewSwitchable: false, soundsTab: true }
 const GRID: LiveContext = { ...PADS, keys: true, editAvailable: false, viewSwitchable: true }
 const PIANO: LiveContext = { ...GRID, pianoShown: true }
+
+describe('Live on other keyboard layouts', () => {
+  it('steps the key on a dead key\'s place ([ on AZERTY is ^), but leaves other dead keys to the input method', () => {
+    expect(liveCommand(key('BracketLeft', 'Dead', { composing: true }), GRID)).toEqual({ kind: 'root', step: -1 })
+    expect(liveCommand(key('BracketRight', 'Dead', { composing: true, shift: true }), GRID)).toEqual({ kind: 'scale', step: 1 })
+    expect(liveCommand(key('Quote', 'Dead', { composing: true }), GRID)).toBeNull()
+  })
+
+  it('takes letters by what they type, by place only for another script\'s letters', () => {
+    // AZERTY: the comma sits on M's place; it is no M.
+    expect(liveCommand(key('KeyM', ','), PADS)).toBeNull()
+    // Dvorak: . on E's place, ; on Z's; V on the full stop's place stays V.
+    expect(liveCommand(key('KeyE', '.'), PADS)).toBeNull()
+    expect(liveCommand(key('KeyZ', ';'), GRID)).toBeNull()
+    expect(liveCommand(key('Period', 'v'), PADS)).toEqual({ kind: 'view' })
+    // Dvorak: / on [ 's place still finds.
+    expect(liveCommand(key('BracketLeft', '/'), PADS)).toEqual({ kind: 'find' })
+    // A Latin letter with an accent types itself, not its place's letter.
+    expect(latinLetter('é', 'KeyE')).toBeNull()
+    expect(latinLetter('ж', 'Semicolon')).toBeNull()
+  })
+
+  it('never takes AltGr combinations (Linux reports AltGr without Ctrl or Alt)', () => {
+    expect(liveCommand(key('Digit8', '[', { altGraph: true }), GRID)).toBeNull()
+    expect(liveCommand(key('KeyE', '€', { altGraph: true }), PADS)).toBeNull()
+  })
+})
 
 describe('Live on the computer keyboard', () => {
   it('lays the number pad out as the EP-133 keypad, and the number row by the numbers printed', () => {

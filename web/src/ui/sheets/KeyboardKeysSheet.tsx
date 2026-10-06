@@ -6,6 +6,7 @@ import type { JSX } from 'preact'
 import { Strings } from '../../core/text/strings'
 import { WebText } from '../../core/text/webText'
 import { keyHelp, keyScope } from '../appKeys'
+import { computerKeys } from '../keyPrefs'
 import { Caption } from '../components/Caption'
 import { Key } from '../components/Key'
 import { Sheet } from '../components/Sheet'
@@ -17,14 +18,16 @@ export interface KeyboardKeysSheetProps {
 }
 
 export function KeyboardKeysSheet(props: KeyboardKeysSheetProps): JSX.Element {
-  // What Live shows when it is the screen whose keys are plugged in; else only Everywhere.
-  const groups = keyHelp(props.open ? (keyScope()?.context() ?? null) : null)
+  // What Live shows when its keys are plugged in; away from Live, all of its keys; off, only Esc and Ctrl/Cmd+Z.
+  const live = props.open ? (keyScope()?.context() ?? null) : null
+  const enabled = computerKeys.value
+  const groups = keyHelp({ live, enabled })
   return (
     <Sheet open={props.open} onDismiss={props.onDismiss} labelledBy="keys-sheet-title">
       <h2 id="keys-sheet-title" class="t-heading keys-sheet__title">
         {WebText.KEYS_TITLE}
       </h2>
-      <p class="t-small keys-sheet__note">{WebText.KEYS_NOW}</p>
+      <p class="t-small keys-sheet__note">{!enabled ? WebText.KEYS_OFF : live !== null ? WebText.KEYS_NOW : WebText.KEYS_ALL}</p>
       {groups.map((g) => (
         <section key={g.title} class="keys-sheet__group">
           <Caption text={g.title} as="h3" align="start" />
