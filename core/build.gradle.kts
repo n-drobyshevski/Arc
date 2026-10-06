@@ -22,7 +22,7 @@ kotlin {
 
 tasks.withType<JavaCompile>().configureEach { options.release.set(17) }
 
-// The version written into every .pak ("arc 0.2.0"), from version.properties.
+// The version written into every .pak ("arc 0.3.0"), from version.properties.
 val arcVersion = rootProject.extra["arcVersion"] as String
 val generateVersion by tasks.registering {
     val out = layout.buildDirectory.dir("generated/version")
