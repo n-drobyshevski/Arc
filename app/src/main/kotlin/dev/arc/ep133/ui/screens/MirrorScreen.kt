@@ -1565,8 +1565,8 @@ private val ViewWordGap = 4.dp
  * K.O. II's body, each after its LED, the LED of the view shown lit and its
  * word in ink, the other grey. A tap on a word shows that view. The piano's
  * word is greyed out where no piano fits (fewer than 8 white keys, or under
- * 120 dp tall). [vertical]: one word over the other (the column beside the
- * keys on a phone on its side).
+ * 120 dp tall). [vertical]: one word over the other, each turned as the mode
+ * word is (the column beside the keys on a phone on its side).
  */
 @Composable
 private fun KeysViewSwitch(ui: ViewSwitch, vertical: Boolean = false) {
@@ -1575,29 +1575,31 @@ private fun KeysViewSwitch(ui: ViewSwitch, vertical: Boolean = false) {
         .coachMark("live.keysView", CoachText.KEYS_VIEW, c.navy, c.onNavy)
         .semantics { contentDescription = MirrorText.KEYS_VIEW }
         .selectableGroup()
+    val turn = if (vertical) Modifier.rotateVertical() else Modifier
     val pads: @Composable () -> Unit = {
-        ViewWord(MirrorText.VIEW_PADS, on = !ui.piano, enabled = true, MirrorText.keysView(false)) { ui.onPick(KeysView.PADS) }
+        ViewWord(MirrorText.VIEW_PADS, on = !ui.piano, enabled = true, MirrorText.keysView(false), turn) { ui.onPick(KeysView.PADS) }
     }
     val piano: @Composable () -> Unit = {
         ViewWord(
             MirrorText.VIEW_PIANO, on = ui.piano, enabled = ui.pianoEnabled,
             if (ui.pianoEnabled) MirrorText.keysView(true) else MirrorText.keysView(true) + ". " + MirrorText.PIANO_NO_ROOM,
+            turn,
         ) { ui.onPick(KeysView.PIANO) }
     }
     if (vertical) {
-        Column(group) { pads(); piano() }
+        Column(group, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) { pads(); piano() }
     } else {
         Row(group, horizontalArrangement = Arrangement.spacedBy(ViewWordGap)) { pads(); piano() }
     }
 }
 
-/** One word of [KeysViewSwitch]: its LED, lit while it is the view shown, and the word, 44 dp high to touch. */
+/** One word of [KeysViewSwitch]: its LED, lit while it is the view shown, and the word, 44 dp high to touch ([modifier]: turned). */
 @Composable
-private fun ViewWord(word: String, on: Boolean, enabled: Boolean, description: String, onClick: () -> Unit) {
+private fun ViewWord(word: String, on: Boolean, enabled: Boolean, description: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     val c = LocalArcColors.current
     val hw = LocalHwColors.current
     Row(
-        Modifier
+        modifier
             .clip(RoundedCornerShape(6.dp))
             .selectable(selected = on, enabled = enabled, role = Role.RadioButton, interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
             .semantics { contentDescription = description }
@@ -1624,14 +1626,15 @@ private fun viewWordStyle(): androidx.compose.ui.text.TextStyle =
     ArcType.capsKeySmall.copy(fontSize = with(LocalDensity.current) { 11.dp.toSp() }, fontWeight = FontWeight.Bold, letterSpacing = 0.07.em)
 
 /**
- * KEYS' grid on a phone on its side: the mode word turned over the view
- * switch (its tiers one over the other), a column left of the keys.
+ * KEYS' grid on a phone on its side: the mode word over the view words, all
+ * turned, a column left of the keys.
  */
 @Composable
 private fun SidewaysKeysLead(keys: KeysUi, actions: KeysActions, viewSwitch: ViewSwitch?) {
     Column(
         Modifier.width(SideLead).fillMaxHeight(),
-        verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
     ) {
         ModeWord(keys, actions, top = false, Modifier.rotateVertical())
         if (viewSwitch != null) KeysViewSwitch(viewSwitch, vertical = true)
@@ -1676,7 +1679,7 @@ private fun SidewaysKeysPicks(keys: KeysUi, actions: KeysActions) {
 }
 
 /** KEYS' columns either side of the grid on a phone on its side, and the room between them and it. */
-private val SideLead = 76.dp
+private val SideLead = 44.dp
 private val SidePicks = 44.dp
 private val SideGap = 12.dp
 

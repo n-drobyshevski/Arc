@@ -511,13 +511,13 @@
 /* KEYS' grid on its side: the turned word over the view switch on the left, the scale and the
  * octave on the right, both in the middle of the keys' height; the body as big as what's left. */
 .live__side--keys {
-  --side-tools: 76px;
+  --side-tools: 44px;
   --side-end: 44px;
 }
 .live-mode--lead {
   flex-direction: column;
-  align-items: flex-start;
-  gap: var(--space-8);
+  align-items: center;
+  gap: var(--space-16);
 }
 .live__side-end {
   flex: none;
@@ -920,7 +920,17 @@
 .live-ko .live-view { --view-on: var(--ko-label); --view-off: color-mix(in oklab, var(--ko-label) 55%, var(--ko-body)); }
 .live-view--vertical {
   flex-direction: column;
-  gap: 0;
+  align-items: center;
+  gap: var(--space-8);
+}
+/* Turned as the mode word over them is: read from the bottom up, the LED first. */
+.live-view--vertical .live-view__word {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  min-height: 0;
+  min-width: 44px;
+  padding: var(--space-2) 0;
+  justify-content: center;
 }
 .live-view__word {
   display: inline-flex;

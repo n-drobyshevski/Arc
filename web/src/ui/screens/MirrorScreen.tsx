@@ -1717,8 +1717,8 @@ function StepWord(props: { glyph: string; description: string; enabled: boolean;
  * K.O. II's body, each after its LED, the LED of the view shown lit. A tap
  * on a word shows that view. A radio group (each word a radio, the arrows
  * move between them). The piano's word is greyed out where it has no room.
- * [vertical]: one word over the other (a column beside the keys on a phone
- * on its side), else side by side.
+ * [vertical]: one word over the other, each turned as the mode word is (a
+ * column beside the keys on a phone on its side), else side by side.
  */
 function KeysViewSwitch(props: { piano: boolean; room: boolean; onView: (piano: boolean) => void; vertical?: boolean }): JSX.Element {
   const { piano, room, vertical = false } = props
