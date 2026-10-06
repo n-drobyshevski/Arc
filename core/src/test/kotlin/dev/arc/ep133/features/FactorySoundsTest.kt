@@ -92,6 +92,16 @@ class FactorySoundsTest {
         assertEquals(10, some[0])
     }
 
+    @Test
+    fun `a sound is unnamed when the device lists it as its slot's file`() {
+        assertTrue(FactorySounds.unnamed(343, "343.pcm"))
+        assertTrue(FactorySounds.unnamed(1, "001.pcm"))
+        assertTrue(FactorySounds.unnamed(1, " 001.PCM "))
+        assertFalse(FactorySounds.unnamed(1, "1.pcm"))
+        assertFalse(FactorySounds.unnamed(2, "001.pcm")) // another slot's file: moved, not the factory sound
+        assertFalse(FactorySounds.unnamed(343, "nt perc"))
+    }
+
     private fun rec(id: String, createdAt: Long, source: String) = BackupRecord(
         id, id, "", createdAt, source, null, BackupDevice(), 0, 0, emptyList(), emptyList(), emptyMap(), 0,
     )

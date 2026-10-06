@@ -1491,7 +1491,8 @@ class ArcController(
                 deviceSounds[slot]?.let { keepPadSound(slot, it.name, it.size, pcm, d.channels, d.sampleRate) }
                     ?: withContext(Dispatchers.Default) { PcmSound.of(pcm, d.channels.toInt(), d.sampleRate.toInt()) }
             } else {
-                toastOnce(dev.arc.ep133.text.MirrorText.NO_COPY)
+                val factory = FactorySounds.unnamed(slot, name) && FactorySounds.inLibrary(_state.value.backups) == null
+                toastOnce(if (factory) dev.arc.ep133.text.MirrorText.NO_COPY_FACTORY else dev.arc.ep133.text.MirrorText.NO_COPY)
                 return null
             }
             if (mirror != null) keepInMemory(slot, name, audio)
@@ -1552,9 +1553,14 @@ class ArcController(
             ?.takeIf { it.size == 2 && it[0] in 0..3 && it[1] in 0..11 }
             ?.let { dev.arc.ep133.features.PhysicalPad(it[0], it[1]) }
 
-    /** The WAV of a sound from the newest backup that has it, if any. */
+    /**
+     * The WAV of a sound from the newest backup that has it, if any; a sound
+     * the device lists unnamed ("343.pcm") from the factory pack.
+     */
     private suspend fun fromBackup(slot: Int, name: String): ByteArray? {
-        val b = dev.arc.ep133.features.PadSounds.newestBackupWith(slot, name, backupNames, _state.value.backups) ?: return null
+        val b = dev.arc.ep133.features.PadSounds.newestBackupWith(slot, name, backupNames, _state.value.backups)
+            ?: FactorySounds.inLibrary(_state.value.backups)?.takeIf { FactorySounds.unnamed(slot, name) }
+            ?: return null
         return pakOf(b.id).sounds[slot]?.wav
     }
 

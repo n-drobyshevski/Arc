@@ -270,7 +270,7 @@ fun MirrorScreen(
     initialToolsOpen: Boolean = false,
     /** For screenshots: start with the offline note unfolded. */
     initialNoteOpen: Boolean = false,
-    /** Not connected and nothing to show: download the factory sounds (FactorySounds); null when they are in the library. */
+    /** Not connected: download the factory sounds (FactorySounds); null when they are in the library. */
     onGetFactory: (() -> Unit)? = null,
     /**
      * Pressing a pad plays its sample on the phone until [onPadUp] (hold is
@@ -812,10 +812,10 @@ private fun RowScope.SpokenLine(said: String, content: @Composable RowScope.() -
     )
 }
 
-/** Not connected and never read: the factory sounds to get, first in the tools. */
+/** Not connected (nothing read, or offline from the last read): the factory sounds to get, first in the tools. */
 @Composable
 private fun FactoryRow(mirror: MirrorUi?, onGetFactory: (() -> Unit)?) {
-    if (onGetFactory == null || mirror?.error != MirrorText.NOT_CONNECTED) return
+    if (onGetFactory == null || mirror?.error != MirrorText.NOT_CONNECTED && mirror?.offline == null) return
     GridPlate {
         SettingRow(FeatureText.FACTORY_SOUNDS, note = FeatureText.FACTORY_NOTE) {
             ArcKey(FeatureText.GET, onGetFactory, size = KeySize.Small, style = KeyStyle.Quiet)

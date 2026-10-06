@@ -88,6 +88,15 @@ object FactorySounds {
         return out
     }
 
+    /**
+     * Whether [name] is the one the EP-133 gives a sound nobody named, its
+     * slot's file ("343.pcm"): how a device still holding the factory sounds
+     * lists them. Live plays such a pad from the pack when it has no copy of
+     * its own (a sample recorded on the device into that slot would be
+     * named so too, but arc copies it while connected).
+     */
+    fun unnamed(slot: Int, name: String): Boolean = name.trim().equals(slot.toString().padStart(3, '0') + ".pcm", ignoreCase = true)
+
     /** The library's factory pack, if it has one (the newest, should there be two). */
     fun inLibrary(backups: List<BackupRecord>): BackupRecord? =
         backups.filter { it.source == SOURCE }.maxByOrNull { it.createdAt }

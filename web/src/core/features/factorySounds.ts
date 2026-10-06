@@ -18,6 +18,7 @@
 import type { Pak } from '../backup/pak'
 import type { LiveSnapshot } from './liveSnapshot'
 import { topNumber } from './padPush'
+import { ktTrim } from '../util/kotlinText'
 import { read as readPads } from './projectPads'
 
 /** A library entry's source for the factory pack (beside "device" and "import"). */
@@ -107,6 +108,17 @@ export function links(learned: ReadonlyMap<number, number>): Map<number, number>
   return out
 }
 
+/**
+ * Whether [name] is the one the EP-133 gives a sound nobody named, its
+ * slot's file ("343.pcm"): how a device still holding the factory sounds
+ * lists them. Live plays such a pad from the pack when it has no copy of
+ * its own (a sample recorded on the device into that slot would be
+ * named so too, but arc copies it while connected).
+ */
+export function unnamed(slot: number, name: string): boolean {
+  return ktTrim(name).toLowerCase() === String(slot).padStart(3, '0') + '.pcm'
+}
+
 /** The library's factory pack, if it has one (the newest, should there be two). */
 export function inLibrary<B extends { readonly source: string; readonly createdAt: number }>(backups: readonly B[]): B | null {
   let best: B | null = null
@@ -131,5 +143,6 @@ export const FactorySounds = {
   isFactory,
   snapshot,
   links,
+  unnamed,
   inLibrary,
 } as const
