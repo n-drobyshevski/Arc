@@ -4,7 +4,12 @@
  * the EP-133 Sample Tool draws the K.O. II: two solid layers, no gradient,
  * highlight or soft shadow.
  * Pressed (:active, [data-down] set while a finger holds it, or latched: .is-down,
- * [aria-pressed=true]), the face travels onto its edge.
+ * [aria-pressed=true]), the face travels onto its edge as the K.O. II's mechanical
+ * keys do (core KeyMotion): straight down to a hard stop, and let go, back up on
+ * the switch's spring a little past rest before it settles. Both come from one
+ * number, --cap-p (0 up, 1 down, under 0 past rest), so the face and its edge
+ * always agree; the light around a lit pad isn't animated, so it follows the
+ * sound at once. Where @property isn't known, a cap jumps between the two.
  *
  * Per element: --cap-face (required), --cap-ink, --cap-edge (default: the face
  * 30% darker), --cap-dx / --cap-dy (the edge offset), and --cap-glow /
@@ -101,6 +106,13 @@
   }
 }
 
+/* A cap's travel, animatable (a registered number; inherits: false, so a cap inside a cap keeps its own). */
+@property --cap-p {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0;
+}
+
 /* The defaults weigh nothing, so a component's own --cap-* always wins. */
 :where(.cap-3d) {
   --cap-edge: color-mix(in oklab, var(--cap-face) 70%, black);
@@ -111,27 +123,27 @@
 :where(.cap-3d--round) { --cap-dx: 1px; --cap-dy: 2px; }
 
 .cap-3d {
+  --cap-p: 0;
   position: relative;
   background: var(--cap-face);
   color: var(--cap-ink);
+  transform: translate(calc(var(--cap-dx) * var(--cap-p)), calc(var(--cap-dy) * var(--cap-p)));
   box-shadow:
-    var(--cap-dx) var(--cap-dy) 0 var(--cap-edge),
+    calc(var(--cap-dx) * (1 - var(--cap-p))) calc(var(--cap-dy) * (1 - var(--cap-p))) 0 var(--cap-edge),
     0 0 var(--cap-glow-blur) var(--cap-glow);
-  transition:
-    transform var(--key-press-ms) var(--key-ease),
-    box-shadow var(--key-press-ms) var(--key-ease);
+  /* Let go: the spring. */
+  transition: --cap-p var(--key-up-ms) var(--key-spring);
 }
 
 .cap-3d:not(:disabled):active,
 .cap-3d[data-down],
 .cap-3d[aria-pressed='true'],
 .cap-3d.is-down {
-  transform: translate(var(--cap-dx), var(--cap-dy));
-  box-shadow:
-    0 0 0 var(--cap-edge),
-    0 0 var(--cap-glow-blur) var(--cap-glow);
+  --cap-p: 1;
+  /* Pressed: at an even speed into the stop. */
+  transition: --cap-p var(--key-down-ms) linear;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .cap-3d { transition: none; }
+  .cap-3d { transition: none !important; }
 }

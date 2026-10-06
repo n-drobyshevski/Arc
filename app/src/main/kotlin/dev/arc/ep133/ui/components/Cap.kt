@@ -1,13 +1,15 @@
 package dev.arc.ep133.ui.components
 
-import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -21,11 +23,14 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dev.arc.ep133.features.KeyMotion
 
 /*
  * Key caps, drawn as the EP-133 Sample Tool draws the K.O. II: a flat face over
  * a flat edge offset down and to the right, two solid layers with no gradient
- * or shadow. Pressed, the face travels onto its edge. Every key in the app is
+ * or shadow. Pressed, the face travels onto its edge as the K.O. II's
+ * mechanical keys do (core KeyMotion: straight down to a hard stop, then a
+ * spring back up past rest). Every key in the app is
  * one: ArcKey, IconBlock, Segmented, the section menu, PlayKey, and Live's
  * pads, KEYS keys and group keys (the web's theme/cap.css).
  */
@@ -39,8 +44,6 @@ val CapDy = 3.dp
 /** A small round cap's shorter edge (a knob's). */
 val RoundCapDx = 1.dp
 val RoundCapDy = 2.dp
-
-private val CapEasing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
 
 /**
  * The K.O. II's own colours: dark number pads with pale labels, pale group keys
@@ -140,16 +143,35 @@ val LocalHwColors = staticCompositionLocalOf { LightHwColors }
 /** A cap's default edge: its face 30% darker. */
 fun capEdge(face: Color): Color = lerp(face, Color.Black, 0.3f)
 
-/** 0..1: how far a cap is down, moving over 60 ms (the keys' press). */
+/**
+ * How far a cap is down: 0 up, 1 on its edge, a little under 0 as it springs
+ * back past rest (KeyMotion: down in 24 ms, at least 50 ms, then the spring).
+ */
 @Composable
 fun capPress(down: Boolean): Float {
-    val p by animateFloatAsState(if (down) 1f else 0f, tween(60, easing = CapEasing), label = "cap")
-    return p
+    val key = remember { KeyMotion.Key(if (down) 1f else 0f) }
+    val pos = remember { mutableFloatStateOf(key.pos) }
+    val held by rememberUpdatedState(down)
+    LaunchedEffect(down) {
+        // From now, so the first frame after the touch already shows the key on its way down.
+        var last = System.nanoTime()
+        do {
+            val t = withFrameNanos { it }
+            val moving = KeyMotion.step(key, held, frameMs(t - last))
+            last = t
+            pos.floatValue = key.pos
+        } while (moving)
+    }
+    return pos.floatValue
 }
+
+/** A frame's step in ms, for KeyMotion: never backwards, and a stalled frame no more than two. */
+internal fun frameMs(ns: Long): Float = (ns / 1_000_000f).coerceIn(0f, 32f)
 
 /**
  * Draws this element as a cap: [face] in [shape] over an [edge] offset by
- * [dx], [dy]. [press] (0..1, see [capPress]) moves the face onto its edge.
+ * [dx], [dy]. [press] (0..1, see [capPress]) moves the face onto its edge;
+ * under 0, the face lifts off it.
  * [alpha] fades face, content and edge together (a disabled key).
  */
 fun Modifier.cap(

@@ -143,6 +143,7 @@ import {
   showOffline,
   transportText,
 } from '../live/glow'
+import { capDown, capUp } from '../live/capDown'
 import { rowPadSize } from '../live/desk'
 import { chosenView, pianoFor, type PianoPlan } from '../live/keyboard'
 import { DEFAULT_KEYS, keysLit, keysNoteText, octaves, upperOctave, type KeysPicker, type KeysShown } from '../live/keys'
@@ -343,15 +344,16 @@ function holdHandlers(
 ): ButtonHTMLAttributes<HTMLButtonElement> {
   // Web: the cap stays down while a finger holds it (data-down, theme/cap.css), as
   // :active is not reliable for several fingers or with touch-action: none.
-  // An attribute, not a class, so a re-render's class string leaves it alone.
-  const lift = (el: HTMLElement): void => el.removeAttribute('data-down')
+  // An attribute, not a class, so a re-render's class string leaves it alone;
+  // a quick tap keeps it a moment (live/capDown.ts).
+  const lift = (el: HTMLElement): void => capUp(el)
   // The tick comes after the press is handed on, so the sound never waits for it.
   const pressed = ticking(target, haptic, tick)
   return {
     onPointerDown: (e) => {
       // The mouse's other buttons (and a pen's barrel button) don't play.
       if (e.pointerType === 'mouse' && e.button !== 0) return
-      e.currentTarget.setAttribute('data-down', '')
+      capDown(e.currentTarget)
       ids?.add(e.pointerId)
       tracker.down(e.pointerId, e.clientX, e.clientY, pressed, inScroll, e.timeStamp)
     },
@@ -1213,7 +1215,7 @@ function stopEditPress(st: EditPress): void {
  */
 function editHandlers(st: EditPress, press: PressTarget | null, open: () => void, haptic: boolean): ButtonHTMLAttributes<HTMLButtonElement> {
   const end = (el: HTMLElement, tap: boolean): void => {
-    el.removeAttribute('data-down')
+    capUp(el)
     const tapped = st.timer !== null
     stopEditPress(st)
     if (tapped && tap) open()
@@ -1225,7 +1227,7 @@ function editHandlers(st: EditPress, press: PressTarget | null, open: () => void
       st.id = e.pointerId
       // The long press ticks after its press, as outside EDIT.
       st.target = press !== null ? ticking(press, haptic, tick) : null
-      e.currentTarget.setAttribute('data-down', '')
+      capDown(e.currentTarget)
       // The press is the hold's end, so the latency note counts from there (a late timer included).
       const at = e.timeStamp + EDIT_HOLD_MS
       st.timer = setTimeout(() => {
@@ -1280,7 +1282,7 @@ function PadCap(props: PadProps): JSX.Element {
     stopEditPress(edit.current)
     for (const id of holds.current) tracker.cancel(id)
     holds.current.clear()
-    btn.current?.removeAttribute('data-down')
+    if (btn.current) capUp(btn.current)
   }, [editMode, tracker])
   // The glow at this render (the screen's frame loop keeps it moving while it fades).
   const g = light ? glow(light, ui.fixedNow ?? perfNow()) : 0
