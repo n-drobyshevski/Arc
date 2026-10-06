@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CancelledError } from '../../../src/core/protocol/errors'
+import { FeatureText } from '../../../src/core/text/featureText'
 import { browserFactory, proxied } from '../../../src/platform/net/factory'
 
 /** A response streaming [chunks], saying [length] (or none), and stopping there. */
@@ -24,7 +25,7 @@ describe('browserFactory', () => {
     const fetch = vi.fn(async () => new Response('<html>'))
     vi.stubGlobal('fetch', fetch)
     await expect(browserFactory(() => base).text('/apps/ep-sample-tool', new AbortController().signal)).resolves.toBe('<html>')
-    expect(fetch).toHaveBeenCalledWith('https://arc.example/te/apps/ep-sample-tool', expect.objectContaining({ credentials: 'omit' }))
+    expect(fetch).toHaveBeenCalledWith('https://arc.example/te/apps/ep-sample-tool', expect.objectContaining({ credentials: 'same-origin' }))
   })
 
   it('streams the pack with its progress against the length', async () => {
@@ -51,5 +52,8 @@ describe('browserFactory', () => {
     await expect(browserFactory(() => base).bytes('/x.pak', abort.signal, () => {})).rejects.toBeInstanceOf(CancelledError)
     vi.stubGlobal('fetch', async () => new Response('', { status: 404 }))
     await expect(browserFactory(() => base).text('/x', new AbortController().signal)).rejects.toThrow('HTTP 404')
+    // fetch's own words for a network failure are replaced.
+    vi.stubGlobal('fetch', () => Promise.reject(new TypeError('NetworkError when attempting to fetch resource.')))
+    await expect(browserFactory(() => base).text('/x', new AbortController().signal)).rejects.toThrow(FeatureText.FACTORY_UNREACHABLE)
   })
 })

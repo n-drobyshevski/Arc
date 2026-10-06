@@ -8,6 +8,7 @@
 // page, so arc in a subfolder still works. Nothing else is forwarded.
 
 import { CancelledError } from '../../core/protocol/errors'
+import { FeatureText } from '../../core/text/featureText'
 import type { FactoryDeps } from '../../state/deps'
 
 /** Where arc's host forwards teenage engineering's EP Sample Tool. */
@@ -21,10 +22,14 @@ export function proxied(path: string, base: string): string {
 async function get(path: string, signal: AbortSignal, base: string): Promise<Response> {
   let res: Response
   try {
-    res = await fetch(proxied(path, base), { signal, credentials: 'omit', cache: 'no-store' })
-  } catch (e) {
+    // Same-origin credentials: a protected preview deployment lets the request through only with
+    // its login cookie (without it, a redirect to vercel.com fails as a network error). arc's own
+    // origin sets no cookies, so in production nothing is sent.
+    res = await fetch(proxied(path, base), { signal, credentials: 'same-origin', cache: 'no-store' })
+  } catch {
     if (signal.aborted) throw new CancelledError()
-    throw e
+    // fetch says only "NetworkError…" / "Failed to fetch" (offline, DNS, a blocked redirect).
+    throw new Error(FeatureText.FACTORY_UNREACHABLE)
   }
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   return res
