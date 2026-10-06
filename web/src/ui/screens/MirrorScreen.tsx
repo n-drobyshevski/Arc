@@ -791,16 +791,17 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           </>
         ) : sideways ? (
           // A phone on its side (Android's sideways grid): the K.O. II's body as big as the room,
-          // the group keys a column left of the pads, as on the device.
+          // the group keys a column left of the pads, as on the device, and the mode row a
+          // column left of the body rather than a row under it, so the pads get its height.
           <>
             {displayStrip}
             <div class="live__side">
+              <div class="live__side-tools">{modeRow}</div>
               <div class="ko-body">
                 <GroupKeys group={group} st={st} now={now} onSelect={setGroup} vertical />
                 <Group group={group} st={st} nameOf={nameOf} now={now} big coach ui={padUi} tracker={tracker} />
               </div>
             </div>
-            {modeRow}
           </>
         ) : (
           <>

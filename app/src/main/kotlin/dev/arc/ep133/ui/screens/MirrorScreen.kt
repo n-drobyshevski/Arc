@@ -64,6 +64,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -368,9 +369,10 @@ fun MirrorScreen(
         // Four groups side by side while their pads keep 40 dp both ways (rows no taller than
         // square pads). Off the height: each group's caption (a 1.2 em line and its gap) and the
         // plate's three lines; off the width, the three gaps and each plate's two lines.
+        // On its side PADS' words are a column left of the pads, not a row over them.
         val caption = with(LocalDensity.current) { ArcType.caps.fontSize.toDp() * 1.2f } + 8.dp
-        val padW = ((roomW - 42.dp) / 4 - 2.dp) / 3
-        val allGroupsSideways = sideways && minOf((roomH - caption - 3.dp) / 4, padW) >= 40.dp
+        val padW = ((roomW - SideControls - SideControlsGap - 42.dp) / 4 - 2.dp) / 3
+        val allGroupsSideways = sideways && minOf((roomH + ControlsRow - caption - 3.dp) / 4, padW) >= 40.dp
         SideZone(
             open = toolsOpen,
             onOpen = { toolsOpen = true },
@@ -435,32 +437,32 @@ fun MirrorScreen(
             } else if (sideways && !keys.on && oneGroup) {
                 val now = clock()
                 BoxWithConstraints(sidewaysColumn, contentAlignment = Alignment.TopCenter) {
-                    // The K.O. II's body as big as the room under the row above, the group keys a
-                    // column left of the pads as on the device; the row above as wide as the body,
-                    // or as the grid used to be (1.4 times its height and the keys' column) when that
-                    // is wider, so its words keep their room.
-                    val gridH = maxHeight - (if (inBar) 0.dp else DisplayLineHeight + 10.dp) - ControlsRow
-                    val k = KoGeom.fit(maxWidth, gridH, 4)
+                    // The K.O. II's body as big as the room under the display line, PADS' words a
+                    // column on its left (the group keys are the body's own first column).
+                    val gridH = maxHeight - (if (inBar) 0.dp else DisplayLineHeight + 10.dp)
+                    val k = KoGeom.fit(maxWidth - SideControls - SideControlsGap, gridH, 4)
                     val bodyW = k.u * (4 * 1.215f + 0.401f) + CapDx + 2.dp
-                    Column(Modifier.width(minOf(maxWidth, maxOf(bodyW, gridH * 1.4f + 84.dp))).fillMaxHeight()) {
+                    Column(Modifier.width(minOf(maxWidth, SideControls + SideControlsGap + bodyW)).fillMaxHeight()) {
                         if (!inBar) {
                             if (editing) EditLine() else DisplayStrip(st, mirror, rec, still = fixedNow != null, wireless = wireless)
                             Spacer(Modifier.height(10.dp))
                         }
-                        ModeRow(keys, keysActions, landscape = true, oneGroup = true, onOneGroup = onOneGroup)
-                        Group(
-                            group, st, nameOf, now,
-                            Modifier.fillMaxWidth().weight(1f).coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
-                            big = true,
-                            onPad = onPad,
-                            onPadKept = onPadKept,
-                            onPadUp = onPadUp,
-                            onPadCut = onPadCut,
-                            playingPads = ringed,
-                            onEdit = onEdit,
-                            haptics = haptics,
-                            onSelectGroup = { group = it },
-                        )
+                        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(SideControlsGap)) {
+                            SidewaysPadsControls(keys, keysActions, oneGroup = true, onOneGroup = onOneGroup)
+                            Group(
+                                group, st, nameOf, now,
+                                Modifier.width(bodyW).fillMaxHeight().coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
+                                big = true,
+                                onPad = onPad,
+                                onPadKept = onPadKept,
+                                onPadUp = onPadUp,
+                                onPadCut = onPadCut,
+                                playingPads = ringed,
+                                onEdit = onEdit,
+                                haptics = haptics,
+                                onSelectGroup = { group = it },
+                            )
+                        }
                     }
                 }
             } else if (sideways && !keys.on && allGroupsSideways) {
@@ -470,13 +472,16 @@ fun MirrorScreen(
                         if (editing) EditLine() else DisplayStrip(st, mirror, rec, still = fixedNow != null, wireless = wireless)
                         Spacer(Modifier.height(10.dp))
                     }
-                    ModeRow(keys, keysActions, landscape = true, onOneGroup = onOneGroup)
-                    // All four in one row, filling the height: nothing to scroll, so a press plays at once.
-                    Row(
-                        Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = caption + 3.dp + padW * 4),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp),
-                    ) {
-                        for (g in 0..3) Group(g, st, nameOf, now, Modifier.weight(1f).fillMaxHeight(), fill = true, onPad = onPad, onPadKept = onPadKept, onPadUp = onPadUp, onPadCut = onPadCut, playingPads = ringed, onEdit = onEdit, haptics = haptics)
+                    // PADS' words on the left, then all four in one row, filling the height: nothing
+                    // to scroll, so a press plays at once.
+                    Row(Modifier.fillMaxWidth().weight(1f, fill = false), horizontalArrangement = Arrangement.spacedBy(SideControlsGap)) {
+                        SidewaysPadsControls(keys, keysActions, oneGroup = false, onOneGroup = onOneGroup)
+                        Row(
+                            Modifier.weight(1f).heightIn(max = caption + 3.dp + padW * 4),
+                            horizontalArrangement = Arrangement.spacedBy(14.dp),
+                        ) {
+                            for (g in 0..3) Group(g, st, nameOf, now, Modifier.weight(1f).fillMaxHeight(), fill = true, onPad = onPad, onPadKept = onPadKept, onPadUp = onPadUp, onPadCut = onPadCut, playingPads = ringed, onEdit = onEdit, haptics = haptics)
+                        }
                     }
                 }
             } else if (oneGroup || keys.on) {
@@ -1369,13 +1374,11 @@ private fun ModeRow(
     keys: KeysUi,
     actions: KeysActions,
     landscape: Boolean = false,
-    oneGroup: Boolean = false,
-    onOneGroup: (Boolean) -> Unit = {},
     /** KEYS' grid ⇄ piano switch, after the mode word; null where it isn't offered. */
     viewSwitch: ViewSwitch? = null,
 ) {
     if (landscape) {
-        SidewaysRow(keys, actions, oneGroup, onOneGroup, viewSwitch)
+        SidewaysRow(keys, actions, viewSwitch)
         return
     }
     val c = LocalArcColors.current
@@ -1446,27 +1449,14 @@ private fun ModeWord(keys: KeysUi, actions: KeysActions, top: Boolean) {
 
 /**
  * The mode row on a phone on its side, over the keys: the mode, the scale
- * and the key at the start, the octave between − and + at the end (in PADS,
- * the mode and the view). Short of room (large text), the key word drops its
- * KEY, then the scale shortens to its code; − and + keep their size.
+ * and the key at the start, the octave between − and + at the end (PADS has
+ * its words in a column left of the pads instead: [SidewaysPadsControls]).
+ * Short of room (large text), the key word drops its KEY, then the scale
+ * shortens to its code; − and + keep their size.
  */
 @Composable
-private fun SidewaysRow(keys: KeysUi, actions: KeysActions, oneGroup: Boolean, onOneGroup: (Boolean) -> Unit, viewSwitch: ViewSwitch?) {
+private fun SidewaysRow(keys: KeysUi, actions: KeysActions, viewSwitch: ViewSwitch?) {
     val c = LocalArcColors.current
-    if (!keys.on) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(WordGap)) {
-            ModeWord(keys, actions, top = false)
-            // The view is a view switch, an underlined pair of words as in the tools; only the
-            // mode word carries the swap mark.
-            TextToggle(
-                listOf(MirrorText.ALL_GROUPS, MirrorText.ONE_GROUP),
-                selected = if (oneGroup) 1 else 0,
-                onSelect = { onOneGroup(it == 1) },
-                Modifier.coachMark("live.view", CoachText.VIEW, c.navy, c.onNavy),
-            )
-        }
-        return
-    }
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val measurer = rememberTextMeasurer()
         val density = LocalDensity.current
@@ -1533,6 +1523,31 @@ private fun SidewaysRow(keys: KeysUi, actions: KeysActions, oneGroup: Boolean, o
 
 /** The room between the words of the row over the keys. */
 private val WordGap = 24.dp
+
+/**
+ * PADS on a phone on its side: its words in a column left of the pads rather
+ * than a row over them, so the pads get that height: the mode word, then the
+ * view as an underlined pair of words, one under the other, as in the tools.
+ */
+@Composable
+private fun SidewaysPadsControls(keys: KeysUi, actions: KeysActions, oneGroup: Boolean, onOneGroup: (Boolean) -> Unit) {
+    val c = LocalArcColors.current
+    Column(Modifier.width(SideControls), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        ModeWord(keys, actions, top = false)
+        // Only the mode word carries the swap mark.
+        TextToggle(
+            listOf(MirrorText.ALL_GROUPS, MirrorText.ONE_GROUP),
+            selected = if (oneGroup) 1 else 0,
+            onSelect = { onOneGroup(it == 1) },
+            Modifier.offset(x = (-8).dp).coachMark("live.view", CoachText.VIEW, c.navy, c.onNavy),
+            vertical = true,
+        )
+    }
+}
+
+/** PADS' column of words on a phone on its side, and the room between it and the pads. */
+private val SideControls = 104.dp
+private val SideControlsGap = 12.dp
 
 /** The KEYS view switch: two keys of [SwitchKey] wide, [SwitchGap] after the mode word. */
 private val SwitchKey = 44.dp

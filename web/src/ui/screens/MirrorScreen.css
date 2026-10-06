@@ -486,8 +486,25 @@
   justify-content: center;
   align-items: flex-start;
 }
+.live__side {
+  --side-tools: 96px;
+  gap: var(--space-12);
+}
+/* The mode row as a column on the left, its words at the top (Android's SidewaysPadsControls). */
+.live__side-tools {
+  flex: none;
+  width: var(--side-tools);
+}
+.live__side-tools .live-mode {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-4);
+  margin-top: 0;
+}
 .live__side > .ko-body {
   --ko-cols: 4;
+  /* As .ko-body's, less the column on the left and its gap. */
+  --u: clamp(0px, min((100cqw - var(--side-tools) - var(--space-12) - var(--cap-dx) - 2px) / (var(--ko-cols) * 1.215 + 0.401), (100cqh - var(--cap-dy) - 2px) / 5.72), 170px);
   display: flex;
   gap: var(--kd-gx);
 }
