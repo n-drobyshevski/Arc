@@ -93,6 +93,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -110,11 +111,13 @@ import dev.arc.ep133.features.NoteNames
 import dev.arc.ep133.features.Scale
 import dev.arc.ep133.features.RecState
 import dev.arc.ep133.data.TakeInfo
+import dev.arc.ep133.text.GuideText
 import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.ui.components.ArcKey
 import dev.arc.ep133.ui.components.Caption
 import dev.arc.ep133.ui.components.CapDx
 import dev.arc.ep133.ui.components.CapDy
+import dev.arc.ep133.ui.components.GroupGlyphs
 import dev.arc.ep133.ui.components.GridPlate
 import dev.arc.ep133.ui.components.LocalHwColors
 import dev.arc.ep133.ui.components.cap
@@ -432,31 +435,32 @@ fun MirrorScreen(
             } else if (sideways && !keys.on && oneGroup) {
                 val now = clock()
                 BoxWithConstraints(sidewaysColumn, contentAlignment = Alignment.TopCenter) {
-                    // The grid as tall as the room and at most 1.4 times as wide, the group keys
-                    // in a column on its right; the row above lines up with the grid.
+                    // The K.O. II's body as big as the room under the row above, the group keys a
+                    // column left of the pads as on the device; the row above as wide as the body,
+                    // or as the grid used to be (1.4 times its height and the keys' column) when that
+                    // is wider, so its words keep their room.
                     val gridH = maxHeight - (if (inBar) 0.dp else DisplayLineHeight + 10.dp) - ControlsRow
-                    val gridW = minOf(gridH * 1.4f, maxWidth - GroupColumn - 12.dp)
-                    Column(Modifier.width(gridW + 12.dp + GroupColumn).fillMaxHeight()) {
+                    val k = KoGeom.fit(maxWidth, gridH, 4)
+                    val bodyW = k.u * (4 * 1.215f + 0.401f) + CapDx + 2.dp
+                    Column(Modifier.width(minOf(maxWidth, maxOf(bodyW, gridH * 1.4f + 84.dp))).fillMaxHeight()) {
                         if (!inBar) {
                             if (editing) EditLine() else DisplayStrip(st, mirror, rec, still = fixedNow != null, wireless = wireless)
                             Spacer(Modifier.height(10.dp))
                         }
                         ModeRow(keys, keysActions, landscape = true, oneGroup = true, onOneGroup = onOneGroup)
-                        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Group(
-                                group, st, nameOf, now,
-                                Modifier.width(gridW).fillMaxHeight().coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
-                                big = true,
-                                onPad = onPad,
-                                onPadKept = onPadKept,
-                                onPadUp = onPadUp,
-                                onPadCut = onPadCut,
-                                playingPads = ringed,
-                                onEdit = onEdit,
-                                haptics = haptics,
-                            )
-                            GroupKeys(group, st, now, onSelect = { group = it }, Modifier.width(GroupColumn).fillMaxHeight(), vertical = true)
-                        }
+                        Group(
+                            group, st, nameOf, now,
+                            Modifier.fillMaxWidth().weight(1f).coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
+                            big = true,
+                            onPad = onPad,
+                            onPadKept = onPadKept,
+                            onPadUp = onPadUp,
+                            onPadCut = onPadCut,
+                            playingPads = ringed,
+                            onEdit = onEdit,
+                            haptics = haptics,
+                            onSelectGroup = { group = it },
+                        )
                     }
                 }
             } else if (sideways && !keys.on && allGroupsSideways) {
@@ -585,9 +589,6 @@ private val SidewaysBottom = 8.dp
 
 /** A tablet's piano is no taller than this. */
 private val PianoMaxTablet = 340.dp
-
-/** The group keys' column beside the one-group grid, on its side. */
-private val GroupColumn = 72.dp
 
 /**
  * The piano's notes in a [width] × [height] room at [octave], [choice] white
@@ -863,10 +864,32 @@ private fun Group(
     /** EDIT is on: a tap gives the pad another sound. */
     onEdit: ((PhysicalPad) -> Unit)? = null,
     haptics: Boolean = false,
+    /** The big grid on a phone on its side: the group keys a column left of the pads, on the body. */
+    onSelectGroup: ((Int) -> Unit)? = null,
 ) {
     val c = LocalArcColors.current
     val lit = st.pads.filterKeys { it.group == group }
     val groupGlow = lit.values.maxOfOrNull { glow(it, now) } ?: 0f
+    if (big) {
+        val pad: @Composable (PhysicalPad, KoGeom) -> Unit = { pad, k ->
+            Pad(
+                pad, lit[pad], nameOf(pad), now,
+                Modifier.size(k.u, k.h),
+                big = true,
+                onPress = onPad?.let { f -> { hold: Boolean, unsure: Boolean, at: Long -> f(pad, hold, unsure, at) } },
+                onKept = { onPadKept(pad) },
+                onRelease = { onPadUp(pad) },
+                onCut = { onPadCut(pad) },
+                playing = pad in playingPads,
+                inScroll = false,
+                onEdit = onEdit?.let { f -> { f(pad) } },
+                haptics = haptics,
+                ko = k,
+            )
+        }
+        KoDeck(group, st, now, modifier, onSelectGroup, pad)
+        return
+    }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // The caption turns orange while one of the group's pads sounds (the big grid's
         // group shows on its key below instead).
@@ -912,7 +935,8 @@ private fun Deck(modifier: Modifier, big: Boolean, content: @Composable ColumnSc
         modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(if (big) 18.dp else 14.dp))
-            .background(hw.body)
+            // The K.O. II's own body, as the Guide draws it, in both themes.
+            .background(hw.ko.body)
             .padding(start = inset, top = inset, end = inset + CapDx, bottom = inset + CapDy),
         verticalArrangement = Arrangement.spacedBy(gap),
     ) { content(gap) }
@@ -921,6 +945,119 @@ private fun Deck(modifier: Modifier, big: Boolean, content: @Composable ColumnSc
 private val DeckGapBig = 10.dp
 private val DeckInsetBig = 12.dp
 
+/**
+ * The big grid drawn as the Guide draws the K.O. II (KoPanel, a 560-wide
+ * device whose pad column is 64.9 wide): every length a share of [u], one
+ * pad's width. A pad is 1.08 times as wide as high; over each row of pads a
+ * line of the words printed on the body; the body's edge offset down and right.
+ */
+private class KoGeom(val u: Dp) {
+    /** The printed line over a row, and the gaps around it. */
+    val line = u * 0.215f
+    val gy = u * 0.077f
+    val gx = u * 0.215f
+    /** A pad's height. */
+    val h = u / 1.08f
+    val keyShape = RoundedCornerShape(maxOf(6.dp, u * 0.092f))
+    val led = (u * 0.085f).coerceIn(5.dp, 7.dp)
+
+    companion object {
+        /**
+         * As big as [w] x [h] lets the body be, with [cols] columns (pads and
+         * group keys): wide, 2 x 0.277 + the gaps + the edge; high, 0.215 +
+         * four rows of (0.215 + 0.077 + 0.926) + three gaps + 0.31 + the edge.
+         */
+        fun fit(w: Dp, h: Dp, cols: Int) = KoGeom(
+            minOf((w - CapDx - 2.dp) / (cols * 1.215f + 0.401f), (h - CapDy - 2.dp) / 5.72f, 170.dp).coerceAtLeast(0.dp),
+        )
+    }
+}
+
+/**
+ * One group's pads on the K.O. II's body, as big as [modifier]'s room lets it
+ * be and in its middle; [onSelectGroup]: the group keys a column left of the
+ * pads, as on the device (a phone on its side). The LEDs before the printed
+ * words stay unlit: on the device they mark the knobs' pages, not the pads.
+ */
+@Composable
+private fun KoDeck(
+    group: Int,
+    st: MirrorState,
+    now: Long,
+    modifier: Modifier,
+    onSelectGroup: ((Int) -> Unit)?,
+    pad: @Composable (PhysicalPad, KoGeom) -> Unit,
+) {
+    val ko = LocalHwColors.current.ko
+    BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
+        val k = KoGeom.fit(maxWidth, maxHeight, if (onSelectGroup != null) 4 else 3)
+        val radius = k.u * 0.277f
+        Row(
+            Modifier
+                .drawBehind {
+                    drawRoundRect(
+                        ko.edge,
+                        topLeft = Offset((k.u * 0.062f).toPx(), (k.u * 0.092f).toPx()),
+                        size = size,
+                        cornerRadius = CornerRadius(radius.toPx()),
+                    )
+                }
+                .clip(RoundedCornerShape(radius))
+                .background(ko.body)
+                .padding(start = k.u * 0.277f, top = k.u * 0.215f, end = k.u * 0.277f + CapDx, bottom = k.u * 0.31f + CapDy),
+            horizontalArrangement = Arrangement.spacedBy(k.gx),
+        ) {
+            if (onSelectGroup != null) {
+                Column(verticalArrangement = Arrangement.spacedBy(k.gy)) {
+                    for (g in 0..3) GroupKey(g, group, st, now, onSelectGroup, Modifier.width(k.u), keyMin = 0.dp, ko = k)
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(k.gy)) {
+                PadNotes.ROWS.forEachIndexed { r, offsets ->
+                    Row(Modifier.height(k.line).clearAndSetSemantics { }, horizontalArrangement = Arrangement.spacedBy(k.gx)) {
+                        for (word in GuideText.LED_ROWS[r]) PrintedWord(word, k)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(k.gx)) {
+                        for (o in offsets) pad(PhysicalPad(group, o), k)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** A word printed on the body over a pad, after its unlit LED a fifth of the way in. */
+@Composable
+private fun PrintedWord(word: String, k: KoGeom) {
+    val ko = LocalHwColors.current.ko
+    val size = with(LocalDensity.current) { (k.u * 0.135f).coerceIn(7.dp, 11.dp).toSp() }
+    Row(
+        Modifier.width(k.u).fillMaxHeight().padding(start = k.u * 0.2f),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(k.u * 0.12f),
+    ) {
+        Box(Modifier.size(k.led).clip(CircleShape).background(ko.ledOff))
+        Text(
+            word.uppercase(),
+            style = ArcType.semi.copy(fontSize = size, lineHeight = 1.em, letterSpacing = 0.06.em),
+            color = ko.label,
+            maxLines = 1,
+            softWrap = false,
+        )
+    }
+}
+
+/** A group key's glyph (KoPanel's GroupGlyphs) in a [size] box. */
+@Composable
+private fun GroupGlyph(g: Int, color: Color, size: Dp) {
+    Canvas(Modifier.size(size)) {
+        val s = this.size.width / 12f
+        for (l in GroupGlyphs[g]) {
+            drawLine(color.copy(alpha = color.alpha * 0.8f), Offset(l[0] * s, l[1] * s), Offset(l[2] * s, l[3] * s), strokeWidth = 1.2f * s, cap = StrokeCap.Round)
+        }
+    }
+}
+
 /** A light around a lit pad or key: [g] 0..1. */
 private fun Modifier.litGlow(g: Float, color: Color, shape: androidx.compose.ui.graphics.Shape): Modifier =
     if (g <= 0f) this else dropShadow(shape, Shadow(radius = 18.dp * g, color = color.copy(alpha = 0.6f * g)))
@@ -928,58 +1065,74 @@ private fun Modifier.litGlow(g: Float, color: Color, shape: androidx.compose.ui.
 /**
  * The group keys under the single grid, pale caps under LEDs as on the K.O. II:
  * the group shown stays down with its LED lit; a group lights orange while one
- * of its pads sounds. [vertical]: a column beside the grid, on a phone on its side.
+ * of its pads sounds. (On a phone on its side they are on the deck: KoDeck.)
  */
 @Composable
-private fun GroupKeys(group: Int, st: MirrorState, now: Long, onSelect: (Int) -> Unit, modifier: Modifier = Modifier, vertical: Boolean = false) {
-    if (vertical) {
-        Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            for (g in 0..3) GroupKey(g, group, st, now, onSelect, Modifier.fillMaxWidth().weight(1f), keyMin = 44.dp, fillHeight = true)
-        }
-    } else {
-        Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            for (g in 0..3) GroupKey(g, group, st, now, onSelect, Modifier.weight(1f), keyMin = 52.dp)
-        }
+private fun GroupKeys(group: Int, st: MirrorState, now: Long, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
+    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        for (g in 0..3) GroupKey(g, group, st, now, onSelect, Modifier.weight(1f), keyMin = 52.dp)
     }
 }
 
+/**
+ * A group key as the K.O. II prints it: pale, its letter in the top left
+ * corner and its function's glyph under it, under its LED. [ko]: on the
+ * deck's body (a phone on its side), pad-sized, the LED on the printed line.
+ */
 @Composable
-private fun GroupKey(g: Int, group: Int, st: MirrorState, now: Long, onSelect: (Int) -> Unit, modifier: Modifier, keyMin: Dp, fillHeight: Boolean = false) {
+private fun GroupKey(g: Int, group: Int, st: MirrorState, now: Long, onSelect: (Int) -> Unit, modifier: Modifier, keyMin: Dp, ko: KoGeom? = null) {
     val c = LocalArcColors.current
     val hw = LocalHwColors.current
     val markA = if (g == 0) Modifier.coachMark("live.groups", CoachText.GROUPS, c.navy, c.onNavy) else Modifier
     val on = g == group
     val sounding = st.pads.filterKeys { it.group == g }.values.maxOfOrNull { glow(it, now) } ?: 0f
-    val face = lerp(hw.lightFace, c.signal, sounding)
-    val edge = lerp(hw.lightEdge, c.signalEdge, sounding)
-    val ink = if (sounding > 0.3f) c.onSignal else if (on) hw.darkFace else hw.lightInk
+    val face = lerp(hw.ko.lightFace, c.signal, sounding)
+    val edge = lerp(hw.ko.lightEdge, c.signalEdge, sounding)
+    val ink = if (sounding > 0.3f) c.onSignal else if (on) hw.ko.darkFace else hw.ko.lightInk
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
-    // The LED, then the key under it.
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    val density = LocalDensity.current
+    val letter = with(density) { (ko?.let { (it.u * 0.277f).coerceIn(15.dp, 34.dp) } ?: 20.dp).toSp() }
+    val led: @Composable () -> Unit = {
         Box(
             Modifier
-                .size(6.dp)
+                .size(ko?.led ?: 6.dp)
                 .then(if (on) Modifier.dropShadow(CircleShape, Shadow(radius = 6.dp, color = c.signal)) else Modifier)
                 .clip(CircleShape)
                 .background(if (on) c.signal else lerp(hw.ledOff, c.signal, sounding)),
         )
-        Box(
+    }
+    // The LED, then the key under it.
+    Column(
+        modifier,
+        horizontalAlignment = if (ko != null) Alignment.Start else Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(ko?.gy ?: 6.dp),
+    ) {
+        if (ko != null) {
+            Box(Modifier.height(ko.line).padding(start = ko.u * 0.2f), contentAlignment = Alignment.CenterStart) { led() }
+        } else {
+            led()
+        }
+        val shape = ko?.keyShape ?: RoundedCornerShape(10.dp)
+        Column(
             Modifier
                 .fillMaxWidth()
-                // In the column beside the grid, the key takes its share of the height.
-                .then(if (fillHeight) Modifier.weight(1f) else Modifier)
-                .heightIn(min = keyMin)
+                .then(if (ko != null) Modifier.height(ko.h) else Modifier.heightIn(min = keyMin))
                 .then(markA)
-                .cap(face, edge, RoundedCornerShape(10.dp), capPress(on || pressed))
+                .cap(face, edge, shape, capPress(on || pressed))
                 .clickable(interactionSource = source, indication = null, role = Role.Tab) { onSelect(g) }
                 .semantics {
                     selected = on
                     contentDescription = MirrorText.GROUP + " " + MirrorText.groupKey(g)
-                },
-            contentAlignment = Alignment.Center,
+                }
+                .then(
+                    if (ko != null) Modifier.padding(start = ko.u * 0.1f, top = ko.u * 0.06f, end = ko.u * 0.1f, bottom = ko.u * 0.16f)
+                    else Modifier.padding(start = 8.dp, top = 5.dp, end = 8.dp, bottom = 7.dp),
+                ),
+            verticalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text(MirrorText.groupKey(g), style = ArcType.tab.copy(fontSize = 22.sp), color = ink)
+            Text(MirrorText.groupKey(g), style = ArcType.semi.copy(fontSize = letter, fontWeight = FontWeight.Medium, lineHeight = 1.em), color = ink)
+            GroupGlyph(g, ink, ko?.let { (it.u * 0.185f).coerceIn(10.dp, 18.dp) } ?: 12.dp)
         }
     }
 }
@@ -1008,39 +1161,54 @@ private fun Pad(
     inScroll: Boolean = !big,
     onEdit: (() -> Unit)? = null,
     haptics: Boolean = false,
+    /** The big grid's K.O. II geometry: the digit, padding and corners from its pad width. */
+    ko: KoGeom? = null,
 ) {
     val c = LocalArcColors.current
     val hw = LocalHwColors.current
+    val density = LocalDensity.current
     val g = light?.let { glow(it, now) } ?: 0f
     val ink = if (g > 0.3f) c.onSignal else hw.darkInk
     val wide = pad.label.length > 1
     val labelStyle = ArcType.semi.copy(
-        // ENTER on a small pad: 9sp and tighter, so it fits on one line.
+        // ENTER on a small pad: 9sp and tighter, so it fits on one line. The K.O. II's
+        // digit: plain, a little over a quarter of the pad's width.
         fontSize = when {
+            ko != null -> with(density) { (if (wide) (ko.u * 0.15f).coerceIn(10.dp, 15.dp) else (ko.u * 0.277f).coerceIn(15.dp, 34.dp)).toSp() }
             big -> if (wide) 15.sp else 28.sp
             else -> if (wide) 9.sp else 15.sp
         },
+        fontWeight = if (ko != null && !wide) FontWeight.Medium else FontWeight.SemiBold,
         lineHeight = 1.em,
         letterSpacing = if (!big && wide) 0.em else 0.04.em,
     )
-    val nameStyle = ArcType.tiny.copy(fontSize = if (big) 14.sp else 10.sp, lineHeight = 1.1.em)
+    val nameStyle = ArcType.tiny.copy(
+        fontSize = ko?.let { with(density) { (it.u * 0.13f).coerceIn(10.dp, 14.dp).toSp() } } ?: if (big) 14.sp else 10.sp,
+        lineHeight = 1.1.em,
+    )
     val nameColor = if (g > 0.3f) c.onSignal else hw.darkDim
-    val density = LocalDensity.current
     // The key's own label top left, where the K.O. II prints it, and the sample at the
     // bottom, stacked, so a long name shortens rather than running into the label.
-    // [room]: a big pad's height inside its padding. On a phone on its side the rows are
-    // short: there the name sits beside the label, in as many lines as fit.
+    // [room]: a big pad's height inside its padding.
     val content: @Composable BoxScope.(room: Dp?) -> Unit = { room ->
-        val label: @Composable () -> Unit = { Text(pad.label, style = labelStyle, color = ink, maxLines = 1, softWrap = false) }
-        if (room != null && room < BigPadRoom) {
-            val lines = with(density) { (room / (nameStyle.fontSize.toDp() * 1.1f)).toInt() }.coerceIn(1, 3)
-            Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        val label: @Composable () -> Unit = {
+            if (pad.label == ".") {
+                // The dot key's label is a dot, as the K.O. II prints it, where a digit's foot would be.
+                val em = with(density) { labelStyle.fontSize.toDp() }
+                Box(Modifier.padding(start = em * 0.1f, top = em * 0.5f).size(em * 0.24f).clip(CircleShape).background(ink))
+            } else {
+                Text(pad.label, style = labelStyle, color = ink, maxLines = 1, softWrap = false)
+            }
+        }
+        if (ko != null) {
+            // The K.O. II's pads keep their proportions, so even a small one is stacked: the
+            // name in the lines left under the digit (at least one; the cap clips the rest).
+            val left = room?.let { it - with(density) { labelStyle.fontSize.toDp() } } ?: 0.dp
+            val lines = with(density) { (left / (nameStyle.fontSize.toDp() * 1.1f)).toInt() }.coerceIn(1, 3)
+            Column(Modifier.fillMaxSize()) {
                 label()
-                if (name != null) {
-                    Text(name, style = nameStyle, color = nameColor, maxLines = lines, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                }
-                // Clear of EDIT's badge in the corner.
-                if (onEdit != null) Spacer(Modifier.width(if (big) 24.dp else 14.dp))
+                Spacer(Modifier.weight(1f))
+                if (name != null) Text(name, style = nameStyle, color = nameColor, maxLines = lines, overflow = TextOverflow.Ellipsis)
             }
         } else {
             Column(Modifier.fillMaxSize()) {
@@ -1052,12 +1220,13 @@ private fun Pad(
             }
         }
     }
-    val shape = RoundedCornerShape(if (big) 8.dp else 6.dp)
+    val shape = ko?.keyShape ?: RoundedCornerShape(if (big) 8.dp else 6.dp)
     val held = remember { mutableStateOf(false) }
     val box = modifier
-        // A dark cap, lit orange (its edge with it, and a light around it), down while held.
+        // A dark cap in the K.O. II's own colours (the Guide's, in both themes), lit orange
+        // (its edge with it, and a light around it), down while held.
         .litGlow(g, c.signal, shape)
-        .cap(lerp(hw.darkFace, c.signal, g), lerp(hw.darkEdge, c.signalEdge, g), shape, capPress(held.value))
+        .cap(lerp(hw.ko.darkFace, c.signal, g), lerp(hw.ko.darkEdge, c.signalEdge, g), shape, capPress(held.value))
         // Playing on the phone, or EDIT on: a signal-orange ring inside the pad.
         .then(if (playing || onEdit != null) Modifier.border(2.dp, c.signal, shape) else Modifier)
         .then(
@@ -1071,7 +1240,13 @@ private fun Pad(
             },
         )
         .semantics { contentDescription = "${pad.groupLetter} ${pad.label}" + (name?.let { ", $it" } ?: "") }
-        .padding(if (big) PaddingValues(10.dp) else PaddingValues(start = 6.dp, top = 5.dp, end = 7.dp, bottom = 5.dp))
+        .padding(
+            when {
+                ko != null -> PaddingValues(horizontal = ko.u * 0.1f, vertical = ko.u * 0.06f)
+                big -> PaddingValues(10.dp)
+                else -> PaddingValues(start = 6.dp, top = 5.dp, end = 7.dp, bottom = 5.dp)
+            },
+        )
     // EDIT's ⇄ badge in the top right corner, over the name if it must.
     val badge: @Composable BoxScope.() -> Unit = {
         if (onEdit != null) {
@@ -1099,9 +1274,6 @@ private fun Pad(
         }
     }
 }
-
-/** A big pad shorter than this inside its padding (about 80 dp in all) puts its name beside its number. */
-private val BigPadRoom = 60.dp
 
 /**
  * The last note sent outside the pads (the EP-133's own KEYS mode), in a small
