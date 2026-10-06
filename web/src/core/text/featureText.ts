@@ -436,6 +436,7 @@ export const FeatureText = {
   /** The progress sheet's note while they download (no cable involved). */
   FACTORY_KEEP_OPEN: "Keep arc open until they're saved.",
   NOT_FACTORY: "teenage engineering's file isn't an EP-133 factory pack.",
+  FACTORY_UNREACHABLE: "teenage engineering's site couldn't be reached. Check the connection and try again.",
 
   /** The download's progress: "12.3 MB of 27.4 MB". */
   factoryProgress(done: number, total: number): string {

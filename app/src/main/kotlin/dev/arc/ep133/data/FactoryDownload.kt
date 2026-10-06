@@ -73,6 +73,10 @@ object FactoryDownload {
             return read(c)
         } catch (e: IOException) {
             if (signal.isCancelled) throw CancelledError()
+            // Offline, no DNS, nothing answering: say so rather than the socket's words.
+            if (e is java.net.UnknownHostException || e is java.net.ConnectException || e is java.net.NoRouteToHostException) {
+                throw IOException(dev.arc.ep133.text.FeatureText.FACTORY_UNREACHABLE, e)
+            }
             throw e
         } finally {
             watcher.interrupt()

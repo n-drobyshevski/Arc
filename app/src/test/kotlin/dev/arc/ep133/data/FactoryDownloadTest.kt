@@ -76,6 +76,13 @@ class FactoryDownloadTest {
     }
 
     @Test
+    fun `nothing answering is said plainly`() {
+        val closed = java.net.ServerSocket(0).use { it.localPort }
+        val e = assertThrows<IOException> { FactoryDownload.text("/x", CancelSignal(), "http://127.0.0.1:$closed") }
+        assertEquals(dev.arc.ep133.text.FeatureText.FACTORY_UNREACHABLE, e.message)
+    }
+
+    @Test
     fun `a server error is an error, not a cancel`() {
         val e = assertThrows<IOException> { FactoryDownload.text("/missing", CancelSignal(), origin) }
         assertEquals("HTTP 404", e.message)
