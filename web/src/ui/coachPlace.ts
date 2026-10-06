@@ -52,7 +52,8 @@
 // - Two side tags on one edge (the GUIDE tab and Live's EDIT tab under it) are
 //   stacked apart, hook and all: the overlap is shared, the upper tag moving up
 //   (where that is clear) and the lower one down (more of it up when there is
-//   no room below), before either slides.
+//   no room below), before either slides. Where both can't fit (a phone on its
+//   side), the lower tab gets an ordinary tag beside it instead.
 // - A side tag stands on the edge its control hugs: the screen's edge, or the
 //   safe area's (the web's edge controls aren't padded for a notch, Android's
 //   are, so both are their control's own edge).
@@ -319,16 +320,37 @@ interface Spot {
   readonly tail: Point
 }
 
-/** Places every mark's tag (CoachOverlay's placement): the tags beside their controls, then the side tags, then the tall areas'. */
+/**
+ * Places every mark's tag (CoachOverlay's placement): the tags beside their
+ * controls, then the side tags, then the tall areas'. Two side tags on one edge
+ * with no room for both, hooks and all (GUIDE and Live's EDIT under it, on a
+ * phone on its side), would sit on each other: the lower one then gets an
+ * ordinary tag by its tab instead (a web delta).
+ */
 export function placeTags(marks: readonly CoachMarkInput[], viewport: Size, measure: MeasureTag, opts: PlaceOptions = {}): PlacedTag[] {
+  const sized = memoised(measure)
+  const asTag = new Set<string>()
+  for (;;) {
+    const placed = placeOnce(marks, viewport, sized, opts, asTag)
+    const lower = placed.find(
+      (p) => p.side !== 0 && placed.some((q) => q !== p && q.side === p.side && centerY(q.mark.bounds) < centerY(p.mark.bounds) && overlaps(roomOf(p), q.rect)),
+    )
+    if (!lower || asTag.has(lower.mark.id)) return placed
+    asTag.add(lower.mark.id)
+  }
+}
+
+/** One placement, the side controls in [asTag] given ordinary tags. */
+function placeOnce(marks: readonly CoachMarkInput[], viewport: Size, measure: MeasureTag, opts: PlaceOptions, asTag: ReadonlySet<string>): PlacedTag[] {
   const crowded = opts.crowded ?? false
   const safe = opts.safe ?? NO_INSETS
   const vw = viewport.width
   const vh = viewport.height
   const sized = memoised(measure)
   const list = placementOrder(marks, viewport)
-  const tall = (m: CoachMarkInput): boolean => isTall(m, viewport)
-  const edge = (m: CoachMarkInput): -1 | 0 | 1 => edgeOf(m, viewport, safe)
+  // A side tab given an ordinary tag is a control, however tall: its tag points at it from beside it.
+  const tall = (m: CoachMarkInput): boolean => !asTag.has(m.id) && isTall(m, viewport)
+  const edge = (m: CoachMarkInput): -1 | 0 | 1 => (asTag.has(m.id) ? 0 : edgeOf(m, viewport, safe))
   // When crowded, the controls a tag must leave in view: every marked one but the tall areas
   // (their tags sit in them), and the ones with no tag. Otherwise the tags keep their places as
   // they were. Arrows point just under or over [controls]; the edge tabs (their own tags hook

@@ -348,6 +348,24 @@ describe('side tags (narrow controls on an edge)', () => {
   })
 })
 
+describe('two side tabs on one edge with no room for both', () => {
+  it('gives the lower one an ordinary tag by its tab, none on another', () => {
+    // A phone on its side: GUIDE and EDIT on the left edge, 388 high, their words too long to stack.
+    const vp = { width: 867, height: 388 }
+    const guide = mark('edge.guide', at(0, 60, 22, 112), 'x'.repeat(16))
+    const edit = mark('edge.edit', at(0, 190, 22, 112), 'y'.repeat(20))
+    for (const crowded of [false, true]) {
+      const ps = placeTags([guide, edit], vp, measure, { crowded })
+      const g = ps.find((p) => p.mark.id === 'edge.guide')!
+      const e = ps.find((p) => p.mark.id === 'edge.edit')!
+      expect(g.side).toBe(-1)
+      expect(e.side).toBe(0)
+      expect(e.tip).not.toBeNull()
+      expect(overlaps(g.room!, e.rect)).toBe(false)
+    }
+  })
+})
+
 describe('crosses and arrowheads across', () => {
   it('finds an arrow running over a box, down or across; ending on its edge is not running over it', () => {
     const r = at(100, 100, 50, 30)

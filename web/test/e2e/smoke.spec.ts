@@ -224,50 +224,56 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
   })
 })
 
-test('a phone on its side: the display line and toasts in the top bar, the piano by keyboard, Back closes the key list', async ({ page }) => {
-  await page.setViewportSize({ width: 867, height: 388 })
-  await page.goto('/?demo#/live')
-  await expect(page.locator('[data-pad]')).toHaveCount(12)
-  const bar = page.getByRole('banner')
-  // The pads' one-line display rides in the top bar, and the page leaves it out.
-  await expect(bar.locator('.live-strip--bar')).toBeVisible()
-  await expect(page.locator('.live .live-strip')).toHaveCount(0)
-  await page.getByRole('button', { name: 'Pads. Tap for keys.' }).click()
-  const piano = page.getByRole('group', { name: /^Keyboard, / })
-  await expect(piano).toBeVisible()
-  await expect(bar.locator('.live-strip--bar')).toContainText(/./)
-  // One key in the Tab order (the root, DO), the arrows move along without scrolling, Enter plays.
-  await expect(piano.locator('[data-note][tabindex="0"]')).toHaveCount(1)
-  await piano.locator('[data-note][tabindex="0"]').focus()
-  const focused = (): Promise<string | null> => page.evaluate(() => document.activeElement?.getAttribute('data-note') ?? null)
-  const first = Number(await focused())
-  await page.keyboard.press('ArrowRight')
-  await expect.poll(focused).toBe(String(first + 1))
-  await page.keyboard.press('End')
-  await page.keyboard.press('Home')
-  await expect.poll(focused).toBe(String(await piano.locator('[data-note]').first().getAttribute('data-note')))
-  expect(await page.evaluate(() => document.scrollingElement?.scrollTop ?? 0)).toBe(0)
-  // No KEYS sound yet: the press says so once, in a toast at the top over the bar's middle.
-  await page.keyboard.press('Enter')
-  const toast = page.getByRole('status').filter({ hasText: 'Tap a pad in Pads first' })
-  await expect(toast).toBeVisible()
-  expect((await toast.boundingBox())!.y).toBeLessThan(56)
-  await page.keyboard.press('Enter')
-  await expect(toast).toHaveCount(1)
-  // The key word's list is a navigation layer: Back closes it.
-  await page.getByRole('button', { name: /^Key: DO\. Tap to change\./ }).click()
-  await expect(page.getByRole('listbox', { name: /^Key: / })).toBeVisible()
-  await page.goBack()
-  await expect(page.getByRole('listbox', { name: /^Key: / })).toHaveCount(0)
-  await expect(piano).toBeVisible()
-  // The guide overlay over the piano: every tag in view, none on another or over a control
-  // (the row of words under the top bar, the octave's − and +, the GUIDE and EDIT tabs).
-  const coach = page.getByRole('dialog', { name: "What's what" })
-  await bar.getByRole('button', { name: "What's what" }).click()
-  await expect(coach.locator('[data-coach-tag="live.octave"]')).toBeVisible()
-  await expect.poll(() => coachHides(page)).toEqual([])
-  await page.keyboard.press('Escape')
-  await expect(coach).toBeHidden()
+test.describe(() => {
+  // No service worker: its "ready to work offline" notice, the first time it installs, would
+  // take the message slot from the toast this test reads (a race with the key presses).
+  test.use({ serviceWorkers: 'block' })
+
+  test('a phone on its side: the display line and toasts in the top bar, the piano by keyboard, Back closes the key list', async ({ page }) => {
+    await page.setViewportSize({ width: 867, height: 388 })
+    await page.goto('/?demo#/live')
+    await expect(page.locator('[data-pad]')).toHaveCount(12)
+    const bar = page.getByRole('banner')
+    // The pads' one-line display rides in the top bar, and the page leaves it out.
+    await expect(bar.locator('.live-strip--bar')).toBeVisible()
+    await expect(page.locator('.live .live-strip')).toHaveCount(0)
+    await page.getByRole('button', { name: 'Pads. Tap for keys.' }).click()
+    const piano = page.getByRole('group', { name: /^Keyboard, / })
+    await expect(piano).toBeVisible()
+    await expect(bar.locator('.live-strip--bar')).toContainText(/./)
+    // One key in the Tab order (the root, DO), the arrows move along without scrolling, Enter plays.
+    await expect(piano.locator('[data-note][tabindex="0"]')).toHaveCount(1)
+    await piano.locator('[data-note][tabindex="0"]').focus()
+    const focused = (): Promise<string | null> => page.evaluate(() => document.activeElement?.getAttribute('data-note') ?? null)
+    const first = Number(await focused())
+    await page.keyboard.press('ArrowRight')
+    await expect.poll(focused).toBe(String(first + 1))
+    await page.keyboard.press('End')
+    await page.keyboard.press('Home')
+    await expect.poll(focused).toBe(String(await piano.locator('[data-note]').first().getAttribute('data-note')))
+    expect(await page.evaluate(() => document.scrollingElement?.scrollTop ?? 0)).toBe(0)
+    // No KEYS sound yet: the press says so once, in a toast at the top over the bar's middle.
+    await page.keyboard.press('Enter')
+    const toast = page.getByRole('status').filter({ hasText: 'Tap a pad in Pads first' })
+    await expect(toast).toBeVisible()
+    expect((await toast.boundingBox())!.y).toBeLessThan(56)
+    await page.keyboard.press('Enter')
+    await expect(toast).toHaveCount(1)
+    // The key word's list is a navigation layer: Back closes it.
+    await page.getByRole('button', { name: /^Key: DO\. Tap to change\./ }).click()
+    await expect(page.getByRole('listbox', { name: /^Key: / })).toBeVisible()
+    await page.goBack()
+    await expect(page.getByRole('listbox', { name: /^Key: / })).toHaveCount(0)
+    await expect(piano).toBeVisible()
+    // The guide overlay over the piano: every tag in view, none on another or over a control
+    // (the row of words under the top bar, the octave's − and +, the GUIDE and EDIT tabs).
+    const coach = page.getByRole('dialog', { name: "What's what" })
+    await bar.getByRole('button', { name: "What's what" }).click()
+    await expect(coach.locator('[data-coach-tag="live.octave"]')).toBeVisible()
+    await expect.poll(() => coachHides(page)).toEqual([])
+    await page.keyboard.press('Escape')
+    await expect(coach).toBeHidden()
+  })
 })
 
 const SIZES = [
