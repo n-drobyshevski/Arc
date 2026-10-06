@@ -2,8 +2,9 @@
  *
  * Web only, from 1024px wide (the desk, theme/desk.css): the guide is the
  * shell's panel docked beside the nav rail, itself the paper card (the
- * screen's --shell face); the list (up to 620) and the K.O. II sit side by
- * side under the header, the device as tall as the room allows. */
+ * screen's --shell face), the page column's full width; the list and the
+ * K.O. II sit side by side under the header, the device as tall as the room
+ * allows and the list in the rest. */
 
 /* Box(fillMaxSize, shell, TopCenter): fills its positioned parent. */
 .guide {
@@ -228,10 +229,8 @@
     padding: 0 24px 16px;
     container-type: size;
   }
-  .guide__list-col {
-    flex: 0 1 620px;
-    max-width: 620px;
-  }
+  /* The list takes the room the device leaves. */
+  .guide__list-col { flex: 1 1 0; }
 
   /* The tabs wrap instead of scrolling. */
   .guide-tabs {
@@ -240,12 +239,12 @@
   }
   .guide-tabs::after { display: none; }
 
-  /* The device as tall as the room allows (its own aspect), at most 46% of
-   * the room's width and the draft's 560 (the drawing's own size). */
+  /* The device as tall as the room allows (its own aspect), at most half the
+   * room's width (the drawing scales to any size). */
   .guide__device {
     flex: none;
     align-self: flex-start;
-    width: min(560px, 46cqw, calc((100cqh - 8px) * var(--ko-aspect)));
+    width: min(50cqw, calc((100cqh - 8px) * var(--ko-aspect)));
     padding-top: 4px;
   }
 }

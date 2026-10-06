@@ -77,12 +77,10 @@
   .shell__edge-tab { display: none; }
 
   /* Docked beside the rail, a paper panel lifted off the desk; it slides out
-   * from under the rail (the shell clips it). Wide enough for the guide's list
-   * and the K.O. II beside it (GuideScreen): the page column at most, 1160 at
-   * most, so on a wide desk the rest of the page stays in view. */
+   * from under the rail (the shell clips it). The whole page column, to its
+   * right edge: the guide's list and the K.O. II beside it (GuideScreen) take
+   * all the room there is. */
   .shell__guide {
-    right: auto;
-    width: min(1160px, 100%);
     border-radius: 0 var(--radius-plate) var(--radius-plate) 0;
     box-shadow: 4px 0 0 var(--desk-shade);
   }
