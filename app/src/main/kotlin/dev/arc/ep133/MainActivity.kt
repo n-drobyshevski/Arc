@@ -433,9 +433,12 @@ class MainActivity : ComponentActivity() {
         // The mirror (re)starts when it opens and whenever a device is (re)connected or
         // goes away; without one it shows the last read.
         val ready = state.device != null
-        // EDIT writes to the device: it ends when the device goes.
+        // EDIT writes to the device, or offline changes pads in arc only: it ends when the device
+        // comes or goes, so no pad sheet stays open on the other side (not on a recreation).
+        var editReady by rememberSaveable { mutableStateOf(ready) }
         LaunchedEffect(ready) {
-            if (!ready) {
+            if (ready != editReady) {
+                editReady = ready
                 liveEdit = false
                 padSheet = null
             }
@@ -658,6 +661,8 @@ class MainActivity : ComponentActivity() {
                             mirror = mirror,
                             nameOf = controller::mirrorName,
                             onGetFactory = if (dev.arc.ep133.features.FactorySounds.inLibrary(state.backups) == null) ({ controller.getFactorySounds() }) else null,
+                            offlinePads = state.offlinePads,
+                            onResetPads = controller::resetOfflinePads,
                             onPad = { pad, hold, unsure, pressedAt -> controller.playPad(pad, hold, unsure, pressedAt) },
                             onPadKept = { pad -> controller.keepPad(pad) },
                             onPadUp = controller::releasePad,
@@ -705,8 +710,8 @@ class MainActivity : ComponentActivity() {
                             edit = dev.arc.ep133.ui.screens.EditUi(
                                 on = liveEdit,
                                 onEdit = { on ->
-                                    // Only with the device there to write to.
-                                    if (on && !ready) controller.toast(dev.arc.ep133.text.MirrorText.EDIT_OFFLINE) else liveEdit = on
+                                    // With the device there to write to, or offline a last read (or the factory sounds) to change in arc.
+                                    if (on && !ready && mirror?.offline == null) controller.toast(dev.arc.ep133.text.MirrorText.EDIT_OFFLINE) else liveEdit = on
                                 },
                                 onPad = { pad -> controller.editTarget(pad)?.let { padSheet = pad to it } },
                             ),
@@ -744,27 +749,35 @@ class MainActivity : ComponentActivity() {
                     val lastPadSheet = remember { mutableStateOf(padSheet) }.apply { if (padSheet != null) value = padSheet }.value
                     fun closePadSheet() {
                         padSheet = null
-                        if (playing?.startsWith("device:") == true) controller.stopPlayback()
+                        if (playing?.startsWith("device:") == true || playing?.startsWith("factory:") == true) controller.stopPlayback()
                     }
                     ArcSheet(visible = padSheet != null, onDismiss = { closePadSheet() }) {
                         lastPadSheet?.let { (pad, target) ->
+                            // Offline: the last read's and the factory pack's lists, the pad changing in arc only.
+                            val offline = mirror?.offlineSounds?.takeIf { !ready }
                             PadSheetContent(
                                 pad = pad,
                                 target = target,
-                                sounds = mirror?.sounds.orEmpty(),
+                                sounds = if (offline != null) offline.device.orEmpty() else mirror?.sounds.orEmpty(),
                                 playing = playing,
-                                busy = state.busy,
-                                onPlay = { controller.playDeviceSound(it) },
+                                busy = state.busy && offline == null,
+                                onPlay = { slot, source -> controller.playLiveSound(slot, source) },
                                 onStop = controller::stopPlayback,
-                                onPick = { slot ->
+                                onPick = { slot, source ->
                                     closePadSheet()
-                                    controller.assignPad(pad, target, slot)
+                                    controller.assignPad(pad, target, slot, source)
                                 },
-                                onUpload = {
+                                onUpload = if (offline != null) null else ({
                                     closePadSheet()
                                     padUploadFor = pad to target
                                     padUploadLauncher.launch(arrayOf("audio/*", "application/octet-stream"))
-                                },
+                                }),
+                                factory = offline?.factory,
+                                unavailable = offline?.unavailable.orEmpty(),
+                                padSource = offline?.let { controller.mirrorLocal(pad)?.source ?: it.base } ?: dev.arc.ep133.features.SoundSource.DEVICE,
+                                offline = offline != null,
+                                readSlot = offline?.let { controller.mirrorReadSlot(target) },
+                                localName = offline?.let { controller.mirrorLocal(pad)?.name },
                             )
                         }
                     }
@@ -928,6 +941,11 @@ class MainActivity : ComponentActivity() {
                 ArcSheet(visible = task != null, onDismiss = null, grip = false) {
                     lastTask?.let { ProgressSheetContent(it, onCancel = controller::cancelTask) }
                 }
+            }
+
+            // The EP-133 connected with offline pad changes kept: write them or leave the device as it is.
+            state.offlinePrompt?.let { n ->
+                dev.arc.ep133.ui.screens.OfflinePadsDialog(n, onWrite = { controller.writeOfflinePads() }, onDiscard = controller::discardOfflinePads)
             }
 
             val toast = state.toast

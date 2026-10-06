@@ -58,6 +58,17 @@ class SoundMemory<K>(private val capBytes: Long) {
         map.remove(key)?.let { bytes -= it.bytes }
     }
 
+    /** Drops every sound whose key [match]es (the copies cleared). */
+    fun removeAll(match: (K) -> Boolean) {
+        val it = map.entries.iterator()
+        while (it.hasNext()) {
+            val e = it.next()
+            if (!match(e.key)) continue
+            bytes -= e.value.bytes
+            it.remove()
+        }
+    }
+
     fun clear() {
         map.clear()
         bytes = 0

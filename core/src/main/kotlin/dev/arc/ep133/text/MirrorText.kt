@@ -256,6 +256,34 @@ object MirrorText {
     fun undoFailed(reason: String) = "The old sound couldn't be put back: $reason"
     fun uploadFailed(reason: String) = "The sample couldn't be uploaded: $reason"
 
+    // ---------- Offline: the sounds panel and pad changes in arc only, put on the EP-133 when it connects ----------
+    /** The Device / Factory switch over the sound list. */
+    const val SOURCE = "Sounds from"
+    const val SOURCE_DEVICE = "Device"
+    const val SOURCE_FACTORY = "Factory"
+    /** A device sound arc has no copy or backup of, dimmed in the list. */
+    const val NEEDS_DEVICE = "Needs the EP-133"
+
+    /** "Pad A 8: kick, in arc until you connect", the toast after a pad got another sound offline. */
+    fun assignedOffline(pad: dev.arc.ep133.features.PhysicalPad, name: String) = "${assigned(pad, name)}, in arc until you connect"
+    const val ASSIGN_NOTE_OFFLINE = "Offline, the pad changes in arc only. When you connect, arc asks before putting it on the EP-133."
+
+    /** The Live tools row while offline changes are kept, with [RESET_PADS]. */
+    const val OFFLINE_PADS = "Offline pad changes"
+    fun offlinePadsNote(n: Int) =
+        "${Format.plural(n, "pad")} changed in arc only. When you connect, arc asks before putting ${if (n == 1) "it" else "them"} on the EP-133."
+    const val RESET_PADS = "Reset pads"
+    const val PADS_RESET = "Pads back to the EP-133's sounds."
+
+    /** The question when the EP-133 connects with offline changes kept: [WRITE] or [DISCARD]. */
+    fun putOffline(n: Int) = "Put ${Format.plural(n, "offline pad change")} on the EP-133?"
+    const val WRITE = "Write"
+    const val DISCARD = "Discard"
+    /** "2 pads put on the EP-133. 1 skipped: …", after [WRITE]. */
+    fun offlineWritten(written: Int, skipped: Int) = "${Format.plural(written, "pad")} put on the EP-133." +
+        if (skipped == 0) "" else " $skipped skipped: the EP-133 has another sound or project there now."
+    const val OFFLINE_DISCARDED = "Offline pad changes discarded."
+
     // ---------- REC: takes of what is played on the phone ----------
     const val REC = "Rec"
     const val TAKES = "Takes"

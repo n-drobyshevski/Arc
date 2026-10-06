@@ -297,6 +297,85 @@ class LiveMirrorTest {
         assertEquals(1, offline.snapshot(0).activeProject)
     }
 
+    // ---------- offline pad changes ----------
+
+    @Test
+    fun `offline changes name and fill their own pad, in their project only`() {
+        val m = mirror(learned = mapOf(9 to 1, 0 to 10))
+        // Pad '7' of A and of B both hold the device's slot 5 (snare).
+        m.setProject(1, listOf(PadGroup("a", mapOf(1 to 5, 10 to 1)), PadGroup("b", mapOf(1 to 5))))
+        val a7 = PhysicalPad(0, 9)
+        val b7 = PhysicalPad(1, 9)
+        val aDot = PhysicalPad(0, 0)
+        m.onMidi(MidiEvent.NoteOn(1, 45, 100, 0))
+        assertEquals("snare", m.snapshot(1).lastHit!!.name)
+        // The factory pack's 5 is another sound, put on A '7' only; the device's 20 on A '.'.
+        m.setLocal(
+            OfflinePads.EMPTY
+                .put(OfflinePad(1, 0, 1, 5, "vox", SoundSource.FACTORY))
+                .put(OfflinePad(1, 0, 10, 20, "bass", SoundSource.DEVICE)),
+        )
+        assertEquals(5, m.slotOf(a7))
+        assertEquals("vox", m.nameOf(a7))
+        assertEquals("vox", m.snapshot(2).lastHit!!.name) // the display follows
+        assertEquals("snare", m.nameOf(b7)) // the same device slot on another pad: unchanged
+        assertEquals(PadSample(5, "vox", true), m.sampleOf(a7))
+        assertEquals(PadSample(5, "snare", false), m.sampleOf(b7))
+        assertEquals(SoundSource.FACTORY, m.localOf(a7)!!.source)
+        assertNull(m.localOf(b7))
+        assertEquals("bass", m.nameOf(aDot))
+        assertEquals(PadTarget(1, 0, 10, 20), m.target(aDot))
+        assertEquals(1, m.slotAt(0, 10)) // the read's own slot
+        // What is saved stays the device read.
+        val saved = m.saved(0)
+        assertEquals(listOf(PadGroup("a", mapOf(1 to 5, 10 to 1)), PadGroup("b", mapOf(1 to 5))), saved.groups)
+        assertEquals(mapOf(1 to "kick", 5 to "snare", 20 to "bass"), saved.names)
+        // On another project the changes don't apply.
+        m.setProject(2, listOf(PadGroup("a", mapOf(1 to 20))))
+        assertNull(m.localOf(a7))
+        assertEquals("bass", m.nameOf(a7))
+        // Back, and cleared: the read's sounds again.
+        m.setProject(1, listOf(PadGroup("a", mapOf(1 to 5, 10 to 1)), PadGroup("b", mapOf(1 to 5))))
+        assertEquals("vox", m.nameOf(a7))
+        m.setLocal(OfflinePads.EMPTY)
+        assertEquals("snare", m.nameOf(a7))
+        assertEquals("snare", m.snapshot(3).lastHit!!.name)
+        assertEquals(PadTarget(1, 0, 10, 1), m.target(aDot))
+    }
+
+    @Test
+    fun `a pad changed before it was pressed shows its change`() {
+        // Nothing learned: no names, but a write would go to the top numbering ('7' = p01).
+        val m = mirror()
+        val a7 = PhysicalPad(0, 9)
+        assertNull(m.nameOf(a7))
+        m.setLocal(OfflinePads.EMPTY.put(OfflinePad(1, 0, 1, 343, "kick", SoundSource.FACTORY)))
+        assertEquals("kick", m.nameOf(a7))
+        assertEquals(PadTarget(1, 0, 1, 343), m.target(a7))
+        assertNull(m.nameOf(PhysicalPad(1, 9))) // group B's '7' has no change
+        assertNull(m.nameOf(PhysicalPad(0, 0)))
+    }
+
+    @Test
+    fun `pad samples list each sound once, the changes over the read`() {
+        val m = mirror()
+        assertEquals(listOf(PadSample(1, "kick", false), PadSample(5, "snare", false), PadSample(20, "bass", false)), m.padSamples())
+        m.setProject(1, listOf(PadGroup("a", mapOf(1 to 5, 10 to 1)), PadGroup("b", mapOf(1 to 5, 2 to 99))))
+        // 99 has no name: nothing to load.
+        assertEquals(listOf(PadSample(1, "kick", false), PadSample(5, "snare", false)), m.padSamples())
+        m.setLocal(
+            OfflinePads.EMPTY
+                .put(OfflinePad(1, 0, 1, 5, "vox", SoundSource.FACTORY))
+                .put(OfflinePad(1, 0, 10, 20, "bass", SoundSource.DEVICE))
+                .put(OfflinePad(1, 2, 3, 30, "hat", SoundSource.DEVICE)) // a pad the read has no record of
+                .put(OfflinePad(2, 0, 1, 40, "other", SoundSource.DEVICE)), // another project's
+        )
+        assertEquals(
+            listOf(PadSample(5, "snare", false), PadSample(5, "vox", true), PadSample(20, "bass", false), PadSample(30, "hat", false)),
+            m.padSamples(),
+        )
+    }
+
     @Test
     fun `an empty pad survives the round trip, and junk reads as nothing`() {
         val s = LiveSnapshot(5, null, listOf(PadGroup("c", mapOf(3 to null))), emptyMap())

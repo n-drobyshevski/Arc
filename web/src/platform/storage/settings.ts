@@ -17,7 +17,8 @@
 //   "arc.mirror.learned", "arc.mirror.order" and "arc.mirror.keysPad"; the
 //   activity's old coach_seen becomes "arc.coachSeen" (read once, as Android
 //   reads it, to carry over into guideSeen). Live's last read (Android's
-//   files/live-last.json) is "arc.live". asked_notifications has no web
+//   files/live-last.json) is "arc.live", its pad changes made offline
+//   (files/live-pads.json) "arc.live.pads". asked_notifications has no web
 //   equivalent and is dropped.
 // - Reads are synchronous (before the first render, so the theme never
 //   flashes). The Storage is injectable; tests (and ?demo) use [memoryStorage].
@@ -111,6 +112,7 @@ export const ORDER_KEY = 'arc.mirror.order'
 export const KEYS_PAD_KEY = 'arc.mirror.keysPad'
 export const COACH_KEY = 'arc.coachSeen'
 export const LIVE_KEY = 'arc.live'
+export const LIVE_PADS_KEY = 'arc.live.pads'
 
 /** The DOM Storage calls used here. */
 export interface KeyValueStorage {
@@ -627,6 +629,33 @@ export class LastReadPrefs {
       this.storage.setItem(LIVE_KEY, json)
     } catch {
       // Kept in memory for this session (the controller holds it).
+    }
+  }
+}
+
+/**
+ * Live's pad changes made offline (the OfflinePads JSON), kept until the
+ * EP-133 connects and they are written or discarded, or until Reset pads
+ * (Android's files/live-pads.json). Not copied to the library folder.
+ */
+export class OfflinePadsPrefs {
+  constructor(private readonly storage: KeyValueStorage = browserStorage()) {}
+
+  load(): string | null {
+    try {
+      return this.storage.getItem(LIVE_PADS_KEY)
+    } catch {
+      return null
+    }
+  }
+
+  /** Null removes them. */
+  save(json: string | null): void {
+    try {
+      if (json === null) this.storage.removeItem(LIVE_PADS_KEY)
+      else this.storage.setItem(LIVE_PADS_KEY, json)
+    } catch {
+      // Kept in memory for this session (the controller holds them).
     }
   }
 }

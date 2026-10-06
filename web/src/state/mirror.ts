@@ -22,6 +22,10 @@
 //   mirror calls them at the same points ArcController does.
 // - [openOffline] has a generation token: an offline open still loading the
 //   last read gives way to any later open or stop.
+// - Offline pad changes (an addition): [openOffline] puts them over the last
+//   read (LiveMirror.setLocal) with the sounds offered offline, [refreshOffline]
+//   follows the library, [localChanged] shows a change; a good read tells the
+//   host ([MirrorHost.deviceRead]), which asks whether to write them.
 
 import { getMetadata, isJsonObject, type JsonValue } from '../core/protocol/fs'
 import { PROJECTS_NODE, projectFromNode, type SoundEntry } from '../core/protocol/device'
@@ -30,6 +34,7 @@ import { contents, projectLayout } from '../core/features/deviceBrowser'
 import { LearnedLinks } from '../core/features/learnedLinks'
 import { CLOCK_TIMEOUT_MS, FADE_MS, LiveMirror, type Hit, type MirrorState, type PadLight, type PadTarget } from '../core/features/liveMirror'
 import type { PhysicalPad } from '../core/features/padNotes'
+import { SoundSource } from '../core/features/offlinePads'
 import { parse as parsePadPush, type PadOrder } from '../core/features/padPush'
 import type { PadGroup } from '../core/features/projectPads'
 import { MirrorText } from '../core/text/mirrorText'
@@ -65,6 +70,8 @@ export interface MirrorHost {
   live: LiveSounds
   /** "5 Oct, 14:02" for the offline line. */
   fmtDateTime(ms: number): string
+  /** The device's sounds and pads were read: offline pad changes kept may be written now. */
+  deviceRead(): void
 }
 
 /** Kotlin String.toDoubleOrNull (Java's float syntax, no surrounding blanks). */
@@ -170,6 +177,11 @@ export class MirrorController {
   /** The mirror Live shows, connected or offline. */
   get current(): LiveMirror | null {
     return this.mirror
+  }
+
+  /** The mirror showing the last read without the device, if that is what Live shows. */
+  get offline(): LiveMirror | null {
+    return this.mirrorSession === null ? this.mirror : null
   }
 
   /** Sets mirror.state to the snapshot, unless it equals the one shown. */
@@ -288,6 +300,7 @@ export class MirrorController {
     }
     if (this.mirror === m) {
       if (ok === true) {
+        host.deviceRead()
         host.live.saveLastRead(m)
         void host.live.preloadPads(m)
         void host.live.copyPadSounds(m, s)
@@ -313,17 +326,53 @@ export class MirrorController {
       if (snap === null) host.store.update((st) => ({ ...st, mirror: this.notConnected() }))
       return
     }
+    // The pad changes made offline go over it, and the sounds offered without the device beside it.
+    const pads = await host.live.loadOfflinePads()
+    const offlineSounds = await host.live.offlineSounds(lastRead !== null ? SoundSource.DEVICE : SoundSource.FACTORY, lastRead)
+    if (gen !== this.openGen) return
+    if (host.session() !== null && host.store.get().device !== null) return
     // Nothing can be learned without the device: pads unlearned are numbered from the top, and nothing is saved.
     const m = new LiveMirror(LearnedLinks.offline(host.prefs.loadLearned()), host.prefs.savedPadOrder(), () => {})
     m.load(snap)
+    m.setLocal(pads)
     this.mirror = m
     this.mirrorSession = null
     void host.live.preloadPads(m)
     const offline = lastRead !== null ? MirrorText.lastSeen(host.fmtDateTime(lastRead.savedAt)) : MirrorText.FACTORY
     host.store.update((st) => ({
       ...st,
-      mirror: { state: m.snapshot(host.perfNow()), loading: false, error: null, offline },
+      mirror: { state: m.snapshot(host.perfNow()), loading: false, error: null, offline, offlineSounds },
     }))
+  }
+
+  /**
+   * The library changed while Live shows the last read without the device:
+   * the sounds it offers follow (a factory pack saved or deleted, a backup
+   * that has a sound arc couldn't play).
+   */
+  async refreshOffline(): Promise<void> {
+    const { host } = this
+    const m = this.offline
+    if (m === null) return
+    const gen = this.openGen
+    const lastRead = await host.live.loadLastRead()
+    const base = host.store.get().mirror?.offlineSounds?.base ?? (lastRead !== null ? SoundSource.DEVICE : SoundSource.FACTORY)
+    const offlineSounds = await host.live.offlineSounds(base, base === SoundSource.DEVICE ? lastRead : null)
+    if (gen !== this.openGen || this.mirror !== m) return
+    host.store.update((st) => (st.mirror ? { ...st, mirror: { ...st.mirror, offlineSounds } } : st))
+  }
+
+  /**
+   * An offline pad change was made or dropped (already set on the mirror):
+   * Live shows it, and the pads' sounds are loaded again.
+   */
+  localChanged(): void {
+    const m = this.mirror
+    if (!m) return
+    void this.host.live.preloadPads(m)
+    this.publish(m)
+    // The names are read through mirrorName: a new MirrorUi re-renders Live even when the state didn't change.
+    this.host.store.update((cur) => (cur.mirror ? { ...cur, mirror: { ...cur.mirror } } : cur))
   }
 
   private loadProject(m: LiveMirror, project: number): void {

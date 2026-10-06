@@ -47,6 +47,18 @@ class SoundMemoryTest {
     }
 
     @Test
+    fun `removing by key drops only the matching sounds`() {
+        val m = SoundMemory<String>(capBytes = 1000)
+        val take = sound(100)
+        m.put("pad:device:5:kick", sound(200))
+        m.put("take:one", take)
+        m.put("pad:factory:343:bass", sound(200))
+        m.removeAll { it.startsWith("pad:") }
+        assertEquals(listOf(take), m.sounds())
+        assertEquals(200, m.bytes)
+    }
+
+    @Test
     fun `replacing, removing and clearing keep the count right`() {
         val m = SoundMemory<String>(capBytes = 10_000)
         m.put("a", sound(100))

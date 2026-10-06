@@ -104,7 +104,9 @@
 // EDIT (giving a pad another sound, Kotlin's EditEdgeTab and pad sheet): with
 // it on, the display line says so, the pads get a signal outline and a ⇄
 // badge, and a tap opens the pad sheet ([EditUi.onPad]); a long press still
-// plays the pad while held.
+// plays the pad while held. Offline (an addition) it changes the pads in arc
+// only, from the last read's sounds or the factory pack's ([EditUi.offline]);
+// the tools then count those changes, with Reset pads ([offlinePads]).
 import { Fragment, h, type ButtonHTMLAttributes, type Component, type ComponentChildren, type FunctionComponent, type JSX, type TargetedDragEvent } from 'preact'
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { computed, signal, type ReadonlySignal } from '@preact/signals'
@@ -113,6 +115,7 @@ import type { MirrorState, PadLight } from '../../core/features/liveMirror'
 import { KeysView, type NoteRange } from '../../core/features/piano'
 import { NoteTouches, type NoteEvent } from '../../core/features/noteTouches'
 import type { SoundEntry } from '../../core/protocol/device'
+import { SoundSource } from '../../core/features/offlinePads'
 import { PadOrder } from '../../core/features/padPush'
 import { ROWS, noteName, padKey, physicalPad, type PhysicalPad } from '../../core/features/padNotes'
 import { CoachText } from '../../core/text/coachText'
@@ -120,7 +123,7 @@ import { CLOSE as GUIDE_CLOSE, LED_ROWS } from '../../core/text/guideText'
 import { MirrorText } from '../../core/text/mirrorText'
 import { FeatureText } from '../../core/text/featureText'
 import { WebText } from '../../core/text/webText'
-import { emptyMirrorState, type MirrorUi } from '../../state/types'
+import { emptyMirrorState, type MirrorUi, type OfflineSounds } from '../../state/types'
 import { Caption } from '../components/Caption'
 import { COACH_YELLOW, COACH_YELLOW_INK } from '../components/Coach'
 import { DisplayPanel } from '../components/DisplayPanel'
@@ -152,7 +155,7 @@ import { computerKeys } from '../keyPrefs'
 import { DEFAULT_KEYS, keysLit, keysNoteText, octaves, upperOctave, type KeysPicker, type KeysShown } from '../live/keys'
 import { PianoKeyboard } from '../live/PianoKeyboard'
 import { PressTracker, rawMovesSupported, ticking, type PressTarget } from '../live/press'
-import { SLOT_MIME, SoundPicker } from '../live/SoundPicker'
+import { SLOT_MIME, SOURCE_MIME, SoundPicker } from '../live/SoundPicker'
 import { dragMayHaveAudio, isAudioFile } from '../../platform/files/pick'
 import { tick } from '../../platform/haptics'
 import { PickWord, WordButton } from '../live/Words'
@@ -193,19 +196,21 @@ export interface KeysActions {
 /** Live's EDIT: giving a pad another sound (an addition; the controller's assignPad). */
 export interface EditUi {
   readonly on: boolean
-  /** The EP-133 is connected (the pads can be written; else the Sounds tab says to connect). */
+  /** The EP-133 is connected (the pads can be written; else the Sounds tab says to connect, or works offline). */
   readonly connected: boolean
+  /** Not connected, showing the last read: the sounds to put on the pads in arc only; else null. */
+  readonly offline: OfflineSounds | null
   onChange: (on: boolean) => void
   /** Opens [pad]'s pad sheet (a tap in EDIT, a right-click on the desk). */
   onPad: (pad: PhysicalPad) => void
-  /** The desk: a device sound dragged from the Sounds tab onto [pad]. */
-  onDropSlot: (pad: PhysicalPad, slot: number) => void
+  /** The desk: a sound of [source]'s list dragged from the Sounds tab onto [pad]. */
+  onDropSlot: (pad: PhysicalPad, slot: number, source: SoundSource) => void
   /** The desk: a WAV dropped on [pad] (uploaded to a free slot, then put on it). */
   onDropFile: (pad: PhysicalPad, file: File) => void
   /** The Sounds tab: the device's sounds, their preview and the drop zone's files (a plain upload). */
   readonly sounds: readonly SoundEntry[]
   readonly playing: string | null
-  onPlay: (slot: number) => void
+  onPlay: (slot: number, source: SoundSource) => void
   onStop: () => void
   onUpload: (files: File[]) => void
   /** The sound on [pad] now by its pad record, when the mirror can't name it yet (for "old → new"). */
@@ -235,6 +240,8 @@ export interface MirrorScreenProps {
   onStop?: () => void
   /** Not connected: download the factory sounds (FactorySounds); null when they can't be, or are in the library. */
   onGetFactory?: (() => void) | null
+  /** The pad changes made offline, counted in the tools with Reset pads; null (or a count of 0) when none. */
+  offlinePads?: { readonly count: number; readonly onReset: () => void } | null
   /**
    * Pressing a pad plays its sample on the phone until [onPadUp] (hold is
    * false for a screen reader's Play, which plays to the end); null leaves
@@ -561,7 +568,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
               if (!ed) return
               const slot = Number(e.dataTransfer?.getData(SLOT_MIME) ?? '')
               if (Number.isInteger(slot) && slot > 0) {
-                ed.onDropSlot(pad, slot)
+                ed.onDropSlot(pad, slot, SoundSource.of(e.dataTransfer?.getData(SOURCE_MIME) ?? '') ?? SoundSource.DEVICE)
                 return
               }
               const file = e.dataTransfer?.files?.[0]
@@ -583,14 +590,27 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
       />
     </RowCard>
   )
+  // Pads changed offline in arc only: how many, and Reset pads.
+  const offlinePads = props.offlinePads ?? null
+  const offlinePadsRow = offlinePads !== null && offlinePads.count > 0 && (
+    <RowCard>
+      <SettingRow
+        title={MirrorText.OFFLINE_PADS}
+        note={MirrorText.offlinePadsNote(offlinePads.count)}
+        control={(ids) => <RowAction text={MirrorText.RESET_PADS} describedBy={ids.titleId} onClick={offlinePads.onReset} />}
+      />
+    </RowCard>
+  )
   const tools = keys.on ? (
     <>
       {factoryRow}
+      {offlinePadsRow}
       <KeysPanel keys={keys} actions={actions} piano={pianoRange !== null} hint={!plan.switchShown} keyboard={keyHints} />
     </>
   ) : (
     <>
       {factoryRow}
+      {offlinePadsRow}
       <RowCard>
         <SettingRow
           title={MirrorText.VIEW}
@@ -1059,19 +1079,42 @@ function ToolsTabs(props: { tab: 'tools' | 'sounds'; onTab: (tab: 'tools' | 'sou
 
 /**
  * The desk's Sounds tab: the device's sounds to drag onto a pad, the hint,
- * and a drop zone for WAV files (uploaded to free slots).
+ * and a drop zone for WAV files (uploaded to free slots). Offline, the last
+ * read's sounds and the factory pack's, to change the pads in arc only (no
+ * uploads without the EP-133).
  */
 function SoundsPanel(props: { edit: EditUi; onDrag: (snd: SoundEntry | null) => void }): JSX.Element {
   const { edit } = props
   const [over, setOver] = useState(false)
   const files = (e: TargetedDragEvent<HTMLElement>): boolean => dragMayHaveAudio(e.dataTransfer)
-  if (!edit.connected) return <p class="t-small live-sounds__hint">{MirrorText.EDIT_OFFLINE}</p>
+  const off = edit.connected ? null : edit.offline
+  if (!edit.connected && off === null) return <p class="t-small live-sounds__hint">{MirrorText.EDIT_OFFLINE}</p>
+  if (off !== null) {
+    return (
+      <div class="live-sounds">
+        <SoundPicker
+          sounds={off.device ?? []}
+          factory={off.factory}
+          unavailable={off.unavailable}
+          padSource={off.base}
+          offline
+          playing={edit.playing}
+          onPlay={edit.onPlay}
+          onStop={edit.onStop}
+          onDrag={props.onDrag}
+          findLabel={FeatureText.FIND_HINT}
+          scroll
+        />
+        <p class="t-small live-sounds__hint">{WebText.DRAG_HINT_OFFLINE}</p>
+      </div>
+    )
+  }
   return (
     <div class="live-sounds">
       <SoundPicker
         sounds={edit.sounds}
         playing={edit.playing}
-        onPlay={edit.onPlay}
+        onPlay={(slot) => edit.onPlay(slot, SoundSource.DEVICE)}
         onStop={edit.onStop}
         onDrag={props.onDrag}
         findLabel={FeatureText.FIND_HINT}

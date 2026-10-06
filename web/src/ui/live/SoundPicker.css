@@ -10,6 +10,16 @@
 }
 .snd--scroll { min-height: 0; }
 
+/* Offline, both lists offered: "Sounds from" and the Device / Factory switch. */
+.snd__source {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-10);
+}
+.snd__source-label { color: var(--graphite); }
+
 /* The find field: a pale box with the search mark, a rule along its bottom. */
 .snd__find {
   flex: none;
@@ -202,3 +212,7 @@ button.snd__pick:focus-visible { outline: var(--focus-ring); outline-offset: -3p
   text-transform: uppercase;
 }
 .snd__play.play-key { width: 32px; height: 32px; }
+/* A device sound arc can't play without the EP-133: dimmed, its words saying so. */
+.snd__row.is-off .snd__slot,
+.snd__row.is-off .snd__name { opacity: var(--icon-disabled); }
+.snd__row.is-off button.snd__pick:disabled { opacity: 1; }

@@ -114,5 +114,12 @@ class FeatureTextTest {
         assertEquals("empty \u2192 vox chop", MirrorText.dropPreview(null, "vox chop"))
         assertEquals("KEYS \u00B7 FA5", MirrorText.lastNote(77, NoteNames.SOLFEGE).uppercase())
         assertEquals("Keys on a piano", MirrorText.keysView(true))
+        assertEquals("Pad A 8: kick, in arc until you connect", MirrorText.assignedOffline(a8, "kick"))
+        assertEquals("1 pad changed in arc only. When you connect, arc asks before putting it on the EP-133.", MirrorText.offlinePadsNote(1))
+        assertEquals("3 pads changed in arc only. When you connect, arc asks before putting them on the EP-133.", MirrorText.offlinePadsNote(3))
+        assertEquals("Put 1 offline pad change on the EP-133?", MirrorText.putOffline(1))
+        assertEquals("Put 2 offline pad changes on the EP-133?", MirrorText.putOffline(2))
+        assertEquals("2 pads put on the EP-133.", MirrorText.offlineWritten(2, 0))
+        assertEquals("1 pad put on the EP-133. 1 skipped: the EP-133 has another sound or project there now.", MirrorText.offlineWritten(1, 1))
     }
 }

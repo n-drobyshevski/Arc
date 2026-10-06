@@ -12,7 +12,7 @@ import { readFile } from '../../src/platform/files/pick'
 import { openMidi, probePermission, requestMidiAccess, watchMidi, webMidiSupported } from '../../src/platform/midi/webmidi'
 import { nullChannel } from '../../src/platform/storage/channel'
 import { Library } from '../../src/platform/storage/library'
-import { CoachPrefs, LastReadPrefs, MirrorPrefs, SettingsStore, memoryStorage, type KeyValueStorage } from '../../src/platform/storage/settings'
+import { CoachPrefs, LastReadPrefs, OfflinePadsPrefs, MirrorPrefs, SettingsStore, memoryStorage, type KeyValueStorage } from '../../src/platform/storage/settings'
 import { createController, type ArcController } from '../../src/state/controller'
 import type { Deps } from '../../src/state/deps'
 import { activeProject, sameBpm, sameMirrorState } from '../../src/state/mirror'
@@ -72,6 +72,7 @@ async function harness(storage: KeyValueStorage = memoryStorage()): Promise<Harn
     liveAudio: fakeLiveAudio(),
     padSounds,
     lastRead: new LastReadPrefs(storage),
+    offlinePads: new OfflinePadsPrefs(storage),
     wakeLock: { set: async () => {} },
     trafficLog: new TrafficLog(),
     now: () => Date.now(),

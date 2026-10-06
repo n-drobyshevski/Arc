@@ -9,6 +9,7 @@ import type { Hit } from '../features/liveMirror'
 import { noteName, type PhysicalPad } from '../features/padNotes'
 import { KeyMark } from '../features/piano'
 import { FeatureText } from './featureText'
+import { plural } from './format'
 
 export const MirrorText = {
   LIVE: 'Live',
@@ -358,4 +359,41 @@ export const MirrorText = {
   uploadFailed(reason: string): string {
     return `The sample couldn't be uploaded: ${reason}`
   },
+
+  // ---------- Offline: the sounds panel and pad changes in arc only, put on the EP-133 when it connects ----------
+  /** The Device / Factory switch over the sound list. */
+  SOURCE: 'Sounds from',
+  SOURCE_DEVICE: 'Device',
+  SOURCE_FACTORY: 'Factory',
+  /** A device sound arc has no copy or backup of, dimmed in the list. */
+  NEEDS_DEVICE: 'Needs the EP-133',
+
+  /** "Pad A 8: kick, in arc until you connect", the toast after a pad got another sound offline. */
+  assignedOffline(pad: PhysicalPad, name: string): string {
+    return `${MirrorText.assigned(pad, name)}, in arc until you connect`
+  },
+  ASSIGN_NOTE_OFFLINE: 'Offline, the pad changes in arc only. When you connect, arc asks before putting it on the EP-133.',
+
+  /** The Live tools row while offline changes are kept, with [RESET_PADS]. */
+  OFFLINE_PADS: 'Offline pad changes',
+  offlinePadsNote(n: number): string {
+    return `${plural(n, 'pad')} changed in arc only. When you connect, arc asks before putting ${n === 1 ? 'it' : 'them'} on the EP-133.`
+  },
+  RESET_PADS: 'Reset pads',
+  PADS_RESET: "Pads back to the EP-133's sounds.",
+
+  /** The question when the EP-133 connects with offline changes kept: [WRITE] or [DISCARD]. */
+  putOffline(n: number): string {
+    return `Put ${plural(n, 'offline pad change')} on the EP-133?`
+  },
+  WRITE: 'Write',
+  DISCARD: 'Discard',
+  /** "2 pads put on the EP-133. 1 skipped: …", after [WRITE]. */
+  offlineWritten(written: number, skipped: number): string {
+    return (
+      `${plural(written, 'pad')} put on the EP-133.` +
+      (skipped === 0 ? '' : ` ${skipped} skipped: the EP-133 has another sound or project there now.`)
+    )
+  },
+  OFFLINE_DISCARDED: 'Offline pad changes discarded.',
 } as const

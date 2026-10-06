@@ -27,6 +27,13 @@
 // shell's second edge tab (on the desk, MirrorScreen hangs it on the K.O. II
 // panel), its pad sheet 'edit:<group>:<offset>' (ui/sheets/PadEditSheet), and
 // a new sample goes through the Device tab's upload sheet, mounted on Live too.
+// EDIT's sheet closes when the EP-133 comes or goes, and EDIT ends when it goes (Root's
+// LaunchedEffect(ready)). Web delta: EDIT stays on when the EP-133 comes, since on the web
+// it can be switched on before the first read (the keyboard's E as the page opens), and
+// waits for that read rather than being turned off by it.
+// Offline the pads change in arc only; once the EP-133 is read again a dialog
+// asks whether to write those changes (state.offlinePrompt: Write, or Discard
+// with Esc, the scrim or its other key; not a navigation layer).
 //
 // On a phone on its side (ui/live/window.ts liveInBar; never on the desk),
 // Live's display line rides in the top bar's middle (LiveBar, MirrorScreen's
@@ -58,6 +65,7 @@ import {
   type NavView,
 } from './ui/nav'
 import { CoachHost, useCoachFirstRun } from './ui/components/Coach'
+import { Dialog } from './ui/components/Dialog'
 import { EditEdgeTab } from './ui/components/EditEdgeTab'
 import { Key } from './ui/components/Key'
 import { NavRail } from './ui/components/NavRail'
@@ -79,7 +87,7 @@ import { liveInBar } from './ui/live/window'
 import type { NoteRange } from './core/features/piano'
 import { SearchScreen } from './ui/screens/SearchScreen'
 import { SettingsScreen } from './ui/screens/SettingsScreen'
-import { EDIT_PREFIX, PadEditSheet } from './ui/sheets/PadEditSheet'
+import { EDIT_PREFIX, editPadOf, PadEditSheet } from './ui/sheets/PadEditSheet'
 import { BackupPadsSheet, DevicePadsSheet } from './ui/sheets/PadsSheet'
 import { FontLicenceSheet } from './ui/sheets/FontLicenceSheet'
 import { DeviceUploadSheet } from './ui/sheets/UploadSheet'
@@ -162,6 +170,17 @@ function Root(): JSX.Element {
   useEffect(() => {
     if (!canEdit && editPads) setEditPads(false)
   }, [canEdit, editPads])
+  // EDIT writes to the device, or offline changes pads in arc only: its pad sheet closes when the
+  // device comes or goes, so none stays open on the other side, and EDIT ends when it goes.
+  const ready = state.device !== null
+  const editReady = useRef(ready)
+  useEffect(() => {
+    if (editReady.current === ready) return
+    editReady.current = ready
+    if (!ready) setEditPads(false)
+    const pad = editPadOf(v.sheets)
+    if (pad !== null) nav.close(sheetLayer(`${EDIT_PREFIX}${pad.group}:${pad.offset}`))
+  }, [ready])
   // On a phone on its side, Live's display line rides in the top bar; the piano's
   // notes (while it shows) let it name a device note past them.
   const win = useWindowSize()
@@ -371,6 +390,16 @@ function Root(): JSX.Element {
       {/* The Keyboard keys sheet 'keys' (?), over whatever screen it was opened on. */}
       <KeyboardKeysSheet open={v.sheets.includes(KEYS_SHEET)} onDismiss={() => nav.close(sheetLayer(KEYS_SHEET))} />
       <ProgressSlot task={progressShown ? state.task : null} onCancel={() => c.cancelTask()} />
+      {/* The EP-133 connected with offline pad changes kept: write them, or discard them. */}
+      <Dialog
+        open={state.offlinePrompt !== null}
+        text={MirrorText.putOffline(state.offlinePrompt ?? 0)}
+        confirm={MirrorText.WRITE}
+        cancel={MirrorText.DISCARD}
+        confirmColor="var(--navy)"
+        onConfirm={() => void c.writeOfflinePads()}
+        onDismiss={() => c.discardOfflinePads()}
+      />
       <ToastLayer raise={state.toast?.id ?? null}>
         <ControllerToast controller={c} />
         <UpdatePrompt />
@@ -445,6 +474,7 @@ function TabScreen(props: {
         <MirrorScreen
           mirror={liveMirror(c)}
           onGetFactory={c.canGetFactory && FactorySounds.inLibrary(state.backups) === null ? () => void c.getFactorySounds() : null}
+          offlinePads={state.offlinePads > 0 ? { count: state.offlinePads, onReset: () => c.resetOfflinePads() } : null}
           onStop={() => c.stopPlayback()}
           nameOf={(pad) => c.mirrorName(pad)}
           oneGroup={settings.liveOneGroup}
@@ -479,15 +509,16 @@ function TabScreen(props: {
           edit={{
             on: props.editPads,
             connected: state.device !== null,
+            offline: state.device === null ? (state.mirror?.offlineSounds ?? null) : null,
             onChange: props.onEditPads,
             onPad: (pad) => {
               if (c.editTarget(pad) !== null) nav.open(sheetLayer(`${EDIT_PREFIX}${pad.group}:${pad.offset}`))
             },
-            onDropSlot: (pad, slot) => void c.assignPad(pad, slot),
+            onDropSlot: (pad, slot, source) => void c.assignPad(pad, slot, source),
             onDropFile: (pad, file) => void c.uploadForPad(pad, [file]),
             sounds: c.liveSounds(),
             playing: c.playing.value,
-            onPlay: (slot) => void c.playDeviceSound(slot),
+            onPlay: (slot, source) => void c.playLiveSound(slot, source),
             onStop: () => c.stopPlayback(),
             onUpload: (files) => void c.dropSamples(files),
             nameNow: (pad) => c.padSoundName(pad),

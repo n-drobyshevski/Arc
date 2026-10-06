@@ -21,8 +21,9 @@ ui/
                     (KEYS on a wide window; its keyboard access: tabStop, stepNote),
                     window.ts (landscape / short, the display line in the top bar),
                     SoundPicker.tsx (EDIT's device sounds: the pad sheet, the desk's
-                    Sounds tab; its RangeKey is the Device tab's too, as Kotlin's in
-                    PadSheet.kt); the .ts ones are tested
+                    Sounds tab; offline a Device / Factory switch and dimmed rows; its
+                    RangeKey is the Device tab's too, as Kotlin's in PadSheet.kt); the
+                    .ts ones are tested
 ```
 
 File header: `// Port of app/src/main/kotlin/dev/arc/ep133/ui/<path>.kt`.

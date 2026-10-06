@@ -537,7 +537,7 @@ fun LivePadSheetPreview() {
                 sounds = padSounds,
                 playing = "device:140",
                 busy = false,
-                onPlay = {}, onStop = {}, onPick = {}, onUpload = {},
+                onPlay = { _, _ -> }, onStop = {}, onPick = { _, _ -> }, onUpload = {},
             )
         }
     }

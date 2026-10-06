@@ -272,6 +272,9 @@ fun MirrorScreen(
     initialNoteOpen: Boolean = false,
     /** Not connected: download the factory sounds (FactorySounds); null when they are in the library. */
     onGetFactory: (() -> Unit)? = null,
+    /** Pad changes made offline, in arc only: how many, for Live tools' row with [onResetPads]. */
+    offlinePads: Int = 0,
+    onResetPads: () -> Unit = {},
     /**
      * Pressing a pad plays its sample on the phone until [onPadUp] (hold is
      * false for a screen reader's Play, which plays to the end); null leaves
@@ -383,6 +386,7 @@ fun MirrorScreen(
             title = MirrorText.TOOLS,
             panel = {
                 FactoryRow(mirror, onGetFactory)
+                OfflinePadsRow(offlinePads, onResetPads)
                 if (keys.on) {
                     KeysPanel(keys, keysActions, piano = piano != null)
                     if (rec.onRec != null) TakesSection(takes)
@@ -819,6 +823,17 @@ private fun FactoryRow(mirror: MirrorUi?, onGetFactory: (() -> Unit)?) {
     GridPlate {
         SettingRow(FeatureText.FACTORY_SOUNDS, note = FeatureText.FACTORY_NOTE) {
             ArcKey(FeatureText.GET, onGetFactory, size = KeySize.Small, style = KeyStyle.Quiet)
+        }
+    }
+}
+
+/** Pads changed offline, in arc only: how many, and the key that puts the device's sounds back on them. */
+@Composable
+private fun OfflinePadsRow(count: Int, onReset: () -> Unit) {
+    if (count == 0) return
+    GridPlate {
+        SettingRow(MirrorText.OFFLINE_PADS, note = MirrorText.offlinePadsNote(count)) {
+            ArcKey(MirrorText.RESET_PADS, onReset, size = KeySize.Small, style = KeyStyle.Quiet)
         }
     }
 }

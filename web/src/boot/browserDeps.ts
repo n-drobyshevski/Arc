@@ -22,6 +22,7 @@ import { IdbPadSoundStore } from '../platform/storage/padSoundStore'
 import {
   CoachPrefs,
   LastReadPrefs,
+  OfflinePadsPrefs,
   MirrorPrefs,
   SettingsStore,
   browserStorage,
@@ -74,7 +75,8 @@ export interface BrowserDepsOptions {
    */
   demo?: boolean
   /**
-   * Where settings, mirror preferences and Live's last read are kept. Default:
+   * Where settings, mirror preferences and Live's last read (and its
+   * offline pad changes) are kept. Default:
    * localStorage, or memory with [demo]. main.tsx passes the one it read the
    * theme from.
    */
@@ -146,6 +148,7 @@ export async function createBrowserDeps(options: BrowserDepsOptions = {}): Promi
     liveAudio,
     padSounds,
     lastRead: new LastReadPrefs(storage),
+    offlinePads: new OfflinePadsPrefs(storage),
     factory: browserFactory(() => doc?.baseURI ?? globalThis.location.href),
     wakeLock,
     trafficLog: new TrafficLog(),

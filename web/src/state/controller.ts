@@ -39,6 +39,10 @@
 //   once and offers UNDO on the toast ([toastWith] / [runToastAction]; the
 //   closure stays here, the state only holds the word); [uploadForPad] goes
 //   through the Device tab's upload sheet (draft + draftPad), then assigns.
+//   Offline it changes the pad in arc only ([assignOffline], Reset with
+//   [resetOfflinePads]); once the EP-133 is read again it asks whether to
+//   write those changes ([offerOfflinePads], [writeOfflinePads] /
+//   [discardOfflinePads]). [playLiveSound] previews the offline lists.
 // - [liveLate]: Live's output delay, for the display line's note, from the
 //   output's latency (LiveAudioDeps.late); Android names Bluetooth from the route (liveWireless).
 // - The debug screen's latency test: [liveLatency] / [resetLatency] (live.ts),
@@ -51,6 +55,7 @@ import { MAX_OCTAVE, MIN_OCTAVE, type NoteNames, type Scale } from '../core/feat
 import { choiceOf as pianoChoiceOf, type KeysView } from '../core/features/piano'
 import { padKey, type PhysicalPad } from '../core/features/padNotes'
 import type { PadTarget } from '../core/features/liveMirror'
+import { OfflinePads, SoundSource } from '../core/features/offlinePads'
 import { backupDevice, restorePak } from '../core/backup/backup'
 import { describePak, openPak, type PakDescription, type PakSound } from '../core/backup/pak'
 import { project as exportProject, projectFileName, soundFileName, soundWav } from '../core/backup/pakExport'
@@ -91,7 +96,7 @@ import { MirrorController } from './mirror'
 import { PreviewCache, type DecodedSound } from './previewCache'
 import { createStore, type Store } from './store'
 import { errorText, isCancelled, Tasks, type OnProgress } from './tasks'
-import { initialState, type Tab, type UiState, type UploadDraftItem } from './types'
+import { initialState, type OfflineSounds, type Tab, type UiState, type UploadDraftItem } from './types'
 
 /** MainActivity COPY_LIMIT: the clipboard gets the latest part of a long log. */
 export const COPY_LIMIT = 200_000
@@ -182,6 +187,8 @@ export class ArcController {
   private playToken = 0
   /** The previews' decoded sounds (backups, pad copies), so playing one again starts at once. */
   private readonly previews = new PreviewCache()
+  /** Write putting the offline pad changes on: they are cleared only at its end, so a read meanwhile doesn't ask again. */
+  private offlineWrite: Promise<void> | null = null
   private searchGen = 0
   private libraryGen = 0
   private names: readonly NameEntry[] = []
@@ -274,6 +281,7 @@ export class ArcController {
       toast,
       live: this.live,
       fmtDateTime: (ms) => this.fmtDateTime(ms),
+      deviceRead: () => void this.offerOfflinePads(),
     })
   }
 
@@ -382,7 +390,8 @@ export class ArcController {
 
   /**
    * Live without a device shows the factory sounds once they are in the
-   * library, and stops when they are deleted: it opens offline again.
+   * library, and stops when they are deleted: it opens offline again. Else
+   * the sounds it offers offline follow the library ([MirrorController.refreshOffline]).
    */
   private factoryChanged(): void {
     const st = this.store.get()
@@ -390,6 +399,7 @@ export class ArcController {
     if (mi === null || (this.conn.session !== null && st.device !== null)) return
     const has = FactorySounds.inLibrary(st.backups) !== null
     if ((has && mi.error === MirrorText.NOT_CONNECTED) || (!has && mi.offline === MirrorText.FACTORY)) void this.mirror.openOffline()
+    else void this.mirror.refreshOffline()
   }
 
   /** library.backups collected: the list, the names for search, and the free space. */
@@ -588,6 +598,8 @@ export class ArcController {
   /** dropSession's controller part (the session is already closed). */
   private onDropped(): void {
     this.mirror.stop()
+    // Asked whether to write the offline pad changes: they stay for the next connection.
+    if (this.store.get().offlinePrompt !== null) this.store.update((st) => ({ ...st, offlinePrompt: null }))
     // Live shows the last read instead.
     if (this.store.get().mirror !== null) void this.mirror.openOffline()
     this.playToken++ // a device sound still downloading must not start after the device is gone
@@ -990,6 +1002,8 @@ export class ArcController {
 
   closeMirror(): void {
     this.mirror.close()
+    // Write needs the mirror's read: the next one asks again.
+    this.store.update((st) => (st.offlinePrompt === null ? st : { ...st, offlinePrompt: null }))
   }
 
   /** The sample on a pad in the mirror, once it is known. */
@@ -1081,16 +1095,47 @@ export class ArcController {
    * sheet and the Sounds tab.
    */
   liveSounds(): readonly SoundEntry[] {
+    // Offline: the list the pads shown come from (the last read's, or the factory pack's).
+    const off = this.offlineSounds()
+    if (off !== null) return (off.base === SoundSource.FACTORY ? off.factory : off.device) ?? []
     return this.store.get().browser.contents?.sounds ?? this.live.deviceSoundList()
+  }
+
+  /** The sounds Live offers without the device, while it shows the last read (MirrorUi.offlineSounds). */
+  private offlineSounds(): OfflineSounds | null {
+    if (this.mirror.offline === null) return null
+    return this.store.get().mirror?.offlineSounds ?? null
   }
 
   /**
    * The name of the sound on [pad] now, as its pad record says (the mirror's
    * own name for it waits for a learned link); null when unknown or empty.
+   * Offline, its change in arc first.
    */
   padSoundName(pad: PhysicalPad): string | null {
-    const slot = this.editTarget(pad, true)?.slot ?? null
-    return slot === null ? null : this.soundName(slot)
+    const t = this.editTarget(pad, true)
+    const slot = t?.slot ?? null
+    if (slot === null) return null
+    const local = this.mirror.offline?.localOf(pad) ?? null
+    if (local !== null) return local.name
+    return this.soundName(slot)
+  }
+
+  /** The list [pad]'s sound comes from offline: its change's, else the pads' own; null when connected. */
+  padSource(pad: PhysicalPad): SoundSource | null {
+    const off = this.offlineSounds()
+    if (off === null) return null
+    return this.mirror.offline?.localOf(pad)?.source ?? off.base
+  }
+
+  /**
+   * Offline, the slot the last read has on [pad], under any change in arc:
+   * the pad sheet keeps it pickable, to take the change back. Null when connected.
+   */
+  padReadSlot(pad: PhysicalPad): number | null {
+    const m = this.mirror.offline
+    const t = m !== null ? this.editTarget(pad, true) : null
+    return m === null || t === null ? null : m.slotAt(t.group, t.pad)
   }
 
   /** A device sound's name for a toast: its name, else its slot number. */
@@ -1098,13 +1143,18 @@ export class ArcController {
     return this.liveSounds().find((snd) => snd.slot === slot)?.name ?? FeatureText.slot(slot)
   }
 
+  /** Whether the EP-133 is connected and read (the pads can be written). */
+  private get deviceReady(): boolean {
+    return this.conn.session !== null && this.store.get().device !== null
+  }
+
   /**
    * Where [pad]'s sound is set now (its project, pad file and slot), or
-   * null, saying why, when it can't be changed: not connected, or the
-   * active project not read yet.
+   * null, saying why, when it can't be changed: not connected (and no last
+   * read shown, where a change stays in arc), or the active project not read yet.
    */
   editTarget(pad: PhysicalPad, quiet = false): PadTarget | null {
-    if (this.conn.session === null || this.store.get().device === null) {
+    if (!this.deviceReady && this.mirror.offline === null) {
       if (!quiet) this.toast(MirrorText.EDIT_OFFLINE)
       return null
     }
@@ -1133,11 +1183,15 @@ export class ArcController {
   /**
    * Puts device sound [slot] on Live's [pad] in the active project, at
    * once: the mirror's names follow, and the toast offers UNDO (when the
-   * sound it had is known). Resolves true when the pad took it.
+   * sound it had is known). Offline, [slot] of [source]'s list goes on the
+   * pad in arc only ([assignOffline]). Resolves true when the pad took it.
    */
-  async assignPad(pad: PhysicalPad, slot: number): Promise<boolean> {
+  async assignPad(pad: PhysicalPad, slot: number, source: SoundSource = SoundSource.DEVICE): Promise<boolean> {
     const t = this.editTarget(pad)
     if (t === null) return false
+    if (!this.deviceReady) return this.assignOffline(pad, t, slot, source)
+    // The factory list is only offered offline: its slot isn't the device's sound.
+    if (source !== SoundSource.DEVICE) return false
     if (t.slot === slot) return true
     const r = await this.writePad(t, slot)
     if (r === null) return false
@@ -1162,6 +1216,154 @@ export class ArcController {
     this.toastWith(text, MirrorText.UNDO, () => void this.undoAssign(pad, { ...t, slot }, old))
   }
 
+  /**
+   * Offline: [slot] of [source]'s list on [pad] (its target [t]) in arc
+   * only, until the EP-133 connects. A device sound arc can't play is
+   * refused, but the read's own sound back on the pad (playable or not)
+   * drops the change. No UNDO: the sheet puts any sound back.
+   */
+  private async assignOffline(pad: PhysicalPad, t: PadTarget, slot: number, source: SoundSource): Promise<boolean> {
+    const m = this.mirror.offline
+    const off = this.offlineSounds()
+    const snd = (source === SoundSource.FACTORY ? off?.factory : off?.device)?.find((e) => e.slot === slot)
+    const readSlot = m?.slotAt(t.group, t.pad) ?? null
+    const own = source === SoundSource.DEVICE && slot === readSlot
+    if (m === null || off === null || snd === undefined || (source === SoundSource.DEVICE && !own && off.unavailable.has(slot))) {
+      this.toast(MirrorText.NEEDS_DEVICE)
+      return false
+    }
+    const pads = await this.live.loadOfflinePads()
+    if (this.mirror.offline !== m) return false
+    const next =
+      own
+        ? OfflinePads.drop(pads, t.project, t.group, t.pad)
+        : OfflinePads.put(pads, { project: t.project, group: t.group, pad: t.pad, slot, name: snd.name, source })
+    this.live.setOfflinePads(next)
+    m.setLocal(next)
+    this.mirror.localChanged()
+    this.toast(MirrorText.assignedOffline(pad, snd.name))
+    return true
+  }
+
+  /** Reset pads: the offline changes go, and the pads show what the last read had. */
+  resetOfflinePads(): void {
+    this.live.setOfflinePads(OfflinePads.EMPTY)
+    const m = this.mirror.offline
+    if (m !== null) {
+      m.setLocal(OfflinePads.EMPTY)
+      this.mirror.localChanged()
+    }
+    this.toast(MirrorText.PADS_RESET)
+  }
+
+  /** The EP-133 was read: with offline pad changes kept, it asks whether to write them (UiState.offlinePrompt). */
+  async offerOfflinePads(): Promise<void> {
+    // Still writing them (Live left and came back meanwhile): not asked again.
+    if (this.offlineWrite !== null) return
+    const n = OfflinePads.size(await this.live.loadOfflinePads())
+    if (n === 0 || !this.deviceReady) return
+    this.store.update((st) => ({ ...st, offlinePrompt: n }))
+  }
+
+  /**
+   * Write: the offline changes that still fit go on the EP-133 one by one
+   * (OfflinePads.fits: made on its active project, the same sound still in
+   * that slot); the rest are skipped. Then they are cleared, and the toast
+   * counts both. The connection going meanwhile keeps the ones not written
+   * yet, for the next read to ask about. A Write while one runs is the
+   * same one.
+   */
+  writeOfflinePads(): Promise<void> {
+    this.store.update((st) => ({ ...st, offlinePrompt: null }))
+    if (this.offlineWrite !== null) return this.offlineWrite
+    const w = this.writeOfflinePadsNow().finally(() => {
+      if (this.offlineWrite === w) this.offlineWrite = null
+    })
+    this.offlineWrite = w
+    return w
+  }
+
+  private async writeOfflinePadsNow(): Promise<void> {
+    const s = this.conn.session
+    // The mirror's read is what the changes are checked against: wait for it.
+    await this.store.waitFor((st) => st.mirror?.loading !== true)
+    const m = this.mirror.current
+    if (s === null || this.conn.session !== s || m === null || this.mirror.offline !== null || !this.deviceReady) {
+      this.toast(MirrorText.EDIT_OFFLINE)
+      return
+    }
+    const pads = (await this.live.loadOfflinePads()).list
+    let written = 0
+    let skipped = 0
+    for (const [i, p] of pads.entries()) {
+      const names = new Map(this.liveSounds().map((snd) => [snd.slot, snd.name]))
+      if (!OfflinePads.fits(p, m.snapshot(this.deps.perfNow()).activeProject, names)) {
+        skipped++
+        continue
+      }
+      const now = m.slotAt(p.group, p.pad)
+      if (now === p.slot) {
+        written++
+        continue
+      }
+      // One write at a time, each after whatever holds the device.
+      await this.store.waitFor((st) => !st.busy)
+      const t: PadTarget = { project: p.project, group: p.group, pad: p.pad, slot: now }
+      const r = this.conn.session === s ? await this.writePad(t, p.slot) : null
+      if (r !== null && r.error === null) {
+        this.mirror.assigned(t, p.slot)
+        written++
+      } else if (this.conn.session !== s) {
+        // The connection went: this change and the rest are kept.
+        this.live.setOfflinePads({ list: pads.slice(i) })
+        return
+      } else {
+        if (r !== null && r.error !== null) this.toast(MirrorText.assignFailed(r.error), true)
+        skipped++
+      }
+    }
+    this.live.setOfflinePads(OfflinePads.EMPTY)
+    this.toast(MirrorText.offlineWritten(written, skipped))
+  }
+
+  /** Discard: the offline changes go; the EP-133 keeps what it has. */
+  discardOfflinePads(): void {
+    this.store.update((st) => ({ ...st, offlinePrompt: null }))
+    this.live.setOfflinePads(OfflinePads.EMPTY)
+    this.toast(MirrorText.OFFLINE_DISCARDED)
+  }
+
+  /**
+   * Previews [slot] of [source]'s list: connected, a device sound as
+   * [playDeviceSound] plays it; offline, from arc's copies, a backup or the
+   * factory pack (cached with the previews), else a toast says there's no
+   * copy. Call from a tap.
+   */
+  async playLiveSound(slot: number, source: SoundSource): Promise<void> {
+    if (this.deviceReady && source === SoundSource.DEVICE) return this.playDeviceSound(slot)
+    this.deps.player.resumeInGesture()
+    const token = ++this.playToken
+    const off = this.offlineSounds()
+    const name = (source === SoundSource.FACTORY ? off?.factory : off?.device)?.find((e) => e.slot === slot)?.name
+    if (name === undefined) return
+    const key = `${PAD_PREVIEW}${source}:${slot}:${name}`
+    let d = this.previews.get(key)
+    if (d === null) {
+      try {
+        d = await this.live.offlineSound(slot, name, source === SoundSource.FACTORY)
+      } catch {
+        d = null
+      }
+      if (d !== null) this.previews.put(key, d)
+    }
+    if (token !== this.playToken) return
+    if (d === null) {
+      this.toast(WebText.LIVE_NO_COPY)
+      return
+    }
+    await this.startSound(`${source}:${slot}`, d.pcm, d.channels, d.sampleRate)
+  }
+
   /** UNDO: [old] back onto the pad [now] describes. */
   private async undoAssign(pad: PhysicalPad, now: PadTarget, old: number): Promise<void> {
     const r = await this.writePad(now, old)
@@ -1180,7 +1382,13 @@ export class ArcController {
    * once uploaded onto [pad]. Only the first file is used.
    */
   async uploadForPad(pad: PhysicalPad, files: readonly ReadableFile[]): Promise<void> {
-    if (files.length === 0 || this.editTarget(pad) === null) return
+    if (files.length === 0) return
+    // Offline a pad changes in arc only: an upload needs the EP-133.
+    if (!this.deviceReady) {
+      this.toast(MirrorText.EDIT_OFFLINE)
+      return
+    }
+    if (this.editTarget(pad) === null) return
     // The free slots come from the device's list: read it first if the Device tab hasn't.
     if (this.store.get().browser.contents === null) await this.refreshAll(true)
     if (this.store.get().browser.contents === null) return
@@ -1205,6 +1413,10 @@ export class ArcController {
 
   /** The picker for [uploadForPad]; call from a tap. */
   async pickForPad(pad: PhysicalPad): Promise<void> {
+    if (!this.deviceReady) {
+      this.toast(MirrorText.EDIT_OFFLINE)
+      return
+    }
     if (this.editTarget(pad) === null) return
     const files = await this.deps.files.pick({ accept: WAV_ACCEPT, multiple: false })
     await this.uploadForPad(pad, files)
@@ -1216,9 +1428,11 @@ export class ArcController {
   }
 
   /** Clears Live's copies of the device's sounds (Settings). */
-  clearPadSounds(): Promise<void> {
+  async clearPadSounds(): Promise<void> {
     this.previews.clear(PAD_PREVIEW)
-    return this.live.clearPadSounds()
+    await this.live.clearPadSounds()
+    // Offline, the device sounds only those copies had are dimmed now.
+    await this.mirror.refreshOffline()
   }
 
   // ---------- library folder ----------
