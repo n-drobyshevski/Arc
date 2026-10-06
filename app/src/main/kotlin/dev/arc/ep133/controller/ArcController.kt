@@ -62,7 +62,8 @@ data class DeviceSummary(val info: DeviceInfo, val storage: Storage, val sounds:
 /** The progress sheet. */
 data class TaskUi(val title: String, val label: String, val fraction: Double, val cancelling: Boolean)
 
-data class ToastMsg(val id: Long, val text: String, val error: Boolean)
+/** A toast; [action] ("Undo") is a key at its end that runs [onAction]. */
+data class ToastMsg(val id: Long, val text: String, val error: Boolean, val action: String? = null, val onAction: (() -> Unit)? = null)
 
 /** The device browser (an addition to the web version). */
 data class BrowserUi(
@@ -117,6 +118,8 @@ data class MirrorUi(
     val error: String? = null,
     /** Not connected, showing the last read instead: when it was made ("Last seen 5 Oct, 14:02"). */
     val offline: String? = null,
+    /** The device's sounds as Live read them, for EDIT's pad sheet (empty until read, and offline). */
+    val sounds: List<dev.arc.ep133.protocol.SoundEntry> = emptyList(),
 )
 
 /** A backup opened for its contents screen (sounds and projects, playback, export). */
@@ -313,8 +316,8 @@ class ArcController(
 
     // ---------- toast ----------
 
-    fun toast(text: String, error: Boolean = false) {
-        _state.update { it.copy(toast = ToastMsg(toastIds.incrementAndGet(), text, error)) }
+    fun toast(text: String, error: Boolean = false, action: String? = null, onAction: (() -> Unit)? = null) {
+        _state.update { it.copy(toast = ToastMsg(toastIds.incrementAndGet(), text, error, action, onAction)) }
     }
 
     /**
@@ -781,8 +784,7 @@ class ArcController(
             if (mirror !== m) break
             ok = exclusive("mirror", quiet = tries > 1) { ss ->
                 val c = DeviceBrowser.contents(ss)
-                deviceSounds = c.sounds.associateBy { it.slot }
-                m.setNames(c.sounds.associate { it.slot to it.name })
+                setLiveSounds(m, c.sounds)
                 val active = runCatching { Fs.getMetadata(ss, Device.PROJECTS_NODE).asObject()["active"] }.getOrNull()
                 val project = (active as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDoubleOrNull()?.toInt()?.let(Device::projectFromNode)
                 val groups = project?.let { p -> runCatching { DeviceBrowser.projectLayout(ss, p).pads }.getOrNull() } ?: emptyList()
@@ -1289,6 +1291,117 @@ class ArcController(
     /** The sample on a pad in the mirror, once it is known. */
     fun mirrorName(pad: dev.arc.ep133.features.PhysicalPad): String? = mirror?.nameOf(pad)
 
+    /** The device's sounds as Live read them: for its copies, its names and EDIT's pad sheet. */
+    private fun setLiveSounds(m: dev.arc.ep133.features.LiveMirror, sounds: List<dev.arc.ep133.protocol.SoundEntry>) {
+        deviceSounds = sounds.associateBy { it.slot }
+        m.setNames(sounds.associate { it.slot to it.name })
+        _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(sounds = sounds)) } ?: cur }
+    }
+
+    // ---------- EDIT: another sound on a pad (an addition; community notes, see Device.assignPad) ----------
+
+    /**
+     * Where a tapped pad's sound is set, for EDIT's pad sheet; null (with a
+     * toast saying why) while the device isn't connected, or Live hasn't read
+     * the active project yet.
+     */
+    fun editTarget(pad: dev.arc.ep133.features.PhysicalPad): dev.arc.ep133.features.PadTarget? {
+        val m = mirror
+        if (session == null || _state.value.device == null || mirrorSession == null || m == null) {
+            toast(dev.arc.ep133.text.MirrorText.EDIT_OFFLINE)
+            return null
+        }
+        return m.target(pad) ?: null.also { toast(dev.arc.ep133.text.MirrorText.EDIT_NO_PROJECT) }
+    }
+
+    /**
+     * Puts sample [slot] on [pad] at once (where [t] says its sound is set).
+     * The names follow straight away, and a toast offers UNDO when the pad's
+     * old sound is known (an empty pad can't be emptied again).
+     */
+    fun assignPad(pad: dev.arc.ep133.features.PhysicalPad, t: dev.arc.ep133.features.PadTarget, slot: Int): Job = scope.launch {
+        val m = mirror ?: return@launch
+        if (writePad(m, t, slot, dev.arc.ep133.text.MirrorText::assignFailed)) assignedToast(m, pad, t, slot)
+    }
+
+    /** UNDO: [t]'s old slot back on [pad]. */
+    private fun undoAssign(pad: dev.arc.ep133.features.PhysicalPad, t: dev.arc.ep133.features.PadTarget): Job = scope.launch {
+        val m = mirror ?: return@launch
+        val old = t.slot ?: return@launch
+        if (writePad(m, t, old, dev.arc.ep133.text.MirrorText::undoFailed)) {
+            toast(dev.arc.ep133.text.MirrorText.restored(pad, soundName(old)))
+        }
+    }
+
+    /**
+     * "Upload a new sample…" from the pad sheet: the picked WAV goes into the
+     * first free slot, then onto [pad]. A file that isn't a usable WAV is
+     * turned away before anything is written.
+     */
+    fun uploadToPad(uri: android.net.Uri, pad: dev.arc.ep133.features.PhysicalPad, t: dev.arc.ep133.features.PadTarget): Job = scope.launch {
+        val s = session ?: return@launch
+        val m = mirror ?: return@launch
+        val (fileName, _) = withContext(Dispatchers.IO) { dev.arc.ep133.files.Files.describe(context, uri) }
+        val bytes = try {
+            withContext(Dispatchers.IO) { dev.arc.ep133.files.Files.read(context, uri) }.also { b ->
+                withContext(Dispatchers.Default) { Wav.decode(b) }
+            }
+        } catch (e: Throwable) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            toast(dev.arc.ep133.text.MirrorText.uploadFailed(e.message ?: e.toString()), error = true)
+            return@launch
+        }
+        val slot = runTask(Strings.UPLOADING) { onProgress, signal ->
+            SampleUpload.uploadToPad(s, fileName, bytes, deviceSounds.keys, t, onProgress = onProgress, signal = signal)
+        } ?: return@launch
+        // The new sound's name and size, for the pad and its copy.
+        exclusive("mirror", quiet = true) { ss -> DeviceBrowser.contents(ss) }?.let { c -> if (mirror === m) setLiveSounds(m, c.sounds) }
+        if (mirror !== m) return@launch
+        padWritten(m, t, slot)
+        assignedToast(m, pad, t, slot)
+    }
+
+    /** Writes [slot] onto [t]'s pad; on failure a toast with [failed] and false. */
+    private suspend fun writePad(m: dev.arc.ep133.features.LiveMirror, t: dev.arc.ep133.features.PadTarget, slot: Int, failed: (String) -> String): Boolean {
+        var error: String? = null
+        val ok = exclusive("pad", quiet = true) { s ->
+            try {
+                Device.assignPad(s, t.project, t.group, t.pad, slot)
+                true
+            } catch (e: Throwable) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                error = e.message ?: e.toString()
+                false
+            }
+        }
+        error?.let { toast(failed(it), error = true) }
+        if (ok != true || mirror !== m) return false
+        padWritten(m, t, slot)
+        return true
+    }
+
+    /** The mirror, its saved read and the pad's copy follow a written pad. */
+    private fun padWritten(m: dev.arc.ep133.features.LiveMirror, t: dev.arc.ep133.features.PadTarget, slot: Int) {
+        m.assigned(t, slot)
+        saveLastRead(m)
+        preloadPads(m)
+        session?.let { copyPadSounds(m, it) }
+        _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(state = m.snapshot(System.nanoTime()))) } ?: cur }
+    }
+
+    private fun assignedToast(m: dev.arc.ep133.features.LiveMirror, pad: dev.arc.ep133.features.PhysicalPad, t: dev.arc.ep133.features.PadTarget, slot: Int) {
+        val text = dev.arc.ep133.text.MirrorText.assigned(pad, soundName(slot))
+        // UNDO only where the old sound is known, and isn't the one just put there.
+        if (t.slot != null && t.slot != slot) {
+            toast(text, action = dev.arc.ep133.text.MirrorText.UNDO, onAction = { if (mirror === m) undoAssign(pad, t) })
+        } else {
+            toast(text)
+        }
+    }
+
+    /** A slot's sound name as Live read it, or its number. */
+    private fun soundName(slot: Int): String = deviceSounds[slot]?.name ?: FeatureText.slot(slot)
+
     fun setPadOrder(order: dev.arc.ep133.features.PadOrder) {
         mirrorPrefs.edit { putString("order", order.name) }
         scope.launch { library.syncIndex() }
@@ -1551,6 +1664,13 @@ class ArcController(
     fun setKeysNames(names: dev.arc.ep133.features.NoteNames) = changeSettings { it.copy(keysNames = names) }
 
     fun setKeysShowNames(on: Boolean) = changeSettings { it.copy(keysShowNames = on) }
+
+    /** The piano's size: one of Piano.CHOICES (null is Auto). */
+    /** KEYS on the grid or the piano, for a [wide] window or a tall one. */
+    fun setKeysView(wide: Boolean, view: dev.arc.ep133.features.KeysView) =
+        changeSettings { if (wide) it.copy(keysViewWide = view) else it.copy(keysViewTall = view) }
+
+    fun setPianoWhites(whites: Int?) = changeSettings { it.copy(pianoWhites = dev.arc.ep133.features.Piano.choiceOf(whites)) }
 
     /** The guide overlay was shown (it opens by itself only once, also across reinstalls). */
     fun setGuideSeen() = changeSettings { it.copy(guideSeen = true) }

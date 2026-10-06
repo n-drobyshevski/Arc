@@ -32,6 +32,14 @@
 // - The scale and octave lists (Kotlin's focusable Popups, which Back
 //   dismisses) are navigation layers too: [picker] / [onPicker] (dialog
 //   'pick:scale' / 'pick:octave'); without them each word keeps its own state.
+// - The tools (the Step 1c redesign) are SettingRow cards: the View as small
+//   caps with a Follow row and its LED toggle, the last note in a small dark
+//   display, and the long notes under one "How Live reads the EP-133"
+//   disclosure. The pad numbering lives in Settings only (no onPadOrder here).
+//   KEYS: a one-octave MiniPiano picks the key; the colours are chips (the
+//   long legend rows are under "How Keys works", with KEYS_NOTE). The chips
+//   say "Playing here" (WebText.CHIP_HERE); the piano's two (root, outside
+//   the scale) show only with the piano.
 //
 // Web only, the desktop layout (from 1024px wide, ui/useDesk.ts), after the
 // EP-133 Sample Tool's K.O. II and Android's sideways layout:
@@ -47,28 +55,52 @@
 //   a ResizeObserver); in a room too small for that, the phone's scrolling grid
 //   on a paper card.
 // - The tools panel is docked: a column beside the panel (SideZone docked),
-//   no strip.
-import { type ButtonHTMLAttributes, type ComponentChildren, type JSX } from 'preact'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { Keys, SCALES, type NoteNames, type Scale } from '../../core/features/keys'
+//   no strip; in KEYS the tools go back behind the edge strip, so the keys
+//   get the page's width. With EDIT available the docked column has two tabs,
+//   TOOLS and SOUNDS: the device's sounds, dragged onto a pad (HTML5 drag and
+//   drop; the pad shows "old → new"), and a WAV dropped on a pad or on the
+//   drop zone under the list. A right-click on a pad opens its pad sheet.
+// - EDIT's tab hangs on the left side of the K.O. II panel (on a phone or
+//   tablet the shell draws it on the window's edge, under GUIDE: app.tsx).
+//
+// Web only, the piano (Kotlin PianoKeyboard, live/PianoKeyboard.tsx): in
+// KEYS, on any window where it fits ([pianoFor], live/keyboard.ts: Android's
+// rule, the view switch remembered per window shape), the display line and
+// the row over the keys (Android's SidewaysRow: mode, view switch, scale,
+// key, − OCT +) over a piano across the page; on the desk on the device's
+// body with the colours' legend under it. The view switch (two icon caps
+// after the KEYS word) is not shown on a portrait phone, which plays on the
+// grid. On a desktop (or with a fine pointer) the computer keyboard plays it.
+// Piano keys carry [data-note] (their MIDI note) for the glow, by exact pitch.
+//
+// EDIT (giving a pad another sound, Kotlin's EditEdgeTab and pad sheet): with
+// it on, the display line says so, the pads get a signal outline and a ⇄
+// badge, and a tap opens the pad sheet ([EditUi.onPad]); a long press still
+// plays the pad while held.
+import { type ButtonHTMLAttributes, type ComponentChildren, type JSX, type TargetedDragEvent } from 'preact'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { Keys, MAX_OCTAVE, MIN_OCTAVE, SCALES, type NoteNames, type Scale } from '../../core/features/keys'
 import type { MirrorState, PadLight } from '../../core/features/liveMirror'
+import { KeysView, type NoteRange } from '../../core/features/piano'
+import type { SoundEntry } from '../../core/protocol/device'
 import { PadOrder } from '../../core/features/padPush'
 import { ROWS, noteName, padKey, physicalPad, type PhysicalPad } from '../../core/features/padNotes'
 import { CoachText } from '../../core/text/coachText'
 import { CLOSE as GUIDE_CLOSE } from '../../core/text/guideText'
 import { MirrorText } from '../../core/text/mirrorText'
+import { FeatureText } from '../../core/text/featureText'
 import { WebText } from '../../core/text/webText'
 import { emptyMirrorState, type MirrorUi } from '../../state/types'
 import { Caption } from '../components/Caption'
 import { COACH_YELLOW, COACH_YELLOW_INK } from '../components/Coach'
 import { DisplayPanel } from '../components/DisplayPanel'
-import { GridPlate } from '../components/GridPlate'
 import { CloseKey } from '../components/GuideKeys'
-import { Key } from '../components/Key'
+import { HwToggle } from '../components/HwToggle'
+import { EditEdgeTab } from '../components/EditEdgeTab'
+import { MiniPiano } from '../components/MiniPiano'
 import { Segmented, handleRovingKey } from '../components/Segmented'
+import { Disclosure, RowCard, SettingRow } from '../components/SettingRow'
 import { SideZone } from '../components/SideZone'
-import { SwitchRow } from '../components/SwitchRow'
-import { TextToggle } from '../components/TextToggle'
 import {
   displayLine,
   displayLineSmall,
@@ -82,10 +114,13 @@ import {
   transportText,
 } from '../live/glow'
 import { rowPadSize } from '../live/desk'
-import { DEFAULT_KEYS, keysDisplayNote, keysLit, octaves, upperOctave, type KeysPicker, type KeysUi } from '../live/keys'
+import { chosenView, pianoFor, type PianoPlan } from '../live/keyboard'
+import { DEFAULT_KEYS, keysLit, keysNoteText, octaves, upperOctave, type KeysPicker, type KeysUi } from '../live/keys'
+import { PianoKeyboard } from '../live/PianoKeyboard'
 import { PressTracker, type PressTarget } from '../live/press'
+import { SLOT_MIME, SoundPicker } from '../live/SoundPicker'
 import { PickWord, WordButton } from '../live/Words'
-import { useDesk } from '../useDesk'
+import { useDesk, useFinePointer, useWindowSize } from '../useDesk'
 import './MirrorScreen.css'
 
 export type { KeysPicker, KeysUi } from '../live/keys'
@@ -99,14 +134,40 @@ export interface KeysActions {
   /** A key pressed; it sounds until [onKeyUp]. A screen reader's Play passes hold = false. */
   onKey?: (index: number, hold: boolean) => void
   onKeyUp?: (index: number) => void
+  /** A piano note pressed (MIDI); it sounds until [onNoteUp]. A screen reader's Play passes hold = false. */
+  onNote?: (note: number, hold: boolean) => void
+  onNoteUp?: (note: number) => void
+  /** The Pads ⇄ Piano switch, for a wide window ([wide]) or a tall one. */
+  onView?: (wide: boolean, view: KeysView) => void
   /** A pad played on the device in the pads view becomes the KEYS sound. */
   onSelect?: (pad: PhysicalPad) => void
+}
+
+/** Live's EDIT: giving a pad another sound (an addition; the controller's assignPad). */
+export interface EditUi {
+  readonly on: boolean
+  /** The EP-133 is connected (the pads can be written; else the Sounds tab says to connect). */
+  readonly connected: boolean
+  onChange: (on: boolean) => void
+  /** Opens [pad]'s pad sheet (a tap in EDIT, a right-click on the desk). */
+  onPad: (pad: PhysicalPad) => void
+  /** The desk: a device sound dragged from the Sounds tab onto [pad]. */
+  onDropSlot: (pad: PhysicalPad, slot: number) => void
+  /** The desk: a WAV dropped on [pad] (uploaded to a free slot, then put on it). */
+  onDropFile: (pad: PhysicalPad, file: File) => void
+  /** The Sounds tab: the device's sounds, their preview and the drop zone's files (a plain upload). */
+  readonly sounds: readonly SoundEntry[]
+  readonly playing: string | null
+  onPlay: (slot: number) => void
+  onStop: () => void
+  onUpload: (files: File[]) => void
+  /** The sound on [pad] now by its pad record, when the mirror can't name it yet (for "old → new"). */
+  nameNow: (pad: PhysicalPad) => string | null
 }
 
 export interface MirrorScreenProps {
   mirror: MirrorUi | null
   nameOf: (pad: PhysicalPad) => string | null
-  onPadOrder: (order: PadOrder) => void
   /** Null on the Live tab, which has no close key. */
   onBack?: (() => void) | null
   /** A fixed time for screenshots; normally the frame clock drives the fade. */
@@ -138,6 +199,11 @@ export interface MirrorScreenProps {
   /** The KEYS list open over the grid (a navigation layer, so Back closes it); see [KeysPicker]. */
   picker?: KeysPicker | null
   onPicker?: (picker: KeysPicker | null) => void
+  /** KEYS on the pads or the piano, remembered for a wide window and a tall one (AUTO by default). */
+  keysViewWide?: KeysView
+  keysViewTall?: KeysView
+  /** Live's EDIT; null (screenshots, tests): no editing. */
+  edit?: EditUi | null
 }
 
 
@@ -165,6 +231,11 @@ function applyGlow(
     const lit = keysLit(notes, keyNotes, now)
     for (const el of root.querySelectorAll<HTMLElement>('[data-key]')) {
       el.style.setProperty('--glow', glowCss(lit.get(Number(el.dataset.key)) ?? 0))
+    }
+    // The piano: each key by its own note.
+    for (const el of root.querySelectorAll<HTMLElement>('[data-note]')) {
+      const l = notes.get(Number(el.dataset.note))
+      el.style.setProperty('--glow', glowCss(l ? glow(l, now) : 0))
     }
   }
 }
@@ -232,19 +303,43 @@ function useBoxSize(el: { readonly current: HTMLElement | null }, on: boolean): 
 }
 
 export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
-  const { mirror, nameOf, onPadOrder, onBack = null, fixedNow = null, oneGroup, follow } = props
+  const { mirror, nameOf, onBack = null, fixedNow = null, oneGroup, follow } = props
   const keys = props.keys ?? DEFAULT_KEYS
   const actions = props.keysActions ?? {}
   const onPad = props.onPad ?? null
   const playingPads = props.playingPads ?? NO_PADS
+  const edit = props.edit ?? null
   const st = mirror?.state ?? emptyMirrorState()
   const root = useRef<HTMLDivElement | null>(null)
   const now = fixedNow ?? perfNow()
   const desk = useDesk()
+  const fine = useFinePointer()
+  const win = useWindowSize()
+  // Live's own box: the piano's room comes off it (live/keyboard.ts).
+  const live = useBoxSize(root, true)
   // The desk's room for the page (beside the docked tools): whether all four groups fit in one row.
   const box = useRef<HTMLDivElement | null>(null)
   const room = useBoxSize(box, desk)
   const rowPad = desk && !oneGroup && !keys.on ? rowPadSize(room.width, room.height) : null
+  // KEYS on the piano or the grid: the view remembered for this window's shape, and the room.
+  const plan = pianoFor(
+    win.width,
+    win.height,
+    live.width,
+    live.height,
+    desk,
+    props.keysViewWide ?? KeysView.AUTO,
+    props.keysViewTall ?? KeysView.AUTO,
+    keys.pianoWhites,
+    keys.octave,
+  )
+  const pianoRange = keys.on ? plan.range : null
+  // In KEYS the tools go behind the strip, so the keys get the page's width.
+  const docked = desk && !keys.on
+  // EDIT is for the pads (the tab shows in PADS only).
+  const editing = edit !== null && edit.on && !keys.on
+  // A phone on its side: too short for the upright grid with its group keys under it.
+  const sideways = !desk && win.width > win.height && win.height < SIDEWAYS_MAX_HEIGHT
 
   // Every finger on the pads or keys; all of them end when the screen goes.
   const tracker = useMemo(() => new PressTracker(), [])
@@ -295,27 +390,79 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     if (!keys.on && hitPad !== null) actions.onSelect?.(hitPad)
   }, [st.lastHit, keys.on])
 
-  const panel = keys.on ? (
-    <KeysPanel keys={keys} actions={actions} />
+  // The desk's docked column: TOOLS or SOUNDS (with EDIT available).
+  const [toolsTab, setToolsTab] = useState<'tools' | 'sounds'>('tools')
+  // A device sound being dragged from the Sounds tab, and the pad it is over (padKey).
+  const [dragged, setDragged] = useState<SoundEntry | null>(null)
+  const [dropAt, setDropAt] = useState<number | null>(null)
+  const drop: DropUi | null =
+    edit !== null && desk && !keys.on
+      ? {
+          at: dropAt,
+          name: dragged?.name ?? null,
+          nameNow: edit.nameNow,
+          onOver: setDropAt,
+          onDrop: (pad, e) => {
+            setDropAt(null)
+            setDragged(null)
+            const slot = Number(e.dataTransfer?.getData(SLOT_MIME) ?? '')
+            if (Number.isInteger(slot) && slot > 0) {
+              edit.onDropSlot(pad, slot)
+              return
+            }
+            const file = e.dataTransfer?.files?.[0]
+            if (file) edit.onDropFile(pad, file)
+          },
+        }
+      : null
+
+  const tools = keys.on ? (
+    <KeysPanel keys={keys} actions={actions} piano={pianoRange !== null} />
   ) : (
     <>
-      <Caption text={MirrorText.VIEW} align="start" />
-      <TextToggle
-        class="live-tools__view"
-        options={[MirrorText.ALL_GROUPS, MirrorText.ONE_GROUP]}
-        selected={oneGroup ? 1 : 0}
-        onSelect={(i) => props.onOneGroup(i === 1)}
-        label={MirrorText.VIEW}
-      />
-      {oneGroup && (
-        <GridPlate>
-          <SwitchRow title={MirrorText.FOLLOW} note={MirrorText.FOLLOW_NOTE} on={follow} onChange={props.onFollow} />
-        </GridPlate>
-      )}
-      {st.lastKeysNote !== null && <KeysStrip st={st} last={st.lastKeysNote} />}
-      <Notes st={st} mirror={mirror} onPadOrder={onPadOrder} tapToPlay={onPad !== null} />
+      <RowCard>
+        <SettingRow
+          title={MirrorText.VIEW}
+          stack
+          control={(ids) => (
+            <Segmented
+              compact
+              fill
+              options={[MirrorText.ALL_GROUPS, MirrorText.ONE_GROUP]}
+              selected={oneGroup ? 1 : 0}
+              onSelect={(i) => props.onOneGroup(i === 1)}
+              labelledBy={ids.titleId}
+            />
+          )}
+        />
+        {oneGroup && (
+          <SettingRow
+            title={MirrorText.FOLLOW}
+            note={MirrorText.FOLLOW_NOTE}
+            control={(ids) => (
+              <HwToggle on={follow} onChange={props.onFollow} labelledBy={ids.titleId} describedBy={ids.noteId} />
+            )}
+          />
+        )}
+      </RowCard>
+      {st.lastKeysNote !== null && <KeysStrip st={st} last={st.lastKeysNote} names={keys.names} />}
+      <Notes st={st} mirror={mirror} tapToPlay={onPad !== null} />
     </>
   )
+  const tabbed = docked && edit !== null
+  const panel = tabbed ? (
+    toolsTab === 'tools' ? (
+      tools
+    ) : (
+      <SoundsPanel edit={edit} onDrag={(snd) => {
+        setDragged(snd)
+        if (snd === null) setDropAt(null)
+      }} />
+    )
+  ) : (
+    tools
+  )
+  const dockHead = tabbed ? <ToolsTabs tab={toolsTab} onTab={setToolsTab} /> : undefined
 
   const padPress = (pad: PhysicalPad): PressTarget | null =>
     onPad === null
@@ -324,46 +471,87 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           press: (hold) => onPad(pad, hold),
           release: () => props.onPadUp?.(pad),
         }
+  const padUi: PadUi = { press: padPress, edit: edit !== null ? edit.onPad : null, editing, drop }
 
   const modeRow = (
-    <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} />
+    <ModeRow
+      keys={keys}
+      actions={actions}
+      picker={props.onPicker ? picker : undefined}
+      onPicker={props.onPicker}
+      plan={plan}
+    />
   )
+  const displayStrip = editing ? <EditStrip /> : <DisplayStrip st={st} mirror={mirror} />
   const allGroups = (
     <div class="live__all">
       <div class="live__head">
         <Caption text={MirrorText.TITLE} as="h1" />
         {onBack && <CloseKey class="live__close" onClick={onBack} description={GUIDE_CLOSE} />}
       </div>
-      <Display st={st} mirror={mirror} initialNoteOpen={props.initialNoteOpen ?? false} />
+      {editing ? <EditStrip /> : <Display st={st} mirror={mirror} initialNoteOpen={props.initialNoteOpen ?? false} />}
       {modeRow}
       {/* Four groups in a row when there is room, two by two on a phone. */}
       <div class="live__groups">
         <div class="live__grid">
           {[0, 1, 2, 3].map((g) => (
-            <Group
-              key={g}
-              group={g}
-              st={st}
-              nameOf={nameOf}
-              now={now}
-              press={padPress}
-              playingPads={playingPads}
-              tracker={tracker}
-            />
+            <Group key={g} group={g} st={st} nameOf={nameOf} now={now} ui={padUi} playingPads={playingPads} tracker={tracker} />
           ))}
         </div>
       </div>
     </div>
   )
+  // On the desk, EDIT's tab on the panel's left side (the shell draws it on a phone).
+  const editTab = desk && edit !== null && !keys.on ? (
+    <EditEdgeTab class="live-edit-tab" on={edit.on} onChange={edit.onChange} />
+  ) : null
 
   let page: JSX.Element
-  if (desk) {
+  if (pianoRange !== null) {
+    // KEYS on the piano: the display line, the row over the keys, the keys across the page
+    // (on the desk on the device's body, the colours' legend under it).
+    page = (
+      <div class={`live-piano${desk ? ' live-piano--desk' : ''}`} style={{ '--piano-h': `${plan.height}px` }}>
+        {onBack && (
+          <div class="live__head">
+            <Caption text={MirrorText.TITLE} />
+            <CloseKey class="live__close" onClick={onBack} description={GUIDE_CLOSE} />
+          </div>
+        )}
+        <div class="live-piano__body">
+          <KeysDisplay st={st} mirror={mirror} keys={keys} pianoRange={pianoRange} />
+          {modeRow}
+          <div
+            class="live-piano__keys"
+            data-coach="live.keys"
+            data-coach-label={CoachText.PIANO}
+            data-coach-face={COACH_YELLOW}
+            data-coach-ink={COACH_YELLOW_INK}
+          >
+            <PianoKeyboard
+              class={desk ? 'piano--flat' : undefined}
+              range={pianoRange}
+              st={st}
+              keys={keys}
+              playingNotes={keys.playingNotes}
+              now={now}
+              onNote={(n, hold) => actions.onNote?.(n, hold)}
+              onNoteUp={(n) => actions.onNoteUp?.(n)}
+              computer={desk || fine}
+              onOctave={(o) => actions.onOctave?.(o)}
+            />
+          </div>
+        </div>
+        {desk && <PianoLegend />}
+      </div>
+    )
+  } else if (desk) {
     // The desk: the K.O. II (or the row of groups) in the room left of the docked tools.
     let body: JSX.Element
     if (keys.on && keyNotes) {
       body = (
         <div class="live-ko live-ko--keys">
-          <KeysDisplay st={st} mirror={mirror} keys={keys} />
+          <KeysDisplay st={st} mirror={mirror} keys={keys} pianoRange={null} />
           {modeRow}
           <div class="live-ko__body">
             <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={actions} tracker={tracker} />
@@ -373,21 +561,12 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     } else if (oneGroup) {
       body = (
         <div class="live-ko">
-          <DisplayStrip st={st} mirror={mirror} />
+          {editTab}
+          {displayStrip}
           {modeRow}
           <div class="live-ko__body">
             <GroupKeys group={group} st={st} now={now} onSelect={setGroup} vertical />
-            <Group
-              group={group}
-              st={st}
-              nameOf={nameOf}
-              now={now}
-              big
-              coach
-              press={padPress}
-              playingPads={playingPads}
-              tracker={tracker}
-            />
+            <Group group={group} st={st} nameOf={nameOf} now={now} big coach ui={padUi} playingPads={playingPads} tracker={tracker} />
           </div>
         </div>
       )
@@ -395,27 +574,23 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
       // All four in one row, nothing to scroll, so a press plays at once.
       body = (
         <div class="live-row desk-paper" style={{ '--row-pad': `${rowPad}px` }}>
-          <DisplayStrip st={st} mirror={mirror} />
+          {editTab}
+          {displayStrip}
           {modeRow}
           <div class="live-row__groups">
             {[0, 1, 2, 3].map((g) => (
-              <Group
-                key={g}
-                group={g}
-                st={st}
-                nameOf={nameOf}
-                now={now}
-                fill
-                press={padPress}
-                playingPads={playingPads}
-                tracker={tracker}
-              />
+              <Group key={g} group={g} st={st} nameOf={nameOf} now={now} fill ui={padUi} playingPads={playingPads} tracker={tracker} />
             ))}
           </div>
         </div>
       )
     } else {
-      body = <div class="live-scroll desk-paper">{allGroups}</div>
+      body = (
+        <div class="live-scroll-wrap">
+          {editTab}
+          <div class="live-scroll desk-paper">{allGroups}</div>
+        </div>
+      )
     }
     page = (
       <div class="live-stage">
@@ -432,7 +607,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     page = (
       // One group (or the keys) fills the screen without scrolling: the display line, the grid
       // (its rows share whatever height is left) and the group keys.
-      <div class="live__one">
+      <div class={`live__one${sideways && !keys.on ? ' live__one--side' : ''}`}>
         {onBack && (
           <div class="live__head">
             <Caption text={MirrorText.TITLE} />
@@ -441,24 +616,25 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         )}
         {keys.on && keyNotes ? (
           <>
-            <KeysDisplay st={st} mirror={mirror} keys={keys} />
+            <KeysDisplay st={st} mirror={mirror} keys={keys} pianoRange={null} />
             <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={actions} tracker={tracker} />
+            {modeRow}
+          </>
+        ) : sideways ? (
+          // A phone on its side (Android's sideways grid): the grid as tall as the room, the
+          // group keys a column on its right.
+          <>
+            {displayStrip}
+            <div class="live__side">
+              <Group group={group} st={st} nameOf={nameOf} now={now} big coach ui={padUi} playingPads={playingPads} tracker={tracker} />
+              <GroupKeys group={group} st={st} now={now} onSelect={setGroup} vertical />
+            </div>
             {modeRow}
           </>
         ) : (
           <>
-            <DisplayStrip st={st} mirror={mirror} />
-            <Group
-              group={group}
-              st={st}
-              nameOf={nameOf}
-              now={now}
-              big
-              coach
-              press={padPress}
-              playingPads={playingPads}
-              tracker={tracker}
-            />
+            {displayStrip}
+            <Group group={group} st={st} nameOf={nameOf} now={now} big coach ui={padUi} playingPads={playingPads} tracker={tracker} />
             {modeRow}
             <GroupKeys group={group} st={st} now={now} onSelect={setGroup} />
           </>
@@ -477,11 +653,126 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         onClose={() => props.onTools(false)}
         title={MirrorText.TOOLS}
         panel={panel}
-        docked={desk}
+        docked={docked}
+        dockHead={dockHead}
       >
         {page}
       </SideZone>
     </div>
+  )
+}
+
+/** The display line while EDIT is on: EDIT, and what a tap on a pad does now. */
+function EditStrip(): JSX.Element {
+  return (
+    <div class="live-strip live-strip--edit" aria-live="polite">
+      <span class="live-strip__sub">{MirrorText.EDIT_TAB}</span>
+      <span class="live-strip__line live-strip__line--start">{MirrorText.EDIT_LINE}</span>
+    </div>
+  )
+}
+
+/** The desk's docked column's two tabs: the tools, and the device's sounds (EDIT). */
+function ToolsTabs(props: { tab: 'tools' | 'sounds'; onTab: (tab: 'tools' | 'sounds') => void }): JSX.Element {
+  const row = useRef<HTMLDivElement | null>(null)
+  const tabs = ['tools', 'sounds'] as const
+  const at = tabs.indexOf(props.tab)
+  return (
+    <div
+      ref={row}
+      class="live-tabs"
+      role="tablist"
+      aria-label={MirrorText.TOOLS}
+      onKeyDown={(e) => handleRovingKey(e, at, 2, row.current, (i) => props.onTab(tabs[i]!))}
+    >
+      {tabs.map((t, i) => {
+        const on = i === at
+        return (
+          <button
+            key={t}
+            type="button"
+            role="tab"
+            aria-selected={on}
+            tabIndex={on ? 0 : -1}
+            data-roving=""
+            data-coach={t === 'sounds' ? 'live.sounds' : undefined}
+            class={`live-tabs__tab cap-3d${on ? ' is-on is-down' : ''}`}
+            onClick={() => props.onTab(t)}
+          >
+            {t === 'tools' ? MirrorText.TAB_TOOLS : MirrorText.TAB_SOUNDS}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * The desk's Sounds tab: the device's sounds to drag onto a pad, the hint,
+ * and a drop zone for WAV files (uploaded to free slots).
+ */
+function SoundsPanel(props: { edit: EditUi; onDrag: (snd: SoundEntry | null) => void }): JSX.Element {
+  const { edit } = props
+  const [over, setOver] = useState(false)
+  const files = (e: TargetedDragEvent<HTMLElement>): boolean => e.dataTransfer?.types.includes('Files') ?? false
+  if (!edit.connected) return <p class="t-small live-sounds__hint">{MirrorText.EDIT_OFFLINE}</p>
+  return (
+    <div class="live-sounds">
+      <SoundPicker
+        sounds={edit.sounds}
+        playing={edit.playing}
+        onPlay={edit.onPlay}
+        onStop={edit.onStop}
+        onDrag={props.onDrag}
+        findLabel={FeatureText.FIND_HINT}
+        scroll
+      />
+      <p class="t-small live-sounds__hint">{WebText.DRAG_HINT}</p>
+      <div
+        class={`live-sounds__drop${over ? ' is-over' : ''}`}
+        onDragEnter={(e) => {
+          if (!files(e)) return
+          e.preventDefault()
+          setOver(true)
+        }}
+        onDragOver={(e) => {
+          if (!files(e)) return
+          e.preventDefault()
+          if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(e) => {
+          if (!files(e)) return
+          e.preventDefault()
+          // Not the page's own drop (a .pak import).
+          e.stopPropagation()
+          setOver(false)
+          edit.onUpload(Array.from(e.dataTransfer?.files ?? []))
+        }}
+      >
+        {WebText.DROP_SAMPLE}
+      </div>
+    </div>
+  )
+}
+
+/** The piano's colours, under it on the desk: what each mark means, with a small swatch. */
+function PianoLegend(): JSX.Element {
+  const rows: [string, string][] = [
+    ['device', MirrorText.LEGEND_DEVICE],
+    ['here', WebText.LIVE_LEGEND_HERE],
+    ['root', MirrorText.LEGEND_ROOT_BAR],
+    ['out', MirrorText.LEGEND_OUT],
+  ]
+  return (
+    <ul class="live-piano__legend">
+      {rows.map(([kind, text]) => (
+        <li key={kind}>
+          <span class={`live-chips__swatch live-chips__swatch--${kind}`} aria-hidden="true" />
+          {text}
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -550,6 +841,33 @@ function Display(props: { st: MirrorState; mirror: MirrorUi | null; initialNoteO
   )
 }
 
+/** A pad's long press in EDIT plays it (a tap opens its sheet). */
+const EDIT_HOLD_MS = 450
+
+/** What a press on a pad does, for every pad of a screen. */
+interface PadUi {
+  /** What a press plays (null: the pads stay still). */
+  press: (pad: PhysicalPad) => PressTarget | null
+  /** Opens a pad's sheet (EDIT, and a right-click with the mouse); null without EDIT. */
+  edit: ((pad: PhysicalPad) => void) | null
+  /** EDIT is on: a tap opens the sheet, a long press plays. */
+  editing: boolean
+  /** The desk: sounds and WAVs dropped on the pads; null elsewhere. */
+  drop: DropUi | null
+}
+
+/** Dropping on the pads (the desk). */
+interface DropUi {
+  /** The pad (padKey) something is dragged over, null when none. */
+  at: number | null
+  /** The device sound being dragged, by name, for "old → new" (null: a file, or from elsewhere). */
+  name: string | null
+  /** The sound on a pad now, when the mirror can't name it. */
+  nameNow: (pad: PhysicalPad) => string | null
+  onOver: (pad: number | null) => void
+  onDrop: (pad: PhysicalPad, e: TargetedDragEvent<HTMLElement>) => void
+}
+
 interface GroupProps {
   group: number
   st: MirrorState
@@ -560,14 +878,13 @@ interface GroupProps {
   fill?: boolean
   /** The guide overlay's "pads light as you play" tag (the big grid only). */
   coach?: boolean
-  /** What a press on a pad plays (null: the pads stay still). */
-  press: (pad: PhysicalPad) => PressTarget | null
+  ui: PadUi
   playingPads: ReadonlySet<number>
   tracker: PressTracker
 }
 
 function Group(props: GroupProps): JSX.Element {
-  const { group, st, nameOf, now, big = false, fill = false, press, playingPads, tracker } = props
+  const { group, st, nameOf, now, big = false, fill = false, ui, playingPads, tracker } = props
   const letter = MirrorText.groupKey(group)
   return (
     <div
@@ -596,7 +913,7 @@ function Group(props: GroupProps): JSX.Element {
                   now={now}
                   big={big}
                   scroll={!big && !fill}
-                  press={press(pad)}
+                  ui={ui}
                   playing={playingPads.has(padKey(pad))}
                   tracker={tracker}
                 />
@@ -612,7 +929,7 @@ function Group(props: GroupProps): JSX.Element {
 /**
  * The group keys under the single grid, pale caps under LEDs as on the K.O. II:
  * the group shown stays down with its LED lit; a group lights orange while one
- * of its pads sounds. [vertical] (the desk): a column beside the grid, each key
+ * of its pads sounds. [vertical] (the desk, a phone on its side): a column beside the grid, each key
  * a pad row high (the roving keys take up / down as well as left / right).
  */
 function GroupKeys(props: {
@@ -671,59 +988,181 @@ interface PadProps {
   big: boolean
   /** On the scrolling all-groups page: a drag across the pads scrolls rather than plays. */
   scroll: boolean
-  press: PressTarget | null
+  ui: PadUi
   /** Playing on the phone: a signal-orange ring inside the pad. */
   playing: boolean
   tracker: PressTracker
 }
 
+/** A press on a pad in EDIT, kept across renders (the mirror re-renders the pads while a finger is down). */
+interface EditPress {
+  timer: ReturnType<typeof setTimeout> | null
+  /** The long press started the pad's sound. */
+  held: boolean
+  /** The pointer pressing it, null when none. */
+  id: number | null
+  /** The kind of the last pointer down on the pad ('mouse' makes a right-click open the sheet). */
+  pointer: string
+}
+
+const newEditPress = (): EditPress => ({ timer: null, held: false, id: null, pointer: '' })
+
+/**
+ * A pad's handlers in EDIT: a tap opens its sheet; held past [EDIT_HOLD_MS]
+ * it plays until let go, as outside EDIT. A drag that turns into a scroll
+ * (the all-groups page) cancels it, opening nothing.
+ */
+function editHandlers(st: EditPress, press: PressTarget | null, open: () => void): ButtonHTMLAttributes<HTMLButtonElement> {
+  const end = (el: HTMLElement, tap: boolean): void => {
+    el.removeAttribute('data-down')
+    if (st.timer !== null) {
+      clearTimeout(st.timer)
+      st.timer = null
+      if (tap) open()
+    } else if (st.held) press?.release()
+    st.held = false
+    st.id = null
+  }
+  return {
+    onPointerDown: (e) => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return
+      if (st.id !== null) return
+      st.id = e.pointerId
+      e.currentTarget.setAttribute('data-down', '')
+      st.timer = setTimeout(() => {
+        st.timer = null
+        st.held = press !== null
+        press?.press(true)
+      }, EDIT_HOLD_MS)
+    },
+    onPointerUp: (e) => {
+      if (e.pointerId === st.id) end(e.currentTarget, true)
+    },
+    onPointerCancel: (e) => {
+      if (e.pointerId === st.id) end(e.currentTarget, false)
+    },
+    onPointerLeave: (e) => {
+      if (e.pointerId === st.id) end(e.currentTarget, false)
+    },
+    // A screen reader's or the keyboard's activation: the sheet.
+    onClick: (e) => {
+      if (e.detail === 0) open()
+    },
+  }
+}
+
 function Pad(props: PadProps): JSX.Element {
-  const { pad, light, name, big, scroll, press, playing, tracker } = props
+  const { pad, light, name, big, scroll, ui, playing, tracker } = props
+  const press = ui.press(pad)
+  const edit = useRef<EditPress>(newEditPress())
+  // A long press still waiting when the pad goes (EDIT off, another view) plays nothing.
+  useEffect(() => () => {
+    if (edit.current.timer !== null) clearTimeout(edit.current.timer)
+  }, [])
   const g = light ? glow(light, props.now) : 0
   const wide = pad.label.length > 1
   const label = `${pad.groupLetter} ${pad.label}` + (name !== null ? `, ${name}` : '')
-  const cls = `live-pad cap-3d${big ? ' live-pad--big' : ''}${playing ? ' is-playing' : ''}`
+  const key = padKey(pad)
+  const dropping = ui.drop !== null && ui.drop.at === key
+  const cls =
+    `live-pad cap-3d${big ? ' live-pad--big' : ''}${playing ? ' is-playing' : ''}` +
+    (ui.editing ? ' is-editing' : '') +
+    (dropping ? ' is-drop' : '')
+  // Over a pad, a dragged sound shows what it would replace: "snare 2 → vox chop".
+  const shown = dropping && ui.drop?.name != null ? MirrorText.dropPreview(name ?? ui.drop.nameNow(pad), ui.drop.name) : name
   const content = (
     <>
       {/* The key's own label in the corner (web: top left, where the K.O. II prints it). */}
       <span class={`live-pad__label${wide ? ' live-pad__label--wide' : ''}`}>{pad.label}</span>
-      {name !== null && <span class="live-pad__name">{name}</span>}
+      {shown !== null && <span class="live-pad__name">{shown}</span>}
+      {ui.editing && !dropping && <span class="live-pad__swap" aria-hidden="true">{'\u21C4'}</span>}
+      {dropping && <span class="live-pad__drop" aria-hidden="true">{WebText.DROP}</span>}
     </>
   )
-  if (press === null) {
+  // The desk: sounds from the Sounds tab and WAV files drop on it.
+  const drop = ui.drop
+  const accepts = (e: TargetedDragEvent<HTMLElement>): boolean => {
+    const types = e.dataTransfer?.types ?? []
+    return types.includes(SLOT_MIME) || types.includes('Files')
+  }
+  const dropHandlers = drop
+    ? {
+        onDragEnter: (e: TargetedDragEvent<HTMLElement>) => {
+          if (!accepts(e)) return
+          e.preventDefault()
+          drop.onOver(key)
+        },
+        onDragOver: (e: TargetedDragEvent<HTMLElement>) => {
+          if (!accepts(e)) return
+          e.preventDefault()
+          if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+          if (drop.at !== key) drop.onOver(key)
+        },
+        onDragLeave: (e: TargetedDragEvent<HTMLElement>) => {
+          const to = e.relatedTarget
+          if (to instanceof Node && e.currentTarget.contains(to)) return
+          if (drop.at === key) drop.onOver(null)
+        },
+        onDrop: (e: TargetedDragEvent<HTMLElement>) => {
+          if (!accepts(e)) return
+          e.preventDefault()
+          // Not the page's own drop (a .pak import).
+          e.stopPropagation()
+          drop.onDrop(pad, e)
+        },
+      }
+    : {}
+  const open = ui.edit
+  if (press === null && !(ui.editing && open)) {
     return (
-      <div class={cls} role="img" aria-label={label} data-pad={padKey(pad)} style={{ '--glow': glowCss(g) }}>
+      <div class={cls} role="img" aria-label={label} data-pad={key} style={{ '--glow': glowCss(g) }} {...dropHandlers}>
         {content}
       </div>
     )
   }
-  // The big grid (and the desk's row) doesn't scroll: it plays on touch-down. The
-  // all-groups page scrolls, so there a drag across the pads must not play them.
+  const handlers = ui.editing && open ? editHandlers(edit.current, press, () => open(pad)) : holdHandlers(tracker, press!, scroll)
+  // A right-click with the mouse opens the pad's sheet (a long press on a touch screen still plays).
+  const onPointerDown = handlers.onPointerDown
   return (
+    // The big grid (and the desk's row) doesn't scroll: it plays on touch-down. The
+    // all-groups page scrolls, so there a drag across the pads must not play them.
     <button
       type="button"
       class={`${cls} live-pad--press${scroll ? ' live-pad--scroll' : ''}`}
       aria-label={label}
-      aria-description={MirrorText.PLAY}
-      data-pad={padKey(pad)}
+      aria-description={ui.editing ? MirrorText.EDIT_LINE : MirrorText.PLAY}
+      data-pad={key}
       style={{ '--glow': glowCss(g) }}
-      {...holdHandlers(tracker, press, scroll)}
+      {...handlers}
+      {...dropHandlers}
+      onPointerDown={(e) => {
+        edit.current.pointer = e.pointerType
+        onPointerDown?.(e)
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        if (open && edit.current.pointer === 'mouse') open(pad)
+      }}
     >
       {content}
     </button>
   )
 }
 
-/** Two octaves around the last note outside the pads, with held notes lit. */
-function KeysStrip(props: { st: MirrorState; last: number }): JSX.Element {
-  const { st, last } = props
+/**
+ * The last note outside the pads in a small dark display: "KEYS · F5" and its
+ * channel while held, over two octaves around it with the held notes lit.
+ */
+function KeysStrip(props: { st: MirrorState; last: number; names: NoteNames }): JSX.Element {
+  const { st, last, names } = props
   const ch = st.keysHeld.get(last)
   return (
-    <div class="live-tools__keys">
-      <p class="t-small live-tools__note">
-        {MirrorText.KEYS + ' · ' + noteName(last) + (ch !== undefined ? ' · ' + MirrorText.channel(ch) : '')}
+    <div class="live-tools__last">
+      <p class="live-tools__last-line">
+        <span>{MirrorText.lastNote(last, names)}</span>
+        {ch !== undefined && <span class="live-tools__last-ch">{MirrorText.channel(ch)}</span>}
       </p>
-      <div class="keys-strip" role="img" aria-label={MirrorText.KEYS + ' ' + noteName(last)}>
+      <div class="keys-strip" role="img" aria-label={MirrorText.KEYS + ' ' + MirrorText.noteName(last, names)}>
         {keysLayout(last).map((k) => (
           <span
             key={k.note}
@@ -736,51 +1175,30 @@ function KeysStrip(props: { st: MirrorState; last: number }): JSX.Element {
   )
 }
 
-function Notes(props: {
-  st: MirrorState
-  mirror: MirrorUi | null
-  onPadOrder: (order: PadOrder) => void
-  tapToPlay: boolean
-}): JSX.Element {
-  const { st, mirror, onPadOrder } = props
-  const orders: readonly [PadOrder, string][] = [
-    [PadOrder.FROM_TOP, MirrorText.FROM_TOP],
-    [PadOrder.FROM_BOTTOM, MirrorText.FROM_BOTTOM],
-  ]
+/** The long notes on how Live reads the device, folded under one disclosure. */
+function Notes(props: { st: MirrorState; mirror: MirrorUi | null; tapToPlay: boolean }): JSX.Element {
+  const { st, mirror } = props
   return (
-    <div class="live-tools__notes">
-      {props.tapToPlay && <p class="t-small live-tools__note">{WebText.LIVE_TAP_NOTE}</p>}
-      {mirror?.offline != null && <p class="t-small live-tools__note">{MirrorText.OFFLINE_NOTE}</p>}
+    <Disclosure title={MirrorText.HOW_LIVE_READS}>
+      {props.tapToPlay && <p>{WebText.LIVE_TAP_NOTE}</p>}
+      {mirror?.offline != null && <p>{MirrorText.OFFLINE_NOTE}</p>}
       {st.padOrder === PadOrder.FROM_TOP && (
         <>
-          <p class="t-small live-tools__note">{MirrorText.LEARN_NOTE}</p>
-          {showNoPushes(st, mirror) && <p class="t-small live-tools__note">{MirrorText.NO_PUSHES}</p>}
+          <p>{MirrorText.LEARN_NOTE}</p>
+          {showNoPushes(st, mirror) && <p>{MirrorText.NO_PUSHES}</p>}
         </>
       )}
-      <Caption text={MirrorText.PAD_ORDER} align="start" as="h3" class="live-tools__order-caption" />
-      <div class="live-tools__orders" role="group" aria-label={MirrorText.PAD_ORDER}>
-        {orders.map(([order, label]) => (
-          <Key
-            key={order}
-            text={label}
-            size="small"
-            variant={st.padOrder === order ? 'navy' : 'normal'}
-            aria-pressed={st.padOrder === order}
-            onClick={() => onPadOrder(order)}
-          />
-        ))}
-      </div>
-      <p class="t-small live-tools__note">{MirrorText.ORDER_NOTE}</p>
-      <p class="t-small live-tools__note">{MirrorText.COMMUNITY_NOTE}</p>
-      <p class="t-small live-tools__note">{MirrorText.LISTEN_ONLY}</p>
-    </div>
+      <p>{MirrorText.COMMUNITY_NOTE}</p>
+      <p>{MirrorText.LISTEN_ONLY}</p>
+    </Disclosure>
   )
 }
 
 /**
  * The row right under the grid, as the PO app's DRUMS / KEYPAD: one word for
- * the mode that a tap switches (PADS ⇄ KEYS), and in KEYS the scale and the
- * octave, a tap on either of which lists the choices.
+ * the mode that a tap switches (PADS ⇄ KEYS), and in KEYS the view switch
+ * (where offered), the scale and the octave, a tap on either of which lists
+ * the choices. Over the piano it is Android's SidewaysRow ([SidewaysRow]).
  */
 function ModeRow(props: {
   keys: KeysUi
@@ -788,8 +1206,10 @@ function ModeRow(props: {
   /** Kept by the caller when given (undefined: each word keeps its own). */
   picker?: KeysPicker | null
   onPicker?: (picker: KeysPicker | null) => void
+  /** Whether the piano shows (and the switch is offered) in this window. */
+  plan: PianoPlan
 }): JSX.Element {
-  const { keys, actions, picker, onPicker } = props
+  const { keys, actions, picker, onPicker, plan } = props
   const pick = (which: KeysPicker): { open?: boolean; onOpen?: (open: boolean) => void } =>
     onPicker
       ? {
@@ -800,21 +1220,36 @@ function ModeRow(props: {
           },
         }
       : {}
+  const piano = keys.on && plan.range !== null
+  const modeWord = (
+    <WordButton
+      label={keys.on ? MirrorText.MODE_KEYS : MirrorText.MODE_PADS}
+      onClick={() => actions.onMode?.(!keys.on)}
+      mark
+      description={MirrorText.modeSwitch(keys.on)}
+      top={!piano}
+      data-coach="live.mode"
+      data-coach-label={CoachText.MODE}
+      data-coach-face="var(--navy)"
+      data-coach-ink="var(--on-navy)"
+    />
+  )
+  const viewSwitch = keys.on && plan.switchShown && (
+    <KeysViewSwitch piano={piano} room={plan.room} onView={(p) => actions.onView?.(plan.wide, chosenView(p))} />
+  )
+  if (piano) return <SidewaysRow keys={keys} actions={actions} pick={pick} mode={modeWord} view={viewSwitch} />
   return (
     // Spread across the row: mode at the start, octave at the end, scale between; pulled
     // up close under the grid (the words keep their full touch height).
     <div class="live-mode">
-      <WordButton
-        label={keys.on ? MirrorText.MODE_KEYS : MirrorText.MODE_PADS}
-        onClick={() => actions.onMode?.(!keys.on)}
-        mark
-        description={MirrorText.modeSwitch(keys.on)}
-        top
-        data-coach="live.mode"
-        data-coach-label={CoachText.MODE}
-        data-coach-face="var(--navy)"
-        data-coach-ink="var(--on-navy)"
-      />
+      {viewSwitch ? (
+        <span class="live-mode__lead">
+          {modeWord}
+          {viewSwitch}
+        </span>
+      ) : (
+        modeWord
+      )}
       {keys.on && (
         <>
           <PickWord
@@ -844,14 +1279,188 @@ function ModeRow(props: {
   )
 }
 
-/** The KEYS display line: KEYS and the last note on the left, the sound it plays on the right. */
-function KeysDisplay(props: { st: MirrorState; mirror: MirrorUi | null; keys: KeysUi }): JSX.Element {
+/** Below this window height a landscape window lays one group out sideways (a phone on its side). */
+const SIDEWAYS_MAX_HEIGHT = 560
+
+/** The row's widths at which the key word drops its KEY, and the scale shortens to its code (Android measures them). */
+const KEY_WORD_ROOM = 560
+const SCALE_NAME_ROOM = 470
+
+/**
+ * The row over the piano (Android's SidewaysRow): the mode, the view
+ * switch, the scale and the key at the start, the octave between − and +
+ * at the end; every list opens downward over the keys. Short of room, the
+ * key word drops its KEY, then the scale shortens to its code.
+ */
+function SidewaysRow(props: {
+  keys: KeysUi
+  actions: KeysActions
+  pick: (which: KeysPicker) => { open?: boolean; onOpen?: (open: boolean) => void }
+  mode: JSX.Element
+  view: JSX.Element | false
+}): JSX.Element {
+  const { keys, actions, pick } = props
+  const row = useRef<HTMLDivElement | null>(null)
+  const width = useBoxSize(row, true).width
+  const tight = width > 0 && width < KEY_WORD_ROOM
+  const key = tight ? Keys.name(keys.root, keys.names) : MirrorText.keyWord(keys.root, keys.names)
+  const scale = width > 0 && width < SCALE_NAME_ROOM ? MirrorText.scaleCode(keys.scale) : MirrorText.scaleName(keys.scale)
+  return (
+    <div ref={row} class="live-mode live-mode--sideways">
+      {props.mode}
+      {props.view}
+      <PickWord
+        label={scale}
+        options={SCALES}
+        selected={keys.scale}
+        name={MirrorText.scaleName}
+        onPick={(s) => actions.onScale?.(s)}
+        description={MirrorText.scaleChoice(keys.scale)}
+        coach={{ id: 'live.scale', label: CoachText.SCALE }}
+        {...pick('scale')}
+        down
+        middle
+      />
+      {/* The key, which upright is in the tools: twelve names in two rows of six, as there. */}
+      <PickWord
+        label={key}
+        options={KEY_ROOTS}
+        selected={keys.root}
+        name={(r) => Keys.name(r, keys.names)}
+        onPick={(r) => actions.onRoot?.(r)}
+        description={MirrorText.keyChoice(keys.root, keys.names)}
+        coach={{ id: 'live.key', label: CoachText.KEY }}
+        columns={6}
+        // Six columns wide: lined up with the word's end, so it stays on a narrow screen.
+        alignEnd
+        down
+        middle
+      />
+      <span class="live-mode__gap" />
+      <StepWord glyph={'\u2212'} description={MirrorText.OCTAVE_DOWN} enabled={keys.octave > MIN_OCTAVE} onClick={() => actions.onOctave?.(keys.octave - 1)} />
+      <PickWord
+        label={MirrorText.octave(keys.octave)}
+        options={octaves()}
+        selected={keys.octave}
+        name={MirrorText.octave}
+        onPick={(o) => actions.onOctave?.(o)}
+        description={MirrorText.octaveChoice(keys.octave)}
+        coach={{ id: 'live.octave', label: CoachText.OCTAVE }}
+        {...pick('octave')}
+        alignEnd
+        down
+        middle
+      />
+      <StepWord glyph="+" description={MirrorText.OCTAVE_UP} enabled={keys.octave < MAX_OCTAVE} onClick={() => actions.onOctave?.(keys.octave + 1)} />
+    </div>
+  )
+}
+
+const KEY_ROOTS: readonly number[] = Object.freeze([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+
+/** − or + by the octave word: one octave down or up, greyed (and disabled) at either end. */
+function StepWord(props: { glyph: string; description: string; enabled: boolean; onClick: () => void }): JSX.Element {
+  return (
+    <button
+      type="button"
+      class="live-step"
+      aria-label={props.description}
+      disabled={!props.enabled}
+      onClick={props.onClick}
+    >
+      <span aria-hidden="true">{props.glyph}</span>
+    </button>
+  )
+}
+
+/**
+ * KEYS on the pads or the piano: two small icon caps after the KEYS word, a
+ * radio group (the arrows move between them). The piano's is greyed out
+ * where it has no room.
+ */
+function KeysViewSwitch(props: { piano: boolean; room: boolean; onView: (piano: boolean) => void }): JSX.Element {
+  const { piano, room } = props
+  const group = useRef<HTMLDivElement | null>(null)
+  const choose = (p: boolean): void => {
+    if (p && !room) return
+    if (p !== piano) props.onView(p)
+  }
+  return (
+    <div
+      ref={group}
+      class="live-view"
+      role="radiogroup"
+      aria-label={MirrorText.KEYS_VIEW}
+      data-coach="live.view"
+      onKeyDown={(e) => {
+        if (!room) return
+        handleRovingKey(e, piano ? 1 : 0, 2, group.current, (i) => choose(i === 1))
+      }}
+    >
+      {[false, true].map((p) => {
+        const on = p === piano
+        const off = p && !room
+        return (
+          <button
+            key={String(p)}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            aria-label={MirrorText.keysView(p)}
+            aria-description={off ? MirrorText.PIANO_NO_ROOM : undefined}
+            title={off ? MirrorText.PIANO_NO_ROOM : MirrorText.keysView(p)}
+            disabled={off}
+            tabIndex={on ? 0 : -1}
+            data-roving=""
+            class={`live-view__key cap-3d${on ? ' is-on is-down' : ''}`}
+            onClick={() => choose(p)}
+          >
+            {p ? <PianoIcon /> : <GridIcon />}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/** The pads: a 3×3 grid of small squares. */
+function GridIcon(): JSX.Element {
+  return (
+    <svg width="20" height="16" viewBox="0 0 20 16" aria-hidden="true" focusable="false">
+      <g fill="currentColor">
+        {[1, 6, 11].map((y) => [1, 7.5, 14].map((x) => <rect key={`${x}:${y}`} x={x} y={y} width="5" height="4" rx="1" />))}
+      </g>
+    </svg>
+  )
+}
+
+/** The piano: an outlined keyboard with three black keys. */
+function PianoIcon(): JSX.Element {
+  return (
+    <svg width="20" height="16" viewBox="0 0 20 16" aria-hidden="true" focusable="false">
+      <rect x="1" y="1" width="18" height="14" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6" />
+      <g fill="currentColor">
+        <rect x="4.5" y="1" width="2.4" height="8" />
+        <rect x="9" y="1" width="2.4" height="8" />
+        <rect x="13.5" y="1" width="2.4" height="8" />
+      </g>
+      <path d="M6 9v6M10.2 9v6M14.7 9v6" stroke="currentColor" stroke-width="1.2" />
+    </svg>
+  )
+}
+
+/**
+ * The KEYS display line: KEYS and the last note on the left, the sound it
+ * plays on the right. A device note past the piano's ends ([pianoRange]) is
+ * named as such: there's no key to light for it.
+ */
+function KeysDisplay(props: { st: MirrorState; mirror: MirrorUi | null; keys: KeysUi; pianoRange: NoteRange | null }): JSX.Element {
   const { st, mirror, keys } = props
-  const note = keysDisplayNote(keys, st.lastNote)
+  const note = keysNoteText(keys, st.lastNote, props.pianoRange)
   return (
     <div class="live-strip" aria-live="polite">
       <span class="live-strip__sub live-strip__dim">{MirrorText.MODE_KEYS.toUpperCase()}</span>
-      {note !== null && <span class="live-strip__sub live-strip__ink">{MirrorText.noteName(note, keys.names)}</span>}
+      {note !== null && <span class="live-strip__sub live-strip__ink live-strip__note">{note}</span>}
       {mirror?.offline != null && <span class="live-strip__sub live-strip__dim">{MirrorText.OFFLINE}</span>}
       <span class="live-strip__line">
         {keys.pad !== null ? MirrorText.keysSound(keys.pad, keys.padName) : MirrorText.NO_SOUND}
@@ -927,28 +1536,57 @@ function KeysGrid(props: {
   )
 }
 
-/** The KEYS tools: the key (fixed-do names) and the scale. */
-function KeysPanel(props: { keys: KeysUi; actions: KeysActions }): JSX.Element {
-  const { keys, actions } = props
-  const rows = [
-    [0, 1, 2, 3, 4, 5],
-    [6, 7, 8, 9, 10, 11],
-  ]
+/**
+ * The KEYS tools: the key on a one-octave piano, the colours as chips, and
+ * how Keys works (its note and the long legend) under a disclosure.
+ * [piano]: the piano is showing, and its two chips with it.
+ */
+function KeysPanel(props: { keys: KeysUi; actions: KeysActions; piano?: boolean }): JSX.Element {
+  const { keys, actions, piano = false } = props
+  const keyId = useId()
   return (
     <>
-      <Caption text={MirrorText.KEY} align="start" />
-      {rows.map((row, i) => (
-        <Segmented
-          key={i}
-          options={row.map((n) => Keys.name(n, keys.names))}
-          selected={row.indexOf(keys.root)}
-          onSelect={(j) => actions.onRoot?.(row[j]!)}
-          label={MirrorText.KEY}
+      <div class="row-card live-tools__card">
+        <p class="live-tools__title">
+          <span id={`${keyId}-k`}>{MirrorText.KEY}</span>
+          <span class="live-tools__hint" id={`${keyId}-h`}>{MirrorText.KEY_HINT}</span>
+        </p>
+        <MiniPiano
+          selected={keys.root}
+          onSelect={(r) => actions.onRoot?.(r)}
+          names={keys.names}
+          labelledBy={`${keyId}-k`}
+          describedBy={`${keyId}-h`}
         />
-      ))}
-      <p class="t-small live-tools__note">{MirrorText.KEYS_NOTE}</p>
-      <KeysLegend names={keys.showNames ? keys.names : null} />
+      </div>
+      <div class="row-card live-tools__card">
+        <p class="live-tools__title" id={`${keyId}-c`}>{MirrorText.LEGEND}</p>
+        <KeysChips piano={piano} labelledBy={`${keyId}-c`} />
+      </div>
+      <Disclosure title={MirrorText.HOW_KEYS_WORKS}>
+        <p>{MirrorText.KEYS_NOTE}</p>
+        <KeysLegend names={keys.showNames ? keys.names : null} />
+      </Disclosure>
     </>
+  )
+}
+
+/** The colours as compact chips: a swatch and a word or two each. */
+function KeysChips(props: { piano: boolean; labelledBy: string }): JSX.Element {
+  const chips: [string, string][] = [
+    ['device', MirrorText.CHIP_DEVICE],
+    ['here', WebText.CHIP_HERE],
+  ]
+  if (props.piano) chips.push(['root', MirrorText.CHIP_ROOT], ['out', MirrorText.CHIP_OUT])
+  return (
+    <ul class="live-chips" aria-labelledby={props.labelledBy}>
+      {chips.map(([kind, text]) => (
+        <li key={kind} class="live-chips__chip">
+          <span class={`live-chips__swatch live-chips__swatch--${kind}`} aria-hidden="true" />
+          {text}
+        </li>
+      ))}
+    </ul>
   )
 }
 
@@ -961,7 +1599,6 @@ function KeysLegend(props: { names: NoteNames | null }): JSX.Element {
   const first = props.names === null ? 'var(--hw-ring)' : 'var(--hw-dark-ink)'
   return (
     <>
-      <Caption text={MirrorText.LEGEND} align="start" />
       <ul class="live-legend">
         <LegendRow text={props.names === null ? MirrorText.LEGEND_OCTAVE : MirrorText.LEGEND_OCTAVE_NAMED}>
           <LegendKey ring={first} name={name} />

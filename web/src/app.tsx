@@ -21,6 +21,11 @@
 // The guide overlay's host then holds the rail too (its Guide key carries the
 // edge.guide mark); it shows over the shell only, as on the phone. Below
 // 1024px the tree is the phone's, unchanged.
+//
+// Live's EDIT (Root's editPads): on while Live shows its pads; its tab is the
+// shell's second edge tab (on the desk, MirrorScreen hangs it on the K.O. II
+// panel), its pad sheet 'edit:<group>:<offset>' (ui/sheets/PadEditSheet), and
+// a new sample goes through the Device tab's upload sheet, mounted on Live too.
 import { Component, type ComponentChildren, type JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { MirrorText } from './core/text/mirrorText'
@@ -46,6 +51,7 @@ import {
   type NavView,
 } from './ui/nav'
 import { CoachHost, useCoachFirstRun } from './ui/components/Coach'
+import { EditEdgeTab } from './ui/components/EditEdgeTab'
 import { Key } from './ui/components/Key'
 import { NavRail } from './ui/components/NavRail'
 import { Sheet } from './ui/components/Sheet'
@@ -64,6 +70,7 @@ import { MirrorScreen } from './ui/screens/MirrorScreen'
 import { PICK_PREFIX as PICK, keysPickerOf } from './ui/live/keys'
 import { SearchScreen } from './ui/screens/SearchScreen'
 import { SettingsScreen } from './ui/screens/SettingsScreen'
+import { EDIT_PREFIX, PadEditSheet } from './ui/sheets/PadEditSheet'
 import { BackupPadsSheet, DevicePadsSheet } from './ui/sheets/PadsSheet'
 import { FontLicenceSheet } from './ui/sheets/FontLicenceSheet'
 import { DeviceUploadSheet } from './ui/sheets/UploadSheet'
@@ -126,6 +133,12 @@ function Root(): JSX.Element {
   const settings = c.settings.value
   const playing = c.playing.value
   const desk = useDesk()
+  // Live's EDIT (giving a pad another sound): on Live, in PADS, until switched off or left.
+  const [editPads, setEditPads] = useState(false)
+  const canEdit = v.tab === 'live' && !settings.liveKeys
+  useEffect(() => {
+    if (!canEdit && editPads) setEditPads(false)
+  }, [canEdit, editPads])
 
   // The guide overlay, once by itself on the first start (coach_seen), over the
   // shell. Not for automated browsers (screenshots, e2e), where it would only be in the way.
@@ -180,6 +193,7 @@ function Root(): JSX.Element {
         onClearPadSounds={() => void c.clearPadSounds()}
         onNoteNames={(n) => c.setKeysNames(n)}
         onShowNames={(on) => c.setKeysShowNames(on)}
+        onPianoWhites={(w) => c.setPianoWhites(w)}
         onRestoreFolder={() => void c.pickFolder()}
         onReconnectFolder={() => void c.reconnectFolder()}
         onExportLibrary={() => void c.exportLibrary()}
@@ -256,8 +270,10 @@ function Root(): JSX.Element {
         onGuide={(open) => (open ? nav.openScreen({ kind: 'guide' }) : nav.close(screenLayer({ kind: 'guide' })))}
         guide={<GuideScreen onBack={() => nav.close(screenLayer({ kind: 'guide' }))} />}
         desk={desk}
+        // Live's EDIT tab under GUIDE (on the desk it hangs on the K.O. II panel instead).
+        edgeTab={canEdit && !desk ? <EditEdgeTab on={editPads} onChange={setEditPads} inert={v.menu} /> : undefined}
       >
-        <TabScreen view={v} />
+        <TabScreen view={v} editPads={editPads} onEditPads={setEditPads} />
       </Shell>
     )
     // On the desk the overlay's host is around the whole desk instead (the rail's marks too).
@@ -303,6 +319,8 @@ function Root(): JSX.Element {
       ) : screen}
       {/* The Device tab's sheets: pads 'pads:device:<n>', upload / trim from state.browser.draft. */}
       {tabs && v.tab === 'device' && <><DevicePadsSheet view={v} /><DeviceUploadSheet view={v} /></>}
+      {/* Live's EDIT: the pad sheet 'edit:<group>:<offset>', and the upload / trim sheets for a new sample. */}
+      {tabs && v.tab === 'live' && <><PadEditSheet view={v} /><DeviceUploadSheet view={v} /></>}
       {/* The Backups tab's sheets: detail 'detail:<id>', compare picker 'comparePick:<id>',
           restore 'restore:<id>', the delete dialog 'delete'. */}
       {tabs && v.tab === 'backups' && <BackupsSheets view={v} />}
@@ -316,7 +334,7 @@ function Root(): JSX.Element {
 }
 
 /** The section under the top bar (Root's `when (tab)`). */
-function TabScreen(props: { view: NavView }): JSX.Element {
+function TabScreen(props: { view: NavView; editPads: boolean; onEditPads: (on: boolean) => void }): JSX.Element {
   const c = useController()
   const nav = useNav()
   const v = props.view
@@ -331,7 +349,6 @@ function TabScreen(props: { view: NavView }): JSX.Element {
         <MirrorScreen
           mirror={mirror}
           nameOf={(pad) => c.mirrorName(pad)}
-          onPadOrder={(o) => c.setPadOrder(o)}
           oneGroup={settings.liveOneGroup}
           onOneGroup={(on) => c.setLiveOneGroup(on)}
           follow={settings.liveFollow}
@@ -360,6 +377,26 @@ function TabScreen(props: { view: NavView }): JSX.Element {
             pad: state.keysPad,
             padName: state.keysPad ? c.mirrorName(state.keysPad) : null,
             playingKeys: c.playingKeys.value,
+            playingNotes: c.playingNotes.value,
+            pianoWhites: settings.pianoWhites,
+          }}
+          keysViewWide={settings.keysViewWide}
+          keysViewTall={settings.keysViewTall}
+          edit={{
+            on: props.editPads,
+            connected: state.device !== null,
+            onChange: props.onEditPads,
+            onPad: (pad) => {
+              if (c.editTarget(pad) !== null) nav.open(sheetLayer(`${EDIT_PREFIX}${pad.group}:${pad.offset}`))
+            },
+            onDropSlot: (pad, slot) => void c.assignPad(pad, slot),
+            onDropFile: (pad, file) => void c.uploadForPad(pad, [file]),
+            sounds: c.liveSounds(),
+            playing: c.playing.value,
+            onPlay: (slot) => void c.playDeviceSound(slot),
+            onStop: () => c.stopPlayback(),
+            onUpload: (files) => void c.dropSamples(files),
+            nameNow: (pad) => c.padSoundName(pad),
           }}
           keysActions={{
             onMode: (on) => c.setLiveKeys(on),
@@ -368,6 +405,9 @@ function TabScreen(props: { view: NavView }): JSX.Element {
             onOctave: (o) => c.setKeysOctave(o),
             onKey: (k, hold) => void c.playKey(k, hold),
             onKeyUp: (k) => c.releaseKey(k),
+            onNote: (n, hold) => void c.playNote(n, hold),
+            onNoteUp: (n) => c.releaseNote(n),
+            onView: (wide, view) => c.setKeysView(wide, view),
             onSelect: (pad) => c.selectKeysPad(pad),
           }}
         />

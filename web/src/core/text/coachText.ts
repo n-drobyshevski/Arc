@@ -18,6 +18,11 @@ export const CoachText = {
   MODE: 'Pads or keys',
   OCTAVE: 'Octave',
   SCALE: 'Scale',
+  KEY: 'Key',
+  PIANO: 'Play, or slide across the keys',
+  KEYS_VIEW: 'Pads or piano',
+  /** The EDIT edge tab's side tag. */
+  EDIT: "Change a pad's sound",
 
   SEARCH: 'Search sounds',
   IMPORT: 'Import a .pak',
@@ -28,6 +33,7 @@ export const CoachText = {
   FOLLOW: 'Follow the group played',
   PADS: 'Pads light as you play',
   MORE_TOOLS: 'More tools',
+  SOUNDS_TAB: 'Drag a sound onto a pad',
 
   REFRESH: 'Read the device again',
   ADD_SAMPLES: 'Add samples',

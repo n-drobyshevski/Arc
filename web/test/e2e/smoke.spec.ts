@@ -134,6 +134,20 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
     await expect(page.locator('[data-pad].is-playing')).toHaveCount(0)
   })
 
+  await test.step('7c. EDIT: a pad gets another sound at once, and UNDO puts the old one back', async () => {
+    await page.getByRole('button', { name: "Edit pads: change a pad's sound." }).click()
+    await page.locator('[data-pad]', { hasText: 'kick' }).first().click()
+    const sheet = page.getByRole('dialog', { name: /^Pad A / })
+    await expect(sheet).toBeVisible()
+    await sheet.getByRole('button', { name: /^002/ }).click()
+    await expect(page.getByRole('status')).toContainText(': snare')
+    await expect(page.locator('[data-pad]', { hasText: 'snare' })).toHaveCount(1)
+    await page.getByRole('button', { name: 'Undo' }).click()
+    await expect(page.getByRole('status')).toContainText('back to kick')
+    await expect(page.locator('[data-pad]', { hasText: 'kick' })).toHaveCount(1)
+    await page.getByRole('button', { name: /^Editing pads/ }).click()
+  })
+
   await test.step('8. import sample.pak: a second row', async () => {
     await selectTab(page, 'Backups')
     await importPak(page, SAMPLE_PAK)

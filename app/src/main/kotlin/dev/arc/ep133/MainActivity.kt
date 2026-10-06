@@ -54,6 +54,7 @@ import dev.arc.ep133.ui.screens.DebugScreen
 import dev.arc.ep133.ui.screens.GuideScreen
 import dev.arc.ep133.ui.screens.MirrorScreen
 import dev.arc.ep133.ui.screens.PadsSheetContent
+import dev.arc.ep133.ui.screens.PadSheetContent
 import dev.arc.ep133.ui.screens.SearchScreen
 import dev.arc.ep133.ui.screens.SettingsScreen
 import dev.arc.ep133.ui.screens.DeviceScreen
@@ -87,6 +88,14 @@ class MainActivity : ComponentActivity() {
     // Sample upload: pick one or more audio files (only WAV can be read; others are flagged).
     private val samplesLauncher = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         controller.pickForUpload(uris)
+    }
+
+    // EDIT's "Upload a new sample…": one file, for the pad whose sheet asked for it.
+    private var padUploadFor: Pair<dev.arc.ep133.features.PhysicalPad, dev.arc.ep133.features.PadTarget>? = null
+    private val padUploadLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val (pad, target) = padUploadFor ?: return@registerForActivityResult
+        padUploadFor = null
+        if (uri != null) withNotifications { controller.uploadToPad(uri, pad, target) }
     }
 
     private val importLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -355,6 +364,9 @@ class MainActivity : ComponentActivity() {
         var notesField by rememberSaveable { mutableStateOf("") }
         // The EP-133 shortcut guide, slid in from the left-edge tab.
         var guideOpen by rememberSaveable { mutableStateOf(false) }
+        // Live's EDIT (the tab under GUIDE), and the pad whose sheet is open with where its sound is set.
+        var liveEdit by rememberSaveable { mutableStateOf(false) }
+        var padSheet by remember { mutableStateOf<Pair<dev.arc.ep133.features.PhysicalPad, dev.arc.ep133.features.PadTarget>?>(null) }
         // The mirror listens only while its tab is in front (not under the debug, settings or guide screen).
         val live = tab == Tab.LIVE && !debug && !settingsOpen && !guideOpen
         val appSettings by controller.settings.collectAsStateWithLifecycle()
@@ -366,6 +378,8 @@ class MainActivity : ComponentActivity() {
                 Tab.LIVE -> {
                     controller.closeMirror()
                     controller.stopPlayback()
+                    liveEdit = false
+                    padSheet = null
                 }
                 Tab.DEVICE -> {
                     padsFor = null
@@ -387,6 +401,13 @@ class MainActivity : ComponentActivity() {
         // The mirror (re)starts when it opens and whenever a device is (re)connected or
         // goes away; without one it shows the last read.
         val ready = state.device != null
+        // EDIT writes to the device: it ends when the device goes.
+        LaunchedEffect(ready) {
+            if (!ready) {
+                liveEdit = false
+                padSheet = null
+            }
+        }
         // Only while the app is in front: in the background nothing listens or redraws.
         val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
         LaunchedEffect(live, ready) {
@@ -461,6 +482,9 @@ class MainActivity : ComponentActivity() {
             octave = appSettings.keysOctave,
             names = appSettings.keysNames,
             showNames = appSettings.keysShowNames,
+            pianoWhites = appSettings.pianoWhites,
+            viewWide = appSettings.keysViewWide,
+            viewTall = appSettings.keysViewTall,
             pad = state.keysPad,
             padName = state.keysPad?.let(controller::mirrorName),
             playingNotes = voices.mapNotNullTo(LinkedHashSet()) { v -> if (v.startsWith("note:")) v.removePrefix("note:").toIntOrNull() else null },
@@ -489,6 +513,7 @@ class MainActivity : ComponentActivity() {
                     onClearPadSounds = { controller.clearPadSounds() },
                     onNoteNames = controller::setKeysNames,
                     onShowNames = controller::setKeysShowNames,
+                    onPianoWhites = controller::setPianoWhites,
                     onRestoreFolder = { folderLauncher.launch(dev.arc.ep133.data.ExternalLibrary.INITIAL_FOLDER) },
                     // No browser installed: nothing to open.
                     onSource = { runCatching { uri.openUri(dev.arc.ep133.text.SettingsText.SOURCE_URL) } },
@@ -580,7 +605,7 @@ class MainActivity : ComponentActivity() {
                     onGuide = { guideOpen = it },
                     guide = { GuideScreen(onBack = { guideOpen = false }) },
                     // On a phone on its side, Live's display line rides in the top bar.
-                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, liveRec, pianoRange = pianoRange) }) else null,
+                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, liveRec, pianoRange = pianoRange, editing = liveEdit) }) else null,
                 ) {
                     // Back from another section returns to Live, the home section, first.
                     BackHandler(enabled = tab != Tab.LIVE) { selectTab(Tab.LIVE) }
@@ -588,7 +613,6 @@ class MainActivity : ComponentActivity() {
                         Tab.LIVE -> MirrorScreen(
                             mirror = mirror,
                             nameOf = controller::mirrorName,
-                            onPadOrder = controller::setPadOrder,
                             onPad = { pad, hold -> controller.playPad(pad, hold) },
                             onPadUp = controller::releasePad,
                             keys = keys,
@@ -601,6 +625,7 @@ class MainActivity : ComponentActivity() {
                                     onNote = { note, hold -> controller.playNote(note, hold) },
                                     onNoteUp = controller::releaseNote,
                                     onSelect = controller::selectKeysPad,
+                                    onView = controller::setKeysView,
                                 )
                             },
                             playingPads = voices.mapNotNullTo(HashSet()) { k ->
@@ -632,6 +657,14 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onDelete = { controller.deleteTake(it) },
                             ),
+                            edit = dev.arc.ep133.ui.screens.EditUi(
+                                on = liveEdit,
+                                onEdit = { on ->
+                                    // Only with the device there to write to.
+                                    if (on && !ready) controller.toast(dev.arc.ep133.text.MirrorText.EDIT_OFFLINE) else liveEdit = on
+                                },
+                                onPad = { pad -> controller.editTarget(pad)?.let { padSheet = pad to it } },
+                            ),
                         )
                         Tab.DEVICE -> DeviceScreen(
                             state = state,
@@ -662,6 +695,35 @@ class MainActivity : ComponentActivity() {
             }
             // The tab screens' sheets, over the frame (same condition as the branch above).
             if (onTabs) {
+                if (tab == Tab.LIVE) {
+                    val lastPadSheet = remember { mutableStateOf(padSheet) }.apply { if (padSheet != null) value = padSheet }.value
+                    fun closePadSheet() {
+                        padSheet = null
+                        if (playing?.startsWith("device:") == true) controller.stopPlayback()
+                    }
+                    ArcSheet(visible = padSheet != null, onDismiss = { closePadSheet() }) {
+                        lastPadSheet?.let { (pad, target) ->
+                            PadSheetContent(
+                                pad = pad,
+                                target = target,
+                                sounds = mirror?.sounds.orEmpty(),
+                                playing = playing,
+                                busy = state.busy,
+                                onPlay = { controller.playDeviceSound(it) },
+                                onStop = controller::stopPlayback,
+                                onPick = { slot ->
+                                    closePadSheet()
+                                    controller.assignPad(pad, target, slot)
+                                },
+                                onUpload = {
+                                    closePadSheet()
+                                    padUploadFor = pad to target
+                                    padUploadLauncher.launch(arrayOf("audio/*", "application/octet-stream"))
+                                },
+                            )
+                        }
+                    }
+                }
                 if (tab == Tab.DEVICE) {
                     val draft = state.browser.draft
                     val lastDraft = remember { mutableStateOf(draft) }.apply { if (draft != null) value = draft }.value
@@ -829,6 +891,8 @@ class MainActivity : ComponentActivity() {
                 text = toast?.text.orEmpty(),
                 error = toast?.error ?: false,
                 onTimeout = controller::dismissToast,
+                action = toast?.action,
+                onAction = toast?.onAction,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }

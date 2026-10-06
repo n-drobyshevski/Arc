@@ -56,6 +56,26 @@ export function fid(id: number): PadFid | null {
 }
 
 /**
+ * A key's pad number counted from the top row, as kmorrill's notes number
+ * the pad files: 7 8 9 are 1 2 3, 4 5 6 are 4 5 6, 1 2 3 are 7 8 9, and
+ * '.', '0', ENTER are 10, 11, 12. [offset] is the official note order (padNotes).
+ * Kotlin's `require` is a RangeError.
+ */
+export function topNumber(offset: number): number {
+  if (!(Number.isInteger(offset) && offset >= 0 && offset <= 11)) throw new RangeError(`no pad at offset ${offset}`)
+  return (3 - Math.trunc(offset / 3)) * 3 + (offset % 3) + 1
+}
+
+/** The pad file id of [fid] (the inverse of [fid]): 3200 + (project-1)*1000 + group*100 + pad. */
+export function node(f: PadFid): number {
+  const ok = (v: number, lo: number, hi: number): boolean => Number.isInteger(v) && v >= lo && v <= hi
+  if (!(ok(f.project, 1, 99) && ok(f.group, 0, 3) && ok(f.pad, 1, 12))) {
+    throw new RangeError(`no pad file for PadFid(project=${f.project}, group=${f.group}, pad=${f.pad})`)
+  }
+  return 3200 + (f.project - 1) * 1000 + f.group * 100 + f.pad
+}
+
+/**
  * How pad numbers in the project file (pads/<group>/pNN) relate to the keys.
  * Community sources disagree: kmorrill's midi-reference (calibrated on a
  * device with these pushes) says pNN is the pad file id's last term, counted

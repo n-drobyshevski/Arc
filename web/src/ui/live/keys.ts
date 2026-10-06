@@ -7,6 +7,8 @@
 import type { PadLight } from '../../core/features/liveMirror'
 import { Keys, MAX_OCTAVE, MIN_OCTAVE, type NoteNames, type Scale } from '../../core/features/keys'
 import type { PhysicalPad } from '../../core/features/padNotes'
+import type { NoteRange } from '../../core/features/piano'
+import { MirrorText } from '../../core/text/mirrorText'
 import { glow } from './glow'
 
 /** What the KEYS view shows: whether it is on, the key, scale and octave, and the sound it plays (Kotlin KeysUi). */
@@ -24,6 +26,10 @@ export interface KeysUi {
   readonly padName: string | null
   /** The keys playing on the phone (a chord), latest last, ringed. */
   readonly playingKeys: ReadonlySet<number>
+  /** The piano's notes playing on the phone, first pressed first, outlined (Kotlin playingNotes). */
+  readonly playingNotes: ReadonlySet<number>
+  /** The piano's white keys as chosen in Settings (Piano.CHOICES); null is Auto, the widest that fits. */
+  readonly pianoWhites: number | null
 }
 
 /** KeysUi() with its defaults. */
@@ -37,6 +43,8 @@ export const DEFAULT_KEYS: KeysUi = Object.freeze({
   pad: null,
   padName: null,
   playingKeys: new Set<number>(),
+  playingNotes: new Set<number>(),
+  pianoWhites: null,
 })
 
 /** How lit each key is now: the brightest device note that falls on it (key index -> 0..1). */
@@ -55,8 +63,14 @@ export function upperOctave(note: number, octave: number): boolean {
   return (Keys.octaveOf(note) - octave) % 2 === 1
 }
 
-/** The note the KEYS display names: the key last pressed on the phone, else the device's last note. */
+/**
+ * The note the KEYS display names: the key (or piano note) last pressed on
+ * the phone, else the device's last note.
+ */
 export function keysDisplayNote(keys: KeysUi, lastNote: number | null): number | null {
+  let note: number | undefined
+  for (const n of keys.playingNotes) note = n
+  if (note !== undefined) return note
   let last: number | undefined
   for (const k of keys.playingKeys) last = k
   if (last !== undefined) {
@@ -87,4 +101,18 @@ export function keysPickerOf(dialogs: readonly string[]): KeysPicker | null {
     if (d === PICK_PREFIX + 'octave') return 'octave'
   }
   return null
+}
+
+/**
+ * The KEYS display's note words with the piano showing ([range]): a device
+ * note past its ends is named as such ("DO2, below the keys"), as there is
+ * no key to light for it (Kotlin KeysDisplay).
+ */
+export function keysNoteText(keys: KeysUi, lastNote: number | null, range: NoteRange | null): string | null {
+  const n = keysDisplayNote(keys, lastNote)
+  if (n === null) return null
+  if (range !== null && (n < range.first || n > range.last) && !keys.playingNotes.has(n)) {
+    return MirrorText.outOfRange(n, keys.names, n < range.first)
+  }
+  return MirrorText.noteName(n, keys.names)
 }

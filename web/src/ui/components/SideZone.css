@@ -125,4 +125,5 @@
     overscroll-behavior: contain;
   }
   .side-zone__dock > * { flex: none; }
+  .side-zone__dock-title { padding-inline: var(--space-2); font-weight: var(--weight-bold); }
 }

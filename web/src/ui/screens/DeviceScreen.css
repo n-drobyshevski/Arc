@@ -1,10 +1,14 @@
 /* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/DeviceScreen.kt
  *
+ * The storage display, the Sample Tool's library blocks and dense rows, the
+ * projects as K.O. II pads. The phone's range keys stick to the top of the
+ * page as it scrolls (Kotlin's stickyHeader).
+ *
  * Web only, from 1024px wide (the desk, theme/desk.css): .device--desk, two
- * columns up to 1200 on the top bar's sides (--desk-pad): a 360 side column
- * and the binder, a paper sheet with a signal bar and spine that scrolls by
- * itself, its range tabs down the right edge; the groups in two columns from
- * 1280px; sound rows as ruled lines on the paper instead of plate rows. */
+ * columns up to 1200 on the top bar's sides (--desk-pad): a 380 side column
+ * (head, storage, projects) and the sounds binder, a paper sheet under an
+ * orange bar that scrolls by itself, its blocks in as many 320px columns as
+ * fit, its range tabs down the right edge. */
 
 /* LazyColumn(widthIn(max = 560)) with contentPadding(start = EdgeTab + 8, end = 16, top = 4, bottom = 24).
  * Items have no spacing of their own; each one's top padding is a margin here. */
@@ -22,7 +26,6 @@
 .device__gap-14 { margin-top: var(--space-14); }
 .device__ink { color: var(--ink); }
 .device__dim { color: var(--graphite); }
-.device__display-ink { color: var(--display-ink); }
 .device__display-dim { color: var(--display-dim); }
 
 .device__head {
@@ -36,137 +39,324 @@
 /* A wrapper the guide overlay measures (data-coach): exactly the control's box. */
 .device__mark { display: inline-flex; flex: none; }
 
-/* Storage panel: free space on the left, counts on the right, 12 apart. */
-.device__stats {
-  display: flex;
-  gap: var(--space-12);
-}
-.device__stats > :first-child { flex: 1 1 0; min-width: 0; }
-.device__stats > :last-child { flex: none; text-align: end; }
-
-/* The toggle is as wide as its words, so the guide tag points at them. */
-.device__switch { align-self: flex-start; }
-
 .device__section { display: flex; flex-direction: column; }
 
-/* ---------- sounds ---------- */
+/* ---------- the storage display ---------- */
 
-.device__block { display: flex; flex-direction: column; }
-.device__range {
+/* The free space large, "free of 61 MB" beside it on its baseline. */
+.storage__top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--space-8);
+  margin: 0;
+}
+.storage__free {
+  color: var(--display-ink);
+  font-size: 34px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: var(--track-stat-num);
+}
+.storage__of { flex: 1 1 auto; min-width: 0; }
+
+.storage__meter {
+  display: flex;
+  gap: 3px;
+  height: 18px;
+}
+.storage__meter > span {
+  flex: 1 1 0;
+  border-radius: var(--radius-segment);
+  background: var(--segment-off);
+}
+.storage__meter > .is-sounds { background: var(--display-ink); }
+.storage__meter > .is-projects { background: var(--signal); }
+
+.storage__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4) 18px;
+  margin-top: -4px;
+}
+.storage__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  color: var(--display-dim);
+}
+.storage__swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+/* ---------- sounds: find, range keys, library blocks ---------- */
+
+/* The range keys, pinned to the top of the page over the blocks (on the page colour). */
+.device__jumps {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  gap: var(--space-8);
+  margin-inline: calc(-1 * var(--space-4));
+  padding: var(--space-12) var(--space-4) var(--space-8);
+  background: var(--shell);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.device__jumps .snd__range { min-height: 44px; min-width: 76px; padding-inline: var(--space-12); }
+
+.device__blocks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+}
+
+/* A hundred of slots: an orange bar over its rows, on a pale card with a faint rim. */
+.device__block {
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--key);
+  box-shadow: inset 0 0 0 1px var(--row-rule);
+}
+.device__block:focus { outline: none; }
+.device__block:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+.device__bar-row {
   display: flex;
   align-items: center;
-  padding: var(--space-18) 0 var(--space-8);
+  gap: var(--space-10);
+  min-height: 40px;
+  padding: 0 var(--space-14);
+  background: var(--signal);
+  color: var(--on-signal);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
-.device__range-name { flex: 1 1 0; min-width: 0; }
+.device__range {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-10);
+  margin: 0;
+  font: inherit;
+  white-space: nowrap;
+}
+.device__kind { font-weight: 600; opacity: 0.8; overflow: hidden; text-overflow: ellipsis; }
+.device__count { flex: none; font-weight: 700; opacity: 0.9; }
 
-.device__rows { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.device__rows { margin: 0; padding: 0; list-style: none; }
 
+/* One sound: LED, slot, NAME, badge, size, round play key; 46 high, a faint line between rows. */
 .sound-row {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
-  padding: var(--space-8) var(--space-10) var(--space-8) var(--space-16);
+  padding: 0 var(--space-8) 0 0;
+  border-top: 1px solid var(--row-rule);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
+.sound-row:first-child { border-top: 0; }
 .sound-row.is-disabled { cursor: default; }
-.sound-row:not(.is-disabled):active { background-image: linear-gradient(var(--row-pressed), var(--row-pressed)); }
-.sound-row:not(.is-disabled):has(.play-key:active) { background-image: none; }
+.sound-row:not(.is-disabled):active { background: var(--row-pressed); }
+.sound-row:not(.is-disabled):has(.play-key:active) { background: none; }
+/* The open sound: tinted, an orange rule down its start side. */
+.sound-row.is-open {
+  background: color-mix(in srgb, var(--signal) 14%, transparent);
+  box-shadow: inset 4px 0 0 var(--signal);
+}
 
 .sound-row__line {
   display: flex;
   align-items: center;
-  gap: var(--space-12);
+  gap: var(--space-8);
+  min-height: 46px;
 }
 .sound-row__main {
   flex: 1 1 0;
   min-width: 0;
+  align-self: stretch;
   display: flex;
   align-items: center;
   gap: var(--space-12);
-  min-height: 40px;
-  padding: 0;
+  padding: 0 0 0 var(--space-14);
   border: 0;
   background: transparent;
   color: inherit;
   font: inherit;
   text-align: start;
   cursor: inherit;
-  border-radius: var(--radius-key);
 }
 .sound-row__main:disabled { color: inherit; }
-.sound-row__slot { flex: none; color: var(--graphite); }
+.sound-row__main:focus-visible { outline: var(--focus-ring); outline-offset: -3px; }
+.sound-row__led {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--hw-led-off);
+}
+.sound-row.is-playing .sound-row__led { background: var(--signal); box-shadow: 0 0 6px var(--signal); }
+.sound-row__slot {
+  flex: none;
+  min-width: 30px;
+  color: var(--graphite);
+  font-weight: 700;
+}
+.sound-row.is-open .sound-row__slot { color: var(--signal-edge); }
+:root[data-theme=dark] .sound-row.is-open .sound-row__slot { color: var(--signal); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme=light]) .sound-row.is-open .sound-row__slot { color: var(--signal); }
+}
 .sound-row__name {
   flex: 1 1 0;
   min-width: 0;
   color: var(--ink);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.sound-row__size { flex: none; color: var(--graphite); }
-
-.sound-details {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  margin: 0;
-  padding-top: var(--space-6);
-}
-.sound-details__row {
-  display: flex;
-  gap: var(--space-12);
-}
-.sound-details__key { flex: none; width: 96px; color: var(--graphite); }
-.sound-details__value {
-  flex: 1 1 0;
-  min-width: 0;
-  margin: 0;
-  color: var(--ink);
-  font-weight: var(--weight-semi);
-  overflow-wrap: anywhere;
-}
-
-/* ---------- projects ---------- */
-
-.project-grid__row {
-  display: flex;
-  align-items: stretch;
-}
-.project-grid__rule {
+/* "P3": the picked project uses this sound (the desk's binder). */
+.sound-row__badge {
   flex: none;
-  width: 1px;
-  background: var(--line);
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--signal);
+  color: var(--on-signal);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.3;
+  letter-spacing: 0.04em;
 }
-/* Same padding as a tile, so flex-basis 0 shares the row equally. */
-.project-grid__fill { flex: 1 1 0; min-width: 0; padding-inline: var(--space-12); }
+.sound-row__size {
+  flex: none;
+  color: var(--graphite);
+  font-size: var(--size-small);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.sound-row__note { margin: 0; padding: 0 0 var(--space-8) 32px; }
 
-.project-tile {
-  flex: 1 1 0;
-  min-width: 0;
+/* The open sound's details: pills, a grey label and its value in bold. */
+.sound-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  margin: 0;
+  padding: var(--space-2) 0 var(--space-12) 32px;
+}
+.sound-chips__chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-6);
+  padding: 5px var(--space-12);
+  border-radius: 999px;
+  background: var(--key);
+}
+.sound-chips dt, .sound-chips dd { margin: 0; }
+.sound-chips__key, .sound-chips__alone { color: var(--graphite); }
+.sound-chips__value { color: var(--ink); font-weight: 700; overflow-wrap: anywhere; }
+
+/* ---------- projects: the K.O. II's pads, the picked project's card ---------- */
+
+.project-pads {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-10);
+  padding: var(--space-12) var(--space-14) 15px var(--space-12);
+  border-radius: var(--radius-plate);
+  background: var(--hw-body);
+}
+
+.project-key {
   display: flex;
   flex-direction: column;
+  justify-content: space-between;
   align-items: flex-start;
-  padding: var(--space-10) var(--space-12);
+  min-width: 0;
+  height: 88px;
+  padding: var(--space-6) var(--space-8) var(--space-8) var(--space-10);
   border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: var(--ink);
+  border-radius: var(--radius-key);
+  --cap-face: var(--hw-dark-face);
+  --cap-edge: var(--hw-dark-edge);
+  --cap-ink: var(--hw-dark-ink);
   font: inherit;
   text-align: start;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
-.project-tile:disabled { cursor: default; }
-.project-tile:focus-visible { outline-offset: -3px; }
-.project-tile.is-on { background: var(--navy); color: var(--on-navy); }
-.project-tile__label { color: var(--graphite); }
-.project-tile__num { margin-top: var(--space-2); }
-.project-tile__size { align-self: flex-end; color: var(--graphite); }
-.project-tile.is-on .project-tile__label,
-.project-tile.is-on .project-tile__size { color: var(--on-navy); }
+.project-key:disabled { cursor: default; }
+.project-key:disabled:not(.is-on) { opacity: 0.6; }
+.project-key:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+.project-key.is-on {
+  --cap-face: var(--signal);
+  --cap-edge: var(--signal-edge);
+  --cap-ink: var(--on-signal);
+}
+/* An empty slot is only its outline: nothing to open. */
+.project-key.is-empty {
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--graphite) 55%, transparent);
+  color: var(--graphite);
+  cursor: default;
+}
+.project-key__num {
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.project-key__size {
+  max-width: 100%;
+  color: var(--hw-dark-dim);
+  font-size: var(--size-small);
+  font-weight: 500;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.project-key.is-on .project-key__size,
+.project-key.is-empty .project-key__size { color: inherit; }
 
-.project-panel__pads { margin-top: var(--space-6); }
+.project-pads--small .project-key { height: 72px; }
+.project-pads--small .project-key__num { font-size: 22px; }
+.project-pads--small .project-key__size { font-size: var(--size-tiny); }
+
+.project-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: var(--space-14) var(--space-16);
+  border-radius: var(--radius-plate);
+  background: var(--plate);
+}
+.project-panel__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--space-10);
+}
+.project-panel__head > h3 { margin: 0; }
+.project-panel__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4) 18px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.project-panel__chip { display: inline-flex; gap: var(--space-8); }
+.project-panel__slot { color: var(--ink); font-weight: 700; }
+.project-panel__pads { margin-top: var(--space-4); }
 
 /* ---------- shared: SectionTitle and Plate (Kotlin internal helpers) ---------- */
 
@@ -201,102 +391,131 @@
 /* ---------- the desk (web only) ---------- */
 
 @media (min-width: 1024px) {
-  /* One window high in the page column (.shell__page), so only the sheet scrolls;
-   * a short window scrolls the page instead. */
+  /* One window high in the page column (.shell__page): the side column and the
+   * sheet scroll by themselves; a short window scrolls the page instead. */
   .device--desk {
     display: grid;
-    grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
+    grid-template-columns: 380px minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
-    column-gap: 22px;
+    column-gap: 20px;
     max-width: var(--top-bar-max);
     height: 100%;
-    min-height: 440px;
+    min-height: 520px;
     padding: var(--space-4) var(--desk-pad) 22px;
   }
   .device__side {
-    position: sticky;
-    top: var(--space-4);
-    align-self: start;
     display: flex;
     flex-direction: column;
+    gap: var(--space-12);
     min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    /* Room for the caps' edges (2 right, 3 down) inside the scrolling box. */
+    padding: 0 var(--space-4) var(--space-8) 0;
+    scrollbar-width: thin;
   }
+  .device__side .device__gap-12 { margin-top: 0; }
+  .device__caption { margin: var(--space-4) 0 0 var(--space-2); }
 
   .device__binder {
     display: flex;
     min-width: 0;
     min-height: 0;
-    max-width: 900px;
+    max-width: 960px;
   }
-  /* The sheet: a 10px signal spine down its left, the bar across its top. */
   .device--desk .device__sheet {
     flex: 1 1 auto;
     min-width: 0;
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    border-left: 10px solid var(--signal);
-    border-radius: 6px var(--radius-plate) var(--radius-plate) 6px;
+    background: var(--key);
   }
   .device__bar {
     flex: none;
     display: flex;
+    align-items: center;
     justify-content: space-between;
     gap: var(--space-12);
-    padding: var(--space-12) 18px;
+    min-height: 44px;
+    padding: 0 18px;
     background: var(--signal);
     color: var(--on-signal);
   }
+  .device__filter {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: var(--space-12);
+    padding: var(--space-12) var(--space-14) 0;
+  }
+  .device__find { flex: 1 1 auto; min-width: 0; }
+  .device__filter .device__find .field__input { padding-block: 9px; font-size: var(--size-body15); }
+  .device__only { flex: none; flex-wrap: nowrap; }
   .device__leaves {
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding: 0 18px 18px;
+    padding: var(--space-14);
   }
-  .device--desk .device__block { break-inside: avoid; }
-
-  /* Ruled lines on the paper, not plate rows. */
-  .device--desk .sound-row {
-    background-color: transparent;
-    border-radius: 0;
-    box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--line) 18%, transparent);
-    padding-inline: var(--space-4) 0;
+  /* The blocks flow down as many columns as fit (Kotlin's Adaptive(330) staggered grid). */
+  .device--desk .device__blocks {
+    display: block;
+    columns: 320px;
+    column-gap: var(--space-14);
+  }
+  .device--desk .device__block {
+    break-inside: avoid;
+    margin-bottom: var(--space-14);
+    background: var(--plate);
   }
 
   /* The binder tabs, under the bar, sticking out of the sheet's right edge. */
   .device__tabs {
     flex: none;
-    min-width: 84px;
+    width: 86px;
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: var(--space-4);
-    padding-top: 52px;
+    gap: var(--space-6);
+    min-height: 0;
+    overflow-y: auto;
+    padding: 56px var(--cap-dx) var(--cap-dy) 0;
+    scrollbar-width: none;
   }
   .device__tab {
-    padding: 7px 10px;
-    border: 1px solid color-mix(in srgb, var(--line) 30%, transparent);
-    border-left: 0;
-    border-radius: 0 6px 6px 0;
-    background: var(--plate);
-    color: var(--graphite);
-    font-family: inherit;
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 1px;
+    min-height: 48px;
+    padding: var(--space-6) var(--space-10);
+    border: 0;
+    border-radius: 0 10px 10px 0;
+    --cap-face: var(--tab-off);
+    --cap-ink: var(--on-tab-off);
+    font: inherit;
     text-align: start;
     cursor: pointer;
   }
-  .device__tab.is-on {
-    border-color: var(--ink);
-    background: var(--ink);
-    color: var(--shell);
+  .device__tab.is-on { --cap-face: var(--ink); --cap-edge: var(--ink); --cap-ink: var(--shell); }
+  .device__tab:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+  .device__tab-range {
+    font-size: 12px;
+    font-weight: 800;
+    line-height: 1.2;
+    letter-spacing: 0.05em;
+    white-space: nowrap;
   }
-
-  .device__section--projects { padding-top: var(--space-4); }
-}
-
-@media (min-width: 1280px) {
-  .device__groups {
-    columns: 2;
-    column-gap: 28px;
+  .device__tab-kind {
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1.2;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    opacity: 0.75;
   }
 }

@@ -12,6 +12,9 @@
 //   (a remembered folder may need a tap to be used again) and
 //   [canPickFolder] (File System Access is Chromium only).
 // - UiState.keysPad is a PhysicalPad (compare with padKey(), not ===).
+// - Live's EDIT (pad assignment): ToastMsg.action is the toast's UNDO word,
+//   whose closure the controller keeps (runToastAction); BrowserUi.draftPad
+//   is the pad an upload draft's sample goes onto.
 
 import type { Pak } from '../core/backup/pak'
 import type { DiffResult } from '../core/features/backupDiff'
@@ -50,6 +53,8 @@ export interface ToastMsg {
   readonly id: number
   readonly text: string
   readonly error: boolean
+  /** A key on the toast (Live's UNDO), its word; the controller runs it (runToastAction). */
+  readonly action?: string | undefined
 }
 
 /** One picked file. [error] is set when it can't be uploaded (not a usable WAV). */
@@ -79,6 +84,8 @@ export interface BrowserUi {
   readonly reading: ReadingKey | null
   /** WAV files picked for upload, waiting for their slots to be confirmed. */
   readonly draft: readonly UploadDraftItem[] | null
+  /** Live's EDIT: the pad the draft's sample goes onto once uploaded (null: a plain upload). */
+  readonly draftPad?: PhysicalPad | null
 }
 
 /** Sound search across saved backups: the query, its results, and whether older backups are still being indexed. */

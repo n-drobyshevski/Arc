@@ -5,6 +5,13 @@ import dev.arc.ep133.protocol.MidiEvent
 /** A pad file id from a pad push: project 1..99, group 0..3 (A..D) and the pad's number in the project file (pNN). */
 data class PadFid(val project: Int, val group: Int, val pad: Int)
 
+/**
+ * Where a physical pad's sound is set (an addition): the active [project]'s
+ * pad file for [group] and [pad] (its number in the project file, pNN), and
+ * the [slot] its pad record holds now (null when empty or not in the records).
+ */
+data class PadTarget(val project: Int, val group: Int, val pad: Int, val slot: Int?)
+
 /** A pad that is sounding (or fading out): its velocity, when it started, and when it was released. */
 data class PadLight(val velocity: Int, val channel: Int, val onAt: Long, val offAt: Long? = null)
 
@@ -240,6 +247,44 @@ class LiveMirror(
 
     @Synchronized
     fun nameOf(pad: PhysicalPad): String? = slotOf(pad)?.let { names[it] }
+
+    /**
+     * A physical pad's number in the project file, to write its sound: the
+     * learned number, else (counting from the top, before any press) the
+     * numbering kmorrill's notes give, '7' = 1 down to ENTER = 12; counted
+     * from the bottom, the official note order plus one (see [PadOrder]).
+     */
+    @Synchronized
+    fun padNumber(pad: PhysicalPad): Int = when (padOrder) {
+        PadOrder.FROM_TOP -> learned[pad.offset] ?: PadPush.topNumber(pad.offset)
+        PadOrder.FROM_BOTTOM -> pad.offset + 1
+    }
+
+    /**
+     * Where [pad]'s sound is set in the active project, and the slot on it
+     * now (for the pad sheet's "now" line and for undo). Null while the
+     * active project is unknown, or the device moved to one not read yet.
+     */
+    @Synchronized
+    fun target(pad: PhysicalPad): PadTarget? {
+        val project = activeProject ?: return null
+        if (pushedProject != null && pushedProject != project) return null
+        val number = padNumber(pad)
+        return PadTarget(project, pad.group, number, layout[('a' + pad.group).toString()]?.get(number))
+    }
+
+    /**
+     * arc put [slot] on [t]'s pad (or put the old one back): the layout
+     * follows at once, so names and the saved read update without reading
+     * the project again. Ignored if the active project changed meanwhile.
+     */
+    @Synchronized
+    fun assigned(t: PadTarget, slot: Int?) {
+        if (t.project != activeProject) return
+        val group = ('a' + t.group).toString()
+        layout = layout + (group to (layout[group].orEmpty() + (t.pad to slot)).toSortedMap())
+        renameLastHit()
+    }
 
     /** The state at [now]: released pads past their fade are dropped, and a stale tempo is cleared. */
     @Synchronized

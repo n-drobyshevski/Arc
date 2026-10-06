@@ -3,7 +3,9 @@ package dev.arc.ep133.data
 import android.content.Context
 import androidx.core.content.edit
 import dev.arc.ep133.features.Keys
+import dev.arc.ep133.features.KeysView
 import dev.arc.ep133.features.NoteNames
+import dev.arc.ep133.features.Piano
 import dev.arc.ep133.features.Scale
 import dev.arc.ep133.text.ThemeChoice
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,6 +35,11 @@ data class AppSettings(
     val keysNames: NoteNames = NoteNames.SOLFEGE,
     /** KEYS writes each key's note name in its ring (off: rings and octave numbers only). */
     val keysShowNames: Boolean = true,
+    /** KEYS on the grid or the piano, remembered once for a wide window and once for a tall one. */
+    val keysViewWide: KeysView = KeysView.AUTO,
+    val keysViewTall: KeysView = KeysView.AUTO,
+    /** The piano's white keys (Piano.WHITES); null is Auto, the widest that fits. */
+    val pianoWhites: Int? = null,
 )
 
 /**
@@ -62,6 +69,9 @@ class SettingsStore(context: Context) {
         keysOctave = prefs.getInt("keysOctave", 4).coerceIn(Keys.MIN_OCTAVE, Keys.MAX_OCTAVE),
         keysNames = runCatching { NoteNames.valueOf(prefs.getString("keysNames", null) ?: "") }.getOrDefault(NoteNames.SOLFEGE),
         keysShowNames = prefs.getBoolean("keysShowNames", true),
+        keysViewWide = runCatching { KeysView.valueOf(prefs.getString("keysViewWide", null) ?: "") }.getOrDefault(KeysView.AUTO),
+        keysViewTall = runCatching { KeysView.valueOf(prefs.getString("keysViewTall", null) ?: "") }.getOrDefault(KeysView.AUTO),
+        pianoWhites = Piano.choiceOf(prefs.getInt("pianoWhites", 0)),
     )
 
     /** Each setting as its key and stored text. */
@@ -79,6 +89,10 @@ class SettingsStore(context: Context) {
         "keysOctave" to keysOctave.toString(),
         "keysNames" to keysNames.name,
         "keysShowNames" to keysShowNames.toString(),
+        "keysViewWide" to keysViewWide.name,
+        "keysViewTall" to keysViewTall.name,
+        // Stored like keepLast: 0 for Auto.
+        "pianoWhites" to (pianoWhites ?: 0).toString(),
     )
 
     fun update(change: (AppSettings) -> AppSettings) {
@@ -90,8 +104,8 @@ class SettingsStore(context: Context) {
         prefs.edit {
             for ((k, v) in changed) {
                 when (k) {
-                    "theme", "keysScale", "keysNames" -> putString(k, v)
-                    "keepLast", "keysRoot", "keysOctave" -> putInt(k, v.toInt())
+                    "theme", "keysScale", "keysNames", "keysViewWide", "keysViewTall" -> putString(k, v)
+                    "keepLast", "keysRoot", "keysOctave", "pianoWhites" -> putInt(k, v.toInt())
                     else -> putBoolean(k, v.toBooleanStrict())
                 }
             }
@@ -119,6 +133,14 @@ class SettingsStore(context: Context) {
             keysOctave = map["app.keysOctave"]?.toIntOrNull()?.takeIf { it in Keys.MIN_OCTAVE..Keys.MAX_OCTAVE } ?: cur.keysOctave,
             keysNames = map["app.keysNames"]?.let { v -> runCatching { NoteNames.valueOf(v) }.getOrNull() } ?: cur.keysNames,
             keysShowNames = map["app.keysShowNames"]?.toBooleanStrictOrNull() ?: cur.keysShowNames,
+            keysViewWide = map["app.keysViewWide"]?.let { v -> runCatching { KeysView.valueOf(v) }.getOrNull() } ?: cur.keysViewWide,
+            keysViewTall = map["app.keysViewTall"]?.let { v -> runCatching { KeysView.valueOf(v) }.getOrNull() } ?: cur.keysViewTall,
+            // 0 is Auto; a size arc doesn't offer leaves the choice as it is.
+            pianoWhites = when (val n = map["app.pianoWhites"]?.toIntOrNull()) {
+                null -> cur.pianoWhites
+                0 -> null
+                else -> Piano.choiceOf(n) ?: cur.pianoWhites
+            },
         )
     }
 }

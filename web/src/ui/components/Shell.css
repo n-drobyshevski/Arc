@@ -46,6 +46,12 @@
   z-index: 10;
 }
 
+/* A second edge tab (Live's EDIT): under GUIDE, 18 apart. */
+.shell__edge-tab--second {
+  display: flex;
+  transform: translateY(calc(-50% - 80px + var(--edge-tab-height) + 18px));
+}
+
 /* The guide slides in from the left over everything (top bar too). */
 .shell__guide {
   position: absolute;
@@ -71,12 +77,12 @@
   .shell__edge-tab { display: none; }
 
   /* Docked beside the rail, a paper panel lifted off the desk; it slides out
-   * from under the rail (the shell clips it) and leaves the rest of the page in view.
-   * 560 wide at every desk width: the guide's five tabs fit in one row (the page
-   * column is at least 920, so 360 of the page stays in view at 1024). */
+   * from under the rail (the shell clips it). Wide enough for the guide's list
+   * and the K.O. II beside it (GuideScreen): the page column at most, 1160 at
+   * most, so on a wide desk the rest of the page stays in view. */
   .shell__guide {
     right: auto;
-    width: 560px;
+    width: min(1160px, 100%);
     border-radius: 0 var(--radius-plate) var(--radius-plate) 0;
     box-shadow: 4px 0 0 var(--desk-shade);
   }

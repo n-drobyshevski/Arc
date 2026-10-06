@@ -34,10 +34,17 @@
 //   Live's output (LiveAudioDeps) is open on the same terms. Pads and keys
 //   play through live.ts. The first-run guide's flag is AppSettings.guideSeen
 //   ([coach] keeps the old seen/markSeen shape for the UI).
+// - Live's EDIT (an addition): [assignPad] writes a pad's sound at
+//   once and offers UNDO on the toast ([toastWith] / [runToastAction]; the
+//   closure stays here, the state only holds the word); [uploadForPad] goes
+//   through the Device tab's upload sheet (draft + draftPad), then assigns.
+//   The piano plays MIDI notes ([playNote]); the KEYS grid keeps [playKey].
 
 import { computed, signal, type ReadonlySignal, type Signal } from '@preact/signals'
 import { MAX_OCTAVE, MIN_OCTAVE, type NoteNames, type Scale } from '../core/features/keys'
+import { choiceOf as pianoChoiceOf, type KeysView } from '../core/features/piano'
 import { padKey, type PhysicalPad } from '../core/features/padNotes'
+import type { PadTarget } from '../core/features/liveMirror'
 import { backupDevice, restorePak } from '../core/backup/backup'
 import { describePak, openPak, type PakDescription, type PakSound } from '../core/backup/pak'
 import { project as exportProject, projectFileName, soundFileName, soundWav } from '../core/backup/pakExport'
@@ -49,10 +56,11 @@ import { compare as comparePaks } from '../core/features/pakCompare'
 import { frames, seconds, type TrimRange } from '../core/features/sampleTrim'
 import { nameFor, nextFree, upload, UploadItem } from '../core/features/sampleUpload'
 import { decodeWav } from '../core/formats/wav'
-import type { SoundEntry } from '../core/protocol/device'
+import { assignPad as writePadSound, type SoundEntry } from '../core/protocol/device'
 import { download } from '../core/protocol/fs'
 import type { TrafficLog } from '../core/protocol/trafficLog'
 import { FeatureText } from '../core/text/featureText'
+import { MirrorText } from '../core/text/mirrorText'
 import { DATE_TIME_PATTERN, DAY_PATTERN, date as formatDate } from '../core/text/format'
 import { BackupDevice, fileNameFor, importTitle, toPrune, type BackupRecord, type RestoreSelection } from '../core/text/libraryRules'
 import { SettingsText, type ThemeChoice } from '../core/text/settingsText'
@@ -129,6 +137,8 @@ export class ArcController {
   readonly playingPads: ReadonlySignal<ReadonlySet<number>>
   /** The keys sounding on the phone, by index (MainActivity's playingKeys). */
   readonly playingKeys: ReadonlySignal<ReadonlySet<number>>
+  /** The piano's notes sounding on the phone, first pressed first (MainActivity's playingNotes). */
+  readonly playingNotes: ReadonlySignal<ReadonlySet<number>>
 
   private readonly settingsSignal: Signal<AppSettings>
   private readonly tasks: Tasks
@@ -136,6 +146,8 @@ export class ArcController {
   private readonly mirror: MirrorController
   private readonly live: LiveSounds
   private toastIds = 0
+  /** What the toast's key does (Live's UNDO), for the toast that shows it. */
+  private toastRun: { id: number; run: () => void } | null = null
   /**
    * Bumped by every play request and every stop. A request that took a while
    * (a download, a decode) plays only if nothing stopped or replaced it meanwhile.
@@ -187,6 +199,15 @@ export class ArcController {
         if (!k.startsWith('keys:')) continue
         const i = Number(k.slice(5))
         if (Number.isInteger(i)) out.add(i)
+      }
+      return out
+    })
+    this.playingNotes = computed(() => {
+      const out = new Set<number>()
+      for (const k of this.liveVoices.value) {
+        if (!k.startsWith('note:')) continue
+        const n = Number(k.slice(5))
+        if (Number.isInteger(n)) out.add(n)
       }
       return out
     })
@@ -427,10 +448,28 @@ export class ArcController {
   // ---------- toast ----------
 
   toast(text: string, error = false): void {
+    this.toastRun = null
     this.store.update((s) => ({ ...s, toast: { id: ++this.toastIds, text, error } }))
   }
 
+  /** A toast with a key ([label], e.g. UNDO) that runs [run] once, if pressed before it goes. */
+  private toastWith(text: string, label: string, run: () => void): void {
+    const id = ++this.toastIds
+    this.toastRun = { id, run }
+    this.store.update((s) => ({ ...s, toast: { id, text, error: false, action: label } }))
+  }
+
+  /** The toast's key was pressed: runs what it offered and dismisses it. */
+  runToastAction(id: number): void {
+    const t = this.toastRun
+    this.dismissToast(id)
+    if (t === null || t.id !== id) return
+    this.toastRun = null
+    t.run()
+  }
+
   dismissToast(id: number): void {
+    if (this.toastRun?.id === id) this.toastRun = null
     this.store.update((s) => (s.toast?.id === id ? { ...s, toast: null } : s))
   }
 
@@ -612,7 +651,7 @@ export class ArcController {
   }
 
   dropDraft(): void {
-    this.store.update((st) => ({ ...st, browser: { ...st.browser, draft: null } }))
+    this.store.update((st) => ({ ...st, browser: { ...st.browser, draft: null, draftPad: null } }))
   }
 
   async uploadDraft(): Promise<void> {
@@ -622,10 +661,21 @@ export class ArcController {
     if (!draft) return
     const items = draft.flatMap((it) => (it.wav !== null && it.slot !== null ? [UploadItem(it.slot, it.name, it.wav, it.trim)] : []))
     if (items.length === 0) return
+    const pad = this.store.get().browser.draftPad ?? null
     this.dropDraft()
     const done = await this.tasks.runTask(Strings.UPLOADING, (onProgress, signal) => upload(s, items, { onProgress, signal }))
-    if (done !== null) this.toast(Strings.uploaded(done.sounds))
+    if (done !== null && pad === null) this.toast(Strings.uploaded(done.sounds))
     await this.refreshAll(true)
+    // Live's EDIT: the new sound onto its pad (the device's list is fresh, so the toast names it).
+    if (done !== null && pad !== null) {
+      const t = this.editTarget(pad)
+      if (t === null) return
+      const slot = items[0]!.slot
+      const r = await this.writePad(t, slot)
+      if (r === null) return
+      if (r.error !== null) this.toast(MirrorText.assignFailed(r.error), true)
+      else this.padAssigned(pad, t, slot)
+    }
   }
 
   /** Compares the backup with the device for this selection; the result shows in the restore sheet. */
@@ -865,6 +915,148 @@ export class ArcController {
   /** The sound KEYS plays: the pad last tapped, or last played on the device in the pads view. */
   selectKeysPad(pad: PhysicalPad): void {
     this.live.selectKeysPad(pad)
+  }
+
+  /** Plays MIDI [note] on the KEYS sound (the piano) until [releaseNote]; [hold] false plays to the end. Call from the press. */
+  playNote(note: number, hold = true): Promise<void> {
+    return this.live.playNote(note, hold)
+  }
+
+  /** The last finger left the note: it fades out. */
+  releaseNote(note: number): void {
+    this.live.releaseNote(note)
+  }
+
+  // ---------- Live's EDIT: another sound on a pad (an addition, see device.assignPad) ----------
+
+  /**
+   * The device's sounds as Live knows them, by slot: the Device tab's list
+   * when it has been read, else the one Live's own read made. For the pad
+   * sheet and the Sounds tab.
+   */
+  liveSounds(): readonly SoundEntry[] {
+    return this.store.get().browser.contents?.sounds ?? this.live.deviceSoundList()
+  }
+
+  /**
+   * The name of the sound on [pad] now, as its pad record says (the mirror's
+   * own name for it waits for a learned link); null when unknown or empty.
+   */
+  padSoundName(pad: PhysicalPad): string | null {
+    const slot = this.editTarget(pad, true)?.slot ?? null
+    return slot === null ? null : this.soundName(slot)
+  }
+
+  /** A device sound's name for a toast: its name, else its slot number. */
+  private soundName(slot: number): string {
+    return this.liveSounds().find((snd) => snd.slot === slot)?.name ?? FeatureText.slot(slot)
+  }
+
+  /**
+   * Where [pad]'s sound is set now (its project, pad file and slot), or
+   * null, saying why, when it can't be changed: not connected, or the
+   * active project not read yet.
+   */
+  editTarget(pad: PhysicalPad, quiet = false): PadTarget | null {
+    if (this.conn.session === null || this.store.get().device === null) {
+      if (!quiet) this.toast(MirrorText.EDIT_OFFLINE)
+      return null
+    }
+    const t = this.mirror.current?.target(pad) ?? null
+    if (t === null && !quiet) this.toast(MirrorText.EDIT_NO_PROJECT)
+    return t
+  }
+
+  /** Writes [slot] onto [t]'s pad; the error text, null when done (or nothing was written: busy). */
+  private async writePad(t: PadTarget, slot: number): Promise<{ error: string | null } | null> {
+    return this.tasks.exclusive('assign', true, async (s) => {
+      try {
+        await writePadSound(s, t.project, t.group, t.pad, slot)
+        return { error: null }
+      } catch (e) {
+        return { error: errorText(e) }
+      }
+    })
+  }
+
+  /**
+   * Puts device sound [slot] on Live's [pad] in the active project, at
+   * once: the mirror's names follow, and the toast offers UNDO (when the
+   * sound it had is known). Resolves true when the pad took it.
+   */
+  async assignPad(pad: PhysicalPad, slot: number): Promise<boolean> {
+    const t = this.editTarget(pad)
+    if (t === null) return false
+    if (t.slot === slot) return true
+    const r = await this.writePad(t, slot)
+    if (r === null) return false
+    if (r.error !== null) {
+      this.toast(MirrorText.assignFailed(r.error), true)
+      return false
+    }
+    this.padAssigned(pad, t, slot)
+    return true
+  }
+
+  /** [pad] took [slot] (its target was [t]): names follow, and a toast with UNDO when the old sound is known. */
+  private padAssigned(pad: PhysicalPad, t: PadTarget, slot: number): void {
+    this.mirror.assigned(t, slot)
+    const text = MirrorText.assigned(pad, this.soundName(slot))
+    const old = t.slot
+    // An empty or unrecorded pad has no sound to put back.
+    if (old === null) {
+      this.toast(text)
+      return
+    }
+    this.toastWith(text, MirrorText.UNDO, () => void this.undoAssign(pad, { ...t, slot }, old))
+  }
+
+  /** UNDO: [old] back onto the pad [now] describes. */
+  private async undoAssign(pad: PhysicalPad, now: PadTarget, old: number): Promise<void> {
+    const r = await this.writePad(now, old)
+    if (r === null) return
+    if (r.error !== null) {
+      this.toast(MirrorText.undoFailed(r.error), true)
+      return
+    }
+    this.mirror.assigned(now, old)
+    this.toast(MirrorText.restored(pad, this.soundName(old)))
+  }
+
+  /**
+   * EDIT's "Upload a new sample…" (or a WAV dropped on a pad): the file goes
+   * into the upload sheet as for the Device tab (a free slot, Trim), and
+   * once uploaded onto [pad]. Only the first file is used.
+   */
+  async uploadForPad(pad: PhysicalPad, files: readonly ReadableFile[]): Promise<void> {
+    if (files.length === 0 || this.editTarget(pad) === null) return
+    // The free slots come from the device's list: read it first if the Device tab hasn't.
+    if (this.store.get().browser.contents === null) await this.refreshAll(true)
+    if (this.store.get().browser.contents === null) return
+    await this.pickForUpload(files.slice(0, 1))
+    this.store.update((st) => (st.browser.draft ? { ...st, browser: { ...st.browser, draftPad: pad } } : st))
+  }
+
+  /**
+   * WAVs dropped on Live's Sounds tab: the upload sheet, as for the Device
+   * tab's Add (the free slots come from the device's list, read first if needed).
+   */
+  async dropSamples(files: readonly ReadableFile[]): Promise<void> {
+    if (files.length === 0) return
+    if (this.conn.session === null || this.store.get().device === null) {
+      this.toast(MirrorText.EDIT_OFFLINE)
+      return
+    }
+    if (this.store.get().browser.contents === null) await this.refreshAll(true)
+    if (this.store.get().browser.contents === null) return
+    await this.pickForUpload(files)
+  }
+
+  /** The picker for [uploadForPad]; call from a tap. */
+  async pickForPad(pad: PhysicalPad): Promise<void> {
+    if (this.editTarget(pad) === null) return
+    const files = await this.deps.files.pick({ accept: WAV_ACCEPT, multiple: false })
+    await this.uploadForPad(pad, files)
   }
 
   /** Space taken by Live's copies of the device's sounds, in bytes (for Settings). */
@@ -1116,6 +1308,16 @@ export class ArcController {
 
   setKeysShowNames(on: boolean): void {
     this.changeSettings((s) => ({ ...s, keysShowNames: on }))
+  }
+
+  /** KEYS on the pads or the piano, remembered for a wide window ([wide]) and for a tall one. */
+  setKeysView(wide: boolean, view: KeysView): void {
+    this.changeSettings((s) => (wide ? { ...s, keysViewWide: view } : { ...s, keysViewTall: view }))
+  }
+
+  /** Live's piano size (Settings → Live → Piano keys): white keys, null for Auto (as many as fit). */
+  setPianoWhites(whites: number | null): void {
+    this.changeSettings((s) => ({ ...s, pianoWhites: pianoChoiceOf(whites) }))
   }
 
   /** The guide overlay was shown (it opens by itself only once, also across reinstalls). */

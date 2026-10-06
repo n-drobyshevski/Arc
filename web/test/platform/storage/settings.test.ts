@@ -41,6 +41,9 @@ describe('SettingsStore', () => {
       keysOctave: 4,
       keysNames: 'SOLFEGE',
       keysShowNames: true,
+      keysViewWide: 'AUTO',
+      keysViewTall: 'AUTO',
+      pianoWhites: null,
     })
     expect(DEFAULT_SETTINGS).toEqual(s.settings)
   })
@@ -116,7 +119,28 @@ describe('SettingsStore', () => {
       'app.keysOctave',
       'app.keysNames',
       'app.keysShowNames',
+      'app.keysViewWide',
+      'app.keysViewTall',
+      'app.pianoWhites',
     ])
+  })
+
+  it('keeps the Keys view per window shape and the piano size, Auto stored as 0', () => {
+    const storage = memoryStorage()
+    const s = new SettingsStore(storage)
+    s.update((c) => ({ ...c, keysViewTall: 'PADS', pianoWhites: 15 }))
+    expect(JSON.parse(storage.getItem(SETTINGS_KEY)!)).toEqual({ keysViewTall: 'PADS', pianoWhites: 15 })
+    expect(Object.entries(s.toIndex())).toEqual([
+      ['app.keysViewTall', 'PADS'],
+      ['app.pianoWhites', '15'],
+    ])
+    s.update((c) => ({ ...c, pianoWhites: null, keysViewWide: 'PIANO' }))
+    expect(JSON.parse(storage.getItem(SETTINGS_KEY)!)).toEqual({ keysViewTall: 'PADS', pianoWhites: 0, keysViewWide: 'PIANO' })
+    expect(s.toIndex()['app.pianoWhites']).toBe('0')
+    expect(new SettingsStore(storage).settings).toEqual({ ...DEFAULT_SETTINGS, keysViewWide: 'PIANO', keysViewTall: 'PADS' })
+    // Odd stored values read as the defaults: a size arc doesn't offer is Auto.
+    expect(readSettings(JSON.stringify({ keysViewWide: 'piano', keysViewTall: 3, pianoWhites: 10 }))).toEqual(DEFAULT_SETTINGS)
+    expect(readSettings(JSON.stringify({ pianoWhites: 22 })).pianoWhites).toBe(22)
   })
 
   it('writes nothing when nothing changed', () => {
@@ -218,6 +242,16 @@ describe('fromIndex', () => {
     // Out of range or unknown: the current value stays (Android takeIf, not coerceIn).
     const odd = { 'app.keysRoot': '12', 'app.keysOctave': '9', 'app.keysScale': 'minor', 'app.keysNames': 'NUMBERS', 'app.liveKeys': 'TRUE', 'app.keysShowNames': 'no' }
     expect(settingsFromIndex(odd, cur)).toEqual(cur)
+  })
+
+  it('takes the Keys views and the piano size; 0 is Auto, an unknown size keeps the choice', () => {
+    const map = { 'app.keysViewWide': 'PADS', 'app.keysViewTall': 'PIANO', 'app.pianoWhites': '12' }
+    expect(settingsFromIndex(map, cur)).toEqual({ ...cur, keysViewWide: 'PADS', keysViewTall: 'PIANO', pianoWhites: 12 })
+    const chosen = { ...cur, pianoWhites: 22 }
+    expect(settingsFromIndex({ 'app.pianoWhites': '0' }, chosen).pianoWhites).toBeNull()
+    expect(settingsFromIndex({ 'app.pianoWhites': '10' }, chosen).pianoWhites).toBe(22)
+    expect(settingsFromIndex({ 'app.pianoWhites': 'auto' }, chosen).pianoWhites).toBe(22)
+    expect(settingsFromIndex({ 'app.keysViewWide': 'piano', 'app.keysViewTall': '' }, cur)).toEqual(cur)
   })
 
   it('restoring writes only what differs, so later defaults never override the folder', () => {

@@ -107,9 +107,29 @@
 
 /* ArcType.body15 at SemiBold */
 .toast__text {
+  flex: 1 1 auto;
   min-width: 0;
   padding: 14px 16px;
   font-size: var(--size-body15);
   font-weight: 600;
   line-height: 1.5;
 }
+
+/* Web: the toast's key (Live's UNDO): capsKey in signal orange, the toast's height to tap. */
+.toast__action {
+  flex: none;
+  align-self: stretch;
+  min-width: var(--tap-min);
+  padding: 0 var(--space-16);
+  border: 0;
+  background: none;
+  color: var(--signal);
+  font: inherit;
+  font-size: var(--size-caps-key);
+  font-weight: 700;
+  letter-spacing: var(--track-caps-key);
+  text-transform: uppercase;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.toast__action:focus-visible { outline: var(--focus-ring); outline-offset: -3px; }

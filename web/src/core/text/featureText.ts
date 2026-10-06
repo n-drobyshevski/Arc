@@ -97,6 +97,53 @@ export const FeatureText = {
   PROJECT: 'Project',
   PICK_PROJECT: 'Tap a project to see its sounds and pads.',
 
+  // The Device tab, redesigned: storage as a split meter, the factory layout per range, projects as pads.
+  /** "free of 61 MB", under the free space in large type. */
+  freeOf(total: number): string {
+    return `free of ${Format.bytes(total)}`
+  },
+  FREE: 'Free',
+
+  /**
+   * The factory layout's kind of sound for the range of slots starting at
+   * [first] (from the official guide's note on SOUND mode: kicks 1-99,
+   * snares 100-199, hi-hats 200-299, percussion 300-399, bass 400-499,
+   * melodic 500-599), or null from 600 up, which the guide leaves free.
+   */
+  factoryCategory(first: number): string | null {
+    if (first >= 1 && first <= 99) return 'Kicks'
+    if (first >= 100 && first <= 199) return 'Snares'
+    if (first >= 200 && first <= 299) return 'Hats'
+    if (first >= 300 && first <= 399) return 'Perc'
+    if (first >= 400 && first <= 499) return 'Bass'
+    if (first >= 500 && first <= 599) return 'Melodic'
+    return null
+  },
+
+  /** "12 · 2.1 MB", the sounds binder's bar after "Sounds". */
+  soundsTotal(n: number, bytes: number): string {
+    return `${n} · ${Format.bytes(bytes)}`
+  },
+
+  ALL: 'All',
+  /** "In P3 · 7", the filter for the sounds the selected project uses. */
+  inProject(project: number, n: number): string {
+    return `In ${FeatureText.projectBadge(project)} · ${n}`
+  },
+
+  /** "P3", on a sound the selected project uses. */
+  projectBadge(project: number): string {
+    return `P${project}`
+  },
+
+  /** A project slot with nothing in it, on its pad key. */
+  EMPTY_PROJECT: 'empty',
+
+  /** "352 KB · 7 sounds", beside the selected project's name. */
+  projectSummary(size: number, sounds: number): string {
+    return `${Format.bytes(size)} · ${plural(sounds, 'sound')}`
+  },
+
   /** "001–099" (en dash). */
   range(r: { readonly from: number; readonly to: number }): string {
     return slot(r.from) + '–' + slot(r.to)

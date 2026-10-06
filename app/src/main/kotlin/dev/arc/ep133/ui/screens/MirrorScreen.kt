@@ -1,8 +1,19 @@
 package dev.arc.ep133.ui.screens
 
 import dev.arc.ep133.ui.components.EdgeTabWidth
+import dev.arc.ep133.ui.components.EditEdgeTab
+import dev.arc.ep133.ui.components.underGuide
+import dev.arc.ep133.features.KeysView
+import androidx.compose.material3.PlainTooltip
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.runtime.mutableStateOf
 import dev.arc.ep133.ui.components.SwitchRow
+import dev.arc.ep133.ui.components.SettingRow
+import dev.arc.ep133.ui.components.PlateLine
+import dev.arc.ep133.ui.components.Disclosure
+import dev.arc.ep133.ui.components.MiniPiano
 import dev.arc.ep133.ui.components.SideStripWidth
 import dev.arc.ep133.ui.components.SideZone
 import dev.arc.ep133.text.CoachText
@@ -145,8 +156,6 @@ import dev.arc.ep133.ui.theme.LocalArcColors
  * plate split by thin lines. A lit pad turns the signal orange, brighter with
  * velocity, and fades on release.
  */
-private val KeyBlack = Color(0xFF1E1F21)
-private val KeyWhite = Color(0xFFF3F2EE)
 private val FADE_NS = 300_000_000L
 
 /** What the KEYS view shows: whether it is on, the key, scale and octave, and the sound it plays. */
@@ -164,6 +173,11 @@ data class KeysUi(
     val padName: String? = null,
     /** The MIDI notes playing on the phone (a chord), latest last; their keys are outlined. */
     val playingNotes: Set<Int> = emptySet(),
+    /** The piano's white keys as chosen in Settings (Piano.CHOICES); null is Auto, the widest that fits. */
+    val pianoWhites: Int? = null,
+    /** Grid or piano, as picked with the view switch, for a wide window and for a tall one. */
+    val viewWide: KeysView = KeysView.AUTO,
+    val viewTall: KeysView = KeysView.AUTO,
 )
 
 class KeysActions(
@@ -176,7 +190,23 @@ class KeysActions(
     val onNoteUp: (note: Int) -> Unit = {},
     /** A pad played on the device in the pads view becomes the KEYS sound. */
     val onSelect: (PhysicalPad) -> Unit = {},
+    /** The view switch: grid or piano, remembered for a [wide] window or a tall one. */
+    val onView: (wide: Boolean, view: KeysView) -> Unit = { _, _ -> },
 )
+
+/**
+ * EDIT, the left edge tab under GUIDE (Live's pads only): while [on], a tap on
+ * a pad calls [onPad] (the pad sheet, to give it another sound), and a long
+ * press still plays it. A null [onEdit] hides the tab.
+ */
+class EditUi(
+    val on: Boolean = false,
+    val onEdit: ((Boolean) -> Unit)? = null,
+    val onPad: (PhysicalPad) -> Unit = {},
+)
+
+/** The KEYS view switch's state: which view shows, and whether the piano has room. */
+private class ViewSwitch(val piano: Boolean, val pianoEnabled: Boolean, val onPick: (KeysView) -> Unit)
 
 /** Live's REC key on the display line: its state, and the tap (null hides it). */
 data class RecUi(val state: RecState = RecState.Idle, val onRec: (() -> Unit)? = null)
@@ -210,7 +240,6 @@ class TakesUi(
 fun MirrorScreen(
     mirror: MirrorUi?,
     nameOf: (PhysicalPad) -> String?,
-    onPadOrder: (PadOrder) -> Unit,
     /** Null on the Live tab, which has no close key. */
     onBack: (() -> Unit)? = null,
     /** A fixed time for screenshots; normally the screen's frame clock drives the fade. */
@@ -246,9 +275,14 @@ fun MirrorScreen(
     /** REC: records what is played on the phone into a take. */
     rec: RecUi = RecUi(),
     takes: TakesUi = TakesUi(),
+    /** EDIT: tapping a pad gives it another sound. */
+    edit: EditUi = EditUi(),
 ) {
     val c = LocalArcColors.current
     val window = LocalArcWindow.current
+    // EDIT works on the pads only, and only on the Live tab (where the tab is).
+    val editing = edit.on && edit.onEdit != null && !keys.on && onBack == null
+    val onEdit = if (editing) edit.onPad else null
     if (onBack != null) BackHandler(onBack = onBack)
     val st = mirror?.state ?: MirrorState()
     // The fade runs on the frame clock while a released pad is fading, and stops after.
@@ -285,7 +319,16 @@ fun MirrorScreen(
         val safe = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal).asPaddingValues()
         val roomW = maxWidth - safe.calculateLeftPadding(LayoutDirection.Ltr) - safe.calculateRightPadding(LayoutDirection.Ltr) - startGutter - endGutter
         val roomH = maxHeight - (if (inBar) 0.dp else DisplayLineHeight + 10.dp) - SidewaysBottom - ControlsRow
-        val piano = if (sideways && keys.on) pianoRange(keys.octave, roomW, if (window.short) roomH else minOf(roomH, PianoMaxTablet)) else null
+        // KEYS plays on the piano where it fits and the view switch (or, on Auto, a wide window)
+        // says so. A portrait phone has no switch: there it is always the grid.
+        val fits = if (keys.on) pianoRange(keys.octave, roomW, if (window.short) roomH else minOf(roomH, PianoMaxTablet), keys.pianoWhites) else null
+        val view = if (sideways) keys.viewWide else keys.viewTall
+        val piano = fits?.takeIf { Piano.showsPiano(view, sideways, window.width.value, room = true) }
+        val viewSwitch = if (keys.on && Piano.switchShown(sideways, window.width.value)) {
+            ViewSwitch(piano != null, fits != null) { keysActions.onView(sideways, it) }
+        } else {
+            null
+        }
         LaunchedEffect(piano) { reportRange(piano) }
         // Four groups side by side while their pads keep 40 dp both ways (rows no taller than
         // square pads). Off the height: each group's caption (a 1.2 em line and its gap) and the
@@ -303,18 +346,23 @@ fun MirrorScreen(
                     KeysPanel(keys, keysActions, piano = piano != null)
                     if (rec.onRec != null) TakesSection(takes)
                 } else {
-                Caption(MirrorText.VIEW, align = androidx.compose.ui.text.style.TextAlign.Start)
-                TextToggle(
-                    listOf(MirrorText.ALL_GROUPS, MirrorText.ONE_GROUP),
-                    selected = if (oneGroup) 1 else 0,
-                    onSelect = { onOneGroup(it == 1) },
-                )
-                if (oneGroup) {
-                    GridPlate { SwitchRow(MirrorText.FOLLOW, MirrorText.FOLLOW_NOTE, follow, onFollow) }
-                }
-                if (st.lastKeysNote != null) KeysStrip(st)
-                if (rec.onRec != null) TakesSection(takes)
-                Notes(st, mirror, onPadOrder, tapToPlay = onPad != null, sideways = sideways)
+                    GridPlate {
+                        SettingRow(MirrorText.VIEW, stacked = true) {
+                            Segmented(
+                                listOf(MirrorText.ALL_GROUPS, MirrorText.ONE_GROUP),
+                                selected = if (oneGroup) 1 else 0,
+                                onSelect = { onOneGroup(it == 1) },
+                                compact = true,
+                            )
+                        }
+                        if (oneGroup) {
+                            PlateLine()
+                            SwitchRow(MirrorText.FOLLOW, MirrorText.FOLLOW_NOTE, follow, onFollow)
+                        }
+                    }
+                    KeysMonitor(st, keys.names)
+                    if (rec.onRec != null) TakesSection(takes)
+                    Notes(st, mirror, tapToPlay = onPad != null, sideways = sideways)
                 }
             },
             // On its side the strip keeps to the edge's upper part, clear of where the white keys are struck.
@@ -333,16 +381,20 @@ fun MirrorScreen(
                         KeysDisplay(st, mirror, keys, rec, still = fixedNow != null, pianoRange = piano)
                         Spacer(Modifier.height(10.dp))
                     }
-                    ModeRow(keys, keysActions, landscape = true)
-                    // The rest of the room; on a tablet no taller than a hand spans.
-                    PianoKeyboard(
-                        piano, st, keys, clock, keysActions,
-                        Modifier
-                            .fillMaxWidth()
-                            .weight(1f, fill = false)
-                            .then(if (window.short) Modifier else Modifier.heightIn(max = PianoMaxTablet))
-                            .coachMark("live.keys", CoachText.PIANO, CoachYellow, CoachYellowInk),
-                    )
+                    // The row over the piano and the piano; upright (a tablet) they sit right
+                    // under the display line, as on the web.
+                    Column(Modifier.weight(1f, fill = false)) {
+                        ModeRow(keys, keysActions, landscape = true, viewSwitch = viewSwitch)
+                        // The rest of the room; on a tablet no taller than a hand spans.
+                        PianoKeyboard(
+                            piano, st, keys, clock, keysActions,
+                            Modifier
+                                .fillMaxWidth()
+                                .weight(1f, fill = false)
+                                .then(if (window.short) Modifier else Modifier.heightIn(max = PianoMaxTablet))
+                                .coachMark("live.keys", CoachText.PIANO, CoachYellow, CoachYellowInk),
+                        )
+                    }
                 }
             } else if (sideways && !keys.on && oneGroup) {
                 val now = clock()
@@ -353,7 +405,7 @@ fun MirrorScreen(
                     val gridW = minOf(gridH * 1.4f, maxWidth - GroupColumn - 12.dp)
                     Column(Modifier.width(gridW + 12.dp + GroupColumn).fillMaxHeight()) {
                         if (!inBar) {
-                            DisplayStrip(st, mirror, rec, still = fixedNow != null)
+                            if (editing) EditLine() else DisplayStrip(st, mirror, rec, still = fixedNow != null)
                             Spacer(Modifier.height(10.dp))
                         }
                         ModeRow(keys, keysActions, landscape = true, oneGroup = true, onOneGroup = onOneGroup)
@@ -365,6 +417,7 @@ fun MirrorScreen(
                                 onPad = onPad,
                                 onPadUp = onPadUp,
                                 playingPads = playingPads,
+                                onEdit = onEdit,
                             )
                             GroupKeys(group, st, now, onSelect = { group = it }, Modifier.width(GroupColumn).fillMaxHeight(), vertical = true)
                         }
@@ -374,7 +427,7 @@ fun MirrorScreen(
                 val now = clock()
                 Column(sidewaysColumn) {
                     if (!inBar) {
-                        DisplayStrip(st, mirror, rec, still = fixedNow != null)
+                        if (editing) EditLine() else DisplayStrip(st, mirror, rec, still = fixedNow != null)
                         Spacer(Modifier.height(10.dp))
                     }
                     ModeRow(keys, keysActions, landscape = true, onOneGroup = onOneGroup)
@@ -383,7 +436,7 @@ fun MirrorScreen(
                         Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = caption + 3.dp + padW * 4),
                         horizontalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
-                        for (g in 0..3) Group(g, st, nameOf, now, Modifier.weight(1f).fillMaxHeight(), fill = true, onPad = onPad, onPadUp = onPadUp, playingPads = playingPads)
+                        for (g in 0..3) Group(g, st, nameOf, now, Modifier.weight(1f).fillMaxHeight(), fill = true, onPad = onPad, onPadUp = onPadUp, playingPads = playingPads, onEdit = onEdit)
                     }
                 }
             } else if (oneGroup || keys.on) {
@@ -412,9 +465,11 @@ fun MirrorScreen(
                                 st, keys, now, keysActions,
                                 Modifier.fillMaxWidth().weight(1f).coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
                             )
-                            ModeRow(keys, keysActions)
+                            ModeRow(keys, keysActions, viewSwitch = viewSwitch)
                         } else {
-                            if (!inBar) DisplayStrip(st, mirror, rec, still = fixedNow != null)
+                            if (!inBar) {
+                                if (editing) EditLine() else DisplayStrip(st, mirror, rec, still = fixedNow != null)
+                            }
                             Group(
                                 group, st, nameOf, now,
                                 Modifier.fillMaxWidth().weight(1f).coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
@@ -422,6 +477,7 @@ fun MirrorScreen(
                                 onPad = onPad,
                                 onPadUp = onPadUp,
                                 playingPads = playingPads,
+                                onEdit = onEdit,
                             )
                             ModeRow(keys, keysActions)
                             GroupKeys(group, st, now, onSelect = { group = it })
@@ -444,7 +500,9 @@ fun MirrorScreen(
                             Caption(MirrorText.TITLE)
                             if (onBack != null) CloseKey(onBack, dev.arc.ep133.text.GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
                         }
-                        if (!inBar) Display(st, mirror, rec, still = fixedNow != null, compact = sideways, initialNoteOpen = initialNoteOpen)
+                        if (!inBar) {
+                            if (editing) EditLine() else Display(st, mirror, rec, still = fixedNow != null, compact = sideways, initialNoteOpen = initialNoteOpen)
+                        }
                         ModeRow(keys, keysActions)
                         BoxWithConstraints(Modifier.fillMaxWidth()) {
                             // Four groups in a row when there is room, two by two on a phone.
@@ -452,7 +510,7 @@ fun MirrorScreen(
                             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                                 for (row in (0..3).chunked(perRow)) {
                                     Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                                        for (g in row) Group(g, st, nameOf, now, Modifier.weight(1f), onPad = onPad, onPadUp = onPadUp, playingPads = playingPads)
+                                        for (g in row) Group(g, st, nameOf, now, Modifier.weight(1f), onPad = onPad, onPadUp = onPadUp, playingPads = playingPads, onEdit = onEdit)
                                     }
                                 }
                             }
@@ -460,6 +518,10 @@ fun MirrorScreen(
                     }
                 }
             }
+        }
+        // Under GUIDE on the left edge; the pads' own tab, so not in KEYS.
+        if (edit.onEdit != null && !keys.on && onBack == null) {
+            EditEdgeTab(edit.on, { edit.onEdit(!edit.on) }, Modifier.align(Alignment.CenterStart).underGuide())
         }
     }
 }
@@ -479,11 +541,21 @@ private val PianoMaxTablet = 340.dp
 /** The group keys' column beside the one-group grid, on its side. */
 private val GroupColumn = 72.dp
 
-/** The piano's notes in a [width] × [height] room at [octave], or null where the grid stays: under 8 white keys, or under 120 dp tall. */
-private fun pianoRange(octave: Int, width: Dp, height: Dp): IntRange? {
-    val whites = Piano.whitesFor(width.value)
-    return if (whites == 0 || height < 120.dp) null else Piano.range(octave, whites)
+/**
+ * The piano's notes in a [width] × [height] room at [octave], [choice] white
+ * keys (or fewer, where they don't fit; null for as many as fit), or null
+ * where the grid stays: under 8 white keys, or under 120 dp tall.
+ */
+private fun pianoRange(octave: Int, width: Dp, height: Dp, choice: Int?): IntRange? {
+    val whites = Piano.whitesFor(width.value, choice)
+    return if (whites == 0 || height.value < Piano.MIN_HEIGHT) null else Piano.range(octave, whites)
 }
+
+/**
+ * The width Live's piano gets on its side in [window]: the long side less the
+ * narrowest gutters. Settings greys out the piano sizes it can't hold.
+ */
+internal fun sidewaysRoom(window: ArcWindow): Dp = maxOf(window.width, window.height) - (EdgeTabWidth + 8.dp) - (SideStripWidth + 12.dp)
 
 /**
  * The page's side gutters inside the safe area: room for the GUIDE tab and
@@ -518,9 +590,40 @@ private val LivePillWindow = 600.dp
  * piano's notes, to name a device note it doesn't reach.
  */
 @Composable
-internal fun LivePill(mirror: MirrorUi?, keys: KeysUi, rec: RecUi = RecUi(), still: Boolean = false, pianoRange: IntRange? = null) {
+internal fun LivePill(mirror: MirrorUi?, keys: KeysUi, rec: RecUi = RecUi(), still: Boolean = false, pianoRange: IntRange? = null, editing: Boolean = false) {
     val st = mirror?.state ?: MirrorState()
-    if (keys.on) KeysDisplay(st, mirror, keys, rec, still, compact = true, pianoRange = pianoRange) else DisplayStrip(st, mirror, rec, still, compact = true)
+    when {
+        keys.on -> KeysDisplay(st, mirror, keys, rec, still, compact = true, pianoRange = pianoRange)
+        editing -> EditLine(compact = true)
+        else -> DisplayStrip(st, mirror, rec, still, compact = true)
+    }
+}
+
+/**
+ * The display line while EDIT is on, lit signal orange: "EDIT  Tap a pad to
+ * change its sound". [compact]: one bar tall, in the top bar ([LivePill]).
+ */
+@Composable
+private fun EditLine(compact: Boolean = false) {
+    val c = LocalArcColors.current
+    DisplayLine(
+        Modifier.clearAndSetSemantics {
+            contentDescription = MirrorText.EDIT_TAB + ", " + MirrorText.EDIT_LINE
+            liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite
+        },
+        compact = compact,
+        color = c.signal,
+    ) {
+        Text(MirrorText.EDIT_TAB, style = ArcType.displaySub, color = c.onSignal.copy(alpha = 0.8f), maxLines = 1)
+        Text(
+            MirrorText.EDIT_LINE,
+            style = if (compact) ArcType.displaySub else ArcType.displayHead,
+            color = c.onSignal,
+            maxLines = if (compact) 1 else 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+    }
 }
 
 /**
@@ -684,6 +787,8 @@ private fun Group(
     onPad: ((pad: PhysicalPad, hold: Boolean) -> Unit)? = null,
     onPadUp: (PhysicalPad) -> Unit = {},
     playingPads: Set<PhysicalPad> = emptySet(),
+    /** EDIT is on: a tap gives the pad another sound. */
+    onEdit: ((PhysicalPad) -> Unit)? = null,
 ) {
     val c = LocalArcColors.current
     val lit = st.pads.filterKeys { it.group == group }
@@ -707,6 +812,7 @@ private fun Group(
                             playing = pad in playingPads,
                             // Only the all-groups page scrolls.
                             inScroll = !fill,
+                            onEdit = onEdit?.let { f -> { f(pad) } },
                         )
                     }
                 }
@@ -821,6 +927,7 @@ private fun Pad(
     onRelease: () -> Unit = {},
     playing: Boolean = false,
     inScroll: Boolean = !big,
+    onEdit: (() -> Unit)? = null,
 ) {
     val c = LocalArcColors.current
     val hw = LocalHwColors.current
@@ -852,6 +959,8 @@ private fun Pad(
                 if (name != null) {
                     Text(name, style = nameStyle, color = nameColor, maxLines = lines, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 }
+                // Clear of EDIT's badge in the corner.
+                if (onEdit != null) Spacer(Modifier.width(if (big) 24.dp else 14.dp))
             }
         } else {
             Column(Modifier.fillMaxSize()) {
@@ -869,44 +978,86 @@ private fun Pad(
         // A dark cap, lit orange (its edge with it, and a light around it), down while held.
         .litGlow(g, c.signal, shape)
         .cap(lerp(hw.darkFace, c.signal, g), lerp(hw.darkEdge, c.signalEdge, g), shape, capPress(held.value))
-        // Playing on the phone: a signal-orange ring inside the pad.
-        .then(if (playing) Modifier.border(2.dp, c.signal, shape) else Modifier)
-        // The big grid doesn't scroll: it plays on touch-down. The all-groups page
-        // scrolls, so there a drag across the pads must not play them.
-        .then(if (onPress == null) Modifier else holdToPlay(onPress, onRelease, inScroll = inScroll, held = held))
+        // Playing on the phone, or EDIT on: a signal-orange ring inside the pad.
+        .then(if (playing || onEdit != null) Modifier.border(2.dp, c.signal, shape) else Modifier)
+        .then(
+            when {
+                // EDIT: a tap opens the pad sheet; held, it still plays.
+                onEdit != null -> tapToEdit(onEdit, onPress, onRelease, held = held)
+                // The big grid doesn't scroll: it plays on touch-down. The all-groups page
+                // scrolls, so there a drag across the pads must not play them.
+                onPress != null -> holdToPlay(onPress, onRelease, inScroll = inScroll, held = held)
+                else -> Modifier
+            },
+        )
         .semantics { contentDescription = "${pad.groupLetter} ${pad.label}" + (name?.let { ", $it" } ?: "") }
         .padding(if (big) PaddingValues(10.dp) else PaddingValues(start = 6.dp, top = 5.dp, end = 7.dp, bottom = 5.dp))
-    if (big) BoxWithConstraints(box) { content(maxHeight) } else Box(box) { content(null) }
+    // EDIT's ⇄ badge in the top right corner, over the name if it must.
+    val badge: @Composable BoxScope.() -> Unit = {
+        if (onEdit != null) {
+            Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .size(if (big) 24.dp else 14.dp)
+                    .clip(RoundedCornerShape(if (big) 6.dp else 4.dp))
+                    .background(c.signal),
+                contentAlignment = Alignment.Center,
+            ) {
+                dev.arc.ep133.ui.components.Icon(ArcIcon.EXCHANGE, c.onSignal, size = if (big) 18.dp else 11.dp)
+            }
+        }
+    }
+    if (big) {
+        BoxWithConstraints(box) {
+            content(maxHeight)
+            badge()
+        }
+    } else {
+        Box(box) {
+            content(null)
+            badge()
+        }
+    }
 }
 
 /** A big pad shorter than this inside its padding (about 80 dp in all) puts its name beside its number. */
 private val BigPadRoom = 60.dp
 
-/** Two octaves around the last note outside the pads, with held notes lit. */
+/**
+ * The last note sent outside the pads (the EP-133's own KEYS mode), in a small
+ * display: "KEYS · MI4" and its channel while held, over two octaves around
+ * it with the held notes lit.
+ */
 @Composable
-private fun KeysStrip(st: MirrorState) {
+private fun KeysMonitor(st: MirrorState, names: NoteNames) {
     val c = LocalArcColors.current
     val last = st.lastKeysNote ?: return
     val start = ((last / 12) * 12 - 12).coerceIn(0, 103)
     val black = setOf(1, 3, 6, 8, 10)
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            MirrorText.KEYS + " \u00B7 " + PadNotes.noteName(last) + (st.keysHeld[last]?.let { " \u00B7 " + MirrorText.channel(it) } ?: ""),
-            style = ArcType.small,
-            color = c.graphite,
-        )
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(c.display)
+            .padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(MirrorText.lastNote(last, names).uppercase(), style = ArcType.displaySub, color = c.displayInk, modifier = Modifier.weight(1f))
+            st.keysHeld[last]?.let { Text(MirrorText.channel(it), style = ArcType.displaySub, color = c.displayDim) }
+        }
         Canvas(
             Modifier
                 .fillMaxWidth()
-                .height(56.dp)
-                .semantics { contentDescription = MirrorText.KEYS + " " + PadNotes.noteName(last) },
+                .height(54.dp)
+                .semantics { contentDescription = MirrorText.KEYS + " " + MirrorText.noteName(last, names) },
         ) {
             val whites = (start until start + 25).filter { it % 12 !in black }
             val w = size.width / whites.size
             whites.forEachIndexed { i, n ->
                 val on = st.keysHeld.containsKey(n)
                 drawRoundRect(
-                    if (on) c.signal else KeyWhite,
+                    if (on) c.signal else c.pianoWhite,
                     topLeft = Offset(i * w + 1, 0f),
                     size = Size(w - 2, size.height),
                     cornerRadius = CornerRadius(3.dp.toPx()),
@@ -917,7 +1068,7 @@ private fun KeysStrip(st: MirrorState) {
                 val leftWhites = whites.count { it < n }
                 val on = st.keysHeld.containsKey(n)
                 drawRoundRect(
-                    if (on) c.signal else KeyBlack,
+                    if (on) c.signal else c.pianoBlack,
                     topLeft = Offset(leftWhites * w - w * 0.3f, 0f),
                     size = Size(w * 0.6f, size.height * 0.6f),
                     cornerRadius = CornerRadius(2.dp.toPx()),
@@ -927,38 +1078,27 @@ private fun KeysStrip(st: MirrorState) {
     }
 }
 
+/**
+ * The pads' notes: what needs saying now (offline, no clock, no pad
+ * messages) in the open, and how Live reads the EP-133 folded away.
+ */
 @Composable
-private fun Notes(st: MirrorState, mirror: MirrorUi?, onPadOrder: (PadOrder) -> Unit, tapToPlay: Boolean = false, sideways: Boolean = false) {
+private fun Notes(st: MirrorState, mirror: MirrorUi?, tapToPlay: Boolean = false, sideways: Boolean = false) {
     val c = LocalArcColors.current
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val learning = st.padOrder == PadOrder.FROM_TOP
+    if (mirror?.offline != null) Text(MirrorText.OFFLINE_NOTE, style = ArcType.small, color = c.graphite)
+    // On its side the display is one line (in the top bar), so what clock out is for is told here.
+    if (sideways && mirror?.offline == null && st.playing == null && st.bpm == null) {
+        Text(MirrorText.NO_TRANSPORT, style = ArcType.small, color = c.graphite)
+    }
+    if (learning && !st.pushesSeen && st.learned.isEmpty() && st.lastHit?.pad != null && mirror?.loading == false) {
+        Text(MirrorText.NO_PUSHES, style = ArcType.small, color = c.graphite)
+    }
+    Disclosure(MirrorText.HOW_LIVE_READS) {
         if (tapToPlay) Text(MirrorText.TAP_NOTE, style = ArcType.small, color = c.graphite)
         // Pads that play on the phone mean keys that do too, and sideways they are a piano.
         if (tapToPlay && !sideways) Text(MirrorText.PIANO_HINT, style = ArcType.small, color = c.graphite)
-        if (mirror?.offline != null) Text(MirrorText.OFFLINE_NOTE, style = ArcType.small, color = c.graphite)
-        // On its side the display is one line (in the top bar), so what clock out is for is told here.
-        if (sideways && mirror?.offline == null && st.playing == null && st.bpm == null) {
-            Text(MirrorText.NO_TRANSPORT, style = ArcType.small, color = c.graphite)
-        }
-        if (st.padOrder == PadOrder.FROM_TOP) {
-            Text(MirrorText.LEARN_NOTE, style = ArcType.small, color = c.graphite)
-            if (!st.pushesSeen && st.learned.isEmpty() && st.lastHit?.pad != null && mirror?.loading == false) {
-                Text(MirrorText.NO_PUSHES, style = ArcType.small, color = c.graphite)
-            }
-        }
-        Caption(MirrorText.PAD_ORDER, Modifier.padding(top = 8.dp), align = androidx.compose.ui.text.style.TextAlign.Start)
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            for ((order, label) in listOf(PadOrder.FROM_TOP to MirrorText.FROM_TOP, PadOrder.FROM_BOTTOM to MirrorText.FROM_BOTTOM)) {
-                ArcKey(
-                    label,
-                    { onPadOrder(order) },
-                    Modifier.weight(1f),
-                    size = KeySize.Small,
-                    style = if (st.padOrder == order) KeyStyle.Navy else KeyStyle.Normal,
-                    down = st.padOrder == order,
-                )
-            }
-        }
-        Text(MirrorText.ORDER_NOTE, style = ArcType.small, color = c.graphite)
+        if (learning) Text(MirrorText.LEARN_NOTE, style = ArcType.small, color = c.graphite)
         Text(MirrorText.COMMUNITY_NOTE, style = ArcType.small, color = c.graphite)
         Text(MirrorText.LISTEN_ONLY, style = ArcType.small, color = c.graphite)
     }
@@ -977,9 +1117,11 @@ private fun ModeRow(
     landscape: Boolean = false,
     oneGroup: Boolean = false,
     onOneGroup: (Boolean) -> Unit = {},
+    /** KEYS' grid ⇄ piano switch, after the mode word; null where it isn't offered. */
+    viewSwitch: ViewSwitch? = null,
 ) {
     if (landscape) {
-        SidewaysRow(keys, actions, oneGroup, onOneGroup)
+        SidewaysRow(keys, actions, oneGroup, onOneGroup, viewSwitch)
         return
     }
     val c = LocalArcColors.current
@@ -998,7 +1140,14 @@ private fun ModeRow(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        ModeWord(keys, actions, top = true)
+        if (viewSwitch != null) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(SwitchGap)) {
+                ModeWord(keys, actions, top = false)
+                KeysViewSwitch(viewSwitch)
+            }
+        } else {
+            ModeWord(keys, actions, top = true)
+        }
         if (keys.on) {
             PickWord(
                 label = MirrorText.scaleName(keys.scale),
@@ -1008,6 +1157,8 @@ private fun ModeRow(
                 onPick = actions.onScale,
                 description = MirrorText.scaleChoice(keys.scale),
                 mark = Modifier.coachMark("live.scale", CoachText.SCALE, c.navy, c.onNavy),
+                // With the switch's caps in the row, the words keep to its middle.
+                top = viewSwitch == null,
             )
             PickWord(
                 label = MirrorText.octave(keys.octave),
@@ -1019,6 +1170,7 @@ private fun ModeRow(
                 mark = Modifier.coachMark("live.octave", CoachText.OCTAVE, c.navy, c.onNavy),
                 // At the row's end: the list opens leftward, staying on screen.
                 alignEnd = true,
+                top = viewSwitch == null,
             )
         }
     }
@@ -1045,7 +1197,7 @@ private fun ModeWord(keys: KeysUi, actions: KeysActions, top: Boolean) {
  * KEY, then the scale shortens to its code; − and + keep their size.
  */
 @Composable
-private fun SidewaysRow(keys: KeysUi, actions: KeysActions, oneGroup: Boolean, onOneGroup: (Boolean) -> Unit) {
+private fun SidewaysRow(keys: KeysUi, actions: KeysActions, oneGroup: Boolean, onOneGroup: (Boolean) -> Unit, viewSwitch: ViewSwitch?) {
     val c = LocalArcColors.current
     if (!keys.on) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(WordGap)) {
@@ -1071,13 +1223,18 @@ private fun SidewaysRow(keys: KeysUi, actions: KeysActions, oneGroup: Boolean, o
         val scaleName = MirrorText.scaleName(keys.scale)
         // Everything but the scale and key words: the mode word and its mark, the octave
         // word between − and +, and the gaps (the one before − at its narrowest).
-        val fixed = width(MirrorText.MODE_KEYS) + 18.dp + width(MirrorText.octave(keys.octave) + pick) + StepWidth * 2 + WordGap * 3
+        val fixed = width(MirrorText.MODE_KEYS) + 18.dp + width(MirrorText.octave(keys.octave) + pick) + StepWidth * 2 + WordGap * 3 +
+            (if (viewSwitch != null) SwitchGap + SwitchWidth else 0.dp)
         val key = MirrorText.keyWord(keys.root, keys.names).takeIf {
             fixed + width(scaleName + pick) + width(it + pick) <= maxWidth
         } ?: Keys.name(keys.root, keys.names)
         val scale = scaleName.takeIf { fixed + width(it + pick) + width(key + pick) <= maxWidth } ?: MirrorText.scaleCode(keys.scale)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             ModeWord(keys, actions, top = false)
+            if (viewSwitch != null) {
+                Spacer(Modifier.width(SwitchGap))
+                KeysViewSwitch(viewSwitch)
+            }
             Spacer(Modifier.width(WordGap))
             PickWord(
                 label = scale,
@@ -1122,6 +1279,84 @@ private fun SidewaysRow(keys: KeysUi, actions: KeysActions, oneGroup: Boolean, o
 
 /** The room between the words of the row over the keys. */
 private val WordGap = 24.dp
+
+/** The KEYS view switch: two keys of [SwitchKey] wide, [SwitchGap] after the mode word. */
+private val SwitchKey = 44.dp
+private val SwitchWidth = SwitchKey * 2 + 2.dp
+private val SwitchGap = 8.dp
+
+/**
+ * KEYS on the grid or the piano: two small icon caps in a recessed tray
+ * right after the KEYS word, the one showing navy and down. The piano key
+ * is greyed out where no piano fits (fewer than 8 white keys, or under
+ * 120 dp tall). Long-press shows each key's name.
+ */
+@Composable
+private fun KeysViewSwitch(ui: ViewSwitch) {
+    val c = LocalArcColors.current
+    val hw = LocalHwColors.current
+    Row(
+        Modifier
+            .coachMark("live.keysView", CoachText.KEYS_VIEW, c.navy, c.onNavy)
+            .semantics { contentDescription = MirrorText.KEYS_VIEW }
+            .selectableGroup()
+            // The tray, a little taller than the caps, inside the keys' touch height.
+            .drawBehind {
+                val inset = (size.height - 36.dp.toPx()) / 2
+                drawRoundRect(hw.body, topLeft = Offset(0f, inset), size = Size(size.width, size.height - inset * 2), cornerRadius = CornerRadius(9.dp.toPx()))
+            }
+            .padding(horizontal = 1.dp),
+    ) {
+        ViewKey(dev.arc.ep133.ui.components.ArcIcon.GRID, on = !ui.piano, enabled = true, label = MirrorText.VIEW_PADS, description = MirrorText.keysView(false)) {
+            ui.onPick(KeysView.PADS)
+        }
+        ViewKey(
+            dev.arc.ep133.ui.components.ArcIcon.PIANO, on = ui.piano, enabled = ui.pianoEnabled, label = MirrorText.VIEW_PIANO,
+            description = if (ui.pianoEnabled) MirrorText.keysView(true) else MirrorText.keysView(true) + ". " + MirrorText.PIANO_NO_ROOM,
+        ) {
+            ui.onPick(KeysView.PIANO)
+        }
+    }
+}
+
+/** One key of [KeysViewSwitch]: a 38 × 28 cap in a 44 dp touch square. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun ViewKey(icon: dev.arc.ep133.ui.components.ArcIcon, on: Boolean, enabled: Boolean, label: String, description: String, onClick: () -> Unit) {
+    val c = LocalArcColors.current
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    androidx.compose.material3.TooltipBox(
+        positionProvider = androidx.compose.material3.TooltipDefaults.rememberTooltipPositionProvider(androidx.compose.material3.TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text(label.uppercase(), style = ArcType.capsKeySmall) } },
+        state = androidx.compose.material3.rememberTooltipState(),
+    ) {
+        Box(
+            Modifier
+                .size(SwitchKey)
+                .selectable(selected = on, enabled = enabled, role = Role.RadioButton, interactionSource = source, indication = null, onClick = onClick)
+                .semantics { contentDescription = description },
+            contentAlignment = Alignment.Center,
+        ) {
+            Box(
+                Modifier
+                    .size(width = 38.dp, height = 28.dp)
+                    .cap(
+                        if (on) c.navy else c.key,
+                        if (on) dev.arc.ep133.ui.components.capEdge(c.navy) else c.keyEdge,
+                        RoundedCornerShape(7.dp),
+                        capPress(on || pressed && enabled),
+                        dx = 1.dp,
+                        dy = 2.dp,
+                        alpha = if (enabled) 1f else 0.4f,
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                dev.arc.ep133.ui.components.Icon(icon, if (on) c.onNavy else c.graphite, size = 18.dp)
+            }
+        }
+    }
+}
 
 /** − and + are this wide, however tight the row. */
 private val StepWidth = 48.dp
@@ -1388,70 +1623,82 @@ private fun KeysGrid(st: MirrorState, keys: KeysUi, now: Long, actions: KeysActi
     }
 }
 
-/** The KEYS tools: the key (fixed-do names) and the scale. [piano]: the piano is showing, and its legend rows with it. */
+/**
+ * The KEYS tools: the key picked on one octave of piano keys, what the keys'
+ * colours mean as compact chips, and how Keys works folded away. [piano]: the
+ * piano is showing, so the chips are the piano's.
+ */
 @Composable
 private fun KeysPanel(keys: KeysUi, actions: KeysActions, piano: Boolean = false) {
     val c = LocalArcColors.current
-    Caption(MirrorText.KEY, align = androidx.compose.ui.text.style.TextAlign.Start)
-    for (row in (0..11).chunked(6)) {
-        Segmented(row.map { Keys.name(it, keys.names) }, selected = row.indexOf(keys.root), onSelect = { actions.onRoot(row[it]) })
+    GridPlate {
+        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(MirrorText.KEY, style = ArcType.semi, color = c.ink)
+                Text(MirrorText.KEY_HINT, style = ArcType.small, color = c.graphite, modifier = Modifier.padding(bottom = 1.dp))
+            }
+            MiniPiano(keys.root, keys.names, actions.onRoot)
+        }
     }
-    Text(MirrorText.KEYS_NOTE, style = ArcType.small, color = c.graphite)
-    // Sideways already, the piano is there (or there's no room for one).
-    if (!LocalArcWindow.current.landscape) Text(MirrorText.PIANO_HINT, style = ArcType.small, color = c.graphite)
-    KeysLegend(piano, if (keys.showNames) keys.names else null)
+    GridPlate {
+        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(MirrorText.LEGEND, style = ArcType.semi, color = c.ink)
+            KeysChips(piano, named = keys.showNames)
+        }
+    }
+    Disclosure(MirrorText.HOW_KEYS_WORKS) {
+        Text(MirrorText.KEYS_NOTE, style = ArcType.small, color = c.graphite)
+        // Sideways already, the piano is there (or there's no room for one).
+        if (!LocalArcWindow.current.landscape) Text(MirrorText.PIANO_HINT, style = ArcType.small, color = c.graphite)
+    }
 }
 
 /**
- * What the keys' colours mean, each with a small key drawn as the grid draws
- * it. One legend for the grid and the piano; the [piano] adds the keys only
- * it has (those outside the scale) and its octave numbers. With [names] (the
- * keys show them), the small keys carry a name in place of a ring. The piano
- * has no rings at all: its root has a bar at its foot, and with names off its
- * scale is told by the dimmed keys outside it.
+ * What the keys' colours mean, as chips: a key in miniature and a short word
+ * each, read out in full by screen readers. The [piano] has a bar for its
+ * root (the grid a ring, or its name in orange when [named]) and dims the keys
+ * outside the scale, which the grid doesn't show.
  */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
-private fun KeysLegend(piano: Boolean = false, names: NoteNames? = null) {
+private fun KeysChips(piano: Boolean, named: Boolean) {
     val c = LocalArcColors.current
     val hw = LocalHwColors.current
-    // The piano's white key, or the grid's dark cap (its rings orange and pale, as the grid draws them).
     val face = if (piano) c.pianoWhite else hw.darkFace
-    val inScale = if (piano) c.navy else hw.ring
-    // A named key's name: the root's in its ring's colour, the others in ink (the cap's on the grid).
-    val nameInk = if (piano) c.ink else hw.darkInk
-    val rootName = names?.let { Keys.name(0, it) }
-    val scaleName = names?.let { Keys.name(2, it) }
-    Caption(MirrorText.LEGEND, align = androidx.compose.ui.text.style.TextAlign.Start)
-    // The piano without names draws nothing in its keys' middles.
-    val bare = piano && names == null
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    androidx.compose.foundation.layout.FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Chip(MirrorText.CHIP_DEVICE, MirrorText.LEGEND_DEVICE) { LegendKey(ring = null, fill = c.signal, side = ChipKey) }
+        Chip(MirrorText.CHIP_PHONE, MirrorText.LEGEND_PHONE) {
+            LegendKey(ring = null, fill = face, outline = if (piano) c.pianoSignal else c.signal, side = ChipKey)
+        }
         if (piano) {
-            LegendRow(MirrorText.LEGEND_ROOT_BAR) { LegendKey(ring = c.rootOn(face), fill = face, name = rootName, bar = c.rootOn(face), bare = bare) }
+            Chip(MirrorText.CHIP_ROOT, MirrorText.LEGEND_ROOT_BAR) { LegendKey(ring = null, fill = face, bar = c.rootOn(face), side = ChipKey) }
+            Chip(MirrorText.CHIP_OUT, MirrorText.LEGEND_OUT) { LegendKey(ring = null, fill = c.keyOut, side = ChipKey) }
         } else {
-            LegendRow(if (names != null) MirrorText.LEGEND_ROOT_NAMED else MirrorText.LEGEND_ROOT) { LegendKey(ring = c.signal, fill = face, name = rootName) }
-        }
-        // (The bare piano's scale shows by the dimmed keys alone: its row is the next.)
-        if (!bare) {
-            LegendRow(if (names != null) MirrorText.LEGEND_IN_SCALE_NAMED else MirrorText.LEGEND_IN_SCALE) { LegendKey(ring = if (names != null) nameInk else inScale, fill = face, name = scaleName) }
-        }
-        if (piano) {
-            LegendRow(MirrorText.LEGEND_OUT) { LegendKey(ring = null, fill = c.keyOut) }
-            LegendRow(MirrorText.LEGEND_C) { LegendKey(ring = null, fill = face, digit = "4") }
-        }
-        LegendRow(MirrorText.LEGEND_DEVICE) { LegendKey(ring = c.onSignal, fill = c.signal, name = scaleName, bare = bare) }
-        LegendRow(MirrorText.LEGEND_PHONE) {
-            LegendKey(ring = if (names != null) nameInk else inScale, fill = face, outline = if (piano) c.pianoSignal else c.signal, name = scaleName, bare = bare)
+            Chip(MirrorText.CHIP_ROOT, if (named) MirrorText.LEGEND_ROOT_NAMED else MirrorText.LEGEND_ROOT) { LegendKey(ring = c.signal, fill = face, side = ChipKey) }
         }
     }
 }
 
+/** A legend key in a chip. */
+private val ChipKey = 16.dp
+
 @Composable
-private fun LegendRow(text: String, keys: @Composable () -> Unit) {
+private fun Chip(text: String, description: String, key: @Composable () -> Unit) {
     val c = LocalArcColors.current
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        // One key in miniature a row, so the words line up.
-        keys()
-        Text(text, style = ArcType.small, color = c.graphite, modifier = Modifier.weight(1f))
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(50))
+            .background(c.shell)
+            .clearAndSetSemantics { contentDescription = description }
+            .padding(start = 6.dp, end = 12.dp, top = 5.dp, bottom = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        key()
+        Text(text, style = ArcType.tiny, color = c.graphite, maxLines = 1)
     }
 }
 
@@ -1470,18 +1717,20 @@ private fun LegendKey(
     name: String? = null,
     bar: Color? = null,
     bare: Boolean = false,
+    side: Dp = 26.dp,
 ) {
     val c = LocalArcColors.current
+    val scale = side / 26.dp
     Box(
         Modifier
-            .size(26.dp)
-            .clip(RoundedCornerShape(4.dp))
+            .size(side)
+            .clip(RoundedCornerShape(4.dp * scale))
             .background(fill ?: LocalHwColors.current.darkFace)
-            .then(if (outline != null) Modifier.border(2.dp, outline, RoundedCornerShape(4.dp)) else Modifier)
-            .padding(if (digit != null) 3.dp else 5.dp),
+            .then(if (outline != null) Modifier.border(2.dp, outline, RoundedCornerShape(4.dp * scale)) else Modifier)
+            .padding((if (digit != null) 3.dp else 5.dp) * scale),
     ) {
         if (bar != null) {
-            Box(Modifier.align(Alignment.BottomCenter).size(width = 10.dp, height = 2.dp).clip(RoundedCornerShape(1.dp)).background(bar))
+            Box(Modifier.align(Alignment.BottomCenter).size(width = 10.dp * scale, height = 2.dp).clip(RoundedCornerShape(1.dp)).background(bar))
         }
         if (bare) {
             // Nothing in the middle.
@@ -1563,6 +1812,78 @@ private fun holdToPlay(
 
 /** How long a press in a scrolling page waits to tell a tap from a scroll (as Compose's own press feedback does). */
 private const val PRESS_DELAY_MS = 64L
+
+/**
+ * A pad while EDIT is on: a tap calls [onTap] (the pad sheet); held past a
+ * long press it plays, as [holdToPlay] does, until the finger lifts ([onPress]
+ * null: it doesn't play). A drag (a scroll) does neither. Screen readers get
+ * the tap as the pad's click and Play as an action of its own.
+ */
+@Composable
+private fun tapToEdit(
+    onTap: () -> Unit,
+    onPress: ((hold: Boolean) -> Unit)?,
+    onRelease: () -> Unit,
+    held: MutableState<Boolean>,
+): Modifier {
+    val tap by androidx.compose.runtime.rememberUpdatedState(onTap)
+    val press by androidx.compose.runtime.rememberUpdatedState(onPress)
+    val release by androidx.compose.runtime.rememberUpdatedState(onRelease)
+    return Modifier
+        .pointerInput(Unit) {
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                // Down at once, so a tap shows on the cap too.
+                held.value = true
+                try {
+                    var lifted = false
+                    var moved = false
+                    withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                        while (!lifted && !moved) {
+                            val ch = awaitPointerEvent(PointerEventPass.Final).changes.firstOrNull { it.id == down.id }
+                            when {
+                                ch == null -> moved = true
+                                ch.changedToUp() -> lifted = true
+                                ch.isConsumed || (ch.position - down.position).getDistance() > viewConfiguration.touchSlop -> moved = true
+                            }
+                        }
+                    }
+                    if (lifted) {
+                        tap()
+                        return@awaitEachGesture
+                    }
+                    val play = press
+                    if (moved || play == null) return@awaitEachGesture
+                    play(true)
+                    try {
+                        while (true) {
+                            val ch = awaitPointerEvent(PointerEventPass.Final).changes.firstOrNull { it.id == down.id } ?: break
+                            if (!ch.pressed || ch.isConsumed) break
+                        }
+                    } finally {
+                        release()
+                    }
+                } finally {
+                    held.value = false
+                }
+            }
+        }
+        .semantics {
+            role = Role.Button
+            onClick(label = MirrorText.EDIT_LINE) {
+                tap()
+                true
+            }
+            if (press != null) {
+                customActions = listOf(
+                    androidx.compose.ui.semantics.CustomAccessibilityAction(MirrorText.PLAY) {
+                        press?.invoke(false)
+                        true
+                    },
+                )
+            }
+        }
+}
 
 /**
  * REC on the display line: a dot and the word, dim while off. Armed, the dot

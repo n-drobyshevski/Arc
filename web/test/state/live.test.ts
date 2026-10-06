@@ -341,10 +341,105 @@ describe('Live: KEYS', () => {
     expect(JSON.parse(h.storage.getItem(SETTINGS_KEY)!)).toEqual({ keysOctave: 8, liveKeys: true, keysNames: 'LETTERS' })
   })
 
+  it('keeps the piano size, a size it does not offer read as Auto (stored as 0)', async () => {
+    const h = await liveHarness()
+    h.c.setPianoWhites(15)
+    expect(h.c.settings.value.pianoWhites).toBe(15)
+    expect(JSON.parse(h.storage.getItem(SETTINGS_KEY)!)).toEqual({ pianoWhites: 15 })
+    h.c.setPianoWhites(9)
+    expect(h.c.settings.value.pianoWhites).toBeNull()
+    expect(JSON.parse(h.storage.getItem(SETTINGS_KEY)!)).toEqual({ pianoWhites: 0 })
+  })
+
   it('the KEYS pad comes back after a restart', async () => {
     const storage = memoryStorage({ 'arc.mirror.keysPad': '2:7' })
     const h = await liveHarness({ storage })
     expect(h.c.state.value.keysPad).toMatchObject({ group: 2, offset: 7 })
+  })
+})
+
+describe('Live: the piano', () => {
+  it('plays MIDI notes on the KEYS sound, as note voices, and lets each go', async () => {
+    const h = await liveOn()
+    await copied(h)
+    h.c.selectKeysPad(A1)
+    await h.c.playNote(60)
+    await h.c.playNote(67)
+    expect(h.liveAudio.presses.map((p) => [p.id, p.key, p.options.pitch])).toEqual([
+      ['note:60', '1:kick', 0],
+      ['note:67', '1:kick', 7],
+    ])
+    expect(h.c.playingNotes.value).toEqual(new Set([60, 67]))
+    // The grid's keys are not the piano's notes.
+    expect(h.c.playingKeys.value).toEqual(new Set())
+    h.c.releaseNote(67)
+    expect(h.liveAudio.releases).toEqual(['note:67'])
+  })
+
+  it('remembers the keys view once for a wide window and once for a tall one', async () => {
+    const h = await liveHarness()
+    h.c.setKeysView(true, 'PIANO')
+    h.c.setKeysView(false, 'PADS')
+    expect(h.c.settings.value.keysViewWide).toBe('PIANO')
+    expect(h.c.settings.value.keysViewTall).toBe('PADS')
+    expect(JSON.parse(h.storage.getItem(SETTINGS_KEY) ?? '{}')).toMatchObject({ keysViewWide: 'PIANO', keysViewTall: 'PADS' })
+  })
+})
+
+describe('Live: EDIT, another sound on a pad', () => {
+  /** The slot on project 1's pad [n] of group A, read back from the device. */
+  async function onDevice(h: LiveHarness, n: number): Promise<number | null | undefined> {
+    await h.c.loadProjectSounds(1)
+    return h.c.state.value.browser.projectPads.get(1)?.find((g) => g.name === 'a')?.pads.get(n)
+  }
+
+  it('puts the sound on the pad at once, names it, and UNDO puts the old one back', async () => {
+    const h = await liveOn()
+    expect(h.c.mirrorName(A5)).toBe('clap')
+    expect(await h.c.assignPad(A5, 2)).toBe(true)
+    expect(h.c.mirrorName(A5)).toBe('snare')
+    const t = h.c.state.value.toast
+    expect(t?.text).toBe(MirrorText.assigned(A5, 'snare'))
+    expect(t?.action).toBe(MirrorText.UNDO)
+    expect(await onDevice(h, 5)).toBe(2)
+    h.c.runToastAction(t!.id)
+    await until(h, (s) => s.toast?.text === MirrorText.restored(A5, 'clap'))
+    expect(h.c.mirrorName(A5)).toBe('clap')
+    expect(await onDevice(h, 5)).toBe(5)
+    // The UNDO is gone with its toast.
+    expect(h.c.state.value.toast?.action).toBeUndefined()
+  })
+
+  it('offers no UNDO for a pad that had no sound', async () => {
+    const h = await liveOn()
+    expect(h.c.editTarget(D12, true)?.slot).toBeNull()
+    expect(await h.c.assignPad(D12, 3)).toBe(true)
+    expect(h.c.state.value.toast?.action).toBeUndefined()
+    expect(h.c.mirrorName(D12)).toBe(h.c.liveSounds().find((snd) => snd.slot === 3)?.name)
+  })
+
+  it('says why a pad can\'t be changed: not connected', async () => {
+    const h = await liveHarness({ storage: memoryStorage(ORDER) })
+    expect(h.c.editTarget(A5)).toBeNull()
+    expect(h.toasts.at(-1)?.text).toBe(MirrorText.EDIT_OFFLINE)
+    expect(await h.c.assignPad(A5, 2)).toBe(false)
+  })
+
+  it('uploads a new sample to a free slot through the upload sheet, then puts it on the pad', async () => {
+    const h = await liveOn()
+    const wav = encodeWav(tone(400, 220), 1, 46875)
+    await h.c.uploadForPad(A5, [new Blob([new Uint8Array(wav)]) as Blob & { name: string }])
+    const draft = h.c.state.value.browser.draft
+    expect(draft?.length).toBe(1)
+    expect(h.c.state.value.browser.draftPad).toEqual(A5)
+    const slot = draft![0]!.slot!
+    expect(h.c.liveSounds().some((snd) => snd.slot === slot)).toBe(false)
+    await h.c.uploadDraft()
+    const prefix = MirrorText.assigned(A5, '')
+    await until(h, (s) => s.toast?.text?.startsWith(prefix) === true && !s.busy)
+    expect(h.c.state.value.toast?.action).toBe(MirrorText.UNDO)
+    expect(await onDevice(h, 5)).toBe(slot)
+    expect(h.c.state.value.browser.draftPad ?? null).toBeNull()
   })
 })
 

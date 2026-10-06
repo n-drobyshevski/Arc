@@ -2,7 +2,8 @@
 //
 // Starts the live mirror: reads the sound names, the active project and its
 // pads (the reads the browser already makes), then only listens to MIDI and
-// pad pushes. Nothing is sent while it runs.
+// pad pushes. Nothing is sent while it runs (Live's EDIT writes through the
+// controller, then tells the mirror: [assigned]).
 //
 // Web deltas:
 // - Times are ms on the MIDI event clock (deps.perfNow = performance.now),
@@ -23,7 +24,7 @@ import { getMetadata, isJsonObject, type JsonValue } from '../core/protocol/fs'
 import { PROJECTS_NODE, projectFromNode } from '../core/protocol/device'
 import type { Session } from '../core/protocol/session'
 import { contents, projectLayout } from '../core/features/deviceBrowser'
-import { LiveMirror, type Hit, type MirrorState, type PadLight } from '../core/features/liveMirror'
+import { LiveMirror, type Hit, type MirrorState, type PadLight, type PadTarget } from '../core/features/liveMirror'
 import type { PhysicalPad } from '../core/features/padNotes'
 import { parse as parsePadPush, type PadOrder } from '../core/features/padPush'
 import type { PadGroup } from '../core/features/projectPads'
@@ -287,6 +288,24 @@ export class MirrorController {
         this.publish(m)
       }
     })()
+  }
+
+  /**
+   * Live's EDIT put [slot] on [t]'s pad (or the old one back): the mirror's
+   * names and the saved read follow at once, and the pad's sample is read
+   * into memory for the next press.
+   */
+  assigned(t: PadTarget, slot: number | null): void {
+    const m = this.mirror
+    if (!m) return
+    m.assigned(t, slot)
+    this.host.live.saveLastRead(m)
+    void this.host.live.preloadPads(m)
+    const s = this.host.session()
+    if (s !== null && this.mirrorSession === s) void this.host.live.copyPadSounds(m, s)
+    this.publish(m)
+    // The names are read through mirrorName: a new MirrorUi re-renders Live even when the state didn't change.
+    this.host.store.update((cur) => (cur.mirror ? { ...cur, mirror: { ...cur.mirror } } : cur))
   }
 
   /** The sample on a pad in the mirror, once it is known. */

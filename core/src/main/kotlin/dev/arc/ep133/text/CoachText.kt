@@ -21,6 +21,9 @@ object CoachText {
     const val SCALE = "Scale"
     const val KEY = "Key"
     const val PIANO = "Play, or slide across the keys"
+    const val KEYS_VIEW = "Pads or piano"
+    /** The EDIT edge tab's side tag. */
+    const val EDIT = "Change a pad's sound"
 
     const val SEARCH = "Search sounds"
     const val IMPORT = "Import a .pak"
@@ -31,6 +34,7 @@ object CoachText {
     const val FOLLOW = "Follow the group played"
     const val PADS = "Pads light as you play"
     const val MORE_TOOLS = "More tools"
+    const val SOUNDS_TAB = "Drag a sound onto a pad"
 
     const val REFRESH = "Read the device again"
     const val ADD_SAMPLES = "Add samples"

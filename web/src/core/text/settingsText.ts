@@ -6,6 +6,7 @@
 // string-union type of the same name (the values are the enum names, so they
 // persist as the same strings).
 
+import { CHOICES as PIANO_CHOICES } from '../features/piano'
 import { plural } from './format'
 
 /** The theme the app uses (an addition to the web version). */
@@ -49,12 +50,19 @@ export const SettingsText = {
   ON: 'On',
   OFF: 'Off',
 
+  // Each row: its name with a one-line note, the control on the right, and
+  // (where there is more to say) an info key that opens the long note.
+  /** The info key, for screen readers; it says whether the long note is open. */
+  MORE_INFO: 'More about this',
+
   LIBRARY: 'Library',
   KEEP: 'Keep',
   KEEP_NOTE: 'After each backup or import, older backups beyond this many are deleted, here and in Documents/arc.',
 
   /** null keeps every backup. */
   KEEP_CHOICES,
+  /** The row's short note; [KEEP_NOTE] is the long one. */
+  KEEP_SHORT: 'Older backups beyond this many are deleted.',
   keepLabel(n: number | null | undefined): string {
     return n != null ? String(n) : 'All'
   },
@@ -78,6 +86,61 @@ export const SettingsText = {
   padSounds(size: string): string {
     return `${SettingsText.PAD_SOUNDS}: ${size}`
   },
+
+  // Live's choices as short rows, and what arc keeps on the phone in a group of its own.
+  NOTE_NAMES_SHORT: 'DO is C (fixed-do), or letters.',
+  SHOW_NAMES_SHORT: 'Off: rings and octave numbers only.',
+  PIANO_KEYS: 'Piano keys',
+  PIANO_KEYS_SHORT: 'Auto shows as many as fit.',
+  PIANO_KEYS_NOTE:
+    "How many keys Live's piano shows. A key is never narrower than a fingertip, so a size the window is too narrow for falls back to the largest that fits.",
+  /** null is Auto; the rest are white keys (Piano.WHITES). */
+  PIANO_CHOICES,
+  pianoKeys(whites: number | null): string {
+    switch (whites) {
+      case null:
+        return 'Auto'
+      case 8:
+        return '1 octave'
+      case 12:
+        return '1\u00BD'
+      case 15:
+        return '2'
+      case 22:
+        return '3 octaves'
+      default:
+        return `${whites} keys`
+    }
+  },
+  /** The same, spelt out for screen readers. */
+  pianoKeysDescription(whites: number | null): string {
+    switch (whites) {
+      case null:
+        return 'Auto: as many keys as fit'
+      case 8:
+        return '1 octave'
+      case 12:
+        return '1\u00BD octaves'
+      case 15:
+        return '2 octaves'
+      case 22:
+        return '3 octaves'
+      default:
+        return `${whites} white keys`
+    }
+  },
+  /** Why a piano size is greyed out. */
+  DOESNT_FIT: 'Too wide for this window',
+
+  SAVED_HERE: 'Saved on the phone',
+  LEARNED_NAMES: 'Learned sample names',
+  LEARNED_NAMES_SHORT: 'They come back as you press pads in Live.',
+  PAD_SOUNDS_SHORT: 'Pad sounds',
+  /** "Pad sounds · 69 KB". */
+  padSoundsShort(size: string): string {
+    return `${SettingsText.PAD_SOUNDS_SHORT} \u00B7 ${size}`
+  },
+  PAD_SOUNDS_SHORT_NOTE: 'Copies of your pad samples, to play without the EP-133.',
 
   ABOUT: 'About',
   version(v: string): string {

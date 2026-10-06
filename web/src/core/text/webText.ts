@@ -113,6 +113,18 @@ export const WebText = {
   padSounds(size: string): string {
     return `${WebText.PAD_SOUNDS}: ${size}`
   },
+  /** Replaces SettingsText.SAVED_HERE "Saved on the phone", the group title for what Settings can clear. */
+  SAVED_HERE: 'Saved in this browser',
+  /** Replaces MirrorText.CHIP_PHONE "Playing on the phone". */
+  CHIP_HERE: 'Playing here',
+
+  // ---------- Live: sounds onto pads with the mouse (no Android counterpart) ----------
+  /** Under the SOUNDS tab's list on a wide window. */
+  DRAG_HINT: 'Drag a sound onto a pad of the active project. Right-click a pad for more.',
+  /** The drop zone under the list. */
+  DROP_SAMPLE: 'Drop a WAV here or on a pad to upload it to a free slot',
+  /** The tag on the pad a sound or file is dragged over. */
+  DROP: 'Drop',
 
   // ---------- library folder (FeatureText folder text; Documents/arc → File System Access) ----------
   LIBRARY_FOLDER: 'Library folder',

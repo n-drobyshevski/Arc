@@ -11,9 +11,10 @@
 //
 // Web only, the desktop layout: [docked] (the page passes useDesk()) shows the
 // panel for good as a paper column on the zone's right, a complementary
-// region under the title's name, with no strip, scrim, slide or close key
+// region under its title's caption, with no strip, scrim, slide or close key
 // (and no side.more mark, as there is no strip to point at). An open overlay
 // left from a narrower window is closed then, so Back has nothing hidden to undo.
+// [dockHead] replaces the docked column's caption (Live's TOOLS / SOUNDS tabs).
 import type { ComponentChildren, JSX } from 'preact'
 import { useEffect, useId, useRef, useState } from 'preact/hooks'
 import { CoachText } from '../../core/text/coachText'
@@ -42,6 +43,8 @@ export interface SideZoneProps {
   class?: string
   /** Web only (the desk): the panel always shown as a column beside the page, no strip. */
   docked?: boolean
+  /** Docked, in place of the title's caption (Live's TOOLS / SOUNDS tabs); the column is then named by [title]. */
+  dockHead?: ComponentChildren
 }
 
 export function SideZone(props: SideZoneProps): JSX.Element {
@@ -111,7 +114,14 @@ export function SideZone(props: SideZoneProps): JSX.Element {
     return (
       <div class={`side-zone side-zone--docked${props.class ? ` ${props.class}` : ''}`}>
         <div class="side-zone__content">{props.children}</div>
-        <aside class="side-zone__dock desk-paper" aria-label={title}>
+        <aside
+          class="side-zone__dock desk-paper"
+          aria-labelledby={props.dockHead ? undefined : titleId}
+          aria-label={props.dockHead ? title : undefined}
+        >
+          {props.dockHead ?? (
+            <Caption text={title} align="start" as="h2" id={titleId} class="side-zone__title side-zone__dock-title" />
+          )}
           {props.panel}
         </aside>
       </div>

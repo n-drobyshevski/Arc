@@ -60,6 +60,8 @@ data class HwColors(
     val lightEdge: Color,
     val lightInk: Color,
     val ledOff: Color,
+    /** The whole K.O. II as the Guide draws it beside its list. */
+    val ko: KoColors = KoColors(),
 ) {
     /** A KEYS key's ring for the first octave (the next is signal orange). */
     val ring: Color get() = darkInk.copy(alpha = 0.7f)
@@ -81,6 +83,56 @@ val DarkHwColors = LightHwColors.copy(
     body = Color(0xFF3A3B3F),
     darkEdge = Color(0xFF606165),
     ledOff = Color(0xFF55565A),
+    ko = KoColors(edge = Color(0xFF0E0F10)),
+)
+
+/**
+ * The Guide's K.O. II illustration: the device's own colours, the same in
+ * both themes but for the body's edge, which must show on a dark page. Keys
+ * come as face, edge (the side under it) and ink; knobs as skirt, skirt
+ * edge, cap, cap edge.
+ */
+@Immutable
+data class KoColors(
+    val body: Color = Color(0xFFD6D5D0),
+    val edge: Color = Color(0xFFAFAEA8),
+    /** The cream panel at the top, the ports strip and the labels printed on the body. */
+    val panel: Color = Color(0xFFE6E4DF),
+    val label: Color = Color(0xFF3B3C3E),
+    val grille: Color = Color(0xFF9A9A97),
+    val grilleHole: Color = Color(0xFF1B1B1B),
+    val screen: Color = Color(0xFF111210),
+    val screenInk: Color = Color(0xFFE9E7DF),
+    val screenTag: Color = Color(0xFFEDECE8),
+    val screenTagInk: Color = Color(0xFF111111),
+    val darkFace: Color = Color(0xFF232425),
+    val darkEdge: Color = Color(0xFF050505),
+    val darkInk: Color = Color(0xFFEDECE8),
+    val lightFace: Color = Color(0xFFEEEDE9),
+    val lightEdge: Color = Color(0xFFA9A8A2),
+    val lightInk: Color = Color(0xFF6A6B6E),
+    /** A two-tier key's pale lower half: its ink, and the rule under ERASE. */
+    val tierInk: Color = Color(0xFF5A5B5D),
+    val tierLine: Color = Color(0xFFD0CFCA),
+    /** PLAY, and the grey lower half of TEMPO / LOOP. */
+    val greyFace: Color = Color(0xFF7E7F81),
+    val greyEdge: Color = Color(0xFF5A5B5D),
+    val greyInk: Color = Color(0xFFF0EFEB),
+    val loopFace: Color = Color(0xFF8E8F91),
+    val ledOff: Color = Color(0xFF8E8E8B),
+    val ledOn: Color = Color(0xFFFF3B1A),
+    val portLight: Color = Color(0xFFF1F0EC),
+    val portLightInk: Color = Color(0xFF444444),
+    val portDark: Color = Color(0xFF111111),
+    val portDarkInk: Color = Color(0xFFDDDDDD),
+    val portInk: Color = Color(0xFF555555),
+    /** The Y knob's tag. */
+    val yTag: Color = Color(0xFF1E1F21),
+    val faderTrack: Color = Color(0xFF111111),
+    val faderEdge: Color = Color(0xFF555555),
+    val knobWhite: List<Color> = listOf(Color(0xFFEAE9E5), Color(0xFFBDBCB7), Color(0xFFF7F6F3), Color(0xFFD3D2CD)),
+    val knobOrange: List<Color> = listOf(Color(0xFFFF5410), Color(0xFFB83600), Color(0xFFFF6A26), Color(0xFFD94300)),
+    val knobBlack: List<Color> = listOf(Color(0xFF28292B), Color(0xFF050506), Color(0xFF36373A), Color(0xFF0B0B0C)),
 )
 
 val LocalHwColors = staticCompositionLocalOf { LightHwColors }

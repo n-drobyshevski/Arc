@@ -1,5 +1,5 @@
 // Port of app/src/main/kotlin/dev/arc/ep133/controller/ArcController.kt (Live's sounds and its last read:
-// openOfflineMirror … clearPadSounds, playPad, playKey, selectKeysPad, the KEYS settings' use)
+// openOfflineMirror … clearPadSounds, playPad, playKey, playNote, selectKeysPad, the KEYS settings' use)
 //
 // What Live plays on the phone and what it remembers of the device:
 // - the last read (project, pads, sound names), kept so Live still shows
@@ -15,6 +15,8 @@
 // - KEYS: the pad whose sample the keys play, repitched to each key's note.
 //
 // Web deltas:
+// - The KEYS grid's voices are still "keys:<index>" (playKey); only the piano
+//   plays "note:<midi>" voices (playNote), which Kotlin uses for both.
 // - Coroutines become promises; a generation counter ends a loop (cacheGen,
 //   preloadGen) where Kotlin cancels a Job.
 // - padMemory is a Map kept in access order by hand (LinkedHashMap with
@@ -83,6 +85,8 @@ export function memoryKey(slot: number, name: string): string {
 export const padVoice = (pad: { readonly group: number; readonly offset: number }): string => `live:${pad.group}:${pad.offset}`
 /** Live's voice id for key [index]: "keys:<index>". */
 export const keyVoice = (index: number): string => `keys:${index}`
+/** Live's voice id for a piano note: "note:<midi>" (Kotlin's id for every KEYS note). */
+export const noteVoice = (note: number): string => `note:${note}`
 
 /** The slots on a read's pads, each once, in order. */
 function padSlots(snap: LiveSnapshot): number[] {
@@ -191,6 +195,11 @@ export class LiveSounds {
 
   deviceSound(slot: number): SoundEntry | undefined {
     return this.deviceSounds.get(slot)
+  }
+
+  /** The device's sound list from Live's read, by slot (empty before it). */
+  deviceSoundList(): SoundEntry[] {
+    return [...this.deviceSounds.values()].sort((a, b) => a.slot - b.slot)
   }
 
   /** Ends the copying loop (the mirror stopped). */
@@ -537,6 +546,43 @@ export class LiveSounds {
   /** The finger left the key: its note fades out. */
   releaseKey(index: number): void {
     this.release(keyVoice(index))
+  }
+
+  /**
+   * Plays MIDI [note] on the KEYS sound (the piano), repitched from its own
+   * pitch (C4) as it is mixed, until [releaseNote] (or to the end, with
+   * [hold] false). The piano names the note as the finger lands, so a change
+   * of octave under a held key still lets go of the note it plays. Call from
+   * the press.
+   */
+  playNote(note: number, hold = true): Promise<void> {
+    const { host } = this
+    host.deps.liveAudio.resumeInGesture()
+    const pressedAt = host.deps.perfNow()
+    const id = noteVoice(note)
+    if (hold) this.held.add(id)
+    const token = host.playToken()
+    const pad = host.store.get().keysPad
+    if (pad === null) {
+      host.toast(MirrorText.PICK_SOUND)
+      return Promise.resolve()
+    }
+    const pitch = note - Keys.ROOT_NOTE
+    const sample = this.padSample(pad)
+    const mem = sample ? this.fromMemory(memoryKey(sample.slot, sample.name)) : null
+    if (sample && mem) {
+      this.startHeld(id, hold, memoryKey(sample.slot, sample.name), mem, pitch, pressedAt)
+      return Promise.resolve()
+    }
+    return (async () => {
+      const got = await this.padAudio(pad)
+      if (got !== null && token === host.playToken()) this.startHeld(id, hold, got.key, got.audio, pitch, pressedAt)
+    })()
+  }
+
+  /** The last finger left the note: it fades out. */
+  releaseNote(note: number): void {
+    this.release(noteVoice(note))
   }
 
   private release(id: string): void {

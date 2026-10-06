@@ -7,6 +7,7 @@
 import { Keys, NoteNames, Scale } from '../features/keys'
 import type { Hit } from '../features/liveMirror'
 import { noteName, type PhysicalPad } from '../features/padNotes'
+import { KeyMark } from '../features/piano'
 import { FeatureText } from './featureText'
 
 export const MirrorText = {
@@ -35,8 +36,9 @@ export const MirrorText = {
   COMMUNITY_NOTE:
     "Pads follow the official MIDI note map; play/stop and tempo are standard MIDI clock messages. Naming the samples relies on community notes about the device's SysEx, not on the official guide.",
   NO_PUSHES: "No pad messages from the device yet, so samples can't be named. Pads still light up.",
+  /** How Live uses the device: it reads, and writes only a pad's sound, when asked in EDIT. */
   LISTEN_ONLY:
-    "arc only reads from the device here (sound names, the active project's pads, and the samples on them, to keep a copy); nothing on it is changed.",
+    "arc reads the device here (sound names, the active project's pads, and the samples on them, to keep a copy). It changes the device only when you give a pad another sound in EDIT.",
 
   // Tapping a pad plays its sample on the phone.
   TAP_NOTE:
@@ -54,6 +56,17 @@ export const MirrorText = {
   PICK_SOUND: "Tap a pad in Pads first: Keys plays that pad's sample.",
   NO_SOUND: 'No sound picked',
 
+  // KEYS on the grid or the piano: two small icon keys after the KEYS word, remembered per window shape.
+  KEYS_VIEW: 'Keys view',
+  VIEW_PADS: 'Pads',
+  VIEW_PIANO: 'Piano',
+  /** What each icon key shows, for screen readers and long-press. */
+  keysView(piano: boolean): string {
+    return piano ? 'Keys on a piano' : 'Keys on the pads'
+  },
+  /** Why the piano key is greyed out. */
+  PIANO_NO_ROOM: 'No room for the piano here',
+
   /** The mode word under the grid, for screen readers: what it shows and what a tap does. */
   modeSwitch(keysOn: boolean): string {
     return keysOn ? 'Keys. Tap for pads.' : 'Pads. Tap for keys.'
@@ -69,6 +82,72 @@ export const MirrorText = {
   LEGEND_OCTAVE_NAMED: 'Name: the octave, pale and orange in turn (its number is in the corner)',
   LEGEND_DEVICE: 'Filled: played on the EP-133',
   LEGEND_PHONE: 'Outlined: playing on the phone',
+  LEGEND_ROOT: "Orange ring: the key's root",
+  LEGEND_IN_SCALE: 'Ring: in the scale',
+  /** The same, when the keys show their names (and no rings). */
+  LEGEND_ROOT_NAMED: "Orange name: the key's root",
+  LEGEND_IN_SCALE_NAMED: 'Name: in the scale',
+  /** The piano's root, which has no ring. */
+  LEGEND_ROOT_BAR: "Orange bar: the key's root",
+  // The piano's rows: it shows every note, so the ones outside the scale too.
+  LEGEND_OUT: 'Dimmed: outside the scale (still plays)',
+  LEGEND_C: 'Number: the octave, on each C',
+
+  // The piano: − and + step the octave, and the key gets its own word.
+  OCTAVE_DOWN: 'Octave down',
+  OCTAVE_UP: 'Octave up',
+
+  /** "KEY DO", the key word above the piano. */
+  keyWord(root: number, names: NoteNames): string {
+    return `${MirrorText.KEY} ${Keys.name(root, names)}`
+  },
+
+  keyChoice(root: number, names: NoteNames): string {
+    return `${MirrorText.KEY}: ${Keys.name(root, names)}. Tap to change.`
+  },
+
+  /** "MAJ", the scale word when the row above the piano runs out of room. */
+  scaleCode(s: Scale): string {
+    switch (s) {
+      case Scale.CHROMATIC:
+        return 'Chr'
+      case Scale.MAJOR:
+        return 'Maj'
+      case Scale.MINOR:
+        return 'Min'
+      case Scale.DORIAN:
+        return 'Dor'
+      case Scale.PHRYGIAN:
+        return 'Phr'
+      case Scale.LYDIAN:
+        return 'Lyd'
+      case Scale.MIXOLYDIAN:
+        return 'Mix'
+      // The word is upper-cased, so the two pentatonics differ in letters, not case.
+      case Scale.MAJOR_PENTATONIC:
+        return 'Maj.P'
+      case Scale.MINOR_PENTATONIC:
+        return 'Min.P'
+      case Scale.BLUES:
+        return 'Blu'
+    }
+  },
+
+  /** A piano key for screen readers: "LA4, root", "LA4, in the scale" or "FA4, outside the scale". */
+  pianoKey(note: number, names: NoteNames, mark: KeyMark): string {
+    const where = mark === KeyMark.ROOT ? ', root' : mark === KeyMark.IN ? ', in the scale' : ', outside the scale'
+    return MirrorText.noteName(note, names) + where
+  },
+
+  /** "Keyboard, DO3 to DO5", the piano as a whole for screen readers. */
+  pianoRange(lo: number, hi: number, names: NoteNames): string {
+    return `Keyboard, ${MirrorText.noteName(lo, names)} to ${MirrorText.noteName(hi, names)}`
+  },
+
+  /** "DO2, below the keys": a note from the EP-133 the piano doesn't reach, for the display and the tick at that end. */
+  outOfRange(note: number, names: NoteNames, below: boolean): string {
+    return MirrorText.noteName(note, names) + (below ? ', below the keys' : ', above the keys')
+  },
 
   scaleName(s: Scale): string {
     switch (s) {
@@ -137,6 +216,9 @@ export const MirrorText = {
   PAD_ORDER: 'Pad numbers in project files',
   FROM_TOP: 'From the top',
   FROM_BOTTOM: 'From the bottom',
+  /** The same two, on the compact segmented control in Settings. */
+  FROM_TOP_SHORT: 'Top',
+  FROM_BOTTOM_SHORT: 'Bottom',
   ORDER_NOTE:
     'Community notes disagree on how project files number the pads. If the names look wrong, try the other way.',
   GROUP: 'Group',
@@ -148,6 +230,26 @@ export const MirrorText = {
   TOOLS: 'Live tools',
   VIEW: 'View',
   FOLLOW_NOTE: 'Follow switches to the group of the pad just played.',
+
+  // Live tools, redesigned: the long notes fold under one disclosure each.
+  HOW_LIVE_READS: 'How Live reads the EP-133',
+  HOW_KEYS_WORKS: 'How Keys works',
+  /** The tools column's two tabs on a wide window: the tools, and the device's sounds to drag onto pads. */
+  TAB_TOOLS: 'Tools',
+  TAB_SOUNDS: 'Sounds',
+  /** The hint beside the one-octave key picker. */
+  KEY_HINT: 'tap a note',
+
+  /** "Keys · MI4", the small display of the last note in the tools (upper-cased where shown). */
+  lastNote(note: number, names: NoteNames): string {
+    return `${MirrorText.KEYS} \u00B7 ${MirrorText.noteName(note, names)}`
+  },
+
+  // The colours as compact chips (the long rows stay for screen readers).
+  CHIP_DEVICE: 'Played on the EP-133',
+  CHIP_PHONE: 'Playing on the phone',
+  CHIP_ROOT: 'Root',
+  CHIP_OUT: 'Outside the scale',
 
   groupKey(group: number): string {
     return String.fromCharCode(65 + group)
@@ -175,5 +277,65 @@ export const MirrorText = {
 
   channel(ch: number): string {
     return `ch ${ch}`
+  },
+
+  // ---------- EDIT: giving a pad another sound (community notes, see device.assignPad) ----------
+  /** The edge tab under GUIDE, upper-case like it. */
+  EDIT_TAB: 'EDIT',
+  /** The tab for screen readers: what it does now. */
+  editTab(on: boolean): string {
+    return on ? 'Editing pads. Tap to stop.' : "Edit pads: change a pad's sound."
+  },
+  /** The display line while EDIT is on, after the EDIT word. */
+  EDIT_LINE: 'Tap a pad to change its sound',
+
+  /** "Pad A 8", the pad sheet's title. */
+  padTitle(pad: PhysicalPad): string {
+    return `Pad ${pad.groupLetter} ${pad.label}`
+  },
+
+  /** "now 101 snare 2", or "now empty": the sound on the pad, under the title. */
+  padNow(slot: number | null, name: string | null): string {
+    return 'now ' + (slot === null ? MirrorText.EMPTY : FeatureText.slot(slot) + (name !== null ? ` ${name}` : ''))
+  },
+
+  /** "Project 1 · now 101 snare 2". */
+  padSheetLine(n: number, slot: number | null, name: string | null): string {
+    return `${MirrorText.project(n)} \u00B7 ${MirrorText.padNow(slot, name)}`
+  },
+  EMPTY: 'empty',
+  FIND_FOR_PAD: 'Find a sound for this pad',
+  /** Marks the sound on the pad now in the sheet's list (upper-cased where shown). */
+  ON_PAD: 'On pad',
+  UPLOAD_NEW: 'Upload a new sample\u2026',
+  ASSIGN_NOTE:
+    "The pad takes the new sound at once. Its own settings (level, pitch and the rest) start again from the sample's, as when you change a pad's sound on the EP-133.",
+
+  /** "Pad A 8: vox chop", the toast after a pad got another sound (with UNDO). */
+  assigned(pad: PhysicalPad, name: string): string {
+    return `Pad ${pad.groupLetter} ${pad.label}: ${name}`
+  },
+  UNDO: 'Undo',
+  /** "Pad A 8: back to snare 2", after UNDO. */
+  restored(pad: PhysicalPad, name: string): string {
+    return `Pad ${pad.groupLetter} ${pad.label}: back to ${name}`
+  },
+
+  /** "snare 2 → vox chop", on a pad while a sound is dragged over it. */
+  dropPreview(old: string | null, next: string): string {
+    return `${old ?? MirrorText.EMPTY} \u2192 ${next}`
+  },
+
+  EDIT_OFFLINE: "Connect your EP-133 to change a pad's sound.",
+  EDIT_NO_PROJECT: "arc hasn't read the active project yet. Wait a moment, or press a pad on the EP-133.",
+  NO_FREE_SLOT: 'No free slot left on the device. Delete a sound there first.',
+  assignFailed(reason: string): string {
+    return `The pad's sound couldn't be changed: ${reason}`
+  },
+  undoFailed(reason: string): string {
+    return `The old sound couldn't be put back: ${reason}`
+  },
+  uploadFailed(reason: string): string {
+    return `The sample couldn't be uploaded: ${reason}`
   },
 } as const

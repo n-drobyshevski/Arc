@@ -7,6 +7,9 @@
 // controller's dismissToast) when its time is up. A new id restarts the timer.
 // The last message stays rendered while the toast fades out.
 //
+// Web: a toast may carry a key (Live's UNDO, ToastMsg.action) at its end, in
+// signal orange; it stays as long as an error, so there is time to press it.
+//
 // Swiping it sideways or down dismisses it at once, as with a notification
 // (past 30% of its width sideways, half its height down, or a fling faster
 // than 700 px/s that way); a shorter drag springs back. It fades as it leaves
@@ -24,8 +27,9 @@ export const ERROR_TOAST_MS = 7000
 /** The fade (Compose fadeIn() / fadeOut() default tween). */
 const FADE_MS = 150
 
-export function toastDuration(error: boolean): number {
-  return error ? ERROR_TOAST_MS : TOAST_MS
+/** How long a toast stays: longer for an error, or one with a key to press. */
+export function toastDuration(error: boolean, action = false): number {
+  return error || action ? ERROR_TOAST_MS : TOAST_MS
 }
 
 /** A fling faster than this (px/s, Kotlin 700.dp) dismisses the toast that way. */
@@ -78,6 +82,8 @@ export function velocityOf(samples: readonly { t: number; x: number; y: number }
 export interface ToastProps {
   toast: ToastMsg | null
   onTimeout: (id: number) => void
+  /** The toast's key was pressed (ToastMsg.action). */
+  onAction?: (id: number) => void
   /** Room left at the bottom (px), above anything docked there. */
   bottomInset?: number
 }
@@ -98,7 +104,7 @@ export function Toast(props: ToastProps): JSX.Element {
     }
     setShown(toast)
     setVisible(true)
-    const handle = window.setTimeout(() => timeout.current(toast.id), toastDuration(toast.error))
+    const handle = window.setTimeout(() => timeout.current(toast.id), toastDuration(toast.error, toast.action !== undefined))
     return () => window.clearTimeout(handle)
   }, [id])
 
@@ -114,7 +120,15 @@ export function Toast(props: ToastProps): JSX.Element {
       {/* A persistent polite live region, so each new message is announced. */}
       <div class="toast-frame">
         <div role="status" aria-live="polite" aria-atomic="true" class="toast-live">
-          {shown && <ToastCard key={shown.id} toast={shown} visible={visible} onDismiss={(id) => timeout.current(id)} />}
+          {shown && (
+            <ToastCard
+              key={shown.id}
+              toast={shown}
+              visible={visible}
+              onDismiss={(id) => timeout.current(id)}
+              onAction={(id) => props.onAction?.(id)}
+            />
+          )}
         </div>
         {/* Outside the live region, so it is not read out with every message. */}
         {shown && visible && (
@@ -135,7 +149,12 @@ interface Drag {
 }
 
 /** One message; its own drag state, so each toast starts in place. */
-function ToastCard(props: { toast: ToastMsg; visible: boolean; onDismiss: (id: number) => void }): JSX.Element {
+function ToastCard(props: {
+  toast: ToastMsg
+  visible: boolean
+  onDismiss: (id: number) => void
+  onAction: (id: number) => void
+}): JSX.Element {
   const { toast, visible } = props
   const [drag, setDrag] = useState<Drag>({ x: 0, y: 0, mode: 'rest' })
   const el = useRef<HTMLDivElement | null>(null)
@@ -155,6 +174,8 @@ function ToastCard(props: { toast: ToastMsg; visible: boolean; onDismiss: (id: n
 
   const onPointerDown = (e: TargetedPointerEvent<HTMLDivElement>): void => {
     if (drag.mode === 'gone' || (e.pointerType === 'mouse' && e.button !== 0)) return
+    // The key takes its own tap.
+    if (e.target instanceof Element && e.target.closest('.toast__action')) return
     start.current = { id: e.pointerId, x: e.clientX, y: e.clientY, dx: drag.x, dy: drag.y, moved: false }
     samples.current = [{ t: e.timeStamp, x: e.clientX, y: e.clientY }]
   }
@@ -216,6 +237,11 @@ function ToastCard(props: { toast: ToastMsg; visible: boolean; onDismiss: (id: n
       }}
     >
       <span class="toast__text">{toast.text}</span>
+      {toast.action !== undefined && (
+        <button type="button" class="toast__action" onClick={() => props.onAction(toast.id)}>
+          {toast.action}
+        </button>
+      )}
     </div>
   )
 }
@@ -223,5 +249,12 @@ function ToastCard(props: { toast: ToastMsg; visible: boolean; onDismiss: (id: n
 /** The app's toast, wired to the controller's toast state and dismissToast. */
 export function ControllerToast(props: { controller: ArcController; bottomInset?: number }): JSX.Element {
   const c = props.controller
-  return <Toast toast={c.state.value.toast} onTimeout={(id) => c.dismissToast(id)} bottomInset={props.bottomInset} />
+  return (
+    <Toast
+      toast={c.state.value.toast}
+      onTimeout={(id) => c.dismissToast(id)}
+      onAction={(id) => c.runToastAction(id)}
+      bottomInset={props.bottomInset}
+    />
+  )
 }
