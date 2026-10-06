@@ -1051,6 +1051,20 @@ describe('Factory sounds', () => {
     await done
   })
 
+  it('tapped while something else runs, it goes next rather than never', async () => {
+    const asked: string[] = []
+    const h = await liveHarness({ unplugged: true, factory: site(await factoryPak(), asked) })
+    await until(h, (s) => s.libraryLoaded)
+    h.c.store.update((st) => ({ ...st, busy: true }))
+    const done = h.c.getFactorySounds()
+    await sleep(30)
+    expect(asked).toEqual([])
+    h.c.store.update((st) => ({ ...st, busy: false }))
+    await done
+    expect(asked).toHaveLength(3)
+    await until(h, (s) => s.backups.length === 1)
+  })
+
   it('refuses a file that is not an EP-133 factory pack, and keeps nothing', async () => {
     const h = await liveHarness({ unplugged: true, factory: site(await factoryPak({ pak_type: 'user', device_name: 'EP-133' })) })
     await until(h, (s) => s.libraryLoaded)

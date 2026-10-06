@@ -9,6 +9,26 @@ import { setKeyScope, type KeyScopeHandler } from '../appKeys'
 import type { KeyInput } from '../keyGuard'
 import { liveCommand, type LiveCommand, type LiveContext } from './liveKeyboard'
 
+// How many presses hold each cap down: a reused button (a group change) may be two pads' at once.
+const capHolds = new WeakMap<Element, number>()
+
+/** [el] down for one more press (capDown on the first). */
+export function holdCap(el: Element, down: (el: Element) => void): void {
+  const n = capHolds.get(el) ?? 0
+  capHolds.set(el, n + 1)
+  if (n === 0) down(el)
+}
+
+/** One press fewer on [el] (capUp on the last). */
+export function releaseCap(el: Element, up: (el: Element) => void): void {
+  const n = (capHolds.get(el) ?? 1) - 1
+  if (n > 0) capHolds.set(el, n)
+  else {
+    capHolds.delete(el)
+    up(el)
+  }
+}
+
 /** Something a key holds down: what it is (pads and keys counted once) and how to press and let go. */
 export interface Held {
   readonly id: string
@@ -94,6 +114,10 @@ export function useLiveKeys(enabled: boolean, host: LiveKeysHost): void {
       },
       releaseAll,
       context: () => latest.current.context(),
+      takes: (target) => {
+        const root = latest.current.root()
+        return root !== null && target instanceof Node && root.contains(target) && !outOfReach()
+      },
     }
   }, [held, counts])
 

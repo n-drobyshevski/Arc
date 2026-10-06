@@ -71,7 +71,8 @@ export function padOffset(input: KeyInput): number | null {
  */
 export function latinLetter(key: string, code: string): string | null {
   if (/^[a-zA-Z]$/.test(key)) return key.toLowerCase()
-  if (!/^\p{L}$/u.test(key) || /^\p{Script=Latin}$/u.test(key)) return null
+  // Another script's letter (or vowel sign, or a ligature like Arabic لا): its place's letter.
+  if (!/^[\p{L}\p{M}]+$/u.test(key) || /\p{Script=Latin}/u.test(key)) return null
   const m = /^Key([A-Z])$/.exec(code)
   return m ? m[1]!.toLowerCase() : null
 }
@@ -117,8 +118,9 @@ export function liveCommand(input: KeyInput, ctx: LiveContext): LiveCommand | nu
   if (ctx.pianoShown && (COMPUTER_KEYS.includes(input.code) || input.code === 'KeyZ' || input.code === 'KeyX')) return null
   // The app's: help and Escape.
   if (input.key === '?' || input.key === 'Escape') return null
-  // '/' is Shift+7 on some layouts, and on [ 's place on Dvorak: by what it types.
-  if (input.key === '/') return !ctx.keys && ctx.soundsTab ? { kind: 'find' } : null
+  // '/' finds in PADS by what it types (Shift+7 on some layouts, on [ 's place on Dvorak);
+  // in KEYS [ ] go by place, so Dvorak's / place still steps the key.
+  if (input.key === '/' && !ctx.keys) return ctx.soundsTab ? { kind: 'find' } : null
   if (bracket) {
     if (!ctx.keys) return null
     const step = input.code === 'BracketLeft' ? -1 : 1

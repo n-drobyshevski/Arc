@@ -110,6 +110,8 @@ interface Finger {
 
 export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
   const { range, st, keys, now, computer = false } = props
+  // The letters on the keys only while Settings → Computer keyboard is on (they play only then).
+  const hints = computer && computerKeys.value
   const playingNotes = props.playingNotes.value
   const plate = useRef<HTMLDivElement | null>(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
@@ -345,7 +347,7 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
             (playingNotes.has(k.note) ? ' is-playing' : '')
           const r = k.rect
           const gap = k.black ? 0 : WHITE_GAP / 2
-          const hint = computer ? computerHint(k.note, keys.octave) : null
+          const hint = hints ? computerHint(k.note, keys.octave) : null
           return (
             <button
               key={k.note}

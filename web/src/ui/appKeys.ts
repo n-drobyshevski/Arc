@@ -66,9 +66,27 @@ export interface KeyScopeHandler {
   releaseAll(): void
   /** What Live shows, for the Keyboard keys sheet. */
   context(): LiveContext
+  /** Whether a key at [target] would come to it (inside its screen, which is in reach). */
+  takes(target: EventTarget | null): boolean
 }
 
 let scope: KeyScopeHandler | null = null
+// Nothing is over the page (useAppKeys keeps it in step): the screen's keys can be reached.
+let reach = true
+
+/** useAppKeys: whether the page is free of overlays, so the screen's own keys can act. */
+export function setLiveReach(free: boolean): void {
+  reach = free
+}
+
+/**
+ * Whether the screen's own keys would take a key aimed at [target] now: one
+ * is plugged in, nothing is over the page, and [target] is in its screen.
+ * (A control's own arrow handling yields only then: NumLock-off number pads.)
+ */
+export function screenTakes(target: EventTarget | null): boolean {
+  return scope !== null && reach && scope.takes(target)
+}
 
 /** Puts [handler] in the slot; the returned function takes it out (if it is still there). */
 export function setKeyScope(handler: KeyScopeHandler): () => void {

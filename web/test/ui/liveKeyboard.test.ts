@@ -27,16 +27,21 @@ describe('Live on other keyboard layouts', () => {
     expect(liveCommand(key('KeyE', '.'), PADS)).toBeNull()
     expect(liveCommand(key('KeyZ', ';'), GRID)).toBeNull()
     expect(liveCommand(key('Period', 'v'), PADS)).toEqual({ kind: 'view' })
-    // Dvorak: / on [ 's place still finds.
+    // Dvorak: / on [ 's place finds in PADS, and steps the key down in KEYS (by place there).
     expect(liveCommand(key('BracketLeft', '/'), PADS)).toEqual({ kind: 'find' })
+    expect(liveCommand(key('BracketLeft', '/'), GRID)).toEqual({ kind: 'root', step: -1 })
     // A Latin letter with an accent types itself, not its place's letter.
     expect(latinLetter('é', 'KeyE')).toBeNull()
-    expect(latinLetter('ж', 'Semicolon')).toBeNull()
+    expect(latinLetter('ç', 'KeyC')).toBeNull()
+    // Another script's vowel sign or ligature on a letter's place: that place's letter.
+    expect(latinLetter('ा', 'KeyE')).toBe('e') // Hindi InScript
+    expect(latinLetter('ิ', 'KeyB')).toBe('b') // Thai
+    expect(latinLetter('لا', 'KeyB')).toBe('b') // Arabic
   })
 
   it('never takes AltGr combinations (Linux reports AltGr without Ctrl or Alt)', () => {
     expect(liveCommand(key('Digit8', '[', { altGraph: true }), GRID)).toBeNull()
-    expect(liveCommand(key('KeyE', '€', { altGraph: true }), PADS)).toBeNull()
+    expect(liveCommand(key('KeyB', 'b', { altGraph: true }), PADS)).toBeNull()
   })
 })
 

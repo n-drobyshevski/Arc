@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { WebText } from '../../src/core/text/webText'
-import { appCommand, escapeCloses, keyHelp, keyScope, setKeyScope, type AppContext, type KeyScopeHandler } from '../../src/ui/appKeys'
+import { appCommand, escapeCloses, keyHelp, keyScope, screenTakes, setKeyScope, setLiveReach, type AppContext, type KeyScopeHandler } from '../../src/ui/appKeys'
 import { inControl, inField, type KeyInput } from '../../src/ui/keyGuard'
 import type { LiveContext } from '../../src/ui/live/liveKeyboard'
 import { screenLayer, sheetLayer, tabLayer, overlayLayer, viewOf, type Layer } from '../../src/ui/nav'
@@ -91,7 +91,7 @@ describe('the key scope slot', () => {
   })
 
   it('holds one screen at a time, letting the old one go, and empties only for its owner', () => {
-    const make = (): KeyScopeHandler => ({ keydown: () => false, keyup: () => {}, escape: () => false, releaseAll: vi.fn(), context: () => null as unknown as LiveContext })
+    const make = (): KeyScopeHandler => ({ keydown: () => false, keyup: () => {}, escape: () => false, releaseAll: vi.fn(), context: () => null as unknown as LiveContext, takes: () => true })
     const a = make()
     const b = make()
     const offA = setKeyScope(a)
@@ -101,6 +101,17 @@ describe('the key scope slot', () => {
     expect(keyScope()).toBe(b)
     offB()
     expect(keyScope()).toBeNull()
+  })
+
+  it("lets controls yield a key only when the screen's keys would take it (nothing over the page)", () => {
+    const off = setKeyScope({ keydown: () => false, keyup: () => {}, escape: () => false, releaseAll: () => {}, context: () => null as unknown as LiveContext, takes: () => true })
+    setLiveReach(true)
+    expect(screenTakes(null)).toBe(true)
+    setLiveReach(false)
+    expect(screenTakes(null)).toBe(false)
+    setLiveReach(true)
+    off()
+    expect(screenTakes(null)).toBe(false)
   })
 })
 

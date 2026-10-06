@@ -147,7 +147,7 @@ import { GLYPHS } from '../components/KoPanel'
 import { capDown, capUp } from '../live/capDown'
 import { rowPadSize } from '../live/desk'
 import { chosenView, pianoFor, type PianoPlan } from '../live/keyboard'
-import { useLiveKeys } from '../live/useLiveKeys'
+import { holdCap, releaseCap, useLiveKeys } from '../live/useLiveKeys'
 import { computerKeys } from '../keyPrefs'
 import { DEFAULT_KEYS, keysLit, keysNoteText, octaves, upperOctave, type KeysPicker, type KeysShown } from '../live/keys'
 import { PianoKeyboard } from '../live/PianoKeyboard'
@@ -668,6 +668,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   // The computer keyboard (web, desktop): the pads, the grid's keys and Live's controls
   // (live/liveKeyboard.ts). The grid hands its keys over here; key changes are announced.
   const gridKeys = useRef<GridKeys | null>(null)
+  // The keyboard's fingers on the grid, one per press, below the pointers' ids.
+  const nextFinger = useRef(KEYBOARD_FINGER)
   const [spoken, setSpoken] = useState({ text: '', n: 0 })
   const setAnnounce = (text: string): void => setSpoken((a) => ({ text, n: a.n + 1 }))
   const soundsTab = docked && edit !== null
@@ -694,11 +696,11 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         down: (at) => {
           target.press(true, false, at)
           el = root.current?.querySelector(`[data-pad="${key}"]`) ?? null
-          if (el) capDown(el)
+          if (el) holdCap(el, (e) => capDown(e))
         },
         up: () => {
           target.release()
-          if (el) capUp(el)
+          if (el) releaseCap(el, (e) => capUp(e))
         },
       }
     },
@@ -707,17 +709,18 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
       const note = keyNotes?.[offset]
       if (grid === null || pianoRange !== null || note === undefined) return null
       let el: Element | null = null
+      // A finger of its own: after an octave or key change the same key is another note, a press of its own.
+      const finger = nextFinger.current--
       return {
-        // By note too: after an octave or key change the same key is another note, a press of its own.
         id: `key:${offset}:${note}`,
         down: (at) => {
-          grid.down(offset, at)
+          grid.down(offset, finger, at)
           el = root.current?.querySelector(`.live-kgrid [data-key="${offset}"]`) ?? null
-          if (el) capDown(el)
+          if (el) holdCap(el, (e) => capDown(e))
         },
         up: () => {
-          grid.up(offset)
-          if (el) capUp(el)
+          grid.up(finger)
+          if (el) releaseCap(el, (e) => capUp(e))
         },
       }
     },
@@ -2063,11 +2066,11 @@ function KeysGrid(props: {
   useEffect(() => {
     if (!keysRef) return
     keysRef.current = {
-      down: (k, at) => {
+      down: (k, finger, at) => {
         const note = notesNow.current[k]
-        if (note !== undefined) press.down(KEYBOARD_FINGER - k, note, true, at)
+        if (note !== undefined) press.down(finger, note, true, at)
       },
-      up: (k) => press.up(KEYBOARD_FINGER - k),
+      up: (finger) => press.up(finger),
     }
     return () => {
       keysRef.current = null
@@ -2115,13 +2118,13 @@ function KeysGrid(props: {
   )
 }
 
-/** The KEYS grid's keys for the computer keyboard (web): down and up by key index. */
+/** The KEYS grid's keys for the computer keyboard (web): key [k] down as [finger], and that finger up. */
 interface GridKeys {
-  down(k: number, at: number): void
-  up(k: number): void
+  down(k: number, finger: number, at: number): void
+  up(finger: number): void
 }
 
-/** The computer keyboard's fingers on the grid: KEYBOARD_FINGER - k, clear of the pointers' ids. */
+/** The computer keyboard's fingers on the grid count down from here, clear of the pointers' ids. */
 const KEYBOARD_FINGER = -100
 
 /** A grid key's press and release, through the grid's NoteTouches (kept the same across renders). */

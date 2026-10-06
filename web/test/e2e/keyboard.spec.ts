@@ -80,6 +80,13 @@ test('KEYS: M switches, the piano keeps its letters, the grid plays the pad keys
   const scaleBefore = await scaleWord.getAttribute('aria-label')
   await page.keyboard.press('Shift+BracketRight')
   await expect(scaleWord).not.toHaveAttribute('aria-label', scaleBefore ?? '')
+  // AZERTY: ] 's place is a dead key there; it still steps the key, through the app's own listener.
+  const keyNow = await keyWord.getAttribute('aria-label')
+  await page.evaluate(() => {
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Dead', code: 'BracketRight', bubbles: true, cancelable: true }))
+    document.body.dispatchEvent(new KeyboardEvent('keyup', { key: 'Dead', code: 'BracketRight', bubbles: true }))
+  })
+  await expect(keyWord).not.toHaveAttribute('aria-label', keyNow ?? '')
   // V: the grid. The pad keys play its keys; Z X step the octave there.
   await page.keyboard.press('KeyV')
   await expect(page.locator('.live-kgrid')).toBeVisible()
@@ -90,6 +97,16 @@ test('KEYS: M switches, the piano keeps its letters, the grid plays the pad keys
   const octBefore = await octave.getAttribute('aria-label')
   await page.keyboard.press('KeyX')
   await expect(octave).not.toHaveAttribute('aria-label', octBefore ?? '')
+  // Two keys on one grid key across an octave change: each holds its own note, the key stays down until both are up.
+  const key3 = page.locator('.live-kgrid [data-key="3"]')
+  await page.keyboard.down('Digit1')
+  await page.keyboard.press('KeyZ')
+  await page.keyboard.down('Numpad1')
+  await page.keyboard.up('Digit1')
+  await page.waitForTimeout(120)
+  await expect(key3).toHaveAttribute('data-down', '')
+  await page.keyboard.up('Numpad1')
+  await expect(key3).not.toHaveAttribute('data-down')
   // Back to the piano and to PADS.
   await page.keyboard.press('KeyV')
   await expect(piano).toBeVisible()
@@ -138,6 +155,8 @@ test('? lists the keys, Esc closes screens but never leaves a section, and the S
   await page.getByRole('button', { name: 'Pads. Tap for keys.' }).click()
   const piano = page.locator('.live-piano__keys')
   await expect(piano).toBeVisible()
+  // No letters on the keys either.
+  await expect(piano.locator('.piano__hint')).toHaveCount(0)
   await page.keyboard.down('KeyA')
   await page.waitForTimeout(120)
   await expect(piano.locator('[data-note][data-down]')).toHaveCount(0)

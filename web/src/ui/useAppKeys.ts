@@ -8,7 +8,7 @@
 // every key up goes to the screen, and leaving the window lets go of all.
 
 import { useEffect, useRef } from 'preact/hooks'
-import { appCommand, keyScope, overlaid } from './appKeys'
+import { appCommand, keyScope, overlaid, setLiveReach } from './appKeys'
 import { toKeyInput } from './keyGuard'
 import { computerKeys } from './keyPrefs'
 import type { NavView } from './nav'
@@ -25,6 +25,8 @@ export interface AppKeysHost {
 export function useAppKeys(enabled: boolean, host: AppKeysHost): void {
   const latest = useRef(host)
   latest.current = host
+  // Read by controls' own key handlers, which run before this layer's listener: kept from the render.
+  setLiveReach(!overlaid(host.view))
   useEffect(() => {
     if (!enabled || typeof window === 'undefined') return
     const releaseAll = (): void => keyScope()?.releaseAll()
@@ -32,7 +34,9 @@ export function useAppKeys(enabled: boolean, host: AppKeysHost): void {
       // macOS sends no key up for a key let go while Cmd is down.
       if (e.metaKey || e.key === 'Meta') releaseAll()
       const input = toKeyInput(e)
-      if (input.prevented || input.composing) return
+      // A dead key on [ or ]'s place (AZERTY's ^) is Live's key step; other composing is the input method's.
+      const deadBracket = input.key === 'Dead' && (input.code === 'BracketLeft' || input.code === 'BracketRight')
+      if (input.prevented || (input.composing && !deadBracket)) return
       const h = latest.current
       const cmd = appCommand(input, { view: h.view, canBack: h.canBack(), enabled: computerKeys.peek(), toastAction: h.undo !== null })
       if (cmd !== null) {
