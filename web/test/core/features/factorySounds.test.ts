@@ -82,6 +82,15 @@ describe('FactorySounds', () => {
     expect(some.get(0)).toBe(10)
   })
 
+  it("calls a sound unnamed when the device lists it as its slot's file", () => {
+    expect(FactorySounds.unnamed(343, '343.pcm')).toBe(true)
+    expect(FactorySounds.unnamed(1, '001.pcm')).toBe(true)
+    expect(FactorySounds.unnamed(1, ' 001.PCM ')).toBe(true)
+    expect(FactorySounds.unnamed(1, '1.pcm')).toBe(false)
+    expect(FactorySounds.unnamed(2, '001.pcm')).toBe(false) // another slot's file: moved, not the factory sound
+    expect(FactorySounds.unnamed(343, 'nt perc')).toBe(false)
+  })
+
   const rec = (id: string, createdAt: number, source: string): BackupRecord => ({
     id,
     title: id,

@@ -1074,6 +1074,25 @@ describe('Factory sounds', () => {
     expect(h.c.state.value.backups.map((r) => r.source)).toEqual([FactorySounds.SOURCE])
   })
 
+  it("plays a last read's unnamed sounds (\"001.pcm\") from the factory pack, and points to it until it's there", async () => {
+    // A device still holding the factory sounds lists them by their files.
+    const lastRead = JSON.stringify({ v: 1, savedAt: 1, project: 1, groups: { a: { '1': 1, '5': 5 } }, names: { '1': '001.pcm', '5': '005.pcm' } })
+    const h = await liveHarness({ storage: memoryStorage({ ...ORDER, [LIVE_KEY]: lastRead }), unplugged: true, factory: site(await factoryPak()) })
+    await until(h, (s) => s.libraryLoaded)
+    h.c.setLive(true)
+    await until(h, (s) => s.mirror?.offline != null)
+    expect(h.c.mirrorName(A1)).toBe('001.pcm')
+    await h.c.playPad(A1)
+    expect(h.toasts.at(-1)?.text).toBe(WebText.LIVE_NO_COPY_FACTORY)
+    await h.c.getFactorySounds()
+    await until(h, (s) => s.backups.length === 1)
+    await sleep(10)
+    // Still the last read, now playing from the pack.
+    expect(h.c.state.value.mirror!.offline).not.toBe(MirrorText.FACTORY)
+    await h.c.playPad(A1)
+    expect(h.liveAudio.presses.at(-1)).toMatchObject({ id: 'live:0:0', key: '1:001.pcm' })
+  })
+
   it('a last read comes before the factory sounds', async () => {
     const first = await liveOn()
     const { storage } = first

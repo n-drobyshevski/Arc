@@ -40,6 +40,8 @@ object MirrorText {
     const val TAP_NOTE = "Hold a pad to hear its sample on the phone (it stops when you let go): from arc's copy of the device's sounds, a backup, or the device."
     const val NO_SAMPLE = "arc doesn't know this pad's sample yet."
     const val NO_COPY = "This sample isn't saved on the phone or in a backup yet."
+    // The same for a factory sound (FactorySounds.unnamed) while the pack isn't in the library.
+    const val NO_COPY_FACTORY = "This factory sample isn't saved on the phone yet: Settings → Live → Factory sounds → Get."
     const val SOUNDS_CLEARED = "Saved pad sounds cleared."
     const val PLAY = "Play"
 

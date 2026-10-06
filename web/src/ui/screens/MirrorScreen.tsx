@@ -229,7 +229,7 @@ export interface MirrorScreenProps {
   onTools: (open: boolean) => void
   /** For screenshots: start with the offline note unfolded. */
   initialNoteOpen?: boolean
-  /** Not connected and nothing to show: download the factory sounds (FactorySounds); null when they can't be, or are in the library. */
+  /** Not connected: download the factory sounds (FactorySounds); null when they can't be, or are in the library. */
   onGetFactory?: (() => void) | null
   /**
    * Pressing a pad plays its sample on the phone until [onPadUp] (hold is
@@ -564,8 +564,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     [dropOn, dropAt, draggedName],
   )
 
-  // Not connected and never read: the factory sounds to get, first in the tools.
-  const getFactory = mirror?.error === MirrorText.NOT_CONNECTED ? (props.onGetFactory ?? null) : null
+  // Not connected (nothing read, or offline from the last read): the factory sounds to get, first in the tools.
+  const getFactory = mirror?.error === MirrorText.NOT_CONNECTED || mirror?.offline != null ? (props.onGetFactory ?? null) : null
   const factoryRow = getFactory !== null && (
     <RowCard>
       <SettingRow

@@ -55,6 +55,8 @@ export const MirrorText = {
     "Hold a pad to hear its sample on the phone (it stops when you let go): from arc's copy of the device's sounds, a backup, or the device.",
   NO_SAMPLE: "arc doesn't know this pad's sample yet.",
   NO_COPY: "This sample isn't saved on the phone or in a backup yet.",
+  // The same for a factory sound (FactorySounds.unnamed) while the pack isn't in the library.
+  NO_COPY_FACTORY: "This factory sample isn't saved on the phone yet: Settings → Live → Factory sounds → Get.",
   SOUNDS_CLEARED: 'Saved pad sounds cleared.',
   PLAY: 'Play',
 

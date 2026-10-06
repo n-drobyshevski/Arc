@@ -483,9 +483,15 @@ export class LiveSounds {
     return padAudioOf(w.pcm, w.channels, Math.trunc(w.sampleRate))
   }
 
-  /** The WAV of a sound from the newest backup that has it, if any. */
+  /**
+   * The WAV of a sound from the newest backup that has it, if any; a sound
+   * the device lists unnamed ("343.pcm") from the factory pack.
+   */
   private async fromBackup(slot: number, name: string): Promise<Uint8Array | null> {
-    const b = newestBackupWith(slot, name, this.host.names(), this.host.store.get().backups)
+    const backups = this.host.store.get().backups
+    const b =
+      newestBackupWith(slot, name, this.host.names(), backups) ??
+      (FactorySounds.unnamed(slot, name) ? FactorySounds.inLibrary(backups) : null)
     if (b === null) return null
     return (await this.pakOf(b.id)).sounds.get(slot)?.wav ?? null
   }
@@ -561,7 +567,8 @@ export class LiveSounds {
           if (e) await this.keepPadSound(slot, e.name, e.size, r.pcm, r.d.channels, r.d.sampleRate)
           audio = this.padMemory.get(key) ?? padAudioOf(r.pcm, Math.trunc(r.d.channels), Math.trunc(r.d.sampleRate))
         } else {
-          host.toastOnce(WebText.LIVE_NO_COPY)
+          const factory = FactorySounds.unnamed(slot, name) && FactorySounds.inLibrary(host.store.get().backups) === null
+          host.toastOnce(factory ? WebText.LIVE_NO_COPY_FACTORY : WebText.LIVE_NO_COPY)
           return null
         }
       }
