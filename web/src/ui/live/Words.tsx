@@ -78,7 +78,8 @@ export function WordButton(props: WordButtonProps): JSX.Element {
       onKeyDown={props.onKeyDown}
       onClick={onClick}
     >
-      <span class="word__row">
+      {/* What the guide overlay points at: the word, not its whole touch area. */}
+      <span class="word__row" data-coach-box={props['data-coach'] ? '' : undefined}>
         {mark && <SwapMark />}
         <span class="word__text">{label}</span>
       </span>
