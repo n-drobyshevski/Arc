@@ -1411,7 +1411,7 @@ export class ArcController {
         if (signal.aborted || isCancelled(e)) throw new CancelledError()
         throw new Error(FeatureText.factoryFailed(errorText(e)))
       }
-    })
+    }, { device: false })
     if (saved === null) return
     this.store.update((st) => ({ ...st, freshId: saved.record.id }))
     this.toastSaved(FeatureText.factorySaved(saved.record.soundCount), saved.copyError)

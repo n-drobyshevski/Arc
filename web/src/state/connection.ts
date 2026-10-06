@@ -133,13 +133,20 @@ export class Connection {
     if (!ev.looksLikeEp || !this.host.deps.settings.settings.autoConnect) return
     // watchMidi already waited its 300 ms (ArcController's delay(300)).
     if (this.session === null && !this.host.store.get().busy) void this.connect()
+    else if (this.session === null && this.host.tasks.deviceless) {
+      // The factory download holds busy without the device: connect once it ends.
+      void this.host.store.waitFor((st) => !st.busy).then(() => {
+        if (this.session === null && !this.disposed) void this.connect()
+      })
+    }
   }
 
   private onRemoved(ev: MidiDeviceEvent): void {
     const open = this.openMidi
     if (open && open.owns(ev) && this.session !== null) {
       this.host.deps.trafficLog.note('device removed')
-      this.host.tasks.abortCurrent?.abort()
+      // A task that doesn't use the device (the factory download) goes on.
+      if (!this.host.tasks.deviceless) this.host.tasks.abortCurrent?.abort()
       this.dropSession(Strings.DISCONNECTED)
     }
   }

@@ -11,6 +11,7 @@ import { writeZip } from '../../src/core/formats/zip'
 import { FeatureText } from '../../src/core/text/featureText'
 import { BackupDevice, type BackupRecord } from '../../src/core/text/libraryRules'
 import { MirrorText } from '../../src/core/text/mirrorText'
+import { Strings } from '../../src/core/text/strings'
 import { WebText } from '../../src/core/text/webText'
 import { NullPlayer } from '../../src/platform/audio/player'
 import { MemoryTarget } from '../../src/platform/storage/external'
@@ -975,6 +976,48 @@ describe('Factory sounds', () => {
     expect(h.c.mirrorName(physicalPad(0, 7))).toBe('nt clap')
     expect(h.c.mirrorName(A1)).toBeNull()
     expect(h.storage.getItem('arc.mirror.learned')).toBeNull()
+  })
+
+  it("unplugging the EP-133 doesn't cancel the download, and plugging it back in connects once it ends", async () => {
+    const pak = await factoryPak()
+    let release: () => void = () => {}
+    const gate = new Promise<void>((r) => (release = r))
+    const h = await liveHarness({
+      factory: {
+        ...site(pak),
+        bytes: async (_path, _signal, onProgress) => {
+          onProgress(1000, pak.length)
+          await gate
+          return pak
+        },
+      },
+    })
+    await h.c.connect()
+    await until(h, (s) => s.device !== null && !s.busy)
+    const done = h.c.getFactorySounds()
+    await until(h, (s) => s.task?.fraction !== undefined && s.task.fraction > 0)
+    h.ep.access.unplug(h.ep.input, h.ep.output)
+    await until(h, (s) => s.device === null)
+    expect(h.c.state.value.task).not.toBeNull()
+    // Back in while the download runs: busy, so it waits.
+    h.ep.access.plug(h.ep.input, h.ep.output)
+    await sleep(400)
+    expect(h.c.isConnected).toBe(false)
+    release()
+    await done
+    expect(h.toasts.map((t) => t.text)).toContain(FeatureText.factorySaved(2))
+    expect(h.toasts.map((t) => t.text)).not.toContain(Strings.CANCELLED)
+    await until(h, (s) => s.device !== null)
+  })
+
+  it('a download starts at once while Live copies pad sounds (it never uses the device)', async () => {
+    const h = await liveHarness({ storage: memoryStorage(ORDER), factory: site(await factoryPak()) })
+    await h.c.connect()
+    h.c.setLive(true)
+    await until(h, (s) => s.backgroundRead)
+    const done = h.c.getFactorySounds()
+    expect(h.c.state.value.task?.title).toBe(FeatureText.GETTING_FACTORY)
+    await done
   })
 
   it('refuses a file that is not an EP-133 factory pack, and keeps nothing', async () => {

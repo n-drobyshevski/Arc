@@ -57,6 +57,8 @@ export interface TaskHost {
 export class Tasks {
   /** The running task's cancel signal (ArcController.abortCurrent). */
   abortCurrent: AbortController | null = null
+  /** The running task doesn't use the EP-133 (the factory download): unplugging it doesn't cancel it. */
+  deviceless = false
   /** Actions waiting for the background copy's current sound to finish; the copy lets them go first. */
   private waiting = 0
   private wakeTurn: (() => void)[] = []
@@ -114,13 +116,21 @@ export class Tasks {
    * else is busy (no toast), and null after an error (shown as a toast: the
    * cancel note for CancelledError, the error's message otherwise).
    */
-  async runTask<T>(title: string, fn: (onProgress: OnProgress, signal: AbortSignal) => Promise<T>): Promise<T | null> {
+  async runTask<T>(
+    title: string,
+    fn: (onProgress: OnProgress, signal: AbortSignal) => Promise<T>,
+    options: { device?: boolean } = {},
+  ): Promise<T | null> {
     const { store } = this.host
-    let free = this.acquire(() => store.update((s) => ({ ...s, busy: true, task: { title, label: '', fraction: 0, cancelling: false } })))
+    const device = options.device ?? true
+    const mark = (): void => store.update((s) => ({ ...s, busy: true, task: { title, label: '', fraction: 0, cancelling: false } }))
+    // [device] false: a task that doesn't use the EP-133 only waits for nothing else to run.
+    let free = device ? this.acquire(mark) : !store.get().busy && (mark(), true)
     if (typeof free !== 'boolean') free = await free
     if (!free) return null
     const signal = new AbortController()
     this.abortCurrent = signal
+    this.deviceless = !device
     const guard = this.guard(title)
     const onProgress: OnProgress = (p) => {
       store.update((st) => {
@@ -137,7 +147,10 @@ export class Tasks {
       else this.host.toast(errorText(e), true)
       return null
     } finally {
-      if (this.abortCurrent === signal) this.abortCurrent = null
+      if (this.abortCurrent === signal) {
+        this.abortCurrent = null
+        this.deviceless = false
+      }
       guard.stop()
       store.update((s) => ({ ...s, busy: false, task: null }))
     }

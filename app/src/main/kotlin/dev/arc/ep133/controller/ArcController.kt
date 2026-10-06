@@ -229,6 +229,8 @@ class ArcController(
     private var mirrorJobs: List<Job> = emptyList()
     private var mirrorPushOff: (() -> Unit)? = null
     private var mirrorSession: Session? = null
+    // Bumped by every stop, so an offline open still reading gives way to a later open or close.
+    private var mirrorGen = 0
     private val mirrorPrefs by lazy { context.getSharedPreferences("mirror", Context.MODE_PRIVATE) }
     // The device's project, pads and names as Live last read them, shown while it is not connected.
     private val lastReadFile by lazy { java.io.File(context.filesDir, "live-last.json") }
@@ -294,6 +296,9 @@ class ArcController(
     private var session: Session? = null
     private var openDeviceId: Int? = null
     private var abortCurrent: CancelSignal? = null
+    /** The running task doesn't use the EP-133 (the factory download): unplugging it doesn't cancel it. */
+    @Volatile
+    private var deviceless = false
     private val toastIds = AtomicLong()
 
     /** Device description for the debug log export. */
@@ -350,14 +355,21 @@ class ArcController(
                 if (midi.looksLikeEp(info) && settingsStore.settings.value.autoConnect) scope.launch {
                     delay(300)
                     val s = _state.value
-                    if (session == null && !s.busy) connect()
+                    if (session == null && !s.busy) {
+                        connect()
+                    } else if (session == null && deviceless) {
+                        // The factory download holds busy without the device: connect once it ends.
+                        _state.first { !it.busy }
+                        if (session == null) connect()
+                    }
                 }
             },
             onRemoved = { info ->
                 scope.launch {
                     if (info.id == openDeviceId && session != null) {
                         trafficLog.note("device removed")
-                        abortCurrent?.cancel()
+                        // A task that doesn't use the device (the factory download) goes on.
+                        if (!deviceless) abortCurrent?.cancel()
                         dropSession(Strings.DISCONNECTED)
                     }
                 }
@@ -449,6 +461,7 @@ class ArcController(
         _state.update { it.copy(busy = true, task = TaskUi(title, "", 0.0, cancelling = false)) }
         val signal = CancelSignal()
         abortCurrent = signal
+        deviceless = !device
         ContextCompat.startForegroundService(context, Intent(context, TransferService::class.java))
         val onProgress: (Progress) -> Unit = { p ->
             _state.update { st ->
@@ -464,6 +477,7 @@ class ArcController(
             null
         } finally {
             abortCurrent = null
+            deviceless = false
             // The service stops itself when it sees the task end. Stopping it from
             // here could beat its startForeground() call, which Android punishes.
             _state.update { it.copy(busy = false, task = null) }
@@ -917,9 +931,11 @@ class ArcController(
      */
     private suspend fun openOfflineMirror() {
         stopMirror()
+        val gen = mirrorGen
         val lastRead = loadLastRead()
         // Never read: the factory sounds, if the library has them.
         val snap = lastRead ?: factorySnapshot()
+        if (gen != mirrorGen) return
         if (snap == null || session != null && _state.value.device != null) {
             if (snap == null) _state.update { it.copy(mirror = notConnectedMirror()) }
             return
@@ -1738,6 +1754,7 @@ class ArcController(
     }
 
     private fun stopMirror() {
+        mirrorGen++
         cacheGen++
         mirrorJobs.forEach { it.cancel() }
         mirrorJobs = emptyList()
@@ -1939,6 +1956,8 @@ class ArcController(
                 }
             } catch (e: Throwable) {
                 if (e is kotlinx.coroutines.CancellationException || e is CancelledError) throw e
+                // Cancel closes the connection: whatever the read then threw, it was the cancel.
+                if (signal.isCancelled) throw CancelledError()
                 throw java.io.IOException(FeatureText.factoryFailed(e.message ?: e.toString()), e)
             }
         } ?: return@launch

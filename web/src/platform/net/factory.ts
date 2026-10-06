@@ -57,6 +57,9 @@ export function browserFactory(base: () => string): FactoryDeps {
         if (signal.aborted) throw new CancelledError()
         throw e
       }
+      // A stream cut off reads as the end: a cancel, or a server that stopped short.
+      if (signal.aborted) throw new CancelledError()
+      if (total !== null && done !== total) throw new Error(`The download stopped at ${done} of ${total} bytes`)
       const out = new Uint8Array(done)
       let at = 0
       for (const c of chunks) {
