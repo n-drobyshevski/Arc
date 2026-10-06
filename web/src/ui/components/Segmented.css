@@ -66,15 +66,20 @@
   --cap-ink: var(--on-navy);
   --cap-edge: color-mix(in oklab, var(--navy) 65%, black);
 }
-/* Equal caps across the width (the View in the Live tools). */
+/* Equal caps across the width (the View in the Live tools). Equal while they
+ * fit; else each as wide as its longest word (no word is cut), and when even
+ * that is too wide (a 320 px phone) the caps wrap to another row rather than
+ * stick out of the card. */
 .segmented--fill {
-  display: grid;
-  grid-auto-flow: column;
-  /* Equal while they fit; else each as wide as its longest word (no word is cut). */
-  grid-auto-columns: minmax(min-content, 1fr);
+  flex-wrap: wrap;
   width: 100%;
 }
-.segmented--fill .segmented__block { padding-inline: var(--space-8); white-space: normal; }
+.segmented--fill .segmented__block {
+  flex: 1 1 0;
+  min-width: min-content;
+  padding-inline: var(--space-8);
+  white-space: normal;
+}
 .segmented--fill .segmented__text { overflow-wrap: normal; }
 
 /* A choice that can't be taken here: faded, no press travel. */

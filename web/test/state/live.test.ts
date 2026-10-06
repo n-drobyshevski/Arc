@@ -439,6 +439,8 @@ describe('Live: EDIT, another sound on a pad', () => {
     await until(h, (s) => s.toast?.text?.startsWith(prefix) === true && !s.busy)
     expect(h.c.state.value.toast?.action).toBe(MirrorText.UNDO)
     expect(await onDevice(h, 5)).toBe(slot)
+    // Live learned the new sound: the pad is named after it.
+    expect(h.c.mirrorName(A5)).toBe(draft![0]!.name)
     expect(h.c.state.value.browser.draftPad ?? null).toBeNull()
   })
 })

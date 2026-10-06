@@ -41,8 +41,11 @@
   flex-direction: column;
   gap: var(--space-3);
   flex: 1 1 0;
-  min-width: 0;
+  /* The control gives way (its caps wrap) before the name is squeezed to a
+   * letter a line on a narrow phone. */
+  min-width: min(7rem, 40%);
 }
+.setting-row--stack .setting-row__text { min-width: 0; }
 .setting-row__title {
   color: var(--ink);
   font-size: var(--size-body15);
@@ -58,7 +61,8 @@
 }
 
 .setting-row__control {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: flex-end;

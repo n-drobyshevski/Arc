@@ -387,8 +387,8 @@ class ArcController(
 
     // ---------- long-running tasks ----------
 
-    private suspend fun <T> runTask(title: String, fn: suspend (onProgress: (Progress) -> Unit, signal: CancelSignal) -> T): T? {
-        if (!awaitDevice()) return null
+    private suspend fun <T> runTask(title: String, wait: Boolean = false, fn: suspend (onProgress: (Progress) -> Unit, signal: CancelSignal) -> T): T? {
+        if (!(if (wait) awaitDeviceWaiting() else awaitDevice())) return null
         _state.update { it.copy(busy = true, task = TaskUi(title, "", 0.0, cancelling = false)) }
         val signal = CancelSignal()
         abortCurrent = signal
@@ -470,9 +470,9 @@ class ArcController(
      * Runs a short device read that must not overlap a transfer (the device
      * handles one conversation at a time). Returns null if something else is busy.
      */
-    private suspend fun <T> exclusive(reading: String, quiet: Boolean = false, block: suspend (Session) -> T): T? {
+    private suspend fun <T> exclusive(reading: String, quiet: Boolean = false, wait: Boolean = false, block: suspend (Session) -> T): T? {
         val s = session ?: return null
-        if (!awaitDevice()) return null
+        if (!(if (wait) awaitDeviceWaiting() else awaitDevice())) return null
         _state.update { it.copy(busy = true, browser = it.browser.copy(reading = reading)) }
         return try {
             block(s)
@@ -503,6 +503,21 @@ class ArcController(
             }
         }
         return !_state.value.busy
+    }
+
+    /**
+     * [awaitDevice] for an action the user already chose (a pick, an UNDO):
+     * it waits out whatever holds the device, such as Live's read when the
+     * app comes back from the file picker, rather than drop the action.
+     * False only when the connection goes meanwhile.
+     */
+    private suspend fun awaitDeviceWaiting(): Boolean {
+        val s = session ?: return false
+        while (session === s) {
+            if (awaitDevice()) return session === s
+            _state.first { !it.busy || session !== s }
+        }
+        return false
     }
 
     fun refreshBrowser(): Job = scope.launch { refreshAll(quiet = false) }
@@ -1311,7 +1326,11 @@ class ArcController(
             toast(dev.arc.ep133.text.MirrorText.EDIT_OFFLINE)
             return null
         }
-        return m.target(pad) ?: null.also { toast(dev.arc.ep133.text.MirrorText.EDIT_NO_PROJECT) }
+        return m.target(pad) ?: null.also {
+            // A known project but no pad number: the device numbers its pads otherwise than arc guessed.
+            val unknownPad = m.snapshot(System.nanoTime()).activeProject != null && m.padNumber(pad) == null
+            toast(if (unknownPad) dev.arc.ep133.text.MirrorText.EDIT_PRESS_FIRST else dev.arc.ep133.text.MirrorText.EDIT_NO_PROJECT)
+        }
     }
 
     /**
@@ -1320,15 +1339,16 @@ class ArcController(
      * old sound is known (an empty pad can't be emptied again).
      */
     fun assignPad(pad: dev.arc.ep133.features.PhysicalPad, t: dev.arc.ep133.features.PadTarget, slot: Int): Job = scope.launch {
-        val m = mirror ?: return@launch
-        if (writePad(m, t, slot, dev.arc.ep133.text.MirrorText::assignFailed)) assignedToast(m, pad, t, slot)
+        if (writePad(t, slot, dev.arc.ep133.text.MirrorText::assignFailed)) assignedToast(pad, t, slot)
     }
 
-    /** UNDO: [t]'s old slot back on [pad]. */
+    /**
+     * UNDO: [t]'s old slot back on [pad]. It doesn't need the mirror the
+     * toast came from: Live may have been closed or read again since.
+     */
     private fun undoAssign(pad: dev.arc.ep133.features.PhysicalPad, t: dev.arc.ep133.features.PadTarget): Job = scope.launch {
-        val m = mirror ?: return@launch
         val old = t.slot ?: return@launch
-        if (writePad(m, t, old, dev.arc.ep133.text.MirrorText::undoFailed)) {
+        if (writePad(t, old, dev.arc.ep133.text.MirrorText::undoFailed)) {
             toast(dev.arc.ep133.text.MirrorText.restored(pad, soundName(old)))
         }
     }
@@ -1336,11 +1356,12 @@ class ArcController(
     /**
      * "Upload a new sample…" from the pad sheet: the picked WAV goes into the
      * first free slot, then onto [pad]. A file that isn't a usable WAV is
-     * turned away before anything is written.
+     * turned away before anything is written. The picker stops the app, so
+     * Live's mirror is gone or being read again when the file comes back:
+     * the upload waits for the device and doesn't need the mirror.
      */
     fun uploadToPad(uri: android.net.Uri, pad: dev.arc.ep133.features.PhysicalPad, t: dev.arc.ep133.features.PadTarget): Job = scope.launch {
-        val s = session ?: return@launch
-        val m = mirror ?: return@launch
+        val s = session ?: return@launch toast(dev.arc.ep133.text.MirrorText.EDIT_OFFLINE)
         val (fileName, _) = withContext(Dispatchers.IO) { dev.arc.ep133.files.Files.describe(context, uri) }
         val bytes = try {
             withContext(Dispatchers.IO) { dev.arc.ep133.files.Files.read(context, uri) }.also { b ->
@@ -1351,20 +1372,29 @@ class ArcController(
             toast(dev.arc.ep133.text.MirrorText.uploadFailed(e.message ?: e.toString()), error = true)
             return@launch
         }
-        val slot = runTask(Strings.UPLOADING) { onProgress, signal ->
+        val slot = runTask(Strings.UPLOADING, wait = true) { onProgress, signal ->
             SampleUpload.uploadToPad(s, fileName, bytes, deviceSounds.keys, t, onProgress = onProgress, signal = signal)
-        } ?: return@launch
-        // The new sound's name and size, for the pad and its copy.
-        exclusive("mirror", quiet = true) { ss -> DeviceBrowser.contents(ss) }?.let { c -> if (mirror === m) setLiveSounds(m, c.sounds) }
-        if (mirror !== m) return@launch
-        padWritten(m, t, slot)
-        assignedToast(m, pad, t, slot)
+        }
+        if (slot == null) {
+            // runTask showed its own error; a connection gone while waiting needs saying.
+            if (session !== s) toast(dev.arc.ep133.text.MirrorText.EDIT_OFFLINE)
+            return@launch
+        }
+        // The new sound's name and size, for the pad and its copy (a mirror opened since read them already).
+        mirror?.let { m ->
+            exclusive("mirror", quiet = true, wait = true) { ss -> DeviceBrowser.contents(ss) }?.let { c -> if (mirror === m) setLiveSounds(m, c.sounds) }
+        }
+        mirror?.let { padWritten(it, t, slot) }
+        assignedToast(pad, t, slot, deviceSounds[slot]?.name ?: SampleUpload.nameFor(fileName))
     }
 
-    /** Writes [slot] onto [t]'s pad; on failure a toast with [failed] and false. */
-    private suspend fun writePad(m: dev.arc.ep133.features.LiveMirror, t: dev.arc.ep133.features.PadTarget, slot: Int, failed: (String) -> String): Boolean {
+    /**
+     * Writes [slot] onto [t]'s pad, waiting for the device if it is busy; on
+     * failure a toast with [failed] (or, disconnected, why) and false.
+     */
+    private suspend fun writePad(t: dev.arc.ep133.features.PadTarget, slot: Int, failed: (String) -> String): Boolean {
         var error: String? = null
-        val ok = exclusive("pad", quiet = true) { s ->
+        val ok = exclusive("pad", quiet = true, wait = true) { s ->
             try {
                 Device.assignPad(s, t.project, t.group, t.pad, slot)
                 true
@@ -1374,14 +1404,22 @@ class ArcController(
                 false
             }
         }
-        error?.let { toast(failed(it), error = true) }
-        if (ok != true || mirror !== m) return false
-        padWritten(m, t, slot)
+        when {
+            error != null -> toast(failed(error!!), error = true)
+            ok == null -> toast(dev.arc.ep133.text.MirrorText.EDIT_OFFLINE, error = true)
+        }
+        if (ok != true) return false
+        mirror?.let { padWritten(it, t, slot) }
         return true
     }
 
-    /** The mirror, its saved read and the pad's copy follow a written pad. */
+    /**
+     * The mirror, its saved read and the pad's copy follow a written pad.
+     * Only a mirror of this connection that has read [t]'s project: another
+     * one reads the pad from the device anyway.
+     */
     private fun padWritten(m: dev.arc.ep133.features.LiveMirror, t: dev.arc.ep133.features.PadTarget, slot: Int) {
+        if (mirrorSession == null || mirrorSession !== session || m.snapshot(System.nanoTime()).activeProject != t.project) return
         m.assigned(t, slot)
         saveLastRead(m)
         preloadPads(m)
@@ -1389,11 +1427,11 @@ class ArcController(
         _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(state = m.snapshot(System.nanoTime()))) } ?: cur }
     }
 
-    private fun assignedToast(m: dev.arc.ep133.features.LiveMirror, pad: dev.arc.ep133.features.PhysicalPad, t: dev.arc.ep133.features.PadTarget, slot: Int) {
-        val text = dev.arc.ep133.text.MirrorText.assigned(pad, soundName(slot))
+    private fun assignedToast(pad: dev.arc.ep133.features.PhysicalPad, t: dev.arc.ep133.features.PadTarget, slot: Int, name: String = soundName(slot)) {
+        val text = dev.arc.ep133.text.MirrorText.assigned(pad, name)
         // UNDO only where the old sound is known, and isn't the one just put there.
         if (t.slot != null && t.slot != slot) {
-            toast(text, action = dev.arc.ep133.text.MirrorText.UNDO, onAction = { if (mirror === m) undoAssign(pad, t) })
+            toast(text, action = dev.arc.ep133.text.MirrorText.UNDO, onAction = { undoAssign(pad, t) })
         } else {
             toast(text)
         }

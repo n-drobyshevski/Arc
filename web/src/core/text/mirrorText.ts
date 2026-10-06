@@ -328,6 +328,7 @@ export const MirrorText = {
 
   EDIT_OFFLINE: "Connect your EP-133 to change a pad's sound.",
   EDIT_NO_PROJECT: "arc hasn't read the active project yet. Wait a moment, or press a pad on the EP-133.",
+  EDIT_PRESS_FIRST: "arc doesn't know which pad this is yet. Press it once on the EP-133, then tap it here.",
   NO_FREE_SLOT: 'No free slot left on the device. Delete a sound there first.',
   assignFailed(reason: string): string {
     return `The pad's sound couldn't be changed: ${reason}`

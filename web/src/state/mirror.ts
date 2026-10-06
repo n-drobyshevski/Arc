@@ -21,7 +21,7 @@
 //   last read gives way to any later open or stop.
 
 import { getMetadata, isJsonObject, type JsonValue } from '../core/protocol/fs'
-import { PROJECTS_NODE, projectFromNode } from '../core/protocol/device'
+import { PROJECTS_NODE, projectFromNode, type SoundEntry } from '../core/protocol/device'
 import type { Session } from '../core/protocol/session'
 import { contents, projectLayout } from '../core/features/deviceBrowser'
 import { LiveMirror, type Hit, type MirrorState, type PadLight, type PadTarget } from '../core/features/liveMirror'
@@ -305,6 +305,20 @@ export class MirrorController {
     if (s !== null && this.mirrorSession === s) void this.host.live.copyPadSounds(m, s)
     this.publish(m)
     // The names are read through mirrorName: a new MirrorUi re-renders Live even when the state didn't change.
+    this.host.store.update((cur) => (cur.mirror ? { ...cur, mirror: { ...cur.mirror } } : cur))
+  }
+
+  /**
+   * The device's sound list read again (after an upload, say): Live's names
+   * and copies follow, for a mirror of [s]'s connection (the Kotlin
+   * setLiveSounds after an upload; here for every read of the list).
+   */
+  setSounds(s: Session, sounds: readonly SoundEntry[]): void {
+    const m = this.mirror
+    if (m === null || this.mirrorSession !== s) return
+    this.host.live.setDeviceSounds(sounds)
+    m.setNames(new Map(sounds.map((snd) => [snd.slot, snd.name])))
+    // The names are read through mirrorName: a new MirrorUi re-renders Live.
     this.host.store.update((cur) => (cur.mirror ? { ...cur, mirror: { ...cur.mirror } } : cur))
   }
 

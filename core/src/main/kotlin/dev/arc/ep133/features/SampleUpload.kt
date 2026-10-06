@@ -69,9 +69,11 @@ object SampleUpload {
 
     /**
      * Live's "Upload a new sample…" on a pad (an addition): [wav] goes into
-     * the first free slot (not in [occupied], the slots used on the device),
-     * through [upload], then onto [target]'s pad with [Device.assignPad].
-     * Returns the slot it went into.
+     * the first free slot, through [upload], then onto [target]'s pad with
+     * [Device.assignPad]. Returns the slot it went into. The slots in use are
+     * listed on the device first, besides [occupied] (the caller's own list,
+     * which can be stale): a sound recorded on the EP-133 meanwhile, or an
+     * earlier upload whose assignment failed, is never overwritten.
      */
     suspend fun uploadToPad(
         session: Session,
@@ -83,7 +85,8 @@ object SampleUpload {
         onProgress: (Progress) -> Unit = {},
         signal: CancelSignal? = null,
     ): Int {
-        val slot = nextFree(occupied, emptySet()) ?: throw UploadError(dev.arc.ep133.text.MirrorText.NO_FREE_SLOT)
+        val used = occupied + Device.listSounds(session).map { it.slot }
+        val slot = nextFree(used, emptySet()) ?: throw UploadError(dev.arc.ep133.text.MirrorText.NO_FREE_SLOT)
         upload(session, listOf(UploadItem(slot, nameFor(fileName), wav, trim)), onProgress, signal)
         Device.assignPad(session, target.project, target.group, target.pad, slot)
         return slot

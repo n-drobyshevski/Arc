@@ -317,21 +317,30 @@ export class LiveMirror {
    * learned number, else (counting from the top, before any press) the
    * numbering kmorrill's notes give, '7' = 1 down to ENTER = 12; counted
    * from the bottom, the official note order plus one (see PadOrder).
+   * Null when that numbering's number already belongs to another, learned
+   * key: the device numbers its pads otherwise, and a write would land on
+   * that key's pad. The pad has to be pressed on the EP-133 first.
    */
-  padNumber(pad: { readonly group: number; readonly offset: number }): number {
-    return this.padOrder === PadOrder.FROM_TOP ? (this.learned.get(pad.offset) ?? topNumber(pad.offset)) : pad.offset + 1
+  padNumber(pad: { readonly group: number; readonly offset: number }): number | null {
+    if (this.padOrder !== PadOrder.FROM_TOP) return pad.offset + 1
+    const learned = this.learned.get(pad.offset)
+    if (learned !== undefined) return learned
+    const top = topNumber(pad.offset)
+    return [...this.learned.values()].includes(top) ? null : top
   }
 
   /**
    * Where [pad]'s sound is set in the active project, and the slot on it now
    * (for the pad sheet's "now" line and for undo). Null while the active
-   * project is unknown, or the device moved to one not read yet.
+   * project is unknown, the device moved to one not read yet, or the pad's
+   * number isn't known (padNumber).
    */
   target(pad: { readonly group: number; readonly offset: number }): PadTarget | null {
     const project = this.activeProject
     if (project === null) return null
     if (this.pushedProject != null && this.pushedProject !== project) return null
     const number = this.padNumber(pad)
+    if (number === null) return null
     return { project, group: pad.group, pad: number, slot: this.layout.get(String.fromCharCode(97 + pad.group))?.get(number) ?? null }
   }
 

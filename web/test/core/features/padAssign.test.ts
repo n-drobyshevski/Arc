@@ -9,7 +9,7 @@ import { fid, node, PadOrder, topNumber } from '../../../src/core/features/padPu
 import { read as readPads } from '../../../src/core/features/projectPads'
 import { UploadError, uploadToPad } from '../../../src/core/features/sampleUpload'
 import { encodeWav } from '../../../src/core/formats/wav'
-import { assignPad, listSounds, padPatch, readProject } from '../../../src/core/protocol/device'
+import { assignPad, padPatch, readProject } from '../../../src/core/protocol/device'
 import { DeviceError } from '../../../src/core/protocol/errors'
 import { Session } from '../../../src/core/protocol/session'
 import { MirrorText } from '../../../src/core/text/mirrorText'
@@ -87,6 +87,24 @@ describe('PadAssignTest', () => {
     expect(m.padNumber(seven)).toBe(10)
   })
 
+  it("an unlearned pad whose top number another key has learned gets no target", () => {
+    // The device numbers from the bottom: a press of '.' reported p01.
+    const m = new LiveMirror(new Map([[0, 1]]))
+    m.setProject(1, [{ name: 'a', pads: new Map([[1, 5], [2, 6]]) }])
+    const dot = physicalPad(0, 0)
+    const seven = physicalPad(0, 9)
+    const eight = physicalPad(0, 10)
+    expect(m.target(dot)).toEqual(target(1, 0, 1, 5))
+    // '7' is p01 from the top, but p01 is '.': no write to the wrong pad.
+    expect(m.padNumber(seven)).toBeNull()
+    expect(m.target(seven)).toBeNull()
+    // '8' (p02 from the top) isn't anyone's: the guess stands.
+    expect(m.target(eight)).toEqual(target(1, 0, 2, 6))
+    // Counted from the bottom, nothing is guessed from the top.
+    m.setPadOrder(PadOrder.FROM_BOTTOM)
+    expect(m.padNumber(seven)).toBe(10)
+  })
+
   it('no target while the project is unknown or not read yet', () => {
     const m = new LiveMirror()
     expect(m.target(physicalPad(0, 0))).toBeNull()
@@ -100,13 +118,16 @@ describe('PadAssignTest', () => {
   it('an upload goes into the first free slot, then onto the pad', async () => {
     const dev = DemoData.device()
     const s = await connect(dev)
-    const occupied = new Set((await listSounds(s)).map((e) => e.slot))
     const wav = encodeWav(noise(2000 * 2), 1, 46875)
-    const slot = await uploadToPad(s, 'vox take.wav', wav, occupied, target(2, 0, 1, 4))
+    // The caller's list is stale (empty here): the device's own list still keeps its sounds.
+    const slot = await uploadToPad(s, 'vox take.wav', wav, new Set(), target(2, 0, 1, 4))
     // Demo slots are 1..8 and 108..111: 9 is the first free one.
     expect(slot).toBe(9)
     expect(dev.sounds.get(9)!.name).toBe('vox take')
     expect((await padsOf(s, 2, 'a'))?.get(1)).toBe(9)
+    // The same stale list again: 9 is taken now, so the next upload goes to 10.
+    expect(await uploadToPad(s, 'vox take 2.wav', wav, new Set(), target(2, 0, 2, null))).toBe(10)
+    expect(dev.sounds.get(9)!.name).toBe('vox take')
     const full = new Set(Array.from({ length: 999 }, (_, i) => i + 1))
     const e = await uploadToPad(s, 'x.wav', wav, full, target(2, 0, 1, 9)).catch((x: unknown) => x)
     expect(e).toBeInstanceOf(UploadError)

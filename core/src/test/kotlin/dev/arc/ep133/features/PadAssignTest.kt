@@ -89,6 +89,26 @@ class PadAssignTest {
     }
 
     @Test
+    fun `an unlearned pad whose top number another key has learned gets no target`() {
+        // The device numbers from the bottom: a press of '.' reported p01.
+        val m = LiveMirror(learned = mapOf(0 to 1)).apply {
+            setProject(1, listOf(PadGroup("a", mapOf(1 to 5, 2 to 6))))
+        }
+        val dot = PhysicalPad(0, 0)
+        val seven = PhysicalPad(0, 9)
+        val eight = PhysicalPad(0, 10)
+        assertEquals(PadTarget(1, 0, 1, 5), m.target(dot))
+        // '7' is p01 from the top, but p01 is '.': no write to the wrong pad.
+        assertNull(m.padNumber(seven))
+        assertNull(m.target(seven))
+        // '8' (p02 from the top) isn't anyone's: the guess stands.
+        assertEquals(PadTarget(1, 0, 2, 6), m.target(eight))
+        // Counted from the bottom, nothing is guessed from the top.
+        m.setPadOrder(PadOrder.FROM_BOTTOM)
+        assertEquals(10, m.padNumber(seven))
+    }
+
+    @Test
     fun `no target while the project is unknown or not read yet`() {
         val m = LiveMirror()
         assertNull(m.target(PhysicalPad(0, 0)))
@@ -103,13 +123,16 @@ class PadAssignTest {
     fun `an upload goes into the first free slot, then onto the pad`() = runTest {
         val dev = DemoData.device()
         val s = connect(dev)
-        val occupied = Device.listSounds(s).map { it.slot }.toSet()
         val wav = Wav.encode(noise(2000 * 2), 1, 46875)
-        val slot = SampleUpload.uploadToPad(s, "vox take.wav", wav, occupied, PadTarget(2, 0, 1, 4))
+        // The caller's list is stale (empty here): the device's own list still keeps its sounds.
+        val slot = SampleUpload.uploadToPad(s, "vox take.wav", wav, emptySet(), PadTarget(2, 0, 1, 4))
         // Demo slots are 1..8 and 108..111: 9 is the first free one.
         assertEquals(9, slot)
         assertEquals("vox take", dev.sounds[9]!!.name)
         assertEquals(9, ProjectPads.read(Device.readProject(s, 2)).first { it.name == "a" }.pads[1])
+        // The same stale list again: 9 is taken now, so the next upload goes to 10.
+        assertEquals(10, SampleUpload.uploadToPad(s, "vox take 2.wav", wav, emptySet(), PadTarget(2, 0, 2, null)))
+        assertEquals("vox take", dev.sounds[9]!!.name)
         val full = (1..999).toSet()
         val e = assertThrows<UploadError> { SampleUpload.uploadToPad(s, "x.wav", wav, full, PadTarget(2, 0, 1, 9)) }
         assertEquals(MirrorText.NO_FREE_SLOT, e.message)

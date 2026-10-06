@@ -586,6 +586,8 @@ export class ArcController {
       const details = new Map([...st.browser.details].filter(([slot]) => sameSound(now.get(slot), before.get(slot))))
       return { ...st, browser: { ...st.browser, contents: c, details, projectSounds: new Map(), projectPads: new Map() } }
     })
+    // Live's names and copies follow the fresh list (an upload, then onto a pad, needs the new sound's name).
+    if (this.conn.session !== null) this.mirror.setSounds(this.conn.session, c.sounds)
   }
 
   async loadSoundDetails(slot: number): Promise<void> {
@@ -962,8 +964,13 @@ export class ArcController {
       if (!quiet) this.toast(MirrorText.EDIT_OFFLINE)
       return null
     }
-    const t = this.mirror.current?.target(pad) ?? null
-    if (t === null && !quiet) this.toast(MirrorText.EDIT_NO_PROJECT)
+    const m = this.mirror.current
+    const t = m?.target(pad) ?? null
+    if (t === null && !quiet) {
+      // A known project but no pad number: the device numbers its pads otherwise than arc guessed.
+      const unknownPad = m != null && m.snapshot(this.deps.perfNow()).activeProject !== null && m.padNumber(pad) === null
+      this.toast(unknownPad ? MirrorText.EDIT_PRESS_FIRST : MirrorText.EDIT_NO_PROJECT)
+    }
     return t
   }
 

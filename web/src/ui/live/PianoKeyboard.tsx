@@ -172,6 +172,13 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
       ids.clear()
     }
     const onDown = (e: KeyboardEvent): void => {
+      // macOS sends no keyup for a letter let go while Cmd is down: let the letters go now.
+      if (e.metaKey || e.key === 'Meta') releaseAll()
+      // Live is covered (the Guide, the section menu make it inert): the piano is out of reach.
+      if (plate.current?.closest('[inert]')) {
+        releaseAll()
+        return
+      }
       if (e.defaultPrevented || !playsKeys({ ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, inField: inField(e.target) })) return
       const step = octaveStep(e.code)
       if (step !== null) {
@@ -190,6 +197,7 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
       play(touches.down(id, note))
     }
     const onUp = (e: KeyboardEvent): void => {
+      if (e.key === 'Meta') releaseAll()
       const id = ids.get(e.code)
       if (id === undefined) return
       ids.delete(e.code)

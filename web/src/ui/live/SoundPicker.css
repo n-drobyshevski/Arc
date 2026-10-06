@@ -63,11 +63,12 @@
   font: inherit;
   cursor: pointer;
 }
-.snd__range.is-on { --cap-face: var(--line); --cap-edge: var(--line); color: var(--shell); }
-/* Dark: --line is near the page; the key held down is the ink then. */
-:root[data-theme=dark] .snd__range.is-on { --cap-face: var(--ink); --cap-edge: var(--ink); }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme=light]) .snd__range.is-on { --cap-face: var(--ink); --cap-edge: var(--ink); }
+/* The range picked: navy, held down (RangeKey's c.navy / capEdge / c.onNavy), as .key--navy. */
+.snd__range.is-on {
+  --cap-face: var(--navy);
+  --cap-ink: var(--on-navy);
+  --cap-edge: color-mix(in oklab, var(--navy) 65%, black);
+  color: var(--on-navy);
 }
 .snd__range:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
 .snd__range-label {

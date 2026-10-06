@@ -14,7 +14,7 @@
 import { restorePak, type Progress, type RestoreResult } from '../backup/backup'
 import type { Pak, PakSound } from '../backup/pak'
 import { decodeWav, encodeWav } from '../formats/wav'
-import { assignPad, cleanSoundName } from '../protocol/device'
+import { assignPad, cleanSoundName, listSounds } from '../protocol/device'
 import type { JsonObject } from '../protocol/fs'
 import type { Session } from '../protocol/session'
 import { MirrorText } from '../text/mirrorText'
@@ -125,8 +125,11 @@ export async function upload(session: Session, items: readonly UploadItem[], opt
 
 /**
  * Live's "Upload a new sample…" on a pad (an addition): [wav] goes into the
- * first free slot (not in [occupied], the slots used on the device), through
- * [upload], then onto [target]'s pad with assignPad. Returns the slot it went into.
+ * first free slot, through [upload], then onto [target]'s pad with assignPad.
+ * Returns the slot it went into. The slots in use are listed on the device
+ * first, besides [occupied] (the caller's own list, which can be stale): a
+ * sound recorded on the EP-133 meanwhile, or an earlier upload whose
+ * assignment failed, is never overwritten.
  */
 export async function uploadToPad(
   session: Session,
@@ -137,7 +140,8 @@ export async function uploadToPad(
   trim: TrimRange | null = null,
   opts: UploadOptions = {},
 ): Promise<number> {
-  const slot = nextFree(occupied, new Set())
+  const used = new Set([...occupied, ...(await listSounds(session)).map((e) => e.slot)])
+  const slot = nextFree(used, new Set())
   if (slot === null) throw new UploadError(MirrorText.NO_FREE_SLOT)
   await upload(session, [UploadItem(slot, nameFor(fileName), wav, trim)], opts)
   await assignPad(session, target.project, target.group, target.pad, slot)

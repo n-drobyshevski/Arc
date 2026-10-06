@@ -119,6 +119,7 @@ import { DEFAULT_KEYS, keysLit, keysNoteText, octaves, upperOctave, type KeysPic
 import { PianoKeyboard } from '../live/PianoKeyboard'
 import { PressTracker, type PressTarget } from '../live/press'
 import { SLOT_MIME, SoundPicker } from '../live/SoundPicker'
+import { dragMayHaveAudio, isAudioFile } from '../../platform/files/pick'
 import { PickWord, WordButton } from '../live/Words'
 import { useDesk, useFinePointer, useWindowSize } from '../useDesk'
 import './MirrorScreen.css'
@@ -249,6 +250,8 @@ function holdHandlers(
   tracker: PressTracker,
   target: PressTarget,
   inScroll: boolean,
+  /** Where the pad keeps the pointers it gave the tracker, to end them when EDIT turns on. */
+  ids?: Set<number>,
 ): ButtonHTMLAttributes<HTMLButtonElement> {
   // Web: the cap stays down while a finger holds it (data-down, theme/cap.css), as
   // :active is not reliable for several fingers or with touch-action: none.
@@ -259,19 +262,23 @@ function holdHandlers(
       // The mouse's other buttons (and a pen's barrel button) don't play.
       if (e.pointerType === 'mouse' && e.button !== 0) return
       e.currentTarget.setAttribute('data-down', '')
+      ids?.add(e.pointerId)
       tracker.down(e.pointerId, e.clientX, e.clientY, target, inScroll)
     },
     onPointerMove: (e) => tracker.move(e.pointerId, e.clientX, e.clientY),
     onPointerUp: (e) => {
       lift(e.currentTarget)
+      ids?.delete(e.pointerId)
       tracker.up(e.pointerId)
     },
     onPointerCancel: (e) => {
       lift(e.currentTarget)
+      ids?.delete(e.pointerId)
       tracker.cancel(e.pointerId)
     },
     onPointerLeave: (e) => {
       lift(e.currentTarget)
+      ids?.delete(e.pointerId)
       tracker.cancel(e.pointerId)
     },
     // A screen reader's or the keyboard's Play: the whole sound.
@@ -714,7 +721,7 @@ function ToolsTabs(props: { tab: 'tools' | 'sounds'; onTab: (tab: 'tools' | 'sou
 function SoundsPanel(props: { edit: EditUi; onDrag: (snd: SoundEntry | null) => void }): JSX.Element {
   const { edit } = props
   const [over, setOver] = useState(false)
-  const files = (e: TargetedDragEvent<HTMLElement>): boolean => e.dataTransfer?.types.includes('Files') ?? false
+  const files = (e: TargetedDragEvent<HTMLElement>): boolean => dragMayHaveAudio(e.dataTransfer)
   if (!edit.connected) return <p class="t-small live-sounds__hint">{MirrorText.EDIT_OFFLINE}</p>
   return (
     <div class="live-sounds">
@@ -742,12 +749,15 @@ function SoundsPanel(props: { edit: EditUi; onDrag: (snd: SoundEntry | null) => 
         }}
         onDragLeave={() => setOver(false)}
         onDrop={(e) => {
+          setOver(false)
           if (!files(e)) return
+          const audio = Array.from(e.dataTransfer?.files ?? []).filter(isAudioFile)
+          // Only backups (.pak) or other files: the page's own drop imports them.
+          if (audio.length === 0) return
           e.preventDefault()
           // Not the page's own drop (a .pak import).
           e.stopPropagation()
-          setOver(false)
-          edit.onUpload(Array.from(e.dataTransfer?.files ?? []))
+          edit.onUpload(audio)
         }}
       >
         {WebText.DROP_SAMPLE}
@@ -1001,11 +1011,26 @@ interface EditPress {
   held: boolean
   /** The pointer pressing it, null when none. */
   id: number | null
+  /**
+   * What the long press plays and lets go, as at pointerdown: a later
+   * render's pad may be another one (Follow switched the group).
+   */
+  target: PressTarget | null
   /** The kind of the last pointer down on the pad ('mouse' makes a right-click open the sheet). */
   pointer: string
 }
 
-const newEditPress = (): EditPress => ({ timer: null, held: false, id: null, pointer: '' })
+const newEditPress = (): EditPress => ({ timer: null, held: false, id: null, target: null, pointer: '' })
+
+/** Ends an EDIT press without opening anything: its timer stops, and a held sound is let go. */
+function stopEditPress(st: EditPress): void {
+  if (st.timer !== null) clearTimeout(st.timer)
+  st.timer = null
+  if (st.held) st.target?.release()
+  st.held = false
+  st.id = null
+  st.target = null
+}
 
 /**
  * A pad's handlers in EDIT: a tap opens its sheet; held past [EDIT_HOLD_MS]
@@ -1015,24 +1040,21 @@ const newEditPress = (): EditPress => ({ timer: null, held: false, id: null, poi
 function editHandlers(st: EditPress, press: PressTarget | null, open: () => void): ButtonHTMLAttributes<HTMLButtonElement> {
   const end = (el: HTMLElement, tap: boolean): void => {
     el.removeAttribute('data-down')
-    if (st.timer !== null) {
-      clearTimeout(st.timer)
-      st.timer = null
-      if (tap) open()
-    } else if (st.held) press?.release()
-    st.held = false
-    st.id = null
+    const tapped = st.timer !== null
+    stopEditPress(st)
+    if (tapped && tap) open()
   }
   return {
     onPointerDown: (e) => {
       if (e.pointerType === 'mouse' && e.button !== 0) return
       if (st.id !== null) return
       st.id = e.pointerId
+      st.target = press
       e.currentTarget.setAttribute('data-down', '')
       st.timer = setTimeout(() => {
         st.timer = null
-        st.held = press !== null
-        press?.press(true)
+        st.held = st.target !== null
+        st.target?.press(true)
       }, EDIT_HOLD_MS)
     },
     onPointerUp: (e) => {
@@ -1055,10 +1077,19 @@ function Pad(props: PadProps): JSX.Element {
   const { pad, light, name, big, scroll, ui, playing, tracker } = props
   const press = ui.press(pad)
   const edit = useRef<EditPress>(newEditPress())
-  // A long press still waiting when the pad goes (EDIT off, another view) plays nothing.
+  const holds = useRef(new Set<number>())
+  const btn = useRef<HTMLButtonElement>(null)
+  const editMode = ui.editing && ui.edit !== null
+  // EDIT on or off, or the pad gone (another view), with a finger still down: the
+  // other handlers won't see its lift, so the press ends here. A long press
+  // still waiting plays nothing, a held sound is let go, and so is a pad played
+  // outside EDIT.
   useEffect(() => () => {
-    if (edit.current.timer !== null) clearTimeout(edit.current.timer)
-  }, [])
+    stopEditPress(edit.current)
+    for (const id of holds.current) tracker.cancel(id)
+    holds.current.clear()
+    btn.current?.removeAttribute('data-down')
+  }, [editMode, tracker])
   const g = light ? glow(light, props.now) : 0
   const wide = pad.label.length > 1
   const label = `${pad.groupLetter} ${pad.label}` + (name !== null ? `, ${name}` : '')
@@ -1081,10 +1112,8 @@ function Pad(props: PadProps): JSX.Element {
   )
   // The desk: sounds from the Sounds tab and WAV files drop on it.
   const drop = ui.drop
-  const accepts = (e: TargetedDragEvent<HTMLElement>): boolean => {
-    const types = e.dataTransfer?.types ?? []
-    return types.includes(SLOT_MIME) || types.includes('Files')
-  }
+  const accepts = (e: TargetedDragEvent<HTMLElement>): boolean =>
+    (e.dataTransfer?.types ?? []).includes(SLOT_MIME) || dragMayHaveAudio(e.dataTransfer)
   const dropHandlers = drop
     ? {
         onDragEnter: (e: TargetedDragEvent<HTMLElement>) => {
@@ -1105,6 +1134,12 @@ function Pad(props: PadProps): JSX.Element {
         },
         onDrop: (e: TargetedDragEvent<HTMLElement>) => {
           if (!accepts(e)) return
+          const file = e.dataTransfer?.files?.[0]
+          if (!(e.dataTransfer?.types ?? []).includes(SLOT_MIME) && (!file || !isAudioFile(file))) {
+            // A backup (.pak) or another file: the page's own drop imports it.
+            if (drop.at === key) drop.onOver(null)
+            return
+          }
           e.preventDefault()
           // Not the page's own drop (a .pak import).
           e.stopPropagation()
@@ -1120,13 +1155,14 @@ function Pad(props: PadProps): JSX.Element {
       </div>
     )
   }
-  const handlers = ui.editing && open ? editHandlers(edit.current, press, () => open(pad)) : holdHandlers(tracker, press!, scroll)
+  const handlers = ui.editing && open ? editHandlers(edit.current, press, () => open(pad)) : holdHandlers(tracker, press!, scroll, holds.current)
   // A right-click with the mouse opens the pad's sheet (a long press on a touch screen still plays).
   const onPointerDown = handlers.onPointerDown
   return (
     // The big grid (and the desk's row) doesn't scroll: it plays on touch-down. The
     // all-groups page scrolls, so there a drag across the pads must not play them.
     <button
+      ref={btn}
       type="button"
       class={`${cls} live-pad--press${scroll ? ' live-pad--scroll' : ''}`}
       aria-label={label}
