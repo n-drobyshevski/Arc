@@ -62,6 +62,8 @@ import type { KeysShown } from './keys'
 import { capDown, capUp } from './capDown'
 import { rawMovesSupported } from './press'
 import './PianoKeyboard.css'
+import { composing, inField } from '../keyGuard'
+import { computerKeys } from '../keyPrefs'
 
 /** How far past a key's edge a sliding finger keeps it, so it doesn't flicker between two keys. */
 const SLIDE_SLOP = 6
@@ -104,13 +106,6 @@ interface Finger {
   readonly y: number
   readonly generation: number
   readonly raw: boolean
-}
-
-/** Whether [t] is a field (typing) or inside a dialog, where letters don't play. */
-function inField(t: EventTarget | null): boolean {
-  if (!(t instanceof Element)) return false
-  if (t.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]')) return true
-  return t.closest('dialog, [role="dialog"], [role="alertdialog"], [role="listbox"]') !== null
 }
 
 export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
@@ -248,6 +243,8 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
         releaseAll()
         return
       }
+      // Settings → Computer keyboard off, or an input method composing: no letters play.
+      if (!computerKeys.peek() || composing(e)) return
       if (e.defaultPrevented || !playsKeys({ ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, inField: inField(e.target) })) return
       const step = octaveStep(e.code)
       if (step !== null) {

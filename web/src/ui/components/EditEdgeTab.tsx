@@ -11,6 +11,7 @@
 import type { JSX } from 'preact'
 import { CoachText } from '../../core/text/coachText'
 import { MirrorText } from '../../core/text/mirrorText'
+import { WebText } from '../../core/text/webText'
 import './EditEdgeTab.css'
 
 export interface EditEdgeTabProps {
@@ -19,6 +20,8 @@ export interface EditEdgeTabProps {
   class?: string
   /** Out of reach (under the section list's scrim). */
   inert?: boolean
+  /** Web: the computer keyboard's key for it ("E"), in its tooltip and for screen readers. */
+  keyShortcut?: string
 }
 
 export function EditEdgeTab(props: EditEdgeTabProps): JSX.Element {
@@ -29,7 +32,8 @@ export function EditEdgeTab(props: EditEdgeTabProps): JSX.Element {
       class={`edit-edge-tab${on ? ' is-on' : ''}${props.class ? ` ${props.class}` : ''}`}
       aria-pressed={on}
       aria-label={MirrorText.editTab(on)}
-      title={MirrorText.editTab(on)}
+      title={props.keyShortcut ? WebText.keyHint(MirrorText.editTab(on), props.keyShortcut) : MirrorText.editTab(on)}
+      aria-keyshortcuts={props.keyShortcut}
       data-coach="edge.edit"
       inert={props.inert || undefined}
       onClick={() => props.onChange(!on)}

@@ -1,0 +1,27 @@
+/* Web only: the Keyboard keys sheet (KeyboardKeysSheet.tsx). Each key a small
+ * cap-like chip, as the keys of the app are caps. */
+
+.keys-sheet__title { margin: 0; color: var(--ink); }
+.keys-sheet__note { margin: 0; color: var(--graphite); }
+.keys-sheet__group { display: flex; flex-direction: column; gap: 8px; }
+.keys-sheet__rows { margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.keys-sheet__row {
+  display: grid;
+  grid-template-columns: minmax(0, 11rem) minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+}
+.keys-sheet__keys { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; }
+.keys-sheet__key {
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: var(--radius-tag);
+  color: var(--ink);
+  background: color-mix(in srgb, var(--line) 8%, transparent);
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--line) 18%, transparent);
+  white-space: nowrap;
+}
+.keys-sheet__label { margin: 0; color: var(--ink); }

@@ -206,6 +206,12 @@
 .live-group__caption {
   --live-caption: color-mix(in oklab, var(--signal) var(--glow-pct), var(--graphite));
 }
+/* Web: the group the computer keyboard's pad keys play, all groups shown. */
+.live-group__caption[data-target] .caption {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
 
 /* The deck: the device's body around the caps. Its padding leaves room on the
  * right and below for the caps' edges. 10 between caps (6 in the small grids). */
