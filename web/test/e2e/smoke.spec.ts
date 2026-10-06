@@ -107,6 +107,30 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
     await expect.poll(litPads).toBe(0)
   })
 
+  await test.step('7a. on a computer, the guide overlay by keyboard over the open Live tools: nothing under the panel tagged, focus back on ?', async () => {
+    const strip = page.getByRole('button', { name: 'Live tools' })
+    await strip.click()
+    const panel = page.getByRole('dialog', { name: 'Live tools' })
+    await expect(panel).toBeVisible()
+    // The panel takes focus as it opens; only then go to ? (else Enter can land on its close key).
+    await expect.poll(() => panel.evaluate((el) => el.contains(document.activeElement))).toBe(true)
+    const help = page.getByRole('banner').getByRole('button', { name: "What's what" })
+    await help.focus()
+    await page.keyboard.press('Enter')
+    const coach = page.getByRole('dialog', { name: "What's what" })
+    await expect(coach.locator('[data-coach-tag="live.pads"]')).toBeVisible()
+    // The more-tools strip is under the panel: no tag points at it.
+    await expect(coach.locator('[data-coach-tag="side.more"]')).toHaveCount(0)
+    await expect.poll(() => coachHides(page)).toEqual([])
+    // Escape closes the overlay alone; the panel under it takes the next one.
+    await page.keyboard.press('Escape')
+    await expect(coach).toBeHidden()
+    await expect(help).toBeFocused()
+    await expect(panel).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(panel).toBeHidden()
+  })
+
   await test.step('7b. Live tab: a pad the device named plays in the browser while held', async () => {
     // A note-on with the device's pad push at the same moment links pad A "." to its sound (001 kick).
     await demo(page, (d) => {

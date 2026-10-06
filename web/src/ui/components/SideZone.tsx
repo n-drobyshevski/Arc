@@ -122,6 +122,8 @@ export function SideZone(props: SideZoneProps): JSX.Element {
             ref={panel}
             id={panelId}
             class={`side-zone__panel${shown && open ? ' is-shown' : ''}`}
+            // The guide overlay tags nothing under the open panel (the strip it covers).
+            data-coach-cover={open ? '' : undefined}
             role="dialog"
             aria-labelledby={titleId}
             aria-hidden={open ? undefined : 'true'}

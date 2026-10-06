@@ -40,9 +40,13 @@
 // - [layoutTags] (the overlay's entry point) uses the crowded rules in a short
 //   window, as Kotlin does, and also in any other window whose plain placement
 //   hides a control under a tag (Device's two keys under the top bar, on a
-//   phone upright or a computer), when they hide fewer.
+//   phone upright or a computer), when they hide fewer. The plain placement
+//   reworks its order around crossed arrows too ([PlaceOptions.reorder]): the
+//   top bar's tags then take their two heights so no arrow runs under a tag.
 // - When crowded, the tags keep off the edge tabs too (the GUIDE tab, the
 //   more-tools strip), so the control a side tag's hook points at stays in view.
+// - The order search also counts tags on each other, and tries other orders
+//   for them (Kotlin's counts only arrows across tags).
 // - Last, a tag another tag's arrow runs under slides sideways off it where it
 //   can ([clearArrows]).
 // - A side tag stands on the edge its control hugs: the screen's edge, or the
@@ -130,6 +134,11 @@ export interface PlaceOptions {
   readonly clear?: readonly Box[]
   /** The safe area (where edge controls may stand, and the close hint's room). */
   readonly safe?: Insets
+  /**
+   * Whether the placing order is reworked around an arrow running across a tag
+   * (always when crowded; a web delta for the plain places, see [layoutTags]).
+   */
+  readonly reorder?: boolean
 }
 
 /** CoachOverlay's metrics (dp = px). */
@@ -568,26 +577,30 @@ export function placeTags(marks: readonly CoachMarkInput[], viewport: Size, meas
     if (!tip || !tail) return 0
     return placed.filter((q) => q !== p && crosses(tip, tail, roomOf(q))).length
   }
-  // How well the tags fit together: none off the screen or on a control, no arrow across
-  // another tag, and short arrows.
+  // The tags [p] sits on (a web delta: Kotlin's score leaves them out, so a crowded window
+  // could keep two tags on each other when every place near one was taken).
+  const stacked = (p: PlacedTag): number => placed.filter((q) => q !== p && overlaps(roomOf(p), roomOf(q))).length
+  // How well the tags fit together: none off the screen, on another tag or on a control, no
+  // arrow across another tag, and short arrows.
   const score = (): number =>
     placed.reduce((sum, p) => {
       const r = roomOf(p)
       const off = r.top < 0 || r.bottom > vh || r.left < 0 || r.right > vw
       const arrow = p.tip && p.tail ? Math.abs(p.tail.x - p.tip.x) + Math.abs(p.tail.y - p.tip.y) : 0
-      return sum + (off ? 1000 : 0) + 100 * onControls(r, p.mark) + 10 * crossings(p) + arrow / vh
+      return sum + (off ? 1000 : 0) + 100 * (onControls(r, p.mark) + stacked(p)) + 10 * crossings(p) + arrow / vh
     }, 0)
 
   let order = list.filter((m) => edge(m) === 0 && !tall(m))
   layout(order)
-  // When crowded, top to bottom can leave an arrow running across another tag: the tags either
-  // side of such a crossing are tried earlier or later in turn, and the best order kept.
-  if (crowded) {
+  // When crowded, top to bottom can leave an arrow running across another tag (or, a web delta,
+  // a tag on another): the tags either side of such a crossing are tried earlier or later in
+  // turn, and the best order kept.
+  if (crowded || opts.reorder) {
     let best = score()
     for (let pass = 0; pass < M.orderPasses; pass++) {
       const crossed = placed.filter((p) => crossings(p) > 0)
       const involved = placed
-        .filter((p) => crossings(p) > 0 || crossed.some((q) => q.tip && q.tail && crosses(q.tip, q.tail, roomOf(p))))
+        .filter((p) => crossings(p) > 0 || stacked(p) > 0 || crossed.some((q) => q.tip && q.tail && crosses(q.tip, q.tail, roomOf(p))))
         .map((p) => p.mark)
         .filter((m) => order.includes(m))
       let bestOrder: CoachMarkInput[] | null = null
@@ -690,16 +703,19 @@ export function clearArrows(placed: readonly PlacedTag[], viewport: Size, opts: 
 
 /**
  * The overlay's placement: crowded in a short window (Kotlin's rule). In any
- * other the plain places, unless a tag there hides a control (or another tag)
- * and the crowded rules hide fewer (a web delta: Device's keys under the top
- * bar, upright or on a computer). Then tags slide off the arrows running under
- * them where they can ([clearArrows], also a web delta).
+ * other the plain places (in whichever order leaves the fewest arrows across
+ * tags), unless a tag there hides a control (or another tag) and the crowded
+ * rules hide fewer (a web delta: Device's keys under the top bar, upright or on
+ * a computer). Then tags slide off the arrows running under them where they
+ * can ([clearArrows], also a web delta).
  */
 export function layoutTags(marks: readonly CoachMarkInput[], viewport: Size, measure: MeasureTag, opts: Omit<PlaceOptions, 'crowded'> = {}): PlacedTag[] {
   const sized = memoised(measure)
   const chosen = ((): PlacedTag[] => {
     if (viewport.height < M.shortHeight) return placeTags(marks, viewport, sized, { ...opts, crowded: true })
-    const plain = placeTags(marks, viewport, sized, { ...opts, crowded: false })
+    // The plain places, in the order that leaves the fewest arrows across tags (the top bar's
+    // second-row tags otherwise run their arrows under the first row's).
+    const plain = placeTags(marks, viewport, sized, { ...opts, crowded: false, reorder: true })
     const hidden = occlusions(plain, viewport, opts)
     if (hidden === 0) return plain
     const careful = placeTags(marks, viewport, sized, { ...opts, crowded: true })

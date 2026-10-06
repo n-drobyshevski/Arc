@@ -13,8 +13,9 @@
 // turned, with a hooked arrow above pointing at the edge.
 // Tap anywhere (or Escape) to close.
 //
-// A control scrolled out of view gets no tag. Where a marked element's touch
-// area reaches past what shows (a word), its data-coach-box part is pointed at.
+// A control scrolled out of view, or under a layer marked data-coach-cover (the
+// open Live tools panel), gets no tag. Where a marked element's touch area
+// reaches past what shows (a word), its data-coach-box part is pointed at.
 //
 // Marking a control, two ways:
 // - useCoachMark(id, label, face, ink) returns a ref callback (Kotlin's
@@ -207,6 +208,17 @@ export function useCoachMark(id: string, label: string, face: string, ink: strin
 
 /** The marks on screen now: data-coach elements under [root], then hook registrations. */
 function collectMarks(root: Element | null, reg: CoachRegistry, origin: DOMRect): CoachMarkInput[] {
+  // Layers over the page (an open side panel): a control whose middle they cover is out of view.
+  const covers = root ? Array.from(root.querySelectorAll('[data-coach-cover]')) : []
+  const covered = (el: Element, r: DOMRect): boolean => {
+    const x = (r.left + r.right) / 2
+    const y = (r.top + r.bottom) / 2
+    return covers.some((c) => {
+      if (c.contains(el)) return false
+      const b = c.getBoundingClientRect()
+      return x >= b.left && x < b.right && y >= b.top && y < b.bottom
+    })
+  }
   const byId = new Map<string, Entry>()
   if (root) {
     for (const el of Array.from(root.querySelectorAll('[data-coach]'))) {
@@ -224,8 +236,9 @@ function collectMarks(root: Element | null, reg: CoachRegistry, origin: DOMRect)
     const part = el.querySelector('[data-coach-box]')
     const r = (part && part.closest('[data-coach]') === el ? part : el).getBoundingClientRect()
     if (r.width === 0 && r.height === 0) continue
-    // Scrolled out of view: no tag pointing off the screen.
+    // Scrolled out of view, or under a panel: no tag pointing at what can't be seen.
     if (r.bottom <= origin.top || r.top >= origin.bottom || r.right <= origin.left || r.left >= origin.right) continue
+    if (covered(el, r)) continue
     out.push({
       id,
       bounds: { left: r.left - origin.left, top: r.top - origin.top, right: r.right - origin.left, bottom: r.bottom - origin.top },
@@ -379,7 +392,7 @@ export function CoachOverlay(props: CoachOverlayProps): JSX.Element | null {
       for (const child of Array.from(host.children)) ro.observe(child)
     }
     const mo = typeof MutationObserver === 'function' && host ? new MutationObserver(schedule) : null
-    mo?.observe(host as Element, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-coach', 'data-coach-clear', 'aria-label', 'class', 'style'] })
+    mo?.observe(host as Element, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-coach', 'data-coach-clear', 'data-coach-cover', 'aria-label', 'class', 'style'] })
     return () => {
       alive = false
       cancelAnimationFrame(raf)
