@@ -37,7 +37,7 @@ function coarsePointer(): boolean {
 }
 
 /**
- * Whether this browser can vibrate (Settings shows the Haptic feedback row
+ * Whether this browser can vibrate (Settings shows the Haptics row
  * only then): the API, on a touch screen ([coarse]: whether the main pointer
  * is a finger), as desktop Chromium has the API without a motor.
  */

@@ -83,8 +83,8 @@ import kotlinx.coroutines.launch
 /**
  * The settings (an addition to the web version): theme, connecting, the
  * screen in Live, how many backups to keep, Live's pad numbering, note names,
- * piano size and haptic feedback, what arc keeps on the phone, and about arc. Each setting is
- * one row (name, short note, control; an info key for the long note), rows
+ * piano size and haptics, what arc keeps on the phone, and about arc. Each setting is
+ * one row (its name and control; an info key after the name for its notes), rows
  * grouped in plates. On a phone the plates are one scroll; on a wide window a
  * list of the sections sits on the left, its LED on the section in view.
  */

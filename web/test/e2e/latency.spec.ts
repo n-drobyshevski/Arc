@@ -3,7 +3,8 @@
 // timeStamp the press time) shows on its engine's row once the output
 // reports it heard; the latencyHint choice is kept in localStorage and Live
 // opens at it; Reset clears the rows' times. The output's latency is fixed
-// before the app loads, so the row's estimate is known.
+// before the app loads, so the row's estimate is known. Open, the panel takes
+// the log's place (on a phone too, where it scrolls down to Reset).
 import type { Page } from '@playwright/test'
 import { LatencyText } from '../../src/core/text/latencyText'
 import { demo, expect, test } from './fixtures'
@@ -78,10 +79,12 @@ test('the latency test shows each engine tried, and its choice reopens Live at t
   await pressPad(page)
   await openDebug(page)
 
-  // Folded under its title above the log; open, how to run it and the choice.
+  // Folded under its title above the log; open, how to run it and the choice, in the log's place.
   const panel = page.locator('.debug__latency')
+  await expect(page.getByRole('log')).toBeVisible()
   await panel.getByRole('button', { name: LatencyText.TITLE }).click()
   await expect(panel.getByText(LatencyText.HOW_TO)).toBeVisible()
+  await expect(page.getByRole('log')).toHaveCount(0)
   const choice = panel.getByRole('radiogroup', { name: LatencyText.ENGINE })
   await expect(choice.getByRole('radio', { name: LatencyText.hint('ZERO') })).toBeChecked()
   await expect(choice.getByText(LatencyText.hintNote('ZERO'))).toBeVisible()
@@ -120,4 +123,26 @@ test('the latency test shows each engine tried, and its choice reopens Live at t
   await expect(rows.first()).toContainText(LatencyText.NO_PRESSES)
   await expect(rows.nth(1)).toContainText(LatencyText.NO_PRESSES)
   await expect(panel.getByRole('button', { name: LatencyText.RESET })).toBeDisabled()
+
+  // Folded, the log is back.
+  await panel.getByRole('button', { name: LatencyText.TITLE }).click()
+  await expect(page.getByRole('log')).toBeVisible()
+})
+
+test('on a phone the open latency test has the screen to itself and scrolls down to Reset', async ({ page }) => {
+  await page.setViewportSize({ width: 393, height: 852 })
+  await page.goto('/?demo#/live')
+  await pressPad(page)
+  await openDebug(page)
+  const panel = page.locator('.debug__latency')
+  await panel.getByRole('button', { name: LatencyText.TITLE }).click()
+  await expect(page.getByRole('log')).toHaveCount(0)
+  await expect(panel.locator('.debug__engine')).toHaveCount(1)
+  // The panel scrolls inside the screen: Reset comes into view, inside the window.
+  const reset = panel.getByRole('button', { name: LatencyText.RESET })
+  await reset.scrollIntoViewIfNeeded()
+  await expect(reset).toBeInViewport({ ratio: 1 })
+  await expect(reset).toBeEnabled()
+  const box = await panel.boundingBox()
+  expect(box && box.y + box.height).toBeLessThanOrEqual(852)
 })

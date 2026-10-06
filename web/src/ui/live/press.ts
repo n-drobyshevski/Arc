@@ -55,9 +55,8 @@ export interface PressTarget {
 }
 
 /**
- * [target] with a [tick] after each press when [on] (Settings → Haptic
- * feedback): the press is handed on first, so the sound never waits for the
- * tick. Nothing on the release, and a press cut by a scroll keeps its tick.
+ * [target] with a [tick] after each press when [on] (Settings → Haptics):
+ * the press is handed on first, so the sound never waits for the tick. Nothing on the release, and a press cut by a scroll keeps its tick.
  */
 export function ticking(target: PressTarget, on: boolean, tick: () => void): PressTarget {
   if (!on) return target

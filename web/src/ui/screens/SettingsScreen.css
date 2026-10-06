@@ -62,6 +62,13 @@
 .settings__section:focus { outline: none; }
 .settings__section:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
 
+/* Strings.storageNote under the Library card: small graphite, 4 in from its edge. */
+.settings__storage {
+  margin: 0;
+  padding-inline: var(--space-4);
+  color: var(--graphite);
+}
+
 /* The folder keys under the Library folder row, side by side. */
 .settings__keys {
   display: flex;

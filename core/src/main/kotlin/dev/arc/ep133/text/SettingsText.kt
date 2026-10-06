@@ -22,16 +22,16 @@ object SettingsText {
     }
 
     const val DEVICE = "Device"
-    const val AUTO_CONNECT = "Connect when plugged in"
+    const val AUTO_CONNECT = "Auto-connect"
     const val AUTO_CONNECT_NOTE = "arc connects by itself when an EP-133 is plugged in."
-    const val KEEP_SCREEN_ON = "Keep the screen on in Live"
+    const val KEEP_SCREEN_ON = "Screen on in Live"
     const val KEEP_SCREEN_ON_NOTE = "The phone doesn't sleep while the Live tab is open."
     const val ON = "On"
     const val OFF = "Off"
 
-    // Each row: its name with a one-line note, the control on the right, and
-    // (where there is more to say) an info key that opens the long note.
-    /** The info key, for screen readers; it says whether the long note is open. */
+    // Each row: its name and the control on the right; an info key opens its
+    // one-line note under the row (and the long note, where there is more to say).
+    /** The info key, for screen readers; it says whether the note is open. */
     const val MORE_INFO = "More about this"
 
     const val LIBRARY = "Library"
@@ -86,7 +86,7 @@ object SettingsText {
     }
     /** Why a piano size is greyed out. */
     const val DOESNT_FIT = "Too wide for this window"
-    const val HAPTICS = "Haptic feedback"
+    const val HAPTICS = "Haptics"
     const val HAPTICS_NOTE = "A light tick when a pad or key goes down."
 
     const val SAVED_HERE = "Saved on the phone"

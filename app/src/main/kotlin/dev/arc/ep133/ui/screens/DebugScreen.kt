@@ -235,6 +235,7 @@ private fun LatencyHeader(ui: LatencyUi) {
                     }
                 },
             note = LatencyText.HOW_TO,
+            noteShown = true,
         ) { Chevron(Modifier.padding(horizontal = 6.dp), open = ui.open) }
     }
 }
@@ -249,7 +250,7 @@ internal fun LatencyPanel(ui: LatencyUi) {
     val c = LocalArcColors.current
     val st = ui.state
     GridPlate {
-        SettingRow(LatencyText.ENGINE, note = LatencyText.ENGINE_NOTE, stacked = true) {
+        SettingRow(LatencyText.ENGINE, note = LatencyText.ENGINE_NOTE, stacked = true, noteShown = true) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Segmented(
                     LiveEngine.entries.map(LatencyText::engine),

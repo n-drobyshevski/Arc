@@ -53,7 +53,8 @@
 //   dismisses) are navigation layers too: [picker] / [onPicker] (dialog
 //   'pick:scale' / 'pick:octave'); without them each word keeps its own state.
 // - The tools (the Step 1c redesign) are SettingRow cards: the View as small
-//   caps with a Follow row and its LED toggle, the last note in a small dark
+//   caps with a Follow row and its LED toggle (its note behind the row's ⓘ
+//   key), the last note in a small dark
 //   display, and the long notes under one "How Live reads the EP-133"
 //   disclosure. The pad numbering lives in Settings only (no onPadOrder here).
 //   KEYS: a one-octave MiniPiano picks the key; the colours are chips (the
@@ -238,7 +239,7 @@ export interface MirrorScreenProps {
   onPadCut?: (pad: PhysicalPad) => void
   /** What sounds on the phone (several pads at once for a chord), ringed; none by default. */
   playing?: LivePlaying | null
-  /** A light tick (navigator.vibrate) when a finger presses a pad or key (Settings → Haptic feedback). */
+  /** A light tick (navigator.vibrate) when a finger presses a pad or key (Settings → Haptics). */
   haptics?: boolean
   /** KEYS: the pads become notes of one sound, like the EP-133's KEYS mode. */
   keys?: KeysShown

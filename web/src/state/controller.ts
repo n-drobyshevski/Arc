@@ -1453,7 +1453,7 @@ export class ArcController {
     this.changeSettings((s) => ({ ...s, keysOctave: coerceIn(Math.trunc(octave), MIN_OCTAVE, MAX_OCTAVE) }))
   }
 
-  /** How KEYS names its notes (Settings → Live → Note names on the keys). */
+  /** How KEYS names its notes (Settings → Live → Note names). */
   setKeysNames(names: NoteNames): void {
     this.changeSettings((s) => ({ ...s, keysNames: names }))
   }
@@ -1472,7 +1472,7 @@ export class ArcController {
     this.changeSettings((s) => ({ ...s, pianoWhites: pianoChoiceOf(whites) }))
   }
 
-  /** A light tick when a pad or key goes down (Settings → Live → Haptic feedback). */
+  /** A light tick when a pad or key goes down (Settings → Live → Haptics). */
   setHaptics(on: boolean): void {
     this.changeSettings((s) => ({ ...s, haptics: on }))
   }

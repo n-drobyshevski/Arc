@@ -1,8 +1,8 @@
 /* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Rows.kt (SettingRow, InfoButton, TipBox, LinkRow, Disclosure) and Components.kt (GridPlate, the row card)
  *
- * A row: the name (semi 15, ink) with its note (small, graphite) on the left,
- * the control on the right, padding 14/18, at least 60 high. Cards are the
- * plate colour, radius 18, rows split by a faint line. */
+ * A row: the name (semi 15, ink) on the left, its ⓘ key after it, the
+ * control on the right, padding 14/18, at least 60 high. Cards are the plate
+ * colour, radius 18, rows split by a faint line. */
 
 .row-card {
   display: flex;
@@ -53,12 +53,6 @@
   line-height: 1.4;
   overflow-wrap: break-word;
 }
-.setting-row__note {
-  color: var(--graphite);
-  font-size: var(--size-tiny);
-  font-weight: var(--weight-regular);
-  line-height: 1.4;
-}
 
 .setting-row__control {
   flex: 0 1 auto;
@@ -71,8 +65,11 @@
 .setting-row--stack .setting-row__control { justify-content: stretch; }
 .setting-row--stack .setting-row__control > * { flex: 1 1 auto; }
 
-/* The long note: a tinted box under the row, inside its padding. */
+/* The notes: a tinted box under the row, inside its padding, a paragraph each. */
 .setting-row__tip {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
   margin: calc(-1 * var(--space-4)) var(--space-18) var(--space-14);
   padding: var(--space-10) var(--space-12);
   border-radius: var(--radius-field);
@@ -81,6 +78,7 @@
   font-size: var(--size-tiny);
   line-height: 1.45;
 }
+.setting-row__tip > p { margin: 0; }
 
 /* The ⓘ key: 20 round, a graphite ring and "i"; open, filled navy. Its touch area reaches 32. */
 .info-key {

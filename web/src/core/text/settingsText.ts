@@ -43,16 +43,16 @@ export const SettingsText = {
   },
 
   DEVICE: 'Device',
-  AUTO_CONNECT: 'Connect when plugged in',
+  AUTO_CONNECT: 'Auto-connect',
   AUTO_CONNECT_NOTE: 'arc connects by itself when an EP-133 is plugged in.',
-  KEEP_SCREEN_ON: 'Keep the screen on in Live',
+  KEEP_SCREEN_ON: 'Screen on in Live',
   KEEP_SCREEN_ON_NOTE: "The phone doesn't sleep while the Live tab is open.",
   ON: 'On',
   OFF: 'Off',
 
-  // Each row: its name with a one-line note, the control on the right, and
-  // (where there is more to say) an info key that opens the long note.
-  /** The info key, for screen readers; it says whether the long note is open. */
+  // Each row: its name and the control on the right; an info key opens its
+  // one-line note under the row (and the long note, where there is more to say).
+  /** The info key, for screen readers; it says whether the note is open. */
   MORE_INFO: 'More about this',
 
   LIBRARY: 'Library',
@@ -131,7 +131,7 @@ export const SettingsText = {
   },
   /** Why a piano size is greyed out. */
   DOESNT_FIT: 'Too wide for this window',
-  HAPTICS: 'Haptic feedback',
+  HAPTICS: 'Haptics',
   HAPTICS_NOTE: 'A light tick when a pad or key goes down.',
 
   SAVED_HERE: 'Saved on the phone',

@@ -53,6 +53,7 @@ import androidx.compose.ui.semantics.expand
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -63,22 +64,25 @@ import dev.arc.ep133.ui.theme.ArcType
 import dev.arc.ep133.ui.theme.LocalArcColors
 
 /*
- * The settings' row pattern, shared by Settings and Live tools: a name with a
- * one-line note on the left, the control on the right (a hardware toggle, a
- * compact Segmented, a key), rows grouped on a [GridPlate] with [PlateLine]s
- * between them. Where there is more to say, an info key opens the long note
- * under the row in a tinted tip box (the web's ui/settings rows).
+ * The settings' row pattern, shared by Settings and Live tools: the name on
+ * the left, the control on the right (a hardware toggle, a compact Segmented,
+ * a key), rows grouped on a [GridPlate] with [PlateLine]s between them. A row's
+ * one-line note (and the long note, where there is more to say) waits behind
+ * an info key after the name, which opens it under the row in a tinted tip box
+ * (the web's ui/settings rows).
  */
 
 /** The narrowest a row's name keeps beside its control before the control moves under it. */
 private val RowNameMin = 96.dp
 
 /**
- * One settings row: [title] and [note] on the left, [control] on the right,
- * or under the name, full width, when it doesn't fit beside it (or always,
- * with [stacked]). [info] adds the info key after the name, which opens that
- * long note under the row. [modifier] goes on the whole row (a row that
- * toggles or opens something puts its click there).
+ * One settings row: [title] on the left, [control] on the right, or under the
+ * name, full width, when it doesn't fit beside it (or always, with
+ * [stacked]). A [note] or an [info] adds the info key after the name, which
+ * opens them under the row, the note first; with [noteShown] the note stays
+ * under the name instead (the debug screen's latency test, whose how-to is
+ * the point). [modifier] goes on the whole row (a row that toggles or opens
+ * something puts its click there).
  */
 @Composable
 fun SettingRow(
@@ -88,10 +92,12 @@ fun SettingRow(
     info: String? = null,
     stacked: Boolean = false,
     titleColor: Color? = null,
+    noteShown: Boolean = false,
     control: (@Composable () -> Unit)? = null,
 ) {
     val c = LocalArcColors.current
     var open by rememberSaveable(title) { mutableStateOf(false) }
+    val tip = listOfNotNull(note?.takeUnless { noteShown }, info)
     Column(
         modifier
             .fillMaxWidth()
@@ -103,15 +109,15 @@ fun SettingRow(
             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(title, style = ArcType.semi, color = titleColor ?: c.ink, modifier = Modifier.weight(1f, fill = false))
-                    if (info != null) InfoButton(open, { open = !open }, Modifier.padding(start = 2.dp))
+                    if (tip.isNotEmpty()) InfoButton(open, { open = !open }, Modifier.padding(start = 2.dp))
                 }
-                if (note != null) Text(note, style = ArcType.small, color = c.graphite)
+                if (note != null && noteShown) Text(note, style = ArcType.small, color = c.graphite)
             }
         }
         RowLayout(stacked, label, control)
-        if (info != null) {
+        if (tip.isNotEmpty()) {
             AnimatedVisibility(open, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
-                TipBox(info, Modifier.padding(top = 10.dp))
+                TipBox(tip, Modifier.padding(top = 10.dp))
             }
         }
     }
@@ -156,25 +162,51 @@ private fun RowLayout(stacked: Boolean, label: @Composable () -> Unit, control: 
     }
 }
 
-/** The long note under a row: small ink on a navy tint. */
+/** The notes under a row (or a heading): small ink on a navy tint, a paragraph each. */
 @Composable
-fun TipBox(text: String, modifier: Modifier = Modifier) {
+fun TipBox(texts: List<String>, modifier: Modifier = Modifier) {
     val c = LocalArcColors.current
-    Text(
-        text,
-        style = ArcType.small,
-        color = c.ink,
-        modifier = modifier
+    Column(
+        modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(10.dp))
             .background(c.navy.copy(alpha = 0.1f))
             .padding(horizontal = 12.dp, vertical = 10.dp),
-    )
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        for (t in texts) Text(t, style = ArcType.small, color = c.ink)
+    }
 }
 
 /**
- * The info key after a row's name: a ringed "i", filled navy while its long
- * note is open. Screen readers hear "More about this", expanded or collapsed.
+ * A section's caption with an info key after it, whose notes ([texts])
+ * unfold under it in a [TipBox] (Live tools' TAKES).
+ */
+@Composable
+fun CaptionInfo(text: String, texts: List<String>, modifier: Modifier = Modifier) {
+    var open by rememberSaveable(text) { mutableStateOf(false) }
+    Column(modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // A Caption's own text, at its own width (a Caption fills the row), so the key follows the word.
+            Text(
+                text.uppercase(),
+                style = ArcType.caps,
+                color = LocalArcColors.current.graphite,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            InfoButton(open, { open = !open }, Modifier.padding(start = 2.dp))
+        }
+        AnimatedVisibility(open, enter = fadeIn() + expandVertically(), exit = fadeOut() + shrinkVertically()) {
+            TipBox(texts, Modifier.padding(top = 4.dp))
+        }
+    }
+}
+
+/**
+ * The info key after a row's name: a ringed "i", filled navy while its notes
+ * are open. Screen readers hear "More about this", expanded or collapsed.
  */
 @Composable
 fun InfoButton(open: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
@@ -262,7 +294,7 @@ fun HwToggle(on: Boolean, modifier: Modifier = Modifier, pressed: Boolean = fals
     }
 }
 
-/** A setting that is on or off: its name and note, and a [HwToggle]; the whole row switches it. */
+/** A setting that is on or off: its name (its note behind the info key), and a [HwToggle]; the whole row switches it. */
 @Composable
 fun SwitchRow(title: String, note: String?, on: Boolean, onChange: (Boolean) -> Unit, info: String? = null) {
     val source = remember { MutableInteractionSource() }
@@ -277,7 +309,7 @@ fun SwitchRow(title: String, note: String?, on: Boolean, onChange: (Boolean) -> 
     ) { HwToggle(on, pressed = pressed) }
 }
 
-/** A row that opens something (a page, a link): its name, and a chevron at the end. */
+/** A row that opens something (a page, a link): its name (its note behind the info key), and a chevron at the end. */
 @Composable
 fun LinkRow(title: String, onClick: () -> Unit, note: String? = null) {
     SettingRow(

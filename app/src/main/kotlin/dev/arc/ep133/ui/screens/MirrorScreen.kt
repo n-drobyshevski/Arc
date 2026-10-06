@@ -13,6 +13,7 @@ import androidx.compose.runtime.mutableStateOf
 import dev.arc.ep133.ui.components.SwitchRow
 import dev.arc.ep133.ui.components.SettingRow
 import dev.arc.ep133.ui.components.PlateLine
+import dev.arc.ep133.ui.components.CaptionInfo
 import dev.arc.ep133.ui.components.Disclosure
 import dev.arc.ep133.ui.components.MiniPiano
 import dev.arc.ep133.ui.components.SideStripWidth
@@ -301,7 +302,7 @@ fun MirrorScreen(
     takes: TakesUi = TakesUi(),
     /** EDIT: tapping a pad gives it another sound. */
     edit: EditUi = EditUi(),
-    /** A light tick as a pad or key goes down (Settings → Haptic feedback). */
+    /** A light tick as a pad or key goes down (Settings → Haptics). */
     haptics: Boolean = true,
     /** Live's sound goes to Bluetooth or a hearing aid ([LiveAudio.wireless]): the display line says it plays late. */
     wireless: Boolean = false,
@@ -1158,26 +1159,28 @@ private fun KeysMonitor(st: MirrorState, names: NoteNames) {
 }
 
 /**
- * The pads' notes: what needs saying now (offline, no clock, no pad
- * messages) in the open, and how Live reads the EP-133 folded away.
+ * The pads' notes: the missing clock in the open on its side (the display
+ * can't say it there), and the rest (offline, no pad messages, how Live
+ * reads the EP-133) folded away.
  */
 @Composable
 private fun Notes(st: MirrorState, mirror: MirrorUi?, tapToPlay: Boolean = false, sideways: Boolean = false) {
     val c = LocalArcColors.current
     val learning = st.padOrder == PadOrder.FROM_TOP
-    if (mirror?.offline != null) Text(MirrorText.OFFLINE_NOTE, style = ArcType.small, color = c.graphite)
     // On its side the display is one line (in the top bar), so what clock out is for is told here.
     if (sideways && mirror?.offline == null && st.playing == null && st.bpm == null) {
         Text(MirrorText.NO_TRANSPORT, style = ArcType.small, color = c.graphite)
-    }
-    if (learning && !st.pushesSeen && st.learned.isEmpty() && st.lastHit?.pad != null && mirror?.loading == false) {
-        Text(MirrorText.NO_PUSHES, style = ArcType.small, color = c.graphite)
     }
     Disclosure(MirrorText.HOW_LIVE_READS) {
         if (tapToPlay) Text(MirrorText.TAP_NOTE, style = ArcType.small, color = c.graphite)
         // Pads that play on the phone mean keys that do too, and sideways they are a piano.
         if (tapToPlay && !sideways) Text(MirrorText.PIANO_HINT, style = ArcType.small, color = c.graphite)
+        // Offline the display line says so too, with this note under a tap.
+        if (mirror?.offline != null) Text(MirrorText.OFFLINE_NOTE, style = ArcType.small, color = c.graphite)
         if (learning) Text(MirrorText.LEARN_NOTE, style = ArcType.small, color = c.graphite)
+        if (learning && !st.pushesSeen && st.learned.isEmpty() && st.lastHit?.pad != null && mirror?.loading == false) {
+            Text(MirrorText.NO_PUSHES, style = ArcType.small, color = c.graphite)
+        }
         Text(MirrorText.COMMUNITY_NOTE, style = ArcType.small, color = c.graphite)
         Text(MirrorText.LISTEN_ONLY, style = ArcType.small, color = c.graphite)
     }
@@ -2036,16 +2039,17 @@ private fun RecChip(rec: RecUi, still: Boolean) {
     }
 }
 
-/** Live tools' takes: each plays, and unfolds to share, save, send to the EP-133 or delete. */
+/**
+ * Live tools' takes: each plays, and unfolds to share, save, send to the
+ * EP-133 or delete. How to record and what a take holds wait behind the info
+ * key after TAKES.
+ */
 @Composable
 private fun TakesSection(t: TakesUi) {
     val c = LocalArcColors.current
     var open by rememberSaveable { mutableStateOf<String?>(null) }
     var confirm by rememberSaveable { mutableStateOf<String?>(null) }
-    Caption(MirrorText.TAKES, align = androidx.compose.ui.text.style.TextAlign.Start)
-    if (t.list.isEmpty()) {
-        Text(MirrorText.NO_TAKES, style = ArcType.small, color = c.graphite)
-    }
+    CaptionInfo(MirrorText.TAKES, listOf(MirrorText.NO_TAKES, MirrorText.TAKES_NOTE))
     for (take in t.list) {
         val playing = t.playing == t.keyOf(take)
         val unfolded = open == take.name
@@ -2085,5 +2089,4 @@ private fun TakesSection(t: TakesUi) {
             }
         }
     }
-    if (t.list.isNotEmpty()) Text(MirrorText.TAKES_NOTE, style = ArcType.small, color = c.graphite)
 }

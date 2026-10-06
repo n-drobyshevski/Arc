@@ -13,6 +13,8 @@
 //   Documents/arc" ([settingsFolder]): reconnect a remembered folder whose
 //   permission lapsed, pick one, restore from another, or, where the browser
 //   can't keep a folder, export the library (plus restore from a folder).
+//   That row's note (the folder's state) is behind its ⓘ key; the storage
+//   note sits under the card, as in Kotlin.
 // - The two confirm dialogs (rememberSaveable confirmKeep / confirmForget) are
 //   navigation layers, dialog 'prune:<keep>' and 'forget', so Back closes them
 //   and a reload keeps them.
@@ -21,15 +23,15 @@
 //   Clear sets it to nothing, as in Kotlin.
 // - The pad order is not a signal (c.padOrder() is read when Root renders), so
 //   the screen keeps its own copy from here on, as the Kotlin does.
-// - The Step 1c rows: each setting is a SettingRow (name, one-line note, the
-//   control on the right, the long note behind an ⓘ key) in a RowCard. What
+// - The Step 1c rows: each setting is a SettingRow (its name and the control
+//   on the right, its notes behind an ⓘ key) in a RowCard. What
 //   arc keeps in the browser (learned names, pad sounds) is its own danger
 //   group, "Saved in this browser" (WebText.SAVED_HERE), with red text actions.
 // - "Piano keys" greys out the sizes that don't fit Live's piano in this
 //   window. The piano's real width is only known in Live, so it is estimated
 //   from the window ([pianoRoomEstimate]: the window less Live's chrome); on a
 //   portrait phone, which plays on the grid, from the window turned sideways.
-// - "Haptic feedback" shows only where the browser can vibrate
+// - "Haptics" shows only where the browser can vibrate
 //   ([SettingsScreenProps.hapticsSupported]): iOS Safari has no vibration
 //   API and desktop browsers no motor, so the row is hidden there rather than
 //   left dead.
@@ -79,12 +81,12 @@ export interface SettingsScreenProps {
   /** Space taken by Live's copies of the pad sounds (bytes). */
   padSoundsSize?: () => Promise<number>
   onClearPadSounds?: () => void
-  /** Note names on the keys: solfège or letters. */
+  /** KEYS' note names: solfège or letters. */
   onNoteNames?: (names: NoteNames) => void
   onShowNames?: (on: boolean) => void
   /** Live's piano size: white keys (Piano.CHOICES), null for Auto. */
   onPianoWhites?: (whites: number | null) => void
-  /** Web: whether this browser can vibrate (platform/haptics.ts); the Haptic feedback row shows only then. */
+  /** Web: whether this browser can vibrate (platform/haptics.ts); the Haptics row shows only then. */
   hapticsSupported?: boolean
   onHaptics?: (on: boolean) => void
   /** Web: give the remembered library folder's permission back. */
@@ -312,7 +314,6 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
   const totalSize = state.backups.reduce((sum, b) => sum + b.size, 0)
   const storage = WebText.storageNote(state.backups.length, totalSize, state.spaceLeft)
   const folder = settingsFolder(state)
-  const folderNote = [storage, folder.note].filter((t) => t.length !== 0).join(' ')
 
   const pianoChoice = pianoChoiceOf(settings.pianoWhites)
   const pianoOff = pianoChoicesOff(pianoRoomEstimate(win.width, win.height))
@@ -419,7 +420,7 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
               <RowCard>
                 <SettingRow
                   title={WebText.LIBRARY_FOLDER}
-                  note={folderNote.length !== 0 ? folderNote : undefined}
+                  note={folder.note.length !== 0 ? folder.note : undefined}
                   stack
                   control={() => <div class="settings__keys">{folder.keys.map(folderKey)}</div>}
                 />
@@ -444,6 +445,7 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
                   )}
                 />
               </RowCard>
+              {storage.length !== 0 && <p class="t-small settings__storage">{storage}</p>}
             </Section>
 
             <Section id="live">

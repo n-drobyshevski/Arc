@@ -22,7 +22,7 @@ data class AppSettings(
     /** How many backups to keep; null keeps all. */
     val keepLast: Int? = null,
     /** Live shows one group at a time, large, instead of all four. */
-    val liveOneGroup: Boolean = false,
+    val liveOneGroup: Boolean = true,
     /** In that view, switch to the group of the pad just played. */
     val liveFollow: Boolean = true,
     /** The guide overlay has been shown once (it opens by itself on the first start only). */
@@ -71,7 +71,7 @@ class SettingsStore internal constructor(private val prefs: SharedPreferences) {
         autoConnect = prefs.getBoolean("autoConnect", true),
         keepScreenOn = prefs.getBoolean("keepScreenOn", true),
         keepLast = prefs.getInt("keepLast", 0).takeIf { it > 0 },
-        liveOneGroup = prefs.getBoolean("liveOneGroup", false),
+        liveOneGroup = prefs.getBoolean("liveOneGroup", true),
         liveFollow = prefs.getBoolean("liveFollow", true),
         guideSeen = prefs.getBoolean("guideSeen", false),
         liveKeys = prefs.getBoolean("liveKeys", false),

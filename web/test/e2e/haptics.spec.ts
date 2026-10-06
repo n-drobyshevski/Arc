@@ -2,7 +2,7 @@
 // the simulated EP-133 of ?demo. navigator.vibrate is replaced by a recorder
 // before the app loads. On an emulated phone (touch screen, coarse pointer) a
 // finger's press on a pad, a KEYS key or a piano key ticks once while
-// Settings → Haptic feedback is on, and not once it is off; on the desktop
+// Settings → Haptics is on, and not once it is off; on the desktop
 // (vibrate there, but no touch screen) the Settings row is not shown at all.
 import type { Page } from '@playwright/test'
 import { expect, test } from './fixtures'
@@ -45,7 +45,7 @@ test.describe('on a phone', () => {
     await expect.poll(() => vibrations(page)).toEqual([10, 10])
 
     await page.getByRole('banner').getByRole('button', { name: 'Settings' }).click()
-    const haptics = page.getByRole('switch', { name: 'Haptic feedback' })
+    const haptics = page.getByRole('switch', { name: 'Haptics' })
     await expect(haptics).toHaveAttribute('aria-checked', 'true')
     await haptics.click()
     await expect(haptics).toHaveAttribute('aria-checked', 'false')
@@ -75,12 +75,12 @@ test.describe('on a phone on its side', () => {
   })
 })
 
-test('on the desktop the Haptic feedback row is hidden: vibrate is there, but no touch screen', async ({ page }) => {
+test('on the desktop the Haptics row is hidden: vibrate is there, but no touch screen', async ({ page }) => {
   await recordVibrate(page)
   await page.goto('/?demo#/live')
   await expect(page.locator('[data-pad]')).toHaveCount(12)
   expect(await page.evaluate(() => typeof navigator.vibrate)).toBe('function')
   await page.getByRole('banner').getByRole('button', { name: 'Settings' }).click()
   await expect(page.getByText('Piano keys', { exact: true })).toBeVisible()
-  await expect(page.getByRole('switch', { name: 'Haptic feedback' })).toHaveCount(0)
+  await expect(page.getByRole('switch', { name: 'Haptics' })).toHaveCount(0)
 })

@@ -65,7 +65,8 @@
 .debug__line--note { color: var(--signal); }
 
 /* The latency test (an addition): a disclosure card over the log. Open, it
- * gives way (and scrolls) before the log is squeezed out. */
+ * takes the log's place (the log, its switch and keys give way) and scrolls
+ * in the screen's height. */
 .debug__latency {
   flex: 0 1 auto;
   min-height: 0;

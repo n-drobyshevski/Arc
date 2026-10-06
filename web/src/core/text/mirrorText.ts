@@ -188,7 +188,7 @@ export const MirrorText = {
     return Keys.name(note, names) + Keys.octaveOf(note)
   },
 
-  NOTE_NAMES: 'Note names on the keys',
+  NOTE_NAMES: 'Note names',
 
   /** The debug log's line for a Live sound: "live:0:3 heard 31 ms after the press (phone speaker)". */
   latencyNote(key: string, ms: number, route: string): string {
@@ -210,7 +210,7 @@ export const MirrorText = {
         return 'C D E'
     }
   },
-  SHOW_NAMES: 'Names on the keys',
+  SHOW_NAMES: 'Key labels',
   SHOW_NAMES_NOTE: 'Off, the keys show only their rings and octave numbers; the display line still names the note.',
   NOTE_NAMES_NOTE: 'How KEYS names its notes and the key picker: fixed-do solfège (DO is C) or letters, sharps as C#, D#.',
 
@@ -219,7 +219,7 @@ export const MirrorText = {
     return `${pad.groupLetter} ${pad.label}` + (name != null ? ` \u00B7 ${name}` : '')
   },
 
-  PAD_ORDER: 'Pad numbers in project files',
+  PAD_ORDER: 'Pad numbers',
   FROM_TOP: 'From the top',
   FROM_BOTTOM: 'From the bottom',
   /** The same two, on the compact segmented control in Settings. */

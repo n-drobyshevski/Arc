@@ -356,7 +356,7 @@ fun LiveKeysSidewaysEMajorPreview() = Live(sideways, keys = keysUi.copy(root = 4
 @Composable
 fun LiveKeysSidewaysDarkPreview() = Live(sideways, dark = true, keys = chord.copy(root = 9, scale = dev.arc.ep133.features.Scale.MINOR_PENTATONIC), piano = 48..72)
 
-// Settings → Names on the keys off: rings and octave numbers only, the display line still names the note.
+// Settings → Key labels off: rings and octave numbers only, the display line still names the note.
 @PreviewTest
 @Preview(name = "Live keys sideways no names", widthDp = 867, heightDp = 388, showBackground = true)
 @Composable

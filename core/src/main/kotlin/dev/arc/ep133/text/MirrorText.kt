@@ -133,7 +133,7 @@ object MirrorText {
     fun noteName(note: Int, names: dev.arc.ep133.features.NoteNames = dev.arc.ep133.features.NoteNames.SOLFEGE) =
         dev.arc.ep133.features.Keys.name(note, names) + dev.arc.ep133.features.Keys.octaveOf(note)
 
-    const val NOTE_NAMES = "Note names on the keys"
+    const val NOTE_NAMES = "Note names"
 
     /** The debug log's line for a Live sound: "live:0:3 heard 31 ms after the press (phone speaker)". */
     fun latencyNote(key: String, ms: Double, route: String) = "$key heard ${"%.0f".format(ms)} ms after the press ($route)"
@@ -146,14 +146,14 @@ object MirrorText {
         dev.arc.ep133.features.NoteNames.SOLFEGE -> "DO RE MI"
         dev.arc.ep133.features.NoteNames.LETTERS -> "C D E"
     }
-    const val SHOW_NAMES = "Names on the keys"
+    const val SHOW_NAMES = "Key labels"
     const val SHOW_NAMES_NOTE = "Off, the keys show only their rings and octave numbers; the display line still names the note."
     const val NOTE_NAMES_NOTE = "How KEYS names its notes and the key picker: fixed-do solfège (DO is C) or letters, sharps as C#, D#."
 
     /** "A 7 · kick", the KEYS sound. */
     fun keysSound(pad: dev.arc.ep133.features.PhysicalPad, name: String?) = "${pad.groupLetter} ${pad.label}" + (name?.let { " \u00B7 $it" } ?: "")
 
-    const val PAD_ORDER = "Pad numbers in project files"
+    const val PAD_ORDER = "Pad numbers"
     const val FROM_TOP = "From the top"
     const val FROM_BOTTOM = "From the bottom"
     /** The same two, on the compact segmented control in Settings. */

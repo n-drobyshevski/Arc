@@ -11,9 +11,11 @@
 //   keyed by a stable id (the ring buffer drops its oldest entries, so an index
 //   key would redraw every line).
 // - The latency test ([LatencyPanel], LatencyText) folds under a disclosure
-//   above the log switch, so the log keeps its room (Android: a header row
-//   that swaps the log for the panel); it opens as it was last left in this
-//   page, with the how-to (Android's header note) at its top. Its choice is
+//   above the log switch (Android: a header row). Open, it takes the log's
+//   place as on Android: the log switch, its keys and the log give way, and
+//   the panel scrolls in the whole screen; folded again, the log is back at
+//   its newest entry. It opens as it was last left in this page, with the
+//   how-to (Android's header note) at its top. Its choice is
 //   the output's latencyHint (Android: the audio engine), and each row's
 //   estimate is the base plus output delay the browser reported
 //   (LatencyText.webEstimate; Android: buffer ÷ rate).
@@ -42,6 +44,8 @@ export interface LatencyPanelProps {
   hint: WebLatencyHint | null
   onHint: (hint: WebLatencyHint) => void
   onReset: () => void
+  /** Told each time the panel opens or folds (the screen gives it the log's place). */
+  onOpen?: (open: boolean) => void
 }
 
 export interface DebugScreenProps {
@@ -100,6 +104,9 @@ export function DebugScreen(props: DebugScreenProps): JSX.Element {
   const [logging, setLogging] = useState(log.enabled)
   const list = useRef<HTMLDivElement | null>(null)
   const root = useRef<HTMLDivElement | null>(null)
+  // The latency test open: in the log's place (Kotlin's latency.open).
+  const [latencyShown, setLatencyShown] = useState(props.latency !== undefined && latencyOpen)
+  const logShown = !(props.latency && latencyShown)
 
   useEffect(() => {
     let frame = 0
@@ -128,15 +135,19 @@ export function DebugScreen(props: DebugScreenProps): JSX.Element {
 
   // LaunchedEffect(entries.size): keep the newest line in view. A full ring
   // keeps its size, so then it follows only while the list was at the bottom.
+  // Back from the latency test, the list starts again at the newest line.
   const seen = useRef({ length: -1, height: 0 })
   useLayoutEffect(() => {
     const el = list.current
-    if (!el) return
+    if (!el) {
+      seen.current = { length: -1, height: 0 }
+      return
+    }
     const prev = seen.current
     const atBottom = el.scrollTop + el.clientHeight >= prev.height - 8
     if (entries.length > 0 && (entries.length !== prev.length || atBottom)) el.scrollTop = el.scrollHeight
     seen.current = { length: entries.length, height: el.scrollHeight }
-  }, [entries])
+  }, [entries, logShown])
 
   return (
     <div ref={root} class="debug" data-screen="debug" tabIndex={-1} aria-labelledby="debug-title">
@@ -144,37 +155,49 @@ export function DebugScreen(props: DebugScreenProps): JSX.Element {
         <h1 id="debug-title" class="t-heading debug__title">{Strings.DEBUG_TITLE}</h1>
         <Key text={Strings.DONE} size="small" variant="quiet" onClick={props.onBack} />
       </div>
-      {props.latency && <LatencyPanel {...props.latency} />}
-      <ChoiceRow
-        text={Strings.DEBUG_TOGGLE}
-        selected={logging}
-        radio={false}
-        trailing={String(entries.length)}
-        onClick={() => {
-          const on = !logging
-          setLogging(on)
-          log.enabled = on
-        }}
-      />
-      <div class="debug__keys">
-        <Key text={Strings.DEBUG_SHARE} size="small" block onClick={props.onShare} />
-        <Key text={Strings.DEBUG_SAVE} size="small" block onClick={props.onSave} />
-      </div>
-      <div class="debug__keys">
-        <Key text={Strings.DEBUG_COPY} size="small" block onClick={props.onCopy} />
-        <Key text={Strings.DEBUG_CLEAR} size="small" block onClick={() => log.clear()} />
-      </div>
-      <div
-        ref={list}
-        class="debug__list"
-        role="log"
-        aria-label={Strings.DEBUG_TITLE}
-        aria-live="off"
-        tabIndex={0}
-      >
-        {entries.length === 0 && <p class="t-small debug__empty">{Strings.DEBUG_EMPTY}</p>}
-        {entries.map((e) => <Line key={idOf(e)} entry={e} />)}
-      </div>
+      {props.latency && (
+        <LatencyPanel
+          {...props.latency}
+          onOpen={(open) => {
+            setLatencyShown(open)
+            props.latency?.onOpen?.(open)
+          }}
+        />
+      )}
+      {logShown && (
+        <>
+          <ChoiceRow
+            text={Strings.DEBUG_TOGGLE}
+            selected={logging}
+            radio={false}
+            trailing={String(entries.length)}
+            onClick={() => {
+              const on = !logging
+              setLogging(on)
+              log.enabled = on
+            }}
+          />
+          <div class="debug__keys">
+            <Key text={Strings.DEBUG_SHARE} size="small" block onClick={props.onShare} />
+            <Key text={Strings.DEBUG_SAVE} size="small" block onClick={props.onSave} />
+          </div>
+          <div class="debug__keys">
+            <Key text={Strings.DEBUG_COPY} size="small" block onClick={props.onCopy} />
+            <Key text={Strings.DEBUG_CLEAR} size="small" block onClick={() => log.clear()} />
+          </div>
+          <div
+            ref={list}
+            class="debug__list"
+            role="log"
+            aria-label={Strings.DEBUG_TITLE}
+            aria-live="off"
+            tabIndex={0}
+          >
+            {entries.length === 0 && <p class="t-small debug__empty">{Strings.DEBUG_EMPTY}</p>}
+            {entries.map((e) => <Line key={idOf(e)} entry={e} />)}
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -192,7 +215,15 @@ export function LatencyPanel(props: LatencyPanelProps): JSX.Element {
   const id = useId()
   const rows = latencyRows(latency)
   return (
-    <Disclosure title={LatencyText.TITLE} class="debug__latency" initialOpen={latencyOpen} onToggle={(open) => (latencyOpen = open)}>
+    <Disclosure
+      title={LatencyText.TITLE}
+      class="debug__latency"
+      initialOpen={latencyOpen}
+      onToggle={(open) => {
+        latencyOpen = open
+        props.onOpen?.(open)
+      }}
+    >
       <p>{LatencyText.HOW_TO}</p>
       {hint !== null && (
         <div class="debug__engine-choice" role="radiogroup" aria-labelledby={`${id}-e`} aria-describedby={`${id}-n`}>

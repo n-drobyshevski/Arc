@@ -120,7 +120,7 @@ internal fun PianoKeyboard(
     now: () -> Long,
     actions: KeysActions,
     modifier: Modifier = Modifier,
-    /** A light tick as a key goes down (Settings → Haptic feedback). */
+    /** A light tick as a key goes down (Settings → Haptics). */
     haptics: Boolean = true,
 ) {
     // Low notes on the left in every language, as on the instrument.

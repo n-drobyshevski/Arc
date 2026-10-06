@@ -27,7 +27,7 @@ class AppSettingsTest {
         val chosen = AppSettings(
             autoConnect = false,
             keepLast = 10,
-            liveOneGroup = true,
+            liveOneGroup = false,
             keysRoot = 4,
             keysOctave = 3,
             keysShowNames = false,
