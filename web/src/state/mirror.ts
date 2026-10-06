@@ -27,7 +27,7 @@ import { getMetadata, isJsonObject, type JsonValue } from '../core/protocol/fs'
 import { PROJECTS_NODE, projectFromNode, type SoundEntry } from '../core/protocol/device'
 import type { Session } from '../core/protocol/session'
 import { contents, projectLayout } from '../core/features/deviceBrowser'
-import { FactorySounds } from '../core/features/factorySounds'
+import { LearnedLinks } from '../core/features/learnedLinks'
 import { CLOCK_TIMEOUT_MS, FADE_MS, LiveMirror, type Hit, type MirrorState, type PadLight, type PadTarget } from '../core/features/liveMirror'
 import type { PhysicalPad } from '../core/features/padNotes'
 import { parse as parsePadPush, type PadOrder } from '../core/features/padPush'
@@ -313,11 +313,8 @@ export class MirrorController {
       if (snap === null) host.store.update((st) => ({ ...st, mirror: this.notConnected() }))
       return
     }
-    // The factory sounds can't be learned (no device): pads unlearned are numbered from the top, and nothing is saved.
-    const m =
-      lastRead !== null
-        ? new LiveMirror(host.prefs.loadLearned(), host.prefs.savedPadOrder(), (learned) => this.saveLearned(learned))
-        : new LiveMirror(FactorySounds.links(host.prefs.loadLearned()), host.prefs.savedPadOrder(), () => {})
+    // Nothing can be learned without the device: pads unlearned are numbered from the top, and nothing is saved.
+    const m = new LiveMirror(LearnedLinks.offline(host.prefs.loadLearned()), host.prefs.savedPadOrder(), () => {})
     m.load(snap)
     this.mirror = m
     this.mirrorSession = null

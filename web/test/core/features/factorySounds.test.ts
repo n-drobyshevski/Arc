@@ -69,19 +69,6 @@ describe('FactorySounds', () => {
     expect(FactorySounds.snapshot(pak(factoryMeta, new Map([[1, tarFile([])]])), 5)).toBeNull()
   })
 
-  it('numbers unlearned pads from the top row, never over a learned number', () => {
-    const top = FactorySounds.links(new Map())
-    expect(top.size).toBe(12)
-    expect(top.get(9)).toBe(1) // '7'
-    expect(top.get(0)).toBe(10) // '.'
-    expect(top.get(2)).toBe(12) // ENTER
-    // '7' learned as p02: '8' (p02 from the top) is left unlinked; the rest as before.
-    const some = FactorySounds.links(new Map([[9, 2]]))
-    expect(some.get(9)).toBe(2)
-    expect(some.has(10)).toBe(false)
-    expect(some.get(0)).toBe(10)
-  })
-
   it("calls a sound unnamed when the device lists it as its slot's file", () => {
     expect(FactorySounds.unnamed(343, '343.pcm')).toBe(true)
     expect(FactorySounds.unnamed(1, '001.pcm')).toBe(true)

@@ -17,7 +17,6 @@
 
 import type { Pak } from '../backup/pak'
 import type { LiveSnapshot } from './liveSnapshot'
-import { topNumber } from './padPush'
 import { ktTrim } from '../util/kotlinText'
 import { read as readPads } from './projectPads'
 
@@ -90,25 +89,6 @@ export function snapshot(pak: Pak, savedAt: number): LiveSnapshot | null {
 }
 
 /**
- * Live's pad links for the factory sounds, where nothing can be learned
- * (no device): the [learned] ones, the rest numbered from the top row as
- * arc writes pads before any press (PadPush.topNumber), which puts the
- * factory kit's kicks on '.' and '0'. Never saved as learned.
- */
-export function links(learned: ReadonlyMap<number, number>): Map<number, number> {
-  const out = new Map(learned)
-  const taken = new Set(out.values())
-  for (let offset = 0; offset <= 11; offset++) {
-    const n = topNumber(offset)
-    if (!out.has(offset) && !taken.has(n)) {
-      out.set(offset, n)
-      taken.add(n)
-    }
-  }
-  return out
-}
-
-/**
  * Whether [name] is the one the EP-133 gives a sound nobody named, its
  * slot's file ("343.pcm"): how a device still holding the factory sounds
  * lists them. Live plays such a pad from the pack when it has no copy of
@@ -142,7 +122,6 @@ export const FactorySounds = {
   locate,
   isFactory,
   snapshot,
-  links,
   unnamed,
   inLibrary,
 } as const

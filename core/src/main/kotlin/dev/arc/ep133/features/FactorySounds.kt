@@ -74,21 +74,6 @@ object FactorySounds {
     }
 
     /**
-     * Live's pad links for the factory sounds, where nothing can be learned
-     * (no device): the [learned] ones, the rest numbered from the top row as
-     * arc writes pads before any press (PadPush.topNumber), which puts the
-     * factory kit's kicks on '.' and '0'. Never saved as learned.
-     */
-    fun links(learned: Map<Int, Int>): Map<Int, Int> {
-        val out = LinkedHashMap(learned)
-        for (offset in 0..11) {
-            val n = PadPush.topNumber(offset)
-            if (offset !in out && n !in out.values) out[offset] = n
-        }
-        return out
-    }
-
-    /**
      * Whether [name] is the one the EP-133 gives a sound nobody named, its
      * slot's file ("343.pcm"): how a device still holding the factory sounds
      * lists them. Live plays such a pad from the pack when it has no copy of
