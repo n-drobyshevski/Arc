@@ -107,7 +107,7 @@ npm run gen:guide  # regenerate src/core/text/guideData.ts from core's GuideText
 
 ### Deploy
 
-The Vercel project `arc` builds from `vercel.json` at the repository root: it installs and builds `web/` and serves `web/dist`. The same file sets the cache headers for `sw.js`, the manifest and `assets/`, allows MIDI for the site, and sets a strict Content-Security-Policy that also keeps arc out of other sites' frames. A push to `main` deploys to production at https://arc-pi-mauve.vercel.app; a push to any other branch gets its own preview deployment. Production builds show the version exactly (`0.2.0`), previews and local builds add `-dev`. The version comes from `version.properties`, as for Android, and `.pak` files name it the same way (`arc 0.2.0`).
+The Vercel project `arc` builds from `vercel.json` at the repository root: it installs and builds `web/` and serves `web/dist`. The same file sets the cache headers for `sw.js`, the manifest and `assets/`, allows MIDI for the site, and sets a strict Content-Security-Policy that also keeps arc out of other sites' frames. A push to `main` deploys to production at https://arc-pi-mauve.vercel.app; a push to any other branch gets its own preview deployment. Production builds show the version exactly (`0.3.0`), previews and local builds add `-dev`. The version comes from `version.properties`, as for Android, and `.pak` files name it the same way (`arc 0.3.0`).
 
 **Status:** the web app has been tested against the simulator (unit tests and the Playwright smoke test with `?demo`), not yet with a physical EP-133. The open questions under [Status](#status-what-is-verified-and-what-still-needs-a-real-device) apply to it too, plus WebMIDI's own: how Chrome splits incoming SysEx, and whether the upload window survives Chrome's MIDI send buffer.
 
@@ -153,10 +153,10 @@ The tests read `reference/test/fixtures/sample.pak` in place, so keep `reference
 
 arc follows [Semantic Versioning](https://semver.org/). A major version breaks `.pak` or library compatibility, a minor version adds features, a patch version fixes bugs. Changes are listed in [`CHANGELOG.md`](CHANGELOG.md).
 
-- **One place:** `version.properties` (`version=0.2.0`) sets the version. The build fails if it isn't `MAJOR.MINOR.PATCH` with minor and patch below 100.
-- **versionCode** is computed from it: `major*10000 + minor*100 + patch` (0.2.0 is 200), so every new version installs over the previous one.
-- **versionName:** local builds are `0.2.0-dev`; CI builds add the run number and commit, `0.2.0-dev.57+abc1234`; release builds are exactly `0.2.0`. It shows in **Settings** and at the top of the debug log.
-- **.pak files** name the version that wrote them in `meta.json` (`"author": "arc 0.2.0"`, without the `-dev` part). The compatibility test builds its backup with the web version's own version string so it can still compare byte for byte.
+- **One place:** `version.properties` (`version=0.3.0`) sets the version. The build fails if it isn't `MAJOR.MINOR.PATCH` with minor and patch below 100.
+- **versionCode** is computed from it: `major*10000 + minor*100 + patch` (0.3.0 is 300), so every new version installs over the previous one.
+- **versionName:** local builds are `0.3.0-dev`; CI builds add the run number and commit, `0.3.0-dev.57+abc1234`; release builds are exactly `0.3.0`. It shows in **Settings** and at the top of the debug log.
+- **.pak files** name the version that wrote them in `meta.json` (`"author": "arc 0.3.0"`, without the `-dev` part). The compatibility test builds its backup with the web version's own version string so it can still compare byte for byte.
 - **To release:**
   1. Bump `version.properties` and move the `Unreleased` notes in `CHANGELOG.md` under `## [X.Y.Z] - date`. Commit and merge.
   2. `git tag vX.Y.Z && git push origin vX.Y.Z`.
