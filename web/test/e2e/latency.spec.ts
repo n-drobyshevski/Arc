@@ -15,10 +15,12 @@ const CHOICE_KEY = 'arc.liveLatencyChoice'
 /**
  * Pad A "." in Live, named by the device (a note-on with its pad push) and
  * pressed until its voice rings: the demo's samples are short, so a
- * MutationObserver counts every ring drawn, and a press that needed the
- * device while it was busy reading (as on Android, it plays nothing) is made
- * again. Then once more, from memory: a press that had to load its sample
- * isn't timed.
+ * MutationObserver counts each time a ring comes on, and a press that needed
+ * the device while it was busy reading (as on Android, it plays nothing) is
+ * made again. Then once more, from memory: a press that had to load its
+ * sample isn't timed. That press waits for the first ring to go out: a pad
+ * pressed again while it still sounds keeps its ring on, so a new ring only
+ * shows once the first one is gone.
  */
 async function pressPad(page: Page): Promise<void> {
   const pad = page.locator('[data-pad]', { hasText: 'kick' }).first()
@@ -31,19 +33,30 @@ async function pressPad(page: Page): Promise<void> {
     await demo(page, (d) => d.noteOff(36))
     await expect(pad).toBeVisible({ timeout: 1_000 })
   }).toPass()
+  // One observer a page (this runs again after Live comes back), counting a pad's ring going from off to on.
   await page.evaluate(() => {
-    const w = window as unknown as { __arcRings: number }
+    const w = window as unknown as { __arcRings?: number }
+    if (w.__arcRings !== undefined) return
     w.__arcRings = 0
-    new MutationObserver(() => {
-      if (document.querySelector('[data-pad].is-playing')) w.__arcRings++
-    }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] })
+    const ringing = (cls: string | null): boolean => /(^|\s)is-playing(\s|$)/.test(cls ?? '')
+    new MutationObserver((records) => {
+      records.forEach((r, i) => {
+        const el = r.target as Element
+        if (!el.matches('[data-pad]')) return
+        // The class after this change: the next change's old one, or the class now.
+        const next = records.slice(i + 1).find((n) => n.target === el)
+        if (!ringing(r.oldValue) && ringing(next ? next.oldValue : el.className)) w.__arcRings = (w.__arcRings ?? 0) + 1
+      })
+    }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'], attributeOldValue: true })
   })
   const rings = (): Promise<number> => page.evaluate(() => (window as unknown as { __arcRings: number }).__arcRings)
-  for (let attempt = 0; attempt < 3 && (await rings()) === 0; attempt++) {
+  const start = await rings()
+  for (let attempt = 0; attempt < 3 && (await rings()) === start; attempt++) {
     await pad.click()
-    await expect.poll(rings, { timeout: 5_000 }).toBeGreaterThan(0).catch(() => undefined)
+    await expect.poll(rings, { timeout: 5_000 }).toBeGreaterThan(start).catch(() => undefined)
   }
-  expect(await rings()).toBeGreaterThan(0)
+  expect(await rings()).toBeGreaterThan(start)
+  await expect(pad).not.toHaveClass(/(^|\s)is-playing(\s|$)/)
   const before = await rings()
   await pad.click()
   await expect.poll(rings, { timeout: 5_000 }).toBeGreaterThan(before)
