@@ -67,6 +67,31 @@ object SampleUpload {
         return PakSound(i.slot, i.name, wav, settings)
     }
 
+    /**
+     * Live's "Upload a new sample…" on a pad (an addition): [wav] goes into
+     * the first free slot, through [upload], then onto [target]'s pad with
+     * [Device.assignPad]. Returns the slot it went into. The slots in use are
+     * listed on the device first, besides [occupied] (the caller's own list,
+     * which can be stale): a sound recorded on the EP-133 meanwhile, or an
+     * earlier upload whose assignment failed, is never overwritten.
+     */
+    suspend fun uploadToPad(
+        session: Session,
+        fileName: String,
+        wav: ByteArray,
+        occupied: Set<Int>,
+        target: PadTarget,
+        trim: IntRange? = null,
+        onProgress: (Progress) -> Unit = {},
+        signal: CancelSignal? = null,
+    ): Int {
+        val used = occupied + Device.listSounds(session).map { it.slot }
+        val slot = nextFree(used, emptySet()) ?: throw UploadError(dev.arc.ep133.text.MirrorText.NO_FREE_SLOT)
+        upload(session, listOf(UploadItem(slot, nameFor(fileName), wav, trim)), onProgress, signal)
+        Device.assignPad(session, target.project, target.group, target.pad, slot)
+        return slot
+    }
+
     suspend fun upload(
         session: Session,
         items: List<UploadItem>,

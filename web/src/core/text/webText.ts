@@ -101,8 +101,6 @@ export const WebText = {
   LIVE_NO_COPY: "This sample isn't saved in this browser or in a backup yet.",
   /** Replaces MirrorText.PIANO_HINT "Turn the phone sideways for a piano (with auto-rotate off, …)". */
   LIVE_PIANO_HINT: 'Turn the screen sideways, or make the window wider than it is tall, for a piano.',
-  /** Replaces MirrorText.LEGEND_IN_SCALE "Navy ring: in the scale": the grid's caps ring pale, the piano's keys navy. */
-  LIVE_LEGEND_IN_SCALE: 'Plain ring: in the scale',
   /** Replaces MirrorText.LEGEND_PHONE "Outlined: playing on the phone". */
   LIVE_LEGEND_HERE: 'Outlined: playing here',
   /**
@@ -117,6 +115,18 @@ export const WebText = {
   padSounds(size: string): string {
     return `${WebText.PAD_SOUNDS}: ${size}`
   },
+  /** Replaces SettingsText.SAVED_HERE "Saved on the phone", the group title for what Settings can clear. */
+  SAVED_HERE: 'Saved in this browser',
+  /** Replaces MirrorText.CHIP_PHONE "Playing on the phone". */
+  CHIP_HERE: 'Playing here',
+
+  // ---------- Live: sounds onto pads with the mouse (no Android counterpart) ----------
+  /** Under the SOUNDS tab's list on a wide window. */
+  DRAG_HINT: 'Drag a sound onto a pad of the active project. Right-click a pad for more.',
+  /** The drop zone under the list. */
+  DROP_SAMPLE: 'Drop a WAV here or on a pad to upload it to a free slot',
+  /** The tag on the pad a sound or file is dragged over. */
+  DROP: 'Drop',
 
   // ---------- library folder (FeatureText folder text; Documents/arc → File System Access) ----------
   LIBRARY_FOLDER: 'Library folder',

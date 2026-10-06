@@ -1,0 +1,45 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Rows.kt (HwToggle)
+ * A small hardware cap (theme/cap.css) with an LED: navy and down with a lit
+ * signal LED when on, a pale key with an unlit LED when off. */
+
+.hw-toggle {
+  --cap-face: var(--key);
+  --cap-ink: var(--graphite);
+  --cap-edge: var(--key-edge);
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-8);
+  min-width: 68px;
+  min-height: 34px;
+  padding: 0 var(--space-12);
+  border-radius: var(--radius-key);
+  user-select: none;
+  -webkit-user-select: none;
+  /* capsKeySmall */
+  font-size: var(--size-caps-key-small);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: var(--track-caps-key);
+  text-transform: uppercase;
+}
+.hw-toggle.is-on {
+  --cap-face: var(--navy);
+  --cap-ink: var(--on-navy);
+  --cap-edge: color-mix(in oklab, var(--navy) 65%, black);
+}
+.hw-toggle:disabled { opacity: var(--key-disabled); }
+
+/* The LED: 7 across, unlit grey; lit, signal orange with a soft light. */
+.hw-toggle__led {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--hw-led-off);
+}
+.hw-toggle.is-on .hw-toggle__led {
+  background: var(--hw-led-on);
+  box-shadow: 0 0 6px var(--hw-led-on);
+}

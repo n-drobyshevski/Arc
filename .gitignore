@@ -2,6 +2,8 @@
 .gradle/
 .kotlin/
 build/
+# CMake's working files for the native code (app/src/main/cpp)
+.cxx/
 local.properties
 captures/
 *.apk

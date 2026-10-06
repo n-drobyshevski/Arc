@@ -142,6 +142,12 @@
   --coach-veil: color-mix(in srgb, var(--shell) 86%, transparent);
   /* Trim waveform outside the selection: displayDim at 50% (TrimSheet.kt). */
   --display-dim-50: color-mix(in srgb, var(--display-dim) 50%, transparent);
+  /* Settings / Live tools rows (Components.kt SettingRow): the faint line
+   * between rows (line at 14%), a danger card's outline (danger at 45%) and
+   * the long note's tip box (navy at 10%). */
+  --row-rule: color-mix(in srgb, var(--line) 14%, transparent);
+  --row-danger-rule: color-mix(in srgb, var(--danger) 45%, transparent);
+  --row-tip: color-mix(in srgb, var(--navy) 10%, transparent);
 
   /* ---- Fixed colours (do not change with the theme) ---- */
   /* Section tag (Chrome.kt TagFace / TagInk). */

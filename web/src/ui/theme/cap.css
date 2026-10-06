@@ -32,17 +32,72 @@
   /* The body the pads sit in, and an unlit LED. */
   --hw-body: #C9CAC5;
   --hw-led-off: #9C9C97;
+
+  /* The Guide's K.O. II illustration (Cap.kt KoColors): the device's own
+   * colours, the same in both themes but for the body's edge, which must show
+   * on a dark page. Keys come as face, edge (the side under it) and ink;
+   * knobs as skirt, skirt edge, cap, cap edge. */
+  --ko-body: #D6D5D0;
+  --ko-edge: #AFAEA8;
+  /* The cream panel at the top, the ports strip and the labels printed on the body. */
+  --ko-panel: #E6E4DF;
+  --ko-label: #3B3C3E;
+  --ko-grille: #9A9A97;
+  --ko-grille-hole: #1B1B1B;
+  --ko-screen: #111210;
+  --ko-screen-ink: #E9E7DF;
+  --ko-screen-tag: #EDECE8;
+  --ko-screen-tag-ink: #111111;
+  --ko-dark-face: #232425;
+  --ko-dark-edge: #050505;
+  --ko-dark-ink: #EDECE8;
+  --ko-light-face: #EEEDE9;
+  --ko-light-edge: #A9A8A2;
+  --ko-light-ink: #6A6B6E;
+  /* A two-tier key's pale lower half: its ink, and the rule under ERASE. */
+  --ko-tier-ink: #5A5B5D;
+  --ko-tier-line: #D0CFCA;
+  /* PLAY, and the grey lower half of TEMPO / LOOP. */
+  --ko-grey-face: #7E7F81;
+  --ko-grey-edge: #5A5B5D;
+  --ko-grey-ink: #F0EFEB;
+  --ko-loop-face: #8E8F91;
+  --ko-led-off: #8E8E8B;
+  --ko-led-on: #FF3B1A;
+  --ko-port-light: #F1F0EC;
+  --ko-port-light-ink: #444444;
+  --ko-port-dark: #111111;
+  --ko-port-dark-ink: #DDDDDD;
+  --ko-port-ink: #555555;
+  /* The Y knob's tag. */
+  --ko-y-tag: #1E1F21;
+  --ko-fader-track: #111111;
+  --ko-fader-edge: #555555;
+  --ko-knob-white: #EAE9E5;
+  --ko-knob-white-edge: #BDBCB7;
+  --ko-knob-white-cap: #F7F6F3;
+  --ko-knob-white-cap-edge: #D3D2CD;
+  --ko-knob-orange: #FF5410;
+  --ko-knob-orange-edge: #B83600;
+  --ko-knob-orange-cap: #FF6A26;
+  --ko-knob-orange-cap-edge: #D94300;
+  --ko-knob-black: #28292B;
+  --ko-knob-black-edge: #050506;
+  --ko-knob-black-cap: #36373A;
+  --ko-knob-black-cap-edge: #0B0B0C;
 }
 :root[data-theme=dark] {
   --hw-body: #3A3B3F;
   --hw-led-off: #55565A;
   --hw-dark-edge: #606165; /* stands out from the dark body */
+  --ko-edge: #0E0F10;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme=light]) {
     --hw-body: #3A3B3F;
     --hw-led-off: #55565A;
     --hw-dark-edge: #606165; /* stands out from the dark body */
+    --ko-edge: #0E0F10;
   }
 }
 

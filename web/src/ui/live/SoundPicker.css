@@ -1,0 +1,204 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/PadSheet.kt (EDIT's sound list, RangeKey)
+ * After the EP Sample Tool's library: range keys as caps, blocks under an
+ * orange bar, dense 40px rows. */
+
+.snd {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+}
+.snd--scroll { min-height: 0; }
+
+/* The find field: a pale box with the search mark, a rule along its bottom. */
+.snd__find {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  min-height: 44px;
+  padding: 0 var(--space-14);
+  border-radius: var(--radius-field);
+  background: var(--key);
+  box-shadow: inset 0 -1px 0 var(--field-rule);
+  color: var(--graphite);
+}
+.snd__find:focus-within { outline: var(--focus-ring); outline-offset: 0; }
+.snd__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--space-10) 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  caret-color: var(--signal);
+  font: inherit;
+  font-size: var(--size-body15);
+  font-weight: 500;
+  outline: none;
+}
+.snd__input::placeholder { color: var(--graphite); }
+
+/* A key per range: the range over its kind of sound, small caps; the one in view held down, dark. */
+.snd__ranges {
+  flex: none;
+  display: flex;
+  gap: var(--space-6);
+  overflow-x: auto;
+  padding: 0 var(--cap-dx) var(--cap-dy) 0;
+  scrollbar-width: none;
+}
+.snd__range {
+  --cap-face: var(--key);
+  --cap-edge: var(--key-edge);
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 7px 11px 6px;
+  border: 0;
+  border-radius: var(--radius-key);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+/* The range picked: navy, held down (RangeKey's c.navy / capEdge / c.onNavy), as .key--navy. */
+.snd__range.is-on {
+  --cap-face: var(--navy);
+  --cap-ink: var(--on-navy);
+  --cap-edge: color-mix(in oklab, var(--navy) 65%, black);
+  color: var(--on-navy);
+}
+.snd__range:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+.snd__range-label {
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+.snd__range-kind {
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.snd__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+}
+.snd--scroll .snd__list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.snd__none { margin: 0; color: var(--graphite); }
+
+/* A range: an orange bar over its rows, on a paper card with a faint rim. */
+.snd__block {
+  flex: none;
+  border-radius: var(--radius-small-plate);
+  overflow: hidden;
+  background: var(--key);
+  box-shadow: inset 0 0 0 1px var(--row-rule);
+  scroll-margin-top: var(--space-4);
+}
+.snd__bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  margin: 0;
+  padding: 9px var(--space-14);
+  background: var(--signal);
+  color: var(--on-signal);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.snd__bar-kind { opacity: 0.8; }
+.snd__bar-count { margin-left: auto; font-weight: 700; opacity: 0.85; }
+
+.snd__rows { margin: 0; padding: 0; list-style: none; }
+
+/* A row: 44 to touch; the row's words a button (the sheet) and the play key at its end. */
+.snd__row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-height: 44px;
+  padding-inline-end: var(--space-8);
+  border-top: 1px solid var(--row-rule);
+}
+.snd__row:first-child { border-top: 0; }
+.snd__row--drag { cursor: grab; }
+.snd__row--drag:active { cursor: grabbing; }
+/* The sound on the pad now: tinted, an orange rule on its start side. */
+.snd__row.is-current {
+  background: color-mix(in srgb, var(--signal) 12%, transparent);
+  box-shadow: inset 3px 0 0 var(--signal);
+}
+.snd__pick {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-12);
+  align-self: stretch;
+  padding: 0 0 0 var(--space-14);
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: start;
+}
+button.snd__pick { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+button.snd__pick:active:not(:disabled) { background: var(--row-pressed); }
+button.snd__pick:disabled { cursor: default; opacity: var(--icon-disabled); }
+button.snd__pick:focus-visible { outline: var(--focus-ring); outline-offset: -3px; }
+
+.snd__led {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--hw-led-off);
+}
+.snd__row.is-playing .snd__led { background: var(--signal); box-shadow: 0 0 6px var(--signal); }
+.snd__slot {
+  flex: none;
+  min-width: 30px;
+  color: var(--graphite);
+  font-size: 13px;
+  font-weight: 600;
+}
+.snd__row.is-current .snd__slot { color: var(--signal-edge); }
+:root[data-theme=dark] .snd__row.is-current .snd__slot { color: var(--signal); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme=light]) .snd__row.is-current .snd__slot { color: var(--signal); }
+}
+.snd__name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.snd__size {
+  flex: none;
+  color: var(--graphite);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+.snd__play.play-key { width: 32px; height: 32px; }

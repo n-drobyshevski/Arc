@@ -23,6 +23,10 @@
 //   control and kept 48px below the top, with a hooked arrow above it pointing
 //   at the edge ([sideHook]). The tab and 30px above it (the hook) are kept
 //   clear by the other tags.
+//
+// Web delta: two side tags on one edge (the GUIDE tab and Live's EDIT tab
+// under it) are stacked apart, hook and all: the overlap is shared, the upper
+// tag moving up and the lower one down (more of it up when there is no room below).
 
 /** A rectangle in px (Compose Rect: left, top, right, bottom). */
 export interface Box {
@@ -201,7 +205,25 @@ export function placeTags(marks: readonly CoachMarkInput[], viewport: Size, meas
     const textSize = measure(text, Number.POSITIVE_INFINITY)
     const w = textSize.height + 2 * M.padY
     const h = textSize.width + 2 * M.padX
-    const top = coerceIn(centerY(m.bounds) - h / 2, M.margin + M.sideTop, viewport.height - M.margin - h)
+    const lowest = M.margin + M.sideTop
+    const highest = viewport.height - M.margin - h
+    let top = coerceIn(centerY(m.bounds) - h / 2, lowest, highest)
+    // Web: two tabs stacked on one edge (GUIDE and Live's EDIT) keep their tags apart, hook and
+    // all: the overlap is shared, the upper tag moving up and this one down, each near its tab.
+    const above = placed.filter((p) => p.side === side).at(-1)
+    if (above !== undefined) {
+      const overlap = above.rect.bottom + M.clearance + M.hookRoom - top
+      if (overlap > 0) {
+        const room = Math.max(0, above.rect.top - lowest)
+        const lift = Math.min(room, Math.max(overlap / 2, overlap - Math.max(0, highest - top)))
+        if (lift > 0) {
+          const r = above.rect
+          const moved = box(r.left, r.top - lift, r.right - r.left, r.bottom - r.top)
+          placed[placed.indexOf(above)] = { ...above, rect: moved, room: { ...moved, top: moved.top - M.hookRoom } }
+        }
+        top = Math.min(top + overlap - lift, highest)
+      }
+    }
     const left = side < 0 ? 0 : viewport.width - w
     const rect = box(left, top, w, h)
     const room = { left: rect.left, top: rect.top - M.hookRoom, right: rect.right, bottom: rect.bottom }

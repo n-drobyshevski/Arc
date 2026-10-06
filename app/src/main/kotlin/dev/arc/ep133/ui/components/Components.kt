@@ -1,6 +1,5 @@
 package dev.arc.ep133.ui.components
 
-import androidx.compose.ui.semantics.stateDescription
 import dev.arc.ep133.text.SettingsText
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -12,6 +11,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -66,7 +67,9 @@ import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import kotlinx.coroutines.launch
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.input.pointer.pointerInput
@@ -230,16 +233,17 @@ private val PanelRadius = 22.dp
 
 /**
  * The display as one dark line: Live's display line, and the device on a
- * phone on its side. [compact] fits it in the top bar.
+ * phone on its side. [compact] fits it in the top bar; [color] lights it
+ * (Live's EDIT line is signal orange).
  */
 @Composable
-fun DisplayLine(modifier: Modifier = Modifier, compact: Boolean = false, content: @Composable RowScope.() -> Unit) {
+fun DisplayLine(modifier: Modifier = Modifier, compact: Boolean = false, color: Color? = null, content: @Composable RowScope.() -> Unit) {
     val c = LocalArcColors.current
     Row(
         modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(if (compact) 12.dp else 14.dp))
-            .background(c.display)
+            .background(color ?: c.display)
             .heightIn(min = if (compact) 44.dp else 48.dp)
             .padding(horizontal = if (compact) 12.dp else 14.dp, vertical = if (compact) 4.dp else 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -268,13 +272,15 @@ fun Caption(text: String, modifier: Modifier = Modifier, color: Color? = null, a
  * operator app's pad grid. Put [PlateLine] between rows.
  */
 @Composable
-fun GridPlate(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+fun GridPlate(modifier: Modifier = Modifier, outline: Color? = null, content: @Composable ColumnScope.() -> Unit) {
     val c = LocalArcColors.current
     Column(
         modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(PlateRadius))
-            .background(c.plate),
+            .background(c.plate)
+            // An outline marks a group whose actions can't be undone (the settings' saved data).
+            .then(if (outline != null) Modifier.border(1.5.dp, outline, RoundedCornerShape(PlateRadius)) else Modifier),
         content = content,
     )
 }
@@ -302,61 +308,94 @@ fun Modifier.plateRow(first: Boolean, last: Boolean, plate: Color, line: Color):
         .background(plate)
         .drawBehind { if (!first) drawRect(line, size = androidx.compose.ui.geometry.Size(size.width, 1.dp.toPx())) }
 
-/** A row of blocks to switch between views: navy and down when selected, pale grey otherwise (like the tabs). */
+/**
+ * A row of blocks to switch between views: navy and down when selected, pale
+ * grey otherwise (like the tabs). [compact]: the smaller caps on the right of a
+ * settings row, pale keys like the hardware toggle, as wide as they need (or
+ * the width they are given). [enabled] greys out a choice that can't be taken
+ * now; [descriptions] read each choice out in full for screen readers.
+ */
 @Composable
-fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
-    val c = LocalArcColors.current
-    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        options.forEachIndexed { i, label ->
-            val on = i == selected
-            val source = remember { MutableInteractionSource() }
-            val pressed by source.collectIsPressedAsState()
-            val face = if (on) c.navy else c.tabOff
-            Box(
-                Modifier
-                    .weight(1f)
-                    .heightIn(min = 44.dp)
-                    // A cap; the chosen one stays down.
-                    .cap(face, capEdge(face), RoundedCornerShape(10.dp), capPress(on || pressed))
-                    .clickable(interactionSource = source, indication = null, role = Role.Tab) { onSelect(i) }
-                    .semantics { this.selected = on }
-                    .padding(horizontal = 4.dp, vertical = 12.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(label.uppercase(), style = ArcType.capsKeySmall, color = if (on) c.onNavy else c.onTabOff, maxLines = 1, textAlign = TextAlign.Center)
+fun Segmented(
+    options: List<String>,
+    selected: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+    enabled: List<Boolean>? = null,
+    descriptions: List<String>? = null,
+) {
+    val key: @Composable (Int, Modifier) -> Unit = { i, m ->
+        SegmentKey(options[i], i == selected, enabled?.getOrNull(i) ?: true, descriptions?.getOrNull(i), compact, m) { onSelect(i) }
+    }
+    if (!compact) {
+        Row(modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (i in options.indices) key(i, Modifier.weight(1f))
+        }
+        return
+    }
+    // Compact: each key as wide as its label, the width given past that shared out evenly;
+    // short of room, the keys with labels of several words give up width (in proportion to
+    // what wrapping saves them) and wrap, never narrower than their longest word.
+    Layout(content = { for (i in options.indices) key(i, Modifier) }, modifier = modifier.selectableGroup()) { keys, constraints ->
+        val gap = 6.dp.roundToPx()
+        val natural = keys.map { it.maxIntrinsicWidth(Constraints.Infinity) }
+        val least = keys.map { it.minIntrinsicWidth(Constraints.Infinity) }
+        val gaps = gap * (keys.size - 1).coerceAtLeast(0)
+        val total = natural.sum() + gaps
+        val room = if (constraints.hasBoundedWidth) constraints.maxWidth else total
+        val widths = if (room >= total) {
+            val extra = room - total
+            natural.mapIndexed { i, w -> w + extra / keys.size + if (i < extra % keys.size) 1 else 0 }
+        } else {
+            val slack = natural.indices.sumOf { natural[it] - least[it] }.coerceAtLeast(1)
+            val short = minOf(total - room, slack)
+            natural.indices.map { natural[it] - (natural[it] - least[it]) * short / slack }
+        }
+        val h = keys.indices.maxOfOrNull { keys[it].minIntrinsicHeight(widths[it]) } ?: 0
+        val placed = keys.mapIndexed { i, m -> m.measure(Constraints.fixed(widths[i], h)) }
+        layout(widths.sum() + gap * (keys.size - 1).coerceAtLeast(0), h) {
+            var x = 0
+            for (p in placed) {
+                p.placeRelative(x, 0)
+                x += p.width + gap
             }
         }
     }
 }
 
-/** A setting that is on or off: its name and note, and an ON / OFF block (navy when on). */
+/** One of [Segmented]'s keys. */
 @Composable
-fun SwitchRow(title: String, note: String, on: Boolean, onChange: (Boolean) -> Unit) {
+private fun SegmentKey(label: String, on: Boolean, can: Boolean, description: String?, compact: Boolean, modifier: Modifier, onClick: () -> Unit) {
     val c = LocalArcColors.current
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Switch) { onChange(!on) }
-            .semantics { stateDescription = if (on) SettingsText.ON else SettingsText.OFF }
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val face = when {
+        on -> c.navy
+        compact -> c.key
+        else -> c.tabOff
+    }
+    val edge = if (compact && !on) c.keyEdge else capEdge(face)
+    Box(
+        modifier
+            .heightIn(min = if (compact) 36.dp else 44.dp)
+            // A cap; the chosen one stays down.
+            .cap(face, edge, RoundedCornerShape(if (compact) 8.dp else 10.dp), capPress(on || pressed && can), alpha = if (can) 1f else 0.45f)
+            .clickable(interactionSource = source, indication = null, enabled = can, role = Role.Tab, onClick = onClick)
+            .semantics {
+                this.selected = on
+                if (description != null) contentDescription = description
+            }
+            .padding(horizontal = if (compact) 10.dp else 4.dp, vertical = if (compact) 9.dp else 12.dp),
+        contentAlignment = Alignment.Center,
     ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, style = ArcType.bold, color = c.ink)
-            Text(note, style = ArcType.small, color = c.graphite)
+        val ink = when {
+            on -> c.onNavy
+            compact -> c.graphite
+            else -> c.onTabOff
         }
-        Box(
-            Modifier
-                .widthIn(min = 56.dp)
-                .heightIn(min = 34.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(if (on) c.navy else c.tabOff)
-                .padding(horizontal = 10.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text((if (on) SettingsText.ON else SettingsText.OFF).uppercase(), style = ArcType.capsKeySmall, color = if (on) c.onNavy else c.onTabOff)
-        }
+        // A compact key short of room wraps its word onto a second line.
+        Text(label.uppercase(), style = ArcType.capsKeySmall, color = ink, maxLines = if (compact) 2 else 1, textAlign = TextAlign.Center)
     }
 }
 
@@ -627,6 +666,9 @@ fun ArcToast(
     modifier: Modifier = Modifier,
     /** Room left at the bottom, above the tab bar. */
     bottomInset: Dp = 0.dp,
+    /** A key at the toast's end ("UNDO") and what it does; a toast with one stays longer. */
+    action: String? = null,
+    onAction: (() -> Unit)? = null,
 ) {
     val c = LocalArcColors.current
     val density = LocalDensity.current
@@ -635,12 +677,15 @@ fun ArcToast(
     val inBar = slot != null
     // One already up when this is first drawn (a screenshot) shows in that first frame.
     var shown by remember { mutableStateOf(id?.let { Triple(it, text, error) }) }
+    // The action of the toast shown, kept with it while it fades out.
+    var shownAction by remember { mutableStateOf(action?.let { a -> onAction?.let { a to it } }) }
     // Unfolding a toast in the bar starts its time again, to read the rest.
     var unfolded by remember(shown?.first) { mutableStateOf(false) }
     LaunchedEffect(id, unfolded) {
         if (id != null) {
             shown = Triple(id, text, error)
-            delay(if (error) 7000 else 3200)
+            shownAction = action?.let { a -> onAction?.let { a to it } }
+            delay(if (error) 7000 else if (shownAction != null) 6000 else 3200)
             onTimeout(id)
         }
     }
@@ -742,7 +787,14 @@ fun ArcToast(
                 )
                 .semantics {
                     liveRegion = LiveRegionMode.Polite
-                    customActions = listOf(
+                    customActions = listOfNotNull(
+                        shownAction?.let { (label, run) ->
+                            androidx.compose.ui.semantics.CustomAccessibilityAction(label) {
+                                run()
+                                onTimeout(s.first)
+                                true
+                            }
+                        },
                         androidx.compose.ui.semantics.CustomAccessibilityAction(SettingsText.DISMISS) {
                             onTimeout(s.first)
                             true
@@ -761,15 +813,31 @@ fun ArcToast(
                     color = c.displayInk,
                     maxLines = if (unfolded) Int.MAX_VALUE else 2,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(vertical = 4.dp, horizontal = 12.dp),
+                    modifier = Modifier.weight(1f, fill = shownAction != null).padding(vertical = 4.dp, horizontal = 12.dp),
                 )
             } else {
                 Text(
                     s.second,
                     style = ArcType.body15.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
                     color = c.displayInk,
-                    modifier = Modifier.padding(vertical = 14.dp, horizontal = 16.dp),
+                    modifier = Modifier.weight(1f, fill = shownAction != null).padding(vertical = 14.dp, horizontal = 16.dp),
                 )
+            }
+            shownAction?.let { (label, run) ->
+                // The action as a word in signal orange at the end, its touch area the toast's height.
+                Box(
+                    Modifier
+                        .fillMaxHeight()
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button) {
+                            run()
+                            onTimeout(s.first)
+                        }
+                        .heightIn(min = 44.dp)
+                        .padding(horizontal = 16.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(label.uppercase(), style = ArcType.capsKey, color = c.signal, maxLines = 1)
+                }
             }
         }
     }
@@ -778,7 +846,8 @@ fun ArcToast(
 /** A labelled text field (`.field` in styles.css). */
 @Composable
 fun ArcField(
-    label: String,
+    /** The caption over the field; null for none (a search field whose placeholder says it all). */
+    label: String?,
     value: String,
     onValueChange: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -789,12 +858,14 @@ fun ArcField(
     keyboardOptions: KeyboardOptions? = null,
     /** The field's colour; the pale key colour unless it sits on a pale page. */
     background: Color? = null,
+    /** An icon before the text (the search glass). */
+    icon: ArcIcon? = null,
 ) {
     val c = LocalArcColors.current
     val source = remember { MutableInteractionSource() }
     val focused by source.collectIsFocusedAsState()
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(label.uppercase(), style = ArcType.caps, color = c.graphite)
+        if (label != null) Text(label.uppercase(), style = ArcType.caps, color = c.graphite)
         val style = (if (singleLine) ArcType.fieldInput else ArcType.notesInput).copy(color = c.ink)
         BasicTextField(
             value = value,
@@ -828,9 +899,12 @@ fun ArcField(
                     drawRect(c.line.copy(alpha = 0.5f), topLeft = Offset(0f, size.height - h), size = androidx.compose.ui.geometry.Size(size.width, h))
                 },
             decorationBox = { inner ->
-                Box(Modifier.padding(vertical = 12.dp, horizontal = 14.dp)) {
-                    if (value.isEmpty() && placeholder.isNotEmpty()) Text(placeholder, style = style.copy(color = c.graphite))
-                    inner()
+                Row(Modifier.padding(vertical = 12.dp, horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (icon != null) Icon(icon, c.graphite, size = 20.dp)
+                    Box(Modifier.weight(1f)) {
+                        if (value.isEmpty() && placeholder.isNotEmpty()) Text(placeholder, style = style.copy(color = c.graphite))
+                        inner()
+                    }
                 }
             },
         )

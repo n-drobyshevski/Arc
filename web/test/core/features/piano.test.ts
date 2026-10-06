@@ -1,11 +1,24 @@
 // Port of core/src/test/kotlin/dev/arc/ep133/features/PianoTest.kt
+//
+// Kotlin's IntRange values are {first, last} NoteRanges here (EMPTY_RANGE
+// for IntRange.EMPTY); assertEquals with a tolerance is toBeCloseTo.
 import { describe, expect, it } from 'vitest'
-import { KeyMark, Piano, isBlack, rangeNotes, type NoteRange } from '../../../src/core/features/piano'
-import { NoteTouches, Press, Release, type NoteEvent } from '../../../src/core/features/noteTouches'
 import { Scale } from '../../../src/core/features/keys'
+import { NoteTouches, Press, Release, type NoteEvent } from '../../../src/core/features/noteTouches'
+import {
+  EMPTY_RANGE,
+  KeyMark,
+  KeysView,
+  Piano,
+  isEmptyRange,
+  keyRect,
+  keysViewOf,
+  rectRight,
+  type NoteRange,
+} from '../../../src/core/features/piano'
 
-const span = (a: number, b: number): number[] => Array.from({ length: b - a + 1 }, (_, i) => a + i)
 const r = (first: number, last: number): NoteRange => ({ first, last })
+const between = (a: number, b: number): number[] => Array.from({ length: b - a + 1 }, (_, i) => a + i)
 
 describe('PianoTest', () => {
   // OCT 4 at two octaves on a Pixel 7's landscape plate: 15 whites of 52, 280 tall.
@@ -24,10 +37,10 @@ describe('PianoTest', () => {
     // Three octaves from C7 would pass 127: the plate ends at G9.
     expect(Piano.range(8, 22)).toEqual(r(96, 127))
     expect(Piano.range(0, 22)).toEqual(r(0, 36))
-    expect(rangeNotes(Piano.range(4, 0))).toEqual([])
+    expect(isEmptyRange(Piano.range(4, 0))).toBe(true)
   })
 
-  it('as many whites as fit 44 px each, else none', () => {
+  it('as many whites as fit 44 dp each, else none', () => {
     expect(Piano.whitesFor(330)).toBe(0)
     expect(Piano.whitesFor(500)).toBe(8)
     expect(Piano.whitesFor(634)).toBe(12)
@@ -37,15 +50,67 @@ describe('PianoTest', () => {
     expect(Piano.whitesFor(351)).toBe(0)
   })
 
+  it('a chosen size is capped at what fits', () => {
+    // Auto is the widest that fits.
+    expect(Piano.whitesFor(1200, null)).toBe(22)
+    expect(Piano.whitesFor(1200, 15)).toBe(15)
+    expect(Piano.whitesFor(1200, 8)).toBe(8)
+    // Three octaves chosen, room for two: two.
+    expect(Piano.whitesFor(809, 22)).toBe(15)
+    expect(Piano.whitesFor(600, 22)).toBe(12)
+    // Smaller than a size chosen: never wider than the choice.
+    expect(Piano.whitesFor(1200, 12)).toBe(12)
+    expect(Piano.whitesFor(1200, 10)).toBe(8)
+    // Not even one octave: none, whatever was chosen.
+    expect(Piano.whitesFor(351, 8)).toBe(0)
+    expect(Piano.whitesFor(351, null)).toBe(0)
+    expect(Piano.CHOICES).toEqual([null, 8, 12, 15, 22])
+    // Settings greys out the sizes that don't fit.
+    expect(Piano.WHITES.filter((n) => Piano.fits(634, n)).sort((a, b) => a - b)).toEqual([8, 12])
+    expect(Piano.fits(634, 0)).toBe(false)
+  })
+
+  it('the piano needs room, and a portrait phone keeps the grid', () => {
+    expect(Piano.hasRoom(500, 120)).toBe(true)
+    expect(Piano.hasRoom(500, 119)).toBe(false)
+    expect(Piano.hasRoom(351, 300)).toBe(false)
+    expect(Piano.hasRoom(400, 300, 8)).toBe(true)
+    // A portrait phone has no switch; a portrait tablet and anything wide do.
+    expect(Piano.switchShown(false, 412)).toBe(false)
+    expect(Piano.switchShown(false, 800)).toBe(true)
+    expect(Piano.switchShown(true, 852)).toBe(true)
+    // Auto: the piano when wide; a choice holds where the switch shows and the piano fits.
+    expect(Piano.showsPiano(KeysView.AUTO, true, 852, true)).toBe(true)
+    expect(Piano.showsPiano(KeysView.AUTO, false, 800, true)).toBe(false)
+    expect(Piano.showsPiano(KeysView.PIANO, false, 800, true)).toBe(true)
+    expect(Piano.showsPiano(KeysView.PADS, true, 852, true)).toBe(false)
+    expect(Piano.showsPiano(KeysView.PIANO, true, 852, false)).toBe(false)
+    expect(Piano.showsPiano(KeysView.PIANO, false, 412, true)).toBe(false)
+  })
+
+  it('stored choices (web: the settings parsing)', () => {
+    expect(Piano.choiceOf(15)).toBe(15)
+    expect(Piano.choiceOf(0)).toBeNull()
+    expect(Piano.choiceOf(10)).toBeNull()
+    expect(Piano.choiceOf(null)).toBeNull()
+    expect(keysViewOf('PIANO')).toBe(KeysView.PIANO)
+    expect(keysViewOf('piano')).toBeNull()
+  })
+
   it('black keys sit on the seams, drawn narrower than they are hit', () => {
     expect(keys.length).toBe(25)
     expect(keys.filter((k) => !k.black).length).toBe(15)
-    expect(keys.map((k) => k.note)).toEqual(span(48, 72))
-    expect(keys.filter((k) => k.black).slice(0, 5).map((k) => k.note)).toEqual([49, 51, 54, 56, 58])
-    expect(isBlack(61)).toBe(true)
-    expect(isBlack(64)).toBe(false)
+    expect(keys.map((k) => k.note)).toEqual(between(48, 72))
+    expect(
+      keys
+        .filter((k) => k.black)
+        .slice(0, 5)
+        .map((k) => k.note),
+    ).toEqual([49, 51, 54, 56, 58])
+    expect(Piano.isBlack(61)).toBe(true)
+    expect(Piano.isBlack(64)).toBe(false)
     const c = keys[0]!
-    expect(c.rect).toEqual({ left: 0, top: 0, width: white, height: h })
+    expect(c.rect).toEqual(keyRect(0, 0, white, h))
     expect(c.hitRect).toEqual(c.rect)
     const cSharp = keys[1]!
     expect(cSharp.rect.left + cSharp.rect.width / 2).toBeCloseTo(white, 3)
@@ -56,8 +121,7 @@ describe('PianoTest', () => {
     // F# sits between F (the 4th white) and G.
     const fSharp = keys.find((k) => k.note === 54)!
     expect(fSharp.rect.left + fSharp.rect.width / 2).toBeCloseTo(4 * white, 3)
-    const last = keys[keys.length - 1]!
-    expect(last.rect.left + last.rect.width).toBeCloseTo(15 * white, 3)
+    expect(rectRight(keys[keys.length - 1]!.rect)).toBeCloseTo(15 * white, 3)
   })
 
   it('a black key is hit wider than drawn, and the whites below it', () => {
@@ -89,7 +153,7 @@ describe('PianoTest', () => {
       current = next
     }
     expect(events).toEqual([Release(48), Press(49)])
-    expect([...t.held]).toEqual([49])
+    expect(t.held).toEqual(new Set([49]))
   })
 
   it('C# slid down past its foot by less than the slop stays C#', () => {
@@ -129,7 +193,7 @@ describe('PianoTest', () => {
     expect(at(white / 2, h + slop + 1, 48)).toBeNull()
     // A note no longer on the plate (after OCT changed) is a fresh touch.
     expect(at(white / 2, h * 0.9, 30)).toBe(48)
-    expect(Piano.layout(r(0, -1), 100, 100)).toEqual([])
+    expect(Piano.layout(EMPTY_RANGE, 100, 100)).toEqual([])
   })
 
   it('keys are marked against the key and scale', () => {
@@ -141,13 +205,13 @@ describe('PianoTest', () => {
     expect(Piano.mark(65, a, Scale.MINOR)).toBe(KeyMark.IN)
     expect(Piano.mark(66, a, Scale.MINOR)).toBe(KeyMark.OUT)
     expect(Piano.mark(58, a, Scale.MINOR)).toBe(KeyMark.OUT)
-    expect(span(57, 68).filter((n) => Piano.mark(n, a, Scale.MINOR) !== KeyMark.OUT)).toEqual([57, 59, 60, 62, 64, 65, 67])
+    expect(between(57, 68).filter((n) => Piano.mark(n, a, Scale.MINOR) !== KeyMark.OUT)).toEqual([57, 59, 60, 62, 64, 65, 67])
     // D blues: D F G G# A C.
-    expect(span(62, 73).filter((n) => Piano.mark(n, 2, Scale.BLUES) !== KeyMark.OUT)).toEqual([62, 65, 67, 68, 69, 72])
+    expect(between(62, 73).filter((n) => Piano.mark(n, 2, Scale.BLUES) !== KeyMark.OUT)).toEqual([62, 65, 67, 68, 69, 72])
     expect(Piano.mark(50, 2, Scale.BLUES)).toBe(KeyMark.ROOT)
     expect(Piano.mark(64, 2, Scale.BLUES)).toBe(KeyMark.OUT)
     // Chromatic: the root, and every other note in.
     expect(Piano.mark(0, 0, Scale.CHROMATIC)).toBe(KeyMark.ROOT)
-    expect(span(61, 71).filter((n) => Piano.mark(n, 0, Scale.CHROMATIC) === KeyMark.IN).length).toBe(11)
+    expect(between(61, 71).filter((n) => Piano.mark(n, 0, Scale.CHROMATIC) === KeyMark.IN).length).toBe(11)
   })
 })

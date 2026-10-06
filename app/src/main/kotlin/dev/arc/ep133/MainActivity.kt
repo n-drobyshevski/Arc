@@ -8,6 +8,9 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.InputDevice
+import android.view.MotionEvent
+import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -54,6 +57,7 @@ import dev.arc.ep133.ui.screens.DebugScreen
 import dev.arc.ep133.ui.screens.GuideScreen
 import dev.arc.ep133.ui.screens.MirrorScreen
 import dev.arc.ep133.ui.screens.PadsSheetContent
+import dev.arc.ep133.ui.screens.PadSheetContent
 import dev.arc.ep133.ui.screens.SearchScreen
 import dev.arc.ep133.ui.screens.SettingsScreen
 import dev.arc.ep133.ui.screens.DeviceScreen
@@ -89,6 +93,14 @@ class MainActivity : ComponentActivity() {
         controller.pickForUpload(uris)
     }
 
+    // EDIT's "Upload a new sample…": one file, for the pad whose sheet asked for it.
+    private var padUploadFor: Pair<dev.arc.ep133.features.PhysicalPad, dev.arc.ep133.features.PadTarget>? = null
+    private val padUploadLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val (pad, target) = padUploadFor ?: return@registerForActivityResult
+        padUploadFor = null
+        if (uri != null) withNotifications { controller.uploadToPad(uri, pad, target) }
+    }
+
     private val importLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) controller.importUri(uri)
     }
@@ -118,6 +130,29 @@ class MainActivity : ComponentActivity() {
 
     // The transfer does not wait for the answer: it works without the notification.
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
+
+    // Whether Live is in front, so its touches go unbuffered ([unbufferedTouch]); main thread only.
+    private var liveTouch = false
+
+    /**
+     * While Live is in front ([on]), touches reach the pads and keys as they
+     * come rather than batched to the next frame, so a press or a slide onto a
+     * key sounds up to a frame sooner. Elsewhere the app keeps Android's
+     * batching. Android 11 and later take it for all pointer input (the
+     * touchscreen, a mouse or stylus) on [view]; Android 10 only gesture by
+     * gesture, asked at each first touch ([dispatchTouchEvent]).
+     */
+    private fun unbufferedTouch(view: View, on: Boolean) {
+        liveTouch = on
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) view.requestUnbufferedDispatch(if (on) InputDevice.SOURCE_CLASS_POINTER else InputDevice.SOURCE_CLASS_NONE)
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (liveTouch && Build.VERSION.SDK_INT < Build.VERSION_CODES.R && ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            window.decorView.requestUnbufferedDispatch(ev)
+        }
+        return super.dispatchTouchEvent(ev)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
@@ -325,6 +360,8 @@ class MainActivity : ComponentActivity() {
     private fun Root() {
         val state by controller.state.collectAsStateWithLifecycle()
         var debug by rememberSaveable { mutableStateOf(false) }
+        // The debug screen's latency test folded out, kept while Live is played in between.
+        var latencyOpen by rememberSaveable { mutableStateOf(false) }
         var settingsOpen by rememberSaveable { mutableStateOf(false) }
         var fontLicence by rememberSaveable { mutableStateOf(false) }
         // The guide overlay: from the ? key, and once by itself on the first start.
@@ -355,6 +392,9 @@ class MainActivity : ComponentActivity() {
         var notesField by rememberSaveable { mutableStateOf("") }
         // The EP-133 shortcut guide, slid in from the left-edge tab.
         var guideOpen by rememberSaveable { mutableStateOf(false) }
+        // Live's EDIT (the tab under GUIDE), and the pad whose sheet is open with where its sound is set.
+        var liveEdit by rememberSaveable { mutableStateOf(false) }
+        var padSheet by remember { mutableStateOf<Pair<dev.arc.ep133.features.PhysicalPad, dev.arc.ep133.features.PadTarget>?>(null) }
         // The mirror listens only while its tab is in front (not under the debug, settings or guide screen).
         val live = tab == Tab.LIVE && !debug && !settingsOpen && !guideOpen
         val appSettings by controller.settings.collectAsStateWithLifecycle()
@@ -366,6 +406,8 @@ class MainActivity : ComponentActivity() {
                 Tab.LIVE -> {
                     controller.closeMirror()
                     controller.stopPlayback()
+                    liveEdit = false
+                    padSheet = null
                 }
                 Tab.DEVICE -> {
                     padsFor = null
@@ -384,9 +426,20 @@ class MainActivity : ComponentActivity() {
             view.keepScreenOn = keepOn
             onDispose { view.keepScreenOn = false }
         }
+        DisposableEffect(live) {
+            unbufferedTouch(view, live)
+            onDispose { unbufferedTouch(view, false) }
+        }
         // The mirror (re)starts when it opens and whenever a device is (re)connected or
         // goes away; without one it shows the last read.
         val ready = state.device != null
+        // EDIT writes to the device: it ends when the device goes.
+        LaunchedEffect(ready) {
+            if (!ready) {
+                liveEdit = false
+                padSheet = null
+            }
+        }
         // Only while the app is in front: in the background nothing listens or redraws.
         val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
         LaunchedEffect(live, ready) {
@@ -434,9 +487,9 @@ class MainActivity : ComponentActivity() {
         // After a recreation (or process death) the opened backup has to be read again.
         LaunchedEffect(contentsBackup?.id) { contentsBackup?.let { controller.openContents(it) } }
         val playing by controller.player.playing.collectAsStateWithLifecycle()
-        // Everything sounding, for Live's rings (several pads or notes for a chord).
-        val voices by controller.liveKeys.collectAsStateWithLifecycle()
         val rec by controller.rec.collectAsStateWithLifecycle()
+        // Live's sound goes to Bluetooth: its display line says it plays late.
+        val liveWireless by controller.liveWireless.collectAsStateWithLifecycle()
         val takes by controller.takes.collectAsStateWithLifecycle()
         // REC on Live's display line, on the page or in the top bar.
         val liveRec = dev.arc.ep133.ui.screens.RecUi(rec, controller::toggleRec)
@@ -460,16 +513,30 @@ class MainActivity : ComponentActivity() {
             scale = appSettings.keysScale,
             octave = appSettings.keysOctave,
             names = appSettings.keysNames,
+            showNames = appSettings.keysShowNames,
+            pianoWhites = appSettings.pianoWhites,
+            viewWide = appSettings.keysViewWide,
+            viewTall = appSettings.keysViewTall,
             pad = state.keysPad,
             padName = state.keysPad?.let(controller::mirrorName),
-            playingNotes = voices.mapNotNullTo(LinkedHashSet()) { v -> if (v.startsWith("note:")) v.removePrefix("note:").toIntOrNull() else null },
         )
         // The piano's notes while it shows, so the bar's display line can name a device note past its ends.
         var pianoRange by remember { mutableStateOf<IntRange?>(null) }
         val liveBar = tab == Tab.LIVE && dev.arc.ep133.ui.screens.liveInBar(dev.arc.ep133.ui.components.LocalArcWindow.current)
         Box(Modifier.fillMaxSize()) {
             if (debug) {
-                DebugScreen(controller.trafficLog, ::shareLog, ::saveLog, ::copyLog) { debug = false }
+                val latency by controller.latency.collectAsStateWithLifecycle()
+                DebugScreen(
+                    controller.trafficLog, ::shareLog, ::saveLog, ::copyLog,
+                    latency = dev.arc.ep133.ui.screens.LatencyUi(
+                        state = latency,
+                        engine = appSettings.liveEngine,
+                        onEngine = controller::setLiveEngine,
+                        onReset = controller::resetLatency,
+                        open = latencyOpen,
+                        onOpen = { latencyOpen = it },
+                    ),
+                ) { debug = false }
             } else if (settingsOpen) {
                 val uri = androidx.compose.ui.platform.LocalUriHandler.current
                 SettingsScreen(
@@ -487,6 +554,9 @@ class MainActivity : ComponentActivity() {
                     padSoundsSize = controller::padSoundsSize,
                     onClearPadSounds = { controller.clearPadSounds() },
                     onNoteNames = controller::setKeysNames,
+                    onShowNames = controller::setKeysShowNames,
+                    onPianoWhites = controller::setPianoWhites,
+                    onHaptics = controller::setHaptics,
                     onRestoreFolder = { folderLauncher.launch(dev.arc.ep133.data.ExternalLibrary.INITIAL_FOLDER) },
                     // No browser installed: nothing to open.
                     onSource = { runCatching { uri.openUri(dev.arc.ep133.text.SettingsText.SOURCE_URL) } },
@@ -578,7 +648,7 @@ class MainActivity : ComponentActivity() {
                     onGuide = { guideOpen = it },
                     guide = { GuideScreen(onBack = { guideOpen = false }) },
                     // On a phone on its side, Live's display line rides in the top bar.
-                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, liveRec, pianoRange = pianoRange) }) else null,
+                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, liveRec, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys, wireless = liveWireless) }) else null,
                 ) {
                     // Back from another section returns to Live, the home section, first.
                     BackHandler(enabled = tab != Tab.LIVE) { selectTab(Tab.LIVE) }
@@ -586,9 +656,10 @@ class MainActivity : ComponentActivity() {
                         Tab.LIVE -> MirrorScreen(
                             mirror = mirror,
                             nameOf = controller::mirrorName,
-                            onPadOrder = controller::setPadOrder,
-                            onPad = { pad, hold -> controller.playPad(pad, hold) },
+                            onPad = { pad, hold, unsure, pressedAt -> controller.playPad(pad, hold, unsure, pressedAt) },
+                            onPadKept = { pad -> controller.keepPad(pad) },
                             onPadUp = controller::releasePad,
+                            onPadCut = controller::cutPad,
                             keys = keys,
                             keysActions = remember(controller) {
                                 dev.arc.ep133.ui.screens.KeysActions(
@@ -596,18 +667,17 @@ class MainActivity : ComponentActivity() {
                                     onRoot = controller::setKeysRoot,
                                     onScale = controller::setKeysScale,
                                     onOctave = controller::setKeysOctave,
-                                    onNote = { note, hold -> controller.playNote(note, hold) },
+                                    onNote = { note, hold, pressedAt -> controller.playNote(note, hold, pressedAt) },
                                     onNoteUp = controller::releaseNote,
                                     onSelect = controller::selectKeysPad,
+                                    onView = controller::setKeysView,
                                 )
                             },
-                            playingPads = voices.mapNotNullTo(HashSet()) { k ->
-                                k.split(':').takeIf { it.size == 3 && it[0] == "live" }?.let { p ->
-                                    val g = p[1].toIntOrNull()
-                                    val o = p[2].toIntOrNull()
-                                    if (g != null && o != null) dev.arc.ep133.features.PhysicalPad(g, o) else null
-                                }
-                            },
+                            // Everything sounding, for the rings (several pads or notes for a chord):
+                            // collected inside Live, so a voice starting doesn't recompose the whole app.
+                            voices = controller.liveKeys,
+                            haptics = appSettings.haptics,
+                            wireless = liveWireless,
                             oneGroup = appSettings.liveOneGroup,
                             onOneGroup = controller::setLiveOneGroup,
                             follow = appSettings.liveFollow,
@@ -629,6 +699,14 @@ class MainActivity : ComponentActivity() {
                                     selectTab(Tab.DEVICE)
                                 },
                                 onDelete = { controller.deleteTake(it) },
+                            ),
+                            edit = dev.arc.ep133.ui.screens.EditUi(
+                                on = liveEdit,
+                                onEdit = { on ->
+                                    // Only with the device there to write to.
+                                    if (on && !ready) controller.toast(dev.arc.ep133.text.MirrorText.EDIT_OFFLINE) else liveEdit = on
+                                },
+                                onPad = { pad -> controller.editTarget(pad)?.let { padSheet = pad to it } },
                             ),
                         )
                         Tab.DEVICE -> DeviceScreen(
@@ -660,6 +738,35 @@ class MainActivity : ComponentActivity() {
             }
             // The tab screens' sheets, over the frame (same condition as the branch above).
             if (onTabs) {
+                if (tab == Tab.LIVE) {
+                    val lastPadSheet = remember { mutableStateOf(padSheet) }.apply { if (padSheet != null) value = padSheet }.value
+                    fun closePadSheet() {
+                        padSheet = null
+                        if (playing?.startsWith("device:") == true) controller.stopPlayback()
+                    }
+                    ArcSheet(visible = padSheet != null, onDismiss = { closePadSheet() }) {
+                        lastPadSheet?.let { (pad, target) ->
+                            PadSheetContent(
+                                pad = pad,
+                                target = target,
+                                sounds = mirror?.sounds.orEmpty(),
+                                playing = playing,
+                                busy = state.busy,
+                                onPlay = { controller.playDeviceSound(it) },
+                                onStop = controller::stopPlayback,
+                                onPick = { slot ->
+                                    closePadSheet()
+                                    controller.assignPad(pad, target, slot)
+                                },
+                                onUpload = {
+                                    closePadSheet()
+                                    padUploadFor = pad to target
+                                    padUploadLauncher.launch(arrayOf("audio/*", "application/octet-stream"))
+                                },
+                            )
+                        }
+                    }
+                }
                 if (tab == Tab.DEVICE) {
                     val draft = state.browser.draft
                     val lastDraft = remember { mutableStateOf(draft) }.apply { if (draft != null) value = draft }.value
@@ -827,6 +934,8 @@ class MainActivity : ComponentActivity() {
                 text = toast?.text.orEmpty(),
                 error = toast?.error ?: false,
                 onTimeout = controller::dismissToast,
+                action = toast?.action,
+                onAction = toast?.onAction,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }

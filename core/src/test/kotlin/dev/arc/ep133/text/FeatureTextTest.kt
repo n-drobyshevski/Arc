@@ -3,6 +3,7 @@ package dev.arc.ep133.text
 import dev.arc.ep133.features.DiffResult
 import dev.arc.ep133.features.KeyMark
 import dev.arc.ep133.features.NoteNames
+import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.ProjectDiff
 import dev.arc.ep133.features.ProjectState
 import dev.arc.ep133.features.Scale
@@ -87,5 +88,31 @@ class FeatureTextTest {
         assertEquals(listOf("CHR", "MAJ", "MIN", "DOR", "PHR", "LYD", "MIX", "MAJ.P", "MIN.P", "BLU"), codes)
         assertEquals(codes.size, codes.toSet().size)
         assertTrue(codes.all { it.length <= 5 })
+    }
+
+    @Test
+    fun `device, settings and pad edit text`() {
+        assertEquals("free of 64 MB", FeatureText.freeOf(64.0 * 1048576))
+        assertEquals(listOf("Kicks", "Snares", "Hats", "Perc", "Bass", "Melodic", null), listOf(1, 100, 200, 300, 400, 500, 600).map(FeatureText::factoryCategory))
+        assertEquals("Kicks", FeatureText.factoryCategory(99))
+        assertEquals(null, FeatureText.factoryCategory(900))
+        assertEquals("In P3 \u00B7 7", FeatureText.inProject(3, 7))
+        assertEquals("P3", FeatureText.projectBadge(3))
+        assertEquals("352 KB \u00B7 7 sounds", FeatureText.projectSummary(352L * 1024, 7))
+        assertEquals("12 \u00B7 2.0 MB", FeatureText.soundsTotal(12, 2.0 * 1048576))
+        assertEquals(listOf("Auto", "1 octave", "1\u00BD", "2", "3 octaves"), SettingsText.PIANO_CHOICES.map(SettingsText::pianoKeys))
+        assertEquals("1\u00BD octaves", SettingsText.pianoKeysDescription(12))
+        assertEquals("Pad sounds \u00B7 69 KB", SettingsText.padSoundsShort("69 KB"))
+        val a8 = PhysicalPad(0, 10)
+        assertEquals("Pad A 8", MirrorText.padTitle(a8))
+        assertEquals("Project 1 \u00B7 now 101 snare 2", MirrorText.padSheetLine(1, 101, "snare 2"))
+        assertEquals("now empty", MirrorText.padNow(null, null))
+        assertEquals("now 007", MirrorText.padNow(7, null))
+        assertEquals("Pad A 8: vox chop", MirrorText.assigned(a8, "vox chop"))
+        assertEquals("Pad A 8: back to snare 2", MirrorText.restored(a8, "snare 2"))
+        assertEquals("snare 2 \u2192 vox chop", MirrorText.dropPreview("snare 2", "vox chop"))
+        assertEquals("empty \u2192 vox chop", MirrorText.dropPreview(null, "vox chop"))
+        assertEquals("KEYS \u00B7 FA5", MirrorText.lastNote(77, NoteNames.SOLFEGE).uppercase())
+        assertEquals("Keys on a piano", MirrorText.keysView(true))
     }
 }

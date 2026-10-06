@@ -1,8 +1,16 @@
-/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/SettingsScreen.kt */
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/SettingsScreen.kt
+ *
+ * The Step 1c page: each section a caption over a card of rows
+ * (components/SettingRow.css), in one scroll on a phone.
+ *
+ * Web only, from 1024px wide (the desk, theme/desk.css): one paper card up to
+ * 1040 wide, the window's height, a 210 wide section nav on its left (an LED
+ * per section, lit for the one in view) and the sections scrolling in the
+ * pane beside it. */
 
 /* Box(fillMaxSize, shell, TopCenter) > Column(widthIn(max 560), verticalScroll,
- * padding 16 / 16, top 12, bottom 32; 10 between children). Full screens scroll
- * the page (app.css); the body already keeps out of the safe areas. */
+ * padding 16 / 16, top 12, bottom 32). Full screens scroll the page (app.css);
+ * the body already keeps out of the safe areas. */
 .settings {
   display: flex;
   justify-content: center;
@@ -15,7 +23,6 @@
 .settings__column {
   display: flex;
   flex-direction: column;
-  gap: var(--space-10);
   width: 100%;
   max-width: var(--column-max);
   min-width: 0;
@@ -29,33 +36,134 @@
   align-items: center;
 }
 .settings__head > * { grid-area: head; }
-.settings__title { padding-inline: 54px; }
+.settings__head .settings__title { padding-inline: 54px; }
 .settings__close { justify-self: end; }
 
-/* Section: Caption with padding(top = 18). */
-.settings__section { margin-top: var(--space-18); }
-
-.settings__label { margin: 0; color: var(--ink); }
-.settings__note { margin: 0; color: var(--graphite); }
-.settings__version { margin: 0; color: var(--ink); }
-
-/* Row(spacedBy 10) of keys with weight(1f). */
-.settings__row {
+.settings__pane,
+.settings__scroll {
   display: flex;
-  gap: var(--space-10);
-}
-.settings__row > * { flex: 1 1 0; min-width: 0; }
-
-/* Row(CenterVertically, spacedBy 10): the copies' size (body15, ink, weight 1f) and Clear. */
-.settings__sounds {
-  display: flex;
-  align-items: center;
-  gap: var(--space-10);
-}
-.settings__sounds-size {
-  flex: 1 1 0;
+  flex-direction: column;
   min-width: 0;
-  margin: 0;
-  color: var(--ink);
 }
-.settings__sounds > :last-child { flex: none; }
+.settings__scroll { gap: var(--space-12); }
+
+/* A section: its caption, 10 over its card; 26 from the section above. */
+.settings__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  padding-top: var(--space-14);
+}
+.settings__section {
+  padding-inline: var(--space-2);
+  font-weight: var(--weight-bold);
+  scroll-margin-top: var(--space-16);
+}
+.settings__section:focus { outline: none; }
+.settings__section:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+
+/* Strings.storageNote under the Library card: small graphite, 4 in from its edge. */
+.settings__storage {
+  margin: 0;
+  padding-inline: var(--space-4);
+  color: var(--graphite);
+}
+
+/* The folder keys under the Library folder row, side by side. */
+.settings__keys {
+  display: flex;
+  gap: var(--space-10);
+  width: 100%;
+}
+.settings__keys > * { flex: 1 1 0; min-width: 0; }
+
+/* ---------- the desk (web only) ---------- */
+
+@media (min-width: 1024px) {
+  /* The card is one window high; the pane scrolls inside it. */
+  .settings {
+    align-items: stretch;
+    height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+    min-height: 0;
+    padding: var(--space-18) var(--desk-pad) var(--space-22);
+  }
+
+  .settings__column {
+    display: grid;
+    grid-template-columns: 210px minmax(0, 1fr);
+    max-width: 1040px;
+    padding: 0;
+    overflow: hidden;
+    background: var(--desk-paper);
+    border-radius: var(--radius-plate);
+  }
+
+  .settings__nav {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    padding: 26px var(--space-14);
+    border-right: 1px solid var(--row-rule);
+    overflow-y: auto;
+  }
+  .settings__nav .settings__title {
+    padding: 0 var(--space-12) var(--space-14);
+    text-align: start;
+  }
+  .settings__nav-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+  .settings__nav-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-10);
+    width: 100%;
+    min-height: 44px;
+    padding: var(--space-10) var(--space-12);
+    border-radius: var(--radius-field);
+    background: transparent;
+    color: var(--ink);
+    font-size: var(--size-body15);
+    font-weight: var(--weight-semi);
+    line-height: 1.35;
+    text-align: start;
+  }
+  .settings__nav-item:hover { background: var(--row-pressed); }
+  .settings__nav-item.is-on { background: var(--plate); }
+  /* The LED: unlit grey; the section in view lit signal orange, as the rail's keys. */
+  .settings__led {
+    flex: none;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--hw-led-off);
+  }
+  .settings__nav-item.is-on .settings__led {
+    background: var(--hw-led-on);
+    box-shadow: 0 0 6px var(--hw-led-on);
+  }
+
+  /* The pane: the close key's row on top, the sections scrolling under it. */
+  .settings__pane { min-height: 0; }
+  .settings__pane-head {
+    flex: none;
+    display: flex;
+    justify-content: flex-end;
+    padding: var(--space-14) var(--space-16) 0;
+  }
+  .settings__scroll {
+    position: relative;
+    flex: 1 1 0;
+    min-height: 0;
+    padding: 0 30px 40px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .settings__group { padding-top: var(--space-10); }
+  .settings__group:first-of-type { padding-top: 0; }
+}

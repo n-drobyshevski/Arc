@@ -46,6 +46,20 @@ export async function selectTab(page: Page, name: 'Backups' | 'Live' | 'Device')
 }
 
 /**
+ * Opens Settings: the nav rail's Settings key on the desktop layout (from
+ * 1024px wide, where the top bar has the theme switch in the gear's place),
+ * the top bar's gear below it.
+ */
+export async function openSettings(page: Page): Promise<void> {
+  const desk = (page.viewportSize()?.width ?? 0) >= 1024
+  const key = desk
+    ? page.locator('.nav-rail').getByRole('button', { name: 'Settings', exact: true })
+    : page.getByRole('banner').getByRole('button', { name: 'Settings', exact: true })
+  await key.click()
+  await expect(page.locator('.app__screen[data-view="settings"]')).toBeVisible()
+}
+
+/**
  * Imports a .pak through the Import key. The app makes a hidden <input type=file>
  * per pick and clicks it; Playwright intercepts that picker (FileChooser) and
  * sets the input's files, which fires its change event like a real choice.

@@ -40,6 +40,46 @@ class PianoTest {
     }
 
     @Test
+    fun `a chosen size is capped at what fits`() {
+        // Auto is the widest that fits.
+        assertEquals(22, Piano.whitesFor(1200f, null))
+        assertEquals(15, Piano.whitesFor(1200f, 15))
+        assertEquals(8, Piano.whitesFor(1200f, 8))
+        // Three octaves chosen, room for two: two.
+        assertEquals(15, Piano.whitesFor(809f, 22))
+        assertEquals(12, Piano.whitesFor(600f, 22))
+        // Smaller than a size chosen: never wider than the choice.
+        assertEquals(12, Piano.whitesFor(1200f, 12))
+        assertEquals(8, Piano.whitesFor(1200f, 10))
+        // Not even one octave: none, whatever was chosen.
+        assertEquals(0, Piano.whitesFor(351f, 8))
+        assertEquals(0, Piano.whitesFor(351f, null))
+        assertEquals(listOf(null, 8, 12, 15, 22), Piano.CHOICES)
+        // Settings greys out the sizes that don't fit.
+        assertEquals(listOf(8, 12), Piano.WHITES.filter { Piano.fits(634f, it) }.sorted())
+        assertFalse(Piano.fits(634f, 0))
+    }
+
+    @Test
+    fun `the piano needs room, and a portrait phone keeps the grid`() {
+        assertTrue(Piano.hasRoom(500f, 120f))
+        assertFalse(Piano.hasRoom(500f, 119f))
+        assertFalse(Piano.hasRoom(351f, 300f))
+        assertTrue(Piano.hasRoom(400f, 300f, 8))
+        // A portrait phone has no switch; a portrait tablet and anything wide do.
+        assertFalse(Piano.switchShown(landscape = false, windowWidthDp = 412f))
+        assertTrue(Piano.switchShown(landscape = false, windowWidthDp = 800f))
+        assertTrue(Piano.switchShown(landscape = true, windowWidthDp = 852f))
+        // Auto: the piano when wide; a choice holds where the switch shows and the piano fits.
+        assertTrue(Piano.showsPiano(KeysView.AUTO, landscape = true, windowWidthDp = 852f, room = true))
+        assertFalse(Piano.showsPiano(KeysView.AUTO, landscape = false, windowWidthDp = 800f, room = true))
+        assertTrue(Piano.showsPiano(KeysView.PIANO, landscape = false, windowWidthDp = 800f, room = true))
+        assertFalse(Piano.showsPiano(KeysView.PADS, landscape = true, windowWidthDp = 852f, room = true))
+        assertFalse(Piano.showsPiano(KeysView.PIANO, landscape = true, windowWidthDp = 852f, room = false))
+        assertFalse(Piano.showsPiano(KeysView.PIANO, landscape = false, windowWidthDp = 412f, room = true))
+    }
+
+    @Test
     fun `black keys sit on the seams, drawn narrower than they are hit`() {
         assertEquals(25, keys.size)
         assertEquals(15, keys.count { !it.black })

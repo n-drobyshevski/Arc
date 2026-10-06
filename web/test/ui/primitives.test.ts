@@ -4,7 +4,8 @@
 import { describe, expect, it } from 'vitest'
 import { createLongPress, LONG_PRESS_MS, tipAlign, type LongPressTimers } from '../../src/ui/components/IconBlock'
 import { litSegments, meterSegments } from '../../src/ui/components/Meter'
-import { rovingIndex } from '../../src/ui/components/Segmented'
+import { rovingIndex, rovingIndexSkipping } from '../../src/ui/components/Segmented'
+import { octaveKeys } from '../../src/ui/components/MiniPiano'
 import { takeChars } from '../../src/ui/components/Field'
 import { toastDuration, TOAST_MS, ERROR_TOAST_MS } from '../../src/ui/components/Toast'
 import { plateRowClass } from '../../src/ui/components/GridPlate'
@@ -276,5 +277,44 @@ describe('Waveform', () => {
 
   it('handles no columns', () => {
     expect(waveformBars([], 0, 0, 0, 100, 96)).toEqual([])
+  })
+})
+
+describe('roving focus over disabled choices', () => {
+  const off = (...i: number[]) => (n: number) => i.includes(n)
+
+  it('steps over the skipped ones, wrapping', () => {
+    expect(rovingIndexSkipping(0, 'ArrowRight', 5, off(1, 2))).toBe(3)
+    expect(rovingIndexSkipping(3, 'ArrowRight', 5, off(4))).toBe(0)
+    expect(rovingIndexSkipping(0, 'ArrowLeft', 5, off(4, 3))).toBe(2)
+    expect(rovingIndexSkipping(0, 'ArrowRight', 5, off())).toBe(1)
+  })
+
+  it('Home and End walk inwards from a skipped end', () => {
+    expect(rovingIndexSkipping(2, 'End', 5, off(4, 3))).toBe(2)
+    expect(rovingIndexSkipping(2, 'Home', 5, off(0))).toBe(1)
+    expect(rovingIndexSkipping(2, 'End', 5, off(4), true)).toBe(3)
+  })
+
+  it('gives up when every other choice is skipped, and ignores other keys', () => {
+    expect(rovingIndexSkipping(0, 'ArrowRight', 3, off(0, 1, 2))).toBeNull()
+    expect(rovingIndexSkipping(0, 'a', 3, off())).toBeNull()
+  })
+})
+
+describe('MiniPiano', () => {
+  it('lays one octave out: 7 whites across, the blacks on their gaps', () => {
+    const keys = octaveKeys()
+    expect(keys.map((k) => k.pc)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+    expect(keys.filter((k) => k.black).map((k) => k.pc)).toEqual([1, 3, 6, 8, 10])
+    const whites = keys.filter((k) => !k.black)
+    expect(whites.map((k) => k.left * 7)).toEqual([0, 1, 2, 3, 4, 5, 6])
+    expect(whites.every((k) => k.width === 1 / 7)).toBe(true)
+    // DI sits centred on the gap between DO and RE, 0.6 of a white wide.
+    const di = keys[1]!
+    expect((di.left + di.width / 2) * 7).toBeCloseTo(1)
+    expect(di.width * 7).toBeCloseTo(0.6)
+    // FI on the gap after FA (the fourth white).
+    expect((keys[6]!.left + keys[6]!.width / 2) * 7).toBeCloseTo(4)
   })
 })

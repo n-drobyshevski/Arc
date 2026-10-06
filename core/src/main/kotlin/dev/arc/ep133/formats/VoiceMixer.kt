@@ -15,16 +15,20 @@ import kotlin.math.pow
  * The same key again cuts the old voice short with a click-free fade, and past
  * [maxVoices] the oldest does the same: the oldest let go of first, then the
  * oldest still held, so a run up the keys keeps the other hand's chord.
+ * A press that turns out to be a scroll is [cut]: it fades out over
+ * [CHOKE_MS] at once, minimum gate or not.
  *
- * [start], [release] and [stopAll] may be called from any thread; they take
- * effect at the next [render], which only the output's thread calls.
+ * [start], [release], [cut] and [stopAll] may be called from any thread; they
+ * take effect at the next [render], which only the output's thread calls.
+ * [render] allocates nothing unless a voice starts or [keys] changes, so the
+ * output's thread doesn't feed the garbage collector.
  */
 class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
     companion object {
         const val MAX_VOICES = 8
         const val MIN_GATE_MS = 60
         const val FADE_MS = 24
-        /** A voice cut short (the same key again, or too many) fades this fast. */
+        /** A voice cut short (the same key again, too many, or [cut]) fades this fast. */
         const val CHOKE_MS = 3
 
         /** How much faster a sound is read to play [semitones] higher. */
@@ -37,6 +41,7 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
     private sealed interface Command {
         class Start(val key: String, val pcm: ShortArray, val channels: Int, val step: Double, val tag: Long) : Command
         class Release(val key: String) : Command
+        class Cut(val key: String) : Command
         data object StopAll : Command
     }
 
@@ -61,10 +66,10 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
     var frame = 0L
         private set
 
-    /** Voices that began in the last [render]. */
+    /** Voices that began in the last [render]; the same list each time, read it on the output's thread. */
     val started = ArrayList<Started>()
 
-    /** The keys sounding (and not cut short) after the last [render]. */
+    /** The keys sounding (and not cut short) after the last [render]: a new set only when they change. */
     var keys: Set<String> = emptySet()
         private set
 
@@ -83,6 +88,11 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
         commands.add(Command.Release(key))
     }
 
+    /** Ends voice [key] now, in [CHOKE_MS], even inside its [MIN_GATE_MS]: the press was a scroll. */
+    fun cut(key: String) {
+        commands.add(Command.Cut(key))
+    }
+
     /** Fades every voice out quickly. */
     fun stopAll() {
         commands.add(Command.StopAll)
@@ -94,30 +104,57 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
         while (true) apply(commands.poll() ?: break)
         if (mix.size < frames * 2) mix = FloatArray(frames * 2)
         java.util.Arrays.fill(mix, 0, frames * 2, 0f)
-        val it = voices.iterator()
-        while (it.hasNext()) if (!play(it.next(), frames)) it.remove()
+        // Ended voices dropped in place, by index: no iterator, no copy.
+        var kept = 0
+        for (i in voices.indices) {
+            val v = voices[i]
+            if (play(v, frames)) voices[kept++] = v
+        }
+        while (voices.size > kept) voices.removeAt(voices.size - 1)
         for (i in 0 until frames * 2) out[i] = mix[i].coerceIn(-32768f, 32767f).toInt().toShort()
         frame += frames
-        val now = voices.filterNot { it.choked }.mapTo(LinkedHashSet()) { it.key }
-        if (now != keys) keys = now
+        if (keysChanged()) keys = voices.filterNot { it.choked }.mapTo(LinkedHashSet()) { it.key }
+    }
+
+    /** Whether the voices not cut short differ from [keys], without building a set (each key has one such voice). */
+    private fun keysChanged(): Boolean {
+        var n = 0
+        for (i in voices.indices) {
+            val v = voices[i]
+            if (v.choked) continue
+            if (v.key !in keys) return true
+            n++
+        }
+        return n != keys.size
     }
 
     private fun apply(c: Command) {
         when (c) {
             is Command.Start -> {
                 if (c.pcm.size < c.channels) return
-                voices.filter { it.key == c.key && !it.choked }.forEach(::cut)
+                cutKey(c.key)
                 while (voices.count { !it.choked } >= maxVoices) {
                     cut(voices.firstOrNull { !it.choked && it.fadeAt != Long.MAX_VALUE } ?: voices.first { !it.choked })
                 }
                 voices += Voice(c.key, c.pcm, c.channels, c.step, frame)
                 started += Started(c.key, c.tag, frame)
             }
-            is Command.Release -> voices.filter { it.key == c.key && !it.choked && it.fadeAt == Long.MAX_VALUE }.forEach {
-                it.fadeAt = maxOf(frame, it.startFrame + minGate)
-                it.fadeFrames = fade
+            is Command.Release -> for (i in voices.indices) {
+                val v = voices[i]
+                if (v.key != c.key || v.choked || v.fadeAt != Long.MAX_VALUE) continue
+                v.fadeAt = maxOf(frame, v.startFrame + minGate)
+                v.fadeFrames = fade
             }
-            Command.StopAll -> voices.filterNot { it.choked }.forEach(::cut)
+            is Command.Cut -> cutKey(c.key)
+            Command.StopAll -> for (i in voices.indices) if (!voices[i].choked) cut(voices[i])
+        }
+    }
+
+    /** Cuts short the voice of [key], if one sounds. */
+    private fun cutKey(key: String) {
+        for (i in voices.indices) {
+            val v = voices[i]
+            if (v.key == key && !v.choked) cut(v)
         }
     }
 

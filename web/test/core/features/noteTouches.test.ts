@@ -9,7 +9,7 @@ describe('NoteTouchesTest', () => {
     expect(t.move(1, 60)).toEqual([])
     expect(t.move(1, 62)).toEqual([Release(60), Press(62)])
     expect(t.move(1, 64)).toEqual([Release(62), Press(64)])
-    expect([...t.held]).toEqual([64])
+    expect(t.held).toEqual(new Set([64]))
     // Off the plate lets go; back on plays again.
     expect(t.move(1, null)).toEqual([Release(64)])
     expect(t.move(1, null)).toEqual([])
@@ -25,7 +25,7 @@ describe('NoteTouchesTest', () => {
     // The second finger strikes it again.
     expect(t.down(2, 60)).toEqual([Press(60)])
     expect(t.up(1)).toEqual([])
-    expect([...t.held]).toEqual([60])
+    expect(t.held).toEqual(new Set([60]))
     expect(t.up(2)).toEqual([Release(60)])
     expect(t.held.size).toBe(0)
   })
@@ -38,7 +38,7 @@ describe('NoteTouchesTest', () => {
     expect(t.move(2, 60)).toEqual([Release(62), Press(60)])
     // Finger 2 slides on: 60 stays, held by finger 1.
     expect(t.move(2, 59)).toEqual([Press(59)])
-    expect(new Set(t.held)).toEqual(new Set([60, 59]))
+    expect(t.held).toEqual(new Set([60, 59]))
     // A finger landing again without its lift: its old note goes first.
     expect(t.down(2, 59)).toEqual([Release(59), Press(59)])
   })

@@ -7,8 +7,13 @@
 //
 // Like BasicTextField, the field shows [value]: an edit the caller rejects
 // (filters out) is undone, and input past [maxLength] is cut off.
+//
+// [icon] goes before the text (the Device tab's search glass). Kotlin's null
+// label (no caps line, the name as a contentDescription) is [hideLabel] here:
+// the label stays for screen readers only.
 import type { CSSProperties, JSX, Ref, TargetedInputEvent, TargetedKeyboardEvent } from 'preact'
 import { useId, useLayoutEffect, useRef, useState } from 'preact/hooks'
+import { Icon, type ArcIcon } from './Icons'
 import './Field.css'
 
 /** onValueChange(it.take(maxLength)) */
@@ -19,6 +24,10 @@ export function takeChars(text: string, maxLength: number | undefined): string {
 
 export interface FieldProps {
   label: string
+  /** The label is read by screen readers but not shown (Kotlin's null label). */
+  hideLabel?: boolean
+  /** An icon before the text (the search glass). */
+  icon?: ArcIcon
   value: string
   onValueChange: (value: string) => void
   singleLine?: boolean
@@ -93,12 +102,15 @@ export function Field(props: FieldProps): JSX.Element {
     },
   } as const
   return (
-    <div class={`field${props.class ? ` ${props.class}` : ''}`}>
-      <label class="field__label" for={id}>{label}</label>
+    <div class={`field${props.icon ? ' field--icon' : ''}${props.class ? ` ${props.class}` : ''}`}>
+      <label class={props.hideLabel ? 'sr-only' : 'field__label'} for={id}>{label}</label>
       {singleLine ? (
-        props.type === 'search'
-          ? <input {...common} {...single} type="search" />
-          : <input {...common} {...single} type="text" />
+        <div class="field__box">
+          {props.icon && <Icon icon={props.icon} size={20} color="var(--graphite)" class="field__icon" />}
+          {props.type === 'search'
+            ? <input {...common} {...single} type="search" />
+            : <input {...common} {...single} type="text" />}
+        </div>
       ) : (
         <textarea
           {...common}

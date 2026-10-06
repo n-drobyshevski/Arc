@@ -7,12 +7,16 @@
 // database opens here), the controller, and the app. ?demo keeps its settings
 // in memory and its library in its own database ("arc-demo"), so it never
 // touches the real ones (boot/browserDeps).
+//
+// Web only: desk.css, the desktop page's tokens (the app's desktop layout from
+// 1024px wide, see ui/useDesk.ts).
 import { effect } from '@preact/signals'
 import { render } from 'preact'
 import './ui/theme/fonts'
 import './ui/theme/tokens.css'
 import './ui/theme/cap.css'
 import './ui/theme/base.css'
+import './ui/theme/desk.css'
 import { App, CrashMessage } from './app'
 import { createBrowserDeps, pageStorage } from './boot/browserDeps'
 import { SettingsStore } from './platform/storage/settings'

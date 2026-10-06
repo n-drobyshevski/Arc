@@ -9,12 +9,18 @@
 // [echoPagesBigEndian], [corruptCrcUploads], [reportCrc], [silent],
 // [hideProjectList], [emptyPages], plus [pushPadActive]. The after-PUT re-init
 // is set synchronously after the reply (Kotlin), not in a queueMicrotask (JS).
+// A pad's `sym` write lands in its project's pad record, as Live's EDIT
+// expects of the device (community notes; see device.assignPad), so ?demo
+// shows a changed pad after the next read.
 
+import { fid as padFid } from '../../src/core/features/padPush'
 import { crc32 } from '../../src/core/formats/crc32'
+import { readTar } from '../../src/core/formats/tar'
 import { be16, be32, decodeFrame, readBe16, readBe32, u14le, type Frame } from '../../src/core/protocol/frame'
 import { pack7 } from '../../src/core/protocol/packed7'
 import type { Transport } from '../../src/core/protocol/transport'
 import { bytes } from '../../src/core/util/bytes'
+import { tarFile } from './bytes'
 import { responseFrame } from './scriptedTransport'
 
 export type Json = Record<string, unknown>
@@ -319,10 +325,33 @@ export class MockEP133 {
     if (node === 2000) putAll(this.projectsMeta, obj)
     else {
       const s = this.sounds.get(node)
-      if (!s) return this.reply(f, 1)
-      putAll(s.meta, obj)
+      if (s) putAll(s.meta, obj)
+      else if (padFid(node) === null || !this.setPadSym(node, obj)) return this.reply(f, 1)
     }
     this.reply(f, 0)
+  }
+
+  /** A pad's "sym" becomes the slot in its record (pads/<group>/pNN, bytes 1-2), added if the project has none. */
+  private setPadSym(node: number, patch: Json): boolean {
+    const fid = padFid(node)
+    const tar = fid === null ? undefined : this.projects.get(fid.project)
+    if (fid === null || !tar) return false
+    const sym = patch.sym
+    if (typeof sym !== 'number') return true
+    const slot = Math.trunc(sym)
+    const group = 'abcd'[fid.group]!
+    const entries = [...readTar(tar).entries()]
+    const at = entries.findIndex(([name, rec]) => {
+      const m = /(?:^|\/)pads\/([^/]+)\/p([0-9]+)$/.exec(name)
+      return m !== null && m[1] === group && Number(m[2]) === fid.pad && rec.length >= 3
+    })
+    const rec = at >= 0 ? entries[at]![1].slice() : new Uint8Array(26)
+    rec[1] = slot & 0xff
+    rec[2] = (slot >> 8) & 0xff
+    if (at >= 0) entries[at] = [entries[at]![0], rec]
+    else entries.push([`pads/${group}/p${String(fid.pad).padStart(2, '0')}`, rec])
+    this.projects.set(fid.project, tarFile(entries))
+    return true
   }
 
   // Guarded, unlike the JS: a node that is not on the 1000 grid is no project.

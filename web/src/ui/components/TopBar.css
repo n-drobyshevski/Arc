@@ -1,4 +1,9 @@
-/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Chrome.kt (TopBar) */
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Chrome.kt (TopBar)
+ *
+ * Web only, from 1024px wide (the desk): the row spans the page column up to
+ * 1200 (--top-bar-max, theme/desk.css; Android's landscape TopBar is 1200dp
+ * wide too), its sides on the desk's --desk-pad, and the theme switch
+ * (ThemeSwitch.css) stands in the settings key's place, 20 after the ? key. */
 
 .top-bar {
   display: flex;
@@ -6,14 +11,14 @@
   width: 100%;
 }
 
-/* Row: max 720, padding 16 / 12 top / 16 / 10 bottom. Android's 8dp item
+/* Row: max 720 (--top-bar-max), padding 16 / 12 top / 16 / 10 bottom. Android's 8dp item
  * spacing is drawn by the gap spans (and the spacer's minimum), so it can give
  * way on narrow screens instead of overflowing. */
 .top-bar__row {
   display: flex;
   align-items: center;
   width: 100%;
-  max-width: var(--wide-max);
+  max-width: var(--top-bar-max, var(--wide-max));
   padding: var(--space-12) var(--space-16) var(--space-10);
 }
 
@@ -34,6 +39,11 @@
   .top-bar__row .section-tag__text { font-size: var(--size-tab); }
 }
 
+/* The desk: the page column's row (SectionMenu.css lines its list up with these numbers). */
+@media (min-width: 1024px) {
+  .top-bar__row { padding: var(--space-18) var(--desk-pad) var(--space-12); }
+}
+
 /* The middle, when it holds something (Live's display line): it takes the gap, 8 in from its neighbours. */
 .top-bar__middle {
   flex: 1 1 0;
@@ -42,8 +52,9 @@
 }
 
 /* A short window wider than tall (a phone on its side): 6 above and below (the bar is
- * 56 high, not 66), and the row across the whole width, so the tag sits at the left. */
-@media (orientation: landscape) and (max-height: 479px) {
+ * 56 high, not 66), and the row across the whole width, so the tag sits at the left.
+ * Not on the desk, whose row keeps its own padding however low the window. */
+@media (orientation: landscape) and (max-height: 479px) and (max-width: 1023px) {
   .top-bar__row {
     max-width: 1200px;
     padding-top: 6px;

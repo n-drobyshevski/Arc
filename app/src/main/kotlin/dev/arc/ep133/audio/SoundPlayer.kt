@@ -4,14 +4,12 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
-import android.media.AudioFormat
 import android.media.AudioManager
-import android.media.AudioTrack
-import dev.arc.ep133.formats.Wav
+import dev.arc.ep133.formats.VoiceMixer
 import dev.arc.ep133.text.FeatureText
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlin.math.min
+import java.util.concurrent.Executors
 
 /** What [SoundPlayer.play] did. */
 sealed interface PlayResult {
@@ -27,18 +25,21 @@ sealed interface PlayResult {
  * of the sound playing, so lists can show a Stop key on the right row. Live's
  * pads and keys play through [LiveAudio] instead.
  *
- * The PCM is streamed to the output from a small thread, as media players do,
- * rather than handed over as one static buffer: a whole sample can be several
- * MB, and static tracks are meant for short clips (on some phones they play
- * without being heard over Bluetooth). While a sound plays arc holds transient
- * audio focus, so other players pause or duck.
+ * Its output works as Live's AudioTrack output does ([BurstOutput]): one
+ * low-latency stream at the phone's own rate, opened by the first sound and
+ * kept while sounds follow, let go of after [IDLE_NS] without one. A sound is a single
+ * [VoiceMixer] voice on it, read at its own rate (converted as it is mixed)
+ * straight from memory, so a several-MB sample needs no buffer of its own and
+ * a replay starts within a burst. While a sound plays arc holds transient
+ * audio focus, so other players pause or duck; it is asked for off the UI thread.
  */
 class SoundPlayer(context: Context? = null) {
     companion object {
         /** What [play] accepts; anything else is not played. */
         fun canPlay(channels: Int, sampleRate: Long) = channels in 1..2 && sampleRate in 4000L..192000L
 
-        private const val CHUNK = 16 * 1024
+        /** Nothing played for this long: the output is let go of, until the next sound. */
+        private const val IDLE_NS = 5_000_000_000L
 
         @android.annotation.SuppressLint("InlinedApi")
         fun isBluetooth(type: Int): Boolean = type in setOf(
@@ -73,6 +74,8 @@ class SoundPlayer(context: Context? = null) {
         .setUsage(AudioAttributes.USAGE_MEDIA)
         .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
         .build()
+    // Focus (and the volume watch) are asked for and let go of here, off the UI and audio threads.
+    private val focusThread = Executors.newSingleThreadExecutor { r -> Thread(r, "arc-player-focus").apply { isDaemon = true } }
     private val focus: AudioFocusRequest? = audio?.let {
         AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
             .setAudioAttributes(attributes)
@@ -80,132 +83,141 @@ class SoundPlayer(context: Context? = null) {
             .setOnAudioFocusChangeListener { change -> if (change < 0) stop() }
             .build()
     }
+    private var focused = false
 
-    /** One sound being played; the thread that feeds it owns (and releases) the track. */
-    private class Playback(val key: String, val track: AudioTrack) {
-        @Volatile var stopped = false
-        var released = false
+    /** Whether media volume is at zero, kept up to date while this output (or Live, which shares it) is open. */
+    val volume = VolumeWatch(context)
+
+    /** The open output and the thread that feeds it (and releases it). */
+    private class Stream(val output: BurstOutput, val mixer: VoiceMixer) {
+        @Volatile var running = true
     }
 
-    // What is playing, oldest first.
-    private val voices = LinkedHashMap<String, Playback>()
+    private var stream: Stream? = null
+    // Bumped by every play and stop: the output's thread shows what it plays only when no newer one waits.
+    @Volatile private var requests = 0L
     private val _playing = MutableStateFlow<String?>(null)
     val playing: StateFlow<String?> = _playing
 
-    private fun publish() {
-        _playing.value = voices.keys.lastOrNull()
-        if (voices.isEmpty()) focus?.let { audio?.abandonAudioFocusRequest(it) }
-    }
-
     /** Whether media volume is at zero (then nothing is heard even when the sound plays). */
-    fun volumeOff(): Boolean = audio?.getStreamVolume(AudioManager.STREAM_MUSIC) == 0
+    fun volumeOff(): Boolean = volume.off
 
     @Synchronized
     fun play(key: String, pcm: ByteArray, channels: Int, sampleRate: Int): PlayResult {
-        stop()
-        return start(key, pcm, channels, sampleRate)
+        if (!canPlay(channels, sampleRate.toLong())) {
+            stop()
+            return PlayResult.Failed(FeatureText.unplayableFormat(channels, sampleRate))
+        }
+        return play(key, PcmSound.of(pcm, channels, sampleRate))
     }
 
-    private fun start(key: String, pcm: ByteArray, channels: Int, sampleRate: Int): PlayResult {
-        if (!canPlay(channels, sampleRate.toLong())) return PlayResult.Failed(FeatureText.unplayableFormat(channels, sampleRate))
-        val frameBytes = 2 * channels
-        val length = pcm.size - pcm.size % frameBytes
-        if (length == 0 || Wav.isSilent(pcm)) return PlayResult.Failed(FeatureText.SILENT_SOUND)
-        val mask = if (channels == 2) AudioFormat.CHANNEL_OUT_STEREO else AudioFormat.CHANNEL_OUT_MONO
-        val minBuffer = AudioTrack.getMinBufferSize(sampleRate, mask, AudioFormat.ENCODING_PCM_16BIT)
-        if (minBuffer <= 0) return PlayResult.Failed(FeatureText.unplayableFormat(channels, sampleRate))
-        val track = try {
-            AudioTrack.Builder()
-                .setAudioAttributes(attributes)
-                .setAudioFormat(
-                    AudioFormat.Builder()
-                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                        .setSampleRate(sampleRate)
-                        .setChannelMask(mask)
-                        .build(),
-                )
-                .setTransferMode(AudioTrack.MODE_STREAM)
-                .setBufferSizeInBytes(minBuffer * 4)
-                .build()
-        } catch (e: Exception) {
-            return PlayResult.Failed(e.message ?: FeatureText.NO_AUDIO_OUTPUT)
-        }
-        if (track.state != AudioTrack.STATE_INITIALIZED) {
-            track.release()
-            return PlayResult.Failed(FeatureText.NO_AUDIO_OUTPUT)
-        }
-        // Denied focus (during a call, say) still plays: the user asked for the sound.
-        focus?.let { audio?.requestAudioFocus(it) }
-        val p = Playback(key, track)
-        try {
-            // Fill the buffer first so the output starts with sound, not an underrun.
-            val first = track.write(pcm, 0, min(length, minBuffer * 4), AudioTrack.WRITE_NON_BLOCKING).coerceAtLeast(0)
-            track.play()
-            voices[key] = p
-            publish()
-            Thread({ feed(p, pcm, first, length, frameBytes) }, "arc-player").apply { isDaemon = true }.start()
-        } catch (e: Exception) {
-            track.release()
-            if (voices.isEmpty()) focus?.let { audio?.abandonAudioFocusRequest(it) }
-            return PlayResult.Failed(e.message ?: FeatureText.NO_AUDIO_OUTPUT)
-        }
-        val out = track.routedDevice
-        return PlayResult.Started(routeName(out?.type, out?.productName?.toString()))
-    }
-
-    /** Writes the rest of the sound, waits until it has been heard, then lets go of the track. */
-    private fun feed(p: Playback, pcm: ByteArray, start: Int, length: Int, frameBytes: Int) {
-        val t = p.track
-        var off = start
-        while (!p.stopped && off < length) {
-            val n = t.write(pcm, off, min(CHUNK, length - off), AudioTrack.WRITE_NON_BLOCKING)
-            if (n < 0) break
-            if (n == 0) Thread.sleep(5) else off += n
-        }
-        // Wait for the last frame to play. A head that stops moving (the output went
-        // away) ends the wait after two seconds.
-        val frames = length / frameBytes
-        var last = -1
-        var still = 0
-        while (!p.stopped) {
-            val head = runCatching { t.playbackHeadPosition }.getOrDefault(frames)
-            if (head >= frames) break
-            still = if (head == last) still + 1 else 0
-            if (still > 100) break
-            last = head
-            Thread.sleep(20)
-        }
-        finish(p)
-    }
-
+    /** Plays a sound already decoded (kept for replays). */
     @Synchronized
-    private fun finish(p: Playback) {
-        if (voices[p.key] === p) {
-            voices.remove(p.key)
-            publish()
+    fun play(key: String, sound: PcmSound): PlayResult {
+        stop()
+        if (!canPlay(sound.channels, sound.sampleRate.toLong())) return PlayResult.Failed(FeatureText.unplayableFormat(sound.channels, sound.sampleRate))
+        if (sound.pcm.size < sound.channels || sound.silent) return PlayResult.Failed(FeatureText.SILENT_SOUND)
+        val s = stream ?: open() ?: return PlayResult.Failed(FeatureText.NO_AUDIO_OUTPUT)
+        s.mixer.start(key, sound.pcm, sound.channels, sound.sampleRate)
+        requests++
+        _playing.value = key
+        // Denied focus (during a call, say) still plays: the user asked for the sound.
+        if (!focused && focus != null) {
+            focused = true
+            focusThread.execute { audio?.requestAudioFocus(focus) }
         }
-        if (!p.released) {
-            p.released = true
-            runCatching { p.track.stop() }
-            p.track.release()
-        }
+        val out = s.output.route
+        return PlayResult.Started(routeName(out?.type, out?.productName?.toString()))
     }
 
     /** Stops everything playing. */
     @Synchronized
     fun stop() {
-        if (voices.isEmpty()) return
-        for (p in voices.values.toList()) halt(p)
+        if (_playing.value == null) return
+        stream?.mixer?.stopAll()
+        requests++
+        _playing.value = null
+        letGoOfFocus()
     }
 
-    /** Silences one sound now; the feeding thread releases its track when it sees the flag. */
-    private fun halt(p: Playback) {
-        p.stopped = true
-        if (!p.released) runCatching {
-            p.track.pause()
-            p.track.flush()
+    private fun letGoOfFocus() {
+        if (!focused || focus == null) return
+        focused = false
+        focusThread.execute { audio?.abandonAudioFocusRequest(focus) }
+    }
+
+    /** Opens the output and starts its thread; null when the phone gives none. Under the lock. */
+    private fun open(): Stream? {
+        val output = BurstOutput.open(audio, attributes) ?: return null
+        val s = Stream(output, VoiceMixer(output.rate, maxVoices = 1))
+        stream = s
+        // Off the caller's (main) thread too: watching asks another process. Posted in order with
+        // the stops below, so the starts and stops stay paired; until it is read, [volumeOff] asks.
+        focusThread.execute { volume.start() }
+        Thread({ run(s) }, "arc-player").apply { isDaemon = true }.start()
+        return s
+    }
+
+    /** Mixes and writes each burst just in time, and shows when the sound has ended. */
+    private fun run(s: Stream) {
+        android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
+        val o = s.output
+        val out = ShortArray(o.burst * 2)
+        var shown: Set<String>? = null
+        var shownRequest = -1L
+        var quietSince = 0L
+        try {
+            while (s.running) {
+                if (!o.ready()) continue
+                val request = requests
+                s.mixer.render(out, o.burst)
+                if (!o.write(out)) break
+                val keys = s.mixer.keys
+                if (keys !== shown || request != shownRequest) {
+                    shown = keys
+                    shownRequest = request
+                    ended(keys, request)
+                }
+                if (keys.isEmpty()) {
+                    val now = System.nanoTime()
+                    if (quietSince == 0L) quietSince = now
+                    if (now - quietSince > IDLE_NS && closeIfIdle(s, request)) break
+                } else {
+                    quietSince = 0L
+                }
+                o.adjust()
+            }
+        } finally {
+            o.release()
+            synchronized(this) {
+                // The output failed: nothing plays any more.
+                if (stream === s) {
+                    stream = null
+                    focusThread.execute { volume.stop() }
+                    _playing.value = null
+                    letGoOfFocus()
+                }
+            }
         }
-        if (voices[p.key] === p) voices.remove(p.key)
-        publish()
+    }
+
+    /** What the burst mixed after [request] sounds; once nothing does, the sound is over. */
+    @Synchronized
+    private fun ended(keys: Set<String>, request: Long) {
+        // A play or stop since then shows itself.
+        if (request != requests || keys.isNotEmpty() || _playing.value == null) return
+        _playing.value = null
+        letGoOfFocus()
+    }
+
+    /** Lets go of the output when nothing was played since [request]; false when something was. */
+    @Synchronized
+    private fun closeIfIdle(s: Stream, request: Long): Boolean {
+        if (request != requests || stream !== s) return false
+        stream = null
+        s.running = false
+        // Off the audio thread: letting go of the broadcasts asks another process.
+        focusThread.execute { volume.stop() }
+        return true
     }
 }

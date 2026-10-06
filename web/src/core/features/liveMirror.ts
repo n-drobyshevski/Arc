@@ -21,8 +21,20 @@
 import type { MidiEvent } from '../protocol/midiInput'
 import { pad as padOfNote, padKey, type PhysicalPad } from './padNotes'
 import type { LiveSnapshot } from './liveSnapshot'
-import { PadOrder } from './padPush'
+import { PadOrder, topNumber } from './padPush'
 import { groupOrder, type PadGroup } from './projectPads'
+
+/**
+ * Where a physical pad's sound is set (an addition): the active [project]'s
+ * pad file for [group] and [pad] (its number in the project file, pNN), and
+ * the [slot] its pad record holds now (null when empty or not in the records).
+ */
+export interface PadTarget {
+  readonly project: number
+  readonly group: number
+  readonly pad: number
+  readonly slot: number | null
+}
 
 /** A pad file id from a pad push: project 1..99, group 0..3 (A..D) and the pad's number in the project file (pNN). */
 export interface PadFid {
@@ -298,6 +310,55 @@ export class LiveMirror {
   nameOf(pad: { readonly group: number; readonly offset: number }): string | null {
     const slot = this.slotOf(pad)
     return slot != null ? (this.names.get(slot) ?? null) : null
+  }
+
+  /**
+   * A physical pad's number in the project file, to write its sound: the
+   * learned number, else (counting from the top, before any press) the
+   * numbering kmorrill's notes give, '7' = 1 down to ENTER = 12; counted
+   * from the bottom, the official note order plus one (see PadOrder).
+   * Null when that numbering's number already belongs to another, learned
+   * key: the device numbers its pads otherwise, and a write would land on
+   * that key's pad. The pad has to be pressed on the EP-133 first.
+   */
+  padNumber(pad: { readonly group: number; readonly offset: number }): number | null {
+    if (this.padOrder !== PadOrder.FROM_TOP) return pad.offset + 1
+    const learned = this.learned.get(pad.offset)
+    if (learned !== undefined) return learned
+    const top = topNumber(pad.offset)
+    return [...this.learned.values()].includes(top) ? null : top
+  }
+
+  /**
+   * Where [pad]'s sound is set in the active project, and the slot on it now
+   * (for the pad sheet's "now" line and for undo). Null while the active
+   * project is unknown, the device moved to one not read yet, or the pad's
+   * number isn't known (padNumber).
+   */
+  target(pad: { readonly group: number; readonly offset: number }): PadTarget | null {
+    const project = this.activeProject
+    if (project === null) return null
+    if (this.pushedProject != null && this.pushedProject !== project) return null
+    const number = this.padNumber(pad)
+    if (number === null) return null
+    return { project, group: pad.group, pad: number, slot: this.layout.get(String.fromCharCode(97 + pad.group))?.get(number) ?? null }
+  }
+
+  /**
+   * arc put [slot] on [t]'s pad (or put the old one back): the layout follows
+   * at once, so names and the saved read update without reading the project
+   * again. Ignored if the active project changed meanwhile.
+   */
+  assigned(t: PadTarget, slot: number | null): void {
+    if (t.project !== this.activeProject) return
+    const group = String.fromCharCode(97 + t.group)
+    const pads = new Map(this.layout.get(group) ?? [])
+    pads.set(t.pad, slot)
+    // Pads by number, as projectPads reads them (Kotlin toSortedMap).
+    const next = new Map(this.layout)
+    next.set(group, new Map([...pads.entries()].sort((a, b) => a[0] - b[0])))
+    this.layout = next
+    this.renameLastHit()
   }
 
   /** The state at [now] (ms): released pads past their fade are dropped, and a stale tempo is cleared. */

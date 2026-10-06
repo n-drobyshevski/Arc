@@ -5,6 +5,8 @@ import android.content.Intent
 import android.text.format.DateFormat
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
+import dev.arc.ep133.audio.PcmSound
+import dev.arc.ep133.audio.SoundMemory
 import dev.arc.ep133.backup.Backup
 import dev.arc.ep133.backup.PakDescription
 import dev.arc.ep133.backup.Paks
@@ -62,7 +64,8 @@ data class DeviceSummary(val info: DeviceInfo, val storage: Storage, val sounds:
 /** The progress sheet. */
 data class TaskUi(val title: String, val label: String, val fraction: Double, val cancelling: Boolean)
 
-data class ToastMsg(val id: Long, val text: String, val error: Boolean)
+/** A toast; [action] ("Undo") is a key at its end that runs [onAction]. */
+data class ToastMsg(val id: Long, val text: String, val error: Boolean, val action: String? = null, val onAction: (() -> Unit)? = null)
 
 /** The device browser (an addition to the web version). */
 data class BrowserUi(
@@ -117,6 +120,8 @@ data class MirrorUi(
     val error: String? = null,
     /** Not connected, showing the last read instead: when it was made ("Last seen 5 Oct, 14:02"). */
     val offline: String? = null,
+    /** The device's sounds as Live read them, for EDIT's pad sheet (empty until read, and offline). */
+    val sounds: List<dev.arc.ep133.protocol.SoundEntry> = emptyList(),
 )
 
 /** A backup opened for its contents screen (sounds and projects, playback, export). */
@@ -168,8 +173,41 @@ data class UiState(
 /** How much of Live's pad samples is kept decoded in memory (16-bit, so 32M samples). */
 private const val PAD_MEMORY_BYTES = 64L * 1024 * 1024
 
+/** How much of the backup sounds and takes played in lists is kept decoded, for a quick replay. */
+private const val PREVIEW_MEMORY_BYTES = 16L * 1024 * 1024
+
 /** A Live press let go of while its sound loaded for longer than this sounds only if no press came after it. */
 private const val LATE_LOAD_NS = 120_000_000L
+
+/** How often an idle mirror with a tempo showing looks whether it went stale. */
+private const val TEMPO_CHECK_MS = 250L
+
+/**
+ * How long an idle mirror showing [st] may sleep before [st] changes by
+ * itself at [now]: when its first released pad or note is past its fade, or
+ * (a tempo showing) the next look at whether the clock stopped. Null: nothing
+ * changes until the device sends something.
+ */
+internal fun mirrorSettlesIn(st: dev.arc.ep133.features.MirrorState, now: Long): Long? {
+    var due = Long.MAX_VALUE
+    for (l in st.pads.values) l.offAt?.let { due = minOf(due, it + dev.arc.ep133.features.LiveMirror.FADE_NS) }
+    for (l in st.notes.values) l.offAt?.let { due = minOf(due, it + dev.arc.ep133.features.LiveMirror.FADE_NS) }
+    // A moment past the fade, so the snapshot drops it.
+    var ms = if (due == Long.MAX_VALUE) null else ((due - now) / 1_000_000L + 5).coerceAtLeast(1L)
+    if (st.bpm != null) ms = minOf(ms ?: TEMPO_CHECK_MS, TEMPO_CHECK_MS)
+    return ms
+}
+
+/**
+ * The mirror state to show after [shown] when the snapshot is [next]: [shown]
+ * itself when the two read the same on screen, the tempo at the display's
+ * precision (MirrorText.bpm). The clock estimate wobbles on every clock
+ * message (48 a second at 120 BPM), so an unchanged screen isn't published again.
+ */
+internal fun shownMirror(shown: dev.arc.ep133.features.MirrorState?, next: dev.arc.ep133.features.MirrorState): dev.arc.ep133.features.MirrorState {
+    if (shown == null || shown.bpm?.let(dev.arc.ep133.text.MirrorText::bpm) != next.bpm?.let(dev.arc.ep133.text.MirrorText::bpm)) return next
+    return if (next.copy(bpm = shown.bpm) == shown) shown else next
+}
 
 class ArcController(
     private val context: Context,
@@ -206,25 +244,32 @@ class ArcController(
     /** The last backup a pad played from, opened, so the next taps are quick. */
     private var openPak: Pair<String, dev.arc.ep133.backup.Pak>? = null
     /** Live's own low-latency output, open while Live is on screen. */
-    private val liveAudio = dev.arc.ep133.audio.LiveAudio(context, ::liveStarted, ::takeDone)
+    private val liveAudio = dev.arc.ep133.audio.LiveAudio(context, ::liveStarted, ::takeDone, ::liveOutput)
     /** The Live voices sounding on the phone ("live:<group>:<offset>" pads, "note:<midi>" keys), for the rings. */
     val liveKeys: StateFlow<Set<String>> get() = liveAudio.keys
     /** Live's REC key. */
     val rec: StateFlow<dev.arc.ep133.features.RecState> get() = liveAudio.rec
+    /** Whether Live's sound goes to Bluetooth or a hearing aid, which plays late: its display line says so. */
+    val liveWireless: StateFlow<Boolean> get() = liveAudio.wireless
+    // The debug screen's latency test: Live's press-to-sound times by engine.
+    private val latencyTest = dev.arc.ep133.audio.LiveLatency()
+    /** The latency test's times and engines, for the debug screen. */
+    val latency: StateFlow<dev.arc.ep133.audio.LiveLatency.State> get() = latencyTest.state
     private val takeStore by lazy { dev.arc.ep133.data.Takes(java.io.File(context.filesDir, "takes")) }
     private val _takes = MutableStateFlow<List<dev.arc.ep133.data.TakeInfo>>(emptyList())
     /** Live's recorded takes, newest first. */
     val takes: StateFlow<List<dev.arc.ep133.data.TakeInfo>> = _takes.asStateFlow()
     // Live's pad samples decoded and ready ("slot:name"), so a press plays at once; the
     // least recently played go past PAD_MEMORY_BYTES. Main thread only.
-    private val padMemory = LinkedHashMap<String, PadAudio>(16, 0.75f, true)
-    private var padMemoryBytes = 0L
+    private val padMemory = SoundMemory<String>(PAD_MEMORY_BYTES)
+    // Previews decoded once and played again at once: backup sounds and takes, by the player's key.
+    private val previews = SoundMemory<String>(PREVIEW_MEMORY_BYTES)
     // A sample on its way to memory for a press, by the same key: the presses that come
     // meanwhile (a glissando over the keys) wait for that one load. Main thread only.
-    private val padLoads = HashMap<String, kotlinx.coroutines.Deferred<PadAudio?>>()
+    private val padLoads = HashMap<String, kotlinx.coroutines.Deferred<PcmSound?>>()
     // The slot the background copy is reading and its sound once kept, so a press on it waits
     // for that read instead of reading it again. Main thread only.
-    private var copying: Pair<Int, kotlinx.coroutines.CompletableDeferred<PadAudio?>>? = null
+    private var copying: Pair<Int, kotlinx.coroutines.CompletableDeferred<PcmSound?>>? = null
     // Counts the sounds presses read from the device, so the copy notices one it was about to read.
     private var pressReads = 0
     // When the latest Live press (pad or key) was made, for the late-load rule in startHeld.
@@ -267,6 +312,9 @@ class ArcController(
             }
         }
         library.onExternalError = { msg -> scope.launch { toast(FeatureText.copyFailed(msg), error = true) } }
+        // The debug screen's engine choice, from the next time Live opens its output.
+        liveAudio.engine = settingsStore.settings.value.liveEngine
+        scope.launch { liveAudio.engineInfo.collect { info -> info?.let(latencyTest::opened) } }
         scope.launch { loadTakes() }
         _state.update { it.copy(keysPad = savedKeysPad()) }
         scope.launch {
@@ -313,8 +361,8 @@ class ArcController(
 
     // ---------- toast ----------
 
-    fun toast(text: String, error: Boolean = false) {
-        _state.update { it.copy(toast = ToastMsg(toastIds.incrementAndGet(), text, error)) }
+    fun toast(text: String, error: Boolean = false, action: String? = null, onAction: (() -> Unit)? = null) {
+        _state.update { it.copy(toast = ToastMsg(toastIds.incrementAndGet(), text, error, action, onAction)) }
     }
 
     /**
@@ -384,8 +432,8 @@ class ArcController(
 
     // ---------- long-running tasks ----------
 
-    private suspend fun <T> runTask(title: String, fn: suspend (onProgress: (Progress) -> Unit, signal: CancelSignal) -> T): T? {
-        if (!awaitDevice()) return null
+    private suspend fun <T> runTask(title: String, wait: Boolean = false, fn: suspend (onProgress: (Progress) -> Unit, signal: CancelSignal) -> T): T? {
+        if (!(if (wait) awaitDeviceWaiting() else awaitDevice())) return null
         _state.update { it.copy(busy = true, task = TaskUi(title, "", 0.0, cancelling = false)) }
         val signal = CancelSignal()
         abortCurrent = signal
@@ -467,9 +515,9 @@ class ArcController(
      * Runs a short device read that must not overlap a transfer (the device
      * handles one conversation at a time). Returns null if something else is busy.
      */
-    private suspend fun <T> exclusive(reading: String, quiet: Boolean = false, block: suspend (Session) -> T): T? {
+    private suspend fun <T> exclusive(reading: String, quiet: Boolean = false, wait: Boolean = false, block: suspend (Session) -> T): T? {
         val s = session ?: return null
-        if (!awaitDevice()) return null
+        if (!(if (wait) awaitDeviceWaiting() else awaitDevice())) return null
         _state.update { it.copy(busy = true, browser = it.browser.copy(reading = reading)) }
         return try {
             block(s)
@@ -500,6 +548,21 @@ class ArcController(
             }
         }
         return !_state.value.busy
+    }
+
+    /**
+     * [awaitDevice] for an action the user already chose (a pick, an UNDO):
+     * it waits out whatever holds the device, such as Live's read when the
+     * app comes back from the file picker, rather than drop the action.
+     * False only when the connection goes meanwhile.
+     */
+    private suspend fun awaitDeviceWaiting(): Boolean {
+        val s = session ?: return false
+        while (session === s) {
+            if (awaitDevice()) return session === s
+            _state.first { !it.busy || session !== s }
+        }
+        return false
     }
 
     fun refreshBrowser(): Job = scope.launch { refreshAll(quiet = false) }
@@ -599,9 +662,26 @@ class ArcController(
      */
     private var playToken = 0L
 
-    /** Downloads a sound from the device and plays it (an addition to the web version). */
+    /**
+     * Plays a sound on the device (an addition to the web version): from Live's
+     * copy in memory or arc's copy on the phone when either is the device's
+     * current sound, else downloaded. A download plays first and is kept after,
+     * so Live (and the next play) needn't read it again.
+     */
     fun playDeviceSound(slot: Int): Job = scope.launch {
         val token = ++playToken
+        val key = "device:$slot"
+        val listed = _state.value.browser.contents?.sounds?.firstOrNull { it.slot == slot } ?: deviceSounds[slot]
+        if (listed != null) {
+            val held = padMemory[memoryKey(slot, listed.name)]
+                ?: withContext(Dispatchers.IO) {
+                    if (padSounds.fresh(slot, listed.name, listed.size)) padSounds.get(slot, listed.name) else null
+                }?.let { wav -> runCatching { withContext(Dispatchers.Default) { PcmSound.ofWav(wav) } }.getOrNull() }
+            if (held != null) {
+                if (token == playToken) startSound(key, held)
+                return@launch
+            }
+        }
         // Played straight from the list: read the channels and rate first when they aren't known yet.
         val d = _state.value.browser.details[slot]
             ?: exclusive("play:$slot") { DeviceBrowser.soundDetails(it, slot) }
@@ -610,11 +690,10 @@ class ArcController(
         if (token != playToken) return@launch
         // Not cancelled on stop: an interrupted download would leave the session out of step.
         val pcm = exclusive("play:$slot") { s -> dev.arc.ep133.protocol.Fs.download(s, slot) } ?: return@launch
-        // Live can play it later without the device.
-        val listed = _state.value.browser.contents?.sounds?.firstOrNull { it.slot == slot } ?: deviceSounds[slot]
-        if (listed != null) keepPadSound(slot, listed.name, listed.size, pcm, d.channels, d.sampleRate)
-        if (token != playToken) return@launch
-        startSound("device:$slot", pcm, d.channels.toInt(), d.sampleRate.toInt())
+        if (token == playToken) startSound(key, pcm, d.channels.toInt(), d.sampleRate.toInt())
+        // Live can play it later without the device; kept after the sound started, not awaited.
+        val known = _state.value.browser.contents?.sounds?.firstOrNull { it.slot == slot } ?: deviceSounds[slot]
+        if (known != null) scope.launch { keepPadSound(slot, known.name, known.size, pcm, d.channels, d.sampleRate) }
     }
 
     /**
@@ -622,15 +701,20 @@ class ArcController(
      * can't play, or media volume at zero. Where the sound went is noted in the
      * debug log, for reports of a sound that plays but isn't heard.
      */
-    private fun startSound(key: String, pcm: ByteArray, channels: Int, sampleRate: Int) {
-        val result = player.play(key, pcm, channels, sampleRate)
+    private fun startSound(key: String, pcm: ByteArray, channels: Int, sampleRate: Int) =
+        played(key, player.play(key, pcm, channels, sampleRate), pcm.size / (2.0 * channels) / sampleRate, channels, sampleRate)
+
+    /** [startSound] for a sound already decoded. */
+    private fun startSound(key: String, sound: PcmSound) =
+        played(key, player.play(key, sound), sound.pcm.size.toDouble() / sound.channels / sound.sampleRate, sound.channels, sound.sampleRate)
+
+    private fun played(key: String, result: dev.arc.ep133.audio.PlayResult, seconds: Double, channels: Int, sampleRate: Int) {
         when (val r = result) {
             is dev.arc.ep133.audio.PlayResult.Failed -> {
                 trafficLog.note("play $key failed: ${r.reason}")
                 toast(FeatureText.cantPlay(r.reason), error = true)
             }
             is dev.arc.ep133.audio.PlayResult.Started -> {
-                val seconds = pcm.size / (2.0 * channels) / sampleRate
                 trafficLog.note(FeatureText.playNote(key, sampleRate, channels, seconds, r.route))
                 if (player.volumeOff()) toast(FeatureText.VOLUME_OFF)
             }
@@ -672,15 +756,16 @@ class ArcController(
         _state.update { it.copy(contents = null) }
     }
 
-    /** Plays a sound from an opened backup; no device needed. */
+    /** Plays a sound from an opened backup; no device needed. Decoded once, so a replay starts at once. */
     fun playBackupSound(slot: Int): Job = scope.launch {
         val token = ++playToken
         val c = _state.value.contents ?: return@launch
         val snd = c.pak?.sounds?.get(slot) ?: return@launch
+        val key = "backup:${c.backupId}:$slot"
         try {
-            val w = withContext(Dispatchers.Default) { Wav.decode(snd.wav) }
+            val sound = previews[key] ?: withContext(Dispatchers.Default) { PcmSound.ofWav(snd.wav) }.also { previews.put(key, it) }
             if (token != playToken || _state.value.contents?.backupId != c.backupId) return@launch
-            startSound("backup:${c.backupId}:$slot", w.pcm, w.channels, w.sampleRate.toInt())
+            startSound(key, sound)
         } catch (e: Throwable) {
             if (e is kotlinx.coroutines.CancellationException) throw e
             toast(e.message ?: e.toString(), error = true)
@@ -744,29 +829,41 @@ class ArcController(
         mirror = m
         mirrorSession = s
         _state.update { it.copy(mirror = MirrorUi(m.snapshot(System.nanoTime()), loading = true)) }
-        // Listen first, so nothing played while reading is missed.
+        // Listen first, so nothing played while reading is missed. Each change marks the
+        // mirror dirty and wakes the publishing loop below.
         val dirty = java.util.concurrent.atomic.AtomicBoolean(true)
+        val news = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
         val listen = scope.launch(Dispatchers.Default) {
             events.collect {
                 m.onMidi(it)
                 dirty.set(true)
+                news.trySend(Unit)
             }
         }
         mirrorPushOff = s.onPush { f ->
             val fid = dev.arc.ep133.features.PadPush.parse(f) ?: return@onPush
             m.onPadPush(fid, System.nanoTime())
             dirty.set(true)
+            news.trySend(Unit)
             // Another project on the device: read its pads.
             if (fid.project != m.snapshot(System.nanoTime()).activeProject) loadMirrorProject(m, fid.project)
         }
-        // At most ~30 states a second. An unchanged state is equal to the last one, so
-        // StateFlow drops it and nothing redraws; time-based changes (pruned pads, a
-        // tempo gone stale) still get through. The fade itself runs on the screen's frame clock.
-        val tick = scope.launch {
+        // A new state when something came in, at most one a frame (on the screen's frame clock,
+        // so it lands in the next frame). Idle, it sleeps until the next news, waking only to let
+        // time-based changes through (released pads pruned, a tempo gone stale). An unchanged
+        // state (the tempo as the display shows it) is the last one again, so StateFlow drops it
+        // and nothing redraws. The fade itself runs on the screen's frame clock.
+        val tick = scope.launch(androidx.compose.ui.platform.AndroidUiDispatcher.Main) {
+            var shown: dev.arc.ep133.features.MirrorState? = null
             while (true) {
-                kotlinx.coroutines.delay(33)
+                if (!dirty.get()) {
+                    val wait = shown?.let { mirrorSettlesIn(it, System.nanoTime()) }
+                    if (wait == null) news.receive() else kotlinx.coroutines.withTimeoutOrNull(wait) { news.receive() }
+                }
+                androidx.compose.runtime.withFrameNanos { }
                 dirty.set(false)
-                val st = m.snapshot(System.nanoTime())
+                val st = shownMirror(shown, m.snapshot(System.nanoTime()))
+                shown = st
                 _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(state = st)) } ?: cur }
             }
         }
@@ -781,8 +878,7 @@ class ArcController(
             if (mirror !== m) break
             ok = exclusive("mirror", quiet = tries > 1) { ss ->
                 val c = DeviceBrowser.contents(ss)
-                deviceSounds = c.sounds.associateBy { it.slot }
-                m.setNames(c.sounds.associate { it.slot to it.name })
+                setLiveSounds(m, c.sounds)
                 val active = runCatching { Fs.getMetadata(ss, Device.PROJECTS_NODE).asObject()["active"] }.getOrNull()
                 val project = (active as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDoubleOrNull()?.toInt()?.let(Device::projectFromNode)
                 val groups = project?.let { p -> runCatching { DeviceBrowser.projectLayout(ss, p).pads }.getOrNull() } ?: emptyList()
@@ -792,6 +888,7 @@ class ArcController(
         }
         if (mirror === m) {
             dirty.set(true)
+            news.trySend(Unit)
             if (ok == true) {
                 saveLastRead(m)
                 preloadPads(m)
@@ -903,7 +1000,7 @@ class ArcController(
                 // A press took this sound meanwhile (or read one from the device): look again.
                 if (pressLoading(todo.slot) || pressReads != reads) continue
                 _state.update { it.copy(backgroundRead = true) }
-                val read = kotlinx.coroutines.CompletableDeferred<PadAudio?>()
+                val read = kotlinx.coroutines.CompletableDeferred<PcmSound?>()
                 copying = todo.slot to read
                 try {
                     val pcm = try {
@@ -927,10 +1024,10 @@ class ArcController(
     }
 
     /** Saves a sound read from the device; with Live open it goes into memory too, and is returned. */
-    private suspend fun keepPadSound(slot: Int, name: String, size: Long, pcm: ByteArray, channels: Double, sampleRate: Double): PadAudio? {
+    private suspend fun keepPadSound(slot: Int, name: String, size: Long, pcm: ByteArray, channels: Double, sampleRate: Double): PcmSound? {
         // Live is open: ready to play too.
         val a = if (mirror != null) {
-            withContext(Dispatchers.Default) { PadAudio.of(pcm, channels.toInt(), sampleRate.toInt()) }.also { keepInMemory(slot, name, it) }
+            withContext(Dispatchers.Default) { PcmSound.of(pcm, channels.toInt(), sampleRate.toInt()) }.also { keepInMemory(slot, name, it) }
         } else {
             null
         }
@@ -946,16 +1043,63 @@ class ArcController(
 
     // Live's pads and keys sound while held (a gate): the voices whose finger is still down.
     private val held = HashSet<String>()
+    // Pads whose press turned out to be a scroll: one still loading doesn't sound at all.
+    private val cut = HashSet<String>()
+    // Presses on the scrolling page that may still turn into a scroll ([playPad] unsure), until
+    // [keepPad] or [cutPad]: whether the sound already started (from memory) or waits to load.
+    private val unsure = HashMap<String, UnsurePress>()
 
-    /** Opens Live's sound output (Live came on screen), so the first press is as quick as the rest. */
+    private class UnsurePress(val started: Boolean, val pressedAt: Long, val token: Long)
+
+    // Voices started after their sample had to load (or wait out the scroll window): their latency
+    // is logged, but kept out of the latency test, which times only presses played from memory.
+    private val unmeasured = HashSet<String>()
+
+    // Whether Live's output is open (and so watches the volume for the presses).
+    private var liveAudioOpen = false
+
+    /**
+     * Opens Live's sound output (Live came on screen), so the first press is as
+     * quick as the rest; the volume is watched meanwhile, so a press doesn't ask for it,
+     * and the pad sounds already in memory are handed to it ([prepareLive]).
+     * The debug log gets how it was set up (native or AudioTrack) once per
+     * open: not again for a recreated activity that finds it open.
+     */
     fun openLiveAudio() {
-        trafficLog.note("live audio: " + if (liveAudio.open()) liveAudio.description else "no output")
+        if (!liveAudioOpen) {
+            liveAudioOpen = true
+            player.volume.start()
+        }
+        if (liveAudio.isOpen) return
+        val opened = liveAudio.open()
+        trafficLog.note("live audio: " + if (opened) liveAudio.description else "no output")
+        if (opened) prepareLive(padMemory.sounds())
+    }
+
+    /**
+     * Hands [sounds] to Live's output off the main thread, so their first press
+     * finds them ready (the native engine copies each into its own memory).
+     * Nothing while Live's output is closed: [openLiveAudio] hands over all of
+     * [padMemory] when it opens.
+     */
+    private fun prepareLive(sounds: List<PcmSound>) {
+        if (!liveAudio.isOpen || sounds.isEmpty()) return
+        scope.launch(Dispatchers.Default) {
+            for (a in sounds) if (!a.silent) liveAudio.prepare(a.pcm, a.channels)
+        }
     }
 
     /** Closes it (Live left the screen). */
     fun closeLiveAudio() {
         held.clear()
+        cut.clear()
+        unsure.clear()
+        unmeasured.clear()
         liveAudio.close()
+        if (liveAudioOpen) {
+            liveAudioOpen = false
+            player.volume.stop()
+        }
     }
 
     /**
@@ -966,24 +1110,70 @@ class ArcController(
      * plays to the end. A stop (leaving Live) drops one still loading, and so
      * does letting go before a slow load ends; other taps don't, unlike the
      * lists' one-at-a-time Play.
+     *
+     * [unsure]: a press on the scrolling page, which may still turn into a
+     * scroll. A sample in memory sounds at once all the same; the rest (the
+     * KEYS pad, a load from the device, the "no sample" toast) waits for
+     * [keepPad], and [cutPad] drops it.
+     *
+     * [pressedAt] (System.nanoTime) is when the finger came down, from the
+     * touch event ([dev.arc.ep133.audio.PressTime]): the latency is counted from it.
      */
-    fun playPad(pad: dev.arc.ep133.features.PhysicalPad, hold: Boolean = true): Job {
-        val pressedAt = System.nanoTime()
-        lastPressAt = pressedAt
+    fun playPad(
+        pad: dev.arc.ep133.features.PhysicalPad,
+        hold: Boolean = true,
+        unsure: Boolean = false,
+        pressedAt: Long = System.nanoTime(),
+    ): Job? {
         val key = "live:${pad.group}:${pad.offset}"
         if (hold) held += key
-        // Main.immediate: with the sample in memory this runs to the end before returning.
-        return scope.launch {
-            val token = playToken
-            // The pad tapped is also the sound KEYS plays; it is loaded right here, so no preload for it.
-            setKeysPad(pad)
-            val a = padAudio(pad) ?: return@launch
-            if (token == playToken) startHeld(key, hold, a, 0, pressedAt)
+        cut -= key
+        this.unsure -= key
+        // The sound first: with the sample in memory it starts before any bookkeeping.
+        val ready = padInMemory(pad)
+        if (unsure && hold) {
+            // Not yet the latest press either: a scroll mustn't drop another press's late load.
+            if (ready != null) startHeld(key, hold, ready, 0, pressedAt, measured = true)
+            this.unsure[key] = UnsurePress(ready != null, pressedAt, playToken)
+            return null
         }
+        lastPressAt = pressedAt
+        if (ready != null) startHeld(key, hold, ready, 0, pressedAt, measured = true)
+        // The pad tapped is also the sound KEYS plays; it is loaded right here, so no preload for it.
+        setKeysPad(pad)
+        return if (ready != null) null else loadAndStart(pad, key, hold, pressedAt, playToken)
+    }
+
+    /**
+     * The press on the scrolling page was a press after all (the scroll window
+     * closed, or the finger lifted inside it): the pad becomes the KEYS sound,
+     * and one not in memory loads and plays now.
+     */
+    fun keepPad(pad: dev.arc.ep133.features.PhysicalPad): Job? {
+        val key = "live:${pad.group}:${pad.offset}"
+        val u = unsure.remove(key) ?: return null
+        lastPressAt = maxOf(lastPressAt, u.pressedAt)
+        setKeysPad(pad)
+        return if (u.started) null else loadAndStart(pad, key, true, u.pressedAt, u.token)
+    }
+
+    /** Loads [pad]'s sample (copy, backup or device) and starts its voice, unless a stop came meanwhile. */
+    private fun loadAndStart(pad: dev.arc.ep133.features.PhysicalPad, key: String, hold: Boolean, pressedAt: Long, token: Long): Job = scope.launch {
+        val a = padAudio(pad) ?: return@launch
+        if (token == playToken) startHeld(key, hold, a, 0, pressedAt, measured = false)
     }
 
     /** The finger left the pad: its sound fades out. */
     fun releasePad(pad: dev.arc.ep133.features.PhysicalPad) = release("live:${pad.group}:${pad.offset}")
+
+    /** The press on the pad was a scroll after all: its sound ends at once (one still loading never starts). */
+    fun cutPad(pad: dev.arc.ep133.features.PhysicalPad) {
+        val key = "live:${pad.group}:${pad.offset}"
+        held -= key
+        // One still unsure never loads, nor becomes the KEYS sound.
+        if (unsure.remove(key) == null) cut += key
+        liveAudio.cut(key)
+    }
 
     private fun release(key: String) {
         held -= key
@@ -996,29 +1186,78 @@ class ArcController(
      * latest press does: a single quick tap on a sound not in memory yet is
      * still heard, but a first glissando over one doesn't end in a burst of
      * every note it slid over.
+     *
+     * [measured]: the sample was in memory at the press, so its latency goes
+     * into the latency test; a load's time would only blur it.
      */
-    private fun startHeld(key: String, hold: Boolean, a: PadAudio, semitones: Int, pressedAt: Long) {
+    private fun startHeld(key: String, hold: Boolean, a: PcmSound, semitones: Int, pressedAt: Long, measured: Boolean) {
+        if (key in cut) return
         val lifted = hold && key !in held
         if (lifted && pressedAt != lastPressAt && System.nanoTime() - pressedAt > LATE_LOAD_NS) return
         when {
             a.silent -> toastOnce(FeatureText.SILENT_SOUND)
             !liveAudio.play(key, a.pcm, a.channels, a.sampleRate, semitones, pressedAt) -> toastOnce(FeatureText.NO_AUDIO_OUTPUT, error = true)
             else -> {
+                // One from memory clears a mark left by a loaded voice that was never heard (cut first).
+                if (measured) unmeasured -= key else unmeasured += key
                 if (lifted) liveAudio.release(key)
                 if (player.volumeOff()) toastOnce(FeatureText.VOLUME_OFF)
             }
         }
     }
 
-    /** A voice was heard: how long after the press, in the debug log; Bluetooth's delay pointed out once. */
-    private fun liveStarted(key: String, latencyMs: Double, route: android.media.AudioDeviceInfo?) {
-        val where = dev.arc.ep133.audio.SoundPlayer.routeName(route?.type, route?.productName?.toString())
-        trafficLog.note(dev.arc.ep133.text.MirrorText.latencyNote(key, latencyMs, where))
-        if (!toldBluetooth && route != null && dev.arc.ep133.audio.SoundPlayer.isBluetooth(route.type)) {
-            toldBluetooth = true
-            scope.launch { toast(dev.arc.ep133.text.MirrorText.BLUETOOTH_DELAY) }
+    /**
+     * A voice was heard: how long after the press, in the debug log and (when
+     * it played from memory) the latency test's times for [engine];
+     * Bluetooth's delay pointed out once.
+     * Called on the audio thread with the bare numbers, so the words are made
+     * here, on the main thread.
+     */
+    private fun liveStarted(key: String, latencyMs: Double, route: android.media.AudioDeviceInfo?, engine: String) {
+        scope.launch {
+            if (!unmeasured.remove(key)) latencyTest.heard(engine, latencyMs)
+            val where = dev.arc.ep133.audio.SoundPlayer.routeName(route?.type, route?.productName?.toString())
+            trafficLog.note(dev.arc.ep133.text.MirrorText.latencyNote(key, latencyMs, where))
+            if (!toldBluetooth && route != null && dev.arc.ep133.audio.SoundPlayer.isBluetooth(route.type)) {
+                toldBluetooth = true
+                toast(dev.arc.ep133.text.MirrorText.BLUETOOTH_DELAY)
+            }
         }
     }
+
+    /** Live's output changed while open (a native stream reopened or retuned, or the switch to AudioTrack): in the debug log. */
+    private fun liveOutput(description: String) {
+        scope.launch {
+            trafficLog.note("live audio: $description")
+            // A press or REC may have opened it ([openLiveAudio] had failed), or the switch to
+            // AudioTrack: the sounds kept go to it too (those it holds already are only found).
+            prepareLive(padMemory.sounds())
+        }
+    }
+
+    /**
+     * The debug screen's engine choice for Live ([dev.arc.ep133.text.LiveEngine]),
+     * kept in the preferences only. An output open now reopens on it; what
+     * was sounding stops, as when Live closes.
+     */
+    fun setLiveEngine(engine: dev.arc.ep133.text.LiveEngine) {
+        // Not changeSettings: the choice stays out of library.json.
+        settingsStore.update { it.copy(liveEngine = engine) }
+        if (liveAudio.engine == engine) return
+        liveAudio.engine = engine
+        if (!liveAudio.isOpen) return
+        held.clear()
+        cut.clear()
+        unsure.clear()
+        unmeasured.clear()
+        liveAudio.close()
+        val opened = liveAudio.open()
+        trafficLog.note("live audio: " + if (opened) liveAudio.description else "no output")
+        if (opened) prepareLive(padMemory.sounds())
+    }
+
+    /** Forgets the latency test's times. */
+    fun resetLatency() = latencyTest.reset()
 
     // ---------- takes: Live recorded (an addition) ----------
 
@@ -1059,18 +1298,20 @@ class ArcController(
     /** Plays a take on the phone (a list's single sound: it stops the one before). */
     fun playTake(t: dev.arc.ep133.data.TakeInfo): Job = scope.launch {
         val token = ++playToken
-        val w = try {
-            withContext(Dispatchers.IO) { Wav.decode(takeFile(t).readBytes()) }
+        val key = takeKey(t)
+        val sound = previews[key] ?: try {
+            withContext(Dispatchers.IO) { PcmSound.ofWav(takeFile(t).readBytes()) }.also { previews.put(key, it) }
         } catch (e: Exception) {
             toast(e.message ?: e.toString(), error = true)
             return@launch
         }
         if (token != playToken) return@launch
-        startSound(takeKey(t), w.pcm, w.channels, w.sampleRate.toInt())
+        startSound(key, sound)
     }
 
     fun deleteTake(t: dev.arc.ep133.data.TakeInfo): Job = scope.launch {
         if (player.playing.value == takeKey(t)) stopPlayback()
+        previews.remove(takeKey(t))
         withContext(Dispatchers.IO) { takeStore.delete(t.name) }
         loadTakes()
     }
@@ -1090,38 +1331,16 @@ class ArcController(
         _state.update { it.copy(browser = it.browser.copy(draft = listOf(item))) }
     }
 
-    /** A pad's sample, ready to play: 16-bit PCM, [channels] interleaved. */
-    private class PadAudio(val pcm: ShortArray, val channels: Int, val sampleRate: Int, val silent: Boolean) {
-        val bytes get() = pcm.size * 2L
-
-        companion object {
-            /** From little-endian 16-bit PCM bytes. */
-            fun of(pcm: ByteArray, channels: Int, sampleRate: Int): PadAudio {
-                val shorts = ShortArray(pcm.size / 2)
-                java.nio.ByteBuffer.wrap(pcm).order(java.nio.ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(shorts)
-                return PadAudio(shorts, channels.coerceIn(1, 2), sampleRate, Wav.isSilent(pcm))
-            }
-        }
-    }
-
     private fun memoryKey(slot: Int, name: String) = "$slot:${name.trim().lowercase()}"
 
-    private fun keepInMemory(slot: Int, name: String, a: PadAudio) {
-        padMemory.put(memoryKey(slot, name), a)?.let { padMemoryBytes -= it.bytes }
-        padMemoryBytes += a.bytes
-        val it = padMemory.entries.iterator()
-        while (padMemoryBytes > PAD_MEMORY_BYTES && it.hasNext()) {
-            val e = it.next()
-            if (e.value === a) continue
-            padMemoryBytes -= e.value.bytes
-            it.remove()
-        }
+    private fun keepInMemory(slot: Int, name: String, a: PcmSound) {
+        padMemory.put(memoryKey(slot, name), a)
+        prepareLive(listOf(a))
     }
 
     private fun forgetPadMemory() {
         preloadGen++
         padMemory.clear()
-        padMemoryBytes = 0
     }
 
     /**
@@ -1151,16 +1370,24 @@ class ArcController(
     }
 
     /** A sample from arc's copy or a backup, decoded; null when neither has it. */
-    private suspend fun loadPadAudio(slot: Int, name: String): PadAudio? {
+    private suspend fun loadPadAudio(slot: Int, name: String): PcmSound? {
         val wav = withContext(Dispatchers.IO) { padSounds.get(slot, name) } ?: fromBackup(slot, name) ?: return null
         return withContext(Dispatchers.Default) {
             val w = Wav.decode(wav)
-            PadAudio.of(w.pcm, w.channels, w.sampleRate.toInt())
+            PcmSound.of(w.pcm, w.channels, w.sampleRate.toInt())
         }
     }
 
+    /** A pad's sample when it is in memory already, without waiting. */
+    private fun padInMemory(pad: dev.arc.ep133.features.PhysicalPad): PcmSound? {
+        val m = mirror ?: return null
+        val slot = m.slotOf(pad) ?: return null
+        val name = m.nameOf(pad) ?: return null
+        return padMemory[memoryKey(slot, name)]
+    }
+
     /** A pad's sample from the first place that has it; null after a toast says why. */
-    private suspend fun padAudio(pad: dev.arc.ep133.features.PhysicalPad): PadAudio? {
+    private suspend fun padAudio(pad: dev.arc.ep133.features.PhysicalPad): PcmSound? {
         val m = mirror
         val slot = m?.slotOf(pad)
         val name = m?.nameOf(pad)
@@ -1184,7 +1411,7 @@ class ArcController(
     }
 
     /** What [padAudio] waits for: arc's copy or a backup, else the device; null after a toast says why. */
-    private suspend fun loadForPress(slot: Int, name: String): PadAudio? {
+    private suspend fun loadForPress(slot: Int, name: String): PcmSound? {
         return try {
             // The background copy reading this very sound: wait for it rather than read it twice.
             val copied = loadPadAudio(slot, name) ?: copying?.takeIf { it.first == slot }?.second?.await()
@@ -1193,7 +1420,7 @@ class ArcController(
                     ?: return null
                 pressReads++
                 deviceSounds[slot]?.let { keepPadSound(slot, it.name, it.size, pcm, d.channels, d.sampleRate) }
-                    ?: withContext(Dispatchers.Default) { PadAudio.of(pcm, d.channels.toInt(), d.sampleRate.toInt()) }
+                    ?: withContext(Dispatchers.Default) { PcmSound.of(pcm, d.channels.toInt(), d.sampleRate.toInt()) }
             } else {
                 toastOnce(dev.arc.ep133.text.MirrorText.NO_COPY)
                 return null
@@ -1228,12 +1455,14 @@ class ArcController(
      * as it is mixed, until [releaseNote] (or to the end, with [hold] false).
      * The screen names the note as the finger lands, so a change of key,
      * scale or octave under a held key still lets go of the note it plays.
+     * [pressedAt]: as [playPad]'s.
      */
-    fun playNote(note: Int, hold: Boolean = true): Job {
-        val pressedAt = System.nanoTime()
+    fun playNote(note: Int, hold: Boolean = true, pressedAt: Long = System.nanoTime()): Job {
         lastPressAt = pressedAt
         val key = "note:$note"
         if (hold) held += key
+        // Timed for the latency test only when the KEYS sound is in memory already.
+        val measured = _state.value.keysPad?.let(::padInMemory) != null
         return scope.launch {
             val token = playToken
             val pad = _state.value.keysPad
@@ -1242,7 +1471,7 @@ class ArcController(
                 return@launch
             }
             val a = padAudio(pad) ?: return@launch
-            if (token == playToken) startHeld(key, hold, a, note - dev.arc.ep133.features.Keys.ROOT_NOTE, pressedAt)
+            if (token == playToken) startHeld(key, hold, a, note - dev.arc.ep133.features.Keys.ROOT_NOTE, pressedAt, measured)
         }
     }
 
@@ -1288,6 +1517,140 @@ class ArcController(
 
     /** The sample on a pad in the mirror, once it is known. */
     fun mirrorName(pad: dev.arc.ep133.features.PhysicalPad): String? = mirror?.nameOf(pad)
+
+    /** The device's sounds as Live read them: for its copies, its names and EDIT's pad sheet. */
+    private fun setLiveSounds(m: dev.arc.ep133.features.LiveMirror, sounds: List<dev.arc.ep133.protocol.SoundEntry>) {
+        deviceSounds = sounds.associateBy { it.slot }
+        m.setNames(sounds.associate { it.slot to it.name })
+        _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(sounds = sounds)) } ?: cur }
+    }
+
+    // ---------- EDIT: another sound on a pad (an addition; community notes, see Device.assignPad) ----------
+
+    /**
+     * Where a tapped pad's sound is set, for EDIT's pad sheet; null (with a
+     * toast saying why) while the device isn't connected, or Live hasn't read
+     * the active project yet.
+     */
+    fun editTarget(pad: dev.arc.ep133.features.PhysicalPad): dev.arc.ep133.features.PadTarget? {
+        val m = mirror
+        if (session == null || _state.value.device == null || mirrorSession == null || m == null) {
+            toast(dev.arc.ep133.text.MirrorText.EDIT_OFFLINE)
+            return null
+        }
+        return m.target(pad) ?: null.also {
+            // A known project but no pad number: the device numbers its pads otherwise than arc guessed.
+            val unknownPad = m.snapshot(System.nanoTime()).activeProject != null && m.padNumber(pad) == null
+            toast(if (unknownPad) dev.arc.ep133.text.MirrorText.EDIT_PRESS_FIRST else dev.arc.ep133.text.MirrorText.EDIT_NO_PROJECT)
+        }
+    }
+
+    /**
+     * Puts sample [slot] on [pad] at once (where [t] says its sound is set).
+     * The names follow straight away, and a toast offers UNDO when the pad's
+     * old sound is known (an empty pad can't be emptied again).
+     */
+    fun assignPad(pad: dev.arc.ep133.features.PhysicalPad, t: dev.arc.ep133.features.PadTarget, slot: Int): Job = scope.launch {
+        if (writePad(t, slot, dev.arc.ep133.text.MirrorText::assignFailed)) assignedToast(pad, t, slot)
+    }
+
+    /**
+     * UNDO: [t]'s old slot back on [pad]. It doesn't need the mirror the
+     * toast came from: Live may have been closed or read again since.
+     */
+    private fun undoAssign(pad: dev.arc.ep133.features.PhysicalPad, t: dev.arc.ep133.features.PadTarget): Job = scope.launch {
+        val old = t.slot ?: return@launch
+        if (writePad(t, old, dev.arc.ep133.text.MirrorText::undoFailed)) {
+            toast(dev.arc.ep133.text.MirrorText.restored(pad, soundName(old)))
+        }
+    }
+
+    /**
+     * "Upload a new sample…" from the pad sheet: the picked WAV goes into the
+     * first free slot, then onto [pad]. A file that isn't a usable WAV is
+     * turned away before anything is written. The picker stops the app, so
+     * Live's mirror is gone or being read again when the file comes back:
+     * the upload waits for the device and doesn't need the mirror.
+     */
+    fun uploadToPad(uri: android.net.Uri, pad: dev.arc.ep133.features.PhysicalPad, t: dev.arc.ep133.features.PadTarget): Job = scope.launch {
+        val s = session ?: return@launch toast(dev.arc.ep133.text.MirrorText.EDIT_OFFLINE)
+        val (fileName, _) = withContext(Dispatchers.IO) { dev.arc.ep133.files.Files.describe(context, uri) }
+        val bytes = try {
+            withContext(Dispatchers.IO) { dev.arc.ep133.files.Files.read(context, uri) }.also { b ->
+                withContext(Dispatchers.Default) { Wav.decode(b) }
+            }
+        } catch (e: Throwable) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            toast(dev.arc.ep133.text.MirrorText.uploadFailed(e.message ?: e.toString()), error = true)
+            return@launch
+        }
+        val slot = runTask(Strings.UPLOADING, wait = true) { onProgress, signal ->
+            SampleUpload.uploadToPad(s, fileName, bytes, deviceSounds.keys, t, onProgress = onProgress, signal = signal)
+        }
+        if (slot == null) {
+            // runTask showed its own error; a connection gone while waiting needs saying.
+            if (session !== s) toast(dev.arc.ep133.text.MirrorText.EDIT_OFFLINE)
+            return@launch
+        }
+        // The new sound's name and size, for the pad and its copy (a mirror opened since read them already).
+        mirror?.let { m ->
+            exclusive("mirror", quiet = true, wait = true) { ss -> DeviceBrowser.contents(ss) }?.let { c -> if (mirror === m) setLiveSounds(m, c.sounds) }
+        }
+        mirror?.let { padWritten(it, t, slot) }
+        assignedToast(pad, t, slot, deviceSounds[slot]?.name ?: SampleUpload.nameFor(fileName))
+    }
+
+    /**
+     * Writes [slot] onto [t]'s pad, waiting for the device if it is busy; on
+     * failure a toast with [failed] (or, disconnected, why) and false.
+     */
+    private suspend fun writePad(t: dev.arc.ep133.features.PadTarget, slot: Int, failed: (String) -> String): Boolean {
+        var error: String? = null
+        val ok = exclusive("pad", quiet = true, wait = true) { s ->
+            try {
+                Device.assignPad(s, t.project, t.group, t.pad, slot)
+                true
+            } catch (e: Throwable) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                error = e.message ?: e.toString()
+                false
+            }
+        }
+        when {
+            error != null -> toast(failed(error!!), error = true)
+            ok == null -> toast(dev.arc.ep133.text.MirrorText.EDIT_OFFLINE, error = true)
+        }
+        if (ok != true) return false
+        mirror?.let { padWritten(it, t, slot) }
+        return true
+    }
+
+    /**
+     * The mirror, its saved read and the pad's copy follow a written pad.
+     * Only a mirror of this connection that has read [t]'s project: another
+     * one reads the pad from the device anyway.
+     */
+    private fun padWritten(m: dev.arc.ep133.features.LiveMirror, t: dev.arc.ep133.features.PadTarget, slot: Int) {
+        if (mirrorSession == null || mirrorSession !== session || m.snapshot(System.nanoTime()).activeProject != t.project) return
+        m.assigned(t, slot)
+        saveLastRead(m)
+        preloadPads(m)
+        session?.let { copyPadSounds(m, it) }
+        _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(state = m.snapshot(System.nanoTime()))) } ?: cur }
+    }
+
+    private fun assignedToast(pad: dev.arc.ep133.features.PhysicalPad, t: dev.arc.ep133.features.PadTarget, slot: Int, name: String = soundName(slot)) {
+        val text = dev.arc.ep133.text.MirrorText.assigned(pad, name)
+        // UNDO only where the old sound is known, and isn't the one just put there.
+        if (t.slot != null && t.slot != slot) {
+            toast(text, action = dev.arc.ep133.text.MirrorText.UNDO, onAction = { undoAssign(pad, t) })
+        } else {
+            toast(text)
+        }
+    }
+
+    /** A slot's sound name as Live read it, or its number. */
+    private fun soundName(slot: Int): String = deviceSounds[slot]?.name ?: FeatureText.slot(slot)
 
     fun setPadOrder(order: dev.arc.ep133.features.PadOrder) {
         mirrorPrefs.edit { putString("order", order.name) }
@@ -1393,6 +1756,9 @@ class ArcController(
     fun stopPlayback() {
         playToken++
         held.clear()
+        cut.clear()
+        unsure.clear()
+        unmeasured.clear()
         liveAudio.stopAll()
         player.stop()
     }
@@ -1549,6 +1915,17 @@ class ArcController(
     }
 
     fun setKeysNames(names: dev.arc.ep133.features.NoteNames) = changeSettings { it.copy(keysNames = names) }
+
+    fun setKeysShowNames(on: Boolean) = changeSettings { it.copy(keysShowNames = on) }
+
+    /** The piano's size: one of Piano.CHOICES (null is Auto). */
+    /** KEYS on the grid or the piano, for a [wide] window or a tall one. */
+    fun setKeysView(wide: Boolean, view: dev.arc.ep133.features.KeysView) =
+        changeSettings { if (wide) it.copy(keysViewWide = view) else it.copy(keysViewTall = view) }
+
+    fun setPianoWhites(whites: Int?) = changeSettings { it.copy(pianoWhites = dev.arc.ep133.features.Piano.choiceOf(whites)) }
+
+    fun setHaptics(on: Boolean) = changeSettings { it.copy(haptics = on) }
 
     /** The guide overlay was shown (it opens by itself only once, also across reinstalls). */
     fun setGuideSeen() = changeSettings { it.copy(guideSeen = true) }

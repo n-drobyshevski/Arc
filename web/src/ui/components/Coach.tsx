@@ -49,7 +49,9 @@ export const COACH_IDS = [
   'top.connection',
   'top.help',
   'top.settings',
+  'top.theme',
   'edge.guide',
+  'edge.edit',
   'backups.search',
   'backups.import',
   'backups.open',
@@ -57,9 +59,11 @@ export const COACH_IDS = [
   'live.keys',
   'live.mode',
   'live.scale',
-  'live.key',
   'live.octave',
+  'live.key',
+  'live.view',
   'live.groups',
+  'live.sounds',
   'side.more',
   'device.refresh',
   'device.add',
@@ -90,7 +94,12 @@ export const COACH_MARKS: Readonly<Record<CoachId, CoachMarkSpec>> = Object.free
   'top.connection': navyTag(CoachText.CONNECTION),
   'top.help': { label: CoachText.HELP, face: 'var(--ink)', ink: 'var(--shell)' },
   'top.settings': { label: CoachText.SETTINGS, face: 'var(--graphite)', ink: 'var(--shell)' },
+  // Web: the desk's theme switch, in the settings key's place (no top.settings
+  // there: the nav rail's Settings key says it in words).
+  'top.theme': navyTag(CoachText.THEME),
   'edge.guide': navyTag(CoachText.GUIDE_TAB),
+  // Live's EDIT tab (under GUIDE): an edge-hook side tag on the phone.
+  'edge.edit': navyTag(CoachText.EDIT),
   'backups.search': navyTag(CoachText.SEARCH),
   'backups.import': navyTag(CoachText.IMPORT),
   'backups.open': yellowTag(CoachText.OPEN_BACKUP),
@@ -99,10 +108,13 @@ export const COACH_MARKS: Readonly<Record<CoachId, CoachMarkSpec>> = Object.free
   'live.keys': yellowTag(CoachText.PADS),
   'live.mode': navyTag(CoachText.MODE),
   'live.scale': navyTag(CoachText.SCALE),
-  // The piano's key word (landscape KEYS).
-  'live.key': navyTag(CoachText.KEY),
   'live.octave': navyTag(CoachText.OCTAVE),
+  // The row over the piano: the key word, and the Pads ⇄ Piano switch.
+  'live.key': navyTag(CoachText.KEY),
+  'live.view': navyTag(CoachText.KEYS_VIEW),
   'live.groups': navyTag(CoachText.GROUPS),
+  // The desk's Sounds tab, beside the K.O. II.
+  'live.sounds': yellowTag(CoachText.SOUNDS_TAB),
   'side.more': { label: CoachText.MORE_TOOLS, face: 'var(--ink)', ink: 'var(--shell)' },
   'device.refresh': navyTag(CoachText.REFRESH),
   'device.add': { label: CoachText.ADD_SAMPLES, face: 'var(--signal)', ink: 'var(--on-signal)' },
