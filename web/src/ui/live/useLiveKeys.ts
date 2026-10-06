@@ -114,9 +114,10 @@ export function useLiveKeys(enabled: boolean, host: LiveKeysHost): void {
       },
       releaseAll,
       context: () => latest.current.context(),
-      takes: (target) => {
+      takes: (target, input) => {
         const root = latest.current.root()
-        return root !== null && target instanceof Node && root.contains(target) && !outOfReach()
+        if (root === null || !(target instanceof Node) || !root.contains(target) || outOfReach()) return false
+        return liveCommand(input, latest.current.context()) !== null
       },
     }
   }, [held, counts])

@@ -106,12 +106,12 @@ describe('the key scope slot', () => {
   it("lets controls yield a key only when the screen's keys would take it (nothing over the page)", () => {
     const off = setKeyScope({ keydown: () => false, keyup: () => {}, escape: () => false, releaseAll: () => {}, context: () => null as unknown as LiveContext, takes: () => true })
     setLiveReach(true)
-    expect(screenTakes(null)).toBe(true)
+    expect(screenTakes(null, key('Numpad4', 'ArrowLeft'))).toBe(true)
     setLiveReach(false)
-    expect(screenTakes(null)).toBe(false)
+    expect(screenTakes(null, key('Numpad4', 'ArrowLeft'))).toBe(false)
     setLiveReach(true)
     off()
-    expect(screenTakes(null)).toBe(false)
+    expect(screenTakes(null, key('Numpad4', 'ArrowLeft'))).toBe(false)
   })
 })
 

@@ -104,6 +104,8 @@ test('KEYS: M switches, the piano keeps its letters, the grid plays the pad keys
   await page.keyboard.down('Numpad1')
   await page.keyboard.up('Digit1')
   await page.waitForTimeout(120)
+  // (The demo has no KEYS sound picked, so nothing rings here: each key is a finger of
+  // its own in the grid's NoteTouches, and lets go of only the note it pressed.)
   await expect(key3).toHaveAttribute('data-down', '')
   await page.keyboard.up('Numpad1')
   await expect(key3).not.toHaveAttribute('data-down')
@@ -212,4 +214,31 @@ test('a pad held while the window loses focus is let go', async ({ page }) => {
   await page.evaluate(() => window.dispatchEvent(new Event('blur')))
   await expect.poll(() => downPads(page)).toEqual([])
   await page.keyboard.up('Digit8')
+})
+
+test('NumLock-off number pad arrows still move a control where Live takes no such key', async ({ page }) => {
+  const send = (key: string, code: string): Promise<void> =>
+    page.evaluate(
+      ([k, c]) => {
+        for (const t of ['keydown', 'keyup']) {
+          document.activeElement?.dispatchEvent(new KeyboardEvent(t, { key: k, code: c, bubbles: true, cancelable: true }))
+        }
+      },
+      [key, code],
+    )
+  // In KEYS on the piano the number pad plays nothing: the grid / piano switch keeps its arrows.
+  await page.keyboard.press('KeyM')
+  await expect(page.locator('.live-piano__keys')).toBeVisible()
+  await page.getByRole('radio', { name: 'Keys on a piano' }).focus()
+  await send('ArrowLeft', 'Numpad4')
+  await expect(page.locator('.live-kgrid')).toBeVisible()
+  // Over Live (the tools panel), its controls keep their arrows too: the key moves on the small piano.
+  await page.getByRole('button', { name: 'Live tools' }).click()
+  const panel = page.getByRole('dialog', { name: 'Live tools' })
+  await expect(panel).toBeVisible()
+  const checked = panel.locator('.mini-piano [role="radio"][aria-checked="true"]')
+  const before = await checked.getAttribute('aria-label')
+  await checked.focus()
+  await send('ArrowRight', 'Numpad6')
+  await expect(checked).not.toHaveAttribute('aria-label', before ?? '')
 })
