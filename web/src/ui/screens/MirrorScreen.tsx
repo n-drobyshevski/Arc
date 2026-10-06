@@ -105,7 +105,7 @@
 // it on, the display line says so, the pads get a signal outline and a ⇄
 // badge, and a tap opens the pad sheet ([EditUi.onPad]); a long press still
 // plays the pad while held.
-import { h, type ButtonHTMLAttributes, type Component, type ComponentChildren, type FunctionComponent, type JSX, type TargetedDragEvent } from 'preact'
+import { Fragment, h, type ButtonHTMLAttributes, type Component, type ComponentChildren, type FunctionComponent, type JSX, type TargetedDragEvent } from 'preact'
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { computed, signal, type ReadonlySignal } from '@preact/signals'
 import { Keys, MAX_OCTAVE, MIN_OCTAVE, SCALES, type NoteNames, type Scale } from '../../core/features/keys'
@@ -116,7 +116,7 @@ import type { SoundEntry } from '../../core/protocol/device'
 import { PadOrder } from '../../core/features/padPush'
 import { ROWS, noteName, padKey, physicalPad, type PhysicalPad } from '../../core/features/padNotes'
 import { CoachText } from '../../core/text/coachText'
-import { CLOSE as GUIDE_CLOSE } from '../../core/text/guideText'
+import { CLOSE as GUIDE_CLOSE, LED_ROWS } from '../../core/text/guideText'
 import { MirrorText } from '../../core/text/mirrorText'
 import { FeatureText } from '../../core/text/featureText'
 import { WebText } from '../../core/text/webText'
@@ -143,6 +143,7 @@ import {
   showOffline,
   transportText,
 } from '../live/glow'
+import { GLYPHS } from '../components/KoPanel'
 import { capDown, capUp } from '../live/capDown'
 import { rowPadSize } from '../live/desk'
 import { chosenView, pianoFor, type PianoPlan } from '../live/keyboard'
@@ -789,13 +790,15 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
             {modeRow}
           </>
         ) : sideways ? (
-          // A phone on its side (Android's sideways grid): the grid as tall as the room, the
-          // group keys a column on its right.
+          // A phone on its side (Android's sideways grid): the K.O. II's body as big as the room,
+          // the group keys a column left of the pads, as on the device.
           <>
             {displayStrip}
             <div class="live__side">
-              <Group group={group} st={st} nameOf={nameOf} now={now} big coach ui={padUi} tracker={tracker} />
-              <GroupKeys group={group} st={st} now={now} onSelect={setGroup} vertical />
+              <div class="ko-body">
+                <GroupKeys group={group} st={st} now={now} onSelect={setGroup} vertical />
+                <Group group={group} st={st} nameOf={nameOf} now={now} big coach ui={padUi} tracker={tracker} />
+              </div>
             </div>
             {modeRow}
           </>
@@ -1087,26 +1090,39 @@ function Group(props: GroupProps): JSX.Element {
           <Caption text={`${MirrorText.GROUP} ${letter}`} as="h2" color="var(--live-caption)" />
         </div>
       )}
-      {/* The pads are caps sitting in the device's body (Deck). */}
-      <div class="live-deck" role="group" aria-label={`${MirrorText.GROUP} ${letter}`}>
+      {/* The pads are caps sitting in the device's body (Deck). The big grid is the K.O. II's
+          own: over each row of pads the words printed on the body, each after its LED. */}
+      <div class={`live-deck${big ? ' live-deck--ko' : ''}`} role="group" aria-label={`${MirrorText.GROUP} ${letter}`}>
         {ROWS.map((offsets, r) => (
-          <div class="live-deck__row" key={r}>
-            {offsets.map((o) => {
-              const pad = physicalPad(group, o)
-              return (
-                <Pad
-                  key={o}
-                  pad={pad}
-                  light={st.pads.get(padKey(pad))}
-                  name={nameOf(pad)}
-                  big={big}
-                  scroll={!big && !fill}
-                  ui={ui}
-                  tracker={tracker}
-                />
-              )
-            })}
-          </div>
+          <Fragment key={r}>
+            {big && (
+              <div class="live-deck__print" aria-hidden="true">
+                {LED_ROWS[r]!.map((word) => (
+                  <span key={word} class="live-deck__word">
+                    <span class="ko-led" />
+                    {word}
+                  </span>
+                ))}
+              </div>
+            )}
+            <div class="live-deck__row">
+              {offsets.map((o) => {
+                const pad = physicalPad(group, o)
+                return (
+                  <Pad
+                    key={o}
+                    pad={pad}
+                    light={st.pads.get(padKey(pad))}
+                    name={nameOf(pad)}
+                    big={big}
+                    scroll={!big && !fill}
+                    ui={ui}
+                    tracker={tracker}
+                  />
+                )
+              })}
+            </div>
+          </Fragment>
         ))}
       </div>
     </div>
@@ -1160,7 +1176,11 @@ function GroupKeys(props: {
               class={`live-keys__key cap-3d${on ? ' is-on is-down' : ''}`}
               onClick={() => onSelect(g)}
             >
-              {MirrorText.groupKey(g)}
+              {/* As printed on the K.O. II: the letter in the corner, its function's glyph under it. */}
+              <span class="live-keys__letter">{MirrorText.groupKey(g)}</span>
+              <svg class="live-keys__glyph" viewBox="0 0 12 12" aria-hidden="true">
+                <path d={GLYPHS[MirrorText.groupKey(g) as 'A' | 'B' | 'C' | 'D']} />
+              </svg>
             </button>
           </div>
         )
@@ -1299,7 +1319,10 @@ function PadCap(props: PadProps): JSX.Element {
   const content = (
     <>
       {/* The key's own label in the corner (web: top left, where the K.O. II prints it). */}
-      <span class={`live-pad__label${wide ? ' live-pad__label--wide' : ''}`}>{pad.label}</span>
+      <span class={`live-pad__label${wide ? ' live-pad__label--wide' : ''}`}>
+        {/* The dot key's label is a dot, drawn as the K.O. II prints it. */}
+        {pad.label === '.' ? <span class="live-pad__dot" /> : pad.label}
+      </span>
       {shown !== null && <span class="live-pad__name">{shown}</span>}
       {ui.editing && !dropping && <span class="live-pad__swap" aria-hidden="true">{'\u21C4'}</span>}
       {dropping && <span class="live-pad__drop" aria-hidden="true">{WebText.DROP}</span>}

@@ -557,8 +557,8 @@ function Split(props: { k: PanelKey; r: Rect; c: Colours; lower: string; lowerIn
   )
 }
 
-/** The glyph printed under a group key's letter, in a 12-unit box: A ✳ (fill), B ↩ (repeat), C ⤒ (copy), D ↓ (paste). */
-const GLYPHS: Readonly<Record<'A' | 'B' | 'C' | 'D', string>> = {
+/** The glyph printed under a group key's letter, in a 12-unit box: A ✳ (fill), B ↩ (repeat), C ⤒ (copy), D ↓ (paste). Live's group keys print it too. */
+export const GLYPHS: Readonly<Record<'A' | 'B' | 'C' | 'D', string>> = {
   A: 'M6 1.5V10.5M1.5 6H10.5M2.8 2.8L9.2 9.2M9.2 2.8L2.8 9.2',
   B: 'M10 2V7H2M2 7L4.5 4.5M2 7L4.5 9.5',
   C: 'M2 1.5H10M6 11V4M6 4L3.5 6.5M6 4L8.5 6.5',
