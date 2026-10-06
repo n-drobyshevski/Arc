@@ -1385,6 +1385,9 @@ export class ArcController {
   async getFactorySounds(): Promise<void> {
     const net = this.deps.factory
     if (net === undefined || FactorySounds.inLibrary(this.store.get().backups) !== null) return
+    // Tapped while something else runs (a read as the page starts, a transfer): it goes next, not never.
+    if (this.store.get().busy) await this.store.waitFor((st) => !st.busy)
+    if (FactorySounds.inLibrary(this.store.get().backups) !== null) return
     const saved = await this.tasks.runTask(FeatureText.GETTING_FACTORY, async (onProgress, signal) => {
       try {
         const path = await FactorySounds.locate((p) => net.text(p, signal))

@@ -1944,6 +1944,9 @@ class ArcController(
      */
     fun getFactorySounds(): Job = scope.launch {
         if (FactorySounds.inLibrary(_state.value.backups) != null) return@launch
+        // Tapped while something else runs (a read, a transfer): it goes next, not never.
+        _state.first { !it.busy }
+        if (FactorySounds.inLibrary(_state.value.backups) != null) return@launch
         val saved = runTask(FeatureText.GETTING_FACTORY, device = false) { onProgress, signal ->
             try {
                 withContext(Dispatchers.IO) {

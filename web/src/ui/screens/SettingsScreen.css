@@ -167,3 +167,6 @@
   .settings__group { padding-top: var(--space-10); }
   .settings__group:first-of-type { padding-top: 0; }
 }
+
+/* Web: Computer keyboard's two controls, the keys sheet and the switch. */
+.settings__keys { display: inline-flex; align-items: center; gap: 8px; }

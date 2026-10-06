@@ -83,11 +83,16 @@ import { EDIT_PREFIX, PadEditSheet } from './ui/sheets/PadEditSheet'
 import { BackupPadsSheet, DevicePadsSheet } from './ui/sheets/PadsSheet'
 import { FontLicenceSheet } from './ui/sheets/FontLicenceSheet'
 import { DeviceUploadSheet } from './ui/sheets/UploadSheet'
-import { useDesk, useWindowSize } from './ui/useDesk'
+import { useDesk, useFinePointer, useWindowSize } from './ui/useDesk'
+import { useAppKeys } from './ui/useAppKeys'
+import { KeyboardKeysSheet } from './ui/sheets/KeyboardKeysSheet'
+import { computerKeys, setComputerKeys } from './ui/keyPrefs'
 import './app.css'
 
 /** The progress sheet's layer id. */
 const PROGRESS = 'progress'
+/** The Keyboard keys sheet (web, desktop: ?). */
+const KEYS_SHEET = 'keys'
 
 export interface AppProps {
   controller: ArcController
@@ -142,6 +147,15 @@ function Root(): JSX.Element {
   const settings = c.settings.value
   const playing = c.playing.value
   const desk = useDesk()
+  const fine = useFinePointer()
+  // The computer keyboard (web, desktop): ? the keys sheet, Esc, Ctrl/Cmd+Z, and the screen's own (Live's).
+  useAppKeys(desk || fine, {
+    view: v,
+    canBack: () => nav.canBack(),
+    undo: state.toast?.action != null ? () => c.runToastAction(state.toast!.id) : null,
+    openHelp: () => nav.open(sheetLayer(KEYS_SHEET)),
+    back: () => nav.back(),
+  })
   // Live's EDIT (giving a pad another sound): on Live, in PADS, until switched off or left.
   const [editPads, setEditPads] = useState(false)
   const canEdit = v.tab === 'live' && !settings.liveKeys
@@ -215,6 +229,7 @@ function Root(): JSX.Element {
         factorySounds={
           c.canGetFactory ? { saved: FactorySounds.inLibrary(state.backups) !== null, onGet: () => void c.getFactorySounds() } : undefined
         }
+        computerKeys={desk || fine ? { on: computerKeys.value, onChange: setComputerKeys, onShow: () => nav.open(sheetLayer(KEYS_SHEET)) } : undefined}
         onNoteNames={(n) => c.setKeysNames(n)}
         onShowNames={(on) => c.setKeysShowNames(on)}
         onPianoWhites={(w) => c.setPianoWhites(w)}
@@ -353,6 +368,8 @@ function Root(): JSX.Element {
       {/* The Backups tab's sheets: detail 'detail:<id>', compare picker 'comparePick:<id>',
           restore 'restore:<id>', the delete dialog 'delete'. */}
       {tabs && v.tab === 'backups' && <BackupsSheets view={v} />}
+      {/* The Keyboard keys sheet 'keys' (?), over whatever screen it was opened on. */}
+      <KeyboardKeysSheet open={v.sheets.includes(KEYS_SHEET)} onDismiss={() => nav.close(sheetLayer(KEYS_SHEET))} />
       <ProgressSlot task={progressShown ? state.task : null} onCancel={() => c.cancelTask()} />
       <ToastLayer raise={state.toast?.id ?? null}>
         <ControllerToast controller={c} />
@@ -428,6 +445,7 @@ function TabScreen(props: {
         <MirrorScreen
           mirror={liveMirror(c)}
           onGetFactory={c.canGetFactory && FactorySounds.inLibrary(state.backups) === null ? () => void c.getFactorySounds() : null}
+          onStop={() => c.stopPlayback()}
           nameOf={(pad) => c.mirrorName(pad)}
           oneGroup={settings.liveOneGroup}
           onOneGroup={(on) => c.setLiveOneGroup(on)}

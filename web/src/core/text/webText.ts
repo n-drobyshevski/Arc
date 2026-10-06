@@ -186,6 +186,53 @@ export const WebText = {
     ]
   },
 
+  // ---------- the computer keyboard (desktop; no Android counterpart) ----------
+  // Never "shortcuts": that word is the EP-133's own, in the Guide.
+  KEYS_TITLE: 'Keyboard keys',
+  KEYS_NOW: 'Keys that work here now. Single keys pause while you type in a field.',
+  /** The sheet opened away from Live (Settings): all of Live's keys. */
+  KEYS_ALL: "Live's keys, and the ones that work everywhere. Single keys pause while you type in a field.",
+  /** The sheet with single keys switched off. */
+  KEYS_OFF: 'Single keys are off: Settings → Live → Computer keyboard turns them on.',
+  KEYS_PADS: 'Live, pads',
+  KEYS_EDIT: 'Live, EDIT',
+  KEYS_GRID: 'Live, keys',
+  KEYS_PIANO: 'Live, piano',
+  KEYS_EVERYWHERE: 'Everywhere',
+  KEY_PADS: 'Hold to play the pads, as on the EP-133',
+  KEY_PADS_ROW: 'The same pads, by their numbers',
+  KEY_GROUP: 'Group A to D',
+  KEY_EDIT: 'EDIT on or off',
+  KEY_EDIT_PAD: "Open that pad's sound",
+  KEY_VIEW_PADS: 'All groups or one group',
+  KEY_FOLLOW: 'Follow on or off',
+  KEY_FIND: 'Find a sound',
+  KEY_MODE: 'Pads or keys',
+  KEY_GRID: 'Hold to play the keys',
+  KEY_PIANO: 'Play the piano',
+  KEY_OCTAVE: 'Octave down, up',
+  KEY_ROOT: 'Key down, up',
+  KEY_SCALE: 'Scale before, after',
+  KEY_VIEW_KEYS: 'Grid or piano',
+  KEY_HELP: 'These keys',
+  KEY_ESCAPE: 'Close a screen; in Live, leave EDIT or stop the sound',
+  KEY_UNDO: 'Undo a new pad sound, while its UNDO shows',
+  /** The tools panel's line in PADS. */
+  LIVE_PADS_KEYS_HINT: 'Keyboard: 1 to 9 or the number pad play pads · A to D group · E edit · M keys · ? all keys',
+  /** The KEYS tools panel's line. */
+  LIVE_KEYS_KEYS_HINT: 'Keyboard: M pads · Z X octave · [ ] key · Shift+[ ] scale · ? all keys',
+  COMPUTER_KEYS: 'Computer keyboard',
+  COMPUTER_KEYS_NOTE: 'Single keys play Live and run its controls. Show keys lists them.',
+  SHOW_KEYS: 'Show keys',
+  /** What a key just switched, for screen readers: "Follow, on". */
+  switched(label: string, on: boolean): string {
+    return `${label}, ${on ? 'on' : 'off'}`
+  },
+  /** A control's tooltip with its key: "EDIT (E)". */
+  keyHint(label: string, key: string): string {
+    return `${label} (${key})`
+  },
+
   // ---------- app updates (PWA; no Android counterpart) ----------
   UPDATE_READY: 'A new version of arc is ready.',
   UPDATE_RELOAD: 'Reload',

@@ -19,6 +19,7 @@ import './ui/theme/base.css'
 import './ui/theme/desk.css'
 import { App, CrashMessage } from './app'
 import { createBrowserDeps, pageStorage } from './boot/browserDeps'
+import { followStorage, initKeyPrefs } from './ui/keyPrefs'
 import { SettingsStore } from './platform/storage/settings'
 import { createController, type ArcController } from './state/controller'
 import { whenIdle } from './ui/components/UpdatePrompt'
@@ -55,6 +56,9 @@ async function boot(): Promise<void> {
   const demo = new URLSearchParams(location.search).has('demo')
   const storage = pageStorage(demo)
   applyTheme(new SettingsStore(storage).settings.theme)
+  // Settings → Computer keyboard: this page's storage, and another tab's change (not for ?demo).
+  initKeyPrefs(storage)
+  if (!demo) followStorage(window)
   if (demo) {
     const { installDemo } = await import('./dev/demo')
     installDemo(window)

@@ -62,6 +62,8 @@ import type { KeysShown } from './keys'
 import { capDown, capUp } from './capDown'
 import { rawMovesSupported } from './press'
 import './PianoKeyboard.css'
+import { altGraph, composing, inField } from '../keyGuard'
+import { computerKeys } from '../keyPrefs'
 
 /** How far past a key's edge a sliding finger keeps it, so it doesn't flicker between two keys. */
 const SLIDE_SLOP = 6
@@ -106,15 +108,10 @@ interface Finger {
   readonly raw: boolean
 }
 
-/** Whether [t] is a field (typing) or inside a dialog, where letters don't play. */
-function inField(t: EventTarget | null): boolean {
-  if (!(t instanceof Element)) return false
-  if (t.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]')) return true
-  return t.closest('dialog, [role="dialog"], [role="alertdialog"], [role="listbox"]') !== null
-}
-
 export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
   const { range, st, keys, now, computer = false } = props
+  // The letters on the keys only while Settings → Computer keyboard is on (they play only then).
+  const hints = computer && computerKeys.value
   const playingNotes = props.playingNotes.value
   const plate = useRef<HTMLDivElement | null>(null)
   const [size, setSize] = useState({ w: 0, h: 0 })
@@ -248,6 +245,8 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
         releaseAll()
         return
       }
+      // Settings → Computer keyboard off, or an input method composing: no letters play.
+      if (!computerKeys.peek() || composing(e) || altGraph(e)) return
       if (e.defaultPrevented || !playsKeys({ ctrlKey: e.ctrlKey, metaKey: e.metaKey, altKey: e.altKey, inField: inField(e.target) })) return
       const step = octaveStep(e.code)
       if (step !== null) {
@@ -348,7 +347,7 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
             (playingNotes.has(k.note) ? ' is-playing' : '')
           const r = k.rect
           const gap = k.black ? 0 : WHITE_GAP / 2
-          const hint = computer ? computerHint(k.note, keys.octave) : null
+          const hint = hints ? computerHint(k.note, keys.octave) : null
           return (
             <button
               key={k.note}

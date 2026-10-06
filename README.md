@@ -61,6 +61,8 @@ The same app runs in Chrome or Edge, on a computer or an Android phone, at **htt
 
 The browser asks once for MIDI access when you connect. It can be installed from the install icon in the address bar or the browser's menu (**Add to Home screen** on Android), and then opens in its own window like an app. After the first visit it works offline. A new version is downloaded in the background and shows **Reload**; arc never reloads in the middle of a transfer.
 
+On a computer the keyboard plays and drives Live: the number pad (or the number row) plays the pads as the EP-133's keypad, A–D pick the group, E is EDIT, M switches pads and keys, and in KEYS the letters play the piano, Z X the octave, [ ] the key and Shift+[ ] the scale. **?** lists the keys that work where you are; Esc closes a screen. Settings → Live → **Computer keyboard** turns the single keys off.
+
 | Browser | EP-133 over USB |
 |---|---|
 | Chrome, Edge, Opera, Brave on Windows, macOS, Linux and ChromeOS | Yes |

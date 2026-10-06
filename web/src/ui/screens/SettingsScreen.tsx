@@ -87,6 +87,8 @@ export interface SettingsScreenProps {
   onShowNames?: (on: boolean) => void
   /** Live's piano size: white keys (Piano.CHOICES), null for Auto. */
   onPianoWhites?: (whites: number | null) => void
+  /** Web, on a desktop: Computer keyboard (single keys on or off, keyPrefs) and its keys sheet; absent elsewhere. */
+  computerKeys?: { on: boolean; onChange: (on: boolean) => void; onShow: () => void } | undefined
   /** The factory sounds (FactorySounds): whether the library has them, and the download; absent where they can't be downloaded. */
   factorySounds?: { saved: boolean; onGet: () => void } | undefined
   /** Web: whether this browser can vibrate (platform/haptics.ts); the Haptics row shows only then. */
@@ -536,6 +538,23 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
                         labelledBy={ids.titleId}
                         describedBy={ids.noteId}
                       />
+                    )}
+                  />
+                )}
+                {props.computerKeys !== undefined && (
+                  <SettingRow
+                    title={WebText.COMPUTER_KEYS}
+                    note={WebText.COMPUTER_KEYS_NOTE}
+                    control={(ids) => (
+                      <span class="settings__keys">
+                        <RowAction text={WebText.SHOW_KEYS} describedBy={ids.titleId} onClick={props.computerKeys!.onShow} />
+                        <HwToggle
+                          on={props.computerKeys!.on}
+                          onChange={props.computerKeys!.onChange}
+                          labelledBy={ids.titleId}
+                          describedBy={ids.noteId}
+                        />
+                      </span>
                     )}
                   />
                 )}
