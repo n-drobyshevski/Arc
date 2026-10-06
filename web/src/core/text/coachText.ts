@@ -13,6 +13,8 @@ export const CoachText = {
   CONNECTION: 'Connection',
   DISCONNECTED: 'Connect the EP-133',
   SETTINGS: 'Settings',
+  /** The web's desktop top bar: its System / Light / Dark switch, in the settings key's place. */
+  THEME: 'Light or dark',
   SECTIONS: 'Sections',
   GUIDE_TAB: 'EP-133 shortcuts',
   MODE: 'Pads or keys',

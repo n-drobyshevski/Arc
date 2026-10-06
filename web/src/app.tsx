@@ -19,8 +19,9 @@
 //   div.app.is-desk > CoachHost > div.desk [ NavRail | div.app__screen ]
 //
 // The guide overlay's host then holds the rail too (its Guide key carries the
-// edge.guide mark); it shows over the shell only, as on the phone. Below
-// 1024px the tree is the phone's, unchanged.
+// edge.guide mark); it shows over the shell only, as on the phone. The top
+// bar has the theme switch (Settings → Theme, marked top.theme) in place of
+// the settings key. Below 1024px the tree is the phone's, unchanged.
 //
 // Live's EDIT (Root's editPads): on while Live shows its pads; its tab is the
 // shell's second edge tab (on the desk, MirrorScreen hangs it on the K.O. II
@@ -276,6 +277,8 @@ function Root(): JSX.Element {
         onDebug={() => nav.openScreen({ kind: 'debug' })}
         onSettings={() => nav.openScreen({ kind: 'settings' })}
         onHelp={() => nav.open(overlayLayer('coach'))}
+        theme={settings.theme}
+        onTheme={(t) => c.setTheme(t)}
         guideOpen={v.guide}
         onGuide={(open) => (open ? nav.openScreen({ kind: 'guide' }) : nav.close(screenLayer({ kind: 'guide' })))}
         guide={<GuideScreen onBack={() => nav.close(screenLayer({ kind: 'guide' }))} />}

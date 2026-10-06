@@ -49,6 +49,7 @@ export const COACH_IDS = [
   'top.connection',
   'top.help',
   'top.settings',
+  'top.theme',
   'edge.guide',
   'edge.edit',
   'backups.search',
@@ -93,6 +94,9 @@ export const COACH_MARKS: Readonly<Record<CoachId, CoachMarkSpec>> = Object.free
   'top.connection': navyTag(CoachText.CONNECTION),
   'top.help': { label: CoachText.HELP, face: 'var(--ink)', ink: 'var(--shell)' },
   'top.settings': { label: CoachText.SETTINGS, face: 'var(--graphite)', ink: 'var(--shell)' },
+  // Web: the desk's theme switch, in the settings key's place (no top.settings
+  // there: the nav rail's Settings key says it in words).
+  'top.theme': navyTag(CoachText.THEME),
   'edge.guide': navyTag(CoachText.GUIDE_TAB),
   // Live's EDIT tab (under GUIDE): an edge-hook side tag on the phone.
   'edge.edit': navyTag(CoachText.EDIT),

@@ -11,10 +11,12 @@
 // the page column right of the nav rail): no GUIDE edge tab (the rail's Guide
 // key opens the guide, and gets the focus back), the guide is a panel docked
 // on the left of the page column instead of covering it, and the top bar's row
-// widens to 1200 (Shell.css, TopBar.css). The shell's own --shell page goes
-// transparent, so the desk shows through.
+// widens to 1200 (Shell.css, TopBar.css), with the theme switch in the
+// settings key's place (the rail's Settings key opens Settings). The shell's
+// own --shell page goes transparent, so the desk shows through.
 import type { ComponentChildren, JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
+import type { ThemeChoice } from '../../core/text/settingsText'
 import type { Tab } from '../../state/types'
 import { GuideEdgeTab } from './GuideEdgeTab'
 import { SectionMenu } from './SectionMenu'
@@ -35,6 +37,9 @@ export interface ShellProps {
   onDebug: () => void
   onSettings: () => void
   onHelp: () => void
+  /** Settings → Theme, for the desk's theme switch in the top bar. */
+  theme: ThemeChoice
+  onTheme: (t: ThemeChoice) => void
   guideOpen: boolean
   onGuide: (open: boolean) => void
   /** The guide screen, slid in while [guideOpen]. */
@@ -73,6 +78,7 @@ export function Shell(props: ShellProps): JSX.Element {
           onDebug={props.onDebug}
           onSettings={props.onSettings}
           onHelp={props.onHelp}
+          {...(props.desk ? { themeSwitch: { theme: props.theme, onTheme: props.onTheme } } : {})}
         />
       </div>
       <div class="shell__body" inert={guideOpen || undefined}>

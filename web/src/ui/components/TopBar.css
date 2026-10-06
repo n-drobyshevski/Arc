@@ -2,7 +2,8 @@
  *
  * Web only, from 1024px wide (the desk): the row spans the page column up to
  * 1200 (--top-bar-max, theme/desk.css; Android's landscape TopBar is 1200dp
- * wide too), its sides on the desk's --desk-pad. */
+ * wide too), its sides on the desk's --desk-pad, and the theme switch
+ * (ThemeSwitch.css) stands in the settings key's place, 20 after the ? key. */
 
 .top-bar {
   display: flex;

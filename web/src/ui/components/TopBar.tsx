@@ -6,12 +6,17 @@
 // then the guide overlay (?) and settings. Their names show on long-press,
 // in the overlay and to screen readers. Long-pressing the tag opens the
 // debug screen.
+//
+// Web only, on the desk (from 1024px wide, [themeSwitch] set by Shell): the
+// theme switch (ThemeSwitch.tsx: System / Light / Dark) in the settings key's
+// place; the nav rail's Settings key opens Settings there.
 import type { JSX } from 'preact'
 import { CoachText } from '../../core/text/coachText'
 import type { Tab } from '../../state/types'
 import { ArcIcon } from './Icons'
 import { IconBlock } from './IconBlock'
 import { SectionTag } from './SectionTag'
+import { ThemeSwitch, type ThemeSwitchProps } from './ThemeSwitch'
 import './TopBar.css'
 
 export interface TopBarProps {
@@ -30,6 +35,8 @@ export interface TopBarProps {
   onDebug: () => void
   onSettings: () => void
   onHelp: () => void
+  /** The desk: the theme switch in place of the settings key. */
+  themeSwitch?: ThemeSwitchProps
 }
 
 export function TopBar(props: TopBarProps): JSX.Element {
@@ -91,18 +98,29 @@ export function TopBar(props: TopBarProps): JSX.Element {
             round
           />
         </span>
-        <span class="top-bar__gap" />
-        <span data-coach="top.settings" class="top-bar__item">
-          <IconBlock
-            icon={ArcIcon.GEAR}
-            label={CoachText.SETTINGS}
-            face="var(--tab-off)"
-            ink="var(--navy)"
-            onClick={props.onSettings}
-            round
-            iconSize={24}
-          />
-        </span>
+        {props.themeSwitch ? (
+          <>
+            <span class="top-bar__gap top-bar__gap--wide" />
+            <span class="top-bar__item">
+              <ThemeSwitch {...props.themeSwitch} />
+            </span>
+          </>
+        ) : (
+          <>
+            <span class="top-bar__gap" />
+            <span data-coach="top.settings" class="top-bar__item">
+              <IconBlock
+                icon={ArcIcon.GEAR}
+                label={CoachText.SETTINGS}
+                face="var(--tab-off)"
+                ink="var(--navy)"
+                onClick={props.onSettings}
+                round
+                iconSize={24}
+              />
+            </span>
+          </>
+        )}
       </div>
     </header>
   )

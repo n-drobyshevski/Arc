@@ -8,7 +8,9 @@
 // held down, navy, its LED lit. The keys do what the phone's controls do: a
 // section key is the section list's pick (selectTab), Guide is the GUIDE edge
 // tab (hidden on the desk; its coach mark moves here) and Settings the top
-// bar's gear. The section tag and its list stay in the top bar.
+// bar's gear (the desk's top bar has the theme switch in its place; the key's
+// own word says what the gear's coach tag did, so it carries none). The
+// section tag and its list stay in the top bar.
 import type { JSX, TargetedKeyboardEvent } from 'preact'
 import { useRef } from 'preact/hooks'
 import { CoachText } from '../../core/text/coachText'

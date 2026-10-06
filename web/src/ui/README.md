@@ -95,7 +95,7 @@ the overlay opens. Mark a control either way:
 ```
 
 Known ids (`COACH_IDS`, labels/colours from the Kotlin call sites):
-`top.*`, `edge.guide|edit`, `backups.search|import|open`, `live.pads|groups`,
+`top.*` (`top.theme` on the desk, where the theme switch takes `top.settings`' place), `edge.guide|edit`, `backups.search|import|open`, `live.pads|groups`,
 `live.keys|mode|scale|octave|key|view|sounds`, `side.more`, `device.refresh|add|switch|play`
 (`device.switch` below the desk only: the desk shows projects and sounds together).
 A narrow control flush with the screen's left or right edge (the GUIDE tab,
@@ -113,8 +113,8 @@ Common optional props on most: `class`, `id`, `ref`. Colours are CSS values
 | Component | Kotlin | Props |
 |---|---|---|
 | `Key` | ArcKey | `text`, `onClick?`, `variant?: 'normal'\|'signal'\|'quiet'\|'navy'`, `size?: 'normal'\|'small'\|'wide'`, `disabled?`, `textColor?`, `block?`, `children?` (+ button attrs) |
-| `IconBlock` | Icons.kt IconBlock | `icon: ArcIcon`, `label` (aria-label + long-press tooltip), `face`, `ink`, `onClick`, `disabled?`, `size?`=44, `iconSize?`, `round?` |
-| `Icon` / `Dot` `Ring` `Gear` `Help` `Refresh` `Plus` `Search` `Import` `Follow` | Icons.kt | `icon` (Icon only), `size?`=22, `color?`, `label?` (else aria-hidden) |
+| `IconBlock` | Icons.kt IconBlock | `icon: ArcIcon`, `label` (aria-label + long-press tooltip), `face`, `ink`, `onClick`, `disabled?`, `size?`=44, `iconSize?`, `round?`, `checked?` + `tabIndex?` (web only: a radio of a group, held down while checked; `ThemeSwitch`) |
+| `Icon` / `Dot` `Ring` `Gear` `Help` `Refresh` `Plus` `Search` `Import` `Follow` (web only: `System` `Sun` `Moon`) | Icons.kt | `icon` (Icon only), `size?`=22, `color?`, `label?` (else aria-hidden) |
 | `PlayKey` | PlayKey | `playing`, `description`, `onClick`, `disabled?` |
 | `Field` | ArcField | `label`, `value`, `onValueChange`, `singleLine?`, `minLines?`, `placeholder?`, `maxLength?`, `inputMode?`, `enterKeyHint?`, `type?`, `background?`, `autoFocus?`, `disabled?`, `onSubmit?`, `icon?: ArcIcon` (before the text: the search glass), `hideLabel?` (Kotlin's null label: for screen readers only) |
 | `Segmented` | Segmented | `options`, `selected`, `onSelect(i)`, `label?` / `labelledBy?`, `describedBy?` (radiogroup, arrow keys); `compact?` (small pale caps sized to their words, a row's control), `fill?` (compact, equal across the width), `disabled?: boolean[]` + `disabledNote?` (greyed, skipped by the arrows), `descriptions?` (screen-reader names) |
@@ -139,6 +139,7 @@ Common optional props on most: `class`, `id`, `ref`. Colours are CSS values
 | `ComboLine`, `KeymapSteps`, `StepBadge`, `CloseKey` | GuideKeys | `combo`, `keymap`, `spoken` (a line of small caps with HOLD / TYPE / TURN and mode tags) / `keymap` (the open row's numbered steps) / `n`, `hold` / `onClick`, `description` |
 | `KoPanel` | KoPanel | `keymap: GuideKeymap \| null` (the K.O. II as an SVG in 560-wide drawing units, the keymap's keys outlined with step badges, the rest dimmed; `KO_ASPECT`; the Guide's desk column) |
 | `Shell`, `TopBar`, `SectionTag`, `SectionMenu`, `GuideEdgeTab` | Chrome.kt | mounted by app.tsx; screens don't use them (`Shell`'s `edgeTab`: a second tab under GUIDE) |
+| `ThemeSwitch`, `themeKeys(theme)` | — (web only) | `theme`, `onTheme(t)` (the desk's top bar, in the settings key's place: System / Light / Dark icon keys as a radiogroup, the same setting as Settings → Theme; coach mark `top.theme`) |
 | `CoachHost`, `CoachOverlay`, `useCoachMark` | Coach.kt | see above |
 
 The top bar's 8dp spacing is drawn by shrinkable gap spans (not `gap`), so

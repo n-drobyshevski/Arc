@@ -14,6 +14,8 @@ object CoachText {
     const val CONNECTION = "Connection"
     const val DISCONNECTED = "Connect the EP-133"
     const val SETTINGS = "Settings"
+    /** The web's desktop top bar: its System / Light / Dark switch, in the settings key's place. */
+    const val THEME = "Light or dark"
     const val SECTIONS = "Sections"
     const val GUIDE_TAB = "EP-133 shortcuts"
     const val MODE = "Pads or keys"

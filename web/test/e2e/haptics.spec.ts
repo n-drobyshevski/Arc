@@ -5,7 +5,7 @@
 // Settings → Haptics is on, and not once it is off; on the desktop
 // (vibrate there, but no touch screen) the Settings row is not shown at all.
 import type { Page } from '@playwright/test'
-import { expect, test } from './fixtures'
+import { expect, openSettings, test } from './fixtures'
 
 /** Records navigator.vibrate's calls in window.__arcVibrate, from before the app starts. */
 async function recordVibrate(page: Page): Promise<void> {
@@ -44,7 +44,7 @@ test.describe('on a phone', () => {
     await keys.nth(3).tap()
     await expect.poll(() => vibrations(page)).toEqual([10, 10])
 
-    await page.getByRole('banner').getByRole('button', { name: 'Settings' }).click()
+    await openSettings(page)
     const haptics = page.getByRole('switch', { name: 'Haptics' })
     await expect(haptics).toHaveAttribute('aria-checked', 'true')
     await haptics.click()
@@ -80,7 +80,7 @@ test('on the desktop the Haptics row is hidden: vibrate is there, but no touch s
   await page.goto('/?demo#/live')
   await expect(page.locator('[data-pad]')).toHaveCount(12)
   expect(await page.evaluate(() => typeof navigator.vibrate)).toBe('function')
-  await page.getByRole('banner').getByRole('button', { name: 'Settings' }).click()
+  await openSettings(page)
   await expect(page.getByText('Piano keys', { exact: true })).toBeVisible()
   await expect(page.getByRole('switch', { name: 'Haptics' })).toHaveCount(0)
 })

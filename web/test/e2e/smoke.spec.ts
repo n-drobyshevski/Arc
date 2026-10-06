@@ -20,7 +20,10 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
     await expect(coach).toBeHidden()
     await selectTab(page, 'Backups')
     await expect(page).toHaveURL(/#\/backups$/)
-    await expect(bar.getByRole('button', { name: 'Settings' })).toBeVisible()
+    // The desktop layout: the theme switch in the gear's place, Settings on the nav rail.
+    await expect(bar.getByRole('radiogroup', { name: 'Theme' })).toBeVisible()
+    await expect(bar.getByRole('button', { name: 'Settings' })).toHaveCount(0)
+    await expect(page.locator('.nav-rail').getByRole('button', { name: 'Settings', exact: true })).toBeVisible()
   })
 
   await test.step('2. auto-connect: the device panel shows the EP-133 and its 12 sounds', async () => {

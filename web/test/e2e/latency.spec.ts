@@ -7,7 +7,7 @@
 // the log's place (on a phone too, where it scrolls down to Reset).
 import type { Page } from '@playwright/test'
 import { LatencyText } from '../../src/core/text/latencyText'
-import { demo, expect, test } from './fixtures'
+import { demo, expect, openSettings, test } from './fixtures'
 
 /** liveAudio.ts's CHOICE_KEY (that module loads the worklet through Vite, so it isn't imported here). */
 const CHOICE_KEY = 'arc.liveLatencyChoice'
@@ -74,7 +74,7 @@ function deviceRate(page: Page): Promise<number> {
 
 /** From Live to the debug screen, through Settings. */
 async function openDebug(page: Page): Promise<void> {
-  await page.getByRole('banner').getByRole('button', { name: 'Settings' }).click()
+  await openSettings(page)
   await page.getByRole('button', { name: 'Debug log' }).click()
   await expect(page.locator('[data-screen="debug"]')).toBeVisible()
 }
