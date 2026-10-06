@@ -30,6 +30,8 @@ export interface LiveHarness {
   liveAudio: FakeLiveAudio
   toasts: ToastMsg[]
   setVisible(v: boolean): void
+  /** The page is going away (pagehide). */
+  pageHide(): void
 }
 
 export interface LiveHarnessOptions {
@@ -39,6 +41,8 @@ export interface LiveHarnessOptions {
   /** No EP-133 plugged in. */
   unplugged?: boolean
   now?: () => number
+  /** The fake output has a `late` signal of its own, as the real LiveAudio. */
+  late?: boolean
 }
 
 const all: LiveHarness[] = []
@@ -63,8 +67,9 @@ export async function liveHarness(opts: LiveHarnessOptions = {}): Promise<LiveHa
   const library = opts.library ?? (await freshLibrary())
   const storage = opts.storage ?? memoryStorage()
   const padSounds = opts.padSounds ?? memoryPadSoundStore()
-  const liveAudio = fakeLiveAudio()
+  const liveAudio = fakeLiveAudio(opts.late ?? false)
   const visListeners = new Set<(v: boolean) => void>()
+  const hideListeners = new Set<() => void>()
   let visible = true
   const deps: Deps = {
     midi: {
@@ -98,6 +103,10 @@ export async function liveHarness(opts: LiveHarnessOptions = {}): Promise<LiveHa
         visListeners.add(l)
         return () => visListeners.delete(l)
       },
+      onPageHide: (l) => {
+        hideListeners.add(l)
+        return () => hideListeners.delete(l)
+      },
     },
     title: { get: () => 'arc', set: () => {} },
     launchFiles: () => false,
@@ -121,6 +130,9 @@ export async function liveHarness(opts: LiveHarnessOptions = {}): Promise<LiveHa
     setVisible(v) {
       visible = v
       for (const l of [...visListeners]) l(v)
+    },
+    pageHide() {
+      for (const l of [...hideListeners]) l()
     },
   }
   all.push(h)

@@ -1,7 +1,12 @@
 // Port of core/src/test/kotlin/dev/arc/ep133/text/FeatureTextTest.kt
 import { describe, expect, it } from 'vitest'
 import { DiffResult, ProjectDiff, ProjectState, SoundDiff, SoundState } from '../../../src/core/features/backupDiff'
+import { NoteNames, SCALES } from '../../../src/core/features/keys'
+import { KeyMark } from '../../../src/core/features/piano'
+import { physicalPad } from '../../../src/core/features/padNotes'
 import { FeatureText } from '../../../src/core/text/featureText'
+import { MirrorText } from '../../../src/core/text/mirrorText'
+import { SettingsText } from '../../../src/core/text/settingsText'
 
 describe('FeatureTextTest', () => {
   it('browser text', () => {
@@ -53,5 +58,50 @@ describe('FeatureTextTest', () => {
     expect(FeatureText.duration(0.9994)).toBe('999 ms')
     expect(FeatureText.trimmed(1.38)).toBe('Trimmed to 1.4 s')
     expect(FeatureText.selection(0.12, 1.5)).toBe('120 ms to 1.5 s, 1.4 s long')
+  })
+  it('piano and key text', () => {
+    const solfege = NoteNames.SOLFEGE
+    expect(MirrorText.keyWord(0, solfege).toUpperCase()).toBe('KEY DO')
+    expect(MirrorText.keyWord(10, NoteNames.LETTERS)).toBe('Key A#')
+    expect(MirrorText.keyChoice(0, solfege)).toBe('Key: DO. Tap to change.')
+    expect(MirrorText.keyChoice(6, NoteNames.LETTERS)).toBe('Key: F#. Tap to change.')
+    expect(MirrorText.pianoKey(69, solfege, KeyMark.ROOT)).toBe('LA4, root')
+    expect(MirrorText.pianoKey(69, solfege, KeyMark.IN)).toBe('LA4, in the scale')
+    expect(MirrorText.pianoKey(65, solfege, KeyMark.OUT)).toBe('FA4, outside the scale')
+    expect(MirrorText.pianoKey(66, NoteNames.LETTERS, KeyMark.OUT)).toBe('F#4, outside the scale')
+    expect(MirrorText.pianoRange(48, 72, solfege)).toBe('Keyboard, DO3 to DO5')
+    expect(MirrorText.pianoRange(96, 127, NoteNames.LETTERS)).toBe('Keyboard, C7 to G9')
+    expect(MirrorText.outOfRange(36, solfege, true)).toBe('DO2, below the keys')
+    expect(MirrorText.outOfRange(88, NoteNames.LETTERS, false)).toBe('E6, above the keys')
+    // Short scale words, still told apart once upper-cased, and never wider than five.
+    const codes = SCALES.map((s) => MirrorText.scaleCode(s).toUpperCase())
+    expect(codes).toEqual(['CHR', 'MAJ', 'MIN', 'DOR', 'PHR', 'LYD', 'MIX', 'MAJ.P', 'MIN.P', 'BLU'])
+    expect(new Set(codes).size).toBe(codes.length)
+    expect(codes.every((c) => c.length <= 5)).toBe(true)
+  })
+
+  it('device, settings and pad edit text', () => {
+    expect(FeatureText.freeOf(64.0 * 1048576)).toBe('free of 64 MB')
+    expect([1, 100, 200, 300, 400, 500, 600].map(FeatureText.factoryCategory)).toEqual(['Kicks', 'Snares', 'Hats', 'Perc', 'Bass', 'Melodic', null])
+    expect(FeatureText.factoryCategory(99)).toBe('Kicks')
+    expect(FeatureText.factoryCategory(900)).toBeNull()
+    expect(FeatureText.inProject(3, 7)).toBe('In P3 \u00B7 7')
+    expect(FeatureText.projectBadge(3)).toBe('P3')
+    expect(FeatureText.projectSummary(352 * 1024, 7)).toBe('352 KB \u00B7 7 sounds')
+    expect(FeatureText.soundsTotal(12, 2.0 * 1048576)).toBe('12 \u00B7 2.0 MB')
+    expect(SettingsText.PIANO_CHOICES.map(SettingsText.pianoKeys)).toEqual(['Auto', '1 octave', '1\u00BD', '2', '3 octaves'])
+    expect(SettingsText.pianoKeysDescription(12)).toBe('1\u00BD octaves')
+    expect(SettingsText.padSoundsShort('69 KB')).toBe('Pad sounds \u00B7 69 KB')
+    const a8 = physicalPad(0, 10)
+    expect(MirrorText.padTitle(a8)).toBe('Pad A 8')
+    expect(MirrorText.padSheetLine(1, 101, 'snare 2')).toBe('Project 1 \u00B7 now 101 snare 2')
+    expect(MirrorText.padNow(null, null)).toBe('now empty')
+    expect(MirrorText.padNow(7, null)).toBe('now 007')
+    expect(MirrorText.assigned(a8, 'vox chop')).toBe('Pad A 8: vox chop')
+    expect(MirrorText.restored(a8, 'snare 2')).toBe('Pad A 8: back to snare 2')
+    expect(MirrorText.dropPreview('snare 2', 'vox chop')).toBe('snare 2 \u2192 vox chop')
+    expect(MirrorText.dropPreview(null, 'vox chop')).toBe('empty \u2192 vox chop')
+    expect(MirrorText.lastNote(77, NoteNames.SOLFEGE).toUpperCase()).toBe('KEYS \u00B7 FA5')
+    expect(MirrorText.keysView(true)).toBe('Keys on a piano')
   })
 })

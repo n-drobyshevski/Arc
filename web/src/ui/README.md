@@ -15,11 +15,14 @@ ui/
   screens/          one file per Kotlin screen (+ its .css)
   sheets/           the sheets/dialogs mounted by app.tsx (Backups, Device, progress, licence)
   live/             Live-tab helpers: glow.ts (pad fade maths), press.ts (hold-to-play
-                    per pointer), keys.ts (KEYS grid, picker layers), Words.tsx (the
-                    PADS/KEYS word, SwapMark, PickWord lists), window.ts (landscape /
-                    short, the display line in the top bar), piano.ts (when the piano
-                    shows, what lights, PianoFingers: the fingers on its keys) and
-                    PianoKeyboard.tsx (the landscape piano); the .ts ones are tested
+                    per pointer), keys.ts (KEYS grid, picker layers), keyboard.ts (the
+                    piano's room, the keys view rule, the computer keyboard), Words.tsx
+                    (the PADS/KEYS word, SwapMark, PickWord lists), PianoKeyboard.tsx
+                    (KEYS on a wide window; its keyboard access: tabStop, stepNote),
+                    window.ts (landscape / short, the display line in the top bar),
+                    SoundPicker.tsx (EDIT's device sounds: the pad sheet, the desk's
+                    Sounds tab; its RangeKey is the Device tab's too, as Kotlin's in
+                    PadSheet.kt); the .ts ones are tested
 ```
 
 File header: `// Port of app/src/main/kotlin/dev/arc/ep133/ui/<path>.kt`.
@@ -63,7 +66,8 @@ nav.back()                                     // a Done/close key: same as syst
 `compare`, `menu`, `side`, `coach`, `sheets: string[]`, `dialogs: string[]`.
 Sheet/dialog ids in use: `detail:<id>`, `restore:<id>`, `comparePick:<id>`,
 `pads:backup:<id>:<n>`, `pads:device:<n>`, `upload`, `trim:<i>`, `licence`,
-`progress` (owned by app.tsx), dialogs `delete`, `prune:<keep>`, `forget`,
+`progress` (owned by app.tsx), `edit:<group>:<offset>` (Live's EDIT pad sheet; Live
+also mounts the `upload` / `trim:<i>` sheets for a pad's new sample), dialogs `delete`, `prune:<keep>`, `forget`,
 `pick:scale` / `pick:octave` (Live's KEYS lists, owned by app.tsx).
 
 Mounting a sheet (in `app.tsx`, under `tabs` = `onTabs(v)` for tab sheets):
@@ -93,11 +97,13 @@ the overlay opens. Mark a control either way:
 ```
 
 Known ids (`COACH_IDS`, labels/colours from the Kotlin call sites):
-`top.*`, `edge.guide`, `backups.search|import|open`, `live.pads|groups`,
-`live.keys|mode|scale|key|octave`, `side.more`, `device.refresh|add|switch|play`.
+`top.*` (`top.theme` on the desk, where the theme switch takes `top.settings`' place), `edge.guide|edit`, `backups.search|import|open`, `live.pads|groups`,
+`live.keys|mode|scale|octave|key|view|sounds`, `side.more`, `device.refresh|add|switch|play`
+(`device.switch` below the desk only: the desk shows projects and sounds together).
 A narrow control flush with the screen's left or right edge (the GUIDE tab,
 the more-tools strip) gets a side tag: a vertical tab on that edge with a
-hooked arrow (`coachPlace.ts` `edgeOf` / `sideHook`, Coach.kt's side tags). Yellow tip tags use
+hooked arrow (`coachPlace.ts` `edgeOf` / `sideHook`, Coach.kt's side tags); two on one edge
+(GUIDE and Live's EDIT) are stacked apart. Yellow tip tags use
 `COACH_YELLOW` / `COACH_YELLOW_INK`. A custom tag: `data-coach-label`,
 `data-coach-face`, `data-coach-ink`. Mark only what is on screen (a control
 scrolled out of view, or under a layer marked `data-coach-cover` such as the
@@ -123,13 +129,16 @@ Common optional props on most: `class`, `id`, `ref`. Colours are CSS values
 | Component | Kotlin | Props |
 |---|---|---|
 | `Key` | ArcKey | `text`, `onClick?`, `variant?: 'normal'\|'signal'\|'quiet'\|'navy'`, `size?: 'normal'\|'small'\|'wide'`, `disabled?`, `textColor?`, `block?`, `children?` (+ button attrs) |
-| `IconBlock` | Icons.kt IconBlock | `icon: ArcIcon`, `label` (aria-label + long-press tooltip), `face`, `ink`, `onClick`, `disabled?`, `size?`=44, `iconSize?`, `round?` |
-| `Icon` / `Dot` `Ring` `Gear` `Help` `Refresh` `Plus` `Search` `Import` `Follow` | Icons.kt | `icon` (Icon only), `size?`=22, `color?`, `label?` (else aria-hidden) |
+| `IconBlock` | Icons.kt IconBlock | `icon: ArcIcon`, `label` (aria-label + long-press tooltip), `face`, `ink`, `onClick`, `disabled?`, `size?`=44, `iconSize?`, `round?`, `checked?` + `tabIndex?` (web only: a radio of a group, held down while checked; `ThemeSwitch`) |
+| `Icon` / `Dot` `Ring` `Gear` `Help` `Refresh` `Plus` `Search` `Import` `Follow` (web only: `System` `Sun` `Moon`) | Icons.kt | `icon` (Icon only), `size?`=22, `color?`, `label?` (else aria-hidden) |
 | `PlayKey` | PlayKey | `playing`, `description`, `onClick`, `disabled?` |
-| `Field` | ArcField | `label`, `value`, `onValueChange`, `singleLine?`, `minLines?`, `placeholder?`, `maxLength?`, `inputMode?`, `enterKeyHint?`, `type?`, `background?`, `autoFocus?`, `disabled?`, `onSubmit?` |
-| `Segmented` | Segmented | `options`, `selected`, `onSelect(i)`, `label?` / `labelledBy?` (radiogroup, arrow keys) |
-| `TextToggle` | TextToggle | `options`, `selected`, `onSelect(i)`, `label?`, `controls?` |
-| `SwitchRow` | SwitchRow | `title`, `note`, `on`, `onChange(on)`, `disabled?` |
+| `Field` | ArcField | `label`, `value`, `onValueChange`, `singleLine?`, `minLines?`, `placeholder?`, `maxLength?`, `inputMode?`, `enterKeyHint?`, `type?`, `background?`, `autoFocus?`, `disabled?`, `onSubmit?`, `icon?: ArcIcon` (before the text: the search glass), `hideLabel?` (Kotlin's null label: for screen readers only) |
+| `Segmented` | Segmented | `options`, `selected`, `onSelect(i)`, `label?` / `labelledBy?`, `describedBy?` (radiogroup, arrow keys); `compact?` (small pale caps sized to their words, a row's control), `fill?` (compact, equal across the width), `disabled?: boolean[]` + `disabledNote?` (greyed, skipped by the arrows), `descriptions?` (screen-reader names) |
+| `HwToggle` | HwToggle | `on`, `onChange(on)`, `label?` / `labelledBy?`, `describedBy?`, `disabled?` (role=switch; a cap with an LED, navy + lit when on) |
+| `SettingRow`, `RowCard`, `RowAction`, `LinkRow`, `Disclosure`, `InfoKey` | SettingRow / InfoButton | row: `title`, `note?`, `info?` (the ⓘ key's long note, in a tip box), `stack?`, `control?(ids)` (gets `titleId` / `noteId` to label itself); card: `danger?`; action: `text`, `onClick`, `danger?`, `disabled?`; link row: `title`, `onClick` (chevron); disclosure: `title`, `children` |
+| `MiniPiano` | KEYS tools key picker | `selected` (0-11), `onSelect(pc)`, `names`, `labelledBy?` / `label?`, `describedBy?` (one octave, radiogroup) |
+| `TextToggle` | TextToggle | `options`, `selected`, `onSelect(i)`, `label?`, `controls?` (unused since the Step 1d Device switch: Segmented) |
+| `SwitchRow` | SwitchRow | `title`, `note`, `on`, `onChange(on)`, `disabled?` (unused since the Step 1c rows: SettingRow + HwToggle) |
 | `ChoiceRow` | ChoiceRow | `text`, `selected`, `onClick`, `radio`, `disabled?`, `trailing?`, `name?` |
 | `Caption` | Caption | `text`, `color?`, `align?: 'center'\|'start'\|'end'`, `as?` |
 | `GridPlate`, `PlateLine`, `plateRowClass(first,last)` | GridPlate | `children`, `role?`, `aria-label?`, `style?` |
@@ -140,10 +149,13 @@ Common optional props on most: `class`, `id`, `ref`. Colours are CSS values
 | `Waveform` | TrimSheet waveform | `pcm`, `channels`, `start`, `end`, `label`, `height?`, `columns?` |
 | `Sheet` | ArcSheet | `open`, `onDismiss: (() => void) \| null`, `grip?`, `label?` / `labelledBy?`, `children` |
 | `Dialog` | AlertDialog (Delete/Confirm) | `open`, `text`, `confirm`, `cancel?`, `confirmColor?`, `onConfirm`, `onDismiss` |
-| `Toast` / `ControllerToast` | ArcToast | `toast`, `onTimeout(id)`, `bottomInset?` / `controller` (app.tsx mounts it). Swipe sideways or down to dismiss (`swipeOutcome`); a Dismiss key outside the live region is shown on focus for screen readers |
-| `SideZone` | SideZone (Live tools) | `open`, `onOpen`, `onClose`, `title`, `panel`, `children` |
-| `ComboView`, `Cap`, `CloseKey` | GuideKeys | `combo`, `spoken` / `cap`, `badgeSpace` / `onClick`, `description` |
-| `Shell`, `TopBar`, `SectionTag`, `SectionMenu`, `GuideEdgeTab` | Chrome.kt | mounted by app.tsx; screens don't use them |
+| `Toast` / `ControllerToast` | ArcToast | `toast`, `onTimeout(id)`, `onAction?(id)` (the toast's key, `ToastMsg.action`: Live's UNDO), `bottomInset?` / `controller` (app.tsx mounts it). Swipe sideways or down to dismiss (`swipeOutcome`); a Dismiss key outside the live region is shown on focus for screen readers |
+| `SideZone` | SideZone (Live tools) | `open`, `onOpen`, `onClose`, `title`, `panel`, `children`, `docked?` (the desk's column), `dockHead?` (replaces the docked caption: Live's TOOLS / SOUNDS tabs) |
+| `EditEdgeTab` | EditEdgeTab (Chrome.kt) | `on`, `onChange(on)`, `inert?`, `class?` (Live's EDIT: under GUIDE via `Shell`'s `edgeTab`; on the desk MirrorScreen hangs it on the K.O. II panel) |
+| `ComboLine`, `KeymapSteps`, `StepBadge`, `CloseKey` | GuideKeys | `combo`, `keymap`, `spoken` (a line of small caps with HOLD / TYPE / TURN and mode tags) / `keymap` (the open row's numbered steps) / `n`, `hold` / `onClick`, `description` |
+| `KoPanel` | KoPanel | `keymap: GuideKeymap \| null` (the K.O. II as an SVG in 560-wide drawing units, the keymap's keys outlined with step badges, the rest dimmed; `KO_ASPECT`; the Guide's desk column) |
+| `Shell`, `TopBar`, `SectionTag`, `SectionMenu`, `GuideEdgeTab` | Chrome.kt | mounted by app.tsx; screens don't use them (`Shell`'s `edgeTab`: a second tab under GUIDE) |
+| `ThemeSwitch`, `themeKeys(theme)` | — (web only) | `theme`, `onTheme(t)` (the desk's top bar, in the settings key's place: System / Light / Dark icon keys as a radiogroup, the same setting as Settings → Theme; coach mark `top.theme`) |
 | `CoachHost`, `CoachOverlay`, `useCoachMark` | Coach.kt | see above |
 
 The top bar's 8dp spacing is drawn by shrinkable gap spans (not `gap`), so
@@ -164,7 +176,8 @@ it matches Android at 360px and gives way only when the tag is long.
   hardware cap, a face over an edge offset 2px right and 3px down (as the
   Sample Tool draws it), pressed on `:active`, `[data-down]`, `.is-down` and
   `[aria-pressed=true]`. Each element sets `--cap-face` (and `--cap-ink`,
-  `--cap-edge`, `--cap-glow`); `--hw-*` are the hardware colours. Key,
+  `--cap-edge`, `--cap-glow`); `--hw-*` are the hardware colours, `--ko-*`
+  the Guide's K.O. II illustration (KoColors; only `--ko-edge` changes in the dark). Key,
   IconBlock, Segmented, SectionMenu, PlayKey and the Live pads, keys and
   group keys use it.
   Never hard-code a theme colour: both themes switch by redefining tokens.
@@ -182,6 +195,14 @@ it matches Android at 360px and gives way only when the tag is long.
   wrap transitions in `@media (prefers-reduced-motion: reduce)`.
 - **Layout**: phone first (393dp reference). Columns cap at `--column-max`
   and centre; no horizontal page scroll at 320px.
+  Web only, the desk: from `@media (min-width: 1024px)` (repeat the literal in
+  every query; media queries can't read custom properties) the app is a grid
+  of the nav rail (`components/NavRail.tsx`, hardware keys with LEDs, in place
+  of the Sections menu and the Guide edge tab) and the page column, on the
+  desk colours of `theme/desk.css` (`--desk-*`, `--rail-width`, `--desk-pad`,
+  `.desk-paper` for paper cards; its two dark blocks identical, as in
+  cap.css). Script asks `useDesk()` (`ui/useDesk.ts`). Below 1024px nothing
+  may change.
 
 ## Checking your screen
 

@@ -1,0 +1,179 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Rows.kt (SettingRow, InfoButton, TipBox, LinkRow, Disclosure) and Components.kt (GridPlate, the row card)
+ *
+ * A row: the name (semi 15, ink) on the left, its ⓘ key after it, the
+ * control on the right, padding 14/18, at least 60 high. Cards are the plate
+ * colour, radius 18, rows split by a faint line. */
+
+.row-card {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  border-radius: var(--radius-plate);
+  background: var(--plate);
+}
+.row-card > * + * { border-top: 1px solid var(--row-rule); }
+.row-card--danger { box-shadow: inset 0 0 0 1.5px var(--row-danger-rule); }
+
+.setting-row {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  text-align: start;
+}
+
+.setting-row__line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-16);
+  min-height: 60px;
+  padding: var(--space-14) var(--space-18);
+}
+.setting-row--stack .setting-row__line {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-10);
+}
+
+.setting-row__text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  flex: 1 1 0;
+  /* Never narrower than the name's longest word: the control takes the rest,
+   * so a short name ("Theme") leaves its caps one row, and a long one makes
+   * the caps wrap before a word is split. */
+  min-width: auto;
+}
+.setting-row--stack .setting-row__text { min-width: 0; }
+.setting-row__title {
+  color: var(--ink);
+  font-size: var(--size-body15);
+  font-weight: var(--weight-semi);
+  line-height: 1.4;
+  overflow-wrap: break-word;
+}
+
+.setting-row__control {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  max-width: 100%;
+}
+.setting-row--stack .setting-row__control { justify-content: stretch; }
+.setting-row--stack .setting-row__control > * { flex: 1 1 auto; }
+
+/* The notes: a tinted box under the row, inside its padding, a paragraph each. */
+.setting-row__tip {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  margin: calc(-1 * var(--space-4)) var(--space-18) var(--space-14);
+  padding: var(--space-10) var(--space-12);
+  border-radius: var(--radius-field);
+  background: var(--row-tip);
+  color: var(--ink);
+  font-size: var(--size-tiny);
+  line-height: 1.45;
+}
+.setting-row__tip > p { margin: 0; }
+
+/* The ⓘ key: 20 round, a graphite ring and "i"; open, filled navy. Its touch area reaches 32. */
+.info-key {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-inline-start: var(--space-8);
+  vertical-align: -3px;
+  border-radius: 50%;
+  border: 1.5px solid var(--graphite);
+  background: transparent;
+  color: var(--graphite);
+  font-size: 12px;
+  font-weight: var(--weight-extra);
+  line-height: 1;
+}
+.info-key::after {
+  content: '';
+  position: absolute;
+  inset: -7px;
+}
+.info-key.is-open {
+  border-color: var(--navy);
+  background: var(--navy);
+  color: var(--on-navy);
+}
+.info-key--static { margin: 0; vertical-align: 0; flex: none; }
+.info-key--static::after { content: none; }
+
+/* A text action (Forget, Clear): caps, navy, or red in a danger card. */
+.row-action {
+  flex: none;
+  min-height: 40px;
+  padding: var(--space-8) var(--space-4);
+  background: transparent;
+  color: var(--navy);
+  font-size: var(--size-tiny);
+  font-weight: var(--weight-extra);
+  letter-spacing: var(--track-caps-key);
+  text-transform: uppercase;
+}
+.row-action--danger { color: var(--danger); }
+.row-action:disabled { opacity: var(--key-disabled); }
+
+/* A link row: the whole row is a button, a chevron at its end. */
+.link-row { background: transparent; color: inherit; }
+.link-row:active { background: var(--row-pressed); }
+.link-row:focus-visible { outline-offset: -3px; }
+.link-row__chevron { flex: none; color: var(--graphite); }
+.row-card > .link-row:last-child { border-radius: 0 0 var(--radius-plate) var(--radius-plate); }
+
+/* A disclosure: ⓘ, the title and a chevron that turns down when open. */
+.disclosure__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  width: 100%;
+  min-height: 52px;
+  padding: var(--space-14) var(--space-18);
+  border-radius: var(--radius-plate);
+  background: transparent;
+  color: var(--ink);
+  text-align: start;
+}
+.disclosure__head:focus-visible { outline-offset: -3px; }
+.disclosure__title {
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: var(--size-body15);
+  font-weight: var(--weight-semi);
+  line-height: 1.4;
+}
+.disclosure__chevron {
+  flex: none;
+  color: var(--graphite);
+  transition: transform var(--key-press-ms) var(--key-ease);
+}
+.disclosure.is-open .disclosure__chevron { transform: rotate(90deg); }
+.row-card > .disclosure__body { border-top: 0; }
+.disclosure__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  padding: 0 var(--space-18) var(--space-16);
+}
+.disclosure__body > p {
+  margin: 0;
+  color: var(--graphite);
+  font-size: var(--size-small);
+  line-height: 1.5;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .disclosure__chevron { transition: none; }
+}

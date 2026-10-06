@@ -1,4 +1,8 @@
-/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Chrome.kt (ArcFrame, ArcShell) */
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Chrome.kt (ArcFrame, ArcShell)
+ *
+ * Web only, from 1024px wide (the desk, theme/desk.css): the shell fills the
+ * page column, transparent over the desk; no GUIDE edge tab (the nav rail has
+ * the Guide key); the guide is a panel docked on the left of the column. */
 
 /* ArcFrame: top bar, a weighted body, the bottom slot; one screen high. */
 .shell {
@@ -42,6 +46,12 @@
   z-index: 10;
 }
 
+/* A second edge tab (Live's EDIT): under GUIDE, 18 apart. */
+.shell__edge-tab--second {
+  display: flex;
+  transform: translateY(calc(-50% - 80px + var(--edge-tab-height) + 18px));
+}
+
 /* The guide slides in from the left over everything (top bar too). */
 .shell__guide {
   position: absolute;
@@ -56,4 +66,25 @@
 
 @media (prefers-reduced-motion: reduce) {
   .shell__guide { transition: none; }
+}
+
+/* ---------- the desk (web only) ---------- */
+
+@media (min-width: 1024px) {
+  .shell,
+  .shell__top { background: transparent; }
+
+  .shell__edge-tab { display: none; }
+
+  /* Docked beside the rail, a paper panel lifted off the desk; it slides out
+   * from under the rail (the shell clips it). Wide enough for the guide's list
+   * and the K.O. II beside it (GuideScreen): the page column at most, 1160 at
+   * most, so on a wide desk the rest of the page stays in view. */
+  .shell__guide {
+    right: auto;
+    width: min(1160px, 100%);
+    border-radius: 0 var(--radius-plate) var(--radius-plate) 0;
+    box-shadow: 4px 0 0 var(--desk-shade);
+  }
+  .shell__guide:not(.is-shown) { box-shadow: none; }
 }

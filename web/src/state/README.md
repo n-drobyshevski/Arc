@@ -49,9 +49,9 @@ Live's deps: `liveAudio` (`LiveAudioDeps`, platform/audio/liveAudio's
 | `c.phase` | `ConnectionPhase` | `'unsupported' \| 'disconnected' \| 'opening' \| 'handshaking' \| 'ready' \| 'task' \| 'reading'` |
 | `c.settings` | `AppSettings` | theme, autoConnect, keepScreenOn, keepLast, liveOneGroup, liveFollow, guideSeen, liveKeys, keysRoot (0..11), keysScale (`Scale`), keysOctave (0..8), keysNames (`NoteNames`) |
 | `c.playing` | `string \| null` | key of the sound playing in the lists: `device:N`, `backup:<id>:N`, or the key given to `playNow` |
-| `c.liveVoices` | `ReadonlySet<string>` | Live voices sounding on the phone: pads `live:<group>:<offset>`, keys `keys:<index>` (Android `liveKeys`) |
+| `c.liveVoices` | `ReadonlySet<string>` | Live voices sounding on the phone: pads `live:<group>:<offset>`, KEYS notes `note:<midi>` (Android `liveKeys`) |
 | `c.playingPads` | `ReadonlySet<number>` | the pads sounding, as `padKey(pad)` (ring them) |
-| `c.playingKeys` | `ReadonlySet<number>` | the KEYS keys sounding, by index (ring them) |
+| `c.playingNotes` | `ReadonlySet<number>` | the KEYS notes sounding (grid and piano), as MIDI notes, first pressed first (ring / outline them) |
 
 Also: `c.store` (`get()`, `update()`, `subscribe()`, `waitFor()`), `c.trafficLog`,
 `c.coach` (`seen`, `markSeen()`: the guide overlay's first-run flag, now
@@ -94,7 +94,7 @@ reject (errors become toasts); the UI may ignore it.
   shows the last read; it restarts when a device connects or goes), and
   Live's sound output is open on the same terms; do not drive
   `openMirror`/`pauseMirror`/`openLiveAudio`/`closeLiveAudio` from the UI.
-- `toast(text, error?)`, `dismissToast(id)` — the UI times toasts out with `dismissToast`.
+- `toast(text, error?)`, `toastOnce(text, error?)` (not while the same text shows: a slide presses many keys), `dismissToast(id)` — the UI times toasts out with `dismissToast`.
 
 **Device**: `connect()` (Connect/Disconnect toggle), `refreshDevice()`, `cancelTask()`,
 `backup()`, `restore(b, sel)`, `compare(b, sel)` / `clearDiff()`.
@@ -120,13 +120,20 @@ library folder), `restoreFromFolder(target)`, `reconnectFolder()`* (the banner t
 **Live**: `mirrorName(pad)`, `setPadOrder(order)`, `padOrder()`, `forgetLearned()`.
 (`openMirror`/`pauseMirror`/`closeMirror` exist but are driven by `setLive`/`tabChanged`.)
 - Pads sound while held (a gate) and play alongside each other (chords, up
-  to 8): `playPad(pad, hold = true)`* on pointerdown, `releasePad(pad)` on
-  pointerup/cancel; `hold: false` (a screen reader's Play) plays the whole
-  sample. The sound comes from arc's copy of the device's sound, else the
+  to 8): `playPad(pad, hold = true, unsure = false, at?)`* on pointerdown
+  (`at`: the event's `timeStamp`, so the latency note counts from the touch),
+  `releasePad(pad)` on pointerup, `cutPad(pad)` when the press turned into a
+  scroll (a short fade, minimum gate or not; the all-groups page); `hold: false` (a screen reader's Play) plays the whole
+  sample. On the all-groups page the press is `unsure`: a sample in memory
+  sounds at once, but the KEYS pad, a load and its toasts wait for
+  `keepPad(pad)` (no scroll within the window), and a cut drops them. The sound comes from arc's copy of the device's sound, else the
   newest backup holding it, else (connected) the device; errors and "no
   copy" / "no sample yet" are toasts. A tapped pad becomes the KEYS sound.
-- KEYS: `playKey(index, hold = true)`* / `releaseKey(index)` (0 = '.', the
-  lowest), `selectKeysPad(pad)` (also for a pad played on the device),
+- KEYS: `playNote(midi, hold = true, at?)`* / `releaseNote(midi)` for a grid
+  key and a piano key alike (the screen names the note as the finger lands,
+  so a held key keeps its note when the key, scale or octave changes; presses
+  during a slide share one load of the sound, and after a slow load only the
+  latest lifted press sounds), `selectKeysPad(pad)` (also for a pad played on the device),
   `setLiveKeys(on)`, `setKeysRoot(0..11)`, `setKeysScale(scale)`,
   `setKeysOctave(0..8)`; values are clamped. `Keys.notes(root, scale, octave)`
   (core/features/keys) gives each key's note for labels.
@@ -137,9 +144,15 @@ library folder), `restoreFromFolder(target)`, `reconnectFolder()`* (the banner t
 `setLiveOneGroup(on)`, `setLiveFollow(on)`, `setKeysNames(names)` (Note names
 on the keys), `padSoundsSize(): Promise<number>` (bytes, for
 `SettingsText.padSounds(Format.bytes(n))`) and `clearPadSounds()`,
-`setGuideSeen()`, `pruneCount(keep)` (for the confirm dialog), then `setKeepLast(keep)`.
+`setHaptics(on)` (the pads' and keys' tick; show the row only where
+`platform/haptics` `supported()`), `setGuideSeen()`, `pruneCount(keep)` (for the confirm dialog), then `setKeepLast(keep)`.
 
 **Debug log**: `logText()`, `logFileName()`, `saveLog()`*, `shareLog()`*, `copyLog()`*.
+Its latency test: `liveLatency` (signal: `LatencyStats` per engine row, and each
+output opened with its latest reported delay; `latencyRows` lists the rows), `liveEngine` (signal: the row in use, or null),
+`liveLatencyHint` (signal, or null without a choice) / `setLiveLatencyHint(choice)`
+(kept in localStorage `arc.liveLatencyChoice`, not in library.json; reopens
+Live's output), `resetLatency()`.
 
 **Formatting**: `fmtDay(ms)`, `fmtDateTime(ms)`.
 
@@ -152,10 +165,12 @@ need transient activation.
 - A running task sets a leave-page guard, the document title shows progress,
   and the screen wake lock is held; tell the user to keep the tab in front.
 - Another tab may own the device (`Connection` toasts it); only one tab connects.
-- Hiding the page stops playback, pauses the mirror and closes Live's output.
-- Browsers start audio only after a tap: Live's output is set up on the first
-  press when the page had none yet, so call `playPad`/`playKey` synchronously
-  from the pointerdown handler.
+- Hiding the page stops playback, pauses the mirror and suspends Live's output
+  (as leaving Live does); it is closed after `LIVE_AUDIO_KEEP_MS` away, or on
+  pagehide.
+- Browsers start audio only after a tap: Live's output is set up when Live
+  opens and the first press wakes it, so call `playPad`/`playNote`
+  synchronously from the pointerdown handler.
 - Restoring from a folder brings back the settings, Live's learned pads
   (combined with those learned since), the pad order (unless one was chosen
   since), the guide flag and live.json (unless this browser's read is newer),

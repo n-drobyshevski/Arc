@@ -49,6 +49,10 @@
 //   for them (Kotlin's counts only arrows across tags).
 // - Last, a tag another tag's arrow runs under slides sideways off it where it
 //   can ([clearArrows]).
+// - Two side tags on one edge (the GUIDE tab and Live's EDIT tab under it) are
+//   stacked apart, hook and all: the overlap is shared, the upper tag moving up
+//   (where that is clear) and the lower one down (more of it up when there is
+//   no room below), before either slides.
 // - A side tag stands on the edge its control hugs: the screen's edge, or the
 //   safe area's (the web's edge controls aren't padded for a notch, Android's
 //   are, so both are their control's own edge).
@@ -353,7 +357,26 @@ export function placeTags(marks: readonly CoachMarkInput[], viewport: Size, meas
     const room = (top: number): Box => ({ left, top: top - M.hookRoom, right: left + w, bottom: top + h })
     const clear = (top: number): boolean =>
       !placed.some((p) => overlaps(inflate(roomOf(p), M.clearance), room(top))) && onControls(room(top), m) === 0
-    const centred = coerceIn(centerY(m.bounds) - h / 2, lo, hi)
+    let centred = coerceIn(centerY(m.bounds) - h / 2, lo, hi)
+    // Web: two tabs stacked on one edge (GUIDE and Live's EDIT) keep their tags apart, hook and
+    // all: the overlap is shared, the upper tag moving up (where it stays clear) and this one
+    // down, each near its tab.
+    const above = placed.filter((p) => p.side === side && centerY(p.mark.bounds) <= centerY(m.bounds)).at(-1)
+    if (above !== undefined) {
+      const overlap = above.rect.bottom + M.clearance + M.hookRoom - centred
+      if (overlap > 0) {
+        let lift = Math.min(Math.max(0, above.rect.top - lo), Math.max(overlap / 2, overlap - Math.max(0, hi - centred)))
+        if (lift > 0) {
+          const r = above.rect
+          const moved = box(r.left, r.top - lift, r.right - r.left, r.bottom - r.top)
+          const movedRoom = { ...moved, top: moved.top - M.hookRoom }
+          const free = !placed.some((p) => p !== above && overlaps(inflate(roomOf(p), M.clearance), movedRoom)) && onControls(movedRoom, above.mark) === 0
+          if (free) placed[placed.indexOf(above)] = { ...above, rect: moved, room: movedRoom }
+          else lift = 0
+        }
+        centred = Math.min(centred + overlap - lift, hi)
+      }
+    }
     // On a phone on its side the edge controls sit high, where the top bar's tags hang: the
     // side tag slides down clear of them while its hook still meets the control, or up while
     // the tag still runs beside it.

@@ -5,6 +5,10 @@
 // that would follow the long press is swallowed. Screen readers read [label]
 // (aria-label); mouse and keyboard users get it as the native title.
 // Faded to .4 when disabled; a black 12% overlay while pressed.
+//
+// Web only: [checked] makes the key one radio of a group (the desk's theme
+// switch, ThemeSwitch.tsx): role=radio with aria-checked, held down while
+// checked, and a [data-roving] item for the group's arrow keys ([tabIndex]).
 import type { CSSProperties, JSX, Ref, TargetedPointerEvent } from 'preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { Icon, type ArcIcon } from './Icons'
@@ -107,6 +111,10 @@ export interface IconBlockProps {
   /** Circle instead of the 8px rounded square. */
   round?: boolean
   class?: string
+  /** Web only: a radio of a group (role=radio, aria-checked), held down while true. */
+  checked?: boolean
+  /** The roving tab stop of a radio group (0 on the checked one, -1 on the rest). */
+  tabIndex?: number
   /** Extra attributes for the coach registry and tests. */
   id?: string
   /** Forwarded to the <button> (Preact 11 passes ref as a prop). */
@@ -114,7 +122,8 @@ export interface IconBlockProps {
 }
 
 export function IconBlock(props: IconBlockProps): JSX.Element {
-  const { icon, label, face, ink, onClick, disabled = false, size = 44, iconSize = 22, round = false } = props
+  const { icon, label, face, ink, onClick, disabled = false, size = 44, iconSize = 22, round = false, checked } = props
+  const radio = checked !== undefined
   const [tip, setTip] = useState<TipAlign | null>(null)
   const self = useRef<HTMLButtonElement | null>(null)
   const start = useRef<{ x: number; y: number } | null>(null)
@@ -174,9 +183,13 @@ export function IconBlock(props: IconBlockProps): JSX.Element {
           if (typeof r === 'function') r(el)
           else if (r) r.current = el
         }}
-        class={`icon-block cap-3d${round ? ' icon-block--round cap-3d--round' : ''}`}
+        class={`icon-block cap-3d${round ? ' icon-block--round cap-3d--round' : ''}${checked ? ' is-down' : ''}`}
         style={style}
         disabled={disabled}
+        role={radio ? 'radio' : undefined}
+        aria-checked={radio ? checked : undefined}
+        tabIndex={props.tabIndex}
+        data-roving={radio ? '' : undefined}
         aria-label={label}
         title={label}
         onPointerDown={onPointerDown}

@@ -11,8 +11,8 @@
 //
 // Web deltas:
 // - SharedPreferences "settings" becomes the JSON object under "arc.settings"
-//   (same field names; keepLast stored as 0 for "keep all", as Android stores
-//   it). Like the preferences, it holds only the fields ever changed.
+//   (same field names; keepLast stored as 0 for "keep all" and pianoWhites as
+//   0 for Auto, as Android stores them). Like the preferences, it holds only the fields ever changed.
 //   SharedPreferences "mirror" (learned, order, keysPad) becomes
 //   "arc.mirror.learned", "arc.mirror.order" and "arc.mirror.keysPad"; the
 //   activity's old coach_seen becomes "arc.coachSeen" (read once, as Android
@@ -27,6 +27,7 @@ import { MAX_OCTAVE, MIN_OCTAVE, NoteNames, Scale, noteNamesOf, scaleOf } from '
 import { LearnedLinks } from '../../core/features/learnedLinks'
 import { physicalPad, type PhysicalPad } from '../../core/features/padNotes'
 import { PadOrder } from '../../core/features/padPush'
+import { KeysView, choiceOf as pianoChoiceOf, keysViewOf } from '../../core/features/piano'
 import { ThemeChoice } from '../../core/text/settingsText'
 
 /** The settings page's choices (an addition to the web version). */
@@ -50,6 +51,15 @@ export interface AppSettings {
   readonly keysOctave: number
   /** KEYS names notes in solfège (DO RE MI) or letters (C D E). */
   readonly keysNames: NoteNames
+  /** KEYS writes each key's note name in its ring (off: rings and octave numbers only). */
+  readonly keysShowNames: boolean
+  /** KEYS on the grid or the piano, remembered once for a wide window and once for a tall one. */
+  readonly keysViewWide: KeysView
+  readonly keysViewTall: KeysView
+  /** The piano's white keys (Piano.WHITES); null is Auto, the widest that fits. */
+  readonly pianoWhites: number | null
+  /** A light tick (navigator.vibrate) when a pad or key goes down under a finger. */
+  readonly haptics: boolean
 }
 
 export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
@@ -66,6 +76,11 @@ export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
   keysScale: Scale.CHROMATIC,
   keysOctave: 4,
   keysNames: NoteNames.SOLFEGE,
+  keysShowNames: true,
+  keysViewWide: KeysView.AUTO,
+  keysViewTall: KeysView.AUTO,
+  pianoWhites: null,
+  haptics: true,
 })
 
 /** Every setting's key, in Android's order (SettingsStore.values()). */
@@ -82,6 +97,11 @@ export const SETTING_KEYS = Object.freeze([
   'keysScale',
   'keysOctave',
   'keysNames',
+  'keysShowNames',
+  'keysViewWide',
+  'keysViewTall',
+  'pianoWhites',
+  'haptics',
 ] as const)
 export type SettingKey = (typeof SETTING_KEYS)[number]
 
@@ -238,12 +258,20 @@ export function readSettings(raw: string | null): AppSettings {
     keysScale: scaleOf(typeof o.keysScale === 'string' ? o.keysScale : null) ?? Scale.CHROMATIC,
     keysOctave: coerceIn(int('keysOctave', 4), MIN_OCTAVE, MAX_OCTAVE),
     keysNames: noteNamesOf(typeof o.keysNames === 'string' ? o.keysNames : null) ?? NoteNames.SOLFEGE,
+    keysShowNames: bool('keysShowNames', true),
+    keysViewWide: keysViewOf(typeof o.keysViewWide === 'string' ? o.keysViewWide : null) ?? KeysView.AUTO,
+    keysViewTall: keysViewOf(typeof o.keysViewTall === 'string' ? o.keysViewTall : null) ?? KeysView.AUTO,
+    // getInt("pianoWhites", 0): 0 (or any size arc doesn't offer) is Auto.
+    pianoWhites: pianoChoiceOf(int('pianoWhites', 0)),
+    haptics: bool('haptics', true),
   }
 }
 
-/** One setting as it is stored under "arc.settings" (booleans and numbers as JSON, keepLast 0 for keep all). */
+/** One setting as it is stored under "arc.settings" (booleans and numbers as JSON, keepLast and pianoWhites 0 for keep all / Auto). */
 function storedValue(s: AppSettings, k: SettingKey): string | number | boolean {
-  return k === 'keepLast' ? (s.keepLast ?? 0) : s[k]
+  if (k === 'keepLast') return s.keepLast ?? 0
+  if (k === 'pianoWhites') return s.pianoWhites ?? 0
+  return s[k]
 }
 
 /**
@@ -272,6 +300,12 @@ export function settingValues(s: AppSettings): Record<SettingKey, string> {
     keysScale: s.keysScale,
     keysOctave: String(s.keysOctave),
     keysNames: s.keysNames,
+    keysShowNames: String(s.keysShowNames),
+    keysViewWide: s.keysViewWide,
+    keysViewTall: s.keysViewTall,
+    // Stored like keepLast: 0 for Auto.
+    pianoWhites: String(s.pianoWhites ?? 0),
+    haptics: String(s.haptics),
   }
 }
 
@@ -308,6 +342,8 @@ export function settingsFromIndex(map: Readonly<Record<string, string>>, cur: Ap
   const keep = keepN !== null && keepN > 0 ? keepN : null
   const root = n('app.keysRoot')
   const octave = n('app.keysOctave')
+  // 0 is Auto; a size arc doesn't offer leaves the choice as it is.
+  const whites = n('app.pianoWhites')
   return {
     theme: themeOf(get(map, 'app.theme')) ?? cur.theme,
     autoConnect: b('app.autoConnect') ?? cur.autoConnect,
@@ -321,6 +357,11 @@ export function settingsFromIndex(map: Readonly<Record<string, string>>, cur: Ap
     keysScale: scaleOf(get(map, 'app.keysScale')) ?? cur.keysScale,
     keysOctave: octave !== null && octave >= MIN_OCTAVE && octave <= MAX_OCTAVE ? octave : cur.keysOctave,
     keysNames: noteNamesOf(get(map, 'app.keysNames')) ?? cur.keysNames,
+    keysShowNames: b('app.keysShowNames') ?? cur.keysShowNames,
+    keysViewWide: keysViewOf(get(map, 'app.keysViewWide')) ?? cur.keysViewWide,
+    keysViewTall: keysViewOf(get(map, 'app.keysViewTall')) ?? cur.keysViewTall,
+    pianoWhites: whites === null ? cur.pianoWhites : whites === 0 ? null : (pianoChoiceOf(whites) ?? cur.pianoWhites),
+    haptics: b('app.haptics') ?? cur.haptics,
   }
 }
 

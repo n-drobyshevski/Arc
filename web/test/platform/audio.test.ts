@@ -2,6 +2,8 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  BUILT_BYTES,
+  BUILT_KEEP,
   NullPlayer,
   WebAudioPlayer,
   STALL_MS,
@@ -332,6 +334,64 @@ describe('WebAudioPlayer lifecycle (audio focus and the stalled head)', () => {
     await p.play('d', s16(1, 2), 1, 46875) // replaces c, clearing its timer
     expect(timers.pending.size).toBe(1)
     expect(p.playing.value).toBe('d')
+  })
+
+  it("builds a sound's buffer once: playing the same PCM again only starts a new source", async () => {
+    const { p, ctx } = player()
+    const pcm = s16(1000, -1000, 2000)
+    await p.play('a', pcm, 1, 46875)
+    await p.play('a', pcm, 1, 46875)
+    expect(ctx.buffers).toHaveLength(1)
+    expect(ctx.sources).toHaveLength(2)
+    expect((ctx.sources[1] as FakeSource).buffer).toBe(ctx.buffers[0])
+    // Another format of the same bytes, or other bytes, get their own buffer.
+    await p.play('a', pcm, 1, 44100)
+    await p.play('b', s16(1000, -1000, 2000), 1, 46875)
+    expect(ctx.buffers).toHaveLength(3)
+  })
+
+  it('keeps only the last few buffers, within a byte cap', async () => {
+    const { p, ctx } = player()
+    const sounds = Array.from({ length: BUILT_KEEP + 1 }, (_, i) => s16(1000 + i, -1000))
+    for (const pcm of sounds) await p.play('a', pcm, 1, 46875)
+    expect(ctx.buffers).toHaveLength(BUILT_KEEP + 1)
+    // The newest are still built; the first played was let go of.
+    await p.play('a', sounds[BUILT_KEEP] as Uint8Array, 1, 46875)
+    await p.play('a', sounds[1] as Uint8Array, 1, 46875)
+    expect(ctx.buffers).toHaveLength(BUILT_KEEP + 1)
+    await p.play('a', sounds[0] as Uint8Array, 1, 46875)
+    expect(ctx.buffers).toHaveLength(BUILT_KEEP + 2)
+    // A sound over the cap stays only while it is the newest.
+    const big = new Uint8Array((BUILT_BYTES / 4 + 2) * 2).fill(1)
+    await p.play('big', big, 1, 46875)
+    await p.play('big', big, 1, 46875)
+    expect(ctx.buffers).toHaveLength(BUILT_KEEP + 3)
+    await p.play('a', sounds[0] as Uint8Array, 1, 46875)
+    expect(ctx.buffers).toHaveLength(BUILT_KEEP + 4)
+    await p.play('big', big, 1, 46875)
+    expect(ctx.buffers).toHaveLength(BUILT_KEEP + 5)
+  })
+
+  it('checks a sound for silence once', async () => {
+    const { p, ctx } = player()
+    // Counts the sample reads (the silence check reads every byte).
+    let reads = 0
+    const bytes = s16(0, 0, 0)
+    const silent = new Proxy(bytes, {
+      get: (t, k) => {
+        if (typeof k === 'string' && /^\d+$/.test(k)) reads++
+        const v = (t as unknown as Record<string | symbol, unknown>)[k]
+        return typeof v === 'function' ? v.bind(t) : v
+      },
+    })
+    const first = await p.play('a', silent, 1, 46875)
+    const once = reads
+    expect(once).toBeGreaterThan(0)
+    const again = await p.play('a', silent, 1, 46875)
+    expect(reads).toBe(once)
+    expect(first).toEqual(again)
+    expect(first.kind).toBe('failed')
+    expect(ctx.buffers).toHaveLength(0)
   })
 
   it('a closed context is replaced by a new one', async () => {

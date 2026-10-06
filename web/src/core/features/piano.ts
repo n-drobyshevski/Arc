@@ -1,12 +1,15 @@
 // Port of core/src/main/kotlin/dev/arc/ep133/features/Piano.kt
 //
-// Live's landscape KEYS (an addition): a chromatic piano across the screen in
+// Live's wide KEYS (an addition): a chromatic piano across the window in
 // place of the EP-133's 4×3 keypad. Every note plays; the key and scale only
-// mark the keys (mark). It starts on a C, an octave under OCT's own C, so
+// mark the keys ([mark]). It starts on a C, an octave under OCT's own C, so
 // OCT 4 shows C3–C5 with the sound's own pitch (C4) in the middle.
 //
-// Web delta: Kotlin's IntRange is a {first, last} pair (empty when last <
-// first), and the enum KeyMark is a const object plus a string-union type.
+// Web deltas: the Kotlin enums `KeyMark` and `KeysView` are const objects plus
+// string-union types of the same name (the values are the enum names, so they
+// persist as the same strings). Kotlin's IntRange is a {first, last}
+// NoteRange, empty when first > last (EMPTY_RANGE); `rangeNotes` lists it.
+// Units are CSS px where Android has dp (the same 44 minimum).
 
 import { intervals, type Scale } from './keys'
 
@@ -14,23 +17,23 @@ import { intervals, type Scale } from './keys'
 export const KeyMark = { ROOT: 'ROOT', IN: 'IN', OUT: 'OUT' } as const
 export type KeyMark = (typeof KeyMark)[keyof typeof KeyMark]
 
-/** An inclusive range of MIDI notes; empty when last < first. */
-export interface NoteRange {
-  readonly first: number
-  readonly last: number
+/**
+ * Whether Live's KEYS plays on the 3×4 grid or the piano (an addition),
+ * remembered once for a wide window and once for a tall one. AUTO is the
+ * piano when the window is wide and it fits.
+ */
+export const KeysView = { AUTO: 'AUTO', PADS: 'PADS', PIANO: 'PIANO' } as const
+export type KeysView = (typeof KeysView)[keyof typeof KeysView]
+
+/** KeysView.entries, in declaration order. */
+export const KEYS_VIEWS: readonly KeysView[] = Object.freeze([KeysView.AUTO, KeysView.PADS, KeysView.PIANO])
+
+/** KeysView.valueOf, or null. */
+export function keysViewOf(name: string | null | undefined): KeysView | null {
+  return name != null && (KEYS_VIEWS as readonly string[]).includes(name) ? (name as KeysView) : null
 }
 
-export const EMPTY_RANGE: NoteRange = Object.freeze({ first: 0, last: -1 })
-
-export function rangeNotes(r: NoteRange): number[] {
-  const out: number[] = []
-  for (let n = r.first; n <= r.last; n++) out.push(n)
-  return out
-}
-
-export const inRange = (r: NoteRange, note: number): boolean => note >= r.first && note <= r.last
-
-/** A rectangle on the piano, in whatever unit its width and height came in (px or dp). */
+/** A rectangle on the piano, in whatever unit its width and height came in. */
 export interface KeyRect {
   readonly left: number
   readonly top: number
@@ -38,12 +41,13 @@ export interface KeyRect {
   readonly height: number
 }
 
-export const right = (r: KeyRect): number => r.left + r.width
-export const bottom = (r: KeyRect): number => r.top + r.height
+export const keyRect = (left: number, top: number, width: number, height: number): KeyRect => ({ left, top, width, height })
+export const rectRight = (r: KeyRect): number => r.left + r.width
+export const rectBottom = (r: KeyRect): number => r.top + r.height
 
 /** Inside, with the left and top edges in and the right and bottom out, so neighbours never share a point. */
-export function contains(r: KeyRect, x: number, y: number): boolean {
-  return x >= r.left && x < right(r) && y >= r.top && y < bottom(r)
+export function rectContains(r: KeyRect, x: number, y: number): boolean {
+  return x >= r.left && x < rectRight(r) && y >= r.top && y < rectBottom(r)
 }
 
 /**
@@ -58,12 +62,37 @@ export interface PianoKey {
   readonly hitRect: KeyRect
 }
 
+/** Notes first..last; empty when first > last (Kotlin IntRange). */
+export interface NoteRange {
+  readonly first: number
+  readonly last: number
+}
+
+/** IntRange.EMPTY. */
+export const EMPTY_RANGE: NoteRange = Object.freeze({ first: 1, last: 0 })
+
+export const isEmptyRange = (r: NoteRange): boolean => r.first > r.last
+
+/** The notes of [r], lowest first. */
+export function rangeNotes(r: NoteRange): number[] {
+  const out: number[] = []
+  for (let n = r.first; n <= r.last; n++) out.push(n)
+  return out
+}
+
 /** The white keys it can show, widest first: three octaves, two, one and a half (C–G), one. */
 export const WHITES: readonly number[] = Object.freeze([22, 15, 12, 8])
-/** A white key is never narrower than this (CSS px): under it the grid stays instead. */
+/** A white key is never narrower than this (px): under it the grid stays instead. */
 export const MIN_WHITE = 44
+/** The piano needs a room at least this tall (px): under it the grid stays instead. */
+export const MIN_HEIGHT = 120
+/** Under this width (px, Android's compact breakpoint) a tall window always plays on the grid. */
+export const COMPACT_WIDTH = 600
 
-// Black keys against a white one: drawn as the KEYS strip draws them (a touch longer),
+/** Settings' piano sizes: null (Auto, the widest that fits), then one octave, one and a half, two, three. */
+export const CHOICES: readonly (number | null)[] = Object.freeze([null, 8, 12, 15, 22])
+
+// Black keys against a white one: drawn as KeysStrip draws them (a touch longer),
 // hit a little wider so a finger meant for the narrow key finds it.
 export const BLACK_WIDTH = 0.6
 export const BLACK_HEIGHT = 0.62
@@ -71,18 +100,59 @@ export const BLACK_HIT_WIDTH = 0.72
 
 const BLACK = new Set([1, 3, 6, 8, 10])
 
-/** How many white keys fit [width] at [minWhite] or wider each; 0 when even one octave doesn't. */
-export function whitesFor(width: number, minWhite: number = MIN_WHITE): number {
-  return WHITES.find((n) => width / n >= minWhite) ?? 0
+/** A stored piano size as a choice: one of [WHITES], else Auto (null). */
+export function choiceOf(stored: number | null | undefined): number | null {
+  return stored != null && WHITES.includes(stored) ? stored : null
+}
+
+/** Whether [whites] white keys fit [width] at [minWhite] or wider each (Settings greys out a size that doesn't). */
+export function fits(width: number, whites: number, minWhite: number = MIN_WHITE): boolean {
+  return whites > 0 && width / whites >= minWhite
+}
+
+/**
+ * How many white keys to show across [width], each [minWhite] or wider:
+ * the widest that fits for Auto (a null [choice]), else [choice] capped at
+ * what fits (a window too narrow for it falls back to the largest that
+ * fits). 0 when even one octave doesn't.
+ */
+export function whitesFor(width: number, choice: number | null = null, minWhite: number = MIN_WHITE): number {
+  return WHITES.find((n) => (choice === null || n <= choice) && fits(width, n, minWhite)) ?? 0
+}
+
+/** Whether a [width] × [height] room can hold the piano: at least one octave of whites, and [MIN_HEIGHT] tall. */
+export function hasRoom(width: number, height: number, choice: number | null = null): boolean {
+  return whitesFor(width, choice) > 0 && height >= MIN_HEIGHT
+}
+
+/**
+ * Whether KEYS offers its Pads ⇄ Piano switch: everywhere but a portrait
+ * phone (a tall window under [COMPACT_WIDTH]), which always plays on the grid.
+ */
+export function switchShown(landscape: boolean, windowWidth: number): boolean {
+  return landscape || windowWidth >= COMPACT_WIDTH
+}
+
+/**
+ * Whether KEYS plays on the piano: never where the switch is hidden or the
+ * piano has no [room]; otherwise as [view] says, AUTO being the piano when
+ * the window is [landscape].
+ */
+export function showsPiano(view: KeysView, landscape: boolean, windowWidth: number, room: boolean): boolean {
+  if (!switchShown(landscape, windowWidth) || !room) return false
+  switch (view) {
+    case KeysView.AUTO:
+      return landscape
+    case KeysView.PIANO:
+      return true
+    case KeysView.PADS:
+      return false
+  }
 }
 
 /** The piano's lowest note at [octave]: C of the octave below (OCT 4 → C3, 48). */
 export function lowest(octave: number): number {
   return 12 * octave
-}
-
-export function isBlack(note: number): boolean {
-  return BLACK.has(((note % 12) + 12) % 12)
 }
 
 /** The notes [whites] white keys cover from [lowest], black keys included; the plate ends at 127 (G9). */
@@ -95,9 +165,13 @@ export function range(octave: number, whites: number): NoteRange {
   return { first: lo, last: hi }
 }
 
+export function isBlack(note: number): boolean {
+  return BLACK.has(((note % 12) + 12) % 12)
+}
+
 /**
- * The keys of [r] on a [w] × [h] plate, lowest first: the white keys side by
- * side, each black key centred on the seam between its two whites.
+ * The keys of [r] on a [w] × [h] plate, lowest first: the white keys side
+ * by side, each black key centred on the seam between its two whites.
  */
 export function layout(r: NoteRange, w: number, h: number): PianoKey[] {
   const notes = rangeNotes(r)
@@ -113,11 +187,11 @@ export function layout(r: NoteRange, w: number, h: number): PianoKey[] {
       return {
         note,
         black: true,
-        rect: { left: seam - drawn / 2, top: 0, width: drawn, height: h * BLACK_HEIGHT },
-        hitRect: { left: seam - hit / 2, top: 0, width: hit, height: h * BLACK_HEIGHT },
+        rect: keyRect(seam - drawn / 2, 0, drawn, h * BLACK_HEIGHT),
+        hitRect: keyRect(seam - hit / 2, 0, hit, h * BLACK_HEIGHT),
       }
     }
-    const rect = { left: seen++ * white, top: 0, width: white, height: h }
+    const rect = keyRect(seen++ * white, 0, white, h)
     return { note, black: false, rect, hitRect: rect }
   })
 }
@@ -132,21 +206,30 @@ export function layout(r: NoteRange, w: number, h: number): PianoKey[] {
  */
 export function keyAt(keys: readonly PianoKey[], x: number, y: number, current: number | null, slop: number): number | null {
   const held = current === null ? undefined : keys.find((k) => k.note === current)
-  if (held !== undefined) {
+  if (held) {
     const r = held.hitRect
-    const near = x >= r.left - slop && x < right(r) + slop && y >= r.top - slop && y < bottom(r) + slop
+    const near = x >= r.left - slop && x < rectRight(r) + slop && y >= r.top - slop && y < rectBottom(r) + slop
     if (held.black) {
       if (near) return held.note
     } else {
       // Its top is the plate's: a black key is shrunk only on the sides it shares with whites.
-      const over = keys.find(
-        (k) => k.black && x >= k.hitRect.left + slop && x < right(k.hitRect) - slop && y >= k.hitRect.top && y < bottom(k.hitRect) - slop,
+      const black = keys.find(
+        (k) =>
+          k.black &&
+          x >= k.hitRect.left + slop &&
+          x < rectRight(k.hitRect) - slop &&
+          y >= k.hitRect.top &&
+          y < rectBottom(k.hitRect) - slop,
       )
-      if (over !== undefined) return over.note
+      if (black) return black.note
       if (near) return held.note
     }
   }
-  return (keys.find((k) => k.black && contains(k.hitRect, x, y)) ?? keys.find((k) => !k.black && contains(k.hitRect, x, y)))?.note ?? null
+  return (
+    keys.find((k) => k.black && rectContains(k.hitRect, x, y))?.note ??
+    keys.find((k) => !k.black && rectContains(k.hitRect, x, y))?.note ??
+    null
+  )
 }
 
 /** Whether [note] is the root of [root]'s [scale] (any octave), in it, or outside it. */
@@ -156,14 +239,22 @@ export function mark(note: number, root: number, scale: Scale): KeyMark {
   return intervals(scale).includes(step) ? KeyMark.IN : KeyMark.OUT
 }
 
-/** The Kotlin `Piano` object, for call sites that read `Piano.range(...)`. */
+/** The Kotlin `Piano` object, for call sites that read `Piano.layout(...)`. */
 export const Piano = {
   WHITES,
   MIN_WHITE,
+  MIN_HEIGHT,
+  COMPACT_WIDTH,
+  CHOICES,
   BLACK_WIDTH,
   BLACK_HEIGHT,
   BLACK_HIT_WIDTH,
+  choiceOf,
+  fits,
   whitesFor,
+  hasRoom,
+  switchShown,
+  showsPiano,
   lowest,
   range,
   isBlack,

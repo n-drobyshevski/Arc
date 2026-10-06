@@ -11,10 +11,15 @@
 // The same key again cuts the old voice short with a click-free fade, and past
 // maxVoices the oldest does the same: the oldest let go of first, then the
 // oldest still held, so a run up the keys keeps the other hand's chord.
+// A press that turns out to be a scroll is cut: it fades out over CHOKE_MS at
+// once, minimum gate or not.
+//
+// render allocates nothing unless a voice starts or keys changes, so the
+// audio thread doesn't feed the garbage collector.
 //
 // Web deltas:
-// - No threads: start/release/stopAll queue commands that take effect at the
-//   next render, as in Kotlin, but the queue is a plain array. In an
+// - No threads: start/release/cut/stopAll queue commands that take effect at
+//   the next render, as in Kotlin, but the queue is a plain array. In an
 //   AudioWorklet the mixer lives in the worklet and the main thread posts the
 //   commands; with a ScriptProcessor it is called directly.
 // - Besides the Kotlin `render` into 16-bit frames (Int16Array), `render`
@@ -24,6 +29,8 @@
 // - Kotlin's Float math is kept with Math.fround so levels match bit for bit.
 //   Frame counters are numbers (safe up to 2^53 frames); "held" is Infinity
 //   where Kotlin uses Long.MAX_VALUE.
+// - Kotlin's private cut(Voice) overload is `cutShort` here, beside the public
+//   cut(key).
 
 const f = Math.fround
 
@@ -40,6 +47,7 @@ export interface Started {
 type Command =
   | { readonly kind: 'start'; readonly key: string; readonly pcm: Int16Array; readonly channels: number; readonly step: number; readonly tag: number }
   | { readonly kind: 'release'; readonly key: string }
+  | { readonly kind: 'cut'; readonly key: string }
   | { readonly kind: 'stopAll' }
 
 class Voice {
@@ -62,17 +70,11 @@ class Voice {
   }
 }
 
-function sameSet(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
-  if (a.size !== b.size) return false
-  for (const k of a) if (!b.has(k)) return false
-  return true
-}
-
 export class VoiceMixer {
   static readonly MAX_VOICES = 8
   static readonly MIN_GATE_MS = 60
   static readonly FADE_MS = 24
-  /** A voice cut short (the same key again, or too many) fades this fast. */
+  /** A voice cut short (the same key again, too many, or cut) fades this fast. */
   static readonly CHOKE_MS = 3
 
   /** How much faster a sound is read to play [semitones] higher. */
@@ -81,7 +83,7 @@ export class VoiceMixer {
   }
 
   private readonly commands: Command[] = []
-  private voices: Voice[] = []
+  private readonly voices: Voice[] = []
   private mix = new Float32Array(0)
   private readonly minGate: number
   private readonly fade: number
@@ -89,7 +91,7 @@ export class VoiceMixer {
   private frameCount = 0
   private keySet: ReadonlySet<string> = new Set()
 
-  /** Voices that began in the last render. */
+  /** Voices that began in the last render; the same array each time. */
   readonly started: Started[] = []
 
   constructor(
@@ -127,6 +129,11 @@ export class VoiceMixer {
     this.commands.push({ kind: 'release', key })
   }
 
+  /** Ends voice [key] now, in CHOKE_MS, even inside its MIN_GATE_MS: the press was a scroll. */
+  cut(key: string): void {
+    this.commands.push({ kind: 'cut', key })
+  }
+
   /** Fades every voice out quickly. */
   stopAll(): void {
     this.commands.push({ kind: 'stopAll' })
@@ -160,27 +167,50 @@ export class VoiceMixer {
 
   private mixNext(frames: number): void {
     this.started.length = 0
-    for (let c = this.commands.shift(); c !== undefined; c = this.commands.shift()) this.apply(c)
+    const commands = this.commands
+    if (commands.length !== 0) {
+      for (let i = 0; i < commands.length; i++) this.apply(commands[i]!)
+      commands.length = 0
+    }
     if (this.mix.length < frames * 2) this.mix = new Float32Array(frames * 2)
     this.mix.fill(0, 0, frames * 2)
-    this.voices = this.voices.filter((v) => this.play(v, frames))
+    // Ended voices dropped in place: no new array per render.
+    const voices = this.voices
+    let kept = 0
+    for (let i = 0; i < voices.length; i++) {
+      const v = voices[i]!
+      if (this.play(v, frames)) voices[kept++] = v
+    }
+    voices.length = kept
   }
 
   private finish(frames: number): void {
     this.frameCount += frames
+    if (!this.keysChanged()) return
     const now = new Set<string>()
     for (const v of this.voices) if (!v.choked) now.add(v.key)
-    if (!sameSet(now, this.keySet)) this.keySet = now
+    this.keySet = now
+  }
+
+  /** Whether the voices not cut short differ from keys, without building a set (each key has one such voice). */
+  private keysChanged(): boolean {
+    let n = 0
+    for (let i = 0; i < this.voices.length; i++) {
+      const v = this.voices[i]!
+      if (v.choked) continue
+      if (!this.keySet.has(v.key)) return true
+      n++
+    }
+    return n !== this.keySet.size
   }
 
   private apply(c: Command): void {
     switch (c.kind) {
       case 'start': {
         if (c.pcm.length < c.channels) return
-        this.voices.filter((v) => v.key === c.key && !v.choked).forEach((v) => this.cut(v))
-        // Past the cap: the oldest let go of first, then the oldest still held.
-        while (this.voices.filter((v) => !v.choked).length >= this.maxVoices) {
-          this.cut(this.voices.find((v) => !v.choked && v.fadeAt !== HELD) ?? this.voices.find((v) => !v.choked)!)
+        this.cutKey(c.key)
+        while (this.sounding() >= this.maxVoices) {
+          this.cutShort(this.voices.find((v) => !v.choked && v.fadeAt !== HELD) ?? this.voices.find((v) => !v.choked)!)
         }
         this.voices.push(new Voice(c.key, c.pcm, c.channels, c.step, this.frameCount))
         this.started.push({ key: c.key, tag: c.tag, frame: this.frameCount })
@@ -194,14 +224,29 @@ export class VoiceMixer {
           }
         }
         return
+      case 'cut':
+        this.cutKey(c.key)
+        return
       case 'stopAll':
-        this.voices.filter((v) => !v.choked).forEach((v) => this.cut(v))
+        for (const v of this.voices) if (!v.choked) this.cutShort(v)
         return
     }
   }
 
+  /** Voices not cut short. */
+  private sounding(): number {
+    let n = 0
+    for (const v of this.voices) if (!v.choked) n++
+    return n
+  }
+
+  /** Cuts short the voice of [key], if one sounds. */
+  private cutKey(key: string): void {
+    for (const v of this.voices) if (v.key === key && !v.choked) this.cutShort(v)
+  }
+
   /** Cuts [v] short: from wherever its level is now, down to nothing in CHOKE_MS. */
-  private cut(v: Voice): void {
+  private cutShort(v: Voice): void {
     v.choked = true
     const g = gain(v, this.frameCount)
     v.fadeFrames = this.choke

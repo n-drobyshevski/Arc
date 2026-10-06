@@ -1,4 +1,8 @@
-/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/ContentsScreen.kt */
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/ContentsScreen.kt
+ *
+ * Web only, from 1024px wide (the desk, theme/desk.css): one paper card up to
+ * 1100 wide, filling the window's height, the header across the top, SOUNDS
+ * and PROJECTS side by side. */
 
 /* Box(fillMaxSize, shell, TopCenter) > LazyColumn(widthIn(max 560), contentPadding 16,
  * 10 between items). Full screens scroll the page (app.css); the body already
@@ -116,4 +120,31 @@
   flex-direction: column;
   gap: var(--space-8);
   margin-top: var(--space-6);
+}
+
+/* ---------- the desk (web only) ---------- */
+
+@media (min-width: 1024px) {
+  /* The card fills the page column's height (the column is one window high at least). */
+  .contents {
+    align-items: stretch;
+    padding: var(--space-18) var(--desk-pad) var(--space-22);
+  }
+
+  .contents__column {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-content: start;
+    align-items: start;
+    column-gap: 32px;
+    row-gap: var(--space-18);
+    max-width: 1100px;
+    padding: var(--space-22) var(--space-24);
+    background: var(--desk-paper);
+    border-radius: var(--radius-plate);
+  }
+  /* The header and a lone line (opening, an error) across both columns. */
+  .contents__head,
+  .contents__column > p { grid-column: 1 / -1; }
+  .contents__section--projects { margin-top: 0; }
 }

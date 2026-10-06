@@ -1,4 +1,5 @@
-// Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Window.kt
+// Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Window.kt (ArcWindow) and
+// MirrorScreen.kt (liveInBar)
 //
 // The window Live lays itself out for: wider than tall is "landscape" (a phone
 // on its side, or most computer windows), and under 480 high is "short" (a
@@ -6,10 +7,13 @@
 // size, not the device's orientation, so split screens and resized browser
 // windows get what fits them.
 //
-// Web delta: Compose's BoxWithConstraints-provided ArcWindow is a hook on the
-// window's inner size (resize events), and the decisions are pure functions
-// so they test without a DOM.
-import { useEffect, useState } from 'preact/hooks'
+// Web deltas:
+// - Compose's BoxWithConstraints-provided ArcWindow is ui/useDesk.ts
+//   useWindowSize (the window's inner size, followed through resize events);
+//   the decisions here are pure functions, so they test without a DOM.
+// - The desk (from 1024px wide, ui/useDesk.ts) keeps its own top bar however
+//   low the window: callers ask [liveInBar] only off the desk, and the CSS
+//   rules for a short window (TopBar.css, Toast.css) stop at 1023px.
 
 export interface ArcWindow {
   readonly width: number
@@ -32,26 +36,4 @@ export const LIVE_PILL_WINDOW = 600
  */
 export function liveInBar(w: ArcWindow): boolean {
   return landscape(w) && short(w) && w.width >= LIVE_PILL_WINDOW
-}
-
-const now = (): ArcWindow =>
-  typeof window === 'undefined' ? { width: 412, height: 843 } : { width: window.innerWidth, height: window.innerHeight }
-
-/** The window's inner size, updated as it is resized or turned. */
-export function useArcWindow(): ArcWindow {
-  const [w, setW] = useState(now)
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    const on = (): void => setW((prev) => {
-      const next = now()
-      return prev.width === next.width && prev.height === next.height ? prev : next
-    })
-    window.addEventListener('resize', on)
-    window.addEventListener('orientationchange', on)
-    return () => {
-      window.removeEventListener('resize', on)
-      window.removeEventListener('orientationchange', on)
-    }
-  }, [])
-  return w
 }

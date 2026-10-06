@@ -39,7 +39,7 @@ import dev.arc.ep133.ui.theme.ArcType
  * Small geometric icons, drawn rather than taken from an icon set, so they
  * match the pocket operator app's flat shapes (REC dot, play triangle, gear).
  */
-enum class ArcIcon { DOT, RING, GEAR, HELP, REFRESH, PLUS, SEARCH, IMPORT, FOLLOW, SWAP }
+enum class ArcIcon { DOT, RING, GEAR, HELP, REFRESH, PLUS, SEARCH, IMPORT, FOLLOW, SWAP, GRID, PIANO, EXCHANGE }
 
 @Composable
 fun Icon(icon: ArcIcon, color: Color, modifier: Modifier = Modifier, size: Dp = 22.dp) {
@@ -124,6 +124,49 @@ private fun DrawScope.draw(icon: ArcIcon, color: Color) {
             val line = Stroke(w * 0.08f)
             drawRect(color, topLeft = Offset(w * 0.1f, w * 0.1f), size = Size(side, side), style = line)
             drawRect(color, topLeft = Offset(w * 0.4f, w * 0.4f), size = Size(side, side), style = line)
+        }
+        ArcIcon.GRID -> {
+            // Live's 3×3 of pads (the KEYS view switch's grid key).
+            val cell = w * 0.26f
+            val gap = (w - cell * 3) / 2
+            for (r in 0..2) for (k in 0..2) {
+                drawRoundRect(
+                    color,
+                    topLeft = Offset(k * (cell + gap), r * (cell + gap) + (size.height - w) / 2),
+                    size = Size(cell, cell),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.05f),
+                )
+            }
+        }
+        ArcIcon.PIANO -> {
+            // An octave in outline: three black keys over the white keys' lines.
+            val top = (size.height - w * 0.8f) / 2
+            val h = w * 0.8f
+            val line = w * 0.08f
+            drawRoundRect(
+                color,
+                topLeft = Offset(line / 2, top + line / 2),
+                size = Size(w - line, h - line),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.08f),
+                style = Stroke(line),
+            )
+            for (x in listOf(0.3f, 0.5f, 0.7f)) {
+                drawLine(color, Offset(w * x, top + h * 0.55f), Offset(w * x, top + h), line * 0.8f)
+                drawRect(color, topLeft = Offset(w * x - w * 0.06f, top), size = Size(w * 0.12f, h * 0.58f))
+            }
+        }
+        ArcIcon.EXCHANGE -> {
+            // ⇄, the EDIT badge on a pad: an arrow right over an arrow left.
+            val l = w * 0.16f
+            val r = w * 0.84f
+            val head = w * 0.16f
+            for ((y, right) in listOf(w * 0.34f to true, w * 0.66f to false)) {
+                drawLine(color, Offset(l, y), Offset(r, y), stroke, StrokeCap.Round)
+                val tip = if (right) r else l
+                val back = if (right) tip - head else tip + head
+                drawLine(color, Offset(tip, y), Offset(back, y - head), stroke, StrokeCap.Round)
+                drawLine(color, Offset(tip, y), Offset(back, y + head), stroke, StrokeCap.Round)
+            }
         }
         ArcIcon.FOLLOW -> {
             // A target: follow the group being played.

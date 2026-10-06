@@ -57,7 +57,6 @@
   background: var(--shell);
 }
 .pick__list--end { left: auto; right: 0; }
-/* Over the piano the row sits above the keys: the list opens downward over them. */
-.pick__list--down { top: 100%; bottom: auto; max-height: calc(100dvh - 140px); }
-/* Several columns (the twelve keys, or a list in a short window), 16 between them. */
-.pick__list--grid { display: grid; column-gap: 16px; }
+.pick__list--down { top: 0; bottom: auto; }
+/* A grid of choices (the keys), row by row in cells of one width. */
+.pick__list--grid { display: grid; column-gap: var(--space-4); }

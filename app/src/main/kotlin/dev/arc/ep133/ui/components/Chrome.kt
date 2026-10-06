@@ -34,6 +34,10 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.draw.dropShadow
+import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -332,37 +336,115 @@ fun SectionMenu(open: Boolean, current: Tab, onPick: (Tab) -> Unit, onDismiss: (
 @Composable
 fun GuideEdgeTab(onClick: () -> Unit, modifier: Modifier = Modifier) {
     val c = LocalArcColors.current
-    Box(
-        modifier
-            // Clear of a navigation bar or a cutout on that side.
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Start))
-            .width(EdgeTabWidth)
-            .height(112.dp)
-            .clip(RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp))
-            // Quiet, like an unselected key: always there, never the loudest thing on the page.
-            .background(c.tabOff)
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+    EdgeTab(
+        NavText.GUIDE_TAB, onClick, modifier,
+        Modifier
             .semantics {
                 role = Role.Button
                 contentDescription = CoachText.GUIDE_TAB
             }
             .coachMark("edge.guide", CoachText.GUIDE_TAB, c.navy, c.onNavy),
+    )
+}
+
+/**
+ * Live's EDIT tab, stacked under GUIDE on the left edge (place it with
+ * [underGuide]): an LED near its top, and while [on] the tab turns signal
+ * orange with the LED lit white. Pads then change their sound when tapped.
+ */
+@Composable
+fun EditEdgeTab(on: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val c = LocalArcColors.current
+    val hw = LocalHwColors.current
+    EdgeTab(
+        dev.arc.ep133.text.MirrorText.EDIT_TAB, onClick, modifier,
+        Modifier
+            .semantics {
+                role = Role.Button
+                contentDescription = dev.arc.ep133.text.MirrorText.editTab(on)
+            }
+            .coachMark("edge.edit", CoachText.EDIT, c.signal, c.onSignal),
+        face = if (on) c.signal else c.tabOff,
+        ink = if (on) c.onSignal else c.onTabOff,
+        led = if (on) c.onSignal else hw.ledOff,
+        ledGlow = on,
+    )
+}
+
+/**
+ * A vertical tab on the left edge, its [word] reading bottom to top, as the
+ * PO's side tabs: quiet, like an unselected key, unless [face] says otherwise.
+ * [led]: a small LED near its top. [marks] (what screen readers and the
+ * guide overlay read) go on the tab itself, inside the safe area.
+ */
+@Composable
+private fun EdgeTab(
+    word: String,
+    onClick: () -> Unit,
+    modifier: Modifier,
+    marks: Modifier,
+    face: Color? = null,
+    ink: Color? = null,
+    led: Color? = null,
+    ledGlow: Boolean = false,
+) {
+    val c = LocalArcColors.current
+    Box(
+        modifier
+            // Clear of a navigation bar or a cutout on that side.
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Start))
+            .width(EdgeTabWidth)
+            .height(EdgeTabHeight)
+            .clip(RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp))
+            // Quiet, like an unselected key: always there, never the loudest thing on the page.
+            .background(face ?: c.tabOff)
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+            .then(marks),
         contentAlignment = Alignment.Center,
     ) {
-        // The word reads bottom to top, as on the PO's side tabs. The tab is only so wide, so
-        // the word grows with the text size only so far.
+        if (led != null) {
+            Box(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 9.dp)
+                    .size(6.dp)
+                    .then(if (ledGlow) Modifier.dropShadow(CircleShape, Shadow(radius = 6.dp, color = led)) else Modifier)
+                    .clip(CircleShape)
+                    .background(led),
+            )
+        }
+        // The tab is only so wide, so the word grows with the text size only so far.
         val density = LocalDensity.current
         CompositionLocalProvider(LocalDensity provides Density(density.density, minOf(density.fontScale, 1.3f))) {
             Text(
-                NavText.GUIDE_TAB.uppercase(),
+                word.uppercase(),
                 style = ArcType.capsKeySmall,
-                color = c.onTabOff,
+                color = ink ?: c.onTabOff,
                 maxLines = 1,
                 softWrap = false,
-                modifier = Modifier.rotateVertical(),
+                // Below the LED, if there is one.
+                modifier = Modifier.padding(top = if (led != null) 10.dp else 0.dp).rotateVertical(),
             )
         }
     }
+}
+
+private val EdgeTabHeight = 112.dp
+
+/** The room between GUIDE and the EDIT tab stacked under it. */
+private val EdgeTabGap = 12.dp
+
+/**
+ * Places a tab aligned to the page's start, centred, just under the guide
+ * tab ([aboveMiddle]), and never closer than 8 dp to the page's foot.
+ */
+fun Modifier.underGuide(): Modifier = layout { measurable, constraints ->
+    val p = measurable.measure(constraints)
+    val guideLift = guideLift(constraints)
+    val down = (EdgeTabHeight + EdgeTabGap).roundToPx() - guideLift
+    // Centred in the page, so its foot is at half the page plus half the tab.
+    val most = if (constraints.hasBoundedHeight) constraints.maxHeight / 2 - p.height / 2 - 8.dp.roundToPx() else down
+    layout(p.width, p.height) { p.place(0, minOf(down, most)) }
 }
 
 /**
@@ -371,9 +453,13 @@ fun GuideEdgeTab(onClick: () -> Unit, modifier: Modifier = Modifier) {
  */
 private fun Modifier.aboveMiddle(): Modifier = layout { measurable, constraints ->
     val p = measurable.measure(constraints)
-    val lift = if (constraints.hasBoundedHeight) minOf(80.dp.roundToPx(), constraints.maxHeight / 2 - 64.dp.roundToPx()) else 80.dp.roundToPx()
+    val lift = guideLift(constraints)
     layout(p.width, p.height) { p.place(0, -lift) }
 }
+
+/** How far [aboveMiddle] lifts the guide tab, in px. */
+private fun androidx.compose.ui.layout.MeasureScope.guideLift(constraints: androidx.compose.ui.unit.Constraints): Int =
+    if (constraints.hasBoundedHeight) minOf(80.dp.roundToPx(), constraints.maxHeight / 2 - 64.dp.roundToPx()) else 80.dp.roundToPx()
 
 /** Turns a single line of text a quarter turn anticlockwise, swapping its width and height for layout. */
 private fun Modifier.rotateVertical(): Modifier = layout { measurable, constraints ->

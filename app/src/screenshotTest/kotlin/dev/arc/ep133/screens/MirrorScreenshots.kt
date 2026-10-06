@@ -34,6 +34,7 @@ import dev.arc.ep133.ui.screens.SettingsScreen
 import dev.arc.ep133.data.AppSettings
 import dev.arc.ep133.ui.screens.DeviceScreen
 import dev.arc.ep133.ui.screens.PadsSheetContent
+import dev.arc.ep133.ui.screens.PadSheetContent
 import dev.arc.ep133.ui.components.ArcFrame
 import dev.arc.ep133.ui.components.CoachHost
 import dev.arc.ep133.ui.components.ArcSheet
@@ -110,6 +111,8 @@ private fun Framed(
     /** A toast showing, and (in a short window) where the bar's middle is: the bar reports it a frame late. */
     toast: String? = null,
     barMiddle: DpRect? = null,
+    /** The toast's action key ("UNDO"). */
+    toastAction: String? = null,
     content: @Composable () -> Unit,
 ) {
     ArcTheme(dark = dark) {
@@ -132,14 +135,17 @@ private fun Framed(
                         content = content,
                     )
                 }
-                ArcToast(id = toast?.let { 1L }, text = toast.orEmpty(), error = false, onTimeout = {}, modifier = Modifier.align(Alignment.BottomCenter))
+                ArcToast(
+                    id = toast?.let { 1L }, text = toast.orEmpty(), error = false, onTimeout = {}, modifier = Modifier.align(Alignment.BottomCenter),
+                    action = toastAction, onAction = toastAction?.let { { } },
+                )
             }
         }
     }
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false) {
     val mirror = MirrorUi(state, loading = loading, offline = offline)
     val recUi = dev.arc.ep133.ui.screens.RecUi(rec) {}
     // The piano's notes, for the display line in the bar to name a device note past them. The
@@ -147,19 +153,19 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
     var pianoRange by remember { mutableStateOf(piano) }
     Framed(
         Tab.LIVE, connected = offline == null, dark = dark, guide = guide,
-        pill = { LivePill(mirror, keys, recUi, still = true, pianoRange = pianoRange) }, toast = toast, barMiddle = barMiddle,
+        pill = { LivePill(mirror, keys, recUi, still = true, pianoRange = pianoRange, editing = edit == true, wireless = wireless) }, toast = toast, barMiddle = barMiddle,
+        toastAction = toastAction,
     ) {
         MirrorScreen(
             mirror = mirror,
             nameOf = { if (state.learned.isEmpty()) null else names[it] },
-            onPadOrder = {},
             fixedNow = NOW,
             oneGroup = oneGroup,
             // The last hit (A 7) is in group A; B is sounding too.
             follow = true,
             initialToolsOpen = tools,
             initialNoteOpen = noteOpen,
-            onPad = if (playingPads.isNotEmpty()) ({ _, _ -> }) else null,
+            onPad = if (playingPads.isNotEmpty()) ({ _, _, _, _ -> }) else null,
             playingPads = playingPads,
             keys = keys,
             onPianoRange = { pianoRange = it },
@@ -170,6 +176,9 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
                 fmtWhen = { if (it == TAKE_AT) "Oct 5, 2:23 PM" else "Oct 4, 9:41 PM" },
                 connected = offline == null,
             ),
+            // The EDIT tab shows where [edit] is given: on or off.
+            edit = if (edit == null) dev.arc.ep133.ui.screens.EditUi() else dev.arc.ep133.ui.screens.EditUi(on = edit, onEdit = {}),
+            wireless = wireless,
         )
     }
 }
@@ -214,6 +223,20 @@ fun LiveOfflineAllPreview() = Live(lastRead, offline = "Last seen Oct 5, 2:02 PM
 @Preview(name = "Live offline pad playing", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
 fun LiveOfflinePlayingPreview() = Live(lastRead, oneGroup = true, offline = "Last seen Oct 5, 2:02 PM", playingPads = setOf(PhysicalPad(0, 9), PhysicalPad(0, 6), PhysicalPad(0, 3)))
+
+// Live's sound goes to Bluetooth, and no pad has been hit on the device yet: the display
+// line says the sound plays late (a size down on the all-groups display).
+private val wirelessState = playing.copy(lastHit = null)
+
+@PreviewTest
+@Preview(name = "Live bluetooth", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveBluetoothPreview() = Live(wirelessState, oneGroup = true, wireless = true)
+
+@PreviewTest
+@Preview(name = "Live bluetooth all groups", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun LiveBluetoothAllPreview() = Live(wirelessState, wireless = true)
 
 // KEYS: the kick played as notes, C major from octave 4. The device holds MI4 and SO5
 // (lit); the phone plays FA4, LA4 and DO5 (outlined).
@@ -333,6 +356,12 @@ fun LiveKeysSidewaysEMajorPreview() = Live(sideways, keys = keysUi.copy(root = 4
 @Composable
 fun LiveKeysSidewaysDarkPreview() = Live(sideways, dark = true, keys = chord.copy(root = 9, scale = dev.arc.ep133.features.Scale.MINOR_PENTATONIC), piano = 48..72)
 
+// Settings → Key labels off: rings and octave numbers only, the display line still names the note.
+@PreviewTest
+@Preview(name = "Live keys sideways no names", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveKeysSidewaysNoNamesPreview() = Live(sideways, keys = chord.copy(showNames = false), piano = 48..72)
+
 @PreviewTest
 @Preview(name = "Live keys sideways letters", widthDp = 867, heightDp = 388, showBackground = true)
 @Composable
@@ -419,6 +448,83 @@ fun LiveKeysTabletPreview() = Live(sideways, keys = chord)
 @Composable
 fun LiveKeysTabletToolsPreview() = Live(sideways, keys = chord.copy(root = 9, scale = dev.arc.ep133.features.Scale.MINOR), tools = true)
 
+// The KEYS view switch on a portrait tablet: the piano picked for a tall window, in the
+// middle of the room under the display line.
+@PreviewTest
+@Preview(name = "Live keys tablet upright piano", widthDp = 800, heightDp = 1232, showBackground = true)
+@Composable
+fun LiveKeysTabletUprightPianoPreview() = Live(sideways, keys = chord.copy(viewTall = dev.arc.ep133.features.KeysView.PIANO))
+
+// The same tablet on Auto: the grid, with the switch after the KEYS word.
+@PreviewTest
+@Preview(name = "Live keys tablet upright grid", widthDp = 800, heightDp = 1232, showBackground = true)
+@Composable
+fun LiveKeysTabletUprightGridPreview() = Live(keysPlaying, keys = keysUi)
+
+// On its side with the grid picked: the upright row under the grid, the switch's grid key down.
+@PreviewTest
+@Preview(name = "Live keys sideways grid picked", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveKeysSidewaysGridPreview() = Live(sideways, keys = chord.copy(viewWide = dev.arc.ep133.features.KeysView.PADS))
+
+// EDIT: the tab under GUIDE, off, then on (the display line, the pads' outlines and badges).
+@PreviewTest
+@Preview(name = "Live edit tab", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveEditTabPreview() = Live(playing, oneGroup = true, edit = false)
+
+@PreviewTest
+@Preview(name = "Live edit on", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveEditOnPreview() = Live(lastRead, oneGroup = true, edit = true)
+
+@PreviewTest
+@Preview(name = "Live edit on dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveEditOnDarkPreview() = Live(lastRead, dark = true, oneGroup = true, edit = true)
+
+@PreviewTest
+@Preview(name = "Live edit on all groups", widthDp = 393, heightDp = 1180, showBackground = true)
+@Composable
+fun LiveEditAllPreview() = Live(lastRead, edit = true)
+
+@PreviewTest
+@Preview(name = "Live edit on sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveEditSidewaysPreview() = Live(lastRead, oneGroup = true, edit = true)
+
+// After a pad got another sound: the toast with UNDO.
+@PreviewTest
+@Preview(name = "Live edit undo toast", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveEditUndoPreview() = Live(lastRead, oneGroup = true, edit = true, toast = MirrorText.assigned(PhysicalPad(0, 7), "vox chop"), toastAction = MirrorText.UNDO)
+
+private val padSounds = listOf(
+    SoundEntry(1, "kick", 234_000), SoundEntry(2, "kick 2", 241_000), SoundEntry(101, "snare 2", 206_000),
+    SoundEntry(102, "rim", 207_000), SoundEntry(140, "vox chop", 240_000), SoundEntry(201, "hat closed", 98_000),
+    SoundEntry(202, "hat open", 180_000), SoundEntry(310, "clap", 120_000),
+)
+
+// EDIT's pad sheet for A 8: the sound on it (101 snare 2) marked ON PAD, a preview playing.
+@PreviewTest
+@Preview(name = "Live pad sheet", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun LivePadSheetPreview() {
+    Framed(Tab.LIVE) {
+        MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
+        ArcSheet(visible = true, onDismiss = {}) {
+            PadSheetContent(
+                pad = PhysicalPad(0, 7),
+                target = dev.arc.ep133.features.PadTarget(1, 0, 2, 101),
+                sounds = padSounds,
+                playing = "device:140",
+                busy = false,
+                onPlay = {}, onStop = {}, onPick = {}, onUpload = {},
+            )
+        }
+    }
+}
+
 // Wider than tall but short of 8 white keys: the grid stays.
 @PreviewTest
 @Preview(name = "Live keys grid fallback", widthDp = 400, heightDp = 360, showBackground = true)
@@ -504,12 +610,12 @@ private val deviceState = connectedState.copy(
 )
 
 @Composable
-private fun Device(section: Int = 0, open: Int? = null, playing: String? = null, connected: Boolean = true, dark: Boolean = false, guide: Boolean = false) {
+private fun Device(section: Int = 0, open: Int? = null, playing: String? = null, connected: Boolean = true, dark: Boolean = false, guide: Boolean = false, slot: Int? = null) {
     val state = if (connected) deviceState else UiState(libraryLoaded = true)
     Framed(Tab.DEVICE, connected = connected, dark = dark, guide = guide) {
         DeviceScreen(
             state = state, onRefresh = {}, onSoundDetails = {}, onProjectSounds = {}, onAddSamples = {},
-            playing = playing, initialSection = section, initialOpen = open,
+            playing = playing, initialSection = section, initialOpen = open, initialSlot = slot,
         )
     }
 }
@@ -528,6 +634,17 @@ fun DeviceTabDarkPreview() = Device(open = 2, playing = "device:3", dark = true)
 @Preview(name = "Device projects", widthDp = 393, heightDp = 852, showBackground = true)
 @Composable
 fun DeviceProjectsPreview() = Device(section = 1, open = 3)
+
+// A tablet on its side: the projects and the sounds binder side by side, project 3's sounds badged.
+@PreviewTest
+@Preview(name = "Device wide", widthDp = 1280, heightDp = 800, showBackground = true)
+@Composable
+fun DeviceWidePreview() = Device(section = 1, open = 3, slot = 2, playing = "device:3")
+
+@PreviewTest
+@Preview(name = "Device wide dark", widthDp = 1280, heightDp = 800, showBackground = true)
+@Composable
+fun DeviceWideDarkPreview() = Device(section = 1, open = 3, slot = 2, playing = "device:3", dark = true)
 
 @PreviewTest
 @Preview(name = "Device disconnected", widthDp = 393, heightDp = 852, showBackground = true)
@@ -620,6 +737,12 @@ fun SettingsDarkPreview() = Settings(dark = true)
 @Composable
 fun SettingsSidewaysPreview() = Settings(dark = false)
 
+// A tablet: the sections listed on the left, the plates beside them.
+@PreviewTest
+@Preview(name = "Settings tablet", widthDp = 1280, heightDp = 800, showBackground = true)
+@Composable
+fun SettingsTabletPreview() = Settings(dark = false)
+
 // The guide overlay (the ? key, and once on the first start), on each tab with tools.
 
 @PreviewTest
@@ -644,7 +767,7 @@ fun GuideOverlayDevicePreview() = Device(guide = true)
 @Composable
 fun SectionListPreview() {
     Framed(Tab.LIVE, menu = true) {
-        MirrorScreen(mirror = MirrorUi(playing), nameOf = { names[it] }, onPadOrder = {}, fixedNow = NOW, oneGroup = true)
+        MirrorScreen(mirror = MirrorUi(playing), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
     }
 }
 

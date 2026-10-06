@@ -1,0 +1,63 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/KoPanel.kt
+ *
+ * The drawing scales to its box: give it a width (or a height) and the other
+ * follows the viewBox. Colours: the --ko-* tokens (theme/cap.css). */
+
+.ko {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+  user-select: none;
+}
+
+/* Text printed on the device: Manrope 500, tabular digits (Kotlin's base style). */
+.ko__t {
+  font-family: var(--font);
+  font-feature-settings: 'tnum';
+  white-space: pre;
+}
+.ko__t--mono { font-family: var(--font-mono); }
+
+/* The group on the display: a signal outline 1.5 wide. */
+.ko__group {
+  fill: none;
+  stroke: var(--signal);
+  stroke-width: 1.5;
+}
+
+/* A group key's glyph (its ink at 80%, 1.2 wide) and the − / + signs (1.6). */
+.ko__glyph,
+.ko__sign {
+  fill: none;
+  stroke: var(--ko-light-ink);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ko__glyph { stroke-width: 1.2; stroke-opacity: 0.8; }
+.ko__sign { stroke-width: 1.6; stroke-linecap: butt; }
+
+/* A key that isn't part of the selected shortcut: 30% over the body. */
+.ko__part { transition: opacity 160ms var(--key-ease); }
+.ko__part.is-dim { opacity: 0.3; }
+
+.ko__outlines > * {
+  fill: none;
+  stroke: var(--signal);
+  stroke-width: 3;
+}
+
+/* A step badge: signal orange, or the hold colours for a held key. */
+.ko__badge {
+  --ko-badge-face: var(--signal);
+  --ko-badge-ink: var(--on-signal);
+}
+.ko__badge--hold {
+  --ko-badge-face: var(--guide-hold-face);
+  --ko-badge-ink: var(--guide-hold-ink);
+}
+.ko__badge > rect { fill: var(--ko-badge-face); }
+
+@media (prefers-reduced-motion: reduce) {
+  .ko__part { transition: none; }
+}

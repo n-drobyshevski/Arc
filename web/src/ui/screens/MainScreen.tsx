@@ -13,6 +13,9 @@
 //   A remembered folder whose permission lapsed shows the "Reconnect library
 //   folder" banner (folderStatus 'prompt'), which also stands in for the
 //   empty library's restore hint and key.
+// - Desktop (web only, from 1024px wide: useDesk): two columns on the desk, the
+//   device panel, the big key and the library's notes and banner in a sticky
+//   side column, the library list and the footer in the main one.
 import type { JSX } from 'preact'
 import { CoachText } from '../../core/text/coachText'
 import { bytes } from '../../core/text/format'
@@ -29,6 +32,7 @@ import { IconBlock } from '../components/IconBlock'
 import { ArcIcon } from '../components/Icons'
 import { Key } from '../components/Key'
 import { Meter } from '../components/Meter'
+import { useDesk } from '../useDesk'
 import './MainScreen.css'
 
 export interface MainScreenProps {
@@ -117,82 +121,125 @@ export function folderModel(
 
 export function MainScreen(props: MainScreenProps): JSX.Element {
   const { state } = props
+  const desk = useDesk()
   const hasBackups = state.backups.length > 0
   const folder = folderModel(state)
   const totalSize = state.backups.reduce((sum, b) => sum + b.size, 0)
   const note = WebText.storageNote(state.backups.length, totalSize, state.spaceLeft)
+
+  const device = (
+    <>
+      <Caption text={NavText.DEVICE_CAPTION} />
+      <DevicePanel state={state} />
+
+      {/* The top bar's Back up block does this too; the big key stays until the first backup. */}
+      {!hasBackups && (
+        <Key
+          text={Strings.BACK_UP}
+          variant="signal"
+          size="wide"
+          block
+          disabled={!(state.midiSupported && state.device !== null && !state.busy)}
+          onClick={props.onBackup}
+        />
+      )}
+    </>
+  )
+  // The caption with its tools as icons (named on long-press and in the guide overlay).
+  const head = (
+    <div class="main-screen__head">
+      <Caption id="arc-backups-caption" as="h2" text={Strings.BACKUPS} align="start" class="main-screen__caption" />
+      {/* Addition to the web version: find sounds across backups. */}
+      {hasBackups && (
+        <span class="main-screen__tool" data-coach="backups.search">
+          <IconBlock icon={ArcIcon.SEARCH} label={CoachText.SEARCH} face="var(--tab-off)" ink="var(--navy)" onClick={props.onSearch} />
+        </span>
+      )}
+      <span class="main-screen__tool" data-coach="backups.import">
+        <IconBlock icon={ArcIcon.IMPORT} label={CoachText.IMPORT} face="var(--tab-off)" ink="var(--navy)" onClick={props.onImport} />
+      </span>
+    </div>
+  )
+  const banner = folder.reconnect && (
+    <div class="main-screen__banner" role="status">
+      <p class="t-small main-screen__banner-text">{WebText.RECONNECT_HINT}</p>
+      <Key text={WebText.RECONNECT_FOLDER} variant="navy" block onClick={props.onReconnectFolder} />
+    </div>
+  )
+  const list = (
+    <>
+      {hasBackups ? (
+        <div data-coach="backups.open">
+          <BackupList list={state.backups} freshId={state.freshId} fmtDay={props.fmtDay} onOpen={props.onOpen} />
+        </div>
+      ) : state.libraryLoaded ? (
+        // #empty starts hidden and only shows once the library has loaded.
+        <DashedBox>
+          <p class="t-bold">{Strings.EMPTY_TITLE}</p>
+          <p class="main-screen__muted">{Strings.EMPTY_TEXT}</p>
+        </DashedBox>
+      ) : null}
+      {folder.emptyRestore && (
+        <>
+          {/* Addition: a new browser can read a library back from an arc folder. */}
+          <p class="t-small main-screen__muted">{WebText.RESTORE_HINT}</p>
+          <Key text={WebText.RESTORE_FOLDER} block onClick={props.onRestoreFolder} />
+        </>
+      )}
+    </>
+  )
+  const notes = (
+    <>
+      {note.length !== 0 && <p class="t-tiny main-screen__muted">{note}</p>}
+      {folder.note.length !== 0 && <p class="t-tiny main-screen__muted">{folder.note}</p>}
+      {folder.key === 'pick' && (
+        <div class="main-screen__quiet">
+          <Key text={WebText.PICK_FOLDER} size="small" variant="quiet" onClick={props.onRestoreFolder} />
+        </div>
+      )}
+      {folder.key === 'export' && (
+        <div class="main-screen__quiet">
+          <Key text={WebText.EXPORT_LIBRARY} size="small" variant="quiet" onClick={props.onExportLibrary} />
+          <Key text={WebText.RESTORE_FOLDER} size="small" variant="quiet" onClick={props.onRestoreFolder} />
+        </div>
+      )}
+    </>
+  )
+  const footer = <p class="t-tiny main-screen__muted main-screen__footer">{Strings.FOOTER}</p>
+
+  if (desk) {
+    // Web desk: the device, its key and the library's notes in a sticky side
+    // column; the library itself, then the footer, in the main column.
+    return (
+      <div class="main-screen main-screen--desk" data-screen="backups">
+        <div class="main-screen__column">
+          <div class="main-screen__side">
+            {device}
+            {notes}
+            {banner}
+          </div>
+          <div class="main-screen__main">
+            <section class="main-screen__library" aria-labelledby="arc-backups-caption">
+              {head}
+              {list}
+            </section>
+            {footer}
+          </div>
+        </div>
+      </div>
+    )
+  }
   return (
     <div class="main-screen" data-screen="backups">
       <div class="main-screen__column">
-        <Caption text={NavText.DEVICE_CAPTION} />
-        <DevicePanel state={state} />
-
-        {/* The top bar's Back up block does this too; the big key stays until the first backup. */}
-        {!hasBackups && (
-          <Key
-            text={Strings.BACK_UP}
-            variant="signal"
-            size="wide"
-            block
-            disabled={!(state.midiSupported && state.device !== null && !state.busy)}
-            onClick={props.onBackup}
-          />
-        )}
-
+        {device}
         <section class="main-screen__library" aria-labelledby="arc-backups-caption">
-          {/* The caption with its tools as icons (named on long-press and in the guide overlay). */}
-          <div class="main-screen__head">
-            <Caption id="arc-backups-caption" as="h2" text={Strings.BACKUPS} align="start" class="main-screen__caption" />
-            {/* Addition to the web version: find sounds across backups. */}
-            {hasBackups && (
-              <span class="main-screen__tool" data-coach="backups.search">
-                <IconBlock icon={ArcIcon.SEARCH} label={CoachText.SEARCH} face="var(--tab-off)" ink="var(--navy)" onClick={props.onSearch} />
-              </span>
-            )}
-            <span class="main-screen__tool" data-coach="backups.import">
-              <IconBlock icon={ArcIcon.IMPORT} label={CoachText.IMPORT} face="var(--tab-off)" ink="var(--navy)" onClick={props.onImport} />
-            </span>
-          </div>
-          {folder.reconnect && (
-            <div class="main-screen__banner" role="status">
-              <p class="t-small main-screen__banner-text">{WebText.RECONNECT_HINT}</p>
-              <Key text={WebText.RECONNECT_FOLDER} variant="navy" block onClick={props.onReconnectFolder} />
-            </div>
-          )}
-          {hasBackups ? (
-            <div data-coach="backups.open">
-              <BackupList list={state.backups} freshId={state.freshId} fmtDay={props.fmtDay} onOpen={props.onOpen} />
-            </div>
-          ) : state.libraryLoaded ? (
-            // #empty starts hidden and only shows once the library has loaded.
-            <DashedBox>
-              <p class="t-bold">{Strings.EMPTY_TITLE}</p>
-              <p class="main-screen__muted">{Strings.EMPTY_TEXT}</p>
-            </DashedBox>
-          ) : null}
-          {folder.emptyRestore && (
-            <>
-              {/* Addition: a new browser can read a library back from an arc folder. */}
-              <p class="t-small main-screen__muted">{WebText.RESTORE_HINT}</p>
-              <Key text={WebText.RESTORE_FOLDER} block onClick={props.onRestoreFolder} />
-            </>
-          )}
-          {note.length !== 0 && <p class="t-tiny main-screen__muted">{note}</p>}
-          {folder.note.length !== 0 && <p class="t-tiny main-screen__muted">{folder.note}</p>}
-          {folder.key === 'pick' && (
-            <div class="main-screen__quiet">
-              <Key text={WebText.PICK_FOLDER} size="small" variant="quiet" onClick={props.onRestoreFolder} />
-            </div>
-          )}
-          {folder.key === 'export' && (
-            <div class="main-screen__quiet">
-              <Key text={WebText.EXPORT_LIBRARY} size="small" variant="quiet" onClick={props.onExportLibrary} />
-              <Key text={WebText.RESTORE_FOLDER} size="small" variant="quiet" onClick={props.onRestoreFolder} />
-            </div>
-          )}
+          {head}
+          {banner}
+          {list}
+          {notes}
         </section>
-
-        <p class="t-tiny main-screen__muted main-screen__footer">{Strings.FOOTER}</p>
+        {footer}
       </div>
     </div>
   )

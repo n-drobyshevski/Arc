@@ -211,3 +211,20 @@ export function attachDrop(target: EventTarget, options: DropOptions): () => voi
 export function isPakName(name: string): boolean {
   return /\.(pak|zip)$/i.test(name)
 }
+
+/**
+ * A drag over a sample drop target (Live's pads, its Sounds tab): whether
+ * it may carry audio files. While dragging only the files' types are known,
+ * where the browser gives them; a file with no type (a .pak has none) is
+ * left for the drop to decide by its name ([isAudioFile]).
+ */
+export function dragMayHaveAudio(dt: Pick<DataTransfer, 'types'> & { items?: DataTransferItemList | readonly { kind: string; type: string }[] } | null | undefined): boolean {
+  if (!dt || !Array.from(dt.types).includes('Files')) return false
+  const items = Array.from(dt.items ?? []).filter((i) => i.kind === 'file')
+  return items.length === 0 || items.some((i) => i.type === '' || i.type.startsWith('audio/'))
+}
+
+/** A dropped file a sample upload takes: audio by type or a .wav name, never a backup (the page imports those). */
+export function isAudioFile(f: { readonly name: string; readonly type: string }): boolean {
+  return !isPakName(f.name) && (f.type.startsWith('audio/') || /\.wave?$/i.test(f.name))
+}

@@ -4,7 +4,9 @@
 //
 //   /sounds    node 1000, children are sample slots 1..999 (raw s16le PCM + JSON metadata)
 //   /projects  node 2000, project N lives at 3000 + (N-1)*1000 and reads/writes as a TAR
+//   pads       zero-byte files under each project: 3200 + (N-1)*1000 + group*100 + pad (padPush.node)
 
+import { node as padNode } from '../features/padPush'
 import { crc32 } from '../formats/crc32'
 import { DeviceError } from './errors'
 import {
@@ -226,6 +228,30 @@ export async function writeSound(session: Session, sound: SoundData, opts: Write
     const same = typeof crc === 'number' && crc === crc32(pcm)
     if (!same) throw new DeviceError(`Sound ${slot} did not verify after upload (checksum mismatch)`)
   }
+}
+
+/**
+ * The metadata that puts sample [slot] on a pad (an addition to the web
+ * version): `{"sym": slot}`. Only `sym` is written. The device then re-syncs
+ * the pad's other fields from the new sample, so the pad's own tweaks reset,
+ * as when a sound is assigned on the device itself. Kotlin's `require` is a
+ * RangeError.
+ */
+export function padPatch(slot: number): JsonObject {
+  if (!(Number.isInteger(slot) && slot >= 1 && slot <= 999)) throw new RangeError(`Slot ${slot} doesn't exist. Slots go from 1 to 999.`)
+  return { sym: slot }
+}
+
+/**
+ * Puts sample [slot] on [pad] (1..12, its number in the project file) of
+ * [group] (0..3 = A..D) in [project]: a METADATA SET on the pad's file
+ * (community notes, kmorrill/ep-series-sysex docs/file-protocol.md; not in
+ * the official guide). The pad's `sym` reads 0 until written, so the slot on
+ * a pad now comes from the project's pad records (projectPads).
+ */
+export async function assignPad(session: Session, project: number, group: number, pad: number, slot: number): Promise<void> {
+  const node = padNode({ project, group, pad })
+  await setMetadata(session, node, padPatch(slot))
 }
 
 /** Upload a project TAR and make the device reload it. */

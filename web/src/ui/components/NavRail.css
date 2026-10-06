@@ -1,0 +1,91 @@
+/* Web only: the desktop layout's nav rail (NavRail.tsx). Rendered only on the
+ * desk (from 1024px wide), in its column of the app's .desk grid. */
+
+/* One window high, held in place while a full screen scrolls the page. */
+.nav-rail {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-14);
+  width: var(--rail-width);
+  height: 100vh;
+  height: 100dvh;
+  padding: var(--space-18) 0 var(--space-22);
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+/* Under the section list (inert then): its scrim reaches over the rail too. */
+.nav-rail::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--scrim);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms linear;
+}
+.nav-rail[inert]::after { opacity: 1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .nav-rail::after { transition: none; }
+}
+
+/* The wordmark over the keys (ArcType.wordmark). */
+.nav-rail__mark {
+  color: var(--ink);
+  line-height: 1;
+  margin: var(--space-4) 0 var(--space-18);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.nav-rail__spacer { flex: 1 0 0; }
+
+/* The LED above its key, as over the K.O. II's group keys. */
+.nav-rail__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+}
+
+.nav-rail__led {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--hw-led-off);
+}
+.nav-rail__item.is-on .nav-rail__led {
+  background: var(--hw-led-on);
+  box-shadow: 0 0 7px var(--hw-led-on);
+}
+
+/* A pale hardware key (the group keys' colours), its name in the bottom left. */
+.nav-rail__key {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+  width: 76px;
+  height: 54px;
+  padding: 7px 8px;
+  border-radius: var(--radius-key);
+  --cap-face: var(--hw-light-face);
+  --cap-ink: var(--hw-light-ink);
+  --cap-edge: var(--hw-light-edge);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: var(--track-caps-key);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+/* The current one: navy, held down (as the section list's current block). */
+.nav-rail__item.is-on .nav-rail__key {
+  --cap-face: var(--navy);
+  --cap-ink: var(--on-navy);
+  --cap-edge: color-mix(in oklab, var(--navy) 65%, black);
+}

@@ -2,16 +2,20 @@
 //
 // Starts the live mirror: reads the sound names, the active project and its
 // pads (the reads the browser already makes), then only listens to MIDI and
-// pad pushes. Nothing is sent while it runs.
+// pad pushes. Nothing is sent while it runs (Live's EDIT writes through the
+// controller, then tells the mirror: [assigned]).
 //
 // Web deltas:
 // - Times are ms on the MIDI event clock (deps.perfNow = performance.now),
 //   where Android uses System.nanoTime.
 // - `_state.first { !busy || mirror == null }` is store.waitFor.
-// - The 33 ms publishing loop is a setTimeout chain; it only runs while the
-//   mirror runs, which the controller limits to a visible tab (repeatOnLifecycle(STARTED)).
-//   StateFlow drops an equal state; here [sameMirrorState] does, so an idle
-//   mirror does not redraw 30 times a second.
+// - No 33 ms publishing loop: a note or pad push marks the mirror changed and
+//   it publishes at the next display frame (host.requestFrame, else a short
+//   timer), once however many events came; an idle mirror does nothing. The
+//   time-based changes the loop caught (a faded pad dropped, a tempo gone
+//   stale) get one timer for the soonest of them. StateFlow drops an equal
+//   state; here [sameMirrorState] does, so a clock tick with the same tempo
+//   redraws nothing.
 // - SharedPreferences "mirror" is MirrorPrefs (localStorage arc.mirror.*).
 // - Live's sounds and last read (openOfflineMirror, saveLastRead,
 //   preloadPads, copyPadSounds, forgetPadMemory) live in live.ts; the
@@ -20,10 +24,10 @@
 //   last read gives way to any later open or stop.
 
 import { getMetadata, isJsonObject, type JsonValue } from '../core/protocol/fs'
-import { PROJECTS_NODE, projectFromNode } from '../core/protocol/device'
+import { PROJECTS_NODE, projectFromNode, type SoundEntry } from '../core/protocol/device'
 import type { Session } from '../core/protocol/session'
 import { contents, projectLayout } from '../core/features/deviceBrowser'
-import { LiveMirror, type Hit, type MirrorState, type PadLight } from '../core/features/liveMirror'
+import { CLOCK_TIMEOUT_MS, FADE_MS, LiveMirror, type Hit, type MirrorState, type PadLight, type PadTarget } from '../core/features/liveMirror'
 import type { PhysicalPad } from '../core/features/padNotes'
 import { parse as parsePadPush, type PadOrder } from '../core/features/padPush'
 import type { PadGroup } from '../core/features/projectPads'
@@ -36,8 +40,8 @@ import type { Store } from './store'
 import type { Tasks } from './tasks'
 import { emptyMirrorState, type MirrorUi, type UiState } from './types'
 
-/** How often the mirror publishes a state (at most ~30 a second). */
-export const MIRROR_TICK_MS = 33
+/** Where the host has no frame clock: a change is published after about one frame. */
+export const MIRROR_FRAME_MS = 16
 /** How many times the initial read is tried while the device is busy or the read fails. */
 export const MIRROR_READ_TRIES = 5
 
@@ -51,6 +55,8 @@ export interface MirrorHost {
   perfNow(): number
   setTimeout(fn: () => void, ms: number): unknown
   clearTimeout(handle: unknown): void
+  /** Runs [fn] at the display's next frame; returns a cancel (Deps.requestFrame). Absent: a short timer. */
+  requestFrame?: ((fn: () => void) => () => void) | undefined
   /** library.syncIndex(), fire and forget. */
   syncIndex(): void
   toast(text: string, error?: boolean): void
@@ -147,7 +153,10 @@ export class MirrorController {
   private mirrorSession: Session | null = null
   private unlisten: (() => void) | null = null
   private pushOff: (() => void) | null = null
-  private tick: unknown = null
+  /** The publish waiting for the next frame (its cancel), or null. */
+  private frame: (() => void) | null = null
+  /** The publish for the soonest time-based change (a fade over, a tempo gone stale), or null. */
+  private settle: unknown = null
   private openGen = 0
 
   constructor(private readonly host: MirrorHost) {}
@@ -164,7 +173,8 @@ export class MirrorController {
 
   /** Sets mirror.state to the snapshot, unless it equals the one shown. */
   private publish(m: LiveMirror, patch: Partial<MirrorUi> = {}): void {
-    const st = m.snapshot(this.host.perfNow())
+    const now = this.host.perfNow()
+    const st = m.snapshot(now)
     this.host.store.update((cur) => {
       const mi = cur.mirror
       if (!mi) return cur
@@ -173,6 +183,44 @@ export class MirrorController {
       if (next.state === mi.state && next.loading === mi.loading && next.error === mi.error && next.offline === mi.offline) return cur
       return { ...cur, mirror: next }
     })
+    if (this.mirror === m) this.settleLater(m, st, now)
+  }
+
+  /** A note or push came in: [m] publishes at the next frame, once however many come before it. */
+  private changed(m: LiveMirror): void {
+    if (this.frame !== null || this.mirror !== m) return
+    const { host } = this
+    const run = (): void => {
+      this.frame = null
+      if (this.mirror === m) this.publish(m)
+    }
+    if (host.requestFrame) {
+      this.frame = host.requestFrame(run)
+    } else {
+      const t = host.setTimeout(run, MIRROR_FRAME_MS)
+      this.frame = () => host.clearTimeout(t)
+    }
+  }
+
+  /**
+   * What the old publishing loop caught without any event: a released pad
+   * or note dropped once faded, a tempo cleared once the clock stopped. One
+   * timer for the soonest of them in [st] (taken at [now]).
+   */
+  private settleLater(m: LiveMirror, st: MirrorState, now: number): void {
+    const { host } = this
+    if (this.settle !== null) host.clearTimeout(this.settle)
+    this.settle = null
+    let at = Number.POSITIVE_INFINITY
+    for (const l of st.pads.values()) if (l.offAt !== null) at = Math.min(at, l.offAt + FADE_MS)
+    for (const l of st.notes.values()) if (l.offAt !== null) at = Math.min(at, l.offAt + FADE_MS)
+    if (st.bpm !== null) at = Math.min(at, now + CLOCK_TIMEOUT_MS)
+    if (at === Number.POSITIVE_INFINITY) return
+    // Just past the moment, as snapshot drops what is strictly older.
+    this.settle = host.setTimeout(() => {
+      this.settle = null
+      if (this.mirror === m) this.publish(m)
+    }, Math.max(0, at - now) + 1)
   }
 
   async open(): Promise<void> {
@@ -192,21 +240,19 @@ export class MirrorController {
     this.mirrorSession = s
     host.store.update((st) => ({ ...st, mirror: { state: m.snapshot(host.perfNow()), loading: true, error: null, offline: null } }))
     // Listen first, so nothing played while reading is missed.
-    this.unlisten = events((e) => m.onMidi(e))
+    // Each event is shown at the next frame, at most once a frame.
+    this.unlisten = events((e) => {
+      m.onMidi(e)
+      this.changed(m)
+    })
     this.pushOff = s.onPush((f) => {
       const fid = parsePadPush(f)
       if (!fid) return
       m.onPadPush(fid, host.perfNow())
+      this.changed(m)
       // Another project on the device: read its pads.
       if (fid.project !== m.snapshot(host.perfNow()).activeProject) this.loadProject(m, fid.project)
     })
-    // At most ~30 states a second; time-based changes (pruned pads, a stale tempo) still get through.
-    const loop = (): void => {
-      if (this.mirror !== m) return
-      this.publish(m)
-      this.tick = host.setTimeout(loop, MIRROR_TICK_MS)
-    }
-    this.tick = host.setTimeout(loop, MIRROR_TICK_MS)
     // The names and pads are read once. If the device is busy (a transfer, or the
     // read of a mirror opened just before), wait for it rather than give up.
     // exclusive() also gives null when the read fails (the error is shown), so a few tries at most.
@@ -289,6 +335,38 @@ export class MirrorController {
     })()
   }
 
+  /**
+   * Live's EDIT put [slot] on [t]'s pad (or the old one back): the mirror's
+   * names and the saved read follow at once, and the pad's sample is read
+   * into memory for the next press.
+   */
+  assigned(t: PadTarget, slot: number | null): void {
+    const m = this.mirror
+    if (!m) return
+    m.assigned(t, slot)
+    this.host.live.saveLastRead(m)
+    void this.host.live.preloadPads(m)
+    const s = this.host.session()
+    if (s !== null && this.mirrorSession === s) void this.host.live.copyPadSounds(m, s)
+    this.publish(m)
+    // The names are read through mirrorName: a new MirrorUi re-renders Live even when the state didn't change.
+    this.host.store.update((cur) => (cur.mirror ? { ...cur, mirror: { ...cur.mirror } } : cur))
+  }
+
+  /**
+   * The device's sound list read again (after an upload, say): Live's names
+   * and copies follow, for a mirror of [s]'s connection (the Kotlin
+   * setLiveSounds after an upload; here for every read of the list).
+   */
+  setSounds(s: Session, sounds: readonly SoundEntry[]): void {
+    const m = this.mirror
+    if (m === null || this.mirrorSession !== s) return
+    this.host.live.setDeviceSounds(sounds)
+    m.setNames(new Map(sounds.map((snd) => [snd.slot, snd.name])))
+    // The names are read through mirrorName: a new MirrorUi re-renders Live.
+    this.host.store.update((cur) => (cur.mirror ? { ...cur, mirror: { ...cur.mirror } } : cur))
+  }
+
   /** The sample on a pad in the mirror, once it is known. */
   mirrorName(pad: { readonly group: number; readonly offset: number }): string | null {
     return this.mirror?.nameOf(pad) ?? null
@@ -334,8 +412,10 @@ export class MirrorController {
   stop(): void {
     this.openGen++
     this.host.live.stopCopy()
-    if (this.tick !== null) this.host.clearTimeout(this.tick)
-    this.tick = null
+    this.frame?.()
+    this.frame = null
+    if (this.settle !== null) this.host.clearTimeout(this.settle)
+    this.settle = null
     this.unlisten?.()
     this.unlisten = null
     this.pushOff?.()

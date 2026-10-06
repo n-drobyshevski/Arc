@@ -37,6 +37,43 @@ object FeatureText {
     const val PROJECT = "Project"
     const val PICK_PROJECT = "Tap a project to see its sounds and pads."
 
+    // The Device tab, redesigned: storage as a split meter, the factory layout per range, projects as pads.
+    /** "free of 61 MB", under the free space in large type. */
+    fun freeOf(total: Double) = "free of ${Format.bytes(total)}"
+    const val FREE = "Free"
+
+    /**
+     * The factory layout's kind of sound for the range of slots starting at
+     * [first] (from the official guide's note on SOUND mode: kicks 1-99,
+     * snares 100-199, hi-hats 200-299, percussion 300-399, bass 400-499,
+     * melodic 500-599), or null from 600 up, which the guide leaves free.
+     */
+    fun factoryCategory(first: Int): String? = when (first) {
+        in 1..99 -> "Kicks"
+        in 100..199 -> "Snares"
+        in 200..299 -> "Hats"
+        in 300..399 -> "Perc"
+        in 400..499 -> "Bass"
+        in 500..599 -> "Melodic"
+        else -> null
+    }
+
+    /** "12 \u00B7 2.1 MB", the sounds binder's bar after "Sounds". */
+    fun soundsTotal(n: Int, bytes: Double) = "$n \u00B7 ${Format.bytes(bytes)}"
+
+    const val ALL = "All"
+    /** "In P3 \u00B7 7", the filter for the sounds the selected project uses. */
+    fun inProject(project: Int, n: Int) = "In ${projectBadge(project)} \u00B7 $n"
+
+    /** "P3", on a sound the selected project uses. */
+    fun projectBadge(project: Int) = "P$project"
+
+    /** A project slot with nothing in it, on its pad key. */
+    const val EMPTY_PROJECT = "empty"
+
+    /** "352 KB \u00B7 7 sounds", beside the selected project's name. */
+    fun projectSummary(size: Long, sounds: Int) = "${Format.bytes(size.toDouble())} \u00B7 ${plural(sounds, "sound")}"
+
     /** "001–099". */
     fun range(r: IntRange) = slot(r.first) + "\u2013" + slot(r.last)
 

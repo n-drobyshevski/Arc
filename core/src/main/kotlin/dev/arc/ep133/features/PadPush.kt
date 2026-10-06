@@ -47,6 +47,22 @@ object PadPush {
         val pad = rest % 100
         return if (group in 0..3 && pad in 1..12 && project in 1..99) PadFid(project, group, pad) else null
     }
+
+    /**
+     * A key's pad number counted from the top row, as kmorrill's notes number
+     * the pad files: 7 8 9 are 1 2 3, 4 5 6 are 4 5 6, 1 2 3 are 7 8 9, and
+     * '.', '0', ENTER are 10, 11, 12. [offset] is the official note order (PadNotes).
+     */
+    fun topNumber(offset: Int): Int {
+        require(offset in 0..11) { "no pad at offset $offset" }
+        return (3 - offset / 3) * 3 + offset % 3 + 1
+    }
+
+    /** The pad file id of [fid] (the inverse of [fid]): 3200 + (project-1)*1000 + group*100 + pad. */
+    fun node(fid: PadFid): Int {
+        require(fid.project in 1..99 && fid.group in 0..3 && fid.pad in 1..12) { "no pad file for $fid" }
+        return 3200 + (fid.project - 1) * 1000 + fid.group * 100 + fid.pad
+    }
 }
 
 /**

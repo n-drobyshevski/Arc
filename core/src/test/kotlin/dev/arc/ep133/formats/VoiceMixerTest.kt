@@ -168,4 +168,87 @@ class VoiceMixerTest {
         m.start("a", steady(10), 1, 1000)
         assertEquals(1000, left(render(m, 1))[0])
     }
+
+    @Test
+    fun `a cut ends the voice within the choke, not the minimum gate`() {
+        val m = mixer()
+        m.start("a", steady(1000), 1, 1000)
+        render(m, 10)
+        // Well inside MIN_GATE_MS: the press turned into a scroll.
+        m.cut("a")
+        val out = left(render(m, 20))
+        assertTrue(out[0] in 1..1000)
+        assertEquals(0, out[VoiceMixer.CHOKE_MS + 1])
+        assertEquals(emptySet<String>(), m.keys)
+    }
+
+    @Test
+    fun `a cut in the same render as its start still fades, without a click`() {
+        val m = mixer()
+        m.start("a", steady(1000), 1, 1000)
+        m.cut("a")
+        val out = left(render(m, 10))
+        assertEquals(1000, out[0])
+        assertEquals(0, out[VoiceMixer.CHOKE_MS + 1])
+        assertEquals(listOf("a"), m.started.map { it.key })
+    }
+
+    @Test
+    fun `a cut of a voice already let go of ends it at once`() {
+        val m = mixer()
+        m.start("a", steady(1000), 1, 1000)
+        m.release("a")
+        render(m, 5)
+        m.cut("a")
+        assertEquals(0, left(render(m, 10))[VoiceMixer.CHOKE_MS + 1])
+    }
+
+    @Test
+    fun `a cut leaves the other voices alone`() {
+        val m = mixer()
+        m.start("a", steady(1000, 1000), 1, 1000)
+        m.start("b", steady(1000, 2000), 1, 1000)
+        render(m, 5)
+        m.cut("a")
+        val out = left(render(m, 10))
+        assertEquals(2000, out[VoiceMixer.CHOKE_MS + 1])
+        assertEquals(setOf("b"), m.keys)
+    }
+
+    @Test
+    fun `a cut of a key not playing does nothing`() {
+        val m = mixer()
+        m.start("a", steady(1000), 1, 1000)
+        render(m, 1)
+        m.cut("nothing")
+        assertEquals(1000, left(render(m, 10))[9])
+        assertEquals(setOf("a"), m.keys)
+    }
+
+    @Test
+    fun `keys and started stay right over many renders`() {
+        val m = mixer()
+        val out = ShortArray(200 * 2)
+        for (n in 0 until 300) {
+            val at = m.frame
+            m.start("a", steady(1000), 1, 1000, tag = n.toLong())
+            m.start("b", steady(1000), 1, 1000)
+            m.render(out, 10)
+            assertEquals(listOf(VoiceMixer.Started("a", n.toLong(), at), VoiceMixer.Started("b", 0, at)), m.started)
+            assertEquals(setOf("a", "b"), m.keys)
+            // Unchanged keys are the same set, not a new one per render.
+            val held = m.keys
+            m.render(out, 10)
+            assertTrue(m.started.isEmpty())
+            assertTrue(held === m.keys)
+            m.cut("b")
+            m.render(out, 10)
+            assertEquals(setOf("a"), m.keys)
+            m.release("a")
+            m.render(out, 200)
+            assertEquals(emptySet<String>(), m.keys)
+            assertEquals(0, out[2 * 199].toInt())
+        }
+        assertEquals(300L * 230, m.frame)
+    }
 }

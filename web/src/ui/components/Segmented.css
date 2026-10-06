@@ -40,3 +40,51 @@
    * the words wrap inside the block rather than being cut off mid-word. */
   overflow-wrap: break-word;
 }
+
+/* ---- compact (the Step 1c rows): pale caps sized to their words ---- */
+.segmented--compact {
+  flex: none;
+  width: auto;
+  max-width: 100%;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-6);
+}
+.segmented--compact .segmented__block {
+  flex: none;
+  min-height: 34px;
+  padding: var(--space-8) var(--space-12);
+  border-radius: var(--radius-key);
+  --cap-face: var(--key);
+  --cap-ink: var(--graphite);
+  --cap-edge: var(--key-edge);
+  font-weight: 800;
+  white-space: nowrap;
+}
+.segmented--compact .segmented__block.is-on {
+  --cap-face: var(--navy);
+  --cap-ink: var(--on-navy);
+  --cap-edge: color-mix(in oklab, var(--navy) 65%, black);
+}
+/* Equal caps across the width (the View in the Live tools). Equal while they
+ * fit; else each as wide as its longest word (no word is cut), and when even
+ * that is too wide (a 320 px phone) the caps wrap to another row rather than
+ * stick out of the card. */
+.segmented--fill {
+  flex-wrap: wrap;
+  width: 100%;
+}
+.segmented--fill .segmented__block {
+  flex: 1 1 0;
+  min-width: min-content;
+  padding-inline: var(--space-8);
+  white-space: normal;
+}
+.segmented--fill .segmented__text { overflow-wrap: normal; }
+
+/* A choice that can't be taken here: faded, no press travel. */
+.segmented__block.is-disabled {
+  opacity: var(--key-disabled);
+  cursor: not-allowed;
+}
+.segmented__block.is-disabled:active { transform: none; box-shadow: var(--cap-dx) var(--cap-dy) 0 var(--cap-edge); }

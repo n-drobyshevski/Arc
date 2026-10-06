@@ -2,6 +2,10 @@
 // of ?demo (src/dev/demo.ts) standing in for the device. One pass through the
 // main flows, a browser without Web MIDI, and screenshots for a manual look
 // next to the Android reference PNGs (attached to the report; no pixel diff).
+// The main flow runs at Playwright's 1280x720, which is the web-only desktop
+// layout (ui/useDesk.ts, from 1024px wide); the screenshots add a 1440x900 one
+// and a phone on its side (867x388), where a test of its own checks Live's
+// top bar, the piano's keyboard access and Back on the key list.
 import { coachHides, demo, expect, importPak, notAutomated, SAMPLE_PAK, selectTab, test } from './fixtures'
 
 test('back up, look inside, restore, browse the device, live pads, import, no MIDI', async ({ page, context }) => {
@@ -18,7 +22,10 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
     await expect(coach).toBeHidden()
     await selectTab(page, 'Backups')
     await expect(page).toHaveURL(/#\/backups$/)
-    await expect(bar.getByRole('button', { name: 'Settings' })).toBeVisible()
+    // The desktop layout: the theme switch in the gear's place, Settings on the nav rail.
+    await expect(bar.getByRole('radiogroup', { name: 'Theme' })).toBeVisible()
+    await expect(bar.getByRole('button', { name: 'Settings' })).toHaveCount(0)
+    await expect(page.locator('.nav-rail').getByRole('button', { name: 'Settings', exact: true })).toBeVisible()
   })
 
   await test.step('2. auto-connect: the device panel shows the EP-133 and its 12 sounds', async () => {
@@ -107,28 +114,36 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
     await expect.poll(litPads).toBe(0)
   })
 
-  await test.step('7a. on a computer, the guide overlay by keyboard over the open Live tools: nothing under the panel tagged, focus back on ?', async () => {
-    const strip = page.getByRole('button', { name: 'Live tools' })
-    await strip.click()
+  await test.step('7a. on a computer, the guide overlay: by the docked tools in PADS, and by keyboard over the tools in KEYS', async () => {
+    const coach = page.getByRole('dialog', { name: "What's what" })
+    const help = page.getByRole('banner').getByRole('button', { name: "What's what" })
+    await help.click()
+    await expect(coach.locator('[data-coach-tag="live.pads"]')).toBeVisible()
+    await expect.poll(() => coachHides(page)).toEqual([])
+    await page.keyboard.press('Escape')
+    await expect(coach).toBeHidden()
+    // In KEYS the tools go behind the edge strip, and slide out over the page.
+    await page.getByRole('button', { name: 'Pads. Tap for keys.' }).click()
+    await page.getByRole('button', { name: 'Live tools' }).click()
     const panel = page.getByRole('dialog', { name: 'Live tools' })
     await expect(panel).toBeVisible()
     // The panel takes focus as it opens; only then go to ? (else Enter can land on its close key).
     await expect.poll(() => panel.evaluate((el) => el.contains(document.activeElement))).toBe(true)
-    const help = page.getByRole('banner').getByRole('button', { name: "What's what" })
     await help.focus()
     await page.keyboard.press('Enter')
-    const coach = page.getByRole('dialog', { name: "What's what" })
-    await expect(coach.locator('[data-coach-tag="live.pads"]')).toBeVisible()
+    await expect(coach.locator('[data-coach-tag="live.keys"]')).toBeVisible()
     // The more-tools strip is under the panel: no tag points at it.
     await expect(coach.locator('[data-coach-tag="side.more"]')).toHaveCount(0)
     await expect.poll(() => coachHides(page)).toEqual([])
-    // Escape closes the overlay alone; the panel under it takes the next one.
+    // Escape closes the overlay alone, focus back on ?; the panel under it takes the next one.
     await page.keyboard.press('Escape')
     await expect(coach).toBeHidden()
     await expect(help).toBeFocused()
     await expect(panel).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(panel).toBeHidden()
+    await page.getByRole('button', { name: 'Keys. Tap for pads.' }).click()
+    await expect(page.locator('[data-pad]')).toHaveCount(12)
   })
 
   await test.step('7b. Live tab: a pad the device named plays in the browser while held', async () => {
@@ -163,68 +178,18 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
     await expect(page.locator('[data-pad].is-playing')).toHaveCount(0)
   })
 
-  await test.step('7c. sideways, KEYS is a piano: a held key sounds, a slide plays the next, fingers push keys down, a device note lights its own key', async () => {
-    const upright = page.viewportSize()
-    await page.setViewportSize({ width: 867, height: 388 })
-    // The pad just played (A ".", the kick) is the sound KEYS plays.
-    await page.getByRole('button', { name: 'Pads. Tap for keys.' }).click()
-    const piano = page.getByRole('group', { name: 'Keyboard, DO3 to DO5' })
-    await expect(piano).toBeVisible()
-    await expect(piano.locator('[data-note]')).toHaveCount(25)
-    // Every note drawn as playing, counted as it happens (the demo's kick is short).
-    await page.evaluate(() => {
-      const w = window as unknown as { __arcNotes: Set<string> }
-      w.__arcNotes = new Set()
-      new MutationObserver(() => {
-        for (const el of document.querySelectorAll('.piano__key.is-playing')) w.__arcNotes.add(el.getAttribute('data-note') ?? '')
-      }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] })
-    })
-    const played = (): Promise<string[]> => page.evaluate(() => [...(window as unknown as { __arcNotes: Set<string> }).__arcNotes].sort())
-    const box = await piano.locator('.piano__plate').boundingBox()
-    if (box === null) throw new Error('the piano has no box')
-    const white = box.width / 15
-    const y = box.y + box.height * 0.9
-    // DO4 (60), the 8th white key, then a slide up to MI4 (64).
-    await page.mouse.move(box.x + white * 7.5, y)
-    for (let attempt = 0; attempt < 3 && !(await played()).includes('60'); attempt++) {
-      await page.mouse.down()
-      await expect.poll(played, { timeout: 5_000 }).toContain('60').catch(() => undefined)
-      if (!(await played()).includes('60')) await page.mouse.up()
-    }
-    expect(await played()).toContain('60')
-    await page.mouse.move(box.x + white * 9.5, y, { steps: 12 })
-    await expect.poll(played, { timeout: 5_000 }).toContain('64')
-    await page.mouse.up()
-    await expect(page.locator('.piano__key.is-playing')).toHaveCount(0)
-    // Fingers: each key under one is down on its edge, and a slide takes the press along.
-    const cdp = await page.context().newCDPSession(page)
-    const down = (): Promise<string[]> => piano.locator('[data-down]').evaluateAll((els) => els.map((el) => el.getAttribute('data-note') ?? '').sort())
-    const finger = (id: number, whites: number): { id: number; x: number; y: number } => ({ id, x: box.x + white * whites, y })
-    // FA4 (65) and LA4 (69), then the first finger slides onto SOL4 (67).
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [finger(1, 10.5), finger(2, 12.5)] })
-    await expect.poll(down).toEqual(['65', '69'])
-    await expect.poll(() => piano.locator('[data-note="69"]').evaluate((el) => getComputedStyle(el).transform)).toBe('matrix(1, 0, 0, 1, 2, 3)')
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [finger(1, 11.5), finger(2, 12.5)] })
-    await expect.poll(down).toEqual(['67', '69'])
-    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
-    await expect.poll(down).toEqual([])
-    // The device's DO4 lights DO4 itself (not a key with its name, as the grid does).
-    const glowOf = (note: number): Promise<number> =>
-      piano.locator(`[data-note="${note}"]`).evaluate((el) => Number((el as HTMLElement).style.getPropertyValue('--glow')))
-    await demo(page, (d) => d.noteOn(60, 127))
-    await expect.poll(() => glowOf(60)).toBeGreaterThan(0.5)
-    expect(await glowOf(72)).toBe(0)
-    await demo(page, (d) => d.noteOff(60))
-    // The guide overlay over the piano: every tag in view, none on another or over a control
-    // (the row of words under the top bar, the octave's − and +, the GUIDE tab).
-    const coach = page.getByRole('dialog', { name: "What's what" })
-    await page.getByRole('banner').getByRole('button', { name: "What's what" }).click()
-    await expect(coach.locator('[data-coach-tag="live.octave"]')).toBeVisible()
-    await expect.poll(() => coachHides(page)).toEqual([])
-    await page.keyboard.press('Escape')
-    await expect(coach).toBeHidden()
-    await page.getByRole('button', { name: 'Keys. Tap for pads.' }).click()
-    if (upright) await page.setViewportSize(upright)
+  await test.step('7c. EDIT: a pad gets another sound at once, and UNDO puts the old one back', async () => {
+    await page.getByRole('button', { name: "Edit pads: change a pad's sound." }).click()
+    await page.locator('[data-pad]', { hasText: 'kick' }).first().click()
+    const sheet = page.getByRole('dialog', { name: /^Pad A / })
+    await expect(sheet).toBeVisible()
+    await sheet.getByRole('button', { name: /^002/ }).click()
+    await expect(page.getByRole('status')).toContainText(': snare')
+    await expect(page.locator('[data-pad]', { hasText: 'snare' })).toHaveCount(1)
+    await page.getByRole('button', { name: 'Undo' }).click()
+    await expect(page.getByRole('status')).toContainText('back to kick')
+    await expect(page.locator('[data-pad]', { hasText: 'kick' })).toHaveCount(1)
+    await page.getByRole('button', { name: /^Editing pads/ }).click()
   })
 
   await test.step('8. import sample.pak: a second row', async () => {
@@ -259,9 +224,56 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
   })
 })
 
+test('a phone on its side: the display line and toasts in the top bar, the piano by keyboard, Back closes the key list', async ({ page }) => {
+  await page.setViewportSize({ width: 867, height: 388 })
+  await page.goto('/?demo#/live')
+  await expect(page.locator('[data-pad]')).toHaveCount(12)
+  const bar = page.getByRole('banner')
+  // The pads' one-line display rides in the top bar, and the page leaves it out.
+  await expect(bar.locator('.live-strip--bar')).toBeVisible()
+  await expect(page.locator('.live .live-strip')).toHaveCount(0)
+  await page.getByRole('button', { name: 'Pads. Tap for keys.' }).click()
+  const piano = page.getByRole('group', { name: /^Keyboard, / })
+  await expect(piano).toBeVisible()
+  await expect(bar.locator('.live-strip--bar')).toContainText(/./)
+  // One key in the Tab order (the root, DO), the arrows move along without scrolling, Enter plays.
+  await expect(piano.locator('[data-note][tabindex="0"]')).toHaveCount(1)
+  await piano.locator('[data-note][tabindex="0"]').focus()
+  const focused = (): Promise<string | null> => page.evaluate(() => document.activeElement?.getAttribute('data-note') ?? null)
+  const first = Number(await focused())
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(focused).toBe(String(first + 1))
+  await page.keyboard.press('End')
+  await page.keyboard.press('Home')
+  await expect.poll(focused).toBe(String(await piano.locator('[data-note]').first().getAttribute('data-note')))
+  expect(await page.evaluate(() => document.scrollingElement?.scrollTop ?? 0)).toBe(0)
+  // No KEYS sound yet: the press says so once, in a toast at the top over the bar's middle.
+  await page.keyboard.press('Enter')
+  const toast = page.getByRole('status').filter({ hasText: 'Tap a pad in Pads first' })
+  await expect(toast).toBeVisible()
+  expect((await toast.boundingBox())!.y).toBeLessThan(56)
+  await page.keyboard.press('Enter')
+  await expect(toast).toHaveCount(1)
+  // The key word's list is a navigation layer: Back closes it.
+  await page.getByRole('button', { name: /^Key: DO\. Tap to change\./ }).click()
+  await expect(page.getByRole('listbox', { name: /^Key: / })).toBeVisible()
+  await page.goBack()
+  await expect(page.getByRole('listbox', { name: /^Key: / })).toHaveCount(0)
+  await expect(piano).toBeVisible()
+  // The guide overlay over the piano: every tag in view, none on another or over a control
+  // (the row of words under the top bar, the octave's − and +, the GUIDE and EDIT tabs).
+  const coach = page.getByRole('dialog', { name: "What's what" })
+  await bar.getByRole('button', { name: "What's what" }).click()
+  await expect(coach.locator('[data-coach-tag="live.octave"]')).toBeVisible()
+  await expect.poll(() => coachHides(page)).toEqual([])
+  await page.keyboard.press('Escape')
+  await expect(coach).toBeHidden()
+})
+
 const SIZES = [
   { name: 'phone', width: 393, height: 852 },
   { name: 'tablet', width: 840, height: 1200 },
+  { name: 'desktop', width: 1440, height: 900 },
   { name: 'sideways', width: 867, height: 388 },
 ] as const
 const SCHEMES = ['light', 'dark'] as const

@@ -3,6 +3,13 @@ package dev.arc.ep133.features
 /** Where a note stands in KEYS' key: its root, another note of the scale, or outside it. */
 enum class KeyMark { ROOT, IN, OUT }
 
+/**
+ * Whether Live's KEYS plays on the 3×4 grid or the piano (an addition),
+ * remembered once for a wide window and once for a tall one. [AUTO] is the
+ * piano when the window is wide and it fits.
+ */
+enum class KeysView { AUTO, PADS, PIANO }
+
 /** A rectangle on the piano, in whatever unit its width and height came in (dp or px). */
 data class KeyRect(val left: Float, val top: Float, val width: Float, val height: Float) {
     val right: Float get() = left + width
@@ -30,6 +37,13 @@ object Piano {
     val WHITES = listOf(22, 15, 12, 8)
     /** A white key is never narrower than this (dp): under it the grid stays instead. */
     const val MIN_WHITE = 44f
+    /** The piano needs a room at least this tall (dp): under it the grid stays instead. */
+    const val MIN_HEIGHT = 120f
+    /** Under this width (dp, Android's compact breakpoint) a tall window always plays on the grid. */
+    const val COMPACT_WIDTH = 600f
+
+    /** Settings' piano sizes: null (Auto, the widest that fits), then one octave, one and a half, two, three. */
+    val CHOICES: List<Int?> = listOf(null, 8, 12, 15, 22)
 
     // Black keys against a white one: drawn as KeysStrip draws them (a touch longer),
     // hit a little wider so a finger meant for the narrow key finds it.
@@ -39,8 +53,42 @@ object Piano {
 
     private val BLACK = setOf(1, 3, 6, 8, 10)
 
-    /** How many white keys fit [widthDp] at [minWhite] or wider each; 0 when even one octave doesn't. */
-    fun whitesFor(widthDp: Float, minWhite: Float = MIN_WHITE): Int = WHITES.firstOrNull { widthDp / it >= minWhite } ?: 0
+    /** A stored piano size as a choice: one of [WHITES], else Auto (null). */
+    fun choiceOf(stored: Int?): Int? = stored?.takeIf { it in WHITES }
+
+    /**
+     * How many white keys to show across [widthDp], each [minWhite] or wider:
+     * the widest that fits for Auto (a null [choice]), else [choice] capped at
+     * what fits (a window too narrow for it falls back to the largest that
+     * fits). 0 when even one octave doesn't.
+     */
+    fun whitesFor(widthDp: Float, choice: Int? = null, minWhite: Float = MIN_WHITE): Int =
+        WHITES.firstOrNull { (choice == null || it <= choice) && fits(widthDp, it, minWhite) } ?: 0
+
+    /** Whether [whites] white keys fit [widthDp] at [minWhite] or wider each (Settings greys out a size that doesn't). */
+    fun fits(widthDp: Float, whites: Int, minWhite: Float = MIN_WHITE): Boolean = whites > 0 && widthDp / whites >= minWhite
+
+    /** Whether a [widthDp] × [heightDp] room can hold the piano: at least one octave of whites, and [MIN_HEIGHT] tall. */
+    fun hasRoom(widthDp: Float, heightDp: Float, choice: Int? = null): Boolean =
+        whitesFor(widthDp, choice) > 0 && heightDp >= MIN_HEIGHT
+
+    /**
+     * Whether KEYS offers its Pads ⇄ Piano switch: everywhere but a portrait
+     * phone (a tall window under [COMPACT_WIDTH]), which always plays on the grid.
+     */
+    fun switchShown(landscape: Boolean, windowWidthDp: Float): Boolean = landscape || windowWidthDp >= COMPACT_WIDTH
+
+    /**
+     * Whether KEYS plays on the piano: never where the switch is hidden or
+     * the piano has no [room]; otherwise as [view] says, [KeysView.AUTO]
+     * being the piano when the window is [landscape].
+     */
+    fun showsPiano(view: KeysView, landscape: Boolean, windowWidthDp: Float, room: Boolean): Boolean =
+        switchShown(landscape, windowWidthDp) && room && when (view) {
+            KeysView.AUTO -> landscape
+            KeysView.PIANO -> true
+            KeysView.PADS -> false
+        }
 
     /** The piano's lowest note at [octave]: C of the octave below (OCT 4 → C3, 48). */
     fun lowest(octave: Int): Int = 12 * octave

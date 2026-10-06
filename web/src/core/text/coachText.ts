@@ -13,6 +13,8 @@ export const CoachText = {
   CONNECTION: 'Connection',
   DISCONNECTED: 'Connect the EP-133',
   SETTINGS: 'Settings',
+  /** The web's desktop top bar: its System / Light / Dark switch, in the settings key's place. */
+  THEME: 'Light or dark',
   SECTIONS: 'Sections',
   GUIDE_TAB: 'EP-133 shortcuts',
   MODE: 'Pads or keys',
@@ -20,6 +22,9 @@ export const CoachText = {
   SCALE: 'Scale',
   KEY: 'Key',
   PIANO: 'Play, or slide across the keys',
+  KEYS_VIEW: 'Pads or piano',
+  /** The EDIT edge tab's side tag. */
+  EDIT: "Change a pad's sound",
 
   SEARCH: 'Search sounds',
   IMPORT: 'Import a .pak',
@@ -30,6 +35,7 @@ export const CoachText = {
   FOLLOW: 'Follow the group played',
   PADS: 'Pads light as you play',
   MORE_TOOLS: 'More tools',
+  SOUNDS_TAB: 'Drag a sound onto a pad',
 
   REFRESH: 'Read the device again',
   ADD_SAMPLES: 'Add samples',
