@@ -41,9 +41,10 @@
   flex-direction: column;
   gap: var(--space-3);
   flex: 1 1 0;
-  /* The control gives way (its caps wrap) before the name is squeezed to a
-   * letter a line on a narrow phone. */
-  min-width: min(7rem, 40%);
+  /* Never narrower than the name's longest word: the control takes the rest,
+   * so a short name ("Theme") leaves its caps one row, and a long one makes
+   * the caps wrap before a word is split. */
+  min-width: auto;
 }
 .setting-row--stack .setting-row__text { min-width: 0; }
 .setting-row__title {
