@@ -3,7 +3,6 @@ package dev.arc.ep133.ui.components
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
@@ -60,7 +59,8 @@ private const val FINE_SPEED = 0.12f
  * middle when [bipolar], as pan and pitch are). Its [label] is printed above
  * and its value ([readout]) below.
  *
- * A drag up or to the right turns it up, [FULL_TURN] for the whole range:
+ * A drag up or to the right turns it up (the knob takes the finger from its
+ * first touch, so the sheet under it stays put), [FULL_TURN] for the whole range:
  * by [step] at a normal speed, by [fineStep] when slow, so a value can be set
  * exactly. A double tap puts it back to [default]. [onChange] hears each new
  * value, [onDone] the finger lifting. With [haptics], each step ticks.
@@ -104,8 +104,68 @@ fun Knob(
     }
     // The value under the finger, unrounded, so slow steps add up.
     val raw = remember { floatArrayOf(0f) }
+    // When and where the last tap without a turn lifted, for a double tap.
+    val lastTap = remember { longArrayOf(Long.MIN_VALUE) }
     Column(
-        modifier.alpha(if (enabled) 1f else 0.4f),
+        modifier
+            .alpha(if (enabled) 1f else 0.4f)
+            // The whole knob, name and value too, takes the finger from its first touch: a drag up or
+            // down turns it and never scrolls the sheet it sits in. Taps are told apart here as well,
+            // since a tap detector beside it would give way to the moves taken.
+            .pointerInput(enabled, range, step, fineStep, default) {
+                if (!enabled) return@pointerInput
+                val perPx = span / FULL_TURN.toPx()
+                val slop = viewConfiguration.touchSlop
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    down.consume()
+                    raw[0] = current
+                    var lastTime = down.uptimeMillis
+                    var moved = false
+                    var travel = 0f
+                    var upAt = -1L
+                    while (true) {
+                        val e = awaitPointerEvent(PointerEventPass.Main)
+                        val ch = e.changes.firstOrNull { it.id == down.id } ?: break
+                        if (!ch.pressed) {
+                            upAt = ch.uptimeMillis
+                            ch.consume()
+                            break
+                        }
+                        val d = ch.positionChange()
+                        ch.consume()
+                        val px = d.x - d.y
+                        if (!moved) {
+                            // A finger's tremble turns nothing (and is still a tap); past the slop it turns, without a jump.
+                            travel += abs(d.x) + abs(d.y)
+                            if (travel < slop) continue
+                            moved = true
+                            lastTime = ch.uptimeMillis
+                            continue
+                        }
+                        if (px != 0f) {
+                            val dt = (ch.uptimeMillis - lastTime).coerceAtLeast(1L)
+                            lastTime = ch.uptimeMillis
+                            val speed = abs(px).toDp().value / dt
+                            raw[0] = (raw[0] + px * perPx).coerceIn(range.start, range.endInclusive)
+                            set(snap(raw[0], if (speed < FINE_SPEED) fineStep else step))
+                        }
+                    }
+                    when {
+                        moved -> {
+                            lastTap[0] = Long.MIN_VALUE
+                            done()
+                        }
+                        upAt < 0 -> lastTap[0] = Long.MIN_VALUE
+                        lastTap[0] != Long.MIN_VALUE && down.uptimeMillis - lastTap[0] <= viewConfiguration.doubleTapTimeoutMillis -> {
+                            lastTap[0] = Long.MIN_VALUE
+                            set(default)
+                            done()
+                        }
+                        else -> lastTap[0] = upAt
+                    }
+                }
+            },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
@@ -134,51 +194,6 @@ fun Knob(
                         disabled()
                     }
                 }
-                .pointerInput(enabled, range, step, fineStep) {
-                    if (!enabled) return@pointerInput
-                    val perPx = span / FULL_TURN.toPx()
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        raw[0] = current
-                        var lastTime = down.uptimeMillis
-                        var moved = false
-                        // A finger's tremble turns nothing, and leaves a double tap to the tap detector.
-                        val slop = viewConfiguration.touchSlop
-                        var travel = 0f
-                        while (true) {
-                            val e = awaitPointerEvent(PointerEventPass.Main)
-                            val ch = e.changes.firstOrNull { it.id == down.id } ?: break
-                            if (!ch.pressed) break
-                            val d = ch.positionChange()
-                            val px = d.x - d.y
-                            if (!moved) {
-                                travel += px
-                                if (abs(travel) < slop) continue
-                                // Past the slop: it turns from here, without a jump.
-                                moved = true
-                                lastTime = ch.uptimeMillis
-                                ch.consume()
-                                continue
-                            }
-                            if (px != 0f) {
-                                ch.consume()
-                                val dt = (ch.uptimeMillis - lastTime).coerceAtLeast(1L)
-                                lastTime = ch.uptimeMillis
-                                val speed = abs(px).toDp().value / dt
-                                raw[0] = (raw[0] + px * perPx).coerceIn(range.start, range.endInclusive)
-                                set(snap(raw[0], if (speed < FINE_SPEED) fineStep else step))
-                            }
-                        }
-                        if (moved) done()
-                    }
-                }
-                .pointerInput(enabled, default) {
-                    if (!enabled) return@pointerInput
-                    detectTapGestures(onDoubleTap = {
-                        set(default)
-                        done()
-                    })
-                },
         ) {
             val (skirt, skirtEdge, cap, capEdge) = colors
             val r = this.size.minDimension / 2f

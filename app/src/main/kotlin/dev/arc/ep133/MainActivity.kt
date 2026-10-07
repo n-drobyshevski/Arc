@@ -812,6 +812,9 @@ class MainActivity : ComponentActivity() {
                                 localName = offline?.let { controller.mirrorLocal(pad)?.name },
                                 edit = padEdit?.takeIf { it.target == target },
                                 onEdit = controller::adjustPad,
+                                // The cap plays the pad as Live does, with its settings.
+                                onPadDown = { controller.playPad(pad) },
+                                onPadUp = { controller.releasePad(pad) },
                                 haptics = appSettings.haptics,
                             )
                         }
