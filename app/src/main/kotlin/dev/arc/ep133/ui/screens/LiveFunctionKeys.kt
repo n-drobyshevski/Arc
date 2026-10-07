@@ -60,8 +60,8 @@ import kotlinx.coroutines.delay
 /*
  * Live's function keys (an addition): PROJECT, KEYS and TEMPO as the EP-133
  * prints its two-tier keys, a dark cap with its word on the upper half and
- * the lower half filled with a colour carrying a second word, then an LED
- * and a printed label under each. A row over the pads (upright, and on the
+ * the lower half filled with a colour carrying a second word, under an LED
+ * and a printed label. A row over the pads (upright, and on the
  * all-groups and tablet pages), a column left of them on a phone on its side.
  */
 
@@ -259,7 +259,7 @@ private const val STALE_BEAT_MS = 100L
 
 /**
  * One two-tier key: [word] on the dark cap's upper half, [sub] in [lowerInk]
- * on its [lower] half, then its LED ([led], 0..1, read in the draw) and
+ * on its [lower] half, under its LED ([led], 0..1, read in the draw) and
  * [label], in ink while [lit]. The whole key and its line take the touch;
  * a screen reader hears [description] and [state] ([toggled] for a switch).
  * [column]: the narrower, shorter key of the column on a phone on its side,
@@ -318,20 +318,6 @@ private fun FunctionKey(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(CapToLed),
     ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .height(column?.cap ?: rowCap())
-                .cap(hw.darkFace, hw.darkEdge, RoundedCornerShape(8.dp), capPress(pressed && enabled), alpha = alpha)
-                .clearAndSetSemantics { },
-        ) {
-            Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                Text(word.uppercase(), style = text, color = hw.darkInk, maxLines = 1, softWrap = false)
-            }
-            Box(Modifier.fillMaxWidth().weight(1f).background(lower), contentAlignment = Alignment.Center) {
-                Text(sub.uppercase(), style = text, color = lowerInk, maxLines = 1, softWrap = false)
-            }
-        }
         // Too short for the LED lines: the caps alone.
         if (column?.led != false) {
             Row(
@@ -354,6 +340,20 @@ private fun FunctionKey(
                     maxLines = 1,
                     softWrap = false,
                 )
+            }
+        }
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .height(column?.cap ?: rowCap())
+                .cap(hw.darkFace, hw.darkEdge, RoundedCornerShape(8.dp), capPress(pressed && enabled), alpha = alpha)
+                .clearAndSetSemantics { },
+        ) {
+            Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                Text(word.uppercase(), style = text, color = hw.darkInk, maxLines = 1, softWrap = false)
+            }
+            Box(Modifier.fillMaxWidth().weight(1f).background(lower), contentAlignment = Alignment.Center) {
+                Text(sub.uppercase(), style = text, color = lowerInk, maxLines = 1, softWrap = false)
             }
         }
     }
