@@ -110,7 +110,7 @@ npm run gen:guide  # regenerate src/core/text/guideData.ts from core's GuideText
 
 ### Deploy
 
-The Vercel project `arc` builds from `vercel.json` at the repository root: it installs and builds `web/` and serves `web/dist`. The same file sets the cache headers for `sw.js`, the manifest and `assets/`, allows MIDI for the site, and sets a strict Content-Security-Policy that also keeps arc out of other sites' frames. A push to `main` deploys to production at https://arc-pi-mauve.vercel.app; a push to any other branch gets its own preview deployment. Production builds show the version exactly (`0.3.5`), previews and local builds add `-dev`. The version comes from `version.properties`, as for Android, and `.pak` files name it the same way (`arc 0.3.5`).
+The Vercel project `arc` builds from `vercel.json` at the repository root: it installs and builds `web/` and serves `web/dist`. The same file sets the cache headers for `sw.js`, the manifest and `assets/`, allows MIDI for the site, and sets a strict Content-Security-Policy that also keeps arc out of other sites' frames. A push to `main` deploys to production at https://arc-pi-mauve.vercel.app; a push to any other branch gets its own preview deployment. Production builds show the version exactly (`0.3.5`), previews and local builds add `-dev`. The version comes from `version.properties`, as for Android, and `.pak` files name it the same way (`arc 0.3.5`). The launcher icon candidates are on a static page beside the app, `/icon-board/` (`web/public/icon-board/`), left out of the service worker's precache and its fallback to the app.
 
 **Status:** the web app has been tested against the simulator (unit tests and the Playwright smoke test with `?demo`), not yet with a physical EP-133. The open questions under [Status](#status-what-is-verified-and-what-still-needs-a-real-device) apply to it too, plus WebMIDI's own: how Chrome splits incoming SysEx, and whether the upload window survives Chrome's MIDI send buffer.
 
@@ -358,4 +358,4 @@ Not affiliated with or endorsed by teenage engineering. EP-133 and K.O. II are t
 
 ## License
 
-MIT (see `LICENSE`). Manrope is licensed under the SIL Open Font License 1.1. Oboe is licensed under the Apache License 2.0.
+MIT (see `LICENSE`). Manrope, and Chakra Petch and IBM Plex Sans on the web's icon board (`web/public/icon-board`), are licensed under the SIL Open Font License 1.1. Oboe is licensed under the Apache License 2.0.

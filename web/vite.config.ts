@@ -72,11 +72,16 @@ const pwa = VitePWA({
   },
   workbox: {
     navigateFallback: 'index.html',
+    // The icon board (public/icon-board/) is a static page beside the app: its
+    // navigations go to the network, and it isn't precached with the app.
+    navigateFallbackDenylist: [/^\/icon-board(?:[/?]|$)/],
     globPatterns: ['**/*.{js,css,html,svg,png,woff2,txt}'],
     globIgnores: [
       // ?demo only: fetched (and runtime-cached) when someone opens the demo.
       '**/demo-*.js',
       '**/*.map',
+      // The icon board, above.
+      'icon-board/**',
       // Manrope: precache the latin and latin-ext subsets the UI text uses. The
       // others load by unicode-range only when a backup name needs them.
       '**/manrope-cyrillic-*',

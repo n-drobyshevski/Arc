@@ -98,3 +98,5 @@ Without `?demo`, headless Chromium leaves `requestMIDIAccess()` waiting on a per
 ## Deploy
 
 `../vercel.json` (repository root) is the build: `npm ci --prefix web`, `npm run build --prefix web`, output `web/dist`, with cache headers for `sw.js`, `manifest.webmanifest` and `assets/`, `Permissions-Policy: midi=(self)`, and a Content-Security-Policy (same-origin scripts and connections only, `data:` fonts for Vite's inlined Manrope subsets, `frame-ancestors 'none'`). A new external origin or an inline script needs a matching change there. Vercel skips the build when nothing under `web/`, `reference/`, `version.properties` or `vercel.json` changed. The Vercel project is `arc`.
+
+`public/icon-board/` is the launcher icon board, a standalone design page served at `/icon-board/` (`vercel.json` redirects `/icon-board` there, so its relative paths resolve). It is not part of the app: the service worker neither precaches it nor answers its navigations (`globIgnores` and `navigateFallbackDenylist` in `vite.config.ts`). It fits the same CSP, with its script in `board.js` and its two fonts, Chakra Petch and IBM Plex Sans (SIL OFL), in `fonts/`.
