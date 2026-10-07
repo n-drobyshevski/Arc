@@ -397,6 +397,12 @@ class MainActivity : ComponentActivity() {
         // Live's EDIT (the tab under GUIDE), and the pad whose sheet is open with where its sound is set.
         var liveEdit by rememberSaveable { mutableStateOf(false) }
         var padSheet by remember { mutableStateOf<Pair<dev.arc.ep133.features.PhysicalPad, dev.arc.ep133.features.PadTarget>?>(null) }
+        // The pad sheet's settings: asked for as it opens, let go of as it closes.
+        val padEdit by controller.padEdit.collectAsStateWithLifecycle()
+        LaunchedEffect(padSheet) {
+            val open = padSheet
+            if (open != null) controller.openPadEdit(open.first, open.second) else controller.closePadEdit()
+        }
         // TEMPO held: the tempo sheet; PROJECT held: the project sheet.
         var tempoSheet by rememberSaveable { mutableStateOf(false) }
         var projectSheet by rememberSaveable { mutableStateOf(false) }
@@ -533,6 +539,11 @@ class MainActivity : ComponentActivity() {
         // Live's function keys: PROJECT steps through the projects, KEYS is the mode, TEMPO the phone's click.
         val metronome by controller.metronome.collectAsStateWithLifecycle()
         val functions = dev.arc.ep133.ui.screens.FunctionKeysUi(
+            // SOUND held: the sheet of the pad played last (its tap is EDIT, below).
+            onPadSound = {
+                val pad = state.keysPad
+                if (pad == null) controller.toast(dev.arc.ep133.text.MirrorText.PLAY_A_PAD) else controller.editTarget(pad)?.let { padSheet = pad to it }
+            },
             project = dev.arc.ep133.ui.screens.projectKeyOf(mirror, state.busy),
             onProject = controller::stepProject,
             onPickProject = { projectSheet = true },
@@ -799,6 +810,12 @@ class MainActivity : ComponentActivity() {
                                 offline = offline != null,
                                 readSlot = offline?.let { controller.mirrorReadSlot(target) },
                                 localName = offline?.let { controller.mirrorLocal(pad)?.name },
+                                edit = padEdit?.takeIf { it.target == target },
+                                onEdit = controller::adjustPad,
+                                // The cap plays the pad as Live does, with its settings.
+                                onPadDown = { controller.playPad(pad) },
+                                onPadUp = { controller.releasePad(pad) },
+                                haptics = appSettings.haptics,
                             )
                         }
                     }

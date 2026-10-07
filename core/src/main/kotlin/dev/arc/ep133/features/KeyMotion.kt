@@ -49,7 +49,9 @@ object KeyMotion {
      * [MIN_DOWN_MS] stays down until then.
      */
     fun step(key: Key, down: Boolean, dtMs: Float): Boolean {
-        if (dtMs <= 0f) return !key.still
+        // No time passed (a frame stamped before the press or release it follows): nothing moves, but
+        // a key not yet where it's going still has to get there, or it would stay stuck (down, after a release).
+        if (dtMs <= 0f) return !key.still || key.pos != (if (down || key.downMs in 0f..<MIN_DOWN_MS) 1f else 0f)
         if (down && key.downMs < 0f) key.downMs = 0f
         val held = down || key.downMs in 0f..<MIN_DOWN_MS
         if (held) {

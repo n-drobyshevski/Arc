@@ -24,7 +24,8 @@ import {
 import type { JsonObject } from '../protocol/fs'
 import type { Session } from '../protocol/session'
 import { ktTrim } from '../util/kotlinText'
-import { read as readPads, type PadGroup } from './projectPads'
+import type { PadSettings } from './padSettings'
+import { read as readPads, settings as padSettingsOf, type PadGroup } from './projectPads'
 
 /** What is on the device right now. */
 export interface DeviceContents {
@@ -36,9 +37,16 @@ export interface DeviceContents {
 }
 
 /** The sounds a project uses and its pads. */
+/**
+ * A project's sounds ([slots]) and pads, from one download; [settings] are the
+ * pads' SOUND EDIT settings where their records look like settings, by
+ * flatKey (projectPads.settings; an addition). Missing means none (Kotlin's
+ * default).
+ */
 export interface ProjectLayout {
   slots: number[]
   pads: PadGroup[]
+  settings?: Map<string, PadSettings>
 }
 
 /** One sound's metadata as the device reports it. */
@@ -102,7 +110,7 @@ export async function projectLayout(
   signal?: AbortSignal | null,
 ): Promise<ProjectLayout> {
   const tar = await readProject(session, project, { signal })
-  return { slots: slotsUsedByProject(tar), pads: readPads(tar) }
+  return { slots: slotsUsedByProject(tar), pads: readPads(tar), settings: padSettingsOf(tar) }
 }
 
 // Kotlin's Char.equals(other, ignoreCase = true): simple (one char) case mappings.

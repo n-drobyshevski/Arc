@@ -36,7 +36,11 @@ class MockSound(val slot: Int, val name: String, val pcm: ByteArray, val meta: M
  * Kotlin-only additions for assertions: [metaWrites], and the knobs
  * [echoPagesBigEndian] and [corruptCrcUploads] used by the quirk tests.
  * A pad's `sym` write lands in its project's pad record, as Live's EDIT
- * expects of the device (community notes; see Device.assignPad).
+ * expects of the device (community notes; see Device.assignPad). Each pad
+ * file of a project the mock holds also has metadata ([padMeta]): `{"sym":0}`
+ * until written (the device's `sym` reads 0 until written), merged into by
+ * every SET, which is refused (status 1) when `sound.playmode` or `time.mode`
+ * isn't a string, as the device does (see Device.writePadSettings).
  */
 class MockEP133(
     sounds: List<MockSound> = emptyList(),
@@ -57,6 +61,8 @@ class MockEP133(
     val sounds = LinkedHashMap<Int, Sound>()
     val projects = LinkedHashMap<Int, ByteArray>()
     val projectsMeta = LinkedHashMap<String, JsonElement>()
+    /** Pad file node to the metadata written to it; a pad not here reads `{"sym":0}`. */
+    private val padsMeta = LinkedHashMap<Int, LinkedHashMap<String, JsonElement>>()
     var deviceId = 0x33
     var needsInit = false
     private var reading: Reading? = null
@@ -230,7 +236,17 @@ class MockEP133(
         )
         node == 2000 -> projectsMeta
         sounds.containsKey(node) -> sounds.getValue(node).meta
-        else -> null
+        else -> PadPush.fid(node)?.let { padMeta(it.project, it.group, it.pad) }
+    }
+
+    /**
+     * What a GET of that pad's file returns: what was written to it, or
+     * `{"sym":0}` if nothing was; null when the mock has no such project.
+     */
+    fun padMeta(project: Int, group: Int, pad: Int): Map<String, JsonElement>? {
+        if (!projects.containsKey(project)) return null
+        val node = PadPush.node(dev.arc.ep133.features.PadFid(project, group, pad))
+        return padsMeta[node] ?: linkedMapOf("sym" to JsJson.number(0))
     }
 
     private fun getMeta(f: Frame, node: Int, page: Int) {
@@ -247,10 +263,26 @@ class MockEP133(
         when {
             node == 2000 -> projectsMeta.putAll(obj)
             sounds.containsKey(node) -> sounds.getValue(node).meta.putAll(obj)
-            PadPush.fid(node) != null -> if (!setPadSym(node, obj)) return reply(f, 1)
+            PadPush.fid(node) != null -> if (!setPad(node, obj)) return reply(f, 1)
             else -> return reply(f, 1)
         }
         reply(f, 0)
+    }
+
+    /**
+     * A SET on a pad's file: refused with a play or time mode that isn't a
+     * string, else merged into its metadata, and "sym" goes into the record.
+     */
+    private fun setPad(node: Int, patch: JsonObject): Boolean {
+        for (k in listOf("sound.playmode", "time.mode")) {
+            val v = patch[k] ?: continue
+            if (v !is JsonPrimitive || !v.isString) return false
+        }
+        if (!setPadSym(node, patch)) return false
+        val fid = PadPush.fid(node) ?: return false
+        val meta = padsMeta.getOrPut(node) { LinkedHashMap(padMeta(fid.project, fid.group, fid.pad).orEmpty()) }
+        meta.putAll(patch)
+        return true
     }
 
     /** A pad's "sym" becomes the slot in its record (pads/<group>/pNN, bytes 1-2), added if the project has none. */

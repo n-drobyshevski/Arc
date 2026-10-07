@@ -14,6 +14,19 @@
 // A press that turns out to be a scroll is cut: it fades out over CHOKE_MS at
 // once, minimum gate or not.
 //
+// Each voice also has a shape (VoiceShape, an addition): the pad's own
+// pitch, level, pan, trim, attack and release, its play mode and its mute
+// group, so a pad plays as the EP-133 plays it. Its level at each frame is
+// the attack's ramp times the fade's level times the shape's gain, then the
+// pan's per side; a cut fades from the fade's level, as without a shape. The
+// modes change what the paragraph above says: a ONESHOT voice ignores its
+// release and plays to its end; a KEY voice isn't cut by the same key again
+// (a new voice joins it, and release and cut take all of the key's voices); a
+// LEGATO start on a key whose legato voice is still held, on the same sound,
+// starts no voice: the held one takes the new pitch where it is (on another
+// sound it starts over, as gated). The DEFAULT shape plays exactly as before
+// shapes.
+//
 // render allocates nothing unless a voice starts or keys changes, so the
 // audio thread doesn't feed the garbage collector.
 //
@@ -31,11 +44,88 @@
 //   where Kotlin uses Long.MAX_VALUE.
 // - Kotlin's private cut(Voice) overload is `cutShort` here, beside the public
 //   cut(key).
+// - The Kotlin enum class VoiceMode is a const object plus a string-union type
+//   of the same name (the values are the enum names). The data class
+//   VoiceShape is an interface, with VoiceShape.DEFAULT and VoiceShape.of()
+//   (its constructor, by named fields over the defaults) in a const object of
+//   the same name. "The same
+//   sound", for legato, is the same Int16Array (Kotlin: the same array).
+// - The web's Live (platform/audio/liveMixer.ts) plays every voice with the
+//   default shape for now.
 
 const f = Math.fround
 
 /** A voice still held: its fade starts at no frame. */
 const HELD = Number.POSITIVE_INFINITY
+
+/** Kotlin's Int.MAX_VALUE: VoiceShape's end when the sound isn't trimmed at its end. */
+const INT_MAX = 2147483647
+
+/** How a voice answers its release and the same key again (the EP-133's play modes, plus arc's gate). */
+export const VoiceMode = {
+  /** Sounds while held (at least MIN_GATE_MS), then fades; the same key again cuts it: arc's own way. */
+  GATE: 'GATE',
+  /** Plays to the end of the sound, release or not; the same key again cuts it and starts over. */
+  ONESHOT: 'ONESHOT',
+  /** Gated like GATE, but the same key again adds a voice beside the one still sounding. */
+  KEY: 'KEY',
+  /** Gated like GATE; the same key again while held only changes the pitch, carrying on where the sound is. */
+  LEGATO: 'LEGATO',
+} as const
+export type VoiceMode = (typeof VoiceMode)[keyof typeof VoiceMode]
+
+/**
+ * How one voice plays its sound (an addition): a pad's SOUND EDIT settings on
+ * the EP-133, as the mixer takes them. DEFAULT plays a sound as the mixer
+ * always has: its own pitch and level, centred, whole, no attack, the usual
+ * release, gated.
+ *
+ * [semitones] adds to start's (±12, may be fractional); [gain] is linear,
+ * 0..1; [pan] is a balance, -16 (left) to 16 (right): the left side's gain is
+ * min(1, (16 - pan) / 16), the right's min(1, (16 + pan) / 16). [start] and
+ * [end] trim the sound, in its own frames: reading starts at [start] and stops
+ * before [end] (clamped to the sound); an [end] at or before [start] leaves
+ * nothing, and nothing plays, as with an empty sound. [attackMs] fades the
+ * voice in from silence, linearly; [releaseMs] is the fade after release,
+ * never shorter than FADE_MS. [mode] says how release and the same key again
+ * are taken (VoiceMode). A [muteGroup] above 0 cuts every other sounding voice
+ * of the same group as this one starts (in CHOKE_MS), as an open hi-hat is
+ * choked by the closed one.
+ */
+export interface VoiceShape {
+  readonly semitones: number
+  readonly gain: number
+  readonly pan: number
+  readonly start: number
+  readonly end: number
+  readonly attackMs: number
+  readonly releaseMs: number
+  readonly mode: VoiceMode
+  readonly muteGroup: number
+}
+
+/** A shape: [fields] over the defaults (Kotlin's VoiceShape constructor). */
+function voiceShape(fields: Partial<VoiceShape> = {}): VoiceShape {
+  return {
+    semitones: 0,
+    gain: 1,
+    pan: 0,
+    start: 0,
+    end: INT_MAX,
+    attackMs: 0,
+    // VoiceMixer.FADE_MS (the class isn't defined yet here).
+    releaseMs: 24,
+    mode: VoiceMode.GATE,
+    muteGroup: 0,
+    ...fields,
+  }
+}
+
+export const VoiceShape = {
+  /** The mixer's own way of playing a sound. */
+  DEFAULT: Object.freeze(voiceShape()) as VoiceShape,
+  of: voiceShape,
+} as const
 
 /** A voice that began in the last render: its [tag] (the caller's), at output frame [frame]. */
 export interface Started {
@@ -45,28 +135,51 @@ export interface Started {
 }
 
 type Command =
-  | { readonly kind: 'start'; readonly key: string; readonly pcm: Int16Array; readonly channels: number; readonly step: number; readonly tag: number }
+  | {
+      readonly kind: 'start'
+      readonly key: string
+      readonly pcm: Int16Array
+      readonly channels: number
+      readonly step: number
+      readonly tag: number
+      readonly shape: VoiceShape
+    }
   | { readonly kind: 'release'; readonly key: string }
   | { readonly kind: 'cut'; readonly key: string }
   | { readonly kind: 'stopAll' }
 
+/**
+ * A voice: [pcm] read from frame [first] to before [end], [level] and the
+ * pan's [left] and [right] its gains, faded in over [attack] frames and out
+ * over [release] after its gate.
+ */
 class Voice {
-  readonly frames: number
-  pos = 0
+  pos: number
   /** The output frame the fade starts at; HELD while held. */
   fadeAt = HELD
   fadeFrames = 1
   /** Cut short: no longer the voice of its key. */
   choked = false
+  /** Released (a ONESHOT voice too, though it plays on): stolen before voices still held. */
+  letGo = false
 
   constructor(
     readonly key: string,
     readonly pcm: Int16Array,
     readonly channels: number,
-    readonly step: number,
+    public step: number,
     readonly startFrame: number,
+    first: number,
+    readonly end: number,
+    readonly level: number,
+    readonly left: number,
+    readonly right: number,
+    readonly attack: number,
+    readonly release: number,
+    readonly mode: VoiceMode,
+    readonly group: number,
   ) {
-    this.frames = Math.trunc(pcm.length / channels)
+    this.pos = first
   }
 }
 
@@ -74,10 +187,12 @@ export class VoiceMixer {
   static readonly MAX_VOICES = 8
   static readonly MIN_GATE_MS = 60
   static readonly FADE_MS = 24
-  /** A voice cut short (the same key again, too many, or cut) fades this fast. */
+  /** A voice cut short (the same key again, too many, cut or its mute group) fades this fast. */
   static readonly CHOKE_MS = 3
+  /** VoiceShape's pan's reach either way. */
+  static readonly PAN_MAX = 16
 
-  /** How much faster a sound is read to play [semitones] higher. */
+  /** How much faster a sound is read to play [semitones] (whole or not) higher. */
   static pitchRatio(semitones: number): number {
     return Math.pow(2, semitones / 12)
   }
@@ -91,7 +206,11 @@ export class VoiceMixer {
   private frameCount = 0
   private keySet: ReadonlySet<string> = new Set()
 
-  /** Voices that began in the last render; the same array each time. */
+  /**
+   * Voices that began in the last render; the same array each time. A legato
+   * start that only changed a held voice's pitch is reported too, with its own
+   * tag, at the frame the pitch changed.
+   */
   readonly started: Started[] = []
 
   constructor(
@@ -115,21 +234,32 @@ export class VoiceMixer {
 
   /**
    * Plays [pcm] (16-bit, [channels] interleaved, at [sampleRate]) as voice
-   * [key], [semitones] from its own pitch, until [release]. [tag] comes back
-   * in [started].
+   * [key], [semitones] (plus [shape]'s) from its own pitch, shaped by
+   * [shape], until [release]. [tag] comes back in [started].
    */
-  start(key: string, pcm: Int16Array, channels: number, sampleRate: number, semitones = 0, tag = 0): void {
+  start(
+    key: string,
+    pcm: Int16Array,
+    channels: number,
+    sampleRate: number,
+    semitones = 0,
+    tag = 0,
+    shape: VoiceShape = VoiceShape.DEFAULT,
+  ): void {
     if (!(channels >= 1 && channels <= 2)) throw new Error(`channels: ${channels}`)
-    const step = (sampleRate / this.outRate) * VoiceMixer.pitchRatio(semitones)
-    this.commands.push({ kind: 'start', key, pcm, channels, step, tag })
+    const step = (sampleRate / this.outRate) * VoiceMixer.pitchRatio(semitones + shape.semitones)
+    this.commands.push({ kind: 'start', key, pcm, channels, step, tag, shape })
   }
 
-  /** Lets go of voice [key]: it fades out now, or once it has sounded MIN_GATE_MS. */
+  /**
+   * Lets go of voice [key] (every one of a KEY key): it fades out now, or
+   * once it has sounded MIN_GATE_MS. A ONESHOT voice plays on.
+   */
   release(key: string): void {
     this.commands.push({ kind: 'release', key })
   }
 
-  /** Ends voice [key] now, in CHOKE_MS, even inside its MIN_GATE_MS: the press was a scroll. */
+  /** Ends voice [key] (all of its voices) now, in CHOKE_MS, even inside its MIN_GATE_MS: the press was a scroll. */
   cut(key: string): void {
     this.commands.push({ kind: 'cut', key })
   }
@@ -192,35 +322,80 @@ export class VoiceMixer {
     this.keySet = now
   }
 
-  /** Whether the voices not cut short differ from keys, without building a set (each key has one such voice). */
+  /**
+   * Whether the voices not cut short differ from keys, without building a
+   * set. A KEY key may have several such voices: each key is counted at its
+   * first.
+   */
   private keysChanged(): boolean {
     let n = 0
     for (let i = 0; i < this.voices.length; i++) {
       const v = this.voices[i]!
-      if (v.choked) continue
+      if (v.choked || this.keyBefore(i)) continue
       if (!this.keySet.has(v.key)) return true
       n++
     }
     return n !== this.keySet.size
   }
 
+  /** Whether a voice before [index], not cut short, has its key. */
+  private keyBefore(index: number): boolean {
+    const key = this.voices[index]!.key
+    for (let i = 0; i < index; i++) {
+      const v = this.voices[i]!
+      if (!v.choked && v.key === key) return true
+    }
+    return false
+  }
+
   private apply(c: Command): void {
     switch (c.kind) {
       case 'start': {
         if (c.pcm.length < c.channels) return
-        this.cutKey(c.key)
-        while (this.sounding() >= this.maxVoices) {
-          this.cutShort(this.voices.find((v) => !v.choked && v.fadeAt !== HELD) ?? this.voices.find((v) => !v.choked)!)
+        const shape = c.shape
+        const frames = Math.trunc(c.pcm.length / c.channels)
+        const first = coerceIn(shape.start, 0, frames)
+        const end = coerceIn(shape.end, first, frames)
+        // Trimmed to nothing: as an empty sound.
+        if (end <= first) return
+        if (shape.mode === VoiceMode.LEGATO && this.legato(c)) return
+        if (shape.mode !== VoiceMode.KEY) this.cutKey(c.key)
+        if (shape.muteGroup > 0) {
+          for (const v of this.voices) if (v.group === shape.muteGroup && !v.choked) this.cutShort(v)
         }
-        this.voices.push(new Voice(c.key, c.pcm, c.channels, c.step, this.frameCount))
+        while (this.sounding() >= this.maxVoices) {
+          this.cutShort(this.voices.find((v) => !v.choked && (v.letGo || v.fadeAt !== HELD)) ?? this.voices.find((v) => !v.choked)!)
+        }
+        const max = VoiceMixer.PAN_MAX
+        const pan = coerceIn(shape.pan, -max, max)
+        this.voices.push(
+          new Voice(
+            c.key,
+            c.pcm,
+            c.channels,
+            c.step,
+            this.frameCount,
+            first,
+            end,
+            coerceIn(f(shape.gain), 0, 1),
+            Math.min(1, f((max - pan) / max)),
+            Math.min(1, f((max + pan) / max)),
+            this.framesOf(shape.attackMs),
+            Math.max(this.fade, this.framesOf(shape.releaseMs)),
+            shape.mode,
+            shape.muteGroup,
+          ),
+        )
         this.started.push({ key: c.key, tag: c.tag, frame: this.frameCount })
         return
       }
       case 'release':
         for (const v of this.voices) {
-          if (v.key === c.key && !v.choked && v.fadeAt === HELD) {
+          if (v.key !== c.key || v.choked) continue
+          v.letGo = true
+          if (v.fadeAt === HELD && v.mode !== VoiceMode.ONESHOT) {
             v.fadeAt = Math.max(this.frameCount, v.startFrame + this.minGate)
-            v.fadeFrames = this.fade
+            v.fadeFrames = v.release
           }
         }
         return
@@ -240,12 +415,34 @@ export class VoiceMixer {
     return n
   }
 
-  /** Cuts short the voice of [key], if one sounds. */
+  /**
+   * A legato start: when [c]'s key has a legato voice still held on the same
+   * sound, that voice takes [c]'s pitch where it is (its other voices, if
+   * any, are cut) and true comes back; false when a voice is to start.
+   */
+  private legato(c: Extract<Command, { kind: 'start' }>): boolean {
+    let held: Voice | undefined
+    for (const v of this.voices) {
+      if (v.key === c.key && !v.choked && v.fadeAt === HELD && v.mode === VoiceMode.LEGATO) held = v
+    }
+    if (held === undefined || held.pcm !== c.pcm || held.channels !== c.channels) return false
+    for (const o of this.voices) if (o !== held && o.key === c.key && !o.choked) this.cutShort(o)
+    held.step = c.step
+    this.started.push({ key: c.key, tag: c.tag, frame: this.frameCount })
+    return true
+  }
+
+  /** [ms] in output frames (0 for less than none). */
+  private framesOf(ms: number): number {
+    return Math.min(INT_MAX, Math.trunc((Math.max(0, ms) * this.outRate) / 1000))
+  }
+
+  /** Cuts short the voices of [key], if any sound. */
   private cutKey(key: string): void {
     for (const v of this.voices) if (v.key === key && !v.choked) this.cutShort(v)
   }
 
-  /** Cuts [v] short: from wherever its level is now, down to nothing in CHOKE_MS. */
+  /** Cuts [v] short: from wherever its fade's level is now, down to nothing in CHOKE_MS. */
   private cutShort(v: Voice): void {
     v.choked = true
     const g = gain(v, this.frameCount)
@@ -255,15 +452,17 @@ export class VoiceMixer {
 
   /** Adds [frames] of [v] to the mix; false once it has ended. */
   private play(v: Voice, frames: number): boolean {
-    const last = v.frames - 1
+    const last = v.end - 1
     const pcm = v.pcm
     const ch = v.channels
     const mix = this.mix
     for (let i = 0; i < frames; i++) {
       const p = v.pos
       if (p > last) return false
-      const g = gain(v, this.frameCount + i)
-      if (g <= 0) return false
+      const at = this.frameCount + i
+      const fadeGain = gain(v, at)
+      if (fadeGain <= 0) return false
+      const g = f(f(ramp(v, at) * fadeGain) * v.level)
       const i0 = Math.trunc(p)
       const i1 = Math.min(i0 + 1, last)
       const frac = f(p - i0)
@@ -274,16 +473,28 @@ export class VoiceMixer {
         const r0 = pcm[i0 * 2 + 1]!
         r = f(r0 + f((pcm[i1 * 2 + 1]! - r0) * frac))
       }
-      mix[2 * i] = mix[2 * i]! + f(l * g)
-      mix[2 * i + 1] = mix[2 * i + 1]! + f(r * g)
+      mix[2 * i] = mix[2 * i]! + f(f(l * g) * v.left)
+      mix[2 * i + 1] = mix[2 * i + 1]! + f(f(r * g) * v.right)
       v.pos = p + v.step
     }
     return true
   }
 }
 
+/** The fade's level at output frame [at]: 1 until it starts, then down to 0. */
 function gain(v: Voice, at: number): number {
   return at < v.fadeAt ? 1 : f(1 - f(f(at - v.fadeAt) / v.fadeFrames))
+}
+
+/** The attack's level at output frame [at]: up from 0 to 1 over the voice's attack frames. */
+function ramp(v: Voice, at: number): number {
+  const since = at - v.startFrame
+  return since >= v.attack ? 1 : f(f(since) / f(v.attack))
+}
+
+/** Kotlin's coerceIn: [x] kept within [min]..[max]. */
+function coerceIn(x: number, min: number, max: number): number {
+  return x < min ? min : x > max ? max : x
 }
 
 function clip(x: number): number {

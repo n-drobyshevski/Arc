@@ -184,8 +184,8 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
                 fmtWhen = { if (it == TAKE_AT) "Oct 5, 2:23 PM" else "Oct 4, 9:41 PM" },
                 connected = offline == null,
             ),
-            // The EDIT tab shows where [edit] is given: on or off.
-            edit = if (edit == null) dev.arc.ep133.ui.screens.EditUi() else dev.arc.ep133.ui.screens.EditUi(on = edit, onEdit = {}),
+            // EDIT, SOUND's key, as on the Live tab: on where [edit] says so.
+            edit = dev.arc.ep133.ui.screens.EditUi(on = edit == true, onEdit = {}),
             wireless = wireless,
             functions = functions,
         )
@@ -550,6 +550,70 @@ fun LivePadSheetPreview() {
         }
     }
 }
+
+// EDIT's pad settings: the EP-133's SOUND EDIT pages over the sounds, folded away.
+private val editPcm = ShortArray(46875) { i -> (kotlin.math.sin(i * 0.05) * 30000 * kotlin.math.exp(-i / 9000.0)).toInt().toShort() }
+private val editState = dev.arc.ep133.controller.PadEditState(
+    pad = PhysicalPad(0, 7),
+    target = dev.arc.ep133.features.PadTarget(1, 0, 2, 101),
+    settings = dev.arc.ep133.features.PadSettings(pitch = -2.5, level = 82, pan = -6, mode = dev.arc.ep133.features.PlayMode.KEY, start = 4000, end = 30000, attack = 12, release = 40),
+    frames = editPcm.size.toLong(),
+    peaks = dev.arc.ep133.ui.screens.trimPeaks(editPcm, 1),
+)
+
+@Composable
+private fun PadSettingsSheet(page: dev.arc.ep133.ui.screens.EditPage, dark: Boolean = false, edit: dev.arc.ep133.controller.PadEditState = editState, offline: Boolean = false) {
+    Framed(Tab.LIVE, dark = dark) {
+        MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
+        ArcSheet(visible = true, onDismiss = {}) {
+            PadSheetContent(
+                pad = PhysicalPad(0, 7),
+                target = edit.target,
+                sounds = padSounds,
+                playing = null,
+                busy = false,
+                onPlay = { _, _ -> }, onStop = {}, onPick = { _, _ -> }, onUpload = if (offline) null else ({}),
+                offline = offline,
+                edit = edit,
+                editPage = page,
+            )
+        }
+    }
+}
+
+@PreviewTest
+@Preview(name = "Pad settings sound", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun PadSettingsSoundPreview() = PadSettingsSheet(dev.arc.ep133.ui.screens.EditPage.SOUND)
+
+@PreviewTest
+@Preview(name = "Pad settings trim small", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun PadSettingsTrimSmallPreview() = PadSettingsSheet(dev.arc.ep133.ui.screens.EditPage.TRIM)
+
+@PreviewTest
+@Preview(name = "Pad settings env dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun PadSettingsEnvDarkPreview() = PadSettingsSheet(dev.arc.ep133.ui.screens.EditPage.ENV, dark = true)
+
+// Oneshot plays to the end: release rests, and the page says why.
+@PreviewTest
+@Preview(name = "Pad settings env oneshot", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun PadSettingsEnvOneshotPreview() = PadSettingsSheet(
+    dev.arc.ep133.ui.screens.EditPage.ENV,
+    edit = editState.copy(settings = dev.arc.ep133.features.PadSettings.DEFAULT),
+)
+
+// Offline: the settings change in arc only; the device is still being asked for nothing.
+@PreviewTest
+@Preview(name = "Pad settings offline mute", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun PadSettingsOfflineMutePreview() = PadSettingsSheet(
+    dev.arc.ep133.ui.screens.EditPage.MUTE,
+    edit = editState.copy(offline = true, settings = editState.settings.copy(muteGroup = true)),
+    offline = true,
+)
 
 // The function keys: the click on, TEMPO's light caught on a beat and its label the EP-133's
 // tempo (it sends MIDI clock, which the click follows).

@@ -12,6 +12,8 @@
 
 namespace arc {
 
+static_assert(VoiceShape().releaseMs == VoiceMixer::FADE_MS, "the default release is the fade");
+
 VoiceMixer::VoiceMixer(int outRate, int maxVoices, int maxFrames)
     : maxVoices_(maxVoices < 1 ? 1 : (maxVoices > MAX_KEYS ? MAX_KEYS : maxVoices)),
       maxFrames_(maxFrames < 1 ? 1 : maxFrames),
@@ -36,16 +38,17 @@ bool VoiceMixer::queue(const Command &c) {
     return true;
 }
 
-bool VoiceMixer::start(int32_t key, Sample *sample, int32_t sampleRate, double pitch, int64_t tag) {
+bool VoiceMixer::start(int32_t key, Sample *sample, int32_t sampleRate, double pitch, int64_t tag,
+                       const VoiceShape &shape) {
     if (sample == nullptr || sample->channels < 1 || sample->channels > 2) return false;
-    return queue({Kind::Start, key, sample, static_cast<double>(sampleRate) / outRate_ * pitch, tag});
+    return queue({Kind::Start, key, sample, static_cast<double>(sampleRate) / outRate_ * pitch, tag, shape});
 }
 
-bool VoiceMixer::release(int32_t key) { return queue({Kind::Release, key, nullptr, 0.0, 0}); }
+bool VoiceMixer::release(int32_t key) { return queue({Kind::Release, key, nullptr, 0.0, 0, VoiceShape()}); }
 
-bool VoiceMixer::cut(int32_t key) { return queue({Kind::Cut, key, nullptr, 0.0, 0}); }
+bool VoiceMixer::cut(int32_t key) { return queue({Kind::Cut, key, nullptr, 0.0, 0, VoiceShape()}); }
 
-bool VoiceMixer::stopAll() { return queue({Kind::StopAll, 0, nullptr, 0.0, 0}); }
+bool VoiceMixer::stopAll() { return queue({Kind::StopAll, 0, nullptr, 0.0, 0, VoiceShape()}); }
 
 void VoiceMixer::render(int16_t *out, int frames) {
     if (frames > maxFrames_) frames = maxFrames_;
@@ -97,18 +100,28 @@ void VoiceMixer::reset(int outRate) {
     setRate(outRate);
 }
 
-// Whether the voices not cut short differ from [keys] (each key has one such voice).
+// Whether the voices not cut short differ from [keys]. A Key-mode key may have
+// several such voices: each key is counted at its first.
 bool VoiceMixer::keysChanged() const {
     int n = 0;
     for (int i = 0; i < voiceCount_; i++) {
         const Voice &v = voices_[i];
-        if (v.choked) continue;
+        if (v.choked || keyBefore(i)) continue;
         bool known = false;
         for (int k = 0; k < keyCount_ && !known; k++) known = keys_[k] == v.key;
         if (!known) return true;
         n++;
     }
     return n != keyCount_;
+}
+
+// Whether a voice before [index], not cut short, has its key.
+bool VoiceMixer::keyBefore(int index) const {
+    const int32_t key = voices_[index].key;
+    for (int i = 0; i < index; i++) {
+        if (!voices_[i].choked && voices_[i].key == key) return true;
+    }
+    return false;
 }
 
 void VoiceMixer::removeVoice(int index) {
@@ -121,7 +134,20 @@ void VoiceMixer::apply(const Command &c) {
     switch (c.kind) {
         case Kind::Start: {
             if (c.sample->frames < 1) return;
-            cutKey(c.key);
+            const VoiceShape &shape = c.shape;
+            const int32_t frames = c.sample->frames;
+            const int32_t first = shape.start < 0 ? 0 : (shape.start > frames ? frames : shape.start);
+            const int32_t end = shape.end < first ? first : (shape.end > frames ? frames : shape.end);
+            // Trimmed to nothing: as an empty sound.
+            if (end <= first) return;
+            if (shape.mode == static_cast<int32_t>(VoiceMode::Legato) && legato(c)) return;
+            if (shape.mode != static_cast<int32_t>(VoiceMode::Key)) cutKey(c.key);
+            if (shape.muteGroup > 0) {
+                for (int i = 0; i < voiceCount_; i++) {
+                    Voice &v = voices_[i];
+                    if (v.group == shape.muteGroup && !v.choked) cutVoice(v);
+                }
+            }
             while (true) {
                 int held = 0;
                 int firstLetGo = -1;
@@ -131,7 +157,7 @@ void VoiceMixer::apply(const Command &c) {
                     if (v.choked) continue;
                     held++;
                     if (first < 0) first = i;
-                    if (firstLetGo < 0 && v.fadeAt != INT64_MAX) firstLetGo = i;
+                    if (firstLetGo < 0 && (v.letGo || v.fadeAt != INT64_MAX)) firstLetGo = i;
                 }
                 if (held < maxVoices_) break;
                 cutVoice(voices_[firstLetGo >= 0 ? firstLetGo : first]);
@@ -145,7 +171,28 @@ void VoiceMixer::apply(const Command &c) {
                 if (oldest < 0) return;
                 removeVoice(oldest);
             }
-            voices_[voiceCount_++] = {c.key, c.sample, c.sample->frames, c.step, frame_, 0.0, INT64_MAX, 1, false};
+            const int32_t pan = shape.pan < -PAN_MAX ? -PAN_MAX : (shape.pan > PAN_MAX ? PAN_MAX : shape.pan);
+            const float level = shape.gain < 0.0f ? 0.0f : (shape.gain > 1.0f ? 1.0f : shape.gain);
+            const float left = static_cast<float>(PAN_MAX - pan) / static_cast<float>(PAN_MAX);
+            const float right = static_cast<float>(PAN_MAX + pan) / static_cast<float>(PAN_MAX);
+            const int32_t release = framesOf(shape.releaseMs);
+            voices_[voiceCount_++] = {c.key,
+                                      c.sample,
+                                      end,
+                                      c.step,
+                                      frame_,
+                                      level,
+                                      left < 1.0f ? left : 1.0f,
+                                      right < 1.0f ? right : 1.0f,
+                                      framesOf(shape.attackMs),
+                                      release > fade_ ? release : fade_,
+                                      shape.mode,
+                                      shape.muteGroup,
+                                      static_cast<double>(first),
+                                      INT64_MAX,
+                                      1,
+                                      false,
+                                      false};
             c.sample->voices++;
             if (startedCount_ < MAX_STARTED) started_[startedCount_++] = {c.key, c.tag, frame_};
             return;
@@ -153,10 +200,13 @@ void VoiceMixer::apply(const Command &c) {
         case Kind::Release:
             for (int i = 0; i < voiceCount_; i++) {
                 Voice &v = voices_[i];
-                if (v.key != c.key || v.choked || v.fadeAt != INT64_MAX) continue;
+                if (v.key != c.key || v.choked) continue;
+                v.letGo = true;
+                if (v.fadeAt != INT64_MAX) continue;
+                if (v.mode == static_cast<int32_t>(VoiceMode::OneShot)) continue;
                 const int64_t gateEnd = v.startFrame + minGate_;
                 v.fadeAt = frame_ > gateEnd ? frame_ : gateEnd;
-                v.fadeFrames = fade_;
+                v.fadeFrames = v.release;
             }
             return;
         case Kind::Cut:
@@ -170,7 +220,34 @@ void VoiceMixer::apply(const Command &c) {
     }
 }
 
-// Cuts short the voice of [key], if one sounds.
+// A legato start: when [c]'s key has a legato voice still held on the same
+// sound, that voice takes [c]'s pitch where it is (its other voices, if any,
+// are cut) and true comes back; false when a voice is to start.
+bool VoiceMixer::legato(const Command &c) {
+    int held = -1;
+    for (int i = 0; i < voiceCount_; i++) {
+        const Voice &v = voices_[i];
+        if (v.key == c.key && !v.choked && v.fadeAt == INT64_MAX && v.mode == static_cast<int32_t>(VoiceMode::Legato)) {
+            held = i;
+        }
+    }
+    if (held < 0 || voices_[held].sample != c.sample) return false;
+    for (int i = 0; i < voiceCount_; i++) {
+        Voice &o = voices_[i];
+        if (i != held && o.key == c.key && !o.choked) cutVoice(o);
+    }
+    voices_[held].step = c.step;
+    if (startedCount_ < MAX_STARTED) started_[startedCount_++] = {c.key, c.tag, frame_};
+    return true;
+}
+
+// [ms] in output frames (0 for less than none).
+int32_t VoiceMixer::framesOf(int32_t ms) const {
+    const int64_t f = static_cast<int64_t>(ms > 0 ? ms : 0) * outRate_ / 1000;
+    return f < INT32_MAX ? static_cast<int32_t>(f) : INT32_MAX;
+}
+
+// Cuts short the voices of [key], if any sound.
 void VoiceMixer::cutKey(int32_t key) {
     for (int i = 0; i < voiceCount_; i++) {
         Voice &v = voices_[i];
@@ -178,7 +255,7 @@ void VoiceMixer::cutKey(int32_t key) {
     }
 }
 
-// Cuts [v] short: from wherever its level is now, down to nothing in CHOKE_MS.
+// Cuts [v] short: from wherever its fade's level is now, down to nothing in CHOKE_MS.
 void VoiceMixer::cutVoice(Voice &v) {
     v.choked = true;
     const float g = gain(v, frame_);
@@ -186,21 +263,29 @@ void VoiceMixer::cutVoice(Voice &v) {
     v.fadeAt = frame_ - static_cast<int64_t>((1.0f - g) * static_cast<float>(choke_));
 }
 
+// The fade's level at output frame [at]: 1 until it starts, then down to 0.
 float VoiceMixer::gain(const Voice &v, int64_t at) const {
     return at < v.fadeAt ? 1.0f : 1.0f - static_cast<float>(at - v.fadeAt) / static_cast<float>(v.fadeFrames);
 }
 
+// The attack's level at output frame [at]: up from 0 to 1 over [attack] frames.
+float VoiceMixer::ramp(const Voice &v, int64_t at) const {
+    const int64_t since = at - v.startFrame;
+    return since >= v.attack ? 1.0f : static_cast<float>(since) / static_cast<float>(v.attack);
+}
+
 // Adds [frames] of [v] to the mix; false once it has ended.
 bool VoiceMixer::play(Voice &v, int frames) {
-    const int32_t last = v.frames - 1;
+    const int32_t last = v.end - 1;
     const int16_t *pcm = v.sample->pcm;
     const int32_t ch = v.sample->channels;
     for (int i = 0; i < frames; i++) {
         const double p = v.pos;
         if (p > last) return false;
         const int64_t at = frame_ + i;
-        const float g = gain(v, at);
-        if (g <= 0.0f) return false;
+        const float fadeGain = gain(v, at);
+        if (fadeGain <= 0.0f) return false;
+        const float g = ramp(v, at) * fadeGain * v.level;
         const int32_t i0 = static_cast<int32_t>(p);
         const int32_t i1 = i0 + 1 < last ? i0 + 1 : last;
         const float frac = static_cast<float>(p - i0);
@@ -213,8 +298,8 @@ bool VoiceMixer::play(Voice &v, int frames) {
         } else {
             r = l;
         }
-        mix_[2 * i] += l * g;
-        mix_[2 * i + 1] += r * g;
+        mix_[2 * i] += l * g * v.left;
+        mix_[2 * i + 1] += r * g * v.right;
         v.pos = p + v.step;
     }
     return true;

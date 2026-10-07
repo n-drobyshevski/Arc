@@ -3,6 +3,7 @@ package dev.arc.ep133.audio
 import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import dev.arc.ep133.formats.VoiceMixer
+import dev.arc.ep133.formats.VoiceShape
 import dev.arc.ep133.text.LatencyText
 import java.util.concurrent.locks.LockSupport
 
@@ -116,13 +117,18 @@ internal class NativeLiveOutput private constructor(
     }
 
     @Synchronized
-    override fun start(key: String, pcm: ShortArray, channels: Int, sampleRate: Int, semitones: Int, tag: Long): Boolean {
+    override fun start(key: String, pcm: ShortArray, channels: Int, sampleRate: Int, semitones: Int, tag: Long, shape: VoiceShape): Boolean {
         require(channels in 1..2) { "channels: $channels" }
         if (closed) return false
         // Nothing to play, as the Kotlin mixer takes it.
         if (pcm.size < channels) return true
         val slot = samples.slot(pcm, channels) ?: return false
-        return NativeAudio.start(handle, keyIds.id(key), slot, sampleRate, VoiceMixer.pitchRatio(semitones), tag)
+        // The shape's semitones go into the pitch here, as the Kotlin mixer's start adds them.
+        val pitch = VoiceMixer.pitchRatio(semitones + shape.semitones)
+        return NativeAudio.start(
+            handle, keyIds.id(key), slot, sampleRate, pitch, tag,
+            shape.gain, shape.pan, shape.start, shape.end, shape.attackMs, shape.releaseMs, shape.mode.ordinal, shape.muteGroup,
+        )
     }
 
     @Synchronized

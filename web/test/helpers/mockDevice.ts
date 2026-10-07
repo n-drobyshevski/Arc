@@ -11,9 +11,12 @@
 // is set synchronously after the reply (Kotlin), not in a queueMicrotask (JS).
 // A pad's `sym` write lands in its project's pad record, as Live's EDIT
 // expects of the device (community notes; see device.assignPad), so ?demo
-// shows a changed pad after the next read.
+// shows a changed pad after the next read. Each pad file of a project the
+// mock holds also has metadata ([padMeta]): {"sym":0} until written, merged
+// into by every SET, which is refused (status 1) when `sound.playmode` or
+// `time.mode` isn't a string, as the device does (see device.writePadSettings).
 
-import { fid as padFid } from '../../src/core/features/padPush'
+import { fid as padFid, node as padNode } from '../../src/core/features/padPush'
 import { crc32 } from '../../src/core/formats/crc32'
 import { readTar } from '../../src/core/formats/tar'
 import { be16, be32, decodeFrame, readBe16, readBe32, u14le, type Frame } from '../../src/core/protocol/frame'
@@ -108,6 +111,8 @@ export class MockEP133 {
   readonly sounds = new Map<number, StoredSound>()
   readonly projects = new Map<number, Uint8Array>()
   readonly projectsMeta: Json = {}
+  /** Pad file node to the metadata written to it; a pad not here reads {"sym":0}. */
+  private readonly padsMeta = new Map<number, Json>()
   deviceId = 0x33
   needsInit = false
   dropped = 0
@@ -301,7 +306,19 @@ export class MockEP133 {
   private metaFor(node: number): Json | null {
     if (node === 1000) return { max_capacity: this.capacity, free_space_in_bytes: this.capacity - this.used }
     if (node === 2000) return this.projectsMeta
-    return this.sounds.get(node)?.meta ?? null
+    const s = this.sounds.get(node)
+    if (s) return s.meta
+    const fid = padFid(node)
+    return fid === null ? null : this.padMeta(fid.project, fid.group, fid.pad)
+  }
+
+  /**
+   * What a GET of that pad's file returns: what was written to it, or
+   * {"sym":0} if nothing was; null when the mock has no such project.
+   */
+  padMeta(project: number, group: number, pad: number): Json | null {
+    if (!this.projects.has(project)) return null
+    return this.padsMeta.get(padNode({ project, group, pad })) ?? { sym: 0 }
   }
 
   private getMeta(f: Frame, node: number, page: number): void {
@@ -326,9 +343,29 @@ export class MockEP133 {
     else {
       const s = this.sounds.get(node)
       if (s) putAll(s.meta, obj)
-      else if (padFid(node) === null || !this.setPadSym(node, obj)) return this.reply(f, 1)
+      else if (padFid(node) === null || !this.setPad(node, obj)) return this.reply(f, 1)
     }
     this.reply(f, 0)
+  }
+
+  /**
+   * A SET on a pad's file: refused with a play or time mode that isn't a
+   * string, else merged into its metadata, and "sym" goes into the record.
+   */
+  private setPad(node: number, patch: Json): boolean {
+    for (const k of ['sound.playmode', 'time.mode']) {
+      if (Object.prototype.hasOwnProperty.call(patch, k) && typeof patch[k] !== 'string') return false
+    }
+    if (!this.setPadSym(node, patch)) return false
+    const fid = padFid(node)
+    if (fid === null) return false
+    let meta = this.padsMeta.get(node)
+    if (!meta) {
+      meta = { ...this.padMeta(fid.project, fid.group, fid.pad) }
+      this.padsMeta.set(node, meta)
+    }
+    putAll(meta, patch)
+    return true
   }
 
   /** A pad's "sym" becomes the slot in its record (pads/<group>/pNN, bytes 1-2), added if the project has none. */

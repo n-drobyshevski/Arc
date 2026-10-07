@@ -4,6 +4,7 @@ import { DiffResult, ProjectDiff, ProjectState, SoundDiff, SoundState } from '..
 import { NoteNames, SCALES } from '../../../src/core/features/keys'
 import { KeyMark } from '../../../src/core/features/piano'
 import { physicalPad } from '../../../src/core/features/padNotes'
+import { PLAY_MODES } from '../../../src/core/features/padSettings'
 import { ProjectSource } from '../../../src/core/features/projectStep'
 import { CoachText } from '../../../src/core/text/coachText'
 import { FeatureText } from '../../../src/core/text/featureText'
@@ -114,6 +115,24 @@ describe('FeatureTextTest', () => {
     expect(MirrorText.offlineWritten(1, 1)).toBe('1 pad put on the EP-133. 1 skipped: the EP-133 has another sound or project there now.')
   })
 
+  it('pad settings text', () => {
+    expect([0, 1, 2, 3, 4].map((i) => MirrorText.pageName(i))).toEqual(['Sound', 'Trim', 'Env', 'Midi', 'Mute'])
+    expect(MirrorText.MUTE_GROUP.toUpperCase()).toBe('MUTE GROUP')
+    expect([1.5, -12.0, 0.0, 0.25, -0.0701, -0.004, 12.0].map((p) => MirrorText.pitchLabel(p))).toEqual(['+1.5', '-12', '0', '+0.25', '-0.07', '0', '+12'])
+    expect(MirrorText.levelLabel(100)).toBe('100')
+    expect([-16, -8, 0, 1, 16].map((p) => MirrorText.panLabel(p))).toEqual(['L16', 'L8', 'C', 'R1', 'R16'])
+    expect(PLAY_MODES.map((m) => MirrorText.modeLabel(m))).toEqual(['Oneshot', 'Key', 'Legato'])
+    expect(MirrorText.secondsLabel(11719, 46875.0)).toBe('0.25 s')
+    expect(MirrorText.secondsLabel(46875, 46875.0)).toBe('1.00 s')
+    expect(MirrorText.secondsLabel(100, 0.0)).toBe('0.00 s')
+    expect(MirrorText.envLabel(255)).toBe('255')
+    expect([0, 15].map((c) => MirrorText.channelLabel(c))).toEqual(['1', '16'])
+    expect([true, false].map((o) => MirrorText.onOff(o))).toEqual(['On', 'Off'])
+    expect(MirrorText.knobDescription(MirrorText.PITCH, MirrorText.pitchLabel(1.5))).toBe('Pitch: +1.5.')
+    expect(MirrorText.trimDescription(1200, 46875)).toBe('Plays 46875 frames from frame 1200.')
+    expect(MirrorText.padSettingsFailed('timeout')).toBe("The pad's settings couldn't be changed: timeout")
+  })
+
   it('function keys and offline notes', () => {
     expect(MirrorText.FN_PROJECT_SUB).toBe('1\u20139')
     expect(MirrorText.projectKeyState(3, ProjectSource.DEVICE)).toBe('Project 3')
@@ -137,6 +156,8 @@ describe('FeatureTextTest', () => {
     expect(CoachText.PROJECT).toBe('Next project: tap; hold + pad 1–9 to pick')
     expect(MirrorText.projectChoice(3, true)).toBe('Project 3, shown')
     expect(MirrorText.projectChoice(4, false)).toBe('Project 4')
+    expect(MirrorText.FN_SOUND).toBe('Sound')
+    expect(MirrorText.SOUND_SHEET).toBe("Pad's sound")
     expect(CoachText.TEMPO).toBe('Click: tap; hold for tempo')
   })
 })

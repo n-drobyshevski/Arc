@@ -35,6 +35,11 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -53,6 +58,7 @@ import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.ui.components.ArcField
 import dev.arc.ep133.ui.components.ArcIcon
 import dev.arc.ep133.ui.components.ArcKey
+import dev.arc.ep133.ui.components.KeyStyle
 import dev.arc.ep133.ui.components.LocalHwColors
 import dev.arc.ep133.ui.components.OneLine
 import dev.arc.ep133.ui.components.PlayKey
@@ -82,6 +88,11 @@ import dev.arc.ep133.ui.theme.LocalArcColors
  * the one that marks it ON PAD. [readSlot] is the pad's sound in the read,
  * never dimmed: picking it takes the pad's change back. [localName] names
  * the pad's offline sound when its list is gone (the pack deleted).
+ *
+ * A pad with a sound shows its settings first ([edit], the EP-133's SOUND
+ * EDIT pages: [PadEditPages]), each turn going to [onEdit]; the list of
+ * sounds then folds away under "Change sound". The pad's cap plays the pad
+ * while held ([onPadDown], [onPadUp]), as a pad does, with its settings.
  */
 @Composable
 fun ColumnScope.PadSheetContent(
@@ -100,6 +111,12 @@ fun ColumnScope.PadSheetContent(
     offline: Boolean = false,
     readSlot: Int? = null,
     localName: String? = null,
+    edit: dev.arc.ep133.controller.PadEditState? = null,
+    onEdit: (dev.arc.ep133.features.PadSettings) -> Unit = {},
+    haptics: Boolean = false,
+    editPage: EditPage = EditPage.SOUND,
+    onPadDown: (() -> Unit)? = null,
+    onPadUp: () -> Unit = {},
 ) {
     val c = LocalArcColors.current
     val now = target.slot
@@ -124,12 +141,49 @@ fun ColumnScope.PadSheetContent(
         ?: groups.firstOrNull()
 
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-        PadCap(pad, nowName)
+        PadCap(pad, nowName, onPadDown, onPadUp)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(MirrorText.padTitle(pad), style = ArcType.heading, color = c.ink)
             Text(MirrorText.padSheetLine(target.project, now, nowName), style = ArcType.small, color = c.graphite)
         }
     }
+    val editing = edit != null && now != null
+    if (editing) {
+        PadEditPages(
+            settings = edit!!.settings,
+            onChange = onEdit,
+            onDone = {},
+            frames = edit.frames,
+            sampleRate = edit.sampleRate,
+            peaks = edit.peaks,
+            haptics = haptics,
+            enabled = !edit.reading && !edit.failed,
+            initialPage = editPage,
+        )
+        Text(
+            when {
+                edit.reading -> MirrorText.PAD_READING
+                edit.failed -> MirrorText.PAD_READ_FAILED
+                offline -> MirrorText.PAD_SETTINGS_OFFLINE
+                else -> MirrorText.PAD_SETTINGS_NOTE
+            },
+            style = ArcType.small,
+            color = c.graphite,
+        )
+    }
+    // With the settings shown, the sounds fold away until asked for. Only a choice made is kept:
+    // the settings arrive a frame after the sheet opens.
+    var listChoice by rememberSaveable(pad) { mutableStateOf<Boolean?>(null) }
+    val listOpen = listChoice ?: !editing
+    if (editing) {
+        ArcKey(
+            if (listOpen) MirrorText.HIDE_SOUNDS else MirrorText.CHANGE_SOUND,
+            { listChoice = !listOpen },
+            Modifier.fillMaxWidth(),
+            style = KeyStyle.Quiet,
+        )
+    }
+    if (!listOpen) return
     if (switch) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(MirrorText.SOURCE, style = ArcType.small, color = c.graphite)
@@ -181,16 +235,45 @@ fun ColumnScope.PadSheetContent(
     if (onUpload != null) ArcKey(MirrorText.UPLOAD_NEW, onUpload, Modifier.fillMaxWidth(), enabled = !busy, textColor = c.navy)
 }
 
-/** The pad itself, small: its label top left and the sound on it at the foot, as on the grid. */
+/**
+ * The pad itself, small: its label top left and the sound on it at the foot,
+ * as on the grid. With [onDown] it plays the pad while held, its face going
+ * down as a pad's does; otherwise it is only a picture (screen readers have
+ * the title beside it).
+ */
 @Composable
-private fun PadCap(pad: PhysicalPad, name: String?) {
+private fun PadCap(pad: PhysicalPad, name: String?, onDown: (() -> Unit)? = null, onUp: () -> Unit = {}) {
     val hw = LocalHwColors.current
+    var pressed by remember { mutableStateOf(false) }
     Box(
         Modifier
             .size(64.dp)
-            // A picture of the pad, not a control: screen readers have the title beside it.
-            .clearAndSetSemantics {}
-            .cap(hw.darkFace, hw.darkEdge, RoundedCornerShape(8.dp), 0f)
+            .then(
+                if (onDown == null) {
+                    Modifier.clearAndSetSemantics {}
+                } else {
+                    Modifier
+                        .pointerInput(onDown) {
+                            detectTapGestures(onPress = {
+                                pressed = true
+                                onDown()
+                                tryAwaitRelease()
+                                pressed = false
+                                onUp()
+                            })
+                        }
+                        .clearAndSetSemantics {
+                            role = Role.Button
+                            contentDescription = FeatureText.play(name ?: pad.label)
+                            onClick {
+                                onDown()
+                                onUp()
+                                true
+                            }
+                        }
+                },
+            )
+            .cap(hw.darkFace, hw.darkEdge, RoundedCornerShape(8.dp), capPress(pressed))
             .padding(start = 8.dp, top = 6.dp, end = 6.dp, bottom = 6.dp),
     ) {
         Text(

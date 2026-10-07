@@ -20,8 +20,18 @@ data class DeviceContents(val storage: Storage, val sounds: List<SoundEntry>, va
     val occupiedSlots: Set<Int> get() = sounds.mapTo(HashSet()) { it.slot }
 }
 
+/**
+ * A project's sounds ([slots]) and pads, from one download; [settings] are
+ * the pads' SOUND EDIT settings where their records look like settings
+ * (ProjectPads.settings; an addition).
+ */
+data class ProjectLayout(
+    val slots: List<Int>,
+    val pads: List<PadGroup>,
+    val settings: Map<Pair<String, Int>, PadSettings> = emptyMap(),
+)
+
 /** One sound's metadata as the device reports it. */
-data class ProjectLayout(val slots: List<Int>, val pads: List<PadGroup>)
 
 data class SoundDetails(
     val slot: Int,
@@ -71,7 +81,7 @@ object DeviceBrowser {
     /** The sounds a project uses and its pads, from one download. */
     suspend fun projectLayout(session: Session, project: Int, signal: CancelSignal? = null): ProjectLayout {
         val tar = Device.readProject(session, project, signal = signal)
-        return ProjectLayout(Tar.slotsUsedByProject(tar), ProjectPads.read(tar))
+        return ProjectLayout(Tar.slotsUsedByProject(tar), ProjectPads.read(tar), ProjectPads.settings(tar))
     }
 
     /**

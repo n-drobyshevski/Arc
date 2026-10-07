@@ -78,8 +78,28 @@ internal object NativeAudio {
     /** Empties [slot]; voices playing its sound play on, and its memory goes once they end. */
     @JvmStatic external fun unload(handle: Long, slot: Int): Boolean
 
-    /** Starts voice [key] on [slot]'s sound, read at [sampleRate] and [pitch] times faster; [tag] comes back with STARTED. */
-    @JvmStatic external fun start(handle: Long, key: Int, slot: Int, sampleRate: Int, pitch: Double, tag: Long): Boolean
+    /**
+     * Starts voice [key] on [slot]'s sound, read at [sampleRate] and [pitch]
+     * times faster; [tag] comes back with STARTED. The rest is the voice's
+     * [dev.arc.ep133.formats.VoiceShape] field by field, less its semitones
+     * (in [pitch] already), the mode by its ordinal.
+     */
+    @JvmStatic external fun start(
+        handle: Long,
+        key: Int,
+        slot: Int,
+        sampleRate: Int,
+        pitch: Double,
+        tag: Long,
+        gain: Float,
+        pan: Int,
+        start: Int,
+        end: Int,
+        attackMs: Int,
+        releaseMs: Int,
+        mode: Int,
+        muteGroup: Int,
+    ): Boolean
 
     @JvmStatic external fun release(handle: Long, key: Int): Boolean
 

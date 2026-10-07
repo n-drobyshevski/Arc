@@ -7,6 +7,7 @@
 //   pads       zero-byte files under each project: 3200 + (N-1)*1000 + group*100 + pad (padPush.node)
 
 import { node as padNode } from '../features/padPush'
+import { toMeta, type PadSettings } from '../features/padSettings'
 import { crc32 } from '../formats/crc32'
 import { DeviceError } from './errors'
 import {
@@ -301,6 +302,42 @@ export function padPatch(slot: number): JsonObject {
 export async function assignPad(session: Session, project: number, group: number, pad: number, slot: number): Promise<void> {
   const node = padNode({ project, group, pad })
   await setMetadata(session, node, padPatch(slot))
+}
+
+/**
+ * The metadata of [pad] (1..12, its number in the project file) of [group]
+ * (0..3 = A..D) in [project], where the device keeps the pad's SOUND EDIT
+ * settings (an addition; read with PadSettings.fromMeta): a METADATA GET on
+ * the pad's file. Community notes, not the official guide:
+ * ZacharySBrown/ep133-ppak PROTOCOL.md and wil-gerard/ep133-mcp
+ * docs/research/pad-params-proof.md (hardware-checked on OS 2.5.1). A pad
+ * never written may read little more than `{"sym":0}` (PadSettings.written);
+ * a pad the device doesn't have reads `{}`.
+ */
+export async function readPad(session: Session, project: number, group: number, pad: number): Promise<JsonObject> {
+  return asObject(await getMetadata(session, padNode({ project, group, pad })))
+}
+
+/**
+ * Gives [pad] of [group] in [project] the SOUND EDIT [settings], with sample
+ * [slot] on it (an addition): a METADATA SET of PadSettings.toMeta on the
+ * pad's file, [frames] being the sample's length when known (for the trim).
+ * Always the full record, `sym` included: per the notes in [readPad], a
+ * partial write can make the device re-sync every field from the sample and
+ * drop the pad's other settings, and the play and time modes go as strings,
+ * or the device refuses the write (status 1).
+ */
+export async function writePadSettings(
+  session: Session,
+  project: number,
+  group: number,
+  pad: number,
+  slot: number,
+  settings: PadSettings,
+  frames: number | null,
+): Promise<void> {
+  const node = padNode({ project, group, pad })
+  await setMetadata(session, node, toMeta(settings, slot, frames))
 }
 
 /** Upload a project TAR and make the device reload it. */
