@@ -33,10 +33,12 @@ sealed interface SamplePhase {
  * start and end at exact frames. It ends when stopped at a frame, at
  * [maxFrames], at the scheduled end, or when cancelled or the input is lost.
  *
- * The last [preRollFrames] frames (20 ms) are always kept, so a take that
- * waits for the threshold still has the attack that crossed it, and one armed
- * a moment late (a press time the input has already passed) starts where it
- * was asked to, or at a threshold those frames already crossed.
+ * The last [keptFrames] frames are always kept (at least [preRollFrames],
+ * 20 ms), so a take that waits for the threshold still has the
+ * [preRollFrames] of attack before it crossed, and one armed late (a press
+ * time the input has already passed, as when the press reaches the input
+ * after its frames do) starts where it was asked to, or at a threshold those
+ * frames already crossed.
  *
  * Only the input's thread calls it, and it allocates nothing after it is
  * built but the [Event.Started] of each take: the take's buffer is the full
@@ -44,10 +46,17 @@ sealed interface SamplePhase {
  * floor(x + 0.5) and stereo mixes down with shr, so the web's port gives the
  * same samples.
  */
-class SampleCapture(val rate: Int, val channels: Int, val maxFrames: Int, val preRollFrames: Int = rate / 50) {
+class SampleCapture(
+    val rate: Int,
+    val channels: Int,
+    val maxFrames: Int,
+    val preRollFrames: Int = rate / 50,
+    val keptFrames: Int = preRollFrames,
+) {
     init {
         require(channels == 1 || channels == 2) { "a take is mono or stereo, not $channels channels" }
         require(maxFrames >= 0 && preRollFrames >= 0) { "no take of $maxFrames frames with $preRollFrames before it" }
+        require(keptFrames >= preRollFrames) { "$keptFrames frames kept can't hold $preRollFrames before a take" }
     }
 
     enum class State { IDLE, ARMED, SCHEDULED, RECORDING, DONE }
@@ -71,11 +80,11 @@ class SampleCapture(val rate: Int, val channels: Int, val maxFrames: Int, val pr
 
     // The last frames fed, converted, oldest first from ringHead - ringCount;
     // the newest is the frame before nextFrame.
-    private val ring = ShortArray(preRollFrames * channels)
+    private val ring = ShortArray(keptFrames * channels)
 
     // The loudest sample of each frame in the ring, after gain, before mixing
     // down: what the threshold is checked against.
-    private val ringPeak = IntArray(preRollFrames)
+    private val ringPeak = IntArray(keptFrames)
     private var ringHead = 0
     private var ringCount = 0
 
@@ -120,7 +129,8 @@ class SampleCapture(val rate: Int, val channels: Int, val maxFrames: Int, val pr
      * Waits for a take that starts at [fromFrame], or with a [threshold] (a
      * level 0..1 of full scale, after [gain]) when the input first reaches it
      * at or after [fromFrame], [preRollFrames] earlier. Either start reaches
-     * back only as far as frames were fed, and never before [fromFrame].
+     * back only as far as the frames fed and kept ([keptFrames]), and never
+     * before [fromFrame].
      * Forgets any take before it.
      */
     fun arm(fromFrame: Long, threshold: Float?) {
@@ -296,7 +306,7 @@ class SampleCapture(val rate: Int, val channels: Int, val maxFrames: Int, val pr
                 buffer[o] = 0
                 if (channels == 2) buffer[o + 1] = 0
             } else {
-                val r = ((ringHead - back.toInt() + preRollFrames) % preRollFrames) * channels
+                val r = ((ringHead - back.toInt() + keptFrames) % keptFrames) * channels
                 buffer[o] = ring[r]
                 if (channels == 2) buffer[o + 1] = ring[r + 1]
             }
@@ -355,14 +365,14 @@ class SampleCapture(val rate: Int, val channels: Int, val maxFrames: Int, val pr
     private fun ringCrossing(from: Long, ringEnd: Long, level: Double): Long {
         for (f in maxOf(from, ringEnd - ringCount) until ringEnd) {
             val back = (ringEnd - f).toInt()
-            if (ringPeak[(ringHead - back + preRollFrames) % preRollFrames] >= level) return f
+            if (ringPeak[(ringHead - back + keptFrames) % keptFrames] >= level) return f
         }
         return NONE
     }
 
     // Keeps the last of the [n] frames just run in the ring.
     private fun remember(src: ShortArray?, offset: Int, inChannels: Int, n: Long, g: Double) {
-        val m = minOf(n, preRollFrames.toLong()).toInt()
+        val m = minOf(n, keptFrames.toLong()).toInt()
         for (k in n - m until n) {
             val i = offset + k.toInt() * inChannels
             convert(src, i, inChannels, g, ring, ringHead * channels)
@@ -371,9 +381,9 @@ class SampleCapture(val rate: Int, val channels: Int, val maxFrames: Int, val pr
                 inChannels == 1 -> abs(gained(src[i], g))
                 else -> maxOf(abs(gained(src[i], g)), abs(gained(src[i + 1], g)))
             }
-            ringHead = (ringHead + 1) % preRollFrames
+            ringHead = (ringHead + 1) % keptFrames
         }
-        ringCount = minOf(ringCount + m, preRollFrames)
+        ringCount = minOf(ringCount + m, keptFrames)
     }
 
     // One input frame at sample [i] of [src] (silence when null), as a frame of the take at [o] of [dst].

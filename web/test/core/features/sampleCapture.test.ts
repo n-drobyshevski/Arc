@@ -105,6 +105,26 @@ describe('SampleCaptureTest', () => {
     expect(from.take()[10]).toBe(20000)
   })
 
+  it('frames kept beyond the pre-roll reach a late press, and the threshold still keeps only the pre-roll', () => {
+    // 100 frames kept, 20 of pre-roll: a press 70 frames back is still there.
+    const late = new SampleCapture(1000, 1, 1000, 20, 100)
+    feed(late, 0, 100)
+    late.arm(30, null)
+    expect(feed(late, 100, 100)).toEqual(Started(30))
+    expect(first(late.take())).toBe(30)
+    expect(late.frames).toBe(170)
+
+    // A crossing already fed after the press is found, with 20 frames before it.
+    const thr = new SampleCapture(1000, 1, 1000, 20, 100)
+    feed(thr, 0, 100, 60)
+    thr.arm(10, 0.5)
+    expect(feed(thr, 100, 100)).toEqual(Started(40))
+    expect(first(thr.take())).toBe(40)
+    expect(thr.take()[20]).toBe(20000)
+
+    expect(() => new SampleCapture(1000, 1, 1000, 20, 10)).toThrow(RangeError)
+  })
+
   it('a stop inside a later block keeps exactly the frames before it', () => {
     const c = capture()
     c.arm(0, null)

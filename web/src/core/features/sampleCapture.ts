@@ -8,10 +8,12 @@
 // start and end at exact frames. It ends when stopped at a frame, at
 // [maxFrames], at the scheduled end, or when cancelled or the input is lost.
 //
-// The last [preRollFrames] frames (20 ms) are always kept, so a take that
-// waits for the threshold still has the attack that crossed it, and one armed
-// a moment late (a press time the input has already passed) starts where it
-// was asked to, or at a threshold those frames already crossed.
+// The last [keptFrames] frames are always kept (at least [preRollFrames],
+// 20 ms), so a take that waits for the threshold still has the
+// [preRollFrames] of attack before it crossed, and one armed late (a press
+// time the input has already passed, as when the press reaches the input
+// after its frames do) starts where it was asked to, or at a threshold those
+// frames already crossed.
 //
 // Only the input's callback calls it, and it allocates nothing after it is
 // built but the Started event of each take: the take's buffer is the full
@@ -130,12 +132,14 @@ export class SampleCapture {
     readonly channels: number,
     readonly maxFrames: number,
     readonly preRollFrames: number = Math.trunc(rate / 50),
+    readonly keptFrames: number = preRollFrames,
   ) {
     if (channels !== 1 && channels !== 2) throw new RangeError(`a take is mono or stereo, not ${channels} channels`)
     if (!(maxFrames >= 0 && preRollFrames >= 0)) throw new RangeError(`no take of ${maxFrames} frames with ${preRollFrames} before it`)
+    if (!(keptFrames >= preRollFrames)) throw new RangeError(`${keptFrames} frames kept can't hold ${preRollFrames} before a take`)
     this.buffer = new Int16Array(maxFrames * channels)
-    this.ring = new Int16Array(preRollFrames * channels)
-    this.ringPeak = new Int32Array(preRollFrames)
+    this.ring = new Int16Array(keptFrames * channels)
+    this.ringPeak = new Int32Array(keptFrames)
   }
 
   /** The input level: each sample is multiplied by it, then clipped to 16 bits. */
@@ -179,7 +183,8 @@ export class SampleCapture {
    * Waits for a take that starts at [fromFrame], or with a [threshold] (a
    * level 0..1 of full scale, after [gain]) when the input first reaches it
    * at or after [fromFrame], [preRollFrames] earlier. Either start reaches
-   * back only as far as frames were fed, and never before [fromFrame].
+   * back only as far as the frames fed and kept ([keptFrames]), and never
+   * before [fromFrame].
    * Forgets any take before it.
    */
   arm(fromFrame: number, threshold: number | null): void {
@@ -373,7 +378,7 @@ export class SampleCapture {
         this.buffer[o] = 0
         if (stereo) this.buffer[o + 1] = 0
       } else {
-        const r = ((this.ringHead - back + this.preRollFrames) % this.preRollFrames) * this.channels
+        const r = ((this.ringHead - back + this.keptFrames) % this.keptFrames) * this.channels
         this.buffer[o] = this.ring[r]!
         if (stereo) this.buffer[o + 1] = this.ring[r + 1]!
       }
@@ -440,14 +445,14 @@ export class SampleCapture {
   private ringCrossing(from: number, ringEnd: number, level: number): number | null {
     for (let f = Math.max(from, ringEnd - this.ringCount); f < ringEnd; f++) {
       const back = ringEnd - f
-      if (this.ringPeak[(this.ringHead - back + this.preRollFrames) % this.preRollFrames]! >= level) return f
+      if (this.ringPeak[(this.ringHead - back + this.keptFrames) % this.keptFrames]! >= level) return f
     }
     return null
   }
 
   // Keeps the last of the [n] frames just run in the ring.
   private remember(src: Int16Array | null, offset: number, inChannels: number, n: number, g: number): void {
-    const m = Math.min(n, this.preRollFrames)
+    const m = Math.min(n, this.keptFrames)
     for (let k = n - m; k < n; k++) {
       const i = offset + k * inChannels
       this.convert(src, i, inChannels, g, this.ring, this.ringHead * this.channels)
@@ -457,9 +462,9 @@ export class SampleCapture {
           : inChannels === 1
             ? Math.abs(gained(src[i]!, g))
             : Math.max(Math.abs(gained(src[i]!, g)), Math.abs(gained(src[i + 1]!, g)))
-      this.ringHead = (this.ringHead + 1) % this.preRollFrames
+      this.ringHead = (this.ringHead + 1) % this.keptFrames
     }
-    this.ringCount = Math.min(this.ringCount + m, this.preRollFrames)
+    this.ringCount = Math.min(this.ringCount + m, this.keptFrames)
   }
 
   // One input frame at sample [i] of [src] (silence when null), as a frame of the take at [o] of [dst].

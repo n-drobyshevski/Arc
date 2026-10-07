@@ -723,6 +723,8 @@ export const MirrorText = {
   sampleSaved(pad: PhysicalPad): string {
     return `${MirrorText.padTitle(pad)}: new sample on the EP-133.`
   },
+  /** A pad pressed for a sound only the EP-133 has while a new sample goes up to it, Live playing on. */
+  DEVICE_UPLOADING: "The EP-133 is taking a new sample. This sound plays once it's done.",
   SAMPLE_DISCARDED: 'Sample discarded.',
   /** A take with no pad to go on (no project read yet): it isn't lost. */
   KEPT_IN_TAKES: 'Kept in Takes: read a project on the EP-133 to put samples on pads.',

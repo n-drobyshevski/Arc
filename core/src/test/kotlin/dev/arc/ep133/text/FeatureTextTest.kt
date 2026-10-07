@@ -205,6 +205,7 @@ class FeatureTextTest {
         assertEquals("Slot 300", MirrorText.slotLine(300, next = false))
         assertEquals("Pad A 7: kept in arc. It goes on the EP-133 when you connect.", MirrorText.sampleQueued(a7))
         assertEquals("Pad A 7: new sample on the EP-133.", MirrorText.sampleSaved(a7))
+        assertEquals("The EP-133 is taking a new sample. This sound plays once it's done.", MirrorText.DEVICE_UPLOADING)
         assertEquals("1 sample kept in Takes.", MirrorText.samplesToTakes(1))
         assertEquals("3 samples kept in Takes.", MirrorText.samplesToTakes(3))
         // The offline prompt counts recordings apart from pad changes.

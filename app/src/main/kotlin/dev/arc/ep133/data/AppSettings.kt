@@ -7,6 +7,7 @@ import dev.arc.ep133.features.Keys
 import dev.arc.ep133.features.KeysView
 import dev.arc.ep133.features.NoteNames
 import dev.arc.ep133.features.Piano
+import dev.arc.ep133.features.SampleSource
 import dev.arc.ep133.features.Scale
 import dev.arc.ep133.features.Tempo
 import dev.arc.ep133.text.LiveEngine
@@ -52,7 +53,49 @@ data class AppSettings(
      * (Debug screen): kept on this phone only, never copied into library.json.
      */
     val liveEngine: LiveEngine = LiveEngine.AUTO,
-)
+    /** SAMPLE's input (an addition): its source and whether it records in stereo. */
+    val sampleSource: SampleSource = SampleSource.MIC,
+    val sampleStereo: Boolean = false,
+    /** SAMPLE's LEVEL per source, in dB: the phone's mic is quiet, so it starts higher. */
+    val sampleGainMic: Float = SAMPLE_GAIN_MIC,
+    val sampleGainRsp: Float = 0f,
+    val sampleGainUsb: Float = 0f,
+    /** SAMPLE's threshold in dBFS; null records from the press. */
+    val sampleThreshold: Float? = null,
+    /** The bars a hands-free take lasts, after a bar's count-in; null (Free) runs until SAMPLE is tapped. */
+    val sampleBars: Int? = null,
+    /** A take opens the review sheet before it goes on its pad (off: straight on, as on the EP-133). */
+    val reviewSamples: Boolean = true,
+    /** The review's switches, kept for the next take (and used as they are with [reviewSamples] off). */
+    val sampleNormalize: Boolean = false,
+    val sampleTrimSilence: Boolean = false,
+) {
+    /** SAMPLE's LEVEL for [source], in dB. */
+    fun sampleGain(source: SampleSource): Float = when (source) {
+        SampleSource.MIC -> sampleGainMic
+        SampleSource.RSP -> sampleGainRsp
+        SampleSource.USB -> sampleGainUsb
+    }
+
+    /** These settings with SAMPLE's LEVEL for [source] at [db]. */
+    fun withSampleGain(source: SampleSource, db: Float): AppSettings = when (source) {
+        SampleSource.MIC -> copy(sampleGainMic = db)
+        SampleSource.RSP -> copy(sampleGainRsp = db)
+        SampleSource.USB -> copy(sampleGainUsb = db)
+    }
+}
+
+/** SAMPLE's LEVEL for the phone's mic until one is chosen, in dB. */
+const val SAMPLE_GAIN_MIC = 12f
+
+/** The LEVEL knob's range, in dB, as SAMPLE's strip turns it. */
+val SAMPLE_GAINS = -12f..30f
+
+/** The threshold knob's range in dBFS, below Off. */
+val SAMPLE_THRESHOLDS = -60f..0f
+
+/** BARS' choices for a hands-free take: Free (null), then these. */
+val SAMPLE_BARS = listOf(1, 2, 4, 8, 16)
 
 /**
  * The settings, kept in the app's preferences and copied into library.json
@@ -89,6 +132,16 @@ class SettingsStore internal constructor(private val prefs: SharedPreferences) {
         haptics = prefs.getBoolean("haptics", true),
         liveTempo = Tempo.clamp(prefs.getInt("liveTempo", Tempo.DEFAULT)),
         liveEngine = liveEngineOf(prefs.getString(LIVE_ENGINE, null)),
+        sampleSource = SampleSource.of(prefs.getString("sampleSource", null) ?: "") ?: SampleSource.MIC,
+        sampleStereo = prefs.getBoolean("sampleStereo", false),
+        sampleGainMic = sampleGainOf(prefs.getFloat("sampleGainMic", SAMPLE_GAIN_MIC)) ?: SAMPLE_GAIN_MIC,
+        sampleGainRsp = sampleGainOf(prefs.getFloat("sampleGainRsp", 0f)) ?: 0f,
+        sampleGainUsb = sampleGainOf(prefs.getFloat("sampleGainUsb", 0f)) ?: 0f,
+        sampleThreshold = sampleThresholdOf(prefs.getString("sampleThreshold", null)),
+        sampleBars = prefs.getInt("sampleBars", 0).takeIf { it in SAMPLE_BARS },
+        reviewSamples = prefs.getBoolean("reviewSamples", true),
+        sampleNormalize = prefs.getBoolean("sampleNormalize", false),
+        sampleTrimSilence = prefs.getBoolean("sampleTrimSilence", false),
     )
 
     fun update(change: (AppSettings) -> AppSettings) {
@@ -105,8 +158,9 @@ class SettingsStore internal constructor(private val prefs: SharedPreferences) {
             }
             for ((k, v) in changed) {
                 when (k) {
-                    "theme", "keysScale", "keysNames", "keysViewWide", "keysViewTall" -> putString(k, v)
-                    "keepLast", "keysRoot", "keysOctave", "pianoWhites", "liveTempo" -> putInt(k, v.toInt())
+                    "theme", "keysScale", "keysNames", "keysViewWide", "keysViewTall", "sampleSource", "sampleThreshold" -> putString(k, v)
+                    "keepLast", "keysRoot", "keysOctave", "pianoWhites", "liveTempo", "sampleBars" -> putInt(k, v.toInt())
+                    "sampleGainMic", "sampleGainRsp", "sampleGainUsb" -> putFloat(k, v.toFloat())
                     else -> putBoolean(k, v.toBooleanStrict())
                 }
             }
@@ -127,6 +181,12 @@ internal const val LIVE_ENGINE = "liveEngine"
 
 /** The engine choice as kept ([LiveEngine]'s name); anything else is [LiveEngine.AUTO]. */
 internal fun liveEngineOf(stored: String?): LiveEngine = LiveEngine.entries.firstOrNull { it.name == stored } ?: LiveEngine.AUTO
+
+/** A stored LEVEL, when it is one the knob turns to (an older or edited file may hold anything). */
+internal fun sampleGainOf(db: Float?): Float? = db?.takeIf { it in SAMPLE_GAINS }
+
+/** A stored threshold: "off" (or anything unreadable or out of range) is none. */
+internal fun sampleThresholdOf(stored: String?): Float? = stored?.toFloatOrNull()?.takeIf { it in SAMPLE_THRESHOLDS }
 
 /**
  * Each setting as its key and stored text (library.json adds "app." to the
@@ -152,6 +212,18 @@ internal fun AppSettings.values(): Map<String, String> = linkedMapOf(
     "pianoWhites" to (pianoWhites ?: 0).toString(),
     "haptics" to haptics.toString(),
     "liveTempo" to liveTempo.toString(),
+    "sampleSource" to sampleSource.id,
+    "sampleStereo" to sampleStereo.toString(),
+    "sampleGainMic" to sampleGainMic.toString(),
+    "sampleGainRsp" to sampleGainRsp.toString(),
+    "sampleGainUsb" to sampleGainUsb.toString(),
+    // No threshold is "off": 0 dB is a threshold.
+    "sampleThreshold" to (sampleThreshold?.toString() ?: "off"),
+    // Stored like keepLast: 0 for Free.
+    "sampleBars" to (sampleBars ?: 0).toString(),
+    "reviewSamples" to reviewSamples.toString(),
+    "sampleNormalize" to sampleNormalize.toString(),
+    "sampleTrimSilence" to sampleTrimSilence.toString(),
 )
 
 /** These settings with what library.json held ("app.*" keys) taken back; anything missing or unreadable stays as it is. */
@@ -180,4 +252,23 @@ internal fun AppSettings.withIndex(map: Map<String, String>): AppSettings = copy
     haptics = map["app.haptics"]?.toBooleanStrictOrNull() ?: haptics,
     // A tempo arc doesn't offer leaves the choice as it is.
     liveTempo = map["app.liveTempo"]?.toIntOrNull()?.takeIf { it in Tempo.MIN..Tempo.MAX } ?: liveTempo,
+    sampleSource = map["app.sampleSource"]?.let(SampleSource::of) ?: sampleSource,
+    sampleStereo = map["app.sampleStereo"]?.toBooleanStrictOrNull() ?: sampleStereo,
+    sampleGainMic = sampleGainOf(map["app.sampleGainMic"]?.toFloatOrNull()) ?: sampleGainMic,
+    sampleGainRsp = sampleGainOf(map["app.sampleGainRsp"]?.toFloatOrNull()) ?: sampleGainRsp,
+    sampleGainUsb = sampleGainOf(map["app.sampleGainUsb"]?.toFloatOrNull()) ?: sampleGainUsb,
+    sampleThreshold = when (val v = map["app.sampleThreshold"]) {
+        null -> sampleThreshold
+        "off" -> null
+        else -> sampleThresholdOf(v) ?: sampleThreshold
+    },
+    // 0 is Free; a length arc doesn't offer leaves the choice as it is.
+    sampleBars = when (val n = map["app.sampleBars"]?.toIntOrNull()) {
+        null -> sampleBars
+        0 -> null
+        else -> n.takeIf { it in SAMPLE_BARS } ?: sampleBars
+    },
+    reviewSamples = map["app.reviewSamples"]?.toBooleanStrictOrNull() ?: reviewSamples,
+    sampleNormalize = map["app.sampleNormalize"]?.toBooleanStrictOrNull() ?: sampleNormalize,
+    sampleTrimSilence = map["app.sampleTrimSilence"]?.toBooleanStrictOrNull() ?: sampleTrimSilence,
 )

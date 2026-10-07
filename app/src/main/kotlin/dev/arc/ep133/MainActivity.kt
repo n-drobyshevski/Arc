@@ -480,8 +480,11 @@ class MainActivity : ComponentActivity() {
                     try {
                         kotlinx.coroutines.awaitCancellation()
                     } finally {
-                        // Nor does it cut the notes still sounding.
-                        if (!isChangingConfigurations) controller.closeLiveAudio()
+                        // Nor does it cut the notes still sounding. Stopped (below STARTED), arc left the screen
+                        // rather than Live: a take it stops says so when it arrives.
+                        if (!isChangingConfigurations) {
+                            controller.closeLiveAudio(background = !lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED))
+                        }
                     }
                 }
             }
@@ -693,7 +696,7 @@ class MainActivity : ComponentActivity() {
                             nameOf = controller::mirrorName,
                             onGetFactory = if (dev.arc.ep133.features.FactorySounds.inLibrary(state.backups) == null) ({ controller.getFactorySounds() }) else null,
                             offlinePads = state.offlinePads,
-                            onResetPads = controller::resetOfflinePads,
+                            onResetPads = { controller.resetOfflinePads() },
                             onPad = { pad, hold, unsure, pressedAt -> controller.playPad(pad, hold, unsure, pressedAt) },
                             onPadKept = { pad -> controller.keepPad(pad) },
                             onPadUp = controller::releasePad,
@@ -1000,8 +1003,8 @@ class MainActivity : ComponentActivity() {
             }
 
             // The EP-133 connected with offline pad changes kept: write them or leave the device as it is.
-            state.offlinePrompt?.let { n ->
-                dev.arc.ep133.ui.screens.OfflinePadsDialog(n, onWrite = { controller.writeOfflinePads() }, onDiscard = controller::discardOfflinePads)
+            state.offlinePrompt?.let { p ->
+                dev.arc.ep133.ui.screens.OfflinePadsDialog(p.changes, p.samples, onWrite = { controller.writeOfflinePads() }, onDiscard = { controller.discardOfflinePads() })
             }
 
             val toast = state.toast

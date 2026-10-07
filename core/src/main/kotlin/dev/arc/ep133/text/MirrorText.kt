@@ -576,6 +576,8 @@ object MirrorText {
     fun sampleQueued(pad: PhysicalPad) = "${padTitle(pad)}: kept in arc. It goes on the EP-133 when you connect."
     /** "Pad A 7: new sample on the EP-133.", once the upload is done. */
     fun sampleSaved(pad: PhysicalPad) = "${padTitle(pad)}: new sample on the EP-133."
+    /** A pad pressed for a sound only the EP-133 has while a new sample goes up to it, Live playing on. */
+    const val DEVICE_UPLOADING = "The EP-133 is taking a new sample. This sound plays once it's done."
     const val SAMPLE_DISCARDED = "Sample discarded."
     /** A take with no pad to go on (no project read yet): it isn't lost. */
     const val KEPT_IN_TAKES = "Kept in Takes: read a project on the EP-133 to put samples on pads."

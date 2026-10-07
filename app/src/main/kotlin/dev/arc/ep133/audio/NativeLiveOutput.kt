@@ -25,7 +25,8 @@ import java.util.concurrent.locks.LockSupport
  * A thread of its own ("arc-live-native") polls the engine every
  * [POLL_NS]: voices started (their latency, from the stream's timestamp, goes
  * to the listener), the keys sounding, xruns, the REC mix (into the take, as
- * the AudioTrack output does), a stream reopened (new route, rate or mode),
+ * the AudioTrack output does, and while it is wanted the stream's timestamp
+ * about every 100 ms, for SAMPLE), a stream reopened (new route, rate or mode),
  * and whether the engine still runs: dead, or no callback for [STALL_NS]
  * while it should play, and it gives out, so Live falls back to AudioTrack.
  * That thread also closes the engine when [close] asks.
@@ -162,6 +163,9 @@ internal class NativeLiveOutput private constructor(
         val mix = ShortArray(NativeAudio.CHUNK * 2)
         val header = LongArray(3)
         val stamp = LongArray(2)
+        // The mix's clock, told apart from [stamp]: that one is the voices' this poll.
+        val clockStamp = LongArray(2)
+        var clocked = 0L
         val watch = StallWatch(STALL_NS)
         // The engine counts its streams from 1, the one [open] started.
         var generation = 1L
@@ -224,6 +228,14 @@ internal class NativeLiveOutput private constructor(
                     if (frames <= 0) break
                     listener.mixed(mix, frames, header[0], header[1].takeIf { it >= 0 }, header[2].toInt())
                 }
+                if (listener.recording) {
+                    val now = System.nanoTime()
+                    // None while the stream reopens: told at the next poll that has one.
+                    if (now - clocked >= LiveListener.CLOCK_NS && NativeAudio.timestamp(handle, clockStamp) != 0) {
+                        clocked = now
+                        listener.clock(clockStamp[0], clockStamp[1], rate)
+                    }
+                }
                 listener.keys(keys)
                 if (state == NativeAudio.DEAD || watch.stalled(reports[0], state == NativeAudio.RUNNING, System.nanoTime())) {
                     gaveOut = true
@@ -238,7 +250,7 @@ internal class NativeLiveOutput private constructor(
             // meanwhile (main thread) mustn't wait for that.
             synchronized(this) { closed = true }
             NativeAudio.destroy(handle)
-            if (gaveOut) listener.gaveOut()
+            if (gaveOut) listener.gaveOut() else if (running) listener.failed()
         }
     }
 

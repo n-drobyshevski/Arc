@@ -6,6 +6,7 @@ import dev.arc.ep133.features.SampleCapture.State
 import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Test
 
 class SampleCaptureTest {
@@ -116,6 +117,27 @@ class SampleCaptureTest {
         assertEquals(Event.Started(140), feed(from, 100, 100, 120, 150))
         assertEquals(140, from.take()[0].toInt())
         assertEquals(20000, from.take()[10].toInt())
+    }
+
+    @Test
+    fun `frames kept beyond the pre-roll reach a late press, and the threshold still keeps only the pre-roll`() {
+        // 100 frames kept, 20 of pre-roll: a press 70 frames back is still there.
+        val late = SampleCapture(1000, 1, 1000, 20, keptFrames = 100)
+        feed(late, 0, 100)
+        late.arm(30, null)
+        assertEquals(Event.Started(30), feed(late, 100, 100))
+        assertEquals(30, late.take().first().toInt())
+        assertEquals(170, late.frames)
+
+        // A crossing already fed after the press is found, with 20 frames before it.
+        val thr = SampleCapture(1000, 1, 1000, 20, keptFrames = 100)
+        feed(thr, 0, 100, 60)
+        thr.arm(10, 0.5f)
+        assertEquals(Event.Started(40), feed(thr, 100, 100))
+        assertEquals(40, thr.take().first().toInt())
+        assertEquals(20000, thr.take()[20].toInt())
+
+        assertThrows(IllegalArgumentException::class.java) { SampleCapture(1000, 1, 1000, 20, keptFrames = 10) }
     }
 
     @Test

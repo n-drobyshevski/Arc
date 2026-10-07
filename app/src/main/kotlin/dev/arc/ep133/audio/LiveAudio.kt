@@ -8,6 +8,7 @@ import android.media.AudioFocusRequest
 import android.media.AudioManager
 import dev.arc.ep133.features.Beat
 import dev.arc.ep133.features.BeatGrid
+import dev.arc.ep133.features.FrameClock
 import dev.arc.ep133.features.RecState
 import dev.arc.ep133.features.TakeRecorder
 import dev.arc.ep133.formats.VoiceMixer
@@ -63,7 +64,12 @@ import java.util.concurrent.Executors
  * REC ([arm]) records the mix into a take: from the first sound after it to
  * [stopRecording], Live closing or [TakeRecorder.MAX_SECONDS]. [onTake] gets
  * the file (null when nothing was played or it couldn't be written), and
- * whether the limit stopped it, on the take's writer thread.
+ * whether the limit stopped it, on the take's writer thread. SAMPLE's RSP
+ * takes the same mix beside it ([sampleTap], before REC sees each block),
+ * with the output's timestamp so a press finds the frame heard then; the tap
+ * is let go of, and told it is lost, when the output closes, gives out or
+ * fails, since the next output counts its frames afresh. So REC and RSP can
+ * run at once.
  *
  * The TEMPO key's click ([startClick]) is a stream of its own
  * ([MetronomeOutput]), not a voice: REC never has it, and it carries on
@@ -76,7 +82,7 @@ class LiveAudio(
     private val onStarted: (key: String, latencyMs: Double, route: AudioDeviceInfo?, engine: String) -> Unit = { _, _, _, _ -> },
     private val onTake: (file: File?, seconds: Double, limit: Boolean, error: String?) -> Unit = { _, _, _, _ -> },
     private val onOutput: (description: String) -> Unit = {},
-) {
+) : MixSource {
     private val audio = context.getSystemService(AudioManager::class.java)
     private val attributes = attributes(AudioAttributes.USAGE_GAME)
     // The old AudioTrack way's ([LiveEngine.TRACK_OLD]): media, as Live was before the latency work.
@@ -142,6 +148,27 @@ class LiveAudio(
     @Volatile private var armed: Take? = null
     @Volatile private var stopAsked = false
 
+    // SAMPLE's RSP, fed on the output's thread; set and cleared under this object's lock.
+    @Volatile private var tap: MixTap? = null
+
+    /**
+     * Who takes the mix beside REC (SAMPLE's RSP, an addition): each block,
+     * and the output's clock, on the output's thread, from the next block.
+     * Cleared, and told [MixTap.lost], when the output closes, gives out or fails.
+     */
+    override var sampleTap: MixTap?
+        get() = tap
+        set(value) {
+            synchronized(this) {
+                tap = value
+                // The native engine hands the mix over from now, as for REC.
+                if (value != null) output?.recordFromNow()
+            }
+        }
+
+    /** The open output's sample rate, null while closed. */
+    override val mixRate: Int? get() = output?.rate
+
     private fun focusRequest(attributes: AudioAttributes) = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
         .setAudioAttributes(attributes)
         // A call or another app taking the output over stops the sounds.
@@ -153,6 +180,11 @@ class LiveAudio(
             .setUsage(usage)
             .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
             .build()
+
+        /** Why RSP's tap was let go of ([MixTap.lost]): Live closed, its native engine gave out, or its output failed. */
+        const val TAP_CLOSED = "Live's sound closed"
+        const val TAP_GAVE_OUT = "Live's sound reopened"
+        const val TAP_FAILED = "Live's sound stopped"
 
         /**
          * Whether output device [type] is wireless, and so heard late: Bluetooth
@@ -212,11 +244,16 @@ class LiveAudio(
 
     /** Closes the output (Live left the screen); what was sounding stops. */
     fun close() {
+        var t: MixTap? = null
         val o = synchronized(this) {
             session?.running = false
             session = null
+            t = tap
+            tap = null
             output.also { output = null }
-        } ?: return
+        }
+        t?.lost(TAP_CLOSED)
+        o ?: return
         o.close()
         _keys.value = emptySet()
         _rec.value = RecState.Idle
@@ -382,16 +419,43 @@ class LiveAudio(
     private fun gaveOut(s: Session) {
         // All under the lock: a press's [openLate] can't open another native engine in between,
         // nor can [close] slip in and leave the AudioTrack output open after Live left.
+        var t: MixTap? = null
         val reopened = synchronized(this) {
             if (session !== s) return
             engines.gaveOut()
             session = null
             output = null
+            // The next output counts its frames from 0: the tap's frames so far are done with.
+            t = tap
+            tap = null
             open().also { if (!it) _wireless.value = false }
         }
         _keys.value = emptySet()
         _rec.value = RecState.Idle
+        // After the reopen, so RSP finds the new output when it opens again.
+        t?.lost(TAP_GAVE_OUT)
         if (reopened) onOutput(description)
+    }
+
+    /**
+     * [s]'s output failed under it, its thread gone (not closed, nor given
+     * out): Live lets go of it as [close] does, so the next press opens a
+     * new one, and RSP is told, since nothing feeds its tap any more.
+     */
+    private fun failed(s: Session) {
+        var t: MixTap? = null
+        synchronized(this) {
+            if (session !== s) return
+            session = null
+            output = null
+            t = tap
+            tap = null
+        }
+        _keys.value = emptySet()
+        _rec.value = RecState.Idle
+        _wireless.value = false
+        hold.idle()
+        t?.lost(TAP_FAILED)
     }
 
     /** Ends [t]: its writer keeps what was recorded up to the last sound. */
@@ -409,7 +473,7 @@ class LiveAudio(
         private var take: Take? = null
         private var shown: Set<String> = emptySet()
 
-        override val recording: Boolean get() = take != null || armed != null
+        override val recording: Boolean get() = take != null || armed != null || tap != null
 
         override fun beforeBlock() {
             armed?.let {
@@ -426,6 +490,8 @@ class LiveAudio(
         }
 
         override fun mixed(out: ShortArray, frames: Int, at: Long, firstStart: Long?, rate: Int) {
+            // RSP first: it only reads the block. Not after Live closed: a tap set since is another output's.
+            if (running) tap?.mixed(out, frames, at, rate)
             val t = take ?: return
             // A native stream reopened at another rate: the take so far is kept, at its own.
             if (rate != t.recorder.outRate) {
@@ -446,6 +512,10 @@ class LiveAudio(
                 val seconds = t.recorder.seconds
                 if (running && (_rec.value as? RecState.Recording)?.seconds != seconds) _rec.value = RecState.Recording(seconds)
             }
+        }
+
+        override fun clock(frame: Long, nanos: Long, rate: Int) {
+            if (running) tap?.clock(FrameClock(frame, nanos, rate))
         }
 
         override fun started(key: String, latencyMs: Double, route: AudioDeviceInfo?, engine: String) = onStarted(key, latencyMs, route, engine)
@@ -484,5 +554,7 @@ class LiveAudio(
         }
 
         override fun gaveOut() = gaveOut(this)
+
+        override fun failed() = failed(this)
     }
 }

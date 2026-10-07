@@ -97,4 +97,27 @@ class OfflineEditTest {
         val device = OfflinePad(1, 0, 1, 1, "Snare.wav", SoundSource.DEVICE)
         assertEquals(OfflineStep.Write(PadTarget(1, 0, 1, null), 1), offlineStep(device, 1, names, readSlot = null))
     }
+
+    @Test
+    fun `a recording uploads onto its pad in its own project, whatever the pad and slots hold`() {
+        val names = mapOf(5 to "kick")
+        val rec = OfflinePad(1, 0, 1, 0, "mic 1007-142301", SoundSource.RECORDED, "smp-20261007-142301.wav")
+        assertEquals(OfflineStep.Upload(PadTarget(1, 0, 1, 5)), offlineStep(rec, 1, names, readSlot = 5))
+        // An empty pad, and a device with no sounds at all.
+        assertEquals(OfflineStep.Upload(PadTarget(1, 0, 1, null)), offlineStep(rec, 1, emptyMap(), readSlot = null))
+        // Its slot 0 is no slot: never "there already".
+        assertEquals(OfflineStep.Upload(PadTarget(1, 0, 1, 0)), offlineStep(rec, 1, names, readSlot = 0))
+        // Another project active: skipped (and the recording goes to Takes).
+        assertEquals(OfflineStep.Skip, offlineStep(rec, 2, names, readSlot = 5))
+    }
+
+    @Test
+    fun `a connected mirror shows only the recordings on their way up`() {
+        val up = OfflinePad(1, 0, 1, 0, "mic 1007-142301", SoundSource.RECORDED, "smp-a.wav")
+        val waiting = OfflinePad(1, 1, 2, 0, "rsp 1007-142400", SoundSource.RECORDED, "smp-b.wav")
+        val change = OfflinePad(1, 2, 3, 5, "kick", SoundSource.DEVICE)
+        val pads = OfflinePads(listOf(up, waiting, change))
+        assertEquals(listOf(up), connectedLocal(pads, setOf("smp-a.wav")).list)
+        assertEquals(OfflinePads.EMPTY, connectedLocal(pads, emptySet()))
+    }
 }

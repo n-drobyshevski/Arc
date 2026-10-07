@@ -22,7 +22,9 @@ import dev.arc.ep133.text.LatencyText
  * Each new voice's latency is from the press (its tag) to when its first
  * frame leaves the output, from the output's timestamp. A new route (Android
  * tells [BurstOutput]) reaches the listener from this thread, at the next burst,
- * and so does a buffer grown or shrunk ([LiveListener.tuned]).
+ * and so does a buffer grown or shrunk ([LiveListener.tuned]). While the mix
+ * is wanted, so does the output's timestamp, about every 100 ms
+ * ([LiveListener.clock]), for SAMPLE's resampling.
  *
  * Opened with old (the debug screen's "AudioTrack, old"), it writes as Live
  * did before the latency work: each burst mixed as soon as the last write
@@ -72,6 +74,8 @@ internal class TrackLiveOutput private constructor(private val output: BurstOutp
         val ts = AudioTimestamp()
         // The route last told: a new object only when Android routes the track anew.
         var told: Any? = Unit
+        // When the clock was last told, for the mix's takers.
+        var clocked = 0L
         try {
             while (running) {
                 // Mixed only once the output has room for it, so a press made meanwhile is in it.
@@ -85,6 +89,11 @@ internal class TrackLiveOutput private constructor(private val output: BurstOutp
                     var first = Long.MAX_VALUE
                     for (i in started.indices) first = minOf(first, started[i].frame)
                     listener.mixed(out, o.burst, at, if (started.isEmpty()) null else first, o.rate)
+                    val now = System.nanoTime()
+                    if (now - clocked >= LiveListener.CLOCK_NS) {
+                        clocked = now
+                        clock(ts, now)
+                    }
                 }
                 if (!o.write(out)) break
                 if (started.isNotEmpty()) report(started, ts)
@@ -104,6 +113,23 @@ internal class TrackLiveOutput private constructor(private val output: BurstOutp
         } finally {
             listener.ended()
             o.release()
+            // A write failed, not [close]: Live lets go of this output.
+            if (running) listener.failed()
+        }
+    }
+
+    /**
+     * Tells the listener when a mix frame is heard, from the output's
+     * timestamp: the track counts the frames it plays from the mixer's first,
+     * so its frames are mix frames. No timestamp yet (just opened): the play
+     * head, [now].
+     */
+    private fun clock(ts: AudioTimestamp, now: Long) {
+        val o = output
+        if (o.track.getTimestamp(ts)) {
+            listener.clock(ts.framePosition, ts.nanoTime, o.rate)
+        } else {
+            listener.clock(o.track.playbackHeadPosition.toLong() and 0xFFFFFFFFL, now, o.rate)
         }
     }
 

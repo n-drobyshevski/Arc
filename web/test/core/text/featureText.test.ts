@@ -197,6 +197,7 @@ describe('FeatureTextTest', () => {
     expect(MirrorText.slotLine(300, false)).toBe('Slot 300')
     expect(MirrorText.sampleQueued(a7)).toBe('Pad A 7: kept in arc. It goes on the EP-133 when you connect.')
     expect(MirrorText.sampleSaved(a7)).toBe('Pad A 7: new sample on the EP-133.')
+    expect(MirrorText.DEVICE_UPLOADING).toBe("The EP-133 is taking a new sample. This sound plays once it's done.")
     expect(MirrorText.samplesToTakes(1)).toBe('1 sample kept in Takes.')
     expect(MirrorText.samplesToTakes(3)).toBe('3 samples kept in Takes.')
     // The offline prompt counts recordings apart from pad changes.
