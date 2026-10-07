@@ -161,6 +161,11 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
             val inset = 1.dp.toPx()
             val untagged = if (short) marks.clear.values.map { it.deflate(inset) } else emptyList()
             fun onControls(r: Rect, own: Mark) = controls.count { it !== own && it.bounds.deflate(inset).overlaps(r) } + untagged.count { it.overlaps(r) }
+            // Upright: the marked controls a tag pushed further out would land on (Live's function
+            // row under the top bar's tags), and the closer a tag may then sit to another.
+            val marked = if (short) emptyList() else list.filter { !tall(it) && edge(it) == 0 }
+            fun onMarked(r: Rect, own: Mark) = marked.any { it !== own && it.bounds.deflate(inset).overlaps(r) }
+            val tight = 2.dp.toPx()
             /** Whether the arrow from [tail] to [tip] (down, up or across) runs over [r]. */
             fun crosses(tip: Offset, tail: Offset, r: Rect): Boolean = if (tip.x == tail.x) {
                 tip.x in r.left..r.right && r.top < maxOf(tip.y, tail.y) && r.bottom > minOf(tip.y, tail.y)
@@ -284,6 +289,20 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
                             }
                         }
                         if (!blocked || ++tries > 8) break
+                        // Upright, rather than go out onto a marked control (SETTINGS over TEMPO on
+                        // Live), a tag stays closer to the others than the clearance, nudged back
+                        // towards its control as far as that lets it, if it then clears every control.
+                        val further = rect.translate(0f, if (below) h + clearance else -(h + clearance))
+                        if (!short && onMarked(further, m)) {
+                            val back = if (below) -1 else 1
+                            val near = (0..((clearance - tight) / inset).toInt()).asSequence()
+                                .map { rect.translate(0f, back * it * inset) }
+                                .firstOrNull { r -> placed.none { it.rect.inflate(tight).overlaps(r) } && !onMarked(r, m) }
+                            if (near != null) {
+                                rect = near
+                                break
+                            }
+                        }
                         reach += h + clearance
                     }
                     // In a short window, slid off the line another control's arrow runs down (or up)

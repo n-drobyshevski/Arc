@@ -28,7 +28,7 @@
 //   host ([MirrorHost.deviceRead]), which asks whether to write them.
 
 import { getMetadata, isJsonObject, type JsonValue } from '../core/protocol/fs'
-import { PROJECTS_NODE, projectFromNode, type SoundEntry } from '../core/protocol/device'
+import { PROJECTS_NODE, projectOfActive, type SoundEntry } from '../core/protocol/device'
 import type { Session } from '../core/protocol/session'
 import { contents, projectLayout } from '../core/features/deviceBrowser'
 import { LearnedLinks } from '../core/features/learnedLinks'
@@ -74,29 +74,8 @@ export interface MirrorHost {
   deviceRead(): void
 }
 
-/** Kotlin String.toDoubleOrNull (Java's float syntax, no surrounding blanks). */
-function ktToDoubleOrNull(s: string): number | null {
-  if (!/^[+-]?(NaN|Infinity|((\d+\.?\d*|\.\d+)([eE][+-]?\d+)?)[fFdD]?)$/.test(s)) return null
-  const v = Number(s.replace(/[fFdD]$/, ''))
-  return Number.isNaN(v) && !/NaN/.test(s) ? null : v
-}
-
-/** Kotlin Double.toInt(): toward zero, NaN is 0, clamped to Int. */
-function ktToInt(d: number): number {
-  if (Number.isNaN(d)) return 0
-  if (d >= 2147483647) return 2147483647
-  if (d <= -2147483648) return -2147483648
-  return Math.trunc(d)
-}
-
-/** `(active as? JsonPrimitive)?.content?.toDoubleOrNull()?.toInt()?.let(Device::projectFromNode)`. */
-export function activeProject(active: JsonValue | undefined): number | null {
-  if (active === undefined || active === null) return null
-  if (typeof active === 'object') return null
-  const content = typeof active === 'string' ? active : String(active)
-  const d = ktToDoubleOrNull(content)
-  return d === null ? null : projectFromNode(ktToInt(d))
-}
+/** The project an "active" value names: device.projectOfActive, kept under this name for its callers. */
+export const activeProject = projectOfActive
 
 function sameLight(a: PadLight, b: PadLight): boolean {
   return a.velocity === b.velocity && a.channel === b.channel && a.onAt === b.onAt && a.offAt === b.offAt

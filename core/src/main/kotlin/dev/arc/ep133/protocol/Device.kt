@@ -52,12 +52,36 @@ object Device {
     const val MAX_SAMPLE_RATE = 46875
     const val MAX_SOUND_NAME = 20
 
+    /** The device's projects, 1..9 (the PROJECT key's numbers, and the ones a backup probes). */
+    const val PROJECT_COUNT = 9
+
     fun projectNode(n: Int): Int = 3000 + (n - 1) * 1000
 
     fun projectFromNode(node: Int): Int? {
         if (node < 3000 || (node - 3000) % 1000 != 0) return null
         val n = (node - 3000) / 1000 + 1
         return if (n in 1..99) n else null
+    }
+
+    /**
+     * The project an "active" value of /projects' metadata names (a node, as
+     * a number or a numeric string), or null when it names none.
+     */
+    fun projectOfActive(active: JsonElement?): Int? =
+        (active as? JsonPrimitive)?.content?.toDoubleOrNull()?.toInt()?.let(::projectFromNode)
+
+    /** The project the device plays now, from /projects' metadata; null when it names none. */
+    suspend fun activeProject(session: Session): Int? =
+        projectOfActive(Fs.getMetadata(session, PROJECTS_NODE).asObject()["active"])
+
+    /**
+     * Makes project [n] the active one, as PROJECT on the device does: the
+     * METADATA SET of {"active": node} on /projects that [writeProject] and a
+     * restore use to make the device load a project.
+     */
+    suspend fun setActiveProject(session: Session, n: Int) {
+        require(n in 1..PROJECT_COUNT) { "Project $n doesn't exist. Projects go from 1 to $PROJECT_COUNT." }
+        Fs.setMetadata(session, PROJECTS_NODE, JsonObject(mapOf("active" to JsJson.number(projectNode(n)))))
     }
 
     /** Per-sound settings worth carrying through a backup. */

@@ -79,6 +79,22 @@ class FactorySoundsTest {
     }
 
     @Test
+    fun `offline, PROJECT steps through the pack's projects with pads`() {
+        val p1 = tarFile(listOf("pads/a/p01" to pad(100)))
+        val p3 = tarFile(listOf("pads/c/p02" to pad(1)))
+        val p = pak(factoryMeta, mapOf(3 to p3, 1 to p1, 2 to tarFile(emptyList())))
+        assertEquals(listOf(1, 3), FactorySounds.projects(p))
+        val snap = FactorySounds.snapshot(p, 5L, project = 3)!!
+        assertEquals(3, snap.activeProject)
+        assertEquals(listOf("c"), snap.groups.map { it.name })
+        assertEquals(mapOf(2 to 1), snap.groups[0].pads)
+        assertEquals(mapOf(1 to "micro kick", 100 to "nt snare"), snap.names)
+        assertNull(FactorySounds.snapshot(p, 5L, project = 2))
+        assertNull(FactorySounds.snapshot(p, 5L, project = 4))
+        assertEquals(emptyList<Int>(), FactorySounds.projects(pak(factoryMeta, emptyMap())))
+    }
+
+    @Test
     fun `a sound is unnamed when the device lists it as its slot's file`() {
         assertTrue(FactorySounds.unnamed(343, "343.pcm"))
         assertTrue(FactorySounds.unnamed(1, "001.pcm"))

@@ -1,7 +1,9 @@
 package dev.arc.ep133.text
 
+import dev.arc.ep133.features.FactorySounds
 import dev.arc.ep133.features.Hit
 import dev.arc.ep133.features.PadNotes
+import dev.arc.ep133.features.ProjectSource
 import dev.arc.ep133.util.jsToFixed
 
 /** Text for the live mirror (an addition to the web version). */
@@ -18,13 +20,13 @@ object MirrorText {
     const val NOTE_HIDDEN = "Tap for a note"
     /** "Last seen 5 Oct, 14:02", for the display while offline. */
     fun lastSeen(at: String) = "Last seen $at"
-    // Not connected and never read, with the factory sounds in the library: their first project.
+    // Not connected, with the factory sounds in the library: one of their projects (the first unless PROJECT steps on).
     const val FACTORY = "Factory sounds"
-    const val FACTORY_NOTE = "Not connected: these are the EP-133's factory sounds, project 1 as it ships. Connect your EP-133 to see it live."
+    fun factoryNote(project: Int) = "Not connected: these are the EP-133's factory sounds, project $project as it ships. Connect your EP-133 to see it live."
     // Not connected and never read: a way to play without it.
     const val GET_FACTORY = "Get the factory sounds to play without it"
-    /** The note under "Offline" for the display's offline line ([lastSeen] or [FACTORY]). */
-    fun offlineNote(offline: String) = if (offline == FACTORY) FACTORY_NOTE else OFFLINE_NOTE
+    /** The note under "Offline" for the display's offline line ([lastSeen] or [FACTORY]), showing [project]. */
+    fun offlineNote(offline: String, project: Int = FactorySounds.PROJECT) = if (offline == FACTORY) factoryNote(project) else OFFLINE_NOTE
     const val PLAYING = "Playing"
     const val STOPPED = "Stopped"
     const val NO_TRANSPORT = "Play/stop and tempo need MIDI clock out: SHIFT + ERASE, then 102 and ENTER."
@@ -33,8 +35,8 @@ object MirrorText {
     const val LEARN_NOTE = "Sample names are learned as you press pads: one press of a key, in any group, names that key in every group, and arc remembers it."
     const val COMMUNITY_NOTE = "Pads follow the official MIDI note map; play/stop and tempo are standard MIDI clock messages. Naming the samples relies on community notes about the device's SysEx, not on the official guide."
     const val NO_PUSHES = "No pad messages from the device yet, so samples can't be named. Pads still light up."
-    /** How Live uses the device: it reads, and writes only a pad's sound, when asked in EDIT. */
-    const val LISTEN_ONLY = "arc reads the device here (sound names, the active project's pads, and the samples on them, to keep a copy). It changes the device only when you give a pad another sound in EDIT."
+    /** How Live uses the device: it reads, and writes only a pad's sound (in EDIT) and the active project (PROJECT), when asked. */
+    const val LISTEN_ONLY = "arc reads the device here (sound names, the active project's pads, and the samples on them, to keep a copy). It changes the device only when you give a pad another sound in EDIT, or switch projects with PROJECT."
 
     // Tapping a pad plays its sample on the phone.
     const val TAP_NOTE = "Hold a pad to hear its sample on the phone (it stops when you let go): from arc's copy of the device's sounds, a backup, or the device."
@@ -61,6 +63,48 @@ object MirrorText {
     fun keysView(piano: Boolean) = if (piano) "Keys on a piano" else "Keys on the pads"
     /** Why the piano key is greyed out. */
     const val PIANO_NO_ROOM = "No room for the piano here"
+
+    // ---------- The function keys over the pads: PROJECT, KEYS (MODE_KEYS over MODE_PADS) and TEMPO ----------
+    /** The keys' two words: the main one on the cap, the second on its coloured lower half. */
+    const val FN_PROJECT = "Project"
+    const val FN_PROJECT_SUB = "1\u20139"
+    const val FN_TEMPO = "Tempo"
+    const val FN_TEMPO_SUB = "Tap"
+
+    /** PROJECT for screen readers: "Project 3", "Factory project 3", or "No project" before one is read. */
+    fun projectKeyState(n: Int?, source: ProjectSource) = when {
+        n == null -> "No project"
+        source == ProjectSource.FACTORY -> "Factory project $n"
+        else -> project(n)
+    }
+    const val PROJECT_NEXT = "Next project"
+    /** PROJECT held: the project sheet, its title, and each key there for screen readers. */
+    const val PICK_PROJECT = "Choose a project"
+    const val PROJECT_TITLE = "Project"
+    fun projectChoice(n: Int, shown: Boolean) = project(n) + if (shown) ", shown" else ""
+    /** Why PROJECT is greyed out. */
+    const val PROJECT_UNAVAILABLE = "Connect the EP-133 or get the factory sounds to change projects"
+    /** A pad tapped in EDIT while the device switches projects. */
+    const val PROJECT_SWITCHING = "The EP-133 is switching projects. Try again in a moment."
+    fun projectFailed(reason: String) = "The project couldn't be switched: $reason"
+
+    // TEMPO: a click on the phone. Tap turns it on or off; hold opens the tempo sheet.
+    const val CLICK = "Click"
+    /** TEMPO for screen readers: "On, 120 BPM", "Off, 98 BPM, from the EP-133". */
+    fun clickState(on: Boolean, bpm: Int, following: Boolean) =
+        (if (on) "On" else "Off") + ", ${tempoValue(bpm)}" + if (following) ", from the EP-133" else ""
+    const val SET_TEMPO = "Set tempo"
+    const val TEMPO_TITLE = "Tempo"
+    /** The sheet's big pad for screen readers (it shows [FN_TEMPO_SUB]). */
+    const val TAP_TEMPO = "Tap tempo"
+    const val SLOWER = "Slower"
+    const val FASTER = "Faster"
+    /** The sheet while the EP-133 sends MIDI clock: its tempo leads, so − + and TAP rest. */
+    const val FOLLOWING = "Following the EP-133's tempo (MIDI clock)."
+    /** "120 BPM". */
+    fun tempoValue(bpm: Int) = "$bpm BPM"
+    /** "120", under a narrow key. */
+    fun tempoShort(bpm: Int) = "$bpm"
 
     /** The mode word under the grid, for screen readers: what it shows and what a tap does. */
     fun modeSwitch(keysOn: Boolean) = if (keysOn) "Keys. Tap for pads." else "Pads. Tap for keys."

@@ -9,7 +9,7 @@ import kotlinx.serialization.json.JsonPrimitive
  * own EP Sample Tool restores a device with, a .pak served beside the tool on
  * their site. arc keeps it as a library entry of its own [SOURCE] (never
  * pruned), so it is browsed, searched and restored like a backup, and Live
- * plays its [PROJECT] while no EP-133 has been read yet.
+ * plays its projects ([PROJECT] first) while no EP-133 is connected.
  *
  * The pack's file name carries a build hash that changes when the tool is
  * rebuilt, so it is looked up in the tool's page and script ([locate]); the
@@ -33,7 +33,7 @@ object FactorySounds {
     /** The library entry's file name. */
     const val FILE_NAME = "ep-133-factory-content.pak"
 
-    /** The project Live shows: the factory kit (drums on A, bass on B, keys on C). */
+    /** The project Live shows first: the factory kit (drums on A, bass on B, keys on C). */
     const val PROJECT = 1
 
     private val SCRIPT = Regex("""src="(/apps/ep-sample-tool/assets/[A-Za-z0-9_.-]+\.js)"""")
@@ -66,12 +66,16 @@ object FactorySounds {
         return meta("pak_type") == "factory" && meta("device_name") == "EP-133" && pak.sounds.isNotEmpty()
     }
 
-    /** What Live shows from the pack: [PROJECT]'s pads and every sound's name; null when it has none. */
-    fun snapshot(pak: Pak, savedAt: Long): LiveSnapshot? {
-        val tar = pak.projects[PROJECT] ?: return null
+    /** What Live shows from the pack: [project]'s pads and every sound's name; null when it has none. */
+    fun snapshot(pak: Pak, savedAt: Long, project: Int = PROJECT): LiveSnapshot? {
+        val tar = pak.projects[project] ?: return null
         val groups = ProjectPads.read(tar).takeIf { it.isNotEmpty() } ?: return null
-        return LiveSnapshot(savedAt, PROJECT, groups, pak.sounds.mapValues { it.value.name })
+        return LiveSnapshot(savedAt, project, groups, pak.sounds.mapValues { it.value.name })
     }
+
+    /** The pack's projects with pads (the ones [snapshot] shows), in order: PROJECT steps through them offline. */
+    fun projects(pak: Pak): List<Int> =
+        pak.projects.filter { (_, tar) -> ProjectPads.read(tar).isNotEmpty() }.keys.sorted()
 
     /**
      * Whether [name] is the one the EP-133 gives a sound nobody named, its

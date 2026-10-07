@@ -18,6 +18,9 @@ export const CoachText = {
   SECTIONS: 'Sections',
   GUIDE_TAB: 'EP-133 shortcuts',
   MODE: 'Pads or keys',
+  /** Live's function keys beside MODE (now the KEYS key). */
+  PROJECT: 'Next project: tap; hold + pad 1–9 to pick',
+  TEMPO: 'Click: tap; hold for tempo',
   OCTAVE: 'Octave',
   SCALE: 'Scale',
   KEY: 'Key',

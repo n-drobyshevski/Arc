@@ -60,6 +60,11 @@ import dev.arc.ep133.protocol.ProjectEntry
 import dev.arc.ep133.protocol.SoundEntry
 import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.ui.screens.MirrorScreen
+import dev.arc.ep133.ui.screens.FunctionKeysUi
+import dev.arc.ep133.ui.screens.ProjectSheetContent
+import dev.arc.ep133.ui.screens.TempoSheetContent
+import dev.arc.ep133.ui.screens.projectChoicesOf
+import dev.arc.ep133.ui.screens.projectKeyOf
 import dev.arc.ep133.ui.theme.ArcTheme
 
 /*
@@ -145,8 +150,10 @@ private fun Framed(
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false) {
-    val mirror = MirrorUi(state, loading = loading, error = error, offline = offline)
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false) {
+    val mirror = MirrorUi(state, loading = loading, error = error, offline = offline, offlineProjects = offlineProjects)
+    // PROJECT as MainActivity works it out; TEMPO's light caught on a beat while the click is on.
+    val functions = FunctionKeysUi(project = projectKeyOf(mirror, busy = false), clickOn = clickOn, beatLit = clickOn)
     val recUi = dev.arc.ep133.ui.screens.RecUi(rec) {}
     // The piano's notes, for the display line in the bar to name a device note past them. The
     // piano reports them a frame late, after the screenshot, so [piano] gives them up front.
@@ -180,6 +187,7 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
             // The EDIT tab shows where [edit] is given: on or off.
             edit = if (edit == null) dev.arc.ep133.ui.screens.EditUi() else dev.arc.ep133.ui.screens.EditUi(on = edit, onEdit = {}),
             wireless = wireless,
+            functions = functions,
         )
     }
 }
@@ -539,6 +547,110 @@ fun LivePadSheetPreview() {
                 busy = false,
                 onPlay = { _, _ -> }, onStop = {}, onPick = { _, _ -> }, onUpload = {},
             )
+        }
+    }
+}
+
+// The function keys: the click on, TEMPO's light caught on a beat and its label the EP-133's
+// tempo (it sends MIDI clock, which the click follows).
+@PreviewTest
+@Preview(name = "Live click on", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveClickOnPreview() = Live(playing, oneGroup = true, clickOn = true)
+
+@PreviewTest
+@Preview(name = "Live click on dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveClickOnDarkPreview() = Live(playing, dark = true, oneGroup = true, clickOn = true)
+
+// Offline from the last read with no factory pack saved: nothing to step to, PROJECT greyed out.
+@PreviewTest
+@Preview(name = "Live offline project greyed", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun LiveOfflineProjectGreyedPreview() = Live(lastRead, oneGroup = true, offline = "Last seen Oct 5, 2:02 PM")
+
+// Offline with the factory pack: PROJECT stepped on to its project 3, the note naming it.
+@PreviewTest
+@Preview(name = "Live factory project 3", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun LiveFactoryProject3Preview() = Live(
+    lastRead.copy(activeProject = 3), offline = MirrorText.FACTORY, noteOpen = true, offlineProjects = listOf(1, 2, 3, 4, 5),
+)
+
+@PreviewTest
+@Preview(name = "Live click on sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveClickOnSidewaysPreview() = Live(playing, oneGroup = true, clickOn = true)
+
+@PreviewTest
+@Preview(name = "Live all groups sideways small", widthDp = 692, heightDp = 336, showBackground = true)
+@Composable
+fun LiveAllGroupsSidewaysSmallPreview() = Live(playing)
+
+@PreviewTest
+@Preview(name = "Live keys sideways grid small", widthDp = 692, heightDp = 336, showBackground = true)
+@Composable
+fun LiveKeysSidewaysGridSmallPreview() = Live(sideways, keys = chord.copy(viewWide = dev.arc.ep133.features.KeysView.PADS))
+
+// A short window on its side (a phone with a large display size): the function column closes
+// up its gaps and shrinks its caps; shorter still, it drops the LED lines.
+@PreviewTest
+@Preview(name = "Live one group sideways short", widthDp = 560, heightDp = 280, showBackground = true)
+@Composable
+fun LiveOneGroupSidewaysShortPreview() = Live(playing, oneGroup = true, clickOn = true)
+
+@PreviewTest
+@Preview(name = "Live one group sideways shortest", widthDp = 490, heightDp = 253, showBackground = true)
+@Composable
+fun LiveOneGroupSidewaysShortestPreview() = Live(playing, oneGroup = true)
+
+@PreviewTest
+@Preview(name = "Live keys sideways grid short", widthDp = 560, heightDp = 280, showBackground = true)
+@Composable
+fun LiveKeysSidewaysGridShortPreview() = Live(sideways, keys = chord.copy(viewWide = dev.arc.ep133.features.KeysView.PADS))
+
+// TEMPO held: the tempo sheet over Live, the click on at the phone's tempo.
+@PreviewTest
+@Preview(name = "Tempo sheet", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun TempoSheetPreview() = TempoSheet(deviceBpm = null)
+
+// While the EP-133 sends MIDI clock its tempo leads: − + and TAP rest.
+@PreviewTest
+@Preview(name = "Tempo sheet following", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun TempoSheetFollowingPreview() = TempoSheet(deviceBpm = 122.0)
+
+@Composable
+private fun TempoSheet(deviceBpm: Double?) {
+    Framed(Tab.LIVE) {
+        MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
+        ArcSheet(visible = true, onDismiss = {}) {
+            TempoSheetContent(bpm = 98, deviceBpm = deviceBpm, on = true, onOn = {}, onBpm = {}, onTap = {}, onDone = {})
+        }
+    }
+}
+
+// PROJECT held: projects 1 to 9 in the keypad's order, the one shown orange.
+@PreviewTest
+@Preview(name = "Project sheet", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun ProjectSheetPreview() = ProjectSheet(MirrorUi(lastRead, loading = false))
+
+// Offline with the factory pack: only the views arc has can be picked.
+@PreviewTest
+@Preview(name = "Project sheet offline", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun ProjectSheetOfflinePreview() = ProjectSheet(
+    MirrorUi(lastRead.copy(activeProject = 1), loading = false, offline = MirrorText.FACTORY, offlineProjects = listOf(1, 2, 3, 4, 5)),
+)
+
+@Composable
+private fun ProjectSheet(mirror: MirrorUi) {
+    Framed(Tab.LIVE) {
+        MirrorScreen(mirror = mirror, nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
+        ArcSheet(visible = true, onDismiss = {}) {
+            ProjectSheetContent(choices = projectChoicesOf(mirror, busy = false), onPick = {}, onDone = {})
         }
     }
 }

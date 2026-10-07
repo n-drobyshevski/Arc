@@ -36,6 +36,19 @@ class OfflineEditTest {
     }
 
     @Test
+    fun `a factory project shown over a last read lists the pack's sounds first, both still offered`() {
+        // PROJECT stepped from the last read to one of the pack's projects.
+        val s = offlineSoundsOf(read, pack, setOf(1), base = SoundSource.FACTORY)
+        assertEquals(SoundSource.FACTORY, s.base)
+        assertEquals(offlineSoundsOf(read, pack, setOf(1)).device, s.device)
+        assertEquals(offlineSoundsOf(read, pack, setOf(1)).factory, s.factory)
+        // And back to the last read.
+        assertEquals(SoundSource.DEVICE, offlineSoundsOf(read, pack, setOf(1), base = SoundSource.DEVICE).base)
+        // Any of the pack's projects gives the same list: each has every sound's name.
+        assertEquals(s.factory, offlineSoundsOf(read, pack.copy(activeProject = 3, groups = emptyList()), setOf(1), SoundSource.FACTORY).factory)
+    }
+
+    @Test
     fun `a pick needs a listed row arc can play`() {
         val s = offlineSoundsOf(read, pack, setOf(1))
         assertEquals(SoundEntry(5, "kick", 0), s.pick(5, SoundSource.DEVICE))

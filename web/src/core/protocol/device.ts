@@ -77,12 +77,61 @@ export const PROJECTS_NODE = 2000
 export const MAX_SAMPLE_RATE = 46875
 export const MAX_SOUND_NAME = 20
 
+/** The device's projects, 1..9 (the PROJECT key's numbers, and the ones a backup probes). */
+export const PROJECT_COUNT = 9
+
 export const projectNode = (n: number): number => 3000 + (n - 1) * 1000
 
 export function projectFromNode(node: number): number | null {
   if (node < 3000 || (node - 3000) % 1000 !== 0) return null
   const n = (node - 3000) / 1000 + 1
   return n >= 1 && n <= 99 ? n : null
+}
+
+/** Kotlin String.toDoubleOrNull (Java's float syntax, no surrounding blanks). */
+function ktToDoubleOrNull(s: string): number | null {
+  if (!/^[+-]?(NaN|Infinity|((\d+\.?\d*|\.\d+)([eE][+-]?\d+)?)[fFdD]?)$/.test(s)) return null
+  const v = Number(s.replace(/[fFdD]$/, ''))
+  return Number.isNaN(v) && !/NaN/.test(s) ? null : v
+}
+
+/** Kotlin Double.toInt(): toward zero, NaN is 0, clamped to Int. */
+function ktToInt(d: number): number {
+  if (Number.isNaN(d)) return 0
+  if (d >= 2147483647) return 2147483647
+  if (d <= -2147483648) return -2147483648
+  return Math.trunc(d)
+}
+
+/**
+ * The project an "active" value of /projects' metadata names (a node, as a
+ * number or a numeric string), or null when it names none. The Kotlin
+ * `(active as? JsonPrimitive)?.content?.toDoubleOrNull()?.toInt()?.let(::projectFromNode)`.
+ */
+export function projectOfActive(active: JsonValue | undefined): number | null {
+  if (active === undefined || active === null) return null
+  if (typeof active === 'object') return null
+  const content = typeof active === 'string' ? active : String(active)
+  const d = ktToDoubleOrNull(content)
+  return d === null ? null : projectFromNode(ktToInt(d))
+}
+
+/** The project the device plays now, from /projects' metadata; null when it names none. */
+export async function activeProject(session: Session): Promise<number | null> {
+  return projectOfActive(asObject(await getMetadata(session, PROJECTS_NODE)).active)
+}
+
+/**
+ * Makes project [n] the active one, as PROJECT on the device does: the
+ * METADATA SET of {"active": node} on /projects that [writeProject] and a
+ * restore use to make the device load a project. Kotlin's `require` is a
+ * RangeError.
+ */
+export async function setActiveProject(session: Session, n: number): Promise<void> {
+  if (!(Number.isInteger(n) && n >= 1 && n <= PROJECT_COUNT)) {
+    throw new RangeError(`Project ${n} doesn't exist. Projects go from 1 to ${PROJECT_COUNT}.`)
+  }
+  await setMetadata(session, PROJECTS_NODE, { active: projectNode(n) })
 }
 
 /** Per-sound settings worth carrying through a backup. */

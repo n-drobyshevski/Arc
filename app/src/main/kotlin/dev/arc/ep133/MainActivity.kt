@@ -58,6 +58,8 @@ import dev.arc.ep133.ui.screens.GuideScreen
 import dev.arc.ep133.ui.screens.MirrorScreen
 import dev.arc.ep133.ui.screens.PadsSheetContent
 import dev.arc.ep133.ui.screens.PadSheetContent
+import dev.arc.ep133.ui.screens.ProjectSheetContent
+import dev.arc.ep133.ui.screens.TempoSheetContent
 import dev.arc.ep133.ui.screens.SearchScreen
 import dev.arc.ep133.ui.screens.SettingsScreen
 import dev.arc.ep133.ui.screens.DeviceScreen
@@ -395,6 +397,9 @@ class MainActivity : ComponentActivity() {
         // Live's EDIT (the tab under GUIDE), and the pad whose sheet is open with where its sound is set.
         var liveEdit by rememberSaveable { mutableStateOf(false) }
         var padSheet by remember { mutableStateOf<Pair<dev.arc.ep133.features.PhysicalPad, dev.arc.ep133.features.PadTarget>?>(null) }
+        // TEMPO held: the tempo sheet; PROJECT held: the project sheet.
+        var tempoSheet by rememberSaveable { mutableStateOf(false) }
+        var projectSheet by rememberSaveable { mutableStateOf(false) }
         // The mirror listens only while its tab is in front (not under the debug, settings or guide screen).
         val live = tab == Tab.LIVE && !debug && !settingsOpen && !guideOpen
         val appSettings by controller.settings.collectAsStateWithLifecycle()
@@ -408,6 +413,8 @@ class MainActivity : ComponentActivity() {
                     controller.stopPlayback()
                     liveEdit = false
                     padSheet = null
+                    tempoSheet = false
+                    projectSheet = false
                 }
                 Tab.DEVICE -> {
                     padsFor = null
@@ -522,6 +529,19 @@ class MainActivity : ComponentActivity() {
             viewTall = appSettings.keysViewTall,
             pad = state.keysPad,
             padName = state.keysPad?.let(controller::mirrorName),
+        )
+        // Live's function keys: PROJECT steps through the projects, KEYS is the mode, TEMPO the phone's click.
+        val metronome by controller.metronome.collectAsStateWithLifecycle()
+        val functions = dev.arc.ep133.ui.screens.FunctionKeysUi(
+            project = dev.arc.ep133.ui.screens.projectKeyOf(mirror, state.busy),
+            onProject = controller::stepProject,
+            onPickProject = { projectSheet = true },
+            onSelectProject = controller::selectProject,
+            clickOn = metronome.on,
+            bpm = metronome.bpm,
+            beats = controller.beats,
+            onClick = controller::setClick,
+            onTempo = { tempoSheet = true },
         )
         // The piano's notes while it shows, so the bar's display line can name a device note past its ends.
         var pianoRange by remember { mutableStateOf<IntRange?>(null) }
@@ -715,6 +735,7 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onPad = { pad -> controller.editTarget(pad)?.let { padSheet = pad to it } },
                             ),
+                            functions = functions,
                         )
                         Tab.DEVICE -> DeviceScreen(
                             state = state,
@@ -780,6 +801,24 @@ class MainActivity : ComponentActivity() {
                                 localName = offline?.let { controller.mirrorLocal(pad)?.name },
                             )
                         }
+                    }
+                    ArcSheet(visible = projectSheet, onDismiss = { projectSheet = false }) {
+                        ProjectSheetContent(
+                            choices = dev.arc.ep133.ui.screens.projectChoicesOf(mirror, state.busy),
+                            onPick = controller::selectProject,
+                            onDone = { projectSheet = false },
+                        )
+                    }
+                    ArcSheet(visible = tempoSheet, onDismiss = { tempoSheet = false }) {
+                        TempoSheetContent(
+                            bpm = metronome.bpm,
+                            deviceBpm = mirror?.state?.bpm,
+                            on = metronome.on,
+                            onOn = controller::setClick,
+                            onBpm = controller::setTempo,
+                            onTap = { controller.tapTempo(it) },
+                            onDone = { tempoSheet = false },
+                        )
                     }
                 }
                 if (tab == Tab.DEVICE) {
