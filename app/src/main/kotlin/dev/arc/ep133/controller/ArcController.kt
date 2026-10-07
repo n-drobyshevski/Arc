@@ -17,6 +17,10 @@ import dev.arc.ep133.features.DeviceBrowser
 import dev.arc.ep133.features.DeviceContents
 import dev.arc.ep133.features.DiffResult
 import dev.arc.ep133.features.FactorySounds
+import dev.arc.ep133.features.OfflinePad
+import dev.arc.ep133.features.OfflinePads
+import dev.arc.ep133.features.PadSample
+import dev.arc.ep133.features.SoundSource
 import dev.arc.ep133.features.SampleUpload
 import dev.arc.ep133.features.SoundDetails
 import dev.arc.ep133.features.UploadItem
@@ -123,6 +127,22 @@ data class MirrorUi(
     val offline: String? = null,
     /** The device's sounds as Live read them, for EDIT's pad sheet (empty until read, and offline). */
     val sounds: List<dev.arc.ep133.protocol.SoundEntry> = emptyList(),
+    /** Offline: the sounds EDIT's pad sheet lists instead, played and put on pads in arc only. */
+    val offlineSounds: OfflineSounds? = null,
+)
+
+/**
+ * The sound lists Live offers offline (an addition): the device's sounds as
+ * last read ([device], null when never read) and the factory pack's
+ * ([factory], null when the library has none), with no sizes. [base] is the
+ * list the view shows (the factory sounds when nothing was read);
+ * [unavailable] are the device's slots arc has no audio for, dimmed.
+ */
+data class OfflineSounds(
+    val base: SoundSource,
+    val device: List<dev.arc.ep133.protocol.SoundEntry>?,
+    val factory: List<dev.arc.ep133.protocol.SoundEntry>?,
+    val unavailable: Set<Int>,
 )
 
 /** A backup opened for its contents screen (sounds and projects, playback, export). */
@@ -164,6 +184,10 @@ data class UiState(
     val keysPad: dev.arc.ep133.features.PhysicalPad? = null,
     /** Whether the library folder has been picked (after a reinstall); until then restoring is offered. */
     val folderPicked: Boolean = false,
+    /** Live's pad changes made offline, in arc only ([OfflinePads]): how many, for Live tools' Reset row. */
+    val offlinePads: Int = 0,
+    /** The EP-133 connected with offline pad changes kept: how many, while it asks whether to write them. */
+    val offlinePrompt: Int? = null,
 )
 
 /**
@@ -176,6 +200,9 @@ private const val PAD_MEMORY_BYTES = 64L * 1024 * 1024
 
 /** How much of the backup sounds and takes played in lists is kept decoded, for a quick replay. */
 private const val PREVIEW_MEMORY_BYTES = 16L * 1024 * 1024
+
+/** The previews' keys for the pad sheet's offline sounds ("pad:<source>:<slot>:<name>"); backups are "backup:<id>:<slot>". */
+private const val PAD_PREVIEW = "pad:"
 
 /** A Live press let go of while its sound loaded for longer than this sounds only if no press came after it. */
 private const val LATE_LOAD_NS = 120_000_000L
@@ -210,6 +237,74 @@ internal fun shownMirror(shown: dev.arc.ep133.features.MirrorState?, next: dev.a
     return if (next.copy(bpm = shown.bpm) == shown) shown else next
 }
 
+/**
+ * The lists Live offers offline: the device's sounds from [lastRead] and the
+ * factory pack's from [factory] (its first project as Live shows it), by
+ * slot, sizes unknown; [unavailable] from [dev.arc.ep133.features.PadSounds.unavailable].
+ */
+internal fun offlineSoundsOf(
+    lastRead: dev.arc.ep133.features.LiveSnapshot?,
+    factory: dev.arc.ep133.features.LiveSnapshot?,
+    unavailable: Set<Int>,
+): OfflineSounds {
+    fun list(names: Map<Int, String>) = names.entries.sortedBy { it.key }.map { dev.arc.ep133.protocol.SoundEntry(it.key, it.value, 0) }
+    return OfflineSounds(
+        base = if (lastRead != null) SoundSource.DEVICE else SoundSource.FACTORY,
+        device = lastRead?.let { list(it.names) },
+        factory = factory?.let { list(it.names) },
+        unavailable = unavailable,
+    )
+}
+
+/**
+ * [slot]'s row in [source]'s list when it is listed and arc can play it;
+ * null: it needs the EP-133. The pad's own sound in the read ([readSlot])
+ * is always taken, unplayable or not: picking it drops the pad's change.
+ */
+internal fun OfflineSounds.pick(slot: Int, source: SoundSource, readSlot: Int? = null): dev.arc.ep133.protocol.SoundEntry? {
+    val list = if (source == SoundSource.FACTORY) factory else device
+    return list?.firstOrNull { it.slot == slot }?.takeIf { source == SoundSource.FACTORY || slot !in unavailable || slot == readSlot }
+}
+
+/**
+ * [pads] after [slot] ([name], from [source]) was picked offline for [t]'s
+ * pad: picking the device's own sound, the one the read has there
+ * ([readSlot]), drops the pad's change; anything else is put on it.
+ */
+internal fun offlineAssign(
+    pads: OfflinePads,
+    t: dev.arc.ep133.features.PadTarget,
+    slot: Int,
+    name: String,
+    source: SoundSource,
+    readSlot: Int?,
+): OfflinePads =
+    if (source == SoundSource.DEVICE && slot == readSlot) pads.drop(t.project, t.group, t.pad)
+    else pads.put(OfflinePad(t.project, t.group, t.pad, slot, name, source))
+
+/** What reconnecting does with one offline pad change. */
+internal sealed interface OfflineStep {
+    /** Skipped: the EP-133 has another sound or project there now ([OfflinePads.fits]). */
+    data object Skip : OfflineStep
+
+    /** The pad has that sound already: done without a write. */
+    data object Done : OfflineStep
+
+    /** [slot] to write on [target]'s pad (its slot the one the read has now). */
+    data class Write(val target: dev.arc.ep133.features.PadTarget, val slot: Int) : OfflineStep
+}
+
+/**
+ * The step for [p] on the device as Live just read it: its [activeProject],
+ * its sound names by slot ([deviceNames]) and the slot on [p]'s pad now
+ * ([readSlot]).
+ */
+internal fun offlineStep(p: OfflinePad, activeProject: Int?, deviceNames: Map<Int, String>, readSlot: Int?): OfflineStep = when {
+    !OfflinePads.fits(p, activeProject, deviceNames) -> OfflineStep.Skip
+    readSlot == p.slot -> OfflineStep.Done
+    else -> OfflineStep.Write(dev.arc.ep133.features.PadTarget(p.project, p.group, p.pad, readSlot), p.slot)
+}
+
 class ArcController(
     private val context: Context,
     private val library: Library,
@@ -237,6 +332,13 @@ class ArcController(
     @Volatile
     private var lastRead: dev.arc.ep133.features.LiveSnapshot? = null
     private var lastReadLoaded = false
+    // Live's pad changes made offline, in arc only, until the next connection puts them on the
+    // device or "Reset pads" clears them. Not in Documents/arc: they belong to this install's read.
+    private val offlinePadsFile by lazy { java.io.File(context.filesDir, "live-pads.json") }
+    @Volatile
+    private var offlinePads: OfflinePads? = null
+    // Write putting them on the device: the changes are cleared only at its end, so a read meanwhile doesn't ask again.
+    private var offlineWrite: Job? = null
 
     // Live's pads play on the phone: from arc's copy of the device's sounds, a backup, or the device.
     private val padSounds by lazy { dev.arc.ep133.features.PadSoundCache(java.io.File(context.filesDir, "pad-sounds")) }
@@ -314,7 +416,7 @@ class ArcController(
                 .catch { e -> toast(Strings.libraryFailed(e.message ?: e.toString()), error = true) }
                 .collect { list ->
                     _state.update { it.copy(backups = list, libraryLoaded = true, spaceLeft = runCatching { library.spaceLeft() }.getOrNull()) }
-                    factoryChanged()
+                    refreshOffline()
                 }
         }
         library.settings = {
@@ -331,7 +433,16 @@ class ArcController(
         scope.launch { loadTakes() }
         _state.update { it.copy(keysPad = savedKeysPad()) }
         scope.launch {
-            library.names.catch { /* shown by the backups collector */ }.collect { backupNames = it; openPak = null }
+            library.names.catch { /* shown by the backups collector */ }.collect {
+                backupNames = it
+                openPak = null
+                // Which of the device's sounds Live can play offline follows the backups.
+                refreshOffline()
+            }
+        }
+        scope.launch {
+            val pads = loadOfflinePads()
+            _state.update { it.copy(offlinePads = pads.size) }
         }
         scope.launch {
             runCatching { library.sweep() }
@@ -424,7 +535,8 @@ class ArcController(
         if (_state.value.mirror != null) scope.launch { openOfflineMirror() }
         playToken++ // a device sound still downloading must not start after the device is gone
         if (player.playing.value?.startsWith("device:") == true) player.stop()
-        _state.update { it.copy(connected = false, device = null, browser = BrowserUi(), diff = null) }
+        // A question about offline pad changes goes with the device; they are kept, and asked about at the next read.
+        _state.update { it.copy(connected = false, device = null, browser = BrowserUi(), diff = null, offlinePrompt = null) }
         if (message != null) toast(message, error = true)
     }
 
@@ -731,6 +843,38 @@ class ArcController(
     }
 
     /**
+     * Plays a sound from EDIT's pad sheet: from the device's list
+     * ([SoundSource.DEVICE]) or the factory pack's. Connected, the device's
+     * sounds play as [playDeviceSound] does. Offline, from what arc has: the
+     * sound in memory, arc's copy or a backup (the pack first for a factory
+     * sound), decoded once for a quick replay; under the player's key
+     * "device:N" or "factory:N". Nothing found: a toast says so.
+     */
+    fun playLiveSound(slot: Int, source: SoundSource): Job {
+        if (source == SoundSource.DEVICE && session != null && _state.value.device != null) return playDeviceSound(slot)
+        return scope.launch {
+            val token = ++playToken
+            val key = "${source.id}:$slot"
+            val sounds = _state.value.mirror?.offlineSounds
+            val name = (if (source == SoundSource.FACTORY) sounds?.factory else sounds?.device)?.firstOrNull { it.slot == slot }?.name ?: return@launch
+            val previewKey = "$PAD_PREVIEW$key:${name.trim().lowercase()}"
+            val sound = previews[previewKey] ?: padMemory[memoryKey(slot, name)]
+                ?: try {
+                    loadPadAudio(slot, name, source == SoundSource.FACTORY)?.also { previews.put(previewKey, it) }
+                } catch (e: Throwable) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    toast(e.message ?: e.toString(), error = true)
+                    return@launch
+                }
+            if (sound == null) {
+                toast(dev.arc.ep133.text.MirrorText.NO_COPY)
+                return@launch
+            }
+            if (token == playToken) startSound(key, sound)
+        }
+    }
+
+    /**
      * Plays on the phone and says so when nothing will be heard: a sound that
      * can't play, or media volume at zero. Where the sound went is noted in the
      * debug log, for reports of a sound that plays but isn't heard.
@@ -924,6 +1068,7 @@ class ArcController(
             dirty.set(true)
             news.trySend(Unit)
             if (ok == true) {
+                offerOfflinePads(s)
                 saveLastRead(m)
                 preloadPads(m)
                 copyPadSounds(m, s)
@@ -955,10 +1100,29 @@ class ArcController(
             onLearned = {},
         )
         m.load(snap)
+        // The pads changed offline show and play their new sounds; the lists for EDIT's pad sheet.
+        m.setLocal(loadOfflinePads())
+        val sounds = offlineSounds(lastRead)
+        if (gen != mirrorGen || session != null && _state.value.device != null) return
         mirror = m
         preloadPads(m)
         val offline = if (lastRead != null) dev.arc.ep133.text.MirrorText.lastSeen(fmtDateTime(lastRead.savedAt)) else dev.arc.ep133.text.MirrorText.FACTORY
-        _state.update { it.copy(mirror = MirrorUi(m.snapshot(System.nanoTime()), loading = false, offline = offline)) }
+        _state.update { it.copy(mirror = MirrorUi(m.snapshot(System.nanoTime()), loading = false, offline = offline, offlineSounds = sounds)) }
+    }
+
+    /**
+     * The lists Live offers offline ([OfflineSounds]): the device's sounds
+     * from [lastRead], dimmed where arc has neither a copy, a backup nor the
+     * factory pack's sound, and the factory pack's.
+     */
+    private suspend fun offlineSounds(lastRead: dev.arc.ep133.features.LiveSnapshot?): OfflineSounds {
+        val factory = factorySnapshot()
+        val unavailable = lastRead?.let { r ->
+            val copies = withContext(Dispatchers.IO) { runCatching { padSounds.copies() }.getOrDefault(emptyMap()) }
+            val packSaved = FactorySounds.inLibrary(_state.value.backups) != null
+            withContext(Dispatchers.Default) { dev.arc.ep133.features.PadSounds.unavailable(r.names, copies, backupNames, packSaved) }
+        }
+        return offlineSoundsOf(lastRead, factory, unavailable.orEmpty())
     }
 
     /**
@@ -979,16 +1143,26 @@ class ArcController(
     }
 
     /**
-     * Live without a device shows the factory sounds once they are in the
-     * library, and stops when they are deleted: it opens offline again.
+     * Live without a device follows the library: it shows the factory sounds
+     * once they are in it, and stops when they are deleted (it opens offline
+     * again); otherwise the offline lists are made again, as which sounds
+     * arc can play changes with the backups, the pack and the copies.
      */
-    private fun factoryChanged() {
+    private fun refreshOffline() {
         val st = _state.value
         val mi = st.mirror ?: return
         if (session != null && st.device != null) return
         val has = FactorySounds.inLibrary(st.backups) != null
         if (has && mi.error == dev.arc.ep133.text.MirrorText.NOT_CONNECTED || !has && mi.offline == dev.arc.ep133.text.MirrorText.FACTORY) {
             scope.launch { openOfflineMirror() }
+            return
+        }
+        val m = mirror ?: return
+        if (mirrorSession != null || mi.offlineSounds == null) return
+        val gen = mirrorGen
+        scope.launch {
+            val sounds = offlineSounds(loadLastRead())
+            if (gen == mirrorGen && mirror === m) _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(offlineSounds = sounds)) } ?: cur }
         }
     }
 
@@ -1031,6 +1205,36 @@ class ArcController(
                 runCatching {
                     tmp.writeText(snap.toJson())
                     if (!tmp.renameTo(lastReadFile)) tmp.delete()
+                }
+            }
+        }
+    }
+
+    /** Live's pad changes made offline, read from their file once (none when it is missing or unreadable). */
+    private suspend fun loadOfflinePads(): OfflinePads {
+        offlinePads?.let { return it }
+        val read = withContext(Dispatchers.IO) {
+            runCatching { OfflinePads.fromJson(offlinePadsFile.readText()) }.getOrNull()
+        } ?: OfflinePads.EMPTY
+        // Changes saved meanwhile are newer than the file was.
+        return offlinePads ?: read.also { offlinePads = it }
+    }
+
+    /** Keeps [pads] as Live's offline changes (written whole, then renamed over the file); none deletes the file. */
+    private fun saveOfflinePads(pads: OfflinePads) {
+        offlinePads = pads
+        _state.update { it.copy(offlinePads = pads.size) }
+        scope.launch(Dispatchers.IO) {
+            synchronized(offlinePadsFile) {
+                if (offlinePads !== pads) return@synchronized // newer changes are on their way
+                runCatching {
+                    if (pads.size == 0) {
+                        offlinePadsFile.delete()
+                    } else {
+                        val tmp = java.io.File(offlinePadsFile.path + ".tmp")
+                        tmp.writeText(pads.toJson())
+                        if (!tmp.renameTo(offlinePadsFile)) tmp.delete()
+                    }
                 }
             }
         }
@@ -1421,26 +1625,32 @@ class ArcController(
     private fun preloadPads(m: dev.arc.ep133.features.LiveMirror) {
         val gen = ++preloadGen
         preloadJob = scope.launch {
-            val snap = m.saved(0)
-            val slots = snap.groups.flatMap { it.pads.values }.filterNotNull().distinct().sorted()
-            val tried = HashSet<Int>()
+            val samples = m.padSamples()
+            val tried = HashSet<PadSample>()
             while (gen == preloadGen && mirror === m) {
-                val keysSlot = _state.value.keysPad?.let(m::slotOf)
-                val slot = (listOfNotNull(keysSlot) + slots).firstOrNull { it !in tried } ?: break
-                tried += slot
-                val name = snap.names[slot] ?: continue
+                val keysSample = _state.value.keysPad?.let(m::sampleOf)
+                val sample = (listOfNotNull(keysSample) + samples).firstOrNull { it !in tried } ?: break
+                tried += sample
+                val (slot, name) = sample
                 val key = memoryKey(slot, name)
                 // In memory already, or a press is loading it.
                 if (padMemory.containsKey(key) || key in padLoads) continue
-                val a = runCatching { loadPadAudio(slot, name) }.getOrNull() ?: continue
+                val a = runCatching { loadPadAudio(slot, name, sample.factory) }.getOrNull() ?: continue
                 if (gen == preloadGen && mirror === m) keepInMemory(slot, name, a)
             }
         }
     }
 
-    /** A sample from arc's copy or a backup, decoded; null when neither has it. */
-    private suspend fun loadPadAudio(slot: Int, name: String): PcmSound? {
-        val wav = withContext(Dispatchers.IO) { padSounds.get(slot, name) } ?: fromBackup(slot, name) ?: return null
+    /**
+     * A sample from arc's copy or a backup, decoded; null when neither has it.
+     * A factory sound put on a pad offline ([factory]) comes from the factory
+     * pack first: the device's copy in that slot may be another sound.
+     */
+    private suspend fun loadPadAudio(slot: Int, name: String, factory: Boolean = false): PcmSound? {
+        val wav = (if (factory) fromPack(slot, name) else null)
+            ?: withContext(Dispatchers.IO) { padSounds.get(slot, name) }
+            ?: fromBackup(slot, name)
+            ?: return null
         return withContext(Dispatchers.Default) {
             val w = Wav.decode(wav)
             PcmSound.of(w.pcm, w.channels, w.sampleRate.toInt())
@@ -1449,28 +1659,24 @@ class ArcController(
 
     /** A pad's sample when it is in memory already, without waiting. */
     private fun padInMemory(pad: dev.arc.ep133.features.PhysicalPad): PcmSound? {
-        val m = mirror ?: return null
-        val slot = m.slotOf(pad) ?: return null
-        val name = m.nameOf(pad) ?: return null
-        return padMemory[memoryKey(slot, name)]
+        val s = mirror?.sampleOf(pad) ?: return null
+        return padMemory[memoryKey(s.slot, s.name)]
     }
 
     /** A pad's sample from the first place that has it; null after a toast says why. */
     private suspend fun padAudio(pad: dev.arc.ep133.features.PhysicalPad): PcmSound? {
-        val m = mirror
-        val slot = m?.slotOf(pad)
-        val name = m?.nameOf(pad)
-        if (slot == null || name == null) {
+        val sample = mirror?.sampleOf(pad)
+        if (sample == null) {
             toastOnce(dev.arc.ep133.text.MirrorText.NO_SAMPLE)
             return null
         }
-        val key = memoryKey(slot, name)
+        val key = memoryKey(sample.slot, sample.name)
         padMemory[key]?.let { return it }
         // Lazy: in the map before it runs, so even one that ends at once takes itself out.
         val load = padLoads.getOrPut(key) {
             scope.async(start = kotlinx.coroutines.CoroutineStart.LAZY) {
                 try {
-                    loadForPress(slot, name)
+                    loadForPress(sample)
                 } finally {
                     padLoads.remove(key)
                 }
@@ -1480,10 +1686,11 @@ class ArcController(
     }
 
     /** What [padAudio] waits for: arc's copy or a backup, else the device; null after a toast says why. */
-    private suspend fun loadForPress(slot: Int, name: String): PcmSound? {
+    private suspend fun loadForPress(sample: PadSample): PcmSound? {
+        val (slot, name) = sample
         return try {
             // The background copy reading this very sound: wait for it rather than read it twice.
-            val copied = loadPadAudio(slot, name) ?: copying?.takeIf { it.first == slot }?.second?.await()
+            val copied = loadPadAudio(slot, name, sample.factory) ?: copying?.takeIf { it.first == slot }?.second?.await()
             val audio = copied ?: padMemory[memoryKey(slot, name)] ?: if (session != null && _state.value.device != null) {
                 val (d, pcm) = exclusive("play:$slot") { s -> DeviceBrowser.soundDetails(s, slot) to dev.arc.ep133.protocol.Fs.download(s, slot) }
                     ?: return null
@@ -1491,7 +1698,7 @@ class ArcController(
                 deviceSounds[slot]?.let { keepPadSound(slot, it.name, it.size, pcm, d.channels, d.sampleRate) }
                     ?: withContext(Dispatchers.Default) { PcmSound.of(pcm, d.channels.toInt(), d.sampleRate.toInt()) }
             } else {
-                val factory = FactorySounds.unnamed(slot, name) && FactorySounds.inLibrary(_state.value.backups) == null
+                val factory = (sample.factory || FactorySounds.unnamed(slot, name)) && FactorySounds.inLibrary(_state.value.backups) == null
                 toastOnce(if (factory) dev.arc.ep133.text.MirrorText.NO_COPY_FACTORY else dev.arc.ep133.text.MirrorText.NO_COPY)
                 return null
             }
@@ -1564,6 +1771,13 @@ class ArcController(
         return pakOf(b.id).sounds[slot]?.wav
     }
 
+    /** The factory pack's sound in [slot], when the library has the pack and the sound there is still [name]. */
+    private suspend fun fromPack(slot: Int, name: String): ByteArray? {
+        val b = FactorySounds.inLibrary(_state.value.backups) ?: return null
+        val snd = pakOf(b.id).sounds[slot] ?: return null
+        return snd.wav.takeIf { dev.arc.ep133.features.PadSoundCache.sameName(snd.name, name) }
+    }
+
     /** A library entry opened, the last one kept open. */
     private suspend fun pakOf(id: String): dev.arc.ep133.backup.Pak =
         openPak?.takeIf { it.first == id }?.second
@@ -1574,9 +1788,12 @@ class ArcController(
 
     fun clearPadSounds(): Job = scope.launch {
         forgetPadMemory()
+        previews.removeAll { it.startsWith(PAD_PREVIEW) }
         withContext(Dispatchers.IO) { padSounds.clear() }
         // What a backup still has plays as quickly as before.
         mirror?.let(::preloadPads)
+        // Offline, the device's sounds only copied are dimmed now.
+        refreshOffline()
         toast(dev.arc.ep133.text.MirrorText.SOUNDS_CLEARED)
     }
 
@@ -1596,6 +1813,12 @@ class ArcController(
     /** The sample on a pad in the mirror, once it is known. */
     fun mirrorName(pad: dev.arc.ep133.features.PhysicalPad): String? = mirror?.nameOf(pad)
 
+    /** The sound put on a pad offline, in arc only, if any (for the pad sheet's list). */
+    fun mirrorLocal(pad: dev.arc.ep133.features.PhysicalPad): OfflinePad? = mirror?.localOf(pad)
+
+    /** The slot the read has on [t]'s pad, under any offline change: the pad sheet keeps it pickable. */
+    fun mirrorReadSlot(t: dev.arc.ep133.features.PadTarget): Int? = mirror?.slotAt(t.group, t.pad)
+
     /** The device's sounds as Live read them: for its copies, its names and EDIT's pad sheet. */
     private fun setLiveSounds(m: dev.arc.ep133.features.LiveMirror, sounds: List<dev.arc.ep133.protocol.SoundEntry>) {
         deviceSounds = sounds.associateBy { it.slot }
@@ -1607,12 +1830,15 @@ class ArcController(
 
     /**
      * Where a tapped pad's sound is set, for EDIT's pad sheet; null (with a
-     * toast saying why) while the device isn't connected, or Live hasn't read
-     * the active project yet.
+     * toast saying why) while the device isn't connected and Live shows no
+     * last read (or factory sounds) to change in arc, or Live hasn't read the
+     * active project yet.
      */
     fun editTarget(pad: dev.arc.ep133.features.PhysicalPad): dev.arc.ep133.features.PadTarget? {
         val m = mirror
-        if (session == null || _state.value.device == null || mirrorSession == null || m == null) {
+        // Offline, the pads change in arc only, until the device connects (assignOffline).
+        val offline = m != null && mirrorSession == null && _state.value.device == null && _state.value.mirror?.offlineSounds != null
+        if (!offline && (session == null || _state.value.device == null || mirrorSession == null) || m == null) {
             toast(dev.arc.ep133.text.MirrorText.EDIT_OFFLINE)
             return null
         }
@@ -1626,10 +1852,117 @@ class ArcController(
     /**
      * Puts sample [slot] on [pad] at once (where [t] says its sound is set).
      * The names follow straight away, and a toast offers UNDO when the pad's
-     * old sound is known (an empty pad can't be emptied again).
+     * old sound is known (an empty pad can't be emptied again). Offline it
+     * changes in arc only ([assignOffline]), picked from [source]'s list.
      */
-    fun assignPad(pad: dev.arc.ep133.features.PhysicalPad, t: dev.arc.ep133.features.PadTarget, slot: Int): Job = scope.launch {
+    fun assignPad(
+        pad: dev.arc.ep133.features.PhysicalPad,
+        t: dev.arc.ep133.features.PadTarget,
+        slot: Int,
+        source: SoundSource = SoundSource.DEVICE,
+    ): Job = scope.launch {
+        if (_state.value.device == null) return@launch assignOffline(pad, t, slot, source)
+        // The factory list is only offered offline: its slot isn't the device's sound.
+        if (source != SoundSource.DEVICE) return@launch
         if (writePad(t, slot, dev.arc.ep133.text.MirrorText::assignFailed)) assignedToast(pad, t, slot)
+    }
+
+    /**
+     * Offline: [slot] from [source]'s list on [pad] in arc only, kept until
+     * the device connects ([offerOfflinePads]) or "Reset pads". Only a sound
+     * arc can play is taken, and the device's own sound back on the pad
+     * (playable or not) drops its change. No UNDO: picking the old sound
+     * again does it.
+     */
+    private suspend fun assignOffline(
+        pad: dev.arc.ep133.features.PhysicalPad,
+        t: dev.arc.ep133.features.PadTarget,
+        slot: Int,
+        source: SoundSource,
+    ) {
+        val m = mirror?.takeIf { mirrorSession == null } ?: return toast(dev.arc.ep133.text.MirrorText.EDIT_OFFLINE)
+        val readSlot = m.slotAt(t.group, t.pad)
+        val entry = _state.value.mirror?.offlineSounds?.pick(slot, source, readSlot) ?: return toast(dev.arc.ep133.text.MirrorText.NEEDS_DEVICE)
+        val pads = offlineAssign(loadOfflinePads(), t, slot, entry.name, source, readSlot)
+        if (mirror !== m) return
+        saveOfflinePads(pads)
+        localChanged(m, pads)
+        toast(dev.arc.ep133.text.MirrorText.assignedOffline(pad, entry.name))
+    }
+
+    /** Live tools' "Reset pads": the offline pad changes go, and the pads play the device's sounds as last read. */
+    fun resetOfflinePads() {
+        saveOfflinePads(OfflinePads.EMPTY)
+        mirror?.takeIf { mirrorSession == null }?.let { localChanged(it, OfflinePads.EMPTY) }
+        toast(dev.arc.ep133.text.MirrorText.PADS_RESET)
+    }
+
+    /** The offline mirror [m] shows [pads]: names, samples and their preload follow. */
+    private fun localChanged(m: dev.arc.ep133.features.LiveMirror, pads: OfflinePads) {
+        m.setLocal(pads)
+        preloadPads(m)
+        _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(state = m.snapshot(System.nanoTime()))) } ?: cur }
+    }
+
+    /** A good read of the device on [s]: offline pad changes kept are asked about ([writeOfflinePads] or [discardOfflinePads]). */
+    private suspend fun offerOfflinePads(s: Session) {
+        // Still writing them (the app left and came back meanwhile): not asked again.
+        if (offlineWrite?.isActive == true) return
+        val pads = loadOfflinePads()
+        if (pads.size > 0 && session === s) _state.update { it.copy(offlinePrompt = pads.size) }
+    }
+
+    /**
+     * Write: the offline pad changes go on the device, one after another,
+     * each one only where it still fits ([OfflinePads.fits]): the project it
+     * was made on is the active one, and the device still holds that sound in
+     * that slot. Then they are cleared, and a toast counts what was put on
+     * and what skipped. The connection going meanwhile keeps the ones not
+     * written yet, for the next read to ask about. A Write while one runs
+     * is the same one.
+     */
+    fun writeOfflinePads(): Job {
+        _state.update { it.copy(offlinePrompt = null) }
+        offlineWrite?.takeIf { it.isActive }?.let { return it }
+        // Lazy, so it is the one running before its first step.
+        return scope.launch(start = kotlinx.coroutines.CoroutineStart.LAZY) { writeOfflinePadsNow() }.also {
+            offlineWrite = it
+            it.start()
+        }
+    }
+
+    private suspend fun writeOfflinePadsNow() {
+        val s = session
+        // The mirror's read is what the changes are checked against: wait for it.
+        _state.first { it.mirror?.loading != true }
+        val m = mirror
+        if (s == null || session !== s || m == null || mirrorSession !== s) return toast(dev.arc.ep133.text.MirrorText.EDIT_OFFLINE)
+        val pads = loadOfflinePads().list
+        var written = 0
+        var skipped = 0
+        for ((i, p) in pads.withIndex()) {
+            val names = deviceSounds.mapValues { it.value.name }
+            when (val step = offlineStep(p, m.snapshot(System.nanoTime()).activeProject, names, m.slotAt(p.group, p.pad))) {
+                OfflineStep.Skip -> skipped++
+                OfflineStep.Done -> written++
+                // writePad waits for the device when it is busy.
+                is OfflineStep.Write -> when {
+                    writePad(step.target, step.slot, dev.arc.ep133.text.MirrorText::assignFailed) -> written++
+                    // The connection went: this change and the rest are kept.
+                    session !== s -> return saveOfflinePads(OfflinePads(pads.drop(i)))
+                    else -> skipped++
+                }
+            }
+        }
+        saveOfflinePads(OfflinePads.EMPTY)
+        toast(dev.arc.ep133.text.MirrorText.offlineWritten(written, skipped))
+    }
+
+    /** Discard: the offline pad changes go, and the device keeps its pads as they are. */
+    fun discardOfflinePads() {
+        _state.update { it.copy(offlinePrompt = null) }
+        saveOfflinePads(OfflinePads.EMPTY)
+        toast(dev.arc.ep133.text.MirrorText.OFFLINE_DISCARDED)
     }
 
     /**
@@ -1762,6 +2095,8 @@ class ArcController(
     fun closeMirror() {
         stopMirror()
         forgetPadMemory()
+        // A question about offline pad changes goes with Live; the next read asks again.
+        _state.update { it.copy(offlinePrompt = null) }
         // When each copy was last played, kept for choosing what to drop when the copies fill up.
         scope.launch(Dispatchers.IO) { runCatching { padSounds.flush() } }
         _state.update { it.copy(mirror = null) }

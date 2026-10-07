@@ -13,8 +13,9 @@
 //
 // Live (ported from main's Live KEYS / pad playback delta): [LiveAudioDeps] is
 // Android's LiveAudio (one low-latency output mixing the pads and keys),
-// [Deps.padSounds] the folder PadSoundCache keeps its copies in, and
-// [Deps.lastRead] Live's last read of the device (files/live-last.json).
+// [Deps.padSounds] the folder PadSoundCache keeps its copies in,
+// [Deps.lastRead] Live's last read of the device (files/live-last.json) and
+// [Deps.offlinePads] its pad changes made offline (files/live-pads.json).
 
 import type { ReadonlySignal } from '@preact/signals'
 import { signal } from '@preact/signals'
@@ -192,6 +193,13 @@ export interface LastReadDeps {
   save(json: string): void | Promise<void>
 }
 
+/** Live's pad changes made offline (OfflinePads JSON): Android's files/live-pads.json. */
+export interface OfflinePadsDeps {
+  load(): string | null | Promise<string | null>
+  /** Null removes them. */
+  save(json: string | null): void | Promise<void>
+}
+
 /** Files.kt and the activity's pickers. */
 export interface FileDeps {
   /** The file picker (call from a tap); [] when closed. */
@@ -255,6 +263,8 @@ export interface Deps {
   padSounds: PadSoundStore
   /** Live's last read, shown while the device is not connected. */
   lastRead: LastReadDeps
+  /** Live's pad changes made offline, until the EP-133 connects (or Reset pads). */
+  offlinePads: OfflinePadsDeps
   /** Where the factory sounds are downloaded from; absent: they can't be. */
   factory?: FactoryDeps | undefined
   /** Screen wake lock: on while a task runs, or Live is open with keepScreenOn. */

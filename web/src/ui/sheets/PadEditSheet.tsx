@@ -5,12 +5,14 @@
 // device's sounds (live/SoundPicker: find, range keys, rows with a preview,
 // the current one marked ON PAD); a tap on a row puts that sound on the pad
 // at once (the toast offers UNDO), and "Upload a new sample…" goes through
-// the upload sheet, then onto the pad.
+// the upload sheet, then onto the pad. Offline (an addition) the last read's
+// sounds and the factory pack's, picked for the pad in arc only (no upload).
 //
 // Also Root's mount (MainActivity.kt, Tab.LIVE): the sheet 'edit:<group>:<offset>'.
 // Web: the request is a history layer; once Live can't change the pad (not
 // connected after a reload, say) the layer is dropped, so Back has nothing
-// hidden to close.
+// hidden to close. Root drops it too when the EP-133 comes or goes, as
+// MainActivity closes the sheet on a change of ready.
 import type { JSX } from 'preact'
 import { useEffect } from 'preact/hooks'
 import { physicalPad, type PhysicalPad } from '../../core/features/padNotes'
@@ -51,9 +53,17 @@ export function PadEditSheet(props: { view: NavView }): JSX.Element {
     if (gone) close()
   }, [gone])
   const name = pad !== null ? c.mirrorName(pad) : null
-  const sounds = c.liveSounds()
+  // Offline: the last read's sounds and the factory pack's, the pad's own list first.
+  const offline = state.device === null ? (state.mirror?.offlineSounds ?? null) : null
+  const sounds = offline !== null ? (offline.device ?? []) : c.liveSounds()
+  const padSource = pad !== null ? c.padSource(pad) : null
   // The sound on the pad now, by its slot (the mirror may not know which pad is which yet).
-  const now = target?.slot != null ? (sounds.find((snd) => snd.slot === target.slot)?.name ?? name) : null
+  const now =
+    target?.slot == null || pad === null
+      ? null
+      : offline !== null
+        ? (c.padSoundName(pad) ?? name)
+        : (sounds.find((snd) => snd.slot === target.slot)?.name ?? name)
   return (
     <Sheet open={pad !== null && target !== null} onDismiss={close} labelledBy="arc-pad-edit-title">
       {pad !== null && target !== null && (
@@ -70,27 +80,35 @@ export function PadEditSheet(props: { view: NavView }): JSX.Element {
           </div>
           <SoundPicker
             sounds={sounds}
+            factory={offline?.factory ?? null}
+            unavailable={offline?.unavailable}
+            readSlot={offline !== null && pad !== null ? c.padReadSlot(pad) : null}
+            offline={offline !== null}
             current={target.slot}
+            padSource={padSource}
             playing={playing}
-            onPlay={(slot) => void c.playDeviceSound(slot)}
+            onPlay={(slot, source) => void c.playLiveSound(slot, source)}
             onStop={() => c.stopPlayback()}
-            onPick={(snd) => {
+            onPick={(snd, source) => {
               close()
-              void c.assignPad(pad, snd.slot)
+              void c.assignPad(pad, snd.slot, source)
             }}
             findLabel={MirrorText.FIND_FOR_PAD}
-            disabled={state.busy}
+            // Offline a pick stays in arc: it doesn't wait for the device.
+            disabled={state.busy && offline === null}
           />
-          <Key
-            text={MirrorText.UPLOAD_NEW}
-            block
-            disabled={state.busy}
-            onClick={() => {
-              close()
-              void c.pickForPad(pad)
-            }}
-          />
-          <p class="t-small pad-edit__note">{MirrorText.ASSIGN_NOTE}</p>
+          {offline === null && (
+            <Key
+              text={MirrorText.UPLOAD_NEW}
+              block
+              disabled={state.busy}
+              onClick={() => {
+                close()
+                void c.pickForPad(pad)
+              }}
+            />
+          )}
+          <p class="t-small pad-edit__note">{offline !== null ? MirrorText.ASSIGN_NOTE_OFFLINE : MirrorText.ASSIGN_NOTE}</p>
         </>
       )}
     </Sheet>

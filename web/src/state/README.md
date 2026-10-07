@@ -38,8 +38,9 @@ real tab can still connect the EP-133.
 Live's deps: `liveAudio` (`LiveAudioDeps`, platform/audio/liveAudio's
 `LiveAudio`: one output mixing pads and keys, samples preloaded by key),
 `padSounds` (the folder PadSoundCache keeps its copies in: IndexedDB store
-`padSounds`, db version 3) and `lastRead` (Live's last read, localStorage
-`arc.live`). `nullLiveAudio()` is an output that never opens.
+`padSounds`, db version 3), `lastRead` (Live's last read, localStorage
+`arc.live`) and `offlinePads` (its pad changes made offline, localStorage
+`arc.live.pads`). `nullLiveAudio()` is an output that never opens.
 
 ## Signals (read with `.value` in components)
 
@@ -72,12 +73,16 @@ state until true), `freshId` (just-saved backup to highlight), `task`
 `durations`, `error`), `search` (`query`, `results`, `indexing`), `pakCompare`,
 `mirror` (`{state: MirrorState, loading, error, offline}`; `offline` is
 `MirrorText.lastSeen(time)` while Live shows the last read without a device:
-show **Offline** and that line; `state.notes` / `state.lastNote` are every
-note held, for the KEYS view), `backgroundRead` (Live is copying a pad's
+show **Offline** and that line; `offlineSounds` then holds the sounds offered
+without the device: `{base, device, factory, unavailable}`, the last read's list
+and the factory pack's, with the device slots arc can't play; `state.notes` /
+`state.lastNote` are every note held, for the KEYS view), `backgroundRead` (Live is copying a pad's
 sound: unlike `busy`, keep every key enabled; an action just waits a moment),
 `keysPad` (the `PhysicalPad` whose sample KEYS plays, or null), `folderPicked`, `folderStatus`
 (`'none' \| 'granted' \| 'prompt' \| 'denied'`; `'prompt'` shows the "Reconnect
-library folder" banner), `canPickFolder`, `folderName` (the folder in use, for `WebText.folderNote`).
+library folder" banner), `canPickFolder`, `folderName` (the folder in use, for `WebText.folderNote`),
+`offlinePads` (Live's pad changes made offline and kept: the tools' Reset pads row),
+`offlinePrompt` (their count while the EP-133, connected again, asks whether to write them).
 
 ## Actions
 
@@ -139,6 +144,13 @@ library folder), `restoreFromFolder(target)`, `reconnectFolder()`* (the banner t
   (core/features/keys) gives each key's note for labels.
 - While Live is open and connected, arc copies the samples on the active
   project's pads from the device in the background (`backgroundRead`).
+- Offline (Live showing the last read): `editTarget(pad)` still answers, and
+  `assignPad(pad, slot, source)` (`source`: `'device'` or `'factory'`)
+  changes the pad in arc only; `playLiveSound(slot, source)`* previews either
+  list (`device:N` / `factory:N`), `padSource(pad)` is the list the pad's sound
+  is in, `resetOfflinePads()` drops the changes. Once the EP-133 is read again
+  `offlinePrompt` is set: `writeOfflinePads()` puts on the ones that still fit,
+  `discardOfflinePads()` drops them.
 
 **Settings**: `setTheme(t)`, `setAutoConnect(on)`, `setKeepScreenOn(on)`,
 `setLiveOneGroup(on)`, `setLiveFollow(on)`, `setKeysNames(names)` (Note names

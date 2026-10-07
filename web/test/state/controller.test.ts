@@ -17,7 +17,7 @@ import { openMidi, probePermission, requestMidiAccess, watchMidi, webMidiSupport
 import { nullChannel } from '../../src/platform/storage/channel'
 import { MemoryTarget } from '../../src/platform/storage/external'
 import { Library } from '../../src/platform/storage/library'
-import { CoachPrefs, LastReadPrefs, MirrorPrefs, SettingsStore, memoryStorage } from '../../src/platform/storage/settings'
+import { CoachPrefs, LastReadPrefs, OfflinePadsPrefs, MirrorPrefs, SettingsStore, memoryStorage } from '../../src/platform/storage/settings'
 import { connectionPhase } from '../../src/state/connection'
 import { createController, type ArcController } from '../../src/state/controller'
 import { unavailableLibrary, type Deps } from '../../src/state/deps'
@@ -116,6 +116,7 @@ async function harness(
     liveAudio,
     padSounds,
     lastRead: new LastReadPrefs(storage),
+    offlinePads: new OfflinePadsPrefs(storage),
     wakeLock: {
       set: async (on) => {
         wake.push(on)

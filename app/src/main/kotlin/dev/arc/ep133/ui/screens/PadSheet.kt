@@ -28,6 +28,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Size
@@ -44,6 +45,7 @@ import androidx.compose.ui.unit.sp
 import dev.arc.ep133.features.DeviceBrowser
 import dev.arc.ep133.features.PadTarget
 import dev.arc.ep133.features.PhysicalPad
+import dev.arc.ep133.features.SoundSource
 import dev.arc.ep133.protocol.SoundEntry
 import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.text.Format
@@ -54,6 +56,7 @@ import dev.arc.ep133.ui.components.ArcKey
 import dev.arc.ep133.ui.components.LocalHwColors
 import dev.arc.ep133.ui.components.OneLine
 import dev.arc.ep133.ui.components.PlayKey
+import dev.arc.ep133.ui.components.Segmented
 import dev.arc.ep133.ui.components.cap
 import dev.arc.ep133.ui.components.capEdge
 import dev.arc.ep133.ui.components.capPress
@@ -69,7 +72,16 @@ import dev.arc.ep133.ui.theme.LocalArcColors
  * into a free slot and puts that on the pad.
  *
  * [sounds] is the device's sound list as Live read it; [playing] is the
- * player's key ("device:<slot>" while a preview plays).
+ * player's key ("device:<slot>" or "factory:<slot>" while a preview plays).
+ *
+ * Offline ([offline]) the pad changes in arc only: [sounds] is the last
+ * read's list and [factory] the factory pack's, with a Device / Factory
+ * switch when both are there; sizes aren't known, the device's sounds arc
+ * can't play ([unavailable]) are dimmed, and there is no upload ([onUpload]
+ * null). [padSource] is the list the pad's sound is from, opened first and
+ * the one that marks it ON PAD. [readSlot] is the pad's sound in the read,
+ * never dimmed: picking it takes the pad's change back. [localName] names
+ * the pad's offline sound when its list is gone (the pack deleted).
  */
 @Composable
 fun ColumnScope.PadSheetContent(
@@ -78,20 +90,37 @@ fun ColumnScope.PadSheetContent(
     sounds: List<SoundEntry>,
     playing: String?,
     busy: Boolean,
-    onPlay: (Int) -> Unit,
+    onPlay: (Int, SoundSource) -> Unit,
     onStop: () -> Unit,
-    onPick: (Int) -> Unit,
-    onUpload: () -> Unit,
+    onPick: (Int, SoundSource) -> Unit,
+    onUpload: (() -> Unit)?,
+    factory: List<SoundEntry>? = null,
+    unavailable: Set<Int> = emptySet(),
+    padSource: SoundSource = SoundSource.DEVICE,
+    offline: Boolean = false,
+    readSlot: Int? = null,
+    localName: String? = null,
 ) {
     val c = LocalArcColors.current
     val now = target.slot
-    val nowName = sounds.firstOrNull { it.slot == now }?.name
+    val switch = factory != null && sounds.isNotEmpty()
+    var picked by rememberSaveable(pad, padSource) { mutableStateOf(padSource) }
+    // Only the lists there are: without the device's, the factory's; without the pack, the device's.
+    val source = when {
+        factory == null -> SoundSource.DEVICE
+        sounds.isEmpty() -> SoundSource.FACTORY
+        else -> picked
+    }
+    val list = if (source == SoundSource.FACTORY) factory.orEmpty() else sounds
+    // The pad's sound, in the list it is from.
+    val onPadSlot = now.takeIf { source == padSource }
+    val nowName = (if (padSource == SoundSource.FACTORY) factory.orEmpty() else sounds).firstOrNull { it.slot == now }?.name ?: localName
     var query by rememberSaveable { mutableStateOf("") }
     // The hundred of slots listed (its first slot): the pad's own at first.
     var shown by rememberSaveable { mutableStateOf<Int?>(null) }
-    val groups = remember(sounds, query) { DeviceBrowser.hundreds(DeviceBrowser.findSounds(sounds, query)) }
+    val groups = remember(list, query) { DeviceBrowser.hundreds(DeviceBrowser.findSounds(list, query)) }
     val range = groups.firstOrNull { it.first.first == shown }
-        ?: groups.firstOrNull { now != null && now in it.first }
+        ?: groups.firstOrNull { onPadSlot != null && onPadSlot in it.first }
         ?: groups.firstOrNull()
 
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -101,6 +130,18 @@ fun ColumnScope.PadSheetContent(
             Text(MirrorText.padSheetLine(target.project, now, nowName), style = ArcType.small, color = c.graphite)
         }
     }
+    if (switch) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(MirrorText.SOURCE, style = ArcType.small, color = c.graphite)
+            Segmented(
+                listOf(MirrorText.SOURCE_DEVICE, MirrorText.SOURCE_FACTORY),
+                selected = if (source == SoundSource.FACTORY) 1 else 0,
+                onSelect = { picked = if (it == 1) SoundSource.FACTORY else SoundSource.DEVICE },
+                compact = true,
+                descriptions = listOf("${MirrorText.SOURCE} ${MirrorText.SOURCE_DEVICE}", "${MirrorText.SOURCE} ${MirrorText.SOURCE_FACTORY}"),
+            )
+        }
+    }
     ArcField(
         null, query, { query = it },
         placeholder = MirrorText.FIND_FOR_PAD,
@@ -108,7 +149,7 @@ fun ColumnScope.PadSheetContent(
         icon = ArcIcon.SEARCH,
     )
     if (groups.isEmpty()) {
-        Text(if (sounds.isEmpty()) FeatureText.NO_SOUNDS else FeatureText.NO_FIND_MATCHES, style = ArcType.body15, color = c.graphite)
+        Text(if (list.isEmpty()) FeatureText.NO_SOUNDS else FeatureText.NO_FIND_MATCHES, style = ArcType.body15, color = c.graphite)
     } else {
         // The hundreds as keys, the one listed navy and down; they scroll sideways when many.
         Row(
@@ -117,25 +158,27 @@ fun ColumnScope.PadSheetContent(
         ) {
             for ((r, _) in groups) RangeKey(r, on = r == range?.first) { shown = r.first }
         }
-        val list = range?.second.orEmpty()
+        val rows = range?.second.orEmpty()
         Column {
-            list.forEachIndexed { i, e ->
+            rows.forEachIndexed { i, e ->
                 SoundPick(
                     e,
                     first = i == 0,
-                    last = i == list.lastIndex,
-                    onPad = e.slot == now,
-                    playing = playing == "device:${e.slot}",
+                    last = i == rows.lastIndex,
+                    onPad = e.slot == onPadSlot,
+                    playing = playing == "${source.id}:${e.slot}",
                     enabled = !busy,
-                    onPlay = { onPlay(e.slot) },
+                    available = source == SoundSource.FACTORY || e.slot !in unavailable || e.slot == readSlot,
+                    sized = !offline,
+                    onPlay = { onPlay(e.slot, source) },
                     onStop = onStop,
-                    onPick = { onPick(e.slot) },
+                    onPick = { onPick(e.slot, source) },
                 )
             }
         }
     }
-    Text(MirrorText.ASSIGN_NOTE, style = ArcType.small, color = c.graphite)
-    ArcKey(MirrorText.UPLOAD_NEW, onUpload, Modifier.fillMaxWidth(), enabled = !busy, textColor = c.navy)
+    Text(if (offline) MirrorText.ASSIGN_NOTE_OFFLINE else MirrorText.ASSIGN_NOTE, style = ArcType.small, color = c.graphite)
+    if (onUpload != null) ArcKey(MirrorText.UPLOAD_NEW, onUpload, Modifier.fillMaxWidth(), enabled = !busy, textColor = c.navy)
 }
 
 /** The pad itself, small: its label top left and the sound on it at the foot, as on the grid. */
@@ -195,7 +238,9 @@ internal fun RangeKey(r: IntRange, on: Boolean, onClick: () -> Unit) {
 /**
  * One sound in the pad sheet: slot, name, size and a preview key. A tap puts
  * it on the pad; the sound on the pad now is marked ON PAD (signal tint and
- * edge) and does nothing.
+ * edge) and does nothing. Offline: no size ([sized] false), and a device
+ * sound arc can't play ([available] false) is dimmed, says it needs the
+ * EP-133, and neither plays nor goes on the pad.
  */
 @Composable
 private fun SoundPick(
@@ -208,6 +253,8 @@ private fun SoundPick(
     onPlay: () -> Unit,
     onStop: () -> Unit,
     onPick: () -> Unit,
+    available: Boolean = true,
+    sized: Boolean = true,
 ) {
     val c = LocalArcColors.current
     val source = remember { MutableInteractionSource() }
@@ -226,22 +273,30 @@ private fun SoundPick(
             )
             // The sound on the pad has a signal edge on its left.
             .drawBehind { if (onPad) drawRect(c.signal, size = Size(4.dp.toPx(), size.height)) }
-            .clickable(interactionSource = source, indication = null, enabled = enabled && !onPad, role = Role.Button, onClick = onPick)
-            .semantics(mergeDescendants = true) { if (onPad) stateDescription = MirrorText.ON_PAD },
+            .clickable(interactionSource = source, indication = null, enabled = enabled && available && !onPad, role = Role.Button, onClick = onPick)
+            .semantics(mergeDescendants = true) {
+                if (onPad) stateDescription = MirrorText.ON_PAD else if (!available) stateDescription = MirrorText.NEEDS_DEVICE
+            },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(
-            Modifier.weight(1f).padding(start = 14.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
+            Modifier.weight(1f).then(if (available) Modifier else Modifier.alpha(0.45f)).padding(start = 14.dp, end = 10.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Box(Modifier.size(6.dp).clip(CircleShape).background(if (playing) c.signal else LocalHwColors.current.ledOff))
             Text(FeatureText.slot(e.slot), style = ArcType.bold, color = if (onPad) c.signal else c.graphite)
             OneLine(e.name.uppercase(), ArcType.bold, c.ink, Modifier.weight(1f))
-            Text(if (onPad) MirrorText.ON_PAD.uppercase() else Format.bytes(e.size), style = ArcType.small, color = c.graphite, maxLines = 1)
+            val note = when {
+                onPad -> MirrorText.ON_PAD.uppercase()
+                !available -> MirrorText.NEEDS_DEVICE
+                sized -> Format.bytes(e.size)
+                else -> null
+            }
+            if (note != null) Text(note, style = ArcType.small, color = c.graphite, maxLines = 1)
             PlayKey(
                 playing = playing,
-                enabled = enabled,
+                enabled = enabled && available,
                 description = if (playing) FeatureText.stop(e.name) else FeatureText.play(e.name),
                 onClick = { if (playing) onStop() else onPlay() },
             )

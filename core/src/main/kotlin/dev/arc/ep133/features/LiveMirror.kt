@@ -12,6 +12,13 @@ data class PadFid(val project: Int, val group: Int, val pad: Int)
  */
 data class PadTarget(val project: Int, val group: Int, val pad: Int, val slot: Int?)
 
+/**
+ * The sound to play for a pad (an addition): its [slot] and [name], and
+ * whether it is a factory sound put on the pad offline ([factory]), which
+ * plays from the factory pack first.
+ */
+data class PadSample(val slot: Int, val name: String, val factory: Boolean)
+
 /** A pad that is sounding (or fading out): its velocity, when it started, and when it was released. */
 data class PadLight(val velocity: Int, val channel: Int, val onAt: Long, val offAt: Long? = null)
 
@@ -81,6 +88,7 @@ class LiveMirror(
     private var activeProject: Int? = null
     private var layout: Map<String, Map<Int, Int?>> = emptyMap()
     private var names: Map<Int, String> = emptyMap()
+    private var local = OfflinePads.EMPTY
     private val learned = LinkedHashMap(learned)
     private var pushesSeen = false
     private var padOrder = padOrder
@@ -115,12 +123,22 @@ class LiveMirror(
         renameLastHit()
     }
 
-    /** Names the last hit again from the current layout and links. */
+    /** Names the last hit again from the current layout, links and pad changes. */
     private fun renameLastHit() {
         val h = lastHit ?: return
         val p = h.pad ?: return
-        val slot = slotOf(p)
-        lastHit = h.copy(slot = slot, name = slot?.let { names[it] })
+        lastHit = h.copy(slot = slotOf(p), name = nameOf(p))
+    }
+
+    /**
+     * The pad changes made offline ([OfflinePads]), only ever set on a mirror
+     * showing the last read without the device: pads, names and their samples
+     * follow them, while [saved] keeps what the device read.
+     */
+    @Synchronized
+    fun setLocal(pads: OfflinePads) {
+        local = pads
+        renameLastHit()
     }
 
     @Synchronized
@@ -163,8 +181,7 @@ class LiveMirror(
                     if (prev != null && prev.first != pad && e.time - prev.second <= MATCH_WINDOW_NS) ambiguous.add(pad.group)
                     pendingNote[pad.group] = pad to e.time
                     tryLink(pad.group)
-                    val slot = slotOf(pad)
-                    lastHit = Hit(pad, e.note, e.channel, e.velocity, slot, slot?.let { names[it] })
+                    lastHit = Hit(pad, e.note, e.channel, e.velocity, slotOf(pad), nameOf(pad))
                 }
             }
             is MidiEvent.NoteOff -> {
@@ -230,23 +247,72 @@ class LiveMirror(
     }
 
     /**
-     * The slot on a physical pad in the active project. Counted from the top,
-     * the pad's number is the learned pad file id term; counted from the
-     * bottom, it is the official note order plus one (see [PadOrder]).
+     * A physical pad's number in the project file, to name it. Counted from
+     * the top, it is the learned pad file id term; counted from the bottom,
+     * the official note order plus one (see [PadOrder]).
+     */
+    private fun numberOf(pad: PhysicalPad): Int? = when (padOrder) {
+        PadOrder.FROM_TOP -> learned[pad.offset]
+        PadOrder.FROM_BOTTOM -> pad.offset + 1
+    }
+
+    /**
+     * The sound put on [pad] offline, if any: the change for the active
+     * project's pad at the number a write would use ([padNumber]), so a pad
+     * placed before it was pressed shows its change too.
+     */
+    @Synchronized
+    fun localOf(pad: PhysicalPad): OfflinePad? {
+        if (local.size == 0) return null
+        val project = activeProject ?: return null
+        if (pushedProject != null && pushedProject != project) return null
+        return local.at(project, pad.group, padNumber(pad) ?: return null)
+    }
+
+    /**
+     * The slot on a physical pad in the active project: its offline change,
+     * else the project's pad layout at its number ([numberOf]).
      */
     @Synchronized
     fun slotOf(pad: PhysicalPad): Int? {
         // The device moved to another project whose pads aren't read yet: no name rather than a wrong one.
         if (pushedProject != null && pushedProject != activeProject) return null
-        val number = when (padOrder) {
-            PadOrder.FROM_TOP -> learned[pad.offset] ?: return null
-            PadOrder.FROM_BOTTOM -> pad.offset + 1
-        }
-        return layout[('a' + pad.group).toString()]?.get(number)
+        localOf(pad)?.let { return it.slot }
+        return slotAt(pad.group, numberOf(pad) ?: return null)
     }
 
+    /** The name on a physical pad: its offline change's, else the sound list's for its slot. */
     @Synchronized
-    fun nameOf(pad: PhysicalPad): String? = slotOf(pad)?.let { names[it] }
+    fun nameOf(pad: PhysicalPad): String? = localOf(pad)?.name ?: slotOf(pad)?.let { names[it] }
+
+    /** The sound to play for [pad]: its offline change, else the read's slot and name; null when either is unknown. */
+    @Synchronized
+    fun sampleOf(pad: PhysicalPad): PadSample? {
+        localOf(pad)?.let { return PadSample(it.slot, it.name, it.source == SoundSource.FACTORY) }
+        val slot = slotOf(pad) ?: return null
+        return PadSample(slot, names[slot] ?: return null, false)
+    }
+
+    /**
+     * Every sound on the active project's pads, each once, by slot: the
+     * read's layout with the offline changes over it. What to load before a
+     * pad is pressed.
+     */
+    @Synchronized
+    fun padSamples(): List<PadSample> {
+        val byPad = LinkedHashMap<Pair<Int, Int>, PadSample>()
+        for ((name, pads) in layout) {
+            val group = name.singleOrNull()?.minus('a') ?: continue
+            for ((number, slot) in pads) byPad[group to number] = PadSample(slot ?: continue, names[slot] ?: continue, false)
+        }
+        val project = activeProject
+        for (p in local.list) if (p.project == project) byPad[p.group to p.pad] = PadSample(p.slot, p.name, p.source == SoundSource.FACTORY)
+        return byPad.values.distinct().sortedWith(compareBy({ it.slot }, { it.factory }))
+    }
+
+    /** The slot the read's layout has on the active project's pad [pad] of [group] (no offline change). */
+    @Synchronized
+    fun slotAt(group: Int, pad: Int): Int? = layout[('a' + group).toString()]?.get(pad)
 
     /**
      * A physical pad's number in the project file, to write its sound: the
@@ -265,7 +331,8 @@ class LiveMirror(
 
     /**
      * Where [pad]'s sound is set in the active project, and the slot on it
-     * now (for the pad sheet's "now" line and for undo). Null while the
+     * now, its offline change's if it has one (for the pad sheet's "now"
+     * line and for undo). Null while the
      * active project is unknown, the device moved to one not read yet, or
      * the pad's number isn't known ([padNumber]).
      */
@@ -274,7 +341,7 @@ class LiveMirror(
         val project = activeProject ?: return null
         if (pushedProject != null && pushedProject != project) return null
         val number = padNumber(pad) ?: return null
-        return PadTarget(project, pad.group, number, layout[('a' + pad.group).toString()]?.get(number))
+        return PadTarget(project, pad.group, number, local.at(project, pad.group, number)?.slot ?: slotAt(pad.group, number))
     }
 
     /**

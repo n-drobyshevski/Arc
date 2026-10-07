@@ -125,6 +125,8 @@ export const WebText = {
   // ---------- Live: sounds onto pads with the mouse (no Android counterpart) ----------
   /** Under the SOUNDS tab's list on a wide window. */
   DRAG_HINT: 'Drag a sound onto a pad of the active project. Right-click a pad for more.',
+  /** The same while offline: changes stay in arc until the EP-133 connects. */
+  DRAG_HINT_OFFLINE: 'Offline: drag a sound onto a pad to change it in arc only. Dimmed sounds need the EP-133.',
   /** The drop zone under the list. */
   DROP_SAMPLE: 'Drop a WAV here or on a pad to upload it to a free slot',
   /** The tag on the pad a sound or file is dragged over. */
