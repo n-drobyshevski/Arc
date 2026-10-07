@@ -6,7 +6,11 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +30,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -33,10 +40,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -45,8 +57,10 @@ import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.arc.ep133.features.MirrorState
+import dev.arc.ep133.features.PadNotes
 import dev.arc.ep133.features.ProjectSource
 import dev.arc.ep133.features.Tempo
+import dev.arc.ep133.protocol.Device
 import dev.arc.ep133.text.CoachText
 import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.ui.components.LocalArcWindow
@@ -64,6 +78,62 @@ import kotlinx.coroutines.delay
  * and a printed label. A row over the pads (upright, and on the
  * all-groups and tablet pages), a column left of them on a phone on its side.
  */
+
+/**
+ * PROJECT held, as the EP-133 picks a project: while [held], a pad or a
+ * KEYS key printed 1 to 9 goes to that project
+ * ([FunctionKeysUi.onSelectProject]) instead of sounding, and the others
+ * ('.', 0, ENTER) stay still. Let go of PROJECT: a pick made meanwhile is
+ * all it does; else a short press steps on ([FunctionKeysUi.onProject]) and
+ * a long one opens the project sheet ([FunctionKeysUi.onPickProject]), once
+ * the finger is off the pads' way. A press taken keeps its release too, so
+ * nothing lets go of a sound it never started.
+ */
+@Stable
+internal class ProjectHold {
+    var held by mutableStateOf(false)
+        private set
+    private var picked = false
+    private val taken = HashSet<Any>()
+
+    fun down() {
+        held = true
+        picked = false
+    }
+
+    /** PROJECT let go of; [long]: held past the long-press time. */
+    fun up(long: Boolean, fn: FunctionKeysUi) {
+        if (!held) return
+        held = false
+        if (picked) return
+        if (long) fn.onPickProject() else fn.onProject()
+    }
+
+    /** PROJECT's press slid off or was taken by a scroll: nothing. */
+    fun cancel() {
+        held = false
+    }
+
+    /** A press on [key] printed [label] (a pad's digit): true when PROJECT takes it. */
+    fun press(key: Any, label: String, fn: FunctionKeysUi): Boolean {
+        if (!held) return false
+        taken += key
+        val n = label.toIntOrNull()?.takeIf { it in 1..Device.PROJECT_COUNT } ?: return true
+        picked = true
+        fn.onSelectProject(n)
+        return true
+    }
+
+    /** Whether [key]'s press was taken (its release and the like are PROJECT's). */
+    fun took(key: Any): Boolean = key in taken
+
+    /** [key] let go of: true when its press was taken. */
+    fun release(key: Any): Boolean = taken.remove(key)
+}
+
+/** A KEYS key's [ProjectHold] key and its pad's digit, by its place on the body. */
+internal fun keysKey(offset: Int): String = "keys:$offset"
+internal fun padDigit(offset: Int): String = PadNotes.LABELS[offset]
 
 /** The row's keys are no wider than this (a tablet's row keeps to the start). */
 private val RowKeyMax = 132.dp
@@ -125,7 +195,7 @@ private fun rowCap(): Dp = if (LocalArcWindow.current.width >= 600.dp) RowCapWid
 
 /** The three keys in a row over the pads or the keys, sharing its width up to [RowKeyMax] each. */
 @Composable
-internal fun FunctionRow(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions, st: MirrorState, haptics: Boolean, modifier: Modifier = Modifier) {
+internal fun FunctionRow(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions, st: MirrorState, haptics: Boolean, modifier: Modifier = Modifier, hold: ProjectHold = remember { ProjectHold() }) {
     Row(
         modifier
             .widthIn(max = RowKeyMax * 3 + RowGap * 2)
@@ -133,7 +203,7 @@ internal fun FunctionRow(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions,
             .semantics { isTraversalGroup = true },
         horizontalArrangement = Arrangement.spacedBy(RowGap),
     ) {
-        FunctionKeys(fn, keys, actions, st, haptics, column = null, Modifier.weight(1f))
+        FunctionKeys(fn, keys, actions, st, haptics, column = null, Modifier.weight(1f), hold)
     }
 }
 
@@ -142,7 +212,7 @@ internal fun FunctionRow(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions,
  * wide, in the middle of its height; sized to that height ([columnFit]).
  */
 @Composable
-internal fun FunctionColumn(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions, st: MirrorState, haptics: Boolean, modifier: Modifier = Modifier) {
+internal fun FunctionColumn(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions, st: MirrorState, haptics: Boolean, modifier: Modifier = Modifier, hold: ProjectHold = remember { ProjectHold() }) {
     BoxWithConstraints(modifier.width(SideFunctions).fillMaxHeight()) {
         val fit = columnFit(maxHeight)
         Column(
@@ -152,26 +222,27 @@ internal fun FunctionColumn(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActio
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(fit.gap, Alignment.CenterVertically),
         ) {
-            FunctionKeys(fn, keys, actions, st, haptics, column = fit, Modifier.fillMaxWidth())
+            FunctionKeys(fn, keys, actions, st, haptics, column = fit, Modifier.fillMaxWidth(), hold)
         }
     }
 }
 
 /** PROJECT, KEYS and TEMPO, each with [modifier]; [column]'s size in the column, null in the row. */
 @Composable
-private fun FunctionKeys(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions, st: MirrorState, haptics: Boolean, column: ColumnFit?, modifier: Modifier) {
+private fun FunctionKeys(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions, st: MirrorState, haptics: Boolean, column: ColumnFit?, modifier: Modifier, hold: ProjectHold) {
     val c = LocalArcColors.current
     val ko = LocalHwColors.current.ko
     val project = fn.project
-    // PROJECT: steps to the next project, held opens the project sheet; its light is on while the device switches.
+    // PROJECT: steps to the next project; held, a pad 1 to 9 picks one, or let go, the project sheet.
+    // Its light is on while it is held and while the device switches.
     val projectState = MirrorText.projectKeyState(project.shown, project.source)
     FunctionKey(
         word = MirrorText.FN_PROJECT,
         sub = MirrorText.FN_PROJECT_SUB,
         lower = ko.lightFace,
         lowerInk = ko.tierInk,
-        led = { if (project.switching) 1f else 0f },
-        lit = project.switching,
+        led = { if (project.switching || hold.held) 1f else 0f },
+        lit = project.switching || hold.held,
         label = project.shown?.let(MirrorText::projectShort) ?: "–",
         description = MirrorText.FN_PROJECT,
         // Greyed out without a device or the factory pack: why, after the project shown.
@@ -185,6 +256,8 @@ private fun FunctionKeys(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions,
         clickLabel = MirrorText.PROJECT_NEXT,
         onLongClick = fn.onPickProject,
         longClickLabel = MirrorText.PICK_PROJECT,
+        hold = hold,
+        fn = fn,
         role = Role.Button,
         column = column,
         haptics = haptics,
@@ -289,6 +362,8 @@ private fun FunctionKey(
     clickLabel: String? = null,
     onLongClick: (() -> Unit)? = null,
     longClickLabel: String? = null,
+    hold: ProjectHold? = null,
+    fn: FunctionKeysUi? = null,
 ) {
     val c = LocalArcColors.current
     val hw = LocalHwColors.current
@@ -300,18 +375,59 @@ private fun FunctionKey(
     }
     val alpha = if (enabled) 1f else 0.45f
     val text = viewWordStyle(if (column != null) 9.5.dp else 10.5.dp, 0.08f)
+    // PROJECT ([hold]): its press and release by hand, so it can be held while the pads are
+    // tapped and its long press acts on release; a screen reader keeps the click and long click.
+    val touch = if (hold != null && fn != null) {
+        Modifier
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
+                awaitEachGesture {
+                    val first = awaitFirstDown()
+                    val press = PressInteraction.Press(first.position)
+                    source.tryEmit(press)
+                    hold.down()
+                    val up = waitForUpOrCancellation()
+                    if (up != null) {
+                        source.tryEmit(PressInteraction.Release(press))
+                        hold.up(up.uptimeMillis - first.uptimeMillis >= viewConfiguration.longPressTimeoutMillis, fn)
+                    } else {
+                        source.tryEmit(PressInteraction.Cancel(press))
+                        hold.cancel()
+                    }
+                }
+            }
+            .semantics {
+                this.role = role
+                if (enabled) {
+                    onClick(clickLabel) {
+                        onClick()
+                        true
+                    }
+                    if (onLongClick != null) {
+                        onLongClick(longClickLabel) {
+                            onLongClick()
+                            true
+                        }
+                    }
+                } else {
+                    disabled()
+                }
+            }
+    } else {
+        Modifier.combinedClickable(
+            interactionSource = source,
+            indication = null,
+            enabled = enabled,
+            role = role,
+            onClickLabel = clickLabel,
+            onLongClickLabel = longClickLabel,
+            onLongClick = onLongClick,
+            onClick = onClick,
+        )
+    }
     Column(
         modifier
-            .combinedClickable(
-                interactionSource = source,
-                indication = null,
-                enabled = enabled,
-                role = role,
-                onClickLabel = clickLabel,
-                onLongClickLabel = longClickLabel,
-                onLongClick = onLongClick,
-                onClick = onClick,
-            )
+            .then(touch)
             .semantics {
                 contentDescription = description
                 state?.let { stateDescription = it }

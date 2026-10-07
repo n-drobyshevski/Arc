@@ -536,6 +536,7 @@ class MainActivity : ComponentActivity() {
             project = dev.arc.ep133.ui.screens.projectKeyOf(mirror, state.busy),
             onProject = controller::stepProject,
             onPickProject = { projectSheet = true },
+            onSelectProject = controller::selectProject,
             clickOn = metronome.on,
             bpm = metronome.bpm,
             beats = controller.beats,

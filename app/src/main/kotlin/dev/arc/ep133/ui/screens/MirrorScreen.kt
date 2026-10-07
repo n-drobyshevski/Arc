@@ -224,8 +224,10 @@ class KeysActions(
 class FunctionKeysUi(
     val project: ProjectKeyUi = ProjectKeyUi(),
     val onProject: () -> Unit = {},
-    /** PROJECT held: the project sheet. */
+    /** PROJECT held and let go of: the project sheet. */
     val onPickProject: () -> Unit = {},
+    /** PROJECT held and a pad printed 1 to 9 tapped: that project. */
+    val onSelectProject: (Int) -> Unit = {},
     val clickOn: Boolean = false,
     val bpm: Int = Tempo.DEFAULT,
     val beats: StateFlow<Beat?>? = null,
@@ -354,6 +356,18 @@ fun MirrorScreen(
     // EDIT works on the pads only, and only on the Live tab (where the tab is).
     val editing = edit.on && edit.onEdit != null && !keys.on && onBack == null
     val onEdit = if (editing) edit.onPad else null
+    // PROJECT held: the pads printed 1 to 9 pick a project instead of sounding, the rest stay still (ProjectHold).
+    val hold = remember { ProjectHold() }
+    val padPress = onPad?.let { f -> { pad: PhysicalPad, h: Boolean, unsure: Boolean, at: Long -> if (!hold.press(pad, pad.label, functions)) f(pad, h, unsure, at) } }
+    val padKept = { pad: PhysicalPad -> if (!hold.took(pad)) onPadKept(pad) }
+    val padUp = { pad: PhysicalPad -> if (!hold.release(pad)) onPadUp(pad) }
+    val padCut = { pad: PhysicalPad -> if (!hold.release(pad)) onPadCut(pad) }
+    val editPad = onEdit?.let { f ->
+        { pad: PhysicalPad ->
+            if (hold.press(pad, pad.label, functions)) hold.release(pad) else f(pad)
+            Unit
+        }
+    }
     if (onBack != null) BackHandler(onBack = onBack)
     val st = mirror?.state ?: MirrorState()
     // The fade runs on the frame clock while a released pad is fading, and stops after.
@@ -464,7 +478,7 @@ fun MirrorScreen(
                     // they sit right under the display line, as on the web. The short sideways
                     // piano keeps its mode word instead, for the keys' height.
                     if (pianoFunctions) {
-                        FunctionRow(functions, keys, keysActions, st, haptics)
+                        FunctionRow(functions, keys, keysActions, st, haptics, hold = hold)
                         Spacer(Modifier.height(10.dp))
                     }
                     Column(Modifier.weight(1f, fill = false)) {
@@ -495,17 +509,17 @@ fun MirrorScreen(
                             Spacer(Modifier.height(10.dp))
                         }
                         Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(SideControlsGap)) {
-                            FunctionColumn(functions, keys, keysActions, st, haptics)
+                            FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold)
                             Group(
                                 group, st, nameOf, now,
                                 Modifier.width(bodyW).fillMaxHeight().coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
                                 big = true,
-                                onPad = onPad,
-                                onPadKept = onPadKept,
-                                onPadUp = onPadUp,
-                                onPadCut = onPadCut,
+                                onPad = padPress,
+                                onPadKept = padKept,
+                                onPadUp = padUp,
+                                onPadCut = padCut,
                                 playingPads = ringed,
-                                onEdit = onEdit,
+                                onEdit = editPad,
                                 haptics = haptics,
                                 onSelectGroup = { group = it },
                             )
@@ -522,12 +536,12 @@ fun MirrorScreen(
                     // The function keys on the left, then all four in one row, filling the height:
                     // nothing to scroll, so a press plays at once.
                     Row(Modifier.fillMaxWidth().weight(1f, fill = false), horizontalArrangement = Arrangement.spacedBy(SideControlsGap)) {
-                        FunctionColumn(functions, keys, keysActions, st, haptics)
+                        FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold)
                         Row(
                             Modifier.weight(1f).heightIn(max = caption + 3.dp + padW * 4),
                             horizontalArrangement = Arrangement.spacedBy(14.dp),
                         ) {
-                            for (g in 0..3) Group(g, st, nameOf, now, Modifier.weight(1f).fillMaxHeight(), fill = true, onPad = onPad, onPadKept = onPadKept, onPadUp = onPadUp, onPadCut = onPadCut, playingPads = ringed, onEdit = onEdit, haptics = haptics)
+                            for (g in 0..3) Group(g, st, nameOf, now, Modifier.weight(1f).fillMaxHeight(), fill = true, onPad = padPress, onPadKept = padKept, onPadUp = padUp, onPadCut = padCut, playingPads = ringed, onEdit = editPad, haptics = haptics)
                         }
                     }
                 }
@@ -564,41 +578,45 @@ fun MirrorScreen(
                                 val gap = if (roomy.u < KeysTightU) SideGapTight else SideGap
                                 val k = KoGeom.fit(maxWidth - columns - gap * gaps, maxHeight, 3)
                                 Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally)) {
-                                    FunctionColumn(functions, keys, keysActions, st, haptics)
+                                    FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold)
                                     if (viewSwitch != null) SidewaysKeysLead(viewSwitch)
                                     KeysGrid(
                                         st, keysNow, now, keysActions,
                                         Modifier.width(k.u * (3 * 1.215f + 0.401f) + CapDx + 2.dp).fillMaxHeight()
                                             .coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
                                         haptics = haptics,
+                                        hold = hold,
+                                        functions = functions,
                                     )
                                     SidewaysKeysPicks(keys, keysActions)
                                 }
                             }
                         } else if (keys.on) {
                             if (!inBar) KeysDisplay(st, mirror, keysNow, rec, still = fixedNow != null)
-                            FunctionRow(functions, keys, keysActions, st, haptics)
+                            FunctionRow(functions, keys, keysActions, st, haptics, hold = hold)
                             KeysGrid(
                                 st, keysNow, now, keysActions,
                                 Modifier.fillMaxWidth().weight(1f).coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
                                 haptics = haptics,
+                                hold = hold,
+                                functions = functions,
                             )
                             ModeRow(keys, keysActions, viewSwitch = viewSwitch, mode = false)
                         } else {
                             if (!inBar) {
                                 if (editing) EditLine() else DisplayStrip(st, mirror, rec, still = fixedNow != null, wireless = wireless)
                             }
-                            FunctionRow(functions, keys, keysActions, st, haptics)
+                            FunctionRow(functions, keys, keysActions, st, haptics, hold = hold)
                             Group(
                                 group, st, nameOf, now,
                                 Modifier.fillMaxWidth().weight(1f).coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
                                 big = true,
-                                onPad = onPad,
-                                onPadKept = onPadKept,
-                                onPadUp = onPadUp,
-                                onPadCut = onPadCut,
+                                onPad = padPress,
+                                onPadKept = padKept,
+                                onPadUp = padUp,
+                                onPadCut = padCut,
                                 playingPads = ringed,
-                                onEdit = onEdit,
+                                onEdit = editPad,
                                 haptics = haptics,
                             )
                             GroupKeys(group, st, now, onSelect = { group = it })
@@ -624,14 +642,14 @@ fun MirrorScreen(
                         if (!inBar) {
                             if (editing) EditLine() else Display(st, mirror, rec, still = fixedNow != null, compact = sideways, initialNoteOpen = initialNoteOpen, wireless = wireless, onGetFactory = onGetFactory)
                         }
-                        FunctionRow(functions, keys, keysActions, st, haptics)
+                        FunctionRow(functions, keys, keysActions, st, haptics, hold = hold)
                         BoxWithConstraints(Modifier.fillMaxWidth()) {
                             // Four groups in a row when there is room, two by two on a phone.
                             val perRow = if (maxWidth >= 640.dp) 4 else 2
                             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                                 for (row in (0..3).chunked(perRow)) {
                                     Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                                        for (g in row) Group(g, st, nameOf, now, Modifier.weight(1f), onPad = onPad, onPadKept = onPadKept, onPadUp = onPadUp, onPadCut = onPadCut, playingPads = ringed, onEdit = onEdit, haptics = haptics)
+                                        for (g in row) Group(g, st, nameOf, now, Modifier.weight(1f), onPad = padPress, onPadKept = padKept, onPadUp = padUp, onPadCut = padCut, playingPads = ringed, onEdit = editPad, haptics = haptics)
                                     }
                                 }
                             }
@@ -1948,7 +1966,17 @@ private fun KeysDisplay(st: MirrorState, mirror: MirrorUi?, keys: KeysUi, rec: R
  * outlined in signal orange.
  */
 @Composable
-private fun KeysGrid(st: MirrorState, keys: KeysUi, now: Long, actions: KeysActions, modifier: Modifier, haptics: Boolean = false) {
+private fun KeysGrid(
+    st: MirrorState,
+    keys: KeysUi,
+    now: Long,
+    actions: KeysActions,
+    modifier: Modifier,
+    haptics: Boolean = false,
+    /** PROJECT held: a key where a pad prints 1 to 9 picks that project instead (ProjectHold). */
+    hold: ProjectHold? = null,
+    functions: FunctionKeysUi = FunctionKeysUi(),
+) {
     val c = LocalArcColors.current
     val notes = Keys.notes(keys.root, keys.scale, keys.octave)
     // Each key is a finger of its own, holding the note it had when pressed: a new key,
@@ -1989,8 +2017,14 @@ private fun KeysGrid(st: MirrorState, keys: KeysUi, now: Long, actions: KeysActi
                 .then(
                     holdToPlay(
                         // A screen reader's Play sounds the note to its end: no finger to keep count of.
-                        { hold, _, at -> if (hold) play(touches.down(o.toLong(), notes[o]), at) else actions.onNote(notes[o], false, at) },
-                        { play(touches.up(o.toLong())) },
+                        { holding, _, at ->
+                            when {
+                                hold?.press(keysKey(o), padDigit(o), functions) == true -> {}
+                                holding -> play(touches.down(o.toLong(), notes[o]), at)
+                                else -> actions.onNote(notes[o], false, at)
+                            }
+                        },
+                        { if (hold?.release(keysKey(o)) != true) play(touches.up(o.toLong())) },
                         held = held,
                         haptics = haptics,
                     ),

@@ -20,7 +20,7 @@ object CoachText {
     const val GUIDE_TAB = "EP-133 shortcuts"
     const val MODE = "Pads or keys"
     /** Live's function keys beside MODE (now the KEYS key). */
-    const val PROJECT = "Next project: tap; hold to choose"
+    const val PROJECT = "Next project: tap; hold + pad 1–9 to pick"
     const val TEMPO = "Click: tap; hold for tempo"
     const val OCTAVE = "Octave"
     const val SCALE = "Scale"
