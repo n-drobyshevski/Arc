@@ -42,6 +42,25 @@ class KeyMotionTest {
     }
 
     @Test
+    fun `a frame with no time passed never ends a move that has somewhere to go`() {
+        // Held down, then let go: the first frame after the release can come stamped before it (0 ms).
+        val key = KeyMotion.Key()
+        run(key, true, 100)
+        assertTrue(key.still)
+        assertTrue(KeyMotion.step(key, false, 0f))
+        assertEquals(1f, key.pos)
+        run(key, false, 300)
+        assertEquals(0f, key.pos)
+        // And a press whose first frame is 0 ms still goes down.
+        assertTrue(KeyMotion.step(key, true, 0f))
+        run(key, true, 30)
+        assertEquals(1f, key.pos)
+        // At rest where it should be, a 0 ms frame is the end.
+        assertFalse(KeyMotion.step(key, true, 0f))
+        assertFalse(KeyMotion.step(KeyMotion.Key(), false, 0f))
+    }
+
+    @Test
     fun `let go, it springs back past rest and settles`() {
         val key = KeyMotion.Key()
         run(key, true, 100)

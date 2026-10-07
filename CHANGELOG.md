@@ -21,6 +21,9 @@ version fixes bugs. The version itself is set in `version.properties`.
 - Live on Android now writes to the device when PROJECT is tapped, as well as in EDIT; Live tools' note on how Live reads the EP-133 says so.
 - The guide overlay, upright: a tag that would be pushed out onto another marked control sits a little closer to its neighbour instead (SETTINGS no longer covers TEMPO on Live).
 
+### Fixed
+- Android: a key let go of could stay drawn pressed (Live's group keys most often), when the frame after the release came stamped before it; it now always springs back.
+
 ## [0.3.5] - 2026-10-06
 
 ### Added
