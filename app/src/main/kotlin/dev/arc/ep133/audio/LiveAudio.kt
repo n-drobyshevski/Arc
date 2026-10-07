@@ -11,6 +11,7 @@ import dev.arc.ep133.features.BeatGrid
 import dev.arc.ep133.features.RecState
 import dev.arc.ep133.features.TakeRecorder
 import dev.arc.ep133.formats.VoiceMixer
+import dev.arc.ep133.formats.VoiceShape
 import dev.arc.ep133.text.LiveEngine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -237,12 +238,23 @@ class LiveAudio(
     /**
      * Plays [pcm] as voice [key] ([semitones] from its own pitch) until
      * [release]; [pressedAt] (System.nanoTime) is when the finger came down.
-     * Opens the output first if Live hasn't. False when there is no output.
+     * [shape] is how the pad plays it, as the EP-133's SOUND EDIT has it
+     * (its own pitch, level, pan, trim, attack, release, play mode and mute
+     * group; [VoiceShape.DEFAULT], Live's own way, unless given). Opens the
+     * output first if Live hasn't. False when there is no output.
      */
-    fun play(key: String, pcm: ShortArray, channels: Int, sampleRate: Int, semitones: Int, pressedAt: Long): Boolean {
+    fun play(
+        key: String,
+        pcm: ShortArray,
+        channels: Int,
+        sampleRate: Int,
+        semitones: Int,
+        pressedAt: Long,
+        shape: VoiceShape = VoiceShape.DEFAULT,
+    ): Boolean {
         if (output == null && !openLate()) return false
         val o = output ?: return false
-        if (!o.start(key, pcm, channels, sampleRate, semitones, pressedAt)) return false
+        if (!o.start(key, pcm, channels, sampleRate, semitones, pressedAt, shape)) return false
         hold.sound(focus)
         return true
     }
@@ -275,6 +287,7 @@ class LiveAudio(
         if (_rec.value != RecState.Idle) stopAsked = true
     }
 
+    /** Lets go of voice [key] (every voice of a KEY-mode pad's; a ONESHOT one plays on to its end). */
     fun release(key: String) {
         output?.release(key)
     }

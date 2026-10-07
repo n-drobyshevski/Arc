@@ -26,24 +26,24 @@ LiveCore::~LiveCore() {
 
 bool LiveCore::load(int32_t slot, Sample *sample) {
     if (slot < 0 || slot >= MAX_SAMPLES || sample == nullptr) return false;
-    return commands_.push({Kind::Load, 0, slot, 0, 0.0, 0, sample});
+    return commands_.push({Kind::Load, 0, slot, 0, 0.0, 0, sample, VoiceShape()});
 }
 
 bool LiveCore::unload(int32_t slot) {
     if (slot < 0 || slot >= MAX_SAMPLES) return false;
-    return commands_.push({Kind::Unload, 0, slot, 0, 0.0, 0, nullptr});
+    return commands_.push({Kind::Unload, 0, slot, 0, 0.0, 0, nullptr, VoiceShape()});
 }
 
-bool LiveCore::start(int32_t key, int32_t slot, int32_t sampleRate, double pitch, int64_t tag) {
+bool LiveCore::start(int32_t key, int32_t slot, int32_t sampleRate, double pitch, int64_t tag, const VoiceShape &shape) {
     if (slot < 0 || slot >= MAX_SAMPLES) return false;
-    return commands_.push({Kind::Start, key, slot, sampleRate, pitch, tag, nullptr});
+    return commands_.push({Kind::Start, key, slot, sampleRate, pitch, tag, nullptr, shape});
 }
 
-bool LiveCore::release(int32_t key) { return commands_.push({Kind::Release, key, 0, 0, 0.0, 0, nullptr}); }
+bool LiveCore::release(int32_t key) { return commands_.push({Kind::Release, key, 0, 0, 0.0, 0, nullptr, VoiceShape()}); }
 
-bool LiveCore::cut(int32_t key) { return commands_.push({Kind::Cut, key, 0, 0, 0.0, 0, nullptr}); }
+bool LiveCore::cut(int32_t key) { return commands_.push({Kind::Cut, key, 0, 0, 0.0, 0, nullptr, VoiceShape()}); }
 
-bool LiveCore::stopAll() { return commands_.push({Kind::StopAll, 0, 0, 0, 0.0, 0, nullptr}); }
+bool LiveCore::stopAll() { return commands_.push({Kind::StopAll, 0, 0, 0, 0.0, 0, nullptr, VoiceShape()}); }
 
 // ---------- audio thread ----------
 
@@ -103,7 +103,7 @@ void LiveCore::apply(const Command &c, bool flush) {
             slots_[c.slot] = nullptr;
             return;
         case Kind::Start:
-            if (!flush && slots_[c.slot] != nullptr) mixer_.start(c.key, slots_[c.slot], c.rate, c.pitch, c.tag);
+            if (!flush && slots_[c.slot] != nullptr) mixer_.start(c.key, slots_[c.slot], c.rate, c.pitch, c.tag, c.shape);
             return;
         case Kind::Release:
             if (!flush) mixer_.release(c.key);

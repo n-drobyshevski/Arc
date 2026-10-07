@@ -88,10 +88,21 @@ JNIEXPORT jboolean JNICALL Java_dev_arc_ep133_audio_NativeAudio_unload(JNIEnv *,
     return c != nullptr && c->unload(slot) ? JNI_TRUE : JNI_FALSE;
 }
 
+// The voice's shape comes as its fields (VoiceShape less the semitones, already in [pitch]; the mode by ordinal).
 JNIEXPORT jboolean JNICALL Java_dev_arc_ep133_audio_NativeAudio_start(
-    JNIEnv *, jclass, jlong handle, jint key, jint slot, jint sampleRate, jdouble pitch, jlong tag) {
+    JNIEnv *, jclass, jlong handle, jint key, jint slot, jint sampleRate, jdouble pitch, jlong tag, jfloat gain, jint pan,
+    jint start, jint end, jint attackMs, jint releaseMs, jint mode, jint muteGroup) {
     LiveCore *c = core(handle);
-    return c != nullptr && c->start(key, slot, sampleRate, pitch, tag) ? JNI_TRUE : JNI_FALSE;
+    arc::VoiceShape shape;
+    shape.gain = gain;
+    shape.pan = pan;
+    shape.start = start;
+    shape.end = end;
+    shape.attackMs = attackMs;
+    shape.releaseMs = releaseMs;
+    shape.mode = mode;
+    shape.muteGroup = muteGroup;
+    return c != nullptr && c->start(key, slot, sampleRate, pitch, tag, shape) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL Java_dev_arc_ep133_audio_NativeAudio_release(JNIEnv *, jclass, jlong handle, jint key) {

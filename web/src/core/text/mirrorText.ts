@@ -7,6 +7,7 @@
 import { FactorySounds } from '../features/factorySounds'
 import { Keys, NoteNames, Scale } from '../features/keys'
 import type { Hit } from '../features/liveMirror'
+import type { PlayMode } from '../features/padSettings'
 import { noteName, type PhysicalPad } from '../features/padNotes'
 import { KeyMark } from '../features/piano'
 import { ProjectSource } from '../features/projectStep'
@@ -417,6 +418,107 @@ export const MirrorText = {
   },
   uploadFailed(reason: string): string {
     return `The sample couldn't be uploaded: ${reason}`
+  },
+
+  // ---------- EDIT: a pad's SOUND EDIT settings (community notes, see device.writePadSettings) ----------
+  /** The pages, as the device prints them (upper-cased where shown), in [pageName]'s order. */
+  PAGE_SOUND: 'Sound',
+  PAGE_TRIM: 'Trim',
+  PAGE_ENV: 'Env',
+  PAGE_MIDI: 'Midi',
+  PAGE_MUTE: 'Mute',
+  /** Page [i]'s name: Sound, Trim, Env, Midi, Mute. Kotlin's List.get throws past the end; this does too. */
+  pageName(i: number): string {
+    const pages = [MirrorText.PAGE_SOUND, MirrorText.PAGE_TRIM, MirrorText.PAGE_ENV, MirrorText.PAGE_MIDI, MirrorText.PAGE_MUTE]
+    const p = pages[i]
+    if (p === undefined) throw new RangeError(`Index ${i} out of bounds for length ${pages.length}`)
+    return p
+  },
+
+  /** The knobs' names. */
+  PITCH: 'Pitch',
+  LEVEL: 'Level',
+  MODE: 'Mode',
+  PAN: 'Pan',
+  START: 'Start',
+  LENGTH: 'Length',
+  ATTACK: 'Attack',
+  RELEASE: 'Release',
+  CHANNEL: 'Channel',
+  MUTE_GROUP: 'Mute group',
+  /** A knob's readout while its value isn't known (the trim before the sample's length is). */
+  NO_VALUE: '\u2014',
+
+  /** "+1.5", "-12", "0": semitones, at most two decimals. */
+  pitchLabel(semitones: number): string {
+    const r = Math.round(semitones * 100) / 100
+    if (r === 0 || Number.isNaN(r)) return '0'
+    return (r > 0 ? '+' : '-') + String(Math.abs(r))
+  },
+
+  /** "100". */
+  levelLabel(level: number): string {
+    return `${level}`
+  },
+
+  /** "C" in the middle, "L8" to the left, "R16" to the right. */
+  panLabel(pan: number): string {
+    return pan < 0 ? `L${-pan}` : pan > 0 ? `R${pan}` : 'C'
+  },
+
+  modeLabel(m: PlayMode): string {
+    switch (m) {
+      case 'oneshot':
+        return 'Oneshot'
+      case 'key':
+        return 'Key'
+      case 'legato':
+        return 'Legato'
+    }
+  },
+
+  /** "0.25 s": [frames] at [rate] frames a second. */
+  secondsLabel(frames: number, rate: number): string {
+    return `${(rate > 0 ? frames / rate : 0).toFixed(2)} s`
+  },
+
+  /** An envelope time as the device keeps it, 0..255 (its milliseconds aren't known for sure). */
+  envLabel(ticks: number): string {
+    return `${ticks}`
+  },
+
+  /** "1".."16" for channels 0..15. */
+  channelLabel(ch: number): string {
+    return `${ch + 1}`
+  },
+
+  onOff(on: boolean): string {
+    return on ? 'On' : 'Off'
+  },
+
+  /** A knob for screen readers: "Pitch: +1.5." */
+  knobDescription(name: string, value: string): string {
+    return `${name}: ${value}.`
+  },
+
+  /** TRIM's waveform for screen readers: "Plays 46875 frames from frame 1200." */
+  trimDescription(start: number, length: number): string {
+    return `Plays ${length} frames from frame ${start}.`
+  },
+  /** Under ENV while the pad is Oneshot, which plays to the end. */
+  ONESHOT_RELEASE: 'Oneshot plays to the end: release is for Key and Legato.',
+  /** Under MUTE. */
+  MUTE_NOTE: 'Pads with the mute group on cut each other off within their group: playing one stops the others.',
+
+  /** The pad sheet's note under the knobs: while the pad's settings are read, offline, or else. */
+  PAD_READING: "Reading the pad's settings\u2026",
+  PAD_SETTINGS_OFFLINE: "Offline, the pad's settings change in arc only. When you connect, arc asks before putting them on the EP-133.",
+  PAD_SETTINGS_NOTE: 'Turns go on the EP-133 as soon as you let go.',
+  /** The key that folds the sheet's sound list away while the settings show, and back. */
+  CHANGE_SOUND: 'Change sound',
+  HIDE_SOUNDS: 'Hide sounds',
+  padSettingsFailed(reason: string): string {
+    return `The pad's settings couldn't be changed: ${reason}`
   },
 
   // ---------- Offline: the sounds panel and pad changes in arc only, put on the EP-133 when it connects ----------

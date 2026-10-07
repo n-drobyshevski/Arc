@@ -397,6 +397,12 @@ class MainActivity : ComponentActivity() {
         // Live's EDIT (the tab under GUIDE), and the pad whose sheet is open with where its sound is set.
         var liveEdit by rememberSaveable { mutableStateOf(false) }
         var padSheet by remember { mutableStateOf<Pair<dev.arc.ep133.features.PhysicalPad, dev.arc.ep133.features.PadTarget>?>(null) }
+        // The pad sheet's settings: asked for as it opens, let go of as it closes.
+        val padEdit by controller.padEdit.collectAsStateWithLifecycle()
+        LaunchedEffect(padSheet) {
+            val open = padSheet
+            if (open != null) controller.openPadEdit(open.first, open.second) else controller.closePadEdit()
+        }
         // TEMPO held: the tempo sheet; PROJECT held: the project sheet.
         var tempoSheet by rememberSaveable { mutableStateOf(false) }
         var projectSheet by rememberSaveable { mutableStateOf(false) }
@@ -804,6 +810,9 @@ class MainActivity : ComponentActivity() {
                                 offline = offline != null,
                                 readSlot = offline?.let { controller.mirrorReadSlot(target) },
                                 localName = offline?.let { controller.mirrorLocal(pad)?.name },
+                                edit = padEdit?.takeIf { it.target == target },
+                                onEdit = controller::adjustPad,
+                                haptics = appSettings.haptics,
                             )
                         }
                     }

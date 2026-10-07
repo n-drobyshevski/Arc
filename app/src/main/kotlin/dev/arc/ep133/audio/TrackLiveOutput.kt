@@ -5,6 +5,7 @@ import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.media.AudioTimestamp
 import dev.arc.ep133.formats.VoiceMixer
+import dev.arc.ep133.formats.VoiceShape
 import dev.arc.ep133.text.LatencyText
 
 /**
@@ -46,8 +47,8 @@ internal class TrackLiveOutput private constructor(private val output: BurstOutp
     @Volatile override var engine = LiveEngineInfo(LatencyText.trackEngine(output.fast, output.burst, output.old), output.rate, output.burst, output.size)
         private set
 
-    override fun start(key: String, pcm: ShortArray, channels: Int, sampleRate: Int, semitones: Int, tag: Long): Boolean {
-        mixer.start(key, pcm, channels, sampleRate, semitones, tag)
+    override fun start(key: String, pcm: ShortArray, channels: Int, sampleRate: Int, semitones: Int, tag: Long, shape: VoiceShape): Boolean {
+        mixer.start(key, pcm, channels, sampleRate, semitones, tag, shape)
         return true
     }
 

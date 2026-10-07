@@ -1,6 +1,8 @@
 // Replays voice-mixer.golden (written by VoiceMixerGoldenTest from the Kotlin
 // VoiceMixer) through the C++ port and wants the same results: every sample
 // of short renders, a hash of long ones, the voices started and the keys.
+// A start line may carry a voice shape (VoiceShape's fields, less the
+// semitones, which are in its pitch).
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -129,7 +131,16 @@ int runVoiceMixerParity(const char *goldenPath) {
             const uint64_t bits = std::strtoull(pitchBits.c_str(), nullptr, 16);
             double pitch = 0;
             std::memcpy(&pitch, &bits, sizeof pitch);
-            CHECK(r.mixer->start(key, r.samples[id].get(), rate, pitch, tag));
+            // A shape other than the default follows: the gain's float bits, pan, start, end, attack, release, mode, group.
+            arc::VoiceShape shape;
+            std::string gainBits;
+            if (words >> gainBits) {
+                const uint32_t g = static_cast<uint32_t>(std::strtoul(gainBits.c_str(), nullptr, 16));
+                std::memcpy(&shape.gain, &g, sizeof shape.gain);
+                words >> shape.pan >> shape.start >> shape.end >> shape.attackMs >> shape.releaseMs >> shape.mode >>
+                    shape.muteGroup;
+            }
+            CHECK(r.mixer->start(key, r.samples[id].get(), rate, pitch, tag, shape));
         } else if (op == "release" || op == "cut") {
             int key = 0;
             words >> key;

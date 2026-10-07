@@ -304,6 +304,83 @@ object MirrorText {
     fun undoFailed(reason: String) = "The old sound couldn't be put back: $reason"
     fun uploadFailed(reason: String) = "The sample couldn't be uploaded: $reason"
 
+    // ---------- EDIT: a pad's SOUND EDIT settings (community notes, see Device.writePadSettings) ----------
+    /** The pages, as the device prints them (upper-cased where shown), in [pageName]'s order. */
+    const val PAGE_SOUND = "Sound"
+    const val PAGE_TRIM = "Trim"
+    const val PAGE_ENV = "Env"
+    const val PAGE_MIDI = "Midi"
+    const val PAGE_MUTE = "Mute"
+    /** Page [i]'s name: Sound, Trim, Env, Midi, Mute. */
+    fun pageName(i: Int) = listOf(PAGE_SOUND, PAGE_TRIM, PAGE_ENV, PAGE_MIDI, PAGE_MUTE)[i]
+
+    /** The knobs' names. */
+    const val PITCH = "Pitch"
+    const val LEVEL = "Level"
+    const val MODE = "Mode"
+    const val PAN = "Pan"
+    const val START = "Start"
+    const val LENGTH = "Length"
+    const val ATTACK = "Attack"
+    const val RELEASE = "Release"
+    const val CHANNEL = "Channel"
+    const val MUTE_GROUP = "Mute group"
+    /** A knob's readout while its value isn't known (the trim before the sample's length is). */
+    const val NO_VALUE = "\u2014"
+
+    /** "+1.5", "-12", "0": semitones, at most two decimals. */
+    fun pitchLabel(semitones: Double): String {
+        val r = Math.round(semitones * 100) / 100.0
+        if (r == 0.0 || r.isNaN()) return "0"
+        return (if (r > 0) "+" else "-") + dev.arc.ep133.util.jsNumberToString(Math.abs(r))
+    }
+
+    /** "100". */
+    fun levelLabel(level: Int) = "$level"
+
+    /** "C" in the middle, "L8" to the left, "R16" to the right. */
+    fun panLabel(pan: Int) = when {
+        pan < 0 -> "L${-pan}"
+        pan > 0 -> "R$pan"
+        else -> "C"
+    }
+
+    fun modeLabel(m: dev.arc.ep133.features.PlayMode) = when (m) {
+        dev.arc.ep133.features.PlayMode.ONESHOT -> "Oneshot"
+        dev.arc.ep133.features.PlayMode.KEY -> "Key"
+        dev.arc.ep133.features.PlayMode.LEGATO -> "Legato"
+    }
+
+    /** "0.25 s": [frames] at [rate] frames a second. */
+    fun secondsLabel(frames: Long, rate: Double) = "${jsToFixed(if (rate > 0) frames / rate else 0.0, 2)} s"
+
+    /** An envelope time as the device keeps it, 0..255 (its milliseconds aren't known for sure). */
+    fun envLabel(ticks: Int) = "$ticks"
+
+    /** "1".."16" for channels 0..15. */
+    fun channelLabel(ch: Int) = "${ch + 1}"
+
+    fun onOff(on: Boolean) = if (on) "On" else "Off"
+
+    /** A knob for screen readers: "Pitch: +1.5." */
+    fun knobDescription(name: String, value: String) = "$name: $value."
+
+    /** TRIM's waveform for screen readers: "Plays 46875 frames from frame 1200." */
+    fun trimDescription(start: Long, length: Long) = "Plays $length frames from frame $start."
+    /** Under ENV while the pad is Oneshot, which plays to the end. */
+    const val ONESHOT_RELEASE = "Oneshot plays to the end: release is for Key and Legato."
+    /** Under MUTE. */
+    const val MUTE_NOTE = "Pads with the mute group on cut each other off within their group: playing one stops the others."
+
+    /** The pad sheet's note under the knobs: while the pad's settings are read, offline, or else. */
+    const val PAD_READING = "Reading the pad's settings\u2026"
+    const val PAD_SETTINGS_OFFLINE = "Offline, the pad's settings change in arc only. When you connect, arc asks before putting them on the EP-133."
+    const val PAD_SETTINGS_NOTE = "Turns go on the EP-133 as soon as you let go."
+    /** The key that folds the sheet's sound list away while the settings show, and back. */
+    const val CHANGE_SOUND = "Change sound"
+    const val HIDE_SOUNDS = "Hide sounds"
+    fun padSettingsFailed(reason: String) = "The pad's settings couldn't be changed: $reason"
+
     // ---------- Offline: the sounds panel and pad changes in arc only, put on the EP-133 when it connects ----------
     /** The Device / Factory switch over the sound list. */
     const val SOURCE = "Sounds from"

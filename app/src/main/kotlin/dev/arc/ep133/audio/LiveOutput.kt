@@ -1,6 +1,7 @@
 package dev.arc.ep133.audio
 
 import android.media.AudioDeviceInfo
+import dev.arc.ep133.formats.VoiceShape
 import dev.arc.ep133.text.LiveEngine
 
 /**
@@ -36,10 +37,12 @@ internal interface LiveOutput {
 
     /**
      * Plays [pcm] (16-bit, [channels] interleaved, at [sampleRate]) as voice
-     * [key], [semitones] from its own pitch, until [release]; [tag] is the
-     * press's time (System.nanoTime). False when it can't be played.
+     * [key], [semitones] from its own pitch, shaped by [shape] (the pad's
+     * SOUND EDIT settings, [dev.arc.ep133.formats.VoiceMixer]'s way), until
+     * [release]; [tag] is the press's time (System.nanoTime). False when it
+     * can't be played.
      */
-    fun start(key: String, pcm: ShortArray, channels: Int, sampleRate: Int, semitones: Int, tag: Long): Boolean
+    fun start(key: String, pcm: ShortArray, channels: Int, sampleRate: Int, semitones: Int, tag: Long, shape: VoiceShape = VoiceShape.DEFAULT): Boolean
 
     fun release(key: String)
 

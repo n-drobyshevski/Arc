@@ -53,6 +53,7 @@ import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.ui.components.ArcField
 import dev.arc.ep133.ui.components.ArcIcon
 import dev.arc.ep133.ui.components.ArcKey
+import dev.arc.ep133.ui.components.KeyStyle
 import dev.arc.ep133.ui.components.LocalHwColors
 import dev.arc.ep133.ui.components.OneLine
 import dev.arc.ep133.ui.components.PlayKey
@@ -82,6 +83,10 @@ import dev.arc.ep133.ui.theme.LocalArcColors
  * the one that marks it ON PAD. [readSlot] is the pad's sound in the read,
  * never dimmed: picking it takes the pad's change back. [localName] names
  * the pad's offline sound when its list is gone (the pack deleted).
+ *
+ * A pad with a sound shows its settings first ([edit], the EP-133's SOUND
+ * EDIT pages: [PadEditPages]), each turn going to [onEdit]; the list of
+ * sounds then folds away under "Change sound".
  */
 @Composable
 fun ColumnScope.PadSheetContent(
@@ -100,6 +105,10 @@ fun ColumnScope.PadSheetContent(
     offline: Boolean = false,
     readSlot: Int? = null,
     localName: String? = null,
+    edit: dev.arc.ep133.controller.PadEditState? = null,
+    onEdit: (dev.arc.ep133.features.PadSettings) -> Unit = {},
+    haptics: Boolean = false,
+    editPage: EditPage = EditPage.SOUND,
 ) {
     val c = LocalArcColors.current
     val now = target.slot
@@ -130,6 +139,40 @@ fun ColumnScope.PadSheetContent(
             Text(MirrorText.padSheetLine(target.project, now, nowName), style = ArcType.small, color = c.graphite)
         }
     }
+    val editing = edit != null && now != null
+    if (editing) {
+        PadEditPages(
+            settings = edit!!.settings,
+            onChange = onEdit,
+            onDone = {},
+            frames = edit.frames,
+            sampleRate = edit.sampleRate,
+            peaks = edit.peaks,
+            haptics = haptics,
+            enabled = !edit.reading,
+            initialPage = editPage,
+        )
+        Text(
+            when {
+                edit.reading -> MirrorText.PAD_READING
+                offline -> MirrorText.PAD_SETTINGS_OFFLINE
+                else -> MirrorText.PAD_SETTINGS_NOTE
+            },
+            style = ArcType.small,
+            color = c.graphite,
+        )
+    }
+    // With the settings shown, the sounds fold away until asked for.
+    var listOpen by rememberSaveable(pad) { mutableStateOf(!editing) }
+    if (editing) {
+        ArcKey(
+            if (listOpen) MirrorText.HIDE_SOUNDS else MirrorText.CHANGE_SOUND,
+            { listOpen = !listOpen },
+            Modifier.fillMaxWidth(),
+            style = KeyStyle.Quiet,
+        )
+    }
+    if (!listOpen) return
     if (switch) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(MirrorText.SOURCE, style = ArcType.small, color = c.graphite)

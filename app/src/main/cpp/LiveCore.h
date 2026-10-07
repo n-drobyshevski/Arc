@@ -57,8 +57,12 @@ public:
     bool load(int32_t slot, Sample *sample);
     /** Empties [slot]; voices playing its sound play on. */
     bool unload(int32_t slot);
-    /** Starts voice [key] on [slot]'s sound, read at [sampleRate], [pitch] times faster; [tag] comes back with STARTED. */
-    bool start(int32_t key, int32_t slot, int32_t sampleRate, double pitch, int64_t tag);
+    /**
+     * Starts voice [key] on [slot]'s sound, read at [sampleRate], [pitch] times
+     * faster, shaped by [shape] (VoiceMixer's); [tag] comes back with STARTED.
+     */
+    bool start(int32_t key, int32_t slot, int32_t sampleRate, double pitch, int64_t tag,
+               const VoiceShape &shape = VoiceShape());
     bool release(int32_t key);
     bool cut(int32_t key);
     bool stopAll();
@@ -114,6 +118,7 @@ private:
         double pitch;
         int64_t tag;
         Sample *sample;
+        VoiceShape shape;
     };
 
     struct Event {

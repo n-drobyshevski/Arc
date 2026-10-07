@@ -125,6 +125,25 @@ class FeatureTextTest {
     }
 
     @Test
+    fun `pad settings text`() {
+        assertEquals(listOf("Sound", "Trim", "Env", "Midi", "Mute"), (0..4).map(MirrorText::pageName))
+        assertEquals("MUTE GROUP", MirrorText.MUTE_GROUP.uppercase())
+        assertEquals(listOf("+1.5", "-12", "0", "+0.25", "-0.07", "0", "+12"), listOf(1.5, -12.0, 0.0, 0.25, -0.0701, -0.004, 12.0).map(MirrorText::pitchLabel))
+        assertEquals("100", MirrorText.levelLabel(100))
+        assertEquals(listOf("L16", "L8", "C", "R1", "R16"), listOf(-16, -8, 0, 1, 16).map(MirrorText::panLabel))
+        assertEquals(listOf("Oneshot", "Key", "Legato"), dev.arc.ep133.features.PlayMode.entries.map(MirrorText::modeLabel))
+        assertEquals("0.25 s", MirrorText.secondsLabel(11719, 46875.0))
+        assertEquals("1.00 s", MirrorText.secondsLabel(46875, 46875.0))
+        assertEquals("0.00 s", MirrorText.secondsLabel(100, 0.0))
+        assertEquals("255", MirrorText.envLabel(255))
+        assertEquals(listOf("1", "16"), listOf(0, 15).map(MirrorText::channelLabel))
+        assertEquals(listOf("On", "Off"), listOf(true, false).map(MirrorText::onOff))
+        assertEquals("Pitch: +1.5.", MirrorText.knobDescription(MirrorText.PITCH, MirrorText.pitchLabel(1.5)))
+        assertEquals("Plays 46875 frames from frame 1200.", MirrorText.trimDescription(1200, 46875))
+        assertEquals("The pad's settings couldn't be changed: timeout", MirrorText.padSettingsFailed("timeout"))
+    }
+
+    @Test
     fun `function keys and offline notes`() {
         assertEquals("1\u20139", MirrorText.FN_PROJECT_SUB)
         assertEquals("Project 3", MirrorText.projectKeyState(3, ProjectSource.DEVICE))
