@@ -1,26 +1,40 @@
-<!doctype html><html lang="en"><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style><meta name="description" content="Every launcher icon candidate for arc, the EP-133 K.O. II backup librarian: 40 ideas in five rounds."><title>arc Icon Board</title><meta name="robots" content="noindex"><link rel="icon" href="../icons/icon.svg" type="image/svg+xml"></head><body>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="robots" content="noindex">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>arc Icon Board</title>
+<meta name="description" content="Every launcher icon candidate for arc, the EP-133 K.O. II backup librarian: 40 ideas in five rounds.">
+<link rel="icon" href="../icons/icon.svg" type="image/svg+xml">
 <style>
-/* Chakra Petch and IBM Plex Sans, latin only, self-hosted (SIL OFL, see fonts/) so arc's CSP needs no outside origin. */
+/* Chakra Petch and IBM Plex Sans, latin only, self-hosted (SIL OFL, see fonts/) so the site's CSP needs no outside origin. */
 @font-face { font-family: 'Chakra Petch'; font-style: normal; font-weight: 500; font-display: swap; src: url(fonts/chakra-petch-latin-500-normal.woff2) format('woff2'); }
 @font-face { font-family: 'Chakra Petch'; font-style: normal; font-weight: 600; font-display: swap; src: url(fonts/chakra-petch-latin-600-normal.woff2) format('woff2'); }
 @font-face { font-family: 'IBM Plex Sans'; font-style: normal; font-weight: 400; font-display: swap; src: url(fonts/ibm-plex-sans-latin-400-normal.woff2) format('woff2'); }
 @font-face { font-family: 'IBM Plex Sans'; font-style: normal; font-weight: 500; font-display: swap; src: url(fonts/ibm-plex-sans-latin-500-normal.woff2) format('woff2'); }
-/* Layout: PO-app sheet — cream page, navy ink, each variant on a pale plate with a letter tag like the app's EDIT tag */
 :root {
   --bg: #e6e2db; --plate: #d7d8d4; --ink: #1f2558; --dim: #6b6a72; --signal: #ff4c00; --tag: #1f2558; --on-tag: #f4f2ee;
   --wall-a: #c9c4ba; --wall-b: #23252b; --line: rgba(31,37,88,.18);
   --display: "Chakra Petch", "DIN Alternate", "Arial Narrow", sans-serif;
   --body: "IBM Plex Sans", system-ui, sans-serif;
+  color-scheme: light;
 }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
   --bg: #1c1d1e; --plate: #2b2c2e; --ink: #ecebe6; --dim: #9a9b9d; --tag: #ecebe6; --on-tag: #1c1d1e; --line: rgba(236,235,230,.15); color-scheme: dark } }
 :root[data-theme="dark"] {
   --bg: #1c1d1e; --plate: #2b2c2e; --ink: #ecebe6; --dim: #9a9b9d; --tag: #ecebe6; --on-tag: #1c1d1e; --line: rgba(236,235,230,.15); color-scheme: dark }
-body { background: var(--bg); color: var(--ink); font-family: var(--body); padding: 0 16px; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--body); padding: 0 16px; }
+[hidden] { display: none !important; }
 .wrap { max-width: 1120px; margin: 0 auto; padding-block: 32px 56px; display: grid; gap: 28px; }
 header { display: grid; gap: 10px; }
 h1 { font-family: var(--display); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; font-size: clamp(1.6rem, 4vw, 2.4rem); margin: 0; text-wrap: balance; }
 header p { margin: 0; max-width: 62ch; color: var(--dim); line-height: 1.5; }
+.site { justify-self: start; display: inline-flex; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 0 18px; border-radius: 999px; background: var(--tag); color: var(--on-tag); font: 600 .9rem var(--display); letter-spacing: .08em; text-transform: uppercase; text-decoration: none; }
+.site::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--signal); }
+.site:hover { filter: brightness(1.12); }
+.site:focus-visible, footer a:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+footer a { color: inherit; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; }
 .card { min-width: 0; background: var(--plate); border-radius: 22px; padding: 18px; display: grid; gap: 14px; align-content: start; }
 .head { display: flex; align-items: center; gap: 10px; }
@@ -34,31 +48,23 @@ header p { margin: 0; max-width: 62ch; color: var(--dim); line-height: 1.5; }
 .wall.a { background: var(--wall-a); } .wall.b { background: var(--wall-b); }
 .ic { width: 48px; height: 48px; overflow: hidden; flex: none; }
 .ic.circle { border-radius: 50%; } .ic.squircle { border-radius: 30%; } .ic.tiny { width: 26px; height: 26px; border-radius: 50%; }
+.ic.mono { border-radius: 50%; }
 .current { opacity: .9; }
 .current .tag { background: var(--dim); }
 footer { color: var(--dim); font-size: .85rem; line-height: 1.5; max-width: 70ch; }
-
-.ic.mono { border-radius: 50%; }
-.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: .8rem; color: var(--dim); }
-
-.ic.mono { border-radius: 50%; }
-nav { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 2; background: var(--bg); padding-block: 10px; display: flex; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid var(--line); }
-nav a { font-family: var(--display); font-weight: 600; text-transform: uppercase; letter-spacing: .08em; font-size: .8rem; color: var(--ink); text-decoration: none; padding: 6px 12px; border-radius: 999px; background: var(--plate); }
-nav a:focus-visible, .star:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
-section { display: grid; gap: 14px; scroll-margin-top: 64px; }
+section { display: grid; gap: 14px; }
 h2 { font-family: var(--display); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; font-size: 1.25rem; margin: 0; display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 h2 small { font-family: var(--body); font-weight: 400; text-transform: none; letter-spacing: 0; font-size: .875rem; color: var(--dim); }
 .star { margin-left: auto; background: none; border: 1.5px solid var(--line); border-radius: 999px; color: var(--dim); font: 600 .75rem var(--display); letter-spacing: .08em; text-transform: uppercase; padding: 4px 10px; cursor: pointer; }
 .star[aria-pressed="true"] { background: var(--signal); border-color: var(--signal); color: #fff; }
+.star:focus-visible, .tabs button:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
 .short { display: flex; flex-wrap: wrap; gap: 12px; }
 .short .pick { display: grid; justify-items: center; gap: 4px; font: 600 .75rem var(--display); letter-spacing: .06em; }
 .short .pick .ic { width: 64px; height: 64px; border-radius: 30%; }
 .tabs { display: flex; gap: 6px; border-bottom: 2px solid var(--ink); }
 .tabs button { font: 600 .9rem var(--display); letter-spacing: .1em; text-transform: uppercase; background: none; border: 0; color: var(--dim); padding: 8px 14px; cursor: pointer; border-radius: 10px 10px 0 0; }
 .tabs button[aria-selected="true"] { background: var(--ink); color: var(--bg); }
-.tabs button:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
 #overview, #details { display: grid; gap: 36px; }
-#overview[hidden], #details[hidden] { display: none; }
 .ov { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 12px; }
 .cell { background: var(--plate); border-radius: 18px; padding: 14px 12px 12px; display: grid; justify-items: center; gap: 10px; min-width: 0; }
 .cell .ic { width: min(100%, 104px); height: auto; aspect-ratio: 1; border-radius: 30%; }
@@ -68,11 +74,13 @@ h2 small { font-family: var(--body); font-weight: 400; text-transform: none; let
 .cell .star { margin: 0; }
 .empty { color: var(--dim); font-size: .9rem; margin: 0; }
 </style>
-
+</head>
+<body>
 <div class="wrap">
   <header>
     <h1>arc · icon board</h1>
     <p>Every launcher icon candidate so far, in one place: 40 ideas plus the current icon. Overview shows them all side by side; Details shows each one masked as a circle and squircle on light and dark wallpapers, and from I on, the themed version Android 13+ draws. Star the ones you like to build a shortlist.</p>
+    <a class="site" href="/">Open arc ↗</a>
   </header>
   <div class="tabs" role="tablist"><button type="button" role="tab" id="tab-overview" aria-controls="overview">Overview</button><button type="button" role="tab" id="tab-details" aria-controls="details">Details</button></div>
   <section id="shortlist"><h2>Shortlist <small>starred icons, kept in this browser</small></h2><div class="short" id="short"></div></section>
@@ -80,9 +88,9 @@ h2 small { font-family: var(--body); font-weight: 400; text-transform: none; let
   <div id="details" role="tabpanel" aria-labelledby="tab-details">
   <div id="sets" style="display:grid;gap:40px"></div>
   </div>
-  <footer>Every variant stays inside the 66dp safe circle, so no launcher mask clips it.</footer>
+  <footer>Every variant stays inside the 66dp safe circle, so no launcher mask clips it.<br>The app: <a href="https://arc-pi-mauve.vercel.app" target="_blank" rel="noopener">arc-pi-mauve.vercel.app</a></footer>
 </div>
 
 <script src="board.js"></script>
-
-</body></html>
+</body>
+</html>
