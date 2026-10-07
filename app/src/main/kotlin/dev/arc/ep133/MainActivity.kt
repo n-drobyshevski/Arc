@@ -533,6 +533,11 @@ class MainActivity : ComponentActivity() {
         // Live's function keys: PROJECT steps through the projects, KEYS is the mode, TEMPO the phone's click.
         val metronome by controller.metronome.collectAsStateWithLifecycle()
         val functions = dev.arc.ep133.ui.screens.FunctionKeysUi(
+            // SOUND held: the sheet of the pad played last (its tap is EDIT, below).
+            onPadSound = {
+                val pad = state.keysPad
+                if (pad == null) controller.toast(dev.arc.ep133.text.MirrorText.PLAY_A_PAD) else controller.editTarget(pad)?.let { padSheet = pad to it }
+            },
             project = dev.arc.ep133.ui.screens.projectKeyOf(mirror, state.busy),
             onProject = controller::stepProject,
             onPickProject = { projectSheet = true },

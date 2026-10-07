@@ -137,6 +137,8 @@ describe('FeatureTextTest', () => {
     expect(CoachText.PROJECT).toBe('Next project: tap; hold + pad 1–9 to pick')
     expect(MirrorText.projectChoice(3, true)).toBe('Project 3, shown')
     expect(MirrorText.projectChoice(4, false)).toBe('Project 4')
+    expect(MirrorText.FN_SOUND).toBe('Sound')
+    expect(MirrorText.SOUND_SHEET).toBe("Pad's sound")
     expect(CoachText.TEMPO).toBe('Click: tap; hold for tempo')
   })
 })

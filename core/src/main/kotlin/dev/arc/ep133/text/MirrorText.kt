@@ -70,6 +70,10 @@ object MirrorText {
     const val FN_PROJECT_SUB = "1\u20139"
     const val FN_TEMPO = "Tempo"
     const val FN_TEMPO_SUB = "Tap"
+    /** SOUND: EDIT on or off (its lower half says EDIT); held, the sheet of the pad played last. */
+    const val FN_SOUND = "Sound"
+    const val SOUND_SHEET = "Pad's sound"
+    const val PLAY_A_PAD = "Play a pad first: SOUND held opens its sound."
 
     /** PROJECT for screen readers: "Project 3", "Factory project 3", or "No project" before one is read. */
     fun projectKeyState(n: Int?, source: ProjectSource) = when {

@@ -184,8 +184,8 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
                 fmtWhen = { if (it == TAKE_AT) "Oct 5, 2:23 PM" else "Oct 4, 9:41 PM" },
                 connected = offline == null,
             ),
-            // The EDIT tab shows where [edit] is given: on or off.
-            edit = if (edit == null) dev.arc.ep133.ui.screens.EditUi() else dev.arc.ep133.ui.screens.EditUi(on = edit, onEdit = {}),
+            // EDIT, SOUND's key, as on the Live tab: on where [edit] says so.
+            edit = dev.arc.ep133.ui.screens.EditUi(on = edit == true, onEdit = {}),
             wireless = wireless,
             functions = functions,
         )

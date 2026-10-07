@@ -148,6 +148,8 @@ class FeatureTextTest {
         assertEquals("Next project: tap; hold + pad 1–9 to pick", CoachText.PROJECT)
         assertEquals("Project 3, shown", MirrorText.projectChoice(3, shown = true))
         assertEquals("Project 4", MirrorText.projectChoice(4, shown = false))
+        assertEquals("Sound", MirrorText.FN_SOUND)
+        assertEquals("Pad's sound", MirrorText.SOUND_SHEET)
         assertEquals("Click: tap; hold for tempo", CoachText.TEMPO)
     }
 }

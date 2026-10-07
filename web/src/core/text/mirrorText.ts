@@ -90,6 +90,10 @@ export const MirrorText = {
   FN_PROJECT_SUB: '1\u20139',
   FN_TEMPO: 'Tempo',
   FN_TEMPO_SUB: 'Tap',
+  /** SOUND: EDIT on or off (its lower half says EDIT); held, the sheet of the pad played last. */
+  FN_SOUND: 'Sound',
+  SOUND_SHEET: "Pad's sound",
+  PLAY_A_PAD: 'Play a pad first: SOUND held opens its sound.',
 
   /** PROJECT for screen readers: "Project 3", "Factory project 3", or "No project" before one is read. */
   projectKeyState(n: number | null, source: ProjectSource): string {

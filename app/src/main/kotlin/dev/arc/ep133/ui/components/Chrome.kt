@@ -348,30 +348,6 @@ fun GuideEdgeTab(onClick: () -> Unit, modifier: Modifier = Modifier) {
 }
 
 /**
- * Live's EDIT tab, stacked under GUIDE on the left edge (place it with
- * [underGuide]): an LED near its top, and while [on] the tab turns signal
- * orange with the LED lit white. Pads then change their sound when tapped.
- */
-@Composable
-fun EditEdgeTab(on: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    val c = LocalArcColors.current
-    val hw = LocalHwColors.current
-    EdgeTab(
-        dev.arc.ep133.text.MirrorText.EDIT_TAB, onClick, modifier,
-        Modifier
-            .semantics {
-                role = Role.Button
-                contentDescription = dev.arc.ep133.text.MirrorText.editTab(on)
-            }
-            .coachMark("edge.edit", CoachText.EDIT, c.signal, c.onSignal),
-        face = if (on) c.signal else c.tabOff,
-        ink = if (on) c.onSignal else c.onTabOff,
-        led = if (on) c.onSignal else hw.ledOff,
-        ledGlow = on,
-    )
-}
-
-/**
  * A vertical tab on the left edge, its [word] reading bottom to top, as the
  * PO's side tabs: quiet, like an unselected key, unless [face] says otherwise.
  * [led]: a small LED near its top. [marks] (what screen readers and the
@@ -430,22 +406,6 @@ private fun EdgeTab(
 }
 
 private val EdgeTabHeight = 112.dp
-
-/** The room between GUIDE and the EDIT tab stacked under it. */
-private val EdgeTabGap = 12.dp
-
-/**
- * Places a tab aligned to the page's start, centred, just under the guide
- * tab ([aboveMiddle]), and never closer than 8 dp to the page's foot.
- */
-fun Modifier.underGuide(): Modifier = layout { measurable, constraints ->
-    val p = measurable.measure(constraints)
-    val guideLift = guideLift(constraints)
-    val down = (EdgeTabHeight + EdgeTabGap).roundToPx() - guideLift
-    // Centred in the page, so its foot is at half the page plus half the tab.
-    val most = if (constraints.hasBoundedHeight) constraints.maxHeight / 2 - p.height / 2 - 8.dp.roundToPx() else down
-    layout(p.width, p.height) { p.place(0, minOf(down, most)) }
-}
 
 /**
  * Lifts the guide tab 80 dp above the page's middle, or less on a short page,

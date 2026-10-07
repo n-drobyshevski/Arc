@@ -161,8 +161,11 @@ private val ColumnGapTight = 6.dp
 private val ColumnCapLed = 32.dp
 private val ColumnCapMin = 30.dp
 
+/** How many keys the row and the column hold: SOUND, PROJECT, KEYS and TEMPO. */
+private const val KEY_COUNT = 4
+
 /** The column's least height that keeps its LED lines (the caps at their smallest with them). */
-internal val FunctionColumnLed = (ColumnCapLed + CapToLed + LedLine) * 3 + ColumnGapTight * 2
+internal val FunctionColumnLed = (ColumnCapLed + CapToLed + LedLine) * KEY_COUNT + ColumnGapTight * (KEY_COUNT - 1)
 
 /**
  * How the column's keys fit [height]: their [cap], the [gap] between them,
@@ -179,11 +182,12 @@ internal data class ColumnFit(val cap: Dp, val gap: Dp, val led: Boolean)
  */
 internal fun columnFit(height: Dp): ColumnFit {
     val line = CapToLed + LedLine
-    val full = (ColumnCap + line) * 3
-    if (height >= full + ColumnGapTight * 2) return ColumnFit(ColumnCap, ((height - full) / 2).coerceAtMost(ColumnGap), true)
-    val withLed = (height - ColumnGapTight * 2) / 3 - line
+    val gaps = KEY_COUNT - 1
+    val full = (ColumnCap + line) * KEY_COUNT
+    if (height >= full + ColumnGapTight * gaps) return ColumnFit(ColumnCap, ((height - full) / gaps).coerceAtMost(ColumnGap), true)
+    val withLed = (height - ColumnGapTight * gaps) / KEY_COUNT - line
     if (withLed >= ColumnCapLed) return ColumnFit(withLed, ColumnGapTight, true)
-    return ColumnFit(((height - ColumnGapTight * 2) / 3).coerceIn(ColumnCapMin, ColumnCap), ColumnGapTight, false)
+    return ColumnFit(((height - ColumnGapTight * gaps) / KEY_COUNT).coerceIn(ColumnCapMin, ColumnCap), ColumnGapTight, false)
 }
 
 /** The row's height: the cap, the gap and the LED line. */
@@ -193,17 +197,17 @@ internal fun functionRowHeight(): Dp = rowCap() + CapToLed + LedLine
 @Composable
 private fun rowCap(): Dp = if (LocalArcWindow.current.width >= 600.dp) RowCapWide else RowCap
 
-/** The three keys in a row over the pads or the keys, sharing its width up to [RowKeyMax] each. */
+/** The four keys in a row over the pads or the keys, sharing its width up to [RowKeyMax] each. */
 @Composable
-internal fun FunctionRow(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions, st: MirrorState, haptics: Boolean, modifier: Modifier = Modifier, hold: ProjectHold = remember { ProjectHold() }) {
+internal fun FunctionRow(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions, st: MirrorState, haptics: Boolean, modifier: Modifier = Modifier, hold: ProjectHold = remember { ProjectHold() }, edit: EditUi = EditUi()) {
     Row(
         modifier
-            .widthIn(max = RowKeyMax * 3 + RowGap * 2)
+            .widthIn(max = RowKeyMax * KEY_COUNT + RowGap * (KEY_COUNT - 1))
             .fillMaxWidth()
             .semantics { isTraversalGroup = true },
         horizontalArrangement = Arrangement.spacedBy(RowGap),
     ) {
-        FunctionKeys(fn, keys, actions, st, haptics, column = null, Modifier.weight(1f), hold)
+        FunctionKeys(fn, keys, actions, st, haptics, column = null, Modifier.weight(1f), hold, edit)
     }
 }
 
@@ -212,7 +216,7 @@ internal fun FunctionRow(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions,
  * wide, in the middle of its height; sized to that height ([columnFit]).
  */
 @Composable
-internal fun FunctionColumn(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions, st: MirrorState, haptics: Boolean, modifier: Modifier = Modifier, hold: ProjectHold = remember { ProjectHold() }) {
+internal fun FunctionColumn(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions, st: MirrorState, haptics: Boolean, modifier: Modifier = Modifier, hold: ProjectHold = remember { ProjectHold() }, edit: EditUi = EditUi()) {
     BoxWithConstraints(modifier.width(SideFunctions).fillMaxHeight()) {
         val fit = columnFit(maxHeight)
         Column(
@@ -222,17 +226,46 @@ internal fun FunctionColumn(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActio
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(fit.gap, Alignment.CenterVertically),
         ) {
-            FunctionKeys(fn, keys, actions, st, haptics, column = fit, Modifier.fillMaxWidth(), hold)
+            FunctionKeys(fn, keys, actions, st, haptics, column = fit, Modifier.fillMaxWidth(), hold, edit)
         }
     }
 }
 
-/** PROJECT, KEYS and TEMPO, each with [modifier]; [column]'s size in the column, null in the row. */
+/** SOUND, PROJECT, KEYS and TEMPO, each with [modifier]; [column]'s size in the column, null in the row. */
 @Composable
-private fun FunctionKeys(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions, st: MirrorState, haptics: Boolean, column: ColumnFit?, modifier: Modifier, hold: ProjectHold) {
+private fun FunctionKeys(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions, st: MirrorState, haptics: Boolean, column: ColumnFit?, modifier: Modifier, hold: ProjectHold, edit: EditUi) {
     val c = LocalArcColors.current
     val ko = LocalHwColors.current.ko
     val project = fn.project
+    // SOUND: Live's EDIT ([edit]) on or off (a tap on a pad then gives it another sound), its light on
+    // while it is; in KEYS it goes back to the pads with EDIT on. Held, the sheet of the pad played last.
+    val editOn = edit.on && !keys.on
+    val onEdit = edit.onEdit
+    FunctionKey(
+        word = MirrorText.FN_SOUND,
+        sub = MirrorText.EDIT_TAB,
+        lower = ko.lightFace,
+        lowerInk = ko.tierInk,
+        led = { if (editOn) 1f else 0f },
+        lit = editOn,
+        label = if (editOn) MirrorText.EDIT_TAB else MirrorText.MODE_PADS,
+        description = MirrorText.FN_SOUND,
+        state = null,
+        enabled = onEdit != null,
+        toggled = editOn,
+        onClick = {
+            if (onEdit != null) {
+                if (keys.on) actions.onMode(false)
+                onEdit(keys.on || !editOn)
+            }
+        },
+        onLongClick = fn.onPadSound,
+        longClickLabel = MirrorText.SOUND_SHEET,
+        role = Role.Switch,
+        column = column,
+        haptics = haptics,
+        modifier = modifier.coachMark("live.sound", CoachText.EDIT, c.signal, c.onSignal),
+    )
     // PROJECT: steps to the next project; held, a pad 1 to 9 picks one, or let go, the project sheet.
     // Its light is on while it is held and while the device switches.
     val projectState = MirrorText.projectKeyState(project.shown, project.source)
@@ -293,7 +326,8 @@ private fun FunctionKeys(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions,
         lowerInk = c.onSignal,
         led = { blink.value },
         lit = fn.clickOn,
-        label = if (column != null) MirrorText.tempoShort(bpm) else device?.let(MirrorText::bpm) ?: MirrorText.tempoValue(bpm),
+        // Whole BPM, so it fits four keys across a narrow phone (the display line keeps the tenth).
+        label = if (column != null) MirrorText.tempoShort(bpm) else MirrorText.tempoValue(bpm),
         description = MirrorText.CLICK,
         state = MirrorText.clickState(fn.clickOn, bpm, following = device != null),
         toggled = fn.clickOn,
