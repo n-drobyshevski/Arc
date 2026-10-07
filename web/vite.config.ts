@@ -72,8 +72,12 @@ const pwa = VitePWA({
   },
   workbox: {
     navigateFallback: 'index.html',
+    // public/icon-board is a standalone design page, not part of the app: the
+    // service worker must let its navigations reach the network, and not precache it.
+    navigateFallbackDenylist: [/\/icon-board(?:[/?]|$)/],
     globPatterns: ['**/*.{js,css,html,svg,png,woff2,txt}'],
     globIgnores: [
+      'icon-board/**',
       // ?demo only: fetched (and runtime-cached) when someone opens the demo.
       '**/demo-*.js',
       '**/*.map',

@@ -358,4 +358,4 @@ Not affiliated with or endorsed by teenage engineering. EP-133 and K.O. II are t
 
 ## License
 
-MIT (see `LICENSE`). Manrope is licensed under the SIL Open Font License 1.1. Oboe is licensed under the Apache License 2.0.
+MIT (see `LICENSE`). Manrope, and Chakra Petch and IBM Plex Sans on the web's icon board (`web/public/icon-board`), are licensed under the SIL Open Font License 1.1. Oboe is licensed under the Apache License 2.0.
