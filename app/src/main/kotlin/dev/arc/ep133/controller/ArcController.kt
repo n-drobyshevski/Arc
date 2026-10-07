@@ -208,8 +208,10 @@ data class UiState(
  * [pad] and where its settings are kept ([target]), the [settings] shown
  * (each turn lands here at once), and its sound's length ([frames], at
  * [sampleRate]) with its waveform ([peaks]) once loaded, for TRIM. [reading]
- * while the EP-133 is asked for the pad's settings; [offline] when they
- * change in arc only.
+ * while the EP-133 is asked for the pad's settings, [failed] when it
+ * couldn't answer (the knobs then rest: a turn would write guesses over the
+ * pad); [offline] when they change in arc only, from [base], what the sheet
+ * showed before them (what isn't turned is taken from the device later).
  */
 data class PadEditState(
     val pad: dev.arc.ep133.features.PhysicalPad,
@@ -220,6 +222,8 @@ data class PadEditState(
     val peaks: List<dev.arc.ep133.features.Peak>? = null,
     val reading: Boolean = false,
     val offline: Boolean = false,
+    val failed: Boolean = false,
+    val base: dev.arc.ep133.features.PadSettings = settings,
 )
 
 /**
@@ -234,7 +238,8 @@ private const val PAD_WRITE_DELAY_MS = 150L
  * How a pad with [s] plays on the phone (an addition): the EP-133's pitch,
  * level, pan, trim, envelope (ticks, [PadSettings.ENV_MS_PER_TICK] each, a
  * guess) and play mode, its mute group being its pad group's ([group] 0..3).
- * For KEYS ([keys]), where each note is a voice of its own, LEGATO is a held note.
+ * For KEYS ([keys]), where each note is a voice of its own, LEGATO is a held
+ * note and the mute group is left out (the notes would cut each other).
  */
 internal fun voiceShape(s: dev.arc.ep133.features.PadSettings, group: Int, keys: Boolean = false): dev.arc.ep133.formats.VoiceShape {
     val ms = dev.arc.ep133.features.PadSettings.ENV_MS_PER_TICK
@@ -251,7 +256,8 @@ internal fun voiceShape(s: dev.arc.ep133.features.PadSettings, group: Int, keys:
             dev.arc.ep133.features.PlayMode.KEY -> dev.arc.ep133.formats.VoiceMode.KEY
             dev.arc.ep133.features.PlayMode.LEGATO -> if (keys) dev.arc.ep133.formats.VoiceMode.GATE else dev.arc.ep133.formats.VoiceMode.LEGATO
         },
-        muteGroup = if (s.muteGroup) group + 1 else 0,
+        // KEYS' notes are one pad's: its mute group would cut its own chord.
+        muteGroup = if (s.muteGroup && !keys) group + 1 else 0,
     )
 }
 
@@ -1247,7 +1253,7 @@ class ArcController(
         // The pads changed offline show and play their new sounds; the lists for EDIT's pad sheet.
         m.setLocal(loadOfflinePads())
         // And with the settings turned offline.
-        padSettings = loadOfflinePadSettings().list.associate { Triple(it.project, it.group, it.pad) to it.settings }
+        padSettings = loadOfflinePadSettings().byPad()
         padSaved.clear()
         val sounds = offlineSounds(lastRead, if (fromRead) SoundSource.DEVICE else SoundSource.FACTORY)
         if (gen != mirrorGen || session != null && _state.value.device != null) return
@@ -2310,20 +2316,31 @@ class ArcController(
             }
         }
         saveOfflinePads(OfflinePads.EMPTY)
-        // Then the settings turned offline, on the pads of the project they were turned in, with the sound now on each.
+        // Then the settings turned offline, on the pads of the project they were turned in that still
+        // hold the sound they were turned for: only what was turned changes, the rest is the device's now.
         val turned = loadOfflinePadSettings().list
         for ((i, p) in turned.withIndex()) {
             val active = m.snapshot(System.nanoTime()).activeProject
             val slot = m.slotAt(p.group, p.pad)
-            if (active != p.project || slot == null) {
+            if (active != p.project || slot == null || slot != p.slot) {
                 skipped++
                 continue
             }
             val t = dev.arc.ep133.features.PadTarget(p.project, p.group, p.pad, slot)
+            val key = padKey(t)
+            val meta = exclusive("pad", quiet = true, wait = true) { ss -> Device.readPad(ss, t.project, t.group, t.pad) }
+            if (meta == null) {
+                if (session !== s) return saveOfflinePadSettings(dev.arc.ep133.features.OfflinePadSettings(turned.drop(i)))
+                skipped++
+                continue
+            }
+            val record = padSettings[key] ?: dev.arc.ep133.features.PadSettings.DEFAULT
+            val now = if (dev.arc.ep133.features.PadSettings.written(meta)) dev.arc.ep133.features.PadSettings.fromMeta(meta, record) else record
+            val merged = p.settings.mergedOnto(p.base, now)
             when {
-                writePadSettings(t, p.settings, null) -> {
+                writePadSettings(t, merged, p.frames, revert = false) -> {
                     written++
-                    padSettings = padSettings + (padKey(t) to p.settings)
+                    padSettings = padSettings + (key to merged)
                 }
                 session !== s -> return saveOfflinePadSettings(dev.arc.ep133.features.OfflinePadSettings(turned.drop(i)))
                 else -> skipped++
@@ -2465,23 +2482,36 @@ class ArcController(
         val known = padSettings[key]
         _padEdit.value = PadEditState(pad, t, known ?: dev.arc.ep133.features.PadSettings.DEFAULT, reading = !offline, offline = offline)
         padEditJob = scope.launch {
-            val a = padAudio(pad)
-            if (a != null) {
+            // The sound loads beside the read: only TRIM waits for it.
+            launch {
+                val a = padAudio(pad) ?: return@launch
                 val frames = (a.pcm.size / a.channels).toLong()
                 val peaks = withContext(Dispatchers.Default) { dev.arc.ep133.ui.screens.trimPeaks(a.pcm, a.channels) }
                 _padEdit.update { e -> e?.takeIf { it.target == t }?.copy(frames = frames, sampleRate = a.sampleRate, peaks = peaks) ?: e }
             }
-            val read: dev.arc.ep133.features.PadSettings? = if (offline) {
-                loadOfflinePadSettings().at(t.project, t.group, t.pad)?.settings
-            } else {
-                exclusive("pad", quiet = true, wait = true) { s -> Device.readPad(s, t.project, t.group, t.pad) }
-                    ?.takeIf { dev.arc.ep133.features.PadSettings.written(it) }
-                    ?.let { dev.arc.ep133.features.PadSettings.fromMeta(it) }
+            if (offline) {
+                // The base is what the first offline turn started from, kept with the change.
+                val kept = loadOfflinePadSettings().at(t.project, t.group, t.pad)?.takeIf { it.slot == slot }
+                if (kept != null) {
+                    padSettings = padSettings + (key to kept.settings)
+                    _padEdit.update { e -> e?.takeIf { it.target == t }?.copy(settings = kept.settings, base = kept.base) ?: e }
+                }
+                return@launch
             }
+            val meta = exclusive("pad", quiet = true, wait = true) { s -> Device.readPad(s, t.project, t.group, t.pad) }
             // A turn made while it read is newer than what was read.
             val turned = padPending?.first?.let(::padKey) == key
+            if (meta == null && !turned) {
+                // No answer: nothing to turn from but guesses, which a write would put over the pad.
+                toast(dev.arc.ep133.text.MirrorText.PAD_READ_FAILED, error = true)
+                _padEdit.update { e -> e?.takeIf { it.target == t }?.copy(reading = false, failed = true) ?: e }
+                return@launch
+            }
+            // Keys the metadata lacks keep what the pad record says.
+            val read = meta?.takeIf { dev.arc.ep133.features.PadSettings.written(it) }
+                ?.let { dev.arc.ep133.features.PadSettings.fromMeta(it, known ?: dev.arc.ep133.features.PadSettings.DEFAULT) }
             val settings = if (turned) padSettings[key] else read ?: known
-            if (read != null && !turned) padSaved[key] = read
+            if (!turned) (read ?: known)?.let { padSaved[key] = it }
             if (settings != null) padSettings = padSettings + (key to settings)
             _padEdit.update { e -> e?.takeIf { it.target == t }?.let { it.copy(settings = settings ?: it.settings, reading = false) } ?: e }
         }
@@ -2499,14 +2529,16 @@ class ArcController(
      * ([PAD_WRITE_DELAY_MS]), the newest only; offline they are kept in arc.
      */
     fun adjustPad(settings: dev.arc.ep133.features.PadSettings) {
-        val e = _padEdit.value ?: return
+        val e = _padEdit.value?.takeIf { !it.reading && !it.failed } ?: return
         val v = settings.clamped(e.frames)
         if (v == e.settings) return
         val key = padKey(e.target)
         padSettings = padSettings + (key to v)
         _padEdit.value = e.copy(settings = v)
         if (e.offline) {
-            scope.launch { saveOfflinePadSettings(loadOfflinePadSettings().put(dev.arc.ep133.features.OfflinePadSetting(e.target.project, e.target.group, e.target.pad, v))) }
+            val slot = e.target.slot ?: return
+            val change = dev.arc.ep133.features.OfflinePadSetting(e.target.project, e.target.group, e.target.pad, slot, v, e.base, e.frames)
+            scope.launch { saveOfflinePadSettings(loadOfflinePadSettings().put(change)) }
             return
         }
         padPending = Triple(e.target, v, e.frames)
@@ -2524,9 +2556,14 @@ class ArcController(
     /**
      * Puts [settings] on [t]'s pad, the whole record (a part could make the
      * device take the rest from the sample again). A failure says why, and
-     * the pad goes back to the settings last written.
+     * (with [revert]) the pad goes back to the settings last written or read.
      */
-    private suspend fun writePadSettings(t: dev.arc.ep133.features.PadTarget, settings: dev.arc.ep133.features.PadSettings, frames: Long?): Boolean {
+    private suspend fun writePadSettings(
+        t: dev.arc.ep133.features.PadTarget,
+        settings: dev.arc.ep133.features.PadSettings,
+        frames: Long?,
+        revert: Boolean = true,
+    ): Boolean {
         val slot = t.slot ?: return false
         var error: String? = null
         val ok = exclusive("pad", quiet = true, wait = true) { s ->
@@ -2545,11 +2582,11 @@ class ArcController(
             return true
         }
         toast(error?.let(dev.arc.ep133.text.MirrorText::padSettingsFailed) ?: dev.arc.ep133.text.MirrorText.EDIT_OFFLINE, error = true)
-        // Back to what the device has, unless a newer turn is on its way.
-        if (padPending?.first?.let(::padKey) != key) {
-            val back = padSaved[key]
-            padSettings = if (back != null) padSettings + (key to back) else padSettings - key
-            _padEdit.update { e -> e?.takeIf { padKey(it.target) == key }?.copy(settings = back ?: dev.arc.ep133.features.PadSettings.DEFAULT) ?: e }
+        // Back to what the device has, unless a newer turn is on its way (or nothing is known of it).
+        val back = padSaved[key]
+        if (revert && back != null && padPending?.first?.let(::padKey) != key) {
+            padSettings = padSettings + (key to back)
+            _padEdit.update { e -> e?.takeIf { padKey(it.target) == key }?.copy(settings = back) ?: e }
         }
         return false
     }
@@ -2578,6 +2615,8 @@ class ArcController(
         } else {
             layout.settings.mapNotNull { (k, v) -> k.first.singleOrNull()?.minus('a')?.let { g -> Triple(project, g, k.second) to v } }.toMap()
         }
+        // What the records hold is what the device has, until a read or write says otherwise.
+        padSaved.putAll(padSettings)
     }
 
     /** A pad's place in arc's memory of settings changes: its sound changed, so the device takes them from the sample again. */

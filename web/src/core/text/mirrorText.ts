@@ -512,6 +512,7 @@ export const MirrorText = {
 
   /** The pad sheet's note under the knobs: while the pad's settings are read, offline, or else. */
   PAD_READING: "Reading the pad's settings\u2026",
+  PAD_READ_FAILED: "The EP-133 didn't send this pad's settings. Close the sheet and open it again to retry.",
   PAD_SETTINGS_OFFLINE: "Offline, the pad's settings change in arc only. When you connect, arc asks before putting them on the EP-133.",
   PAD_SETTINGS_NOTE: 'Turns go on the EP-133 as soon as you let go.',
   /** The key that folds the sheet's sound list away while the settings show, and back. */

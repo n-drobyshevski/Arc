@@ -139,6 +139,36 @@ describe('PadSettingsTest', () => {
     expect(PadSettings.withMode(odd, 'oneshot')).toEqual(odd)
   })
 
+  it("mergedOnto takes only the turned fields onto the device's settings", () => {
+    const base = ps({ pitch: 1, level: 80, start: 100, end: 2000, timeMode: 'bpm' })
+    const current = ps({
+      pitch: -3, level: 60, pan: 5, mode: 'legato', start: 200, end: 3000,
+      attack: 9, release: 40, muteGroup: true, midiChannel: 7, timeMode: 'bar',
+    })
+    // Nothing turned: what the device holds now, every field.
+    expect(PadSettings.mergedOnto(base, base, current)).toEqual(current)
+    // Turned: level and pan; the rest (unchanged from base) are the device's.
+    const turned = { ...base, level: 30, pan: -4 }
+    expect(PadSettings.mergedOnto(turned, base, current)).toEqual({ ...current, level: 30, pan: -4 })
+    // A field turned back to its base value is not a change.
+    expect(PadSettings.mergedOnto({ ...base, level: 80 }, base, current)).toEqual(current)
+    // Every field turned: all of this one's.
+    const all = ps({
+      pitch: 2, level: 10, pan: -1, mode: 'key', start: 5, end: null,
+      attack: 1, release: 2, muteGroup: true, midiChannel: 3, timeMode: 'off',
+    })
+    expect(PadSettings.mergedOnto(all, base, current)).toEqual(all)
+    // end: cleared to the sample's end offline wins over the device's end...
+    expect(PadSettings.mergedOnto({ ...base, end: null }, base, current).end).toBeNull()
+    // ...a set end over a device's null, and an untouched end takes the device's, null or not.
+    expect(PadSettings.mergedOnto(ps({ end: 1500 }), PadSettings.DEFAULT, { ...current, end: null }).end).toBe(1500)
+    expect(PadSettings.mergedOnto(PadSettings.DEFAULT, PadSettings.DEFAULT, { ...current, end: null }).end).toBeNull()
+    expect(PadSettings.mergedOnto(PadSettings.DEFAULT, PadSettings.DEFAULT, current).end).toBe(3000)
+    // timeMode too, though arc doesn't edit it.
+    expect(PadSettings.mergedOnto({ ...base, timeMode: 'off' }, base, current).timeMode).toBe('off')
+    expect(PadSettings.mergedOnto(base, base, current).timeMode).toBe('bar')
+  })
+
   it('clamped keeps the trim inside the sample', () => {
     expect(PadSettings.clamped(ps({ start: 500, end: 9000 }), 4000)).toEqual(ps({ start: 500, end: 4000 }))
     expect(PadSettings.clamped(ps({ start: 7000, end: 9000 }), 4000)).toEqual(ps({ start: 3999, end: 4000 }))

@@ -151,6 +151,37 @@ class PadSettingsTest {
     }
 
     @Test
+    fun `mergedOnto takes only the turned fields onto the device's settings`() {
+        val base = PadSettings(pitch = 1.0, level = 80, start = 100, end = 2000, timeMode = "bpm")
+        val current = PadSettings(
+            pitch = -3.0, level = 60, pan = 5, mode = PlayMode.LEGATO, start = 200, end = 3000,
+            attack = 9, release = 40, muteGroup = true, midiChannel = 7, timeMode = "bar",
+        )
+        // Nothing turned: what the device holds now, every field.
+        assertEquals(current, base.mergedOnto(base, current))
+        // Turned: level and pan; the rest (unchanged from base) are the device's.
+        val turned = base.copy(level = 30, pan = -4)
+        assertEquals(current.copy(level = 30, pan = -4), turned.mergedOnto(base, current))
+        // A field turned back to its base value is not a change.
+        assertEquals(current, base.copy(level = 80).mergedOnto(base, current))
+        // Every field turned: all of this one's.
+        val all = PadSettings(
+            pitch = 2.0, level = 10, pan = -1, mode = PlayMode.KEY, start = 5, end = null,
+            attack = 1, release = 2, muteGroup = true, midiChannel = 3, timeMode = "off",
+        )
+        assertEquals(all, all.mergedOnto(base, current))
+        // end: cleared to the sample's end offline wins over the device's end...
+        assertNull(base.copy(end = null).mergedOnto(base, current).end)
+        // ...a set end over a device's null, and an untouched end takes the device's, null or not.
+        assertEquals(1500L, PadSettings(end = 1500).mergedOnto(PadSettings.DEFAULT, current.copy(end = null)).end)
+        assertNull(PadSettings.DEFAULT.mergedOnto(PadSettings.DEFAULT, current.copy(end = null)).end)
+        assertEquals(3000L, PadSettings.DEFAULT.mergedOnto(PadSettings.DEFAULT, current).end)
+        // timeMode too, though arc doesn't edit it.
+        assertEquals("off", base.copy(timeMode = "off").mergedOnto(base, current).timeMode)
+        assertEquals("bar", base.mergedOnto(base, current).timeMode)
+    }
+
+    @Test
     fun `clamped keeps the trim inside the sample`() {
         val s = PadSettings(start = 500, end = 9000)
         assertEquals(PadSettings(start = 500, end = 4000), s.clamped(4000))

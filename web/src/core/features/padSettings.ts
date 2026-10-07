@@ -166,6 +166,28 @@ export function toMeta(s: PadSettings, slot: number, frames: number | null): Jso
   return m
 }
 
+/**
+ * Offline edits replayed onto what the device holds now, so only what was
+ * turned changes: field by field (every one, [end] and [timeMode] too), [s]'s
+ * value where it differs from [base] (what the sheet showed before the
+ * edits), else [current]'s (what the device reads now).
+ */
+export function mergedOnto(s: PadSettings, base: PadSettings, current: PadSettings): PadSettings {
+  return {
+    pitch: s.pitch !== base.pitch ? s.pitch : current.pitch,
+    level: s.level !== base.level ? s.level : current.level,
+    pan: s.pan !== base.pan ? s.pan : current.pan,
+    mode: s.mode !== base.mode ? s.mode : current.mode,
+    start: s.start !== base.start ? s.start : current.start,
+    end: s.end !== base.end ? s.end : current.end,
+    attack: s.attack !== base.attack ? s.attack : current.attack,
+    release: s.release !== base.release ? s.release : current.release,
+    muteGroup: s.muteGroup !== base.muteGroup ? s.muteGroup : current.muteGroup,
+    midiChannel: s.midiChannel !== base.midiChannel ? s.midiChannel : current.midiChannel,
+    timeMode: s.timeMode !== base.timeMode ? s.timeMode : current.timeMode,
+  }
+}
+
 /** Frames the pad plays of a sample [frames] long: end (or the sample's end) less start, never below 0. */
 export function length(s: PadSettings, frames: number): number {
   return Math.max(0, (s.end ?? frames) - s.start)
@@ -334,6 +356,7 @@ export const PadSettings = {
   withMode,
   clamped,
   toMeta,
+  mergedOnto,
   length,
   toJson,
   fromMeta,

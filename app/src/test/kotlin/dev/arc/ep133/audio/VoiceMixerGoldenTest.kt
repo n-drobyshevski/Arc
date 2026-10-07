@@ -432,6 +432,19 @@ class VoiceMixerGoldenTest {
             stopAll()
             render(6)
         }
+        scenario("mode-oneshot-steal", maxVoices = 2) {
+            // A one-shot let go of plays on, but past the limit it goes before an older held voice.
+            start("a", steady(1000, 1000), 1, 1000)
+            start("b", steady(1000, 2000), 1, 1000, shape = VoiceShape(mode = VoiceMode.ONESHOT))
+            render(1)
+            release("b")
+            render(1)
+            start("c", steady(1000, 4000), 1, 1000)
+            render(8)
+            // Still held, a one-shot is stolen only as the oldest held.
+            start("b", steady(1000, 2000), 1, 1000, shape = VoiceShape(mode = VoiceMode.ONESHOT))
+            render(8)
+        }
         scenario("mode-key") {
             start("k", steady(1000, 1000), 1, 1000, shape = VoiceShape(mode = VoiceMode.KEY))
             render(4)

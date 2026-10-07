@@ -118,6 +118,26 @@ data class PadSettings(
         return JsonObject(m)
     }
 
+    /**
+     * Offline edits replayed onto what the device holds now, so only what was
+     * turned changes: field by field (every one, [end] and [timeMode] too),
+     * this one's value where it differs from [base] (what the sheet showed
+     * before the edits), else [current]'s (what the device reads now).
+     */
+    fun mergedOnto(base: PadSettings, current: PadSettings): PadSettings = PadSettings(
+        pitch = if (pitch != base.pitch) pitch else current.pitch,
+        level = if (level != base.level) level else current.level,
+        pan = if (pan != base.pan) pan else current.pan,
+        mode = if (mode != base.mode) mode else current.mode,
+        start = if (start != base.start) start else current.start,
+        end = if (end != base.end) end else current.end,
+        attack = if (attack != base.attack) attack else current.attack,
+        release = if (release != base.release) release else current.release,
+        muteGroup = if (muteGroup != base.muteGroup) muteGroup else current.muteGroup,
+        midiChannel = if (midiChannel != base.midiChannel) midiChannel else current.midiChannel,
+        timeMode = if (timeMode != base.timeMode) timeMode else current.timeMode,
+    )
+
     /** Frames the pad plays of a sample [frames] long: end (or the sample's end) less start, never below 0. */
     fun length(frames: Long): Long = maxOf(0L, (end ?: frames) - start)
 

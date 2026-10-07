@@ -160,6 +160,8 @@ class Voice {
   fadeFrames = 1
   /** Cut short: no longer the voice of its key. */
   choked = false
+  /** Released (a ONESHOT voice too, though it plays on): stolen before voices still held. */
+  letGo = false
 
   constructor(
     readonly key: string,
@@ -362,7 +364,7 @@ export class VoiceMixer {
           for (const v of this.voices) if (v.group === shape.muteGroup && !v.choked) this.cutShort(v)
         }
         while (this.sounding() >= this.maxVoices) {
-          this.cutShort(this.voices.find((v) => !v.choked && v.fadeAt !== HELD) ?? this.voices.find((v) => !v.choked)!)
+          this.cutShort(this.voices.find((v) => !v.choked && (v.letGo || v.fadeAt !== HELD)) ?? this.voices.find((v) => !v.choked)!)
         }
         const max = VoiceMixer.PAN_MAX
         const pan = coerceIn(shape.pan, -max, max)
@@ -389,7 +391,9 @@ export class VoiceMixer {
       }
       case 'release':
         for (const v of this.voices) {
-          if (v.key === c.key && !v.choked && v.fadeAt === HELD && v.mode !== VoiceMode.ONESHOT) {
+          if (v.key !== c.key || v.choked) continue
+          v.letGo = true
+          if (v.fadeAt === HELD && v.mode !== VoiceMode.ONESHOT) {
             v.fadeAt = Math.max(this.frameCount, v.startFrame + this.minGate)
             v.fadeFrames = v.release
           }

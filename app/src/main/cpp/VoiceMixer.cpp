@@ -157,7 +157,7 @@ void VoiceMixer::apply(const Command &c) {
                     if (v.choked) continue;
                     held++;
                     if (first < 0) first = i;
-                    if (firstLetGo < 0 && v.fadeAt != INT64_MAX) firstLetGo = i;
+                    if (firstLetGo < 0 && (v.letGo || v.fadeAt != INT64_MAX)) firstLetGo = i;
                 }
                 if (held < maxVoices_) break;
                 cutVoice(voices_[firstLetGo >= 0 ? firstLetGo : first]);
@@ -191,6 +191,7 @@ void VoiceMixer::apply(const Command &c) {
                                       static_cast<double>(first),
                                       INT64_MAX,
                                       1,
+                                      false,
                                       false};
             c.sample->voices++;
             if (startedCount_ < MAX_STARTED) started_[startedCount_++] = {c.key, c.tag, frame_};
@@ -199,7 +200,9 @@ void VoiceMixer::apply(const Command &c) {
         case Kind::Release:
             for (int i = 0; i < voiceCount_; i++) {
                 Voice &v = voices_[i];
-                if (v.key != c.key || v.choked || v.fadeAt != INT64_MAX) continue;
+                if (v.key != c.key || v.choked) continue;
+                v.letGo = true;
+                if (v.fadeAt != INT64_MAX) continue;
                 if (v.mode == static_cast<int32_t>(VoiceMode::OneShot)) continue;
                 const int64_t gateEnd = v.startFrame + minGate_;
                 v.fadeAt = frame_ > gateEnd ? frame_ : gateEnd;

@@ -97,7 +97,8 @@ fun Knob(
         return s.coerceIn(range.start, range.endInclusive)
     }
     fun set(v: Float) {
-        if (v == current) return
+        // The grid's floats never land exactly on the value shown (-12 + 123 × 0.1): a hair is no turn.
+        if (abs(v - current) < 1e-3f) return
         tick?.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         change(v)
     }
@@ -118,7 +119,14 @@ fun Knob(
                     progressBarRangeInfo = ProgressBarRangeInfo(value, range, if (step > 0f) (span / step).roundToInt() - 1 else 0)
                     if (enabled) {
                         setProgress { v ->
-                            set(snap(v, step))
+                            // A screen reader's nudge smaller than a step still moves one, its way.
+                            val s = snap(v, step)
+                            val to = if (abs(s - current) < 1e-3f && abs(v - current) >= 1e-3f && step > 0f) {
+                                (current + if (v > current) step else -step).coerceIn(range.start, range.endInclusive)
+                            } else {
+                                s
+                            }
+                            set(to)
                             done()
                             true
                         }
@@ -134,14 +142,25 @@ fun Knob(
                         raw[0] = current
                         var lastTime = down.uptimeMillis
                         var moved = false
+                        // A finger's tremble turns nothing, and leaves a double tap to the tap detector.
+                        val slop = viewConfiguration.touchSlop
+                        var travel = 0f
                         while (true) {
                             val e = awaitPointerEvent(PointerEventPass.Main)
                             val ch = e.changes.firstOrNull { it.id == down.id } ?: break
                             if (!ch.pressed) break
                             val d = ch.positionChange()
                             val px = d.x - d.y
-                            if (px != 0f) {
+                            if (!moved) {
+                                travel += px
+                                if (abs(travel) < slop) continue
+                                // Past the slop: it turns from here, without a jump.
                                 moved = true
+                                lastTime = ch.uptimeMillis
+                                ch.consume()
+                                continue
+                            }
+                            if (px != 0f) {
                                 ch.consume()
                                 val dt = (ch.uptimeMillis - lastTime).coerceAtLeast(1L)
                                 lastTime = ch.uptimeMillis

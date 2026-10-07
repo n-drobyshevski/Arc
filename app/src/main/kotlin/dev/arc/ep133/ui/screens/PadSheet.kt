@@ -149,12 +149,13 @@ fun ColumnScope.PadSheetContent(
             sampleRate = edit.sampleRate,
             peaks = edit.peaks,
             haptics = haptics,
-            enabled = !edit.reading,
+            enabled = !edit.reading && !edit.failed,
             initialPage = editPage,
         )
         Text(
             when {
                 edit.reading -> MirrorText.PAD_READING
+                edit.failed -> MirrorText.PAD_READ_FAILED
                 offline -> MirrorText.PAD_SETTINGS_OFFLINE
                 else -> MirrorText.PAD_SETTINGS_NOTE
             },
@@ -162,12 +163,14 @@ fun ColumnScope.PadSheetContent(
             color = c.graphite,
         )
     }
-    // With the settings shown, the sounds fold away until asked for.
-    var listOpen by rememberSaveable(pad) { mutableStateOf(!editing) }
+    // With the settings shown, the sounds fold away until asked for. Only a choice made is kept:
+    // the settings arrive a frame after the sheet opens.
+    var listChoice by rememberSaveable(pad) { mutableStateOf<Boolean?>(null) }
+    val listOpen = listChoice ?: !editing
     if (editing) {
         ArcKey(
             if (listOpen) MirrorText.HIDE_SOUNDS else MirrorText.CHANGE_SOUND,
-            { listOpen = !listOpen },
+            { listChoice = !listOpen },
             Modifier.fillMaxWidth(),
             style = KeyStyle.Quiet,
         )

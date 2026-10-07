@@ -40,4 +40,11 @@ class VoiceShapeTest {
         assertEquals(VoiceMode.LEGATO, voiceShape(s, 0).mode)
         assertEquals(VoiceMode.GATE, voiceShape(s, 0, keys = true).mode)
     }
+
+    @Test
+    fun `KEYS leaves the mute group out, so a chord on a muted pad isn't cut to one note`() {
+        val s = PadSettings.DEFAULT.copy(muteGroup = true)
+        assertEquals(3, voiceShape(s, 2).muteGroup)
+        assertEquals(0, voiceShape(s, 2, keys = true).muteGroup)
+    }
 }

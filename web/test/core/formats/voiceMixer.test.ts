@@ -358,6 +358,20 @@ describe('VoiceMixer', () => {
     expect(left(render(m, 10))[VoiceMixer.CHOKE_MS + 1]).toBe(0)
   })
 
+  it('past the limit a one-shot let go of goes before an older held voice', () => {
+    const m = mixer(2)
+    m.start('held', steady(1000, 1000), 1, 1000)
+    m.start('tail', steady(1000, 2000), 1, 1000, 0, 0, VoiceShape.of({ mode: VoiceMode.ONESHOT }))
+    render(m, 1)
+    // The one-shot plays on after its release, but it was let go of: it goes first.
+    m.release('tail')
+    render(m, 1)
+    m.start('new', steady(1000, 4000), 1, 1000)
+    render(m, 1)
+    expect(new Set(m.keys)).toEqual(new Set(['held', 'new']))
+    expect(left(render(m, 10))[VoiceMixer.CHOKE_MS + 1]).toBe(5000)
+  })
+
   it('in key mode the same key again adds a voice, and release takes them all', () => {
     const m = mixer()
     const key = VoiceShape.of({ mode: VoiceMode.KEY })

@@ -144,6 +144,8 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
         var fadeFrames = 1
         /** Cut short: no longer the voice of its key. */
         var choked = false
+        /** Released (a [VoiceMode.ONESHOT] voice too, though it plays on): stolen before voices still held. */
+        var letGo = false
     }
 
     private val commands = ConcurrentLinkedQueue<Command>()
@@ -265,7 +267,7 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
                     }
                 }
                 while (voices.count { !it.choked } >= maxVoices) {
-                    cut(voices.firstOrNull { !it.choked && it.fadeAt != Long.MAX_VALUE } ?: voices.first { !it.choked })
+                    cut(voices.firstOrNull { !it.choked && (it.letGo || it.fadeAt != Long.MAX_VALUE) } ?: voices.first { !it.choked })
                 }
                 val pan = shape.pan.coerceIn(-PAN_MAX, PAN_MAX)
                 voices += Voice(
@@ -282,7 +284,9 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
             }
             is Command.Release -> for (i in voices.indices) {
                 val v = voices[i]
-                if (v.key != c.key || v.choked || v.fadeAt != Long.MAX_VALUE || v.mode == VoiceMode.ONESHOT) continue
+                if (v.key != c.key || v.choked) continue
+                v.letGo = true
+                if (v.fadeAt != Long.MAX_VALUE || v.mode == VoiceMode.ONESHOT) continue
                 v.fadeAt = maxOf(frame, v.startFrame + minGate)
                 v.fadeFrames = v.release
             }

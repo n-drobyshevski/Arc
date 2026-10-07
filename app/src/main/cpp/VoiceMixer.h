@@ -176,6 +176,8 @@ private:
         int32_t fadeFrames;
         /** Cut short: no longer the voice of its key. */
         bool choked;
+        /** Released (a OneShot voice too, though it plays on): stolen before voices still held. */
+        bool letGo;
     };
 
     void setRate(int outRate);

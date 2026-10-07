@@ -373,6 +373,21 @@ class VoiceMixerTest {
     }
 
     @Test
+    fun `past the limit a one-shot let go of goes before an older held voice`() {
+        val m = mixer(max = 2)
+        m.start("held", steady(1000, 1000), 1, 1000)
+        m.start("tail", steady(1000, 2000), 1, 1000, shape = VoiceShape(mode = VoiceMode.ONESHOT))
+        render(m, 1)
+        // The one-shot plays on after its release, but it was let go of: it goes first.
+        m.release("tail")
+        render(m, 1)
+        m.start("new", steady(1000, 4000), 1, 1000)
+        render(m, 1)
+        assertEquals(setOf("held", "new"), m.keys)
+        assertEquals(5000, left(render(m, 10))[VoiceMixer.CHOKE_MS + 1])
+    }
+
+    @Test
     fun `in key mode the same key again adds a voice, and release takes them all`() {
         val m = mixer()
         val key = VoiceShape(mode = VoiceMode.KEY)
