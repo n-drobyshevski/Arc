@@ -61,7 +61,14 @@ import dev.arc.ep133.protocol.SoundEntry
 import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.ui.screens.MirrorScreen
 import dev.arc.ep133.ui.screens.FunctionKeysUi
+import dev.arc.ep133.ui.screens.SampleKeyUi
+import dev.arc.ep133.ui.screens.SampleUi
+import dev.arc.ep133.controller.SampleUiState
+import dev.arc.ep133.features.SampleInput
+import dev.arc.ep133.features.SamplePhase
+import dev.arc.ep133.features.SampleSource
 import dev.arc.ep133.ui.screens.ProjectSheetContent
+import dev.arc.ep133.ui.screens.SampleReviewSheetContent
 import dev.arc.ep133.ui.screens.TempoSheetContent
 import dev.arc.ep133.ui.screens.projectChoicesOf
 import dev.arc.ep133.ui.screens.projectKeyOf
@@ -149,18 +156,35 @@ private fun Framed(
     }
 }
 
+/** Live's function keys behind a sheet: SAMPLE off, over the mic, as the app always has it. */
+private val sheetFunctions = FunctionKeysUi(sample = SampleKeyUi(label = MirrorText.sourceShort(SampleSource.MIC, false)))
+
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null) {
     val mirror = MirrorUi(state, loading = loading, error = error, offline = offline, offlineProjects = offlineProjects)
     // PROJECT as MainActivity works it out; TEMPO's light caught on a beat while the click is on.
-    val functions = FunctionKeysUi(project = projectKeyOf(mirror, busy = false), clickOn = clickOn, beatLit = clickOn)
+    val functions = FunctionKeysUi(
+        project = projectKeyOf(mirror, busy = false), clickOn = clickOn, beatLit = clickOn,
+        // SAMPLE, as MainActivity works it out: off, over the mic, unless the preview has the mode.
+        sample = (sample ?: SampleUiState()).let { s ->
+            val p = s.phase
+            SampleKeyUi(
+                on = s.on,
+                recording = p is SamplePhase.Recording,
+                handsFree = p is SamplePhase.Waiting || p is SamplePhase.CountIn || p is SamplePhase.Recording && p.latched,
+                label = MirrorText.sourceShort(s.input.source, s.input.stereo),
+            )
+        },
+    )
+    // The meter caught at a level, its threshold tick where the knob has it.
+    val sampleUi = sample?.let { SampleUi(it, level = { 0.62f }, still = true) }
     val recUi = dev.arc.ep133.ui.screens.RecUi(rec) {}
     // The piano's notes, for the display line in the bar to name a device note past them. The
     // piano reports them a frame late, after the screenshot, so [piano] gives them up front.
     var pianoRange by remember { mutableStateOf(piano) }
     Framed(
         Tab.LIVE, connected = offline == null && error == null, dark = dark, guide = guide,
-        pill = { LivePill(mirror, keys, recUi, still = true, pianoRange = pianoRange, editing = edit == true, wireless = wireless) }, toast = toast, barMiddle = barMiddle,
+        pill = { LivePill(mirror, keys, recUi, still = true, pianoRange = pianoRange, editing = edit == true, wireless = wireless, sample = sampleUi) }, toast = toast, barMiddle = barMiddle,
         toastAction = toastAction,
     ) {
         MirrorScreen(
@@ -188,6 +212,7 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
             edit = dev.arc.ep133.ui.screens.EditUi(on = edit == true, onEdit = {}),
             wireless = wireless,
             functions = functions,
+            sample = sampleUi,
         )
     }
 }
@@ -537,7 +562,7 @@ private val padSounds = listOf(
 @Composable
 fun LivePadSheetPreview() {
     Framed(Tab.LIVE) {
-        MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
+        MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true, functions = sheetFunctions)
         ArcSheet(visible = true, onDismiss = {}) {
             PadSheetContent(
                 pad = PhysicalPad(0, 7),
@@ -564,7 +589,7 @@ private val editState = dev.arc.ep133.controller.PadEditState(
 @Composable
 private fun PadSettingsSheet(page: dev.arc.ep133.ui.screens.EditPage, dark: Boolean = false, edit: dev.arc.ep133.controller.PadEditState = editState, offline: Boolean = false) {
     Framed(Tab.LIVE, dark = dark) {
-        MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
+        MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true, functions = sheetFunctions)
         ArcSheet(visible = true, onDismiss = {}) {
             PadSheetContent(
                 pad = PhysicalPad(0, 7),
@@ -688,7 +713,7 @@ fun TempoSheetFollowingPreview() = TempoSheet(deviceBpm = 122.0)
 @Composable
 private fun TempoSheet(deviceBpm: Double?) {
     Framed(Tab.LIVE) {
-        MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
+        MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true, functions = sheetFunctions)
         ArcSheet(visible = true, onDismiss = {}) {
             TempoSheetContent(bpm = 98, deviceBpm = deviceBpm, on = true, onOn = {}, onBpm = {}, onTap = {}, onDone = {})
         }
@@ -712,12 +737,165 @@ fun ProjectSheetOfflinePreview() = ProjectSheet(
 @Composable
 private fun ProjectSheet(mirror: MirrorUi) {
     Framed(Tab.LIVE) {
-        MirrorScreen(mirror = mirror, nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
+        MirrorScreen(mirror = mirror, nameOf = { names[it] }, fixedNow = NOW, oneGroup = true, functions = sheetFunctions)
         ArcSheet(visible = true, onDismiss = {}) {
             ProjectSheetContent(choices = projectChoicesOf(mirror, busy = false), onPick = {}, onDone = {})
         }
     }
 }
+
+// SAMPLE mode: the line lit orange with the source, the meter and what to do; the strip under it;
+// the empty pads' rings blinking (caught on), those with a sound ringed, the take's pad lit.
+private val mic = SampleInput(SampleSource.MIC, false)
+private val rspSt = SampleInput(SampleSource.RSP, true)
+private val inputs = listOf(mic, SampleInput(SampleSource.RSP, false), rspSt)
+private val sampleReady = SampleUiState(on = true, input = mic, inputs = inputs, gainDb = 12f, thresholdDb = -24f, maxSeconds = 40)
+
+@PreviewTest
+@Preview(name = "Live sample", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSamplePreview() = Live(lastRead, oneGroup = true, sample = sampleReady)
+
+@PreviewTest
+@Preview(name = "Live sample dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSampleDarkPreview() = Live(lastRead, dark = true, oneGroup = true, sample = sampleReady)
+
+// A pad held with the threshold set: the take waits for sound.
+@PreviewTest
+@Preview(name = "Live sample waiting", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSampleWaitingPreview() = Live(lastRead, oneGroup = true, sample = sampleReady.copy(phase = SamplePhase.Waiting(PhysicalPad(0, 2))))
+
+// Resampling the phone's sound in stereo into an empty pad, 4 s of 20.
+@PreviewTest
+@Preview(name = "Live sample recording small", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun LiveSampleRecordingSmallPreview() = Live(
+    lastRead, oneGroup = true,
+    sample = sampleReady.copy(input = rspSt, gainDb = 0f, thresholdDb = null, maxSeconds = 20, phase = SamplePhase.Recording(PhysicalPad(0, 2), 4, 20, false)),
+)
+
+// LATCH on, two bars: the click counts in.
+@PreviewTest
+@Preview(name = "Live sample count-in", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun LiveSampleCountInPreview() = Live(
+    lastRead, oneGroup = true, clickOn = true,
+    sample = sampleReady.copy(latch = true, bars = 2, thresholdDb = null, phase = SamplePhase.CountIn(PhysicalPad(0, 5), 3)),
+)
+
+@PreviewTest
+@Preview(name = "Live sample all groups", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSampleAllGroupsPreview() = Live(lastRead, sample = sampleReady)
+
+// The EP-133 over USB: the strip says it's experimental.
+@PreviewTest
+@Preview(name = "Live sample usb", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSampleUsbPreview() = Live(
+    lastRead, oneGroup = true,
+    sample = sampleReady.copy(input = SampleInput(SampleSource.USB, true), inputs = inputs + SampleInput(SampleSource.USB, false) + SampleInput(SampleSource.USB, true), gainDb = 0f, usb = true),
+)
+
+// The EP-133 short of space: takes stop sooner, and the line says so.
+@PreviewTest
+@Preview(name = "Live sample low space", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun LiveSampleLowSpacePreview() = Live(lastRead, oneGroup = true, sample = sampleReady.copy(lowSpace = true, maxSeconds = 12))
+
+// On its side: the line in the top bar, the strip one row over the pads.
+@PreviewTest
+@Preview(name = "Live sample sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveSampleSidewaysPreview() = Live(lastRead, oneGroup = true, sample = sampleReady.copy(phase = SamplePhase.Recording(PhysicalPad(0, 2), 7, 40, true), latch = true))
+
+@PreviewTest
+@Preview(name = "Live sample bar", widthDp = 692, heightDp = 336, showBackground = true)
+@Composable
+fun LiveSampleBarPreview() = Live(lastRead, oneGroup = true, sample = sampleReady)
+
+@PreviewTest
+@Preview(name = "Live sample short", widthDp = 490, heightDp = 253, showBackground = true)
+@Composable
+fun LiveSampleShortPreview() = Live(lastRead, oneGroup = true, sample = sampleReady)
+
+// A tablet: the strip one row under the line.
+@PreviewTest
+@Preview(name = "Live sample tablet", widthDp = 840, heightDp = 900, showBackground = true)
+@Composable
+fun LiveSampleTabletPreview() = Live(lastRead, sample = sampleReady)
+
+// SAMPLE's review sheet after a take into A 3: 4 s of RSP ST, a breath of silence before a decaying
+// chord, trimmed to where the sound starts and short of its tail; the next free slot after 1 to 213.
+private const val REVIEW_RATE = 48_000
+private val reviewPcm = ShortArray(REVIEW_RATE * 4 * 2) { i ->
+    val f = i / 2 - REVIEW_RATE * 3 / 10
+    if (f < 0) {
+        0
+    } else {
+        val t = f.toDouble() / REVIEW_RATE
+        val v = (kotlin.math.sin(t * 2 * Math.PI * 220) + 0.6 * kotlin.math.sin(t * 2 * Math.PI * (if (i % 2 == 0) 330.0 else 277.0))) * 16000 * kotlin.math.exp(-t * 1.1)
+        v.toInt()
+    }.toShort()
+}
+
+private fun reviewOf(occupied: Set<Int>?): dev.arc.ep133.controller.SampleReview {
+    val r = dev.arc.ep133.controller.sampleReviewOf(
+        PhysicalPad(0, 2), rspSt, reviewPcm, 2, REVIEW_RATE, dev.arc.ep133.features.SampleCapture.End.STOPPED, latched = false,
+        name = "rsp 1007-142301", normalize = true, trimSilence = true, occupied = occupied,
+    )
+    return dev.arc.ep133.controller.trimReview(r, r.start, r.length - REVIEW_RATE / 2).copy(trimSilence = true)
+}
+
+@Composable
+private fun SampleSheet(review: dev.arc.ep133.controller.SampleReview, dark: Boolean = false, playing: Boolean = false) {
+    val mirror = MirrorUi(lastRead, loading = false)
+    val sample = SampleUi(sampleReady.copy(input = rspSt, gainDb = 0f), still = true)
+    // On its side the line rides in the top bar, as on Live.
+    Framed(Tab.LIVE, dark = dark, pill = { LivePill(mirror, dev.arc.ep133.ui.screens.KeysUi(), still = true, sample = sample) }) {
+        MirrorScreen(
+            mirror = mirror, nameOf = { names[it] }, fixedNow = NOW, oneGroup = true,
+            functions = FunctionKeysUi(sample = SampleKeyUi(on = true, label = MirrorText.sourceShort(rspSt.source, rspSt.stereo))),
+            sample = sample,
+        )
+        ArcSheet(visible = true, onDismiss = {}) {
+            SampleReviewSheetContent(
+                review = review, playing = playing, haptics = false,
+                onTrim = { _, _ -> }, onNormalize = {}, onTrimSilence = {}, onSlot = {},
+                onPlay = {}, onStop = {}, onRetake = {}, onKeep = {}, onDiscard = {},
+            )
+        }
+    }
+}
+
+@PreviewTest
+@Preview(name = "Sample review", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun SampleReviewPreview() = SampleSheet(reviewOf((1..213).toSet()))
+
+@PreviewTest
+@Preview(name = "Sample review dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun SampleReviewDarkPreview() = SampleSheet(reviewOf((1..213).toSet()), dark = true, playing = true)
+
+@PreviewTest
+@Preview(name = "Sample review small", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun SampleReviewSmallPreview() = SampleSheet(reviewOf((1..213).toSet()))
+
+// On its side: the take on the left, the choices and keys on the right.
+@PreviewTest
+@Preview(name = "Sample review sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun SampleReviewSidewaysPreview() = SampleSheet(reviewOf((1..213).toSet()))
+
+// Offline: the slot is picked when the EP-133 connects.
+@PreviewTest
+@Preview(name = "Sample review offline", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun SampleReviewOfflinePreview() = SampleSheet(reviewOf(null))
 
 // Wider than tall but short of 8 white keys: the grid stays.
 @PreviewTest
@@ -962,7 +1140,7 @@ fun GuideOverlayDevicePreview() = Device(guide = true)
 @Composable
 fun SectionListPreview() {
     Framed(Tab.LIVE, menu = true) {
-        MirrorScreen(mirror = MirrorUi(playing), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
+        MirrorScreen(mirror = MirrorUi(playing), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true, functions = sheetFunctions)
     }
 }
 

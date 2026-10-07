@@ -59,6 +59,7 @@ import dev.arc.ep133.ui.screens.MirrorScreen
 import dev.arc.ep133.ui.screens.PadsSheetContent
 import dev.arc.ep133.ui.screens.PadSheetContent
 import dev.arc.ep133.ui.screens.ProjectSheetContent
+import dev.arc.ep133.ui.screens.SampleReviewSheetContent
 import dev.arc.ep133.ui.screens.TempoSheetContent
 import dev.arc.ep133.ui.screens.SearchScreen
 import dev.arc.ep133.ui.screens.SettingsScreen
@@ -133,6 +134,36 @@ class MainActivity : ComponentActivity() {
     // The transfer does not wait for the answer: it works without the notification.
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
+    /**
+     * What SAMPLE asked the mic permission for ([withMicrophone]): [MIC_ENTER]
+     * or "step:<n>". Kept in the saved state, because the answer can reach a
+     * recreated activity; it is acted on then.
+     */
+    private var pendingMic: String? = null
+
+    // Android's question about the mic is out ([withMicrophone]); a second one is never sent meanwhile,
+    // as Android would answer it "no" at once. With whether it would have shown a rationale then, and
+    // when it went (SystemClock.elapsedRealtime), for [refusedForGood].
+    private var micAsking = false
+    private var micRationaleBefore = false
+    private var micAskedAt = 0L
+
+    // SAMPLE's mic and USB inputs: the answer goes to what asked ([pendingMic]); refused, RSP stands in.
+    private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val what = pendingMic
+        pendingMic = null
+        val asking = micAsking
+        micAsking = false
+        val prefs = getPreferences(MODE_PRIVATE)
+        if (granted) {
+            prefs.edit { remove(PREF_MIC_REFUSED) }
+        } else if (refusedForGood(asking)) {
+            prefs.edit { putBoolean(PREF_MIC_REFUSED, true) }
+            noMicToast()
+        }
+        micAnswered(what, granted)
+    }
+
     // Whether Live is in front, so its touches go unbuffered ([unbufferedTouch]); main thread only.
     private var liveTouch = false
 
@@ -160,6 +191,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         pendingSave = savedInstanceState?.getString(KEY_PENDING_SAVE)
+        pendingMic = savedInstanceState?.getString(KEY_PENDING_MIC)
         if (savedInstanceState == null) handleIntent(intent)
         setContent {
             val settings by controller.settings.collectAsStateWithLifecycle()
@@ -186,6 +218,7 @@ class MainActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putString(KEY_PENDING_SAVE, pendingSave)
+        outState.putString(KEY_PENDING_MIC, pendingMic)
     }
 
     /** A .pak opened from Files (or another app) lands here. */
@@ -248,6 +281,104 @@ class MainActivity : ComponentActivity() {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         block()
+    }
+
+    private fun micGranted(): Boolean =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
+    /**
+     * SAMPLE's mic, for [what] ([MIC_ENTER], or "step:<n>" for −/+): with the
+     * permission it goes ahead at once. Refused for good (as an answer found
+     * it, [refusedForGood], and Android still shows no rationale), a toast
+     * says so with a key to the app's settings, and [what] goes ahead without
+     * it (RSP stands in). Else Android asks, and [what] goes ahead with the
+     * answer, even in a recreated activity ([pendingMic]); while it asks, a
+     * second ask (a quick double tap on −/+) does nothing.
+     */
+    private fun withMicrophone(what: String) {
+        if (micGranted()) return micAnswered(what, true)
+        val rationale = shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)
+        if (getPreferences(MODE_PRIVATE).getBoolean(PREF_MIC_REFUSED, false) && !rationale) {
+            noMicToast()
+            return micAnswered(what, false)
+        }
+        if (micAsking) return
+        micAsking = true
+        micRationaleBefore = rationale
+        micAskedAt = android.os.SystemClock.elapsedRealtime()
+        pendingMic = what
+        micPermission.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    /**
+     * Whether a "no" from Android means it won't ask again: no rationale now,
+     * and either there was one before the question (the "no" that ends the
+     * asking) or the answer came back too soon for anyone to have seen a
+     * question ([MIC_AUTO_REFUSAL_MS]). The question dismissed, or the first
+     * "no", leaves it to ask again, as does an "Only this time" that has run
+     * out. [asked]: this activity sent the question (else, recreated
+     * meanwhile, only the rationale is known).
+     */
+    private fun refusedForGood(asked: Boolean): Boolean {
+        if (shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)) return false
+        if (!asked) return false
+        return micRationaleBefore || android.os.SystemClock.elapsedRealtime() - micAskedAt < MIC_AUTO_REFUSAL_MS
+    }
+
+    /** The mic refused for good: a toast says so, with a key to the app's settings. */
+    private fun noMicToast() {
+        // The application's context, so the toast's key doesn't keep this activity.
+        val app = applicationContext
+        controller.toast(dev.arc.ep133.text.MirrorText.NO_MIC, error = true, action = dev.arc.ep133.text.MirrorText.MIC_SETTINGS) {
+            runCatching {
+                app.startActivity(
+                    Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", app.packageName, null))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+        }
+    }
+
+    /**
+     * SAMPLE's [what] goes ahead, the mic [granted] or not. A −/+ refused
+     * leaves the input where it was rather than stepping on past the mic and
+     * USB to another RSP input nobody picked.
+     */
+    private fun micAnswered(what: String?, granted: Boolean) {
+        when {
+            what == MIC_ENTER -> controller.enterSample(granted)
+            what != null && what.startsWith(MIC_STEP) && granted -> what.removePrefix(MIC_STEP).toIntOrNull()?.let { controller.stepSampleInput(it, true) }
+        }
+    }
+
+    /**
+     * SAMPLE tapped outside the mode: it opens, asking for the mic first when
+     * the input last chosen needs it (MIC or USB); RSP doesn't, and opens
+     * with whatever Android last said.
+     */
+    private fun enterSample() {
+        val input = controller.sample.value.input
+        if (input.source == dev.arc.ep133.features.SampleSource.RSP) controller.enterSample(micGranted()) else withMicrophone(MIC_ENTER)
+    }
+
+    /**
+     * SAMPLE's − or + ([step]): with the mic allowed, the input that many
+     * places on among all offered. Without it, a step that lands on the mic
+     * or USB (as they would be offered, [now] showing whether USB is plugged
+     * in) asks for the mic first ([withMicrophone]); one that lands on RSP
+     * goes ahead as it is.
+     */
+    private fun stepSampleSource(step: Int, now: dev.arc.ep133.controller.SampleUiState) {
+        if (micGranted()) return controller.stepSampleInput(step, true)
+        val offered = dev.arc.ep133.features.SampleInput.ORDER.filter {
+            when (it.source) {
+                dev.arc.ep133.features.SampleSource.MIC -> !it.stereo
+                dev.arc.ep133.features.SampleSource.RSP -> true
+                dev.arc.ep133.features.SampleSource.USB -> now.usb
+            }
+        }
+        val next = dev.arc.ep133.features.SampleInput.cycle(offered, now.input, step)
+        if (next.source == dev.arc.ep133.features.SampleSource.RSP) controller.stepSampleInput(step, false) else withMicrophone(MIC_STEP + step)
     }
 
     private fun savePak(b: BackupRecord) {
@@ -415,6 +546,8 @@ class MainActivity : ComponentActivity() {
             // Leaving a tab does what its Done key used to.
             when (tab) {
                 Tab.LIVE -> {
+                    // SAMPLE goes with Live (closing its sound, below, would end it too).
+                    controller.exitSample()
                     controller.closeMirror()
                     controller.stopPlayback()
                     liveEdit = false
@@ -539,9 +672,33 @@ class MainActivity : ComponentActivity() {
             pad = state.keysPad,
             padName = state.keysPad?.let(controller::mirrorName),
         )
-        // Live's function keys: PROJECT steps through the projects, KEYS is the mode, TEMPO the phone's click.
+        // Live's function keys: SAMPLE is its mode, PROJECT steps through the projects, KEYS is the mode,
+        // TEMPO the phone's click.
         val metronome by controller.metronome.collectAsStateWithLifecycle()
+        val sample by controller.sample.collectAsStateWithLifecycle()
+        val samplePhase = sample.phase
         val functions = dev.arc.ep133.ui.screens.FunctionKeysUi(
+            sample = dev.arc.ep133.ui.screens.SampleKeyUi(
+                on = sample.on,
+                recording = samplePhase is dev.arc.ep133.features.SamplePhase.Recording,
+                // A hands-free take, its count-in or its wait: a tap stops it.
+                handsFree = sample.on && dev.arc.ep133.ui.screens.handsFreeTake(samplePhase),
+                label = dev.arc.ep133.text.MirrorText.sourceShort(sample.input.source, sample.input.stereo),
+                onSample = {
+                    if (sample.on) {
+                        controller.exitSample()
+                    } else {
+                        // The pads record in the mode: KEYS, EDIT and the sheets over them go.
+                        if (appSettings.liveKeys) controller.setLiveKeys(false)
+                        liveEdit = false
+                        padSheet = null
+                        tempoSheet = false
+                        enterSample()
+                    }
+                },
+                onStop = controller::stopSample,
+                onLatchPad = { pad, at -> controller.latchSample(pad, at) },
+            ),
             // SOUND held: the sheet of the pad played last (its tap is EDIT, below).
             onPadSound = {
                 val pad = state.keysPad
@@ -556,6 +713,23 @@ class MainActivity : ComponentActivity() {
             beats = controller.beats,
             onClick = controller::setClick,
             onTempo = { tempoSheet = true },
+        )
+        // SAMPLE mode on Live's page: its line and strip, and the pads recording while it is on.
+        val sampleUi = dev.arc.ep133.ui.screens.SampleUi(
+            state = sample,
+            level = controller::sampleLevel,
+            clip = controller::sampleClip,
+            onSource = { step -> stepSampleSource(step, sample) },
+            onStereo = { stereo -> controller.setSampleInput(sample.input.copy(stereo = stereo)) },
+            onGain = controller::setSampleGain,
+            onThreshold = controller::setSampleThreshold,
+            onBars = controller::setSampleBars,
+            onLatch = controller::setSampleLatch,
+            onPadDown = { pad, at, unsure -> controller.samplePadDown(pad, at, unsure) },
+            onPadUp = controller::samplePadUp,
+            onPadKept = controller::samplePadKept,
+            onPadCut = controller::samplePadCut,
+            onLatchPad = { pad -> controller.latchSample(pad) },
         )
         // The piano's notes while it shows, so the bar's display line can name a device note past its ends.
         var pianoRange by remember { mutableStateOf<IntRange?>(null) }
@@ -595,6 +769,7 @@ class MainActivity : ComponentActivity() {
                     onShowNames = controller::setKeysShowNames,
                     onPianoWhites = controller::setPianoWhites,
                     onHaptics = controller::setHaptics,
+                    onReviewSamples = controller::setReviewSamples,
                     onRestoreFolder = { folderLauncher.launch(dev.arc.ep133.data.ExternalLibrary.INITIAL_FOLDER) },
                     // No browser installed: nothing to open.
                     onSource = { runCatching { uri.openUri(dev.arc.ep133.text.SettingsText.SOURCE_URL) } },
@@ -686,7 +861,7 @@ class MainActivity : ComponentActivity() {
                     onGuide = { guideOpen = it },
                     guide = { GuideScreen(onBack = { guideOpen = false }) },
                     // On a phone on its side, Live's display line rides in the top bar.
-                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, liveRec, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys, wireless = liveWireless) }) else null,
+                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, liveRec, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys, wireless = liveWireless, sample = sampleUi) }) else null,
                 ) {
                     // Back from another section returns to Live, the home section, first.
                     BackHandler(enabled = tab != Tab.LIVE) { selectTab(Tab.LIVE) }
@@ -704,7 +879,11 @@ class MainActivity : ComponentActivity() {
                             keys = keys,
                             keysActions = remember(controller) {
                                 dev.arc.ep133.ui.screens.KeysActions(
-                                    onMode = controller::setLiveKeys,
+                                    // The keys play notes, not pads to record into: SAMPLE closes for them.
+                                    onMode = { on ->
+                                        if (on) controller.exitSample()
+                                        controller.setLiveKeys(on)
+                                    },
                                     onRoot = controller::setKeysRoot,
                                     onScale = controller::setKeysScale,
                                     onOctave = controller::setKeysOctave,
@@ -745,11 +924,18 @@ class MainActivity : ComponentActivity() {
                                 on = liveEdit,
                                 onEdit = { on ->
                                     // With the device there to write to, or offline a last read (or the factory sounds) to change in arc.
-                                    if (on && !ready && mirror?.offline == null) controller.toast(dev.arc.ep133.text.MirrorText.EDIT_OFFLINE) else liveEdit = on
+                                    if (on && !ready && mirror?.offline == null) {
+                                        controller.toast(dev.arc.ep133.text.MirrorText.EDIT_OFFLINE)
+                                    } else {
+                                        // A tap on a pad gives it another sound: SAMPLE closes for it.
+                                        if (on) controller.exitSample()
+                                        liveEdit = on
+                                    }
                                 },
                                 onPad = { pad -> controller.editTarget(pad)?.let { padSheet = pad to it } },
                             ),
                             functions = functions,
+                            sample = sampleUi,
                         )
                         Tab.DEVICE -> DeviceScreen(
                             state = state,
@@ -839,6 +1025,27 @@ class MainActivity : ComponentActivity() {
                             onTap = { controller.tapTempo(it) },
                             onDone = { tempoSheet = false },
                         )
+                    }
+                    // SAMPLE's take before KEEP: dismissed, it is discarded (the toast offers UNDO).
+                    val review by controller.sampleReview.collectAsStateWithLifecycle()
+                    val lastReview = remember { mutableStateOf(review) }.apply { if (review != null) value = review }.value
+                    ArcSheet(visible = review != null, onDismiss = { controller.discardSample() }) {
+                        lastReview?.let { r ->
+                            SampleReviewSheetContent(
+                                review = r,
+                                playing = playing == dev.arc.ep133.controller.REVIEW_KEY,
+                                haptics = appSettings.haptics,
+                                onTrim = controller::setReviewTrim,
+                                onNormalize = controller::setReviewNormalize,
+                                onTrimSilence = controller::setReviewTrimSilence,
+                                onSlot = controller::stepReviewSlot,
+                                onPlay = { controller.playReview() },
+                                onStop = controller::stopReview,
+                                onRetake = controller::retakeSample,
+                                onKeep = controller::keepSample,
+                                onDiscard = controller::discardSample,
+                            )
+                        }
                     }
                 }
                 if (tab == Tab.DEVICE) {
@@ -1022,6 +1229,17 @@ class MainActivity : ComponentActivity() {
 }
 
 private const val KEY_PENDING_SAVE = "pending_save"
+private const val KEY_PENDING_MIC = "pending_mic"
+
+/** What SAMPLE asks the mic for ([MainActivity.withMicrophone]): to open the mode, or −/+ by the number after it. */
+private const val MIC_ENTER = "enter"
+private const val MIC_STEP = "step:"
+
+/** The preference that says Android refused the mic for good, as an answer found it ([MainActivity.refusedForGood]). */
+private const val PREF_MIC_REFUSED = "mic_refused"
+
+/** A "no" to the mic sooner than this after asking came without a question shown: Android no longer asks. */
+private const val MIC_AUTO_REFUSAL_MS = 300L
 private const val COPY_LIMIT = 200_000
 
 /** versionName without enabling the BuildConfig feature. */

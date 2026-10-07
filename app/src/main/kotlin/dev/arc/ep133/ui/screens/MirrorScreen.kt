@@ -212,7 +212,8 @@ class KeysActions(
 
 /**
  * Live's function keys over the pads ([FunctionRow], [FunctionColumn]):
- * PROJECT ([project], a tap [onProject] steps to the next one), KEYS (the
+ * SAMPLE ([sample], null hides it), PROJECT ([project], a tap [onProject]
+ * steps to the next one), KEYS (the
  * mode, from [KeysUi]) and TEMPO, the phone's click: [clickOn] at the
  * phone's tempo [bpm] (the EP-133's leads while it sends MIDI clock), a tap
  * [onClick] turns it on or off and a hold [onTempo] opens the tempo sheet.
@@ -235,6 +236,8 @@ class FunctionKeysUi(
     val onTempo: () -> Unit = {},
     /** For screenshots: TEMPO's light caught lit, on a beat. */
     val beatLit: Boolean = false,
+    /** SAMPLE, first in the row (an addition); null hides it. */
+    val sample: SampleKeyUi? = null,
 )
 
 /**
@@ -347,23 +350,84 @@ fun MirrorScreen(
     wireless: Boolean = false,
     /** PROJECT, KEYS and TEMPO over the pads (KEYS is the mode word's place, but on the short sideways piano). */
     functions: FunctionKeysUi = FunctionKeysUi(),
+    /**
+     * SAMPLE mode (an addition; null for none): while it is on, its line and
+     * strip stand in for the display line, a pad held records into it, and
+     * the pads light as the EP-133's do in the mode.
+     */
+    sample: SampleUi? = null,
 ) {
     val sounding = voices?.collectAsStateWithLifecycle()?.value
     val ringed = if (sounding == null) playingPads else remember(sounding) { LiveVoices.pads(sounding) }
     val keysNow = soundingKeys(keys, sounding)
     val c = LocalArcColors.current
     val window = LocalArcWindow.current
-    // EDIT works on the pads only, and only on the Live tab (where the tab is).
-    val editing = edit.on && edit.onEdit != null && !keys.on && onBack == null
+    // SAMPLE mode, on the Live tab: its line and strip at the top, the pads recording.
+    val sampling = sample != null && sample.state.on && onBack == null
+    // EDIT works on the pads only, and only on the Live tab (where the tab is); SAMPLE's pads record instead.
+    val editing = edit.on && edit.onEdit != null && !keys.on && onBack == null && !sampling
     val onEdit = if (editing) edit.onPad else null
     // PROJECT held: the pads printed 1 to 9 pick a project instead of sounding, the rest stay still (ProjectHold).
     val hold = remember { ProjectHold() }
+    // SAMPLE held in SAMPLE mode: the first pad tapped latches a hands-free take instead of sounding (SampleHold).
+    val sampleHold = remember { SampleHold() }
     // SOUND is EDIT's key: Live's EDIT where it works (the Live tab), none elsewhere.
     val editKey = if (edit.onEdit != null && onBack == null) edit else EditUi()
-    val padPress = onPad?.let { f -> { pad: PhysicalPad, h: Boolean, unsure: Boolean, at: Long -> if (!hold.press(pad, pad.label, functions)) f(pad, h, unsure, at) } }
-    val padKept = { pad: PhysicalPad -> if (!hold.took(pad)) onPadKept(pad) }
-    val padUp = { pad: PhysicalPad -> if (!hold.release(pad)) onPadUp(pad) }
-    val padCut = { pad: PhysicalPad -> if (!hold.release(pad)) onPadCut(pad) }
+    // The pads whose press went to SAMPLE (held to record, or played beside a take): their kept,
+    // release and cut go there too, even if the mode closed meanwhile; the rest stay the player's.
+    val samplePressed = remember { HashSet<PhysicalPad>() }
+    val padPress = onPad?.let { f ->
+        { pad: PhysicalPad, h: Boolean, unsure: Boolean, at: Long ->
+            if (!hold.press(pad, pad.label, functions) && !sampleHold.press(pad, pad, at, functions, unsure)) {
+                // A screen reader's Play (no finger to hold) plays the pad, in the mode too.
+                if (sampling && h) {
+                    samplePressed += pad
+                    sample?.onPadDown(pad, at, unsure)
+                } else {
+                    f(pad, h, unsure, at)
+                }
+            }
+        }
+    }
+    val padKept = { pad: PhysicalPad ->
+        // An unsure press SAMPLE took latches only now, kept (a scroll latches nothing).
+        if (!hold.took(pad) && !sampleHold.kept(pad, functions)) {
+            if (pad in samplePressed) sample?.onPadKept(pad) else onPadKept(pad)
+        }
+    }
+    val padUp = { pad: PhysicalPad, at: Long ->
+        if (!hold.release(pad) && !sampleHold.release(pad)) {
+            if (samplePressed.remove(pad)) sample?.onPadUp(pad, at) else onPadUp(pad)
+        }
+    }
+    val padCut = { pad: PhysicalPad ->
+        if (!hold.release(pad) && !sampleHold.release(pad)) {
+            if (samplePressed.remove(pad)) sample?.onPadCut(pad) else onPadCut(pad)
+        }
+    }
+    // In the mode the pads light as the EP-133's do: the empty ones blink together (one transition,
+    // read as they draw), those with a sound stay lit, the take's lights up.
+    val padSampling = if (sampling && sample != null) {
+        val still = fixedNow != null || sample.still
+        val blink = if (still) {
+            null
+        } else {
+            androidx.compose.animation.core.rememberInfiniteTransition(label = "sample").animateFloat(
+                1f,
+                0.15f,
+                androidx.compose.animation.core.infiniteRepeatable(
+                    androidx.compose.animation.core.tween(SAMPLE_BLINK_MS.toInt()),
+                    androidx.compose.animation.core.RepeatMode.Reverse,
+                ),
+                label = "sample",
+            )
+        }
+        val phase = sample.state.phase
+        PadSampling(led = { pad -> sampleLed(pad, phase, nameOf(pad) != null) }, blink = blink, onLatch = sample.onLatchPad)
+    } else {
+        null
+    }
+    if (sampling && sample != null) SampleHaptics(sample.state, haptics, held = { it in samplePressed }, bpm = mirror?.state?.bpm ?: functions.bpm.toDouble())
     val editPad = onEdit?.let { f ->
         { pad: PhysicalPad ->
             if (hold.press(pad, pad.label, functions)) hold.release(pad) else f(pad)
@@ -405,7 +469,9 @@ fun MirrorScreen(
         // less the display line when it is on the page.
         val safe = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal).asPaddingValues()
         val roomW = maxWidth - safe.calculateLeftPadding(LayoutDirection.Ltr) - safe.calculateRightPadding(LayoutDirection.Ltr) - startGutter - endGutter
-        val roomH = maxHeight - (if (inBar) 0.dp else DisplayLineHeight + 10.dp) - SidewaysBottom - ControlsRow
+        // SAMPLE's strip takes its share too.
+        val sampleExtra = if (sampling && sample != null) samplerHeadExtra(sample, roomW, inBar, sideways) else 0.dp
+        val roomH = maxHeight - (if (inBar) 0.dp else DisplayLineHeight + 10.dp) - sampleExtra - SidewaysBottom - ControlsRow
         // KEYS plays on the piano where it fits and the view switch (or, on Auto, a wide window)
         // says so. A portrait phone has no switch: there it is always the grid.
         // Only the short sideways piano goes without the function keys; elsewhere their row is over it.
@@ -472,7 +538,10 @@ fun MirrorScreen(
                 .padding(start = startGutter, end = endGutter, bottom = SidewaysBottom)
             if (piano != null) {
                 Column(sidewaysColumn) {
-                    if (!inBar) {
+                    if (sampling && sample != null) {
+                        SamplerHead(sample, inBar, sideways, haptics, still = fixedNow != null || sample.still)
+                        Spacer(Modifier.height(10.dp))
+                    } else if (!inBar) {
                         KeysDisplay(st, mirror, keysNow, rec, still = fixedNow != null, pianoRange = piano)
                         Spacer(Modifier.height(10.dp))
                     }
@@ -480,7 +549,7 @@ fun MirrorScreen(
                     // they sit right under the display line, as on the web. The short sideways
                     // piano keeps its mode word instead, for the keys' height.
                     if (pianoFunctions) {
-                        FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
+                        FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey, sampleHold = sampleHold)
                         Spacer(Modifier.height(10.dp))
                     }
                     Column(Modifier.weight(1f, fill = false)) {
@@ -502,48 +571,61 @@ fun MirrorScreen(
                 BoxWithConstraints(sidewaysColumn, contentAlignment = Alignment.TopCenter) {
                     // The K.O. II's body as big as the room under the display line, the function
                     // keys a column on its left (the group keys are the body's own first column).
-                    val gridH = maxHeight - (if (inBar) 0.dp else DisplayLineHeight + 10.dp)
+                    val gridH = maxHeight - (if (inBar) 0.dp else DisplayLineHeight + 10.dp) - sampleExtra
                     val k = KoGeom.fit(maxWidth - SideFunctions - SideControlsGap, gridH, 4)
                     val bodyW = k.u * (4 * 1.215f + 0.401f) + CapDx + 2.dp
-                    Column(Modifier.width(minOf(maxWidth, SideFunctions + SideControlsGap + bodyW)).fillMaxHeight()) {
-                        if (!inBar) {
-                            if (editing) EditLine() else DisplayStrip(st, mirror, rec, still = fixedNow != null, wireless = wireless)
+                    val columnW = minOf(maxWidth, SideFunctions + SideControlsGap + bodyW)
+                    // SAMPLE's line and strip across the page (its strip a row a key tall where there's room),
+                    // the body under them.
+                    Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+                        if (sampling && sample != null) {
+                            SamplerHead(sample, inBar, sideways, haptics, still = fixedNow != null || sample.still)
                             Spacer(Modifier.height(10.dp))
                         }
-                        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(SideControlsGap)) {
-                            FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
-                            Group(
-                                group, st, nameOf, now,
-                                Modifier.width(bodyW).fillMaxHeight().coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
-                                big = true,
-                                onPad = padPress,
-                                onPadKept = padKept,
-                                onPadUp = padUp,
-                                onPadCut = padCut,
-                                playingPads = ringed,
-                                onEdit = editPad,
-                                haptics = haptics,
-                                onSelectGroup = { group = it },
-                            )
+                        Column(Modifier.width(columnW).weight(1f)) {
+                            if (!sampling && !inBar) {
+                                if (editing) EditLine() else DisplayStrip(st, mirror, rec, still = fixedNow != null, wireless = wireless)
+                                Spacer(Modifier.height(10.dp))
+                            }
+                            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(SideControlsGap)) {
+                                FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey, sampleHold = sampleHold)
+                                Group(
+                                    group, st, nameOf, now,
+                                    Modifier.width(bodyW).fillMaxHeight().coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
+                                    big = true,
+                                    onPad = padPress,
+                                    onPadKept = padKept,
+                                    onPadUp = padUp,
+                                    onPadCut = padCut,
+                                    playingPads = ringed,
+                                    onEdit = editPad,
+                                    sampling = padSampling,
+                                    haptics = haptics,
+                                    onSelectGroup = { group = it },
+                                )
+                            }
                         }
                     }
                 }
             } else if (sideways && !keys.on && allGroupsSideways) {
                 val now = clock()
                 Column(sidewaysColumn) {
-                    if (!inBar) {
+                    if (sampling && sample != null) {
+                        SamplerHead(sample, inBar, sideways, haptics, still = fixedNow != null || sample.still)
+                        Spacer(Modifier.height(10.dp))
+                    } else if (!inBar) {
                         if (editing) EditLine() else DisplayStrip(st, mirror, rec, still = fixedNow != null, wireless = wireless)
                         Spacer(Modifier.height(10.dp))
                     }
                     // The function keys on the left, then all four in one row, filling the height:
                     // nothing to scroll, so a press plays at once.
                     Row(Modifier.fillMaxWidth().weight(1f, fill = false), horizontalArrangement = Arrangement.spacedBy(SideControlsGap)) {
-                        FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
+                        FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey, sampleHold = sampleHold)
                         Row(
                             Modifier.weight(1f).heightIn(max = caption + 3.dp + padW * 4),
                             horizontalArrangement = Arrangement.spacedBy(14.dp),
                         ) {
-                            for (g in 0..3) Group(g, st, nameOf, now, Modifier.weight(1f).fillMaxHeight(), fill = true, onPad = padPress, onPadKept = padKept, onPadUp = padUp, onPadCut = padCut, playingPads = ringed, onEdit = editPad, haptics = haptics)
+                            for (g in 0..3) Group(g, st, nameOf, now, Modifier.weight(1f).fillMaxHeight(), fill = true, onPad = padPress, onPadKept = padKept, onPadUp = padUp, onPadCut = padCut, playingPads = ringed, onEdit = editPad, haptics = haptics, sampling = padSampling)
                         }
                     }
                 }
@@ -571,7 +653,11 @@ fun MirrorScreen(
                             // On its side: the keys on the K.O. II's body as big as the room, the function
                             // keys and the view switch (turned) on their left, the scale and the octave
                             // on their right.
-                            if (!inBar) KeysDisplay(st, mirror, keysNow, rec, still = fixedNow != null)
+                            if (sampling && sample != null) {
+                                SamplerHead(sample, inBar, sideways, haptics, still = fixedNow != null || sample.still)
+                            } else if (!inBar) {
+                                KeysDisplay(st, mirror, keysNow, rec, still = fixedNow != null)
+                            }
                             BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
                                 val columns = SideFunctions + SidePicks + if (viewSwitch != null) SideLead else 0.dp
                                 val gaps = if (viewSwitch != null) 3 else 2
@@ -580,7 +666,7 @@ fun MirrorScreen(
                                 val gap = if (roomy.u < KeysTightU) SideGapTight else SideGap
                                 val k = KoGeom.fit(maxWidth - columns - gap * gaps, maxHeight, 3)
                                 Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally)) {
-                                    FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
+                                    FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey, sampleHold = sampleHold)
                                     if (viewSwitch != null) SidewaysKeysLead(viewSwitch)
                                     KeysGrid(
                                         st, keysNow, now, keysActions,
@@ -594,8 +680,12 @@ fun MirrorScreen(
                                 }
                             }
                         } else if (keys.on) {
-                            if (!inBar) KeysDisplay(st, mirror, keysNow, rec, still = fixedNow != null)
-                            FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
+                            if (sampling && sample != null) {
+                                SamplerHead(sample, inBar, sideways, haptics, still = fixedNow != null || sample.still)
+                            } else if (!inBar) {
+                                KeysDisplay(st, mirror, keysNow, rec, still = fixedNow != null)
+                            }
+                            FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey, sampleHold = sampleHold)
                             KeysGrid(
                                 st, keysNow, now, keysActions,
                                 Modifier.fillMaxWidth().weight(1f).coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
@@ -605,10 +695,12 @@ fun MirrorScreen(
                             )
                             ModeRow(keys, keysActions, viewSwitch = viewSwitch, mode = false)
                         } else {
-                            if (!inBar) {
+                            if (sampling && sample != null) {
+                                SamplerHead(sample, inBar, sideways, haptics, still = fixedNow != null || sample.still)
+                            } else if (!inBar) {
                                 if (editing) EditLine() else DisplayStrip(st, mirror, rec, still = fixedNow != null, wireless = wireless)
                             }
-                            FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
+                            FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey, sampleHold = sampleHold)
                             Group(
                                 group, st, nameOf, now,
                                 Modifier.fillMaxWidth().weight(1f).coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
@@ -619,6 +711,7 @@ fun MirrorScreen(
                                 onPadCut = padCut,
                                 playingPads = ringed,
                                 onEdit = editPad,
+                                sampling = padSampling,
                                 haptics = haptics,
                             )
                             GroupKeys(group, st, now, onSelect = { group = it })
@@ -641,17 +734,19 @@ fun MirrorScreen(
                             Caption(MirrorText.TITLE)
                             if (onBack != null) CloseKey(onBack, dev.arc.ep133.text.GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
                         }
-                        if (!inBar) {
+                        if (sampling && sample != null) {
+                            SamplerHead(sample, inBar, sideways, haptics, still = fixedNow != null || sample.still)
+                        } else if (!inBar) {
                             if (editing) EditLine() else Display(st, mirror, rec, still = fixedNow != null, compact = sideways, initialNoteOpen = initialNoteOpen, wireless = wireless, onGetFactory = onGetFactory)
                         }
-                        FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
+                        FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey, sampleHold = sampleHold)
                         BoxWithConstraints(Modifier.fillMaxWidth()) {
                             // Four groups in a row when there is room, two by two on a phone.
                             val perRow = if (maxWidth >= 640.dp) 4 else 2
                             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                                 for (row in (0..3).chunked(perRow)) {
                                     Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                                        for (g in row) Group(g, st, nameOf, now, Modifier.weight(1f), onPad = padPress, onPadKept = padKept, onPadUp = padUp, onPadCut = padCut, playingPads = ringed, onEdit = editPad, haptics = haptics)
+                                        for (g in row) Group(g, st, nameOf, now, Modifier.weight(1f), onPad = padPress, onPadKept = padKept, onPadUp = padUp, onPadCut = padCut, playingPads = ringed, onEdit = editPad, haptics = haptics, sampling = padSampling)
                                     }
                                 }
                             }
@@ -728,7 +823,7 @@ private val LivePillWindow = 600.dp
 
 /**
  * Live's display line in the top bar's middle, on a phone on its side: the
- * KEYS line or the pads' one-line display, one bar tall. [pianoRange] is the
+ * KEYS line, SAMPLE's or the pads' one-line display, one bar tall. [pianoRange] is the
  * piano's notes, to name a device note it doesn't reach; [wireless] as
  * [MirrorScreen] takes it.
  */
@@ -743,10 +838,13 @@ internal fun LivePill(
     /** The voices sounding on the phone, as [MirrorScreen] takes them: the note playing is named. */
     voices: StateFlow<Set<String>>? = null,
     wireless: Boolean = false,
+    /** SAMPLE mode: while it is on, its line ([SampleLine]). */
+    sample: SampleUi? = null,
 ) {
     val st = mirror?.state ?: MirrorState()
     val keysNow = soundingKeys(keys, voices?.collectAsStateWithLifecycle()?.value)
     when {
+        sample != null && sample.state.on -> SampleLine(sample, compact = true, still = still || sample.still)
         keys.on -> KeysDisplay(st, mirror, keysNow, rec, still, compact = true, pianoRange = pianoRange)
         editing -> EditLine(compact = true)
         else -> DisplayStrip(st, mirror, rec, still, compact = true, wireless = wireless)
@@ -785,7 +883,7 @@ private fun EditLine(compact: Boolean = false) {
  * second, so a run of notes or hits is read where it ends, not one by one.
  */
 @Composable
-private fun spoken(text: String): String {
+internal fun spoken(text: String): String {
     var said by remember { mutableStateOf(text) }
     var saidAt by remember { mutableLongStateOf(0L) }
     LaunchedEffect(text) {
@@ -990,14 +1088,17 @@ private fun Group(
     fill: Boolean = big,
     onPad: ((pad: PhysicalPad, hold: Boolean, unsure: Boolean, pressedAt: Long) -> Unit)? = null,
     onPadKept: (PhysicalPad) -> Unit = {},
-    onPadUp: (PhysicalPad) -> Unit = {},
-    onPadCut: (PhysicalPad) -> Unit = onPadUp,
+    /** A pad let go of, at [releasedAt] (System.nanoTime, the lift's own time: [PressTime]). */
+    onPadUp: (pad: PhysicalPad, releasedAt: Long) -> Unit = { _, _ -> },
+    onPadCut: (PhysicalPad) -> Unit = { onPadUp(it, System.nanoTime()) },
     playingPads: Set<PhysicalPad> = emptySet(),
     /** EDIT is on: a tap gives the pad another sound. */
     onEdit: ((PhysicalPad) -> Unit)? = null,
     haptics: Boolean = false,
     /** The big grid on a phone on its side: the group keys a column left of the pads, on the body. */
     onSelectGroup: ((Int) -> Unit)? = null,
+    /** SAMPLE mode: the pads' lights, and a screen reader's click latching a take. */
+    sampling: PadSampling? = null,
 ) {
     val c = LocalArcColors.current
     val lit = st.pads.filterKeys { it.group == group }
@@ -1010,13 +1111,16 @@ private fun Group(
                 big = true,
                 onPress = onPad?.let { f -> { hold: Boolean, unsure: Boolean, at: Long -> f(pad, hold, unsure, at) } },
                 onKept = { onPadKept(pad) },
-                onRelease = { onPadUp(pad) },
+                onRelease = { at -> onPadUp(pad, at) },
                 onCut = { onPadCut(pad) },
                 playing = pad in playingPads,
                 inScroll = false,
                 onEdit = onEdit?.let { f -> { f(pad) } },
                 haptics = haptics,
                 ko = k,
+                sampleLed = sampling?.led?.invoke(pad),
+                blink = sampling?.blink,
+                onLatch = sampling?.onLatch?.let { f -> { f(pad) } },
             )
         }
         val groupKeys: (@Composable (KoGeom) -> Unit)? = onSelectGroup?.let { select ->
@@ -1040,13 +1144,16 @@ private fun Group(
                             Modifier.weight(1f).then(if (fill) Modifier.fillMaxHeight() else Modifier.aspectRatio(1f)),
                             onPress = onPad?.let { f -> { hold: Boolean, unsure: Boolean, at: Long -> f(pad, hold, unsure, at) } },
                             onKept = { onPadKept(pad) },
-                            onRelease = { onPadUp(pad) },
+                            onRelease = { at -> onPadUp(pad, at) },
                             onCut = { onPadCut(pad) },
                             playing = pad in playingPads,
                             // Only the all-groups page scrolls.
                             inScroll = !fill,
                             onEdit = onEdit?.let { f -> { f(pad) } },
                             haptics = haptics,
+                            sampleLed = sampling?.led?.invoke(pad),
+                            blink = sampling?.blink,
+                            onLatch = sampling?.onLatch?.let { f -> { f(pad) } },
                         )
                     }
                 }
@@ -1282,19 +1389,30 @@ private fun Pad(
     big: Boolean = false,
     onPress: ((hold: Boolean, unsure: Boolean, pressedAt: Long) -> Unit)? = null,
     onKept: () -> Unit = {},
-    onRelease: () -> Unit = {},
-    onCut: () -> Unit = onRelease,
+    /** Let go of at [releasedAt] (System.nanoTime: [PressTime]). */
+    onRelease: (releasedAt: Long) -> Unit = {},
+    onCut: () -> Unit = { onRelease(System.nanoTime()) },
     playing: Boolean = false,
     inScroll: Boolean = !big,
     onEdit: (() -> Unit)? = null,
     haptics: Boolean = false,
     /** The big grid's K.O. II geometry: the digit, padding and corners from its pad width. */
     ko: KoGeom? = null,
+    /**
+     * SAMPLE mode's light ([SampleLed], null out of it): a ring, blinking
+     * with [blink] while the pad is empty, steady with a sound on it; the
+     * take's pad lit up, and heard as recording or waiting to. A screen
+     * reader's click is [onLatch] there (a hands-free take, or its end or
+     * cancel), and a pad with a sound keeps a Play action.
+     */
+    sampleLed: SampleLed? = null,
+    blink: androidx.compose.runtime.State<Float>? = null,
+    onLatch: (() -> Unit)? = null,
 ) {
     val c = LocalArcColors.current
     val hw = LocalHwColors.current
     val density = LocalDensity.current
-    val g = light?.let { glow(it, now) } ?: 0f
+    val g = if (sampleLed == SampleLed.RECORDING || sampleLed == SampleLed.WAITING) 1f else light?.let { glow(it, now) } ?: 0f
     val ink = if (g > 0.3f) c.onSignal else hw.darkInk
     val wide = pad.label.length > 1
     val labelStyle = ArcType.semi.copy(
@@ -1329,13 +1447,17 @@ private fun Pad(
         }
         if (ko != null) {
             // The K.O. II's pads keep their proportions, so even a small one is stacked: the
-            // name in the lines left under the digit (at least one; the cap clips the rest).
-            val left = room?.let { it - with(density) { labelStyle.fontSize.toDp() } } ?: 0.dp
-            val lines = with(density) { (left / (nameStyle.fontSize.toDp() * 1.1f)).toInt() }.coerceIn(1, 3)
+            // name in the lines left under the digit, up to three; with no room for one (a
+            // short window on its side, SAMPLE's strip over the pads), none rather than half
+            // of one clipped by the cap. A screen reader still hears it.
+            // The face is the cap's edge shorter than the room, and the name keeps that much clear
+            // of the face's foot too (SAMPLE's ring is drawn there).
+            val left = room?.let { it - CapDy * 2 - with(density) { labelStyle.fontSize.toDp() } } ?: 0.dp
+            val lines = with(density) { (left / (nameStyle.fontSize.toDp() * 1.1f)).toInt() }.coerceAtMost(3)
             Column(Modifier.fillMaxSize()) {
                 label()
                 Spacer(Modifier.weight(1f))
-                if (name != null) Text(name, style = nameStyle, color = nameColor, maxLines = lines, overflow = TextOverflow.Ellipsis)
+                if (name != null && (room == null || lines >= 1)) Text(name, style = nameStyle, color = nameColor, maxLines = lines.coerceAtLeast(1), overflow = TextOverflow.Ellipsis)
             }
         } else {
             Column(Modifier.fillMaxSize()) {
@@ -1354,19 +1476,41 @@ private fun Pad(
         // (its edge with it, and a light around it), down while held.
         .litGlow(g, c.signal, shape)
         .cap(lerp(hw.ko.darkFace, c.signal, g), lerp(hw.ko.darkEdge, c.signalEdge, g), shape, capPress(held.value))
+        // SAMPLE mode: the empty pads' ring blinks, the filled pads' stays (drawn, so a blink only redraws).
+        .sampleRing(sampleLed, blink, c.signal, shape)
         // Playing on the phone, or EDIT on: a signal-orange ring inside the pad.
         .then(if (playing || onEdit != null) Modifier.border(2.dp, c.signal, shape) else Modifier)
         .then(
             when {
                 // EDIT: a tap opens the pad sheet; held, it still plays.
-                onEdit != null -> tapToEdit(onEdit, onPress, onRelease, held = held, haptics = haptics)
+                onEdit != null -> tapToEdit(onEdit, onPress, { onRelease(System.nanoTime()) }, held = held, haptics = haptics)
+                // SAMPLE mode: held, it records (its press and lift go to the sampler, above); a screen
+                // reader can't hold, so its click latches a hands-free take, and Play plays a filled pad.
+                onPress != null && sampleLed != null && onLatch != null -> holdToPlay(
+                    onPress, onRelease, onKept = onKept, onCut = onCut, inScroll = inScroll, held = held, haptics = haptics,
+                    clickLabel = when (sampleLed) {
+                        SampleLed.RECORDING -> MirrorText.STOP_RECORDING
+                        SampleLed.WAITING -> MirrorText.CANCEL_RECORDING
+                        else -> MirrorText.RECORD_HANDS_FREE
+                    },
+                    onClick = onLatch,
+                    playAction = name != null,
+                )
                 // Both play on touch-down. The all-groups page scrolls, so there a press that
                 // turns into a drag across the pads is cut short.
                 onPress != null -> holdToPlay(onPress, onRelease, onKept = onKept, onCut = onCut, inScroll = inScroll, held = held, haptics = haptics)
                 else -> Modifier
             },
         )
-        .semantics { contentDescription = "${pad.groupLetter} ${pad.label}" + (name?.let { ", $it" } ?: "") }
+        .semantics {
+            contentDescription = "${pad.groupLetter} ${pad.label}" + (name?.let { ", $it" } ?: "") +
+                when (sampleLed) {
+                    null -> ""
+                    SampleLed.RECORDING -> MirrorText.PAD_RECORDING
+                    SampleLed.WAITING -> MirrorText.PAD_WAITING
+                    else -> MirrorText.padSampleState(name != null)
+                }
+        }
         .padding(
             when {
                 ko != null -> PaddingValues(horizontal = ko.u * 0.1f, vertical = ko.u * 0.06f)
@@ -2022,7 +2166,7 @@ private fun KeysGrid(
                                 else -> actions.onNote(notes[o], false, at)
                             }
                         },
-                        { if (hold?.release(keysKey(o)) != true) play(touches.up(o.toLong())) },
+                        { _ -> if (hold?.release(keysKey(o)) != true) play(touches.up(o.toLong())) },
                         held = held,
                         haptics = haptics,
                     ),
@@ -2198,22 +2342,29 @@ private fun LegendKey(
  * the whole sound. [held] is true while a finger holds it (the cap stays
  * down). [haptics]: a light tick once the press is handed on (a cut keeps it).
  * The press's time is the touch-down event's ([PressTime]), so Live's
- * latency counts from the touch itself.
+ * latency counts from the touch itself; the release's is the lift's
+ * (SAMPLE stops a take at it), or now when the gesture ended otherwise.
+ * [onClick] stands in for a screen reader's click (labelled [clickLabel]),
+ * and [playAction] then keeps Play as an action of its own (SAMPLE mode).
  */
 @Composable
 private fun holdToPlay(
     onPress: (hold: Boolean, unsure: Boolean, pressedAt: Long) -> Unit,
-    onRelease: () -> Unit,
+    onRelease: (releasedAt: Long) -> Unit,
     onKept: () -> Unit = {},
-    onCut: () -> Unit = onRelease,
+    onCut: () -> Unit = { onRelease(System.nanoTime()) },
     inScroll: Boolean = false,
     held: MutableState<Boolean>? = null,
     haptics: Boolean = false,
+    clickLabel: String = MirrorText.PLAY,
+    onClick: (() -> Unit)? = null,
+    playAction: Boolean = false,
 ): Modifier {
     val press by androidx.compose.runtime.rememberUpdatedState(onPress)
     val release by androidx.compose.runtime.rememberUpdatedState(onRelease)
     val cut by androidx.compose.runtime.rememberUpdatedState(onCut)
     val kept by androidx.compose.runtime.rememberUpdatedState(onKept)
+    val click by androidx.compose.runtime.rememberUpdatedState(onClick)
     val tick by androidx.compose.runtime.rememberUpdatedState(if (haptics) LocalHapticFeedback.current else null)
     return Modifier
         .pointerInput(inScroll) {
@@ -2224,6 +2375,8 @@ private fun holdToPlay(
                 held?.value = true
                 var scrolled = false
                 var unsure = inScroll
+                // When the finger lifted (the event's own time), if it did.
+                var upAt: Long? = null
                 try {
                     var lifted = false
                     if (inScroll) {
@@ -2233,7 +2386,10 @@ private fun holdToPlay(
                                 val ch = awaitPointerEvent(PointerEventPass.Final).changes.firstOrNull { it.id == down.id }
                                 when {
                                     ch == null -> scrolled = true
-                                    ch.changedToUp() -> lifted = true
+                                    ch.changedToUp() -> {
+                                        lifted = true
+                                        upAt = ch.uptimeMillis
+                                    }
                                     ch.isConsumed || (ch.position - down.position).getDistance() > viewConfiguration.touchSlop -> scrolled = true
                                 }
                             }
@@ -2246,7 +2402,11 @@ private fun holdToPlay(
                     while (!lifted && !scrolled) {
                         val ch = awaitPointerEvent(PointerEventPass.Final).changes.firstOrNull { it.id == down.id } ?: break
                         // Lifted, or a scroll took the finger over.
-                        if (!ch.pressed || inScroll && ch.isConsumed) break
+                        if (!ch.pressed) {
+                            upAt = ch.uptimeMillis
+                            break
+                        }
+                        if (inScroll && ch.isConsumed) break
                     }
                 } finally {
                     // Also when the pad leaves the screen with the finger still on it.
@@ -2256,16 +2416,24 @@ private fun holdToPlay(
                     } else {
                         // Ended inside the window some other way (the pad left the screen): kept, then let go of.
                         if (unsure) kept()
-                        release()
+                        release(upAt?.let(PressTime::of) ?: System.nanoTime())
                     }
                 }
             }
         }
         .semantics {
             role = Role.Button
-            onClick(label = MirrorText.PLAY) {
-                press(false, false, System.nanoTime())
+            onClick(label = clickLabel) {
+                click?.invoke() ?: press(false, false, System.nanoTime())
                 true
+            }
+            if (playAction) {
+                customActions = listOf(
+                    androidx.compose.ui.semantics.CustomAccessibilityAction(MirrorText.PLAY) {
+                        press(false, false, System.nanoTime())
+                        true
+                    },
+                )
             }
         }
 }

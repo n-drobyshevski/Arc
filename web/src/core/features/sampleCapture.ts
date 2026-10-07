@@ -39,8 +39,8 @@ import type { PhysicalPad } from './padNotes'
 export type SamplePhase =
   /** Nothing going on: holding a pad records into it. */
   | { readonly type: 'Ready' }
-  /** [pad] is held or latched, and the take waits for the input to pass the threshold. */
-  | { readonly type: 'Waiting'; readonly pad: PhysicalPad }
+  /** [pad] is held or latched ([latched]: hands-free), and the take waits for the input to pass the threshold. */
+  | { readonly type: 'Waiting'; readonly pad: PhysicalPad; readonly latched: boolean }
   /** A take of some bars into [pad] waits for PLAY on the EP-133 (its MIDI Start). */
   | { readonly type: 'WaitingForPlay'; readonly pad: PhysicalPad }
   /** The click counts [beat] of the bar before a take of some bars into [pad]. */
@@ -52,7 +52,7 @@ export type SamplePhase =
 
 export const SamplePhase = {
   Ready: Object.freeze({ type: 'Ready' }) as SamplePhase,
-  Waiting: (pad: PhysicalPad): SamplePhase => ({ type: 'Waiting', pad }),
+  Waiting: (pad: PhysicalPad, latched = false): SamplePhase => ({ type: 'Waiting', pad, latched }),
   WaitingForPlay: (pad: PhysicalPad): SamplePhase => ({ type: 'WaitingForPlay', pad }),
   CountIn: (pad: PhysicalPad, beat: number): SamplePhase => ({ type: 'CountIn', pad, beat }),
   Recording: (pad: PhysicalPad, seconds: number, max: number, latched: boolean): SamplePhase => ({

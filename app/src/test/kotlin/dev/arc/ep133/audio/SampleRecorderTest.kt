@@ -637,7 +637,7 @@ class SampleRecorderTest {
         r.recorder.setThreshold(-6f)
         r.recorder.arm(pad, ms(0), latched = true, maxFrames = 40_000)
         first.mixed(ShortArray(200) { 10 }, 100, 0, rate)
-        assertEquals(SamplePhase.Waiting(pad), r.recorder.phase.value)
+        assertEquals(SamplePhase.Waiting(pad, latched = true), r.recorder.phase.value)
         // Live's output opens again at 2000 Hz: RSP with it, and the take still waits for its sound.
         r.mix.mixRate = 2000
         first.mixed(ShortArray(20), 10, 100, 2000)

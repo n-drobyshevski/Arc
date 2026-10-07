@@ -279,7 +279,7 @@ private const val PAD_PREVIEW = "pad:"
 private const val LATE_LOAD_NS = 120_000_000L
 
 /** The player's key for SAMPLE's review sheet. */
-private const val REVIEW_KEY = "sample:review"
+internal const val REVIEW_KEY = "sample:review"
 
 /** How long SAMPLE's count-in waits for the click's next beat before it gives up (a beat at 40 BPM is 1.5 s). */
 private const val BEAT_WAIT_MS = 2_000L
@@ -2422,6 +2422,8 @@ class ArcController(
     private var micAllowed = false
     // The pad held down to record, and when it was pressed. Main thread only, as the rest here.
     private var sampleHeld: Pair<dev.arc.ep133.features.PhysicalPad, Long>? = null
+    // With LATCH on, an unsure press (the scrolling page) and when it was pressed: it latches once kept.
+    private var sampleLatchUnsure: Pair<dev.arc.ep133.features.PhysicalPad, Long>? = null
     // The pad of a hands-free take, from its latch (or count-in); over once the recorder no longer has a take going.
     private var sampleLatched: dev.arc.ep133.features.PhysicalPad? = null
     // Pads played as ever while a take records, to let go of with their finger.
@@ -2538,6 +2540,7 @@ class ArcController(
         sampleCount?.cancel()
         if (background && recorder.phase.value is SamplePhase.Recording) stoppedInBackground = true
         sampleHeld = null
+        sampleLatchUnsure = null
         sampleLatched = null
         samplePlayed.forEach(::releasePad)
         samplePlayed.clear()
@@ -2672,9 +2675,10 @@ class ArcController(
      * A pad pressed in SAMPLE mode at [pressedAtNanos] (the touch's time,
      * [dev.arc.ep133.audio.PressTime]): held, it records from that moment
      * (or from the first sound past the threshold) until [samplePadUp];
-     * with LATCH on it starts a hands-free take ([latchSample]). While a
-     * take goes on, another pad plays as ever ([playPad], [unsure] as there),
-     * which is how a chord goes into RSP.
+     * with LATCH on it starts a hands-free take ([latchSample]), an [unsure]
+     * press only once [samplePadKept] says it was a press (a scroll starts
+     * nothing). While a take goes on, another pad plays as ever ([playPad],
+     * [unsure] as there), which is how a chord goes into RSP.
      */
     fun samplePadDown(pad: dev.arc.ep133.features.PhysicalPad, pressedAtNanos: Long, unsure: Boolean = false) {
         if (!sampleMode.value.on) return
@@ -2683,7 +2687,10 @@ class ArcController(
             playPad(pad, unsure = unsure, pressedAt = pressedAtNanos)
             return
         }
-        if (sampleMode.value.latch) return latchSample(pad, pressedAtNanos)
+        if (sampleMode.value.latch) {
+            if (unsure) sampleLatchUnsure = pad to pressedAtNanos else latchSample(pad, pressedAtNanos)
+            return
+        }
         // An input lost on the way (Live's output closed under RSP): open it again for this press.
         if (recorder.input == null) openSampleInput(sampleMode.value.input ?: storedSampleInput())
         if (!armSample(pad, pressedAtNanos, latched = false)) return
@@ -2717,13 +2724,25 @@ class ArcController(
         recorder.stop(releasedAtNanos)
     }
 
-    /** A press on the scrolling page was a press after all: one played beside a take goes on as [keepPad] says. */
+    /**
+     * A press on the scrolling page was a press after all: with LATCH on its
+     * hands-free take starts now, from the press; one played beside a take
+     * goes on as [keepPad] says.
+     */
     fun samplePadKept(pad: dev.arc.ep133.features.PhysicalPad) {
+        sampleLatchUnsure?.takeIf { it.first == pad }?.let { (_, at) ->
+            sampleLatchUnsure = null
+            return latchSample(pad, at)
+        }
         if (pad in samplePlayed) keepPad(pad)
     }
 
-    /** The press on [pad] turned into a scroll: its take is thrown away (or, played beside one, its sound cut). */
+    /** The press on [pad] turned into a scroll: its take is thrown away, or never latched (or, played beside one, its sound cut). */
     fun samplePadCut(pad: dev.arc.ep133.features.PhysicalPad) {
+        if (sampleLatchUnsure?.first == pad) {
+            sampleLatchUnsure = null
+            return
+        }
         if (samplePlayed.remove(pad)) return cutPad(pad)
         if (sampleHeld?.first != pad) return
         sampleHeld = null

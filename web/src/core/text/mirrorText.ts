@@ -653,9 +653,9 @@ export const MirrorText = {
     return `${MirrorText.takeLength(seconds)} / ${MirrorText.takeLength(max)}`
   },
 
-  /** "Pad A 7: uploading, 40%". */
-  sampleUploading(pad: PhysicalPad, percent: number): string {
-    return `${MirrorText.padTitle(pad)}: uploading, ${percent}%`
+  /** "Pad A 7: uploading, 40%"; without [percent] as a screen reader hears it, once rather than at each step. */
+  sampleUploading(pad: PhysicalPad, percent: number | null = null): string {
+    return `${MirrorText.padTitle(pad)}: uploading` + (percent === null ? '' : `, ${percent}%`)
   },
 
   /** A full-length take won't fit in the EP-133's free space, so takes stop sooner. */
@@ -664,9 +664,15 @@ export const MirrorText = {
     return `${MirrorText.DISK_LOW}: room for ${seconds} s`
   },
 
-  /** SAMPLE for screen readers: what it is now and what a tap does. */
-  sampleKeyState(on: boolean, recording: boolean): string {
-    if (recording) return 'Recording hands-free. Tap to stop.'
+  /**
+   * SAMPLE for screen readers: what it is now and what a tap does.
+   * [recording]: a take records; [handsFree]: a hands-free take goes on
+   * (recording, or waiting for sound, the count-in or PLAY), which a tap stops.
+   */
+  sampleKeyState(on: boolean, recording = false, handsFree = false): string {
+    if (handsFree && recording) return 'Recording hands-free. Tap to stop.'
+    if (handsFree) return 'Waiting to record hands-free. Tap to stop.'
+    if (recording) return 'Recording. Tap to leave sample mode.'
     if (on) return 'On. Tap to leave sample mode.'
     return 'Off. Tap, then hold a pad to record into it.'
   },
@@ -675,9 +681,13 @@ export const MirrorText = {
   padSampleState(filled: boolean): string {
     return filled ? ', has a sound' : ', empty'
   },
-  /** A pad's click in the mode for screen readers, which can't hold: a latched take, or its end. */
+  /** Added to the take's pad instead: recording into it, or waiting to (for sound, the count-in or PLAY). */
+  PAD_RECORDING: ', recording',
+  PAD_WAITING: ', waiting to record',
+  /** A pad's click in the mode for screen readers, which can't hold: a latched take, its end, or (before it starts) its cancel. */
   RECORD_HANDS_FREE: 'Record hands-free',
   STOP_RECORDING: 'Stop recording',
+  CANCEL_RECORDING: 'Cancel recording',
 
   /** A short tap on an empty pad in the mode. */
   HOLD_TO_RECORD: 'Hold the pad to record. A tap plays a pad that has a sound.',
@@ -712,6 +722,9 @@ export const MirrorText = {
   slotLine(slot: number, next: boolean): string {
     return `Slot ${slot}` + (next ? ', the next free one' : '')
   },
+  /** The − and + either side of the slot line. */
+  PREV_SLOT: 'Previous free slot',
+  NEXT_SLOT: 'Next free slot',
   /** Offline, the slot is picked on upload: the free ones aren't known until then. */
   SLOT_WHEN_CONNECTED: 'Goes into the next free slot when the EP-133 connects.',
 

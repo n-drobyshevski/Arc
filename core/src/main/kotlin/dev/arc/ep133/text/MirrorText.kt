@@ -521,25 +521,35 @@ object MirrorText {
     /** "0:04 / 0:20": the take so far, and the longest it can be. */
     fun sampleTime(seconds: Int, max: Int) = "${takeLength(seconds.toDouble())} / ${takeLength(max.toDouble())}"
 
-    /** "Pad A 7: uploading, 40%". */
-    fun sampleUploading(pad: PhysicalPad, percent: Int) = "${padTitle(pad)}: uploading, $percent%"
+    /** "Pad A 7: uploading, 40%"; without [percent] as a screen reader hears it, once rather than at each step. */
+    fun sampleUploading(pad: PhysicalPad, percent: Int? = null) = "${padTitle(pad)}: uploading" + (percent?.let { ", $it%" } ?: "")
 
     /** A full-length take won't fit in the EP-133's free space, so takes stop sooner. */
     const val DISK_LOW = "Disk low"
     fun diskLow(seconds: Int) = "$DISK_LOW: room for $seconds s"
 
-    /** SAMPLE for screen readers: what it is now and what a tap does. */
-    fun sampleKeyState(on: Boolean, recording: Boolean) = when {
-        recording -> "Recording hands-free. Tap to stop."
+    /**
+     * SAMPLE for screen readers: what it is now and what a tap does.
+     * [recording]: a take records; [handsFree]: a hands-free take goes on
+     * (recording, or waiting for sound, the count-in or PLAY), which a tap stops.
+     */
+    fun sampleKeyState(on: Boolean, recording: Boolean = false, handsFree: Boolean = false) = when {
+        handsFree && recording -> "Recording hands-free. Tap to stop."
+        handsFree -> "Waiting to record hands-free. Tap to stop."
+        recording -> "Recording. Tap to leave sample mode."
         on -> "On. Tap to leave sample mode."
         else -> "Off. Tap, then hold a pad to record into it."
     }
 
     /** Added to a pad's name for screen readers in the mode: ", has a sound" or ", empty". */
     fun padSampleState(filled: Boolean) = if (filled) ", has a sound" else ", empty"
-    /** A pad's click in the mode for screen readers, which can't hold: a latched take, or its end. */
+    /** Added to the take's pad instead: recording into it, or waiting to (for sound, the count-in or PLAY). */
+    const val PAD_RECORDING = ", recording"
+    const val PAD_WAITING = ", waiting to record"
+    /** A pad's click in the mode for screen readers, which can't hold: a latched take, its end, or (before it starts) its cancel. */
     const val RECORD_HANDS_FREE = "Record hands-free"
     const val STOP_RECORDING = "Stop recording"
+    const val CANCEL_RECORDING = "Cancel recording"
 
     /** A short tap on an empty pad in the mode. */
     const val HOLD_TO_RECORD = "Hold the pad to record. A tap plays a pad that has a sound."
@@ -569,6 +579,9 @@ object MirrorText {
 
     /** "Slot 214, the next free one": where KEEP puts the sample (− and + step over the free slots). */
     fun slotLine(slot: Int, next: Boolean) = "Slot $slot" + if (next) ", the next free one" else ""
+    /** The − and + either side of the slot line. */
+    const val PREV_SLOT = "Previous free slot"
+    const val NEXT_SLOT = "Next free slot"
     /** Offline, the slot is picked on upload: the free ones aren't known until then. */
     const val SLOT_WHEN_CONNECTED = "Goes into the next free slot when the EP-133 connects."
 

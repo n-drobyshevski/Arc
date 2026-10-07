@@ -84,7 +84,7 @@ import kotlinx.coroutines.launch
 /**
  * The settings (an addition to the web version): theme, connecting, the
  * screen in Live, how many backups to keep, Live's pad numbering, note names,
- * piano size and haptics, what arc keeps on the phone, and about arc. Each setting is
+ * piano size, haptics and SAMPLE's review, what arc keeps on the phone, and about arc. Each setting is
  * one row (its name and control; an info key after the name for its notes), rows
  * grouped in plates. On a phone the plates are one scroll; on a wide window a
  * list of the sections sits on the left, its LED on the section in view.
@@ -111,6 +111,8 @@ fun SettingsScreen(
     onShowNames: (Boolean) -> Unit = {},
     onPianoWhites: (Int?) -> Unit = {},
     onHaptics: (Boolean) -> Unit = {},
+    /** SAMPLE's review sheet after each take, or straight onto the pad (an addition). */
+    onReviewSamples: (Boolean) -> Unit = {},
     /** Downloads the factory sounds (FactorySounds); null hides the row. */
     onGetFactory: (() -> Unit)? = null,
     onSource: () -> Unit,
@@ -214,6 +216,8 @@ fun SettingsScreen(
                 }
                 PlateLine()
                 SwitchRow(SettingsText.HAPTICS, SettingsText.HAPTICS_NOTE, settings.haptics, onHaptics)
+                PlateLine()
+                SwitchRow(SettingsText.REVIEW_SAMPLES, SettingsText.REVIEW_SAMPLES_NOTE, settings.reviewSamples, onReviewSamples)
                 if (onGetFactory != null) {
                     val saved = FactorySounds.inLibrary(state.backups) != null
                     PlateLine()

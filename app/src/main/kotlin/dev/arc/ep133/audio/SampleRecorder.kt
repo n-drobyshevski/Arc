@@ -592,7 +592,7 @@ class SampleRecorder(
                             is Ask.Arm -> c.arm(at, a.threshold)
                             is Ask.Schedule -> c.schedule(at, a.length)
                         }
-                        _phase.value = SamplePhase.Waiting(a.pad)
+                        _phase.value = SamplePhase.Waiting(a.pad, a.latched)
                         after(c)
                     }
                     is Ask.Stop -> if (going(c)) {

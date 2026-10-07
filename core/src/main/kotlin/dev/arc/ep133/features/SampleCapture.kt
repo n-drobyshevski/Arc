@@ -8,8 +8,8 @@ sealed interface SamplePhase {
     /** Nothing going on: holding a pad records into it. */
     data object Ready : SamplePhase
 
-    /** [pad] is held or latched, and the take waits for the input to pass the threshold. */
-    data class Waiting(val pad: PhysicalPad) : SamplePhase
+    /** [pad] is held or latched ([latched]: hands-free), and the take waits for the input to pass the threshold. */
+    data class Waiting(val pad: PhysicalPad, val latched: Boolean = false) : SamplePhase
 
     /** A take of some bars into [pad] waits for PLAY on the EP-133 (its MIDI Start). */
     data class WaitingForPlay(val pad: PhysicalPad) : SamplePhase

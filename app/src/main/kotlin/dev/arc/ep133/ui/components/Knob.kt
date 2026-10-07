@@ -5,7 +5,9 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -48,6 +50,9 @@ private const val SWEEP = 270f
 /** A drag across this much turns a knob through its whole range. */
 private val FULL_TURN = 220.dp
 
+/** A [Knob]'s value is at least this wide when it sits beside the knob ("−60 dB"). */
+private val InlineReadout = 48.dp
+
 /** Slower than this (dp per millisecond), a drag turns by [fineStep] instead of [step]. */
 private const val FINE_SPEED = 0.12f
 
@@ -65,7 +70,8 @@ private const val FINE_SPEED = 0.12f
  * exactly. A double tap puts it back to [default]. [onChange] hears each new
  * value, [onDone] the finger lifting. With [haptics], each step ticks.
  * Screen readers hear it as a range they can set ([description], [readout]).
- * [enabled] false dims it and stops it turning.
+ * [enabled] false dims it and stops it turning. [inline]: the label over
+ * the value beside the knob, for a strip one key tall (SAMPLE's).
  */
 @Composable
 fun Knob(
@@ -84,6 +90,7 @@ fun Knob(
     haptics: Boolean = false,
     description: String = label,
     size: Dp = 56.dp,
+    inline: Boolean = false,
     onDone: () -> Unit = {},
 ) {
     val c = LocalArcColors.current
@@ -106,70 +113,80 @@ fun Knob(
     val raw = remember { floatArrayOf(0f) }
     // When and where the last tap without a turn lifted, for a double tap.
     val lastTap = remember { longArrayOf(Long.MIN_VALUE) }
-    Column(
-        modifier
-            .alpha(if (enabled) 1f else 0.4f)
-            // The whole knob, name and value too, takes the finger from its first touch: a drag up or
-            // down turns it and never scrolls the sheet it sits in. Taps are told apart here as well,
-            // since a tap detector beside it would give way to the moves taken.
-            .pointerInput(enabled, range, step, fineStep, default) {
-                if (!enabled) return@pointerInput
-                val perPx = span / FULL_TURN.toPx()
-                val slop = viewConfiguration.touchSlop
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    down.consume()
-                    raw[0] = current
-                    var lastTime = down.uptimeMillis
-                    var moved = false
-                    var travel = 0f
-                    var upAt = -1L
-                    while (true) {
-                        val e = awaitPointerEvent(PointerEventPass.Main)
-                        val ch = e.changes.firstOrNull { it.id == down.id } ?: break
-                        if (!ch.pressed) {
-                            upAt = ch.uptimeMillis
-                            ch.consume()
-                            break
-                        }
-                        val d = ch.positionChange()
+    val touch = modifier
+        .alpha(if (enabled) 1f else 0.4f)
+        // The whole knob, name and value too, takes the finger from its first touch: a drag up or
+        // down turns it and never scrolls the sheet it sits in. Taps are told apart here as well,
+        // since a tap detector beside it would give way to the moves taken.
+        .pointerInput(enabled, range, step, fineStep, default) {
+            if (!enabled) return@pointerInput
+            val perPx = span / FULL_TURN.toPx()
+            val slop = viewConfiguration.touchSlop
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                down.consume()
+                raw[0] = current
+                var lastTime = down.uptimeMillis
+                var moved = false
+                var travel = 0f
+                var upAt = -1L
+                while (true) {
+                    val e = awaitPointerEvent(PointerEventPass.Main)
+                    val ch = e.changes.firstOrNull { it.id == down.id } ?: break
+                    if (!ch.pressed) {
+                        upAt = ch.uptimeMillis
                         ch.consume()
-                        val px = d.x - d.y
-                        if (!moved) {
-                            // A finger's tremble turns nothing (and is still a tap); past the slop it turns, without a jump.
-                            travel += abs(d.x) + abs(d.y)
-                            if (travel < slop) continue
-                            moved = true
-                            lastTime = ch.uptimeMillis
-                            continue
-                        }
-                        if (px != 0f) {
-                            val dt = (ch.uptimeMillis - lastTime).coerceAtLeast(1L)
-                            lastTime = ch.uptimeMillis
-                            val speed = abs(px).toDp().value / dt
-                            raw[0] = (raw[0] + px * perPx).coerceIn(range.start, range.endInclusive)
-                            set(snap(raw[0], if (speed < FINE_SPEED) fineStep else step))
-                        }
+                        break
                     }
-                    when {
-                        moved -> {
-                            lastTap[0] = Long.MIN_VALUE
-                            done()
-                        }
-                        upAt < 0 -> lastTap[0] = Long.MIN_VALUE
-                        lastTap[0] != Long.MIN_VALUE && down.uptimeMillis - lastTap[0] <= viewConfiguration.doubleTapTimeoutMillis -> {
-                            lastTap[0] = Long.MIN_VALUE
-                            set(default)
-                            done()
-                        }
-                        else -> lastTap[0] = upAt
+                    val d = ch.positionChange()
+                    ch.consume()
+                    val px = d.x - d.y
+                    if (!moved) {
+                        // A finger's tremble turns nothing (and is still a tap); past the slop it turns, without a jump.
+                        travel += abs(d.x) + abs(d.y)
+                        if (travel < slop) continue
+                        moved = true
+                        lastTime = ch.uptimeMillis
+                        continue
+                    }
+                    if (px != 0f) {
+                        val dt = (ch.uptimeMillis - lastTime).coerceAtLeast(1L)
+                        lastTime = ch.uptimeMillis
+                        val speed = abs(px).toDp().value / dt
+                        raw[0] = (raw[0] + px * perPx).coerceIn(range.start, range.endInclusive)
+                        set(snap(raw[0], if (speed < FINE_SPEED) fineStep else step))
                     }
                 }
-            },
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
+                when {
+                    moved -> {
+                        lastTap[0] = Long.MIN_VALUE
+                        done()
+                    }
+                    upAt < 0 -> lastTap[0] = Long.MIN_VALUE
+                    lastTap[0] != Long.MIN_VALUE && down.uptimeMillis - lastTap[0] <= viewConfiguration.doubleTapTimeoutMillis -> {
+                        lastTap[0] = Long.MIN_VALUE
+                        set(default)
+                        done()
+                    }
+                    else -> lastTap[0] = upAt
+                }
+            }
+        }
+    val name: @Composable () -> Unit = {
         Text(label.uppercase(), style = ArcType.caps.copy(fontSize = 11.sp), color = c.graphite, maxLines = 1, textAlign = TextAlign.Center)
+    }
+    val shown: @Composable () -> Unit = {
+        // Beside the knob, the value keeps a width of its own, so the knobs after it don't shift as it turns.
+        Text(
+            readout,
+            style = ArcType.bold.copy(fontSize = 14.sp),
+            color = c.ink,
+            maxLines = 1,
+            textAlign = if (inline) TextAlign.Start else TextAlign.Center,
+            modifier = if (inline) Modifier.widthIn(min = InlineReadout) else Modifier,
+        )
+    }
+    val knob: @Composable () -> Unit = {
         Canvas(
             Modifier
                 .size(size)
@@ -226,7 +243,22 @@ fun Knob(
                 cap = StrokeCap.Round,
             )
         }
-        Text(readout, style = ArcType.bold.copy(fontSize = 14.sp), color = c.ink, maxLines = 1, textAlign = TextAlign.Center)
+    }
+    if (inline) {
+        // The name printed over the value beside the knob, so it takes no more width than either.
+        Row(touch, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            knob()
+            Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                name()
+                shown()
+            }
+        }
+    } else {
+        Column(touch, horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            name()
+            knob()
+            shown()
+        }
     }
 }
 
