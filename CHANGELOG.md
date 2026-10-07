@@ -22,6 +22,7 @@ version fixes bugs. The version itself is set in `version.properties`.
 - The guide overlay, upright: a tag that would be pushed out onto another marked control sits a little closer to its neighbour instead (SETTINGS no longer covers TEMPO on Live).
 
 ### Fixed
+- Android: a quick tap no longer leaves a key drawn pressed (Live's group keys, where the chosen group then no longer stood out).
 - Android: a key let go of could stay drawn pressed (Live's group keys most often), when the frame after the release came stamped before it; it now always springs back.
 
 ## [0.3.5] - 2026-10-06
