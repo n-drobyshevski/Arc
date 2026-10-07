@@ -377,6 +377,23 @@ class LiveMirrorTest {
     }
 
     @Test
+    fun `a sample recorded offline plays from its file and has no slot yet`() {
+        val m = mirror(learned = mapOf(9 to 1))
+        val a7 = PhysicalPad(0, 9)
+        // A '7' held the device's snare (slot 5); a recording replaces it.
+        m.setLocal(OfflinePads.EMPTY.put(OfflinePad(1, 0, 1, 0, "mic 1007-142301", SoundSource.RECORDED, "rec-1.wav")))
+        assertEquals(PadSample(0, "mic 1007-142301", false, "rec-1.wav"), m.sampleOf(a7))
+        assertEquals("mic 1007-142301", m.nameOf(a7))
+        // Slot 0 is a placeholder: the pad has no slot until the upload gives it one.
+        assertNull(m.slotOf(a7))
+        assertEquals(PadTarget(1, 0, 1, null), m.target(a7))
+        assertEquals(
+            listOf(PadSample(0, "mic 1007-142301", false, "rec-1.wav"), PadSample(1, "kick", false), PadSample(20, "bass", false)),
+            m.padSamples(),
+        )
+    }
+
+    @Test
     fun `an empty pad survives the round trip, and junk reads as nothing`() {
         val s = LiveSnapshot(5, null, listOf(PadGroup("c", mapOf(3 to null))), emptyMap())
         assertEquals(s, LiveSnapshot.fromJson(s.toJson()))

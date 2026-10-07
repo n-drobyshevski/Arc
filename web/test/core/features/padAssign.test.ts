@@ -134,4 +134,26 @@ describe('PadAssignTest', () => {
     expect((e as Error).message).toBe(MirrorText.NO_FREE_SLOT)
     s.close()
   })
+
+  it('an upload into a picked slot needs it free on the device', async () => {
+    const dev = DemoData.device()
+    const s = await connect(dev)
+    const wav = encodeWav(noise(2000 * 2), 1, 46875)
+    expect(await uploadToPad(s, 'mic take.wav', wav, new Set(), target(2, 0, 1, 4), null, {}, 42)).toBe(42)
+    expect(dev.sounds.get(42)!.name).toBe('mic take')
+    expect((await padsOf(s, 2, 'a'))?.get(1)).toBe(42)
+    // The caller's list is stale (empty here), but the device lists 5: nothing is written, the pad keeps its sound.
+    const snare = dev.sounds.get(5)!.name
+    const pads = readPads(await readProject(s, 2))
+    const e = await uploadToPad(s, 'mic take 2.wav', wav, new Set(), target(2, 0, 2, null), null, {}, 5).catch((x: unknown) => x)
+    expect(e).toBeInstanceOf(UploadError)
+    expect((e as Error).message).toBe('Slot 5 has a sound now. Pick another slot.')
+    expect(dev.sounds.get(5)!.name).toBe(snare)
+    // Taken in the caller's own list counts too.
+    const e2 = await uploadToPad(s, 'mic take 2.wav', wav, new Set([50]), target(2, 0, 2, null), null, {}, 50).catch((x: unknown) => x)
+    expect(e2).toBeInstanceOf(UploadError)
+    expect(dev.sounds.get(50)).toBeUndefined()
+    expect(readPads(await readProject(s, 2))).toEqual(pads)
+    s.close()
+  })
 })

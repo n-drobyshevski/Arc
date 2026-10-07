@@ -22,6 +22,8 @@ object CoachText {
     /** Live's function keys beside MODE (now the KEYS key). */
     const val PROJECT = "Next project: tap; hold + pad 1–9 to pick"
     const val TEMPO = "Click: tap; hold for tempo"
+    /** SAMPLE, first in the row: held with a pad, it latches a hands-free take. */
+    const val SAMPLE = "Sample: tap, then hold a pad; hold + pad to latch"
     const val OCTAVE = "Octave"
     const val SCALE = "Scale"
     const val KEY = "Key"

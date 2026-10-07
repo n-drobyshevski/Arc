@@ -6,7 +6,10 @@
 //
 // Web deltas:
 // - SoundSource is a string union whose values are the Kotlin enum's `id`
-//   ('device', 'factory'): `source.id` is `source`, `SoundSource.of` the same.
+//   ('device', 'factory', 'rec'): `source.id` is `source`, `SoundSource.of`
+//   the same.
+// - OfflinePad's `file` is optional: absent is Kotlin's default null, so a
+//   pad written without it equals one read back without it.
 // - The data classes are plain readonly interfaces; their methods are
 //   functions taking the value first (`pads.put(p)` is `put(pads, p)`), and
 //   `OfflinePads.EMPTY` / `fromJson` / `fits` are on the `OfflinePads` object
@@ -18,13 +21,20 @@
 import { SOURCE as FACTORY_SOURCE, unnamed } from './factorySounds'
 import { PadSoundCache } from './padSoundCache'
 
-/** Which list a sound was picked from: the device's sounds as last read, or the factory pack. */
-export type SoundSource = 'device' | 'factory'
+/**
+ * Which list a sound was picked from: the device's sounds as last read, or
+ * the factory pack; or a sample recorded in arc that isn't on the device yet
+ * (RECORDED, an addition: recorded in SAMPLE mode while offline, the sound
+ * is arc's own file, and it gets a slot only when it is uploaded on the next
+ * connection).
+ */
+export type SoundSource = 'device' | 'factory' | 'rec'
 export const SoundSource = {
   DEVICE: 'device',
   FACTORY: FACTORY_SOURCE,
+  RECORDED: 'rec',
   of(id: string): SoundSource | null {
-    return id === 'device' || id === 'factory' ? id : null
+    return id === 'device' || id === 'factory' || id === 'rec' ? id : null
   },
 } as const
 
@@ -32,7 +42,8 @@ export const SoundSource = {
  * A sound put on a pad while no EP-133 is connected (an addition): the
  * [project]'s pad file for [group] (0..3, A..D) and [pad] (its number in the
  * project file, pNN, as in PadTarget), and the [slot] and [name] picked from
- * [source]'s list.
+ * [source]'s list. A RECORDED sample has no slot yet ([slot] 0) and plays
+ * from [file], its file name in arc's samples folder.
  */
 export interface OfflinePad {
   readonly project: number
@@ -41,6 +52,7 @@ export interface OfflinePad {
   readonly slot: number
   readonly name: string
   readonly source: SoundSource
+  readonly file?: string | null
 }
 
 export interface OfflinePads {
@@ -75,7 +87,16 @@ export function toJson(pads: OfflinePads): string {
   // Non-numeric keys: JSON.stringify keeps them in the Kotlin order.
   return JSON.stringify({
     v: 1,
-    pads: pads.list.map((p) => ({ project: p.project, group: p.group, pad: p.pad, slot: p.slot, name: p.name, source: p.source })),
+    pads: pads.list.map((p) => ({
+      project: p.project,
+      group: p.group,
+      pad: p.pad,
+      slot: p.slot,
+      name: p.name,
+      source: p.source,
+      // Only recorded samples have one: the other entries stay as they always were.
+      ...(p.file != null ? { file: p.file } : {}),
+    })),
   })
 }
 
@@ -86,7 +107,12 @@ function intOrNull(v: unknown): number | null {
   return typeof v === 'number' && Number.isInteger(v) && v >= -(2 ** 31) && v <= 2 ** 31 - 1 ? v : null
 }
 
-/** Null when the text is not a version this one can read; entries it can't read are skipped. */
+/**
+ * Null when the text is not a version this one can read; entries it can't
+ * read are skipped. The version stays 1 with recorded samples in it: a reader
+ * from before them skips those entries (an unknown source and slot 0) and
+ * keeps the rest.
+ */
 export function fromJson(text: string): OfflinePads | null {
   let o: unknown
   try {
@@ -106,13 +132,21 @@ export function fromJson(text: string): OfflinePads | null {
     if (group === null || group < 0 || group > 3) continue
     const pad = intOrNull(f['pad'])
     if (pad === null || pad < 1) continue
-    const slot = intOrNull(f['slot'])
-    if (slot === null || slot < 1) continue
     const name = f['name']
     if (typeof name !== 'string') continue
     const source = typeof f['source'] === 'string' ? SoundSource.of(f['source']) : null
     if (source === null) continue
-    out = put(out, { project, group, pad, slot, name, source })
+    // A recorded sample has slot 0 until it is uploaded, and is nothing without its file.
+    const recorded = source === SoundSource.RECORDED
+    const slot = intOrNull(f['slot'])
+    if (slot === null || (recorded ? slot !== 0 : slot < 1)) continue
+    let file: string | undefined
+    if (recorded) {
+      const v = f['file']
+      if (typeof v !== 'string') continue
+      file = v
+    }
+    out = put(out, file !== undefined ? { project, group, pad, slot, name, source, file } : { project, group, pad, slot, name, source })
   }
   return out
 }
@@ -121,17 +155,20 @@ export function fromJson(text: string): OfflinePads | null {
  * Whether [p] can still go on the device: made on its [activeProject], and
  * the device holds the sound in that slot ([deviceNames], by slot). A factory
  * sound also fits where the device lists that slot unnamed (FactorySounds.unnamed):
- * the factory sound is still there.
+ * the factory sound is still there. A recorded sample only needs its project:
+ * it brings its own sound and goes into whichever slot is free when it is
+ * uploaded.
  */
 export function fits(p: OfflinePad, activeProject: number | null, deviceNames: ReadonlyMap<number, string>): boolean {
   if (p.project !== activeProject) return false
   const dev = deviceNames.get(p.slot)
-  if (dev === undefined) return false
   switch (p.source) {
     case 'device':
-      return PadSoundCache.sameName(dev, p.name)
+      return dev !== undefined && PadSoundCache.sameName(dev, p.name)
     case 'factory':
-      return PadSoundCache.sameName(dev, p.name) || unnamed(p.slot, dev)
+      return dev !== undefined && (PadSoundCache.sameName(dev, p.name) || unnamed(p.slot, dev))
+    case 'rec':
+      return true
   }
 }
 

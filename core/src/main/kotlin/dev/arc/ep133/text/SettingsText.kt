@@ -88,6 +88,9 @@ object SettingsText {
     const val DOESNT_FIT = "Too wide for this window"
     const val HAPTICS = "Haptics"
     const val HAPTICS_NOTE = "A light tick when a pad or key goes down."
+    /** SAMPLE's review sheet after each take (an addition: the EP-133 puts a take straight on its pad). */
+    const val REVIEW_SAMPLES = "Review samples"
+    const val REVIEW_SAMPLES_NOTE = "After each recording, trim and hear it before it goes on the pad. Off, it goes straight on, as on the EP-133."
 
     const val SAVED_HERE = "Saved on the phone"
     const val LEARNED_NAMES = "Learned sample names"

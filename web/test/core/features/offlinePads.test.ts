@@ -4,6 +4,7 @@ import { OfflinePads, SoundSource, type OfflinePad } from '../../../src/core/fea
 
 const kick: OfflinePad = { project: 1, group: 0, pad: 5, slot: 343, name: 'kick', source: SoundSource.FACTORY }
 const snare: OfflinePad = { project: 1, group: 1, pad: 2, slot: 7, name: 'snare', source: SoundSource.DEVICE }
+const take: OfflinePad = { project: 1, group: 0, pad: 5, slot: 0, name: 'mic 1007-142301', source: SoundSource.RECORDED, file: 'rec-1.wav' }
 
 describe('OfflinePadsTest', () => {
   it('one change per pad, the latest last, and a drop takes it back', () => {
@@ -85,5 +86,66 @@ describe('OfflinePadsTest', () => {
     expect(OfflinePads.fits(kick, 2, names)).toBe(false)
     expect(OfflinePads.fits(snare, null, names)).toBe(false)
     expect(OfflinePads.fits(snare, 1, names)).toBe(true)
+  })
+
+  it('a recorded sample survives the round trip with its file', () => {
+    expect(SoundSource.RECORDED).toBe('rec')
+    expect(SoundSource.of('rec')).toBe(SoundSource.RECORDED)
+    const p = OfflinePads.put(OfflinePads.put(OfflinePads.EMPTY, snare), take)
+    // Still version 1; only the recorded entry has a file.
+    expect(OfflinePads.toJson(p)).toBe(
+      '{"v":1,"pads":[{"project":1,"group":1,"pad":2,"slot":7,"name":"snare","source":"device"},' +
+        '{"project":1,"group":0,"pad":5,"slot":0,"name":"mic 1007-142301","source":"rec","file":"rec-1.wav"}]}',
+    )
+    expect(OfflinePads.fromJson(OfflinePads.toJson(p))).toEqual(p)
+  })
+
+  it('a reader from before recorded samples skips them and keeps the rest', () => {
+    const p = OfflinePads.put(OfflinePads.put(OfflinePads.EMPTY, snare), take)
+    // To a reader from before, "rec" is a source it doesn't know, which it skips like any other.
+    expect(SoundSource.of('later')).toBeNull()
+    expect(OfflinePads.fromJson(OfflinePads.toJson(p).replace('"rec"', '"later"'))!.list).toEqual([snare])
+    // Text written before recorded samples still reads, every entry without a file.
+    const before = '{"v":1,"pads":[{"project":1,"group":1,"pad":2,"slot":7,"name":"snare","source":"device"}]}'
+    expect(OfflinePads.fromJson(before)!.list).toEqual([snare])
+    expect(OfflinePads.fromJson(before)!.list[0]!.file ?? null).toBeNull()
+  })
+
+  it('a recorded entry needs slot 0 and its file', () => {
+    const text = `{"v":1,"pads":[
+      {"project":1,"group":0,"pad":5,"slot":0,"name":"x","source":"rec"},
+      {"project":1,"group":0,"pad":5,"slot":0,"name":"x","source":"rec","file":7},
+      {"project":1,"group":0,"pad":5,"slot":3,"name":"x","source":"rec","file":"x.wav"},
+      {"project":1,"group":0,"pad":6,"slot":0,"name":"x","source":"device"},
+      {"project":1,"group":1,"pad":2,"slot":7,"name":"snare","source":"device","file":"stray.wav"},
+      {"project":1,"group":0,"pad":5,"slot":0,"name":"mic 1007-142301","source":"rec","file":"rec-1.wav"}
+    ]}`
+    // A file on another source's entry is ignored.
+    expect(OfflinePads.fromJson(text)!.list).toEqual([snare, take])
+  })
+
+  it("a recording replaces a pad's earlier change, and a pick replaces a recording", () => {
+    let p = OfflinePads.put(OfflinePads.put(OfflinePads.put(OfflinePads.EMPTY, kick), snare), take)
+    expect(p.list).toEqual([snare, take]) // kick was on the same pad
+    const hat: OfflinePad = { ...kick, slot: 200, name: 'hat', source: SoundSource.DEVICE }
+    p = OfflinePads.put(p, hat)
+    expect(p.list).toEqual([snare, hat])
+    expect(OfflinePads.at(p, 1, 0, 5)!.file ?? null).toBeNull()
+  })
+
+  it("a recorded sample fits on its own project, whatever the device's slots hold", () => {
+    expect(OfflinePads.fits(take, 1, new Map())).toBe(true)
+    expect(
+      OfflinePads.fits(
+        take,
+        1,
+        new Map([
+          [0, 'kick'],
+          [343, '343.pcm'],
+        ]),
+      ),
+    ).toBe(true)
+    expect(OfflinePads.fits(take, 2, new Map())).toBe(false)
+    expect(OfflinePads.fits(take, null, new Map())).toBe(false)
   })
 })

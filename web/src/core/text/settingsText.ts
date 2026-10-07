@@ -133,6 +133,10 @@ export const SettingsText = {
   DOESNT_FIT: 'Too wide for this window',
   HAPTICS: 'Haptics',
   HAPTICS_NOTE: 'A light tick when a pad or key goes down.',
+  /** SAMPLE's review sheet after each take (an addition: the EP-133 puts a take straight on its pad). */
+  REVIEW_SAMPLES: 'Review samples',
+  REVIEW_SAMPLES_NOTE:
+    'After each recording, trim and hear it before it goes on the pad. Off, it goes straight on, as on the EP-133.',
 
   SAVED_HERE: 'Saved on the phone',
   LEARNED_NAMES: 'Learned sample names',

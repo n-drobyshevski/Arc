@@ -7,6 +7,7 @@ import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.ProjectDiff
 import dev.arc.ep133.features.ProjectSource
 import dev.arc.ep133.features.ProjectState
+import dev.arc.ep133.features.SampleSource
 import dev.arc.ep133.features.Scale
 import dev.arc.ep133.features.SoundDiff
 import dev.arc.ep133.features.SoundState
@@ -170,5 +171,48 @@ class FeatureTextTest {
         assertEquals("Sound", MirrorText.FN_SOUND)
         assertEquals("Pad's sound", MirrorText.SOUND_SHEET)
         assertEquals("Click: tap; hold for tempo", CoachText.TEMPO)
+    }
+
+    @Test
+    fun `sample text`() {
+        val a7 = PhysicalPad(0, 9)
+        assertEquals("Sample", MirrorText.FN_SAMPLE)
+        assertEquals("LATCH", MirrorText.FN_SAMPLE_SUB.uppercase())
+        assertEquals(listOf("MIC", "RSP ST", "USB"), listOf(SampleSource.MIC to false, SampleSource.RSP to true, SampleSource.USB to false).map { (s, st) -> MirrorText.sourceShort(s, st).uppercase() })
+        assertEquals("Phone mic, mono", MirrorText.sourceName(SampleSource.MIC, false))
+        assertEquals("Resample the phone's sound, stereo", MirrorText.sourceName(SampleSource.RSP, true))
+        assertEquals("EP-133 over USB, mono", MirrorText.sourceName(SampleSource.USB, false))
+        // LEVEL is the pad sheet's knob word; SAMPLE's KNOB X reuses it.
+        assertEquals("Level", MirrorText.LEVEL)
+        assertEquals(listOf("+12 dB", "\u22126 dB", "0 dB"), listOf(12, -6, 0).map(MirrorText::gainReadout))
+        assertEquals(listOf("Off", "\u221224 dB", "0 dB"), listOf(null, -24, 0).map(MirrorText::thresholdReadout))
+        assertEquals(listOf("Free", "1 bar", "2 bars"), listOf(null, 1, 2).map(MirrorText::barsChoice))
+        assertEquals("Count-in 3", MirrorText.countIn(3))
+        assertEquals("0:04 / 0:20", MirrorText.sampleTime(4, 20))
+        assertEquals("0:39 / 0:40", MirrorText.sampleTime(39, 40))
+        assertEquals("Pad A 7: uploading, 40%", MirrorText.sampleUploading(a7, 40))
+        assertEquals("Disk low: room for 12 s", MirrorText.diskLow(12))
+        assertEquals("Recording hands-free. Tap to stop.", MirrorText.sampleKeyState(on = true, recording = true))
+        assertEquals("On. Tap to leave sample mode.", MirrorText.sampleKeyState(on = true, recording = false))
+        assertEquals("Off. Tap, then hold a pad to record into it.", MirrorText.sampleKeyState(on = false, recording = false))
+        assertEquals("Pad A 7, has a sound", MirrorText.padTitle(a7) + MirrorText.padSampleState(true))
+        assertEquals(", empty", MirrorText.padSampleState(false))
+        assertEquals("The input couldn't be opened: busy", MirrorText.inputFailed("busy"))
+        // The seconds are cut, not rounded, as the take's time is.
+        assertEquals("Pad A 7 \u00B7 0:04 \u00B7 RSP ST", MirrorText.reviewLine(a7, 4.7, SampleSource.RSP, true))
+        assertEquals("Pad A 7 \u00B7 1:05 \u00B7 MIC", MirrorText.reviewLine(a7, 65.0, SampleSource.MIC, false))
+        assertEquals("Slot 214, the next free one", MirrorText.slotLine(214, next = true))
+        assertEquals("Slot 300", MirrorText.slotLine(300, next = false))
+        assertEquals("Pad A 7: kept in arc. It goes on the EP-133 when you connect.", MirrorText.sampleQueued(a7))
+        assertEquals("Pad A 7: new sample on the EP-133.", MirrorText.sampleSaved(a7))
+        assertEquals("1 sample kept in Takes.", MirrorText.samplesToTakes(1))
+        assertEquals("3 samples kept in Takes.", MirrorText.samplesToTakes(3))
+        // The offline prompt counts recordings apart from pad changes.
+        assertEquals("Put 2 offline pad changes on the EP-133?", MirrorText.putOffline(2, samples = 0))
+        assertEquals("Put 1 new sample on the EP-133?", MirrorText.putOffline(0, samples = 1))
+        assertEquals("Put 1 offline pad change and 2 new samples on the EP-133?", MirrorText.putOffline(1, samples = 2))
+        assertEquals("Review samples", SettingsText.REVIEW_SAMPLES)
+        assertTrue(SettingsText.REVIEW_SAMPLES_NOTE.endsWith("as on the EP-133."))
+        assertEquals("Sample: tap, then hold a pad; hold + pad to latch", CoachText.SAMPLE)
     }
 }

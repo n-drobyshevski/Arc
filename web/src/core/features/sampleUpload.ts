@@ -129,7 +129,9 @@ export async function upload(session: Session, items: readonly UploadItem[], opt
  * Returns the slot it went into. The slots in use are listed on the device
  * first, besides [occupied] (the caller's own list, which can be stale): a
  * sound recorded on the EP-133 meanwhile, or an earlier upload whose
- * assignment failed, is never overwritten.
+ * assignment failed, is never overwritten. A given [slot] (SAMPLE's review
+ * picks one) is used only while that list still has it free; otherwise the
+ * upload fails with nothing written.
  */
 export async function uploadToPad(
   session: Session,
@@ -139,13 +141,20 @@ export async function uploadToPad(
   target: PadTarget,
   trim: TrimRange | null = null,
   opts: UploadOptions = {},
+  slot: number | null = null,
 ): Promise<number> {
   const used = new Set([...occupied, ...(await listSounds(session)).map((e) => e.slot)])
-  const slot = nextFree(used, new Set())
-  if (slot === null) throw new UploadError(MirrorText.NO_FREE_SLOT)
-  await upload(session, [UploadItem(slot, nameFor(fileName), wav, trim)], opts)
-  await assignPad(session, target.project, target.group, target.pad, slot)
-  return slot
+  if (slot !== null && used.has(slot)) throw new UploadError(slotTaken(slot))
+  const into = slot ?? nextFree(used, new Set())
+  if (into === null) throw new UploadError(MirrorText.NO_FREE_SLOT)
+  await upload(session, [UploadItem(into, nameFor(fileName), wav, trim)], opts)
+  await assignPad(session, target.project, target.group, target.pad, into)
+  return into
+}
+
+/** Why a picked slot can't be used: a sound went there after it was picked. */
+function slotTaken(slot: number): string {
+  return `Slot ${slot} has a sound now. Pick another slot.`
 }
 
 /** The Kotlin `object SampleUpload`. */

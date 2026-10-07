@@ -17,7 +17,8 @@
 // timeStamp / performance.now()), where the Kotlin uses nanoseconds;
 // @Synchronized is dropped (single-threaded JS); pads are keyed by
 // padKey() = group * 12 + offset; padSamples keys a pad by group * 100 +
-// its number where Kotlin uses a Pair, and distinct() compares the fields.
+// its number where Kotlin uses a Pair, and distinct() compares the fields;
+// PadSample's `file` is optional, absent being Kotlin's default null.
 
 import type { MidiEvent } from '../protocol/midiInput'
 import { pad as padOfNote, padKey, type PhysicalPad } from './padNotes'
@@ -41,12 +42,14 @@ export interface PadTarget {
 /**
  * The sound to play for a pad (an addition): its [slot] and [name], and
  * whether it is a factory sound put on the pad offline ([factory]), which
- * plays from the factory pack first.
+ * plays from the factory pack first. A sample recorded in arc and not on the
+ * device yet has slot 0 and plays from its [file] in arc's samples folder.
  */
 export interface PadSample {
   readonly slot: number
   readonly name: string
   readonly factory: boolean
+  readonly file?: string | null
 }
 
 /** A pad file id from a pad push: project 1..99, group 0..3 (A..D) and the pad's number in the project file (pNN). */
@@ -336,13 +339,14 @@ export class LiveMirror {
 
   /**
    * The slot on a physical pad in the active project: its offline change,
-   * else the project's pad layout at its number (numberOf).
+   * else the project's pad layout at its number (numberOf). None for a
+   * sample recorded in arc: it has no slot until it is uploaded.
    */
   slotOf(pad: { readonly group: number; readonly offset: number }): number | null {
     // The device moved to another project whose pads aren't read yet: no name rather than a wrong one.
     if (this.pushedProject != null && this.pushedProject !== this.activeProject) return null
     const local = this.localOf(pad)
-    if (local !== null) return local.slot
+    if (local !== null) return slotIn(local)
     const number = this.numberOf(pad)
     return number === null ? null : this.slotAt(pad.group, number)
   }
@@ -358,7 +362,7 @@ export class LiveMirror {
   /** The sound to play for [pad]: its offline change, else the read's slot and name; null when either is unknown. */
   sampleOf(pad: { readonly group: number; readonly offset: number }): PadSample | null {
     const local = this.localOf(pad)
-    if (local !== null) return { slot: local.slot, name: local.name, factory: local.source === SoundSource.FACTORY }
+    if (local !== null) return sampleIn(local)
     const slot = this.slotOf(pad)
     if (slot === null) return null
     const name = this.names.get(slot)
@@ -385,14 +389,14 @@ export class LiveMirror {
     }
     for (const p of this.local.list) {
       if (p.project === this.activeProject) {
-        byPad.set(p.group * 100 + p.pad, { slot: p.slot, name: p.name, factory: p.source === SoundSource.FACTORY })
+        byPad.set(p.group * 100 + p.pad, sampleIn(p))
       }
     }
     // distinct(): data class equality.
     const seen = new Set<string>()
     const out: PadSample[] = []
     for (const s of byPad.values()) {
-      const k = `${s.slot}:${s.factory}:${s.name}`
+      const k = JSON.stringify([s.slot, s.factory, s.file ?? null, s.name])
       if (seen.has(k)) continue
       seen.add(k)
       out.push(s)
@@ -425,8 +429,8 @@ export class LiveMirror {
 
   /**
    * Where [pad]'s sound is set in the active project, and the slot on it now,
-   * its offline change's if it has one (for the pad sheet's "now" line and
-   * for undo). Null while the active
+   * its offline change's if it has one (none for a sample recorded in arc;
+   * for the pad sheet's "now" line and for undo). Null while the active
    * project is unknown, the device moved to one not read yet, or the pad's
    * number isn't known (padNumber).
    */
@@ -436,7 +440,8 @@ export class LiveMirror {
     if (this.pushedProject != null && this.pushedProject !== project) return null
     const number = this.padNumber(pad)
     if (number === null) return null
-    const slot = OfflinePads.at(this.local, project, pad.group, number)?.slot ?? this.slotAt(pad.group, number)
+    const change = OfflinePads.at(this.local, project, pad.group, number)
+    const slot = change !== null ? slotIn(change) : this.slotAt(pad.group, number)
     return { project, group: pad.group, pad: number, slot }
   }
 
@@ -485,6 +490,17 @@ export class LiveMirror {
       lastNote: this.lastNote,
     }
   }
+}
+
+/** What an offline change plays: a recorded sample brings its file along. */
+function sampleIn(p: OfflinePad): PadSample {
+  const s = { slot: p.slot, name: p.name, factory: p.source === SoundSource.FACTORY }
+  return p.file != null ? { ...s, file: p.file } : s
+}
+
+/** An offline change's slot on the device; a recorded sample's slot 0 is a placeholder, not a slot. */
+function slotIn(p: OfflinePad): number | null {
+  return p.source === SoundSource.RECORDED ? null : p.slot
 }
 
 function sameFid(a: PadFid, b: PadFid): boolean {

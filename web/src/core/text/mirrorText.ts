@@ -2,7 +2,9 @@
 //
 // Text for the live mirror (an addition to the web version).
 //
-// Web delta: jsToFixed and String.format("%.0f") are native toFixed.
+// Web deltas:
+// - jsToFixed and String.format("%.0f") are native toFixed.
+// - The web has no REC, so only its takeLength is here, for SAMPLE's times.
 
 import { FactorySounds } from '../features/factorySounds'
 import { Keys, NoteNames, Scale } from '../features/keys'
@@ -11,6 +13,7 @@ import type { PlayMode } from '../features/padSettings'
 import { noteName, type PhysicalPad } from '../features/padNotes'
 import { KeyMark } from '../features/piano'
 import { ProjectSource } from '../features/projectStep'
+import { SampleSource } from '../features/sampleSource'
 import { FeatureText } from './featureText'
 import { plural } from './format'
 
@@ -544,9 +547,19 @@ export const MirrorText = {
   RESET_PADS: 'Reset pads',
   PADS_RESET: "Pads back to the EP-133's sounds.",
 
-  /** The question when the EP-133 connects with offline changes kept: [WRITE] or [DISCARD]. */
-  putOffline(n: number): string {
-    return `Put ${plural(n, 'offline pad change')} on the EP-133?`
+  /**
+   * The question when the EP-133 connects with offline changes kept: [WRITE] or [DISCARD].
+   * [n] counts the pad changes and [samples] the new recordings waiting to go on, so a
+   * prompt for recordings alone doesn't call them pad changes.
+   */
+  putOffline(n: number, samples: number = 0): string {
+    const what =
+      samples === 0
+        ? plural(n, 'offline pad change')
+        : n === 0
+          ? plural(samples, 'new sample')
+          : `${plural(n, 'offline pad change')} and ${plural(samples, 'new sample')}`
+    return `Put ${what} on the EP-133?`
   },
   WRITE: 'Write',
   DISCARD: 'Discard',
@@ -558,4 +571,163 @@ export const MirrorText = {
     )
   },
   OFFLINE_DISCARDED: 'Offline pad changes discarded.',
+
+  /** "0:12", "10:00". */
+  takeLength(seconds: number): string {
+    // Kotlin's toLong(): toward zero.
+    const s = Math.trunc(seconds)
+    return `${Math.trunc(s / 60)}:${String(s % 60).padStart(2, '0')}`
+  },
+
+  // ---------- SAMPLE: recording into a pad (an addition) ----------
+  /** The SAMPLE function key's two words. Held with a pad, it records hands-free, as SHIFT + pad does on the EP-133. */
+  FN_SAMPLE: 'Sample',
+  FN_SAMPLE_SUB: 'Latch',
+
+  /** The sources' words, upper-cased where shown, as the device prints them. */
+  MIC: 'Mic',
+  RSP: 'Rsp',
+  USB: 'Usb',
+  MONO: 'Mono',
+  STEREO: 'Stereo',
+
+  /** "Rsp St", the source chip (upper-cased where shown: "RSP ST"); mono has no mark, as on the device. */
+  sourceShort(s: SampleSource, stereo: boolean): string {
+    const word = s === SampleSource.MIC ? MirrorText.MIC : s === SampleSource.RSP ? MirrorText.RSP : MirrorText.USB
+    return word + (stereo ? ' St' : '')
+  },
+
+  /** The source spelt out for screen readers: "Phone mic, mono", "EP-133 over USB, stereo". */
+  sourceName(s: SampleSource, stereo: boolean): string {
+    const name = s === SampleSource.MIC ? 'Phone mic' : s === SampleSource.RSP ? "Resample the phone's sound" : 'EP-133 over USB'
+    return name + (stereo ? ', stereo' : ', mono')
+  },
+  /** The − and + either side of the source chip. */
+  PREV_SOURCE: 'Previous source',
+  NEXT_SOURCE: 'Next source',
+
+  // KNOB X is [LEVEL] (the input's gain) and KNOB Y the threshold, as on the device.
+  /** THRESHOLD under knob Y; [THRESHOLD_NAME] for screen readers, where the short word reads badly. */
+  THRESHOLD: 'Thresh',
+  THRESHOLD_NAME: 'Threshold',
+
+  /** "+12 dB", "−6 dB" or "0 dB": the input's gain under LEVEL. */
+  gainReadout(db: number): string {
+    return db > 0 ? `+${db} dB` : db < 0 ? `\u2212${-db} dB` : '0 dB'
+  },
+
+  /** "−24 dB", or "Off" with no threshold (recording starts at the press). */
+  thresholdReadout(db: number | null): string {
+    return db === null ? MirrorText.onOff(false) : MirrorText.gainReadout(db)
+  },
+
+  /** A take of a set length, in bars of the tempo: "Free" (until you let go), "1 bar", "2 bars". */
+  BARS: 'Bars',
+  barsChoice(n: number | null): string {
+    return n === null ? 'Free' : plural(n, 'bar')
+  },
+
+  /** The strip's switch for hands-free takes, for one hand or a screen reader (SAMPLE held does the same). */
+  LATCH: 'Latch',
+  LATCH_NOTE: 'Latch on: tap a pad to record hands-free. Tap SAMPLE to stop.',
+  MONITOR: 'Monitor',
+  MONITOR_NOTE: 'Plays the mic in your headphones while you sample.',
+  /** The meter, for screen readers, and its clip light. */
+  INPUT_LEVEL: 'Input level',
+  CLIPPING: 'Clipping',
+
+  // The orange display line in the mode: the tag, then what happens next.
+  SAMPLE_TAG: 'Sample',
+  SAMPLE_READY: 'Hold a pad to record',
+  SAMPLE_READY_LATCH: 'Tap a pad to record hands-free',
+  /** Armed with a threshold: the take starts with the first sound loud enough. */
+  SAMPLE_WAITING: 'Waiting for sound',
+  /** A take of set bars from USB while the EP-133 sends MIDI clock: it starts with the device's PLAY. */
+  WAITING_FOR_PLAY: 'Press PLAY on the EP-133',
+  countIn(beat: number): string {
+    return `Count-in ${beat}`
+  },
+
+  /** "0:04 / 0:20": the take so far, and the longest it can be. */
+  sampleTime(seconds: number, max: number): string {
+    return `${MirrorText.takeLength(seconds)} / ${MirrorText.takeLength(max)}`
+  },
+
+  /** "Pad A 7: uploading, 40%". */
+  sampleUploading(pad: PhysicalPad, percent: number): string {
+    return `${MirrorText.padTitle(pad)}: uploading, ${percent}%`
+  },
+
+  /** A full-length take won't fit in the EP-133's free space, so takes stop sooner. */
+  DISK_LOW: 'Disk low',
+  diskLow(seconds: number): string {
+    return `${MirrorText.DISK_LOW}: room for ${seconds} s`
+  },
+
+  /** SAMPLE for screen readers: what it is now and what a tap does. */
+  sampleKeyState(on: boolean, recording: boolean): string {
+    if (recording) return 'Recording hands-free. Tap to stop.'
+    if (on) return 'On. Tap to leave sample mode.'
+    return 'Off. Tap, then hold a pad to record into it.'
+  },
+
+  /** Added to a pad's name for screen readers in the mode: ", has a sound" or ", empty". */
+  padSampleState(filled: boolean): string {
+    return filled ? ', has a sound' : ', empty'
+  },
+  /** A pad's click in the mode for screen readers, which can't hold: a latched take, or its end. */
+  RECORD_HANDS_FREE: 'Record hands-free',
+  STOP_RECORDING: 'Stop recording',
+
+  /** A short tap on an empty pad in the mode. */
+  HOLD_TO_RECORD: 'Hold the pad to record. A tap plays a pad that has a sound.',
+  /** The mic permission was refused for good, with [MIC_SETTINGS] to open the app's settings. */
+  NO_MIC: 'arc needs the microphone to sample the mic or USB. RSP works without it.',
+  MIC_SETTINGS: 'Settings',
+  USB_EXPERIMENTAL: 'USB sampling is experimental. The EP-133 needs OS 2.5 and its sound going out over USB.',
+  USB_GONE: 'The USB input went away. What was recorded is kept.',
+  inputFailed(reason: string): string {
+    return `The input couldn't be opened: ${reason}`
+  },
+  /** Android silences the mic while another app (a call, say) records. */
+  MIC_BUSY: 'Another app is using the mic.',
+  /** On return, after the take stopped because arc left the screen. */
+  SAMPLE_BACKGROUND: 'Sampling stopped when arc left the screen. The recording is kept.',
+
+  // The review sheet after a take: trim and hear it, then KEEP, RETAKE or DISCARD (with UNDO).
+  REVIEW_TITLE: 'New sample',
+
+  /** "Pad A 7 · 0:04 · RSP ST", under the review sheet's title. */
+  reviewLine(pad: PhysicalPad, seconds: number, source: SampleSource, stereo: boolean): string {
+    return `${MirrorText.padTitle(pad)} \u00B7 ${MirrorText.takeLength(seconds)} \u00B7 ${MirrorText.sourceShort(source, stereo).toUpperCase()}`
+  },
+  NORMALIZE: 'Normalize',
+  NORMALIZE_NOTE: 'Raises the sample so its loudest point is at 0 dB.',
+  TRIM_SILENCE: 'Trim silence',
+  TRIM_SILENCE_NOTE: 'Starts the sample where the sound starts.',
+  RETAKE: 'Retake',
+  KEEP: 'Keep',
+
+  /** "Slot 214, the next free one": where KEEP puts the sample (− and + step over the free slots). */
+  slotLine(slot: number, next: boolean): string {
+    return `Slot ${slot}` + (next ? ', the next free one' : '')
+  },
+  /** Offline, the slot is picked on upload: the free ones aren't known until then. */
+  SLOT_WHEN_CONNECTED: 'Goes into the next free slot when the EP-133 connects.',
+
+  /** "Pad A 7: kept in arc. It goes on the EP-133 when you connect.", after KEEP offline. */
+  sampleQueued(pad: PhysicalPad): string {
+    return `${MirrorText.padTitle(pad)}: kept in arc. It goes on the EP-133 when you connect.`
+  },
+  /** "Pad A 7: new sample on the EP-133.", once the upload is done. */
+  sampleSaved(pad: PhysicalPad): string {
+    return `${MirrorText.padTitle(pad)}: new sample on the EP-133.`
+  },
+  SAMPLE_DISCARDED: 'Sample discarded.',
+  /** A take with no pad to go on (no project read yet): it isn't lost. */
+  KEPT_IN_TAKES: 'Kept in Takes: read a project on the EP-133 to put samples on pads.',
+  /** "2 samples kept in Takes.", after offline recordings were discarded or reset: never dropped. */
+  samplesToTakes(n: number): string {
+    return `${plural(n, 'sample')} kept in Takes.`
+  },
 } as const
