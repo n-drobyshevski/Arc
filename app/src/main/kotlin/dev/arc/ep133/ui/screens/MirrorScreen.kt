@@ -224,6 +224,8 @@ class KeysActions(
 class FunctionKeysUi(
     val project: ProjectKeyUi = ProjectKeyUi(),
     val onProject: () -> Unit = {},
+    /** PROJECT held: the project sheet. */
+    val onPickProject: () -> Unit = {},
     val clickOn: Boolean = false,
     val bpm: Int = Tempo.DEFAULT,
     val beats: StateFlow<Beat?>? = null,

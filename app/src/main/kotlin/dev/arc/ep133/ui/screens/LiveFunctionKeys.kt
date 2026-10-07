@@ -163,7 +163,7 @@ private fun FunctionKeys(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions,
     val c = LocalArcColors.current
     val ko = LocalHwColors.current.ko
     val project = fn.project
-    // PROJECT: steps to the next project; its light is on while the device switches.
+    // PROJECT: steps to the next project, held opens the project sheet; its light is on while the device switches.
     val projectState = MirrorText.projectKeyState(project.shown, project.source)
     FunctionKey(
         word = MirrorText.FN_PROJECT,
@@ -183,6 +183,8 @@ private fun FunctionKeys(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions,
         enabled = project.enabled,
         onClick = fn.onProject,
         clickLabel = MirrorText.PROJECT_NEXT,
+        onLongClick = fn.onPickProject,
+        longClickLabel = MirrorText.PICK_PROJECT,
         role = Role.Button,
         column = column,
         haptics = haptics,

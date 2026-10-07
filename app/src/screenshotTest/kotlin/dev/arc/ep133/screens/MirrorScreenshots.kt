@@ -61,7 +61,9 @@ import dev.arc.ep133.protocol.SoundEntry
 import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.ui.screens.MirrorScreen
 import dev.arc.ep133.ui.screens.FunctionKeysUi
+import dev.arc.ep133.ui.screens.ProjectSheetContent
 import dev.arc.ep133.ui.screens.TempoSheetContent
+import dev.arc.ep133.ui.screens.projectChoicesOf
 import dev.arc.ep133.ui.screens.projectKeyOf
 import dev.arc.ep133.ui.theme.ArcTheme
 
@@ -625,6 +627,30 @@ private fun TempoSheet(deviceBpm: Double?) {
         MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
         ArcSheet(visible = true, onDismiss = {}) {
             TempoSheetContent(bpm = 98, deviceBpm = deviceBpm, on = true, onOn = {}, onBpm = {}, onTap = {}, onDone = {})
+        }
+    }
+}
+
+// PROJECT held: projects 1 to 9 in the keypad's order, the one shown orange.
+@PreviewTest
+@Preview(name = "Project sheet", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun ProjectSheetPreview() = ProjectSheet(MirrorUi(lastRead, loading = false))
+
+// Offline with the factory pack: only the views arc has can be picked.
+@PreviewTest
+@Preview(name = "Project sheet offline", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun ProjectSheetOfflinePreview() = ProjectSheet(
+    MirrorUi(lastRead.copy(activeProject = 1), loading = false, offline = MirrorText.FACTORY, offlineProjects = listOf(1, 2, 3, 4, 5)),
+)
+
+@Composable
+private fun ProjectSheet(mirror: MirrorUi) {
+    Framed(Tab.LIVE) {
+        MirrorScreen(mirror = mirror, nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
+        ArcSheet(visible = true, onDismiss = {}) {
+            ProjectSheetContent(choices = projectChoicesOf(mirror, busy = false), onPick = {}, onDone = {})
         }
     }
 }

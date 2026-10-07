@@ -3,6 +3,7 @@ package dev.arc.ep133.ui.screens
 import dev.arc.ep133.controller.MirrorUi
 import dev.arc.ep133.features.ProjectSource
 import dev.arc.ep133.features.ProjectStep
+import dev.arc.ep133.protocol.Device
 import dev.arc.ep133.text.MirrorText
 
 /**
@@ -44,4 +45,21 @@ internal fun projectKeyOf(mirror: MirrorUi?, busy: Boolean): ProjectKeyUi = when
         enabled = !mirror.loading && (!busy || mirror.projectTarget != null),
         switching = mirror.projectTarget != null,
     )
+}
+
+/** A key of the project sheet: project [n], whether a pick goes there, and whether it is [shown] now. */
+data class ProjectChoice(val n: Int, val enabled: Boolean, val shown: Boolean)
+
+/**
+ * The project sheet's keys, 1 to 9, for [mirror] (PROJECT held): any
+ * project while a tap on PROJECT works when connected, only the views arc
+ * has offline (the last read's project and the factory pack's); the one
+ * shown is marked, and picking it does nothing.
+ */
+internal fun projectChoicesOf(mirror: MirrorUi?, busy: Boolean): List<ProjectChoice> {
+    val key = projectKeyOf(mirror, busy)
+    val views = mirror?.offlineProjects.takeIf { mirror?.offline != null }
+    return (1..Device.PROJECT_COUNT).map { n ->
+        ProjectChoice(n, enabled = key.enabled && n != key.shown && (views == null || n in views), shown = n == key.shown)
+    }
 }

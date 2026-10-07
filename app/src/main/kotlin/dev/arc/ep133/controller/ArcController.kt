@@ -1965,24 +1965,44 @@ class ArcController(
      */
     fun stepProject() {
         val mi = _state.value.mirror ?: return
-        if (mi.offline != null) return stepOfflineProject(mi)
+        if (mi.offline != null) {
+            val views = mi.offlineProjects
+            // A tap before the last one's view opened steps on from that one.
+            val cur = offlineProject?.takeIf { it in views } ?: mi.state.activeProject
+            dev.arc.ep133.features.ProjectStep.nextOffline(cur, views)?.let(::selectProject)
+            return
+        }
+        val m = mirror ?: return
+        selectProject(dev.arc.ep133.features.ProjectStep.next(projectTarget ?: m.snapshot(System.nanoTime()).activeProject))
+    }
+
+    /**
+     * PROJECT held, a project picked on its sheet: [n] (1..9) as [stepProject]
+     * would go there. Connected, the EP-133 switches to it (a pick while it
+     * switches moves the target); offline, Live shows that view, when it is
+     * one of [MirrorUi.offlineProjects]. Nothing for the project already
+     * shown, nor under the same conditions as a tap.
+     */
+    fun selectProject(n: Int) {
+        if (n !in 1..dev.arc.ep133.protocol.Device.PROJECT_COUNT) return
+        val mi = _state.value.mirror ?: return
+        if (mi.offline != null) {
+            // Offline: a view of what arc has (no device, nothing written).
+            val views = mi.offlineProjects
+            if (n !in views || n == (offlineProject?.takeIf { it in views } ?: mi.state.activeProject)) return
+            offlineProject = n
+            scope.launch { openOfflineMirror() }
+            return
+        }
         val s = session
         val m = mirror
         if (s == null || m == null || mirrorSession !== s || _state.value.device == null || mi.loading) return
-        // Another action holds the device (the key is greyed out); PROJECT's own switch takes more taps.
+        // Another action holds the device (the key is greyed out); PROJECT's own switch takes more.
         if (_state.value.busy && projectTarget == null) return
-        projectTarget = dev.arc.ep133.features.ProjectStep.next(projectTarget ?: m.snapshot(System.nanoTime()).activeProject)
+        if (projectTarget == null && n == m.snapshot(System.nanoTime()).activeProject) return
+        projectTarget = n
         showProjectTarget()
         if (projectJob?.isActive != true) projectJob = scope.launch { switchProjects() }
-    }
-
-    /** Offline: the next view, shown from what arc has (no device, nothing written). */
-    private fun stepOfflineProject(mi: MirrorUi) {
-        val views = mi.offlineProjects
-        // A tap before the last one's view opened steps on from that one.
-        val cur = offlineProject?.takeIf { it in views } ?: mi.state.activeProject
-        offlineProject = dev.arc.ep133.features.ProjectStep.nextOffline(cur, views) ?: return
-        scope.launch { openOfflineMirror() }
     }
 
     /**

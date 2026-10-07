@@ -134,7 +134,9 @@ describe('FeatureTextTest', () => {
     expect(MirrorText.offlineNote(MirrorText.lastSeen('5 Oct, 14:02'), 3)).toBe(MirrorText.OFFLINE_NOTE)
     // Web delta: no PROJECT key on the web.
     expect(MirrorText.LISTEN_ONLY.endsWith('another sound in EDIT.')).toBe(true)
-    expect(CoachText.PROJECT).toBe('Next project')
+    expect(CoachText.PROJECT).toBe('Next project: tap; hold to choose')
+    expect(MirrorText.projectChoice(3, true)).toBe('Project 3, shown')
+    expect(MirrorText.projectChoice(4, false)).toBe('Project 4')
     expect(CoachText.TEMPO).toBe('Click: tap; hold for tempo')
   })
 })

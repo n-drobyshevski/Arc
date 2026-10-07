@@ -98,6 +98,12 @@ export const MirrorText = {
     return MirrorText.project(n)
   },
   PROJECT_NEXT: 'Next project',
+  /** PROJECT held: the project sheet, its title, and each key there for screen readers. */
+  PICK_PROJECT: 'Choose a project',
+  PROJECT_TITLE: 'Project',
+  projectChoice(n: number, shown: boolean): string {
+    return MirrorText.project(n) + (shown ? ', shown' : '')
+  },
   /** Why PROJECT is greyed out. */
   PROJECT_UNAVAILABLE: 'Connect the EP-133 or get the factory sounds to change projects',
   /** A pad tapped in EDIT while the device switches projects. */

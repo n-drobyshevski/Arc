@@ -78,6 +78,10 @@ object MirrorText {
         else -> project(n)
     }
     const val PROJECT_NEXT = "Next project"
+    /** PROJECT held: the project sheet, its title, and each key there for screen readers. */
+    const val PICK_PROJECT = "Choose a project"
+    const val PROJECT_TITLE = "Project"
+    fun projectChoice(n: Int, shown: Boolean) = project(n) + if (shown) ", shown" else ""
     /** Why PROJECT is greyed out. */
     const val PROJECT_UNAVAILABLE = "Connect the EP-133 or get the factory sounds to change projects"
     /** A pad tapped in EDIT while the device switches projects. */

@@ -145,7 +145,9 @@ class FeatureTextTest {
         assertEquals(MirrorText.factoryNote(1), MirrorText.offlineNote(MirrorText.FACTORY))
         assertEquals(MirrorText.OFFLINE_NOTE, MirrorText.offlineNote(MirrorText.lastSeen("5 Oct, 14:02"), 3))
         assertTrue(MirrorText.LISTEN_ONLY.endsWith("in EDIT, or switch projects with PROJECT."))
-        assertEquals("Next project", CoachText.PROJECT)
+        assertEquals("Next project: tap; hold to choose", CoachText.PROJECT)
+        assertEquals("Project 3, shown", MirrorText.projectChoice(3, shown = true))
+        assertEquals("Project 4", MirrorText.projectChoice(4, shown = false))
         assertEquals("Click: tap; hold for tempo", CoachText.TEMPO)
     }
 }
