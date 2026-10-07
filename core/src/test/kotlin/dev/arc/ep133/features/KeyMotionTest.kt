@@ -55,6 +55,13 @@ class KeyMotionTest {
         assertTrue(KeyMotion.step(key, true, 0f))
         run(key, true, 30)
         assertEquals(1f, key.pos)
+        // A quick tap: at the bottom and let go inside its shortest stay. It still has to come back up.
+        val tap = KeyMotion.Key()
+        run(tap, true, 30)
+        assertEquals(1f, tap.pos)
+        assertTrue(KeyMotion.step(tap, false, 0f))
+        run(tap, false, 300)
+        assertEquals(0f, tap.pos)
         // At rest where it should be, a 0 ms frame is the end.
         assertFalse(KeyMotion.step(key, true, 0f))
         assertFalse(KeyMotion.step(KeyMotion.Key(), false, 0f))
