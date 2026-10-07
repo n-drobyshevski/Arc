@@ -16,6 +16,7 @@ version fixes bugs. The version itself is set in `version.properties`.
 - Live on Android plays pads with their settings: pitch, level, pan, trim, attack and release (10 ms a tick, a guess until checked on a device), ONESHOT playing to the end, KEY stacking a pad's voices, LEGATO carrying on from where the sound was, and a mute group cutting the others in it. Pads whose settings arc doesn't know yet play as before. The native engine and AudioTrack render the same samples, checked against the Kotlin mixer as before.
 
 ### Changed
+- New app icon: a cassette mid-backup, its take-up reel full and lit orange, on navy. On Android it is the launcher icon, the themed (Android 13+) icon and the transfer notification's icon; on the web the favicon, the install icons and a new opaque home-screen icon for iOS (`icons/apple-touch-icon.png`, which no longer gets black corners). `npm run gen:icons` in `web/` redraws the web icons from the same shapes.
 - Live on Android: the SOUND key replaces the **EDIT** tab on the left edge (GUIDE stays where it was); its coach mark moves onto the key. The web keeps its tab.
 - Live on Android: the KEYS key replaces the PADS / KEYS word wherever the function keys show (its LED lit in KEYS), and the PADS row under an upright phone's pads is gone, giving the pads its height; the short sideways piano keeps its turned word. The web is unchanged.
 - Live on Android now writes to the device when PROJECT is tapped, as well as in EDIT; Live tools' note on how Live reads the EP-133 says so.
