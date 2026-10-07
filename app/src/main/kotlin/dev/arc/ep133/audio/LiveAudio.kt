@@ -6,6 +6,8 @@ import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import dev.arc.ep133.features.Beat
+import dev.arc.ep133.features.BeatGrid
 import dev.arc.ep133.features.RecState
 import dev.arc.ep133.features.TakeRecorder
 import dev.arc.ep133.formats.VoiceMixer
@@ -61,6 +63,12 @@ import java.util.concurrent.Executors
  * [stopRecording], Live closing or [TakeRecorder.MAX_SECONDS]. [onTake] gets
  * the file (null when nothing was played or it couldn't be written), and
  * whether the limit stopped it, on the take's writer thread.
+ *
+ * The TEMPO key's click ([startClick]) is a stream of its own
+ * ([MetronomeOutput]), not a voice: REC never has it, and it carries on
+ * while the output reopens. It shares the output's audio focus ([FocusHold]):
+ * focus stays while it is on, and a call or another app taking focus stops
+ * it as it stops the voices.
  */
 class LiveAudio(
     context: Context,
@@ -79,7 +87,13 @@ class LiveAudio(
     private val oldFocus = focusRequest(oldAttributes)
     // The request for the open output's attributes; the one held is let go of as it was asked for.
     @Volatile private var focus = gameFocus
-    @Volatile private var focused: AudioFocusRequest? = null
+    // Whether focus is held, for the voices and the click together; it queues the asks and let-gos.
+    private val hold = FocusHold<AudioFocusRequest>(::ask, ::letGo)
+
+    // The click, and who is told when something other than [stopClick] stops it; under [clickLock].
+    private val clickLock = Any()
+    @Volatile private var click: MetronomeOutput? = null
+    private var clickStopped: (() -> Unit)? = null
 
     private val _keys = MutableStateFlow<Set<String>>(emptySet())
     /** The voices sounding (pad and key ids), for the rings. */
@@ -130,7 +144,7 @@ class LiveAudio(
     private fun focusRequest(attributes: AudioAttributes) = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
         .setAudioAttributes(attributes)
         // A call or another app taking the output over stops the sounds.
-        .setOnAudioFocusChangeListener { change -> if (change < 0) stopAll() }
+        .setOnAudioFocusChangeListener { change -> if (change < 0) focusLost(change) }
         .build()
 
     companion object {
@@ -206,7 +220,8 @@ class LiveAudio(
         _keys.value = emptySet()
         _rec.value = RecState.Idle
         _wireless.value = false
-        letGoOfFocus()
+        // The click keeps it while on; [stopClick] lets go of it then.
+        hold.idle()
     }
 
     /**
@@ -228,11 +243,7 @@ class LiveAudio(
         if (output == null && !openLate()) return false
         val o = output ?: return false
         if (!o.start(key, pcm, channels, sampleRate, semitones, pressedAt)) return false
-        if (focused == null) {
-            val f = focus
-            focused = f
-            focusThread.execute { audio.requestAudioFocus(f) }
-        }
+        hold.sound(focus)
         return true
     }
 
@@ -280,9 +291,77 @@ class LiveAudio(
     /** Where the output goes now, once it is open. */
     fun route(): AudioDeviceInfo? = output?.route
 
-    private fun letGoOfFocus() {
-        val f = focused ?: return
-        focused = null
+    /** Whether the click is on. */
+    val clicking: Boolean get() = click != null
+
+    /**
+     * Starts the click at [bpm], or on the EP-133's beats while [grid] gives
+     * them (asked before each burst with the time now; null: run free).
+     * [onBeat] gets each click when it is scheduled, with when it is heard,
+     * on the click's thread; [onStopped] is told when something other than
+     * [stopClick] stops it: focus taken, or the output failing. Already on,
+     * only [bpm] is taken. Needs no open output. False when there is no output.
+     */
+    fun startClick(bpm: Int, grid: (now: Long) -> BeatGrid? = { null }, onBeat: (Beat) -> Unit = {}, onStopped: () -> Unit = {}): Boolean {
+        synchronized(clickLock) {
+            click?.let {
+                it.bpm = bpm
+                return true
+            }
+            val c = MetronomeOutput.open(audio, attributes, bpm, grid, onBeat, ::clickEnded) ?: return false
+            click = c
+            clickStopped = onStopped
+            hold.clickOn(focus)
+        }
+        return true
+    }
+
+    /** The click's tempo, from the beat after the next; nothing while it is off. */
+    fun setClickTempo(bpm: Int) {
+        click?.bpm = bpm
+    }
+
+    /** Stops the click (onStopped isn't told). The focus goes once all is quiet, as after the voices. */
+    fun stopClick() {
+        stopClick(null)
+    }
+
+    /** Stops the click if it is [only] (any, when null); its onStopped is told unless [only] is null. */
+    private fun stopClick(only: MetronomeOutput?, tell: Boolean = only != null) {
+        val stopped = synchronized(clickLock) {
+            val c = click ?: return
+            if (only != null && c !== only) return
+            click = null
+            c.close()
+            hold.clickOff()
+            // No output to count the quiet: let go now.
+            if (output == null) hold.idle()
+            clickStopped.also { clickStopped = null }
+        }
+        if (tell) stopped?.invoke()
+    }
+
+    /** The click's output failed under it (on its thread). */
+    private fun clickEnded(c: MetronomeOutput) = stopClick(c)
+
+    /**
+     * Focus was taken ([change] < 0): the voices stop. A call or another
+     * app's sound ([AudioManager.AUDIOFOCUS_LOSS], [AudioManager.AUDIOFOCUS_LOSS_TRANSIENT])
+     * also stops the click and lets go, so the next sound asks again; a
+     * notification's ducking leaves the click on, as Android ducks it.
+     */
+    private fun focusLost(change: Int) {
+        stopAll()
+        if (change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK) return
+        click?.let { stopClick(it, tell = true) }
+        hold.lost()
+    }
+
+    private fun ask(f: AudioFocusRequest) {
+        focusThread.execute { audio.requestAudioFocus(f) }
+    }
+
+    private fun letGo(f: AudioFocusRequest) {
         focusThread.execute { audio.abandonAudioFocusRequest(f) }
     }
 
@@ -316,7 +395,6 @@ class LiveAudio(
         @Volatile var running = true
         private var take: Take? = null
         private var shown: Set<String> = emptySet()
-        private var quietSince = 0L
 
         override val recording: Boolean get() = take != null || armed != null
 
@@ -364,13 +442,8 @@ class LiveAudio(
                 shown = keys
                 if (running) _keys.value = keys
             }
-            // Quiet for two seconds: other apps may have the output back.
-            if (keys.isEmpty()) {
-                if (quietSince == 0L) quietSince = System.nanoTime()
-                if (focused != null && System.nanoTime() - quietSince > 2_000_000_000L) letGoOfFocus()
-            } else {
-                quietSince = 0L
-            }
+            // Quiet for two seconds, the click off: other apps may have the output back.
+            hold.quiet(keys.isEmpty(), System.nanoTime())
         }
 
         override fun routed(route: AudioDeviceInfo?) {

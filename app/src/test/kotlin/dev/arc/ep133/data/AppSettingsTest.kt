@@ -33,9 +33,23 @@ class AppSettingsTest {
             keysShowNames = false,
             pianoWhites = dev.arc.ep133.features.Piano.CHOICES.filterNotNull().first(),
             haptics = false,
+            liveTempo = 98,
         )
         val index = chosen.values().mapKeys { "app." + it.key }
         assertEquals(chosen, AppSettings().withIndex(index))
+    }
+
+    @Test
+    fun `the click's tempo starts at 120 and library json gives back only one arc offers`() {
+        assertEquals(120, AppSettings().liveTempo)
+        assertEquals("120", AppSettings().values()["liveTempo"])
+        assertEquals(98, AppSettings().withIndex(mapOf("app.liveTempo" to "98")).liveTempo)
+        assertEquals(240, AppSettings().withIndex(mapOf("app.liveTempo" to "240")).liveTempo)
+        // Out of 40..240, or not a number: left as it is.
+        assertEquals(98, AppSettings(liveTempo = 98).withIndex(mapOf("app.liveTempo" to "39")).liveTempo)
+        assertEquals(98, AppSettings(liveTempo = 98).withIndex(mapOf("app.liveTempo" to "241")).liveTempo)
+        assertEquals(98, AppSettings(liveTempo = 98).withIndex(mapOf("app.liveTempo" to "fast")).liveTempo)
+        assertEquals(98, AppSettings(liveTempo = 98).withIndex(emptyMap()).liveTempo)
     }
 
     @Test

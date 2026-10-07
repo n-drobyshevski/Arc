@@ -99,6 +99,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import dev.arc.ep133.controller.MirrorUi
+import dev.arc.ep133.features.FactorySounds
+import dev.arc.ep133.features.Beat
+import dev.arc.ep133.features.Tempo
 import dev.arc.ep133.features.MirrorState
 import dev.arc.ep133.features.PadLight
 import dev.arc.ep133.features.PadNotes
@@ -210,6 +213,27 @@ class KeysActions(
 )
 
 /**
+ * Live's function keys over the pads ([FunctionRow], [FunctionColumn]):
+ * PROJECT ([project], a tap [onProject] steps to the next one), KEYS (the
+ * mode, from [KeysUi]) and TEMPO, the phone's click: [clickOn] at the
+ * phone's tempo [bpm] (the EP-133's leads while it sends MIDI clock), a tap
+ * [onClick] turns it on or off and a hold [onTempo] opens the tempo sheet.
+ * [beats] blink TEMPO's light (the click's, or the EP-133's while it is off);
+ * null leaves it still.
+ */
+class FunctionKeysUi(
+    val project: ProjectKeyUi = ProjectKeyUi(),
+    val onProject: () -> Unit = {},
+    val clickOn: Boolean = false,
+    val bpm: Int = Tempo.DEFAULT,
+    val beats: StateFlow<Beat?>? = null,
+    val onClick: (Boolean) -> Unit = {},
+    val onTempo: () -> Unit = {},
+    /** For screenshots: TEMPO's light caught lit, on a beat. */
+    val beatLit: Boolean = false,
+)
+
+/**
  * EDIT, the left edge tab under GUIDE (Live's pads only): while [on], a tap on
  * a pad calls [onPad] (the pad sheet, to give it another sound), and a long
  * press still plays it. A null [onEdit] hides the tab.
@@ -246,7 +270,8 @@ class TakesUi(
 /**
  * A live mirror of the EP-133 (an addition to the web version): the four
  * groups' pads light as the device plays them, with the sample on each once
- * it is known, plus play state, tempo and KEYS notes. It only listens.
+ * it is known, plus play state, tempo and KEYS notes. It listens, and
+ * writes only when asked: a pad's sound in EDIT, the project on PROJECT.
  *
  * [nameOf] gives the sample on a pad (null while not known); [now] is the
  * System.nanoTime of this frame, for the fade.
@@ -316,6 +341,8 @@ fun MirrorScreen(
     haptics: Boolean = true,
     /** Live's sound goes to Bluetooth or a hearing aid ([LiveAudio.wireless]): the display line says it plays late. */
     wireless: Boolean = false,
+    /** PROJECT, KEYS and TEMPO over the pads (KEYS is the mode word's place, but on the short sideways piano). */
+    functions: FunctionKeysUi = FunctionKeysUi(),
 ) {
     val sounding = voices?.collectAsStateWithLifecycle()?.value
     val ringed = if (sounding == null) playingPads else remember(sounding) { LiveVoices.pads(sounding) }
@@ -363,7 +390,10 @@ fun MirrorScreen(
         val roomH = maxHeight - (if (inBar) 0.dp else DisplayLineHeight + 10.dp) - SidewaysBottom - ControlsRow
         // KEYS plays on the piano where it fits and the view switch (or, on Auto, a wide window)
         // says so. A portrait phone has no switch: there it is always the grid.
-        val fits = if (keys.on) pianoRange(keys.octave, roomW, if (window.short) roomH else minOf(roomH, PianoMaxTablet), keys.pianoWhites) else null
+        // Only the short sideways piano goes without the function keys; elsewhere their row is over it.
+        val pianoFunctions = !window.short
+        val pianoH = if (pianoFunctions) minOf(roomH - functionRowHeight() - 10.dp, PianoMaxTablet) else roomH
+        val fits = if (keys.on) pianoRange(keys.octave, roomW, pianoH, keys.pianoWhites) else null
         val view = if (sideways) keys.viewWide else keys.viewTall
         val piano = fits?.takeIf { Piano.showsPiano(view, sideways, window.width.value, room = true) }
         val viewSwitch = if (keys.on && Piano.switchShown(sideways, window.width.value)) {
@@ -375,10 +405,12 @@ fun MirrorScreen(
         // Four groups side by side while their pads keep 40 dp both ways (rows no taller than
         // square pads). Off the height: each group's caption (a 1.2 em line and its gap) and the
         // plate's three lines; off the width, the three gaps and each plate's two lines.
-        // On its side the PADS word is turned in a column left of the pads, not a row over them.
+        // On its side the function keys are a column left of the pads, not a row over them, and
+        // the height keeps that column's LED lines too (columnFit).
         val caption = with(LocalDensity.current) { ArcType.caps.fontSize.toDp() * 1.2f } + 8.dp
-        val padW = ((roomW - SideControls - SideControlsGap - 42.dp) / 4 - 2.dp) / 3
-        val allGroupsSideways = sideways && minOf((roomH + ControlsRow - caption - 3.dp) / 4, padW) >= 40.dp
+        val padW = ((roomW - SideFunctions - SideControlsGap - 42.dp) / 4 - 2.dp) / 3
+        val allGroupsSideways = sideways && minOf((roomH + ControlsRow - caption - 3.dp) / 4, padW) >= 40.dp &&
+            roomH + ControlsRow >= FunctionColumnLed
         SideZone(
             open = toolsOpen,
             onOpen = { toolsOpen = true },
@@ -426,10 +458,15 @@ fun MirrorScreen(
                         KeysDisplay(st, mirror, keysNow, rec, still = fixedNow != null, pianoRange = piano)
                         Spacer(Modifier.height(10.dp))
                     }
-                    // The row over the piano and the piano; upright (a tablet) they sit right
-                    // under the display line, as on the web.
+                    // A tablet's function keys, then the row over the piano and the piano; upright
+                    // they sit right under the display line, as on the web. The short sideways
+                    // piano keeps its mode word instead, for the keys' height.
+                    if (pianoFunctions) {
+                        FunctionRow(functions, keys, keysActions, st, haptics)
+                        Spacer(Modifier.height(10.dp))
+                    }
                     Column(Modifier.weight(1f, fill = false)) {
-                        ModeRow(keys, keysActions, landscape = true, viewSwitch = viewSwitch)
+                        ModeRow(keys, keysActions, landscape = true, viewSwitch = viewSwitch, mode = !pianoFunctions)
                         // The rest of the room; on a tablet no taller than a hand spans.
                         PianoKeyboard(
                             piano, st, keysNow, clock, keysActions,
@@ -445,18 +482,18 @@ fun MirrorScreen(
             } else if (sideways && !keys.on && oneGroup) {
                 val now = clock()
                 BoxWithConstraints(sidewaysColumn, contentAlignment = Alignment.TopCenter) {
-                    // The K.O. II's body as big as the room under the display line, the PADS word
-                    // turned on its left (the group keys are the body's own first column).
+                    // The K.O. II's body as big as the room under the display line, the function
+                    // keys a column on its left (the group keys are the body's own first column).
                     val gridH = maxHeight - (if (inBar) 0.dp else DisplayLineHeight + 10.dp)
-                    val k = KoGeom.fit(maxWidth - SideControls - SideControlsGap, gridH, 4)
+                    val k = KoGeom.fit(maxWidth - SideFunctions - SideControlsGap, gridH, 4)
                     val bodyW = k.u * (4 * 1.215f + 0.401f) + CapDx + 2.dp
-                    Column(Modifier.width(minOf(maxWidth, SideControls + SideControlsGap + bodyW)).fillMaxHeight()) {
+                    Column(Modifier.width(minOf(maxWidth, SideFunctions + SideControlsGap + bodyW)).fillMaxHeight()) {
                         if (!inBar) {
                             if (editing) EditLine() else DisplayStrip(st, mirror, rec, still = fixedNow != null, wireless = wireless)
                             Spacer(Modifier.height(10.dp))
                         }
                         Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(SideControlsGap)) {
-                            SidewaysPadsControls(keys, keysActions)
+                            FunctionColumn(functions, keys, keysActions, st, haptics)
                             Group(
                                 group, st, nameOf, now,
                                 Modifier.width(bodyW).fillMaxHeight().coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
@@ -480,10 +517,10 @@ fun MirrorScreen(
                         if (editing) EditLine() else DisplayStrip(st, mirror, rec, still = fixedNow != null, wireless = wireless)
                         Spacer(Modifier.height(10.dp))
                     }
-                    // The PADS word turned on the left, then all four in one row, filling the height:
+                    // The function keys on the left, then all four in one row, filling the height:
                     // nothing to scroll, so a press plays at once.
                     Row(Modifier.fillMaxWidth().weight(1f, fill = false), horizontalArrangement = Arrangement.spacedBy(SideControlsGap)) {
-                        SidewaysPadsControls(keys, keysActions)
+                        FunctionColumn(functions, keys, keysActions, st, haptics)
                         Row(
                             Modifier.weight(1f).heightIn(max = caption + 3.dp + padW * 4),
                             horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -513,14 +550,20 @@ fun MirrorScreen(
                             }
                         }
                         if (keys.on && sideways) {
-                            // On its side: the keys on the K.O. II's body as big as the room, the mode
-                            // word (turned) and the view switch on their left, the scale and the octave
+                            // On its side: the keys on the K.O. II's body as big as the room, the function
+                            // keys and the view switch (turned) on their left, the scale and the octave
                             // on their right.
                             if (!inBar) KeysDisplay(st, mirror, keysNow, rec, still = fixedNow != null)
                             BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
-                                val k = KoGeom.fit(maxWidth - SideLead - SidePicks - SideGap * 2, maxHeight, 3)
-                                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(SideGap, Alignment.CenterHorizontally)) {
-                                    SidewaysKeysLead(keys, keysActions, viewSwitch)
+                                val columns = SideFunctions + SidePicks + if (viewSwitch != null) SideLead else 0.dp
+                                val gaps = if (viewSwitch != null) 3 else 2
+                                val roomy = KoGeom.fit(maxWidth - columns - SideGap * gaps, maxHeight, 3)
+                                // Short of width (a narrow window), the columns close up before the keys' words clip.
+                                val gap = if (roomy.u < KeysTightU) SideGapTight else SideGap
+                                val k = KoGeom.fit(maxWidth - columns - gap * gaps, maxHeight, 3)
+                                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally)) {
+                                    FunctionColumn(functions, keys, keysActions, st, haptics)
+                                    if (viewSwitch != null) SidewaysKeysLead(viewSwitch)
                                     KeysGrid(
                                         st, keysNow, now, keysActions,
                                         Modifier.width(k.u * (3 * 1.215f + 0.401f) + CapDx + 2.dp).fillMaxHeight()
@@ -532,16 +575,18 @@ fun MirrorScreen(
                             }
                         } else if (keys.on) {
                             if (!inBar) KeysDisplay(st, mirror, keysNow, rec, still = fixedNow != null)
+                            FunctionRow(functions, keys, keysActions, st, haptics)
                             KeysGrid(
                                 st, keysNow, now, keysActions,
                                 Modifier.fillMaxWidth().weight(1f).coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
                                 haptics = haptics,
                             )
-                            ModeRow(keys, keysActions, viewSwitch = viewSwitch)
+                            ModeRow(keys, keysActions, viewSwitch = viewSwitch, mode = false)
                         } else {
                             if (!inBar) {
                                 if (editing) EditLine() else DisplayStrip(st, mirror, rec, still = fixedNow != null, wireless = wireless)
                             }
+                            FunctionRow(functions, keys, keysActions, st, haptics)
                             Group(
                                 group, st, nameOf, now,
                                 Modifier.fillMaxWidth().weight(1f).coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
@@ -554,7 +599,6 @@ fun MirrorScreen(
                                 onEdit = onEdit,
                                 haptics = haptics,
                             )
-                            ModeRow(keys, keysActions)
                             GroupKeys(group, st, now, onSelect = { group = it })
                         }
                     }
@@ -578,7 +622,7 @@ fun MirrorScreen(
                         if (!inBar) {
                             if (editing) EditLine() else Display(st, mirror, rec, still = fixedNow != null, compact = sideways, initialNoteOpen = initialNoteOpen, wireless = wireless, onGetFactory = onGetFactory)
                         }
-                        ModeRow(keys, keysActions)
+                        FunctionRow(functions, keys, keysActions, st, haptics)
                         BoxWithConstraints(Modifier.fillMaxWidth()) {
                             // Four groups in a row when there is room, two by two on a phone.
                             val perRow = if (maxWidth >= 640.dp) 4 else 2
@@ -902,7 +946,7 @@ private fun Display(
                 enter = androidx.compose.animation.expandVertically() + androidx.compose.animation.fadeIn(),
                 exit = androidx.compose.animation.shrinkVertically() + androidx.compose.animation.fadeOut(),
             ) {
-                Text(MirrorText.offlineNote(mirror.offline), style = ArcType.displayHint, color = c.displayDim)
+                Text(MirrorText.offlineNote(mirror.offline, st.activeProject ?: FactorySounds.PROJECT), style = ArcType.displayHint, color = c.displayDim)
             }
             // Never read: the factory sounds to get.
             getFactory != null -> Text(
@@ -1413,7 +1457,7 @@ private fun Notes(st: MirrorState, mirror: MirrorUi?, tapToPlay: Boolean = false
         // Pads that play on the phone mean keys that do too, and sideways they are a piano.
         if (tapToPlay && !sideways) Text(MirrorText.PIANO_HINT, style = ArcType.small, color = c.graphite)
         // Offline the display line says so too, with this note under a tap.
-        if (mirror?.offline != null) Text(MirrorText.offlineNote(mirror.offline), style = ArcType.small, color = c.graphite)
+        if (mirror?.offline != null) Text(MirrorText.offlineNote(mirror.offline, st.activeProject ?: FactorySounds.PROJECT), style = ArcType.small, color = c.graphite)
         if (learning) Text(MirrorText.LEARN_NOTE, style = ArcType.small, color = c.graphite)
         if (learning && !st.pushesSeen && st.learned.isEmpty() && st.lastHit?.pad != null && mirror?.loading == false) {
             Text(MirrorText.NO_PUSHES, style = ArcType.small, color = c.graphite)
@@ -1424,10 +1468,11 @@ private fun Notes(st: MirrorState, mirror: MirrorUi?, tapToPlay: Boolean = false
 }
 
 /**
- * The row right under the grid, as the PO app's DRUMS / KEYPAD: one word for
- * the mode that a tap switches (PADS ⇄ KEYS), and in KEYS the scale and the
- * octave, a tap on either of which lists the choices. [landscape]: the row
- * over the keys or pads on a phone on its side ([SidewaysRow]).
+ * The row right under the grid, as the PO app's DRUMS / KEYPAD: in KEYS the
+ * scale and the octave, a tap on either of which lists the choices, after
+ * the view switch where there is one. [mode]: one word for the mode first,
+ * which a tap switches (PADS ⇄ KEYS), where the function keys' KEYS isn't
+ * shown. [landscape]: the row over the piano ([SidewaysRow]).
  */
 @Composable
 private fun ModeRow(
@@ -1436,9 +1481,10 @@ private fun ModeRow(
     landscape: Boolean = false,
     /** KEYS' grid ⇄ piano switch, after the mode word; null where it isn't offered. */
     viewSwitch: ViewSwitch? = null,
+    mode: Boolean = true,
 ) {
     if (landscape) {
-        SidewaysRow(keys, actions, viewSwitch)
+        SidewaysRow(keys, actions, viewSwitch, mode)
         return
     }
     val c = LocalArcColors.current
@@ -1459,10 +1505,10 @@ private fun ModeRow(
     ) {
         if (viewSwitch != null) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(SwitchGap)) {
-                ModeWord(keys, actions, top = false)
+                if (mode) ModeWord(keys, actions, top = false)
                 KeysViewSwitch(viewSwitch)
             }
-        } else {
+        } else if (mode) {
             ModeWord(keys, actions, top = true)
         }
         if (keys.on) {
@@ -1508,14 +1554,13 @@ private fun ModeWord(keys: KeysUi, actions: KeysActions, top: Boolean, modifier:
 }
 
 /**
- * The mode row on a phone on its side, over the keys: the mode, the scale
- * and the key at the start, the octave between − and + at the end (PADS has
- * its word turned in a column left of the pads instead: [SidewaysPadsControls]).
- * Short of room (large text), the key word drops its KEY, then the scale
- * shortens to its code; − and + keep their size.
+ * The mode row over the piano: the mode ([mode]: not where the function
+ * keys' KEYS is over it), the scale and the key at the start, the octave
+ * between − and + at the end. Short of room (large text), the key word drops
+ * its KEY, then the scale shortens to its code; − and + keep their size.
  */
 @Composable
-private fun SidewaysRow(keys: KeysUi, actions: KeysActions, viewSwitch: ViewSwitch?) {
+private fun SidewaysRow(keys: KeysUi, actions: KeysActions, viewSwitch: ViewSwitch?, mode: Boolean) {
     val c = LocalArcColors.current
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val measurer = rememberTextMeasurer()
@@ -1528,20 +1573,20 @@ private fun SidewaysRow(keys: KeysUi, actions: KeysActions, viewSwitch: ViewSwit
         val scaleName = MirrorText.scaleName(keys.scale)
         // Everything but the scale and key words: the mode word and its mark, the octave
         // word between − and +, and the gaps (the one before − at its narrowest).
-        val fixed = width(MirrorText.MODE_KEYS) + 18.dp + width(MirrorText.octave(keys.octave) + pick) + StepWidth * 2 + WordGap * 3 +
+        val fixed = (if (mode) width(MirrorText.MODE_KEYS) + 18.dp + WordGap else 0.dp) + width(MirrorText.octave(keys.octave) + pick) + StepWidth * 2 + WordGap * 2 +
             // The view words: each its LED, the gap after it and its 2 dp either side.
-            (if (viewSwitch != null) SwitchGap + width(MirrorText.VIEW_PADS, viewStyle) + width(MirrorText.VIEW_PIANO, viewStyle) + (6.dp + 5.dp + 4.dp) * 2 + ViewWordGap else 0.dp)
+            (if (viewSwitch != null) (if (mode) SwitchGap else 0.dp) + width(MirrorText.VIEW_PADS, viewStyle) + width(MirrorText.VIEW_PIANO, viewStyle) + (6.dp + 5.dp + 4.dp) * 2 + ViewWordGap + (if (mode) 0.dp else WordGap) else 0.dp)
         val key = MirrorText.keyWord(keys.root, keys.names).takeIf {
             fixed + width(scaleName + pick) + width(it + pick) <= maxWidth
         } ?: Keys.name(keys.root, keys.names)
         val scale = scaleName.takeIf { fixed + width(it + pick) + width(key + pick) <= maxWidth } ?: MirrorText.scaleCode(keys.scale)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            ModeWord(keys, actions, top = false)
+            if (mode) ModeWord(keys, actions, top = false)
             if (viewSwitch != null) {
-                Spacer(Modifier.width(SwitchGap))
+                if (mode) Spacer(Modifier.width(SwitchGap))
                 KeysViewSwitch(viewSwitch)
             }
-            Spacer(Modifier.width(WordGap))
+            if (mode || viewSwitch != null) Spacer(Modifier.width(WordGap))
             PickWord(
                 label = scale,
                 options = Scale.entries,
@@ -1586,21 +1631,7 @@ private fun SidewaysRow(keys: KeysUi, actions: KeysActions, viewSwitch: ViewSwit
 /** The room between the words of the row over the keys. */
 private val WordGap = 24.dp
 
-/**
- * PADS on a phone on its side: the mode word turned a quarter turn, as the
- * edge tabs' words are, in a narrow column left of the pads (in the middle of
- * their height) rather than a row over them, so the pads get that height. The
- * view (all groups or one) is in the tools only.
- */
-@Composable
-private fun SidewaysPadsControls(keys: KeysUi, actions: KeysActions) {
-    Box(Modifier.width(SideControls).fillMaxHeight(), contentAlignment = Alignment.Center) {
-        ModeWord(keys, actions, top = false, Modifier.rotateVertical())
-    }
-}
-
-/** PADS' column on a phone on its side (the turned word's touch height), and the room between it and the pads. */
-private val SideControls = 44.dp
+/** The room between the function keys' column and the pads on a phone on its side. */
 private val SideControlsGap = 12.dp
 
 /** The KEYS view switch, [SwitchGap] after the mode word; its words' gap. */
@@ -1667,24 +1698,23 @@ private fun ViewWord(word: String, on: Boolean, enabled: Boolean, description: S
     }
 }
 
-/** The view words' print: 11 dp whatever the font size, as the words printed on the body are. */
+/** The view words' print: 11 dp ([size]) whatever the font size, as the words printed on the body are. */
 @Composable
-private fun viewWordStyle(): androidx.compose.ui.text.TextStyle =
-    ArcType.capsKeySmall.copy(fontSize = with(LocalDensity.current) { 11.dp.toSp() }, fontWeight = FontWeight.Bold, letterSpacing = 0.07.em)
+internal fun viewWordStyle(size: Dp = 11.dp, spacing: Float = 0.07f): androidx.compose.ui.text.TextStyle =
+    ArcType.capsKeySmall.copy(fontSize = with(LocalDensity.current) { size.toSp() }, fontWeight = FontWeight.Bold, letterSpacing = spacing.em)
 
 /**
- * KEYS' grid on a phone on its side: the mode word over the view words, all
- * turned, a column left of the keys.
+ * KEYS' grid on a phone on its side: the view words, turned, a column
+ * between the function keys and the keys.
  */
 @Composable
-private fun SidewaysKeysLead(keys: KeysUi, actions: KeysActions, viewSwitch: ViewSwitch?) {
+private fun SidewaysKeysLead(viewSwitch: ViewSwitch) {
     Column(
         Modifier.width(SideLead).fillMaxHeight(),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
     ) {
-        ModeWord(keys, actions, top = false, Modifier.rotateVertical())
-        if (viewSwitch != null) KeysViewSwitch(viewSwitch, vertical = true)
+        KeysViewSwitch(viewSwitch, vertical = true)
     }
 }
 
@@ -1725,10 +1755,14 @@ private fun SidewaysKeysPicks(keys: KeysUi, actions: KeysActions) {
     }
 }
 
-/** KEYS' columns either side of the grid on a phone on its side, and the room between them and it. */
+/** KEYS' columns either side of the grid on a phone on its side (the view words', the picks'), and the room between them and it. */
 private val SideLead = 44.dp
 private val SidePicks = 44.dp
 private val SideGap = 12.dp
+private val SideGapTight = 6.dp
+
+/** Under this pad width the keys' printed words and octave numbers start to clip. */
+private val KeysTightU = 38.dp
 
 /** − and + are this wide, however tight the row. */
 private val StepWidth = 48.dp

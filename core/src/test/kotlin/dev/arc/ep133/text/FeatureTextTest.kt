@@ -5,6 +5,7 @@ import dev.arc.ep133.features.KeyMark
 import dev.arc.ep133.features.NoteNames
 import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.ProjectDiff
+import dev.arc.ep133.features.ProjectSource
 import dev.arc.ep133.features.ProjectState
 import dev.arc.ep133.features.Scale
 import dev.arc.ep133.features.SoundDiff
@@ -121,5 +122,30 @@ class FeatureTextTest {
         assertEquals("Put 2 offline pad changes on the EP-133?", MirrorText.putOffline(2))
         assertEquals("2 pads put on the EP-133.", MirrorText.offlineWritten(2, 0))
         assertEquals("1 pad put on the EP-133. 1 skipped: the EP-133 has another sound or project there now.", MirrorText.offlineWritten(1, 1))
+    }
+
+    @Test
+    fun `function keys and offline notes`() {
+        assertEquals("1\u20139", MirrorText.FN_PROJECT_SUB)
+        assertEquals("Project 3", MirrorText.projectKeyState(3, ProjectSource.DEVICE))
+        assertEquals("Project 3", MirrorText.projectKeyState(3, ProjectSource.LAST_READ))
+        assertEquals("Factory project 3", MirrorText.projectKeyState(3, ProjectSource.FACTORY))
+        assertEquals("No project", MirrorText.projectKeyState(null, ProjectSource.DEVICE))
+        assertEquals("P3", MirrorText.projectShort(3))
+        assertEquals("The project couldn't be switched: timeout", MirrorText.projectFailed("timeout"))
+        assertEquals("On, 120 BPM", MirrorText.clickState(true, 120, following = false))
+        assertEquals("Off, 98 BPM, from the EP-133", MirrorText.clickState(false, 98, following = true))
+        assertEquals("120 BPM", MirrorText.tempoValue(120))
+        assertEquals("120", MirrorText.tempoShort(120))
+        assertEquals(
+            "Not connected: these are the EP-133's factory sounds, project 3 as it ships. Connect your EP-133 to see it live.",
+            MirrorText.offlineNote(MirrorText.FACTORY, 3),
+        )
+        // Project 1 unless PROJECT stepped on; a last read keeps its own note.
+        assertEquals(MirrorText.factoryNote(1), MirrorText.offlineNote(MirrorText.FACTORY))
+        assertEquals(MirrorText.OFFLINE_NOTE, MirrorText.offlineNote(MirrorText.lastSeen("5 Oct, 14:02"), 3))
+        assertTrue(MirrorText.LISTEN_ONLY.endsWith("in EDIT, or switch projects with PROJECT."))
+        assertEquals("Next project", CoachText.PROJECT)
+        assertEquals("Click: tap; hold for tempo", CoachText.TEMPO)
     }
 }

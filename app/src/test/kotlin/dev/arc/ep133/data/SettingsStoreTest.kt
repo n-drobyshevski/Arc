@@ -40,6 +40,22 @@ class SettingsStoreTest {
         assertEquals(mapOf("app.haptics" to "false"), store.toIndex())
     }
 
+    @Test
+    fun `the click's tempo is kept as a number once chosen, and read back clamped`() {
+        val prefs = MemoryPrefs()
+        val store = SettingsStore(prefs)
+        assertEquals(120, store.settings.value.liveTempo)
+        // The default isn't kept.
+        assertFalse(prefs.contains("liveTempo"))
+        store.update { it.copy(liveTempo = 98) }
+        assertEquals(98, prefs.getInt("liveTempo", 0))
+        assertEquals(98, SettingsStore(prefs).settings.value.liveTempo)
+        assertEquals(mapOf("app.liveTempo" to "98"), store.toIndex())
+        // A stored tempo out of range (an older or edited file) comes back clamped.
+        prefs.edit().putInt("liveTempo", 400).apply()
+        assertEquals(240, SettingsStore(prefs).settings.value.liveTempo)
+    }
+
     /** SharedPreferences in a map: enough for [SettingsStore]. */
     private class MemoryPrefs : SharedPreferences {
         val map = HashMap<String, Any?>()

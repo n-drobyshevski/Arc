@@ -4,7 +4,7 @@
 // own EP Sample Tool restores a device with, a .pak served beside the tool on
 // their site. arc keeps it as a library entry of its own [SOURCE] (never
 // pruned), so it is browsed, searched and restored like a backup, and Live
-// plays its [PROJECT] while no EP-133 has been read yet.
+// plays its projects ([PROJECT] first) while no EP-133 is connected.
 //
 // The pack's file name carries a build hash that changes when the tool is
 // rebuilt, so it is looked up in the tool's page and script ([locate]); the
@@ -37,7 +37,7 @@ export const KNOWN_SIZE = 27_375_018
 /** The library entry's file name. */
 export const FILE_NAME = 'ep-133-factory-content.pak'
 
-/** The project Live shows: the factory kit (drums on A, bass on B, keys on C). */
+/** The project Live shows first: the factory kit (drums on A, bass on B, keys on C). */
 export const PROJECT = 1
 
 const SCRIPT = /src="(\/apps\/ep-sample-tool\/assets\/[A-Za-z0-9_.-]+\.js)"/
@@ -77,15 +77,22 @@ export function isFactory(pak: Pak): boolean {
   return meta('pak_type') === 'factory' && meta('device_name') === 'EP-133' && pak.sounds.size > 0
 }
 
-/** What Live shows from the pack: [PROJECT]'s pads and every sound's name; null when it has none. */
-export function snapshot(pak: Pak, savedAt: number): LiveSnapshot | null {
-  const tar = pak.projects.get(PROJECT)
+/** What Live shows from the pack: [project]'s pads and every sound's name; null when it has none. */
+export function snapshot(pak: Pak, savedAt: number, project: number = PROJECT): LiveSnapshot | null {
+  const tar = pak.projects.get(project)
   if (tar === undefined) return null
   const groups = readPads(tar)
   if (groups.length === 0) return null
   const names = new Map<number, string>()
   for (const [slot, s] of pak.sounds) names.set(slot, s.name)
-  return { savedAt, activeProject: PROJECT, groups, names }
+  return { savedAt, activeProject: project, groups, names }
+}
+
+/** The pack's projects with pads (the ones [snapshot] shows), in order: PROJECT steps through them offline. */
+export function projects(pak: Pak): number[] {
+  const out: number[] = []
+  for (const [n, tar] of pak.projects) if (readPads(tar).length > 0) out.push(n)
+  return out.sort((a, b) => a - b)
 }
 
 /**
@@ -122,6 +129,7 @@ export const FactorySounds = {
   locate,
   isFactory,
   snapshot,
+  projects,
   unnamed,
   inLibrary,
 } as const

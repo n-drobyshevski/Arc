@@ -14,6 +14,7 @@ import { writeZip, type ZipEntry } from '../formats/zip'
 import { checkAbort } from '../protocol/cancel'
 import {
   MAX_SAMPLE_RATE,
+  PROJECT_COUNT,
   PROJECTS_NODE,
   getStorage,
   listProjects,
@@ -128,7 +129,7 @@ export async function backupDevice(session: Session, opts: BackupOptions = {}): 
   // Some firmware lists no projects; then try the first nine directly and
   // keep whatever downloads.
   const probing = projects.length === 0
-  if (probing) projects = Array.from({ length: 9 }, (_, i) => ({ project: i + 1, node: projectNode(i + 1), name: '', size: 0 }))
+  if (probing) projects = Array.from({ length: PROJECT_COUNT }, (_, i) => ({ project: i + 1, node: projectNode(i + 1), name: '', size: 0 }))
 
   const totalWeight =
     sounds.reduce((n, s) => n + Math.max(s.size, 1024), 0) + projects.length * PROJECT_WEIGHT || 1

@@ -30,8 +30,6 @@ import dev.arc.ep133.midi.MidiConnector
 import dev.arc.ep133.protocol.CancelSignal
 import dev.arc.ep133.protocol.CancelledError
 import dev.arc.ep133.protocol.Device
-import dev.arc.ep133.protocol.Fs
-import dev.arc.ep133.formats.asObject
 import dev.arc.ep133.protocol.DeviceInfo
 import dev.arc.ep133.protocol.LoggingTransport
 import dev.arc.ep133.protocol.Session
@@ -57,6 +55,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -129,7 +128,21 @@ data class MirrorUi(
     val sounds: List<dev.arc.ep133.protocol.SoundEntry> = emptyList(),
     /** Offline: the sounds EDIT's pad sheet lists instead, played and put on pads in arc only. */
     val offlineSounds: OfflineSounds? = null,
+    /**
+     * Connected, PROJECT tapped: the project the EP-133 is switching to, the
+     * newest tap's, until the read of it lands (null otherwise). The display
+     * and the key show it meanwhile, and EDIT waits.
+     */
+    val projectTarget: Int? = null,
+    /**
+     * Offline: the projects PROJECT steps through (ProjectStep.offlineViews),
+     * the last read's and the factory pack's. Fewer than two grey it out.
+     */
+    val offlineProjects: List<Int> = emptyList(),
 )
+
+/** Live's click (TEMPO): whether it sounds, and the phone's tempo (the EP-133's leads while it sends MIDI clock). */
+data class MetronomeUi(val on: Boolean = false, val bpm: Int = dev.arc.ep133.features.Tempo.DEFAULT)
 
 /**
  * The sound lists Live offers offline (an addition): the device's sounds as
@@ -210,6 +223,9 @@ private const val LATE_LOAD_NS = 120_000_000L
 /** How often an idle mirror with a tempo showing looks whether it went stale. */
 private const val TEMPO_CHECK_MS = 250L
 
+/** How long the click's tempo rests before library.json gets it. */
+private const val TEMPO_SYNC_MS = 1000L
+
 /**
  * How long an idle mirror showing [st] may sleep before [st] changes by
  * itself at [now]: when its first released pad or note is past its fade, or
@@ -238,18 +254,38 @@ internal fun shownMirror(shown: dev.arc.ep133.features.MirrorState?, next: dev.a
 }
 
 /**
+ * PROJECT's switch loop: [pass] for [target]'s project, again while taps
+ * moved the target on meanwhile, until a pass ends with the target where it
+ * began. A tap at any point of a pass, its last read too, gets a pass of
+ * its own, so taps pile up and the newest is written. A null pass (cut
+ * short by a tap, or the mirror closed or reopened meanwhile) is looked at
+ * again. Null once the target is gone; else the last pass's result.
+ */
+internal suspend fun <R : Any> passOnNewest(target: () -> Int?, pass: suspend (want: Int) -> R?): R? {
+    while (true) {
+        val want = target() ?: return null
+        val r = pass(want) ?: continue
+        if (target() == want) return r
+    }
+}
+
+/**
  * The lists Live offers offline: the device's sounds from [lastRead] and the
- * factory pack's from [factory] (its first project as Live shows it), by
- * slot, sizes unknown; [unavailable] from [dev.arc.ep133.features.PadSounds.unavailable].
+ * factory pack's from [factory] (any of its projects: each has every sound's
+ * name), by slot, sizes unknown; [unavailable] from
+ * [dev.arc.ep133.features.PadSounds.unavailable]. [base] is the view's own
+ * list: the device's for the last read, the factory pack's for one of its
+ * projects (PROJECT steps between them).
  */
 internal fun offlineSoundsOf(
     lastRead: dev.arc.ep133.features.LiveSnapshot?,
     factory: dev.arc.ep133.features.LiveSnapshot?,
     unavailable: Set<Int>,
+    base: SoundSource = if (lastRead != null) SoundSource.DEVICE else SoundSource.FACTORY,
 ): OfflineSounds {
     fun list(names: Map<Int, String>) = names.entries.sortedBy { it.key }.map { dev.arc.ep133.protocol.SoundEntry(it.key, it.value, 0) }
     return OfflineSounds(
-        base = if (lastRead != null) SoundSource.DEVICE else SoundSource.FACTORY,
+        base = base,
         device = lastRead?.let { list(it.names) },
         factory = factory?.let { list(it.names) },
         unavailable = unavailable,
@@ -348,8 +384,29 @@ class ArcController(
     private var backupNames: List<dev.arc.ep133.features.NameEntry> = emptyList()
     /** The last backup a pad played from, opened, so the next taps are quick. */
     private var openPak: Pair<String, dev.arc.ep133.backup.Pak>? = null
-    /** The factory sounds' first project as Live shows it, by the library entry it came from. */
-    private var factorySnap: Pair<String, dev.arc.ep133.features.LiveSnapshot?>? = null
+    /** The factory sounds' projects with pads as Live shows them, by number, by the library entry they came from. */
+    private var factorySnaps: Pair<String, Map<Int, dev.arc.ep133.features.LiveSnapshot>>? = null
+    // PROJECT, connected: the project the newest tap asked for, until the device's read of it lands,
+    // and the one worker writing it (taps meanwhile only move the target). Main thread only.
+    private var projectTarget: Int? = null
+    private var projectJob: Job? = null
+    // PROJECT, offline: the view stepped to (null: the last read, else the pack's first project).
+    // In memory only, and forgotten after a good read of the device.
+    private var offlineProject: Int? = null
+    // TEMPO: the device's MIDI clock, followed while Live listens to it (null offline). Fed on the
+    // listening thread, asked by the click's.
+    @Volatile
+    private var clockFollow: dev.arc.ep133.features.ClockFollow? = null
+    private val tapTempo = dev.arc.ep133.features.TapTempo()
+    private val clickOn = MutableStateFlow(false)
+    private val _beats = MutableStateFlow<dev.arc.ep133.features.Beat?>(null)
+    /**
+     * Each beat for TEMPO's light, with when it is heard ([dev.arc.ep133.features.Beat.at]):
+     * the click's while it sounds, else the EP-133's from its clock.
+     */
+    val beats: StateFlow<dev.arc.ep133.features.Beat?> = _beats.asStateFlow()
+    // −/+ and tap tempo change the tempo many times a second: library.json is written once it rests.
+    private var tempoSync: Job? = null
     /** Live's own low-latency output, open while Live is on screen. */
     private val liveAudio = dev.arc.ep133.audio.LiveAudio(context, ::liveStarted, ::takeDone, ::liveOutput)
     /** The Live voices sounding on the phone ("live:<group>:<offset>" pads, "note:<midi>" keys), for the rings. */
@@ -394,6 +451,11 @@ class ArcController(
     private val settingsStore = dev.arc.ep133.data.SettingsStore(context)
     val settings: StateFlow<dev.arc.ep133.data.AppSettings> = settingsStore.settings
 
+    /** Live's click: on or off (never kept), and the phone's tempo ([dev.arc.ep133.data.AppSettings.liveTempo]). */
+    val metronome: StateFlow<MetronomeUi> =
+        combine(clickOn, settings) { on, s -> MetronomeUi(on, s.liveTempo) }
+            .stateIn(scope, kotlinx.coroutines.flow.SharingStarted.Eagerly, MetronomeUi(false, settings.value.liveTempo))
+
     @Volatile
     private var session: Session? = null
     private var openDeviceId: Int? = null
@@ -430,6 +492,8 @@ class ArcController(
         // The debug screen's engine choice, from the next time Live opens its output.
         liveAudio.engine = settingsStore.settings.value.liveEngine
         scope.launch { liveAudio.engineInfo.collect { info -> info?.let(latencyTest::opened) } }
+        // The click follows the tempo, also one library.json gives back (nothing while it is off).
+        scope.launch { settings.collect { liveAudio.setClickTempo(it.liveTempo) } }
         scope.launch { loadTakes() }
         _state.update { it.copy(keysPad = savedKeysPad()) }
         scope.launch {
@@ -985,8 +1049,9 @@ class ArcController(
 
     /**
      * Starts the live mirror: reads the sound names, the active project and
-     * its pads (the reads the browser already makes), then only listens to
-     * MIDI and pad pushes. Nothing is sent while it runs.
+     * its pads (the reads the browser already makes), then listens to MIDI
+     * and pad pushes. It writes only when asked: a pad's sound in EDIT, and
+     * the active project when PROJECT is tapped ([stepProject]).
      */
     fun openMirror(): Job = scope.launch {
         // Already running for this connection (opened twice): keep it.
@@ -1006,6 +1071,8 @@ class ArcController(
         )
         mirror = m
         mirrorSession = s
+        val follow = dev.arc.ep133.features.ClockFollow()
+        clockFollow = follow
         _state.update { it.copy(mirror = MirrorUi(m.snapshot(System.nanoTime()), loading = true)) }
         // Listen first, so nothing played while reading is missed. Each change marks the
         // mirror dirty and wakes the publishing loop below.
@@ -1014,6 +1081,8 @@ class ArcController(
         val listen = scope.launch(Dispatchers.Default) {
             events.collect {
                 m.onMidi(it)
+                // TEMPO's light: the device's beats while the click is off (on, the click's light it, as heard).
+                follow.onMidi(it)?.let { b -> if (!liveAudio.clicking) _beats.value = b }
                 dirty.set(true)
                 news.trySend(Unit)
             }
@@ -1057,8 +1126,7 @@ class ArcController(
             ok = exclusive("mirror", quiet = tries > 1) { ss ->
                 val c = DeviceBrowser.contents(ss)
                 setLiveSounds(m, c.sounds)
-                val active = runCatching { Fs.getMetadata(ss, Device.PROJECTS_NODE).asObject()["active"] }.getOrNull()
-                val project = (active as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDoubleOrNull()?.toInt()?.let(Device::projectFromNode)
+                val project = runCatching { Device.activeProject(ss) }.getOrNull()
                 val groups = project?.let { p -> runCatching { DeviceBrowser.projectLayout(ss, p).pads }.getOrNull() } ?: emptyList()
                 m.setProject(project, groups)
                 true
@@ -1068,6 +1136,8 @@ class ArcController(
             dirty.set(true)
             news.trySend(Unit)
             if (ok == true) {
+                // Offline next time starts again from the last read.
+                offlineProject = null
                 offerOfflinePads(s)
                 saveLastRead(m)
                 preloadPads(m)
@@ -1080,15 +1150,24 @@ class ArcController(
 
     /**
      * Live without the device: the pads and sample names of the last read,
-     * marked offline. Nothing lights, as nothing is listened to.
+     * marked offline, or of a factory project (never read, or PROJECT
+     * stepped to it: [offlineProject]). Nothing lights, as nothing is
+     * listened to.
      */
     private suspend fun openOfflineMirror() {
         stopMirror()
         val gen = mirrorGen
         val lastRead = loadLastRead()
-        // Never read: the factory sounds, if the library has them.
-        val snap = lastRead ?: factorySnapshot()
+        val factory = factorySnapshots()
         if (gen != mirrorGen) return
+        val views = dev.arc.ep133.features.ProjectStep.offlineViews(lastRead?.activeProject, factory.keys)
+        // The view PROJECT stepped to; else the last read; never read, the factory sounds' first project.
+        val snap = when (val n = offlineProject?.takeIf { it in views }) {
+            null -> lastRead ?: factory[FactorySounds.PROJECT] ?: factory.values.firstOrNull()
+            lastRead?.activeProject -> lastRead
+            else -> factory[n]
+        }
+        val fromRead = snap != null && snap === lastRead
         if (snap == null || session != null && _state.value.device != null) {
             if (snap == null) _state.update { it.copy(mirror = notConnectedMirror()) }
             return
@@ -1102,44 +1181,51 @@ class ArcController(
         m.load(snap)
         // The pads changed offline show and play their new sounds; the lists for EDIT's pad sheet.
         m.setLocal(loadOfflinePads())
-        val sounds = offlineSounds(lastRead)
+        val sounds = offlineSounds(lastRead, if (fromRead) SoundSource.DEVICE else SoundSource.FACTORY)
         if (gen != mirrorGen || session != null && _state.value.device != null) return
         mirror = m
         preloadPads(m)
-        val offline = if (lastRead != null) dev.arc.ep133.text.MirrorText.lastSeen(fmtDateTime(lastRead.savedAt)) else dev.arc.ep133.text.MirrorText.FACTORY
-        _state.update { it.copy(mirror = MirrorUi(m.snapshot(System.nanoTime()), loading = false, offline = offline, offlineSounds = sounds)) }
+        // Every factory project's line is FACTORY (refreshOffline goes by it); offlineNote names the project.
+        val offline = lastRead?.takeIf { fromRead }?.let { dev.arc.ep133.text.MirrorText.lastSeen(fmtDateTime(it.savedAt)) } ?: dev.arc.ep133.text.MirrorText.FACTORY
+        _state.update {
+            it.copy(mirror = MirrorUi(m.snapshot(System.nanoTime()), loading = false, offline = offline, offlineSounds = sounds, offlineProjects = views))
+        }
     }
 
     /**
      * The lists Live offers offline ([OfflineSounds]): the device's sounds
      * from [lastRead], dimmed where arc has neither a copy, a backup nor the
-     * factory pack's sound, and the factory pack's.
+     * factory pack's sound, and the factory pack's; [base] the view's own.
      */
-    private suspend fun offlineSounds(lastRead: dev.arc.ep133.features.LiveSnapshot?): OfflineSounds {
-        val factory = factorySnapshot()
+    private suspend fun offlineSounds(lastRead: dev.arc.ep133.features.LiveSnapshot?, base: SoundSource): OfflineSounds {
+        val factory = factorySnapshots().values.firstOrNull()
         val unavailable = lastRead?.let { r ->
             val copies = withContext(Dispatchers.IO) { runCatching { padSounds.copies() }.getOrDefault(emptyMap()) }
             val packSaved = FactorySounds.inLibrary(_state.value.backups) != null
             withContext(Dispatchers.Default) { dev.arc.ep133.features.PadSounds.unavailable(r.names, copies, backupNames, packSaved) }
         }
-        return offlineSoundsOf(lastRead, factory, unavailable.orEmpty())
+        return offlineSoundsOf(lastRead, factory, unavailable.orEmpty(), base)
     }
 
     /**
-     * What Live shows while no EP-133 has been read: the factory sounds' first
-     * project, when the library has them (FactorySounds); else null.
+     * What Live can show from the factory sounds while no EP-133 is
+     * connected: each of their projects with pads, by number, in order;
+     * none when the library doesn't have them (FactorySounds).
      */
-    private suspend fun factorySnapshot(): dev.arc.ep133.features.LiveSnapshot? {
-        val b = FactorySounds.inLibrary(_state.value.backups) ?: return null
-        factorySnap?.takeIf { it.first == b.id }?.let { return it.second }
-        val snap = try {
-            FactorySounds.snapshot(pakOf(b.id), b.createdAt)
+    private suspend fun factorySnapshots(): Map<Int, dev.arc.ep133.features.LiveSnapshot> {
+        val b = FactorySounds.inLibrary(_state.value.backups) ?: return emptyMap()
+        factorySnaps?.takeIf { it.first == b.id }?.let { return it.second }
+        val snaps = try {
+            val pak = pakOf(b.id)
+            withContext(Dispatchers.Default) {
+                FactorySounds.projects(pak).mapNotNull { p -> FactorySounds.snapshot(pak, b.createdAt, p)?.let { p to it } }.toMap()
+            }
         } catch (e: Exception) {
             if (e is kotlinx.coroutines.CancellationException) throw e
-            null
+            emptyMap()
         }
-        factorySnap = b.id to snap
-        return snap
+        factorySnaps = b.id to snaps
+        return snaps
     }
 
     /**
@@ -1161,8 +1247,13 @@ class ArcController(
         if (mirrorSession != null || mi.offlineSounds == null) return
         val gen = mirrorGen
         scope.launch {
-            val sounds = offlineSounds(loadLastRead())
-            if (gen == mirrorGen && mirror === m) _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(offlineSounds = sounds)) } ?: cur }
+            val lastRead = loadLastRead()
+            val sounds = offlineSounds(lastRead, mi.offlineSounds.base)
+            // The pack saved or deleted under the last read: PROJECT gets its projects, or greys out.
+            val views = dev.arc.ep133.features.ProjectStep.offlineViews(lastRead?.activeProject, factorySnapshots().keys)
+            if (gen == mirrorGen && mirror === m) {
+                _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(offlineSounds = sounds, offlineProjects = views)) } ?: cur }
+            }
         }
     }
 
@@ -1362,8 +1453,11 @@ class ArcController(
         }
     }
 
-    /** Closes it (Live left the screen). */
+    /** Closes it (Live left the screen), and the click with it. */
     fun closeLiveAudio() {
+        // LiveAudio.close leaves the click on (the debug engine switch closes and opens again).
+        setClick(false)
+        tapTempo.reset()
         held.clear()
         cut.clear()
         unsure.clear()
@@ -1374,6 +1468,54 @@ class ArcController(
             player.volume.stop()
         }
     }
+
+    // ---------- TEMPO: a click on the phone (an addition) ----------
+
+    /**
+     * TEMPO's tap: the click on or off. On, it plays at the phone's tempo,
+     * or on the EP-133's beats while it sends MIDI clock ([clockFollow]); its
+     * own output, so REC leaves it out. Focus taken (a call) or the output
+     * failing turns it off. No output: a toast, and it stays off.
+     */
+    fun setClick(on: Boolean) {
+        if (!on) {
+            liveAudio.stopClick()
+            clickOn.value = false
+            return
+        }
+        if (liveAudio.clicking) return
+        // On first: a click that dies at once (a dead track) runs onStopped from its own
+        // thread, maybe before startClick has returned, and that "off" must stand.
+        clickOn.value = true
+        val started = liveAudio.startClick(
+            settings.value.liveTempo,
+            grid = { now -> clockFollow?.grid(now) },
+            onBeat = { _beats.value = it },
+            onStopped = { clickOn.value = false },
+        )
+        if (!started) {
+            clickOn.value = false
+            toast(FeatureText.NO_AUDIO_OUTPUT, error = true)
+        }
+    }
+
+    /** The phone's tempo, clamped to Tempo.MIN..MAX and kept; a click on takes it from the beat after the next. */
+    fun setTempo(bpm: Int) {
+        settingsStore.update { it.copy(liveTempo = dev.arc.ep133.features.Tempo.clamp(bpm)) }
+        // Not changeSettings: library.json is written once the tempo rests.
+        tempoSync?.cancel()
+        tempoSync = scope.launch {
+            delay(TEMPO_SYNC_MS)
+            withContext(kotlinx.coroutines.NonCancellable) { library.syncIndex() }
+        }
+    }
+
+    /**
+     * A tap on the tempo sheet's TAP pad, at [at] (System.nanoTime, as
+     * PressTime gives it): from the second tap of a run on, the tempo the
+     * taps give is set and returned ([dev.arc.ep133.features.TapTempo]); null before.
+     */
+    fun tapTempo(at: Long): Int? = tapTempo.tap(at)?.also(::setTempo)
 
     /**
      * Plays a Live pad's sample on the phone (arc's copy of the device's
@@ -1810,6 +1952,107 @@ class ArcController(
         }
     }
 
+    // ---------- PROJECT: the next project (an addition) ----------
+
+    /**
+     * PROJECT's tap. Connected, the EP-133 switches to the next project
+     * (ProjectStep.next) and Live follows it once it is read; taps while it
+     * switches move the target on, and one worker writes the newest
+     * ([switchProjects]). Offline, Live shows the next of its views instead
+     * (the last read's project and the factory pack's), in arc only.
+     * Nothing while Live reads, another action holds the device, or there is
+     * nothing to step to (as [dev.arc.ep133.ui.screens.projectKeyOf] greys it out).
+     */
+    fun stepProject() {
+        val mi = _state.value.mirror ?: return
+        if (mi.offline != null) return stepOfflineProject(mi)
+        val s = session
+        val m = mirror
+        if (s == null || m == null || mirrorSession !== s || _state.value.device == null || mi.loading) return
+        // Another action holds the device (the key is greyed out); PROJECT's own switch takes more taps.
+        if (_state.value.busy && projectTarget == null) return
+        projectTarget = dev.arc.ep133.features.ProjectStep.next(projectTarget ?: m.snapshot(System.nanoTime()).activeProject)
+        showProjectTarget()
+        if (projectJob?.isActive != true) projectJob = scope.launch { switchProjects() }
+    }
+
+    /** Offline: the next view, shown from what arc has (no device, nothing written). */
+    private fun stepOfflineProject(mi: MirrorUi) {
+        val views = mi.offlineProjects
+        // A tap before the last one's view opened steps on from that one.
+        val cur = offlineProject?.takeIf { it in views } ?: mi.state.activeProject
+        offlineProject = dev.arc.ep133.features.ProjectStep.nextOffline(cur, views) ?: return
+        scope.launch { openOfflineMirror() }
+    }
+
+    /**
+     * Writes [projectTarget] as the device's active project and reads it
+     * back, again while taps moved it on meanwhile. Only the newest's read
+     * goes further: its pads, the saved read, preload and copies, as for a
+     * project switched on the device ([loadMirrorProject]). A failed switch
+     * says why, and Live stays on the project it read last. Each pass
+     * finishes (a read cut short would put the session out of step); a
+     * mirror closed or reopened meanwhile is looked at again.
+     */
+    private suspend fun switchProjects() {
+        val done = passOnNewest({ projectTarget }) { want -> projectPass(want) } ?: return
+        projectTarget = null
+        val read = done.read
+        if (read == null) {
+            showProjectTarget()
+            toast(dev.arc.ep133.text.MirrorText.projectFailed(done.failed ?: dev.arc.ep133.text.MirrorText.EDIT_OFFLINE), error = true)
+            return
+        }
+        val m = done.mirror
+        m.setProject(read.first, read.second)
+        saveLastRead(m)
+        preloadPads(m)
+        copyPadSounds(m, done.session)
+        _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(state = m.snapshot(System.nanoTime()), projectTarget = null)) } ?: cur }
+    }
+
+    /** One [switchProjects] pass: what was read, or ([read] null) why it [failed]. */
+    private class ProjectPass(
+        val mirror: dev.arc.ep133.features.LiveMirror,
+        val session: Session,
+        val read: Pair<Int?, List<dev.arc.ep133.features.PadGroup>>?,
+        val failed: String?,
+    )
+
+    /** Writes [want] and reads it back, then its pads; null when a tap moved on or the mirror went meanwhile. */
+    private suspend fun projectPass(want: Int): ProjectPass? {
+        val s = session
+        val m = mirror
+        if (s == null || m == null || mirrorSession !== s) {
+            projectTarget = null
+            return null
+        }
+        var failed: String? = null
+        var tapped = false
+        val read = exclusive<Pair<Int?, List<dev.arc.ep133.features.PadGroup>>?>("liveProject", quiet = true, wait = true) { ss ->
+            try {
+                Device.setActiveProject(ss, want)
+                val now = Device.activeProject(ss)
+                // Tapped on: the next pass writes the newest, these pads aren't needed.
+                tapped = projectTarget != want
+                // Empty projects may have no pads to read: they show empty.
+                if (tapped) null else now to (now?.let { p -> runCatching { DeviceBrowser.projectLayout(ss, p).pads }.getOrNull() } ?: emptyList())
+            } catch (e: Throwable) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                failed = e.message ?: e.toString()
+                null
+            }
+        }
+        // Closed, reopened or disconnected meanwhile, or tapped on: the next pass sees.
+        if (mirror !== m || session !== s || tapped) return null
+        return ProjectPass(m, s, read, failed)
+    }
+
+    /** The mirror shows [projectTarget] (connected; null when not switching). */
+    private fun showProjectTarget() {
+        _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(projectTarget = projectTarget)) } ?: cur }
+    }
+
     /** The sample on a pad in the mirror, once it is known. */
     fun mirrorName(pad: dev.arc.ep133.features.PhysicalPad): String? = mirror?.nameOf(pad)
 
@@ -1831,8 +2074,8 @@ class ArcController(
     /**
      * Where a tapped pad's sound is set, for EDIT's pad sheet; null (with a
      * toast saying why) while the device isn't connected and Live shows no
-     * last read (or factory sounds) to change in arc, or Live hasn't read the
-     * active project yet.
+     * last read (or factory sounds) to change in arc, Live hasn't read the
+     * active project yet, or PROJECT is switching it.
      */
     fun editTarget(pad: dev.arc.ep133.features.PhysicalPad): dev.arc.ep133.features.PadTarget? {
         val m = mirror
@@ -1840,6 +2083,11 @@ class ArcController(
         val offline = m != null && mirrorSession == null && _state.value.device == null && _state.value.mirror?.offlineSounds != null
         if (!offline && (session == null || _state.value.device == null || mirrorSession == null) || m == null) {
             toast(dev.arc.ep133.text.MirrorText.EDIT_OFFLINE)
+            return null
+        }
+        // The pad's project is about to change: its sound is set once the switch lands.
+        if (!offline && projectTarget != null) {
+            toast(dev.arc.ep133.text.MirrorText.PROJECT_SWITCHING)
             return null
         }
         return m.target(pad) ?: null.also {
@@ -2111,6 +2359,9 @@ class ArcController(
         mirrorPushOff = null
         mirror = null
         mirrorSession = null
+        clockFollow = null
+        // A switch still writing finishes its pass, then sees the mirror gone (switchProjects).
+        projectTarget = null
     }
 
     /** Learned pad links, "offset:pad" pairs: the keypad's numbering is the same in every project. */

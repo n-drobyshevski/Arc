@@ -4,6 +4,8 @@ import { DiffResult, ProjectDiff, ProjectState, SoundDiff, SoundState } from '..
 import { NoteNames, SCALES } from '../../../src/core/features/keys'
 import { KeyMark } from '../../../src/core/features/piano'
 import { physicalPad } from '../../../src/core/features/padNotes'
+import { ProjectSource } from '../../../src/core/features/projectStep'
+import { CoachText } from '../../../src/core/text/coachText'
 import { FeatureText } from '../../../src/core/text/featureText'
 import { MirrorText } from '../../../src/core/text/mirrorText'
 import { SettingsText } from '../../../src/core/text/settingsText'
@@ -110,5 +112,29 @@ describe('FeatureTextTest', () => {
     expect(MirrorText.putOffline(2)).toBe('Put 2 offline pad changes on the EP-133?')
     expect(MirrorText.offlineWritten(2, 0)).toBe('2 pads put on the EP-133.')
     expect(MirrorText.offlineWritten(1, 1)).toBe('1 pad put on the EP-133. 1 skipped: the EP-133 has another sound or project there now.')
+  })
+
+  it('function keys and offline notes', () => {
+    expect(MirrorText.FN_PROJECT_SUB).toBe('1\u20139')
+    expect(MirrorText.projectKeyState(3, ProjectSource.DEVICE)).toBe('Project 3')
+    expect(MirrorText.projectKeyState(3, ProjectSource.LAST_READ)).toBe('Project 3')
+    expect(MirrorText.projectKeyState(3, ProjectSource.FACTORY)).toBe('Factory project 3')
+    expect(MirrorText.projectKeyState(null, ProjectSource.DEVICE)).toBe('No project')
+    expect(MirrorText.projectShort(3)).toBe('P3')
+    expect(MirrorText.projectFailed('timeout')).toBe("The project couldn't be switched: timeout")
+    expect(MirrorText.clickState(true, 120, false)).toBe('On, 120 BPM')
+    expect(MirrorText.clickState(false, 98, true)).toBe('Off, 98 BPM, from the EP-133')
+    expect(MirrorText.tempoValue(120)).toBe('120 BPM')
+    expect(MirrorText.tempoShort(120)).toBe('120')
+    expect(MirrorText.offlineNote(MirrorText.FACTORY, 3)).toBe(
+      "Not connected: these are the EP-133's factory sounds, project 3 as it ships. Connect your EP-133 to see it live.",
+    )
+    // Project 1 unless PROJECT stepped on; a last read keeps its own note.
+    expect(MirrorText.offlineNote(MirrorText.FACTORY)).toBe(MirrorText.factoryNote(1))
+    expect(MirrorText.offlineNote(MirrorText.lastSeen('5 Oct, 14:02'), 3)).toBe(MirrorText.OFFLINE_NOTE)
+    // Web delta: no PROJECT key on the web.
+    expect(MirrorText.LISTEN_ONLY.endsWith('another sound in EDIT.')).toBe(true)
+    expect(CoachText.PROJECT).toBe('Next project')
+    expect(CoachText.TEMPO).toBe('Click: tap; hold for tempo')
   })
 })

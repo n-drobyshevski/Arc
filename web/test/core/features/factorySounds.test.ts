@@ -69,6 +69,21 @@ describe('FactorySounds', () => {
     expect(FactorySounds.snapshot(pak(factoryMeta, new Map([[1, tarFile([])]])), 5)).toBeNull()
   })
 
+  it("offline, PROJECT steps through the pack's projects with pads", () => {
+    const p1 = tarFile([['pads/a/p01', pad(100)]])
+    const p3 = tarFile([['pads/c/p02', pad(1)]])
+    const p = pak(factoryMeta, new Map([[3, p3], [1, p1], [2, tarFile([])]]))
+    expect(FactorySounds.projects(p)).toEqual([1, 3])
+    const snap = FactorySounds.snapshot(p, 5, 3)!
+    expect(snap.activeProject).toBe(3)
+    expect(snap.groups.map((g) => g.name)).toEqual(['c'])
+    expect([...snap.groups[0]!.pads]).toEqual([[2, 1]])
+    expect([...snap.names]).toEqual([[1, 'micro kick'], [100, 'nt snare']])
+    expect(FactorySounds.snapshot(p, 5, 2)).toBeNull()
+    expect(FactorySounds.snapshot(p, 5, 4)).toBeNull()
+    expect(FactorySounds.projects(pak(factoryMeta, new Map()))).toEqual([])
+  })
+
   it("calls a sound unnamed when the device lists it as its slot's file", () => {
     expect(FactorySounds.unnamed(343, '343.pcm')).toBe(true)
     expect(FactorySounds.unnamed(1, '001.pcm')).toBe(true)

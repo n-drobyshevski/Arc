@@ -8,6 +8,7 @@ import dev.arc.ep133.features.KeysView
 import dev.arc.ep133.features.NoteNames
 import dev.arc.ep133.features.Piano
 import dev.arc.ep133.features.Scale
+import dev.arc.ep133.features.Tempo
 import dev.arc.ep133.text.LiveEngine
 import dev.arc.ep133.text.ThemeChoice
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -44,6 +45,8 @@ data class AppSettings(
     val pianoWhites: Int? = null,
     /** A light tick when a pad or key is pressed in Live (the phone's own touch feedback setting still applies). */
     val haptics: Boolean = true,
+    /** Live's click (TEMPO): the phone's tempo in BPM, Tempo.MIN..MAX. The click itself always starts off. */
+    val liveTempo: Int = Tempo.DEFAULT,
     /**
      * Which output Live plays through, a debug choice for the latency test
      * (Debug screen): kept on this phone only, never copied into library.json.
@@ -84,6 +87,7 @@ class SettingsStore internal constructor(private val prefs: SharedPreferences) {
         keysViewTall = runCatching { KeysView.valueOf(prefs.getString("keysViewTall", null) ?: "") }.getOrDefault(KeysView.AUTO),
         pianoWhites = Piano.choiceOf(prefs.getInt("pianoWhites", 0)),
         haptics = prefs.getBoolean("haptics", true),
+        liveTempo = Tempo.clamp(prefs.getInt("liveTempo", Tempo.DEFAULT)),
         liveEngine = liveEngineOf(prefs.getString(LIVE_ENGINE, null)),
     )
 
@@ -102,7 +106,7 @@ class SettingsStore internal constructor(private val prefs: SharedPreferences) {
             for ((k, v) in changed) {
                 when (k) {
                     "theme", "keysScale", "keysNames", "keysViewWide", "keysViewTall" -> putString(k, v)
-                    "keepLast", "keysRoot", "keysOctave", "pianoWhites" -> putInt(k, v.toInt())
+                    "keepLast", "keysRoot", "keysOctave", "pianoWhites", "liveTempo" -> putInt(k, v.toInt())
                     else -> putBoolean(k, v.toBooleanStrict())
                 }
             }
@@ -147,6 +151,7 @@ internal fun AppSettings.values(): Map<String, String> = linkedMapOf(
     // Stored like keepLast: 0 for Auto.
     "pianoWhites" to (pianoWhites ?: 0).toString(),
     "haptics" to haptics.toString(),
+    "liveTempo" to liveTempo.toString(),
 )
 
 /** These settings with what library.json held ("app.*" keys) taken back; anything missing or unreadable stays as it is. */
@@ -173,4 +178,6 @@ internal fun AppSettings.withIndex(map: Map<String, String>): AppSettings = copy
         else -> Piano.choiceOf(n) ?: pianoWhites
     },
     haptics = map["app.haptics"]?.toBooleanStrictOrNull() ?: haptics,
+    // A tempo arc doesn't offer leaves the choice as it is.
+    liveTempo = map["app.liveTempo"]?.toIntOrNull()?.takeIf { it in Tempo.MIN..Tempo.MAX } ?: liveTempo,
 )

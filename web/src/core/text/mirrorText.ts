@@ -4,10 +4,12 @@
 //
 // Web delta: jsToFixed and String.format("%.0f") are native toFixed.
 
+import { FactorySounds } from '../features/factorySounds'
 import { Keys, NoteNames, Scale } from '../features/keys'
 import type { Hit } from '../features/liveMirror'
 import { noteName, type PhysicalPad } from '../features/padNotes'
 import { KeyMark } from '../features/piano'
+import { ProjectSource } from '../features/projectStep'
 import { FeatureText } from './featureText'
 import { plural } from './format'
 
@@ -27,15 +29,16 @@ export const MirrorText = {
   lastSeen(at: string): string {
     return `Last seen ${at}`
   },
-  // Not connected and never read, with the factory sounds in the library: their first project.
+  // Not connected, with the factory sounds in the library: one of their projects (the first unless PROJECT steps on).
   FACTORY: 'Factory sounds',
-  FACTORY_NOTE:
-    "Not connected: these are the EP-133's factory sounds, project 1 as it ships. Connect your EP-133 to see it live.",
+  factoryNote(project: number): string {
+    return `Not connected: these are the EP-133's factory sounds, project ${project} as it ships. Connect your EP-133 to see it live.`
+  },
   // Not connected and never read: a way to play without it.
   GET_FACTORY: 'Get the factory sounds to play without it',
-  /** The note under "Offline" for the display's offline line ([lastSeen] or [FACTORY]). */
-  offlineNote(offline: string): string {
-    return offline === MirrorText.FACTORY ? MirrorText.FACTORY_NOTE : MirrorText.OFFLINE_NOTE
+  /** The note under "Offline" for the display's offline line ([lastSeen] or [FACTORY]), showing [project]. */
+  offlineNote(offline: string, project: number = FactorySounds.PROJECT): string {
+    return offline === MirrorText.FACTORY ? MirrorText.factoryNote(project) : MirrorText.OFFLINE_NOTE
   },
   PLAYING: 'Playing',
   STOPPED: 'Stopped',
@@ -47,7 +50,8 @@ export const MirrorText = {
   COMMUNITY_NOTE:
     "Pads follow the official MIDI note map; play/stop and tempo are standard MIDI clock messages. Naming the samples relies on community notes about the device's SysEx, not on the official guide.",
   NO_PUSHES: "No pad messages from the device yet, so samples can't be named. Pads still light up.",
-  /** How Live uses the device: it reads, and writes only a pad's sound, when asked in EDIT. */
+  /** How Live uses the device: it reads, and writes only a pad's sound (in EDIT) and the active project (PROJECT), when asked. */
+  // Web delta: the web has no PROJECT key (Android's Live function keys), so it isn't named here.
   LISTEN_ONLY:
     "arc reads the device here (sound names, the active project's pads, and the samples on them, to keep a copy). It changes the device only when you give a pad another sound in EDIT.",
 
@@ -79,6 +83,51 @@ export const MirrorText = {
   },
   /** Why the piano key is greyed out. */
   PIANO_NO_ROOM: 'No room for the piano here',
+
+  // ---------- The function keys over the pads: PROJECT, KEYS (MODE_KEYS over MODE_PADS) and TEMPO ----------
+  /** The keys' two words: the main one on the cap, the second on its coloured lower half. */
+  FN_PROJECT: 'Project',
+  FN_PROJECT_SUB: '1\u20139',
+  FN_TEMPO: 'Tempo',
+  FN_TEMPO_SUB: 'Tap',
+
+  /** PROJECT for screen readers: "Project 3", "Factory project 3", or "No project" before one is read. */
+  projectKeyState(n: number | null, source: ProjectSource): string {
+    if (n === null) return 'No project'
+    if (source === ProjectSource.FACTORY) return `Factory project ${n}`
+    return MirrorText.project(n)
+  },
+  PROJECT_NEXT: 'Next project',
+  /** Why PROJECT is greyed out. */
+  PROJECT_UNAVAILABLE: 'Connect the EP-133 or get the factory sounds to change projects',
+  /** A pad tapped in EDIT while the device switches projects. */
+  PROJECT_SWITCHING: 'The EP-133 is switching projects. Try again in a moment.',
+  projectFailed(reason: string): string {
+    return `The project couldn't be switched: ${reason}`
+  },
+
+  // TEMPO: a click on the phone. Tap turns it on or off; hold opens the tempo sheet.
+  CLICK: 'Click',
+  /** TEMPO for screen readers: "On, 120 BPM", "Off, 98 BPM, from the EP-133". */
+  clickState(on: boolean, bpm: number, following: boolean): string {
+    return (on ? 'On' : 'Off') + `, ${MirrorText.tempoValue(bpm)}` + (following ? ', from the EP-133' : '')
+  },
+  SET_TEMPO: 'Set tempo',
+  TEMPO_TITLE: 'Tempo',
+  /** The sheet's big pad for screen readers (it shows [FN_TEMPO_SUB]). */
+  TAP_TEMPO: 'Tap tempo',
+  SLOWER: 'Slower',
+  FASTER: 'Faster',
+  /** The sheet while the EP-133 sends MIDI clock: its tempo leads, so − + and TAP rest. */
+  FOLLOWING: "Following the EP-133's tempo (MIDI clock).",
+  /** "120 BPM". */
+  tempoValue(bpm: number): string {
+    return `${bpm} BPM`
+  },
+  /** "120", under a narrow key. */
+  tempoShort(bpm: number): string {
+    return `${bpm}`
+  },
 
   /** The mode word under the grid, for screen readers: what it shows and what a tap does. */
   modeSwitch(keysOn: boolean): string {
