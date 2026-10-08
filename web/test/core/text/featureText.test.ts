@@ -1,5 +1,6 @@
 // Port of core/src/test/kotlin/dev/arc/ep133/text/FeatureTextTest.kt
 import { describe, expect, it } from 'vitest'
+import { arpNote } from '../../../src/core/features/arp'
 import { DiffResult, ProjectDiff, ProjectState, SoundDiff, SoundState } from '../../../src/core/features/backupDiff'
 import { NoteNames, SCALES } from '../../../src/core/features/keys'
 import { FX_TYPES, FxType } from '../../../src/core/features/fxSettings'
@@ -280,6 +281,12 @@ describe('FeatureTextTest', () => {
     expect(MirrorText.timingName(Timing.SIXTEENTH)).toBe('Timing 1/16: notes snap to the nearest 1/16')
     expect(MirrorText.timingName(Timing.EIGHTH_T)).toBe('Timing 1/8T: notes snap to the nearest 1/8 triplet')
     expect(MirrorText.timingName(Timing.OFF)).toBe('Timing off: notes stay where you play them')
+    const held = [arpNote(a7, 5), arpNote(a7, 9), arpNote(a7, 0)]
+    expect(MirrorText.arpLine(false, false, Timing.SIXTEENTH, held, NoteNames.SOLFEGE)).toBe('ARP · 1/16 · FA LA DO')
+    expect(MirrorText.arpLine(false, true, Timing.EIGHTH_T, held, NoteNames.LETTERS)).toBe('ARP ∞ · 1/8T · F A C')
+    expect(MirrorText.arpLine(true, false, Timing.THIRTY_SECOND, [arpNote(a7, null), arpNote(physicalPad(1, 2), null)], NoteNames.SOLFEGE)).toBe(
+      'REPEAT · 1/32 · A 7, B ENTER',
+    )
     expect(MirrorText.groupLength(0, 1)).toBe('A · 1 bar')
     expect(MirrorText.groupLengthName(3, 16)).toBe('Group D, 16 bars')
     expect(MirrorText.clearAsk(1)).toBe("Clear group B's notes?")

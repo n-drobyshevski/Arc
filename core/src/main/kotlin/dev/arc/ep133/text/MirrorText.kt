@@ -638,6 +638,17 @@ object MirrorText {
     /** TIMING's choices: Off, 1/1, 1/2, 1/4, 1/8, 1/8T, 1/16, 1/16T, 1/32. */
     fun timingLabel(t: Timing) = if (t == Timing.OFF) onOff(false) else t.id
 
+    /**
+     * The display line while the arp plays: "ARP \u00B7 1/16 \u00B7 DO FA LA" (KEYS,
+     * the notes held by [names]), "REPEAT \u00B7 1/16 \u00B7 A 7, B 1" for note repeat
+     * (PADS: [repeat]), the pads held; "ARP \u221E \u00B7 \u2026" latched.
+     */
+    fun arpLine(repeat: Boolean, latch: Boolean, interval: Timing, notes: List<dev.arc.ep133.features.ArpNote>, names: dev.arc.ep133.features.NoteNames): String {
+        val words = notes.map { n -> n.semitones?.let { dev.arc.ep133.features.Keys.name(dev.arc.ep133.features.Keys.ROOT_NOTE + it, names) } ?: "${n.pad.groupLetter} ${n.pad.label}" }
+        val head = (if (repeat) "REPEAT" else "ARP") + if (latch) " \u221E" else ""
+        return "$head \u00B7 ${timingLabel(interval)} \u00B7 ${words.joinToString(if (repeat) ", " else " ")}"
+    }
+
     /** A TIMING choice for screen readers: a triplet ("1/8T") said as "1/8 triplet". */
     fun timingName(t: Timing) =
         if (t == Timing.OFF) "Timing off: notes stay where you play them" else "Timing ${t.id}: notes snap to the nearest ${timingSpoken(t)}"

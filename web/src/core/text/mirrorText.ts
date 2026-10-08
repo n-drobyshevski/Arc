@@ -7,6 +7,7 @@
 // - The web has no REC (TAKE), so only its takeLength is here, for SAMPLE's
 //   times; TAKE's words are Android's only.
 
+import type { ArpNote } from '../features/arp'
 import { FactorySounds } from '../features/factorySounds'
 import { FxSettings, FxType } from '../features/fxSettings'
 import { Keys, NoteNames, Scale } from '../features/keys'
@@ -788,6 +789,17 @@ export const MirrorText = {
   /** TIMING's choices: Off, 1/1, 1/2, 1/4, 1/8, 1/8T, 1/16, 1/16T, 1/32. */
   timingLabel(t: Timing): string {
     return t === Timing.OFF ? MirrorText.onOff(false) : t
+  },
+
+  /**
+   * The display line while the arp plays: "ARP \u00B7 1/16 \u00B7 DO FA LA" (KEYS,
+   * the notes held by [names]), "REPEAT \u00B7 1/16 \u00B7 A 7, B 1" for note repeat
+   * (PADS: [repeat]), the pads held; "ARP \u221E \u00B7 \u2026" latched.
+   */
+  arpLine(repeat: boolean, latch: boolean, interval: Timing, notes: readonly ArpNote[], names: NoteNames): string {
+    const words = notes.map((n) => (n.semitones !== null ? Keys.name(Keys.ROOT_NOTE + n.semitones, names) : `${n.pad.groupLetter} ${n.pad.label}`))
+    const head = (repeat ? 'REPEAT' : 'ARP') + (latch ? ' \u221E' : '')
+    return `${head} \u00B7 ${MirrorText.timingLabel(interval)} \u00B7 ${words.join(repeat ? ', ' : ' ')}`
   },
 
   /** A TIMING choice for screen readers: a triplet ("1/8T") said as "1/8 triplet". */

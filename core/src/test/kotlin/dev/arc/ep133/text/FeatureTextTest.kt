@@ -1,5 +1,6 @@
 package dev.arc.ep133.text
 
+import dev.arc.ep133.features.ArpNote
 import dev.arc.ep133.features.DiffResult
 import dev.arc.ep133.features.FxType
 import dev.arc.ep133.features.KeyMark
@@ -286,6 +287,14 @@ class FeatureTextTest {
         assertEquals("Timing 1/16: notes snap to the nearest 1/16", MirrorText.timingName(Timing.SIXTEENTH))
         assertEquals("Timing 1/8T: notes snap to the nearest 1/8 triplet", MirrorText.timingName(Timing.EIGHTH_T))
         assertEquals("Timing off: notes stay where you play them", MirrorText.timingName(Timing.OFF))
+        val c4 = ArpNote(a7, 0)
+        val held = listOf(ArpNote(a7, 5), ArpNote(a7, 9), c4)
+        assertEquals("ARP · 1/16 · FA LA DO", MirrorText.arpLine(false, false, Timing.SIXTEENTH, held, NoteNames.SOLFEGE))
+        assertEquals("ARP ∞ · 1/8T · F A C", MirrorText.arpLine(false, true, Timing.EIGHTH_T, held, NoteNames.LETTERS))
+        assertEquals(
+            "REPEAT · 1/32 · A 7, B ENTER",
+            MirrorText.arpLine(true, false, Timing.THIRTY_SECOND, listOf(ArpNote(a7, null), ArpNote(PhysicalPad(1, 2), null)), NoteNames.SOLFEGE),
+        )
         assertEquals("A · 1 bar", MirrorText.groupLength(0, 1))
         assertEquals("Group D, 16 bars", MirrorText.groupLengthName(3, 16))
         assertEquals("Clear group B's notes?", MirrorText.clearAsk(1))

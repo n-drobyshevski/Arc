@@ -1958,6 +1958,8 @@ class ArcController(
         tapTempo.reset()
         // A punch-in lasts while it is held; the next output starts with none.
         fxDesk.punchAllUp()
+        // The arp's notes go with the output; it stays on.
+        arpClear()
         held.clear()
         cut.clear()
         unsure.clear()
@@ -2042,7 +2044,8 @@ class ArcController(
      * While PATTERN records, the press is a note there from that moment (an
      * [unsure] one once kept), unless [record] is false (the pad sheet's cap,
      * which tries the sound out); with RECORD armed, it starts the recording
-     * there ([patternPadDown]).
+     * there ([patternPadDown]). With the arp on ([setArpOn]), a press but
+     * the pad sheet's holds the pad for note repeat instead ([arpPress]).
      */
     fun playPad(
         pad: dev.arc.ep133.features.PhysicalPad,
@@ -2052,6 +2055,12 @@ class ArcController(
         record: Boolean = true,
     ): Job? {
         val key = "live:${pad.group}:${pad.offset}"
+        // The arp on (RPT): the press holds the pad for note repeat, not played or recorded itself.
+        if (record && arpTakes(hold)) {
+            if (!unsure) setKeysPad(pad)
+            arpPress(key, dev.arc.ep133.features.ArpNote(pad, null), keys = false, pressedAt, hold)
+            return null
+        }
         if (hold) held += key
         cut -= key
         this.unsure -= key
@@ -2098,6 +2107,8 @@ class ArcController(
     fun cutPad(pad: dev.arc.ep133.features.PhysicalPad) {
         val key = "live:${pad.group}:${pad.offset}"
         held -= key
+        // Nor does it repeat.
+        if (arpDesk.cut(key)) publishArp()
         // A note it recorded (a sure press a swipe took over) was no press either.
         patternHeld.remove(key)?.let { setPatterns(withoutNote(projectPatterns, it)) }
         // One still unsure never loads, nor becomes the KEYS sound.
@@ -2109,6 +2120,8 @@ class ArcController(
         held -= key
         liveAudio.release(key)
         recordRelease(key, releasedAt)
+        // A note the arp holds goes with the finger (unless latched).
+        if (arpDesk.release(key, settings.value.arpLatch)) publishArp()
     }
 
     /**
@@ -2187,6 +2200,7 @@ class ArcController(
         if (liveAudio.engine == engine) return
         liveAudio.engine = engine
         if (!liveAudio.isOpen) return
+        arpClear()
         held.clear()
         cut.clear()
         unsure.clear()
@@ -2433,9 +2447,15 @@ class ArcController(
      * as it is mixed, until [releaseNote] (or to the end, with [hold] false).
      * The screen names the note as the finger lands, so a change of key,
      * scale or octave under a held key still lets go of the note it plays.
-     * [pressedAt]: as [playPad]'s, and so is a note PATTERN records.
+     * [pressedAt]: as [playPad]'s, and so is a note PATTERN records. With
+     * the arp on ([setArpOn]), the note joins the arp's instead ([arpPress]).
      */
     fun playNote(note: Int, hold: Boolean = true, pressedAt: Long = System.nanoTime()): Job {
+        if (arpTakes(hold)) {
+            val pad = _state.value.keysPad
+            if (pad != null) arpPress("note:$note", dev.arc.ep133.features.ArpNote(pad, note - dev.arc.ep133.features.Keys.ROOT_NOTE), keys = true, pressedAt, hold)
+            return scope.launch { if (pad == null) toastOnce(dev.arc.ep133.text.MirrorText.PICK_SOUND) }
+        }
         lastPressAt = pressedAt
         val key = "note:$note"
         if (hold) held += key
@@ -3648,12 +3668,26 @@ class ArcController(
         var from: Double? = null
     }
 
+    // The arp's notes, the pads loading for it and those found nowhere this run, and pressure's last plan and the next.
+    private val arpDesk = ArpDesk()
+    private val arpLoading = HashSet<dev.arc.ep133.features.PhysicalPad>()
+    private val arpTried = HashSet<dev.arc.ep133.features.PhysicalPad>()
+    private var arpPressureAt = 0L
+    private var arpPressureJob: Job? = null
+    private val _arp = MutableStateFlow(arpDesk.ui(settings.value.arpOn, settings.value.arp, settings.value.timing, settings.value.keysNames))
+
+    /** ARP / RPT for Live: on, latched, the notes it plays, the settings and TIMING, and the display line while it plays. */
+    val arp: StateFlow<ArpUi> = _arp.asStateFlow()
+
     init {
         liveAudio.sequencer = patternScheduler
         // A note whose pad has no sound in the plan, told on the output's thread: the plan is made again here.
         patternScheduler.onMissing = { scope.launch { refreshPatternPlan() } }
-        // A call, or another app's sound: the pattern stops, as the voices did.
-        liveAudio.onFocusLost = { patternStop() }
+        // A call, or another app's sound: the pattern and the arp stop, as the voices did.
+        liveAudio.onFocusLost = {
+            patternStop()
+            arpClear()
+        }
         scope.launch { loadPatterns() }
         // Another project (switched on the device, by PROJECT, or offline): its own patterns.
         scope.launch {
@@ -3663,7 +3697,22 @@ class ArcController(
         scope.launch {
             // As the plan rounds it: the clock's tempo, measured afresh with every state, changes in its last digits all along.
             combine(_state.map { s -> s.mirror?.state?.bpm?.let { patternBpm(it, dev.arc.ep133.features.Tempo.DEFAULT) } }.distinctUntilChanged(), settings.map { it.liveTempo }.distinctUntilChanged()) { _, _ -> }
-                .collect { refreshPatternPlan() }
+                .collect {
+                    refreshPatternPlan()
+                    publishArp()
+                }
+        }
+    }
+
+    init {
+        // A step played while the pattern runs, told on the output's thread: recorded here.
+        patternScheduler.onArpStep = { step -> scope.launch { recordArpStep(step) } }
+        // The settings: TIMING, the arp's, ARP on or off (off, its notes go), the notes' names.
+        scope.launch {
+            settings.map { listOf(it.arpOn, it.arp, it.timing, it.keysNames) }.distinctUntilChanged().drop(1).collect {
+                if (!settings.value.arpOn) arpDesk.clear()
+                publishArp()
+            }
         }
     }
 
@@ -3712,6 +3761,8 @@ class ArcController(
         loadPatterns()
         if (project == patternProject) return
         patternStop()
+        // The arp's notes were the other project's pads.
+        arpClear()
         savePatterns()
         patternProject = project
         projectPatterns = patterns.of(project)
@@ -3779,7 +3830,7 @@ class ArcController(
 
     /** Where this run of the transport is heard, once it is; null while stopped. */
     private fun heardTimeline(): dev.arc.ep133.audio.Timeline? =
-        patternScheduler.timeline.value?.takeIf { patternScheduler.running && it !== staleTimeline }
+        patternScheduler.timeline.value?.takeIf { patternScheduler.playing && it !== staleTimeline }
 
     /**
      * The tick heard at [nanos] in this run: by its [heardTimeline], or
@@ -3787,7 +3838,7 @@ class ArcController(
      * neither is known.
      */
     private fun patternTickAt(nanos: Long): Double? =
-        heardTimeline()?.tickAt(nanos) ?: patternPressAt?.takeIf { patternScheduler.running }?.let { pressTickAt(nanos, it, patternScheduler.plan.bpm) }
+        heardTimeline()?.tickAt(nanos) ?: patternPressAt?.takeIf { patternScheduler.playing }?.let { pressTickAt(nanos, it, patternScheduler.plan.bpm) }
 
     /** The first [heardTimeline] of this run, waited for. */
     private suspend fun awaitTimeline(): dev.arc.ep133.audio.Timeline? =
@@ -4038,6 +4089,142 @@ class ArcController(
 
     /** AUTO length: an empty group recorded from stop ends where recording stops (kept). */
     fun setPatternAutoLength(on: Boolean) = changeSettings { it.copy(patternAutoLength = on) }
+
+    // ---------- ARP: the arpeggiator (KEYS) and note repeat (PADS), on TIMING's interval (an addition) ----------
+
+    /** ARP (KEYS) / RPT (PADS) on or off (kept); off, the notes it held go and it stops. */
+    fun setArpOn(on: Boolean) {
+        if (!on) arpClear()
+        changeSettings { it.copy(arpOn = on) }
+    }
+
+    /** The order KEYS's held notes play in (kept). */
+    fun setArpOrder(order: dev.arc.ep133.features.ArpOrder) = changeSettings { it.withArp(it.arp.withOrder(order)) }
+
+    /** Over 1 to 3 octaves (kept). */
+    fun setArpOctaves(n: Int) = changeSettings { it.withArp(it.arp.withOctaves(n)) }
+
+    /** Each note held for 10..100 % of a step (kept). */
+    fun setArpGate(percent: Int) = changeSettings { it.withArp(it.arp.withGate(percent)) }
+
+    /** LATCH (kept): the notes play on after the fingers are up; off, those no finger holds go. */
+    fun setArpLatch(on: Boolean) {
+        if (!on && arpDesk.unlatch()) publishArp()
+        changeSettings { it.withArp(it.arp.withLatch(on)) }
+    }
+
+    /** TIMING's interval (KNOB X; kept): the arp's step, and the grid recording snaps to while quantizing. */
+    fun setTimingInterval(t: Timing) = changeSettings { it.withTiming(it.timing.withInterval(t)) }
+
+    /** TIMING's swing, 50..75 % (KNOB Y; kept): 1/8 and 1/16 only. */
+    fun setTimingSwing(percent: Int) = changeSettings { it.withTiming(it.timing.withSwing(percent)) }
+
+    /** TIMING's - and + (kept): recording snaps to the interval, or keeps free time. */
+    fun setTimingQuantize(on: Boolean) = changeSettings { it.withTiming(it.timing.withQuantize(on)) }
+
+    /** KEYS [note] held at [pressure] (the touch's own, while the arp is on): its velocity, on a phone that tells pressure. */
+    fun notePressure(note: Int, pressure: Float) = arpPressure("note:$note", pressure)
+
+    /** [pad] held at [pressure] (the touch's own, while note repeat is on): its velocity, on a phone that tells pressure. */
+    fun padPressure(pad: dev.arc.ep133.features.PhysicalPad, pressure: Float) = arpPressure("live:${pad.group}:${pad.offset}", pressure)
+
+    // Whether the arp takes a press: it is on, and the press holds (a screen reader's tap, which never lets go, only latched).
+    private fun arpTakes(hold: Boolean): Boolean = settings.value.let { it.arpOn && (hold || it.arpLatch) }
+
+    /**
+     * A press on voice [key] at [pressedAt] while the arp is on: [note]
+     * joins the arp's notes ([keys]: a KEYS note; else a pad for note
+     * repeat), neither played nor recorded itself; the sequencer plays it
+     * on the next step (the first of a run on the press). With RECORD armed,
+     * the recording starts on it, as on a press's ([patternPadDown]); the
+     * arp's steps are what it records ([recordArpStep]).
+     */
+    private fun arpPress(key: String, note: dev.arc.ep133.features.ArpNote, keys: Boolean, pressedAt: Long, hold: Boolean) {
+        lastPressAt = pressedAt
+        patternPadDown(pressedAt)
+        val latch = settings.value.arpLatch
+        if (arpDesk.press(key, note, keys, pressedAt, latch)) arpTried.clear()
+        // A tap that never lets go (latched, or it wouldn't be here): up at once, its note kept.
+        if (!hold) arpDesk.release(key, latch)
+        publishArp()
+    }
+
+    // Pressure on a held note: its velocity, the plan handed on at most every ARP_PRESSURE_MS.
+    private fun arpPressure(key: String, pressure: Float) {
+        if (!arpDesk.pressure(key, pressure)) return
+        if (arpPressureJob?.isActive == true) return
+        val wait = ARP_PRESSURE_MS - (System.nanoTime() - arpPressureAt) / 1_000_000L
+        if (wait <= 0) {
+            arpPressureAt = System.nanoTime()
+            publishArp()
+            return
+        }
+        arpPressureJob = scope.launch {
+            delay(wait)
+            arpPressureAt = System.nanoTime()
+            publishArp()
+        }
+    }
+
+    /** The arp's notes go (another project, the output closed, playback stopped); it stays on. */
+    private fun arpClear() {
+        arpPressureJob?.cancel()
+        arpDesk.clear()
+        publishArp()
+    }
+
+    /**
+     * Hands the sequencer what the arp plays ([dev.arc.ep133.audio.ArpPlan]):
+     * on, its notes, on their pads' sounds in memory as a press plays them,
+     * at TIMING and the arp's settings and TEMPO's tempo; null (it stops)
+     * off or with none. A pad whose sound isn't in memory loads, as a press
+     * would load it, and the plan follows. Live's line follows too.
+     */
+    private fun publishArp() {
+        val s = settings.value
+        val plan = if (s.arpOn && arpDesk.notes.isNotEmpty()) {
+            val m = mirror
+            val pads = arpDesk.notes.mapTo(HashSet()) { it.pad }
+            val (voices, missing) = patternVoices(pads, ::padInMemory, { pad, keys -> shapeFor(pad, keys) }) { pad -> m?.sampleOf(pad) != null }
+            for (pad in missing) loadArpPad(pad)
+            arpDesk.plan(voices, s.timing, s.arp, patternBpm(_state.value.mirror?.state?.bpm, s.liveTempo))
+        } else {
+            null
+        }
+        patternScheduler.arp = plan
+        _arp.value = arpDesk.ui(s.arpOn, s.arp, s.timing, s.keysNames)
+    }
+
+    // [pad]'s sound into memory for the arp, as a press loads it (once a run: one found nowhere isn't asked again).
+    private fun loadArpPad(pad: dev.arc.ep133.features.PhysicalPad) {
+        if (pad in arpTried || !arpLoading.add(pad)) return
+        scope.launch {
+            val a = try {
+                padAudio(pad)
+            } finally {
+                arpLoading -= pad
+            }
+            if (a == null) arpTried += pad else publishArp()
+        }
+    }
+
+    /**
+     * A step the arp played on the pattern's clock (told on the output's
+     * thread, handed here): while recording, a note of the pattern where it
+     * played, at its velocity and as long as its gate. It is on the grid
+     * already, so TIMING doesn't move it.
+     */
+    private fun recordArpStep(step: dev.arc.ep133.audio.ArpStep) {
+        if (!transport.state.recording) return
+        val n = step.note
+        val tick = step.globalTick.toDouble()
+        patternGroups += n.pad.group
+        markPasses(tick)
+        val r = patternRecorder.noteOn(projectPatterns, n.pad, n.semitones, tick, tick, Timing.OFF, velocity = n.velocity)
+        if (r.id == 0) return
+        _pattern.update { it.copy(focusGroup = n.pad.group) }
+        setPatterns(patternRecorder.noteOff(r.patterns, r.id, tick + step.gateTicks))
+    }
 
     /** [group]'s length, 1 to 99 bars; notes past the end are kept, not played. */
     fun setPatternLength(group: Int, bars: Int) {
@@ -5059,6 +5246,7 @@ class ArcController(
 
     fun stopPlayback() {
         playToken++
+        arpClear()
         held.clear()
         cut.clear()
         unsure.clear()
