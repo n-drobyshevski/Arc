@@ -112,6 +112,13 @@ internal fun sameVoices(a: Map<PhysicalPad, PadVoice>, b: Map<PhysicalPad, PadVo
 internal fun patternBpm(device: Double?, liveTempo: Int): Double =
     device?.takeIf { it > 0 }?.let { floor(it * 10 + 0.5) / 10 } ?: Tempo.clamp(liveTempo).toDouble()
 
+/**
+ * The global tick heard at [nanos] in a run a pad's press started at
+ * [pressAt] (tick 0 there, both System.nanoTime), at [bpm]: for the presses
+ * before the sequencer's timeline is out. Fractional; below 0 before the press.
+ */
+internal fun pressTickAt(nanos: Long, pressAt: Long, bpm: Double): Double = (nanos - pressAt) * bpm * Seq.PPQN / 60e9
+
 /** The count-in's beat heard at global [tick], 1..4 through the bar before tick 0; null before it and from tick 0. */
 internal fun countInBeat(tick: Double): Int? {
     if (tick >= 0) return null

@@ -76,6 +76,9 @@ interface MixScheduler {
 
     /** Whether it plays (or counts in): the output's stamp is wanted, and focus kept. */
     val running: Boolean
+
+    /** Whether RECORD is armed, so a pad may start it: the output's stamp is wanted, not focus. */
+    val armed: Boolean
 }
 
 /**
@@ -89,7 +92,8 @@ interface MixScheduler {
  *
  * The clock is arc's own ([TransportClock]): [play] anchors tick 0 a
  * lookahead (and the count-in's bars, and any lead asked for) after the
- * frames rendered so far. A new [SeqPlan.bpm] takes over where scheduling
+ * frames rendered so far, or on the frame heard at a pad's press (RECORD
+ * armed: the output's stamps are kept while stopped for it). A new [SeqPlan.bpm] takes over where scheduling
  * has got to. Notes are counted by tick across windows, so a tempo change's
  * rounding neither repeats a note nor skips one.
  *
@@ -139,7 +143,7 @@ class PatternScheduler(private val lookaheadNs: Long = LOOKAHEAD_NS) : MixSchedu
     val timeline: StateFlow<Timeline?> = _timeline
 
     private sealed interface Ask {
-        class Play(val countInBars: Int, val extraLeadNs: Long) : Ask
+        class Play(val countInBars: Int, val extraLeadNs: Long, val atNanos: Long?) : Ask
 
         data object Stop : Ask
     }
@@ -150,11 +154,16 @@ class PatternScheduler(private val lookaheadNs: Long = LOOKAHEAD_NS) : MixSchedu
 
     override val running: Boolean get() = on
 
+    /** RECORD is armed (set by the main thread): the output's stamps keep coming while stopped, for [play] at a press. */
+    @Volatile override var armed = false
+
     // Everything below is the output thread's.
 
     // The anchored clock (null while stopped), and the output's stamp since it was anchored.
     private var clock: TransportClock? = null
     private var stamp: FrameClock? = null
+    // The output's latest stamp, stopped too: where a press is heard, for an anchor on it.
+    private var latest: FrameClock? = null
 
     // Lost: no scheduling until the next stamp re-anchors; [lostTick] is where it was, should no timeline say.
     private var waiting = false
@@ -188,10 +197,16 @@ class PatternScheduler(private val lookaheadNs: Long = LOOKAHEAD_NS) : MixSchedu
      * Starts the transport, from tick 0, [countInBars] bars after the next
      * block's lookahead, and [extraLeadNs] later still (time for a count-in's
      * click to start). Picked up on the next [fill]; playing already, it starts again.
+     *
+     * [atNanos] (System.nanoTime, a pad's press): tick 0 is the frame heard
+     * then, by the output's latest stamp, and the timeline is out at once.
+     * What falls before the frames rendered by more than the lookahead isn't
+     * played (the first notes of other groups may play a little late, or not
+     * at all). No stamp yet: tick 0 is the frames rendered.
      */
-    fun play(countInBars: Int, extraLeadNs: Long = 0) {
+    fun play(countInBars: Int, extraLeadNs: Long = 0, atNanos: Long? = null) {
         on = true
-        asks.add(Ask.Play(maxOf(countInBars, 0), maxOf(extraLeadNs, 0L)))
+        asks.add(Ask.Play(maxOf(countInBars, 0), maxOf(extraLeadNs, 0L), atNanos))
     }
 
     /** Stops it: on the next [fill], what waits is dropped and the notes sounding let go of. */
@@ -207,6 +222,8 @@ class PatternScheduler(private val lookaheadNs: Long = LOOKAHEAD_NS) : MixSchedu
     override fun fill(sink: ScheduleSink, rendered: Long, rate: Int) {
         // Taken first: a loss told before a start or a stop here is the old run's, not the new anchor's.
         var lostNow = lostAsked.getAndSet(false)
+        // A stamp of frames counted before (a loss, another rate, from 0 again) doesn't find a press.
+        if (lostNow || rendered < lastRendered || latest?.rate != rate) latest = null
         while (true) {
             when (val a = asks.poll() ?: break) {
                 is Ask.Play -> {
@@ -255,6 +272,7 @@ class PatternScheduler(private val lookaheadNs: Long = LOOKAHEAD_NS) : MixSchedu
     }
 
     override fun clock(c: FrameClock) {
+        latest = c
         val t = clock ?: return
         if (waiting) {
             // The tick heard at the new stamp's moment, through the timeline before the loss.
@@ -273,15 +291,24 @@ class PatternScheduler(private val lookaheadNs: Long = LOOKAHEAD_NS) : MixSchedu
 
     private fun anchor(a: Ask.Play, rendered: Long, rate: Int) {
         val bpm = plan.bpm.takeIf { it > 0 } ?: Tempo.DEFAULT.toDouble()
-        val lead = (lookaheadNs + a.extraLeadNs) * rate / 1_000_000_000L
-        val c = TransportClock(rendered + lead + barFrames(a.countInBars, bpm, rate), rate, bpm)
+        val at = a.atNanos
+        // At a press: the frame heard then, by the latest stamp (kept, so the timeline is out at once).
+        val s = latest.takeIf { at != null }
+        val start = when {
+            at == null -> rendered + (lookaheadNs + a.extraLeadNs) * rate / 1_000_000_000L
+            s != null -> s.frameAt(at)
+            else -> rendered
+        }
+        val c = TransportClock(start + barFrames(a.countInBars, bpm, rate), rate, bpm)
         clock = c
-        stamp = null
+        stamp = s
         waiting = false
-        nextTick = firstTick(c, rendered)
+        // At a press, notes up to a lookahead behind the mix still go (late); nothing before.
+        nextTick = firstTick(c, if (at != null) rendered - lookaheadNs * rate / 1_000_000_000L else rendered)
         scheduledTo = rendered
         lastRendered = rendered
         _timeline.value = null
+        publish()
     }
 
     private fun publish() {

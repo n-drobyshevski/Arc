@@ -10,6 +10,7 @@ import dev.arc.ep133.features.TransportPhase.COUNT_IN
 import dev.arc.ep133.features.TransportPhase.PLAYING
 import dev.arc.ep133.features.TransportPhase.STOPPED
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
 
 class TransportTest {
@@ -62,6 +63,38 @@ class TransportTest {
         off.recordUp(10 * ms)
         assertEquals(Start(0, true), off.play(recordHeld = false, countIn = false))
         assertEquals(TransportState(PLAYING, true), off.state)
+    }
+
+    @Test
+    fun `armed, a pad starts the recording at once, bar 1 on its press`() {
+        val t = Transport()
+        t.recordDown(0)
+        t.recordUp(10 * ms)
+        assertEquals(Start(0, true, 500 * ms), t.padDown(500 * ms))
+        assertEquals(TransportState(PLAYING, true), t.state)
+        // Running, a pad is only a pad.
+        assertEquals(None, t.padDown(600 * ms))
+        assertEquals(TransportState(PLAYING, true), t.state)
+        // RECORD let go of after the pad that started it: nothing.
+        val held = Transport()
+        held.recordDown(0)
+        held.padDown(100 * ms)
+        assertEquals(None, held.recordUp(2_000 * ms))
+        assertEquals(TransportState(PLAYING, true), held.state)
+        // Stopped, counting in, or playing without recording: nothing.
+        val stopped = Transport()
+        assertEquals(None, stopped.padDown(0))
+        assertEquals(TransportState(), stopped.state)
+        val counting = Transport()
+        counting.recordDown(0)
+        counting.play(recordHeld = false, countIn = true)
+        assertEquals(None, counting.padDown(100 * ms))
+        assertEquals(TransportState(COUNT_IN, true), counting.state)
+        val plays = playing()
+        assertEquals(None, plays.padDown(0))
+        assertEquals(TransportState(PLAYING, false), plays.state)
+        // PLAY's start has no press to put bar 1 on.
+        assertNull((Transport().play(recordHeld = false, countIn = true) as Start).at)
     }
 
     @Test

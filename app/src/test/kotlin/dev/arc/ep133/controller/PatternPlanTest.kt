@@ -2,6 +2,8 @@ package dev.arc.ep133.controller
 
 import dev.arc.ep133.audio.PadVoice
 import dev.arc.ep133.audio.PcmSound
+import dev.arc.ep133.audio.Timeline
+import dev.arc.ep133.features.FrameClock
 import dev.arc.ep133.features.Pattern
 import dev.arc.ep133.features.PatternNote
 import dev.arc.ep133.features.PatternRecorder
@@ -9,6 +11,7 @@ import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.ProjectPatterns
 import dev.arc.ep133.features.Seq
 import dev.arc.ep133.features.Timing
+import dev.arc.ep133.features.TransportClock
 import dev.arc.ep133.features.TransportPhase
 import dev.arc.ep133.features.TransportState
 import dev.arc.ep133.features.barFrames
@@ -83,6 +86,23 @@ class PatternPlanTest {
         assertEquals(4, countInBeat(-0.1))
         assertNull(countInBeat(0.0))
         assertNull(countInBeat(500.0))
+    }
+
+    @Test
+    fun `before the timeline, a press-started run counts its ticks from the press`() {
+        val press = 5_000_000_000L
+        assertEquals(0.0, pressTickAt(press, press, 120.0))
+        // A beat is half a second at 120 BPM.
+        assertEquals(Seq.PPQN.toDouble(), pressTickAt(press + 500_000_000L, press, 120.0), 1e-9)
+        assertEquals(Seq.TICKS_PER_BAR.toDouble(), pressTickAt(press + 2_500_000_000L, press, 96.0), 1e-9)
+        assertEquals(-Seq.PPQN / 2.0, pressTickAt(press - 250_000_000L, press, 120.0), 1e-9)
+        // The same ticks the sequencer's timeline gives once it anchors tick 0 on the frame heard at the press.
+        val stamp = FrameClock(1_000_000L, press - 30_000_000L, 48_000)
+        val heard = Timeline(TransportClock(stamp.frameAt(press), 48_000, 97.3), stamp)
+        for (ms in listOf(0L, 7L, 480L, 3_000L)) {
+            val at = press + ms * 1_000_000L
+            assertEquals(heard.tickAt(at), pressTickAt(at, press, 97.3), 0.01, "$ms ms")
+        }
     }
 
     @Test

@@ -779,9 +779,9 @@ export const MirrorText = {
     return `/ ${beats}`
   },
 
-  /** "PLAY to start \u00B7 1/16" on the display line while RECORD is armed: what PLAY does, and the grid. */
+  /** "Play a pad or PLAY \u00B7 1/16" on the display line while RECORD is armed: what starts it (a pad at once, PLAY after the count-in), and the grid. */
   patternArmed(timing: Timing): string {
-    return `PLAY to start \u00B7 ${MirrorText.timingLabel(timing)}`
+    return `Play a pad or PLAY \u00B7 ${MirrorText.timingLabel(timing)}`
   },
 
   /** TIMING's choices: Off, 1/8, 1/16, 1/32. */

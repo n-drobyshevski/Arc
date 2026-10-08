@@ -316,4 +316,80 @@ class PatternSchedulerTest {
         // Re-anchored never: the first timeline still holds.
         assertEquals(0.0, r.s.timeline.value!!.tickAt(r.heard(ahead)), 1e-9)
     }
+
+    // Group A's beats, the first (id 1) the press that started the run, heard live; group B's pad 2 on tick 0 too.
+    private fun pressPlan() = SeqPlan(
+        ProjectPatterns().with(0, beats()).with(1, Pattern(1, listOf(PatternNote(0, 2, 24, id = 10)))),
+        voices(),
+        mapOf(1 to 0L),
+        120.0,
+    )
+
+    @Test
+    fun `a press anchors tick 0 on the frame heard then, the timeline out at once`() {
+        val r = Rig()
+        r.s.plan = pressPlan()
+        r.s.armed = true
+        assertFalse(r.s.running)
+        // Armed and stopped: the output's stamps come, and nothing plays.
+        r.run(48_000, stampEvery = 25)
+        assertTrue(r.sink.events.isEmpty())
+        val f = r.rendered - 1200
+        val at = r.heard(f)
+        r.s.play(0, atNanos = at)
+        r.fill()
+        val tl = r.s.timeline.value!!
+        assertEquals(0.0, tl.tickAt(at), 1e-6)
+        assertEquals(f, tl.frameOfTick(0))
+        r.run(f + 2 * bar, stampEvery = 25)
+        val starts = r.sink.starts.filter { it.at < f + 2 * bar }
+        // B's tick 0 a little late (sent behind the mix), A's pressed note not again in pass 0, then each once on its frame.
+        assertEquals("live:1:2" to f, starts.first().key to starts.first().at)
+        assertTrue(starts.first().at < starts.first().rendered)
+        assertEquals(
+            listOf(f + 24000, f + 48000, f + 72000, f + bar, f + bar, f + bar + 24000, f + bar + 48000, f + bar + 72000),
+            starts.drop(1).map { it.at },
+        )
+        assertEquals(listOf("live:0:0", "live:1:2"), starts.filter { it.at == f + bar }.map { it.key })
+        // The stamps after it keep the same timeline.
+        assertSame(tl, r.s.timeline.value)
+    }
+
+    @Test
+    fun `a press heard longer ago than the lookahead replays nothing of the past`() {
+        val r = Rig()
+        r.s.plan = pressPlan()
+        r.run(48_000, stampEvery = 25)
+        val f = r.rendered - ahead - 2400
+        r.s.play(0, atNanos = r.heard(f))
+        r.run(f + bar, stampEvery = 25)
+        val starts = r.sink.starts
+        assertTrue(starts.all { it.at >= it.rendered - ahead })
+        assertEquals(listOf(f + 24000, f + 48000, f + 72000), starts.filter { it.at < f + bar }.map { it.at })
+        assertEquals(0.0, r.s.timeline.value!!.tickAt(r.heard(f)), 1e-6)
+    }
+
+    @Test
+    fun `a press with no stamp, or one from frames counted before, anchors on the frames rendered`() {
+        for (lost in listOf(false, true)) {
+            val r = Rig()
+            r.s.plan = pressPlan()
+            if (lost) {
+                // A stamp, then the output reopened: its frames count anew.
+                r.run(48_000, stampEvery = 25)
+                r.s.lost()
+            } else {
+                r.run(48_000)
+            }
+            val from = r.rendered
+            r.s.play(0, atNanos = r.heard(from - 1200))
+            r.fill()
+            assertNull(r.s.timeline.value, "lost $lost")
+            r.stamp()
+            assertEquals(0.0, r.s.timeline.value!!.tickAt(r.heard(from)), 1e-6, "lost $lost")
+            r.rendered += 192
+            r.run(from + bar, stampEvery = 25)
+            assertEquals(listOf(from, from + 24000, from + 48000, from + 72000), r.sink.starts.filter { it.at < from + bar }.map { it.at }, "lost $lost")
+        }
+    }
 }

@@ -2026,7 +2026,8 @@ class ArcController(
      * touch event ([dev.arc.ep133.audio.PressTime]): the latency is counted from it.
      * While PATTERN records, the press is a note there from that moment (an
      * [unsure] one once kept), unless [record] is false (the pad sheet's cap,
-     * which tries the sound out).
+     * which tries the sound out); with RECORD armed, it starts the recording
+     * there ([patternPadDown]).
      */
     fun playPad(
         pad: dev.arc.ep133.features.PhysicalPad,
@@ -2051,7 +2052,7 @@ class ArcController(
         if (ready != null) startHeld(key, hold, ready, 0, pressedAt, measured = true, shapeFor(pad))
         // The pad tapped is also the sound KEYS plays; it is loaded right here, so no preload for it.
         setKeysPad(pad)
-        if (record) recordPress(pad, null, key, pressedAt, hold)
+        if (record) recordPress(pad, null, key, pressedAt, hold, first = patternPadDown(pressedAt))
         return if (ready != null) null else loadAndStart(pad, key, hold, pressedAt, playToken)
     }
 
@@ -2065,7 +2066,7 @@ class ArcController(
         val u = unsure.remove(key) ?: return null
         lastPressAt = maxOf(lastPressAt, u.pressedAt)
         setKeysPad(pad)
-        recordPress(pad, null, key, u.pressedAt, hold = true)
+        recordPress(pad, null, key, u.pressedAt, hold = true, first = patternPadDown(u.pressedAt))
         return if (u.started) null else loadAndStart(pad, key, true, u.pressedAt, u.token)
     }
 
@@ -2425,7 +2426,7 @@ class ArcController(
         if (hold) held += key
         // Timed for the latency test only when the KEYS sound is in memory already.
         val measured = _state.value.keysPad?.let(::padInMemory) != null
-        _state.value.keysPad?.let { recordPress(it, note - dev.arc.ep133.features.Keys.ROOT_NOTE, key, pressedAt, hold) }
+        _state.value.keysPad?.let { recordPress(it, note - dev.arc.ep133.features.Keys.ROOT_NOTE, key, pressedAt, hold, first = patternPadDown(pressedAt)) }
         return scope.launch {
             val token = playToken
             val pad = _state.value.keysPad
@@ -3509,6 +3510,8 @@ class ArcController(
     private val eraseHolds = HashMap<String, EraseHold>()
     // Follows the transport while it runs: the count-in's beats, AUTO length, passes, ERASE held.
     private var patternLoop: Job? = null
+    // The press a pad started this run with (tick 0 there), for the presses before its timeline is out.
+    private var patternPressAt: Long? = null
     // The timeline of the run before the transport last started: one the sequencer never got to drop
     // (Live's output closed under it) isn't this run's. Read on the click's thread too.
     @Volatile
@@ -3655,6 +3658,14 @@ class ArcController(
     private fun heardTimeline(): dev.arc.ep133.audio.Timeline? =
         patternScheduler.timeline.value?.takeIf { patternScheduler.running && it !== staleTimeline }
 
+    /**
+     * The tick heard at [nanos] in this run: by its [heardTimeline], or
+     * before that is out, from the pad's press that started it; null while
+     * neither is known.
+     */
+    private fun patternTickAt(nanos: Long): Double? =
+        heardTimeline()?.tickAt(nanos) ?: patternPressAt?.takeIf { patternScheduler.running }?.let { pressTickAt(nanos, it, patternScheduler.plan.bpm) }
+
     /** The first [heardTimeline] of this run, waited for. */
     private suspend fun awaitTimeline(): dev.arc.ep133.audio.Timeline? =
         patternScheduler.timeline.first { it != null && it !== staleTimeline }
@@ -3678,6 +3689,17 @@ class ArcController(
     /** Stops the transport (and recording, kept), and disarms RECORD. */
     fun patternStop() = patternAct { transport.stop() }
 
+    /**
+     * A pad or KEYS note played at [at] (not in SAMPLE): with RECORD armed,
+     * the recording starts right there, bar 1 on the press, as on the
+     * device. True when it did: that press is the run's first note.
+     */
+    private fun patternPadDown(at: Long): Boolean {
+        if (transport.state.phase != TransportPhase.ARMED || sampleMode.value.on) return false
+        patternAct { transport.padDown(at) }
+        return transport.state.recording
+    }
+
     /** What [step] asks of the transport, done; [extraLeadNs] puts a start that much later still. */
     private fun patternAct(extraLeadNs: Long = 0L, step: () -> TransportAction) {
         val was = transport.state
@@ -3689,14 +3711,18 @@ class ArcController(
             TransportAction.PunchOut -> punchOut()
             TransportAction.None -> Unit
         }
+        // Armed, Live's output is open and tells its clock, so a pad's press finds the frame it was heard at.
+        val armed = transport.state.phase == TransportPhase.ARMED
+        patternScheduler.armed = armed
+        if (armed && !liveAudio.isOpen) openLiveAudio()
         showPattern()
     }
 
     /**
      * The transport starts ([a]), on Live's output (opened for it if Live
      * hadn't): the sequencer anchors bar 1 after the count-in, if any (the
-     * click comes on for it), and its loop follows. No output: a toast, and
-     * it stays stopped.
+     * click comes on for it), or on the pad's press that started it, and its
+     * loop follows. No output: a toast, and it stays stopped.
      */
     private fun startPattern(a: TransportAction.Start, extraLeadNs: Long) {
         if (!liveAudio.isOpen) openLiveAudio()
@@ -3711,11 +3737,12 @@ class ArcController(
         patternGroups.clear()
         patternTried.clear()
         countInClickAsked = false
+        patternPressAt = a.at
         staleTimeline = patternScheduler.timeline.value
         _pattern.update { it.copy(countIn = null) }
         if (a.record) setPatterns(patternRecorder.punchIn(projectPatterns, fromStop = true, settings.value.patternAutoLength))
         refreshPatternPlan()
-        patternScheduler.play(a.countInBars, if (a.countInBars > 0) COUNT_IN_LEAD_NS else extraLeadNs)
+        patternScheduler.play(a.countInBars, if (a.countInBars > 0) COUNT_IN_LEAD_NS else extraLeadNs, a.at)
         followPattern()
     }
 
@@ -3724,10 +3751,11 @@ class ArcController(
         patternLoop?.cancel()
         patternLoop = null
         if (wasRecording) {
-            val tick = heardTimeline()?.tickAt(System.nanoTime()) ?: 0.0
+            val tick = patternTickAt(System.nanoTime()) ?: 0.0
             setPatterns(patternRecorder.punchOut(heldNotesEnded(projectPatterns, patternRecorder, patternHeld.values, tick), tick))
         }
         patternScheduler.stop()
+        patternPressAt = null
         patternHeld.clear()
         eraseHolds.clear()
         patternSkip = emptyMap()
@@ -3745,7 +3773,7 @@ class ArcController(
 
     /** Recording stops where it is heard, and the patterns are kept; playing goes on. */
     private fun punchOut() {
-        val tick = heardTimeline()?.tickAt(System.nanoTime()) ?: 0.0
+        val tick = patternTickAt(System.nanoTime()) ?: 0.0
         // A pad or key still held ends its note here: a lift after the punch-out records nothing.
         val p = heldNotesEnded(projectPatterns, patternRecorder, patternHeld.values, tick)
         patternHeld.clear()
@@ -3841,17 +3869,17 @@ class ArcController(
      * voice [key] sounding: a note in the pattern while recording, on
      * TIMING's grid, its gate held until [recordRelease] ([hold]; else a
      * step of the grid). A note the grid puts after the moment it was heard
-     * isn't played in that pass again.
+     * isn't played in that pass again, nor the [first] note of a run a press
+     * started (on tick 0, heard already) in its first.
      */
-    private fun recordPress(pad: dev.arc.ep133.features.PhysicalPad, semitones: Int?, key: String, pressedAt: Long, hold: Boolean) {
+    private fun recordPress(pad: dev.arc.ep133.features.PhysicalPad, semitones: Int?, key: String, pressedAt: Long, hold: Boolean, first: Boolean = false) {
         if (!transport.state.recording) return
-        val tl = heardTimeline() ?: return
-        val tick = tl.tickAt(pressedAt)
+        val tick = patternTickAt(pressedAt) ?: return
         patternGroups += pad.group
         markPasses(tick)
-        val r = patternRecorder.noteOn(projectPatterns, pad, semitones, tick, tl.tickAt(System.nanoTime()), settings.value.patternTiming)
+        val r = patternRecorder.noteOn(projectPatterns, pad, semitones, tick, patternTickAt(System.nanoTime()) ?: tick, settings.value.patternTiming)
         if (r.id == 0) return
-        r.skipPass?.let { patternSkip = patternSkip + (r.id to it) }
+        (if (first) 0L else r.skipPass)?.let { patternSkip = patternSkip + (r.id to it) }
         // The same key again before it was let go of (another finger): the first note's gate ends here.
         val before = patternHeld.remove(key)
         val p = if (before != null) patternRecorder.noteOff(r.patterns, before, tick) else r.patterns
@@ -3863,8 +3891,8 @@ class ArcController(
     /** Voice [key] let go of at [releasedAt]: the note it recorded, if any, ends its gate there. */
     private fun recordRelease(key: String, releasedAt: Long) {
         val id = patternHeld.remove(key) ?: return
-        val tl = heardTimeline() ?: return
-        setPatterns(patternRecorder.noteOff(projectPatterns, id, tl.tickAt(releasedAt)))
+        val tick = patternTickAt(releasedAt) ?: return
+        setPatterns(patternRecorder.noteOff(projectPatterns, id, tick))
     }
 
     /**

@@ -1,13 +1,15 @@
 // Port of core/src/main/kotlin/dev/arc/ep133/features/Transport.kt
 //
 // RECORD and PLAY, as on the device: RECORD then PLAY records after a bar's
-// count-in, RECORD + PLAY together at once; PLAY while running stops. RECORD
-// while playing punches in and out; held, it records only while held. Unlike
-// the device, PLAY always starts at bar 1.
+// count-in, RECORD + PLAY together at once; PLAY while running stops. Armed,
+// a pad starts the recording at once, bar 1 on its press; PLAY still gives
+// the count-in. RECORD while playing punches in and out; held, it records only
+// while held. Unlike the device, PLAY always starts at bar 1.
 //
 // Web deltas:
 // - Times are MILLISECONDS where the Kotlin uses nanoseconds: LONG_PRESS_NS
-//   is LONG_PRESS_MS and recordUp's longPressNs is longPressMs.
+//   is LONG_PRESS_MS, recordUp's longPressNs is longPressMs, and Start's at
+//   is milliseconds too (null where the Kotlin's is null).
 // - TransportPhase is a string union of the enum's names; TransportState is a
 //   plain readonly interface built by transportState().
 // - The sealed TransportAction is a tagged union ({type: 'Start' | 'Stop' |
@@ -27,16 +29,25 @@ export function transportState(phase: TransportPhase = 'STOPPED', recording = fa
   return { phase, recording }
 }
 
-/** What a press on RECORD or PLAY asks of the sequencer and the recorder. */
+/** What a press on RECORD or PLAY (or a pad, armed) asks of the sequencer and the recorder. */
 export type TransportAction =
-  /** Play from bar 1, after [countInBars] bars of count-in (0: at once), recording if [record]. */
-  | { readonly type: 'Start'; readonly countInBars: number; readonly record: boolean }
+  /**
+   * Play from bar 1, after [countInBars] bars of count-in (0: at once),
+   * recording if [record]; bar 1 heard at [at] (a pad's press), else as
+   * soon as it can be.
+   */
+  | { readonly type: 'Start'; readonly countInBars: number; readonly record: boolean; readonly at: number | null }
   | { readonly type: 'Stop' }
   | { readonly type: 'PunchIn' }
   | { readonly type: 'PunchOut' }
   | { readonly type: 'None' }
 
-export const Start = (countInBars: number, record: boolean): TransportAction => ({ type: 'Start', countInBars, record })
+export const Start = (countInBars: number, record: boolean, at: number | null = null): TransportAction => ({
+  type: 'Start',
+  countInBars,
+  record,
+  at,
+})
 export const Stop: TransportAction = { type: 'Stop' }
 export const PunchIn: TransportAction = { type: 'PunchIn' }
 export const PunchOut: TransportAction = { type: 'PunchOut' }
@@ -94,6 +105,13 @@ export class Transport {
       case 'PLAYING':
         return this.set('STOPPED', false, Stop)
     }
+  }
+
+  /** A pad (or a KEYS note) goes down at [at]: armed, recording starts right there, bar 1 on the press. */
+  padDown(at: number): TransportAction {
+    if (this.current.phase !== 'ARMED') return None
+    this.punchedAt = null
+    return this.set('PLAYING', true, Start(0, true, at))
   }
 
   /** The count-in is over: playing, recording if it was armed. */

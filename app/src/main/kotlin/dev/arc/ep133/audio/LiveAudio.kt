@@ -79,7 +79,7 @@ import java.util.concurrent.Executors
  *
  * The pattern sequencer ([sequencer], a [MixScheduler]) schedules into the
  * same mix, on the output's thread before each block, with the output's
- * stamp while it runs; it is told [MixScheduler.lost] when the output
+ * stamp while it runs or RECORD is armed; it is told [MixScheduler.lost] when the output
  * reopens (a native stream; a track rerouted keeps its frames), gives out,
  * fails or closes, and re-anchors. Focus is
  * asked for when it starts and held while it runs, sounding or not; a call
@@ -179,7 +179,8 @@ class LiveAudio(
 
     /**
      * The pattern sequencer, fed on the output's thread before each block
-     * and with its stamp while it runs (an addition); null for none.
+     * and with its stamp while it runs or RECORD is armed (an addition);
+     * null for none.
      */
     @Volatile var sequencer: MixScheduler? = null
 
@@ -508,7 +509,8 @@ class LiveAudio(
 
         override val recording: Boolean get() = take != null || armed != null || tap != null
 
-        override val clocked: Boolean get() = sequencer?.running == true
+        // Armed too: a pad's press may start the sequencer, on the frame heard then.
+        override val clocked: Boolean get() = sequencer?.let { it.running || it.armed } == true
 
         override fun beforeBlock(rendered: Long, rate: Int) {
             // Not after Live closed: the sequencer may be on another output by now.

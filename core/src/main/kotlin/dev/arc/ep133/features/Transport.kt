@@ -6,10 +6,14 @@ enum class TransportPhase { STOPPED, ARMED, COUNT_IN, PLAYING }
 /** The transport's [phase], and whether pads played go into the pattern ([recording]; while counting in, once it starts). */
 data class TransportState(val phase: TransportPhase = TransportPhase.STOPPED, val recording: Boolean = false)
 
-/** What a press on RECORD or PLAY asks of the sequencer and the recorder. */
+/** What a press on RECORD or PLAY (or a pad, armed) asks of the sequencer and the recorder. */
 sealed interface TransportAction {
-    /** Play from bar 1, after [countInBars] bars of count-in (0: at once), recording if [record]. */
-    data class Start(val countInBars: Int, val record: Boolean) : TransportAction
+    /**
+     * Play from bar 1, after [countInBars] bars of count-in (0: at once),
+     * recording if [record]; bar 1 heard at [at] (a pad's press), else as
+     * soon as it can be.
+     */
+    data class Start(val countInBars: Int, val record: Boolean, val at: Long? = null) : TransportAction
 
     data object Stop : TransportAction
     data object PunchIn : TransportAction
@@ -20,9 +24,10 @@ sealed interface TransportAction {
 /**
  * RECORD and PLAY, as on the device: RECORD then PLAY records after a
  * bar's count-in, RECORD + PLAY together at once; PLAY while running stops.
- * RECORD while playing punches in and out; held, it records only while held.
- * Unlike the device, PLAY always starts at bar 1. Times are nanoseconds on
- * one clock.
+ * Armed, a pad starts the recording at once, bar 1 on its press; PLAY
+ * still gives the count-in. RECORD while playing punches in and out; held,
+ * it records only while held. Unlike the device, PLAY always starts at
+ * bar 1. Times are nanoseconds on one clock.
  */
 class Transport {
     companion object {
@@ -69,6 +74,13 @@ class Transport {
             TransportPhase.ARMED -> start(TransportAction.Start(if (countIn && !recordHeld) 1 else 0, true))
             TransportPhase.COUNT_IN, TransportPhase.PLAYING -> set(TransportPhase.STOPPED, false, TransportAction.Stop)
         }
+    }
+
+    /** A pad (or a KEYS note) goes down at [at]: armed, recording starts right there, bar 1 on the press. */
+    fun padDown(at: Long): TransportAction {
+        if (state.phase != TransportPhase.ARMED) return TransportAction.None
+        punchedAt = null
+        return set(TransportPhase.PLAYING, true, TransportAction.Start(0, true, at))
     }
 
     /** The count-in is over: playing, recording if it was armed. */

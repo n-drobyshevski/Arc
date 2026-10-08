@@ -629,8 +629,8 @@ object MirrorText {
     /** "/ 4" beside the count-in's big digit ([countIn] for screen readers). */
     fun countInOf(beats: Int) = "/ $beats"
 
-    /** "PLAY to start \u00B7 1/16" on the display line while RECORD is armed: what PLAY does, and the grid. */
-    fun patternArmed(timing: Timing) = "PLAY to start \u00B7 ${timingLabel(timing)}"
+    /** "Play a pad or PLAY \u00B7 1/16" on the display line while RECORD is armed: what starts it (a pad at once, PLAY after the count-in), and the grid. */
+    fun patternArmed(timing: Timing) = "Play a pad or PLAY \u00B7 ${timingLabel(timing)}"
 
     /** TIMING's choices: Off, 1/8, 1/16, 1/32. */
     fun timingLabel(t: Timing) = if (t == Timing.OFF) onOff(false) else t.id

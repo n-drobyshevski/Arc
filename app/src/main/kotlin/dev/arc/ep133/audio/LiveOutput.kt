@@ -89,7 +89,7 @@ internal interface LiveListener {
     /** Whether the mix is wanted (REC armed, a take going, or SAMPLE resampling it). */
     val recording: Boolean
 
-    /** Whether [clock] is wanted without the mix (the sequencer runs). */
+    /** Whether [clock] is wanted without the mix (the sequencer runs, or RECORD is armed). */
     val clocked: Boolean get() = false
 
     /** A block of the mix: [frames] stereo frames in [out], the first at mix frame [at] and [rate]; [firstStart] the first voice start in it. */
