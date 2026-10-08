@@ -530,7 +530,8 @@ fun MirrorScreen(
                 onScale = keysActions.onScale,
                 onOctave = keysActions.onOctave,
                 onNote = { note, _, _ -> transport.onEraseNote(note) },
-                onNoteUp = {},
+                // A key held from before ERASE went on still lets go of its note (a lift of one that never sounded is nothing).
+                onNoteUp = keysActions.onNoteUp,
                 onSelect = keysActions.onSelect,
                 onView = keysActions.onView,
             )
@@ -1398,12 +1399,14 @@ private fun Display(
                     Text(if (noteOpen) "\u25B4" else "\u25BE", style = ArcType.displaySub, color = c.displayDim)
                 }
             } else {
-                val transport = when (st.playing) {
-                    true -> "\u25B6 " + MirrorText.PLAYING
-                    false -> "\u25A0 " + MirrorText.STOPPED
+                // The device's own ▶/■ gives way while the pattern runs, so only PLAY's chip reads as one.
+                val glyph = transport?.phase.let { it == null || it == TransportPhase.STOPPED || it == TransportPhase.ARMED }
+                val played = when (st.playing) {
+                    true -> (if (glyph) "\u25B6 " else "") + MirrorText.PLAYING
+                    false -> (if (glyph) "\u25A0 " else "") + MirrorText.STOPPED
                     null -> ""
                 }
-                Text(transport, style = ArcType.displayHead, color = c.displayInk, modifier = Modifier.weight(1f))
+                Text(played, style = ArcType.displayHead, color = c.displayInk, modifier = Modifier.weight(1f))
             }
             st.bpm?.let { Text(MirrorText.bpm(it), style = ArcType.displaySub, color = c.displayInk) }
             st.activeProject?.let { Text(MirrorText.project(it), style = ArcType.displaySub, color = c.displayDim) }
@@ -1420,7 +1423,7 @@ private fun Display(
                 modifier = Modifier.weight(1f),
             )
         }
-        if (transport != null) PatternRow(transport, track.beat.value, still)
+        if (transport != null) PatternRow(transport, track.beat, still)
         // The one-group view keeps to one screen; the all-groups view explains clock out.
         when {
             compact -> Unit
@@ -1897,7 +1900,11 @@ private fun Pad(
                 )
                 // Both play on touch-down. The all-groups page scrolls, so there a press that
                 // turns into a drag across the pads is cut short.
-                onPress != null -> holdToPlay(onPress, onRelease, onKept = onKept, onCut = onCut, inScroll = inScroll, held = held, haptics = haptics)
+                // ERASE: a screen reader's click erases the pad's notes instead of playing it.
+                onPress != null -> holdToPlay(
+                    onPress, onRelease, onKept = onKept, onCut = onCut, inScroll = inScroll, held = held, haptics = haptics,
+                    clickLabel = if (noteDot != null) MirrorText.ERASE else MirrorText.PLAY,
+                )
                 else -> Modifier
             },
         )

@@ -837,6 +837,41 @@ fun LivePatternSidewaysPreview() = Live(
 @Composable
 fun LivePatternSidewaysSmallPreview() = Live(playing, oneGroup = true, rec = dev.arc.ep133.features.RecState.Recording(12), transport = patternUi(TransportPhase.ARMED))
 
+// The narrowest phone at its tightest: playing in ERASE with a take recording and something to undo. RECORD's word,
+// ↶ and TAKE's word give way; ERASE (on) and the counter stay whole.
+@PreviewTest
+@Preview(name = "Live pattern erase small", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun LivePatternEraseSmallPreview() = Live(
+    playing, oneGroup = true, rec = dev.arc.ep133.features.RecState.Recording(72),
+    transport = patternUi(TransportPhase.PLAYING, at = PatternPosition(3, 4, 4, 0.6875f), erase = true, canUndo = true),
+)
+
+// A tablet upright: the line keeps to the pads' width, so while stopped it keeps its own words whole and ERASE and ↶
+// wait for the pattern to run (or the sheet).
+@PreviewTest
+@Preview(name = "Live pattern tablet", widthDp = 840, heightDp = 900, showBackground = true)
+@Composable
+fun LivePatternTabletPreview() = Live(playing, oneGroup = true, transport = patternUi(canUndo = true))
+
+// KEYS on a tablet's piano: the chips on the KEYS line, the counter in its words' place.
+@PreviewTest
+@Preview(name = "Live pattern tablet piano", widthDp = 800, heightDp = 1232, showBackground = true)
+@Composable
+fun LivePatternTabletPianoPreview() = Live(
+    sideways, keys = chord.copy(viewTall = dev.arc.ep133.features.KeysView.PIANO),
+    transport = patternUi(TransportPhase.PLAYING, recording = true, at = PatternPosition(2, 3, 4, 0.375f), canUndo = true),
+)
+
+// KEYS on its side: the KEYS line in the top bar, the chips icon-only.
+@PreviewTest
+@Preview(name = "Live pattern keys sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LivePatternKeysSidewaysPreview() = Live(
+    sideways, keys = chord, piano = 48..72,
+    transport = patternUi(TransportPhase.PLAYING, at = PatternPosition(1, 2, 4, 0.0625f), canUndo = true),
+)
+
 // RECORD held: the pattern sheet over Live, group A picked; two pads not loaded yet.
 @PreviewTest
 @Preview(name = "Pattern sheet", widthDp = 393, heightDp = 852, showBackground = true)

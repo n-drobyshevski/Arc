@@ -622,12 +622,14 @@ internal fun TransportUi.hasWords(): Boolean = phase != TransportPhase.STOPPED |
 /**
  * The pattern's row in the all-groups display ([Display]): RECORD and PLAY,
  * ERASE and ↶ where they fit, and its words while it has some, as on the
- * line ([PatternLine]); [beat] from the display's [patternTrack]. The row is
+ * line ([PatternLine]); [beatState] from the display's [patternTrack]. The row is
  * there while stopped too, so the pads don't move as the pattern starts.
  */
 @Composable
-internal fun PatternRow(t: TransportUi, beat: LineBeat?, still: Boolean) {
+internal fun PatternRow(t: TransportUi, beatState: State<LineBeat?>, still: Boolean) {
     BoxWithConstraints {
+        // Read here, so a beat recomposes the row, not the whole display.
+        val beat = beatState.value
         val fit = lineFit(t, null, compact = false, width = maxWidth, padding = 0.dp)
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TransportChips(t, beat, compact = false, steady = still || reducedMotion(), recordWord = fit.recordWord)
