@@ -643,8 +643,8 @@ class MainActivity : ComponentActivity() {
         // Live's sound goes to Bluetooth: its display line says it plays late.
         val liveWireless by controller.liveWireless.collectAsStateWithLifecycle()
         val takes by controller.takes.collectAsStateWithLifecycle()
-        // REC on Live's display line, on the page or in the top bar.
-        val liveRec = dev.arc.ep133.ui.screens.RecUi(rec, controller::toggleRec)
+        // TAKE in Live tools, and its badge on Live's display line while it records, on the page or in the top bar.
+        val liveTake = dev.arc.ep133.ui.screens.TakeUi(rec, controller::toggleRec)
         val compareA = compareIds?.substringBefore('|')?.let { id -> state.backups.firstOrNull { it.id == id } }
         val compareB = compareIds?.substringAfter('|')?.let { id -> state.backups.firstOrNull { it.id == id } }
         // Also runs again after a recreation, when the result is gone.
@@ -877,7 +877,7 @@ class MainActivity : ComponentActivity() {
                     onGuide = { guideOpen = it },
                     guide = { GuideScreen(onBack = { guideOpen = false }) },
                     // On a phone on its side, Live's display line rides in the top bar.
-                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, liveRec, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys, wireless = liveWireless, sample = sampleUi, header = sampleHeader) }) else null,
+                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, take = liveTake, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys, wireless = liveWireless, sample = sampleUi, header = sampleHeader) }) else null,
                     sample = sampleKey,
                 ) {
                     // Back from another section returns to Live, the home section, first.
@@ -920,7 +920,7 @@ class MainActivity : ComponentActivity() {
                             follow = appSettings.liveFollow,
                             onFollow = controller::setLiveFollow,
                             onPianoRange = { pianoRange = it },
-                            rec = liveRec,
+                            take = liveTake,
                             takes = dev.arc.ep133.ui.screens.TakesUi(
                                 list = takes,
                                 playing = playing,

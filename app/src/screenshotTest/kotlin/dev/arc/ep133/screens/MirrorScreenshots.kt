@@ -70,6 +70,12 @@ import dev.arc.ep133.features.SampleSource
 import dev.arc.ep133.ui.screens.ProjectSheetContent
 import dev.arc.ep133.ui.screens.SampleReviewSheetContent
 import dev.arc.ep133.ui.screens.TempoSheetContent
+import dev.arc.ep133.ui.screens.PatternSheetContent
+import dev.arc.ep133.ui.screens.TakeUi
+import dev.arc.ep133.ui.screens.TransportUi
+import dev.arc.ep133.features.PatternPosition
+import dev.arc.ep133.features.Timing
+import dev.arc.ep133.features.TransportPhase
 import dev.arc.ep133.ui.screens.projectChoicesOf
 import dev.arc.ep133.ui.screens.projectKeyOf
 import dev.arc.ep133.ui.theme.ArcTheme
@@ -160,21 +166,22 @@ private fun Framed(
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false) {
     val mirror = MirrorUi(state, loading = loading, error = error, offline = offline, offlineProjects = offlineProjects)
     // PROJECT as MainActivity works it out; TEMPO's light caught on a beat while the click is on.
     val functions = FunctionKeysUi(project = projectKeyOf(mirror, busy = false), clickOn = clickOn, beatLit = clickOn)
     // The SAMPLE panel, as MainActivity has it: the meter caught at a level, its threshold tick where the
     // knob has it, the last take's wave where [lastTake]. Without [sample], the panel closed, as the app has it in
     // PADS: the mic key in the top bar unlit, and nothing on the page.
-    val sampleUi = SampleUi(sample ?: SampleUiState(), level = { 0.62f }, lastTake = if (lastTake) takePeaks else null, still = true, unroll = unroll)
-    val recUi = dev.arc.ep133.ui.screens.RecUi(rec) {}
+    val sampleUi = SampleUi(sample ?: SampleUiState(), level = { 0.62f }, lastTake = if (lastTake) takePeaks else null, still = true, unroll = unroll, hasPattern = ptn, pattern = ptn)
+    // TAKE in Live tools, its badge on the line while [rec] records.
+    val takeUi = TakeUi(rec) {}
     // The piano's notes, for the display line in the bar to name a device note past them. The
     // piano reports them a frame late, after the screenshot, so [piano] gives them up front.
     var pianoRange by remember { mutableStateOf(piano) }
     Framed(
         Tab.LIVE, connected = offline == null && error == null, dark = dark, guide = guide,
-        pill = { LivePill(mirror, keys, recUi, still = true, pianoRange = pianoRange, editing = edit == true, wireless = wireless, sample = sampleUi) }, toast = toast, barMiddle = barMiddle,
+        pill = { LivePill(mirror, keys, transport, takeUi, still = true, pianoRange = pianoRange, editing = edit == true, wireless = wireless, sample = sampleUi) }, toast = toast, barMiddle = barMiddle,
         toastAction = toastAction,
         sample = SampleKey(sampleUi.state.on && !keys.on) {},
     ) {
@@ -192,7 +199,8 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
             playingPads = playingPads,
             keys = keys,
             onPianoRange = { pianoRange = it },
-            rec = recUi,
+            transport = transport,
+            take = takeUi,
             takes = dev.arc.ep133.ui.screens.TakesUi(
                 list = takes,
                 playing = takes.firstOrNull()?.name,
@@ -711,6 +719,187 @@ private fun TempoSheet(deviceBpm: Double?) {
     }
 }
 
+// The pattern's RECORD and PLAY on the display line (Variant 1, "Line"), against made-up transport states: groups A
+// and B have notes, A is 4 bars, B 2. Stopped, the line is as it was with the two chips first.
+private fun patternUi(
+    phase: TransportPhase = TransportPhase.STOPPED,
+    recording: Boolean = false,
+    countIn: Int? = null,
+    at: PatternPosition? = null,
+    erase: Boolean = false,
+    canUndo: Boolean = false,
+    missing: Int = 0,
+) = TransportUi(
+    phase = phase,
+    recording = recording,
+    countIn = countIn,
+    timing = Timing.SIXTEENTH,
+    bars = listOf(4, 2, 1, 1),
+    hasNotes = listOf(true, true, false, false),
+    focusGroup = 0,
+    erase = erase,
+    canUndo = canUndo,
+    missing = missing,
+    notePads = setOf(PhysicalPad(0, 9), PhysicalPad(0, 10), PhysicalPad(0, 6), PhysicalPad(0, 7), PhysicalPad(0, 3)),
+    position = { at },
+)
+
+// The pads the pattern is playing, ringed as the phone's voices are.
+private val patternPads = setOf(PhysicalPad(0, 9), PhysicalPad(0, 6))
+
+@PreviewTest
+@Preview(name = "Live pattern stopped", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePatternStoppedPreview() = Live(playing, oneGroup = true, transport = patternUi(canUndo = true))
+
+// RECORD tapped: its light blinks (caught lit), and the line says what PLAY does.
+@PreviewTest
+@Preview(name = "Live pattern armed", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePatternArmedPreview() = Live(playing, oneGroup = true, transport = patternUi(TransportPhase.ARMED))
+
+// RECORD then PLAY: the click counts a bar in, beat 3 of 4 big on the line.
+@PreviewTest
+@Preview(name = "Live pattern count-in", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePatternCountInPreview() = Live(playing, oneGroup = true, clickOn = true, transport = patternUi(TransportPhase.COUNT_IN, recording = true, countIn = 3))
+
+// Recording, bar 2 beat 3 of A's 4 bars at 1/16: RECORD lit, the line framed in signal, its hairline 3/8 along.
+@PreviewTest
+@Preview(name = "Live pattern recording", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePatternRecordingPreview() = Live(
+    playing, oneGroup = true, playingPads = patternPads,
+    transport = patternUi(TransportPhase.PLAYING, recording = true, at = PatternPosition(2, 3, 4, 0.375f), canUndo = true),
+)
+
+@PreviewTest
+@Preview(name = "Live pattern recording dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePatternRecordingDarkPreview() = Live(
+    playing, dark = true, oneGroup = true, playingPads = patternPads,
+    transport = patternUi(TransportPhase.PLAYING, recording = true, at = PatternPosition(2, 3, 4, 0.375f), canUndo = true),
+)
+
+@PreviewTest
+@Preview(name = "Live pattern recording small", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun LivePatternRecordingSmallPreview() = Live(
+    playing, oneGroup = true, playingPads = patternPads,
+    transport = patternUi(TransportPhase.PLAYING, recording = true, at = PatternPosition(2, 3, 4, 0.375f), canUndo = true),
+)
+
+// Playing: PLAY reads ■, ERASE and ↶ on the line, the counter and its hairline in the display's ink; a take
+// records too, its badge on the line.
+@PreviewTest
+@Preview(name = "Live pattern playing", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePatternPlayingPreview() = Live(
+    playing, oneGroup = true, playingPads = patternPads, rec = dev.arc.ep133.features.RecState.Recording(12),
+    transport = patternUi(TransportPhase.PLAYING, at = PatternPosition(1, 2, 4, 0.0625f), canUndo = true),
+)
+
+// ERASE latched while it plays: the pads with notes dotted, the rest dimmed.
+@PreviewTest
+@Preview(name = "Live pattern erase", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePatternErasePreview() = Live(
+    playing, oneGroup = true,
+    transport = patternUi(TransportPhase.PLAYING, at = PatternPosition(1, 4, 4, 0.1875f), erase = true, canUndo = true),
+)
+
+// The all-groups display: the counter in its big line, the chips at its end.
+@PreviewTest
+@Preview(name = "Live pattern all groups", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun LivePatternAllGroupsPreview() = Live(
+    playing, playingPads = patternPads,
+    transport = patternUi(TransportPhase.PLAYING, recording = true, at = PatternPosition(2, 3, 4, 0.375f), canUndo = true),
+)
+
+// KEYS: the same chips before the KEYS line.
+@PreviewTest
+@Preview(name = "Live pattern keys", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePatternKeysPreview() = Live(keysPlaying, keys = keysUi, transport = patternUi(TransportPhase.ARMED))
+
+// On its side the line rides in the top bar: the chips icon-only.
+@PreviewTest
+@Preview(name = "Live pattern sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LivePatternSidewaysPreview() = Live(
+    playing, oneGroup = true, playingPads = patternPads,
+    transport = patternUi(TransportPhase.PLAYING, recording = true, at = PatternPosition(2, 3, 4, 0.375f), canUndo = true),
+)
+
+@PreviewTest
+@Preview(name = "Live pattern sideways small", widthDp = 692, heightDp = 336, showBackground = true)
+@Composable
+fun LivePatternSidewaysSmallPreview() = Live(playing, oneGroup = true, rec = dev.arc.ep133.features.RecState.Recording(12), transport = patternUi(TransportPhase.ARMED))
+
+// The narrowest phone at its tightest: playing in ERASE with a take recording and something to undo. RECORD's word,
+// ↶ and TAKE's word give way; ERASE (on) and the counter stay whole.
+@PreviewTest
+@Preview(name = "Live pattern erase small", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun LivePatternEraseSmallPreview() = Live(
+    playing, oneGroup = true, rec = dev.arc.ep133.features.RecState.Recording(72),
+    transport = patternUi(TransportPhase.PLAYING, at = PatternPosition(3, 4, 4, 0.6875f), erase = true, canUndo = true),
+)
+
+// A tablet upright: the line keeps to the pads' width, so while stopped it keeps its own words whole and ERASE and ↶
+// wait for the pattern to run (or the sheet).
+@PreviewTest
+@Preview(name = "Live pattern tablet", widthDp = 840, heightDp = 900, showBackground = true)
+@Composable
+fun LivePatternTabletPreview() = Live(playing, oneGroup = true, transport = patternUi(canUndo = true))
+
+// KEYS on a tablet's piano: the chips on the KEYS line, the counter in its words' place.
+@PreviewTest
+@Preview(name = "Live pattern tablet piano", widthDp = 800, heightDp = 1232, showBackground = true)
+@Composable
+fun LivePatternTabletPianoPreview() = Live(
+    sideways, keys = chord.copy(viewTall = dev.arc.ep133.features.KeysView.PIANO),
+    transport = patternUi(TransportPhase.PLAYING, recording = true, at = PatternPosition(2, 3, 4, 0.375f), canUndo = true),
+)
+
+// KEYS on its side: the KEYS line in the top bar, the chips icon-only.
+@PreviewTest
+@Preview(name = "Live pattern keys sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LivePatternKeysSidewaysPreview() = Live(
+    sideways, keys = chord, piano = 48..72,
+    transport = patternUi(TransportPhase.PLAYING, at = PatternPosition(1, 2, 4, 0.0625f), canUndo = true),
+)
+
+// RECORD held: the pattern sheet over Live, group A picked; two pads not loaded yet.
+@PreviewTest
+@Preview(name = "Pattern sheet", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun PatternSheetPreview() = PatternSheet()
+
+@PreviewTest
+@Preview(name = "Pattern sheet dark", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun PatternSheetDarkPreview() = PatternSheet(dark = true)
+
+@Composable
+private fun PatternSheet(dark: Boolean = false) {
+    val t = patternUi(canUndo = true, missing = 2)
+    Framed(Tab.LIVE, dark = dark) {
+        MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true, transport = t)
+        ArcSheet(visible = true, onDismiss = {}) {
+            PatternSheetContent(t, onDone = {})
+        }
+    }
+}
+
+// Live tools' takes: the TAKE key, lit while a take records, its time on it.
+@PreviewTest
+@Preview(name = "Live tools take recording", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsTakeRecordingPreview() = Live(lastRead, oneGroup = true, tools = true, offline = "Last seen Oct 5, 2:02 PM", takes = someTakes, rec = dev.arc.ep133.features.RecState.Recording(12))
+
 // PROJECT held: projects 1 to 9 in the keypad's order, the one shown orange.
 @PreviewTest
 @Preview(name = "Project sheet", widthDp = 393, heightDp = 852, showBackground = true)
@@ -780,6 +969,12 @@ fun LiveSamplePanelCountInPreview() = Live(
     lastRead, oneGroup = true, clickOn = true,
     sample = sampleReady.copy(latch = true, bars = 2, thresholdDb = null, phase = SamplePhase.CountIn(PhysicalPad(0, 5), 3)),
 )
+
+// The project has notes: BARS steps on from 16 to PTN, a take as long as the pattern.
+@PreviewTest
+@Preview(name = "Live sample panel bars ptn", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSamplePanelPtnPreview() = Live(lastRead, oneGroup = true, sample = sampleReady.copy(latch = true, bars = 16), ptn = true)
 
 // On the all-groups page: the panel over the four groups, which keep their size and record too.
 @PreviewTest
