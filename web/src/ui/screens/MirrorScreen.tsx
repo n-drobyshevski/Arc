@@ -1189,13 +1189,10 @@ function DisplayStrip(props: {
     <div class={`live-strip${props.compact ? ' live-strip--bar' : ''}`} aria-live="polite">
       {st.playing === true && <span class="live-strip__sub live-strip__ink" role="img" aria-label={MirrorText.PLAYING}>{'▶'}</span>}
       {st.playing === false && <span class="live-strip__sub live-strip__dim" role="img" aria-label={MirrorText.STOPPED}>{'■'}</span>}
-      {st.playing === null && mirror?.offline != null && (
-        <span class="live-strip__sub live-strip__dim">{MirrorText.OFFLINE}</span>
-      )}
+      {/* Offline and the project are only read out: the top bar and the PROJECT key show them. */}
+      {st.playing === null && mirror?.offline != null && <span class="sr-only">{MirrorText.OFFLINE}</span>}
       {st.bpm !== null && <span class="live-strip__sub live-strip__ink">{MirrorText.bpm(st.bpm)}</span>}
-      {st.activeProject !== null && (
-        <span class="live-strip__sub live-strip__dim">{MirrorText.projectShort(st.activeProject)}</span>
-      )}
+      {st.activeProject !== null && <span class="sr-only">{MirrorText.project(st.activeProject)}</span>}
       <span class="live-strip__line">{displayLine(st, mirror, late)}</span>
     </div>
   )
@@ -2021,7 +2018,7 @@ function KeysDisplay(props: {
     <div class={`live-strip${compact ? ' live-strip--bar' : ''}`} aria-live="polite">
       <span class={`live-strip__sub live-strip__dim${compact ? ' sr-only' : ''}`}>{MirrorText.MODE_KEYS.toUpperCase()}</span>
       {note !== null && <span class="live-strip__sub live-strip__ink live-strip__note">{note}</span>}
-      {mirror?.offline != null && <span class="live-strip__sub live-strip__dim">{MirrorText.OFFLINE}</span>}
+      {mirror?.offline != null && <span class="sr-only">{MirrorText.OFFLINE}</span>}
       <span class="live-strip__line">
         {keys.pad !== null ? MirrorText.keysSound(keys.pad, keys.padName) : MirrorText.NO_SOUND}
       </span>

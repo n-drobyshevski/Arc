@@ -1310,13 +1310,13 @@ private fun DisplayStrip(
     val said = spoken(listOfNotNull(played, st.bpm?.let(MirrorText::bpm), st.activeProject?.let(MirrorText::project), main).joinToString(", "))
     PatternLine(transport, take, still, compact) {
         SpokenLine(said) {
+            // Offline and the project are only said: the top bar and the PROJECT key show them.
             when (st.playing) {
                 true -> Text("\u25B6", style = ArcType.displaySub, color = c.displayInk)
                 false -> Text("\u25A0", style = ArcType.displaySub, color = c.displayDim)
-                null -> if (mirror?.offline != null) Text(MirrorText.OFFLINE, style = ArcType.displaySub, color = c.displayDim, maxLines = 1)
+                null -> Unit
             }
             st.bpm?.let { Text(MirrorText.bpm(it), style = ArcType.displaySub, color = c.displayInk, maxLines = 1) }
-            st.activeProject?.let { Text(MirrorText.projectShort(it), style = ArcType.displaySub, color = c.displayDim, maxLines = 1) }
             Text(
                 main,
                 style = ArcType.displayHead,
@@ -2510,7 +2510,6 @@ private fun KeysDisplay(
                 noteText?.let {
                     Text(it, style = ArcType.displaySub, color = c.displayInk, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = noteMax))
                 }
-                offline?.let { Text(it, style = ArcType.displaySub, color = c.displayDim, maxLines = 1) }
                 Text(
                     sound,
                     style = ArcType.displayHead,
