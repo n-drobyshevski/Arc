@@ -94,7 +94,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import dev.arc.ep133.controller.MirrorUi
@@ -354,8 +353,8 @@ fun MirrorScreen(
     functions: FunctionKeysUi = FunctionKeysUi(),
     /**
      * SAMPLE (an addition; null for none): on the Live tab in PADS, the
-     * SAMPLE panel its tab (or a swipe on the pads) unrolls in the function
-     * keys' place ([SampleSlot]). While it is open SAMPLE mode is on: its line stands in
+     * SAMPLE panel the mic key in the top bar (or a swipe on the pads) unrolls
+     * in the function keys' place ([SampleSlot]). While it is open SAMPLE mode is on: its line stands in
      * for the display line, a pad held records into it, and the pads light
      * as the EP-133's do in the mode.
      */
@@ -436,8 +435,8 @@ fun MirrorScreen(
     val panelScope = androidx.compose.runtime.rememberCoroutineScope()
     val reduceMotion = reducedMotion()
     val feel = LocalHapticFeedback.current
-    // The tab (tapped, or pulled and let go at [velocity], timeline per second), a swipe or Back: the panel unrolls
-    // or rolls up with a tick, and the mode follows.
+    // A swipe, the handle under the panel (tapped, or dragged and let go at [velocity], timeline per second) or Back:
+    // the panel unrolls or rolls up with a tick, and the mode follows.
     val openPanel = { velocity: Float? ->
         if (sample != null && !panel.open) {
             if (haptics) feel.performHapticFeedback(HapticFeedbackType.SegmentTick)
@@ -452,8 +451,9 @@ fun MirrorScreen(
             sample.onClose()
         }
     }
-    // The mode turned off another way (the tab, a sheet), or KEYS, which has no panel: it rolls up (at once
-    // for KEYS, off the page). Turned on another way, it unrolls. The tab or a swipe has set it going already.
+    // The mode turned off another way (the mic key in the top bar, a sheet), or KEYS, which has no panel: it rolls
+    // up (at once for KEYS, off the page). Turned on another way (the mic key, from KEYS too), it unrolls. A swipe,
+    // the handle or Back has set it going already.
     LaunchedEffect(sampling, panelOn) {
         when {
             !panelOn -> if (panel.open) panel.go(false, reduce = true)
@@ -585,19 +585,15 @@ fun MirrorScreen(
                         DisplayStrip(st, mirror, rec, still = fixedNow != null, wireless = wireless)
                     }
                 }
-                // The function keys' place: the keys, or the SAMPLE panel unrolled there with its tab under them ([fit]
-                // upright, null on its side, where it is [side] wide and keeps its tab open only where the column is
-                // tall enough for it and the controls), as far along as [panel] is.
+                // The function keys' place: the keys, or the SAMPLE panel unrolled there with its handle under it ([fit]
+                // upright, null on its side, where it is [side] wide and has its handle only where the column is tall
+                // enough for it and the controls), open holding [hold] more under it upright, as far along as [panel] is.
                 val functionSlot: @Composable (Modifier, SamplePanelFit?, Dp?, Dp, @Composable () -> Unit) -> Unit = { m, fit, side, hold, fnKeys ->
                     if (sample == null || !panelOn) {
                         Box(m) { fnKeys() }
                     } else {
-                        val handle = side == null || roomH + ControlsRow >= sidePanelHeight(side) + TabRow
-                        // How far a pull on the tab goes: the panel's height upright, its width on its side.
-                        val note = usbNoteRoom(sample.state.input.source == SampleSource.USB)
-                        val reach = side ?: fit?.let { panelHeight(it, note) } ?: 0.dp
-                        // On its side the keys keep their places where the tab fits in the room under them.
-                        SampleSlot(panel, openPanel, closePanel, reach, panelScope, m, sideways = side, handle = handle, foot = { columnFoot(it.toDp()).roundToPx() }, openRoom = hold, keys = fnKeys) {
+                        val handle = side == null || roomH + ControlsRow >= sidePanelHeight(side) + HandleRow
+                        SampleSlot(panel, openPanel, closePanel, panelScope, m, sideways = side, handle = handle, openRoom = hold, keys = fnKeys) {
                             SamplePanelFace(sample, panel, fit, haptics, stillSample)
                         }
                     }
@@ -810,10 +806,9 @@ fun MirrorScreen(
                                     BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
                                         val fit = samplePanelFit(maxWidth, maxHeight - 10.dp, usbNoteRoom(sample?.state?.input?.source == SampleSource.USB))
                                         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                            functionSlot(Modifier.fillMaxWidth(), fit, null, 0.dp, fnRow)
-                                            // The deck's body below the tab hanging into its room ([PadsClear]): the room it
-                                            // gives up for it is taken before the glide, so it isn't scaled with the pads.
-                                            PadsGlide(panel, Modifier.fillMaxWidth().weight(1f).then(swipe).koClear(PadsClear, 3), scaleOf = { w, h -> koUnit(w, h, 3) }) {
+                                            // Open, the slot keeps room under the panel for its handle ([HandleRoom]).
+                                            functionSlot(Modifier.fillMaxWidth(), fit, null, HandleRoom, fnRow)
+                                            PadsGlide(panel, Modifier.fillMaxWidth().weight(1f).then(swipe), scaleOf = { w, h -> koUnit(w, h, 3) }) {
                                                 body(Modifier.fillMaxSize())
                                             }
                                         }
@@ -863,12 +858,12 @@ fun MirrorScreen(
                                 fnRow()
                             } else {
                                 // The panel in the function keys' place, its display always there (the page scrolls). Over the
-                                // groups, where its tab hangs (the slot is drawn over what follows it); open, the slot holds
-                                // the tab clear of the group names (the panel, at its own width on a tablet, puts it over one
+                                // groups, where its handle hangs (the slot is drawn over what follows it); open, the slot holds
+                                // the handle clear of the group names (the panel, at its own width on a tablet, puts it over one
                                 // of them). Fitted to the page's width between its gutters, worked out here rather than measured
                                 // around the slot, which grows as it unrolls: that would compose it again on every frame.
                                 val pageW = minOf(AllGroupsMaxWidth, roomW + startGutter + endGutter) - startGutter - endGutter
-                                functionSlot(Modifier.fillMaxWidth(), samplePanelFit(pageW, null), null, TabRow - 10.dp, fnRow)
+                                functionSlot(Modifier.fillMaxWidth(), samplePanelFit(pageW, null), null, HandleRow - 10.dp, fnRow)
                             }
                             val grid: @Composable (Modifier) -> Unit = { m ->
                                 BoxWithConstraints(m.fillMaxWidth()) {
@@ -1357,36 +1352,6 @@ internal fun koPadWidth(w: Dp, h: Dp, cols: Int): Dp = KoGeom.fit(w, h, cols).u
  * ([KoGeom.fit]): how big it is, for [PadsGlide].
  */
 internal fun Density.koUnit(w: Int, h: Int, cols: Int): Float = KoGeom.fit(w.toDp(), h.toDp(), cols).u.toPx()
-
-/** The big grid's body's height (the edge under it aside) for its pad width [u]: as [KoGeom.fit] counts it. */
-private const val KO_BODY_HIGH = 5.628f
-
-/** How far down a room [h] tall the big grid's body starts, sized [k] and in its middle ([KoDeck]). */
-private fun koTop(h: Dp, k: KoGeom): Dp = (h - k.u * KO_BODY_HIGH - CapDy) / 2
-
-/**
- * How much of the top of a [w] x [h] room the big grid ([cols] columns)
- * gives up so that its body starts at least [clear] down it: none where it
- * does in the middle of the whole room (a grid as wide as it can be, with
- * room above it), else as little as does it, the body a little smaller.
- */
-internal fun koCut(w: Dp, h: Dp, cols: Int, clear: Dp): Dp {
-    if (clear <= 0.dp || koTop(h, KoGeom.fit(w, h, cols)) >= clear) return 0.dp
-    var lo = 0f
-    var hi = clear.value
-    repeat(16) {
-        val mid = (lo + hi) / 2f
-        if (mid.dp + koTop(h - mid.dp, KoGeom.fit(w, h - mid.dp, cols)) >= clear) hi = mid else lo = mid
-    }
-    return hi.dp
-}
-
-/** [this], the big grid's room ([cols] columns), giving up the top of it its body keeps [clear] of ([koCut]). */
-internal fun Modifier.koClear(clear: Dp, cols: Int): Modifier = layout { measurable, constraints ->
-    val cut = if (constraints.hasBoundedHeight) koCut(constraints.maxWidth.toDp(), constraints.maxHeight.toDp(), cols, clear).roundToPx() else 0
-    val p = measurable.measure(constraints.copy(minHeight = (constraints.minHeight - cut).coerceAtLeast(0), maxHeight = constraints.maxHeight - cut))
-    layout(p.width, p.height + cut) { p.place(0, cut) }
-}
 
 /** How wide the big grid's body is with [cols] columns, as tall as [h] lets it be ([KoGeom.fit]) whatever the width. */
 internal fun koDeckWidth(h: Dp, cols: Int): Dp = KoGeom.fit(Dp.Infinity, h, cols).u * (cols * 1.215f + 0.401f) + CapDx + 2.dp

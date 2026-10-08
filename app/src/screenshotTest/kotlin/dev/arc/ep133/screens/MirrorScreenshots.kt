@@ -41,6 +41,7 @@ import dev.arc.ep133.ui.components.ArcSheet
 import dev.arc.ep133.ui.components.Tab
 import dev.arc.ep133.ui.components.ArcShell
 import dev.arc.ep133.ui.components.ArcToast
+import dev.arc.ep133.ui.components.SampleKey
 import dev.arc.ep133.ui.components.BarSlot
 import dev.arc.ep133.ui.components.LocalArcWindow
 import dev.arc.ep133.ui.components.LocalBarSlot
@@ -124,6 +125,8 @@ private fun Framed(
     barMiddle: DpRect? = null,
     /** The toast's action key ("UNDO"). */
     toastAction: String? = null,
+    /** Live's mic key in the top bar, as MainActivity has it on Live (here unlit unless given). */
+    sample: SampleKey? = if (tab == Tab.LIVE) SampleKey(false) {} else null,
     content: @Composable () -> Unit,
 ) {
     ArcTheme(dark = dark) {
@@ -143,6 +146,7 @@ private fun Framed(
                         guide = { GuideScreen(onBack = {}) },
                         middle = pill.takeIf { tab == Tab.LIVE && liveInBar(LocalArcWindow.current) },
                         initialMenuOpen = menu,
+                        sample = sample,
                         content = content,
                     )
                 }
@@ -156,16 +160,14 @@ private fun Framed(
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, tab: Boolean = true, pulled: Boolean = false) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, pulled: Boolean = false) {
     val mirror = MirrorUi(state, loading = loading, error = error, offline = offline, offlineProjects = offlineProjects)
     // PROJECT as MainActivity works it out; TEMPO's light caught on a beat while the click is on.
     val functions = FunctionKeysUi(project = projectKeyOf(mirror, busy = false), clickOn = clickOn, beatLit = clickOn)
     // The SAMPLE panel, as MainActivity has it: the meter caught at a level, its threshold tick where the
-    // knob has it, the last take's wave where [lastTake]. Without [sample], the panel closed, its tab under the
-    // function keys as the app has it in PADS; without [tab] either, none (as before SAMPLE).
-    val sampleUi = (sample ?: SampleUiState().takeIf { tab })?.let {
-        SampleUi(it, level = { 0.62f }, lastTake = if (lastTake) takePeaks else null, still = true, unroll = unroll, pulled = pulled)
-    }
+    // knob has it, the last take's wave where [lastTake]. Without [sample], the panel closed, as the app has it in
+    // PADS: the mic key in the top bar unlit, and nothing on the page.
+    val sampleUi = SampleUi(sample ?: SampleUiState(), level = { 0.62f }, lastTake = if (lastTake) takePeaks else null, still = true, unroll = unroll, pulled = pulled)
     val recUi = dev.arc.ep133.ui.screens.RecUi(rec) {}
     // The piano's notes, for the display line in the bar to name a device note past them. The
     // piano reports them a frame late, after the screenshot, so [piano] gives them up front.
@@ -174,6 +176,7 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
         Tab.LIVE, connected = offline == null && error == null, dark = dark, guide = guide,
         pill = { LivePill(mirror, keys, recUi, still = true, pianoRange = pianoRange, editing = edit == true, wireless = wireless, sample = sampleUi) }, toast = toast, barMiddle = barMiddle,
         toastAction = toastAction,
+        sample = SampleKey(sampleUi.state.on && !keys.on) {},
     ) {
         MirrorScreen(
             mirror = mirror,
@@ -732,7 +735,8 @@ private fun ProjectSheet(mirror: MirrorUi) {
     }
 }
 
-// The SAMPLE panel, unrolled in the function keys' place, its tab hanging under it: the line above lit
+// The SAMPLE panel, unrolled in the function keys' place, its handle hanging under it, the mic key in the top
+// bar lit: the line above lit
 // orange with the source, the meter and what to do; the panel's display and controls; the page's pads,
 // the empty pads' rings blinking (caught on), those with a sound ringed, the take's pad lit.
 private val mic = SampleInput(SampleSource.MIC, false)
@@ -818,19 +822,20 @@ fun LiveSamplePanelShortPreview() = Live(lastRead, oneGroup = true, sample = sam
 fun LiveSamplePanelTabletPreview() = Live(lastRead, sample = sampleReady, lastTake = true)
 
 // Caught 135 ms into the 300 of a tap's opening (45%; 94% of the way down, Material's emphasised decelerate
-// being quick off the mark): the panel nearly unrolled out of the line, its tab gone down with it, the display
+// being quick off the mark): the panel nearly unrolled out of the line, its handle coming down with it, the display
 // most of the way in and the controls' rows coming after it, the function keys fading, the pads gliding down.
 @PreviewTest
 @Preview(name = "Live sample unroll", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
 fun LiveSampleUnrollPreview() = Live(lastRead, oneGroup = true, sample = sampleReady, unroll = 0.936f)
 
-// The tab pulled 30% of the way down: the tab under the finger, the panel out of the line as far, its display
-// fading in as it comes out, the keys going and the pads moved down as far.
+// The open panel's handle dragged up, 70% of the way still out: the handle under the finger at the panel's edge,
+// the panel gone back into the line as far, its controls (faded in as they came out) still in, the keys coming
+// back and the pads moving up as far.
 @PreviewTest
 @Preview(name = "Live sample pull", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
-fun LiveSamplePullPreview() = Live(lastRead, oneGroup = true, sample = sampleReady, unroll = 0.3f, pulled = true)
+fun LiveSamplePullPreview() = Live(lastRead, oneGroup = true, sample = sampleReady, unroll = 0.7f, pulled = true)
 
 // SAMPLE's review sheet after a take into A 3: 4 s of RSP ST, a breath of silence before a decaying
 // chord, trimmed to where the sound starts and short of its tail; the next free slot after 1 to 213.
@@ -861,8 +866,8 @@ private fun reviewOf(occupied: Set<Int>?): dev.arc.ep133.controller.SampleReview
 private fun SampleSheet(review: dev.arc.ep133.controller.SampleReview, dark: Boolean = false, playing: Boolean = false) {
     val mirror = MirrorUi(lastRead, loading = false)
     val sample = SampleUi(sampleReady.copy(input = rspSt, gainDb = 0f), still = true)
-    // On its side the line rides in the top bar, as on Live.
-    Framed(Tab.LIVE, dark = dark, pill = { LivePill(mirror, dev.arc.ep133.ui.screens.KeysUi(), still = true, sample = sample) }) {
+    // On its side the line rides in the top bar, as on Live; the mic key lit, the panel open under the sheet.
+    Framed(Tab.LIVE, dark = dark, pill = { LivePill(mirror, dev.arc.ep133.ui.screens.KeysUi(), still = true, sample = sample) }, sample = SampleKey(true) {}) {
         MirrorScreen(
             mirror = mirror, nameOf = { names[it] }, fixedNow = NOW, oneGroup = true,
             sample = sample,
@@ -916,7 +921,7 @@ fun LiveKeysGridFallbackPreview() = Live(sideways, keys = chord)
  * toast preview checks the toast's look and fit in that place, not that the bar reports it
  * (a device check).
  */
-private val SmallBarMiddle = DpRect(101.dp, 6.dp, 455.dp, 50.dp)
+private val SmallBarMiddle = DpRect(97.dp, 6.dp, 451.dp, 50.dp)
 
 private val device = BackupDevice("EP-133", "TE032AS001", "", "2.5.1")
 

@@ -114,7 +114,7 @@ class LiveSamplerTest {
         assertEquals(0.dp, small.display)
         assertTrue(small.knob > 30.dp)
         // Shorter: the knobs a key tall, then one row that scrolls.
-        assertEquals(44.dp, samplePanelFit(353.dp, 400.dp).knob)
+        assertEquals(44.dp, samplePanelFit(353.dp, 392.dp).knob)
         assertEquals(SampleControls.LINE, samplePanelFit(301.dp, 360.dp).controls)
         // The panel's height as laid out: padding, edge, display, gap and the two rows.
         assertEquals(12.dp * 2 + 3.dp + 96.dp + 10.dp + 44.dp + 6.dp + 56.dp, panelHeight(roomy))

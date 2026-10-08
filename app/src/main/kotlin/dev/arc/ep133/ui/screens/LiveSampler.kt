@@ -102,8 +102,8 @@ import kotlin.math.roundToInt
 
 /*
  * SAMPLE mode on Live (an addition, after the EP-133's own sampler): the
- * SAMPLE panel in the function keys' place, unrolled with its tab or a swipe
- * on the pads ([SampleSlot]), with its display (the source, the input's meter, the
+ * SAMPLE panel in the function keys' place, unrolled with the mic key in the
+ * top bar or a swipe on the pads ([SampleSlot]), with its display (the source, the input's meter, the
  * take's time and its wave) and the sampler's controls (−/+ for the source,
  * STEREO, LATCH or STOP, KNOB X the input's level, KNOB Y the threshold,
  * BARS); the page's pads lit as the K.O. II lights them in the mode, empty
@@ -115,9 +115,10 @@ import kotlin.math.roundToInt
  * SAMPLE mode for Live's page (an addition): its [state] as the controller
  * has it, and the input's [level] (0..1 across −60..0 dBFS) and [clip],
  * both read as the meter draws; [lastTake], the last take's waveform, for
- * the display while nothing records. The SAMPLE tab or a swipe on the pads
- * opening the SAMPLE panel opens the mode ([onOpen]); the tab again, a
- * swipe back or Back leaves it ([onClose]); while a sheet is open over Live ([sheetOpen]:
+ * the display while nothing records. A swipe on the pads opening the
+ * SAMPLE panel opens the mode ([onOpen]); a swipe back, the handle under
+ * the panel or Back leaves it ([onClose]) (the mic key in the top bar
+ * works the mode itself, and the panel follows); while a sheet is open over Live ([sheetOpen]:
  * the review, say) Back is the sheet's.
  * The panel's −/+ step the source ([onSource]), STEREO records in stereo or
  * mono ([onStereo]), the knobs set the level ([onGain], dB) and the
@@ -132,7 +133,7 @@ import kotlin.math.roundToInt
  * hands-free take, or stops it ([onLatchPad]). [still] keeps the lights and
  * the meter from moving, and [unroll] catches the panel that far along its
  * motion (0 the function keys, 1 the panel; screenshots), under a finger
- * pulling its tab where [pulled].
+ * dragging its handle where [pulled].
  */
 class SampleUi(
     val state: SampleUiState = SampleUiState(),
@@ -315,7 +316,7 @@ internal fun usbNoteRoom(usb: Boolean): Dp {
 /**
  * The upright SAMPLE panel [width] wide (the pads' width, the function
  * keys' row's place; no wider than [PanelWidthMax]), sharing [room] with the pads under it (the height of
- * the panel, its tab and the pads; null on the scrolling page, where
+ * the panel, the room under it for its handle ([HandleRoom]) and the pads; null on the scrolling page, where
  * there is always room), [note] of it the USB note's ([usbNoteRoom]): two rows of controls ([SampleControls.NARROW]
  * under [ControlsRowsMin]), the knobs as big as the row lets them be, up to
  * [PanelKnob], and the display over them. Where the pads would come out
@@ -336,7 +337,7 @@ internal fun samplePanelFit(width: Dp, room: Dp?, note: Dp = 0.dp): SamplePanelF
         SamplePanelFit(0.dp, KnobInline, SampleControls.LINE),
     )
     if (room == null) return tries.first()
-    return tries.firstOrNull { koPadWidth(width, room - panelHeight(it, note) - TabRow, 3) >= PadsMin } ?: tries.last()
+    return tries.firstOrNull { koPadWidth(width, room - panelHeight(it, note) - HandleRoom, 3) >= PadsMin } ?: tries.last()
 }
 
 /**

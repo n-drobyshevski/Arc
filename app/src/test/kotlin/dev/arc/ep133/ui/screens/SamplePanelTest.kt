@@ -4,7 +4,6 @@ import androidx.compose.animation.core.SpringSpec
 import androidx.compose.animation.core.TweenSpec
 import androidx.compose.runtime.MonotonicFrameClock
 import androidx.compose.ui.input.pointer.PointerId
-import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -14,7 +13,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import kotlin.coroutines.resume
 
-/** The SAMPLE panel: its motion's timeline, a pull on its tab and when it lands, and a swipe on the pads. */
+/** The SAMPLE panel: its motion's timeline, a drag on its handle and when it lands, and a swipe on the pads. */
 class SamplePanelTest {
     @Test
     fun `a swipe 30 percent of the way across, or flung, opens or closes the panel`() {
@@ -93,11 +92,12 @@ class SamplePanelTest {
     }
 
     @Test
-    fun `a pull draws the panel out as far as the finger goes, of its open height`() {
-        assertEquals(0.25f, pullProgress(from = 0f, distance = 100f, reach = 400f))
-        assertEquals(0.5f, pullProgress(from = 0.25f, distance = 100f, reach = 400f))
-        // Back up, from open.
+    fun `a drag on the handle moves the panel as far as the finger goes, of the handle's way`() {
+        // Up, from open.
         assertEquals(0.75f, pullProgress(from = 1f, distance = -100f, reach = 400f))
+        assertEquals(0.5f, pullProgress(from = 0.75f, distance = -100f, reach = 400f))
+        // Back down, drawing it out again.
+        assertEquals(0.75f, pullProgress(from = 0.5f, distance = 100f, reach = 400f))
         // Never past either end.
         assertEquals(1f, pullProgress(from = 0.5f, distance = 900f, reach = 400f))
         assertEquals(0f, pullProgress(from = 0f, distance = -50f, reach = 400f))
@@ -135,13 +135,13 @@ class SamplePanelTest {
     }
 
     @Test
-    fun `the tab takes a pull only the way the panel can go, and leaves the rest to the page`() {
-        // Down on the closed tab, up on the open one: a pull.
-        assertTrue(pullTakes(along = 12f, cross = 3f, progress = 0f))
+    fun `the handle takes a drag only the way the panel can go, and leaves the rest to the page`() {
+        // Up on the open panel's handle: a drag; down on it: the page's scroll.
         assertTrue(pullTakes(along = -12f, cross = 3f, progress = 1f))
-        // Up on the closed tab, down on the open one: the page's scroll.
-        assertFalse(pullTakes(along = -12f, cross = 3f, progress = 0f))
         assertFalse(pullTakes(along = 12f, cross = 3f, progress = 1f))
+        // At the closed end (before it rests and the handle goes): only down, drawing it out again.
+        assertTrue(pullTakes(along = 12f, cross = 3f, progress = 0f))
+        assertFalse(pullTakes(along = -12f, cross = 3f, progress = 0f))
         // More across than along: neither.
         assertFalse(pullTakes(along = 5f, cross = 12f, progress = 0f))
         // Caught on its way: either way.
@@ -275,17 +275,5 @@ class SamplePanelTest {
         panel.start(open = true, reduce = true, scope = scope)
         assertEquals(1f, panel.display)
         assertEquals(1f, panel.row(second = true))
-    }
-
-    @Test
-    fun `the big grid keeps clear of the tab hanging into its room, moving only when it has no room above`() {
-        // One group upright on a 412 x 843 page: the grid as wide as it goes, with room above it, stays.
-        assertEquals(0.dp, koCut(352.dp, 600.dp, 3, PadsClear))
-        assertEquals(0.dp, koCut(352.dp, 300.dp, 3, 0.dp))
-        // As tall as it goes (a small phone): it gives up what the tab needs past the air the grid had.
-        val cut = koCut(352.dp, 300.dp, 3, PadsClear)
-        assertTrue(cut > 4.dp && cut < 5.5.dp) { "$cut" }
-        // Never more than the tab's reach.
-        assertTrue(koCut(352.dp, 120.dp, 3, PadsClear) <= PadsClear)
     }
 }

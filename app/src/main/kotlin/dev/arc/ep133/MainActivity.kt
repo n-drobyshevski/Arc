@@ -352,9 +352,9 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * The SAMPLE panel swiped open: the mode opens, asking for the mic first
-     * when the input last chosen needs it (MIC or USB); RSP doesn't, and
-     * opens with whatever Android last said.
+     * The SAMPLE panel opened (a swipe, or the mic key in the top bar): the
+     * mode opens, asking for the mic first when the input last chosen needs
+     * it (MIC or USB); RSP doesn't, and opens with whatever Android last said.
      */
     private fun enterSample() {
         val input = controller.sample.value.input
@@ -694,9 +694,9 @@ class MainActivity : ComponentActivity() {
             onClick = controller::setClick,
             onTempo = { tempoSheet = true },
         )
-        // The SAMPLE panel in the function keys' place: its tab (or a swipe on Live's pads) opens it and SAMPLE mode
-        // (asking for the mic first where the input needs it), the tab again, a swipe back or Back leaves it; the
-        // pads record while it is open.
+        // The SAMPLE panel in the function keys' place: a swipe on Live's pads opens it and SAMPLE mode (asking for
+        // the mic first where the input needs it), a swipe back, its handle or Back leaves it; the pads record while
+        // it is open. The mic key in the top bar works the mode, and the panel follows.
         val sampleUi = dev.arc.ep133.ui.screens.SampleUi(
             state = sample,
             level = controller::sampleLevel,
@@ -731,6 +731,23 @@ class MainActivity : ComponentActivity() {
         // The piano's notes while it shows, so the bar's display line can name a device note past its ends.
         var pianoRange by remember { mutableStateOf<IntRange?>(null) }
         val liveBar = tab == Tab.LIVE && dev.arc.ep133.ui.screens.liveInBar(dev.arc.ep133.ui.components.LocalArcWindow.current)
+        // Live's mic key in the top bar, while Live has a mirror or offline pads: lit while SAMPLE's panel is open. A
+        // tap opens it as a swipe does (from KEYS, Live goes to PADS for it in the same tap), or closes it, with a tick.
+        val feel = androidx.compose.ui.platform.LocalHapticFeedback.current
+        val sampleKey = if (tab == Tab.LIVE && mirror != null) {
+            val panelOpen = sample.on && !appSettings.liveKeys
+            dev.arc.ep133.ui.components.SampleKey(panelOpen) {
+                if (appSettings.haptics) feel.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.SegmentTick)
+                if (panelOpen) {
+                    controller.exitSample()
+                } else {
+                    if (appSettings.liveKeys) controller.setLiveKeys(false)
+                    sampleUi.onOpen()
+                }
+            }
+        } else {
+            null
+        }
         Box(Modifier.fillMaxSize()) {
             if (debug) {
                 val latency by controller.latency.collectAsStateWithLifecycle()
@@ -859,6 +876,7 @@ class MainActivity : ComponentActivity() {
                     guide = { GuideScreen(onBack = { guideOpen = false }) },
                     // On a phone on its side, Live's display line rides in the top bar.
                     middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, liveRec, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys, wireless = liveWireless, sample = sampleUi) }) else null,
+                    sample = sampleKey,
                 ) {
                     // Back from another section returns to Live, the home section, first.
                     BackHandler(enabled = tab != Tab.LIVE) { selectTab(Tab.LIVE) }

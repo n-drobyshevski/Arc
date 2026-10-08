@@ -72,11 +72,9 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.zIndex
-import dev.arc.ep133.text.CoachText
 import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.ui.components.LocalHwColors
 import dev.arc.ep133.ui.components.cap
-import dev.arc.ep133.ui.components.coachMark
 import dev.arc.ep133.ui.theme.LocalArcColors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -91,19 +89,20 @@ import kotlin.math.roundToInt
  * one after the other; the function keys fade and shrink a little away, and
  * the pads glide down (or, on its side, aside) to make room.
  *
- * The way in is the SAMPLE tab ([PanelTab]) between the function keys and
- * the pads, where the panel comes from: a tap opens the panel, and a pull
- * down (across, on its side) draws it out under the finger. Open, the same
- * tab hangs under the panel and works the other way. A swipe from right to
- * left on the pads opens it too, and one back closes it ([panelSwipe]); so
- * does Back.
+ * The way in is the mic key in the top bar (Live's SAMPLE key, [ArcShell]):
+ * a tap opens the panel, from KEYS too (Live goes to PADS for it), and
+ * another closes it. It works the mode, and the panel follows it
+ * ([MirrorScreen]). Open, a handle hangs under the panel ([PanelHandle]): a
+ * tap closes it, and a drag up (to the left, on its side) puts it away
+ * under the finger. A swipe from right to left on the pads opens it too,
+ * and one back closes it ([panelSwipe]); so does Back.
  *
  * The motion is one timeline, [SamplePanel.progress], run by one
  * Animatable: 0 the keys, 1 the panel unrolled, and in between how far it
  * has unrolled. A tap or a swipe runs it in [PANEL_OPEN_MS] with Material's
  * emphasised decelerate ([PanelOpenEasing]), and back in [PANEL_CLOSE_MS]
- * accelerating ([PanelCloseEasing]); a pull sets it from the finger
- * ([pullProgress]) and lets go with a spring carrying the finger's speed.
+ * accelerating ([PanelCloseEasing]); a drag on the handle sets it from the
+ * finger ([pullProgress]) and lets go with a spring carrying the finger's speed.
  * The display and the rows fade in at their own times along it
  * ([panelFade]), so a reversal midway runs them back from where they are;
  * once a finger has had the panel, until it next rests, they fade in as
@@ -112,8 +111,8 @@ import kotlin.math.roundToInt
  * Nothing recomposes as it moves, which is what made it feel slow. The
  * timeline is read only where things lay out or draw:
  * - the slot ([SampleSlot]) measures its height (on its side the column's
- *   width, [unrollWidth]) from it, and places the keys, the panel and the tab;
- * - the keys' fade and shrink, the panel's clip and slide and the tab's fade
+ *   width, [unrollWidth]) from it, and places the keys, the panel and the handle;
+ * - the keys' fade and shrink, the panel's clip and slide and the handle's fade
  *   are graphics-layer lambdas of that placement, and the panel itself is
  *   measured at its full size, so it doesn't lay out again while it unrolls;
  * - the display and the rows of controls fade in graphics-layer lambdas
@@ -128,10 +127,10 @@ import kotlin.math.roundToInt
  *   grows (the all-groups page fits the panel to the page's width, worked
  *   out ahead), and SAMPLE's line over the sideways column is laid out at
  *   the width the column ends at ([centredAt]).
- * The pull's progress lives in [SamplePanel] too, so a frame of it is a
+ * A drag's progress lives in [SamplePanel] too, so a frame of it is a
  * layout pass, never a composition. Only [SamplePanel.open] and
  * [SamplePanel.moving], each changing once per opening or closing, are read
- * while composing (with whether the keys, the panel or the tab show at all,
+ * while composing (with whether the keys, the panel or the handle show at all,
  * through derivedStateOf). What comes out composes in a frame of its own
  * before the motion starts its clock ([SamplePanel.start]), so a slow first
  * frame doesn't skip the start of it.
@@ -406,23 +405,23 @@ internal const val PANEL_FLING = 1000f
  */
 internal fun swipeLands(travel: Float, velocity: Float): Boolean = travel >= PANEL_SWIPE_AT || velocity >= PANEL_FLING
 
-/** How far a pull on the tab has to draw the panel out (or in), of the way, to open (or close) it when let go. */
+/** How far a drag on the handle has to put the panel away (or draw it back out), of the way, to close (or open) it when let go. */
 internal const val PULL_LANDS = 0.35f
 
-/** A flick of the tab faster than this (dp per second) opens or closes the panel the way it goes, however short. */
+/** A flick of the handle faster than this (dp per second) opens or closes the panel the way it goes, however short. */
 internal const val PULL_FLING = 600f
 
 /**
- * Where a pull on the tab puts the timeline: [from] where it is, the finger
- * gone on [distance] (px, down or, on its side, across; negative back) over
- * [reach], how far the tab goes from one end to the other (so it stays
- * under the finger).
+ * Where a drag on the handle puts the timeline: [from] where it is, the
+ * finger gone on [distance] (px, down or, on its side, across; negative
+ * back) over [reach], how far the handle goes from one end to the other
+ * (so it stays under the finger).
  */
 internal fun pullProgress(from: Float, distance: Float, reach: Float): Float =
     if (reach <= 0f) from else (from + distance / reach).coerceIn(0f, 1f)
 
 /**
- * Whether a pull let go opens (or closes) the panel: [travel] how far it
+ * Whether a drag let go opens (or closes) the panel: [travel] how far it
  * is the way that does (0..1 of the timeline from where the panel rested)
  * and [velocity] (dp per second) the finger's that way, negative back. A
  * flick past [PULL_FLING] goes its own way; slower, past [PULL_LANDS] it
@@ -435,7 +434,7 @@ internal fun pullLands(travel: Float, velocity: Float): Boolean = when {
 }
 
 /**
- * Whether a finger on the tab past the touch slop pulls the panel: gone
+ * Whether a finger on the handle past the touch slop drags the panel: gone
  * [along] (px, down or across on its side, the way that opens it) more
  * than [cross], and a way the panel, at [progress], can go. Up from closed
  * or down from open is left to the page, which scrolls.
@@ -444,7 +443,7 @@ internal fun pullTakes(along: Float, cross: Float, progress: Float): Boolean =
     abs(along) >= abs(cross) && !(along < 0f && progress <= 0f) && !(along > 0f && progress >= 1f)
 
 /**
- * Whether a pull let go leaves the panel open: taken hold of [from] along
+ * Whether a drag let go leaves the panel open: taken hold of [from] along
  * the timeline, let go [to], the finger going at [velocity] (dp per second,
  * the way that opens it; negative back). It counts from the end it was
  * nearer when the finger took hold, so a panel caught on its way (to
@@ -537,147 +536,129 @@ private const val KEYS_SHRINK = 0.06f
 private val KeysSink = 6.dp
 
 /**
- * The SAMPLE tab's row, under the keys or the panel. Upright it adds nothing
- * to the slot: it hangs into the gap under it and the top of the pads' room
- * ([PadsClear]), so the pads stay where they were before the tab.
+ * The handle's row under the open panel. Upright it hangs past the slot's
+ * foot into the gap under it and the room the slot keeps for it
+ * ([HandleRoom]); on its side it is the column's foot.
  */
-internal val TabRow = 16.dp
+internal val HandleRow = 16.dp
 
 /**
- * How far down the pads' room (10 dp under the slot, upright) the tab
- * reaches, with 3 dp of air under it: the big grid's body keeps below it
- * ([koCut]), which one group's pads, with room above them, already do.
+ * How much more the slot holds under the open panel upright, past the
+ * panel itself, for the handle hanging there: with the 10 dp gap above
+ * the pads, the handle's edge has 3 dp of air over them.
  */
-internal val PadsClear = 8.dp
+internal val HandleRoom = 8.dp
 
-/** The width a finger finds the tab in (its height grows to a finger's as Compose's own touch targets do). */
-private val TabTouchWidth = 112.dp
+/** The width a finger finds the handle in (its height grows to a finger's as Compose's own touch targets do). */
+private val HandleTouchWidth = 112.dp
 
-/** The tab's face, its edge below, its corners, the gap and side padding around its word, and its dot. */
-private val TabFace = 9.5.dp
-private val TabEdge = 1.5.dp
-private val TabEdgeX = 1.dp
-private val TabCorner = 5.dp
-private val TabPadding = 7.dp
-private val TabGap = 4.dp
-private val TabDot = 4.dp
+/** The handle's face, its edge below, its corners, the gap and side padding around its word, and its dot. */
+private val HandleFace = 9.5.dp
+private val HandleEdge = 1.5.dp
+private val HandleEdgeX = 1.dp
+private val HandleCorner = 5.dp
+private val HandlePadding = 7.dp
+private val HandleGap = 4.dp
+private val HandleDot = 4.dp
 
-/**
- * How far the tab's edge sits above the foot of its row: upright, the pads
- * are that far below it, and the keys' own edge (3 dp under them) as far
- * above its face.
- */
-private val TabLift = 1.dp
+/** How far the handle's edge sits above the foot of its row. */
+private val HandleLift = 1.dp
 
-/** The tab's word, printed as the function keys' words are, and its letter spacing (em). */
-private val TabWord = 7.5.dp
-private const val TAB_WORD_SPACING = 0.12f
+/** The handle's word, printed as the function keys' words are, and its letter spacing (em). */
+private val HandleWord = 7.5.dp
+private const val HANDLE_WORD_SPACING = 0.12f
 
 /** The panel's corners as it unrolls: its face's ([SamplePanelFace]). */
 private val UnrollCorner = 18.dp
 
 /**
  * The function keys' place on Live's page, holding the [keys] or the SAMPLE
- * panel ([face]), with the SAMPLE tab ([PanelTab]) under them, as far along
- * as [panel] is (see the notes at the top). Upright the slot is as tall as
- * the keys or the panel, the tab's row hanging under it into the gap below
- * (drawn over what is there, and found by a finger first); open, the slot
- * holds [openRoom] more of it, where what comes below can't have the tab
- * over it. [sideways] (the
- * panel's width on its side) it takes the column's height, the tab's row at
- * its foot, and is as wide as the keys' column or the panel; the keys keep
- * the column's height where the room they leave empty at their foot
- * ([foot], px for a column so many px tall) holds the tab, so they don't
- * move for it, and else give up only what it lacks. The panel unrolls from
- * its top, clipped to the slot so it comes out from under SAMPLE's line;
- * the keys fade, shrink and sink as it does, and the tab goes down with it
- * (across, on its side). The tab opens the panel ([onOpen]) and closes it
- * ([onClose]), with the timeline per second a finger let go of it at, or
- * null for a tap; what a finger leaves going (a spring back, the panel let
- * go of when the tab leaves the page) goes on in [scope], which outlives
- * the slot (it moves when the phone turns). [reach] is the panel's open height upright, its width on
- * its side; a pull goes as far as the tab does from one end to the other
- * (from under the keys to under the panel), so the tab stays under the
- * finger. Without [handle] (a column too short for the tab under the panel
- * and its controls) the tab fades as the panel comes out and is
- * gone once it is all out, and Back or a swipe close it.
+ * panel ([face]), with its handle ([PanelHandle]) under the panel, as far
+ * along as [panel] is (see the notes at the top). Closed, it is the keys
+ * and nothing else. Upright the slot is as tall as the keys or the panel,
+ * and open holds [openRoom] more under it, for the handle hanging past its
+ * foot into the gap below (drawn over what is there, and found by a finger
+ * first). [sideways] (the panel's width on its side) it takes the column's
+ * height and is as wide as the keys' column or the panel, the handle's row
+ * at its foot. The panel unrolls from its top, clipped to the slot so it
+ * comes out from under SAMPLE's line; the keys fade, shrink and sink as it
+ * does. The handle comes with the panel: upright it hangs from the panel's
+ * edge as it unrolls, fading in as it comes out from under the line; on its
+ * side it stays at the foot under the panel's middle and fades in over the
+ * first half. It closes the panel ([onClose]), or opens it again while it
+ * is closing ([onOpen]), with the timeline per second a finger let go of
+ * it at, or null for a tap; what a finger leaves going (a spring back, the
+ * panel let go of when the handle leaves the page) goes on in [scope],
+ * which outlives the slot (it moves when the phone turns). A drag goes as
+ * far as the handle does from one end to the other (upright from under the
+ * line to under the panel, on its side from the column's middle to the
+ * panel's), so the handle stays under the finger. Without [handle] (a
+ * column too short for it under the panel and its controls) there is none,
+ * and Back, a swipe or the mic key close the panel.
  */
 @Composable
 internal fun SampleSlot(
     panel: SamplePanel,
     onOpen: (velocity: Float?) -> Unit,
     onClose: (velocity: Float?) -> Unit,
-    reach: Dp,
     scope: CoroutineScope,
     modifier: Modifier = Modifier,
     sideways: Dp? = null,
     handle: Boolean = true,
-    foot: Density.(height: Int) -> Int = { 0 },
     openRoom: Dp = 0.dp,
     keys: @Composable () -> Unit,
     face: @Composable () -> Unit,
 ) {
-    // Each there while it shows, or is about to: the panel from the moment it opens (or a finger draws it out), the
-    // keys from the moment it closes. derivedStateOf: composition hears of the timeline only as these change.
+    // Each there while it shows, or is about to: the panel (and its handle) from the moment it opens, the keys from
+    // the moment it closes. derivedStateOf: composition hears of the timeline only as these change.
     val showFace by remember(panel) { derivedStateOf { panel.open || panel.progress > 0f } }
     val showKeys by remember(panel) { derivedStateOf { !panel.open || panel.progress < 1f } }
-    // Without a handle, the tab until the panel is all the way out, fading as it comes.
-    val showTab by remember(panel, handle) { derivedStateOf { handle || !panel.open || panel.progress < 1f } }
-    // The keys' extent the tab starts from (their height, on its side their width), as last laid out.
-    val keysAt = remember { KeysExtent() }
+    // The keys' and the panel's extents, as last laid out: how far the handle goes.
+    val at = remember { SlotExtents() }
     val across = sideways != null
     Layout(
         content = {
             if (showKeys) Box(Modifier.layoutId(SLOT_KEYS)) { keys() }
-            if (showFace) Box(Modifier.layoutId(SLOT_FACE).semantics { paneTitle = MirrorText.SAMPLE_TAG }) { face() }
-            if (showTab) {
-                Box(Modifier.layoutId(SLOT_TAB)) {
-                    // Upright from under the keys to under the panel; on its side from the column's middle to the panel's.
-                    PanelTab(panel, { if (across) (reach.toPx() - keysAt.px) / 2f else reach.toPx() - keysAt.px }, across, scope, onOpen, onClose)
+            if (showFace) {
+                Box(Modifier.layoutId(SLOT_FACE).semantics { paneTitle = MirrorText.SAMPLE_TAG }) { face() }
+                if (handle) {
+                    Box(Modifier.layoutId(SLOT_HANDLE)) {
+                        PanelHandle(panel, { if (across) (at.face - at.keys) / 2f else at.face + UnrollFrom.toPx() }, across, scope, onOpen, onClose)
+                    }
                 }
             }
         },
-        // Over what comes after it, where the tab hangs into the pads' room.
+        // Over what comes after it, where the handle hangs into the pads' room.
         modifier = modifier.zIndex(1f),
     ) { measurables, constraints ->
         val m = panel.unroll
-        val row = TabRow.roundToPx()
+        val row = HandleRow.roundToPx()
         val keysM = measurables.firstOrNull { it.layoutId == SLOT_KEYS }
         val faceM = measurables.firstOrNull { it.layoutId == SLOT_FACE }
-        val tabM = measurables.firstOrNull { it.layoutId == SLOT_TAB }
+        val handleM = measurables.firstOrNull { it.layoutId == SLOT_HANDLE }
         val keysP: Placeable?
         val faceP: Placeable?
         val w: Int
         val h: Int
-        val tabY: Int
         if (sideways == null) {
             val loose = constraints.copy(minHeight = 0)
             keysP = keysM?.measure(loose)
-            // The panel at its own width (a tablet's keeps to the start), the tab centred under it.
+            // The panel at its own width (a tablet's keeps to the start), the handle centred under it.
             faceP = faceM?.measure(loose.copy(minWidth = 0))
             w = if (constraints.hasBoundedWidth) constraints.maxWidth else maxOf(keysP?.width ?: 0, faceP?.width ?: 0)
-            // Under the keys or the panel, the tab's row in the gap under the slot, past its bottom (nothing there clips it).
-            tabY = lerpPx(keysP?.height ?: 0, faceP?.height ?: 0, m)
-            h = tabY + lerpPx(0, openRoom.roundToPx(), m)
+            h = lerpPx(keysP?.height ?: 0, faceP?.height ?: 0, m) + lerpPx(0, openRoom.roundToPx(), m)
         } else {
             val open = sideways.roundToPx()
             h = constraints.maxHeight
-            tabY = h - row
-            // As little as the keys can give up for the tab: none where their own foot holds it.
-            var lo = 0
-            var hi = row
-            while (lo < hi) {
-                val cut = (lo + hi) / 2
-                if (cut + foot(h - cut) >= row) hi = cut else lo = cut + 1
-            }
-            keysP = keysM?.measure(Constraints(maxWidth = constraints.maxWidth, maxHeight = (h - lo).coerceAtLeast(0)))
-            faceP = faceM?.measure(Constraints.fixed(open, (if (handle) tabY else h).coerceAtLeast(0)))
+            keysP = keysM?.measure(Constraints(maxWidth = constraints.maxWidth, maxHeight = h))
+            faceP = faceM?.measure(Constraints.fixed(open, (if (handle) h - row else h).coerceAtLeast(0)))
             w = lerpPx(keysP?.width ?: 0, open, m)
         }
         val keysW = keysP?.width ?: w
         val faceW = faceP?.width ?: w
-        if (keysP != null) keysAt.px = (if (sideways == null) keysP.height else keysP.width).toFloat()
-        val tabP = tabM?.measure(Constraints())
+        if (keysP != null) at.keys = (if (sideways == null) keysP.height else keysP.width).toFloat()
+        if (faceP != null) at.face = (if (sideways == null) faceP.height else faceP.width).toFloat()
+        val handleP = handleM?.measure(Constraints())
         layout(w, h) {
             keysP?.placeWithLayer(0, 0) {
                 val u = panel.unroll
@@ -699,22 +680,34 @@ internal fun SampleSlot(
                     clip = false
                 }
             }
-            // Centred under the keys, then under the panel as it unrolls; with no room for it under the panel, it fades.
-            tabP?.placeWithLayer(lerpPx(keysW, faceW, m) / 2 - tabP.width / 2, tabY) {
-                alpha = if (handle) 1f else 1f - panel.unroll
+            if (handleP != null) {
+                if (sideways == null) {
+                    // From the panel's edge as it unrolls (the panel's height down, less how far up it still is), and
+                    // out from under the line as that edge comes past the slot's top.
+                    val edge = ((faceP?.height ?: 0) * m - UnrollFrom.toPx() * (1f - m)).roundToInt()
+                    handleP.placeWithLayer(faceW / 2 - handleP.width / 2, edge.coerceAtLeast(0)) {
+                        alpha = (edge / row.toFloat()).coerceIn(0f, 1f)
+                    }
+                } else {
+                    // At the foot, under the middle of the panel as it widens.
+                    handleP.placeWithLayer(lerpPx(keysW, faceW, m) / 2 - handleP.width / 2, h - row) {
+                        alpha = (panel.unroll * 2f).coerceIn(0f, 1f)
+                    }
+                }
             }
         }
     }
 }
 
-/** How tall (on its side, wide) the function keys were last laid out, px: where the tab starts from. */
-private class KeysExtent {
-    var px = 0f
+/** How tall (on its side, wide) the function keys and the panel were last laid out, px: how far the handle goes. */
+private class SlotExtents {
+    var keys = 0f
+    var face = 0f
 }
 
 private const val SLOT_KEYS = "keys"
 private const val SLOT_FACE = "face"
-private const val SLOT_TAB = "tab"
+private const val SLOT_HANDLE = "handle"
 
 /** [a] to [b] at [f] (0..1), in whole pixels. */
 private fun lerpPx(a: Int, b: Int, f: Float): Int = (a + (b - a) * f).roundToInt()
@@ -863,22 +856,22 @@ private class RestRoom {
 }
 
 /**
- * The SAMPLE tab, under the function keys or, open, the panel (an addition,
- * after a drawer's pull tab): a small dark cap in the keys' print, SAMPLE's
- * orange dot and its word. A tap opens the panel ([onOpen]), or closes it
- * ([onClose]) when open. A pull down ([across] on its side: to the right)
- * draws it out under the finger, [reach] (px, how far the tab goes from
+ * The handle under the open SAMPLE panel (an addition, after a drawer's
+ * handle): a small dark cap in the keys' print, SAMPLE's orange dot and its
+ * word. A tap closes the panel ([onClose]), or, caught while it closes,
+ * opens it again ([onOpen]). A drag up ([across] on its side: to the left)
+ * puts it away under the finger, [reach] (px, how far the handle goes from
  * end to end, as it is laid out now) for all of it ([pullProgress]); one
- * up (to the left) puts it back. One the way the panel can't go (up from
- * closed, down from open) is left to the page, which scrolls. Let go, it
- * opens or closes on a spring carrying the finger's speed, or springs back
- * to the end it was nearer when the finger took hold ([pullOpens]); what
- * it leaves going runs in [scope]. A screen reader hears it as the button [MirrorText.OPEN_SAMPLE], or
- * [MirrorText.CLOSE_SAMPLE] while the panel is open. The first-run guide
- * points at it.
+ * back down (to the right) draws it out again. One the way the panel can't
+ * go (down from open) is left to the page, which scrolls. Let go, it opens
+ * or closes on a spring carrying the finger's speed, or springs back to the
+ * end it was nearer when the finger took hold ([pullOpens]); what it leaves
+ * going runs in [scope]. A screen reader hears it as the button
+ * [MirrorText.CLOSE_SAMPLE], or [MirrorText.OPEN_SAMPLE] while the panel
+ * closes.
  */
 @Composable
-private fun PanelTab(panel: SamplePanel, reach: Density.() -> Float, across: Boolean, scope: CoroutineScope, onOpen: (Float?) -> Unit, onClose: (Float?) -> Unit) {
+private fun PanelHandle(panel: SamplePanel, reach: Density.() -> Float, across: Boolean, scope: CoroutineScope, onOpen: (Float?) -> Unit, onClose: (Float?) -> Unit) {
     val c = LocalArcColors.current
     val hw = LocalHwColors.current
     val open = panel.open
@@ -888,7 +881,7 @@ private fun PanelTab(panel: SamplePanel, reach: Density.() -> Float, across: Boo
     val reduce = reducedMotion()
     Box(
         Modifier
-            .size(TabTouchWidth, TabRow)
+            .size(HandleTouchWidth, HandleRow)
             .pointerInput(panel, across, scope) {
                 if (panel.fixed) return@pointerInput
                 awaitEachGesture {
@@ -898,7 +891,7 @@ private fun PanelTab(panel: SamplePanel, reach: Density.() -> Float, across: Boo
                     var pulling = false
                     var settled = false
                     var from = 0f
-                    // How far the finger has gone, summed from each move: the tab goes with the panel, so where the
+                    // How far the finger has gone, summed from each move: the handle goes with the panel, so where the
                     // finger is on it says little of how far it has gone.
                     var moved = Offset.Zero
                     try {
@@ -941,12 +934,12 @@ private fun PanelTab(panel: SamplePanel, reach: Density.() -> Float, across: Boo
                                 continue
                             }
                             ch.consume()
-                            // As far as the finger went, of the tab's way from end to end as it is now laid out.
+                            // As far as the finger went, of the handle's way from end to end as it is now laid out.
                             panel.pull(pullProgress(panel.progress, if (across) step.x else step.y, span(this)))
                         }
                     } finally {
-                        // The gesture ended without a lift (another took the finger, or the tab left the page): the
-                        // panel goes back to rest, in a scope that outlives the tab.
+                        // The gesture ended without a lift (another took the finger, or the handle left the page): the
+                        // panel goes back to rest, in a scope that outlives the handle.
                         if (pulling && !settled) panel.start(panel.open, reduce, scope)
                     }
                 }
@@ -963,19 +956,17 @@ private fun PanelTab(panel: SamplePanel, reach: Density.() -> Float, across: Boo
     ) {
         Row(
             Modifier
-                .padding(bottom = TabLift)
-                .coachMark("live.sample", CoachText.SAMPLE, c.signal, c.onSignal)
-                .padding(end = TabEdgeX, bottom = TabEdge)
-                .height(TabFace)
-                .cap(hw.darkFace, hw.darkEdge, RoundedCornerShape(TabCorner), press = 0f, dx = TabEdgeX, dy = TabEdge)
-                .padding(horizontal = TabPadding),
+                .padding(end = HandleEdgeX, bottom = HandleLift + HandleEdge)
+                .height(HandleFace)
+                .cap(hw.darkFace, hw.darkEdge, RoundedCornerShape(HandleCorner), press = 0f, dx = HandleEdgeX, dy = HandleEdge)
+                .padding(horizontal = HandlePadding),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(TabGap),
+            horizontalArrangement = Arrangement.spacedBy(HandleGap),
         ) {
-            Canvas(Modifier.size(TabDot)) { drawCircle(c.signal) }
+            Canvas(Modifier.size(HandleDot)) { drawCircle(c.signal) }
             Text(
                 MirrorText.SAMPLE_TAG.uppercase(),
-                style = viewWordStyle(TabWord, TAB_WORD_SPACING).copy(lineHeight = 1.em),
+                style = viewWordStyle(HandleWord, HANDLE_WORD_SPACING).copy(lineHeight = 1.em),
                 color = hw.darkInk,
                 maxLines = 1,
                 softWrap = false,

@@ -64,7 +64,6 @@ import dev.arc.ep133.features.Tempo
 import dev.arc.ep133.protocol.Device
 import dev.arc.ep133.text.CoachText
 import dev.arc.ep133.text.MirrorText
-import dev.arc.ep133.ui.components.CapDy
 import dev.arc.ep133.ui.components.LocalArcWindow
 import dev.arc.ep133.ui.components.LocalHwColors
 import dev.arc.ep133.ui.components.cap
@@ -191,18 +190,6 @@ internal fun columnFit(height: Dp): ColumnFit {
     val withLed = (height - ColumnGapTight * gaps) / KEY_COUNT - line
     if (withLed >= ColumnCapLed) return ColumnFit(withLed, ColumnGapTight, true)
     return ColumnFit(((height - ColumnGapTight * gaps) / KEY_COUNT).coerceIn(ColumnCapMin, ColumnCap), ColumnGapTight, false)
-}
-
-/**
- * The room the column's keys leave empty under them in [height] (they sit in
- * its middle), below the last cap's edge: where the SAMPLE tab goes
- * ([SampleSlot]) without moving them. None once the gaps are as tight as
- * they go.
- */
-internal fun columnFoot(height: Dp): Dp {
-    val fit = columnFit(height)
-    val keys = (fit.cap + if (fit.led) CapToLed + LedLine else 0.dp) * KEY_COUNT + fit.gap * (KEY_COUNT - 1)
-    return ((height - keys) / 2 - CapDy).coerceAtLeast(0.dp)
 }
 
 /** The row's height: the cap, the gap and the LED line. */

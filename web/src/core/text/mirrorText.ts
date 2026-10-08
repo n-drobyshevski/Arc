@@ -581,9 +581,9 @@ export const MirrorText = {
 
   // ---------- SAMPLE: recording into a pad (an addition) ----------
   /**
-   * The SAMPLE panel in the function keys' place, opened with its tab
-   * between Live's function keys and pads: screen readers get the tab as
-   * these, closed and open.
+   * The handle under the SAMPLE panel open in the function keys' place:
+   * screen readers get it as these, while the panel is open and while it
+   * closes (a tap then opens it again).
    */
   OPEN_SAMPLE: 'Open sample',
   CLOSE_SAMPLE: 'Back to keys',

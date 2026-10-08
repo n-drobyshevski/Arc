@@ -216,6 +216,6 @@ class FeatureTextTest {
         assertEquals("Put 1 offline pad change and 2 new samples on the EP-133?", MirrorText.putOffline(1, samples = 2))
         assertEquals("Review samples", SettingsText.REVIEW_SAMPLES)
         assertTrue(SettingsText.REVIEW_SAMPLES_NOTE.endsWith("as on the EP-133."))
-        assertEquals("Sample: tap or pull out", CoachText.SAMPLE)
+        assertEquals("Sample", CoachText.SAMPLE)
     }
 }

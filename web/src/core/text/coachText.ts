@@ -21,8 +21,8 @@ export const CoachText = {
   /** Live's function keys beside MODE (now the KEYS key). */
   PROJECT: 'Next project: tap; hold + pad 1–9 to pick',
   TEMPO: 'Click: tap; hold for tempo',
-  /** The SAMPLE panel's tab between Live's function keys and pads: a tap opens the panel, a pull draws it out. */
-  SAMPLE: 'Sample: tap or pull out',
+  /** The mic key in Live's top bar: a tap opens the SAMPLE panel, another closes it. */
+  SAMPLE: 'Sample',
   OCTAVE: 'Octave',
   SCALE: 'Scale',
   KEY: 'Key',
