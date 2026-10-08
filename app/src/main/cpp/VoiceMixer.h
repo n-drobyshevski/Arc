@@ -30,11 +30,15 @@
 // - Timed commands wait in fixed storage too: at most MAX_PENDING, kept in
 //   order by insertion; one that finds it full is applied at once, as if it
 //   came late (Kotlin keeps any number).
+// - The FX bus (fx/FxBus.h) is a member with fixed storage for maxFrames;
+//   [reset] starts it over at the new rate too, its settings kept.
 //
 // Commands take effect at the next [render]; one thread calls everything.
 #pragma once
 
 #include <cstdint>
+
+#include "fx/FxBus.h"
 
 namespace arc {
 
@@ -61,6 +65,10 @@ struct VoiceShape {
     int32_t mode = static_cast<int32_t>(VoiceMode::Gate);
     /** Above 0: starting this voice cuts every other sounding voice of the group. */
     int32_t muteGroup = 0;
+    /** The group (0..3) whose FX send and sidechain duck the voice goes through; -1: neither (not muteGroup). */
+    int32_t bus = -1;
+    /** Starting this voice starts the sidechain's duck, even when it has nothing to play. */
+    bool duckSource = false;
 };
 
 /** A sound in native memory: 16-bit PCM, [channels] interleaved. Its owner frees it. */
@@ -138,6 +146,12 @@ public:
     bool stopAll();
     /** Drops the timed starts and releases still waiting for their frame; those sent after it wait as usual. */
     bool flushTimed();
+    /**
+     * Sets up the FX bus: [what] is one of fx::FxControl's commands, with its
+     * [index], [x] and [y]. Not timed: it takes effect at the next render's
+     * start, in order with the other commands.
+     */
+    bool control(int32_t what, int32_t index, float x, float y);
     /** Commands that still fit before the next [render]. */
     int room() const { return MAX_COMMANDS - commandCount_; }
 
@@ -145,7 +159,7 @@ public:
      * Mixes the next [frames] (at most maxFrames) stereo frames into [out]
      * (left, right, …): the commands first, then the timed ones already due,
      * then the voices up to the next timed command's frame inside the render,
-     * that command, and on.
+     * that command, and on; then the FX bus, then the clip.
      */
     void render(int16_t *out, int frames);
 
@@ -166,10 +180,11 @@ public:
     uint32_t keysVersion() const { return keysVersion_; }
 
 private:
-    enum class Kind : uint8_t { Start, Release, Cut, StopAll, FlushTimed };
+    enum class Kind : uint8_t { Start, Release, Cut, StopAll, FlushTimed, Control };
 
     // [at]: the output frame a timed command waits for, NOW for none. A
-    // Release's [tag] other than 0: only the voices started with it.
+    // Release's [tag] other than 0: only the voices started with it. A
+    // Control's [what], index ([key]), [x] and [y] go to the FX bus.
     struct Command {
         Kind kind;
         int32_t key;
@@ -178,6 +193,9 @@ private:
         int64_t tag;
         VoiceShape shape;
         int64_t at;
+        int32_t what;
+        float x;
+        float y;
     };
 
     // Kotlin's Voice: [sample] read up to before frame [end], [level] and the
@@ -205,6 +223,8 @@ private:
         bool choked;
         /** Released (a OneShot voice too, though it plays on): stolen before voices still held. */
         bool letGo;
+        /** The FX bus group, or -1. */
+        int32_t bus;
     };
 
     void setRate(int outRate);
@@ -240,6 +260,7 @@ private:
     Voice voices_[VOICE_SLOTS];
     int voiceCount_ = 0;
     float *mix_;
+    fx::FxBus fx_;
     int64_t frame_ = 0;
     Started started_[MAX_STARTED];
     int startedCount_ = 0;

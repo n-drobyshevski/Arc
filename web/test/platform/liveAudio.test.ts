@@ -33,7 +33,8 @@ import {
   type ToMixer,
 } from '../../src/platform/audio/liveAudio'
 import { WebLatencyHint } from '../../src/core/text/latencyText'
-import { VoiceMixer } from '../../src/core/formats/voiceMixer'
+import { VoiceMixer, VoiceShape } from '../../src/core/formats/voiceMixer'
+import { FxControl } from '../../src/core/formats/fx/fxBus'
 import { WebText } from '../../src/core/text/webText'
 import type { LiveAudioDeps } from '../../src/state/deps'
 
@@ -316,6 +317,67 @@ describe('MixerHost', () => {
   })
 })
 
+
+describe('MixerHost FX', () => {
+  /** A square wave on [shape]'s bus, through a host given [setup] first: 2048 frames of the left channel. */
+  function played(setup: ToMixer[], shape?: Partial<VoiceShape>): Float32Array {
+    const h = new MixerHost(RATE, () => undefined)
+    for (const m of setup) h.handle(m)
+    h.handle({ t: 'load', id: 1, pcm: new Int16Array(4800).map((_, i) => (i % 40 < 20 ? 12000 : -12000)) })
+    const start: ToMixer = { t: 'start', key: 'k', id: 1, channels: 1, sampleRate: RATE, semitones: 0, tag: 0 }
+    h.handle(shape === undefined ? start : { ...start, shape })
+    const l = new Float32Array(2048)
+    h.render(l, new Float32Array(2048), 2048, 0)
+    return l
+  }
+  const wet: ToMixer[] = [
+    { t: 'control', what: FxControl.SEND, index: 1, x: 1, y: 0 },
+    { t: 'control', what: FxControl.FX_TYPE, index: FxControl.DISTORTION, x: 1, y: 0.5 },
+  ]
+
+  it("a control reaches the mixer's FX bus, heard by a voice on that group's bus", () => {
+    const dry = played([])
+    expect(played(wet, { bus: 1 })).not.toEqual(dry)
+    // Another group's voice, or one on no bus, plays dry.
+    expect(played(wet, { bus: 2 })).toEqual(dry)
+    expect(played(wet)).toEqual(dry)
+  })
+
+  it('a start without a shape plays as VoiceShape.DEFAULT; one with a shape takes its fields over the defaults', () => {
+    const plain = new VoiceMixer(RATE)
+    const pcm = tone()
+    plain.start('k', pcm, 1, RATE, 0, 0, VoiceShape.of({ gain: 0.5, pan: 16 }))
+    const want = new Float32Array(128)
+    plain.renderPlanar(want, new Float32Array(128), 128)
+    const h = new MixerHost(RATE, () => undefined)
+    h.handle({ t: 'load', id: 1, pcm })
+    h.handle({ t: 'start', key: 'k', id: 1, channels: 1, sampleRate: RATE, semitones: 0, tag: 0, shape: { gain: 0.5, pan: 16 } })
+    const got = new Float32Array(128)
+    h.render(got, new Float32Array(128), 128, 0)
+    expect(got).toEqual(want)
+    expect(played([], {})).toEqual(played([]))
+  })
+
+  it('a duck source ducks the sidechain\'s groups even through the message path', () => {
+    const duck: ToMixer[] = [{ t: 'control', what: FxControl.SIDECHAIN, index: 0b0010, x: 0.5, y: 0.5 }]
+    const h = new MixerHost(RATE, () => undefined)
+    for (const m of duck) h.handle(m)
+    h.handle({ t: 'load', id: 1, pcm: tone(RATE) })
+    h.handle({ t: 'start', key: 'held', id: 1, channels: 1, sampleRate: RATE, semitones: 0, tag: 0, shape: { bus: 1 } })
+    const before = new Float32Array(128)
+    h.render(before, new Float32Array(128), 128, 0)
+    h.handle({ t: 'start', key: 'kick', id: 1, channels: 1, sampleRate: RATE, semitones: 0, tag: 0, shape: { bus: 0, gain: 0, duckSource: true } })
+    const after = new Float32Array(1024)
+    h.render(after, new Float32Array(1024), 1024, 0)
+    // The held voice dips toward the floor once the duck source starts.
+    expect(after[1000]!).toBeLessThan(before[100]! * 0.5)
+  })
+
+  it('transferable posts a control as it is', () => {
+    const m: ToMixer = { t: 'control', what: FxControl.FX_XY, index: 0, x: 0.25, y: 0.75 }
+    expect(transferable(m)).toEqual([m, []])
+  })
+})
 
 async function opened(backend = new FakeBackend()) {
   const live = new LiveAudio(backend)
@@ -1007,6 +1069,62 @@ describe('LiveAudio', () => {
     backend.link.sent.length = 0
     expect(live.press('k', 's', PAD)).toBe(false)
     expect(backend.link.sent).toEqual([])
+  })
+
+  it('control reaches the open output; a press with a shape carries it', async () => {
+    const { live, backend } = await opened()
+    live.preload('s', tone(), 1, RATE)
+    backend.link.sent.length = 0
+    live.control(FxControl.SEND, 2, 0.5, 0)
+    live.press('k', 's', { ...PAD, shape: { bus: 2, duckSource: true } })
+    live.press('j', 's', PAD)
+    expect(backend.link.sent).toEqual([
+      { t: 'control', what: FxControl.SEND, index: 2, x: 0.5, y: 0 },
+      { t: 'start', key: 'k', id: 1, channels: 1, sampleRate: RATE, semitones: 0, tag: 1000, shape: { bus: 2, duckSource: true } },
+      { t: 'start', key: 'j', id: 1, channels: 1, sampleRate: RATE, semitones: 0, tag: 1000 },
+    ])
+    expect('shape' in backend.link.sent[2]!).toBe(false)
+  })
+
+  it('control with no output opens none; the next output gets every setting kept, before any press, punch-ins aside', async () => {
+    const backend = new FakeBackend()
+    backend.deferred = true
+    const live = new LiveAudio(backend)
+    live.control(FxControl.FX_TYPE, FxControl.REVERB, 0.5, 0.5)
+    live.control(FxControl.FX_XY, 0, 0.2, 0.9)
+    live.control(FxControl.SEND, 0, 0.3, 0)
+    live.control(FxControl.SEND, 0, 0.4, 0)
+    live.control(FxControl.PUNCH, FxControl.STUTTER, 1, 0)
+    expect(backend.contexts).toHaveLength(0)
+    live.preload('s', tone(), 1, RATE)
+    live.press('k', 's', PAD)
+    backend.settle()
+    await flush()
+    expect(backend.link.sent.map((m) => (m.t === 'control' ? [m.what, m.index, m.x, m.y] : m.t))).toEqual([
+      'load',
+      [FxControl.FX_TYPE, FxControl.REVERB, 0.2, 0.9],
+      [FxControl.SEND, 0, 0.4, 0],
+      'start',
+    ])
+  })
+
+  it('a new output after a close gets the FX settings again; a suspended one keeps its own', async () => {
+    const { live, backend } = await opened()
+    live.control(FxControl.COMP, 1, 0.7, 0.2)
+    live.control(FxControl.TEMPO, 0, 140, 0)
+    live.suspend()
+    live.open()
+    await flush()
+    expect(backend.links).toHaveLength(1)
+    expect(backend.link.sent.filter((m) => m.t === 'control')).toHaveLength(2)
+    live.close()
+    live.open()
+    await flush()
+    expect(backend.links).toHaveLength(2)
+    expect(backend.link.sent).toEqual([
+      { t: 'control', what: FxControl.COMP, index: 1, x: 0.7, y: 0.2 },
+      { t: 'control', what: FxControl.TEMPO, index: 0, x: 140, y: 0 },
+    ])
   })
 })
 

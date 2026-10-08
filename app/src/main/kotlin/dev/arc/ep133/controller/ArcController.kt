@@ -68,6 +68,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -257,9 +258,16 @@ private const val PAD_WRITE_DELAY_MS = 150L
  * level, pan, trim, envelope (ticks, [PadSettings.ENV_MS_PER_TICK] each, a
  * guess) and play mode, its mute group being its pad group's ([group] 0..3).
  * For KEYS ([keys]), where each note is a voice of its own, LEGATO is a held
- * note and the mute group is left out (the notes would cut each other).
+ * note and the mute group is left out (the notes would cut each other). It
+ * goes through its group's FX bus (its send, the sidechain's duck), and
+ * [duckSource] when the pad is the sidechain's source.
  */
-internal fun voiceShape(s: dev.arc.ep133.features.PadSettings, group: Int, keys: Boolean = false): dev.arc.ep133.formats.VoiceShape {
+internal fun voiceShape(
+    s: dev.arc.ep133.features.PadSettings,
+    group: Int,
+    keys: Boolean = false,
+    duckSource: Boolean = false,
+): dev.arc.ep133.formats.VoiceShape {
     val ms = dev.arc.ep133.features.PadSettings.ENV_MS_PER_TICK
     return dev.arc.ep133.formats.VoiceShape(
         semitones = s.pitch,
@@ -276,6 +284,8 @@ internal fun voiceShape(s: dev.arc.ep133.features.PadSettings, group: Int, keys:
         },
         // KEYS' notes are one pad's: its mute group would cut its own chord.
         muteGroup = if (s.muteGroup && !keys) group + 1 else 0,
+        bus = group,
+        duckSource = duckSource,
     )
 }
 
@@ -323,6 +333,9 @@ private const val TEMPO_CHECK_MS = 250L
 
 /** How long the click's tempo rests before library.json gets it. */
 private const val TEMPO_SYNC_MS = 1000L
+
+/** How long FX's knobs rest before fx.json gets them. */
+private const val FX_SAVE_MS = 500L
 
 /**
  * How long an idle mirror showing [st] may sleep before [st] changes by
@@ -1943,6 +1956,8 @@ class ArcController(
         // LiveAudio.close leaves the click on (the debug engine switch closes and opens again).
         setClick(false)
         tapTempo.reset()
+        // A punch-in lasts while it is held; the next output starts with none.
+        fxDesk.punchAllUp()
         held.clear()
         cut.clear()
         unsure.clear()
@@ -3467,6 +3482,114 @@ class ArcController(
         return withContext(Dispatchers.Default) { PcmSound.ofWav(wav) }
     }
 
+    // ---------- FX: the master effect, sends, compressor, sidechain, punch-ins (an addition) ----------
+
+    // Every project's FX, read from their file once: in arc's own files, as they never go on the EP-133.
+    // Before PATTERN's, whose plan asks [shapeFor] (the sidechain's source) as it starts.
+    private val fxFile by lazy { java.io.File(context.filesDir, "fx.json") }
+    // Each change goes straight to Live's output, which keeps the last of each for the next output.
+    private val fxDesk = FxDesk(liveAudio::control) { saveFx() }
+    // The knobs turn many times a second: fx.json is written once they rest.
+    private var fxSave: Job? = null
+
+    /** The FX of the project Live shows (the FX sheet and key). */
+    val fx: StateFlow<dev.arc.ep133.features.FxSettings> get() = fxDesk.fx
+
+    /** The punch-in slots held, in the order pressed (the display line's PUNCH). */
+    val punches: StateFlow<Set<Int>> get() = fxDesk.punches
+
+    init {
+        scope.launch { loadFx() }
+        // Another project (switched on the device, by PROJECT, or offline): its own FX.
+        scope.launch {
+            _state.map { it.mirror?.state?.activeProject }.filterNotNull().distinctUntilChanged().collect { fxDesk.switchTo(it) }
+        }
+        // The sidechain's source moved, on or off: the voices started from now duck as it says.
+        scope.launch {
+            fxDesk.fx.map { it.sidechain.on to (it.sidechain.group to it.sidechain.pad) }.distinctUntilChanged().drop(1)
+                .collect { refreshPatternPlan() }
+        }
+        // The tempo Live plays at (the pattern's: the EP-133's while it sends its clock, else the
+        // phone's), for the delay's divisions and the punch-ins' beats.
+        scope.launch {
+            combine(_state.map { s -> s.mirror?.state?.bpm }.distinctUntilChanged(), settings.map { it.liveTempo }.distinctUntilChanged()) { device, tempo ->
+                patternBpm(device, tempo)
+            }.distinctUntilChanged().collect { liveAudio.control(dev.arc.ep133.formats.fx.FxControl.TEMPO, 0, it.toFloat(), 0f) }
+        }
+    }
+
+    /** fx.json, read once; what was changed before it was read is kept over it. Its settings reach the output then. */
+    private suspend fun loadFx() {
+        if (fxDesk.loaded) return
+        val read = withContext(Dispatchers.IO) {
+            runCatching { dev.arc.ep133.features.FxBook.fromJson(fxFile.readText()) }.getOrNull()
+        }
+        if (fxDesk.load(read)) saveFx()
+    }
+
+    /** Keeps every project's FX once the knobs rest (written whole, then renamed over the file); none deletes it. */
+    private fun saveFx() {
+        if (!fxDesk.loaded) return
+        fxSave?.cancel()
+        fxSave = scope.launch {
+            delay(FX_SAVE_MS)
+            val text = fxDesk.json()
+            withContext(kotlinx.coroutines.NonCancellable + Dispatchers.IO) {
+                synchronized(fxFile) {
+                    runCatching {
+                        if (text == null) {
+                            fxFile.delete()
+                        } else {
+                            val tmp = java.io.File(fxFile.path + ".tmp")
+                            tmp.writeText(text)
+                            if (!tmp.renameTo(fxFile)) tmp.delete()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /** The effect: [type], or none when [type] is on already (its key tapped again). */
+    fun setFxType(type: dev.arc.ep133.features.FxType, group: Int? = null) = fxDesk.setType(type, group)
+
+    /** The effect's X and Y knobs (0..1). */
+    fun setFxXY(x: Float, y: Float) = fxDesk.setXY(x, y)
+
+    /** Group [group]'s (0..3, A..D) send to the effect (0..1). */
+    fun setFxSend(group: Int, v: Float) = fxDesk.setSend(group, v)
+
+    /** The master compressor: on or off, its drive [x] and speed [y] (0..1); what is left out stays. */
+    fun setComp(on: Boolean = fx.value.comp.on, x: Float = fx.value.comp.x, y: Float = fx.value.comp.y) = fxDesk.setComp(on, x, y)
+
+    /** The sidechain on or off. */
+    fun setSidechainOn(on: Boolean) = fxDesk.setSidechainOn(on)
+
+    /** The sidechain's source: the selected pad, [pad] (0..11) of [group] (0..3). */
+    fun setSidechainSource(group: Int, pad: Int) = fxDesk.setSidechainSource(group, pad)
+
+    /** Group [group] (0..3) ducked by the sidechain, or no longer. */
+    fun toggleSidechainDest(group: Int) = fxDesk.toggleSidechainDest(group)
+
+    /** The duck's length [x] and shape [y] (0..1). */
+    fun setSidechainXY(x: Float, y: Float) = fxDesk.setSidechainXY(x, y)
+
+    /**
+     * A punch-in pressed while FX is held: [slot] (0..11, [punchSlotForPad]
+     * of the pad) at [depth] (0..1; a press however light punches in). Sent
+     * on the caller's thread, so it is heard with the next burst.
+     */
+    fun punchDown(slot: Int, depth: Float) = fxDesk.punchDown(slot, depth)
+
+    /** A punch-in held goes deeper or lighter (the finger's pressure or place on the pad). */
+    fun punchMove(slot: Int, depth: Float) = fxDesk.punchMove(slot, depth)
+
+    /** A punch-in's pad let go of. */
+    fun punchUp(slot: Int) = fxDesk.punchUp(slot)
+
+    /** FX let go of: every punch-in with it. */
+    fun punchAllUp() = fxDesk.punchAllUp()
+
     // ---------- PATTERN: record and play on the phone (an addition) ----------
 
     // Every project's patterns, read from their file once: in arc's own files, as they never go on the EP-133.
@@ -4743,12 +4866,15 @@ class ArcController(
      * How [pad] plays on the phone: its settings as known, made a voice
      * shape; unknown, as a pad always has (held, then let go of). KEYS
      * ([keys]) plays each note on its own, so LEGATO's one voice across notes
-     * becomes a held note there.
+     * becomes a held note there. Either way it is on its group's FX bus, and
+     * ducks the sidechain's groups when it is the source (KEYS' notes too,
+     * when their pad is).
      */
     private fun shapeFor(pad: dev.arc.ep133.features.PhysicalPad?, keys: Boolean = false): dev.arc.ep133.formats.VoiceShape {
-        val t = pad?.let { mirror?.target(it) } ?: return dev.arc.ep133.formats.VoiceShape.DEFAULT
-        val s = padSettings[padKey(t)] ?: return dev.arc.ep133.formats.VoiceShape.DEFAULT
-        return voiceShape(s, pad.group, keys)
+        pad ?: return dev.arc.ep133.formats.VoiceShape.DEFAULT
+        val duck = duckSource(fxDesk.fx.value, pad)
+        val s = mirror?.target(pad)?.let { padSettings[padKey(it)] } ?: return dev.arc.ep133.formats.VoiceShape(bus = pad.group, duckSource = duck)
+        return voiceShape(s, pad.group, keys, duck)
     }
 
     /**

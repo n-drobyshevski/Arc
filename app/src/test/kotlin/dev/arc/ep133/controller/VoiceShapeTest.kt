@@ -47,4 +47,13 @@ class VoiceShapeTest {
         assertEquals(3, voiceShape(s, 2).muteGroup)
         assertEquals(0, voiceShape(s, 2, keys = true).muteGroup)
     }
+
+    @Test
+    fun `a pad plays on its group's FX bus, and ducks only when it is the sidechain's source`() {
+        val s = PadSettings.DEFAULT.copy(muteGroup = true)
+        assertEquals(1, voiceShape(s, 1).bus)
+        assertEquals(3, voiceShape(s, 3, keys = true).bus)
+        assertEquals(false, voiceShape(s, 1).duckSource)
+        assertEquals(true, voiceShape(s, 1, duckSource = true).duckSource)
+    }
 }

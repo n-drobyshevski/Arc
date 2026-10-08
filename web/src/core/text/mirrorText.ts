@@ -8,6 +8,7 @@
 //   times; TAKE's words are Android's only.
 
 import { FactorySounds } from '../features/factorySounds'
+import { FxSettings, FxType } from '../features/fxSettings'
 import { Keys, NoteNames, Scale } from '../features/keys'
 import type { Hit } from '../features/liveMirror'
 import type { PlayMode } from '../features/padSettings'
@@ -860,7 +861,220 @@ export const MirrorText = {
         return state.recording ? 'Recording' : MirrorText.PLAYING
     }
   },
+
+  // ---------- FX: the master effect, the sends, the output compressor and the sidechain (an addition) ----------
+  /** FX, the fourth function key: its two words. A tap opens the FX sheet; held, the pads play the punch-ins. */
+  FN_FX: 'FX',
+  FN_FX_SUB: 'Page',
+  /** FX for screen readers, before the effect on (fxName): "Effects, Delay". */
+  FX_EFFECTS: 'Effects',
+  FX_SHEET: 'Effect settings',
+  PUNCH_INS: 'Punch-ins',
+
+  /** An effect's name for screen readers and the XY pad: "Delay", or "Off" for none. */
+  fxName(type: FxType): string {
+    switch (type) {
+      case FxType.NONE:
+        return MirrorText.onOff(false)
+      case FxType.DELAY:
+        return 'Delay'
+      case FxType.REVERB:
+        return 'Reverb'
+      case FxType.DISTORTION:
+        return 'Distortion'
+      case FxType.CHORUS:
+        return 'Chorus'
+      case FxType.FILTER:
+        return 'Filter'
+      case FxType.COMPRESSOR:
+        return 'Compressor'
+    }
+  },
+
+  /** Its three letters, as the sheet's row and the narrow column's key print them: DLY, REV, DST, CHO, FLT, CMP; OFF for none. */
+  fxCode(type: FxType): string {
+    switch (type) {
+      case FxType.NONE:
+        return 'OFF'
+      case FxType.DELAY:
+        return 'DLY'
+      case FxType.REVERB:
+        return 'REV'
+      case FxType.DISTORTION:
+        return 'DST'
+      case FxType.CHORUS:
+        return 'CHO'
+      case FxType.FILTER:
+        return 'FLT'
+      case FxType.COMPRESSOR:
+        return 'CMP'
+    }
+  },
+
+  /** The word on FX's light in the row, no longer than six letters so four keys fit across a narrow phone: "Delay", "Dist", "FX off". */
+  fxKeyLabel(type: FxType): string {
+    if (type === FxType.NONE) return 'FX off'
+    if (type === FxType.DISTORTION) return 'Dist'
+    if (type === FxType.COMPRESSOR) return 'Comp'
+    return MirrorText.fxName(type)
+  },
+
+  /** "Effects, Delay", the FX key as a screen reader says it. */
+  fxKeyDescription(type: FxType): string {
+    return `${MirrorText.FX_EFFECTS}, ${MirrorText.fxName(type)}`
+  },
+
+  /** The FX sheet's title and its two pages. */
+  FX_TITLE: 'FX',
+  FX_EFFECT: 'Effect',
+  FX_OUTPUT: 'Output',
+
+  /** An effect in the sheet's row for screen readers: the one on says a tap turns it off. */
+  fxChoice(type: FxType, on: boolean): string {
+    return MirrorText.fxName(type) + (on ? ', on. Tap again to turn it off.' : '')
+  },
+
+  /** The XY pad: its name, and what X and Y do now: "Length 1/8D, feedback 38%". */
+  XY_PAD: 'X and Y',
+  xyState(type: FxType, x: number, y: number, bpm: number): string {
+    return (
+      `${knobWord(FxSettings.xLabel(type))} ${FxSettings.xReadout(type, x, bpm)}, ` +
+      `${FxSettings.yLabel(type).toLowerCase()} ${FxSettings.yReadout(type, y)}`
+    )
+  },
+
+  /** "1/8D · 38%", the pad's readout under the effect's name. */
+  xyReadout(type: FxType, x: number, y: number, bpm: number): string {
+    return `${FxSettings.xReadout(type, x, bpm)} \u00B7 ${FxSettings.yReadout(type, y)}`
+  },
+
+  /** A screen reader's step on the pad: "Length up", "Feedback down". */
+  xyStep(label: string, up: boolean): string {
+    return knobWord(label) + (up ? ' up' : ' down')
+  },
+
+  /** The pad with no effect on. */
+  XY_OFF: 'Pick an effect to play X and Y',
+
+  /** Each group's send to the effect: "Send A", its value 0 to 100. */
+  SENDS: 'Sends',
+  sendName(group: number): string {
+    return `Send ${MirrorText.groupKey(group)}`
+  },
+  sendValue(v: number): string {
+    return `${Math.round(Math.fround(v * 100))}`
+  },
+
+  /** OUTPUT: the compressor after everything, and the sidechain. */
+  OUTPUT_COMP: 'Output comp',
+  OUTPUT_COMP_NOTE: 'Evens out everything the phone plays, last.',
+  DRIVE: 'Drive',
+  SPEED: 'Speed',
+  SIDECHAIN: 'Sidechain',
+  SIDECHAIN_NOTE: 'Each hit of the source pad ducks the groups picked, then lets them back up.',
+  SC_SOURCE: 'Source',
+  SHAPE: 'Shape',
+  DUCKS: 'Ducks',
+
+  /** "A 7 kick", the sidechain's source (its pad alone while its sound isn't known). */
+  sidechainSource(pad: PhysicalPad, name: string | null): string {
+    return `${pad.groupLetter} ${pad.label}` + (name !== null ? ` ${name}` : '')
+  },
+
+  /** SOURCE for screen readers: "Sidechain source, A 7 kick". */
+  sidechainSourceDescription(pad: PhysicalPad, name: string | null): string {
+    return `${MirrorText.SIDECHAIN} ${MirrorText.SC_SOURCE.toLowerCase()}, ${MirrorText.sidechainSource(pad, name)}`
+  },
+
+  /** What a tap on SOURCE does: "Set to B 1", the pad played last. */
+  setSource(pad: PhysicalPad): string {
+    return `Set to ${pad.groupLetter} ${pad.label}`
+  },
+
+  /** SOURCE with no pad played yet. */
+  PLAY_FOR_SOURCE: 'Play a pad to pick it',
+
+  /** A group's key under DUCKS for screen readers: "Duck group A". */
+  duckChoice(group: number): string {
+    return `Duck group ${MirrorText.groupKey(group)}`
+  },
+
+  /** How long the duck lasts: "180 ms". */
+  sidechainLength(x: number): string {
+    return `${Math.round(Math.fround(30 + Math.fround(570 * x)))} ms`
+  },
+
+  /** How it comes back up: "SNAP 40" (fast, then easing), "EVEN", "PUMP 40" (slow, then fast). */
+  sidechainShape(y: number): string {
+    const tilt = Math.round(Math.fround(Math.fround(y - 0.5) * 200))
+    return tilt < 0 ? `SNAP ${-tilt}` : tilt > 0 ? `PUMP ${tilt}` : 'EVEN'
+  },
+
+  /** Under the sheet's pad cap: what holding it does. */
+  FX_HEAR: 'Hold the pad to hear it through the effects.',
+
+  /** Under the cap with no effect on: the pad plays dry. */
+  FX_HEAR_OFF: 'No effect on: pick one, then hold the pad to hear it.',
+
+  /** Under the cap when the pad's group (letter) sends nothing: the pad plays dry. */
+  fxHearNoSend(letter: string): string {
+    return `Group ${letter} sends nothing to the effect: raise its fader to hear it.`
+  },
+
+  /** Before any pad was played: the cap has no pad to play yet. */
+  FX_HEAR_NONE: 'Play a pad in Live to hear the effects here.',
+
+  /** The sheet's note: the effects are the phone's alone. */
+  FX_NOTE: "The effects play in Live's sound on the phone; the EP-133's own FX stay as they are.",
+
+  /**
+   * FX held: the pads play the twelve punch-ins. Each one's name where a pad
+   * prints its sound, in slot order ('.' PITCH RND, '0' SLICE, ENTER STUTTER,
+   * '1' REPEAT ... '9' DECIMATE): "Repeat", "Oct ↓".
+   */
+  punchName(slot: number): string {
+    return PUNCH_NAMES[slot]!
+  },
+
+  /** Its name in full for screen readers: "Beat repeat", "Octave down". */
+  punchDescription(slot: number): string {
+    return PUNCH_WORDS[slot]!
+  },
+
+  /** Printed small under a punch-in's name while it isn't held. */
+  PUNCH_HOLD: 'hold',
+
+  /** A punch-in pad's click for screen readers (no finger to hold: it stays in until clicked again), and its state while in. */
+  PUNCH_IN: 'Punch in',
+  PUNCH_OUT: 'Let go',
+  PUNCHED_IN: 'In',
+
+  /** The display line while punch-ins are held, in the order pressed: "PUNCH · REPEAT + LPF". */
+  punchLine(slots: Iterable<number>): string {
+    return 'PUNCH · ' + [...slots].map((s) => MirrorText.punchName(s).toUpperCase()).join(' + ')
+  },
+
+  /** That line as a screen reader says it: "Punch-ins, Beat repeat, Low-pass filter". */
+  punchSpoken(slots: Iterable<number>): string {
+    return [MirrorText.PUNCH_INS, ...[...slots].map((s) => MirrorText.punchDescription(s))].join(', ')
+  },
 } as const
+
+const PUNCH_NAMES = [
+  'Pitch rnd', 'Slice', 'Stutter', 'Repeat', 'Tape stop', 'Filter LFO',
+  'LPF', 'HPF', 'Send FX', 'Tremolo', 'Oct ↓', 'Decimate',
+]
+
+const PUNCH_WORDS = [
+  'Pitch random', 'Slice', 'Stutter', 'Beat repeat', 'Tape stop', 'Filter LFO',
+  'Low-pass filter', 'High-pass filter', 'Send to FX', 'Tremolo', 'Octave down', 'Decimator',
+]
+
+/** A knob's printed name as a word: "LENGTH" to "Length". */
+function knobWord(label: string): string {
+  const w = label.toLowerCase()
+  return w.charAt(0).toUpperCase() + w.slice(1)
+}
 
 /** "A" for group 0 (Kotlin's 'A' + group). */
 function groupLetter(group: number): string {

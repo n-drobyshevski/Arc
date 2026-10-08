@@ -27,7 +27,8 @@ import dev.arc.ep133.text.LatencyText
  * ([LiveListener.clock]), for SAMPLE's resampling and the sequencer.
  *
  * The sequencer's timed notes ([ScheduleSink]) go to the mixer as they are,
- * since its frames are the mix's: each lands on its frame in the burst.
+ * since its frames are the mix's: each lands on its frame in the burst. So do
+ * the FX bus's settings ([control]), applied at the next burst's start.
  *
  * Opened with old (the debug screen's "AudioTrack, old"), it writes as Live
  * did before the latency work: each burst mixed as soon as the last write
@@ -71,6 +72,8 @@ internal class TrackLiveOutput private constructor(private val output: BurstOutp
     override fun releaseAt(key: String, atFrame: Long, tag: Long) = mixer.release(key, atFrame, tag)
 
     override fun flushTimed() = mixer.flushTimed()
+
+    override fun control(what: Int, index: Int, x: Float, y: Float) = mixer.control(what, index, x, y)
 
     // The thread hands every burst over while [LiveListener.recording] says so.
     override fun recordFromNow() {}

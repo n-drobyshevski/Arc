@@ -1,6 +1,7 @@
 // LiveCore on the host: commands in, sounds held and let go of safely,
 // reports and REC blocks out, a restart, the sequencer's timed commands (a
-// sound kept while a timed start waits on it), and the three threads at once (built
+// sound kept while a timed start waits on it), the FX bus's settings (kept
+// across a restart, a knob's drag merged), and the three threads at once (built
 // with AddressSanitizer where the compiler has it, so a sound freed under a
 // voice fails the run).
 #include <atomic>
@@ -15,6 +16,7 @@
 
 using arc::LiveCore;
 using arc::Sample;
+using arc::fx::FxControl;
 
 namespace {
 
@@ -59,7 +61,10 @@ std::vector<int16_t> render(LiveCore &core, int frames) {
     return out;
 }
 
-void aLoadedSoundPlaysAndIsReported() {
+// Each test keeps a LiveCore (over a megabyte) on its stack and is never inlined: inlined
+// into runLiveCoreTests, AddressSanitizer would keep every one apart in one frame too big
+// for the stack.
+[[gnu::noinline]] void aLoadedSoundPlaysAndIsReported() {
     LiveCore core(1000);
     CHECK(core.load(0, steady(100, 1000)));
     CHECK(core.start(7, 0, 1000, 1.0, 42));
@@ -74,7 +79,7 @@ void aLoadedSoundPlaysAndIsReported() {
     CHECK(again.started.empty() && again.keys.empty());
 }
 
-void anUnloadedSoundPlaysOnAndIsFreedOnceItEnds() {
+[[gnu::noinline]] void anUnloadedSoundPlaysOnAndIsFreedOnceItEnds() {
     LiveCore core(1000);
     CHECK(core.load(3, steady(1000, 1000)));
     CHECK(core.start(1, 3, 1000, 1.0, 0));
@@ -94,7 +99,7 @@ void anUnloadedSoundPlaysOnAndIsFreedOnceItEnds() {
     CHECK(!r.keys.empty() && r.keys.back().empty());
 }
 
-void aStartAndAnUnloadTogetherStillPlay() {
+[[gnu::noinline]] void aStartAndAnUnloadTogetherStillPlay() {
     LiveCore core(1000);
     CHECK(core.load(0, steady(30, 500)));
     // The start reads the slot as the commands are applied: before the unload empties it.
@@ -112,7 +117,7 @@ void aStartAndAnUnloadTogetherStillPlay() {
     CHECK(core.freed() == 1);
 }
 
-void aLoadIntoAFullSlotLetsTheOldSoundGo() {
+[[gnu::noinline]] void aLoadIntoAFullSlotLetsTheOldSoundGo() {
     LiveCore core(1000);
     CHECK(core.load(0, steady(10, 1)));
     CHECK(core.load(0, steady(10, 2)));
@@ -123,7 +128,7 @@ void aLoadIntoAFullSlotLetsTheOldSoundGo() {
     CHECK(core.freed() == 1);
 }
 
-void aRestartDropsTheStartsQueuedMeanwhileAndFadesOut() {
+[[gnu::noinline]] void aRestartDropsTheStartsQueuedMeanwhileAndFadesOut() {
     LiveCore core(1000);
     CHECK(core.load(0, steady(1000, 1000)));
     CHECK(core.start(1, 0, 1000, 1.0, 5));
@@ -144,7 +149,7 @@ void aRestartDropsTheStartsQueuedMeanwhileAndFadesOut() {
     CHECK(Reports(core).started.size() == 1);
 }
 
-void aRestartAtAnotherRateStartsTheMixerOver() {
+[[gnu::noinline]] void aRestartAtAnotherRateStartsTheMixerOver() {
     LiveCore core(1000);
     CHECK(core.load(0, steady(1000, 1000)));
     CHECK(core.start(1, 0, 1000, 1.0, 0));
@@ -163,7 +168,7 @@ void aRestartAtAnotherRateStartsTheMixerOver() {
     CHECK(core.freed() == 0);
 }
 
-void recHandsBackEachBlockWholeWithItsFirstStart() {
+[[gnu::noinline]] void recHandsBackEachBlockWholeWithItsFirstStart() {
     LiveCore core(48000);
     CHECK(core.load(0, steady(48000, 100)));
     render(core, 64);
@@ -198,7 +203,7 @@ void recHandsBackEachBlockWholeWithItsFirstStart() {
     CHECK(core.readMix(mix, LiveCore::CHUNK, header) == 0);
 }
 
-void aFullQueueRefuses() {
+[[gnu::noinline]] void aFullQueueRefuses() {
     LiveCore core(1000);
     int pushed = 0;
     while (core.release(1)) pushed++;
@@ -212,7 +217,7 @@ void aFullQueueRefuses() {
     delete s;
 }
 
-void aTimedStartPlaysOnItsFrameAndIsReportedThere() {
+[[gnu::noinline]] void aTimedStartPlaysOnItsFrameAndIsReportedThere() {
     LiveCore core(1000);
     CHECK(core.rendered() == 0);
     CHECK(core.load(0, steady(100, 1000)));
@@ -230,7 +235,7 @@ void aTimedStartPlaysOnItsFrameAndIsReportedThere() {
     CHECK(core.rendered() == 32);
 }
 
-void aTaggedReleaseLetsGoOfItsOwnVoiceOnly() {
+[[gnu::noinline]] void aTaggedReleaseLetsGoOfItsOwnVoiceOnly() {
     LiveCore core(1000);
     CHECK(core.load(0, steady(1000, 1000)));
     CHECK(core.start(1, 0, 1000, 1.0, 5));
@@ -249,7 +254,7 @@ void aTaggedReleaseLetsGoOfItsOwnVoiceOnly() {
     CHECK(!r.keys.empty() && r.keys.back().empty());
 }
 
-void aSoundIsKeptWhileATimedStartWaitsOnIt() {
+[[gnu::noinline]] void aSoundIsKeptWhileATimedStartWaitsOnIt() {
     LiveCore core(1000);
     CHECK(core.load(0, steady(10, 700)));
     CHECK(core.start(1, 0, 1000, 1.0, -1, arc::VoiceShape(), 40));
@@ -266,7 +271,7 @@ void aSoundIsKeptWhileATimedStartWaitsOnIt() {
     CHECK(core.freed() == 1);
 }
 
-void flushTimedDropsWhatWaitsAndLetsItsSoundGo() {
+[[gnu::noinline]] void flushTimedDropsWhatWaitsAndLetsItsSoundGo() {
     LiveCore core(1000);
     CHECK(core.load(0, steady(10, 700)));
     CHECK(core.start(1, 0, 1000, 1.0, -1, arc::VoiceShape(), 40));
@@ -279,7 +284,7 @@ void flushTimedDropsWhatWaitsAndLetsItsSoundGo() {
     CHECK(core.freed() == 1);
 }
 
-void aRestartDropsTimedCommandsWaiting() {
+[[gnu::noinline]] void aRestartDropsTimedCommandsWaiting() {
     LiveCore core(1000);
     CHECK(core.load(0, steady(1000, 1000)));
     CHECK(core.start(1, 0, 1000, 1.0, -1, arc::VoiceShape(), 40));
@@ -299,7 +304,7 @@ void aRestartDropsTimedCommandsWaiting() {
     CHECK(core.freed() == 1);
 }
 
-void pastTheTimedCommandsItHoldsTheMixerPlaysOneAtOnce() {
+[[gnu::noinline]] void pastTheTimedCommandsItHoldsTheMixerPlaysOneAtOnce() {
     LiveCore core(1000);
     CHECK(core.load(0, steady(10, 1)));
     for (int i = 0; i < arc::VoiceMixer::MAX_PENDING; i++) CHECK(core.start(1, 0, 1000, 1.0, -1, arc::VoiceShape(), 1000000));
@@ -322,17 +327,80 @@ void pastTheTimedCommandsItHoldsTheMixerPlaysOneAtOnce() {
     CHECK(core.freed() == 1);
 }
 
-void outputReportsComeBack() {
+[[gnu::noinline]] void outputReportsComeBack() {
     LiveCore core(1000);
     core.reportOutput(2, 288);
     Reports r(core);
     CHECK(r.output.size() == 1 && r.output[0].first == 2 && r.output[0].second == 288);
 }
 
+// A voice on group 0's bus, at [rate]: the FX bus's send and effect apply to it.
+bool startOnBus(LiveCore &core, int32_t key, int64_t tag) {
+    arc::VoiceShape shape;
+    shape.bus = 0;
+    return core.start(key, 0, 48000, 1.0, tag, shape);
+}
+
+[[gnu::noinline]] void aControlReachesTheMixersFxBus() {
+    LiveCore dry(48000);
+    LiveCore wet(48000);
+    for (LiveCore *core : {&dry, &wet}) {
+        CHECK(core->load(0, steady(48000, 12000)));
+        CHECK(startOnBus(*core, 1, 0));
+    }
+    CHECK(wet.control(FxControl::SEND, 0, 1.0f, 0.0f));
+    CHECK(wet.control(FxControl::FX_TYPE, FxControl::DISTORTION, 1.0f, 0.5f));
+    const auto a = render(dry, 256);
+    const auto b = render(wet, 256);
+    CHECK(a[2 * 255] == 12000);
+    CHECK(a != b);
+}
+
+[[gnu::noinline]] void aRestartKeepsTheControlsQueuedMeanwhile() {
+    LiveCore before(48000);
+    LiveCore after(48000);
+    for (LiveCore *core : {&before, &after}) {
+        CHECK(core->load(0, steady(48000, 12000)));
+        render(*core, 16);
+    }
+    // The same settings, one engine's sent while its stream was away.
+    CHECK(before.control(FxControl::SEND, 0, 1.0f, 0.0f));
+    CHECK(before.control(FxControl::FX_TYPE, FxControl::FILTER, 0.2f, 0.5f));
+    render(before, 16);
+    CHECK(after.control(FxControl::SEND, 0, 1.0f, 0.0f));
+    CHECK(after.control(FxControl::FX_TYPE, FxControl::FILTER, 0.2f, 0.5f));
+    CHECK(startOnBus(after, 1, 0));
+    after.restart(48000);
+    // The press made meanwhile is dropped; the settings aren't.
+    CHECK(render(after, 16)[0] == 0);
+    CHECK(Reports(after).started.empty());
+    CHECK(startOnBus(before, 2, 0));
+    CHECK(startOnBus(after, 2, 0));
+    CHECK(render(before, 256) == render(after, 256));
+}
+
+[[gnu::noinline]] void aKnobsDragTakesOneOfTheMixersCommands() {
+    LiveCore core(48000);
+    CHECK(core.load(0, steady(48000, 1000)));
+    // Far more than the mixer takes in one render, all the same knob: only the last is applied.
+    for (int i = 0; i < 1000; i++) CHECK(core.control(FxControl::FX_XY, 0, static_cast<float>(i) / 1000.0f, 0.5f));
+    CHECK(core.start(1, 0, 48000, 1.0, 9));
+    render(core, 16);
+    CHECK(Reports(core).started.size() == 1);
+    // Two knobs in turn aren't merged: the start waits for the renders that take them all.
+    for (int i = 0; i < 1000; i++) CHECK(core.control(FxControl::SEND, i % 2, 0.5f, 0.0f));
+    CHECK(core.start(2, 0, 48000, 1.0, 10));
+    render(core, 16);
+    CHECK(Reports(core).started.empty());
+    for (int i = 0; i < 4; i++) render(core, 16);
+    const Reports r(core);
+    CHECK(r.started.size() == 1 && r.started[0].tag == 10);
+}
+
 // The producer, the audio thread and the poll thread at once, sounds loaded,
 // played and unloaded all the while. AddressSanitizer catches a sound freed
 // while a voice reads it; the counts catch one never freed.
-void threeThreadsAtOnce() {
+[[gnu::noinline]] void threeThreadsAtOnce() {
     auto core = std::make_unique<LiveCore>(48000);
     std::atomic<bool> done{false};
     std::atomic<int64_t> loaded{0};
@@ -419,5 +487,8 @@ void runLiveCoreTests() {
     aRestartDropsTimedCommandsWaiting();
     pastTheTimedCommandsItHoldsTheMixerPlaysOneAtOnce();
     outputReportsComeBack();
+    aControlReachesTheMixersFxBus();
+    aRestartKeepsTheControlsQueuedMeanwhile();
+    aKnobsDragTakesOneOfTheMixersCommands();
     threeThreadsAtOnce();
 }

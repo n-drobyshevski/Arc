@@ -1,5 +1,7 @@
 package dev.arc.ep133.formats
 
+import dev.arc.ep133.formats.fx.FxBus
+import dev.arc.ep133.formats.fx.FxControl
 import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.math.pow
 
@@ -35,6 +37,11 @@ enum class VoiceMode {
  * and the same key again are taken ([VoiceMode]). A [muteGroup] above 0 cuts
  * every other sounding voice of the same group as this one starts (in
  * [VoiceMixer.CHOKE_MS]), as an open hi-hat is choked by the closed one.
+ *
+ * [bus] is the group (0..3, A to D) whose FX send and sidechain duck the voice
+ * goes through ([FxBus], an addition); -1, the default, is neither: straight
+ * to the mix, as before FX. A [duckSource] voice starts the sidechain's duck
+ * as it starts (even when it has nothing to play). Neither is [muteGroup].
  */
 data class VoiceShape(
     val semitones: Double = 0.0,
@@ -46,6 +53,8 @@ data class VoiceShape(
     val releaseMs: Int = VoiceMixer.FADE_MS,
     val mode: VoiceMode = VoiceMode.GATE,
     val muteGroup: Int = 0,
+    val bus: Int = -1,
+    val duckSource: Boolean = false,
 ) {
     companion object {
         /** The mixer's own way of playing a sound. */
@@ -92,9 +101,16 @@ data class VoiceShape(
  * commands still waiting. Without timed commands a render plays exactly as
  * before them.
  *
- * [start], [release], [cut], [stopAll] and [flushTimed] may be called from
- * any thread; they take effect at the next [render], which only the output's
- * thread calls. [render] allocates nothing unless a voice starts, a timed
+ * The voices also go through the FX bus ([FxBus], an addition): each voice
+ * on a group's bus ([VoiceShape.bus]) is heard at that group's dry gain and
+ * sent at its send gain, frame by frame, and the bus adds the effect's
+ * return, the punch-ins and the master compressor before the clip. [control]
+ * sets it up (an [FxControl] command). With the bus at its defaults every
+ * voice plays exactly as before it.
+ *
+ * [start], [release], [cut], [stopAll], [flushTimed] and [control] may be
+ * called from any thread; they take effect at the next [render], which only
+ * the output's thread calls. [render] allocates nothing unless a voice starts, a timed
  * command waits, or [keys] changes, so the output's thread doesn't feed the
  * garbage collector.
  */
@@ -142,6 +158,7 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
         /** [tag] other than 0: only the voices started with it. */
         class Release(val key: String, override val at: Long, val tag: Long) : Command
         class Cut(val key: String) : Command
+        class Control(val what: Int, val index: Int, val x: Float, val y: Float) : Command
         data object StopAll : Command
         data object FlushTimed : Command
     }
@@ -167,6 +184,7 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
         val release: Int,
         val mode: VoiceMode,
         val group: Int,
+        val bus: Int,
     ) {
         var pos = first.toDouble()
         /** The output frame the fade starts at; [Long.MAX_VALUE] while held. */
@@ -183,6 +201,7 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
     private val pending = ArrayList<Command>()
     private val voices = ArrayList<Voice>()
     private var mix = FloatArray(0)
+    private val fx = FxBus(outRate)
     private val minGate = MIN_GATE_MS * outRate / 1000L
     private val fade = maxOf(1, FADE_MS * outRate / 1000)
     private val choke = maxOf(1, CHOKE_MS * outRate / 1000)
@@ -245,15 +264,26 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
     }
 
     /**
+     * Sets up the FX bus: [what] is one of [FxControl]'s commands, with its
+     * [index], [x] and [y]. Not timed: it takes effect at the next render's
+     * start, in order with the other commands.
+     */
+    fun control(what: Int, index: Int, x: Float, y: Float) {
+        commands.add(Command.Control(what, index, x, y))
+    }
+
+    /**
      * Mixes the next [frames] stereo frames into [out] (left, right, …): the
      * commands first, then the timed ones already due, then the voices up to
-     * the next timed command's frame inside the render, that command, and on.
+     * the next timed command's frame inside the render, that command, and on;
+     * then the FX bus, then the clip.
      */
     fun render(out: ShortArray, frames: Int) {
         started.clear()
         while (true) take(commands.poll() ?: break)
         if (mix.size < frames * 2) mix = FloatArray(frames * 2)
         java.util.Arrays.fill(mix, 0, frames * 2, 0f)
+        fx.begin(frames)
         val end = frame + frames
         var done = 0
         while (true) {
@@ -261,12 +291,14 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
             val next = if (pending.isEmpty()) end else minOf(end, pending[0].at)
             val n = (next - frame).toInt()
             if (n > 0) {
+                fx.gains(done, n, frame)
                 playAll(done, n)
                 done += n
                 frame += n
             }
             if (frame >= end) break
         }
+        fx.process(mix, frames)
         for (i in 0 until frames * 2) out[i] = mix[i].coerceIn(-32768f, 32767f).toInt().toShort()
         if (keysChanged()) keys = voices.filterNot { it.choked }.mapTo(LinkedHashSet()) { it.key }
     }
@@ -330,6 +362,8 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
     private fun apply(c: Command) {
         when (c) {
             is Command.Start -> {
+                // The duck starts with its source, whether or not it has anything to play.
+                if (c.shape.duckSource) fx.trigger(frame)
                 if (c.pcm.size < c.channels) return
                 val shape = c.shape
                 val frames = c.pcm.size / c.channels
@@ -358,6 +392,7 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
                     release = maxOf(fade, framesOf(shape.releaseMs)),
                     mode = shape.mode,
                     group = shape.muteGroup,
+                    bus = if (shape.bus in 0 until FxControl.GROUPS) shape.bus else -1,
                 )
                 started += Started(c.key, c.tag, frame)
             }
@@ -370,6 +405,7 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
                 v.fadeFrames = v.release
             }
             is Command.Cut -> cutKey(c.key)
+            is Command.Control -> fx.control(c.what, c.index, c.x, c.y)
             Command.StopAll -> for (i in voices.indices) if (!voices[i].choked) cut(voices[i])
             Command.FlushTimed -> pending.clear()
         }
@@ -427,11 +463,20 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
         return if (since >= v.attack) 1f else since.toFloat() / v.attack.toFloat()
     }
 
-    /** Adds [frames] of [v] to the mix from its frame [offset] (output frame [frame]); false once it has ended. */
+    /**
+     * Adds [frames] of [v] to the mix from its frame [offset] (output frame
+     * [frame]); false once it has ended. On a group's bus, each frame is
+     * heard at the group's dry gain (when it isn't 1 throughout) and sent to
+     * the FX bus at its send gain (when that isn't 0 throughout): one more
+     * factor after the rest, so a gain of 1 changes nothing.
+     */
     private fun play(v: Voice, offset: Int, frames: Int): Boolean {
         val last = v.end - 1
         val pcm = v.pcm
         val ch = v.channels
+        val dry = if (v.bus >= 0) fx.dry(v.bus) else null
+        val send = if (v.bus >= 0) fx.send(v.bus) else null
+        val fxIn = fx.fxIn
         for (i in 0 until frames) {
             val p = v.pos
             if (p > last) return false
@@ -450,8 +495,20 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
             } else {
                 l
             }
-            mix[2 * (offset + i)] += l * gain * v.left
-            mix[2 * (offset + i) + 1] += r * gain * v.right
+            val left = l * gain * v.left
+            val right = r * gain * v.right
+            val j = 2 * (offset + i)
+            if (dry == null) {
+                mix[j] += left
+                mix[j + 1] += right
+            } else {
+                mix[j] += left * dry[offset + i]
+                mix[j + 1] += right * dry[offset + i]
+            }
+            if (send != null) {
+                fxIn[j] += left * send[offset + i]
+                fxIn[j + 1] += right * send[offset + i]
+            }
             v.pos = p + v.step
         }
         return true

@@ -5,8 +5,8 @@ package dev.arc.ep133.audio
  * is in src/main/cpp): an Oboe (AAudio) stream mixed in its own callback by
  * a port of [dev.arc.ep133.formats.VoiceMixer]. [NativeLiveOutput] is the only
  * caller, and keeps to the engine's threads: one producer at a time (load,
- * unload, start, release, releaseAt, cut, stopAll, flushTimed), one poll
- * thread (the rest).
+ * unload, start, release, releaseAt, cut, stopAll, flushTimed, control), one
+ * poll thread (the rest).
  *
  * A handle is from [create] and is good until [destroy]. Sounds are copied
  * into native memory by [load] and played by slot; keys are small ints
@@ -104,6 +104,8 @@ internal object NativeAudio {
         releaseMs: Int,
         mode: Int,
         muteGroup: Int,
+        bus: Int,
+        duckSource: Boolean,
         at: Long,
     ): Boolean
 
@@ -118,6 +120,14 @@ internal object NativeAudio {
 
     /** Drops the timed starts and releases still waiting for their frame. */
     @JvmStatic external fun flushTimed(handle: Long): Boolean
+
+    /**
+     * Sets up the mixer's FX bus ([dev.arc.ep133.formats.VoiceMixer.control]):
+     * [what] is one of [dev.arc.ep133.formats.fx.FxControl]'s commands. Kept
+     * when the stream reopens. The same knob's commands queued faster than the
+     * audio callback takes them apply only the last.
+     */
+    @JvmStatic external fun control(handle: Long, what: Int, index: Int, x: Float, y: Float): Boolean
 
     /** REC: whether the engine hands its mix back ([readMix]). */
     @JvmStatic external fun setRecording(handle: Long, on: Boolean)

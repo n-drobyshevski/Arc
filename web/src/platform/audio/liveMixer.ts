@@ -11,11 +11,14 @@
 // runs audio, so the samples are sent over once ('load', by id) and a press
 // only names one ('start'), which keeps a press cheap. Each render reports the voices that
 // began, with the context time of their first frame, and the keys sounding
-// when they change.
+// when they change. A start may carry its voice's shape (VoiceShape's
+// fields over the defaults, as VoiceShape.of takes them: the FX bus's group
+// and the sidechain's source among them), and 'control' sets up the mixer's
+// FX bus (VoiceMixer.control).
 //
 // Imports only the core mixer: this file is bundled into the worklet.
 
-import { VoiceMixer } from '../../core/formats/voiceMixer'
+import { VoiceMixer, VoiceShape } from '../../core/formats/voiceMixer'
 
 /** The AudioWorkletProcessor's registered name. */
 export const LIVE_PROCESSOR = 'arc-live-mixer'
@@ -25,7 +28,11 @@ export type ToMixer =
   /** Keeps sample [id] ready (16-bit, interleaved) until 'unload'. */
   | { readonly t: 'load'; readonly id: number; readonly pcm: Int16Array }
   | { readonly t: 'unload'; readonly id: number }
-  /** VoiceMixer.start with a loaded sample; [tag] is the press time (performance.now() ms), 0 for none. */
+  /**
+   * VoiceMixer.start with a loaded sample; [tag] is the press time
+   * (performance.now() ms), 0 for none; [shape] the voice's VoiceShape
+   * fields over the defaults (VoiceShape.of), none: VoiceShape.DEFAULT.
+   */
   | {
       readonly t: 'start'
       readonly key: string
@@ -34,11 +41,14 @@ export type ToMixer =
       readonly sampleRate: number
       readonly semitones: number
       readonly tag: number
+      readonly shape?: Partial<VoiceShape>
     }
   | { readonly t: 'release'; readonly key: string }
   /** VoiceMixer.cut: the voice ends in CHOKE_MS, minimum gate or not (a press that became a scroll). */
   | { readonly t: 'cut'; readonly key: string }
   | { readonly t: 'stopAll' }
+  /** VoiceMixer.control: FxControl command [what] (FX_TYPE to PUNCH) with its [index], [x] and [y]. */
+  | { readonly t: 'control'; readonly what: number; readonly index: number; readonly x: number; readonly y: number }
 
 /**
  * [m] as it is posted to the worklet, and what moves with it: a 'load' takes
@@ -96,7 +106,8 @@ export class MixerHost {
       case 'start': {
         const pcm = this.samples.get(m.id)
         if (pcm === undefined || !(m.channels >= 1 && m.channels <= 2)) return
-        this.mixer.start(m.key, pcm, m.channels, m.sampleRate, m.semitones, m.tag)
+        const shape = m.shape === undefined ? VoiceShape.DEFAULT : VoiceShape.of(m.shape)
+        this.mixer.start(m.key, pcm, m.channels, m.sampleRate, m.semitones, m.tag, shape)
         return
       }
       case 'release':
@@ -107,6 +118,9 @@ export class MixerHost {
         return
       case 'stopAll':
         this.mixer.stopAll()
+        return
+      case 'control':
+        this.mixer.control(m.what, m.index, m.x, m.y)
         return
     }
   }

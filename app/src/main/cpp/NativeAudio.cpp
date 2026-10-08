@@ -4,7 +4,7 @@
 // calls into Java: the app polls.
 //
 // Threads, as the Kotlin side keeps them: one producer at a time (load,
-// unload, start, release, releaseAt, cut, stopAll, flushTimed), one poll
+// unload, start, release, releaseAt, cut, stopAll, flushTimed, control), one poll
 // thread (poll, readMix, timestamp, info, and finally shutdown and destroy),
 // REC's flag from either.
 #include <jni.h>
@@ -93,7 +93,7 @@ JNIEXPORT jboolean JNICALL Java_dev_arc_ep133_audio_NativeAudio_unload(JNIEnv *,
 // then the mix frame it starts at (VoiceMixer::NOW: as soon as it can).
 JNIEXPORT jboolean JNICALL Java_dev_arc_ep133_audio_NativeAudio_start(
     JNIEnv *, jclass, jlong handle, jint key, jint slot, jint sampleRate, jdouble pitch, jlong tag, jfloat gain, jint pan,
-    jint start, jint end, jint attackMs, jint releaseMs, jint mode, jint muteGroup, jlong at) {
+    jint start, jint end, jint attackMs, jint releaseMs, jint mode, jint muteGroup, jint bus, jboolean duckSource, jlong at) {
     LiveCore *c = core(handle);
     arc::VoiceShape shape;
     shape.gain = gain;
@@ -104,6 +104,8 @@ JNIEXPORT jboolean JNICALL Java_dev_arc_ep133_audio_NativeAudio_start(
     shape.releaseMs = releaseMs;
     shape.mode = mode;
     shape.muteGroup = muteGroup;
+    shape.bus = bus;
+    shape.duckSource = duckSource == JNI_TRUE;
     return c != nullptr && c->start(key, slot, sampleRate, pitch, tag, shape, at) ? JNI_TRUE : JNI_FALSE;
 }
 
@@ -131,6 +133,12 @@ JNIEXPORT jboolean JNICALL Java_dev_arc_ep133_audio_NativeAudio_stopAll(JNIEnv *
 JNIEXPORT jboolean JNICALL Java_dev_arc_ep133_audio_NativeAudio_flushTimed(JNIEnv *, jclass, jlong handle) {
     LiveCore *c = core(handle);
     return c != nullptr && c->flushTimed() ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL Java_dev_arc_ep133_audio_NativeAudio_control(
+    JNIEnv *, jclass, jlong handle, jint what, jint index, jfloat x, jfloat y) {
+    LiveCore *c = core(handle);
+    return c != nullptr && c->control(what, index, x, y) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL Java_dev_arc_ep133_audio_NativeAudio_setRecording(JNIEnv *, jclass, jlong handle, jboolean on) {

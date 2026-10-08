@@ -22,9 +22,10 @@ class FunctionColumnTest {
     fun `shorter, the gaps close up, then the caps shrink, then the LED lines go`() {
         assertEquals(ColumnFit(38.dp, 9.dp, true), columnFit(259.dp))
         assertEquals(ColumnFit(38.dp, 6.dp, true), columnFit(250.dp))
-        assertEquals(ColumnFit(33.dp, 6.dp, true), columnFit(230.dp))
+        assertEquals(ColumnFit(35.dp, 6.dp, true), columnFit(238.dp))
         assertEquals(ColumnFit(32.dp, 6.dp, true), columnFit(FunctionColumnLed))
-        val noLed = columnFit(180.dp)
+        assertEquals(226.dp, FunctionColumnLed)
+        val noLed = columnFit(200.dp)
         assertFalse(noLed.led)
         assertEquals(6.dp, noLed.gap)
         assertEquals(38.dp, noLed.cap)

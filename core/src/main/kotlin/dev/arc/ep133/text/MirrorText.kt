@@ -1,6 +1,8 @@
 package dev.arc.ep133.text
 
 import dev.arc.ep133.features.FactorySounds
+import dev.arc.ep133.features.FxSettings
+import dev.arc.ep133.features.FxType
 import dev.arc.ep133.features.Hit
 import dev.arc.ep133.features.PadNotes
 import dev.arc.ep133.features.PhysicalPad
@@ -10,6 +12,7 @@ import dev.arc.ep133.features.Timing
 import dev.arc.ep133.features.TransportPhase
 import dev.arc.ep133.features.TransportState
 import dev.arc.ep133.util.jsToFixed
+import kotlin.math.roundToInt
 
 /** Text for the live mirror (an addition to the web version). */
 object MirrorText {
@@ -680,4 +683,159 @@ object MirrorText {
         TransportPhase.COUNT_IN -> "Counting in"
         TransportPhase.PLAYING -> if (state.recording) "Recording" else PLAYING
     }
+
+    // ---------- FX: the master effect, the sends, the output compressor and the sidechain (an addition) ----------
+    /** FX, the fourth function key: its two words. A tap opens the FX sheet; held, the pads play the punch-ins. */
+    const val FN_FX = "FX"
+    const val FN_FX_SUB = "Page"
+    /** FX for screen readers, before the effect on ([fxName]): "Effects, Delay". */
+    const val FX_EFFECTS = "Effects"
+    const val FX_SHEET = "Effect settings"
+    const val PUNCH_INS = "Punch-ins"
+
+    /** An effect's name for screen readers and the XY pad: "Delay", or "Off" for none. */
+    fun fxName(type: FxType) = when (type) {
+        FxType.NONE -> onOff(false)
+        FxType.DELAY -> "Delay"
+        FxType.REVERB -> "Reverb"
+        FxType.DISTORTION -> "Distortion"
+        FxType.CHORUS -> "Chorus"
+        FxType.FILTER -> "Filter"
+        FxType.COMPRESSOR -> "Compressor"
+    }
+
+    /** Its three letters, as the sheet's row and the narrow column's key print them: DLY, REV, DST, CHO, FLT, CMP; OFF for none. */
+    fun fxCode(type: FxType) = when (type) {
+        FxType.NONE -> "OFF"
+        FxType.DELAY -> "DLY"
+        FxType.REVERB -> "REV"
+        FxType.DISTORTION -> "DST"
+        FxType.CHORUS -> "CHO"
+        FxType.FILTER -> "FLT"
+        FxType.COMPRESSOR -> "CMP"
+    }
+
+    /** The word on FX's light in the row, no longer than six letters so four keys fit across a narrow phone: "Delay", "Dist", "FX off". */
+    fun fxKeyLabel(type: FxType) = when (type) {
+        FxType.NONE -> "FX off"
+        FxType.DISTORTION -> "Dist"
+        FxType.COMPRESSOR -> "Comp"
+        else -> fxName(type)
+    }
+
+    /** "Effects, Delay", the FX key as a screen reader says it. */
+    fun fxKeyDescription(type: FxType) = "$FX_EFFECTS, ${fxName(type)}"
+
+    /** The FX sheet's title and its two pages. */
+    const val FX_TITLE = "FX"
+    const val FX_EFFECT = "Effect"
+    const val FX_OUTPUT = "Output"
+
+    /** An effect in the sheet's row for screen readers: the one on says a tap turns it off. */
+    fun fxChoice(type: FxType, on: Boolean) = fxName(type) + if (on) ", on. Tap again to turn it off." else ""
+
+    /** The XY pad: its name, and what X and Y do now: "Length 1/8D, feedback 38%". */
+    const val XY_PAD = "X and Y"
+    fun xyState(type: FxType, x: Float, y: Float, bpm: Float) =
+        "${knobWord(FxSettings.xLabel(type))} ${FxSettings.xReadout(type, x, bpm)}, " +
+            "${FxSettings.yLabel(type).lowercase()} ${FxSettings.yReadout(type, y)}"
+
+    /** "1/8D · 38%", the pad's readout under the effect's name. */
+    fun xyReadout(type: FxType, x: Float, y: Float, bpm: Float) = "${FxSettings.xReadout(type, x, bpm)} \u00B7 ${FxSettings.yReadout(type, y)}"
+
+    /** A screen reader's step on the pad: "Length up", "Feedback down". */
+    fun xyStep(label: String, up: Boolean) = knobWord(label) + if (up) " up" else " down"
+
+    /** The pad with no effect on. */
+    const val XY_OFF = "Pick an effect to play X and Y"
+
+    /** Each group's send to the effect: "Send A", its value 0 to 100. */
+    const val SENDS = "Sends"
+    fun sendName(group: Int) = "Send ${groupKey(group)}"
+    fun sendValue(v: Float) = "${(v * 100f).roundToInt()}"
+
+    /** OUTPUT: the compressor after everything, and the sidechain. */
+    const val OUTPUT_COMP = "Output comp"
+    const val OUTPUT_COMP_NOTE = "Evens out everything the phone plays, last."
+    const val DRIVE = "Drive"
+    const val SPEED = "Speed"
+    const val SIDECHAIN = "Sidechain"
+    const val SIDECHAIN_NOTE = "Each hit of the source pad ducks the groups picked, then lets them back up."
+    const val SC_SOURCE = "Source"
+    const val SHAPE = "Shape"
+    const val DUCKS = "Ducks"
+
+    /** "A 7 kick", the sidechain's source (its pad alone while its sound isn't known). */
+    fun sidechainSource(pad: PhysicalPad, name: String?) = "${pad.groupLetter} ${pad.label}" + (name?.let { " $it" } ?: "")
+
+    /** SOURCE for screen readers: "Sidechain source, A 7 kick". */
+    fun sidechainSourceDescription(pad: PhysicalPad, name: String?) = "$SIDECHAIN ${SC_SOURCE.lowercase()}, ${sidechainSource(pad, name)}"
+
+    /** What a tap on SOURCE does: "Set to B 1", the pad played last. */
+    fun setSource(pad: PhysicalPad) = "Set to ${pad.groupLetter} ${pad.label}"
+
+    /** SOURCE with no pad played yet. */
+    const val PLAY_FOR_SOURCE = "Play a pad to pick it"
+
+    /** A group's key under DUCKS for screen readers: "Duck group A". */
+    fun duckChoice(group: Int) = "Duck group ${groupKey(group)}"
+
+    /** How long the duck lasts: "180 ms". */
+    fun sidechainLength(x: Float) = "${(30f + 570f * x).roundToInt()} ms"
+
+    /** How it comes back up: "SNAP 40" (fast, then easing), "EVEN", "PUMP 40" (slow, then fast). */
+    fun sidechainShape(y: Float): String {
+        val tilt = ((y - 0.5f) * 200f).roundToInt()
+        return if (tilt < 0) "SNAP ${-tilt}" else if (tilt > 0) "PUMP $tilt" else "EVEN"
+    }
+
+    /** Under the sheet's pad cap: what holding it does. */
+    const val FX_HEAR = "Hold the pad to hear it through the effects."
+
+    /** Under the cap with no effect on: the pad plays dry. */
+    const val FX_HEAR_OFF = "No effect on: pick one, then hold the pad to hear it."
+
+    /** Under the cap when the pad's group ([letter]) sends nothing: the pad plays dry. */
+    fun fxHearNoSend(letter: Char) = "Group $letter sends nothing to the effect: raise its fader to hear it."
+
+    /** Before any pad was played: the cap has no pad to play yet. */
+    const val FX_HEAR_NONE = "Play a pad in Live to hear the effects here."
+
+    /** The sheet's note: the effects are the phone's alone. */
+    const val FX_NOTE = "The effects play in Live's sound on the phone; the EP-133's own FX stay as they are."
+
+    /**
+     * FX held: the pads play the twelve punch-ins. Each one's name where a pad
+     * prints its sound, in slot order ('.' PITCH RND, '0' SLICE, ENTER STUTTER,
+     * '1' REPEAT ... '9' DECIMATE): "Repeat", "Oct ↓".
+     */
+    fun punchName(slot: Int) = PUNCH_NAMES[slot]
+    private val PUNCH_NAMES = listOf(
+        "Pitch rnd", "Slice", "Stutter", "Repeat", "Tape stop", "Filter LFO",
+        "LPF", "HPF", "Send FX", "Tremolo", "Oct ↓", "Decimate",
+    )
+
+    /** Its name in full for screen readers: "Beat repeat", "Octave down". */
+    fun punchDescription(slot: Int) = PUNCH_WORDS[slot]
+    private val PUNCH_WORDS = listOf(
+        "Pitch random", "Slice", "Stutter", "Beat repeat", "Tape stop", "Filter LFO",
+        "Low-pass filter", "High-pass filter", "Send to FX", "Tremolo", "Octave down", "Decimator",
+    )
+
+    /** Printed small under a punch-in's name while it isn't held. */
+    const val PUNCH_HOLD = "hold"
+
+    /** A punch-in pad's click for screen readers (no finger to hold: it stays in until clicked again), and its state while in. */
+    const val PUNCH_IN = "Punch in"
+    const val PUNCH_OUT = "Let go"
+    const val PUNCHED_IN = "In"
+
+    /** The display line while punch-ins are held, in the order pressed: "PUNCH · REPEAT + LPF". */
+    fun punchLine(slots: Collection<Int>) = "PUNCH · " + slots.joinToString(" + ") { punchName(it).uppercase() }
+
+    /** That line as a screen reader says it: "Punch-ins, Beat repeat, Low-pass filter". */
+    fun punchSpoken(slots: Collection<Int>) = (listOf(PUNCH_INS) + slots.map(::punchDescription)).joinToString(", ")
+
+    /** A knob's printed name as a word: "LENGTH" to "Length". */
+    private fun knobWord(label: String) = label.lowercase().replaceFirstChar { it.uppercaseChar() }
 }

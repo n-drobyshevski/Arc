@@ -38,6 +38,13 @@
 // commands still waiting. Without timed commands a render plays exactly as
 // before them.
 //
+// The voices also go through the FX bus (FxBus, an addition): each voice on a
+// group's bus (VoiceShape's bus) is heard at that group's dry gain and sent
+// at its send gain, frame by frame, and the bus adds the effect's return, the
+// punch-ins and the master compressor before the clip. control sets it up (an
+// FxControl command). With the bus at its defaults every voice plays exactly
+// as before it.
+//
 // render allocates nothing unless a voice starts, a timed command waits, or
 // keys changes, so the audio thread doesn't feed the garbage collector.
 //
@@ -64,6 +71,9 @@
 //   sound", for legato, is the same Int16Array (Kotlin: the same array).
 // - The web's Live (platform/audio/liveMixer.ts) plays every voice with the
 //   default shape for now.
+// - control rounds its values to floats (Kotlin takes Floats).
+
+import { FxBus, FxControl } from './fx/fxBus'
 
 const f = Math.fround
 
@@ -103,6 +113,11 @@ export type VoiceMode = (typeof VoiceMode)[keyof typeof VoiceMode]
  * are taken (VoiceMode). A [muteGroup] above 0 cuts every other sounding voice
  * of the same group as this one starts (in CHOKE_MS), as an open hi-hat is
  * choked by the closed one.
+ *
+ * [bus] is the group (0..3, A to D) whose FX send and sidechain duck the voice
+ * goes through (FxBus, an addition); -1, the default, is neither: straight to
+ * the mix, as before FX. A [duckSource] voice starts the sidechain's duck as
+ * it starts (even when it has nothing to play). Neither is [muteGroup].
  */
 export interface VoiceShape {
   readonly semitones: number
@@ -114,6 +129,8 @@ export interface VoiceShape {
   readonly releaseMs: number
   readonly mode: VoiceMode
   readonly muteGroup: number
+  readonly bus: number
+  readonly duckSource: boolean
 }
 
 /** A shape: [fields] over the defaults (Kotlin's VoiceShape constructor). */
@@ -129,6 +146,8 @@ function voiceShape(fields: Partial<VoiceShape> = {}): VoiceShape {
     releaseMs: 24,
     mode: VoiceMode.GATE,
     muteGroup: 0,
+    bus: -1,
+    duckSource: false,
     ...fields,
   }
 }
@@ -162,6 +181,7 @@ type Command =
   | { readonly kind: 'cut'; readonly key: string; readonly at: number }
   | { readonly kind: 'stopAll'; readonly at: number }
   | { readonly kind: 'flushTimed'; readonly at: number }
+  | { readonly kind: 'control'; readonly what: number; readonly index: number; readonly x: number; readonly y: number; readonly at: number }
 
 /**
  * A voice: [pcm] read from frame [first] to before [end], [level] and the
@@ -194,6 +214,7 @@ class Voice {
     readonly release: number,
     readonly mode: VoiceMode,
     readonly group: number,
+    readonly bus: number,
   ) {
     this.pos = first
   }
@@ -220,6 +241,7 @@ export class VoiceMixer {
   private readonly pending: Command[] = []
   private readonly voices: Voice[] = []
   private mix = new Float32Array(0)
+  private readonly fx: FxBus
   private readonly minGate: number
   private readonly fade: number
   private readonly choke: number
@@ -241,6 +263,7 @@ export class VoiceMixer {
     this.minGate = Math.trunc((VoiceMixer.MIN_GATE_MS * outRate) / 1000)
     this.fade = Math.max(1, Math.trunc((VoiceMixer.FADE_MS * outRate) / 1000))
     this.choke = Math.max(1, Math.trunc((VoiceMixer.CHOKE_MS * outRate) / 1000))
+    this.fx = new FxBus(outRate)
   }
 
   /** Output frames rendered so far. */
@@ -300,6 +323,15 @@ export class VoiceMixer {
   }
 
   /**
+   * Sets up the FX bus: [what] is one of FxControl's commands, with its
+   * [index], [x] and [y]. Not timed: it takes effect at the next render's
+   * start, in order with the other commands.
+   */
+  control(what: number, index: number, x: number, y: number): void {
+    this.commands.push({ kind: 'control', what, index, x: f(x), y: f(y), at: VoiceMixer.NOW })
+  }
+
+  /**
    * Mixes the next [frames] stereo frames into [out] (left, right, …): 16-bit
    * levels into an Int16Array, as Kotlin does, or -1..1 into a Float32Array.
    */
@@ -328,7 +360,7 @@ export class VoiceMixer {
   /**
    * The commands first, then the timed ones already due, then the voices up
    * to the next timed command's frame inside the render, that command, and
-   * on; the frame count moves on with them.
+   * on; the frame count moves on with them. Then the FX bus.
    */
   private mixNext(frames: number): void {
     this.started.length = 0
@@ -339,6 +371,7 @@ export class VoiceMixer {
     }
     if (this.mix.length < frames * 2) this.mix = new Float32Array(frames * 2)
     this.mix.fill(0, 0, frames * 2)
+    this.fx.begin(frames)
     const pending = this.pending
     const end = this.frameCount + frames
     let done = 0
@@ -347,12 +380,14 @@ export class VoiceMixer {
       const next = pending.length === 0 ? end : Math.min(end, pending[0]!.at)
       const n = next - this.frameCount
       if (n > 0) {
+        this.fx.gains(done, n, this.frameCount)
         this.playAll(done, n)
         done += n
         this.frameCount += n
       }
       if (this.frameCount >= end) break
     }
+    this.fx.process(this.mix, frames)
   }
 
   /** A command off the queue: applied now or, timed, kept until its frame, behind those already waiting for it. */
@@ -431,6 +466,8 @@ export class VoiceMixer {
   private apply(c: Command): void {
     switch (c.kind) {
       case 'start': {
+        // The duck starts with its source, whether or not it has anything to play.
+        if (c.shape.duckSource) this.fx.trigger(this.frameCount)
         if (c.pcm.length < c.channels) return
         const shape = c.shape
         const frames = Math.trunc(c.pcm.length / c.channels)
@@ -465,6 +502,7 @@ export class VoiceMixer {
             Math.max(this.fade, this.framesOf(shape.releaseMs)),
             shape.mode,
             shape.muteGroup,
+            shape.bus >= 0 && shape.bus < FxControl.GROUPS ? shape.bus : -1,
           ),
         )
         this.started.push({ key: c.key, tag: c.tag, frame: this.frameCount })
@@ -488,6 +526,9 @@ export class VoiceMixer {
         return
       case 'flushTimed':
         this.pending.length = 0
+        return
+      case 'control':
+        this.fx.control(c.what, c.index, c.x, c.y)
         return
     }
   }
@@ -536,12 +577,21 @@ export class VoiceMixer {
     v.fadeAt = this.frameCount - Math.trunc(f(f(1 - g) * this.choke))
   }
 
-  /** Adds [frames] of [v] to the mix from its frame [offset] (the output frame the count is at); false once it has ended. */
+  /**
+   * Adds [frames] of [v] to the mix from its frame [offset] (the output frame
+   * the count is at); false once it has ended. On a group's bus, each frame
+   * is heard at the group's dry gain (when it isn't 1 throughout) and sent to
+   * the FX bus at its send gain (when that isn't 0 throughout): one more
+   * factor after the rest, so a gain of 1 changes nothing.
+   */
   private play(v: Voice, offset: number, frames: number): boolean {
     const last = v.end - 1
     const pcm = v.pcm
     const ch = v.channels
     const mix = this.mix
+    const dry = v.bus >= 0 ? this.fx.dry(v.bus) : null
+    const send = v.bus >= 0 ? this.fx.send(v.bus) : null
+    const fxIn = this.fx.fxIn
     for (let i = 0; i < frames; i++) {
       const p = v.pos
       if (p > last) return false
@@ -559,9 +609,20 @@ export class VoiceMixer {
         const r0 = pcm[i0 * 2 + 1]!
         r = f(r0 + f((pcm[i1 * 2 + 1]! - r0) * frac))
       }
+      const left = f(f(l * g) * v.left)
+      const right = f(f(r * g) * v.right)
       const j = 2 * (offset + i)
-      mix[j] = mix[j]! + f(f(l * g) * v.left)
-      mix[j + 1] = mix[j + 1]! + f(f(r * g) * v.right)
+      if (dry === null) {
+        mix[j] = mix[j]! + left
+        mix[j + 1] = mix[j + 1]! + right
+      } else {
+        mix[j] = mix[j]! + f(left * dry[offset + i]!)
+        mix[j + 1] = mix[j + 1]! + f(right * dry[offset + i]!)
+      }
+      if (send !== null) {
+        fxIn[j] = fxIn[j]! + f(left * send[offset + i]!)
+        fxIn[j + 1] = fxIn[j + 1]! + f(right * send[offset + i]!)
+      }
       v.pos = p + v.step
     }
     return true

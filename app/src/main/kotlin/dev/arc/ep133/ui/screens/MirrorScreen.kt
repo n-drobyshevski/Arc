@@ -102,6 +102,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import dev.arc.ep133.controller.MirrorUi
+import dev.arc.ep133.controller.punchSlotForPad
+import dev.arc.ep133.features.FxType
 import dev.arc.ep133.features.FactorySounds
 import dev.arc.ep133.features.Beat
 import dev.arc.ep133.features.Tempo
@@ -228,10 +230,11 @@ class KeysActions(
 
 /**
  * Live's function keys over the pads ([FunctionRow], [FunctionColumn]):
- * PROJECT ([project], a tap [onProject] steps to the next one), KEYS (the
- * mode, from [KeysUi]) and TEMPO, the phone's click: [clickOn] at the
- * phone's tempo [bpm] (the EP-133's leads while it sends MIDI clock), a tap
- * [onClick] turns it on or off and a hold [onTempo] opens the tempo sheet.
+ * SOUND, PROJECT ([project], a tap [onProject] steps to the next one),
+ * TEMPO, the phone's click: [clickOn] at the phone's tempo [bpm] (the
+ * EP-133's leads while it sends MIDI clock), a tap [onClick] turns it on or
+ * off and a hold [onTempo] opens the tempo sheet, and FX ([fx], the effect
+ * on): a tap [onFx] opens the FX sheet, a hold [onFxHold] the punch-ins.
  * [beats] blink TEMPO's light (the click's, or the EP-133's while it is off);
  * null leaves it still.
  */
@@ -251,6 +254,13 @@ class FunctionKeysUi(
     val onTempo: () -> Unit = {},
     /** For screenshots: TEMPO's light caught lit, on a beat. */
     val beatLit: Boolean = false,
+    /** The effect on, named on FX's light. */
+    val fx: FxType = FxType.NONE,
+    /** FX tapped: the FX sheet. */
+    val onFx: () -> Unit = {},
+    /** FX held down (true) and let go of (false): the pads play the punch-ins meanwhile ([fxHeld]). */
+    val onFxHold: (Boolean) -> Unit = {},
+    val fxHeld: Boolean = false,
 )
 
 /**
@@ -423,6 +433,12 @@ fun MirrorScreen(
     /** PROJECT, KEYS and TEMPO over the pads (KEYS is the mode word's place, but on the short sideways piano). */
     functions: FunctionKeysUi = FunctionKeysUi(),
     /**
+     * The punch-ins (an addition): while FX is held ([FunctionKeysUi.fxHeld])
+     * the one-group pads play them instead of their sounds, and the display
+     * line names those held.
+     */
+    punch: PunchUi = PunchUi(),
+    /**
      * SAMPLE (an addition; null for none): on the Live tab in PADS, the
      * SAMPLE panel the mic key in the top bar (or a swipe on the pads) opens:
      * the display line grows into it over the function keys' place, its row
@@ -453,10 +469,18 @@ fun MirrorScreen(
     // EDIT works on the pads only, and only on the Live tab (where the tab is); SAMPLE's pads record, ERASE's erase, instead.
     val editing = edit.on && edit.onEdit != null && !keys.on && onBack == null && !sampling && !erasing
     val onEdit = if (editing) edit.onPad else null
+    // FX held: the one-group pads are the punch-ins (PADS on the Live tab, not while SAMPLE's record), their touches
+    // the punch-ins' alone. The pressures seen stay with the screen, so a device's pressure is learned once.
+    val pressure = remember { PressureSense() }
+    val padPunch = if (functions.fxHeld && !keys.on && onBack == null && !sampling) PadPunch(punch, pressure) else null
+    // The display line names the punch-ins held, over EDIT's line too.
+    val punchHeld = punch.held.takeIf { padPunch != null }.orEmpty()
     // PROJECT held: the pads printed 1 to 9 pick a project instead of sounding, the rest stay still (ProjectHold).
     val hold = remember { ProjectHold() }
     // SOUND is EDIT's key: Live's EDIT where it works (the Live tab), none elsewhere.
     val editKey = if (edit.onEdit != null && onBack == null) edit else EditUi()
+    // KEYS / PADS printed on the pads' plate (KoDeck): a tap shows the other mode.
+    val modeStrip: @Composable (Modifier, Dp) -> Unit = { m, size -> ModeStrip(keys.on, keysActions.onMode, haptics, size, m) }
     // The pads whose press went to SAMPLE (held to record, or played beside a take): their kept,
     // release and cut go there too, even if the mode closed meanwhile; the rest stay the player's.
     val samplePressed = remember { HashSet<PhysicalPad>() }
@@ -707,6 +731,17 @@ fun MirrorScreen(
                             if (oneGroup) {
                                 PlateLine()
                                 SwitchRow(MirrorText.FOLLOW, MirrorText.FOLLOW_NOTE, follow, onFollow)
+                            } else {
+                                // The four groups have no one plate to print KEYS / PADS on (ModeStrip): the mode is here.
+                                PlateLine()
+                                SettingRow(MirrorText.MODE, stacked = true) {
+                                    Segmented(
+                                        listOf(MirrorText.MODE_PADS, MirrorText.MODE_KEYS),
+                                        selected = 0,
+                                        onSelect = { if (it == 1) keysActions.onMode(true) },
+                                        compact = true,
+                                    )
+                                }
                             }
                         }
                         KeysMonitor(st, keys.names)
@@ -727,7 +762,7 @@ fun MirrorScreen(
                 // The display line on the page (not in the top bar). With the SAMPLE panel it grows into the panel, its
                 // words giving way to SAMPLE's header in place ([SampleMorph]); the line itself stays the pads' own.
                 val padsLine: @Composable () -> Unit = {
-                    if (editing) EditLine() else DisplayStrip(st, mirror, transport, take, still = fixedNow != null, wireless = wireless)
+                    if (editing && punchHeld.isEmpty()) EditLine() else DisplayStrip(st, mirror, transport, take, still = fixedNow != null, wireless = wireless, punch = punchHeld)
                 }
                 val sampleNow = sample ?: SampleUi()
                 // The display line growing into the SAMPLE panel over the function keys, upright ([SampleMorph]): laid out as
@@ -768,8 +803,9 @@ fun MirrorScreen(
                         }
                     }
                 }
-                // The pads' swipe that opens and closes the panel, the pads under it hearing of a finger it took.
-                val swipe = if (panelOn) panelSwipe(panel, openPanel, closePanel) else Modifier
+                // The pads' swipe that opens and closes the panel, the pads under it hearing of a finger it took (not
+                // while they are the punch-ins: a finger moving there sets a punch-in's depth).
+                val swipe = if (panelOn && padPunch == null) panelSwipe(panel, openPanel, closePanel) else Modifier
                 if (piano != null) {
                     Column(sidewaysColumn) {
                         if (!inBar) {
@@ -778,13 +814,14 @@ fun MirrorScreen(
                         }
                         // A tablet's function keys, then the row over the piano and the piano; upright
                         // they sit right under the display line, as on the web. The short sideways
-                        // piano keeps its mode word instead, for the keys' height.
+                        // piano goes without them, for the keys' height. With no plate round the
+                        // piano, the row starts with the mode word.
                         if (pianoFunctions) {
                             FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
                             Spacer(Modifier.height(10.dp))
                         }
                         Column(Modifier.weight(1f, fill = false)) {
-                            ModeRow(keys, keysActions, landscape = true, viewSwitch = viewSwitch, mode = !pianoFunctions)
+                            ModeRow(keys, keysActions, landscape = true, viewSwitch = viewSwitch)
                             // The rest of the room; on a tablet no taller than a hand spans.
                             PianoKeyboard(
                                 piano, st, keysNow, clock, keysPlay,
@@ -804,7 +841,7 @@ fun MirrorScreen(
                         // keys a column on its left (the group keys are the body's own first column).
                         val gridH = maxHeight - (if (inBar) 0.dp else DisplayLineHeight + 10.dp)
                         val k = KoGeom.fit(maxWidth - SideFunctions - SideControlsGap, gridH, 4)
-                        val bodyW = k.u * (4 * 1.215f + 0.401f) + CapDx + 2.dp
+                        val bodyW = k.width(4)
                         val columnW = minOf(maxWidth, SideFunctions + SideControlsGap + bodyW)
                         val body: @Composable (Modifier) -> Unit = { m ->
                             Group(
@@ -821,6 +858,8 @@ fun MirrorScreen(
                                 onSelectGroup = { group = it },
                                 sampling = padSampling,
                                 erase = eraseDots,
+                                mode = modeStrip,
+                                punch = padPunch,
                             )
                         }
                         val fnColumn: @Composable () -> Unit = { FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey) }
@@ -949,11 +988,12 @@ fun MirrorScreen(
                                         if (viewSwitch != null) SidewaysKeysLead(viewSwitch)
                                         KeysGrid(
                                             st, keysNow, now, keysPlay,
-                                            Modifier.width(k.u * (3 * 1.215f + 0.401f) + CapDx + 2.dp).fillMaxHeight()
+                                            Modifier.width(k.width(3)).fillMaxHeight()
                                                 .coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
                                             haptics = haptics,
                                             hold = hold,
                                             functions = functions,
+                                            mode = modeStrip,
                                         )
                                         SidewaysKeysPicks(keys, keysActions)
                                     }
@@ -967,6 +1007,7 @@ fun MirrorScreen(
                                     haptics = haptics,
                                     hold = hold,
                                     functions = functions,
+                                    mode = modeStrip,
                                 )
                                 ModeRow(keys, keysActions, viewSwitch = viewSwitch, mode = false)
                             } else {
@@ -986,6 +1027,8 @@ fun MirrorScreen(
                                         haptics = haptics,
                                         sampling = padSampling,
                                         erase = eraseDots,
+                                        mode = modeStrip,
+                                        punch = padPunch,
                                     )
                                 }
                                 if (!panelOn) {
@@ -1172,6 +1215,8 @@ internal fun LivePill(
     wireless: Boolean = false,
     /** SAMPLE mode: while it is on, its header ([SamplePillLine]), the line cross-fading into it. */
     sample: SampleUi? = null,
+    /** The punch-ins held, in the order pressed ([PunchUi.held]): the line names them, over EDIT's too. */
+    punch: Set<Int> = emptySet(),
     /**
      * How far the SAMPLE panel under it has cross-faded its header in
      * ([SamplePanel.header], read as it draws), while Live shows it
@@ -1185,8 +1230,8 @@ internal fun LivePill(
     val line: @Composable () -> Unit = {
         when {
             keys.on -> KeysDisplay(st, mirror, keysNow, transport, take, still, compact = true, pianoRange = pianoRange)
-            editing -> EditLine(compact = true)
-            else -> DisplayStrip(st, mirror, transport, take, still, compact = true, wireless = wireless)
+            editing && punch.isEmpty() -> EditLine(compact = true)
+            else -> DisplayStrip(st, mirror, transport, take, still, compact = true, wireless = wireless, punch = punch)
         }
     }
     val sampleNow = sample ?: SampleUi()
@@ -1287,8 +1332,9 @@ private fun displayLineSmall(st: MirrorState, mirror: MirrorUi?, wireless: Boole
  * The one-group view's display as a single dark line: play state, tempo and
  * project on the left, the pad just played (or that the sound plays late) on
  * the right; the pattern's RECORD and PLAY first, its words in their place
- * while it is on ([PatternLine]). [compact]: one bar tall, in the top bar
- * ([LivePill]).
+ * while it is on ([PatternLine]). While punch-ins are held ([punch], FX held)
+ * it names them instead, in signal orange: "PUNCH · REPEAT + LPF".
+ * [compact]: one bar tall, in the top bar ([LivePill]).
  */
 @Composable
 private fun DisplayStrip(
@@ -1299,8 +1345,17 @@ private fun DisplayStrip(
     still: Boolean,
     compact: Boolean = false,
     wireless: Boolean = false,
+    punch: Set<Int> = emptySet(),
 ) {
     val c = LocalArcColors.current
+    if (punch.isNotEmpty()) {
+        PatternLine(transport, take, still, compact) {
+            SpokenLine(spoken(MirrorText.punchSpoken(punch))) {
+                Text(MirrorText.punchLine(punch), style = ArcType.displayHead, color = c.signal, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            }
+        }
+        return
+    }
     val main = displayLine(st, mirror, wireless)
     val played = when (st.playing) {
         true -> MirrorText.PLAYING
@@ -1481,35 +1536,44 @@ private fun Group(
     sampling: PadSampling? = null,
     /** ERASE: the pads with notes, dotted (the rest dimmed); null out of it. */
     erase: Set<PhysicalPad>? = null,
+    /** The big grid: KEYS / PADS in its plate's right margin (KoDeck). */
+    mode: (@Composable (Modifier, Dp) -> Unit)? = null,
+    /** FX held (the big grid only): the pads are the punch-ins ([PunchPad]); null for their sounds. */
+    punch: PadPunch? = null,
 ) {
     val c = LocalArcColors.current
     val lit = st.pads.filterKeys { it.group == group }
     val groupGlow = lit.values.maxOfOrNull { glow(it, now) } ?: 0f
     if (big) {
         val pad: @Composable (PhysicalPad, KoGeom) -> Unit = { pad, k ->
-            Pad(
-                pad, lit[pad], nameOf(pad), now,
-                Modifier.size(k.u, k.h),
-                big = true,
-                onPress = onPad?.let { f -> { hold: Boolean, unsure: Boolean, at: Long -> f(pad, hold, unsure, at) } },
-                onKept = { onPadKept(pad) },
-                onRelease = { at -> onPadUp(pad, at) },
-                onCut = { onPadCut(pad) },
-                playing = pad in playingPads,
-                inScroll = false,
-                onEdit = onEdit?.let { f -> { f(pad) } },
-                haptics = haptics,
-                ko = k,
-                sampleLed = sampling?.led?.invoke(pad),
-                blink = sampling?.blink,
-                onLatch = sampling?.onLatch?.let { f -> { f(pad) } },
-                noteDot = erase?.let { pad in it },
-            )
+            val slot = punchSlotForPad(pad.offset)
+            if (punch != null && slot >= 0) {
+                PunchPad(slot, slot in punch.ui.held, punch.ui, punch.sense, Modifier.size(k.u, k.h), k.u, k.keyShape, haptics = haptics)
+            } else {
+                Pad(
+                    pad, lit[pad], nameOf(pad), now,
+                    Modifier.size(k.u, k.h),
+                    big = true,
+                    onPress = onPad?.let { f -> { hold: Boolean, unsure: Boolean, at: Long -> f(pad, hold, unsure, at) } },
+                    onKept = { onPadKept(pad) },
+                    onRelease = { at -> onPadUp(pad, at) },
+                    onCut = { onPadCut(pad) },
+                    playing = pad in playingPads,
+                    inScroll = false,
+                    onEdit = onEdit?.let { f -> { f(pad) } },
+                    haptics = haptics,
+                    ko = k,
+                    sampleLed = sampling?.led?.invoke(pad),
+                    blink = sampling?.blink,
+                    onLatch = sampling?.onLatch?.let { f -> { f(pad) } },
+                    noteDot = erase?.let { pad in it },
+                )
+            }
         }
         val groupKeys: (@Composable (KoGeom) -> Unit)? = onSelectGroup?.let { select ->
             { k -> for (g in 0..3) GroupKey(g, group, st, now, select, Modifier.width(k.u), keyMin = 0.dp, ko = k) }
         }
-        KoDeck(modifier, groupKeys) { o, k -> pad(PhysicalPad(group, o), k) }
+        KoDeck(modifier, groupKeys, mode) { o, k -> pad(PhysicalPad(group, o), k) }
         return
     }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1586,13 +1650,17 @@ private class KoGeom(val u: Dp) {
     companion object {
         /**
          * As big as [w] x [h] lets the body be, with [cols] columns (pads and
-         * group keys): wide, 2 x 0.277 + the gaps + the edge; high, 0.215 +
-         * four rows of (0.215 + 0.077 + 0.926) + three gaps + 0.31 + the edge.
+         * group keys): wide, 2 x 0.277 + the gaps + the edge + the mode strip
+         * ([ModeStripWidth]); high, 0.215 + four rows of (0.215 + 0.077 +
+         * 0.926) + three gaps + 0.31 + the edge.
          */
         fun fit(w: Dp, h: Dp, cols: Int) = KoGeom(
-            minOf((w - CapDx - 2.dp) / (cols * 1.215f + 0.401f), (h - CapDy - 2.dp) / 5.72f, 170.dp).coerceAtLeast(0.dp),
+            minOf((w - CapDx - 2.dp - ModeStripWidth) / (cols * 1.215f + 0.401f), (h - CapDy - 2.dp) / 5.72f, 170.dp).coerceAtLeast(0.dp),
         )
     }
+
+    /** The body's width with [cols] columns, its edge and mode strip in it. */
+    fun width(cols: Int): Dp = u * (cols * 1.215f + 0.401f) + CapDx + 2.dp + ModeStripWidth
 }
 
 /** The big grid's pad width in a [w] x [h] room with [cols] columns ([KoGeom.fit]). */
@@ -1605,14 +1673,16 @@ internal fun koPadWidth(w: Dp, h: Dp, cols: Int): Dp = KoGeom.fit(w, h, cols).u
 internal fun Density.koUnit(w: Int, h: Int, cols: Int): Float = KoGeom.fit(w.toDp(), h.toDp(), cols).u.toPx()
 
 /** How wide the big grid's body is with [cols] columns, as tall as [h] lets it be ([KoGeom.fit]) whatever the width. */
-internal fun koDeckWidth(h: Dp, cols: Int): Dp = KoGeom.fit(Dp.Infinity, h, cols).u * (cols * 1.215f + 0.401f) + CapDx + 2.dp
+internal fun koDeckWidth(h: Dp, cols: Int): Dp = KoGeom.fit(Dp.Infinity, h, cols).width(cols)
 
 /**
  * Twelve keys on the K.O. II's body (a group's pads, or KEYS' notes), as big
  * as [modifier]'s room lets it be and in its middle; [key] draws the key at
  * each pad offset, [k.u] by [k.h]. [groupKeys]: a column left of them, as the
- * device's group keys are (a phone on its side). The LEDs before the printed
- * words stay unlit: on the device they mark the knobs' pages, not the pads.
+ * device's group keys are (a phone on its side). [mode]: KEYS / PADS in the
+ * body's right margin ([ModeStrip]), given that margin, the keys' height, and
+ * its words' size. The LEDs before the printed words stay unlit: on the
+ * device they mark the knobs' pages, not the pads.
  * While the SAMPLE panel moves, the room it is given stays as it was and the
  * drawing glides instead ([PadsGlide]), so this lays out (and its keys
  * compose) once per opening or closing, not on every frame.
@@ -1621,6 +1691,7 @@ internal fun koDeckWidth(h: Dp, cols: Int): Dp = KoGeom.fit(Dp.Infinity, h, cols
 private fun KoDeck(
     modifier: Modifier,
     groupKeys: (@Composable (KoGeom) -> Unit)?,
+    mode: (@Composable (Modifier, Dp) -> Unit)?,
     key: @Composable (offset: Int, k: KoGeom) -> Unit,
 ) {
     val ko = LocalHwColors.current.ko
@@ -1638,12 +1709,20 @@ private fun KoDeck(
             }
             .clip(RoundedCornerShape(radius))
             .background(ko.body)
-            .padding(start = k.u * 0.277f, top = k.u * 0.215f, end = k.u * 0.277f + CapDx, bottom = k.u * 0.31f + CapDy)
-        KoBody(k, body, groupKeys, key)
+        // The right margin is the mode strip's wider: the keys keep clear of it, their edge out of its touch.
+        val margin = k.u * 0.277f + ModeStripWidth
+        Box(body) {
+            KoBody(k, Modifier.padding(start = k.u * 0.277f, top = k.u * 0.215f, end = margin + CapDx, bottom = k.u * 0.31f + CapDy), groupKeys, key)
+            if (mode != null) {
+                Box(Modifier.matchParentSize().padding(top = k.u * 0.215f, bottom = k.u * 0.31f + CapDy), contentAlignment = Alignment.CenterEnd) {
+                    mode(Modifier.width(margin).fillMaxHeight(), (k.u * 0.11f).coerceIn(8.dp, 10.dp))
+                }
+            }
+        }
     }
 }
 
-/** KoDeck's body ([body], its plate) with the group keys and the twelve keys on it, as [k] sizes them. */
+/** KoDeck's body (its plate, [body] the room round its keys) with the group keys and the twelve keys on it, as [k] sizes them. */
 @Composable
 private fun KoBody(k: KoGeom, body: Modifier, groupKeys: (@Composable (KoGeom) -> Unit)?, key: @Composable (offset: Int, k: KoGeom) -> Unit) {
     Row(
@@ -1699,7 +1778,7 @@ private fun GroupGlyph(g: Int, color: Color, size: Dp) {
 }
 
 /** A light around a lit pad or key: [g] 0..1. */
-private fun Modifier.litGlow(g: Float, color: Color, shape: androidx.compose.ui.graphics.Shape): Modifier =
+internal fun Modifier.litGlow(g: Float, color: Color, shape: androidx.compose.ui.graphics.Shape): Modifier =
     if (g <= 0f) this else dropShadow(shape, Shadow(radius = 18.dp * g, color = color.copy(alpha = 0.6f * g)))
 
 /**
@@ -2050,8 +2129,8 @@ private fun Notes(st: MirrorState, mirror: MirrorUi?, tapToPlay: Boolean = false
  * The row right under the grid, as the PO app's DRUMS / KEYPAD: in KEYS the
  * scale and the octave, a tap on either of which lists the choices, after
  * the view switch where there is one. [mode]: one word for the mode first,
- * which a tap switches (PADS ⇄ KEYS), where the function keys' KEYS isn't
- * shown. [landscape]: the row over the piano ([SidewaysRow]).
+ * which a tap switches (PADS ⇄ KEYS), where no plate prints it ([ModeStrip]):
+ * the piano. [landscape]: the row over the piano ([SidewaysRow]).
  */
 @Composable
 private fun ModeRow(
@@ -2133,10 +2212,10 @@ private fun ModeWord(keys: KeysUi, actions: KeysActions, top: Boolean, modifier:
 }
 
 /**
- * The mode row over the piano: the mode ([mode]: not where the function
- * keys' KEYS is over it), the scale and the key at the start, the octave
- * between − and + at the end. Short of room (large text), the key word drops
- * its KEY, then the scale shortens to its code; − and + keep their size.
+ * The mode row over the piano: the mode ([mode]), the scale and the key at
+ * the start, the octave between − and + at the end. Short of room (large
+ * text), the key word drops its KEY, then the scale shortens to its code;
+ * − and + keep their size.
  */
 @Composable
 private fun SidewaysRow(keys: KeysUi, actions: KeysActions, viewSwitch: ViewSwitch?, mode: Boolean) {
@@ -2543,6 +2622,8 @@ private fun KeysGrid(
     /** PROJECT held: a key where a pad prints 1 to 9 picks that project instead (ProjectHold). */
     hold: ProjectHold? = null,
     functions: FunctionKeysUi = FunctionKeysUi(),
+    /** KEYS / PADS in the plate's right margin (KoDeck). */
+    mode: (@Composable (Modifier, Dp) -> Unit)? = null,
 ) {
     val c = LocalArcColors.current
     val notes = Keys.notes(keys.root, keys.scale, keys.octave)
@@ -2566,7 +2647,7 @@ private fun KeysGrid(
     // its digit, its octave where a pad shows its sample.
     val hw = LocalHwColors.current
     val density = LocalDensity.current
-    KoDeck(modifier, groupKeys = null) { o, k ->
+    KoDeck(modifier, groupKeys = null, mode) { o, k ->
         val note = notes[o]
         val g = lit[o] ?: 0f
         // Dark caps: the root orange, the scale's other notes pale (navy would sink into

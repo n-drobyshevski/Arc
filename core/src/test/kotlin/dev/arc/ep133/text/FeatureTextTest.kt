@@ -1,6 +1,7 @@
 package dev.arc.ep133.text
 
 import dev.arc.ep133.features.DiffResult
+import dev.arc.ep133.features.FxType
 import dev.arc.ep133.features.KeyMark
 import dev.arc.ep133.features.NoteNames
 import dev.arc.ep133.features.PhysicalPad
@@ -175,6 +176,46 @@ class FeatureTextTest {
         assertEquals("Sound", MirrorText.FN_SOUND)
         assertEquals("Pad's sound", MirrorText.SOUND_SHEET)
         assertEquals("Click: tap; hold for tempo", CoachText.TEMPO)
+    }
+
+    @Test
+    fun `fx text`() {
+        assertEquals(listOf("FX", "PAGE"), listOf(MirrorText.FN_FX, MirrorText.FN_FX_SUB).map { it.uppercase() })
+        assertEquals(listOf("OFF", "DLY", "REV", "DST", "CHO", "FLT", "CMP"), FxType.entries.map(MirrorText::fxCode))
+        // The key's word stays six letters at most, for four keys across a narrow phone.
+        assertEquals(listOf("FX off", "Delay", "Reverb", "Dist", "Chorus", "Filter", "Comp"), FxType.entries.map(MirrorText::fxKeyLabel))
+        assertTrue(FxType.entries.all { MirrorText.fxKeyLabel(it).length <= 6 })
+        assertEquals("Effects, Distortion", MirrorText.fxKeyDescription(FxType.DISTORTION))
+        assertEquals("Effects, Off", MirrorText.fxKeyDescription(FxType.NONE))
+        assertEquals("Reverb, on. Tap again to turn it off.", MirrorText.fxChoice(FxType.REVERB, on = true))
+        assertEquals("Reverb", MirrorText.fxChoice(FxType.REVERB, on = false))
+        assertEquals("Group B sends nothing to the effect: raise its fader to hear it.", MirrorText.fxHearNoSend('B'))
+        assertEquals("Length 1/8D, feedback 38%", MirrorText.xyState(FxType.DELAY, 0.625f, 0.4f, 120f))
+        assertEquals("Cutoff OPEN, reso Q 4.3", MirrorText.xyState(FxType.FILTER, 0.5f, 0.5f, 120f))
+        assertEquals("1/8D \u00B7 38%", MirrorText.xyReadout(FxType.DELAY, 0.625f, 0.4f, 120f))
+        assertEquals(listOf("Length up", "Feedback down"), listOf(MirrorText.xyStep("LENGTH", true), MirrorText.xyStep("FEEDBACK", false)))
+        assertEquals("Send C", MirrorText.sendName(2))
+        assertEquals(listOf("0", "62", "100"), listOf(0f, 0.62f, 1f).map(MirrorText::sendValue))
+        val a7 = PhysicalPad(0, 9)
+        assertEquals("A 7 kick", MirrorText.sidechainSource(a7, "kick"))
+        assertEquals("A 7", MirrorText.sidechainSource(a7, null))
+        assertEquals("Sidechain source, A 7 kick", MirrorText.sidechainSourceDescription(a7, "kick"))
+        assertEquals("Set to B 1", MirrorText.setSource(PhysicalPad(1, 3)))
+        assertEquals("Duck group D", MirrorText.duckChoice(3))
+        assertEquals(listOf("30 ms", "201 ms", "600 ms"), listOf(0f, 0.3f, 1f).map(MirrorText::sidechainLength))
+        assertEquals(listOf("SNAP 60", "EVEN", "PUMP 40"), listOf(0.2f, 0.5f, 0.7f).map(MirrorText::sidechainShape))
+    }
+
+    @Test
+    fun `punch text`() {
+        // Slot order, '.' to '9', as the pads print them while FX is held.
+        assertEquals(
+            listOf("PITCH RND", "SLICE", "STUTTER", "REPEAT", "TAPE STOP", "FILTER LFO", "LPF", "HPF", "SEND FX", "TREMOLO", "OCT \u2193", "DECIMATE"),
+            (0 until 12).map { MirrorText.punchName(it).uppercase() },
+        )
+        assertEquals(listOf("Beat repeat", "Octave down"), listOf(3, 10).map(MirrorText::punchDescription))
+        assertEquals("PUNCH \u00B7 REPEAT + LPF", MirrorText.punchLine(linkedSetOf(3, 6)))
+        assertEquals("Punch-ins, Beat repeat, Low-pass filter", MirrorText.punchSpoken(linkedSetOf(3, 6)))
     }
 
     @Test

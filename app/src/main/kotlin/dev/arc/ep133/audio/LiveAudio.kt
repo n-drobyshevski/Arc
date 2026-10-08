@@ -84,6 +84,12 @@ import java.util.concurrent.Executors
  * fails or closes, and re-anchors. Focus is
  * asked for when it starts and held while it runs, sounding or not; a call
  * or another app taking focus is told to [onFocusLost], which stops it.
+ *
+ * The mix's FX bus ([control], an addition) is set up command by command,
+ * from any thread, and each setting's last value is kept ([FxSetup]): an
+ * output opened afresh, or a native stream reopened on another route, gets
+ * them all again, so the effect, sends, compressor, sidechain and tempo
+ * outlive the output they were set on. Punch-ins are not kept.
  */
 class LiveAudio(
     context: Context,
@@ -140,6 +146,10 @@ class LiveAudio(
 
     // Key numbers for the native engine, kept across outputs.
     private val keyIds = LiveKeys()
+
+    // The FX bus's settings, kept across outputs; also the lock that keeps a setting from slipping
+    // between an output opening and its replay.
+    private val fx = FxSetup()
 
     @Volatile private var output: LiveOutput? = null
     // What the open output's thread reports into; a new one for each output.
@@ -246,6 +256,8 @@ class LiveAudio(
         s.sink = o
         session = s
         output = o
+        // After [output]: a setting sent meanwhile went to this output, or is in the replay.
+        replayFx(o)
         _engine.value = o.engine
         // After [output]: a route the thread reports meanwhile is no older than this one.
         _wireless.value = isWireless(o.route?.type)
@@ -362,6 +374,25 @@ class LiveAudio(
 
     fun stopAll() {
         output?.stopAll()
+    }
+
+    /**
+     * Sets up the mix's FX bus: [what] is one of
+     * [dev.arc.ep133.formats.fx.FxControl]'s commands, with its [index], [x]
+     * and [y]. It reaches the open output at its next block, and is kept for
+     * the next output (a punch-in excepted). Any thread; it never opens the
+     * output.
+     */
+    fun control(what: Int, index: Int, x: Float, y: Float) {
+        synchronized(fx) {
+            fx.record(what, index, x, y)
+            output?.control(what, index, x, y)
+        }
+    }
+
+    /** Sends every FX setting kept to [o]: it opened afresh, or its stream reopened. */
+    private fun replayFx(o: LiveOutput) {
+        synchronized(fx) { fx.replay(o::control) }
     }
 
     /** Where the output goes now, once it is open. */
@@ -583,7 +614,11 @@ class LiveAudio(
             _wireless.value = isWireless(route?.type)
             // A native stream reopened: what was scheduled is dropped. Not the track's (re)route, told on its
             // first block too: its frames go on and what waits in its mixer stays; the stamp follows the delay.
-            if (sink is NativeLiveOutput) sequencer?.lost()
+            (sink as? NativeLiveOutput)?.let {
+                sequencer?.lost()
+                // The engine keeps its FX settings across a reopen; sent again all the same, as to a new output.
+                replayFx(it)
+            }
         }
 
         override fun changed(description: String) {

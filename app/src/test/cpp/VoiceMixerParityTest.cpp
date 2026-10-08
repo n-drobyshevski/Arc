@@ -2,8 +2,10 @@
 // VoiceMixer) through the C++ port and wants the same results: every sample
 // of short renders, a hash of long ones, the voices started and the keys.
 // A start line may carry a voice shape (VoiceShape's fields, less the
-// semitones, which are in its pitch); a timed start ("startat") has its frame
-// after the tag, a timed or tagged release ("releaseat") its frame and tag.
+// semitones, which are in its pitch: 8 of them, or 10 with the FX bus and the
+// duck source); a timed start ("startat") has its frame after the tag, a timed
+// or tagged release ("releaseat") its frame and tag. A "control" line is an
+// FX bus command: its kind, index and two float values as bits.
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -43,6 +45,14 @@ int16_t *noise(size_t size, int64_t seed) {
         pcm[i] = static_cast<int16_t>(static_cast<uint16_t>(x >> 48));
     }
     return pcm;
+}
+
+// A float from its bits in hex, as VoiceMixerGoldenTest writes them (Integer.toHexString).
+float floatOf(const std::string &hex) {
+    const uint32_t bits = static_cast<uint32_t>(std::strtoul(hex.c_str(), nullptr, 16));
+    float v = 0;
+    std::memcpy(&v, &bits, sizeof v);
+    return v;
 }
 
 struct Replay {
@@ -134,14 +144,16 @@ int runVoiceMixerParity(const char *goldenPath) {
             const uint64_t bits = std::strtoull(pitchBits.c_str(), nullptr, 16);
             double pitch = 0;
             std::memcpy(&pitch, &bits, sizeof pitch);
-            // A shape other than the default follows: the gain's float bits, pan, start, end, attack, release, mode, group.
+            // A shape other than the default follows: the gain's float bits, pan, start, end, attack, release, mode,
+            // group, then (on a bus or a duck source) the bus and the source as 0 or 1.
             arc::VoiceShape shape;
             std::string gainBits;
             if (words >> gainBits) {
-                const uint32_t g = static_cast<uint32_t>(std::strtoul(gainBits.c_str(), nullptr, 16));
-                std::memcpy(&shape.gain, &g, sizeof shape.gain);
+                shape.gain = floatOf(gainBits);
                 words >> shape.pan >> shape.start >> shape.end >> shape.attackMs >> shape.releaseMs >> shape.mode >>
                     shape.muteGroup;
+                int duck = 0;
+                if (words >> shape.bus >> duck) shape.duckSource = duck != 0;
             }
             CHECK(r.mixer->start(key, r.samples[id].get(), rate, pitch, tag, shape, at));
         } else if (op == "release" || op == "cut") {
@@ -154,6 +166,13 @@ int runVoiceMixerParity(const char *goldenPath) {
             int64_t tag = 0;
             words >> key >> at >> tag;
             CHECK(r.mixer->release(key, at, tag));
+        } else if (op == "control") {
+            int32_t what = 0;
+            int32_t index = 0;
+            std::string xBits;
+            std::string yBits;
+            words >> what >> index >> xBits >> yBits;
+            CHECK(r.mixer->control(what, index, floatOf(xBits), floatOf(yBits)));
         } else if (op == "stop") {
             CHECK(r.mixer->stopAll());
         } else if (op == "flushtimed") {
