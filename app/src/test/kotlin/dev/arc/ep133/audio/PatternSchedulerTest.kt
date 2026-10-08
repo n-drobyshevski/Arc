@@ -299,4 +299,21 @@ class PatternSchedulerTest {
         assertEquals(7, starts.size)
         assertFalse(starts.any { it.at == ahead + 24000L })
     }
+
+    @Test
+    fun `a loss told before PLAY is the old run's, so bar 1 plays where it was anchored`() {
+        // Live's output closed (lost) and opened again, then PLAY: all picked up by the same block.
+        val r = Rig()
+        r.s.plan = plan(0, beats())
+        r.s.lost()
+        r.s.play(0)
+        // The output's first stamp comes a few blocks later.
+        r.run(1920)
+        r.stamp()
+        assertNotNull(r.s.timeline.value)
+        r.run(ahead + bar, stampEvery = 25)
+        assertEquals(listOf(ahead, ahead + 24000L, ahead + 48000L, ahead + 72000L), r.sink.starts.map { it.at }.filter { it < ahead + bar })
+        // Re-anchored never: the first timeline still holds.
+        assertEquals(0.0, r.s.timeline.value!!.tickAt(r.heard(ahead)), 1e-9)
+    }
 }

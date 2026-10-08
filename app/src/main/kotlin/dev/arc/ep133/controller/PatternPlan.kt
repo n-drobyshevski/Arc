@@ -120,3 +120,14 @@ internal fun countInBeat(tick: Double): Int? {
 
 /** [ticks] of the pattern at [bpm] as frames at [rate] (an input's own), rounded half up as [dev.arc.ep133.features.barFrames]. */
 internal fun ticksToFrames(ticks: Long, bpm: Double, rate: Int): Long = floor(ticks * 60.0 * rate / (bpm * Seq.PPQN) + 0.5).toLong()
+
+/** [p] without note [id] (a press that was a scroll or a swipe after all); [p] itself when no note has it. */
+internal fun withoutNote(p: ProjectPatterns, id: Int): ProjectPatterns {
+    if (id == 0) return p
+    for (g in 0 until 4) {
+        val pat = p.group(g)
+        if (pat.notes.none { it.id == id }) continue
+        return p.with(g, pat.copy(notes = pat.notes.filterNot { it.id == id }))
+    }
+    return p
+}

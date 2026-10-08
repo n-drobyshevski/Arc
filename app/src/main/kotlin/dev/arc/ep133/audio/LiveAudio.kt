@@ -80,7 +80,8 @@ import java.util.concurrent.Executors
  * The pattern sequencer ([sequencer], a [MixScheduler]) schedules into the
  * same mix, on the output's thread before each block, with the output's
  * stamp while it runs; it is told [MixScheduler.lost] when the output
- * reroutes, reopens, gives out, fails or closes, and re-anchors. Focus is
+ * reopens (a native stream; a track rerouted keeps its frames), gives out,
+ * fails or closes, and re-anchors. Focus is
  * asked for when it starts and held while it runs, sounding or not; a call
  * or another app taking focus is told to [onFocusLost], which stops it.
  */
@@ -578,8 +579,9 @@ class LiveAudio(
         override fun routed(route: AudioDeviceInfo?) {
             if (!running || session !== this) return
             _wireless.value = isWireless(route?.type)
-            // A native stream reopened (what was scheduled is dropped), or the route's delay is new.
-            sequencer?.lost()
+            // A native stream reopened: what was scheduled is dropped. Not the track's (re)route, told on its
+            // first block too: its frames go on and what waits in its mixer stays; the stamp follows the delay.
+            if (sink is NativeLiveOutput) sequencer?.lost()
         }
 
         override fun changed(description: String) {

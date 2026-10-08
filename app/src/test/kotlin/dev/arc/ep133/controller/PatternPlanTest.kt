@@ -121,4 +121,14 @@ class PatternPlanTest {
         assertFalse(patternShown(counting, p, TransportState(TransportPhase.ARMED), false).running)
         assertFalse(PatternUiState().anyNotes)
     }
+
+    @Test
+    fun `a press that was no press after all takes its note back out, and only it`() {
+        val kept = PatternNote(0, 1, 24, id = 4)
+        val p = ProjectPatterns().with(1, Pattern(1, listOf(kept, PatternNote(96, 5, 24, id = 7))))
+        val out = withoutNote(p, 7)
+        assertEquals(listOf(kept), out.group(1).notes)
+        assertSame(p, withoutNote(p, 9))
+        assertSame(p, withoutNote(p, 0))
+    }
 }

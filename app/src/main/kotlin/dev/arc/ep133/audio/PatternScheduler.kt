@@ -15,6 +15,7 @@ import dev.arc.ep133.formats.VoiceShape
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 import kotlin.math.ceil
 
@@ -144,7 +145,7 @@ class PatternScheduler(private val lookaheadNs: Long = LOOKAHEAD_NS) : MixSchedu
     }
 
     private val asks = ConcurrentLinkedQueue<Ask>()
-    @Volatile private var lostAsked = false
+    private val lostAsked = AtomicBoolean(false)
     @Volatile private var on = false
 
     override val running: Boolean get() = on
@@ -200,15 +201,18 @@ class PatternScheduler(private val lookaheadNs: Long = LOOKAHEAD_NS) : MixSchedu
     }
 
     override fun lost() {
-        lostAsked = true
+        lostAsked.set(true)
     }
 
     override fun fill(sink: ScheduleSink, rendered: Long, rate: Int) {
+        // Taken first: a loss told before a start or a stop here is the old run's, not the new anchor's.
+        var lostNow = lostAsked.getAndSet(false)
         while (true) {
             when (val a = asks.poll() ?: break) {
                 is Ask.Play -> {
                     flush(sink)
                     anchor(a, rendered, rate)
+                    lostNow = false
                 }
                 Ask.Stop -> {
                     flush(sink)
@@ -216,18 +220,18 @@ class PatternScheduler(private val lookaheadNs: Long = LOOKAHEAD_NS) : MixSchedu
                     stamp = null
                     waiting = false
                     _timeline.value = null
+                    lostNow = false
                 }
             }
         }
         var c = clock
         // Lost, or the frames count anew (another rate, or from 0 again): what was sent is gone.
-        if (c != null && !waiting && (lostAsked || rate != c.rate || rendered < lastRendered)) {
+        if (c != null && !waiting && (lostNow || rate != c.rate || rendered < lastRendered)) {
             flush(sink)
             lostTick = c.tickAt(lastRendered)
             waiting = true
             stamp = null
         }
-        lostAsked = false
         lastRendered = rendered
         if (c == null || waiting) return
         val p = plan

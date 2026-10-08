@@ -2080,7 +2080,8 @@ class ArcController(
     fun cutPad(pad: dev.arc.ep133.features.PhysicalPad) {
         val key = "live:${pad.group}:${pad.offset}"
         held -= key
-        patternHeld -= key
+        // A note it recorded (a sure press a swipe took over) was no press either.
+        patternHeld.remove(key)?.let { setPatterns(withoutNote(projectPatterns, it)) }
         // One still unsure never loads, nor becomes the KEYS sound.
         if (unsure.remove(key) == null) cut += key
         liveAudio.cut(key)
@@ -3532,7 +3533,8 @@ class ArcController(
         }
         // TEMPO's tempo: the EP-133's while it sends its clock, else the phone's.
         scope.launch {
-            combine(_state.map { it.mirror?.state?.bpm }.distinctUntilChanged(), settings.map { it.liveTempo }.distinctUntilChanged()) { _, _ -> }
+            // As the plan rounds it: the clock's tempo, measured afresh with every state, changes in its last digits all along.
+            combine(_state.map { s -> s.mirror?.state?.bpm?.let { patternBpm(it, dev.arc.ep133.features.Tempo.DEFAULT) } }.distinctUntilChanged(), settings.map { it.liveTempo }.distinctUntilChanged()) { _, _ -> }
                 .collect { refreshPatternPlan() }
         }
     }
@@ -3965,7 +3967,9 @@ class ArcController(
      * itself; the mic's and USB's at the moment it is heard.
      */
     private fun sampleOnPattern(pad: dev.arc.ep133.features.PhysicalPad, bars: Int?) {
-        if (!patternRunning()) {
+        // Started for the take: it starts at bar 1, however late the first stamp is told.
+        val fromStop = !patternRunning()
+        if (fromStop) {
             // Armed: the take plays the patterns, it doesn't record into them.
             patternAct { transport.punchOut() }
             patternAct(PATTERN_TAKE_LEAD_NS) { transport.play(recordHeld = false, countIn = false) }
@@ -3980,8 +3984,8 @@ class ArcController(
                 sampleWaiting.value = SamplePhase.Waiting(pad, latched = true)
                 val tl = kotlinx.coroutines.withTimeoutOrNull(BEAT_WAIT_MS) { awaitTimeline() } ?: return@launch
                 val len = bars?.let { it * Seq.TICKS_PER_BAR } ?: projectPatterns.longestTicks
-                // A moment ahead, so the take is asked for before it starts.
-                val start = nextLoopStart(tl.tickAt(System.nanoTime() + dev.arc.ep133.audio.PatternScheduler.LOOKAHEAD_NS), if (bars == null) len else Seq.TICKS_PER_BAR)
+                // A moment ahead, so the take is asked for before it starts (one a little late takes what the input kept).
+                val start = if (fromStop) 0L else nextLoopStart(tl.tickAt(System.nanoTime() + dev.arc.ep133.audio.PatternScheduler.LOOKAHEAD_NS), if (bars == null) len else Seq.TICKS_PER_BAR)
                 val end = start + len
                 started = if (recorder.input?.source == SampleSource.RSP) {
                     recorder.scheduleMix(pad, tl.frameOfTick(start), tl.frameOfTick(end) - tl.frameOfTick(start), sampleMaxFrames())
