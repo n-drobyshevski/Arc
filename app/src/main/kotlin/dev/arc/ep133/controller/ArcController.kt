@@ -847,7 +847,7 @@ class ArcController(
     private val liveAudio = dev.arc.ep133.audio.LiveAudio(context, ::liveStarted, ::takeDone, ::liveOutput)
     /** The Live voices sounding on the phone ("live:<group>:<offset>" pads, "note:<midi>" keys), for the rings. */
     val liveKeys: StateFlow<Set<String>> get() = liveAudio.keys
-    /** Live's REC key. */
+    /** Live's TAKE key (Live tools), and its badge on the display line. */
     val rec: StateFlow<dev.arc.ep133.features.RecState> get() = liveAudio.rec
     /** Whether Live's sound goes to Bluetooth or a hearing aid, which plays late: its display line says so. */
     val liveWireless: StateFlow<Boolean> get() = liveAudio.wireless
@@ -2189,7 +2189,7 @@ class ArcController(
         _takes.value = withContext(Dispatchers.IO) { runCatching { takeStore.list() }.getOrDefault(emptyList()) }
     }
 
-    /** REC: arms a take (the next sound starts it), or stops the one going. */
+    /** TAKE (REC before RECORD was the pattern's): arms a take (the next sound starts it), or stops the one going. */
     fun toggleRec() {
         if (liveAudio.rec.value != dev.arc.ep133.features.RecState.Idle) {
             liveAudio.stopRecording()

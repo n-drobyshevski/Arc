@@ -424,22 +424,15 @@ object MirrorText {
         if (skipped == 0) "" else " $skipped skipped: the EP-133 has another sound or project there now."
     const val OFFLINE_DISCARDED = "Offline pad changes discarded."
 
-    // ---------- REC: takes of what is played on the phone ----------
+    // ---------- TAKE: takes of what is played on the phone ----------
+    /** SAMPLE's take going on, for screen readers ("Pad A 1, Rec"). */
     const val REC = "Rec"
     const val TAKES = "Takes"
-    const val NO_TAKES = "Tap REC on the display, then play: recording starts with the first sound and stops when you tap REC again."
     const val TAKES_NOTE = "A take holds the pads and keys played on the phone, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save or Share copies one out."
     const val TO_DEVICE = "To EP-133"
     const val DELETE_TAKE = "Delete this take?"
     const val NO_OUTPUT = "There is no sound output to record from."
     const val SHARE_TAKE_FAILED = "Sharing failed. Use Save WAV instead."
-
-    /** What the REC key does now, for screen readers. */
-    fun recDescription(state: dev.arc.ep133.features.RecState) = when (state) {
-        dev.arc.ep133.features.RecState.Idle -> "Record. Recording starts with the first sound you play."
-        dev.arc.ep133.features.RecState.Armed -> "Record, waiting for the first sound. Tap to cancel."
-        is dev.arc.ep133.features.RecState.Recording -> "Recording, ${takeLength(state.seconds.toDouble())}. Tap to stop."
-    }
 
     /** "0:12", "10:00". */
     fun takeLength(seconds: Double): String {

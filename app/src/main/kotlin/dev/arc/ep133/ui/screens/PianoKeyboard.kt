@@ -146,7 +146,7 @@ private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> 
     // The notes a finger is on, and how far down each key is (0..1, read while drawing).
     val fingered = remember { mutableStateOf(emptySet<Int>()) }
     val down = remember { mutableStateMapOf<Int, Float>() }
-    // [at]: when the finger came down or slid onto the key, for the presses among [events].
+    // [at]: when the finger came down, slid onto the key or left it, for the presses and releases among [events].
     fun play(events: List<NoteEvent>, at: Long = System.nanoTime()) {
         events.forEach { e ->
             when (e) {
@@ -155,7 +155,7 @@ private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> 
                     currentActions.onNote(e.note, true, at)
                     tick?.performHapticFeedback(HapticFeedbackType.KeyboardTap)
                 }
-                is NoteEvent.Release -> currentActions.onNoteUp(e.note)
+                is NoteEvent.Release -> currentActions.onNoteUp(e.note, at)
             }
         }
         fingered.value = touches.held
@@ -231,7 +231,7 @@ private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> 
                                     // Lifted, or taken over (a cancel lifts it too).
                                     !ch.pressed -> {
                                         fingers.remove(ch.id)
-                                        play(touches.up(id))
+                                        play(touches.up(id), PressTime.of(ch.uptimeMillis))
                                     }
                                     ch.positionChanged() -> {
                                         // After − or +, a finger resting on a key keeps the note it

@@ -215,10 +215,11 @@ class KeysActions(
     /**
      * A MIDI note pressed; it sounds until [onNoteUp]. A screen reader's Play
      * passes hold = false. [pressedAt] (System.nanoTime) is when the finger
-     * came down, from the touch event ([PressTime]).
+     * came down, from the touch event ([PressTime]); [onNoteUp]'s releasedAt
+     * when it left, as the pattern's gate takes it.
      */
     val onNote: (note: Int, hold: Boolean, pressedAt: Long) -> Unit = { _, _, _ -> },
-    val onNoteUp: (note: Int) -> Unit = {},
+    val onNoteUp: (note: Int, releasedAt: Long) -> Unit = { _, _ -> },
     /** A pad played on the device in the pads view becomes the KEYS sound. */
     val onSelect: (PhysicalPad) -> Unit = {},
     /** The view switch: grid or piano, remembered for a [wide] window or a tall one. */
@@ -315,8 +316,9 @@ class TransportUi(
     /** In ERASE, a pad down and up: a tap erases its notes, a hold while playing those it passes. */
     val onErasePadDown: (pad: PhysicalPad, at: Long) -> Unit = { _, _ -> },
     val onErasePadUp: (pad: PhysicalPad, at: Long) -> Unit = { _, _ -> },
-    /** In ERASE on KEYS, a key erases its note (MIDI) on the KEYS pad. */
-    val onEraseNote: (note: Int) -> Unit = {},
+    /** In ERASE on KEYS, a key down and up, as a pad's: its note (MIDI) on the KEYS pad. */
+    val onEraseNoteDown: (note: Int, at: Long) -> Unit = { _, _ -> },
+    val onEraseNoteUp: (note: Int, at: Long) -> Unit = { _, _ -> },
 ) {
     val state: TransportState get() = TransportState(phase, recording)
 }
@@ -384,12 +386,13 @@ fun MirrorScreen(
     onPad: ((pad: PhysicalPad, hold: Boolean, unsure: Boolean, pressedAt: Long) -> Unit)? = null,
     /** The unsure press on a pad was a press after all (no scroll within [PRESS_DELAY_MS], or a lift inside it). */
     onPadKept: (PhysicalPad) -> Unit = {},
-    onPadUp: (PhysicalPad) -> Unit = {},
+    /** The finger left the pad, at [releasedAt] (System.nanoTime, from the touch event): the pattern's gate ends there. */
+    onPadUp: (pad: PhysicalPad, releasedAt: Long) -> Unit = { _, _ -> },
     /**
      * The press on a pad of the scrolling page turned into a scroll: its sound
      * is cut short, rather than let go of ([onPadUp]).
      */
-    onPadCut: (PhysicalPad) -> Unit = onPadUp,
+    onPadCut: (PhysicalPad) -> Unit = { onPadUp(it, System.nanoTime()) },
     /** The pads whose samples are playing on the phone (several at once for a chord), ringed. */
     playingPads: Set<PhysicalPad> = emptySet(),
     /**
@@ -507,7 +510,7 @@ fun MirrorScreen(
                 samplePressed.remove(pad) -> sample?.onPadUp(pad, at)
                 eraseHeld.remove(pad) -> transport?.onErasePadUp(pad, at)
                 eraseUnsure.remove(pad) != null -> Unit
-                else -> onPadUp(pad)
+                else -> onPadUp(pad, at)
             }
         }
     }
@@ -529,9 +532,16 @@ fun MirrorScreen(
                 onRoot = keysActions.onRoot,
                 onScale = keysActions.onScale,
                 onOctave = keysActions.onOctave,
-                onNote = { note, _, _ -> transport.onEraseNote(note) },
+                onNote = { note, h, at ->
+                    transport.onEraseNoteDown(note, at)
+                    // A screen reader's click: a tap.
+                    if (!h) transport.onEraseNoteUp(note, at)
+                },
                 // A key held from before ERASE went on still lets go of its note (a lift of one that never sounded is nothing).
-                onNoteUp = keysActions.onNoteUp,
+                onNoteUp = { note, at ->
+                    transport.onEraseNoteUp(note, at)
+                    keysActions.onNoteUp(note, at)
+                },
                 onSelect = keysActions.onSelect,
                 onView = keysActions.onView,
             )
@@ -2540,11 +2550,11 @@ private fun KeysGrid(
     // Each key is a finger of its own, holding the note it had when pressed: a new key,
     // scale or octave under a held key still lets go of the note that sounds.
     val touches = remember { NoteTouches() }
-    // [at]: when the finger came down, for the presses among [events].
+    // [at]: when the finger came down or left, for the presses and releases among [events].
     fun play(events: List<NoteEvent>, at: Long = System.nanoTime()) = events.forEach { e ->
         when (e) {
             is NoteEvent.Press -> actions.onNote(e.note, true, at)
-            is NoteEvent.Release -> actions.onNoteUp(e.note)
+            is NoteEvent.Release -> actions.onNoteUp(e.note, at)
         }
     }
     // How lit each key is: the brightest device note that falls on it.
@@ -2582,7 +2592,7 @@ private fun KeysGrid(
                                 else -> actions.onNote(notes[o], false, at)
                             }
                         },
-                        { _ -> if (hold?.release(keysKey(o)) != true) play(touches.up(o.toLong())) },
+                        { at -> if (hold?.release(keysKey(o)) != true) play(touches.up(o.toLong()), at) },
                         held = held,
                         haptics = haptics,
                     ),
