@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.arc.ep133.ui.theme.ArcType
@@ -39,7 +40,7 @@ import dev.arc.ep133.ui.theme.ArcType
  * Small geometric icons, drawn rather than taken from an icon set, so they
  * match the pocket operator app's flat shapes (REC dot, play triangle, gear).
  */
-enum class ArcIcon { DOT, RING, GEAR, HELP, REFRESH, PLUS, SEARCH, IMPORT, FOLLOW, SWAP, EXCHANGE }
+enum class ArcIcon { DOT, RING, GEAR, HELP, REFRESH, PLUS, SEARCH, IMPORT, FOLLOW, SWAP, EXCHANGE, MIC }
 
 @Composable
 fun Icon(icon: ArcIcon, color: Color, modifier: Modifier = Modifier, size: Dp = 22.dp) {
@@ -138,6 +139,20 @@ private fun DrawScope.draw(icon: ArcIcon, color: Color) {
                 drawLine(color, Offset(tip, y), Offset(back, y + head), stroke, StrokeCap.Round)
             }
         }
+        ArcIcon.MIC -> {
+            // A microphone (Live's SAMPLE key): a capsule body in a U-shaped holder on a stem.
+            val body = w * 0.3f
+            drawRoundRect(
+                color,
+                topLeft = Offset(c.x - body / 2, w * 0.08f),
+                size = Size(body, w * 0.48f),
+                cornerRadius = androidx.compose.ui.geometry.CornerRadius(body / 2),
+            )
+            val r = w * 0.25f
+            val holder = w * 0.42f
+            drawArc(color, 0f, 180f, false, topLeft = Offset(c.x - r, holder - r), size = Size(2 * r, 2 * r), style = Stroke(stroke, cap = StrokeCap.Round))
+            drawLine(color, Offset(c.x, holder + r), Offset(c.x, w * 0.9f), stroke, StrokeCap.Round)
+        }
         ArcIcon.FOLLOW -> {
             // A target: follow the group being played.
             drawCircle(color, radius = w * 0.38f, style = Stroke(stroke))
@@ -149,7 +164,8 @@ private fun DrawScope.draw(icon: ArcIcon, color: Color) {
 /**
  * A square (or round) icon key, drawn as a cap (see [cap]) whose face travels
  * onto its edge while pressed. Long-press shows its name; screen readers read
- * [label]. The touch area stays at least 44dp even when the face is drawn smaller.
+ * [label], then [state] where it has one (a key that is on or off). The touch
+ * area stays at least 44dp even when the face is drawn smaller.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -164,6 +180,7 @@ fun IconBlock(
     size: Dp = 44.dp,
     iconSize: Dp = 22.dp,
     round: Boolean = false,
+    state: String? = null,
 ) {
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
@@ -184,7 +201,10 @@ fun IconBlock(
                     alpha = if (enabled) 1f else 0.4f,
                 )
                 .clickable(interactionSource = source, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
-                .semantics { contentDescription = label },
+                .semantics {
+                    contentDescription = label
+                    if (state != null) stateDescription = state
+                },
             contentAlignment = Alignment.Center,
         ) {
             Icon(icon, ink, size = iconSize)

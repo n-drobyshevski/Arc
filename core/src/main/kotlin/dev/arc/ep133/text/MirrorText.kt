@@ -3,7 +3,9 @@ package dev.arc.ep133.text
 import dev.arc.ep133.features.FactorySounds
 import dev.arc.ep133.features.Hit
 import dev.arc.ep133.features.PadNotes
+import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.ProjectSource
+import dev.arc.ep133.features.SampleSource
 import dev.arc.ep133.util.jsToFixed
 
 /** Text for the live mirror (an addition to the web version). */
@@ -36,7 +38,7 @@ object MirrorText {
     const val COMMUNITY_NOTE = "Pads follow the official MIDI note map; play/stop and tempo are standard MIDI clock messages. Naming the samples relies on community notes about the device's SysEx, not on the official guide."
     const val NO_PUSHES = "No pad messages from the device yet, so samples can't be named. Pads still light up."
     /** How Live uses the device: it reads, and writes only a pad's sound (in EDIT) and the active project (PROJECT), when asked. */
-    const val LISTEN_ONLY = "arc reads the device here (sound names, the active project's pads, and the samples on them, to keep a copy). It changes the device only when you give a pad another sound in EDIT, or switch projects with PROJECT."
+    const val LISTEN_ONLY = "arc reads the device here (sound names, the active project's pads, and the samples on them, to keep a copy). It changes the device only when you give a pad another sound in EDIT, switch projects with PROJECT, or keep a sample in SAMPLE."
 
     // Tapping a pad plays its sample on the phone.
     const val TAP_NOTE = "Hold a pad to hear its sample on the phone (it stops when you let go): from arc's copy of the device's sounds, a backup, or the device."
@@ -402,8 +404,16 @@ object MirrorText {
     const val RESET_PADS = "Reset pads"
     const val PADS_RESET = "Pads back to the EP-133's sounds."
 
-    /** The question when the EP-133 connects with offline changes kept: [WRITE] or [DISCARD]. */
-    fun putOffline(n: Int) = "Put ${Format.plural(n, "offline pad change")} on the EP-133?"
+    /**
+     * The question when the EP-133 connects with offline changes kept: [WRITE] or [DISCARD].
+     * [n] counts the pad changes and [samples] the new recordings waiting to go on, so a
+     * prompt for recordings alone doesn't call them pad changes.
+     */
+    fun putOffline(n: Int, samples: Int = 0) = "Put " + when {
+        samples == 0 -> Format.plural(n, "offline pad change")
+        n == 0 -> Format.plural(samples, "new sample")
+        else -> "${Format.plural(n, "offline pad change")} and ${Format.plural(samples, "new sample")}"
+    } + " on the EP-133?"
     const val WRITE = "Write"
     const val DISCARD = "Discard"
     /** "2 pads put on the EP-133. 1 skipped: …", after [WRITE]. */
@@ -440,4 +450,136 @@ object MirrorText {
         "The take reached ${dev.arc.ep133.features.TakeRecorder.MAX_SECONDS / 60} minutes and was saved (${takeLength(seconds)})."
 
     fun takeFailed(reason: String) = "The take couldn't be saved: $reason"
+
+    // ---------- SAMPLE: recording into a pad (an addition) ----------
+    /** The sources' words, upper-cased where shown, as the device prints them. */
+    const val MIC = "Mic"
+    const val RSP = "Rsp"
+    const val USB = "Usb"
+    const val STEREO = "Stereo"
+
+    /** "Rsp St", the source chip (upper-cased where shown: "RSP ST"); mono has no mark, as on the device. */
+    fun sourceShort(s: SampleSource, stereo: Boolean) = when (s) {
+        SampleSource.MIC -> MIC
+        SampleSource.RSP -> RSP
+        SampleSource.USB -> USB
+    } + if (stereo) " St" else ""
+
+    /** The source spelt out for screen readers: "Phone mic, mono", "EP-133 over USB, stereo". */
+    fun sourceName(s: SampleSource, stereo: Boolean) = when (s) {
+        SampleSource.MIC -> "Phone mic"
+        SampleSource.RSP -> "Resample the phone's sound"
+        SampleSource.USB -> "EP-133 over USB"
+    } + if (stereo) ", stereo" else ", mono"
+    /** The − and + either side of the source chip. */
+    const val PREV_SOURCE = "Previous source"
+    const val NEXT_SOURCE = "Next source"
+
+    // KNOB X is [LEVEL] (the input's gain) and KNOB Y the threshold, as on the device.
+    /** THRESHOLD under knob Y; [THRESHOLD_NAME] for screen readers, where the short word reads badly. */
+    const val THRESHOLD = "Thresh"
+    const val THRESHOLD_NAME = "Threshold"
+
+    /** "+12 dB", "−6 dB" or "0 dB": the input's gain under LEVEL. */
+    fun gainReadout(db: Int) = when {
+        db > 0 -> "+$db dB"
+        db < 0 -> "\u2212${-db} dB"
+        else -> "0 dB"
+    }
+
+    /** "−24 dB", or "Off" with no threshold (recording starts at the press). */
+    fun thresholdReadout(db: Int?) = if (db == null) onOff(false) else gainReadout(db)
+
+    /** A take of a set length, in bars of the tempo: "Free" (until you let go), "1 bar", "2 bars". */
+    const val BARS = "Bars"
+    fun barsChoice(n: Int?) = if (n == null) "Free" else Format.plural(n, "bar")
+
+    /**
+     * The switch for hands-free takes, for one hand or a screen reader; while
+     * one goes on (or counts in, or waits) its key reads STOP ([FeatureText.STOP]).
+     */
+    const val LATCH = "Latch"
+    const val LATCH_NOTE = "Latch on: tap a pad to record hands-free. Tap it again or STOP to stop."
+    /** The meter, for screen readers, and its clip light. */
+    const val INPUT_LEVEL = "Input level"
+    const val CLIPPING = "Clipping"
+
+    // The display line in the mode, grown into the SAMPLE panel: the tag, then what happens next.
+    const val SAMPLE_TAG = "Sample"
+    const val SAMPLE_READY = "Hold a pad to record"
+    const val SAMPLE_READY_LATCH = "Tap a pad to record hands-free"
+    /** Armed with a threshold: the take starts with the first sound loud enough. */
+    const val SAMPLE_WAITING = "Waiting for sound"
+    /** A take of set bars from USB while the EP-133 sends MIDI clock: it starts with the device's PLAY. */
+    const val WAITING_FOR_PLAY = "Press PLAY on the EP-133"
+    fun countIn(beat: Int) = "Count-in $beat"
+
+    /** "0:04 / 0:20": the take so far, and the longest it can be. */
+    fun sampleTime(seconds: Int, max: Int) = "${takeLength(seconds.toDouble())} / ${takeLength(max.toDouble())}"
+
+    /** "Takes up to 40 s": the panel's wave strip before the first take, the longest one can be. */
+    fun sampleMax(seconds: Int) = "Takes up to $seconds s"
+
+    /** "Pad A 7: uploading, 40%"; without [percent] as a screen reader hears it, once rather than at each step. */
+    fun sampleUploading(pad: PhysicalPad, percent: Int? = null) = "${padTitle(pad)}: uploading" + (percent?.let { ", $it%" } ?: "")
+
+    /** A full-length take won't fit in the EP-133's free space, so takes stop sooner. */
+    const val DISK_LOW = "Disk low"
+    fun diskLow(seconds: Int) = "$DISK_LOW: room for $seconds s"
+
+    /** Added to a pad's name for screen readers in the mode: ", has a sound" or ", empty". */
+    fun padSampleState(filled: Boolean) = if (filled) ", has a sound" else ", empty"
+    /** Added to the take's pad instead: recording into it, or waiting to (for sound, the count-in or PLAY). */
+    const val PAD_RECORDING = ", recording"
+    const val PAD_WAITING = ", waiting to record"
+    /** A pad's click in the mode for screen readers, which can't hold: a latched take, its end, or (before it starts) its cancel. */
+    const val RECORD_HANDS_FREE = "Record hands-free"
+    const val STOP_RECORDING = "Stop recording"
+    const val CANCEL_RECORDING = "Cancel recording"
+
+    /** A short tap on an empty pad in the mode. */
+    const val HOLD_TO_RECORD = "Hold the pad to record. A tap plays a pad that has a sound."
+    /** The mic permission was refused for good, with [MIC_SETTINGS] to open the app's settings. */
+    const val NO_MIC = "arc needs the microphone to sample the mic or USB. RSP works without it."
+    const val MIC_SETTINGS = "Settings"
+    const val USB_EXPERIMENTAL = "USB sampling is experimental. The EP-133 needs OS 2.5 and its sound going out over USB."
+    const val USB_GONE = "The USB input went away. What was recorded is kept."
+    fun inputFailed(reason: String) = "The input couldn't be opened: $reason"
+    /** Android silences the mic while another app (a call, say) records. */
+    const val MIC_BUSY = "Another app is using the mic."
+    /** On return, after the take stopped because arc left the screen. */
+    const val SAMPLE_BACKGROUND = "Sampling stopped when arc left the screen. The recording is kept."
+
+    // The review sheet after a take: trim and hear it, then KEEP, RETAKE or DISCARD (with UNDO).
+    const val REVIEW_TITLE = "New sample"
+
+    /** "Pad A 7 \u00B7 0:04 \u00B7 RSP ST", under the review sheet's title. */
+    fun reviewLine(pad: PhysicalPad, seconds: Double, source: SampleSource, stereo: Boolean) =
+        "${padTitle(pad)} \u00B7 ${takeLength(seconds)} \u00B7 ${sourceShort(source, stereo).uppercase()}"
+    const val NORMALIZE = "Normalize"
+    const val NORMALIZE_NOTE = "Raises the sample so its loudest point is at 0 dB."
+    const val TRIM_SILENCE = "Trim silence"
+    const val TRIM_SILENCE_NOTE = "Starts the sample where the sound starts."
+    const val RETAKE = "Retake"
+    const val KEEP = "Keep"
+
+    /** "Slot 214, the next free one": where KEEP puts the sample (− and + step over the free slots). */
+    fun slotLine(slot: Int, next: Boolean) = "Slot $slot" + if (next) ", the next free one" else ""
+    /** The − and + either side of the slot line. */
+    const val PREV_SLOT = "Previous free slot"
+    const val NEXT_SLOT = "Next free slot"
+    /** Offline, the slot is picked on upload: the free ones aren't known until then. */
+    const val SLOT_WHEN_CONNECTED = "Goes into the next free slot when the EP-133 connects."
+
+    /** "Pad A 7: kept in arc. It goes on the EP-133 when you connect.", after KEEP offline. */
+    fun sampleQueued(pad: PhysicalPad) = "${padTitle(pad)}: kept in arc. It goes on the EP-133 when you connect."
+    /** "Pad A 7: new sample on the EP-133.", once the upload is done. */
+    fun sampleSaved(pad: PhysicalPad) = "${padTitle(pad)}: new sample on the EP-133."
+    /** A pad pressed for a sound only the EP-133 has while a new sample goes up to it, Live playing on. */
+    const val DEVICE_UPLOADING = "The EP-133 is taking a new sample. This sound plays once it's done."
+    const val SAMPLE_DISCARDED = "Sample discarded."
+    /** A take with no pad to go on (no project read yet): it isn't lost. */
+    const val KEPT_IN_TAKES = "Kept in Takes: read a project on the EP-133 to put samples on pads."
+    /** "2 samples kept in Takes.", after offline recordings were discarded or reset: never dropped. */
+    fun samplesToTakes(n: Int) = "${Format.plural(n, "sample")} kept in Takes."
 }

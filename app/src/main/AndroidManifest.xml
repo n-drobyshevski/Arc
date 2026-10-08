@@ -4,6 +4,8 @@
     <!-- USB MIDI. Not required: without MIDI the library (import, share, save) still works. -->
     <uses-feature android:name="android.software.midi" android:required="false" />
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+    <!-- SAMPLE records the mic or the EP-133 over USB audio. Not required: RSP and the rest work without one. -->
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
@@ -11,6 +13,8 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- Only to download the EP-133's factory sounds from teenage engineering, when asked (FactoryDownload). -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Only while SAMPLE mode is open with the mic or USB as its source (InputCapture); asked for then. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <application
         android:name=".ArcApp"

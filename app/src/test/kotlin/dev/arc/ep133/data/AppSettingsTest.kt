@@ -3,6 +3,7 @@ package dev.arc.ep133.data
 import dev.arc.ep133.text.LiveEngine
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -37,6 +38,46 @@ class AppSettingsTest {
         )
         val index = chosen.values().mapKeys { "app." + it.key }
         assertEquals(chosen, AppSettings().withIndex(index))
+    }
+
+    @Test
+    fun `SAMPLE's choices round-trip through library json, no threshold and Free bars too`() {
+        val chosen = AppSettings(
+            sampleSource = dev.arc.ep133.features.SampleSource.USB,
+            sampleStereo = true,
+            sampleGainMic = 6.5f,
+            sampleGainRsp = -3f,
+            sampleGainUsb = 30f,
+            sampleThreshold = -24f,
+            sampleBars = 4,
+            reviewSamples = false,
+            sampleNormalize = true,
+            sampleTrimSilence = true,
+        )
+        assertEquals(chosen, AppSettings().withIndex(chosen.values().mapKeys { "app." + it.key }))
+        // Back to none and Free: stored as "off" and 0, and read back as such.
+        val none = chosen.copy(sampleThreshold = null, sampleBars = null)
+        assertEquals("off", none.values()["sampleThreshold"])
+        assertEquals("0", none.values()["sampleBars"])
+        assertEquals(none, chosen.withIndex(none.values().mapKeys { "app." + it.key }))
+    }
+
+    @Test
+    fun `SAMPLE starts on the mic at +12 dB, reviewing each take, and leaves out what arc doesn't offer`() {
+        val d = AppSettings()
+        assertEquals(dev.arc.ep133.features.SampleSource.MIC, d.sampleSource)
+        assertEquals(12f, d.sampleGain(dev.arc.ep133.features.SampleSource.MIC))
+        assertEquals(0f, d.sampleGain(dev.arc.ep133.features.SampleSource.RSP))
+        assertEquals(-6f, d.withSampleGain(dev.arc.ep133.features.SampleSource.USB, -6f).sampleGainUsb)
+        assertTrue(d.reviewSamples)
+        assertNull(d.sampleThreshold)
+        assertNull(d.sampleBars)
+        // A level past the knob, a threshold above 0 dB, 3 bars or an unknown source: left as they are.
+        val odd = mapOf("app.sampleGainMic" to "40", "app.sampleThreshold" to "6", "app.sampleBars" to "3", "app.sampleSource" to "line")
+        assertEquals(d, d.withIndex(odd))
+        assertEquals(-60f, sampleThresholdOf("-60.0"))
+        assertNull(sampleThresholdOf("off"))
+        assertNull(sampleGainOf(-13f))
     }
 
     @Test

@@ -335,6 +335,21 @@ describe('LiveMirrorTest', () => {
     expect(m.padSamples()).toEqual([sample(5, 'snare', false), sample(5, 'vox', true), sample(20, 'bass', false), sample(30, 'hat', false)])
   })
 
+  it('a sample recorded offline plays from its file and has no slot yet', () => {
+    const m = mirror(new Map([[9, 1]]))
+    const a7 = physicalPad(0, 9)
+    // A '7' held the device's snare (slot 5); a recording replaces it.
+    const take: OfflinePad = { ...local(1, 0, 1, 0, 'mic 1007-142301', SoundSource.RECORDED), file: 'rec-1.wav' }
+    m.setLocal(OfflinePads.put(OfflinePads.EMPTY, take))
+    const recorded: PadSample = { slot: 0, name: 'mic 1007-142301', factory: false, file: 'rec-1.wav' }
+    expect(m.sampleOf(a7)).toEqual(recorded)
+    expect(m.nameOf(a7)).toBe('mic 1007-142301')
+    // Slot 0 is a placeholder: the pad has no slot until the upload gives it one.
+    expect(m.slotOf(a7)).toBeNull()
+    expect(m.target(a7)).toEqual({ project: 1, group: 0, pad: 1, slot: null })
+    expect(m.padSamples()).toEqual([recorded, sample(1, 'kick', false), sample(20, 'bass', false)])
+  })
+
   it('an empty pad survives the round trip, and junk reads as nothing', () => {
     const s: LiveSnapshot = { savedAt: 5, activeProject: null, groups: [group('c', [[3, null]])], names: new Map() }
     expect(LiveSnapshot.fromJson(LiveSnapshot.toJson(s))).toEqual(s)

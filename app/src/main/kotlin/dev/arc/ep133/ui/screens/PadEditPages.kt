@@ -27,6 +27,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.arc.ep133.features.PadSettings
@@ -195,18 +196,28 @@ private fun androidx.compose.foundation.layout.RowScope.YKnob(
 
 /** TRIM's waveform: the sound across, the part the pad plays (start to end) lit. */
 @Composable
-private fun TrimWave(peaks: List<Peak>, frames: Long, s: PadSettings) {
+private fun TrimWave(peaks: List<Peak>, frames: Long, s: PadSettings) =
+    TrimWave(peaks, frames, s.start, s.end ?: frames, MirrorText.trimDescription(s.start, s.length(frames)))
+
+/**
+ * A sound's waveform with the part kept lit (an addition): [peaks] across a
+ * sound [frames] long, the columns from [start] to [end] (exclusive) in
+ * signal orange and the rest dimmed, on the display's dark glass, [height]
+ * tall. Screen readers hear [description]. EDIT's TRIM page and SAMPLE's
+ * review sheet draw it.
+ */
+@Composable
+internal fun TrimWave(peaks: List<Peak>, frames: Long, start: Long, end: Long, description: String, height: Dp = TrimWaveHeight) {
     val c = LocalArcColors.current
-    val start = s.start
-    val end = s.end ?: frames
     Canvas(
         Modifier
             .fillMaxWidth()
-            .height(44.dp)
+            .height(height)
             .clip(RoundedCornerShape(8.dp))
             .background(c.display)
-            .describe(MirrorText.trimDescription(s.start, s.length(frames))),
+            .describe(description),
     ) {
+        if (peaks.isEmpty()) return@Canvas
         val colW = size.width / peaks.size
         val mid = size.height / 2
         val half = size.height / 2 - 4.dp.toPx()
@@ -223,6 +234,9 @@ private fun TrimWave(peaks: List<Peak>, frames: Long, s: PadSettings) {
         }
     }
 }
+
+/** [TrimWave]'s height on EDIT's TRIM page. */
+private val TrimWaveHeight = 44.dp
 
 /** A page key: a dark cap with the page's name, orange while it is the page shown. */
 @Composable

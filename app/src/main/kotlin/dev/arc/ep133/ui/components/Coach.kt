@@ -100,7 +100,8 @@ fun Modifier.coachClear(id: String): Modifier = composed {
  * don't overlap. In a short window (a phone on its side, the top bar's tags
  * crowding the row of words under it) no tag sits on another control or on
  * another tag's arrow: it goes to the other side of its control, beside it or
- * further out. Tap anywhere to close.
+ * further out. Tap anywhere to close (the hint saying so stays under the top
+ * bar).
  *
  * Everything is drawn, not composed: the marks are known once the screen has
  * been laid out, which is before drawing, so the overlay is complete in its
@@ -245,10 +246,10 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
                         (r.inflate(clearance).contains(Offset(b.center.x, b.bottom + tipGap)) || r.inflate(clearance).contains(Offset(b.center.x, b.top - tipGap)))
                 }
                 // The arrows of the other controls above or below this place that run (or, their tags
-                // not placed yet, may run) across it.
-                fun lines(r: Rect) = controls.count { n ->
+                // not placed yet, may run) across it, or within [room] of its sides.
+                fun lines(r: Rect, room: Float = clearance) = controls.count { n ->
                     val p = placed.firstOrNull { it.m === n }
-                    n !== m && n.bounds.center.x in r.left - clearance..r.right + clearance && (n.bounds.bottom <= r.top || n.bounds.top >= r.bottom) &&
+                    n !== m && n.bounds.center.x in r.left - room..r.right + room && (n.bounds.bottom <= r.top || n.bounds.top >= r.bottom) &&
                         (p?.tip == null || p.tail == null || crosses(p.tip, p.tail, r.inflate(clearance)))
                 }
                 val step = 2.dp.toPx()
@@ -261,8 +262,12 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
                     to = minOf(size.width - margin - w, x - padX)
                 }
                 // Pushed further out, below or above the control, until it clears the tags placed and
-                // the other controls (sliding sideways off them where it still meets its arrow).
-                fun out(below: Boolean): Rect {
+                // the other controls (sliding sideways off them where it still meets its arrow). [clean]
+                // (a short window): it slides only where no other control's arrow need cross it, and
+                // goes out just past the tags in its way rather than a whole step.
+                fun out(below: Boolean, clean: Boolean = false): Rect {
+                    // Clean, an arrow need only keep its own room from the tag, not a tag's clearance.
+                    val lineRoom = if (clean) arrowRoom else clearance
                     var reach = gap
                     var rect: Rect
                     var tries = 0
@@ -279,7 +284,7 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
                                 .flatMap { sequenceOf(left - it * step, left + it * step) }
                                 .filter { it in from..to }
                                 .map { Rect(Offset(it, top), Size(w, h)) }
-                            val off = slid.firstOrNull { under(it).isEmpty() && !hits(it) && onControls(it, m) == 0 }
+                            val off = slid.firstOrNull { under(it).isEmpty() && !hits(it) && onControls(it, m) == 0 && (!clean || lines(it, lineRoom) == 0) }
                                 ?: slid.takeIf { edgeTag && !onControl }?.firstOrNull { !hits(it) && under(it).size <= covered.size && onControls(it, m) == 0 }
                             if (off != null) {
                                 rect = off
@@ -303,17 +308,20 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
                                 break
                             }
                         }
-                        reach += h + clearance
+                        // Clean, only as far as the tags it lands on reach, where that is less than a step.
+                        val past = if (!clean) null else placed.map { it.rect.inflate(clearance) }.filter { it.overlaps(rect) }
+                            .maxOfOrNull { if (below) it.bottom - m.bounds.bottom else m.bounds.top - it.top }
+                        reach = if (past != null && past > reach) minOf(past, reach + h + clearance) else reach + h + clearance
                     }
                     // In a short window, slid off the line another control's arrow runs down (or up)
                     // where it can, so that arrow needn't cross it.
-                    if (short && !hits(rect) && lines(rect) > 0) {
+                    if (short && !hits(rect) && lines(rect, lineRoom) > 0) {
                         val top = rect.top
                         val fewer = (1..((to - from) / step).toInt()).asSequence()
                             .flatMap { sequenceOf(rect.left - it * step, rect.left + it * step) }
                             .filter { it in from..to }
                             .map { Rect(Offset(it, top), Size(w, h)) }
-                            .filter { lines(it) < lines(rect) && under(it).size <= under(rect).size && !hits(it) && onControls(it, m) == 0 }
+                            .filter { lines(it, lineRoom) < lines(rect, lineRoom) && under(it).size <= under(rect).size && !hits(it) && onControls(it, m) == 0 }
                             .firstOrNull()
                         if (fewer != null) rect = fewer
                     }
@@ -321,8 +329,8 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
                 }
                 // Where the tag goes, and its arrow: from the tag's edge to just off the control's.
                 class Spot(val rect: Rect, val tip: Offset, val tail: Offset)
-                fun vertical(below: Boolean): Spot {
-                    val r = out(below)
+                fun vertical(below: Boolean, clean: Boolean = false): Spot {
+                    val r = out(below, clean)
                     return if (below) Spot(r, Offset(x, m.bounds.bottom + tipGap), Offset(x, r.top)) else Spot(r, Offset(x, m.bounds.top - tipGap), Offset(x, r.bottom))
                 }
                 // Beside the control, level with it, the arrow pointing across.
@@ -338,7 +346,7 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
                     val crossed = placed.count { crosses(s.tip, s.tail, it.rect) } +
                         controls.count { it !== m && crosses(s.tip, s.tail, it.bounds.deflate(inset)) } + untagged.count { crosses(s.tip, s.tail, it) }
                     val off = r.top < margin || r.bottom > size.height - margin || r.left < margin || r.right > size.width - margin
-                    return (if (off) 1000f else 0f) + (if (hits(r)) 100f else 0f) + 100f * onControls(r, m) + 10f * (crossed + under(r).size + lines(r)) +
+                    return (if (off) 1000f else 0f) + (if (hits(r)) 100f else 0f) + 100f * onControls(r, m) + 10f * (crossed + under(r).size + lines(r, arrowRoom)) +
                         (abs(s.tail.x - s.tip.x) + abs(s.tail.y - s.tip.y)) / size.height
                 }
                 // Below a control in the top half, above one in the bottom half; in a short window (its
@@ -349,7 +357,7 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
                 if (short) {
                     var fit = misfit(spot)
                     val right = x < size.width / 2
-                    for (other in listOf(vertical(!below), beside(right), beside(!right))) {
+                    for (other in listOf(vertical(below, clean = true), vertical(!below), beside(right), beside(!right))) {
                         val f = misfit(other)
                         if (f + 5f < fit) {
                             spot = other
@@ -511,12 +519,14 @@ fun CoachOverlay(marks: CoachMarks, visible: Boolean, onDismiss: () -> Unit) {
             }
             val hint = measurer.measure(CoachText.CLOSE_HINT.uppercase(), hintStyle)
             // Below the middle, clear of a tag in the middle of the pad grid. Where a tag is there
-            // anyway (a short window), in the middle of the tallest gap between the tags instead.
+            // anyway (a short window), in the middle of the tallest gap between the tags under the
+            // top bar instead, so it never lands on the bar's display line.
             val hintLeft = (size.width - hint.size.width) / 2
             var hintTop = size.height * 0.72f
             val tags = placed.map { it.rect.inflate(clearance) }
             if (tags.any { it.overlaps(Rect(Offset(hintLeft, hintTop), Size(hint.size.width.toFloat(), hint.size.height.toFloat()))) }) {
-                val top = safe.getTop(this) + margin
+                val bar = marks.marks.filterKeys { it.startsWith("top.") }.values.maxOfOrNull { it.bounds.bottom }
+                val top = maxOf(safe.getTop(this).toFloat(), bar ?: 0f) + margin
                 val bottom = size.height - safe.getBottom(this) - margin
                 var from = top
                 var best = top to top

@@ -42,6 +42,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -66,6 +67,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.arc.ep133.text.CoachText
+import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.text.NavText
 import dev.arc.ep133.ui.theme.ArcType
 import dev.arc.ep133.ui.theme.LocalArcColors
@@ -76,6 +78,14 @@ enum class Tab(val label: String) {
     LIVE(NavText.LIVE),
     DEVICE(NavText.DEVICE),
 }
+
+/**
+ * Live's SAMPLE key in the top bar (an addition): a mic key that is lit
+ * while SAMPLE's panel is open ([on]). A tap ([onTap]) opens the panel, or
+ * closes it while it is open.
+ */
+@Immutable
+data class SampleKey(val on: Boolean, val onTap: () -> Unit)
 
 /** How wide the left-edge guide tab is (screens keep this much gutter on the left). */
 val EdgeTabWidth: Dp = 22.dp
@@ -132,6 +142,8 @@ fun ArcShell(
     guide: @Composable () -> Unit,
     /** Fills the top bar's middle (Live's display line, in a short window). */
     middle: (@Composable BoxScope.() -> Unit)? = null,
+    /** Live's SAMPLE key in the top bar (an addition; null for none, as on the other sections). */
+    sample: SampleKey? = null,
     /** For screenshots: start with the section list open. */
     initialMenuOpen: Boolean = false,
     content: @Composable () -> Unit,
@@ -153,6 +165,7 @@ fun ArcShell(
                     onSettings = onSettings,
                     onHelp = onHelp,
                     middle = middle,
+                    sample = sample,
                 )
             },
         ) {
@@ -174,7 +187,12 @@ fun ArcShell(
  * then the guide overlay (?) and settings. Their names show on long-press,
  * in the overlay and to screen readers. Long-pressing the tag opens the
  * debug screen (as the wordmark did). The room between the tag and the keys
- * holds [middle]; a toast in a short window takes its place.
+ * holds [middle]; a toast in a short window takes its place. On Live, a mic
+ * key ([sample], an addition) comes before ? and the gear, round as they
+ * are, and orange while SAMPLE's panel is open; in a top bar too narrow for
+ * it (a 360 dp phone), or where it would shorten the display line [middle]
+ * holds (a small phone on its side), the keys close up in their two groups,
+ * and beside the line come down a size and close up to it as well.
  */
 @Composable
 fun TopBar(
@@ -189,9 +207,22 @@ fun TopBar(
     onSettings: () -> Unit = {},
     onHelp: () -> Unit = {},
     middle: (@Composable BoxScope.() -> Unit)? = null,
+    sample: SampleKey? = null,
 ) {
     val c = LocalArcColors.current
     val window = LocalArcWindow.current
+    // The mic key in a narrow bar, or beside Live's display line in a bar not much wider than a phone on its side:
+    // the keys close up in their two groups, and the middle takes what is left. Beside the line they come down a
+    // size too, and close up to it, so it has the room it had without the mic key.
+    val lineTight = sample != null && middle != null && window.width < TopBarLineTight
+    val tight = sample != null && (window.width < TopBarTight || lineTight)
+    val key = if (lineTight) TopBarKeyLineTight else 44.dp
+    // Closed up, the gaps are set one by one: the middle (the room before the squares when it is empty) needs none.
+    val middleGap = when {
+        middle == null -> 0.dp
+        lineTight -> TopBarGapTight
+        else -> 8.dp
+    }
     val slot = LocalBarSlot.current
     DisposableEffect(slot) { onDispose { slot?.bounds = null } }
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
@@ -203,12 +234,13 @@ fun TopBar(
                 // 56 dp tall instead of 66 when the window is short.
                 .padding(start = 16.dp, end = 16.dp, top = if (window.short) 6.dp else 12.dp, bottom = if (window.short) 6.dp else 10.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(if (tight) 0.dp else 8.dp),
         ) {
             SectionTag(
                 section, onSections, onDebug,
                 Modifier.coachMark("top.sections", CoachText.SECTIONS, c.navy, c.onNavy),
             )
+            if (tight) Spacer(Modifier.width(middleGap))
             // As tall as the keys; empty, it is just the space between.
             Box(
                 Modifier
@@ -219,38 +251,72 @@ fun TopBar(
             ) {
                 middle?.invoke(this)
             }
+            if (tight) Spacer(Modifier.width(middleGap))
             IconBlock(
                 ArcIcon.DOT, CoachText.BACK_UP, c.signal, c.onSignal, onBackup,
                 Modifier.coachMark("top.backup", CoachText.BACK_UP, c.signal, c.onSignal),
-                enabled = canBackup,
+                enabled = canBackup, size = key,
             )
+            if (tight) Spacer(Modifier.width(TopBarGapTight))
             if (connected) {
                 IconBlock(
                     ArcIcon.DOT, CoachText.CONNECTED, c.ok, c.onOk, onConnect,
                     Modifier.coachMark("top.connection", CoachText.CONNECTION, c.ok, c.onOk),
-                    enabled = canConnect, iconSize = 16.dp,
+                    enabled = canConnect, size = key, iconSize = 16.dp,
                 )
             } else {
                 IconBlock(
                     ArcIcon.RING, CoachText.DISCONNECTED, c.navy, c.onNavy, onConnect,
                     Modifier.coachMark("top.connection", CoachText.CONNECTION, c.navy, c.onNavy),
-                    enabled = canConnect, iconSize = 18.dp,
+                    enabled = canConnect, size = key, iconSize = 18.dp,
                 )
             }
-            Spacer(Modifier.width(4.dp))
+            Spacer(Modifier.width(if (tight) TopBarGroupTight else 4.dp))
+            if (sample != null) {
+                IconBlock(
+                    ArcIcon.MIC, MirrorText.SAMPLE_TAG,
+                    if (sample.on) c.signal else c.tabOff,
+                    if (sample.on) c.onSignal else c.navy,
+                    sample.onTap,
+                    Modifier.coachMark("top.sample", CoachText.SAMPLE, c.signal, c.onSignal),
+                    size = key, round = true,
+                    state = MirrorText.onOff(sample.on),
+                )
+                if (tight) Spacer(Modifier.width(TopBarGapTight))
+            }
             IconBlock(
                 ArcIcon.HELP, CoachText.HELP, c.tabOff, c.navy, onHelp,
                 Modifier.coachMark("top.help", CoachText.HELP, c.ink, c.shell),
-                round = true,
+                size = key, round = true,
             )
+            if (tight) Spacer(Modifier.width(TopBarGapTight))
             IconBlock(
                 ArcIcon.GEAR, CoachText.SETTINGS, c.tabOff, c.navy, onSettings,
                 Modifier.coachMark("top.settings", CoachText.SETTINGS, c.graphite, c.shell),
-                round = true, iconSize = 24.dp,
+                size = key, round = true, iconSize = 24.dp,
             )
         }
     }
 }
+
+/** Below this window width, the top bar with Live's mic key in it closes its keys up ([TopBar]). */
+private val TopBarTight = 400.dp
+
+/**
+ * Below this window width, the top bar with Live's mic key and display line in
+ * it closes its keys up too, and brings them down to [TopBarKeyLineTight], so
+ * the line keeps its pad's sound name ([TopBar]).
+ */
+private val TopBarLineTight = 760.dp
+
+/** How big the top bar's keys are beside Live's display line, closed up ([TopBarLineTight]). */
+private val TopBarKeyLineTight = 40.dp
+
+/** The gap between two keys of a group in the top bar, closed up ([TopBarTight]). */
+private val TopBarGapTight = 4.dp
+
+/** The gap between the top bar's squares and its round keys, closed up ([TopBarTight]). */
+private val TopBarGroupTight = 8.dp
 
 /** A block with an arrow point on its right, like the pocket operator app's EDIT tag. */
 private val TagShape = GenericShape { size, _ ->

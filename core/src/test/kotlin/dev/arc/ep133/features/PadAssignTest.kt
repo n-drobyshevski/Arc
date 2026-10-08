@@ -138,4 +138,27 @@ class PadAssignTest {
         assertEquals(MirrorText.NO_FREE_SLOT, e.message)
         s.close()
     }
+
+    @Test
+    fun `an upload into a picked slot needs it free on the device`() = runTest {
+        val dev = DemoData.device()
+        val s = connect(dev)
+        val wav = Wav.encode(noise(2000 * 2), 1, 46875)
+        assertEquals(42, SampleUpload.uploadToPad(s, "mic take.wav", wav, emptySet(), PadTarget(2, 0, 1, 4), slot = 42))
+        assertEquals("mic take", dev.sounds[42]!!.name)
+        assertEquals(42, ProjectPads.read(Device.readProject(s, 2)).first { it.name == "a" }.pads[1])
+        // The caller's list is stale (empty here), but the device lists 5: nothing is written, the pad keeps its sound.
+        val snare = dev.sounds[5]!!.name
+        val pads = ProjectPads.read(Device.readProject(s, 2))
+        val e = assertThrows<UploadError> {
+            SampleUpload.uploadToPad(s, "mic take 2.wav", wav, emptySet(), PadTarget(2, 0, 2, null), slot = 5)
+        }
+        assertEquals("Slot 5 has a sound now. Pick another slot.", e.message)
+        assertEquals(snare, dev.sounds[5]!!.name)
+        // Taken in the caller's own list counts too.
+        assertThrows<UploadError> { SampleUpload.uploadToPad(s, "mic take 2.wav", wav, setOf(50), PadTarget(2, 0, 2, null), slot = 50) }
+        assertNull(dev.sounds[50])
+        assertEquals(pads, ProjectPads.read(Device.readProject(s, 2)))
+        s.close()
+    }
 }

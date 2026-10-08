@@ -15,9 +15,10 @@ data class PadTarget(val project: Int, val group: Int, val pad: Int, val slot: I
 /**
  * The sound to play for a pad (an addition): its [slot] and [name], and
  * whether it is a factory sound put on the pad offline ([factory]), which
- * plays from the factory pack first.
+ * plays from the factory pack first. A sample recorded in arc and not on the
+ * device yet has slot 0 and plays from its [file] in arc's samples folder.
  */
-data class PadSample(val slot: Int, val name: String, val factory: Boolean)
+data class PadSample(val slot: Int, val name: String, val factory: Boolean, val file: String? = null)
 
 /** A pad that is sounding (or fading out): its velocity, when it started, and when it was released. */
 data class PadLight(val velocity: Int, val channel: Int, val onAt: Long, val offAt: Long? = null)
@@ -271,13 +272,14 @@ class LiveMirror(
 
     /**
      * The slot on a physical pad in the active project: its offline change,
-     * else the project's pad layout at its number ([numberOf]).
+     * else the project's pad layout at its number ([numberOf]). None for a
+     * sample recorded in arc: it has no slot until it is uploaded.
      */
     @Synchronized
     fun slotOf(pad: PhysicalPad): Int? {
         // The device moved to another project whose pads aren't read yet: no name rather than a wrong one.
         if (pushedProject != null && pushedProject != activeProject) return null
-        localOf(pad)?.let { return it.slot }
+        localOf(pad)?.let { return slotIn(it) }
         return slotAt(pad.group, numberOf(pad) ?: return null)
     }
 
@@ -288,7 +290,7 @@ class LiveMirror(
     /** The sound to play for [pad]: its offline change, else the read's slot and name; null when either is unknown. */
     @Synchronized
     fun sampleOf(pad: PhysicalPad): PadSample? {
-        localOf(pad)?.let { return PadSample(it.slot, it.name, it.source == SoundSource.FACTORY) }
+        localOf(pad)?.let { return sampleIn(it) }
         val slot = slotOf(pad) ?: return null
         return PadSample(slot, names[slot] ?: return null, false)
     }
@@ -306,9 +308,15 @@ class LiveMirror(
             for ((number, slot) in pads) byPad[group to number] = PadSample(slot ?: continue, names[slot] ?: continue, false)
         }
         val project = activeProject
-        for (p in local.list) if (p.project == project) byPad[p.group to p.pad] = PadSample(p.slot, p.name, p.source == SoundSource.FACTORY)
+        for (p in local.list) if (p.project == project) byPad[p.group to p.pad] = sampleIn(p)
         return byPad.values.distinct().sortedWith(compareBy({ it.slot }, { it.factory }))
     }
+
+    /** What an offline change plays: a recorded sample brings its [OfflinePad.file] along. */
+    private fun sampleIn(p: OfflinePad) = PadSample(p.slot, p.name, p.source == SoundSource.FACTORY, p.file)
+
+    /** An offline change's slot on the device; a recorded sample's slot 0 is a placeholder, not a slot. */
+    private fun slotIn(p: OfflinePad): Int? = p.slot.takeUnless { p.source == SoundSource.RECORDED }
 
     /** The slot the read's layout has on the active project's pad [pad] of [group] (no offline change). */
     @Synchronized
@@ -331,8 +339,8 @@ class LiveMirror(
 
     /**
      * Where [pad]'s sound is set in the active project, and the slot on it
-     * now, its offline change's if it has one (for the pad sheet's "now"
-     * line and for undo). Null while the
+     * now, its offline change's if it has one (none for a sample recorded in
+     * arc; for the pad sheet's "now" line and for undo). Null while the
      * active project is unknown, the device moved to one not read yet, or
      * the pad's number isn't known ([padNumber]).
      */
@@ -341,7 +349,8 @@ class LiveMirror(
         val project = activeProject ?: return null
         if (pushedProject != null && pushedProject != project) return null
         val number = padNumber(pad) ?: return null
-        return PadTarget(project, pad.group, number, local.at(project, pad.group, number)?.slot ?: slotAt(pad.group, number))
+        val change = local.at(project, pad.group, number)
+        return PadTarget(project, pad.group, number, if (change != null) slotIn(change) else slotAt(pad.group, number))
     }
 
     /**

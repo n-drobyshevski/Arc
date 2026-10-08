@@ -56,6 +56,26 @@ class SettingsStoreTest {
         assertEquals(240, SettingsStore(prefs).settings.value.liveTempo)
     }
 
+    @Test
+    fun `SAMPLE's level, threshold and bars are kept as chosen, and none comes back as none`() {
+        val prefs = MemoryPrefs()
+        val store = SettingsStore(prefs)
+        store.update { it.copy(sampleGainMic = 18f, sampleThreshold = -30f, sampleBars = 2, sampleSource = dev.arc.ep133.features.SampleSource.RSP) }
+        assertEquals(18f, prefs.getFloat("sampleGainMic", 0f))
+        assertEquals("-30.0", prefs.getString("sampleThreshold", null))
+        assertEquals(2, prefs.getInt("sampleBars", 0))
+        val back = SettingsStore(prefs).settings.value
+        assertEquals(18f, back.sampleGainMic)
+        assertEquals(-30f, back.sampleThreshold)
+        assertEquals(2, back.sampleBars)
+        assertEquals(dev.arc.ep133.features.SampleSource.RSP, back.sampleSource)
+        // The defaults weren't kept.
+        assertFalse(prefs.contains("sampleGainRsp"))
+        store.update { it.copy(sampleThreshold = null, sampleBars = null) }
+        assertEquals(null, SettingsStore(prefs).settings.value.sampleThreshold)
+        assertEquals(null, SettingsStore(prefs).settings.value.sampleBars)
+    }
+
     /** SharedPreferences in a map: enough for [SettingsStore]. */
     private class MemoryPrefs : SharedPreferences {
         val map = HashMap<String, Any?>()

@@ -6,6 +6,7 @@ import { KeyMark } from '../../../src/core/features/piano'
 import { physicalPad } from '../../../src/core/features/padNotes'
 import { PLAY_MODES } from '../../../src/core/features/padSettings'
 import { ProjectSource } from '../../../src/core/features/projectStep'
+import { SampleSource } from '../../../src/core/features/sampleSource'
 import { CoachText } from '../../../src/core/text/coachText'
 import { FeatureText } from '../../../src/core/text/featureText'
 import { MirrorText } from '../../../src/core/text/mirrorText'
@@ -159,5 +160,53 @@ describe('FeatureTextTest', () => {
     expect(MirrorText.FN_SOUND).toBe('Sound')
     expect(MirrorText.SOUND_SHEET).toBe("Pad's sound")
     expect(CoachText.TEMPO).toBe('Click: tap; hold for tempo')
+  })
+
+  it('sample text', () => {
+    const a7 = physicalPad(0, 9)
+    expect(MirrorText.SAMPLE_TAG).toBe('Sample')
+    expect(MirrorText.LATCH_NOTE).toBe('Latch on: tap a pad to record hands-free. Tap it again or STOP to stop.')
+    // LATCH reads STOP while a hands-free take goes on: the shared word.
+    expect(FeatureText.STOP.toUpperCase()).toBe('STOP')
+    expect(
+      ([[SampleSource.MIC, false], [SampleSource.RSP, true], [SampleSource.USB, false]] as const).map(([s, st]) =>
+        MirrorText.sourceShort(s, st).toUpperCase(),
+      ),
+    ).toEqual(['MIC', 'RSP ST', 'USB'])
+    expect(MirrorText.sourceName(SampleSource.MIC, false)).toBe('Phone mic, mono')
+    expect(MirrorText.sourceName(SampleSource.RSP, true)).toBe("Resample the phone's sound, stereo")
+    expect(MirrorText.sourceName(SampleSource.USB, false)).toBe('EP-133 over USB, mono')
+    // LEVEL is the pad sheet's knob word; SAMPLE's KNOB X reuses it.
+    expect(MirrorText.LEVEL).toBe('Level')
+    expect([12, -6, 0].map((db) => MirrorText.gainReadout(db))).toEqual(['+12 dB', '\u22126 dB', '0 dB'])
+    expect([null, -24, 0].map((db) => MirrorText.thresholdReadout(db))).toEqual(['Off', '\u221224 dB', '0 dB'])
+    expect([null, 1, 2].map((n) => MirrorText.barsChoice(n))).toEqual(['Free', '1 bar', '2 bars'])
+    expect(MirrorText.countIn(3)).toBe('Count-in 3')
+    expect(MirrorText.sampleTime(4, 20)).toBe('0:04 / 0:20')
+    expect(MirrorText.sampleTime(39, 40)).toBe('0:39 / 0:40')
+    expect(MirrorText.sampleMax(40)).toBe('Takes up to 40 s')
+    expect(MirrorText.sampleUploading(a7, 40)).toBe('Pad A 7: uploading, 40%')
+    expect(MirrorText.diskLow(12)).toBe('Disk low: room for 12 s')
+    expect(MirrorText.sampleUploading(a7)).toBe('Pad A 7: uploading')
+    expect(MirrorText.padTitle(a7) + MirrorText.padSampleState(true)).toBe('Pad A 7, has a sound')
+    expect(MirrorText.padSampleState(false)).toBe(', empty')
+    expect(MirrorText.inputFailed('busy')).toBe("The input couldn't be opened: busy")
+    // The seconds are cut, not rounded, as the take's time is.
+    expect(MirrorText.reviewLine(a7, 4.7, SampleSource.RSP, true)).toBe('Pad A 7 \u00B7 0:04 \u00B7 RSP ST')
+    expect(MirrorText.reviewLine(a7, 65.0, SampleSource.MIC, false)).toBe('Pad A 7 \u00B7 1:05 \u00B7 MIC')
+    expect(MirrorText.slotLine(214, true)).toBe('Slot 214, the next free one')
+    expect(MirrorText.slotLine(300, false)).toBe('Slot 300')
+    expect(MirrorText.sampleQueued(a7)).toBe('Pad A 7: kept in arc. It goes on the EP-133 when you connect.')
+    expect(MirrorText.sampleSaved(a7)).toBe('Pad A 7: new sample on the EP-133.')
+    expect(MirrorText.DEVICE_UPLOADING).toBe("The EP-133 is taking a new sample. This sound plays once it's done.")
+    expect(MirrorText.samplesToTakes(1)).toBe('1 sample kept in Takes.')
+    expect(MirrorText.samplesToTakes(3)).toBe('3 samples kept in Takes.')
+    // The offline prompt counts recordings apart from pad changes.
+    expect(MirrorText.putOffline(2, 0)).toBe('Put 2 offline pad changes on the EP-133?')
+    expect(MirrorText.putOffline(0, 1)).toBe('Put 1 new sample on the EP-133?')
+    expect(MirrorText.putOffline(1, 2)).toBe('Put 1 offline pad change and 2 new samples on the EP-133?')
+    expect(SettingsText.REVIEW_SAMPLES).toBe('Review samples')
+    expect(SettingsText.REVIEW_SAMPLES_NOTE.endsWith('as on the EP-133.')).toBe(true)
+    expect(CoachText.SAMPLE).toBe('Sample')
   })
 })

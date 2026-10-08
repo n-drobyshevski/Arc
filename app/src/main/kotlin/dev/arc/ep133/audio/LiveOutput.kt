@@ -61,11 +61,23 @@ internal interface LiveListener {
     /** Before each block of mix is read: REC armed or stopped meanwhile is picked up. */
     fun beforeBlock()
 
-    /** Whether the mix is wanted (REC armed, or a take going). */
+    /** Whether the mix is wanted (REC armed, a take going, or SAMPLE resampling it). */
     val recording: Boolean
 
     /** A block of the mix: [frames] stereo frames in [out], the first at mix frame [at] and [rate]; [firstStart] the first voice start in it. */
     fun mixed(out: ShortArray, frames: Int, at: Long, firstStart: Long?, rate: Int)
+
+    /**
+     * Mix frame [frame] is heard at [nanos] (System.nanoTime), at [rate]:
+     * from the output's timestamp about every [CLOCK_NS] while the mix is
+     * wanted, so SAMPLE can tell which frame was playing at a press.
+     */
+    fun clock(frame: Long, nanos: Long, rate: Int)
+
+    companion object {
+        /** How often an output tells [clock] while the mix is wanted. */
+        const val CLOCK_NS = 100_000_000L
+    }
 
     /** A voice was heard [latencyMs] after its press, through [route], on [engine] ([LiveEngineInfo.label]). */
     fun started(key: String, latencyMs: Double, route: AudioDeviceInfo?, engine: String)
@@ -87,6 +99,13 @@ internal interface LiveListener {
 
     /** The native engine gave out (dead, or stalled), after [ended]: Live carries on through AudioTrack. */
     fun gaveOut()
+
+    /**
+     * The thread ended by itself, after [ended] and with the output let go
+     * of: its stream failed (a write or a poll), and nothing more comes from
+     * it. Not told after [gaveOut], nor when the output was closed.
+     */
+    fun failed()
 }
 
 /**

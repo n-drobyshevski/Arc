@@ -35,6 +35,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -69,6 +70,7 @@ import dev.arc.ep133.ui.components.cap
 import dev.arc.ep133.ui.components.capPress
 import dev.arc.ep133.ui.components.coachMark
 import dev.arc.ep133.ui.theme.LocalArcColors
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 
 /*
@@ -109,7 +111,7 @@ internal class ProjectHold {
         if (long) fn.onPickProject() else fn.onProject()
     }
 
-    /** PROJECT's press slid off or was taken by a scroll: nothing. */
+    /** PROJECT's press slid off, was taken by a scroll, or went with its key (the SAMPLE panel over it): nothing. */
     fun cancel() {
         held = false
     }
@@ -411,6 +413,9 @@ private fun FunctionKey(
     val text = viewWordStyle(if (column != null) 9.5.dp else 10.5.dp, 0.08f)
     // PROJECT ([hold]): its press and release by hand, so it can be held while the pads are
     // tapped and its long press acts on release; a screen reader keeps the click and long click.
+    // The gesture outlives the composition it started in: its release acts on the keys as they
+    // are now (the project list read since), not as they were at the press.
+    val fnNow by rememberUpdatedState(fn)
     val touch = if (hold != null && fn != null) {
         Modifier
             .pointerInput(enabled) {
@@ -420,10 +425,18 @@ private fun FunctionKey(
                     val press = PressInteraction.Press(first.position)
                     source.tryEmit(press)
                     hold.down()
-                    val up = waitForUpOrCancellation()
+                    val up = try {
+                        waitForUpOrCancellation()
+                    } catch (gone: CancellationException) {
+                        // The key left the page while held (the SAMPLE panel unrolled over it): no lift
+                        // will come, and PROJECT mustn't stay held, taking the pads' presses.
+                        source.tryEmit(PressInteraction.Cancel(press))
+                        hold.cancel()
+                        throw gone
+                    }
                     if (up != null) {
                         source.tryEmit(PressInteraction.Release(press))
-                        hold.up(up.uptimeMillis - first.uptimeMillis >= viewConfiguration.longPressTimeoutMillis, fn)
+                        hold.up(up.uptimeMillis - first.uptimeMillis >= viewConfiguration.longPressTimeoutMillis, fnNow ?: fn)
                     } else {
                         source.tryEmit(PressInteraction.Cancel(press))
                         hold.cancel()

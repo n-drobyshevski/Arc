@@ -22,6 +22,8 @@ object CoachText {
     /** Live's function keys beside MODE (now the KEYS key). */
     const val PROJECT = "Next project: tap; hold + pad 1–9 to pick"
     const val TEMPO = "Click: tap; hold for tempo"
+    /** The mic key in Live's top bar: a tap opens the SAMPLE panel, another closes it. */
+    const val SAMPLE = "Sample"
     const val OCTAVE = "Octave"
     const val SCALE = "Scale"
     const val KEY = "Key"

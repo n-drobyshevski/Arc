@@ -206,3 +206,7 @@ val hostMixerTest = tasks.register<HostCppTest>("hostMixerTest") {
 
 // `./gradlew test` runs it with the JVM tests.
 tasks.matching { it.name == "test" }.configureEach { dependsOn(hostMixerTest) }
+
+// The screenshot previews render one after another in one test JVM: past a hundred and twenty of
+// them (Live's SAMPLE card among them), Gradle's default 512 MB heap runs out before the last.
+tasks.withType<Test>().matching { it.name.endsWith("ScreenshotTest") }.configureEach { maxHeapSize = "2g" }

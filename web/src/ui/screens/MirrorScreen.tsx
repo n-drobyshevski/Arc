@@ -2106,7 +2106,9 @@ function KeysGrid(props: {
   const notesNow = useRef(keyNotes)
   notesNow.current = keyNotes
   const keysRef = props.keysRef
-  useEffect(() => {
+  // Handed over before the grid is painted: a key pressed as soon as the grid shows (V, then a
+  // pad key) finds it ready; after paint, a slow machine dropped that first key.
+  useLayoutEffect(() => {
     if (!keysRef) return
     keysRef.current = {
       down: (k, finger, at) => {
