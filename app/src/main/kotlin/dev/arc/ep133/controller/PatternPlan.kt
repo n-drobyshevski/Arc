@@ -119,6 +119,16 @@ internal fun patternBpm(device: Double?, liveTempo: Int): Double =
  */
 internal fun pressTickAt(nanos: Long, pressAt: Long, bpm: Double): Double = (nanos - pressAt) * bpm * Seq.PPQN / 60e9
 
+/**
+ * The pass a note just recorded isn't played in: [skipPass] (the grid put
+ * it after it was heard), else pass 0 for the [first] note of a run a press
+ * started, or one heard [early] in it (before its timeline is out, while
+ * the sequencer may still send what fell behind the mix from the press on,
+ * a chord's other fingers): heard already, and pass 0 of a note heard is
+ * behind. Null: every pass plays it.
+ */
+internal fun pressSkip(skipPass: Long?, first: Boolean, early: Boolean): Long? = skipPass ?: 0L.takeIf { first || early }
+
 /** The count-in's beat heard at global [tick], 1..4 through the bar before tick 0; null before it and from tick 0. */
 internal fun countInBeat(tick: Double): Int? {
     if (tick >= 0) return null

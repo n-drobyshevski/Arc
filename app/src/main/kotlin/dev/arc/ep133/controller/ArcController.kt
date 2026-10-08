@@ -3870,7 +3870,8 @@ class ArcController(
      * TIMING's grid, its gate held until [recordRelease] ([hold]; else a
      * step of the grid). A note the grid puts after the moment it was heard
      * isn't played in that pass again, nor the [first] note of a run a press
-     * started (on tick 0, heard already) in its first.
+     * started (on tick 0, heard already) in its first, nor any other heard
+     * before that run's timeline is out (a chord's other fingers: [pressSkip]).
      */
     private fun recordPress(pad: dev.arc.ep133.features.PhysicalPad, semitones: Int?, key: String, pressedAt: Long, hold: Boolean, first: Boolean = false) {
         if (!transport.state.recording) return
@@ -3879,7 +3880,7 @@ class ArcController(
         markPasses(tick)
         val r = patternRecorder.noteOn(projectPatterns, pad, semitones, tick, patternTickAt(System.nanoTime()) ?: tick, settings.value.patternTiming)
         if (r.id == 0) return
-        (if (first) 0L else r.skipPass)?.let { patternSkip = patternSkip + (r.id to it) }
+        pressSkip(r.skipPass, first, early = patternPressAt != null && heardTimeline() == null)?.let { patternSkip = patternSkip + (r.id to it) }
         // The same key again before it was let go of (another finger): the first note's gate ends here.
         val before = patternHeld.remove(key)
         val p = if (before != null) patternRecorder.noteOff(r.patterns, before, tick) else r.patterns

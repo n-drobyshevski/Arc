@@ -106,6 +106,16 @@ class PatternPlanTest {
     }
 
     @Test
+    fun `a press-started run's first note, and those heard before its timeline, skip pass 0`() {
+        assertEquals(0L, pressSkip(null, first = true, early = false))
+        assertEquals(0L, pressSkip(null, first = false, early = true))
+        assertNull(pressSkip(null, first = false, early = false))
+        // The grid put it later than heard: that pass, as ever.
+        assertEquals(2L, pressSkip(2L, first = false, early = true))
+        assertEquals(1L, pressSkip(1L, first = false, early = false))
+    }
+
+    @Test
     fun `a take's ticks are frames at the input's rate, rounded as bars are`() {
         assertEquals(barFrames(1, 120.0, 48_000), ticksToFrames(Seq.TICKS_PER_BAR.toLong(), 120.0, 48_000))
         assertEquals(barFrames(3, 97.3, 44_100), ticksToFrames(3L * Seq.TICKS_PER_BAR, 97.3, 44_100))

@@ -74,7 +74,9 @@ class PatternSchedulerTest {
     // A note on each beat of a bar, on pad A1, each [gate] ticks.
     private fun beats(gate: Int = 24) = Pattern(1, List(4) { PatternNote(it * 96, 0, gate, id = it + 1) })
 
-    private inner class Rig(val s: PatternScheduler = PatternScheduler()) {
+    // The scheduler's own clock ([nanos]) is the moment the frames rendered are heard, unless one is given.
+    private inner class Rig(nanos: (() -> Long)? = null) {
+        val s = PatternScheduler(nanos = nanos ?: { heard(rendered) })
         val sink = FakeSink()
         var rendered = 0L
 
@@ -338,6 +340,8 @@ class PatternSchedulerTest {
         val at = r.heard(f)
         r.s.play(0, atNanos = at)
         r.fill()
+        // Out with this block, B's tick 0 (behind the mix) sent in it already.
+        assertEquals(listOf("live:1:2" to f), r.sink.starts.map { it.key to it.at })
         val tl = r.s.timeline.value!!
         assertEquals(0.0, tl.tickAt(at), 1e-6)
         assertEquals(f, tl.frameOfTick(0))
@@ -359,6 +363,7 @@ class PatternSchedulerTest {
     fun `a press heard longer ago than the lookahead replays nothing of the past`() {
         val r = Rig()
         r.s.plan = pressPlan()
+        r.s.armed = true
         r.run(48_000, stampEvery = 25)
         val f = r.rendered - ahead - 2400
         r.s.play(0, atNanos = r.heard(f))
@@ -370,10 +375,11 @@ class PatternSchedulerTest {
     }
 
     @Test
-    fun `a press with no stamp, or one from frames counted before, anchors on the frames rendered`() {
+    fun `a press with no stamp, or one from frames counted before, waits for the next and anchors where it was heard`() {
         for (lost in listOf(false, true)) {
             val r = Rig()
             r.s.plan = pressPlan()
+            r.s.armed = true
             if (lost) {
                 // A stamp, then the output reopened: its frames count anew.
                 r.run(48_000, stampEvery = 25)
@@ -381,15 +387,69 @@ class PatternSchedulerTest {
             } else {
                 r.run(48_000)
             }
-            val from = r.rendered
-            r.s.play(0, atNanos = r.heard(from - 1200))
+            val f = r.rendered - 1200
+            val at = r.heard(f)
+            r.s.play(0, atNanos = at)
             r.fill()
+            r.rendered += 192
+            r.fill()
+            // Nothing sent and nothing out till a stamp says where the press was heard.
+            assertTrue(r.sink.starts.isEmpty(), "lost $lost")
             assertNull(r.s.timeline.value, "lost $lost")
             r.stamp()
-            assertEquals(0.0, r.s.timeline.value!!.tickAt(r.heard(from)), 1e-6, "lost $lost")
+            // Out once the next block has sent what fell behind (B's tick 0, a little late).
+            assertNull(r.s.timeline.value, "lost $lost")
+            r.fill()
+            assertEquals(listOf("live:1:2" to f), r.sink.starts.map { it.key to it.at }, "lost $lost")
+            assertEquals(0.0, r.s.timeline.value!!.tickAt(at), 1e-6, "lost $lost")
             r.rendered += 192
-            r.run(from + bar, stampEvery = 25)
-            assertEquals(listOf(from, from + 24000, from + 48000, from + 72000), r.sink.starts.filter { it.at < from + bar }.map { it.at }, "lost $lost")
+            r.run(f + bar, stampEvery = 25)
+            assertEquals(listOf(f, f + 24000, f + 48000, f + 72000), r.sink.starts.filter { it.at < f + bar }.map { it.at }, "lost $lost")
         }
+    }
+
+    @Test
+    fun `a press no stamp follows for long takes the frames rendered as heard then`() {
+        var now = 0L
+        val r = Rig { now }
+        r.s.plan = pressPlan()
+        r.s.armed = true
+        r.run(48_000)
+        val at = 7_000_000_000L
+        now = at
+        r.s.play(0, atNanos = at)
+        // Blocks of 4 ms and no stamp: nothing for half a second.
+        while (now - at < PatternScheduler.PRESS_WAIT_NS) {
+            r.fill()
+            r.rendered += 192
+            now += 4_000_000L
+        }
+        assertTrue(r.sink.starts.isEmpty())
+        // Tick 0 half a second before the frames rendered; what fell further behind than the lookahead isn't sent.
+        val f = r.rendered - 24_000
+        r.run(f + bar)
+        assertEquals(listOf(f + 24000, f + 48000, f + 72000), r.sink.starts.filter { it.at < f + bar }.map { it.at })
+    }
+
+    @Test
+    fun `a stamp from before RECORD was last armed finds no press`() {
+        val r = Rig()
+        r.s.plan = pressPlan()
+        r.s.armed = true
+        r.run(48_000, stampEvery = 25)
+        // Disarmed, the stamps stop, and the output's clock moves off the last one (an underrun, say).
+        r.s.armed = false
+        r.run(96_000)
+        r.base += 30_000_000L
+        r.s.armed = true
+        val f = r.rendered - 1200
+        val at = r.heard(f)
+        r.s.play(0, atNanos = at)
+        r.fill()
+        assertNull(r.s.timeline.value)
+        r.stamp()
+        r.fill()
+        assertEquals(f, r.s.timeline.value!!.frameOfTick(0))
+        assertEquals(0.0, r.s.timeline.value!!.tickAt(at), 1e-6)
     }
 }
