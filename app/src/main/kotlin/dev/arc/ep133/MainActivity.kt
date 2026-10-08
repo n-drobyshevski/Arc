@@ -1135,7 +1135,8 @@ class MainActivity : ComponentActivity() {
                                 bpm = dev.arc.ep133.controller.patternBpm(mirror?.state?.bpm, appSettings.liveTempo).toFloat(),
                                 selected = state.keysPad,
                                 nameOf = controller::mirrorName,
-                                onType = controller::setFxType,
+                                // An effect put on with no send anywhere: the group of the pad played last sends to it.
+                                onType = { controller.setFxType(it, state.keysPad?.group) },
                                 onXY = controller::setFxXY,
                                 onSend = controller::setFxSend,
                                 onComp = { on, x, y -> controller.setComp(on, x, y) },

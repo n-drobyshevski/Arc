@@ -77,7 +77,7 @@ A debug screen (Settings → **Debug log**, or long-press the section tag) shows
 
 Live's phone engine has the EP-133's effects, built into its own mixer (the native engine, AudioTrack and the Kotlin, C++ and web mixers render the same samples). They are the phone's only: nothing is sent to the EP-133, its own FX settings are never read or changed, and a TAKE or RSP take records them as heard. Each project keeps its own FX in arc (`fx.json`, in the app's own files); a project left at the defaults isn't saved.
 
-- **Hearing it** (both pages): the pad played last sits at the top of the sheet as a cap, as in the pad sheet; held, it plays as a pad does, through the effects, while they are set.
+- **Hearing it** (both pages): the pad played last sits at the top of the sheet as a cap, as in the pad sheet; held, it plays as a pad does, through the effects, while they are set. A new project's groups send nothing, so the first effect put on gives that pad's group a send of 50%; under the cap, a line says when the pad would play dry (no effect on, or its group's send at 0).
 - **Master effect** (the FX sheet's EFFECT page, one at a time; the one on, tapped again, turns off). The XY pad sets the effect's X and Y:
 
   | Effect | X | Y |

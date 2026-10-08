@@ -189,6 +189,7 @@ class FeatureTextTest {
         assertEquals("Effects, Off", MirrorText.fxKeyDescription(FxType.NONE))
         assertEquals("Reverb, on. Tap again to turn it off.", MirrorText.fxChoice(FxType.REVERB, on = true))
         assertEquals("Reverb", MirrorText.fxChoice(FxType.REVERB, on = false))
+        assertEquals("Group B sends nothing to the effect: raise its fader to hear it.", MirrorText.fxHearNoSend('B'))
         assertEquals("Length 1/8D, feedback 38%", MirrorText.xyState(FxType.DELAY, 0.625f, 0.4f, 120f))
         assertEquals("Cutoff OPEN, reso Q 4.3", MirrorText.xyState(FxType.FILTER, 0.5f, 0.5f, 120f))
         assertEquals("1/8D \u00B7 38%", MirrorText.xyReadout(FxType.DELAY, 0.625f, 0.4f, 120f))

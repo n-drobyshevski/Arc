@@ -1013,6 +1013,14 @@ export const MirrorText = {
   /** Under the sheet's pad cap: what holding it does. */
   FX_HEAR: 'Hold the pad to hear it through the effects.',
 
+  /** Under the cap with no effect on: the pad plays dry. */
+  FX_HEAR_OFF: 'No effect on: pick one, then hold the pad to hear it.',
+
+  /** Under the cap when the pad's group (letter) sends nothing: the pad plays dry. */
+  fxHearNoSend(letter: string): string {
+    return `Group ${letter} sends nothing to the effect: raise its fader to hear it.`
+  },
+
   /** Before any pad was played: the cap has no pad to play yet. */
   FX_HEAR_NONE: 'Play a pad in Live to hear the effects here.',
 

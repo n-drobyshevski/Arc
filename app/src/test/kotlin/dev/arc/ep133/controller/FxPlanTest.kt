@@ -90,6 +90,29 @@ class FxPlanTest {
     }
 
     @Test
+    fun `an effect put on with no group sending to it gets the playing group's send, and only then`() {
+        desk.load(null)
+        sent.clear()
+        desk.setType(FxType.REVERB, group = 2)
+        assertEquals(
+            listOf(
+                Cmd(FxControl.FX_TYPE, FxControl.REVERB, 0.5f, 0.5f),
+                Cmd(FxControl.SEND, 2, FIRST_SEND, 0f),
+            ),
+            sent,
+        )
+        assertEquals(listOf(0f, 0f, FIRST_SEND, 0f), desk.fx.value.sends)
+        // A send there already, or no group known, or the effect off: the sends stay.
+        sent.clear()
+        desk.setType(FxType.DELAY, group = 0)
+        desk.setType(FxType.DELAY, group = 1)
+        desk.setSend(2, 0f)
+        desk.setType(FxType.CHORUS)
+        assertEquals(listOf(0f, 0f, 0f, 0f), desk.fx.value.sends)
+        assertEquals(FxType.CHORUS, desk.fx.value.type)
+    }
+
+    @Test
     fun `the effect on already, chosen again, is none, and its knobs stay`() {
         desk.load(null)
         desk.setXY(0.3f, 0.6f)

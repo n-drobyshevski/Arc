@@ -175,6 +175,7 @@ describe('FeatureTextTest', () => {
     expect(MirrorText.fxKeyDescription(FxType.NONE)).toBe('Effects, Off')
     expect(MirrorText.fxChoice(FxType.REVERB, true)).toBe('Reverb, on. Tap again to turn it off.')
     expect(MirrorText.fxChoice(FxType.REVERB, false)).toBe('Reverb')
+    expect(MirrorText.fxHearNoSend('B')).toBe('Group B sends nothing to the effect: raise its fader to hear it.')
     expect(MirrorText.xyState(FxType.DELAY, 0.625, 0.4, 120)).toBe('Length 1/8D, feedback 38%')
     expect(MirrorText.xyState(FxType.FILTER, 0.5, 0.5, 120)).toBe('Cutoff OPEN, reso Q 4.3')
     expect(MirrorText.xyReadout(FxType.DELAY, 0.625, 0.4, 120)).toBe('1/8D \u00B7 38%')

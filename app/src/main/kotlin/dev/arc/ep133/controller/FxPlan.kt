@@ -17,6 +17,9 @@ import kotlinx.coroutines.flow.asStateFlow
 /** Where the FX bus's commands go: [FxControl] command `what` with its index and knobs (Live's output). */
 internal typealias FxSend = (what: Int, index: Int, x: Float, y: Float) -> Unit
 
+/** A group's send when an effect goes on with no group sending to it ([FxDesk.setType]). */
+internal const val FIRST_SEND = 0.5f
+
 /** A punch-in's lightest depth: a press always punches in, however light it is (0 would let go). */
 internal const val PUNCH_MIN_DEPTH = 0.01f
 
@@ -115,10 +118,17 @@ internal class FxDesk(private val send: FxSend, private val edited: () -> Unit =
     /** fx.json's text; null when every project is at the defaults (no file). */
     fun json(): String? = kept().takeIf { it.isNotEmpty() }?.let(FxBook::toJson)
 
-    /** The effect: [t], or none when [t] is the one on already (its key tapped again). Its knobs stay. */
-    fun setType(t: FxType) {
+    /**
+     * The effect: [t], or none when [t] is the one on already (its key tapped
+     * again). Its knobs stay. An effect put on while no group sends to it
+     * (every send at 0, as a new project has them) would be silent: group
+     * [group] (the pad played last's, when known) then sends [FIRST_SEND], so
+     * the effect is heard at once.
+     */
+    fun setType(t: FxType, group: Int? = null) {
         val s = _fx.value.let { it.withType(if (it.type == t) FxType.NONE else t) }
         if (edit(s)) send(FxControl.FX_TYPE, s.type.ordinal, s.x, s.y)
+        if (s.type != FxType.NONE && group != null && s.sends.all { it == 0f }) setSend(group, FIRST_SEND)
     }
 
     /** The effect's knobs (0..1). */

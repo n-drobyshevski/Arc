@@ -3551,7 +3551,7 @@ class ArcController(
     }
 
     /** The effect: [type], or none when [type] is on already (its key tapped again). */
-    fun setFxType(type: dev.arc.ep133.features.FxType) = fxDesk.setType(type)
+    fun setFxType(type: dev.arc.ep133.features.FxType, group: Int? = null) = fxDesk.setType(type, group)
 
     /** The effect's X and Y knobs (0..1). */
     fun setFxXY(x: Float, y: Float) = fxDesk.setXY(x, y)

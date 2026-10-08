@@ -152,7 +152,13 @@ private fun HearRow(fx: FxUi) {
         )
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(MirrorText.padTitle(pad) + (name?.let { " \u00B7 $it" } ?: ""), style = ArcType.bold, color = c.ink, maxLines = 1)
-            Text(MirrorText.FX_HEAR, style = ArcType.small, color = c.graphite)
+            // Said when the pad would play dry: no effect on, or its group sending nothing to it.
+            val dry = when {
+                fx.settings.type == FxType.NONE -> MirrorText.FX_HEAR_OFF
+                fx.settings.sends.getOrElse(pad.group) { 0f } == 0f -> MirrorText.fxHearNoSend(pad.groupLetter)
+                else -> null
+            }
+            Text(dry ?: MirrorText.FX_HEAR, style = ArcType.small, color = if (dry != null) c.signal else c.graphite)
         }
     }
 }
