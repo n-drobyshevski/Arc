@@ -16,4 +16,19 @@ class LiveVoicesTest {
     fun `notes to outline, latest last`() {
         assertEquals(listOf(64, 60), LiveVoices.notes(voices).toList())
     }
+
+    // The pattern's KEYS notes: "seq:<group>:<offset>:<midi>".
+    private val pattern = linkedSetOf("seq:1:4:62", "note:64", "seq:1:4:67", "seq:0:2:60", "seq:1:4", "seq:1:x:60", "seq:1:4:x")
+
+    @Test
+    fun `a pattern's notes ring their pads`() {
+        assertEquals(setOf(PhysicalPad(1, 4), PhysicalPad(0, 2)), LiveVoices.pads(pattern))
+    }
+
+    @Test
+    fun `a pattern's notes on the KEYS pad are outlined, others not`() {
+        assertEquals(listOf(62, 64, 67), LiveVoices.notes(pattern, PhysicalPad(1, 4)).toList())
+        assertEquals(listOf(64), LiveVoices.notes(pattern).toList())
+        assertEquals(listOf(64, 60), LiveVoices.notes(pattern, PhysicalPad(0, 2)).toList())
+    }
 }

@@ -239,6 +239,8 @@ class FeatureTextTest {
         assertEquals("1.1 / 1 · Off", MirrorText.patternRecording(1, 1, 1, Timing.OFF))
         assertEquals("Count-in 3", MirrorText.countIn(3))
         assertEquals("/ 4", MirrorText.countInOf(4))
+        assertEquals("PLAY to start · 1/16", MirrorText.patternArmed(Timing.SIXTEENTH))
+        assertEquals("PLAY to start · Off", MirrorText.patternArmed(Timing.OFF))
         assertEquals(listOf("Off", "1/8", "1/16", "1/32"), Timing.entries.map(MirrorText::timingLabel))
         assertEquals("Timing 1/16: notes snap to the nearest 1/16", MirrorText.timingName(Timing.SIXTEENTH))
         assertEquals("Timing off: notes stay where you play them", MirrorText.timingName(Timing.OFF))

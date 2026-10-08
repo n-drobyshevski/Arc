@@ -124,7 +124,9 @@ import kotlin.math.roundToInt
  * The panel's −/+ step the source ([onSource]), STEREO records in stereo or
  * mono ([onStereo]), the knobs set the level ([onGain], dB) and the
  * threshold ([onThreshold], dBFS, null for none), BARS a hands-free take's
- * length ([onBars], null for Free), LATCH whether a tap records hands-free
+ * length ([onBars], null for Free; after 16, PTN, the pattern's length,
+ * while the project has notes ([hasPattern]): [pattern] while picked,
+ * [onPattern] picking it or not), LATCH whether a tap records hands-free
  * ([onLatch]), and STOP, in LATCH's place while a hands-free take goes on,
  * stops it ([onStop]).
  *
@@ -151,6 +153,9 @@ class SampleUi(
     val onGain: (Float) -> Unit = {},
     val onThreshold: (Float?) -> Unit = {},
     val onBars: (Int?) -> Unit = {},
+    val hasPattern: Boolean = false,
+    val pattern: Boolean = false,
+    val onPattern: (Boolean) -> Unit = {},
     val onLatch: (Boolean) -> Unit = {},
     val onPadDown: (pad: PhysicalPad, pressedAt: Long, unsure: Boolean) -> Unit = { _, _, _ -> },
     val onPadUp: (pad: PhysicalPad, releasedAt: Long) -> Unit = { _, _ -> },
@@ -249,6 +254,19 @@ internal fun nextBars(bars: Int?): Int? {
     val choices = listOf<Int?>(null) + SAMPLE_BARS
     // One that isn't a choice counts as Free.
     return choices[(choices.indexOf(bars).coerceAtLeast(0) + 1) % choices.size]
+}
+
+/** BARS' choice: [bars] (null for Free), or the pattern's length ([pattern], PTN). */
+internal data class BarsPick(val bars: Int?, val pattern: Boolean = false)
+
+/**
+ * BARS' next choice from [bars] (or PTN, [pattern]): as [nextBars], with PTN
+ * after 16 while the project has notes ([hasPattern]), then Free again.
+ */
+internal fun nextBarsPick(bars: Int?, pattern: Boolean, hasPattern: Boolean): BarsPick = when {
+    pattern && hasPattern -> BarsPick(null)
+    hasPattern && bars == SAMPLE_BARS.last() -> BarsPick(bars, pattern = true)
+    else -> BarsPick(nextBars(bars))
 }
 
 /**
@@ -983,14 +1001,23 @@ private fun ThresholdKnob(ui: SampleUi, haptics: Boolean, modifier: Modifier = M
     )
 }
 
-/** BARS and its choice ("FREE", "2 BARS"; [short]: the choice alone); a tap steps to the next ([nextBars]). */
+/**
+ * BARS and its choice ("FREE", "2 BARS", "PTN"; [short]: the choice alone);
+ * a tap steps to the next ([nextBarsPick]).
+ */
 @Composable
 private fun BarsKey(ui: SampleUi, haptics: Boolean, modifier: Modifier = Modifier, short: Boolean = false) {
     val bars = ui.state.bars
-    val choice = MirrorText.barsChoice(bars)
-    SampleKey(MirrorText.knobDescription(MirrorText.BARS, choice), haptics, modifier, onClick = { ui.onBars(nextBars(bars)) }) { ink ->
-        // "2 BARS" says it already; Free says what is free.
-        if (bars == null && !short) SampleKeyWord(MirrorText.BARS, ink.copy(alpha = 0.65f))
+    val pattern = ui.pattern && ui.hasPattern
+    val choice = if (pattern) MirrorText.PTN else MirrorText.barsChoice(bars)
+    val step = {
+        val next = nextBarsPick(bars, pattern, ui.hasPattern)
+        if (next.pattern != pattern) ui.onPattern(next.pattern)
+        if (!next.pattern && next.bars != bars) ui.onBars(next.bars)
+    }
+    SampleKey(MirrorText.knobDescription(MirrorText.BARS, if (pattern) MirrorText.PTN_NAME else choice), haptics, modifier, onClick = step) { ink ->
+        // "2 BARS" says it already; Free and PTN say what is free, or the pattern's.
+        if ((bars == null || pattern) && !short) SampleKeyWord(MirrorText.BARS, ink.copy(alpha = 0.65f))
         SampleKeyWord(choice, ink)
     }
 }
