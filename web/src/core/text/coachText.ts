@@ -21,7 +21,7 @@ export const CoachText = {
   /** Live's function keys beside MODE (now the KEYS key). */
   PROJECT: 'Next project: tap; hold + pad 1–9 to pick',
   TEMPO: 'Click: tap; hold for tempo',
-  /** The SAMPLE card, a swipe from right to left on Live's pads (its sliver peeks in at their edge). */
+  /** The SAMPLE panel, a swipe from right to left on Live's pads (its sliver peeks in at their edge). */
   SAMPLE: 'Sample: swipe the pads left',
   OCTAVE: 'Octave',
   SCALE: 'Scale',

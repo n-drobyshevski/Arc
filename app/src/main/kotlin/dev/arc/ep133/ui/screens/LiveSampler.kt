@@ -45,12 +45,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -83,7 +85,6 @@ import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.ui.components.CapDx
 import dev.arc.ep133.ui.components.CapDy
-import dev.arc.ep133.ui.components.Caption
 import dev.arc.ep133.ui.components.DisplayLine
 import dev.arc.ep133.ui.components.Knob
 import dev.arc.ep133.ui.components.LocalHwColors
@@ -101,24 +102,24 @@ import kotlin.math.roundToInt
 
 /*
  * SAMPLE mode on Live (an addition, after the EP-133's own sampler): the
- * SAMPLE card beside the pads card, reached with a swipe ([LiveCards]),
- * with its display (the source, the input's meter, the take's time and its
- * wave), the sampler's controls (−/+ for the source, STEREO, LATCH or STOP,
- * KNOB X the input's level, KNOB Y the threshold, BARS) and the group's
- * pads lit as the K.O. II lights them in the mode, empty pads blinking and
- * those with a sound lit; and, while it is open, the display line lit
- * orange with the source, the meter and what happens next.
+ * SAMPLE panel in the function keys' place, unrolled with a swipe on the
+ * pads ([SampleSlot]), with its display (the source, the input's meter, the
+ * take's time and its wave) and the sampler's controls (−/+ for the source,
+ * STEREO, LATCH or STOP, KNOB X the input's level, KNOB Y the threshold,
+ * BARS); the page's pads lit as the K.O. II lights them in the mode, empty
+ * pads blinking and those with a sound lit; and, while it is open, the
+ * display line lit orange with the source, the meter and what happens next.
  */
 
 /**
  * SAMPLE mode for Live's page (an addition): its [state] as the controller
  * has it, and the input's [level] (0..1 across −60..0 dBFS) and [clip],
  * both read as the meter draws; [lastTake], the last take's waveform, for
- * the display while nothing records. A swipe to the SAMPLE card opens the
- * mode ([onOpen]), one back to the pads (or Back) leaves it ([onClose]);
- * while a sheet is open over Live ([sheetOpen]: the review, say) Back is
- * the sheet's.
- * The card's −/+ step the source ([onSource]), STEREO records in stereo or
+ * the display while nothing records. A swipe on the pads that opens the
+ * SAMPLE panel opens the mode ([onOpen]); one back, the panel's handle or
+ * Back leaves it ([onClose]); while a sheet is open over Live ([sheetOpen]:
+ * the review, say) Back is the sheet's.
+ * The panel's −/+ step the source ([onSource]), STEREO records in stereo or
  * mono ([onStereo]), the knobs set the level ([onGain], dB) and the
  * threshold ([onThreshold], dBFS, null for none), BARS a hands-free take's
  * length ([onBars], null for Free), LATCH whether a tap records hands-free
@@ -129,8 +130,8 @@ import kotlin.math.roundToInt
  * (unsure on the scrolling page, which [onPadKept] or [onPadCut] settles),
  * [onPadUp] at the lift's. A screen reader's click on a pad latches a
  * hands-free take, or stops it ([onLatchPad]). [still] keeps the lights and
- * the meter from moving, and [turn] catches the cards that far into a turn
- * (0 the pads, 1 SAMPLE; screenshots).
+ * the meter from moving, and [unroll] catches the panel that far along its
+ * motion (0 the function keys, 1 the panel; screenshots).
  */
 class SampleUi(
     val state: SampleUiState = SampleUiState(),
@@ -138,7 +139,7 @@ class SampleUi(
     val clip: () -> Boolean = { false },
     val lastTake: List<Peak>? = null,
     val still: Boolean = false,
-    val turn: Float? = null,
+    val unroll: Float? = null,
     val sheetOpen: Boolean = false,
     val onOpen: () -> Unit = {},
     val onClose: () -> Unit = {},
@@ -262,7 +263,7 @@ internal fun autoStopped(last: SamplePhase.Recording, held: Boolean, bars: Int?,
     return last.seconds >= length - 1
 }
 
-/** How the SAMPLE card lays out its controls. */
+/** How the SAMPLE panel lays out its controls. */
 internal enum class SampleControls {
     /** −/source/+, STEREO and LATCH a row of keys; the knobs (their names and values beside them) and BARS under them. */
     ROWS,
@@ -278,15 +279,11 @@ internal enum class SampleControls {
 }
 
 /**
- * How the SAMPLE card shares its height upright ([sampleCardFit]): the
- * display's height (0: none, SAMPLE's line over the card saying it all),
- * the knobs' size, how the controls lie, and whether the card's SAMPLE
- * caption has room under it.
+ * How the SAMPLE panel lays out upright ([samplePanelFit]): the display's
+ * height (0: none, SAMPLE's line over the panel saying it all), the knobs'
+ * size, and how the controls lie.
  */
-internal data class SampleCardFit(val display: Dp, val knob: Dp, val controls: SampleControls, val caption: Boolean)
-
-/** The card's bare deck of pads [u] wide: [KO_BARE_HIGH] pads high, and the caps' edge. */
-private fun deckHeight(u: Dp): Dp = u * KO_BARE_HIGH + CapDy + 2.dp
+internal data class SamplePanelFit(val display: Dp, val knob: Dp, val controls: SampleControls)
 
 /** How tall the controls are laid out as [controls], their knobs [knob]. */
 private fun controlsHeight(controls: SampleControls, knob: Dp): Dp = when (controls) {
@@ -295,58 +292,84 @@ private fun controlsHeight(controls: SampleControls, knob: Dp): Dp = when (contr
 }
 
 /**
- * The upright SAMPLE card in a [height] tall room, its face (inside the
- * padding) [width] wide: two rows of controls ([SampleControls.NARROW]
- * under [ControlsRowsMin]), the knobs as big as the row lets them be, up
- * to [CardKnob]; the display what the pads leave of it once they have
- * [PadsWant] wide pads, from [DisplayMin] to [DisplayMax]. Where the pads
- * would come out under [PadsMin], the knobs come down to a key's height,
- * then the caption goes, then the display (SAMPLE's line over the card
- * still says what it did), then the controls go into one row.
+ * The upright panel's height laid out as [fit]: its padding, the caps' edge,
+ * the display, the controls and [note], the USB note's room under them
+ * ([usbNoteRoom]; none for the other sources).
  */
-internal fun sampleCardFit(width: Dp, height: Dp): SampleCardFit {
-    val narrow = width < ControlsRowsMin
-    val rows = if (narrow) SampleControls.NARROW else SampleControls.ROWS
-    val bars = if (narrow) BarsNarrow else BarsWidth
-    val knobWide = ((width - bars - ControlGap * 2) / 2 - KnobText).coerceIn(KnobInline, CardKnob)
-    val knobKey = minOf(knobWide, SampleKeyHeight)
-    val tries = listOf(
-        SampleCardFit(DisplayMin, knobWide, rows, caption = true),
-        SampleCardFit(DisplayMin, knobKey, rows, caption = true),
-        SampleCardFit(DisplayMin, knobKey, rows, caption = false),
-        SampleCardFit(0.dp, knobKey, rows, caption = false),
-        SampleCardFit(0.dp, KnobInline, SampleControls.LINE, caption = false),
-    )
-    for (t in tries) {
-        val rest = sampleFace(height, t.caption) - controlsHeight(t.controls, t.knob) - CardGap
-        val display = if (t.display == 0.dp) 0.dp else (rest - CardGap - deckHeight(PadsWant)).coerceIn(DisplayMin, DisplayMax)
-        val pads = rest - if (display == 0.dp) 0.dp else display + CardGap
-        if (pads >= deckHeight(PadsMin) || t === tries.last()) return t.copy(display = display)
-    }
-    return tries.last()
+internal fun panelHeight(fit: SamplePanelFit, note: Dp = 0.dp): Dp =
+    PanelPadding * 2 + CapDy + (if (fit.display > 0.dp) fit.display + PanelGap else 0.dp) + controlsHeight(fit.controls, fit.knob) + note
+
+/**
+ * The room the USB note takes under the SAMPLE panel's controls while the
+ * source is [usb]: the gap over it and two lines of its type, as large as
+ * the phone's font size makes them; none for the other sources.
+ */
+@Composable
+internal fun usbNoteRoom(usb: Boolean): Dp {
+    if (!usb) return 0.dp
+    return with(LocalDensity.current) { UsbNoteLine.toDp() } * 2 + ControlGap
 }
 
-/** The card's face height in a [height] tall room: less the caption under it ([caption]), the padding and the caps' edge. */
-private fun sampleFace(height: Dp, caption: Boolean): Dp = height - (if (caption) CaptionRow else 0.dp) - CardPadding * 2 - CapDy
+/**
+ * The upright SAMPLE panel [width] wide (the pads' width, the function
+ * keys' row's place; no wider than [PanelWidthMax]), sharing [room] with the pads under it (the height of
+ * the panel, its handle and the pads; null on the scrolling page, where
+ * there is always room), [note] of it the USB note's ([usbNoteRoom]): two rows of controls ([SampleControls.NARROW]
+ * under [ControlsRowsMin]), the knobs as big as the row lets them be, up to
+ * [PanelKnob], and the display over them. Where the pads would come out
+ * under [PadsMin], the display goes (SAMPLE's line over the panel still
+ * says what it did), then the knobs come down to a key's height, then the
+ * controls go into one row.
+ */
+internal fun samplePanelFit(width: Dp, room: Dp?, note: Dp = 0.dp): SamplePanelFit {
+    val face = minOf(width, PanelWidthMax) - PanelPadding * 2 - CapDx
+    val narrow = face < ControlsRowsMin
+    val rows = if (narrow) SampleControls.NARROW else SampleControls.ROWS
+    val bars = if (narrow) BarsNarrow else BarsWidth
+    val knobWide = ((face - bars - ControlGap * 2) / 2 - KnobText).coerceIn(KnobInline, PanelKnob)
+    val tries = listOf(
+        SamplePanelFit(PanelDisplay, knobWide, rows),
+        SamplePanelFit(0.dp, knobWide, rows),
+        SamplePanelFit(0.dp, minOf(knobWide, SampleKeyHeight), rows),
+        SamplePanelFit(0.dp, KnobInline, SampleControls.LINE),
+    )
+    if (room == null) return tries.first()
+    return tries.firstOrNull { koPadWidth(width - PeekRoom, room - panelHeight(it, note) - HandleRow, 3) >= PadsMin } ?: tries.last()
+}
 
-/** The SAMPLE card's face: its corners, padding, and the gap between its display, controls and pads. */
-private val CardCorner = 18.dp
-private val CardPadding = 12.dp
-private val CardGap = 10.dp
+/**
+ * The SAMPLE panel's width on its side, [room] wide beside a deck of pads
+ * [deck] wide: what the deck leaves, from [SideColumnMin] to [SideColumnMax]
+ * (the deck narrows where the room is short of that).
+ */
+internal fun sidePanelWidth(room: Dp, deck: Dp): Dp = (room - deck).coerceIn(SideColumnMin, SideColumnMax)
 
-/** The SAMPLE caption under the upright card: its line and the gap over it. */
-private val CaptionRow = 24.dp
+/**
+ * The least height of the SAMPLE panel on its side, [width] wide: its
+ * controls (two rows, as that width lays them) without the display.
+ */
+internal fun sidePanelHeight(width: Dp): Dp {
+    val face = width - PanelPadding * 2 - CapDx
+    val controls = if (face >= ControlsRowsMin) SampleControls.ROWS else SampleControls.NARROW
+    return PanelPadding * 2 + CapDy + controlsHeight(controls, SampleKeyHeight)
+}
 
-/** The display's height upright: at least (its line and a line of wave), and at most. */
-private val DisplayMin = 80.dp
-private val DisplayMax = 140.dp
+/** The SAMPLE panel's face: its corners, padding, and the gap between its display and controls. */
+private val PanelCorner = 18.dp
+private val PanelPadding = 12.dp
+private val PanelGap = 10.dp
 
-/** The pads' width the upright display gives way to, and the least the card keeps them at (about a finger's). */
-private val PadsWant = 64.dp
-private val PadsMin = 40.dp
+/** The upright panel is no wider than this (a tablet's page), keeping to the start as the function keys' row does. */
+private val PanelWidthMax = 560.dp
+
+/** The display's height upright. */
+private val PanelDisplay = 96.dp
+
+/** The least pad width the upright panel leaves the pads (about a finger's): under it, the panel gives up its display, then more. */
+private val PadsMin = 44.dp
 
 /** The knobs at their biggest, as on the pad sheet; and the name ("THRESH") and value beside an inline one, with its gap. */
-private val CardKnob = 56.dp
+private val PanelKnob = 56.dp
 private val KnobText = 60.dp
 
 /** BARS in the narrow controls, its choice alone on it ("FREE", "2 BARS"). */
@@ -358,11 +381,14 @@ private val ControlsRowsMin = 308.dp
 /** LATCH (and STOP in its place) keeps this width, so the row doesn't shift as it changes. */
 private val LatchWidth = 72.dp
 
-/** On its side, the controls' column: at least and at most this wide, and its display's least and most height. */
+/** On its side, the panel: at least and at most this wide, and its display's least and most height. */
 private val SideColumnMin = 240.dp
 private val SideColumnMax = 380.dp
 private val SideDisplayMin = 80.dp
 private val SideDisplayMax = 140.dp
+
+/** How far the display and the rows of controls slide down as they fade in. */
+private val FadeSlide = 8.dp
 
 /** The display's corners, padding and the gap between its line and its wave. */
 private val DisplayCorner = 14.dp
@@ -376,108 +402,71 @@ private const val SCOPE_STEP_NS = 40_000_000L
 internal const val SAMPLE_BLINK_MS = 450L
 
 /**
- * The SAMPLE card (an addition, after the pocket operator app's pages): the
- * K.O. II's pale face holding the sampler. Upright: a display ([SampleDisplay])
- * over the controls (−/source/+, STEREO, LATCH or STOP, KNOB X LEVEL, KNOB Y
- * THRESH and BARS) over the current group's twelve [pads], with a SAMPLE
- * caption under it where there is room ([sampleCardFit]). On its side
- * ([sideways]): the display and the controls a column on the left (it
- * scrolls in a short window; the knobs keep the finger), the pads on the
- * right. [onClose], the pads card's sliver at its left edge ([PadsPeek]):
- * a tap goes back to the pads. [still] keeps the display from moving
- * (screenshots).
+ * The SAMPLE panel (an addition, after the EP-133's sampler) on the K.O.
+ * II's pale face, in the function keys' place ([SampleSlot]): a display
+ * ([SampleDisplay]) over the controls (−/source/+, STEREO, LATCH or STOP;
+ * KNOB X LEVEL, KNOB Y THRESH and BARS). Upright it lies as [fit] says
+ * ([samplePanelFit]); on its side (null) it fills the column, the controls
+ * as its width lets them lie, the display over them where it is tall
+ * enough, and it scrolls where it is short (the knobs keep the finger). The
+ * display and the two rows fade and slide in as [panel] unrolls, one after
+ * the other. [still] keeps the display from moving (screenshots).
  */
 @Composable
-internal fun SampleCard(
-    ui: SampleUi,
-    sideways: Boolean,
-    haptics: Boolean,
-    still: Boolean,
-    onClose: () -> Unit,
-    modifier: Modifier = Modifier,
-    pads: @Composable (Modifier) -> Unit,
-) {
-    BoxWithConstraints(modifier) {
-        val fit = if (sideways) null else sampleCardFit(maxWidth - PeekRoom - CardPadding * 2 - CapDx, maxHeight)
-        Column {
-            Row(Modifier.fillMaxWidth().weight(1f)) {
-                PadsPeek(onClose, Modifier.width(PeekWidth).fillMaxHeight())
-                Spacer(Modifier.width(PeekGap))
-                CardFace(Modifier.weight(1f).fillMaxHeight()) {
-                    if (fit != null) {
-                        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(CardGap)) {
-                            if (fit.display > 0.dp) SampleDisplay(ui, still, Modifier.fillMaxWidth().height(fit.display))
-                            SampleControls(ui, haptics, fit.controls, fit.knob)
-                            pads(Modifier.fillMaxWidth().weight(1f))
-                        }
-                    } else {
-                        SidewaysFace(ui, haptics, still, pads)
-                    }
-                }
+internal fun SamplePanelFace(ui: SampleUi, panel: SamplePanel, fit: SamplePanelFit?, haptics: Boolean, still: Boolean, modifier: Modifier = Modifier) {
+    val display = Modifier.fadeIn { panel.display }
+    val rows = { second: Boolean -> Modifier.fadeIn { panel.row(second) } }
+    if (fit != null) {
+        PanelFace(modifier.widthIn(max = PanelWidthMax).fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(PanelGap)) {
+                if (fit.display > 0.dp) SampleDisplay(ui, still, display.fillMaxWidth().height(fit.display))
+                SampleControls(ui, haptics, fit.controls, fit.knob, rows)
             }
-            if (fit?.caption == true) {
-                Caption(MirrorText.SAMPLE_TAG, Modifier.padding(start = PeekRoom, top = CaptionRow - CaptionLine))
+        }
+        return
+    }
+    PanelFace(modifier.fillMaxSize()) {
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val controls = if (maxWidth >= ControlsRowsMin) SampleControls.ROWS else SampleControls.NARROW
+            val bars = if (controls == SampleControls.NARROW) BarsNarrow else BarsWidth
+            val knob = minOf(((maxWidth - bars - ControlGap * 2) / 2 - KnobText).coerceAtLeast(KnobInline), SampleKeyHeight)
+            // Less the caps' edges under the two rows, so the display leaves the controls all their height.
+            val room = maxHeight - controlsHeight(controls, knob) - PanelGap - CapDy * 2
+            val height = if (room < SideDisplayMin) 0.dp else room.coerceAtMost(SideDisplayMax)
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(PanelGap)) {
+                if (height > 0.dp) SampleDisplay(ui, still, display.fillMaxWidth().height(height))
+                SampleControls(ui, haptics, controls, knob, rows)
             }
         }
     }
 }
 
-/** The caption's own line, the rest of [CaptionRow] its gap. */
-private val CaptionLine = 17.dp
-
-/**
- * The SAMPLE card on its side: the display and the controls a column on the
- * left, as wide as the pads leave ([SideColumnMin] to [SideColumnMax]; it
- * scrolls when short), the caption under them, the pads on the right. Too
- * short for the display over the controls, the display and caption go
- * (SAMPLE's line, in the top bar or over the card, says it all).
- */
-@Composable
-private fun SidewaysFace(ui: SampleUi, haptics: Boolean, still: Boolean, pads: @Composable (Modifier) -> Unit) {
-    BoxWithConstraints(Modifier.fillMaxSize()) {
-        // The pads as big as the height lets them be, four across with the group keys; the column the rest.
-        val u = (maxHeight - CapDy - 2.dp) / KO_BARE_HIGH
-        val deckW = u * (4 * KO_BARE_WIDE - 0.215f) + CapDx + 2.dp
-        val column = (maxWidth - CardGap - deckW).coerceIn(SideColumnMin, SideColumnMax)
-        val controls = if (column >= ControlsRowsMin) SampleControls.ROWS else SampleControls.NARROW
-        val bars = if (controls == SampleControls.NARROW) BarsNarrow else BarsWidth
-        val knob = minOf(((column - bars - ControlGap * 2) / 2 - KnobText).coerceAtLeast(KnobInline), SampleKeyHeight)
-        val room = maxHeight - controlsHeight(controls, knob) - CardGap * 2 - CaptionLine
-        val display = if (room < SideDisplayMin) 0.dp else room.coerceAtMost(SideDisplayMax)
-        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(CardGap)) {
-            Column(
-                Modifier.width(column).fillMaxHeight().verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(CardGap),
-            ) {
-                if (display > 0.dp) SampleDisplay(ui, still, Modifier.fillMaxWidth().height(display))
-                SampleControls(ui, haptics, controls, knob)
-                // On the card's pale face in both themes.
-                if (display > 0.dp) Caption(MirrorText.SAMPLE_TAG, color = LightArcColors.graphite)
-            }
-            pads(Modifier.weight(1f).fillMaxHeight())
-        }
-    }
+/** [this] faded in and slid down [FadeSlide] as far as [shown] says (0..1, read as it draws). */
+private fun Modifier.fadeIn(shown: () -> Float): Modifier = graphicsLayer {
+    val p = shown()
+    alpha = p
+    translationY = -FadeSlide.toPx() * (1f - p)
 }
 
-/** The SAMPLE card's face: the K.O. II's pale body, its edge below and to the right, as the pads card's. */
+/** The SAMPLE panel's face: the K.O. II's pale body, its edge below and to the right, as the pads' body's. */
 @Composable
-private fun CardFace(modifier: Modifier, content: @Composable BoxScope.() -> Unit) {
+private fun PanelFace(modifier: Modifier, content: @Composable BoxScope.() -> Unit) {
     val ko = LocalHwColors.current.ko
     Box(
         modifier
             .drawBehind {
-                drawRoundRect(ko.edge, topLeft = Offset(CapDx.toPx(), CapDy.toPx()), size = Size(size.width - CapDx.toPx(), size.height - CapDy.toPx()), cornerRadius = CornerRadius(CardCorner.toPx()))
+                drawRoundRect(ko.edge, topLeft = Offset(CapDx.toPx(), CapDy.toPx()), size = Size(size.width - CapDx.toPx(), size.height - CapDy.toPx()), cornerRadius = CornerRadius(PanelCorner.toPx()))
             }
             .padding(end = CapDx, bottom = CapDy)
-            .clip(RoundedCornerShape(CardCorner))
+            .clip(RoundedCornerShape(PanelCorner))
             .background(ko.body)
-            .padding(CardPadding),
+            .padding(PanelPadding),
         content = content,
     )
 }
 
 /**
- * The SAMPLE card's display, dark as the device's: the source's chip, the
+ * The SAMPLE panel's display, dark as the device's: the source's chip, the
  * input's meter (its threshold's mark and clip light in orange) and the
  * take's time against its longest (or the wait, the count-in, the upload, or
  * "Disk low"); under them the wave ([SampleWave]). A screen reader hears the
@@ -615,7 +604,7 @@ private val StepKeyWidth = 44.dp
 private val SourceWidth = 60.dp
 private val SourceWidthFill = 44.dp
 
-/** The source's window filling a wide row (a tablet's card) stops here, the rest a gap before STEREO. */
+/** The source's window filling a wide row (a tablet's panel) stops here, the rest a gap before LATCH. */
 private val SourceWidthMax = 128.dp
 
 /** The smallest type the source window takes where it fills a narrow row. */
@@ -640,7 +629,7 @@ private val StatusMin = 11.sp
 
 
 /**
- * The display line while the SAMPLE card is open, lit signal orange as
+ * The display line while the SAMPLE panel is open, lit signal orange as
  * EDIT's is: SAMPLE and the source ("RSP ST"), the input's meter, and what
  * happens next ([sampleStatus]) on one line, its type smaller where it is
  * long; a polite live region at most once a second. [compact]: one bar
@@ -700,7 +689,7 @@ internal fun SampleLine(ui: SampleUi, modifier: Modifier = Modifier, compact: Bo
 }
 
 /**
- * The input's meter, on SAMPLE's line and the card's display: [METER_SEGMENTS]
+ * The input's meter, on SAMPLE's line and the panel's display: [METER_SEGMENTS]
  * segments in [ink] lit up to [level] (0..1, read as it draws), a tick in
  * [accent] at the threshold ([mark], the same scale; null for none) and a
  * light at the end that comes on in [accent] when the input [clip]s. Each
@@ -761,44 +750,48 @@ private fun SampleMeter(level: () -> Float, clip: () -> Boolean, mark: Float?, s
 }
 
 /**
- * The SAMPLE card's controls, as the K.O. II's dark keys and knobs on its
+ * The SAMPLE panel's controls, as the K.O. II's dark keys and knobs on its
  * face: − and + either side of the source's window (the device's −/+),
  * STEREO, LATCH (STOP while a hands-free take goes on), KNOB X LEVEL
  * (orange, the input's gain), KNOB Y THRESH (black, Off at its left end,
  * then −60 to 0 dB) [knob] big, and BARS (a tap steps Free, 1, 2, 4, 8, 16),
- * laid out as [layout] says. The USB source adds a line saying it is
- * experimental. The knobs hold the finger from its first touch, so nothing
- * under them scrolls or turns the card.
+ * laid out as [layout] says, each row with [rows] (the second's
+ * modifier where `second`). The USB source adds a line saying it is
+ * experimental, with the second row. The knobs hold the finger from its first touch, so nothing
+ * under them scrolls or closes the panel.
  */
 @Composable
-private fun SampleControls(ui: SampleUi, haptics: Boolean, layout: SampleControls, knob: Dp) {
-    // The card's face is the K.O. II's pale body in both themes: the knobs' words and the USB note in
+private fun SampleControls(ui: SampleUi, haptics: Boolean, layout: SampleControls, knob: Dp, rows: (second: Boolean) -> Modifier) {
+    // The panel's face is the K.O. II's pale body in both themes: the knobs' words and the USB note in
     // the light theme's inks, so they read on it in the dark one too.
-    CompositionLocalProvider(LocalArcColors provides LightArcColors) { ControlsOnFace(ui, haptics, layout, knob) }
+    CompositionLocalProvider(LocalArcColors provides LightArcColors) { ControlsOnFace(ui, haptics, layout, knob, rows) }
 }
 
-/** [SampleControls], in the inks of the card's face. */
+/** [SampleControls], in the inks of the panel's face. */
 @Composable
-private fun ControlsOnFace(ui: SampleUi, haptics: Boolean, layout: SampleControls, knob: Dp) {
+private fun ControlsOnFace(ui: SampleUi, haptics: Boolean, layout: SampleControls, knob: Dp, rows: (second: Boolean) -> Modifier) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(ControlGap)) {
         when (layout) {
             SampleControls.ROWS -> {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(ControlGap)) {
-                    SourceKeys(ui, haptics, Modifier.weight(1f), fill = true)
-                    StereoKey(ui, haptics)
+                Row(rows(false).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(ControlGap)) {
+                    // STEREO straight after +; what a wide row (a tablet's) has over is a gap before LATCH.
+                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(ControlGap)) {
+                        SourceKeys(ui, haptics, Modifier.weight(1f, fill = false), fill = true)
+                        StereoKey(ui, haptics)
+                    }
                     LatchKey(ui, haptics, Modifier.width(LatchWidth))
                 }
-                KnobRow(ui, haptics, knob)
+                KnobRow(ui, haptics, knob, rows(true))
             }
             SampleControls.NARROW -> {
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(ControlGap)) {
+                Row(rows(false).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(ControlGap)) {
                     SourceKeys(ui, haptics, Modifier.weight(1f), fill = true)
                     LatchKey(ui, haptics, Modifier.width(BarsNarrow))
                 }
-                KnobRow(ui, haptics, knob, narrow = true)
+                KnobRow(ui, haptics, knob, rows(true), narrow = true)
             }
             SampleControls.LINE -> Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                rows(false).fillMaxWidth().horizontalScroll(rememberScrollState()),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(ControlGap),
             ) {
@@ -810,15 +803,15 @@ private fun ControlsOnFace(ui: SampleUi, haptics: Boolean, layout: SampleControl
                 BarsKey(ui, haptics, Modifier.width(BarsWidth))
             }
         }
-        if (ui.state.input.source == SampleSource.USB) UsbNote()
+        if (ui.state.input.source == SampleSource.USB) UsbNote(rows(true))
     }
 }
 
 /** KNOB X and KNOB Y, [knob] big, their names and values beside them, then BARS ([narrow]: its choice alone). */
 @Composable
-private fun KnobRow(ui: SampleUi, haptics: Boolean, knob: Dp, narrow: Boolean = false) {
+private fun KnobRow(ui: SampleUi, haptics: Boolean, knob: Dp, modifier: Modifier, narrow: Boolean = false) {
     Row(
-        Modifier.fillMaxWidth().heightIn(min = SampleKeyHeight),
+        modifier.fillMaxWidth().heightIn(min = SampleKeyHeight),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(ControlGap),
     ) {
@@ -828,11 +821,15 @@ private fun KnobRow(ui: SampleUi, haptics: Boolean, knob: Dp, narrow: Boolean = 
     }
 }
 
-/** The line under the SAMPLE card's controls saying USB sampling is experimental, in two lines of small type. */
+/** The USB note's type, and its lines' height ([usbNoteRoom] keeps room for two). */
+private val UsbNoteSize = 12.sp
+private val UsbNoteLine = 15.sp
+
+/** The line under the SAMPLE panel's controls saying USB sampling is experimental, in two lines of small type. */
 @Composable
-private fun UsbNote() {
+private fun UsbNote(modifier: Modifier) {
     val c = LocalArcColors.current
-    Text(MirrorText.USB_EXPERIMENTAL, style = ArcType.tiny.copy(fontSize = 12.sp, lineHeight = 1.25.em), color = c.graphite, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    Text(MirrorText.USB_EXPERIMENTAL, modifier, style = ArcType.tiny.copy(fontSize = UsbNoteSize, lineHeight = UsbNoteLine), color = c.graphite, maxLines = 2, overflow = TextOverflow.Ellipsis)
 }
 
 /**
@@ -852,7 +849,7 @@ private fun SourceKeys(ui: SampleUi, haptics: Boolean, modifier: Modifier = Modi
         Box(
             Modifier
                 // Its own width but where it fills (a weight in a row scrolling sideways would leave it none),
-                // and then no wider than SourceWidthMax: the rest of a wide row is a gap after +.
+                // and then no wider than SourceWidthMax: the rest of a wide row is a gap after the keys.
                 .then(
                     if (fill) {
                         Modifier.weight(1f, fill = false).widthIn(min = SourceWidthFill, max = SourceWidthMax).fillMaxWidth()
@@ -967,13 +964,13 @@ private fun LatchKey(ui: SampleUi, haptics: Boolean, modifier: Modifier = Modifi
     }
 }
 
-/** A word on one of the SAMPLE card's keys, in the function keys' print. */
+/** A word on one of the SAMPLE panel's keys, in the function keys' print. */
 @Composable
 private fun SampleKeyWord(word: String, ink: Color) {
     Text(word.uppercase(), style = viewWordStyle(10.5.dp, 0.08f), color = ink, maxLines = 1, softWrap = false)
 }
 
-/** A SAMPLE card key's LED, lit while [on]. */
+/** A SAMPLE panel key's LED, lit while [on]. */
 @Composable
 private fun SampleKeyLed(on: Boolean) {
     val c = LocalArcColors.current
@@ -985,7 +982,7 @@ private fun SampleKeyLed(on: Boolean) {
 }
 
 /**
- * One of the SAMPLE card's keys: a dark cap, down while pressed, with [content]
+ * One of the SAMPLE panel's keys: a dark cap, down while pressed, with [content]
  * on it (handed the cap's ink); a light tick as it goes down ([haptics]). A screen
  * reader hears [description], and [toggled] for a switch ([role]), with
  * [note] after its state where given (what LATCH on does).

@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
-/** SAMPLE's line, card and pad lights: what they say and how they lay out. */
+/** SAMPLE's line, panel and pad lights: what they say and how they lay out. */
 class LiveSamplerTest {
     private val pad = PhysicalPad(0, 2)
     private val other = PhysicalPad(1, 9)
@@ -100,27 +100,38 @@ class LiveSamplerTest {
     }
 
     @Test
-    fun `the upright card keeps the pads a finger wide, giving up the big knobs, the caption, the display, then a row`() {
-        // A Pixel 7's card: two rows of controls, the knobs as big as the row lets them be, the caption under it.
-        val roomy = sampleCardFit(311.dp, 497.dp)
+    fun `the upright panel keeps the pads a finger wide, giving up its display, the big knobs, then a row`() {
+        // A Pixel 7's: two rows of controls, the knobs at their biggest, the display over them.
+        val roomy = samplePanelFit(353.dp, 609.dp)
         assertEquals(SampleControls.ROWS, roomy.controls)
-        assertTrue(roomy.knob > 44.dp)
-        assertTrue(roomy.caption)
-        assertEquals(80.dp, roomy.display)
-        // A tablet's: the display grows, up to its most, and the knobs to theirs.
-        assertEquals(140.dp, sampleCardFit(480.dp, 900.dp).display)
-        assertEquals(56.dp, sampleCardFit(480.dp, 900.dp).knob)
-        // Shorter: the knobs a key tall and no caption, the display kept.
-        val short = sampleCardFit(311.dp, 445.dp)
-        assertEquals(44.dp, short.knob)
-        assertFalse(short.caption)
-        assertEquals(80.dp, short.display)
-        // A small phone's: narrow controls (STEREO left to -/+), no display (SAMPLE's line says it all).
-        val small = sampleCardFit(258.dp, 400.dp)
+        assertEquals(56.dp, roomy.knob)
+        assertEquals(96.dp, roomy.display)
+        // The scrolling page always has room for the display.
+        assertEquals(96.dp, samplePanelFit(353.dp, null).display)
+        // A small phone's: narrow controls (STEREO left to -/+) and no display (SAMPLE's line says it all).
+        val small = samplePanelFit(301.dp, 444.dp)
         assertEquals(SampleControls.NARROW, small.controls)
         assertEquals(0.dp, small.display)
-        // Shorter still: one row that scrolls.
-        assertEquals(SampleControls.LINE, sampleCardFit(258.dp, 330.dp).controls)
-        assertEquals(SampleControls.LINE, sampleCardFit(258.dp, 200.dp).controls)
+        assertTrue(small.knob > 30.dp)
+        // Shorter: the knobs a key tall, then one row that scrolls.
+        assertEquals(44.dp, samplePanelFit(353.dp, 400.dp).knob)
+        assertEquals(SampleControls.LINE, samplePanelFit(301.dp, 360.dp).controls)
+        // The panel's height as laid out: padding, edge, display, gap and the two rows.
+        assertEquals(12.dp * 2 + 3.dp + 96.dp + 10.dp + 44.dp + 6.dp + 56.dp, panelHeight(roomy))
+    }
+
+    @Test
+    fun `the USB note under the controls counts against the pads' room`() {
+        // Room for the display over the pads, but not with the note's two lines under the controls as well.
+        assertEquals(96.dp, samplePanelFit(353.dp, 530.dp).display)
+        assertEquals(0.dp, samplePanelFit(353.dp, 530.dp, note = 36.dp).display)
+        assertEquals(panelHeight(samplePanelFit(353.dp, null)) + 36.dp, panelHeight(samplePanelFit(353.dp, null), note = 36.dp))
+    }
+
+    @Test
+    fun `on its side the panel takes what the pads leave, within its least and most`() {
+        assertEquals(380.dp, sidePanelWidth(800.dp, 310.dp))
+        assertEquals(300.dp, sidePanelWidth(600.dp, 300.dp))
+        assertEquals(240.dp, sidePanelWidth(450.dp, 300.dp))
     }
 }

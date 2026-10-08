@@ -88,7 +88,7 @@ data class AppSettings(
 /** SAMPLE's LEVEL for the phone's mic until one is chosen, in dB. */
 const val SAMPLE_GAIN_MIC = 12f
 
-/** The LEVEL knob's range, in dB, as the SAMPLE card's KNOB X turns it. */
+/** The LEVEL knob's range, in dB, as the SAMPLE panel's KNOB X turns it. */
 val SAMPLE_GAINS = -12f..30f
 
 /** The threshold knob's range in dBFS, below Off. */

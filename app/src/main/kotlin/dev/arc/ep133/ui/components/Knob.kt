@@ -71,7 +71,7 @@ private const val FINE_SPEED = 0.12f
  * value, [onDone] the finger lifting. With [haptics], each step ticks.
  * Screen readers hear it as a range they can set ([description], [readout]).
  * [enabled] false dims it and stops it turning. [inline]: the label over
- * the value beside the knob, for a row one key tall (the SAMPLE card's).
+ * the value beside the knob, for a row one key tall (the SAMPLE panel's).
  */
 @Composable
 fun Knob(

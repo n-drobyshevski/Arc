@@ -22,7 +22,7 @@ object CoachText {
     /** Live's function keys beside MODE (now the KEYS key). */
     const val PROJECT = "Next project: tap; hold + pad 1–9 to pick"
     const val TEMPO = "Click: tap; hold for tempo"
-    /** The SAMPLE card, a swipe from right to left on Live's pads (its sliver peeks in at their edge). */
+    /** The SAMPLE panel, a swipe from right to left on Live's pads (its sliver peeks in at their edge). */
     const val SAMPLE = "Sample: swipe the pads left"
     const val OCTAVE = "Octave"
     const val SCALE = "Scale"

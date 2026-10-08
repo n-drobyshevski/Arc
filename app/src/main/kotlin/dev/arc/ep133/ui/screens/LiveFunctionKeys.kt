@@ -70,6 +70,7 @@ import dev.arc.ep133.ui.components.cap
 import dev.arc.ep133.ui.components.capPress
 import dev.arc.ep133.ui.components.coachMark
 import dev.arc.ep133.ui.theme.LocalArcColors
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 
 /*
@@ -110,7 +111,7 @@ internal class ProjectHold {
         if (long) fn.onPickProject() else fn.onProject()
     }
 
-    /** PROJECT's press slid off or was taken by a scroll: nothing. */
+    /** PROJECT's press slid off, was taken by a scroll, or went with its key (the SAMPLE panel over it): nothing. */
     fun cancel() {
         held = false
     }
@@ -424,7 +425,15 @@ private fun FunctionKey(
                     val press = PressInteraction.Press(first.position)
                     source.tryEmit(press)
                     hold.down()
-                    val up = waitForUpOrCancellation()
+                    val up = try {
+                        waitForUpOrCancellation()
+                    } catch (gone: CancellationException) {
+                        // The key left the page while held (the SAMPLE panel unrolled over it): no lift
+                        // will come, and PROJECT mustn't stay held, taking the pads' presses.
+                        source.tryEmit(PressInteraction.Cancel(press))
+                        hold.cancel()
+                        throw gone
+                    }
                     if (up != null) {
                         source.tryEmit(PressInteraction.Release(press))
                         hold.up(up.uptimeMillis - first.uptimeMillis >= viewConfiguration.longPressTimeoutMillis, fnNow ?: fn)

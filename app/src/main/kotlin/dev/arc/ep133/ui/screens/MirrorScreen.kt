@@ -105,6 +105,7 @@ import dev.arc.ep133.features.PadLight
 import dev.arc.ep133.features.PadNotes
 import dev.arc.ep133.features.PadOrder
 import dev.arc.ep133.features.PhysicalPad
+import dev.arc.ep133.features.SampleSource
 import dev.arc.ep133.features.Keys
 import dev.arc.ep133.features.NoteEvent
 import dev.arc.ep133.features.NoteTouches
@@ -160,6 +161,7 @@ import dev.arc.ep133.ui.components.ArcWindow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.CompositionLocalProvider
 import kotlinx.coroutines.flow.StateFlow
 import dev.arc.ep133.ui.theme.ArcType
 import dev.arc.ep133.ui.theme.LocalArcColors
@@ -350,10 +352,10 @@ fun MirrorScreen(
     functions: FunctionKeysUi = FunctionKeysUi(),
     /**
      * SAMPLE (an addition; null for none): on the Live tab in PADS, the
-     * SAMPLE card beside the pads card, a swipe away ([LiveCards]). While
-     * it is open SAMPLE mode is on: its line stands in for the display line,
-     * a pad held on the card records into it, and its pads light as the
-     * EP-133's do in the mode.
+     * SAMPLE panel a swipe on the pads unrolls in the function keys' place
+     * ([SampleSlot]). While it is open SAMPLE mode is on: its line stands in
+     * for the display line, a pad held records into it, and the pads light
+     * as the EP-133's do in the mode.
      */
     sample: SampleUi? = null,
 ) {
@@ -362,10 +364,10 @@ fun MirrorScreen(
     val keysNow = soundingKeys(keys, sounding)
     val c = LocalArcColors.current
     val window = LocalArcWindow.current
-    // The SAMPLE card beside the pads card: on the Live tab, in PADS.
-    val cardsOn = sample != null && onBack == null && !keys.on
-    // SAMPLE mode, the card open: its line in the display line's place, the card's pads recording.
-    val sampling = cardsOn && sample?.state?.on == true
+    // The SAMPLE panel in the function keys' place: on the Live tab, in PADS.
+    val panelOn = sample != null && onBack == null && !keys.on
+    // SAMPLE mode, the panel open: its line in the display line's place, the pads recording.
+    val sampling = panelOn && sample?.state?.on == true
     // EDIT works on the pads only, and only on the Live tab (where the tab is); SAMPLE's pads record instead.
     val editing = edit.on && edit.onEdit != null && !keys.on && onBack == null && !sampling
     val onEdit = if (editing) edit.onPad else null
@@ -427,25 +429,33 @@ fun MirrorScreen(
         null
     }
     if (sampling && sample != null) SampleHaptics(sample.state, haptics, held = { it in samplePressed }, bpm = mirror?.state?.bpm ?: functions.bpm.toDouble())
-    // Live's two cards, wherever the layout below puts them: the pads card and the SAMPLE card.
-    val turn = remember { CardTurn(sample?.turn ?: if (sampling) 1f else 0f, fixed = sample?.turn != null) }
-    val cardsScope = androidx.compose.runtime.rememberCoroutineScope()
+    // The SAMPLE panel, wherever the layout below puts the function keys.
+    val panel = remember { SamplePanel(sample?.unroll ?: if (sampling) 1f else 0f, fixed = sample?.unroll != null) }
+    val panelScope = androidx.compose.runtime.rememberCoroutineScope()
     val reduceMotion = reducedMotion()
-    // The mode alone, for a swipe that has set the cards going itself (at the finger's speed).
-    val openMode = { sample?.onOpen?.invoke(); Unit }
-    val closeMode = { sample?.onClose?.invoke(); Unit }
-    // A peek's tap or Back: the cards turn, and the mode follows.
-    val openCard = {
-        cardsScope.launch { turn.settle(1f, reduce = reduceMotion) }
-        openMode()
+    val feel = LocalHapticFeedback.current
+    // A swipe, the peek's tap, the handle or Back: the panel unrolls or rolls up with a tick, and the mode follows.
+    val openPanel = {
+        if (sample != null && !panel.open) {
+            if (haptics) feel.performHapticFeedback(HapticFeedbackType.SegmentTick)
+            panelScope.launch { panel.go(true, reduceMotion) }
+            sample.onOpen()
+        }
     }
-    val closeCard = {
-        cardsScope.launch { turn.settle(0f, reduce = reduceMotion) }
-        closeMode()
+    val closePanel = {
+        if (sample != null && panel.open) {
+            if (haptics) feel.performHapticFeedback(HapticFeedbackType.SegmentTick)
+            panelScope.launch { panel.go(false, reduceMotion) }
+            sample.onClose()
+        }
     }
-    // KEYS (or another tab's MirrorScreen) has no cards: back on the pads, the pads card is in front.
-    LaunchedEffect(cardsOn) {
-        if (!cardsOn && turn.page != 0f) turn.settle(0f, reduce = true)
+    // The mode turned off another way (the tab, a sheet), or KEYS, which has no panel: it rolls up (at once
+    // for KEYS, off the page). Turned on another way, it unrolls. A swipe has set it going already.
+    LaunchedEffect(sampling, panelOn) {
+        when {
+            !panelOn -> if (panel.open) panel.go(false, reduce = true)
+            sampling != panel.open -> panel.go(sampling, reduceMotion)
+        }
     }
     val stillSample = fixedNow != null || sample?.still == true
     val editPad = onEdit?.let { f ->
@@ -485,7 +495,6 @@ fun MirrorScreen(
     val reportRange by androidx.compose.runtime.rememberUpdatedState(onPianoRange)
     DisposableEffect(Unit) { onDispose { reportRange(null) } }
     BoxWithConstraints(Modifier.fillMaxSize().background(c.shell), contentAlignment = Alignment.TopCenter) {
-        val pageH = maxHeight
         // The room the page gets between its gutters (the bars above and below are already off),
         // less the display line when it is on the page.
         val safe = WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal).asPaddingValues()
@@ -514,352 +523,349 @@ fun MirrorScreen(
         val padW = ((roomW - SideFunctions - SideControlsGap - 42.dp) / 4 - 2.dp) / 3
         val allGroupsSideways = sideways && minOf((roomH + ControlsRow - caption - 3.dp) / 4, padW) >= 40.dp &&
             roomH + ControlsRow >= FunctionColumnLed
-        // Back turns the SAMPLE card back to the pads (Live tools, open over it, close first: their Back comes
-        // later). Not while a sheet is open over Live: its Back was there first, so this one would win.
-        BackHandler(enabled = cardsOn && sample?.sheetOpen != true && (sampling || turn.page == 1f)) { closeCard() }
-        SideZone(
-            open = toolsOpen,
-            onOpen = { toolsOpen = true },
-            onClose = { toolsOpen = false },
-            title = MirrorText.TOOLS,
-            panel = {
-                FactoryRow(mirror, onGetFactory)
-                OfflinePadsRow(offlinePads, onResetPads)
-                if (keys.on) {
-                    KeysPanel(keys, keysActions, piano = piano != null)
-                    if (rec.onRec != null) TakesSection(takes)
-                } else {
-                    GridPlate {
-                        SettingRow(MirrorText.VIEW, stacked = true) {
-                            Segmented(
-                                listOf(MirrorText.ALL_GROUPS, MirrorText.ONE_GROUP),
-                                selected = if (oneGroup) 1 else 0,
-                                onSelect = { onOneGroup(it == 1) },
-                                compact = true,
+        // Back rolls the SAMPLE panel up (Live tools, open over it, close first: their Back comes later). Not
+        // while a sheet is open over Live: its Back was there first, so this one would win.
+        BackHandler(enabled = panelOn && sample?.sheetOpen != true && panel.open) { closePanel() }
+        // The pads hear of a finger the SAMPLE panel's swipe took ([holdToPlay]).
+        CompositionLocalProvider(LocalSamplePanel provides panel) {
+            SideZone(
+                open = toolsOpen,
+                onOpen = { toolsOpen = true },
+                onClose = { toolsOpen = false },
+                title = MirrorText.TOOLS,
+                panel = {
+                    FactoryRow(mirror, onGetFactory)
+                    OfflinePadsRow(offlinePads, onResetPads)
+                    if (keys.on) {
+                        KeysPanel(keys, keysActions, piano = piano != null)
+                        if (rec.onRec != null) TakesSection(takes)
+                    } else {
+                        GridPlate {
+                            SettingRow(MirrorText.VIEW, stacked = true) {
+                                Segmented(
+                                    listOf(MirrorText.ALL_GROUPS, MirrorText.ONE_GROUP),
+                                    selected = if (oneGroup) 1 else 0,
+                                    onSelect = { onOneGroup(it == 1) },
+                                    compact = true,
+                                )
+                            }
+                            if (oneGroup) {
+                                PlateLine()
+                                SwitchRow(MirrorText.FOLLOW, MirrorText.FOLLOW_NOTE, follow, onFollow)
+                            }
+                        }
+                        KeysMonitor(st, keys.names)
+                        if (rec.onRec != null) TakesSection(takes)
+                        Notes(st, mirror, tapToPlay = onPad != null, sideways = sideways)
+                    }
+                },
+                // On its side the strip keeps to the edge's upper part, clear of where the white keys are struck.
+                stripAlignment = if (sideways) Alignment.TopEnd else Alignment.CenterEnd,
+                stripHeight = if (sideways) 0.4f else 0.5f,
+            ) {
+                // Sideways: no width cap, and down to the bottom edge with only a small margin, so
+                // nothing but the keys is under a finger striking low.
+                val sidewaysColumn = Modifier
+                    .windowInsetsPadding(WindowInsets.safeDrawing)
+                    .fillMaxSize()
+                    .padding(start = startGutter, end = endGutter, bottom = SidewaysBottom)
+                // The display line on the page (not in the top bar): SAMPLE's while its panel is open.
+                val padsLine: @Composable () -> Unit = {
+                    if (sampling && sample != null) {
+                        SampleLine(sample, still = stillSample)
+                    } else if (editing) {
+                        EditLine()
+                    } else {
+                        DisplayStrip(st, mirror, rec, still = fixedNow != null, wireless = wireless)
+                    }
+                }
+                // The function keys' place: the keys, or the SAMPLE panel unrolled there ([fit] upright, null on its
+                // side, where it is [side] wide and has its handle only where the column is tall enough for it and
+                // the controls), as far along as [panel] is.
+                val functionSlot: @Composable (Modifier, SamplePanelFit?, Dp?, @Composable () -> Unit) -> Unit = { m, fit, side, fnKeys ->
+                    if (sample == null || !panelOn) {
+                        Box(m) { fnKeys() }
+                    } else {
+                        val handle = side == null || roomH + ControlsRow >= sidePanelHeight(side) + HandleRow
+                        SampleSlot(panel, closePanel, m, sideways = side, handle = handle, keys = fnKeys) {
+                            SamplePanelFace(sample, panel, fit, haptics, stillSample)
+                        }
+                    }
+                }
+                // The pads' swipe that opens and closes the panel, the pads under it hearing of a finger it took.
+                val swipe = if (panelOn) panelSwipe(panel, openPanel, closePanel) else Modifier
+                // The SAMPLE panel's sliver at the pads' edge, where it can open.
+                val peek: (@Composable () -> Unit)? = if (panelOn) ({ SamplePeek(openPanel) }) else null
+                if (piano != null) {
+                    Column(sidewaysColumn) {
+                        if (!inBar) {
+                            KeysDisplay(st, mirror, keysNow, rec, still = fixedNow != null, pianoRange = piano)
+                            Spacer(Modifier.height(10.dp))
+                        }
+                        // A tablet's function keys, then the row over the piano and the piano; upright
+                        // they sit right under the display line, as on the web. The short sideways
+                        // piano keeps its mode word instead, for the keys' height.
+                        if (pianoFunctions) {
+                            FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
+                            Spacer(Modifier.height(10.dp))
+                        }
+                        Column(Modifier.weight(1f, fill = false)) {
+                            ModeRow(keys, keysActions, landscape = true, viewSwitch = viewSwitch, mode = !pianoFunctions)
+                            // The rest of the room; on a tablet no taller than a hand spans.
+                            PianoKeyboard(
+                                piano, st, keysNow, clock, keysActions,
+                                Modifier
+                                    .fillMaxWidth()
+                                    .weight(1f, fill = false)
+                                    .then(if (window.short) Modifier else Modifier.heightIn(max = PianoMaxTablet))
+                                    .coachMark("live.keys", CoachText.PIANO, CoachYellow, CoachYellowInk),
+                                haptics = haptics,
                             )
                         }
-                        if (oneGroup) {
-                            PlateLine()
-                            SwitchRow(MirrorText.FOLLOW, MirrorText.FOLLOW_NOTE, follow, onFollow)
+                    }
+                } else if (sideways && !keys.on && oneGroup) {
+                    val now = clock()
+                    BoxWithConstraints(sidewaysColumn, contentAlignment = Alignment.TopCenter) {
+                        // The K.O. II's body as big as the room under the display line, the function
+                        // keys a column on its left (the group keys are the body's own first column).
+                        val gridH = maxHeight - (if (inBar) 0.dp else DisplayLineHeight + 10.dp)
+                        val k = KoGeom.fit(maxWidth - SideFunctions - SideControlsGap, gridH, 4)
+                        val bodyW = k.u * (4 * 1.215f + 0.401f) + CapDx + 2.dp
+                        val columnW = minOf(maxWidth, SideFunctions + SideControlsGap + bodyW)
+                        val body: @Composable (Modifier, (@Composable () -> Unit)?) -> Unit = { m, sliver ->
+                            Group(
+                                group, st, nameOf, now,
+                                m.coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
+                                big = true,
+                                onPad = padPress,
+                                onPadKept = padKept,
+                                onPadUp = padUp,
+                                onPadCut = padCut,
+                                playingPads = ringed,
+                                onEdit = editPad,
+                                haptics = haptics,
+                                onSelectGroup = { group = it },
+                                sampling = padSampling,
+                                peek = sliver,
+                            )
+                        }
+                        val fnColumn: @Composable () -> Unit = { FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey) }
+                        if (!panelOn) {
+                            Column(Modifier.width(columnW).fillMaxHeight()) {
+                                if (!inBar) {
+                                    padsLine()
+                                    Spacer(Modifier.height(10.dp))
+                                }
+                                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(SideControlsGap)) {
+                                    fnColumn()
+                                    body(Modifier.width(bodyW).fillMaxHeight(), null)
+                                }
+                            }
+                        } else {
+                            // The panel in the column's place, as wide as the body (as tall as the room lets it be, the
+                            // peek beside it) leaves it; the column widens to it as it unrolls and the body narrows.
+                            val deckW = koDeckWidth(gridH, 4) + PeekRoom
+                            val sideW = sidePanelWidth(maxWidth - SideControlsGap, deckW)
+                            val closedW = minOf(maxWidth, columnW + PeekRoom)
+                            val openW = minOf(maxWidth, sideW + SideControlsGap + deckW)
+                            Column(Modifier.unrollWidth(panel, closedW, openW).fillMaxHeight()) {
+                                if (!inBar) {
+                                    padsLine()
+                                    Spacer(Modifier.height(10.dp))
+                                }
+                                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(SideControlsGap)) {
+                                    functionSlot(Modifier.fillMaxHeight(), null, sideW, fnColumn)
+                                    body(Modifier.weight(1f).fillMaxHeight().then(swipe), peek)
+                                }
+                            }
                         }
                     }
-                    KeysMonitor(st, keys.names)
-                    if (rec.onRec != null) TakesSection(takes)
-                    Notes(st, mirror, tapToPlay = onPad != null, sideways = sideways)
-                }
-            },
-            // On its side the strip keeps to the edge's upper part, clear of where the white keys are struck.
-            stripAlignment = if (sideways) Alignment.TopEnd else Alignment.CenterEnd,
-            stripHeight = if (sideways) 0.4f else 0.5f,
-        ) {
-            // Sideways: no width cap, and down to the bottom edge with only a small margin, so
-            // nothing but the keys is under a finger striking low.
-            val sidewaysColumn = Modifier
-                .windowInsetsPadding(WindowInsets.safeDrawing)
-                .fillMaxSize()
-                .padding(start = startGutter, end = endGutter, bottom = SidewaysBottom)
-            // The display line on the page (not in the top bar): SAMPLE's while its card is open.
-            val padsLine: @Composable () -> Unit = {
-                if (sampling && sample != null) {
-                    SampleLine(sample, still = stillSample)
-                } else if (editing) {
-                    EditLine()
-                } else {
-                    DisplayStrip(st, mirror, rec, still = fixedNow != null, wireless = wireless)
-                }
-            }
-            // The SAMPLE card, [side] on its side, its pads the group shown; [deckKeys]: the group keys on its
-            // deck (no row of them under it); [scrolls]: on the scrolling page, its presses unsure as a scroll's.
-            val sampleCard: @Composable (side: Boolean, deckKeys: Boolean, now: Long, scrolls: Boolean) -> Unit = { side, deckKeys, now, scrolls ->
-                if (sample != null) {
-                    SampleCard(sample, sideways = side, haptics = haptics, still = stillSample, onClose = closeCard, modifier = Modifier.fillMaxSize()) { m ->
-                        Group(
-                            group, st, nameOf, now, m,
-                            big = true,
-                            bare = true,
-                            onPad = padPress,
-                            onPadKept = padKept,
-                            onPadUp = padUp,
-                            onPadCut = padCut,
-                            playingPads = ringed,
-                            haptics = haptics,
-                            onSelectGroup = if (deckKeys) ({ g: Int -> group = g }) else null,
-                            sampling = padSampling,
-                            inScroll = scrolls,
-                        )
+                } else if (sideways && !keys.on && allGroupsSideways) {
+                    val now = clock()
+                    Column(sidewaysColumn) {
+                        if (!inBar) {
+                            padsLine()
+                            Spacer(Modifier.height(10.dp))
+                        }
+                        // The function keys on the left, then all four in one row, filling the height:
+                        // nothing to scroll, so a press plays at once.
+                        val fnColumn: @Composable () -> Unit = { FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey) }
+                        val groups: @Composable (Modifier) -> Unit = { m ->
+                            Row(m, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                for (g in 0..3) Group(g, st, nameOf, now, Modifier.weight(1f).fillMaxHeight(), fill = true, onPad = padPress, onPadKept = padKept, onPadUp = padUp, onPadCut = padCut, playingPads = ringed, onEdit = editPad, haptics = haptics, sampling = padSampling)
+                            }
+                        }
+                        if (!panelOn) {
+                            Row(Modifier.fillMaxWidth().weight(1f, fill = false), horizontalArrangement = Arrangement.spacedBy(SideControlsGap)) {
+                                fnColumn()
+                                groups(Modifier.weight(1f).heightIn(max = caption + 3.dp + padW * 4))
+                            }
+                        } else {
+                            // The panel in the column's place, the groups keeping at least three fifths of the room (their
+                            // pads, narrower, no taller than wide), the peek after them.
+                            val sideW = sidePanelWidth(roomW, roomW * 0.6f)
+                            val padOpen = ((roomW - sideW - SideControlsGap - PeekRoom - 42.dp) / 4 - 2.dp) / 3
+                            Row(Modifier.fillMaxWidth().weight(1f, fill = false), horizontalArrangement = Arrangement.spacedBy(SideControlsGap)) {
+                                functionSlot(Modifier.fillMaxHeight(), null, sideW, fnColumn)
+                                PeekRow(peek!!, Modifier.weight(1f).unrollMaxHeight(panel, caption + 3.dp + padW * 4, caption + 3.dp + padOpen * 4).then(swipe)) {
+                                    groups(Modifier.fillMaxWidth())
+                                }
+                            }
+                        }
                     }
-                }
-            }
-            // The SAMPLE card's sliver at the pads card's edge.
-            val peek: @Composable () -> Unit = { SamplePeek(openCard) }
-            if (piano != null) {
-                Column(sidewaysColumn) {
-                    if (!inBar) {
-                        KeysDisplay(st, mirror, keysNow, rec, still = fixedNow != null, pianoRange = piano)
-                        Spacer(Modifier.height(10.dp))
-                    }
-                    // A tablet's function keys, then the row over the piano and the piano; upright
-                    // they sit right under the display line, as on the web. The short sideways
-                    // piano keeps its mode word instead, for the keys' height.
-                    if (pianoFunctions) {
-                        FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
-                        Spacer(Modifier.height(10.dp))
-                    }
-                    Column(Modifier.weight(1f, fill = false)) {
-                        ModeRow(keys, keysActions, landscape = true, viewSwitch = viewSwitch, mode = !pianoFunctions)
-                        // The rest of the room; on a tablet no taller than a hand spans.
-                        PianoKeyboard(
-                            piano, st, keysNow, clock, keysActions,
+                } else if (oneGroup || keys.on) {
+                    val now = clock()
+                    // One group (or the keys) fills the screen without scrolling: the display line, the grid
+                    // (its rows share whatever height is left) and the group keys.
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                        Column(
                             Modifier
-                                .fillMaxWidth()
-                                .weight(1f, fill = false)
-                                .then(if (window.short) Modifier else Modifier.heightIn(max = PianoMaxTablet))
-                                .coachMark("live.keys", CoachText.PIANO, CoachYellow, CoachYellowInk),
-                            haptics = haptics,
-                        )
-                    }
-                }
-            } else if (sideways && !keys.on && oneGroup) {
-                val now = clock()
-                BoxWithConstraints(sidewaysColumn, contentAlignment = Alignment.TopCenter) {
-                    // The K.O. II's body as big as the room under the display line, the function
-                    // keys a column on its left (the group keys are the body's own first column).
-                    val gridH = maxHeight - (if (inBar) 0.dp else DisplayLineHeight + 10.dp)
-                    val k = KoGeom.fit(maxWidth - SideFunctions - SideControlsGap, gridH, 4)
-                    val bodyW = k.u * (4 * 1.215f + 0.401f) + CapDx + 2.dp
-                    val columnW = minOf(maxWidth, SideFunctions + SideControlsGap + bodyW)
-                    val padsW = minOf(maxWidth, columnW + PeekRoom)
-                    val body: @Composable (Modifier, (@Composable () -> Unit)?) -> Unit = { m, sliver ->
-                        Group(
-                            group, st, nameOf, now,
-                            m.coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
-                            big = true,
-                            onPad = padPress,
-                            onPadKept = padKept,
-                            onPadUp = padUp,
-                            onPadCut = padCut,
-                            playingPads = ringed,
-                            onEdit = editPad,
-                            haptics = haptics,
-                            onSelectGroup = { group = it },
-                            peek = sliver,
-                        )
-                    }
-                    if (!cardsOn) {
-                        Column(Modifier.width(columnW).fillMaxHeight()) {
-                            if (!inBar) {
-                                padsLine()
-                                Spacer(Modifier.height(10.dp))
+                                .windowInsetsPadding(WindowInsets.safeDrawing)
+                                // Not much wider than a phone, so a tablet's pads don't turn into long bars.
+                                .then(if (sideways) Modifier else Modifier.widthIn(max = 520.dp))
+                                .fillMaxSize()
+                                .padding(start = startGutter, end = endGutter, top = 4.dp, bottom = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            if (onBack != null) {
+                                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                                    Caption(MirrorText.TITLE)
+                                    CloseKey(onBack, dev.arc.ep133.text.GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
+                                }
                             }
-                            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(SideControlsGap)) {
-                                FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
-                                body(Modifier.width(bodyW).fillMaxHeight(), null)
-                            }
-                        }
-                    } else {
-                        // The cards across the page: the pads card is the function keys and the body (with
-                        // the SAMPLE card's sliver beside it), where they always are; the SAMPLE card takes
-                        // the page's width, the function keys turning away with the pads.
-                        Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
-                            if (!inBar) {
-                                Box(Modifier.width(columnW)) { padsLine() }
-                                Spacer(Modifier.height(10.dp))
-                            }
-                            LiveCards(
-                                turn, sampling, openMode, closeMode, haptics,
-                                Modifier.fillMaxWidth().weight(1f),
-                                pads = {
-                                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-                                        Row(Modifier.width(padsW).fillMaxHeight(), horizontalArrangement = Arrangement.spacedBy(SideControlsGap)) {
-                                            FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
-                                            body(Modifier.weight(1f).fillMaxHeight(), peek)
+                            if (keys.on && sideways) {
+                                // On its side: the keys on the K.O. II's body as big as the room, the function
+                                // keys and the view switch (turned) on their left, the scale and the octave
+                                // on their right.
+                                if (!inBar) KeysDisplay(st, mirror, keysNow, rec, still = fixedNow != null)
+                                BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+                                    val columns = SideFunctions + SidePicks + if (viewSwitch != null) SideLead else 0.dp
+                                    val gaps = if (viewSwitch != null) 3 else 2
+                                    val roomy = KoGeom.fit(maxWidth - columns - SideGap * gaps, maxHeight, 3)
+                                    // Short of width (a narrow window), the columns close up before the keys' words clip.
+                                    val gap = if (roomy.u < KeysTightU) SideGapTight else SideGap
+                                    val k = KoGeom.fit(maxWidth - columns - gap * gaps, maxHeight, 3)
+                                    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally)) {
+                                        FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
+                                        if (viewSwitch != null) SidewaysKeysLead(viewSwitch)
+                                        KeysGrid(
+                                            st, keysNow, now, keysActions,
+                                            Modifier.width(k.u * (3 * 1.215f + 0.401f) + CapDx + 2.dp).fillMaxHeight()
+                                                .coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
+                                            haptics = haptics,
+                                            hold = hold,
+                                            functions = functions,
+                                        )
+                                        SidewaysKeysPicks(keys, keysActions)
+                                    }
+                                }
+                            } else if (keys.on) {
+                                if (!inBar) KeysDisplay(st, mirror, keysNow, rec, still = fixedNow != null)
+                                FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
+                                KeysGrid(
+                                    st, keysNow, now, keysActions,
+                                    Modifier.fillMaxWidth().weight(1f).coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
+                                    haptics = haptics,
+                                    hold = hold,
+                                    functions = functions,
+                                )
+                                ModeRow(keys, keysActions, viewSwitch = viewSwitch, mode = false)
+                            } else {
+                                if (!inBar) padsLine()
+                                val fnRow: @Composable () -> Unit = { FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey) }
+                                val body: @Composable (Modifier, (@Composable () -> Unit)?) -> Unit = { m, sliver ->
+                                    Group(
+                                        group, st, nameOf, now,
+                                        m.coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
+                                        big = true,
+                                        onPad = padPress,
+                                        onPadKept = padKept,
+                                        onPadUp = padUp,
+                                        onPadCut = padCut,
+                                        playingPads = ringed,
+                                        onEdit = editPad,
+                                        haptics = haptics,
+                                        sampling = padSampling,
+                                        peek = sliver,
+                                    )
+                                }
+                                if (!panelOn) {
+                                    fnRow()
+                                    body(Modifier.fillMaxWidth().weight(1f), null)
+                                } else {
+                                    // The panel in the function keys' place, laid out for the room it shares with the
+                                    // pads; the pads, with the peek at their edge, take what it leaves.
+                                    BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+                                        val fit = samplePanelFit(maxWidth, maxHeight - 10.dp, usbNoteRoom(sample?.state?.input?.source == SampleSource.USB))
+                                        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                            functionSlot(Modifier.fillMaxWidth(), fit, null, fnRow)
+                                            body(Modifier.fillMaxWidth().weight(1f).then(swipe), peek)
                                         }
                                     }
-                                },
-                                sample = { sampleCard(true, true, now, false) },
-                            )
-                        }
-                    }
-                }
-            } else if (sideways && !keys.on && allGroupsSideways) {
-                val now = clock()
-                Column(sidewaysColumn) {
-                    if (!inBar) {
-                        padsLine()
-                        Spacer(Modifier.height(10.dp))
-                    }
-                    // The function keys on the left, then all four in one row, filling the height:
-                    // nothing to scroll, so a press plays at once.
-                    val groups: @Composable (Modifier) -> Unit = { m ->
-                        Row(m, horizontalArrangement = Arrangement.spacedBy(SideControlsGap)) {
-                            FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
-                            Row(
-                                Modifier.weight(1f).heightIn(max = caption + 3.dp + padW * 4),
-                                horizontalArrangement = Arrangement.spacedBy(14.dp),
-                            ) {
-                                for (g in 0..3) Group(g, st, nameOf, now, Modifier.weight(1f).fillMaxHeight(), fill = true, onPad = padPress, onPadKept = padKept, onPadUp = padUp, onPadCut = padCut, playingPads = ringed, onEdit = editPad, haptics = haptics)
+                                }
+                                GroupKeys(group, st, now, onSelect = { group = it })
                             }
                         }
                     }
-                    if (!cardsOn) {
-                        groups(Modifier.fillMaxWidth().weight(1f, fill = false))
-                    } else {
-                        // The pads card is the function keys and the groups, the SAMPLE card as big.
-                        LiveCards(
-                            turn, sampling, openMode, closeMode, haptics,
-                            Modifier.fillMaxWidth().weight(1f, fill = false),
-                            pads = { PeekRow(peek) { groups(Modifier.fillMaxWidth()) } },
-                            sample = { sampleCard(true, true, now, false) },
-                        )
+                } else {
+                    val now = clock()
+                    val page = rememberScrollState()
+                    // The panel opening on the page scrolled down to the pads (a swipe on the lower groups): the page
+                    // goes back up with it, so it unrolls in sight under SAMPLE's line.
+                    if (panelOn) {
+                        LaunchedEffect(panel.open) {
+                            if (panel.open && page.value > 0) {
+                                if (reduceMotion) page.scrollTo(0) else page.animateScrollTo(0)
+                            }
+                        }
                     }
-                }
-            } else if (oneGroup || keys.on) {
-                val now = clock()
-                // One group (or the keys) fills the screen without scrolling: the display line, the grid
-                // (its rows share whatever height is left) and the group keys.
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-                    Column(
-                        Modifier
-                            .windowInsetsPadding(WindowInsets.safeDrawing)
-                            // Not much wider than a phone, so a tablet's pads don't turn into long bars.
-                            .then(if (sideways) Modifier else Modifier.widthIn(max = 520.dp))
-                            .fillMaxSize()
-                            .padding(start = startGutter, end = endGutter, top = 4.dp, bottom = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        if (onBack != null) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+                        Column(
+                            Modifier
+                                .windowInsetsPadding(WindowInsets.safeDrawing)
+                                .widthIn(max = 720.dp)
+                                .fillMaxWidth()
+                                .verticalScroll(page)
+                                .padding(start = startGutter, end = endGutter, top = 4.dp, bottom = 24.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
                             Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                                 Caption(MirrorText.TITLE)
-                                CloseKey(onBack, dev.arc.ep133.text.GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
+                                if (onBack != null) CloseKey(onBack, dev.arc.ep133.text.GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
                             }
-                        }
-                        if (keys.on && sideways) {
-                            // On its side: the keys on the K.O. II's body as big as the room, the function
-                            // keys and the view switch (turned) on their left, the scale and the octave
-                            // on their right.
-                            if (!inBar) KeysDisplay(st, mirror, keysNow, rec, still = fixedNow != null)
-                            BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
-                                val columns = SideFunctions + SidePicks + if (viewSwitch != null) SideLead else 0.dp
-                                val gaps = if (viewSwitch != null) 3 else 2
-                                val roomy = KoGeom.fit(maxWidth - columns - SideGap * gaps, maxHeight, 3)
-                                // Short of width (a narrow window), the columns close up before the keys' words clip.
-                                val gap = if (roomy.u < KeysTightU) SideGapTight else SideGap
-                                val k = KoGeom.fit(maxWidth - columns - gap * gaps, maxHeight, 3)
-                                Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally)) {
-                                    FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
-                                    if (viewSwitch != null) SidewaysKeysLead(viewSwitch)
-                                    KeysGrid(
-                                        st, keysNow, now, keysActions,
-                                        Modifier.width(k.u * (3 * 1.215f + 0.401f) + CapDx + 2.dp).fillMaxHeight()
-                                            .coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
-                                        haptics = haptics,
-                                        hold = hold,
-                                        functions = functions,
-                                    )
-                                    SidewaysKeysPicks(keys, keysActions)
+                            if (!inBar) {
+                                if (sampling && sample != null) {
+                                    SampleLine(sample, still = stillSample)
+                                } else if (editing) {
+                                    EditLine()
+                                } else {
+                                    Display(st, mirror, rec, still = fixedNow != null, compact = sideways, initialNoteOpen = initialNoteOpen, wireless = wireless, onGetFactory = onGetFactory)
                                 }
                             }
-                        } else if (keys.on) {
-                            if (!inBar) KeysDisplay(st, mirror, keysNow, rec, still = fixedNow != null)
-                            FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
-                            KeysGrid(
-                                st, keysNow, now, keysActions,
-                                Modifier.fillMaxWidth().weight(1f).coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
-                                haptics = haptics,
-                                hold = hold,
-                                functions = functions,
-                            )
-                            ModeRow(keys, keysActions, viewSwitch = viewSwitch, mode = false)
-                        } else {
-                            if (!inBar) padsLine()
-                            FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
-                            val body: @Composable (Modifier, (@Composable () -> Unit)?) -> Unit = { m, sliver ->
-                                Group(
-                                    group, st, nameOf, now,
-                                    m.coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
-                                    big = true,
-                                    onPad = padPress,
-                                    onPadKept = padKept,
-                                    onPadUp = padUp,
-                                    onPadCut = padCut,
-                                    playingPads = ringed,
-                                    onEdit = editPad,
-                                    haptics = haptics,
-                                    peek = sliver,
-                                )
-                            }
-                            if (!cardsOn) {
-                                body(Modifier.fillMaxWidth().weight(1f), null)
+                            val fnRow: @Composable () -> Unit = { FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey) }
+                            if (!panelOn) {
+                                fnRow()
                             } else {
-                                // The pads card and the SAMPLE card in the grid's place, the group keys under both.
-                                LiveCards(
-                                    turn, sampling, openMode, closeMode, haptics,
-                                    Modifier.fillMaxWidth().weight(1f),
-                                    pads = { body(Modifier.fillMaxSize(), peek) },
-                                    sample = { sampleCard(false, false, now, false) },
-                                )
+                                // The panel in the function keys' place, its display always there (the page scrolls).
+                                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                                    functionSlot(Modifier.fillMaxWidth(), samplePanelFit(maxWidth, null), null, fnRow)
+                                }
                             }
-                            GroupKeys(group, st, now, onSelect = { group = it })
-                        }
-                    }
-                }
-            } else {
-                val now = clock()
-                // The SAMPLE card on the scrolling page fills the screen under the function keys: what is left
-                // under the title, SAMPLE's line and the function keys, with the page's padding and gaps.
-                val sampleH = maxOf(
-                    SampleCardMin,
-                    pageH - 4.dp - (caption - 8.dp) - 12.dp - (if (inBar) 0.dp else DisplayLineHeight + 12.dp) - functionRowHeight() - 12.dp - 24.dp,
-                )
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-                    Column(
-                        Modifier
-                            .windowInsetsPadding(WindowInsets.safeDrawing)
-                            .widthIn(max = 720.dp)
-                            .fillMaxWidth()
-                            .verticalScroll(rememberScrollState())
-                            .padding(start = startGutter, end = endGutter, top = 4.dp, bottom = 24.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                            Caption(MirrorText.TITLE)
-                            if (onBack != null) CloseKey(onBack, dev.arc.ep133.text.GuideText.CLOSE, Modifier.align(Alignment.CenterEnd))
-                        }
-                        if (!inBar) {
-                            if (sampling && sample != null) {
-                                SampleLine(sample, still = stillSample)
-                            } else if (editing) {
-                                EditLine()
-                            } else {
-                                Display(st, mirror, rec, still = fixedNow != null, compact = sideways, initialNoteOpen = initialNoteOpen, wireless = wireless, onGetFactory = onGetFactory)
-                            }
-                        }
-                        FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
-                        val grid: @Composable () -> Unit = {
-                            BoxWithConstraints(Modifier.fillMaxWidth()) {
-                                // Four groups in a row when there is room, two by two on a phone.
-                                val perRow = if (maxWidth >= 640.dp) 4 else 2
-                                Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                                    for (row in (0..3).chunked(perRow)) {
-                                        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                                            for (g in row) Group(g, st, nameOf, now, Modifier.weight(1f), onPad = padPress, onPadKept = padKept, onPadUp = padUp, onPadCut = padCut, playingPads = ringed, onEdit = editPad, haptics = haptics)
+                            val grid: @Composable () -> Unit = {
+                                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                                    // Four groups in a row when there is room, two by two on a phone.
+                                    val perRow = if (maxWidth >= 640.dp) 4 else 2
+                                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                        for (row in (0..3).chunked(perRow)) {
+                                            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                                for (g in row) Group(g, st, nameOf, now, Modifier.weight(1f), onPad = padPress, onPadKept = padKept, onPadUp = padUp, onPadCut = padCut, playingPads = ringed, onEdit = editPad, haptics = haptics, sampling = padSampling)
+                                            }
                                         }
                                     }
                                 }
                             }
-                        }
-                        if (!cardsOn) {
-                            grid()
-                        } else {
-                            // The SAMPLE card as tall as the rest of the screen under the function keys (it has the
-                            // group's pads only, with the group keys on its deck).
-                            LiveCards(
-                                turn, sampling, openMode, closeMode, haptics,
-                                Modifier.fillMaxWidth(),
-                                sampleMin = sampleH,
-                                pads = { PeekRow(peek) { grid() } },
-                                sample = { sampleCard(sideways, true, now, true) },
-                            )
+                            // Open, the peek's room goes to the pads, which only measure again for it.
+                            if (!panelOn) grid() else PeekRow(peek!!, swipe, share = { 1f - panel.unroll }) { grid() }
                         }
                     }
                 }
@@ -881,9 +887,6 @@ private val ControlsRow = 44.dp
 
 /** The display line's height, on the page when it isn't in the top bar. */
 private val DisplayLineHeight = 48.dp
-
-/** The SAMPLE card on the scrolling page is never shorter than this, whatever the screen leaves. */
-private val SampleCardMin = 320.dp
 
 /** What is left under the keys or pads on a phone on its side. */
 private val SidewaysBottom = 8.dp
@@ -1212,16 +1215,8 @@ private fun Group(
     onSelectGroup: ((Int) -> Unit)? = null,
     /** SAMPLE mode: the pads' lights, and a screen reader's click latching a take. */
     sampling: PadSampling? = null,
-    /** The big grid on the SAMPLE card, whose face is the body: the keys without a body of their own. */
-    bare: Boolean = false,
-    /** The big grid's sliver of the SAMPLE card beside the body, on its right ([SamplePeek]). */
+    /** The big grid's sliver of the SAMPLE panel beside the body, on its right ([SamplePeek]). */
     peek: (@Composable () -> Unit)? = null,
-    /**
-     * The big grid on a page that scrolls (the SAMPLE card on the scrolling
-     * page): its presses are unsure until kept, as the small grids' are, so
-     * a scroll that starts on a pad records nothing.
-     */
-    inScroll: Boolean = false,
 ) {
     val c = LocalArcColors.current
     val lit = st.pads.filterKeys { it.group == group }
@@ -1237,7 +1232,7 @@ private fun Group(
                 onRelease = { at -> onPadUp(pad, at) },
                 onCut = { onPadCut(pad) },
                 playing = pad in playingPads,
-                inScroll = inScroll,
+                inScroll = false,
                 onEdit = onEdit?.let { f -> { f(pad) } },
                 haptics = haptics,
                 ko = k,
@@ -1249,7 +1244,7 @@ private fun Group(
         val groupKeys: (@Composable (KoGeom) -> Unit)? = onSelectGroup?.let { select ->
             { k -> for (g in 0..3) GroupKey(g, group, st, now, select, Modifier.width(k.u), keyMin = 0.dp, ko = k) }
         }
-        KoDeck(modifier, groupKeys, bare = bare, peek = peek) { o, k -> pad(PhysicalPad(group, o), k) }
+        KoDeck(modifier, groupKeys, peek = peek) { o, k -> pad(PhysicalPad(group, o), k) }
         return
     }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1307,15 +1302,6 @@ private fun Deck(modifier: Modifier, content: @Composable ColumnScope.(gap: Dp) 
 }
 
 /**
- * A bare deck's keys (no body round them: the SAMPLE card), in pads
- * ([KoGeom.u]): a column with the gap after it, and the height of four rows
- * of printed line and keys with the gaps between them (4 x (0.215 + 0.926)
- * + 7 x 0.077).
- */
-internal const val KO_BARE_WIDE = 1.215f
-internal const val KO_BARE_HIGH = 5.11f
-
-/**
  * The big grid drawn as the Guide draws the K.O. II (KoPanel, a 560-wide
  * device whose pad column is 64.9 wide): every length a share of [u], one
  * pad's width. A pad is 1.08 times as wide as high; over each row of pads a
@@ -1336,18 +1322,18 @@ private class KoGeom(val u: Dp) {
          * As big as [w] x [h] lets the body be, with [cols] columns (pads and
          * group keys): wide, 2 x 0.277 + the gaps + the edge; high, 0.215 +
          * four rows of (0.215 + 0.077 + 0.926) + three gaps + 0.31 + the edge.
-         * [bare] (no body of its own, the SAMPLE card): the keys alone, without
-         * the body's margins ([KO_BARE_WIDE], [KO_BARE_HIGH]).
          */
-        fun fit(w: Dp, h: Dp, cols: Int, bare: Boolean = false) = KoGeom(
-            minOf(
-                (w - CapDx - 2.dp) / (if (bare) cols * KO_BARE_WIDE - 0.215f else cols * 1.215f + 0.401f),
-                (h - CapDy - 2.dp) / (if (bare) KO_BARE_HIGH else 5.72f),
-                170.dp,
-            ).coerceAtLeast(0.dp),
+        fun fit(w: Dp, h: Dp, cols: Int) = KoGeom(
+            minOf((w - CapDx - 2.dp) / (cols * 1.215f + 0.401f), (h - CapDy - 2.dp) / 5.72f, 170.dp).coerceAtLeast(0.dp),
         )
     }
 }
+
+/** The big grid's pad width in a [w] x [h] room with [cols] columns ([KoGeom.fit]). */
+internal fun koPadWidth(w: Dp, h: Dp, cols: Int): Dp = KoGeom.fit(w, h, cols).u
+
+/** How wide the big grid's body is with [cols] columns, as tall as [h] lets it be ([KoGeom.fit]) whatever the width. */
+internal fun koDeckWidth(h: Dp, cols: Int): Dp = KoGeom.fit(Dp.Infinity, h, cols).u * (cols * 1.215f + 0.401f) + CapDx + 2.dp
 
 /**
  * Twelve keys on the K.O. II's body (a group's pads, or KEYS' notes), as big
@@ -1355,43 +1341,37 @@ private class KoGeom(val u: Dp) {
  * each pad offset, [k.u] by [k.h]. [groupKeys]: a column left of them, as the
  * device's group keys are (a phone on its side). The LEDs before the printed
  * words stay unlit: on the device they mark the knobs' pages, not the pads.
- * [bare]: no body of its own, the keys on a face that is one already (the
- * SAMPLE card). [peek]: the other card's sliver beside the body, on its
- * right, as tall as it ([PeekRow]); the body and it share the middle.
+ * [peek]: the SAMPLE panel's sliver beside the body, on its right, as tall
+ * as it ([PeekRow]); the body and it share the middle.
  */
 @Composable
 private fun KoDeck(
     modifier: Modifier,
     groupKeys: (@Composable (KoGeom) -> Unit)?,
-    bare: Boolean = false,
     peek: (@Composable () -> Unit)? = null,
     key: @Composable (offset: Int, k: KoGeom) -> Unit,
 ) {
     val ko = LocalHwColors.current.ko
     BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
-        val k = KoGeom.fit(maxWidth - if (peek != null) PeekRoom else 0.dp, maxHeight, if (groupKeys != null) 4 else 3, bare = bare)
+        val k = KoGeom.fit(maxWidth - if (peek != null) PeekRoom else 0.dp, maxHeight, if (groupKeys != null) 4 else 3)
         val radius = k.u * 0.277f
-        val body = if (bare) {
-            Modifier.padding(end = CapDx, bottom = CapDy)
-        } else {
-            Modifier
-                .drawBehind {
-                    drawRoundRect(
-                        ko.edge,
-                        topLeft = Offset((k.u * 0.062f).toPx(), (k.u * 0.092f).toPx()),
-                        size = size,
-                        cornerRadius = CornerRadius(radius.toPx()),
-                    )
-                }
-                .clip(RoundedCornerShape(radius))
-                .background(ko.body)
-                .padding(start = k.u * 0.277f, top = k.u * 0.215f, end = k.u * 0.277f + CapDx, bottom = k.u * 0.31f + CapDy)
-        }
+        val body = Modifier
+            .drawBehind {
+                drawRoundRect(
+                    ko.edge,
+                    topLeft = Offset((k.u * 0.062f).toPx(), (k.u * 0.092f).toPx()),
+                    size = size,
+                    cornerRadius = CornerRadius(radius.toPx()),
+                )
+            }
+            .clip(RoundedCornerShape(radius))
+            .background(ko.body)
+            .padding(start = k.u * 0.277f, top = k.u * 0.215f, end = k.u * 0.277f + CapDx, bottom = k.u * 0.31f + CapDy)
         if (peek != null) PeekRow(peek) { KoBody(k, body, groupKeys, key) } else KoBody(k, body, groupKeys, key)
     }
 }
 
-/** KoDeck's body ([body], its plate or none) with the group keys and the twelve keys on it, as [k] sizes them. */
+/** KoDeck's body ([body], its plate) with the group keys and the twelve keys on it, as [k] sizes them. */
 @Composable
 private fun KoBody(k: KoGeom, body: Modifier, groupKeys: (@Composable (KoGeom) -> Unit)?, key: @Composable (offset: Int, k: KoGeom) -> Unit) {
     Row(
@@ -1604,8 +1584,8 @@ private fun Pad(
             // name in the lines left under the digit (at least one; the cap clips the rest).
             // In SAMPLE mode the name also keeps clear of the face's foot, the cap's edge shorter
             // than the room, where the ring is drawn: up to three lines, and with no room for one
-            // (the SAMPLE card's short deck) none rather than half of one under the ring. A screen
-            // reader still hears it.
+            // (small pads under the SAMPLE panel) none rather than half of one under the ring. A
+            // screen reader still hears it.
             val ringed = sampleLed != null
             val left = room?.let { it - (if (ringed) CapDy * 2 else 0.dp) - with(density) { labelStyle.fontSize.toDp() } } ?: 0.dp
             val fit = with(density) { (left / (nameStyle.fontSize.toDp() * 1.1f)).toInt() }
@@ -2502,8 +2482,8 @@ private fun LegendKey(
  * (SAMPLE stops a take at it), or now when the gesture ended otherwise.
  * [onClick] stands in for a screen reader's click (labelled [clickLabel]),
  * and [playAction] then keeps Play as an action of its own (SAMPLE mode).
- * A swipe between Live's cards that takes the finger ([CardTurn.took]) cuts
- * the press short ([onCut]), on any page. [onKept], [onRelease] and [onCut]
+ * A swipe on the pads that takes the finger to open or close the SAMPLE
+ * panel ([SamplePanel.took]) cuts the press short ([onCut]), on any page. [onKept], [onRelease] and [onCut]
  * are those of the touch-down: the pad pressed hears its whole press, even
  * if by the lift the cap shows another pad (the group switched under it).
  */
@@ -2526,8 +2506,8 @@ private fun holdToPlay(
     val kept by androidx.compose.runtime.rememberUpdatedState(onKept)
     val click by androidx.compose.runtime.rememberUpdatedState(onClick)
     val tick by androidx.compose.runtime.rememberUpdatedState(if (haptics) LocalHapticFeedback.current else null)
-    // Live's cards ([LiveCards]): a swipe that takes the finger cuts the press short, as a scroll does.
-    val swipe = LocalCardTurn.current
+    // The SAMPLE panel's swipe ([panelSwipe]): one that takes the finger cuts the press short, as a scroll does.
+    val swipe = LocalSamplePanel.current
     return Modifier
         .pointerInput(inScroll, swipe) {
             awaitEachGesture {

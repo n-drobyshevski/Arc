@@ -429,11 +429,11 @@ data class OfflinePrompt(val changes: Int, val samples: Int = 0)
 // ---------- SAMPLE: recording into a pad (an addition) ----------
 
 /**
- * SAMPLE mode as its line and card show it (an addition): [on] while the
+ * SAMPLE mode as its line and panel show it (an addition): [on] while the
  * mode is open, the [input] recording from those [inputs] offered (USB only
  * while plugged in, [usb]; MIC and USB only with the mic allowed), its LEVEL
  * ([gainDb]) and threshold ([thresholdDb], null for none), the [bars] a
- * hands-free take lasts (null: Free), the card's [latch] switch, what is
+ * hands-free take lasts (null: Free), the panel's [latch] switch, what is
  * going on ([phase]), the longest take in seconds ([maxSeconds], less when
  * the EP-133 is short of space: [lowSpace]).
  */
@@ -2498,7 +2498,7 @@ class ArcController(
     // A recording going up to the EP-133, with how far.
     private val sampleUploading = MutableStateFlow<SamplePhase.Uploading?>(null)
 
-    /** SAMPLE mode, for its card and its line. */
+    /** SAMPLE mode, for its panel and its line. */
     val sample: StateFlow<SampleUiState> =
         combine(sampleMode, settings, recorder.phase, sampleWaiting, sampleUploading) { m, s, rec, waiting, up -> sampleUi(m, s, rec, waiting, up) }
             .stateIn(scope, kotlinx.coroutines.flow.SharingStarted.Eagerly, sampleUi(SampleMode(), settings.value, SamplePhase.Ready, null, null))
@@ -2507,7 +2507,7 @@ class ArcController(
 
     private val _sampleLastTake = MutableStateFlow<List<dev.arc.ep133.features.Peak>?>(null)
 
-    /** The last take's waveform (kept or on the review sheet), for the SAMPLE card's display while nothing records; null before the first. */
+    /** The last take's waveform (kept or on the review sheet), for the SAMPLE panel's display while nothing records; null before the first. */
     val sampleLastTake: StateFlow<List<dev.arc.ep133.features.Peak>?> = _sampleLastTake.asStateFlow()
 
     /** The take on the review sheet, if any. */
@@ -2607,12 +2607,14 @@ class ArcController(
     fun sampleClip(): Boolean = recorder.clip()
 
     /**
-     * The SAMPLE card opened (a swipe on Live's pads): the mode opens on the
+     * The SAMPLE panel opened (a swipe on Live's pads): the mode opens on the
      * input last chosen, metering it at once; nothing records until a pad is
      * held. Without the mic
      * ([micAllowed] false, as the activity found it) MIC and USB aren't
-     * offered and RSP stands in. EDIT's pad sheet closes. Called again when
-     * the permission came meanwhile, the mic and USB come in.
+     * offered and RSP stands in. EDIT's pad sheet closes, and TEMPO's click
+     * stops: its key is under the panel, and the phone's speaker would play
+     * into a MIC take (BARS' count-in starts it for its bar). Called again
+     * when the permission came meanwhile, the mic and USB come in.
      */
     fun enterSample(micAllowed: Boolean) {
         val had = this.micAllowed
@@ -2626,6 +2628,7 @@ class ArcController(
         }
         stoppedInBackground = false
         closePadEdit()
+        setClick(false)
         usbInputs.start()
         // The free space as last read: a take that wouldn't fit stops sooner ("Disk low").
         sampleMode.update { it.copy(on = true, free = _state.value.device?.storage?.free) }

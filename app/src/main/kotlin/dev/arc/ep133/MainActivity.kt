@@ -352,7 +352,7 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * The SAMPLE card swiped open: the mode opens, asking for the mic first
+     * The SAMPLE panel swiped open: the mode opens, asking for the mic first
      * when the input last chosen needs it (MIC or USB); RSP doesn't, and
      * opens with whatever Android last said.
      */
@@ -694,14 +694,15 @@ class MainActivity : ComponentActivity() {
             onClick = controller::setClick,
             onTempo = { tempoSheet = true },
         )
-        // The SAMPLE card beside Live's pads: a swipe to it opens SAMPLE mode (asking for the mic first
-        // where the input needs it), one back (or Back) leaves it; its pads record while it is open.
+        // The SAMPLE panel in the function keys' place: a swipe on Live's pads opens it and SAMPLE mode (asking
+        // for the mic first where the input needs it), one back, its handle or Back leaves it; the pads record
+        // while it is open.
         val sampleUi = dev.arc.ep133.ui.screens.SampleUi(
             state = sample,
             level = controller::sampleLevel,
             clip = controller::sampleClip,
             lastTake = lastTake,
-            // A sheet over Live keeps Back: the SAMPLE card's would otherwise take it first.
+            // A sheet over Live keeps Back: the SAMPLE panel's would otherwise take it first.
             sheetOpen = review != null || padSheet != null || tempoSheet || projectSheet || fontLicence || padsFor != null ||
                 detail != null || restore != null || comparePickFor != null || state.task != null,
             onOpen = {

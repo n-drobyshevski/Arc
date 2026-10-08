@@ -177,7 +177,7 @@ class FeatureTextTest {
     fun `sample text`() {
         val a7 = PhysicalPad(0, 9)
         assertEquals("Open sample", MirrorText.OPEN_SAMPLE)
-        assertEquals("Back to pads", MirrorText.CLOSE_SAMPLE)
+        assertEquals("Back to keys", MirrorText.CLOSE_SAMPLE)
         assertEquals("Sample", MirrorText.SAMPLE_TAG)
         assertEquals("Latch on: tap a pad to record hands-free. Tap it again or STOP to stop.", MirrorText.LATCH_NOTE)
         // LATCH reads STOP while a hands-free take goes on: the shared word.

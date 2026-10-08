@@ -156,14 +156,14 @@ private fun Framed(
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, turn: Float? = null, lastTake: Boolean = false, peek: Boolean = false) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, peek: Boolean = false) {
     val mirror = MirrorUi(state, loading = loading, error = error, offline = offline, offlineProjects = offlineProjects)
     // PROJECT as MainActivity works it out; TEMPO's light caught on a beat while the click is on.
     val functions = FunctionKeysUi(project = projectKeyOf(mirror, busy = false), clickOn = clickOn, beatLit = clickOn)
-    // The SAMPLE card, as MainActivity has it: the meter caught at a level, its threshold tick where the
-    // knob has it, the last take's wave where [lastTake]. [peek]: the pads card with the SAMPLE card beside it.
+    // The SAMPLE panel, as MainActivity has it: the meter caught at a level, its threshold tick where the
+    // knob has it, the last take's wave where [lastTake]. [peek]: the pads with the panel's sliver beside them.
     val sampleUi = (sample ?: SampleUiState().takeIf { peek })?.let {
-        SampleUi(it, level = { 0.62f }, lastTake = if (lastTake) takePeaks else null, still = true, turn = turn)
+        SampleUi(it, level = { 0.62f }, lastTake = if (lastTake) takePeaks else null, still = true, unroll = unroll)
     }
     val recUi = dev.arc.ep133.ui.screens.RecUi(rec) {}
     // The piano's notes, for the display line in the bar to name a device note past them. The
@@ -731,98 +731,100 @@ private fun ProjectSheet(mirror: MirrorUi) {
     }
 }
 
-// The SAMPLE card, a swipe away from the pads: open, the line above lit orange with the source, the
-// meter and what to do; on the card the display, the controls and the group's pads, the empty pads'
-// rings blinking (caught on), those with a sound ringed, the take's pad lit.
+// The SAMPLE panel, unrolled with a swipe on the pads in the function keys' place: the line above lit
+// orange with the source, the meter and what to do; the panel's display and controls; the page's pads,
+// the empty pads' rings blinking (caught on), those with a sound ringed, the take's pad lit.
 private val mic = SampleInput(SampleSource.MIC, false)
 private val rspSt = SampleInput(SampleSource.RSP, true)
 private val inputs = listOf(mic, SampleInput(SampleSource.RSP, false), rspSt)
 private val sampleReady = SampleUiState(on = true, input = mic, inputs = inputs, gainDb = 12f, thresholdDb = -24f, maxSeconds = 40)
 
 @PreviewTest
-@Preview(name = "Live sample card", widthDp = 412, heightDp = 843, showBackground = true)
+@Preview(name = "Live sample panel", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
-fun LiveSampleCardPreview() = Live(lastRead, oneGroup = true, sample = sampleReady)
+fun LiveSamplePanelPreview() = Live(lastRead, oneGroup = true, sample = sampleReady)
 
 // The last take's wave on the display.
 @PreviewTest
-@Preview(name = "Live sample card dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Preview(name = "Live sample panel dark", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
-fun LiveSampleCardDarkPreview() = Live(lastRead, dark = true, oneGroup = true, sample = sampleReady, lastTake = true)
+fun LiveSamplePanelDarkPreview() = Live(lastRead, dark = true, oneGroup = true, sample = sampleReady, lastTake = true)
 
 // A pad held with the threshold set: the take waits for sound.
 @PreviewTest
-@Preview(name = "Live sample card waiting", widthDp = 412, heightDp = 843, showBackground = true)
+@Preview(name = "Live sample panel waiting", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
-fun LiveSampleCardWaitingPreview() = Live(lastRead, oneGroup = true, sample = sampleReady.copy(phase = SamplePhase.Waiting(PhysicalPad(0, 2))))
+fun LiveSamplePanelWaitingPreview() = Live(lastRead, oneGroup = true, sample = sampleReady.copy(phase = SamplePhase.Waiting(PhysicalPad(0, 2))))
 
-// Resampling the phone's sound in stereo into an empty pad, 4 s of 20.
+// Resampling the phone's sound in stereo into an empty pad, 4 s of 20: a small phone's panel, without its display.
 @PreviewTest
-@Preview(name = "Live sample card recording small", widthDp = 360, heightDp = 668, showBackground = true)
+@Preview(name = "Live sample panel recording small", widthDp = 360, heightDp = 668, showBackground = true)
 @Composable
-fun LiveSampleCardRecordingSmallPreview() = Live(
+fun LiveSamplePanelRecordingSmallPreview() = Live(
     lastRead, oneGroup = true,
     sample = sampleReady.copy(input = rspSt, gainDb = 0f, thresholdDb = null, maxSeconds = 20, phase = SamplePhase.Recording(PhysicalPad(0, 2), 4, 20, false)),
 )
 
 // LATCH on, two bars: the click counts in, and LATCH reads STOP.
 @PreviewTest
-@Preview(name = "Live sample card count-in", widthDp = 393, heightDp = 852, showBackground = true)
+@Preview(name = "Live sample panel count-in", widthDp = 393, heightDp = 852, showBackground = true)
 @Composable
-fun LiveSampleCardCountInPreview() = Live(
+fun LiveSamplePanelCountInPreview() = Live(
     lastRead, oneGroup = true, clickOn = true,
     sample = sampleReady.copy(latch = true, bars = 2, thresholdDb = null, phase = SamplePhase.CountIn(PhysicalPad(0, 5), 3)),
 )
 
-// From the all-groups page: the card has the group's pads, the group keys on its deck.
+// On the all-groups page: the panel over the four groups, which keep their size and record too.
 @PreviewTest
-@Preview(name = "Live sample card all groups", widthDp = 412, heightDp = 843, showBackground = true)
+@Preview(name = "Live sample panel all groups", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
-fun LiveSampleCardAllGroupsPreview() = Live(lastRead, sample = sampleReady)
+fun LiveSamplePanelAllGroupsPreview() = Live(lastRead, sample = sampleReady)
 
-// The EP-133 over USB: the card says it's experimental.
+// The EP-133 over USB: the panel says it's experimental.
 @PreviewTest
-@Preview(name = "Live sample card usb", widthDp = 412, heightDp = 843, showBackground = true)
+@Preview(name = "Live sample panel usb", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
-fun LiveSampleCardUsbPreview() = Live(
+fun LiveSamplePanelUsbPreview() = Live(
     lastRead, oneGroup = true,
     sample = sampleReady.copy(input = SampleInput(SampleSource.USB, true), inputs = inputs + SampleInput(SampleSource.USB, false) + SampleInput(SampleSource.USB, true), gainDb = 0f, usb = true),
 )
 
 // The EP-133 short of space: takes stop sooner, and the display says so.
 @PreviewTest
-@Preview(name = "Live sample card low space", widthDp = 393, heightDp = 852, showBackground = true)
+@Preview(name = "Live sample panel low space", widthDp = 393, heightDp = 852, showBackground = true)
 @Composable
-fun LiveSampleCardLowSpacePreview() = Live(lastRead, oneGroup = true, sample = sampleReady.copy(lowSpace = true, maxSeconds = 12))
+fun LiveSamplePanelLowSpacePreview() = Live(lastRead, oneGroup = true, sample = sampleReady.copy(lowSpace = true, maxSeconds = 12))
 
-// On its side: the line in the top bar; on the card the display and controls left, the pads right.
+// On its side: the line in the top bar; the panel in the function keys' column, widened, the pads beside it.
 @PreviewTest
-@Preview(name = "Live sample card sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Preview(name = "Live sample panel sideways", widthDp = 867, heightDp = 388, showBackground = true)
 @Composable
-fun LiveSampleCardSidewaysPreview() = Live(lastRead, oneGroup = true, sample = sampleReady.copy(phase = SamplePhase.Recording(PhysicalPad(0, 2), 7, 40, true), latch = true))
-
-@PreviewTest
-@Preview(name = "Live sample card bar", widthDp = 692, heightDp = 336, showBackground = true)
-@Composable
-fun LiveSampleCardBarPreview() = Live(lastRead, oneGroup = true, sample = sampleReady, lastTake = true)
+fun LiveSamplePanelSidewaysPreview() = Live(lastRead, oneGroup = true, sample = sampleReady.copy(phase = SamplePhase.Recording(PhysicalPad(0, 2), 7, 40, true), latch = true))
 
 @PreviewTest
-@Preview(name = "Live sample card short", widthDp = 490, heightDp = 253, showBackground = true)
+@Preview(name = "Live sample panel bar", widthDp = 692, heightDp = 336, showBackground = true)
 @Composable
-fun LiveSampleCardShortPreview() = Live(lastRead, oneGroup = true, sample = sampleReady)
+fun LiveSamplePanelBarPreview() = Live(lastRead, oneGroup = true, sample = sampleReady, lastTake = true)
 
 @PreviewTest
-@Preview(name = "Live sample card tablet", widthDp = 840, heightDp = 900, showBackground = true)
+@Preview(name = "Live sample panel short", widthDp = 490, heightDp = 253, showBackground = true)
 @Composable
-fun LiveSampleCardTabletPreview() = Live(lastRead, sample = sampleReady, lastTake = true)
+fun LiveSamplePanelShortPreview() = Live(lastRead, oneGroup = true, sample = sampleReady)
 
-// Caught 40% into the swipe: the pads card tilting away to the left, the SAMPLE card coming in.
 @PreviewTest
-@Preview(name = "Live sample swipe", widthDp = 412, heightDp = 843, showBackground = true)
+@Preview(name = "Live sample panel tablet", widthDp = 840, heightDp = 900, showBackground = true)
 @Composable
-fun LiveSampleSwipePreview() = Live(lastRead, oneGroup = true, sample = sampleReady.copy(on = false), turn = 0.4f)
+fun LiveSamplePanelTabletPreview() = Live(lastRead, sample = sampleReady, lastTake = true)
 
-// The pads as the app shows them, the SAMPLE card's sliver at their edge.
+// Caught 45% into unrolling (202 ms of the panel's 450, along the 720 ms its rows take): the panel most of
+// the way down out of the line, its display starting to fade in, the function keys fading, the pads
+// gliding down.
+@PreviewTest
+@Preview(name = "Live sample unroll", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSampleUnrollPreview() = Live(lastRead, oneGroup = true, sample = sampleReady, unroll = 0.28f)
+
+// The pads as the app shows them, the SAMPLE panel's sliver at their edge.
 @PreviewTest
 @Preview(name = "Live pads peek", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
@@ -847,7 +849,7 @@ private val reviewPcm = ShortArray(REVIEW_RATE * 4 * 2) { i ->
     }.toShort()
 }
 
-/** The take's wave, as the SAMPLE card's display draws the last one. */
+/** The take's wave, as the SAMPLE panel's display draws the last one. */
 private val takePeaks by lazy { dev.arc.ep133.features.SampleEdit.peaks(reviewPcm, 2, dev.arc.ep133.controller.REVIEW_COLUMNS) }
 
 private fun reviewOf(occupied: Set<Int>?): dev.arc.ep133.controller.SampleReview {

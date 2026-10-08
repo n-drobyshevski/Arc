@@ -453,11 +453,12 @@ object MirrorText {
 
     // ---------- SAMPLE: recording into a pad (an addition) ----------
     /**
-     * The SAMPLE card beside Live's pads, reached with a swipe: screen
-     * readers get these as the pads card's action and the SAMPLE card's.
+     * The SAMPLE panel in the function keys' place, opened with a swipe on
+     * Live's pads: screen readers get these as the sliver at the pads' edge
+     * and the handle under the panel.
      */
     const val OPEN_SAMPLE = "Open sample"
-    const val CLOSE_SAMPLE = "Back to pads"
+    const val CLOSE_SAMPLE = "Back to keys"
 
     /** The sources' words, upper-cased where shown, as the device prints them. */
     const val MIC = "Mic"
