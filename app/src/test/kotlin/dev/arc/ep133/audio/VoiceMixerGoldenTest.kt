@@ -22,8 +22,10 @@ import kotlin.random.Random
  * bus: sends, the dry law, the sidechain's duck, smoothing and the tempo, and
  * long random ones with random controls, then the tone effects: the
  * distortion, the filter, the compressor and the master compressor, their
- * knobs swept and their types switched, and random ones), written out
- * with every
+ * knobs swept and their types switched, and random ones, then the time
+ * effects: the delay, the reverb and the chorus, their knobs and the tempo
+ * swept, their tails rung out into silence and started again, and random
+ * ones), written out with every
  * command and what each render gave (its samples, or a hash of them for long
  * renders, the voices started and the keys). The host test
  * (src/test/cpp/VoiceMixerParityTest.cpp, run by `./gradlew test` through
@@ -379,6 +381,7 @@ class VoiceMixerGoldenTest {
         timed(::scenario)
         fx(::scenario)
         tone(::scenario)
+        time(::scenario)
         return out.toString()
     }
 
@@ -831,7 +834,7 @@ class VoiceMixerGoldenTest {
             render(64)
         }
         scenario("fx-dry-law") {
-            // A send with an effect (the delay adds nothing so far): the dry gives way by the effect's law.
+            // A send with an effect: the dry gives way by the effect's law.
             control(FxControl.FX_TYPE, FxControl.DELAY, 0.3f, 0.6f)
             control(FxControl.SEND, 0, 1f, 0f)
             control(FxControl.SEND, 2, 0.5f, 0f)
@@ -1264,6 +1267,281 @@ class VoiceMixerGoldenTest {
                         }
                     }
                     render(block)
+                }
+                render(rate / 4)
+            }
+        }
+    }
+
+    /**
+     * The time effects' scenarios: the delay, the reverb and the chorus on the send bus, through the mixer's
+     * controls (knobs and the tempo swept a block at a time, types switched mid-tail and mid-fade, tails rung
+     * out into silence, where the bus skips them, and started again), then random ones.
+     */
+    private fun time(play: (String, Int, Int, Trace.() -> Unit) -> Unit) {
+        fun scenario(name: String, outRate: Int = 1000, maxVoices: Int = VoiceMixer.MAX_VOICES, body: Trace.() -> Unit) =
+            play(name, outRate, maxVoices, body)
+        fun on(bus: Int, duck: Boolean = false) = VoiceShape(bus = bus, duckSource = duck)
+        // An impulse, for the echoes and the tails.
+        val click = ShortArray(32).also {
+            it[0] = 30000
+            it[1] = -20000
+        }
+
+        scenario("time-delay", outRate = 48000) {
+            val hiss = noise(2, 4800, 4711)
+            // An eighth at 120 BPM: the click comes back 12000 frames on, then again, fed back.
+            control(FxControl.FX_TYPE, FxControl.DELAY, 0.45f, 0.5f)
+            control(FxControl.SEND, 0, 1f, 0f)
+            control(FxControl.SEND, 1, 0.5f, 0f)
+            start("c", click, 1, 48000, shape = on(1))
+            render(96)
+            render(11904)
+            repeat(3) { render(96) }
+            render(11712)
+            repeat(3) { render(96) }
+            // Through every length a block at a time over a burst of noise, the read head gliding.
+            start("n", hiss, 2, 48000, shape = on(0))
+            for (i in 0..23) {
+                control(FxControl.FX_XY, 0, i / 23f, 0.6f)
+                render(96)
+            }
+            // The tempo moves the length too, held to 2 seconds at the slowest.
+            for (bpm in listOf(90f, 300f, 20f, 133f)) {
+                control(FxControl.TEMPO, 0, bpm, 0f)
+                render(96)
+                render(4704)
+            }
+            control(FxControl.FX_XY, 0, 1f, 0.5f)
+            control(FxControl.TEMPO, 0, 20f, 0f)
+            start("c", click, 1, 48000, shape = on(1))
+            render(48000)
+            render(48096)
+            // The feedback up to the most and back down, at the shortest length.
+            control(FxControl.TEMPO, 0, 120f, 0f)
+            start("n", hiss, 2, 48000, shape = on(0))
+            for (i in 0..10) {
+                control(FxControl.FX_XY, 0, 0f, i / 10f)
+                render(96)
+            }
+            for (i in 10 downTo 0 step 2) {
+                control(FxControl.FX_XY, 0, 0.1f, i / 10f)
+                render(192)
+            }
+            // Nothing sent, a short feedback rings out into silence, where the bus skips it; a click starts
+            // it again.
+            control(FxControl.FX_XY, 0, 0f, 0.3f)
+            control(FxControl.SEND, 0, 0f, 0f)
+            control(FxControl.SEND, 1, 0f, 0f)
+            repeat(7) { render(48000) }
+            render(96)
+            control(FxControl.SEND, 1, 0.5f, 0f)
+            start("c", click, 1, 48000, shape = on(1))
+            render(96)
+            render(2904)
+            render(96)
+        }
+        scenario("time-reverb", outRate = 44100) {
+            val hiss = noise(2, 4410, 8080)
+            control(FxControl.FX_TYPE, FxControl.REVERB, 0.5f, 0.5f)
+            control(FxControl.SEND, 2, 1f, 0f)
+            control(FxControl.SEND, 3, 0.4f, 0f)
+            start("c", click, 1, 44100, shape = on(2))
+            start("n", hiss, 2, 44100, shape = on(3))
+            start("free", ShortArray(4410) { 700 }, 1, 44100)
+            render(64)
+            repeat(4) { render(96) }
+            render(4410)
+            // The size from the least to the most, then the tone from dark across the middle to bright.
+            start("n", hiss, 2, 44100, shape = on(3))
+            for (i in 0..20) {
+                control(FxControl.FX_XY, 0, i / 20f, 0.5f)
+                render(96)
+            }
+            for (i in 0..20) {
+                control(FxControl.FX_XY, 0, 0.8f, i / 20f)
+                render(96)
+            }
+            for (i in 20 downTo 0 step 5) {
+                control(FxControl.FX_XY, 0, 0.8f, 0.4f + i / 100f)
+                render(96)
+            }
+            render(8820)
+            // Nothing sent, the smallest size rings out into silence, where the bus skips it; a click starts
+            // it again.
+            control(FxControl.FX_XY, 0, 0f, 0.2f)
+            control(FxControl.SEND, 2, 0f, 0f)
+            control(FxControl.SEND, 3, 0f, 0f)
+            repeat(6) { render(44100) }
+            render(96)
+            control(FxControl.SEND, 2, 1f, 0f)
+            start("c", click, 1, 44100, shape = on(2))
+            render(96)
+            render(4410)
+        }
+        scenario("time-chorus", outRate = 48000) {
+            val hiss = noise(2, 9600, 2525)
+            val hum = ShortArray(2400) { (((it * 7) % 96) * 400 - 19000).toShort() }
+            control(FxControl.FX_TYPE, FxControl.CHORUS, 0.5f, 0.5f)
+            control(FxControl.SEND, 0, 0.8f, 0f)
+            control(FxControl.SEND, 1, 1f, 0f)
+            start("h", hum, 1, 48000, shape = on(1))
+            render(64)
+            repeat(4) { render(96) }
+            // The rate up, block by block, then the depth and feedback up to the most and down again.
+            for (i in 0..20) {
+                control(FxControl.FX_XY, 0, i / 20f, 0.5f)
+                render(96)
+            }
+            start("n", hiss, 2, 48000, shape = on(0))
+            for (i in 0..10) {
+                control(FxControl.FX_XY, 0, 0.7f, i / 10f)
+                render(96)
+            }
+            render(2400)
+            for (i in 10 downTo 0 step 2) {
+                control(FxControl.FX_XY, 0, 0.3f, i / 10f)
+                render(96)
+            }
+            // At the most feedback, a click rings out into silence (nothing sent after it), where the bus
+            // skips it; then it starts again.
+            control(FxControl.FX_XY, 0, 1f, 1f)
+            cut("h")
+            cut("n")
+            start("c", click, 1, 48000, shape = on(1))
+            render(96)
+            control(FxControl.SEND, 0, 0f, 0f)
+            control(FxControl.SEND, 1, 0f, 0f)
+            repeat(3) { render(96) }
+            render(48000)
+            render(48000)
+            render(96)
+            control(FxControl.SEND, 1, 1f, 0f)
+            start("c", click, 1, 48000, shape = on(1))
+            render(96)
+            render(960)
+        }
+        scenario("time-switches", outRate = 48000) {
+            val hiss = noise(2, 96000, 6161)
+            control(FxControl.SEND, 0, 0.7f, 0f)
+            control(FxControl.SEND, 1, 1f, 0f)
+            start("a", hiss, 2, 48000, shape = on(0))
+            // Each change crossfades over 20 ms (960 frames); the one fading out is reset after.
+            val types = listOf(
+                FxControl.DELAY, FxControl.REVERB, FxControl.CHORUS, FxControl.DISTORTION, FxControl.DELAY,
+                FxControl.NONE, FxControl.REVERB, FxControl.FILTER, FxControl.CHORUS, FxControl.DELAY,
+            )
+            for (type in types) {
+                control(FxControl.FX_TYPE, type, 0.3f, 0.7f)
+                render(96)
+                render(1200)
+            }
+            // Changes inside a fade, then two in one render.
+            control(FxControl.FX_TYPE, FxControl.REVERB, 0.9f, 0.6f)
+            render(96)
+            control(FxControl.FX_TYPE, FxControl.CHORUS, 0.9f, 0.6f)
+            render(96)
+            control(FxControl.FX_TYPE, FxControl.DELAY, 0.2f, 0.9f)
+            control(FxControl.FX_TYPE, FxControl.REVERB, 0.9f, 0.9f)
+            render(64)
+            render(1200)
+            // A delay's echoes cut off by a switch to none, and a fresh delay (from silence) after.
+            cut("a")
+            control(FxControl.FX_TYPE, FxControl.DELAY, 0.3f, 0.8f)
+            start("c", click, 1, 48000, shape = on(1))
+            render(96)
+            render(9600)
+            control(FxControl.FX_TYPE, FxControl.NONE, 0.5f, 0.5f)
+            repeat(12) { render(96) }
+            control(FxControl.FX_TYPE, FxControl.DELAY, 0.3f, 0.8f)
+            render(9600)
+            // SEND_FX held over a group that sends nothing, moved, and let go; the sidechain ducks the
+            // send; the master compressor after the reverb.
+            control(FxControl.FX_TYPE, FxControl.REVERB, 0.7f, 0.3f)
+            control(FxControl.SEND, 1, 0f, 0f)
+            control(FxControl.SIDECHAIN, 0b0001, 0.2f, 0.5f)
+            control(FxControl.COMP, 1, 0.6f, 0.4f)
+            start("a", hiss, 2, 48000, shape = on(0))
+            start("b", ShortArray(4800) { 3000 }, 1, 48000, shape = on(2))
+            render(96)
+            control(FxControl.PUNCH, FxControl.SEND_FX, 0.5f, 0f)
+            repeat(3) { render(96) }
+            start("k", ShortArray(0), 1, 48000, shape = on(-1, duck = true))
+            control(FxControl.PUNCH, FxControl.SEND_FX, 0.9f, 0f)
+            repeat(3) { render(96) }
+            control(FxControl.PUNCH, FxControl.SEND_FX, 0f, 0f)
+            repeat(3) { render(96) }
+            stopAll()
+            render(4800)
+        }
+        scenario("time-every-sample") {
+            // At 1000 Hz, short renders: each effect's samples written out whole. The delay at 300 BPM is
+            // 25 frames (an eighth triplet 66 and two thirds, read between two samples), the reverb's lines
+            // a few dozen, the chorus's taps 5 to 25 frames back.
+            control(FxControl.TEMPO, 0, 300f, 0f)
+            var seed = 61L
+            for (type in listOf(FxControl.DELAY, FxControl.REVERB, FxControl.CHORUS)) {
+                control(FxControl.FX_TYPE, type, 0f, 0.7f)
+                control(FxControl.SEND, 0, 1f, 0f)
+                start("a", noise(1, 30, seed++), 1, 1000, shape = on(0))
+                start("b", click, 1, 1000, shape = on(0))
+                render(40)
+                render(40)
+                control(FxControl.FX_XY, 0, 0.3f, 0.9f)
+                render(40)
+                render(40)
+                control(FxControl.FX_XY, 0, 1f, 0.2f)
+                render(40)
+                stopAll()
+                render(60)
+                control(FxControl.FX_TYPE, FxControl.NONE, 0.5f, 0.5f)
+                render(30)
+            }
+        }
+
+        // Random knob moves, sends, tempos and type changes among these three (and now and then the others),
+        // with SEND_FX, the sidechain and the master compressor, voices on random buses, at real rates and
+        // block sizes.
+        val types = intArrayOf(FxControl.NONE, FxControl.DELAY, FxControl.REVERB, FxControl.CHORUS, FxControl.DELAY, FxControl.REVERB, FxControl.CHORUS)
+        val pool = listOf("seq:0:0", "seq:0:3", "seq:1:5", "seq:2:11", "live:0:3", "live:3:7")
+        var n = 0
+        for ((rate, block) in listOf(44100 to 96, 48000 to 192)) {
+            val random = Random(13377 + n++)
+            scenario("random-time-$rate-$block", rate, VoiceMixer.MAX_VOICES) {
+                val sounds = List(4) {
+                    val channels = 1 + random.nextInt(2)
+                    Pair(noise(channels, 200 + random.nextInt(if (it == 0) 20000 else 3000), random.nextLong(1, Long.MAX_VALUE)), channels)
+                }
+                repeat(240) {
+                    when (random.nextInt(14)) {
+                        0, 1 -> control(FxControl.FX_TYPE, types[random.nextInt(types.size)], random.nextFloat(), random.nextFloat())
+                        2 -> control(FxControl.FX_TYPE, random.nextInt(FxControl.TYPES), random.nextFloat(), random.nextFloat())
+                        3, 4, 5 -> control(FxControl.FX_XY, 0, random.nextFloat(), random.nextFloat())
+                        6 -> control(FxControl.SEND, random.nextInt(4), if (random.nextInt(4) == 0) 0f else random.nextFloat(), 0f)
+                        7 -> control(FxControl.TEMPO, 0, 40f + random.nextInt(220), 0f)
+                        8 -> control(FxControl.COMP, random.nextInt(2), random.nextFloat(), random.nextFloat())
+                        9 -> control(FxControl.PUNCH, FxControl.SEND_FX, if (random.nextBoolean()) 0f else random.nextFloat(), 0f)
+                        10 -> control(FxControl.SIDECHAIN, random.nextInt(16), random.nextFloat(), random.nextFloat())
+                        else -> {}
+                    }
+                    if (random.nextInt(3) == 0) {
+                        val key = pool[random.nextInt(pool.size)]
+                        when (random.nextInt(10)) {
+                            in 0 until 6 -> {
+                                val (pcm, channels) = sounds[random.nextInt(sounds.size)]
+                                val shape = VoiceShape(
+                                    gain = if (random.nextBoolean()) 1f else random.nextInt(0, 101) / 100f,
+                                    pan = if (random.nextBoolean()) 0 else random.nextInt(-16, 17),
+                                    bus = random.nextInt(-1, 4),
+                                    duckSource = random.nextInt(6) == 0,
+                                )
+                                start(key, pcm, channels, rate, random.nextInt(-12, 13), random.nextLong(1, 1_000_000), shape)
+                            }
+                            in 6 until 9 -> release(key)
+                            else -> cut(key)
+                        }
+                    }
+                    render(if (random.nextInt(20) == 0) block * 40 else block)
                 }
                 render(rate / 4)
             }

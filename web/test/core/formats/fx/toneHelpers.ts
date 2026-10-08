@@ -1,4 +1,4 @@
-// Shared by the tone effects' tests (distortion, filter, compressor): signals and measures, as their Kotlin twins have them.
+// Shared by the effects' tests (distortion, filter, compressor, reverb, chorus, delay): signals and measures, as their Kotlin twins have them.
 import type { Effect } from '../../../../src/core/formats/fx/fxBus'
 import { Lcg } from '../../../../src/core/formats/fx/fxMath'
 
