@@ -1144,6 +1144,9 @@ class MainActivity : ComponentActivity() {
                                 onSidechainDest = controller::toggleSidechainDest,
                                 onSidechainXY = controller::setSidechainXY,
                                 haptics = appSettings.haptics,
+                                // The cap plays the pad as Live does, through the effects (a try, never a pattern's note).
+                                onPadDown = { controller.playPad(it, record = false) },
+                                onPadUp = controller::releasePad,
                             ),
                             onDone = { fxSheet = false },
                         )

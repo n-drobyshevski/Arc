@@ -24,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -90,6 +91,9 @@ class FxUi(
     val onSidechainXY: (x: Float, y: Float) -> Unit = { _, _ -> },
     /** A light tick as a knob turns a step (Settings → Haptics). */
     val haptics: Boolean = true,
+    /** The cap holds [selected] down: it plays as Live plays it, through the effects (null: no cap to play). */
+    val onPadDown: ((PhysicalPad) -> Unit)? = null,
+    val onPadUp: (PhysicalPad) -> Unit = {},
 )
 
 /** The FX sheet's two pages. */
@@ -101,6 +105,9 @@ enum class FxPage { EFFECT, OUTPUT }
  * it off), an XY pad for its two knobs, and each group's send to it.
  * OUTPUT: the compressor after everything, and the sidechain (a pad's hits
  * duck the groups picked). Everything goes through [fx]; [onDone] closes it.
+ *
+ * Over both pages, the pad played last as a cap (as the pad sheet has):
+ * held, it plays as a pad does, so the effect is heard while it is set.
  */
 @Composable
 fun ColumnScope.FxSheetContent(fx: FxUi, onDone: () -> Unit, initialPage: FxPage = FxPage.EFFECT) {
@@ -117,9 +124,37 @@ fun ColumnScope.FxSheetContent(fx: FxUi, onDone: () -> Unit, initialPage: FxPage
             compact = true,
         )
     }
+    HearRow(fx)
     if (page == FxPage.EFFECT.ordinal) EffectPage(fx) else OutputPage(fx)
     Text(MirrorText.FX_NOTE, style = ArcType.small, color = c.graphite)
     ArcKey(Strings.DONE, onDone, Modifier.fillMaxWidth(), style = KeyStyle.Quiet)
+}
+
+/** The pad played last as a cap, held to hear it through the effects; before any, a line saying so. */
+@Composable
+private fun HearRow(fx: FxUi) {
+    val c = LocalArcColors.current
+    val pad = fx.selected
+    if (pad == null) {
+        Text(MirrorText.FX_HEAR_NONE, style = ArcType.small, color = c.graphite)
+        return
+    }
+    val name = fx.nameOf(pad)
+    // The pad the press began on is the one let go, whatever is selected meanwhile.
+    val down = fx.onPadDown
+    var held by remember { mutableStateOf<PhysicalPad?>(null) }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        PadCap(
+            pad,
+            name,
+            down?.let { d -> { held = pad; d(pad) } },
+            { held?.let(fx.onPadUp); held = null },
+        )
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(MirrorText.padTitle(pad) + (name?.let { " \u00B7 $it" } ?: ""), style = ArcType.bold, color = c.ink, maxLines = 1)
+            Text(MirrorText.FX_HEAR, style = ArcType.small, color = c.graphite)
+        }
+    }
 }
 
 /** The effects in the sheet's row: every one but none (the one on, tapped again). */

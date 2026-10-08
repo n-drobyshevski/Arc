@@ -789,6 +789,12 @@ object MirrorText {
         return if (tilt < 0) "SNAP ${-tilt}" else if (tilt > 0) "PUMP $tilt" else "EVEN"
     }
 
+    /** Under the sheet's pad cap: what holding it does. */
+    const val FX_HEAR = "Hold the pad to hear it through the effects."
+
+    /** Before any pad was played: the cap has no pad to play yet. */
+    const val FX_HEAR_NONE = "Play a pad in Live to hear the effects here."
+
     /** The sheet's note: the effects are the phone's alone. */
     const val FX_NOTE = "The effects play in Live's sound on the phone; the EP-133's own FX stay as they are."
 

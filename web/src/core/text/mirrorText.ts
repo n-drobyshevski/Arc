@@ -1010,6 +1010,12 @@ export const MirrorText = {
     return tilt < 0 ? `SNAP ${-tilt}` : tilt > 0 ? `PUMP ${tilt}` : 'EVEN'
   },
 
+  /** Under the sheet's pad cap: what holding it does. */
+  FX_HEAR: 'Hold the pad to hear it through the effects.',
+
+  /** Before any pad was played: the cap has no pad to play yet. */
+  FX_HEAR_NONE: 'Play a pad in Live to hear the effects here.',
+
   /** The sheet's note: the effects are the phone's alone. */
   FX_NOTE: "The effects play in Live's sound on the phone; the EP-133's own FX stay as they are.",
 

@@ -242,7 +242,7 @@ fun ColumnScope.PadSheetContent(
  * the title beside it).
  */
 @Composable
-private fun PadCap(pad: PhysicalPad, name: String?, onDown: (() -> Unit)? = null, onUp: () -> Unit = {}) {
+internal fun PadCap(pad: PhysicalPad, name: String?, onDown: (() -> Unit)? = null, onUp: () -> Unit = {}) {
     val hw = LocalHwColors.current
     var pressed by remember { mutableStateOf(false) }
     Box(
