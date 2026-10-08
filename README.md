@@ -73,6 +73,35 @@ Backups use the same layout as the official Sample Tool's `.pak`: a zip with `/m
 
 A debug screen (Settings → **Debug log**, or long-press the section tag) shows every SysEx message sent and received, and can share, save or copy the log as a text file. Its **Latency** test compares Live's audio engines on your own phone or browser (see [Measuring latency](#measuring-latency)).
 
+## Live's FX (Android)
+
+Live's phone engine has the EP-133's effects, built into its own mixer (the native engine, AudioTrack and the Kotlin, C++ and web mixers render the same samples). They are the phone's only: nothing is sent to the EP-133, its own FX settings are never read or changed, and a TAKE or RSP take records them as heard. Each project keeps its own FX in arc (`fx.json`, in the app's own files); a project left at the defaults isn't saved.
+
+- **Master effect** (the FX sheet's EFFECT page, one at a time; the one on, tapped again, turns off). The XY pad sets the effect's X and Y:
+
+  | Effect | X | Y |
+  |---|---|---|
+  | DLY delay | length, 1/32 to 1/2 in time with the tempo (triplets and dotted too) | feedback |
+  | REV reverb | size | colour, darker down, brighter up |
+  | DST distortion | drive | colour, a low-pass down, a high-pass up, open in the middle |
+  | CHO chorus | rate | depth and feedback |
+  | FLT filter | cutoff: a low-pass left, open in the middle, a high-pass right | resonance |
+  | CMP compressor | drive | speed |
+
+- **Sends**, one fader per group A–D: how much of that group goes into the effect. As a send rises a delay, reverb or chorus keeps most of the dry sound, while distortion, filter and compressor take its place.
+- **OUTPUT COMP**: a compressor on the whole output, after the effect and the punch-ins, with DRIVE and SPEED.
+- **Sidechain**: a pad (SOURCE, set from the pad played last) ducks the groups picked under DUCKS each time it plays, a quick dip and a recovery whose LENGTH (30–600 ms) and SHAPE (a snap back to an even fade to a pump) are set by the knobs.
+- **Punch-ins**: hold FX and the one-group pads become twelve punch-ins, by the label printed on each pad, as on the EP-133. A pad held punches its effect in, several combine, and lifting it lets it go; letting go of FX lets go of them all. The depth is the touch's pressure where the screen reports one, else how high up the pad the finger is.
+
+  | Pad | Punch-in | Pad | Punch-in | Pad | Punch-in |
+  |---|---|---|---|---|---|
+  | 7 | tremolo | 8 | octave down | 9 | decimate |
+  | 4 | low-pass filter | 5 | high-pass filter | 6 | send FX (all groups into the effect) |
+  | 1 | beat repeat | 2 | tape stop | 3 | filter LFO |
+  | • | pitch random | 0 | slice | ENTER | stutter |
+
+  Punch-ins start no voice and go into no pattern.
+
 ## Web app
 
 The same app runs in Chrome or Edge, on a computer or an Android phone, at **https://arc-pi-mauve.vercel.app**. It talks to the EP-133 over USB-C with WebMIDI. Everything above is there: backup, restore, the library, contents, compare, search, the device browser, sample upload with trim, pads, the live mirror (opening on Live, shown as one group with A–D by default, pads that sound while held, chords of up to 8 sounds, KEYS with solfège or letter note names and, wherever it fits, the piano, and Offline from the last read, where EDIT and the desktop's **Sounds** tab change pads in arc only until the EP-133 connects), settings, the shortcut guide and the debug log. It looks and reads like the Android app, and its `.pak` files and `library.json` are the same files the Android app writes, so a library moves between the two.
@@ -256,8 +285,9 @@ The behaviours above are commented where they happen in the code. The same goes 
 - **A pad's sound settings are Android only:** EDIT's pages (pitch, level, pan, play mode, trim, envelope, MIDI channel, mute group) and the phone playing pads with them have no web screens yet; the web's pad sheet changes a pad's sound only. The model, the device read and write and the mixer's voice shape are ported to the web's core already, unused there. They write a pad's metadata the way EDIT's sound change does.
 - **SAMPLE is Android only:** the SAMPLE panel, its inputs (the phone's mic, Live's mix, the EP-133 over USB audio), the review sheet and the uploads have no web equivalent yet: the web's Live has no SAMPLE panel. Its pure logic is ported to the web's core already, unused there: the take's capture with the threshold and its pre-roll, the meter, the limits and Disk low, the review's edits, the count-in and PLAY timing, recordings as offline pad changes and uploads into a given slot, with the text. Recording into a pad is an addition: the EP-133 samples on the device itself, and arc uses only commands it already uses (KEEP's upload is EDIT's **Upload a new sample…** onto the pad).
 - **Patterns stay in arc:** RECORD and PLAY record and play on the phone only. Patterns are never written to the EP-133 or read from it, and no MIDI goes to it; they play whatever sound is on each pad, as Live's pads do. Next to the device's sequencer:
-  - one pattern per group, for each project; no scenes, no FX, no swing, no step sequencing (notes go in only as played) and no note repeat;
+  - one pattern per group, for each project; no scenes, no swing, no step sequencing (notes go in only as played) and no note repeat;
   - PLAY always starts at bar 1, never where the pattern stopped;
+  - the FX (see [Live's FX](#lives-fx-android)) play over the patterns as they do over the pads, but nothing about them is recorded into a pattern: not the effect, its knobs, the sends or a punch-in;
   - arc's own clock: the tempo follows the EP-133's while it sends MIDI clock, but the phase doesn't, so bar 1 is wherever PLAY (or, armed, the first pad) was pressed on the phone, not the device's;
   - TIMING is Off, 1/8, 1/16 or 1/32; AUTO length is an addition (1, 2, 4 or 8 bars), and so are SAMPLE's PTN and its bar-locked starts;
   - Android only: the web's core has the logic and the text, with the same tests, but no screens or sequencer yet.
