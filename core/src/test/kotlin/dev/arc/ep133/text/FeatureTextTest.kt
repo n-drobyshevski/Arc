@@ -164,7 +164,7 @@ class FeatureTextTest {
         // Project 1 unless PROJECT stepped on; a last read keeps its own note.
         assertEquals(MirrorText.factoryNote(1), MirrorText.offlineNote(MirrorText.FACTORY))
         assertEquals(MirrorText.OFFLINE_NOTE, MirrorText.offlineNote(MirrorText.lastSeen("5 Oct, 14:02"), 3))
-        assertTrue(MirrorText.LISTEN_ONLY.endsWith("in EDIT, or switch projects with PROJECT."))
+        assertTrue(MirrorText.LISTEN_ONLY.endsWith("in EDIT, switch projects with PROJECT, or keep a sample in SAMPLE."))
         assertEquals("Next project: tap; hold + pad 1–9 to pick", CoachText.PROJECT)
         assertEquals("Project 3, shown", MirrorText.projectChoice(3, shown = true))
         assertEquals("Project 4", MirrorText.projectChoice(4, shown = false))
@@ -176,8 +176,12 @@ class FeatureTextTest {
     @Test
     fun `sample text`() {
         val a7 = PhysicalPad(0, 9)
-        assertEquals("Sample", MirrorText.FN_SAMPLE)
-        assertEquals("LATCH", MirrorText.FN_SAMPLE_SUB.uppercase())
+        assertEquals("Open sample", MirrorText.OPEN_SAMPLE)
+        assertEquals("Back to pads", MirrorText.CLOSE_SAMPLE)
+        assertEquals("Sample", MirrorText.SAMPLE_TAG)
+        assertEquals("Latch on: tap a pad to record hands-free. Tap it again or STOP to stop.", MirrorText.LATCH_NOTE)
+        // LATCH reads STOP while a hands-free take goes on: the shared word.
+        assertEquals("STOP", FeatureText.STOP.uppercase())
         assertEquals(listOf("MIC", "RSP ST", "USB"), listOf(SampleSource.MIC to false, SampleSource.RSP to true, SampleSource.USB to false).map { (s, st) -> MirrorText.sourceShort(s, st).uppercase() })
         assertEquals("Phone mic, mono", MirrorText.sourceName(SampleSource.MIC, false))
         assertEquals("Resample the phone's sound, stereo", MirrorText.sourceName(SampleSource.RSP, true))
@@ -193,11 +197,6 @@ class FeatureTextTest {
         assertEquals("Pad A 7: uploading, 40%", MirrorText.sampleUploading(a7, 40))
         assertEquals("Disk low: room for 12 s", MirrorText.diskLow(12))
         assertEquals("Pad A 7: uploading", MirrorText.sampleUploading(a7))
-        assertEquals("Recording hands-free. Tap to stop.", MirrorText.sampleKeyState(on = true, recording = true, handsFree = true))
-        assertEquals("Waiting to record hands-free. Tap to stop.", MirrorText.sampleKeyState(on = true, recording = false, handsFree = true))
-        assertEquals("Recording. Tap to leave sample mode.", MirrorText.sampleKeyState(on = true, recording = true))
-        assertEquals("On. Tap to leave sample mode.", MirrorText.sampleKeyState(on = true, recording = false))
-        assertEquals("Off. Tap, then hold a pad to record into it.", MirrorText.sampleKeyState(on = false, recording = false))
         assertEquals("Pad A 7, has a sound", MirrorText.padTitle(a7) + MirrorText.padSampleState(true))
         assertEquals(", empty", MirrorText.padSampleState(false))
         assertEquals("The input couldn't be opened: busy", MirrorText.inputFailed("busy"))
@@ -217,6 +216,6 @@ class FeatureTextTest {
         assertEquals("Put 1 offline pad change and 2 new samples on the EP-133?", MirrorText.putOffline(1, samples = 2))
         assertEquals("Review samples", SettingsText.REVIEW_SAMPLES)
         assertTrue(SettingsText.REVIEW_SAMPLES_NOTE.endsWith("as on the EP-133."))
-        assertEquals("Sample: tap, then hold a pad; hold + pad to latch", CoachText.SAMPLE)
+        assertEquals("Sample: swipe the pads left", CoachText.SAMPLE)
     }
 }

@@ -197,4 +197,59 @@ class SampleKeepTest {
         val other = offlineAssign(before, PadTarget(1, 0, 2, 7), 9, "hat", SoundSource.DEVICE, readSlot = 7)
         assertTrue(recordingsLetGo(before, other, emptySet()).isEmpty())
     }
+
+    @Test
+    fun `a sound written on a pad while connected takes the recordings waiting there off it`() {
+        val t = PadTarget(1, 0, 1, 5)
+        val rec = OfflinePad(1, 0, 1, 0, "mic 1007-142301", SoundSource.RECORDED, "smp-a.wav")
+        val snare = OfflinePad(1, 0, 2, 7, "snare", SoundSource.DEVICE)
+        val otherRec = OfflinePad(1, 0, 2, 0, "mic 1007-142302", SoundSource.RECORDED, "smp-b.wav")
+        val pads = OfflinePads(listOf(rec, snare, otherRec))
+        // Queued (or failed): it would overwrite the sound just written when its turn came.
+        assertEquals(listOf(snare, otherRec), withoutRecordingsOn(pads, t, emptySet()).list)
+        // Going up now: left to its upload.
+        assertEquals(pads.list, withoutRecordingsOn(pads, t, setOf("smp-a.wav")).list)
+        // Another project's pad of the same number keeps its recording.
+        assertEquals(pads.list, withoutRecordingsOn(pads, t.copy(project = 2), emptySet()).list)
+    }
+
+    @Test
+    fun `a review counts the slots the recordings kept and not up yet go into as in use`() {
+        // A kept with slot 6 and waiting: B's review steps over it, and its next free one is not 6.
+        val taken = slotsTaken(setOf(1, 2, 4), listOf(6, null))
+        assertEquals(setOf(1, 2, 4, 6), taken)
+        assertEquals(5, stepFreeSlot(taken, 3, 1))
+        assertEquals(7, stepFreeSlot(taken, 5, 1))
+        assertEquals(7, review(shortArrayOf(1), occupied = slotsTaken(setOf(1, 2, 3, 4, 5), listOf(6))).nextFree)
+    }
+
+    @Test
+    fun `a tap on the hands-free take's pad stops it, an unsure one once kept`() {
+        val other = PhysicalPad(0, 3)
+        fun press(pad: PhysicalPad = seven, held: PhysicalPad? = null, latched: PhysicalPad? = seven, handsFree: Boolean = true, going: Boolean = true, latch: Boolean = true, unsure: Boolean = false) =
+            samplePress(pad, held, latched, handsFree, going, latch, unsure)
+        assertEquals(SamplePress.STOP, press())
+        // On the scrolling page a scroll that starts on the pad must not stop it.
+        assertEquals(SamplePress.STOP_WHEN_KEPT, press(unsure = true))
+        // Another pad plays beside the take, as ever.
+        assertEquals(SamplePress.PLAY, press(pad = other))
+        // Its count-in or wait over with nothing (the take ended): the pad latches again.
+        assertEquals(SamplePress.LATCH, press(handsFree = false, going = false))
+        assertEquals(SamplePress.LATCH_WHEN_KEPT, press(handsFree = false, going = false, unsure = true))
+        // A held take going on: its pad isn't a hands-free one, another pad plays.
+        assertEquals(SamplePress.PLAY, press(held = other, latched = null, handsFree = false))
+        // LATCH off and nothing going: held to record.
+        assertEquals(SamplePress.HOLD, press(latched = null, handsFree = false, going = false, latch = false))
+    }
+
+    @Test
+    fun `a take coming in lets go of its latch, unless the pad was latched anew as it ended`() {
+        val other = PhysicalPad(0, 3)
+        assertNull(latchAfterTake(seven, seven, going = false))
+        // Tapped again on the downbeat as its bars ran out: the new take keeps its latch.
+        assertEquals(seven, latchAfterTake(seven, seven, going = true))
+        // Another pad's latch is left alone.
+        assertEquals(other, latchAfterTake(other, seven, going = false))
+        assertNull(latchAfterTake(null, seven, going = false))
+    }
 }

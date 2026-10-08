@@ -75,12 +75,14 @@ class SampleRecorderTest {
         val recorder = SampleRecorder(mix, { _, s -> sink = s; input }, CoroutineScope(dispatcher)) { now }
         val takes = mutableListOf<SampleTake>()
         val lost = mutableListOf<String>()
+        var reopened = 0
         val phases = mutableListOf<SamplePhase>()
         var fed = 0L
 
         init {
             recorder.onDone = { takes += it }
             recorder.onLost = { _, why -> lost += why }
+            recorder.onReopened = { reopened++ }
         }
 
         fun open(input: SampleInput = mic, gainDb: Float = 0f): String? = recorder.open(input, gainDb)
@@ -514,14 +516,18 @@ class SampleRecorderTest {
         val second = r.mix.sampleTap!!
         assertTrue(second !== first)
         assertEquals(44100, r.recorder.rate)
+        // The controller hears of it, to show the new rate (and the longest take at it).
+        assertEquals(1, r.reopened)
         second.mixed(ShortArray(20), 10, 10, 44100)
         assertSame(second, r.mix.sampleTap)
         assertTrue(r.lost.isEmpty())
+        assertEquals(1, r.reopened)
         // Live closing for good is a lost input.
         r.mix.mixRate = null
         second.lost(LiveAudio.TAP_CLOSED)
         assertEquals(listOf(LiveAudio.TAP_CLOSED), r.lost)
         assertNull(r.recorder.input)
+        assertEquals(1, r.reopened)
     }
 
     @Test

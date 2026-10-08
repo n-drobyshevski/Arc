@@ -164,8 +164,12 @@ describe('FeatureTextTest', () => {
 
   it('sample text', () => {
     const a7 = physicalPad(0, 9)
-    expect(MirrorText.FN_SAMPLE).toBe('Sample')
-    expect(MirrorText.FN_SAMPLE_SUB.toUpperCase()).toBe('LATCH')
+    expect(MirrorText.OPEN_SAMPLE).toBe('Open sample')
+    expect(MirrorText.CLOSE_SAMPLE).toBe('Back to pads')
+    expect(MirrorText.SAMPLE_TAG).toBe('Sample')
+    expect(MirrorText.LATCH_NOTE).toBe('Latch on: tap a pad to record hands-free. Tap it again or STOP to stop.')
+    // LATCH reads STOP while a hands-free take goes on: the shared word.
+    expect(FeatureText.STOP.toUpperCase()).toBe('STOP')
     expect(
       ([[SampleSource.MIC, false], [SampleSource.RSP, true], [SampleSource.USB, false]] as const).map(([s, st]) =>
         MirrorText.sourceShort(s, st).toUpperCase(),
@@ -185,11 +189,6 @@ describe('FeatureTextTest', () => {
     expect(MirrorText.sampleUploading(a7, 40)).toBe('Pad A 7: uploading, 40%')
     expect(MirrorText.diskLow(12)).toBe('Disk low: room for 12 s')
     expect(MirrorText.sampleUploading(a7)).toBe('Pad A 7: uploading')
-    expect(MirrorText.sampleKeyState(true, true, true)).toBe('Recording hands-free. Tap to stop.')
-    expect(MirrorText.sampleKeyState(true, false, true)).toBe('Waiting to record hands-free. Tap to stop.')
-    expect(MirrorText.sampleKeyState(true, true, false)).toBe('Recording. Tap to leave sample mode.')
-    expect(MirrorText.sampleKeyState(true, false)).toBe('On. Tap to leave sample mode.')
-    expect(MirrorText.sampleKeyState(false, false)).toBe('Off. Tap, then hold a pad to record into it.')
     expect(MirrorText.padTitle(a7) + MirrorText.padSampleState(true)).toBe('Pad A 7, has a sound')
     expect(MirrorText.padSampleState(false)).toBe(', empty')
     expect(MirrorText.inputFailed('busy')).toBe("The input couldn't be opened: busy")
@@ -209,6 +208,6 @@ describe('FeatureTextTest', () => {
     expect(MirrorText.putOffline(1, 2)).toBe('Put 1 offline pad change and 2 new samples on the EP-133?')
     expect(SettingsText.REVIEW_SAMPLES).toBe('Review samples')
     expect(SettingsText.REVIEW_SAMPLES_NOTE.endsWith('as on the EP-133.')).toBe(true)
-    expect(CoachText.SAMPLE).toBe('Sample: tap, then hold a pad; hold + pad to latch')
+    expect(CoachText.SAMPLE).toBe('Sample: swipe the pads left')
   })
 })

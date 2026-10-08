@@ -580,15 +580,17 @@ export const MirrorText = {
   },
 
   // ---------- SAMPLE: recording into a pad (an addition) ----------
-  /** The SAMPLE function key's two words. Held with a pad, it records hands-free, as SHIFT + pad does on the EP-133. */
-  FN_SAMPLE: 'Sample',
-  FN_SAMPLE_SUB: 'Latch',
+  /**
+   * The SAMPLE card beside Live's pads, reached with a swipe: screen
+   * readers get these as the pads card's action and the SAMPLE card's.
+   */
+  OPEN_SAMPLE: 'Open sample',
+  CLOSE_SAMPLE: 'Back to pads',
 
   /** The sources' words, upper-cased where shown, as the device prints them. */
   MIC: 'Mic',
   RSP: 'Rsp',
   USB: 'Usb',
-  MONO: 'Mono',
   STEREO: 'Stereo',
 
   /** "Rsp St", the source chip (upper-cased where shown: "RSP ST"); mono has no mark, as on the device. */
@@ -627,11 +629,12 @@ export const MirrorText = {
     return n === null ? 'Free' : plural(n, 'bar')
   },
 
-  /** The strip's switch for hands-free takes, for one hand or a screen reader (SAMPLE held does the same). */
+  /**
+   * The switch for hands-free takes, for one hand or a screen reader; while
+   * one goes on (or counts in, or waits) its key reads STOP ([FeatureText.STOP]).
+   */
   LATCH: 'Latch',
-  LATCH_NOTE: 'Latch on: tap a pad to record hands-free. Tap SAMPLE to stop.',
-  MONITOR: 'Monitor',
-  MONITOR_NOTE: 'Plays the mic in your headphones while you sample.',
+  LATCH_NOTE: 'Latch on: tap a pad to record hands-free. Tap it again or STOP to stop.',
   /** The meter, for screen readers, and its clip light. */
   INPUT_LEVEL: 'Input level',
   CLIPPING: 'Clipping',
@@ -662,19 +665,6 @@ export const MirrorText = {
   DISK_LOW: 'Disk low',
   diskLow(seconds: number): string {
     return `${MirrorText.DISK_LOW}: room for ${seconds} s`
-  },
-
-  /**
-   * SAMPLE for screen readers: what it is now and what a tap does.
-   * [recording]: a take records; [handsFree]: a hands-free take goes on
-   * (recording, or waiting for sound, the count-in or PLAY), which a tap stops.
-   */
-  sampleKeyState(on: boolean, recording = false, handsFree = false): string {
-    if (handsFree && recording) return 'Recording hands-free. Tap to stop.'
-    if (handsFree) return 'Waiting to record hands-free. Tap to stop.'
-    if (recording) return 'Recording. Tap to leave sample mode.'
-    if (on) return 'On. Tap to leave sample mode.'
-    return 'Off. Tap, then hold a pad to record into it.'
   },
 
   /** Added to a pad's name for screen readers in the mode: ", has a sound" or ", empty". */

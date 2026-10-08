@@ -45,7 +45,7 @@ export type SamplePhase =
   | { readonly type: 'WaitingForPlay'; readonly pad: PhysicalPad }
   /** The click counts [beat] of the bar before a take of some bars into [pad]. */
   | { readonly type: 'CountIn'; readonly pad: PhysicalPad; readonly beat: number }
-  /** Recording into [pad]: [seconds] of at most [max]; [latched] when it runs hands-free until SAMPLE stops it. */
+  /** Recording into [pad]: [seconds] of at most [max]; [latched] when it runs hands-free until STOP, or a tap on its pad, stops it (or its bars run out). */
   | { readonly type: 'Recording'; readonly pad: PhysicalPad; readonly seconds: number; readonly max: number; readonly latched: boolean }
   /** A kept take goes onto [pad] on the EP-133, [percent] of it sent. */
   | { readonly type: 'Uploading'; readonly pad: PhysicalPad; readonly percent: number }

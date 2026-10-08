@@ -352,9 +352,9 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * SAMPLE tapped outside the mode: it opens, asking for the mic first when
-     * the input last chosen needs it (MIC or USB); RSP doesn't, and opens
-     * with whatever Android last said.
+     * The SAMPLE card swiped open: the mode opens, asking for the mic first
+     * when the input last chosen needs it (MIC or USB); RSP doesn't, and
+     * opens with whatever Android last said.
      */
     private fun enterSample() {
         val input = controller.sample.value.input
@@ -672,33 +672,13 @@ class MainActivity : ComponentActivity() {
             pad = state.keysPad,
             padName = state.keysPad?.let(controller::mirrorName),
         )
-        // Live's function keys: SAMPLE is its mode, PROJECT steps through the projects, KEYS is the mode,
-        // TEMPO the phone's click.
+        // Live's function keys: PROJECT steps through the projects, KEYS is the mode, TEMPO the phone's click.
         val metronome by controller.metronome.collectAsStateWithLifecycle()
         val sample by controller.sample.collectAsStateWithLifecycle()
-        val samplePhase = sample.phase
+        val lastTake by controller.sampleLastTake.collectAsStateWithLifecycle()
+        // SAMPLE's take before KEEP: dismissed, it is discarded (the toast offers UNDO).
+        val review by controller.sampleReview.collectAsStateWithLifecycle()
         val functions = dev.arc.ep133.ui.screens.FunctionKeysUi(
-            sample = dev.arc.ep133.ui.screens.SampleKeyUi(
-                on = sample.on,
-                recording = samplePhase is dev.arc.ep133.features.SamplePhase.Recording,
-                // A hands-free take, its count-in or its wait: a tap stops it.
-                handsFree = sample.on && dev.arc.ep133.ui.screens.handsFreeTake(samplePhase),
-                label = dev.arc.ep133.text.MirrorText.sourceShort(sample.input.source, sample.input.stereo),
-                onSample = {
-                    if (sample.on) {
-                        controller.exitSample()
-                    } else {
-                        // The pads record in the mode: KEYS, EDIT and the sheets over them go.
-                        if (appSettings.liveKeys) controller.setLiveKeys(false)
-                        liveEdit = false
-                        padSheet = null
-                        tempoSheet = false
-                        enterSample()
-                    }
-                },
-                onStop = controller::stopSample,
-                onLatchPad = { pad, at -> controller.latchSample(pad, at) },
-            ),
             // SOUND held: the sheet of the pad played last (its tap is EDIT, below).
             onPadSound = {
                 val pad = state.keysPad
@@ -714,11 +694,27 @@ class MainActivity : ComponentActivity() {
             onClick = controller::setClick,
             onTempo = { tempoSheet = true },
         )
-        // SAMPLE mode on Live's page: its line and strip, and the pads recording while it is on.
+        // The SAMPLE card beside Live's pads: a swipe to it opens SAMPLE mode (asking for the mic first
+        // where the input needs it), one back (or Back) leaves it; its pads record while it is open.
         val sampleUi = dev.arc.ep133.ui.screens.SampleUi(
             state = sample,
             level = controller::sampleLevel,
             clip = controller::sampleClip,
+            lastTake = lastTake,
+            // A sheet over Live keeps Back: the SAMPLE card's would otherwise take it first.
+            sheetOpen = review != null || padSheet != null || tempoSheet || projectSheet || fontLicence || padsFor != null ||
+                detail != null || restore != null || comparePickFor != null || state.task != null,
+            onOpen = {
+                if (!sample.on) {
+                    // The pads record in the mode: EDIT and the sheets over them go.
+                    liveEdit = false
+                    padSheet = null
+                    tempoSheet = false
+                    enterSample()
+                }
+            },
+            onClose = { controller.exitSample() },
+            onStop = controller::stopSample,
             onSource = { step -> stepSampleSource(step, sample) },
             onStereo = { stereo -> controller.setSampleInput(sample.input.copy(stereo = stereo)) },
             onGain = controller::setSampleGain,
@@ -1026,8 +1022,7 @@ class MainActivity : ComponentActivity() {
                             onDone = { tempoSheet = false },
                         )
                     }
-                    // SAMPLE's take before KEEP: dismissed, it is discarded (the toast offers UNDO).
-                    val review by controller.sampleReview.collectAsStateWithLifecycle()
+                    // SAMPLE's review sheet (its take collected above).
                     val lastReview = remember { mutableStateOf(review) }.apply { if (review != null) value = review }.value
                     ArcSheet(visible = review != null, onDismiss = { controller.discardSample() }) {
                         lastReview?.let { r ->

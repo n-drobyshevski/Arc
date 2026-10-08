@@ -38,7 +38,7 @@ object MirrorText {
     const val COMMUNITY_NOTE = "Pads follow the official MIDI note map; play/stop and tempo are standard MIDI clock messages. Naming the samples relies on community notes about the device's SysEx, not on the official guide."
     const val NO_PUSHES = "No pad messages from the device yet, so samples can't be named. Pads still light up."
     /** How Live uses the device: it reads, and writes only a pad's sound (in EDIT) and the active project (PROJECT), when asked. */
-    const val LISTEN_ONLY = "arc reads the device here (sound names, the active project's pads, and the samples on them, to keep a copy). It changes the device only when you give a pad another sound in EDIT, or switch projects with PROJECT."
+    const val LISTEN_ONLY = "arc reads the device here (sound names, the active project's pads, and the samples on them, to keep a copy). It changes the device only when you give a pad another sound in EDIT, switch projects with PROJECT, or keep a sample in SAMPLE."
 
     // Tapping a pad plays its sample on the phone.
     const val TAP_NOTE = "Hold a pad to hear its sample on the phone (it stops when you let go): from arc's copy of the device's sounds, a backup, or the device."
@@ -452,15 +452,17 @@ object MirrorText {
     fun takeFailed(reason: String) = "The take couldn't be saved: $reason"
 
     // ---------- SAMPLE: recording into a pad (an addition) ----------
-    /** The SAMPLE function key's two words. Held with a pad, it records hands-free, as SHIFT + pad does on the EP-133. */
-    const val FN_SAMPLE = "Sample"
-    const val FN_SAMPLE_SUB = "Latch"
+    /**
+     * The SAMPLE card beside Live's pads, reached with a swipe: screen
+     * readers get these as the pads card's action and the SAMPLE card's.
+     */
+    const val OPEN_SAMPLE = "Open sample"
+    const val CLOSE_SAMPLE = "Back to pads"
 
     /** The sources' words, upper-cased where shown, as the device prints them. */
     const val MIC = "Mic"
     const val RSP = "Rsp"
     const val USB = "Usb"
-    const val MONO = "Mono"
     const val STEREO = "Stereo"
 
     /** "Rsp St", the source chip (upper-cased where shown: "RSP ST"); mono has no mark, as on the device. */
@@ -499,11 +501,12 @@ object MirrorText {
     const val BARS = "Bars"
     fun barsChoice(n: Int?) = if (n == null) "Free" else Format.plural(n, "bar")
 
-    /** The strip's switch for hands-free takes, for one hand or a screen reader (SAMPLE held does the same). */
+    /**
+     * The switch for hands-free takes, for one hand or a screen reader; while
+     * one goes on (or counts in, or waits) its key reads STOP ([FeatureText.STOP]).
+     */
     const val LATCH = "Latch"
-    const val LATCH_NOTE = "Latch on: tap a pad to record hands-free. Tap SAMPLE to stop."
-    const val MONITOR = "Monitor"
-    const val MONITOR_NOTE = "Plays the mic in your headphones while you sample."
+    const val LATCH_NOTE = "Latch on: tap a pad to record hands-free. Tap it again or STOP to stop."
     /** The meter, for screen readers, and its clip light. */
     const val INPUT_LEVEL = "Input level"
     const val CLIPPING = "Clipping"
@@ -527,19 +530,6 @@ object MirrorText {
     /** A full-length take won't fit in the EP-133's free space, so takes stop sooner. */
     const val DISK_LOW = "Disk low"
     fun diskLow(seconds: Int) = "$DISK_LOW: room for $seconds s"
-
-    /**
-     * SAMPLE for screen readers: what it is now and what a tap does.
-     * [recording]: a take records; [handsFree]: a hands-free take goes on
-     * (recording, or waiting for sound, the count-in or PLAY), which a tap stops.
-     */
-    fun sampleKeyState(on: Boolean, recording: Boolean = false, handsFree: Boolean = false) = when {
-        handsFree && recording -> "Recording hands-free. Tap to stop."
-        handsFree -> "Waiting to record hands-free. Tap to stop."
-        recording -> "Recording. Tap to leave sample mode."
-        on -> "On. Tap to leave sample mode."
-        else -> "Off. Tap, then hold a pad to record into it."
-    }
 
     /** Added to a pad's name for screen readers in the mode: ", has a sound" or ", empty". */
     fun padSampleState(filled: Boolean) = if (filled) ", has a sound" else ", empty"

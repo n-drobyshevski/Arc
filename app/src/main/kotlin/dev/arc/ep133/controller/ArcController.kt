@@ -429,13 +429,13 @@ data class OfflinePrompt(val changes: Int, val samples: Int = 0)
 // ---------- SAMPLE: recording into a pad (an addition) ----------
 
 /**
- * SAMPLE mode as its line and strip show it (an addition): [on] while the
+ * SAMPLE mode as its line and card show it (an addition): [on] while the
  * mode is open, the [input] recording from those [inputs] offered (USB only
  * while plugged in, [usb]; MIC and USB only with the mic allowed), its LEVEL
  * ([gainDb]) and threshold ([thresholdDb], null for none), the [bars] a
- * hands-free take lasts (null: Free), the strip's [latch] and [monitor]
- * switches, what is going on ([phase]), the longest take in seconds
- * ([maxSeconds], less when the EP-133 is short of space: [lowSpace]).
+ * hands-free take lasts (null: Free), the card's [latch] switch, what is
+ * going on ([phase]), the longest take in seconds ([maxSeconds], less when
+ * the EP-133 is short of space: [lowSpace]).
  */
 data class SampleUiState(
     val on: Boolean = false,
@@ -445,7 +445,6 @@ data class SampleUiState(
     val thresholdDb: Float? = null,
     val bars: Int? = null,
     val latch: Boolean = false,
-    val monitor: Boolean = false,
     val phase: SamplePhase = SamplePhase.Ready,
     val maxSeconds: Int = dev.arc.ep133.features.SampleLimits.MAX_MONO_S,
     val lowSpace: Boolean = false,
@@ -634,6 +633,80 @@ internal fun stepFreeSlot(occupied: Set<Int>, from: Int?, step: Int): Int? {
     return s
 }
 
+/** What a pad pressed in SAMPLE mode does ([samplePress]). */
+internal enum class SamplePress {
+    /** Stops the hands-free take it is the pad of (or that take's count-in or wait for PLAY), at the press. */
+    STOP,
+
+    /** The same once the press is kept (an unsure press on the scrolling page): a scroll stops nothing. */
+    STOP_WHEN_KEPT,
+
+    /** Plays as ever beside the take going on: how a chord goes into RSP. */
+    PLAY,
+
+    /** LATCH on: a hands-free take into it. */
+    LATCH,
+
+    /** The same once the press is kept: a scroll latches nothing. */
+    LATCH_WHEN_KEPT,
+
+    /** Records into it while held. */
+    HOLD,
+}
+
+/**
+ * What a press on [pad] does in SAMPLE mode: [held] is the pad held to
+ * record (null for none), [latched] the pad of a hands-free take, and
+ * [handsFree] whether that take (or its count-in, or its wait for PLAY)
+ * goes on; [going], whether any take does; [latch], LATCH; [unsure], a
+ * press on the scrolling page that may yet be a scroll. A tap on the
+ * hands-free take's pad stops it, as STOP does.
+ */
+internal fun samplePress(
+    pad: dev.arc.ep133.features.PhysicalPad,
+    held: dev.arc.ep133.features.PhysicalPad?,
+    latched: dev.arc.ep133.features.PhysicalPad?,
+    handsFree: Boolean,
+    going: Boolean,
+    latch: Boolean,
+    unsure: Boolean,
+): SamplePress = when {
+    held == null && latched == pad && handsFree -> if (unsure) SamplePress.STOP_WHEN_KEPT else SamplePress.STOP
+    going -> SamplePress.PLAY
+    latch -> if (unsure) SamplePress.LATCH_WHEN_KEPT else SamplePress.LATCH
+    else -> SamplePress.HOLD
+}
+
+/**
+ * The hands-free take's pad ([latched]) once a take into [take] has come
+ * in: let go of when it was that take's, unless a take is [going] again
+ * (the same pad latched anew as the last take ended, before it came in).
+ */
+internal fun latchAfterTake(
+    latched: dev.arc.ep133.features.PhysicalPad?,
+    take: dev.arc.ep133.features.PhysicalPad,
+    going: Boolean,
+): dev.arc.ep133.features.PhysicalPad? = if (latched == take && !going) null else latched
+
+/**
+ * The slots a new take's review counts as in use: the device's
+ * ([device]), and those the recordings kept and not yet up are going into
+ * ([held], each as its review left it; null for the next free one then).
+ */
+internal fun slotsTaken(device: Set<Int>, held: Collection<Int?>): Set<Int> = device + held.filterNotNull()
+
+/**
+ * [pads] with the recordings on [t]'s pad taken off, but those [going] up
+ * now: another sound was written onto the pad while connected, and they
+ * would overwrite it when their turn came.
+ */
+internal fun withoutRecordingsOn(pads: OfflinePads, t: dev.arc.ep133.features.PadTarget, going: Set<String>): OfflinePads =
+    OfflinePads(
+        pads.list.filterNot {
+            it.source == SoundSource.RECORDED && it.project == t.project && it.group == t.group && it.pad == t.pad && it.file !in going
+        },
+    )
+
 /**
  * The offline changes a connected mirror shows: only the recordings on their
  * way up now, or whose upload failed in this connection ([uploading], by
@@ -793,6 +866,16 @@ class ArcController(
     private var session: Session? = null
     private var openDeviceId: Int? = null
     private var abortCurrent: CancelSignal? = null
+    // SAMPLE's upload going on while Live plays on: its Cancel (the transfer notification's).
+    private var abortBackground: CancelSignal? = null
+    private val _backgroundTask = MutableStateFlow<TaskUi?>(null)
+
+    /**
+     * A transfer that runs while Live plays on, with no progress sheet
+     * (SAMPLE's uploads): the transfer service keeps arc alive for it, with
+     * its notification and Cancel, as for a [UiState.task].
+     */
+    val backgroundTask: StateFlow<TaskUi?> = _backgroundTask.asStateFlow()
     /** The running task doesn't use the EP-133 (the factory download): unplugging it doesn't cancel it. */
     @Volatile
     private var deviceless = false
@@ -1005,11 +1088,16 @@ class ArcController(
         }
     }
 
-    /** Cancel stops between items, like the web version. */
+    /** Cancel stops between items, like the web version; with no task, it stops SAMPLE's upload ([backgroundTask]). */
     fun cancelTask() {
-        val a = abortCurrent ?: return
-        a.cancel()
-        _state.update { st -> st.task?.let { st.copy(task = it.copy(cancelling = true, label = Strings.STOPPING)) } ?: st }
+        abortCurrent?.let { a ->
+            a.cancel()
+            _state.update { st -> st.task?.let { st.copy(task = it.copy(cancelling = true, label = Strings.STOPPING)) } ?: st }
+            return
+        }
+        val b = abortBackground ?: return
+        b.cancel()
+        _backgroundTask.update { it?.copy(cancelling = true, label = Strings.STOPPING) }
     }
 
     private fun fmtDate(ms: Long): String =
@@ -2384,7 +2472,6 @@ class ArcController(
         val input: SampleInput? = null,
         val inputs: List<SampleInput> = emptyList(),
         val latch: Boolean = false,
-        val monitor: Boolean = false,
         /** The open input's rate, and whether a take from it is stereo (a stereo mic may open mono). */
         val rate: Int = dev.arc.ep133.audio.SampleRecorder.DEFAULT_RATE,
         val stereo: Boolean = false,
@@ -2393,8 +2480,13 @@ class ArcController(
         val usb: Boolean = false,
     )
 
-    /** A recording kept while connected, waiting its turn to upload: its [file], [pad], and the [slot] picked (null: the next free one). */
-    private class QueuedSample(val pad: dev.arc.ep133.features.PhysicalPad, val file: String, val slot: Int?)
+    /**
+     * A recording kept while connected, waiting its turn to upload: its
+     * [file], [pad], and the [slot] picked (null: the next free one); [held]
+     * is the slot its review showed, kept from the next review's choice
+     * until it is up ([sampleSlotsTaken]).
+     */
+    private class QueuedSample(val pad: dev.arc.ep133.features.PhysicalPad, val file: String, val slot: Int?, val held: Int?)
 
     // The EP-133's USB input, watched while the mode is open.
     private val usbInputs = dev.arc.ep133.audio.UsbAudioInputs(context.getSystemService(android.media.AudioManager::class.java))
@@ -2406,12 +2498,17 @@ class ArcController(
     // A recording going up to the EP-133, with how far.
     private val sampleUploading = MutableStateFlow<SamplePhase.Uploading?>(null)
 
-    /** SAMPLE mode, for its key, line and strip. */
+    /** SAMPLE mode, for its card and its line. */
     val sample: StateFlow<SampleUiState> =
         combine(sampleMode, settings, recorder.phase, sampleWaiting, sampleUploading) { m, s, rec, waiting, up -> sampleUi(m, s, rec, waiting, up) }
             .stateIn(scope, kotlinx.coroutines.flow.SharingStarted.Eagerly, sampleUi(SampleMode(), settings.value, SamplePhase.Ready, null, null))
 
     private val _sampleReview = MutableStateFlow<SampleReview?>(null)
+
+    private val _sampleLastTake = MutableStateFlow<List<dev.arc.ep133.features.Peak>?>(null)
+
+    /** The last take's waveform (kept or on the review sheet), for the SAMPLE card's display while nothing records; null before the first. */
+    val sampleLastTake: StateFlow<List<dev.arc.ep133.features.Peak>?> = _sampleLastTake.asStateFlow()
 
     /** The take on the review sheet, if any. */
     val sampleReview: StateFlow<SampleReview?> = _sampleReview.asStateFlow()
@@ -2424,6 +2521,10 @@ class ArcController(
     private var sampleHeld: Pair<dev.arc.ep133.features.PhysicalPad, Long>? = null
     // With LATCH on, an unsure press (the scrolling page) and when it was pressed: it latches once kept.
     private var sampleLatchUnsure: Pair<dev.arc.ep133.features.PhysicalPad, Long>? = null
+    // An unsure press on the hands-free take's pad, and when it was pressed: it stops the take once kept.
+    private var sampleStopUnsure: Pair<dev.arc.ep133.features.PhysicalPad, Long>? = null
+    // The pad whose press, still down, latched the hands-free take: a swipe or scroll taking it latches nothing.
+    private var sampleLatchPress: dev.arc.ep133.features.PhysicalPad? = null
     // The pad of a hands-free take, from its latch (or count-in); over once the recorder no longer has a take going.
     private var sampleLatched: dev.arc.ep133.features.PhysicalPad? = null
     // Pads played as ever while a take records, to let go of with their finger.
@@ -2437,6 +2538,8 @@ class ArcController(
     private var stoppedInBackground = false
     // Recordings kept while connected, waiting for [uploadSamples].
     private val sampleQueue = ArrayList<QueuedSample>()
+    // The queued recording going up now, while the worker uploads it: its slot is still held.
+    private var sampleUpNow: QueuedSample? = null
     // Recordings on their way up, by file, from the moment they leave the queue (or Write's list) until
     // their upload ends: the worker's and Write's may both be in [uploadRecorded], one waiting its turn.
     private val samplesGoingUp = HashSet<String>()
@@ -2455,6 +2558,8 @@ class ArcController(
     init {
         recorder.onDone = ::sampleDone
         recorder.onLost = ::sampleLost
+        // RSP reopened at Live's output's new rate: the mode shows it, and its longest take.
+        recorder.onReopened = { if (sampleMode.value.on) syncSampleInput() }
         // Android silencing the mic (a call, another app recording): said each time it starts.
         scope.launch { recorder.silenced.collect { if (it) toast(dev.arc.ep133.text.MirrorText.MIC_BUSY, error = true) } }
         // The EP-133's USB input plugged in or out: −/+ offers it or not.
@@ -2485,7 +2590,6 @@ class ArcController(
             thresholdDb = s.sampleThreshold,
             bars = s.sampleBars,
             latch = m.latch,
-            monitor = m.monitor,
             // The count-in shows over the take it has scheduled; a take over the wait for PLAY or an upload.
             phase = waiting as? SamplePhase.CountIn ?: rec.takeIf { it != SamplePhase.Ready } ?: waiting ?: up ?: SamplePhase.Ready,
             maxSeconds = sampleMaxFrames(stereo, m.rate, m.free) / m.rate,
@@ -2503,8 +2607,9 @@ class ArcController(
     fun sampleClip(): Boolean = recorder.clip()
 
     /**
-     * SAMPLE tapped: the mode opens on the input last chosen, metering it
-     * at once; nothing records until a pad is held. Without the mic
+     * The SAMPLE card opened (a swipe on Live's pads): the mode opens on the
+     * input last chosen, metering it at once; nothing records until a pad is
+     * held. Without the mic
      * ([micAllowed] false, as the activity found it) MIC and USB aren't
      * offered and RSP stands in. EDIT's pad sheet closes. Called again when
      * the permission came meanwhile, the mic and USB come in.
@@ -2541,6 +2646,8 @@ class ArcController(
         if (background && recorder.phase.value is SamplePhase.Recording) stoppedInBackground = true
         sampleHeld = null
         sampleLatchUnsure = null
+        sampleStopUnsure = null
+        sampleLatchPress = null
         sampleLatched = null
         samplePlayed.forEach(::releasePad)
         samplePlayed.clear()
@@ -2644,9 +2751,6 @@ class ArcController(
     /** LATCH: a tap on a pad records hands-free, for one hand or a screen reader (not kept). */
     fun setSampleLatch(on: Boolean) = sampleMode.update { it.copy(latch = on) }
 
-    /** MONITOR: the mic in the headphones while sampling (not kept). */
-    fun setSampleMonitor(on: Boolean) = sampleMode.update { it.copy(monitor = on) }
-
     /** Settings' "Review samples": each take opens the review sheet, or goes straight on its pad. */
     fun setReviewSamples(on: Boolean) = changeSettings { it.copy(reviewSamples = on) }
 
@@ -2678,23 +2782,34 @@ class ArcController(
      * with LATCH on it starts a hands-free take ([latchSample]), an [unsure]
      * press only once [samplePadKept] says it was a press (a scroll starts
      * nothing). While a take goes on, another pad plays as ever ([playPad],
-     * [unsure] as there), which is how a chord goes into RSP.
+     * [unsure] as there), which is how a chord goes into RSP; a tap on the
+     * pad of a hands-free take (recording, or counting in or waiting for it)
+     * stops it at the press, as STOP does ([samplePress]; an [unsure] one
+     * once kept). A press that latched and is then taken by a swipe or a
+     * scroll latches nothing ([samplePadCut]).
      */
     fun samplePadDown(pad: dev.arc.ep133.features.PhysicalPad, pressedAtNanos: Long, unsure: Boolean = false) {
         if (!sampleMode.value.on) return
-        if (sampleGoing()) {
-            samplePlayed += pad
-            playPad(pad, unsure = unsure, pressedAt = pressedAtNanos)
-            return
+        val handsFree = sampleCount?.isActive == true || recorder.going
+        when (samplePress(pad, sampleHeld?.first, sampleLatched, handsFree, sampleGoing(), sampleMode.value.latch, unsure)) {
+            SamplePress.STOP -> stopSampleAt(pressedAtNanos)
+            SamplePress.STOP_WHEN_KEPT -> sampleStopUnsure = pad to pressedAtNanos
+            SamplePress.PLAY -> {
+                samplePlayed += pad
+                playPad(pad, unsure = unsure, pressedAt = pressedAtNanos)
+            }
+            SamplePress.LATCH -> {
+                latchSample(pad, pressedAtNanos)
+                if (sampleLatched == pad) sampleLatchPress = pad
+            }
+            SamplePress.LATCH_WHEN_KEPT -> sampleLatchUnsure = pad to pressedAtNanos
+            SamplePress.HOLD -> {
+                // An input lost on the way (Live's output closed under RSP): open it again for this press.
+                if (recorder.input == null) openSampleInput(sampleMode.value.input ?: storedSampleInput())
+                if (!armSample(pad, pressedAtNanos, latched = false)) return
+                sampleHeld = pad to pressedAtNanos
+            }
         }
-        if (sampleMode.value.latch) {
-            if (unsure) sampleLatchUnsure = pad to pressedAtNanos else latchSample(pad, pressedAtNanos)
-            return
-        }
-        // An input lost on the way (Live's output closed under RSP): open it again for this press.
-        if (recorder.input == null) openSampleInput(sampleMode.value.input ?: storedSampleInput())
-        if (!armSample(pad, pressedAtNanos, latched = false)) return
-        sampleHeld = pad to pressedAtNanos
     }
 
     /** Arms a take into [pad]; false after a toast when there is no room left for one. */
@@ -2711,6 +2826,7 @@ class ArcController(
      * a toast says to hold it.
      */
     fun samplePadUp(pad: dev.arc.ep133.features.PhysicalPad, releasedAtNanos: Long) {
+        if (sampleLatchPress == pad) sampleLatchPress = null
         if (samplePlayed.remove(pad)) return releasePad(pad)
         val (held, at) = sampleHeld ?: return
         if (held != pad) return
@@ -2726,21 +2842,48 @@ class ArcController(
 
     /**
      * A press on the scrolling page was a press after all: with LATCH on its
-     * hands-free take starts now, from the press; one played beside a take
-     * goes on as [keepPad] says.
+     * hands-free take starts now, from the press; on the hands-free take's
+     * pad it stops the take, at the press; one played beside a take goes on
+     * as [keepPad] says.
      */
     fun samplePadKept(pad: dev.arc.ep133.features.PhysicalPad) {
+        sampleStopUnsure?.takeIf { it.first == pad }?.let { (_, at) ->
+            sampleStopUnsure = null
+            // Still that pad's take (it may have run out meanwhile).
+            if (sampleLatched == pad) stopSampleAt(at)
+            return
+        }
         sampleLatchUnsure?.takeIf { it.first == pad }?.let { (_, at) ->
             sampleLatchUnsure = null
-            return latchSample(pad, at)
+            latchSample(pad, at)
+            if (sampleLatched == pad) sampleLatchPress = pad
+            return
         }
         if (pad in samplePlayed) keepPad(pad)
     }
 
-    /** The press on [pad] turned into a scroll: its take is thrown away, or never latched (or, played beside one, its sound cut). */
+    /**
+     * The press on [pad] turned into a scroll, or a swipe between Live's
+     * cards took it: its take is thrown away, or never latched (a hands-free
+     * take it latched, or that take's count-in, ends with nothing), never
+     * stopped; played beside one, its sound is cut.
+     */
     fun samplePadCut(pad: dev.arc.ep133.features.PhysicalPad) {
+        if (sampleStopUnsure?.first == pad) {
+            sampleStopUnsure = null
+            return
+        }
         if (sampleLatchUnsure?.first == pad) {
             sampleLatchUnsure = null
+            return
+        }
+        if (sampleLatchPress == pad) {
+            sampleLatchPress = null
+            if (sampleLatched == pad) {
+                sampleCount?.cancel()
+                sampleLatched = null
+                recorder.cancel()
+            }
             return
         }
         if (samplePlayed.remove(pad)) return cutPad(pad)
@@ -2750,8 +2893,8 @@ class ArcController(
     }
 
     /**
-     * SAMPLE held and [pad] tapped (or a tap with LATCH on): a hands-free
-     * take into [pad], as SHIFT + pad on the EP-133, until [stopSample].
+     * A tap on [pad] with LATCH on (or a screen reader's click on it): a
+     * hands-free take into [pad], as SHIFT + pad on the EP-133, until [stopSample].
      * With BARS set it lasts that long, after a bar's count-in on the click
      * ([countInSample]); from USB while the EP-133 sends its clock, it waits
      * for the device's PLAY instead ([waitForPlay]). A latch while one goes
@@ -2772,11 +2915,15 @@ class ArcController(
         }
     }
 
-    /** SAMPLE tapped during a hands-free take: it stops now (a count-in or a wait for PLAY just ends). */
-    fun stopSample() {
+    /** STOP (LATCH's key during a hands-free take): it stops now (a count-in or a wait for PLAY just ends). */
+    fun stopSample() = stopSampleAt(System.nanoTime())
+
+    /** The hands-free take stops at [at] (a tap on its pad: the touch's time), as [stopSample]. */
+    private fun stopSampleAt(at: Long) {
         sampleCount?.cancel()
         sampleLatched = null
-        recorder.stop(System.nanoTime())
+        sampleLatchPress = null
+        recorder.stop(at)
     }
 
     /** How long a beat is at [at]: the EP-133's while it sends its clock, else the phone's tempo. */
@@ -2867,7 +3014,8 @@ class ArcController(
      * take kept from the background, say) is kept as it stands first.
      */
     private fun sampleDone(take: dev.arc.ep133.audio.SampleTake) {
-        if (sampleLatched == take.pad) sampleLatched = null
+        // A take latched anew into the same pad as this one ended keeps its latch.
+        sampleLatched = latchAfterTake(sampleLatched, take.pad, sampleCount?.isActive == true || recorder.going)
         if (stoppedInBackground) {
             stoppedInBackground = false
             toast(dev.arc.ep133.text.MirrorText.SAMPLE_BACKGROUND)
@@ -2875,13 +3023,14 @@ class ArcController(
         trafficLog.note("sample ${take.input.source.id}: ${take.frames} frames, ${take.channels} ch at ${take.rate} Hz, ${take.end}")
         scope.launch {
             val s = settings.value
-            val occupied = if (sampleOnline()) deviceSounds.keys else null
+            val occupied = if (sampleOnline()) sampleSlotsTaken() else null
             val name = dev.arc.ep133.features.SampleName.of(take.input.source, System.currentTimeMillis())
             val r = backed(
                 withContext(Dispatchers.Default) {
                     sampleReviewOf(take.pad, take.input, take.pcm, take.channels, take.rate, take.end, take.latched, name, s.sampleNormalize, s.sampleTrimSilence, occupied)
                 },
             )
+            _sampleLastTake.value = r.peaks
             if (!s.reviewSamples) {
                 keepReviewed(r)
             } else {
@@ -2900,6 +3049,8 @@ class ArcController(
     private fun sampleLost(input: SampleInput, why: String) {
         sampleHeld = null
         sampleLatched = null
+        sampleLatchPress = null
+        sampleStopUnsure = null
         sampleCount?.cancel()
         if (!sampleMode.value.on || input.source == SampleSource.RSP) return
         toast(if (input.source == SampleSource.USB) dev.arc.ep133.text.MirrorText.USB_GONE else dev.arc.ep133.text.MirrorText.inputFailed(why), error = true)
@@ -2927,14 +3078,17 @@ class ArcController(
 
     /** The slot KEEP puts the take into, while connected: a free one, or null for the next free one. */
     fun setReviewSlot(slot: Int?) = _sampleReview.update { r ->
-        val free = slot?.takeIf { it in SampleUpload.FIRST_SLOT..SampleUpload.LAST_SLOT && it !in deviceSounds.keys }
+        val free = slot?.takeIf { it in SampleUpload.FIRST_SLOT..SampleUpload.LAST_SLOT && it !in sampleSlotsTaken() }
         r?.takeIf { !it.offline }?.copy(slot = free ?: r.nextFree) ?: r
     }
 
     /** The review's slot − and +: [step] free slots on. */
     fun stepReviewSlot(step: Int) = _sampleReview.update { r ->
-        r?.takeIf { !it.offline }?.copy(slot = stepFreeSlot(deviceSounds.keys, r.slot, step)) ?: r
+        r?.takeIf { !it.offline }?.copy(slot = stepFreeSlot(sampleSlotsTaken(), r.slot, step)) ?: r
     }
+
+    /** The slots a review counts as in use: the device's, and those the recordings kept and not up yet go into. */
+    private fun sampleSlotsTaken(): Set<Int> = slotsTaken(deviceSounds.keys, sampleQueue.map { it.held } + sampleUpNow?.held)
 
     /** Plays the review's part kept, as KEEP would put it on the pad (a list's single sound: it stops the one before). */
     fun playReview(): Job = scope.launch {
@@ -3081,7 +3235,7 @@ class ArcController(
         val m = mirror
         val online = sampleOnline() && m != null
         // Queued first, so it never counts as an offline change.
-        if (online) sampleQueue += QueuedSample(r.pad, file.name, r.slot?.takeIf { it != r.nextFree })
+        if (online) sampleQueue += QueuedSample(r.pad, file.name, r.slot?.takeIf { it != r.nextFree }, r.slot)
         saveOfflinePads(pads)
         recordingsToTakes(replaced)
         // The new sound comes with its own settings, as on the device.
@@ -3135,7 +3289,13 @@ class ArcController(
                     samplesGoingUp -= q.file
                 }
                 val t = dev.arc.ep133.features.PadTarget(p.project, p.group, p.pad, mirror?.slotAt(p.group, p.pad))
-                if (uploadRecorded(s, p, t, q.pad, q.slot) != null) {
+                sampleUpNow = q
+                val up = try {
+                    uploadRecorded(s, p, t, q.pad, q.slot)
+                } finally {
+                    sampleUpNow = null
+                }
+                if (up != null) {
                     toast(dev.arc.ep133.text.MirrorText.sampleSaved(q.pad))
                 } else if (q.file in samplesFailed && session === s) {
                     // Asked about now, not at the next connection: Write tries it again.
@@ -3412,8 +3572,10 @@ class ArcController(
     /**
      * Puts sample [slot] on [pad] at once (where [t] says its sound is set).
      * The names follow straight away, and a toast offers UNDO when the pad's
-     * old sound is known (an empty pad can't be emptied again). Offline it
-     * changes in arc only ([assignOffline]), picked from [source]'s list.
+     * old sound is known (an empty pad can't be emptied again). A SAMPLE
+     * recording still waiting on the pad goes to Takes ([recordingsOverwritten]).
+     * Offline it changes in arc only ([assignOffline]), picked from
+     * [source]'s list.
      */
     fun assignPad(
         pad: dev.arc.ep133.features.PhysicalPad,
@@ -3424,7 +3586,29 @@ class ArcController(
         if (_state.value.device == null) return@launch assignOffline(pad, t, slot, source)
         // The factory list is only offered offline: its slot isn't the device's sound.
         if (source != SoundSource.DEVICE) return@launch
-        if (writePad(t, slot, dev.arc.ep133.text.MirrorText::assignFailed)) assignedToast(pad, t, slot)
+        if (writePad(t, slot, dev.arc.ep133.text.MirrorText::assignFailed)) {
+            assignedToast(pad, t, slot, moved = recordingsOverwritten(t))
+        }
+    }
+
+    /**
+     * Another sound was written onto [t]'s pad while connected: a SAMPLE
+     * recording kept on it and not up yet (queued, or failed) would play on
+     * in its place and, its turn come, overwrite it. Its change goes, the
+     * pad plays what the device has, and its file goes to Takes; how many
+     * did. One going up now goes on (it leaves for Takes if it can't land).
+     */
+    private suspend fun recordingsOverwritten(t: dev.arc.ep133.features.PadTarget): Int {
+        val before = loadOfflinePads()
+        val pads = withoutRecordingsOn(before, t, samplesGoingUp)
+        if (pads.list.size == before.list.size) return 0
+        val gone = before.list.filter { it !in pads.list }
+        val files = gone.mapNotNullTo(HashSet()) { it.file }
+        sampleQueue.removeAll { it.file in files }
+        samplesFailed -= files
+        saveOfflinePads(pads)
+        mirror?.takeIf { mirrorSession != null && mirrorSession === session }?.let { localChanged(it, connectedLocal(pads, samplesShown())) }
+        return recordingsToTakes(gone)
     }
 
     /**
@@ -3636,7 +3820,8 @@ class ArcController(
 
     /**
      * "Upload a new sample…" from the pad sheet: the picked WAV goes into the
-     * first free slot, then onto [pad]. A file that isn't a usable WAV is
+     * first free slot, then onto [pad] (a SAMPLE recording waiting on it goes
+     * to Takes, as with [assignPad]). A file that isn't a usable WAV is
      * turned away before anything is written. The picker stops the app, so
      * Live's mirror is gone or being read again when the file comes back:
      * the upload waits for the device and doesn't need the mirror.
@@ -3654,7 +3839,7 @@ class ArcController(
             return@launch
         }
         val slot = uploadBytesToPad(s, fileName, bytes, t) ?: return@launch
-        assignedToast(pad, t, slot, deviceSounds[slot]?.name ?: SampleUpload.nameFor(fileName))
+        assignedToast(pad, t, slot, deviceSounds[slot]?.name ?: SampleUpload.nameFor(fileName), recordingsOverwritten(t))
     }
 
     /**
@@ -3662,9 +3847,11 @@ class ArcController(
      * [slot] when given (SAMPLE's review picked it; it must still be free),
      * else the first free one. As a task with the progress sheet, or ([task]
      * false, SAMPLE's uploads) while Live plays on, its progress going to
-     * [onProgress]. The mirror's names and the pad follow, after [kept] (the
-     * slot written) has kept the pad's copy, when the caller has the sound.
-     * Returns the slot, or null once a toast said why not.
+     * [onProgress], the transfer service keeping arc alive meanwhile (its
+     * notification's Cancel stops it: [backgroundTask]). The mirror's names
+     * and the pad follow, after [kept] (the slot written) has kept the pad's
+     * copy, when the caller has the sound. Returns the slot, or null once a
+     * toast said why not.
      */
     private suspend fun uploadBytesToPad(
         s: Session,
@@ -3682,15 +3869,36 @@ class ArcController(
             }
         } else {
             var error: String? = null
-            exclusive("upload", quiet = true, wait = true) { ss ->
-                try {
-                    SampleUpload.uploadToPad(ss, fileName, wav, deviceSounds.keys, t, onProgress = onProgress, slot = slot)
-                } catch (e: Throwable) {
-                    if (e is kotlinx.coroutines.CancellationException) throw e
-                    error = e.message ?: e.toString()
-                    null
+            var cancelled = false
+            val signal = CancelSignal()
+            abortBackground = signal
+            _backgroundTask.value = TaskUi(Strings.UPLOADING, SampleUpload.nameFor(fileName), 0.0, cancelling = false)
+            // Not allowed from the background on newer Android (the upload then goes on as long as arc does).
+            runCatching { ContextCompat.startForegroundService(context, Intent(context, TransferService::class.java)) }
+            val progress: (Progress) -> Unit = { p ->
+                onProgress(p)
+                _backgroundTask.update { it?.copy(fraction = p.fraction) }
+            }
+            try {
+                exclusive("upload", quiet = true, wait = true) { ss ->
+                    try {
+                        SampleUpload.uploadToPad(ss, fileName, wav, deviceSounds.keys, t, onProgress = progress, signal = signal, slot = slot)
+                    } catch (e: Throwable) {
+                        if (e is kotlinx.coroutines.CancellationException) throw e
+                        if (e is CancelledError) cancelled = true else error = e.message ?: e.toString()
+                        null
+                    }
+                }.also {
+                    error?.let { toast(dev.arc.ep133.text.MirrorText.uploadFailed(it), error = true) }
+                    if (cancelled) toast(Strings.CANCELLED)
                 }
-            }.also { error?.let { toast(dev.arc.ep133.text.MirrorText.uploadFailed(it), error = true) } }
+            } finally {
+                if (abortBackground === signal) {
+                    abortBackground = null
+                    // The service stops itself when it sees the transfer end.
+                    _backgroundTask.value = null
+                }
+            }
         }
         if (into == null) {
             // runTask showed its own error; a connection gone while waiting needs saying.
@@ -3750,8 +3958,10 @@ class ArcController(
         _state.update { cur -> cur.mirror?.let { cur.copy(mirror = it.copy(state = m.snapshot(System.nanoTime()))) } ?: cur }
     }
 
-    private fun assignedToast(pad: dev.arc.ep133.features.PhysicalPad, t: dev.arc.ep133.features.PadTarget, slot: Int, name: String = soundName(slot)) {
-        val text = dev.arc.ep133.text.MirrorText.assigned(pad, name)
+    /** "Pad A 8: [name]", with UNDO where it can; and how many recordings on the pad went to Takes ([moved]). */
+    private fun assignedToast(pad: dev.arc.ep133.features.PhysicalPad, t: dev.arc.ep133.features.PadTarget, slot: Int, name: String = soundName(slot), moved: Int = 0) {
+        val said = dev.arc.ep133.text.MirrorText.assigned(pad, name)
+        val text = if (moved > 0) "$said.${samplesMoved(moved)}" else said
         // UNDO only where the old sound is known, and isn't the one just put there.
         if (t.slot != null && t.slot != slot) {
             toast(text, action = dev.arc.ep133.text.MirrorText.UNDO, onAction = { undoAssign(pad, t) })

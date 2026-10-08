@@ -17,7 +17,7 @@ sealed interface SamplePhase {
     /** The click counts [beat] of the bar before a take of some bars into [pad]. */
     data class CountIn(val pad: PhysicalPad, val beat: Int) : SamplePhase
 
-    /** Recording into [pad]: [seconds] of at most [max]; [latched] when it runs hands-free until SAMPLE stops it. */
+    /** Recording into [pad]: [seconds] of at most [max]; [latched] when it runs hands-free until STOP, or a tap on its pad, stops it (or its bars run out). */
     data class Recording(val pad: PhysicalPad, val seconds: Int, val max: Int, val latched: Boolean) : SamplePhase
 
     /** A kept take goes onto [pad] on the EP-133, [percent] of it sent. */

@@ -19,6 +19,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.sample
@@ -27,7 +28,9 @@ import kotlin.math.roundToInt
 
 /**
  * Foreground service (type dataSync) that keeps the process alive while a
- * backup or restore runs, so locking the phone does not kill the transfer.
+ * backup or restore runs, or SAMPLE's upload while Live plays on
+ * ([dev.arc.ep133.controller.ArcController.backgroundTask]), so locking the
+ * phone or leaving arc does not kill the transfer.
  * The work itself runs in ArcController; this only holds the process, a
  * partial wake lock and the progress notification.
  */
@@ -52,7 +55,7 @@ class TransferService : Service() {
             controller.cancelTask()
             return START_NOT_STICKY
         }
-        val task = controller.state.value.task
+        val task = controller.state.value.task ?: controller.backgroundTask.value
         ServiceCompat.startForeground(
             this,
             NOTIFICATION_ID,
@@ -70,7 +73,7 @@ class TransferService : Service() {
                 .apply { acquire(4 * 60 * 60 * 1000L) }
         }
         scope.launch {
-            controller.state.map { it.task }.distinctUntilChanged().sample(250).collect { t ->
+            combine(controller.state.map { it.task }, controller.backgroundTask) { t, b -> t ?: b }.distinctUntilChanged().sample(250).collect { t ->
                 if (t == null) {
                     stopSelf()
                 } else {

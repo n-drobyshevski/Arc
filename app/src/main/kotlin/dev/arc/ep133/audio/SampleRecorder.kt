@@ -190,6 +190,12 @@ class SampleRecorder(
      */
     var onLost: (input: SampleInput, why: String) -> Unit = { _, _ -> }
 
+    /**
+     * RSP opened again by itself, on [scope], when Live's output reopened
+     * at another rate: [rate] (and so the longest take) may be another now.
+     */
+    var onReopened: () -> Unit = {}
+
     // The open input; set and cleared on the caller's thread (the main one).
     @Volatile private var feed: Feed? = null
 
@@ -349,6 +355,7 @@ class SampleRecorder(
             // A press as Live's output opened at another rate (or reopened), or a take still waiting for
             // its start, records on the new one.
             feed?.let(f::handOn)
+            onReopened()
             return
         }
         f.drop()
