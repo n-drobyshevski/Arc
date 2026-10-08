@@ -4,6 +4,7 @@ import dev.arc.ep133.formats.VoiceMixer
 import dev.arc.ep133.formats.VoiceMode
 import dev.arc.ep133.formats.VoiceShape
 import dev.arc.ep133.formats.fx.FxControl
+import dev.arc.ep133.formats.fx.Punch
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assertions.fail
@@ -25,7 +26,8 @@ import kotlin.random.Random
  * knobs swept and their types switched, and random ones, then the time
  * effects: the delay, the reverb and the chorus, their knobs and the tempo
  * swept, their tails rung out into silence and started again, and random
- * ones), written out with every
+ * ones, then the punch-ins: each slot pressed, moved and let go of, several
+ * at once over the effects, and random ones), written out with every
  * command and what each render gave (its samples, or a hash of them for long
  * renders, the voices started and the keys). The host test
  * (src/test/cpp/VoiceMixerParityTest.cpp, run by `./gradlew test` through
@@ -382,6 +384,7 @@ class VoiceMixerGoldenTest {
         fx(::scenario)
         tone(::scenario)
         time(::scenario)
+        punch(::scenario)
         return out.toString()
     }
 
@@ -951,7 +954,7 @@ class VoiceMixerGoldenTest {
             render(64)
         }
         scenario("fx-tempo-and-the-rest") {
-            // The tempo, held to 20..300, then the punch-ins (stubs for now) and the master compressor.
+            // The tempo, held to 20..300, then the punch-ins (every slot at once) and the master compressor.
             start("a", steady(1000, 1000), 1, 1000, shape = on(1))
             control(FxControl.SEND, 1, 0.5f, 0f)
             control(FxControl.FX_TYPE, FxControl.DELAY, 0.5f, 0.5f)
@@ -1522,6 +1525,271 @@ class VoiceMixerGoldenTest {
                         8 -> control(FxControl.COMP, random.nextInt(2), random.nextFloat(), random.nextFloat())
                         9 -> control(FxControl.PUNCH, FxControl.SEND_FX, if (random.nextBoolean()) 0f else random.nextFloat(), 0f)
                         10 -> control(FxControl.SIDECHAIN, random.nextInt(16), random.nextFloat(), random.nextFloat())
+                        else -> {}
+                    }
+                    if (random.nextInt(3) == 0) {
+                        val key = pool[random.nextInt(pool.size)]
+                        when (random.nextInt(10)) {
+                            in 0 until 6 -> {
+                                val (pcm, channels) = sounds[random.nextInt(sounds.size)]
+                                val shape = VoiceShape(
+                                    gain = if (random.nextBoolean()) 1f else random.nextInt(0, 101) / 100f,
+                                    pan = if (random.nextBoolean()) 0 else random.nextInt(-16, 17),
+                                    bus = random.nextInt(-1, 4),
+                                    duckSource = random.nextInt(6) == 0,
+                                )
+                                start(key, pcm, channels, rate, random.nextInt(-12, 13), random.nextLong(1, 1_000_000), shape)
+                            }
+                            in 6 until 9 -> release(key)
+                            else -> cut(key)
+                        }
+                    }
+                    render(if (random.nextInt(20) == 0) block * 40 else block)
+                }
+                render(rate / 4)
+            }
+        }
+    }
+
+    /**
+     * The punch-ins' scenarios, through the mixer's controls: each slot pressed, its depth moved, let go of
+     * (and pressed again inside its fade), over noise and steady tones, the tempo changed under the synced
+     * ones; the loops held for longer than the history; several at once, over the master effect and under
+     * the master compressor; each slot's samples written out whole at 1000 Hz; then random ones.
+     */
+    private fun punch(play: (String, Int, Int, Trace.() -> Unit) -> Unit) {
+        fun scenario(name: String, outRate: Int = 1000, maxVoices: Int = VoiceMixer.MAX_VOICES, body: Trace.() -> Unit) =
+            play(name, outRate, maxVoices, body)
+        fun on(bus: Int, duck: Boolean = false) = VoiceShape(bus = bus, duckSource = duck)
+        fun Trace.press(slot: Int, depth: Float) = control(FxControl.PUNCH, slot, depth, 0f)
+        val click = ShortArray(32).also {
+            it[0] = 30000
+            it[1] = -20000
+        }
+
+        scenario("punch-loops", outRate = 48000) {
+            val hiss = noise(2, 96000, 3131)
+            start("a", hiss, 2, 48000)
+            render(96)
+            render(24000)
+            // The beat repeat at each quarter of its depth: a quarter, an eighth, a 16th and a 32nd note,
+            // the depth moved while it is held (the loop stays as caught), then let go of.
+            for (depth in listOf(0.1f, 0.3f, 0.6f, 0.9f)) {
+                press(FxControl.BEAT_REPEAT, depth)
+                render(96)
+                press(FxControl.BEAT_REPEAT, 1.1f - depth)
+                render(4800)
+                press(FxControl.BEAT_REPEAT, 0f)
+                render(96)
+                render(1200)
+            }
+            // A quarter at 60 BPM, held to a second, held for three: longer than the history.
+            control(FxControl.TEMPO, 0, 60f, 0f)
+            press(FxControl.BEAT_REPEAT, 0.05f)
+            render(48000)
+            control(FxControl.TEMPO, 0, 150f, 0f)
+            render(48000)
+            render(48000)
+            press(FxControl.BEAT_REPEAT, 0f)
+            render(96)
+            // The stutter at three sizes, then let go of and pressed again inside its fade (it plays on),
+            // then with the beat repeat over it.
+            start("a", hiss, 2, 48000)
+            render(4800)
+            for (depth in listOf(0.01f, 0.5f, 1f)) {
+                press(FxControl.STUTTER, depth)
+                render(96)
+                render(2400)
+                press(FxControl.STUTTER, 0f)
+                render(96)
+            }
+            press(FxControl.STUTTER, 0.4f)
+            render(1000)
+            press(FxControl.STUTTER, 0f)
+            render(64)
+            press(FxControl.STUTTER, 0.8f)
+            render(64)
+            render(2000)
+            press(FxControl.STUTTER, 0f)
+            render(300)
+            press(FxControl.STUTTER, 0.3f)
+            press(FxControl.BEAT_REPEAT, 0.7f)
+            render(2400)
+            press(FxControl.STUTTER, 0f)
+            render(2400)
+            press(FxControl.BEAT_REPEAT, 0f)
+            render(960)
+        }
+        scenario("punch-tape", outRate = 44100) {
+            // Mono noise: the file holds its seed, not its samples.
+            val buzz = noise(1, 88200, 1313)
+            start("h", buzz, 1, 44100)
+            render(4410)
+            // The quickest stop (0.3 s) into silence, held there, then let go of.
+            press(FxControl.TAPE_STOP, 1f)
+            render(96)
+            render(13230)
+            render(96)
+            press(FxControl.TAPE_STOP, 0f)
+            render(96)
+            render(2000)
+            // The slowest (1.5 s), let go of halfway.
+            press(FxControl.TAPE_STOP, 0.01f)
+            render(96)
+            render(30000)
+            press(FxControl.TAPE_STOP, 0f)
+            render(96)
+            render(1000)
+            // Over the reverb's return, its depth moved on the way (the time stays as caught).
+            control(FxControl.FX_TYPE, FxControl.REVERB, 0.6f, 0.5f)
+            control(FxControl.SEND, 0, 0.5f, 0f)
+            start("h", buzz, 1, 44100, shape = on(0))
+            render(4410)
+            press(FxControl.TAPE_STOP, 0.5f)
+            render(96)
+            press(FxControl.TAPE_STOP, 0.9f)
+            render(44100)
+            press(FxControl.TAPE_STOP, 0f)
+            render(4410)
+        }
+        scenario("punch-pitch", outRate = 48000) {
+            val buzz = noise(1, 96000, 707)
+            start("h", buzz, 1, 48000)
+            render(4800)
+            // A random step each beat, then quicker beats and a narrower range.
+            press(FxControl.PITCH_RANDOM, 1f)
+            repeat(4) { render(96) }
+            render(24000)
+            render(24000)
+            control(FxControl.TEMPO, 0, 300f, 0f)
+            render(9600)
+            press(FxControl.PITCH_RANDOM, 0.3f)
+            render(19200)
+            press(FxControl.PITCH_RANDOM, 0f)
+            render(96)
+            render(480)
+            // An octave down, mixed back out a block at a time.
+            press(FxControl.OCTAVE_DOWN, 1f)
+            render(4800)
+            for (i in 10 downTo 1) {
+                press(FxControl.OCTAVE_DOWN, i / 10f)
+                render(96)
+            }
+            press(FxControl.OCTAVE_DOWN, 0f)
+            render(300)
+            // Both: the random steps an octave down.
+            control(FxControl.TEMPO, 0, 120f, 0f)
+            start("h", buzz, 1, 48000)
+            press(FxControl.PITCH_RANDOM, 0.6f)
+            press(FxControl.OCTAVE_DOWN, 0.7f)
+            render(12000)
+            render(12000)
+            press(FxControl.PITCH_RANDOM, 0f)
+            render(4800)
+            press(FxControl.OCTAVE_DOWN, 0f)
+            render(960)
+        }
+        scenario("punch-shapers", outRate = 44100) {
+            val hiss = noise(2, 88200, 5151)
+            start("a", hiss, 2, 44100)
+            render(441)
+            // Each pressed lightly, its depth swept up a block at a time, the tempo changed under it, let go of.
+            for (slot in listOf(FxControl.SLICE, FxControl.FILTER_LFO, FxControl.LPF, FxControl.HPF, FxControl.TREMOLO, FxControl.DECIMATOR)) {
+                press(slot, 0.05f)
+                render(96)
+                for (i in 1..10) {
+                    press(slot, i / 10f)
+                    render(96)
+                }
+                render(4410)
+                control(FxControl.TEMPO, 0, 175f, 0f)
+                render(2205)
+                press(slot, 0f)
+                render(96)
+                render(300)
+                control(FxControl.TEMPO, 0, 120f, 0f)
+            }
+        }
+        scenario("punch-combos", outRate = 48000) {
+            val hiss = noise(2, 96000, 7272)
+            control(FxControl.FX_TYPE, FxControl.REVERB, 0.6f, 0.6f)
+            control(FxControl.SEND, 0, 0.5f, 0f)
+            control(FxControl.SEND, 1, 0.8f, 0f)
+            control(FxControl.COMP, 1, 0.5f, 0.5f)
+            start("a", hiss, 2, 48000, shape = on(0))
+            start("c", click, 1, 48000, shape = on(1))
+            render(9600)
+            // Piled up a few at a time, SEND_FX among them, over the reverb and under the compressor.
+            press(FxControl.BEAT_REPEAT, 0.6f)
+            press(FxControl.SLICE, 0.4f)
+            press(FxControl.LPF, 0.5f)
+            render(96)
+            render(9600)
+            press(FxControl.SEND_FX, 0.8f)
+            press(FxControl.DECIMATOR, 0.3f)
+            press(FxControl.TREMOLO, 0.9f)
+            render(4800)
+            press(FxControl.OCTAVE_DOWN, 0.5f)
+            press(FxControl.FILTER_LFO, 0.6f)
+            press(FxControl.HPF, 0.2f)
+            render(9600)
+            // Let go of one by one, the sidechain ducking under the rest.
+            for (slot in listOf(FxControl.BEAT_REPEAT, FxControl.SLICE, FxControl.LPF, FxControl.SEND_FX)) {
+                press(slot, 0f)
+                render(96)
+            }
+            control(FxControl.SIDECHAIN, 0b0011, 0.3f, 0.5f)
+            start("k", ShortArray(0), 1, 48000, shape = on(-1, duck = true))
+            render(2400)
+            // Every slot at once, a delay now, then all let go of at once.
+            control(FxControl.FX_TYPE, FxControl.DELAY, 0.4f, 0.7f)
+            start("a", hiss, 2, 48000, shape = on(0))
+            for (slot in 0 until FxControl.SLOTS) press(slot, 0.5f + slot / 30f)
+            render(96)
+            render(3840)
+            for (slot in 0 until FxControl.SLOTS) press(slot, 0f)
+            render(96)
+            render(960)
+        }
+        scenario("punch-every-sample") {
+            // At 1000 Hz and 300 BPM, short renders: each slot's samples written out whole. A beat is 200
+            // frames, a 16th 50, the fade 5, the shifters' window 50, the history 2000.
+            control(FxControl.TEMPO, 0, 300f, 0f)
+            start("a", noise(1, 2000, 99), 1, 1000)
+            render(64)
+            render(64)
+            for (slot in Punch.ORDER) {
+                press(slot, 0.7f)
+                render(40)
+                render(40)
+                press(slot, 0.2f)
+                render(40)
+                press(slot, 0f)
+                render(10)
+            }
+        }
+
+        // Random presses, moves and lets go of (several held at once), with random effects, sends, tempos,
+        // the compressor and the sidechain, voices on random buses, at real rates and block sizes.
+        val pool = listOf("seq:0:0", "seq:0:3", "seq:1:5", "seq:2:11", "live:0:3", "live:3:7")
+        var n = 0
+        for ((rate, block) in listOf(44100 to 96, 48000 to 192)) {
+            val random = Random(13399 + n++)
+            scenario("random-punch-$rate-$block", rate, VoiceMixer.MAX_VOICES) {
+                val sounds = List(4) {
+                    val channels = 1 + random.nextInt(2)
+                    Pair(noise(channels, 200 + random.nextInt(if (it == 0) 40000 else 3000), random.nextLong(1, Long.MAX_VALUE)), channels)
+                }
+                repeat(240) {
+                    when (random.nextInt(14)) {
+                        in 0 until 5 -> control(FxControl.PUNCH, random.nextInt(FxControl.SLOTS), if (random.nextInt(3) == 0) 0f else random.nextFloat(), 0f)
+                        5 -> control(FxControl.PUNCH, random.nextInt(FxControl.SLOTS), 0f, 0f)
+                        6 -> control(FxControl.FX_TYPE, random.nextInt(FxControl.TYPES), random.nextFloat(), random.nextFloat())
+                        7 -> control(FxControl.FX_XY, 0, random.nextFloat(), random.nextFloat())
+                        8 -> control(FxControl.SEND, random.nextInt(4), if (random.nextInt(4) == 0) 0f else random.nextFloat(), 0f)
+                        9 -> control(FxControl.TEMPO, 0, 40f + random.nextInt(260), 0f)
+                        10 -> control(FxControl.COMP, random.nextInt(2), random.nextFloat(), random.nextFloat())
+                        11 -> control(FxControl.SIDECHAIN, random.nextInt(16), random.nextFloat(), random.nextFloat())
                         else -> {}
                     }
                     if (random.nextInt(3) == 0) {
