@@ -512,7 +512,7 @@ object MirrorText {
     const val INPUT_LEVEL = "Input level"
     const val CLIPPING = "Clipping"
 
-    // The orange display line in the mode: the tag, then what happens next.
+    // The display line in the mode, grown into the SAMPLE panel: the tag, then what happens next.
     const val SAMPLE_TAG = "Sample"
     const val SAMPLE_READY = "Hold a pad to record"
     const val SAMPLE_READY_LATCH = "Tap a pad to record hands-free"
@@ -524,6 +524,9 @@ object MirrorText {
 
     /** "0:04 / 0:20": the take so far, and the longest it can be. */
     fun sampleTime(seconds: Int, max: Int) = "${takeLength(seconds.toDouble())} / ${takeLength(max.toDouble())}"
+
+    /** "Takes up to 40 s": the panel's wave strip before the first take, the longest one can be. */
+    fun sampleMax(seconds: Int) = "Takes up to $seconds s"
 
     /** "Pad A 7: uploading, 40%"; without [percent] as a screen reader hears it, once rather than at each step. */
     fun sampleUploading(pad: PhysicalPad, percent: Int? = null) = "${padTitle(pad)}: uploading" + (percent?.let { ", $it%" } ?: "")

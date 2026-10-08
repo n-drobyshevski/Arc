@@ -50,8 +50,14 @@ private const val SWEEP = 270f
 /** A drag across this much turns a knob through its whole range. */
 private val FULL_TURN = 220.dp
 
-/** A [Knob]'s value is at least this wide when it sits beside the knob ("−60 dB"). */
+/** A [Knob]'s value is at least this wide when it sits beside the knob ("−60 dB"); a compact one's, in its smaller type. */
 private val InlineReadout = 48.dp
+private val InlineReadoutCompact = 40.dp
+
+/** A compact inline [Knob]'s name and value, a size down, and the gap between them and the knob. */
+private val CompactName = 10.sp
+private val CompactValue = 12.sp
+private val CompactGap = 4.dp
 
 /** Slower than this (dp per millisecond), a drag turns by [fineStep] instead of [step]. */
 private const val FINE_SPEED = 0.12f
@@ -71,7 +77,8 @@ private const val FINE_SPEED = 0.12f
  * value, [onDone] the finger lifting. With [haptics], each step ticks.
  * Screen readers hear it as a range they can set ([description], [readout]).
  * [enabled] false dims it and stops it turning. [inline]: the label over
- * the value beside the knob, for a row one key tall (the SAMPLE panel's).
+ * the value beside the knob, for a row one key tall (the SAMPLE panel's);
+ * [compact] as well, both in smaller type and closer to it, for a narrow row.
  */
 @Composable
 fun Knob(
@@ -91,8 +98,10 @@ fun Knob(
     description: String = label,
     size: Dp = 56.dp,
     inline: Boolean = false,
+    compact: Boolean = false,
     onDone: () -> Unit = {},
 ) {
+    val small = inline && compact
     val c = LocalArcColors.current
     val tick = if (haptics) LocalHapticFeedback.current else null
     val current by rememberUpdatedState(value)
@@ -173,17 +182,17 @@ fun Knob(
             }
         }
     val name: @Composable () -> Unit = {
-        Text(label.uppercase(), style = ArcType.caps.copy(fontSize = 11.sp), color = c.graphite, maxLines = 1, textAlign = TextAlign.Center)
+        Text(label.uppercase(), style = ArcType.caps.copy(fontSize = if (small) CompactName else 11.sp), color = c.graphite, maxLines = 1, textAlign = TextAlign.Center)
     }
     val shown: @Composable () -> Unit = {
         // Beside the knob, the value keeps a width of its own, so the knobs after it don't shift as it turns.
         Text(
             readout,
-            style = ArcType.bold.copy(fontSize = 14.sp),
+            style = ArcType.bold.copy(fontSize = if (small) CompactValue else 14.sp),
             color = c.ink,
             maxLines = 1,
             textAlign = if (inline) TextAlign.Start else TextAlign.Center,
-            modifier = if (inline) Modifier.widthIn(min = InlineReadout) else Modifier,
+            modifier = if (inline) Modifier.widthIn(min = if (small) InlineReadoutCompact else InlineReadout) else Modifier,
         )
     }
     val knob: @Composable () -> Unit = {
@@ -246,7 +255,7 @@ fun Knob(
     }
     if (inline) {
         // The name printed over the value beside the knob, so it takes no more width than either.
-        Row(touch, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(touch, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (small) CompactGap else 6.dp)) {
             knob()
             Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 name()

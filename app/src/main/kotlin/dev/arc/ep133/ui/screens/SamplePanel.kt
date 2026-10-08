@@ -22,6 +22,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.rememberGraphicsLayer
@@ -42,7 +43,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.Outline
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
@@ -62,17 +65,17 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
-import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.zIndex
 import dev.arc.ep133.text.MirrorText
+import dev.arc.ep133.ui.components.CapDy
 import dev.arc.ep133.ui.components.LocalHwColors
 import dev.arc.ep133.ui.components.cap
 import dev.arc.ep133.ui.theme.LocalArcColors
@@ -82,19 +85,27 @@ import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /*
- * Live's SAMPLE panel (an addition, after the EP-133's own sampler): it
- * unrolls down out of SAMPLE's orange line in the function keys' place
+ * Live's SAMPLE panel (an addition, after the EP-133's own sampler): the
+ * dark display line itself grows into it, over the function keys' place
  * (their row upright, their column on its side), and the pads stay on the
- * page to record into. Its display fades in, then its two rows of controls
- * one after the other; the function keys fade and shrink a little away, and
- * the pads glide down (or, on its side, aside) to make room.
+ * page to record into ([SampleMorph]). The line's words fade out and
+ * SAMPLE's header fades in in their place, its dark shape grows down to hold the wave strip
+ * under it, and a pale plate with the controls unrolls from under that, the
+ * two one rounded body; the wave fades in, then the two rows of controls one
+ * after the other; the function keys fade and shrink a little away, and the
+ * pads glide down to make room (on its side, the line narrows first while
+ * they come aside under it, then grows down as they rise beside it). Nothing
+ * shows twice: the header is the only status while the panel is open. Where the
+ * line rides in the top bar (a phone on its side, [LivePill]) it can't grow
+ * into the column: there the pill fades through to the header, and the panel
+ * under it, headerless, unrolls in the keys' place ([SampleSlot]).
  *
  * The way in is the mic key in the top bar (Live's SAMPLE key, [ArcShell]):
  * a tap opens the panel, from KEYS too (Live goes to PADS for it), and
  * another closes it. It works the mode, and the panel follows it
  * ([MirrorScreen]). Open, a handle hangs under the panel ([PanelHandle]): a
- * tap closes it, and a drag up (to the left, on its side) puts it away
- * under the finger. A swipe from right to left on the pads opens it too,
+ * tap closes it, and a drag up (to the left, beside the top bar's line)
+ * puts it away under the finger. A swipe from right to left on the pads opens it too,
  * and one back closes it ([panelSwipe]); so does Back.
  *
  * The motion is one timeline, [SamplePanel.progress], run by one
@@ -103,30 +114,34 @@ import kotlin.math.roundToInt
  * emphasised decelerate ([PanelOpenEasing]), and back in [PANEL_CLOSE_MS]
  * accelerating ([PanelCloseEasing]); a drag on the handle sets it from the
  * finger ([pullProgress]) and lets go with a spring carrying the finger's speed.
- * The display and the rows fade in at their own times along it
+ * The header cross-fades over its first [PANEL_HEADER_MS] ([panelHeaderFade]),
+ * the line's words going before the header's come ([lineShown]),
+ * and the wave and the rows fade in at their own times along it
  * ([panelFade]), so a reversal midway runs them back from where they are;
  * once a finger has had the panel, until it next rests, they fade in as
  * they come out of the line instead, if sooner ([panelPullFade]).
  *
  * Nothing recomposes as it moves, which is what made it feel slow. The
  * timeline is read only where things lay out or draw:
- * - the slot ([SampleSlot]) measures its height (on its side the column's
- *   width, [unrollWidth]) from it, and places the keys, the panel and the handle;
- * - the keys' fade and shrink, the panel's clip and slide and the handle's fade
- *   are graphics-layer lambdas of that placement, and the panel itself is
- *   measured at its full size, so it doesn't lay out again while it unrolls;
- * - the display and the rows of controls fade in graphics-layer lambdas
- *   ([SamplePanelFace]);
+ * - the growing line ([SampleMorph]) measures its height (on its side, the
+ *   pads' room) from it, and places the line, the header, the wave, the
+ *   plate, the keys and the handle; its body's shape is drawn from it
+ *   ([MorphGeom]); the headerless slot ([SampleSlot]) measures its height (on
+ *   its side the column's width, [unrollWidth]) the same way;
+ * - the cross-fade, the keys' fade and shrink, the clips and slides and the
+ *   handle's fade are graphics-layer lambdas of that placement, and every
+ *   part is measured at its full size, so it doesn't lay out again as it moves;
+ * - the wave and the rows of controls fade in graphics-layer lambdas
+ *   ([SamplePlate], [SampleWaveStrip]);
  * - the pads ([PadsGlide]) keep the size they were laid out at while the
  *   panel moves, a layout of their own given the same room every frame and
  *   drawn scaled and moved to the room they have, and are laid out again
  *   once, where it comes to rest. One group's big pads, whose print is
  *   sized from their room ([KoDeck]), so compose again once per opening or
  *   closing, not on every frame;
- * - nothing that composes from its room is measured around the slot as it
+ * - nothing that composes from its room is measured around the panel as it
  *   grows (the all-groups page fits the panel to the page's width, worked
- *   out ahead), and SAMPLE's line over the sideways column is laid out at
- *   the width the column ends at ([centredAt]).
+ *   out ahead), and the header is laid out once at the panel's open width.
  * A drag's progress lives in [SamplePanel] too, so a frame of it is a
  * layout pass, never a composition. Only [SamplePanel.open] and
  * [SamplePanel.moving], each changing once per opening or closing, are read
@@ -182,7 +197,14 @@ internal class SamplePanel(start: Float, val fixed: Boolean = false, pulled: Boo
     /** How far the panel has unrolled (and the keys gone, the pads moved): the timeline itself. */
     val unroll: Float get() = progress
 
-    /** How far the display has faded in. */
+    /** How far the display line has cross-faded, in place, into SAMPLE's header ([panelHeaderFade]). */
+    val header: Float get() {
+        val p = progress
+        val timed = panelHeaderFade(p)
+        return if (pulling) maxOf(timed, panelPullFade(p, PULL_HEADER_AT)) else timed
+    }
+
+    /** How far the wave strip under the header has faded in. */
     val display: Float get() = fade(PANEL_DISPLAY_AT, PULL_DISPLAY_AT)
 
     /** How far the controls' first row (−/source/+, STEREO, LATCH) and, from [second], the second have faded in. */
@@ -292,7 +314,10 @@ private const val PANEL_THRESHOLD = 0.001f
 /** The panel's unrolling opening, the keys going and the pads gliding with it (ms): all of the timeline. */
 internal const val PANEL_OPEN_MS = 300
 
-/** When the display (ms into the opening), and the controls' first and second rows, start fading in. */
+/** How long the display line takes to cross-fade into SAMPLE's header at the start of the opening (ms). */
+internal const val PANEL_HEADER_MS = 120
+
+/** When the wave strip (ms into the opening), and the controls' first and second rows, start fading in. */
 internal const val PANEL_DISPLAY_AT = 40
 internal const val PANEL_ROW1_AT = 70
 internal const val PANEL_ROW2_AT = 100
@@ -361,6 +386,64 @@ private fun bezier(a: Float, b: Float, s: Float): Float {
 }
 
 /**
+ * How far the display line has cross-faded into SAMPLE's header at
+ * [progress] along the timeline: evenly over the first [PANEL_HEADER_MS] of
+ * the opening, so the line's words give way to the header's in place before
+ * the panel is much out, and come back over the end of the closing.
+ */
+internal fun panelHeaderFade(progress: Float): Float = (panelTime(progress) / PANEL_HEADER_MS).coerceIn(0f, 1f)
+
+/**
+ * How much of the display line's words shows at [fade] along its cross-fade
+ * into SAMPLE's header ([panelHeaderFade]): all of them, gone by its middle,
+ * so they and the header's are never over each other in the same row (a
+ * fade through).
+ */
+internal fun lineShown(fade: Float): Float = (1f - fade * 2f).coerceIn(0f, 1f)
+
+/** How much of SAMPLE's header shows at [fade] along the cross-fade: none until its middle, then all of it ([lineShown]). */
+internal fun headerShown(fade: Float): Float = (fade * 2f - 1f).coerceIn(0f, 1f)
+
+/**
+ * How far the display line on its side has narrowed to the panel's width at
+ * [progress] along the timeline, the pads coming aside under it as it does
+ * ([SampleMorph]): over the opening's first [SIDE_ACROSS_MS], at the
+ * opening's own pace, before it grows down ([morphDown]); so the two never
+ * cross.
+ */
+internal fun morphAcross(progress: Float): Float =
+    PanelOpenEasing.transform((panelTime(progress) / SIDE_ACROSS_MS).coerceIn(0f, 1f)).coerceIn(0f, 1f)
+
+/**
+ * How far the display line on its side has grown down into the panel at
+ * [progress], the pads rising beside it ([SampleMorph]): not at all until it
+ * has narrowed ([morphAcross]), then over the rest of the opening, at its
+ * pace.
+ */
+internal fun morphDown(progress: Float): Float =
+    PanelOpenEasing.transform(((panelTime(progress) - SIDE_ACROSS_MS) / (PANEL_OPEN_MS - SIDE_ACROSS_MS)).coerceIn(0f, 1f)).coerceIn(0f, 1f)
+
+/**
+ * How far a finger on the handle goes for all of the timeline at [progress]
+ * (px) on its side, the foot going [reach] from end to end ([morphDown]): as
+ * far as the foot would at the pace it goes there, so it stays under the
+ * finger; while the line narrows (the foot still) or where the foot goes
+ * slower than the timeline, [reach] itself, so the finger still moves it.
+ */
+internal fun morphReach(progress: Float, reach: Float): Float {
+    val a = (progress - REACH_STEP).coerceAtLeast(0f)
+    val b = (progress + REACH_STEP).coerceAtMost(1f)
+    val pace = if (b > a) (morphDown(b) - morphDown(a)) / (b - a) else 1f
+    return reach * maxOf(pace, 1f)
+}
+
+/** How long the line on its side takes to narrow to the panel's width, at the start of the opening, before it grows down (ms). */
+internal const val SIDE_ACROSS_MS = 90
+
+/** Either side of where the panel is, how far along the timeline [morphReach] looks to find the foot's pace. */
+private const val REACH_STEP = 0.01f
+
+/**
  * How far a part of the panel starting [startMs] into the opening has faded
  * in at [progress] along the timeline: 0 before it starts, then over
  * [PANEL_FADE_MS] to 1.
@@ -369,10 +452,12 @@ internal fun panelFade(progress: Float, startMs: Int): Float =
     FadeEasing.transform(((panelTime(progress) - startMs) / PANEL_FADE_MS).coerceIn(0f, 1f))
 
 /**
- * Where along the timeline the display, and the controls' first and second
- * rows, start fading in under a finger: about where each starts to come out
- * of the line, the panel unrolling from its top.
+ * Where along the timeline the header, the wave strip, and the controls'
+ * first and second rows, start fading in under a finger: the header at once,
+ * the line's own row, the others about where each starts to come out, the
+ * panel unrolling from its top.
  */
+internal const val PULL_HEADER_AT = 0f
 internal const val PULL_DISPLAY_AT = 0.1f
 internal const val PULL_ROW1_AT = 0.35f
 internal const val PULL_ROW2_AT = 0.55f
@@ -528,7 +613,7 @@ internal fun panelSwipe(panel: SamplePanel, onOpen: () -> Unit, onClose: () -> U
 /** The SAMPLE panel, for the pads under it: a press a swipe takes is cut short ([holdToPlay]). */
 internal val LocalSamplePanel = staticCompositionLocalOf<SamplePanel?> { null }
 
-/** How far up the panel starts unrolling, at SAMPLE's line. */
+/** How far up the panel starts unrolling: from under the top bar, or (the plate) from under the screen's foot. */
 private val UnrollFrom = 38.dp
 
 /** The function keys going: how much they shrink, and how far they sink. */
@@ -568,22 +653,24 @@ private val HandleLift = 1.dp
 private val HandleWord = 7.5.dp
 private const val HANDLE_WORD_SPACING = 0.12f
 
-/** The panel's corners as it unrolls: its face's ([SamplePanelFace]). */
-private val UnrollCorner = 18.dp
+/** The panel's corners as it unrolls: its face's ([SampleBodyFace]). */
+private val UnrollCorner = BodyCorner
 
 /**
- * The function keys' place on Live's page, holding the [keys] or the SAMPLE
- * panel ([face]), with its handle ([PanelHandle]) under the panel, as far
- * along as [panel] is (see the notes at the top). Closed, it is the keys
+ * The function keys' place on Live's page, where the display line rides in
+ * the top bar and so can't grow into the panel ([SampleMorph]), holding the
+ * [keys] or the headerless SAMPLE panel ([face], [SampleBodyFace]), with its
+ * handle ([PanelHandle]) under the panel, as far along as [panel] is (see the
+ * notes at the top). Closed, it is the keys
  * and nothing else. Upright the slot is as tall as the keys or the panel,
  * and open holds [openRoom] more under it, for the handle hanging past its
  * foot into the gap below (drawn over what is there, and found by a finger
  * first). [sideways] (the panel's width on its side) it takes the column's
  * height and is as wide as the keys' column or the panel, the handle's row
  * at its foot. The panel unrolls from its top, clipped to the slot so it
- * comes out from under SAMPLE's line; the keys fade, shrink and sink as it
+ * comes out from under the top bar; the keys fade, shrink and sink as it
  * does. The handle comes with the panel: upright it hangs from the panel's
- * edge as it unrolls, fading in as it comes out from under the line; on its
+ * edge as it unrolls, fading in as it comes out from under the bar; on its
  * side it stays at the foot under the panel's middle and fades in over the
  * first half. It closes the panel ([onClose]), or opens it again while it
  * is closing ([onOpen]), with the timeline per second a finger let go of
@@ -620,7 +707,8 @@ internal fun SampleSlot(
         content = {
             if (showKeys) Box(Modifier.layoutId(SLOT_KEYS)) { keys() }
             if (showFace) {
-                Box(Modifier.layoutId(SLOT_FACE).semantics { paneTitle = MirrorText.SAMPLE_TAG }) { face() }
+                // The pane's title is the header's, in the top bar ([SamplePillLine]).
+                Box(Modifier.layoutId(SLOT_FACE)) { face() }
                 if (handle) {
                     Box(Modifier.layoutId(SLOT_HANDLE)) {
                         PanelHandle(panel, { if (across) (at.face - at.keys) / 2f else at.face + UnrollFrom.toPx() }, across, scope, onOpen, onClose)
@@ -699,6 +787,337 @@ internal fun SampleSlot(
     }
 }
 
+/**
+ * Where the display line and its panel go on Live's page on its side, the
+ * line on the page ([SampleMorph]): closed, the line [closed] wide (null: the
+ * room's) over the function keys' column and the pads beside it, [gap] apart;
+ * open, the panel [panel] wide down the left from the line's top, and the
+ * pads beside it from the top, all [open] wide (null: the room's). [handle]:
+ * whether the column is tall enough for the handle under the panel. The
+ * pads are no taller than [padsClosed] and [padsOpen] (all four groups' pads
+ * no taller than wide), where given.
+ */
+internal class MorphSide(
+    val closed: Dp?,
+    val open: Dp?,
+    val panel: Dp,
+    val gap: Dp,
+    val handle: Boolean,
+    val padsClosed: Dp? = null,
+    val padsOpen: Dp? = null,
+)
+
+/**
+ * The display line growing into the SAMPLE panel (an addition): the line's
+ * own rounded dark shape grows down in place, its words ([line]) giving way
+ * to SAMPLE's [header] in the line's row over the first [PANEL_HEADER_MS]
+ * (the one fading out, then the other in: [lineShown]);
+ * under the header, on the same dark screen, the wave [strip] ([wave] tall,
+ * none where 0); then a pale plate with the controls ([plate]) unrolls from
+ * under the screen, its outer corners the line's ([corner]) and the screen's
+ * lower corners squaring off to meet it, so the two are one body (the
+ * device's screen over its keys), with a lip under it. The function [keys]
+ * under the line ([gap] under it) fade, shrink and sink away as it comes, as
+ * far along as [panel] is.
+ *
+ * Upright the body is the page's width and grows in height from the line's
+ * to the panel's, [openRoom] more under it open for the handle hanging past
+ * its foot ([PanelHandle]); the pads come after, gliding ([PadsGlide]). On
+ * its [side] (the line on the page) the [pads] are inside this layout, and
+ * the two take turns so that neither is ever over the other: first the line
+ * narrows to the panel's width as the pads come aside, under it, to beside
+ * where the panel will be ([morphAcross]); then it grows down the left of
+ * the column as the pads rise beside it to the top ([morphDown]). The handle
+ * follows the body's foot either way: a drag up puts the panel back into the
+ * line under the finger ([onClose]), down draws it out ([onOpen]); what a
+ * finger leaves going runs in [scope].
+ *
+ * All of it is one timeline read as it lays out and draws: the body's shape
+ * is drawn from it ([MorphGeom]), the parts are placed from it, and their
+ * fades and clips are graphics-layer lambdas. Each part is measured at a size
+ * that doesn't change as it moves, so nothing measures again but the room
+ * (the slot's height, the pads' room on its side), and nothing recomposes.
+ */
+@Composable
+internal fun SampleMorph(
+    panel: SamplePanel,
+    onOpen: (velocity: Float?) -> Unit,
+    onClose: (velocity: Float?) -> Unit,
+    scope: CoroutineScope,
+    gap: Dp,
+    corner: Dp,
+    wave: Dp,
+    modifier: Modifier = Modifier,
+    openRoom: Dp = 0.dp,
+    side: MorphSide? = null,
+    line: @Composable () -> Unit,
+    keys: @Composable () -> Unit,
+    header: @Composable () -> Unit,
+    strip: @Composable () -> Unit,
+    plate: @Composable () -> Unit,
+    pads: @Composable () -> Unit = {},
+) {
+    val showFace by remember(panel) { derivedStateOf { panel.open || panel.progress > 0f } }
+    val showKeys by remember(panel) { derivedStateOf { !panel.open || panel.progress < 1f } }
+    val g = remember { MorphGeom() }
+    val dark = LocalArcColors.current.display
+    val ko = LocalHwColors.current.ko
+    val handle = side?.handle ?: true
+    Layout(
+        content = {
+            if (showKeys) Box(Modifier.layoutId(MORPH_KEYS)) { keys() }
+            if (side != null) Box(Modifier.layoutId(MORPH_PADS)) { pads() }
+            // The body's shape, over the keys going: drawn from the timeline, nothing in it.
+            if (showFace) Box(Modifier.layoutId(MORPH_BODY).drawBehind { g.draw(this, panel.unroll, dark, ko.body, ko.edge) })
+            if (showKeys) Box(Modifier.layoutId(MORPH_LINE)) { line() }
+            if (showFace) {
+                Box(Modifier.layoutId(MORPH_HEADER)) { header() }
+                if (wave > 0.dp) Box(Modifier.layoutId(MORPH_STRIP)) { strip() }
+                Box(Modifier.layoutId(MORPH_PLATE)) { plate() }
+                if (handle) Box(Modifier.layoutId(MORPH_HANDLE)) { PanelHandle(panel, { g.reachAt(panel.progress) }, false, scope, onOpen, onClose) }
+            }
+        },
+        // Over what comes after it, where the handle hangs into the pads' room.
+        modifier = modifier.zIndex(1f),
+    ) { measurables, constraints ->
+        val u = panel.unroll
+        val m = { id: String -> measurables.firstOrNull { it.layoutId == id } }
+        val gapPx = gap.roundToPx()
+        val headerPx = BodyHeader.roundToPx()
+        val wavePx = wave.roundToPx()
+        val sidePx = WaveSide.roundToPx()
+        val lip = CapDy.roundToPx()
+        val row = if (handle) HandleRow.roundToPx() else 0
+        val screenOpen = headerPx + if (wavePx > 0) wavePx + WaveFoot.roundToPx() else 0
+        g.side = side != null
+        g.corner = corner.toPx()
+        g.lip = lip.toFloat()
+        g.screenOpen = screenOpen.toFloat()
+        val lineP: Placeable?
+        val keysP: Placeable?
+        val plateP: Placeable?
+        val padsP: Placeable?
+        val w: Int
+        val h: Int
+        val padsAt: IntOffset
+        if (side == null) {
+            w = constraints.maxWidth
+            val across = Constraints(minWidth = w, maxWidth = w)
+            lineP = m(MORPH_LINE)?.measure(across)
+            keysP = m(MORPH_KEYS)?.measure(across)
+            plateP = m(MORPH_PLATE)?.measure(across)
+            if (lineP != null) g.line = lineP.height.toFloat() else if (g.line == 0f) g.line = headerPx.toFloat()
+            if (keysP != null) g.keys = keysP.height
+            if (plateP != null) g.plate = plateP.height
+            g.closedW = w.toFloat()
+            g.openW = w.toFloat()
+            g.bodyOpenW = w.toFloat()
+            g.room = w.toFloat()
+            g.openBottom = screenOpen + g.plate.toFloat()
+            val closedH = g.line.roundToInt() + gapPx + g.keys
+            val openH = screenOpen + g.plate + lip + openRoom.roundToPx()
+            h = lerpPx(closedH, openH, u)
+            padsP = null
+            padsAt = IntOffset.Zero
+        } else {
+            w = constraints.maxWidth
+            h = constraints.maxHeight
+            val closedW = side.closed?.roundToPx()?.coerceAtMost(w) ?: w
+            val openW = side.open?.roundToPx()?.coerceAtMost(w) ?: w
+            val panelW = side.panel.roundToPx().coerceAtMost(openW)
+            val padsGap = side.gap.roundToPx()
+            lineP = m(MORPH_LINE)?.measure(Constraints(minWidth = closedW, maxWidth = closedW))
+            // Open from the start (the line not yet laid out), the header's row stands in for it.
+            if (lineP != null) g.line = lineP.height.toFloat() else if (g.line == 0f) g.line = headerPx.toFloat()
+            val under = (h - g.line.roundToInt() - gapPx).coerceAtLeast(0)
+            keysP = m(MORPH_KEYS)?.measure(Constraints(maxWidth = closedW, maxHeight = under))
+            if (keysP != null) g.keys = keysP.width
+            g.closedW = closedW.toFloat()
+            g.openW = openW.toFloat()
+            g.bodyOpenW = panelW.toFloat()
+            g.room = w.toFloat()
+            g.openBottom = (h - row - lip).toFloat()
+            plateP = m(MORPH_PLATE)?.measure(Constraints.fixed(panelW, (h - row - lip - screenOpen).coerceAtLeast(0)))
+            // The pads' room: beside the keys under the line, closed; beside the panel from the top, open.
+            val fromX = g.keys + padsGap
+            val toX = panelW + padsGap
+            val fromH = side.padsClosed?.roundToPx()?.let { minOf(it, under) } ?: under
+            val toH = side.padsOpen?.roundToPx()?.let { minOf(it, h) } ?: h
+            // Aside under the line as it narrows, then up beside it as it grows down: clear of it all the way.
+            val across = g.across(u)
+            val down = g.down(u)
+            val pw = lerpPx(closedW - fromX, openW - toX, across).coerceAtLeast(0)
+            val ph = lerpPx(fromH, toH, down).coerceAtLeast(0)
+            padsP = m(MORPH_PADS)?.measure(Constraints.fixed(pw, ph))
+            padsAt = IntOffset(lerpPx(fromX, toX, across), lerpPx(g.line.roundToInt() + gapPx, 0, down))
+        }
+        g.reach = g.openBottom - g.line
+        val bodyW = g.bodyW(u).roundToInt()
+        val x0 = g.x0(u).roundToInt()
+        val headerP = m(MORPH_HEADER)?.measure(Constraints.fixed(g.bodyOpenW.roundToInt(), headerPx))
+        val stripP = m(MORPH_STRIP)?.measure(Constraints.fixed((g.bodyOpenW.roundToInt() - sidePx * 2).coerceAtLeast(0), wavePx))
+        val bodyP = m(MORPH_BODY)?.measure(Constraints.fixed(w, h))
+        val handleP = m(MORPH_HANDLE)?.measure(Constraints())
+        layout(w, h) {
+            keysP?.placeWithLayer(x0, g.line.roundToInt() + gapPx) {
+                val k = panel.unroll
+                alpha = 1f - k
+                scaleX = 1f - KEYS_SHRINK * k
+                scaleY = scaleX
+                translationY = KeysSink.toPx() * k
+            }
+            padsP?.place(x0 + padsAt.x, padsAt.y)
+            bodyP?.place(0, 0)
+            lineP?.placeWithLayer(x0, 0) {
+                val k = panel.unroll
+                alpha = lineShown(panel.header)
+                // Within the body's shape as it changes (narrowing on its side, shorter than a tall line).
+                clip = k > 0f
+                if (k > 0f) shape = g.screenShape(k)
+            }
+            headerP?.placeWithLayer(x0, 0) {
+                // In place: over the middle of the line's row as it fades in, then up into its own row as the line grows.
+                val k = panel.unroll
+                alpha = headerShown(panel.header)
+                translationY = (g.line - headerPx) / 2f * (1f - g.down(k))
+            }
+            stripP?.placeWithLayer(x0 + sidePx, headerPx) {
+                // As much of it as the screen has grown down to.
+                clip = true
+                shape = ClipRect(top = -headerPx.toFloat(), bottom = g.screen(panel.unroll) - headerPx)
+            }
+            plateP?.placeWithLayer(x0, 0) {
+                // Out from under the screen's foot, a little slide with it, cut off at the body's foot.
+                val k = panel.unroll
+                val screen = g.screen(k)
+                val top = screen - UnrollFrom.toPx() * (1f - g.down(k))
+                translationY = top
+                clip = k < 1f
+                if (k < 1f) shape = UnrollShape(top = screen - top, bottom = g.bottom(k) - top, right = g.bodyW(k), corner = g.corner)
+            }
+            handleP?.let { hp ->
+                val foot = g.bottom(u)
+                hp.placeWithLayer(x0 + bodyW / 2 - hp.width / 2, foot.roundToInt() + lip) {
+                    alpha = ((g.bottom(panel.unroll) - g.line) / row.coerceAtLeast(1)).coerceIn(0f, 1f)
+                }
+            }
+        }
+    }
+}
+
+private const val MORPH_KEYS = "keys"
+private const val MORPH_PADS = "pads"
+private const val MORPH_BODY = "body"
+private const val MORPH_LINE = "line"
+private const val MORPH_HEADER = "header"
+private const val MORPH_STRIP = "strip"
+private const val MORPH_PLATE = "plate"
+private const val MORPH_HANDLE = "handle"
+
+/**
+ * The growing line's measures as last laid out, px ([SampleMorph]), and its
+ * shape at a point on the timeline, worked out where it draws: the room's
+ * width, the column's closed and open, the body's open; the line's height,
+ * the screen's open (header and wave strip), the body's foot open, the lip,
+ * the corners; the keys' height (on its side, width) and the plate's height;
+ * how far the handle goes from end to end; and whether it lies on its [side],
+ * where it narrows first and grows down after ([morphAcross], [morphDown]).
+ */
+private class MorphGeom {
+    var side = false
+    var room = 0f
+    var closedW = 0f
+    var openW = 0f
+    var bodyOpenW = 0f
+    var line = 0f
+    var screenOpen = 0f
+    var openBottom = 0f
+    var lip = 0f
+    var corner = 0f
+    var keys = 0
+    var plate = 0
+    var reach = 0f
+
+    /** How far across it (and the pads beside it) has gone at [u]: all of the timeline upright, its first leg on its side. */
+    fun across(u: Float): Float = if (side) morphAcross(u) else u
+
+    /** How far down it (and the pads beside it) has gone at [u]: all of the timeline upright, its second leg on its side. */
+    fun down(u: Float): Float = if (side) morphDown(u) else u
+
+    /** The body's left edge at [u]: the column's, centred in the room as it widens or narrows. */
+    fun x0(u: Float): Float = (room - lerpF(closedW, openW, across(u))) / 2f
+
+    /** The body's width at [u]: the line's, to the panel's. */
+    fun bodyW(u: Float): Float = lerpF(closedW, bodyOpenW, across(u))
+
+    /** The dark screen's height at [u]: the line's, to the header's and the wave strip's. */
+    fun screen(u: Float): Float = lerpF(line, screenOpen, down(u))
+
+    /** The body's foot at [u]: the line's, to under the plate. */
+    fun bottom(u: Float): Float = lerpF(line, openBottom, down(u))
+
+    /**
+     * How far a finger goes for all of the timeline at [u] (px), the handle
+     * on the foot: upright, the foot's whole way; on its side, at the pace
+     * the foot goes there ([morphReach]), so it stays under the finger.
+     */
+    fun reachAt(u: Float): Float = if (side) morphReach(u, reach) else reach
+
+    /** How round the screen's lower corners are at [u]: the line's, squaring off as the plate comes out under them. */
+    fun screenFoot(u: Float): Float = corner * (1f - ((bottom(u) - screen(u)) / corner.coerceAtLeast(1f)).coerceIn(0f, 1f))
+
+    /** The screen's shape at [u], in the line's own pixels (it sits at the body's left edge). */
+    fun screenShape(u: Float): Shape = BodyShape(bodyW(u), screen(u), corner, screenFoot(u))
+
+    private val path = Path()
+
+    /**
+     * The body at [u], in [scope] (the room's pixels): nothing closed; else the
+     * plate in [body] tucked under the screen's foot, its lip in [edge] under
+     * it, and the screen in [dark] over them, its top corners the line's.
+     */
+    fun draw(scope: DrawScope, u: Float, dark: Color, body: Color, edge: Color) {
+        if (u <= 0f) return
+        val x = x0(u)
+        val w = bodyW(u)
+        val screen = screen(u)
+        val foot = bottom(u)
+        val r = CornerRadius(corner)
+        if (foot > screen) {
+            val top = (screen - corner).coerceAtLeast(0f)
+            path.reset()
+            path.addRoundRect(RoundRect(x, top + lip, x + w, foot + lip, CornerRadius.Zero, CornerRadius.Zero, r, r))
+            scope.drawPath(path, edge)
+            path.reset()
+            path.addRoundRect(RoundRect(x, top, x + w, foot, CornerRadius.Zero, CornerRadius.Zero, r, r))
+            scope.drawPath(path, body)
+        }
+        val f = CornerRadius(screenFoot(u))
+        path.reset()
+        path.addRoundRect(RoundRect(x, 0f, x + w, screen, r, r, f, f))
+        scope.drawPath(path, dark)
+    }
+}
+
+/** [a] to [b] at [f] (0..1). */
+private fun lerpF(a: Float, b: Float, f: Float): Float = a + (b - a) * f
+
+/** A rounded rectangle from the top left, [width] by [height], its top corners [top] and lower ones [foot] round. */
+private class BodyShape(val width: Float, val height: Float, val top: Float, val foot: Float) : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+        if (width <= 0f || height <= 0f) return Outline.Rectangle(Rect.Zero)
+        val t = CornerRadius(top)
+        val f = CornerRadius(foot)
+        return Outline.Rounded(RoundRect(0f, 0f, width, height, t, t, f, f))
+    }
+}
+
+/** Everything from [top] down to [bottom], however wide, in the layer's own pixels. */
+private class ClipRect(val top: Float, val bottom: Float) : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline =
+        if (bottom <= top) Outline.Rectangle(Rect.Zero) else Outline.Rectangle(Rect(0f, top, size.width, bottom))
+}
+
 /** How tall (on its side, wide) the function keys and the panel were last laid out, px: how far the handle goes. */
 private class SlotExtents {
     var keys = 0f
@@ -727,19 +1146,6 @@ private class UnrollShape(val top: Float, val bottom: Float, val right: Float, v
             },
         )
     }
-}
-
-/**
- * [this] laid out [width] wide whatever room it is given, and over its
- * middle: the same room every frame while the room around it changes, so
- * the parts in it (a line's words, fitted to its width) aren't measured
- * again.
- */
-internal fun Modifier.centredAt(width: Dp): Modifier = layout { measurable, constraints ->
-    val w = width.roundToPx()
-    val p = measurable.measure(constraints.copy(minWidth = w, maxWidth = w))
-    val room = if (constraints.hasBoundedWidth) constraints.maxWidth else w
-    layout(room, p.height) { p.place((room - w) / 2, 0) }
 }
 
 /**

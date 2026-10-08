@@ -3265,7 +3265,7 @@ class ArcController(
 
     /**
      * The one worker uploading the recordings kept while connected, oldest
-     * first, while Live plays on: SAMPLE's line shows the progress. Each
+     * first, while Live plays on: SAMPLE's header shows the progress. Each
      * done goes on its pad and leaves arc's folder. One that fails stays an
      * offline change, its pad still playing it from arc, and the question
      * about offline changes asks at once whether to write it (try again) or
@@ -3319,7 +3319,7 @@ class ArcController(
 
     /**
      * Uploads recording [p] onto [t]'s pad ([slot], else the next free one),
-     * its progress on SAMPLE's line when its physical [pad] is known: one at
+     * its progress in SAMPLE's header when its physical [pad] is known: one at
      * a time, whoever asks, and on its way up ([samplesGoingUp]) from the
      * call, waiting its turn included. Once on the device, the pad plays the
      * device's sound (kept from the recording, so not read back), and the

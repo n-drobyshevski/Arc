@@ -194,6 +194,7 @@ class FeatureTextTest {
         assertEquals("Count-in 3", MirrorText.countIn(3))
         assertEquals("0:04 / 0:20", MirrorText.sampleTime(4, 20))
         assertEquals("0:39 / 0:40", MirrorText.sampleTime(39, 40))
+        assertEquals("Takes up to 40 s", MirrorText.sampleMax(40))
         assertEquals("Pad A 7: uploading, 40%", MirrorText.sampleUploading(a7, 40))
         assertEquals("Disk low: room for 12 s", MirrorText.diskLow(12))
         assertEquals("Pad A 7: uploading", MirrorText.sampleUploading(a7))

@@ -154,7 +154,7 @@ class SampleRecorder(
 
     private val _phase = MutableStateFlow<SamplePhase>(SamplePhase.Ready)
 
-    /** What is going on, for SAMPLE's line; [SamplePhase.Ready] while closed. */
+    /** What is going on, for SAMPLE's header; [SamplePhase.Ready] while closed. */
     val phase: StateFlow<SamplePhase> = _phase
 
     private val _silenced = MutableStateFlow(false)

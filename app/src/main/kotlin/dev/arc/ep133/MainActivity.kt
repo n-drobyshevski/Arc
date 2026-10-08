@@ -730,6 +730,8 @@ class MainActivity : ComponentActivity() {
         )
         // The piano's notes while it shows, so the bar's display line can name a device note past its ends.
         var pianoRange by remember { mutableStateOf<IntRange?>(null) }
+        // How far Live's SAMPLE panel has cross-faded its header in, while Live shows: the bar's line follows it.
+        var sampleHeader by remember { mutableStateOf<(() -> Float)?>(null) }
         val liveBar = tab == Tab.LIVE && dev.arc.ep133.ui.screens.liveInBar(dev.arc.ep133.ui.components.LocalArcWindow.current)
         // Live's mic key in the top bar, while Live has a mirror or offline pads: lit while SAMPLE's panel is open. A
         // tap opens it as a swipe does (from KEYS, Live goes to PADS for it in the same tap), or closes it, with a tick.
@@ -875,7 +877,7 @@ class MainActivity : ComponentActivity() {
                     onGuide = { guideOpen = it },
                     guide = { GuideScreen(onBack = { guideOpen = false }) },
                     // On a phone on its side, Live's display line rides in the top bar.
-                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, liveRec, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys, wireless = liveWireless, sample = sampleUi) }) else null,
+                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, liveRec, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys, wireless = liveWireless, sample = sampleUi, header = sampleHeader) }) else null,
                     sample = sampleKey,
                 ) {
                     // Back from another section returns to Live, the home section, first.
@@ -951,6 +953,7 @@ class MainActivity : ComponentActivity() {
                             ),
                             functions = functions,
                             sample = sampleUi,
+                            onSampleHeader = { sampleHeader = it },
                         )
                         Tab.DEVICE -> DeviceScreen(
                             state = state,

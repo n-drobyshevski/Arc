@@ -61,6 +61,83 @@ class SamplePanelTest {
     }
 
     @Test
+    fun `the line cross-fades into SAMPLE's header in place over the opening's first 120 ms, and back closing`() {
+        assertEquals(120, PANEL_HEADER_MS)
+        assertEquals(0f, panelHeaderFade(0f))
+        assertEquals(0.5f, panelHeaderFade(opened(60)), 0.02f)
+        assertEquals(1f, panelHeaderFade(opened(PANEL_HEADER_MS)), 1e-3f)
+        assertEquals(1f, panelHeaderFade(1f))
+        // The header is in before the wave strip and the rows are much out: it leads them.
+        val early = opened(80)
+        assertTrue(panelHeaderFade(early) > panelFade(early, PANEL_DISPLAY_AT))
+        // Closing, it holds while the controls fade and comes back to the line at the end, the line whole at rest.
+        val closed = { ms: Float -> 1f - PanelCloseEasing.transform((ms / PANEL_CLOSE_MS).coerceIn(0f, 1f)) }
+        assertEquals(1f, panelHeaderFade(closed(40f)), 1e-3f)
+        assertEquals(0f, panelHeaderFade(closed(PANEL_CLOSE_MS.toFloat())))
+        // Under a finger it comes with the first of the drag, as the line's own row is the first out.
+        val pulled = SamplePanel(0.2f, fixed = true, pulled = true)
+        assertEquals(maxOf(panelHeaderFade(0.2f), panelPullFade(0.2f, PULL_HEADER_AT)), pulled.header)
+        assertEquals(0f, PULL_HEADER_AT)
+        assertEquals(1f, SamplePanel(1f, fixed = true).header)
+        assertEquals(0f, SamplePanel(0f, fixed = true).header)
+    }
+
+    @Test
+    fun `the line's words go before the header's come, never over each other in the row`() {
+        // At rest: the line alone, closed; the header alone, open.
+        assertEquals(1f, lineShown(0f))
+        assertEquals(0f, headerShown(0f))
+        assertEquals(0f, lineShown(1f))
+        assertEquals(1f, headerShown(1f))
+        // The line half gone a quarter of the way through (30 ms into the opening), gone by the middle (60 ms).
+        assertEquals(0.5f, lineShown(0.25f), 1e-6f)
+        assertEquals(0f, lineShown(0.5f))
+        assertEquals(0f, headerShown(0.5f))
+        // The header half in three quarters of the way through (90 ms), in at the end.
+        assertEquals(0.5f, headerShown(0.75f), 1e-6f)
+        for (i in 0..20) {
+            val f = i / 20f
+            assertTrue(lineShown(f) == 0f || headerShown(f) == 0f)
+        }
+    }
+
+    @Test
+    fun `on its side the line narrows first and grows down after, never both at once`() {
+        // The timeline [ms] into a tap's opening.
+        val opened = { ms: Float -> PanelOpenEasing.transform((ms / PANEL_OPEN_MS).coerceIn(0f, 1f)) }
+        assertEquals(0f, morphAcross(0f))
+        assertEquals(0f, morphDown(0f))
+        assertEquals(1f, morphAcross(1f))
+        assertEquals(1f, morphDown(1f))
+        // Halfway through its narrowing it hasn't started down (the pads, aside under it, still clear of its foot).
+        assertTrue(morphAcross(opened(SIDE_ACROSS_MS / 2f)) in 0.1f..0.99f)
+        assertEquals(0f, morphDown(opened(SIDE_ACROSS_MS / 2f)))
+        // Down on its way only once it is as narrow as the panel (the pads beside it, clear of its side).
+        for (i in 0..300) {
+            val p = i / 300f
+            assertTrue(morphDown(p) == 0f || morphAcross(p) == 1f, "at $p")
+        }
+        assertTrue(morphDown(opened(200f)) > 0.5f)
+        // Each goes one way only.
+        for (i in 1..300) {
+            assertTrue(morphAcross(i / 300f) >= morphAcross((i - 1) / 300f))
+            assertTrue(morphDown(i / 300f) >= morphDown((i - 1) / 300f))
+        }
+    }
+
+    @Test
+    fun `on its side the handle stays under the finger as the foot goes, and still moves while the line narrows`() {
+        // While it narrows the foot is still: the finger takes the panel along at the foot's whole way.
+        assertEquals(300f, morphReach(0.05f, 300f))
+        // Growing down, the finger goes as far as the foot does for a step of the timeline.
+        val p = 0.95f
+        val step = 0.001f
+        val foot = (morphDown(p + step) - morphDown(p - step)) * 300f
+        assertEquals(foot / (2 * step), morphReach(p, 300f), morphReach(p, 300f) * 0.05f)
+        assertTrue(morphReach(p, 300f) >= 300f)
+    }
+
+    @Test
     fun `closing, the controls fade first and quickly, then the panel rolls up without a jump`() {
         // The timeline [ms] into a tap's closing, from all the way open.
         val closed = { ms: Float -> 1f - PanelCloseEasing.transform((ms / PANEL_CLOSE_MS).coerceIn(0f, 1f)) }

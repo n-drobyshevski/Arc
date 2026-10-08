@@ -186,6 +186,7 @@ describe('FeatureTextTest', () => {
     expect(MirrorText.countIn(3)).toBe('Count-in 3')
     expect(MirrorText.sampleTime(4, 20)).toBe('0:04 / 0:20')
     expect(MirrorText.sampleTime(39, 40)).toBe('0:39 / 0:40')
+    expect(MirrorText.sampleMax(40)).toBe('Takes up to 40 s')
     expect(MirrorText.sampleUploading(a7, 40)).toBe('Pad A 7: uploading, 40%')
     expect(MirrorText.diskLow(12)).toBe('Disk low: room for 12 s')
     expect(MirrorText.sampleUploading(a7)).toBe('Pad A 7: uploading')

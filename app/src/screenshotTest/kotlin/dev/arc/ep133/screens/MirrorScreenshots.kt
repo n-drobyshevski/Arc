@@ -735,10 +735,10 @@ private fun ProjectSheet(mirror: MirrorUi) {
     }
 }
 
-// The SAMPLE panel, unrolled in the function keys' place, its handle hanging under it, the mic key in the top
-// bar lit: the line above lit
-// orange with the source, the meter and what to do; the panel's display and controls; the page's pads,
-// the empty pads' rings blinking (caught on), those with a sound ringed, the take's pad lit.
+// The display line grown into the SAMPLE panel over the function keys' place, its handle hanging under it, the mic
+// key in the top bar lit: the line's row now SAMPLE's header (its orange light, the source, the meter and what to do),
+// the wave strip under it on the same dark screen, the controls on the pale plate below; the page's pads, the empty
+// pads' rings blinking (caught on), those with a sound ringed, the take's pad lit.
 private val mic = SampleInput(SampleSource.MIC, false)
 private val rspSt = SampleInput(SampleSource.RSP, true)
 private val inputs = listOf(mic, SampleInput(SampleSource.RSP, false), rspSt)
@@ -761,7 +761,8 @@ fun LiveSamplePanelDarkPreview() = Live(lastRead, dark = true, oneGroup = true, 
 @Composable
 fun LiveSamplePanelWaitingPreview() = Live(lastRead, oneGroup = true, sample = sampleReady.copy(phase = SamplePhase.Waiting(PhysicalPad(0, 2))))
 
-// Resampling the phone's sound in stereo into an empty pad, 4 s of 20: a small phone's panel, without its display.
+// Resampling the phone's sound in stereo into an empty pad, 4 s of 20: a small phone's panel, the wave strip just fitting
+// over pads a finger wide (any shorter and it goes, the header still saying it all).
 @PreviewTest
 @Preview(name = "Live sample panel recording small", widthDp = 360, heightDp = 668, showBackground = true)
 @Composable
@@ -794,13 +795,14 @@ fun LiveSamplePanelUsbPreview() = Live(
     sample = sampleReady.copy(input = SampleInput(SampleSource.USB, true), inputs = inputs + SampleInput(SampleSource.USB, false) + SampleInput(SampleSource.USB, true), gainDb = 0f, usb = true),
 )
 
-// The EP-133 short of space: takes stop sooner, and the display says so.
+// The EP-133 short of space: takes stop sooner, and the header says so.
 @PreviewTest
 @Preview(name = "Live sample panel low space", widthDp = 393, heightDp = 852, showBackground = true)
 @Composable
 fun LiveSamplePanelLowSpacePreview() = Live(lastRead, oneGroup = true, sample = sampleReady.copy(lowSpace = true, maxSeconds = 12))
 
-// On its side: the line in the top bar; the panel in the function keys' column, widened, the pads beside it.
+// On its side, the line in the top bar: SAMPLE's header in the pill, the panel under it in the function keys' column
+// without a header of its own (the wave strip and the controls), widened, the pads beside it.
 @PreviewTest
 @Preview(name = "Live sample panel sideways", widthDp = 867, heightDp = 388, showBackground = true)
 @Composable
@@ -810,6 +812,13 @@ fun LiveSamplePanelSidewaysPreview() = Live(lastRead, oneGroup = true, sample = 
 @Preview(name = "Live sample panel bar", widthDp = 692, heightDp = 336, showBackground = true)
 @Composable
 fun LiveSamplePanelBarPreview() = Live(lastRead, oneGroup = true, sample = sampleReady, lastTake = true)
+
+// On its side, too narrow for the line in the top bar: the line grows down the column's left into the panel, the pads
+// beside it from the top.
+@PreviewTest
+@Preview(name = "Live sample panel side line", widthDp = 560, heightDp = 280, showBackground = true)
+@Composable
+fun LiveSamplePanelSideLinePreview() = Live(lastRead, oneGroup = true, sample = sampleReady, lastTake = true)
 
 @PreviewTest
 @Preview(name = "Live sample panel short", widthDp = 490, heightDp = 253, showBackground = true)
@@ -821,17 +830,25 @@ fun LiveSamplePanelShortPreview() = Live(lastRead, oneGroup = true, sample = sam
 @Composable
 fun LiveSamplePanelTabletPreview() = Live(lastRead, sample = sampleReady, lastTake = true)
 
-// Caught 135 ms into the 300 of a tap's opening (45%; 94% of the way down, Material's emphasised decelerate
-// being quick off the mark): the panel nearly unrolled out of the line, its handle coming down with it, the display
-// most of the way in and the controls' rows coming after it, the function keys fading, the pads gliding down.
+// Caught 90 ms into the 300 of a tap's opening (87% of the way, Material's emphasised decelerate being quick off
+// the mark): the line's words gone and SAMPLE's header half in, in their place, the dark screen grown most of the
+// way down with the wave strip coming in, the plate unrolling from under it with its handle and its first row coming,
+// the function keys fading, the pads gliding down.
 @PreviewTest
 @Preview(name = "Live sample unroll", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
-fun LiveSampleUnrollPreview() = Live(lastRead, oneGroup = true, sample = sampleReady, unroll = 0.936f)
+fun LiveSampleUnrollPreview() = Live(lastRead, oneGroup = true, sample = sampleReady, unroll = 0.867f)
 
-// The open panel's handle dragged up, 70% of the way still out: the handle under the finger at the panel's edge,
-// the panel gone back into the line as far, its controls (faded in as they came out) still in, the keys coming
-// back and the pads moving up as far.
+// On its side, the line on the page, caught growing down: narrowed to the panel's width first, the pads come aside
+// under it, now rising beside it, never under it; the header in, the function keys fading under the plate.
+@PreviewTest
+@Preview(name = "Live sample side unroll", widthDp = 560, heightDp = 280, showBackground = true)
+@Composable
+fun LiveSampleSideUnrollPreview() = Live(lastRead, oneGroup = true, sample = sampleReady, unroll = 0.95f)
+
+// The open panel's handle dragged up, 70% of the way still out: the handle under the finger at the body's foot,
+// the body gone back toward the line as far, the header and the controls (faded in as they came out) still in, the
+// keys coming back and the pads moving up as far.
 @PreviewTest
 @Preview(name = "Live sample pull", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable

@@ -640,7 +640,7 @@ export const MirrorText = {
   INPUT_LEVEL: 'Input level',
   CLIPPING: 'Clipping',
 
-  // The orange display line in the mode: the tag, then what happens next.
+  // The display line in the mode, grown into the SAMPLE panel: the tag, then what happens next.
   SAMPLE_TAG: 'Sample',
   SAMPLE_READY: 'Hold a pad to record',
   SAMPLE_READY_LATCH: 'Tap a pad to record hands-free',
@@ -655,6 +655,11 @@ export const MirrorText = {
   /** "0:04 / 0:20": the take so far, and the longest it can be. */
   sampleTime(seconds: number, max: number): string {
     return `${MirrorText.takeLength(seconds)} / ${MirrorText.takeLength(max)}`
+  },
+
+  /** "Takes up to 40 s": the panel's wave strip before the first take, the longest one can be. */
+  sampleMax(seconds: number): string {
+    return `Takes up to ${seconds} s`
   },
 
   /** "Pad A 7: uploading, 40%"; without [percent] as a screen reader hears it, once rather than at each step. */

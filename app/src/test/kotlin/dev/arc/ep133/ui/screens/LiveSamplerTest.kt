@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
-/** SAMPLE's line, panel and pad lights: what they say and how they lay out. */
+/** SAMPLE's header, panel and pad lights: what they say and how they lay out. */
 class LiveSamplerTest {
     private val pad = PhysicalPad(0, 2)
     private val other = PhysicalPad(1, 9)
@@ -100,32 +100,58 @@ class LiveSamplerTest {
     }
 
     @Test
-    fun `the upright panel keeps the pads a finger wide, giving up its display, the big knobs, then a row`() {
-        // A Pixel 7's: two rows of controls, the knobs at their biggest, the display over them.
-        val roomy = samplePanelFit(353.dp, 609.dp)
+    fun `the upright panel keeps the pads a finger wide, giving up its wave, the big knobs, then a row`() {
+        // A Pixel 7's (the room from the display line's top): two rows of controls, the knobs at their biggest, the
+        // wave strip under the header.
+        val roomy = samplePanelFit(353.dp, 680.dp)
         assertEquals(SampleControls.ROWS, roomy.controls)
         assertEquals(56.dp, roomy.knob)
-        assertEquals(96.dp, roomy.display)
-        // The scrolling page always has room for the display.
-        assertEquals(96.dp, samplePanelFit(353.dp, null).display)
-        // A small phone's: narrow controls (STEREO left to -/+) and no display (SAMPLE's line says it all).
-        val small = samplePanelFit(301.dp, 444.dp)
+        assertEquals(52.dp, roomy.wave)
+        // The scrolling page always has room for the wave.
+        assertEquals(52.dp, samplePanelFit(353.dp, null).wave)
+        // Shorter, the wave goes first (the header still says what goes on), then the knobs come down to a key's
+        // height, then the controls go into one row.
+        assertEquals(52.dp, samplePanelFit(353.dp, 508.dp).wave)
+        assertEquals(0.dp, samplePanelFit(353.dp, 507.dp).wave)
+        assertEquals(56.dp, samplePanelFit(353.dp, 507.dp).knob)
+        assertEquals(44.dp, samplePanelFit(353.dp, 445.dp).knob)
+        assertEquals(SampleControls.LINE, samplePanelFit(353.dp, 433.dp).controls)
+        // A narrow page's: STEREO left to -/+, and the wave where there is room for it.
+        val small = samplePanelFit(301.dp, 496.dp)
         assertEquals(SampleControls.NARROW, small.controls)
-        assertEquals(0.dp, small.display)
+        assertEquals(52.dp, small.wave)
         assertTrue(small.knob > 30.dp)
-        // Shorter: the knobs a key tall, then one row that scrolls.
-        assertEquals(44.dp, samplePanelFit(353.dp, 392.dp).knob)
-        assertEquals(SampleControls.LINE, samplePanelFit(301.dp, 360.dp).controls)
-        // The panel's height as laid out: padding, edge, display, gap and the two rows.
-        assertEquals(12.dp * 2 + 3.dp + 96.dp + 10.dp + 44.dp + 6.dp + 56.dp, panelHeight(roomy))
+        assertEquals(0.dp, samplePanelFit(301.dp, 495.dp).wave)
+        // Its height open: the line's row (the header), the wave and the dark room under it, the plate's padding,
+        // the two rows and its lip.
+        assertEquals(48.dp + 52.dp + 10.dp + 12.dp * 2 + 44.dp + 6.dp + 56.dp + 3.dp, panelHeight(roomy))
+        assertEquals(panelHeight(roomy) - 62.dp, panelHeight(roomy.copy(wave = 0.dp)))
     }
 
     @Test
     fun `the USB note under the controls counts against the pads' room`() {
-        // Room for the display over the pads, but not with the note's two lines under the controls as well.
-        assertEquals(96.dp, samplePanelFit(353.dp, 530.dp).display)
-        assertEquals(0.dp, samplePanelFit(353.dp, 530.dp, note = 36.dp).display)
+        // Room for the wave over the pads, but not with the note's two lines under the controls as well.
+        assertEquals(52.dp, samplePanelFit(353.dp, 520.dp).wave)
+        assertEquals(0.dp, samplePanelFit(353.dp, 520.dp, note = 36.dp).wave)
         assertEquals(panelHeight(samplePanelFit(353.dp, null)) + 36.dp, panelHeight(samplePanelFit(353.dp, null), note = 36.dp))
+    }
+
+    @Test
+    fun `on its side the wave strip takes what the plate leaves, and goes where that is too little`() {
+        // 300 wide: two rows of key-tall controls, the plate's padding and its lip.
+        assertEquals(12.dp * 2 + 3.dp + 44.dp + 6.dp + 44.dp, sidePanelHeight(300.dp))
+        assertEquals(52.dp, sideWave(sidePanelHeight(300.dp) + 62.dp, 300.dp))
+        assertEquals(0.dp, sideWave(sidePanelHeight(300.dp) + 61.dp, 300.dp))
+        // A taller column: the wave takes all the room over the plate's least height, nothing empty under the controls.
+        assertEquals(130.dp, sideWave(sidePanelHeight(300.dp) + 140.dp, 300.dp))
+    }
+
+    @Test
+    fun `on its side the USB note under the controls keeps its room on the plate, out of the wave's`() {
+        assertEquals(sidePanelHeight(300.dp) + 36.dp, sidePanelHeight(300.dp, note = 36.dp))
+        // The same column: the wave gives the note its room, and goes where what is left is too little.
+        assertEquals(94.dp, sideWave(sidePanelHeight(300.dp) + 140.dp, 300.dp, note = 36.dp))
+        assertEquals(0.dp, sideWave(sidePanelHeight(300.dp) + 62.dp, 300.dp, note = 36.dp))
     }
 
     @Test
