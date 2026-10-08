@@ -198,13 +198,14 @@ describe('FxBus', () => {
 
   it('takes dry from a voice on a bus with a send and an effect, by the law', () => {
     const m = new VoiceMixer(1000)
-    m.control(FxControl.FX_TYPE, FxControl.DISTORTION, 0.5, 0.5)
+    // The filter's high-pass, all the way up: of a steady level it returns nothing once it has settled.
+    m.control(FxControl.FX_TYPE, FxControl.FILTER, 1, 0)
     m.control(FxControl.SEND, 3, 0.75, 0)
     m.start('a', steady(1000), 1, 1000, 0, 0, VoiceShape.of({ bus: 3 }))
     m.start('b', steady(1000, 100), 1, 1000)
     const out = left(render(m, 200))
-    // The send glides up: the dry glides down to a quarter (the stub effect adds nothing back).
-    expect(out[1]! >= 1000 && out[1]! < 1100).toBe(true)
+    // The send glides up: the dry glides down to a quarter.
+    expect(out[1]! >= 1000 && out[1]! <= 1100).toBe(true)
     expect(out[199]).toBe(250 + 100)
   })
 })

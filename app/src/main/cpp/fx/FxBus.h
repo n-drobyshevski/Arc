@@ -125,11 +125,15 @@ public:
             case FxControl::SEND:
                 if (index >= 0 && index < FxControl::GROUPS) sendsTo_[index] = clamp01(x);
                 return;
-            case FxControl::COMP:
-                compOn_ = index != 0;
+            case FxControl::COMP: {
+                // Switched on: from silence, not from where it was left.
+                const bool on = index != 0;
+                if (on && !compOn_) compressor_.reset();
+                compOn_ = on;
                 compXTo_ = clamp01(x);
                 compYTo_ = clamp01(y);
                 return;
+            }
             case FxControl::SIDECHAIN:
                 dests_ = index & ((1 << FxControl::GROUPS) - 1);
                 duckX_ = clamp01(x);

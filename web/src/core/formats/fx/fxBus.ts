@@ -255,11 +255,15 @@ export class FxBus {
       case FxControl.SEND:
         if (index >= 0 && index < GROUPS) this.sendsTo[index] = clamp01(x)
         return
-      case FxControl.COMP:
-        this.compOn = index !== 0
+      case FxControl.COMP: {
+        // Switched on: from silence, not from where it was left.
+        const on = index !== 0
+        if (on && !this.compOn) this.compressor.reset()
+        this.compOn = on
         this.compXTo = clamp01(x)
         this.compYTo = clamp01(y)
         return
+      }
       case FxControl.SIDECHAIN:
         this.dests = index & ((1 << GROUPS) - 1)
         this.duckX = clamp01(x)

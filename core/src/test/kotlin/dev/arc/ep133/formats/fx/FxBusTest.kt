@@ -208,13 +208,14 @@ class FxBusTest {
     @Test
     fun `a voice on a bus with a send and an effect loses dry by the law`() {
         val m = VoiceMixer(1000)
-        m.control(FxControl.FX_TYPE, FxControl.DISTORTION, 0.5f, 0.5f)
+        // The filter's high-pass, all the way up: of a steady level it returns nothing once it has settled.
+        m.control(FxControl.FX_TYPE, FxControl.FILTER, 1f, 0f)
         m.control(FxControl.SEND, 3, 0.75f, 0f)
         m.start("a", steady(1000), 1, 1000, shape = VoiceShape(bus = 3))
         m.start("b", steady(1000, 100), 1, 1000)
         val out = left(render(m, 200))
-        // The send glides up: the dry glides down to a quarter (the stub effect adds nothing back).
-        assertTrue(out[1] in 1000 until 1100)
+        // The send glides up: the dry glides down to a quarter.
+        assertTrue(out[1] in 1000..1100)
         assertEquals(250 + 100, out[199])
     }
 }

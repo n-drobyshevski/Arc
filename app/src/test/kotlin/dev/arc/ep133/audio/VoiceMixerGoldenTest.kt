@@ -20,7 +20,9 @@ import kotlin.random.Random
  * inside a render, on its edge and late, and long random ones as the
  * pattern sequencer sends them, at real rates and block sizes, then the FX
  * bus: sends, the dry law, the sidechain's duck, smoothing and the tempo, and
- * long random ones with random controls), written out
+ * long random ones with random controls, then the tone effects: the
+ * distortion, the filter, the compressor and the master compressor, their
+ * knobs swept and their types switched, and random ones), written out
  * with every
  * command and what each render gave (its samples, or a hash of them for long
  * renders, the voices started and the keys). The host test
@@ -376,6 +378,7 @@ class VoiceMixerGoldenTest {
         shapes(::scenario)
         timed(::scenario)
         fx(::scenario)
+        tone(::scenario)
         return out.toString()
     }
 
@@ -828,7 +831,7 @@ class VoiceMixerGoldenTest {
             render(64)
         }
         scenario("fx-dry-law") {
-            // A send with an effect (a stub that adds nothing yet): the dry gives way by the effect's law.
+            // A send with an effect (the delay adds nothing so far): the dry gives way by the effect's law.
             control(FxControl.FX_TYPE, FxControl.DELAY, 0.3f, 0.6f)
             control(FxControl.SEND, 0, 1f, 0f)
             control(FxControl.SEND, 2, 0.5f, 0f)
@@ -945,7 +948,7 @@ class VoiceMixerGoldenTest {
             render(64)
         }
         scenario("fx-tempo-and-the-rest") {
-            // The tempo, held to 20..300, then the punch-ins and the master compressor (stubs for now).
+            // The tempo, held to 20..300, then the punch-ins (stubs for now) and the master compressor.
             start("a", steady(1000, 1000), 1, 1000, shape = on(1))
             control(FxControl.SEND, 1, 0.5f, 0f)
             control(FxControl.FX_TYPE, FxControl.DELAY, 0.5f, 0.5f)
@@ -1029,6 +1032,240 @@ class VoiceMixerGoldenTest {
                     }
                     render(rate / 4)
                 }
+            }
+        }
+    }
+
+    /**
+     * The tone effects' scenarios: the distortion, the filter and the compressor on the send bus, and the
+     * master compressor, through the mixer's controls (knobs swept a block at a time, types switched
+     * mid-sound and mid-fade, tails into silence), then random ones.
+     */
+    private fun tone(play: (String, Int, Int, Trace.() -> Unit) -> Unit) {
+        fun scenario(name: String, outRate: Int = 1000, maxVoices: Int = VoiceMixer.MAX_VOICES, body: Trace.() -> Unit) =
+            play(name, outRate, maxVoices, body)
+        fun steady(n: Int, v: Short = 1000) = ShortArray(n) { v }
+        fun on(bus: Int) = VoiceShape(bus = bus)
+        // An impulse, for the filters' ringing and tails.
+        val click = ShortArray(32).also {
+            it[0] = 30000
+            it[1] = -20000
+        }
+
+        scenario("tone-distortion", outRate = 48000) {
+            val hiss = noise(2, 48000, 1331)
+            control(FxControl.FX_TYPE, FxControl.DISTORTION, 0f, 0.5f)
+            control(FxControl.SEND, 0, 1f, 0f)
+            control(FxControl.SEND, 1, 0.5f, 0f)
+            start("a", hiss, 2, 48000, shape = on(0))
+            start("b", click, 1, 48000, shape = on(1))
+            render(32)
+            render(96)
+            // The drive up, the colour from bright to dark, a block at a time.
+            for (i in 0..20) {
+                control(FxControl.FX_XY, 0, i / 20f, 1f - i / 20f)
+                render(96)
+            }
+            // Back and forth across the middle of the colour, at the hardest drive.
+            start("b", click, 1, 48000, shape = on(1))
+            for (i in 0..10) {
+                control(FxControl.FX_XY, 0, 1f, 0.45f + i * 0.01f)
+                render(64)
+            }
+            for (i in 10 downTo 0) {
+                control(FxControl.FX_XY, 0, 0.6f, 0.45f + i * 0.01f)
+                render(96)
+            }
+            // Its tail once the sound is gone, then silence (skipped).
+            release("a")
+            repeat(10) { render(96) }
+            render(4800)
+            render(96)
+        }
+        scenario("tone-filter", outRate = 44100) {
+            val hiss = noise(1, 44100, 2024)
+            control(FxControl.FX_TYPE, FxControl.FILTER, 0.1f, 0.2f)
+            control(FxControl.SEND, 2, 1f, 0f)
+            start("n", hiss, 1, 44100, shape = on(2))
+            start("free", steady(44100, 500), 1, 44100)
+            render(64)
+            render(96)
+            // From the low-pass across the middle to the high-pass, the resonance up with it, and back.
+            for (i in 0..40) {
+                control(FxControl.FX_XY, 0, i / 40f, i / 40f)
+                render(96)
+            }
+            for (i in 40 downTo 0 step 4) {
+                control(FxControl.FX_XY, 0, i / 40f, 0.5f)
+                render(96)
+            }
+            // Jumps: the low-pass over to the high-pass, and back before that has faded.
+            control(FxControl.FX_XY, 0, 0.05f, 1f)
+            repeat(3) { render(96) }
+            control(FxControl.FX_XY, 0, 0.95f, 1f)
+            render(64)
+            control(FxControl.FX_XY, 0, 0.05f, 1f)
+            repeat(4) { render(96) }
+            // The resonance rings on a click once the noise is gone (the same type: the knobs only).
+            cut("n")
+            control(FxControl.FX_TYPE, FxControl.FILTER, 0.3f, 1f)
+            repeat(4) { render(96) }
+            start("c", click, 1, 44100, shape = on(2))
+            render(64)
+            repeat(6) { render(96) }
+            control(FxControl.FX_XY, 0, 0.8f, 1f)
+            start("c", click, 1, 44100, shape = on(2))
+            repeat(6) { render(96) }
+            render(8820)
+        }
+        scenario("tone-compressor", outRate = 48000) {
+            val loud = noise(2, 24000, 99)
+            control(FxControl.FX_TYPE, FxControl.COMPRESSOR, 0f, 0f)
+            control(FxControl.SEND, 0, 1f, 0f)
+            control(FxControl.SEND, 3, 0.6f, 0f)
+            start("loud", loud, 2, 48000, shape = on(0))
+            start("quiet", steady(48000, 1500), 1, 48000, shape = on(3))
+            render(64)
+            render(96)
+            // Through each speed, then the drive up.
+            for (y in 0..8) {
+                control(FxControl.FX_XY, 0, 0.5f, y / 8f)
+                render(192)
+            }
+            for (x in 0..8) {
+                control(FxControl.FX_XY, 0, x / 8f, 0.3f)
+                render(96)
+            }
+            // The loud one lets go: the envelope with it, the quiet one below the threshold.
+            release("loud")
+            repeat(10) { render(96) }
+            // Nothing sent: skipped once silent; then a peak again.
+            cut("quiet")
+            repeat(20) { render(96) }
+            start("loud", loud, 2, 48000, shape = on(0))
+            render(96)
+            render(4800)
+        }
+        scenario("tone-master-compressor", outRate = 44100) {
+            start("a", noise(2, 44100, 5), 2, 44100)
+            start("b", steady(44100, 3000), 1, 44100, shape = on(1))
+            render(64)
+            control(FxControl.COMP, 1, 0.5f, 0.5f)
+            render(64)
+            render(96)
+            for (i in 0..8) {
+                control(FxControl.COMP, 1, i / 8f, 1f - i / 8f)
+                render(96)
+            }
+            control(FxControl.COMP, 0, 0.5f, 0.5f)
+            render(96)
+            // On again: from silence.
+            control(FxControl.COMP, 1, 1f, 0f)
+            render(64)
+            // With an effect in front of it, and SEND_FX held, then let go.
+            control(FxControl.FX_TYPE, FxControl.DISTORTION, 0.8f, 0.2f)
+            control(FxControl.PUNCH, FxControl.SEND_FX, 0.7f, 0f)
+            repeat(5) { render(96) }
+            control(FxControl.PUNCH, FxControl.SEND_FX, 0f, 0f)
+            repeat(5) { render(96) }
+            stopAll()
+            repeat(4) { render(96) }
+        }
+        scenario("tone-switches", outRate = 48000) {
+            val hiss = noise(2, 96000, 4242)
+            control(FxControl.SEND, 0, 0.8f, 0f)
+            start("a", hiss, 2, 48000, shape = on(0))
+            // Each change crossfades over 20 ms (960 frames).
+            for (type in listOf(FxControl.DISTORTION, FxControl.FILTER, FxControl.COMPRESSOR, FxControl.NONE, FxControl.FILTER, FxControl.DISTORTION)) {
+                control(FxControl.FX_TYPE, type, 0.2f, 0.8f)
+                render(96)
+                render(96)
+                render(960)
+            }
+            // Changes inside a fade, a block apart, then two in one render.
+            control(FxControl.FX_TYPE, FxControl.FILTER, 0.9f, 0.6f)
+            render(96)
+            control(FxControl.FX_TYPE, FxControl.COMPRESSOR, 0.9f, 0.6f)
+            render(96)
+            control(FxControl.FX_TYPE, FxControl.DISTORTION, 0.9f, 0.6f)
+            render(64)
+            control(FxControl.FX_TYPE, FxControl.FILTER, 0.1f, 0.1f)
+            control(FxControl.FX_TYPE, FxControl.COMPRESSOR, 0.1f, 0.1f)
+            render(96)
+            render(1200)
+            cut("a")
+            repeat(3) { render(96) }
+            // A ringing tail fading out into no effect.
+            control(FxControl.FX_TYPE, FxControl.FILTER, 0.2f, 1f)
+            start("c", click, 1, 48000, shape = on(0))
+            render(96)
+            control(FxControl.FX_TYPE, FxControl.NONE, 0.5f, 0.5f)
+            repeat(12) { render(96) }
+        }
+        scenario("tone-every-sample") {
+            // At 1000 Hz, short renders: each effect's samples written out whole.
+            var seed = 31L
+            for (type in listOf(FxControl.DISTORTION, FxControl.FILTER, FxControl.COMPRESSOR)) {
+                control(FxControl.FX_TYPE, type, 0.7f, 0.3f)
+                control(FxControl.SEND, 0, 1f, 0f)
+                start("a", noise(1, 200, seed++), 1, 1000, shape = on(0))
+                start("b", click, 1, 1000, shape = on(0))
+                render(40)
+                render(40)
+                control(FxControl.FX_XY, 0, 0.2f, 0.9f)
+                render(40)
+                control(FxControl.FX_XY, 0, 0.5f, 0.5f)
+                render(40)
+                stopAll()
+                render(20)
+            }
+            control(FxControl.COMP, 1, 1f, 0f)
+            start("a", noise(2, 200, seed), 2, 1000)
+            render(40)
+            control(FxControl.COMP, 1, 0f, 1f)
+            render(40)
+        }
+
+        // Random knob moves, sends and type changes among these three, with the master compressor on and
+        // off, voices on random buses, at real rates and block sizes.
+        val types = intArrayOf(FxControl.NONE, FxControl.DISTORTION, FxControl.FILTER, FxControl.COMPRESSOR)
+        val pool = listOf("seq:0:0", "seq:0:3", "seq:1:5", "seq:2:11", "live:0:3", "live:3:7")
+        var n = 0
+        for ((rate, block) in listOf(44100 to 96, 48000 to 192)) {
+            val random = Random(13399 + n++)
+            scenario("random-tone-$rate-$block", rate, VoiceMixer.MAX_VOICES) {
+                val sounds = List(4) {
+                    val channels = 1 + random.nextInt(2)
+                    Pair(noise(channels, 200 + random.nextInt(if (it == 0) 30000 else 4000), random.nextLong(1, Long.MAX_VALUE)), channels)
+                }
+                repeat(200) {
+                    when (random.nextInt(10)) {
+                        0 -> control(FxControl.FX_TYPE, types[random.nextInt(types.size)], random.nextFloat(), random.nextFloat())
+                        1, 2, 3 -> control(FxControl.FX_XY, 0, random.nextFloat(), random.nextFloat())
+                        4 -> control(FxControl.SEND, random.nextInt(4), if (random.nextInt(4) == 0) 0f else random.nextFloat(), 0f)
+                        5 -> control(FxControl.COMP, random.nextInt(2), random.nextFloat(), random.nextFloat())
+                        6 -> control(FxControl.PUNCH, FxControl.SEND_FX, if (random.nextBoolean()) 0f else random.nextFloat(), 0f)
+                        else -> {}
+                    }
+                    if (random.nextInt(3) == 0) {
+                        val key = pool[random.nextInt(pool.size)]
+                        when (random.nextInt(10)) {
+                            in 0 until 6 -> {
+                                val (pcm, channels) = sounds[random.nextInt(sounds.size)]
+                                val shape = VoiceShape(
+                                    gain = if (random.nextBoolean()) 1f else random.nextInt(0, 101) / 100f,
+                                    pan = if (random.nextBoolean()) 0 else random.nextInt(-16, 17),
+                                    bus = random.nextInt(-1, 4),
+                                )
+                                start(key, pcm, channels, rate, random.nextInt(-12, 13), random.nextLong(1, 1_000_000), shape)
+                            }
+                            in 6 until 9 -> release(key)
+                            else -> cut(key)
+                        }
+                    }
+                    render(block)
+                }
+                render(rate / 4)
             }
         }
     }

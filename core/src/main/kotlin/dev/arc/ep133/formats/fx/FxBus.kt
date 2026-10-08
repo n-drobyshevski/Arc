@@ -231,7 +231,10 @@ class FxBus(val outRate: Int) {
             }
             FxControl.SEND -> if (index in 0 until FxControl.GROUPS) sendsTo[index] = clamp01(x)
             FxControl.COMP -> {
-                compOn = index != 0
+                // Switched on: from silence, not from where it was left.
+                val on = index != 0
+                if (on && !compOn) compressor.reset()
+                compOn = on
                 compXTo = clamp01(x)
                 compYTo = clamp01(y)
             }
