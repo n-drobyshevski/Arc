@@ -4,16 +4,19 @@
 //
 // Web deltas:
 // - jsToFixed and String.format("%.0f") are native toFixed.
-// - The web has no REC, so only its takeLength is here, for SAMPLE's times.
+// - The web has no REC (TAKE), so only its takeLength is here, for SAMPLE's
+//   times; TAKE's words are Android's only.
 
 import { FactorySounds } from '../features/factorySounds'
 import { Keys, NoteNames, Scale } from '../features/keys'
 import type { Hit } from '../features/liveMirror'
 import type { PlayMode } from '../features/padSettings'
 import { noteName, type PhysicalPad } from '../features/padNotes'
+import { Timing } from '../features/pattern'
 import { KeyMark } from '../features/piano'
 import { ProjectSource } from '../features/projectStep'
 import { SampleSource } from '../features/sampleSource'
+import type { TransportState } from '../features/transport'
 import { FeatureText } from './featureText'
 import { plural } from './format'
 
@@ -733,4 +736,128 @@ export const MirrorText = {
   samplesToTakes(n: number): string {
     return `${plural(n, 'sample')} kept in Takes.`
   },
+
+  /** SAMPLE's BARS choice for a take as long as the pattern (upper-cased where shown: "PTN"). */
+  PTN: 'Ptn',
+  PTN_NAME: "The pattern's length",
+  PTN_NOTE: 'Records as long as the longest pattern, from its start: at once when stopped, else from the next loop.',
+
+  // ---------- PATTERN: the pads played into a looping pattern with RECORD and PLAY, as on the device ----------
+  // PLAY, UNDO and LENGTH are the words above; a running pattern's key reads STOP ([FeatureText.STOP]).
+  /** The sheet held RECORD opens. */
+  PATTERN: 'Pattern',
+  RECORD: 'Record',
+  ERASE: 'Erase',
+  TIMING: 'Timing',
+  COUNT_IN: 'Count-in',
+  COUNT_IN_NOTE: 'RECORD then PLAY counts a bar in. RECORD and PLAY together start at once.',
+  /** AUTO length: a pattern recorded from stop into an empty group ends where you stop. */
+  AUTO: 'Auto',
+  AUTO_NOTE: 'An empty group recorded from stop ends where you stop: 1, 2, 4 or 8 bars.',
+  CLEAR: 'Clear',
+  CLEAR_ALL: 'Clear all',
+  /** SHIFT + + on the device: twice as long, the notes copied in. [DOUBLE_NAME] for screen readers. */
+  DOUBLE: '\u00D72',
+  DOUBLE_NAME: 'Double the length',
+  /** The − and + either side of a group's length. */
+  SHORTER: 'Shorter',
+  LONGER: 'Longer',
+  PATTERN_NOTE: 'Patterns stay in arc and play on the phone.',
+
+  /** "2.3 / 4": bar 2, beat 3 of a 4-bar pattern, on the display line while it runs. */
+  patternPosition(bar: number, beat: number, bars: number): string {
+    return `${bar}.${beat} / ${bars}`
+  },
+
+  /** "2.3 / 4 · 1/16" while recording: the grid the notes snap to as well. */
+  patternRecording(bar: number, beat: number, bars: number, timing: Timing): string {
+    return `${MirrorText.patternPosition(bar, beat, bars)} \u00B7 ${MirrorText.timingLabel(timing)}`
+  },
+
+  /** "/ 4" beside the count-in's big digit ([countIn] for screen readers). */
+  countInOf(beats: number): string {
+    return `/ ${beats}`
+  },
+
+  /** TIMING's choices: Off, 1/8, 1/16, 1/32. */
+  timingLabel(t: Timing): string {
+    return t === Timing.OFF ? MirrorText.onOff(false) : t
+  },
+
+  /** A TIMING choice for screen readers. */
+  timingName(t: Timing): string {
+    return t === Timing.OFF ? 'Timing off: notes stay where you play them' : `Timing ${t}: notes snap to the nearest ${t}`
+  },
+
+  /** "A · 2 bars", a group's length in the sheet; "Group A, 2 bars" for screen readers. */
+  groupLength(group: number, bars: number): string {
+    return `${groupLetter(group)} \u00B7 ${plural(bars, 'bar')}`
+  },
+  groupLengthName(group: number, bars: number): string {
+    return `Group ${groupLetter(group)}, ${plural(bars, 'bar')}`
+  },
+
+  /** CLEAR asks in the sheet: one group's notes, or every group's. */
+  clearAsk(group: number | null): string {
+    return group === null ? "Clear every group's notes?" : `Clear group ${groupLetter(group)}'s notes?`
+  },
+  cleared(group: number | null): string {
+    return group === null ? 'Patterns cleared.' : `Group ${groupLetter(group)} cleared.`
+  },
+
+  /** ERASE on: what a pad does now. */
+  ERASE_NOTE: 'Tap a pad to erase its notes. Hold one while the pattern plays to erase it as it passes.',
+  /** "Pad A 7: notes erased.", after a tap in ERASE. */
+  erased(pad: PhysicalPad): string {
+    return `${MirrorText.padTitle(pad)}: notes erased.`
+  },
+  /** Added to a pad's name for screen readers in ERASE. */
+  PAD_HAS_NOTES: ', has notes',
+
+  /** "3 pads not loaded": pads the pattern plays whose sounds aren't on the phone yet. */
+  missingPads(n: number): string {
+    return `${plural(n, 'pad')} not loaded`
+  },
+  MISSING_NOTE: "Their sounds aren't on the phone yet. They play once arc has them.",
+
+  /** The RECORD key for screen readers: "Record, armed". */
+  recordDescription(state: TransportState): string {
+    const word =
+      state.phase === 'ARMED' || (state.phase === 'COUNT_IN' && state.recording) ? 'armed' : state.recording ? 'recording' : 'off'
+    return `${MirrorText.RECORD}, ${word}`
+  },
+  /** What a hold on RECORD does, for screen readers. */
+  RECORD_HOLD: 'Pattern settings',
+
+  /** The PLAY key for screen readers: "Play, bar 2 of 4". */
+  playDescription(state: TransportState, bar: number, bars: number): string {
+    switch (state.phase) {
+      case 'STOPPED':
+      case 'ARMED':
+        return MirrorText.PLAY
+      case 'COUNT_IN':
+        return `${MirrorText.PLAY}, counting in`
+      case 'PLAYING':
+        return `${MirrorText.PLAY}, bar ${bar} of ${bars}`
+    }
+  },
+
+  /** Said once when the transport changes: "Record armed", "Counting in", "Recording", "Playing", "Stopped". */
+  transportAnnouncement(state: TransportState): string {
+    switch (state.phase) {
+      case 'STOPPED':
+        return MirrorText.STOPPED
+      case 'ARMED':
+        return 'Record armed'
+      case 'COUNT_IN':
+        return 'Counting in'
+      case 'PLAYING':
+        return state.recording ? 'Recording' : MirrorText.PLAYING
+    }
+  },
 } as const
+
+/** "A" for group 0 (Kotlin's 'A' + group). */
+function groupLetter(group: number): string {
+  return String.fromCharCode(65 + group)
+}

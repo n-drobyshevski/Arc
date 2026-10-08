@@ -7,10 +7,14 @@ import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.ProjectDiff
 import dev.arc.ep133.features.ProjectSource
 import dev.arc.ep133.features.ProjectState
+import dev.arc.ep133.features.RecState
 import dev.arc.ep133.features.SampleSource
 import dev.arc.ep133.features.Scale
 import dev.arc.ep133.features.SoundDiff
 import dev.arc.ep133.features.SoundState
+import dev.arc.ep133.features.Timing
+import dev.arc.ep133.features.TransportPhase
+import dev.arc.ep133.features.TransportState
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -216,5 +220,66 @@ class FeatureTextTest {
         assertEquals("Review samples", SettingsText.REVIEW_SAMPLES)
         assertTrue(SettingsText.REVIEW_SAMPLES_NOTE.endsWith("as on the EP-133."))
         assertEquals("Sample", CoachText.SAMPLE)
+    }
+
+    @Test
+    fun `pattern text`() {
+        val a7 = PhysicalPad(0, 9)
+        assertEquals("Pattern", MirrorText.PATTERN)
+        assertEquals(
+            listOf("RECORD", "PLAY", "STOP", "ERASE", "UNDO", "TIMING", "LENGTH", "AUTO", "COUNT-IN", "CLEAR", "CLEAR ALL"),
+            listOf(
+                MirrorText.RECORD, MirrorText.PLAY, FeatureText.STOP, MirrorText.ERASE, MirrorText.UNDO, MirrorText.TIMING,
+                MirrorText.LENGTH, MirrorText.AUTO, MirrorText.COUNT_IN, MirrorText.CLEAR, MirrorText.CLEAR_ALL,
+            ).map { it.uppercase() },
+        )
+        assertEquals("×2", MirrorText.DOUBLE)
+        assertEquals("2.3 / 4", MirrorText.patternPosition(2, 3, 4))
+        assertEquals("2.3 / 4 · 1/16", MirrorText.patternRecording(2, 3, 4, Timing.SIXTEENTH))
+        assertEquals("1.1 / 1 · Off", MirrorText.patternRecording(1, 1, 1, Timing.OFF))
+        assertEquals("Count-in 3", MirrorText.countIn(3))
+        assertEquals("/ 4", MirrorText.countInOf(4))
+        assertEquals(listOf("Off", "1/8", "1/16", "1/32"), Timing.entries.map(MirrorText::timingLabel))
+        assertEquals("Timing 1/16: notes snap to the nearest 1/16", MirrorText.timingName(Timing.SIXTEENTH))
+        assertEquals("Timing off: notes stay where you play them", MirrorText.timingName(Timing.OFF))
+        assertEquals("A · 1 bar", MirrorText.groupLength(0, 1))
+        assertEquals("Group D, 16 bars", MirrorText.groupLengthName(3, 16))
+        assertEquals("Clear group B's notes?", MirrorText.clearAsk(1))
+        assertEquals("Clear every group's notes?", MirrorText.clearAsk(null))
+        assertEquals("Group C cleared.", MirrorText.cleared(2))
+        assertEquals("Patterns cleared.", MirrorText.cleared(null))
+        assertEquals("Pad A 7: notes erased.", MirrorText.erased(a7))
+        assertEquals("Pad A 7, has notes", MirrorText.padTitle(a7) + MirrorText.PAD_HAS_NOTES)
+        assertEquals("1 pad not loaded", MirrorText.missingPads(1))
+        assertEquals("3 pads not loaded", MirrorText.missingPads(3))
+        assertEquals("Patterns stay in arc and play on the phone.", MirrorText.PATTERN_NOTE)
+        // The keys for screen readers, and what is said when the transport changes.
+        val stopped = TransportState()
+        val armed = TransportState(TransportPhase.ARMED)
+        val counting = TransportState(TransportPhase.COUNT_IN, recording = true)
+        val recording = TransportState(TransportPhase.PLAYING, recording = true)
+        val playing = TransportState(TransportPhase.PLAYING)
+        assertEquals(
+            listOf("Record, off", "Record, armed", "Record, armed", "Record, recording", "Record, off"),
+            listOf(stopped, armed, counting, recording, playing).map(MirrorText::recordDescription),
+        )
+        assertEquals("Record, off", MirrorText.recordDescription(TransportState(TransportPhase.COUNT_IN)))
+        assertEquals(
+            listOf("Play", "Play", "Play, counting in", "Play, bar 2 of 4", "Play, bar 2 of 4"),
+            listOf(stopped, armed, counting, recording, playing).map { MirrorText.playDescription(it, 2, 4) },
+        )
+        assertEquals(
+            listOf("Stopped", "Record armed", "Counting in", "Recording", "Playing"),
+            listOf(stopped, armed, counting, recording, playing).map(MirrorText::transportAnnouncement),
+        )
+        // SAMPLE's BARS choice for the pattern's length.
+        assertEquals("PTN", MirrorText.PTN.uppercase())
+        // REC is TAKE now.
+        assertEquals("TAKE 0:12", MirrorText.takeBadge(12.9).uppercase())
+        assertEquals("Take. Recording starts with the first sound you play.", MirrorText.takeDescription(RecState.Idle))
+        assertEquals("Take, waiting for the first sound. Tap to cancel.", MirrorText.takeDescription(RecState.Armed))
+        assertEquals("Recording a take, 1:05. Tap to stop.", MirrorText.takeDescription(RecState.Recording(65)))
+        assertTrue(MirrorText.TAKES_HINT.startsWith("Tap TAKE, then play"))
+        assertEquals("Record a pattern: tap, then PLAY; hold for its settings", CoachText.RECORD)
     }
 }
