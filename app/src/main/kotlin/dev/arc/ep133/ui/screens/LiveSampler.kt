@@ -102,8 +102,8 @@ import kotlin.math.roundToInt
 
 /*
  * SAMPLE mode on Live (an addition, after the EP-133's own sampler): the
- * SAMPLE panel in the function keys' place, unrolled with a swipe on the
- * pads ([SampleSlot]), with its display (the source, the input's meter, the
+ * SAMPLE panel in the function keys' place, unrolled with its tab or a swipe
+ * on the pads ([SampleSlot]), with its display (the source, the input's meter, the
  * take's time and its wave) and the sampler's controls (−/+ for the source,
  * STEREO, LATCH or STOP, KNOB X the input's level, KNOB Y the threshold,
  * BARS); the page's pads lit as the K.O. II lights them in the mode, empty
@@ -115,9 +115,9 @@ import kotlin.math.roundToInt
  * SAMPLE mode for Live's page (an addition): its [state] as the controller
  * has it, and the input's [level] (0..1 across −60..0 dBFS) and [clip],
  * both read as the meter draws; [lastTake], the last take's waveform, for
- * the display while nothing records. A swipe on the pads that opens the
- * SAMPLE panel opens the mode ([onOpen]); one back, the panel's handle or
- * Back leaves it ([onClose]); while a sheet is open over Live ([sheetOpen]:
+ * the display while nothing records. The SAMPLE tab or a swipe on the pads
+ * opening the SAMPLE panel opens the mode ([onOpen]); the tab again, a
+ * swipe back or Back leaves it ([onClose]); while a sheet is open over Live ([sheetOpen]:
  * the review, say) Back is the sheet's.
  * The panel's −/+ step the source ([onSource]), STEREO records in stereo or
  * mono ([onStereo]), the knobs set the level ([onGain], dB) and the
@@ -131,7 +131,8 @@ import kotlin.math.roundToInt
  * [onPadUp] at the lift's. A screen reader's click on a pad latches a
  * hands-free take, or stops it ([onLatchPad]). [still] keeps the lights and
  * the meter from moving, and [unroll] catches the panel that far along its
- * motion (0 the function keys, 1 the panel; screenshots).
+ * motion (0 the function keys, 1 the panel; screenshots), under a finger
+ * pulling its tab where [pulled].
  */
 class SampleUi(
     val state: SampleUiState = SampleUiState(),
@@ -140,6 +141,7 @@ class SampleUi(
     val lastTake: List<Peak>? = null,
     val still: Boolean = false,
     val unroll: Float? = null,
+    val pulled: Boolean = false,
     val sheetOpen: Boolean = false,
     val onOpen: () -> Unit = {},
     val onClose: () -> Unit = {},
@@ -313,7 +315,7 @@ internal fun usbNoteRoom(usb: Boolean): Dp {
 /**
  * The upright SAMPLE panel [width] wide (the pads' width, the function
  * keys' row's place; no wider than [PanelWidthMax]), sharing [room] with the pads under it (the height of
- * the panel, its handle and the pads; null on the scrolling page, where
+ * the panel, its tab and the pads; null on the scrolling page, where
  * there is always room), [note] of it the USB note's ([usbNoteRoom]): two rows of controls ([SampleControls.NARROW]
  * under [ControlsRowsMin]), the knobs as big as the row lets them be, up to
  * [PanelKnob], and the display over them. Where the pads would come out
@@ -334,7 +336,7 @@ internal fun samplePanelFit(width: Dp, room: Dp?, note: Dp = 0.dp): SamplePanelF
         SamplePanelFit(0.dp, KnobInline, SampleControls.LINE),
     )
     if (room == null) return tries.first()
-    return tries.firstOrNull { koPadWidth(width - PeekRoom, room - panelHeight(it, note) - HandleRow, 3) >= PadsMin } ?: tries.last()
+    return tries.firstOrNull { koPadWidth(width, room - panelHeight(it, note) - TabRow, 3) >= PadsMin } ?: tries.last()
 }
 
 /**
@@ -633,58 +635,70 @@ private val StatusMin = 11.sp
  * EDIT's is: SAMPLE and the source ("RSP ST"), the input's meter, and what
  * happens next ([sampleStatus]) on one line, its type smaller where it is
  * long; a polite live region at most once a second. [compact]: one bar
- * tall, in the top bar ([LivePill]).
+ * tall, in the top bar ([LivePill]). SAMPLE's word goes where the line is
+ * short: under [LineTagWidth] wide, measured, or [width] where the page
+ * knows it ahead (a column widening as the panel unrolls: the line then
+ * doesn't compose again on every frame).
  */
 @Composable
-internal fun SampleLine(ui: SampleUi, modifier: Modifier = Modifier, compact: Boolean = false, still: Boolean = ui.still) {
+internal fun SampleLine(ui: SampleUi, modifier: Modifier = Modifier, compact: Boolean = false, still: Boolean = ui.still, width: Dp? = null) {
+    if (width != null) {
+        SampleLineContent(ui, modifier, compact, still, tag = !compact && width >= LineTagWidth)
+        return
+    }
+    BoxWithConstraints(modifier) {
+        SampleLineContent(ui, Modifier, compact, still, tag = !compact && maxWidth >= LineTagWidth)
+    }
+}
+
+/** [SampleLine]'s line, with SAMPLE's word where [tag]. */
+@Composable
+private fun SampleLineContent(ui: SampleUi, modifier: Modifier, compact: Boolean, still: Boolean, tag: Boolean) {
     val c = LocalArcColors.current
     val s = ui.state
     val ink = c.onSignal
     val status = sampleStatus(s)
     val said = spoken(sampleSpoken(s))
-    BoxWithConstraints(modifier) {
-        val tag = !compact && maxWidth >= LineTagWidth
-        DisplayLine(compact = compact, color = c.signal) {
-            Row(
-                Modifier.clearAndSetSemantics { contentDescription = MirrorText.SAMPLE_TAG + ", " + MirrorText.sourceName(s.input.source, s.input.stereo) },
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                if (tag) Text(MirrorText.SAMPLE_TAG.uppercase(), style = ArcType.displaySub, color = ink.copy(alpha = 0.8f), maxLines = 1)
-                Text(
-                    MirrorText.sourceShort(s.input.source, s.input.stereo).uppercase(),
-                    style = ArcType.displaySub,
-                    color = ink,
-                    maxLines = 1,
-                    softWrap = false,
-                    modifier = Modifier
-                        .border(1.dp, ink.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
-                        .padding(horizontal = 6.dp, vertical = 1.dp),
-                )
-            }
-            SampleMeter(
-                ui.level,
-                ui.clip,
-                mark = s.thresholdDb?.let(PeakMeter::markOf),
-                still = still,
-                ink = ink,
-                accent = c.display,
-                modifier = Modifier.size(if (compact) MeterWidthCompact else MeterWidth, MeterHeight),
-            )
-            // One line, as the display's: a long one ("Disk low: room for 12 s") in smaller type, never a second line.
-            val style = if (compact) ArcType.displaySub else ArcType.displayHead
-            BasicText(
-                status,
-                style = style.copy(color = ink, textAlign = TextAlign.End),
+    DisplayLine(modifier, compact = compact, color = c.signal) {
+        Row(
+            Modifier.clearAndSetSemantics { contentDescription = MirrorText.SAMPLE_TAG + ", " + MirrorText.sourceName(s.input.source, s.input.stereo) },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            if (tag) Text(MirrorText.SAMPLE_TAG.uppercase(), style = ArcType.displaySub, color = ink.copy(alpha = 0.8f), maxLines = 1)
+            Text(
+                MirrorText.sourceShort(s.input.source, s.input.stereo).uppercase(),
+                style = ArcType.displaySub,
+                color = ink,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                autoSize = TextAutoSize.StepBased(minFontSize = StatusMin, maxFontSize = style.fontSize, stepSize = 0.5.sp),
-                modifier = Modifier.weight(1f).clearAndSetSemantics {
-                    contentDescription = said
-                    liveRegion = LiveRegionMode.Polite
-                },
+                softWrap = false,
+                modifier = Modifier
+                    .border(1.dp, ink.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
+                    .padding(horizontal = 6.dp, vertical = 1.dp),
             )
         }
+        SampleMeter(
+            ui.level,
+            ui.clip,
+            mark = s.thresholdDb?.let(PeakMeter::markOf),
+            still = still,
+            ink = ink,
+            accent = c.display,
+            modifier = Modifier.size(if (compact) MeterWidthCompact else MeterWidth, MeterHeight),
+        )
+        // One line, as the display's: a long one ("Disk low: room for 12 s") in smaller type, never a second line.
+        val style = if (compact) ArcType.displaySub else ArcType.displayHead
+        BasicText(
+            status,
+            style = style.copy(color = ink, textAlign = TextAlign.End),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            autoSize = TextAutoSize.StepBased(minFontSize = StatusMin, maxFontSize = style.fontSize, stepSize = 0.5.sp),
+            modifier = Modifier.weight(1f).clearAndSetSemantics {
+                contentDescription = said
+                liveRegion = LiveRegionMode.Polite
+            },
+        )
     }
 }
 

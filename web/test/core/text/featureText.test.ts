@@ -208,6 +208,6 @@ describe('FeatureTextTest', () => {
     expect(MirrorText.putOffline(1, 2)).toBe('Put 1 offline pad change and 2 new samples on the EP-133?')
     expect(SettingsText.REVIEW_SAMPLES).toBe('Review samples')
     expect(SettingsText.REVIEW_SAMPLES_NOTE.endsWith('as on the EP-133.')).toBe(true)
-    expect(CoachText.SAMPLE).toBe('Sample: swipe the pads left')
+    expect(CoachText.SAMPLE).toBe('Sample: tap or pull out')
   })
 })

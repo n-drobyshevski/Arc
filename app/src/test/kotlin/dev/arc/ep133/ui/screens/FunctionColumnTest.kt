@@ -40,4 +40,14 @@ class FunctionColumnTest {
             h += 1.dp
         }
     }
+
+    @Test
+    fun `the room the keys leave under them, below the last edge, holds the SAMPLE tab`() {
+        // 268 dp of keys in 340: 36 under them, less the cap's 3 dp edge.
+        assertEquals(33.dp, columnFoot(340.dp))
+        assertEquals(0.dp, columnFoot(268.dp))
+        // The gaps closing up: none.
+        assertEquals(0.dp, columnFoot(250.dp))
+        assertEquals(0.dp, columnFoot(120.dp))
+    }
 }

@@ -94,6 +94,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import dev.arc.ep133.controller.MirrorUi
@@ -154,6 +155,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import dev.arc.ep133.features.Piano
@@ -352,8 +354,8 @@ fun MirrorScreen(
     functions: FunctionKeysUi = FunctionKeysUi(),
     /**
      * SAMPLE (an addition; null for none): on the Live tab in PADS, the
-     * SAMPLE panel a swipe on the pads unrolls in the function keys' place
-     * ([SampleSlot]). While it is open SAMPLE mode is on: its line stands in
+     * SAMPLE panel its tab (or a swipe on the pads) unrolls in the function
+     * keys' place ([SampleSlot]). While it is open SAMPLE mode is on: its line stands in
      * for the display line, a pad held records into it, and the pads light
      * as the EP-133's do in the mode.
      */
@@ -430,27 +432,28 @@ fun MirrorScreen(
     }
     if (sampling && sample != null) SampleHaptics(sample.state, haptics, held = { it in samplePressed }, bpm = mirror?.state?.bpm ?: functions.bpm.toDouble())
     // The SAMPLE panel, wherever the layout below puts the function keys.
-    val panel = remember { SamplePanel(sample?.unroll ?: if (sampling) 1f else 0f, fixed = sample?.unroll != null) }
+    val panel = remember { SamplePanel(sample?.unroll ?: if (sampling) 1f else 0f, fixed = sample?.unroll != null, pulled = sample?.pulled == true) }
     val panelScope = androidx.compose.runtime.rememberCoroutineScope()
     val reduceMotion = reducedMotion()
     val feel = LocalHapticFeedback.current
-    // A swipe, the peek's tap, the handle or Back: the panel unrolls or rolls up with a tick, and the mode follows.
-    val openPanel = {
+    // The tab (tapped, or pulled and let go at [velocity], timeline per second), a swipe or Back: the panel unrolls
+    // or rolls up with a tick, and the mode follows.
+    val openPanel = { velocity: Float? ->
         if (sample != null && !panel.open) {
             if (haptics) feel.performHapticFeedback(HapticFeedbackType.SegmentTick)
-            panelScope.launch { panel.go(true, reduceMotion) }
+            panel.start(true, reduceMotion, panelScope, velocity)
             sample.onOpen()
         }
     }
-    val closePanel = {
+    val closePanel = { velocity: Float? ->
         if (sample != null && panel.open) {
             if (haptics) feel.performHapticFeedback(HapticFeedbackType.SegmentTick)
-            panelScope.launch { panel.go(false, reduceMotion) }
+            panel.start(false, reduceMotion, panelScope, velocity)
             sample.onClose()
         }
     }
     // The mode turned off another way (the tab, a sheet), or KEYS, which has no panel: it rolls up (at once
-    // for KEYS, off the page). Turned on another way, it unrolls. A swipe has set it going already.
+    // for KEYS, off the page). Turned on another way, it unrolls. The tab or a swipe has set it going already.
     LaunchedEffect(sampling, panelOn) {
         when {
             !panelOn -> if (panel.open) panel.go(false, reduce = true)
@@ -525,7 +528,7 @@ fun MirrorScreen(
             roomH + ControlsRow >= FunctionColumnLed
         // Back rolls the SAMPLE panel up (Live tools, open over it, close first: their Back comes later). Not
         // while a sheet is open over Live: its Back was there first, so this one would win.
-        BackHandler(enabled = panelOn && sample?.sheetOpen != true && panel.open) { closePanel() }
+        BackHandler(enabled = panelOn && sample?.sheetOpen != true && panel.open) { closePanel(null) }
         // The pads hear of a finger the SAMPLE panel's swipe took ([holdToPlay]).
         CompositionLocalProvider(LocalSamplePanel provides panel) {
             SideZone(
@@ -569,33 +572,38 @@ fun MirrorScreen(
                     .windowInsetsPadding(WindowInsets.safeDrawing)
                     .fillMaxSize()
                     .padding(start = startGutter, end = endGutter, bottom = SidewaysBottom)
-                // The display line on the page (not in the top bar): SAMPLE's while its panel is open.
-                val padsLine: @Composable () -> Unit = {
+                // The display line on the page (not in the top bar): SAMPLE's while its panel is open, [width] wide where that
+                // is known ahead (the sideways column, which widens as the panel unrolls). There it is laid out at that width
+                // from the start, over the middle of the column where the column ends up, so it doesn't lay out (its
+                // words fitted to it) again on every frame.
+                val padsLine: @Composable (width: Dp?) -> Unit = { width ->
                     if (sampling && sample != null) {
-                        SampleLine(sample, still = stillSample)
+                        SampleLine(sample, if (width != null) Modifier.centredAt(width) else Modifier, still = stillSample, width = width)
                     } else if (editing) {
                         EditLine()
                     } else {
                         DisplayStrip(st, mirror, rec, still = fixedNow != null, wireless = wireless)
                     }
                 }
-                // The function keys' place: the keys, or the SAMPLE panel unrolled there ([fit] upright, null on its
-                // side, where it is [side] wide and has its handle only where the column is tall enough for it and
-                // the controls), as far along as [panel] is.
-                val functionSlot: @Composable (Modifier, SamplePanelFit?, Dp?, @Composable () -> Unit) -> Unit = { m, fit, side, fnKeys ->
+                // The function keys' place: the keys, or the SAMPLE panel unrolled there with its tab under them ([fit]
+                // upright, null on its side, where it is [side] wide and keeps its tab open only where the column is
+                // tall enough for it and the controls), as far along as [panel] is.
+                val functionSlot: @Composable (Modifier, SamplePanelFit?, Dp?, Dp, @Composable () -> Unit) -> Unit = { m, fit, side, hold, fnKeys ->
                     if (sample == null || !panelOn) {
                         Box(m) { fnKeys() }
                     } else {
-                        val handle = side == null || roomH + ControlsRow >= sidePanelHeight(side) + HandleRow
-                        SampleSlot(panel, closePanel, m, sideways = side, handle = handle, keys = fnKeys) {
+                        val handle = side == null || roomH + ControlsRow >= sidePanelHeight(side) + TabRow
+                        // How far a pull on the tab goes: the panel's height upright, its width on its side.
+                        val note = usbNoteRoom(sample.state.input.source == SampleSource.USB)
+                        val reach = side ?: fit?.let { panelHeight(it, note) } ?: 0.dp
+                        // On its side the keys keep their places where the tab fits in the room under them.
+                        SampleSlot(panel, openPanel, closePanel, reach, panelScope, m, sideways = side, handle = handle, foot = { columnFoot(it.toDp()).roundToPx() }, openRoom = hold, keys = fnKeys) {
                             SamplePanelFace(sample, panel, fit, haptics, stillSample)
                         }
                     }
                 }
                 // The pads' swipe that opens and closes the panel, the pads under it hearing of a finger it took.
-                val swipe = if (panelOn) panelSwipe(panel, openPanel, closePanel) else Modifier
-                // The SAMPLE panel's sliver at the pads' edge, where it can open.
-                val peek: (@Composable () -> Unit)? = if (panelOn) ({ SamplePeek(openPanel) }) else null
+                val swipe = if (panelOn) panelSwipe(panel, { openPanel(null) }, { closePanel(null) }) else Modifier
                 if (piano != null) {
                     Column(sidewaysColumn) {
                         if (!inBar) {
@@ -632,7 +640,7 @@ fun MirrorScreen(
                         val k = KoGeom.fit(maxWidth - SideFunctions - SideControlsGap, gridH, 4)
                         val bodyW = k.u * (4 * 1.215f + 0.401f) + CapDx + 2.dp
                         val columnW = minOf(maxWidth, SideFunctions + SideControlsGap + bodyW)
-                        val body: @Composable (Modifier, (@Composable () -> Unit)?) -> Unit = { m, sliver ->
+                        val body: @Composable (Modifier) -> Unit = { m ->
                             Group(
                                 group, st, nameOf, now,
                                 m.coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
@@ -646,36 +654,36 @@ fun MirrorScreen(
                                 haptics = haptics,
                                 onSelectGroup = { group = it },
                                 sampling = padSampling,
-                                peek = sliver,
                             )
                         }
                         val fnColumn: @Composable () -> Unit = { FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey) }
                         if (!panelOn) {
                             Column(Modifier.width(columnW).fillMaxHeight()) {
                                 if (!inBar) {
-                                    padsLine()
+                                    padsLine(null)
                                     Spacer(Modifier.height(10.dp))
                                 }
                                 Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(SideControlsGap)) {
                                     fnColumn()
-                                    body(Modifier.width(bodyW).fillMaxHeight(), null)
+                                    body(Modifier.width(bodyW).fillMaxHeight())
                                 }
                             }
                         } else {
-                            // The panel in the column's place, as wide as the body (as tall as the room lets it be, the
-                            // peek beside it) leaves it; the column widens to it as it unrolls and the body narrows.
-                            val deckW = koDeckWidth(gridH, 4) + PeekRoom
+                            // The panel in the column's place, as wide as the body (as tall as the room lets it be)
+                            // leaves it; the column widens to it as it unrolls and the body narrows, gliding ([PadsGlide]).
+                            val deckW = koDeckWidth(gridH, 4)
                             val sideW = sidePanelWidth(maxWidth - SideControlsGap, deckW)
-                            val closedW = minOf(maxWidth, columnW + PeekRoom)
                             val openW = minOf(maxWidth, sideW + SideControlsGap + deckW)
-                            Column(Modifier.unrollWidth(panel, closedW, openW).fillMaxHeight()) {
+                            Column(Modifier.unrollWidth(panel, columnW, openW).fillMaxHeight()) {
                                 if (!inBar) {
-                                    padsLine()
+                                    padsLine(openW)
                                     Spacer(Modifier.height(10.dp))
                                 }
                                 Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(SideControlsGap)) {
-                                    functionSlot(Modifier.fillMaxHeight(), null, sideW, fnColumn)
-                                    body(Modifier.weight(1f).fillMaxHeight().then(swipe), peek)
+                                    functionSlot(Modifier.fillMaxHeight(), null, sideW, 0.dp, fnColumn)
+                                    PadsGlide(panel, Modifier.weight(1f).fillMaxHeight().then(swipe), scaleOf = { w, h -> koUnit(w, h, 4) }) {
+                                        body(Modifier.fillMaxSize())
+                                    }
                                 }
                             }
                         }
@@ -684,7 +692,7 @@ fun MirrorScreen(
                     val now = clock()
                     Column(sidewaysColumn) {
                         if (!inBar) {
-                            padsLine()
+                            padsLine(null)
                             Spacer(Modifier.height(10.dp))
                         }
                         // The function keys on the left, then all four in one row, filling the height:
@@ -702,14 +710,19 @@ fun MirrorScreen(
                             }
                         } else {
                             // The panel in the column's place, the groups keeping at least three fifths of the room (their
-                            // pads, narrower, no taller than wide), the peek after them.
+                            // pads, narrower, no taller than wide), gliding to it from their top left ([PadsGlide]).
                             val sideW = sidePanelWidth(roomW, roomW * 0.6f)
-                            val padOpen = ((roomW - sideW - SideControlsGap - PeekRoom - 42.dp) / 4 - 2.dp) / 3
+                            val padOpen = ((roomW - sideW - SideControlsGap - 42.dp) / 4 - 2.dp) / 3
                             Row(Modifier.fillMaxWidth().weight(1f, fill = false), horizontalArrangement = Arrangement.spacedBy(SideControlsGap)) {
-                                functionSlot(Modifier.fillMaxHeight(), null, sideW, fnColumn)
-                                PeekRow(peek!!, Modifier.weight(1f).unrollMaxHeight(panel, caption + 3.dp + padW * 4, caption + 3.dp + padOpen * 4).then(swipe)) {
-                                    groups(Modifier.fillMaxWidth())
-                                }
+                                functionSlot(Modifier.fillMaxHeight(), null, sideW, 0.dp, fnColumn)
+                                PadsGlide(
+                                    panel,
+                                    Modifier.weight(1f)
+                                        .unrollMaxHeight(panel, caption + 3.dp + padW * 4, caption + 3.dp + padOpen * 4)
+                                        .then(swipe),
+                                    centred = false,
+                                    scaleOf = { w, _ -> w.toFloat() },
+                                ) { groups(Modifier) }
                             }
                         }
                     }
@@ -771,9 +784,9 @@ fun MirrorScreen(
                                 )
                                 ModeRow(keys, keysActions, viewSwitch = viewSwitch, mode = false)
                             } else {
-                                if (!inBar) padsLine()
+                                if (!inBar) padsLine(null)
                                 val fnRow: @Composable () -> Unit = { FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey) }
-                                val body: @Composable (Modifier, (@Composable () -> Unit)?) -> Unit = { m, sliver ->
+                                val body: @Composable (Modifier) -> Unit = { m ->
                                     Group(
                                         group, st, nameOf, now,
                                         m.coachMark("live.pads", CoachText.PADS, CoachYellow, CoachYellowInk),
@@ -786,20 +799,23 @@ fun MirrorScreen(
                                         onEdit = editPad,
                                         haptics = haptics,
                                         sampling = padSampling,
-                                        peek = sliver,
                                     )
                                 }
                                 if (!panelOn) {
                                     fnRow()
-                                    body(Modifier.fillMaxWidth().weight(1f), null)
+                                    body(Modifier.fillMaxWidth().weight(1f))
                                 } else {
                                     // The panel in the function keys' place, laid out for the room it shares with the
-                                    // pads; the pads, with the peek at their edge, take what it leaves.
+                                    // pads; the pads take what it leaves, gliding to it ([PadsGlide]).
                                     BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
                                         val fit = samplePanelFit(maxWidth, maxHeight - 10.dp, usbNoteRoom(sample?.state?.input?.source == SampleSource.USB))
                                         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                            functionSlot(Modifier.fillMaxWidth(), fit, null, fnRow)
-                                            body(Modifier.fillMaxWidth().weight(1f).then(swipe), peek)
+                                            functionSlot(Modifier.fillMaxWidth(), fit, null, 0.dp, fnRow)
+                                            // The deck's body below the tab hanging into its room ([PadsClear]): the room it
+                                            // gives up for it is taken before the glide, so it isn't scaled with the pads.
+                                            PadsGlide(panel, Modifier.fillMaxWidth().weight(1f).then(swipe).koClear(PadsClear, 3), scaleOf = { w, h -> koUnit(w, h, 3) }) {
+                                                body(Modifier.fillMaxSize())
+                                            }
                                         }
                                     }
                                 }
@@ -823,7 +839,7 @@ fun MirrorScreen(
                         Column(
                             Modifier
                                 .windowInsetsPadding(WindowInsets.safeDrawing)
-                                .widthIn(max = 720.dp)
+                                .widthIn(max = AllGroupsMaxWidth)
                                 .fillMaxWidth()
                                 .verticalScroll(page)
                                 .padding(start = startGutter, end = endGutter, top = 4.dp, bottom = 24.dp),
@@ -846,13 +862,16 @@ fun MirrorScreen(
                             if (!panelOn) {
                                 fnRow()
                             } else {
-                                // The panel in the function keys' place, its display always there (the page scrolls).
-                                BoxWithConstraints(Modifier.fillMaxWidth()) {
-                                    functionSlot(Modifier.fillMaxWidth(), samplePanelFit(maxWidth, null), null, fnRow)
-                                }
+                                // The panel in the function keys' place, its display always there (the page scrolls). Over the
+                                // groups, where its tab hangs (the slot is drawn over what follows it); open, the slot holds
+                                // the tab clear of the group names (the panel, at its own width on a tablet, puts it over one
+                                // of them). Fitted to the page's width between its gutters, worked out here rather than measured
+                                // around the slot, which grows as it unrolls: that would compose it again on every frame.
+                                val pageW = minOf(AllGroupsMaxWidth, roomW + startGutter + endGutter) - startGutter - endGutter
+                                functionSlot(Modifier.fillMaxWidth(), samplePanelFit(pageW, null), null, TabRow - 10.dp, fnRow)
                             }
-                            val grid: @Composable () -> Unit = {
-                                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                            val grid: @Composable (Modifier) -> Unit = { m ->
+                                BoxWithConstraints(m.fillMaxWidth()) {
                                     // Four groups in a row when there is room, two by two on a phone.
                                     val perRow = if (maxWidth >= 640.dp) 4 else 2
                                     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -864,8 +883,8 @@ fun MirrorScreen(
                                     }
                                 }
                             }
-                            // Open, the peek's room goes to the pads, which only measure again for it.
-                            if (!panelOn) grid() else PeekRow(peek!!, swipe, share = { 1f - panel.unroll }) { grid() }
+                            // The pads keep their size as the panel opens over them: they only move down.
+                            grid(swipe)
                         }
                     }
                 }
@@ -893,6 +912,9 @@ private val SidewaysBottom = 8.dp
 
 /** A tablet's piano is no taller than this. */
 private val PianoMaxTablet = 340.dp
+
+/** How wide the all-groups page goes, its gutters in it: a tablet's four groups in a row, not stretched further. */
+private val AllGroupsMaxWidth = 720.dp
 
 /**
  * The piano's notes in a [width] × [height] room at [octave], [choice] white
@@ -1215,8 +1237,6 @@ private fun Group(
     onSelectGroup: ((Int) -> Unit)? = null,
     /** SAMPLE mode: the pads' lights, and a screen reader's click latching a take. */
     sampling: PadSampling? = null,
-    /** The big grid's sliver of the SAMPLE panel beside the body, on its right ([SamplePeek]). */
-    peek: (@Composable () -> Unit)? = null,
 ) {
     val c = LocalArcColors.current
     val lit = st.pads.filterKeys { it.group == group }
@@ -1244,7 +1264,7 @@ private fun Group(
         val groupKeys: (@Composable (KoGeom) -> Unit)? = onSelectGroup?.let { select ->
             { k -> for (g in 0..3) GroupKey(g, group, st, now, select, Modifier.width(k.u), keyMin = 0.dp, ko = k) }
         }
-        KoDeck(modifier, groupKeys, peek = peek) { o, k -> pad(PhysicalPad(group, o), k) }
+        KoDeck(modifier, groupKeys) { o, k -> pad(PhysicalPad(group, o), k) }
         return
     }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1332,6 +1352,42 @@ private class KoGeom(val u: Dp) {
 /** The big grid's pad width in a [w] x [h] room with [cols] columns ([KoGeom.fit]). */
 internal fun koPadWidth(w: Dp, h: Dp, cols: Int): Dp = KoGeom.fit(w, h, cols).u
 
+/**
+ * The big grid's pad width (px) in a room [w] x [h] px with [cols] columns
+ * ([KoGeom.fit]): how big it is, for [PadsGlide].
+ */
+internal fun Density.koUnit(w: Int, h: Int, cols: Int): Float = KoGeom.fit(w.toDp(), h.toDp(), cols).u.toPx()
+
+/** The big grid's body's height (the edge under it aside) for its pad width [u]: as [KoGeom.fit] counts it. */
+private const val KO_BODY_HIGH = 5.628f
+
+/** How far down a room [h] tall the big grid's body starts, sized [k] and in its middle ([KoDeck]). */
+private fun koTop(h: Dp, k: KoGeom): Dp = (h - k.u * KO_BODY_HIGH - CapDy) / 2
+
+/**
+ * How much of the top of a [w] x [h] room the big grid ([cols] columns)
+ * gives up so that its body starts at least [clear] down it: none where it
+ * does in the middle of the whole room (a grid as wide as it can be, with
+ * room above it), else as little as does it, the body a little smaller.
+ */
+internal fun koCut(w: Dp, h: Dp, cols: Int, clear: Dp): Dp {
+    if (clear <= 0.dp || koTop(h, KoGeom.fit(w, h, cols)) >= clear) return 0.dp
+    var lo = 0f
+    var hi = clear.value
+    repeat(16) {
+        val mid = (lo + hi) / 2f
+        if (mid.dp + koTop(h - mid.dp, KoGeom.fit(w, h - mid.dp, cols)) >= clear) hi = mid else lo = mid
+    }
+    return hi.dp
+}
+
+/** [this], the big grid's room ([cols] columns), giving up the top of it its body keeps [clear] of ([koCut]). */
+internal fun Modifier.koClear(clear: Dp, cols: Int): Modifier = layout { measurable, constraints ->
+    val cut = if (constraints.hasBoundedHeight) koCut(constraints.maxWidth.toDp(), constraints.maxHeight.toDp(), cols, clear).roundToPx() else 0
+    val p = measurable.measure(constraints.copy(minHeight = (constraints.minHeight - cut).coerceAtLeast(0), maxHeight = constraints.maxHeight - cut))
+    layout(p.width, p.height + cut) { p.place(0, cut) }
+}
+
 /** How wide the big grid's body is with [cols] columns, as tall as [h] lets it be ([KoGeom.fit]) whatever the width. */
 internal fun koDeckWidth(h: Dp, cols: Int): Dp = KoGeom.fit(Dp.Infinity, h, cols).u * (cols * 1.215f + 0.401f) + CapDx + 2.dp
 
@@ -1341,19 +1397,19 @@ internal fun koDeckWidth(h: Dp, cols: Int): Dp = KoGeom.fit(Dp.Infinity, h, cols
  * each pad offset, [k.u] by [k.h]. [groupKeys]: a column left of them, as the
  * device's group keys are (a phone on its side). The LEDs before the printed
  * words stay unlit: on the device they mark the knobs' pages, not the pads.
- * [peek]: the SAMPLE panel's sliver beside the body, on its right, as tall
- * as it ([PeekRow]); the body and it share the middle.
+ * While the SAMPLE panel moves, the room it is given stays as it was and the
+ * drawing glides instead ([PadsGlide]), so this lays out (and its keys
+ * compose) once per opening or closing, not on every frame.
  */
 @Composable
 private fun KoDeck(
     modifier: Modifier,
     groupKeys: (@Composable (KoGeom) -> Unit)?,
-    peek: (@Composable () -> Unit)? = null,
     key: @Composable (offset: Int, k: KoGeom) -> Unit,
 ) {
     val ko = LocalHwColors.current.ko
     BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
-        val k = KoGeom.fit(maxWidth - if (peek != null) PeekRoom else 0.dp, maxHeight, if (groupKeys != null) 4 else 3)
+        val k = KoGeom.fit(maxWidth, maxHeight, if (groupKeys != null) 4 else 3)
         val radius = k.u * 0.277f
         val body = Modifier
             .drawBehind {
@@ -1367,7 +1423,7 @@ private fun KoDeck(
             .clip(RoundedCornerShape(radius))
             .background(ko.body)
             .padding(start = k.u * 0.277f, top = k.u * 0.215f, end = k.u * 0.277f + CapDx, bottom = k.u * 0.31f + CapDy)
-        if (peek != null) PeekRow(peek) { KoBody(k, body, groupKeys, key) } else KoBody(k, body, groupKeys, key)
+        KoBody(k, body, groupKeys, key)
     }
 }
 
