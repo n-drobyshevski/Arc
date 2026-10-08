@@ -23,6 +23,10 @@ export const CoachText = {
   TEMPO: 'Click: tap; hold for tempo',
   /** The mic key in Live's top bar: a tap opens the SAMPLE panel, another closes it. */
   SAMPLE: 'Sample',
+  /** The pattern's keys on Live's display line: RECORD arms (a hold opens the pattern sheet), PLAY starts at bar 1. */
+  RECORD: 'Record a pattern: tap, then PLAY; hold for its settings',
+  PATTERN_PLAY: 'Play the pattern from bar 1',
+  ERASE: "Erase a pad's notes",
   OCTAVE: 'Octave',
   SCALE: 'Scale',
   KEY: 'Key',

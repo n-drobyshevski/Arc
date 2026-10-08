@@ -4,9 +4,11 @@ import { DiffResult, ProjectDiff, ProjectState, SoundDiff, SoundState } from '..
 import { NoteNames, SCALES } from '../../../src/core/features/keys'
 import { KeyMark } from '../../../src/core/features/piano'
 import { physicalPad } from '../../../src/core/features/padNotes'
+import { TIMINGS, Timing } from '../../../src/core/features/pattern'
 import { PLAY_MODES } from '../../../src/core/features/padSettings'
 import { ProjectSource } from '../../../src/core/features/projectStep'
 import { SampleSource } from '../../../src/core/features/sampleSource'
+import { transportState } from '../../../src/core/features/transport'
 import { CoachText } from '../../../src/core/text/coachText'
 import { FeatureText } from '../../../src/core/text/featureText'
 import { MirrorText } from '../../../src/core/text/mirrorText'
@@ -208,5 +210,72 @@ describe('FeatureTextTest', () => {
     expect(SettingsText.REVIEW_SAMPLES).toBe('Review samples')
     expect(SettingsText.REVIEW_SAMPLES_NOTE.endsWith('as on the EP-133.')).toBe(true)
     expect(CoachText.SAMPLE).toBe('Sample')
+  })
+
+  it('pattern text', () => {
+    const a7 = physicalPad(0, 9)
+    expect(MirrorText.PATTERN).toBe('Pattern')
+    expect(
+      [
+        MirrorText.RECORD,
+        MirrorText.PLAY,
+        FeatureText.STOP,
+        MirrorText.ERASE,
+        MirrorText.UNDO,
+        MirrorText.TIMING,
+        MirrorText.LENGTH,
+        MirrorText.AUTO,
+        MirrorText.COUNT_IN,
+        MirrorText.CLEAR,
+        MirrorText.CLEAR_ALL,
+      ].map((w) => w.toUpperCase()),
+    ).toEqual(['RECORD', 'PLAY', 'STOP', 'ERASE', 'UNDO', 'TIMING', 'LENGTH', 'AUTO', 'COUNT-IN', 'CLEAR', 'CLEAR ALL'])
+    expect(MirrorText.DOUBLE).toBe('×2')
+    expect(MirrorText.patternPosition(2, 3, 4)).toBe('2.3 / 4')
+    expect(MirrorText.patternRecording(2, 3, 4, Timing.SIXTEENTH)).toBe('2.3 / 4 · 1/16')
+    expect(MirrorText.patternRecording(1, 1, 1, Timing.OFF)).toBe('1.1 / 1 · Off')
+    expect(MirrorText.countIn(3)).toBe('Count-in 3')
+    expect(MirrorText.countInOf(4)).toBe('/ 4')
+    expect(TIMINGS.map((t) => MirrorText.timingLabel(t))).toEqual(['Off', '1/8', '1/16', '1/32'])
+    expect(MirrorText.timingName(Timing.SIXTEENTH)).toBe('Timing 1/16: notes snap to the nearest 1/16')
+    expect(MirrorText.timingName(Timing.OFF)).toBe('Timing off: notes stay where you play them')
+    expect(MirrorText.groupLength(0, 1)).toBe('A · 1 bar')
+    expect(MirrorText.groupLengthName(3, 16)).toBe('Group D, 16 bars')
+    expect(MirrorText.clearAsk(1)).toBe("Clear group B's notes?")
+    expect(MirrorText.clearAsk(null)).toBe("Clear every group's notes?")
+    expect(MirrorText.cleared(2)).toBe('Group C cleared.')
+    expect(MirrorText.cleared(null)).toBe('Patterns cleared.')
+    expect(MirrorText.erased(a7)).toBe('Pad A 7: notes erased.')
+    expect(MirrorText.padTitle(a7) + MirrorText.PAD_HAS_NOTES).toBe('Pad A 7, has notes')
+    expect(MirrorText.missingPads(1)).toBe('1 pad not loaded')
+    expect(MirrorText.missingPads(3)).toBe('3 pads not loaded')
+    expect(MirrorText.PATTERN_NOTE).toBe('Patterns stay in arc and play on the phone.')
+    // The keys for screen readers, and what is said when the transport changes.
+    const stopped = transportState()
+    const armed = transportState('ARMED')
+    const counting = transportState('COUNT_IN', true)
+    const recording = transportState('PLAYING', true)
+    const playing = transportState('PLAYING')
+    const states = [stopped, armed, counting, recording, playing]
+    expect(states.map((s) => MirrorText.recordDescription(s))).toEqual([
+      'Record, off',
+      'Record, armed',
+      'Record, armed',
+      'Record, recording',
+      'Record, off',
+    ])
+    expect(MirrorText.recordDescription(transportState('COUNT_IN'))).toBe('Record, off')
+    expect(states.map((s) => MirrorText.playDescription(s, 2, 4))).toEqual([
+      'Play',
+      'Play',
+      'Play, counting in',
+      'Play, bar 2 of 4',
+      'Play, bar 2 of 4',
+    ])
+    expect(states.map((s) => MirrorText.transportAnnouncement(s))).toEqual(['Stopped', 'Record armed', 'Counting in', 'Recording', 'Playing'])
+    // SAMPLE's BARS choice for the pattern's length.
+    expect(MirrorText.PTN.toUpperCase()).toBe('PTN')
+    // Web delta: no REC, so no TAKE words.
+    expect(CoachText.RECORD).toBe('Record a pattern: tap, then PLAY; hold for its settings')
   })
 })
