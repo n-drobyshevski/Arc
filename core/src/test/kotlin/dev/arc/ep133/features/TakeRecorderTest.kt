@@ -178,6 +178,47 @@ class TakeRecorderTest {
     }
 
     @Test
+    fun `stopped before its stop frame, the take keeps all it recorded, silence too`() {
+        val r = TakeRecorder(1000)
+        r.armAt(0)
+        val out = burst(16)
+        out[2 * 2] = 100
+        r.onBurst(out, 16, 0, null)
+        r.stopAt(1000)
+        assertFalse(r.onBurst(burst(16), 16, 16, null)!!.last)
+        // Only frame 2 sounds, yet the take was locked to frames: all 32 are kept.
+        assertEquals(3L, r.audible)
+        assertEquals(32L, r.stop())
+        assertEquals(TakeRecorder.State.IDLE, r.state)
+    }
+
+    @Test
+    fun `a take already recording isn't armed again at a frame`() {
+        val r = TakeRecorder(1000)
+        r.arm()
+        r.onBurst(burst(16, 3), 16, 0, 0)
+        r.armAt(100)
+        assertEquals(TakeRecorder.State.RECORDING, r.state)
+        assertEquals(16, r.onBurst(burst(16, 3), 16, 16, null)!!.frames)
+        assertEquals(32L, r.frames)
+    }
+
+    @Test
+    fun `a plain arm after a take locked to frames waits for a sound and has no stop frame`() {
+        val r = TakeRecorder(1000)
+        r.armAt(0)
+        r.stopAt(8)
+        assertTrue(r.onBurst(burst(16), 16, 0, null)!!.last)
+        r.arm()
+        assertNull(r.onBurst(burst(16), 16, 16, null))
+        val k = r.onBurst(burst(16, 4), 16, 32, 40)!!
+        assertEquals(8, k.from)
+        assertFalse(k.last)
+        assertFalse(r.onBurst(burst(16, 4), 16, 48, null)!!.last)
+        assertEquals(24L, r.stop())
+    }
+
+    @Test
     fun `a header for audio written as it is recorded`() {
         val h = Wav.header(4000, 2, 48000)
         assertEquals(44, h.size)

@@ -361,10 +361,15 @@ export class VoiceMixer {
       this.apply(c)
       return
     }
+    // Moved up in place, by index: splice would make a new array of what it removes.
     const pending = this.pending
     let i = pending.length
-    while (i > 0 && pending[i - 1]!.at > c.at) i--
-    pending.splice(i, 0, c)
+    pending.push(c)
+    while (i > 0 && pending[i - 1]!.at > c.at) {
+      pending[i] = pending[i - 1]!
+      i--
+    }
+    pending[i] = c
   }
 
   /** Applies the timed commands whose frame has come (or gone), in order. */
@@ -374,7 +379,9 @@ export class VoiceMixer {
     while (n < pending.length && pending[n]!.at <= this.frameCount) n++
     if (n === 0) return
     for (let i = 0; i < n; i++) this.apply(pending[i]!)
-    pending.splice(0, n)
+    // Moved down in place: no new array.
+    for (let i = n; i < pending.length; i++) pending[i - n] = pending[i]!
+    pending.length -= n
   }
 
   /** Adds the next [frames] of every voice to the mix, from its frame [offset]; ended voices are dropped in place. */
