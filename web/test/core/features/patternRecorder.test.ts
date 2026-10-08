@@ -253,6 +253,8 @@ describe('PatternRecorderTest', () => {
     // A whole loop or more: every note on the pad.
     expect(notesOf(r.eraseRange(p, a3, null, 1000.0, 1384.0)).map((n) => n.offset)).toEqual([4])
     expect(r.eraseRange(p, a3, null, 300.0, 300.0)).toEqual(p)
+    // A stretch with none of the pad's notes gives the very patterns back (nothing to publish or save).
+    expect(r.eraseRange(p, a3, null, 220.0, 300.0)).toBe(p)
     // Notes left past the end aren't played, so the playhead never passes them.
     const past = withGroup(0, pattern(1, [patternNote(10, 3, 24), patternNote(500, 3, 24)]))
     expect(ticks(r.eraseRange(past, a3, null, 760.0, 780.0))).toEqual([500])

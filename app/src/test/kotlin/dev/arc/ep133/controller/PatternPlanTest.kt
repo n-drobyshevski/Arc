@@ -4,9 +4,11 @@ import dev.arc.ep133.audio.PadVoice
 import dev.arc.ep133.audio.PcmSound
 import dev.arc.ep133.features.Pattern
 import dev.arc.ep133.features.PatternNote
+import dev.arc.ep133.features.PatternRecorder
 import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.ProjectPatterns
 import dev.arc.ep133.features.Seq
+import dev.arc.ep133.features.Timing
 import dev.arc.ep133.features.TransportPhase
 import dev.arc.ep133.features.TransportState
 import dev.arc.ep133.features.barFrames
@@ -130,5 +132,18 @@ class PatternPlanTest {
         assertEquals(listOf(kept), out.group(1).notes)
         assertSame(p, withoutNote(p, 9))
         assertSame(p, withoutNote(p, 0))
+    }
+
+    @Test
+    fun `notes still held as recording stops end there, not a grid step on`() {
+        val r = PatternRecorder()
+        val start = r.punchIn(ProjectPatterns(), fromStop = true, autoLength = false)
+        val held = r.noteOn(start, PhysicalPad(0, 3), null, 96.0, 96.0, Timing.SIXTEENTH)
+        val let = r.noteOn(held.patterns, PhysicalPad(0, 4), 2, 192.0, 192.0, Timing.SIXTEENTH)
+        // Recorded with a step's gate until let go of.
+        assertEquals(listOf(24, 24), let.patterns.group(0).notes.map { it.gate })
+        val out = heldNotesEnded(let.patterns, r, listOf(held.id, let.id), 300.0)
+        assertEquals(listOf(204, 108), out.group(0).notes.map { it.gate })
+        assertSame(let.patterns, heldNotesEnded(let.patterns, r, emptyList(), 300.0))
     }
 }

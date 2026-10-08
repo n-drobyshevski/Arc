@@ -191,7 +191,9 @@ export class PatternRecorder {
     // Notes left past the end aren't played, so the playhead never passes them.
     const inRange = (t: number): boolean => (pat.open || t < len) && (whole || (from <= to ? t >= from && t < to : t >= from || t < to))
     const out = ProjectPatterns.with(p, pad.group, { ...pat, notes: pat.notes.filter((n) => !(on(n, pad, semitones) && inRange(n.tick))) })
-    if (samePatterns(out, p) || run.pushed) return out
+    // Nothing passed: the very patterns back, so a pad held over empty stretches changes nothing.
+    if (samePatterns(out, p)) return p
+    if (run.pushed) return out
     run.pushed = true
     return this.edit(p, out)
   }

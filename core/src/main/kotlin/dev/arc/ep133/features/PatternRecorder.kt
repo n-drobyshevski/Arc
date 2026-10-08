@@ -161,7 +161,9 @@ class PatternRecorder(private val maxUndo: Int = 32) {
         // Notes left past the end aren't played, so the playhead never passes them.
         val inRange = { t: Int -> (pat.open || t < len) && (whole || if (from <= to) t >= from && t < to else t >= from || t < to) }
         val out = p.with(pad.group, pat.copy(notes = pat.notes.filterNot { on(it, pad, semitones) && inRange(it.tick) }))
-        if (out == p || run.pushed) return out
+        // Nothing passed: the very patterns back, so a pad held over empty stretches changes nothing.
+        if (out == p) return p
+        if (run.pushed) return out
         run.pushed = true
         return edit(p, out)
     }

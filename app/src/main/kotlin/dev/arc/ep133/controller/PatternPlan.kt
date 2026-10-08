@@ -2,6 +2,7 @@ package dev.arc.ep133.controller
 
 import dev.arc.ep133.audio.PadVoice
 import dev.arc.ep133.audio.PcmSound
+import dev.arc.ep133.features.PatternRecorder
 import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.ProjectPatterns
 import dev.arc.ep133.features.Seq
@@ -120,6 +121,17 @@ internal fun countInBeat(tick: Double): Int? {
 
 /** [ticks] of the pattern at [bpm] as frames at [rate] (an input's own), rounded half up as [dev.arc.ep133.features.barFrames]. */
 internal fun ticksToFrames(ticks: Long, bpm: Double, rate: Int): Long = floor(ticks * 60.0 * rate / (bpm * Seq.PPQN) + 0.5).toLong()
+
+/**
+ * [p] with the notes [held] (by id, their pads or keys still down) ended at
+ * global [tick], as recording stops there ([recorder]'s punch-out or stop):
+ * each keeps the gate it had up to then, not a grid step.
+ */
+internal fun heldNotesEnded(p: ProjectPatterns, recorder: PatternRecorder, held: Collection<Int>, tick: Double): ProjectPatterns {
+    var out = p
+    for (id in held) out = recorder.noteOff(out, id, tick)
+    return out
+}
 
 /** [p] without note [id] (a press that was a scroll or a swipe after all); [p] itself when no note has it. */
 internal fun withoutNote(p: ProjectPatterns, id: Int): ProjectPatterns {

@@ -2025,13 +2025,15 @@ class ArcController(
      * [pressedAt] (System.nanoTime) is when the finger came down, from the
      * touch event ([dev.arc.ep133.audio.PressTime]): the latency is counted from it.
      * While PATTERN records, the press is a note there from that moment (an
-     * [unsure] one once kept).
+     * [unsure] one once kept), unless [record] is false (the pad sheet's cap,
+     * which tries the sound out).
      */
     fun playPad(
         pad: dev.arc.ep133.features.PhysicalPad,
         hold: Boolean = true,
         unsure: Boolean = false,
         pressedAt: Long = System.nanoTime(),
+        record: Boolean = true,
     ): Job? {
         val key = "live:${pad.group}:${pad.offset}"
         if (hold) held += key
@@ -2049,7 +2051,7 @@ class ArcController(
         if (ready != null) startHeld(key, hold, ready, 0, pressedAt, measured = true, shapeFor(pad))
         // The pad tapped is also the sound KEYS plays; it is loaded right here, so no preload for it.
         setKeysPad(pad)
-        recordPress(pad, null, key, pressedAt, hold)
+        if (record) recordPress(pad, null, key, pressedAt, hold)
         return if (ready != null) null else loadAndStart(pad, key, hold, pressedAt, playToken)
     }
 
@@ -3723,7 +3725,7 @@ class ArcController(
         patternLoop = null
         if (wasRecording) {
             val tick = heardTimeline()?.tickAt(System.nanoTime()) ?: 0.0
-            setPatterns(patternRecorder.punchOut(projectPatterns, tick))
+            setPatterns(patternRecorder.punchOut(heldNotesEnded(projectPatterns, patternRecorder, patternHeld.values, tick), tick))
         }
         patternScheduler.stop()
         patternHeld.clear()
@@ -3744,7 +3746,10 @@ class ArcController(
     /** Recording stops where it is heard, and the patterns are kept; playing goes on. */
     private fun punchOut() {
         val tick = heardTimeline()?.tickAt(System.nanoTime()) ?: 0.0
-        setPatterns(patternRecorder.punchOut(projectPatterns, tick))
+        // A pad or key still held ends its note here: a lift after the punch-out records nothing.
+        val p = heldNotesEnded(projectPatterns, patternRecorder, patternHeld.values, tick)
+        patternHeld.clear()
+        setPatterns(patternRecorder.punchOut(p, tick))
         savePatterns()
     }
 
