@@ -121,15 +121,17 @@ internal fun PianoKeyboard(
     modifier: Modifier = Modifier,
     /** A light tick as a key goes down (Settings → Haptics). */
     haptics: Boolean = true,
+    /** While the arp is on: each finger's pressure, the touch's own, for the note it is on. */
+    pressure: ((note: Int, pressure: Float) -> Unit)? = null,
 ) {
     // Low notes on the left in every language, as on the instrument.
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-        Keyboard(range, st, keys, now, actions, modifier, haptics)
+        Keyboard(range, st, keys, now, actions, modifier, haptics, pressure)
     }
 }
 
 @Composable
-private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> Long, actions: KeysActions, modifier: Modifier, haptics: Boolean) {
+private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> Long, actions: KeysActions, modifier: Modifier, haptics: Boolean, pressure: ((Int, Float) -> Unit)?) {
     val c = LocalArcColors.current
     val hw = LocalHwColors.current
     val density = LocalDensity.current
@@ -142,6 +144,7 @@ private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> 
     val touches = remember { NoteTouches() }
     val currentRange by rememberUpdatedState(range)
     val currentActions by rememberUpdatedState(actions)
+    val currentPressure by rememberUpdatedState(pressure)
     val tick by rememberUpdatedState(if (haptics) LocalHapticFeedback.current else null)
     // The notes a finger is on, and how far down each key is (0..1, read while drawing).
     val fingered = remember { mutableStateOf(emptySet<Int>()) }
@@ -245,6 +248,8 @@ private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> 
                                         }
                                     }
                                 }
+                                // A finger on a key tells its pressure, while the arp asks.
+                                if (ch.pressed) fingers[ch.id]?.note?.let { n -> currentPressure?.invoke(n, ch.pressure) }
                                 ch.consume()
                             }
                         } while (event.changes.any { it.pressed })

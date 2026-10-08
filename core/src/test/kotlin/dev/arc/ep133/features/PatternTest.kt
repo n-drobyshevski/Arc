@@ -116,7 +116,9 @@ class PatternTest {
     @Test
     fun `timing snaps to the nearest grid tick, ties up`() {
         assertEquals(Timing.SIXTEENTH, Timing.DEFAULT)
-        assertEquals(listOf(0, 48, 24, 12), Timing.entries.map { it.ticks })
+        assertEquals(listOf(0, 384, 192, 96, 48, 32, 24, 16, 12), Timing.entries.map { it.ticks })
+        assertEquals(Timing.entries.drop(1), Timing.intervals)
+        assertEquals(Timing.EIGHTH_T, Timing.of("1/8T"))
         assertEquals(Timing.EIGHTH, Timing.of("1/8"))
         assertEquals(Timing.OFF, Timing.of("off"))
         assertNull(Timing.of("1/64"))
@@ -134,5 +136,58 @@ class PatternTest {
         assertEquals(10L, Timing.OFF.quantize(10.49))
         assertEquals(11L, Timing.OFF.quantize(10.5))
         assertEquals(0L, Timing.OFF.quantize(-0.5))
+    }
+
+    @Test
+    fun `swing pushes the odd steps of 1-8 and 1-16 late, up to half a step`() {
+        assertEquals(listOf(Timing.EIGHTH, Timing.SIXTEENTH), Timing.entries.filter { it.swings })
+        assertEquals(0, Timing.SIXTEENTH.swingOffset(0, 75))
+        assertEquals(12, Timing.SIXTEENTH.swingOffset(1, 75))
+        assertEquals(24, Timing.EIGHTH.swingOffset(3, 75))
+        assertEquals(0, Timing.SIXTEENTH.swingOffset(1, 50))
+        // 58%: 8 / 50 of 24 ticks, 3.84, rounds to 4.
+        assertEquals(4, Timing.SIXTEENTH.swingOffset(1, 58))
+        assertEquals(4, Timing.SIXTEENTH.swingOffset(-1, 58))
+        // Held to 50..75.
+        assertEquals(12, Timing.SIXTEENTH.swingOffset(1, 99))
+        assertEquals(0, Timing.SIXTEENTH.swingOffset(1, 10))
+        // Triplets, the long ones and 1/32 don't swing.
+        for (t in listOf(Timing.SIXTEENTH_T, Timing.QUARTER, Timing.THIRTY_SECOND, Timing.OFF)) assertEquals(0, t.swingOffset(1, 75))
+    }
+
+    @Test
+    fun `quantize snaps to the swung grid, straight the same as without swing`() {
+        // At 75 the 1/16 grid is 0, 36, 48, 84, 96...
+        assertEquals(36L, Timing.SIXTEENTH.quantize(30.0, 75))
+        assertEquals(0L, Timing.SIXTEENTH.quantize(17.9, 75))
+        // Ties round up: 18 is as near 0 as 36.
+        assertEquals(36L, Timing.SIXTEENTH.quantize(18.0, 75))
+        assertEquals(48L, Timing.SIXTEENTH.quantize(42.0, 75))
+        assertEquals(84L, Timing.SIXTEENTH.quantize(70.0, 75))
+        // Before 0: step -1 is late too, at -12.
+        assertEquals(-12L, Timing.SIXTEENTH.quantize(-7.0, 75))
+        assertEquals(0L, Timing.SIXTEENTH.quantize(-6.0, 75))
+        // 1/16T doesn't swing.
+        assertEquals(16L, Timing.SIXTEENTH_T.quantize(12.0, 75))
+        assertEquals(10L, Timing.OFF.quantize(10.4, 75))
+        var t = -50.0
+        while (t < 450.0) {
+            for (timing in Timing.entries) assertEquals(timing.quantize(t), timing.quantize(t, 50), "$timing at $t")
+            t += 0.25
+        }
+    }
+
+    @Test
+    fun `TIMING's settings are never OFF, hold the swing, and record OFF in free time`() {
+        val d = TimingSettings()
+        assertEquals(TimingSettings(Timing.SIXTEENTH, 50, true), d)
+        assertEquals(TimingSettings.DEFAULT, d)
+        assertEquals(Timing.SIXTEENTH, TimingSettings(Timing.OFF).interval)
+        assertEquals(Timing.SIXTEENTH, d.withInterval(Timing.EIGHTH).withInterval(Timing.OFF).interval)
+        assertEquals(75, d.withSwing(80).swing)
+        assertEquals(50, TimingSettings(swing = 0).swing)
+        assertEquals(Timing.SIXTEENTH, d.record)
+        assertEquals(Timing.OFF, d.withQuantize(false).record)
+        assertEquals(Timing.EIGHTH_T, d.withQuantize(false).withInterval(Timing.EIGHTH_T).withQuantize(true).record)
     }
 }

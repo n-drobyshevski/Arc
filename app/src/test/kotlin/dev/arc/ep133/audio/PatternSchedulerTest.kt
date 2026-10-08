@@ -1,5 +1,9 @@
 package dev.arc.ep133.audio
 
+import dev.arc.ep133.features.Arp
+import dev.arc.ep133.features.ArpNote
+import dev.arc.ep133.features.ArpOrder
+import dev.arc.ep133.features.ArpSettings
 import dev.arc.ep133.features.FrameClock
 import dev.arc.ep133.features.Keys
 import dev.arc.ep133.features.Pattern
@@ -7,6 +11,8 @@ import dev.arc.ep133.features.PatternNote
 import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.ProjectPatterns
 import dev.arc.ep133.features.Seq
+import dev.arc.ep133.features.Timing
+import dev.arc.ep133.features.TimingSettings
 import dev.arc.ep133.formats.VoiceMixer
 import dev.arc.ep133.formats.VoiceMode
 import dev.arc.ep133.formats.VoiceShape
@@ -26,7 +32,9 @@ import kotlin.random.Random
  * The pattern sequencer against a fake output, block by block: notes land
  * on their frames once each across windows and tempo changes, gates are let
  * go of, stop and a lost output drop what waits and let go of what sounds,
- * and the beat goes on where it was heard after a re-anchor.
+ * and the beat goes on where it was heard after a re-anchor. The arp and
+ * note repeat step from the press on a clock of their own, or on the
+ * pattern's grid while it runs.
  */
 class PatternSchedulerTest {
     // 48 kHz at 120 BPM: 250 frames a tick, a bar 96000 frames; the lookahead 2400.
@@ -451,5 +459,235 @@ class PatternSchedulerTest {
         r.fill()
         assertEquals(f, r.s.timeline.value!!.frameOfTick(0))
         assertEquals(0.0, r.s.timeline.value!!.tickAt(at), 1e-6)
+    }
+
+    // ---------- The arp and note repeat ----------
+
+    // 1/16 at 120 BPM: 24 ticks, 6000 frames a step.
+    private val step = 6000L
+
+    private fun note(semis: Int?, velocity: Int = 127, pad: PhysicalPad = PhysicalPad(0, 0)) = ArpNote(pad, semis, velocity)
+
+    private fun arpPlan(
+        notes: List<ArpNote>,
+        pressNanos: Long,
+        order: ArpOrder = ArpOrder.PLAYED,
+        gate: Int = 50,
+        swing: Int = 50,
+        interval: Timing = Timing.SIXTEENTH,
+        keys: Boolean = true,
+        bpm: Double = 120.0,
+    ) = ArpPlan(notes, voices(), keys, TimingSettings(interval, swing), ArpSettings(order, gate = gate), bpm, 7, pressNanos)
+
+    private val arpStarts: (Rig) -> List<Started> = { r -> r.sink.starts.filter { it.key.startsWith("arp:") } }
+
+    @Test
+    fun `a free arp plays its first step on the press, then a step every interval`() {
+        val r = Rig()
+        r.run(48_000)
+        val f = r.rendered - 1200
+        r.s.arp = arpPlan(listOf(note(0), note(4), note(7)), r.heard(f))
+        assertTrue(r.s.running)
+        assertFalse(r.s.playing)
+        r.stamp()
+        r.run(f + bar, stampEvery = 25)
+        val starts = arpStarts(r).filter { it.at < f + bar }
+        assertEquals(List(16) { f + it * step }, starts.map { it.at })
+        assertEquals(List(16) { "arp:0:0:" + listOf(0, 4, 7)[it % 3] }, starts.map { it.key })
+        assertEquals(List(16) { listOf(0, 4, 7)[it % 3] }, starts.map { it.semitones })
+        assertTrue(starts.all { it.shape == keysShape && it.tag < 0 })
+        // The press heard before the block: its step a little late, the rest ahead of the mix.
+        assertTrue(starts.first().at < starts.first().rendered)
+        assertTrue(starts.drop(1).all { it.at >= it.rendered })
+        // No stamp: step 0 on the frames rendered.
+        val q = Rig()
+        q.run(48_000)
+        q.s.arp = arpPlan(listOf(note(0)), q.heard(q.rendered))
+        q.run(48_000 + bar)
+        assertEquals(List(16) { 48_000 + it * step }, arpStarts(q).filter { it.at < 48_000 + bar }.map { it.at })
+    }
+
+    @Test
+    fun `with the pattern running, the press plays at once and the steps after it lie on the grid`() {
+        val r = Rig()
+        val ticks = ArrayList<Long>()
+        r.s.onArpStep = { ticks += it.globalTick }
+        r.s.plan = SeqPlan(ProjectPatterns(), voices(), emptyMap(), 120.0)
+        r.s.play(0)
+        r.run(48_000, stampEvery = 25)
+        // Tick 177.6: the grid's 1/16 at 180 is less than half a step on, so the next is 192.
+        val f = r.rendered - 1200
+        r.s.arp = arpPlan(listOf(note(0), note(4)), r.heard(f))
+        r.run(f + bar, stampEvery = 25)
+        val starts = arpStarts(r).filter { it.at < f + bar }
+        assertEquals(f, starts.first().at)
+        assertEquals(List(starts.size - 1) { ahead + (192 + it * 24) * 250L }, starts.drop(1).map { it.at })
+        assertEquals(listOf(178L) + List(starts.size - 1) { 192L + it * 24 }, ticks.take(starts.size))
+        assertTrue(ticks.zipWithNext().all { (a, b) -> b > a })
+    }
+
+    @Test
+    fun `swing puts every odd step later, free and on the grid`() {
+        val r = Rig()
+        r.run(48_000)
+        val f = r.rendered
+        r.s.arp = arpPlan(listOf(note(0)), r.heard(f), swing = 75)
+        r.run(f + bar)
+        // 75%: half a 1/16 late, 12 ticks.
+        assertEquals(List(16) { f + it * step + if (it % 2 == 1) 3000 else 0 }, arpStarts(r).filter { it.at < f + bar }.map { it.at })
+        // On the grid: the odd 1/16s of the bar, from tick 0.
+        val g = Rig()
+        g.s.plan = SeqPlan(ProjectPatterns(), voices(), emptyMap(), 120.0)
+        g.s.play(0)
+        g.run(48_000, stampEvery = 25)
+        g.s.arp = arpPlan(listOf(note(0)), g.heard(g.rendered - 1200), swing = 75)
+        g.run(48_000 + bar, stampEvery = 25)
+        for (s in arpStarts(g).drop(1)) {
+            val tick = (s.at - ahead) / 250
+            assertEquals(if ((tick / 24) % 2 == 1L) 12L else 0L, tick % 24, "tick $tick")
+        }
+        // Straight with 1/8T, which doesn't swing.
+        val t = Rig()
+        t.run(48_000)
+        t.s.arp = arpPlan(listOf(note(0)), t.heard(t.rendered), swing = 75, interval = Timing.EIGHTH_T)
+        t.run(48_000 + bar)
+        assertEquals(List(12) { 48_000 + it * 8000L }, arpStarts(t).filter { it.at < 48_000 + bar }.map { it.at })
+    }
+
+    @Test
+    fun `UP cycles across windows, neither repeating nor skipping a step through tempo and plan changes`() {
+        val random = Random(133)
+        val r = Rig()
+        val held = listOf(note(7), note(0), note(4))
+        val press = r.heard(0)
+        while (r.rendered < 4 * bar) {
+            r.s.arp = arpPlan(held, press, order = ArpOrder.UP, bpm = 90 + random.nextDouble() * 60)
+            r.fill()
+            r.rendered += 64 + random.nextInt(800)
+        }
+        val starts = arpStarts(r)
+        assertTrue(starts.size > 40)
+        assertEquals(List(starts.size) { "arp:0:0:" + listOf(0, 4, 7)[it % 3] }, starts.map { it.key })
+        assertTrue(starts.zipWithNext().all { (a, b) -> b.at > a.at })
+        // Steps at 90..150 BPM: 4000..6667 frames apart.
+        assertTrue(starts.zipWithNext().all { (a, b) -> b.at - a.at in 3990..6680 }) { starts.zipWithNext().map { (a, b) -> b.at - a.at }.toString() }
+    }
+
+    @Test
+    fun `each step lets go at its gate, on the voice it started`() {
+        val r = Rig()
+        r.s.arp = arpPlan(listOf(note(0), note(5)), r.heard(0), gate = 50)
+        r.run(bar)
+        val starts = arpStarts(r).filter { it.at + 3000 < bar - ahead }
+        val releases = r.sink.releases
+        assertTrue(starts.size >= 10)
+        for (s in starts) {
+            val rel = releases.single { it.tag == s.tag }
+            assertEquals(s.key, rel.key)
+            // Half of a 1/16: 12 ticks.
+            assertEquals(s.at + 3000, rel.at)
+        }
+        assertEquals(Arp.gateTicks(Timing.SIXTEENTH, 50), 12)
+    }
+
+    @Test
+    fun `no plan lets go of every arp voice, and nothing more plays`() {
+        val r = Rig()
+        r.s.arp = arpPlan(listOf(note(0), note(4)), r.heard(0), gate = 100)
+        r.run(30_000)
+        val sounding = arpStarts(r).filter { it.at < r.rendered }.last()
+        r.s.arp = null
+        assertFalse(r.s.running)
+        r.fill()
+        val stopAt = r.rendered
+        r.run(r.rendered + bar)
+        val starts = arpStarts(r)
+        // Each voice let go of: the one sounding where the mix was, any sent to start later at its gate.
+        for (s in starts) assertTrue(r.sink.releases.any { it.tag == s.tag }) { "${s.key} at ${s.at} never let go of" }
+        assertEquals(stopAt, r.sink.releases.filter { it.tag == sounding.tag }.minOf { it.at })
+        assertTrue(starts.all { it.at < stopAt + ahead })
+        assertFalse(r.sink.events.contains(Flushed))
+    }
+
+    @Test
+    fun `note repeat plays every pad held on each step, as pad hits`() {
+        val r = Rig()
+        val a1 = PhysicalPad(0, 0)
+        val b3 = PhysicalPad(1, 4)
+        r.s.arp = arpPlan(listOf(note(null, pad = a1), note(null, velocity = 64, pad = b3)), r.heard(0), keys = false)
+        r.run(bar)
+        val starts = arpStarts(r).filter { it.at < bar }
+        assertEquals(32, starts.size)
+        for ((i, pair) in starts.chunked(2).withIndex()) {
+            assertEquals(listOf("arp:0:0:n", "arp:1:4:n"), pair.map { it.key })
+            assertTrue(pair.all { it.at == i * step && it.semitones == 0 })
+            assertEquals(padShape, pair[0].shape)
+            // Softer: (64 / 127)² of the pad's gain.
+            assertEquals(padShape.gain * Arp.velocityGain(64), pair[1].shape.gain, 1e-6f)
+        }
+    }
+
+    @Test
+    fun `a pattern note plays at its velocity, 127 as it was`() {
+        val r = Rig()
+        val pattern = Pattern(1, listOf(PatternNote(0, 0, 24, id = 1), PatternNote(96, 0, 24, velocity = 32, id = 2)))
+        r.s.plan = plan(0, pattern)
+        r.s.play(0)
+        r.run(bar)
+        val (loud, soft) = r.sink.starts
+        assertSame(padShape, loud.shape)
+        assertEquals(padShape.gain * Arp.velocityGain(32), soft.shape.gain, 1e-6f)
+    }
+
+    @Test
+    fun `steps are told for RECORD only while the pattern runs, which they move onto at its start`() {
+        val r = Rig()
+        val told = ArrayList<ArpStep>()
+        r.s.onArpStep = { told += it }
+        r.s.plan = SeqPlan(ProjectPatterns(), voices(), emptyMap(), 120.0)
+        r.s.arp = arpPlan(listOf(note(0)), r.heard(0), gate = 25)
+        r.run(bar, stampEvery = 25)
+        assertTrue(arpStarts(r).isNotEmpty())
+        assertTrue(told.isEmpty())
+        val before = arpStarts(r).size
+        r.s.play(0)
+        r.run(3 * bar, stampEvery = 25)
+        // PLAY anchors tick 0 a lookahead on; from there, the grid's steps.
+        val zero = bar + ahead
+        val after = arpStarts(r).drop(before)
+        assertTrue(after.isNotEmpty())
+        for (s in after) assertEquals(0L, (s.at - zero) % step, "frame ${s.at}")
+        assertEquals(after.size, told.size)
+        assertEquals(after.map { (it.at - zero) / 250 }, told.map { it.globalTick })
+        assertTrue(told.all { it.gateTicks == 6 && it.note == note(0) })
+        // Stopped, the arp goes on its own clock, and RECORD hears nothing more.
+        r.s.stop()
+        val n = told.size
+        r.run(4 * bar, stampEvery = 25)
+        assertEquals(n, told.size)
+        assertTrue(arpStarts(r).last().at > 3 * bar + ahead)
+    }
+
+    @Test
+    fun `a step STOP drops before it is mixed is never told for RECORD`() {
+        val r = Rig()
+        val told = ArrayList<Pair<ArpStep, Long>>()
+        r.s.onArpStep = { told += it to r.rendered }
+        r.s.plan = SeqPlan(ProjectPatterns(), voices(), emptyMap(), 120.0)
+        r.s.play(0)
+        r.run(48_000, stampEvery = 25)
+        r.s.arp = arpPlan(listOf(note(0)), r.heard(r.rendered - 1200))
+        // Tick 480 (frame 218400) is sent a lookahead early, and not yet mixed when STOP comes.
+        val zero = ahead
+        val pending = zero + 480 * 250L
+        r.run(pending - 1056, stampEvery = 25)
+        assertTrue(arpStarts(r).any { it.at == pending && it.rendered < pending })
+        // Each one told was mixed by then.
+        assertTrue(told.isNotEmpty())
+        for ((s, at) in told) assertTrue(zero + s.globalTick * 250 < at, "tick ${s.globalTick} told at $at")
+        r.s.stop()
+        r.run(pending + bar, stampEvery = 25)
+        assertTrue(r.sink.events.contains(Flushed))
+        assertTrue(told.none { it.first.globalTick >= 480 }, told.map { it.first.globalTick }.toString())
     }
 }

@@ -35,6 +35,8 @@ object CoachText {
     const val KEYS_VIEW = "Pads or piano"
     /** The EDIT edge tab's side tag. */
     const val EDIT = "Change a pad's sound"
+    /** The ARP / RPT switch on the pads' plate, and LATCH under it. */
+    const val ARP = "Arp or repeat: hold pads"
 
     const val SEARCH = "Search sounds"
     const val IMPORT = "Import a .pak"

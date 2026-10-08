@@ -1,5 +1,6 @@
 // Port of core/src/test/kotlin/dev/arc/ep133/text/FeatureTextTest.kt
 import { describe, expect, it } from 'vitest'
+import { ARP_ORDERS, arpNote } from '../../../src/core/features/arp'
 import { DiffResult, ProjectDiff, ProjectState, SoundDiff, SoundState } from '../../../src/core/features/backupDiff'
 import { NoteNames, SCALES } from '../../../src/core/features/keys'
 import { FX_TYPES, FxType } from '../../../src/core/features/fxSettings'
@@ -276,9 +277,25 @@ describe('FeatureTextTest', () => {
     expect(MirrorText.countInOf(4)).toBe('/ 4')
     expect(MirrorText.patternArmed(Timing.SIXTEENTH)).toBe('Play a pad or PLAY · 1/16')
     expect(MirrorText.patternArmed(Timing.OFF)).toBe('Play a pad or PLAY · Off')
-    expect(TIMINGS.map((t) => MirrorText.timingLabel(t))).toEqual(['Off', '1/8', '1/16', '1/32'])
+    expect(TIMINGS.map((t) => MirrorText.timingLabel(t))).toEqual(['Off', '1/1', '1/2', '1/4', '1/8', '1/8T', '1/16', '1/16T', '1/32'])
     expect(MirrorText.timingName(Timing.SIXTEENTH)).toBe('Timing 1/16: notes snap to the nearest 1/16')
+    expect(MirrorText.timingName(Timing.EIGHTH_T)).toBe('Timing 1/8T: notes snap to the nearest 1/8 triplet')
     expect(MirrorText.timingName(Timing.OFF)).toBe('Timing off: notes stay where you play them')
+    const held = [arpNote(a7, 5), arpNote(a7, 9), arpNote(a7, 0)]
+    expect(MirrorText.arpLine(false, false, Timing.SIXTEENTH, held, NoteNames.SOLFEGE)).toBe('ARP · 1/16 · FA LA DO')
+    expect(MirrorText.arpLine(false, true, Timing.EIGHTH_T, held, NoteNames.LETTERS)).toBe('ARP ∞ · 1/8T · F A C')
+    expect(MirrorText.arpLine(true, false, Timing.THIRTY_SECOND, [arpNote(a7, null), arpNote(physicalPad(1, 2), null)], NoteNames.SOLFEGE)).toBe(
+      'REPEAT · 1/32 · A 7, B ENTER',
+    )
+    // The ARP / RPT switch and the tempo sheet's TIMING page.
+    expect([MirrorText.ARP, MirrorText.RPT].map((w) => w.toUpperCase())).toEqual(['ARP', 'RPT'])
+    expect(MirrorText.arpFirst(true)).toBe('Turn on RPT first')
+    expect(CoachText.ARP).toBe('Arp or repeat: hold pads')
+    expect(MirrorText.intervalName(Timing.SIXTEENTH_T)).toBe('Interval 1/16 triplet')
+    expect(MirrorText.percent(56)).toBe('56%')
+    expect(MirrorText.GATE_NOTE).toBe('How long each note sounds, as a share of the step.')
+    expect(ARP_ORDERS.map((o) => MirrorText.arpOrderName(o))).toEqual(['Played', 'Up', 'Down', 'Up-dn', 'Random'])
+    expect((['played', 'updown'] as const).map((o) => MirrorText.arpOrderSpoken(o))).toEqual(['As played', 'Up and down'])
     expect(MirrorText.groupLength(0, 1)).toBe('A · 1 bar')
     expect(MirrorText.groupLengthName(3, 16)).toBe('Group D, 16 bars')
     expect(MirrorText.clearAsk(1)).toBe("Clear group B's notes?")

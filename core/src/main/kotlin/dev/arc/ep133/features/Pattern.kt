@@ -9,6 +9,7 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import kotlin.math.abs
 import kotlin.math.floor
 
 /** The EP-133's sequencer, as its guide gives it: 96 ticks a beat, 1 to 99 bars a group. */
@@ -163,15 +164,25 @@ data class Patterns(val projects: Map<Int, ProjectPatterns> = emptyMap()) {
 }
 
 /**
- * TIMING (the device's quantize): the grid recorded notes snap to, in
- * ticks, or OFF for free time (the tick played). 1/16 by default, as on the
- * device. [id] is the word kept in settings.
+ * TIMING (the device's quantize and note interval): the grid recorded notes
+ * snap to and the arp and note repeat step at, in ticks, or OFF for free
+ * time (the tick played). 1/16 by default, as on the device; swing bends the
+ * off-beats of 1/8 and 1/16 only ([swings]). [id] is the word kept in
+ * settings.
  */
 enum class Timing(val id: String, val ticks: Int) {
     OFF("off", 0),
+    WHOLE("1/1", 384),
+    HALF("1/2", 192),
+    QUARTER("1/4", 96),
     EIGHTH("1/8", 48),
+    EIGHTH_T("1/8T", 32),
     SIXTEENTH("1/16", 24),
+    SIXTEENTH_T("1/16T", 16),
     THIRTY_SECOND("1/32", 12);
+
+    /** Whether swing applies: 1/8 and 1/16 only, as on the device. */
+    val swings: Boolean get() = this == EIGHTH || this == SIXTEENTH
 
     /**
      * [tick] on the grid: the nearest grid tick, ties rounding up; OFF the
@@ -180,9 +191,77 @@ enum class Timing(val id: String, val ticks: Int) {
     fun quantize(tick: Double): Long =
         if (ticks == 0) floor(tick + 0.5).toLong() else floor(tick / ticks + 0.5).toLong() * ticks
 
+    /**
+     * How late step [stepIndex] of the grid plays at [swing] (50..75): 0 for
+     * the even steps, and for the odd ones (swing - 50) / 50 of a step,
+     * rounded to the tick (ticks / 2 at 75). 0 where it doesn't [swings].
+     */
+    fun swingOffset(stepIndex: Long, swing: Int): Int {
+        if (!swings || (stepIndex and 1L) == 0L) return 0
+        return ((TimingSettings.clampSwing(swing) - TimingSettings.SWING_MIN) * ticks + 25) / 50
+    }
+
+    /**
+     * [tick] on the grid swung by [swing]: the nearest of its points
+     * (k * ticks + [swingOffset] of k), ties rounding up, as [quantize]
+     * (which it is, straight); OFF the nearest tick.
+     */
+    fun quantize(tick: Double, swing: Int): Long {
+        if (ticks == 0 || swingOffset(1, swing) == 0) return quantize(tick)
+        val k0 = floor(tick / ticks).toLong()
+        var best = 0L
+        var bestDistance = Double.POSITIVE_INFINITY
+        for (k in k0 - 1..k0 + 1) {
+            val point = k * ticks + swingOffset(k, swing)
+            val d = abs(tick - point)
+            if (d <= bestDistance) {
+                best = point
+                bestDistance = d
+            }
+        }
+        return best
+    }
+
     companion object {
         val DEFAULT = SIXTEENTH
 
+        /** The note intervals KNOB X offers: every entry but OFF, in order. */
+        val intervals: List<Timing> = entries.filter { it != OFF }
+
         fun of(id: String): Timing? = entries.firstOrNull { it.id == id }
+    }
+}
+
+/**
+ * The TIMING settings: the note [interval] (never OFF; OFF is read as 1/16),
+ * its [swing] (50..75, 50 straight) and whether recording snaps to the grid
+ * ([quantize]) or keeps free time (the device's - and +).
+ */
+data class TimingSettings private constructor(val interval: Timing, val swing: Int, val quantize: Boolean) {
+    /** The grid recording snaps to: the interval, or OFF for free time. */
+    val record: Timing get() = if (quantize) interval else Timing.OFF
+
+    fun withInterval(t: Timing): TimingSettings = of(t, swing, quantize)
+
+    /** Another swing, held to 50..75. */
+    fun withSwing(s: Int): TimingSettings = of(interval, s, quantize)
+
+    fun withQuantize(q: Boolean): TimingSettings = of(interval, swing, q)
+
+    companion object {
+        /** Swing, as a percent: 50 is straight, 75 puts the off-beats halfway to the next step. */
+        const val SWING_MIN = 50
+        const val SWING_MAX = 75
+
+        val DEFAULT = of()
+
+        /** Settings with OFF read as 1/16 and the swing held to 50..75 (`TimingSettings(...)` is this). */
+        fun of(interval: Timing = Timing.DEFAULT, swing: Int = SWING_MIN, quantize: Boolean = true): TimingSettings =
+            TimingSettings(if (interval == Timing.OFF) Timing.SIXTEENTH else interval, clampSwing(swing), quantize)
+
+        operator fun invoke(interval: Timing = Timing.DEFAULT, swing: Int = SWING_MIN, quantize: Boolean = true): TimingSettings =
+            of(interval, swing, quantize)
+
+        fun clampSwing(s: Int): Int = s.coerceIn(SWING_MIN, SWING_MAX)
     }
 }

@@ -1,6 +1,10 @@
 package dev.arc.ep133.data
 
 import android.content.SharedPreferences
+import dev.arc.ep133.features.ArpOrder
+import dev.arc.ep133.features.ArpSettings
+import dev.arc.ep133.features.Timing
+import dev.arc.ep133.features.TimingSettings
 import dev.arc.ep133.text.LiveEngine
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -74,6 +78,45 @@ class SettingsStoreTest {
         store.update { it.copy(sampleThreshold = null, sampleBars = null) }
         assertEquals(null, SettingsStore(prefs).settings.value.sampleThreshold)
         assertEquals(null, SettingsStore(prefs).settings.value.sampleBars)
+    }
+
+    @Test
+    fun `an earlier version's TIMING is read as the interval and quantize, and kept with them once changed`() {
+        val prefs = MemoryPrefs()
+        prefs.edit().putString("patternTiming", "1/8").apply()
+        val store = SettingsStore(prefs)
+        assertEquals(TimingSettings(Timing.EIGHTH, 50, true), store.settings.value.timing)
+        // Free time: the interval goes in beside "off", so it isn't lost.
+        store.update { it.withTiming(it.timing.withQuantize(false)) }
+        assertEquals("off", prefs.getString("patternTiming", null))
+        assertEquals("1/8", prefs.getString("timingInterval", null))
+        assertEquals(TimingSettings(Timing.EIGHTH, 50, false), SettingsStore(prefs).settings.value.timing)
+        // OFF from an earlier version: free time on 1/16.
+        val old = MemoryPrefs()
+        old.edit().putString("patternTiming", "off").apply()
+        assertEquals(TimingSettings(Timing.SIXTEENTH, 50, false), SettingsStore(old).settings.value.timing)
+        // Nothing kept: 1/16, quantized, and nothing written.
+        val fresh = MemoryPrefs()
+        assertEquals(TimingSettings.DEFAULT, SettingsStore(fresh).settings.value.timing)
+        assertTrue(SettingsStore(fresh).toIndex().isEmpty())
+    }
+
+    @Test
+    fun `the arp's settings are kept as chosen and read back in range`() {
+        val prefs = MemoryPrefs()
+        val store = SettingsStore(prefs)
+        store.update { it.copy(arpOn = true, timingSwing = 66).withArp(ArpSettings(ArpOrder.RANDOM, 2, 30, true)) }
+        assertEquals("random", prefs.getString("arpOrder", null))
+        assertEquals(2, prefs.getInt("arpOctaves", 0))
+        assertEquals(30, prefs.getInt("arpGate", 0))
+        assertEquals(66, prefs.getInt("timingSwing", 0))
+        val back = SettingsStore(prefs).settings.value
+        assertTrue(back.arpOn)
+        assertEquals(ArpSettings(ArpOrder.RANDOM, 2, 30, true), back.arp)
+        assertEquals(66, back.timingSwing)
+        prefs.edit().putInt("arpGate", 500).putInt("timingSwing", 20).apply()
+        assertEquals(50, SettingsStore(prefs).settings.value.arpGate)
+        assertEquals(50, SettingsStore(prefs).settings.value.timingSwing)
     }
 
     /** SharedPreferences in a map: enough for [SettingsStore]. */

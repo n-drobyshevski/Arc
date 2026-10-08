@@ -591,9 +591,18 @@ internal val ModeStripWidth = 16.dp
  * The whole strip ([modifier]: the margin, the pads' height) is one switch: a
  * tap shows the other mode ([onMode]), with a tick under the finger when
  * [haptics] is on. [size]: the words' print, as the plate's own words go.
+ * With [arp] the words keep to the strip's upper half, and its lower half
+ * holds ARP (RPT in PADS) and LATCH ([ArpStripSwitches]).
  */
 @Composable
-internal fun ModeStrip(keysOn: Boolean, onMode: (Boolean) -> Unit, haptics: Boolean, size: Dp, modifier: Modifier) {
+internal fun ModeStrip(keysOn: Boolean, onMode: (Boolean) -> Unit, haptics: Boolean, size: Dp, modifier: Modifier, arp: LiveArp? = null) {
+    if (arp != null) {
+        Column(modifier) {
+            ModeStrip(keysOn, onMode, haptics, size, Modifier.fillMaxWidth().weight(1f))
+            ArpStripSwitches(arp, repeat = !keysOn, haptics = haptics, size = size, modifier = Modifier.fillMaxWidth().weight(1f))
+        }
+        return
+    }
     val c = LocalArcColors.current
     val ko = LocalHwColors.current.ko
     val source = remember { MutableInteractionSource() }

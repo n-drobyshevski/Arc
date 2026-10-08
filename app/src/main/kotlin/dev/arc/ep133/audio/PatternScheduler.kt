@@ -1,5 +1,8 @@
 package dev.arc.ep133.audio
 
+import dev.arc.ep133.features.Arp
+import dev.arc.ep133.features.ArpNote
+import dev.arc.ep133.features.ArpSettings
 import dev.arc.ep133.features.BeatGrid
 import dev.arc.ep133.features.FrameClock
 import dev.arc.ep133.features.Keys
@@ -8,6 +11,8 @@ import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.ProjectPatterns
 import dev.arc.ep133.features.SeqNote
 import dev.arc.ep133.features.Tempo
+import dev.arc.ep133.features.Timing
+import dev.arc.ep133.features.TimingSettings
 import dev.arc.ep133.features.TransportClock
 import dev.arc.ep133.features.barFrames
 import dev.arc.ep133.formats.VoiceMixer
@@ -18,6 +23,7 @@ import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 import kotlin.math.ceil
+import kotlin.math.floor
 
 /**
  * A pad's sound as the pattern plays it (an addition): [pcm] at [channels]
@@ -38,6 +44,29 @@ class SeqPlan(val patterns: ProjectPatterns, val voices: Map<PhysicalPad, PadVoi
         val EMPTY = SeqPlan(ProjectPatterns(), emptyMap(), emptyMap(), Tempo.DEFAULT.toDouble())
     }
 }
+
+/**
+ * What the arp or note repeat plays (an addition): the [notes] held, in the
+ * order pressed (latched ones too), the sounds on their pads ([voices]),
+ * whether it is KEYS's arp ([keys]) or PADS's note repeat, TIMING and the
+ * arp's settings, the tempo ([bpm]), the RANDOM order's [seed] and the press
+ * that started the run ([pressNanos], System.nanoTime): another one starts
+ * the run again, its first step on that press. Made anew for each change,
+ * never changed in place.
+ */
+class ArpPlan(
+    val notes: List<ArpNote>,
+    val voices: Map<PhysicalPad, PadVoice>,
+    val keys: Boolean,
+    val timing: TimingSettings,
+    val settings: ArpSettings,
+    val bpm: Double,
+    val seed: Int,
+    val pressNanos: Long,
+)
+
+/** A note the arp played at [globalTick] of the pattern's clock, [gateTicks] long: for RECORD. */
+class ArpStep(val note: ArpNote, val globalTick: Long, val gateTicks: Int)
 
 /**
  * Where the transport is in heard time (an addition): its [clock] (ticks to
@@ -74,7 +103,7 @@ interface MixScheduler {
     /** The mix's frames were let go of or count anew (the stream reopened or rerouted, another engine): it re-anchors. */
     fun lost()
 
-    /** Whether it plays (or counts in): the output's stamp is wanted, and focus kept. */
+    /** Whether it plays (or counts in, or the arp plays): the output's stamp is wanted, and focus kept. */
     val running: Boolean
 
     /** Whether RECORD is armed, so a pad may start it: the output's stamp is wanted, not focus. */
@@ -103,6 +132,10 @@ interface MixScheduler {
  * Each gets a tag of its own below 0, so its release lets go of that voice
  * only (a press of the same pad plays on) and it never counts as a press's
  * latency.
+ *
+ * The arp and note repeat ([arp], [ArpRunner]) play from here too, Live's
+ * output having room for one scheduler: on the pattern's grid while the
+ * transport runs, else on a clock of their own from the press.
  *
  * [stop] drops what is still waiting ([ScheduleSink.flushTimed]) and lets go
  * of every note still sounding. [lost] does the same, then waits for the
@@ -141,6 +174,20 @@ class PatternScheduler(
      */
     var onMissing: (PhysicalPad) -> Unit = {}
 
+    /** What the arp or note repeat plays: published by the main thread; null (or no notes) stops it. */
+    @Volatile var arp: ArpPlan? = null
+
+    /**
+     * A step the arp played while the pattern's clock runs, on the output's
+     * thread once it is mixed (one STOP or PLAY dropped before never is):
+     * hand it on (RECORD takes it), don't record it there.
+     */
+    var onArpStep: ((ArpStep) -> Unit)?
+        get() = arpRunner.onStep
+        set(value) {
+            arpRunner.onStep = value
+        }
+
     private val _timeline = MutableStateFlow<Timeline?>(null)
 
     /**
@@ -160,7 +207,11 @@ class PatternScheduler(
     private val lostAsked = AtomicBoolean(false)
     @Volatile private var on = false
 
-    override val running: Boolean get() = on
+    /** The transport plays (or counts in), or the arp does: the output's stamp is wanted, and focus kept. */
+    override val running: Boolean get() = on || arp?.notes?.isNotEmpty() == true
+
+    /** The transport plays (or counts in); the arp alone doesn't count. */
+    val playing: Boolean get() = on
 
     /** RECORD is armed (set by the main thread): the output's stamps keep coming while stopped, for [play] at a press. */
     @Volatile override var armed = false
@@ -186,6 +237,7 @@ class PatternScheduler(
 
     private var nextTag = -1L
     private val notes = ArrayList<SeqNote>()
+    private val arpRunner = ArpRunner { nextTag-- }
 
     // The notes sent and not over: key, tag, end tick, and the frame their release was sent for (UNSENT).
     private var held = 0
@@ -233,10 +285,22 @@ class PatternScheduler(
 
     override fun fill(sink: ScheduleSink, rendered: Long, rate: Int) {
         // Taken first: a loss told before a start or a stop here is the old run's, not the new anchor's.
-        var lostNow = lostAsked.getAndSet(false)
+        val lost = lostAsked.getAndSet(false)
+        // The arp's frames are gone too, whatever the transport does: a loss, or frames counted anew.
+        val arpLost = lost || rendered < lastRendered
+        // The arp's steps mixed by now go to RECORD, before a flush below drops those not yet.
+        arpRunner.mixed(rendered, arpLost)
+        fillPattern(sink, rendered, rate, lost)
+        val c = clock
+        arpRunner.fill(sink, rendered, rate, lookaheadNs * rate / 1_000_000_000L, arp, c?.takeIf { !waiting }, c != null && waiting, latest, arpLost)
+    }
+
+    // The pattern's part of [fill]: the transport's asks, its anchor and the notes and gates of this window.
+    private fun fillPattern(sink: ScheduleSink, rendered: Long, rate: Int, lost: Boolean) {
+        var lostNow = lost
         // A stamp of frames counted before (a loss, another rate, from 0 again) doesn't find a press,
-        // nor one from before the clock was last wanted (disarmed and stopped: none came since).
-        if (lostNow || rendered < lastRendered || latest?.rate != rate || !armed && !on) latest = null
+        // nor one from before the clock was last wanted (disarmed and stopped, the arp off: none came since).
+        if (lostNow || rendered < lastRendered || latest?.rate != rate || !armed && !running) latest = null
         while (true) {
             when (val a = asks.poll() ?: break) {
                 is Ask.Play -> {
@@ -378,11 +442,8 @@ class PatternScheduler(
         val semis = n.note.semitones
         val key = if (semis == null) padKeys[n.group][o] else noteKey(n.group, o, Keys.ROOT_NOTE + semis)
         val tag = nextTag--
-        val ok = if (semis == null) {
-            sink.startAt(key, v.pcm, v.channels, v.rate, 0, tag, v.shape, n.startFrame)
-        } else {
-            sink.startAt(key, v.pcm, v.channels, v.rate, semis, tag, v.keysShape, n.startFrame)
-        }
+        val shape = velocityShape(if (semis == null) v.shape else v.keysShape, n.note.velocity)
+        val ok = sink.startAt(key, v.pcm, v.channels, v.rate, semis ?: 0, tag, shape, n.startFrame)
         if (ok) hold(key, tag, n.startTick + n.note.gate)
     }
 
@@ -410,7 +471,7 @@ class PatternScheduler(
         held = k
     }
 
-    // What waits is dropped first, then every note sent and not over is let go of now.
+    // What waits is dropped first, then every note sent and not over is let go of now (the arp's too).
     private fun flush(sink: ScheduleSink) {
         sink.flushTimed()
         for (i in 0 until held) {
@@ -418,6 +479,7 @@ class PatternScheduler(
             heldKeys[i] = null
         }
         held = 0
+        arpRunner.flushed(sink)
     }
 
     private fun hold(key: String, tag: Long, endTick: Long) {
@@ -446,5 +508,303 @@ class PatternScheduler(
         var t = ceil(c.tickAt(frame)).toLong() - 1
         while (c.frameOf(t) < frame) t++
         return t
+    }
+}
+
+/** [shape] for a note at [velocity] (1..127): its gain times [Arp.velocityGain]; itself at 127. */
+internal fun velocityShape(shape: VoiceShape, velocity: Int): VoiceShape {
+    val g = Arp.velocityGain(velocity)
+    return if (g == 1f) shape else shape.copy(gain = shape.gain * g)
+}
+
+/**
+ * The arp and note repeat as [PatternScheduler] plays them (an addition),
+ * on the output's thread, after the pattern's notes in each [fill]. A step
+ * is TIMING's interval, swung on its odd steps: while the transport runs,
+ * on the pattern's own grid (step k at k × interval + swing, from tick 0),
+ * else on a clock of its own whose step 0 is the frame the run's press was
+ * heard at (by the output's latest stamp; with none, the frames rendered).
+ * A run that starts while the transport runs plays its first step at the
+ * press all the same, and the grid's after it, leaving out one less than
+ * half a step on.
+ *
+ * KEYS (the arp) plays one note of [Arp.cycle] a step, PADS (note repeat)
+ * every pad held. Each step's notes play as "arp:<group>:<offset>:<semitones>"
+ * ("n" for a pad hit), with a tag of their own below 0 ([tag]), and let go
+ * of [Arp.gateTicks] later. Steps are counted across windows, so a tempo or
+ * plan change neither repeats a step nor skips one; a new plan's notes play
+ * from the next step on (what was sent, at most a lookahead, plays out).
+ * With no plan, every arp voice sounding is let go of where the mix is.
+ *
+ * Its gates are kept in frames, not ticks: a run may go from its own clock
+ * to the pattern's (PLAY) and back (STOP) while a note sounds.
+ */
+internal class ArpRunner(private val tag: () -> Long) {
+    /** A step played on the pattern's clock (not on the arp's own), told once mixed ([mixed]): for RECORD. */
+    var onStep: ((ArpStep) -> Unit)? = null
+
+    // The plan the cycle is of, and the run's press (a new one starts the run again); active while it plays.
+    private var shown: ArpPlan? = null
+    private var cycle: List<ArpNote> = emptyList()
+    private var runPress = 0L
+    private var active = false
+    // The steps played this run: the cycle's index.
+    private var count = 0L
+    // The arp's own clock while the transport is stopped; whether it steps on the pattern's grid instead.
+    private var free: TransportClock? = null
+    private var onGrid = false
+    // The next step of the grid in use, its interval and swing, and the frame scheduling has got to.
+    private var nextStep = 0L
+    private var stepInterval: Timing? = null
+    private var stepSwing = TimingSettings.SWING_MIN
+    private var scheduledTo = 0L
+    // What was sent may be gone (flushed, or the frames count anew): steps go from the frames rendered again.
+    private var resync = false
+
+    // The notes sent and not over: key, tag, start and end frame, and whether the release is sent.
+    private var held = 0
+    private var heldKeys = arrayOfNulls<String>(32)
+    private var heldTags = LongArray(32)
+    private var heldStarts = LongArray(32)
+    private var heldEnds = LongArray(32)
+    private var heldSent = BooleanArray(32)
+
+    // The steps for [onStep] not mixed yet, and their frames: a flush drops them, unheard, unrecorded.
+    private var told = 0
+    private var toldSteps = arrayOfNulls<ArpStep>(16)
+    private var toldFrames = LongArray(16)
+
+    // Keys made once: semitones -64..127 for each pad, and a pad hit's ("n").
+    private val keys = arrayOfNulls<String>(4 * 12 * KEY_SEMIS)
+    private val hitKeys = Array(4) { g -> Array(12) { o -> "arp:$g:$o:n" } }
+
+    /**
+     * Before a block: [rendered] frames done at [rate], [ahead] frames of
+     * lookahead. [grid] is the pattern's clock while it runs and is anchored;
+     * [paused] while it waits for a stamp to anchor (nothing new goes then).
+     * [latest] is the output's latest stamp; [lost]: the frames count anew.
+     */
+    fun fill(sink: ScheduleSink, rendered: Long, rate: Int, ahead: Long, plan: ArpPlan?, grid: TransportClock?, paused: Boolean, latest: FrameClock?, lost: Boolean) {
+        val to = rendered + ahead
+        if (lost) flushed(sink)
+        val p = plan?.takeIf { it.notes.isNotEmpty() }
+        if (p == null) {
+            if (active) stop(sink, rendered)
+            releases(sink, to, rendered)
+            return
+        }
+        if (paused) {
+            releases(sink, to, rendered)
+            return
+        }
+        val restart = !active || p.pressNanos != runPress
+        if (p !== shown) {
+            shown = p
+            cycle = if (p.keys) Arp.cycle(p.notes, p.settings.order, p.settings.octaves) else Arp.repeatNotes(p.notes)
+        }
+        if (restart) {
+            active = true
+            runPress = p.pressNanos
+            count = 0
+        }
+        val interval = p.timing.interval
+        val ticks = interval.ticks
+        val swing = p.timing.swing
+        val gate = Arp.gateTicks(interval, p.settings.gate)
+        // Where the press was heard; up to a lookahead behind the mix, as a press's pattern notes go.
+        val press = if (restart) maxOf(latest?.takeIf { it.rate == rate }?.frameAt(p.pressNanos) ?: rendered, rendered - ahead) else 0L
+        val c: TransportClock
+        if (grid != null) {
+            c = grid
+            if (restart) {
+                // The press plays at once; the grid's steps go on from half a step after it.
+                val t = c.tickAt(press)
+                step(sink, p, c, floor(t + 0.5).toLong(), press, gate, true)
+                val after = t + ticks / 2.0
+                nextStep = firstStep(after, ticks) { k -> k * ticks + interval.swingOffset(k, swing) >= after }
+            } else if (!onGrid || resync || interval != stepInterval) {
+                // From the pattern's next step on: the transport started, steps were dropped, or another interval.
+                val from = if (onGrid && !resync) scheduledTo else rendered
+                nextStep = firstStep(c.tickAt(from), ticks) { k -> c.frameOf(k * ticks + interval.swingOffset(k, swing)) >= from }
+            }
+            onGrid = true
+            free = null
+        } else {
+            val bpm = p.bpm.takeIf { it > 0 } ?: Tempo.DEFAULT.toDouble()
+            var f = free
+            if (restart || f == null || onGrid || resync || f.rate != rate) {
+                // Step 0 on the press, or (the transport stopped, frames lost) where the mix is.
+                f = TransportClock(if (restart) press else rendered, rate, bpm)
+                nextStep = 0
+            } else if (interval != stepInterval) {
+                // Another interval: its step 0 where the old one's next step was.
+                val old = stepInterval ?: interval
+                f = TransportClock(f.frameOf(nextStep * old.ticks + old.swingOffset(nextStep, stepSwing)), rate, f.bpm)
+                nextStep = 0
+            } else if (bpm != f.bpm) {
+                f = f.retempo(maxOf(scheduledTo, rendered), bpm)
+            }
+            onGrid = false
+            free = f
+            c = f
+        }
+        stepInterval = interval
+        stepSwing = swing
+        resync = false
+        var k = nextStep
+        while (true) {
+            val t = k * ticks + interval.swingOffset(k, swing)
+            val f = c.frameOf(t)
+            if (f >= to) break
+            // One fallen further behind than the lookahead is let go.
+            if (f >= rendered - ahead) step(sink, p, c, t, f, gate, grid != null)
+            k++
+        }
+        nextStep = k
+        scheduledTo = to
+        releases(sink, to, rendered)
+    }
+
+    /** What was sent and waits is gone ([ScheduleSink.flushTimed]): every arp voice is let go of now, and steps go on from the mix. */
+    fun flushed(sink: ScheduleSink) {
+        for (i in 0 until held) {
+            sink.releaseAt(heldKeys[i]!!, VoiceMixer.NOW, heldTags[i])
+            heldKeys[i] = null
+        }
+        held = 0
+        resync = true
+        // Never heard, so not for RECORD either.
+        mixed(Long.MIN_VALUE, lost = true)
+    }
+
+    /**
+     * Before a block, [rendered] frames done: the steps on the pattern's
+     * clock mixed by now are told ([onStep]); [lost] (the frames gone), none
+     * still waiting ever is.
+     */
+    fun mixed(rendered: Long, lost: Boolean) {
+        var k = 0
+        for (i in 0 until told) {
+            val s = toldSteps[i]!!
+            toldSteps[i] = null
+            if (lost) continue
+            if (toldFrames[i] < rendered) {
+                onStep?.invoke(s)
+            } else {
+                toldSteps[k] = s
+                toldFrames[k] = toldFrames[i]
+                k++
+            }
+        }
+        told = k
+    }
+
+    // The run ends: the voices sounding are let go of at [rendered]; those sent to start later play out their gate.
+    private fun stop(sink: ScheduleSink, rendered: Long) {
+        for (i in 0 until held) {
+            if (heldStarts[i] >= rendered || heldSent[i] && heldEnds[i] <= rendered) continue
+            sink.releaseAt(heldKeys[i]!!, rendered, heldTags[i])
+            heldEnds[i] = rendered
+            heldSent[i] = true
+        }
+        active = false
+        shown = null
+        cycle = emptyList()
+        free = null
+        onGrid = false
+    }
+
+    // Step [tick] at [frame]: the arp's note, or every pad held; [recorded] on the pattern's clock.
+    private fun step(sink: ScheduleSink, p: ArpPlan, c: TransportClock, tick: Long, frame: Long, gate: Int, recorded: Boolean) {
+        val end = frame + floor(gate * c.framesPerTick + 0.5).toLong()
+        if (p.keys) {
+            Arp.noteAt(count, cycle, p.settings.order, p.seed)?.let { play(sink, p, it, tick, frame, end, gate, recorded) }
+        } else {
+            for (i in cycle.indices) play(sink, p, cycle[i], tick, frame, end, gate, recorded)
+        }
+        count++
+    }
+
+    private fun play(sink: ScheduleSink, p: ArpPlan, n: ArpNote, tick: Long, frame: Long, end: Long, gate: Int, recorded: Boolean) {
+        val pad = n.pad
+        val v = p.voices[pad] ?: return
+        if (pad.group !in 0..3 || pad.offset !in 0..11) return
+        val semis = n.semitones
+        val key = key(pad.group, pad.offset, semis)
+        val t = tag()
+        val shape = velocityShape(if (semis == null) v.shape else v.keysShape, n.velocity)
+        if (!sink.startAt(key, v.pcm, v.channels, v.rate, semis ?: 0, t, shape, frame)) return
+        hold(key, t, frame, end)
+        if (recorded && onStep != null) tell(ArpStep(n, tick, gate), frame)
+    }
+
+    // [s], played at [frame], for [onStep] once mixed.
+    private fun tell(s: ArpStep, frame: Long) {
+        if (told == toldSteps.size) {
+            toldSteps = toldSteps.copyOf(told * 2)
+            toldFrames = toldFrames.copyOf(told * 2)
+        }
+        toldSteps[told] = s
+        toldFrames[told] = frame
+        told++
+    }
+
+    // The releases that fall before [to] are sent; a note is forgotten once its release is rendered.
+    private fun releases(sink: ScheduleSink, to: Long, rendered: Long) {
+        var k = 0
+        for (i in 0 until held) {
+            if (!heldSent[i] && heldEnds[i] < to) {
+                sink.releaseAt(heldKeys[i]!!, heldEnds[i], heldTags[i])
+                heldSent[i] = true
+            }
+            if (heldSent[i] && heldEnds[i] < rendered) continue
+            if (k != i) {
+                heldKeys[k] = heldKeys[i]
+                heldTags[k] = heldTags[i]
+                heldStarts[k] = heldStarts[i]
+                heldEnds[k] = heldEnds[i]
+                heldSent[k] = heldSent[i]
+            }
+            k++
+        }
+        for (i in k until held) heldKeys[i] = null
+        held = k
+    }
+
+    private fun hold(key: String, tag: Long, start: Long, end: Long) {
+        if (held == heldKeys.size) {
+            val n = held * 2
+            heldKeys = heldKeys.copyOf(n)
+            heldTags = heldTags.copyOf(n)
+            heldStarts = heldStarts.copyOf(n)
+            heldEnds = heldEnds.copyOf(n)
+            heldSent = heldSent.copyOf(n)
+        }
+        heldKeys[held] = key
+        heldTags[held] = tag
+        heldStarts[held] = start
+        heldEnds[held] = end
+        heldSent[held] = false
+        held++
+    }
+
+    private fun key(g: Int, o: Int, semis: Int?): String {
+        if (semis == null) return hitKeys[g][o]
+        if (semis !in KEY_LOW until KEY_LOW + KEY_SEMIS) return "arp:$g:$o:$semis"
+        val i = (g * 12 + o) * KEY_SEMIS + semis - KEY_LOW
+        return keys[i] ?: "arp:$g:$o:$semis".also { keys[i] = it }
+    }
+
+    // The first step [at] holds for, the steps rising: from two below the one at [tick] (a swing is under a step).
+    private inline fun firstStep(tick: Double, ticks: Int, at: (Long) -> Boolean): Long {
+        var k = floor(tick / ticks).toLong() - 2
+        while (!at(k)) k++
+        return k
+    }
+
+    private companion object {
+        // The semitones a KEYS note's key is kept for: the keys' reach and three octaves up.
+        const val KEY_LOW = -64
+        const val KEY_SEMIS = 192
     }
 }

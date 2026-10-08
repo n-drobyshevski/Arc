@@ -9,11 +9,15 @@ import {
   ProjectPatterns,
   Seq,
   TIMINGS,
+  TIMING_INTERVALS,
   Timing,
+  TimingSettings,
   pattern,
   patternNote,
   projectPatterns,
   quantize,
+  swingOffset,
+  timingSwings,
   timingTicks,
 } from '../../../src/core/features/pattern'
 
@@ -125,8 +129,12 @@ describe('PatternTest', () => {
 
   it('timing snaps to the nearest grid tick, ties up', () => {
     expect(Timing.DEFAULT).toBe(Timing.SIXTEENTH)
-    expect(TIMINGS.map(timingTicks)).toEqual([0, 48, 24, 12])
+    expect(TIMINGS.map(timingTicks)).toEqual([0, 384, 192, 96, 48, 32, 24, 16, 12])
+    expect(TIMINGS).toEqual(['off', '1/1', '1/2', '1/4', '1/8', '1/8T', '1/16', '1/16T', '1/32'])
+    expect(TIMING_INTERVALS).toEqual(TIMINGS.slice(1))
+    expect(TIMINGS.filter(timingSwings)).toEqual([Timing.EIGHTH, Timing.SIXTEENTH])
     expect(Timing.of('1/8')).toBe(Timing.EIGHTH)
+    expect(Timing.of('1/16T')).toBe(Timing.SIXTEENTH_T)
     expect(Timing.of('off')).toBe(Timing.OFF)
     expect(Timing.of('1/64')).toBeNull()
     expect(quantize(Timing.SIXTEENTH, 11.9)).toBe(0)
@@ -143,5 +151,73 @@ describe('PatternTest', () => {
     expect(quantize(Timing.OFF, 10.49)).toBe(10)
     expect(quantize(Timing.OFF, 10.5)).toBe(11)
     expect(quantize(Timing.OFF, -0.5)).toBe(0)
+  })
+  it('swing puts the odd steps of 1/8 and 1/16 late', () => {
+    expect(swingOffset(Timing.SIXTEENTH, 0, 75)).toBe(0)
+    expect(swingOffset(Timing.SIXTEENTH, 1, 75)).toBe(12)
+    expect(swingOffset(Timing.SIXTEENTH, 2, 75)).toBe(0)
+    expect(swingOffset(Timing.SIXTEENTH, 3, 60)).toBe(5)
+    expect(swingOffset(Timing.SIXTEENTH, 5, 66)).toBe(8)
+    expect(swingOffset(Timing.SIXTEENTH, -1, 75)).toBe(12)
+    expect(swingOffset(Timing.EIGHTH, 1, 75)).toBe(24)
+    expect(swingOffset(Timing.EIGHTH, 1, 60)).toBe(10)
+    // Straight at 50, and held to 50..75.
+    expect(swingOffset(Timing.SIXTEENTH, 1, 50)).toBe(0)
+    expect(swingOffset(Timing.SIXTEENTH, 1, 40)).toBe(0)
+    expect(swingOffset(Timing.SIXTEENTH, 1, 90)).toBe(12)
+    // The other intervals don't swing.
+    for (const t of [Timing.OFF, Timing.WHOLE, Timing.HALF, Timing.QUARTER, Timing.EIGHTH_T, Timing.SIXTEENTH_T, Timing.THIRTY_SECOND]) {
+      expect(swingOffset(t, 1, 75)).toBe(0)
+    }
+  })
+
+  it('swung timing snaps to the nearest swung grid point', () => {
+    // 1/16 at 75%: 0, 36, 48, 84, 96 ...
+    expect(quantize(Timing.SIXTEENTH, 17.9, 75)).toBe(0)
+    expect(quantize(Timing.SIXTEENTH, 18.1, 75)).toBe(36)
+    expect(quantize(Timing.SIXTEENTH, 40.0, 75)).toBe(36)
+    expect(quantize(Timing.SIXTEENTH, 43.0, 75)).toBe(48)
+    expect(quantize(Timing.SIXTEENTH, 60.0, 75)).toBe(48)
+    expect(quantize(Timing.SIXTEENTH, 66.5, 75)).toBe(84)
+    // Before tick 0 the step before is an off-beat too: -12.
+    expect(quantize(Timing.SIXTEENTH, -10.0, 75)).toBe(-12)
+    expect(quantize(Timing.SIXTEENTH, -5.0, 75)).toBe(0)
+    // 1/8 at 66%: 0, 63, 96 ...
+    expect(quantize(Timing.EIGHTH, 30.0, 66)).toBe(0)
+    expect(quantize(Timing.EIGHTH, 32.0, 66)).toBe(63)
+    expect(quantize(Timing.EIGHTH, 79.0, 66)).toBe(63)
+    expect(quantize(Timing.EIGHTH, 80.0, 66)).toBe(96)
+    // Swing doesn't move the intervals that don't swing, or OFF.
+    expect(quantize(Timing.SIXTEENTH_T, 7.9, 75)).toBe(0)
+    expect(quantize(Timing.SIXTEENTH_T, 8.0, 75)).toBe(16)
+    expect(quantize(Timing.OFF, 10.5, 75)).toBe(11)
+  })
+
+  it('timing at 50% swing is the straight grid', () => {
+    for (const t of TIMINGS) {
+      for (let i = -200; i <= 1600; i++) {
+        const tick = i * 0.25 + 0.1 * (i % 3)
+        expect(quantize(t, tick, 50)).toBe(quantize(t, tick))
+      }
+    }
+  })
+
+  it('the TIMING settings: an interval, never OFF, swing held to 50..75', () => {
+    expect(TimingSettings.DEFAULT).toEqual({ interval: Timing.SIXTEENTH, swing: 50, quantize: true })
+    expect(TimingSettings.record(TimingSettings.DEFAULT)).toBe(Timing.SIXTEENTH)
+    expect(TimingSettings.of({ interval: Timing.OFF }).interval).toBe(Timing.SIXTEENTH)
+    expect(TimingSettings.of({ swing: 90 }).swing).toBe(75)
+    expect(TimingSettings.of({ swing: 10 }).swing).toBe(50)
+    const s = TimingSettings.withInterval(TimingSettings.DEFAULT, Timing.EIGHTH_T)
+    expect(s.interval).toBe(Timing.EIGHTH_T)
+    expect(TimingSettings.withInterval(s, Timing.OFF).interval).toBe(Timing.SIXTEENTH)
+    expect(TimingSettings.withSwing(s, 66).swing).toBe(66)
+    expect(TimingSettings.withSwing(s, 80).swing).toBe(75)
+    expect(TimingSettings.withSwing(s, 49).swing).toBe(50)
+    // Free time records with OFF; the interval stays for the arp.
+    const free = TimingSettings.withQuantize(s, false)
+    expect(TimingSettings.record(free)).toBe(Timing.OFF)
+    expect(free.interval).toBe(Timing.EIGHTH_T)
+    expect(TimingSettings.record(TimingSettings.withQuantize(free, true))).toBe(Timing.EIGHTH_T)
   })
 })

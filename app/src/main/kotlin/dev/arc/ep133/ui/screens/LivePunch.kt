@@ -106,10 +106,15 @@ internal class PressureSense {
 
     /** A touch's depth: its [pressure] (seen first) while pressures vary, else where it is, [y] down a pad [height] tall. */
     fun depth(pressure: Float, y: Float, height: Float): Float {
-        see(pressure)
-        if (!varies || !pressure.isFinite()) return yDepth(y, height)
-        val at = ((pressure - low) / (high - low)).coerceIn(0f, 1f)
+        val at = level(pressure) ?: return yDepth(y, height)
         return PUNCH_FLOOR + at * (1f - PUNCH_FLOOR)
+    }
+
+    /** Where [pressure] (seen first) is in the range seen, 0..1, while pressures vary; null while they don't (no pressure to play with). */
+    fun level(pressure: Float): Float? {
+        see(pressure)
+        if (!varies || !pressure.isFinite()) return null
+        return ((pressure - low) / (high - low)).coerceIn(0f, 1f)
     }
 }
 

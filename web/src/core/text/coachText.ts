@@ -34,6 +34,8 @@ export const CoachText = {
   KEYS_VIEW: 'Pads or piano',
   /** The EDIT edge tab's side tag. */
   EDIT: "Change a pad's sound",
+  /** The ARP / RPT switch on the pads' plate, and LATCH under it. */
+  ARP: 'Arp or repeat: hold pads',
 
   SEARCH: 'Search sounds',
   IMPORT: 'Import a .pak',

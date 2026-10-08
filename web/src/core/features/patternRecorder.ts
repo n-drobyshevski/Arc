@@ -107,15 +107,25 @@ export class PatternRecorder {
 
   /**
    * A pad (or a KEYS note on it, [semitones]) pressed at global [tick]; the
-   * phone played it at [heardTick]. On [timing]'s grid, a press up to half a
-   * step before tick 0 records at 0 and earlier ones nothing. A note on the
+   * phone played it at [heardTick], at [velocity] (1..127). On [timing]'s
+   * grid, swung by [swing], a press up to half a step before tick 0 records
+   * at 0 and earlier ones nothing. A note on the
    * same pad and pitch at that tick (with OFF, within 6 ticks) is replaced.
    * When the grid put the note after [heardTick], the pass it lands in is to
    * be skipped (skipPass): it was heard.
    */
-  noteOn(p: ProjectPatterns, pad: PhysicalPad, semitones: number | null, tick: number, heardTick: number, timing: Timing): Recorded {
+  noteOn(
+    p: ProjectPatterns,
+    pad: PhysicalPad,
+    semitones: number | null,
+    tick: number,
+    heardTick: number,
+    timing: Timing,
+    swing = 50,
+    velocity = 127,
+  ): Recorded {
     this.lastErase = null
-    const q = quantize(timing, tick)
+    const q = quantize(timing, tick, swing)
     if (q < 0) return { patterns: p, id: 0, skipPass: null }
     const grown = this.grow(p, q)
     const pat = ProjectPatterns.group(grown, pad.group)
@@ -130,7 +140,7 @@ export class PatternRecorder {
     if (kept.length >= Seq.MAX_NOTES) return { patterns: p, id: 0, skipPass: null }
     const id = ++this.nextId
     const gate = timing === Timing.OFF ? timingTicks(Timing.SIXTEENTH) : timingTicks(timing)
-    const out = ProjectPatterns.with(grown, pad.group, { ...pat, notes: [...kept, patternNote(local, pad.offset, gate, semitones, 127, id)] })
+    const out = ProjectPatterns.with(grown, pad.group, { ...pat, notes: [...kept, patternNote(local, pad.offset, gate, semitones, velocity, id)] })
     this.checkpoint(p)
     this.held.set(id, q)
     return { patterns: out, id, skipPass: q > heardTick ? passOf(q, len) : null }

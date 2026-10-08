@@ -7,6 +7,7 @@
 // - The web has no REC (TAKE), so only its takeLength is here, for SAMPLE's
 //   times; TAKE's words are Android's only.
 
+import type { ArpNote, ArpOrder } from '../features/arp'
 import { FactorySounds } from '../features/factorySounds'
 import { FxSettings, FxType } from '../features/fxSettings'
 import { Keys, NoteNames, Scale } from '../features/keys'
@@ -785,14 +786,74 @@ export const MirrorText = {
     return `Play a pad or PLAY \u00B7 ${MirrorText.timingLabel(timing)}`
   },
 
-  /** TIMING's choices: Off, 1/8, 1/16, 1/32. */
+  /** TIMING's choices: Off, 1/1, 1/2, 1/4, 1/8, 1/8T, 1/16, 1/16T, 1/32. */
   timingLabel(t: Timing): string {
     return t === Timing.OFF ? MirrorText.onOff(false) : t
   },
 
-  /** A TIMING choice for screen readers. */
+  /**
+   * The display line while the arp plays: "ARP \u00B7 1/16 \u00B7 DO FA LA" (KEYS,
+   * the notes held by [names]), "REPEAT \u00B7 1/16 \u00B7 A 7, B 1" for note repeat
+   * (PADS: [repeat]), the pads held; "ARP \u221E \u00B7 \u2026" latched.
+   */
+  arpLine(repeat: boolean, latch: boolean, interval: Timing, notes: readonly ArpNote[], names: NoteNames): string {
+    const words = notes.map((n) => (n.semitones !== null ? Keys.name(Keys.ROOT_NOTE + n.semitones, names) : `${n.pad.groupLetter} ${n.pad.label}`))
+    const head = (repeat ? 'REPEAT' : 'ARP') + (latch ? ' \u221E' : '')
+    return `${head} \u00B7 ${MirrorText.timingLabel(interval)} \u00B7 ${words.join(repeat ? ', ' : ' ')}`
+  },
+
+  /** A TIMING choice for screen readers: a triplet ("1/8T") said as "1/8 triplet". */
   timingName(t: Timing): string {
-    return t === Timing.OFF ? 'Timing off: notes stay where you play them' : `Timing ${t}: notes snap to the nearest ${t}`
+    return t === Timing.OFF ? 'Timing off: notes stay where you play them' : `Timing ${t}: notes snap to the nearest ${timingSpoken(t)}`
+  },
+
+  // ---------- ARP: the arpeggiator and note repeat, and TIMING (an addition: the device's TIMING + pads) ----------
+  /** The switch on the pads' plate: ARP in KEYS, RPT (note repeat) in PADS; their names for screen readers. */
+  ARP: 'Arp',
+  RPT: 'Rpt',
+  ARP_NAME: 'Arpeggiator',
+  RPT_NAME: 'Note repeat',
+
+  /** LATCH greyed out while the arp is off: why. */
+  arpFirst(repeat: boolean): string {
+    return `Turn on ${repeat ? 'RPT' : 'ARP'} first`
+  },
+
+  /** The tempo sheet's two pages: TEMPO (the click) and TIMING. */
+  TEMPO_TAB: 'Tempo',
+  INTERVAL: 'Interval',
+  SWING: 'Swing',
+  GATE: 'Gate',
+  /** SWING's knob rests at the other intervals. */
+  SWING_NOTE: 'Swing plays at 1/8 and 1/16.',
+  QUANTIZE: 'Quantize',
+  FREE_TIME: 'Free time',
+  QUANTIZE_NOTE: 'Quantize: notes you record snap to the interval. Free time: they stay where you play them.',
+  TIMING_NOTE: 'The interval is the step the arp and note repeat play at, and the grid recording snaps to.',
+  ARP_SECTION: 'Arp and repeat',
+  ORDER: 'Order',
+  OCTAVES: 'Octaves',
+  /** Beside GATE's knob: what it sets. */
+  GATE_NOTE: 'How long each note sounds, as a share of the step.',
+  ARP_LATCH_NOTE: 'Latch on: the notes play on after you let go. The next press starts a new set.',
+
+  /** A knob's percent: "56%". */
+  percent(v: number): string {
+    return `${v}%`
+  },
+
+  /** An INTERVAL choice for screen readers: "Interval 1/8 triplet". */
+  intervalName(t: Timing): string {
+    return `Interval ${timingSpoken(t)}`
+  },
+
+  /** The arp's orders as their keys print them, and in full for screen readers. */
+  arpOrderName(o: ArpOrder): string {
+    return ARP_ORDER_NAMES[o]
+  },
+
+  arpOrderSpoken(o: ArpOrder): string {
+    return o === 'played' ? 'As played' : o === 'updown' ? 'Up and down' : ARP_ORDER_NAMES[o]
   },
 
   /** "A · 2 bars", a group's length in the sheet; "Group A, 2 bars" for screen readers. */
@@ -1060,6 +1121,14 @@ export const MirrorText = {
   },
 } as const
 
+const ARP_ORDER_NAMES: Record<ArpOrder, string> = {
+  played: 'Played',
+  up: 'Up',
+  down: 'Down',
+  updown: 'Up-dn',
+  random: 'Random',
+}
+
 const PUNCH_NAMES = [
   'Pitch rnd', 'Slice', 'Stutter', 'Repeat', 'Tape stop', 'Filter LFO',
   'LPF', 'HPF', 'Send FX', 'Tremolo', 'Oct ↓', 'Decimate',
@@ -1079,4 +1148,9 @@ function knobWord(label: string): string {
 /** "A" for group 0 (Kotlin's 'A' + group). */
 function groupLetter(group: number): string {
   return String.fromCharCode(65 + group)
+}
+
+/** A timing as said aloud: a triplet ("1/8T") as "1/8 triplet". */
+function timingSpoken(t: Timing): string {
+  return t.endsWith('T') ? `${t.slice(0, -1)} triplet` : t
 }
