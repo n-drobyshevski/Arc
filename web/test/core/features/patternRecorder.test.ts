@@ -80,6 +80,10 @@ describe('PatternRecorderTest', () => {
     off = hit(r, projectPatterns(), a3, 382.0, Timing.OFF).patterns
     off = hit(r, off, a3, 384.0 + 2, Timing.OFF).patterns
     expect(ticks(off)).toEqual([2])
+    // Notes left past the end aren't played: nothing played replaces them.
+    const past = withGroup(0, pattern(1, [patternNote(500, 3, 24), patternNote(386, 3, 24)]))
+    expect(ticks(hit(r, past, a3, 0.0).patterns)).toEqual([500, 386, 0])
+    expect(ticks(hit(r, past, a3, 2.0, Timing.OFF).patterns)).toEqual([500, 386, 2])
   })
 
   it('a note the grid puts after it was heard skips that pass', () => {
@@ -249,6 +253,10 @@ describe('PatternRecorderTest', () => {
     // A whole loop or more: every note on the pad.
     expect(notesOf(r.eraseRange(p, a3, null, 1000.0, 1384.0)).map((n) => n.offset)).toEqual([4])
     expect(r.eraseRange(p, a3, null, 300.0, 300.0)).toEqual(p)
+    // Notes left past the end aren't played, so the playhead never passes them.
+    const past = withGroup(0, pattern(1, [patternNote(10, 3, 24), patternNote(500, 3, 24)]))
+    expect(ticks(r.eraseRange(past, a3, null, 760.0, 780.0))).toEqual([500])
+    expect(ticks(r.eraseRange(past, a3, null, 0.0, 384.0))).toEqual([500])
   })
 
   it('a pad held in erase is one checkpoint', () => {

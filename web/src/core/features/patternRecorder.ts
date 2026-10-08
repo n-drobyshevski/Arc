@@ -122,8 +122,10 @@ export class PatternRecorder {
     const len = Pattern.lengthTicks(pat)
     const local = pat.open ? q : floorMod(q, len)
     const near = timing === Timing.OFF ? OVERDUB_TICKS : 0
+    // A note left past the end (the length made shorter) isn't played, so nothing played replaces it.
     const kept = pat.notes.filter(
-      (n) => !(n.offset === pad.offset && n.semitones === semitones && distance(n.tick, local, len, pat.open) <= near),
+      (n) =>
+        !(n.offset === pad.offset && n.semitones === semitones && (pat.open || n.tick < len) && distance(n.tick, local, len, pat.open) <= near),
     )
     if (kept.length >= Seq.MAX_NOTES) return { patterns: p, id: 0, skipPass: null }
     const id = ++this.nextId
@@ -186,7 +188,8 @@ export class PatternRecorder {
     const whole = !pat.open && toTick - fromTick >= len
     const from = pat.open ? fromTick : floorMod(fromTick, len)
     const to = pat.open ? toTick : floorMod(toTick, len)
-    const inRange = (t: number): boolean => whole || (from <= to ? t >= from && t < to : t >= from || t < to)
+    // Notes left past the end aren't played, so the playhead never passes them.
+    const inRange = (t: number): boolean => (pat.open || t < len) && (whole || (from <= to ? t >= from && t < to : t >= from || t < to))
     const out = ProjectPatterns.with(p, pad.group, { ...pat, notes: pat.notes.filter((n) => !(on(n, pad, semitones) && inRange(n.tick))) })
     if (samePatterns(out, p) || run.pushed) return out
     run.pushed = true

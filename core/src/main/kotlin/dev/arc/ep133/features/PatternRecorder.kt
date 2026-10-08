@@ -97,7 +97,10 @@ class PatternRecorder(private val maxUndo: Int = 32) {
         val len = pat.lengthTicks
         val local = if (pat.open) q.toInt() else Math.floorMod(q, len.toLong()).toInt()
         val near = if (timing == Timing.OFF) OVERDUB_TICKS else 0
-        val kept = pat.notes.filterNot { it.offset == pad.offset && it.semitones == semitones && distance(it.tick, local, len, pat.open) <= near }
+        // A note left past the end (the length made shorter) isn't played, so nothing played replaces it.
+        val kept = pat.notes.filterNot {
+            it.offset == pad.offset && it.semitones == semitones && (pat.open || it.tick < len) && distance(it.tick, local, len, pat.open) <= near
+        }
         if (kept.size >= Seq.MAX_NOTES) return Recorded(p, 0, null)
         val id = ++nextId
         val gate = if (timing == Timing.OFF) Timing.SIXTEENTH.ticks else timing.ticks
@@ -155,7 +158,8 @@ class PatternRecorder(private val maxUndo: Int = 32) {
         val whole = !pat.open && toTick - fromTick >= len
         val from = if (pat.open) fromTick else floorMod(fromTick, len)
         val to = if (pat.open) toTick else floorMod(toTick, len)
-        val inRange = { t: Int -> whole || if (from <= to) t >= from && t < to else t >= from || t < to }
+        // Notes left past the end aren't played, so the playhead never passes them.
+        val inRange = { t: Int -> (pat.open || t < len) && (whole || if (from <= to) t >= from && t < to else t >= from || t < to) }
         val out = p.with(pad.group, pat.copy(notes = pat.notes.filterNot { on(it, pad, semitones) && inRange(it.tick) }))
         if (out == p || run.pushed) return out
         run.pushed = true

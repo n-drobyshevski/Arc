@@ -76,6 +76,10 @@ class PatternRecorderTest {
         off = r.hit(ProjectPatterns(), a3, 382.0, Timing.OFF).patterns
         off = r.hit(off, a3, 384.0 + 2, Timing.OFF).patterns
         assertEquals(listOf(2), ticks(off))
+        // Notes left past the end aren't played: nothing played replaces them.
+        val past = ProjectPatterns().with(0, Pattern(1, listOf(PatternNote(500, 3, 24), PatternNote(386, 3, 24))))
+        assertEquals(listOf(500, 386, 0), ticks(r.hit(past, a3, 0.0).patterns))
+        assertEquals(listOf(500, 386, 2), ticks(r.hit(past, a3, 2.0, Timing.OFF).patterns))
     }
 
     @Test
@@ -261,6 +265,10 @@ class PatternRecorderTest {
         // A whole loop or more: every note on the pad.
         assertEquals(listOf(4), r.eraseRange(p, a3, null, 1000.0, 1384.0).group(0).notes.map { it.offset })
         assertEquals(p, r.eraseRange(p, a3, null, 300.0, 300.0))
+        // Notes left past the end aren't played, so the playhead never passes them.
+        val past = ProjectPatterns().with(0, Pattern(1, listOf(PatternNote(10, 3, 24), PatternNote(500, 3, 24))))
+        assertEquals(listOf(500), ticks(r.eraseRange(past, a3, null, 760.0, 780.0)))
+        assertEquals(listOf(500), ticks(r.eraseRange(past, a3, null, 0.0, 384.0)))
     }
 
     @Test
