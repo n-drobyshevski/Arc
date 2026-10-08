@@ -102,6 +102,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import dev.arc.ep133.controller.MirrorUi
+import dev.arc.ep133.controller.punchSlotForPad
 import dev.arc.ep133.features.FxType
 import dev.arc.ep133.features.FactorySounds
 import dev.arc.ep133.features.Beat
@@ -432,6 +433,12 @@ fun MirrorScreen(
     /** PROJECT, KEYS and TEMPO over the pads (KEYS is the mode word's place, but on the short sideways piano). */
     functions: FunctionKeysUi = FunctionKeysUi(),
     /**
+     * The punch-ins (an addition): while FX is held ([FunctionKeysUi.fxHeld])
+     * the one-group pads play them instead of their sounds, and the display
+     * line names those held.
+     */
+    punch: PunchUi = PunchUi(),
+    /**
      * SAMPLE (an addition; null for none): on the Live tab in PADS, the
      * SAMPLE panel the mic key in the top bar (or a swipe on the pads) opens:
      * the display line grows into it over the function keys' place, its row
@@ -462,6 +469,12 @@ fun MirrorScreen(
     // EDIT works on the pads only, and only on the Live tab (where the tab is); SAMPLE's pads record, ERASE's erase, instead.
     val editing = edit.on && edit.onEdit != null && !keys.on && onBack == null && !sampling && !erasing
     val onEdit = if (editing) edit.onPad else null
+    // FX held: the one-group pads are the punch-ins (PADS on the Live tab, not while SAMPLE's record), their touches
+    // the punch-ins' alone. The pressures seen stay with the screen, so a device's pressure is learned once.
+    val pressure = remember { PressureSense() }
+    val padPunch = if (functions.fxHeld && !keys.on && onBack == null && !sampling) PadPunch(punch, pressure) else null
+    // The display line names the punch-ins held, over EDIT's line too.
+    val punchHeld = punch.held.takeIf { padPunch != null }.orEmpty()
     // PROJECT held: the pads printed 1 to 9 pick a project instead of sounding, the rest stay still (ProjectHold).
     val hold = remember { ProjectHold() }
     // SOUND is EDIT's key: Live's EDIT where it works (the Live tab), none elsewhere.
@@ -749,7 +762,7 @@ fun MirrorScreen(
                 // The display line on the page (not in the top bar). With the SAMPLE panel it grows into the panel, its
                 // words giving way to SAMPLE's header in place ([SampleMorph]); the line itself stays the pads' own.
                 val padsLine: @Composable () -> Unit = {
-                    if (editing) EditLine() else DisplayStrip(st, mirror, transport, take, still = fixedNow != null, wireless = wireless)
+                    if (editing && punchHeld.isEmpty()) EditLine() else DisplayStrip(st, mirror, transport, take, still = fixedNow != null, wireless = wireless, punch = punchHeld)
                 }
                 val sampleNow = sample ?: SampleUi()
                 // The display line growing into the SAMPLE panel over the function keys, upright ([SampleMorph]): laid out as
@@ -790,8 +803,9 @@ fun MirrorScreen(
                         }
                     }
                 }
-                // The pads' swipe that opens and closes the panel, the pads under it hearing of a finger it took.
-                val swipe = if (panelOn) panelSwipe(panel, openPanel, closePanel) else Modifier
+                // The pads' swipe that opens and closes the panel, the pads under it hearing of a finger it took (not
+                // while they are the punch-ins: a finger moving there sets a punch-in's depth).
+                val swipe = if (panelOn && padPunch == null) panelSwipe(panel, openPanel, closePanel) else Modifier
                 if (piano != null) {
                     Column(sidewaysColumn) {
                         if (!inBar) {
@@ -845,6 +859,7 @@ fun MirrorScreen(
                                 sampling = padSampling,
                                 erase = eraseDots,
                                 mode = modeStrip,
+                                punch = padPunch,
                             )
                         }
                         val fnColumn: @Composable () -> Unit = { FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey) }
@@ -1013,6 +1028,7 @@ fun MirrorScreen(
                                         sampling = padSampling,
                                         erase = eraseDots,
                                         mode = modeStrip,
+                                        punch = padPunch,
                                     )
                                 }
                                 if (!panelOn) {
@@ -1199,6 +1215,8 @@ internal fun LivePill(
     wireless: Boolean = false,
     /** SAMPLE mode: while it is on, its header ([SamplePillLine]), the line cross-fading into it. */
     sample: SampleUi? = null,
+    /** The punch-ins held, in the order pressed ([PunchUi.held]): the line names them, over EDIT's too. */
+    punch: Set<Int> = emptySet(),
     /**
      * How far the SAMPLE panel under it has cross-faded its header in
      * ([SamplePanel.header], read as it draws), while Live shows it
@@ -1212,8 +1230,8 @@ internal fun LivePill(
     val line: @Composable () -> Unit = {
         when {
             keys.on -> KeysDisplay(st, mirror, keysNow, transport, take, still, compact = true, pianoRange = pianoRange)
-            editing -> EditLine(compact = true)
-            else -> DisplayStrip(st, mirror, transport, take, still, compact = true, wireless = wireless)
+            editing && punch.isEmpty() -> EditLine(compact = true)
+            else -> DisplayStrip(st, mirror, transport, take, still, compact = true, wireless = wireless, punch = punch)
         }
     }
     val sampleNow = sample ?: SampleUi()
@@ -1314,8 +1332,9 @@ private fun displayLineSmall(st: MirrorState, mirror: MirrorUi?, wireless: Boole
  * The one-group view's display as a single dark line: play state, tempo and
  * project on the left, the pad just played (or that the sound plays late) on
  * the right; the pattern's RECORD and PLAY first, its words in their place
- * while it is on ([PatternLine]). [compact]: one bar tall, in the top bar
- * ([LivePill]).
+ * while it is on ([PatternLine]). While punch-ins are held ([punch], FX held)
+ * it names them instead, in signal orange: "PUNCH · REPEAT + LPF".
+ * [compact]: one bar tall, in the top bar ([LivePill]).
  */
 @Composable
 private fun DisplayStrip(
@@ -1326,8 +1345,17 @@ private fun DisplayStrip(
     still: Boolean,
     compact: Boolean = false,
     wireless: Boolean = false,
+    punch: Set<Int> = emptySet(),
 ) {
     val c = LocalArcColors.current
+    if (punch.isNotEmpty()) {
+        PatternLine(transport, take, still, compact) {
+            SpokenLine(spoken(MirrorText.punchSpoken(punch))) {
+                Text(MirrorText.punchLine(punch), style = ArcType.displayHead, color = c.signal, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            }
+        }
+        return
+    }
     val main = displayLine(st, mirror, wireless)
     val played = when (st.playing) {
         true -> MirrorText.PLAYING
@@ -1510,30 +1538,37 @@ private fun Group(
     erase: Set<PhysicalPad>? = null,
     /** The big grid: KEYS / PADS in its plate's right margin (KoDeck). */
     mode: (@Composable (Modifier, Dp) -> Unit)? = null,
+    /** FX held (the big grid only): the pads are the punch-ins ([PunchPad]); null for their sounds. */
+    punch: PadPunch? = null,
 ) {
     val c = LocalArcColors.current
     val lit = st.pads.filterKeys { it.group == group }
     val groupGlow = lit.values.maxOfOrNull { glow(it, now) } ?: 0f
     if (big) {
         val pad: @Composable (PhysicalPad, KoGeom) -> Unit = { pad, k ->
-            Pad(
-                pad, lit[pad], nameOf(pad), now,
-                Modifier.size(k.u, k.h),
-                big = true,
-                onPress = onPad?.let { f -> { hold: Boolean, unsure: Boolean, at: Long -> f(pad, hold, unsure, at) } },
-                onKept = { onPadKept(pad) },
-                onRelease = { at -> onPadUp(pad, at) },
-                onCut = { onPadCut(pad) },
-                playing = pad in playingPads,
-                inScroll = false,
-                onEdit = onEdit?.let { f -> { f(pad) } },
-                haptics = haptics,
-                ko = k,
-                sampleLed = sampling?.led?.invoke(pad),
-                blink = sampling?.blink,
-                onLatch = sampling?.onLatch?.let { f -> { f(pad) } },
-                noteDot = erase?.let { pad in it },
-            )
+            val slot = punchSlotForPad(pad.offset)
+            if (punch != null && slot >= 0) {
+                PunchPad(slot, slot in punch.ui.held, punch.ui, punch.sense, Modifier.size(k.u, k.h), k.u, k.keyShape, haptics = haptics)
+            } else {
+                Pad(
+                    pad, lit[pad], nameOf(pad), now,
+                    Modifier.size(k.u, k.h),
+                    big = true,
+                    onPress = onPad?.let { f -> { hold: Boolean, unsure: Boolean, at: Long -> f(pad, hold, unsure, at) } },
+                    onKept = { onPadKept(pad) },
+                    onRelease = { at -> onPadUp(pad, at) },
+                    onCut = { onPadCut(pad) },
+                    playing = pad in playingPads,
+                    inScroll = false,
+                    onEdit = onEdit?.let { f -> { f(pad) } },
+                    haptics = haptics,
+                    ko = k,
+                    sampleLed = sampling?.led?.invoke(pad),
+                    blink = sampling?.blink,
+                    onLatch = sampling?.onLatch?.let { f -> { f(pad) } },
+                    noteDot = erase?.let { pad in it },
+                )
+            }
         }
         val groupKeys: (@Composable (KoGeom) -> Unit)? = onSelectGroup?.let { select ->
             { k -> for (g in 0..3) GroupKey(g, group, st, now, select, Modifier.width(k.u), keyMin = 0.dp, ko = k) }
@@ -1743,7 +1778,7 @@ private fun GroupGlyph(g: Int, color: Color, size: Dp) {
 }
 
 /** A light around a lit pad or key: [g] 0..1. */
-private fun Modifier.litGlow(g: Float, color: Color, shape: androidx.compose.ui.graphics.Shape): Modifier =
+internal fun Modifier.litGlow(g: Float, color: Color, shape: androidx.compose.ui.graphics.Shape): Modifier =
     if (g <= 0f) this else dropShadow(shape, Shadow(radius = 18.dp * g, color = color.copy(alpha = 0.6f * g)))
 
 /**

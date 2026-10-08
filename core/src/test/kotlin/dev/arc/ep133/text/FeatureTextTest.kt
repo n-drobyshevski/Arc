@@ -206,6 +206,18 @@ class FeatureTextTest {
     }
 
     @Test
+    fun `punch text`() {
+        // Slot order, '.' to '9', as the pads print them while FX is held.
+        assertEquals(
+            listOf("PITCH RND", "SLICE", "STUTTER", "REPEAT", "TAPE STOP", "FILTER LFO", "LPF", "HPF", "SEND FX", "TREMOLO", "OCT \u2193", "DECIMATE"),
+            (0 until 12).map { MirrorText.punchName(it).uppercase() },
+        )
+        assertEquals(listOf("Beat repeat", "Octave down"), listOf(3, 10).map(MirrorText::punchDescription))
+        assertEquals("PUNCH \u00B7 REPEAT + LPF", MirrorText.punchLine(linkedSetOf(3, 6)))
+        assertEquals("Punch-ins, Beat repeat, Low-pass filter", MirrorText.punchSpoken(linkedSetOf(3, 6)))
+    }
+
+    @Test
     fun `sample text`() {
         val a7 = PhysicalPad(0, 9)
         assertEquals("Sample", MirrorText.SAMPLE_TAG)

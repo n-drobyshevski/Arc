@@ -1012,7 +1012,49 @@ export const MirrorText = {
 
   /** The sheet's note: the effects are the phone's alone. */
   FX_NOTE: "The effects play in Live's sound on the phone; the EP-133's own FX stay as they are.",
+
+  /**
+   * FX held: the pads play the twelve punch-ins. Each one's name where a pad
+   * prints its sound, in slot order ('.' PITCH RND, '0' SLICE, ENTER STUTTER,
+   * '1' REPEAT ... '9' DECIMATE): "Repeat", "Oct ↓".
+   */
+  punchName(slot: number): string {
+    return PUNCH_NAMES[slot]!
+  },
+
+  /** Its name in full for screen readers: "Beat repeat", "Octave down". */
+  punchDescription(slot: number): string {
+    return PUNCH_WORDS[slot]!
+  },
+
+  /** Printed small under a punch-in's name while it isn't held. */
+  PUNCH_HOLD: 'hold',
+
+  /** A punch-in pad's click for screen readers (no finger to hold: it stays in until clicked again), and its state while in. */
+  PUNCH_IN: 'Punch in',
+  PUNCH_OUT: 'Let go',
+  PUNCHED_IN: 'In',
+
+  /** The display line while punch-ins are held, in the order pressed: "PUNCH · REPEAT + LPF". */
+  punchLine(slots: Iterable<number>): string {
+    return 'PUNCH · ' + [...slots].map((s) => MirrorText.punchName(s).toUpperCase()).join(' + ')
+  },
+
+  /** That line as a screen reader says it: "Punch-ins, Beat repeat, Low-pass filter". */
+  punchSpoken(slots: Iterable<number>): string {
+    return [MirrorText.PUNCH_INS, ...[...slots].map((s) => MirrorText.punchDescription(s))].join(', ')
+  },
 } as const
+
+const PUNCH_NAMES = [
+  'Pitch rnd', 'Slice', 'Stutter', 'Repeat', 'Tape stop', 'Filter LFO',
+  'LPF', 'HPF', 'Send FX', 'Tremolo', 'Oct ↓', 'Decimate',
+]
+
+const PUNCH_WORDS = [
+  'Pitch random', 'Slice', 'Stutter', 'Beat repeat', 'Tape stop', 'Filter LFO',
+  'Low-pass filter', 'High-pass filter', 'Send to FX', 'Tremolo', 'Octave down', 'Decimator',
+]
 
 /** A knob's printed name as a word: "LENGTH" to "Length". */
 function knobWord(label: string): string {

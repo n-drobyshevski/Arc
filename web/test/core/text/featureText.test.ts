@@ -191,6 +191,16 @@ describe('FeatureTextTest', () => {
     expect([0.2, 0.5, 0.7].map((y) => MirrorText.sidechainShape(y))).toEqual(['SNAP 60', 'EVEN', 'PUMP 40'])
   })
 
+  it('punch text', () => {
+    // Slot order, '.' to '9', as the pads print them while FX is held.
+    expect(Array.from({ length: 12 }, (_, s) => MirrorText.punchName(s).toUpperCase())).toEqual(
+      ['PITCH RND', 'SLICE', 'STUTTER', 'REPEAT', 'TAPE STOP', 'FILTER LFO', 'LPF', 'HPF', 'SEND FX', 'TREMOLO', 'OCT \u2193', 'DECIMATE'],
+    )
+    expect([3, 10].map((s) => MirrorText.punchDescription(s))).toEqual(['Beat repeat', 'Octave down'])
+    expect(MirrorText.punchLine(new Set([3, 6]))).toBe('PUNCH \u00B7 REPEAT + LPF')
+    expect(MirrorText.punchSpoken(new Set([3, 6]))).toBe('Punch-ins, Beat repeat, Low-pass filter')
+  })
+
   it('sample text', () => {
     const a7 = physicalPad(0, 9)
     expect(MirrorText.SAMPLE_TAG).toBe('Sample')

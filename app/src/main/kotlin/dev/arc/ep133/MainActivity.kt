@@ -735,6 +735,8 @@ class MainActivity : ComponentActivity() {
         val review by controller.sampleReview.collectAsStateWithLifecycle()
         // FX: the project's effect, sends, output compressor and sidechain, for the FX key and sheet.
         val fx by controller.fx.collectAsStateWithLifecycle()
+        // The punch-ins held while FX is, in the order pressed: lit on the pads and named on the display line.
+        val punches by controller.punches.collectAsStateWithLifecycle()
         val functions = dev.arc.ep133.ui.screens.FunctionKeysUi(
             // SOUND held: the sheet of the pad played last (its tap is EDIT, below).
             onPadSound = {
@@ -944,7 +946,7 @@ class MainActivity : ComponentActivity() {
                     onGuide = { guideOpen = it },
                     guide = { GuideScreen(onBack = { guideOpen = false }) },
                     // On a phone on its side, Live's display line rides in the top bar.
-                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, transport = liveTransport, take = liveTake, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys, wireless = liveWireless, sample = sampleUi, header = sampleHeader) }) else null,
+                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, transport = liveTransport, take = liveTake, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys, wireless = liveWireless, sample = sampleUi, punch = punches, header = sampleHeader) }) else null,
                     sample = sampleKey,
                 ) {
                     // Back from another section returns to Live, the home section, first.
@@ -1023,6 +1025,13 @@ class MainActivity : ComponentActivity() {
                                 onPad = { pad -> controller.editTarget(pad)?.let { padSheet = pad to it } },
                             ),
                             functions = functions,
+                            // FX held: the one-group pads play the punch-ins, straight to the effects (no voice, nothing recorded).
+                            punch = dev.arc.ep133.ui.screens.PunchUi(
+                                held = punches,
+                                onDown = controller::punchDown,
+                                onMove = controller::punchMove,
+                                onUp = controller::punchUp,
+                            ),
                             sample = sampleUi,
                             onSampleHeader = { sampleHeader = it },
                         )

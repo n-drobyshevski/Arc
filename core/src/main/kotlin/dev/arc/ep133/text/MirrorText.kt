@@ -792,6 +792,38 @@ object MirrorText {
     /** The sheet's note: the effects are the phone's alone. */
     const val FX_NOTE = "The effects play in Live's sound on the phone; the EP-133's own FX stay as they are."
 
+    /**
+     * FX held: the pads play the twelve punch-ins. Each one's name where a pad
+     * prints its sound, in slot order ('.' PITCH RND, '0' SLICE, ENTER STUTTER,
+     * '1' REPEAT ... '9' DECIMATE): "Repeat", "Oct ↓".
+     */
+    fun punchName(slot: Int) = PUNCH_NAMES[slot]
+    private val PUNCH_NAMES = listOf(
+        "Pitch rnd", "Slice", "Stutter", "Repeat", "Tape stop", "Filter LFO",
+        "LPF", "HPF", "Send FX", "Tremolo", "Oct ↓", "Decimate",
+    )
+
+    /** Its name in full for screen readers: "Beat repeat", "Octave down". */
+    fun punchDescription(slot: Int) = PUNCH_WORDS[slot]
+    private val PUNCH_WORDS = listOf(
+        "Pitch random", "Slice", "Stutter", "Beat repeat", "Tape stop", "Filter LFO",
+        "Low-pass filter", "High-pass filter", "Send to FX", "Tremolo", "Octave down", "Decimator",
+    )
+
+    /** Printed small under a punch-in's name while it isn't held. */
+    const val PUNCH_HOLD = "hold"
+
+    /** A punch-in pad's click for screen readers (no finger to hold: it stays in until clicked again), and its state while in. */
+    const val PUNCH_IN = "Punch in"
+    const val PUNCH_OUT = "Let go"
+    const val PUNCHED_IN = "In"
+
+    /** The display line while punch-ins are held, in the order pressed: "PUNCH · REPEAT + LPF". */
+    fun punchLine(slots: Collection<Int>) = "PUNCH · " + slots.joinToString(" + ") { punchName(it).uppercase() }
+
+    /** That line as a screen reader says it: "Punch-ins, Beat repeat, Low-pass filter". */
+    fun punchSpoken(slots: Collection<Int>) = (listOf(PUNCH_INS) + slots.map(::punchDescription)).joinToString(", ")
+
     /** A knob's printed name as a word: "LENGTH" to "Length". */
     private fun knobWord(label: String) = label.lowercase().replaceFirstChar { it.uppercaseChar() }
 }
