@@ -102,6 +102,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import dev.arc.ep133.controller.MirrorUi
+import dev.arc.ep133.features.FxType
 import dev.arc.ep133.features.FactorySounds
 import dev.arc.ep133.features.Beat
 import dev.arc.ep133.features.Tempo
@@ -228,10 +229,11 @@ class KeysActions(
 
 /**
  * Live's function keys over the pads ([FunctionRow], [FunctionColumn]):
- * SOUND, PROJECT ([project], a tap [onProject] steps to the next one) and
+ * SOUND, PROJECT ([project], a tap [onProject] steps to the next one),
  * TEMPO, the phone's click: [clickOn] at the phone's tempo [bpm] (the
  * EP-133's leads while it sends MIDI clock), a tap [onClick] turns it on or
- * off and a hold [onTempo] opens the tempo sheet.
+ * off and a hold [onTempo] opens the tempo sheet, and FX ([fx], the effect
+ * on): a tap [onFx] opens the FX sheet, a hold [onFxHold] the punch-ins.
  * [beats] blink TEMPO's light (the click's, or the EP-133's while it is off);
  * null leaves it still.
  */
@@ -251,6 +253,13 @@ class FunctionKeysUi(
     val onTempo: () -> Unit = {},
     /** For screenshots: TEMPO's light caught lit, on a beat. */
     val beatLit: Boolean = false,
+    /** The effect on, named on FX's light. */
+    val fx: FxType = FxType.NONE,
+    /** FX tapped: the FX sheet. */
+    val onFx: () -> Unit = {},
+    /** FX held down (true) and let go of (false): the pads play the punch-ins meanwhile ([fxHeld]). */
+    val onFxHold: (Boolean) -> Unit = {},
+    val fxHeld: Boolean = false,
 )
 
 /**

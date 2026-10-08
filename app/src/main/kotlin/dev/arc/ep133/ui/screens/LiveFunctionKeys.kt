@@ -59,6 +59,7 @@ import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dev.arc.ep133.features.FxType
 import dev.arc.ep133.features.MirrorState
 import dev.arc.ep133.features.PadNotes
 import dev.arc.ep133.features.ProjectSource
@@ -77,8 +78,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 
 /*
- * Live's function keys (an addition): SOUND, PROJECT and TEMPO as the EP-133
- * prints its two-tier keys, a dark cap with its word on the upper half and
+ * Live's function keys (an addition): SOUND, PROJECT, TEMPO and FX as the
+ * EP-133 prints its two-tier keys, a dark cap with its word on the upper half and
  * the lower half filled with a colour carrying a second word, under an LED
  * and a printed label. A row over the pads (upright, and on the
  * all-groups and tablet pages), a column left of them on a phone on its side.
@@ -167,8 +168,8 @@ private val ColumnGapTight = 6.dp
 private val ColumnCapLed = 32.dp
 private val ColumnCapMin = 30.dp
 
-/** How many keys the row and the column hold: SOUND, PROJECT and TEMPO. */
-private const val KEY_COUNT = 3
+/** How many keys the row and the column hold: SOUND, PROJECT, TEMPO and FX. */
+private const val KEY_COUNT = 4
 
 /** The column's least height that keeps its LED lines (the caps at their smallest with them). */
 internal val FunctionColumnLed = (ColumnCapLed + CapToLed + LedLine) * KEY_COUNT + ColumnGapTight * (KEY_COUNT - 1)
@@ -182,9 +183,9 @@ internal data class ColumnFit(val cap: Dp, val gap: Dp, val led: Boolean)
 /**
  * The column's keys in [height], as tall as they fit (in a short window on
  * its side, or with a large display size, the keys beside it shrink too):
- * full size (about 200 dp) in room; shorter, the gaps close up, then the
+ * full size (about 250 dp) in room; shorter, the gaps close up, then the
  * caps shrink, then the LED lines go (a screen reader still hears what they
- * say). Under about 100 dp it is as small as it gets.
+ * say). Under about 140 dp it is as small as it gets.
  */
 internal fun columnFit(height: Dp): ColumnFit {
     val line = CapToLed + LedLine
@@ -203,7 +204,7 @@ internal fun functionRowHeight(): Dp = rowCap() + CapToLed + LedLine
 @Composable
 private fun rowCap(): Dp = if (LocalArcWindow.current.width >= 600.dp) RowCapWide else RowCap
 
-/** The three keys in a row over the pads or the keys, sharing its width up to [RowKeyMax] each. */
+/** The four keys in a row over the pads or the keys, sharing its width up to [RowKeyMax] each. */
 @Composable
 internal fun FunctionRow(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions, st: MirrorState, haptics: Boolean, modifier: Modifier = Modifier, hold: ProjectHold = remember { ProjectHold() }, edit: EditUi = EditUi()) {
     Row(
@@ -218,7 +219,7 @@ internal fun FunctionRow(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions,
 }
 
 /**
- * The three keys in a column left of the pads or the keys, [SideFunctions]
+ * The four keys in a column left of the pads or the keys, [SideFunctions]
  * wide, in the middle of its height; sized to that height ([columnFit]).
  */
 @Composable
@@ -237,7 +238,7 @@ internal fun FunctionColumn(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActio
     }
 }
 
-/** SOUND, PROJECT and TEMPO, each with [modifier]; [column]'s size in the column, null in the row. */
+/** SOUND, PROJECT, TEMPO and FX, each with [modifier]; [column]'s size in the column, null in the row. */
 @Composable
 private fun FunctionKeys(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions, st: MirrorState, haptics: Boolean, column: ColumnFit?, modifier: Modifier, hold: ProjectHold, edit: EditUi) {
     val c = LocalArcColors.current
@@ -314,7 +315,7 @@ private fun FunctionKeys(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions,
         lowerInk = c.onSignal,
         led = { blink.value },
         lit = fn.clickOn,
-        // Whole BPM, so it fits three keys across a narrow phone (the display line keeps the tenth).
+        // Whole BPM, so it fits four keys across a narrow phone (the display line keeps the tenth).
         label = if (column != null) MirrorText.tempoShort(bpm) else MirrorText.tempoValue(bpm),
         description = MirrorText.CLICK,
         state = MirrorText.clickState(fn.clickOn, bpm, following = device != null),
@@ -326,6 +327,31 @@ private fun FunctionKeys(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions,
         column = column,
         haptics = haptics,
         modifier = modifier.coachMark("live.tempo", CoachText.TEMPO, c.navy, c.onNavy),
+    )
+    // FX: a tap opens the FX sheet; held, the pads play the punch-ins until it lets go (its upper half lit
+    // meanwhile). Its light is on while an effect is, under the effect's name. A screen reader's long
+    // click turns the punch-ins on and off instead, as it can't hold the key while it plays the pads.
+    val fx = fn.fx
+    FunctionKey(
+        word = MirrorText.FN_FX,
+        sub = MirrorText.FN_FX_SUB,
+        lower = ko.lightFace,
+        lowerInk = ko.tierInk,
+        led = { if (fx != FxType.NONE || fn.fxHeld) 1f else 0f },
+        lit = fx != FxType.NONE || fn.fxHeld,
+        label = if (column != null) MirrorText.fxCode(fx) else MirrorText.fxKeyLabel(fx),
+        description = MirrorText.FX_EFFECTS,
+        state = MirrorText.fxName(fx),
+        onClick = fn.onFx,
+        clickLabel = MirrorText.FX_SHEET,
+        onLongClick = { fn.onFxHold(!fn.fxHeld) },
+        longClickLabel = MirrorText.PUNCH_INS,
+        onHold = fn.onFxHold,
+        held = fn.fxHeld,
+        role = Role.Button,
+        column = column,
+        haptics = haptics,
+        modifier = modifier,
     )
 }
 
@@ -361,6 +387,9 @@ private const val STALE_BEAT_MS = 100L
  * a screen reader hears [description] and [state] ([toggled] for a switch).
  * [column]: the narrower, shorter key of the column on a phone on its side,
  * its cap and (when it fits) LED line as that says; null in the row.
+ * [onHold] (FX): a press let go of before the long-press time is a click;
+ * held past it, the key is held (true) until it lets go (false), and while
+ * [held] its upper half is lit.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -386,6 +415,8 @@ private fun FunctionKey(
     longClickLabel: String? = null,
     hold: ProjectHold? = null,
     fn: FunctionKeysUi? = null,
+    onHold: ((Boolean) -> Unit)? = null,
+    held: Boolean = false,
 ) {
     val c = LocalArcColors.current
     val hw = LocalHwColors.current
@@ -402,6 +433,26 @@ private fun FunctionKey(
     // The gesture outlives the composition it started in: its release acts on the keys as they
     // are now (the project list read since), not as they were at the press.
     val fnNow by rememberUpdatedState(fn)
+    val clickNow by rememberUpdatedState(onClick)
+    val holdNow by rememberUpdatedState(onHold)
+    // The click and long click a screen reader keeps where the press is taken by hand.
+    val actions = Modifier.semantics {
+        this.role = role
+        if (enabled) {
+            onClick(clickLabel) {
+                onClick()
+                true
+            }
+            if (onLongClick != null) {
+                onLongClick(longClickLabel) {
+                    onLongClick()
+                    true
+                }
+            }
+        } else {
+            disabled()
+        }
+    }
     val touch = if (hold != null && fn != null) {
         Modifier
             .pointerInput(enabled) {
@@ -429,23 +480,43 @@ private fun FunctionKey(
                     }
                 }
             }
-            .semantics {
-                this.role = role
-                if (enabled) {
-                    onClick(clickLabel) {
-                        onClick()
-                        true
-                    }
-                    if (onLongClick != null) {
-                        onLongClick(longClickLabel) {
-                            onLongClick()
-                            true
+            .then(actions)
+    } else if (onHold != null) {
+        // FX: a tap before the long-press time, else held until the lift (or the key leaving the page).
+        Modifier
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
+                awaitEachGesture {
+                    val first = awaitFirstDown()
+                    val press = PressInteraction.Press(first.position)
+                    source.tryEmit(press)
+                    var down = false
+                    try {
+                        var cancelled = false
+                        val up = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                            waitForUpOrCancellation().also { if (it == null) cancelled = true }
                         }
+                        if (up != null) {
+                            source.tryEmit(PressInteraction.Release(press))
+                            clickNow()
+                        } else if (cancelled) {
+                            source.tryEmit(PressInteraction.Cancel(press))
+                        } else {
+                            down = true
+                            tick?.performHapticFeedback(HapticFeedbackType.LongPress)
+                            holdNow?.invoke(true)
+                            val lift = waitForUpOrCancellation()
+                            source.tryEmit(if (lift != null) PressInteraction.Release(press) else PressInteraction.Cancel(press))
+                        }
+                    } catch (gone: CancellationException) {
+                        source.tryEmit(PressInteraction.Cancel(press))
+                        throw gone
+                    } finally {
+                        if (down) holdNow?.invoke(false)
                     }
-                } else {
-                    disabled()
                 }
             }
+            .then(actions)
     } else {
         Modifier.combinedClickable(
             interactionSource = source,
@@ -500,8 +571,8 @@ private fun FunctionKey(
                 .cap(hw.darkFace, hw.darkEdge, RoundedCornerShape(8.dp), capPress(pressed && enabled), alpha = alpha)
                 .clearAndSetSemantics { },
         ) {
-            Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                Text(word.uppercase(), style = text, color = hw.darkInk, maxLines = 1, softWrap = false)
+            Box(Modifier.fillMaxWidth().weight(1f).then(if (held) Modifier.background(c.signal) else Modifier), contentAlignment = Alignment.Center) {
+                Text(word.uppercase(), style = text, color = if (held) c.onSignal else hw.darkInk, maxLines = 1, softWrap = false)
             }
             Box(Modifier.fillMaxWidth().weight(1f).background(lower), contentAlignment = Alignment.Center) {
                 Text(sub.uppercase(), style = text, color = lowerInk, maxLines = 1, softWrap = false)

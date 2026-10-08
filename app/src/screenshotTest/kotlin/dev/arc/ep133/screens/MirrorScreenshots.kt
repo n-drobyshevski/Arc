@@ -71,6 +71,13 @@ import dev.arc.ep133.ui.screens.ProjectSheetContent
 import dev.arc.ep133.ui.screens.SampleReviewSheetContent
 import dev.arc.ep133.ui.screens.TempoSheetContent
 import dev.arc.ep133.ui.screens.PatternSheetContent
+import dev.arc.ep133.ui.screens.FxPage
+import dev.arc.ep133.ui.screens.FxSheetContent
+import dev.arc.ep133.ui.screens.FxUi
+import dev.arc.ep133.features.Comp
+import dev.arc.ep133.features.FxSettings
+import dev.arc.ep133.features.FxType
+import dev.arc.ep133.features.Sidechain
 import dev.arc.ep133.ui.screens.TakeUi
 import dev.arc.ep133.ui.screens.TransportUi
 import dev.arc.ep133.features.PatternPosition
@@ -166,10 +173,10 @@ private fun Framed(
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE) {
     val mirror = MirrorUi(state, loading = loading, error = error, offline = offline, offlineProjects = offlineProjects)
-    // PROJECT as MainActivity works it out; TEMPO's light caught on a beat while the click is on.
-    val functions = FunctionKeysUi(project = projectKeyOf(mirror, busy = false), clickOn = clickOn, beatLit = clickOn)
+    // PROJECT as MainActivity works it out; TEMPO's light caught on a beat while the click is on; FX named on its light.
+    val functions = FunctionKeysUi(project = projectKeyOf(mirror, busy = false), clickOn = clickOn, beatLit = clickOn, fx = fx)
     // The SAMPLE panel, as MainActivity has it: the meter caught at a level, its threshold tick where the
     // knob has it, the last take's wave where [lastTake]. Without [sample], the panel closed, as the app has it in
     // PADS: the mic key in the top bar unlit, and nothing on the page.
@@ -721,6 +728,74 @@ private fun TempoSheet(deviceBpm: Double?) {
         MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
         ArcSheet(visible = true, onDismiss = {}) {
             TempoSheetContent(bpm = 98, deviceBpm = deviceBpm, on = true, onOn = {}, onBpm = {}, onTap = {}, onDone = {})
+        }
+    }
+}
+
+// FX, the fourth function key: the effect on named on its light.
+@PreviewTest
+@Preview(name = "Live fx key", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveFxKeyPreview() = Live(playing, oneGroup = true, fx = FxType.DELAY)
+
+@PreviewTest
+@Preview(name = "Live fx key small", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun LiveFxKeySmallPreview() = Live(playing, oneGroup = true, clickOn = true, fx = FxType.DISTORTION)
+
+// On its side the column has four keys: FX's light gives the effect's three letters.
+@PreviewTest
+@Preview(name = "Live fx key sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveFxKeySidewaysPreview() = Live(playing, oneGroup = true, fx = FxType.REVERB)
+
+@PreviewTest
+@Preview(name = "Live fx key sideways small", widthDp = 692, heightDp = 336, showBackground = true)
+@Composable
+fun LiveFxKeySidewaysSmallPreview() = Live(playing, oneGroup = true, fx = FxType.COMPRESSOR)
+
+// FX tapped: the FX sheet over Live. A delay on at 1/8D with its feedback at 38%, A (the pad played last's group,
+// in signal) and D sending to it; on OUTPUT the compressor and a sidechain from A 7 ducking B and C.
+private val fxDelay = FxSettings(
+    type = FxType.DELAY, x = 0.625f, y = 0.4f,
+    sends = listOf(0.62f, 0.2f, 0f, 0.35f),
+    comp = Comp(on = true, x = 0.6f, y = 0.3f),
+    sidechain = Sidechain(on = true, group = 0, pad = 9, dests = 0b0110, x = 0.26f, y = 0.7f),
+)
+
+@PreviewTest
+@Preview(name = "Fx sheet effect", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun FxSheetEffectPreview() = FxSheet(FxPage.EFFECT, fxDelay)
+
+@PreviewTest
+@Preview(name = "Fx sheet effect small dark", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun FxSheetEffectSmallDarkPreview() = FxSheet(FxPage.EFFECT, fxDelay.copy(type = FxType.FILTER, x = 0.3f, y = 0.55f), dark = true)
+
+// No effect on: the pad rests, dimmed, and says what to do.
+@PreviewTest
+@Preview(name = "Fx sheet effect off", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun FxSheetEffectOffPreview() = FxSheet(FxPage.EFFECT, FxSettings.DEFAULT)
+
+// SOURCE offers the pad played last (B 1 here).
+@PreviewTest
+@Preview(name = "Fx sheet output", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun FxSheetOutputPreview() = FxSheet(FxPage.OUTPUT, fxDelay, selected = PhysicalPad(1, 3))
+
+@PreviewTest
+@Preview(name = "Fx sheet output small dark", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun FxSheetOutputSmallDarkPreview() = FxSheet(FxPage.OUTPUT, fxDelay, dark = true, selected = PhysicalPad(1, 3))
+
+@Composable
+private fun FxSheet(page: FxPage, settings: FxSettings, dark: Boolean = false, selected: PhysicalPad = PhysicalPad(0, 9)) {
+    Framed(Tab.LIVE, dark = dark) {
+        MirrorScreen(mirror = MirrorUi(playing, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true, functions = FunctionKeysUi(fx = settings.type))
+        ArcSheet(visible = true, onDismiss = {}) {
+            FxSheetContent(FxUi(settings, bpm = 122f, selected = selected, nameOf = { names[it] }), onDone = {}, initialPage = page)
         }
     }
 }

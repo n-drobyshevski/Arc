@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import { DiffResult, ProjectDiff, ProjectState, SoundDiff, SoundState } from '../../../src/core/features/backupDiff'
 import { NoteNames, SCALES } from '../../../src/core/features/keys'
+import { FX_TYPES, FxType } from '../../../src/core/features/fxSettings'
 import { KeyMark } from '../../../src/core/features/piano'
 import { physicalPad } from '../../../src/core/features/padNotes'
 import { TIMINGS, Timing } from '../../../src/core/features/pattern'
@@ -162,6 +163,32 @@ describe('FeatureTextTest', () => {
     expect(MirrorText.FN_SOUND).toBe('Sound')
     expect(MirrorText.SOUND_SHEET).toBe("Pad's sound")
     expect(CoachText.TEMPO).toBe('Click: tap; hold for tempo')
+  })
+
+  it('fx text', () => {
+    expect([MirrorText.FN_FX, MirrorText.FN_FX_SUB].map((w) => w.toUpperCase())).toEqual(['FX', 'PAGE'])
+    expect(FX_TYPES.map((t) => MirrorText.fxCode(t))).toEqual(['OFF', 'DLY', 'REV', 'DST', 'CHO', 'FLT', 'CMP'])
+    // The key's word stays six letters at most, for four keys across a narrow phone.
+    expect(FX_TYPES.map((t) => MirrorText.fxKeyLabel(t))).toEqual(['FX off', 'Delay', 'Reverb', 'Dist', 'Chorus', 'Filter', 'Comp'])
+    expect(FX_TYPES.every((t) => MirrorText.fxKeyLabel(t).length <= 6)).toBe(true)
+    expect(MirrorText.fxKeyDescription(FxType.DISTORTION)).toBe('Effects, Distortion')
+    expect(MirrorText.fxKeyDescription(FxType.NONE)).toBe('Effects, Off')
+    expect(MirrorText.fxChoice(FxType.REVERB, true)).toBe('Reverb, on. Tap again to turn it off.')
+    expect(MirrorText.fxChoice(FxType.REVERB, false)).toBe('Reverb')
+    expect(MirrorText.xyState(FxType.DELAY, 0.625, 0.4, 120)).toBe('Length 1/8D, feedback 38%')
+    expect(MirrorText.xyState(FxType.FILTER, 0.5, 0.5, 120)).toBe('Cutoff OPEN, reso Q 4.3')
+    expect(MirrorText.xyReadout(FxType.DELAY, 0.625, 0.4, 120)).toBe('1/8D \u00B7 38%')
+    expect([MirrorText.xyStep('LENGTH', true), MirrorText.xyStep('FEEDBACK', false)]).toEqual(['Length up', 'Feedback down'])
+    expect(MirrorText.sendName(2)).toBe('Send C')
+    expect([0, 0.62, 1].map((v) => MirrorText.sendValue(v))).toEqual(['0', '62', '100'])
+    const a7 = physicalPad(0, 9)
+    expect(MirrorText.sidechainSource(a7, 'kick')).toBe('A 7 kick')
+    expect(MirrorText.sidechainSource(a7, null)).toBe('A 7')
+    expect(MirrorText.sidechainSourceDescription(a7, 'kick')).toBe('Sidechain source, A 7 kick')
+    expect(MirrorText.setSource(physicalPad(1, 3))).toBe('Set to B 1')
+    expect(MirrorText.duckChoice(3)).toBe('Duck group D')
+    expect([0, 0.3, 1].map((x) => MirrorText.sidechainLength(x))).toEqual(['30 ms', '201 ms', '600 ms'])
+    expect([0.2, 0.5, 0.7].map((y) => MirrorText.sidechainShape(y))).toEqual(['SNAP 60', 'EVEN', 'PUMP 40'])
   })
 
   it('sample text', () => {

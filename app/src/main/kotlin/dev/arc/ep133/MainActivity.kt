@@ -62,6 +62,7 @@ import dev.arc.ep133.ui.screens.ProjectSheetContent
 import dev.arc.ep133.ui.screens.SampleReviewSheetContent
 import dev.arc.ep133.ui.screens.TempoSheetContent
 import dev.arc.ep133.ui.screens.PatternSheetContent
+import dev.arc.ep133.ui.screens.FxSheetContent
 import dev.arc.ep133.ui.screens.SearchScreen
 import dev.arc.ep133.ui.screens.SettingsScreen
 import dev.arc.ep133.ui.screens.DeviceScreen
@@ -535,10 +536,17 @@ class MainActivity : ComponentActivity() {
             val open = padSheet
             if (open != null) controller.openPadEdit(open.first, open.second) else controller.closePadEdit()
         }
-        // TEMPO held: the tempo sheet; PROJECT held: the project sheet; RECORD held: the pattern sheet.
+        // TEMPO held: the tempo sheet; PROJECT held: the project sheet; RECORD held: the pattern sheet; FX tapped: the FX sheet.
         var tempoSheet by rememberSaveable { mutableStateOf(false) }
         var projectSheet by rememberSaveable { mutableStateOf(false) }
         var patternSheet by rememberSaveable { mutableStateOf(false) }
+        var fxSheet by rememberSaveable { mutableStateOf(false) }
+        // FX held: the pads play the punch-ins until it lets go, which lets go of every one held.
+        var punchMode by remember { mutableStateOf(false) }
+        fun punchOff() {
+            if (punchMode) controller.punchAllUp()
+            punchMode = false
+        }
         // The mirror listens only while its tab is in front (not under the debug, settings or guide screen).
         val live = tab == Tab.LIVE && !debug && !settingsOpen && !guideOpen
         val appSettings by controller.settings.collectAsStateWithLifecycle()
@@ -557,6 +565,8 @@ class MainActivity : ComponentActivity() {
                     tempoSheet = false
                     projectSheet = false
                     patternSheet = false
+                    fxSheet = false
+                    punchOff()
                     controller.setPatternErase(false)
                 }
                 Tab.DEVICE -> {
@@ -723,6 +733,8 @@ class MainActivity : ComponentActivity() {
         val lastTake by controller.sampleLastTake.collectAsStateWithLifecycle()
         // SAMPLE's take before KEEP: dismissed, it is discarded (the toast offers UNDO).
         val review by controller.sampleReview.collectAsStateWithLifecycle()
+        // FX: the project's effect, sends, output compressor and sidechain, for the FX key and sheet.
+        val fx by controller.fx.collectAsStateWithLifecycle()
         val functions = dev.arc.ep133.ui.screens.FunctionKeysUi(
             // SOUND held: the sheet of the pad played last (its tap is EDIT, below).
             onPadSound = {
@@ -738,6 +750,10 @@ class MainActivity : ComponentActivity() {
             beats = controller.beats,
             onClick = controller::setClick,
             onTempo = { tempoSheet = true },
+            fx = fx.type,
+            onFx = { fxSheet = true },
+            onFxHold = { down -> if (down) punchMode = true else punchOff() },
+            fxHeld = punchMode,
         )
         // The SAMPLE panel in the function keys' place: a swipe on Live's pads opens it and SAMPLE mode (asking for
         // the mic first where the input needs it), a swipe back or Back leaves it; the pads record while
@@ -748,7 +764,7 @@ class MainActivity : ComponentActivity() {
             clip = controller::sampleClip,
             lastTake = lastTake,
             // A sheet over Live keeps Back: the SAMPLE panel's would otherwise take it first.
-            sheetOpen = review != null || padSheet != null || tempoSheet || projectSheet || patternSheet || fontLicence || padsFor != null ||
+            sheetOpen = review != null || padSheet != null || tempoSheet || projectSheet || patternSheet || fxSheet || fontLicence || padsFor != null ||
                 detail != null || restore != null || comparePickFor != null || state.task != null,
             onOpen = {
                 if (!sample.on) {
@@ -757,6 +773,7 @@ class MainActivity : ComponentActivity() {
                     padSheet = null
                     tempoSheet = false
                     patternSheet = false
+                    fxSheet = false
                     enterSample()
                 }
             },
@@ -1100,6 +1117,27 @@ class MainActivity : ComponentActivity() {
                     }
                     ArcSheet(visible = patternSheet, onDismiss = { patternSheet = false }) {
                         PatternSheetContent(liveTransport, onDone = { patternSheet = false })
+                    }
+                    ArcSheet(visible = fxSheet, onDismiss = { fxSheet = false }) {
+                        FxSheetContent(
+                            dev.arc.ep133.ui.screens.FxUi(
+                                settings = fx,
+                                // The tempo Live plays at: the EP-133's while it sends its clock, else the phone's.
+                                bpm = dev.arc.ep133.controller.patternBpm(mirror?.state?.bpm, appSettings.liveTempo).toFloat(),
+                                selected = state.keysPad,
+                                nameOf = controller::mirrorName,
+                                onType = controller::setFxType,
+                                onXY = controller::setFxXY,
+                                onSend = controller::setFxSend,
+                                onComp = { on, x, y -> controller.setComp(on, x, y) },
+                                onSidechainOn = controller::setSidechainOn,
+                                onSidechainSource = controller::setSidechainSource,
+                                onSidechainDest = controller::toggleSidechainDest,
+                                onSidechainXY = controller::setSidechainXY,
+                                haptics = appSettings.haptics,
+                            ),
+                            onDone = { fxSheet = false },
+                        )
                     }
                     // SAMPLE's review sheet (its take collected above).
                     val lastReview = remember { mutableStateOf(review) }.apply { if (review != null) value = review }.value
