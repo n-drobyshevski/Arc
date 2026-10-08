@@ -12,6 +12,7 @@ import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -55,6 +56,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import dev.arc.ep133.features.MirrorState
@@ -69,16 +71,18 @@ import dev.arc.ep133.ui.components.LocalHwColors
 import dev.arc.ep133.ui.components.cap
 import dev.arc.ep133.ui.components.capPress
 import dev.arc.ep133.ui.components.coachMark
+import dev.arc.ep133.ui.components.rotateVertical
 import dev.arc.ep133.ui.theme.LocalArcColors
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 
 /*
- * Live's function keys (an addition): PROJECT, KEYS and TEMPO as the EP-133
+ * Live's function keys (an addition): SOUND, PROJECT and TEMPO as the EP-133
  * prints its two-tier keys, a dark cap with its word on the upper half and
  * the lower half filled with a colour carrying a second word, under an LED
  * and a printed label. A row over the pads (upright, and on the
  * all-groups and tablet pages), a column left of them on a phone on its side.
+ * KEYS / PADS is printed on the pads' plate instead ([ModeStrip]).
  */
 
 /**
@@ -163,8 +167,8 @@ private val ColumnGapTight = 6.dp
 private val ColumnCapLed = 32.dp
 private val ColumnCapMin = 30.dp
 
-/** How many keys the row and the column hold: SOUND, PROJECT, KEYS and TEMPO. */
-private const val KEY_COUNT = 4
+/** How many keys the row and the column hold: SOUND, PROJECT and TEMPO. */
+private const val KEY_COUNT = 3
 
 /** The column's least height that keeps its LED lines (the caps at their smallest with them). */
 internal val FunctionColumnLed = (ColumnCapLed + CapToLed + LedLine) * KEY_COUNT + ColumnGapTight * (KEY_COUNT - 1)
@@ -199,7 +203,7 @@ internal fun functionRowHeight(): Dp = rowCap() + CapToLed + LedLine
 @Composable
 private fun rowCap(): Dp = if (LocalArcWindow.current.width >= 600.dp) RowCapWide else RowCap
 
-/** The four keys in a row over the pads or the keys, sharing its width up to [RowKeyMax] each. */
+/** The three keys in a row over the pads or the keys, sharing its width up to [RowKeyMax] each. */
 @Composable
 internal fun FunctionRow(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions, st: MirrorState, haptics: Boolean, modifier: Modifier = Modifier, hold: ProjectHold = remember { ProjectHold() }, edit: EditUi = EditUi()) {
     Row(
@@ -233,7 +237,7 @@ internal fun FunctionColumn(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActio
     }
 }
 
-/** SOUND, PROJECT, KEYS and TEMPO, each with [modifier]; [column]'s size in the column, null in the row. */
+/** SOUND, PROJECT and TEMPO, each with [modifier]; [column]'s size in the column, null in the row. */
 @Composable
 private fun FunctionKeys(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions, st: MirrorState, haptics: Boolean, column: ColumnFit?, modifier: Modifier, hold: ProjectHold, edit: EditUi) {
     val c = LocalArcColors.current
@@ -298,24 +302,6 @@ private fun FunctionKeys(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions,
         haptics = haptics,
         modifier = modifier.coachMark("live.project", CoachText.PROJECT, c.navy, c.onNavy),
     )
-    // KEYS: the mode, its light on while the pads are keys (the key doesn't latch).
-    FunctionKey(
-        word = MirrorText.MODE_KEYS,
-        sub = MirrorText.MODE_PADS,
-        lower = c.signal,
-        lowerInk = c.onSignal,
-        led = { if (keys.on) 1f else 0f },
-        lit = keys.on,
-        label = if (keys.on) MirrorText.MODE_KEYS else MirrorText.MODE_PADS,
-        description = MirrorText.MODE_KEYS,
-        state = null,
-        toggled = keys.on,
-        onClick = { actions.onMode(!keys.on) },
-        role = Role.Switch,
-        column = column,
-        haptics = haptics,
-        modifier = modifier.coachMark("live.mode", CoachText.MODE, c.navy, c.onNavy),
-    )
     // TEMPO: a tap turns the click on or off, a hold opens the tempo sheet. While the
     // EP-133 sends MIDI clock its tempo is the one shown (and the one the click follows).
     val device = st.bpm
@@ -328,7 +314,7 @@ private fun FunctionKeys(fn: FunctionKeysUi, keys: KeysUi, actions: KeysActions,
         lowerInk = c.onSignal,
         led = { blink.value },
         lit = fn.clickOn,
-        // Whole BPM, so it fits four keys across a narrow phone (the display line keeps the tenth).
+        // Whole BPM, so it fits three keys across a narrow phone (the display line keeps the tenth).
         label = if (column != null) MirrorText.tempoShort(bpm) else MirrorText.tempoValue(bpm),
         description = MirrorText.CLICK,
         state = MirrorText.clickState(fn.clickOn, bpm, following = device != null),
@@ -521,5 +507,53 @@ private fun FunctionKey(
                 Text(sub.uppercase(), style = text, color = lowerInk, maxLines = 1, softWrap = false)
             }
         }
+    }
+}
+
+/** How much wider the pads' plate's right margin is for [ModeStrip] (the pads give it up). */
+internal val ModeStripWidth = 16.dp
+
+/**
+ * KEYS / PADS printed in the pads' plate's right margin (an addition): the
+ * two words turned to read upward, as the GUIDE tab's does, KEYS over
+ * PADS with a short line between, the mode shown in ink and the other grey.
+ * The whole strip ([modifier]: the margin, the pads' height) is one switch: a
+ * tap shows the other mode ([onMode]), with a tick under the finger when
+ * [haptics] is on. [size]: the words' print, as the plate's own words go.
+ */
+@Composable
+internal fun ModeStrip(keysOn: Boolean, onMode: (Boolean) -> Unit, haptics: Boolean, size: Dp, modifier: Modifier) {
+    val c = LocalArcColors.current
+    val ko = LocalHwColors.current.ko
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val tick = if (haptics) LocalHapticFeedback.current else null
+    LaunchedEffect(pressed) {
+        if (pressed) tick?.performHapticFeedback(HapticFeedbackType.KeyboardTap)
+    }
+    val word: @Composable (String, Boolean) -> Unit = { text, on ->
+        Text(
+            text.uppercase(),
+            style = viewWordStyle(size, 0.14f).copy(fontWeight = if (on) FontWeight.Bold else FontWeight.SemiBold),
+            color = if (on) ko.label else ko.ledOff,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.rotateVertical(),
+        )
+    }
+    Column(
+        modifier
+            .coachMark("live.mode", CoachText.MODE, c.navy, c.onNavy)
+            .toggleable(value = keysOn, interactionSource = source, indication = null, role = Role.Switch) { onMode(it) }
+            .semantics {
+                contentDescription = CoachText.MODE
+                stateDescription = if (keysOn) MirrorText.MODE_KEYS else MirrorText.MODE_PADS
+            },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically),
+    ) {
+        word(MirrorText.MODE_KEYS, keysOn)
+        Box(Modifier.size(1.5.dp, 14.dp).background(ko.edge, RoundedCornerShape(1.dp)))
+        word(MirrorText.MODE_PADS, !keysOn)
     }
 }

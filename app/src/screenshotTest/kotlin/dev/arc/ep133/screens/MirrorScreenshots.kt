@@ -232,6 +232,12 @@ fun LiveOneGroupDarkPreview() = Live(playing, dark = true, oneGroup = true)
 @Composable
 fun LiveToolsOpenPreview() = Live(playing, oneGroup = true, tools = true)
 
+// All four groups have no plate to print KEYS / PADS on: the mode is in the tools.
+@PreviewTest
+@Preview(name = "Live all groups tools", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveAllGroupsToolsPreview() = Live(playing, tools = true)
+
 // A smaller phone (360 x 740 dp, less the bars): still one screen, the pads just get shorter.
 @PreviewTest
 @Preview(name = "Live one group small", widthDp = 360, heightDp = 668, showBackground = true)
