@@ -57,6 +57,24 @@ class ArpPlanTest {
     }
 
     @Test
+    fun `a press a scroll may take tells its time once kept, and nothing once cut`() {
+        assertTrue(desk.press(padKey(a7), hit(a7), false, 50, false, unsure = true))
+        assertEquals(listOf(hit(a7)), desk.notes)
+        assertEquals(50L, desk.keep(padKey(a7)))
+        // Kept once: RECORD isn't started by it again.
+        assertNull(desk.keep(padKey(a7)))
+        desk.press(padKey(b1), hit(b1), false, 60, false, unsure = true)
+        assertTrue(desk.cut(padKey(b1)))
+        assertNull(desk.keep(padKey(b1)))
+        // A sure press has nothing to keep.
+        desk.press(padKey(b1), hit(b1), false, 70, false)
+        assertNull(desk.keep(padKey(b1)))
+        desk.press(padKey(keysPad), hit(keysPad), false, 80, false, unsure = true)
+        desk.clear()
+        assertNull(desk.keep(padKey(keysPad)))
+    }
+
+    @Test
     fun `the same note under two fingers plays once and goes with the last of them`() {
         desk.press("note:60", key(0), true, 1, false)
         desk.press("grid:60", key(0), true, 2, false)

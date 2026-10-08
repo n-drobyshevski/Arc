@@ -667,4 +667,27 @@ class PatternSchedulerTest {
         assertEquals(n, told.size)
         assertTrue(arpStarts(r).last().at > 3 * bar + ahead)
     }
+
+    @Test
+    fun `a step STOP drops before it is mixed is never told for RECORD`() {
+        val r = Rig()
+        val told = ArrayList<Pair<ArpStep, Long>>()
+        r.s.onArpStep = { told += it to r.rendered }
+        r.s.plan = SeqPlan(ProjectPatterns(), voices(), emptyMap(), 120.0)
+        r.s.play(0)
+        r.run(48_000, stampEvery = 25)
+        r.s.arp = arpPlan(listOf(note(0)), r.heard(r.rendered - 1200))
+        // Tick 480 (frame 218400) is sent a lookahead early, and not yet mixed when STOP comes.
+        val zero = ahead
+        val pending = zero + 480 * 250L
+        r.run(pending - 1056, stampEvery = 25)
+        assertTrue(arpStarts(r).any { it.at == pending && it.rendered < pending })
+        // Each one told was mixed by then.
+        assertTrue(told.isNotEmpty())
+        for ((s, at) in told) assertTrue(zero + s.globalTick * 250 < at, "tick ${s.globalTick} told at $at")
+        r.s.stop()
+        r.run(pending + bar, stampEvery = 25)
+        assertTrue(r.sink.events.contains(Flushed))
+        assertTrue(told.none { it.first.globalTick >= 480 }, told.map { it.first.globalTick }.toString())
+    }
 }

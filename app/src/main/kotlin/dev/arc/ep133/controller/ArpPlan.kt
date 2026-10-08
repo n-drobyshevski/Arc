@@ -67,6 +67,8 @@ internal class ArpDesk {
 
     // The fingers down, by voice key: the note each holds.
     private val down = LinkedHashMap<String, ArpNote>()
+    // The presses a scroll may yet take, by voice key: when each came, for RECORD's start once kept.
+    private val unsure = HashMap<String, Long>()
     private val sense = PressureSense()
 
     /** The RANDOM order's seed: the run's own, from its press. */
@@ -77,10 +79,11 @@ internal class ArpDesk {
 
     /**
      * A finger down on voice [key] at [at], holding [note] ([keys]: a KEYS
-     * note), [latch] on or off. True when it starts a run of its own (its
-     * first step on this press).
+     * note), [latch] on or off; [unsure] while a scroll may yet take it
+     * ([keep], [cut]). True when it starts a run of its own (its first step
+     * on this press).
      */
-    fun press(key: String, note: ArpNote, keys: Boolean, at: Long, latch: Boolean): Boolean {
+    fun press(key: String, note: ArpNote, keys: Boolean, at: Long, latch: Boolean, unsure: Boolean = false): Boolean {
         val fresh = notes.isEmpty() || keys != this.keys || latch && down.isEmpty()
         if (fresh) {
             notes = listOf(note)
@@ -90,11 +93,16 @@ internal class ArpDesk {
             notes = notes + note
         }
         down[key] = note
+        if (unsure) this.unsure[key] = at else this.unsure -= key
         return fresh
     }
 
+    /** The press on voice [key] was a press after all: when it came, if it was [press]ed unsure (else null). */
+    fun keep(key: String): Long? = unsure.remove(key)
+
     /** The finger on voice [key] up: its note goes (unless [latch], or another finger holds it). True when the notes changed. */
     fun release(key: String, latch: Boolean): Boolean {
+        unsure -= key
         val n = down.remove(key) ?: return false
         if (latch || down.values.any { sameArpNote(it, n) }) return false
         return drop(n)
@@ -102,6 +110,7 @@ internal class ArpDesk {
 
     /** The press on voice [key] was a scroll after all: its note goes, latched or not. True when the notes changed. */
     fun cut(key: String): Boolean {
+        unsure -= key
         val n = down.remove(key) ?: return false
         if (down.values.any { sameArpNote(it, n) }) return false
         return drop(n)
@@ -118,6 +127,7 @@ internal class ArpDesk {
     /** Every note goes, and every finger is forgotten. True when there were notes. */
     fun clear(): Boolean {
         down.clear()
+        unsure.clear()
         if (notes.isEmpty()) return false
         notes = emptyList()
         return true

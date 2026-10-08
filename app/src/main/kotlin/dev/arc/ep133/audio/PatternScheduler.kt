@@ -179,7 +179,8 @@ class PatternScheduler(
 
     /**
      * A step the arp played while the pattern's clock runs, on the output's
-     * thread: hand it on (RECORD takes it), don't record it there.
+     * thread once it is mixed (one STOP or PLAY dropped before never is):
+     * hand it on (RECORD takes it), don't record it there.
      */
     var onArpStep: ((ArpStep) -> Unit)?
         get() = arpRunner.onStep
@@ -287,6 +288,8 @@ class PatternScheduler(
         val lost = lostAsked.getAndSet(false)
         // The arp's frames are gone too, whatever the transport does: a loss, or frames counted anew.
         val arpLost = lost || rendered < lastRendered
+        // The arp's steps mixed by now go to RECORD, before a flush below drops those not yet.
+        arpRunner.mixed(rendered, arpLost)
         fillPattern(sink, rendered, rate, lost)
         val c = clock
         arpRunner.fill(sink, rendered, rate, lookaheadNs * rate / 1_000_000_000L, arp, c?.takeIf { !waiting }, c != null && waiting, latest, arpLost)
@@ -537,7 +540,7 @@ internal fun velocityShape(shape: VoiceShape, velocity: Int): VoiceShape {
  * to the pattern's (PLAY) and back (STOP) while a note sounds.
  */
 internal class ArpRunner(private val tag: () -> Long) {
-    /** A step played on the pattern's clock (not on the arp's own): for RECORD. */
+    /** A step played on the pattern's clock (not on the arp's own), told once mixed ([mixed]): for RECORD. */
     var onStep: ((ArpStep) -> Unit)? = null
 
     // The plan the cycle is of, and the run's press (a new one starts the run again); active while it plays.
@@ -565,6 +568,11 @@ internal class ArpRunner(private val tag: () -> Long) {
     private var heldStarts = LongArray(32)
     private var heldEnds = LongArray(32)
     private var heldSent = BooleanArray(32)
+
+    // The steps for [onStep] not mixed yet, and their frames: a flush drops them, unheard, unrecorded.
+    private var told = 0
+    private var toldSteps = arrayOfNulls<ArpStep>(16)
+    private var toldFrames = LongArray(16)
 
     // Keys made once: semitones -64..127 for each pad, and a pad hit's ("n").
     private val keys = arrayOfNulls<String>(4 * 12 * KEY_SEMIS)
@@ -665,6 +673,30 @@ internal class ArpRunner(private val tag: () -> Long) {
         }
         held = 0
         resync = true
+        // Never heard, so not for RECORD either.
+        mixed(Long.MIN_VALUE, lost = true)
+    }
+
+    /**
+     * Before a block, [rendered] frames done: the steps on the pattern's
+     * clock mixed by now are told ([onStep]); [lost] (the frames gone), none
+     * still waiting ever is.
+     */
+    fun mixed(rendered: Long, lost: Boolean) {
+        var k = 0
+        for (i in 0 until told) {
+            val s = toldSteps[i]!!
+            toldSteps[i] = null
+            if (lost) continue
+            if (toldFrames[i] < rendered) {
+                onStep?.invoke(s)
+            } else {
+                toldSteps[k] = s
+                toldFrames[k] = toldFrames[i]
+                k++
+            }
+        }
+        told = k
     }
 
     // The run ends: the voices sounding are let go of at [rendered]; those sent to start later play out their gate.
@@ -703,7 +735,18 @@ internal class ArpRunner(private val tag: () -> Long) {
         val shape = velocityShape(if (semis == null) v.shape else v.keysShape, n.velocity)
         if (!sink.startAt(key, v.pcm, v.channels, v.rate, semis ?: 0, t, shape, frame)) return
         hold(key, t, frame, end)
-        if (recorded) onStep?.invoke(ArpStep(n, tick, gate))
+        if (recorded && onStep != null) tell(ArpStep(n, tick, gate), frame)
+    }
+
+    // [s], played at [frame], for [onStep] once mixed.
+    private fun tell(s: ArpStep, frame: Long) {
+        if (told == toldSteps.size) {
+            toldSteps = toldSteps.copyOf(told * 2)
+            toldFrames = toldFrames.copyOf(told * 2)
+        }
+        toldSteps[told] = s
+        toldFrames[told] = frame
+        told++
     }
 
     // The releases that fall before [to] are sent; a note is forgotten once its release is rendered.

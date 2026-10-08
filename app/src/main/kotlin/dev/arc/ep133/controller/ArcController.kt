@@ -2056,9 +2056,10 @@ class ArcController(
     ): Job? {
         val key = "live:${pad.group}:${pad.offset}"
         // The arp on (RPT): the press holds the pad for note repeat, not played or recorded itself.
+        // One a scroll may yet take becomes the KEYS sound, and starts RECORD armed, once kept ([keepPad]).
         if (record && arpTakes(hold)) {
             if (!unsure) setKeysPad(pad)
-            arpPress(key, dev.arc.ep133.features.ArpNote(pad, null), keys = false, pressedAt, hold)
+            arpPress(key, dev.arc.ep133.features.ArpNote(pad, null), keys = false, pressedAt, hold, unsure)
             return null
         }
         if (hold) held += key
@@ -2087,6 +2088,12 @@ class ArcController(
      */
     fun keepPad(pad: dev.arc.ep133.features.PhysicalPad): Job? {
         val key = "live:${pad.group}:${pad.offset}"
+        // One the arp holds: neither played nor recorded itself.
+        arpDesk.keep(key)?.let { at ->
+            setKeysPad(pad)
+            patternPadDown(at)
+            return null
+        }
         val u = unsure.remove(key) ?: return null
         lastPressAt = maxOf(lastPressAt, u.pressedAt)
         setKeysPad(pad)
@@ -4136,14 +4143,15 @@ class ArcController(
      * joins the arp's notes ([keys]: a KEYS note; else a pad for note
      * repeat), neither played nor recorded itself; the sequencer plays it
      * on the next step (the first of a run on the press). With RECORD armed,
-     * the recording starts on it, as on a press's ([patternPadDown]); the
-     * arp's steps are what it records ([recordArpStep]).
+     * the recording starts on it, as on a press's ([patternPadDown]; one
+     * [unsure], once kept); the arp's steps are what it records ([recordArpStep]).
      */
-    private fun arpPress(key: String, note: dev.arc.ep133.features.ArpNote, keys: Boolean, pressedAt: Long, hold: Boolean) {
+    private fun arpPress(key: String, note: dev.arc.ep133.features.ArpNote, keys: Boolean, pressedAt: Long, hold: Boolean, unsure: Boolean = false) {
         lastPressAt = pressedAt
-        patternPadDown(pressedAt)
+        // Unsure, RECORD starts once the press is kept ([keepPad]): a scroll starts nothing.
+        if (!unsure) patternPadDown(pressedAt)
         val latch = settings.value.arpLatch
-        if (arpDesk.press(key, note, keys, pressedAt, latch)) arpTried.clear()
+        if (arpDesk.press(key, note, keys, pressedAt, latch, unsure)) arpTried.clear()
         // A tap that never lets go (latched, or it wouldn't be here): up at once, its note kept.
         if (!hold) arpDesk.release(key, latch)
         publishArp()
