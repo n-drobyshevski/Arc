@@ -5,7 +5,9 @@
 //
 // Three kinds of thread, each with its own side:
 // - the producer (one app thread at a time; the Kotlin side serializes them)
-//   queues commands: load, unload, start, release, cut, stop all;
+//   queues commands: load, unload, start, release, cut, stop all, and the
+//   pattern sequencer's timed starts and releases (at a mix frame, the
+//   releases tagged) and their flush;
 // - the audio thread ([render]) applies them, mixes, and reports: voices
 //   started (key, frame, the press's tag), the keys sounding when they change,
 //   the output's xruns and buffer size, and, while REC is on, the mix itself
@@ -60,12 +62,17 @@ public:
     /**
      * Starts voice [key] on [slot]'s sound, read at [sampleRate], [pitch] times
      * faster, shaped by [shape] (VoiceMixer's); [tag] comes back with STARTED.
+     * Timed, it starts at mix frame [at] (VoiceMixer::NOW: at the next render).
      */
     bool start(int32_t key, int32_t slot, int32_t sampleRate, double pitch, int64_t tag,
-               const VoiceShape &shape = VoiceShape());
+               const VoiceShape &shape = VoiceShape(), int64_t at = VoiceMixer::NOW);
     bool release(int32_t key);
+    /** Lets go of voice [key] at mix frame [at]; a [tag] other than 0: only the voices started with it. */
+    bool releaseAt(int32_t key, int64_t at, int64_t tag);
     bool cut(int32_t key);
     bool stopAll();
+    /** Drops the timed starts and releases still waiting for their frame. */
+    bool flushTimed();
 
     /** REC: whether the mix goes back to the consumer (any thread). */
     void setRecording(bool on) { recording_.store(on, std::memory_order_relaxed); }
@@ -78,6 +85,8 @@ public:
     void reportOutput(int32_t xruns, int32_t bufferSize);
     /** Output frames mixed so far (or between streams). */
     int64_t frame() const { return mixer_.frame(); }
+    /** [frame] as the last render left it, for any thread: where the sequencer schedules from. */
+    int64_t rendered() const { return rendered_.load(std::memory_order_acquire); }
     int outRate() const { return mixer_.outRate(); }
 
     // ---------- between streams (no render running) ----------
@@ -85,8 +94,8 @@ public:
     /**
      * The stream reopened at [outRate]: the next render applies the loads and
      * unloads queued meanwhile and drops the rest (presses made while nothing
-     * played aren't heard late); what was sounding fades out, or, at a new
-     * rate, is dropped at once.
+     * played aren't heard late), timed commands waiting in the mixer too; what
+     * was sounding fades out, or, at a new rate, is dropped at once.
      */
     void restart(int outRate);
 
@@ -108,8 +117,9 @@ public:
     int64_t freed() const { return freedCount_; }
 
 private:
-    enum class Kind : uint8_t { Load, Unload, Start, Release, Cut, StopAll };
+    enum class Kind : uint8_t { Load, Unload, Start, Release, ReleaseTagged, Cut, StopAll, FlushTimed };
 
+    // [at]: the mix frame a timed Start or ReleaseTagged waits for (VoiceMixer::NOW for none).
     struct Command {
         Kind kind;
         int32_t key;
@@ -119,6 +129,7 @@ private:
         int64_t tag;
         Sample *sample;
         VoiceShape shape;
+        int64_t at;
     };
 
     struct Event {
@@ -147,6 +158,7 @@ private:
     Sample *retired_[MAX_RETIRED] = {};
     int retiredCount_ = 0;
     uint32_t keysSent_ = 0;
+    std::atomic<int64_t> rendered_{0};
     std::atomic<bool> recording_{false};
     std::atomic<bool> flushing_{false};
 

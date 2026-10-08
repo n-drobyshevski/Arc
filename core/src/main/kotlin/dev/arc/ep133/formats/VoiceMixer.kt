@@ -81,10 +81,22 @@ data class VoiceShape(
  * the new pitch where it is (on another sound it starts over, as gated). The
  * [DEFAULT] shape plays exactly as before shapes.
  *
- * [start], [release], [cut] and [stopAll] may be called from any thread; they
- * take effect at the next [render], which only the output's thread calls.
- * [render] allocates nothing unless a voice starts or [keys] changes, so the
- * output's thread doesn't feed the garbage collector.
+ * A start or a release may also be timed (an addition, for the pattern
+ * sequencer): given an output frame, it waits for that frame and takes effect
+ * there, inside a render if need be (the render plays up to it, applies it,
+ * and goes on), so a note lands on its frame rather than on a block's edge.
+ * One whose frame has already passed takes effect at the next render's start,
+ * after the commands that aren't timed. A timed release may name a tag: it
+ * then lets go of only the voices started with that tag, so the sequencer's
+ * note-off never ends a press of the same pad. [flushTimed] drops the timed
+ * commands still waiting. Without timed commands a render plays exactly as
+ * before them.
+ *
+ * [start], [release], [cut], [stopAll] and [flushTimed] may be called from
+ * any thread; they take effect at the next [render], which only the output's
+ * thread calls. [render] allocates nothing unless a voice starts, a timed
+ * command waits, or [keys] changes, so the output's thread doesn't feed the
+ * garbage collector.
  */
 class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
     companion object {
@@ -95,6 +107,8 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
         const val CHOKE_MS = 3
         /** [VoiceShape.pan]'s reach either way. */
         const val PAN_MAX = 16
+        /** A command's frame when it isn't timed: it takes effect at the next [render]'s start. */
+        const val NOW = Long.MIN_VALUE
 
         /** How much faster a sound is read to play [semitones] higher. */
         fun pitchRatio(semitones: Double): Double = 2.0.pow(semitones / 12.0)
@@ -105,16 +119,31 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
 
     /**
      * A voice that began in the last [render]: its [tag] (the caller's), at
-     * output frame [frame]. A legato start that only changed a held voice's
-     * pitch is reported too, with its own tag, at the frame the pitch changed.
+     * output frame [frame] (a timed start's own, unless it came late). A
+     * legato start that only changed a held voice's pitch is reported too,
+     * with its own tag, at the frame the pitch changed.
      */
     data class Started(val key: String, val tag: Long, val frame: Long)
 
+    /** [at]: the output frame a timed command waits for, [NOW] for none. */
     private sealed interface Command {
-        class Start(val key: String, val pcm: ShortArray, val channels: Int, val step: Double, val tag: Long, val shape: VoiceShape) : Command
-        class Release(val key: String) : Command
+        val at: Long get() = NOW
+
+        class Start(
+            val key: String,
+            val pcm: ShortArray,
+            val channels: Int,
+            val step: Double,
+            val tag: Long,
+            val shape: VoiceShape,
+            override val at: Long,
+        ) : Command
+
+        /** [tag] other than 0: only the voices started with it. */
+        class Release(val key: String, override val at: Long, val tag: Long) : Command
         class Cut(val key: String) : Command
         data object StopAll : Command
+        data object FlushTimed : Command
     }
 
     /**
@@ -124,6 +153,7 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
      */
     private class Voice(
         val key: String,
+        var tag: Long,
         val pcm: ShortArray,
         val channels: Int,
         var step: Double,
@@ -149,6 +179,8 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
     }
 
     private val commands = ConcurrentLinkedQueue<Command>()
+    // Timed commands waiting for their frame: by frame, then as they came (the output's thread only).
+    private val pending = ArrayList<Command>()
     private val voices = ArrayList<Voice>()
     private var mix = FloatArray(0)
     private val minGate = MIN_GATE_MS * outRate / 1000L
@@ -169,7 +201,8 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
     /**
      * Plays [pcm] (16-bit, [channels] interleaved, at [sampleRate]) as voice
      * [key], [semitones] (plus [shape]'s) from its own pitch, shaped by
-     * [shape], until [release]. [tag] comes back in [started].
+     * [shape], until [release]. [tag] comes back in [started]. Timed, it
+     * starts at output frame [at] ([NOW]: at the next render).
      */
     fun start(
         key: String,
@@ -179,19 +212,21 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
         semitones: Int = 0,
         tag: Long = 0,
         shape: VoiceShape = VoiceShape.DEFAULT,
+        at: Long = NOW,
     ) {
         require(channels in 1..2) { "channels: $channels" }
         val step = sampleRate.toDouble() / outRate * pitchRatio(semitones + shape.semitones)
-        commands.add(Command.Start(key, pcm, channels, step, tag, shape))
+        commands.add(Command.Start(key, pcm, channels, step, tag, shape, at))
     }
 
     /**
      * Lets go of voice [key] (every one of a [VoiceMode.KEY] key): it fades
      * out now, or once it has sounded [MIN_GATE_MS]. A [VoiceMode.ONESHOT]
-     * voice plays on.
+     * voice plays on. Timed, it lets go at output frame [at]; a [tag] other
+     * than 0 lets go of only the voices started with that tag.
      */
-    fun release(key: String) {
-        commands.add(Command.Release(key))
+    fun release(key: String, at: Long = NOW, tag: Long = 0) {
+        commands.add(Command.Release(key, at, tag))
     }
 
     /** Ends voice [key] (all of its voices) now, in [CHOKE_MS], even inside its [MIN_GATE_MS]: the press was a scroll. */
@@ -204,22 +239,66 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
         commands.add(Command.StopAll)
     }
 
-    /** Mixes the next [frames] stereo frames into [out] (left, right, …). */
+    /** Drops the timed starts and releases still waiting for their frame; those sent after it wait as usual. */
+    fun flushTimed() {
+        commands.add(Command.FlushTimed)
+    }
+
+    /**
+     * Mixes the next [frames] stereo frames into [out] (left, right, …): the
+     * commands first, then the timed ones already due, then the voices up to
+     * the next timed command's frame inside the render, that command, and on.
+     */
     fun render(out: ShortArray, frames: Int) {
         started.clear()
-        while (true) apply(commands.poll() ?: break)
+        while (true) take(commands.poll() ?: break)
         if (mix.size < frames * 2) mix = FloatArray(frames * 2)
         java.util.Arrays.fill(mix, 0, frames * 2, 0f)
+        val end = frame + frames
+        var done = 0
+        while (true) {
+            applyDue()
+            val next = if (pending.isEmpty()) end else minOf(end, pending[0].at)
+            val n = (next - frame).toInt()
+            if (n > 0) {
+                playAll(done, n)
+                done += n
+                frame += n
+            }
+            if (frame >= end) break
+        }
+        for (i in 0 until frames * 2) out[i] = mix[i].coerceIn(-32768f, 32767f).toInt().toShort()
+        if (keysChanged()) keys = voices.filterNot { it.choked }.mapTo(LinkedHashSet()) { it.key }
+    }
+
+    /** A command off the queue: applied now or, timed, kept until its frame, behind those already waiting for it. */
+    private fun take(c: Command) {
+        if (c.at == NOW) return apply(c)
+        var i = pending.size
+        while (i > 0 && pending[i - 1].at > c.at) i--
+        pending.add(i, c)
+    }
+
+    /** Applies the timed commands whose frame has come (or gone), in order. */
+    private fun applyDue() {
+        var n = 0
+        while (n < pending.size && pending[n].at <= frame) n++
+        if (n == 0) return
+        for (i in 0 until n) apply(pending[i])
+        // Moved down in place: no view, no copy.
+        for (i in n until pending.size) pending[i - n] = pending[i]
+        while (n-- > 0) pending.removeAt(pending.size - 1)
+    }
+
+    /** Adds the next [frames] of every voice to the mix, from its frame [offset]; ended voices are dropped. */
+    private fun playAll(offset: Int, frames: Int) {
         // Ended voices dropped in place, by index: no iterator, no copy.
         var kept = 0
         for (i in voices.indices) {
             val v = voices[i]
-            if (play(v, frames)) voices[kept++] = v
+            if (play(v, offset, frames)) voices[kept++] = v
         }
         while (voices.size > kept) voices.removeAt(voices.size - 1)
-        for (i in 0 until frames * 2) out[i] = mix[i].coerceIn(-32768f, 32767f).toInt().toShort()
-        frame += frames
-        if (keysChanged()) keys = voices.filterNot { it.choked }.mapTo(LinkedHashSet()) { it.key }
     }
 
     /**
@@ -271,7 +350,7 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
                 }
                 val pan = shape.pan.coerceIn(-PAN_MAX, PAN_MAX)
                 voices += Voice(
-                    c.key, c.pcm, c.channels, c.step, frame, first, end,
+                    c.key, c.tag, c.pcm, c.channels, c.step, frame, first, end,
                     level = shape.gain.coerceIn(0f, 1f),
                     left = minOf(1f, (PAN_MAX - pan) / PAN_MAX.toFloat()),
                     right = minOf(1f, (PAN_MAX + pan) / PAN_MAX.toFloat()),
@@ -284,7 +363,7 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
             }
             is Command.Release -> for (i in voices.indices) {
                 val v = voices[i]
-                if (v.key != c.key || v.choked) continue
+                if (v.key != c.key || v.choked || (c.tag != 0L && v.tag != c.tag)) continue
                 v.letGo = true
                 if (v.fadeAt != Long.MAX_VALUE || v.mode == VoiceMode.ONESHOT) continue
                 v.fadeAt = maxOf(frame, v.startFrame + minGate)
@@ -292,13 +371,15 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
             }
             is Command.Cut -> cutKey(c.key)
             Command.StopAll -> for (i in voices.indices) if (!voices[i].choked) cut(voices[i])
+            Command.FlushTimed -> pending.clear()
         }
     }
 
     /**
      * A legato start: when [c]'s key has a legato voice still held on the same
-     * sound, that voice takes [c]'s pitch where it is (its other voices, if
-     * any, are cut) and true comes back; false when a voice is to start.
+     * sound, that voice takes [c]'s pitch and tag where it is (its other
+     * voices, if any, are cut) and true comes back; false when a voice is to
+     * start.
      */
     private fun legato(c: Command.Start): Boolean {
         var held: Voice? = null
@@ -313,6 +394,7 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
             if (o !== v && o.key == c.key && !o.choked) cut(o)
         }
         v.step = c.step
+        v.tag = c.tag
         started += Started(c.key, c.tag, frame)
         return true
     }
@@ -345,8 +427,8 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
         return if (since >= v.attack) 1f else since.toFloat() / v.attack.toFloat()
     }
 
-    /** Adds [frames] of [v] to the mix; false once it has ended. */
-    private fun play(v: Voice, frames: Int): Boolean {
+    /** Adds [frames] of [v] to the mix from its frame [offset] (output frame [frame]); false once it has ended. */
+    private fun play(v: Voice, offset: Int, frames: Int): Boolean {
         val last = v.end - 1
         val pcm = v.pcm
         val ch = v.channels
@@ -368,8 +450,8 @@ class VoiceMixer(val outRate: Int, val maxVoices: Int = MAX_VOICES) {
             } else {
                 l
             }
-            mix[2 * i] += l * gain * v.left
-            mix[2 * i + 1] += r * gain * v.right
+            mix[2 * (offset + i)] += l * gain * v.left
+            mix[2 * (offset + i) + 1] += r * gain * v.right
             v.pos = p + v.step
         }
         return true

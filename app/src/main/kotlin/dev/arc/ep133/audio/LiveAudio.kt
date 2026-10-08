@@ -475,7 +475,10 @@ class LiveAudio(
 
         override val recording: Boolean get() = take != null || armed != null || tap != null
 
-        override fun beforeBlock() {
+        // No sequencer yet.
+        override val clocked: Boolean get() = false
+
+        override fun beforeBlock(rendered: Long, rate: Int) {
             armed?.let {
                 armed = null
                 take?.let { t -> end(t) }

@@ -27,8 +27,19 @@
 // sound it starts over, as gated). The DEFAULT shape plays exactly as before
 // shapes.
 //
-// render allocates nothing unless a voice starts or keys changes, so the
-// audio thread doesn't feed the garbage collector.
+// A start or a release may also be timed (an addition, for the pattern
+// sequencer): given an output frame, it waits for that frame and takes effect
+// there, inside a render if need be (the render plays up to it, applies it,
+// and goes on), so a note lands on its frame rather than on a block's edge.
+// One whose frame has already passed takes effect at the next render's start,
+// after the commands that aren't timed. A timed release may name a tag: it
+// then lets go of only the voices started with that tag, so the sequencer's
+// note-off never ends a press of the same pad. flushTimed drops the timed
+// commands still waiting. Without timed commands a render plays exactly as
+// before them.
+//
+// render allocates nothing unless a voice starts, a timed command waits, or
+// keys changes, so the audio thread doesn't feed the garbage collector.
 //
 // Web deltas:
 // - No threads: start/release/cut/stopAll queue commands that take effect at
@@ -41,7 +52,8 @@
 //   The mix is the same; float output is the clipped 16-bit level / 32768.
 // - Kotlin's Float math is kept with Math.fround so levels match bit for bit.
 //   Frame counters are numbers (safe up to 2^53 frames); "held" is Infinity
-//   where Kotlin uses Long.MAX_VALUE.
+//   where Kotlin uses Long.MAX_VALUE. NOW is Kotlin's Long.MIN_VALUE, -2^63,
+//   which a number holds exactly.
 // - Kotlin's private cut(Voice) overload is `cutShort` here, beside the public
 //   cut(key).
 // - The Kotlin enum class VoiceMode is a const object plus a string-union type
@@ -134,6 +146,7 @@ export interface Started {
   readonly frame: number
 }
 
+/** [at]: the output frame a timed command waits for, NOW for none. A release's [tag] other than 0: only the voices started with it. */
 type Command =
   | {
       readonly kind: 'start'
@@ -143,10 +156,12 @@ type Command =
       readonly step: number
       readonly tag: number
       readonly shape: VoiceShape
+      readonly at: number
     }
-  | { readonly kind: 'release'; readonly key: string }
-  | { readonly kind: 'cut'; readonly key: string }
-  | { readonly kind: 'stopAll' }
+  | { readonly kind: 'release'; readonly key: string; readonly at: number; readonly tag: number }
+  | { readonly kind: 'cut'; readonly key: string; readonly at: number }
+  | { readonly kind: 'stopAll'; readonly at: number }
+  | { readonly kind: 'flushTimed'; readonly at: number }
 
 /**
  * A voice: [pcm] read from frame [first] to before [end], [level] and the
@@ -165,6 +180,7 @@ class Voice {
 
   constructor(
     readonly key: string,
+    public tag: number,
     readonly pcm: Int16Array,
     readonly channels: number,
     public step: number,
@@ -191,6 +207,8 @@ export class VoiceMixer {
   static readonly CHOKE_MS = 3
   /** VoiceShape's pan's reach either way. */
   static readonly PAN_MAX = 16
+  /** A command's frame when it isn't timed: it takes effect at the next render's start (Kotlin's Long.MIN_VALUE). */
+  static readonly NOW = -(2 ** 63)
 
   /** How much faster a sound is read to play [semitones] (whole or not) higher. */
   static pitchRatio(semitones: number): number {
@@ -198,6 +216,8 @@ export class VoiceMixer {
   }
 
   private readonly commands: Command[] = []
+  // Timed commands waiting for their frame: by frame, then as they came.
+  private readonly pending: Command[] = []
   private readonly voices: Voice[] = []
   private mix = new Float32Array(0)
   private readonly minGate: number
@@ -207,9 +227,10 @@ export class VoiceMixer {
   private keySet: ReadonlySet<string> = new Set()
 
   /**
-   * Voices that began in the last render; the same array each time. A legato
-   * start that only changed a held voice's pitch is reported too, with its own
-   * tag, at the frame the pitch changed.
+   * Voices that began in the last render; the same array each time, each at
+   * its frame (a timed start's own, unless it came late). A legato start that
+   * only changed a held voice's pitch is reported too, with its own tag, at
+   * the frame the pitch changed.
    */
   readonly started: Started[] = []
 
@@ -235,7 +256,8 @@ export class VoiceMixer {
   /**
    * Plays [pcm] (16-bit, [channels] interleaved, at [sampleRate]) as voice
    * [key], [semitones] (plus [shape]'s) from its own pitch, shaped by
-   * [shape], until [release]. [tag] comes back in [started].
+   * [shape], until [release]. [tag] comes back in [started]. Timed, it
+   * starts at output frame [at] (NOW: at the next render).
    */
   start(
     key: string,
@@ -245,28 +267,36 @@ export class VoiceMixer {
     semitones = 0,
     tag = 0,
     shape: VoiceShape = VoiceShape.DEFAULT,
+    at: number = VoiceMixer.NOW,
   ): void {
     if (!(channels >= 1 && channels <= 2)) throw new Error(`channels: ${channels}`)
     const step = (sampleRate / this.outRate) * VoiceMixer.pitchRatio(semitones + shape.semitones)
-    this.commands.push({ kind: 'start', key, pcm, channels, step, tag, shape })
+    this.commands.push({ kind: 'start', key, pcm, channels, step, tag, shape, at })
   }
 
   /**
    * Lets go of voice [key] (every one of a KEY key): it fades out now, or
-   * once it has sounded MIN_GATE_MS. A ONESHOT voice plays on.
+   * once it has sounded MIN_GATE_MS. A ONESHOT voice plays on. Timed, it
+   * lets go at output frame [at]; a [tag] other than 0 lets go of only the
+   * voices started with that tag.
    */
-  release(key: string): void {
-    this.commands.push({ kind: 'release', key })
+  release(key: string, at: number = VoiceMixer.NOW, tag = 0): void {
+    this.commands.push({ kind: 'release', key, at, tag })
   }
 
   /** Ends voice [key] (all of its voices) now, in CHOKE_MS, even inside its MIN_GATE_MS: the press was a scroll. */
   cut(key: string): void {
-    this.commands.push({ kind: 'cut', key })
+    this.commands.push({ kind: 'cut', key, at: VoiceMixer.NOW })
   }
 
   /** Fades every voice out quickly. */
   stopAll(): void {
-    this.commands.push({ kind: 'stopAll' })
+    this.commands.push({ kind: 'stopAll', at: VoiceMixer.NOW })
+  }
+
+  /** Drops the timed starts and releases still waiting for their frame; those sent after it wait as usual. */
+  flushTimed(): void {
+    this.commands.push({ kind: 'flushTimed', at: VoiceMixer.NOW })
   }
 
   /**
@@ -281,7 +311,7 @@ export class VoiceMixer {
     } else {
       for (let i = 0; i < frames * 2; i++) out[i] = clip(mix[i]!) / 32768
     }
-    this.finish(frames)
+    this.finish()
   }
 
   /** Mixes the next [frames] frames into separate [left] and [right] channels, -1..1. */
@@ -292,30 +322,73 @@ export class VoiceMixer {
       left[i] = clip(mix[2 * i]!) / 32768
       right[i] = clip(mix[2 * i + 1]!) / 32768
     }
-    this.finish(frames)
+    this.finish()
   }
 
+  /**
+   * The commands first, then the timed ones already due, then the voices up
+   * to the next timed command's frame inside the render, that command, and
+   * on; the frame count moves on with them.
+   */
   private mixNext(frames: number): void {
     this.started.length = 0
     const commands = this.commands
     if (commands.length !== 0) {
-      for (let i = 0; i < commands.length; i++) this.apply(commands[i]!)
+      for (let i = 0; i < commands.length; i++) this.take(commands[i]!)
       commands.length = 0
     }
     if (this.mix.length < frames * 2) this.mix = new Float32Array(frames * 2)
     this.mix.fill(0, 0, frames * 2)
-    // Ended voices dropped in place: no new array per render.
+    const pending = this.pending
+    const end = this.frameCount + frames
+    let done = 0
+    for (;;) {
+      this.applyDue()
+      const next = pending.length === 0 ? end : Math.min(end, pending[0]!.at)
+      const n = next - this.frameCount
+      if (n > 0) {
+        this.playAll(done, n)
+        done += n
+        this.frameCount += n
+      }
+      if (this.frameCount >= end) break
+    }
+  }
+
+  /** A command off the queue: applied now or, timed, kept until its frame, behind those already waiting for it. */
+  private take(c: Command): void {
+    if (c.at === VoiceMixer.NOW) {
+      this.apply(c)
+      return
+    }
+    const pending = this.pending
+    let i = pending.length
+    while (i > 0 && pending[i - 1]!.at > c.at) i--
+    pending.splice(i, 0, c)
+  }
+
+  /** Applies the timed commands whose frame has come (or gone), in order. */
+  private applyDue(): void {
+    const pending = this.pending
+    let n = 0
+    while (n < pending.length && pending[n]!.at <= this.frameCount) n++
+    if (n === 0) return
+    for (let i = 0; i < n; i++) this.apply(pending[i]!)
+    pending.splice(0, n)
+  }
+
+  /** Adds the next [frames] of every voice to the mix, from its frame [offset]; ended voices are dropped in place. */
+  private playAll(offset: number, frames: number): void {
     const voices = this.voices
     let kept = 0
     for (let i = 0; i < voices.length; i++) {
       const v = voices[i]!
-      if (this.play(v, frames)) voices[kept++] = v
+      if (this.play(v, offset, frames)) voices[kept++] = v
     }
     voices.length = kept
   }
 
-  private finish(frames: number): void {
-    this.frameCount += frames
+  private finish(): void {
     if (!this.keysChanged()) return
     const now = new Set<string>()
     for (const v of this.voices) if (!v.choked) now.add(v.key)
@@ -371,6 +444,7 @@ export class VoiceMixer {
         this.voices.push(
           new Voice(
             c.key,
+            c.tag,
             c.pcm,
             c.channels,
             c.step,
@@ -391,7 +465,7 @@ export class VoiceMixer {
       }
       case 'release':
         for (const v of this.voices) {
-          if (v.key !== c.key || v.choked) continue
+          if (v.key !== c.key || v.choked || (c.tag !== 0 && v.tag !== c.tag)) continue
           v.letGo = true
           if (v.fadeAt === HELD && v.mode !== VoiceMode.ONESHOT) {
             v.fadeAt = Math.max(this.frameCount, v.startFrame + this.minGate)
@@ -405,6 +479,9 @@ export class VoiceMixer {
       case 'stopAll':
         for (const v of this.voices) if (!v.choked) this.cutShort(v)
         return
+      case 'flushTimed':
+        this.pending.length = 0
+        return
     }
   }
 
@@ -417,8 +494,9 @@ export class VoiceMixer {
 
   /**
    * A legato start: when [c]'s key has a legato voice still held on the same
-   * sound, that voice takes [c]'s pitch where it is (its other voices, if
-   * any, are cut) and true comes back; false when a voice is to start.
+   * sound, that voice takes [c]'s pitch and tag where it is (its other
+   * voices, if any, are cut) and true comes back; false when a voice is to
+   * start.
    */
   private legato(c: Extract<Command, { kind: 'start' }>): boolean {
     let held: Voice | undefined
@@ -428,6 +506,7 @@ export class VoiceMixer {
     if (held === undefined || held.pcm !== c.pcm || held.channels !== c.channels) return false
     for (const o of this.voices) if (o !== held && o.key === c.key && !o.choked) this.cutShort(o)
     held.step = c.step
+    held.tag = c.tag
     this.started.push({ key: c.key, tag: c.tag, frame: this.frameCount })
     return true
   }
@@ -450,8 +529,8 @@ export class VoiceMixer {
     v.fadeAt = this.frameCount - Math.trunc(f(f(1 - g) * this.choke))
   }
 
-  /** Adds [frames] of [v] to the mix; false once it has ended. */
-  private play(v: Voice, frames: number): boolean {
+  /** Adds [frames] of [v] to the mix from its frame [offset] (the output frame the count is at); false once it has ended. */
+  private play(v: Voice, offset: number, frames: number): boolean {
     const last = v.end - 1
     const pcm = v.pcm
     const ch = v.channels
@@ -473,8 +552,9 @@ export class VoiceMixer {
         const r0 = pcm[i0 * 2 + 1]!
         r = f(r0 + f((pcm[i1 * 2 + 1]! - r0) * frac))
       }
-      mix[2 * i] = mix[2 * i]! + f(f(l * g) * v.left)
-      mix[2 * i + 1] = mix[2 * i + 1]! + f(f(r * g) * v.right)
+      const j = 2 * (offset + i)
+      mix[j] = mix[j]! + f(f(l * g) * v.left)
+      mix[j + 1] = mix[j + 1]! + f(f(r * g) * v.right)
       v.pos = p + v.step
     }
     return true

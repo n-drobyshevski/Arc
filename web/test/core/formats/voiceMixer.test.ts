@@ -1,8 +1,8 @@
 // Port of core/src/test/kotlin/dev/arc/ep133/formats/VoiceMixerTest.kt,
 // plus web cases for the Float32 outputs (interleaved and planar), and a
 // replay of the native mixer's vectors (app/src/test/cpp/voice-mixer.golden,
-// written by the Kotlin mixer), so the port is held to it sample for sample
-// as the C++ one is.
+// written by the Kotlin mixer, timed commands included), so the port is held
+// to it sample for sample as the C++ one is.
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -462,6 +462,158 @@ describe('VoiceMixer', () => {
     expect(out[VoiceMixer.CHOKE_MS]).toBe(0)
   })
 
+  // Timed commands (an addition): the pattern sequencer's notes, each on its frame.
+
+  it('a timed start lands on its frame inside the render', () => {
+    const m = mixer()
+    render(m, 16)
+    m.start('a', steady(100), 1, 1000, 0, -1, VoiceShape.DEFAULT, 20)
+    const out = left(render(m, 16))
+    expect(out).toEqual([...Array<number>(4).fill(0), ...Array<number>(12).fill(1000)])
+    expect(m.started).toEqual([{ key: 'a', tag: -1, frame: 20 }])
+    expect([...m.keys]).toEqual(['a'])
+    expect(m.frame).toBe(32)
+  })
+
+  it("a timed start on the render's end waits for the next one", () => {
+    const m = mixer()
+    m.start('a', steady(100), 1, 1000, 0, 0, VoiceShape.DEFAULT, 16)
+    expect(left(render(m, 16))).toEqual(Array<number>(16).fill(0))
+    expect(m.started).toEqual([])
+    expect(left(render(m, 1))[0]).toBe(1000)
+    expect(m.started).toEqual([{ key: 'a', tag: 0, frame: 16 }])
+  })
+
+  it("a late timed start plays at the render's start, after the commands that aren't timed", () => {
+    const m = mixer()
+    render(m, 16)
+    m.start('late', steady(100, 1000), 1, 1000, 0, -1, VoiceShape.DEFAULT, 3)
+    m.start('now', steady(100, 2000), 1, 1000, 0, 5)
+    expect(left(render(m, 1))[0]).toBe(3000)
+    expect(m.started).toEqual([
+      { key: 'now', tag: 5, frame: 16 },
+      { key: 'late', tag: -1, frame: 16 },
+    ])
+  })
+
+  it('timed commands at one frame keep their order', () => {
+    const m = mixer()
+    // The second start of the key cuts the first: the order they were sent in.
+    m.start('a', steady(100, 1000), 1, 1000, 0, 1, VoiceShape.DEFAULT, 4)
+    m.start('a', steady(100, 2000), 1, 1000, 0, 2, VoiceShape.DEFAULT, 4)
+    m.start('b', steady(100, 10), 1, 1000, 0, 3, VoiceShape.DEFAULT, 2)
+    render(m, 8)
+    expect(m.started.map((s) => [s.frame, s.tag])).toEqual([
+      [2, 3],
+      [4, 1],
+      [4, 2],
+    ])
+    expect(left(render(m, 8))[VoiceMixer.CHOKE_MS + 1]).toBe(2010)
+  })
+
+  it('a timed release lets go at its frame', () => {
+    const m = mixer()
+    m.start('a', steady(1000), 1, 1000)
+    render(m, 100)
+    m.release('a', 110)
+    const out = left(render(m, 40))
+    expect(out[9]).toBe(1000)
+    expect(out[10]).toBe(1000)
+    expect(out[10 + VoiceMixer.FADE_MS + 1]).toBe(0)
+  })
+
+  it('a tagged release lets go of only the voice started with that tag', () => {
+    const m = mixer()
+    m.start('p', steady(1000, 1000), 1, 1000, 0, -5, VoiceShape.DEFAULT, 0)
+    render(m, 8)
+    // A press of the same pad takes over; the sequencer's note-off leaves it alone.
+    m.start('p', steady(1000, 2000), 1, 1000, 0, 77)
+    m.release('p', 10, -5)
+    const out = left(render(m, 200))
+    expect(out[199]).toBe(2000)
+    expect([...m.keys]).toEqual(['p'])
+    m.release('p', VoiceMixer.NOW, 77)
+    render(m, 200)
+    expect(m.keys.size).toBe(0)
+  })
+
+  it("a tagged release takes one of a key-mode key's voices", () => {
+    const m = mixer()
+    const key = VoiceShape.of({ mode: VoiceMode.KEY })
+    m.start('k', steady(1000, 1000), 1, 1000, 0, -1, key)
+    m.start('k', steady(1000, 300), 1, 1000, 0, 9, key)
+    m.release('k', 0, -1)
+    const out = left(render(m, 200))
+    expect(out[0]).toBe(1300)
+    expect(out[199]).toBe(300)
+  })
+
+  it("a legato press carrying on the sequencer's voice takes its tag", () => {
+    const m = mixer()
+    const legato = VoiceShape.of({ mode: VoiceMode.LEGATO })
+    const sound = steady(1000)
+    m.start('l', sound, 1, 1000, 0, -7, legato, 0)
+    render(m, 8)
+    m.start('l', sound, 1, 1000, 12, 12, legato)
+    // The sequencer's note-off finds no voice of its own.
+    m.release('l', 10, -7)
+    render(m, 200)
+    expect([...m.keys]).toEqual(['l'])
+  })
+
+  it('a timed start chokes its mute group on its frame', () => {
+    const m = mixer()
+    m.start('open', steady(1000, 1000), 1, 1000, 0, 0, VoiceShape.of({ muteGroup: 1 }))
+    render(m, 8)
+    m.start('closed', steady(1000, 2000), 1, 1000, 0, 0, VoiceShape.of({ muteGroup: 1 }), 12)
+    const out = left(render(m, 16))
+    expect(out[3]).toBe(1000)
+    // Both while the open one chokes, then the closed one alone.
+    expect(out[4]).toBeGreaterThanOrEqual(2001)
+    expect(out[4]).toBeLessThanOrEqual(3000)
+    expect(out[4 + VoiceMixer.CHOKE_MS + 1]).toBe(2000)
+  })
+
+  it('flushTimed drops what waits, not what is sent after it', () => {
+    const m = mixer()
+    m.start('a', steady(100, 1000), 1, 1000, 0, 0, VoiceShape.DEFAULT, 40)
+    render(m, 16)
+    m.start('b', steady(100, 2000), 1, 1000, 0, 0, VoiceShape.DEFAULT, 20)
+    m.flushTimed()
+    m.start('c', steady(100, 4000), 1, 1000, 0, 0, VoiceShape.DEFAULT, 24)
+    const out = left(render(m, 32))
+    expect(out[7]).toBe(0)
+    expect(out[8]).toBe(4000)
+    expect(out[31]).toBe(4000)
+    expect(m.started.map((s) => s.key)).toEqual(['c'])
+  })
+
+  it('a render split by timed commands plays as renders split at their frames', () => {
+    const pcm = Int16Array.from({ length: 3000 }, (_, i) => ((i * 7919) % 20000) - 10000)
+    const shape = VoiceShape.of({ attackMs: 7, releaseMs: 40, pan: 3 })
+    const timed = new VoiceMixer(44100)
+    timed.start('a', pcm, 1, 46875, 3, -1, shape, 37)
+    timed.start('b', pcm, 1, 46875, -5, -2, VoiceShape.DEFAULT, 100)
+    timed.release('a', 3000, -1)
+    const one = new Int16Array(4096 * 2)
+    timed.render(one, 4096)
+    const split = new VoiceMixer(44100)
+    const parts = new Int16Array(4096 * 2)
+    const part = (from: number, to: number): void => {
+      const out = new Int16Array((to - from) * 2)
+      split.render(out, to - from)
+      parts.set(out, from * 2)
+    }
+    part(0, 37)
+    split.start('a', pcm, 1, 46875, 3, -1, shape)
+    part(37, 100)
+    split.start('b', pcm, 1, 46875, -5, -2)
+    part(100, 3000)
+    split.release('a')
+    part(3000, 4096)
+    expect([...one]).toEqual([...parts])
+  })
+
   // Web cases.
 
   it('only one or two channels', () => {
@@ -591,29 +743,40 @@ function replayGolden(text: string): number {
         case 'noise':
           samples[n(1)] = { pcm: noise(n(3), BigInt(w[4]!)), channels: n(2) }
           break
-        case 'start': {
+        case 'start':
+        case 'startat': {
           const sound = samples[n(2)]!
           const pitch = doubleOf(w[4]!)
+          // A timed start has its frame after the tag, the shape (if any) after that.
+          const timed = w[0] === 'startat'
+          const s = timed ? 7 : 6
           const shape =
-            w.length > 6
+            w.length > s
               ? VoiceShape.of({
-                  gain: floatOf(w[6]!),
-                  pan: n(7),
-                  start: n(8),
-                  end: n(9),
-                  attackMs: n(10),
-                  releaseMs: n(11),
-                  mode: MODES[n(12)]!,
-                  muteGroup: n(13),
+                  gain: floatOf(w[s]!),
+                  pan: n(s + 1),
+                  start: n(s + 2),
+                  end: n(s + 3),
+                  attackMs: n(s + 4),
+                  releaseMs: n(s + 5),
+                  mode: MODES[n(s + 6)]!,
+                  muteGroup: n(s + 7),
                 })
               : VoiceShape.DEFAULT
           VoiceMixer.pitchRatio = () => pitch
-          mixer.start(w[1]!, sound.pcm, sound.channels, n(3), 0, n(5), shape)
+          mixer.start(w[1]!, sound.pcm, sound.channels, n(3), 0, n(5), shape, timed ? n(6) : VoiceMixer.NOW)
           VoiceMixer.pitchRatio = pitchRatio
           break
         }
         case 'release':
           mixer.release(w[1]!)
+          break
+        case 'releaseat':
+          // Kotlin's NOW, -2^63, is a number exactly: VoiceMixer.NOW.
+          mixer.release(w[1]!, n(2), n(3))
+          break
+        case 'flushtimed':
+          mixer.flushTimed()
           break
         case 'cut':
           mixer.cut(w[1]!)

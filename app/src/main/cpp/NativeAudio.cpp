@@ -4,8 +4,9 @@
 // calls into Java: the app polls.
 //
 // Threads, as the Kotlin side keeps them: one producer at a time (load,
-// unload, start, release, cut, stopAll), one poll thread (poll, readMix,
-// timestamp, info, and finally shutdown and destroy), REC's flag from either.
+// unload, start, release, releaseAt, cut, stopAll, flushTimed), one poll
+// thread (poll, readMix, timestamp, info, and finally shutdown and destroy),
+// REC's flag from either.
 #include <jni.h>
 
 #include <memory>
@@ -27,8 +28,8 @@ LiveCore *core(jlong handle) {
     return e == nullptr ? nullptr : e->core();
 }
 
-// poll()'s header, before the reports.
-constexpr int HEADER = 4;
+// poll()'s header, before the reports: callbacks, state, generation, the report count, the frames rendered.
+constexpr int HEADER = 5;
 constexpr int POLL_MAX = 1024;
 
 }  // namespace
@@ -88,10 +89,11 @@ JNIEXPORT jboolean JNICALL Java_dev_arc_ep133_audio_NativeAudio_unload(JNIEnv *,
     return c != nullptr && c->unload(slot) ? JNI_TRUE : JNI_FALSE;
 }
 
-// The voice's shape comes as its fields (VoiceShape less the semitones, already in [pitch]; the mode by ordinal).
+// The voice's shape comes as its fields (VoiceShape less the semitones, already in [pitch]; the mode by ordinal),
+// then the mix frame it starts at (VoiceMixer::NOW: as soon as it can).
 JNIEXPORT jboolean JNICALL Java_dev_arc_ep133_audio_NativeAudio_start(
     JNIEnv *, jclass, jlong handle, jint key, jint slot, jint sampleRate, jdouble pitch, jlong tag, jfloat gain, jint pan,
-    jint start, jint end, jint attackMs, jint releaseMs, jint mode, jint muteGroup) {
+    jint start, jint end, jint attackMs, jint releaseMs, jint mode, jint muteGroup, jlong at) {
     LiveCore *c = core(handle);
     arc::VoiceShape shape;
     shape.gain = gain;
@@ -102,12 +104,18 @@ JNIEXPORT jboolean JNICALL Java_dev_arc_ep133_audio_NativeAudio_start(
     shape.releaseMs = releaseMs;
     shape.mode = mode;
     shape.muteGroup = muteGroup;
-    return c != nullptr && c->start(key, slot, sampleRate, pitch, tag, shape) ? JNI_TRUE : JNI_FALSE;
+    return c != nullptr && c->start(key, slot, sampleRate, pitch, tag, shape, at) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL Java_dev_arc_ep133_audio_NativeAudio_release(JNIEnv *, jclass, jlong handle, jint key) {
     LiveCore *c = core(handle);
     return c != nullptr && c->release(key) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL Java_dev_arc_ep133_audio_NativeAudio_releaseAt(
+    JNIEnv *, jclass, jlong handle, jint key, jlong at, jlong tag) {
+    LiveCore *c = core(handle);
+    return c != nullptr && c->releaseAt(key, at, tag) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL Java_dev_arc_ep133_audio_NativeAudio_cut(JNIEnv *, jclass, jlong handle, jint key) {
@@ -118,6 +126,11 @@ JNIEXPORT jboolean JNICALL Java_dev_arc_ep133_audio_NativeAudio_cut(JNIEnv *, jc
 JNIEXPORT jboolean JNICALL Java_dev_arc_ep133_audio_NativeAudio_stopAll(JNIEnv *, jclass, jlong handle) {
     LiveCore *c = core(handle);
     return c != nullptr && c->stopAll() ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL Java_dev_arc_ep133_audio_NativeAudio_flushTimed(JNIEnv *, jclass, jlong handle) {
+    LiveCore *c = core(handle);
+    return c != nullptr && c->flushTimed() ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL Java_dev_arc_ep133_audio_NativeAudio_setRecording(JNIEnv *, jclass, jlong handle, jboolean on) {
@@ -138,6 +151,7 @@ JNIEXPORT jint JNICALL Java_dev_arc_ep133_audio_NativeAudio_poll(JNIEnv *env, jc
     LiveCore *c = e->core();
     const int n = c == nullptr ? 0 : c->poll(buffer + HEADER, capacity - HEADER);
     buffer[3] = n;
+    buffer[4] = c == nullptr ? 0 : c->rendered();
     env->SetLongArrayRegion(out, 0, HEADER + n, reinterpret_cast<const jlong *>(buffer));
     return HEADER + n;
 }

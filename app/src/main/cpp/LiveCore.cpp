@@ -26,24 +26,39 @@ LiveCore::~LiveCore() {
 
 bool LiveCore::load(int32_t slot, Sample *sample) {
     if (slot < 0 || slot >= MAX_SAMPLES || sample == nullptr) return false;
-    return commands_.push({Kind::Load, 0, slot, 0, 0.0, 0, sample, VoiceShape()});
+    return commands_.push({Kind::Load, 0, slot, 0, 0.0, 0, sample, VoiceShape(), VoiceMixer::NOW});
 }
 
 bool LiveCore::unload(int32_t slot) {
     if (slot < 0 || slot >= MAX_SAMPLES) return false;
-    return commands_.push({Kind::Unload, 0, slot, 0, 0.0, 0, nullptr, VoiceShape()});
+    return commands_.push({Kind::Unload, 0, slot, 0, 0.0, 0, nullptr, VoiceShape(), VoiceMixer::NOW});
 }
 
-bool LiveCore::start(int32_t key, int32_t slot, int32_t sampleRate, double pitch, int64_t tag, const VoiceShape &shape) {
+bool LiveCore::start(int32_t key, int32_t slot, int32_t sampleRate, double pitch, int64_t tag, const VoiceShape &shape,
+                     int64_t at) {
     if (slot < 0 || slot >= MAX_SAMPLES) return false;
-    return commands_.push({Kind::Start, key, slot, sampleRate, pitch, tag, nullptr, shape});
+    return commands_.push({Kind::Start, key, slot, sampleRate, pitch, tag, nullptr, shape, at});
 }
 
-bool LiveCore::release(int32_t key) { return commands_.push({Kind::Release, key, 0, 0, 0.0, 0, nullptr, VoiceShape()}); }
+bool LiveCore::release(int32_t key) {
+    return commands_.push({Kind::Release, key, 0, 0, 0.0, 0, nullptr, VoiceShape(), VoiceMixer::NOW});
+}
 
-bool LiveCore::cut(int32_t key) { return commands_.push({Kind::Cut, key, 0, 0, 0.0, 0, nullptr, VoiceShape()}); }
+bool LiveCore::releaseAt(int32_t key, int64_t at, int64_t tag) {
+    return commands_.push({Kind::ReleaseTagged, key, 0, 0, 0.0, tag, nullptr, VoiceShape(), at});
+}
 
-bool LiveCore::stopAll() { return commands_.push({Kind::StopAll, 0, 0, 0, 0.0, 0, nullptr, VoiceShape()}); }
+bool LiveCore::cut(int32_t key) {
+    return commands_.push({Kind::Cut, key, 0, 0, 0.0, 0, nullptr, VoiceShape(), VoiceMixer::NOW});
+}
+
+bool LiveCore::stopAll() {
+    return commands_.push({Kind::StopAll, 0, 0, 0, 0.0, 0, nullptr, VoiceShape(), VoiceMixer::NOW});
+}
+
+bool LiveCore::flushTimed() {
+    return commands_.push({Kind::FlushTimed, 0, 0, 0, 0.0, 0, nullptr, VoiceShape(), VoiceMixer::NOW});
+}
 
 // ---------- audio thread ----------
 
@@ -52,10 +67,14 @@ void LiveCore::render(int16_t *out, int frames) {
     // mixer must not outlive the sweep that may free its sound.
     if (frames <= 0) return;
     const bool flush = flushing_.exchange(false, std::memory_order_acq_rel);
-    // Room kept for the stop a restart adds; what doesn't fit waits for the next render.
+    // Room kept for the flush and stop a restart adds; what doesn't fit waits for the next render.
     Command c{};
-    while (mixer_.room() > 1 && commands_.pop(c)) apply(c, flush);
-    if (flush) mixer_.stopAll();
+    while (mixer_.room() > 2 && commands_.pop(c)) apply(c, flush);
+    if (flush) {
+        // Timed commands still waiting from before the restart aren't heard late either.
+        mixer_.flushTimed();
+        mixer_.stopAll();
+    }
 
     const bool recording = recording_.load(std::memory_order_relaxed);
     for (int done = 0; done < frames;) {
@@ -90,6 +109,7 @@ void LiveCore::render(int16_t *out, int frames) {
         if (events_.push(e)) keysSent_ = mixer_.keysVersion();
     }
     sweep();
+    rendered_.store(mixer_.frame(), std::memory_order_release);
 }
 
 void LiveCore::apply(const Command &c, bool flush) {
@@ -103,10 +123,15 @@ void LiveCore::apply(const Command &c, bool flush) {
             slots_[c.slot] = nullptr;
             return;
         case Kind::Start:
-            if (!flush && slots_[c.slot] != nullptr) mixer_.start(c.key, slots_[c.slot], c.rate, c.pitch, c.tag, c.shape);
+            if (!flush && slots_[c.slot] != nullptr) {
+                mixer_.start(c.key, slots_[c.slot], c.rate, c.pitch, c.tag, c.shape, c.at);
+            }
             return;
         case Kind::Release:
             if (!flush) mixer_.release(c.key);
+            return;
+        case Kind::ReleaseTagged:
+            if (!flush) mixer_.release(c.key, c.at, c.tag);
             return;
         case Kind::Cut:
             if (!flush) mixer_.cut(c.key);
@@ -114,22 +139,26 @@ void LiveCore::apply(const Command &c, bool flush) {
         case Kind::StopAll:
             if (!flush) mixer_.stopAll();
             return;
+        case Kind::FlushTimed:
+            if (!flush) mixer_.flushTimed();
+            return;
     }
 }
 
-// A start queued in the mixer may still point at [s]: it is only let go of after a render.
+// A start queued in the mixer may still point at [s]: it is only let go of after a render, and once no timed
+// start waits on it.
 void LiveCore::retire(Sample *s) {
     s->unloaded = true;
     // Past MAX_RETIRED (never in practice) the sound is kept for good rather than freed under a voice.
     if (retiredCount_ < MAX_RETIRED) retired_[retiredCount_++] = s;
 }
 
-// Hands the unloaded sounds no voice reads to the consumer, which frees them.
+// Hands the unloaded sounds no voice reads (nor timed start waits on) to the consumer, which frees them.
 void LiveCore::sweep() {
     int kept = 0;
     for (int i = 0; i < retiredCount_; i++) {
         Sample *s = retired_[i];
-        if (s->voices > 0 || !freed_.push(s)) retired_[kept++] = s;
+        if (s->voices > 0 || s->pending > 0 || !freed_.push(s)) retired_[kept++] = s;
     }
     retiredCount_ = kept;
 }

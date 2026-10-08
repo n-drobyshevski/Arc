@@ -5,16 +5,37 @@ import dev.arc.ep133.formats.VoiceShape
 import dev.arc.ep133.text.LiveEngine
 
 /**
+ * Where the pattern sequencer sends its notes (an addition): starts and
+ * releases at a mix frame ([LiveListener.beforeBlock]'s count), each landing
+ * on its frame in the mix ([dev.arc.ep133.formats.VoiceMixer]'s timed
+ * commands). A frame already gone plays at once. Any thread may call them.
+ */
+interface ScheduleSink {
+    /**
+     * Plays [pcm] as [LiveOutput.start] does, from mix frame [atFrame]. The
+     * sequencer's [tag] is below 0, so it never counts as a press's time
+     * (latency reports skip it). False when it can't be played.
+     */
+    fun startAt(key: String, pcm: ShortArray, channels: Int, sampleRate: Int, semitones: Int, tag: Long, shape: VoiceShape, atFrame: Long): Boolean
+
+    /** Lets go of the voice of [key] started with [tag] (a press of the same key plays on) at mix frame [atFrame]. */
+    fun releaseAt(key: String, atFrame: Long, tag: Long)
+
+    /** Drops the starts and releases still waiting for their frame (the sequencer stopped or moved). */
+    fun flushTimed()
+}
+
+/**
  * One of the outputs [LiveAudio] plays Live through (an addition): the native
  * engine ([NativeLiveOutput], Oboe and AAudio) when it loads and works, else
  * AudioTrack ([TrackLiveOutput]). Each has a thread of its own that tells
  * LiveAudio what happens through a [LiveListener].
  *
- * [prepare], [start], [release], [cut], [stopAll] and [recordFromNow] may be
- * called from any thread; [close] ends the thread (it lets go of the output as
- * it ends).
+ * [prepare], [start], [release], [cut], [stopAll], [recordFromNow] and the
+ * [ScheduleSink] calls may be called from any thread; [close] ends the thread
+ * (it lets go of the output as it ends).
  */
-internal interface LiveOutput {
+internal interface LiveOutput : ScheduleSink {
     /** The output's sample rate (the mix's frames are counted at it). */
     val rate: Int
 
@@ -58,24 +79,32 @@ internal interface LiveOutput {
 
 /** What an output's thread tells [LiveAudio]; every call on that one thread. */
 internal interface LiveListener {
-    /** Before each block of mix is read: REC armed or stopped meanwhile is picked up. */
-    fun beforeBlock()
+    /**
+     * Before each block of mix is read: REC armed or stopped meanwhile is
+     * picked up, and the sequencer schedules ahead of [rendered], the mix
+     * frames rendered so far, at [rate].
+     */
+    fun beforeBlock(rendered: Long, rate: Int)
 
     /** Whether the mix is wanted (REC armed, a take going, or SAMPLE resampling it). */
     val recording: Boolean
+
+    /** Whether [clock] is wanted without the mix (the sequencer runs). */
+    val clocked: Boolean get() = false
 
     /** A block of the mix: [frames] stereo frames in [out], the first at mix frame [at] and [rate]; [firstStart] the first voice start in it. */
     fun mixed(out: ShortArray, frames: Int, at: Long, firstStart: Long?, rate: Int)
 
     /**
      * Mix frame [frame] is heard at [nanos] (System.nanoTime), at [rate]:
-     * from the output's timestamp about every [CLOCK_NS] while the mix is
-     * wanted, so SAMPLE can tell which frame was playing at a press.
+     * from the output's timestamp about every [CLOCK_NS] while the mix or the
+     * clock is wanted ([recording], [clocked]), so SAMPLE can tell which frame
+     * was playing at a press, and the sequencer where its beat is.
      */
     fun clock(frame: Long, nanos: Long, rate: Int)
 
     companion object {
-        /** How often an output tells [clock] while the mix is wanted. */
+        /** How often an output tells [clock] while the mix or the clock is wanted. */
         const val CLOCK_NS = 100_000_000L
     }
 

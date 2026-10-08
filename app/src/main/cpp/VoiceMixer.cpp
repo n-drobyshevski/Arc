@@ -39,42 +39,46 @@ bool VoiceMixer::queue(const Command &c) {
 }
 
 bool VoiceMixer::start(int32_t key, Sample *sample, int32_t sampleRate, double pitch, int64_t tag,
-                       const VoiceShape &shape) {
+                       const VoiceShape &shape, int64_t at) {
     if (sample == nullptr || sample->channels < 1 || sample->channels > 2) return false;
-    return queue({Kind::Start, key, sample, static_cast<double>(sampleRate) / outRate_ * pitch, tag, shape});
+    return queue({Kind::Start, key, sample, static_cast<double>(sampleRate) / outRate_ * pitch, tag, shape, at});
 }
 
-bool VoiceMixer::release(int32_t key) { return queue({Kind::Release, key, nullptr, 0.0, 0, VoiceShape()}); }
+bool VoiceMixer::release(int32_t key, int64_t at, int64_t tag) {
+    return queue({Kind::Release, key, nullptr, 0.0, tag, VoiceShape(), at});
+}
 
-bool VoiceMixer::cut(int32_t key) { return queue({Kind::Cut, key, nullptr, 0.0, 0, VoiceShape()}); }
+bool VoiceMixer::cut(int32_t key) { return queue({Kind::Cut, key, nullptr, 0.0, 0, VoiceShape(), NOW}); }
 
-bool VoiceMixer::stopAll() { return queue({Kind::StopAll, 0, nullptr, 0.0, 0, VoiceShape()}); }
+bool VoiceMixer::stopAll() { return queue({Kind::StopAll, 0, nullptr, 0.0, 0, VoiceShape(), NOW}); }
+
+bool VoiceMixer::flushTimed() { return queue({Kind::FlushTimed, 0, nullptr, 0.0, 0, VoiceShape(), NOW}); }
 
 void VoiceMixer::render(int16_t *out, int frames) {
     if (frames > maxFrames_) frames = maxFrames_;
     startedCount_ = 0;
-    for (int i = 0; i < commandCount_; i++) apply(commands_[i]);
+    for (int i = 0; i < commandCount_; i++) take(commands_[i]);
     commandCount_ = 0;
     std::memset(mix_, 0, sizeof(float) * static_cast<size_t>(frames) * 2);
-    // Ended voices dropped in place, by index.
-    int kept = 0;
-    for (int i = 0; i < voiceCount_; i++) {
-        Voice &v = voices_[i];
-        if (play(v, frames)) {
-            if (kept != i) voices_[kept] = v;
-            kept++;
-        } else {
-            v.sample->voices--;
+    const int64_t end = frame_ + frames;
+    int done = 0;
+    while (true) {
+        applyDue();
+        const int64_t next = pendingCount_ == 0 || pending_[0].at > end ? end : pending_[0].at;
+        const int n = static_cast<int>(next - frame_);
+        if (n > 0) {
+            playAll(done, n);
+            done += n;
+            frame_ += n;
         }
+        if (frame_ >= end) break;
     }
-    voiceCount_ = kept;
     for (int i = 0; i < frames * 2; i++) {
         float m = mix_[i];
         if (m < -32768.0f) m = -32768.0f;
         else if (m > 32767.0f) m = 32767.0f;
         out[i] = static_cast<int16_t>(static_cast<int32_t>(m));
     }
-    frame_ += frames;
     if (keysChanged()) {
         keyCount_ = 0;
         for (int i = 0; i < voiceCount_; i++) {
@@ -88,10 +92,68 @@ void VoiceMixer::render(int16_t *out, int frames) {
     }
 }
 
+// A command off the queue: applied now or, timed, kept until its frame,
+// behind those already waiting for it (by insertion: the list is short).
+void VoiceMixer::take(const Command &c) {
+    if (c.kind == Kind::FlushTimed) {
+        flushPending();
+        return;
+    }
+    if (c.at == NOW || pendingCount_ == MAX_PENDING) {
+        apply(c);
+        return;
+    }
+    int i = pendingCount_;
+    while (i > 0 && pending_[i - 1].at > c.at) {
+        pending_[i] = pending_[i - 1];
+        i--;
+    }
+    pending_[i] = c;
+    pendingCount_++;
+    if (c.kind == Kind::Start) c.sample->pending++;
+}
+
+// Applies the timed commands whose frame has come (or gone), in order.
+void VoiceMixer::applyDue() {
+    int n = 0;
+    while (n < pendingCount_ && pending_[n].at <= frame_) n++;
+    if (n == 0) return;
+    for (int i = 0; i < n; i++) {
+        if (pending_[i].kind == Kind::Start) pending_[i].sample->pending--;
+        apply(pending_[i]);
+    }
+    for (int i = n; i < pendingCount_; i++) pending_[i - n] = pending_[i];
+    pendingCount_ -= n;
+}
+
+// Drops every timed command waiting.
+void VoiceMixer::flushPending() {
+    for (int i = 0; i < pendingCount_; i++) {
+        if (pending_[i].kind == Kind::Start) pending_[i].sample->pending--;
+    }
+    pendingCount_ = 0;
+}
+
+// Adds the next [frames] of every voice to the mix, from its frame [offset]; ended voices are dropped in place, by index.
+void VoiceMixer::playAll(int offset, int frames) {
+    int kept = 0;
+    for (int i = 0; i < voiceCount_; i++) {
+        Voice &v = voices_[i];
+        if (play(v, offset, frames)) {
+            if (kept != i) voices_[kept] = v;
+            kept++;
+        } else {
+            v.sample->voices--;
+        }
+    }
+    voiceCount_ = kept;
+}
+
 void VoiceMixer::reset(int outRate) {
     for (int i = 0; i < voiceCount_; i++) voices_[i].sample->voices--;
     voiceCount_ = 0;
     commandCount_ = 0;
+    flushPending();
     startedCount_ = 0;
     if (keyCount_ != 0) {
         keyCount_ = 0;
@@ -177,6 +239,7 @@ void VoiceMixer::apply(const Command &c) {
             const float right = static_cast<float>(PAN_MAX + pan) / static_cast<float>(PAN_MAX);
             const int32_t release = framesOf(shape.releaseMs);
             voices_[voiceCount_++] = {c.key,
+                                      c.tag,
                                       c.sample,
                                       end,
                                       c.step,
@@ -200,7 +263,7 @@ void VoiceMixer::apply(const Command &c) {
         case Kind::Release:
             for (int i = 0; i < voiceCount_; i++) {
                 Voice &v = voices_[i];
-                if (v.key != c.key || v.choked) continue;
+                if (v.key != c.key || v.choked || (c.tag != 0 && v.tag != c.tag)) continue;
                 v.letGo = true;
                 if (v.fadeAt != INT64_MAX) continue;
                 if (v.mode == static_cast<int32_t>(VoiceMode::OneShot)) continue;
@@ -217,12 +280,15 @@ void VoiceMixer::apply(const Command &c) {
                 if (!voices_[i].choked) cutVoice(voices_[i]);
             }
             return;
+        case Kind::FlushTimed:
+            flushPending();
+            return;
     }
 }
 
 // A legato start: when [c]'s key has a legato voice still held on the same
-// sound, that voice takes [c]'s pitch where it is (its other voices, if any,
-// are cut) and true comes back; false when a voice is to start.
+// sound, that voice takes [c]'s pitch and tag where it is (its other voices,
+// if any, are cut) and true comes back; false when a voice is to start.
 bool VoiceMixer::legato(const Command &c) {
     int held = -1;
     for (int i = 0; i < voiceCount_; i++) {
@@ -237,6 +303,7 @@ bool VoiceMixer::legato(const Command &c) {
         if (i != held && o.key == c.key && !o.choked) cutVoice(o);
     }
     voices_[held].step = c.step;
+    voices_[held].tag = c.tag;
     if (startedCount_ < MAX_STARTED) started_[startedCount_++] = {c.key, c.tag, frame_};
     return true;
 }
@@ -274,8 +341,8 @@ float VoiceMixer::ramp(const Voice &v, int64_t at) const {
     return since >= v.attack ? 1.0f : static_cast<float>(since) / static_cast<float>(v.attack);
 }
 
-// Adds [frames] of [v] to the mix; false once it has ended.
-bool VoiceMixer::play(Voice &v, int frames) {
+// Adds [frames] of [v] to the mix from its frame [offset] (output frame frame_); false once it has ended.
+bool VoiceMixer::play(Voice &v, int offset, int frames) {
     const int32_t last = v.end - 1;
     const int16_t *pcm = v.sample->pcm;
     const int32_t ch = v.sample->channels;
@@ -298,8 +365,8 @@ bool VoiceMixer::play(Voice &v, int frames) {
         } else {
             r = l;
         }
-        mix_[2 * i] += l * g * v.left;
-        mix_[2 * i + 1] += r * g * v.right;
+        mix_[2 * (offset + i)] += l * g * v.left;
+        mix_[2 * (offset + i) + 1] += r * g * v.right;
         v.pos = p + v.step;
     }
     return true;

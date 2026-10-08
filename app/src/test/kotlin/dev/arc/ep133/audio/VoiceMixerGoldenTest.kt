@@ -14,7 +14,10 @@ import kotlin.random.Random
  * scenarios played through the Kotlin [VoiceMixer] (VoiceMixerTest's cases,
  * then long random ones at real rates and pitches, then the voice shapes:
  * each of [VoiceShape]'s settings and modes, and long random ones with random
- * shapes), written out with every
+ * shapes, then the timed commands: starts and tagged releases at a frame,
+ * inside a render, on its edge and late, and long random ones as the
+ * pattern sequencer sends them, at real rates and block sizes), written out
+ * with every
  * command and what each render gave (its samples, or a hash of them for long
  * renders, the voices started and the keys). The host test
  * (src/test/cpp/VoiceMixerParityTest.cpp, run by `./gradlew test` through
@@ -83,13 +86,27 @@ class VoiceMixerGoldenTest {
          * A start; a [shape] other than the default (its semitones aside, which
          * go into the pitch, as the native output does) adds its fields to the
          * line: the gain's float bits, pan, start, end, attack, release, the
-         * mode's ordinal and the mute group.
+         * mode's ordinal and the mute group. A timed one ([at]) is a "startat"
+         * line, with its frame after the tag.
          */
-        fun start(key: String, pcm: ShortArray, channels: Int, rate: Int, semitones: Int = 0, tag: Long = 0, shape: VoiceShape = VoiceShape.DEFAULT) {
+        fun start(
+            key: String,
+            pcm: ShortArray,
+            channels: Int,
+            rate: Int,
+            semitones: Int = 0,
+            tag: Long = 0,
+            shape: VoiceShape = VoiceShape.DEFAULT,
+            at: Long = VoiceMixer.NOW,
+        ) {
             val id = sample(pcm, channels)
-            mixer.start(key, pcm, channels, rate, semitones, tag, shape)
+            mixer.start(key, pcm, channels, rate, semitones, tag, shape, at)
             val pitch = java.lang.Long.toHexString(VoiceMixer.pitchRatio(semitones + shape.semitones).toRawBits())
-            out.append("start ${keys.id(key)} $id $rate $pitch $tag")
+            if (at == VoiceMixer.NOW) {
+                out.append("start ${keys.id(key)} $id $rate $pitch $tag")
+            } else {
+                out.append("startat ${keys.id(key)} $id $rate $pitch $tag $at")
+            }
             if (shape.copy(semitones = 0.0) != VoiceShape.DEFAULT) {
                 out.append(' ').append(Integer.toHexString(shape.gain.toRawBits())).append(' ').append(shape.pan)
                     .append(' ').append(shape.start).append(' ').append(shape.end).append(' ').append(shape.attackMs)
@@ -101,6 +118,17 @@ class VoiceMixerGoldenTest {
         fun release(key: String) {
             mixer.release(key)
             out.append("release ${keys.id(key)}\n")
+        }
+
+        /** A timed or tagged release: its frame ([VoiceMixer.NOW] as a number) and tag. */
+        fun releaseAt(key: String, at: Long, tag: Long) {
+            mixer.release(key, at, tag)
+            out.append("releaseat ${keys.id(key)} $at $tag\n")
+        }
+
+        fun flushTimed() {
+            mixer.flushTimed()
+            out.append("flushtimed\n")
         }
 
         fun cut(key: String) {
@@ -327,6 +355,7 @@ class VoiceMixerGoldenTest {
             }
         }
         shapes(::scenario)
+        timed(::scenario)
         return out.toString()
     }
 
@@ -565,6 +594,192 @@ class VoiceMixerGoldenTest {
                     }
                 }
                 render(setup.first / 4)
+            }
+        }
+    }
+
+    /** The timed commands' scenarios: inside a render, on its edge and late, tags, a mute group, the flush, then random ones. */
+    private fun timed(play: (String, Int, Int, Trace.() -> Unit) -> Unit) {
+        fun scenario(name: String, outRate: Int = 1000, maxVoices: Int = VoiceMixer.MAX_VOICES, body: Trace.() -> Unit) =
+            play(name, outRate, maxVoices, body)
+        fun steady(n: Int, v: Short = 1000) = ShortArray(n) { v }
+        val now = VoiceMixer.NOW
+
+        scenario("timed-in-block") {
+            render(16)
+            // Inside the next render, on its end (so the one after's start), and gone already.
+            start("a", steady(100, 1000), 1, 1000, tag = -1, at = 20)
+            start("b", steady(100, 2000), 1, 1000, tag = -2, at = 32)
+            start("c", steady(100, 3000), 1, 1000, tag = -3, at = 10)
+            // Not timed: before the late one, though sent after it.
+            start("d", steady(100, 50), 1, 1000, tag = 4)
+            render(16)
+            render(16)
+            // Two at one frame keep their order; one a frame later.
+            start("e", steady(100, 100), 1, 1000, tag = -5, at = 50)
+            start("f", steady(100, 200), 1, 1000, tag = -6, at = 50)
+            start("g", steady(100, 300), 1, 1000, tag = -7, at = 51)
+            releaseAt("a", 40, -1)
+            releaseAt("b", 63, -2)
+            render(32)
+            // Several in one render, and a render that ends just before one.
+            start("a", steady(100, 400), 1, 1000, tag = -8, at = 85)
+            start("b", steady(100, 500), 1, 1000, tag = -9, at = 90)
+            start("c", steady(100, 600), 1, 1000, tag = -10, at = 92)
+            start("d", steady(100, 700), 1, 1000, tag = -11, at = 97)
+            render(17)
+            render(1)
+            render(64)
+            stopAll()
+            render(64)
+            // An empty render applies what is due, and nothing else.
+            start("h", steady(100, 800), 1, 1000, tag = -12, at = 226)
+            start("i", steady(100, 900), 1, 1000, tag = -13, at = 227)
+            render(0)
+            render(1)
+            render(4)
+        }
+        scenario("timed-tagged-release") {
+            start("p", steady(1000, 1000), 1, 1000, tag = -5, at = 4)
+            render(8)
+            // A press of the same key cuts the sequencer's voice; the sequencer's note-off then leaves the press alone.
+            start("p", steady(1000, 2000), 1, 1000, tag = 77)
+            releaseAt("p", 20, -5)
+            render(32)
+            render(32)
+            release("p")
+            render(100)
+            // Key mode: two voices on the key, one let go of by its tag.
+            val key = VoiceShape(mode = VoiceMode.KEY)
+            start("k", steady(1000, 1000), 1, 1000, tag = -6, shape = key, at = 174)
+            start("k", steady(1000, 300), 1, 1000, tag = 9, shape = key)
+            releaseAt("k", 180, -6)
+            render(32)
+            render(100)
+            // Tagged, not timed.
+            releaseAt("k", now, 9)
+            render(100)
+            // Legato: a press carrying on the sequencer's voice takes it over, tag and all.
+            val legato = VoiceShape(mode = VoiceMode.LEGATO)
+            val sound = ShortArray(1000) { (it * 3).toShort() }
+            start("l", sound, 1, 1000, tag = -7, shape = legato, at = 410)
+            render(16)
+            start("l", sound, 1, 1000, semitones = 5, tag = 12, shape = legato)
+            releaseAt("l", 490, -7)
+            render(32)
+            render(64)
+            releaseAt("l", 560, 12)
+            render(64)
+            render(64)
+            // A tag no voice has lets go of nothing; untagged and timed lets go of them all.
+            start("m", steady(1000, 100), 1, 1000, tag = -8, shape = key)
+            start("m", steady(1000, 200), 1, 1000, tag = -9, shape = key)
+            releaseAt("m", 700, -10)
+            render(16)
+            releaseAt("m", 720, 0)
+            render(64)
+            render(64)
+        }
+        scenario("timed-mute-group") {
+            start("open", steady(1000, 1000), 1, 1000, shape = VoiceShape(muteGroup = 1))
+            start("ride", steady(1000, 300), 1, 1000, shape = VoiceShape(muteGroup = 2))
+            render(8)
+            // The closed hat chokes the open one on its frame, inside the render.
+            start("closed", steady(1000, 2000), 1, 1000, tag = -1, shape = VoiceShape(muteGroup = 1, mode = VoiceMode.ONESHOT), at = 13)
+            render(16)
+            start("open", steady(1000, 1000), 1, 1000, tag = -2, shape = VoiceShape(muteGroup = 1), at = 30)
+            start("snare", steady(1000, 7), 1, 1000, tag = -3, at = 30)
+            render(16)
+            render(8)
+            stopAll()
+            render(8)
+        }
+        scenario("timed-flush") {
+            start("a", steady(100, 1000), 1, 1000, tag = -1, at = 10)
+            releaseAt("a", 12, -1)
+            flushTimed()
+            // Sent after the flush: kept.
+            start("b", steady(100, 2000), 1, 1000, tag = -2, at = 12)
+            render(16)
+            // Waiting from an earlier render, then flushed.
+            start("c", steady(100, 3000), 1, 1000, tag = -3, at = 100)
+            releaseAt("b", 90, -2)
+            render(16)
+            flushTimed()
+            render(64)
+            render(64)
+            // A flush with nothing waiting.
+            flushTimed()
+            start("d", steady(100, 400), 1, 1000, tag = -4, at = 170)
+            render(16)
+            render(16)
+        }
+
+        // As the pattern sequencer sends them: notes ahead of the render (some late), each let go of by its
+        // tag after its gate, with presses, cuts, stops and flushes between, at real rates and block sizes.
+        val rates = intArrayOf(46875, 44100, 48000, 22050)
+        val pool = listOf("seq:0:0", "seq:0:3", "seq:1:5", "seq:2:11", "live:0:3", "live:1:5", "note:60", "note:64")
+        val modes = VoiceMode.entries
+        var n = 0
+        for (rate in intArrayOf(44100, 48000)) {
+            for ((block, renders) in listOf(1 to 400, 96 to 200, 192 to 150, 1024 to 60)) {
+                val random = Random(13300 + n++)
+                scenario("random-timed-$rate-$block", rate, VoiceMixer.MAX_VOICES) {
+                    val sounds = List(5) {
+                        val channels = 1 + random.nextInt(2)
+                        val frames = 20 + random.nextInt(if (it == 0) 20000 else 3000)
+                        Triple(noise(channels, frames, random.nextLong(1, Long.MAX_VALUE)), channels, rates[random.nextInt(rates.size)])
+                    }
+                    // How far ahead the sequencer looks: about 50 ms, but at least a few renders.
+                    val ahead = maxOf(rate / 20, block * 3)
+                    var tag = 0L
+                    repeat(renders) {
+                        // One-frame renders get commands now and then, as a sequencer's would: and fewer voices
+                        // fading out at once than the native mixer's VOICE_SLOTS (past those it drops the oldest).
+                        if (block < 96 && random.nextInt(6) != 0) {
+                            render(block)
+                            return@repeat
+                        }
+                        repeat(random.nextInt(4)) {
+                            val key = pool[random.nextInt(pool.size)]
+                            val r = random.nextInt(100)
+                            when {
+                                r < 45 -> {
+                                    val (pcm, channels, sr) = sounds[random.nextInt(sounds.size)]
+                                    val shape = if (random.nextInt(3) == 0) {
+                                        VoiceShape(
+                                            gain = random.nextInt(0, 101) / 100f,
+                                            pan = random.nextInt(-16, 17),
+                                            attackMs = if (random.nextBoolean()) 0 else random.nextInt(0, 50),
+                                            releaseMs = if (random.nextBoolean()) VoiceMixer.FADE_MS else random.nextInt(0, 300),
+                                            mode = modes[random.nextInt(modes.size)],
+                                            muteGroup = if (random.nextBoolean()) 0 else random.nextInt(1, 3),
+                                        )
+                                    } else {
+                                        VoiceShape.DEFAULT
+                                    }
+                                    // Mostly ahead, now and then already gone.
+                                    val at = mixer.frame + random.nextInt(-ahead / 4, ahead)
+                                    val t = -(++tag)
+                                    start(key, pcm, channels, sr, random.nextInt(-12, 13), t, shape, at)
+                                    if (random.nextInt(5) != 0) releaseAt(key, at + random.nextInt(1, ahead * 2), t)
+                                }
+                                r < 60 -> {
+                                    val (pcm, channels, sr) = sounds[random.nextInt(sounds.size)]
+                                    start(key, pcm, channels, sr, random.nextInt(-12, 13), random.nextLong(1, 1_000_000))
+                                }
+                                r < 72 -> release(key)
+                                r < 78 -> releaseAt(key, now, -random.nextLong(1, tag + 2))
+                                r < 84 -> cut(key)
+                                r < 87 -> stopAll()
+                                r < 90 -> flushTimed()
+                                else -> releaseAt(key, mixer.frame + random.nextInt(0, ahead), -random.nextLong(1, tag + 2))
+                            }
+                        }
+                        render(block)
+                    }
+                    render(rate / 4)
+                }
             }
         }
     }

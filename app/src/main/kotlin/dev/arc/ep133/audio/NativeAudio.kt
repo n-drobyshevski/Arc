@@ -5,7 +5,8 @@ package dev.arc.ep133.audio
  * is in src/main/cpp): an Oboe (AAudio) stream mixed in its own callback by
  * a port of [dev.arc.ep133.formats.VoiceMixer]. [NativeLiveOutput] is the only
  * caller, and keeps to the engine's threads: one producer at a time (load,
- * unload, start, release, cut, stopAll), one poll thread (the rest).
+ * unload, start, release, releaseAt, cut, stopAll, flushTimed), one poll
+ * thread (the rest).
  *
  * A handle is from [create] and is good until [destroy]. Sounds are copied
  * into native memory by [load] and played by slot; keys are small ints
@@ -13,8 +14,11 @@ package dev.arc.ep133.audio
  * what the engine reported.
  */
 internal object NativeAudio {
-    /** [poll]'s header: data callbacks so far, engine state, stream generation, then the report count. */
-    const val HEADER = 4
+    /** [poll]'s header: data callbacks so far, engine state, stream generation, the report count, then [RENDERED]. */
+    const val HEADER = 5
+
+    /** Where [poll]'s header has the mix frames rendered so far (as the last callback left them). */
+    const val RENDERED = 4
 
     /** Engine states ([poll]'s second number). */
     const val CLOSED = 0
@@ -80,9 +84,10 @@ internal object NativeAudio {
 
     /**
      * Starts voice [key] on [slot]'s sound, read at [sampleRate] and [pitch]
-     * times faster; [tag] comes back with STARTED. The rest is the voice's
+     * times faster; [tag] comes back with STARTED. Then the voice's
      * [dev.arc.ep133.formats.VoiceShape] field by field, less its semitones
-     * (in [pitch] already), the mode by its ordinal.
+     * (in [pitch] already), the mode by its ordinal; and the mix frame it
+     * starts at, [at] ([dev.arc.ep133.formats.VoiceMixer.NOW]: as soon as it can).
      */
     @JvmStatic external fun start(
         handle: Long,
@@ -99,13 +104,20 @@ internal object NativeAudio {
         releaseMs: Int,
         mode: Int,
         muteGroup: Int,
+        at: Long,
     ): Boolean
 
     @JvmStatic external fun release(handle: Long, key: Int): Boolean
 
+    /** Lets go of voice [key] at mix frame [at]; a [tag] other than 0 lets go of only the voices started with it. */
+    @JvmStatic external fun releaseAt(handle: Long, key: Int, at: Long, tag: Long): Boolean
+
     @JvmStatic external fun cut(handle: Long, key: Int): Boolean
 
     @JvmStatic external fun stopAll(handle: Long): Boolean
+
+    /** Drops the timed starts and releases still waiting for their frame. */
+    @JvmStatic external fun flushTimed(handle: Long): Boolean
 
     /** REC: whether the engine hands its mix back ([readMix]). */
     @JvmStatic external fun setRecording(handle: Long, on: Boolean)
