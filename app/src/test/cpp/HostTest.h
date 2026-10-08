@@ -24,6 +24,7 @@ inline int &failures() {
 
 // The suites, each in its own file.
 int runVoiceMixerParity(const char *goldenPath);
+int runFxMathParity(const char *goldenPath);
 void runLiveCoreTests();
 void runBufferTunerTests();
 void runRingTests();

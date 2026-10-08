@@ -12,6 +12,8 @@ plugins {
 
 // Written by VoiceMixerGoldenTest (the Kotlin mixer), read by the C++ mixer's host test.
 val mixerGolden = file("src/test/cpp/voice-mixer.golden")
+// Written by FxMathGoldenTest (the Kotlin FX arithmetic), read by the host test and the web test.
+val fxMathGolden = file("src/test/cpp/fx-math.golden")
 
 android {
     namespace = "dev.arc.ep133"
@@ -85,8 +87,9 @@ android {
             it.useJUnitPlatform()
             // The vectors the native mixer's host test checks against (see hostMixerTest below).
             it.systemProperty("arc.mixerGolden", mixerGolden.absolutePath)
+            it.systemProperty("arc.fxMathGolden", fxMathGolden.absolutePath)
             it.systemProperty("arc.updateGolden", providers.gradleProperty("arc.updateGolden").getOrElse("false"))
-            it.inputs.files(mixerGolden)
+            it.inputs.files(mixerGolden, fxMathGolden)
         }
     }
 
@@ -130,7 +133,8 @@ dependencies {
 /**
  * Builds and runs the native engine's host test (src/test/cpp) with this
  * machine's own C++ compiler: the C++ VoiceMixer must render exactly what the
- * Kotlin one does (the vectors in [mixerGolden]), and LiveCore must hand sounds,
+ * Kotlin one does (the vectors in [mixerGolden]), the FX bus's arithmetic must
+ * give the Kotlin one's bits (the vectors in [fxMathGolden]), and LiveCore must hand sounds,
  * commands and reports over as it says. The Oboe stream and the JNI aren't in
  * it (they need a device). Skipped, saying so, where no compiler is found.
  */
@@ -142,6 +146,10 @@ abstract class HostCppTest : DefaultTask() {
     @get:InputFile
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val golden: RegularFileProperty
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val fxGolden: RegularFileProperty
 
     @get:Internal
     abstract val includeDir: DirectoryProperty
@@ -186,7 +194,7 @@ abstract class HostCppTest : DefaultTask() {
             logger.warn("hostMixerTest: no sanitizer runtime found; running without AddressSanitizer")
             compile(compilers.first(), sanitize = false)
         }
-        exec.exec { commandLine(binary.absolutePath, golden.get().asFile.absolutePath) }
+        exec.exec { commandLine(binary.absolutePath, golden.get().asFile.absolutePath, fxGolden.get().asFile.absolutePath) }
         passed.writeText("ok\n")
     }
 }
@@ -196,9 +204,10 @@ val hostMixerTest = tasks.register<HostCppTest>("hostMixerTest") {
     group = "verification"
     val cpp = layout.projectDirectory.dir("src/main/cpp")
     // The parts without Oboe or JNI, and the tests.
-    sources.from(fileTree(cpp) { include("VoiceMixer.*", "LiveCore.*", "SpscRing.h", "BufferTuner.h") })
+    sources.from(fileTree(cpp) { include("VoiceMixer.*", "LiveCore.*", "SpscRing.h", "BufferTuner.h", "fx/*.h") })
     sources.from(fileTree("src/test/cpp") { include("*.cpp", "*.h") })
     golden.set(mixerGolden)
+    fxGolden.set(fxMathGolden)
     includeDir.set(cpp)
     outDir.set(layout.buildDirectory.dir("host-test"))
     outputs.upToDateWhen { outDir.get().asFile.resolve("passed").exists() }
