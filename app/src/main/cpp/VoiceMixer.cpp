@@ -17,7 +17,8 @@ static_assert(VoiceShape().releaseMs == VoiceMixer::FADE_MS, "the default releas
 VoiceMixer::VoiceMixer(int outRate, int maxVoices, int maxFrames)
     : maxVoices_(maxVoices < 1 ? 1 : (maxVoices > MAX_KEYS ? MAX_KEYS : maxVoices)),
       maxFrames_(maxFrames < 1 ? 1 : maxFrames),
-      mix_(new float[static_cast<size_t>(maxFrames_) * 2]) {
+      mix_(new float[static_cast<size_t>(maxFrames_) * 2]),
+      fx_(outRate, maxFrames_) {
     setRate(outRate);
 }
 
@@ -41,18 +42,22 @@ bool VoiceMixer::queue(const Command &c) {
 bool VoiceMixer::start(int32_t key, Sample *sample, int32_t sampleRate, double pitch, int64_t tag,
                        const VoiceShape &shape, int64_t at) {
     if (sample == nullptr || sample->channels < 1 || sample->channels > 2) return false;
-    return queue({Kind::Start, key, sample, static_cast<double>(sampleRate) / outRate_ * pitch, tag, shape, at});
+    return queue({Kind::Start, key, sample, static_cast<double>(sampleRate) / outRate_ * pitch, tag, shape, at, 0, 0.0f, 0.0f});
 }
 
 bool VoiceMixer::release(int32_t key, int64_t at, int64_t tag) {
-    return queue({Kind::Release, key, nullptr, 0.0, tag, VoiceShape(), at});
+    return queue({Kind::Release, key, nullptr, 0.0, tag, VoiceShape(), at, 0, 0.0f, 0.0f});
 }
 
-bool VoiceMixer::cut(int32_t key) { return queue({Kind::Cut, key, nullptr, 0.0, 0, VoiceShape(), NOW}); }
+bool VoiceMixer::cut(int32_t key) { return queue({Kind::Cut, key, nullptr, 0.0, 0, VoiceShape(), NOW, 0, 0.0f, 0.0f}); }
 
-bool VoiceMixer::stopAll() { return queue({Kind::StopAll, 0, nullptr, 0.0, 0, VoiceShape(), NOW}); }
+bool VoiceMixer::stopAll() { return queue({Kind::StopAll, 0, nullptr, 0.0, 0, VoiceShape(), NOW, 0, 0.0f, 0.0f}); }
 
-bool VoiceMixer::flushTimed() { return queue({Kind::FlushTimed, 0, nullptr, 0.0, 0, VoiceShape(), NOW}); }
+bool VoiceMixer::flushTimed() { return queue({Kind::FlushTimed, 0, nullptr, 0.0, 0, VoiceShape(), NOW, 0, 0.0f, 0.0f}); }
+
+bool VoiceMixer::control(int32_t what, int32_t index, float x, float y) {
+    return queue({Kind::Control, index, nullptr, 0.0, 0, VoiceShape(), NOW, what, x, y});
+}
 
 void VoiceMixer::render(int16_t *out, int frames) {
     if (frames > maxFrames_) frames = maxFrames_;
@@ -60,6 +65,7 @@ void VoiceMixer::render(int16_t *out, int frames) {
     for (int i = 0; i < commandCount_; i++) take(commands_[i]);
     commandCount_ = 0;
     std::memset(mix_, 0, sizeof(float) * static_cast<size_t>(frames) * 2);
+    fx_.begin(frames);
     const int64_t end = frame_ + frames;
     int done = 0;
     while (true) {
@@ -67,12 +73,14 @@ void VoiceMixer::render(int16_t *out, int frames) {
         const int64_t next = pendingCount_ == 0 || pending_[0].at > end ? end : pending_[0].at;
         const int n = static_cast<int>(next - frame_);
         if (n > 0) {
+            fx_.gains(done, n, frame_);
             playAll(done, n);
             done += n;
             frame_ += n;
         }
         if (frame_ >= end) break;
     }
+    fx_.process(mix_, frames);
     for (int i = 0; i < frames * 2; i++) {
         float m = mix_[i];
         if (m < -32768.0f) m = -32768.0f;
@@ -160,6 +168,7 @@ void VoiceMixer::reset(int outRate) {
         keysVersion_++;
     }
     setRate(outRate);
+    fx_.setRate(outRate);
 }
 
 // Whether the voices not cut short differ from [keys]. A Key-mode key may have
@@ -195,6 +204,8 @@ void VoiceMixer::removeVoice(int index) {
 void VoiceMixer::apply(const Command &c) {
     switch (c.kind) {
         case Kind::Start: {
+            // The duck starts with its source, whether or not it has anything to play.
+            if (c.shape.duckSource) fx_.trigger(frame_);
             if (c.sample->frames < 1) return;
             const VoiceShape &shape = c.shape;
             const int32_t frames = c.sample->frames;
@@ -255,7 +266,8 @@ void VoiceMixer::apply(const Command &c) {
                                       INT64_MAX,
                                       1,
                                       false,
-                                      false};
+                                      false,
+                                      shape.bus >= 0 && shape.bus < fx::FxControl::GROUPS ? shape.bus : -1};
             c.sample->voices++;
             if (startedCount_ < MAX_STARTED) started_[startedCount_++] = {c.key, c.tag, frame_};
             return;
@@ -282,6 +294,9 @@ void VoiceMixer::apply(const Command &c) {
             return;
         case Kind::FlushTimed:
             flushPending();
+            return;
+        case Kind::Control:
+            fx_.control(c.what, c.key, c.x, c.y);
             return;
     }
 }
@@ -342,10 +357,16 @@ float VoiceMixer::ramp(const Voice &v, int64_t at) const {
 }
 
 // Adds [frames] of [v] to the mix from its frame [offset] (output frame frame_); false once it has ended.
+// On a group's bus, each frame is heard at the group's dry gain (when it isn't
+// 1 throughout) and sent to the FX bus at its send gain (when that isn't 0
+// throughout): one more factor after the rest, so a gain of 1 changes nothing.
 bool VoiceMixer::play(Voice &v, int offset, int frames) {
     const int32_t last = v.end - 1;
     const int16_t *pcm = v.sample->pcm;
     const int32_t ch = v.sample->channels;
+    const float *dry = v.bus >= 0 ? fx_.dry(v.bus) : nullptr;
+    const float *send = v.bus >= 0 ? fx_.send(v.bus) : nullptr;
+    float *fxIn = fx_.fxIn();
     for (int i = 0; i < frames; i++) {
         const double p = v.pos;
         if (p > last) return false;
@@ -365,8 +386,20 @@ bool VoiceMixer::play(Voice &v, int offset, int frames) {
         } else {
             r = l;
         }
-        mix_[2 * (offset + i)] += l * g * v.left;
-        mix_[2 * (offset + i) + 1] += r * g * v.right;
+        const float left = l * g * v.left;
+        const float right = r * g * v.right;
+        const int j = 2 * (offset + i);
+        if (dry == nullptr) {
+            mix_[j] += left;
+            mix_[j + 1] += right;
+        } else {
+            mix_[j] += left * dry[offset + i];
+            mix_[j + 1] += right * dry[offset + i];
+        }
+        if (send != nullptr) {
+            fxIn[j] += left * send[offset + i];
+            fxIn[j + 1] += right * send[offset + i];
+        }
         v.pos = p + v.step;
     }
     return true;

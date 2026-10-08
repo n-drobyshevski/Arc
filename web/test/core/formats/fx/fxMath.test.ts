@@ -21,6 +21,7 @@ import {
   triangle,
   wrap01,
 } from '../../../../src/core/formats/fx/fxMath'
+import { Svf } from '../../../../src/core/formats/fx/svf'
 
 // app/src/test/cpp/fx-math.golden, read in place (like voice-mixer.golden).
 const goldenPath = fileURLToPath(new URL('../../../../../app/src/test/cpp/fx-math.golden', import.meta.url))
@@ -105,6 +106,33 @@ function replayGolden(text: string): number {
             want(lcg.unit(), 3 + i)
           }
         }
+        break
+      }
+      case 'svf': {
+        // As FxMathGoldenTest: noise (retuned halfway to half the cutoff), then silence; a hash of every output.
+        const hz = fl(1)
+        const q = fl(2)
+        const rate = int(3)
+        const n = int(5)
+        const tail = int(6)
+        const svf = new Svf()
+        svf.tune(hz, q, rate)
+        const lcg = new Lcg(int(4))
+        let h = 0x811c9dc5 | 0
+        const hash = (v: number): void => {
+          h = Math.imul(h ^ parseInt(bits(v), 16), 16777619)
+        }
+        for (let i = 0; i < n + tail; i++) {
+          if (i === n >> 1) svf.tune(Math.fround(hz * 0.5), q, rate)
+          svf.process(i < n ? Math.fround(Math.fround(Math.fround(lcg.unit() * 2) - 1) * 32768) : 0)
+          hash(svf.lp)
+          hash(svf.bp)
+          hash(svf.hp)
+        }
+        want(svf.lp, 8)
+        want(svf.bp, 9)
+        want(svf.hp, 10)
+        if ((h >>> 0).toString(16) !== w[7]) throw new Error(`fx-math.golden: ${line}: web hash ${(h >>> 0).toString(16)}`)
         break
       }
       case 'end':

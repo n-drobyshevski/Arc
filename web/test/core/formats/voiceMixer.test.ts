@@ -747,7 +747,8 @@ function replayGolden(text: string): number {
         case 'startat': {
           const sound = samples[n(2)]!
           const pitch = doubleOf(w[4]!)
-          // A timed start has its frame after the tag, the shape (if any) after that.
+          // A timed start has its frame after the tag, the shape (if any) after that: 8 fields, or 10 with
+          // the FX bus and the duck source.
           const timed = w[0] === 'startat'
           const s = timed ? 7 : 6
           const shape =
@@ -761,6 +762,7 @@ function replayGolden(text: string): number {
                   releaseMs: n(s + 5),
                   mode: MODES[n(s + 6)]!,
                   muteGroup: n(s + 7),
+                  ...(w.length > s + 8 ? { bus: n(s + 8), duckSource: n(s + 9) !== 0 } : {}),
                 })
               : VoiceShape.DEFAULT
           VoiceMixer.pitchRatio = () => pitch
@@ -780,6 +782,10 @@ function replayGolden(text: string): number {
           break
         case 'cut':
           mixer.cut(w[1]!)
+          break
+        case 'control':
+          // An FX bus command: its kind, index and two float values as bits.
+          mixer.control(n(1), n(2), floatOf(w[3]!), floatOf(w[4]!))
           break
         case 'stop':
           mixer.stopAll()

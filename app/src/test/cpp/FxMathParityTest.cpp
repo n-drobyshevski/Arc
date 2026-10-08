@@ -1,7 +1,9 @@
 // Replays fx-math.golden (written by FxMathGoldenTest from the Kotlin FxMath)
 // through the C++ port and wants the same bits: each line is a function, its
 // arguments (floats as bits, ints in decimal) and what it gave; "lcg" and
-// "lcgunit" lines are a seed's first states and first numbers in 0..1.
+// "lcgunit" lines are a seed's first states and first numbers in 0..1, "svf"
+// lines noise through the state-variable filter (fx/Svf.h): a hash of every
+// output and the last ones.
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -12,6 +14,7 @@
 
 #include "HostTest.h"
 #include "fx/FxMath.h"
+#include "fx/Svf.h"
 
 namespace {
 
@@ -133,6 +136,34 @@ int runFxMathParity(const char *goldenPath) {
                 } else {
                     expectBits(line, readFloat(words), lcg.unit());
                 }
+            }
+        } else if (op == "svf") {
+            // As FxMathGoldenTest: noise (retuned halfway to half the cutoff), then silence.
+            const float hz = readFloat(words);
+            const float q = readFloat(words);
+            int32_t rate = 0;
+            int32_t seed = 0;
+            int n = 0;
+            int tail = 0;
+            std::string hash;
+            words >> rate >> seed >> n >> tail >> hash;
+            fx::Svf svf;
+            svf.tune(hz, q, rate);
+            fx::Lcg lcg(seed);
+            uint32_t h = 0x811c9dc5u;
+            for (int i = 0; i < n + tail; i++) {
+                if (i == n / 2) svf.tune(hz * 0.5f, q, rate);
+                svf.process(i < n ? (lcg.unit() * 2.0f - 1.0f) * 32768.0f : 0.0f);
+                h = (h ^ bitsOf(svf.lp())) * 16777619u;
+                h = (h ^ bitsOf(svf.bp())) * 16777619u;
+                h = (h ^ bitsOf(svf.hp())) * 16777619u;
+            }
+            expectBits(line, readFloat(words), svf.lp());
+            expectBits(line, readFloat(words), svf.bp());
+            expectBits(line, readFloat(words), svf.hp());
+            if (static_cast<uint32_t>(std::strtoul(hash.c_str(), nullptr, 16)) != h) {
+                arc::test::failures()++;
+                if (reported++ < 10) std::fprintf(stderr, "fx-math.golden: %s: C++ hash %08x\n", line.c_str(), h);
             }
         } else if (op == "end") {
             ended = true;

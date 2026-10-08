@@ -3,6 +3,7 @@ package dev.arc.ep133.audio
 import dev.arc.ep133.formats.fx.DENORMAL
 import dev.arc.ep133.formats.fx.Lcg
 import dev.arc.ep133.formats.fx.PI_F
+import dev.arc.ep133.formats.fx.Svf
 import dev.arc.ep133.formats.fx.clamp01
 import dev.arc.ep133.formats.fx.flush
 import dev.arc.ep133.formats.fx.knobHz
@@ -26,8 +27,9 @@ import kotlin.random.Random
  * The vectors the FX bus's arithmetic is checked against in its other ports
  * (an addition): each FxMath function over a sweep of inputs (edges, zeros
  * of either sign, values either side of the denormal flush and the clip's
- * knee, and random ones), the semitone table, and the Lcg's sequences from a
- * few seeds, written out with what each gave as float bits. The host test
+ * knee, and random ones), the semitone table, the Lcg's sequences from a
+ * few seeds, and the state-variable filter ([Svf]) over noise at a spread of
+ * cutoffs, resonances and rates, written out with what each gave as float bits. The host test
  * (src/test/cpp/FxMathParityTest.cpp, run by `./gradlew test` through
  * :app:hostMixerTest) and the web test (web/test/core/formats/fx/fxMath.test.ts)
  * replay them through their ports and want the same bits.
@@ -136,6 +138,40 @@ class FxMathGoldenTest {
             repeat(16) { out.append(' ').append(bits(units.unit())) }
             out.append('\n')
         }
+
+        // The state-variable filter: noise through it (retuned halfway, to half the cutoff), then [tail] frames of
+        // silence; a hash of every output's bits (FNV-1a over 32-bit words) and the last outputs.
+        var seed = 1
+        fun svf(hz: Float, q: Float, rate: Int, n: Int, tail: Int) {
+            val filter = Svf()
+            filter.tune(hz, q, rate)
+            val lcg = Lcg(seed)
+            var h = 0x811c9dc5.toInt()
+            fun hash(v: Float) {
+                h = (h xor v.toRawBits()) * 16777619
+            }
+            for (i in 0 until n + tail) {
+                if (i == n / 2) filter.tune(hz * 0.5f, q, rate)
+                filter.process(if (i < n) (lcg.unit() * 2f - 1f) * 32768f else 0f)
+                hash(filter.lp)
+                hash(filter.bp)
+                hash(filter.hp)
+            }
+            out.append("svf ").append(bits(hz)).append(' ').append(bits(q)).append(' ').append(rate).append(' ').append(seed)
+                .append(' ').append(n).append(' ').append(tail).append(' ').append(Integer.toHexString(h))
+                .append(' ').append(bits(filter.lp)).append(' ').append(bits(filter.bp)).append(' ').append(bits(filter.hp)).append('\n')
+            seed++
+        }
+        for (rate in listOf(44100, 48000)) {
+            for (hz in listOf(20f, 60f, 500f, 1000f, 5000f, 12000f, 0.4f * rate, 30000f)) {
+                for (q in listOf(0.5f, 0.707f, 2f, 8f)) svf(hz, q, rate, 512, 0)
+            }
+        }
+        // Long enough for the tails to die to exactly 0 through the denormal flush.
+        svf(1000f, 8f, 48000, 256, 48000)
+        svf(20f, 8f, 48000, 256, 480000)
+        svf(18000f, 0.5f, 96000, 256, 9600)
+
         out.append("end\n")
         return out.toString()
     }

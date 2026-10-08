@@ -3,6 +3,8 @@ package dev.arc.ep133.audio
 import dev.arc.ep133.formats.VoiceMixer
 import dev.arc.ep133.formats.VoiceMode
 import dev.arc.ep133.formats.VoiceShape
+import dev.arc.ep133.formats.fx.FxControl
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assertions.fail
 import org.junit.jupiter.api.Test
@@ -16,7 +18,9 @@ import kotlin.random.Random
  * each of [VoiceShape]'s settings and modes, and long random ones with random
  * shapes, then the timed commands: starts and tagged releases at a frame,
  * inside a render, on its edge and late, and long random ones as the
- * pattern sequencer sends them, at real rates and block sizes), written out
+ * pattern sequencer sends them, at real rates and block sizes, then the FX
+ * bus: sends, the dry law, the sidechain's duck, smoothing and the tempo, and
+ * long random ones with random controls), written out
  * with every
  * command and what each render gave (its samples, or a hash of them for long
  * renders, the voices started and the keys). The host test
@@ -27,13 +31,19 @@ import kotlin.random.Random
  * This test fails when the Kotlin mixer no longer writes the committed file
  * (src/test/cpp/voice-mixer.golden): after a deliberate change to it, write the
  * file again with `./gradlew :app:testDebugUnitTest -Parc.updateGolden=true`,
- * and change the C++ port until the host test passes.
+ * and change the C++ port until the host test passes. New scenarios go at the
+ * end: the first [LEGACY_SCENARIOS] (those from before the FX bus) must come
+ * out as they always have, and the test won't write the file otherwise.
  */
 class VoiceMixerGoldenTest {
     @Test
     fun `the Kotlin mixer still writes the committed vectors`() {
         val golden = File(System.getProperty("arc.mixerGolden") ?: fail("arc.mixerGolden not set"))
         val text = vectors()
+        // The scenarios from before the FX bus, to the byte: the bus at its defaults changes nothing.
+        assertEquals(LEGACY_FNV, fnv(legacy(text))) {
+            "The first $LEGACY_SCENARIOS scenarios no longer come out as they did before the FX bus: new scenarios go at the end."
+        }
         if (System.getProperty("arc.updateGolden") == "true") {
             golden.writeText(text)
             return
@@ -86,8 +96,9 @@ class VoiceMixerGoldenTest {
          * A start; a [shape] other than the default (its semitones aside, which
          * go into the pitch, as the native output does) adds its fields to the
          * line: the gain's float bits, pan, start, end, attack, release, the
-         * mode's ordinal and the mute group. A timed one ([at]) is a "startat"
-         * line, with its frame after the tag.
+         * mode's ordinal and the mute group, then, for a voice on a bus or a
+         * duck source, the bus and 1 or 0 for the source. A timed one ([at])
+         * is a "startat" line, with its frame after the tag.
          */
         fun start(
             key: String,
@@ -107,12 +118,20 @@ class VoiceMixerGoldenTest {
             } else {
                 out.append("startat ${keys.id(key)} $id $rate $pitch $tag $at")
             }
-            if (shape.copy(semitones = 0.0) != VoiceShape.DEFAULT) {
+            val routed = shape.bus != -1 || shape.duckSource
+            if (routed || shape.copy(semitones = 0.0) != VoiceShape.DEFAULT) {
                 out.append(' ').append(Integer.toHexString(shape.gain.toRawBits())).append(' ').append(shape.pan)
                     .append(' ').append(shape.start).append(' ').append(shape.end).append(' ').append(shape.attackMs)
                     .append(' ').append(shape.releaseMs).append(' ').append(shape.mode.ordinal).append(' ').append(shape.muteGroup)
             }
+            if (routed) out.append(' ').append(shape.bus).append(' ').append(if (shape.duckSource) 1 else 0)
             out.append('\n')
+        }
+
+        /** An FX bus command ([FxControl]): its kind, index and the float bits of its two values. */
+        fun control(what: Int, index: Int, x: Float, y: Float) {
+            mixer.control(what, index, x, y)
+            out.append("control $what $index ${Integer.toHexString(x.toRawBits())} ${Integer.toHexString(y.toRawBits())}\n")
         }
 
         fun release(key: String) {
@@ -356,6 +375,7 @@ class VoiceMixerGoldenTest {
         }
         shapes(::scenario)
         timed(::scenario)
+        fx(::scenario)
         return out.toString()
     }
 
@@ -784,7 +804,261 @@ class VoiceMixerGoldenTest {
         }
     }
 
+    /** The FX bus's scenarios: sends, the dry law, the duck, smoothing, the tempo, then random ones. */
+    private fun fx(play: (String, Int, Int, Trace.() -> Unit) -> Unit) {
+        fun scenario(name: String, outRate: Int = 1000, maxVoices: Int = VoiceMixer.MAX_VOICES, body: Trace.() -> Unit) =
+            play(name, outRate, maxVoices, body)
+        fun steady(n: Int, v: Short = 1000) = ShortArray(n) { v }
+        fun on(bus: Int, duck: Boolean = false, mode: VoiceMode = VoiceMode.GATE) = VoiceShape(bus = bus, duckSource = duck, mode = mode)
+
+        scenario("fx-sends-none") {
+            // No effect: the dry law is 1, so every group plays as before, sends or not.
+            for ((g, send) in listOf(0.25f, 0.5f, 0.75f, 1f).withIndex()) control(FxControl.SEND, g, send, 0f)
+            start("a", steady(1000, 1000), 1, 1000, shape = on(0))
+            start("b", steady(1000, 2000), 1, 1000, shape = on(1))
+            start("c", steady(1000, 3000), 1, 1000, shape = on(2))
+            start("d", steady(1000, 4000), 1, 1000, shape = on(3))
+            start("e", steady(1000, 500), 1, 1000)
+            render(16)
+            render(64)
+            control(FxControl.SEND, 1, 0f, 0f)
+            release("a")
+            release("c")
+            render(64)
+            render(64)
+        }
+        scenario("fx-dry-law") {
+            // A send with an effect (a stub that adds nothing yet): the dry gives way by the effect's law.
+            control(FxControl.FX_TYPE, FxControl.DELAY, 0.3f, 0.6f)
+            control(FxControl.SEND, 0, 1f, 0f)
+            control(FxControl.SEND, 2, 0.5f, 0f)
+            start("a", steady(2000, 1000), 1, 1000, shape = on(0))
+            start("b", steady(2000, 2000), 1, 1000, shape = on(1))
+            start("c", steady(2000, 3000), 1, 1000, shape = on(2))
+            start("free", steady(2000, 300), 1, 1000)
+            render(32)
+            render(64)
+            for (type in listOf(FxControl.DISTORTION, FxControl.FILTER, FxControl.REVERB, FxControl.CHORUS, FxControl.COMPRESSOR)) {
+                control(FxControl.FX_TYPE, type, 0.5f, 0.5f)
+                render(48)
+            }
+            control(FxControl.FX_XY, 0, 0.9f, 0.1f)
+            render(16)
+            // Two changes in one render, a type out of range (none), and back.
+            control(FxControl.FX_TYPE, FxControl.DELAY, 0.5f, 0.5f)
+            control(FxControl.FX_TYPE, FxControl.REVERB, 0.5f, 0.5f)
+            render(8)
+            control(FxControl.FX_TYPE, 9, 0.5f, 0.5f)
+            render(40)
+            control(FxControl.FX_TYPE, FxControl.FILTER, 0.5f, 0.5f)
+            control(FxControl.SEND, 0, 0f, 0f)
+            render(64)
+            stopAll()
+            render(16)
+        }
+        scenario("fx-duck-now") {
+            control(FxControl.SIDECHAIN, 0b0001, 0f, 0f)
+            start("bass", steady(1000, 1000), 1, 1000, shape = on(0))
+            start("pad", steady(1000, 2000), 1, 1000, shape = on(1))
+            render(8)
+            // The source plays (straight to the mix) and ducks group A: 2 ms down, back by 30 ms.
+            start("kick", steady(20, 500), 1, 1000, shape = on(-1, duck = true))
+            render(48)
+            // Again inside the duck: from where it is. Then the slow curve and the longest.
+            start("kick", steady(20, 500), 1, 1000, shape = on(-1, duck = true))
+            render(10)
+            start("kick", steady(20, 500), 1, 1000, shape = on(-1, duck = true))
+            render(40)
+            control(FxControl.SIDECHAIN, 0b0011, 1f, 1f)
+            start("kick", steady(20, 500), 1, 1000, shape = on(2, duck = true))
+            render(64)
+            render(64)
+            render(64)
+            render(64)
+            render(64)
+            render(64)
+            render(64)
+            render(64)
+            render(64)
+            render(64)
+        }
+        scenario("fx-duck-timed-silent") {
+            control(FxControl.SIDECHAIN, 0b0001, 0.2f, 0.5f)
+            start("bass", steady(1000, 1000), 1, 1000, shape = on(0))
+            render(4)
+            // Nothing to play, timed inside the next render: it ducks on its own frame all the same.
+            start("ghost", ShortArray(0), 1, 1000, tag = -1, shape = on(-1, duck = true), at = 10)
+            render(64)
+            render(64)
+            // Trimmed to nothing, and a legato start that only changes a held voice's pitch: both duck.
+            start("trim", steady(100), 1, 1000, tag = -2, shape = VoiceShape(start = 50, end = 50, duckSource = true), at = 140)
+            render(64)
+            val lead = steady(1000, 700)
+            start("lead", lead, 1, 1000, shape = on(0, mode = VoiceMode.LEGATO))
+            render(64)
+            start("lead", lead, 1, 1000, semitones = 3, tag = -3, shape = on(0, duck = true, mode = VoiceMode.LEGATO), at = 270)
+            render(64)
+            render(64)
+            // A source on a bus that's ducked ducks itself.
+            start("self", steady(100, 4000), 1, 1000, shape = on(0, duck = true))
+            render(32)
+        }
+        scenario("fx-duck-dests") {
+            control(FxControl.SIDECHAIN, 0b0101, 0.1f, 0.3f)
+            for (g in 0 until 4) start("g$g", steady(2000, (1000 * (g + 1)).toShort()), 1, 1000, shape = on(g))
+            start("free", steady(2000, 100), 1, 1000)
+            render(4)
+            start("kick", ShortArray(0), 1, 1000, shape = on(-1, duck = true))
+            render(32)
+            // The mask changes while ducking: the duck carries on, on the new groups.
+            control(FxControl.SIDECHAIN, 0b1010, 0.1f, 0.3f)
+            render(16)
+            // Off mid-duck: back to 1 at once; on again: still mid-duck.
+            control(FxControl.SIDECHAIN, 0, 0.1f, 0.3f)
+            render(4)
+            control(FxControl.SIDECHAIN, 0b1111, 0.1f, 0.3f)
+            render(32)
+            start("kick", ShortArray(0), 1, 1000, shape = on(-1, duck = true))
+            render(64)
+            render(64)
+        }
+        scenario("fx-control-smoothing", outRate = 48000) {
+            control(FxControl.FX_TYPE, FxControl.DISTORTION, 0.5f, 0.5f)
+            start("a", steady(48000, 10000), 1, 48000, shape = on(0))
+            start("b", steady(48000, -8000), 1, 48000, shape = on(3))
+            render(64)
+            // A send glides up over about 20 ms (the dry down with it), then down.
+            control(FxControl.SEND, 0, 1f, 0f)
+            control(FxControl.SEND, 3, 0.3f, 0f)
+            repeat(20) { render(64) }
+            render(4096)
+            render(64)
+            control(FxControl.SEND, 0, 0.2f, 0f)
+            control(FxControl.FX_XY, 0, 0f, 1f)
+            repeat(20) { render(64) }
+            // SEND_FX held: every group sends at least its depth.
+            control(FxControl.PUNCH, FxControl.SEND_FX, 0.6f, 0f)
+            repeat(4) { render(64) }
+            control(FxControl.PUNCH, FxControl.SEND_FX, 0f, 0f)
+            repeat(4) { render(64) }
+            render(24000)
+            render(64)
+        }
+        scenario("fx-tempo-and-the-rest") {
+            // The tempo, held to 20..300, then the punch-ins and the master compressor (stubs for now).
+            start("a", steady(1000, 1000), 1, 1000, shape = on(1))
+            control(FxControl.SEND, 1, 0.5f, 0f)
+            control(FxControl.FX_TYPE, FxControl.DELAY, 0.5f, 0.5f)
+            for (bpm in listOf(90f, 5f, 400f, Float.NaN, 120f)) {
+                control(FxControl.TEMPO, 0, bpm, 0f)
+                render(8)
+            }
+            for (slot in 0 until FxControl.SLOTS) control(FxControl.PUNCH, slot, 0.7f, 0f)
+            control(FxControl.PUNCH, 12, 1f, 0f)
+            control(FxControl.PUNCH, -1, 1f, 0f)
+            render(16)
+            for (slot in 0 until FxControl.SLOTS) control(FxControl.PUNCH, slot, -1f, 0f)
+            render(16)
+            control(FxControl.COMP, 1, 0.8f, 0.2f)
+            render(16)
+            control(FxControl.COMP, 0, 0.8f, 0.2f)
+            // Out of range and not numbers: held, or ignored.
+            control(FxControl.SEND, 7, 1f, 0f)
+            control(FxControl.SEND, 1, Float.NaN, 0f)
+            control(FxControl.SIDECHAIN, -1, 2f, -3f)
+            control(99, 0, 1f, 1f)
+            render(16)
+            render(32)
+        }
+
+        // As the controller will send them: random controls between renders, voices on random buses (some of
+        // them duck sources, some timed), at real rates and block sizes.
+        val rates = intArrayOf(46875, 44100, 48000, 22050)
+        val pool = listOf("seq:0:0", "seq:0:3", "seq:1:5", "seq:2:11", "live:0:3", "live:1:5", "live:3:7", "note:60")
+        val modes = VoiceMode.entries
+        var n = 0
+        for (rate in intArrayOf(44100, 48000)) {
+            for ((block, renders) in listOf(96 to 300, 192 to 150, 1024 to 60)) {
+                val random = Random(13310 + n++)
+                scenario("random-fx-$rate-$block", rate, VoiceMixer.MAX_VOICES) {
+                    val sounds = List(5) {
+                        val channels = 1 + random.nextInt(2)
+                        val frames = if (it == 4) 0 else 20 + random.nextInt(if (it == 0) 20000 else 3000)
+                        Triple(noise(channels, frames, random.nextLong(1, Long.MAX_VALUE)), channels, rates[random.nextInt(rates.size)])
+                    }
+                    val ahead = maxOf(rate / 20, block * 3)
+                    var tag = 0L
+                    repeat(renders) {
+                        repeat(random.nextInt(3)) {
+                            when (random.nextInt(8)) {
+                                0 -> control(FxControl.FX_TYPE, random.nextInt(FxControl.TYPES), random.nextFloat(), random.nextFloat())
+                                1 -> control(FxControl.FX_XY, 0, random.nextFloat(), random.nextFloat())
+                                2, 3 -> control(FxControl.SEND, random.nextInt(4), if (random.nextInt(3) == 0) 0f else random.nextFloat(), 0f)
+                                4 -> control(FxControl.SIDECHAIN, random.nextInt(16), random.nextFloat(), random.nextFloat())
+                                5 -> control(FxControl.COMP, random.nextInt(2), random.nextFloat(), random.nextFloat())
+                                6 -> control(FxControl.TEMPO, 0, 60f + random.nextInt(140), 0f)
+                                else -> control(FxControl.PUNCH, random.nextInt(FxControl.SLOTS), if (random.nextBoolean()) 0f else random.nextFloat(), 0f)
+                            }
+                        }
+                        repeat(random.nextInt(4)) {
+                            val key = pool[random.nextInt(pool.size)]
+                            val r = random.nextInt(100)
+                            val (pcm, channels, sr) = sounds[random.nextInt(sounds.size)]
+                            val shape = VoiceShape(
+                                gain = if (random.nextBoolean()) 1f else random.nextInt(0, 101) / 100f,
+                                pan = if (random.nextBoolean()) 0 else random.nextInt(-16, 17),
+                                mode = modes[random.nextInt(modes.size)],
+                                bus = random.nextInt(-1, 4),
+                                duckSource = random.nextInt(5) == 0,
+                            )
+                            when {
+                                r < 45 -> {
+                                    val at = mixer.frame + random.nextInt(-ahead / 4, ahead)
+                                    val t = -(++tag)
+                                    start(key, pcm, channels, sr, random.nextInt(-12, 13), t, shape, at)
+                                    if (random.nextInt(5) != 0) releaseAt(key, at + random.nextInt(1, ahead * 2), t)
+                                }
+                                r < 70 -> start(key, pcm, channels, sr, random.nextInt(-12, 13), random.nextLong(1, 1_000_000), shape)
+                                r < 88 -> release(key)
+                                r < 94 -> cut(key)
+                                r < 96 -> stopAll()
+                                else -> flushTimed()
+                            }
+                        }
+                        render(block)
+                    }
+                    render(rate / 4)
+                }
+            }
+        }
+    }
+
     private companion object {
+        /** The scenarios written before the FX bus, and the FNV-1a of the file's text up to the end of the last of them. */
+        const val LEGACY_SCENARIOS = 55
+        const val LEGACY_FNV = 0x350777a57d7b0e0eL
+
+        /** [text] up to the end of its first [LEGACY_SCENARIOS] scenarios. */
+        fun legacy(text: String): String {
+            var at = 0
+            repeat(LEGACY_SCENARIOS) {
+                val end = text.indexOf("\nend\n", at)
+                if (end < 0) return text
+                at = end + 4
+            }
+            return text.substring(0, at + 1)
+        }
+
+        /** FNV-1a over [text]'s characters (ASCII). */
+        fun fnv(text: String): Long {
+            var h = -0x340d631b7bdddcdbL // 0xcbf29ce484222325
+            for (c in text) {
+                h = h xor c.code.toLong()
+                h *= 0x100000001b3L
+            }
+            return h
+        }
+
         /** Full-scale noise: xorshift64, the top 16 bits of each step (the C++ side makes the same). */
         fun noiseOf(size: Int, seed: Long): ShortArray {
             var x = seed
