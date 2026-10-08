@@ -70,6 +70,14 @@ import dev.arc.ep133.features.SampleSource
 import dev.arc.ep133.ui.screens.ProjectSheetContent
 import dev.arc.ep133.ui.screens.SampleReviewSheetContent
 import dev.arc.ep133.ui.screens.TempoSheetContent
+import dev.arc.ep133.ui.screens.TempoPage
+import dev.arc.ep133.ui.screens.TimingUi
+import dev.arc.ep133.ui.screens.LiveArp
+import dev.arc.ep133.controller.ArpUi
+import dev.arc.ep133.features.ArpNote
+import dev.arc.ep133.features.ArpOrder
+import dev.arc.ep133.features.ArpSettings
+import dev.arc.ep133.features.TimingSettings
 import dev.arc.ep133.ui.screens.PatternSheetContent
 import dev.arc.ep133.ui.screens.FxPage
 import dev.arc.ep133.ui.screens.FxSheetContent
@@ -174,7 +182,7 @@ private fun Framed(
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null, arp: LiveArp? = null, voices: Set<String>? = null) {
     val mirror = MirrorUi(state, loading = loading, error = error, offline = offline, offlineProjects = offlineProjects)
     // PROJECT as MainActivity works it out; TEMPO's light caught on a beat while the click is on; FX named on its light,
     // held while [punch] gives the punch-ins.
@@ -188,9 +196,11 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
     // The piano's notes, for the display line in the bar to name a device note past them. The
     // piano reports them a frame late, after the screenshot, so [piano] gives them up front.
     var pianoRange by remember { mutableStateOf(piano) }
+    // The voices sounding, as the phone reports them ([voices]: the arp's steps lit); null leaves the rings as given.
+    val voiceFlow = remember(voices) { voices?.let { kotlinx.coroutines.flow.MutableStateFlow(it) } }
     Framed(
         Tab.LIVE, connected = offline == null && error == null, dark = dark, guide = guide,
-        pill = { LivePill(mirror, keys, transport, takeUi, still = true, pianoRange = pianoRange, editing = edit == true, wireless = wireless, sample = sampleUi, punch = punch?.held.orEmpty()) }, toast = toast, barMiddle = barMiddle,
+        pill = { LivePill(mirror, keys, transport, takeUi, still = true, pianoRange = pianoRange, editing = edit == true, wireless = wireless, sample = sampleUi, punch = punch?.held.orEmpty(), arp = arp?.ui?.line, voices = voiceFlow) }, toast = toast, barMiddle = barMiddle,
         toastAction = toastAction,
         sample = SampleKey(sampleUi.state.on && !keys.on) {},
     ) {
@@ -222,6 +232,8 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
             functions = functions,
             punch = punch ?: PunchUi(),
             sample = sampleUi,
+            voices = voiceFlow,
+            arp = arp,
         )
     }
 }
@@ -725,15 +737,94 @@ fun TempoSheetPreview() = TempoSheet(deviceBpm = null)
 @Composable
 fun TempoSheetFollowingPreview() = TempoSheet(deviceBpm = 122.0)
 
+// TEMPO held, its TIMING tab: 1/16 swung to 56%, quantized; the arp as played over one octave, gate 50%, latched.
+@PreviewTest
+@Preview(name = "Tempo sheet timing", widthDp = 393, heightDp = 852, showBackground = true)
 @Composable
-private fun TempoSheet(deviceBpm: Double?) {
-    Framed(Tab.LIVE) {
+fun TempoSheetTimingPreview() = TempoSheet(deviceBpm = null, timing = timingUi)
+
+// At 1/8T swing rests, saying where it plays; free time, the arp up and down over two octaves.
+@PreviewTest
+@Preview(name = "Tempo sheet timing dark", widthDp = 393, heightDp = 852, showBackground = true)
+@Composable
+fun TempoSheetTimingDarkPreview() = TempoSheet(
+    deviceBpm = null,
+    timing = TimingUi(TimingSettings(Timing.EIGHTH_T, 56, quantize = false), ArpSettings(ArpOrder.UP_DOWN, octaves = 2, gate = 80)),
+    dark = true,
+)
+
+private val timingUi = TimingUi(TimingSettings(Timing.SIXTEENTH, 56, quantize = true), ArpSettings(latch = true))
+
+@Composable
+private fun TempoSheet(deviceBpm: Double?, timing: TimingUi? = null, dark: Boolean = false) {
+    Framed(Tab.LIVE, dark = dark) {
         MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
         ArcSheet(visible = true, onDismiss = {}) {
-            TempoSheetContent(bpm = 98, deviceBpm = deviceBpm, on = true, onOn = {}, onBpm = {}, onTap = {}, onDone = {})
+            TempoSheetContent(
+                bpm = 98, deviceBpm = deviceBpm, on = true, onOn = {}, onBpm = {}, onTap = {}, onDone = {},
+                timing = timing,
+                initialPage = if (timing != null) TempoPage.TIMING else TempoPage.TEMPO,
+            )
         }
     }
 }
+
+// ARP on KEYS: DO, FA and LA held in that order (outlined and numbered), FA sounding now (lit), and the
+// display line saying what plays. ARP lit on the plate under KEYS / PADS, LATCH ready under it.
+private val arpHeld = listOf(ArpNote(PhysicalPad(0, 9), 0), ArpNote(PhysicalPad(0, 9), 5), ArpNote(PhysicalPad(0, 9), 9))
+private val keysArp = LiveArp(
+    ArpUi(
+        on = true, held = arpHeld, keys = true, sounding = true,
+        line = dev.arc.ep133.text.MirrorText.arpLine(false, false, Timing.SIXTEENTH, arpHeld, dev.arc.ep133.features.NoteNames.SOLFEGE),
+    ),
+)
+private val arpState = playing.copy(notes = emptyMap())
+
+@PreviewTest
+@Preview(name = "Live keys arp", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveKeysArpPreview() = Live(arpState, keys = keysUi.copy(playingNotes = emptySet()), arp = keysArp, voices = setOf("arp:0:9:5"))
+
+// On its side, the grid picked: the plate's margin holds the switches as upright; the line rides in the top bar.
+@PreviewTest
+@Preview(name = "Live keys arp sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveKeysArpSidewaysPreview() = Live(
+    arpState, keys = keysUi.copy(playingNotes = emptySet(), viewWide = dev.arc.ep133.features.KeysView.PADS),
+    arp = keysArp, voices = setOf("arp:0:9:5"),
+)
+
+// On its side over the piano, latched: ARP and LATCH after the view words, the held notes down.
+@PreviewTest
+@Preview(name = "Live keys arp sideways piano", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveKeysArpSidewaysPianoPreview() = Live(
+    arpState, keys = chord.copy(playingNotes = emptySet()), piano = 48..72,
+    arp = LiveArp(
+        ArpUi(
+            on = true, latch = true, held = arpHeld, keys = true, sounding = true, settings = ArpSettings(latch = true),
+            line = dev.arc.ep133.text.MirrorText.arpLine(false, true, Timing.SIXTEENTH, arpHeld, dev.arc.ep133.features.NoteNames.SOLFEGE),
+        ),
+    ),
+    voices = setOf("arp:0:9:5"),
+)
+
+// RPT on PADS: A 7 and A 1 held, both sounding on the step (lit), the line saying so.
+private val rptHeld = listOf(ArpNote(PhysicalPad(0, 9), null), ArpNote(PhysicalPad(0, 3), null))
+
+@PreviewTest
+@Preview(name = "Live pads repeat", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LivePadsRepeatPreview() = Live(
+    arpState.copy(pads = emptyMap()), oneGroup = true,
+    arp = LiveArp(
+        ArpUi(
+            on = true, held = rptHeld, keys = false, sounding = true,
+            line = dev.arc.ep133.text.MirrorText.arpLine(true, false, Timing.SIXTEENTH, rptHeld, dev.arc.ep133.features.NoteNames.SOLFEGE),
+        ),
+    ),
+    voices = setOf("arp:0:9:n", "arp:0:3:n"),
+)
 
 // FX, the fourth function key: the effect on named on its light.
 @PreviewTest

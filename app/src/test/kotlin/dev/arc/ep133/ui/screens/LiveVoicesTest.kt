@@ -31,4 +31,23 @@ class LiveVoicesTest {
         assertEquals(listOf(64), LiveVoices.notes(pattern).toList())
         assertEquals(listOf(64, 60), LiveVoices.notes(pattern, PhysicalPad(0, 2)).toList())
     }
+
+    // The arp's voices: "arp:<group>:<offset>:<semitones>", "n" for a pad hit.
+    private val arp = linkedSetOf("arp:1:4:5", "arp:1:4:-12", "arp:0:9:n", "arp:2:3:7", "arp:1:4", "arp:1:x:2", "arp:0:1:x", "note:64")
+
+    @Test
+    fun `the arp's voices ring and light their pads`() {
+        val pads = setOf(PhysicalPad(1, 4), PhysicalPad(0, 9), PhysicalPad(2, 3))
+        assertEquals(pads, LiveVoices.arpPads(arp))
+        assertEquals(pads, LiveVoices.pads(arp))
+    }
+
+    @Test
+    fun `the arp's notes on the KEYS pad light, from the root note`() {
+        assertEquals(setOf(65, 48), LiveVoices.arpNotes(arp, PhysicalPad(1, 4)))
+        assertEquals(emptySet<Int>(), LiveVoices.arpNotes(arp, PhysicalPad(0, 9)))
+        assertEquals(emptySet<Int>(), LiveVoices.arpNotes(arp, null))
+        // They aren't the phone's own notes: nothing outlined for them.
+        assertEquals(listOf(64), LiveVoices.notes(arp, PhysicalPad(1, 4)).toList())
+    }
 }

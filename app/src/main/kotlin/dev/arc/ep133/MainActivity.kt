@@ -737,6 +737,17 @@ class MainActivity : ComponentActivity() {
         val fx by controller.fx.collectAsStateWithLifecycle()
         // The punch-ins held while FX is, in the order pressed: lit on the pads and named on the display line.
         val punches by controller.punches.collectAsStateWithLifecycle()
+        // ARP / RPT and LATCH on the pads' plate: the notes held arpeggiate (KEYS) or repeat (PADS) at TIMING's interval.
+        val arp by controller.arp.collectAsStateWithLifecycle()
+        val liveArp = remember(arp) {
+            dev.arc.ep133.ui.screens.LiveArp(
+                ui = arp,
+                onOn = controller::setArpOn,
+                onLatch = controller::setArpLatch,
+                onNotePressure = controller::notePressure,
+                onPadPressure = controller::padPressure,
+            )
+        }
         val functions = dev.arc.ep133.ui.screens.FunctionKeysUi(
             // SOUND held: the sheet of the pad played last (its tap is EDIT, below).
             onPadSound = {
@@ -946,7 +957,7 @@ class MainActivity : ComponentActivity() {
                     onGuide = { guideOpen = it },
                     guide = { GuideScreen(onBack = { guideOpen = false }) },
                     // On a phone on its side, Live's display line rides in the top bar.
-                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, transport = liveTransport, take = liveTake, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys, wireless = liveWireless, sample = sampleUi, punch = punches, header = sampleHeader) }) else null,
+                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, transport = liveTransport, take = liveTake, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys, wireless = liveWireless, sample = sampleUi, punch = punches, arp = arp.line, header = sampleHeader) }) else null,
                     sample = sampleKey,
                 ) {
                     // Back from another section returns to Live, the home section, first.
@@ -1034,6 +1045,7 @@ class MainActivity : ComponentActivity() {
                             ),
                             sample = sampleUi,
                             onSampleHeader = { sampleHeader = it },
+                            arp = liveArp,
                         )
                         Tab.DEVICE -> DeviceScreen(
                             state = state,
@@ -1122,6 +1134,19 @@ class MainActivity : ComponentActivity() {
                             onBpm = controller::setTempo,
                             onTap = { controller.tapTempo(it) },
                             onDone = { tempoSheet = false },
+                            // TIMING: the interval the arp steps at and recording snaps to, and the arp's settings.
+                            timing = dev.arc.ep133.ui.screens.TimingUi(
+                                timing = arp.timing,
+                                arp = arp.settings,
+                                onInterval = controller::setTimingInterval,
+                                onSwing = controller::setTimingSwing,
+                                onQuantize = controller::setTimingQuantize,
+                                onOrder = controller::setArpOrder,
+                                onOctaves = controller::setArpOctaves,
+                                onGate = controller::setArpGate,
+                                onLatch = controller::setArpLatch,
+                                haptics = appSettings.haptics,
+                            ),
                         )
                     }
                     ArcSheet(visible = patternSheet, onDismiss = { patternSheet = false }) {

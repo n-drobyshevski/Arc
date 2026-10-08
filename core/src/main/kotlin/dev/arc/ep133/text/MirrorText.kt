@@ -655,6 +655,55 @@ object MirrorText {
 
     private fun timingSpoken(t: Timing) = if (t.id.endsWith("T")) t.id.dropLast(1) + " triplet" else t.id
 
+    // ---------- ARP: the arpeggiator and note repeat, and TIMING (an addition: the device's TIMING + pads) ----------
+    /** The switch on the pads' plate: ARP in KEYS, RPT (note repeat) in PADS; their names for screen readers. */
+    const val ARP = "Arp"
+    const val RPT = "Rpt"
+    const val ARP_NAME = "Arpeggiator"
+    const val RPT_NAME = "Note repeat"
+
+    /** LATCH greyed out while the arp is off: why. */
+    fun arpFirst(repeat: Boolean) = "Turn on ${if (repeat) "RPT" else "ARP"} first"
+
+    /** The tempo sheet's two pages: TEMPO (the click) and [TIMING]. */
+    const val TEMPO_TAB = "Tempo"
+    const val INTERVAL = "Interval"
+    const val SWING = "Swing"
+    const val GATE = "Gate"
+    /** SWING's knob rests at the other intervals. */
+    const val SWING_NOTE = "Swing plays at 1/8 and 1/16."
+    const val QUANTIZE = "Quantize"
+    const val FREE_TIME = "Free time"
+    const val QUANTIZE_NOTE = "Quantize: notes you record snap to the interval. Free time: they stay where you play them."
+    const val TIMING_NOTE = "The interval is the step the arp and note repeat play at, and the grid recording snaps to."
+    const val ARP_SECTION = "Arp and repeat"
+    const val ORDER = "Order"
+    const val OCTAVES = "Octaves"
+    /** Beside GATE's knob: what it sets. */
+    const val GATE_NOTE = "How long each note sounds, as a share of the step."
+    const val ARP_LATCH_NOTE = "Latch on: the notes play on after you let go. The next press starts a new set."
+
+    /** A knob's percent: "56%". */
+    fun percent(v: Int) = "$v%"
+
+    /** An INTERVAL choice for screen readers: "Interval 1/8 triplet". */
+    fun intervalName(t: Timing) = "Interval ${timingSpoken(t)}"
+
+    /** The arp's orders as their keys print them, and in full for screen readers. */
+    fun arpOrderName(o: dev.arc.ep133.features.ArpOrder) = when (o) {
+        dev.arc.ep133.features.ArpOrder.PLAYED -> "Played"
+        dev.arc.ep133.features.ArpOrder.UP -> "Up"
+        dev.arc.ep133.features.ArpOrder.DOWN -> "Down"
+        dev.arc.ep133.features.ArpOrder.UP_DOWN -> "Up-dn"
+        dev.arc.ep133.features.ArpOrder.RANDOM -> "Random"
+    }
+
+    fun arpOrderSpoken(o: dev.arc.ep133.features.ArpOrder) = when (o) {
+        dev.arc.ep133.features.ArpOrder.PLAYED -> "As played"
+        dev.arc.ep133.features.ArpOrder.UP_DOWN -> "Up and down"
+        else -> arpOrderName(o)
+    }
+
     /** "A \u00B7 2 bars", a group's length in the sheet; "Group A, 2 bars" for screen readers. */
     fun groupLength(group: Int, bars: Int) = "${'A' + group} \u00B7 ${Format.plural(bars, "bar")}"
     fun groupLengthName(group: Int, bars: Int) = "Group ${'A' + group}, ${Format.plural(bars, "bar")}"

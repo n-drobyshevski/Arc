@@ -7,7 +7,7 @@
 // - The web has no REC (TAKE), so only its takeLength is here, for SAMPLE's
 //   times; TAKE's words are Android's only.
 
-import type { ArpNote } from '../features/arp'
+import type { ArpNote, ArpOrder } from '../features/arp'
 import { FactorySounds } from '../features/factorySounds'
 import { FxSettings, FxType } from '../features/fxSettings'
 import { Keys, NoteNames, Scale } from '../features/keys'
@@ -807,6 +807,55 @@ export const MirrorText = {
     return t === Timing.OFF ? 'Timing off: notes stay where you play them' : `Timing ${t}: notes snap to the nearest ${timingSpoken(t)}`
   },
 
+  // ---------- ARP: the arpeggiator and note repeat, and TIMING (an addition: the device's TIMING + pads) ----------
+  /** The switch on the pads' plate: ARP in KEYS, RPT (note repeat) in PADS; their names for screen readers. */
+  ARP: 'Arp',
+  RPT: 'Rpt',
+  ARP_NAME: 'Arpeggiator',
+  RPT_NAME: 'Note repeat',
+
+  /** LATCH greyed out while the arp is off: why. */
+  arpFirst(repeat: boolean): string {
+    return `Turn on ${repeat ? 'RPT' : 'ARP'} first`
+  },
+
+  /** The tempo sheet's two pages: TEMPO (the click) and TIMING. */
+  TEMPO_TAB: 'Tempo',
+  INTERVAL: 'Interval',
+  SWING: 'Swing',
+  GATE: 'Gate',
+  /** SWING's knob rests at the other intervals. */
+  SWING_NOTE: 'Swing plays at 1/8 and 1/16.',
+  QUANTIZE: 'Quantize',
+  FREE_TIME: 'Free time',
+  QUANTIZE_NOTE: 'Quantize: notes you record snap to the interval. Free time: they stay where you play them.',
+  TIMING_NOTE: 'The interval is the step the arp and note repeat play at, and the grid recording snaps to.',
+  ARP_SECTION: 'Arp and repeat',
+  ORDER: 'Order',
+  OCTAVES: 'Octaves',
+  /** Beside GATE's knob: what it sets. */
+  GATE_NOTE: 'How long each note sounds, as a share of the step.',
+  ARP_LATCH_NOTE: 'Latch on: the notes play on after you let go. The next press starts a new set.',
+
+  /** A knob's percent: "56%". */
+  percent(v: number): string {
+    return `${v}%`
+  },
+
+  /** An INTERVAL choice for screen readers: "Interval 1/8 triplet". */
+  intervalName(t: Timing): string {
+    return `Interval ${timingSpoken(t)}`
+  },
+
+  /** The arp's orders as their keys print them, and in full for screen readers. */
+  arpOrderName(o: ArpOrder): string {
+    return ARP_ORDER_NAMES[o]
+  },
+
+  arpOrderSpoken(o: ArpOrder): string {
+    return o === 'played' ? 'As played' : o === 'updown' ? 'Up and down' : ARP_ORDER_NAMES[o]
+  },
+
   /** "A · 2 bars", a group's length in the sheet; "Group A, 2 bars" for screen readers. */
   groupLength(group: number, bars: number): string {
     return `${groupLetter(group)} \u00B7 ${plural(bars, 'bar')}`
@@ -1071,6 +1120,14 @@ export const MirrorText = {
     return [MirrorText.PUNCH_INS, ...[...slots].map((s) => MirrorText.punchDescription(s))].join(', ')
   },
 } as const
+
+const ARP_ORDER_NAMES: Record<ArpOrder, string> = {
+  played: 'Played',
+  up: 'Up',
+  down: 'Down',
+  updown: 'Up-dn',
+  random: 'Random',
+}
 
 const PUNCH_NAMES = [
   'Pitch rnd', 'Slice', 'Stutter', 'Repeat', 'Tape stop', 'Filter LFO',

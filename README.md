@@ -103,6 +103,22 @@ Live's phone engine has the EP-133's effects, built into its own mixer (the nati
 
   Punch-ins start no voice and go into no pattern.
 
+## Live's arp and TIMING (Android)
+
+As on the EP-133 (OS 2.5), where TIMING held with pads repeats a pad or arpeggiates KEYS notes, arc plays the notes held on the phone at TIMING's interval. Instead of holding a key, a switch on the pads' plate turns it on, so both hands stay free for chords.
+
+- **ARP / RPT** sits on the pads' plate under KEYS / PADS (one group and KEYS' grid, upright, on its side and on a tablet; over the piano at the start of its row; with all four groups, in Live tools). In KEYS it reads **ARP**: the keys held arpeggiate. In PADS it reads **RPT**: every pad held repeats together on each step (note repeat). It lights orange while on; a press then holds a note for it instead of playing it. A key or pad of the other kind starts a new set.
+- **LATCH**, under it (only while ARP is on): the notes play on after the fingers lift, and the next press after every finger is up starts a new set. LATCH off lets go of the notes no finger holds.
+- **What you see:** the notes held are outlined (KEYS numbers them in the order pressed), the one sounding now is lit, and the display line says what plays: **ARP · 1/16 · DO FA LA**, **ARP ∞ · …** latched, **REPEAT · 1/16 · A 7, A 1**.
+- **Pressure:** on a phone whose screen reports pressure, a held key's or pad's pressure is its velocity (louder pressed harder); elsewhere every step plays at full velocity.
+- **TIMING**, the Tempo sheet's second tab (hold TEMPO):
+  - **INTERVAL**: 1/1, 1/2, 1/4, 1/8, 1/8T, 1/16 (the default), 1/16T or 1/32, the arp's step and the grid recording snaps to;
+  - **RECORD**: QUANTIZE (notes snap to the interval) or FREE TIME (they stay where they were played); the Pattern sheet's TIMING is the same setting, Off being free time;
+  - **SWING**, 50% (straight) to 75%, at 1/8 and 1/16 only, as on the device: it delays the odd steps and recording snaps to the swung grid;
+  - **ORDER** (KEYS): as played (the device's), up, down, up and down, or random; **OCTAVES**: 1 to 3; **GATE**: how long each note sounds, 10 to 100% of a step; **LATCH**.
+- **Recording:** with RECORD on, the notes the arp plays go into the pattern like notes played by hand, each at its step and gate. While the pattern runs the arp keeps to its grid; stopped, it runs on its own clock from the press.
+- The settings are app-wide, kept with the others in library.json. Nothing goes to the EP-133, and the web has the core (TIMING, the arp's orders and the text) with the same tests, but no screens or sequencer yet.
+
 ## Web app
 
 The same app runs in Chrome or Edge, on a computer or an Android phone, at **https://arc-pi-mauve.vercel.app**. It talks to the EP-133 over USB-C with WebMIDI. Everything above is there: backup, restore, the library, contents, compare, search, the device browser, sample upload with trim, pads, the live mirror (opening on Live, shown as one group with A–D by default, pads that sound while held, chords of up to 8 sounds, KEYS with solfège or letter note names and, wherever it fits, the piano, and Offline from the last read, where EDIT and the desktop's **Sounds** tab change pads in arc only until the EP-133 connects), settings, the shortcut guide and the debug log. It looks and reads like the Android app, and its `.pak` files and `library.json` are the same files the Android app writes, so a library moves between the two.
@@ -286,11 +302,11 @@ The behaviours above are commented where they happen in the code. The same goes 
 - **A pad's sound settings are Android only:** EDIT's pages (pitch, level, pan, play mode, trim, envelope, MIDI channel, mute group) and the phone playing pads with them have no web screens yet; the web's pad sheet changes a pad's sound only. The model, the device read and write and the mixer's voice shape are ported to the web's core already, unused there. They write a pad's metadata the way EDIT's sound change does.
 - **SAMPLE is Android only:** the SAMPLE panel, its inputs (the phone's mic, Live's mix, the EP-133 over USB audio), the review sheet and the uploads have no web equivalent yet: the web's Live has no SAMPLE panel. Its pure logic is ported to the web's core already, unused there: the take's capture with the threshold and its pre-roll, the meter, the limits and Disk low, the review's edits, the count-in and PLAY timing, recordings as offline pad changes and uploads into a given slot, with the text. Recording into a pad is an addition: the EP-133 samples on the device itself, and arc uses only commands it already uses (KEEP's upload is EDIT's **Upload a new sample…** onto the pad).
 - **Patterns stay in arc:** RECORD and PLAY record and play on the phone only. Patterns are never written to the EP-133 or read from it, and no MIDI goes to it; they play whatever sound is on each pad, as Live's pads do. Next to the device's sequencer:
-  - one pattern per group, for each project; no scenes, no swing, no step sequencing (notes go in only as played) and no note repeat;
+  - one pattern per group, for each project; no scenes and no step sequencing (notes go in as played, by hand or by the arp; see [Live's arp and TIMING](#lives-arp-and-timing-android));
   - PLAY always starts at bar 1, never where the pattern stopped;
   - the FX (see [Live's FX](#lives-fx-android)) play over the patterns as they do over the pads, but nothing about them is recorded into a pattern: not the effect, its knobs, the sends or a punch-in;
   - arc's own clock: the tempo follows the EP-133's while it sends MIDI clock, but the phase doesn't, so bar 1 is wherever PLAY (or, armed, the first pad) was pressed on the phone, not the device's;
-  - TIMING is Off, 1/8, 1/16 or 1/32; AUTO length is an addition (1, 2, 4 or 8 bars), and so are SAMPLE's PTN and its bar-locked starts;
+  - TIMING has the device's eight intervals, swing and free time; AUTO length is an addition (1, 2, 4 or 8 bars), and so are SAMPLE's PTN and its bar-locked starts, and the arp's orders, octaves, gate and switch on the plate;
   - Android only: the web's core has the logic and the text, with the same tests, but no screens or sequencer yet.
 - **New features:** the device browser, sample upload, compare, contents, trim, pads, search and guide screens have no web equivalent, so their wording is new. They use only commands the web version already uses (LIST, metadata get, file download, and the restore path for uploads). Playback, trimming and export happen on the phone.
 

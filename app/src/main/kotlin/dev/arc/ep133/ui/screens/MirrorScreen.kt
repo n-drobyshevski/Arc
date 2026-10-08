@@ -207,6 +207,10 @@ data class KeysUi(
     /** Grid or piano, as picked with the view switch, for a wide window and for a tall one. */
     val viewWide: KeysView = KeysView.AUTO,
     val viewTall: KeysView = KeysView.AUTO,
+    /** The notes held for the arp (MIDI), in the order pressed: outlined and numbered ([LiveArp]). */
+    val arpHeld: List<Int> = emptyList(),
+    /** The notes the arp sounds now: lit. */
+    val arpLit: Set<Int> = emptySet(),
 )
 
 class KeysActions(
@@ -454,10 +458,25 @@ fun MirrorScreen(
      * it doesn't.
      */
     onSampleHeader: ((() -> Float)?) -> Unit = {},
+    /**
+     * ARP / RPT and LATCH (an addition; null hides them): on the pads' plate
+     * under KEYS / PADS ([ModeStrip]), over the piano, and in the tools
+     * beside the four groups. While it is on the keys and pads report their
+     * pressure, the notes it holds are outlined and those it sounds lit, and
+     * the display line says what it plays.
+     */
+    arp: LiveArp? = null,
 ) {
     val sounding = voices?.collectAsStateWithLifecycle()?.value
-    val ringed = if (sounding == null) playingPads else remember(sounding) { LiveVoices.pads(sounding) }
-    val keysNow = soundingKeys(keys, sounding)
+    // The pads held for note repeat are ringed too, and those it sounds lit.
+    val arpPads = arp?.heldPads.orEmpty()
+    val ringed = (if (sounding == null) playingPads else remember(sounding) { LiveVoices.pads(sounding) }).let { if (arpPads.isEmpty()) it else it + arpPads }
+    val arpLitPads = if (sounding == null) emptySet() else remember(sounding) { LiveVoices.arpPads(sounding) }
+    val keysNow = arpKeys(soundingKeys(keys, sounding), arp, sounding)
+    // The arp's line on the display; the pressure of a held key or pad, while it is on.
+    val arpLine = arp?.ui?.line
+    val notePressure = arp?.takeIf { it.ui.on }?.onNotePressure
+    val padPressure = arp?.takeIf { it.ui.on }?.onPadPressure
     val c = LocalArcColors.current
     val window = LocalArcWindow.current
     // The SAMPLE panel in the function keys' place: on the Live tab, in PADS.
@@ -480,7 +499,7 @@ fun MirrorScreen(
     // SOUND is EDIT's key: Live's EDIT where it works (the Live tab), none elsewhere.
     val editKey = if (edit.onEdit != null && onBack == null) edit else EditUi()
     // KEYS / PADS printed on the pads' plate (KoDeck): a tap shows the other mode.
-    val modeStrip: @Composable (Modifier, Dp) -> Unit = { m, size -> ModeStrip(keys.on, keysActions.onMode, haptics, size, m) }
+    val modeStrip: @Composable (Modifier, Dp) -> Unit = { m, size -> ModeStrip(keys.on, keysActions.onMode, haptics, size, m, arp) }
     // The pads whose press went to SAMPLE (held to record, or played beside a take): their kept,
     // release and cut go there too, even if the mode closed meanwhile; the rest stay the player's.
     val samplePressed = remember { HashSet<PhysicalPad>() }
@@ -742,6 +761,15 @@ fun MirrorScreen(
                                         compact = true,
                                     )
                                 }
+                                // Nor ARP / RPT and LATCH: note repeat is here too.
+                                if (arp != null) {
+                                    PlateLine()
+                                    SwitchRow(MirrorText.RPT_NAME, null, arp.ui.on, arp.onOn)
+                                    if (arp.ui.on) {
+                                        PlateLine()
+                                        SwitchRow(MirrorText.LATCH, MirrorText.ARP_LATCH_NOTE, arp.ui.latch, arp.onLatch)
+                                    }
+                                }
                             }
                         }
                         KeysMonitor(st, keys.names)
@@ -762,7 +790,7 @@ fun MirrorScreen(
                 // The display line on the page (not in the top bar). With the SAMPLE panel it grows into the panel, its
                 // words giving way to SAMPLE's header in place ([SampleMorph]); the line itself stays the pads' own.
                 val padsLine: @Composable () -> Unit = {
-                    if (editing && punchHeld.isEmpty()) EditLine() else DisplayStrip(st, mirror, transport, take, still = fixedNow != null, wireless = wireless, punch = punchHeld)
+                    if (editing && punchHeld.isEmpty() && arpLine == null) EditLine() else DisplayStrip(st, mirror, transport, take, still = fixedNow != null, wireless = wireless, punch = punchHeld, arp = arpLine)
                 }
                 val sampleNow = sample ?: SampleUi()
                 // The display line growing into the SAMPLE panel over the function keys, upright ([SampleMorph]): laid out as
@@ -809,7 +837,7 @@ fun MirrorScreen(
                 if (piano != null) {
                     Column(sidewaysColumn) {
                         if (!inBar) {
-                            KeysDisplay(st, mirror, keysNow, transport, take, still = fixedNow != null, pianoRange = piano)
+                            KeysDisplay(st, mirror, keysNow, transport, take, still = fixedNow != null, pianoRange = piano, arp = arpLine)
                             Spacer(Modifier.height(10.dp))
                         }
                         // A tablet's function keys, then the row over the piano and the piano; upright
@@ -821,16 +849,19 @@ fun MirrorScreen(
                             Spacer(Modifier.height(10.dp))
                         }
                         Column(Modifier.weight(1f, fill = false)) {
-                            ModeRow(keys, keysActions, landscape = true, viewSwitch = viewSwitch)
+                            ModeRow(keys, keysActions, landscape = true, viewSwitch = viewSwitch, arp = arp)
                             // The rest of the room; on a tablet no taller than a hand spans.
+                            // The arp's notes, held and sounding, are down on the piano as the phone's own are.
+                            val pianoKeys = if (keysNow.arpHeld.isEmpty() && keysNow.arpLit.isEmpty()) keysNow else keysNow.copy(playingNotes = keysNow.playingNotes + keysNow.arpHeld + keysNow.arpLit)
                             PianoKeyboard(
-                                piano, st, keysNow, clock, keysPlay,
+                                piano, st, pianoKeys, clock, keysPlay,
                                 Modifier
                                     .fillMaxWidth()
                                     .weight(1f, fill = false)
                                     .then(if (window.short) Modifier else Modifier.heightIn(max = PianoMaxTablet))
                                     .coachMark("live.keys", CoachText.PIANO, CoachYellow, CoachYellowInk),
                                 haptics = haptics,
+                                pressure = notePressure,
                             )
                         }
                     }
@@ -860,6 +891,8 @@ fun MirrorScreen(
                                 erase = eraseDots,
                                 mode = modeStrip,
                                 punch = padPunch,
+                                arpLit = arpLitPads,
+                                onPadPressure = padPressure,
                             )
                         }
                         val fnColumn: @Composable () -> Unit = { FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey) }
@@ -908,7 +941,7 @@ fun MirrorScreen(
                     val fnColumn: @Composable () -> Unit = { FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey) }
                     val groups: @Composable (Modifier) -> Unit = { m ->
                         Row(m, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                            for (g in 0..3) Group(g, st, nameOf, now, Modifier.weight(1f).fillMaxHeight(), fill = true, onPad = padPress, onPadKept = padKept, onPadUp = padUp, onPadCut = padCut, playingPads = ringed, onEdit = editPad, haptics = haptics, sampling = padSampling, erase = eraseDots)
+                            for (g in 0..3) Group(g, st, nameOf, now, Modifier.weight(1f).fillMaxHeight(), fill = true, onPad = padPress, onPadKept = padKept, onPadUp = padUp, onPadCut = padCut, playingPads = ringed, onEdit = editPad, haptics = haptics, sampling = padSampling, erase = eraseDots, arpLit = arpLitPads, onPadPressure = padPressure)
                         }
                     }
                     if (panelOn && !inBar) {
@@ -975,7 +1008,7 @@ fun MirrorScreen(
                                 // On its side: the keys on the K.O. II's body as big as the room, the function
                                 // keys and the view switch (turned) on their left, the scale and the octave
                                 // on their right.
-                                if (!inBar) KeysDisplay(st, mirror, keysNow, transport, take, still = fixedNow != null)
+                                if (!inBar) KeysDisplay(st, mirror, keysNow, transport, take, still = fixedNow != null, arp = arpLine)
                                 BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
                                     val columns = SideFunctions + SidePicks + if (viewSwitch != null) SideLead else 0.dp
                                     val gaps = if (viewSwitch != null) 3 else 2
@@ -994,12 +1027,13 @@ fun MirrorScreen(
                                             hold = hold,
                                             functions = functions,
                                             mode = modeStrip,
+                                            pressure = notePressure,
                                         )
                                         SidewaysKeysPicks(keys, keysActions)
                                     }
                                 }
                             } else if (keys.on) {
-                                if (!inBar) KeysDisplay(st, mirror, keysNow, transport, take, still = fixedNow != null)
+                                if (!inBar) KeysDisplay(st, mirror, keysNow, transport, take, still = fixedNow != null, arp = arpLine)
                                 FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
                                 KeysGrid(
                                     st, keysNow, now, keysPlay,
@@ -1008,6 +1042,7 @@ fun MirrorScreen(
                                     hold = hold,
                                     functions = functions,
                                     mode = modeStrip,
+                                    pressure = notePressure,
                                 )
                                 ModeRow(keys, keysActions, viewSwitch = viewSwitch, mode = false)
                             } else {
@@ -1029,6 +1064,8 @@ fun MirrorScreen(
                                         erase = eraseDots,
                                         mode = modeStrip,
                                         punch = padPunch,
+                                        arpLit = arpLitPads,
+                                        onPadPressure = padPressure,
                                     )
                                 }
                                 if (!panelOn) {
@@ -1081,10 +1118,10 @@ fun MirrorScreen(
                             // open in its place, and comes back as it was.
                             var noteOpen by rememberSaveable { mutableStateOf(initialNoteOpen) }
                             val line: @Composable () -> Unit = {
-                                if (editing) {
+                                if (editing && arpLine == null) {
                                     EditLine()
                                 } else {
-                                    Display(st, mirror, transport, take, still = fixedNow != null, compact = sideways, noteOpen = noteOpen, onNote = { noteOpen = it }, wireless = wireless, onGetFactory = onGetFactory)
+                                    Display(st, mirror, transport, take, still = fixedNow != null, compact = sideways, noteOpen = noteOpen, onNote = { noteOpen = it }, wireless = wireless, onGetFactory = onGetFactory, arp = arpLine)
                                 }
                             }
                             val fnRow: @Composable () -> Unit = { FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey) }
@@ -1109,7 +1146,7 @@ fun MirrorScreen(
                                     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                                         for (row in (0..3).chunked(perRow)) {
                                             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                                                for (g in row) Group(g, st, nameOf, now, Modifier.weight(1f), onPad = padPress, onPadKept = padKept, onPadUp = padUp, onPadCut = padCut, playingPads = ringed, onEdit = editPad, haptics = haptics, sampling = padSampling, erase = eraseDots)
+                                                for (g in row) Group(g, st, nameOf, now, Modifier.weight(1f), onPad = padPress, onPadKept = padKept, onPadUp = padUp, onPadCut = padCut, playingPads = ringed, onEdit = editPad, haptics = haptics, sampling = padSampling, erase = eraseDots, arpLit = arpLitPads, onPadPressure = padPressure)
                                             }
                                         }
                                     }
@@ -1131,6 +1168,19 @@ private fun soundingKeys(keys: KeysUi, sounding: Set<String>?): KeysUi {
     if (sounding == null) return keys
     val notes = remember(sounding, keys.pad) { LiveVoices.notes(sounding, keys.pad) }
     return remember(keys, notes) { keys.copy(playingNotes = notes) }
+}
+
+/**
+ * [keys] with the arp's notes: those [arp] holds (outlined, numbered) and
+ * those [sounding] on the phone it plays now (lit); without [sounding]
+ * (screenshots), the lit ones as [keys] gives them.
+ */
+@Composable
+private fun arpKeys(keys: KeysUi, arp: LiveArp?, sounding: Set<String>?): KeysUi {
+    val held = arp?.heldNotes.orEmpty()
+    val lit = if (sounding == null) keys.arpLit else remember(sounding, keys.pad) { LiveVoices.arpNotes(sounding, keys.pad) }
+    if (held.isEmpty() && lit == keys.arpLit) return keys
+    return remember(keys, held, lit) { keys.copy(arpHeld = held, arpLit = lit) }
 }
 
 /** The controls row's height over the keys (its words' touch height). */
@@ -1217,6 +1267,8 @@ internal fun LivePill(
     sample: SampleUi? = null,
     /** The punch-ins held, in the order pressed ([PunchUi.held]): the line names them, over EDIT's too. */
     punch: Set<Int> = emptySet(),
+    /** The arp's line while it plays ([dev.arc.ep133.controller.ArpUi.line]): over EDIT's, under the punch-ins'. */
+    arp: String? = null,
     /**
      * How far the SAMPLE panel under it has cross-faded its header in
      * ([SamplePanel.header], read as it draws), while Live shows it
@@ -1229,9 +1281,9 @@ internal fun LivePill(
     val keysNow = soundingKeys(keys, voices?.collectAsStateWithLifecycle()?.value)
     val line: @Composable () -> Unit = {
         when {
-            keys.on -> KeysDisplay(st, mirror, keysNow, transport, take, still, compact = true, pianoRange = pianoRange)
-            editing && punch.isEmpty() -> EditLine(compact = true)
-            else -> DisplayStrip(st, mirror, transport, take, still, compact = true, wireless = wireless, punch = punch)
+            keys.on -> KeysDisplay(st, mirror, keysNow, transport, take, still, compact = true, pianoRange = pianoRange, arp = arp)
+            editing && punch.isEmpty() && arp == null -> EditLine(compact = true)
+            else -> DisplayStrip(st, mirror, transport, take, still, compact = true, wireless = wireless, punch = punch, arp = arp)
         }
     }
     val sampleNow = sample ?: SampleUi()
@@ -1333,7 +1385,8 @@ private fun displayLineSmall(st: MirrorState, mirror: MirrorUi?, wireless: Boole
  * project on the left, the pad just played (or that the sound plays late) on
  * the right; the pattern's RECORD and PLAY first, its words in their place
  * while it is on ([PatternLine]). While punch-ins are held ([punch], FX held)
- * it names them instead, in signal orange: "PUNCH · REPEAT + LPF".
+ * it names them instead, in signal orange: "PUNCH · REPEAT + LPF"; while
+ * the arp plays ([arp]), what it plays: "REPEAT · 1/16 · A 7".
  * [compact]: one bar tall, in the top bar ([LivePill]).
  */
 @Composable
@@ -1346,12 +1399,14 @@ private fun DisplayStrip(
     compact: Boolean = false,
     wireless: Boolean = false,
     punch: Set<Int> = emptySet(),
+    arp: String? = null,
 ) {
     val c = LocalArcColors.current
-    if (punch.isNotEmpty()) {
+    if (punch.isNotEmpty() || arp != null) {
+        val line = if (punch.isNotEmpty()) MirrorText.punchLine(punch) else arp.orEmpty()
         PatternLine(transport, take, still, compact) {
-            SpokenLine(spoken(MirrorText.punchSpoken(punch))) {
-                Text(MirrorText.punchLine(punch), style = ArcType.displayHead, color = c.signal, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            SpokenLine(spoken(if (punch.isNotEmpty()) MirrorText.punchSpoken(punch) else line)) {
+                Text(line, style = ArcType.displayHead, color = c.signal, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             }
         }
         return
@@ -1444,6 +1499,8 @@ private fun Display(
     onNote: (Boolean) -> Unit = {},
     wireless: Boolean = false,
     onGetFactory: (() -> Unit)? = null,
+    /** While the arp plays: what it plays, in signal orange in the big line's place. */
+    arp: String? = null,
 ) {
     val c = LocalArcColors.current
     val offline = mirror?.offline != null && st.playing == null
@@ -1479,10 +1536,10 @@ private fun Display(
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                displayLine(st, mirror, wireless),
-                // The offline line ("Last seen Oct 5, 2:02 PM") and the late note fit a phone a size down.
-                style = ArcType.statFree.copy(fontSize = if (compact || displayLineSmall(st, mirror, wireless)) 22.sp else 26.sp),
-                color = c.displayInk,
+                arp ?: displayLine(st, mirror, wireless),
+                // The offline line ("Last seen Oct 5, 2:02 PM"), the late note and the arp's fit a phone a size down.
+                style = ArcType.statFree.copy(fontSize = if (compact || arp != null || displayLineSmall(st, mirror, wireless)) 22.sp else 26.sp),
+                color = if (arp != null) c.signal else c.displayInk,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
@@ -1540,6 +1597,10 @@ private fun Group(
     mode: (@Composable (Modifier, Dp) -> Unit)? = null,
     /** FX held (the big grid only): the pads are the punch-ins ([PunchPad]); null for their sounds. */
     punch: PadPunch? = null,
+    /** The pads the arp sounds now: lit. */
+    arpLit: Set<PhysicalPad> = emptySet(),
+    /** While the arp is on: a held pad's pressure, the touch's own. */
+    onPadPressure: ((PhysicalPad, Float) -> Unit)? = null,
 ) {
     val c = LocalArcColors.current
     val lit = st.pads.filterKeys { it.group == group }
@@ -1567,6 +1628,8 @@ private fun Group(
                     blink = sampling?.blink,
                     onLatch = sampling?.onLatch?.let { f -> { f(pad) } },
                     noteDot = erase?.let { pad in it },
+                    arpLit = pad in arpLit,
+                    onPressure = onPadPressure?.let { f -> { p: Float -> f(pad, p) } },
                 )
             }
         }
@@ -1602,6 +1665,8 @@ private fun Group(
                             blink = sampling?.blink,
                             onLatch = sampling?.onLatch?.let { f -> { f(pad) } },
                             noteDot = erase?.let { pad in it },
+                            arpLit = pad in arpLit,
+                            onPressure = onPadPressure?.let { f -> { p: Float -> f(pad, p) } },
                         )
                     }
                 }
@@ -1895,11 +1960,15 @@ private fun Pad(
     onLatch: (() -> Unit)? = null,
     /** ERASE ([eraseDot]): true with notes to erase, false without; null out of it. */
     noteDot: Boolean? = null,
+    /** The arp sounds it now: lit, as a hit lights it. */
+    arpLit: Boolean = false,
+    /** While the arp is on: the held pad's pressure, the touch's own. */
+    onPressure: ((Float) -> Unit)? = null,
 ) {
     val c = LocalArcColors.current
     val hw = LocalHwColors.current
     val density = LocalDensity.current
-    val g = if (sampleLed == SampleLed.RECORDING || sampleLed == SampleLed.WAITING) 1f else light?.let { glow(it, now) } ?: 0f
+    val g = if (sampleLed == SampleLed.RECORDING || sampleLed == SampleLed.WAITING || arpLit) 1f else light?.let { glow(it, now) } ?: 0f
     val ink = if (g > 0.3f) c.onSignal else hw.darkInk
     val wide = pad.label.length > 1
     val labelStyle = ArcType.semi.copy(
@@ -1993,6 +2062,7 @@ private fun Pad(
                 onPress != null -> holdToPlay(
                     onPress, onRelease, onKept = onKept, onCut = onCut, inScroll = inScroll, held = held, haptics = haptics,
                     clickLabel = if (noteDot != null) MirrorText.ERASE else MirrorText.PLAY,
+                    onPressure = onPressure,
                 )
                 else -> Modifier
             },
@@ -2140,9 +2210,11 @@ private fun ModeRow(
     /** KEYS' grid ⇄ piano switch, after the mode word; null where it isn't offered. */
     viewSwitch: ViewSwitch? = null,
     mode: Boolean = true,
+    /** ARP and LATCH over the piano, after the view switch ([ArpRowWords]); null for none. */
+    arp: LiveArp? = null,
 ) {
     if (landscape) {
-        SidewaysRow(keys, actions, viewSwitch, mode)
+        SidewaysRow(keys, actions, viewSwitch, mode, arp)
         return
     }
     val c = LocalArcColors.current
@@ -2212,13 +2284,13 @@ private fun ModeWord(keys: KeysUi, actions: KeysActions, top: Boolean, modifier:
 }
 
 /**
- * The mode row over the piano: the mode ([mode]), the scale and the key at
- * the start, the octave between − and + at the end. Short of room (large
- * text), the key word drops its KEY, then the scale shortens to its code;
- * − and + keep their size.
+ * The mode row over the piano: the mode ([mode]), ARP and LATCH ([arp]),
+ * the scale and the key at the start, the octave between − and + at the
+ * end. Short of room (large text), the key word drops its KEY, then the
+ * scale shortens to its code; − and + keep their size.
  */
 @Composable
-private fun SidewaysRow(keys: KeysUi, actions: KeysActions, viewSwitch: ViewSwitch?, mode: Boolean) {
+private fun SidewaysRow(keys: KeysUi, actions: KeysActions, viewSwitch: ViewSwitch?, mode: Boolean, arp: LiveArp? = null) {
     val c = LocalArcColors.current
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val measurer = rememberTextMeasurer()
@@ -2233,7 +2305,9 @@ private fun SidewaysRow(keys: KeysUi, actions: KeysActions, viewSwitch: ViewSwit
         // word between − and +, and the gaps (the one before − at its narrowest).
         val fixed = (if (mode) width(MirrorText.MODE_KEYS) + 18.dp + WordGap else 0.dp) + width(MirrorText.octave(keys.octave) + pick) + StepWidth * 2 + WordGap * 2 +
             // The view words: each its LED, the gap after it and its 2 dp either side.
-            (if (viewSwitch != null) (if (mode) SwitchGap else 0.dp) + width(MirrorText.VIEW_PADS, viewStyle) + width(MirrorText.VIEW_PIANO, viewStyle) + (6.dp + 5.dp + 4.dp) * 2 + ViewWordGap + (if (mode) 0.dp else WordGap) else 0.dp)
+            (if (viewSwitch != null) (if (mode) SwitchGap else 0.dp) + width(MirrorText.VIEW_PADS, viewStyle) + width(MirrorText.VIEW_PIANO, viewStyle) + (6.dp + 5.dp + 4.dp) * 2 + ViewWordGap + (if (mode) 0.dp else WordGap) else 0.dp) +
+            // ARP and LATCH, as the view words, after their gap.
+            (if (arp != null) WordGap + width(MirrorText.ARP, viewStyle) + width(MirrorText.LATCH, viewStyle) + (6.dp + 5.dp + 4.dp) * 2 + ArpWordGap else 0.dp)
         val key = MirrorText.keyWord(keys.root, keys.names).takeIf {
             fixed + width(scaleName + pick) + width(it + pick) <= maxWidth
         } ?: Keys.name(keys.root, keys.names)
@@ -2244,7 +2318,11 @@ private fun SidewaysRow(keys: KeysUi, actions: KeysActions, viewSwitch: ViewSwit
                 if (mode) Spacer(Modifier.width(SwitchGap))
                 KeysViewSwitch(viewSwitch)
             }
-            if (mode || viewSwitch != null) Spacer(Modifier.width(WordGap))
+            if (arp != null) {
+                if (mode || viewSwitch != null) Spacer(Modifier.width(WordGap))
+                ArpRowWords(arp, repeat = !keys.on)
+            }
+            if (mode || viewSwitch != null || arp != null) Spacer(Modifier.width(WordGap))
             PickWord(
                 label = scale,
                 options = Scale.entries,
@@ -2566,8 +2644,18 @@ private fun KeysDisplay(
     still: Boolean,
     compact: Boolean = false,
     pianoRange: IntRange? = null,
+    /** While the arp plays: what it plays, in signal orange in place of the note and the sound. */
+    arp: String? = null,
 ) {
     val c = LocalArcColors.current
+    if (arp != null) {
+        PatternLine(transport, take, still, compact) {
+            SpokenLine(spoken(arp)) {
+                Text(arp, style = ArcType.displayHead, color = c.signal, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            }
+        }
+        return
+    }
     val note = keys.playingNotes.lastOrNull() ?: st.lastNote
     val noteText = note?.let { n ->
         if (pianoRange != null && n !in pianoRange && n !in keys.playingNotes) {
@@ -2624,6 +2712,8 @@ private fun KeysGrid(
     functions: FunctionKeysUi = FunctionKeysUi(),
     /** KEYS / PADS in the plate's right margin (KoDeck). */
     mode: (@Composable (Modifier, Dp) -> Unit)? = null,
+    /** While the arp is on: a held key's pressure, the touch's own, for the note it pressed. */
+    pressure: ((note: Int, pressure: Float) -> Unit)? = null,
 ) {
     val c = LocalArcColors.current
     val notes = Keys.notes(keys.root, keys.scale, keys.octave)
@@ -2649,38 +2739,48 @@ private fun KeysGrid(
     val density = LocalDensity.current
     KoDeck(modifier, groupKeys = null, mode) { o, k ->
         val note = notes[o]
-        val g = lit[o] ?: 0f
+        // The note the arp sounds now lights its key as a device note does.
+        val g = if (note in keys.arpLit) 1f else lit[o] ?: 0f
+        // Held for the arp: outlined, and numbered in the order pressed.
+        val order = keys.arpHeld.indexOf(note) + 1
         // Dark caps: the root orange, the scale's other notes pale (navy would sink into
         // the cap). A named key shows its name in that colour, without the ring.
         val root = o % keys.scale.intervals.size == 0
         val ring = if (root) c.signal else hw.ring
         val held = remember { mutableStateOf(false) }
+        // The note the finger pressed, whose pressure it reports (a new key or octave under it keeps it).
+        val pressed = remember { intArrayOf(note) }
         val nameSize = with(density) { (k.u * 0.277f).coerceIn(15.dp, 34.dp) }
         Column(
             Modifier
                 .size(k.u, k.h)
                 .litGlow(g, c.signal, k.keyShape)
                 .cap(lerp(hw.ko.darkFace, c.signal, g), lerp(hw.ko.darkEdge, c.signalEdge, g), k.keyShape, capPress(held.value))
-                .then(if (note in keys.playingNotes) Modifier.border(2.dp, c.signal, k.keyShape) else Modifier)
+                .then(if (note in keys.playingNotes || order > 0) Modifier.border(2.dp, c.signal, k.keyShape) else Modifier)
                 .then(
                     holdToPlay(
                         // A screen reader's Play sounds the note to its end: no finger to keep count of.
                         { holding, _, at ->
                             when {
                                 hold?.press(keysKey(o), padDigit(o), functions) == true -> {}
-                                holding -> play(touches.down(o.toLong(), notes[o]), at)
+                                holding -> {
+                                    pressed[0] = notes[o]
+                                    play(touches.down(o.toLong(), notes[o]), at)
+                                }
                                 else -> actions.onNote(notes[o], false, at)
                             }
                         },
                         { at -> if (hold?.release(keysKey(o)) != true) play(touches.up(o.toLong()), at) },
                         held = held,
                         haptics = haptics,
+                        onPressure = pressure?.let { f -> { p: Float -> f(pressed[0], p) } },
                     ),
                 )
                 .semantics { contentDescription = MirrorText.noteName(note, keys.names) }
                 .padding(horizontal = k.u * 0.1f, vertical = k.u * 0.06f),
         ) {
             val ink = if (g > 0.3f) c.onSignal else if (root) c.signal else hw.darkInk
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             if (!keys.showNames) {
                 // Unnamed: a ring the digit's height, where the digit would be.
                 Canvas(Modifier.padding(top = nameSize * 0.12f).size(nameSize * 0.8f)) {
@@ -2699,6 +2799,17 @@ private fun KeysGrid(
                     maxLines = 1,
                     softWrap = false,
                 )
+            }
+            if (order > 0) {
+                Spacer(Modifier.weight(1f))
+                Text(
+                    order.toString(),
+                    style = ArcType.tiny.copy(fontSize = with(density) { (k.u * 0.12f).coerceIn(9.dp, 13.dp).toSp() }, lineHeight = 1.em, fontWeight = FontWeight.SemiBold),
+                    color = if (g > 0.3f) c.onSignal else c.signal,
+                    maxLines = 1,
+                    modifier = Modifier.clearAndSetSemantics { },
+                )
+            }
             }
             Spacer(Modifier.weight(1f))
             Text(
@@ -2869,8 +2980,11 @@ private fun holdToPlay(
     clickLabel: String = MirrorText.PLAY,
     onClick: (() -> Unit)? = null,
     playAction: Boolean = false,
+    /** While the arp is on: the held finger's pressure as it goes down and as it changes (null: not asked). */
+    onPressure: ((Float) -> Unit)? = null,
 ): Modifier {
     val press by androidx.compose.runtime.rememberUpdatedState(onPress)
+    val pressure by androidx.compose.runtime.rememberUpdatedState(onPressure)
     val release by androidx.compose.runtime.rememberUpdatedState(onRelease)
     val cut by androidx.compose.runtime.rememberUpdatedState(onCut)
     val kept by androidx.compose.runtime.rememberUpdatedState(onKept)
@@ -2888,6 +3002,7 @@ private fun holdToPlay(
                 val pressCut = cut
                 val pressKept = kept
                 press(true, inScroll, PressTime.of(down.uptimeMillis))
+                pressure?.invoke(down.pressure)
                 tick?.performHapticFeedback(HapticFeedbackType.KeyboardTap)
                 held?.value = true
                 var scrolled = false
@@ -2923,6 +3038,7 @@ private fun holdToPlay(
                             upAt = ch.uptimeMillis
                             break
                         }
+                        pressure?.invoke(ch.pressure)
                         if (ch.isConsumed && swipe?.took(down.id) == true) {
                             scrolled = true
                             break

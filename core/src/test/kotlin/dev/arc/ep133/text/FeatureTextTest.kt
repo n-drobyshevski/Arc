@@ -1,6 +1,7 @@
 package dev.arc.ep133.text
 
 import dev.arc.ep133.features.ArpNote
+import dev.arc.ep133.features.ArpOrder
 import dev.arc.ep133.features.DiffResult
 import dev.arc.ep133.features.FxType
 import dev.arc.ep133.features.KeyMark
@@ -295,6 +296,15 @@ class FeatureTextTest {
             "REPEAT · 1/32 · A 7, B ENTER",
             MirrorText.arpLine(true, false, Timing.THIRTY_SECOND, listOf(ArpNote(a7, null), ArpNote(PhysicalPad(1, 2), null)), NoteNames.SOLFEGE),
         )
+        // The ARP / RPT switch and the tempo sheet's TIMING page.
+        assertEquals(listOf("ARP", "RPT"), listOf(MirrorText.ARP, MirrorText.RPT).map { it.uppercase() })
+        assertEquals("Turn on RPT first", MirrorText.arpFirst(repeat = true))
+        assertEquals("Arp or repeat: hold pads", CoachText.ARP)
+        assertEquals("Interval 1/16 triplet", MirrorText.intervalName(Timing.SIXTEENTH_T))
+        assertEquals("56%", MirrorText.percent(56))
+        assertEquals("How long each note sounds, as a share of the step.", MirrorText.GATE_NOTE)
+        assertEquals(listOf("Played", "Up", "Down", "Up-dn", "Random"), ArpOrder.entries.map(MirrorText::arpOrderName))
+        assertEquals(listOf("As played", "Up and down"), listOf(ArpOrder.PLAYED, ArpOrder.UP_DOWN).map(MirrorText::arpOrderSpoken))
         assertEquals("A · 1 bar", MirrorText.groupLength(0, 1))
         assertEquals("Group D, 16 bars", MirrorText.groupLengthName(3, 16))
         assertEquals("Clear group B's notes?", MirrorText.clearAsk(1))
