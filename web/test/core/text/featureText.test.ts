@@ -164,8 +164,6 @@ describe('FeatureTextTest', () => {
 
   it('sample text', () => {
     const a7 = physicalPad(0, 9)
-    expect(MirrorText.OPEN_SAMPLE).toBe('Open sample')
-    expect(MirrorText.CLOSE_SAMPLE).toBe('Back to keys')
     expect(MirrorText.SAMPLE_TAG).toBe('Sample')
     expect(MirrorText.LATCH_NOTE).toBe('Latch on: tap a pad to record hands-free. Tap it again or STOP to stop.')
     // LATCH reads STOP while a hands-free take goes on: the shared word.

@@ -160,14 +160,14 @@ private fun Framed(
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, pulled: Boolean = false) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false) {
     val mirror = MirrorUi(state, loading = loading, error = error, offline = offline, offlineProjects = offlineProjects)
     // PROJECT as MainActivity works it out; TEMPO's light caught on a beat while the click is on.
     val functions = FunctionKeysUi(project = projectKeyOf(mirror, busy = false), clickOn = clickOn, beatLit = clickOn)
     // The SAMPLE panel, as MainActivity has it: the meter caught at a level, its threshold tick where the
     // knob has it, the last take's wave where [lastTake]. Without [sample], the panel closed, as the app has it in
     // PADS: the mic key in the top bar unlit, and nothing on the page.
-    val sampleUi = SampleUi(sample ?: SampleUiState(), level = { 0.62f }, lastTake = if (lastTake) takePeaks else null, still = true, unroll = unroll, pulled = pulled)
+    val sampleUi = SampleUi(sample ?: SampleUiState(), level = { 0.62f }, lastTake = if (lastTake) takePeaks else null, still = true, unroll = unroll)
     val recUi = dev.arc.ep133.ui.screens.RecUi(rec) {}
     // The piano's notes, for the display line in the bar to name a device note past them. The
     // piano reports them a frame late, after the screenshot, so [piano] gives them up front.
@@ -735,10 +735,11 @@ private fun ProjectSheet(mirror: MirrorUi) {
     }
 }
 
-// The display line grown into the SAMPLE panel over the function keys' place, its handle hanging under it, the mic
-// key in the top bar lit: the line's row now SAMPLE's header (its orange light, the source, the meter and what to do),
-// the wave strip under it on the same dark screen, the controls on the pale plate below; the page's pads, the empty
-// pads' rings blinking (caught on), those with a sound ringed, the take's pad lit.
+// The display line grown into the SAMPLE panel over the function keys' place, the mic key in the top bar lit (it
+// closes the panel, as Back or a swipe back does): the line's row now SAMPLE's header (its orange light, the source,
+// the meter and what to do), the wave strip under it on the same dark screen, the controls on the pale plate below;
+// the page's pads under it at the page's own gap, the empty pads' rings blinking (caught on), those with a sound
+// ringed, the take's pad lit.
 private val mic = SampleInput(SampleSource.MIC, false)
 private val rspSt = SampleInput(SampleSource.RSP, true)
 private val inputs = listOf(mic, SampleInput(SampleSource.RSP, false), rspSt)
@@ -832,8 +833,8 @@ fun LiveSamplePanelTabletPreview() = Live(lastRead, sample = sampleReady, lastTa
 
 // Caught 90 ms into the 300 of a tap's opening (87% of the way, Material's emphasised decelerate being quick off
 // the mark): the line's words gone and SAMPLE's header half in, in their place, the dark screen grown most of the
-// way down with the wave strip coming in, the plate unrolling from under it with its handle and its first row coming,
-// the function keys fading, the pads gliding down.
+// way down with the wave strip coming in, the plate unrolling from under it with its first row coming, the function
+// keys fading, the pads gliding down.
 @PreviewTest
 @Preview(name = "Live sample unroll", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
@@ -845,14 +846,6 @@ fun LiveSampleUnrollPreview() = Live(lastRead, oneGroup = true, sample = sampleR
 @Preview(name = "Live sample side unroll", widthDp = 560, heightDp = 280, showBackground = true)
 @Composable
 fun LiveSampleSideUnrollPreview() = Live(lastRead, oneGroup = true, sample = sampleReady, unroll = 0.95f)
-
-// The open panel's handle dragged up, 70% of the way still out: the handle under the finger at the body's foot,
-// the body gone back toward the line as far, the header and the controls (faded in as they came out) still in, the
-// keys coming back and the pads moving up as far.
-@PreviewTest
-@Preview(name = "Live sample pull", widthDp = 412, heightDp = 843, showBackground = true)
-@Composable
-fun LiveSamplePullPreview() = Live(lastRead, oneGroup = true, sample = sampleReady, unroll = 0.7f, pulled = true)
 
 // SAMPLE's review sheet after a take into A 3: 4 s of RSP ST, a breath of silence before a decaying
 // chord, trimmed to where the sound starts and short of its tail; the next free slot after 1 to 213.

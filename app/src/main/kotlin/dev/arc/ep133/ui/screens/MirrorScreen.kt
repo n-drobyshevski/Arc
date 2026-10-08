@@ -445,29 +445,28 @@ fun MirrorScreen(
     }
     if (sampling && sample != null) SampleHaptics(sample.state, haptics, held = { it in samplePressed }, bpm = mirror?.state?.bpm ?: functions.bpm.toDouble())
     // The SAMPLE panel, wherever the layout below puts the function keys.
-    val panel = remember { SamplePanel(sample?.unroll ?: if (sampling) 1f else 0f, fixed = sample?.unroll != null, pulled = sample?.pulled == true) }
+    val panel = remember { SamplePanel(sample?.unroll ?: if (sampling) 1f else 0f, fixed = sample?.unroll != null) }
     val panelScope = androidx.compose.runtime.rememberCoroutineScope()
     val reduceMotion = reducedMotion()
     val feel = LocalHapticFeedback.current
-    // A swipe, the handle under the panel (tapped, or dragged and let go at [velocity], timeline per second) or Back:
-    // the panel unrolls or rolls up with a tick, and the mode follows.
-    val openPanel = { velocity: Float? ->
+    // A swipe or Back: the panel unrolls or rolls up with a tick, and the mode follows.
+    val openPanel = {
         if (sample != null && !panel.open) {
             if (haptics) feel.performHapticFeedback(HapticFeedbackType.SegmentTick)
-            panel.start(true, reduceMotion, panelScope, velocity)
+            panel.start(true, reduceMotion, panelScope)
             sample.onOpen()
         }
     }
-    val closePanel = { velocity: Float? ->
+    val closePanel = {
         if (sample != null && panel.open) {
             if (haptics) feel.performHapticFeedback(HapticFeedbackType.SegmentTick)
-            panel.start(false, reduceMotion, panelScope, velocity)
+            panel.start(false, reduceMotion, panelScope)
             sample.onClose()
         }
     }
     // The mode turned off another way (the mic key in the top bar, a sheet), or KEYS, which has no panel: it rolls
-    // up (at once for KEYS, off the page). Turned on another way (the mic key, from KEYS too), it unrolls. A swipe,
-    // the handle or Back has set it going already.
+    // up (at once for KEYS, off the page). Turned on another way (the mic key, from KEYS too), it unrolls. A swipe
+    // or Back has set it going already.
     LaunchedEffect(sampling, panelOn) {
         when {
             !panelOn -> if (panel.open) panel.go(false, reduce = true)
@@ -550,7 +549,7 @@ fun MirrorScreen(
             roomH + ControlsRow >= FunctionColumnLed
         // Back rolls the SAMPLE panel up (Live tools, open over it, close first: their Back comes later). Not
         // while a sheet is open over Live: its Back was there first, so this one would win.
-        BackHandler(enabled = panelOn && sample?.sheetOpen != true && panel.open) { closePanel(null) }
+        BackHandler(enabled = panelOn && sample?.sheetOpen != true && panel.open) { closePanel() }
         // The pads hear of a finger the SAMPLE panel's swipe took ([holdToPlay]).
         CompositionLocalProvider(LocalSamplePanel provides panel) {
             SideZone(
@@ -601,11 +600,10 @@ fun MirrorScreen(
                 }
                 val sampleNow = sample ?: SampleUi()
                 // The display line growing into the SAMPLE panel over the function keys, upright ([SampleMorph]): laid out as
-                // [fit], [gap] between the line and the keys closed, the line's [corner]s, open holding [hold] more under it
-                // for the handle.
-                val lineMorph: @Composable (Modifier, SamplePanelFit, Dp, Dp, Dp, @Composable () -> Unit, @Composable () -> Unit) -> Unit = { m, fit, gap, corner, hold, line, fnKeys ->
+                // [fit], [gap] between the line and the keys closed, the line's [corner]s.
+                val lineMorph: @Composable (Modifier, SamplePanelFit, Dp, Dp, @Composable () -> Unit, @Composable () -> Unit) -> Unit = { m, fit, gap, corner, line, fnKeys ->
                     SampleMorph(
-                        panel, openPanel, closePanel, panelScope, gap, corner, fit.wave, m, openRoom = hold,
+                        panel, gap, corner, fit.wave, m,
                         line = line,
                         keys = fnKeys,
                         header = { SampleHeader(sampleNow, stillSample) },
@@ -616,9 +614,9 @@ fun MirrorScreen(
                 // The display line growing down the sideways column's left into the panel, [side] as the column has it, the
                 // pads beside it ([SampleMorph]).
                 val sideMorph: @Composable (Modifier, MorphSide, Dp, @Composable () -> Unit, @Composable () -> Unit) -> Unit = { m, side, height, fnKeys, padsGlide ->
-                    val wave = sideWave(height - (if (side.handle) HandleRow else 0.dp) - BodyHeader, side.panel, usbNote)
+                    val wave = sideWave(height - BodyHeader, side.panel, usbNote)
                     SampleMorph(
-                        panel, openPanel, closePanel, panelScope, 10.dp, BodyCorner, wave, m, side = side,
+                        panel, 10.dp, BodyCorner, wave, m, side = side,
                         line = padsLine,
                         keys = fnKeys,
                         header = { SampleHeader(sampleNow, stillSample) },
@@ -628,21 +626,19 @@ fun MirrorScreen(
                     )
                 }
                 // The function keys' place, the display line in the top bar: the keys, or the SAMPLE panel unrolled there
-                // without a header (the top bar's line is its header, [LivePill]) with its handle under it ([fit] upright,
-                // null on its side, where it is [side] wide and has its handle only where the column is tall enough for it and
-                // the controls), open holding [hold] more under it upright, as far along as [panel] is.
-                val functionSlot: @Composable (Modifier, SamplePanelFit?, Dp?, Dp, @Composable () -> Unit) -> Unit = { m, fit, side, hold, fnKeys ->
+                // without a header (the top bar's line is its header, [LivePill]) ([fit] upright, null on its side, where
+                // it is [side] wide), as far along as [panel] is.
+                val functionSlot: @Composable (Modifier, SamplePanelFit?, Dp?, @Composable () -> Unit) -> Unit = { m, fit, side, fnKeys ->
                     if (sample == null || !panelOn) {
                         Box(m) { fnKeys() }
                     } else {
-                        val handle = side == null || roomH + ControlsRow >= sidePanelHeight(side, usbNote) + HandleRow
-                        SampleSlot(panel, openPanel, closePanel, panelScope, m, sideways = side, handle = handle, openRoom = hold, keys = fnKeys) {
+                        SampleSlot(panel, m, sideways = side, keys = fnKeys) {
                             SampleBodyFace(sample, panel, fit, haptics, stillSample)
                         }
                     }
                 }
                 // The pads' swipe that opens and closes the panel, the pads under it hearing of a finger it took.
-                val swipe = if (panelOn) panelSwipe(panel, { openPanel(null) }, { closePanel(null) }) else Modifier
+                val swipe = if (panelOn) panelSwipe(panel, openPanel, closePanel) else Modifier
                 if (piano != null) {
                     Column(sidewaysColumn) {
                         if (!inBar) {
@@ -713,8 +709,7 @@ fun MirrorScreen(
                             val deckW = koDeckWidth(maxHeight, 4)
                             val sideW = sidePanelWidth(maxWidth - SideControlsGap, deckW)
                             val openW = minOf(maxWidth, sideW + SideControlsGap + deckW)
-                            val handle = maxHeight >= BodyHeader + sidePanelHeight(sideW, usbNote) + HandleRow
-                            sideMorph(Modifier.fillMaxSize(), MorphSide(columnW, openW, sideW, SideControlsGap, handle), maxHeight, fnColumn) {
+                            sideMorph(Modifier.fillMaxSize(), MorphSide(columnW, openW, sideW, SideControlsGap), maxHeight, fnColumn) {
                                 PadsGlide(panel, Modifier.fillMaxSize().then(swipe), scaleOf = { w, h -> koUnit(w, h, 4) }) {
                                     body(Modifier.fillMaxSize())
                                 }
@@ -727,7 +722,7 @@ fun MirrorScreen(
                             val openW = minOf(maxWidth, sideW + SideControlsGap + deckW)
                             Column(Modifier.unrollWidth(panel, columnW, openW).fillMaxHeight()) {
                                 Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(SideControlsGap)) {
-                                    functionSlot(Modifier.fillMaxHeight(), null, sideW, 0.dp, fnColumn)
+                                    functionSlot(Modifier.fillMaxHeight(), null, sideW, fnColumn)
                                     PadsGlide(panel, Modifier.weight(1f).fillMaxHeight().then(swipe), scaleOf = { w, h -> koUnit(w, h, 4) }) {
                                         body(Modifier.fillMaxSize())
                                     }
@@ -751,8 +746,7 @@ fun MirrorScreen(
                         val sideW = sidePanelWidth(roomW, roomW * 0.6f)
                         val padOpen = ((roomW - sideW - SideControlsGap - 42.dp) / 4 - 2.dp) / 3
                         val height = roomH + ControlsRow + DisplayLineHeight + 10.dp
-                        val handle = height >= BodyHeader + sidePanelHeight(sideW, usbNote) + HandleRow
-                        val side = MorphSide(null, null, sideW, SideControlsGap, handle, padsClosed = caption + 3.dp + padW * 4, padsOpen = caption + 3.dp + padOpen * 4)
+                        val side = MorphSide(null, null, sideW, SideControlsGap, padsClosed = caption + 3.dp + padW * 4, padsOpen = caption + 3.dp + padOpen * 4)
                         Box(sidewaysColumn) {
                             sideMorph(Modifier.fillMaxSize(), side, height, fnColumn) {
                                 PadsGlide(panel, Modifier.fillMaxSize().then(swipe), centred = false, scaleOf = { w, _ -> w.toFloat() }) { groups(Modifier) }
@@ -774,7 +768,7 @@ fun MirrorScreen(
                             val sideW = sidePanelWidth(roomW, roomW * 0.6f)
                             val padOpen = ((roomW - sideW - SideControlsGap - 42.dp) / 4 - 2.dp) / 3
                             Row(Modifier.fillMaxWidth().weight(1f, fill = false), horizontalArrangement = Arrangement.spacedBy(SideControlsGap)) {
-                                functionSlot(Modifier.fillMaxHeight(), null, sideW, 0.dp, fnColumn)
+                                functionSlot(Modifier.fillMaxHeight(), null, sideW, fnColumn)
                                 PadsGlide(
                                     panel,
                                     Modifier.weight(1f)
@@ -870,8 +864,7 @@ fun MirrorScreen(
                                     BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
                                         val fit = samplePanelFit(maxWidth, maxHeight - 10.dp, usbNote)
                                         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                            // Open, it keeps room under the panel for its handle ([HandleRoom]).
-                                            lineMorph(Modifier.fillMaxWidth(), fit, 10.dp, BodyCorner, HandleRoom, padsLine, fnRow)
+                                            lineMorph(Modifier.fillMaxWidth(), fit, 10.dp, BodyCorner, padsLine, fnRow)
                                             PadsGlide(panel, Modifier.fillMaxWidth().weight(1f).then(swipe), scaleOf = { w, h -> koUnit(w, h, 3) }) {
                                                 body(Modifier.fillMaxSize())
                                             }
@@ -927,12 +920,11 @@ fun MirrorScreen(
                                 if (!inBar) line()
                                 fnRow()
                             } else if (!inBar) {
-                                // The display grows into the panel over the function keys, its handle over the groups (drawn
-                                // over what follows it); open, it holds the handle clear of the group names.
-                                lineMorph(Modifier.fillMaxWidth(), samplePanelFit(pageW, null), 12.dp, if (editing) BodyCorner else DisplayCorner, HandleRow - 10.dp, line, fnRow)
+                                // The display grows into the panel over the function keys.
+                                lineMorph(Modifier.fillMaxWidth(), samplePanelFit(pageW, null), 12.dp, if (editing) BodyCorner else DisplayCorner, line, fnRow)
                             } else {
                                 // The line in the top bar: the panel in the function keys' place without a header.
-                                functionSlot(Modifier.fillMaxWidth(), samplePanelFit(pageW, null), null, HandleRow - 10.dp, fnRow)
+                                functionSlot(Modifier.fillMaxWidth(), samplePanelFit(pageW, null), null, fnRow)
                             }
                             val grid: @Composable (Modifier) -> Unit = { m ->
                                 BoxWithConstraints(m.fillMaxWidth()) {

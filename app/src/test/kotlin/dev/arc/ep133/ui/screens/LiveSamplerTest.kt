@@ -111,17 +111,17 @@ class LiveSamplerTest {
         assertEquals(52.dp, samplePanelFit(353.dp, null).wave)
         // Shorter, the wave goes first (the header still says what goes on), then the knobs come down to a key's
         // height, then the controls go into one row.
-        assertEquals(52.dp, samplePanelFit(353.dp, 508.dp).wave)
-        assertEquals(0.dp, samplePanelFit(353.dp, 507.dp).wave)
-        assertEquals(56.dp, samplePanelFit(353.dp, 507.dp).knob)
-        assertEquals(44.dp, samplePanelFit(353.dp, 445.dp).knob)
-        assertEquals(SampleControls.LINE, samplePanelFit(353.dp, 433.dp).controls)
+        assertEquals(52.dp, samplePanelFit(353.dp, 500.dp).wave)
+        assertEquals(0.dp, samplePanelFit(353.dp, 499.dp).wave)
+        assertEquals(56.dp, samplePanelFit(353.dp, 499.dp).knob)
+        assertEquals(44.dp, samplePanelFit(353.dp, 437.dp).knob)
+        assertEquals(SampleControls.LINE, samplePanelFit(353.dp, 425.dp).controls)
         // A narrow page's: STEREO left to -/+, and the wave where there is room for it.
-        val small = samplePanelFit(301.dp, 496.dp)
+        val small = samplePanelFit(301.dp, 488.dp)
         assertEquals(SampleControls.NARROW, small.controls)
         assertEquals(52.dp, small.wave)
         assertTrue(small.knob > 30.dp)
-        assertEquals(0.dp, samplePanelFit(301.dp, 495.dp).wave)
+        assertEquals(0.dp, samplePanelFit(301.dp, 487.dp).wave)
         // Its height open: the line's row (the header), the wave and the dark room under it, the plate's padding,
         // the two rows and its lip.
         assertEquals(48.dp + 52.dp + 10.dp + 12.dp * 2 + 44.dp + 6.dp + 56.dp + 3.dp, panelHeight(roomy))

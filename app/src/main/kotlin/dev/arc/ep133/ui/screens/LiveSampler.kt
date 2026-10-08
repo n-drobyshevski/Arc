@@ -117,10 +117,10 @@ import kotlin.math.roundToInt
  * has it, and the input's [level] (0..1 across −60..0 dBFS) and [clip],
  * both read as the meter draws; [lastTake], the last take's waveform, for
  * the display while nothing records. A swipe on the pads opening the
- * SAMPLE panel opens the mode ([onOpen]); a swipe back, the handle under
- * the panel or Back leaves it ([onClose]) (the mic key in the top bar
- * works the mode itself, and the panel follows); while a sheet is open over Live ([sheetOpen]:
- * the review, say) Back is the sheet's.
+ * SAMPLE panel opens the mode ([onOpen]); a swipe back or Back leaves it
+ * ([onClose]) (the mic key in the top bar works the mode itself, and the
+ * panel follows); while a sheet is open over Live ([sheetOpen]: the review,
+ * say) Back is the sheet's.
  * The panel's −/+ step the source ([onSource]), STEREO records in stereo or
  * mono ([onStereo]), the knobs set the level ([onGain], dB) and the
  * threshold ([onThreshold], dBFS, null for none), BARS a hands-free take's
@@ -133,8 +133,7 @@ import kotlin.math.roundToInt
  * [onPadUp] at the lift's. A screen reader's click on a pad latches a
  * hands-free take, or stops it ([onLatchPad]). [still] keeps the lights and
  * the meter from moving, and [unroll] catches the panel that far along its
- * motion (0 the function keys, 1 the panel; screenshots), under a finger
- * dragging its handle where [pulled].
+ * motion (0 the function keys, 1 the panel; screenshots).
  */
 class SampleUi(
     val state: SampleUiState = SampleUiState(),
@@ -143,7 +142,6 @@ class SampleUi(
     val lastTake: List<Peak>? = null,
     val still: Boolean = false,
     val unroll: Float? = null,
-    val pulled: Boolean = false,
     val sheetOpen: Boolean = false,
     val onOpen: () -> Unit = {},
     val onClose: () -> Unit = {},
@@ -319,12 +317,11 @@ internal fun usbNoteRoom(usb: Boolean): Dp {
 /**
  * The upright SAMPLE panel [width] wide (the page's, the display line's; its
  * controls no wider than [PanelWidthMax]), sharing [room] with the pads under
- * it (the panel open from the display line's top down, the room under it for
- * its handle ([HandleRoom]) and the pads; null on the scrolling page, where
- * there is always room), [note] of it the USB note's ([usbNoteRoom]): two rows
- * of controls ([SampleControls.NARROW] under [ControlsRowsMin]), the knobs as
- * big as the row lets them be, up to [PanelKnob], and the wave strip under the
- * header. Where the pads would come out under [PadsMin], the wave goes (the
+ * it (the panel open from the display line's top down, and the pads under it;
+ * null on the scrolling page, where there is always room), [note] of it the
+ * USB note's ([usbNoteRoom]): two rows of controls ([SampleControls.NARROW]
+ * under [ControlsRowsMin]), the knobs as big as the row lets them be, up to
+ * [PanelKnob], and the wave strip under the header. Where the pads would come out under [PadsMin], the wave goes (the
  * header still says what goes on), then the knobs come down to a key's
  * height, then the controls go into one row.
  */
@@ -341,7 +338,7 @@ internal fun samplePanelFit(width: Dp, room: Dp?, note: Dp = 0.dp): SamplePanelF
         SamplePanelFit(0.dp, KnobInline, SampleControls.LINE),
     )
     if (room == null) return tries.first()
-    return tries.firstOrNull { koPadWidth(width, room - panelHeight(it, note) - HandleRoom, 3) >= PadsMin } ?: tries.last()
+    return tries.firstOrNull { koPadWidth(width, room - panelHeight(it, note), 3) >= PadsMin } ?: tries.last()
 }
 
 /**

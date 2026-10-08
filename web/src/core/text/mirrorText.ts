@@ -580,14 +580,6 @@ export const MirrorText = {
   },
 
   // ---------- SAMPLE: recording into a pad (an addition) ----------
-  /**
-   * The handle under the SAMPLE panel open in the function keys' place:
-   * screen readers get it as these, while the panel is open and while it
-   * closes (a tap then opens it again).
-   */
-  OPEN_SAMPLE: 'Open sample',
-  CLOSE_SAMPLE: 'Back to keys',
-
   /** The sources' words, upper-cased where shown, as the device prints them. */
   MIC: 'Mic',
   RSP: 'Rsp',

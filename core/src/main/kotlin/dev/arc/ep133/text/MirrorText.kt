@@ -452,14 +452,6 @@ object MirrorText {
     fun takeFailed(reason: String) = "The take couldn't be saved: $reason"
 
     // ---------- SAMPLE: recording into a pad (an addition) ----------
-    /**
-     * The handle under the SAMPLE panel open in the function keys' place:
-     * screen readers get it as these, while the panel is open and while it
-     * closes (a tap then opens it again).
-     */
-    const val OPEN_SAMPLE = "Open sample"
-    const val CLOSE_SAMPLE = "Back to keys"
-
     /** The sources' words, upper-cased where shown, as the device prints them. */
     const val MIC = "Mic"
     const val RSP = "Rsp"

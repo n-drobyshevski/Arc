@@ -5,20 +5,10 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationSpec
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.snapshotFlow
@@ -36,7 +26,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameNanos
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -54,30 +43,20 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
-import androidx.compose.ui.input.pointer.positionChangeIgnoreConsumed
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.Placeable
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.onClick
-import androidx.compose.ui.semantics.role
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.em
-import androidx.compose.ui.zIndex
-import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.ui.components.CapDy
 import dev.arc.ep133.ui.components.LocalHwColors
-import dev.arc.ep133.ui.components.cap
 import dev.arc.ep133.ui.theme.LocalArcColors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -103,34 +82,29 @@ import kotlin.math.roundToInt
  * The way in is the mic key in the top bar (Live's SAMPLE key, [ArcShell]):
  * a tap opens the panel, from KEYS too (Live goes to PADS for it), and
  * another closes it. It works the mode, and the panel follows it
- * ([MirrorScreen]). Open, a handle hangs under the panel ([PanelHandle]): a
- * tap closes it, and a drag up (to the left, beside the top bar's line)
- * puts it away under the finger. A swipe from right to left on the pads opens it too,
+ * ([MirrorScreen]). A swipe from right to left on the pads opens it too,
  * and one back closes it ([panelSwipe]); so does Back.
  *
  * The motion is one timeline, [SamplePanel.progress], run by one
  * Animatable: 0 the keys, 1 the panel unrolled, and in between how far it
- * has unrolled. A tap or a swipe runs it in [PANEL_OPEN_MS] with Material's
- * emphasised decelerate ([PanelOpenEasing]), and back in [PANEL_CLOSE_MS]
- * accelerating ([PanelCloseEasing]); a drag on the handle sets it from the
- * finger ([pullProgress]) and lets go with a spring carrying the finger's speed.
- * The header cross-fades over its first [PANEL_HEADER_MS] ([panelHeaderFade]),
- * the line's words going before the header's come ([lineShown]),
- * and the wave and the rows fade in at their own times along it
- * ([panelFade]), so a reversal midway runs them back from where they are;
- * once a finger has had the panel, until it next rests, they fade in as
- * they come out of the line instead, if sooner ([panelPullFade]).
+ * has unrolled. It runs in [PANEL_OPEN_MS] with Material's emphasised
+ * decelerate ([PanelOpenEasing]), and back in [PANEL_CLOSE_MS]
+ * accelerating ([PanelCloseEasing]). The header cross-fades over its first
+ * [PANEL_HEADER_MS] ([panelHeaderFade]), the line's words going before the
+ * header's come ([lineShown]), and the wave and the rows fade in at their
+ * own times along it ([panelFade]), so a reversal midway runs them back
+ * from where they are.
  *
  * Nothing recomposes as it moves, which is what made it feel slow. The
  * timeline is read only where things lay out or draw:
  * - the growing line ([SampleMorph]) measures its height (on its side, the
  *   pads' room) from it, and places the line, the header, the wave, the
- *   plate, the keys and the handle; its body's shape is drawn from it
- *   ([MorphGeom]); the headerless slot ([SampleSlot]) measures its height (on
- *   its side the column's width, [unrollWidth]) the same way;
- * - the cross-fade, the keys' fade and shrink, the clips and slides and the
- *   handle's fade are graphics-layer lambdas of that placement, and every
- *   part is measured at its full size, so it doesn't lay out again as it moves;
+ *   plate and the keys; its body's shape is drawn from it ([MorphGeom]); the
+ *   headerless slot ([SampleSlot]) measures its height (on its side the
+ *   column's width, [unrollWidth]) the same way;
+ * - the cross-fade, the keys' fade and shrink, and the clips and slides are
+ *   graphics-layer lambdas of that placement, and every part is measured at
+ *   its full size, so it doesn't lay out again as it moves;
  * - the wave and the rows of controls fade in graphics-layer lambdas
  *   ([SamplePlate], [SampleWaveStrip]);
  * - the pads ([PadsGlide]) keep the size they were laid out at while the
@@ -142,13 +116,11 @@ import kotlin.math.roundToInt
  * - nothing that composes from its room is measured around the panel as it
  *   grows (the all-groups page fits the panel to the page's width, worked
  *   out ahead), and the header is laid out once at the panel's open width.
- * A drag's progress lives in [SamplePanel] too, so a frame of it is a
- * layout pass, never a composition. Only [SamplePanel.open] and
- * [SamplePanel.moving], each changing once per opening or closing, are read
- * while composing (with whether the keys, the panel or the handle show at all,
- * through derivedStateOf). What comes out composes in a frame of its own
- * before the motion starts its clock ([SamplePanel.start]), so a slow first
- * frame doesn't skip the start of it.
+ * Only [SamplePanel.open] and [SamplePanel.moving], each changing once per
+ * opening or closing, are read while composing (with whether the keys or
+ * the panel show at all, through derivedStateOf). What comes out composes
+ * in a frame of its own before the motion starts its clock
+ * ([SamplePanel.start]), so a slow first frame doesn't skip the start of it.
  *
  * The swipe on the pads is a trigger, not a drag the panel follows: a
  * pointer handler of its own on the pads ([panelSwipe]), not a pager,
@@ -165,57 +137,39 @@ import kotlin.math.roundToInt
 /**
  * Where Live's SAMPLE panel is: [progress] 0 with the function keys, 1 with
  * the panel unrolled, in between as far as it has unrolled while it opens
- * or closes, or while a finger pulls it. [open] is where it rests or is on
- * its way to; [moving], whether it is on its way or held. [fixed] holds the
- * panel where it started (screenshots): nothing moves it, and [pulled]
- * catches it under a finger.
+ * or closes. [open] is where it rests or is on its way to; [moving],
+ * whether it is on its way. [fixed] holds the panel where it started
+ * (screenshots): nothing moves it.
  */
 @Stable
-internal class SamplePanel(start: Float, val fixed: Boolean = false, pulled: Boolean = false) {
+internal class SamplePanel(start: Float, val fixed: Boolean = false) {
     private val time = Animatable(start, PANEL_THRESHOLD).also { it.updateBounds(0f, 1f) }
 
-    // Where a finger holds it, while it pulls: the timeline then follows the finger, not the Animatable.
-    private var held by mutableStateOf<Float?>(null)
-
-    // Each start, grab and go counts one: an animation a later one cut short doesn't say it has stopped.
+    // Each start and go counts one: an animation a later one cut short doesn't say it has stopped.
     private var runs = 0
 
     /** How far along the timeline: 0 the keys, 1 the panel. Read where it lays out or draws. */
-    val progress: Float get() = held ?: time.value
+    val progress: Float get() = time.value
 
     /** Whether the panel rests open, or is opening. */
     var open by mutableStateOf(start >= 0.5f)
         private set
 
-    /** Whether the panel is on its way, or held by a finger: the pads keep the size they were laid out at ([PadsGlide]). */
+    /** Whether the panel is on its way: the pads keep the size they were laid out at ([PadsGlide]). */
     var moving by mutableStateOf(false)
         private set
-
-    // From a finger taking hold until the panel next rests at an end: its parts fade in as they come out ([panelPullFade]).
-    private var pulling by mutableStateOf(pulled)
 
     /** How far the panel has unrolled (and the keys gone, the pads moved): the timeline itself. */
     val unroll: Float get() = progress
 
     /** How far the display line has cross-faded, in place, into SAMPLE's header ([panelHeaderFade]). */
-    val header: Float get() {
-        val p = progress
-        val timed = panelHeaderFade(p)
-        return if (pulling) maxOf(timed, panelPullFade(p, PULL_HEADER_AT)) else timed
-    }
+    val header: Float get() = panelHeaderFade(progress)
 
     /** How far the wave strip under the header has faded in. */
-    val display: Float get() = fade(PANEL_DISPLAY_AT, PULL_DISPLAY_AT)
+    val display: Float get() = panelFade(progress, PANEL_DISPLAY_AT)
 
     /** How far the controls' first row (−/source/+, STEREO, LATCH) and, from [second], the second have faded in. */
-    fun row(second: Boolean): Float = if (second) fade(PANEL_ROW2_AT, PULL_ROW2_AT) else fade(PANEL_ROW1_AT, PULL_ROW1_AT)
-
-    // A part's fade at its time ([panelFade]); while a finger has had the panel, at least as far as it has come out.
-    private fun fade(startMs: Int, pullAt: Float): Float {
-        val p = progress
-        val timed = panelFade(p, startMs)
-        return if (pulling) maxOf(timed, panelPullFade(p, pullAt)) else timed
-    }
+    fun row(second: Boolean): Float = panelFade(progress, if (second) PANEL_ROW2_AT else PANEL_ROW1_AT)
 
     // The pointers a swipe took off the pads: their press is cut short, as a scroll's is.
     private val swiped = HashSet<PointerId>()
@@ -233,33 +187,17 @@ internal class SamplePanel(start: Float, val fixed: Boolean = false, pulled: Boo
         swiped -= id
     }
 
-    /** A finger takes hold of the panel where it is (stopping it, if it was on its way), for [pull]. */
-    fun grab(scope: CoroutineScope) {
-        if (fixed) return
-        runs++
-        held = progress
-        moving = true
-        pulling = true
-        scope.launch { time.stop() }
-    }
-
-    /** The finger holding the panel has drawn it [to] along the timeline ([pullProgress]). */
-    fun pull(to: Float) {
-        if (fixed || held == null) return
-        held = to.coerceIn(0f, 1f)
-    }
-
     /**
-     * The panel opens ([open]) or closes from wherever it is (a finger's
-     * hold, too), going in [scope]: see [settle]. It is on its way at once,
-     * so a press that comes before the first frame finds it going.
+     * The panel opens ([open]) or closes from wherever it is, going in
+     * [scope]: see [settle]. It is on its way at once, so a press that comes
+     * before the first frame finds it going.
      */
-    fun start(open: Boolean, reduce: Boolean, scope: CoroutineScope, velocity: Float? = null) {
+    fun start(open: Boolean, reduce: Boolean, scope: CoroutineScope) {
         if (fixed) return
         this.open = open
         val run = ++runs
         moving = !reduce
-        scope.launch { settle(run, open, reduce, velocity) }
+        scope.launch { settle(run, open, reduce) }
     }
 
     /** [start], waiting for the panel to come to rest. */
@@ -268,26 +206,22 @@ internal class SamplePanel(start: Float, val fixed: Boolean = false, pulled: Boo
         this.open = open
         val run = ++runs
         moving = !reduce
-        settle(run, open, reduce, null)
+        settle(run, open, reduce)
     }
 
     /**
      * The panel goes to rest, open or closed: in [PANEL_OPEN_MS] for all of
-     * it opening or [PANEL_CLOSE_MS] closing ([panelSpec]); with a finger's
-     * [velocity] (timeline per second), let go, on a spring that carries it
-     * on; or at once with [reduce] (animations off in Android's settings).
-     * From rest at an end it waits a frame before it starts, so what it
-     * brings out composes before the motion takes its start time.
+     * it opening or [PANEL_CLOSE_MS] closing ([panelSpec]), or at once with
+     * [reduce] (animations off in Android's settings). From rest at an end it
+     * waits a frame before it starts, so what it brings out composes before
+     * the motion takes its start time.
      */
-    private suspend fun settle(run: Int, open: Boolean, reduce: Boolean, velocity: Float?) {
+    private suspend fun settle(run: Int, open: Boolean, reduce: Boolean) {
         if (run != runs) return
         try {
             // From rest at an end (a tap, a swipe), what comes out (the panel, or the keys going back) composes
             // first: a frame for it, before the motion takes its start time, so a slow first frame doesn't jump it.
-            val fromRest = held == null && !time.isRunning && (time.value == 0f || time.value == 1f)
-            held?.let { time.snapTo(it) }
-            if (run != runs) return
-            held = null
+            val fromRest = !time.isRunning && (time.value == 0f || time.value == 1f)
             val target = if (open) 1f else 0f
             if (reduce) {
                 time.snapTo(target)
@@ -296,14 +230,10 @@ internal class SamplePanel(start: Float, val fixed: Boolean = false, pulled: Boo
                     withFrameNanos { }
                     if (run != runs) return
                 }
-                time.animateTo(target, panelSpec(open, abs(target - time.value), velocity), initialVelocity = velocity ?: 0f)
+                time.animateTo(target, panelSpec(open, abs(target - time.value)))
             }
         } finally {
-            if (run == runs) {
-                moving = false
-                // At rest at an end, where both fades agree: taps fade the parts in at their times again.
-                if (time.value == 0f || time.value == 1f) pulling = false
-            }
+            if (run == runs) moving = false
         }
     }
 }
@@ -349,22 +279,15 @@ internal val PanelCloseEasing = CubicBezierEasing(0.3f, 0f, 1f, 1f)
 /** How the display and the rows fade in over their [PANEL_FADE_MS]: at once, then settling. */
 private val FadeEasing = LinearOutSlowInEasing
 
-/**
- * How the timeline goes to rest: [open] or closed with [left] of it to go,
- * at the pace of a tap; or, a finger letting go at [velocity] (timeline per
- * second), on a spring without a bounce that carries that speed on.
- */
-internal fun panelSpec(open: Boolean, left: Float, velocity: Float?): AnimationSpec<Float> = when {
-    velocity != null -> spring(Spring.DampingRatioNoBouncy, Spring.StiffnessMediumLow, PANEL_THRESHOLD)
-    open -> tween((left * PANEL_OPEN_MS).roundToInt(), easing = PanelOpenEasing)
-    else -> tween((left * PANEL_CLOSE_MS).roundToInt(), easing = PanelCloseEasing)
-}
+/** How the timeline goes to rest: [open] or closed with [left] of it to go, at the pace of a whole opening or closing. */
+internal fun panelSpec(open: Boolean, left: Float): AnimationSpec<Float> =
+    if (open) tween((left * PANEL_OPEN_MS).roundToInt(), easing = PanelOpenEasing) else tween((left * PANEL_CLOSE_MS).roundToInt(), easing = PanelCloseEasing)
 
 /**
  * How far into the opening (ms, of [PANEL_OPEN_MS]) the timeline is at
  * [progress]: [PanelOpenEasing] run backwards, so the parts that fade in at
  * their own times do so on time while it opens, and at the same places
- * along it whatever moves it (a finger, closing, a spring).
+ * along it closing, or reversed midway.
  */
 internal fun panelTime(progress: Float): Float {
     if (progress <= 0f) return 0f
@@ -423,25 +346,8 @@ internal fun morphAcross(progress: Float): Float =
 internal fun morphDown(progress: Float): Float =
     PanelOpenEasing.transform(((panelTime(progress) - SIDE_ACROSS_MS) / (PANEL_OPEN_MS - SIDE_ACROSS_MS)).coerceIn(0f, 1f)).coerceIn(0f, 1f)
 
-/**
- * How far a finger on the handle goes for all of the timeline at [progress]
- * (px) on its side, the foot going [reach] from end to end ([morphDown]): as
- * far as the foot would at the pace it goes there, so it stays under the
- * finger; while the line narrows (the foot still) or where the foot goes
- * slower than the timeline, [reach] itself, so the finger still moves it.
- */
-internal fun morphReach(progress: Float, reach: Float): Float {
-    val a = (progress - REACH_STEP).coerceAtLeast(0f)
-    val b = (progress + REACH_STEP).coerceAtMost(1f)
-    val pace = if (b > a) (morphDown(b) - morphDown(a)) / (b - a) else 1f
-    return reach * maxOf(pace, 1f)
-}
-
 /** How long the line on its side takes to narrow to the panel's width, at the start of the opening, before it grows down (ms). */
 internal const val SIDE_ACROSS_MS = 90
-
-/** Either side of where the panel is, how far along the timeline [morphReach] looks to find the foot's pace. */
-private const val REACH_STEP = 0.01f
 
 /**
  * How far a part of the panel starting [startMs] into the opening has faded
@@ -450,31 +356,6 @@ private const val REACH_STEP = 0.01f
  */
 internal fun panelFade(progress: Float, startMs: Int): Float =
     FadeEasing.transform(((panelTime(progress) - startMs) / PANEL_FADE_MS).coerceIn(0f, 1f))
-
-/**
- * Where along the timeline the header, the wave strip, and the controls'
- * first and second rows, start fading in under a finger: the header at once,
- * the line's own row, the others about where each starts to come out, the
- * panel unrolling from its top.
- */
-internal const val PULL_HEADER_AT = 0f
-internal const val PULL_DISPLAY_AT = 0.1f
-internal const val PULL_ROW1_AT = 0.35f
-internal const val PULL_ROW2_AT = 0.55f
-
-/** How much of the timeline each part takes to fade in under a finger: in by the time it is nearly all out. */
-internal const val PULL_FADE = 0.35f
-
-/**
- * How far a part starting [at] along the timeline has faded in at
- * [progress] while a finger draws the panel out (or puts it back): over
- * [PULL_FADE] of the way, so it comes out with the panel rather than all at
- * once near the end, as it would by its time ([panelFade]): Material's
- * emphasised decelerate goes most of the way in the first frames, so by
- * time the display would start only 70% of the way out.
- */
-internal fun panelPullFade(progress: Float, at: Float): Float =
-    FadeEasing.transform(((progress - at) / PULL_FADE).coerceIn(0f, 1f))
 
 /** How far across the pads (of their width) a swipe has to go to open or close the panel, if not flung. */
 internal const val PANEL_SWIPE_AT = 0.3f
@@ -489,57 +370,6 @@ internal const val PANEL_FLING = 1000f
  * [PANEL_FLING].
  */
 internal fun swipeLands(travel: Float, velocity: Float): Boolean = travel >= PANEL_SWIPE_AT || velocity >= PANEL_FLING
-
-/** How far a drag on the handle has to put the panel away (or draw it back out), of the way, to close (or open) it when let go. */
-internal const val PULL_LANDS = 0.35f
-
-/** A flick of the handle faster than this (dp per second) opens or closes the panel the way it goes, however short. */
-internal const val PULL_FLING = 600f
-
-/**
- * Where a drag on the handle puts the timeline: [from] where it is, the
- * finger gone on [distance] (px, down or, on its side, across; negative
- * back) over [reach], how far the handle goes from one end to the other
- * (so it stays under the finger).
- */
-internal fun pullProgress(from: Float, distance: Float, reach: Float): Float =
-    if (reach <= 0f) from else (from + distance / reach).coerceIn(0f, 1f)
-
-/**
- * Whether a drag let go opens (or closes) the panel: [travel] how far it
- * is the way that does (0..1 of the timeline from where the panel rested)
- * and [velocity] (dp per second) the finger's that way, negative back. A
- * flick past [PULL_FLING] goes its own way; slower, past [PULL_LANDS] it
- * does, and short of it the panel springs back.
- */
-internal fun pullLands(travel: Float, velocity: Float): Boolean = when {
-    velocity >= PULL_FLING -> true
-    velocity <= -PULL_FLING -> false
-    else -> travel >= PULL_LANDS
-}
-
-/**
- * Whether a finger on the handle past the touch slop drags the panel: gone
- * [along] (px, down or across on its side, the way that opens it) more
- * than [cross], and a way the panel, at [progress], can go. Up from closed
- * or down from open is left to the page, which scrolls.
- */
-internal fun pullTakes(along: Float, cross: Float, progress: Float): Boolean =
-    abs(along) >= abs(cross) && !(along < 0f && progress <= 0f) && !(along > 0f && progress >= 1f)
-
-/**
- * Whether a drag let go leaves the panel open: taken hold of [from] along
- * the timeline, let go [to], the finger going at [velocity] (dp per second,
- * the way that opens it; negative back). It counts from the end it was
- * nearer when the finger took hold, so a panel caught on its way (to
- * either end) goes where the finger takes it ([pullLands]), not where it
- * was going.
- */
-internal fun pullOpens(from: Float, to: Float, velocity: Float): Boolean {
-    val wasOpen = from >= 0.5f
-    val lands = if (wasOpen) pullLands(1f - to, -velocity) else pullLands(to, velocity)
-    return wasOpen != lands
-}
 
 /** Whether Android's animations are off (Settings, animator duration scale 0): the panel then opens and closes at once. */
 @Composable
@@ -620,110 +450,43 @@ private val UnrollFrom = 38.dp
 private const val KEYS_SHRINK = 0.06f
 private val KeysSink = 6.dp
 
-/**
- * The handle's row under the open panel. Upright it hangs past the slot's
- * foot into the gap under it and the room the slot keeps for it
- * ([HandleRoom]); on its side it is the column's foot.
- */
-internal val HandleRow = 16.dp
-
-/**
- * How much more the slot holds under the open panel upright, past the
- * panel itself, for the handle hanging there: with the 10 dp gap above
- * the pads, the handle's edge has 3 dp of air over them.
- */
-internal val HandleRoom = 8.dp
-
-/** The width a finger finds the handle in (its height grows to a finger's as Compose's own touch targets do). */
-private val HandleTouchWidth = 112.dp
-
-/** The handle's face, its edge below, its corners, the gap and side padding around its word, and its dot. */
-private val HandleFace = 9.5.dp
-private val HandleEdge = 1.5.dp
-private val HandleEdgeX = 1.dp
-private val HandleCorner = 5.dp
-private val HandlePadding = 7.dp
-private val HandleGap = 4.dp
-private val HandleDot = 4.dp
-
-/** How far the handle's edge sits above the foot of its row. */
-private val HandleLift = 1.dp
-
-/** The handle's word, printed as the function keys' words are, and its letter spacing (em). */
-private val HandleWord = 7.5.dp
-private const val HANDLE_WORD_SPACING = 0.12f
-
 /** The panel's corners as it unrolls: its face's ([SampleBodyFace]). */
 private val UnrollCorner = BodyCorner
 
 /**
  * The function keys' place on Live's page, where the display line rides in
  * the top bar and so can't grow into the panel ([SampleMorph]), holding the
- * [keys] or the headerless SAMPLE panel ([face], [SampleBodyFace]), with its
- * handle ([PanelHandle]) under the panel, as far along as [panel] is (see the
- * notes at the top). Closed, it is the keys
- * and nothing else. Upright the slot is as tall as the keys or the panel,
- * and open holds [openRoom] more under it, for the handle hanging past its
- * foot into the gap below (drawn over what is there, and found by a finger
- * first). [sideways] (the panel's width on its side) it takes the column's
- * height and is as wide as the keys' column or the panel, the handle's row
- * at its foot. The panel unrolls from its top, clipped to the slot so it
- * comes out from under the top bar; the keys fade, shrink and sink as it
- * does. The handle comes with the panel: upright it hangs from the panel's
- * edge as it unrolls, fading in as it comes out from under the bar; on its
- * side it stays at the foot under the panel's middle and fades in over the
- * first half. It closes the panel ([onClose]), or opens it again while it
- * is closing ([onOpen]), with the timeline per second a finger let go of
- * it at, or null for a tap; what a finger leaves going (a spring back, the
- * panel let go of when the handle leaves the page) goes on in [scope],
- * which outlives the slot (it moves when the phone turns). A drag goes as
- * far as the handle does from one end to the other (upright from under the
- * line to under the panel, on its side from the column's middle to the
- * panel's), so the handle stays under the finger. Without [handle] (a
- * column too short for it under the panel and its controls) there is none,
- * and Back, a swipe or the mic key close the panel.
+ * [keys] or the headerless SAMPLE panel ([face], [SampleBodyFace]), as far
+ * along as [panel] is (see the notes at the top). Closed, it is the keys and
+ * nothing else. Upright the slot is as tall as the keys or the panel;
+ * [sideways] (the panel's width on its side) it takes the column's height
+ * and is as wide as the keys' column or the panel. The panel unrolls from
+ * its top, clipped to the slot so it comes out from under the top bar; the
+ * keys fade, shrink and sink as it does.
  */
 @Composable
 internal fun SampleSlot(
     panel: SamplePanel,
-    onOpen: (velocity: Float?) -> Unit,
-    onClose: (velocity: Float?) -> Unit,
-    scope: CoroutineScope,
     modifier: Modifier = Modifier,
     sideways: Dp? = null,
-    handle: Boolean = true,
-    openRoom: Dp = 0.dp,
     keys: @Composable () -> Unit,
     face: @Composable () -> Unit,
 ) {
-    // Each there while it shows, or is about to: the panel (and its handle) from the moment it opens, the keys from
-    // the moment it closes. derivedStateOf: composition hears of the timeline only as these change.
+    // Each there while it shows, or is about to: the panel from the moment it opens, the keys from the moment it
+    // closes. derivedStateOf: composition hears of the timeline only as these change.
     val showFace by remember(panel) { derivedStateOf { panel.open || panel.progress > 0f } }
     val showKeys by remember(panel) { derivedStateOf { !panel.open || panel.progress < 1f } }
-    // The keys' and the panel's extents, as last laid out: how far the handle goes.
-    val at = remember { SlotExtents() }
-    val across = sideways != null
     Layout(
         content = {
             if (showKeys) Box(Modifier.layoutId(SLOT_KEYS)) { keys() }
-            if (showFace) {
-                // The pane's title is the header's, in the top bar ([SamplePillLine]).
-                Box(Modifier.layoutId(SLOT_FACE)) { face() }
-                if (handle) {
-                    Box(Modifier.layoutId(SLOT_HANDLE)) {
-                        PanelHandle(panel, { if (across) (at.face - at.keys) / 2f else at.face + UnrollFrom.toPx() }, across, scope, onOpen, onClose)
-                    }
-                }
-            }
+            // The pane's title is the header's, in the top bar ([SamplePillLine]).
+            if (showFace) Box(Modifier.layoutId(SLOT_FACE)) { face() }
         },
-        // Over what comes after it, where the handle hangs into the pads' room.
-        modifier = modifier.zIndex(1f),
+        modifier = modifier,
     ) { measurables, constraints ->
         val m = panel.unroll
-        val row = HandleRow.roundToPx()
         val keysM = measurables.firstOrNull { it.layoutId == SLOT_KEYS }
         val faceM = measurables.firstOrNull { it.layoutId == SLOT_FACE }
-        val handleM = measurables.firstOrNull { it.layoutId == SLOT_HANDLE }
         val keysP: Placeable?
         val faceP: Placeable?
         val w: Int
@@ -731,22 +494,18 @@ internal fun SampleSlot(
         if (sideways == null) {
             val loose = constraints.copy(minHeight = 0)
             keysP = keysM?.measure(loose)
-            // The panel at its own width (a tablet's keeps to the start), the handle centred under it.
+            // The panel at its own width (a tablet's keeps to the start).
             faceP = faceM?.measure(loose.copy(minWidth = 0))
             w = if (constraints.hasBoundedWidth) constraints.maxWidth else maxOf(keysP?.width ?: 0, faceP?.width ?: 0)
-            h = lerpPx(keysP?.height ?: 0, faceP?.height ?: 0, m) + lerpPx(0, openRoom.roundToPx(), m)
+            h = lerpPx(keysP?.height ?: 0, faceP?.height ?: 0, m)
         } else {
             val open = sideways.roundToPx()
             h = constraints.maxHeight
             keysP = keysM?.measure(Constraints(maxWidth = constraints.maxWidth, maxHeight = h))
-            faceP = faceM?.measure(Constraints.fixed(open, (if (handle) h - row else h).coerceAtLeast(0)))
+            faceP = faceM?.measure(Constraints.fixed(open, h))
             w = lerpPx(keysP?.width ?: 0, open, m)
         }
         val keysW = keysP?.width ?: w
-        val faceW = faceP?.width ?: w
-        if (keysP != null) at.keys = (if (sideways == null) keysP.height else keysP.width).toFloat()
-        if (faceP != null) at.face = (if (sideways == null) faceP.height else faceP.width).toFloat()
-        val handleP = handleM?.measure(Constraints())
         layout(w, h) {
             keysP?.placeWithLayer(0, 0) {
                 val u = panel.unroll
@@ -768,21 +527,6 @@ internal fun SampleSlot(
                     clip = false
                 }
             }
-            if (handleP != null) {
-                if (sideways == null) {
-                    // From the panel's edge as it unrolls (the panel's height down, less how far up it still is), and
-                    // out from under the line as that edge comes past the slot's top.
-                    val edge = ((faceP?.height ?: 0) * m - UnrollFrom.toPx() * (1f - m)).roundToInt()
-                    handleP.placeWithLayer(faceW / 2 - handleP.width / 2, edge.coerceAtLeast(0)) {
-                        alpha = (edge / row.toFloat()).coerceIn(0f, 1f)
-                    }
-                } else {
-                    // At the foot, under the middle of the panel as it widens.
-                    handleP.placeWithLayer(lerpPx(keysW, faceW, m) / 2 - handleP.width / 2, h - row) {
-                        alpha = (panel.unroll * 2f).coerceIn(0f, 1f)
-                    }
-                }
-            }
         }
     }
 }
@@ -792,8 +536,7 @@ internal fun SampleSlot(
  * line on the page ([SampleMorph]): closed, the line [closed] wide (null: the
  * room's) over the function keys' column and the pads beside it, [gap] apart;
  * open, the panel [panel] wide down the left from the line's top, and the
- * pads beside it from the top, all [open] wide (null: the room's). [handle]:
- * whether the column is tall enough for the handle under the panel. The
+ * pads beside it from the top, all [open] wide (null: the room's). The
  * pads are no taller than [padsClosed] and [padsOpen] (all four groups' pads
  * no taller than wide), where given.
  */
@@ -802,7 +545,6 @@ internal class MorphSide(
     val open: Dp?,
     val panel: Dp,
     val gap: Dp,
-    val handle: Boolean,
     val padsClosed: Dp? = null,
     val padsOpen: Dp? = null,
 )
@@ -821,16 +563,11 @@ internal class MorphSide(
  * far along as [panel] is.
  *
  * Upright the body is the page's width and grows in height from the line's
- * to the panel's, [openRoom] more under it open for the handle hanging past
- * its foot ([PanelHandle]); the pads come after, gliding ([PadsGlide]). On
- * its [side] (the line on the page) the [pads] are inside this layout, and
+ * to the panel's; the pads come after, gliding ([PadsGlide]). On its [side] (the line on the page) the [pads] are inside this layout, and
  * the two take turns so that neither is ever over the other: first the line
  * narrows to the panel's width as the pads come aside, under it, to beside
  * where the panel will be ([morphAcross]); then it grows down the left of
- * the column as the pads rise beside it to the top ([morphDown]). The handle
- * follows the body's foot either way: a drag up puts the panel back into the
- * line under the finger ([onClose]), down draws it out ([onOpen]); what a
- * finger leaves going runs in [scope].
+ * the column as the pads rise beside it to the top ([morphDown]).
  *
  * All of it is one timeline read as it lays out and draws: the body's shape
  * is drawn from it ([MorphGeom]), the parts are placed from it, and their
@@ -841,14 +578,10 @@ internal class MorphSide(
 @Composable
 internal fun SampleMorph(
     panel: SamplePanel,
-    onOpen: (velocity: Float?) -> Unit,
-    onClose: (velocity: Float?) -> Unit,
-    scope: CoroutineScope,
     gap: Dp,
     corner: Dp,
     wave: Dp,
     modifier: Modifier = Modifier,
-    openRoom: Dp = 0.dp,
     side: MorphSide? = null,
     line: @Composable () -> Unit,
     keys: @Composable () -> Unit,
@@ -862,7 +595,6 @@ internal fun SampleMorph(
     val g = remember { MorphGeom() }
     val dark = LocalArcColors.current.display
     val ko = LocalHwColors.current.ko
-    val handle = side?.handle ?: true
     Layout(
         content = {
             if (showKeys) Box(Modifier.layoutId(MORPH_KEYS)) { keys() }
@@ -874,11 +606,9 @@ internal fun SampleMorph(
                 Box(Modifier.layoutId(MORPH_HEADER)) { header() }
                 if (wave > 0.dp) Box(Modifier.layoutId(MORPH_STRIP)) { strip() }
                 Box(Modifier.layoutId(MORPH_PLATE)) { plate() }
-                if (handle) Box(Modifier.layoutId(MORPH_HANDLE)) { PanelHandle(panel, { g.reachAt(panel.progress) }, false, scope, onOpen, onClose) }
             }
         },
-        // Over what comes after it, where the handle hangs into the pads' room.
-        modifier = modifier.zIndex(1f),
+        modifier = modifier,
     ) { measurables, constraints ->
         val u = panel.unroll
         val m = { id: String -> measurables.firstOrNull { it.layoutId == id } }
@@ -887,7 +617,6 @@ internal fun SampleMorph(
         val wavePx = wave.roundToPx()
         val sidePx = WaveSide.roundToPx()
         val lip = CapDy.roundToPx()
-        val row = if (handle) HandleRow.roundToPx() else 0
         val screenOpen = headerPx + if (wavePx > 0) wavePx + WaveFoot.roundToPx() else 0
         g.side = side != null
         g.corner = corner.toPx()
@@ -915,7 +644,7 @@ internal fun SampleMorph(
             g.room = w.toFloat()
             g.openBottom = screenOpen + g.plate.toFloat()
             val closedH = g.line.roundToInt() + gapPx + g.keys
-            val openH = screenOpen + g.plate + lip + openRoom.roundToPx()
+            val openH = screenOpen + g.plate + lip
             h = lerpPx(closedH, openH, u)
             padsP = null
             padsAt = IntOffset.Zero
@@ -936,8 +665,8 @@ internal fun SampleMorph(
             g.openW = openW.toFloat()
             g.bodyOpenW = panelW.toFloat()
             g.room = w.toFloat()
-            g.openBottom = (h - row - lip).toFloat()
-            plateP = m(MORPH_PLATE)?.measure(Constraints.fixed(panelW, (h - row - lip - screenOpen).coerceAtLeast(0)))
+            g.openBottom = (h - lip).toFloat()
+            plateP = m(MORPH_PLATE)?.measure(Constraints.fixed(panelW, (h - lip - screenOpen).coerceAtLeast(0)))
             // The pads' room: beside the keys under the line, closed; beside the panel from the top, open.
             val fromX = g.keys + padsGap
             val toX = panelW + padsGap
@@ -951,13 +680,10 @@ internal fun SampleMorph(
             padsP = m(MORPH_PADS)?.measure(Constraints.fixed(pw, ph))
             padsAt = IntOffset(lerpPx(fromX, toX, across), lerpPx(g.line.roundToInt() + gapPx, 0, down))
         }
-        g.reach = g.openBottom - g.line
-        val bodyW = g.bodyW(u).roundToInt()
         val x0 = g.x0(u).roundToInt()
         val headerP = m(MORPH_HEADER)?.measure(Constraints.fixed(g.bodyOpenW.roundToInt(), headerPx))
         val stripP = m(MORPH_STRIP)?.measure(Constraints.fixed((g.bodyOpenW.roundToInt() - sidePx * 2).coerceAtLeast(0), wavePx))
         val bodyP = m(MORPH_BODY)?.measure(Constraints.fixed(w, h))
-        val handleP = m(MORPH_HANDLE)?.measure(Constraints())
         layout(w, h) {
             keysP?.placeWithLayer(x0, g.line.roundToInt() + gapPx) {
                 val k = panel.unroll
@@ -995,12 +721,6 @@ internal fun SampleMorph(
                 clip = k < 1f
                 if (k < 1f) shape = UnrollShape(top = screen - top, bottom = g.bottom(k) - top, right = g.bodyW(k), corner = g.corner)
             }
-            handleP?.let { hp ->
-                val foot = g.bottom(u)
-                hp.placeWithLayer(x0 + bodyW / 2 - hp.width / 2, foot.roundToInt() + lip) {
-                    alpha = ((g.bottom(panel.unroll) - g.line) / row.coerceAtLeast(1)).coerceIn(0f, 1f)
-                }
-            }
         }
     }
 }
@@ -1012,7 +732,6 @@ private const val MORPH_LINE = "line"
 private const val MORPH_HEADER = "header"
 private const val MORPH_STRIP = "strip"
 private const val MORPH_PLATE = "plate"
-private const val MORPH_HANDLE = "handle"
 
 /**
  * The growing line's measures as last laid out, px ([SampleMorph]), and its
@@ -1020,7 +739,7 @@ private const val MORPH_HANDLE = "handle"
  * width, the column's closed and open, the body's open; the line's height,
  * the screen's open (header and wave strip), the body's foot open, the lip,
  * the corners; the keys' height (on its side, width) and the plate's height;
- * how far the handle goes from end to end; and whether it lies on its [side],
+ * and whether it lies on its [side],
  * where it narrows first and grows down after ([morphAcross], [morphDown]).
  */
 private class MorphGeom {
@@ -1036,7 +755,6 @@ private class MorphGeom {
     var corner = 0f
     var keys = 0
     var plate = 0
-    var reach = 0f
 
     /** How far across it (and the pads beside it) has gone at [u]: all of the timeline upright, its first leg on its side. */
     fun across(u: Float): Float = if (side) morphAcross(u) else u
@@ -1055,13 +773,6 @@ private class MorphGeom {
 
     /** The body's foot at [u]: the line's, to under the plate. */
     fun bottom(u: Float): Float = lerpF(line, openBottom, down(u))
-
-    /**
-     * How far a finger goes for all of the timeline at [u] (px), the handle
-     * on the foot: upright, the foot's whole way; on its side, at the pace
-     * the foot goes there ([morphReach]), so it stays under the finger.
-     */
-    fun reachAt(u: Float): Float = if (side) morphReach(u, reach) else reach
 
     /** How round the screen's lower corners are at [u]: the line's, squaring off as the plate comes out under them. */
     fun screenFoot(u: Float): Float = corner * (1f - ((bottom(u) - screen(u)) / corner.coerceAtLeast(1f)).coerceIn(0f, 1f))
@@ -1118,15 +829,8 @@ private class ClipRect(val top: Float, val bottom: Float) : Shape {
         if (bottom <= top) Outline.Rectangle(Rect.Zero) else Outline.Rectangle(Rect(0f, top, size.width, bottom))
 }
 
-/** How tall (on its side, wide) the function keys and the panel were last laid out, px: how far the handle goes. */
-private class SlotExtents {
-    var keys = 0f
-    var face = 0f
-}
-
 private const val SLOT_KEYS = "keys"
 private const val SLOT_FACE = "face"
-private const val SLOT_HANDLE = "handle"
 
 /** [a] to [b] at [f] (0..1), in whole pixels. */
 private fun lerpPx(a: Int, b: Int, f: Float): Int = (a + (b - a) * f).roundToInt()
@@ -1259,124 +963,4 @@ private const val PADS_SETTLE_MS = 120
 private class RestRoom {
     var constraints: Constraints? = null
     var held by mutableStateOf(false)
-}
-
-/**
- * The handle under the open SAMPLE panel (an addition, after a drawer's
- * handle): a small dark cap in the keys' print, SAMPLE's orange dot and its
- * word. A tap closes the panel ([onClose]), or, caught while it closes,
- * opens it again ([onOpen]). A drag up ([across] on its side: to the left)
- * puts it away under the finger, [reach] (px, how far the handle goes from
- * end to end, as it is laid out now) for all of it ([pullProgress]); one
- * back down (to the right) draws it out again. One the way the panel can't
- * go (down from open) is left to the page, which scrolls. Let go, it opens
- * or closes on a spring carrying the finger's speed, or springs back to the
- * end it was nearer when the finger took hold ([pullOpens]); what it leaves
- * going runs in [scope]. A screen reader hears it as the button
- * [MirrorText.CLOSE_SAMPLE], or [MirrorText.OPEN_SAMPLE] while the panel
- * closes.
- */
-@Composable
-private fun PanelHandle(panel: SamplePanel, reach: Density.() -> Float, across: Boolean, scope: CoroutineScope, onOpen: (Float?) -> Unit, onClose: (Float?) -> Unit) {
-    val c = LocalArcColors.current
-    val hw = LocalHwColors.current
-    val open = panel.open
-    val opened by rememberUpdatedState(onOpen)
-    val closed by rememberUpdatedState(onClose)
-    val span by rememberUpdatedState(reach)
-    val reduce = reducedMotion()
-    Box(
-        Modifier
-            .size(HandleTouchWidth, HandleRow)
-            .pointerInput(panel, across, scope) {
-                if (panel.fixed) return@pointerInput
-                awaitEachGesture {
-                    val down = awaitFirstDown()
-                    val tracker = VelocityTracker()
-                    tracker.addPosition(down.uptimeMillis, down.position)
-                    var pulling = false
-                    var settled = false
-                    var from = 0f
-                    // How far the finger has gone, summed from each move: the handle goes with the panel, so where the
-                    // finger is on it says little of how far it has gone.
-                    var moved = Offset.Zero
-                    try {
-                        while (true) {
-                            val ch = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
-                            val step = ch.positionChangeIgnoreConsumed()
-                            moved += step
-                            tracker.addPosition(ch.uptimeMillis, down.position + moved)
-                            if (!ch.pressed) {
-                                if (pulling) {
-                                    // Let go: on to the end the finger takes it to, or back, at the finger's speed.
-                                    val v = tracker.calculateVelocity().let { if (across) it.x else it.y }
-                                    val reachPx = span(this)
-                                    val perSecond = if (reachPx > 0f) v / reachPx else 0f
-                                    val opens = pullOpens(from, panel.progress, v / density)
-                                    when {
-                                        // Already on its way there (caught going), or springing back: no change of mode.
-                                        opens == panel.open -> panel.start(opens, reduce, scope, perSecond)
-                                        opens -> opened(perSecond)
-                                        else -> closed(perSecond)
-                                    }
-                                    settled = true
-                                } else if (!ch.isConsumed) {
-                                    // A tap.
-                                    ch.consume()
-                                    if (panel.open) closed(null) else opened(null)
-                                }
-                                break
-                            }
-                            if (!pulling) {
-                                if (moved.getDistance() <= viewConfiguration.touchSlop) continue
-                                val along = if (across) moved.x else moved.y
-                                // Past the slop more crosswise than the way the panel comes, or the way it can't go
-                                // (up from closed, down from open): neither a pull nor a tap, and the page scrolls.
-                                if (!pullTakes(along, if (across) moved.y else moved.x, panel.progress)) break
-                                pulling = true
-                                from = panel.progress
-                                panel.grab(scope)
-                                ch.consume()
-                                continue
-                            }
-                            ch.consume()
-                            // As far as the finger went, of the handle's way from end to end as it is now laid out.
-                            panel.pull(pullProgress(panel.progress, if (across) step.x else step.y, span(this)))
-                        }
-                    } finally {
-                        // The gesture ended without a lift (another took the finger, or the handle left the page): the
-                        // panel goes back to rest, in a scope that outlives the handle.
-                        if (pulling && !settled) panel.start(panel.open, reduce, scope)
-                    }
-                }
-            }
-            .clearAndSetSemantics {
-                role = Role.Button
-                contentDescription = if (open) MirrorText.CLOSE_SAMPLE else MirrorText.OPEN_SAMPLE
-                onClick {
-                    if (open) closed(null) else opened(null)
-                    true
-                }
-            },
-        contentAlignment = Alignment.BottomCenter,
-    ) {
-        Row(
-            Modifier
-                .padding(end = HandleEdgeX, bottom = HandleLift + HandleEdge)
-                .height(HandleFace)
-                .cap(hw.darkFace, hw.darkEdge, RoundedCornerShape(HandleCorner), press = 0f, dx = HandleEdgeX, dy = HandleEdge)
-                .padding(horizontal = HandlePadding),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(HandleGap),
-        ) {
-            Canvas(Modifier.size(HandleDot)) { drawCircle(c.signal) }
-            Text(
-                MirrorText.SAMPLE_TAG.uppercase(),
-                style = viewWordStyle(HandleWord, HANDLE_WORD_SPACING).copy(lineHeight = 1.em),
-                color = hw.darkInk,
-                maxLines = 1,
-                softWrap = false,
-            )
-        }
-    }
 }

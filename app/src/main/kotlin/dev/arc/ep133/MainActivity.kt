@@ -695,7 +695,7 @@ class MainActivity : ComponentActivity() {
             onTempo = { tempoSheet = true },
         )
         // The SAMPLE panel in the function keys' place: a swipe on Live's pads opens it and SAMPLE mode (asking for
-        // the mic first where the input needs it), a swipe back, its handle or Back leaves it; the pads record while
+        // the mic first where the input needs it), a swipe back or Back leaves it; the pads record while
         // it is open. The mic key in the top bar works the mode, and the panel follows.
         val sampleUi = dev.arc.ep133.ui.screens.SampleUi(
             state = sample,
