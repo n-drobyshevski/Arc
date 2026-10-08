@@ -21,6 +21,7 @@ import type { ReadonlySignal } from '@preact/signals'
 import { signal } from '@preact/signals'
 import type { PadSoundStore } from '../core/features/padSoundCache'
 import type { WebLatencyHint } from '../core/text/latencyText'
+import type { VoiceShape } from '../core/formats/voiceMixer'
 import type { TrafficLog } from '../core/protocol/trafficLog'
 import type { MidiAccessLike, MidiDeviceEvent, MidiPermission, OpenMidi } from '../platform/midi/webmidi'
 import type { ReleaseLock } from '../platform/midi/owner'
@@ -87,6 +88,8 @@ export interface LivePress {
   readonly gate: boolean
   /** When the finger came down (Deps.perfNow, ms: the input event's own time), for the latency note. */
   readonly pressedAt?: number
+  /** How the pad plays it: VoiceShape's fields over the defaults (its FX group and sidechain source among them). */
+  readonly shape?: Partial<VoiceShape>
 }
 
 /**
@@ -141,6 +144,12 @@ export interface LiveAudioDeps {
   /** The press became a scroll: voice [id] ends at once (a short fade, however short the press was). */
   cut(id: string): void
   stopAll(): void
+  /**
+   * Sets up the mix's FX bus (VoiceMixer.control: an FxControl command with
+   * its index and two values); kept for the next output, a punch-in excepted
+   * (absent: no FX).
+   */
+  control?(what: number, index: number, x: number, y: number): void
   /** The voices sounding (pad and key ids), for the rings (ArcController.liveKeys). */
   readonly voices: ReadonlySignal<ReadonlySet<string>>
   /** How the output was set up, for the debug log ("48000 Hz, …"), "" before it opens. */

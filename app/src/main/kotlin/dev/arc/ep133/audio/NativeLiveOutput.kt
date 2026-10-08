@@ -16,8 +16,8 @@ import java.util.concurrent.locks.LockSupport
  * thread, and a headphone plug or unplug reopens the stream on the new route.
  *
  * Presses go in as commands through a lock-free ring: [prepare], [start],
- * [release], [cut], [stopAll] and the sequencer's timed [startAt],
- * [releaseAt] and [flushTimed] hold this object's lock, so the ring has one
+ * [release], [cut], [stopAll], the sequencer's timed [startAt],
+ * [releaseAt] and [flushTimed], and the FX bus's [control] hold this object's lock, so the ring has one
  * producer at a time. A sound is copied into native memory ([NativeSamples])
  * when the app prepares it, off the main thread, so a press only finds it
  * (one never prepared is copied the first time it plays); keys go as numbers
@@ -134,7 +134,8 @@ internal class NativeLiveOutput private constructor(
         val pitch = VoiceMixer.pitchRatio(semitones + shape.semitones)
         return NativeAudio.start(
             handle, keyIds.id(key), slot, sampleRate, pitch, tag,
-            shape.gain, shape.pan, shape.start, shape.end, shape.attackMs, shape.releaseMs, shape.mode.ordinal, shape.muteGroup, atFrame,
+            shape.gain, shape.pan, shape.start, shape.end, shape.attackMs, shape.releaseMs, shape.mode.ordinal, shape.muteGroup,
+            shape.bus, shape.duckSource, atFrame,
         )
     }
 
@@ -161,6 +162,11 @@ internal class NativeLiveOutput private constructor(
     @Synchronized
     override fun flushTimed() {
         if (!closed) NativeAudio.flushTimed(handle)
+    }
+
+    @Synchronized
+    override fun control(what: Int, index: Int, x: Float, y: Float) {
+        if (!closed) NativeAudio.control(handle, what, index, x, y)
     }
 
     @Synchronized

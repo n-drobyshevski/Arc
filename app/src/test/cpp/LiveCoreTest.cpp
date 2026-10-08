@@ -1,6 +1,7 @@
 // LiveCore on the host: commands in, sounds held and let go of safely,
 // reports and REC blocks out, a restart, the sequencer's timed commands (a
-// sound kept while a timed start waits on it), and the three threads at once (built
+// sound kept while a timed start waits on it), the FX bus's settings (kept
+// across a restart, a knob's drag merged), and the three threads at once (built
 // with AddressSanitizer where the compiler has it, so a sound freed under a
 // voice fails the run).
 #include <atomic>
@@ -15,6 +16,7 @@
 
 using arc::LiveCore;
 using arc::Sample;
+using arc::fx::FxControl;
 
 namespace {
 
@@ -329,6 +331,69 @@ void outputReportsComeBack() {
     CHECK(r.output.size() == 1 && r.output[0].first == 2 && r.output[0].second == 288);
 }
 
+// A voice on group 0's bus, at [rate]: the FX bus's send and effect apply to it.
+bool startOnBus(LiveCore &core, int32_t key, int64_t tag) {
+    arc::VoiceShape shape;
+    shape.bus = 0;
+    return core.start(key, 0, 48000, 1.0, tag, shape);
+}
+
+void aControlReachesTheMixersFxBus() {
+    LiveCore dry(48000);
+    LiveCore wet(48000);
+    for (LiveCore *core : {&dry, &wet}) {
+        CHECK(core->load(0, steady(48000, 12000)));
+        CHECK(startOnBus(*core, 1, 0));
+    }
+    CHECK(wet.control(FxControl::SEND, 0, 1.0f, 0.0f));
+    CHECK(wet.control(FxControl::FX_TYPE, FxControl::DISTORTION, 1.0f, 0.5f));
+    const auto a = render(dry, 256);
+    const auto b = render(wet, 256);
+    CHECK(a[2 * 255] == 12000);
+    CHECK(a != b);
+}
+
+void aRestartKeepsTheControlsQueuedMeanwhile() {
+    LiveCore before(48000);
+    LiveCore after(48000);
+    for (LiveCore *core : {&before, &after}) {
+        CHECK(core->load(0, steady(48000, 12000)));
+        render(*core, 16);
+    }
+    // The same settings, one engine's sent while its stream was away.
+    CHECK(before.control(FxControl::SEND, 0, 1.0f, 0.0f));
+    CHECK(before.control(FxControl::FX_TYPE, FxControl::FILTER, 0.2f, 0.5f));
+    render(before, 16);
+    CHECK(after.control(FxControl::SEND, 0, 1.0f, 0.0f));
+    CHECK(after.control(FxControl::FX_TYPE, FxControl::FILTER, 0.2f, 0.5f));
+    CHECK(startOnBus(after, 1, 0));
+    after.restart(48000);
+    // The press made meanwhile is dropped; the settings aren't.
+    CHECK(render(after, 16)[0] == 0);
+    CHECK(Reports(after).started.empty());
+    CHECK(startOnBus(before, 2, 0));
+    CHECK(startOnBus(after, 2, 0));
+    CHECK(render(before, 256) == render(after, 256));
+}
+
+void aKnobsDragTakesOneOfTheMixersCommands() {
+    LiveCore core(48000);
+    CHECK(core.load(0, steady(48000, 1000)));
+    // Far more than the mixer takes in one render, all the same knob: only the last is applied.
+    for (int i = 0; i < 1000; i++) CHECK(core.control(FxControl::FX_XY, 0, static_cast<float>(i) / 1000.0f, 0.5f));
+    CHECK(core.start(1, 0, 48000, 1.0, 9));
+    render(core, 16);
+    CHECK(Reports(core).started.size() == 1);
+    // Two knobs in turn aren't merged: the start waits for the renders that take them all.
+    for (int i = 0; i < 1000; i++) CHECK(core.control(FxControl::SEND, i % 2, 0.5f, 0.0f));
+    CHECK(core.start(2, 0, 48000, 1.0, 10));
+    render(core, 16);
+    CHECK(Reports(core).started.empty());
+    for (int i = 0; i < 4; i++) render(core, 16);
+    const Reports r(core);
+    CHECK(r.started.size() == 1 && r.started[0].tag == 10);
+}
+
 // The producer, the audio thread and the poll thread at once, sounds loaded,
 // played and unloaded all the while. AddressSanitizer catches a sound freed
 // while a voice reads it; the counts catch one never freed.
@@ -419,5 +484,8 @@ void runLiveCoreTests() {
     aRestartDropsTimedCommandsWaiting();
     pastTheTimedCommandsItHoldsTheMixerPlaysOneAtOnce();
     outputReportsComeBack();
+    aControlReachesTheMixersFxBus();
+    aRestartKeepsTheControlsQueuedMeanwhile();
+    aKnobsDragTakesOneOfTheMixersCommands();
     threeThreadsAtOnce();
 }

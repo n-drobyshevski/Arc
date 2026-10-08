@@ -26,38 +26,42 @@ LiveCore::~LiveCore() {
 
 bool LiveCore::load(int32_t slot, Sample *sample) {
     if (slot < 0 || slot >= MAX_SAMPLES || sample == nullptr) return false;
-    return commands_.push({Kind::Load, 0, slot, 0, 0.0, 0, sample, VoiceShape(), VoiceMixer::NOW});
+    return commands_.push({Kind::Load, 0, slot, 0, 0.0, 0, sample, VoiceShape(), VoiceMixer::NOW, 0, 0.0f, 0.0f});
 }
 
 bool LiveCore::unload(int32_t slot) {
     if (slot < 0 || slot >= MAX_SAMPLES) return false;
-    return commands_.push({Kind::Unload, 0, slot, 0, 0.0, 0, nullptr, VoiceShape(), VoiceMixer::NOW});
+    return commands_.push({Kind::Unload, 0, slot, 0, 0.0, 0, nullptr, VoiceShape(), VoiceMixer::NOW, 0, 0.0f, 0.0f});
 }
 
 bool LiveCore::start(int32_t key, int32_t slot, int32_t sampleRate, double pitch, int64_t tag, const VoiceShape &shape,
                      int64_t at) {
     if (slot < 0 || slot >= MAX_SAMPLES) return false;
-    return commands_.push({Kind::Start, key, slot, sampleRate, pitch, tag, nullptr, shape, at});
+    return commands_.push({Kind::Start, key, slot, sampleRate, pitch, tag, nullptr, shape, at, 0, 0.0f, 0.0f});
 }
 
 bool LiveCore::release(int32_t key) {
-    return commands_.push({Kind::Release, key, 0, 0, 0.0, 0, nullptr, VoiceShape(), VoiceMixer::NOW});
+    return commands_.push({Kind::Release, key, 0, 0, 0.0, 0, nullptr, VoiceShape(), VoiceMixer::NOW, 0, 0.0f, 0.0f});
 }
 
 bool LiveCore::releaseAt(int32_t key, int64_t at, int64_t tag) {
-    return commands_.push({Kind::ReleaseTagged, key, 0, 0, 0.0, tag, nullptr, VoiceShape(), at});
+    return commands_.push({Kind::ReleaseTagged, key, 0, 0, 0.0, tag, nullptr, VoiceShape(), at, 0, 0.0f, 0.0f});
 }
 
 bool LiveCore::cut(int32_t key) {
-    return commands_.push({Kind::Cut, key, 0, 0, 0.0, 0, nullptr, VoiceShape(), VoiceMixer::NOW});
+    return commands_.push({Kind::Cut, key, 0, 0, 0.0, 0, nullptr, VoiceShape(), VoiceMixer::NOW, 0, 0.0f, 0.0f});
 }
 
 bool LiveCore::stopAll() {
-    return commands_.push({Kind::StopAll, 0, 0, 0, 0.0, 0, nullptr, VoiceShape(), VoiceMixer::NOW});
+    return commands_.push({Kind::StopAll, 0, 0, 0, 0.0, 0, nullptr, VoiceShape(), VoiceMixer::NOW, 0, 0.0f, 0.0f});
 }
 
 bool LiveCore::flushTimed() {
-    return commands_.push({Kind::FlushTimed, 0, 0, 0, 0.0, 0, nullptr, VoiceShape(), VoiceMixer::NOW});
+    return commands_.push({Kind::FlushTimed, 0, 0, 0, 0.0, 0, nullptr, VoiceShape(), VoiceMixer::NOW, 0, 0.0f, 0.0f});
+}
+
+bool LiveCore::control(int32_t what, int32_t index, float x, float y) {
+    return commands_.push({Kind::Control, index, 0, 0, 0.0, 0, nullptr, VoiceShape(), VoiceMixer::NOW, what, x, y});
 }
 
 // ---------- audio thread ----------
@@ -69,7 +73,15 @@ void LiveCore::render(int16_t *out, int frames) {
     const bool flush = flushing_.exchange(false, std::memory_order_acq_rel);
     // Room kept for the flush and stop a restart adds; what doesn't fit waits for the next render.
     Command c{};
-    while (mixer_.room() > 2 && commands_.pop(c)) apply(c, flush);
+    while (mixer_.room() > 2 && commands_.pop(c)) {
+        // A knob dragged faster than this drains: only its newest value is applied.
+        while (merges(c)) {
+            const Command *next = commands_.peek();
+            if (next == nullptr || next->kind != Kind::Control || next->what != c.what || next->key != c.key) break;
+            commands_.pop(c);
+        }
+        apply(c, flush);
+    }
     if (flush) {
         // Timed commands still waiting from before the restart aren't heard late either.
         mixer_.flushTimed();
@@ -142,6 +154,26 @@ void LiveCore::apply(const Command &c, bool flush) {
         case Kind::FlushTimed:
             if (!flush) mixer_.flushTimed();
             return;
+        case Kind::Control:
+            // A setting, not a press: kept across a restart (the mixer's FX bus keeps its settings too).
+            mixer_.control(c.what, c.key, c.x, c.y);
+            return;
+    }
+}
+
+// A knob's command, which the same knob's next one makes moot: the effect's knobs, a send, the compressor's
+// and the sidechain's settings (each by its index too). Not a type change (its knobs come with it, and the
+// effect starts over) nor a punch-in, whose presses and lets-go all count.
+bool LiveCore::merges(const Command &c) {
+    if (c.kind != Kind::Control) return false;
+    switch (c.what) {
+        case fx::FxControl::FX_XY:
+        case fx::FxControl::SEND:
+        case fx::FxControl::COMP:
+        case fx::FxControl::SIDECHAIN:
+            return true;
+        default:
+            return false;
     }
 }
 

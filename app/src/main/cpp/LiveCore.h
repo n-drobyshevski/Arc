@@ -7,7 +7,7 @@
 // - the producer (one app thread at a time; the Kotlin side serializes them)
 //   queues commands: load, unload, start, release, cut, stop all, and the
 //   pattern sequencer's timed starts and releases (at a mix frame, the
-//   releases tagged) and their flush;
+//   releases tagged) and their flush, and the FX bus's settings;
 // - the audio thread ([render]) applies them, mixes, and reports: voices
 //   started (key, frame, the press's tag), the keys sounding when they change,
 //   the output's xruns and buffer size, and, while REC is on, the mix itself
@@ -73,6 +73,13 @@ public:
     bool stopAll();
     /** Drops the timed starts and releases still waiting for their frame. */
     bool flushTimed();
+    /**
+     * Sets up the mixer's FX bus (VoiceMixer::control: [what] one of
+     * fx::FxControl's commands). Not dropped by a restart. Several of the same
+     * knob's (the same [what] and [index]) in a row, queued faster than the
+     * audio thread takes them, apply only the last.
+     */
+    bool control(int32_t what, int32_t index, float x, float y);
 
     /** REC: whether the mix goes back to the consumer (any thread). */
     void setRecording(bool on) { recording_.store(on, std::memory_order_relaxed); }
@@ -92,8 +99,8 @@ public:
     // ---------- between streams (no render running) ----------
 
     /**
-     * The stream reopened at [outRate]: the next render applies the loads and
-     * unloads queued meanwhile and drops the rest (presses made while nothing
+     * The stream reopened at [outRate]: the next render applies the loads,
+     * unloads and FX settings queued meanwhile and drops the rest (presses made while nothing
      * played aren't heard late), timed commands waiting in the mixer too; what
      * was sounding fades out, or, at a new rate, is dropped at once.
      */
@@ -117,9 +124,10 @@ public:
     int64_t freed() const { return freedCount_; }
 
 private:
-    enum class Kind : uint8_t { Load, Unload, Start, Release, ReleaseTagged, Cut, StopAll, FlushTimed };
+    enum class Kind : uint8_t { Load, Unload, Start, Release, ReleaseTagged, Cut, StopAll, FlushTimed, Control };
 
-    // [at]: the mix frame a timed Start or ReleaseTagged waits for (VoiceMixer::NOW for none).
+    // [at]: the mix frame a timed Start or ReleaseTagged waits for (VoiceMixer::NOW for none). A Control's
+    // [what], index ([key]), [x] and [y] go to the mixer's FX bus.
     struct Command {
         Kind kind;
         int32_t key;
@@ -130,6 +138,9 @@ private:
         Sample *sample;
         VoiceShape shape;
         int64_t at;
+        int32_t what;
+        float x;
+        float y;
     };
 
     struct Event {
@@ -149,6 +160,7 @@ private:
     static constexpr int MAX_RETIRED = 512;
 
     void apply(const Command &c, bool flush);
+    static bool merges(const Command &c);
     void retire(Sample *s);
     void sweep();
 

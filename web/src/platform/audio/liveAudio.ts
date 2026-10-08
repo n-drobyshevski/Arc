@@ -75,10 +75,18 @@
 //   The delay the browser reports drifts (and often reads 0 just after a
 //   start), so it is only carried along for the estimate line, read again
 //   when the output is set up and at each [onStarted] report, which carries it.
+// - The FX bus ([control]): each setting's last value is kept (FxSetup) and
+//   sent again to each new output, queued before any press it waits with; a
+//   suspended output keeps its mixer, so nothing is resent on a wake (Kotlin
+//   resends to a native stream reopened on a new route too). A press's shape
+//   ([LivePressOptions.shape]) is VoiceShape's fields over the defaults, sent
+//   as they are (Kotlin hands over a whole VoiceShape).
 
 import { signal, type ReadonlySignal, type Signal } from '@preact/signals'
 import { LatencyText, WebLatencyHint } from '../../core/text/latencyText'
 import { WebText } from '../../core/text/webText'
+import type { VoiceShape } from '../../core/formats/voiceMixer'
+import { FxSetup } from './fxSetup'
 import { LIVE_PROCESSOR, MixerHost, transferable, type FromMixer, type ToMixer } from './liveMixer'
 // The AudioWorklet module's URL: Vite bundles liveWorklet.ts (with the core
 // mixer) into one self-contained script. (`new URL('./liveWorklet.ts',
@@ -229,6 +237,8 @@ export interface LivePressOptions {
   readonly gate: boolean
   /** When the finger came down (performance.now() ms: the input event's timeStamp), for the latency note; default: now. */
   readonly pressedAt?: number
+  /** How the pad plays it: VoiceShape's fields over the defaults (its FX group and sidechain source among them); default: the mixer's own. */
+  readonly shape?: Partial<VoiceShape>
 }
 
 /** The output's latency in ms: the context's own, and the device's after it. */
@@ -361,6 +371,8 @@ export class LiveAudio {
   private toldSlow = false
   private nextId = 1
   private readonly samples = new Map<string, Sample>()
+  /** The FX bus's settings, for each new output. */
+  private readonly fx = new FxSetup()
   /** Voices pressed with gate false: a release doesn't cut them short. */
   private readonly ungated = new Set<string>()
   private readonly startedListeners = new Set<(id: string, latencyMs: number, route: string, engine: OutputEngine) => void>()
@@ -549,7 +561,7 @@ export class LiveAudio {
     else this.ungated.add(id)
     const pressedAt = options.pressedAt ?? this.backend.now()
     s.pressedAt = this.backend.now()
-    send(s, {
+    const start: ToMixer = {
       t: 'start',
       key: id,
       id: sample.id,
@@ -557,7 +569,8 @@ export class LiveAudio {
       sampleRate: sample.sampleRate,
       semitones: options.pitch,
       tag: pressedAt > 0 ? pressedAt : 0,
-    })
+    }
+    send(s, options.shape === undefined ? start : { ...start, shape: options.shape })
     return true
   }
 
@@ -580,6 +593,17 @@ export class LiveAudio {
   stopAll(): void {
     this.ungated.clear()
     if (this.stream) send(this.stream, { t: 'stopAll' })
+  }
+
+  /**
+   * Sets up the mix's FX bus: [what] is one of FxControl's commands, with its
+   * [index], [x] and [y]. It reaches the open output (or waits with its
+   * presses while the mixer starts) and is kept for the next output, a
+   * punch-in excepted. It never opens or wakes the output.
+   */
+  control(what: number, index: number, x: number, y: number): void {
+    this.fx.record(what, index, x, y)
+    if (this.stream) send(this.stream, { t: 'control', what, index, x, y })
   }
 
   private drop(sample: Sample): void {
@@ -630,8 +654,9 @@ export class LiveAudio {
       engine: null,
     }
     this.stream = s
-    // The samples loaded, ready again.
+    // The samples loaded, ready again, and the FX bus as it was set up (before any press).
     for (const sample of this.samples.values()) this.load(s, sample)
+    for (const c of this.fx.commands()) send(s, { t: 'control', what: c.what, index: c.index, x: c.x, y: c.y })
     ctx.addEventListener?.('statechange', () => this.stateChanged(s))
     this.backend.connect(ctx, (m) => this.received(s, m)).then(
       (link) => {

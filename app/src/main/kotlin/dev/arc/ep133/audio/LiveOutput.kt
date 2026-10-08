@@ -31,8 +31,8 @@ interface ScheduleSink {
  * AudioTrack ([TrackLiveOutput]). Each has a thread of its own that tells
  * LiveAudio what happens through a [LiveListener].
  *
- * [prepare], [start], [release], [cut], [stopAll], [recordFromNow] and the
- * [ScheduleSink] calls may be called from any thread; [close] ends the thread
+ * [prepare], [start], [release], [cut], [stopAll], [control], [recordFromNow]
+ * and the [ScheduleSink] calls may be called from any thread; [close] ends the thread
  * (it lets go of the output as it ends).
  */
 internal interface LiveOutput : ScheduleSink {
@@ -70,6 +70,13 @@ internal interface LiveOutput : ScheduleSink {
     fun cut(key: String)
 
     fun stopAll()
+
+    /**
+     * Sets up the mix's FX bus ([dev.arc.ep133.formats.VoiceMixer.control]):
+     * [what] is one of [dev.arc.ep133.formats.fx.FxControl]'s commands, with
+     * its [index], [x] and [y]. It takes effect at the next block.
+     */
+    fun control(what: Int, index: Int, x: Float, y: Float)
 
     /** REC was just armed: the mix is to be handed over from now on, even before the thread notices. */
     fun recordFromNow()
