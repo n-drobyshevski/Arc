@@ -486,6 +486,52 @@ class SampleRecorderTest {
     }
 
     @Test
+    fun `a take scheduled at a mix frame is exact, with no clock`() {
+        val r = Rig()
+        r.mix.mixRate = 2000
+        r.open(SampleInput(SampleSource.RSP, true))
+        val tap = r.mix.sampleTap!!
+        r.recorder.setThreshold(-1f)
+        // Mix frame 1200 for 300 frames: no stamp says when it is heard, none is needed.
+        assertTrue(r.recorder.scheduleMix(pad, 1200, 300, maxFrames = 40_000))
+        assertTrue(r.recorder.going)
+        for (at in 1000L until 2000L step 250) tap.mixed(ShortArray(500) { (at + it / 2).toShort() }, 250, at, 2000)
+        val t = r.takes.single()
+        assertEquals(SampleCapture.End.BARS, t.end)
+        assertEquals(300, t.frames)
+        assertEquals(1200.toShort(), t.pcm[0])
+        assertEquals(1499.toShort(), t.pcm[t.pcm.size - 1])
+        assertTrue(t.latched)
+        assertFalse(r.recorder.going)
+    }
+
+    @Test
+    fun `a take at a mix frame is RSP's only`() {
+        val r = Rig()
+        assertFalse(r.recorder.scheduleMix(pad, 0, 100))
+        r.open()
+        assertFalse(r.recorder.scheduleMix(pad, 0, 100))
+        assertFalse(r.recorder.going)
+    }
+
+    @Test
+    fun `a take at a mix frame still waiting as Live's output reopens is over`() {
+        val r = Rig()
+        r.open(SampleInput(SampleSource.RSP, false))
+        val first = r.mix.sampleTap!!
+        assertTrue(r.recorder.scheduleMix(pad, 5000, 100))
+        first.mixed(ShortArray(200), 100, 0, rate)
+        // The new output counts its frames from 0: frame 5000 there is another moment.
+        r.mix.mixRate = 2000
+        first.mixed(ShortArray(20), 10, 100, 2000)
+        val second = r.mix.sampleTap!!
+        assertTrue(second !== first)
+        assertFalse(r.recorder.going)
+        second.mixed(ShortArray(20_000), 10_000, 0, 2000)
+        assertTrue(r.takes.isEmpty())
+    }
+
+    @Test
     fun `RSP taps Live's mix at its rate and lets go on close`() {
         val r = Rig()
         r.mix.mixRate = 2000
