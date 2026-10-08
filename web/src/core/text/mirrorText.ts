@@ -785,14 +785,14 @@ export const MirrorText = {
     return `Play a pad or PLAY \u00B7 ${MirrorText.timingLabel(timing)}`
   },
 
-  /** TIMING's choices: Off, 1/8, 1/16, 1/32. */
+  /** TIMING's choices: Off, 1/1, 1/2, 1/4, 1/8, 1/8T, 1/16, 1/16T, 1/32. */
   timingLabel(t: Timing): string {
     return t === Timing.OFF ? MirrorText.onOff(false) : t
   },
 
-  /** A TIMING choice for screen readers. */
+  /** A TIMING choice for screen readers: a triplet ("1/8T") said as "1/8 triplet". */
   timingName(t: Timing): string {
-    return t === Timing.OFF ? 'Timing off: notes stay where you play them' : `Timing ${t}: notes snap to the nearest ${t}`
+    return t === Timing.OFF ? 'Timing off: notes stay where you play them' : `Timing ${t}: notes snap to the nearest ${timingSpoken(t)}`
   },
 
   /** "A · 2 bars", a group's length in the sheet; "Group A, 2 bars" for screen readers. */
@@ -1079,4 +1079,9 @@ function knobWord(label: string): string {
 /** "A" for group 0 (Kotlin's 'A' + group). */
 function groupLetter(group: number): string {
   return String.fromCharCode(65 + group)
+}
+
+/** A timing as said aloud: a triplet ("1/8T") as "1/8 triplet". */
+function timingSpoken(t: Timing): string {
+  return t.endsWith('T') ? `${t.slice(0, -1)} triplet` : t
 }

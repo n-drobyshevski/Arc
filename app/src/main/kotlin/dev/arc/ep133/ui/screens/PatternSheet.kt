@@ -127,12 +127,15 @@ fun ColumnScope.PatternSheetContent(t: TransportUi, onDone: () -> Unit) {
         }
     }
     Caption(MirrorText.TIMING, align = TextAlign.Start)
-    Segmented(
-        Timing.entries.map(MirrorText::timingLabel),
-        selected = Timing.entries.indexOf(t.timing),
-        onSelect = { t.onTiming(Timing.entries[it]) },
-        descriptions = Timing.entries.map(MirrorText::timingName),
-    )
+    // Off and the eight intervals are too many for one row on a phone: Off and the long ones, then the short ones.
+    for (row in TimingRows) {
+        Segmented(
+            row.map(MirrorText::timingLabel),
+            selected = row.indexOf(t.timing),
+            onSelect = { t.onTiming(row[it]) },
+            descriptions = row.map(MirrorText::timingName),
+        )
+    }
     GridPlate {
         SwitchRow(MirrorText.COUNT_IN, MirrorText.COUNT_IN_NOTE, t.countInOn, t.onCountIn)
         PlateLine()
@@ -288,6 +291,9 @@ private fun LengthKey(glyph: String, description: String, enabled: Boolean, onSt
         Text(glyph, style = ArcType.word.copy(fontSize = 26.sp, lineHeight = 1.em), color = c.ink)
     }
 }
+
+/** TIMING's choices in two rows: Off to 1/4, then 1/8 to 1/32. */
+private val TimingRows: List<List<Timing>> = Timing.entries.let { listOf(it.take(4), it.drop(4)) }
 
 /** − and +, and the length between them. */
 private val StepKey: Dp = 52.dp

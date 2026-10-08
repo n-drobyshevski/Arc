@@ -1,5 +1,9 @@
 package dev.arc.ep133.data
 
+import dev.arc.ep133.features.ArpOrder
+import dev.arc.ep133.features.ArpSettings
+import dev.arc.ep133.features.Timing
+import dev.arc.ep133.features.TimingSettings
 import dev.arc.ep133.text.LiveEngine
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -124,12 +128,64 @@ class AppSettingsTest {
     @Test
     fun `PATTERN's choices round-trip through library json, TIMING by its word`() {
         for (t in dev.arc.ep133.features.Timing.entries) {
-            val chosen = AppSettings(patternTiming = t, patternCountIn = false, patternAutoLength = true, samplePattern = true)
+            val chosen = AppSettings(patternCountIn = false, patternAutoLength = true, samplePattern = true).withPatternTiming(t)
+            assertEquals(t, chosen.patternTiming)
             assertEquals(chosen, AppSettings().withIndex(chosen.values().mapKeys { "app." + it.key }))
         }
-        assertEquals("off", AppSettings(patternTiming = dev.arc.ep133.features.Timing.OFF).values()["patternTiming"])
+        assertEquals("off", AppSettings().withPatternTiming(dev.arc.ep133.features.Timing.OFF).values()["patternTiming"])
         // A grid arc doesn't offer, or a switch that isn't one: left as they are.
         val odd = mapOf("app.patternTiming" to "1/12", "app.patternCountIn" to "no", "app.samplePattern" to "1")
         assertEquals(AppSettings(), AppSettings().withIndex(odd))
+    }
+
+    @Test
+    fun `TIMING starts on 1-16, straight and quantized, and patternTiming is the grid it records on`() {
+        val d = AppSettings()
+        assertEquals(TimingSettings(Timing.SIXTEENTH, 50, true), d.timing)
+        assertEquals(Timing.SIXTEENTH, d.patternTiming)
+        val free = d.withTiming(d.timing.withInterval(Timing.EIGHTH_T).withQuantize(false))
+        assertEquals(Timing.EIGHTH_T, free.timingInterval)
+        assertEquals(Timing.OFF, free.patternTiming)
+        assertEquals("off", free.values()["patternTiming"])
+        assertEquals("1/8T", free.values()["timingInterval"])
+        // PATTERN's selector: OFF keeps the interval and records free; a grid is the interval, quantized.
+        assertEquals(Timing.EIGHTH_T, d.withPatternTiming(Timing.EIGHTH_T).withPatternTiming(Timing.OFF).timingInterval)
+        assertEquals(TimingSettings(Timing.QUARTER, 50, true), free.withPatternTiming(Timing.QUARTER).timing)
+        // Swing held to 50..75.
+        assertEquals(75, d.withTiming(d.timing.withSwing(90)).timingSwing)
+    }
+
+    @Test
+    fun `TIMING and the arp round-trip through library json`() {
+        val chosen = AppSettings(
+            timingInterval = Timing.SIXTEENTH_T,
+            timingSwing = 62,
+            timingQuantize = false,
+            arpOn = true,
+            arpOrder = ArpOrder.UP_DOWN,
+            arpOctaves = 3,
+            arpGate = 80,
+            arpLatch = true,
+        )
+        assertEquals(chosen, AppSettings().withIndex(chosen.values().mapKeys { "app." + it.key }))
+        assertEquals("updown", chosen.values()["arpOrder"])
+        assertEquals(ArpSettings(ArpOrder.UP_DOWN, 3, 80, true), chosen.arp)
+        // Values arc doesn't offer are left as they are.
+        val odd = mapOf("app.timingSwing" to "80", "app.arpOctaves" to "4", "app.arpGate" to "5", "app.arpOrder" to "sideways", "app.timingInterval" to "1/64")
+        assertEquals(AppSettings(), AppSettings().withIndex(odd))
+        // The arp's helper holds octaves and gate to their ranges.
+        assertEquals(ArpSettings(ArpOrder.DOWN, 3, 10, false), AppSettings().withArp(ArpSettings(ArpOrder.DOWN, 7, 0)).arp)
+    }
+
+    @Test
+    fun `an earlier library json's single TIMING choice gives the interval and quantize`() {
+        val eighth = AppSettings().withIndex(mapOf("app.patternTiming" to "1/8"))
+        assertEquals(TimingSettings(Timing.EIGHTH, 50, true), eighth.timing)
+        // OFF: free time, the interval as it was.
+        val off = AppSettings(timingInterval = Timing.THIRTY_SECOND).withIndex(mapOf("app.patternTiming" to "off"))
+        assertEquals(TimingSettings(Timing.THIRTY_SECOND, 50, false), off.timing)
+        // The new keys, when there, win.
+        val both = mapOf("app.patternTiming" to "1/8", "app.timingInterval" to "1/4", "app.timingQuantize" to "true")
+        assertEquals(Timing.QUARTER, AppSettings().withIndex(both).patternTiming)
     }
 }

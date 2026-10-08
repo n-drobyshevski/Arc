@@ -336,4 +336,15 @@ class PatternRecorderTest {
         val most = ProjectPatterns().with(0, Pattern(99))
         assertEquals(most, r.double(most, 0))
     }
+
+    @Test
+    fun `a press snaps to the swung grid and keeps its velocity`() {
+        val r = PatternRecorder()
+        val p0 = r.punchIn(ProjectPatterns(), fromStop = true, autoLength = false)
+        // At 75 the off-beat 1/16 is at 36: 30 snaps there, straight it would go to 24.
+        val swung = r.noteOn(p0, a3, null, 30.0, 30.0, sixteenth, swing = 75, velocity = 90)
+        assertEquals(PatternNote(36, 3, 24, null, 90, swung.id), swung.patterns.group(0).notes.single())
+        val straight = r.noteOn(p0, a3, null, 30.0, 30.0, sixteenth)
+        assertEquals(PatternNote(24, 3, 24, null, 127, straight.id), straight.patterns.group(0).notes.single())
+    }
 }

@@ -3,6 +3,8 @@ package dev.arc.ep133.data
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.core.content.edit
+import dev.arc.ep133.features.ArpOrder
+import dev.arc.ep133.features.ArpSettings
 import dev.arc.ep133.features.Keys
 import dev.arc.ep133.features.KeysView
 import dev.arc.ep133.features.NoteNames
@@ -11,6 +13,7 @@ import dev.arc.ep133.features.SampleSource
 import dev.arc.ep133.features.Scale
 import dev.arc.ep133.features.Tempo
 import dev.arc.ep133.features.Timing
+import dev.arc.ep133.features.TimingSettings
 import dev.arc.ep133.text.LiveEngine
 import dev.arc.ep133.text.ThemeChoice
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -72,13 +75,50 @@ data class AppSettings(
     val sampleTrimSilence: Boolean = false,
     /** SAMPLE's BARS on PTN: a hands-free take lasts the pattern's length, from its next loop start (with notes in the project only). */
     val samplePattern: Boolean = false,
-    /** PATTERN's TIMING (an addition, the device's quantize): 1/16 as on the device. */
-    val patternTiming: Timing = Timing.DEFAULT,
     /** RECORD then PLAY counts a bar in first. */
     val patternCountIn: Boolean = true,
     /** AUTO length: an empty group recorded from stop ends where recording stops (1, 2, 4 or 8 bars). */
     val patternAutoLength: Boolean = false,
+    /** TIMING's note interval (KNOB X; never OFF), 1/16 as on the device: the grid recording snaps to and the arp steps at. */
+    val timingInterval: Timing = Timing.DEFAULT,
+    /** TIMING's swing (KNOB Y), 50..75: 50 straight. */
+    val timingSwing: Int = TimingSettings.SWING_MIN,
+    /** TIMING's - and +: recording snaps to the interval, or keeps free time. */
+    val timingQuantize: Boolean = true,
+    /** The arp (KEYS) and note repeat (PADS) are on: a press holds a note for them instead of playing it. */
+    val arpOn: Boolean = false,
+    /** The arp's order, octaves (1..3), gate (10..100 % of a step) and latch. */
+    val arpOrder: ArpOrder = ArpOrder.PLAYED,
+    val arpOctaves: Int = ArpSettings.MIN_OCTAVES,
+    val arpGate: Int = ArpSettings.DEFAULT.gate,
+    val arpLatch: Boolean = false,
 ) {
+    /** TIMING as one: interval, swing and quantize. */
+    val timing: TimingSettings get() = TimingSettings(timingInterval, timingSwing, timingQuantize)
+
+    /**
+     * PATTERN's TIMING (an addition, the device's quantize): the grid
+     * recording snaps to, [timing]'s interval or OFF for free time. Kept as
+     * its own setting too ("patternTiming"), for earlier versions.
+     */
+    val patternTiming: Timing get() = timing.record
+
+    /** The arp's settings as one. */
+    val arp: ArpSettings get() = ArpSettings(arpOrder, arpOctaves, arpGate, arpLatch)
+
+    /** These settings with TIMING at [t] (OFF read as 1/16, the swing held to 50..75). */
+    fun withTiming(t: TimingSettings): AppSettings = copy(timingInterval = t.interval, timingSwing = t.swing, timingQuantize = t.quantize)
+
+    /** PATTERN's TIMING picked at [t]: OFF records in free time (the interval stays); a grid is the interval, quantized. */
+    fun withPatternTiming(t: Timing): AppSettings =
+        withTiming(if (t == Timing.OFF) timing.withQuantize(false) else timing.withInterval(t).withQuantize(true))
+
+    /** These settings with the arp's at [a] (octaves and gate held to their ranges). */
+    fun withArp(a: ArpSettings): AppSettings {
+        val held = a.withOctaves(a.octaves).withGate(a.gate)
+        return copy(arpOrder = held.order, arpOctaves = held.octaves, arpGate = held.gate, arpLatch = held.latch)
+    }
+
     /** SAMPLE's LEVEL for [source], in dB. */
     fun sampleGain(source: SampleSource): Float = when (source) {
         SampleSource.MIC -> sampleGainMic
@@ -152,16 +192,29 @@ class SettingsStore internal constructor(private val prefs: SharedPreferences) {
         sampleNormalize = prefs.getBoolean("sampleNormalize", false),
         sampleTrimSilence = prefs.getBoolean("sampleTrimSilence", false),
         samplePattern = prefs.getBoolean("samplePattern", false),
-        patternTiming = Timing.of(prefs.getString("patternTiming", null) ?: "") ?: Timing.DEFAULT,
         patternCountIn = prefs.getBoolean("patternCountIn", true),
         patternAutoLength = prefs.getBoolean("patternAutoLength", false),
+        timingInterval = timingIntervalOf(prefs.getString("timingInterval", null), legacyTiming()) ?: Timing.DEFAULT,
+        timingSwing = timingSwingOf(prefs.getInt("timingSwing", TimingSettings.SWING_MIN)) ?: TimingSettings.SWING_MIN,
+        timingQuantize = if (prefs.contains("timingQuantize")) prefs.getBoolean("timingQuantize", true) else (legacyTiming() ?: Timing.DEFAULT) != Timing.OFF,
+        arpOn = prefs.getBoolean("arpOn", false),
+        arpOrder = ArpOrder.of(prefs.getString("arpOrder", null) ?: "") ?: ArpOrder.PLAYED,
+        arpOctaves = arpOctavesOf(prefs.getInt("arpOctaves", ArpSettings.MIN_OCTAVES)) ?: ArpSettings.MIN_OCTAVES,
+        arpGate = arpGateOf(prefs.getInt("arpGate", ArpSettings.DEFAULT.gate)) ?: ArpSettings.DEFAULT.gate,
+        arpLatch = prefs.getBoolean("arpLatch", false),
     )
+
+    // TIMING as an earlier version kept it: one choice, OFF or a grid.
+    private fun legacyTiming(): Timing? = Timing.of(prefs.getString("patternTiming", null) ?: "")
 
     fun update(change: (AppSettings) -> AppSettings) {
         val cur = _settings.value
         val next = change(cur)
         val before = cur.values()
-        val changed = next.values().filter { (k, v) -> before[k] != v }
+        val after = next.values()
+        var changed = after.filter { (k, v) -> before[k] != v }
+        // TIMING's settings go in together: an interval left unwritten would otherwise be read back from patternTiming, which OFF loses.
+        if (changed.keys.any { it in TIMING_KEYS }) changed = changed + after.filterKeys { it in TIMING_KEYS }
         val engine = next.liveEngine != cur.liveEngine
         if (changed.isEmpty() && !engine) return
         prefs.edit {
@@ -171,8 +224,10 @@ class SettingsStore internal constructor(private val prefs: SharedPreferences) {
             }
             for ((k, v) in changed) {
                 when (k) {
-                    "theme", "keysScale", "keysNames", "keysViewWide", "keysViewTall", "sampleSource", "sampleThreshold", "patternTiming" -> putString(k, v)
-                    "keepLast", "keysRoot", "keysOctave", "pianoWhites", "liveTempo", "sampleBars" -> putInt(k, v.toInt())
+                    "theme", "keysScale", "keysNames", "keysViewWide", "keysViewTall", "sampleSource", "sampleThreshold", "patternTiming",
+                    "timingInterval", "arpOrder" -> putString(k, v)
+                    "keepLast", "keysRoot", "keysOctave", "pianoWhites", "liveTempo", "sampleBars",
+                    "timingSwing", "arpOctaves", "arpGate" -> putInt(k, v.toInt())
                     "sampleGainMic", "sampleGainRsp", "sampleGainUsb" -> putFloat(k, v.toFloat())
                     else -> putBoolean(k, v.toBooleanStrict())
                 }
@@ -189,6 +244,9 @@ class SettingsStore internal constructor(private val prefs: SharedPreferences) {
     fun fromIndex(map: Map<String, String>) = update { it.withIndex(map) }
 }
 
+/** TIMING's preferences, written together whenever one of them changes. */
+private val TIMING_KEYS = setOf("patternTiming", "timingInterval", "timingSwing", "timingQuantize")
+
 /** The preference that keeps [AppSettings.liveEngine]. */
 internal const val LIVE_ENGINE = "liveEngine"
 
@@ -197,6 +255,21 @@ internal fun liveEngineOf(stored: String?): LiveEngine = LiveEngine.entries.firs
 
 /** A stored LEVEL, when it is one the knob turns to (an older or edited file may hold anything). */
 internal fun sampleGainOf(db: Float?): Float? = db?.takeIf { it in SAMPLE_GAINS }
+
+/**
+ * A stored TIMING interval: one of the intervals, or else the one [legacy]
+ * (an earlier version's single TIMING choice) had when it was a grid.
+ */
+internal fun timingIntervalOf(stored: String?, legacy: Timing?): Timing? =
+    stored?.let(Timing::of)?.takeIf { it != Timing.OFF } ?: legacy?.takeIf { it != Timing.OFF }
+
+/** A stored swing, when it is one KNOB Y turns to. */
+internal fun timingSwingOf(n: Int?): Int? = n?.takeIf { it in TimingSettings.SWING_MIN..TimingSettings.SWING_MAX }
+
+/** A stored octave count or gate, when the arp offers it. */
+internal fun arpOctavesOf(n: Int?): Int? = n?.takeIf { it in ArpSettings.MIN_OCTAVES..ArpSettings.MAX_OCTAVES }
+
+internal fun arpGateOf(n: Int?): Int? = n?.takeIf { it in ArpSettings.MIN_GATE..ArpSettings.MAX_GATE }
 
 /** A stored threshold: "off" (or anything unreadable or out of range) is none. */
 internal fun sampleThresholdOf(stored: String?): Float? = stored?.toFloatOrNull()?.takeIf { it in SAMPLE_THRESHOLDS }
@@ -238,10 +311,18 @@ internal fun AppSettings.values(): Map<String, String> = linkedMapOf(
     "sampleNormalize" to sampleNormalize.toString(),
     "sampleTrimSilence" to sampleTrimSilence.toString(),
     "samplePattern" to samplePattern.toString(),
-    // TIMING's word: "off", "1/8", "1/16" or "1/32".
+    // TIMING's grid as one word, as earlier versions read it: "off" or the interval ("1/16", "1/8T"...).
     "patternTiming" to patternTiming.id,
     "patternCountIn" to patternCountIn.toString(),
     "patternAutoLength" to patternAutoLength.toString(),
+    "timingInterval" to timingInterval.id,
+    "timingSwing" to timingSwing.toString(),
+    "timingQuantize" to timingQuantize.toString(),
+    "arpOn" to arpOn.toString(),
+    "arpOrder" to arpOrder.id,
+    "arpOctaves" to arpOctaves.toString(),
+    "arpGate" to arpGate.toString(),
+    "arpLatch" to arpLatch.toString(),
 )
 
 /** These settings with what library.json held ("app.*" keys) taken back; anything missing or unreadable stays as it is. */
@@ -290,7 +371,16 @@ internal fun AppSettings.withIndex(map: Map<String, String>): AppSettings = copy
     sampleNormalize = map["app.sampleNormalize"]?.toBooleanStrictOrNull() ?: sampleNormalize,
     sampleTrimSilence = map["app.sampleTrimSilence"]?.toBooleanStrictOrNull() ?: sampleTrimSilence,
     samplePattern = map["app.samplePattern"]?.toBooleanStrictOrNull() ?: samplePattern,
-    patternTiming = map["app.patternTiming"]?.let(Timing::of) ?: patternTiming,
     patternCountIn = map["app.patternCountIn"]?.toBooleanStrictOrNull() ?: patternCountIn,
     patternAutoLength = map["app.patternAutoLength"]?.toBooleanStrictOrNull() ?: patternAutoLength,
+    // An earlier version's single TIMING choice stands in for the interval and quantize it didn't keep.
+    timingInterval = timingIntervalOf(map["app.timingInterval"], map["app.patternTiming"]?.let(Timing::of)) ?: timingInterval,
+    timingSwing = timingSwingOf(map["app.timingSwing"]?.toIntOrNull()) ?: timingSwing,
+    timingQuantize = map["app.timingQuantize"]?.toBooleanStrictOrNull()
+        ?: map["app.patternTiming"]?.let(Timing::of)?.let { it != Timing.OFF } ?: timingQuantize,
+    arpOn = map["app.arpOn"]?.toBooleanStrictOrNull() ?: arpOn,
+    arpOrder = map["app.arpOrder"]?.let(ArpOrder::of) ?: arpOrder,
+    arpOctaves = arpOctavesOf(map["app.arpOctaves"]?.toIntOrNull()) ?: arpOctaves,
+    arpGate = arpGateOf(map["app.arpGate"]?.toIntOrNull()) ?: arpGate,
+    arpLatch = map["app.arpLatch"]?.toBooleanStrictOrNull() ?: arpLatch,
 )

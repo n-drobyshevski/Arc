@@ -82,15 +82,25 @@ class PatternRecorder(private val maxUndo: Int = 32) {
 
     /**
      * A pad (or a KEYS note on it, [semitones]) pressed at global [tick];
-     * the phone played it at [heardTick]. On [timing]'s grid, a press up to
-     * half a step before tick 0 records at 0 and earlier ones nothing. A
-     * note on the same pad and pitch at that tick (with OFF, within 6 ticks)
-     * is replaced. When the grid put the note after [heardTick], the pass
-     * it lands in is to be skipped ([Recorded.skipPass]): it was heard.
+     * the phone played it at [heardTick], at [velocity] (1..127). On
+     * [timing]'s grid, swung by [swing], a press up to half a step before
+     * tick 0 records at 0 and earlier ones nothing. A note on the same pad
+     * and pitch at that tick (with OFF, within 6 ticks) is replaced. When the
+     * grid put the note after [heardTick], the pass it lands in is to be
+     * skipped ([Recorded.skipPass]): it was heard.
      */
-    fun noteOn(p: ProjectPatterns, pad: PhysicalPad, semitones: Int?, tick: Double, heardTick: Double, timing: Timing): Recorded {
+    fun noteOn(
+        p: ProjectPatterns,
+        pad: PhysicalPad,
+        semitones: Int?,
+        tick: Double,
+        heardTick: Double,
+        timing: Timing,
+        swing: Int = TimingSettings.SWING_MIN,
+        velocity: Int = 127,
+    ): Recorded {
         lastErase = null
-        val q = timing.quantize(tick)
+        val q = timing.quantize(tick, swing)
         if (q < 0) return Recorded(p, 0, null)
         val grown = grow(p, q.toDouble())
         val pat = grown.group(pad.group)
@@ -104,7 +114,7 @@ class PatternRecorder(private val maxUndo: Int = 32) {
         if (kept.size >= Seq.MAX_NOTES) return Recorded(p, 0, null)
         val id = ++nextId
         val gate = if (timing == Timing.OFF) Timing.SIXTEENTH.ticks else timing.ticks
-        val out = grown.with(pad.group, pat.copy(notes = kept + PatternNote(local, pad.offset, gate, semitones, id = id)))
+        val out = grown.with(pad.group, pat.copy(notes = kept + PatternNote(local, pad.offset, gate, semitones, velocity, id)))
         checkpoint(p)
         held[id] = q
         return Recorded(out, id, if (q > heardTick) passOf(q, len) else null)

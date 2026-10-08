@@ -13,10 +13,16 @@
 //   `ProjectPatterns.group(p, g)`). A note's absent `semitones` is null.
 // - Patterns' map is a ReadonlyMap; usedPads gives the pads' padKey numbers,
 //   as JS Sets have no value equality for objects.
-// - Timing is a string union of the Kotlin enum's `id` ('off', '1/8',
-//   '1/16', '1/32'): `timing.id` is `timing`, `timing.ticks` is
-//   `timingTicks(timing)` and `timing.quantize(t)` is `quantize(timing, t)`;
-//   `Timing.entries` is TIMINGS.
+// - Timing is a string union of the Kotlin enum's `id` ('off', '1/1' ...
+//   '1/32'): `timing.id` is `timing`, `timing.ticks` is `timingTicks(timing)`,
+//   `timing.swings` is `timingSwings(timing)`, `timing.swingOffset(k, s)` is
+//   `swingOffset(timing, k, s)` and `timing.quantize(t, s)` is
+//   `quantize(timing, t, s)` (the swing defaulting to 50, so it is also
+//   `timing.quantize(t)`); `Timing.entries` is TIMINGS and
+//   `Timing.intervals` TIMING_INTERVALS.
+// - TimingSettings is a plain readonly interface built by
+//   `TimingSettings.of()`, with its methods on the `TimingSettings` object
+//   (`s.record` is `TimingSettings.record(s)`).
 // - fromJson reads through JSON.parse, with kotlinx's intOrNull as in
 //   offlinePads.
 
@@ -262,37 +268,139 @@ function fromJson(text: string): Patterns | null {
 export const Patterns = { EMPTY, of, put, toJson, fromJson } as const
 
 /**
- * TIMING (the device's quantize): the grid recorded notes snap to, or 'off'
- * for free time (the tick played). 1/16 by default, as on the device. The
- * value is the word kept in settings.
+ * TIMING (the device's quantize and note interval): the grid recorded notes
+ * snap to and the arp and note repeat step at, or 'off' for free time (the
+ * tick played). 1/16 by default, as on the device; swing bends the off-beats
+ * of 1/8 and 1/16 only. The value is the word kept in settings.
  */
-export type Timing = 'off' | '1/8' | '1/16' | '1/32'
+export type Timing = 'off' | '1/1' | '1/2' | '1/4' | '1/8' | '1/8T' | '1/16' | '1/16T' | '1/32'
 
 /** Timing.entries, in declaration order. */
-export const TIMINGS: readonly Timing[] = ['off', '1/8', '1/16', '1/32']
+export const TIMINGS: readonly Timing[] = ['off', '1/1', '1/2', '1/4', '1/8', '1/8T', '1/16', '1/16T', '1/32']
 
-const TIMING_TICKS: Readonly<Record<Timing, number>> = { off: 0, '1/8': 48, '1/16': 24, '1/32': 12 }
+/** The note intervals KNOB X offers: every timing but 'off', in order. */
+export const TIMING_INTERVALS: readonly Timing[] = TIMINGS.filter((t) => t !== 'off')
+
+const TIMING_TICKS: Readonly<Record<Timing, number>> = {
+  off: 0,
+  '1/1': 384,
+  '1/2': 192,
+  '1/4': 96,
+  '1/8': 48,
+  '1/8T': 32,
+  '1/16': 24,
+  '1/16T': 16,
+  '1/32': 12,
+}
 
 export function timingTicks(t: Timing): number {
   return TIMING_TICKS[t]
 }
 
+/** Whether swing applies to [t]: 1/8 and 1/16 only, as on the device. */
+export function timingSwings(t: Timing): boolean {
+  return t === '1/8' || t === '1/16'
+}
+
+/** Swing, as a percent: 50 is straight, 75 puts the off-beats halfway to the next step. */
+const SWING_MIN = 50
+const SWING_MAX = 75
+
+function clampSwing(swing: number): number {
+  return Math.min(Math.max(swing, SWING_MIN), SWING_MAX)
+}
+
 /**
- * [tick] on [t]'s grid: the nearest grid tick, ties rounding up; 'off' the
- * nearest tick. It can land on the pattern's length (the caller wraps it).
+ * How late step [stepIndex] of [t]'s grid plays at [swing] (50..75): 0 for
+ * the even steps, and for the odd ones (swing - 50) / 50 of a step, rounded
+ * to the tick (ticks / 2 at 75). 0 where [t] doesn't swing.
  */
-export function quantize(t: Timing, tick: number): number {
+export function swingOffset(t: Timing, stepIndex: number, swing: number): number {
+  if (!timingSwings(t) || stepIndex % 2 === 0) return 0
+  return Math.trunc(((clampSwing(swing) - SWING_MIN) * TIMING_TICKS[t] + 25) / 50)
+}
+
+/**
+ * [tick] on [t]'s grid swung by [swing]: the nearest of its points
+ * (k * ticks + swingOffset(k)), ties rounding up; 'off' the nearest tick. It
+ * can land on the pattern's length (the caller wraps it).
+ */
+export function quantize(t: Timing, tick: number, swing: number = SWING_MIN): number {
   const ticks = TIMING_TICKS[t]
-  return ticks === 0 ? Math.floor(tick + 0.5) : Math.floor(tick / ticks + 0.5) * ticks
+  if (ticks === 0) return Math.floor(tick + 0.5)
+  if (swingOffset(t, 1, swing) === 0) return Math.floor(tick / ticks + 0.5) * ticks
+  const k0 = Math.floor(tick / ticks)
+  let best = 0
+  let bestDistance = Infinity
+  for (let k = k0 - 1; k <= k0 + 1; k++) {
+    const point = k * ticks + swingOffset(t, k, swing)
+    const d = Math.abs(tick - point)
+    if (d <= bestDistance) {
+      best = point
+      bestDistance = d
+    }
+  }
+  return best
 }
 
 export const Timing = {
   OFF: 'off',
+  WHOLE: '1/1',
+  HALF: '1/2',
+  QUARTER: '1/4',
   EIGHTH: '1/8',
+  EIGHTH_T: '1/8T',
   SIXTEENTH: '1/16',
+  SIXTEENTH_T: '1/16T',
   THIRTY_SECOND: '1/32',
   DEFAULT: '1/16',
   of(id: string): Timing | null {
     return (TIMINGS as readonly string[]).includes(id) ? (id as Timing) : null
   },
+} as const
+
+/**
+ * The TIMING settings: the note [interval] (never 'off'), its [swing]
+ * (50..75) and whether recording snaps to the grid ([quantize]) or keeps
+ * free time.
+ */
+export interface TimingSettings {
+  readonly interval: Timing
+  readonly swing: number
+  readonly quantize: boolean
+}
+
+/** Settings: [fields] over the defaults (Kotlin's TimingSettings constructor), 'off' read as 1/16 and the swing held to 50..75. */
+function timingSettingsOf(fields: Partial<TimingSettings> = {}): TimingSettings {
+  const s = { interval: Timing.SIXTEENTH as Timing, swing: SWING_MIN, quantize: true, ...fields }
+  return { interval: s.interval === Timing.OFF ? Timing.SIXTEENTH : s.interval, swing: clampSwing(s.swing), quantize: s.quantize }
+}
+
+/** The grid recording snaps to: the interval, or 'off' for free time. */
+function record(s: TimingSettings): Timing {
+  return s.quantize ? s.interval : Timing.OFF
+}
+
+function withInterval(s: TimingSettings, interval: Timing): TimingSettings {
+  return timingSettingsOf({ ...s, interval })
+}
+
+function withSwing(s: TimingSettings, swing: number): TimingSettings {
+  return timingSettingsOf({ ...s, swing })
+}
+
+function withQuantize(s: TimingSettings, quantize: boolean): TimingSettings {
+  return { ...s, quantize }
+}
+
+export const TimingSettings = {
+  SWING_MIN,
+  SWING_MAX,
+  DEFAULT: timingSettingsOf(),
+  of: timingSettingsOf,
+  clampSwing,
+  record,
+  withInterval,
+  withSwing,
+  withQuantize,
 } as const

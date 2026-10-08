@@ -86,6 +86,23 @@ describe('PatternRecorderTest', () => {
     expect(ticks(hit(r, past, a3, 2.0, Timing.OFF).patterns)).toEqual([500, 386, 2])
   })
 
+  it('a press snaps to the swung grid and keeps its velocity', () => {
+    const r = new PatternRecorder()
+    // 1/16 at 75%: the off-beats sit at 36 and 84, so 40 goes to 36, not 48.
+    let p = r.noteOn(projectPatterns(), a3, null, 40.0, 40.0, sixteenth, 75, 90).patterns
+    expect(notesOf(p)[0]).toEqual(patternNote(36, 3, 24, null, 90, 1))
+    p = r.noteOn(p, a4, 2, 66.5, 66.5, sixteenth, 75).patterns
+    expect(ticks(p)).toEqual([36, 84])
+    expect(notesOf(p)[1]!.velocity).toBe(127)
+    // Straight by default.
+    expect(ticks(hit(r, projectPatterns(), a3, 40.0).patterns)).toEqual([48])
+    // Swing doesn't touch 1/32 or OFF.
+    expect(ticks(r.noteOn(projectPatterns(), a3, null, 40.0, 40.0, Timing.THIRTY_SECOND, 75).patterns)).toEqual([36])
+    expect(ticks(r.noteOn(projectPatterns(), a3, null, 40.4, 40.4, Timing.OFF, 75).patterns)).toEqual([40])
+    // Swung after it was heard: that pass is skipped too.
+    expect(r.noteOn(projectPatterns(), a3, null, 30.0, 30.0, sixteenth, 75).skipPass).toBe(0)
+  })
+
   it('a note the grid puts after it was heard skips that pass', () => {
     const r = new PatternRecorder()
     // Heard at 380, snapped to 384: the next pass's tick 0 would play it again at once.

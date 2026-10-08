@@ -635,11 +635,14 @@ object MirrorText {
     /** "Play a pad or PLAY \u00B7 1/16" on the display line while RECORD is armed: what starts it (a pad at once, PLAY after the count-in), and the grid. */
     fun patternArmed(timing: Timing) = "Play a pad or PLAY \u00B7 ${timingLabel(timing)}"
 
-    /** TIMING's choices: Off, 1/8, 1/16, 1/32. */
+    /** TIMING's choices: Off, 1/1, 1/2, 1/4, 1/8, 1/8T, 1/16, 1/16T, 1/32. */
     fun timingLabel(t: Timing) = if (t == Timing.OFF) onOff(false) else t.id
 
-    /** A TIMING choice for screen readers. */
-    fun timingName(t: Timing) = if (t == Timing.OFF) "Timing off: notes stay where you play them" else "Timing ${t.id}: notes snap to the nearest ${t.id}"
+    /** A TIMING choice for screen readers: a triplet ("1/8T") said as "1/8 triplet". */
+    fun timingName(t: Timing) =
+        if (t == Timing.OFF) "Timing off: notes stay where you play them" else "Timing ${t.id}: notes snap to the nearest ${timingSpoken(t)}"
+
+    private fun timingSpoken(t: Timing) = if (t.id.endsWith("T")) t.id.dropLast(1) + " triplet" else t.id
 
     /** "A \u00B7 2 bars", a group's length in the sheet; "Group A, 2 bars" for screen readers. */
     fun groupLength(group: Int, bars: Int) = "${'A' + group} \u00B7 ${Format.plural(bars, "bar")}"

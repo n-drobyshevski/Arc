@@ -4001,7 +4001,7 @@ class ArcController(
         val tick = patternTickAt(pressedAt) ?: return
         patternGroups += pad.group
         markPasses(tick)
-        val r = patternRecorder.noteOn(projectPatterns, pad, semitones, tick, patternTickAt(System.nanoTime()) ?: tick, settings.value.patternTiming)
+        val r = patternRecorder.noteOn(projectPatterns, pad, semitones, tick, patternTickAt(System.nanoTime()) ?: tick, settings.value.patternTiming, settings.value.timingSwing)
         if (r.id == 0) return
         pressSkip(r.skipPass, first, early = patternPressAt != null && heardTimeline() == null)?.let { patternSkip = patternSkip + (r.id to it) }
         // The same key again before it was let go of (another finger): the first note's gate ends here.
@@ -4031,7 +4031,7 @@ class ArcController(
     }
 
     /** TIMING: the grid recorded notes snap to (kept). */
-    fun setPatternTiming(t: Timing) = changeSettings { it.copy(patternTiming = t) }
+    fun setPatternTiming(t: Timing) = changeSettings { it.withPatternTiming(t) }
 
     /** COUNT-IN: RECORD then PLAY counts a bar in first (kept). */
     fun setPatternCountIn(on: Boolean) = changeSettings { it.copy(patternCountIn = on) }
