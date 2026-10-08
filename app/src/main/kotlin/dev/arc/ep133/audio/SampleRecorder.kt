@@ -81,7 +81,7 @@ class SampleTake(
  * picked up; one waiting for the threshold still keeps only the 20 ms before
  * the crossing.
  *
- * Commands ([arm], [schedule], [stop], [cancel]) are queued and picked up
+ * Commands ([arm], [schedule], [scheduleMix], [stop], [cancel]) are queued and picked up
  * by the feeding thread before its next block, as REC's are in [LiveAudio]:
  * the [SampleCapture] and the [PeakMeter] are touched only there, under the
  * input's lock, which [close] and a lost input take once more to end what is
@@ -168,7 +168,7 @@ class SampleRecorder(
      */
     var onDone: (SampleTake) -> Unit = {}
 
-    // Takes asked for ([arm], [schedule]) and not over yet: counted up on the caller's thread as each
+    // Takes asked for ([arm], [schedule], [scheduleMix]) and not over yet: counted up on the caller's thread as each
     // is asked, down as each ends, on the feeding thread, or with its input when it never started.
     private val open = AtomicInteger()
 
@@ -320,6 +320,20 @@ class SampleRecorder(
         return true
     }
 
+    /**
+     * Schedules a take of exactly [lengthFrames] of Live's mix into [pad]
+     * from mix frame [startMixFrame] (a pattern's loop start, from its
+     * timeline): RSP only, to the frame, with no clock in between. [maxFrames]
+     * caps it as for [arm]. Live's output reopening before it starts ends it
+     * with nothing, since its frames count afresh. False when RSP isn't open.
+     */
+    fun scheduleMix(pad: PhysicalPad, startMixFrame: Long, lengthFrames: Long, maxFrames: Int = Int.MAX_VALUE): Boolean {
+        val f = feed ?: return false
+        if (f.input.source != SampleSource.RSP || maxFrames <= 0 || lengthFrames < 0) return false
+        f.ask(Ask.ScheduleFrame(pad, startMixFrame, maxFrames, lengthFrames))
+        return true
+    }
+
     /** Stops the take at the frame of [releasedAtNanos], keeping what came before it. */
     fun stop(releasedAtNanos: Long = nanoTime()) {
         feed?.ask(Ask.Stop(releasedAtNanos))
@@ -370,6 +384,9 @@ class SampleRecorder(
         class Arm(pad: PhysicalPad, nanos: Long, latched: Boolean, maxFrames: Int, val threshold: Float?) : Start(pad, nanos, latched, maxFrames)
 
         class Schedule(pad: PhysicalPad, nanos: Long, maxFrames: Int, val length: Long) : Start(pad, nanos, true, maxFrames)
+
+        /** RSP's take of set frames from mix frame [frame] rather than a moment ([nanos] unused). */
+        class ScheduleFrame(pad: PhysicalPad, val frame: Long, maxFrames: Int, val length: Long) : Start(pad, 0L, true, maxFrames)
 
         class Stop(val nanos: Long) : Ask
 
@@ -453,8 +470,9 @@ class SampleRecorder(
                 val all = listOfNotNull(unstarted, held) + generateSequence { asks.poll() }
                 unstarted = null
                 held = null
-                // Still counted in [open]: each goes on as the same take.
-                all.forEach { next.asks.add(rescaled(it, rate, next.rate)) }
+                // Still counted in [open]: each goes on as the same take. One at a mix frame is
+                // over: the next output's frames count afresh.
+                all.forEach { if (it is Ask.ScheduleFrame) open.decrementAndGet() else next.asks.add(rescaled(it, rate, next.rate)) }
             }
         }
 
@@ -579,7 +597,7 @@ class SampleRecorder(
                 held = null
                 when (a) {
                     is Ask.Start -> {
-                        val at = frameAt(a.nanos)
+                        val at = if (a is Ask.ScheduleFrame) a.frame else frameAt(a.nanos)
                         if (going(c)) {
                             // The take before it ends where this one starts, and is handed over first.
                             if (fed) c.stop(minOf(at, fedEnd))
@@ -598,6 +616,7 @@ class SampleRecorder(
                         when (a) {
                             is Ask.Arm -> c.arm(at, a.threshold)
                             is Ask.Schedule -> c.schedule(at, a.length)
+                            is Ask.ScheduleFrame -> c.schedule(at, a.length)
                         }
                         _phase.value = SamplePhase.Waiting(a.pad, a.latched)
                         after(c)

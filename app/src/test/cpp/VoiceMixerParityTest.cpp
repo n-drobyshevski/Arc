@@ -2,7 +2,8 @@
 // VoiceMixer) through the C++ port and wants the same results: every sample
 // of short renders, a hash of long ones, the voices started and the keys.
 // A start line may carry a voice shape (VoiceShape's fields, less the
-// semitones, which are in its pitch).
+// semitones, which are in its pitch); a timed start ("startat") has its frame
+// after the tag, a timed or tagged release ("releaseat") its frame and tag.
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -121,13 +122,15 @@ int runVoiceMixerParity(const char *goldenPath) {
             int64_t seed = 0;
             words >> id >> channels >> size >> seed;
             r.addSample(id, channels, size, noise(static_cast<size_t>(size), seed));
-        } else if (op == "start") {
+        } else if (op == "start" || op == "startat") {
             int key = 0;
             int id = 0;
             int rate = 0;
             std::string pitchBits;
             int64_t tag = 0;
+            int64_t at = VoiceMixer::NOW;
             words >> key >> id >> rate >> pitchBits >> tag;
+            if (op == "startat") words >> at;
             const uint64_t bits = std::strtoull(pitchBits.c_str(), nullptr, 16);
             double pitch = 0;
             std::memcpy(&pitch, &bits, sizeof pitch);
@@ -140,13 +143,21 @@ int runVoiceMixerParity(const char *goldenPath) {
                 words >> shape.pan >> shape.start >> shape.end >> shape.attackMs >> shape.releaseMs >> shape.mode >>
                     shape.muteGroup;
             }
-            CHECK(r.mixer->start(key, r.samples[id].get(), rate, pitch, tag, shape));
+            CHECK(r.mixer->start(key, r.samples[id].get(), rate, pitch, tag, shape, at));
         } else if (op == "release" || op == "cut") {
             int key = 0;
             words >> key;
             CHECK(op == "release" ? r.mixer->release(key) : r.mixer->cut(key));
+        } else if (op == "releaseat") {
+            int key = 0;
+            int64_t at = 0;
+            int64_t tag = 0;
+            words >> key >> at >> tag;
+            CHECK(r.mixer->release(key, at, tag));
         } else if (op == "stop") {
             CHECK(r.mixer->stopAll());
+        } else if (op == "flushtimed") {
+            CHECK(r.mixer->flushTimed());
         } else if (op == "render") {
             int frames = 0;
             words >> frames;

@@ -1,5 +1,6 @@
 // LiveCore on the host: commands in, sounds held and let go of safely,
-// reports and REC blocks out, a restart, and the three threads at once (built
+// reports and REC blocks out, a restart, the sequencer's timed commands (a
+// sound kept while a timed start waits on it), and the three threads at once (built
 // with AddressSanitizer where the compiler has it, so a sound freed under a
 // voice fails the run).
 #include <atomic>
@@ -211,6 +212,116 @@ void aFullQueueRefuses() {
     delete s;
 }
 
+void aTimedStartPlaysOnItsFrameAndIsReportedThere() {
+    LiveCore core(1000);
+    CHECK(core.rendered() == 0);
+    CHECK(core.load(0, steady(100, 1000)));
+    CHECK(core.start(7, 0, 1000, 1.0, -1, arc::VoiceShape(), 20));
+    render(core, 16);
+    CHECK(core.rendered() == 16);
+    CHECK(Reports(core).started.empty());
+    const auto out = render(core, 16);
+    CHECK(out[2 * 3] == 0 && out[2 * 4] == 1000);
+    CHECK(core.rendered() == 32);
+    Reports r(core);
+    CHECK(r.started.size() == 1 && r.started[0].key == 7 && r.started[0].frame == 20 && r.started[0].tag == -1);
+    // A callback with no frames renders nothing, and the count stays.
+    core.render(nullptr, 0);
+    CHECK(core.rendered() == 32);
+}
+
+void aTaggedReleaseLetsGoOfItsOwnVoiceOnly() {
+    LiveCore core(1000);
+    CHECK(core.load(0, steady(1000, 1000)));
+    CHECK(core.start(1, 0, 1000, 1.0, 5));
+    // Another tag: the voice plays on.
+    CHECK(core.releaseAt(1, 10, -9));
+    render(core, 200);
+    Reports held(core);
+    CHECK(!held.keys.empty() && held.keys.back() == std::vector<int64_t>{1});
+    CHECK(core.releaseAt(1, 210, 5));
+    render(core, 8);
+    drain(core);
+    const auto out = render(core, 100);
+    CHECK(out[0] == 1000);
+    CHECK(out[2 * 30] == 0);
+    Reports r(core);
+    CHECK(!r.keys.empty() && r.keys.back().empty());
+}
+
+void aSoundIsKeptWhileATimedStartWaitsOnIt() {
+    LiveCore core(1000);
+    CHECK(core.load(0, steady(10, 700)));
+    CHECK(core.start(1, 0, 1000, 1.0, -1, arc::VoiceShape(), 40));
+    render(core, 16);
+    CHECK(core.unload(0));
+    render(core, 16);
+    drain(core);
+    // Unloaded, but a start still waits to read it.
+    CHECK(core.freed() == 0);
+    const auto out = render(core, 16);
+    CHECK(out[2 * 8] == 700);
+    render(core, 16);
+    drain(core);
+    CHECK(core.freed() == 1);
+}
+
+void flushTimedDropsWhatWaitsAndLetsItsSoundGo() {
+    LiveCore core(1000);
+    CHECK(core.load(0, steady(10, 700)));
+    CHECK(core.start(1, 0, 1000, 1.0, -1, arc::VoiceShape(), 40));
+    render(core, 16);
+    CHECK(core.unload(0));
+    CHECK(core.flushTimed());
+    render(core, 64);
+    Reports r(core);
+    CHECK(r.started.empty());
+    CHECK(core.freed() == 1);
+}
+
+void aRestartDropsTimedCommandsWaiting() {
+    LiveCore core(1000);
+    CHECK(core.load(0, steady(1000, 1000)));
+    CHECK(core.start(1, 0, 1000, 1.0, -1, arc::VoiceShape(), 40));
+    render(core, 16);
+    // One still in the queue too.
+    CHECK(core.start(2, 0, 1000, 1.0, -2, arc::VoiceShape(), 50));
+    core.restart(1000);
+    render(core, 64);
+    CHECK(Reports(core).started.empty());
+    // At another rate as well.
+    CHECK(core.start(3, 0, 1000, 1.0, -3, arc::VoiceShape(), 200));
+    render(core, 16);
+    core.restart(2000);
+    CHECK(core.unload(0));
+    render(core, 400);
+    CHECK(Reports(core).started.empty());
+    CHECK(core.freed() == 1);
+}
+
+void pastTheTimedCommandsItHoldsTheMixerPlaysOneAtOnce() {
+    LiveCore core(1000);
+    CHECK(core.load(0, steady(10, 1)));
+    for (int i = 0; i < arc::VoiceMixer::MAX_PENDING; i++) CHECK(core.start(1, 0, 1000, 1.0, -1, arc::VoiceShape(), 1000000));
+    // A render takes what fits in the mixer's queue.
+    render(core, 1);
+    render(core, 1);
+    CHECK(Reports(core).started.empty());
+    CHECK(core.start(2, 0, 1000, 1.0, -2, arc::VoiceShape(), 1000000));
+    render(core, 1);
+    Reports r(core);
+    CHECK(r.started.size() == 1 && r.started[0].key == 2 && r.started[0].frame == 2);
+    // The sound goes once nothing waits on it.
+    CHECK(core.unload(0));
+    render(core, 20);
+    drain(core);
+    CHECK(core.freed() == 0);
+    CHECK(core.flushTimed());
+    render(core, 1);
+    drain(core);
+    CHECK(core.freed() == 1);
+}
+
 void outputReportsComeBack() {
     LiveCore core(1000);
     core.reportOutput(2, 288);
@@ -254,10 +365,20 @@ void threeThreadsAtOnce() {
                 core->unload(slot);
                 break;
             case 2:
-                core->start(key, slot, 46875, 1.0 + (seed % 7) * 0.25, i + 1);
+                if ((seed & 1) != 0) {
+                    core->start(key, slot, 46875, 1.0 + (seed % 7) * 0.25, i + 1);
+                } else {
+                    // A sequencer's note, some way ahead of the mix, now and then flushed.
+                    core->start(key, slot, 46875, 1.0, -(i + 1), arc::VoiceShape(), core->rendered() + seed % 2000);
+                    if (seed % 61 == 0) core->flushTimed();
+                }
                 break;
             case 3:
-                core->release(key);
+                if ((seed & 1) != 0) {
+                    core->release(key);
+                } else {
+                    core->releaseAt(key, core->rendered() + seed % 3000, -(i - static_cast<int>(seed % 50)));
+                }
                 break;
             default:
                 core->cut(key);
@@ -291,6 +412,12 @@ void runLiveCoreTests() {
     aRestartAtAnotherRateStartsTheMixerOver();
     recHandsBackEachBlockWholeWithItsFirstStart();
     aFullQueueRefuses();
+    aTimedStartPlaysOnItsFrameAndIsReportedThere();
+    aTaggedReleaseLetsGoOfItsOwnVoiceOnly();
+    aSoundIsKeptWhileATimedStartWaitsOnIt();
+    flushTimedDropsWhatWaitsAndLetsItsSoundGo();
+    aRestartDropsTimedCommandsWaiting();
+    pastTheTimedCommandsItHoldsTheMixerPlaysOneAtOnce();
     outputReportsComeBack();
     threeThreadsAtOnce();
 }

@@ -90,6 +90,16 @@ class LiveSamplerTest {
     }
 
     @Test
+    fun `BARS gains PTN after 16 while the project has notes`() {
+        assertEquals(BarsPick(16, pattern = true), nextBarsPick(16, pattern = false, hasPattern = true))
+        assertEquals(BarsPick(null), nextBarsPick(16, pattern = true, hasPattern = true))
+        assertEquals(BarsPick(2), nextBarsPick(1, pattern = false, hasPattern = true))
+        // No notes: no PTN, and one picked before counts as its bars.
+        assertEquals(BarsPick(null), nextBarsPick(16, pattern = false, hasPattern = false))
+        assertEquals(BarsPick(null), nextBarsPick(16, pattern = true, hasPattern = false))
+    }
+
+    @Test
     fun `a take stops by itself held at the limit, at its longest, or after its bars`() {
         assertTrue(autoStopped(SamplePhase.Recording(pad, 7, 20, false), held = true, bars = null, bpm = 120.0))
         assertFalse(autoStopped(SamplePhase.Recording(pad, 7, 20, false), held = false, bars = null, bpm = 120.0))

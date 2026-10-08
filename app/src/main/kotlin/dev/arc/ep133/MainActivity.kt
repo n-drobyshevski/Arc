@@ -61,6 +61,7 @@ import dev.arc.ep133.ui.screens.PadSheetContent
 import dev.arc.ep133.ui.screens.ProjectSheetContent
 import dev.arc.ep133.ui.screens.SampleReviewSheetContent
 import dev.arc.ep133.ui.screens.TempoSheetContent
+import dev.arc.ep133.ui.screens.PatternSheetContent
 import dev.arc.ep133.ui.screens.SearchScreen
 import dev.arc.ep133.ui.screens.SettingsScreen
 import dev.arc.ep133.ui.screens.DeviceScreen
@@ -534,9 +535,10 @@ class MainActivity : ComponentActivity() {
             val open = padSheet
             if (open != null) controller.openPadEdit(open.first, open.second) else controller.closePadEdit()
         }
-        // TEMPO held: the tempo sheet; PROJECT held: the project sheet.
+        // TEMPO held: the tempo sheet; PROJECT held: the project sheet; RECORD held: the pattern sheet.
         var tempoSheet by rememberSaveable { mutableStateOf(false) }
         var projectSheet by rememberSaveable { mutableStateOf(false) }
+        var patternSheet by rememberSaveable { mutableStateOf(false) }
         // The mirror listens only while its tab is in front (not under the debug, settings or guide screen).
         val live = tab == Tab.LIVE && !debug && !settingsOpen && !guideOpen
         val appSettings by controller.settings.collectAsStateWithLifecycle()
@@ -554,6 +556,8 @@ class MainActivity : ComponentActivity() {
                     padSheet = null
                     tempoSheet = false
                     projectSheet = false
+                    patternSheet = false
+                    controller.setPatternErase(false)
                 }
                 Tab.DEVICE -> {
                     padsFor = null
@@ -643,8 +647,49 @@ class MainActivity : ComponentActivity() {
         // Live's sound goes to Bluetooth: its display line says it plays late.
         val liveWireless by controller.liveWireless.collectAsStateWithLifecycle()
         val takes by controller.takes.collectAsStateWithLifecycle()
-        // REC on Live's display line, on the page or in the top bar.
-        val liveRec = dev.arc.ep133.ui.screens.RecUi(rec, controller::toggleRec)
+        // TAKE in Live tools, and its badge on Live's display line while it records, on the page or in the top bar.
+        val liveTake = dev.arc.ep133.ui.screens.TakeUi(rec, controller::toggleTake)
+        // RECORD and PLAY on Live's display line: the pads played into a pattern that plays on the phone. A hold on
+        // RECORD opens the pattern sheet; where the pattern is is read as the line draws, not collected.
+        val pattern by controller.pattern.collectAsStateWithLifecycle()
+        val liveTransport = remember(pattern) {
+            dev.arc.ep133.ui.screens.TransportUi(
+                phase = pattern.phase,
+                recording = pattern.recording,
+                countIn = pattern.countIn,
+                timing = pattern.timing,
+                countInOn = pattern.countInOn,
+                autoLength = pattern.autoLength,
+                bars = pattern.bars,
+                hasNotes = pattern.hasNotes,
+                focusGroup = pattern.focusGroup,
+                erase = pattern.erase,
+                canUndo = pattern.canUndo,
+                missing = pattern.missing,
+                notePads = pattern.notePads,
+                position = controller::patternPosition,
+                onRecordDown = controller::patternRecordDown,
+                onRecordUp = controller::patternRecordUp,
+                onPlay = { recordHeld -> controller.patternPlay(recordHeld) },
+                onSheet = { patternSheet = true },
+                onErase = { on ->
+                    // A pad tapped erases instead of opening its sheet: EDIT goes.
+                    if (on) liveEdit = false
+                    controller.setPatternErase(on)
+                },
+                onUndo = controller::undoPattern,
+                onTiming = controller::setPatternTiming,
+                onCountIn = controller::setPatternCountIn,
+                onAutoLength = controller::setPatternAutoLength,
+                onLength = controller::setPatternLength,
+                onDouble = controller::doublePattern,
+                onClear = controller::clearPattern,
+                onErasePadDown = { pad, at -> controller.erasePadDown(pad, at) },
+                onErasePadUp = { pad, at -> controller.erasePadUp(pad, at) },
+                onEraseNoteDown = controller::eraseNoteDown,
+                onEraseNoteUp = controller::eraseNoteUp,
+            )
+        }
         val compareA = compareIds?.substringBefore('|')?.let { id -> state.backups.firstOrNull { it.id == id } }
         val compareB = compareIds?.substringAfter('|')?.let { id -> state.backups.firstOrNull { it.id == id } }
         // Also runs again after a recreation, when the result is gone.
@@ -703,7 +748,7 @@ class MainActivity : ComponentActivity() {
             clip = controller::sampleClip,
             lastTake = lastTake,
             // A sheet over Live keeps Back: the SAMPLE panel's would otherwise take it first.
-            sheetOpen = review != null || padSheet != null || tempoSheet || projectSheet || fontLicence || padsFor != null ||
+            sheetOpen = review != null || padSheet != null || tempoSheet || projectSheet || patternSheet || fontLicence || padsFor != null ||
                 detail != null || restore != null || comparePickFor != null || state.task != null,
             onOpen = {
                 if (!sample.on) {
@@ -711,6 +756,7 @@ class MainActivity : ComponentActivity() {
                     liveEdit = false
                     padSheet = null
                     tempoSheet = false
+                    patternSheet = false
                     enterSample()
                 }
             },
@@ -721,6 +767,10 @@ class MainActivity : ComponentActivity() {
             onGain = controller::setSampleGain,
             onThreshold = controller::setSampleThreshold,
             onBars = controller::setSampleBars,
+            // PTN, after 16 BARS while the project has notes: a take the pattern's length.
+            hasPattern = pattern.anyNotes,
+            pattern = sample.pattern,
+            onPattern = controller::setSamplePattern,
             onLatch = controller::setSampleLatch,
             onPadDown = { pad, at, unsure -> controller.samplePadDown(pad, at, unsure) },
             onPadUp = controller::samplePadUp,
@@ -877,7 +927,7 @@ class MainActivity : ComponentActivity() {
                     onGuide = { guideOpen = it },
                     guide = { GuideScreen(onBack = { guideOpen = false }) },
                     // On a phone on its side, Live's display line rides in the top bar.
-                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, liveRec, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys, wireless = liveWireless, sample = sampleUi, header = sampleHeader) }) else null,
+                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, transport = liveTransport, take = liveTake, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys, wireless = liveWireless, sample = sampleUi, header = sampleHeader) }) else null,
                     sample = sampleKey,
                 ) {
                     // Back from another section returns to Live, the home section, first.
@@ -920,7 +970,8 @@ class MainActivity : ComponentActivity() {
                             follow = appSettings.liveFollow,
                             onFollow = controller::setLiveFollow,
                             onPianoRange = { pianoRange = it },
-                            rec = liveRec,
+                            transport = liveTransport,
+                            take = liveTake,
                             takes = dev.arc.ep133.ui.screens.TakesUi(
                                 list = takes,
                                 playing = playing,
@@ -944,8 +995,11 @@ class MainActivity : ComponentActivity() {
                                     if (on && !ready && mirror?.offline == null) {
                                         controller.toast(dev.arc.ep133.text.MirrorText.EDIT_OFFLINE)
                                     } else {
-                                        // A tap on a pad gives it another sound: SAMPLE closes for it.
-                                        if (on) controller.exitSample()
+                                        // A tap on a pad gives it another sound: SAMPLE and ERASE close for it.
+                                        if (on) {
+                                            controller.exitSample()
+                                            controller.setPatternErase(false)
+                                        }
                                         liveEdit = on
                                     }
                                 },
@@ -1019,8 +1073,8 @@ class MainActivity : ComponentActivity() {
                                 localName = offline?.let { controller.mirrorLocal(pad)?.name },
                                 edit = padEdit?.takeIf { it.target == target },
                                 onEdit = controller::adjustPad,
-                                // The cap plays the pad as Live does, with its settings.
-                                onPadDown = { controller.playPad(pad) },
+                                // The cap plays the pad as Live does, with its settings (a try, never a pattern's note).
+                                onPadDown = { controller.playPad(pad, record = false) },
                                 onPadUp = { controller.releasePad(pad) },
                                 haptics = appSettings.haptics,
                             )
@@ -1043,6 +1097,9 @@ class MainActivity : ComponentActivity() {
                             onTap = { controller.tapTempo(it) },
                             onDone = { tempoSheet = false },
                         )
+                    }
+                    ArcSheet(visible = patternSheet, onDismiss = { patternSheet = false }) {
+                        PatternSheetContent(liveTransport, onDone = { patternSheet = false })
                     }
                     // SAMPLE's review sheet (its take collected above).
                     val lastReview = remember { mutableStateOf(review) }.apply { if (review != null) value = review }.value

@@ -16,7 +16,8 @@ import java.util.concurrent.locks.LockSupport
  * thread, and a headphone plug or unplug reopens the stream on the new route.
  *
  * Presses go in as commands through a lock-free ring: [prepare], [start],
- * [release], [cut] and [stopAll] hold this object's lock, so the ring has one
+ * [release], [cut], [stopAll] and the sequencer's timed [startAt],
+ * [releaseAt] and [flushTimed] hold this object's lock, so the ring has one
  * producer at a time. A sound is copied into native memory ([NativeSamples])
  * when the app prepares it, off the main thread, so a press only finds it
  * (one never prepared is copied the first time it plays); keys go as numbers
@@ -25,10 +26,12 @@ import java.util.concurrent.locks.LockSupport
  * A thread of its own ("arc-live-native") polls the engine every
  * [POLL_NS]: voices started (their latency, from the stream's timestamp, goes
  * to the listener), the keys sounding, xruns, the REC mix (into the take, as
- * the AudioTrack output does, and while it is wanted the stream's timestamp
- * about every 100 ms, for SAMPLE), a stream reopened (new route, rate or mode),
- * and whether the engine still runs: dead, or no callback for [STALL_NS]
- * while it should play, and it gives out, so Live falls back to AudioTrack.
+ * the AudioTrack output does, and while it or the clock is wanted the
+ * stream's timestamp about every 100 ms, for SAMPLE and the sequencer), the
+ * mix frames rendered so far (where the sequencer schedules from), a stream
+ * reopened (new route, rate or mode), and whether the engine still runs:
+ * dead, or no callback for [STALL_NS] while it should play, and it gives
+ * out, so Live falls back to AudioTrack.
  * That thread also closes the engine when [close] asks.
  */
 internal class NativeLiveOutput private constructor(
@@ -117,8 +120,11 @@ internal class NativeLiveOutput private constructor(
         if (!closed && channels in 1..2 && pcm.size >= channels) samples.slot(pcm, channels)
     }
 
+    override fun start(key: String, pcm: ShortArray, channels: Int, sampleRate: Int, semitones: Int, tag: Long, shape: VoiceShape): Boolean =
+        startAt(key, pcm, channels, sampleRate, semitones, tag, shape, VoiceMixer.NOW)
+
     @Synchronized
-    override fun start(key: String, pcm: ShortArray, channels: Int, sampleRate: Int, semitones: Int, tag: Long, shape: VoiceShape): Boolean {
+    override fun startAt(key: String, pcm: ShortArray, channels: Int, sampleRate: Int, semitones: Int, tag: Long, shape: VoiceShape, atFrame: Long): Boolean {
         require(channels in 1..2) { "channels: $channels" }
         if (closed) return false
         // Nothing to play, as the Kotlin mixer takes it.
@@ -128,7 +134,7 @@ internal class NativeLiveOutput private constructor(
         val pitch = VoiceMixer.pitchRatio(semitones + shape.semitones)
         return NativeAudio.start(
             handle, keyIds.id(key), slot, sampleRate, pitch, tag,
-            shape.gain, shape.pan, shape.start, shape.end, shape.attackMs, shape.releaseMs, shape.mode.ordinal, shape.muteGroup,
+            shape.gain, shape.pan, shape.start, shape.end, shape.attackMs, shape.releaseMs, shape.mode.ordinal, shape.muteGroup, atFrame,
         )
     }
 
@@ -145,6 +151,16 @@ internal class NativeLiveOutput private constructor(
     @Synchronized
     override fun stopAll() {
         if (!closed) NativeAudio.stopAll(handle)
+    }
+
+    @Synchronized
+    override fun releaseAt(key: String, atFrame: Long, tag: Long) {
+        if (!closed) NativeAudio.releaseAt(handle, keyIds.id(key), atFrame, tag)
+    }
+
+    @Synchronized
+    override fun flushTimed() {
+        if (!closed) NativeAudio.flushTimed(handle)
     }
 
     @Synchronized
@@ -173,9 +189,6 @@ internal class NativeLiveOutput private constructor(
         var gaveOut = false
         try {
             while (running) {
-                listener.beforeBlock()
-                // Under the lock, so a REC armed meanwhile ([recordFromNow]) isn't turned off again.
-                synchronized(this) { NativeAudio.setRecording(handle, listener.recording) }
                 val n = NativeAudio.poll(handle, reports)
                 if (n < NativeAudio.HEADER) break
                 val state = reports[1].toInt()
@@ -192,13 +205,17 @@ internal class NativeLiveOutput private constructor(
                         listener.tuned(engine)
                     }
                 }
+                listener.beforeBlock(reports[NativeAudio.RENDERED], rate)
+                // Under the lock, so a REC armed meanwhile ([recordFromNow]) isn't turned off again.
+                synchronized(this) { NativeAudio.setRecording(handle, listener.recording) }
                 var heard = 0
                 var i = NativeAudio.HEADER
                 while (i < n) {
                     when (reports[i]) {
                         NativeAudio.STARTED -> {
                             val tag = reports[i + 3]
-                            if (tag != 0L) {
+                            // No press (0), or the sequencer's (below 0): no latency to tell.
+                            if (tag > 0L) {
                                 // One timestamp for all the voices in this poll.
                                 if (heard == 0) heard = NativeAudio.timestamp(handle, stamp)
                                 report(reports[i + 1].toInt(), reports[i + 2], tag, if (heard == 0) null else stamp)
@@ -228,7 +245,7 @@ internal class NativeLiveOutput private constructor(
                     if (frames <= 0) break
                     listener.mixed(mix, frames, header[0], header[1].takeIf { it >= 0 }, header[2].toInt())
                 }
-                if (listener.recording) {
+                if (listener.recording || listener.clocked) {
                     val now = System.nanoTime()
                     // None while the stream reopens: told at the next poll that has one.
                     if (now - clocked >= LiveListener.CLOCK_NS && NativeAudio.timestamp(handle, clockStamp) != 0) {

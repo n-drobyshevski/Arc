@@ -117,6 +117,11 @@ import dev.arc.ep133.features.NoteTouches
 import dev.arc.ep133.features.NoteNames
 import dev.arc.ep133.features.Scale
 import dev.arc.ep133.features.RecState
+import dev.arc.ep133.features.PatternPosition
+import dev.arc.ep133.features.Seq
+import dev.arc.ep133.features.Timing
+import dev.arc.ep133.features.TransportPhase
+import dev.arc.ep133.features.TransportState
 import dev.arc.ep133.data.TakeInfo
 import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.text.GuideText
@@ -210,10 +215,11 @@ class KeysActions(
     /**
      * A MIDI note pressed; it sounds until [onNoteUp]. A screen reader's Play
      * passes hold = false. [pressedAt] (System.nanoTime) is when the finger
-     * came down, from the touch event ([PressTime]).
+     * came down, from the touch event ([PressTime]); [onNoteUp]'s releasedAt
+     * when it left, as the pattern's gate takes it.
      */
     val onNote: (note: Int, hold: Boolean, pressedAt: Long) -> Unit = { _, _, _ -> },
-    val onNoteUp: (note: Int) -> Unit = {},
+    val onNoteUp: (note: Int, releasedAt: Long) -> Unit = { _, _ -> },
     /** A pad played on the device in the pads view becomes the KEYS sound. */
     val onSelect: (PhysicalPad) -> Unit = {},
     /** The view switch: grid or piano, remembered for a [wide] window or a tall one. */
@@ -261,8 +267,64 @@ class EditUi(
 /** The KEYS view switch's state: which view shows, and whether the piano has room. */
 private class ViewSwitch(val piano: Boolean, val pianoEnabled: Boolean, val onPick: (KeysView) -> Unit)
 
-/** Live's REC key on the display line: its state, and the tap (null hides it). */
-data class RecUi(val state: RecState = RecState.Idle, val onRec: (() -> Unit)? = null)
+/**
+ * The pattern's transport on Live (an addition, after the EP-133's RECORD
+ * and PLAY; null hides it): the RECORD and PLAY chips on the display line
+ * ([PatternLine]), the counter while it runs, ERASE and ↶, and the pattern
+ * sheet a hold on RECORD opens ([onSheet]; [PatternSheetContent]).
+ */
+class TransportUi(
+    val phase: TransportPhase = TransportPhase.STOPPED,
+    /** Pads played go into the pattern (while counting in, once it starts). */
+    val recording: Boolean = false,
+    /** The count-in's beat, 1 to 4, while it counts in. */
+    val countIn: Int? = null,
+    val timing: Timing = Timing.DEFAULT,
+    /** RECORD then PLAY counts a bar in. */
+    val countInOn: Boolean = true,
+    val autoLength: Boolean = false,
+    /** Each group's length in bars, and whether it has notes, A to D. */
+    val bars: List<Int> = List(4) { Seq.DEFAULT_BARS },
+    val hasNotes: List<Boolean> = List(4) { false },
+    /** The group the counter follows: the one played into last. */
+    val focusGroup: Int = 0,
+    /** ERASE latched: a pad erases its notes instead of sounding. */
+    val erase: Boolean = false,
+    val canUndo: Boolean = false,
+    /** Pads the pattern plays whose sounds aren't on the phone yet. */
+    val missing: Int = 0,
+    /** The pads with notes, dotted in ERASE. */
+    val notePads: Set<PhysicalPad> = emptySet(),
+    /** Where the focus group is at a System.nanoTime, null before the clock starts; read as the line draws. */
+    val position: (Long) -> PatternPosition? = { null },
+    /** RECORD down and up, at the touch's own times ([PressTime]). */
+    val onRecordDown: (at: Long) -> Unit = {},
+    val onRecordUp: (at: Long) -> Unit = {},
+    /** PLAY (STOP while it runs), with RECORD held down or not. */
+    val onPlay: (recordHeld: Boolean) -> Unit = {},
+    /** RECORD held while stopped or armed: the pattern sheet. */
+    val onSheet: () -> Unit = {},
+    val onErase: (Boolean) -> Unit = {},
+    val onUndo: () -> Unit = {},
+    val onTiming: (Timing) -> Unit = {},
+    val onCountIn: (Boolean) -> Unit = {},
+    val onAutoLength: (Boolean) -> Unit = {},
+    val onLength: (group: Int, bars: Int) -> Unit = { _, _ -> },
+    val onDouble: (group: Int) -> Unit = {},
+    /** One group's notes, or every group's (null). */
+    val onClear: (group: Int?) -> Unit = {},
+    /** In ERASE, a pad down and up: a tap erases its notes, a hold while playing those it passes. */
+    val onErasePadDown: (pad: PhysicalPad, at: Long) -> Unit = { _, _ -> },
+    val onErasePadUp: (pad: PhysicalPad, at: Long) -> Unit = { _, _ -> },
+    /** In ERASE on KEYS, a key down and up, as a pad's: its note (MIDI) on the KEYS pad. */
+    val onEraseNoteDown: (note: Int, at: Long) -> Unit = { _, _ -> },
+    val onEraseNoteUp: (note: Int, at: Long) -> Unit = { _, _ -> },
+) {
+    val state: TransportState get() = TransportState(phase, recording)
+}
+
+/** TAKE (REC before RECORD was the pattern's): Live's sound recorded into a take, its [state]; [onTake] starts or stops one. */
+class TakeUi(val state: RecState = RecState.Idle, val onTake: () -> Unit = {})
 
 /** The takes in Live tools, and what their keys do. */
 class TakesUi(
@@ -324,12 +386,13 @@ fun MirrorScreen(
     onPad: ((pad: PhysicalPad, hold: Boolean, unsure: Boolean, pressedAt: Long) -> Unit)? = null,
     /** The unsure press on a pad was a press after all (no scroll within [PRESS_DELAY_MS], or a lift inside it). */
     onPadKept: (PhysicalPad) -> Unit = {},
-    onPadUp: (PhysicalPad) -> Unit = {},
+    /** The finger left the pad, at [releasedAt] (System.nanoTime, from the touch event): the pattern's gate ends there. */
+    onPadUp: (pad: PhysicalPad, releasedAt: Long) -> Unit = { _, _ -> },
     /**
      * The press on a pad of the scrolling page turned into a scroll: its sound
      * is cut short, rather than let go of ([onPadUp]).
      */
-    onPadCut: (PhysicalPad) -> Unit = onPadUp,
+    onPadCut: (PhysicalPad) -> Unit = { onPadUp(it, System.nanoTime()) },
     /** The pads whose samples are playing on the phone (several at once for a chord), ringed. */
     playingPads: Set<PhysicalPad> = emptySet(),
     /**
@@ -346,8 +409,10 @@ fun MirrorScreen(
      * otherwise: the display line in the top bar names a device note it doesn't reach.
      */
     onPianoRange: (IntRange?) -> Unit = {},
-    /** REC: records what is played on the phone into a take. */
-    rec: RecUi = RecUi(),
+    /** RECORD and PLAY: the pads played into a pattern that plays on the phone (null hides them). */
+    transport: TransportUi? = null,
+    /** TAKE: records what is played on the phone into a take, from Live tools (null hides it, and the takes). */
+    take: TakeUi? = null,
     takes: TakesUi = TakesUi(),
     /** EDIT: tapping a pad gives it another sound. */
     edit: EditUi = EditUi(),
@@ -383,8 +448,10 @@ fun MirrorScreen(
     val panelOn = sample != null && onBack == null && !keys.on
     // SAMPLE mode, the panel open: the display line grown into it, its header saying what goes on, the pads recording.
     val sampling = panelOn && sample?.state?.on == true
-    // EDIT works on the pads only, and only on the Live tab (where the tab is); SAMPLE's pads record instead.
-    val editing = edit.on && edit.onEdit != null && !keys.on && onBack == null && !sampling
+    // ERASE latched: a pad erases its notes (SAMPLE's pads record instead).
+    val erasing = transport?.erase == true && !sampling
+    // EDIT works on the pads only, and only on the Live tab (where the tab is); SAMPLE's pads record, ERASE's erase, instead.
+    val editing = edit.on && edit.onEdit != null && !keys.on && onBack == null && !sampling && !erasing
     val onEdit = if (editing) edit.onPad else null
     // PROJECT held: the pads printed 1 to 9 pick a project instead of sounding, the rest stay still (ProjectHold).
     val hold = remember { ProjectHold() }
@@ -393,6 +460,11 @@ fun MirrorScreen(
     // The pads whose press went to SAMPLE (held to record, or played beside a take): their kept,
     // release and cut go there too, even if the mode closed meanwhile; the rest stay the player's.
     val samplePressed = remember { HashSet<PhysicalPad>() }
+    // The pads whose press went to ERASE, held; and the unsure ones of the scrolling page, by when they went
+    // down, which erase once kept (a scroll erases nothing).
+    val eraseHeld = remember { HashSet<PhysicalPad>() }
+    val eraseUnsure = remember { HashMap<PhysicalPad, Long>() }
+    // The order a press goes: PROJECT held, SAMPLE, ERASE, then (EDIT's long press too) play.
     val padPress = onPad?.let { f ->
         { pad: PhysicalPad, h: Boolean, unsure: Boolean, at: Long ->
             if (!hold.press(pad, pad.label, functions)) {
@@ -400,6 +472,19 @@ fun MirrorScreen(
                 if (sampling && h) {
                     samplePressed += pad
                     sample?.onPadDown(pad, at, unsure)
+                } else if (erasing && transport != null) {
+                    when {
+                        // A screen reader's click: a tap.
+                        !h -> {
+                            transport.onErasePadDown(pad, at)
+                            transport.onErasePadUp(pad, at)
+                        }
+                        unsure -> eraseUnsure[pad] = at
+                        else -> {
+                            eraseHeld += pad
+                            transport.onErasePadDown(pad, at)
+                        }
+                    }
                 } else {
                     f(pad, h, unsure, at)
                 }
@@ -408,19 +493,65 @@ fun MirrorScreen(
     }
     val padKept = { pad: PhysicalPad ->
         if (!hold.took(pad)) {
-            if (pad in samplePressed) sample?.onPadKept(pad) else onPadKept(pad)
+            val erasedAt = eraseUnsure.remove(pad)
+            when {
+                erasedAt != null -> {
+                    eraseHeld += pad
+                    transport?.onErasePadDown(pad, erasedAt)
+                }
+                pad in samplePressed -> sample?.onPadKept(pad)
+                else -> onPadKept(pad)
+            }
         }
     }
     val padUp = { pad: PhysicalPad, at: Long ->
         if (!hold.release(pad)) {
-            if (samplePressed.remove(pad)) sample?.onPadUp(pad, at) else onPadUp(pad)
+            when {
+                samplePressed.remove(pad) -> sample?.onPadUp(pad, at)
+                eraseHeld.remove(pad) -> transport?.onErasePadUp(pad, at)
+                eraseUnsure.remove(pad) != null -> Unit
+                else -> onPadUp(pad, at)
+            }
         }
     }
     val padCut = { pad: PhysicalPad ->
         if (!hold.release(pad)) {
-            if (samplePressed.remove(pad)) sample?.onPadCut(pad) else onPadCut(pad)
+            when {
+                samplePressed.remove(pad) -> sample?.onPadCut(pad)
+                eraseHeld.remove(pad) -> transport?.onErasePadUp(pad, System.nanoTime())
+                eraseUnsure.remove(pad) != null -> Unit
+                else -> onPadCut(pad)
+            }
         }
     }
+    // ERASE on KEYS: a key erases its note instead of sounding.
+    val keysPlay = if (erasing && keys.on && transport != null) {
+        remember(keysActions, transport) {
+            KeysActions(
+                onMode = keysActions.onMode,
+                onRoot = keysActions.onRoot,
+                onScale = keysActions.onScale,
+                onOctave = keysActions.onOctave,
+                onNote = { note, h, at ->
+                    transport.onEraseNoteDown(note, at)
+                    // A screen reader's click: a tap.
+                    if (!h) transport.onEraseNoteUp(note, at)
+                },
+                // A key held from before ERASE went on still lets go of its note (a lift of one that never sounded is nothing).
+                onNoteUp = { note, at ->
+                    transport.onEraseNoteUp(note, at)
+                    keysActions.onNoteUp(note, at)
+                },
+                onSelect = keysActions.onSelect,
+                onView = keysActions.onView,
+            )
+        }
+    } else {
+        keysActions
+    }
+    // ERASE's dots: the pads with notes.
+    val eraseDots = if (erasing) transport?.notePads else null
+    PatternHaptics(transport, haptics)
     // In the mode the pads light as the EP-133's do: the empty ones blink together (one transition,
     // read as they draw), those with a sound stay lit, the take's lights up.
     val padSampling = if (sampling && sample != null) {
@@ -562,7 +693,7 @@ fun MirrorScreen(
                     OfflinePadsRow(offlinePads, onResetPads)
                     if (keys.on) {
                         KeysPanel(keys, keysActions, piano = piano != null)
-                        if (rec.onRec != null) TakesSection(takes)
+                        if (take != null) TakesSection(takes, take)
                     } else {
                         GridPlate {
                             SettingRow(MirrorText.VIEW, stacked = true) {
@@ -579,7 +710,7 @@ fun MirrorScreen(
                             }
                         }
                         KeysMonitor(st, keys.names)
-                        if (rec.onRec != null) TakesSection(takes)
+                        if (take != null) TakesSection(takes, take)
                         Notes(st, mirror, tapToPlay = onPad != null, sideways = sideways)
                     }
                 },
@@ -596,7 +727,7 @@ fun MirrorScreen(
                 // The display line on the page (not in the top bar). With the SAMPLE panel it grows into the panel, its
                 // words giving way to SAMPLE's header in place ([SampleMorph]); the line itself stays the pads' own.
                 val padsLine: @Composable () -> Unit = {
-                    if (editing) EditLine() else DisplayStrip(st, mirror, rec, still = fixedNow != null, wireless = wireless)
+                    if (editing) EditLine() else DisplayStrip(st, mirror, transport, take, still = fixedNow != null, wireless = wireless)
                 }
                 val sampleNow = sample ?: SampleUi()
                 // The display line growing into the SAMPLE panel over the function keys, upright ([SampleMorph]): laid out as
@@ -642,7 +773,7 @@ fun MirrorScreen(
                 if (piano != null) {
                     Column(sidewaysColumn) {
                         if (!inBar) {
-                            KeysDisplay(st, mirror, keysNow, rec, still = fixedNow != null, pianoRange = piano)
+                            KeysDisplay(st, mirror, keysNow, transport, take, still = fixedNow != null, pianoRange = piano)
                             Spacer(Modifier.height(10.dp))
                         }
                         // A tablet's function keys, then the row over the piano and the piano; upright
@@ -656,7 +787,7 @@ fun MirrorScreen(
                             ModeRow(keys, keysActions, landscape = true, viewSwitch = viewSwitch, mode = !pianoFunctions)
                             // The rest of the room; on a tablet no taller than a hand spans.
                             PianoKeyboard(
-                                piano, st, keysNow, clock, keysActions,
+                                piano, st, keysNow, clock, keysPlay,
                                 Modifier
                                     .fillMaxWidth()
                                     .weight(1f, fill = false)
@@ -689,6 +820,7 @@ fun MirrorScreen(
                                 haptics = haptics,
                                 onSelectGroup = { group = it },
                                 sampling = padSampling,
+                                erase = eraseDots,
                             )
                         }
                         val fnColumn: @Composable () -> Unit = { FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey) }
@@ -737,7 +869,7 @@ fun MirrorScreen(
                     val fnColumn: @Composable () -> Unit = { FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey) }
                     val groups: @Composable (Modifier) -> Unit = { m ->
                         Row(m, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                            for (g in 0..3) Group(g, st, nameOf, now, Modifier.weight(1f).fillMaxHeight(), fill = true, onPad = padPress, onPadKept = padKept, onPadUp = padUp, onPadCut = padCut, playingPads = ringed, onEdit = editPad, haptics = haptics, sampling = padSampling)
+                            for (g in 0..3) Group(g, st, nameOf, now, Modifier.weight(1f).fillMaxHeight(), fill = true, onPad = padPress, onPadKept = padKept, onPadUp = padUp, onPadCut = padCut, playingPads = ringed, onEdit = editPad, haptics = haptics, sampling = padSampling, erase = eraseDots)
                         }
                     }
                     if (panelOn && !inBar) {
@@ -804,7 +936,7 @@ fun MirrorScreen(
                                 // On its side: the keys on the K.O. II's body as big as the room, the function
                                 // keys and the view switch (turned) on their left, the scale and the octave
                                 // on their right.
-                                if (!inBar) KeysDisplay(st, mirror, keysNow, rec, still = fixedNow != null)
+                                if (!inBar) KeysDisplay(st, mirror, keysNow, transport, take, still = fixedNow != null)
                                 BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
                                     val columns = SideFunctions + SidePicks + if (viewSwitch != null) SideLead else 0.dp
                                     val gaps = if (viewSwitch != null) 3 else 2
@@ -816,7 +948,7 @@ fun MirrorScreen(
                                         FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
                                         if (viewSwitch != null) SidewaysKeysLead(viewSwitch)
                                         KeysGrid(
-                                            st, keysNow, now, keysActions,
+                                            st, keysNow, now, keysPlay,
                                             Modifier.width(k.u * (3 * 1.215f + 0.401f) + CapDx + 2.dp).fillMaxHeight()
                                                 .coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
                                             haptics = haptics,
@@ -827,10 +959,10 @@ fun MirrorScreen(
                                     }
                                 }
                             } else if (keys.on) {
-                                if (!inBar) KeysDisplay(st, mirror, keysNow, rec, still = fixedNow != null)
+                                if (!inBar) KeysDisplay(st, mirror, keysNow, transport, take, still = fixedNow != null)
                                 FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
                                 KeysGrid(
-                                    st, keysNow, now, keysActions,
+                                    st, keysNow, now, keysPlay,
                                     Modifier.fillMaxWidth().weight(1f).coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
                                     haptics = haptics,
                                     hold = hold,
@@ -853,6 +985,7 @@ fun MirrorScreen(
                                         onEdit = editPad,
                                         haptics = haptics,
                                         sampling = padSampling,
+                                        erase = eraseDots,
                                     )
                                 }
                                 if (!panelOn) {
@@ -908,7 +1041,7 @@ fun MirrorScreen(
                                 if (editing) {
                                     EditLine()
                                 } else {
-                                    Display(st, mirror, rec, still = fixedNow != null, compact = sideways, noteOpen = noteOpen, onNote = { noteOpen = it }, wireless = wireless, onGetFactory = onGetFactory)
+                                    Display(st, mirror, transport, take, still = fixedNow != null, compact = sideways, noteOpen = noteOpen, onNote = { noteOpen = it }, wireless = wireless, onGetFactory = onGetFactory)
                                 }
                             }
                             val fnRow: @Composable () -> Unit = { FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey) }
@@ -933,7 +1066,7 @@ fun MirrorScreen(
                                     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                                         for (row in (0..3).chunked(perRow)) {
                                             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                                                for (g in row) Group(g, st, nameOf, now, Modifier.weight(1f), onPad = padPress, onPadKept = padKept, onPadUp = padUp, onPadCut = padCut, playingPads = ringed, onEdit = editPad, haptics = haptics, sampling = padSampling)
+                                                for (g in row) Group(g, st, nameOf, now, Modifier.weight(1f), onPad = padPress, onPadKept = padKept, onPadUp = padUp, onPadCut = padCut, playingPads = ringed, onEdit = editPad, haptics = haptics, sampling = padSampling, erase = eraseDots)
                                             }
                                         }
                                     }
@@ -953,7 +1086,7 @@ fun MirrorScreen(
 @Composable
 private fun soundingKeys(keys: KeysUi, sounding: Set<String>?): KeysUi {
     if (sounding == null) return keys
-    val notes = remember(sounding) { LiveVoices.notes(sounding) }
+    val notes = remember(sounding, keys.pad) { LiveVoices.notes(sounding, keys.pad) }
     return remember(keys, notes) { keys.copy(playingNotes = notes) }
 }
 
@@ -1028,7 +1161,9 @@ private val LivePillWindow = 600.dp
 internal fun LivePill(
     mirror: MirrorUi?,
     keys: KeysUi,
-    rec: RecUi = RecUi(),
+    /** RECORD and PLAY, icon-only on the line, and TAKE's badge, as [MirrorScreen] takes them. */
+    transport: TransportUi? = null,
+    take: TakeUi? = null,
     still: Boolean = false,
     pianoRange: IntRange? = null,
     editing: Boolean = false,
@@ -1049,9 +1184,9 @@ internal fun LivePill(
     val keysNow = soundingKeys(keys, voices?.collectAsStateWithLifecycle()?.value)
     val line: @Composable () -> Unit = {
         when {
-            keys.on -> KeysDisplay(st, mirror, keysNow, rec, still, compact = true, pianoRange = pianoRange)
+            keys.on -> KeysDisplay(st, mirror, keysNow, transport, take, still, compact = true, pianoRange = pianoRange)
             editing -> EditLine(compact = true)
-            else -> DisplayStrip(st, mirror, rec, still, compact = true, wireless = wireless)
+            else -> DisplayStrip(st, mirror, transport, take, still, compact = true, wireless = wireless)
         }
     }
     val sampleNow = sample ?: SampleUi()
@@ -1151,28 +1286,37 @@ private fun displayLineSmall(st: MirrorState, mirror: MirrorUi?, wireless: Boole
 /**
  * The one-group view's display as a single dark line: play state, tempo and
  * project on the left, the pad just played (or that the sound plays late) on
- * the right. [compact]: one bar tall, in the top bar ([LivePill]).
+ * the right; the pattern's RECORD and PLAY first, its words in their place
+ * while it is on ([PatternLine]). [compact]: one bar tall, in the top bar
+ * ([LivePill]).
  */
 @Composable
-private fun DisplayStrip(st: MirrorState, mirror: MirrorUi?, rec: RecUi, still: Boolean, compact: Boolean = false, wireless: Boolean = false) {
+private fun DisplayStrip(
+    st: MirrorState,
+    mirror: MirrorUi?,
+    transport: TransportUi?,
+    take: TakeUi?,
+    still: Boolean,
+    compact: Boolean = false,
+    wireless: Boolean = false,
+) {
     val c = LocalArcColors.current
     val main = displayLine(st, mirror, wireless)
-    val transport = when (st.playing) {
+    val played = when (st.playing) {
         true -> MirrorText.PLAYING
         false -> MirrorText.STOPPED
         null -> if (mirror?.offline != null) MirrorText.OFFLINE else null
     }
-    val said = spoken(listOfNotNull(transport, st.bpm?.let(MirrorText::bpm), st.activeProject?.let(MirrorText::project), main).joinToString(", "))
-    DisplayLine(compact = compact) {
-        RecChip(rec, still)
+    val said = spoken(listOfNotNull(played, st.bpm?.let(MirrorText::bpm), st.activeProject?.let(MirrorText::project), main).joinToString(", "))
+    PatternLine(transport, take, still, compact) {
         SpokenLine(said) {
+            // Offline and the project are only said: the top bar and the PROJECT key show them.
             when (st.playing) {
                 true -> Text("\u25B6", style = ArcType.displaySub, color = c.displayInk)
                 false -> Text("\u25A0", style = ArcType.displaySub, color = c.displayDim)
-                null -> if (mirror?.offline != null) Text(MirrorText.OFFLINE, style = ArcType.displaySub, color = c.displayDim, maxLines = 1)
+                null -> Unit
             }
             st.bpm?.let { Text(MirrorText.bpm(it), style = ArcType.displaySub, color = c.displayInk, maxLines = 1) }
-            st.activeProject?.let { Text(MirrorText.projectShort(it), style = ArcType.displaySub, color = c.displayDim, maxLines = 1) }
             Text(
                 main,
                 style = ArcType.displayHead,
@@ -1187,8 +1331,9 @@ private fun DisplayStrip(st: MirrorState, mirror: MirrorUi?, rec: RecUi, still: 
 }
 
 /**
- * The words of a display line, read as one polite live region ([said]). REC
- * sits beside it, not in it, so a screen reader keeps it as a button.
+ * The words of a display line, read as one polite live region ([said]). The
+ * pattern's chips sit beside it, not in it, so a screen reader keeps them as
+ * buttons.
  */
 @Composable
 private fun RowScope.SpokenLine(said: String, content: @Composable RowScope.() -> Unit) {
@@ -1229,12 +1374,15 @@ private fun OfflinePadsRow(count: Int, onReset: () -> Unit) {
  * The all-groups page's display. Offline, why it is stays folded under the
  * word until asked for, so the pads keep the room: [noteOpen] whether it is
  * unfolded, [onNote] a tap on the word asking for it (or folding it again).
+ * The pattern has a row of its own under the big line ([PatternRow]);
+ * TAKE's badge ends the top line while a take records.
  */
 @Composable
 private fun Display(
     st: MirrorState,
     mirror: MirrorUi?,
-    rec: RecUi,
+    transport: TransportUi?,
+    take: TakeUi?,
     still: Boolean,
     compact: Boolean = false,
     noteOpen: Boolean = false,
@@ -1245,9 +1393,8 @@ private fun Display(
     val c = LocalArcColors.current
     val offline = mirror?.offline != null && st.playing == null
     val getFactory = onGetFactory.takeIf { mirror?.error == MirrorText.NOT_CONNECTED }
-    // REC ends the top line, unless the transport fills it on a phone: then the big line below.
-    val recOnTop = st.playing == null
-    DisplayPanel {
+    val track = patternTrack(transport, still, corner = DisplayCorner, inset = 18.dp)
+    DisplayPanel(track.frame) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             if (offline) {
                 Row(
@@ -1262,16 +1409,18 @@ private fun Display(
                     Text(if (noteOpen) "\u25B4" else "\u25BE", style = ArcType.displaySub, color = c.displayDim)
                 }
             } else {
-                val transport = when (st.playing) {
-                    true -> "\u25B6 " + MirrorText.PLAYING
-                    false -> "\u25A0 " + MirrorText.STOPPED
+                // The device's own ▶/■ gives way while the pattern runs, so only PLAY's chip reads as one.
+                val glyph = transport?.phase.let { it == null || it == TransportPhase.STOPPED || it == TransportPhase.ARMED }
+                val played = when (st.playing) {
+                    true -> (if (glyph) "\u25B6 " else "") + MirrorText.PLAYING
+                    false -> (if (glyph) "\u25A0 " else "") + MirrorText.STOPPED
                     null -> ""
                 }
-                Text(transport, style = ArcType.displayHead, color = c.displayInk, modifier = Modifier.weight(1f))
+                Text(played, style = ArcType.displayHead, color = c.displayInk, modifier = Modifier.weight(1f))
             }
             st.bpm?.let { Text(MirrorText.bpm(it), style = ArcType.displaySub, color = c.displayInk) }
             st.activeProject?.let { Text(MirrorText.project(it), style = ArcType.displaySub, color = c.displayDim) }
-            if (recOnTop) RecChip(rec, still)
+            if (take != null && take.state != RecState.Idle) TakeBadge(take, compact = false, steady = still)
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -1283,8 +1432,8 @@ private fun Display(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            if (!recOnTop) RecChip(rec, still)
         }
+        if (transport != null) PatternRow(transport, track.beat, still)
         // The one-group view keeps to one screen; the all-groups view explains clock out.
         when {
             compact -> Unit
@@ -1330,6 +1479,8 @@ private fun Group(
     onSelectGroup: ((Int) -> Unit)? = null,
     /** SAMPLE mode: the pads' lights, and a screen reader's click latching a take. */
     sampling: PadSampling? = null,
+    /** ERASE: the pads with notes, dotted (the rest dimmed); null out of it. */
+    erase: Set<PhysicalPad>? = null,
 ) {
     val c = LocalArcColors.current
     val lit = st.pads.filterKeys { it.group == group }
@@ -1352,6 +1503,7 @@ private fun Group(
                 sampleLed = sampling?.led?.invoke(pad),
                 blink = sampling?.blink,
                 onLatch = sampling?.onLatch?.let { f -> { f(pad) } },
+                noteDot = erase?.let { pad in it },
             )
         }
         val groupKeys: (@Composable (KoGeom) -> Unit)? = onSelectGroup?.let { select ->
@@ -1385,6 +1537,7 @@ private fun Group(
                             sampleLed = sampling?.led?.invoke(pad),
                             blink = sampling?.blink,
                             onLatch = sampling?.onLatch?.let { f -> { f(pad) } },
+                            noteDot = erase?.let { pad in it },
                         )
                     }
                 }
@@ -1661,6 +1814,8 @@ private fun Pad(
     sampleLed: SampleLed? = null,
     blink: androidx.compose.runtime.State<Float>? = null,
     onLatch: (() -> Unit)? = null,
+    /** ERASE ([eraseDot]): true with notes to erase, false without; null out of it. */
+    noteDot: Boolean? = null,
 ) {
     val c = LocalArcColors.current
     val hw = LocalHwColors.current
@@ -1735,6 +1890,8 @@ private fun Pad(
         .sampleRing(sampleLed, blink, c.signal, shape)
         // Playing on the phone, or EDIT on: a signal-orange ring inside the pad.
         .then(if (playing || onEdit != null) Modifier.border(2.dp, c.signal, shape) else Modifier)
+        // ERASE: a dot on a pad with notes (pale on a lit pad), the rest dimmed.
+        .eraseDot(noteDot, if (g > 0.3f) c.onSignal else c.signal)
         .then(
             when {
                 // EDIT: a tap opens the pad sheet; held, it still plays.
@@ -1753,7 +1910,11 @@ private fun Pad(
                 )
                 // Both play on touch-down. The all-groups page scrolls, so there a press that
                 // turns into a drag across the pads is cut short.
-                onPress != null -> holdToPlay(onPress, onRelease, onKept = onKept, onCut = onCut, inScroll = inScroll, held = held, haptics = haptics)
+                // ERASE: a screen reader's click erases the pad's notes instead of playing it.
+                onPress != null -> holdToPlay(
+                    onPress, onRelease, onKept = onKept, onCut = onCut, inScroll = inScroll, held = held, haptics = haptics,
+                    clickLabel = if (noteDot != null) MirrorText.ERASE else MirrorText.PLAY,
+                )
                 else -> Modifier
             },
         )
@@ -1764,7 +1925,8 @@ private fun Pad(
                     SampleLed.RECORDING -> MirrorText.PAD_RECORDING
                     SampleLed.WAITING -> MirrorText.PAD_WAITING
                     else -> MirrorText.padSampleState(name != null)
-                }
+                } +
+                if (noteDot == true) MirrorText.PAD_HAS_NOTES else ""
         }
         .padding(
             when {
@@ -2310,12 +2472,22 @@ private val ListPadding = 8.dp
 
 /**
  * The KEYS display line: KEYS and the last note on the left, the sound it
- * plays on the right. [compact]: one bar tall, in the top bar ([LivePill]),
+ * plays on the right, after the pattern's RECORD and PLAY, its words in
+ * their place while it is on ([PatternLine]). [compact]: one bar tall, in the top bar ([LivePill]),
  * where the mode word is right under it. A device note past the piano's ends
  * ([pianoRange]) is named as such: there's no key to light for it.
  */
 @Composable
-private fun KeysDisplay(st: MirrorState, mirror: MirrorUi?, keys: KeysUi, rec: RecUi, still: Boolean, compact: Boolean = false, pianoRange: IntRange? = null) {
+private fun KeysDisplay(
+    st: MirrorState,
+    mirror: MirrorUi?,
+    keys: KeysUi,
+    transport: TransportUi?,
+    take: TakeUi?,
+    still: Boolean,
+    compact: Boolean = false,
+    pianoRange: IntRange? = null,
+) {
     val c = LocalArcColors.current
     val note = keys.playingNotes.lastOrNull() ?: st.lastNote
     val noteText = note?.let { n ->
@@ -2332,14 +2504,12 @@ private fun KeysDisplay(st: MirrorState, mirror: MirrorUi?, keys: KeysUi, rec: R
     // never squeezes out the sound's name.
     BoxWithConstraints {
         val noteMax = if (compact) maxWidth / 2 else Dp.Unspecified
-        DisplayLine(compact = compact) {
-            RecChip(rec, still)
+        PatternLine(transport, take, still, compact) {
             SpokenLine(said) {
                 if (!compact) Text(MirrorText.MODE_KEYS.uppercase(), style = ArcType.displaySub, color = c.displayDim, maxLines = 1)
                 noteText?.let {
                     Text(it, style = ArcType.displaySub, color = c.displayInk, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = noteMax))
                 }
-                offline?.let { Text(it, style = ArcType.displaySub, color = c.displayDim, maxLines = 1) }
                 Text(
                     sound,
                     style = ArcType.displayHead,
@@ -2379,11 +2549,11 @@ private fun KeysGrid(
     // Each key is a finger of its own, holding the note it had when pressed: a new key,
     // scale or octave under a held key still lets go of the note that sounds.
     val touches = remember { NoteTouches() }
-    // [at]: when the finger came down, for the presses among [events].
+    // [at]: when the finger came down or left, for the presses and releases among [events].
     fun play(events: List<NoteEvent>, at: Long = System.nanoTime()) = events.forEach { e ->
         when (e) {
             is NoteEvent.Press -> actions.onNote(e.note, true, at)
-            is NoteEvent.Release -> actions.onNoteUp(e.note)
+            is NoteEvent.Release -> actions.onNoteUp(e.note, at)
         }
     }
     // How lit each key is: the brightest device note that falls on it.
@@ -2421,7 +2591,7 @@ private fun KeysGrid(
                                 else -> actions.onNote(notes[o], false, at)
                             }
                         },
-                        { _ -> if (hold?.release(keysKey(o)) != true) play(touches.up(o.toLong())) },
+                        { at -> if (hold?.release(keysKey(o)) != true) play(touches.up(o.toLong()), at) },
                         held = held,
                         haptics = haptics,
                     ),
@@ -2789,58 +2959,31 @@ private fun tapToEdit(
 }
 
 /**
- * REC on the display line: a dot and the word, dim while off. Armed, the dot
- * blinks until the first sound; recording, it is lit and the time runs.
- * [still] keeps it from blinking (screenshots).
+ * Live tools' takes: the TAKE key, which starts a take (it records from the
+ * first sound) and stops it, its time on it while it records; then the
+ * takes, each of which plays, and unfolds to share, save, send to the EP-133
+ * or delete. How to record and what a take holds wait behind the info key
+ * after TAKES.
  */
 @Composable
-private fun RecChip(rec: RecUi, still: Boolean) {
-    val onRec = rec.onRec ?: return
-    val c = LocalArcColors.current
-    val on = rec.state != RecState.Idle
-    val blink = if (rec.state == RecState.Armed && !still) {
-        val t = androidx.compose.animation.core.rememberInfiniteTransition(label = "rec")
-        t.animateFloat(
-            1f,
-            0.15f,
-            androidx.compose.animation.core.infiniteRepeatable(
-                androidx.compose.animation.core.tween(450),
-                androidx.compose.animation.core.RepeatMode.Reverse,
-            ),
-            label = "rec",
-        ).value
-    } else {
-        1f
-    }
-    Row(
-        Modifier
-            // In the top bar, on a phone on its side, the guide overlay's tags keep off it.
-            .coachClear("live.rec")
-            .clip(RoundedCornerShape(8.dp))
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = onRec)
-            .semantics(mergeDescendants = true) { contentDescription = MirrorText.recDescription(rec.state) }
-            .border(1.dp, if (on) c.signal else c.displayDim.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        Canvas(Modifier.size(10.dp)) { drawCircle(if (on) c.signal.copy(alpha = blink) else c.displayDim) }
-        val label = (rec.state as? RecState.Recording)?.let { MirrorText.takeLength(it.seconds.toDouble()) } ?: MirrorText.REC.uppercase()
-        Text(label, style = ArcType.displaySub, color = if (on) c.displayInk else c.displayDim, maxLines = 1)
-    }
-}
-
-/**
- * Live tools' takes: each plays, and unfolds to share, save, send to the
- * EP-133 or delete. How to record and what a take holds wait behind the info
- * key after TAKES.
- */
-@Composable
-private fun TakesSection(t: TakesUi) {
+private fun TakesSection(t: TakesUi, take: TakeUi) {
     val c = LocalArcColors.current
     var open by rememberSaveable { mutableStateOf<String?>(null) }
     var confirm by rememberSaveable { mutableStateOf<String?>(null) }
-    CaptionInfo(MirrorText.TAKES, listOf(MirrorText.NO_TAKES, MirrorText.TAKES_NOTE))
+    CaptionInfo(MirrorText.TAKES, listOf(MirrorText.TAKES_HINT, MirrorText.TAKES_NOTE))
+    val recording = take.state as? RecState.Recording
+    ArcKey(
+        "\u25CF " + (recording?.let { MirrorText.takeBadge(it.seconds.toDouble()) } ?: MirrorText.TAKE),
+        take.onTake,
+        Modifier
+            .fillMaxWidth()
+            .semantics(mergeDescendants = true) {
+                contentDescription = MirrorText.takeDescription(take.state)
+                stateDescription = MirrorText.onOff(take.state != RecState.Idle)
+            },
+        style = if (take.state != RecState.Idle) KeyStyle.Signal else KeyStyle.Normal,
+        size = KeySize.Small,
+    )
     for (take in t.list) {
         val playing = t.playing == t.keyOf(take)
         val unfolded = open == take.name

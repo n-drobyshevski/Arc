@@ -481,4 +481,158 @@ class VoiceMixerTest {
         assertTrue(out.all { it <= 700 })
         assertEquals(0, out[VoiceMixer.CHOKE_MS])
     }
+
+    // Timed commands (an addition): the pattern sequencer's notes, each on its frame.
+
+    @Test
+    fun `a timed start lands on its frame inside the render`() {
+        val m = mixer()
+        render(m, 16)
+        m.start("a", steady(100), 1, 1000, tag = -1, at = 20)
+        val out = left(render(m, 16))
+        assertEquals(List(4) { 0 } + List(12) { 1000 }, out)
+        assertEquals(listOf(VoiceMixer.Started("a", -1, 20)), m.started)
+        assertEquals(setOf("a"), m.keys)
+        assertEquals(32L, m.frame)
+    }
+
+    @Test
+    fun `a timed start on the render's end waits for the next one`() {
+        val m = mixer()
+        m.start("a", steady(100), 1, 1000, at = 16)
+        assertEquals(List(16) { 0 }, left(render(m, 16)))
+        assertEquals(emptyList<VoiceMixer.Started>(), m.started)
+        assertEquals(1000, left(render(m, 1))[0])
+        assertEquals(listOf(VoiceMixer.Started("a", 0, 16)), m.started)
+    }
+
+    @Test
+    fun `a late timed start plays at the render's start, after the commands that aren't timed`() {
+        val m = mixer()
+        render(m, 16)
+        m.start("late", steady(100, 1000), 1, 1000, tag = -1, at = 3)
+        m.start("now", steady(100, 2000), 1, 1000, tag = 5)
+        assertEquals(3000, left(render(m, 1))[0])
+        assertEquals(listOf(VoiceMixer.Started("now", 5, 16), VoiceMixer.Started("late", -1, 16)), m.started)
+    }
+
+    @Test
+    fun `timed commands at one frame keep their order`() {
+        val m = mixer()
+        // The second start of the key cuts the first: the order they were sent in.
+        m.start("a", steady(100, 1000), 1, 1000, tag = 1, at = 4)
+        m.start("a", steady(100, 2000), 1, 1000, tag = 2, at = 4)
+        m.start("b", steady(100, 10), 1, 1000, tag = 3, at = 2)
+        render(m, 8)
+        assertEquals(listOf(2L to 3L, 4L to 1L, 4L to 2L), m.started.map { it.frame to it.tag })
+        assertEquals(2010, left(render(m, 8))[VoiceMixer.CHOKE_MS + 1])
+    }
+
+    @Test
+    fun `a timed release lets go at its frame`() {
+        val m = mixer()
+        m.start("a", steady(1000), 1, 1000)
+        render(m, 100)
+        m.release("a", at = 110)
+        val out = left(render(m, 40))
+        assertEquals(1000, out[9])
+        assertEquals(1000, out[10])
+        assertEquals(0, out[10 + VoiceMixer.FADE_MS + 1])
+    }
+
+    @Test
+    fun `a tagged release lets go of only the voice started with that tag`() {
+        val m = mixer()
+        m.start("p", steady(1000, 1000), 1, 1000, tag = -5, at = 0)
+        render(m, 8)
+        // A press of the same pad takes over; the sequencer's note-off leaves it alone.
+        m.start("p", steady(1000, 2000), 1, 1000, tag = 77)
+        m.release("p", at = 10, tag = -5)
+        val out = left(render(m, 200))
+        assertEquals(2000, out[199])
+        assertEquals(setOf("p"), m.keys)
+        m.release("p", tag = 77)
+        render(m, 200)
+        assertEquals(emptySet<String>(), m.keys)
+    }
+
+    @Test
+    fun `a tagged release takes one of a key-mode key's voices`() {
+        val m = mixer()
+        val key = VoiceShape(mode = VoiceMode.KEY)
+        m.start("k", steady(1000, 1000), 1, 1000, tag = -1, shape = key)
+        m.start("k", steady(1000, 300), 1, 1000, tag = 9, shape = key)
+        m.release("k", at = 0, tag = -1)
+        val out = left(render(m, 200))
+        assertEquals(1300, out[0])
+        assertEquals(300, out[199])
+    }
+
+    @Test
+    fun `a legato press carrying on the sequencer's voice takes its tag`() {
+        val m = mixer()
+        val legato = VoiceShape(mode = VoiceMode.LEGATO)
+        val sound = steady(1000)
+        m.start("l", sound, 1, 1000, tag = -7, shape = legato, at = 0)
+        render(m, 8)
+        m.start("l", sound, 1, 1000, semitones = 12, tag = 12, shape = legato)
+        // The sequencer's note-off finds no voice of its own.
+        m.release("l", at = 10, tag = -7)
+        render(m, 200)
+        assertEquals(setOf("l"), m.keys)
+    }
+
+    @Test
+    fun `a timed start chokes its mute group on its frame`() {
+        val m = mixer()
+        m.start("open", steady(1000, 1000), 1, 1000, shape = VoiceShape(muteGroup = 1))
+        render(m, 8)
+        m.start("closed", steady(1000, 2000), 1, 1000, shape = VoiceShape(muteGroup = 1), at = 12)
+        val out = left(render(m, 16))
+        assertEquals(1000, out[3])
+        // Both while the open one chokes, then the closed one alone.
+        assertTrue(out[4] in 2001..3000)
+        assertEquals(2000, out[4 + VoiceMixer.CHOKE_MS + 1])
+    }
+
+    @Test
+    fun `flushTimed drops what waits, not what is sent after it`() {
+        val m = mixer()
+        m.start("a", steady(100, 1000), 1, 1000, at = 40)
+        render(m, 16)
+        m.start("b", steady(100, 2000), 1, 1000, at = 20)
+        m.flushTimed()
+        m.start("c", steady(100, 4000), 1, 1000, at = 24)
+        val out = left(render(m, 32))
+        assertEquals(0, out[7])
+        assertEquals(4000, out[8])
+        assertEquals(4000, out[31])
+        assertEquals(listOf("c"), m.started.map { it.key })
+    }
+
+    @Test
+    fun `a render split by timed commands plays as renders split at their frames`() {
+        val pcm = ShortArray(3000) { ((it * 7919) % 20000 - 10000).toShort() }
+        val shape = VoiceShape(attackMs = 7, releaseMs = 40, pan = 3)
+        val timed = VoiceMixer(44100)
+        timed.start("a", pcm, 1, 46875, 3, tag = -1, shape = shape, at = 37)
+        timed.start("b", pcm, 1, 46875, -5, tag = -2, at = 100)
+        timed.release("a", at = 3000, tag = -1)
+        val one = ShortArray(4096 * 2).also { timed.render(it, 4096) }
+        val split = VoiceMixer(44100)
+        val parts = ShortArray(4096 * 2)
+        fun part(from: Int, to: Int) {
+            val out = ShortArray((to - from) * 2)
+            split.render(out, to - from)
+            out.copyInto(parts, from * 2)
+        }
+        part(0, 37)
+        split.start("a", pcm, 1, 46875, 3, tag = -1, shape = shape)
+        part(37, 100)
+        split.start("b", pcm, 1, 46875, -5, tag = -2)
+        part(100, 3000)
+        split.release("a")
+        part(3000, 4096)
+        assertArrayEquals(parts, one)
+    }
 }

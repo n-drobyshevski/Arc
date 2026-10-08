@@ -110,4 +110,26 @@ class AppSettingsTest {
         assertEquals(LiveEngine.AUTO, liveEngineOf("track"))
         assertEquals("liveEngine", LIVE_ENGINE)
     }
+
+    @Test
+    fun `PATTERN starts on 1-16 with the count-in on and AUTO off, and PTN off`() {
+        val d = AppSettings()
+        assertEquals(dev.arc.ep133.features.Timing.SIXTEENTH, d.patternTiming)
+        assertTrue(d.patternCountIn)
+        assertFalse(d.patternAutoLength)
+        assertFalse(d.samplePattern)
+        assertEquals("1/16", d.values()["patternTiming"])
+    }
+
+    @Test
+    fun `PATTERN's choices round-trip through library json, TIMING by its word`() {
+        for (t in dev.arc.ep133.features.Timing.entries) {
+            val chosen = AppSettings(patternTiming = t, patternCountIn = false, patternAutoLength = true, samplePattern = true)
+            assertEquals(chosen, AppSettings().withIndex(chosen.values().mapKeys { "app." + it.key }))
+        }
+        assertEquals("off", AppSettings(patternTiming = dev.arc.ep133.features.Timing.OFF).values()["patternTiming"])
+        // A grid arc doesn't offer, or a switch that isn't one: left as they are.
+        val odd = mapOf("app.patternTiming" to "1/12", "app.patternCountIn" to "no", "app.samplePattern" to "1")
+        assertEquals(AppSettings(), AppSettings().withIndex(odd))
+    }
 }

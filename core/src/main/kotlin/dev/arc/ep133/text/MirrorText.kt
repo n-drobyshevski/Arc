@@ -6,6 +6,9 @@ import dev.arc.ep133.features.PadNotes
 import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.ProjectSource
 import dev.arc.ep133.features.SampleSource
+import dev.arc.ep133.features.Timing
+import dev.arc.ep133.features.TransportPhase
+import dev.arc.ep133.features.TransportState
 import dev.arc.ep133.util.jsToFixed
 
 /** Text for the live mirror (an addition to the web version). */
@@ -421,22 +424,15 @@ object MirrorText {
         if (skipped == 0) "" else " $skipped skipped: the EP-133 has another sound or project there now."
     const val OFFLINE_DISCARDED = "Offline pad changes discarded."
 
-    // ---------- REC: takes of what is played on the phone ----------
+    // ---------- TAKE: takes of what is played on the phone ----------
+    /** SAMPLE's take going on, for screen readers ("Pad A 1, Rec"). */
     const val REC = "Rec"
     const val TAKES = "Takes"
-    const val NO_TAKES = "Tap REC on the display, then play: recording starts with the first sound and stops when you tap REC again."
     const val TAKES_NOTE = "A take holds the pads and keys played on the phone, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save or Share copies one out."
     const val TO_DEVICE = "To EP-133"
     const val DELETE_TAKE = "Delete this take?"
     const val NO_OUTPUT = "There is no sound output to record from."
     const val SHARE_TAKE_FAILED = "Sharing failed. Use Save WAV instead."
-
-    /** What the REC key does now, for screen readers. */
-    fun recDescription(state: dev.arc.ep133.features.RecState) = when (state) {
-        dev.arc.ep133.features.RecState.Idle -> "Record. Recording starts with the first sound you play."
-        dev.arc.ep133.features.RecState.Armed -> "Record, waiting for the first sound. Tap to cancel."
-        is dev.arc.ep133.features.RecState.Recording -> "Recording, ${takeLength(state.seconds.toDouble())}. Tap to stop."
-    }
 
     /** "0:12", "10:00". */
     fun takeLength(seconds: Double): String {
@@ -450,6 +446,20 @@ object MirrorText {
         "The take reached ${dev.arc.ep133.features.TakeRecorder.MAX_SECONDS / 60} minutes and was saved (${takeLength(seconds)})."
 
     fun takeFailed(reason: String) = "The take couldn't be saved: $reason"
+
+    // REC is called TAKE now that RECORD is the pattern's, as on the device; it moves to Live tools.
+    const val TAKE = "Take"
+    const val TAKES_HINT = "Tap TAKE, then play: recording starts with the first sound and stops when you tap TAKE again."
+
+    /** What the TAKE key does now, for screen readers. */
+    fun takeDescription(state: dev.arc.ep133.features.RecState) = when (state) {
+        dev.arc.ep133.features.RecState.Idle -> "Take. Recording starts with the first sound you play."
+        dev.arc.ep133.features.RecState.Armed -> "Take, waiting for the first sound. Tap to cancel."
+        is dev.arc.ep133.features.RecState.Recording -> "Recording a take, ${takeLength(state.seconds.toDouble())}. Tap to stop."
+    }
+
+    /** "Take 0:12" (upper-cased where shown), by the display line while a take records; a tap stops it. */
+    fun takeBadge(seconds: Double) = "$TAKE ${takeLength(seconds)}"
 
     // ---------- SAMPLE: recording into a pad (an addition) ----------
     /** The sources' words, upper-cased where shown, as the device prints them. */
@@ -582,4 +592,92 @@ object MirrorText {
     const val KEPT_IN_TAKES = "Kept in Takes: read a project on the EP-133 to put samples on pads."
     /** "2 samples kept in Takes.", after offline recordings were discarded or reset: never dropped. */
     fun samplesToTakes(n: Int) = "${Format.plural(n, "sample")} kept in Takes."
+
+    /** SAMPLE's BARS choice for a take as long as the pattern (upper-cased where shown: "PTN"). */
+    const val PTN = "Ptn"
+    const val PTN_NAME = "The pattern's length"
+    const val PTN_NOTE = "Records as long as the longest pattern, from its start: at once when stopped, else from the next loop."
+
+    // ---------- PATTERN: the pads played into a looping pattern with RECORD and PLAY, as on the device ----------
+    // PLAY, UNDO and LENGTH are the words above; a running pattern's key reads STOP ([FeatureText.STOP]).
+    /** The sheet held RECORD opens. */
+    const val PATTERN = "Pattern"
+    const val RECORD = "Record"
+    const val ERASE = "Erase"
+    const val TIMING = "Timing"
+    const val COUNT_IN = "Count-in"
+    const val COUNT_IN_NOTE = "RECORD then PLAY counts a bar in. RECORD and PLAY together start at once."
+    /** AUTO length: a pattern recorded from stop into an empty group ends where you stop. */
+    const val AUTO = "Auto"
+    const val AUTO_NOTE = "An empty group recorded from stop ends where you stop: 1, 2, 4 or 8 bars."
+    const val CLEAR = "Clear"
+    const val CLEAR_ALL = "Clear all"
+    /** SHIFT + + on the device: twice as long, the notes copied in. [DOUBLE_NAME] for screen readers. */
+    const val DOUBLE = "\u00D72"
+    const val DOUBLE_NAME = "Double the length"
+    /** The − and + either side of a group's length. */
+    const val SHORTER = "Shorter"
+    const val LONGER = "Longer"
+    const val PATTERN_NOTE = "Patterns stay in arc and play on the phone."
+
+    /** "2.3 / 4": bar 2, beat 3 of a 4-bar pattern, on the display line while it runs. */
+    fun patternPosition(bar: Int, beat: Int, bars: Int) = "$bar.$beat / $bars"
+
+    /** "2.3 / 4 \u00B7 1/16" while recording: the grid the notes snap to as well. */
+    fun patternRecording(bar: Int, beat: Int, bars: Int, timing: Timing) = "${patternPosition(bar, beat, bars)} \u00B7 ${timingLabel(timing)}"
+
+    /** "/ 4" beside the count-in's big digit ([countIn] for screen readers). */
+    fun countInOf(beats: Int) = "/ $beats"
+
+    /** "Play a pad or PLAY \u00B7 1/16" on the display line while RECORD is armed: what starts it (a pad at once, PLAY after the count-in), and the grid. */
+    fun patternArmed(timing: Timing) = "Play a pad or PLAY \u00B7 ${timingLabel(timing)}"
+
+    /** TIMING's choices: Off, 1/8, 1/16, 1/32. */
+    fun timingLabel(t: Timing) = if (t == Timing.OFF) onOff(false) else t.id
+
+    /** A TIMING choice for screen readers. */
+    fun timingName(t: Timing) = if (t == Timing.OFF) "Timing off: notes stay where you play them" else "Timing ${t.id}: notes snap to the nearest ${t.id}"
+
+    /** "A \u00B7 2 bars", a group's length in the sheet; "Group A, 2 bars" for screen readers. */
+    fun groupLength(group: Int, bars: Int) = "${'A' + group} \u00B7 ${Format.plural(bars, "bar")}"
+    fun groupLengthName(group: Int, bars: Int) = "Group ${'A' + group}, ${Format.plural(bars, "bar")}"
+
+    /** CLEAR asks in the sheet: one group's notes, or every group's. */
+    fun clearAsk(group: Int?) = if (group == null) "Clear every group's notes?" else "Clear group ${'A' + group}'s notes?"
+    fun cleared(group: Int?) = if (group == null) "Patterns cleared." else "Group ${'A' + group} cleared."
+
+    /** ERASE on: what a pad does now. */
+    const val ERASE_NOTE = "Tap a pad to erase its notes. Hold one while the pattern plays to erase it as it passes."
+    /** "Pad A 7: notes erased.", after a tap in ERASE. */
+    fun erased(pad: PhysicalPad) = "${padTitle(pad)}: notes erased."
+    /** Added to a pad's name for screen readers in ERASE. */
+    const val PAD_HAS_NOTES = ", has notes"
+
+    /** "3 pads not loaded": pads the pattern plays whose sounds aren't on the phone yet. */
+    fun missingPads(n: Int) = "${Format.plural(n, "pad")} not loaded"
+    const val MISSING_NOTE = "Their sounds aren't on the phone yet. They play once arc has them."
+
+    /** The RECORD key for screen readers: "Record, armed". */
+    fun recordDescription(state: TransportState) = "$RECORD, " + when {
+        state.phase == TransportPhase.ARMED || state.phase == TransportPhase.COUNT_IN && state.recording -> "armed"
+        state.recording -> "recording"
+        else -> "off"
+    }
+    /** What a hold on RECORD does, for screen readers. */
+    const val RECORD_HOLD = "Pattern settings"
+
+    /** The PLAY key for screen readers: "Play, bar 2 of 4". */
+    fun playDescription(state: TransportState, bar: Int, bars: Int) = when (state.phase) {
+        TransportPhase.STOPPED, TransportPhase.ARMED -> PLAY
+        TransportPhase.COUNT_IN -> "$PLAY, counting in"
+        TransportPhase.PLAYING -> "$PLAY, bar $bar of $bars"
+    }
+
+    /** Said once when the transport changes: "Record armed", "Counting in", "Recording", "Playing", "Stopped". */
+    fun transportAnnouncement(state: TransportState) = when (state.phase) {
+        TransportPhase.STOPPED -> STOPPED
+        TransportPhase.ARMED -> "Record armed"
+        TransportPhase.COUNT_IN -> "Counting in"
+        TransportPhase.PLAYING -> if (state.recording) "Recording" else PLAYING
+    }
 }

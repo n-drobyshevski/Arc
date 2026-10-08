@@ -10,6 +10,7 @@ import dev.arc.ep133.features.Piano
 import dev.arc.ep133.features.SampleSource
 import dev.arc.ep133.features.Scale
 import dev.arc.ep133.features.Tempo
+import dev.arc.ep133.features.Timing
 import dev.arc.ep133.text.LiveEngine
 import dev.arc.ep133.text.ThemeChoice
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -69,6 +70,14 @@ data class AppSettings(
     /** The review's switches, kept for the next take (and used as they are with [reviewSamples] off). */
     val sampleNormalize: Boolean = false,
     val sampleTrimSilence: Boolean = false,
+    /** SAMPLE's BARS on PTN: a hands-free take lasts the pattern's length, from its next loop start (with notes in the project only). */
+    val samplePattern: Boolean = false,
+    /** PATTERN's TIMING (an addition, the device's quantize): 1/16 as on the device. */
+    val patternTiming: Timing = Timing.DEFAULT,
+    /** RECORD then PLAY counts a bar in first. */
+    val patternCountIn: Boolean = true,
+    /** AUTO length: an empty group recorded from stop ends where recording stops (1, 2, 4 or 8 bars). */
+    val patternAutoLength: Boolean = false,
 ) {
     /** SAMPLE's LEVEL for [source], in dB. */
     fun sampleGain(source: SampleSource): Float = when (source) {
@@ -142,6 +151,10 @@ class SettingsStore internal constructor(private val prefs: SharedPreferences) {
         reviewSamples = prefs.getBoolean("reviewSamples", true),
         sampleNormalize = prefs.getBoolean("sampleNormalize", false),
         sampleTrimSilence = prefs.getBoolean("sampleTrimSilence", false),
+        samplePattern = prefs.getBoolean("samplePattern", false),
+        patternTiming = Timing.of(prefs.getString("patternTiming", null) ?: "") ?: Timing.DEFAULT,
+        patternCountIn = prefs.getBoolean("patternCountIn", true),
+        patternAutoLength = prefs.getBoolean("patternAutoLength", false),
     )
 
     fun update(change: (AppSettings) -> AppSettings) {
@@ -158,7 +171,7 @@ class SettingsStore internal constructor(private val prefs: SharedPreferences) {
             }
             for ((k, v) in changed) {
                 when (k) {
-                    "theme", "keysScale", "keysNames", "keysViewWide", "keysViewTall", "sampleSource", "sampleThreshold" -> putString(k, v)
+                    "theme", "keysScale", "keysNames", "keysViewWide", "keysViewTall", "sampleSource", "sampleThreshold", "patternTiming" -> putString(k, v)
                     "keepLast", "keysRoot", "keysOctave", "pianoWhites", "liveTempo", "sampleBars" -> putInt(k, v.toInt())
                     "sampleGainMic", "sampleGainRsp", "sampleGainUsb" -> putFloat(k, v.toFloat())
                     else -> putBoolean(k, v.toBooleanStrict())
@@ -224,6 +237,11 @@ internal fun AppSettings.values(): Map<String, String> = linkedMapOf(
     "reviewSamples" to reviewSamples.toString(),
     "sampleNormalize" to sampleNormalize.toString(),
     "sampleTrimSilence" to sampleTrimSilence.toString(),
+    "samplePattern" to samplePattern.toString(),
+    // TIMING's word: "off", "1/8", "1/16" or "1/32".
+    "patternTiming" to patternTiming.id,
+    "patternCountIn" to patternCountIn.toString(),
+    "patternAutoLength" to patternAutoLength.toString(),
 )
 
 /** These settings with what library.json held ("app.*" keys) taken back; anything missing or unreadable stays as it is. */
@@ -271,4 +289,8 @@ internal fun AppSettings.withIndex(map: Map<String, String>): AppSettings = copy
     reviewSamples = map["app.reviewSamples"]?.toBooleanStrictOrNull() ?: reviewSamples,
     sampleNormalize = map["app.sampleNormalize"]?.toBooleanStrictOrNull() ?: sampleNormalize,
     sampleTrimSilence = map["app.sampleTrimSilence"]?.toBooleanStrictOrNull() ?: sampleTrimSilence,
+    samplePattern = map["app.samplePattern"]?.toBooleanStrictOrNull() ?: samplePattern,
+    patternTiming = map["app.patternTiming"]?.let(Timing::of) ?: patternTiming,
+    patternCountIn = map["app.patternCountIn"]?.toBooleanStrictOrNull() ?: patternCountIn,
+    patternAutoLength = map["app.patternAutoLength"]?.toBooleanStrictOrNull() ?: patternAutoLength,
 )

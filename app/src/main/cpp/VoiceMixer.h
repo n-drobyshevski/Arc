@@ -24,8 +24,12 @@
 // - [keysVersion] counts changes of [keys] (Kotlin: a new set object).
 // - [reset] starts over at another output rate (the stream reopened on a new
 //   device), keeping the frame count.
-// - Each voice counts itself on its Sample (Sample::voices), so the engine
-//   knows when a sound let go of is no longer read.
+// - Each voice counts itself on its Sample (Sample::voices), and so does each
+//   timed start waiting for its frame (Sample::pending), so the engine knows
+//   when a sound let go of is no longer read.
+// - Timed commands wait in fixed storage too: at most MAX_PENDING, kept in
+//   order by insertion; one that finds it full is applied at once, as if it
+//   came late (Kotlin keeps any number).
 //
 // Commands take effect at the next [render]; one thread calls everything.
 #pragma once
@@ -66,6 +70,8 @@ struct Sample {
     int32_t channels = 1;
     /** Voices reading it (the mixer's thread only). */
     int32_t voices = 0;
+    /** Timed starts waiting in a mixer to read it (the mixer's thread only). */
+    int32_t pending = 0;
     /** Let go of by the app: freed once no voice reads it (the mixer's thread only). */
     bool unloaded = false;
 
@@ -91,6 +97,10 @@ public:
     static constexpr int MAX_KEYS = 32;
     static constexpr int MAX_STARTED = 64;
     static constexpr int MAX_COMMANDS = 256;
+    /** Timed commands waiting for their frame. */
+    static constexpr int MAX_PENDING = 256;
+    /** A command's frame when it isn't timed: it takes effect at the next [render]'s start. */
+    static constexpr int64_t NOW = INT64_MIN;
 
     /** A voice that began in the last [render]: its [tag] (the caller's), at output frame [frame]. */
     struct Started {
@@ -109,24 +119,37 @@ public:
     /**
      * Plays [sample] (read at [sampleRate], [pitch] times faster: Kotlin's
      * VoiceMixer.pitchRatio) as voice [key], shaped by [shape], until
-     * [release]. [tag] comes back in [started]. False when the command queue
-     * is full.
+     * [release]. [tag] comes back in [started]. Timed, it starts at output
+     * frame [at] (NOW: at the next render). False when the command queue is
+     * full.
      */
     bool start(int32_t key, Sample *sample, int32_t sampleRate, double pitch, int64_t tag,
-               const VoiceShape &shape = VoiceShape());
-    /** Lets go of voice [key] (all of a Key-mode key's): it fades out now, or once it has sounded MIN_GATE_MS. A OneShot voice plays on. */
-    bool release(int32_t key);
+               const VoiceShape &shape = VoiceShape(), int64_t at = NOW);
+    /**
+     * Lets go of voice [key] (all of a Key-mode key's): it fades out now, or
+     * once it has sounded MIN_GATE_MS. A OneShot voice plays on. Timed, it
+     * lets go at output frame [at]; a [tag] other than 0 lets go of only the
+     * voices started with that tag.
+     */
+    bool release(int32_t key, int64_t at = NOW, int64_t tag = 0);
     /** Ends voice [key] (all of its voices) now, in CHOKE_MS, even inside its MIN_GATE_MS: the press was a scroll. */
     bool cut(int32_t key);
     /** Fades every voice out quickly. */
     bool stopAll();
+    /** Drops the timed starts and releases still waiting for their frame; those sent after it wait as usual. */
+    bool flushTimed();
     /** Commands that still fit before the next [render]. */
     int room() const { return MAX_COMMANDS - commandCount_; }
 
-    /** Mixes the next [frames] (at most maxFrames) stereo frames into [out] (left, right, …). */
+    /**
+     * Mixes the next [frames] (at most maxFrames) stereo frames into [out]
+     * (left, right, …): the commands first, then the timed ones already due,
+     * then the voices up to the next timed command's frame inside the render,
+     * that command, and on.
+     */
     void render(int16_t *out, int frames);
 
-    /** Drops every voice and queued command and starts over at [outRate]; the frame count goes on. */
+    /** Drops every voice and queued or timed command and starts over at [outRate]; the frame count goes on. */
     void reset(int outRate);
 
     /** Output frames rendered so far. */
@@ -143,8 +166,10 @@ public:
     uint32_t keysVersion() const { return keysVersion_; }
 
 private:
-    enum class Kind : uint8_t { Start, Release, Cut, StopAll };
+    enum class Kind : uint8_t { Start, Release, Cut, StopAll, FlushTimed };
 
+    // [at]: the output frame a timed command waits for, NOW for none. A
+    // Release's [tag] other than 0: only the voices started with it.
     struct Command {
         Kind kind;
         int32_t key;
@@ -152,6 +177,7 @@ private:
         double step;
         int64_t tag;
         VoiceShape shape;
+        int64_t at;
     };
 
     // Kotlin's Voice: [sample] read up to before frame [end], [level] and the
@@ -159,6 +185,7 @@ private:
     // over [release] after its gate.
     struct Voice {
         int32_t key;
+        int64_t tag;
         Sample *sample;
         int32_t end;
         double step;
@@ -182,6 +209,10 @@ private:
 
     void setRate(int outRate);
     bool queue(const Command &c);
+    void take(const Command &c);
+    void applyDue();
+    void flushPending();
+    void playAll(int offset, int frames);
     void apply(const Command &c);
     void cutKey(int32_t key);
     void cutVoice(Voice &v);
@@ -190,7 +221,7 @@ private:
     bool keyBefore(int index) const;
     float gain(const Voice &v, int64_t at) const;
     float ramp(const Voice &v, int64_t at) const;
-    bool play(Voice &v, int frames);
+    bool play(Voice &v, int offset, int frames);
     bool keysChanged() const;
     void removeVoice(int index);
 
@@ -203,6 +234,9 @@ private:
 
     Command commands_[MAX_COMMANDS];
     int commandCount_ = 0;
+    // Timed commands waiting for their frame: by frame, then as they came.
+    Command pending_[MAX_PENDING];
+    int pendingCount_ = 0;
     Voice voices_[VOICE_SLOTS];
     int voiceCount_ = 0;
     float *mix_;

@@ -76,6 +76,14 @@ import java.util.concurrent.Executors
  * while the output reopens. It shares the output's audio focus ([FocusHold]):
  * focus stays while it is on, and a call or another app taking focus stops
  * it as it stops the voices.
+ *
+ * The pattern sequencer ([sequencer], a [MixScheduler]) schedules into the
+ * same mix, on the output's thread before each block, with the output's
+ * stamp while it runs or RECORD is armed; it is told [MixScheduler.lost] when the output
+ * reopens (a native stream; a track rerouted keeps its frames), gives out,
+ * fails or closes, and re-anchors. Focus is
+ * asked for when it starts and held while it runs, sounding or not; a call
+ * or another app taking focus is told to [onFocusLost], which stops it.
  */
 class LiveAudio(
     context: Context,
@@ -169,6 +177,21 @@ class LiveAudio(
     /** The open output's sample rate, null while closed. */
     override val mixRate: Int? get() = output?.rate
 
+    /**
+     * The pattern sequencer, fed on the output's thread before each block
+     * and with its stamp while it runs or RECORD is armed (an addition);
+     * null for none.
+     */
+    @Volatile var sequencer: MixScheduler? = null
+
+    /**
+     * Focus was taken by a call or another app's sound
+     * ([AudioManager.AUDIOFOCUS_LOSS], [AudioManager.AUDIOFOCUS_LOSS_TRANSIENT];
+     * not a notification's ducking), on the main thread: the voices have
+     * stopped, and the sequencer is to stop too.
+     */
+    var onFocusLost: (change: Int) -> Unit = {}
+
     private fun focusRequest(attributes: AudioAttributes) = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
         .setAudioAttributes(attributes)
         // A call or another app taking the output over stops the sounds.
@@ -220,6 +243,7 @@ class LiveAudio(
         val o = openNative(s) ?: TrackLiveOutput.open(audio, if (old) oldAttributes else attributes, s, old) ?: return false
         focus = if (old && o is TrackLiveOutput) oldFocus else gameFocus
         description = o.description
+        s.sink = o
         session = s
         output = o
         _engine.value = o.engine
@@ -253,6 +277,8 @@ class LiveAudio(
             output.also { output = null }
         }
         t?.lost(TAP_CLOSED)
+        // The next output counts its frames afresh.
+        sequencer?.lost()
         o ?: return
         o.close()
         _keys.value = emptySet()
@@ -405,6 +431,7 @@ class LiveAudio(
         if (change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK) return
         click?.let { stopClick(it, tell = true) }
         hold.lost()
+        onFocusLost(change)
     }
 
     private fun ask(f: AudioFocusRequest) {
@@ -432,6 +459,7 @@ class LiveAudio(
         }
         _keys.value = emptySet()
         _rec.value = RecState.Idle
+        sequencer?.lost()
         // After the reopen, so RSP finds the new output when it opens again.
         t?.lost(TAP_GAVE_OUT)
         if (reopened) onOutput(description)
@@ -454,6 +482,7 @@ class LiveAudio(
         _keys.value = emptySet()
         _rec.value = RecState.Idle
         _wireless.value = false
+        sequencer?.lost()
         hold.idle()
         t?.lost(TAP_FAILED)
     }
@@ -464,18 +493,34 @@ class LiveAudio(
     }
 
     /**
-     * One output's side of Live (the same for both): REC's take, the keys and
-     * focus, all on that output's thread. [running] goes false when Live
-     * closes, so a late report doesn't overwrite the closed state.
+     * One output's side of Live (the same for both): REC's take, the
+     * sequencer, the keys and focus, all on that output's thread. [running]
+     * goes false when Live closes, so a late report doesn't overwrite the
+     * closed state.
      */
     private inner class Session : LiveListener {
         @Volatile var running = true
+        // The output the sequencer schedules into, once [open] has it.
+        @Volatile var sink: ScheduleSink? = null
         private var take: Take? = null
         private var shown: Set<String> = emptySet()
+        // Whether the sequencer ran at the last block: focus is asked for as it starts.
+        private var sequencing = false
 
         override val recording: Boolean get() = take != null || armed != null || tap != null
 
-        override fun beforeBlock() {
+        // Armed too: a pad's press may start the sequencer, on the frame heard then.
+        override val clocked: Boolean get() = sequencer?.let { it.running || it.armed } == true
+
+        override fun beforeBlock(rendered: Long, rate: Int) {
+            // Not after Live closed: the sequencer may be on another output by now.
+            if (running) {
+                val seq = sequencer
+                sink?.let { seq?.fill(it, rendered, rate) }
+                val on = seq?.running == true
+                if (on && !sequencing) hold.sound(focus)
+                sequencing = on
+            }
             armed?.let {
                 armed = null
                 take?.let { t -> end(t) }
@@ -503,7 +548,8 @@ class LiveAudio(
             val k = t.recorder.onBurst(out, frames, at, firstStart)
             if (k != null) t.writer.write(out, k.from, k.frames)
             if (k?.last == true) {
-                t.limit = true
+                // The last burst of a take stopped at a frame isn't the limit.
+                t.limit = t.recorder.frames >= t.recorder.maxFrames
                 end(t)
                 take = null
                 _rec.value = RecState.Idle
@@ -515,7 +561,10 @@ class LiveAudio(
         }
 
         override fun clock(frame: Long, nanos: Long, rate: Int) {
-            if (running) tap?.clock(FrameClock(frame, nanos, rate))
+            if (!running) return
+            val c = FrameClock(frame, nanos, rate)
+            tap?.clock(c)
+            sequencer?.clock(c)
         }
 
         override fun started(key: String, latencyMs: Double, route: AudioDeviceInfo?, engine: String) = onStarted(key, latencyMs, route, engine)
@@ -525,12 +574,16 @@ class LiveAudio(
                 shown = keys
                 if (running) _keys.value = keys
             }
-            // Quiet for two seconds, the click off: other apps may have the output back.
-            hold.quiet(keys.isEmpty(), System.nanoTime())
+            // Quiet for two seconds, the click and the sequencer off: other apps may have the output back.
+            hold.quiet(keys.isEmpty() && sequencer?.running != true, System.nanoTime())
         }
 
         override fun routed(route: AudioDeviceInfo?) {
-            if (running && session === this) _wireless.value = isWireless(route?.type)
+            if (!running || session !== this) return
+            _wireless.value = isWireless(route?.type)
+            // A native stream reopened: what was scheduled is dropped. Not the track's (re)route, told on its
+            // first block too: its frames go on and what waits in its mixer stays; the stamp follows the delay.
+            if (sink is NativeLiveOutput) sequencer?.lost()
         }
 
         override fun changed(description: String) {

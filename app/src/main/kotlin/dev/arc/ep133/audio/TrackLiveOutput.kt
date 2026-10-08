@@ -23,8 +23,11 @@ import dev.arc.ep133.text.LatencyText
  * frame leaves the output, from the output's timestamp. A new route (Android
  * tells [BurstOutput]) reaches the listener from this thread, at the next burst,
  * and so does a buffer grown or shrunk ([LiveListener.tuned]). While the mix
- * is wanted, so does the output's timestamp, about every 100 ms
- * ([LiveListener.clock]), for SAMPLE's resampling.
+ * or the clock is wanted, so does the output's timestamp, about every 100 ms
+ * ([LiveListener.clock]), for SAMPLE's resampling and the sequencer.
+ *
+ * The sequencer's timed notes ([ScheduleSink]) go to the mixer as they are,
+ * since its frames are the mix's: each lands on its frame in the burst.
  *
  * Opened with old (the debug screen's "AudioTrack, old"), it writes as Live
  * did before the latency work: each burst mixed as soon as the last write
@@ -60,6 +63,15 @@ internal class TrackLiveOutput private constructor(private val output: BurstOutp
 
     override fun stopAll() = mixer.stopAll()
 
+    override fun startAt(key: String, pcm: ShortArray, channels: Int, sampleRate: Int, semitones: Int, tag: Long, shape: VoiceShape, atFrame: Long): Boolean {
+        mixer.start(key, pcm, channels, sampleRate, semitones, tag, shape, atFrame)
+        return true
+    }
+
+    override fun releaseAt(key: String, atFrame: Long, tag: Long) = mixer.release(key, atFrame, tag)
+
+    override fun flushTimed() = mixer.flushTimed()
+
     // The thread hands every burst over while [LiveListener.recording] says so.
     override fun recordFromNow() {}
 
@@ -80,7 +92,7 @@ internal class TrackLiveOutput private constructor(private val output: BurstOutp
             while (running) {
                 // Mixed only once the output has room for it, so a press made meanwhile is in it.
                 if (!o.ready()) continue
-                listener.beforeBlock()
+                listener.beforeBlock(mixer.frame, o.rate)
                 val at = mixer.frame
                 mixer.render(out, o.burst)
                 // The mixer's own list, read here on its thread: no copy.
@@ -89,6 +101,8 @@ internal class TrackLiveOutput private constructor(private val output: BurstOutp
                     var first = Long.MAX_VALUE
                     for (i in started.indices) first = minOf(first, started[i].frame)
                     listener.mixed(out, o.burst, at, if (started.isEmpty()) null else first, o.rate)
+                }
+                if (listener.recording || listener.clocked) {
                     val now = System.nanoTime()
                     if (now - clocked >= LiveListener.CLOCK_NS) {
                         clocked = now
@@ -145,7 +159,8 @@ internal class TrackLiveOutput private constructor(private val output: BurstOutp
         val label = engine.label
         for (i in started.indices) {
             val v = started[i]
-            if (v.tag == 0L) continue
+            // No press (0), or the sequencer's (below 0): no latency to tell.
+            if (v.tag <= 0L) continue
             val heardAt = atNanos + ((v.frame - atFrame) / rate * 1e9).toLong()
             listener.started(v.key, (heardAt - v.tag) / 1e6, route, label)
         }
