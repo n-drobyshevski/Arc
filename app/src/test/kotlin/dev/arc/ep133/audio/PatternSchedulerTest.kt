@@ -259,6 +259,31 @@ class PatternSchedulerTest {
     }
 
     @Test
+    fun `the tick heard is the stamp's less the delay the stamp leaves out`() {
+        // The pattern's clock is arc's own and its notes are not moved by the delay (the sequencer takes no input for
+        // one); what the eye follows and a press lands on goes through the timeline's heard time.
+        val a = Rig()
+        a.s.plan = plan(0, beats())
+        a.s.play(0)
+        a.run(ahead + 2 * bar, stampEvery = 3)
+        val t = a.s.timeline.value!!
+        val delay = 180_000_000L
+        // At 120 BPM a tick is 5 ms and a bit: 180 ms is 34.56 of them.
+        val now = a.heard(ahead + bar / 2)
+        assertEquals(t.tickAt(now), t.heardTickAt(now, 0L))
+        assertEquals(t.tickAt(now) - 34.56, t.heardTickAt(now, delay), 1e-9)
+        assertEquals(t.nanosOf(96) + delay, t.heardNanosOf(96, delay))
+        assertEquals(t.nanosOf(96), t.heardNanosOf(96, 0L))
+        // What is heard at a tick's heard time is that tick.
+        assertEquals(96.0, t.heardTickAt(t.heardNanosOf(96, delay), delay), 1e-6)
+        // A slower tempo makes the same time fewer ticks.
+        a.s.plan = plan(0, beats(), bpm = 60.0)
+        a.fill()
+        val slow = a.s.timeline.value!!
+        assertEquals(slow.tickAt(now) - 17.28, slow.heardTickAt(now, delay), 1e-9)
+    }
+
+    @Test
     fun `the timeline comes with the first stamp and is new only when it changes`() {
         val r = Rig()
         r.s.plan = plan(0, beats())

@@ -50,6 +50,13 @@ import java.util.concurrent.Executors
  * [wireless] says when the output goes to Bluetooth or a hearing aid, which
  * plays late whatever the app does; Live's display line says so. It follows
  * the route as it changes (a headset connecting while Live is open).
+ * [latencyMs] is the output's own latency about every second while it is open
+ * (Oboe's estimate for the native one, the frames in flight by the timestamp
+ * for AudioTrack): the part of the output's delay that its own stamp counts.
+ * With [makeUpDelay] on, a wireless output's delay that the stamp leaves out
+ * ([delayNs], [OutputDelay.ms]) is made up for where the phone lines up with
+ * sound outside it ([OutputDelay] says where). [delayNs] is a plain volatile
+ * read, for the audio threads.
  *
  * [onStarted] gets each voice's latency: from the press ([play]'s pressedAt)
  * to when its first frame leaves the output, from the output's timestamp,
@@ -123,6 +130,66 @@ class LiveAudio(
     private val _wireless = MutableStateFlow(false)
     /** Whether the open output goes to a wireless device ([isWireless]); false while closed. */
     val wireless: StateFlow<Boolean> = _wireless
+
+    private val _latency = MutableStateFlow<Int?>(null)
+    /**
+     * The open output's latency in milliseconds, told about once a second
+     * (see [LiveListener.latency]); null while closed or while it can't be
+     * measured. It is what the output's stamp already counts of its delay, and
+     * is not what is made up for ([delayNs]); a wireless route's is more when
+     * the audio HAL reports the link.
+     */
+    val latencyMs: StateFlow<Int?> = _latency
+
+    private val _madeUp = MutableStateFlow<Int?>(null)
+    /**
+     * The delay in all, in milliseconds ([OutputDelay.totalMs]), while it is
+     * made up for (the output wireless and [makeUpDelay] on), else null: the
+     * Bluetooth chip's words.
+     */
+    val madeUpFor: StateFlow<Int?> = _madeUp
+
+    // The delay made up for now, in nanoseconds; 0 unless the output is wireless and [makingUp] is on.
+    @Volatile private var delay = 0L
+    @Volatile private var makingUp = true
+
+    /**
+     * Whether the delay of a wireless output is made up for (the setting;
+     * on until set otherwise). Any thread.
+     */
+    fun makeUpDelay(on: Boolean) {
+        makingUp = on
+        refreshDelay()
+    }
+
+    /**
+     * The part of the output's delay that its stamp leaves out, in
+     * nanoseconds, to be made up for ([OutputDelay.ms]): 0 wired, closed or
+     * with [makeUpDelay] off. Read without a lock, on any thread (the click's
+     * included).
+     */
+    val delayNs: Long get() = delay
+
+    // The delay follows three inputs set from four threads (the main one, the output's, the route's and the settings'); it
+    // is worked out under a lock from what they all hold by then, so the last to write leaves it right. Readers don't lock.
+    @Synchronized
+    private fun refreshDelay() {
+        val wireless = _wireless.value
+        val latency = _latency.value
+        delay = OutputDelay.nanos(OutputDelay.ms(makingUp, wireless, latency))
+        _madeUp.value = if (makingUp && wireless) OutputDelay.totalMs(latency) else null
+    }
+
+    // The route's wireless state, and the delay that follows it.
+    private fun setWireless(wireless: Boolean) {
+        _wireless.value = wireless
+        refreshDelay()
+    }
+
+    private fun setLatency(ms: Int?) {
+        _latency.value = ms
+        refreshDelay()
+    }
 
     private val _engine = MutableStateFlow<LiveEngineInfo?>(null)
     /**
@@ -254,13 +321,15 @@ class LiveAudio(
         focus = if (old && o is TrackLiveOutput) oldFocus else gameFocus
         description = o.description
         s.sink = o
+        // The last output's is gone; the new one tells its own within a second.
+        setLatency(null)
         session = s
         output = o
         // After [output]: a setting sent meanwhile went to this output, or is in the replay.
         replayFx(o)
         _engine.value = o.engine
         // After [output]: a route the thread reports meanwhile is no older than this one.
-        _wireless.value = isWireless(o.route?.type)
+        setWireless(isWireless(o.route?.type))
         return true
     }
 
@@ -295,7 +364,8 @@ class LiveAudio(
         o.close()
         _keys.value = emptySet()
         _rec.value = RecState.Idle
-        _wireless.value = false
+        setWireless(false)
+        setLatency(null)
         // The click keeps it while on; [stopClick] lets go of it then.
         hold.idle()
     }
@@ -403,9 +473,11 @@ class LiveAudio(
 
     /**
      * Starts the click at [bpm], or on the EP-133's beats while [grid] gives
-     * them (asked before each burst with the time now; null: run free).
-     * [onBeat] gets each click when it is scheduled, with when it is heard,
-     * on the click's thread; [onStopped] is told when something other than
+     * them (asked before each burst with the time now; null: run free). A grid
+     * of the EP-133's is the caller's to send early by [delayNs] when it lines
+     * up with sound outside the phone ([OutputDelay.earlier]); the pattern's
+     * own is not. [onBeat] gets each click when it is scheduled, with when it
+     * is heard ([delayNs] after the output's stamp has it), on the click's thread; [onStopped] is told when something other than
      * [stopClick] stops it: focus taken, or the output failing. Already on,
      * only [bpm] is taken. Needs no open output. False when there is no output.
      */
@@ -415,7 +487,7 @@ class LiveAudio(
                 it.bpm = bpm
                 return true
             }
-            val c = MetronomeOutput.open(audio, attributes, bpm, grid, onBeat, ::clickEnded) ?: return false
+            val c = MetronomeOutput.open(audio, attributes, bpm, grid, { delay }, onBeat, ::clickEnded) ?: return false
             click = c
             clickStopped = onStopped
             hold.clickOn(focus)
@@ -486,7 +558,12 @@ class LiveAudio(
             // The next output counts its frames from 0: the tap's frames so far are done with.
             t = tap
             tap = null
-            open().also { if (!it) _wireless.value = false }
+            open().also {
+                if (!it) {
+                    setWireless(false)
+                    setLatency(null)
+                }
+            }
         }
         _keys.value = emptySet()
         _rec.value = RecState.Idle
@@ -512,7 +589,8 @@ class LiveAudio(
         }
         _keys.value = emptySet()
         _rec.value = RecState.Idle
-        _wireless.value = false
+        setWireless(false)
+        setLatency(null)
         sequencer?.lost()
         hold.idle()
         t?.lost(TAP_FAILED)
@@ -611,7 +689,7 @@ class LiveAudio(
 
         override fun routed(route: AudioDeviceInfo?) {
             if (!running || session !== this) return
-            _wireless.value = isWireless(route?.type)
+            setWireless(isWireless(route?.type))
             // A native stream reopened: what was scheduled is dropped. Not the track's (re)route, told on its
             // first block too: its frames go on and what waits in its mixer stays; the stamp follows the delay.
             (sink as? NativeLiveOutput)?.let {
@@ -625,6 +703,10 @@ class LiveAudio(
             if (!running || session !== this) return
             this@LiveAudio.description = description
             onOutput(description)
+        }
+
+        override fun latency(ms: Int?) {
+            if (running && session === this) setLatency(ms)
         }
 
         override fun tuned(engine: LiveEngineInfo) {

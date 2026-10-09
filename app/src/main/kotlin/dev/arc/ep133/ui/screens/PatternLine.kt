@@ -35,6 +35,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -74,6 +75,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.arc.ep133.audio.PressTime
 import dev.arc.ep133.controller.SceneUi
 import dev.arc.ep133.features.RecState
@@ -89,6 +91,8 @@ import dev.arc.ep133.ui.components.coachClear
 import dev.arc.ep133.ui.components.coachMark
 import dev.arc.ep133.ui.theme.ArcType
 import dev.arc.ep133.ui.theme.LocalArcColors
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 /*
  * The pattern's RECORD and PLAY on Live's display line (an addition, after
@@ -993,26 +997,39 @@ internal fun LineChip(
 }
 
 /**
+ * The delay Live is making up for, in milliseconds, while its sound goes to
+ * Bluetooth and Make up for Bluetooth delay is on ([dev.arc.ep133.audio.OutputDelay.totalMs]);
+ * null otherwise. The Bluetooth chip ([LateChip]) says so. The flow itself is
+ * what is provided (it never changes, so providing it recomposes nothing) and
+ * only the chip reads it: the figure is told every second, and the whole
+ * screen would follow it.
+ */
+internal val LocalDelayMadeUp = staticCompositionLocalOf<StateFlow<Int?>> { MutableStateFlow(null) }
+
+/**
  * Live's sound goes to Bluetooth, which plays late: a Bluetooth glyph and a
  * clock in amber ([dev.arc.ep133.ui.theme.ArcColors.warn]) on a chip's frame,
  * for as long as it does. Not a button: a long press names it
- * ([MirrorText.WIRELESS_DELAY]) as a tooltip, and a screen reader reads it as
- * its description. Not a live region: the line is rebuilt as it changes, so
- * it would say it again each time; the change of route is announced once, by
- * its toast.
+ * ([MirrorText.WIRELESS_DELAY], or [MirrorText.wirelessMadeUp] with the delay
+ * when it is made up for, [LocalDelayMadeUp]) as a tooltip, and a screen
+ * reader reads it as its description. Not a live region: the line is rebuilt
+ * as it changes, so it would say it again each time; the change of route is
+ * announced once, by its toast.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun LateChip(compact: Boolean) {
     val c = LocalArcColors.current
+    val madeUp by LocalDelayMadeUp.current.collectAsStateWithLifecycle()
+    val words = madeUp?.let(MirrorText::wirelessMadeUp) ?: MirrorText.WIRELESS_DELAY
     TooltipBox(
         positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Below),
-        tooltip = { PlainTooltip { Text(MirrorText.WIRELESS_DELAY, style = ArcType.capsKeySmall) } },
+        tooltip = { PlainTooltip { Text(words, style = ArcType.capsKeySmall) } },
         state = rememberTooltipState(),
     ) {
         LineChip(
             Modifier.semantics(mergeDescendants = true) {
-                contentDescription = MirrorText.WIRELESS_DELAY
+                contentDescription = words
             },
             lit = true,
             filled = false,

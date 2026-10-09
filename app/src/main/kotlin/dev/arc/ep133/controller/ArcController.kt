@@ -871,6 +871,10 @@ class ArcController(
     val rec: StateFlow<dev.arc.ep133.features.RecState> get() = liveAudio.rec
     /** Whether Live's sound goes to Bluetooth or a hearing aid, which plays late: its display line says so. */
     val liveWireless: StateFlow<Boolean> get() = liveAudio.wireless
+    /** Live's output latency in milliseconds, about once a second while it is open; null when closed or not measurable ([dev.arc.ep133.audio.LiveAudio.latencyMs]). */
+    val outputLatencyMs: StateFlow<Int?> get() = liveAudio.latencyMs
+    /** The Bluetooth delay in milliseconds while it is made up for (wireless, the setting on), else null: the chip's words ([dev.arc.ep133.audio.LiveAudio.madeUpFor]). */
+    val delayMadeUpFor: StateFlow<Int?> get() = liveAudio.madeUpFor
     // The debug screen's latency test: Live's press-to-sound times by engine.
     private val latencyTest = dev.arc.ep133.audio.LiveLatency()
     /** The latency test's times and engines, for the debug screen. */
@@ -2002,7 +2006,9 @@ class ArcController(
         val started = liveAudio.startClick(
             settings.value.liveTempo,
             // The pattern's beats while it runs, so the click lands on its bar 1 and counts it in.
-            grid = { now -> heardTimeline()?.grid() ?: clockFollow?.grid(now) },
+            // The EP-133's beats are sound outside the phone, so the click for them goes out early by the output's
+            // delay and is heard on the device's beat; the pattern's own are the phone's alone, and stay as they are.
+            grid = { now -> heardTimeline()?.grid() ?: clockFollow?.grid(now)?.let { dev.arc.ep133.audio.OutputDelay.earlier(it, liveAudio.delayNs) } },
             onBeat = {
                 _beats.value = it
                 // SAMPLE's count-in counts the click's beats.
@@ -3675,6 +3681,10 @@ class ArcController(
 
     // The pads and notes held while recording, by their voice's key ("live:g:o", "note:n"): their notes, for the gate.
     private val patternHeld = HashMap<String, Int>()
+    // The ticks a held note's start was moved from where it was heard (by its id), for its release to follow.
+    private val patternShifts = HashMap<Int, Double>()
+    // The run began with a count-in: a press made while the player still hears it stays in it.
+    private var patternCountedIn = false
     // The pass of each note recorded that was heard live as it was played (by its id): not played again.
     private var patternSkip: Map<Int, Long> = emptyMap()
     // The groups recorded into since the punch-in: each of their passes is an UNDO step.
@@ -3731,6 +3741,9 @@ class ArcController(
 
     init {
         liveAudio.sequencer = patternScheduler
+        // Make up for Bluetooth delay: the setting, to Live's output (which reads it on its own threads).
+        liveAudio.makeUpDelay(settings.value.makeUpDelay)
+        scope.launch { settings.map { it.makeUpDelay }.distinctUntilChanged().collect { liveAudio.makeUpDelay(it) } }
         // A note whose pad has no sound in the plan, told on the output's thread: the plan is made again here.
         patternScheduler.onMissing = { scope.launch { refreshPatternPlan() } }
         // A call, or another app's sound: the pattern and the arp stop, as the voices did.
@@ -3937,6 +3950,26 @@ class ArcController(
     private fun patternTickAt(nanos: Long): Double? =
         heardTimeline()?.tickAt(nanos) ?: patternPressAt?.takeIf { patternScheduler.playing }?.let { pressTickAt(nanos, it, patternScheduler.plan.bpm) }
 
+    /**
+     * How late Live's output is heard now, in nanoseconds: what is made up for
+     * ([dev.arc.ep133.audio.OutputDelay]); 0 wired, with the setting off or closed.
+     */
+    private fun heardDelay(): Long = liveAudio.delayNs
+
+    /**
+     * The tick the player hears at [nanos], as [patternTickAt] but through the
+     * output's delay: what the playhead shows and where a live press lands.
+     * The pattern's clock is arc's own and its notes stay where they are (see
+     * [dev.arc.ep133.audio.PatternScheduler]); only what is lined up with the ear moves.
+     * A press that started the run, before its timeline is out, is counted
+     * from the press all the same.
+     */
+    private fun patternHeardTickAt(nanos: Long): Double? {
+        val d = heardDelay()
+        heardTimeline()?.let { return it.heardTickAt(nanos, d) }
+        return patternPressAt?.takeIf { patternScheduler.playing }?.let { pressTickAt(nanos - d, it, patternScheduler.plan.bpm) }
+    }
+
     /** The first [heardTimeline] of this run, waited for. */
     private suspend fun awaitTimeline(): dev.arc.ep133.audio.Timeline? =
         patternScheduler.timeline.first { it != null && it !== staleTimeline }
@@ -4009,10 +4042,12 @@ class ArcController(
         // PLAY starts the passes from 0: what was heard live in another run is played again.
         patternSkip = emptyMap()
         patternHeld.clear()
+        patternShifts.clear()
         patternGroups.clear()
         patternTried.clear()
         countInClickAsked = false
         patternPressAt = a.at
+        patternCountedIn = a.countInBars > 0
         staleTimeline = patternScheduler.timeline.value
         _pattern.update { it.copy(countIn = null) }
         if (a.record) setPatterns(patternRecorder.punchIn(projectPatterns, fromStop = true, settings.value.patternAutoLength))
@@ -4026,8 +4061,9 @@ class ArcController(
         patternLoop?.cancel()
         patternLoop = null
         if (wasRecording) {
-            val tick = patternTickAt(System.nanoTime()) ?: 0.0
-            setPatterns(patternRecorder.punchOut(heldNotesEnded(projectPatterns, patternRecorder, patternHeld.values, tick), tick))
+            // Where the player stops it is where they hear it.
+            val tick = patternHeardTickAt(System.nanoTime()) ?: 0.0
+            setPatterns(patternRecorder.punchOut(heldNotesEnded(projectPatterns, patternRecorder, patternHeld.values, tick, patternShifts), tick))
         }
         patternScheduler.stop()
         // A pick still waiting takes over at once, as every change does while stopped.
@@ -4041,6 +4077,7 @@ class ArcController(
             stepCorrectedShown()
         }
         patternSkip = emptyMap()
+        patternShifts.clear()
         countInClickOff()
         _pattern.update { it.copy(countIn = null) }
         refreshPatternPlan()
@@ -4055,10 +4092,11 @@ class ArcController(
 
     /** Recording stops where it is heard, and the patterns are kept; playing goes on. */
     private fun punchOut() {
-        val tick = patternTickAt(System.nanoTime()) ?: 0.0
+        val tick = patternHeardTickAt(System.nanoTime()) ?: 0.0
         // A pad or key still held ends its note here: a lift after the punch-out records nothing.
-        val p = heldNotesEnded(projectPatterns, patternRecorder, patternHeld.values, tick)
+        val p = heldNotesEnded(projectPatterns, patternRecorder, patternHeld.values, tick, patternShifts)
         patternHeld.clear()
+        patternShifts.clear()
         setPatterns(patternRecorder.punchOut(p, tick))
         savePatterns()
     }
@@ -4076,17 +4114,20 @@ class ArcController(
             while (true) {
                 val tl = heardTimeline() ?: awaitTimeline() ?: continue
                 val now = System.nanoTime()
-                val tick = tl.tickAt(now)
-                followTick(tl, tick, now)
-                val next = tl.nanosOf((floor(tick / Seq.PPQN).toLong() + 1) * Seq.PPQN)
+                // What the eye follows is what is heard.
+                val late = heardDelay()
+                val tick = tl.heardTickAt(now, late)
+                followTick(tl, tick, now, late)
+                val next = tl.heardNanosOf((floor(tick / Seq.PPQN).toLong() + 1) * Seq.PPQN, late)
                 // A pick waiting is found on its tick (and its grace), not on the next beat.
-                val due = sceneDesk.dueTick()?.let { (tl.nanosOf(it) + SCENE_GRACE_NS - now) / 1_000_000L + 1 } ?: Long.MAX_VALUE
+                val due = sceneDesk.dueTick()?.let { (tl.heardNanosOf(it, late) + SCENE_GRACE_NS - now) / 1_000_000L + 1 } ?: Long.MAX_VALUE
                 delay(minOf((next - now) / 1_000_000L + 1, due).coerceIn(1L, if (eraseHolds.isEmpty() && !stepDesk.holding) PATTERN_LOOP_MS else PATTERN_ERASE_MS))
             }
         }
     }
 
-    private fun followTick(tl: dev.arc.ep133.audio.Timeline, tick: Double, now: Long) {
+    // [tick] is the tick heard at [now], the output playing [late] nanoseconds late.
+    private fun followTick(tl: dev.arc.ep133.audio.Timeline, tick: Double, now: Long, late: Long) {
         if (transport.state.phase == TransportPhase.COUNT_IN) {
             // The click comes on for the count-in once its beats are known, so it clicks them from the first.
             if (!countInClickAsked) {
@@ -4105,7 +4146,7 @@ class ArcController(
             countInClickOff()
             showPattern()
         }
-        sceneDue(tl.tickAt(now - SCENE_GRACE_NS))
+        sceneDue(tl.heardTickAt(now - SCENE_GRACE_NS, late))
         val st = transport.state
         if (st.recording && tick >= 0) {
             markPasses(tick)
@@ -4143,7 +4184,8 @@ class ArcController(
         var p = projectPatterns
         for (h in eraseHolds.values) {
             if (now - h.downAt < ERASE_TAP_NS) continue
-            val from = h.from ?: maxOf(tl.tickAt(h.downAt), 0.0)
+            // From where the pad went down in what was heard; to a lookahead ahead of what is sent.
+            val from = h.from ?: maxOf(tl.heardTickAt(h.downAt, heardDelay()), 0.0)
             if (to <= from) continue
             p = patternRecorder.eraseRange(p, h.pad, h.semitones, from, to)
             h.from = to
@@ -4162,10 +4204,15 @@ class ArcController(
      */
     private fun recordPress(pad: dev.arc.ep133.features.PhysicalPad, semitones: Int?, key: String, pressedAt: Long, hold: Boolean, first: Boolean = false) {
         if (!transport.state.recording) return
-        val tick = patternTickAt(pressedAt) ?: return
+        val stamped = patternTickAt(pressedAt) ?: return
+        // The player reacts to what is heard, which a wireless output plays late: the press is where it was heard
+        // (an earlier pass's end by its global tick; before the run is heard, see OutputDelay.placed). The press that
+        // started the run is its tick 0.
+        val heard = patternHeardTickAt(pressedAt) ?: return
         // A pick whose tick the press is past takes over first: the note goes to the pattern playing then.
-        sceneDue(tick)
+        sceneDue(heard)
         patternGroups += pad.group
+        val tick = pressPlace(first, stamped, heard, patternCountedIn)
         markPasses(tick)
         val r = patternRecorder.noteOn(projectPatterns, pad, semitones, tick, patternTickAt(System.nanoTime()) ?: tick, settings.value.patternTiming, settings.value.timingSwing)
         if (r.id == 0) return
@@ -4173,7 +4220,12 @@ class ArcController(
         // The same key again before it was let go of (another finger): the first note's gate ends here.
         val before = patternHeld.remove(key)
         val p = if (before != null) patternRecorder.noteOff(r.patterns, before, tick) else r.patterns
-        if (hold) patternHeld[key] = r.id
+        if (before != null) patternShifts.remove(before)
+        if (hold) {
+            patternHeld[key] = r.id
+            // Its release follows the note: it is heard where it is let go, and moved as far as the start was.
+            if (tick != heard) patternShifts[r.id] = tick - heard
+        }
         _pattern.update { it.copy(focusGroup = pad.group) }
         setPatterns(p)
     }
@@ -4181,7 +4233,8 @@ class ArcController(
     /** Voice [key] let go of at [releasedAt]: the note it recorded, if any, ends its gate there. */
     private fun recordRelease(key: String, releasedAt: Long) {
         val id = patternHeld.remove(key) ?: return
-        val tick = patternTickAt(releasedAt) ?: return
+        val shift = patternShifts.remove(id) ?: 0.0
+        val tick = (patternHeardTickAt(releasedAt) ?: return) + shift
         setPatterns(patternRecorder.noteOff(projectPatterns, id, tick))
     }
 
@@ -4193,7 +4246,7 @@ class ArcController(
     fun patternPosition(now: Long): PatternPosition? {
         if (!patternRunning()) return null
         val tl = heardTimeline() ?: return null
-        return positionOf(tl.tickAt(now), projectPatterns.group(_pattern.value.focusGroup.coerceIn(0, 3)))
+        return positionOf(tl.heardTickAt(now, heardDelay()), projectPatterns.group(_pattern.value.focusGroup.coerceIn(0, 3)))
     }
 
     /** TIMING: the grid recorded notes snap to (kept). */
@@ -4412,8 +4465,9 @@ class ArcController(
             toast(dev.arc.ep133.text.MirrorText.erased(pad))
             return
         }
-        val from = h.from ?: maxOf(tl.tickAt(h.downAt), 0.0)
-        val to = tl.tickAt(releasedAt)
+        val late = heardDelay()
+        val from = h.from ?: maxOf(tl.heardTickAt(h.downAt, late), 0.0)
+        val to = tl.heardTickAt(releasedAt, late)
         if (to > from) setPatterns(patternRecorder.eraseRange(projectPatterns, pad, semitones, from, to))
     }
 
@@ -4459,14 +4513,16 @@ class ArcController(
                 sampleWaiting.value = SamplePhase.Waiting(pad, latched = true)
                 val tl = kotlinx.coroutines.withTimeoutOrNull(BEAT_WAIT_MS) { awaitTimeline() } ?: return@launch
                 val len = bars?.let { it * Seq.TICKS_PER_BAR } ?: projectPatterns.longestTicks
+                // The mix is taken where it is (RSP); a mic or USB input hears the loop as the player does, late over Bluetooth.
+                val late = if (recorder.input?.source == SampleSource.RSP) 0L else heardDelay()
                 // A moment ahead, so the take is asked for before it starts (one a little late takes what the input kept).
-                val start = if (fromStop) 0L else nextLoopStart(tl.tickAt(System.nanoTime() + dev.arc.ep133.audio.PatternScheduler.LOOKAHEAD_NS), if (bars == null) len else Seq.TICKS_PER_BAR)
+                val start = if (fromStop) 0L else nextLoopStart(tl.heardTickAt(System.nanoTime() + dev.arc.ep133.audio.PatternScheduler.LOOKAHEAD_NS, late), if (bars == null) len else Seq.TICKS_PER_BAR)
                 val end = start + len
                 started = if (recorder.input?.source == SampleSource.RSP) {
                     recorder.scheduleMix(pad, tl.frameOfTick(start), tl.frameOfTick(end) - tl.frameOfTick(start), sampleMaxFrames())
                 } else {
                     val rate = recorder.rate ?: return@launch
-                    recorder.schedule(pad, tl.nanosOf(start), ticksToFrames(len.toLong(), tl.clock.bpm, rate), sampleMaxFrames())
+                    recorder.schedule(pad, tl.heardNanosOf(start, late), ticksToFrames(len.toLong(), tl.clock.bpm, rate), sampleMaxFrames())
                 }
             } finally {
                 sampleWaiting.value = null
@@ -4652,7 +4708,8 @@ class ArcController(
      */
     fun correctPadUp(pad: dev.arc.ep133.features.PhysicalPad, releasedAt: Long, semitones: Int? = null) {
         val tl = heardTimeline()?.takeIf { transport.state.phase == TransportPhase.PLAYING }
-        val tickAt = tl?.let { t -> { nanos: Long -> t.tickAt(nanos) } }
+        val late = heardDelay()
+        val tickAt = tl?.let { t -> { nanos: Long -> t.heardTickAt(nanos, late) } }
         setPatterns(stepDesk.holdUp(eraseKey(pad, semitones), releasedAt, projectPatterns, patternRecorder, settings.value.timing, tickAt))
         publishStep()
         if (!stepDesk.holding) stepCorrectedShown()
@@ -4769,7 +4826,8 @@ class ArcController(
     private fun correctHeld(tl: dev.arc.ep133.audio.Timeline, now: Long) {
         if (!stepDesk.holding || transport.state.phase != TransportPhase.PLAYING) return
         val to = tl.tickAt(now + dev.arc.ep133.audio.PatternScheduler.LOOKAHEAD_NS)
-        setPatterns(stepDesk.held(projectPatterns, patternRecorder, settings.value.timing, to, now) { tl.tickAt(it) })
+        val late = heardDelay()
+        setPatterns(stepDesk.held(projectPatterns, patternRecorder, settings.value.timing, to, now) { tl.heardTickAt(it, late) })
         publishStep()
     }
 
@@ -4943,7 +5001,7 @@ class ArcController(
     // Running, the tick a pick made now goes from: the one heard, but no earlier than the sequencer can still switch at (what
     // it has sent ahead of the ear is the old pattern's). Null while stopped (or not heard yet): a pick plays at once.
     private fun sceneTickNow(): Double? =
-        if (patternRunning()) patternTickAt(System.nanoTime())?.let { maxOf(it, patternScheduler.freeTick.toDouble()) } else null
+        if (patternRunning()) patternHeardTickAt(System.nanoTime())?.let { maxOf(it, patternScheduler.freeTick.toDouble()) } else null
 
     // The PAD flow is dropped (ERASE came on).
     private fun endPadStage() {
@@ -6107,6 +6165,9 @@ class ArcController(
     fun setPianoWhites(whites: Int?) = changeSettings { it.copy(pianoWhites = dev.arc.ep133.features.Piano.choiceOf(whites)) }
 
     fun setHaptics(on: Boolean) = changeSettings { it.copy(haptics = on) }
+
+    /** Make up for Bluetooth delay (kept): see [dev.arc.ep133.audio.OutputDelay] for what moves. */
+    fun setMakeUpDelay(on: Boolean) = changeSettings { it.copy(makeUpDelay = on) }
 
     /** The guide overlay was shown (it opens by itself only once, also across reinstalls). */
     fun setGuideSeen() = changeSettings { it.copy(guideSeen = true) }

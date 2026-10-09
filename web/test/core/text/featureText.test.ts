@@ -252,6 +252,18 @@ describe('FeatureTextTest', () => {
     expect(CoachText.SAMPLE).toBe('Sample')
   })
 
+  it('bluetooth delay text', () => {
+    expect(SettingsText.MAKE_UP_DELAY).toBe('Make up for Bluetooth delay')
+    expect(SettingsText.MAKE_UP_DELAY_NOTE.endsWith('are not changed.')).toBe(true)
+    expect(SettingsText.delayNow(40, 140)).toBe('Now: the output counts about 40 ms; arc makes up the other 140 ms.')
+    expect(SettingsText.delayNow(220, 0)).toBe("Now: the output counts about 220 ms, all of Bluetooth's delay, so nothing more is made up.")
+    expect(SettingsText.delayNow(null, 180)).toBe('Now: not measured, counted as about 180 ms.')
+    expect(SettingsText.DELAY_NONE).toBe("Now: the sound isn't going to Bluetooth, so nothing is made up for.")
+    // The chip leads with the delay, as the line may cut it short.
+    expect(MirrorText.WIRELESS_DELAY.startsWith('Bluetooth plays late')).toBe(true)
+    expect(MirrorText.wirelessMadeUp(180)).toBe('Bluetooth plays late (about 180 ms): arc makes up for it')
+  })
+
   it('pattern text', () => {
     const a7 = physicalPad(0, 9)
     expect(MirrorText.PATTERN).toBe('Pattern')

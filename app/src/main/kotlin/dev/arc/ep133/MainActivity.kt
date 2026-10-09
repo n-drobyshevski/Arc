@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -493,6 +494,13 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun Root() {
+        // The delay Live makes up for while its sound goes to Bluetooth, for the Bluetooth chip's words: the flow, which
+        // only the chip reads (it is told every second).
+        CompositionLocalProvider(dev.arc.ep133.ui.screens.LocalDelayMadeUp provides controller.delayMadeUpFor) { RootContent() }
+    }
+
+    @Composable
+    private fun RootContent() {
         val state by controller.state.collectAsStateWithLifecycle()
         var debug by rememberSaveable { mutableStateOf(false) }
         // The debug screen's latency test folded out, kept while Live is played in between.
@@ -938,6 +946,9 @@ class MainActivity : ComponentActivity() {
                     onShowNames = controller::setKeysShowNames,
                     onPianoWhites = controller::setPianoWhites,
                     onHaptics = controller::setHaptics,
+                    onMakeUpDelay = controller::setMakeUpDelay,
+                    wireless = liveWireless,
+                    latency = controller.outputLatencyMs,
                     onReviewSamples = controller::setReviewSamples,
                     onRestoreFolder = { folderLauncher.launch(dev.arc.ep133.data.ExternalLibrary.INITIAL_FOLDER) },
                     // No browser installed: nothing to open.

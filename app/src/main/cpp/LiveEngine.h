@@ -66,6 +66,13 @@ public:
      */
     int timestamp(int64_t *out);
 
+    /**
+     * The stream's output latency in milliseconds, as Oboe works it out from
+     * the frames written and the stream's timestamp (rounded); -1 while there
+     * is no stream, no timestamp yet, or the engine is busy reopening.
+     */
+    int32_t latencyMs();
+
     State state() const { return state_.load(std::memory_order_acquire); }
     /** Data callbacks so far: the app's watchdog sees the stream move. */
     int64_t callbacks() const { return callbacks_.load(std::memory_order_relaxed); }

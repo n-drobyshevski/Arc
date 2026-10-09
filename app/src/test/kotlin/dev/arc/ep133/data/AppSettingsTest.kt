@@ -29,6 +29,18 @@ class AppSettingsTest {
     }
 
     @Test
+    fun `making up for Bluetooth delay is on by default, stored like the other switches and read back from library json`() {
+        assertTrue(AppSettings().makeUpDelay)
+        assertEquals("true", AppSettings().values()["makeUpDelay"])
+        assertEquals("false", AppSettings(makeUpDelay = false).values()["makeUpDelay"])
+        assertFalse(AppSettings().withIndex(mapOf("app.makeUpDelay" to "false")).makeUpDelay)
+        assertTrue(AppSettings(makeUpDelay = false).withIndex(mapOf("app.makeUpDelay" to "true")).makeUpDelay)
+        // Missing or unreadable: left as it is.
+        assertFalse(AppSettings(makeUpDelay = false).withIndex(emptyMap()).makeUpDelay)
+        assertTrue(AppSettings().withIndex(mapOf("app.makeUpDelay" to "maybe")).makeUpDelay)
+    }
+
+    @Test
     fun `every setting round-trips through library json`() {
         val chosen = AppSettings(
             autoConnect = false,
@@ -39,6 +51,7 @@ class AppSettingsTest {
             keysShowNames = false,
             pianoWhites = dev.arc.ep133.features.Piano.CHOICES.filterNotNull().first(),
             haptics = false,
+            makeUpDelay = false,
             liveTempo = 98,
         )
         val index = chosen.values().mapKeys { "app." + it.key }

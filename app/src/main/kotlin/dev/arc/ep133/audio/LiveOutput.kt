@@ -113,6 +113,9 @@ internal interface LiveListener {
     companion object {
         /** How often an output tells [clock] while the mix or the clock is wanted. */
         const val CLOCK_NS = 100_000_000L
+
+        /** How often an output tells [latency]. */
+        const val LATENCY_NS = 1_000_000_000L
     }
 
     /** A voice was heard [latencyMs] after its press, through [route], on [engine] ([LiveEngineInfo.label]). */
@@ -120,6 +123,13 @@ internal interface LiveListener {
 
     /** The output goes to [route] now (routed anew, or reopened on another device); it may repeat the route it opened on. */
     fun routed(route: AudioDeviceInfo?)
+
+    /**
+     * The output's latency now in milliseconds (the time from a frame being
+     * written to it leaving the output), about every [LATENCY_NS]; null when
+     * it can't be told. Not told by an output that can't measure.
+     */
+    fun latency(ms: Int?) {}
 
     /** The keys sounding, after each block: the same set object until they change. */
     fun keys(keys: Set<String>)

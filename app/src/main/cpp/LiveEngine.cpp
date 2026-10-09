@@ -131,6 +131,15 @@ int LiveEngine::timestamp(int64_t *out) {
     return 2;
 }
 
+int32_t LiveEngine::latencyMs() {
+    // As [timestamp]: a reopen holds the lock a while, and the caller then goes without.
+    std::unique_lock<std::mutex> l(lock_, std::try_to_lock);
+    if (!l.owns_lock() || !stream_) return -1;
+    const oboe::ResultWithValue<double> latency = stream_->calculateLatencyMillis();
+    if (!latency || !(latency.value() > 0.0)) return -1;
+    return static_cast<int32_t>(latency.value() + 0.5);
+}
+
 oboe::DataCallbackResult LiveEngine::onAudioReady(oboe::AudioStream *stream, void *audioData, int32_t numFrames) {
     callbacks_.fetch_add(1, std::memory_order_relaxed);
     LiveCore *core = core_.get();

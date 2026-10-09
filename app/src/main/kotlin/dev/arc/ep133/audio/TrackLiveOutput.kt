@@ -24,7 +24,9 @@ import dev.arc.ep133.text.LatencyText
  * tells [BurstOutput]) reaches the listener from this thread, at the next burst,
  * and so does a buffer grown or shrunk ([LiveListener.tuned]). While the mix
  * or the clock is wanted, so does the output's timestamp, about every 100 ms
- * ([LiveListener.clock]), for SAMPLE's resampling and the sequencer.
+ * ([LiveListener.clock]), for SAMPLE's resampling and the sequencer. About
+ * every second the output's latency is told ([LiveListener.latency]), worked
+ * out from the same timestamp.
  *
  * The sequencer's timed notes ([ScheduleSink]) go to the mixer as they are,
  * since its frames are the mix's: each lands on its frame in the burst. So do
@@ -91,6 +93,8 @@ internal class TrackLiveOutput private constructor(private val output: BurstOutp
         var told: Any? = Unit
         // When the clock was last told, for the mix's takers.
         var clocked = 0L
+        // When the latency was last told (0: not yet).
+        var measured = 0L
         try {
             while (running) {
                 // Mixed only once the output has room for it, so a press made meanwhile is in it.
@@ -114,6 +118,11 @@ internal class TrackLiveOutput private constructor(private val output: BurstOutp
                 }
                 if (!o.write(out)) break
                 if (started.isNotEmpty()) report(started, ts)
+                val checked = System.nanoTime()
+                if (measured == 0L || checked - measured >= LiveListener.LATENCY_NS) {
+                    measured = checked
+                    listener.latency(latency(ts, checked))
+                }
                 val route = o.route
                 if (route !== told) {
                     told = route
@@ -148,6 +157,18 @@ internal class TrackLiveOutput private constructor(private val output: BurstOutp
         } else {
             listener.clock(o.track.playbackHeadPosition.toLong() and 0xFFFFFFFFL, now, o.rate)
         }
+    }
+
+    /**
+     * The output's latency now in milliseconds ([OutputDelay.latencyMs]), as
+     * Oboe works it out for the native one: the frames written but not yet
+     * played, by the output's timestamp ([now] is System.nanoTime). Null with
+     * no timestamp yet.
+     */
+    private fun latency(ts: AudioTimestamp, now: Long): Int? {
+        val o = output
+        if (!o.track.getTimestamp(ts)) return null
+        return OutputDelay.latencyMs(mixer.frame, ts.framePosition, ts.nanoTime, now, o.rate)
     }
 
     /** When each new voice's first frame is heard, from the output's timestamp. */

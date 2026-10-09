@@ -46,6 +46,18 @@ class SettingsStoreTest {
     }
 
     @Test
+    fun `making up for Bluetooth delay is kept once switched off, and the default never is`() {
+        val prefs = MemoryPrefs()
+        val store = SettingsStore(prefs)
+        assertTrue(store.settings.value.makeUpDelay)
+        assertFalse(prefs.contains("makeUpDelay"))
+        store.update { it.copy(makeUpDelay = false) }
+        assertFalse(prefs.getBoolean("makeUpDelay", true))
+        assertFalse(SettingsStore(prefs).settings.value.makeUpDelay)
+        assertEquals(mapOf("app.makeUpDelay" to "false"), store.toIndex())
+    }
+
+    @Test
     fun `the click's tempo is kept as a number once chosen, and read back clamped`() {
         val prefs = MemoryPrefs()
         val store = SettingsStore(prefs)

@@ -176,4 +176,85 @@ class PatternPlanTest {
         assertEquals(listOf(204, 108), out.group(0).notes.map { it.gate })
         assertSame(let.patterns, heldNotesEnded(let.patterns, r, emptyList(), 300.0))
     }
+
+    // ---------- Bluetooth delay: a press is where it was heard ----------
+
+    // 120 BPM: a bar is 384 ticks and 2 s; 180 ms is 34.56 ticks.
+    private val late = 34.56
+    private val bar = ProjectPatterns().with(0, Pattern(1, emptyList()))
+
+    // A press the stamp has at [stamped], placed as the controller does and noted on at 1/16, the mix at [now].
+    private fun press(
+        recorder: PatternRecorder,
+        p: ProjectPatterns,
+        stamped: Double,
+        delay: Double = late,
+        first: Boolean = false,
+        countedIn: Boolean = false,
+        now: Double = stamped,
+    ) = recorder.noteOn(p, a1, null, pressPlace(first, stamped, stamped - delay, countedIn), now, Timing.SIXTEENTH)
+
+    private fun PatternRecorder.Recorded.tick() = patterns.group(0).notes.first { it.id == id }.tick
+
+    @Test
+    fun `a press five ticks into the second pass, heard 180 ms late, is recorded in the end of the pass before`() {
+        val r = press(PatternRecorder(), bar, 389.0)
+        // Heard at 354.44: on the 1/16 grid tick 360 of the first pass, behind the mix, so played in the pass it was made in.
+        assertEquals(360, r.tick())
+        assertNull(r.skipPass)
+    }
+
+    @Test
+    fun `counted in, a downbeat a little early is the downbeat, as wired`() {
+        // The player still hears the count-in until the stamp is 34.56 ticks in: a press at 24.56 was heard at -10.
+        val delayed = press(PatternRecorder(), bar, 24.56, countedIn = true)
+        assertEquals(0, delayed.tick())
+        // The same press, heard at -10, wired (stamped -10, no delay): the same note.
+        val wired = press(PatternRecorder(), bar, -10.0, delay = 0.0, countedIn = true)
+        assertEquals(wired.tick(), delayed.tick())
+        // Too early is dropped, as wired, and not wrapped to the end of the loop.
+        assertEquals(0, press(PatternRecorder(), bar, 14.56, countedIn = true).id)
+        assertEquals(0, press(PatternRecorder(), bar, -20.0, delay = 0.0, countedIn = true).id)
+    }
+
+    @Test
+    fun `a chord that starts the run lands on the start, not at the end of the loop`() {
+        val recorder = PatternRecorder()
+        // The first finger is tick 0 whatever the delay; the others within the delay of it were heard before the loop was.
+        var p = bar
+        val ticks = listOf(0.0 to true, 3.0 to false, 20.0 to false).map { (stamped, first) ->
+            val r = press(recorder, p, stamped, first = first)
+            p = r.patterns
+            assertEquals(0.0, pressPlace(first, stamped, stamped - late, countedIn = false))
+            r.tick()
+        }
+        assertEquals(listOf(0, 0, 0), ticks)
+        // Once the loop is heard (the stamp past the delay) a press is where it was heard: 100 - 34.56 is 65.44, the 1/16 at 72.
+        assertEquals(72, press(recorder, p, 100.0).tick())
+    }
+
+    @Test
+    fun `with no delay a press is recorded as it always was`() {
+        for (tick in listOf(-3.0, 0.0, 5.0, 130.25, 383.9, 4000.5)) {
+            assertEquals(tick, pressPlace(false, tick, tick, countedIn = false))
+            assertEquals(tick, pressPlace(false, tick, tick, countedIn = true))
+            assertEquals(tick, pressPlace(true, tick, tick, countedIn = false))
+        }
+    }
+
+    @Test
+    fun `a note held through stop ends where it is let go of, as far on as its start was moved`() {
+        val recorder = PatternRecorder()
+        // The press that started the run: heard 34.56 ticks before the start, placed at it.
+        val first = press(recorder, bar, 0.0, first = true)
+        val shift = pressPlace(true, 0.0, -late, countedIn = false) - (-late)
+        assertEquals(late, shift, 1e-9)
+        // STOP where it is heard, 165.44 (the stamp's 200).
+        val heard = 200.0 - late
+        assertEquals(200, heldNotesEnded(first.patterns, recorder, listOf(first.id), heard, mapOf(first.id to shift)).group(0).notes.single().gate)
+        // Without the shift its gate is the delay too short.
+        val other = PatternRecorder()
+        val o = press(other, bar, 0.0, first = true)
+        assertEquals(165, heldNotesEnded(o.patterns, other, listOf(o.id), heard).group(0).notes.single().gate)
+    }
 }

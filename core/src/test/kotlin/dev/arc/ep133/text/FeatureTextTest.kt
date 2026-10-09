@@ -269,6 +269,19 @@ class FeatureTextTest {
     }
 
     @Test
+    fun `bluetooth delay text`() {
+        assertEquals("Make up for Bluetooth delay", SettingsText.MAKE_UP_DELAY)
+        assertTrue(SettingsText.MAKE_UP_DELAY_NOTE.endsWith("are not changed."))
+        assertEquals("Now: the output counts about 40 ms; arc makes up the other 140 ms.", SettingsText.delayNow(40, 140))
+        assertEquals("Now: the output counts about 220 ms, all of Bluetooth's delay, so nothing more is made up.", SettingsText.delayNow(220, 0))
+        assertEquals("Now: not measured, counted as about 180 ms.", SettingsText.delayNow(null, 180))
+        assertEquals("Now: the sound isn't going to Bluetooth, so nothing is made up for.", SettingsText.DELAY_NONE)
+        // The chip leads with the delay, as the line may cut it short.
+        assertTrue(MirrorText.WIRELESS_DELAY.startsWith("Bluetooth plays late"))
+        assertEquals("Bluetooth plays late (about 180 ms): arc makes up for it", MirrorText.wirelessMadeUp(180))
+    }
+
+    @Test
     fun `pattern text`() {
         val a7 = PhysicalPad(0, 9)
         assertEquals("Pattern", MirrorText.PATTERN)
