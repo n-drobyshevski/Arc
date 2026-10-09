@@ -3,6 +3,7 @@ package dev.arc.ep133.data
 import android.content.SharedPreferences
 import dev.arc.ep133.features.ArpOrder
 import dev.arc.ep133.features.ArpSettings
+import dev.arc.ep133.features.SwitchTime
 import dev.arc.ep133.features.Timing
 import dev.arc.ep133.features.TimingSettings
 import dev.arc.ep133.text.LiveEngine
@@ -117,6 +118,21 @@ class SettingsStoreTest {
         prefs.edit().putInt("arpGate", 500).putInt("timingSwing", 20).apply()
         assertEquals(50, SettingsStore(prefs).settings.value.arpGate)
         assertEquals(50, SettingsStore(prefs).settings.value.timingSwing)
+    }
+
+    @Test
+    fun `the scene change is kept under its own key once chosen, and read back by its word`() {
+        val prefs = MemoryPrefs()
+        val store = SettingsStore(prefs)
+        assertEquals(SwitchTime.IMMEDIATE, store.settings.value.sceneSwitch)
+        assertFalse(prefs.contains("sceneSwitch"))
+        store.update { it.copy(sceneSwitch = SwitchTime.BAR) }
+        assertEquals("bar", prefs.getString("sceneSwitch", null))
+        assertEquals(SwitchTime.BAR, SettingsStore(prefs).settings.value.sceneSwitch)
+        assertEquals(mapOf("app.sceneSwitch" to "bar"), store.toIndex())
+        // A word from another version reads as the default.
+        prefs.edit().putString("sceneSwitch", "song").apply()
+        assertEquals(SwitchTime.IMMEDIATE, SettingsStore(prefs).settings.value.sceneSwitch)
     }
 
     /** SharedPreferences in a map: enough for [SettingsStore]. */

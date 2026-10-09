@@ -1,34 +1,70 @@
 // Port of core/src/main/kotlin/dev/arc/ep133/features/PatternRecorder.kt
 //
 // Recording into a project's patterns, as RECORD does on the device: every
-// edit is pure, taking the patterns and giving the new ones, and keeps the
-// undo checkpoints (SHIFT + B on the device).
+// edit is pure, taking the patterns playing and giving the new ones, and
+// keeps the undo checkpoints (SHIFT + B on the device).
 //
 // Ticks are global: counted from the transport's tick 0 (PLAY starts at bar
 // 1), negative during the count-in. A group's pattern takes them mod its
 // length, except while it is open: then its tick is the global one, and it
 // grows instead of looping (grow).
 //
-// Undo: a checkpoint is the whole of a project's patterns, pushed on the
-// first change after a punch-in or a pass of a group being recorded into
-// (passed), and before each erase, clear, length change or double; at most
-// [maxUndo] are kept.
+// Undo: a checkpoint is the whole of the project's sequencer (seq, with the
+// patterns as they were), pushed on the first change after a punch-in or a
+// pass of a group being recorded into (passed), before each erase, clear,
+// length change or double, and before each edit of the scenes or the banks
+// (editSeq); at most [maxUndo] are kept. A gesture (a pad held in ERASE or to
+// correct, a knob turned on a step, presses of − / + on one pad) is one
+// checkpoint. Picking a pattern or a scene is no checkpoint and keeps them
+// all: an undo after it goes back to the checkpoint whole, its pick included.
+//
+// Step edits (place, velocity, length, nudge) are for a stopped transport,
+// whose patterns are never open; on an open pattern they, and the shifts and
+// corrects, give the patterns back as they were.
 //
 // Web deltas:
-// - Recorded is a plain readonly interface.
-// - The Kotlin compares patterns with data class equals; here samePatterns
-//   compares them field by field.
+// - Recorded, Nudged and Corrected are plain readonly interfaces.
+// - The Kotlin compares patterns and sequencers with data class equals; here
+//   samePatterns and sameSeq (pattern.ts) compare them field by field.
 // - Kotlin's Long ticks and passes are whole JS numbers.
+// - settle's (offset, semitones, tick) Triples are "offset:semitones:tick"
+//   strings.
 
 import type { PhysicalPad } from './padNotes'
-import { Pattern, ProjectPatterns, Seq, Timing, pattern, patternNote, quantize, timingTicks, type PatternNote } from './pattern'
+import {
+  Pattern,
+  ProjectPatterns,
+  ProjectSeq,
+  Seq,
+  Timing,
+  pattern,
+  patternNote,
+  quantize,
+  samePattern,
+  sameSeq,
+  timingTicks,
+  type PatternNote,
+} from './pattern'
 import { passOf } from './sequencer'
+import { Steps } from './steps'
 
 /** A note recorded: the [patterns] with it and its [id] (0: nothing recorded), and the pass the scheduler skips, if any. */
 export interface Recorded {
   readonly patterns: ProjectPatterns
   readonly id: number
   readonly skipPass: number | null
+}
+
+/** Notes nudged: the [patterns] with them moved, and the [step] they sit on now (the old one if none moved). */
+export interface Nudged {
+  readonly patterns: ProjectPatterns
+  readonly step: number
+}
+
+/** Notes corrected to the grid: the [patterns] and how many [moved] (dropped onto another note counts too). */
+export interface Corrected {
+  readonly patterns: ProjectPatterns
+  readonly moved: number
 }
 
 /** With TIMING OFF, a note this near one on the same pad and pitch replaces it. */
@@ -43,7 +79,7 @@ interface EraseRun {
 }
 
 export class PatternRecorder {
-  private readonly checkpoints: ProjectPatterns[] = []
+  private readonly checkpoints: ProjectSeq[] = []
   // The next change pushes a checkpoint.
   private pending = false
   private nextId = 0
@@ -55,6 +91,18 @@ export class PatternRecorder {
   private readonly lastPass: (number | null)[] = [null, null, null, null]
   // The erase going on while playing, so one held pad is one checkpoint.
   private lastErase: EraseRun | null = null
+  // The step edit or correct going on, by its kind and target ("vel:0:5"), so one knob turn or held pad is one checkpoint.
+  private lastRun: string | null = null
+  // Whether that run has pushed its checkpoint.
+  private runPushed = false
+
+  /**
+   * The project's sequencer as it stands, which the patterns handed to the
+   * edits are the playing ones of; the caller sets it whenever the picks, the
+   * banks or the scenes change. A checkpoint is this with the patterns before
+   * the edit.
+   */
+  seq: ProjectSeq = ProjectSeq.DEFAULT
 
   constructor(private readonly maxUndo = 32) {}
 
@@ -69,7 +117,7 @@ export class PatternRecorder {
    */
   punchIn(p: ProjectPatterns, fromStop: boolean, autoLength: boolean): ProjectPatterns {
     this.pending = true
-    this.lastErase = null
+    this.breakRuns()
     this.lastPass.fill(null)
     if (!fromStop || !autoLength) return p
     let out = p
@@ -88,7 +136,7 @@ export class PatternRecorder {
    * length it had.
    */
   punchOut(p: ProjectPatterns, tickNow: number): ProjectPatterns {
-    this.lastErase = null
+    this.breakRuns()
     this.held.clear()
     let out = p
     for (let g = 0; g < 4; g++) {
@@ -124,7 +172,7 @@ export class PatternRecorder {
     swing = 50,
     velocity = 127,
   ): Recorded {
-    this.lastErase = null
+    this.breakRuns()
     const q = quantize(timing, tick, swing)
     if (q < 0) return { patterns: p, id: 0, skipPass: null }
     const grown = this.grow(p, q)
@@ -176,7 +224,7 @@ export class PatternRecorder {
 
   /** ERASE + pad: every note on [pad], or only its KEYS note [semitones]. */
   erasePad(p: ProjectPatterns, pad: PhysicalPad, semitones: number | null = null): ProjectPatterns {
-    this.lastErase = null
+    this.breakRuns()
     const pat = ProjectPatterns.group(p, pad.group)
     return this.edit(p, ProjectPatterns.with(p, pad.group, { ...pat, notes: pat.notes.filter((n) => !on(n, pad, semitones)) }))
   }
@@ -192,6 +240,7 @@ export class PatternRecorder {
       last !== null && last.pad.group === pad.group && last.pad.offset === pad.offset && last.semitones === semitones && last.end === fromTick
     const run: EraseRun = { pad, semitones, end: toTick, pushed: goingOn && last?.pushed === true }
     this.lastErase = run
+    this.lastRun = null
     if (toTick <= fromTick) return p
     const pat = ProjectPatterns.group(p, pad.group)
     const len = Pattern.lengthTicks(pat)
@@ -210,7 +259,7 @@ export class PatternRecorder {
 
   /** ERASE + group: [group]'s notes, or every group's (null); the lengths stay. */
   clear(p: ProjectPatterns, group: number | null): ProjectPatterns {
-    this.lastErase = null
+    this.breakRuns()
     let out = p
     for (let g = 0; g < 4; g++) {
       if (group === null || g === group) out = ProjectPatterns.with(out, g, { ...ProjectPatterns.group(out, g), notes: [] })
@@ -220,7 +269,7 @@ export class PatternRecorder {
 
   /** [group]'s length, 1 to 99 bars; notes past the end are kept but not played. It closes an open group. */
   setLength(p: ProjectPatterns, group: number, bars: number): ProjectPatterns {
-    this.lastErase = null
+    this.breakRuns()
     const pat = ProjectPatterns.group(p, group)
     return this.edit(p, ProjectPatterns.with(p, group, { ...pat, bars: Math.min(Math.max(bars, 1), Seq.MAX_BARS), open: false }))
   }
@@ -230,7 +279,7 @@ export class PatternRecorder {
    * into the new part, over anything left past the old end.
    */
   double(p: ProjectPatterns, group: number): ProjectPatterns {
-    this.lastErase = null
+    this.breakRuns()
     const pat = ProjectPatterns.group(p, group)
     if (pat.bars >= Seq.MAX_BARS) return p
     const len = Pattern.lengthTicks(pat)
@@ -259,12 +308,163 @@ export class PatternRecorder {
     return out
   }
 
-  /** The patterns before the last checkpoint, or null with none left. */
-  undo(p: ProjectPatterns): ProjectPatterns | null {
-    this.lastErase = null
+  /**
+   * RECORD + pad on [step], stopped: [pad] (or its KEYS note [semitones])
+   * placed there for one [interval], at [velocity] (1..127). A note of the
+   * same pad and pitch on the step is replaced; the pattern full
+   * (Seq.MAX_NOTES), nothing is placed.
+   */
+  stepPlace(
+    p: ProjectPatterns,
+    pad: PhysicalPad,
+    semitones: number | null,
+    step: number,
+    interval: Timing,
+    swing: number,
+    velocity = 127,
+  ): ProjectPatterns {
+    this.breakRuns()
+    const pat = ProjectPatterns.group(p, pad.group)
+    if (pat.open) return p
+    const isOn = onStep(pat, step, interval, swing)
+    const kept = pat.notes.filter((n) => !(n.offset === pad.offset && n.semitones === semitones && isOn(n)))
+    if (kept.length >= Seq.MAX_NOTES) return p
+    const note = patternNote(Steps.tickOf(step, interval, swing), pad.offset, timingTicks(interval), semitones, clamp(velocity, 1, 127))
+    return this.edit(p, ProjectPatterns.with(p, pad.group, { ...pat, notes: [...kept, note] }))
+  }
+
+  /** SHIFT + KNOB X on [step], stopped: every note on it at [velocity] (1..127). One turn of the knob is one checkpoint. */
+  stepVelocity(p: ProjectPatterns, group: number, step: number, interval: Timing, swing: number, velocity: number): ProjectPatterns {
+    const v = clamp(velocity, 1, 127)
+    return this.stepNotes(p, `vel:${group}:${step}`, group, step, interval, swing, (n) => ({ ...n, velocity: v }))
+  }
+
+  /** SHIFT + KNOB Y on [step], stopped: every note on it [gate] ticks long (1 tick to a bar). One turn of the knob is one checkpoint. */
+  stepGate(p: ProjectPatterns, group: number, step: number, interval: Timing, swing: number, gate: number): ProjectPatterns {
+    const g = clamp(gate, 1, Seq.TICKS_PER_BAR)
+    return this.stepNotes(p, `gate:${group}:${step}`, group, step, interval, swing, (n) => ({ ...n, gate: g }))
+  }
+
+  /**
+   * SHIFT + pad and − / + on [step], stopped: the notes of [pad] there (every
+   * pitch, or only [semitones]) a step earlier or later ([dir] -1 or +1) on
+   * the swung grid with [quantize], else a tick, off the grid; both wrap round
+   * the pattern. A note moved onto one of the same pad and pitch replaces it.
+   * The presses on one pad are one checkpoint.
+   */
+  nudge(
+    p: ProjectPatterns,
+    pad: PhysicalPad,
+    semitones: number | null,
+    step: number,
+    interval: Timing,
+    swing: number,
+    quantize: boolean,
+    dir: number,
+  ): Nudged {
+    const key = `nudge:${pad.group}:${pad.offset}:${semitones}`
+    const pat = ProjectPatterns.group(p, pad.group)
+    if (pat.open) return { patterns: this.gesture(key, key, p, p), step }
+    const len = Pattern.lengthTicks(pat)
+    const count = Steps.count(pat, interval)
+    const isOn = onStep(pat, step, interval, swing)
+    const target = Steps.tickOf(floorMod(step + dir, count), interval, swing)
+    const moves = new Map<number, number>()
+    pat.notes.forEach((n, i) => {
+      if (on(n, pad, semitones) && isOn(n)) moves.set(i, quantize ? target : floorMod(n.tick + dir, len))
+    })
+    const out = this.gesture(key, key, p, ProjectPatterns.with(p, pad.group, { ...pat, notes: settle(pat, moves, true).notes }))
+    if (samePatterns(out, p)) return { patterns: p, step }
+    // The cursor follows the note: the first of them, where it sits now.
+    return { patterns: out, step: Steps.indexOf(moves.get(Math.min(...moves.keys()))!, interval, swing, count) }
+  }
+
+  /**
+   * SHIFT + TIMING, a pad held and − / +: all of [pad]'s notes that play
+   * (every pitch, or only [semitones]) a tick earlier or later ([dir] -1 or
+   * +1), wrapping round the pattern; notes past the end stay put. A note
+   * moved onto one of the same pad and pitch replaces it. The presses on one
+   * pad are one checkpoint.
+   */
+  shiftPad(p: ProjectPatterns, pad: PhysicalPad, semitones: number | null, dir: number): ProjectPatterns {
+    const key = `shift:${pad.group}:${pad.offset}:${semitones}`
+    const pat = ProjectPatterns.group(p, pad.group)
+    if (pat.open) return this.gesture(key, key, p, p)
+    const len = Pattern.lengthTicks(pat)
+    const moves = new Map<number, number>()
+    pat.notes.forEach((n, i) => {
+      if (on(n, pad, semitones) && n.tick < len) moves.set(i, floorMod(n.tick + dir, len))
+    })
+    return this.gesture(key, key, p, ProjectPatterns.with(p, pad.group, { ...pat, notes: settle(pat, moves, true).notes }))
+  }
+
+  /**
+   * SHIFT + TIMING and a pad, stopped (timing correct): all of [pad]'s notes
+   * that play (every pitch, or only [semitones]) onto [interval]'s grid swung
+   * by [swing], wrapping round the pattern. Of two of one pitch that land on
+   * the same tick, the first (in tick order) stays.
+   */
+  correctPad(p: ProjectPatterns, pad: PhysicalPad, semitones: number | null, interval: Timing, swing: number): Corrected {
+    this.breakRuns()
+    const pat = ProjectPatterns.group(p, pad.group)
+    if (pat.open) return { patterns: p, moved: 0 }
+    const len = Pattern.lengthTicks(pat)
+    const { patterns, moved } = correct(p, pat, pad, semitones, interval, swing, (t) => t < len)
+    return { patterns: this.edit(p, patterns), moved }
+  }
+
+  /**
+   * SHIFT + TIMING with [pad] held while playing: its notes from global
+   * [fromTick] to [toTick] (as eraseRange takes them) corrected as correctPad
+   * does. Ranges that follow on from the last one on the same pad are the
+   * same gesture: one checkpoint. Corrected.moved counts this range's notes
+   * only.
+   */
+  correctRange(
+    p: ProjectPatterns,
+    pad: PhysicalPad,
+    semitones: number | null,
+    fromTick: number,
+    toTick: number,
+    interval: Timing,
+    swing: number,
+  ): Corrected {
+    // The run's key ends where its range does, so only a range that follows on goes on with it.
+    const key = `correct:${pad.group}:${pad.offset}:${semitones}`
+    const pat = ProjectPatterns.group(p, pad.group)
+    if (pat.open || toTick <= fromTick) return { patterns: this.gesture(`${key}@${fromTick}`, `${key}@${toTick}`, p, p), moved: 0 }
+    const len = Pattern.lengthTicks(pat)
+    const whole = toTick - fromTick >= len
+    const from = floorMod(fromTick, len)
+    const to = floorMod(toTick, len)
+    const { patterns, moved } = correct(p, pat, pad, semitones, interval, swing, (t) => t < len && (whole || (from <= to ? t >= from && t < to : t >= from || t < to)))
+    return { patterns: this.gesture(`${key}@${fromTick}`, `${key}@${toTick}`, p, patterns), moved }
+  }
+
+  /** The knob let go of or the pad lifted: the next step edit or correct is a gesture of its own. */
+  endRun(): void {
+    this.lastRun = null
+  }
+
+  /**
+   * An edit of the scenes or the banks (a commit, a clear or delete, a
+   * paste), from [before] to [after]: as edit, a checkpoint of its own when it
+   * changed anything, and the gestures going on end.
+   */
+  editSeq(before: ProjectSeq, after: ProjectSeq): ProjectSeq {
+    this.breakRuns()
+    if (sameSeq(after, before)) return before
+    this.pushSeq(ProjectSeq.withPlaying(before, this.closed(ProjectSeq.playing(before))))
+    this.pending = true
+    return after
+  }
+
+  /** The project's sequencer before the last checkpoint (those the same as [current] skipped), or null with none left. */
+  undo(current: ProjectSeq): ProjectSeq | null {
+    this.breakRuns()
     while (this.checkpoints.length > 0) {
       const c = this.checkpoints.pop()!
-      if (!samePatterns(c, p)) {
+      if (!sameSeq(c, current)) {
         this.pending = true
         return c
       }
@@ -279,6 +479,41 @@ export class PatternRecorder {
     this.pending = false
   }
 
+  // Any edit but the run it is part of ends the gestures going on.
+  private breakRuns(): void {
+    this.lastErase = null
+    this.lastRun = null
+  }
+
+  // A step edit or correct, part of the run [key]: its first change is a checkpoint, as edit, and the rest of the
+  // run's none. It goes on from the last run when that was [follows].
+  private gesture(follows: string, key: string, before: ProjectPatterns, after: ProjectPatterns): ProjectPatterns {
+    this.lastErase = null
+    const pushed = this.lastRun === follows && this.runPushed
+    this.lastRun = key
+    this.runPushed = pushed
+    if (samePatterns(after, before)) return before
+    if (pushed) return after
+    this.runPushed = true
+    return this.edit(before, after)
+  }
+
+  // stepVelocity and stepGate: [change] on every note on [step] of [group].
+  private stepNotes(
+    p: ProjectPatterns,
+    key: string,
+    group: number,
+    step: number,
+    interval: Timing,
+    swing: number,
+    change: (n: PatternNote) => PatternNote,
+  ): ProjectPatterns {
+    const pat = ProjectPatterns.group(p, group)
+    if (pat.open) return this.gesture(key, key, p, p)
+    const isOn = onStep(pat, step, interval, swing)
+    return this.gesture(key, key, p, ProjectPatterns.with(p, group, { ...pat, notes: pat.notes.map((n) => (isOn(n) ? change(n) : n)) }))
+  }
+
   // An erase, clear, length or double: its own checkpoint when it changed anything, and what is recorded next another.
   private edit(before: ProjectPatterns, after: ProjectPatterns): ProjectPatterns {
     if (samePatterns(after, before)) return before
@@ -288,14 +523,22 @@ export class PatternRecorder {
   }
 
   private push(before: ProjectPatterns): void {
-    // Open groups go back as they were before the punch-in: closed, at their old length.
-    let c = before
+    this.pushSeq(ProjectSeq.withPlaying(this.seq, this.closed(before)))
+  }
+
+  private pushSeq(c: ProjectSeq): void {
+    this.checkpoints.push(c)
+    while (this.checkpoints.length > this.maxUndo) this.checkpoints.shift()
+  }
+
+  // Open groups go back as they were before the punch-in: closed, at their old length.
+  private closed(p: ProjectPatterns): ProjectPatterns {
+    let c = p
     for (let g = 0; g < 4; g++) {
       const pat = ProjectPatterns.group(c, g)
       if (pat.open) c = ProjectPatterns.with(c, g, pattern(Pattern.isEmpty(pat) ? this.openedFrom[g]! : pat.bars, pat.notes))
     }
-    this.checkpoints.push(c)
-    while (this.checkpoints.length > this.maxUndo) this.checkpoints.shift()
+    return c
   }
 }
 
@@ -303,22 +546,75 @@ export class PatternRecorder {
 export function samePatterns(a: ProjectPatterns, b: ProjectPatterns): boolean {
   if (a === b) return true
   if (a.groups.length !== b.groups.length) return false
-  return a.groups.every((x, g) => {
-    const y = b.groups[g]!
-    return (
-      x.bars === y.bars &&
-      x.open === y.open &&
-      x.notes.length === y.notes.length &&
-      x.notes.every((n, i) => {
-        const m = y.notes[i]!
-        return n.tick === m.tick && n.offset === m.offset && n.gate === m.gate && n.semitones === m.semitones && n.velocity === m.velocity && n.id === m.id
-      })
-    )
-  })
+  return a.groups.every((x, g) => samePattern(x, b.groups[g]!))
 }
 
 function on(n: PatternNote, pad: PhysicalPad, semitones: number | null): boolean {
   return n.offset === pad.offset && (semitones === null || n.semitones === semitones)
+}
+
+/** Whether a note plays on [step] of [pat] (notes past the end are on none). */
+function onStep(pat: Pattern, step: number, interval: Timing, swing: number): (n: PatternNote) => boolean {
+  const count = Steps.count(pat, interval)
+  const len = Pattern.lengthTicks(pat)
+  return (n) => n.tick < len && Steps.indexOf(n.tick, interval, swing, count) === step
+}
+
+/**
+ * [pat]'s notes, in their order, with those at [moves]' indices at their new
+ * ticks. Where notes of one pad and pitch then share a tick a moved one landed
+ * on, one stays: a moved one when [movedWins], else the first as they were in
+ * tick order. Also which notes were dropped.
+ */
+function settle(pat: Pattern, moves: ReadonlyMap<number, number>, movedWins: boolean): { notes: PatternNote[]; dropped: boolean[] } {
+  const notes = pat.notes
+  const len = Pattern.lengthTicks(pat)
+  const keyOf = (n: PatternNote, t: number): string => `${n.offset}:${n.semitones}:${t}`
+  // Only where a moved note landed can two meet.
+  const landed = new Set([...moves].map(([i, t]) => keyOf(notes[i]!, t)))
+  const rank = (i: number): number => (movedWins && !moves.has(i) ? 1 : 0)
+  const order = notes.map((_, i) => i).sort((a, b) => rank(a) - rank(b) || notes[a]!.tick - notes[b]!.tick)
+  const seen = new Set<string>()
+  const dropped = notes.map(() => false)
+  for (const i of order) {
+    const t = moves.get(i) ?? notes[i]!.tick
+    // Notes past the end aren't played: nothing lands on them.
+    if (t >= len) continue
+    const k = keyOf(notes[i]!, t)
+    if (landed.has(k) && seen.has(k)) dropped[i] = true
+    seen.add(k)
+  }
+  const out: PatternNote[] = []
+  notes.forEach((n, i) => {
+    if (dropped[i]) return
+    const t = moves.get(i)
+    out.push(t === undefined ? n : { ...n, tick: t })
+  })
+  return { notes: out, dropped }
+}
+
+/** [pad]'s notes at the ticks [selected] takes, onto the grid: the patterns, and how many moved or were dropped. */
+function correct(
+  p: ProjectPatterns,
+  pat: Pattern,
+  pad: PhysicalPad,
+  semitones: number | null,
+  interval: Timing,
+  swing: number,
+  selected: (tick: number) => boolean,
+): Corrected {
+  const len = Pattern.lengthTicks(pat)
+  const moves = new Map<number, number>()
+  pat.notes.forEach((n, i) => {
+    if (on(n, pad, semitones) && selected(n.tick)) moves.set(i, floorMod(quantize(interval, n.tick, swing), len))
+  })
+  const { notes, dropped } = settle(pat, moves, false)
+  const moved = pat.notes.filter((n, i) => dropped[i] || (moves.has(i) && moves.get(i) !== n.tick)).length
+  return { patterns: ProjectPatterns.with(p, pad.group, { ...pat, notes }), moved }
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.min(Math.max(v, lo), hi)
 }
 
 /** 1, 2, 4 or 8 bars: the power of two at or over [bars], at most MAX_AUTO_BARS. */

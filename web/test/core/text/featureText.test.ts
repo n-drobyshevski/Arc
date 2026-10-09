@@ -6,10 +6,11 @@ import { NoteNames, SCALES } from '../../../src/core/features/keys'
 import { FX_TYPES, FxType } from '../../../src/core/features/fxSettings'
 import { KeyMark } from '../../../src/core/features/piano'
 import { physicalPad } from '../../../src/core/features/padNotes'
-import { TIMINGS, Timing } from '../../../src/core/features/pattern'
+import { ProjectSeq, TIMINGS, Timing } from '../../../src/core/features/pattern'
 import { PLAY_MODES } from '../../../src/core/features/padSettings'
 import { ProjectSource } from '../../../src/core/features/projectStep'
 import { SampleSource } from '../../../src/core/features/sampleSource'
+import { SWITCH_TIMES, SceneOps, SwitchTime } from '../../../src/core/features/scenes'
 import { transportState } from '../../../src/core/features/transport'
 import { CoachText } from '../../../src/core/text/coachText'
 import { FeatureText } from '../../../src/core/text/featureText'
@@ -334,5 +335,120 @@ describe('FeatureTextTest', () => {
     expect(MirrorText.PTN.toUpperCase()).toBe('PTN')
     // Web delta: no REC, so no TAKE words.
     expect(CoachText.RECORD).toBe('Record a pattern: tap, then PLAY; hold for its settings')
+  })
+
+  it('scene text', () => {
+    expect([1, 5, 99].map((n) => MirrorText.patternLabel(n))).toEqual(['P01', 'P05', 'P99'])
+    // The scene's index, shown from 1.
+    expect([0, 9, 98].map((i) => MirrorText.sceneLabel(i))).toEqual(['S01', 'S10', 'S99'])
+    const seq = SceneOps.selectPattern(SceneOps.selectPattern(ProjectSeq.DEFAULT, 1, 3), 3, 2)
+    expect(MirrorText.sceneLine(seq)).toBe('S01 \u00B7 A01 B03 C01 D02')
+    expect(MirrorText.sceneLine(SceneOps.newScene(ProjectSeq.DEFAULT))).toBe('S02 \u00B7 A02 B02 C02 D02')
+    expect(SWITCH_TIMES.map((t) => MirrorText.switchName(t))).toEqual(['Immediate', 'Bar end', 'Pattern end'])
+    expect(MirrorText.queuedLabel(1, 5)).toBe('P01 \u2192 P05')
+    expect(MirrorText.copiedPattern(3)).toBe('P03 copied.')
+    expect(MirrorText.copiedBar(2)).toBe('Bar 2 copied.')
+    expect(MirrorText.copiedPad('KICK')).toBe('KICK copied.')
+    expect(MirrorText.pastedPattern(5)).toBe('Pasted into P05.')
+    expect(MirrorText.pastedBar(2)).toBe('Pasted into bar 2.')
+    expect(MirrorText.pastedPad('SNARE')).toBe('Pasted onto SNARE.')
+    expect(MirrorText.CLEARED_SCENE).toBe('Scene cleared.')
+    expect(MirrorText.DELETED_SCENE).toBe('Scene deleted.')
+  })
+
+  it('scene panel text', () => {
+    expect(MirrorText.groupPattern(1, 3)).toBe('B03')
+    expect(SWITCH_TIMES.map((t) => MirrorText.switchAt(t))).toEqual(['now', 'at bar end', 'at pattern end'])
+    expect(MirrorText.groupMove(1, 5)).toBe('B \u2192 05')
+    expect(MirrorText.sceneMove(2)).toBe('\u2192 S03')
+    expect(MirrorText.queuedLine(MirrorText.groupMove(1, 5), SwitchTime.BAR)).toBe('B \u2192 05 at bar end')
+    expect(MirrorText.queuedLine(MirrorText.sceneMove(2), SwitchTime.PATTERN)).toBe('\u2192 S03 at pattern end')
+    expect(MirrorText.sceneCommitted(2)).toBe('S03 committed')
+    expect(MirrorText.sceneCleared(4)).toBe('S05 cleared')
+    expect(MirrorText.sceneDeleted(4)).toBe('S05 deleted')
+    expect(MirrorText.gridStatus(1)).toBe('B \u00B7 pick 01\u201399')
+    expect(MirrorText.clipCopied('A bar 2')).toBe('A bar 2 copied')
+    expect(MirrorText.clipPasted('SNARE')).toBe('SNARE pasted')
+    expect(MirrorText.PAD_TAP_SOURCE).toBe('Tap a pad')
+    expect(MirrorText.padTapTarget('KICK')).toBe('KICK \u2192 tap target')
+    expect([MirrorText.NO_PATTERN_COPIED, MirrorText.NO_BAR_COPIED, MirrorText.NO_PAD_COPIED]).toEqual(['No pattern copied', 'No bar copied', 'No pad copied'])
+    // For screen readers.
+    expect(MirrorText.sceneSpoken(1, 3, [1, 3, 1, 2])).toBe('Scene 2 of 3, patterns A 1, B 3, C 1, D 2')
+    expect(MirrorText.patternSpoken(1, 5, 4)).toBe('Group B, pattern 5, 4 bars')
+    expect(MirrorText.patternSpoken(0, 1, 1)).toBe('Group A, pattern 1, 1 bar')
+    expect(MirrorText.patternQueuedSpoken(1, 5, SwitchTime.BAR)).toBe('Group B, pattern 5, at bar end')
+    expect(MirrorText.sceneQueuedSpoken(2, SwitchTime.PATTERN)).toBe('Scene 3, at pattern end')
+    expect(MirrorText.sceneCommittedSpoken(2)).toBe('Scene 3 committed')
+  })
+
+  it('scene panel labels', () => {
+    expect(MirrorText.sceneChipName(1, 3)).toBe('Scenes, scene 2 of 3')
+    expect(MirrorText.sceneStatus(1, 3)).toBe('Scene 2 of 3')
+    expect([MirrorText.patternNumber(3), MirrorText.numberMove(3, 5)]).toEqual(['03', '03\u219205'])
+    expect([true, false].map((n) => MirrorText.groupColumn(1, 3, n))).toEqual(['Group B, pattern 3, has notes', 'Group B, pattern 3'])
+    expect([MirrorText.groupPrevious(1), MirrorText.groupNext(1), MirrorText.groupNextFree(1)]).toEqual([
+      'Group B, previous pattern',
+      'Group B, next pattern',
+      'Group B, next free pattern',
+    ])
+    expect([null, 5].map((q) => MirrorText.groupKeyPattern(3, q))).toEqual([', pattern 3', ', pattern 3, changing to 5'])
+    // CLR and DEL, the hold key.
+    expect([false, true].map((d) => MirrorText.eraseSceneName(d))).toEqual(['Clear scene', 'Delete scene'])
+    expect([MirrorText.eraseHolding(false, 'S02'), MirrorText.eraseHolding(true, 'S05')].map((w) => w.toUpperCase())).toEqual(['HOLD \u00B7 CLR S02', 'HOLD \u00B7 DEL S05'])
+    expect(SWITCH_TIMES.map((t) => MirrorText.changeName(t))).toEqual(['Scene change: Immediate', 'Scene change: Bar end', 'Scene change: Pattern end'])
+    // CLIP.
+    expect([MirrorText.PTN, MirrorText.BAR, MirrorText.CLIP_PAD, MirrorText.COPY, MirrorText.PASTE].map((w) => w.toUpperCase())).toEqual(['PTN', 'BAR', 'PAD', 'COPY', 'PASTE'])
+    expect([MirrorText.barPagesGroup(0), MirrorText.clipHeld('A bar 2')]).toEqual(['Group A \u00B7 bar', 'Clip \u00B7 A bar 2'])
+    // The 1-99 grid.
+    expect([MirrorText.gridTitle(1), MirrorText.gridDetail(3, 4), MirrorText.gridDetail(3, 1)]).toEqual(['Group B', 'P03 \u00B7 4 bars', 'P03 \u00B7 1 bar'])
+    expect([MirrorText.patternCell(5, true), MirrorText.patternCell(6, false)]).toEqual(['Pattern 5, has notes', 'Pattern 6'])
+    expect(CoachText.SCENE).toBe('Pick patterns and scenes, copy and paste')
+  })
+
+  it('step text', () => {
+    // bar.beat.step, from 1: the 5th 1/16 is 1.2.1.
+    expect([0, 4, 5, 15, 16].map((s) => MirrorText.stepLabel(s, Timing.SIXTEENTH))).toEqual(['1.1.1', '1.2.1', '1.2.2', '1.4.4', '2.1.1'])
+    expect(MirrorText.stepLabel(3, Timing.EIGHTH)).toBe('1.2.2')
+    expect(MirrorText.stepLabel(7, Timing.THIRTY_SECOND)).toBe('1.1.8')
+    // A beat or longer: the step is 1.
+    expect(MirrorText.stepLabel(3, Timing.QUARTER)).toBe('1.4.1')
+    expect(MirrorText.stepLabel(2, Timing.HALF)).toBe('2.1.1')
+    expect(MirrorText.stepLabel(2, Timing.WHOLE)).toBe('3.1.1')
+    // Triplets: 1..3 in a beat at 1/8T, 1..6 at 1/16T.
+    expect(MirrorText.stepLabel(5, Timing.EIGHTH_T)).toBe('1.2.3')
+    expect(MirrorText.stepLabel(11, Timing.SIXTEENTH_T)).toBe('1.2.6')
+    expect([24, 384, 192, 96, 48, 32, 16, 12, 72, 120, 360, 50, 1].map((t) => MirrorText.gateLabel(t))).toEqual([
+      '1/16',
+      '1 bar',
+      '1/2',
+      '1/4',
+      '1/8',
+      '1/8T',
+      '1/16T',
+      '1/32',
+      '3/16',
+      '5/16',
+      '15/16',
+      '50 tk',
+      '1 tk',
+    ])
+    expect(MirrorText.correctedLine(1)).toBe('1 corrected')
+    expect(MirrorText.correctedLine(3)).toBe('3 corrected')
+    // The STEP panel's status, and what screen readers say.
+    expect(MirrorText.stepPlaced('SNARE')).toBe('+ SNARE')
+    expect(MirrorText.stepPlacedSpoken('SNARE', '1.2.1')).toBe('SNARE on step 1.2.1')
+    expect(MirrorText.stepNudged('KICK', '1.2.2')).toBe('KICK \u2192 1.2.2')
+    expect(MirrorText.stepNudgedSpoken('KICK', '1.2.2')).toBe('KICK moved to step 1.2.2')
+    expect([1, -2, 0].map((t) => MirrorText.stepShifted('KICK', t))).toEqual(['KICK +1 tk', 'KICK \u22122 tk', 'KICK 0 tk'])
+    expect([1, -2, 0].map((t) => MirrorText.stepShiftedSpoken('KICK', t))).toEqual(['KICK 1 tick later', 'KICK 2 ticks earlier', 'KICK back in place'])
+    expect([0, 1, 2].map((n) => MirrorText.stepSpoken('1.2.1', n))).toEqual(['Step 1.2.1', 'Step 1.2.1, 1 note', 'Step 1.2.1, 2 notes'])
+    // The STEP chip and panel.
+    expect(MirrorText.stepStatus('1.2.1')).toBe('STEP 1.2.1')
+    expect([MirrorText.stepCell('1.2.1', true), MirrorText.stepCell('2.4.4', false)]).toEqual(['Step 1.2.1, has notes', 'Step 2.4.4'])
+    expect(MirrorText.barPage(2)).toBe('Bar 2')
+    expect([MirrorText.nudgeChip(null), MirrorText.nudgeChip('KICK')].map((w) => w.toUpperCase())).toEqual(['NUDGE', 'NUDGE \u00B7 KICK'])
+    expect([MirrorText.STEP, MirrorText.VEL, MirrorText.LEN, MirrorText.BAR, MirrorText.CORRECT].map((w) => w.toUpperCase())).toEqual(['STEP', 'VEL', 'LEN', 'BAR', 'CORRECT'])
+    expect(MirrorText.NUDGE_NOTE).toBe('Tap a lit pad to pick it, then \u2212 and + move its note.')
+    expect(CoachText.STEP).toBe('Step through the pattern')
   })
 })

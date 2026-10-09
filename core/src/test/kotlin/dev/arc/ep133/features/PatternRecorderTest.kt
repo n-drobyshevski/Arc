@@ -20,6 +20,9 @@ class PatternRecorderTest {
 
     private fun ticks(p: ProjectPatterns, g: Int = 0) = p.group(g).notes.map { it.tick }
 
+    /** UNDO from [p] (the patterns playing in the recorder's seq): the patterns it goes back to, or null. */
+    private fun PatternRecorder.undoPlaying(p: ProjectPatterns) = undo(seq.withPlaying(p))?.playing()
+
     @Test
     fun `a press goes to the nearest grid tick, and one on the length wraps to 0`() {
         val r = PatternRecorder()
@@ -183,7 +186,7 @@ class PatternRecorderTest {
     fun `undo takes back a pass at a time`() {
         val r = PatternRecorder()
         assertFalse(r.canUndo)
-        assertNull(r.undo(ProjectPatterns()))
+        assertNull(r.undoPlaying(ProjectPatterns()))
         val empty = ProjectPatterns()
         var p = r.punchIn(empty, fromStop = true, autoLength = false)
         assertFalse(r.canUndo)
@@ -196,9 +199,9 @@ class PatternRecorderTest {
         p = r.hit(p, a3, 384.0 + 192).patterns
         r.passed(0, 1)
         p = r.hit(p, a4, 384.0 + 288).patterns
-        assertEquals(firstPass, r.undo(p))
-        assertEquals(empty, r.undo(firstPass))
-        assertNull(r.undo(empty))
+        assertEquals(firstPass, r.undoPlaying(p))
+        assertEquals(empty, r.undoPlaying(firstPass))
+        assertNull(r.undoPlaying(empty))
         assertFalse(r.canUndo)
     }
 
@@ -214,12 +217,12 @@ class PatternRecorderTest {
         assertEquals(p4, r.erasePad(p4, a3))
         // Recorded after an erase: a checkpoint of its own.
         val p5 = r.hit(p4, a3, 0.0).patterns
-        assertEquals(p4, r.undo(p5))
-        assertEquals(p3, r.undo(p4))
-        assertEquals(p2, r.undo(p3))
-        assertEquals(p1, r.undo(p2))
-        assertEquals(p0, r.undo(p1))
-        assertNull(r.undo(p0))
+        assertEquals(p4, r.undoPlaying(p5))
+        assertEquals(p3, r.undoPlaying(p4))
+        assertEquals(p2, r.undoPlaying(p3))
+        assertEquals(p1, r.undoPlaying(p2))
+        assertEquals(p0, r.undoPlaying(p1))
+        assertNull(r.undoPlaying(p0))
     }
 
     @Test
@@ -229,9 +232,9 @@ class PatternRecorderTest {
         val p1 = r.setLength(p0, 0, 2)
         val p2 = r.setLength(p1, 0, 3)
         val p3 = r.setLength(p2, 0, 4)
-        assertEquals(p2, r.undo(p3))
-        assertEquals(p1, r.undo(p2))
-        assertNull(r.undo(p1))
+        assertEquals(p2, r.undoPlaying(p3))
+        assertEquals(p1, r.undoPlaying(p2))
+        assertNull(r.undoPlaying(p1))
     }
 
     @Test
@@ -241,7 +244,7 @@ class PatternRecorderTest {
         var p = r.punchIn(start, fromStop = true, autoLength = true)
         p = r.hit(p, b0, 500.0).patterns
         p = r.punchOut(p, 600.0)
-        assertEquals(start, r.undo(p))
+        assertEquals(start, r.undoPlaying(p))
     }
 
     @Test
@@ -284,12 +287,12 @@ class PatternRecorderTest {
         p = r.eraseRange(p, a3, null, 50.0, 150.0)
         p = r.eraseRange(p, a3, null, 150.0, 250.0)
         assertTrue(p.group(0).isEmpty)
-        assertEquals(p0, r.undo(p))
-        assertNull(r.undo(p0))
+        assertEquals(p0, r.undoPlaying(p))
+        assertNull(r.undoPlaying(p0))
         // Let go and held again: another gesture.
         var q = r.eraseRange(p0, a3, null, 0.0, 50.0)
         q = r.eraseRange(q, a3, null, 300.0, 384.0 + 150)
-        assertEquals(listOf(100, 200), ticks(r.undo(q)!!))
+        assertEquals(listOf(100, 200), ticks(r.undoPlaying(q)!!))
     }
 
     @Test
@@ -346,5 +349,241 @@ class PatternRecorderTest {
         assertEquals(PatternNote(36, 3, 24, null, 90, swung.id), swung.patterns.group(0).notes.single())
         val straight = r.noteOn(p0, a3, null, 30.0, 30.0, sixteenth)
         assertEquals(PatternNote(24, 3, 24, null, 127, straight.id), straight.patterns.group(0).notes.single())
+    }
+
+    private fun one(vararg notes: PatternNote) = ProjectPatterns().with(0, Pattern(1, notes.toList()))
+
+    @Test
+    fun `a note placed on a step replaces the pad's at its pitch`() {
+        val r = PatternRecorder()
+        val p0 = one(PatternNote(96, 3, 24, velocity = 50), PatternNote(98, 3, 24, semitones = 2), PatternNote(100, 3, 24), PatternNote(120, 3, 24))
+        // Step 4 at 1/16 is 96..107: both of A 3's pad hits go, its KEYS note of another pitch and step 5 stay.
+        val p1 = r.stepPlace(p0, a3, null, 4, sixteenth, 50, velocity = 90)
+        assertEquals(listOf(PatternNote(98, 3, 24, 2), PatternNote(120, 3, 24), PatternNote(96, 3, 24, null, 90)), p1.group(0).notes)
+        val p2 = r.stepPlace(p1, a3, 2, 4, sixteenth, 50)
+        assertEquals(listOf(120, 96, 96), ticks(p2))
+        assertEquals(listOf(null, null, 2), p2.group(0).notes.map { it.semitones })
+        // One interval long, on the swung grid, at 1..127.
+        assertEquals(PatternNote(72, 4, 48, null, 127), PatternRecorder().stepPlace(ProjectPatterns(), a4, null, 1, Timing.EIGHTH, 75, velocity = 200).group(0).notes.single())
+        assertEquals(1, PatternRecorder().stepPlace(ProjectPatterns(), a4, null, 0, sixteenth, 50, velocity = 0).group(0).notes.single().velocity)
+        // Each place is a checkpoint.
+        assertEquals(p1, r.undoPlaying(p2))
+        assertEquals(p0, r.undoPlaying(p1))
+    }
+
+    @Test
+    fun `a full pattern takes no step note, but a replaced one still fits`() {
+        val r = PatternRecorder()
+        val full = ProjectPatterns().with(0, Pattern(99, List(Seq.MAX_NOTES) { PatternNote(it, 0, 1) }))
+        assertSame(full, r.stepPlace(full, a3, null, 0, sixteenth, 50))
+        // Ticks 0..11 are step 0.
+        assertEquals(Seq.MAX_NOTES - 11, r.stepPlace(full, PhysicalPad(0, 0), null, 0, sixteenth, 50).group(0).notes.size)
+    }
+
+    @Test
+    fun `a step's velocity and length are held to range, and a knob turn is one undo`() {
+        val r = PatternRecorder()
+        val p0 = one(PatternNote(0, 3, 24), PatternNote(2, 4, 24, semitones = 5), PatternNote(24, 3, 24))
+        var p = r.stepVelocity(p0, 0, 0, sixteenth, 50, 90)
+        assertEquals(listOf(90, 90, 127), p.group(0).notes.map { it.velocity })
+        p = r.stepVelocity(p, 0, 0, sixteenth, 50, 0)
+        assertEquals(listOf(1, 1, 127), p.group(0).notes.map { it.velocity })
+        p = r.stepVelocity(p, 0, 0, sixteenth, 50, 300)
+        p = r.stepVelocity(p, 0, 0, sixteenth, 50, 100)
+        assertEquals(listOf(100, 100, 127), p.group(0).notes.map { it.velocity })
+        assertEquals(p0, r.undoPlaying(p))
+        assertNull(r.undoPlaying(p0))
+        var g = r.stepGate(p0, 0, 0, sixteenth, 50, 0)
+        assertEquals(listOf(1, 1, 24), g.group(0).notes.map { it.gate })
+        g = r.stepGate(g, 0, 0, sixteenth, 50, 1000)
+        assertEquals(listOf(384, 384, 24), g.group(0).notes.map { it.gate })
+        g = r.stepGate(g, 0, 0, sixteenth, 50, 48)
+        assertEquals(p0, r.undoPlaying(g))
+        // An empty step: nothing changes.
+        assertSame(p0, r.stepVelocity(p0, 0, 5, sixteenth, 50, 10))
+        // Another step is another gesture, as is the knob let go of.
+        var q = r.stepVelocity(p0, 0, 0, sixteenth, 50, 90)
+        q = r.stepVelocity(q, 0, 1, sixteenth, 50, 90)
+        val second = q
+        q = r.stepVelocity(q, 0, 1, sixteenth, 50, 80)
+        r.endRun()
+        q = r.stepVelocity(q, 0, 1, sixteenth, 50, 70)
+        assertEquals(listOf(90, 90, 80), r.undoPlaying(q)!!.group(0).notes.map { it.velocity })
+        assertEquals(listOf(90, 90, 127), r.undoPlaying(second)!!.group(0).notes.map { it.velocity })
+    }
+
+    @Test
+    fun `a nudge moves a step on the grid, or a tick in free time, and the cursor follows`() {
+        val r = PatternRecorder()
+        val p0 = one(PatternNote(24, 3, 24), PatternNote(24, 3, 24, semitones = 2), PatternNote(24, 4, 24))
+        val up = r.nudge(p0, a3, null, 1, sixteenth, 50, quantize = true, dir = 1)
+        assertEquals(listOf(48, 48, 24), ticks(up.patterns))
+        assertEquals(2, up.step)
+        assertEquals(listOf(24, 48, 24), ticks(r.nudge(p0, a3, 2, 1, sixteenth, 50, true, 1).patterns))
+        val free = r.nudge(p0, a3, null, 1, sixteenth, 50, quantize = false, dir = -1)
+        assertEquals(listOf(23, 23, 24), ticks(free.patterns))
+        assertEquals(1, free.step)
+        // A tick past halfway: the next step.
+        assertEquals(PatternRecorder.Nudged(one(PatternNote(36, 3, 24)), 2), r.nudge(one(PatternNote(35, 3, 24)), a3, null, 1, sixteenth, 50, false, 1))
+        // Nothing of the pad there: the very patterns, the cursor where it was.
+        val none = r.nudge(p0, a3, null, 3, sixteenth, 50, true, 1)
+        assertSame(p0, none.patterns)
+        assertEquals(3, none.step)
+    }
+
+    @Test
+    fun `a nudge wraps round both ends`() {
+        val r = PatternRecorder()
+        assertEquals(PatternRecorder.Nudged(one(PatternNote(360, 3, 24)), 15), r.nudge(one(PatternNote(0, 3, 24)), a3, null, 0, sixteenth, 50, true, -1))
+        assertEquals(PatternRecorder.Nudged(one(PatternNote(0, 3, 24)), 0), r.nudge(one(PatternNote(360, 3, 24)), a3, null, 15, sixteenth, 50, true, 1))
+        // Free time: 383 still rounds to step 0.
+        assertEquals(PatternRecorder.Nudged(one(PatternNote(383, 3, 24)), 0), r.nudge(one(PatternNote(0, 3, 24)), a3, null, 0, sixteenth, 50, false, -1))
+        assertEquals(PatternRecorder.Nudged(one(PatternNote(0, 3, 24)), 0), r.nudge(one(PatternNote(383, 3, 24)), a3, null, 0, sixteenth, 50, false, 1))
+    }
+
+    @Test
+    fun `a nudge keeps a swung grid swung`() {
+        val r = PatternRecorder()
+        var n = r.nudge(one(PatternNote(36, 3, 24)), a3, null, 1, sixteenth, 75, true, 1)
+        assertEquals(listOf(48), ticks(n.patterns))
+        n = r.nudge(n.patterns, a3, null, n.step, sixteenth, 75, true, 1)
+        assertEquals(PatternRecorder.Nudged(one(PatternNote(84, 3, 24)), 3), n)
+        // Off the grid, on step 1 (36): it snaps to step 0.
+        assertEquals(listOf(0), ticks(r.nudge(one(PatternNote(40, 3, 24)), a3, null, 1, sixteenth, 75, true, -1).patterns))
+    }
+
+    @Test
+    fun `a nudged note replaces one it lands on, and the presses are one undo`() {
+        val r = PatternRecorder()
+        val p0 = one(PatternNote(24, 3, 24), PatternNote(48, 3, 24, velocity = 50), PatternNote(48, 4, 24))
+        val hit = r.nudge(p0, a3, null, 1, sixteenth, 50, true, 1)
+        assertEquals(listOf(PatternNote(48, 3, 24), PatternNote(48, 4, 24)), hit.patterns.group(0).notes)
+        var n = hit
+        n = r.nudge(n.patterns, a3, null, n.step, sixteenth, 50, true, 1)
+        n = r.nudge(n.patterns, a3, null, n.step, sixteenth, 50, false, 1)
+        assertEquals(listOf(73, 48), ticks(n.patterns))
+        assertEquals(3, n.step)
+        assertEquals(p0, r.undoPlaying(n.patterns))
+        assertNull(r.undoPlaying(p0))
+    }
+
+    @Test
+    fun `a pad's notes shift a tick, round the loop, past the end left alone`() {
+        val r = PatternRecorder()
+        val p0 = one(PatternNote(0, 3, 24), PatternNote(200, 3, 24, semitones = 2), PatternNote(500, 3, 24), PatternNote(0, 4, 24))
+        var p = r.shiftPad(p0, a3, null, -1)
+        assertEquals(listOf(383, 199, 500, 0), ticks(p))
+        p = r.shiftPad(p, a3, null, -1)
+        p = r.shiftPad(p, a3, null, -1)
+        assertEquals(listOf(381, 197, 500, 0), ticks(p))
+        assertEquals(p0, r.undoPlaying(p))
+        assertNull(r.undoPlaying(p0))
+        assertEquals(listOf(0, 201, 500, 0), ticks(r.shiftPad(p0, a3, 2, 1)))
+        assertEquals(listOf(0, 0), ticks(r.shiftPad(one(PatternNote(383, 3, 24), PatternNote(0, 4, 24)), a3, null, 1)))
+    }
+
+    @Test
+    fun `timing correct puts a pad's notes on the grid, the first of two on a tick staying`() {
+        val r = PatternRecorder()
+        val p0 = one(
+            PatternNote(5, 3, 24),
+            PatternNote(22, 3, 24, velocity = 60),
+            PatternNote(26, 3, 24, velocity = 70),
+            PatternNote(48, 3, 24),
+            PatternNote(380, 3, 24),
+            PatternNote(500, 3, 24),
+            PatternNote(13, 4, 24),
+        )
+        val c = r.correctPad(p0, a3, null, sixteenth, 50)
+        // 5 and 22 move; 26 lands on 22's 24 and 380 on 5's 0 (round the loop): both dropped.
+        assertEquals(4, c.moved)
+        assertEquals(listOf(0, 24, 48, 500, 13), ticks(c.patterns))
+        assertEquals(listOf(127, 60, 127, 127, 127), c.patterns.group(0).notes.map { it.velocity })
+        // Already on it: nothing moved, the very patterns.
+        val again = r.correctPad(c.patterns, a3, null, sixteenth, 50)
+        assertEquals(0, again.moved)
+        assertSame(c.patterns, again.patterns)
+        // Swung: 30 and 40 go to 36, 70 to 84.
+        val swung = PatternRecorder().correctPad(one(PatternNote(30, 3, 24), PatternNote(40, 3, 24), PatternNote(70, 3, 24)), a3, null, sixteenth, 75)
+        assertEquals(PatternRecorder.Corrected(one(PatternNote(36, 3, 24), PatternNote(84, 3, 24)), 3), swung)
+        // One pitch of the pad.
+        assertEquals(PatternRecorder.Corrected(one(PatternNote(5, 3, 24), PatternNote(0, 3, 24, 2)), 1), PatternRecorder().correctPad(one(PatternNote(5, 3, 24), PatternNote(5, 3, 24, 2)), a3, 2, sixteenth, 50))
+        // Each is a checkpoint.
+        val p2 = r.correctPad(c.patterns, a3, null, Timing.QUARTER, 50).patterns
+        // At 1/4, 24 lands on 0 and 48 rounds up to 96.
+        assertEquals(listOf(0, 96, 500, 13), ticks(p2))
+        assertEquals(c.patterns, r.undoPlaying(p2))
+        assertEquals(p0, r.undoPlaying(c.patterns))
+    }
+
+    @Test
+    fun `a pad held to correct while playing is one checkpoint`() {
+        val r = PatternRecorder()
+        val p0 = one(PatternNote(10, 3, 24), PatternNote(100, 3, 24), PatternNote(200, 3, 24))
+        var total = 0
+        var p = p0
+        for ((from, to) in listOf(0.0 to 5.0, 5.0 to 50.0, 50.0 to 150.0, 150.0 to 250.0)) {
+            val c = r.correctRange(p, a3, null, from, to, sixteenth, 50)
+            total += c.moved
+            p = c.patterns
+        }
+        assertEquals(3, total)
+        assertEquals(listOf(0, 96, 192), ticks(p))
+        assertEquals(p0, r.undoPlaying(p))
+        assertNull(r.undoPlaying(p0))
+        // Let go and held again: another gesture.
+        var q = r.correctRange(p0, a3, null, 0.0, 50.0, sixteenth, 50).patterns
+        val again = r.correctRange(q, a3, null, 300.0, 384.0 + 150, sixteenth, 50)
+        assertEquals(1, again.moved)
+        q = again.patterns
+        assertEquals(listOf(0, 100, 200), ticks(r.undoPlaying(q)!!))
+        // Round the loop, and a whole loop.
+        assertEquals(PatternRecorder.Corrected(one(PatternNote(0, 3, 24), PatternNote(200, 3, 24)), 1), r.correctRange(one(PatternNote(380, 3, 24), PatternNote(200, 3, 24)), a3, null, 760.0, 780.0, sixteenth, 50))
+        val whole = r.correctRange(p0, a3, null, 1000.0, 1384.0, sixteenth, 50)
+        assertEquals(3, whole.moved)
+        assertEquals(PatternRecorder.Corrected(p0, 0), r.correctRange(p0, a3, null, 300.0, 300.0, sixteenth, 50))
+    }
+
+    @Test
+    fun `another edit in between breaks a run`() {
+        val r = PatternRecorder()
+        val p0 = one(PatternNote(0, 3, 24), PatternNote(10, 4, 24), PatternNote(30, 4, 24))
+        val p1 = r.stepVelocity(p0, 0, 0, sixteenth, 50, 90)
+        val p2 = r.stepGate(p1, 0, 0, sixteenth, 50, 48)
+        val p3 = r.stepVelocity(p2, 0, 0, sixteenth, 50, 80)
+        val p4 = r.correctRange(p3, a4, null, 0.0, 20.0, sixteenth, 50).patterns
+        val p5 = r.erasePad(p4, a3)
+        // Follows on from 20, but the erase came in between: a checkpoint of its own.
+        val p6 = r.correctRange(p5, a4, null, 20.0, 40.0, sixteenth, 50).patterns
+        assertEquals(listOf(0, 24), ticks(p6))
+        val p7 = r.shiftPad(p6, a4, null, 1)
+        val p8 = r.hit(p7, a3, 96.0).patterns
+        val p9 = r.shiftPad(p8, a4, null, 1)
+        assertEquals(listOf(2, 26, 96), ticks(p9))
+        assertEquals(p8, r.undoPlaying(p9))
+        assertEquals(p7, r.undoPlaying(p8))
+        assertEquals(p6, r.undoPlaying(p7))
+        assertEquals(p5, r.undoPlaying(p6))
+        assertEquals(p4, r.undoPlaying(p5))
+        assertEquals(p3, r.undoPlaying(p4))
+        assertEquals(p2, r.undoPlaying(p3))
+        assertEquals(p1, r.undoPlaying(p2))
+        assertEquals(p0, r.undoPlaying(p1))
+        assertNull(r.undoPlaying(p0))
+    }
+
+    @Test
+    fun `step edits and corrects leave an open pattern alone`() {
+        val r = PatternRecorder()
+        var p = r.punchIn(ProjectPatterns(), fromStop = true, autoLength = true)
+        p = r.hit(p, a3, 30.0).patterns
+        assertTrue(p.group(0).open)
+        assertSame(p, r.stepPlace(p, a4, null, 0, sixteenth, 50))
+        assertSame(p, r.stepVelocity(p, 0, 1, sixteenth, 50, 10))
+        assertSame(p, r.stepGate(p, 0, 1, sixteenth, 50, 10))
+        assertEquals(PatternRecorder.Nudged(p, 1), r.nudge(p, a3, null, 1, sixteenth, 50, true, 1))
+        assertSame(p, r.shiftPad(p, a3, null, 1))
+        assertEquals(PatternRecorder.Corrected(p, 0), r.correctPad(p, a3, null, Timing.QUARTER, 50))
+        assertEquals(PatternRecorder.Corrected(p, 0), r.correctRange(p, a3, null, 0.0, 50.0, Timing.QUARTER, 50))
     }
 }

@@ -8,13 +8,16 @@ import dev.arc.ep133.features.KeyMark
 import dev.arc.ep133.features.NoteNames
 import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.ProjectDiff
+import dev.arc.ep133.features.ProjectSeq
 import dev.arc.ep133.features.ProjectSource
 import dev.arc.ep133.features.ProjectState
 import dev.arc.ep133.features.RecState
 import dev.arc.ep133.features.SampleSource
 import dev.arc.ep133.features.Scale
+import dev.arc.ep133.features.SceneOps
 import dev.arc.ep133.features.SoundDiff
 import dev.arc.ep133.features.SoundState
+import dev.arc.ep133.features.SwitchTime
 import dev.arc.ep133.features.Timing
 import dev.arc.ep133.features.TransportPhase
 import dev.arc.ep133.features.TransportState
@@ -344,5 +347,115 @@ class FeatureTextTest {
         assertEquals("Recording a take, 1:05. Tap to stop.", MirrorText.takeDescription(RecState.Recording(65)))
         assertTrue(MirrorText.TAKES_HINT.startsWith("Tap TAKE, then play"))
         assertEquals("Record a pattern: tap, then PLAY; hold for its settings", CoachText.RECORD)
+    }
+
+    @Test
+    fun `scene text`() {
+        assertEquals(listOf("P01", "P05", "P99"), listOf(1, 5, 99).map(MirrorText::patternLabel))
+        // The scene's index, shown from 1.
+        assertEquals(listOf("S01", "S10", "S99"), listOf(0, 9, 98).map(MirrorText::sceneLabel))
+        val seq = SceneOps.selectPattern(SceneOps.selectPattern(ProjectSeq.DEFAULT, 1, 3), 3, 2)
+        assertEquals("S01 \u00B7 A01 B03 C01 D02", MirrorText.sceneLine(seq))
+        assertEquals("S02 \u00B7 A02 B02 C02 D02", MirrorText.sceneLine(SceneOps.newScene(ProjectSeq.DEFAULT)))
+        assertEquals(listOf("Immediate", "Bar end", "Pattern end"), SwitchTime.entries.map(MirrorText::switchName))
+        assertEquals("P01 \u2192 P05", MirrorText.queuedLabel(1, 5))
+        assertEquals("P03 copied.", MirrorText.copiedPattern(3))
+        assertEquals("Bar 2 copied.", MirrorText.copiedBar(2))
+        assertEquals("KICK copied.", MirrorText.copiedPad("KICK"))
+        assertEquals("Pasted into P05.", MirrorText.pastedPattern(5))
+        assertEquals("Pasted into bar 2.", MirrorText.pastedBar(2))
+        assertEquals("Pasted onto SNARE.", MirrorText.pastedPad("SNARE"))
+        assertEquals("Scene cleared.", MirrorText.CLEARED_SCENE)
+        assertEquals("Scene deleted.", MirrorText.DELETED_SCENE)
+    }
+
+    @Test
+    fun `scene panel text`() {
+        assertEquals("B03", MirrorText.groupPattern(1, 3))
+        assertEquals(listOf("now", "at bar end", "at pattern end"), SwitchTime.entries.map(MirrorText::switchAt))
+        assertEquals("B \u2192 05", MirrorText.groupMove(1, 5))
+        assertEquals("\u2192 S03", MirrorText.sceneMove(2))
+        assertEquals("B \u2192 05 at bar end", MirrorText.queuedLine(MirrorText.groupMove(1, 5), SwitchTime.BAR))
+        assertEquals("\u2192 S03 at pattern end", MirrorText.queuedLine(MirrorText.sceneMove(2), SwitchTime.PATTERN))
+        assertEquals("S03 committed", MirrorText.sceneCommitted(2))
+        assertEquals("S05 cleared", MirrorText.sceneCleared(4))
+        assertEquals("S05 deleted", MirrorText.sceneDeleted(4))
+        assertEquals("B \u00B7 pick 01\u201399", MirrorText.gridStatus(1))
+        assertEquals("A bar 2 copied", MirrorText.clipCopied("A bar 2"))
+        assertEquals("SNARE pasted", MirrorText.clipPasted("SNARE"))
+        assertEquals("Tap a pad", MirrorText.PAD_TAP_SOURCE)
+        assertEquals("KICK \u2192 tap target", MirrorText.padTapTarget("KICK"))
+        assertEquals(listOf("No pattern copied", "No bar copied", "No pad copied"), listOf(MirrorText.NO_PATTERN_COPIED, MirrorText.NO_BAR_COPIED, MirrorText.NO_PAD_COPIED))
+        // For screen readers.
+        assertEquals("Scene 2 of 3, patterns A 1, B 3, C 1, D 2", MirrorText.sceneSpoken(1, 3, listOf(1, 3, 1, 2)))
+        assertEquals("Group B, pattern 5, 4 bars", MirrorText.patternSpoken(1, 5, 4))
+        assertEquals("Group A, pattern 1, 1 bar", MirrorText.patternSpoken(0, 1, 1))
+        assertEquals("Group B, pattern 5, at bar end", MirrorText.patternQueuedSpoken(1, 5, SwitchTime.BAR))
+        assertEquals("Scene 3, at pattern end", MirrorText.sceneQueuedSpoken(2, SwitchTime.PATTERN))
+        assertEquals("Scene 3 committed", MirrorText.sceneCommittedSpoken(2))
+    }
+
+    @Test
+    fun `scene panel labels`() {
+        assertEquals("Scenes, scene 2 of 3", MirrorText.sceneChipName(1, 3))
+        assertEquals("Scene 2 of 3", MirrorText.sceneStatus(1, 3))
+        assertEquals(listOf("03", "03\u219205"), listOf(MirrorText.patternNumber(3), MirrorText.numberMove(3, 5)))
+        assertEquals(listOf("Group B, pattern 3, has notes", "Group B, pattern 3"), listOf(true, false).map { MirrorText.groupColumn(1, 3, it) })
+        assertEquals(listOf("Group B, previous pattern", "Group B, next pattern", "Group B, next free pattern"), listOf(MirrorText.groupPrevious(1), MirrorText.groupNext(1), MirrorText.groupNextFree(1)))
+        assertEquals(listOf(", pattern 3", ", pattern 3, changing to 5"), listOf(null, 5).map { MirrorText.groupKeyPattern(3, it) })
+        // CLR and DEL, the hold key.
+        assertEquals(listOf("Clear scene", "Delete scene"), listOf(false, true).map(MirrorText::eraseSceneName))
+        assertEquals(listOf("HOLD \u00B7 CLR S02", "HOLD \u00B7 DEL S05"), listOf(MirrorText.eraseHolding(false, "S02"), MirrorText.eraseHolding(true, "S05")).map { it.uppercase() })
+        assertEquals(listOf("Scene change: Immediate", "Scene change: Bar end", "Scene change: Pattern end"), SwitchTime.entries.map(MirrorText::changeName))
+        // CLIP.
+        assertEquals(listOf("PTN", "BAR", "PAD", "COPY", "PASTE"), listOf(MirrorText.PTN, MirrorText.BAR, MirrorText.CLIP_PAD, MirrorText.COPY, MirrorText.PASTE).map { it.uppercase() })
+        assertEquals(listOf("Group A \u00B7 bar", "Clip \u00B7 A bar 2"), listOf(MirrorText.barPagesGroup(0), MirrorText.clipHeld("A bar 2")))
+        // The 1-99 grid.
+        assertEquals(listOf("Group B", "P03 \u00B7 4 bars", "P03 \u00B7 1 bar"), listOf(MirrorText.gridTitle(1), MirrorText.gridDetail(3, 4), MirrorText.gridDetail(3, 1)))
+        assertEquals(listOf("Pattern 5, has notes", "Pattern 6"), listOf(MirrorText.patternCell(5, true), MirrorText.patternCell(6, false)))
+        assertEquals("Pick patterns and scenes, copy and paste", CoachText.SCENE)
+    }
+
+    @Test
+    fun `step text`() {
+        // bar.beat.step, from 1: the 5th 1/16 is 1.2.1.
+        assertEquals(
+            listOf("1.1.1", "1.2.1", "1.2.2", "1.4.4", "2.1.1"),
+            listOf(0, 4, 5, 15, 16).map { MirrorText.stepLabel(it, Timing.SIXTEENTH) },
+        )
+        assertEquals("1.2.2", MirrorText.stepLabel(3, Timing.EIGHTH))
+        assertEquals("1.1.8", MirrorText.stepLabel(7, Timing.THIRTY_SECOND))
+        // A beat or longer: the step is 1.
+        assertEquals("1.4.1", MirrorText.stepLabel(3, Timing.QUARTER))
+        assertEquals("2.1.1", MirrorText.stepLabel(2, Timing.HALF))
+        assertEquals("3.1.1", MirrorText.stepLabel(2, Timing.WHOLE))
+        // Triplets: 1..3 in a beat at 1/8T, 1..6 at 1/16T.
+        assertEquals("1.2.3", MirrorText.stepLabel(5, Timing.EIGHTH_T))
+        assertEquals("1.2.6", MirrorText.stepLabel(11, Timing.SIXTEENTH_T))
+        assertEquals(
+            listOf("1/16", "1 bar", "1/2", "1/4", "1/8", "1/8T", "1/16T", "1/32", "3/16", "5/16", "15/16", "50 tk", "1 tk"),
+            listOf(24, 384, 192, 96, 48, 32, 16, 12, 72, 120, 360, 50, 1).map(MirrorText::gateLabel),
+        )
+        assertEquals("1 corrected", MirrorText.correctedLine(1))
+        assertEquals("3 corrected", MirrorText.correctedLine(3))
+        // The STEP panel's status, and what screen readers say.
+        assertEquals("+ SNARE", MirrorText.stepPlaced("SNARE"))
+        assertEquals("SNARE on step 1.2.1", MirrorText.stepPlacedSpoken("SNARE", "1.2.1"))
+        assertEquals("KICK \u2192 1.2.2", MirrorText.stepNudged("KICK", "1.2.2"))
+        assertEquals("KICK moved to step 1.2.2", MirrorText.stepNudgedSpoken("KICK", "1.2.2"))
+        assertEquals(listOf("KICK +1 tk", "KICK \u22122 tk", "KICK 0 tk"), listOf(1, -2, 0).map { MirrorText.stepShifted("KICK", it) })
+        assertEquals(
+            listOf("KICK 1 tick later", "KICK 2 ticks earlier", "KICK back in place"),
+            listOf(1, -2, 0).map { MirrorText.stepShiftedSpoken("KICK", it) },
+        )
+        assertEquals(listOf("Step 1.2.1", "Step 1.2.1, 1 note", "Step 1.2.1, 2 notes"), listOf(0, 1, 2).map { MirrorText.stepSpoken("1.2.1", it) })
+        // The STEP chip and panel.
+        assertEquals("STEP 1.2.1", MirrorText.stepStatus("1.2.1"))
+        assertEquals(listOf("Step 1.2.1, has notes", "Step 2.4.4"), listOf(MirrorText.stepCell("1.2.1", true), MirrorText.stepCell("2.4.4", false)))
+        assertEquals("Bar 2", MirrorText.barPage(2))
+        assertEquals(listOf("NUDGE", "NUDGE \u00B7 KICK"), listOf(MirrorText.nudgeChip(null), MirrorText.nudgeChip("KICK")).map { it.uppercase() })
+        assertEquals(listOf("STEP", "VEL", "LEN", "BAR", "CORRECT"), listOf(MirrorText.STEP, MirrorText.VEL, MirrorText.LEN, MirrorText.BAR, MirrorText.CORRECT).map { it.uppercase() })
+        assertEquals("Tap a lit pad to pick it, then \u2212 and + move its note.", MirrorText.NUDGE_NOTE)
+        assertEquals("Step through the pattern", CoachText.STEP)
     }
 }

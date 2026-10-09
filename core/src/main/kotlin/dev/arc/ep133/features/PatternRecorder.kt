@@ -6,24 +6,39 @@ import kotlin.math.floor
 
 /**
  * Recording into a project's patterns, as RECORD does on the device: every
- * edit is pure, taking the patterns and giving the new ones, and keeps the
- * undo checkpoints (SHIFT + B on the device).
+ * edit is pure, taking the patterns playing and giving the new ones, and
+ * keeps the undo checkpoints (SHIFT + B on the device).
  *
  * Ticks are global: counted from the transport's tick 0 (PLAY starts at bar
  * 1), negative during the count-in. A group's pattern takes them mod its
  * length, except while it is [Pattern.open]: then its tick is the global
  * one, and it grows instead of looping ([grow]).
  *
- * Undo: a checkpoint is the whole of a project's patterns, pushed on the
- * first change after a punch-in or a pass of a group being recorded into
- * ([passed]), and before each erase, clear, length change or double; at
- * most [maxUndo] are kept.
+ * Undo: a checkpoint is the whole of the project's sequencer ([seq], with
+ * the patterns as they were), pushed on the first change after a punch-in
+ * or a pass of a group being recorded into ([passed]), before each erase,
+ * clear, length change or double, and before each edit of the scenes or
+ * the banks ([editSeq]); at most [maxUndo] are kept. A gesture (a pad held
+ * in ERASE or to correct, a knob turned on a step, presses of − / + on one
+ * pad) is one checkpoint. Picking a pattern or a scene is no checkpoint and
+ * keeps them all: an undo after it goes back to the checkpoint whole, its
+ * pick included.
+ *
+ * Step edits (place, velocity, length, nudge) are for a stopped transport,
+ * whose patterns are never open; on an open pattern they, and the shifts
+ * and corrects, give the patterns back as they were.
  */
 class PatternRecorder(private val maxUndo: Int = 32) {
     /** A note recorded: the [patterns] with it and its [id] (0: nothing recorded), and the pass the scheduler skips, if any. */
     data class Recorded(val patterns: ProjectPatterns, val id: Int, val skipPass: Long?)
 
-    private val checkpoints = ArrayDeque<ProjectPatterns>()
+    /** Notes nudged: the [patterns] with them moved, and the [step] they sit on now (the old one if none moved). */
+    data class Nudged(val patterns: ProjectPatterns, val step: Int)
+
+    /** Notes corrected to the grid: the [patterns] and how many [moved] (dropped onto another note counts too). */
+    data class Corrected(val patterns: ProjectPatterns, val moved: Int)
+
+    private val checkpoints = ArrayDeque<ProjectSeq>()
     // The next change pushes a checkpoint.
     private var pending = false
     private var nextId = 0
@@ -35,6 +50,18 @@ class PatternRecorder(private val maxUndo: Int = 32) {
     private val lastPass = LongArray(4) { Long.MIN_VALUE }
     // The erase going on while playing, so one held pad is one checkpoint.
     private var lastErase: EraseRun? = null
+    // The step edit or correct going on, by its kind and target ("vel:0:5"), so one knob turn or held pad is one checkpoint.
+    private var lastRun: String? = null
+    // Whether that run has pushed its checkpoint.
+    private var runPushed = false
+
+    /**
+     * The project's sequencer as it stands, which the patterns handed to the
+     * edits are the playing ones of; the caller sets it whenever the picks,
+     * the banks or the scenes change. A checkpoint is this with the patterns
+     * before the edit.
+     */
+    var seq: ProjectSeq = ProjectSeq.DEFAULT
 
     val canUndo: Boolean get() = checkpoints.isNotEmpty()
 
@@ -45,7 +72,7 @@ class PatternRecorder(private val maxUndo: Int = 32) {
      */
     fun punchIn(p: ProjectPatterns, fromStop: Boolean, autoLength: Boolean): ProjectPatterns {
         pending = true
-        lastErase = null
+        breakRuns()
         lastPass.fill(Long.MIN_VALUE)
         if (!fromStop || !autoLength) return p
         var out = p
@@ -64,7 +91,7 @@ class PatternRecorder(private val maxUndo: Int = 32) {
      * the length it had.
      */
     fun punchOut(p: ProjectPatterns, tickNow: Double): ProjectPatterns {
-        lastErase = null
+        breakRuns()
         held.clear()
         var out = p
         for (g in 0 until 4) {
@@ -99,7 +126,7 @@ class PatternRecorder(private val maxUndo: Int = 32) {
         swing: Int = TimingSettings.SWING_MIN,
         velocity: Int = 127,
     ): Recorded {
-        lastErase = null
+        breakRuns()
         val q = timing.quantize(tick, swing)
         if (q < 0) return Recorded(p, 0, null)
         val grown = grow(p, q.toDouble())
@@ -147,7 +174,7 @@ class PatternRecorder(private val maxUndo: Int = 32) {
 
     /** ERASE + pad: every note on [pad], or only its KEYS note [semitones]. */
     fun erasePad(p: ProjectPatterns, pad: PhysicalPad, semitones: Int? = null): ProjectPatterns {
-        lastErase = null
+        breakRuns()
         val pat = p.group(pad.group)
         return edit(p, p.with(pad.group, pat.copy(notes = pat.notes.filterNot { on(it, pad, semitones) })))
     }
@@ -162,6 +189,7 @@ class PatternRecorder(private val maxUndo: Int = 32) {
         val goingOn = last != null && last.pad == pad && last.semitones == semitones && last.end == fromTick
         val run = EraseRun(pad, semitones, toTick, goingOn && last?.pushed == true)
         lastErase = run
+        lastRun = null
         if (toTick <= fromTick) return p
         val pat = p.group(pad.group)
         val len = pat.lengthTicks.toDouble()
@@ -180,7 +208,7 @@ class PatternRecorder(private val maxUndo: Int = 32) {
 
     /** ERASE + group: [group]'s notes, or every group's (null); the lengths stay. */
     fun clear(p: ProjectPatterns, group: Int?): ProjectPatterns {
-        lastErase = null
+        breakRuns()
         var out = p
         for (g in 0 until 4) if (group == null || g == group) out = out.with(g, out.group(g).copy(notes = emptyList()))
         return edit(p, out)
@@ -188,7 +216,7 @@ class PatternRecorder(private val maxUndo: Int = 32) {
 
     /** [group]'s length, 1 to 99 bars; notes past the end are kept but not played. It closes an open group. */
     fun setLength(p: ProjectPatterns, group: Int, bars: Int): ProjectPatterns {
-        lastErase = null
+        breakRuns()
         val pat = p.group(group)
         return edit(p, p.with(group, pat.copy(bars = bars.coerceIn(1, Seq.MAX_BARS), open = false)))
     }
@@ -198,7 +226,7 @@ class PatternRecorder(private val maxUndo: Int = 32) {
      * into the new part, over anything left past the old end.
      */
     fun double(p: ProjectPatterns, group: Int): ProjectPatterns {
-        lastErase = null
+        breakRuns()
         val pat = p.group(group)
         if (pat.bars >= Seq.MAX_BARS) return p
         val len = pat.lengthTicks
@@ -227,12 +255,162 @@ class PatternRecorder(private val maxUndo: Int = 32) {
         return out
     }
 
-    /** The patterns before the last checkpoint, or null with none left. */
-    fun undo(p: ProjectPatterns): ProjectPatterns? {
-        lastErase = null
+    /**
+     * RECORD + pad on [step], stopped: [pad] (or its KEYS note [semitones])
+     * placed there for one [interval], at [velocity] (1..127). A note of the
+     * same pad and pitch on the step is replaced; the pattern full
+     * ([Seq.MAX_NOTES]), nothing is placed.
+     */
+    fun stepPlace(
+        p: ProjectPatterns,
+        pad: PhysicalPad,
+        semitones: Int?,
+        step: Int,
+        interval: Timing,
+        swing: Int,
+        velocity: Int = 127,
+    ): ProjectPatterns {
+        breakRuns()
+        val pat = p.group(pad.group)
+        if (pat.open) return p
+        val onStep = onStep(pat, step, interval, swing)
+        val kept = pat.notes.filterNot { it.offset == pad.offset && it.semitones == semitones && onStep(it) }
+        if (kept.size >= Seq.MAX_NOTES) return p
+        val note = PatternNote(Steps.tickOf(step, interval, swing), pad.offset, interval.ticks, semitones, velocity.coerceIn(1, 127))
+        return edit(p, p.with(pad.group, pat.copy(notes = kept + note)))
+    }
+
+    /** SHIFT + KNOB X on [step], stopped: every note on it at [velocity] (1..127). One turn of the knob is one checkpoint. */
+    fun stepVelocity(p: ProjectPatterns, group: Int, step: Int, interval: Timing, swing: Int, velocity: Int): ProjectPatterns {
+        val v = velocity.coerceIn(1, 127)
+        return stepNotes(p, "vel:$group:$step", group, step, interval, swing) { it.copy(velocity = v) }
+    }
+
+    /** SHIFT + KNOB Y on [step], stopped: every note on it [gate] ticks long (1 tick to a bar). One turn of the knob is one checkpoint. */
+    fun stepGate(p: ProjectPatterns, group: Int, step: Int, interval: Timing, swing: Int, gate: Int): ProjectPatterns {
+        val g = gate.coerceIn(1, Seq.TICKS_PER_BAR)
+        return stepNotes(p, "gate:$group:$step", group, step, interval, swing) { it.copy(gate = g) }
+    }
+
+    /**
+     * SHIFT + pad and − / + on [step], stopped: the notes of [pad] there
+     * (every pitch, or only [semitones]) a step earlier or later ([dir] -1
+     * or +1) on the swung grid with [quantize], else a tick, off the grid;
+     * both wrap round the pattern. A note moved onto one of the same pad and
+     * pitch replaces it. The presses on one pad are one checkpoint.
+     */
+    fun nudge(
+        p: ProjectPatterns,
+        pad: PhysicalPad,
+        semitones: Int?,
+        step: Int,
+        interval: Timing,
+        swing: Int,
+        quantize: Boolean,
+        dir: Int,
+    ): Nudged {
+        val key = "nudge:${pad.group}:${pad.offset}:$semitones"
+        val pat = p.group(pad.group)
+        if (pat.open) return Nudged(gesture(key, key, p, p), step)
+        val len = pat.lengthTicks
+        val count = Steps.count(pat, interval)
+        val onStep = onStep(pat, step, interval, swing)
+        val target = Steps.tickOf(Math.floorMod(step + dir, count), interval, swing)
+        val moves = HashMap<Int, Int>()
+        pat.notes.forEachIndexed { i, n ->
+            if (on(n, pad, semitones) && onStep(n)) moves[i] = if (quantize) target else Math.floorMod(n.tick + dir, len)
+        }
+        val out = gesture(key, key, p, p.with(pad.group, pat.copy(notes = settle(pat, moves, movedWins = true).first)))
+        if (out == p) return Nudged(p, step)
+        // The cursor follows the note: the first of them, where it sits now.
+        return Nudged(out, Steps.indexOf(moves.getValue(moves.keys.min()), interval, swing, count))
+    }
+
+    /**
+     * SHIFT + TIMING, a pad held and − / +: all of [pad]'s notes that play
+     * (every pitch, or only [semitones]) a tick earlier or later ([dir] -1
+     * or +1), wrapping round the pattern; notes past the end stay put. A
+     * note moved onto one of the same pad and pitch replaces it. The presses
+     * on one pad are one checkpoint.
+     */
+    fun shiftPad(p: ProjectPatterns, pad: PhysicalPad, semitones: Int?, dir: Int): ProjectPatterns {
+        val key = "shift:${pad.group}:${pad.offset}:$semitones"
+        val pat = p.group(pad.group)
+        if (pat.open) return gesture(key, key, p, p)
+        val len = pat.lengthTicks
+        val moves = HashMap<Int, Int>()
+        pat.notes.forEachIndexed { i, n -> if (on(n, pad, semitones) && n.tick < len) moves[i] = Math.floorMod(n.tick + dir, len) }
+        return gesture(key, key, p, p.with(pad.group, pat.copy(notes = settle(pat, moves, movedWins = true).first)))
+    }
+
+    /**
+     * SHIFT + TIMING and a pad, stopped (timing correct): all of [pad]'s
+     * notes that play (every pitch, or only [semitones]) onto [interval]'s
+     * grid swung by [swing], wrapping round the pattern. Of two of one pitch
+     * that land on the same tick, the first (in tick order) stays.
+     */
+    fun correctPad(p: ProjectPatterns, pad: PhysicalPad, semitones: Int?, interval: Timing, swing: Int): Corrected {
+        breakRuns()
+        val pat = p.group(pad.group)
+        if (pat.open) return Corrected(p, 0)
+        val (out, moved) = correct(p, pat, pad, semitones, interval, swing) { it < pat.lengthTicks }
+        return Corrected(edit(p, out), moved)
+    }
+
+    /**
+     * SHIFT + TIMING with [pad] held while playing: its notes from global
+     * [fromTick] to [toTick] (as [eraseRange] takes them) corrected as
+     * [correctPad] does. Ranges that follow on from the last one on the same
+     * pad are the same gesture: one checkpoint. [Corrected.moved] counts
+     * this range's notes only.
+     */
+    fun correctRange(
+        p: ProjectPatterns,
+        pad: PhysicalPad,
+        semitones: Int?,
+        fromTick: Double,
+        toTick: Double,
+        interval: Timing,
+        swing: Int,
+    ): Corrected {
+        // The run's key ends where its range does, so only a range that follows on goes on with it.
+        val key = "correct:${pad.group}:${pad.offset}:$semitones"
+        val pat = p.group(pad.group)
+        if (pat.open || toTick <= fromTick) return Corrected(gesture("$key@$fromTick", "$key@$toTick", p, p), 0)
+        val len = pat.lengthTicks.toDouble()
+        val whole = toTick - fromTick >= len
+        val from = floorMod(fromTick, len)
+        val to = floorMod(toTick, len)
+        val (out, moved) = correct(p, pat, pad, semitones, interval, swing) { t ->
+            t < len && (whole || if (from <= to) t >= from && t < to else t >= from || t < to)
+        }
+        return Corrected(gesture("$key@$fromTick", "$key@$toTick", p, out), moved)
+    }
+
+    /** The knob let go of or the pad lifted: the next step edit or correct is a gesture of its own. */
+    fun endRun() {
+        lastRun = null
+    }
+
+    /**
+     * An edit of the scenes or the banks (a commit, a clear or delete, a
+     * paste), from [before] to [after]: as [edit], a checkpoint of its own
+     * when it changed anything, and the gestures going on end.
+     */
+    fun editSeq(before: ProjectSeq, after: ProjectSeq): ProjectSeq {
+        breakRuns()
+        if (after == before) return before
+        pushSeq(before.withPlaying(closed(before.playing())))
+        pending = true
+        return after
+    }
+
+    /** The project's sequencer before the last checkpoint (those the same as [current] skipped), or null with none left. */
+    fun undo(current: ProjectSeq): ProjectSeq? {
+        breakRuns()
         while (checkpoints.isNotEmpty()) {
             val c = checkpoints.removeAt(checkpoints.lastIndex)
-            if (c != p) {
+            if (c != current) {
                 pending = true
                 return c
             }
@@ -247,6 +425,61 @@ class PatternRecorder(private val maxUndo: Int = 32) {
         pending = false
     }
 
+    // Any edit but the run it is part of ends the gestures going on.
+    private fun breakRuns() {
+        lastErase = null
+        lastRun = null
+    }
+
+    // A step edit or correct, part of the run [key]: its first change is a checkpoint, as [edit], and the rest of the
+    // run's none. It goes on from the last run when that was [follows].
+    private fun gesture(follows: String, key: String, before: ProjectPatterns, after: ProjectPatterns): ProjectPatterns {
+        lastErase = null
+        val pushed = lastRun == follows && runPushed
+        lastRun = key
+        runPushed = pushed
+        if (after == before) return before
+        if (pushed) return after
+        runPushed = true
+        return edit(before, after)
+    }
+
+    // [stepVelocity] and [stepGate]: [change] on every note on [step] of [group].
+    private fun stepNotes(
+        p: ProjectPatterns,
+        key: String,
+        group: Int,
+        step: Int,
+        interval: Timing,
+        swing: Int,
+        change: (PatternNote) -> PatternNote,
+    ): ProjectPatterns {
+        val pat = p.group(group)
+        if (pat.open) return gesture(key, key, p, p)
+        val onStep = onStep(pat, step, interval, swing)
+        return gesture(key, key, p, p.with(group, pat.copy(notes = pat.notes.map { if (onStep(it)) change(it) else it })))
+    }
+
+    // [pad]'s notes at the ticks [selected] takes, onto the grid: the patterns, and how many moved or were dropped.
+    private fun correct(
+        p: ProjectPatterns,
+        pat: Pattern,
+        pad: PhysicalPad,
+        semitones: Int?,
+        interval: Timing,
+        swing: Int,
+        selected: (Int) -> Boolean,
+    ): Pair<ProjectPatterns, Int> {
+        val len = pat.lengthTicks
+        val moves = HashMap<Int, Int>()
+        pat.notes.forEachIndexed { i, n ->
+            if (on(n, pad, semitones) && selected(n.tick)) moves[i] = Math.floorMod(interval.quantize(n.tick.toDouble(), swing), len.toLong()).toInt()
+        }
+        val (notes, dropped) = settle(pat, moves, movedWins = false)
+        val moved = pat.notes.indices.count { i -> dropped[i] || moves[i].let { it != null && it != pat.notes[i].tick } }
+        return p.with(pad.group, pat.copy(notes = notes)) to moved
+    }
+
     // An erase, clear, length or double: its own checkpoint when it changed anything, and what is recorded next another.
     private fun edit(before: ProjectPatterns, after: ProjectPatterns): ProjectPatterns {
         if (after == before) return before
@@ -255,15 +488,21 @@ class PatternRecorder(private val maxUndo: Int = 32) {
         return after
     }
 
-    private fun push(before: ProjectPatterns) {
-        // Open groups go back as they were before the punch-in: closed, at their old length.
-        var c = before
+    private fun push(before: ProjectPatterns) = pushSeq(seq.withPlaying(closed(before)))
+
+    private fun pushSeq(c: ProjectSeq) {
+        checkpoints.addLast(c)
+        while (checkpoints.size > maxUndo) checkpoints.removeAt(0)
+    }
+
+    // Open groups go back as they were before the punch-in: closed, at their old length.
+    private fun closed(p: ProjectPatterns): ProjectPatterns {
+        var c = p
         for (g in 0 until 4) {
             val pat = c.group(g)
             if (pat.open) c = c.with(g, Pattern(if (pat.isEmpty) openedFrom[g] else pat.bars, pat.notes))
         }
-        checkpoints.addLast(c)
-        while (checkpoints.size > maxUndo) checkpoints.removeAt(0)
+        return c
     }
 
     // A pad held in ERASE while playing: where its last range ended, and whether it pushed its checkpoint.
@@ -274,6 +513,36 @@ class PatternRecorder(private val maxUndo: Int = 32) {
         const val OVERDUB_TICKS = 6
 
         fun on(n: PatternNote, pad: PhysicalPad, semitones: Int?) = n.offset == pad.offset && (semitones == null || n.semitones == semitones)
+
+        /** Whether a note plays on [step] of [pat] (notes past the end are on none). */
+        fun onStep(pat: Pattern, step: Int, interval: Timing, swing: Int): (PatternNote) -> Boolean {
+            val count = Steps.count(pat, interval)
+            return { it.tick < pat.lengthTicks && Steps.indexOf(it.tick, interval, swing, count) == step }
+        }
+
+        /**
+         * [pat]'s notes, in their order, with those at [moves]' indices at
+         * their new ticks. Where notes of one pad and pitch then share a tick
+         * a moved one landed on, one stays: a moved one when [movedWins], else
+         * the first as they were in tick order. Also which notes were dropped.
+         */
+        fun settle(pat: Pattern, moves: Map<Int, Int>, movedWins: Boolean): Pair<List<PatternNote>, BooleanArray> {
+            val notes = pat.notes
+            // Only where a moved note landed can two meet.
+            val landed = moves.map { (i, t) -> Triple(notes[i].offset, notes[i].semitones, t) }.toSet()
+            val order = notes.indices.sortedWith(compareBy({ if (movedWins && it !in moves) 1 else 0 }, { notes[it].tick }))
+            val seen = HashSet<Triple<Int, Int?, Int>>()
+            val dropped = BooleanArray(notes.size)
+            for (i in order) {
+                val t = moves[i] ?: notes[i].tick
+                // Notes past the end aren't played: nothing lands on them.
+                if (t >= pat.lengthTicks) continue
+                val k = Triple(notes[i].offset, notes[i].semitones, t)
+                if (k in landed && !seen.add(k)) dropped[i] = true
+            }
+            val out = notes.mapIndexedNotNull { i, n -> if (dropped[i]) null else moves[i]?.let { n.copy(tick = it) } ?: n }
+            return out to dropped
+        }
 
         /** 1, 2, 4 or 8 bars: the power of two at or over [bars], at most [Seq.MAX_AUTO_BARS]. */
         fun autoBars(bars: Int): Int {

@@ -639,6 +639,150 @@ class PatternSchedulerTest {
         assertEquals(padShape.gain * Arp.velocityGain(32), soft.shape.gain, 1e-6f)
     }
 
+    // A plan with [now] playing, and the group's [queued] pattern from its tick; [also] are other groups' patterns playing.
+    private fun switching(now: Pattern, vararg queued: Pair<Int, QueuedSwitch>, also: Map<Int, Pattern> = emptyMap()): SeqPlan {
+        var p = ProjectPatterns()
+        for ((g, pat) in also) p = p.with(g, pat)
+        for ((g, _) in queued) p = p.with(g, now)
+        return SeqPlan(p, voices(), emptyMap(), 120.0, queued.toMap())
+    }
+
+    // What started up to tick [until]: its tick (250 frames each at this tempo) and voice.
+    private fun startsBefore(r: Rig, until: Long): List<Pair<Long, String>> =
+        r.sink.starts.filter { it.at < ahead + until * 250 }.map { (it.at - ahead) / 250 to it.key }
+
+    // A bar with a hit on pad [pad] (0..11) at each of [ticks].
+    private fun hits(pad: Int, vararg ticks: Int) = Pattern(1, ticks.mapIndexed { i, t -> PatternNote(t, pad, 24, id = i + 1) })
+
+    @Test
+    fun `a switch at a bar line plays the old pattern before it and the queued one from it`() {
+        val r = Rig()
+        // A's beats on A 1, B's two hits on A 2: B takes over at bar 3 (tick 768), and is on its own bar 1 there.
+        r.s.plan = switching(beats(), 0 to QueuedSwitch(hits(1, 0, 192), 2L * Seq.TICKS_PER_BAR))
+        r.s.play(0)
+        r.run(ahead + 4 * bar)
+        val a = listOf(0L, 96, 192, 288, 384, 480, 576, 672).map { it to "live:0:0" }
+        val b = listOf(768L, 960, 1152, 1344).map { it to "live:0:1" }
+        assertEquals(a + b, startsBefore(r, 4L * Seq.TICKS_PER_BAR))
+    }
+
+    @Test
+    fun `a switch at a pattern end drops the old pattern's second pass and starts the queued one on its tick`() {
+        val r = Rig()
+        // A is 2 bars, a note in each: the switch at tick 768 is its end. B is a bar: it plays at 768 and again at 1152.
+        val a = Pattern(2, listOf(PatternNote(0, 0, 24, id = 1), PatternNote(400, 0, 24, id = 2)))
+        r.s.plan = switching(a, 0 to QueuedSwitch(hits(1, 0), 768))
+        r.s.play(0)
+        r.run(ahead + 4 * bar)
+        assertEquals(
+            listOf(0L to "live:0:0", 400L to "live:0:0", 768L to "live:0:1", 1152L to "live:0:1"),
+            startsBefore(r, 4L * Seq.TICKS_PER_BAR),
+        )
+    }
+
+    @Test
+    fun `an immediate switch keeps the queued pattern on the transport's bar 1, whatever tick it comes at`() {
+        val r = Rig()
+        // From tick 100: the old pattern plays its notes at 0 and 96; B's note at 0 is before the switch, so it doesn't play
+        // and the old note at 288 is after it, so nor does that; B's at 192 does, and B loops on from its own tick 0.
+        r.s.plan = switching(beats(), 0 to QueuedSwitch(hits(1, 0, 192), 100))
+        r.s.play(0)
+        r.run(ahead + 2 * bar)
+        assertEquals(
+            listOf(0L to "live:0:0", 96L to "live:0:0", 192L to "live:0:1", 384L to "live:0:1", 576L to "live:0:1"),
+            startsBefore(r, 2L * Seq.TICKS_PER_BAR),
+        )
+    }
+
+    @Test
+    fun `two groups switch at their own ticks`() {
+        val r = Rig()
+        val a = Pattern(1, listOf(PatternNote(0, 0, 24, id = 1), PatternNote(192, 0, 24, id = 2)))
+        val b = Pattern(1, listOf(PatternNote(96, 1, 24, id = 3)))
+        // A switches at bar 2, B at bar 3.
+        r.s.plan = switching(a, 0 to QueuedSwitch(b, 384), 1 to QueuedSwitch(b, 768))
+        r.s.play(0)
+        r.run(ahead + 3 * bar)
+        assertEquals(
+            listOf(
+                0L to "live:0:0", 0L to "live:1:0", 192L to "live:0:0", 192L to "live:1:0",
+                384L to "live:1:0", 480L to "live:0:1", 576L to "live:1:0", 864L to "live:0:1", 864L to "live:1:1",
+            ),
+            startsBefore(r, 3L * Seq.TICKS_PER_BAR),
+        )
+    }
+
+    @Test
+    fun `a group with no queue is left as it was`() {
+        val r = Rig()
+        val other = Pattern(1, listOf(PatternNote(48, 5, 24, id = 9)))
+        r.s.plan = switching(beats(), 0 to QueuedSwitch(hits(1, 0), 384), also = mapOf(2 to other))
+        r.s.play(0)
+        r.run(ahead + 2 * bar)
+        val c = startsBefore(r, 2L * Seq.TICKS_PER_BAR).filter { it.second == "live:2:5" }
+        assertEquals(listOf(48L, 432L), c.map { it.first })
+    }
+
+    @Test
+    fun `the plan taking the queued pattern in place of the queue neither repeats nor skips a note`() {
+        val b = hits(1, 0, 96, 192, 288)
+        val queued = switching(beats(), 0 to QueuedSwitch(b, 384))
+        val whole = Rig()
+        whole.s.plan = queued
+        whole.s.play(0)
+        whole.run(ahead + 4 * bar)
+        // The controller applies the switch once the playhead passes it: the pattern itself, no queue.
+        val applied = Rig()
+        applied.s.plan = queued
+        applied.s.play(0)
+        applied.run(ahead + 384 * 250 + 4800)
+        applied.s.plan = SeqPlan(ProjectPatterns().with(0, b), voices(), emptyMap(), 120.0)
+        applied.run(ahead + 4 * bar)
+        assertEquals(startsBefore(whole, 1536), startsBefore(applied, 1536))
+        assertEquals(whole.sink.starts.map { it.at }, applied.sink.starts.map { it.at })
+    }
+
+    @Test
+    fun `a switch queued at the free tick finds nothing of the old pattern sent from it, and the queued one whole`() {
+        // Hits every 24 ticks, the old pattern on pad 0 and the queued one on pad 1, so the window the switch lands in has some.
+        val every = IntArray(16) { it * 24 }
+        val r = Rig()
+        assertEquals(Long.MIN_VALUE, r.s.freeTick)
+        r.s.plan = plan(0, hits(0, *every))
+        r.s.play(0)
+        r.run(ahead + bar / 2 + 1234)
+        val at = r.s.freeTick
+        // Past what was sent: the old pattern's notes sent so far are all before it.
+        assertTrue(r.sink.starts.all { (it.at - ahead) / 250 < at })
+        assertTrue(at > (r.rendered - ahead) / 250)
+        r.s.plan = switching(hits(0, *every), 0 to QueuedSwitch(hits(1, *every), at))
+        r.run(ahead + 2 * bar)
+        val heard = startsBefore(r, 2L * Seq.TICKS_PER_BAR)
+        assertTrue(heard.none { it.second == "live:0:0" && it.first >= at })
+        val queued = (0 until 2L * Seq.TICKS_PER_BAR step 24).filter { it >= at }.map { it to "live:0:1" }
+        assertEquals(queued, heard.filter { it.second == "live:0:1" })
+        r.s.stop()
+        r.run(r.rendered + 192)
+        assertEquals(Long.MIN_VALUE, r.s.freeTick)
+    }
+
+    @Test
+    fun `a note of the old pattern sounding at the switch is let go of at its own gate`() {
+        val r = Rig()
+        // A's note starts at 300 and lasts to 500; the switch at 384 takes the pattern, not the gate.
+        val a = Pattern(1, listOf(PatternNote(300, 0, 200, id = 1)))
+        r.s.plan = switching(a, 0 to QueuedSwitch(hits(1, 0), 384))
+        r.s.play(0)
+        r.run(ahead + 2 * bar)
+        val held = r.sink.starts.first { it.key == "live:0:0" }
+        val release = r.sink.releases.first { it.key == "live:0:0" }
+        assertEquals(held.tag, release.tag)
+        assertEquals(ahead + 500 * 250, release.at)
+        assertEquals(listOf(300L to "live:0:0", 384L to "live:0:1"), startsBefore(r, 768))
+        // Nothing dropped but what PLAY's own start dropped.
+        assertEquals(1, r.sink.events.count { it === Flushed })
+    }
+
     @Test
     fun `steps are told for RECORD only while the pattern runs, which they move onto at its start`() {
         val r = Rig()

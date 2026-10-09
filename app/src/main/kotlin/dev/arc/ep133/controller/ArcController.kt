@@ -319,8 +319,15 @@ private const val PATTERN_LOOP_MS = 100L
 /** And this often while ERASE is held on a pad, so the notes go before the sequencer sends them. */
 private const val PATTERN_ERASE_MS = 20L
 
-/** A press in ERASE let go of sooner than this is a tap: it erases the pad's every note. */
-private const val ERASE_TAP_NS = 200_000_000L
+/**
+ * A scene's or pattern's pick waiting takes over in the model this long after its tick is heard (the sequencer
+ * played it from the tick all the same): a press just before the tick, told late (a scroll's wait), still records
+ * into the pattern it was played over.
+ */
+private const val SCENE_GRACE_NS = 100_000_000L
+
+/** A press in ERASE (or CORRECT, while playing) let go of sooner than this is a tap: it erases (corrects) the pad's every note. */
+internal const val ERASE_TAP_NS = 200_000_000L
 
 /** A recording's key in Live's pad memory: its file in arc's samples folder. */
 private fun recordedKey(file: String) = "rec:$file"
@@ -1958,8 +1965,10 @@ class ArcController(
         tapTempo.reset()
         // A punch-in lasts while it is held; the next output starts with none.
         fxDesk.punchAllUp()
-        // The arp's notes go with the output; it stays on.
+        // The arp's notes go with the output; it stays on. So do the STEP panel's auditions.
         arpClear()
+        stepAuditions.values.forEach(Job::cancel)
+        stepAuditions.clear()
         held.clear()
         cut.clear()
         unsure.clear()
@@ -2055,6 +2064,12 @@ class ArcController(
         record: Boolean = true,
     ): Job? {
         val key = "live:${pad.group}:${pad.offset}"
+        // The PAD flow of SCENE's CLIP row waiting for a pad: the tap is its, neither played nor recorded (one
+        // a scroll may yet take, once kept: [keepPad]).
+        if (record && sceneDesk.padStage != PadStage.NONE) {
+            if (unsure && hold) sceneTaps += key else scenePadTap(pad)
+            return null
+        }
         // The arp on (RPT): the press holds the pad for note repeat, not played or recorded itself.
         // One a scroll may yet take becomes the KEYS sound, and starts RECORD armed, once kept ([keepPad]).
         if (record && arpTakes(hold)) {
@@ -2088,6 +2103,11 @@ class ArcController(
      */
     fun keepPad(pad: dev.arc.ep133.features.PhysicalPad): Job? {
         val key = "live:${pad.group}:${pad.offset}"
+        // One the PAD flow was waiting for: its tap.
+        if (sceneTaps.remove(key)) {
+            scenePadTap(pad)
+            return null
+        }
         // One the arp holds: neither played nor recorded itself.
         arpDesk.keep(key)?.let { at ->
             setKeysPad(pad)
@@ -2114,6 +2134,7 @@ class ArcController(
     fun cutPad(pad: dev.arc.ep133.features.PhysicalPad) {
         val key = "live:${pad.group}:${pad.offset}"
         held -= key
+        sceneTaps -= key
         // Nor does it repeat.
         if (arpDesk.cut(key)) publishArp()
         // A note it recorded (a sure press a swipe took over) was no press either.
@@ -2705,7 +2726,7 @@ class ArcController(
      * input last chosen, metering it at once; nothing records until a pad is
      * held. Without the mic
      * ([micAllowed] false, as the activity found it) MIC and USB aren't
-     * offered and RSP stands in. EDIT's pad sheet closes, and TEMPO's click
+     * offered and RSP stands in. STEP's and the scene panel and EDIT's pad sheet close, and TEMPO's click
      * stops: its key is under the panel, and the phone's speaker would play
      * into a MIC take (BARS' count-in starts it for its bar). PATTERN stops
      * recording, and plays on. Called again
@@ -2722,6 +2743,9 @@ class ArcController(
             return
         }
         stoppedInBackground = false
+        // The panels share the function keys' place: SAMPLE's closes STEP's and SCENE's.
+        closeStep()
+        closeScene()
         closePadEdit()
         setClick(false)
         // PATTERN stops recording; PLAY goes on, for a take of what it plays.
@@ -3626,11 +3650,13 @@ class ArcController(
     private var patternsLoaded = false
     // Something was recorded or changed before the file was read: it is newer than the file.
     private var patternsTouched = false
-    // The project the patterns played and recorded are (0: none known yet), and its patterns as they stand.
+    // The project the patterns played and recorded are (0: none known yet), its sequencer as it stands, and the
+    // patterns its scene plays (projectSeq.playing(), kept as one value so a change is told by identity).
     private var patternProject = 0
+    private var projectSeq = dev.arc.ep133.features.ProjectSeq.DEFAULT
     @Volatile
     private var projectPatterns = ProjectPatterns()
-    // A recorder (and its UNDO) for each project this run: a note's id is its recorder's own.
+    // A recorder (and its UNDO) for each project this run: a note's id is its recorder's own. Its seq is the project's.
     private val patternRecorders = HashMap<Int, dev.arc.ep133.features.PatternRecorder>()
     private val patternRecorder get() = patternRecorders.getOrPut(patternProject) { dev.arc.ep133.features.PatternRecorder() }
     private val transport = dev.arc.ep133.features.Transport()
@@ -3686,6 +3712,23 @@ class ArcController(
     /** ARP / RPT for Live: on, latched, the notes it plays, the settings and TIMING, and the display line while it plays. */
     val arp: StateFlow<ArpUi> = _arp.asStateFlow()
 
+    // The STEP panel, the cursors and CORRECT; the notes auditioned (by voice key, let go of after their gate); the line's count's end.
+    private val stepDesk = StepDesk { n -> stepWord(n, mirror?.nameOf(n.pad), settings.value.keysNames) }
+    private val stepAuditions = HashMap<String, Job>()
+    private var stepShown: Job? = null
+    private val _step = MutableStateFlow(StepUi())
+
+    /** STEP for Live: the panel, the cursor's step on the group's pattern, NUDGE and CORRECT, and the status line. */
+    val step: StateFlow<StepUi> = _step.asStateFlow()
+
+    // The scene panel, the picks waiting for their tick and the clipboard; the pads tapped on the scrolling page that the PAD flow may take.
+    private val sceneDesk = SceneDesk { pad -> stepWord(StepNote(pad, null), mirror?.nameOf(pad), settings.value.keysNames) }
+    private val sceneTaps = HashSet<String>()
+    private val _scene = MutableStateFlow(SceneUi(switchTime = settings.value.sceneSwitch))
+
+    /** SCENE for Live: the scene, each group's pattern and what waits to take over, the panel, the 1–99 grid, the CLIP row and the status line. */
+    val scene: StateFlow<SceneUi> = _scene.asStateFlow()
+
     init {
         liveAudio.sequencer = patternScheduler
         // A note whose pad has no sound in the plan, told on the output's thread: the plan is made again here.
@@ -3712,6 +3755,17 @@ class ArcController(
     }
 
     init {
+        // TIMING's interval and swing: the STEP panel's cursor keeps its place on the new grid.
+        scope.launch {
+            settings.map { it.timing }.distinctUntilChanged().drop(1).collect { publishStep() }
+        }
+        // The scene change setting: the panel's CHANGE chip follows.
+        scope.launch {
+            settings.map { it.sceneSwitch }.distinctUntilChanged().drop(1).collect { publishScene() }
+        }
+    }
+
+    init {
         // A step played while the pattern runs, told on the output's thread: recorded here.
         patternScheduler.onArpStep = { step -> scope.launch { recordArpStep(step) } }
         // The settings: TIMING, the arp's, ARP on or off (off, its notes go), the notes' names.
@@ -3732,12 +3786,12 @@ class ArcController(
         if (patternsLoaded) return
         patternsLoaded = true
         if (patternsTouched) {
-            patterns = read.put(patternProject, projectPatterns)
+            patterns = read.put(patternProject, projectSeq)
             savePatterns()
             return
         }
         patterns = read
-        projectPatterns = read.of(patternProject)
+        useSeq(read.of(patternProject))
         refreshPatternPlan()
         showPattern()
     }
@@ -3745,7 +3799,7 @@ class ArcController(
     /** Keeps the patterns (written whole, then renamed over the file); none deletes the file. */
     private fun savePatterns() {
         if (!patternsLoaded) return
-        val all = patterns.put(patternProject, projectPatterns)
+        val all = patterns.put(patternProject, projectSeq)
         patterns = all
         scope.launch(Dispatchers.IO) {
             synchronized(patternsFile) {
@@ -3767,12 +3821,17 @@ class ArcController(
     private suspend fun switchPatterns(project: Int) {
         loadPatterns()
         if (project == patternProject) return
+        // The scene panel, its picks waiting and its clipboard are the other project's: dropped, not applied by the STOP.
+        sceneDesk.reset()
+        sceneTaps.clear()
         patternStop()
-        // The arp's notes were the other project's pads.
+        // The arp's notes were the other project's pads, and so was the STEP panel's pattern.
         arpClear()
+        closeStep()
         savePatterns()
         patternProject = project
-        projectPatterns = patterns.of(project)
+        stepDesk.project = project
+        useSeq(patterns.of(project))
         patternSkip = emptyMap()
         patternTried.clear()
         _pattern.update { it.copy(project = project) }
@@ -3780,10 +3839,19 @@ class ArcController(
         showPattern()
     }
 
-    /** The project's patterns are [p] now: the sequencer and the line follow, and (not recording) they are kept. */
+    /** The project's sequencer is [seq] now, the patterns playing its scene's; the recorder's seq follows. */
+    private fun useSeq(seq: dev.arc.ep133.features.ProjectSeq) {
+        projectSeq = seq
+        projectPatterns = seq.playing()
+        patternRecorder.seq = seq
+    }
+
+    /** The project's patterns are [p] now (back in their scene's slots): the sequencer and the line follow, and (not recording) they are kept. */
     private fun setPatterns(p: ProjectPatterns) {
         if (p === projectPatterns) return
+        projectSeq = projectSeq.withPlaying(p)
         projectPatterns = p
+        patternRecorder.seq = projectSeq
         patternsTouched = true
         refreshPatternPlan()
         showPattern()
@@ -3791,11 +3859,30 @@ class ArcController(
         if (!transport.state.recording) savePatterns()
     }
 
-    private fun showPattern() = _pattern.update { patternShown(it, projectPatterns, transport.state, patternRecorder.canUndo) }
+    /**
+     * The project's sequencer is [seq] now after a pick, an edit of the scenes or the banks, or an UNDO: the
+     * patterns playing, the sequencer and Live follow, and (not recording) it is kept.
+     */
+    private fun setSeq(seq: dev.arc.ep133.features.ProjectSeq) {
+        if (seq === projectSeq) return
+        useSeq(seq)
+        patternsTouched = true
+        refreshPatternPlan()
+        showPattern()
+        // Recording, it is kept at the punch-out.
+        if (!transport.state.recording) savePatterns()
+    }
+
+    private fun showPattern() {
+        _pattern.update { patternShown(it, projectPatterns, transport.state, patternRecorder.canUndo) }
+        publishStep()
+        publishScene()
+    }
 
     /**
      * Hands the sequencer what it plays ([dev.arc.ep133.audio.SeqPlan]): the
-     * patterns, the sounds of their pads in memory as each pad plays them
+     * patterns and those waiting to take over a group, the sounds of their
+     * pads in memory as each pad plays them
      * (its settings as known), the passes heard live, and TEMPO's tempo. Not
      * when nothing changed. Pads whose sounds aren't in memory load quietly,
      * from arc's copies or a backup ([loadPatternPad]); the line counts them.
@@ -3803,11 +3890,14 @@ class ArcController(
     private fun refreshPatternPlan() {
         val p = projectPatterns
         val m = mirror
-        val (voices, missing) = patternVoices(p.usedPads(), ::padInMemory, { pad, keys -> shapeFor(pad, keys) }) { pad -> m?.sampleOf(pad) != null }
+        // The picks waiting, as the patterns that take over: read from the sequencer as it stands, so a note recorded meanwhile is in them.
+        val queued = sceneDesk.targets(projectSeq).mapValues { (g, q) -> dev.arc.ep133.audio.QueuedSwitch(projectSeq.pattern(g, q.to), q.at) }
+        val pads = queued.entries.fold(p.usedPads()) { all, (g, q) -> all + q.pattern.playable().map { dev.arc.ep133.features.PhysicalPad(g, it.offset) } }
+        val (voices, missing) = patternVoices(pads, ::padInMemory, { pad, keys -> shapeFor(pad, keys) }) { pad -> m?.sampleOf(pad) != null }
         val bpm = patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo)
         val old = patternScheduler.plan
-        if (old.patterns !== p || old.skip !== patternSkip || old.bpm != bpm || !sameVoices(old.voices, voices)) {
-            patternScheduler.plan = dev.arc.ep133.audio.SeqPlan(p, voices, patternSkip, bpm)
+        if (old.patterns !== p || old.skip !== patternSkip || old.bpm != bpm || old.queued != queued || !sameVoices(old.voices, voices)) {
+            patternScheduler.plan = dev.arc.ep133.audio.SeqPlan(p, voices, patternSkip, bpm, queued)
         }
         for (pad in missing) loadPatternPad(pad)
         if (_pattern.value.missing != missing.size) _pattern.update { it.copy(missing = missing.size) }
@@ -3871,12 +3961,12 @@ class ArcController(
     fun patternStop() = patternAct { transport.stop() }
 
     /**
-     * A pad or KEYS note played at [at] (not in SAMPLE): with RECORD armed,
+     * A pad or KEYS note played at [at] (not in SAMPLE or the STEP panel): with RECORD armed,
      * the recording starts right there, bar 1 on the press, as on the
      * device. True when it did: that press is the run's first note.
      */
     private fun patternPadDown(at: Long): Boolean {
-        if (transport.state.phase != TransportPhase.ARMED || sampleMode.value.on) return false
+        if (!pressArms(transport.state.phase, sampleMode.value.on, stepDesk.open)) return false
         patternAct { transport.padDown(at) }
         return transport.state.recording
     }
@@ -3896,6 +3986,8 @@ class ArcController(
         val armed = transport.state.phase == TransportPhase.ARMED
         patternScheduler.armed = armed
         if (armed && !liveAudio.isOpen) openLiveAudio()
+        // The STEP panel is for a stopped transport: one that starts folds it.
+        if (stepDesk.open && transport.state.phase != TransportPhase.STOPPED) closeStep()
         showPattern()
     }
 
@@ -3912,6 +4004,8 @@ class ArcController(
             toast(dev.arc.ep133.text.MirrorText.NO_OUTPUT, error = true)
             return
         }
+        // The STEP panel's auditions go: their release, due later, would cut the pattern's own notes on their keys.
+        auditionsEnd()
         // PLAY starts the passes from 0: what was heard live in another run is played again.
         patternSkip = emptyMap()
         patternHeld.clear()
@@ -3936,9 +4030,16 @@ class ArcController(
             setPatterns(patternRecorder.punchOut(heldNotesEnded(projectPatterns, patternRecorder, patternHeld.values, tick), tick))
         }
         patternScheduler.stop()
+        // A pick still waiting takes over at once, as every change does while stopped.
+        sceneFlush()
         patternPressAt = null
         patternHeld.clear()
         eraseHolds.clear()
+        // The pads held to correct let go; the line keeps their count a moment.
+        if (stepDesk.holding) {
+            stepDesk.holdsEnd(patternRecorder)
+            stepCorrectedShown()
+        }
         patternSkip = emptyMap()
         countInClickOff()
         _pattern.update { it.copy(countIn = null) }
@@ -3964,9 +4065,10 @@ class ArcController(
 
     /**
      * While the transport runs, from the first time it is heard: the
-     * count-in's beats as they are heard (then PLAYING), AUTO length and the
-     * passes of the groups recorded into, ERASE held. It wakes on each beat,
-     * and more often while ERASE is held.
+     * count-in's beats as they are heard (then PLAYING), the picks waiting
+     * for their tick, AUTO length and the passes of the groups recorded into,
+     * ERASE and CORRECT held. It wakes on each beat, on the tick a pick waits
+     * for, and more often while ERASE or CORRECT is held.
      */
     private fun followPattern() {
         patternLoop?.cancel()
@@ -3977,7 +4079,9 @@ class ArcController(
                 val tick = tl.tickAt(now)
                 followTick(tl, tick, now)
                 val next = tl.nanosOf((floor(tick / Seq.PPQN).toLong() + 1) * Seq.PPQN)
-                delay(((next - now) / 1_000_000L + 1).coerceIn(1L, if (eraseHolds.isEmpty()) PATTERN_LOOP_MS else PATTERN_ERASE_MS))
+                // A pick waiting is found on its tick (and its grace), not on the next beat.
+                val due = sceneDesk.dueTick()?.let { (tl.nanosOf(it) + SCENE_GRACE_NS - now) / 1_000_000L + 1 } ?: Long.MAX_VALUE
+                delay(minOf((next - now) / 1_000_000L + 1, due).coerceIn(1L, if (eraseHolds.isEmpty() && !stepDesk.holding) PATTERN_LOOP_MS else PATTERN_ERASE_MS))
             }
         }
     }
@@ -4001,12 +4105,14 @@ class ArcController(
             countInClickOff()
             showPattern()
         }
+        sceneDue(tl.tickAt(now - SCENE_GRACE_NS))
         val st = transport.state
         if (st.recording && tick >= 0) {
             markPasses(tick)
             setPatterns(patternRecorder.grow(projectPatterns, tick))
         }
         eraseHeld(tl, now)
+        correctHeld(tl, now)
     }
 
     /** The click the count-in turned on goes off again. */
@@ -4057,6 +4163,8 @@ class ArcController(
     private fun recordPress(pad: dev.arc.ep133.features.PhysicalPad, semitones: Int?, key: String, pressedAt: Long, hold: Boolean, first: Boolean = false) {
         if (!transport.state.recording) return
         val tick = patternTickAt(pressedAt) ?: return
+        // A pick whose tick the press is past takes over first: the note goes to the pattern playing then.
+        sceneDue(tick)
         patternGroups += pad.group
         markPasses(tick)
         val r = patternRecorder.noteOn(projectPatterns, pad, semitones, tick, patternTickAt(System.nanoTime()) ?: tick, settings.value.patternTiming, settings.value.timingSwing)
@@ -4135,8 +4243,9 @@ class ArcController(
     /** [pad] held at [pressure] (the touch's own, while note repeat is on): its velocity, on a phone that tells pressure. */
     fun padPressure(pad: dev.arc.ep133.features.PhysicalPad, pressure: Float) = arpPressure("live:${pad.group}:${pad.offset}", pressure)
 
-    // Whether the arp takes a press: it is on, and the press holds (a screen reader's tap, which never lets go, only latched).
-    private fun arpTakes(hold: Boolean): Boolean = settings.value.let { it.arpOn && (hold || it.arpLatch) }
+    // Whether the arp takes a press: it is on, and the press holds (a screen reader's tap, which never lets go, only latched);
+    // not while the STEP panel is open, whose presses are its own.
+    private fun arpTakes(hold: Boolean): Boolean = settings.value.let { arpTakesPress(it.arpOn, it.arpLatch, hold, stepDesk.open) }
 
     /**
      * A press on voice [key] at [pressedAt] while the arp is on: [note]
@@ -4226,6 +4335,7 @@ class ArcController(
         if (!transport.state.recording) return
         val n = step.note
         val tick = step.globalTick.toDouble()
+        sceneDue(tick)
         patternGroups += n.pad.group
         markPasses(tick)
         val r = patternRecorder.noteOn(projectPatterns, n.pad, n.semitones, tick, tick, Timing.OFF, velocity = n.velocity)
@@ -4257,15 +4367,28 @@ class ArcController(
         toast(dev.arc.ep133.text.MirrorText.cleared(group))
     }
 
-    /** UNDO (SHIFT + B on the device): back to before the last pass recorded, erase, clear or length change. */
+    /**
+     * UNDO (SHIFT + B on the device): back to before the last pass recorded, erase, clear, length change, or
+     * edit of the scenes (COMMIT, CLR, DEL, a paste), the project's scenes, banks and picks as they were then.
+     * A pick waiting goes.
+     */
     fun undoPattern() {
-        patternRecorder.undo(projectPatterns)?.let(::setPatterns)
+        patternRecorder.undo(projectSeq)?.let { seq ->
+            sceneDesk.cancel()
+            setSeq(seq)
+        }
         showPattern()
     }
 
-    /** ERASE on or off: on, a pad tapped erases its notes, and one held while playing erases them as they pass. */
+    /** ERASE on or off: on, a pad tapped erases its notes, and one held while playing erases them as they pass. CORRECT goes off with it on. */
     fun setPatternErase(on: Boolean) {
         if (!on) eraseHolds.clear()
+        // A pad tapped is erased, not the PAD flow's.
+        if (on) endPadStage()
+        if (on && stepDesk.correct) {
+            stepDesk.correct(false, patternRecorder)
+            publishStep()
+        }
         _pattern.update { it.copy(erase = on) }
     }
 
@@ -4350,6 +4473,519 @@ class ArcController(
                 if (!started && sampleLatched == pad) sampleLatched = null
             }
         }
+    }
+
+    // ---------- STEP: the pattern a step at a time while stopped, and timing correct (an addition: − / +, RECORD + pad, SHIFT + TIMING) ----------
+
+    /**
+     * The STEP panel opened ([on]) on [group] (Live's one group shown, or the
+     * KEYS sound's), or closed (✕). It opens only while stopped (armed,
+     * RECORD is disarmed first, as STOP does): ERASE goes off, SAMPLE's
+     * panel and the scene panel close (they share the function keys' place), and the arp's
+     * notes go, as its presses are the panel's own. Closing lets go of the
+     * pick, NUDGE, the panel's RECORD and its status; CORRECT stays.
+     */
+    fun setStepOpen(on: Boolean, group: Int = stepDesk.group) {
+        if (!on) {
+            closeStep()
+            return
+        }
+        if (stepDesk.open) {
+            setStepGroup(group)
+            return
+        }
+        if (!stepOpens(transport.state.phase)) return
+        if (transport.state.phase == TransportPhase.ARMED) patternStop()
+        setPatternErase(false)
+        exitSample()
+        closeScene()
+        arpClear()
+        stepDesk.open(patternProject, group)
+        publishStep()
+    }
+
+    /** Live shows [group] now (another group, or the KEYS sound's): the panel steps through it, at that group's cursor. */
+    fun setStepGroup(group: Int) {
+        stepDesk.group(group)
+        publishStep()
+    }
+
+    /** The panel's RECORD goes down: while it is held, a pad or key tapped goes on the cursor's step. Not the transport's RECORD. */
+    fun stepRecordDown() = stepAct { stepDesk.record(true) }
+
+    /** The panel's RECORD comes up: a tap only sounds again. */
+    fun stepRecordUp() = stepAct { stepDesk.record(false) }
+
+    /** The panel's PLAY: the panel folds and the patterns play from bar 1 (CORRECT stays as it is). */
+    fun stepPlay() {
+        closeStep()
+        patternPlay()
+    }
+
+    /**
+     * A pad pressed at [pressedAt] while the STEP panel is open, at the
+     * touch's [pressure] (NaN: none told). With the panel's RECORD held it
+     * goes on the cursor's step at the pressure's velocity (127 on a phone
+     * that doesn't tell pressure) and sounds as a press does; with NUDGE
+     * waiting it is picked instead ([stepPadPick]); else it only sounds,
+     * and with CORRECT on its notes go onto the grid as it lets go. It
+     * neither arms nor records into the pattern, and the arp doesn't take it.
+     */
+    fun stepPadDown(pad: dev.arc.ep133.features.PhysicalPad, pressedAt: Long = System.nanoTime(), pressure: Float = Float.NaN) {
+        if (!stepDesk.open) return
+        val r = stepDesk.press("live:${pad.group}:${pad.offset}", StepNote(pad, null), pressure, projectPatterns, patternRecorder, settings.value.timing)
+        setPatterns(r.patterns)
+        publishStep()
+        if (r.plays) playPad(pad, pressedAt = pressedAt, record = false)
+    }
+
+    /** The pad pressed in the STEP panel let go of at [releasedAt]: its sound fades, and with CORRECT on (and no − / + meanwhile) its notes go onto the grid. */
+    fun stepPadUp(pad: dev.arc.ep133.features.PhysicalPad, releasedAt: Long = System.nanoTime()) {
+        releasePad(pad, releasedAt)
+        stepRelease("live:${pad.group}:${pad.offset}")
+    }
+
+    /** KEYS in the STEP panel: MIDI [note] on the KEYS sound pressed at [pressedAt], as [stepPadDown] (the note goes on the step at its pitch). */
+    fun stepNoteDown(note: Int, pressedAt: Long = System.nanoTime(), pressure: Float = Float.NaN) {
+        if (!stepDesk.open) return
+        val pad = _state.value.keysPad
+        if (pad == null) {
+            toastOnce(dev.arc.ep133.text.MirrorText.PICK_SOUND)
+            return
+        }
+        val n = StepNote(pad, note - dev.arc.ep133.features.Keys.ROOT_NOTE)
+        val r = stepDesk.press("note:$note", n, pressure, projectPatterns, patternRecorder, settings.value.timing)
+        setPatterns(r.patterns)
+        publishStep()
+        if (r.plays) playNote(note, pressedAt = pressedAt)
+    }
+
+    /** KEYS in the STEP panel: the note let go of at [releasedAt], as [stepPadUp]. */
+    fun stepNoteUp(note: Int, releasedAt: Long = System.nanoTime()) {
+        releaseNote(note, releasedAt)
+        stepRelease("note:$note")
+    }
+
+    /**
+     * A long press on [pad] in the STEP panel: picked for − / + to nudge,
+     * when it has a note on the cursor's step (every pitch on it); picked
+     * already, it is let go of. False when it has none there (nothing
+     * changes), and with CORRECT on, where − / + shift a held pad instead.
+     */
+    fun stepPadPick(pad: dev.arc.ep133.features.PhysicalPad): Boolean = stepPick(StepNote(pad, null))
+
+    /** KEYS in the STEP panel: a long press on MIDI [note] of the KEYS sound picks that note, as [stepPadPick]. */
+    fun stepNotePick(note: Int): Boolean {
+        val pad = _state.value.keysPad ?: return false
+        return stepPick(StepNote(pad, note - dev.arc.ep133.features.Keys.ROOT_NOTE))
+    }
+
+    /**
+     * The panel's −: with CORRECT on and a pad held, its notes a tick
+     * earlier; else, a note picked, it is nudged a step earlier (a tick in
+     * free time) and the cursor follows it; else the cursor goes back a
+     * step, wrapping round the pattern, and its notes sound.
+     */
+    fun stepMinus() = stepBy(-1)
+
+    /** The panel's +: as [stepMinus], later. */
+    fun stepPlus() = stepBy(1)
+
+    /** The strip's step [step] tapped: the cursor jumps there and its notes sound; the pick goes. */
+    fun stepJump(step: Int) {
+        if (!stepDesk.open) return
+        stepDesk.jump(step, projectPatterns, patternRecorder, settings.value.timing)
+        publishStep()
+        auditionStep()
+    }
+
+    /** BAR's page [bar] (from 0) tapped: the cursor jumps to that bar's first step, as [stepJump]. */
+    fun stepPage(bar: Int) {
+        if (!stepDesk.open) return
+        stepDesk.page(bar, projectPatterns, patternRecorder, settings.value.timing)
+        publishStep()
+        auditionStep()
+    }
+
+    /** VEL's knob (SHIFT + KNOB X on the device): every note on the cursor's step at [velocity], 1..127. A turn is one UNDO step ([stepKnobEnd]). */
+    fun setStepVelocity(velocity: Int) = stepAct { setPatterns(stepDesk.velocity(velocity, projectPatterns, patternRecorder, settings.value.timing)) }
+
+    /** LEN's knob (SHIFT + KNOB Y): every note on the cursor's step [ticks] long, snapped to [STEP_GATES] (a tick to a bar). A turn is one UNDO step. */
+    fun setStepGate(ticks: Int) = stepAct { setPatterns(stepDesk.gate(ticks, projectPatterns, patternRecorder, settings.value.timing)) }
+
+    /** VEL's or LEN's knob let go of: the next turn is an UNDO step of its own. */
+    fun stepKnobEnd() = patternRecorder.endRun()
+
+    /** NUDGE latched ([on]): a tap picks its pad, as a long press does; off, the pick goes. CORRECT goes off with it on. */
+    fun setStepNudge(on: Boolean) = stepAct { stepDesk.nudge(on, patternRecorder) }
+
+    /**
+     * CORRECT on or off (timing correct, SHIFT + TIMING on the device): in
+     * the panel a pad tapped puts its every note on TIMING's grid and swing
+     * (and sounds); while playing a pad held puts its notes on the grid as
+     * they play ([correctPadDown]), the line counting them. NUDGE and the
+     * pick go either way; ERASE (and the scene panel's PAD flow waiting)
+     * goes off with it on.
+     */
+    fun setStepCorrect(on: Boolean) {
+        if (on) setPatternErase(false)
+        // A pad tapped is corrected, not the PAD flow's.
+        if (on) endPadStage()
+        stepDesk.correct(on, patternRecorder)
+        stepShown?.cancel()
+        publishStep()
+    }
+
+    /** A pad (a KEYS note on it: [semitones]) pressed at [at] with CORRECT on while playing: what it corrects is known as it is let go of, or held. */
+    fun correctPadDown(pad: dev.arc.ep133.features.PhysicalPad, at: Long, semitones: Int? = null) {
+        if (!stepDesk.correct) return
+        stepShown?.cancel()
+        stepDesk.holdDown(eraseKey(pad, semitones), StepNote(pad, semitones), at)
+        publishStep()
+    }
+
+    /**
+     * The pad pressed with CORRECT on let go of at [releasedAt]. A tap, or
+     * any press while not playing, puts its every note on the grid; held
+     * while playing, it corrected its notes as they passed, up to here. The
+     * line says how many, a moment longer.
+     */
+    fun correctPadUp(pad: dev.arc.ep133.features.PhysicalPad, releasedAt: Long, semitones: Int? = null) {
+        val tl = heardTimeline()?.takeIf { transport.state.phase == TransportPhase.PLAYING }
+        val tickAt = tl?.let { t -> { nanos: Long -> t.tickAt(nanos) } }
+        setPatterns(stepDesk.holdUp(eraseKey(pad, semitones), releasedAt, projectPatterns, patternRecorder, settings.value.timing, tickAt))
+        publishStep()
+        if (!stepDesk.holding) stepCorrectedShown()
+    }
+
+    /** KEYS with CORRECT on: MIDI [note] on the KEYS sound pressed at [at], as [correctPadDown]. */
+    fun correctNoteDown(note: Int, at: Long) {
+        val pad = _state.value.keysPad ?: return
+        correctPadDown(pad, at, note - dev.arc.ep133.features.Keys.ROOT_NOTE)
+    }
+
+    /** KEYS with CORRECT on: the note let go of at [releasedAt], as [correctPadUp]. */
+    fun correctNoteUp(note: Int, releasedAt: Long) {
+        val pad = _state.value.keysPad ?: return
+        correctPadUp(pad, releasedAt, note - dev.arc.ep133.features.Keys.ROOT_NOTE)
+    }
+
+    /** Live's STEP follows the patterns, TIMING and the desk. */
+    private fun publishStep() {
+        _step.value = stepDesk.ui(projectPatterns, settings.value.timing)
+    }
+
+    // [change] done on the desk, while the panel is open, and Live follows.
+    private inline fun stepAct(change: () -> Unit) {
+        if (!stepDesk.open) return
+        change()
+        publishStep()
+    }
+
+    /** The panel closes (✕, PLAY, the transport starting, SAMPLE, another project), if it was open. */
+    private fun closeStep() {
+        if (!stepDesk.open) return
+        stepDesk.close(patternRecorder)
+        publishStep()
+    }
+
+    // A finger up on voice [key] in the panel: CORRECT's tap, or the end of − / +'s shift.
+    private fun stepRelease(key: String) {
+        if (!stepDesk.open) return
+        setPatterns(stepDesk.release(key, projectPatterns, patternRecorder, settings.value.timing))
+        publishStep()
+    }
+
+    private fun stepPick(n: StepNote): Boolean {
+        if (!stepDesk.open) return false
+        val picked = stepDesk.pick(n, projectPatterns, patternRecorder, settings.value.timing)
+        publishStep()
+        return picked
+    }
+
+    // − or + ([dir]): CORRECT's shift of a held pad, the picked note's nudge, or the cursor (whose notes sound).
+    private fun stepBy(dir: Int) {
+        if (!stepDesk.open) return
+        val r = stepDesk.minusPlus(dir, projectPatterns, patternRecorder, settings.value.timing)
+        setPatterns(r.patterns)
+        publishStep()
+        if (r.audition) auditionStep()
+    }
+
+    /**
+     * The notes on the cursor's step sound, each as a press of its pad (or
+     * KEYS note) would, at its velocity, untimed: let go of after its gate
+     * at the pattern's tempo, 60 ms to 1.5 s. Only from memory (a sound not
+     * there loads quietly, as the patterns' do); the last audition's notes
+     * still sounding are let go of first.
+     */
+    private fun auditionStep() {
+        auditionsEnd()
+        val t = settings.value.timing
+        val g = stepDesk.group
+        val notes = dev.arc.ep133.features.Steps.notesOn(projectPatterns.group(g), stepDesk.cursor(projectPatterns, t.interval), t.interval, t.swing)
+        if (notes.isEmpty()) return
+        val bpm = patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo)
+        val now = System.nanoTime()
+        for (n in notes) {
+            val pad = dev.arc.ep133.features.PhysicalPad(g, n.offset)
+            val a = padInMemory(pad)
+            if (a == null) {
+                loadPatternPad(pad)
+                continue
+            }
+            // The pattern's own voice keys: a pad hit rings its pad, a KEYS note its key.
+            val key = n.semitones?.let { "seq:$g:${n.offset}:${dev.arc.ep133.features.Keys.ROOT_NOTE + it}" } ?: "live:$g:${n.offset}"
+            // A finger holding it already sounds it.
+            if (key in held || key in stepAuditions) continue
+            val shape = dev.arc.ep133.audio.velocityShape(shapeFor(pad, keys = n.semitones != null), n.velocity)
+            startHeld(key, hold = false, a, n.semitones ?: 0, now, measured = false, shape)
+            stepAuditions[key] = scope.launch {
+                delay(auditionMs(n.gate, bpm))
+                stepAuditions.remove(key)
+                if (key !in held) liveAudio.release(key)
+            }
+        }
+    }
+
+    /**
+     * The notes the STEP panel auditions still sounding are let go of now (a
+     * finger holding one keeps it): before the next audition, and as the
+     * transport starts, whose notes ring on the same voice keys.
+     */
+    private fun auditionsEnd() {
+        for ((key, job) in stepAuditions) {
+            job.cancel()
+            if (key !in held) liveAudio.release(key)
+        }
+        stepAuditions.clear()
+    }
+
+    /**
+     * The pads held to correct while playing put their notes on the grid as
+     * the playhead passes, a lookahead ahead, so the notes go before the
+     * sequencer sends them, as [eraseHeld] does; the line counts them.
+     */
+    private fun correctHeld(tl: dev.arc.ep133.audio.Timeline, now: Long) {
+        if (!stepDesk.holding || transport.state.phase != TransportPhase.PLAYING) return
+        val to = tl.tickAt(now + dev.arc.ep133.audio.PatternScheduler.LOOKAHEAD_NS)
+        setPatterns(stepDesk.held(projectPatterns, patternRecorder, settings.value.timing, to, now) { tl.tickAt(it) })
+        publishStep()
+    }
+
+    /** The line's count of the notes corrected while playing goes a moment after the last pad held lets go. */
+    private fun stepCorrectedShown() {
+        stepShown?.cancel()
+        stepShown = scope.launch {
+            delay(CORRECT_SHOWN_MS)
+            stepDesk.correctedShown()
+            publishStep()
+        }
+    }
+
+    // ---------- SCENES: the pattern each group plays, switched while playing, and copy and paste (an addition: GROUP, MAIN, SHIFT + C / D) ----------
+
+    /**
+     * The scene panel opened ([on]) with column [group] focused (the group Live shows), or closed (✕). It opens
+     * whatever the transport does and stays open while it plays. It shares the function keys' place with STEP's panel
+     * and SAMPLE's: opening it closes them. The pads stay playable and recordable, but for the PAD flow's stages.
+     * Closing drops the grid and the PAD flow; the picks waiting for their tick and the clipboard stay.
+     */
+    fun setSceneOpen(on: Boolean, group: Int = sceneDesk.group) {
+        if (!on) {
+            closeScene()
+            return
+        }
+        if (sceneDesk.open) {
+            setSceneGroup(group)
+            return
+        }
+        closeStep()
+        exitSample()
+        sceneDesk.open(group)
+        publishScene()
+    }
+
+    /** Live shows [group] now (another group, or its column was tapped): the CLIP row's pattern and bar work on it. */
+    fun setSceneGroup(group: Int) {
+        sceneDesk.focus(group)
+        publishScene()
+    }
+
+    /**
+     * [group]'s − (-1) or + (+1): the pattern number as shown (the queued one, if any) a step on, wrapping round
+     * 1..99. Stopped (or armed) it plays at once; counting in or playing it is queued for the tick the scene change
+     * setting gives ([setSceneSwitch]), replacing that group's queue and cancelling a scene's.
+     */
+    fun scenePatternStep(group: Int, dir: Int) = scenePick { at, time -> sceneDesk.stepPattern(projectSeq, group, dir, at, time) }
+
+    /** [group]'s pattern [n] picked on the 1–99 grid (1..99): as [scenePatternStep]. The grid closes. */
+    fun scenePatternPick(group: Int, n: Int) = scenePick { at, time -> sceneDesk.pickPattern(projectSeq, group, n, at, time) }
+
+    /** NEXT FREE: the first pattern of [group] after the number shown with no notes (the number shown when every one has), as [scenePatternStep]. */
+    fun scenePatternNextFree(group: Int) = scenePick { at, time -> sceneDesk.pickNextFree(projectSeq, group, at, time) }
+
+    /** The 1–99 grid opens over the pads for [group], or closes (null). */
+    fun sceneGrid(group: Int?) {
+        sceneDesk.grid(group)
+        publishScene()
+    }
+
+    /**
+     * The scene's − (-1) or + (+1), from the one shown (the queued one, if any): another scene, and + past the last
+     * is a new one ([dev.arc.ep133.features.SceneOps.newScene]: each group on its next free pattern). Stopped it plays
+     * at once; running it is queued for all four groups at one tick: the next bar line under Bar end, the end of the
+     * longest pattern playing under Pattern end. A group's queue goes with it.
+     */
+    fun sceneStep(dir: Int) = scenePick { at, time -> sceneDesk.stepScene(projectSeq, dir, at, time) }
+
+    /**
+     * COMMIT (SHIFT + MAIN on the device): the scene is copied right after itself, into the groups' next free
+     * patterns, and selected: one UNDO step. At once even while playing, the copies being what plays; the picks
+     * waiting go. At 99 scenes the status says so.
+     */
+    fun sceneCommit() = sceneEdit { sceneDesk.commit(projectSeq, patternRecorder) }
+
+    /**
+     * The CLR / DEL key held its 2 s (ERASE + MAIN on the device): an empty scene that isn't the only one is
+     * deleted (DEL), any other is emptied of its notes (CLR); a toast says which. One UNDO step, at once; the picks
+     * waiting go. Nothing when nothing changes (the only scene, already empty).
+     */
+    fun sceneEraseHold() {
+        sceneTickNow()?.let(::sceneDue)
+        val r = sceneDesk.erase(projectSeq, patternRecorder)
+        if (r != null) {
+            setSeq(r.seq)
+            toast(if (r.erase == dev.arc.ep133.features.SceneErase.CLEARED) dev.arc.ep133.text.MirrorText.CLEARED_SCENE else dev.arc.ep133.text.MirrorText.DELETED_SCENE)
+        }
+        publishScene()
+    }
+
+    /** CHANGE (410 to 412 on the device; kept, and the pattern sheet's too): when a pick made while playing takes over. */
+    fun setSceneSwitch(time: dev.arc.ep133.features.SwitchTime) = changeSettings { it.copy(sceneSwitch = time) }
+
+    /** The CLIP row's PTN, BAR or PAD; a PAD flow waiting is dropped. */
+    fun setClipMode(mode: ClipMode) {
+        sceneDesk.mode(mode)
+        publishScene()
+    }
+
+    /** The bar page BAR copies and pastes, [bar] from 0 (held to the focused group's length). */
+    fun setClipBar(bar: Int) {
+        sceneDesk.page(bar)
+        publishScene()
+    }
+
+    /**
+     * COPY: in PTN the focused group's pattern goes to the clipboard, in BAR its bar page's notes; in PAD it waits for
+     * a tap on the pad to copy ([scenePadTap]; COPY again drops it), the pads taking no other press till then (ERASE
+     * and CORRECT go off).
+     */
+    fun clipCopy() {
+        sceneDesk.copy(projectSeq)
+        stageBegun()
+        publishScene()
+    }
+
+    /**
+     * PASTE: in PTN the clipboard's pattern replaces the focused group's pattern, in BAR the clipboard's notes the bar
+     * page's (one UNDO step each); in PAD it waits for a tap on the pad to paste onto, which may be in another group
+     * once the group key is switched. With nothing of that kind copied the status says so.
+     */
+    fun clipPaste() = sceneEdit {
+        sceneDesk.paste(projectSeq, patternRecorder).also { stageBegun() }
+    }
+
+    /**
+     * A pad tapped while the PAD flow waits (the pads' own press goes here by itself, as [playPad]): the pad COPY takes,
+     * or the pad PASTE puts the clipboard's notes on (one UNDO step). It neither plays nor records, and the flow ends.
+     * False when none waits.
+     */
+    fun scenePadTap(pad: dev.arc.ep133.features.PhysicalPad): Boolean {
+        if (sceneDesk.padStage == PadStage.NONE) return false
+        sceneEdit { sceneDesk.padTap(pad, projectSeq, patternRecorder) }
+        return true
+    }
+
+    /** Live's SCENE follows the sequencer, the settings and the desk. */
+    private fun publishScene() {
+        _scene.value = sceneDesk.ui(projectSeq, settings.value.sceneSwitch)
+    }
+
+    // A pick: the desk plays it at once while stopped ([at] null) or queues it for its tick; the sequencer, its plan and Live follow.
+    // A pick waiting that the sequencer may have played from already takes over first, not replaced.
+    private inline fun scenePick(pick: (at: Double?, time: dev.arc.ep133.features.SwitchTime) -> dev.arc.ep133.features.ProjectSeq) {
+        val at = sceneTickNow()
+        if (at != null) sceneDue(at)
+        setSeq(pick(at, settings.value.sceneSwitch))
+        // A queue made or dropped: the plan has it.
+        refreshPatternPlan()
+        publishScene()
+        // On its tick, not the next beat's.
+        if (sceneDesk.waiting > 0) wakePattern()
+    }
+
+    // An edit of the sequencer on the desk (already one UNDO step), and Live follows. A pick the sequencer may have played from
+    // already takes over first: the edit's on what is heard, and one it drops would be heard undone.
+    private inline fun sceneEdit(edit: () -> dev.arc.ep133.features.ProjectSeq) {
+        sceneTickNow()?.let(::sceneDue)
+        setSeq(edit())
+        publishScene()
+    }
+
+    // The PAD flow began waiting for a pad: ERASE and CORRECT go off, whose taps are their own (and come first).
+    private fun stageBegun() {
+        if (sceneDesk.padStage == PadStage.NONE) return
+        if (_pattern.value.erase) setPatternErase(false)
+        if (stepDesk.correct) setStepCorrect(false)
+    }
+
+    // Running, the tick a pick made now goes from: the one heard, but no earlier than the sequencer can still switch at (what
+    // it has sent ahead of the ear is the old pattern's). Null while stopped (or not heard yet): a pick plays at once.
+    private fun sceneTickNow(): Double? =
+        if (patternRunning()) patternTickAt(System.nanoTime())?.let { maxOf(it, patternScheduler.freeTick.toDouble()) } else null
+
+    // The PAD flow is dropped (ERASE came on).
+    private fun endPadStage() {
+        if (sceneDesk.padStage == PadStage.NONE) return
+        sceneDesk.endStage()
+        publishScene()
+    }
+
+    /** The panel closes (✕, STEP, SAMPLE, another project), if it was open. */
+    private fun closeScene() {
+        if (!sceneDesk.open) return
+        sceneDesk.close()
+        sceneTaps.clear()
+        publishScene()
+    }
+
+    /**
+     * The picks waiting whose tick the playhead has passed ([tick], as heard) take over, as [followTick] finds them
+     * and a press past one: the sequencer takes the pattern, which the sequencer's plan was playing from the tick already.
+     */
+    private fun sceneDue(tick: Double) {
+        val waiting = sceneDesk.waiting
+        if (waiting == 0) return
+        val out = sceneDesk.due(projectSeq, tick)
+        if (sceneDesk.waiting == waiting && out === projectSeq) return
+        setSeq(out)
+        // The queue went: the plan has none.
+        refreshPatternPlan()
+        publishScene()
+    }
+
+    // STOP: every pick waiting takes over at once.
+    private fun sceneFlush() {
+        if (sceneDesk.waiting == 0) return
+        setSeq(sceneDesk.flush(projectSeq))
+        refreshPatternPlan()
+        publishScene()
+    }
+
+    // The follow loop wakes now, so a pick just queued is found on its tick.
+    private fun wakePattern() {
+        if (patternLoop?.isActive == true) followPattern()
     }
 
     // ---------- PROJECT: the next project (an addition) ----------

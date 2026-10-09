@@ -2,6 +2,7 @@ package dev.arc.ep133.data
 
 import dev.arc.ep133.features.ArpOrder
 import dev.arc.ep133.features.ArpSettings
+import dev.arc.ep133.features.SwitchTime
 import dev.arc.ep133.features.Timing
 import dev.arc.ep133.features.TimingSettings
 import dev.arc.ep133.text.LiveEngine
@@ -175,6 +176,19 @@ class AppSettingsTest {
         assertEquals(AppSettings(), AppSettings().withIndex(odd))
         // The arp's helper holds octaves and gate to their ranges.
         assertEquals(ArpSettings(ArpOrder.DOWN, 3, 10, false), AppSettings().withArp(ArpSettings(ArpOrder.DOWN, 7, 0)).arp)
+    }
+
+    @Test
+    fun `the scene change setting starts Immediate, under a key of its own, and round-trips by its word`() {
+        assertEquals(SwitchTime.IMMEDIATE, AppSettings().sceneSwitch)
+        assertEquals("now", AppSettings().values()["sceneSwitch"])
+        for (t in SwitchTime.entries) {
+            val chosen = AppSettings(sceneSwitch = t)
+            assertEquals(t.id, chosen.values()["sceneSwitch"])
+            assertEquals(chosen, AppSettings().withIndex(chosen.values().mapKeys { "app." + it.key }))
+        }
+        // A word arc doesn't know, from another version: left as it is.
+        assertEquals(SwitchTime.BAR, AppSettings(sceneSwitch = SwitchTime.BAR).withIndex(mapOf("app.sceneSwitch" to "song")).sceneSwitch)
     }
 
     @Test

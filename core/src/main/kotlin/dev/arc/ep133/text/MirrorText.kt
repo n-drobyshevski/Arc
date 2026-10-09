@@ -6,8 +6,11 @@ import dev.arc.ep133.features.FxType
 import dev.arc.ep133.features.Hit
 import dev.arc.ep133.features.PadNotes
 import dev.arc.ep133.features.PhysicalPad
+import dev.arc.ep133.features.ProjectSeq
 import dev.arc.ep133.features.ProjectSource
 import dev.arc.ep133.features.SampleSource
+import dev.arc.ep133.features.Seq
+import dev.arc.ep133.features.SwitchTime
 import dev.arc.ep133.features.Timing
 import dev.arc.ep133.features.TransportPhase
 import dev.arc.ep133.features.TransportState
@@ -745,6 +748,282 @@ object MirrorText {
         TransportPhase.ARMED -> "Record armed"
         TransportPhase.COUNT_IN -> "Counting in"
         TransportPhase.PLAYING -> if (state.recording) "Recording" else PLAYING
+    }
+
+    // ---------- SCENES: the pattern each group plays, picked as MAIN and GROUP do on the device; copy and paste ----------
+    /** "P01": a group's pattern [n] (1..99). */
+    fun patternLabel(n: Int) = "P${twoDigits(n)}"
+
+    /** "S01": the scene at [index] (from 0), shown from 1. */
+    fun sceneLabel(index: Int) = "S${twoDigits(index + 1)}"
+
+    /** "A01": [group]'s pattern [n], as the group keys and the scene line show it. */
+    fun groupPattern(group: Int, n: Int) = "${'A' + group}${twoDigits(n)}"
+
+    /** "S01 · A01 B03 C01 D02": the scene playing, and each group's pattern in it. */
+    fun sceneLine(seq: ProjectSeq) = "${sceneLabel(seq.scene)} · " + (0 until 4).joinToString(" ") { g -> groupPattern(g, seq.selected(g)) }
+
+    /** The scene change setting's choices (410 to 412 on the device). */
+    fun switchName(t: SwitchTime) = when (t) {
+        SwitchTime.IMMEDIATE -> "Immediate"
+        SwitchTime.BAR -> "Bar end"
+        SwitchTime.PATTERN -> "Pattern end"
+    }
+
+    /** "P01 → P05": a group's pattern playing, and the one waiting to take over. */
+    fun queuedLabel(from: Int, to: Int) = "${patternLabel(from)} → ${patternLabel(to)}"
+
+    /** What SHIFT + C copied: pattern [n], [bar] (as shown, from 1) or a pad's notes (the pad's [name]). */
+    fun copiedPattern(n: Int) = "${patternLabel(n)} copied."
+    fun copiedBar(bar: Int) = "Bar $bar copied."
+    fun copiedPad(name: String) = "$name copied."
+
+    /** Where SHIFT + D pasted: into pattern [n], [bar] (from 1) or onto a pad (its [name]). */
+    fun pastedPattern(n: Int) = "Pasted into ${patternLabel(n)}."
+    fun pastedBar(bar: Int) = "Pasted into bar $bar."
+    fun pastedPad(name: String) = "Pasted onto $name."
+
+    /** ERASE + MAIN held: CLR emptied the scene's patterns, DEL deleted the empty scene. */
+    const val CLEARED_SCENE = "Scene cleared."
+    const val DELETED_SCENE = "Scene deleted."
+
+    // The scene panel's status line (upper-cased where shown) and what a screen reader is told of each change.
+    /** When a pick takes over, for the status and screen readers: "now", "at bar end", "at pattern end". */
+    fun switchAt(t: SwitchTime) = when (t) {
+        SwitchTime.IMMEDIATE -> "now"
+        SwitchTime.BAR -> "at bar end"
+        SwitchTime.PATTERN -> "at pattern end"
+    }
+
+    /** "B → 05": group [group] changing to pattern [to]. */
+    fun groupMove(group: Int, to: Int) = "${'A' + group} \u2192 ${twoDigits(to)}"
+
+    /** "→ S03": the scene waiting to take over. */
+    fun sceneMove(index: Int) = "\u2192 ${sceneLabel(index)}"
+
+    /** "B → 05 at bar end": what waits ([move]: groupMove's, or sceneMove's) and for when. */
+    fun queuedLine(move: String, t: SwitchTime) = "$move ${switchAt(t)}"
+
+    /** "S03 committed": COMMIT made the scene at [index]. */
+    fun sceneCommitted(index: Int) = "${sceneLabel(index)} committed"
+
+    /** COMMIT with 99 scenes already. */
+    const val SCENES_FULL = "No room for another scene"
+
+    /** "S05 cleared", "S05 deleted": what ERASE + MAIN held did to the scene at [index]. */
+    fun sceneCleared(index: Int) = "${sceneLabel(index)} cleared"
+    fun sceneDeleted(index: Int) = "${sceneLabel(index)} deleted"
+
+    /** "B · pick 01–99": the grid open over the pads for [group]. */
+    fun gridStatus(group: Int) = "${'A' + group} \u00B7 pick 01\u201399"
+
+    /** "A01 copied", "A bar 2 copied", "KICK copied": [what] the clip took; "A05 pasted", "SNARE pasted": where it went. */
+    fun clipCopied(what: String) = "$what copied"
+    fun clipPasted(what: String) = "$what pasted"
+
+    /** The PAD clip's two stages: COPY waits for the pad to copy, then PASTE for the pad ([word], the one copied) to paste onto. */
+    const val PAD_TAP_SOURCE = "Tap a pad"
+    fun padTapTarget(word: String) = "$word \u2192 tap target"
+
+    /** PASTE with nothing of its kind copied. */
+    const val NO_PATTERN_COPIED = "No pattern copied"
+    const val NO_BAR_COPIED = "No bar copied"
+    const val NO_PAD_COPIED = "No pad copied"
+
+    /** A scene for screen readers: "Scene 2 of 3, patterns A 1, B 3, C 1, D 2". */
+    fun sceneSpoken(index: Int, count: Int, patterns: List<Int>) =
+        "Scene ${index + 1} of $count, patterns " + patterns.mapIndexed { g, n -> "${'A' + g} $n" }.joinToString(", ")
+
+    /** A group's pattern for screen readers: "Group B, pattern 5, 4 bars". */
+    fun patternSpoken(group: Int, n: Int, bars: Int) = "Group ${'A' + group}, pattern $n, $bars ${if (bars == 1) "bar" else "bars"}"
+
+    /** A change waiting, for screen readers: "Group B, pattern 5, at bar end", "Scene 3, at pattern end". */
+    fun patternQueuedSpoken(group: Int, n: Int, t: SwitchTime) = "Group ${'A' + group}, pattern $n, ${switchAt(t)}"
+    fun sceneQueuedSpoken(index: Int, t: SwitchTime) = "Scene ${index + 1}, ${switchAt(t)}"
+
+    /** COMMIT for screen readers: "Scene 3 committed". */
+    fun sceneCommittedSpoken(index: Int) = "Scene ${index + 1} committed"
+
+    // The scene panel's own words (upper-cased where shown) and their names for screen readers.
+    /** The panel's name, and ✕ closing it; the S01 chip on the display line for screen readers: "Scenes, scene 2 of 3". */
+    const val SCENE_NAME = "Scenes and patterns"
+    const val CLOSE_SCENE = "Close scenes and patterns"
+    fun sceneChipName(index: Int, count: Int) = "Scenes, scene ${index + 1} of $count"
+
+    /** The panel's status while nothing else is said: "Scene 2 of 3". */
+    fun sceneStatus(index: Int, count: Int) = "Scene ${index + 1} of $count"
+
+    /** "03": a pattern's number as the group keys and columns show it; "03→05": the one playing and the one waiting. */
+    fun patternNumber(n: Int) = twoDigits(n)
+    fun numberMove(n: Int, to: Int) = "${twoDigits(n)}\u2192${twoDigits(to)}"
+
+    /** The head's − and + around the scene; + on the last scene makes a new one. */
+    const val PREV_SCENE = "Previous scene"
+    const val NEXT_SCENE = "Next scene"
+    const val NEW_SCENE = "New scene"
+
+    /** A group's column: its name for screen readers ("Group B, pattern 3, has notes"), and what its number does. */
+    fun groupColumn(group: Int, n: Int, notes: Boolean) = "$GROUP ${'A' + group}, pattern $n" + if (notes) PAD_HAS_NOTES else ""
+    const val PICK_PATTERN = "Pick a pattern"
+    fun groupPrevious(group: Int) = "$GROUP ${'A' + group}, previous pattern"
+    fun groupNext(group: Int) = "$GROUP ${'A' + group}, next pattern"
+
+    /** NEXT FREE: the first pattern after this one with no notes ("Group B, next free pattern"). */
+    const val NEXT_FREE = "Next free"
+    fun groupNextFree(group: Int) = "$GROUP ${'A' + group}, next free pattern"
+
+    /** A group key's pattern for screen readers, after its name: ", pattern 3", and ", changing to 5" while one waits. */
+    fun groupKeyPattern(n: Int, queued: Int?) = ", pattern $n" + (queued?.let { ", changing to $it" } ?: "")
+
+    /** COMMIT (duplicates the scene), and what it does for screen readers. */
+    const val COMMIT = "Commit"
+    const val COMMIT_NOTE = "Makes a new scene after this one, with copies of the patterns in free slots."
+
+    /** CLR and DEL, the hold key (DEL when the scene is empty): its name, what holding does, and the status while it is held ("Hold · Del S05"). */
+    const val CLR = "Clr"
+    const val DEL = "Del"
+    fun eraseSceneName(delete: Boolean) = if (delete) "Delete scene" else "Clear scene"
+    const val HOLD_NOTE = "Hold for two seconds."
+    fun eraseHolding(delete: Boolean, scene: String) = "Hold \u00B7 ${if (delete) DEL else CLR} $scene"
+
+    /** CHANGE: when a pick takes over. The chip's name for screen readers ("Scene change: Bar end") and what a tap does. */
+    const val CHANGE = "Change"
+    fun changeName(t: SwitchTime) = "Scene change: ${switchName(t)}"
+    const val CHANGE_NOTE = "Tap to change when a pick takes over: now, at bar end, or at pattern end. Stopped, it is always at once."
+
+    /** The pattern sheet's SCENE CHANGE row, the same setting: its caption and a line under the choices. */
+    const val SCENE_CHANGE = "Scene change"
+    const val SCENE_CHANGE_NOTE = "Playing: a new pattern or scene waits for the bar's or pattern's end. Stopped: always at once."
+
+    /** CLIP: PTN, BAR and PAD (their names for screen readers), COPY and PASTE, and the bar pages' row ("Group A · bar", "Clip · A bar 2"). */
+    const val CLIP = "Clip"
+    const val CLIP_PAD = "Pad"
+    const val CLIP_PTN_NAME = "Whole pattern"
+    const val CLIP_BAR_NAME = "One bar"
+    const val CLIP_PAD_NAME = "One pad's notes"
+    const val COPY = "Copy"
+    const val PASTE = "Paste"
+    fun barPagesGroup(group: Int) = "$GROUP ${'A' + group} \u00B7 bar"
+    fun clipHeld(what: String) = "$CLIP \u00B7 $what"
+
+    /** The 1–99 grid over the pads: its name, ✕ closing it, its title ("Group B") and the pattern it starts on ("P03 · 4 bars"). */
+    const val GRID_NAME = "Pattern grid"
+    const val CLOSE_GRID = "Close pattern grid"
+    fun gridTitle(group: Int) = "$GROUP ${'A' + group}"
+    fun gridDetail(n: Int, bars: Int) = "${patternLabel(n)} \u00B7 ${Format.plural(bars, "bar")}"
+
+    /** A cell of the grid for screen readers: "Pattern 5, has notes" (the pattern playing is selected; the next free one says so). */
+    fun patternCell(n: Int, notes: Boolean) = "Pattern $n" + if (notes) PAD_HAS_NOTES else ""
+
+    /** The grid's legend (upper-cased where shown). */
+    const val GRID_HAS_NOTES = "Has notes"
+    const val GRID_EMPTY = "Empty"
+    const val GRID_PLAYING = "Playing"
+
+    private fun twoDigits(n: Int) = n.toString().padStart(2, '0')
+
+    // ---------- STEP: the pattern a step at a time while stopped, and timing correct, as on the device ----------
+    /**
+     * The step cursor as the device shows it: bar, beat and the step in the
+     * beat, from 1 ("1.2.1" is the 5th 1/16). At a beat or longer the third
+     * is 1; triplets count 1..3 in a beat at 1/8T, 1..6 at 1/16T.
+     */
+    fun stepLabel(step: Int, interval: Timing): String {
+        val t = step * interval.ticks
+        val sub = if (interval.ticks < Seq.PPQN) t % Seq.PPQN / interval.ticks + 1 else 1
+        return "${t / Seq.TICKS_PER_BAR + 1}.${t % Seq.TICKS_PER_BAR / Seq.PPQN + 1}.$sub"
+    }
+
+    /** A note's length on a step: an interval's word ("1/16"), "1 bar", sixteenths ("3/16"), else ticks ("50 tk"). */
+    fun gateLabel(ticks: Int): String {
+        if (ticks == Seq.TICKS_PER_BAR) return "1 bar"
+        Timing.intervals.firstOrNull { it.ticks == ticks }?.let { return it.id }
+        val sixteenth = Timing.SIXTEENTH.ticks
+        return if (ticks % sixteenth == 0) "${ticks / sixteenth}/16" else "$ticks tk"
+    }
+
+    /** "3 corrected": the notes timing correct put on the grid. */
+    fun correctedLine(n: Int) = "$n corrected"
+
+    /** The STEP panel's status as RECORD + pad puts a note on the step: "+ SNARE". */
+    fun stepPlaced(word: String) = "+ $word"
+
+    /** A note put on a step, for screen readers: "SNARE on step 1.2.1". */
+    fun stepPlacedSpoken(word: String, step: String) = "$word on step $step"
+
+    /** "KICK → 1.2.2": the note picked, nudged, and the step it sits on now. */
+    fun stepNudged(word: String, step: String) = "$word → $step"
+
+    /** A nudge for screen readers: "KICK moved to step 1.2.2". */
+    fun stepNudgedSpoken(word: String, step: String) = "$word moved to step $step"
+
+    /** "KICK +1 tk": a held pad's notes moved by CORRECT's − / +, the ticks so far ("−2 tk" earlier). */
+    fun stepShifted(word: String, ticks: Int) = "$word ${signedTicks(ticks)} tk"
+
+    /** A shift for screen readers: "KICK 1 tick later", "KICK 2 ticks earlier", "KICK back in place". */
+    fun stepShiftedSpoken(word: String, ticks: Int): String {
+        if (ticks == 0) return "$word back in place"
+        val n = Math.abs(ticks)
+        return "$word $n ${if (n == 1) "tick" else "ticks"} ${if (ticks > 0) "later" else "earlier"}"
+    }
+
+    /** The step cursor for screen readers: "Step 1.2.1", and ", 2 notes" with notes on it. */
+    fun stepSpoken(step: String, notes: Int) = "Step $step" + when (notes) {
+        0 -> ""
+        1 -> ", 1 note"
+        else -> ", $notes notes"
+    }
+
+    /** The STEP chip on the stopped display line and the panel it opens (upper-cased where shown); its name for screen readers. */
+    const val STEP = "Step"
+    const val STEP_NAME = "Step editing"
+    const val CLOSE_STEP = "Close step editing"
+
+    /** "STEP 1.2.1": the panel's status line while nothing else is said. */
+    fun stepStatus(step: String) = "STEP $step"
+
+    /** The panel's RECORD, held: what it does, for screen readers (a click holds it until the next). */
+    const val STEP_RECORD_NOTE = "Hold and tap a pad to put it on the step"
+
+    /** − and + either side of the strip. */
+    const val PREV_STEP = "Previous step"
+    const val NEXT_STEP = "Next step"
+
+    /** A cell of the strip for screen readers: "Step 1.2.1, has notes". */
+    fun stepCell(step: String, notes: Boolean) = "Step $step" + if (notes) PAD_HAS_NOTES else ""
+
+    /** The panel's knobs, every note on the step (upper-cased where shown), and their names for screen readers. */
+    const val VEL = "Vel"
+    const val LEN = "Len"
+    const val VELOCITY = "Velocity"
+    const val NOTE_LENGTH = "Note length"
+
+    /** BAR's pages under a pattern longer than a bar; "Bar 2" for screen readers. */
+    const val BAR = "Bar"
+    fun barPage(bar: Int) = "Bar $bar"
+
+    /** The panel's latches: NUDGE (a tap picks a lit pad for − / +) and CORRECT (timing correct), upper-cased where shown. */
+    const val NUDGE = "Nudge"
+    const val CORRECT = "Correct"
+
+    /** NUDGE with a note picked: "Nudge · KICK". */
+    fun nudgeChip(word: String?) = if (word == null) NUDGE else "$NUDGE · $word"
+
+    /** What NUDGE and CORRECT do, after their state for screen readers. */
+    const val NUDGE_NOTE = "Tap a lit pad to pick it, then − and + move its note."
+    const val CORRECT_NOTE = "Tap a pad to put its notes on the grid. While the pattern plays, hold one to correct it as it passes."
+
+    /** Added to a pad's or key's name for screen readers in the STEP panel: on the cursor's step, and picked for − / +. */
+    const val ON_STEP = ", on the step"
+    const val PICKED = ", picked"
+
+    /** A long press on a lit pad or key: picked for − / +; its action's name for screen readers. */
+    const val PICK = "Pick to nudge"
+
+    private fun signedTicks(n: Int) = when {
+        n > 0 -> "+$n"
+        n < 0 -> "−${-n}"
+        else -> "0"
     }
 
     // ---------- FX: the master effect, the sends, the output compressor and the sidechain (an addition) ----------

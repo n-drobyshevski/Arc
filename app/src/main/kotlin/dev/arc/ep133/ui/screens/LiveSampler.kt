@@ -638,8 +638,8 @@ internal fun SampleBodyFace(ui: SampleUi, panel: SamplePanel, fit: SamplePanelFi
     }
 }
 
-/** [this] faded in and slid down [FadeSlide] as far as [shown] says (0..1, read as it draws). */
-private fun Modifier.fadeIn(shown: () -> Float): Modifier = graphicsLayer {
+/** [this] faded in and slid down [FadeSlide] as far as [shown] says (0..1, read as it draws): the panel's rows, SAMPLE's and STEP's. */
+internal fun Modifier.fadeIn(shown: () -> Float): Modifier = graphicsLayer {
     val p = shown()
     alpha = p
     translationY = -FadeSlide.toPx() * (1f - p)

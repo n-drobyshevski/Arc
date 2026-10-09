@@ -41,43 +41,95 @@ class PatternTest {
         assertEquals(setOf(PhysicalPad(0, 3), PhysicalPad(2, 0)), p.usedPads())
     }
 
+    /** A project's sequencer as it starts, playing [p]. */
+    private fun seq(p: ProjectPatterns) = ProjectSeq.DEFAULT.withPlaying(p)
+
     @Test
     fun `patterns by project, the blank ones dropped`() {
-        val p = ProjectPatterns().with(1, Pattern(2))
-        val all = Patterns.EMPTY.put(1, p).put(3, ProjectPatterns())
+        val p = seq(ProjectPatterns().with(1, Pattern(2)))
+        val all = Patterns.EMPTY.put(1, p).put(3, ProjectSeq.DEFAULT).put(4, seq(ProjectPatterns()))
         assertEquals(p, all.of(1))
-        assertEquals(ProjectPatterns(), all.of(2))
+        assertEquals(ProjectSeq.DEFAULT, all.of(2))
         assertEquals(setOf(1), all.projects.keys)
-        assertEquals(Patterns.EMPTY, all.put(1, ProjectPatterns()))
+        assertEquals(Patterns.EMPTY, all.put(1, ProjectSeq.DEFAULT))
+        // Another scene is something: kept.
+        assertEquals(setOf(5), Patterns.EMPTY.put(5, SceneOps.newScene(ProjectSeq.DEFAULT)).projects.keys)
     }
 
     @Test
     fun `the patterns survive the round trip, without ids or the open flag`() {
         val a = Pattern(2, listOf(PatternNote(96, 3, 24, semitones = 5, id = 7)))
-        val all = Patterns.EMPTY.put(1, ProjectPatterns().with(0, a))
-        assertEquals("""{"v":1,"projects":[{"project":1,"groups":[{"group":0,"bars":2,"notes":[{"t":96,"pad":3,"gate":24,"semi":5}]}]}]}""", all.toJson())
-        assertEquals(Patterns.EMPTY.put(1, ProjectPatterns().with(0, a.copy(notes = listOf(a.notes[0].copy(id = 0))))), Patterns.fromJson(all.toJson()))
-        // Velocity only when it isn't full; a group with only another length is kept; project 0 (none known) too.
-        val more = Patterns.EMPTY
-            .put(0, ProjectPatterns().with(3, Pattern(1, listOf(PatternNote(0, 0, 1, velocity = 64)))))
-            .put(2, ProjectPatterns().with(1, Pattern(4)))
+        val all = Patterns.EMPTY.put(1, seq(ProjectPatterns().with(0, a)))
         assertEquals(
-            """{"v":1,"projects":[{"project":0,"groups":[{"group":3,"bars":1,"notes":[{"t":0,"pad":0,"gate":1,"vel":64}]}]},""" +
-                """{"project":2,"groups":[{"group":1,"bars":4,"notes":[]}]}]}""",
+            """{"v":2,"projects":[{"project":1,"scene":0,"scenes":[[1,1,1,1]],"groups":[{"group":0,"patterns":[""" +
+                """{"n":1,"bars":2,"notes":[{"t":96,"pad":3,"gate":24,"semi":5}]}]}]}]}""",
+            all.toJson(),
+        )
+        assertEquals(Patterns.EMPTY.put(1, seq(ProjectPatterns().with(0, a.copy(notes = listOf(a.notes[0].copy(id = 0)))))), Patterns.fromJson(all.toJson()))
+        // Velocity only when it isn't full; a pattern with only another length is kept; project 0 (none known) too.
+        val more = Patterns.EMPTY
+            .put(0, seq(ProjectPatterns().with(3, Pattern(1, listOf(PatternNote(0, 0, 1, velocity = 64))))))
+            .put(2, seq(ProjectPatterns().with(1, Pattern(4))))
+        assertEquals(
+            """{"v":2,"projects":[{"project":0,"scene":0,"scenes":[[1,1,1,1]],"groups":[{"group":3,"patterns":[""" +
+                """{"n":1,"bars":1,"notes":[{"t":0,"pad":0,"gate":1,"vel":64}]}]}]},""" +
+                """{"project":2,"scene":0,"scenes":[[1,1,1,1]],"groups":[{"group":1,"patterns":[{"n":1,"bars":4,"notes":[]}]}]}]}""",
             more.toJson(),
         )
         assertEquals(more, Patterns.fromJson(more.toJson()))
-        assertFalse(Patterns.EMPTY.put(1, ProjectPatterns().with(0, a.copy(open = true))).toJson().contains("open"))
+        assertFalse(Patterns.EMPTY.put(1, seq(ProjectPatterns().with(0, a.copy(open = true)))).toJson().contains("open"))
         assertEquals(Patterns.EMPTY, Patterns.fromJson(Patterns.EMPTY.toJson()))
+        assertEquals("""{"v":2,"projects":[]}""", Patterns.EMPTY.toJson())
+    }
+
+    @Test
+    fun `scenes and banks survive the round trip, blank patterns left out`() {
+        val kick = Pattern(1, listOf(PatternNote(0, 0, 24)))
+        val p = ProjectSeq(
+            banks = listOf(mapOf(1 to kick, 3 to Pattern(2, listOf(PatternNote(384, 1, 12)))), emptyMap(), mapOf(2 to Pattern(4)), mapOf(99 to kick)),
+            scenes = listOf(Scene(listOf(1, 1, 1, 1)), Scene(listOf(3, 5, 2, 99))),
+            scene = 1,
+        )
+        val all = Patterns.EMPTY.put(7, p)
+        assertEquals(
+            """{"v":2,"projects":[{"project":7,"scene":1,"scenes":[[1,1,1,1],[3,5,2,99]],"groups":[""" +
+                """{"group":0,"patterns":[{"n":1,"bars":1,"notes":[{"t":0,"pad":0,"gate":24}]},{"n":3,"bars":2,"notes":[{"t":384,"pad":1,"gate":12}]}]},""" +
+                """{"group":2,"patterns":[{"n":2,"bars":4,"notes":[]}]},""" +
+                """{"group":3,"patterns":[{"n":99,"bars":1,"notes":[{"t":0,"pad":0,"gate":24}]}]}]}]}""",
+            all.toJson(),
+        )
+        assertEquals(all, Patterns.fromJson(all.toJson()))
+        assertEquals(1, Patterns.fromJson(all.toJson())!!.of(7).scene)
+    }
+
+    @Test
+    fun `a version 1 file reads as pattern 1 of each group, in one scene, and is written as version 2`() {
+        val v1 = """{"v":1,"projects":[{"project":1,"groups":[{"group":0,"bars":2,"notes":[{"t":96,"pad":3,"gate":24,"semi":5}]},""" +
+            """{"group":2,"bars":4,"notes":[]}]}]}"""
+        val read = Patterns.fromJson(v1)!!
+        val want = ProjectSeq.DEFAULT
+            .withPattern(0, 1, Pattern(2, listOf(PatternNote(96, 3, 24, semitones = 5))))
+            .withPattern(2, 1, Pattern(4))
+        assertEquals(want, read.of(1))
+        assertEquals(listOf(Scene(listOf(1, 1, 1, 1))), read.of(1).scenes)
+        assertEquals(
+            """{"v":2,"projects":[{"project":1,"scene":0,"scenes":[[1,1,1,1]],"groups":[""" +
+                """{"group":0,"patterns":[{"n":1,"bars":2,"notes":[{"t":96,"pad":3,"gate":24,"semi":5}]}]},""" +
+                """{"group":2,"patterns":[{"n":1,"bars":4,"notes":[]}]}]}]}""",
+            read.toJson(),
+        )
+        assertEquals(read, Patterns.fromJson(read.toJson()))
     }
 
     @Test
     fun `junk reads as nothing, and entries it can't read are skipped`() {
         assertNull(Patterns.fromJson("not json"))
         assertNull(Patterns.fromJson("[]"))
-        assertNull(Patterns.fromJson("""{"v":2,"projects":[]}"""))
+        assertNull(Patterns.fromJson("""{"v":3,"projects":[]}"""))
+        assertNull(Patterns.fromJson("""{"v":"2","projects":[]}"""))
         assertNull(Patterns.fromJson("""{"projects":[]}"""))
         assertEquals(Patterns.EMPTY, Patterns.fromJson("""{"v":1}"""))
+        assertEquals(Patterns.EMPTY, Patterns.fromJson("""{"v":2}"""))
         val text = """{"v":1,"projects":[
             {"project":100,"groups":[{"group":0,"bars":2,"notes":[]}]},
             {"project":"1","groups":[{"group":0,"bars":2,"notes":[]}]},
@@ -101,16 +153,49 @@ class PatternTest {
         ]}"""
         val want = Patterns.EMPTY.put(
             1,
-            ProjectPatterns().with(0, Pattern(2, listOf(PatternNote(0, 1, 24), PatternNote(48, 2, 12, semitones = -3, velocity = 100)))),
+            seq(ProjectPatterns().with(0, Pattern(2, listOf(PatternNote(0, 1, 24), PatternNote(48, 2, 12, semitones = -3, velocity = 100))))),
         )
         assertEquals(want, Patterns.fromJson(text))
     }
 
     @Test
-    fun `a group reads at most its note cap`() {
+    fun `version 2 junk is skipped too`() {
+        val text = """{"v":2,"projects":[
+            {"project":100,"scenes":[[1,1,1,1]],"groups":[]},
+            "x",
+            {"project":2,"scene":5,"scenes":[[1,1,1,1],[1,2,3],[0,1,1,1],[1,1,1,100],[1,"2",1,1],"x",[2,2,2,2]],"groups":[
+                {"group":4,"patterns":[{"n":1,"bars":2,"notes":[]}]},
+                {"group":"0","patterns":[{"n":1,"bars":2,"notes":[]}]},
+                {"group":1,"patterns":[
+                    {"n":0,"bars":2,"notes":[]},
+                    {"n":100,"bars":2,"notes":[]},
+                    {"n":2,"bars":0,"notes":[]},
+                    {"n":2,"notes":[]},
+                    "x",
+                    {"n":2,"bars":3,"notes":[{"t":0,"pad":1,"gate":24},{"t":0,"pad":12,"gate":24}]}
+                ]}
+            ]},
+            {"project":3,"scenes":[],"groups":[{"group":0,"patterns":[{"n":4,"bars":2,"notes":[]}]}]}
+        ]}"""
+        val read = Patterns.fromJson(text)!!
+        assertEquals(setOf(2, 3), read.projects.keys)
+        // The scenes it can read, and the index held to them.
+        val two = read.of(2)
+        assertEquals(listOf(Scene(listOf(1, 1, 1, 1)), Scene(listOf(2, 2, 2, 2))), two.scenes)
+        assertEquals(1, two.scene)
+        assertEquals(mapOf(2 to Pattern(3, listOf(PatternNote(0, 1, 24)))), two.banks[1])
+        assertTrue(two.banks[0].isEmpty())
+        // No scenes: the one of patterns 1.
+        assertEquals(ProjectSeq.DEFAULT.withPattern(0, 4, Pattern(2)), read.of(3))
+    }
+
+    @Test
+    fun `a pattern reads at most its note cap`() {
         val notes = (0 until Seq.MAX_NOTES + 5).joinToString(",") { """{"t":$it,"pad":0,"gate":1}""" }
         val read = Patterns.fromJson("""{"v":1,"projects":[{"project":1,"groups":[{"group":0,"bars":99,"notes":[$notes]}]}]}""")
-        assertEquals(Seq.MAX_NOTES, read!!.of(1).group(0).notes.size)
+        assertEquals(Seq.MAX_NOTES, read!!.of(1).playing().group(0).notes.size)
+        val read2 = Patterns.fromJson("""{"v":2,"projects":[{"project":1,"groups":[{"group":0,"patterns":[{"n":1,"bars":99,"notes":[$notes]}]}]}]}""")
+        assertEquals(Seq.MAX_NOTES, read2!!.of(1).pattern(0, 1).notes.size)
     }
 
     @Test

@@ -662,12 +662,16 @@ class MainActivity : ComponentActivity() {
         // RECORD and PLAY on Live's display line: the pads played into a pattern that plays on the phone. A hold on
         // RECORD opens the pattern sheet; where the pattern is is read as the line draws, not collected.
         val pattern by controller.pattern.collectAsStateWithLifecycle()
-        val liveTransport = remember(pattern) {
+        // SCENES: the pattern each group plays and the scene, for the S01 chip, the panel it opens, the group keys' numbers
+        // and (SCENE CHANGE) the pattern sheet.
+        val scene by controller.scene.collectAsStateWithLifecycle()
+        val liveTransport = remember(pattern, scene.switchTime) {
             dev.arc.ep133.ui.screens.TransportUi(
                 phase = pattern.phase,
                 recording = pattern.recording,
                 countIn = pattern.countIn,
                 timing = pattern.timing,
+                switchTime = scene.switchTime,
                 countInOn = pattern.countInOn,
                 autoLength = pattern.autoLength,
                 bars = pattern.bars,
@@ -689,6 +693,7 @@ class MainActivity : ComponentActivity() {
                 },
                 onUndo = controller::undoPattern,
                 onTiming = controller::setPatternTiming,
+                onSwitchTime = controller::setSceneSwitch,
                 onCountIn = controller::setPatternCountIn,
                 onAutoLength = controller::setPatternAutoLength,
                 onLength = controller::setPatternLength,
@@ -746,6 +751,74 @@ class MainActivity : ComponentActivity() {
                 onLatch = controller::setArpLatch,
                 onNotePressure = controller::notePressure,
                 onPadPressure = controller::padPressure,
+            )
+        }
+        // STEP: the STEP chip on the stopped display line unrolls the panel over the function keys, where − / + step
+        // through the pattern, RECORD held puts pads on the step, VEL and LEN set it, NUDGE and CORRECT; CORRECT stays lit
+        // on the line while the pattern plays, a pad held correcting its notes as they pass.
+        val step by controller.step.collectAsStateWithLifecycle()
+        val liveStep = remember(step, appSettings.keysNames) {
+            dev.arc.ep133.ui.screens.LiveStep(
+                ui = step,
+                pickedWord = step.picked?.let { dev.arc.ep133.controller.stepWord(it, controller.mirrorName(it.pad), appSettings.keysNames) },
+                onOpen = { group ->
+                    // The pads place, pick and sound in the panel: EDIT goes.
+                    liveEdit = false
+                    controller.setStepOpen(true, group)
+                },
+                onClose = { controller.setStepOpen(false) },
+                onGroup = controller::setStepGroup,
+                onRecordDown = controller::stepRecordDown,
+                onRecordUp = controller::stepRecordUp,
+                onPlay = controller::stepPlay,
+                onPadDown = { pad, at, pressure -> controller.stepPadDown(pad, at, pressure) },
+                onPadUp = { pad, at -> controller.stepPadUp(pad, at) },
+                onNoteDown = { note, at, pressure -> controller.stepNoteDown(note, at, pressure) },
+                onNoteUp = { note, at -> controller.stepNoteUp(note, at) },
+                onPadPick = controller::stepPadPick,
+                onNotePick = controller::stepNotePick,
+                onMinus = controller::stepMinus,
+                onPlus = controller::stepPlus,
+                onJump = controller::stepJump,
+                onPage = controller::stepPage,
+                onVelocity = controller::setStepVelocity,
+                onGate = controller::setStepGate,
+                onKnobEnd = controller::stepKnobEnd,
+                onNudge = controller::setStepNudge,
+                onCorrect = controller::setStepCorrect,
+                onCorrectPadDown = { pad, at -> controller.correctPadDown(pad, at) },
+                onCorrectPadUp = { pad, at -> controller.correctPadUp(pad, at) },
+                onCorrectNoteDown = controller::correctNoteDown,
+                onCorrectNoteUp = controller::correctNoteUp,
+            )
+        }
+        // SCENES: the S01 chip beside STEP's (the scene's readout while the pattern plays) unrolls the panel over the function
+        // keys, where the groups' patterns and the scenes are picked (a pick waits for its bar or pattern end while it plays),
+        // COMMIT, CLR / DEL held, CHANGE, and COPY and PASTE of a pattern, a bar or a pad's notes. The panel stays open while it plays.
+        val liveScene = remember(scene, pattern.phase) {
+            dev.arc.ep133.ui.screens.LiveScene(
+                ui = scene,
+                running = pattern.phase == dev.arc.ep133.features.TransportPhase.PLAYING || pattern.phase == dev.arc.ep133.features.TransportPhase.COUNT_IN,
+                onOpen = { group ->
+                    // The pads stay the player's, so EDIT goes: a tap on one gives it another sound, not a pattern.
+                    liveEdit = false
+                    controller.setSceneOpen(true, group)
+                },
+                onClose = { controller.setSceneOpen(false) },
+                onGroup = controller::setSceneGroup,
+                onPlay = { controller.patternPlay(false) },
+                onScene = controller::sceneStep,
+                onPatternStep = controller::scenePatternStep,
+                onPatternPick = controller::scenePatternPick,
+                onNextFree = controller::scenePatternNextFree,
+                onGrid = controller::sceneGrid,
+                onCommit = controller::sceneCommit,
+                onErase = controller::sceneEraseHold,
+                onSwitch = controller::setSceneSwitch,
+                onClipMode = controller::setClipMode,
+                onBar = controller::setClipBar,
+                onCopy = controller::clipCopy,
+                onPaste = controller::clipPaste,
             )
         }
         val functions = dev.arc.ep133.ui.screens.FunctionKeysUi(
@@ -957,7 +1030,7 @@ class MainActivity : ComponentActivity() {
                     onGuide = { guideOpen = it },
                     guide = { GuideScreen(onBack = { guideOpen = false }) },
                     // On a phone on its side, Live's display line rides in the top bar.
-                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, transport = liveTransport, take = liveTake, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys, wireless = liveWireless, sample = sampleUi, punch = punches, arp = arp.line, header = sampleHeader) }) else null,
+                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, transport = liveTransport, take = liveTake, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys, wireless = liveWireless, sample = sampleUi, punch = punches, arp = arp.line, header = sampleHeader, step = liveStep, stepOpens = appSettings.liveOneGroup && !appSettings.liveKeys, scene = liveScene, sceneOpens = appSettings.liveOneGroup && !appSettings.liveKeys) }) else null,
                     sample = sampleKey,
                 ) {
                     // Back from another section returns to Live, the home section, first.
@@ -1025,10 +1098,13 @@ class MainActivity : ComponentActivity() {
                                     if (on && !ready && mirror?.offline == null) {
                                         controller.toast(dev.arc.ep133.text.MirrorText.EDIT_OFFLINE)
                                     } else {
-                                        // A tap on a pad gives it another sound: SAMPLE and ERASE close for it.
+                                        // A tap on a pad gives it another sound: SAMPLE, STEP, SCENE, ERASE and CORRECT close for it.
                                         if (on) {
                                             controller.exitSample()
+                                            controller.setStepOpen(false)
+                                            controller.setSceneOpen(false)
                                             controller.setPatternErase(false)
+                                            if (step.correct) controller.setStepCorrect(false)
                                         }
                                         liveEdit = on
                                     }
@@ -1046,6 +1122,8 @@ class MainActivity : ComponentActivity() {
                             sample = sampleUi,
                             onSampleHeader = { sampleHeader = it },
                             arp = liveArp,
+                            step = liveStep,
+                            scene = liveScene,
                         )
                         Tab.DEVICE -> DeviceScreen(
                             state = state,
