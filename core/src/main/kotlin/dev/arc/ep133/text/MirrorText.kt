@@ -8,6 +8,7 @@ import dev.arc.ep133.features.PadNotes
 import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.ProjectSource
 import dev.arc.ep133.features.SampleSource
+import dev.arc.ep133.features.Seq
 import dev.arc.ep133.features.Timing
 import dev.arc.ep133.features.TransportPhase
 import dev.arc.ep133.features.TransportState
@@ -746,6 +747,29 @@ object MirrorText {
         TransportPhase.COUNT_IN -> "Counting in"
         TransportPhase.PLAYING -> if (state.recording) "Recording" else PLAYING
     }
+
+    // ---------- STEP: the pattern a step at a time while stopped, and timing correct, as on the device ----------
+    /**
+     * The step cursor as the device shows it: bar, beat and the step in the
+     * beat, from 1 ("1.2.1" is the 5th 1/16). At a beat or longer the third
+     * is 1; triplets count 1..3 in a beat at 1/8T, 1..6 at 1/16T.
+     */
+    fun stepLabel(step: Int, interval: Timing): String {
+        val t = step * interval.ticks
+        val sub = if (interval.ticks < Seq.PPQN) t % Seq.PPQN / interval.ticks + 1 else 1
+        return "${t / Seq.TICKS_PER_BAR + 1}.${t % Seq.TICKS_PER_BAR / Seq.PPQN + 1}.$sub"
+    }
+
+    /** A note's length on a step: an interval's word ("1/16"), "1 bar", sixteenths ("3/16"), else ticks ("50 tk"). */
+    fun gateLabel(ticks: Int): String {
+        if (ticks == Seq.TICKS_PER_BAR) return "1 bar"
+        Timing.intervals.firstOrNull { it.ticks == ticks }?.let { return it.id }
+        val sixteenth = Timing.SIXTEENTH.ticks
+        return if (ticks % sixteenth == 0) "${ticks / sixteenth}/16" else "$ticks tk"
+    }
+
+    /** "3 corrected": the notes timing correct put on the grid. */
+    fun correctedLine(n: Int) = "$n corrected"
 
     // ---------- FX: the master effect, the sends, the output compressor and the sidechain (an addition) ----------
     /** FX, the fourth function key: its two words. A tap opens the FX sheet; held, the pads play the punch-ins. */

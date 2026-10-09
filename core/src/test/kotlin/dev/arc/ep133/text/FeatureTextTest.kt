@@ -345,4 +345,28 @@ class FeatureTextTest {
         assertTrue(MirrorText.TAKES_HINT.startsWith("Tap TAKE, then play"))
         assertEquals("Record a pattern: tap, then PLAY; hold for its settings", CoachText.RECORD)
     }
+
+    @Test
+    fun `step text`() {
+        // bar.beat.step, from 1: the 5th 1/16 is 1.2.1.
+        assertEquals(
+            listOf("1.1.1", "1.2.1", "1.2.2", "1.4.4", "2.1.1"),
+            listOf(0, 4, 5, 15, 16).map { MirrorText.stepLabel(it, Timing.SIXTEENTH) },
+        )
+        assertEquals("1.2.2", MirrorText.stepLabel(3, Timing.EIGHTH))
+        assertEquals("1.1.8", MirrorText.stepLabel(7, Timing.THIRTY_SECOND))
+        // A beat or longer: the step is 1.
+        assertEquals("1.4.1", MirrorText.stepLabel(3, Timing.QUARTER))
+        assertEquals("2.1.1", MirrorText.stepLabel(2, Timing.HALF))
+        assertEquals("3.1.1", MirrorText.stepLabel(2, Timing.WHOLE))
+        // Triplets: 1..3 in a beat at 1/8T, 1..6 at 1/16T.
+        assertEquals("1.2.3", MirrorText.stepLabel(5, Timing.EIGHTH_T))
+        assertEquals("1.2.6", MirrorText.stepLabel(11, Timing.SIXTEENTH_T))
+        assertEquals(
+            listOf("1/16", "1 bar", "1/2", "1/4", "1/8", "1/8T", "1/16T", "1/32", "3/16", "5/16", "15/16", "50 tk", "1 tk"),
+            listOf(24, 384, 192, 96, 48, 32, 16, 12, 72, 120, 360, 50, 1).map(MirrorText::gateLabel),
+        )
+        assertEquals("1 corrected", MirrorText.correctedLine(1))
+        assertEquals("3 corrected", MirrorText.correctedLine(3))
+    }
 }

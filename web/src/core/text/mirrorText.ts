@@ -14,7 +14,7 @@ import { Keys, NoteNames, Scale } from '../features/keys'
 import type { Hit } from '../features/liveMirror'
 import type { PlayMode } from '../features/padSettings'
 import { noteName, type PhysicalPad } from '../features/padNotes'
-import { Timing } from '../features/pattern'
+import { Seq, TIMING_INTERVALS, Timing, timingTicks } from '../features/pattern'
 import { KeyMark } from '../features/piano'
 import { ProjectSource } from '../features/projectStep'
 import { SampleSource } from '../features/sampleSource'
@@ -921,6 +921,33 @@ export const MirrorText = {
       case 'PLAYING':
         return state.recording ? 'Recording' : MirrorText.PLAYING
     }
+  },
+
+  // ---------- STEP: the pattern a step at a time while stopped, and timing correct, as on the device ----------
+  /**
+   * The step cursor as the device shows it: bar, beat and the step in the
+   * beat, from 1 ("1.2.1" is the 5th 1/16). At a beat or longer the third is
+   * 1; triplets count 1..3 in a beat at 1/8T, 1..6 at 1/16T.
+   */
+  stepLabel(step: number, interval: Timing): string {
+    const ticks = timingTicks(interval)
+    const t = step * ticks
+    const sub = ticks < Seq.PPQN ? Math.trunc((t % Seq.PPQN) / ticks) + 1 : 1
+    return `${Math.trunc(t / Seq.TICKS_PER_BAR) + 1}.${Math.trunc((t % Seq.TICKS_PER_BAR) / Seq.PPQN) + 1}.${sub}`
+  },
+
+  /** A note's length on a step: an interval's word ("1/16"), "1 bar", sixteenths ("3/16"), else ticks ("50 tk"). */
+  gateLabel(ticks: number): string {
+    if (ticks === Seq.TICKS_PER_BAR) return '1 bar'
+    const interval = TIMING_INTERVALS.find((t) => timingTicks(t) === ticks)
+    if (interval !== undefined) return interval
+    const sixteenth = timingTicks(Timing.SIXTEENTH)
+    return ticks % sixteenth === 0 ? `${ticks / sixteenth}/16` : `${ticks} tk`
+  },
+
+  /** "3 corrected": the notes timing correct put on the grid. */
+  correctedLine(n: number): string {
+    return `${n} corrected`
   },
 
   // ---------- FX: the master effect, the sends, the output compressor and the sidechain (an addition) ----------

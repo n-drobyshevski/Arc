@@ -335,4 +335,35 @@ describe('FeatureTextTest', () => {
     // Web delta: no REC, so no TAKE words.
     expect(CoachText.RECORD).toBe('Record a pattern: tap, then PLAY; hold for its settings')
   })
+
+  it('step text', () => {
+    // bar.beat.step, from 1: the 5th 1/16 is 1.2.1.
+    expect([0, 4, 5, 15, 16].map((s) => MirrorText.stepLabel(s, Timing.SIXTEENTH))).toEqual(['1.1.1', '1.2.1', '1.2.2', '1.4.4', '2.1.1'])
+    expect(MirrorText.stepLabel(3, Timing.EIGHTH)).toBe('1.2.2')
+    expect(MirrorText.stepLabel(7, Timing.THIRTY_SECOND)).toBe('1.1.8')
+    // A beat or longer: the step is 1.
+    expect(MirrorText.stepLabel(3, Timing.QUARTER)).toBe('1.4.1')
+    expect(MirrorText.stepLabel(2, Timing.HALF)).toBe('2.1.1')
+    expect(MirrorText.stepLabel(2, Timing.WHOLE)).toBe('3.1.1')
+    // Triplets: 1..3 in a beat at 1/8T, 1..6 at 1/16T.
+    expect(MirrorText.stepLabel(5, Timing.EIGHTH_T)).toBe('1.2.3')
+    expect(MirrorText.stepLabel(11, Timing.SIXTEENTH_T)).toBe('1.2.6')
+    expect([24, 384, 192, 96, 48, 32, 16, 12, 72, 120, 360, 50, 1].map((t) => MirrorText.gateLabel(t))).toEqual([
+      '1/16',
+      '1 bar',
+      '1/2',
+      '1/4',
+      '1/8',
+      '1/8T',
+      '1/16T',
+      '1/32',
+      '3/16',
+      '5/16',
+      '15/16',
+      '50 tk',
+      '1 tk',
+    ])
+    expect(MirrorText.correctedLine(1)).toBe('1 corrected')
+    expect(MirrorText.correctedLine(3)).toBe('3 corrected')
+  })
 })
