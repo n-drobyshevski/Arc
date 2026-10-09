@@ -1,5 +1,6 @@
 // End-to-end: the slim top bar. On a phone (the narrow layout) the bar keeps the
-// section tag, the connection key and ?; Back up is the orange block first in the
+// section tag, the connection key and ? (and Live's Bluetooth key while the sound
+// plays late: liveLate.spec.ts; the connection key's hold: holdDisconnect.spec.ts); Back up is the orange block first in the
 // Backups caption row, and Settings is the first row of Live's tools and the last
 // entry of the section list. The desktop layout keeps Settings on its nav rail
 // (and no Settings entry or row), and gets Back up in the caption row too.
@@ -19,7 +20,10 @@ test.describe('on a phone', () => {
     await expect(bar.getByRole('button', { name: "What's what" })).toBeVisible()
     await expect(bar.getByRole('button', { name: 'Back up', exact: true })).toHaveCount(0)
     await expect(bar.getByRole('button', { name: 'Settings' })).toHaveCount(0)
-    await expect(bar.getByRole('button')).toHaveCount(3)
+    // The three keys, and the Disconnect button screen readers have beside the connection key.
+    await expect(bar.getByRole('button')).toHaveCount(4)
+    await expect(bar.getByRole('button', { name: 'Disconnect', exact: true })).toHaveCount(1)
+    await expect(bar.getByRole('button', { name: /^Bluetooth/ })).toHaveCount(0)
   })
 
   test('Back up is first in the Backups caption row once there are backups; the big key until then', async ({ page }) => {

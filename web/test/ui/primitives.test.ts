@@ -2,7 +2,7 @@
 // (ports of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt,
 // Icons.kt IconBlock and the TrimSheet.kt waveform and range slider).
 import { describe, expect, it } from 'vitest'
-import { createLongPress, LONG_PRESS_MS, tipAlign, type LongPressTimers } from '../../src/ui/components/IconBlock'
+import { createLongPress, HOLD_MS, LONG_PRESS_MS, tipAlign, type LongPressTimers } from '../../src/ui/components/IconBlock'
 import { litSegments, meterSegments } from '../../src/ui/components/Meter'
 import { rovingIndex, rovingIndexSkipping } from '../../src/ui/components/Segmented'
 import { octaveKeys } from '../../src/ui/components/MiniPiano'
@@ -98,6 +98,27 @@ describe('IconBlock long press', () => {
     lp.down()
     lp.dispose()
     expect(t.pending()).toBe(0)
+  })
+
+  it('the hold (the connection key\'s disconnect) is the same timing over a second', () => {
+    const t = fakeTimers()
+    let done = 0
+    const hold = createLongPress(() => { done++ }, t, HOLD_MS)
+    expect(HOLD_MS).toBe(1000)
+    // Let go early: no disconnect, and the tap that follows is an ordinary click (the hint).
+    hold.down()
+    t.advance(HOLD_MS - 1)
+    hold.cancel()
+    t.advance(10)
+    expect(done).toBe(0)
+    expect(hold.consumeClick()).toBe(false)
+    // Held the whole second: it acts once, and the click that ends the press is swallowed.
+    hold.down()
+    t.advance(HOLD_MS)
+    expect(done).toBe(1)
+    hold.up()
+    expect(hold.consumeClick()).toBe(true)
+    expect(hold.consumeClick()).toBe(false)
   })
 
   it('keeps the tooltip inside the viewport', () => {

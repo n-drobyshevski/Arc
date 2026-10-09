@@ -259,7 +259,10 @@ describe('FeatureTextTest', () => {
     expect(SettingsText.delayNow(220, 0)).toBe("Now: the output counts about 220 ms, all of Bluetooth's delay, so nothing more is made up.")
     expect(SettingsText.delayNow(null, 180)).toBe('Now: not measured, counted as about 180 ms.')
     expect(SettingsText.DELAY_NONE).toBe("Now: the sound isn't going to Bluetooth, so nothing is made up for.")
-    // The chip leads with the delay, as the line may cut it short.
+    // The top bar's Bluetooth key and the connection key's hold (web: the phone's own wording).
+    expect(CoachText.BLUETOOTH).toBe('Bluetooth delay')
+    expect(CoachText.HOLD_TO_DISCONNECT).toBe('Hold to disconnect')
+    // The sentence leads with the delay, as a toast may be cut short.
     expect(MirrorText.WIRELESS_DELAY.startsWith('Bluetooth plays late')).toBe(true)
     expect(MirrorText.wirelessMadeUp(180)).toBe('Bluetooth plays late (about 180 ms): arc makes up for it')
   })

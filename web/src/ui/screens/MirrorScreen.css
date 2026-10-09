@@ -178,14 +178,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* With the Bluetooth chip beside it, a hit too long for one line takes two, a size down
- * (the text breaks at a separator, useCut / twoLines). */
-.live-strip__line--two {
-  font-size: var(--size-display-sub);
-  line-height: 1.2;
-  white-space: pre-line;
-  text-overflow: ellipsis;
-}
 /* In the top bar (a phone on its side, LivePill): one bar tall (44), radius 12, a little
  * tighter. The note takes at most half the line, so a long one ("DO6, above the keys")
  * never squeezes out the sound. */

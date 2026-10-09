@@ -61,6 +61,7 @@ export const COACH_YELLOW_INK = 'var(--coach-yellow-ink)'
 /** Every control the overlay knows, by screen. */
 export const COACH_IDS = [
   'top.sections',
+  'top.bluetooth',
   'top.connection',
   'top.help',
   'top.theme',
@@ -106,6 +107,8 @@ const yellowTag = (label: string): CoachMarkSpec => ({ label, face: COACH_YELLOW
  */
 export const COACH_MARKS: Readonly<Record<CoachId, CoachMarkSpec>> = Object.freeze({
   'top.sections': navyTag(CoachText.SECTIONS),
+  // Live's amber key while the sound plays late (the face of the key itself).
+  'top.bluetooth': { label: CoachText.BLUETOOTH, face: 'var(--warn)', ink: 'var(--display)' },
   'top.connection': navyTag(CoachText.CONNECTION),
   'top.help': { label: CoachText.HELP, face: 'var(--ink)', ink: 'var(--shell)' },
   // Web: the desk's theme switch, after the ? key (the nav rail's Settings key

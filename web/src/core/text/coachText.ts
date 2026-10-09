@@ -9,9 +9,16 @@ export const CoachText = {
   CLOSE_HINT: 'Tap anywhere to close',
 
   BACK_UP: 'Back up',
-  CONNECTED: 'EP-133 connected: tap to disconnect',
+  /** The connection key while connected: its name; a tap says HOLD_TO_DISCONNECT, a hold disconnects. */
+  CONNECTED: 'EP-133 connected: hold to disconnect',
   CONNECTION: 'Connection',
   DISCONNECTED: 'Connect the EP-133',
+  /** A tap on the connected key (the toast), and what a screen reader hears with it. */
+  HOLD_TO_DISCONNECT: 'Hold to disconnect',
+  /** The same for a screen reader as a button of its own, beside the connection key. */
+  DISCONNECT: 'Disconnect',
+  /** Live's top bar while the sound goes to Bluetooth, which plays late: the key's name and tag. */
+  BLUETOOTH: 'Bluetooth delay',
   SETTINGS: 'Settings',
   /** The web's desktop top bar: its System / Light / Dark switch, in the settings key's place. */
   THEME: 'Light or dark',

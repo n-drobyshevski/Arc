@@ -279,15 +279,11 @@ export const MirrorText = {
   },
   BLUETOOTH_DELAY:
     'Sound goes to Bluetooth, which plays late (often 0.2 s or more). Wired headphones or the phone speaker are much quicker.',
-  /** The Bluetooth chip on Live's display line, for as long as the sound goes to Bluetooth: its tooltip and what a screen reader says. */
+  /** The Bluetooth key in Live's top bar, for as long as the sound goes to Bluetooth: its sentence in the toast and what a screen reader says. */
   WIRELESS_DELAY: 'Bluetooth plays late: wired or the speaker is quicker',
-  /** The same chip while Make up for Bluetooth delay is on, with the delay it makes up for: "Bluetooth plays late (about 180 ms): arc makes up for it". */
+  /** The same key while Make up for Bluetooth delay is on, with the delay it makes up for: "Bluetooth plays late (about 180 ms): arc makes up for it". */
   wirelessMadeUp(ms: number): string {
     return `Bluetooth plays late (about ${ms} ms): arc makes up for it`
-  },
-  /** The same where the route isn't known but the output's own delay is long: "Sound plays 140 ms late: wired output is quicker". */
-  slowOutput(ms: number): string {
-    return `Sound plays ${ms} ms late: wired output is quicker`
   },
   noteNames(n: NoteNames): string {
     switch (n) {
