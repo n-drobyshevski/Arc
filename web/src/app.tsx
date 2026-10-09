@@ -321,6 +321,9 @@ function Root(): JSX.Element {
         connected={state.connected}
         canConnect={state.midiSupported && !state.busy}
         onConnect={() => void c.connect()}
+        onNote={(text) => c.toast(text)}
+        // Read by the top bar alone, so a new delay re-renders only that.
+        late={v.tab === 'live' ? c.liveLate : null}
         onDebug={() => nav.openScreen({ kind: 'debug' })}
         // The section list's last entry: the list closes and Settings opens in its place.
         onSettings={() => nav.replace(overlayLayer('menu'), screenLayer({ kind: 'settings' }))}
@@ -415,7 +418,6 @@ function LiveBar(props: { pianoRange: NoteRange | null; editing: boolean }): JSX
       mirror={liveMirror(c)}
       keys={liveKeys(c)}
       playing={livePlaying(c)}
-      late={c.liveLate}
       editing={props.editing}
       pianoRange={props.pianoRange}
     />
@@ -500,8 +502,6 @@ function TabScreen(props: {
           // Signals, read by each pad and key: a voice doesn't re-render this screen.
           playing={livePlaying(c)}
           haptics={settings.haptics}
-          // Read by the display line alone, so a new delay re-renders only that.
-          outputLate={c.liveLate}
           keys={liveKeys(c)}
           inBar={props.inBar}
           onPianoRange={props.onPianoRange}

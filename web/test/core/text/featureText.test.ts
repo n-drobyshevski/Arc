@@ -268,11 +268,10 @@ describe('FeatureTextTest', () => {
 
   it('connection key text', () => {
     expect(NavText.HOLD_TO_DISCONNECT).toBe('Hold to disconnect')
-    expect(CoachText.CONNECTED_HOLD).toBe('EP-133 connected: hold to disconnect')
+    expect(CoachText.CONNECTED).toBe('EP-133 connected: hold to disconnect')
+    expect(CoachText.CONNECTED_NAME).toBe('EP-133 connected')
     expect(CoachText.CONNECTION_HOLD).toBe('Connection: hold to disconnect')
     expect(CoachText.DISCONNECT).toBe('Disconnect')
-    // The web's key still disconnects on a tap.
-    expect(CoachText.CONNECTED).toBe('EP-133 connected: tap to disconnect')
   })
 
   it('pattern text', () => {

@@ -10,11 +10,12 @@ object CoachText {
     const val CLOSE_HINT = "Tap anywhere to close"
 
     const val BACK_UP = "Back up"
-    const val CONNECTED = "EP-133 connected: tap to disconnect"
-    /** Android's connection key while connected: a tap only says to hold ([NavText.HOLD_TO_DISCONNECT]), so its name does too. */
-    const val CONNECTED_HOLD = "EP-133 connected: hold to disconnect"
+    /** The connection key while connected: a tap only says to hold ([NavText.HOLD_TO_DISCONNECT]), so its name does too. */
+    const val CONNECTED = "EP-133 connected: hold to disconnect"
+    /** The web's connected key for a screen reader, which hears [NavText.HOLD_TO_DISCONNECT] as its description. */
+    const val CONNECTED_NAME = "EP-133 connected"
     const val CONNECTION = "Connection"
-    /** The guide overlay's tag on Android's connection key while connected. */
+    /** The guide overlay's tag on the connection key while connected. */
     const val CONNECTION_HOLD = "Connection: hold to disconnect"
     /** The connection key's action for a screen reader, which disconnects without the timed hold. */
     const val DISCONNECT = "Disconnect"

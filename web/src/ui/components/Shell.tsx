@@ -17,6 +17,7 @@
 // desk shows through.
 import type { ComponentChildren, JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
+import type { ReadonlySignal } from '@preact/signals'
 import type { ThemeChoice } from '../../core/text/settingsText'
 import type { Tab } from '../../state/types'
 import { GuideEdgeTab } from './GuideEdgeTab'
@@ -33,6 +34,10 @@ export interface ShellProps {
   connected: boolean
   canConnect: boolean
   onConnect: () => void
+  /** A short note in the toast (the top bar's keys explain themselves with it). */
+  onNote: (text: string) => void
+  /** Live's output delay (ms) while it is heard, for the top bar's Bluetooth key; null off Live. */
+  late?: ReadonlySignal<number | null> | null
   onDebug: () => void
   /** Settings, the last entry of the section list (the list closes with it; none on the desk). */
   onSettings: () => void
@@ -75,6 +80,8 @@ export function Shell(props: ShellProps): JSX.Element {
           connected={props.connected}
           canConnect={props.canConnect}
           onConnect={props.onConnect}
+          onNote={props.onNote}
+          late={props.late}
           onDebug={props.onDebug}
           onHelp={props.onHelp}
           {...(props.desk ? { themeSwitch: { theme: props.theme, onTheme: props.onTheme } } : {})}

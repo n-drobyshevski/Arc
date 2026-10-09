@@ -531,6 +531,26 @@ describe('the placing order', () => {
     expect(crossings(laid)).toBe(0)
   })
 
+  it('with Live\'s Bluetooth key before the connection key, the tags still clear each other', () => {
+    // A phone 360 wide: the bar is the tag, then the Bluetooth key, the connection key and ? (the real
+    // measure is in the e2e test; here every letter is 10px).
+    const PHONE = { width: 360, height: 780 }
+    const keys = [
+      mark('top.sections', at(16, 12, 126, 44), 'Sections'),
+      mark('top.bluetooth', at(184, 12, 44, 44), 'Bluetooth delay'),
+      mark('top.connection', at(236, 12, 44, 44), 'Connection'),
+      mark('top.help', at(300, 12, 44, 44), "What's what"),
+    ]
+    const ps = layoutTags(keys, PHONE, measure)
+    expect(ps).toHaveLength(keys.length)
+    for (const p of ps) for (const q of ps) if (p !== q) expect(overlaps(r(p), r(q))).toBe(false)
+    // The desk: the same key before the connection key in the 1200 row.
+    const wide = [mark('top.bluetooth', at(780, 12, 44, 44), 'Bluetooth delay'), ...bar.slice(1, 3)]
+    const laid = layoutTags(wide, DESK, measure)
+    expect(crossings(laid)).toBe(0)
+    for (const p of laid) for (const q of laid) if (p !== q) expect(overlaps(r(p), r(q))).toBe(false)
+  })
+
   it('when crowded, is reworked around tags on each other too', () => {
     // A phone on its side, Backups: the top bar, back up, search and import under it, the list below.
     const SMALL = { width: 692, height: 336 }

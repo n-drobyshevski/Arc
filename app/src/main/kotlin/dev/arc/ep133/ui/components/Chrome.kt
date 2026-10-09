@@ -288,7 +288,7 @@ fun TopBar(
             if (connected) {
                 // A tap only says to hold: letting go early, or sliding off, leaves the EP-133 connected.
                 IconBlock(
-                    ArcIcon.DOT, CoachText.CONNECTED_HOLD, c.ok, c.onOk, { onHint(NavText.HOLD_TO_DISCONNECT) },
+                    ArcIcon.DOT, CoachText.CONNECTED, c.ok, c.onOk, { onHint(NavText.HOLD_TO_DISCONNECT) },
                     Modifier.coachMark("top.connection", CoachText.CONNECTION_HOLD, c.ok, c.onOk),
                     enabled = canConnect, iconSize = 16.dp,
                     hold = KeyHold(CoachText.DISCONNECT, haptics, onDisconnect),
