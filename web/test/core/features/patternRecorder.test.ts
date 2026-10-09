@@ -4,6 +4,7 @@ import { physicalPad, type PhysicalPad } from '../../../src/core/features/padNot
 import {
   Pattern,
   ProjectPatterns,
+  ProjectSeq,
   Seq,
   Timing,
   pattern,
@@ -24,6 +25,12 @@ const hit = (r: PatternRecorder, p: Patterns, pad: PhysicalPad, tick: number, ti
   r.noteOn(p, pad, semitones, tick, tick, timing)
 
 const ticks = (p: Patterns, g = 0): number[] => ProjectPatterns.group(p, g).notes.map((n) => n.tick)
+
+/** UNDO from [p] (the patterns playing in the recorder's seq): the patterns it goes back to, or null. */
+const undoPlaying = (r: PatternRecorder, p: Patterns): Patterns | null => {
+  const back = r.undo(ProjectSeq.withPlaying(r.seq, p))
+  return back === null ? null : ProjectSeq.playing(back)
+}
 const notesOf = (p: Patterns, g = 0) => ProjectPatterns.group(p, g).notes
 const withGroup = (g: number, pat: Pattern, p: Patterns = projectPatterns()): Patterns => ProjectPatterns.with(p, g, pat)
 const one = (...notes: PatternNote[]): Patterns => withGroup(0, pattern(1, notes))
@@ -199,7 +206,7 @@ describe('PatternRecorderTest', () => {
   it('undo takes back a pass at a time', () => {
     const r = new PatternRecorder()
     expect(r.canUndo).toBe(false)
-    expect(r.undo(projectPatterns())).toBeNull()
+    expect(undoPlaying(r, projectPatterns())).toBeNull()
     const empty = projectPatterns()
     let p = r.punchIn(empty, true, false)
     expect(r.canUndo).toBe(false)
@@ -212,9 +219,9 @@ describe('PatternRecorderTest', () => {
     p = hit(r, p, a3, 384.0 + 192).patterns
     r.passed(0, 1)
     p = hit(r, p, a4, 384.0 + 288).patterns
-    expect(r.undo(p)).toEqual(firstPass)
-    expect(r.undo(firstPass)).toEqual(empty)
-    expect(r.undo(empty)).toBeNull()
+    expect(undoPlaying(r, p)).toEqual(firstPass)
+    expect(undoPlaying(r, firstPass)).toEqual(empty)
+    expect(undoPlaying(r, empty)).toBeNull()
     expect(r.canUndo).toBe(false)
   })
 
@@ -229,12 +236,12 @@ describe('PatternRecorderTest', () => {
     expect(r.erasePad(p4, a3)).toEqual(p4)
     // Recorded after an erase: a checkpoint of its own.
     const p5 = hit(r, p4, a3, 0.0).patterns
-    expect(r.undo(p5)).toEqual(p4)
-    expect(r.undo(p4)).toEqual(p3)
-    expect(r.undo(p3)).toEqual(p2)
-    expect(r.undo(p2)).toEqual(p1)
-    expect(r.undo(p1)).toEqual(p0)
-    expect(r.undo(p0)).toBeNull()
+    expect(undoPlaying(r, p5)).toEqual(p4)
+    expect(undoPlaying(r, p4)).toEqual(p3)
+    expect(undoPlaying(r, p3)).toEqual(p2)
+    expect(undoPlaying(r, p2)).toEqual(p1)
+    expect(undoPlaying(r, p1)).toEqual(p0)
+    expect(undoPlaying(r, p0)).toBeNull()
   })
 
   it('at most maxUndo checkpoints are kept', () => {
@@ -243,9 +250,9 @@ describe('PatternRecorderTest', () => {
     const p1 = r.setLength(p0, 0, 2)
     const p2 = r.setLength(p1, 0, 3)
     const p3 = r.setLength(p2, 0, 4)
-    expect(r.undo(p3)).toEqual(p2)
-    expect(r.undo(p2)).toEqual(p1)
-    expect(r.undo(p1)).toBeNull()
+    expect(undoPlaying(r, p3)).toEqual(p2)
+    expect(undoPlaying(r, p2)).toEqual(p1)
+    expect(undoPlaying(r, p1)).toBeNull()
   })
 
   it('an undo of an auto length recording closes the groups again', () => {
@@ -254,7 +261,7 @@ describe('PatternRecorderTest', () => {
     let p = r.punchIn(start, true, true)
     p = hit(r, p, b0, 500.0).patterns
     p = r.punchOut(p, 600.0)
-    expect(r.undo(p)).toEqual(start)
+    expect(undoPlaying(r, p)).toEqual(start)
   })
 
   it("erasing a pad takes all its notes, or one pitch's", () => {
@@ -291,12 +298,12 @@ describe('PatternRecorderTest', () => {
     p = r.eraseRange(p, a3, null, 50.0, 150.0)
     p = r.eraseRange(p, a3, null, 150.0, 250.0)
     expect(Pattern.isEmpty(ProjectPatterns.group(p, 0))).toBe(true)
-    expect(r.undo(p)).toEqual(p0)
-    expect(r.undo(p0)).toBeNull()
+    expect(undoPlaying(r, p)).toEqual(p0)
+    expect(undoPlaying(r, p0)).toBeNull()
     // Let go and held again: another gesture.
     let q = r.eraseRange(p0, a3, null, 0.0, 50.0)
     q = r.eraseRange(q, a3, null, 300.0, 384.0 + 150)
-    expect(ticks(r.undo(q)!)).toEqual([100, 200])
+    expect(ticks(undoPlaying(r, q)!)).toEqual([100, 200])
   })
 
   it('clear takes the notes of a group or all, and keeps the lengths', () => {
@@ -354,8 +361,8 @@ describe('PatternRecorderTest', () => {
     expect(notesOf(new PatternRecorder().stepPlace(projectPatterns(), a4, null, 1, Timing.EIGHTH, 75, 200))).toEqual([patternNote(72, 4, 48, null, 127)])
     expect(notesOf(new PatternRecorder().stepPlace(projectPatterns(), a4, null, 0, sixteenth, 50, 0))[0]!.velocity).toBe(1)
     // Each place is a checkpoint.
-    expect(r.undo(p2)).toEqual(p1)
-    expect(r.undo(p1)).toEqual(p0)
+    expect(undoPlaying(r, p2)).toEqual(p1)
+    expect(undoPlaying(r, p1)).toEqual(p0)
   })
 
   it("a full pattern takes no step note, but a replaced one still fits", () => {
@@ -377,14 +384,14 @@ describe('PatternRecorderTest', () => {
     p = r.stepVelocity(p, 0, 0, sixteenth, 50, 300)
     p = r.stepVelocity(p, 0, 0, sixteenth, 50, 100)
     expect(velocities(p)).toEqual([100, 100, 127])
-    expect(r.undo(p)).toEqual(p0)
-    expect(r.undo(p0)).toBeNull()
+    expect(undoPlaying(r, p)).toEqual(p0)
+    expect(undoPlaying(r, p0)).toBeNull()
     let g = r.stepGate(p0, 0, 0, sixteenth, 50, 0)
     expect(notesOf(g).map((n) => n.gate)).toEqual([1, 1, 24])
     g = r.stepGate(g, 0, 0, sixteenth, 50, 1000)
     expect(notesOf(g).map((n) => n.gate)).toEqual([384, 384, 24])
     g = r.stepGate(g, 0, 0, sixteenth, 50, 48)
-    expect(r.undo(g)).toEqual(p0)
+    expect(undoPlaying(r, g)).toEqual(p0)
     // An empty step: nothing changes.
     expect(r.stepVelocity(p0, 0, 5, sixteenth, 50, 10)).toBe(p0)
     // Another step is another gesture, as is the knob let go of.
@@ -394,8 +401,8 @@ describe('PatternRecorderTest', () => {
     q = r.stepVelocity(q, 0, 1, sixteenth, 50, 80)
     r.endRun()
     q = r.stepVelocity(q, 0, 1, sixteenth, 50, 70)
-    expect(velocities(r.undo(q)!)).toEqual([90, 90, 80])
-    expect(velocities(r.undo(second)!)).toEqual([90, 90, 127])
+    expect(velocities(undoPlaying(r, q)!)).toEqual([90, 90, 80])
+    expect(velocities(undoPlaying(r, second)!)).toEqual([90, 90, 127])
   })
 
   it('a nudge moves a step on the grid, or a tick in free time, and the cursor follows', () => {
@@ -445,8 +452,8 @@ describe('PatternRecorderTest', () => {
     n = r.nudge(n.patterns, a3, null, n.step, sixteenth, 50, false, 1)
     expect(ticks(n.patterns)).toEqual([73, 48])
     expect(n.step).toBe(3)
-    expect(r.undo(n.patterns)).toEqual(p0)
-    expect(r.undo(p0)).toBeNull()
+    expect(undoPlaying(r, n.patterns)).toEqual(p0)
+    expect(undoPlaying(r, p0)).toBeNull()
   })
 
   it("a pad's notes shift a tick, round the loop, past the end left alone", () => {
@@ -457,8 +464,8 @@ describe('PatternRecorderTest', () => {
     p = r.shiftPad(p, a3, null, -1)
     p = r.shiftPad(p, a3, null, -1)
     expect(ticks(p)).toEqual([381, 197, 500, 0])
-    expect(r.undo(p)).toEqual(p0)
-    expect(r.undo(p0)).toBeNull()
+    expect(undoPlaying(r, p)).toEqual(p0)
+    expect(undoPlaying(r, p0)).toBeNull()
     expect(ticks(r.shiftPad(p0, a3, 2, 1))).toEqual([0, 201, 500, 0])
     expect(ticks(r.shiftPad(one(patternNote(383, 3, 24), patternNote(0, 4, 24)), a3, null, 1))).toEqual([0, 0])
   })
@@ -494,8 +501,8 @@ describe('PatternRecorderTest', () => {
     const p2 = r.correctPad(c.patterns, a3, null, Timing.QUARTER, 50).patterns
     // At 1/4, 24 lands on 0 and 48 rounds up to 96.
     expect(ticks(p2)).toEqual([0, 96, 500, 13])
-    expect(r.undo(p2)).toEqual(c.patterns)
-    expect(r.undo(c.patterns)).toEqual(p0)
+    expect(undoPlaying(r, p2)).toEqual(c.patterns)
+    expect(undoPlaying(r, c.patterns)).toEqual(p0)
   })
 
   it('a pad held to correct while playing is one checkpoint', () => {
@@ -515,14 +522,14 @@ describe('PatternRecorderTest', () => {
     }
     expect(total).toBe(3)
     expect(ticks(p)).toEqual([0, 96, 192])
-    expect(r.undo(p)).toEqual(p0)
-    expect(r.undo(p0)).toBeNull()
+    expect(undoPlaying(r, p)).toEqual(p0)
+    expect(undoPlaying(r, p0)).toBeNull()
     // Let go and held again: another gesture.
     let q = r.correctRange(p0, a3, null, 0.0, 50.0, sixteenth, 50).patterns
     const again = r.correctRange(q, a3, null, 300.0, 384.0 + 150, sixteenth, 50)
     expect(again.moved).toBe(1)
     q = again.patterns
-    expect(ticks(r.undo(q)!)).toEqual([0, 100, 200])
+    expect(ticks(undoPlaying(r, q)!)).toEqual([0, 100, 200])
     // Round the loop, and a whole loop.
     expect(r.correctRange(one(patternNote(380, 3, 24), patternNote(200, 3, 24)), a3, null, 760.0, 780.0, sixteenth, 50)).toEqual(
       corrected(one(patternNote(0, 3, 24), patternNote(200, 3, 24)), 1),
@@ -546,16 +553,16 @@ describe('PatternRecorderTest', () => {
     const p8 = hit(r, p7, a3, 96.0).patterns
     const p9 = r.shiftPad(p8, a4, null, 1)
     expect(ticks(p9)).toEqual([2, 26, 96])
-    expect(r.undo(p9)).toEqual(p8)
-    expect(r.undo(p8)).toEqual(p7)
-    expect(r.undo(p7)).toEqual(p6)
-    expect(r.undo(p6)).toEqual(p5)
-    expect(r.undo(p5)).toEqual(p4)
-    expect(r.undo(p4)).toEqual(p3)
-    expect(r.undo(p3)).toEqual(p2)
-    expect(r.undo(p2)).toEqual(p1)
-    expect(r.undo(p1)).toEqual(p0)
-    expect(r.undo(p0)).toBeNull()
+    expect(undoPlaying(r, p9)).toEqual(p8)
+    expect(undoPlaying(r, p8)).toEqual(p7)
+    expect(undoPlaying(r, p7)).toEqual(p6)
+    expect(undoPlaying(r, p6)).toEqual(p5)
+    expect(undoPlaying(r, p5)).toEqual(p4)
+    expect(undoPlaying(r, p4)).toEqual(p3)
+    expect(undoPlaying(r, p3)).toEqual(p2)
+    expect(undoPlaying(r, p2)).toEqual(p1)
+    expect(undoPlaying(r, p1)).toEqual(p0)
+    expect(undoPlaying(r, p0)).toBeNull()
   })
 
   it('step edits and corrects leave an open pattern alone', () => {

@@ -1,19 +1,22 @@
 // Port of core/src/main/kotlin/dev/arc/ep133/features/PatternRecorder.kt
 //
 // Recording into a project's patterns, as RECORD does on the device: every
-// edit is pure, taking the patterns and giving the new ones, and keeps the
-// undo checkpoints (SHIFT + B on the device).
+// edit is pure, taking the patterns playing and giving the new ones, and
+// keeps the undo checkpoints (SHIFT + B on the device).
 //
 // Ticks are global: counted from the transport's tick 0 (PLAY starts at bar
 // 1), negative during the count-in. A group's pattern takes them mod its
 // length, except while it is open: then its tick is the global one, and it
 // grows instead of looping (grow).
 //
-// Undo: a checkpoint is the whole of a project's patterns, pushed on the
-// first change after a punch-in or a pass of a group being recorded into
-// (passed), and before each erase, clear, length change or double; at most
-// [maxUndo] are kept. A gesture (a pad held in ERASE or to correct, a knob
-// turned on a step, presses of − / + on one pad) is one checkpoint.
+// Undo: a checkpoint is the whole of the project's sequencer (seq, with the
+// patterns as they were), pushed on the first change after a punch-in or a
+// pass of a group being recorded into (passed), before each erase, clear,
+// length change or double, and before each edit of the scenes or the banks
+// (editSeq); at most [maxUndo] are kept. A gesture (a pad held in ERASE or to
+// correct, a knob turned on a step, presses of − / + on one pad) is one
+// checkpoint. Picking a pattern or a scene is no checkpoint and keeps them
+// all: an undo after it goes back to the checkpoint whole, its pick included.
 //
 // Step edits (place, velocity, length, nudge) are for a stopped transport,
 // whose patterns are never open; on an open pattern they, and the shifts and
@@ -21,14 +24,27 @@
 //
 // Web deltas:
 // - Recorded, Nudged and Corrected are plain readonly interfaces.
-// - The Kotlin compares patterns with data class equals; here samePatterns
-//   compares them field by field.
+// - The Kotlin compares patterns and sequencers with data class equals; here
+//   samePatterns and sameSeq (pattern.ts) compare them field by field.
 // - Kotlin's Long ticks and passes are whole JS numbers.
 // - settle's (offset, semitones, tick) Triples are "offset:semitones:tick"
 //   strings.
 
 import type { PhysicalPad } from './padNotes'
-import { Pattern, ProjectPatterns, Seq, Timing, pattern, patternNote, quantize, timingTicks, type PatternNote } from './pattern'
+import {
+  Pattern,
+  ProjectPatterns,
+  ProjectSeq,
+  Seq,
+  Timing,
+  pattern,
+  patternNote,
+  quantize,
+  samePattern,
+  sameSeq,
+  timingTicks,
+  type PatternNote,
+} from './pattern'
 import { passOf } from './sequencer'
 import { Steps } from './steps'
 
@@ -63,7 +79,7 @@ interface EraseRun {
 }
 
 export class PatternRecorder {
-  private readonly checkpoints: ProjectPatterns[] = []
+  private readonly checkpoints: ProjectSeq[] = []
   // The next change pushes a checkpoint.
   private pending = false
   private nextId = 0
@@ -79,6 +95,14 @@ export class PatternRecorder {
   private lastRun: string | null = null
   // Whether that run has pushed its checkpoint.
   private runPushed = false
+
+  /**
+   * The project's sequencer as it stands, which the patterns handed to the
+   * edits are the playing ones of; the caller sets it whenever the picks, the
+   * banks or the scenes change. A checkpoint is this with the patterns before
+   * the edit.
+   */
+  seq: ProjectSeq = ProjectSeq.DEFAULT
 
   constructor(private readonly maxUndo = 32) {}
 
@@ -422,12 +446,25 @@ export class PatternRecorder {
     this.lastRun = null
   }
 
-  /** The patterns before the last checkpoint, or null with none left. */
-  undo(p: ProjectPatterns): ProjectPatterns | null {
+  /**
+   * An edit of the scenes or the banks (a commit, a clear or delete, a
+   * paste), from [before] to [after]: as edit, a checkpoint of its own when it
+   * changed anything, and the gestures going on end.
+   */
+  editSeq(before: ProjectSeq, after: ProjectSeq): ProjectSeq {
+    this.breakRuns()
+    if (sameSeq(after, before)) return before
+    this.pushSeq(ProjectSeq.withPlaying(before, this.closed(ProjectSeq.playing(before))))
+    this.pending = true
+    return after
+  }
+
+  /** The project's sequencer before the last checkpoint (those the same as [current] skipped), or null with none left. */
+  undo(current: ProjectSeq): ProjectSeq | null {
     this.breakRuns()
     while (this.checkpoints.length > 0) {
       const c = this.checkpoints.pop()!
-      if (!samePatterns(c, p)) {
+      if (!sameSeq(c, current)) {
         this.pending = true
         return c
       }
@@ -486,14 +523,22 @@ export class PatternRecorder {
   }
 
   private push(before: ProjectPatterns): void {
-    // Open groups go back as they were before the punch-in: closed, at their old length.
-    let c = before
+    this.pushSeq(ProjectSeq.withPlaying(this.seq, this.closed(before)))
+  }
+
+  private pushSeq(c: ProjectSeq): void {
+    this.checkpoints.push(c)
+    while (this.checkpoints.length > this.maxUndo) this.checkpoints.shift()
+  }
+
+  // Open groups go back as they were before the punch-in: closed, at their old length.
+  private closed(p: ProjectPatterns): ProjectPatterns {
+    let c = p
     for (let g = 0; g < 4; g++) {
       const pat = ProjectPatterns.group(c, g)
       if (pat.open) c = ProjectPatterns.with(c, g, pattern(Pattern.isEmpty(pat) ? this.openedFrom[g]! : pat.bars, pat.notes))
     }
-    this.checkpoints.push(c)
-    while (this.checkpoints.length > this.maxUndo) this.checkpoints.shift()
+    return c
   }
 }
 
@@ -501,18 +546,7 @@ export class PatternRecorder {
 export function samePatterns(a: ProjectPatterns, b: ProjectPatterns): boolean {
   if (a === b) return true
   if (a.groups.length !== b.groups.length) return false
-  return a.groups.every((x, g) => {
-    const y = b.groups[g]!
-    return (
-      x.bars === y.bars &&
-      x.open === y.open &&
-      x.notes.length === y.notes.length &&
-      x.notes.every((n, i) => {
-        const m = y.notes[i]!
-        return n.tick === m.tick && n.offset === m.offset && n.gate === m.gate && n.semitones === m.semitones && n.velocity === m.velocity && n.id === m.id
-      })
-    )
-  })
+  return a.groups.every((x, g) => samePattern(x, b.groups[g]!))
 }
 
 function on(n: PatternNote, pad: PhysicalPad, semitones: number | null): boolean {

@@ -6,9 +6,11 @@ import dev.arc.ep133.features.FxType
 import dev.arc.ep133.features.Hit
 import dev.arc.ep133.features.PadNotes
 import dev.arc.ep133.features.PhysicalPad
+import dev.arc.ep133.features.ProjectSeq
 import dev.arc.ep133.features.ProjectSource
 import dev.arc.ep133.features.SampleSource
 import dev.arc.ep133.features.Seq
+import dev.arc.ep133.features.SwitchTime
 import dev.arc.ep133.features.Timing
 import dev.arc.ep133.features.TransportPhase
 import dev.arc.ep133.features.TransportState
@@ -747,6 +749,42 @@ object MirrorText {
         TransportPhase.COUNT_IN -> "Counting in"
         TransportPhase.PLAYING -> if (state.recording) "Recording" else PLAYING
     }
+
+    // ---------- SCENES: the pattern each group plays, picked as MAIN and GROUP do on the device; copy and paste ----------
+    /** "P01": a group's pattern [n] (1..99). */
+    fun patternLabel(n: Int) = "P${twoDigits(n)}"
+
+    /** "S01": the scene at [index] (from 0), shown from 1. */
+    fun sceneLabel(index: Int) = "S${twoDigits(index + 1)}"
+
+    /** "S01 · A01 B03 C01 D02": the scene playing, and each group's pattern in it. */
+    fun sceneLine(seq: ProjectSeq) = "${sceneLabel(seq.scene)} · " + (0 until 4).joinToString(" ") { g -> "${'A' + g}${twoDigits(seq.selected(g))}" }
+
+    /** The scene change setting's choices (410 to 412 on the device). */
+    fun switchName(t: SwitchTime) = when (t) {
+        SwitchTime.IMMEDIATE -> "Immediate"
+        SwitchTime.BAR -> "Bar end"
+        SwitchTime.PATTERN -> "Pattern end"
+    }
+
+    /** "P01 → P05": a group's pattern playing, and the one waiting to take over. */
+    fun queuedLabel(from: Int, to: Int) = "${patternLabel(from)} → ${patternLabel(to)}"
+
+    /** What SHIFT + C copied: pattern [n], [bar] (as shown, from 1) or a pad's notes (the pad's [name]). */
+    fun copiedPattern(n: Int) = "${patternLabel(n)} copied."
+    fun copiedBar(bar: Int) = "Bar $bar copied."
+    fun copiedPad(name: String) = "$name copied."
+
+    /** Where SHIFT + D pasted: into pattern [n], [bar] (from 1) or onto a pad (its [name]). */
+    fun pastedPattern(n: Int) = "Pasted into ${patternLabel(n)}."
+    fun pastedBar(bar: Int) = "Pasted into bar $bar."
+    fun pastedPad(name: String) = "Pasted onto $name."
+
+    /** ERASE + MAIN held: CLR emptied the scene's patterns, DEL deleted the empty scene. */
+    const val CLEARED_SCENE = "Scene cleared."
+    const val DELETED_SCENE = "Scene deleted."
+
+    private fun twoDigits(n: Int) = n.toString().padStart(2, '0')
 
     // ---------- STEP: the pattern a step at a time while stopped, and timing correct, as on the device ----------
     /**

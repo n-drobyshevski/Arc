@@ -29,6 +29,9 @@ class StepPlanTest {
 
     private fun hit(pad: PhysicalPad) = StepNote(pad, null)
 
+    // UNDO from [p], the patterns playing: the patterns it goes back to, or null.
+    private fun undo(p: ProjectPatterns) = recorder.undo(recorder.seq.withPlaying(p))?.playing()
+
     private fun key(pad: PhysicalPad) = "live:${pad.group}:${pad.offset}"
 
     // Group A [bars] long with [notes].
@@ -212,9 +215,9 @@ class StepPlanTest {
         assertFalse(desk.pick(hit(kick), moved.patterns, recorder, t))
 
         // UNDO: the nudge, then the shifts, each one step.
-        val beforeNudge = recorder.undo(moved.patterns)
+        val beforeNudge = undo(moved.patterns)
         assertEquals(twice, beforeNudge)
-        assertEquals(p, recorder.undo(beforeNudge!!))
+        assertEquals(p, undo(beforeNudge!!))
     }
 
     @Test
@@ -260,8 +263,8 @@ class StepPlanTest {
         recorder.endRun()
         val c = desk.gate(30, b, recorder, t)
         assertEquals(listOf(32, 32, 24), c.group(0).notes.map { it.gate })
-        assertEquals(b, recorder.undo(c))
-        assertEquals(p, recorder.undo(b))
+        assertEquals(b, undo(c))
+        assertEquals(p, undo(b))
     }
 
     @Test
@@ -285,8 +288,8 @@ class StepPlanTest {
         assertEquals("4 corrected", desk.status)
         assertFalse(desk.holding)
         // The whole hold is one UNDO step.
-        assertEquals(p, recorder.undo(c))
-        assertNull(recorder.undo(p))
+        assertEquals(p, undo(c))
+        assertNull(undo(p))
         // The count goes a moment later (not while the panel shows).
         desk.correctedShown()
         assertNull(desk.status)

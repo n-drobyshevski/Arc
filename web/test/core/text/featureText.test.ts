@@ -6,10 +6,11 @@ import { NoteNames, SCALES } from '../../../src/core/features/keys'
 import { FX_TYPES, FxType } from '../../../src/core/features/fxSettings'
 import { KeyMark } from '../../../src/core/features/piano'
 import { physicalPad } from '../../../src/core/features/padNotes'
-import { TIMINGS, Timing } from '../../../src/core/features/pattern'
+import { ProjectSeq, TIMINGS, Timing } from '../../../src/core/features/pattern'
 import { PLAY_MODES } from '../../../src/core/features/padSettings'
 import { ProjectSource } from '../../../src/core/features/projectStep'
 import { SampleSource } from '../../../src/core/features/sampleSource'
+import { SWITCH_TIMES, SceneOps } from '../../../src/core/features/scenes'
 import { transportState } from '../../../src/core/features/transport'
 import { CoachText } from '../../../src/core/text/coachText'
 import { FeatureText } from '../../../src/core/text/featureText'
@@ -334,6 +335,25 @@ describe('FeatureTextTest', () => {
     expect(MirrorText.PTN.toUpperCase()).toBe('PTN')
     // Web delta: no REC, so no TAKE words.
     expect(CoachText.RECORD).toBe('Record a pattern: tap, then PLAY; hold for its settings')
+  })
+
+  it('scene text', () => {
+    expect([1, 5, 99].map((n) => MirrorText.patternLabel(n))).toEqual(['P01', 'P05', 'P99'])
+    // The scene's index, shown from 1.
+    expect([0, 9, 98].map((i) => MirrorText.sceneLabel(i))).toEqual(['S01', 'S10', 'S99'])
+    const seq = SceneOps.selectPattern(SceneOps.selectPattern(ProjectSeq.DEFAULT, 1, 3), 3, 2)
+    expect(MirrorText.sceneLine(seq)).toBe('S01 \u00B7 A01 B03 C01 D02')
+    expect(MirrorText.sceneLine(SceneOps.newScene(ProjectSeq.DEFAULT))).toBe('S02 \u00B7 A02 B02 C02 D02')
+    expect(SWITCH_TIMES.map((t) => MirrorText.switchName(t))).toEqual(['Immediate', 'Bar end', 'Pattern end'])
+    expect(MirrorText.queuedLabel(1, 5)).toBe('P01 \u2192 P05')
+    expect(MirrorText.copiedPattern(3)).toBe('P03 copied.')
+    expect(MirrorText.copiedBar(2)).toBe('Bar 2 copied.')
+    expect(MirrorText.copiedPad('KICK')).toBe('KICK copied.')
+    expect(MirrorText.pastedPattern(5)).toBe('Pasted into P05.')
+    expect(MirrorText.pastedBar(2)).toBe('Pasted into bar 2.')
+    expect(MirrorText.pastedPad('SNARE')).toBe('Pasted onto SNARE.')
+    expect(MirrorText.CLEARED_SCENE).toBe('Scene cleared.')
+    expect(MirrorText.DELETED_SCENE).toBe('Scene deleted.')
   })
 
   it('step text', () => {

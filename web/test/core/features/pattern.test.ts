@@ -7,6 +7,7 @@ import {
   Pattern,
   Patterns,
   ProjectPatterns,
+  ProjectSeq,
   Seq,
   TIMINGS,
   TIMING_INTERVALS,
@@ -15,11 +16,17 @@ import {
   pattern,
   patternNote,
   projectPatterns,
+  projectSeq,
   quantize,
+  scene,
   swingOffset,
   timingSwings,
   timingTicks,
 } from '../../../src/core/features/pattern'
+import { SceneOps } from '../../../src/core/features/scenes'
+
+/** A project's sequencer as it starts, playing [p]. */
+const seq = (p: ProjectPatterns) => ProjectSeq.withPlaying(ProjectSeq.DEFAULT, p)
 
 describe('PatternTest', () => {
   it("the device's sequencer numbers", () => {
@@ -54,44 +61,85 @@ describe('PatternTest', () => {
   })
 
   it('patterns by project, the blank ones dropped', () => {
-    const p = ProjectPatterns.with(projectPatterns(), 1, pattern(2))
-    const all = Patterns.put(Patterns.put(Patterns.EMPTY, 1, p), 3, projectPatterns())
+    const p = seq(ProjectPatterns.with(projectPatterns(), 1, pattern(2)))
+    const all = Patterns.put(Patterns.put(Patterns.put(Patterns.EMPTY, 1, p), 3, ProjectSeq.DEFAULT), 4, seq(projectPatterns()))
     expect(Patterns.of(all, 1)).toEqual(p)
-    expect(Patterns.of(all, 2)).toEqual(projectPatterns())
+    expect(Patterns.of(all, 2)).toEqual(ProjectSeq.DEFAULT)
     expect([...all.projects.keys()]).toEqual([1])
-    expect(Patterns.put(all, 1, projectPatterns())).toEqual(Patterns.EMPTY)
+    expect(Patterns.put(all, 1, ProjectSeq.DEFAULT)).toEqual(Patterns.EMPTY)
+    // Another scene is something: kept.
+    expect([...Patterns.put(Patterns.EMPTY, 5, SceneOps.newScene(ProjectSeq.DEFAULT)).projects.keys()]).toEqual([5])
   })
 
   it('the patterns survive the round trip, without ids or the open flag', () => {
     const a = pattern(2, [patternNote(96, 3, 24, 5, 127, 7)])
-    const all = Patterns.put(Patterns.EMPTY, 1, ProjectPatterns.with(projectPatterns(), 0, a))
+    const all = Patterns.put(Patterns.EMPTY, 1, seq(ProjectPatterns.with(projectPatterns(), 0, a)))
     expect(Patterns.toJson(all)).toBe(
-      '{"v":1,"projects":[{"project":1,"groups":[{"group":0,"bars":2,"notes":[{"t":96,"pad":3,"gate":24,"semi":5}]}]}]}',
+      '{"v":2,"projects":[{"project":1,"scene":0,"scenes":[[1,1,1,1]],"groups":[{"group":0,"patterns":[' +
+        '{"n":1,"bars":2,"notes":[{"t":96,"pad":3,"gate":24,"semi":5}]}]}]}]}',
     )
     expect(Patterns.fromJson(Patterns.toJson(all))).toEqual(
-      Patterns.put(Patterns.EMPTY, 1, ProjectPatterns.with(projectPatterns(), 0, { ...a, notes: [{ ...a.notes[0]!, id: 0 }] })),
+      Patterns.put(Patterns.EMPTY, 1, seq(ProjectPatterns.with(projectPatterns(), 0, { ...a, notes: [{ ...a.notes[0]!, id: 0 }] }))),
     )
-    // Velocity only when it isn't full; a group with only another length is kept; project 0 (none known) too.
+    // Velocity only when it isn't full; a pattern with only another length is kept; project 0 (none known) too.
     const more = Patterns.put(
-      Patterns.put(Patterns.EMPTY, 0, ProjectPatterns.with(projectPatterns(), 3, pattern(1, [patternNote(0, 0, 1, null, 64)]))),
+      Patterns.put(Patterns.EMPTY, 0, seq(ProjectPatterns.with(projectPatterns(), 3, pattern(1, [patternNote(0, 0, 1, null, 64)])))),
       2,
-      ProjectPatterns.with(projectPatterns(), 1, pattern(4)),
+      seq(ProjectPatterns.with(projectPatterns(), 1, pattern(4))),
     )
     expect(Patterns.toJson(more)).toBe(
-      '{"v":1,"projects":[{"project":0,"groups":[{"group":3,"bars":1,"notes":[{"t":0,"pad":0,"gate":1,"vel":64}]}]},' +
-        '{"project":2,"groups":[{"group":1,"bars":4,"notes":[]}]}]}',
+      '{"v":2,"projects":[{"project":0,"scene":0,"scenes":[[1,1,1,1]],"groups":[{"group":3,"patterns":[' +
+        '{"n":1,"bars":1,"notes":[{"t":0,"pad":0,"gate":1,"vel":64}]}]}]},' +
+        '{"project":2,"scene":0,"scenes":[[1,1,1,1]],"groups":[{"group":1,"patterns":[{"n":1,"bars":4,"notes":[]}]}]}]}',
     )
     expect(Patterns.fromJson(Patterns.toJson(more))).toEqual(more)
-    expect(Patterns.toJson(Patterns.put(Patterns.EMPTY, 1, ProjectPatterns.with(projectPatterns(), 0, { ...a, open: true })))).not.toContain('open')
+    expect(Patterns.toJson(Patterns.put(Patterns.EMPTY, 1, seq(ProjectPatterns.with(projectPatterns(), 0, { ...a, open: true }))))).not.toContain('open')
     expect(Patterns.fromJson(Patterns.toJson(Patterns.EMPTY))).toEqual(Patterns.EMPTY)
+    expect(Patterns.toJson(Patterns.EMPTY)).toBe('{"v":2,"projects":[]}')
+  })
+
+  it('scenes and banks survive the round trip, blank patterns left out', () => {
+    const kick = pattern(1, [patternNote(0, 0, 24)])
+    const p = projectSeq(
+      [new Map([[1, kick], [3, pattern(2, [patternNote(384, 1, 12)])]]), new Map(), new Map([[2, pattern(4)]]), new Map([[99, kick]])],
+      [scene([1, 1, 1, 1]), scene([3, 5, 2, 99])],
+      1,
+    )
+    const all = Patterns.put(Patterns.EMPTY, 7, p)
+    expect(Patterns.toJson(all)).toBe(
+      '{"v":2,"projects":[{"project":7,"scene":1,"scenes":[[1,1,1,1],[3,5,2,99]],"groups":[' +
+        '{"group":0,"patterns":[{"n":1,"bars":1,"notes":[{"t":0,"pad":0,"gate":24}]},{"n":3,"bars":2,"notes":[{"t":384,"pad":1,"gate":12}]}]},' +
+        '{"group":2,"patterns":[{"n":2,"bars":4,"notes":[]}]},' +
+        '{"group":3,"patterns":[{"n":99,"bars":1,"notes":[{"t":0,"pad":0,"gate":24}]}]}]}]}',
+    )
+    expect(Patterns.fromJson(Patterns.toJson(all))).toEqual(all)
+    expect(Patterns.of(Patterns.fromJson(Patterns.toJson(all))!, 7).scene).toBe(1)
+  })
+
+  it('a version 1 file reads as pattern 1 of each group, in one scene, and is written as version 2', () => {
+    const v1 =
+      '{"v":1,"projects":[{"project":1,"groups":[{"group":0,"bars":2,"notes":[{"t":96,"pad":3,"gate":24,"semi":5}]},' +
+      '{"group":2,"bars":4,"notes":[]}]}]}'
+    const read = Patterns.fromJson(v1)!
+    const want = ProjectSeq.withPattern(ProjectSeq.withPattern(ProjectSeq.DEFAULT, 0, 1, pattern(2, [patternNote(96, 3, 24, 5)])), 2, 1, pattern(4))
+    expect(Patterns.of(read, 1)).toEqual(want)
+    expect(Patterns.of(read, 1).scenes).toEqual([scene([1, 1, 1, 1])])
+    expect(Patterns.toJson(read)).toBe(
+      '{"v":2,"projects":[{"project":1,"scene":0,"scenes":[[1,1,1,1]],"groups":[' +
+        '{"group":0,"patterns":[{"n":1,"bars":2,"notes":[{"t":96,"pad":3,"gate":24,"semi":5}]}]},' +
+        '{"group":2,"patterns":[{"n":1,"bars":4,"notes":[]}]}]}]}',
+    )
+    expect(Patterns.fromJson(Patterns.toJson(read))).toEqual(read)
   })
 
   it("junk reads as nothing, and entries it can't read are skipped", () => {
     expect(Patterns.fromJson('not json')).toBeNull()
     expect(Patterns.fromJson('[]')).toBeNull()
-    expect(Patterns.fromJson('{"v":2,"projects":[]}')).toBeNull()
+    expect(Patterns.fromJson('{"v":3,"projects":[]}')).toBeNull()
+    expect(Patterns.fromJson('{"v":"2","projects":[]}')).toBeNull()
     expect(Patterns.fromJson('{"projects":[]}')).toBeNull()
     expect(Patterns.fromJson('{"v":1}')).toEqual(Patterns.EMPTY)
+    expect(Patterns.fromJson('{"v":2}')).toEqual(Patterns.EMPTY)
     const text = `{"v":1,"projects":[
             {"project":100,"groups":[{"group":0,"bars":2,"notes":[]}]},
             {"project":"1","groups":[{"group":0,"bars":2,"notes":[]}]},
@@ -116,15 +164,47 @@ describe('PatternTest', () => {
     const want = Patterns.put(
       Patterns.EMPTY,
       1,
-      ProjectPatterns.with(projectPatterns(), 0, pattern(2, [patternNote(0, 1, 24), patternNote(48, 2, 12, -3, 100)])),
+      seq(ProjectPatterns.with(projectPatterns(), 0, pattern(2, [patternNote(0, 1, 24), patternNote(48, 2, 12, -3, 100)]))),
     )
     expect(Patterns.fromJson(text)).toEqual(want)
   })
 
-  it('a group reads at most its note cap', () => {
+  it('version 2 junk is skipped too', () => {
+    const text = `{"v":2,"projects":[
+            {"project":100,"scenes":[[1,1,1,1]],"groups":[]},
+            "x",
+            {"project":2,"scene":5,"scenes":[[1,1,1,1],[1,2,3],[0,1,1,1],[1,1,1,100],[1,"2",1,1],"x",[2,2,2,2]],"groups":[
+                {"group":4,"patterns":[{"n":1,"bars":2,"notes":[]}]},
+                {"group":"0","patterns":[{"n":1,"bars":2,"notes":[]}]},
+                {"group":1,"patterns":[
+                    {"n":0,"bars":2,"notes":[]},
+                    {"n":100,"bars":2,"notes":[]},
+                    {"n":2,"bars":0,"notes":[]},
+                    {"n":2,"notes":[]},
+                    "x",
+                    {"n":2,"bars":3,"notes":[{"t":0,"pad":1,"gate":24},{"t":0,"pad":12,"gate":24}]}
+                ]}
+            ]},
+            {"project":3,"scenes":[],"groups":[{"group":0,"patterns":[{"n":4,"bars":2,"notes":[]}]}]}
+        ]}`
+    const read = Patterns.fromJson(text)!
+    expect([...read.projects.keys()].sort()).toEqual([2, 3])
+    // The scenes it can read, and the index held to them.
+    const two = Patterns.of(read, 2)
+    expect(two.scenes).toEqual([scene([1, 1, 1, 1]), scene([2, 2, 2, 2])])
+    expect(two.scene).toBe(1)
+    expect(two.banks[1]).toEqual(new Map([[2, pattern(3, [patternNote(0, 1, 24)])]]))
+    expect(two.banks[0]!.size).toBe(0)
+    // No scenes: the one of patterns 1.
+    expect(Patterns.of(read, 3)).toEqual(ProjectSeq.withPattern(ProjectSeq.DEFAULT, 0, 4, pattern(2)))
+  })
+
+  it('a pattern reads at most its note cap', () => {
     const notes = Array.from({ length: Seq.MAX_NOTES + 5 }, (_, i) => `{"t":${i},"pad":0,"gate":1}`).join(',')
     const read = Patterns.fromJson(`{"v":1,"projects":[{"project":1,"groups":[{"group":0,"bars":99,"notes":[${notes}]}]}]}`)
-    expect(ProjectPatterns.group(Patterns.of(read!, 1), 0).notes.length).toBe(Seq.MAX_NOTES)
+    expect(ProjectPatterns.group(ProjectSeq.playing(Patterns.of(read!, 1)), 0).notes.length).toBe(Seq.MAX_NOTES)
+    const read2 = Patterns.fromJson(`{"v":2,"projects":[{"project":1,"groups":[{"group":0,"patterns":[{"n":1,"bars":99,"notes":[${notes}]}]}]}]}`)
+    expect(ProjectSeq.pattern(Patterns.of(read2!, 1), 0, 1).notes.length).toBe(Seq.MAX_NOTES)
   })
 
   it('timing snaps to the nearest grid tick, ties up', () => {

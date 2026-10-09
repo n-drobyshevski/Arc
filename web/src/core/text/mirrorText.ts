@@ -14,10 +14,11 @@ import { Keys, NoteNames, Scale } from '../features/keys'
 import type { Hit } from '../features/liveMirror'
 import type { PlayMode } from '../features/padSettings'
 import { noteName, type PhysicalPad } from '../features/padNotes'
-import { Seq, TIMING_INTERVALS, Timing, timingTicks } from '../features/pattern'
+import { ProjectSeq, Seq, TIMING_INTERVALS, Timing, timingTicks } from '../features/pattern'
 import { KeyMark } from '../features/piano'
 import { ProjectSource } from '../features/projectStep'
 import { SampleSource } from '../features/sampleSource'
+import { SwitchTime } from '../features/scenes'
 import type { TransportState } from '../features/transport'
 import { FeatureText } from './featureText'
 import { plural } from './format'
@@ -923,6 +924,66 @@ export const MirrorText = {
     }
   },
 
+  // ---------- SCENES: the pattern each group plays, picked as MAIN and GROUP do on the device; copy and paste ----------
+  /** "P01": a group's pattern [n] (1..99). */
+  patternLabel(n: number): string {
+    return `P${twoDigits(n)}`
+  },
+
+  /** "S01": the scene at [index] (from 0), shown from 1. */
+  sceneLabel(index: number): string {
+    return `S${twoDigits(index + 1)}`
+  },
+
+  /** "S01 · A01 B03 C01 D02": the scene playing, and each group's pattern in it. */
+  sceneLine(seq: ProjectSeq): string {
+    const groups = [0, 1, 2, 3].map((g) => `${groupLetter(g)}${twoDigits(ProjectSeq.selected(seq, g))}`)
+    return `${MirrorText.sceneLabel(seq.scene)} \u00B7 ${groups.join(' ')}`
+  },
+
+  /** The scene change setting's choices (410 to 412 on the device). */
+  switchName(t: SwitchTime): string {
+    switch (t) {
+      case SwitchTime.IMMEDIATE:
+        return 'Immediate'
+      case SwitchTime.BAR:
+        return 'Bar end'
+      case SwitchTime.PATTERN:
+        return 'Pattern end'
+    }
+  },
+
+  /** "P01 → P05": a group's pattern playing, and the one waiting to take over. */
+  queuedLabel(from: number, to: number): string {
+    return `${MirrorText.patternLabel(from)} \u2192 ${MirrorText.patternLabel(to)}`
+  },
+
+  /** What SHIFT + C copied: pattern [n], [bar] (as shown, from 1) or a pad's notes (the pad's [name]). */
+  copiedPattern(n: number): string {
+    return `${MirrorText.patternLabel(n)} copied.`
+  },
+  copiedBar(bar: number): string {
+    return `Bar ${bar} copied.`
+  },
+  copiedPad(name: string): string {
+    return `${name} copied.`
+  },
+
+  /** Where SHIFT + D pasted: into pattern [n], [bar] (from 1) or onto a pad (its [name]). */
+  pastedPattern(n: number): string {
+    return `Pasted into ${MirrorText.patternLabel(n)}.`
+  },
+  pastedBar(bar: number): string {
+    return `Pasted into bar ${bar}.`
+  },
+  pastedPad(name: string): string {
+    return `Pasted onto ${name}.`
+  },
+
+  /** ERASE + MAIN held: CLR emptied the scene's patterns, DEL deleted the empty scene. */
+  CLEARED_SCENE: 'Scene cleared.',
+  DELETED_SCENE: 'Scene deleted.',
+
   // ---------- STEP: the pattern a step at a time while stopped, and timing correct, as on the device ----------
   /**
    * The step cursor as the device shows it: bar, beat and the step in the
@@ -1272,4 +1333,9 @@ function groupLetter(group: number): string {
 /** A timing as said aloud: a triplet ("1/8T") as "1/8 triplet". */
 function timingSpoken(t: Timing): string {
   return t.endsWith('T') ? `${t.slice(0, -1)} triplet` : t
+}
+
+/** "05" for 5: a pattern or scene number as the device shows it. */
+function twoDigits(n: number): string {
+  return String(n).padStart(2, '0')
 }

@@ -8,13 +8,16 @@ import dev.arc.ep133.features.KeyMark
 import dev.arc.ep133.features.NoteNames
 import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.ProjectDiff
+import dev.arc.ep133.features.ProjectSeq
 import dev.arc.ep133.features.ProjectSource
 import dev.arc.ep133.features.ProjectState
 import dev.arc.ep133.features.RecState
 import dev.arc.ep133.features.SampleSource
 import dev.arc.ep133.features.Scale
+import dev.arc.ep133.features.SceneOps
 import dev.arc.ep133.features.SoundDiff
 import dev.arc.ep133.features.SoundState
+import dev.arc.ep133.features.SwitchTime
 import dev.arc.ep133.features.Timing
 import dev.arc.ep133.features.TransportPhase
 import dev.arc.ep133.features.TransportState
@@ -344,6 +347,26 @@ class FeatureTextTest {
         assertEquals("Recording a take, 1:05. Tap to stop.", MirrorText.takeDescription(RecState.Recording(65)))
         assertTrue(MirrorText.TAKES_HINT.startsWith("Tap TAKE, then play"))
         assertEquals("Record a pattern: tap, then PLAY; hold for its settings", CoachText.RECORD)
+    }
+
+    @Test
+    fun `scene text`() {
+        assertEquals(listOf("P01", "P05", "P99"), listOf(1, 5, 99).map(MirrorText::patternLabel))
+        // The scene's index, shown from 1.
+        assertEquals(listOf("S01", "S10", "S99"), listOf(0, 9, 98).map(MirrorText::sceneLabel))
+        val seq = SceneOps.selectPattern(SceneOps.selectPattern(ProjectSeq.DEFAULT, 1, 3), 3, 2)
+        assertEquals("S01 \u00B7 A01 B03 C01 D02", MirrorText.sceneLine(seq))
+        assertEquals("S02 \u00B7 A02 B02 C02 D02", MirrorText.sceneLine(SceneOps.newScene(ProjectSeq.DEFAULT)))
+        assertEquals(listOf("Immediate", "Bar end", "Pattern end"), SwitchTime.entries.map(MirrorText::switchName))
+        assertEquals("P01 \u2192 P05", MirrorText.queuedLabel(1, 5))
+        assertEquals("P03 copied.", MirrorText.copiedPattern(3))
+        assertEquals("Bar 2 copied.", MirrorText.copiedBar(2))
+        assertEquals("KICK copied.", MirrorText.copiedPad("KICK"))
+        assertEquals("Pasted into P05.", MirrorText.pastedPattern(5))
+        assertEquals("Pasted into bar 2.", MirrorText.pastedBar(2))
+        assertEquals("Pasted onto SNARE.", MirrorText.pastedPad("SNARE"))
+        assertEquals("Scene cleared.", MirrorText.CLEARED_SCENE)
+        assertEquals("Scene deleted.", MirrorText.DELETED_SCENE)
     }
 
     @Test

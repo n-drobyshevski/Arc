@@ -6,19 +6,23 @@ import kotlin.math.floor
 
 /**
  * Recording into a project's patterns, as RECORD does on the device: every
- * edit is pure, taking the patterns and giving the new ones, and keeps the
- * undo checkpoints (SHIFT + B on the device).
+ * edit is pure, taking the patterns playing and giving the new ones, and
+ * keeps the undo checkpoints (SHIFT + B on the device).
  *
  * Ticks are global: counted from the transport's tick 0 (PLAY starts at bar
  * 1), negative during the count-in. A group's pattern takes them mod its
  * length, except while it is [Pattern.open]: then its tick is the global
  * one, and it grows instead of looping ([grow]).
  *
- * Undo: a checkpoint is the whole of a project's patterns, pushed on the
- * first change after a punch-in or a pass of a group being recorded into
- * ([passed]), and before each erase, clear, length change or double; at
- * most [maxUndo] are kept. A gesture (a pad held in ERASE or to correct, a
- * knob turned on a step, presses of − / + on one pad) is one checkpoint.
+ * Undo: a checkpoint is the whole of the project's sequencer ([seq], with
+ * the patterns as they were), pushed on the first change after a punch-in
+ * or a pass of a group being recorded into ([passed]), before each erase,
+ * clear, length change or double, and before each edit of the scenes or
+ * the banks ([editSeq]); at most [maxUndo] are kept. A gesture (a pad held
+ * in ERASE or to correct, a knob turned on a step, presses of − / + on one
+ * pad) is one checkpoint. Picking a pattern or a scene is no checkpoint and
+ * keeps them all: an undo after it goes back to the checkpoint whole, its
+ * pick included.
  *
  * Step edits (place, velocity, length, nudge) are for a stopped transport,
  * whose patterns are never open; on an open pattern they, and the shifts
@@ -34,7 +38,7 @@ class PatternRecorder(private val maxUndo: Int = 32) {
     /** Notes corrected to the grid: the [patterns] and how many [moved] (dropped onto another note counts too). */
     data class Corrected(val patterns: ProjectPatterns, val moved: Int)
 
-    private val checkpoints = ArrayDeque<ProjectPatterns>()
+    private val checkpoints = ArrayDeque<ProjectSeq>()
     // The next change pushes a checkpoint.
     private var pending = false
     private var nextId = 0
@@ -50,6 +54,14 @@ class PatternRecorder(private val maxUndo: Int = 32) {
     private var lastRun: String? = null
     // Whether that run has pushed its checkpoint.
     private var runPushed = false
+
+    /**
+     * The project's sequencer as it stands, which the patterns handed to the
+     * edits are the playing ones of; the caller sets it whenever the picks,
+     * the banks or the scenes change. A checkpoint is this with the patterns
+     * before the edit.
+     */
+    var seq: ProjectSeq = ProjectSeq.DEFAULT
 
     val canUndo: Boolean get() = checkpoints.isNotEmpty()
 
@@ -380,12 +392,25 @@ class PatternRecorder(private val maxUndo: Int = 32) {
         lastRun = null
     }
 
-    /** The patterns before the last checkpoint, or null with none left. */
-    fun undo(p: ProjectPatterns): ProjectPatterns? {
+    /**
+     * An edit of the scenes or the banks (a commit, a clear or delete, a
+     * paste), from [before] to [after]: as [edit], a checkpoint of its own
+     * when it changed anything, and the gestures going on end.
+     */
+    fun editSeq(before: ProjectSeq, after: ProjectSeq): ProjectSeq {
+        breakRuns()
+        if (after == before) return before
+        pushSeq(before.withPlaying(closed(before.playing())))
+        pending = true
+        return after
+    }
+
+    /** The project's sequencer before the last checkpoint (those the same as [current] skipped), or null with none left. */
+    fun undo(current: ProjectSeq): ProjectSeq? {
         breakRuns()
         while (checkpoints.isNotEmpty()) {
             val c = checkpoints.removeAt(checkpoints.lastIndex)
-            if (c != p) {
+            if (c != current) {
                 pending = true
                 return c
             }
@@ -463,15 +488,21 @@ class PatternRecorder(private val maxUndo: Int = 32) {
         return after
     }
 
-    private fun push(before: ProjectPatterns) {
-        // Open groups go back as they were before the punch-in: closed, at their old length.
-        var c = before
+    private fun push(before: ProjectPatterns) = pushSeq(seq.withPlaying(closed(before)))
+
+    private fun pushSeq(c: ProjectSeq) {
+        checkpoints.addLast(c)
+        while (checkpoints.size > maxUndo) checkpoints.removeAt(0)
+    }
+
+    // Open groups go back as they were before the punch-in: closed, at their old length.
+    private fun closed(p: ProjectPatterns): ProjectPatterns {
+        var c = p
         for (g in 0 until 4) {
             val pat = c.group(g)
             if (pat.open) c = c.with(g, Pattern(if (pat.isEmpty) openedFrom[g] else pat.bars, pat.notes))
         }
-        checkpoints.addLast(c)
-        while (checkpoints.size > maxUndo) checkpoints.removeAt(0)
+        return c
     }
 
     // A pad held in ERASE while playing: where its last range ended, and whether it pushed its checkpoint.

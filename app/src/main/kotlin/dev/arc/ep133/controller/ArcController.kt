@@ -3630,11 +3630,13 @@ class ArcController(
     private var patternsLoaded = false
     // Something was recorded or changed before the file was read: it is newer than the file.
     private var patternsTouched = false
-    // The project the patterns played and recorded are (0: none known yet), and its patterns as they stand.
+    // The project the patterns played and recorded are (0: none known yet), its sequencer as it stands, and the
+    // patterns its scene plays (projectSeq.playing(), kept as one value so a change is told by identity).
     private var patternProject = 0
+    private var projectSeq = dev.arc.ep133.features.ProjectSeq.DEFAULT
     @Volatile
     private var projectPatterns = ProjectPatterns()
-    // A recorder (and its UNDO) for each project this run: a note's id is its recorder's own.
+    // A recorder (and its UNDO) for each project this run: a note's id is its recorder's own. Its seq is the project's.
     private val patternRecorders = HashMap<Int, dev.arc.ep133.features.PatternRecorder>()
     private val patternRecorder get() = patternRecorders.getOrPut(patternProject) { dev.arc.ep133.features.PatternRecorder() }
     private val transport = dev.arc.ep133.features.Transport()
@@ -3752,12 +3754,12 @@ class ArcController(
         if (patternsLoaded) return
         patternsLoaded = true
         if (patternsTouched) {
-            patterns = read.put(patternProject, projectPatterns)
+            patterns = read.put(patternProject, projectSeq)
             savePatterns()
             return
         }
         patterns = read
-        projectPatterns = read.of(patternProject)
+        useSeq(read.of(patternProject))
         refreshPatternPlan()
         showPattern()
     }
@@ -3765,7 +3767,7 @@ class ArcController(
     /** Keeps the patterns (written whole, then renamed over the file); none deletes the file. */
     private fun savePatterns() {
         if (!patternsLoaded) return
-        val all = patterns.put(patternProject, projectPatterns)
+        val all = patterns.put(patternProject, projectSeq)
         patterns = all
         scope.launch(Dispatchers.IO) {
             synchronized(patternsFile) {
@@ -3794,7 +3796,7 @@ class ArcController(
         savePatterns()
         patternProject = project
         stepDesk.project = project
-        projectPatterns = patterns.of(project)
+        useSeq(patterns.of(project))
         patternSkip = emptyMap()
         patternTried.clear()
         _pattern.update { it.copy(project = project) }
@@ -3802,10 +3804,19 @@ class ArcController(
         showPattern()
     }
 
-    /** The project's patterns are [p] now: the sequencer and the line follow, and (not recording) they are kept. */
+    /** The project's sequencer is [seq] now, the patterns playing its scene's; the recorder's seq follows. */
+    private fun useSeq(seq: dev.arc.ep133.features.ProjectSeq) {
+        projectSeq = seq
+        projectPatterns = seq.playing()
+        patternRecorder.seq = seq
+    }
+
+    /** The project's patterns are [p] now (back in their scene's slots): the sequencer and the line follow, and (not recording) they are kept. */
     private fun setPatterns(p: ProjectPatterns) {
         if (p === projectPatterns) return
+        projectSeq = projectSeq.withPlaying(p)
         projectPatterns = p
+        patternRecorder.seq = projectSeq
         patternsTouched = true
         refreshPatternPlan()
         showPattern()
@@ -4295,7 +4306,12 @@ class ArcController(
 
     /** UNDO (SHIFT + B on the device): back to before the last pass recorded, erase, clear or length change. */
     fun undoPattern() {
-        patternRecorder.undo(projectPatterns)?.let(::setPatterns)
+        patternRecorder.undo(projectSeq)?.let { seq ->
+            useSeq(seq)
+            patternsTouched = true
+            refreshPatternPlan()
+            if (!transport.state.recording) savePatterns()
+        }
         showPattern()
     }
 
