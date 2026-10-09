@@ -40,8 +40,13 @@
 //   reads each move as it arrives, not at the next frame's pointermove
 //   (PressTracker.move's raw moves; one listener on the document, there only
 //   while a press's scroll window is open: PressTracker.onWindows).
-// - The display line says when the output plays late ([outputLate]:
-//   MirrorText.slowOutput from its latency; Android says Bluetooth from the route).
+// - While the output plays late ([outputLate], from its latency) an amber chip
+//   (LateChip: a Bluetooth glyph and a clock, named MirrorText.slowOutput) stays
+//   on the display lines, after their chips and before their words; Android's
+//   says Bluetooth from the route (MirrorText.WIRELESS_DELAY). The one-group line makes room
+//   for it as Android's does: the tempo gives way first, then the play glyph,
+//   then a hit too long for one line takes two, a size down (live/useCut.ts
+//   measures where Android measures the words before laying them out).
 // - The haptic tick ([haptics]) is navigator.vibrate (platform/haptics.ts),
 //   after a finger's press only: not for a screen reader's Play.
 // - A finger's press hands on its pointerdown's timeStamp (onPad's, onKey's
@@ -129,10 +134,12 @@ import { COACH_YELLOW, COACH_YELLOW_INK } from '../components/Coach'
 import { DisplayPanel } from '../components/DisplayPanel'
 import { CloseKey } from '../components/GuideKeys'
 import { HwToggle } from '../components/HwToggle'
+import { LateChip } from '../components/LateChip'
 import { EditEdgeTab } from '../components/EditEdgeTab'
 import { MiniPiano } from '../components/MiniPiano'
 import { Segmented, handleRovingKey } from '../components/Segmented'
-import { Disclosure, RowAction, RowCard, SettingRow } from '../components/SettingRow'
+import { ArcIcon } from '../components/Icons'
+import { Disclosure, LinkRow, RowAction, RowCard, SettingRow } from '../components/SettingRow'
 import { SideZone } from '../components/SideZone'
 import {
   displayLine,
@@ -145,10 +152,12 @@ import {
   showNoPushes,
   showOffline,
   transportText,
+  twoLines,
 } from '../live/glow'
 import { GLYPHS } from '../components/KoPanel'
 import { capDown, capUp } from '../live/capDown'
 import { rowPadSize } from '../live/desk'
+import { useCut } from '../live/useCut'
 import { chosenView, pianoFor, type PianoPlan } from '../live/keyboard'
 import { holdCap, releaseCap, useLiveKeys } from '../live/useLiveKeys'
 import { computerKeys } from '../keyPrefs'
@@ -240,6 +249,12 @@ export interface MirrorScreenProps {
   onStop?: () => void
   /** Not connected: download the factory sounds (FactorySounds); null when they can't be, or are in the library. */
   onGetFactory?: (() => void) | null
+  /**
+   * Opens Settings, from the first row of Live tools (an addition; the caller
+   * closes the tools with it). Not on the desk, where the nav rail has the
+   * key. Null hides the row.
+   */
+  onSettings?: (() => void) | null
   /** The pad changes made offline, counted in the tools with Reset pads; null (or a count of 0) when none. */
   offlinePads?: { readonly count: number; readonly onReset: () => void } | null
   /**
@@ -579,7 +594,14 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     [dropOn, dropAt, draggedName],
   )
 
-  // Not connected (nothing read, or offline from the last read): the factory sounds to get, first in the tools.
+  // Settings left the top bar: its way in is here, first in the tools (not on the desk, whose rail has its key).
+  const onSettings = desk ? null : (props.onSettings ?? null)
+  const settingsRow = onSettings !== null && (
+    <RowCard>
+      <LinkRow title={CoachText.SETTINGS} icon={ArcIcon.GEAR} coach="tools.settings" onClick={onSettings} />
+    </RowCard>
+  )
+  // Not connected (nothing read, or offline from the last read): the factory sounds to get, after it.
   const getFactory = mirror?.error === MirrorText.NOT_CONNECTED || mirror?.offline != null ? (props.onGetFactory ?? null) : null
   const factoryRow = getFactory !== null && (
     <RowCard>
@@ -603,12 +625,14 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   )
   const tools = keys.on ? (
     <>
+      {settingsRow}
       {factoryRow}
       {offlinePadsRow}
       <KeysPanel keys={keys} actions={actions} piano={pianoRange !== null} hint={!plan.switchShown} keyboard={keyHints} />
     </>
   ) : (
     <>
+      {settingsRow}
       {factoryRow}
       {offlinePadsRow}
       <RowCard>
@@ -866,7 +890,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           </div>
         )}
         <div class="live-piano__body">
-          {!inBar && <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={pianoRange} />}
+          {!inBar && <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} late={late} pianoRange={pianoRange} />}
           {modeRow}
           <div
             class="live-piano__keys"
@@ -899,7 +923,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     if (keys.on && keyNotes) {
       body = (
         <div class="live-ko live-ko--keys">
-          <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={null} />
+          <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} late={late} pianoRange={null} />
           {modeRow}
           <div class="live-ko__body">
             <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} haptic={haptic} keysRef={gridKeys} />
@@ -967,7 +991,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           // room, the mode word (turned) and the view switch a column on their left, the scale and
           // the octave one on their right.
           <>
-            {!inBar && <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={null} />}
+            {!inBar && <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} late={late} pianoRange={null} />}
             <div class="live__side live__side--keys">
               <div class="live__side-tools">{modeLead}</div>
               <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} haptic={haptic} keysRef={gridKeys} />
@@ -976,7 +1000,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           </>
         ) : keys.on && keyNotes ? (
           <>
-            {!inBar && <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={null} />}
+            {!inBar && <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} late={late} pianoRange={null} />}
             <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} haptic={haptic} keysRef={gridKeys} />
             {modeRow}
           </>
@@ -1174,8 +1198,14 @@ function PianoLegend(): JSX.Element {
 
 /**
  * The one-group view's display as a single dark line: play state, tempo and
- * project on the left, the pad just played (or that the sound plays late) on
- * the right. [compact]: one bar tall, in the top bar ([LivePill]).
+ * project on the left, the pad just played on the right. While the output
+ * plays late ([late]) the amber chip ([LateChip]) stays first, before the
+ * words (as Android's PatternLine puts it), whatever the line says, and takes
+ * room from them: the tempo gives way where they don't both fit, then the
+ * play glyph (both are still read), and a hit still too long for one line
+ * takes two, a size down (upright only: the top bar's [compact] line is one
+ * bar tall, so it ends in an ellipsis).
+ * [compact]: one bar tall, in the top bar ([LivePill]).
  */
 function DisplayStrip(props: {
   st: MirrorState
@@ -1183,17 +1213,22 @@ function DisplayStrip(props: {
   late: ReadonlySignal<number | null> | null
   compact?: boolean
 }): JSX.Element {
-  const { st, mirror } = props
+  const { st, mirror, compact = false } = props
   const late = props.late?.value ?? null
+  const main = displayLine(st, mirror)
+  const line = useRef<HTMLSpanElement | null>(null)
+  const cut = useCut(line, `${main}|${st.bpm}|${st.playing}`, compact ? 2 : 3, late !== null)
+  const two = cut >= 3
   return (
-    <div class={`live-strip${props.compact ? ' live-strip--bar' : ''}`} aria-live="polite">
-      {st.playing === true && <span class="live-strip__sub live-strip__ink" role="img" aria-label={MirrorText.PLAYING}>{'▶'}</span>}
-      {st.playing === false && <span class="live-strip__sub live-strip__dim" role="img" aria-label={MirrorText.STOPPED}>{'■'}</span>}
+    <div class={`live-strip${compact ? ' live-strip--bar' : ''}`} aria-live="polite">
+      {late !== null && <LateChip text={MirrorText.slowOutput(late)} compact={compact} />}
+      {st.playing === true && <span class={cut >= 2 ? 'sr-only' : 'live-strip__sub live-strip__ink'} role="img" aria-label={MirrorText.PLAYING}>{'▶'}</span>}
+      {st.playing === false && <span class={cut >= 2 ? 'sr-only' : 'live-strip__sub live-strip__dim'} role="img" aria-label={MirrorText.STOPPED}>{'■'}</span>}
       {/* Offline and the project are only read out: the top bar and the PROJECT key show them. */}
       {st.playing === null && mirror?.offline != null && <span class="sr-only">{MirrorText.OFFLINE}</span>}
-      {st.bpm !== null && <span class="live-strip__sub live-strip__ink">{MirrorText.bpm(st.bpm)}</span>}
+      {st.bpm !== null && <span class={cut >= 1 ? 'sr-only' : 'live-strip__sub live-strip__ink'}>{MirrorText.bpm(st.bpm)}</span>}
       {st.activeProject !== null && <span class="sr-only">{MirrorText.project(st.activeProject)}</span>}
-      <span class="live-strip__line">{displayLine(st, mirror, late)}</span>
+      <span ref={line} class={`live-strip__line${two ? ' live-strip__line--two' : ''}`}>{two ? twoLines(main) : main}</span>
     </div>
   )
 }
@@ -1232,9 +1267,10 @@ function Display(props: {
         {st.activeProject !== null && (
           <span class="t-display-sub live-display__dim">{MirrorText.project(st.activeProject)}</span>
         )}
+        {late !== null && <LateChip text={MirrorText.slowOutput(late)} />}
       </div>
-      <p class={`live-display__line t-stat-free${displayLineSmall(st, mirror, late) ? ' live-display__line--small' : ''}`}>
-        {displayLine(st, mirror, late)}
+      <p class={`live-display__line t-stat-free${displayLineSmall(st, mirror) ? ' live-display__line--small' : ''}`}>
+        {displayLine(st, mirror)}
       </p>
       {/* Offline, the folded note; never read, the factory sounds to get; else the all-groups view explains clock out. */}
       {offline ? (
@@ -1997,7 +2033,10 @@ function KeysViewSwitch(props: { piano: boolean; room: boolean; onView: (piano: 
 
 /**
  * The KEYS display line: KEYS and the last note on the left, the sound it
- * plays on the right. A device note past the piano's ends ([pianoRange]) is
+ * plays on the right. While the output plays late ([late]) the amber chip
+ * ([LateChip]) stays here too, in the mode word's place (the mode switch
+ * beside the keys says KEYS), and a sound's name too long for the line is a
+ * size down on two. A device note past the piano's ends ([pianoRange]) is
  * named as such: there's no key to light for it. [compact]: one bar tall, in
  * the top bar ([LivePill]), where the word KEYS (right under it) is left to
  * screen readers.
@@ -2007,21 +2046,27 @@ function KeysDisplay(props: {
   mirror: MirrorUi | null
   keys: KeysShown
   playing: LivePlaying
+  late: ReadonlySignal<number | null> | null
   pianoRange: NoteRange | null
   compact?: boolean
 }): JSX.Element {
   const { st, mirror, keys, playing, compact = false } = props
+  const late = props.late?.value ?? null
   // The note last pressed here: this line re-renders with what plays, not the screen.
   const shown = { ...keys, playingNotes: playing.notes.value }
   const note = keysNoteText(shown, st.lastNote, props.pianoRange)
+  const sound = keys.pad !== null ? MirrorText.keysSound(keys.pad, keys.padName) : MirrorText.NO_SOUND
+  const line = useRef<HTMLSpanElement | null>(null)
+  const chipped = late !== null && !compact
+  // The note shares the line's room, so a new one measures again.
+  const two = useCut(line, `${sound}|${note ?? ''}`, 1, chipped) > 0
   return (
     <div class={`live-strip${compact ? ' live-strip--bar' : ''}`} aria-live="polite">
-      <span class={`live-strip__sub live-strip__dim${compact ? ' sr-only' : ''}`}>{MirrorText.MODE_KEYS.toUpperCase()}</span>
+      <span class={`live-strip__sub live-strip__dim${compact || late !== null ? ' sr-only' : ''}`}>{MirrorText.MODE_KEYS.toUpperCase()}</span>
+      {late !== null && <LateChip text={MirrorText.slowOutput(late)} compact={compact} />}
       {note !== null && <span class="live-strip__sub live-strip__ink live-strip__note">{note}</span>}
       {mirror?.offline != null && <span class="sr-only">{MirrorText.OFFLINE}</span>}
-      <span class="live-strip__line">
-        {keys.pad !== null ? MirrorText.keysSound(keys.pad, keys.padName) : MirrorText.NO_SOUND}
-      </span>
+      <span ref={line} class={`live-strip__line${two ? ' live-strip__line--two' : ''}`}>{two ? twoLines(sound) : sound}</span>
     </div>
   )
 }
@@ -2042,7 +2087,7 @@ export function LivePill(props: {
 }): JSX.Element {
   const { mirror, keys } = props
   const st = mirror?.state ?? emptyMirrorState()
-  if (keys.on) return <KeysDisplay st={st} mirror={mirror} keys={keys} playing={props.playing} pianoRange={props.pianoRange} compact />
+  if (keys.on) return <KeysDisplay st={st} mirror={mirror} keys={keys} playing={props.playing} late={props.late} pianoRange={props.pianoRange} compact />
   if (props.editing) return <EditStrip compact />
   return <DisplayStrip st={st} mirror={mirror} late={props.late} compact />
 }

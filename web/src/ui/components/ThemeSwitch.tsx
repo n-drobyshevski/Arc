@@ -1,8 +1,9 @@
 // Web only: the desktop top bar's theme switch (no Kotlin counterpart; the
 // Android app sets the theme in Settings only).
 //
-// On the desk (from 1024px wide, ui/useDesk.ts) the top bar shows it in place
-// of the settings key, which the nav rail's Settings key replaces. Three small
+// On the desk (from 1024px wide, ui/useDesk.ts) the top bar shows it after the
+// ? key, where the phone has no such switch (Settings has the theme; the nav
+// rail has the Settings key). Three small
 // icon keys, System / Light / Dark (SettingsText.theme), the chosen one held
 // down, navy: the same setting as Settings → Theme (controller.setTheme), so
 // the two always agree. A radio group, as Segmented: one tab stop, the arrow

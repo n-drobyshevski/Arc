@@ -62,6 +62,12 @@
   --cap-edge: color-mix(in oklab, var(--navy) 65%, black);
 }
 
+/* Settings: a gap (8 between the blocks' 6s), then a block like the others, the gear (20) before its word. */
+.section-menu__settings {
+  gap: 10px;
+  margin-top: 14px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .section-menu, .section-menu.is-open { transition: none; }
 }

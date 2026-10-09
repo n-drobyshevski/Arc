@@ -1,15 +1,17 @@
 // Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Chrome.kt (TopBar)
 //
 // The section tag, then icon keys as in the pocket operator app's top row: the
-// orange REC-style dot backs up, the connection key is green with a dot while
-// the EP-133 is connected (a tap disconnects) and navy with a ring when not,
-// then the guide overlay (?) and settings. Their names show on long-press,
-// in the overlay and to screen readers. Long-pressing the tag opens the
-// debug screen.
+// connection key is green with a dot while the EP-133 is connected (a tap
+// disconnects) and navy with a ring when not, then the guide overlay (?).
+// Their names show on long-press, in the overlay and to screen readers. Back
+// up lives on the Backups screen, and Settings in Live's tools and the
+// section list under the tag (SectionMenu). Long-pressing the tag opens the
+// debug screen (as the wordmark did).
 //
 // Web only, on the desk (from 1024px wide, [themeSwitch] set by Shell): the
-// theme switch (ThemeSwitch.tsx: System / Light / Dark) in the settings key's
-// place; the nav rail's Settings key opens Settings there.
+// theme switch (ThemeSwitch.tsx: System / Light / Dark) after the ? key; the
+// nav rail's Settings key opens Settings there. Live's mic key (SAMPLE) isn't
+// ported.
 import type { ComponentChildren, JSX } from 'preact'
 import { CoachText } from '../../core/text/coachText'
 import type { Tab } from '../../state/types'
@@ -29,13 +31,10 @@ export interface TopBarProps {
   sectionsId?: string
   connected: boolean
   canConnect: boolean
-  canBackup: boolean
-  onBackup: () => void
   onConnect: () => void
   onDebug: () => void
-  onSettings: () => void
   onHelp: () => void
-  /** The desk: the theme switch in place of the settings key. */
+  /** The desk: the theme switch after the ? key. */
   themeSwitch?: ThemeSwitchProps
   /** In place of the gap after the tag: Live's display line on a phone on its side. */
   middle?: ComponentChildren
@@ -53,17 +52,6 @@ export function TopBar(props: TopBarProps): JSX.Element {
           {...(props.sectionsId ? { controls: props.sectionsId } : {})}
         />
         {props.middle ? <div class="top-bar__middle">{props.middle}</div> : <span class="top-bar__spacer" />}
-        <span data-coach="top.backup" class="top-bar__item">
-          <IconBlock
-            icon={ArcIcon.DOT}
-            label={CoachText.BACK_UP}
-            face="var(--signal)"
-            ink="var(--on-signal)"
-            onClick={props.onBackup}
-            disabled={!props.canBackup}
-          />
-        </span>
-        <span class="top-bar__gap" />
         <span data-coach="top.connection" class="top-bar__item">
           {props.connected ? (
             <IconBlock
@@ -100,26 +88,11 @@ export function TopBar(props: TopBarProps): JSX.Element {
             round
           />
         </span>
-        {props.themeSwitch ? (
+        {props.themeSwitch && (
           <>
             <span class="top-bar__gap top-bar__gap--wide" />
             <span class="top-bar__item">
               <ThemeSwitch {...props.themeSwitch} />
-            </span>
-          </>
-        ) : (
-          <>
-            <span class="top-bar__gap" />
-            <span data-coach="top.settings" class="top-bar__item">
-              <IconBlock
-                icon={ArcIcon.GEAR}
-                label={CoachText.SETTINGS}
-                face="var(--tab-off)"
-                ink="var(--navy)"
-                onClick={props.onSettings}
-                round
-                iconSize={24}
-              />
             </span>
           </>
         )}

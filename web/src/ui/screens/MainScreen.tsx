@@ -1,7 +1,8 @@
 // Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/MainScreen.kt
 //
 // The Backups tab (index.html .app): the device panel and the library. The
-// header's keys live in the top bar now.
+// header's connection key lives in the top bar now; Back up is the orange
+// block before the library's tools, or the big key while there are no backups.
 //
 // Web deltas:
 // - No MIDI: WebText.NO_MIDI_* (the browser, not the phone).
@@ -127,19 +128,21 @@ export function MainScreen(props: MainScreenProps): JSX.Element {
   const totalSize = state.backups.reduce((sum, b) => sum + b.size, 0)
   const note = WebText.storageNote(state.backups.length, totalSize, state.spaceLeft)
 
+  const canBackup = state.midiSupported && state.device !== null && !state.busy
+
   const device = (
     <>
       <Caption text={NavText.DEVICE_CAPTION} />
       <DevicePanel state={state} />
 
-      {/* The top bar's Back up block does this too; the big key stays until the first backup. */}
+      {/* The big key stays until the first backup; after it, the orange block opens the caption row below. */}
       {!hasBackups && (
         <Key
           text={Strings.BACK_UP}
           variant="signal"
           size="wide"
           block
-          disabled={!(state.midiSupported && state.device !== null && !state.busy)}
+          disabled={!canBackup}
           onClick={props.onBackup}
         />
       )}
@@ -149,6 +152,11 @@ export function MainScreen(props: MainScreenProps): JSX.Element {
   const head = (
     <div class="main-screen__head">
       <Caption id="arc-backups-caption" as="h2" text={Strings.BACKUPS} align="start" class="main-screen__caption" />
+      {hasBackups && (
+        <span class="main-screen__tool" data-coach="backups.backup">
+          <IconBlock icon={ArcIcon.DOT} label={CoachText.BACK_UP} face="var(--signal)" ink="var(--on-signal)" onClick={props.onBackup} disabled={!canBackup} />
+        </span>
+      )}
       {/* Addition to the web version: find sounds across backups. */}
       {hasBackups && (
         <span class="main-screen__tool" data-coach="backups.search">

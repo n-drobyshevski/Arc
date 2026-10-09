@@ -6,9 +6,9 @@
 //
 // Web deltas: times are milliseconds on the MIDI event clock (performance.now),
 // where the Kotlin uses System.nanoTime; FADE_NS 300 ms is FADE_MS here. The
-// display line says when Live's output plays late ([late], from its latency:
-// MirrorText.slowOutput), as Android says Bluetooth from the route
-// (MirrorText.WIRELESS_DELAY).
+// display line's amber chip (LateChip.tsx) says when Live's output plays late,
+// from its latency ([MirrorText.slowOutput]), as Android's says Bluetooth from
+// the route (MirrorText.WIRELESS_DELAY); neither takes the line's main text.
 
 import type { Hit, MirrorState, PadLight } from '../../core/features/liveMirror'
 import { MirrorText } from '../../core/text/mirrorText'
@@ -94,16 +94,16 @@ export function keysLayout(last: number): KeyRect[] {
 // ---------- the display ----------
 
 /**
- * The display's main line: the error, "Reading…", the hit, that Live's sound
- * plays late ([late]: the output's delay in ms, null when it isn't heard),
- * offline the time of the last read ("Last seen Oct 5, 2:02 PM"), or "Press a pad".
+ * The display's main line: the error, "Reading…", the hit, offline the time
+ * of the last read ("Last seen Oct 5, 2:02 PM"), or "Press a pad". That Live's
+ * sound plays late is not said here but by the chip (LateChip.tsx), which
+ * stays beside it.
  */
-export function displayLine(st: MirrorState, mirror: MirrorUi | null, late: number | null = null): string {
+export function displayLine(st: MirrorState, mirror: MirrorUi | null): string {
   const hit: Hit | null = st.lastHit
   if (mirror?.error != null) return mirror.error
   if (mirror?.loading === true && hit === null) return MirrorText.READING
   if (hit !== null) return MirrorText.hit(hit)
-  if (late !== null) return MirrorText.slowOutput(late)
   if (mirror?.offline != null) return mirror.offline
   return MirrorText.WAITING
 }
@@ -113,11 +113,31 @@ export function showOffline(st: MirrorState, mirror: MirrorUi | null): boolean {
   return mirror?.offline != null && st.playing === null
 }
 
-/** The offline line ("Last seen …") and the late note are longer than a hit: the display draws them a size down (22 for 26). */
-export function displayLineSmall(st: MirrorState, mirror: MirrorUi | null, late: number | null = null): boolean {
-  if (st.lastHit !== null) return false
-  if (mirror?.offline != null) return true
-  return late !== null && mirror?.error == null && mirror?.loading !== true
+/** The offline line ("Last seen …") and "Press a pad on the EP-133." are longer than a hit: the display draws them a size down (22 for 26). */
+export function displayLineSmall(st: MirrorState, mirror: MirrorUi | null): boolean {
+  return st.lastHit === null && mirror?.error == null && mirror?.loading !== true
+}
+
+/**
+ * [text] broken onto two lines at one of its " · " separators, the dot
+ * dropped: the one that evens the lines out, the later on a tie ("A 7 ·
+ * 001 kick · 124" as "A 7 · 001 kick" over "124", the sound's name kept
+ * whole). Without a separator it is left to wrap where it may.
+ */
+export function twoLines(text: string): string {
+  const sep = ' \u00B7 '
+  let best = -1
+  let widest = Number.POSITIVE_INFINITY
+  let at = text.indexOf(sep)
+  while (at > 0) {
+    const w = Math.max(at, text.length - at - sep.length)
+    if (w <= widest) {
+      widest = w
+      best = at
+    }
+    at = text.indexOf(sep, at + 1)
+  }
+  return best < 0 ? text : text.slice(0, best) + '\n' + text.slice(best + sep.length)
 }
 
 /** The all-groups display's transport word: "▶ Playing", "■ Stopped", or nothing before any clock. */
