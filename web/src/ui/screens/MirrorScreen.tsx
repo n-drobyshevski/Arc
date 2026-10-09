@@ -42,8 +42,8 @@
 //   while a press's scroll window is open: PressTracker.onWindows).
 // - While the output plays late ([outputLate], from its latency) an amber chip
 //   (LateChip: a Bluetooth glyph and a clock, named MirrorText.slowOutput) stays
-//   on the display lines after their other words; Android's says Bluetooth
-//   from the route (MirrorText.WIRELESS_DELAY). The one-group line makes room
+//   on the display lines, after their chips and before their words; Android's
+//   says Bluetooth from the route (MirrorText.WIRELESS_DELAY). The one-group line makes room
 //   for it as Android's does: the tempo gives way first, then the play glyph,
 //   then a hit too long for one line takes two, a size down (live/useCut.ts
 //   measures where Android measures the words before laying them out).
@@ -1199,11 +1199,12 @@ function PianoLegend(): JSX.Element {
 /**
  * The one-group view's display as a single dark line: play state, tempo and
  * project on the left, the pad just played on the right. While the output
- * plays late ([late]) the amber chip ([LateChip]) stays after the tempo,
- * whatever the line says, and takes room from the words: the tempo gives way
- * where they don't both fit, then the play glyph (both are still read), and a
- * hit still too long for one line takes two, a size down (upright only: the
- * top bar's [compact] line is one bar tall, so it ends in an ellipsis).
+ * plays late ([late]) the amber chip ([LateChip]) stays first, before the
+ * words (as Android's PatternLine puts it), whatever the line says, and takes
+ * room from them: the tempo gives way where they don't both fit, then the
+ * play glyph (both are still read), and a hit still too long for one line
+ * takes two, a size down (upright only: the top bar's [compact] line is one
+ * bar tall, so it ends in an ellipsis).
  * [compact]: one bar tall, in the top bar ([LivePill]).
  */
 function DisplayStrip(props: {
@@ -1220,13 +1221,13 @@ function DisplayStrip(props: {
   const two = cut >= 3
   return (
     <div class={`live-strip${compact ? ' live-strip--bar' : ''}`} aria-live="polite">
+      {late !== null && <LateChip text={MirrorText.slowOutput(late)} compact={compact} />}
       {st.playing === true && <span class={cut >= 2 ? 'sr-only' : 'live-strip__sub live-strip__ink'} role="img" aria-label={MirrorText.PLAYING}>{'▶'}</span>}
       {st.playing === false && <span class={cut >= 2 ? 'sr-only' : 'live-strip__sub live-strip__dim'} role="img" aria-label={MirrorText.STOPPED}>{'■'}</span>}
       {/* Offline and the project are only read out: the top bar and the PROJECT key show them. */}
       {st.playing === null && mirror?.offline != null && <span class="sr-only">{MirrorText.OFFLINE}</span>}
       {st.bpm !== null && <span class={cut >= 1 ? 'sr-only' : 'live-strip__sub live-strip__ink'}>{MirrorText.bpm(st.bpm)}</span>}
       {st.activeProject !== null && <span class="sr-only">{MirrorText.project(st.activeProject)}</span>}
-      {late !== null && <LateChip text={MirrorText.slowOutput(late)} compact={compact} />}
       <span ref={line} class={`live-strip__line${two ? ' live-strip__line--two' : ''}`}>{two ? twoLines(main) : main}</span>
     </div>
   )
@@ -2057,7 +2058,8 @@ function KeysDisplay(props: {
   const sound = keys.pad !== null ? MirrorText.keysSound(keys.pad, keys.padName) : MirrorText.NO_SOUND
   const line = useRef<HTMLSpanElement | null>(null)
   const chipped = late !== null && !compact
-  const two = useCut(line, sound, 1, chipped) > 0
+  // The note shares the line's room, so a new one measures again.
+  const two = useCut(line, `${sound}|${note ?? ''}`, 1, chipped) > 0
   return (
     <div class={`live-strip${compact ? ' live-strip--bar' : ''}`} aria-live="polite">
       <span class={`live-strip__sub live-strip__dim${compact || late !== null ? ' sr-only' : ''}`}>{MirrorText.MODE_KEYS.toUpperCase()}</span>

@@ -3,8 +3,10 @@
 // A display line that has to make room: how many of its [max] steps of giving
 // way it takes so that its main text ([line], which ends in an ellipsis when
 // it is cut) shows whole. Each step is tried in turn, in layout before the
-// first paint, until the text fits or none is left; a new text ([key]) or a
-// new width for the line's box starts again from none. [on] false: no step.
+// first paint, until the text fits or none is left; a new text ([key], which
+// names everything that shares the line's room, not only the text) or a new
+// width for the line's box starts again from none, and so does [on] turning
+// true again. [on] false: no step.
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import type { RefObject } from 'preact'
 
@@ -14,7 +16,11 @@ export function useCut(line: RefObject<HTMLElement | null>, key: string, max: nu
   const [pass, setPass] = useState(0)
   const seen = useRef(key)
   useLayoutEffect(() => {
-    if (!on) return
+    if (!on) {
+      // What was measured is stale by the time it is on again.
+      if (cut !== 0) setCut(0)
+      return
+    }
     if (seen.current !== key) {
       seen.current = key
       setCut(0)
