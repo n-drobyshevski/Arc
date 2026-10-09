@@ -935,9 +935,14 @@ export const MirrorText = {
     return `S${twoDigits(index + 1)}`
   },
 
+  /** "A01": [group]'s pattern [n], as the group keys and the scene line show it. */
+  groupPattern(group: number, n: number): string {
+    return `${groupLetter(group)}${twoDigits(n)}`
+  },
+
   /** "S01 · A01 B03 C01 D02": the scene playing, and each group's pattern in it. */
   sceneLine(seq: ProjectSeq): string {
-    const groups = [0, 1, 2, 3].map((g) => `${groupLetter(g)}${twoDigits(ProjectSeq.selected(seq, g))}`)
+    const groups = [0, 1, 2, 3].map((g) => MirrorText.groupPattern(g, ProjectSeq.selected(seq, g)))
     return `${MirrorText.sceneLabel(seq.scene)} \u00B7 ${groups.join(' ')}`
   },
 
@@ -983,6 +988,207 @@ export const MirrorText = {
   /** ERASE + MAIN held: CLR emptied the scene's patterns, DEL deleted the empty scene. */
   CLEARED_SCENE: 'Scene cleared.',
   DELETED_SCENE: 'Scene deleted.',
+
+  // The scene panel's status line (upper-cased where shown) and what a screen reader is told of each change.
+  /** When a pick takes over, for the status and screen readers: "now", "at bar end", "at pattern end". */
+  switchAt(t: SwitchTime): string {
+    switch (t) {
+      case SwitchTime.IMMEDIATE:
+        return 'now'
+      case SwitchTime.BAR:
+        return 'at bar end'
+      case SwitchTime.PATTERN:
+        return 'at pattern end'
+    }
+  },
+
+  /** "B → 05": group [group] changing to pattern [to]. */
+  groupMove(group: number, to: number): string {
+    return `${groupLetter(group)} \u2192 ${twoDigits(to)}`
+  },
+
+  /** "→ S03": the scene waiting to take over. */
+  sceneMove(index: number): string {
+    return `\u2192 ${MirrorText.sceneLabel(index)}`
+  },
+
+  /** "B → 05 at bar end": what waits ([move]: groupMove's, or sceneMove's) and for when. */
+  queuedLine(move: string, t: SwitchTime): string {
+    return `${move} ${MirrorText.switchAt(t)}`
+  },
+
+  /** "S03 committed": COMMIT made the scene at [index]. */
+  sceneCommitted(index: number): string {
+    return `${MirrorText.sceneLabel(index)} committed`
+  },
+
+  /** COMMIT with 99 scenes already. */
+  SCENES_FULL: 'No room for another scene',
+
+  /** "S05 cleared", "S05 deleted": what ERASE + MAIN held did to the scene at [index]. */
+  sceneCleared(index: number): string {
+    return `${MirrorText.sceneLabel(index)} cleared`
+  },
+  sceneDeleted(index: number): string {
+    return `${MirrorText.sceneLabel(index)} deleted`
+  },
+
+  /** "B · pick 01–99": the grid open over the pads for [group]. */
+  gridStatus(group: number): string {
+    return `${groupLetter(group)} \u00B7 pick 01\u201399`
+  },
+
+  /** "A01 copied", "A bar 2 copied", "KICK copied": [what] the clip took; "A05 pasted", "SNARE pasted": where it went. */
+  clipCopied(what: string): string {
+    return `${what} copied`
+  },
+  clipPasted(what: string): string {
+    return `${what} pasted`
+  },
+
+  /** The PAD clip's two stages: COPY waits for the pad to copy, then PASTE for the pad ([word], the one copied) to paste onto. */
+  PAD_TAP_SOURCE: 'Tap a pad',
+  padTapTarget(word: string): string {
+    return `${word} \u2192 tap target`
+  },
+
+  /** PASTE with nothing of its kind copied. */
+  NO_PATTERN_COPIED: 'No pattern copied',
+  NO_BAR_COPIED: 'No bar copied',
+  NO_PAD_COPIED: 'No pad copied',
+
+  /** A scene for screen readers: "Scene 2 of 3, patterns A 1, B 3, C 1, D 2". */
+  sceneSpoken(index: number, count: number, patterns: readonly number[]): string {
+    return `Scene ${index + 1} of ${count}, patterns ${patterns.map((n, g) => `${groupLetter(g)} ${n}`).join(', ')}`
+  },
+
+  /** A group's pattern for screen readers: "Group B, pattern 5, 4 bars". */
+  patternSpoken(group: number, n: number, bars: number): string {
+    return `Group ${groupLetter(group)}, pattern ${n}, ${bars} ${bars === 1 ? 'bar' : 'bars'}`
+  },
+
+  /** A change waiting, for screen readers: "Group B, pattern 5, at bar end", "Scene 3, at pattern end". */
+  patternQueuedSpoken(group: number, n: number, t: SwitchTime): string {
+    return `Group ${groupLetter(group)}, pattern ${n}, ${MirrorText.switchAt(t)}`
+  },
+  sceneQueuedSpoken(index: number, t: SwitchTime): string {
+    return `Scene ${index + 1}, ${MirrorText.switchAt(t)}`
+  },
+
+  /** COMMIT for screen readers: "Scene 3 committed". */
+  sceneCommittedSpoken(index: number): string {
+    return `Scene ${index + 1} committed`
+  },
+
+  // The scene panel's own words (upper-cased where shown) and their names for screen readers.
+  /** The panel's name, and ✕ closing it; the S01 chip on the display line for screen readers: "Scenes, scene 2 of 3". */
+  SCENE_NAME: 'Scenes and patterns',
+  CLOSE_SCENE: 'Close scenes and patterns',
+  sceneChipName(index: number, count: number): string {
+    return `Scenes, scene ${index + 1} of ${count}`
+  },
+
+  /** The panel's status while nothing else is said: "Scene 2 of 3". */
+  sceneStatus(index: number, count: number): string {
+    return `Scene ${index + 1} of ${count}`
+  },
+
+  /** "03": a pattern's number as the group keys and columns show it; "03→05": the one playing and the one waiting. */
+  patternNumber(n: number): string {
+    return twoDigits(n)
+  },
+  numberMove(n: number, to: number): string {
+    return `${twoDigits(n)}\u2192${twoDigits(to)}`
+  },
+
+  /** The head's − and + around the scene; + on the last scene makes a new one. */
+  PREV_SCENE: 'Previous scene',
+  NEXT_SCENE: 'Next scene',
+  NEW_SCENE: 'New scene',
+
+  /** A group's column: its name for screen readers ("Group B, pattern 3, has notes"), and what its number does. */
+  groupColumn(group: number, n: number, notes: boolean): string {
+    return `Group ${groupLetter(group)}, pattern ${n}` + (notes ? ', has notes' : '')
+  },
+  PICK_PATTERN: 'Pick a pattern',
+  groupPrevious(group: number): string {
+    return `Group ${groupLetter(group)}, previous pattern`
+  },
+  groupNext(group: number): string {
+    return `Group ${groupLetter(group)}, next pattern`
+  },
+
+  /** NEXT FREE: the first pattern after this one with no notes ("Group B, next free pattern"). */
+  NEXT_FREE: 'Next free',
+  groupNextFree(group: number): string {
+    return `Group ${groupLetter(group)}, next free pattern`
+  },
+
+  /** A group key's pattern for screen readers, after its name: ", pattern 3", and ", changing to 5" while one waits. */
+  groupKeyPattern(n: number, queued: number | null): string {
+    return `, pattern ${n}` + (queued !== null ? `, changing to ${queued}` : '')
+  },
+
+  /** COMMIT (duplicates the scene), and what it does for screen readers. */
+  COMMIT: 'Commit',
+  COMMIT_NOTE: 'Makes a new scene after this one, with copies of the patterns in free slots.',
+
+  /** CLR and DEL, the hold key (DEL when the scene is empty): its name, what holding does, and the status while it is held ("Hold · Del S05"). */
+  CLR: 'Clr',
+  DEL: 'Del',
+  eraseSceneName(del: boolean): string {
+    return del ? 'Delete scene' : 'Clear scene'
+  },
+  HOLD_NOTE: 'Hold for two seconds.',
+  eraseHolding(del: boolean, scene: string): string {
+    return `Hold \u00B7 ${del ? MirrorText.DEL : MirrorText.CLR} ${scene}`
+  },
+
+  /** CHANGE: when a pick takes over. The chip's name for screen readers ("Scene change: Bar end") and what a tap does. */
+  CHANGE: 'Change',
+  changeName(t: SwitchTime): string {
+    return `Scene change: ${MirrorText.switchName(t)}`
+  },
+  CHANGE_NOTE: 'Tap to change when a pick takes over: now, at bar end, or at pattern end. Stopped, it is always at once.',
+
+  /** The pattern sheet's SCENE CHANGE row, the same setting: its caption and a line under the choices. */
+  SCENE_CHANGE: 'Scene change',
+  SCENE_CHANGE_NOTE: "Playing: a new pattern or scene waits for the bar's or pattern's end. Stopped: always at once.",
+
+  /** CLIP: PTN, BAR and PAD (their names for screen readers), COPY and PASTE, and the bar pages' row ("Group A · bar", "Clip · A bar 2"). */
+  CLIP: 'Clip',
+  CLIP_PAD: 'Pad',
+  CLIP_PTN_NAME: 'Whole pattern',
+  CLIP_BAR_NAME: 'One bar',
+  CLIP_PAD_NAME: "One pad's notes",
+  COPY: 'Copy',
+  PASTE: 'Paste',
+  barPagesGroup(group: number): string {
+    return `Group ${groupLetter(group)} \u00B7 bar`
+  },
+  clipHeld(what: string): string {
+    return `Clip \u00B7 ${what}`
+  },
+
+  /** The 1–99 grid over the pads: its name, ✕ closing it, its title ("Group B") and the pattern it starts on ("P03 · 4 bars"). */
+  GRID_NAME: 'Pattern grid',
+  CLOSE_GRID: 'Close pattern grid',
+  gridTitle(group: number): string {
+    return `Group ${groupLetter(group)}`
+  },
+  gridDetail(n: number, bars: number): string {
+    return `${MirrorText.patternLabel(n)} \u00B7 ${plural(bars, 'bar')}`
+  },
+
+  /** A cell of the grid for screen readers: "Pattern 5, has notes" (the pattern playing is selected; the next free one says so). */
+  patternCell(n: number, notes: boolean): string {
+    return `Pattern ${n}` + (notes ? ', has notes' : '')
+  },
+
+  /** The grid's legend (upper-cased where shown). */
+  GRID_HAS_NOTES: 'Has notes',
+  GRID_EMPTY: 'Empty',
+  GRID_PLAYING: 'Playing',
 
   // ---------- STEP: the pattern a step at a time while stopped, and timing correct, as on the device ----------
   /**

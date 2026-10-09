@@ -452,15 +452,26 @@ private fun StepStrip(ui: StepUi, onJump: (Int) -> Unit, modifier: Modifier) {
 }
 
 /** How far a strip cell (and − and +) is from the display's dark toward its dim ink. */
-private const val CellShade = 0.3f
+internal const val CellShade = 0.3f
 
 /** A strip cell's height, and the room more before a beat's first. */
 private val CellHeight = 22.dp
 private val BeatGap = 3.dp
 
-/** − or + beside the strip: a cap a shade off the screen's dark, a tick as it goes down. */
+/**
+ * − or + beside the strip: a cap a shade ([shade]) off the screen's dark, a
+ * tick as it goes down; [modifier] sizes it (the strip's own by default; the
+ * SCENE panel's keys are other sizes).
+ */
 @Composable
-private fun StepKey(glyph: String, description: String, haptics: Boolean, onClick: () -> Unit) {
+internal fun StepKey(
+    glyph: String,
+    description: String,
+    haptics: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier.size(StepKeyWidth, StepKeyHeight),
+    shade: Float = CellShade,
+) {
     val c = LocalArcColors.current
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
@@ -468,10 +479,9 @@ private fun StepKey(glyph: String, description: String, haptics: Boolean, onClic
     LaunchedEffect(pressed) {
         if (pressed) tick?.performHapticFeedback(HapticFeedbackType.KeyboardTap)
     }
-    val face = lerp(c.display, c.displayDim, CellShade)
+    val face = lerp(c.display, c.displayDim, shade)
     Box(
-        Modifier
-            .size(StepKeyWidth, StepKeyHeight)
+        modifier
             .cap(face, lerp(c.display, Color.Black, 0.6f), RoundedCornerShape(7.dp), capPress(pressed))
             .clickable(interactionSource = source, indication = null, role = Role.Button, onClick = onClick)
             .semantics { contentDescription = description },
@@ -538,20 +548,30 @@ private fun BarPages(ui: StepUi, onPage: (Int) -> Unit, modifier: Modifier) {
         Spacer(modifier)
         return
     }
+    BarPageKeys(MirrorText.BAR.uppercase(), ui.bars, ui.page, onPage, modifier)
+}
+
+/**
+ * [word] and a page key per bar ([bars], the one at [page] lit, from 0), [height]
+ * tall to touch: BAR's pages in the STEP panel, and the scene panel's CLIP
+ * row in BAR. Past what fits, the pages scroll sideways, the one shown kept in sight.
+ */
+@Composable
+internal fun BarPageKeys(word: String, bars: Int, page: Int, onPage: (Int) -> Unit, modifier: Modifier, height: Dp = StepKnobRow) {
     val c = LocalArcColors.current
     val scroll = rememberScrollState()
     val density = LocalDensity.current
-    LaunchedEffect(ui.page) {
-        with(density) { scroll.animateScrollTo(((ui.page - 1).coerceAtLeast(0) * PageKeyWidth.toPx()).roundToInt()) }
+    LaunchedEffect(page) {
+        with(density) { scroll.animateScrollTo(((page - 1).coerceAtLeast(0) * PageKeyWidth.toPx()).roundToInt()) }
     }
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(MirrorText.BAR.uppercase(), style = viewWordStyle(9.dp, 0.1f), color = c.displayDim, maxLines = 1, softWrap = false, modifier = Modifier.clearAndSetSemantics { })
+        Text(word, style = viewWordStyle(9.dp, 0.1f), color = c.displayDim, maxLines = 1, softWrap = false, modifier = Modifier.clearAndSetSemantics { })
         Row(Modifier.horizontalScroll(scroll)) {
-            for (b in 0 until ui.bars) {
-                val on = b == ui.page
+            for (b in 0 until bars) {
+                val on = b == page
                 Box(
                     Modifier
-                        .size(PageKeyWidth, StepKnobRow)
+                        .size(PageKeyWidth, height)
                         .selectable(selected = on, role = Role.Tab, interactionSource = remember { MutableInteractionSource() }, indication = null) { onPage(b) }
                         .semantics { contentDescription = MirrorText.barPage(b + 1) },
                     contentAlignment = Alignment.Center,

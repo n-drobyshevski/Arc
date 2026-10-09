@@ -370,6 +370,53 @@ class FeatureTextTest {
     }
 
     @Test
+    fun `scene panel text`() {
+        assertEquals("B03", MirrorText.groupPattern(1, 3))
+        assertEquals(listOf("now", "at bar end", "at pattern end"), SwitchTime.entries.map(MirrorText::switchAt))
+        assertEquals("B \u2192 05", MirrorText.groupMove(1, 5))
+        assertEquals("\u2192 S03", MirrorText.sceneMove(2))
+        assertEquals("B \u2192 05 at bar end", MirrorText.queuedLine(MirrorText.groupMove(1, 5), SwitchTime.BAR))
+        assertEquals("\u2192 S03 at pattern end", MirrorText.queuedLine(MirrorText.sceneMove(2), SwitchTime.PATTERN))
+        assertEquals("S03 committed", MirrorText.sceneCommitted(2))
+        assertEquals("S05 cleared", MirrorText.sceneCleared(4))
+        assertEquals("S05 deleted", MirrorText.sceneDeleted(4))
+        assertEquals("B \u00B7 pick 01\u201399", MirrorText.gridStatus(1))
+        assertEquals("A bar 2 copied", MirrorText.clipCopied("A bar 2"))
+        assertEquals("SNARE pasted", MirrorText.clipPasted("SNARE"))
+        assertEquals("Tap a pad", MirrorText.PAD_TAP_SOURCE)
+        assertEquals("KICK \u2192 tap target", MirrorText.padTapTarget("KICK"))
+        assertEquals(listOf("No pattern copied", "No bar copied", "No pad copied"), listOf(MirrorText.NO_PATTERN_COPIED, MirrorText.NO_BAR_COPIED, MirrorText.NO_PAD_COPIED))
+        // For screen readers.
+        assertEquals("Scene 2 of 3, patterns A 1, B 3, C 1, D 2", MirrorText.sceneSpoken(1, 3, listOf(1, 3, 1, 2)))
+        assertEquals("Group B, pattern 5, 4 bars", MirrorText.patternSpoken(1, 5, 4))
+        assertEquals("Group A, pattern 1, 1 bar", MirrorText.patternSpoken(0, 1, 1))
+        assertEquals("Group B, pattern 5, at bar end", MirrorText.patternQueuedSpoken(1, 5, SwitchTime.BAR))
+        assertEquals("Scene 3, at pattern end", MirrorText.sceneQueuedSpoken(2, SwitchTime.PATTERN))
+        assertEquals("Scene 3 committed", MirrorText.sceneCommittedSpoken(2))
+    }
+
+    @Test
+    fun `scene panel labels`() {
+        assertEquals("Scenes, scene 2 of 3", MirrorText.sceneChipName(1, 3))
+        assertEquals("Scene 2 of 3", MirrorText.sceneStatus(1, 3))
+        assertEquals(listOf("03", "03\u219205"), listOf(MirrorText.patternNumber(3), MirrorText.numberMove(3, 5)))
+        assertEquals(listOf("Group B, pattern 3, has notes", "Group B, pattern 3"), listOf(true, false).map { MirrorText.groupColumn(1, 3, it) })
+        assertEquals(listOf("Group B, previous pattern", "Group B, next pattern", "Group B, next free pattern"), listOf(MirrorText.groupPrevious(1), MirrorText.groupNext(1), MirrorText.groupNextFree(1)))
+        assertEquals(listOf(", pattern 3", ", pattern 3, changing to 5"), listOf(null, 5).map { MirrorText.groupKeyPattern(3, it) })
+        // CLR and DEL, the hold key.
+        assertEquals(listOf("Clear scene", "Delete scene"), listOf(false, true).map(MirrorText::eraseSceneName))
+        assertEquals(listOf("HOLD \u00B7 CLR S02", "HOLD \u00B7 DEL S05"), listOf(MirrorText.eraseHolding(false, "S02"), MirrorText.eraseHolding(true, "S05")).map { it.uppercase() })
+        assertEquals(listOf("Scene change: Immediate", "Scene change: Bar end", "Scene change: Pattern end"), SwitchTime.entries.map(MirrorText::changeName))
+        // CLIP.
+        assertEquals(listOf("PTN", "BAR", "PAD", "COPY", "PASTE"), listOf(MirrorText.PTN, MirrorText.BAR, MirrorText.CLIP_PAD, MirrorText.COPY, MirrorText.PASTE).map { it.uppercase() })
+        assertEquals(listOf("Group A \u00B7 bar", "Clip \u00B7 A bar 2"), listOf(MirrorText.barPagesGroup(0), MirrorText.clipHeld("A bar 2")))
+        // The 1-99 grid.
+        assertEquals(listOf("Group B", "P03 \u00B7 4 bars", "P03 \u00B7 1 bar"), listOf(MirrorText.gridTitle(1), MirrorText.gridDetail(3, 4), MirrorText.gridDetail(3, 1)))
+        assertEquals(listOf("Pattern 5, has notes", "Pattern 6"), listOf(MirrorText.patternCell(5, true), MirrorText.patternCell(6, false)))
+        assertEquals("Pick patterns and scenes, copy and paste", CoachText.SCENE)
+    }
+
+    @Test
     fun `step text`() {
         // bar.beat.step, from 1: the 5th 1/16 is 1.2.1.
         assertEquals(

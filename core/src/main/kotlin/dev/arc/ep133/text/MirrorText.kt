@@ -757,8 +757,11 @@ object MirrorText {
     /** "S01": the scene at [index] (from 0), shown from 1. */
     fun sceneLabel(index: Int) = "S${twoDigits(index + 1)}"
 
+    /** "A01": [group]'s pattern [n], as the group keys and the scene line show it. */
+    fun groupPattern(group: Int, n: Int) = "${'A' + group}${twoDigits(n)}"
+
     /** "S01 · A01 B03 C01 D02": the scene playing, and each group's pattern in it. */
-    fun sceneLine(seq: ProjectSeq) = "${sceneLabel(seq.scene)} · " + (0 until 4).joinToString(" ") { g -> "${'A' + g}${twoDigits(seq.selected(g))}" }
+    fun sceneLine(seq: ProjectSeq) = "${sceneLabel(seq.scene)} · " + (0 until 4).joinToString(" ") { g -> groupPattern(g, seq.selected(g)) }
 
     /** The scene change setting's choices (410 to 412 on the device). */
     fun switchName(t: SwitchTime) = when (t) {
@@ -783,6 +786,139 @@ object MirrorText {
     /** ERASE + MAIN held: CLR emptied the scene's patterns, DEL deleted the empty scene. */
     const val CLEARED_SCENE = "Scene cleared."
     const val DELETED_SCENE = "Scene deleted."
+
+    // The scene panel's status line (upper-cased where shown) and what a screen reader is told of each change.
+    /** When a pick takes over, for the status and screen readers: "now", "at bar end", "at pattern end". */
+    fun switchAt(t: SwitchTime) = when (t) {
+        SwitchTime.IMMEDIATE -> "now"
+        SwitchTime.BAR -> "at bar end"
+        SwitchTime.PATTERN -> "at pattern end"
+    }
+
+    /** "B → 05": group [group] changing to pattern [to]. */
+    fun groupMove(group: Int, to: Int) = "${'A' + group} \u2192 ${twoDigits(to)}"
+
+    /** "→ S03": the scene waiting to take over. */
+    fun sceneMove(index: Int) = "\u2192 ${sceneLabel(index)}"
+
+    /** "B → 05 at bar end": what waits ([move]: groupMove's, or sceneMove's) and for when. */
+    fun queuedLine(move: String, t: SwitchTime) = "$move ${switchAt(t)}"
+
+    /** "S03 committed": COMMIT made the scene at [index]. */
+    fun sceneCommitted(index: Int) = "${sceneLabel(index)} committed"
+
+    /** COMMIT with 99 scenes already. */
+    const val SCENES_FULL = "No room for another scene"
+
+    /** "S05 cleared", "S05 deleted": what ERASE + MAIN held did to the scene at [index]. */
+    fun sceneCleared(index: Int) = "${sceneLabel(index)} cleared"
+    fun sceneDeleted(index: Int) = "${sceneLabel(index)} deleted"
+
+    /** "B · pick 01–99": the grid open over the pads for [group]. */
+    fun gridStatus(group: Int) = "${'A' + group} \u00B7 pick 01\u201399"
+
+    /** "A01 copied", "A bar 2 copied", "KICK copied": [what] the clip took; "A05 pasted", "SNARE pasted": where it went. */
+    fun clipCopied(what: String) = "$what copied"
+    fun clipPasted(what: String) = "$what pasted"
+
+    /** The PAD clip's two stages: COPY waits for the pad to copy, then PASTE for the pad ([word], the one copied) to paste onto. */
+    const val PAD_TAP_SOURCE = "Tap a pad"
+    fun padTapTarget(word: String) = "$word \u2192 tap target"
+
+    /** PASTE with nothing of its kind copied. */
+    const val NO_PATTERN_COPIED = "No pattern copied"
+    const val NO_BAR_COPIED = "No bar copied"
+    const val NO_PAD_COPIED = "No pad copied"
+
+    /** A scene for screen readers: "Scene 2 of 3, patterns A 1, B 3, C 1, D 2". */
+    fun sceneSpoken(index: Int, count: Int, patterns: List<Int>) =
+        "Scene ${index + 1} of $count, patterns " + patterns.mapIndexed { g, n -> "${'A' + g} $n" }.joinToString(", ")
+
+    /** A group's pattern for screen readers: "Group B, pattern 5, 4 bars". */
+    fun patternSpoken(group: Int, n: Int, bars: Int) = "Group ${'A' + group}, pattern $n, $bars ${if (bars == 1) "bar" else "bars"}"
+
+    /** A change waiting, for screen readers: "Group B, pattern 5, at bar end", "Scene 3, at pattern end". */
+    fun patternQueuedSpoken(group: Int, n: Int, t: SwitchTime) = "Group ${'A' + group}, pattern $n, ${switchAt(t)}"
+    fun sceneQueuedSpoken(index: Int, t: SwitchTime) = "Scene ${index + 1}, ${switchAt(t)}"
+
+    /** COMMIT for screen readers: "Scene 3 committed". */
+    fun sceneCommittedSpoken(index: Int) = "Scene ${index + 1} committed"
+
+    // The scene panel's own words (upper-cased where shown) and their names for screen readers.
+    /** The panel's name, and ✕ closing it; the S01 chip on the display line for screen readers: "Scenes, scene 2 of 3". */
+    const val SCENE_NAME = "Scenes and patterns"
+    const val CLOSE_SCENE = "Close scenes and patterns"
+    fun sceneChipName(index: Int, count: Int) = "Scenes, scene ${index + 1} of $count"
+
+    /** The panel's status while nothing else is said: "Scene 2 of 3". */
+    fun sceneStatus(index: Int, count: Int) = "Scene ${index + 1} of $count"
+
+    /** "03": a pattern's number as the group keys and columns show it; "03→05": the one playing and the one waiting. */
+    fun patternNumber(n: Int) = twoDigits(n)
+    fun numberMove(n: Int, to: Int) = "${twoDigits(n)}\u2192${twoDigits(to)}"
+
+    /** The head's − and + around the scene; + on the last scene makes a new one. */
+    const val PREV_SCENE = "Previous scene"
+    const val NEXT_SCENE = "Next scene"
+    const val NEW_SCENE = "New scene"
+
+    /** A group's column: its name for screen readers ("Group B, pattern 3, has notes"), and what its number does. */
+    fun groupColumn(group: Int, n: Int, notes: Boolean) = "$GROUP ${'A' + group}, pattern $n" + if (notes) PAD_HAS_NOTES else ""
+    const val PICK_PATTERN = "Pick a pattern"
+    fun groupPrevious(group: Int) = "$GROUP ${'A' + group}, previous pattern"
+    fun groupNext(group: Int) = "$GROUP ${'A' + group}, next pattern"
+
+    /** NEXT FREE: the first pattern after this one with no notes ("Group B, next free pattern"). */
+    const val NEXT_FREE = "Next free"
+    fun groupNextFree(group: Int) = "$GROUP ${'A' + group}, next free pattern"
+
+    /** A group key's pattern for screen readers, after its name: ", pattern 3", and ", changing to 5" while one waits. */
+    fun groupKeyPattern(n: Int, queued: Int?) = ", pattern $n" + (queued?.let { ", changing to $it" } ?: "")
+
+    /** COMMIT (duplicates the scene), and what it does for screen readers. */
+    const val COMMIT = "Commit"
+    const val COMMIT_NOTE = "Makes a new scene after this one, with copies of the patterns in free slots."
+
+    /** CLR and DEL, the hold key (DEL when the scene is empty): its name, what holding does, and the status while it is held ("Hold · Del S05"). */
+    const val CLR = "Clr"
+    const val DEL = "Del"
+    fun eraseSceneName(delete: Boolean) = if (delete) "Delete scene" else "Clear scene"
+    const val HOLD_NOTE = "Hold for two seconds."
+    fun eraseHolding(delete: Boolean, scene: String) = "Hold \u00B7 ${if (delete) DEL else CLR} $scene"
+
+    /** CHANGE: when a pick takes over. The chip's name for screen readers ("Scene change: Bar end") and what a tap does. */
+    const val CHANGE = "Change"
+    fun changeName(t: SwitchTime) = "Scene change: ${switchName(t)}"
+    const val CHANGE_NOTE = "Tap to change when a pick takes over: now, at bar end, or at pattern end. Stopped, it is always at once."
+
+    /** The pattern sheet's SCENE CHANGE row, the same setting: its caption and a line under the choices. */
+    const val SCENE_CHANGE = "Scene change"
+    const val SCENE_CHANGE_NOTE = "Playing: a new pattern or scene waits for the bar's or pattern's end. Stopped: always at once."
+
+    /** CLIP: PTN, BAR and PAD (their names for screen readers), COPY and PASTE, and the bar pages' row ("Group A · bar", "Clip · A bar 2"). */
+    const val CLIP = "Clip"
+    const val CLIP_PAD = "Pad"
+    const val CLIP_PTN_NAME = "Whole pattern"
+    const val CLIP_BAR_NAME = "One bar"
+    const val CLIP_PAD_NAME = "One pad's notes"
+    const val COPY = "Copy"
+    const val PASTE = "Paste"
+    fun barPagesGroup(group: Int) = "$GROUP ${'A' + group} \u00B7 bar"
+    fun clipHeld(what: String) = "$CLIP \u00B7 $what"
+
+    /** The 1–99 grid over the pads: its name, ✕ closing it, its title ("Group B") and the pattern it starts on ("P03 · 4 bars"). */
+    const val GRID_NAME = "Pattern grid"
+    const val CLOSE_GRID = "Close pattern grid"
+    fun gridTitle(group: Int) = "$GROUP ${'A' + group}"
+    fun gridDetail(n: Int, bars: Int) = "${patternLabel(n)} \u00B7 ${Format.plural(bars, "bar")}"
+
+    /** A cell of the grid for screen readers: "Pattern 5, has notes" (the pattern playing is selected; the next free one says so). */
+    fun patternCell(n: Int, notes: Boolean) = "Pattern $n" + if (notes) PAD_HAS_NOTES else ""
+
+    /** The grid's legend (upper-cased where shown). */
+    const val GRID_HAS_NOTES = "Has notes"
+    const val GRID_EMPTY = "Empty"
+    const val GRID_PLAYING = "Playing"
 
     private fun twoDigits(n: Int) = n.toString().padStart(2, '0')
 

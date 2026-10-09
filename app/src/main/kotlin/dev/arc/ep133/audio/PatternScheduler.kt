@@ -6,6 +6,7 @@ import dev.arc.ep133.features.ArpSettings
 import dev.arc.ep133.features.BeatGrid
 import dev.arc.ep133.features.FrameClock
 import dev.arc.ep133.features.Keys
+import dev.arc.ep133.features.Pattern
 import dev.arc.ep133.features.PatternPlayer
 import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.ProjectPatterns
@@ -33,13 +34,30 @@ import kotlin.math.floor
 class PadVoice(val pcm: ShortArray, val channels: Int, val rate: Int, val shape: VoiceShape, val keysShape: VoiceShape)
 
 /**
+ * A pattern waiting to take over a group (an addition: a pick made while
+ * the sequencer plays): [pattern] plays from global tick [atTick] on.
+ */
+data class QueuedSwitch(val pattern: Pattern, val atTick: Long)
+
+/**
  * What the sequencer plays (an addition): the project's [patterns], the
  * sounds on their pads ([voices]; a note on a pad not in it is told to
  * [PatternScheduler.onMissing]), [skip] (a note's id to the pass not to play,
  * [dev.arc.ep133.features.PatternRecorder.Recorded.skipPass]) and the tempo,
- * [bpm]. Made anew for each change, never changed in place.
+ * [bpm]. [queued] gives a group (0..3) the pattern that takes over from a
+ * tick: its notes before the tick come from [patterns], those from it on
+ * from the queued one, each at the global tick mod its own pattern's length
+ * (patterns stay locked to bar 1, as arc's clock is, so a 2-bar pattern
+ * switched in at an odd bar starts at its bar 2; the device starts it at
+ * its bar 1). Made anew for each change, never changed in place.
  */
-class SeqPlan(val patterns: ProjectPatterns, val voices: Map<PhysicalPad, PadVoice>, val skip: Map<Int, Long>, val bpm: Double) {
+class SeqPlan(
+    val patterns: ProjectPatterns,
+    val voices: Map<PhysicalPad, PadVoice>,
+    val skip: Map<Int, Long>,
+    val bpm: Double,
+    val queued: Map<Int, QueuedSwitch> = emptyMap(),
+) {
     companion object {
         val EMPTY = SeqPlan(ProjectPatterns(), emptyMap(), emptyMap(), Tempo.DEFAULT.toDouble())
     }
@@ -142,9 +160,15 @@ interface MixScheduler {
  * output's next stamp and re-anchors on it, keeping the tick heard then:
  * a short gap, and the beat goes on where it was.
  *
+ * A group whose plan has a [SeqPlan.queued] switch plays its old pattern
+ * up to the switch's tick and the queued one from it, in the same window:
+ * the switch is as exact as any note. Notes of the old pattern still
+ * sounding at the switch are let go of at their own gates.
+ *
  * [plan] and the commands may come from any thread; [fill] and [clock] come
  * on the output's thread, and touch the rest. Steady scheduling allocates
- * only the notes [PatternPlayer.window] finds.
+ * only the notes [PatternPlayer.window] finds (and, with a switch queued,
+ * the queued patterns' own, once a plan).
  */
 class PatternScheduler(
     private val lookaheadNs: Long = LOOKAHEAD_NS,
@@ -163,6 +187,9 @@ class PatternScheduler(
 
         // The stamp drifted this far (in ms) from the timeline shown: shown anew.
         private const val DRIFT_MS = 1
+
+        // Notes by tick, then group, as [PatternPlayer.window] gives them.
+        private val BY_TICK = Comparator<SeqNote> { a, b -> if (a.startTick != b.startTick) a.startTick.compareTo(b.startTick) else a.group - b.group }
     }
 
     /** What plays: published by the main thread, read by the output's on each block. */
@@ -213,6 +240,17 @@ class PatternScheduler(
     /** The transport plays (or counts in); the arp alone doesn't count. */
     val playing: Boolean get() = on
 
+    /**
+     * The first tick a plan published now is sure to reach before it is
+     * sent (an addition, for a [SeqPlan.queued] switch while it plays): a
+     * lookahead past the first tick not sent yet, room for the blocks sent
+     * meanwhile. A switch at an earlier tick would find the old pattern's
+     * notes from it sent already, and the queued one's never. [Long.MIN_VALUE]
+     * until the transport's first block is sent.
+     */
+    @Volatile var freeTick: Long = Long.MIN_VALUE
+        private set
+
     /** RECORD is armed (set by the main thread): the output's stamps keep coming while stopped, for [play] at a press. */
     @Volatile override var armed = false
 
@@ -249,6 +287,11 @@ class PatternScheduler(
     // The pads told to [onMissing] for [missingOf].
     private var missingOf: SeqPlan? = null
     private val missing = HashSet<PhysicalPad>()
+
+    // The queued patterns of [switchOf] as a project's patterns (a blank one for a group with none), and their notes in a window.
+    private var switchOf: SeqPlan? = null
+    private var switched = ProjectPatterns()
+    private val switchedNotes = ArrayList<SeqNote>()
 
     // Keys and pads made once, so a note finds them without a new string or object.
     private val pads = Array(4) { g -> Array(12) { o -> PhysicalPad(g, o) } }
@@ -305,11 +348,13 @@ class PatternScheduler(
             when (val a = asks.poll() ?: break) {
                 is Ask.Play -> {
                     flush(sink)
+                    freeTick = Long.MIN_VALUE
                     anchor(a, rendered, rate)
                     lostNow = false
                 }
                 Ask.Stop -> {
                     flush(sink)
+                    freeTick = Long.MIN_VALUE
                     clock = null
                     stamp = null
                     waiting = false
@@ -355,13 +400,38 @@ class PatternScheduler(
         val from = maxOf(c.frameOf(nextTick), rendered - ahead)
         if (to > from) {
             PatternPlayer.window(p.patterns, c, from, to, p.skip, notes)
+            if (p.queued.isNotEmpty()) switchIn(p, c, from, to)
             for (i in notes.indices) start(sink, p, notes[i])
             nextTick = firstTick(c, to)
         }
+        freeTick = maxOf(nextTick, firstTick(c, to + ahead))
         scheduledTo = to
         releases(sink, c, to, rendered)
         // Out once what fell behind the mix at an anchor on a press is sent: a press told it after that isn't sent again.
         if (_timeline.value == null) publish()
+    }
+
+    // [notes] (the plan's patterns' window) with each queued group's notes from its switch's tick on taken from the queued pattern instead.
+    private fun switchIn(p: SeqPlan, c: TransportClock, from: Long, to: Long) {
+        if (switchOf !== p) {
+            switchOf = p
+            var q = ProjectPatterns()
+            for ((g, s) in p.queued) if (g in 0..3) q = q.with(g, s.pattern)
+            switched = q
+        }
+        PatternPlayer.window(switched, c, from, to, emptyMap(), switchedNotes)
+        var k = 0
+        for (i in notes.indices) {
+            val n = notes[i]
+            val s = p.queued[n.group]
+            if (s == null || n.startTick < s.atTick) notes[k++] = n
+        }
+        while (notes.size > k) notes.removeAt(notes.lastIndex)
+        for (i in switchedNotes.indices) {
+            val n = switchedNotes[i]
+            if (n.startTick >= p.queued.getValue(n.group).atTick) notes += n
+        }
+        notes.sortWith(BY_TICK)
     }
 
     override fun clock(c: FrameClock) {

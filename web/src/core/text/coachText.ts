@@ -29,6 +29,8 @@ export const CoachText = {
   ERASE: "Erase a pad's notes",
   /** The STEP chip beside ERASE while the pattern is stopped: the STEP panel. */
   STEP: 'Step through the pattern',
+  /** The scene chip beside it (and the readout while the pattern plays): the scene panel. */
+  SCENE: 'Pick patterns and scenes, copy and paste',
   OCTAVE: 'Octave',
   SCALE: 'Scale',
   KEY: 'Key',

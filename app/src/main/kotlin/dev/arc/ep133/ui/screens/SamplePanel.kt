@@ -125,7 +125,8 @@ import kotlin.math.roundToInt
  * STEP's panel (an addition, after the device's step sequencing) comes out
  * of the same place on the same timeline, all of it on the dark screen: the
  * header STEP's row, the strip its controls, and no plate ([PanelKind]). The
- * two never show at once; the panel says which it is.
+ * SCENE panel (scenes and patterns, after the device's GROUP and MAIN) is the
+ * same, taller. They never show at once; the panel says which it is.
  *
  * The swipe on the pads is a trigger, not a drag the panel follows: a
  * pointer handler of its own on the pads ([panelSwipe]), not a pager,
@@ -139,8 +140,8 @@ import kotlin.math.roundToInt
  * takes the finger from its first touch, keeps it.
  */
 
-/** Which panel the display line grows into: SAMPLE's, or STEP's ([SamplePanel.kind]). */
-internal enum class PanelKind { SAMPLE, STEP }
+/** Which panel the display line grows into: SAMPLE's, STEP's or SCENE's ([SamplePanel.kind]). */
+internal enum class PanelKind { SAMPLE, STEP, SCENE }
 
 /**
  * Where Live's SAMPLE panel is: [progress] 0 with the function keys, 1 with
@@ -148,7 +149,7 @@ internal enum class PanelKind { SAMPLE, STEP }
  * or closes. [open] is where it rests or is on its way to; [moving],
  * whether it is on its way. [fixed] holds the panel where it started
  * (screenshots): nothing moves it. [kind] is which panel it is, SAMPLE's
- * or STEP's, from [start]'s too.
+ * STEP's or SCENE's, from [start]'s too.
  */
 @Stable
 internal class SamplePanel(start: Float, val fixed: Boolean = false, kind: PanelKind = PanelKind.SAMPLE) {

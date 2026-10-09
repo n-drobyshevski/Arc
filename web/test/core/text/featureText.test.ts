@@ -10,7 +10,7 @@ import { ProjectSeq, TIMINGS, Timing } from '../../../src/core/features/pattern'
 import { PLAY_MODES } from '../../../src/core/features/padSettings'
 import { ProjectSource } from '../../../src/core/features/projectStep'
 import { SampleSource } from '../../../src/core/features/sampleSource'
-import { SWITCH_TIMES, SceneOps } from '../../../src/core/features/scenes'
+import { SWITCH_TIMES, SceneOps, SwitchTime } from '../../../src/core/features/scenes'
 import { transportState } from '../../../src/core/features/transport'
 import { CoachText } from '../../../src/core/text/coachText'
 import { FeatureText } from '../../../src/core/text/featureText'
@@ -354,6 +354,55 @@ describe('FeatureTextTest', () => {
     expect(MirrorText.pastedPad('SNARE')).toBe('Pasted onto SNARE.')
     expect(MirrorText.CLEARED_SCENE).toBe('Scene cleared.')
     expect(MirrorText.DELETED_SCENE).toBe('Scene deleted.')
+  })
+
+  it('scene panel text', () => {
+    expect(MirrorText.groupPattern(1, 3)).toBe('B03')
+    expect(SWITCH_TIMES.map((t) => MirrorText.switchAt(t))).toEqual(['now', 'at bar end', 'at pattern end'])
+    expect(MirrorText.groupMove(1, 5)).toBe('B \u2192 05')
+    expect(MirrorText.sceneMove(2)).toBe('\u2192 S03')
+    expect(MirrorText.queuedLine(MirrorText.groupMove(1, 5), SwitchTime.BAR)).toBe('B \u2192 05 at bar end')
+    expect(MirrorText.queuedLine(MirrorText.sceneMove(2), SwitchTime.PATTERN)).toBe('\u2192 S03 at pattern end')
+    expect(MirrorText.sceneCommitted(2)).toBe('S03 committed')
+    expect(MirrorText.sceneCleared(4)).toBe('S05 cleared')
+    expect(MirrorText.sceneDeleted(4)).toBe('S05 deleted')
+    expect(MirrorText.gridStatus(1)).toBe('B \u00B7 pick 01\u201399')
+    expect(MirrorText.clipCopied('A bar 2')).toBe('A bar 2 copied')
+    expect(MirrorText.clipPasted('SNARE')).toBe('SNARE pasted')
+    expect(MirrorText.PAD_TAP_SOURCE).toBe('Tap a pad')
+    expect(MirrorText.padTapTarget('KICK')).toBe('KICK \u2192 tap target')
+    expect([MirrorText.NO_PATTERN_COPIED, MirrorText.NO_BAR_COPIED, MirrorText.NO_PAD_COPIED]).toEqual(['No pattern copied', 'No bar copied', 'No pad copied'])
+    // For screen readers.
+    expect(MirrorText.sceneSpoken(1, 3, [1, 3, 1, 2])).toBe('Scene 2 of 3, patterns A 1, B 3, C 1, D 2')
+    expect(MirrorText.patternSpoken(1, 5, 4)).toBe('Group B, pattern 5, 4 bars')
+    expect(MirrorText.patternSpoken(0, 1, 1)).toBe('Group A, pattern 1, 1 bar')
+    expect(MirrorText.patternQueuedSpoken(1, 5, SwitchTime.BAR)).toBe('Group B, pattern 5, at bar end')
+    expect(MirrorText.sceneQueuedSpoken(2, SwitchTime.PATTERN)).toBe('Scene 3, at pattern end')
+    expect(MirrorText.sceneCommittedSpoken(2)).toBe('Scene 3 committed')
+  })
+
+  it('scene panel labels', () => {
+    expect(MirrorText.sceneChipName(1, 3)).toBe('Scenes, scene 2 of 3')
+    expect(MirrorText.sceneStatus(1, 3)).toBe('Scene 2 of 3')
+    expect([MirrorText.patternNumber(3), MirrorText.numberMove(3, 5)]).toEqual(['03', '03\u219205'])
+    expect([true, false].map((n) => MirrorText.groupColumn(1, 3, n))).toEqual(['Group B, pattern 3, has notes', 'Group B, pattern 3'])
+    expect([MirrorText.groupPrevious(1), MirrorText.groupNext(1), MirrorText.groupNextFree(1)]).toEqual([
+      'Group B, previous pattern',
+      'Group B, next pattern',
+      'Group B, next free pattern',
+    ])
+    expect([null, 5].map((q) => MirrorText.groupKeyPattern(3, q))).toEqual([', pattern 3', ', pattern 3, changing to 5'])
+    // CLR and DEL, the hold key.
+    expect([false, true].map((d) => MirrorText.eraseSceneName(d))).toEqual(['Clear scene', 'Delete scene'])
+    expect([MirrorText.eraseHolding(false, 'S02'), MirrorText.eraseHolding(true, 'S05')].map((w) => w.toUpperCase())).toEqual(['HOLD \u00B7 CLR S02', 'HOLD \u00B7 DEL S05'])
+    expect(SWITCH_TIMES.map((t) => MirrorText.changeName(t))).toEqual(['Scene change: Immediate', 'Scene change: Bar end', 'Scene change: Pattern end'])
+    // CLIP.
+    expect([MirrorText.PTN, MirrorText.BAR, MirrorText.CLIP_PAD, MirrorText.COPY, MirrorText.PASTE].map((w) => w.toUpperCase())).toEqual(['PTN', 'BAR', 'PAD', 'COPY', 'PASTE'])
+    expect([MirrorText.barPagesGroup(0), MirrorText.clipHeld('A bar 2')]).toEqual(['Group A \u00B7 bar', 'Clip \u00B7 A bar 2'])
+    // The 1-99 grid.
+    expect([MirrorText.gridTitle(1), MirrorText.gridDetail(3, 4), MirrorText.gridDetail(3, 1)]).toEqual(['Group B', 'P03 \u00B7 4 bars', 'P03 \u00B7 1 bar'])
+    expect([MirrorText.patternCell(5, true), MirrorText.patternCell(6, false)]).toEqual(['Pattern 5, has notes', 'Pattern 6'])
+    expect(CoachText.SCENE).toBe('Pick patterns and scenes, copy and paste')
   })
 
   it('step text', () => {

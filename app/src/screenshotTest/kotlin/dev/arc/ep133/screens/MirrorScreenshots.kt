@@ -73,7 +73,14 @@ import dev.arc.ep133.ui.screens.TempoSheetContent
 import dev.arc.ep133.ui.screens.TempoPage
 import dev.arc.ep133.ui.screens.TimingUi
 import dev.arc.ep133.ui.screens.LiveArp
+import dev.arc.ep133.ui.screens.LiveScene
 import dev.arc.ep133.ui.screens.LiveStep
+import dev.arc.ep133.controller.ClipMode
+import dev.arc.ep133.controller.ClipUi
+import dev.arc.ep133.controller.PadStage
+import dev.arc.ep133.controller.SceneGroupUi
+import dev.arc.ep133.controller.SceneUi
+import dev.arc.ep133.features.SwitchTime
 import dev.arc.ep133.controller.StepNote
 import dev.arc.ep133.controller.StepUi
 import dev.arc.ep133.controller.ArpUi
@@ -185,7 +192,7 @@ private fun Framed(
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null, arp: LiveArp? = null, voices: Set<String>? = null, step: LiveStep? = null) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null, arp: LiveArp? = null, voices: Set<String>? = null, step: LiveStep? = null, scene: LiveScene? = null) {
     val mirror = MirrorUi(state, loading = loading, error = error, offline = offline, offlineProjects = offlineProjects)
     // PROJECT as MainActivity works it out; TEMPO's light caught on a beat while the click is on; FX named on its light,
     // held while [punch] gives the punch-ins.
@@ -203,9 +210,11 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
     val voiceFlow = remember(voices) { voices?.let { kotlinx.coroutines.flow.MutableStateFlow(it) } }
     // STEP, as MainActivity always has it with the pattern's transport: its chip on the stopped line, the panel where [step] opens it.
     val stepUi = step ?: transport?.let { LiveStep() }
+    // SCENES, as MainActivity always has it with the pattern's transport: its chip on the stopped line, the panel where [scene] opens it.
+    val sceneUi = scene ?: transport?.let { LiveScene(still = true) }
     Framed(
         Tab.LIVE, connected = offline == null && error == null, dark = dark, guide = guide,
-        pill = { LivePill(mirror, keys, transport, takeUi, still = true, pianoRange = pianoRange, editing = edit == true, wireless = wireless, sample = sampleUi, punch = punch?.held.orEmpty(), arp = arp?.ui?.line, voices = voiceFlow, step = stepUi, stepOpens = oneGroup && !keys.on) }, toast = toast, barMiddle = barMiddle,
+        pill = { LivePill(mirror, keys, transport, takeUi, still = true, pianoRange = pianoRange, editing = edit == true, wireless = wireless, sample = sampleUi, punch = punch?.held.orEmpty(), arp = arp?.ui?.line, voices = voiceFlow, step = stepUi, stepOpens = oneGroup && !keys.on, scene = sceneUi, sceneOpens = oneGroup && !keys.on) }, toast = toast, barMiddle = barMiddle,
         toastAction = toastAction,
         sample = SampleKey(sampleUi.state.on && !keys.on) {},
     ) {
@@ -240,6 +249,7 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
             voices = voiceFlow,
             arp = arp,
             step = stepUi,
+            scene = sceneUi,
         )
     }
 }
@@ -917,11 +927,13 @@ private fun patternUi(
     erase: Boolean = false,
     canUndo: Boolean = false,
     missing: Int = 0,
+    switchTime: SwitchTime = SwitchTime.DEFAULT,
 ) = TransportUi(
     phase = phase,
     recording = recording,
     countIn = countIn,
     timing = Timing.SIXTEENTH,
+    switchTime = switchTime,
     bars = listOf(4, 2, 1, 1),
     hasNotes = listOf(true, true, false, false),
     focusGroup = 0,
@@ -1162,6 +1174,202 @@ fun LiveStepCorrectPlayingDarkPreview() = Live(
     step = LiveStep(StepUi(correct = true, status = MirrorText.correctedLine(3))),
 )
 
+// SCENES (layout B): the S02 chip after PLAY on the stopped line unrolls the line into the SCENE panel over the function keys,
+// all on its dark screen: ▶, the scene's − and + and the status in the line's own row, the four groups' columns, COMMIT, CLR,
+// CHANGE and the CLIP row. Project here: scene 2 of 3 = A01 B03 C01 D02; B has notes in 01-03, 05, 06, 09 and 12, and is 4 bars.
+private val sceneGroups = listOf(
+    SceneGroupUi(1, null, setOf(1, 2, 4), 3, 2),
+    SceneGroupUi(3, null, setOf(1, 2, 3, 5, 6, 9, 12), 4, 4),
+    SceneGroupUi(1, null, setOf(1, 3), 2, 1),
+    SceneGroupUi(2, null, setOf(1, 2), 3, 1),
+)
+private val scenePanel = SceneUi(open = true, index = 1, count = 3, label = "S02", group = 0, groups = sceneGroups, switchTime = SwitchTime.BAR)
+
+// Open while stopped: nothing said yet, so the status is where the scene is.
+@PreviewTest
+@Preview(name = "Live scene panel", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveScenePanelPreview() = Live(lastRead, oneGroup = true, transport = patternUi(canUndo = true), scene = LiveScene(scenePanel, still = true))
+
+@PreviewTest
+@Preview(name = "Live scene panel dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveScenePanelDarkPreview() = Live(lastRead, dark = true, oneGroup = true, transport = patternUi(canUndo = true), scene = LiveScene(scenePanel, still = true))
+
+// Playing with B waiting for pattern 5 at the bar's end: its number reads 03→05 (blinking, caught lit), the column and the group
+// key outlined in signal orange; ■ stops it, and the panel stays open with the pads playable under it.
+private val sceneQueued = scenePanel.copy(
+    groups = sceneGroups.mapIndexed { g, c -> if (g == 1) c.copy(queued = 5) else c },
+    status = MirrorText.queuedLine(MirrorText.groupMove(1, 5), SwitchTime.BAR),
+)
+
+@PreviewTest
+@Preview(name = "Live scene panel playing", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveScenePanelPlayingPreview() = Live(
+    playing, oneGroup = true, playingPads = patternPads, voices = emptySet(),
+    transport = patternUi(TransportPhase.PLAYING, at = PatternPosition(2, 3, 4, 0.375f), canUndo = true),
+    scene = LiveScene(sceneQueued.copy(group = 1), running = true, still = true),
+)
+
+// The 1–99 grid over the pads, from B's number: patterns with notes filled, the one playing orange, the next free one outlined.
+@PreviewTest
+@Preview(name = "Live scene grid", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSceneGridPreview() = Live(
+    lastRead, oneGroup = true, transport = patternUi(canUndo = true),
+    scene = LiveScene(scenePanel.copy(group = 1, gridGroup = 1, status = MirrorText.gridStatus(1)), still = true),
+)
+
+@PreviewTest
+@Preview(name = "Live scene grid dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSceneGridDarkPreview() = Live(
+    lastRead, dark = true, oneGroup = true, transport = patternUi(canUndo = true),
+    scene = LiveScene(scenePanel.copy(group = 1, gridGroup = 1, status = MirrorText.gridStatus(1)), still = true),
+)
+
+// COMMIT: S03 made after S02, with copies of the patterns in free slots (A03 B04 C02 D03).
+@PreviewTest
+@Preview(name = "Live scene commit", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSceneCommitPreview() = Live(
+    lastRead, oneGroup = true, transport = patternUi(canUndo = true),
+    scene = LiveScene(
+        scenePanel.copy(
+            index = 2, count = 4, label = "S03",
+            groups = listOf(3, 4, 2, 3).mapIndexed { g, n -> SceneGroupUi(n, null, sceneGroups[g].filled + n, n + 1, sceneGroups[g].bars) },
+            status = MirrorText.sceneCommitted(2),
+        ),
+        still = true,
+    ),
+)
+
+// CLR held: the key fills over its 2 s, caught a little over half way.
+@PreviewTest
+@Preview(name = "Live scene clear hold", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSceneClearHoldPreview() = Live(lastRead, oneGroup = true, transport = patternUi(canUndo = true), scene = LiveScene(scenePanel, holding = 0.55f, still = true))
+
+// DEL: S05 is empty (and not the only scene), so the held key reads DEL.
+@PreviewTest
+@Preview(name = "Live scene delete hold", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSceneDeleteHoldPreview() = Live(
+    lastRead, oneGroup = true, transport = patternUi(canUndo = true),
+    scene = LiveScene(
+        scenePanel.copy(
+            index = 4, count = 5, label = "S05", canDelete = true,
+            groups = listOf(7, 7, 2, 3).map { SceneGroupUi(it, null, emptySet(), it + 1, 1) },
+        ),
+        holding = 0.55f,
+        still = true,
+    ),
+)
+
+// CLIP · BAR: the focused group's bar pages (A is 2 bars), bar 2 copied.
+@PreviewTest
+@Preview(name = "Live scene bar copy", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSceneBarCopyPreview() = Live(
+    lastRead, oneGroup = true, transport = patternUi(canUndo = true),
+    scene = LiveScene(
+        scenePanel.copy(clipMode = ClipMode.BAR, bar = 1, clip = ClipUi(ClipMode.BAR, "bar 2"), status = MirrorText.clipCopied("A bar 2")),
+        still = true,
+    ),
+)
+
+// CLIP · PAD: COPY waits for a pad (the pads take the tap, none plays) ...
+@PreviewTest
+@Preview(name = "Live scene pad copy", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveScenePadCopyPreview() = Live(
+    lastRead, oneGroup = true, transport = patternUi(canUndo = true),
+    scene = LiveScene(scenePanel.copy(clipMode = ClipMode.PAD, padStage = PadStage.SOURCE, status = MirrorText.PAD_TAP_SOURCE), still = true),
+)
+
+// ... and, with the kick copied, PASTE waits for the pad to paste onto (it may be in another group: C is shown).
+@PreviewTest
+@Preview(name = "Live scene pad paste", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveScenePadPastePreview() = Live(
+    lastRead, oneGroup = true, transport = patternUi(canUndo = true),
+    scene = LiveScene(
+        scenePanel.copy(
+            group = 2, clipMode = ClipMode.PAD, padStage = PadStage.TARGET, clip = ClipUi(ClipMode.PAD, "KICK"),
+            status = MirrorText.padTapTarget("KICK"),
+        ),
+        still = true,
+    ),
+)
+
+// A small phone: the panel and the pads under it.
+@PreviewTest
+@Preview(name = "Live scene panel small", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun LiveScenePanelSmallPreview() = Live(lastRead, oneGroup = true, transport = patternUi(canUndo = true), scene = LiveScene(sceneQueued, still = true))
+
+// KEYS: the panel over the keys' grid, the group's keys under it.
+@PreviewTest
+@Preview(name = "Live scene keys", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSceneKeysPreview() = Live(
+    keysPlaying.copy(notes = emptyMap()), keys = keysUi.copy(playingNotes = emptySet()), transport = patternUi(canUndo = true),
+    scene = LiveScene(scenePanel, still = true),
+)
+
+// On its side, the line in the top bar: the panel in the function keys' column with its own header, the pads beside it.
+@PreviewTest
+@Preview(name = "Live scene panel sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveScenePanelSidewaysPreview() = Live(lastRead, oneGroup = true, transport = patternUi(canUndo = true), scene = LiveScene(scenePanel, still = true))
+
+// A small phone on its side, and a tablet.
+@PreviewTest
+@Preview(name = "Live scene panel sideways small", widthDp = 692, heightDp = 336, showBackground = true)
+@Composable
+fun LiveScenePanelSidewaysSmallPreview() = Live(lastRead, oneGroup = true, transport = patternUi(canUndo = true), scene = LiveScene(sceneQueued, still = true))
+
+@PreviewTest
+@Preview(name = "Live scene panel tablet", widthDp = 840, heightDp = 900, showBackground = true)
+@Composable
+fun LiveScenePanelTabletPreview() = Live(lastRead, oneGroup = true, transport = patternUi(canUndo = true), scene = LiveScene(scenePanel, still = true))
+
+// Folded while it plays: the line reads the scene (B waiting for 5, blinking, caught lit) with the counter after it.
+@PreviewTest
+@Preview(name = "Live scene line playing", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSceneLinePlayingPreview() = Live(
+    playing, oneGroup = true, playingPads = patternPads, voices = emptySet(),
+    transport = patternUi(TransportPhase.PLAYING, at = PatternPosition(2, 3, 4, 0.375f)),
+    scene = LiveScene(sceneQueued.copy(open = false), still = true),
+)
+
+@PreviewTest
+@Preview(name = "Live scene line playing dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSceneLinePlayingDarkPreview() = Live(
+    playing, dark = true, oneGroup = true, playingPads = patternPads, voices = emptySet(),
+    transport = patternUi(TransportPhase.PLAYING, at = PatternPosition(2, 3, 4, 0.375f)),
+    scene = LiveScene(sceneQueued.copy(open = false), still = true),
+)
+
+// The same in the top bar on its side.
+@PreviewTest
+@Preview(name = "Live scene line sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveSceneLineSidewaysPreview() = Live(
+    playing, oneGroup = true, voices = emptySet(),
+    transport = patternUi(TransportPhase.PLAYING, at = PatternPosition(2, 3, 4, 0.375f)),
+    scene = LiveScene(sceneQueued.copy(open = false), still = true),
+)
+
+// Stopped, past the default: the S02 chip after ▶, the tempo and the hit staying.
+@PreviewTest
+@Preview(name = "Live scene line stopped", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSceneLineStoppedPreview() = Live(playing, oneGroup = true, transport = patternUi(canUndo = true), scene = LiveScene(scenePanel.copy(open = false), still = true))
+
 @PreviewTest
 @Preview(name = "Pattern sheet", widthDp = 393, heightDp = 852, showBackground = true)
 @Composable
@@ -1174,7 +1382,7 @@ fun PatternSheetDarkPreview() = PatternSheet(dark = true)
 
 @Composable
 private fun PatternSheet(dark: Boolean = false) {
-    val t = patternUi(canUndo = true, missing = 2)
+    val t = patternUi(canUndo = true, missing = 2, switchTime = SwitchTime.BAR)
     Framed(Tab.LIVE, dark = dark) {
         MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true, transport = t, step = LiveStep())
         ArcSheet(visible = true, onDismiss = {}) {

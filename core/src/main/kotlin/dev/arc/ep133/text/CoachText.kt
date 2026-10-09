@@ -30,6 +30,8 @@ object CoachText {
     const val ERASE = "Erase a pad's notes"
     /** The STEP chip beside ERASE while the pattern is stopped: the STEP panel. */
     const val STEP = "Step through the pattern"
+    /** The scene chip beside it (and the readout while the pattern plays): the scene panel. */
+    const val SCENE = "Pick patterns and scenes, copy and paste"
     const val OCTAVE = "Octave"
     const val SCALE = "Scale"
     const val KEY = "Key"

@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import dev.arc.ep133.features.Seq
+import dev.arc.ep133.features.SwitchTime
 import dev.arc.ep133.features.Timing
 import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.text.Strings
@@ -71,10 +72,12 @@ import kotlinx.coroutines.launch
  * is TEMPO's. LENGTH: the four groups' lengths, one picked to change (the
  * group recorded into last first): − and + a bar (held, they repeat), the
  * lengths offered first (1, 2, 4, 8), and ×2, which copies the notes in
- * (SHIFT + + on the device). TIMING, the grid notes snap to; the count-in
- * and AUTO length; UNDO, ERASE and CLEAR (a group's notes or every group's,
- * asked here first). Pads the pattern plays whose sounds aren't on the
- * phone yet are counted. Everything goes through [t]; [onDone] closes it.
+ * (SHIFT + + on the device). TIMING, the grid notes snap to; SCENE CHANGE,
+ * when a pattern or scene picked while it plays takes over (the scene panel's
+ * CHANGE chip is the same setting); the count-in and AUTO length; UNDO,
+ * ERASE and CLEAR (a group's notes or every group's, asked here first).
+ * Pads the pattern plays whose sounds aren't on the phone yet are counted.
+ * Everything goes through [t]; [onDone] closes it.
  */
 @Composable
 fun ColumnScope.PatternSheetContent(t: TransportUi, onDone: () -> Unit) {
@@ -136,6 +139,14 @@ fun ColumnScope.PatternSheetContent(t: TransportUi, onDone: () -> Unit) {
             descriptions = row.map(MirrorText::timingName),
         )
     }
+    Caption(MirrorText.SCENE_CHANGE, align = TextAlign.Start)
+    Segmented(
+        SwitchTime.entries.map(MirrorText::switchName),
+        selected = t.switchTime.ordinal,
+        onSelect = { t.onSwitchTime(SwitchTime.entries[it]) },
+        descriptions = SwitchTime.entries.map(MirrorText::changeName),
+    )
+    Text(MirrorText.SCENE_CHANGE_NOTE, style = ArcType.small, color = c.graphite)
     GridPlate {
         SwitchRow(MirrorText.COUNT_IN, MirrorText.COUNT_IN_NOTE, t.countInOn, t.onCountIn)
         PlateLine()
