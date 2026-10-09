@@ -48,6 +48,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -66,11 +67,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.arc.ep133.text.CoachText
 import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.text.NavText
 import dev.arc.ep133.ui.theme.ArcType
 import dev.arc.ep133.ui.theme.LocalArcColors
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 /** The sections, switched from the tag at the top left. */
 enum class Tab(val label: String) {
@@ -86,6 +90,25 @@ enum class Tab(val label: String) {
  */
 @Immutable
 data class SampleKey(val on: Boolean, val onTap: () -> Unit)
+
+/**
+ * Live's Bluetooth key in the top bar (an addition), there while the sound
+ * goes to Bluetooth, which plays late. A tap ([onTap]) is given the sentence
+ * that says so ([MirrorText.WIRELESS_DELAY], or [MirrorText.wirelessMadeUp]
+ * with the delay when it is made up for) to show as a toast.
+ */
+@Immutable
+data class LateKey(val onTap: (String) -> Unit)
+
+/**
+ * The delay Live is making up for, in milliseconds, while its sound goes to
+ * Bluetooth and Make up for Bluetooth delay is on ([dev.arc.ep133.audio.OutputDelay.totalMs]);
+ * null otherwise. The Bluetooth key ([LateKey]) says so. The flow itself is
+ * what is provided (it never changes, so providing it recomposes nothing) and
+ * only the key reads it: the figure is told every second, and the whole
+ * screen would follow it.
+ */
+val LocalDelayMadeUp = staticCompositionLocalOf<StateFlow<Int?>> { MutableStateFlow(null) }
 
 /** How wide the left-edge guide tab is (screens keep this much gutter on the left). */
 val EdgeTabWidth: Dp = 22.dp
@@ -142,6 +165,8 @@ fun ArcShell(
     middle: (@Composable BoxScope.() -> Unit)? = null,
     /** Live's SAMPLE key in the top bar (an addition; null for none, as on the other sections). */
     sample: SampleKey? = null,
+    /** Live's Bluetooth key in the top bar (an addition; null for none, as while the sound doesn't go to Bluetooth). */
+    late: LateKey? = null,
     /** For screenshots: start with the section list open. */
     initialMenuOpen: Boolean = false,
     content: @Composable () -> Unit,
@@ -161,6 +186,7 @@ fun ArcShell(
                     onHelp = onHelp,
                     middle = middle,
                     sample = sample,
+                    late = late,
                 )
             },
         ) {
@@ -184,9 +210,12 @@ fun ArcShell(
  * The section tag, then icon keys as in the pocket operator app's top row: the
  * connection key is green with a dot while the EP-133 is connected (a tap
  * disconnects) and navy with a ring when not, then the guide overlay (?).
- * Their names show on long-press, in the overlay and to screen readers. Back
- * up lives on the Backups screen, and Settings in Live's tools and the section
- * list under the tag ([SectionMenu]). Long-pressing the tag opens the debug
+ * Their names show on long-press, in the overlay and to screen readers. On
+ * Live, while the sound goes to Bluetooth, an amber key with the Bluetooth
+ * rune and a clock ([late], an addition) comes right before the connection
+ * key: a tap says that Bluetooth plays late. Back up lives on the Backups
+ * screen, and Settings in Live's tools and the section list under the tag
+ * ([SectionMenu]). Long-pressing the tag opens the debug
  * screen (as the wordmark did). The room between the tag and the keys holds
  * [middle]; a toast in a short window takes its place. On Live, a mic key
  * ([sample], an addition) comes before ?, round as it is, and orange while
@@ -203,6 +232,7 @@ fun TopBar(
     onHelp: () -> Unit = {},
     middle: (@Composable BoxScope.() -> Unit)? = null,
     sample: SampleKey? = null,
+    late: LateKey? = null,
 ) {
     val c = LocalArcColors.current
     val window = LocalArcWindow.current
@@ -233,6 +263,7 @@ fun TopBar(
             ) {
                 middle?.invoke(this)
             }
+            if (late != null) LateBlock(late)
             if (connected) {
                 IconBlock(
                     ArcIcon.DOT, CoachText.CONNECTED, c.ok, c.onOk, onConnect,
@@ -265,6 +296,26 @@ fun TopBar(
             )
         }
     }
+}
+
+/**
+ * [late]'s key: the warn colour with the EDIT tag's dark ink, the connection key's size.
+ * Long-press names it; a screen reader reads the sentence a tap shows.
+ * It alone reads the delay made up for ([LocalDelayMadeUp]).
+ */
+@Composable
+private fun LateBlock(late: LateKey) {
+    val c = LocalArcColors.current
+    val madeUp by LocalDelayMadeUp.current.collectAsStateWithLifecycle()
+    val words = madeUp?.let(MirrorText::wirelessMadeUp) ?: MirrorText.WIRELESS_DELAY
+    IconBlock(
+        ArcIcon.BLUETOOTH, CoachText.BLUETOOTH, c.warn, TagInk,
+        { late.onTap(words) },
+        Modifier.coachMark("top.bluetooth", CoachText.BLUETOOTH, c.warn, TagInk),
+        iconSize = 20.dp,
+        beside = ArcIcon.CLOCK,
+        description = words,
+    )
 }
 
 /** A block with an arrow point on its right, like the pocket operator app's EDIT tag. */

@@ -276,9 +276,10 @@ class FeatureTextTest {
         assertEquals("Now: the output counts about 220 ms, all of Bluetooth's delay, so nothing more is made up.", SettingsText.delayNow(220, 0))
         assertEquals("Now: not measured, counted as about 180 ms.", SettingsText.delayNow(null, 180))
         assertEquals("Now: the sound isn't going to Bluetooth, so nothing is made up for.", SettingsText.DELAY_NONE)
-        // The chip leads with the delay, as the line may cut it short.
+        // The key's sentence leads with the delay, as a toast may cut it short.
         assertTrue(MirrorText.WIRELESS_DELAY.startsWith("Bluetooth plays late"))
         assertEquals("Bluetooth plays late (about 180 ms): arc makes up for it", MirrorText.wirelessMadeUp(180))
+        assertEquals("Bluetooth delay", CoachText.BLUETOOTH)
     }
 
     @Test

@@ -869,11 +869,11 @@ class ArcController(
     val liveKeys: StateFlow<Set<String>> get() = liveAudio.keys
     /** Live's TAKE key (Live tools), and its badge on the display line. */
     val rec: StateFlow<dev.arc.ep133.features.RecState> get() = liveAudio.rec
-    /** Whether Live's sound goes to Bluetooth or a hearing aid, which plays late: its display line says so. */
+    /** Whether Live's sound goes to Bluetooth or a hearing aid, which plays late: the top bar's Bluetooth key says so. */
     val liveWireless: StateFlow<Boolean> get() = liveAudio.wireless
     /** Live's output latency in milliseconds, about once a second while it is open; null when closed or not measurable ([dev.arc.ep133.audio.LiveAudio.latencyMs]). */
     val outputLatencyMs: StateFlow<Int?> get() = liveAudio.latencyMs
-    /** The Bluetooth delay in milliseconds while it is made up for (wireless, the setting on), else null: the chip's words ([dev.arc.ep133.audio.LiveAudio.madeUpFor]). */
+    /** The Bluetooth delay in milliseconds while it is made up for (wireless, the setting on), else null: the Bluetooth key's words ([dev.arc.ep133.audio.LiveAudio.madeUpFor]). */
     val delayMadeUpFor: StateFlow<Int?> get() = liveAudio.madeUpFor
     // The debug screen's latency test: Live's press-to-sound times by engine.
     private val latencyTest = dev.arc.ep133.audio.LiveLatency()

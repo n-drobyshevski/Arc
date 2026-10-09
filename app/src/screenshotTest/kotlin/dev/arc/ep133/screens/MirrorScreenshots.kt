@@ -41,6 +41,7 @@ import dev.arc.ep133.ui.components.ArcSheet
 import dev.arc.ep133.ui.components.Tab
 import dev.arc.ep133.ui.components.ArcShell
 import dev.arc.ep133.ui.components.ArcToast
+import dev.arc.ep133.ui.components.LateKey
 import dev.arc.ep133.ui.components.SampleKey
 import dev.arc.ep133.ui.components.BarSlot
 import dev.arc.ep133.ui.components.LocalArcWindow
@@ -159,6 +160,8 @@ private fun Framed(
     toastAction: String? = null,
     /** Live's mic key in the top bar, as MainActivity has it on Live (here unlit unless given). */
     sample: SampleKey? = if (tab == Tab.LIVE) SampleKey(false) {} else null,
+    /** Live's Bluetooth key in the top bar, while the sound goes to Bluetooth. */
+    late: LateKey? = null,
     content: @Composable () -> Unit,
 ) {
     ArcTheme(dark = dark) {
@@ -179,6 +182,7 @@ private fun Framed(
                         middle = pill.takeIf { tab == Tab.LIVE && liveInBar(LocalArcWindow.current) },
                         initialMenuOpen = menu,
                         sample = sample,
+                        late = late,
                         content = content,
                     )
                 }
@@ -214,9 +218,10 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
     val sceneUi = scene ?: transport?.let { LiveScene(still = true) }
     Framed(
         Tab.LIVE, connected = offline == null && error == null, dark = dark, guide = guide,
-        pill = { LivePill(mirror, keys, transport, takeUi, still = true, pianoRange = pianoRange, editing = edit == true, wireless = wireless, sample = sampleUi, punch = punch?.held.orEmpty(), arp = arp?.ui?.line, voices = voiceFlow, step = stepUi, stepOpens = oneGroup && !keys.on, scene = sceneUi, sceneOpens = oneGroup && !keys.on) }, toast = toast, barMiddle = barMiddle,
+        pill = { LivePill(mirror, keys, transport, takeUi, still = true, pianoRange = pianoRange, editing = edit == true, sample = sampleUi, punch = punch?.held.orEmpty(), arp = arp?.ui?.line, voices = voiceFlow, step = stepUi, stepOpens = oneGroup && !keys.on, scene = sceneUi, sceneOpens = oneGroup && !keys.on) }, toast = toast, barMiddle = barMiddle,
         toastAction = toastAction,
         sample = SampleKey(sampleUi.state.on && !keys.on) {},
+        late = LateKey {}.takeIf { wireless },
     ) {
         MirrorScreen(
             mirror = mirror,
@@ -242,7 +247,6 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
             ),
             // EDIT, SOUND's key, as on the Live tab: on where [edit] says so.
             edit = dev.arc.ep133.ui.screens.EditUi(on = edit == true, onEdit = {}),
-            wireless = wireless,
             functions = functions,
             punch = punch ?: PunchUi(),
             sample = sampleUi,
@@ -319,8 +323,8 @@ fun LiveFactoryPreview() = Live(lastRead.copy(activeProject = 1), offline = dev.
 @Composable
 fun LiveOfflinePlayingPreview() = Live(lastRead, oneGroup = true, offline = "Last seen Oct 5, 2:02 PM", playingPads = setOf(PhysicalPad(0, 9), PhysicalPad(0, 6), PhysicalPad(0, 3)))
 
-// Live's sound goes to Bluetooth, and no pad has been hit on the device yet: the display
-// line keeps the Bluetooth chip (the Bluetooth glyph and a clock, in amber) and says "Press a pad".
+// Live's sound goes to Bluetooth, and no pad has been hit on the device yet: the top bar keeps the
+// Bluetooth key (the Bluetooth glyph and a clock, in amber) before the connection key; the line says "Press a pad".
 private val wirelessState = playing.copy(lastHit = null)
 
 @PreviewTest
@@ -333,24 +337,36 @@ fun LiveBluetoothPreview() = Live(wirelessState, oneGroup = true, wireless = tru
 @Composable
 fun LiveBluetoothAllPreview() = Live(wirelessState, wireless = true)
 
-// A pad hit, and the chip stays: RECORD, PLAY and S01 first, the Bluetooth chip after them, the hit in full.
-@PreviewTest
-@Preview(name = "Live bluetooth hit", widthDp = 412, heightDp = 843, showBackground = true)
-@Composable
-fun LiveBluetoothHitPreview() = Live(playing, oneGroup = true, wireless = true, transport = patternUi(canUndo = true))
-
 @PreviewTest
 @Preview(name = "Live bluetooth dark", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
 fun LiveBluetoothDarkPreview() = Live(playing, dark = true, oneGroup = true, wireless = true, transport = patternUi(canUndo = true))
 
-// On its side the line sits in the top bar, its chips glyphs alone.
+// A 360 dp phone: the tag, the four keys and what is left between them.
+@PreviewTest
+@Preview(name = "Live bluetooth 360", widthDp = 360, heightDp = 740, showBackground = true)
+@Composable
+fun LiveBluetooth360Preview() = Live(wirelessState, oneGroup = true, wireless = true, transport = patternUi(canUndo = true))
+
+// The ? overlay tags the key too.
+@PreviewTest
+@Preview(name = "Guide overlay Live bluetooth", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun GuideOverlayLiveBluetoothPreview() = Live(playing, oneGroup = true, guide = true, wireless = true)
+
+// A tap on the key: the sentence it reads, as a toast.
+@PreviewTest
+@Preview(name = "Live bluetooth toast", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveBluetoothToastPreview() = Live(playing, oneGroup = true, wireless = true, transport = patternUi(canUndo = true), toast = MirrorText.wirelessMadeUp(180))
+
+// On its side the line sits in the top bar beside the key, its chips glyphs alone.
 @PreviewTest
 @Preview(name = "Live bluetooth sideways small", widthDp = 692, heightDp = 336, showBackground = true)
 @Composable
 fun LiveBluetoothSidewaysSmallPreview() = Live(playing, oneGroup = true, wireless = true, transport = patternUi())
 
-// KEYS keeps the chip too: the Bluetooth chip after RECORD and PLAY, before KEYS and the note.
+// KEYS: the line has its mode word and the note, the key stays in the bar.
 @PreviewTest
 @Preview(name = "Live bluetooth keys", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
@@ -463,7 +479,7 @@ private val chord = keysUi.copy(scale = dev.arc.ep133.features.Scale.CHROMATIC, 
 @Composable
 fun LiveKeysSidewaysPreview() = Live(sideways, keys = chord, piano = 48..72)
 
-// The same with the sound on Bluetooth: the chip rides in the top bar's line.
+// The same with the sound on Bluetooth: the key rides in the top bar beside the line.
 @PreviewTest
 @Preview(name = "Live bluetooth keys sideways", widthDp = 867, heightDp = 388, showBackground = true)
 @Composable

@@ -145,7 +145,7 @@ class LiveAudio(
     /**
      * The delay in all, in milliseconds ([OutputDelay.totalMs]), while it is
      * made up for (the output wireless and [makeUpDelay] on), else null: the
-     * Bluetooth chip's words.
+     * Bluetooth key's words.
      */
     val madeUpFor: StateFlow<Int?> = _madeUp
 

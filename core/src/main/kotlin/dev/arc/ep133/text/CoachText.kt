@@ -24,6 +24,8 @@ object CoachText {
     const val TEMPO = "Click: tap; hold for tempo"
     /** The mic key in Live's top bar: a tap opens the SAMPLE panel, another closes it. */
     const val SAMPLE = "Sample"
+    /** The amber Bluetooth key in Live's top bar, while the sound goes to Bluetooth: a tap says that it plays late. */
+    const val BLUETOOTH = "Bluetooth delay"
     /** The pattern's keys on Live's display line: RECORD arms (a hold opens the pattern sheet), PLAY starts at bar 1. */
     const val RECORD = "Record a pattern: tap, then PLAY; hold for its settings"
     const val PATTERN_PLAY = "Play the pattern from bar 1"

@@ -494,9 +494,9 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun Root() {
-        // The delay Live makes up for while its sound goes to Bluetooth, for the Bluetooth chip's words: the flow, which
-        // only the chip reads (it is told every second).
-        CompositionLocalProvider(dev.arc.ep133.ui.screens.LocalDelayMadeUp provides controller.delayMadeUpFor) { RootContent() }
+        // The delay Live makes up for while its sound goes to Bluetooth, for the Bluetooth key's words: the flow, which
+        // only the key reads (it is told every second).
+        CompositionLocalProvider(dev.arc.ep133.ui.components.LocalDelayMadeUp provides controller.delayMadeUpFor) { RootContent() }
     }
 
     @Composable
@@ -662,7 +662,7 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(contentsBackup?.id) { contentsBackup?.let { controller.openContents(it) } }
         val playing by controller.player.playing.collectAsStateWithLifecycle()
         val rec by controller.rec.collectAsStateWithLifecycle()
-        // Live's sound goes to Bluetooth: its display line says it plays late.
+        // Live's sound goes to Bluetooth: the top bar's Bluetooth key says it plays late (and the settings row).
         val liveWireless by controller.liveWireless.collectAsStateWithLifecycle()
         val takes by controller.takes.collectAsStateWithLifecycle()
         // TAKE in Live tools, and its badge on Live's display line while it records, on the page or in the top bar.
@@ -911,6 +911,8 @@ class MainActivity : ComponentActivity() {
         } else {
             null
         }
+        // Live's Bluetooth key in the top bar, while the sound goes to Bluetooth: a tap toasts the sentence it reads.
+        val lateKey = remember(controller) { dev.arc.ep133.ui.components.LateKey { controller.toast(it) } }.takeIf { tab == Tab.LIVE && liveWireless }
         Box(Modifier.fillMaxSize()) {
             if (debug) {
                 val latency by controller.latency.collectAsStateWithLifecycle()
@@ -1039,8 +1041,9 @@ class MainActivity : ComponentActivity() {
                     onGuide = { guideOpen = it },
                     guide = { GuideScreen(onBack = { guideOpen = false }) },
                     // On a phone on its side, Live's display line rides in the top bar.
-                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, transport = liveTransport, take = liveTake, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys, wireless = liveWireless, sample = sampleUi, punch = punches, arp = arp.line, header = sampleHeader, step = liveStep, stepOpens = appSettings.liveOneGroup && !appSettings.liveKeys, scene = liveScene, sceneOpens = appSettings.liveOneGroup && !appSettings.liveKeys) }) else null,
+                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, transport = liveTransport, take = liveTake, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys, sample = sampleUi, punch = punches, arp = arp.line, header = sampleHeader, step = liveStep, stepOpens = appSettings.liveOneGroup && !appSettings.liveKeys, scene = liveScene, sceneOpens = appSettings.liveOneGroup && !appSettings.liveKeys) }) else null,
                     sample = sampleKey,
+                    late = lateKey,
                 ) {
                     // Back from another section returns to Live, the home section, first.
                     BackHandler(enabled = tab != Tab.LIVE) { selectTab(Tab.LIVE) }
@@ -1076,7 +1079,6 @@ class MainActivity : ComponentActivity() {
                             // collected inside Live, so a voice starting doesn't recompose the whole app.
                             voices = controller.liveKeys,
                             haptics = appSettings.haptics,
-                            wireless = liveWireless,
                             oneGroup = appSettings.liveOneGroup,
                             onOneGroup = controller::setLiveOneGroup,
                             follow = appSettings.liveFollow,

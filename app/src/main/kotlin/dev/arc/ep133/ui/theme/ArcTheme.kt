@@ -45,7 +45,7 @@ data class ArcColors(
     val displayDim: Color,
     val segmentOff: Color,
     val danger: Color,
-    /** A warning on the dark display (the line's Bluetooth chip): amber, 7:1 or more on it in either theme. */
+    /** A warning: amber, 7:1 or more on the dark display in either theme (the top bar's Bluetooth key takes it as its face). */
     val warn: Color,
     /** Selected tab and choice keys. */
     val navy: Color,

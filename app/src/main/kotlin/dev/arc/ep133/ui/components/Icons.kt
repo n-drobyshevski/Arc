@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -187,8 +188,10 @@ private fun DrawScope.draw(icon: ArcIcon, color: Color) {
 /**
  * A square (or round) icon key, drawn as a cap (see [cap]) whose face travels
  * onto its edge while pressed. Long-press shows its name; screen readers read
- * [label], then [state] where it has one (a key that is on or off). The touch
- * area stays at least 44dp even when the face is drawn smaller.
+ * [label] (or [description], where the key says more than its name), then
+ * [state] where it has one (a key that is on or off). [beside]: a second icon
+ * after [icon], the same size. The touch area stays at least 44dp even when
+ * the face is drawn smaller.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -204,6 +207,8 @@ fun IconBlock(
     iconSize: Dp = 22.dp,
     round: Boolean = false,
     state: String? = null,
+    beside: ArcIcon? = null,
+    description: String = label,
 ) {
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
@@ -225,12 +230,19 @@ fun IconBlock(
                 )
                 .clickable(interactionSource = source, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
                 .semantics {
-                    contentDescription = label
+                    contentDescription = description
                     if (state != null) stateDescription = state
                 },
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, ink, size = iconSize)
+            if (beside == null) {
+                Icon(icon, ink, size = iconSize)
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(icon, ink, size = iconSize)
+                    Icon(beside, ink, size = iconSize)
+                }
+            }
         }
     }
 }
