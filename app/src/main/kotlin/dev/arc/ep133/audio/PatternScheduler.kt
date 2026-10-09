@@ -8,6 +8,7 @@ import dev.arc.ep133.features.FrameClock
 import dev.arc.ep133.features.Keys
 import dev.arc.ep133.features.Pattern
 import dev.arc.ep133.features.PatternPlayer
+import dev.arc.ep133.features.PhaseAnchors
 import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.ProjectPatterns
 import dev.arc.ep133.features.SeqNote
@@ -46,10 +47,10 @@ data class QueuedSwitch(val pattern: Pattern, val atTick: Long)
  * [dev.arc.ep133.features.PatternRecorder.Recorded.skipPass]) and the tempo,
  * [bpm]. [queued] gives a group (0..3) the pattern that takes over from a
  * tick: its notes before the tick come from [patterns], those from it on
- * from the queued one, each at the global tick mod its own pattern's length
- * (patterns stay locked to bar 1, as arc's clock is, so a 2-bar pattern
- * switched in at an odd bar starts at its bar 2; the device starts it at
- * its bar 1). Made anew for each change, never changed in place.
+ * from the queued one, which starts at its bar 1 on that tick, as the
+ * device starts it. Each group's pattern loops from its own anchor in
+ * [phase] (where it started: 0, bar 1, unless it was switched in since the
+ * transport started). Made anew for each change, never changed in place.
  */
 class SeqPlan(
     val patterns: ProjectPatterns,
@@ -57,6 +58,7 @@ class SeqPlan(
     val skip: Map<Int, Long>,
     val bpm: Double,
     val queued: Map<Int, QueuedSwitch> = emptyMap(),
+    val phase: PhaseAnchors = PhaseAnchors.ZERO,
 ) {
     companion object {
         val EMPTY = SeqPlan(ProjectPatterns(), emptyMap(), emptyMap(), Tempo.DEFAULT.toDouble())
@@ -310,9 +312,10 @@ class PatternScheduler(
     private var missingOf: SeqPlan? = null
     private val missing = HashSet<PhysicalPad>()
 
-    // The queued patterns of [switchOf] as a project's patterns (a blank one for a group with none), and their notes in a window.
+    // The queued patterns of [switchOf] as a project's patterns (a blank one for a group with none), where each starts, and their notes in a window.
     private var switchOf: SeqPlan? = null
     private var switched = ProjectPatterns()
+    private var switchedPhase = PhaseAnchors.ZERO
     private val switchedNotes = ArrayList<SeqNote>()
 
     // Keys and pads made once, so a note finds them without a new string or object.
@@ -421,7 +424,7 @@ class PatternScheduler(
         // From the first tick not sent; one fallen further behind than the lookahead is let go.
         val from = maxOf(c.frameOf(nextTick), rendered - ahead)
         if (to > from) {
-            PatternPlayer.window(p.patterns, c, from, to, p.skip, notes)
+            PatternPlayer.window(p.patterns, c, from, to, p.skip, notes, p.phase)
             if (p.queued.isNotEmpty()) switchIn(p, c, from, to)
             for (i in notes.indices) start(sink, p, notes[i])
             nextTick = firstTick(c, to)
@@ -438,10 +441,17 @@ class PatternScheduler(
         if (switchOf !== p) {
             switchOf = p
             var q = ProjectPatterns()
-            for ((g, s) in p.queued) if (g in 0..3) q = q.with(g, s.pattern)
+            var ph = PhaseAnchors.ZERO
+            for ((g, s) in p.queued) {
+                if (g !in 0..3) continue
+                q = q.with(g, s.pattern)
+                // The queued pattern starts at its bar 1 where it takes over.
+                ph = ph.with(g, s.atTick)
+            }
             switched = q
+            switchedPhase = ph
         }
-        PatternPlayer.window(switched, c, from, to, emptyMap(), switchedNotes)
+        PatternPlayer.window(switched, c, from, to, emptyMap(), switchedNotes, switchedPhase)
         var k = 0
         for (i in notes.indices) {
             val n = notes[i]

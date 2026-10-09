@@ -286,4 +286,15 @@ class ScenesTest {
         assertEquals(2304L, SceneOps.switchTick(SwitchTime.PATTERN, 1153.0, 1152))
         assertEquals(1152L, SceneOps.switchTick(SwitchTime.PATTERN, 1152.0, 1152))
     }
+
+    @Test
+    fun `the lines of a switch count from the tick the pattern started at`() {
+        // A 2-bar pattern that started at tick 100: its bar lines are 484, 868, ..., its ends 868, 1636, ...
+        assertEquals(listOf(100L, 484L, 484L, 868L), listOf(100.0, 101.0, 484.0, 484.5).map { SceneOps.switchTick(SwitchTime.BAR, it, 768, 100) })
+        assertEquals(listOf(100L, 868L, 868L, 1636L), listOf(100.0, 300.0, 868.0, 868.5).map { SceneOps.switchTick(SwitchTime.PATTERN, it, 768, 100) })
+        // Now is now whatever the anchor.
+        assertEquals(301L, SceneOps.switchTick(SwitchTime.IMMEDIATE, 300.2, 768, 100))
+        // Started at 0, as before.
+        assertEquals(768L, SceneOps.switchTick(SwitchTime.PATTERN, 100.0, 768, 0))
+    }
 }

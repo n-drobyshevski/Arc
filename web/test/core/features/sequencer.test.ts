@@ -8,10 +8,15 @@ import { frameAt, type FrameClock } from '../../../src/core/features/sampleTimin
 import { barFrames } from '../../../src/core/features/sampleSource'
 import {
   PatternPlayer,
+  PhaseAnchors,
   beatGrid,
   framesPerTick,
   frameOf,
+  firstPassAtOrAfter,
+  globalTickOf,
+  localTick,
   msOf,
+  sinceAnchor,
   nextLoopStart,
   passOf,
   positionOf,
@@ -191,5 +196,111 @@ describe('SequencerTest', () => {
     expect(positionOf(1_536.0, four)).toEqual({ bar: 1, beat: 1, bars: 4, fraction: 0 })
     // Open, it doesn't loop.
     expect(positionOf(384.0, pattern(2, [], true))).toEqual({ bar: 2, beat: 1, bars: 2, fraction: 0.5 })
+  })
+
+  it('a pattern plays from its anchor, bar 1 where it started', () => {
+    // A 2-bar pattern with a note on its bar 1 and one on its bar 2, switched in at the odd bar 2 (tick 384).
+    const p = ProjectPatterns.with(projectPatterns(), 0, pattern(2, notes([0, 384])))
+    const clock = transportClock(0, 48_000, 120.0)
+    const out: SeqNote[] = []
+    const from = frameOf(clock, 384)
+    const to = frameOf(clock, 384 + 3 * 384)
+    // Locked to the transport's bar 1 its bar 2 would be heard first, at 384.
+    PatternPlayer.window(p, clock, from, to, new Map(), out)
+    expect(out.map((n) => [n.startTick, n.note.tick])).toEqual([
+      [384, 384],
+      [768, 0],
+      [1_152, 384],
+    ])
+    // From its anchor its bar 1 is, and its bar 2 a bar on.
+    PatternPlayer.window(p, clock, from, to, new Map(), out, PhaseAnchors.with(PhaseAnchors.ZERO, 0, 384))
+    expect(out.map((n) => [n.startTick, n.note.tick])).toEqual([
+      [384, 0],
+      [768, 384],
+      [1_152, 0],
+    ])
+    // Nothing of a pattern plays before its anchor, and another group goes on as it was.
+    const two = ProjectPatterns.with(p, 1, pattern(2, notes([0], 1)))
+    PatternPlayer.window(two, clock, 0, frameOf(clock, 3 * 384), new Map(), out, PhaseAnchors.with(PhaseAnchors.ZERO, 0, 384))
+    expect(at(out)).toEqual([
+      [0, 1],
+      [384, 0],
+      [768, 0],
+      [768, 1],
+    ])
+  })
+
+  it('windows back to back from an anchor miss and repeat none', () => {
+    const p = ProjectPatterns.with(projectPatterns(), 0, pattern(2, notes([0, 100, 384])))
+    const clock = transportClock(0, 48_000, 120.0)
+    const phase = PhaseAnchors.with(PhaseAnchors.ZERO, 0, 200)
+    const whole: SeqNote[] = []
+    PatternPlayer.window(p, clock, 0, frameOf(clock, 4 * 384), new Map(), whole, phase)
+    const parts: SeqNote[] = []
+    const out: SeqNote[] = []
+    for (let f = 0; f < frameOf(clock, 4 * 384); f += 777) {
+      PatternPlayer.window(p, clock, f, f + 777, new Map(), out, phase)
+      parts.push(...out)
+    }
+    expect(parts.map((n) => n.startTick)).toEqual(whole.map((n) => n.startTick))
+    expect(whole.map((n) => n.startTick)).toEqual([200, 300, 584, 968, 1_068, 1_352])
+  })
+
+  it('passes skipped are counted from the anchor', () => {
+    const p = ProjectPatterns.with(projectPatterns(), 0, pattern(1, [patternNote(0, 0, 24, null, 127, 7)]))
+    const clock = transportClock(0, 48_000, 120.0)
+    const out: SeqNote[] = []
+    PatternPlayer.window(p, clock, frameOf(clock, 100), frameOf(clock, 100 + 3 * 384), new Map([[7, 1]]), out, PhaseAnchors.with(PhaseAnchors.ZERO, 0, 100))
+    // Pass 1 from the anchor (tick 484) is the one left out.
+    expect(out.map((n) => n.startTick)).toEqual([100, 868])
+  })
+
+  it('an open pattern and a window of another phase', () => {
+    const open = ProjectPatterns.with(projectPatterns(), 0, pattern(2, notes([100]), true))
+    const clock = transportClock(0, 48_000, 120.0)
+    const out: SeqNote[] = []
+    PatternPlayer.window(open, clock, 0, frameOf(clock, 4 * 384), new Map(), out, PhaseAnchors.with(PhaseAnchors.ZERO, 0, 200))
+    expect(out.map((n) => n.startTick)).toEqual([300])
+  })
+
+  it('anchors are four ticks, 0 out of range, and the same ones when nothing changes', () => {
+    const z = PhaseAnchors.ZERO
+    expect(PhaseAnchors.with(z, 0, 0)).toBe(z)
+    expect(PhaseAnchors.with(z, 4, 5)).toBe(z)
+    const a = PhaseAnchors.with(z, 2, 384)
+    expect([0, 1, 2, 3, 7].map((g) => PhaseAnchors.of(a, g))).toEqual([0, 0, 384, 0, 0])
+  })
+
+  it('local ticks are the time since the anchor, round the loop unless open', () => {
+    const two = pattern(2)
+    expect(localTick(768.0, 768, two)).toBe(0)
+    expect(localTick(778.0, 768, two)).toBe(10)
+    expect(localTick(778.0 + 768, 768, two)).toBe(10)
+    expect(localTick(-10.0, 0, two)).toBe(758)
+    expect(localTick(778.0, 0, pattern(2, [], true))).toBe(778)
+    expect(localTick(778.0, 768, pattern(2, [], true))).toBe(10)
+    expect(localTick(758.0, 768, pattern(2, [], true))).toBe(-10)
+    expect(passOf(1_151, 768, 384)).toBe(0)
+    expect(passOf(1_152, 768, 384)).toBe(1)
+    expect(passOf(383, 768, 384)).toBe(-1)
+    expect(sinceAnchor(368.0, 384)).toBe(-16)
+    // The first pass a note at 10 plays at or after a tick: this one while it hasn't passed, the next once it has.
+    expect(firstPassAtOrAfter(394, 10, 768, 384)).toBe(0)
+    expect(firstPassAtOrAfter(395, 10, 768, 384)).toBe(1)
+    expect(firstPassAtOrAfter(-1_000, 10, 768, 384)).toBe(-1)
+    expect(globalTickOf(10, 0, 768, 384)).toBe(394)
+    expect(globalTickOf(10, 1, 768, 384)).toBe(1_162)
+    expect(nextLoopStart(100.0, 768, 384)).toBe(384)
+    expect(nextLoopStart(385.0, 768, 384)).toBe(1_152)
+    expect(nextLoopStart(1_152.0, 768, 384)).toBe(1_152)
+  })
+
+  it('the position counts from the anchor', () => {
+    const two = pattern(2)
+    // Switched in at tick 384 (an odd bar): its bar 1 there, its bar 2 a bar on, its bar 1 again at 1152.
+    expect(positionOf(384.0, two, 384)).toEqual({ bar: 1, beat: 1, bars: 2, fraction: 0 })
+    expect(positionOf(100.0, two, 384)).toEqual({ bar: 1, beat: 1, bars: 2, fraction: 0 })
+    expect(positionOf(384.0 + 384 + 192, two, 384)).toEqual({ bar: 2, beat: 3, bars: 2, fraction: 0.75 })
+    expect(positionOf(1_152.0, two, 384)).toEqual({ bar: 1, beat: 1, bars: 2, fraction: 0 })
   })
 })

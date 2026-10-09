@@ -3834,7 +3834,7 @@ class ArcController(
     private suspend fun switchPatterns(project: Int) {
         loadPatterns()
         if (project == patternProject) return
-        // The scene panel, its picks waiting and its clipboard are the other project's: dropped, not applied by the STOP.
+        // The scene panel and its picks waiting are the other project's: dropped, not applied by the STOP. The clipboard stays, to paste in this project.
         sceneDesk.reset()
         sceneTaps.clear()
         patternStop()
@@ -3903,14 +3903,17 @@ class ArcController(
     private fun refreshPatternPlan() {
         val p = projectPatterns
         val m = mirror
+        // Where each pattern started, for the recording's ticks as for the sequencer's.
+        val phase = sceneDesk.phase
+        patternRecorder.phase = phase
         // The picks waiting, as the patterns that take over: read from the sequencer as it stands, so a note recorded meanwhile is in them.
         val queued = sceneDesk.targets(projectSeq).mapValues { (g, q) -> dev.arc.ep133.audio.QueuedSwitch(projectSeq.pattern(g, q.to), q.at) }
         val pads = queued.entries.fold(p.usedPads()) { all, (g, q) -> all + q.pattern.playable().map { dev.arc.ep133.features.PhysicalPad(g, it.offset) } }
         val (voices, missing) = patternVoices(pads, ::padInMemory, { pad, keys -> shapeFor(pad, keys) }) { pad -> m?.sampleOf(pad) != null }
         val bpm = patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo)
         val old = patternScheduler.plan
-        if (old.patterns !== p || old.skip !== patternSkip || old.bpm != bpm || old.queued != queued || !sameVoices(old.voices, voices)) {
-            patternScheduler.plan = dev.arc.ep133.audio.SeqPlan(p, voices, patternSkip, bpm, queued)
+        if (old.patterns !== p || old.skip !== patternSkip || old.bpm != bpm || old.queued != queued || old.phase != phase || !sameVoices(old.voices, voices)) {
+            patternScheduler.plan = dev.arc.ep133.audio.SeqPlan(p, voices, patternSkip, bpm, queued, phase)
         }
         for (pad in missing) loadPatternPad(pad)
         if (_pattern.value.missing != missing.size) _pattern.update { it.copy(missing = missing.size) }
@@ -4041,6 +4044,8 @@ class ArcController(
         auditionsEnd()
         // PLAY starts the passes from 0: what was heard live in another run is played again.
         patternSkip = emptyMap()
+        // Every pattern starts at bar 1 again.
+        sceneDesk.restart()
         patternHeld.clear()
         patternShifts.clear()
         patternGroups.clear()
@@ -4168,7 +4173,7 @@ class ArcController(
         val t = floor(maxOf(tick, 0.0)).toLong()
         for (g in patternGroups) {
             val pat = projectPatterns.group(g)
-            if (!pat.open) patternRecorder.passed(g, passOf(t, pat.lengthTicks))
+            if (!pat.open) patternRecorder.passed(g, passOf(t, pat.lengthTicks, sceneDesk.phase.of(g)))
         }
     }
 
@@ -4246,7 +4251,8 @@ class ArcController(
     fun patternPosition(now: Long): PatternPosition? {
         if (!patternRunning()) return null
         val tl = heardTimeline() ?: return null
-        return positionOf(tl.heardTickAt(now, heardDelay()), projectPatterns.group(_pattern.value.focusGroup.coerceIn(0, 3)))
+        val g = _pattern.value.focusGroup.coerceIn(0, 3)
+        return positionOf(tl.heardTickAt(now, heardDelay()), projectPatterns.group(g), sceneDesk.phase.of(g))
     }
 
     /** TIMING: the grid recorded notes snap to (kept). */
@@ -4516,7 +4522,9 @@ class ArcController(
                 // The mix is taken where it is (RSP); a mic or USB input hears the loop as the player does, late over Bluetooth.
                 val late = if (recorder.input?.source == SampleSource.RSP) 0L else heardDelay()
                 // A moment ahead, so the take is asked for before it starts (one a little late takes what the input kept).
-                val start = if (fromStop) 0L else nextLoopStart(tl.heardTickAt(System.nanoTime() + dev.arc.ep133.audio.PatternScheduler.LOOKAHEAD_NS, late), if (bars == null) len else Seq.TICKS_PER_BAR)
+                // The patterns' loop is the longest group's, from where it started; a bar count goes by the transport's bars.
+                val anchor = if (bars == null) sceneDesk.phase.of((0 until 4).first { projectPatterns.group(it).lengthTicks == len }) else 0L
+                val start = if (fromStop) 0L else nextLoopStart(tl.heardTickAt(System.nanoTime() + dev.arc.ep133.audio.PatternScheduler.LOOKAHEAD_NS, late), if (bars == null) len else Seq.TICKS_PER_BAR, anchor)
                 val end = start + len
                 started = if (recorder.input?.source == SampleSource.RSP) {
                     recorder.scheduleMix(pad, tl.frameOfTick(start), tl.frameOfTick(end) - tl.frameOfTick(start), sampleMaxFrames())
@@ -5025,8 +5033,14 @@ class ArcController(
     private fun sceneDue(tick: Double) {
         val waiting = sceneDesk.waiting
         if (waiting == 0) return
+        val started = sceneDesk.phase
         val out = sceneDesk.due(projectSeq, tick)
         if (sceneDesk.waiting == waiting && out === projectSeq) return
+        // The notes heard live in a pattern left are not of the one that starts: its passes are counted from its own start.
+        if (patternSkip.isNotEmpty()) {
+            val left = (0 until 4).filter { sceneDesk.phase.of(it) != started.of(it) }.flatMapTo(HashSet()) { g -> projectPatterns.group(g).notes.map { it.id } }
+            if (left.isNotEmpty()) patternSkip = patternSkip.filterKeys { it !in left }
+        }
         setSeq(out)
         // The queue went: the plan has none.
         refreshPatternPlan()

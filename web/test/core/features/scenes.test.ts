@@ -280,4 +280,14 @@ describe('ScenesTest', () => {
     expect(SceneOps.switchTick(SwitchTime.PATTERN, 1153.0, 1152)).toBe(2304)
     expect(SceneOps.switchTick(SwitchTime.PATTERN, 1152.0, 1152)).toBe(1152)
   })
+
+  it('the lines of a switch count from the tick the pattern started at', () => {
+    // A 2-bar pattern that started at tick 100: its bar lines are 484, 868, ..., its ends 868, 1636, ...
+    expect([100.0, 101.0, 484.0, 484.5].map((t) => SceneOps.switchTick(SwitchTime.BAR, t, 768, 100))).toEqual([100, 484, 484, 868])
+    expect([100.0, 300.0, 868.0, 868.5].map((t) => SceneOps.switchTick(SwitchTime.PATTERN, t, 768, 100))).toEqual([100, 868, 868, 1636])
+    // Now is now whatever the anchor.
+    expect(SceneOps.switchTick(SwitchTime.IMMEDIATE, 300.2, 768, 100)).toBe(301)
+    // Started at 0, as before.
+    expect(SceneOps.switchTick(SwitchTime.PATTERN, 100.0, 768, 0)).toBe(768)
+  })
 })

@@ -8,6 +8,7 @@ import dev.arc.ep133.features.FrameClock
 import dev.arc.ep133.features.Keys
 import dev.arc.ep133.features.Pattern
 import dev.arc.ep133.features.PatternNote
+import dev.arc.ep133.features.PhaseAnchors
 import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.ProjectPatterns
 import dev.arc.ep133.features.Seq
@@ -706,16 +707,57 @@ class PatternSchedulerTest {
     }
 
     @Test
-    fun `an immediate switch keeps the queued pattern on the transport's bar 1, whatever tick it comes at`() {
+    fun `an immediate switch starts the queued pattern at its bar 1, whatever tick it comes at`() {
         val r = Rig()
-        // From tick 100: the old pattern plays its notes at 0 and 96; B's note at 0 is before the switch, so it doesn't play
-        // and the old note at 288 is after it, so nor does that; B's at 192 does, and B loops on from its own tick 0.
+        // From tick 100: the old pattern plays its notes at 0 and 96, and the one at 288 is after the switch, so it doesn't;
+        // B starts on its own tick 0 at 100 and loops on from there.
         r.s.plan = switching(beats(), 0 to QueuedSwitch(hits(1, 0, 192), 100))
         r.s.play(0)
         r.run(ahead + 2 * bar)
         assertEquals(
-            listOf(0L to "live:0:0", 96L to "live:0:0", 192L to "live:0:1", 384L to "live:0:1", 576L to "live:0:1"),
+            listOf(0L to "live:0:0", 96L to "live:0:0", 100L to "live:0:1", 292L to "live:0:1", 484L to "live:0:1", 676L to "live:0:1"),
             startsBefore(r, 2L * Seq.TICKS_PER_BAR),
+        )
+    }
+
+    // A pattern two bars long with a note on its bar 1 (pad 1) and on its bar 2 (pad 2).
+    private fun twoBars() = Pattern(2, listOf(PatternNote(0, 1, 24, id = 1), PatternNote(384, 2, 24, id = 2)))
+
+    @Test
+    fun `a 2-bar pattern switched in on an odd bar starts at its bar 1`() {
+        val r = Rig()
+        // Switched in at tick 384, bar 2 of the transport: its bar 1 plays there, its bar 2 a bar on, and so on in turn.
+        r.s.plan = switching(beats(), 0 to QueuedSwitch(twoBars(), 384))
+        r.s.play(0)
+        r.run(ahead + 4 * bar)
+        val b = startsBefore(r, 4L * Seq.TICKS_PER_BAR).filter { it.second != "live:0:0" }
+        assertEquals(listOf(384L to "live:0:1", 768L to "live:0:2", 1152L to "live:0:1"), b)
+    }
+
+    @Test
+    fun `the plan taking a switched-in pattern in place of the queue goes on from its start`() {
+        val queued = switching(beats(), 0 to QueuedSwitch(twoBars(), 384))
+        val whole = Rig()
+        whole.s.plan = queued
+        whole.s.play(0)
+        whole.run(ahead + 6 * bar)
+        // The controller applies it once the playhead passes: the pattern, with the tick it started at.
+        val applied = Rig()
+        applied.s.plan = queued
+        applied.s.play(0)
+        applied.run(ahead + 384 * 250 + 4800)
+        applied.s.plan = SeqPlan(ProjectPatterns().with(0, twoBars()), voices(), emptyMap(), 120.0, phase = PhaseAnchors.ZERO.with(0, 384))
+        applied.run(ahead + 6 * bar)
+        assertEquals(startsBefore(whole, 6L * Seq.TICKS_PER_BAR), startsBefore(applied, 6L * Seq.TICKS_PER_BAR))
+        assertEquals(whole.sink.starts.map { it.at }, applied.sink.starts.map { it.at })
+        // Another switch, out of a pattern that started late, leaves the old one at the tick and starts the new one there.
+        val later = Rig()
+        later.s.plan = SeqPlan(ProjectPatterns().with(0, twoBars()), voices(), emptyMap(), 120.0, mapOf(0 to QueuedSwitch(hits(3, 0), 1000)), PhaseAnchors.ZERO.with(0, 100))
+        later.s.play(0)
+        later.run(ahead + 4 * bar)
+        assertEquals(
+            listOf(100L to "live:0:1", 484L to "live:0:2", 868L to "live:0:1", 1000L to "live:0:3", 1384L to "live:0:3"),
+            startsBefore(later, 4L * Seq.TICKS_PER_BAR).filter { it.first <= 1384 },
         )
     }
 
@@ -784,7 +826,8 @@ class PatternSchedulerTest {
         r.run(ahead + 2 * bar)
         val heard = startsBefore(r, 2L * Seq.TICKS_PER_BAR)
         assertTrue(heard.none { it.second == "live:0:0" && it.first >= at })
-        val queued = (0 until 2L * Seq.TICKS_PER_BAR step 24).filter { it >= at }.map { it to "live:0:1" }
+        // The queued pattern starts on its tick 0 there, a note every 24 ticks.
+        val queued = (at until 2L * Seq.TICKS_PER_BAR step 24).map { it to "live:0:1" }
         assertEquals(queued, heard.filter { it.second == "live:0:1" })
         r.s.stop()
         r.run(r.rendered + 192)

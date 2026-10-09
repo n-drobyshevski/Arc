@@ -10,9 +10,10 @@ import kotlin.math.floor
  * keeps the undo checkpoints (SHIFT + B on the device).
  *
  * Ticks are global: counted from the transport's tick 0 (PLAY starts at bar
- * 1), negative during the count-in. A group's pattern takes them mod its
- * length, except while it is [Pattern.open]: then its tick is the global
- * one, and it grows instead of looping ([grow]).
+ * 1), negative during the count-in. A group's pattern takes them from its
+ * anchor ([phase]: where it started, bar 1 of the pattern) mod its length
+ * ([localTick]), except while it is [Pattern.open]: then its tick is the
+ * global one less the anchor, and it grows instead of looping ([grow]).
  *
  * Undo: a checkpoint is the whole of the project's sequencer ([seq], with
  * the patterns as they were), pushed on the first change after a punch-in
@@ -63,6 +64,18 @@ class PatternRecorder(private val maxUndo: Int = 32) {
      */
     var seq: ProjectSeq = ProjectSeq.DEFAULT
 
+    /**
+     * Where each group's pattern started, which the global ticks handed to
+     * the edits are counted from; the caller sets it as the transport starts
+     * (all 0) and as a pick takes over a group.
+     */
+    var phase: PhaseAnchors = PhaseAnchors.ZERO
+        set(value) {
+            // A group whose pattern starts afresh counts its passes anew.
+            for (g in 0 until 4) if (value.of(g) != field.of(g)) lastPass[g] = Long.MIN_VALUE
+            field = value
+        }
+
     val canUndo: Boolean get() = checkpoints.isNotEmpty()
 
     /**
@@ -100,7 +113,8 @@ class PatternRecorder(private val maxUndo: Int = 32) {
             out = if (pat.isEmpty) {
                 out.with(g, Pattern(openedFrom[g], pat.notes))
             } else {
-                val elapsed = maxOf(ceil(tickNow / Seq.TICKS_PER_BAR).toInt(), pat.notes.maxOf { it.tick } / Seq.TICKS_PER_BAR + 1)
+                val now = localTick(tickNow, phase.of(g), pat)
+                val elapsed = maxOf(ceil(now / Seq.TICKS_PER_BAR).toInt(), pat.notes.maxOf { it.tick } / Seq.TICKS_PER_BAR + 1)
                 out.with(g, Pattern(autoBars(elapsed), pat.notes))
             }
         }
@@ -110,8 +124,9 @@ class PatternRecorder(private val maxUndo: Int = 32) {
     /**
      * A pad (or a KEYS note on it, [semitones]) pressed at global [tick];
      * the phone played it at [heardTick], at [velocity] (1..127). On
-     * [timing]'s grid, swung by [swing], a press up to half a step before
-     * tick 0 records at 0 and earlier ones nothing. A note on the same pad
+     * [timing]'s grid (the pattern's own: from its anchor), swung by [swing],
+     * a press up to half a step before the pattern's tick 0 records at 0 and
+     * earlier ones nothing. A note on the same pad
      * and pitch at that tick (with OFF, within 6 ticks) is replaced. When the
      * grid put the note after [heardTick], the pass it lands in is to be
      * skipped ([Recorded.skipPass]): it was heard.
@@ -127,12 +142,14 @@ class PatternRecorder(private val maxUndo: Int = 32) {
         velocity: Int = 127,
     ): Recorded {
         breakRuns()
-        val q = timing.quantize(tick, swing)
+        val anchor = phase.of(pad.group)
+        // On the pattern's own time, from its anchor: its grid is the pattern's.
+        val q = timing.quantize(sinceAnchor(tick, anchor), swing)
         if (q < 0) return Recorded(p, 0, null)
-        val grown = grow(p, q.toDouble())
+        val grown = grow(p, (q + anchor).toDouble())
         val pat = grown.group(pad.group)
         val len = pat.lengthTicks
-        val local = if (pat.open) q.toInt() else Math.floorMod(q, len.toLong()).toInt()
+        val local = localTick(q + anchor, anchor, pat).toInt()
         val near = if (timing == Timing.OFF) OVERDUB_TICKS else 0
         // A note left past the end (the length made shorter) isn't played, so nothing played replaces it.
         val kept = pat.notes.filterNot {
@@ -143,8 +160,8 @@ class PatternRecorder(private val maxUndo: Int = 32) {
         val gate = if (timing == Timing.OFF) Timing.SIXTEENTH.ticks else timing.ticks
         val out = grown.with(pad.group, pat.copy(notes = kept + PatternNote(local, pad.offset, gate, semitones, velocity, id)))
         checkpoint(p)
-        held[id] = q
-        return Recorded(out, id, if (q > heardTick) passOf(q, len) else null)
+        held[id] = q + anchor
+        return Recorded(out, id, if (q + anchor > heardTick) passOf(q + anchor, len, anchor) else null)
     }
 
     /** Note [id] let go of at global [tick]: its gate runs from its start on the grid to here, 1 tick to the pattern's length. */
@@ -158,7 +175,7 @@ class PatternRecorder(private val maxUndo: Int = 32) {
             val n = pat.notes[i]
             val len = pat.lengthTicks
             // From the global start while it is known; else (an undo in between) from where it sits, wrapping.
-            val delta = if (start != null) tick - start else floorMod(tick - n.tick, len.toDouble())
+            val delta = if (start != null) tick - start else floorMod(localTick(tick, phase.of(g), pat) - n.tick, len.toDouble())
             val gate = floor(delta + 0.5).toLong().coerceIn(1, len.toLong()).toInt()
             return p.with(g, pat.copy(notes = pat.notes.toMutableList().also { it[i] = n.copy(gate = gate) }))
         }
@@ -181,7 +198,8 @@ class PatternRecorder(private val maxUndo: Int = 32) {
 
     /**
      * ERASE held on [pad] while playing: its notes from global [fromTick] to
-     * [toTick], wrapping round the pattern. Ranges that follow on from the
+     * [toTick] (nothing before the pattern started), wrapping round the
+     * pattern. Ranges that follow on from the
      * last one on the same pad are the same gesture: one checkpoint.
      */
     fun eraseRange(p: ProjectPatterns, pad: PhysicalPad, semitones: Int?, fromTick: Double, toTick: Double): ProjectPatterns {
@@ -190,12 +208,15 @@ class PatternRecorder(private val maxUndo: Int = 32) {
         val run = EraseRun(pad, semitones, toTick, goingOn && last?.pushed == true)
         lastErase = run
         lastRun = null
-        if (toTick <= fromTick) return p
         val pat = p.group(pad.group)
+        val anchor = phase.of(pad.group)
+        // What passed before the pattern started was another's.
+        val start = maxOf(fromTick, anchor.toDouble())
+        if (toTick <= start) return p
         val len = pat.lengthTicks.toDouble()
-        val whole = !pat.open && toTick - fromTick >= len
-        val from = if (pat.open) fromTick else floorMod(fromTick, len)
-        val to = if (pat.open) toTick else floorMod(toTick, len)
+        val whole = !pat.open && toTick - start >= len
+        val from = localTick(start, anchor, pat)
+        val to = localTick(toTick, anchor, pat)
         // Notes left past the end aren't played, so the playhead never passes them.
         val inRange = { t: Int -> (pat.open || t < len) && (whole || if (from <= to) t >= from && t < to else t >= from || t < to) }
         val out = p.with(pad.group, pat.copy(notes = pat.notes.filterNot { on(it, pad, semitones) && inRange(it.tick) }))
@@ -240,14 +261,15 @@ class PatternRecorder(private val maxUndo: Int = 32) {
         return edit(p, p.with(group, Pattern(bars, notes)))
     }
 
-    /** Open groups grow to take in [tickNow]: 1, 2, 4 or 8 bars; past 8 they close and loop. */
+    /** Open groups grow to take in global [tickNow] (from their anchors): 1, 2, 4 or 8 bars; past 8 they close and loop. */
     fun grow(p: ProjectPatterns, tickNow: Double): ProjectPatterns {
-        if (tickNow < 0) return p
         var out = p
-        val need = floor(tickNow / Seq.TICKS_PER_BAR).toInt() + 1
         for (g in 0 until 4) {
             val pat = p.group(g)
             if (!pat.open) continue
+            val now = localTick(tickNow, phase.of(g), pat)
+            if (now < 0) continue
+            val need = floor(now / Seq.TICKS_PER_BAR).toInt() + 1
             val bars = maxOf(pat.bars, autoBars(need))
             val open = need <= Seq.MAX_AUTO_BARS
             if (bars != pat.bars || open != pat.open) out = out.with(g, pat.copy(bars = bars, open = open))
@@ -347,21 +369,23 @@ class PatternRecorder(private val maxUndo: Int = 32) {
      * SHIFT + TIMING and a pad, stopped (timing correct): all of [pad]'s
      * notes that play (every pitch, or only [semitones]) onto [interval]'s
      * grid swung by [swing], wrapping round the pattern. Of two of one pitch
-     * that land on the same tick, the first (in tick order) stays.
+     * that land on the same tick, the first (in tick order) stays. A tap
+     * with other pads held ([inRun]) is part of their gesture
+     * ([correctRange]): one checkpoint with theirs.
      */
-    fun correctPad(p: ProjectPatterns, pad: PhysicalPad, semitones: Int?, interval: Timing, swing: Int): Corrected {
-        breakRuns()
+    fun correctPad(p: ProjectPatterns, pad: PhysicalPad, semitones: Int?, interval: Timing, swing: Int, inRun: Boolean = false): Corrected {
+        if (!inRun) breakRuns()
         val pat = p.group(pad.group)
-        if (pat.open) return Corrected(p, 0)
+        if (pat.open) return Corrected(if (inRun) gesture(CORRECT_RUN, CORRECT_RUN, p, p) else p, 0)
         val (out, moved) = correct(p, pat, pad, semitones, interval, swing) { it < pat.lengthTicks }
-        return Corrected(edit(p, out), moved)
+        return Corrected(if (inRun) gesture(CORRECT_RUN, CORRECT_RUN, p, out) else edit(p, out), moved)
     }
 
     /**
      * SHIFT + TIMING with [pad] held while playing: its notes from global
      * [fromTick] to [toTick] (as [eraseRange] takes them) corrected as
-     * [correctPad] does. Ranges that follow on from the last one on the same
-     * pad are the same gesture: one checkpoint. [Corrected.moved] counts
+     * [correctPad] does. Every range, of any pad, from the first hold to
+     * [endRun] is the same gesture: one checkpoint. [Corrected.moved] counts
      * this range's notes only.
      */
     fun correctRange(
@@ -373,18 +397,18 @@ class PatternRecorder(private val maxUndo: Int = 32) {
         interval: Timing,
         swing: Int,
     ): Corrected {
-        // The run's key ends where its range does, so only a range that follows on goes on with it.
-        val key = "correct:${pad.group}:${pad.offset}:$semitones"
         val pat = p.group(pad.group)
-        if (pat.open || toTick <= fromTick) return Corrected(gesture("$key@$fromTick", "$key@$toTick", p, p), 0)
+        val anchor = phase.of(pad.group)
+        val start = maxOf(fromTick, anchor.toDouble())
+        if (pat.open || toTick <= start) return Corrected(gesture(CORRECT_RUN, CORRECT_RUN, p, p), 0)
         val len = pat.lengthTicks.toDouble()
-        val whole = toTick - fromTick >= len
-        val from = floorMod(fromTick, len)
-        val to = floorMod(toTick, len)
+        val whole = toTick - start >= len
+        val from = localTick(start, anchor, pat)
+        val to = localTick(toTick, anchor, pat)
         val (out, moved) = correct(p, pat, pad, semitones, interval, swing) { t ->
             t < len && (whole || if (from <= to) t >= from && t < to else t >= from || t < to)
         }
-        return Corrected(gesture("$key@$fromTick", "$key@$toTick", p, out), moved)
+        return Corrected(gesture(CORRECT_RUN, CORRECT_RUN, p, out), moved)
     }
 
     /** The knob let go of or the pad lifted: the next step edit or correct is a gesture of its own. */
@@ -511,6 +535,9 @@ class PatternRecorder(private val maxUndo: Int = 32) {
     private companion object {
         /** With TIMING OFF, a note this near one on the same pad and pitch replaces it. */
         const val OVERDUB_TICKS = 6
+
+        /** The gesture of the pads held to correct while playing: one run, whatever the pad. */
+        const val CORRECT_RUN = "correct"
 
         fun on(n: PatternNote, pad: PhysicalPad, semitones: Int?) = n.offset == pad.offset && (semitones == null || n.semitones == semitones)
 

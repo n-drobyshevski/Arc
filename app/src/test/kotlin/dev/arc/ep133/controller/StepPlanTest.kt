@@ -296,6 +296,55 @@ class StepPlanTest {
     }
 
     @Test
+    fun `two pads held with CORRECT on while playing are one UNDO step, from the first down to the last up`() {
+        val p = patterns(1, note(5, kick), note(101, kick), note(197, kick), note(10, snare), note(130, snare), note(290, snare))
+        desk.correct(true, recorder)
+        val tickAt = { nanos: Long -> nanos / 1e6 }
+        desk.holdDown("0:9:null", hit(kick), 0L)
+        // The snare comes down a while later, and corrects from where it was pressed on (its first note is behind it).
+        desk.holdDown("0:11:null", hit(snare), 50_000_000L)
+        var out = desk.held(p, recorder, t, 100.0, 300_000_000L, tickAt)
+        out = desk.held(out, recorder, t, 200.0, 320_000_000L, tickAt)
+        out = desk.held(out, recorder, t, 300.0, 340_000_000L, tickAt)
+        assertEquals(listOf(0, 96, 192), ticks(out, kick))
+        assertEquals(listOf(10, 120, 288), ticks(out, snare))
+        // The kick lets go while the snare is held: the gesture goes on.
+        out = desk.holdUp("0:9:null", 350_000_000L, out, recorder, t, tickAt)
+        assertTrue(desk.holding)
+        out = desk.held(out, recorder, t, 380.0, 400_000_000L, tickAt)
+        out = desk.holdUp("0:11:null", 450_000_000L, out, recorder, t, tickAt)
+        assertFalse(desk.holding)
+        assertEquals(listOf(0, 96, 192), ticks(out, kick))
+        // The playhead came round the bar to its first note while it was held.
+        assertEquals(listOf(0, 120, 288), ticks(out, snare))
+        // Everything since the first pad went down is one step.
+        assertEquals(p, undo(out))
+        assertNull(undo(p))
+        // The next hold is a gesture of its own.
+        desk.holdDown("0:9:null", hit(kick), 0L)
+        val next = desk.holdUp("0:9:null", 100_000_000L, p, recorder, t, tickAt)
+        assertEquals(p, undo(next))
+    }
+
+    @Test
+    fun `a pad tapped with another held to correct while playing is part of its gesture`() {
+        val p = patterns(1, note(5, kick), note(101, kick), note(10, snare))
+        desk.correct(true, recorder)
+        val tickAt = { nanos: Long -> nanos / 1e6 }
+        desk.holdDown("0:9:null", hit(kick), 0L)
+        var out = desk.held(p, recorder, t, 50.0, 300_000_000L, tickAt)
+        desk.holdDown("0:11:null", hit(snare), 310_000_000L)
+        // A tap: shorter than a tap's time.
+        out = desk.holdUp("0:11:null", 330_000_000L, out, recorder, t, tickAt)
+        assertEquals(listOf(0), ticks(out, snare))
+        out = desk.held(out, recorder, t, 150.0, 400_000_000L, tickAt)
+        out = desk.holdUp("0:9:null", 450_000_000L, out, recorder, t, tickAt)
+        assertEquals(listOf(0, 96), ticks(out, kick))
+        assertEquals(p, undo(out))
+        assertNull(undo(p))
+    }
+
+    @Test
     fun `a tap with CORRECT on while playing corrects the pad's every note, and CORRECT off ends the holds`() {
         val p = patterns(1, note(5, kick), note(290, kick))
         desk.correct(true, recorder)

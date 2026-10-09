@@ -387,8 +387,10 @@ internal class StepDesk(private val word: (StepNote) -> String) {
      * the playhead passes ([PatternRecorder.correctRange]), from where each
      * was pressed up to global tick [to] (a lookahead ahead) at [now];
      * [tickAt] is the tick heard at a time. A hold shorter than a tap
-     * corrects nothing here ([holdUp] takes the pad's every note). Each
-     * hold is one UNDO step; the line counts the notes corrected.
+     * corrects nothing here ([holdUp] takes the pad's every note). All the
+     * pads held together, from the first down to the last up, are one UNDO
+     * step ([PatternRecorder.correctRange]'s run, ended by [holdUp] and
+     * [holdsEnd]); the line counts the notes corrected.
      */
     fun held(p: ProjectPatterns, recorder: PatternRecorder, t: TimingSettings, to: Double, now: Long, tickAt: (Long) -> Double): ProjectPatterns {
         var out = p
@@ -415,7 +417,8 @@ internal class StepDesk(private val word: (StepNote) -> String) {
     fun holdUp(key: String, releasedAt: Long, p: ProjectPatterns, recorder: PatternRecorder, t: TimingSettings, tickAt: ((Long) -> Double)?): ProjectPatterns {
         val h = holds.remove(key) ?: return p
         val out = if (tickAt == null || h.from == null && releasedAt - h.downAt < ERASE_TAP_NS) {
-            recorder.correctPad(p, h.note.pad, h.note.semitones, t.interval, t.swing).also { corrected += it.moved }.patterns
+            // Part of the gesture of the pads held with it, from the first down to the last up.
+            recorder.correctPad(p, h.note.pad, h.note.semitones, t.interval, t.swing, inRun = true).also { corrected += it.moved }.patterns
         } else {
             val from = h.from ?: maxOf(tickAt(h.downAt), 0.0)
             val to = tickAt(releasedAt)

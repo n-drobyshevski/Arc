@@ -3,6 +3,7 @@ package dev.arc.ep133.controller
 import dev.arc.ep133.features.Clip
 import dev.arc.ep133.features.Pattern
 import dev.arc.ep133.features.PatternRecorder
+import dev.arc.ep133.features.PhaseAnchors
 import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.ProjectSeq
 import dev.arc.ep133.features.SceneErase
@@ -10,6 +11,7 @@ import dev.arc.ep133.features.SceneErased
 import dev.arc.ep133.features.SceneOps
 import dev.arc.ep133.features.Seq
 import dev.arc.ep133.features.SwitchTime
+import dev.arc.ep133.features.localTick
 import dev.arc.ep133.text.MirrorText
 import kotlin.math.ceil
 
@@ -76,8 +78,12 @@ internal data class QueuedPick(val to: Int, val at: Long, val time: SwitchTime)
 /** A scene change waiting: every group goes to scene [to] (an index; the number of scenes is a new one) at global tick [at]. */
 internal data class QueuedScene(val to: Int, val at: Long, val time: SwitchTime)
 
-/** The global tick at which a pick made at [tick] takes over ([SceneOps.switchTick]), no earlier than bar 1 (a pick in the count-in). */
-internal fun queueTick(time: SwitchTime, tick: Double, lengthTicks: Int): Long = SceneOps.switchTick(time, tick, lengthTicks).coerceAtLeast(0L)
+/**
+ * The global tick at which a pick made at [tick] takes over ([SceneOps.switchTick]; the pattern's lines count from
+ * its [anchor]), no earlier than bar 1 (a pick in the count-in).
+ */
+internal fun queueTick(time: SwitchTime, tick: Double, lengthTicks: Int, anchor: Long = 0L): Long =
+    SceneOps.switchTick(time, tick, lengthTicks, anchor).coerceAtLeast(0L)
 
 /** CHANGE's chip: the next choice, Immediate → Bar end → Pattern end → Immediate. */
 internal fun SwitchTime.cycled(): SwitchTime = SwitchTime.entries[(ordinal + 1) % SwitchTime.entries.size]
@@ -95,10 +101,10 @@ internal fun filledPatterns(seq: ProjectSeq, group: Int): Set<Int> = seq.banks[g
  * while it is open (the pick takes over before its first pass ends) closes
  * so it loops when it is picked again.
  */
-internal fun closedAt(pat: Pattern, tick: Double): Pattern {
+internal fun closedAt(pat: Pattern, tick: Double, anchor: Long = 0L): Pattern {
     if (!pat.open) return pat
     if (pat.isEmpty) return Pattern(Seq.DEFAULT_BARS, pat.notes)
-    val elapsed = maxOf(ceil(tick / Seq.TICKS_PER_BAR).toInt(), pat.notes.maxOf { it.tick } / Seq.TICKS_PER_BAR + 1)
+    val elapsed = maxOf(ceil(localTick(tick, anchor, pat) / Seq.TICKS_PER_BAR).toInt(), pat.notes.maxOf { it.tick } / Seq.TICKS_PER_BAR + 1)
     return Pattern(Seq.LENGTHS.firstOrNull { it >= elapsed } ?: Seq.MAX_AUTO_BARS, pat.notes)
 }
 
@@ -118,6 +124,10 @@ internal fun closedAt(pat: Pattern, tick: Double): Pattern {
  * queue it would have replaced. A scene change queues all four groups at
  * one tick: the next bar line under BAR, and under PATTERN the end of the
  * longest pattern playing.
+ *
+ * A pattern taking over a group starts at its bar 1 on the tick it takes over at: the desk keeps where each group's
+ * pattern started ([phase]; all 0 once the transport starts, [restart]), and the lines of Bar end and Pattern end
+ * for a group's pick are those of its own pattern, from there.
  */
 internal class SceneDesk(private val word: (PhysicalPad) -> String) {
     /** The panel is shown. */
@@ -134,6 +144,10 @@ internal class SceneDesk(private val word: (PhysicalPad) -> String) {
 
     /** The CLIP row's choice. */
     var clipMode = ClipMode.PTN
+        private set
+
+    /** Where each group's pattern started: the global tick of its bar 1. */
+    var phase = PhaseAnchors.ZERO
         private set
 
     /** The PAD flow: nothing, COPY waiting for a pad, or PASTE waiting for one. */
@@ -183,15 +197,19 @@ internal class SceneDesk(private val word: (PhysicalPad) -> String) {
         said = null
     }
 
-    /** Another project: the panel closes, and the picks waiting, the clipboard and the CLIP row go. */
+    /** Another project: the panel closes, and the picks waiting, where the patterns started and the CLIP row go; the clipboard stays, as the device's does, to paste in the other project. */
     fun reset() {
         close()
         picks.clear()
         scene = null
-        clip = null
-        clipWhat = null
+        phase = PhaseAnchors.ZERO
         clipMode = ClipMode.PTN
         bar = 0
+    }
+
+    /** The transport starts: every pattern starts at bar 1. */
+    fun restart() {
+        phase = PhaseAnchors.ZERO
     }
 
     /** Live shows [group] now (or its column was tapped): the CLIP row works on it. */
@@ -231,7 +249,7 @@ internal class SceneDesk(private val word: (PhysicalPad) -> String) {
             said = patternSaid(out, group)
             return out
         }
-        picks[group] = QueuedPick(k, queueTick(time, at, seq.pattern(group, seq.selected(group)).lengthTicks), time)
+        picks[group] = QueuedPick(k, queueTick(time, at, seq.pattern(group, seq.selected(group)).lengthTicks, phase.of(group)), time)
         said = if (time == SwitchTime.IMMEDIATE) MirrorText.patternSpoken(group, k, seq.pattern(group, k).bars) else MirrorText.patternQueuedSpoken(group, k, time)
         return seq
     }
@@ -260,7 +278,7 @@ internal class SceneDesk(private val word: (PhysicalPad) -> String) {
             said = sceneSaid(out)
             return out
         }
-        scene = QueuedScene(k, queueTick(time, at, seq.playing().longestTicks), time)
+        scene = QueuedScene(k, sceneTick(seq, at, time), time)
         said = if (time == SwitchTime.IMMEDIATE) sceneSaid(pickedScene(seq, k)) else MirrorText.sceneQueuedSpoken(k, time)
         return seq
     }
@@ -476,6 +494,14 @@ internal class SceneDesk(private val word: (PhysicalPad) -> String) {
         )
     }
 
+    // The tick a scene change made at [at] takes over: the next bar line, or the next end of the longest pattern playing (of those as long, the first to end, from where each started).
+    private fun sceneTick(seq: ProjectSeq, at: Double, time: SwitchTime): Long {
+        val playing = seq.playing()
+        val longest = playing.longestTicks
+        if (time != SwitchTime.PATTERN) return queueTick(time, at, longest)
+        return (0 until 4).filter { playing.group(it).lengthTicks == longest }.minOf { queueTick(time, at, longest, phase.of(it)) }
+    }
+
     // The number [group] shows: the one waiting for its tick, else the one playing.
     private fun shown(seq: ProjectSeq, group: Int): Int = targets(seq)[group]?.to ?: seq.selected(group)
 
@@ -523,29 +549,31 @@ internal class SceneDesk(private val word: (PhysicalPad) -> String) {
         val s = scene
         if (s != null && passed(s.at)) {
             scene = null
-            out = leaving(out, pickedScene(out, s.to), tick?.let { s.at.toDouble() })
+            out = leaving(out, pickedScene(out, s.to), s.at.takeIf { tick != null })
             said = sceneSaid(out)
             status = null
         }
         for ((g, q) in picks.entries.sortedBy { it.value.at }) {
             if (!passed(q.at)) continue
             picks.remove(g)
-            out = leaving(out, SceneOps.selectPattern(out, g, q.to), tick?.let { q.at.toDouble() })
+            out = leaving(out, SceneOps.selectPattern(out, g, q.to), q.at.takeIf { tick != null })
             said = patternSaid(out, g)
             status = null
         }
         return out
     }
 
-    // [to] (the pick made on [from]) with the patterns [from] plays that it leaves closed, if one was open.
-    private fun leaving(from: ProjectSeq, to: ProjectSeq, tick: Double?): ProjectSeq {
-        if (tick == null) return to
+    // [to] (the pick made on [from]) taking over at global tick [at] (null: STOP, where none is open and the transport
+    // starts afresh): the patterns [from] plays that it leaves closed, if one was open, and the groups it changes starting at [at].
+    private fun leaving(from: ProjectSeq, to: ProjectSeq, at: Long?): ProjectSeq {
+        if (at == null) return to
         var out = to
         for (g in 0 until 4) {
             val n = from.selected(g)
             if (to.selected(g) == n) continue
             val pat = from.pattern(g, n)
-            if (pat.open) out = out.withPattern(g, n, closedAt(pat, tick))
+            if (pat.open) out = out.withPattern(g, n, closedAt(pat, at.toDouble(), phase.of(g)))
+            phase = phase.with(g, at)
         }
         return out
     }

@@ -208,25 +208,27 @@ function pastePad(seq: ProjectSeq, pad: PhysicalPad, clip: PadClip): ProjectSeq 
 /**
  * The global tick at which a change queued at [globalTick] takes over a group
  * whose pattern is [currentLengthTicks] long: at once (the next whole tick),
- * at the next bar line, or at the next end of the group's pattern. A press
- * exactly on a line switches there. Stopped, the caller switches at once
- * whatever [time] is. A scene's change queues each group: under PATTERN each
- * has its own tick, under BAR they share one.
+ * at the next bar line, or at the next end of the group's pattern. The lines
+ * are the pattern's own, counted from the global tick it started at
+ * ([anchor], PhaseAnchors); a scene's BAR, shared by all groups, goes by the
+ * transport's (anchor 0). A press exactly on a line switches there. Stopped,
+ * the caller switches at once whatever [time] is. A scene's change queues each
+ * group: under PATTERN each has its own tick, under BAR they share one.
  */
-function switchTick(time: SwitchTime, globalTick: number, currentLengthTicks: number): number {
+function switchTick(time: SwitchTime, globalTick: number, currentLengthTicks: number, anchor = 0): number {
   switch (time) {
     case SwitchTime.IMMEDIATE:
       return Math.ceil(globalTick) + 0
     case SwitchTime.BAR:
-      return nextLine(globalTick, Seq.TICKS_PER_BAR)
+      return nextLine(globalTick, Seq.TICKS_PER_BAR, anchor)
     case SwitchTime.PATTERN:
-      return nextLine(globalTick, Math.max(currentLengthTicks, 1))
+      return nextLine(globalTick, Math.max(currentLengthTicks, 1), anchor)
   }
 }
 
-/** The first multiple of [every] at or after [tick] (+ 0: never -0). */
-function nextLine(tick: number, every: number): number {
-  return Math.ceil(tick / every) * every + 0
+/** The first [anchor] plus a multiple of [every] at or after [tick] (+ 0: never -0). */
+function nextLine(tick: number, every: number, anchor: number): number {
+  return anchor + Math.ceil((tick - anchor) / every) * every + 0
 }
 
 /** [p] as a copy goes in another slot: closed, its notes' ids 0. */
