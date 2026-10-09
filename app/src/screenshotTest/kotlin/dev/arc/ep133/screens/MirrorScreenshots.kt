@@ -172,8 +172,8 @@ private fun Framed(
                 CoachHost(visible = guide, onDismiss = {}) {
                     ArcShell(
                         tab = tab, onTab = {},
-                        connected = connected, canConnect = true, canBackup = connected,
-                        onBackup = {}, onConnect = {}, onDebug = {}, onSettings = {}, onHelp = {},
+                        connected = connected, canConnect = true,
+                        onConnect = {}, onDebug = {}, onSettings = {}, onHelp = {},
                         guideOpen = guideOpen, onGuide = {},
                         guide = { GuideScreen(onBack = {}) },
                         middle = pill.takeIf { tab == Tab.LIVE && liveInBar(LocalArcWindow.current) },
@@ -250,6 +250,7 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
             arp = arp,
             step = stepUi,
             scene = sceneUi,
+            onSettings = {},
         )
     }
 }
@@ -1664,6 +1665,12 @@ fun MainConnectedPreview() = Main(connectedState)
 @Composable
 fun MainConnectedDarkPreview() = Main(connectedState, dark = true)
 
+// A 360 dp phone: the BACKUPS caption row holds Back up, search and import.
+@PreviewTest
+@Preview(name = "Main connected narrow", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun MainConnectedNarrowPreview() = Main(connectedState)
+
 @PreviewTest
 @Preview(name = "Main empty after reinstall", widthDp = 393, heightDp = 852, showBackground = true)
 @Composable
@@ -1855,6 +1862,16 @@ fun GuideOverlayDevicePreview() = Device(guide = true)
 fun SectionListPreview() {
     Framed(Tab.LIVE, menu = true) {
         MirrorScreen(mirror = MirrorUi(playing), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
+    }
+}
+
+// Settings ends the list, under a thin rule, on any section.
+@PreviewTest
+@Preview(name = "Section menu settings", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun SectionMenuSettingsPreview() {
+    Framed(Tab.BACKUPS, menu = true) {
+        MainScreen(state = connectedState, fmtDay = { "" }, onBackup = {}, onImport = {}, onOpen = {})
     }
 }
 

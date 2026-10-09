@@ -493,6 +493,8 @@ fun MirrorScreen(
      * open, covers them), and the group keys carry the patterns' numbers.
      */
     scene: LiveScene? = null,
+    /** Opens Settings, from the first row of Live tools (an addition; null hides the row). */
+    onSettings: (() -> Unit)? = null,
 ) {
     val sounding = voices?.collectAsStateWithLifecycle()?.value
     // The pads held for note repeat are ringed too, and those it sounds lit.
@@ -905,6 +907,8 @@ fun MirrorScreen(
                 onClose = { toolsOpen = false },
                 title = MirrorText.TOOLS,
                 panel = {
+                    // Settings left the top bar: its way in is here, and the tools close behind it.
+                    if (onSettings != null) SettingsRow { toolsOpen = false; onSettings() }
                     FactoryRow(mirror, onGetFactory)
                     OfflinePadsRow(offlinePads, onResetPads)
                     if (keys.on) {
@@ -1716,6 +1720,28 @@ private fun RowScope.SpokenLine(said: String, content: @Composable RowScope.() -
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         content = content,
     )
+}
+
+/** Settings, first in the tools: the gear, its name and a chevron on a plate (the tools close, then Settings opens). */
+@Composable
+private fun SettingsRow(onClick: () -> Unit) {
+    val c = LocalArcColors.current
+    GridPlate {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = onClick)
+                .coachMark("tools.settings", CoachText.SETTINGS, c.graphite, c.shell)
+                .heightIn(min = 56.dp)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            dev.arc.ep133.ui.components.Icon(ArcIcon.GEAR, c.ink, size = 22.dp)
+            Text(CoachText.SETTINGS, style = ArcType.semi, color = c.ink, modifier = Modifier.weight(1f))
+            dev.arc.ep133.ui.components.Chevron(Modifier.padding(horizontal = 6.dp))
+        }
+    }
 }
 
 /** Not connected (nothing read, or offline from the last read): the factory sounds to get, first in the tools. */

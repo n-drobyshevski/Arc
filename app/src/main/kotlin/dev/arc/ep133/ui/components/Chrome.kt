@@ -131,8 +131,6 @@ fun ArcShell(
     onTab: (Tab) -> Unit,
     connected: Boolean,
     canConnect: Boolean,
-    canBackup: Boolean,
-    onBackup: () -> Unit,
     onConnect: () -> Unit,
     onDebug: () -> Unit,
     onSettings: () -> Unit,
@@ -158,11 +156,8 @@ fun ArcShell(
                     onSections = { menuOpen = !menuOpen },
                     connected = connected,
                     canConnect = canConnect,
-                    canBackup = canBackup,
-                    onBackup = onBackup,
                     onConnect = onConnect,
                     onDebug = onDebug,
-                    onSettings = onSettings,
                     onHelp = onHelp,
                     middle = middle,
                     sample = sample,
@@ -172,7 +167,12 @@ fun ArcShell(
             content()
             GuideEdgeTab({ onGuide(true) }, Modifier.align(Alignment.CenterStart).aboveMiddle())
             // Under the top bar, so the tag stays in view above the list.
-            SectionMenu(menuOpen, tab, onPick = { menuOpen = false; onTab(it) }, onDismiss = { menuOpen = false })
+            SectionMenu(
+                menuOpen, tab,
+                onPick = { menuOpen = false; onTab(it) },
+                onSettings = { menuOpen = false; onSettings() },
+                onDismiss = { menuOpen = false },
+            )
         }
         AnimatedVisibility(guideOpen, enter = slideInHorizontally { -it }, exit = slideOutHorizontally { -it }) {
             guide()
@@ -182,17 +182,15 @@ fun ArcShell(
 
 /**
  * The section tag, then icon keys as in the pocket operator app's top row: the
- * orange REC-style dot backs up, the connection key is green with a dot while
- * the EP-133 is connected (a tap disconnects) and navy with a ring when not,
- * then the guide overlay (?) and settings. Their names show on long-press,
- * in the overlay and to screen readers. Long-pressing the tag opens the
- * debug screen (as the wordmark did). The room between the tag and the keys
- * holds [middle]; a toast in a short window takes its place. On Live, a mic
- * key ([sample], an addition) comes before ? and the gear, round as they
- * are, and orange while SAMPLE's panel is open; in a top bar too narrow for
- * it (a 360 dp phone), or where it would shorten the display line [middle]
- * holds (a small phone on its side), the keys close up in their two groups,
- * and beside the line come down a size and close up to it as well.
+ * connection key is green with a dot while the EP-133 is connected (a tap
+ * disconnects) and navy with a ring when not, then the guide overlay (?).
+ * Their names show on long-press, in the overlay and to screen readers. Back
+ * up lives on the Backups screen, and Settings in Live's tools and the section
+ * list under the tag ([SectionMenu]). Long-pressing the tag opens the debug
+ * screen (as the wordmark did). The room between the tag and the keys holds
+ * [middle]; a toast in a short window takes its place. On Live, a mic key
+ * ([sample], an addition) comes before ?, round as it is, and orange while
+ * SAMPLE's panel is open.
  */
 @Composable
 fun TopBar(
@@ -200,29 +198,14 @@ fun TopBar(
     onSections: () -> Unit,
     connected: Boolean,
     canConnect: Boolean,
-    canBackup: Boolean,
-    onBackup: () -> Unit,
     onConnect: () -> Unit,
     onDebug: () -> Unit,
-    onSettings: () -> Unit = {},
     onHelp: () -> Unit = {},
     middle: (@Composable BoxScope.() -> Unit)? = null,
     sample: SampleKey? = null,
 ) {
     val c = LocalArcColors.current
     val window = LocalArcWindow.current
-    // The mic key in a narrow bar, or beside Live's display line in a bar not much wider than a phone on its side:
-    // the keys close up in their two groups, and the middle takes what is left. Beside the line they come down a
-    // size too, and close up to it, so it has the room it had without the mic key.
-    val lineTight = sample != null && middle != null && window.width < TopBarLineTight
-    val tight = sample != null && (window.width < TopBarTight || lineTight)
-    val key = if (lineTight) TopBarKeyLineTight else 44.dp
-    // Closed up, the gaps are set one by one: the middle (the room before the squares when it is empty) needs none.
-    val middleGap = when {
-        middle == null -> 0.dp
-        lineTight -> TopBarGapTight
-        else -> 8.dp
-    }
     val slot = LocalBarSlot.current
     DisposableEffect(slot) { onDispose { slot?.bounds = null } }
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
@@ -234,13 +217,12 @@ fun TopBar(
                 // 56 dp tall instead of 66 when the window is short.
                 .padding(start = 16.dp, end = 16.dp, top = if (window.short) 6.dp else 12.dp, bottom = if (window.short) 6.dp else 10.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(if (tight) 0.dp else 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             SectionTag(
                 section, onSections, onDebug,
                 Modifier.coachMark("top.sections", CoachText.SECTIONS, c.navy, c.onNavy),
             )
-            if (tight) Spacer(Modifier.width(middleGap))
             // As tall as the keys; empty, it is just the space between.
             Box(
                 Modifier
@@ -251,27 +233,20 @@ fun TopBar(
             ) {
                 middle?.invoke(this)
             }
-            if (tight) Spacer(Modifier.width(middleGap))
-            IconBlock(
-                ArcIcon.DOT, CoachText.BACK_UP, c.signal, c.onSignal, onBackup,
-                Modifier.coachMark("top.backup", CoachText.BACK_UP, c.signal, c.onSignal),
-                enabled = canBackup, size = key,
-            )
-            if (tight) Spacer(Modifier.width(TopBarGapTight))
             if (connected) {
                 IconBlock(
                     ArcIcon.DOT, CoachText.CONNECTED, c.ok, c.onOk, onConnect,
                     Modifier.coachMark("top.connection", CoachText.CONNECTION, c.ok, c.onOk),
-                    enabled = canConnect, size = key, iconSize = 16.dp,
+                    enabled = canConnect, iconSize = 16.dp,
                 )
             } else {
                 IconBlock(
                     ArcIcon.RING, CoachText.DISCONNECTED, c.navy, c.onNavy, onConnect,
                     Modifier.coachMark("top.connection", CoachText.CONNECTION, c.navy, c.onNavy),
-                    enabled = canConnect, size = key, iconSize = 18.dp,
+                    enabled = canConnect, iconSize = 18.dp,
                 )
             }
-            Spacer(Modifier.width(if (tight) TopBarGroupTight else 4.dp))
+            Spacer(Modifier.width(4.dp))
             if (sample != null) {
                 IconBlock(
                     ArcIcon.MIC, MirrorText.SAMPLE_TAG,
@@ -279,44 +254,18 @@ fun TopBar(
                     if (sample.on) c.onSignal else c.navy,
                     sample.onTap,
                     Modifier.coachMark("top.sample", CoachText.SAMPLE, c.signal, c.onSignal),
-                    size = key, round = true,
+                    round = true,
                     state = MirrorText.onOff(sample.on),
                 )
-                if (tight) Spacer(Modifier.width(TopBarGapTight))
             }
             IconBlock(
                 ArcIcon.HELP, CoachText.HELP, c.tabOff, c.navy, onHelp,
                 Modifier.coachMark("top.help", CoachText.HELP, c.ink, c.shell),
-                size = key, round = true,
-            )
-            if (tight) Spacer(Modifier.width(TopBarGapTight))
-            IconBlock(
-                ArcIcon.GEAR, CoachText.SETTINGS, c.tabOff, c.navy, onSettings,
-                Modifier.coachMark("top.settings", CoachText.SETTINGS, c.graphite, c.shell),
-                size = key, round = true, iconSize = 24.dp,
+                round = true,
             )
         }
     }
 }
-
-/** Below this window width, the top bar with Live's mic key in it closes its keys up ([TopBar]). */
-private val TopBarTight = 400.dp
-
-/**
- * Below this window width, the top bar with Live's mic key and display line in
- * it closes its keys up too, and brings them down to [TopBarKeyLineTight], so
- * the line keeps its pad's sound name ([TopBar]).
- */
-private val TopBarLineTight = 760.dp
-
-/** How big the top bar's keys are beside Live's display line, closed up ([TopBarLineTight]). */
-private val TopBarKeyLineTight = 40.dp
-
-/** The gap between two keys of a group in the top bar, closed up ([TopBarTight]). */
-private val TopBarGapTight = 4.dp
-
-/** The gap between the top bar's squares and its round keys, closed up ([TopBarTight]). */
-private val TopBarGroupTight = 8.dp
 
 /** A block with an arrow point on its right, like the pocket operator app's EDIT tag. */
 private val TagShape = GenericShape { size, _ ->
@@ -355,10 +304,12 @@ private fun SectionTag(section: Tab, onClick: () -> Unit, onLongPress: () -> Uni
 
 /**
  * The sections, as caps stacked under the section tag (drawn in place, not
- * in a popup window): the current one navy and down. A tap outside closes the list.
+ * in a popup window): the current one navy and down. After them, under a thin
+ * rule, Settings (an addition), a cap like an unselected tab with the gear
+ * before its word. A tap outside closes the list.
  */
 @Composable
-fun SectionMenu(open: Boolean, current: Tab, onPick: (Tab) -> Unit, onDismiss: () -> Unit) {
+fun SectionMenu(open: Boolean, current: Tab, onPick: (Tab) -> Unit, onSettings: () -> Unit, onDismiss: () -> Unit) {
     val c = LocalArcColors.current
     AnimatedVisibility(open, enter = fadeIn(), exit = fadeOut()) {
         Box(
@@ -392,6 +343,24 @@ fun SectionMenu(open: Boolean, current: Tab, onPick: (Tab) -> Unit, onDismiss: (
                     ) {
                         Text(t.label.uppercase(), style = ArcType.tab, color = if (on) c.onNavy else c.ink)
                     }
+                }
+                // A wider gap, then the page that is no section (a rule would cross the page behind the scrim).
+                Spacer(Modifier.height(8.dp))
+                val source = remember { MutableInteractionSource() }
+                val pressed by source.collectIsPressedAsState()
+                Row(
+                    Modifier
+                        .widthIn(min = 150.dp)
+                        .heightIn(min = 48.dp)
+                        .cap(c.key, c.keyEdge, RoundedCornerShape(8.dp), capPress(pressed))
+                        .clickable(interactionSource = source, indication = null, role = Role.Button, onClick = onSettings)
+                        .semantics { contentDescription = CoachText.SETTINGS }
+                        .padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Icon(ArcIcon.GEAR, c.ink, size = 20.dp)
+                    Text(CoachText.SETTINGS.uppercase(), style = ArcType.tab, color = c.ink)
                 }
             }
         }

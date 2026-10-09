@@ -1020,8 +1020,6 @@ class MainActivity : ComponentActivity() {
                     onTab = { selectTab(it) },
                     connected = state.connected,
                     canConnect = state.midiSupported && !state.busy,
-                    canBackup = state.midiSupported && state.device != null && !state.busy,
-                    onBackup = { withNotifications { controller.backup() } },
                     onConnect = { controller.connect() },
                     onDebug = { debug = true },
                     onSettings = { settingsOpen = true },
@@ -1124,6 +1122,7 @@ class MainActivity : ComponentActivity() {
                             arp = liveArp,
                             step = liveStep,
                             scene = liveScene,
+                            onSettings = { settingsOpen = true },
                         )
                         Tab.DEVICE -> DeviceScreen(
                             state = state,
@@ -1429,7 +1428,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Transfers can start from any tab (Back up is in the top bar).
+                // Transfers can start from any tab (a restore or upload away from Backups).
                 val task = state.task
                 val lastTask = remember { mutableStateOf(task) }.apply { if (task != null) value = task }.value
                 ArcSheet(visible = task != null, onDismiss = null, grip = false) {

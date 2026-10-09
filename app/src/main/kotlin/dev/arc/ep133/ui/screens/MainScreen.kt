@@ -69,7 +69,8 @@ import dev.arc.ep133.ui.theme.LocalArcColors
 
 /**
  * The Backups tab (index.html .app): the device panel and the library. The
- * header's keys live in the top bar now.
+ * header's connection key lives in the top bar now; Back up is the orange
+ * block before the library's tools, or the big key while there are no backups.
  */
 @Composable
 fun MainScreen(
@@ -97,7 +98,8 @@ fun MainScreen(
             // On a phone on its side the panel is one line, so the backups show without scrolling.
             DevicePanel(state, line = LocalArcWindow.current.short)
 
-            // The top bar's Back up block does this too; the big key stays until the first backup.
+            // The big key stays until the first backup; after it, the orange block opens the caption row below.
+            val canBackup = state.midiSupported && state.device != null && !state.busy
             if (state.backups.isEmpty()) {
                 ArcKey(
                     Strings.BACK_UP,
@@ -105,7 +107,7 @@ fun MainScreen(
                     modifier = Modifier.fillMaxWidth(),
                     style = KeyStyle.Signal,
                     size = KeySize.Wide,
-                    enabled = state.midiSupported && state.device != null && !state.busy,
+                    enabled = canBackup,
                 )
             }
 
@@ -113,8 +115,13 @@ fun MainScreen(
                 // The caption with its tools as icons (named on long-press and in the guide overlay).
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Caption(Strings.BACKUPS, Modifier.weight(1f), align = androidx.compose.ui.text.style.TextAlign.Start)
-                    // Addition to the web version: find sounds across backups.
                     if (state.backups.isNotEmpty()) {
+                        IconBlock(
+                            ArcIcon.DOT, CoachText.BACK_UP, c.signal, c.onSignal, onBackup,
+                            Modifier.coachMark("backups.backup", CoachText.BACK_UP, c.signal, c.onSignal),
+                            enabled = canBackup,
+                        )
+                        // Addition to the web version: find sounds across backups.
                         IconBlock(
                             ArcIcon.SEARCH, CoachText.SEARCH, c.tabOff, c.navy, onSearch,
                             Modifier.coachMark("backups.search", CoachText.SEARCH, c.navy, c.onNavy),
