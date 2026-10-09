@@ -40,7 +40,7 @@ import dev.arc.ep133.ui.theme.ArcType
  * Small geometric icons, drawn rather than taken from an icon set, so they
  * match the pocket operator app's flat shapes (REC dot, play triangle, gear).
  */
-enum class ArcIcon { DOT, RING, GEAR, HELP, REFRESH, PLUS, SEARCH, IMPORT, FOLLOW, SWAP, EXCHANGE, MIC }
+enum class ArcIcon { DOT, RING, GEAR, HELP, REFRESH, PLUS, SEARCH, IMPORT, FOLLOW, SWAP, EXCHANGE, MIC, BLUETOOTH, CLOCK }
 
 @Composable
 fun Icon(icon: ArcIcon, color: Color, modifier: Modifier = Modifier, size: Dp = 22.dp) {
@@ -152,6 +152,29 @@ private fun DrawScope.draw(icon: ArcIcon, color: Color) {
             val holder = w * 0.42f
             drawArc(color, 0f, 180f, false, topLeft = Offset(c.x - r, holder - r), size = Size(2 * r, 2 * r), style = Stroke(stroke, cap = StrokeCap.Round))
             drawLine(color, Offset(c.x, holder + r), Offset(c.x, w * 0.9f), stroke, StrokeCap.Round)
+        }
+        ArcIcon.BLUETOOTH -> {
+            // The rune: a spine with two arrowheads on its right, crossed by the strokes from its left.
+            val x = c.x
+            val rune = Path().apply {
+                moveTo(w * 0.24f, w * 0.68f)
+                lineTo(w * 0.76f, w * 0.30f)
+                lineTo(x, w * 0.08f)
+                lineTo(x, w * 0.92f)
+                lineTo(w * 0.76f, w * 0.70f)
+                lineTo(w * 0.24f, w * 0.32f)
+            }
+            drawPath(rune, color, style = Stroke(stroke * 1.1f, cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+        }
+        ArcIcon.CLOCK -> {
+            // A face with its two hands: late.
+            drawCircle(color, radius = w * 0.4f, style = Stroke(stroke))
+            val hands = Path().apply {
+                moveTo(c.x, c.y - w * 0.22f)
+                lineTo(c.x, c.y)
+                lineTo(c.x + w * 0.16f, c.y + w * 0.1f)
+            }
+            drawPath(hands, color, style = Stroke(stroke, cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
         }
         ArcIcon.FOLLOW -> {
             // A target: follow the group being played.

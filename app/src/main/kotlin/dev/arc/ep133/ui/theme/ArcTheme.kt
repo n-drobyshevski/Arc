@@ -45,6 +45,8 @@ data class ArcColors(
     val displayDim: Color,
     val segmentOff: Color,
     val danger: Color,
+    /** A warning on the dark display (the line's Bluetooth chip): amber, 7:1 or more on it in either theme. */
+    val warn: Color,
     /** Selected tab and choice keys. */
     val navy: Color,
     val onNavy: Color,
@@ -93,6 +95,7 @@ val LightArcColors = ArcColors(
     displayDim = Color(0xFF8A8C83),
     segmentOff = Color(0xFF3A3D36),
     danger = Color(0xFFB3261E),
+    warn = Color(0xFFE8A53E),
     navy = Color(0xFF1F2558),
     onNavy = Color(0xFFF4F2EE),
     tabOff = Color(0xFFD3D2DA),
@@ -124,6 +127,7 @@ val DarkArcColors = LightArcColors.copy(
     segmentOff = Color(0xFF2A2D27),
     signalEdge = Color(0xFFA83200),
     danger = Color(0xFFFF8A80),
+    warn = Color(0xFFFFC15E),
     navy = Color(0xFFAEB4F0),
     onNavy = Color(0xFF14162B),
     tabOff = Color(0xFF3A3B44),

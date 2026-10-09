@@ -206,7 +206,7 @@ object MirrorText {
     /** The debug log's line for a Live sound: "live:0:3 heard 31 ms after the press (phone speaker)". */
     fun latencyNote(key: String, ms: Double, route: String) = "$key heard ${"%.0f".format(ms)} ms after the press ($route)"
     const val BLUETOOTH_DELAY = "Sound goes to Bluetooth, which plays late (often 0.2 s or more). Wired headphones or the phone speaker are much quicker."
-    /** Live's display line while the sound goes to Bluetooth; the line may cut it short, so the delay comes first. */
+    /** The Bluetooth chip on Live's display line, for as long as the sound goes to Bluetooth: its tooltip and what a screen reader says. */
     const val WIRELESS_DELAY = "Bluetooth plays late: wired or the speaker is quicker"
     /** The same where the route isn't known but the output's own delay is long: "Sound plays 140 ms late: wired output is quicker". */
     fun slowOutput(ms: Int) = "Sound plays $ms ms late: wired output is quicker"

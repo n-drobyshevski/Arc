@@ -439,7 +439,7 @@ fun MirrorScreen(
     edit: EditUi = EditUi(),
     /** A light tick as a pad or key goes down (Settings → Haptics). */
     haptics: Boolean = true,
-    /** Live's sound goes to Bluetooth or a hearing aid ([LiveAudio.wireless]): the display line says it plays late. */
+    /** Live's sound goes to Bluetooth or a hearing aid ([LiveAudio.wireless]): the display line keeps the Bluetooth chip ([LateChip]), which says it plays late. */
     wireless: Boolean = false,
     /** PROJECT, KEYS and TEMPO over the pads (KEYS is the mode word's place, but on the short sideways piano). */
     functions: FunctionKeysUi = FunctionKeysUi(),
@@ -1057,7 +1057,7 @@ fun MirrorScreen(
                 if (piano != null) {
                     Column(sidewaysColumn) {
                         if (!inBar) {
-                            KeysDisplay(st, mirror, keysNow, transport, take, still = fixedNow != null, pianoRange = piano, arp = arpLine, step = stepLine)
+                            KeysDisplay(st, mirror, keysNow, transport, take, still = fixedNow != null, pianoRange = piano, wireless = wireless, arp = arpLine, step = stepLine)
                             Spacer(Modifier.height(10.dp))
                         }
                         // A tablet's function keys, then the row over the piano and the piano; upright
@@ -1230,7 +1230,7 @@ fun MirrorScreen(
                                 // On its side: the keys on the K.O. II's body as big as the room, the function
                                 // keys and the view switch (turned) on their left, the scale and the octave
                                 // on their right.
-                                if (!inBar) KeysDisplay(st, mirror, keysNow, transport, take, still = fixedNow != null, arp = arpLine, step = stepLine)
+                                if (!inBar) KeysDisplay(st, mirror, keysNow, transport, take, still = fixedNow != null, wireless = wireless, arp = arpLine, step = stepLine)
                                 BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
                                     val columns = SideFunctions + SidePicks + if (viewSwitch != null) SideLead else 0.dp
                                     val gaps = if (viewSwitch != null) 3 else 2
@@ -1255,7 +1255,7 @@ fun MirrorScreen(
                                     }
                                 }
                             } else if (keys.on) {
-                                val keysLine: @Composable () -> Unit = { KeysDisplay(st, mirror, keysNow, transport, take, still = fixedNow != null, arp = arpLine, step = stepLine) }
+                                val keysLine: @Composable () -> Unit = { KeysDisplay(st, mirror, keysNow, transport, take, still = fixedNow != null, wireless = wireless, arp = arpLine, step = stepLine) }
                                 val fnRow: @Composable () -> Unit = { FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey) }
                                 val grid: @Composable (Modifier) -> Unit = { m ->
                                     KeysGrid(
@@ -1543,7 +1543,7 @@ internal fun LivePill(
     }
     val line: @Composable () -> Unit = {
         when {
-            keys.on -> KeysDisplay(st, mirror, keysNow, transport, take, still, compact = true, pianoRange = pianoRange, arp = arp, step = stepLine)
+            keys.on -> KeysDisplay(st, mirror, keysNow, transport, take, still, compact = true, pianoRange = pianoRange, wireless = wireless, arp = arp, step = stepLine)
             editing && punch.isEmpty() && arp == null -> EditLine(compact = true)
             else -> DisplayStrip(st, mirror, transport, take, still, compact = true, wireless = wireless, punch = punch, arp = arp, step = stepLine)
         }
@@ -1618,35 +1618,32 @@ internal fun spoken(text: String): String {
 private const val SPOKEN_MS = 1000L
 
 /**
- * The display's main line: the error, "Reading…", the hit, that Live's sound
- * plays late ([wireless]: it goes to Bluetooth), offline the time of the last
- * read ("Last seen Oct 5, 2:02 PM"), or "Press a pad". A device hit hides the
- * note while it shows.
+ * The display's main line: the error, "Reading…", the hit, offline the time
+ * of the last read ("Last seen Oct 5, 2:02 PM"), or "Press a pad". A device
+ * hit hides the note while it shows. That Live's sound goes to Bluetooth is
+ * not said here but by the Bluetooth chip ([LateChip]), which stays beside it.
  */
-private fun displayLine(st: MirrorState, mirror: MirrorUi?, wireless: Boolean): String {
+private fun displayLine(st: MirrorState, mirror: MirrorUi?): String {
     val hit = st.lastHit
     return when {
         mirror?.error != null -> mirror.error
         mirror?.loading == true && hit == null -> MirrorText.READING
         hit != null -> MirrorText.hit(hit)
-        wireless -> MirrorText.WIRELESS_DELAY
         mirror?.offline != null -> mirror.offline
         else -> MirrorText.WAITING
     }
 }
 
-/** The offline line ("Last seen …") and the late note are longer than a hit: the all-groups display draws them a size down (22 for 26). */
-private fun displayLineSmall(st: MirrorState, mirror: MirrorUi?, wireless: Boolean): Boolean = when {
-    st.lastHit != null -> false
-    mirror?.offline != null -> true
-    else -> wireless && mirror?.error == null && mirror?.loading != true
-}
+/** The offline line ("Last seen …") and "Press a pad on the EP-133." are longer than a hit: the all-groups display draws them a size down (22 for 26). */
+private fun displayLineSmall(st: MirrorState, mirror: MirrorUi?): Boolean = st.lastHit == null && mirror?.error == null && mirror?.loading != true
 
 /**
  * The one-group view's display as a single dark line: play state, tempo and
- * project on the left, the pad just played (or that the sound plays late) on
- * the right; the pattern's RECORD and PLAY first, its words in their place
- * while it is on ([PatternLine]). While punch-ins are held ([punch], FX held)
+ * project on the left, the pad just played on the right; the pattern's RECORD
+ * and PLAY first, its words in their place while it is on ([PatternLine]).
+ * While the sound goes to Bluetooth ([wireless]) the Bluetooth chip
+ * ([LateChip]) stays after the other chips, before the words, whatever they
+ * say: it plays late. While punch-ins are held ([punch], FX held)
  * it names them instead, in signal orange: "PUNCH · REPEAT + LPF"; while
  * the arp plays ([arp]), what it plays: "REPEAT · 1/16 · A 7". [step]:
  * STEP's chip while stopped, CORRECT's while playing ([StepLine]).
@@ -1668,38 +1665,98 @@ private fun DisplayStrip(
     val c = LocalArcColors.current
     if (punch.isNotEmpty() || arp != null) {
         val line = if (punch.isNotEmpty()) MirrorText.punchLine(punch) else arp.orEmpty()
-        PatternLine(transport, take, still, compact, step) {
+        PatternLine(transport, take, still, compact, step, late = wireless) {
             SpokenLine(spoken(if (punch.isNotEmpty()) MirrorText.punchSpoken(punch) else line)) {
                 Text(line, style = ArcType.displayHead, color = c.signal, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             }
         }
         return
     }
-    val main = displayLine(st, mirror, wireless)
+    val main = displayLine(st, mirror)
     val played = when (st.playing) {
         true -> MirrorText.PLAYING
         false -> MirrorText.STOPPED
         null -> if (mirror?.offline != null) MirrorText.OFFLINE else null
     }
+    // The chip beside it says that the sound plays late, so the words do not: that is said once.
     val said = spoken(listOfNotNull(played, st.bpm?.let(MirrorText::bpm), st.activeProject?.let(MirrorText::project), main).joinToString(", "))
-    PatternLine(transport, take, still, compact, step) {
+    PatternLine(transport, take, still, compact, step, late = wireless) {
         SpokenLine(said) {
             // Offline and the project are only said: the top bar and the PROJECT key show them.
-            when (st.playing) {
-                true -> Text("\u25B6", style = ArcType.displaySub, color = c.displayInk)
-                false -> Text("\u25A0", style = ArcType.displaySub, color = c.displayDim)
-                null -> Unit
-            }
-            st.bpm?.let { Text(MirrorText.bpm(it), style = ArcType.displaySub, color = c.displayInk, maxLines = 1) }
-            Text(
-                main,
-                style = ArcType.displayHead,
-                color = c.displayInk,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = androidx.compose.ui.text.style.TextAlign.End,
-                modifier = Modifier.weight(1f),
-            )
+            StripWords(st, main, late = wireless, compact = compact)
+        }
+    }
+}
+
+/**
+ * [text] broken onto two lines at one of its " · " separators, the dot
+ * dropped: the one that evens the lines out, the later on a tie ("A 7 ·
+ * 001 kick · 124" as "A 7 · 001 kick" over "124", the sound's name kept
+ * whole). Without a separator it is left to wrap where it may.
+ */
+internal fun twoLines(text: String): String {
+    val sep = " \u00B7 "
+    var best = -1
+    var widest = Int.MAX_VALUE
+    var at = text.indexOf(sep)
+    while (at > 0) {
+        val w = maxOf(at, text.length - at - sep.length)
+        if (w <= widest) { widest = w; best = at }
+        at = text.indexOf(sep, at + 1)
+    }
+    return if (best < 0) text else text.substring(0, best) + "\n" + text.substring(best + sep.length)
+}
+
+/**
+ * The strip's own words: ▶ or ■ and the tempo, then the main line ([main]) at
+ * the end. While the sound goes to Bluetooth ([late]) the Bluetooth chip has
+ * taken room from them, so the hit keeps it: the tempo gives way where they do
+ * not both fit, then the glyph, and a hit still too long for one line takes two, a size down
+ * (upright only: the top bar's [compact] line is one bar tall, so it stays on one
+ * line and ends in an ellipsis).
+ */
+@Composable
+private fun RowScope.StripWords(st: MirrorState, main: String, late: Boolean, compact: Boolean) {
+    val c = LocalArcColors.current
+    val glyph = when (st.playing) {
+        true -> "\u25B6"
+        false -> "\u25A0"
+        null -> null
+    }
+    val tempo = st.bpm?.let(MirrorText::bpm)
+    val lead: @Composable RowScope.(Boolean) -> Unit = { withTempo ->
+        if (glyph != null) Text(glyph, style = ArcType.displaySub, color = if (st.playing == true) c.displayInk else c.displayDim)
+        if (tempo != null && withTempo) Text(tempo, style = ArcType.displaySub, color = c.displayInk, maxLines = 1)
+    }
+    val words: @Composable (Modifier, Boolean) -> Unit = { modifier, one ->
+        Text(
+            if (one) main else twoLines(main),
+            style = if (one) ArcType.displayHead else ArcType.displaySub,
+            color = c.displayInk,
+            maxLines = if (one) 1 else 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+            modifier = modifier,
+        )
+    }
+    if (!late) {
+        lead(true)
+        words(Modifier.weight(1f), true)
+        return
+    }
+    BoxWithConstraints(Modifier.weight(1f)) {
+        val measurer = rememberTextMeasurer()
+        val density = LocalDensity.current
+        fun width(text: String, style: androidx.compose.ui.text.TextStyle): Dp = with(density) { measurer.measure(text, style, maxLines = 1, softWrap = false).size.width.toDp() }
+        val room = maxWidth
+        val head = width(main, ArcType.displayHead)
+        val glyphWidth = glyph?.let { width(it, ArcType.displaySub) } ?: 0.dp
+        val leadWidth = glyphWidth + (tempo?.let { (if (glyph != null) 10.dp else 0.dp) + width(it, ArcType.displaySub) } ?: 0.dp)
+        val keepGlyph = glyphWidth > 0.dp && glyphWidth + 10.dp + head <= room
+        val keepTempo = leadWidth > 0.dp && leadWidth + 10.dp + head <= room
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (keepGlyph || keepTempo) lead(keepTempo)
+            words(Modifier.weight(1f), compact || head <= room)
         }
     }
 }
@@ -1771,7 +1828,9 @@ private fun OfflinePadsRow(count: Int, onReset: () -> Unit) {
  * word until asked for, so the pads keep the room: [noteOpen] whether it is
  * unfolded, [onNote] a tap on the word asking for it (or folding it again).
  * The pattern has a row of its own under the big line ([PatternRow]);
- * TAKE's badge ends the top line while a take records.
+ * TAKE's badge ends the top line while a take records, and the Bluetooth chip
+ * ([LateChip], while the sound goes to Bluetooth: [wireless]) comes before it,
+ * after the tempo and the project.
  */
 @Composable
 private fun Display(
@@ -1820,13 +1879,14 @@ private fun Display(
             }
             st.bpm?.let { Text(MirrorText.bpm(it), style = ArcType.displaySub, color = c.displayInk) }
             st.activeProject?.let { Text(MirrorText.project(it), style = ArcType.displaySub, color = c.displayDim) }
+            if (wireless) LateChip(compact)
             if (take != null && take.state != RecState.Idle) TakeBadge(take, compact = false, steady = still)
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
-                arp ?: displayLine(st, mirror, wireless),
-                // The offline line ("Last seen Oct 5, 2:02 PM"), the late note and the arp's fit a phone a size down.
-                style = ArcType.statFree.copy(fontSize = if (compact || arp != null || displayLineSmall(st, mirror, wireless)) 22.sp else 26.sp),
+                arp ?: displayLine(st, mirror),
+                // The offline line ("Last seen Oct 5, 2:02 PM") and the arp's fit a phone a size down.
+                style = ArcType.statFree.copy(fontSize = if (compact || arp != null || displayLineSmall(st, mirror)) 22.sp else 26.sp),
                 color = if (arp != null) c.signal else c.displayInk,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -3006,7 +3066,9 @@ private val ListPadding = 8.dp
 /**
  * The KEYS display line: KEYS and the last note on the left, the sound it
  * plays on the right, after the pattern's RECORD and PLAY, its words in
- * their place while it is on ([PatternLine]). [compact]: one bar tall, in the top bar ([LivePill]),
+ * their place while it is on ([PatternLine]). While the sound goes to Bluetooth
+ * ([wireless]) the Bluetooth chip ([LateChip]) stays here too, in the mode
+ * word's place. [compact]: one bar tall, in the top bar ([LivePill]),
  * where the mode word is right under it. A device note past the piano's ends
  * ([pianoRange]) is named as such: there's no key to light for it.
  */
@@ -3020,6 +3082,8 @@ private fun KeysDisplay(
     still: Boolean,
     compact: Boolean = false,
     pianoRange: IntRange? = null,
+    /** The sound goes to Bluetooth ([MirrorScreen]'s wireless): the Bluetooth chip stays on the line ([LateChip]). */
+    wireless: Boolean = false,
     /** While the arp plays: what it plays, in signal orange in place of the note and the sound. */
     arp: String? = null,
     /** STEP's chip while stopped, CORRECT's while playing ([StepLine]). */
@@ -3027,7 +3091,7 @@ private fun KeysDisplay(
 ) {
     val c = LocalArcColors.current
     if (arp != null) {
-        PatternLine(transport, take, still, compact, step) {
+        PatternLine(transport, take, still, compact, step, late = wireless) {
             SpokenLine(spoken(arp)) {
                 Text(arp, style = ArcType.displayHead, color = c.signal, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             }
@@ -3049,21 +3113,28 @@ private fun KeysDisplay(
     // never squeezes out the sound's name.
     BoxWithConstraints {
         val noteMax = if (compact) maxWidth / 2 else Dp.Unspecified
-        PatternLine(transport, take, still, compact, step) {
+        PatternLine(transport, take, still, compact, step, late = wireless) {
             SpokenLine(said) {
-                if (!compact) Text(MirrorText.MODE_KEYS.uppercase(), style = ArcType.displaySub, color = c.displayDim, maxLines = 1)
+                // The chip takes the mode word's room: the mode switch beside the keys says KEYS.
+                if (!compact && !wireless) Text(MirrorText.MODE_KEYS.uppercase(), style = ArcType.displaySub, color = c.displayDim, maxLines = 1)
                 noteText?.let {
                     Text(it, style = ArcType.displaySub, color = c.displayInk, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = noteMax))
                 }
-                Text(
-                    sound,
-                    style = ArcType.displayHead,
-                    color = c.displayInk,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.End,
-                    modifier = Modifier.weight(1f),
-                )
+                // Upright with the chip, a sound's name too long for the line is a size down on two, as the strip's hit is.
+                val chipped = wireless && !compact
+                BoxWithConstraints(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                    val measurer = rememberTextMeasurer()
+                    val head = with(LocalDensity.current) { measurer.measure(sound, ArcType.displayHead, maxLines = 1, softWrap = false).size.width.toDp() }
+                    val two = chipped && head > maxWidth
+                    Text(
+                        if (two) twoLines(sound) else sound,
+                        style = if (two) ArcType.displaySub else ArcType.displayHead,
+                        color = c.displayInk,
+                        maxLines = if (two) 2 else 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                    )
+                }
             }
         }
     }

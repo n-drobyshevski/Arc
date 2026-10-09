@@ -320,7 +320,7 @@ fun LiveFactoryPreview() = Live(lastRead.copy(activeProject = 1), offline = dev.
 fun LiveOfflinePlayingPreview() = Live(lastRead, oneGroup = true, offline = "Last seen Oct 5, 2:02 PM", playingPads = setOf(PhysicalPad(0, 9), PhysicalPad(0, 6), PhysicalPad(0, 3)))
 
 // Live's sound goes to Bluetooth, and no pad has been hit on the device yet: the display
-// line says the sound plays late (a size down on the all-groups display).
+// line keeps the Bluetooth chip (the Bluetooth glyph and a clock, in amber) and says "Press a pad".
 private val wirelessState = playing.copy(lastHit = null)
 
 @PreviewTest
@@ -332,6 +332,29 @@ fun LiveBluetoothPreview() = Live(wirelessState, oneGroup = true, wireless = tru
 @Preview(name = "Live bluetooth all groups", widthDp = 393, heightDp = 852, showBackground = true)
 @Composable
 fun LiveBluetoothAllPreview() = Live(wirelessState, wireless = true)
+
+// A pad hit, and the chip stays: RECORD, PLAY and S01 first, the Bluetooth chip after them, the hit in full.
+@PreviewTest
+@Preview(name = "Live bluetooth hit", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveBluetoothHitPreview() = Live(playing, oneGroup = true, wireless = true, transport = patternUi(canUndo = true))
+
+@PreviewTest
+@Preview(name = "Live bluetooth dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveBluetoothDarkPreview() = Live(playing, dark = true, oneGroup = true, wireless = true, transport = patternUi(canUndo = true))
+
+// On its side the line sits in the top bar, its chips glyphs alone.
+@PreviewTest
+@Preview(name = "Live bluetooth sideways small", widthDp = 692, heightDp = 336, showBackground = true)
+@Composable
+fun LiveBluetoothSidewaysSmallPreview() = Live(playing, oneGroup = true, wireless = true, transport = patternUi())
+
+// KEYS keeps the chip too: the Bluetooth chip after RECORD and PLAY, before KEYS and the note.
+@PreviewTest
+@Preview(name = "Live bluetooth keys", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveBluetoothKeysPreview() = Live(keysPlaying, keys = keysUi, wireless = true, transport = patternUi(canUndo = true))
 
 // KEYS: the kick played as notes, C major from octave 4. The device holds MI4 and SO5
 // (lit); the phone plays FA4, LA4 and DO5 (outlined).
@@ -439,6 +462,12 @@ private val chord = keysUi.copy(scale = dev.arc.ep133.features.Scale.CHROMATIC, 
 @Preview(name = "Live keys sideways", widthDp = 867, heightDp = 388, showBackground = true)
 @Composable
 fun LiveKeysSidewaysPreview() = Live(sideways, keys = chord, piano = 48..72)
+
+// The same with the sound on Bluetooth: the chip rides in the top bar's line.
+@PreviewTest
+@Preview(name = "Live bluetooth keys sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveBluetoothKeysSidewaysPreview() = Live(sideways, keys = chord, piano = 48..72, wireless = true, transport = patternUi(canUndo = true))
 
 // Nothing playing on the phone: the display line names the device's DO6, past the keys.
 @PreviewTest

@@ -20,7 +20,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Text
+import androidx.compose.material3.TooltipAnchorPosition
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
@@ -76,7 +82,9 @@ import dev.arc.ep133.features.Tempo
 import dev.arc.ep133.features.TransportPhase
 import dev.arc.ep133.text.CoachText
 import dev.arc.ep133.text.MirrorText
+import dev.arc.ep133.ui.components.ArcIcon
 import dev.arc.ep133.ui.components.DisplayLine
+import dev.arc.ep133.ui.components.Icon
 import dev.arc.ep133.ui.components.coachClear
 import dev.arc.ep133.ui.components.coachMark
 import dev.arc.ep133.ui.theme.ArcType
@@ -163,9 +171,11 @@ internal class SceneLine(
  * [transport]; null for none), then while the pattern is armed, counts in,
  * plays or erases its words ([PatternWords]), else [idle], the line's own;
  * and TAKE's badge while a take records ([take]). [step]: STEP's chip while
- * stopped and CORRECT's while playing ([StepLine]). [compact]: one bar tall,
- * in the top bar ([LivePill]), the chips icon-only. [still]: a picture
- * (screenshots), nothing moving.
+ * stopped and CORRECT's while playing ([StepLine]). [late]: Live's sound goes
+ * to Bluetooth, so the Bluetooth chip ([LateChip]) stays after the other chips
+ * whatever the line says. [compact]: one bar tall, in the top bar
+ * ([LivePill]), the chips icon-only. [still]: a picture (screenshots),
+ * nothing moving.
  */
 @Composable
 internal fun PatternLine(
@@ -174,6 +184,7 @@ internal fun PatternLine(
     still: Boolean,
     compact: Boolean = false,
     step: StepLine? = null,
+    late: Boolean = false,
     idle: @Composable RowScope.() -> Unit,
 ) {
     val t = transport
@@ -194,10 +205,15 @@ internal fun PatternLine(
         // On a wide line (a tablet) ERASE and ↶ fit beside the line's own words too; else only while the pattern runs.
         val wide = maxWidth >= WideLine
         val chipWord = scene?.ui?.label.takeIf { stopped || playing && readout == null }
-        val fit = if (t != null && t.hasWords()) lineFit(t, take.takeIf { taking }, compact, maxWidth, correct = correct, scene = chipWord, readout = readout?.ui?.let(::sceneReadout)) else LineFit()
+        val fit = when {
+            t != null && t.hasWords() -> lineFit(t, take.takeIf { taking }, compact, maxWidth, correct = correct, scene = chipWord, readout = readout?.ui?.let(::sceneReadout), late = late)
+            // Stopped, the Bluetooth chip and the hit want the room RECORD's word would take: it gives way first.
+            t != null && late && !compact -> LineFit(recordWord = idleRecordWord(t, take.takeIf { taking }, maxWidth, wide, chipWord, stepping))
+            else -> LineFit()
+        }
         // While it plays the chip comes last: only where everything else fits with it.
         val sceneChip = scene != null && (stopped || playing && readout == null && fit.scene)
-        val stepFit = if (t != null && stepping) stepFit(t, take.takeIf { taking }, compact, maxWidth, wide, scene = chipWord) else StepFit.NONE
+        val stepFit = if (t != null && stepping) stepFit(t, take.takeIf { taking }, compact, maxWidth, wide, scene = chipWord, late = late, recordWord = fit.recordWord) else StepFit.NONE
         DisplayLine(track.frame, compact = compact) {
             if (t != null) {
                 TransportChips(t, beat.value, compact, still || reduce, recordWord = fit.recordWord)
@@ -205,13 +221,16 @@ internal fun PatternLine(
                 if (t.hasWords()) {
                     EditChips(t, compact, show = fit.edit && t.phase != TransportPhase.COUNT_IN && t.phase != TransportPhase.ARMED)
                     if (correct && step != null) CorrectChip(step, compact)
+                    if (late) LateChip(compact)
                     PatternWords(t, beat.value, compact, corrected = step?.status?.takeIf { correct }, readout = readout, steady = still || reduce)
                 } else {
                     if (wide) EditChips(t, compact, show = true)
                     if (step != null && stepFit != StepFit.NONE) StepChip(step, compact, word = stepFit == StepFit.WORD)
+                    if (late) LateChip(compact)
                     idle()
                 }
             } else {
+                if (late) LateChip(compact)
                 idle()
             }
             if (take != null && taking) TakeBadge(take, compact, still || reduce, word = fit.takeWord)
@@ -256,13 +275,14 @@ private fun lineFits(items: List<Dp>, width: Dp, padding: Dp): Boolean {
  * CORRECT's chip, [correct], which always stays; and the scene's chip,
  * [scene] its word, when it has one; and the scene's readout, [readout] its
  * parts, while the pattern plays, which keeps the room it needs before the
- * chips beside it give way, and shortens itself where they have) on a line
+ * chips beside it give way, and shortens itself where they have; and the
+ * Bluetooth chip, [late], which always stays) on a line
  * [width] wide, [padding] inside either end: the chips and the words measured as they are drawn, the
  * counter at its widest for the pattern's length so it doesn't flip from
  * bar to bar.
  */
 @Composable
-private fun lineFit(t: TransportUi, take: TakeUi?, compact: Boolean, width: Dp, padding: Dp = if (compact) 12.dp else 14.dp, correct: Boolean = false, scene: String? = null, readout: List<String>? = null): LineFit {
+private fun lineFit(t: TransportUi, take: TakeUi?, compact: Boolean, width: Dp, padding: Dp = if (compact) 12.dp else 14.dp, correct: Boolean = false, scene: String? = null, readout: List<String>? = null, late: Boolean = false): LineFit {
     val sizes = ChipSizes(rememberTextMeasurer(), LocalDensity.current, compact)
     val text = sizes::text
     val chip = sizes::chip
@@ -301,7 +321,7 @@ private fun lineFit(t: TransportUi, take: TakeUi?, compact: Boolean, width: Dp, 
     // The readout in full, its parts and the gaps between them.
     val sceneWords = if (readout != null) readout.fold(0.dp) { a, w -> a + text(w, ReadoutStyle) } + ReadoutGap * (readout.size - 1) else 0.dp
     fun fits(items: List<Dp>): Boolean = lineFits(items, width, padding)
-    val rest = listOf(words, takeChip(true), sceneWords)
+    val rest = listOf(words, takeChip(true), sceneWords, if (late) chip(LateGlyphWidth, 0.dp) else 0.dp)
     val wordsAndEdit = listOf(record, play) + edit + rest
     val wordsAndErase = listOf(record, play) + erase + rest
     val dotAndErase = listOf(recordDot, play) + erase + rest
@@ -321,21 +341,22 @@ private enum class StepFit { WORD, GLYPH, NONE }
 /**
  * How STEP's chip fits on the stopped line [width] wide beside RECORD, PLAY,
  * ERASE and ↶ ([wide]: on the line while stopped), the scene's chip ([scene]
- * its word, when it has one) and [take]'s badge while
+ * its word, when it has one), the Bluetooth chip ([late]) and [take]'s badge while
  * it records: with its word while the line's own words keep [IdleRoomy]
  * (the tempo and the hit), else its glyph alone ([compact]: always) while
  * they keep [IdleMin], else not at all.
  */
 @Composable
-private fun stepFit(t: TransportUi, take: TakeUi?, compact: Boolean, width: Dp, wide: Boolean, padding: Dp = if (compact) 12.dp else 14.dp, scene: String? = null): StepFit {
+private fun stepFit(t: TransportUi, take: TakeUi?, compact: Boolean, width: Dp, wide: Boolean, padding: Dp = if (compact) 12.dp else 14.dp, scene: String? = null, late: Boolean = false, recordWord: Boolean = true): StepFit {
     val sizes = ChipSizes(rememberTextMeasurer(), LocalDensity.current, compact)
     val chips = listOfNotNull(
-        sizes.chip(10.dp, if (compact) 0.dp else sizes.text(MirrorText.RECORD.uppercase(), ArcType.displaySub)),
+        sizes.chip(10.dp, if (compact || !recordWord) 0.dp else sizes.text(MirrorText.RECORD.uppercase(), ArcType.displaySub)),
         sizes.chip(10.dp, 0.dp),
         scene?.let { sizes.chip(0.dp, sizes.text(it.uppercase(), ArcType.displaySub)) },
         sizes.chip(0.dp, sizes.text(MirrorText.ERASE.uppercase(), ArcType.displaySub)).takeIf { wide && t.hasNotes.any { it } },
         sizes.chip(12.dp, 0.dp).takeIf { wide && t.canUndo },
         take?.let { sizes.chip(8.dp, sizes.text(MirrorText.TAKE.uppercase(), ArcType.displaySub.copy(fontSize = 12.sp, fontFeatureSettings = "tnum"))) },
+        sizes.chip(LateGlyphWidth, 0.dp).takeIf { late },
     )
     return when {
         !compact && lineFits(chips + sizes.chip(0.dp, sizes.text(MirrorText.STEP.uppercase(), ArcType.displaySub)) + IdleRoomy, width, padding) -> StepFit.WORD
@@ -343,6 +364,31 @@ private fun stepFit(t: TransportUi, take: TakeUi?, compact: Boolean, width: Dp, 
         else -> StepFit.NONE
     }
 }
+
+/**
+ * Whether RECORD keeps its word on the stopped line [width] wide with the
+ * Bluetooth chip: where the other chips ([wide]: ERASE and ↶ too; [scene] its
+ * word, when it has one; [step]: STEP's glyph) and [take]'s badge leave the
+ * line's own words [IdleLate], else RECORD is its dot alone.
+ */
+@Composable
+private fun idleRecordWord(t: TransportUi, take: TakeUi?, width: Dp, wide: Boolean, scene: String?, step: Boolean, padding: Dp = 14.dp): Boolean {
+    val sizes = ChipSizes(rememberTextMeasurer(), LocalDensity.current, compact = false)
+    val chips = listOfNotNull(
+        sizes.chip(10.dp, sizes.text(MirrorText.RECORD.uppercase(), ArcType.displaySub)),
+        sizes.chip(10.dp, 0.dp),
+        scene?.let { sizes.chip(0.dp, sizes.text(it.uppercase(), ArcType.displaySub)) },
+        sizes.chip(0.dp, sizes.text(MirrorText.ERASE.uppercase(), ArcType.displaySub)).takeIf { wide && t.hasNotes.any { it } },
+        sizes.chip(12.dp, 0.dp).takeIf { wide && t.canUndo },
+        sizes.chip(StepGlyphWidth, 0.dp).takeIf { step },
+        take?.let { sizes.chip(8.dp, sizes.text(MirrorText.TAKE.uppercase(), ArcType.displaySub.copy(fontSize = 12.sp, fontFeatureSettings = "tnum"))) },
+        sizes.chip(LateGlyphWidth, 0.dp),
+    )
+    return lineFits(chips + IdleLate, width, padding)
+}
+
+/** The room the stopped line keeps for the hit beside the Bluetooth chip before RECORD gives up its word: a hit on one line. */
+private val IdleLate = 180.dp
 
 /** The room the stopped line keeps for its own words beside STEP's chip: with its word, and at least, with its glyph. */
 private val IdleRoomy = 140.dp
@@ -945,6 +991,43 @@ internal fun LineChip(
         ) { content(ink) }
     }
 }
+
+/**
+ * Live's sound goes to Bluetooth, which plays late: a Bluetooth glyph and a
+ * clock in amber ([dev.arc.ep133.ui.theme.ArcColors.warn]) on a chip's frame,
+ * for as long as it does. Not a button: a long press names it
+ * ([MirrorText.WIRELESS_DELAY]) as a tooltip, and a screen reader reads it as
+ * its description. Not a live region: the line is rebuilt as it changes, so
+ * it would say it again each time; the change of route is announced once, by
+ * its toast.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun LateChip(compact: Boolean) {
+    val c = LocalArcColors.current
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Below),
+        tooltip = { PlainTooltip { Text(MirrorText.WIRELESS_DELAY, style = ArcType.capsKeySmall) } },
+        state = rememberTooltipState(),
+    ) {
+        LineChip(
+            Modifier.semantics(mergeDescendants = true) {
+                contentDescription = MirrorText.WIRELESS_DELAY
+            },
+            lit = true,
+            filled = false,
+            compact = compact,
+            litColor = c.warn.copy(alpha = 0.6f),
+        ) {
+            Icon(ArcIcon.BLUETOOTH, c.warn, size = LateGlyph)
+            Icon(ArcIcon.CLOCK, c.warn, size = LateGlyph)
+        }
+    }
+}
+
+/** The Bluetooth chip's glyphs (the rune and the clock) and, with the gap between, their width. */
+private val LateGlyph = 16.dp
+private val LateGlyphWidth = LateGlyph * 2 + 6.dp
 
 /**
  * TAKE's badge on the line while a take records ("● TAKE 0:12"; armed,
