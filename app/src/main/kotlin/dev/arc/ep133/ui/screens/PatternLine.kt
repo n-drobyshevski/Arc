@@ -344,6 +344,28 @@ private fun stepFit(t: TransportUi, take: TakeUi?, compact: Boolean, width: Dp, 
     }
 }
 
+/**
+ * How STEP's chip fits in the all-groups display's pattern row [width] wide
+ * ([stepFit]'s for a row with no words of its own while stopped): after RECORD
+ * (its word where [fit] has it), PLAY, and ERASE and ↶ ([edit], where they
+ * show): with its word, else its glyph, else not at all.
+ */
+@Composable
+private fun stepRowFit(t: TransportUi, width: Dp, fit: LineFit, edit: Boolean): StepFit {
+    val sizes = ChipSizes(rememberTextMeasurer(), LocalDensity.current, compact = false)
+    val chips = listOfNotNull(
+        sizes.chip(10.dp, if (fit.recordWord) sizes.text(MirrorText.RECORD.uppercase(), ArcType.displaySub) else 0.dp),
+        sizes.chip(10.dp, 0.dp),
+        sizes.chip(0.dp, sizes.text(MirrorText.ERASE.uppercase(), ArcType.displaySub)).takeIf { edit && (t.erase || t.hasNotes.any { it }) },
+        sizes.chip(12.dp, 0.dp).takeIf { edit && t.canUndo },
+    )
+    return when {
+        lineFits(chips + sizes.chip(0.dp, sizes.text(MirrorText.STEP.uppercase(), ArcType.displaySub)), width, 0.dp) -> StepFit.WORD
+        lineFits(chips + sizes.chip(StepGlyphWidth, 0.dp), width, 0.dp) -> StepFit.GLYPH
+        else -> StepFit.NONE
+    }
+}
+
 /** The room the stopped line keeps for its own words beside STEP's chip: with its word, and at least, with its glyph. */
 private val IdleRoomy = 140.dp
 private val IdleMin = 64.dp
@@ -892,10 +914,12 @@ internal fun TransportUi.hasWords(): Boolean = phase != TransportPhase.STOPPED |
 
 /**
  * The pattern's row in the all-groups display ([Display]): RECORD and PLAY,
- * ERASE and ↶ where they fit, CORRECT while it plays with timing correct on
- * ([step]), and its words while it has some, as on the
- * line ([PatternLine]); [beatState] from the display's [patternTrack]. The row is
- * there while stopped too, so the pads don't move as the pattern starts.
+ * ERASE and ↶ where they fit, STEP's chip while it is stopped (the panel
+ * opens on the group last selected or pressed: [LiveStep]), CORRECT while it
+ * plays with timing correct on ([step]), and its words while it has some, as
+ * on the line ([PatternLine]); [beatState] from the display's [patternTrack].
+ * The row is there while stopped too, so the pads don't move as the pattern
+ * starts.
  */
 @Composable
 internal fun PatternRow(t: TransportUi, beatState: State<LineBeat?>, still: Boolean, step: StepLine? = null) {
@@ -904,9 +928,13 @@ internal fun PatternRow(t: TransportUi, beatState: State<LineBeat?>, still: Bool
         val beat = beatState.value
         val correct = step != null && step.correct && t.phase == TransportPhase.PLAYING
         val fit = lineFit(t, null, compact = false, width = maxWidth, padding = 0.dp, correct = correct)
+        val stepping = step != null && step.opens && t.phase == TransportPhase.STOPPED && !t.erase
+        val edit = fit.edit && t.phase != TransportPhase.COUNT_IN && t.phase != TransportPhase.ARMED
+        val stepFit = if (stepping) stepRowFit(t, maxWidth, fit, edit) else StepFit.NONE
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TransportChips(t, beat, compact = false, steady = still || reducedMotion(), recordWord = fit.recordWord)
-            EditChips(t, compact = false, show = fit.edit && t.phase != TransportPhase.COUNT_IN && t.phase != TransportPhase.ARMED)
+            EditChips(t, compact = false, show = edit)
+            if (step != null && stepFit != StepFit.NONE) StepChip(step, compact = false, word = stepFit == StepFit.WORD)
             if (correct && step != null) CorrectChip(step, compact = false)
             if (t.hasWords()) PatternWords(t, beat, compact = false, corrected = step?.status?.takeIf { correct }) else Box(Modifier.weight(1f))
         }

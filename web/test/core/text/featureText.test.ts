@@ -473,5 +473,6 @@ describe('FeatureTextTest', () => {
     expect([MirrorText.STEP, MirrorText.VEL, MirrorText.LEN, MirrorText.BAR, MirrorText.CORRECT].map((w) => w.toUpperCase())).toEqual(['STEP', 'VEL', 'LEN', 'BAR', 'CORRECT'])
     expect(MirrorText.NUDGE_NOTE).toBe('Tap a lit pad to pick it, then \u2212 and + move its note.')
     expect(CoachText.STEP).toBe('Step through the pattern')
+    expect(MirrorText.STEP_GROUP).toBe('Editing in step')
   })
 })

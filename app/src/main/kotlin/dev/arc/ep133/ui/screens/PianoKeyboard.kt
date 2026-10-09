@@ -14,6 +14,12 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
@@ -109,7 +115,10 @@ private val BlackRadius = 4.dp
  * The piano over [range]: device notes light their own key (and one the
  * piano doesn't reach puts an orange tick at that end), the notes playing on
  * the phone are outlined. [now] is the fade's clock, read while drawing so a
- * fade redraws the keys without recomposing them.
+ * fade redraws the keys without recomposing them. [step]: the STEP panel is
+ * open ([PadStep], by MIDI note): the keys with a note on the cursor's step
+ * outlined, the one picked for − / + ringed, a key held while the panel's
+ * RECORD is lit as it goes on the step, and a long press picking a key.
  */
 @Composable
 internal fun PianoKeyboard(
@@ -123,15 +132,16 @@ internal fun PianoKeyboard(
     haptics: Boolean = true,
     /** While the arp is on: each finger's pressure, the touch's own, for the note it is on. */
     pressure: ((note: Int, pressure: Float) -> Unit)? = null,
+    step: PadStep? = null,
 ) {
     // Low notes on the left in every language, as on the instrument.
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-        Keyboard(range, st, keys, now, actions, modifier, haptics, pressure)
+        Keyboard(range, st, keys, now, actions, modifier, haptics, pressure, step)
     }
 }
 
 @Composable
-private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> Long, actions: KeysActions, modifier: Modifier, haptics: Boolean, pressure: ((Int, Float) -> Unit)?) {
+private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> Long, actions: KeysActions, modifier: Modifier, haptics: Boolean, pressure: ((Int, Float) -> Unit)?, step: PadStep?) {
     val c = LocalArcColors.current
     val hw = LocalHwColors.current
     val density = LocalDensity.current
@@ -145,6 +155,9 @@ private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> 
     val currentRange by rememberUpdatedState(range)
     val currentActions by rememberUpdatedState(actions)
     val currentPressure by rememberUpdatedState(pressure)
+    val currentStep by rememberUpdatedState(step)
+    // The touch's pressure as a key goes down, for the note the STEP panel's RECORD + key places ([LocalDownPressure]).
+    val downPressure = LocalDownPressure.current
     val tick by rememberUpdatedState(if (haptics) LocalHapticFeedback.current else null)
     // The notes a finger is on, and how far down each key is (0..1, read while drawing).
     val fingered = remember { mutableStateOf(emptySet<Int>()) }
@@ -194,11 +207,19 @@ private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> 
                 val mark = Piano.mark(note, keys.root, keys.scale)
                 Box(
                     Modifier.semantics {
-                        contentDescription = MirrorText.pianoKey(note, keys.names, mark)
+                        contentDescription = MirrorText.pianoKey(note, keys.names, mark) + when {
+                            step?.picked == note -> MirrorText.PICKED
+                            step != null && note in step.lit -> MirrorText.ON_STEP
+                            else -> ""
+                        }
                         role = Role.Button
                         onClick(label = MirrorText.PLAY) {
+                            downPressure?.set(0, Float.NaN)
                             currentActions.onNote(note, false, System.nanoTime())
                             true
+                        }
+                        if (step != null) {
+                            customActions = listOf(CustomAccessibilityAction(MirrorText.PICK) { currentStep?.onPick?.invoke(note) == true })
                         }
                     },
                 )
@@ -213,11 +234,14 @@ private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> 
                 isTraversalGroup = true
                 contentDescription = MirrorText.pianoRange(range.first, range.last, keys.names)
             }
-            .pointerInput(Unit) {
+            .pointerInput(Unit) { coroutineScope {
+                val pickScope = this
                 val slop = SlideSlop.toPx()
                 awaitEachGesture {
                     // Each finger: the note under it, where it was, and which layout that was in.
                     val fingers = HashMap<PointerId, Finger>()
+                    // The STEP panel: a finger held still on a key picks it, once the long press time has passed.
+                    val picking = HashMap<PointerId, Job>()
                     try {
                         do {
                             val event = awaitPointerEvent()
@@ -229,11 +253,28 @@ private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> 
                                     ch.changedToDownIgnoreConsumed() -> {
                                         val note = Piano.keyAt(laid, ch.position.x, ch.position.y, null, 0f)
                                         fingers[ch.id] = Finger(note, ch.position, geometry.generation)
-                                        if (note != null) play(touches.down(id, note), PressTime.of(ch.uptimeMillis))
+                                        if (note != null) {
+                                            downPressure?.set(0, ch.pressure)
+                                            play(touches.down(id, note), PressTime.of(ch.uptimeMillis))
+                                            if (currentStep != null) {
+                                                val at = ch.position
+                                                val wait = viewConfiguration.longPressTimeoutMillis
+                                                val touchSlop = viewConfiguration.touchSlop
+                                                picking[ch.id] = pickScope.launch {
+                                                    delay(wait)
+                                                    val now = fingers[ch.id]
+                                                    if (now != null && now.note == note && (now.anchor - at).getDistance() <= touchSlop) {
+                                                        val picked = currentStep?.onPick?.invoke(note) == true
+                                                        tick?.performHapticFeedback(if (picked) HapticFeedbackType.LongPress else HapticFeedbackType.Reject)
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
                                     // Lifted, or taken over (a cancel lifts it too).
                                     !ch.pressed -> {
                                         fingers.remove(ch.id)
+                                        picking.remove(ch.id)?.cancel()
                                         play(touches.up(id), PressTime.of(ch.uptimeMillis))
                                     }
                                     ch.positionChanged() -> {
@@ -244,6 +285,7 @@ private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> 
                                         if (!resting) {
                                             val note = Piano.keyAt(laid, ch.position.x, ch.position.y, f?.note, slop)
                                             fingers[ch.id] = Finger(note, ch.position, geometry.generation)
+                                            if (note != f?.note) picking.remove(ch.id)?.cancel()
                                             play(touches.move(id, note), PressTime.of(ch.uptimeMillis))
                                         }
                                     }
@@ -255,14 +297,15 @@ private fun Keyboard(range: IntRange, st: MirrorState, keys: KeysUi, now: () -> 
                         } while (event.changes.any { it.pressed })
                     } finally {
                         // Also when the keys leave the screen (turned upright, or PADS) under a finger.
+                        picking.values.forEach { it.cancel() }
                         play(touches.releaseAll())
                     }
                 }
-            }
+            } }
             .drawBehind {
                 val laid = geometry.keys(range, size.width, size.height)
                 // A preview draws one frame: there a sounding key is simply down.
-                drawPiano(laid, range, st, keys, now(), c, hw, labels) { n ->
+                drawPiano(laid, range, st, keys, now(), c, hw, labels, step, fingered.value) { n ->
                     if (still && n in keys.playingNotes) 1f else down[n] ?: 0f
                 }
             },
@@ -342,6 +385,9 @@ private fun DrawScope.drawPiano(
     c: ArcColors,
     hw: HwColors,
     labels: Labels,
+    /** The STEP panel's keys, by MIDI note, and the notes a finger is on (a key held while its RECORD is lights up as it goes on the step). */
+    step: PadStep?,
+    fingered: Set<Int>,
     /** How far down a key is, 0..1. */
     pressOf: (Int) -> Float,
 ) {
@@ -362,6 +408,7 @@ private fun DrawScope.drawPiano(
     }
     val line = 1.dp.toPx()
     val held = 2.dp.toPx()
+    val pickedStroke = 3.dp.toPx()
     val rootOnWhite = c.rootOn(c.pianoWhite)
     // A key down on its edge: the face, and all drawn on it, moved by the edge's offset.
     val travel = Offset(CapDx.toPx(), CapDy.toPx())
@@ -381,9 +428,12 @@ private fun DrawScope.drawPiano(
         if (k.black) continue
         val r = k.rect
         val mark = Piano.mark(k.note, keys.root, keys.scale)
-        val g = lit[k.note] ?: 0f
+        val g = if (step?.placing == true && k.note in fingered) 1f else lit[k.note] ?: 0f
         val playing = k.note in keys.playingNotes
+        val onStep = step != null && k.note in step.lit
+        val picked = step?.picked == k.note
         val color = lerp(if (mark == KeyMark.OUT) c.keyOut else c.pianoWhite, c.signal, g)
+        if (picked) drawPickHalo(Rect(r.left + gap / 2, r.top, r.right - gap / 2, r.bottom), whiteCorner, c.signal, pressOf(k.note), travel)
         val face = drawCap(Rect(r.left + gap / 2, r.top, r.right - gap / 2, r.bottom), whiteCorner, color, capEdge(color), pressOf(k.note), travel)
         val cx = face.center.x
         val cy = face.bottom - foot - ring / 2
@@ -400,7 +450,7 @@ private fun DrawScope.drawPiano(
             val ink = if (onLit) c.onSignal else if (own) c.ink else c.pianoDigit
             drawText(d, ink, Offset(cx - d.size.width / 2f, cy - ring / 2 - 4.dp.toPx() - d.size.height))
         }
-        if (playing) drawHeld(face, whiteCorner, held, c.pianoSignal)
+        if (playing || onStep || picked) drawHeld(face, whiteCorner, if (picked) pickedStroke else held, c.pianoSignal)
     }
 
     // Black keys over them: dark caps, outlined (in the dark theme the outline is what
@@ -414,9 +464,12 @@ private fun DrawScope.drawPiano(
         if (!k.black) continue
         val r = k.rect
         val mark = Piano.mark(k.note, keys.root, keys.scale)
-        val g = lit[k.note] ?: 0f
+        val g = if (step?.placing == true && k.note in fingered) 1f else lit[k.note] ?: 0f
         val playing = k.note in keys.playingNotes
+        val onStep = step != null && k.note in step.lit
+        val picked = step?.picked == k.note
         val color = lerp(if (mark == KeyMark.OUT) c.keyOutBlack else c.pianoBlack, c.signal, g)
+        if (picked) drawPickHalo(Rect(r.left, r.top, r.right, r.bottom), blackCorner, c.signal, pressOf(k.note), travel)
         val face = drawCap(Rect(r.left, r.top, r.right, r.bottom), blackCorner, color, lerp(hw.darkEdge, c.signalEdge, g), pressOf(k.note), travel)
         drawRoundRect(c.pianoLine, face.topLeft, face.size, blackCorner, style = Stroke(line))
         val onLit = g > 0.3f
@@ -428,7 +481,7 @@ private fun DrawScope.drawPiano(
             if (mark == KeyMark.ROOT) drawRootBar(ink, cx, blackRing, face.bottom)
             if (keys.showNames) drawLabel(labels.name(k.note), ink, Offset(cx, cy))
         }
-        if (playing) drawHeld(face, blackCorner, held, c.pianoSignal)
+        if (playing || onStep || picked) drawHeld(face, blackCorner, if (picked) pickedStroke else held, c.pianoSignal)
     }
 
     // A device note the piano doesn't reach: an orange tick at that end.
@@ -475,7 +528,20 @@ private fun DrawScope.drawCap(rect: Rect, corner: CornerRadius, color: Color, ed
     return face
 }
 
-/** Playing on the phone: the signal orange inside the key's face, as on the grid. */
+/** A key picked for − / + in the STEP panel: a soft ring in [color] just outside its cap, as the grid's pads have. */
+private fun DrawScope.drawPickHalo(rect: Rect, corner: CornerRadius, color: Color, down: Float, travel: Offset) {
+    val out = 4.dp.toPx()
+    val moved = if (down != 0f) rect.translate(travel * down) else rect
+    drawRoundRect(
+        color.copy(alpha = 0.28f),
+        Offset(moved.left - out, moved.top - out),
+        Size(moved.width + out * 2, moved.height + out * 2),
+        CornerRadius(corner.x + out),
+        style = Stroke(out * 1.6f),
+    )
+}
+
+/** Playing on the phone, or on the STEP panel's cursor step: the signal orange inside the key's face, as on the grid. */
 private fun DrawScope.drawHeld(face: Rect, corner: CornerRadius, stroke: Float, color: Color) {
     val inset = stroke / 2
     drawRoundRect(

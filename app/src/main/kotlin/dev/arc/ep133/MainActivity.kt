@@ -1045,7 +1045,7 @@ class MainActivity : ComponentActivity() {
                     onGuide = { guideOpen = it },
                     guide = { GuideScreen(onBack = { guideOpen = false }) },
                     // On a phone on its side, Live's display line rides in the top bar.
-                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, transport = liveTransport, take = liveTake, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys, sample = sampleUi, punch = punches, arp = arp.line, header = sampleHeader, step = liveStep, stepOpens = appSettings.liveOneGroup && !appSettings.liveKeys, scene = liveScene, sceneOpens = appSettings.liveOneGroup && !appSettings.liveKeys) }) else null,
+                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, transport = liveTransport, take = liveTake, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys, sample = sampleUi, punch = punches, arp = arp.line, header = sampleHeader, step = liveStep, scene = liveScene, sceneOpens = appSettings.liveOneGroup && !appSettings.liveKeys) }) else null,
                     sample = sampleKey,
                     late = lateKey,
                 ) {

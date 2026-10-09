@@ -1019,6 +1019,9 @@ object MirrorText {
     const val ON_STEP = ", on the step"
     const val PICKED = ", picked"
 
+    /** A group's state for screen readers on the all-groups page while the STEP panel is open on it (the group its pads' notes go to). */
+    const val STEP_GROUP = "Editing in step"
+
     /** A long press on a lit pad or key: picked for − / +; its action's name for screen readers. */
     const val PICK = "Pick to nudge"
 

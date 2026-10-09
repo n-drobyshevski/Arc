@@ -71,6 +71,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -105,6 +106,12 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import dev.arc.ep133.controller.ClipMode
 import dev.arc.ep133.controller.MirrorUi
+import dev.arc.ep133.controller.StepHosting
+import dev.arc.ep133.controller.StepView
+import dev.arc.ep133.controller.stepGroupFor
+import dev.arc.ep133.controller.stepHosting
+import dev.arc.ep133.controller.stepOffered
+import dev.arc.ep133.controller.stepView
 import dev.arc.ep133.controller.punchSlotForPad
 import dev.arc.ep133.features.FxType
 import dev.arc.ep133.features.FactorySounds
@@ -473,13 +480,18 @@ fun MirrorScreen(
     arp: LiveArp? = null,
     /**
      * STEP (an addition; null for none): the STEP chip on the stopped display
-     * line, where the layout has room for the panel (one group's pads and
-     * KEYS' grid, upright, and the pads on its side), unrolls the line into
-     * the STEP panel over the function keys, as SAMPLE's does. While it is
-     * open the pads and keys are its own ([LiveStep]): the cursor's step lit
-     * on them, a press placing (RECORD held), picking (NUDGE) or sounding,
-     * a long press picking. While the pattern plays with CORRECT on, a pad
-     * held corrects its notes as it passes, as ERASE's erases them.
+     * line (on the all-groups page, in the pattern's row under it), in every
+     * view ([StepView]): one group's pads, the four groups, KEYS' grid and
+     * the piano, upright or on its side. It unrolls the line into the STEP
+     * panel over the function keys, as SAMPLE's does, or where that has no
+     * room (KEYS' grid and the short piano on their side) the panel comes out
+     * in a column left of the keys ([stepHosting]). While it is open the pads
+     * and keys are its own ([LiveStep]): the cursor's step lit on them, a
+     * press placing (RECORD held), picking (NUDGE) or sounding, a long press
+     * picking. It edits the group shown: one group's, the KEYS sound's, and
+     * on the all-groups page the group last selected or pressed ([stepGroupFor]).
+     * While the pattern plays with CORRECT on, a pad held corrects its notes
+     * as it passes, as ERASE's erases them.
      */
     step: LiveStep? = null,
     /**
@@ -544,10 +556,21 @@ fun MirrorScreen(
     // The pads whose press went to the STEP panel (their lift goes there too, even once it has closed), and those held to
     // CORRECT while playing, as ERASE's.
     val stepPressed = remember { HashSet<PhysicalPad>() }
+    // Those of the scrolling all-groups page still unsure (a scroll may take the finger): the time and pressure they came down at.
+    val stepUnsure = remember { HashMap<PhysicalPad, Pair<Long, Float>>() }
     val correctHeld = remember { HashSet<PhysicalPad>() }
     val correctUnsure = remember { HashMap<PhysicalPad, Long>() }
     // The touch's pressure as a pad or key goes down ([holdToPlay]): a note RECORD + pad places takes its velocity from it.
     val downPressure = remember { floatArrayOf(Float.NaN) }
+    // The group shown in the one-group view; Follow switches it to the group just played.
+    var group by rememberSaveable { mutableIntStateOf(initialGroup) }
+    // A pad down in the STEP panel. The all-groups page has all four groups' pads under the one panel: a press in another
+    // group makes it the group shown (the desk takes the panel there, on the step it shows: [StepDesk.press]).
+    val stepPadDown = { pad: PhysicalPad, at: Long, pressure: Float ->
+        if (!oneGroup && pad.group != group) group = pad.group
+        step?.onPadDown(pad, at, pressure)
+        Unit
+    }
     // The order a press goes: PROJECT held, SAMPLE, STEP, ERASE, CORRECT, then (EDIT's long press too) play.
     val padPress = onPad?.let { f ->
         { pad: PhysicalPad, h: Boolean, unsure: Boolean, at: Long ->
@@ -557,9 +580,14 @@ fun MirrorScreen(
                     samplePressed += pad
                     sample?.onPadDown(pad, at, unsure)
                 } else if (stepping && step != null) {
-                    step.onPadDown(pad, at, downPressure[0])
-                    // A screen reader's click: a tap.
-                    if (h) stepPressed += pad else step.onPadUp(pad, at)
+                    if (h && unsure) {
+                        // Placed and sounded once it is a press, not a scroll ([padKept]).
+                        stepUnsure[pad] = at to downPressure[0]
+                    } else {
+                        stepPadDown(pad, at, downPressure[0])
+                        // A screen reader's click: a tap.
+                        if (h) stepPressed += pad else step.onPadUp(pad, at)
+                    }
                 } else if (correcting && step != null) {
                     when {
                         // A screen reader's click: a tap.
@@ -596,7 +624,12 @@ fun MirrorScreen(
         if (!hold.took(pad)) {
             val erasedAt = eraseUnsure.remove(pad)
             val correctedAt = correctUnsure.remove(pad)
+            val stepped = stepUnsure.remove(pad)
             when {
+                stepped != null -> {
+                    stepPressed += pad
+                    stepPadDown(pad, stepped.first, stepped.second)
+                }
                 erasedAt != null -> {
                     eraseHeld += pad
                     transport?.onErasePadDown(pad, erasedAt)
@@ -617,7 +650,7 @@ fun MirrorScreen(
                 stepPressed.remove(pad) -> step?.onPadUp(pad, at)
                 eraseHeld.remove(pad) -> transport?.onErasePadUp(pad, at)
                 correctHeld.remove(pad) -> step?.onCorrectPadUp(pad, at)
-                eraseUnsure.remove(pad) != null || correctUnsure.remove(pad) != null -> Unit
+                eraseUnsure.remove(pad) != null || correctUnsure.remove(pad) != null || stepUnsure.remove(pad) != null -> Unit
                 else -> onPadUp(pad, at)
             }
         }
@@ -629,7 +662,7 @@ fun MirrorScreen(
                 stepPressed.remove(pad) -> step?.onPadUp(pad, System.nanoTime())
                 eraseHeld.remove(pad) -> transport?.onErasePadUp(pad, System.nanoTime())
                 correctHeld.remove(pad) -> step?.onCorrectPadUp(pad, System.nanoTime())
-                eraseUnsure.remove(pad) != null || correctUnsure.remove(pad) != null -> Unit
+                eraseUnsure.remove(pad) != null || correctUnsure.remove(pad) != null || stepUnsure.remove(pad) != null -> Unit
                 else -> onPadCut(pad)
             }
         }
@@ -780,8 +813,6 @@ fun MirrorScreen(
     val clock = { fixedNow ?: if (fading) frame else System.nanoTime() }
     // The secondary controls live in a side panel, opened from the strip on the right.
     var toolsOpen by rememberSaveable { mutableStateOf(initialToolsOpen) }
-    // The group shown in the one-group view; Follow switches it to the group just played.
-    var group by rememberSaveable { mutableIntStateOf(initialGroup) }
     val hitGroup = st.lastHit?.pad?.group
     LaunchedEffect(hitGroup, st.lastHit, follow, oneGroup) {
         if (oneGroup && follow && hitGroup != null) group = hitGroup
@@ -790,8 +821,10 @@ fun MirrorScreen(
     LaunchedEffect(st.lastHit, keys.on) {
         if (!keys.on) st.lastHit?.pad?.let(keysActions.onSelect)
     }
-    // STEP's panel steps through the group shown (in KEYS, the KEYS sound's).
-    val stepGroup = if (keys.on) keys.pad?.group else group
+    // STEP's panel steps through the group shown (in KEYS, the KEYS sound's; on the all-groups page, the group last selected or
+    // whose pad was pressed last: [stepGroupFor]). The page's group is the one source: it opens the panel (the top bar's line
+    // too) and a pad pressed in another group on the all-groups page moves it ([stepPadDown]), the desk following.
+    val stepGroup = stepGroupFor(stepView(keys.on, piano = false, oneGroup = oneGroup), group, keys.pad?.group)
     LaunchedEffect(stepGroup, stepping) {
         if (stepping && stepGroup != null && stepGroup != step?.ui?.group) step?.onGroup(stepGroup)
     }
@@ -836,9 +869,12 @@ fun MirrorScreen(
         val padW = ((roomW - SideFunctions - SideControlsGap - 42.dp) / 4 - 2.dp) / 3
         val allGroupsSideways = sideways && minOf((roomH + ControlsRow - caption - 3.dp) / 4, padW) >= 40.dp &&
             roomH + ControlsRow >= FunctionColumnLed
-        // STEP's panel where the layout has room for it: one group's pads and KEYS' grid upright, and one group's pads on
-        // its side (not the piano, the four groups or KEYS' grid on its side). The STEP chip shows only there.
-        val stepHost = step != null && onBack == null && transport != null && piano == null && if (keys.on) !sideways else oneGroup
+        // STEP's panel in every view of Live (the Live tab, with the pattern's transport): one group's pads, the four groups,
+        // KEYS' grid and the piano, upright or on its side. How each hosts it is [stepHosting]'s: the display line growing into
+        // it, or its own face in the function keys' place. The STEP chip shows wherever the view shows the pattern's chips.
+        val stepHost = stepOffered(step != null, onBack == null, transport != null)
+        val stepViewHere = stepView(keys.on, piano != null, oneGroup)
+        val hosting = stepHosting(stepViewHere, sideways, window.short)
         // The SCENE panel's where STEP's is, and where its taller body leaves room (a short window on its side gives it up).
         val sceneHost = scene != null && onBack == null && transport != null && piano == null && sceneFits(window) && if (keys.on) !sideways else oneGroup
         // The panel follows SAMPLE's mode and STEP's and SCENE's panels, whichever is open (the controller keeps them apart): it
@@ -882,13 +918,17 @@ fun MirrorScreen(
         // The group keys carry the patterns' numbers where there is something to say.
         val groupNumbers = scene?.let { groupNumbers(it.ui, steady = fixedNow != null || it.still || reduceMotion) }
         // The pads (and keys) while the panel is open: the cursor's step lit, the one picked ringed, a long press picking.
-        val padStep = if (stepping && step != null) {
-            PadStep(stepLitPads(step.ui, group), stepPickedPad(step.ui, group), step.ui.recordHeld) { o -> step.onPadPick(PhysicalPad(group, o)) }
-        } else {
-            null
+        // [padStepFor]: one group's grid; on the all-groups page each group's own, the panel's group named by its caption.
+        val padStepFor: (Int) -> PadStep? = { g ->
+            if (stepping && step != null) {
+                PadStep(stepLitPads(step.ui, g), stepPickedPad(step.ui, g), step.ui.recordHeld, edited = step.ui.group == g) { o -> step.onPadPick(PhysicalPad(g, o)) }
+            } else {
+                null
+            }
         }
+        val padStep = padStepFor(group)
         val keysStep = if (stepping && step != null) {
-            PadStep(stepLitNotes(step.ui, keys.pad), stepPickedNote(step.ui, keys.pad), step.ui.recordHeld, step.onNotePick)
+            PadStep(stepLitNotes(step.ui, keys.pad), stepPickedNote(step.ui, keys.pad), step.ui.recordHeld, onPick = step.onNotePick)
         } else {
             null
         }
@@ -1053,23 +1093,14 @@ fun MirrorScreen(
                 // Where the line grows into a panel (SAMPLE's, STEP's or SCENE's) rather than sitting over the function keys.
                 val morphs = panelOn || stepHost || sceneHost
                 if (piano != null) {
-                    Column(sidewaysColumn) {
-                        if (!inBar) {
-                            KeysDisplay(st, mirror, keysNow, transport, take, still = fixedNow != null, pianoRange = piano, arp = arpLine, step = stepLine)
-                            Spacer(Modifier.height(10.dp))
-                        }
-                        // A tablet's function keys, then the row over the piano and the piano; upright
-                        // they sit right under the display line, as on the web. The short sideways
-                        // piano goes without them, for the keys' height. With no plate round the
-                        // piano, the row starts with the mode word.
-                        if (pianoFunctions) {
-                            FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
-                            Spacer(Modifier.height(10.dp))
-                        }
-                        Column(Modifier.weight(1f, fill = false)) {
+                    val keysLine: @Composable () -> Unit = { KeysDisplay(st, mirror, keysNow, transport, take, still = fixedNow != null, pianoRange = piano, arp = arpLine, step = stepLine) }
+                    val fnRow: @Composable () -> Unit = { FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey) }
+                    // The mode row over the piano and the piano; on a tablet no taller than a hand spans. The arp's notes, held
+                    // and sounding, are down on the piano as the phone's own are. STEP's panel lights the keys with notes on the
+                    // cursor's step, a press places (RECORD held), picks (NUDGE) or sounds, a long press picks ([keysStep]).
+                    val pianoBody: @Composable (Modifier) -> Unit = { m ->
+                        Column(m) {
                             ModeRow(keys, keysActions, landscape = true, viewSwitch = viewSwitch, arp = arp)
-                            // The rest of the room; on a tablet no taller than a hand spans.
-                            // The arp's notes, held and sounding, are down on the piano as the phone's own are.
                             val pianoKeys = if (keysNow.arpHeld.isEmpty() && keysNow.arpLit.isEmpty()) keysNow else keysNow.copy(playingNotes = keysNow.playingNotes + keysNow.arpHeld + keysNow.arpLit)
                             PianoKeyboard(
                                 piano, st, pianoKeys, clock, keysPlay,
@@ -1080,7 +1111,48 @@ fun MirrorScreen(
                                     .coachMark("live.keys", CoachText.PIANO, CoachYellow, CoachYellowInk),
                                 haptics = haptics,
                                 pressure = notePressure,
+                                step = keysStep,
                             )
+                        }
+                    }
+                    if (stepHost && hosting == StepHosting.SLOT) {
+                        // The short sideways piano has no function keys, and no height to give: STEP's panel comes out in a column
+                        // left of it, with a header of its own, the piano narrowing (the same keys, a little slimmer) as it does.
+                        Column(sidewaysColumn) {
+                            if (!inBar) {
+                                keysLine()
+                                Spacer(Modifier.height(10.dp))
+                            }
+                            val sideW = maxOf(sidePanelWidth(roomW - SideControlsGap, roomW * 0.6f), StepColumnMin)
+                            Row(Modifier.fillMaxWidth().weight(1f)) {
+                                functionSlot(Modifier.fillMaxHeight(), null, sideW) { Spacer(Modifier.fillMaxHeight()) }
+                                Spacer(Modifier.unrollWidth(panel, 0.dp, SideControlsGap))
+                                pianoBody(Modifier.weight(1f).fillMaxHeight())
+                            }
+                        }
+                    } else {
+                        Column(sidewaysColumn) {
+                            if (stepHost) {
+                                // A tablet's function keys under the line: it grows into STEP's panel over them.
+                                BoxWithConstraints(Modifier.fillMaxWidth()) {
+                                    lineMorph(Modifier.fillMaxWidth(), samplePanelFit(maxWidth, null), maxWidth, 10.dp, BodyCorner, keysLine, fnRow)
+                                }
+                                Spacer(Modifier.height(10.dp))
+                            } else {
+                                // A tablet's function keys, then the row over the piano and the piano; upright
+                                // they sit right under the display line, as on the web. The short sideways
+                                // piano goes without them, for the keys' height. With no plate round the
+                                // piano, the row starts with the mode word.
+                                if (!inBar) {
+                                    keysLine()
+                                    Spacer(Modifier.height(10.dp))
+                                }
+                                if (pianoFunctions) {
+                                    fnRow()
+                                    Spacer(Modifier.height(10.dp))
+                                }
+                            }
+                            pianoBody(Modifier.weight(1f, fill = false))
                         }
                     }
                 } else if (sideways && !keys.on && oneGroup) {
@@ -1161,10 +1233,10 @@ fun MirrorScreen(
                     val fnColumn: @Composable () -> Unit = { FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey) }
                     val groups: @Composable (Modifier) -> Unit = { m ->
                         Row(m, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                            for (g in 0..3) Group(g, st, nameOf, now, Modifier.weight(1f).fillMaxHeight(), fill = true, onPad = padPress, onPadKept = padKept, onPadUp = padUp, onPadCut = padCut, playingPads = ringed, onEdit = editPad, haptics = haptics, sampling = padSampling, erase = eraseDots, arpLit = arpLitPads, onPadPressure = padPressure)
+                            for (g in 0..3) Group(g, st, nameOf, now, Modifier.weight(1f).fillMaxHeight(), fill = true, onPad = padPress, onPadKept = padKept, onPadUp = padUp, onPadCut = padCut, playingPads = ringed, onEdit = editPad, haptics = haptics, sampling = padSampling, erase = eraseDots, arpLit = arpLitPads, onPadPressure = padPressure, step = padStepFor(g))
                         }
                     }
-                    if (panelOn && !inBar) {
+                    if (morphs && !inBar) {
                         // The display line grows down the left into the panel, the groups keeping at least three fifths of
                         // the room (their pads, narrower, no taller than wide) and gliding to it from their top left.
                         val sideW = sidePanelWidth(roomW, roomW * 0.6f)
@@ -1181,7 +1253,7 @@ fun MirrorScreen(
                             padsLine()
                             Spacer(Modifier.height(10.dp))
                         }
-                        if (!panelOn) {
+                        if (!morphs) {
                             Row(Modifier.fillMaxWidth().weight(1f, fill = false), horizontalArrangement = Arrangement.spacedBy(SideControlsGap)) {
                                 fnColumn()
                                 groups(Modifier.weight(1f).heightIn(max = caption + 3.dp + padW * 4))
@@ -1236,20 +1308,51 @@ fun MirrorScreen(
                                     // Short of width (a narrow window), the columns close up before the keys' words clip.
                                     val gap = if (roomy.u < KeysTightU) SideGapTight else SideGap
                                     val k = KoGeom.fit(maxWidth - columns - gap * gaps, maxHeight, 3)
-                                    Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally)) {
-                                        FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
-                                        if (viewSwitch != null) SidewaysKeysLead(viewSwitch)
-                                        KeysGrid(
-                                            st, keysNow, now, keysPlay,
-                                            Modifier.width(k.width(3)).fillMaxHeight()
-                                                .coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
-                                            haptics = haptics,
-                                            hold = hold,
-                                            functions = functions,
-                                            mode = modeStrip,
-                                            pressure = notePressure,
-                                        )
-                                        SidewaysKeysPicks(keys, keysActions)
+                                    if (stepHost && hosting == StepHosting.SLOT) {
+                                        // STEP's panel in the function keys' column, with a header of its own (the line stays where
+                                        // it is, over the keys or in the top bar): the column unrolls to the panel's width and the
+                                        // keys glide narrower beside it ([PadsGlide]); the view words and the picks keep theirs.
+                                        val others = columns - SideFunctions
+                                        val closedW = minOf(maxWidth, columns + gap * gaps + k.width(3))
+                                        val sideW = sidePanelWidth(maxWidth - others - gap * gaps, k.width(3))
+                                        val openW = minOf(maxWidth, sideW + others + gap * gaps + k.width(3))
+                                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                            Row(Modifier.unrollWidth(panel, closedW, openW).fillMaxHeight(), horizontalArrangement = Arrangement.spacedBy(gap)) {
+                                                functionSlot(Modifier.fillMaxHeight(), null, sideW) {
+                                                    FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
+                                                }
+                                                if (viewSwitch != null) SidewaysKeysLead(viewSwitch)
+                                                PadsGlide(panel, Modifier.weight(1f).fillMaxHeight().then(swipe), scaleOf = { w, h -> koUnit(w, h, 3) }) {
+                                                    KeysGrid(
+                                                        st, keysNow, now, keysPlay,
+                                                        Modifier.fillMaxSize().coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
+                                                        haptics = haptics,
+                                                        hold = hold,
+                                                        functions = functions,
+                                                        mode = modeStrip,
+                                                        pressure = notePressure,
+                                                        step = keysStep,
+                                                    )
+                                                }
+                                                SidewaysKeysPicks(keys, keysActions)
+                                            }
+                                        }
+                                    } else {
+                                        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally)) {
+                                            FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
+                                            if (viewSwitch != null) SidewaysKeysLead(viewSwitch)
+                                            KeysGrid(
+                                                st, keysNow, now, keysPlay,
+                                                Modifier.width(k.width(3)).fillMaxHeight()
+                                                    .coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
+                                                haptics = haptics,
+                                                hold = hold,
+                                                functions = functions,
+                                                mode = modeStrip,
+                                                pressure = notePressure,
+                                            )
+                                            SidewaysKeysPicks(keys, keysActions)
+                                        }
                                     }
                                 }
                             } else if (keys.on) {
@@ -1337,7 +1440,7 @@ fun MirrorScreen(
                     val page = rememberScrollState()
                     // The panel opening on the page scrolled down to the pads (a swipe on the lower groups): the page
                     // goes back up with it, so the display grows into it in sight.
-                    if (panelOn) {
+                    if (morphs) {
                         LaunchedEffect(panel.open) {
                             if (panel.open && page.value > 0) {
                                 if (reduceMotion) page.scrollTo(0) else page.animateScrollTo(0)
@@ -1373,7 +1476,7 @@ fun MirrorScreen(
                             // worked out here rather than measured around the panel, which grows as it unrolls (that would
                             // compose it again on every frame).
                             val pageW = minOf(AllGroupsMaxWidth, roomW + startGutter + endGutter) - startGutter - endGutter
-                            if (!panelOn) {
+                            if (!morphs) {
                                 if (!inBar) line()
                                 fnRow()
                             } else if (!inBar) {
@@ -1390,7 +1493,7 @@ fun MirrorScreen(
                                     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                                         for (row in (0..3).chunked(perRow)) {
                                             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                                                for (g in row) Group(g, st, nameOf, now, Modifier.weight(1f), onPad = padPress, onPadKept = padKept, onPadUp = padUp, onPadCut = padCut, playingPads = ringed, onEdit = editPad, haptics = haptics, sampling = padSampling, erase = eraseDots, arpLit = arpLitPads, onPadPressure = padPressure)
+                                                for (g in row) Group(g, st, nameOf, now, Modifier.weight(1f), onPad = padPress, onPadKept = padKept, onPadUp = padUp, onPadCut = padCut, playingPads = ringed, onEdit = editPad, haptics = haptics, sampling = padSampling, erase = eraseDots, arpLit = arpLitPads, onPadPressure = padPressure, step = padStepFor(g))
                                             }
                                         }
                                     }
@@ -1513,11 +1616,10 @@ internal fun LivePill(
     arp: String? = null,
     /**
      * STEP, as [MirrorScreen] takes it: CORRECT's chip while the pattern plays
-     * with it on, and STEP's while stopped where the page under the bar has
-     * room for its panel ([stepOpens]: one group's pads).
+     * with it on, and STEP's while stopped (every view the page under the bar
+     * shows offers it, [stepOffered]).
      */
     step: LiveStep? = null,
-    stepOpens: Boolean = false,
     /**
      * The scene, as [MirrorScreen] takes it: its chip while stopped (the readout while the pattern plays) where the page
      * under the bar has room for the SCENE panel ([sceneOpens]: one group's pads).
@@ -1537,7 +1639,7 @@ internal fun LivePill(
     val sceneLine = scene?.let { sc -> SceneLine(sc.ui, opens = sceneOpens && sceneFits(LocalArcWindow.current) && !sc.ui.open, onOpen = { sc.onOpen(sc.ui.group) }) }
     val stepLine = if (step == null && sceneLine == null) null else {
         val s = step ?: LiveStep()
-        StepLine(opens = stepOpens && !s.ui.open, correct = s.ui.correct, status = s.ui.status, onOpen = { s.onOpen(s.ui.group) }, onCorrect = s.onCorrect, scene = sceneLine)
+        StepLine(opens = step != null && transport != null && !s.ui.open, correct = s.ui.correct, status = s.ui.status, onOpen = { s.onOpen(s.ui.group) }, onCorrect = s.onCorrect, scene = sceneLine)
     }
     val line: @Composable () -> Unit = {
         when {
@@ -1879,7 +1981,7 @@ private fun Group(
     arpLit: Set<PhysicalPad> = emptySet(),
     /** While the arp is on: a held pad's pressure, the touch's own. */
     onPadPressure: ((PhysicalPad, Float) -> Unit)? = null,
-    /** The STEP panel open (one group's big grid): the pads on the cursor's step lit, the one picked ringed ([PadStep]). */
+    /** The STEP panel open (one group's big grid, or a group of the all-groups page): the pads on the cursor's step lit, the one picked ringed ([PadStep]). */
     step: PadStep? = null,
     /** The group keys' pattern numbers ([GroupNumbers]), where there is something to say. */
     groupNumbers: GroupNumbers? = null,
@@ -1929,8 +2031,13 @@ private fun Group(
     }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         // The caption turns orange while one of the group's pads sounds (the big grid's
-        // group shows on its key instead).
-        Caption(MirrorText.GROUP + " " + ('A' + group), color = lerp(c.graphite, c.signal, groupGlow))
+        // group shows on its key instead), and while the STEP panel edits the group.
+        val edited = step?.edited == true
+        Caption(
+            MirrorText.GROUP + " " + ('A' + group),
+            Modifier.then(if (edited) Modifier.semantics { stateDescription = MirrorText.STEP_GROUP } else Modifier),
+            color = lerp(c.graphite, c.signal, if (edited) 1f else groupGlow),
+        )
         Deck(if (fill) Modifier.weight(1f) else Modifier) { gap ->
             PadNotes.ROWS.forEach { rowOffsets ->
                 // Side by side on a phone on its side, the rows share the height; else the pads are square.
@@ -1955,6 +2062,10 @@ private fun Group(
                             noteDot = erase?.let { pad in it },
                             arpLit = pad in arpLit,
                             onPressure = onPadPressure?.let { f -> { p: Float -> f(pad, p) } },
+                            stepLit = step != null && pad.offset in step.lit,
+                            picked = step?.picked == pad.offset,
+                            placing = step?.placing == true,
+                            onPick = step?.let { s -> { s.onPick(pad.offset) } },
                         )
                     }
                 }
@@ -2399,7 +2510,12 @@ private fun Pad(
                 val em = with(density) { labelStyle.fontSize.toDp() }
                 Box(Modifier.padding(start = em * 0.1f, top = em * 0.5f).size(em * 0.24f).clip(CircleShape).background(ink))
             } else {
-                Text(pad.label, style = labelStyle, color = ink, maxLines = 1, softWrap = false)
+                // Under the STEP panel the pads are smaller ([onPick]): ENTER shrinks on one too narrow for it, a digit keeps its size.
+                if (wide && onPick != null) {
+                    Text(pad.label, style = labelStyle, color = ink, maxLines = 1, softWrap = false, autoSize = TextAutoSize.StepBased(minFontSize = 5.sp, maxFontSize = labelStyle.fontSize, stepSize = 0.5.sp))
+                } else {
+                    Text(pad.label, style = labelStyle, color = ink, maxLines = 1, softWrap = false)
+                }
             }
         }
         if (ko != null) {
@@ -2491,6 +2607,8 @@ private fun Pad(
             when {
                 ko != null -> PaddingValues(horizontal = ko.u * 0.1f, vertical = ko.u * 0.06f)
                 big -> PaddingValues(10.dp)
+                // Under the STEP panel the pads are narrow: less at the sides, for ENTER.
+                onPick != null -> PaddingValues(start = 3.dp, top = 5.dp, end = 3.dp, bottom = 5.dp)
                 else -> PaddingValues(start = 6.dp, top = 5.dp, end = 7.dp, bottom = 5.dp)
             },
         )

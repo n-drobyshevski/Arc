@@ -481,5 +481,6 @@ class FeatureTextTest {
         assertEquals(listOf("STEP", "VEL", "LEN", "BAR", "CORRECT"), listOf(MirrorText.STEP, MirrorText.VEL, MirrorText.LEN, MirrorText.BAR, MirrorText.CORRECT).map { it.uppercase() })
         assertEquals("Tap a lit pad to pick it, then \u2212 and + move its note.", MirrorText.NUDGE_NOTE)
         assertEquals("Step through the pattern", CoachText.STEP)
+        assertEquals("Editing in step", MirrorText.STEP_GROUP)
     }
 }

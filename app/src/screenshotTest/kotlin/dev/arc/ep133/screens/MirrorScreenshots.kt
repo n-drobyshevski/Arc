@@ -221,7 +221,7 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
     val sceneUi = scene ?: transport?.let { LiveScene(still = true) }
     Framed(
         Tab.LIVE, connected = offline == null && error == null, dark = dark, guide = guide,
-        pill = { LivePill(mirror, keys, transport, takeUi, still = true, pianoRange = pianoRange, editing = edit == true, sample = sampleUi, punch = punch?.held.orEmpty(), arp = arp?.ui?.line, voices = voiceFlow, step = stepUi, stepOpens = oneGroup && !keys.on, scene = sceneUi, sceneOpens = oneGroup && !keys.on) }, toast = toast, barMiddle = barMiddle,
+        pill = { LivePill(mirror, keys, transport, takeUi, still = true, pianoRange = pianoRange, editing = edit == true, sample = sampleUi, punch = punch?.held.orEmpty(), arp = arp?.ui?.line, voices = voiceFlow, step = stepUi, scene = sceneUi, sceneOpens = oneGroup && !keys.on) }, toast = toast, barMiddle = barMiddle,
         toastAction = toastAction,
         sample = SampleKey(sampleUi.state.on && !keys.on) {},
         late = LateKey {}.takeIf { wireless },
@@ -1221,6 +1221,94 @@ fun LiveStepPanelSidewaysPreview() = Live(lastRead, oneGroup = true, transport =
 @Preview(name = "Live step panel side line", widthDp = 560, heightDp = 280, showBackground = true)
 @Composable
 fun LiveStepPanelSideLinePreview() = Live(lastRead, oneGroup = true, transport = patternUi(canUndo = true), step = LiveStep(stepPanel.copy(recordHeld = false, status = null)))
+
+// STEP on the all-groups page: its chip in the pattern's row under the big line; the display grows into the panel over the
+// function keys, the four groups under it. Group A is the one it edits (its caption in signal orange, the kick, the closed hat
+// and the snare lit on its pads).
+@PreviewTest
+@Preview(name = "Live step all groups", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveStepAllGroupsPreview() = Live(lastRead, transport = patternUi(canUndo = true), step = LiveStep(stepPanel.copy(recordHeld = false, status = null)))
+
+@PreviewTest
+@Preview(name = "Live step all groups dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveStepAllGroupsDarkPreview() = Live(lastRead, dark = true, transport = patternUi(canUndo = true), step = LiveStep(stepPanel))
+
+// A small phone: the chip among RECORD, PLAY, ERASE and undo in the row, and the panel's latches in a row of their own.
+@PreviewTest
+@Preview(name = "Live step all groups small", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun LiveStepAllGroupsSmallPreview() = Live(lastRead, transport = patternUi(canUndo = true), step = LiveStep(stepPanel.copy(recordHeld = false, status = null)))
+
+// The panel closed, the chip waiting in the row.
+@PreviewTest
+@Preview(name = "Live step all groups chip", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveStepAllGroupsChipPreview() = Live(lastRead, transport = patternUi(canUndo = true))
+
+// On its side, the four groups in a row: the line in the top bar, the panel in the function keys' column.
+@PreviewTest
+@Preview(name = "Live step all groups sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveStepAllGroupsSidewaysPreview() = Live(lastRead, transport = patternUi(canUndo = true), step = LiveStep(stepPanel.copy(recordHeld = false, status = null)))
+
+// The piano on a tablet, upright: the KEYS line grows into the panel over the function keys, the piano under it; the notes on
+// the step (DO and SOL) outlined on its keys.
+@PreviewTest
+@Preview(name = "Live step piano upright", widthDp = 800, heightDp = 1232, showBackground = true)
+@Composable
+fun LiveStepPianoUprightPreview() = Live(
+    keysPlaying.copy(notes = emptyMap()), keys = chord.copy(viewTall = dev.arc.ep133.features.KeysView.PIANO, playingNotes = emptySet()), transport = patternUi(canUndo = true),
+    step = LiveStep(stepPanel.copy(lit = setOf(9 to 0, 9 to 7), velocity = 110, gate = 48, recordHeld = false, status = null)),
+)
+
+// The piano on a phone on its side: no function keys over it, so the panel is a column left of the keys (its own header), the
+// piano narrower beside it; RECORD held, a key tapped onto the step ("+ KICK"), DO and SOL outlined, the key held lit.
+@PreviewTest
+@Preview(name = "Live step piano sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveStepPianoSidewaysPreview() = Live(
+    sideways, keys = chord.copy(playingNotes = emptySet()), piano = 48..72, transport = patternUi(canUndo = true),
+    step = LiveStep(stepPanel.copy(lit = setOf(9 to 0, 9 to 7), velocity = 110, gate = 48, status = MirrorText.stepPlaced("KICK"))),
+)
+
+@PreviewTest
+@Preview(name = "Live step piano sideways dark", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveStepPianoSidewaysDarkPreview() = Live(
+    sideways, dark = true, keys = chord.copy(playingNotes = emptySet()), piano = 48..72, transport = patternUi(canUndo = true),
+    step = LiveStep(stepPanel.copy(lit = setOf(9 to 0, 9 to 7), velocity = 110, gate = 48, recordHeld = false, status = null)),
+)
+
+// The piano on a phone on its side with a key picked for NUDGE (ringed), the line in the top bar: the panel in a column left of the keys, wide enough for BAR's pages.
+@PreviewTest
+@Preview(name = "Live step piano side line", widthDp = 640, heightDp = 360, showBackground = true)
+@Composable
+fun LiveStepPianoSideLinePreview() = Live(
+    sideways, keys = chord.copy(playingNotes = emptySet(), scale = dev.arc.ep133.features.Scale.MAJOR), piano = 48..60, transport = patternUi(canUndo = true),
+    step = LiveStep(
+        stepPanel.copy(lit = setOf(9 to 0, 9 to -5), picked = StepNote(PhysicalPad(0, 9), -5), recordHeld = false, status = MirrorText.stepNudged("SO", "1.2.2")),
+        pickedWord = "SO",
+    ),
+)
+
+// KEYS' grid on its side: the panel in the function keys' column (the view words and the picks keep theirs), the keys narrower beside it.
+@PreviewTest
+@Preview(name = "Live step keys sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveStepKeysSidewaysPreview() = Live(
+    sideways, keys = chord.copy(playingNotes = emptySet(), viewWide = dev.arc.ep133.features.KeysView.PADS), transport = patternUi(canUndo = true),
+    step = LiveStep(stepPanel.copy(lit = setOf(9 to 0, 9 to 7), velocity = 110, gate = 48, recordHeld = false, status = null)),
+)
+
+@PreviewTest
+@Preview(name = "Live step keys sideways dark", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveStepKeysSidewaysDarkPreview() = Live(
+    sideways, dark = true, keys = chord.copy(playingNotes = emptySet(), viewWide = dev.arc.ep133.features.KeysView.PADS), transport = patternUi(canUndo = true),
+    step = LiveStep(stepPanel.copy(lit = setOf(9 to 0, 9 to 7), velocity = 110, gate = 48, recordHeld = false, status = null)),
+)
 
 // PLAY folded the panel; CORRECT stays lit on the line, and the snare held as it plays has put 3 notes on the grid.
 @PreviewTest

@@ -7,6 +7,7 @@ import dev.arc.ep133.features.PatternNote
 import dev.arc.ep133.features.PatternRecorder
 import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.ProjectPatterns
+import dev.arc.ep133.features.Steps
 import dev.arc.ep133.features.Timing
 import dev.arc.ep133.features.TimingSettings
 import dev.arc.ep133.features.TransportPhase
@@ -172,6 +173,75 @@ class StepPlanTest {
             listOf(true, true, false, false),
             listOf(TransportPhase.STOPPED, TransportPhase.ARMED, TransportPhase.COUNT_IN, TransportPhase.PLAYING).map(::stepOpens),
         )
+    }
+
+    @Test
+    fun `the view Live shows is told from KEYS, the piano and the one-group switch`() {
+        assertEquals(StepView.ONE_GROUP, stepView(keysOn = false, piano = false, oneGroup = true))
+        assertEquals(StepView.ALL_GROUPS, stepView(keysOn = false, piano = false, oneGroup = false))
+        assertEquals(StepView.KEYS_GRID, stepView(keysOn = true, piano = false, oneGroup = true))
+        assertEquals(StepView.PIANO, stepView(keysOn = true, piano = true, oneGroup = false))
+        // The pads' view switch has no say once KEYS is on, and a piano shown means nothing in PADS.
+        assertEquals(StepView.ALL_GROUPS, stepView(keysOn = false, piano = true, oneGroup = false))
+    }
+
+    @Test
+    fun `STEP is offered in every view on the Live tab with the pattern's transport, and nowhere else`() {
+        assertTrue(stepOffered(step = true, onLive = true, transport = true))
+        assertFalse(stepOffered(step = false, onLive = true, transport = true))
+        assertFalse(stepOffered(step = true, onLive = false, transport = true))
+        assertFalse(stepOffered(step = true, onLive = true, transport = false))
+    }
+
+    @Test
+    fun `the display line grows into the panel where there are function keys under it, else the panel takes their place`() {
+        // The pads (one group or four) and KEYS' grid upright: the line grows into it, whatever the window.
+        for (sideways in listOf(false, true)) {
+            for (short in listOf(false, true)) {
+                assertEquals(StepHosting.MORPH, stepHosting(StepView.ONE_GROUP, sideways, short))
+                assertEquals(StepHosting.MORPH, stepHosting(StepView.ALL_GROUPS, sideways, short))
+            }
+        }
+        assertEquals(StepHosting.MORPH, stepHosting(StepView.KEYS_GRID, sideways = false, short = false))
+        assertEquals(StepHosting.MORPH, stepHosting(StepView.KEYS_GRID, sideways = false, short = true))
+        // KEYS' grid on its side has no room under the line: the panel is a column left of the keys.
+        assertEquals(StepHosting.SLOT, stepHosting(StepView.KEYS_GRID, sideways = true, short = true))
+        assertEquals(StepHosting.SLOT, stepHosting(StepView.KEYS_GRID, sideways = true, short = false))
+        // The piano: a tablet's has its function keys over it (the line grows into the panel over them, upright or sideways);
+        // the short window's goes without them, for its height, so the panel is a column beside it.
+        assertEquals(StepHosting.MORPH, stepHosting(StepView.PIANO, sideways = false, short = false))
+        assertEquals(StepHosting.MORPH, stepHosting(StepView.PIANO, sideways = true, short = false))
+        assertEquals(StepHosting.SLOT, stepHosting(StepView.PIANO, sideways = true, short = true))
+    }
+
+    @Test
+    fun `the panel edits the KEYS sound's group on KEYS and the group shown on the pads, on the all-groups page the last selected or pressed`() {
+        // KEYS' grid and the piano: the KEYS sound's group, none until a sound is picked.
+        assertEquals(2, stepGroupFor(StepView.KEYS_GRID, group = 0, keysGroup = 2))
+        assertEquals(3, stepGroupFor(StepView.PIANO, group = 1, keysGroup = 3))
+        assertNull(stepGroupFor(StepView.PIANO, group = 1, keysGroup = null))
+        // One group's pads: the group key selected. The all-groups page keeps the selection it was left with.
+        assertEquals(1, stepGroupFor(StepView.ONE_GROUP, group = 1, keysGroup = 3))
+        assertEquals(1, stepGroupFor(StepView.ALL_GROUPS, group = 1, keysGroup = 3))
+        assertEquals(0, stepGroupFor(StepView.ALL_GROUPS, group = 0, keysGroup = null))
+    }
+
+    @Test
+    fun `a pad pressed on another group of the all-groups page takes the panel there, on the step it shows`() {
+        val hat = PhysicalPad(2, 6)
+        val p = ProjectPatterns().with(0, Pattern(1, listOf(note(0, kick)))).with(2, Pattern(1, listOf(note(48, hat))))
+        desk.open(1, 0)
+        desk.jump(2, p, recorder, t)
+        assertEquals(0, desk.group)
+        // A press in group C with RECORD held: the panel steps through C from then on, and the note goes where the panel shows (A's step 3), not at C's own saved cursor.
+        desk.record(true)
+        val out = desk.press(key(hat), hit(hat), Float.NaN, p, recorder, t)
+        assertEquals(2, desk.group)
+        assertEquals(2, desk.cursor(p, t.interval))
+        assertTrue(Steps.notesOn(out.patterns.group(2), 2, t.interval, t.swing).isNotEmpty())
+        // A's own cursor stays where it was.
+        desk.group(0)
+        assertEquals(2, desk.cursor(p, t.interval))
     }
 
     @Test
