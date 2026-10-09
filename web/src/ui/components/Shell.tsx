@@ -3,7 +3,7 @@
 // The page under the top bar: TopBar, then the section's page with the GUIDE
 // tab on the left edge (centred, 80px up; [edgeTab], Live's EDIT, under it)
 // and the section list over it (under
-// the top bar, so the tag stays in view). The guide slides in from the left
+// the top bar, so the tag stays in view; Settings is its last entry). The guide slides in from the left
 // over everything. The page box has a fixed height; [children] scroll inside
 // .shell__page (screens that fill it, like Live's one-group view, use height: 100%).
 //
@@ -11,9 +11,10 @@
 // the page column right of the nav rail): no GUIDE edge tab (the rail's Guide
 // key opens the guide, and gets the focus back), the guide is a panel docked
 // on the left of the page column instead of covering it, and the top bar's row
-// widens to 1200 (Shell.css, TopBar.css), with the theme switch in the
-// settings key's place (the rail's Settings key opens Settings). The shell's
-// own --shell page goes transparent, so the desk shows through.
+// widens to 1200 (Shell.css, TopBar.css), with the theme switch after the ?
+// key. The rail's Settings key opens Settings, so the section list has no
+// Settings entry there. The shell's own --shell page goes transparent, so the
+// desk shows through.
 import type { ComponentChildren, JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type { ThemeChoice } from '../../core/text/settingsText'
@@ -31,10 +32,9 @@ export interface ShellProps {
   onMenu: (open: boolean) => void
   connected: boolean
   canConnect: boolean
-  canBackup: boolean
-  onBackup: () => void
   onConnect: () => void
   onDebug: () => void
+  /** Settings, the last entry of the section list (the list closes with it; none on the desk). */
   onSettings: () => void
   onHelp: () => void
   /** Settings → Theme, for the desk's theme switch in the top bar. */
@@ -74,11 +74,8 @@ export function Shell(props: ShellProps): JSX.Element {
           sectionsId={MENU_ID}
           connected={props.connected}
           canConnect={props.canConnect}
-          canBackup={props.canBackup}
-          onBackup={props.onBackup}
           onConnect={props.onConnect}
           onDebug={props.onDebug}
-          onSettings={props.onSettings}
           onHelp={props.onHelp}
           {...(props.desk ? { themeSwitch: { theme: props.theme, onTheme: props.onTheme } } : {})}
           middle={props.middle}
@@ -95,6 +92,7 @@ export function Shell(props: ShellProps): JSX.Element {
           open={menuOpen}
           current={tab}
           onPick={(t) => props.onTab(t)}
+          {...(props.desk ? {} : { onSettings: props.onSettings })}
           onDismiss={() => props.onMenu(false)}
         />
       </div>

@@ -1,7 +1,8 @@
 // End-to-end: the desktop top bar's theme switch (web only,
 // src/ui/components/ThemeSwitch.tsx). From 1024px wide the top bar has a
-// System / Light / Dark radio group in the settings key's place, the same
-// setting as Settings → Theme; below that the gear is still there.
+// System / Light / Dark radio group after the ? key, the same setting as
+// Settings → Theme; below that there is no switch, and Settings is in the
+// section list and Live's tools.
 import type { Page } from '@playwright/test'
 import { expect, openSettings, test } from './fixtures'
 
@@ -14,7 +15,7 @@ const theme = (page: Page): Promise<{ resolved: string | null; setting: string |
 test.describe('on the desktop', () => {
   test.use({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' })
 
-  test('the theme switch replaces the gear and follows Settings → Theme', async ({ page }) => {
+  test('the theme switch follows Settings → Theme, and no Settings key is in the bar', async ({ page }) => {
     await page.goto('/?demo#/live')
     await expect(page.locator('[data-pad]')).toHaveCount(12)
     const bar = page.getByRole('banner')
@@ -48,22 +49,23 @@ test.describe('on the desktop', () => {
     await expect.poll(() => theme(page)).toEqual({ resolved: 'dark', setting: 'DARK' })
     await expect(group.locator('[tabindex="0"]')).toHaveCount(1)
 
-    // The guide overlay points at the switch, and at no settings key in the top bar.
+    // The guide overlay points at the switch, and at no Settings or Back up key in the top bar.
     await bar.getByRole('button', { name: "What's what" }).click()
     const coach = page.getByRole('dialog', { name: "What's what" })
     await expect(coach.locator('[data-coach-tag="top.theme"]')).toHaveText('LIGHT OR DARK')
     await expect(coach.locator('[data-coach-tag="top.settings"]')).toHaveCount(0)
+    await expect(coach.locator('[data-coach-tag="top.backup"]')).toHaveCount(0)
   })
 })
 
 test.describe('on a phone', () => {
   test.use({ viewport: { width: 393, height: 852 } })
 
-  test('the gear is still there, and no theme switch', async ({ page }) => {
+  test('no gear and no theme switch in the bar; Settings is in the section list', async ({ page }) => {
     await page.goto('/?demo#/live')
     await expect(page.locator('[data-pad]')).toHaveCount(12)
     const bar = page.getByRole('banner')
-    await expect(bar.getByRole('button', { name: 'Settings', exact: true })).toBeVisible()
+    await expect(bar.getByRole('button', { name: 'Settings' })).toHaveCount(0)
     await expect(bar.getByRole('radiogroup', { name: 'Theme' })).toHaveCount(0)
     await openSettings(page)
   })

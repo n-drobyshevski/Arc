@@ -22,9 +22,10 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
     await expect(coach).toBeHidden()
     await selectTab(page, 'Backups')
     await expect(page).toHaveURL(/#\/backups$/)
-    // The desktop layout: the theme switch in the gear's place, Settings on the nav rail.
+    // The desktop layout: the theme switch after the ? key, Settings on the nav rail, no Back up key in the bar.
     await expect(bar.getByRole('radiogroup', { name: 'Theme' })).toBeVisible()
     await expect(bar.getByRole('button', { name: 'Settings' })).toHaveCount(0)
+    await expect(bar.getByRole('button', { name: 'Back up', exact: true })).toHaveCount(0)
     await expect(page.locator('.nav-rail').getByRole('button', { name: 'Settings', exact: true })).toBeVisible()
   })
 
@@ -208,7 +209,7 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
     expect(await plain.evaluate(() => 'requestMIDIAccess' in navigator)).toBe(false)
     await expect(plain.locator('.device-panel__title')).toHaveText('No MIDI in this browser')
     const bar = plain.getByRole('banner')
-    await expect(bar.getByRole('button', { name: 'Back up', exact: true })).toBeDisabled()
+    await expect(plain.getByRole('button', { name: 'Back up device' })).toBeDisabled()
     await expect(bar.getByRole('button', { name: 'Connect the EP-133' })).toBeDisabled()
     // Same browser profile, but the backups saved above were the demo's: ?demo keeps its own
     // library ("arc-demo") and settings, so the real library is still empty...

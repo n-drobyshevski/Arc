@@ -27,6 +27,8 @@ export const ArcIcon = {
   IMPORT: 'IMPORT',
   FOLLOW: 'FOLLOW',
   SWAP: 'SWAP',
+  BLUETOOTH: 'BLUETOOTH',
+  CLOCK: 'CLOCK',
   SYSTEM: 'SYSTEM',
   SUN: 'SUN',
   MOON: 'MOON',
@@ -244,6 +246,40 @@ export function Swap(props: IconProps): JSX.Element {
   )
 }
 
+/**
+ * The rune: a spine with two arrowheads on its right, crossed by the strokes
+ * from its left (stroke × 1.1, round caps and joins).
+ */
+export function Bluetooth(props: IconProps): JSX.Element {
+  return (
+    <Svg {...props} name="BLUETOOTH">
+      <path
+        d={`M${n(W * 0.24)} ${n(W * 0.68)}L${n(W * 0.76)} ${n(W * 0.3)}L${C} ${n(W * 0.08)}V${n(W * 0.92)}L${n(W * 0.76)} ${n(W * 0.7)}L${n(W * 0.24)} ${n(W * 0.32)}`}
+        stroke="currentColor"
+        stroke-width={n(STROKE * 1.1)}
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </Svg>
+  )
+}
+
+/** A face r = .4w with its two hands: late. */
+export function Clock(props: IconProps): JSX.Element {
+  return (
+    <Svg {...props} name="CLOCK">
+      <circle cx={C} cy={C} r={n(W * 0.4)} stroke="currentColor" stroke-width={n(STROKE)} />
+      <path
+        d={`M${C} ${n(C - W * 0.22)}V${C}L${n(C + W * 0.16)} ${n(C + W * 0.1)}`}
+        stroke="currentColor"
+        stroke-width={n(STROKE)}
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </Svg>
+  )
+}
+
 /** Web only. Theme System: RING with its left half filled (sweeping from the top through the left). */
 export function System(props: IconProps): JSX.Element {
   const r = W * 0.32
@@ -314,6 +350,8 @@ const BY_NAME: Readonly<Record<ArcIcon, (p: IconProps) => JSX.Element>> = {
   IMPORT: Import,
   FOLLOW: Follow,
   SWAP: Swap,
+  BLUETOOTH: Bluetooth,
+  CLOCK: Clock,
   SYSTEM: System,
   SUN: Sun,
   MOON: Moon,

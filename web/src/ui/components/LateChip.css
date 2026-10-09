@@ -1,0 +1,59 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/PatternLine.kt (LateChip, LineChip)
+ * On the dark display: the amber --warn (7:1 or more on it in either theme). */
+
+.late-chip-wrap {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  /* As tall as a touch target, however small the chip looks. */
+  min-height: 40px;
+  min-width: 32px;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.late-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--warn) 60%, transparent);
+  border-radius: 8px;
+  color: var(--warn);
+}
+.late-chip--compact { padding: 5px 7px; }
+
+/* PlainTooltip below the chip (IconBlock's), the sentence wrapping where it is long. */
+.late-chip__tip {
+  position: absolute;
+  top: calc(100% - 4px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  width: max-content;
+  max-width: min(260px, calc(100vw - 16px));
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--display);
+  color: var(--display-ink);
+  box-shadow: 0 0 0 1px var(--display-dim);
+  pointer-events: none;
+  font-size: var(--size-caps-key-small);
+  font-weight: 700;
+  line-height: 1.3;
+  text-align: start;
+  animation: late-chip-tip 150ms ease-out;
+}
+.late-chip__tip--start { left: 0; transform: none; }
+.late-chip__tip--end { left: auto; right: 0; transform: none; }
+
+@keyframes late-chip-tip {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .late-chip__tip { animation: none; }
+}
