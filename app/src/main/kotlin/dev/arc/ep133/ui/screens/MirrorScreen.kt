@@ -90,6 +90,8 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
@@ -466,6 +468,17 @@ fun MirrorScreen(
      * the display line says what it plays.
      */
     arp: LiveArp? = null,
+    /**
+     * STEP (an addition; null for none): the STEP chip on the stopped display
+     * line, where the layout has room for the panel (one group's pads and
+     * KEYS' grid, upright, and the pads on its side), unrolls the line into
+     * the STEP panel over the function keys, as SAMPLE's does. While it is
+     * open the pads and keys are its own ([LiveStep]): the cursor's step lit
+     * on them, a press placing (RECORD held), picking (NUDGE) or sounding,
+     * a long press picking. While the pattern plays with CORRECT on, a pad
+     * held corrects its notes as it passes, as ERASE's erases them.
+     */
+    step: LiveStep? = null,
 ) {
     val sounding = voices?.collectAsStateWithLifecycle()?.value
     // The pads held for note repeat are ringed too, and those it sounds lit.
@@ -483,15 +496,20 @@ fun MirrorScreen(
     val panelOn = sample != null && onBack == null && !keys.on
     // SAMPLE mode, the panel open: the display line grown into it, its header saying what goes on, the pads recording.
     val sampling = panelOn && sample?.state?.on == true
-    // ERASE latched: a pad erases its notes (SAMPLE's pads record instead).
-    val erasing = transport?.erase == true && !sampling
+    // STEP's panel open (the Live tab, with the pattern's transport): the pads and keys are its own. Where the layout has no
+    // room for it (worked out with the room, below) it closes.
+    val stepping = step != null && onBack == null && transport != null && step.ui.open && !sampling
+    // ERASE latched: a pad erases its notes (SAMPLE's pads record instead, STEP's place or sound).
+    val erasing = transport?.erase == true && !sampling && !stepping
+    // CORRECT on while the pattern plays: a pad corrects its notes instead of sounding, as ERASE's erases them.
+    val correcting = step?.ui?.correct == true && transport?.phase == TransportPhase.PLAYING && !sampling && !stepping && !erasing
     // EDIT works on the pads only, and only on the Live tab (where the tab is); SAMPLE's pads record, ERASE's erase, instead.
-    val editing = edit.on && edit.onEdit != null && !keys.on && onBack == null && !sampling && !erasing
+    val editing = edit.on && edit.onEdit != null && !keys.on && onBack == null && !sampling && !erasing && !stepping
     val onEdit = if (editing) edit.onPad else null
     // FX held: the one-group pads are the punch-ins (PADS on the Live tab, not while SAMPLE's record), their touches
     // the punch-ins' alone. The pressures seen stay with the screen, so a device's pressure is learned once.
     val pressure = remember { PressureSense() }
-    val padPunch = if (functions.fxHeld && !keys.on && onBack == null && !sampling) PadPunch(punch, pressure) else null
+    val padPunch = if (functions.fxHeld && !keys.on && onBack == null && !sampling && !stepping) PadPunch(punch, pressure) else null
     // The display line names the punch-ins held, over EDIT's line too.
     val punchHeld = punch.held.takeIf { padPunch != null }.orEmpty()
     // PROJECT held: the pads printed 1 to 9 pick a project instead of sounding, the rest stay still (ProjectHold).
@@ -507,7 +525,14 @@ fun MirrorScreen(
     // down, which erase once kept (a scroll erases nothing).
     val eraseHeld = remember { HashSet<PhysicalPad>() }
     val eraseUnsure = remember { HashMap<PhysicalPad, Long>() }
-    // The order a press goes: PROJECT held, SAMPLE, ERASE, then (EDIT's long press too) play.
+    // The pads whose press went to the STEP panel (their lift goes there too, even once it has closed), and those held to
+    // CORRECT while playing, as ERASE's.
+    val stepPressed = remember { HashSet<PhysicalPad>() }
+    val correctHeld = remember { HashSet<PhysicalPad>() }
+    val correctUnsure = remember { HashMap<PhysicalPad, Long>() }
+    // The touch's pressure as a pad or key goes down ([holdToPlay]): a note RECORD + pad places takes its velocity from it.
+    val downPressure = remember { floatArrayOf(Float.NaN) }
+    // The order a press goes: PROJECT held, SAMPLE, STEP, ERASE, CORRECT, then (EDIT's long press too) play.
     val padPress = onPad?.let { f ->
         { pad: PhysicalPad, h: Boolean, unsure: Boolean, at: Long ->
             if (!hold.press(pad, pad.label, functions)) {
@@ -515,6 +540,23 @@ fun MirrorScreen(
                 if (sampling && h) {
                     samplePressed += pad
                     sample?.onPadDown(pad, at, unsure)
+                } else if (stepping && step != null) {
+                    step.onPadDown(pad, at, downPressure[0])
+                    // A screen reader's click: a tap.
+                    if (h) stepPressed += pad else step.onPadUp(pad, at)
+                } else if (correcting && step != null) {
+                    when {
+                        // A screen reader's click: a tap.
+                        !h -> {
+                            step.onCorrectPadDown(pad, at)
+                            step.onCorrectPadUp(pad, at)
+                        }
+                        unsure -> correctUnsure[pad] = at
+                        else -> {
+                            correctHeld += pad
+                            step.onCorrectPadDown(pad, at)
+                        }
+                    }
                 } else if (erasing && transport != null) {
                     when {
                         // A screen reader's click: a tap.
@@ -537,10 +579,15 @@ fun MirrorScreen(
     val padKept = { pad: PhysicalPad ->
         if (!hold.took(pad)) {
             val erasedAt = eraseUnsure.remove(pad)
+            val correctedAt = correctUnsure.remove(pad)
             when {
                 erasedAt != null -> {
                     eraseHeld += pad
                     transport?.onErasePadDown(pad, erasedAt)
+                }
+                correctedAt != null -> {
+                    correctHeld += pad
+                    step?.onCorrectPadDown(pad, correctedAt)
                 }
                 pad in samplePressed -> sample?.onPadKept(pad)
                 else -> onPadKept(pad)
@@ -551,8 +598,10 @@ fun MirrorScreen(
         if (!hold.release(pad)) {
             when {
                 samplePressed.remove(pad) -> sample?.onPadUp(pad, at)
+                stepPressed.remove(pad) -> step?.onPadUp(pad, at)
                 eraseHeld.remove(pad) -> transport?.onErasePadUp(pad, at)
-                eraseUnsure.remove(pad) != null -> Unit
+                correctHeld.remove(pad) -> step?.onCorrectPadUp(pad, at)
+                eraseUnsure.remove(pad) != null || correctUnsure.remove(pad) != null -> Unit
                 else -> onPadUp(pad, at)
             }
         }
@@ -561,14 +610,54 @@ fun MirrorScreen(
         if (!hold.release(pad)) {
             when {
                 samplePressed.remove(pad) -> sample?.onPadCut(pad)
+                stepPressed.remove(pad) -> step?.onPadUp(pad, System.nanoTime())
                 eraseHeld.remove(pad) -> transport?.onErasePadUp(pad, System.nanoTime())
-                eraseUnsure.remove(pad) != null -> Unit
+                correctHeld.remove(pad) -> step?.onCorrectPadUp(pad, System.nanoTime())
+                eraseUnsure.remove(pad) != null || correctUnsure.remove(pad) != null -> Unit
                 else -> onPadCut(pad)
             }
         }
     }
-    // ERASE on KEYS: a key erases its note instead of sounding.
-    val keysPlay = if (erasing && keys.on && transport != null) {
+    // ERASE on KEYS: a key erases its note instead of sounding; CORRECT while playing corrects it; in the STEP panel, a key
+    // places, picks or sounds its note there.
+    val keysPlay = if (stepping && keys.on && step != null) {
+        remember(keysActions, step) {
+            KeysActions(
+                onMode = keysActions.onMode,
+                onRoot = keysActions.onRoot,
+                onScale = keysActions.onScale,
+                onOctave = keysActions.onOctave,
+                onNote = { note, h, at ->
+                    step.onNoteDown(note, at, downPressure[0])
+                    // A screen reader's click: a tap.
+                    if (!h) step.onNoteUp(note, at)
+                },
+                onNoteUp = step.onNoteUp,
+                onSelect = keysActions.onSelect,
+                onView = keysActions.onView,
+            )
+        }
+    } else if (correcting && keys.on && step != null) {
+        remember(keysActions, step) {
+            KeysActions(
+                onMode = keysActions.onMode,
+                onRoot = keysActions.onRoot,
+                onScale = keysActions.onScale,
+                onOctave = keysActions.onOctave,
+                onNote = { note, h, at ->
+                    step.onCorrectNoteDown(note, at)
+                    if (!h) step.onCorrectNoteUp(note, at)
+                },
+                // A key held from before CORRECT went on still lets go of its note.
+                onNoteUp = { note, at ->
+                    step.onCorrectNoteUp(note, at)
+                    keysActions.onNoteUp(note, at)
+                },
+                onSelect = keysActions.onSelect,
+                onView = keysActions.onView,
+            )
+        }
+    } else if (erasing && keys.on && transport != null) {
         remember(keysActions, transport) {
             KeysActions(
                 onMode = keysActions.onMode,
@@ -618,33 +707,28 @@ fun MirrorScreen(
         null
     }
     if (sampling && sample != null) SampleHaptics(sample.state, haptics, held = { it in samplePressed }, bpm = mirror?.state?.bpm ?: functions.bpm.toDouble())
-    // The SAMPLE panel, wherever the layout below puts the function keys.
-    val panel = remember { SamplePanel(sample?.unroll ?: if (sampling) 1f else 0f, fixed = sample?.unroll != null) }
+    // The SAMPLE panel (or STEP's), wherever the layout below puts the function keys.
+    val panel = remember {
+        val unroll = sample?.unroll ?: step?.unroll
+        SamplePanel(unroll ?: if (sampling || stepping) 1f else 0f, fixed = unroll != null, kind = if (stepping) PanelKind.STEP else PanelKind.SAMPLE)
+    }
     val panelScope = androidx.compose.runtime.rememberCoroutineScope()
     val reduceMotion = reducedMotion()
     val feel = LocalHapticFeedback.current
-    // A swipe or Back: the panel unrolls or rolls up with a tick, and the mode follows.
+    // A swipe or Back: the panel unrolls (SAMPLE's) or rolls up (whichever is open) with a tick, and the mode follows.
     val openPanel = {
-        if (sample != null && !panel.open) {
+        if (sample != null && panelOn && !panel.open) {
             if (haptics) feel.performHapticFeedback(HapticFeedbackType.SegmentTick)
+            panel.kind = PanelKind.SAMPLE
             panel.start(true, reduceMotion, panelScope)
             sample.onOpen()
         }
     }
     val closePanel = {
-        if (sample != null && panel.open) {
+        if (panel.open) {
             if (haptics) feel.performHapticFeedback(HapticFeedbackType.SegmentTick)
             panel.start(false, reduceMotion, panelScope)
-            sample.onClose()
-        }
-    }
-    // The mode turned off another way (the mic key in the top bar, a sheet), or KEYS, which has no panel: it rolls
-    // up (at once for KEYS, off the page). Turned on another way (the mic key, from KEYS too), it unrolls. A swipe
-    // or Back has set it going already.
-    LaunchedEffect(sampling, panelOn) {
-        when {
-            !panelOn -> if (panel.open) panel.go(false, reduce = true)
-            sampling != panel.open -> panel.go(sampling, reduceMotion)
+            if (panel.kind == PanelKind.STEP) step?.onClose() else sample?.onClose()
         }
     }
     val stillSample = fixedNow != null || sample?.still == true
@@ -684,6 +768,11 @@ fun MirrorScreen(
     LaunchedEffect(st.lastHit, keys.on) {
         if (!keys.on) st.lastHit?.pad?.let(keysActions.onSelect)
     }
+    // STEP's panel steps through the group shown (in KEYS, the KEYS sound's).
+    val stepGroup = if (keys.on) keys.pad?.group else group
+    LaunchedEffect(stepGroup, stepping) {
+        if (stepping && stepGroup != null && stepGroup != step?.ui?.group) step?.onGroup(stepGroup)
+    }
     // On its side Live has a layout of its own, the controls in a row over the keys or pads
     // (the grid stays where no piano fits). In a short window the display line sits in the
     // top bar instead ([LivePill]).
@@ -721,11 +810,50 @@ fun MirrorScreen(
         val padW = ((roomW - SideFunctions - SideControlsGap - 42.dp) / 4 - 2.dp) / 3
         val allGroupsSideways = sideways && minOf((roomH + ControlsRow - caption - 3.dp) / 4, padW) >= 40.dp &&
             roomH + ControlsRow >= FunctionColumnLed
-        // Back rolls the SAMPLE panel up (Live tools, open over it, close first: their Back comes later). Not
+        // STEP's panel where the layout has room for it: one group's pads and KEYS' grid upright, and one group's pads on
+        // its side (not the piano, the four groups or KEYS' grid on its side). The STEP chip shows only there.
+        val stepHost = step != null && onBack == null && transport != null && piano == null && if (keys.on) !sideways else oneGroup
+        // The panel follows SAMPLE's mode and STEP's panel, whichever is open (the controller keeps them apart): it unrolls
+        // as one opens (from KEYS too) and rolls up as it closes, at once where the layout has no room for it (SAMPLE's
+        // in KEYS, off the page), where STEP's closes too. A swipe or Back has set it going already.
+        val stepShown = stepping && stepHost
+        val kind = if (stepShown) PanelKind.STEP else PanelKind.SAMPLE
+        val wanted = stepShown || sampling
+        val hosted = if (panel.kind == PanelKind.STEP) stepHost else panelOn
+        LaunchedEffect(wanted, kind, hosted) {
+            when {
+                wanted && panel.kind != kind -> {
+                    if (panel.open) panel.go(false, reduce = true)
+                    panel.kind = kind
+                    panel.go(true, reduceMotion)
+                }
+                !hosted -> if (panel.open) panel.go(false, reduce = true)
+                wanted != panel.open -> panel.go(wanted, reduceMotion)
+            }
+        }
+        LaunchedEffect(stepping, stepHost) {
+            if (stepping && !stepHost) step?.onClose()
+        }
+        // The STEP chip and CORRECT's on the display line; the chip opens the panel on the group shown.
+        val stepLine = step?.let { s ->
+            StepLine(opens = stepHost && !s.ui.open, correct = s.ui.correct, status = s.ui.status, onOpen = { s.onOpen(stepGroup ?: s.ui.group) }, onCorrect = s.onCorrect)
+        }
+        // The pads (and keys) while the panel is open: the cursor's step lit, the one picked ringed, a long press picking.
+        val padStep = if (stepping && step != null) {
+            PadStep(stepLitPads(step.ui, group), stepPickedPad(step.ui, group), step.ui.recordHeld) { o -> step.onPadPick(PhysicalPad(group, o)) }
+        } else {
+            null
+        }
+        val keysStep = if (stepping && step != null) {
+            PadStep(stepLitNotes(step.ui, keys.pad), stepPickedNote(step.ui, keys.pad), step.ui.recordHeld, step.onNotePick)
+        } else {
+            null
+        }
+        // Back rolls the SAMPLE panel (or STEP's) up (Live tools, open over it, close first: their Back comes later). Not
         // while a sheet is open over Live: its Back was there first, so this one would win.
-        BackHandler(enabled = panelOn && sample?.sheetOpen != true && panel.open) { closePanel() }
+        BackHandler(enabled = (panelOn || stepHost) && sample?.sheetOpen != true && panel.open) { closePanel() }
         // The pads hear of a finger the SAMPLE panel's swipe took ([holdToPlay]).
-        CompositionLocalProvider(LocalSamplePanel provides panel) {
+        CompositionLocalProvider(LocalSamplePanel provides panel, LocalDownPressure provides downPressure) {
             SideZone(
                 open = toolsOpen,
                 onOpen = { toolsOpen = true },
@@ -790,54 +918,62 @@ fun MirrorScreen(
                 // The display line on the page (not in the top bar). With the SAMPLE panel it grows into the panel, its
                 // words giving way to SAMPLE's header in place ([SampleMorph]); the line itself stays the pads' own.
                 val padsLine: @Composable () -> Unit = {
-                    if (editing && punchHeld.isEmpty() && arpLine == null) EditLine() else DisplayStrip(st, mirror, transport, take, still = fixedNow != null, wireless = wireless, punch = punchHeld, arp = arpLine)
+                    if (editing && punchHeld.isEmpty() && arpLine == null) EditLine() else DisplayStrip(st, mirror, transport, take, still = fixedNow != null, wireless = wireless, punch = punchHeld, arp = arpLine, step = stepLine)
                 }
                 val sampleNow = sample ?: SampleUi()
-                // The display line growing into the SAMPLE panel over the function keys, upright ([SampleMorph]): laid out as
-                // [fit], [gap] between the line and the keys closed, the line's [corner]s.
-                val lineMorph: @Composable (Modifier, SamplePanelFit, Dp, Dp, @Composable () -> Unit, @Composable () -> Unit) -> Unit = { m, fit, gap, corner, line, fnKeys ->
+                val stepNow = step ?: LiveStep()
+                // The display line growing into the SAMPLE panel (or STEP's, all on its dark screen: its header, its controls
+                // [width] wide less the line's sides, and no plate) over the function keys, upright ([SampleMorph]): laid out
+                // as [fit], [gap] between the line and the keys closed, the line's [corner]s.
+                val lineMorph: @Composable (Modifier, SamplePanelFit, Dp, Dp, Dp, @Composable () -> Unit, @Composable () -> Unit) -> Unit = { m, fit, width, gap, corner, line, fnKeys ->
+                    val steps = panel.kind == PanelKind.STEP
+                    val wave = if (steps) stepDeckHeight(width - WaveSide * 2) else fit.wave
                     SampleMorph(
-                        panel, gap, corner, fit.wave, m,
+                        panel, gap, corner, wave, m,
                         line = line,
                         keys = fnKeys,
-                        header = { SampleHeader(sampleNow, stillSample) },
-                        strip = { SampleWaveStrip(sampleNow, panel, stillSample, fit.wave) },
-                        plate = { SamplePlate(sampleNow, panel, fit, haptics) },
+                        header = { if (steps) StepHeader(stepNow, haptics) else SampleHeader(sampleNow, stillSample) },
+                        strip = { if (steps) StepDeck(stepNow, panel, haptics) else SampleWaveStrip(sampleNow, panel, stillSample, fit.wave) },
+                        plate = { if (!steps) SamplePlate(sampleNow, panel, fit, haptics) },
                     )
                 }
                 // The display line growing down the sideways column's left into the panel, [side] as the column has it, the
-                // pads beside it ([SampleMorph]).
+                // pads beside it ([SampleMorph]). STEP's screen takes the column's height, its controls at its top.
                 val sideMorph: @Composable (Modifier, MorphSide, Dp, @Composable () -> Unit, @Composable () -> Unit) -> Unit = { m, side, height, fnKeys, padsGlide ->
-                    val wave = sideWave(height - BodyHeader, side.panel, usbNote)
+                    val steps = panel.kind == PanelKind.STEP
+                    val wave = if (steps) (height - BodyHeader - WaveFoot - CapDy).coerceAtLeast(0.dp) else sideWave(height - BodyHeader, side.panel, usbNote)
                     SampleMorph(
                         panel, 10.dp, BodyCorner, wave, m, side = side,
                         line = padsLine,
                         keys = fnKeys,
-                        header = { SampleHeader(sampleNow, stillSample) },
-                        strip = { SampleWaveStrip(sampleNow, panel, stillSample, wave) },
-                        plate = { SamplePlate(sampleNow, panel, null, haptics) },
+                        header = { if (steps) StepHeader(stepNow, haptics) else SampleHeader(sampleNow, stillSample) },
+                        strip = { if (steps) StepDeck(stepNow, panel, haptics) else SampleWaveStrip(sampleNow, panel, stillSample, wave) },
+                        plate = { if (!steps) SamplePlate(sampleNow, panel, null, haptics) },
                         pads = padsGlide,
                     )
                 }
                 // The function keys' place, the display line in the top bar: the keys, or the SAMPLE panel unrolled there
                 // without a header (the top bar's line is its header, [LivePill]) ([fit] upright, null on its side, where
-                // it is [side] wide), as far along as [panel] is.
+                // it is [side] wide), as far along as [panel] is; or STEP's, with its own.
                 val functionSlot: @Composable (Modifier, SamplePanelFit?, Dp?, @Composable () -> Unit) -> Unit = { m, fit, side, fnKeys ->
-                    if (sample == null || !panelOn) {
+                    if ((sample == null || !panelOn) && !stepHost) {
                         Box(m) { fnKeys() }
                     } else {
                         SampleSlot(panel, m, sideways = side, keys = fnKeys) {
-                            SampleBodyFace(sample, panel, fit, haptics, stillSample)
+                            if (panel.kind == PanelKind.STEP) StepBodyFace(stepNow, panel, haptics) else SampleBodyFace(sampleNow, panel, fit, haptics, stillSample)
                         }
                     }
                 }
                 // The pads' swipe that opens and closes the panel, the pads under it hearing of a finger it took (not
-                // while they are the punch-ins: a finger moving there sets a punch-in's depth).
-                val swipe = if (panelOn && padPunch == null) panelSwipe(panel, openPanel, closePanel) else Modifier
+                // while they are the punch-ins: a finger moving there sets a punch-in's depth). Back left to right closes
+                // STEP's too.
+                val swipe = if ((panelOn || stepHost) && padPunch == null) panelSwipe(panel, openPanel, closePanel) else Modifier
+                // Where the line grows into a panel (SAMPLE's or STEP's) rather than sitting over the function keys.
+                val morphs = panelOn || stepHost
                 if (piano != null) {
                     Column(sidewaysColumn) {
                         if (!inBar) {
-                            KeysDisplay(st, mirror, keysNow, transport, take, still = fixedNow != null, pianoRange = piano, arp = arpLine)
+                            KeysDisplay(st, mirror, keysNow, transport, take, still = fixedNow != null, pianoRange = piano, arp = arpLine, step = stepLine)
                             Spacer(Modifier.height(10.dp))
                         }
                         // A tablet's function keys, then the row over the piano and the piano; upright
@@ -893,10 +1029,11 @@ fun MirrorScreen(
                                 punch = padPunch,
                                 arpLit = arpLitPads,
                                 onPadPressure = padPressure,
+                                step = padStep,
                             )
                         }
                         val fnColumn: @Composable () -> Unit = { FunctionColumn(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey) }
-                        if (!panelOn) {
+                        if (!morphs) {
                             Column(Modifier.width(columnW).fillMaxHeight()) {
                                 if (!inBar) {
                                     padsLine()
@@ -1008,7 +1145,7 @@ fun MirrorScreen(
                                 // On its side: the keys on the K.O. II's body as big as the room, the function
                                 // keys and the view switch (turned) on their left, the scale and the octave
                                 // on their right.
-                                if (!inBar) KeysDisplay(st, mirror, keysNow, transport, take, still = fixedNow != null, arp = arpLine)
+                                if (!inBar) KeysDisplay(st, mirror, keysNow, transport, take, still = fixedNow != null, arp = arpLine, step = stepLine)
                                 BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
                                     val columns = SideFunctions + SidePicks + if (viewSwitch != null) SideLead else 0.dp
                                     val gaps = if (viewSwitch != null) 3 else 2
@@ -1033,20 +1170,40 @@ fun MirrorScreen(
                                     }
                                 }
                             } else if (keys.on) {
-                                if (!inBar) KeysDisplay(st, mirror, keysNow, transport, take, still = fixedNow != null, arp = arpLine)
-                                FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey)
-                                KeysGrid(
-                                    st, keysNow, now, keysPlay,
-                                    Modifier.fillMaxWidth().weight(1f).coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
-                                    haptics = haptics,
-                                    hold = hold,
-                                    functions = functions,
-                                    mode = modeStrip,
-                                    pressure = notePressure,
-                                )
+                                val keysLine: @Composable () -> Unit = { KeysDisplay(st, mirror, keysNow, transport, take, still = fixedNow != null, arp = arpLine, step = stepLine) }
+                                val fnRow: @Composable () -> Unit = { FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey) }
+                                val grid: @Composable (Modifier) -> Unit = { m ->
+                                    KeysGrid(
+                                        st, keysNow, now, keysPlay,
+                                        m.coachMark("live.keys", CoachText.PADS, CoachYellow, CoachYellowInk),
+                                        haptics = haptics,
+                                        hold = hold,
+                                        functions = functions,
+                                        mode = modeStrip,
+                                        pressure = notePressure,
+                                        step = keysStep,
+                                    )
+                                }
+                                if (!stepHost) {
+                                    if (!inBar) keysLine()
+                                    fnRow()
+                                    grid(Modifier.fillMaxWidth().weight(1f))
+                                } else {
+                                    // The KEYS line grows into STEP's panel over the function keys, as the pads' does; the keys
+                                    // take what it leaves, gliding to it ([PadsGlide]).
+                                    BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+                                        val width = maxWidth
+                                        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                            lineMorph(Modifier.fillMaxWidth(), samplePanelFit(width, null), width, 10.dp, BodyCorner, keysLine, fnRow)
+                                            PadsGlide(panel, Modifier.fillMaxWidth().weight(1f).then(swipe), scaleOf = { w, h -> koUnit(w, h, 3) }) {
+                                                grid(Modifier.fillMaxSize())
+                                            }
+                                        }
+                                    }
+                                }
                                 ModeRow(keys, keysActions, viewSwitch = viewSwitch, mode = false)
                             } else {
-                                if (!inBar && !panelOn) padsLine()
+                                if (!inBar && !morphs) padsLine()
                                 val fnRow: @Composable () -> Unit = { FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey) }
                                 val body: @Composable (Modifier) -> Unit = { m ->
                                     Group(
@@ -1066,9 +1223,10 @@ fun MirrorScreen(
                                         punch = padPunch,
                                         arpLit = arpLitPads,
                                         onPadPressure = padPressure,
+                                        step = padStep,
                                     )
                                 }
-                                if (!panelOn) {
+                                if (!morphs) {
                                     fnRow()
                                     body(Modifier.fillMaxWidth().weight(1f))
                                 } else {
@@ -1076,8 +1234,9 @@ fun MirrorScreen(
                                     // shares with the pads; the pads take what it leaves, gliding to it ([PadsGlide]).
                                     BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
                                         val fit = samplePanelFit(maxWidth, maxHeight - 10.dp, usbNote)
+                                        val width = maxWidth
                                         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                            lineMorph(Modifier.fillMaxWidth(), fit, 10.dp, BodyCorner, padsLine, fnRow)
+                                            lineMorph(Modifier.fillMaxWidth(), fit, width, 10.dp, BodyCorner, padsLine, fnRow)
                                             PadsGlide(panel, Modifier.fillMaxWidth().weight(1f).then(swipe), scaleOf = { w, h -> koUnit(w, h, 3) }) {
                                                 body(Modifier.fillMaxSize())
                                             }
@@ -1121,7 +1280,7 @@ fun MirrorScreen(
                                 if (editing && arpLine == null) {
                                     EditLine()
                                 } else {
-                                    Display(st, mirror, transport, take, still = fixedNow != null, compact = sideways, noteOpen = noteOpen, onNote = { noteOpen = it }, wireless = wireless, onGetFactory = onGetFactory, arp = arpLine)
+                                    Display(st, mirror, transport, take, still = fixedNow != null, compact = sideways, noteOpen = noteOpen, onNote = { noteOpen = it }, wireless = wireless, onGetFactory = onGetFactory, arp = arpLine, step = stepLine)
                                 }
                             }
                             val fnRow: @Composable () -> Unit = { FunctionRow(functions, keys, keysActions, st, haptics, hold = hold, edit = editKey) }
@@ -1134,7 +1293,7 @@ fun MirrorScreen(
                                 fnRow()
                             } else if (!inBar) {
                                 // The display grows into the panel over the function keys.
-                                lineMorph(Modifier.fillMaxWidth(), samplePanelFit(pageW, null), 12.dp, if (editing) BodyCorner else DisplayCorner, line, fnRow)
+                                lineMorph(Modifier.fillMaxWidth(), samplePanelFit(pageW, null), pageW, 12.dp, if (editing) BodyCorner else DisplayCorner, line, fnRow)
                             } else {
                                 // The line in the top bar: the panel in the function keys' place without a header.
                                 functionSlot(Modifier.fillMaxWidth(), samplePanelFit(pageW, null), null, fnRow)
@@ -1270,6 +1429,13 @@ internal fun LivePill(
     /** The arp's line while it plays ([dev.arc.ep133.controller.ArpUi.line]): over EDIT's, under the punch-ins'. */
     arp: String? = null,
     /**
+     * STEP, as [MirrorScreen] takes it: CORRECT's chip while the pattern plays
+     * with it on, and STEP's while stopped where the page under the bar has
+     * room for its panel ([stepOpens]: one group's pads).
+     */
+    step: LiveStep? = null,
+    stepOpens: Boolean = false,
+    /**
      * How far the SAMPLE panel under it has cross-faded its header in
      * ([SamplePanel.header], read as it draws), while Live shows it
      * ([MirrorScreen]'s onSampleHeader): the pill follows it, a finger's drag
@@ -1279,11 +1445,12 @@ internal fun LivePill(
 ) {
     val st = mirror?.state ?: MirrorState()
     val keysNow = soundingKeys(keys, voices?.collectAsStateWithLifecycle()?.value)
+    val stepLine = step?.let { s -> StepLine(opens = stepOpens && !s.ui.open, correct = s.ui.correct, status = s.ui.status, onOpen = { s.onOpen(s.ui.group) }, onCorrect = s.onCorrect) }
     val line: @Composable () -> Unit = {
         when {
-            keys.on -> KeysDisplay(st, mirror, keysNow, transport, take, still, compact = true, pianoRange = pianoRange, arp = arp)
+            keys.on -> KeysDisplay(st, mirror, keysNow, transport, take, still, compact = true, pianoRange = pianoRange, arp = arp, step = stepLine)
             editing && punch.isEmpty() && arp == null -> EditLine(compact = true)
-            else -> DisplayStrip(st, mirror, transport, take, still, compact = true, wireless = wireless, punch = punch, arp = arp)
+            else -> DisplayStrip(st, mirror, transport, take, still, compact = true, wireless = wireless, punch = punch, arp = arp, step = stepLine)
         }
     }
     val sampleNow = sample ?: SampleUi()
@@ -1386,7 +1553,8 @@ private fun displayLineSmall(st: MirrorState, mirror: MirrorUi?, wireless: Boole
  * the right; the pattern's RECORD and PLAY first, its words in their place
  * while it is on ([PatternLine]). While punch-ins are held ([punch], FX held)
  * it names them instead, in signal orange: "PUNCH · REPEAT + LPF"; while
- * the arp plays ([arp]), what it plays: "REPEAT · 1/16 · A 7".
+ * the arp plays ([arp]), what it plays: "REPEAT · 1/16 · A 7". [step]:
+ * STEP's chip while stopped, CORRECT's while playing ([StepLine]).
  * [compact]: one bar tall, in the top bar ([LivePill]).
  */
 @Composable
@@ -1400,11 +1568,12 @@ private fun DisplayStrip(
     wireless: Boolean = false,
     punch: Set<Int> = emptySet(),
     arp: String? = null,
+    step: StepLine? = null,
 ) {
     val c = LocalArcColors.current
     if (punch.isNotEmpty() || arp != null) {
         val line = if (punch.isNotEmpty()) MirrorText.punchLine(punch) else arp.orEmpty()
-        PatternLine(transport, take, still, compact) {
+        PatternLine(transport, take, still, compact, step) {
             SpokenLine(spoken(if (punch.isNotEmpty()) MirrorText.punchSpoken(punch) else line)) {
                 Text(line, style = ArcType.displayHead, color = c.signal, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             }
@@ -1418,7 +1587,7 @@ private fun DisplayStrip(
         null -> if (mirror?.offline != null) MirrorText.OFFLINE else null
     }
     val said = spoken(listOfNotNull(played, st.bpm?.let(MirrorText::bpm), st.activeProject?.let(MirrorText::project), main).joinToString(", "))
-    PatternLine(transport, take, still, compact) {
+    PatternLine(transport, take, still, compact, step) {
         SpokenLine(said) {
             // Offline and the project are only said: the top bar and the PROJECT key show them.
             when (st.playing) {
@@ -1501,6 +1670,8 @@ private fun Display(
     onGetFactory: (() -> Unit)? = null,
     /** While the arp plays: what it plays, in signal orange in the big line's place. */
     arp: String? = null,
+    /** CORRECT on the pattern's row while it plays with timing correct on ([StepLine]). */
+    step: StepLine? = null,
 ) {
     val c = LocalArcColors.current
     val offline = mirror?.offline != null && st.playing == null
@@ -1545,7 +1716,7 @@ private fun Display(
                 modifier = Modifier.weight(1f),
             )
         }
-        if (transport != null) PatternRow(transport, track.beat, still)
+        if (transport != null) PatternRow(transport, track.beat, still, step)
         // The one-group view keeps to one screen; the all-groups view explains clock out.
         when {
             compact -> Unit
@@ -1601,6 +1772,8 @@ private fun Group(
     arpLit: Set<PhysicalPad> = emptySet(),
     /** While the arp is on: a held pad's pressure, the touch's own. */
     onPadPressure: ((PhysicalPad, Float) -> Unit)? = null,
+    /** The STEP panel open (one group's big grid): the pads on the cursor's step lit, the one picked ringed ([PadStep]). */
+    step: PadStep? = null,
 ) {
     val c = LocalArcColors.current
     val lit = st.pads.filterKeys { it.group == group }
@@ -1630,6 +1803,10 @@ private fun Group(
                     noteDot = erase?.let { pad in it },
                     arpLit = pad in arpLit,
                     onPressure = onPadPressure?.let { f -> { p: Float -> f(pad, p) } },
+                    stepLit = step != null && pad.offset in step.lit,
+                    picked = step?.picked == pad.offset,
+                    placing = step?.placing == true,
+                    onPick = step?.let { s -> { s.onPick(pad.offset) } },
                 )
             }
         }
@@ -1842,6 +2019,45 @@ private fun GroupGlyph(g: Int, color: Color, size: Dp) {
     }
 }
 
+/**
+ * A pad or key picked for − / + in the STEP panel ([picked]): a soft ring in
+ * [color] just outside its cap, as far round as its [shape].
+ */
+internal fun Modifier.pickHalo(picked: Boolean, color: Color, shape: androidx.compose.ui.graphics.Shape): Modifier =
+    if (!picked) {
+        this
+    } else {
+        drawBehind {
+            val out = PickHalo.toPx()
+            val outline = shape.createOutline(androidx.compose.ui.geometry.Size(size.width + out * 2, size.height + out * 2), layoutDirection, this)
+            translate(-out, -out) {
+                drawOutline(outline, color.copy(alpha = 0.28f), style = androidx.compose.ui.graphics.drawscope.Stroke(out * 1.6f))
+            }
+        }
+    }
+
+/** How far out from its cap a picked pad's ring is. */
+private val PickHalo = 4.dp
+
+/** NUDGE at the foot of a pad or key picked for − / +: a small signal-orange tag. */
+@Composable
+private fun NudgeTag(modifier: Modifier) {
+    val c = LocalArcColors.current
+    Text(
+        MirrorText.NUDGE.uppercase(),
+        style = viewWordStyle(8.dp, 0.1f),
+        color = c.onSignal,
+        maxLines = 1,
+        softWrap = false,
+        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+        modifier = modifier
+            .clip(RoundedCornerShape(3.dp))
+            .background(c.signal)
+            .padding(vertical = 2.dp)
+            .clearAndSetSemantics { },
+    )
+}
+
 /** A light around a lit pad or key: [g] 0..1. */
 internal fun Modifier.litGlow(g: Float, color: Color, shape: androidx.compose.ui.graphics.Shape): Modifier =
     if (g <= 0f) this else dropShadow(shape, Shadow(radius = 18.dp * g, color = color.copy(alpha = 0.6f * g)))
@@ -1964,12 +2180,24 @@ private fun Pad(
     arpLit: Boolean = false,
     /** While the arp is on: the held pad's pressure, the touch's own. */
     onPressure: ((Float) -> Unit)? = null,
+    /**
+     * The STEP panel open: with a note on the cursor's step ([stepLit]:
+     * outlined, its digit signal orange), picked for − / + ([picked]: ringed,
+     * NUDGE at its foot), the panel's RECORD held ([placing]: held, it lights
+     * up as it goes on the step), and a long press picking it ([onPick]:
+     * false where it has no note there).
+     */
+    stepLit: Boolean = false,
+    picked: Boolean = false,
+    placing: Boolean = false,
+    onPick: (() -> Boolean)? = null,
 ) {
     val c = LocalArcColors.current
     val hw = LocalHwColors.current
     val density = LocalDensity.current
-    val g = if (sampleLed == SampleLed.RECORDING || sampleLed == SampleLed.WAITING || arpLit) 1f else light?.let { glow(it, now) } ?: 0f
-    val ink = if (g > 0.3f) c.onSignal else hw.darkInk
+    val held = remember { mutableStateOf(false) }
+    val g = if (sampleLed == SampleLed.RECORDING || sampleLed == SampleLed.WAITING || arpLit || placing && held.value) 1f else light?.let { glow(it, now) } ?: 0f
+    val ink = if (g > 0.3f) c.onSignal else if (stepLit) c.signal else hw.darkInk
     val wide = pad.label.length > 1
     val labelStyle = ArcType.semi.copy(
         // ENTER on a small pad: 9sp and tighter, so it fits on one line. The K.O. II's
@@ -2007,37 +2235,39 @@ private fun Pad(
             // In SAMPLE mode the name also keeps clear of the face's foot, the cap's edge shorter
             // than the room, where the ring is drawn: up to three lines, and with no room for one
             // (small pads under the SAMPLE panel) none rather than half of one under the ring. A
-            // screen reader still hears it.
-            val ringed = sampleLed != null
+            // screen reader still hears it. So under the STEP panel ([onPick]), where the pads are smaller and outlined.
+            val ringed = sampleLed != null || onPick != null
             val left = room?.let { it - (if (ringed) CapDy * 2 else 0.dp) - with(density) { labelStyle.fontSize.toDp() } } ?: 0.dp
             val fit = with(density) { (left / (nameStyle.fontSize.toDp() * 1.1f)).toInt() }
             val lines = if (ringed) fit.coerceAtMost(3) else fit.coerceIn(1, 3)
             Column(Modifier.fillMaxSize()) {
                 label()
                 Spacer(Modifier.weight(1f))
-                if (name != null && (room == null || lines >= 1)) Text(name, style = nameStyle, color = nameColor, maxLines = lines.coerceAtLeast(1), overflow = TextOverflow.Ellipsis)
+                // Picked for − / +, NUDGE in the name's place ([NudgeTag]).
+                if (name != null && !picked && (room == null || lines >= 1)) Text(name, style = nameStyle, color = nameColor, maxLines = lines.coerceAtLeast(1), overflow = TextOverflow.Ellipsis)
             }
         } else {
             Column(Modifier.fillMaxSize()) {
                 label()
                 Spacer(Modifier.weight(1f))
-                if (name != null) {
+                if (name != null && !picked) {
                     Text(name, style = nameStyle, color = nameColor, maxLines = if (big) 3 else 2, overflow = TextOverflow.Ellipsis)
                 }
             }
         }
     }
     val shape = ko?.keyShape ?: RoundedCornerShape(if (big) 8.dp else 6.dp)
-    val held = remember { mutableStateOf(false) }
     val box = modifier
+        // Picked for − / + in the STEP panel: a soft signal ring round the cap.
+        .pickHalo(picked, c.signal, shape)
         // A dark cap in the K.O. II's own colours (the Guide's, in both themes), lit orange
         // (its edge with it, and a light around it), down while held.
         .litGlow(g, c.signal, shape)
         .cap(lerp(hw.ko.darkFace, c.signal, g), lerp(hw.ko.darkEdge, c.signalEdge, g), shape, capPress(held.value))
         // SAMPLE mode: the empty pads' ring blinks, the filled pads' stays (drawn, so a blink only redraws).
         .sampleRing(sampleLed, blink, c.signal, shape)
-        // Playing on the phone, or EDIT on: a signal-orange ring inside the pad.
-        .then(if (playing || onEdit != null) Modifier.border(2.dp, c.signal, shape) else Modifier)
+        // Playing on the phone, EDIT on, or on STEP's cursor step: a signal-orange ring inside the pad (thicker, picked).
+        .then(if (playing || onEdit != null || stepLit || picked) Modifier.border(if (picked) 3.dp else 2.dp, c.signal, shape) else Modifier)
         // ERASE: a dot on a pad with notes (pale on a lit pad), the rest dimmed.
         .eraseDot(noteDot, if (g > 0.3f) c.onSignal else c.signal)
         .then(
@@ -2059,10 +2289,12 @@ private fun Pad(
                 // Both play on touch-down. The all-groups page scrolls, so there a press that
                 // turns into a drag across the pads is cut short.
                 // ERASE: a screen reader's click erases the pad's notes instead of playing it.
+                // The STEP panel: held still, it is picked for − / + (a screen reader's action of its own).
                 onPress != null -> holdToPlay(
                     onPress, onRelease, onKept = onKept, onCut = onCut, inScroll = inScroll, held = held, haptics = haptics,
                     clickLabel = if (noteDot != null) MirrorText.ERASE else MirrorText.PLAY,
                     onPressure = onPressure,
+                    onLongPress = onPick,
                 )
                 else -> Modifier
             },
@@ -2075,7 +2307,12 @@ private fun Pad(
                     SampleLed.WAITING -> MirrorText.PAD_WAITING
                     else -> MirrorText.padSampleState(name != null)
                 } +
-                if (noteDot == true) MirrorText.PAD_HAS_NOTES else ""
+                (if (noteDot == true) MirrorText.PAD_HAS_NOTES else "") +
+                when {
+                    picked -> MirrorText.PICKED
+                    stepLit -> MirrorText.ON_STEP
+                    else -> ""
+                }
         }
         .padding(
             when {
@@ -2084,8 +2321,9 @@ private fun Pad(
                 else -> PaddingValues(start = 6.dp, top = 5.dp, end = 7.dp, bottom = 5.dp)
             },
         )
-    // EDIT's ⇄ badge in the top right corner, over the name if it must.
+    // EDIT's ⇄ badge in the top right corner, over the name if it must; NUDGE at a picked pad's foot, over its name.
     val badge: @Composable BoxScope.() -> Unit = {
+        if (picked) NudgeTag(Modifier.align(Alignment.BottomCenter).fillMaxWidth())
         if (onEdit != null) {
             Box(
                 Modifier
@@ -2646,10 +2884,12 @@ private fun KeysDisplay(
     pianoRange: IntRange? = null,
     /** While the arp plays: what it plays, in signal orange in place of the note and the sound. */
     arp: String? = null,
+    /** STEP's chip while stopped, CORRECT's while playing ([StepLine]). */
+    step: StepLine? = null,
 ) {
     val c = LocalArcColors.current
     if (arp != null) {
-        PatternLine(transport, take, still, compact) {
+        PatternLine(transport, take, still, compact, step) {
             SpokenLine(spoken(arp)) {
                 Text(arp, style = ArcType.displayHead, color = c.signal, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             }
@@ -2671,7 +2911,7 @@ private fun KeysDisplay(
     // never squeezes out the sound's name.
     BoxWithConstraints {
         val noteMax = if (compact) maxWidth / 2 else Dp.Unspecified
-        PatternLine(transport, take, still, compact) {
+        PatternLine(transport, take, still, compact, step) {
             SpokenLine(said) {
                 if (!compact) Text(MirrorText.MODE_KEYS.uppercase(), style = ArcType.displaySub, color = c.displayDim, maxLines = 1)
                 noteText?.let {
@@ -2714,6 +2954,8 @@ private fun KeysGrid(
     mode: (@Composable (Modifier, Dp) -> Unit)? = null,
     /** While the arp is on: a held key's pressure, the touch's own, for the note it pressed. */
     pressure: ((note: Int, pressure: Float) -> Unit)? = null,
+    /** The STEP panel open: the keys whose notes are on the cursor's step lit, the one picked ringed, by MIDI note ([PadStep]). */
+    step: PadStep? = null,
 ) {
     val c = LocalArcColors.current
     val notes = Keys.notes(keys.root, keys.scale, keys.octave)
@@ -2751,12 +2993,17 @@ private fun KeysGrid(
         // The note the finger pressed, whose pressure it reports (a new key or octave under it keeps it).
         val pressed = remember { intArrayOf(note) }
         val nameSize = with(density) { (k.u * 0.277f).coerceIn(15.dp, 34.dp) }
+        // The STEP panel: on the cursor's step, picked for − / +, and held while its RECORD is (lit as it goes on the step).
+        val stepLit = step != null && note in step.lit
+        val picked = step?.picked == note
+        val lit = if (step?.placing == true && held.value) 1f else g
         Column(
             Modifier
                 .size(k.u, k.h)
-                .litGlow(g, c.signal, k.keyShape)
-                .cap(lerp(hw.ko.darkFace, c.signal, g), lerp(hw.ko.darkEdge, c.signalEdge, g), k.keyShape, capPress(held.value))
-                .then(if (note in keys.playingNotes || order > 0) Modifier.border(2.dp, c.signal, k.keyShape) else Modifier)
+                .pickHalo(picked, c.signal, k.keyShape)
+                .litGlow(lit, c.signal, k.keyShape)
+                .cap(lerp(hw.ko.darkFace, c.signal, lit), lerp(hw.ko.darkEdge, c.signalEdge, lit), k.keyShape, capPress(held.value))
+                .then(if (note in keys.playingNotes || order > 0 || stepLit || picked) Modifier.border(if (picked) 3.dp else 2.dp, c.signal, k.keyShape) else Modifier)
                 .then(
                     holdToPlay(
                         // A screen reader's Play sounds the note to its end: no finger to keep count of.
@@ -2774,19 +3021,26 @@ private fun KeysGrid(
                         held = held,
                         haptics = haptics,
                         onPressure = pressure?.let { f -> { p: Float -> f(pressed[0], p) } },
+                        onLongPress = step?.let { s -> { s.onPick(pressed[0]) } },
                     ),
                 )
-                .semantics { contentDescription = MirrorText.noteName(note, keys.names) }
+                .semantics {
+                    contentDescription = MirrorText.noteName(note, keys.names) + when {
+                        picked -> MirrorText.PICKED
+                        stepLit -> MirrorText.ON_STEP
+                        else -> ""
+                    }
+                }
                 .padding(horizontal = k.u * 0.1f, vertical = k.u * 0.06f),
         ) {
-            val ink = if (g > 0.3f) c.onSignal else if (root) c.signal else hw.darkInk
+            val ink = if (lit > 0.3f) c.onSignal else if (root || stepLit) c.signal else hw.darkInk
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
             if (!keys.showNames) {
                 // Unnamed: a ring the digit's height, where the digit would be.
                 Canvas(Modifier.padding(top = nameSize * 0.12f).size(nameSize * 0.8f)) {
                     val stroke = size.width * 0.14f
                     drawCircle(
-                        color = if (g > 0.3f) c.onSignal else ring,
+                        color = if (lit > 0.3f) c.onSignal else ring,
                         radius = size.width / 2 - stroke / 2,
                         style = androidx.compose.ui.graphics.drawscope.Stroke(width = stroke),
                     )
@@ -2805,18 +3059,23 @@ private fun KeysGrid(
                 Text(
                     order.toString(),
                     style = ArcType.tiny.copy(fontSize = with(density) { (k.u * 0.12f).coerceIn(9.dp, 13.dp).toSp() }, lineHeight = 1.em, fontWeight = FontWeight.SemiBold),
-                    color = if (g > 0.3f) c.onSignal else c.signal,
+                    color = if (lit > 0.3f) c.onSignal else c.signal,
                     maxLines = 1,
                     modifier = Modifier.clearAndSetSemantics { },
                 )
             }
             }
             Spacer(Modifier.weight(1f))
-            Text(
-                Keys.octaveOf(note).toString(),
-                style = ArcType.tiny.copy(fontSize = with(density) { (k.u * 0.13f).coerceIn(10.dp, 14.dp).toSp() }, lineHeight = 1.1.em),
-                color = if (g > 0.3f) c.onSignal else hw.darkDim,
-            )
+            // Picked for − / +, NUDGE in the octave's place.
+            if (picked) {
+                NudgeTag(Modifier.fillMaxWidth())
+            } else {
+                Text(
+                    Keys.octaveOf(note).toString(),
+                    style = ArcType.tiny.copy(fontSize = with(density) { (k.u * 0.13f).coerceIn(10.dp, 14.dp).toSp() }, lineHeight = 1.1.em),
+                    color = if (lit > 0.3f) c.onSignal else hw.darkDim,
+                )
+            }
         }
     }
 }
@@ -2982,8 +3241,13 @@ private fun holdToPlay(
     playAction: Boolean = false,
     /** While the arp is on: the held finger's pressure as it goes down and as it changes (null: not asked). */
     onPressure: ((Float) -> Unit)? = null,
+    /** The STEP panel: held still past a long press, picked for − / + (false where it can't be: a "reject" tick). */
+    onLongPress: (() -> Boolean)? = null,
 ): Modifier {
     val press by androidx.compose.runtime.rememberUpdatedState(onPress)
+    val longPress by androidx.compose.runtime.rememberUpdatedState(onLongPress)
+    // The touch's pressure as it goes down, for a press that wants it at once (the STEP panel's RECORD + pad).
+    val downPressure = LocalDownPressure.current
     val pressure by androidx.compose.runtime.rememberUpdatedState(onPressure)
     val release by androidx.compose.runtime.rememberUpdatedState(onRelease)
     val cut by androidx.compose.runtime.rememberUpdatedState(onCut)
@@ -3001,6 +3265,7 @@ private fun holdToPlay(
                 val pressRelease = release
                 val pressCut = cut
                 val pressKept = kept
+                downPressure?.set(0, down.pressure)
                 press(true, inScroll, PressTime.of(down.uptimeMillis))
                 pressure?.invoke(down.pressure)
                 tick?.performHapticFeedback(HapticFeedbackType.KeyboardTap)
@@ -3031,7 +3296,33 @@ private fun holdToPlay(
                             pressKept()
                         }
                     }
-                    while (!lifted && !scrolled) {
+                    // The STEP panel: held still past a long press (no lift, no move past the slop), it is picked, with a
+                    // long tick of its own (or a reject's where it can't be); it goes on sounding until the lift.
+                    var gone = false
+                    val pick = longPress
+                    if (pick != null && !lifted && !scrolled) {
+                        var moved = false
+                        val waited = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                            while (true) {
+                                val ch = awaitPointerEvent(PointerEventPass.Final).changes.firstOrNull { it.id == down.id }
+                                when {
+                                    ch == null -> gone = true
+                                    !ch.pressed -> {
+                                        lifted = true
+                                        upAt = ch.uptimeMillis
+                                    }
+                                    ch.isConsumed && swipe?.took(down.id) == true -> scrolled = true
+                                    (ch.position - down.position).getDistance() > viewConfiguration.touchSlop -> moved = true
+                                }
+                                if (gone || lifted || scrolled || moved) break
+                            }
+                        }
+                        if (waited == null) {
+                            val picked = pick()
+                            tick?.performHapticFeedback(if (picked) HapticFeedbackType.LongPress else HapticFeedbackType.Reject)
+                        }
+                    }
+                    while (!lifted && !scrolled && !gone) {
                         val ch = awaitPointerEvent(PointerEventPass.Final).changes.firstOrNull { it.id == down.id } ?: break
                         // Lifted, or a scroll took the finger over.
                         if (!ch.pressed) {
@@ -3061,17 +3352,20 @@ private fun holdToPlay(
         .semantics {
             role = Role.Button
             onClick(label = clickLabel) {
+                downPressure?.set(0, Float.NaN)
                 click?.invoke() ?: press(false, false, System.nanoTime())
                 true
             }
-            if (playAction) {
-                customActions = listOf(
-                    androidx.compose.ui.semantics.CustomAccessibilityAction(MirrorText.PLAY) {
-                        press(false, false, System.nanoTime())
-                        true
-                    },
-                )
-            }
+            val actions = listOfNotNull(
+                androidx.compose.ui.semantics.CustomAccessibilityAction(MirrorText.PLAY) {
+                    press(false, false, System.nanoTime())
+                    true
+                }.takeIf { playAction },
+                androidx.compose.ui.semantics.CustomAccessibilityAction(MirrorText.PICK) {
+                    longPress?.invoke() == true
+                }.takeIf { onLongPress != null },
+            )
+            if (actions.isNotEmpty()) customActions = actions
         }
 }
 

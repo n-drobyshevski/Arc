@@ -950,6 +950,98 @@ export const MirrorText = {
     return `${n} corrected`
   },
 
+  /** The STEP panel's status as RECORD + pad puts a note on the step: "+ SNARE". */
+  stepPlaced(word: string): string {
+    return `+ ${word}`
+  },
+
+  /** A note put on a step, for screen readers: "SNARE on step 1.2.1". */
+  stepPlacedSpoken(word: string, step: string): string {
+    return `${word} on step ${step}`
+  },
+
+  /** "KICK → 1.2.2": the note picked, nudged, and the step it sits on now. */
+  stepNudged(word: string, step: string): string {
+    return `${word} → ${step}`
+  },
+
+  /** A nudge for screen readers: "KICK moved to step 1.2.2". */
+  stepNudgedSpoken(word: string, step: string): string {
+    return `${word} moved to step ${step}`
+  },
+
+  /** "KICK +1 tk": a held pad's notes moved by CORRECT's − / +, the ticks so far ("−2 tk" earlier). */
+  stepShifted(word: string, ticks: number): string {
+    const signed = ticks > 0 ? `+${ticks}` : ticks < 0 ? `−${-ticks}` : '0'
+    return `${word} ${signed} tk`
+  },
+
+  /** A shift for screen readers: "KICK 1 tick later", "KICK 2 ticks earlier", "KICK back in place". */
+  stepShiftedSpoken(word: string, ticks: number): string {
+    if (ticks === 0) return `${word} back in place`
+    const n = Math.abs(ticks)
+    return `${word} ${n} ${n === 1 ? 'tick' : 'ticks'} ${ticks > 0 ? 'later' : 'earlier'}`
+  },
+
+  /** The step cursor for screen readers: "Step 1.2.1", and ", 2 notes" with notes on it. */
+  stepSpoken(step: string, notes: number): string {
+    return `Step ${step}` + (notes === 0 ? '' : notes === 1 ? ', 1 note' : `, ${notes} notes`)
+  },
+
+  /** The STEP chip on the stopped display line and the panel it opens (upper-cased where shown); its name for screen readers. */
+  STEP: 'Step',
+  STEP_NAME: 'Step editing',
+  CLOSE_STEP: 'Close step editing',
+
+  /** "STEP 1.2.1": the panel's status line while nothing else is said. */
+  stepStatus(step: string): string {
+    return `STEP ${step}`
+  },
+
+  /** The panel's RECORD, held: what it does, for screen readers (a click holds it until the next). */
+  STEP_RECORD_NOTE: 'Hold and tap a pad to put it on the step',
+
+  /** − and + either side of the strip. */
+  PREV_STEP: 'Previous step',
+  NEXT_STEP: 'Next step',
+
+  /** A cell of the strip for screen readers: "Step 1.2.1, has notes". */
+  stepCell(step: string, notes: boolean): string {
+    return `Step ${step}` + (notes ? MirrorText.PAD_HAS_NOTES : '')
+  },
+
+  /** The panel's knobs, every note on the step (upper-cased where shown), and their names for screen readers. */
+  VEL: 'Vel',
+  LEN: 'Len',
+  VELOCITY: 'Velocity',
+  NOTE_LENGTH: 'Note length',
+
+  /** BAR's pages under a pattern longer than a bar; "Bar 2" for screen readers. */
+  BAR: 'Bar',
+  barPage(bar: number): string {
+    return `Bar ${bar}`
+  },
+
+  /** The panel's latches: NUDGE (a tap picks a lit pad for − / +) and CORRECT (timing correct), upper-cased where shown. */
+  NUDGE: 'Nudge',
+  CORRECT: 'Correct',
+
+  /** NUDGE with a note picked: "Nudge · KICK". */
+  nudgeChip(word: string | null): string {
+    return word === null ? MirrorText.NUDGE : `${MirrorText.NUDGE} · ${word}`
+  },
+
+  /** What NUDGE and CORRECT do, after their state for screen readers. */
+  NUDGE_NOTE: 'Tap a lit pad to pick it, then − and + move its note.',
+  CORRECT_NOTE: 'Tap a pad to put its notes on the grid. While the pattern plays, hold one to correct it as it passes.',
+
+  /** Added to a pad's or key's name for screen readers in the STEP panel: on the cursor's step, and picked for − / +. */
+  ON_STEP: ', on the step',
+  PICKED: ', picked',
+
+  /** A long press on a lit pad or key: picked for − / +; its action's name for screen readers. */
+  PICK: 'Pick to nudge',
+
   // ---------- FX: the master effect, the sends, the output compressor and the sidechain (an addition) ----------
   /** FX, the fourth function key: its two words. A tap opens the FX sheet; held, the pads play the punch-ins. */
   FN_FX: 'FX',

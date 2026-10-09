@@ -73,6 +73,9 @@ import dev.arc.ep133.ui.screens.TempoSheetContent
 import dev.arc.ep133.ui.screens.TempoPage
 import dev.arc.ep133.ui.screens.TimingUi
 import dev.arc.ep133.ui.screens.LiveArp
+import dev.arc.ep133.ui.screens.LiveStep
+import dev.arc.ep133.controller.StepNote
+import dev.arc.ep133.controller.StepUi
 import dev.arc.ep133.controller.ArpUi
 import dev.arc.ep133.features.ArpNote
 import dev.arc.ep133.features.ArpOrder
@@ -182,7 +185,7 @@ private fun Framed(
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null, arp: LiveArp? = null, voices: Set<String>? = null) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null, arp: LiveArp? = null, voices: Set<String>? = null, step: LiveStep? = null) {
     val mirror = MirrorUi(state, loading = loading, error = error, offline = offline, offlineProjects = offlineProjects)
     // PROJECT as MainActivity works it out; TEMPO's light caught on a beat while the click is on; FX named on its light,
     // held while [punch] gives the punch-ins.
@@ -198,9 +201,11 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
     var pianoRange by remember { mutableStateOf(piano) }
     // The voices sounding, as the phone reports them ([voices]: the arp's steps lit); null leaves the rings as given.
     val voiceFlow = remember(voices) { voices?.let { kotlinx.coroutines.flow.MutableStateFlow(it) } }
+    // STEP, as MainActivity always has it with the pattern's transport: its chip on the stopped line, the panel where [step] opens it.
+    val stepUi = step ?: transport?.let { LiveStep() }
     Framed(
         Tab.LIVE, connected = offline == null && error == null, dark = dark, guide = guide,
-        pill = { LivePill(mirror, keys, transport, takeUi, still = true, pianoRange = pianoRange, editing = edit == true, wireless = wireless, sample = sampleUi, punch = punch?.held.orEmpty(), arp = arp?.ui?.line, voices = voiceFlow) }, toast = toast, barMiddle = barMiddle,
+        pill = { LivePill(mirror, keys, transport, takeUi, still = true, pianoRange = pianoRange, editing = edit == true, wireless = wireless, sample = sampleUi, punch = punch?.held.orEmpty(), arp = arp?.ui?.line, voices = voiceFlow, step = stepUi, stepOpens = oneGroup && !keys.on) }, toast = toast, barMiddle = barMiddle,
         toastAction = toastAction,
         sample = SampleKey(sampleUi.state.on && !keys.on) {},
     ) {
@@ -234,6 +239,7 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
             sample = sampleUi,
             voices = voiceFlow,
             arp = arp,
+            step = stepUi,
         )
     }
 }
@@ -1055,6 +1061,107 @@ fun LivePatternKeysSidewaysPreview() = Live(
 )
 
 // RECORD held: the pattern sheet over Live, group A picked; two pads not loaded yet.
+// STEP (layout A): the STEP chip on the stopped line unrolls the line into the STEP panel over the function keys, all on its
+// dark screen. A 2-bar pattern at 1/16, the cursor on 1.2.1 with the kick and the closed hat on it: RECORD held and the snare
+// tapped onto the step too ("+ SNARE"), the three pads lit on the grid, VEL and LEN at the first note's, BAR 1 of 2.
+private val stepOccupied = List(32) { it in setOf(0, 2, 4, 6, 8, 10, 11, 12, 14, 16, 20, 24, 28) }
+private val stepPanel = StepUi(
+    open = true,
+    group = 0,
+    step = 4,
+    count = 32,
+    label = "1.2.1",
+    bars = 2,
+    page = 0,
+    occupied = stepOccupied,
+    lit = setOf(9 to null, 6 to null, 11 to null),
+    velocity = 96,
+    gate = 24,
+    recordHeld = true,
+    status = MirrorText.stepPlaced("SNARE"),
+    interval = Timing.SIXTEENTH,
+)
+
+@PreviewTest
+@Preview(name = "Live step panel", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveStepPanelPreview() = Live(lastRead, oneGroup = true, transport = patternUi(canUndo = true), step = LiveStep(stepPanel))
+
+@PreviewTest
+@Preview(name = "Live step panel dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveStepPanelDarkPreview() = Live(lastRead, dark = true, oneGroup = true, transport = patternUi(canUndo = true), step = LiveStep(stepPanel))
+
+// NUDGE: the kick long-pressed (ringed, NUDGE at its foot and on the chip), then +: it moved to 1.2.2 and the cursor followed.
+@PreviewTest
+@Preview(name = "Live step nudge", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveStepNudgePreview() = Live(
+    lastRead, oneGroup = true, transport = patternUi(canUndo = true),
+    step = LiveStep(
+        stepPanel.copy(
+            step = 5, label = "1.2.2", occupied = List(32) { it in setOf(0, 2, 5, 6, 8, 10, 11, 12, 14, 16, 20, 24, 28) }, lit = setOf(9 to null),
+            recordHeld = false, picked = StepNote(PhysicalPad(0, 9), null), status = MirrorText.stepNudged("KICK", "1.2.2"),
+        ),
+        pickedWord = "KICK",
+    ),
+)
+
+// CORRECT on: a tap on the closed hat put its notes on the grid.
+@PreviewTest
+@Preview(name = "Live step correct", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveStepCorrectPreview() = Live(
+    lastRead, oneGroup = true, transport = patternUi(canUndo = true),
+    step = LiveStep(stepPanel.copy(lit = setOf(9 to null, 6 to null), recordHeld = false, correct = true, status = MirrorText.correctedLine(5))),
+)
+
+// A small phone: NUDGE and CORRECT a row of their own under the knobs; nothing said last, the status is the cursor.
+@PreviewTest
+@Preview(name = "Live step panel small", widthDp = 360, heightDp = 668, showBackground = true)
+@Composable
+fun LiveStepPanelSmallPreview() = Live(lastRead, oneGroup = true, transport = patternUi(canUndo = true), step = LiveStep(stepPanel.copy(recordHeld = false, status = null)))
+
+// KEYS: the KEYS sound's notes on the step light their keys (DO and SOL), the panel the same.
+@PreviewTest
+@Preview(name = "Live step keys", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveStepKeysPreview() = Live(
+    keysPlaying.copy(notes = emptyMap()), keys = keysUi.copy(playingNotes = emptySet()), transport = patternUi(canUndo = true),
+    step = LiveStep(stepPanel.copy(lit = setOf(9 to 0, 9 to 7), velocity = 110, gate = 48, recordHeld = false, status = null)),
+)
+
+// On its side, the line in the top bar: the panel in the function keys' column with its own header, the pads beside it.
+@PreviewTest
+@Preview(name = "Live step panel sideways", widthDp = 867, heightDp = 388, showBackground = true)
+@Composable
+fun LiveStepPanelSidewaysPreview() = Live(lastRead, oneGroup = true, transport = patternUi(canUndo = true), step = LiveStep(stepPanel.copy(recordHeld = false, status = null)))
+
+// On its side, the line on the page: it grows down the column's left into the panel, the pads beside it from the top.
+@PreviewTest
+@Preview(name = "Live step panel side line", widthDp = 560, heightDp = 280, showBackground = true)
+@Composable
+fun LiveStepPanelSideLinePreview() = Live(lastRead, oneGroup = true, transport = patternUi(canUndo = true), step = LiveStep(stepPanel.copy(recordHeld = false, status = null)))
+
+// PLAY folded the panel; CORRECT stays lit on the line, and the snare held as it plays has put 3 notes on the grid.
+@PreviewTest
+@Preview(name = "Live step correct playing", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveStepCorrectPlayingPreview() = Live(
+    playing, oneGroup = true, voices = emptySet(),
+    transport = patternUi(TransportPhase.PLAYING, at = PatternPosition(1, 3, 2, 0.25f), canUndo = true),
+    step = LiveStep(StepUi(correct = true, status = MirrorText.correctedLine(3))),
+)
+
+@PreviewTest
+@Preview(name = "Live step correct playing dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveStepCorrectPlayingDarkPreview() = Live(
+    playing, dark = true, oneGroup = true, voices = emptySet(),
+    transport = patternUi(TransportPhase.PLAYING, at = PatternPosition(1, 3, 2, 0.25f), canUndo = true),
+    step = LiveStep(StepUi(correct = true, status = MirrorText.correctedLine(3))),
+)
+
 @PreviewTest
 @Preview(name = "Pattern sheet", widthDp = 393, heightDp = 852, showBackground = true)
 @Composable
@@ -1069,7 +1176,7 @@ fun PatternSheetDarkPreview() = PatternSheet(dark = true)
 private fun PatternSheet(dark: Boolean = false) {
     val t = patternUi(canUndo = true, missing = 2)
     Framed(Tab.LIVE, dark = dark) {
-        MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true, transport = t)
+        MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true, transport = t, step = LiveStep())
         ArcSheet(visible = true, onDismiss = {}) {
             PatternSheetContent(t, onDone = {})
         }

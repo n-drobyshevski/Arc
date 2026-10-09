@@ -771,6 +771,87 @@ object MirrorText {
     /** "3 corrected": the notes timing correct put on the grid. */
     fun correctedLine(n: Int) = "$n corrected"
 
+    /** The STEP panel's status as RECORD + pad puts a note on the step: "+ SNARE". */
+    fun stepPlaced(word: String) = "+ $word"
+
+    /** A note put on a step, for screen readers: "SNARE on step 1.2.1". */
+    fun stepPlacedSpoken(word: String, step: String) = "$word on step $step"
+
+    /** "KICK → 1.2.2": the note picked, nudged, and the step it sits on now. */
+    fun stepNudged(word: String, step: String) = "$word → $step"
+
+    /** A nudge for screen readers: "KICK moved to step 1.2.2". */
+    fun stepNudgedSpoken(word: String, step: String) = "$word moved to step $step"
+
+    /** "KICK +1 tk": a held pad's notes moved by CORRECT's − / +, the ticks so far ("−2 tk" earlier). */
+    fun stepShifted(word: String, ticks: Int) = "$word ${signedTicks(ticks)} tk"
+
+    /** A shift for screen readers: "KICK 1 tick later", "KICK 2 ticks earlier", "KICK back in place". */
+    fun stepShiftedSpoken(word: String, ticks: Int): String {
+        if (ticks == 0) return "$word back in place"
+        val n = Math.abs(ticks)
+        return "$word $n ${if (n == 1) "tick" else "ticks"} ${if (ticks > 0) "later" else "earlier"}"
+    }
+
+    /** The step cursor for screen readers: "Step 1.2.1", and ", 2 notes" with notes on it. */
+    fun stepSpoken(step: String, notes: Int) = "Step $step" + when (notes) {
+        0 -> ""
+        1 -> ", 1 note"
+        else -> ", $notes notes"
+    }
+
+    /** The STEP chip on the stopped display line and the panel it opens (upper-cased where shown); its name for screen readers. */
+    const val STEP = "Step"
+    const val STEP_NAME = "Step editing"
+    const val CLOSE_STEP = "Close step editing"
+
+    /** "STEP 1.2.1": the panel's status line while nothing else is said. */
+    fun stepStatus(step: String) = "STEP $step"
+
+    /** The panel's RECORD, held: what it does, for screen readers (a click holds it until the next). */
+    const val STEP_RECORD_NOTE = "Hold and tap a pad to put it on the step"
+
+    /** − and + either side of the strip. */
+    const val PREV_STEP = "Previous step"
+    const val NEXT_STEP = "Next step"
+
+    /** A cell of the strip for screen readers: "Step 1.2.1, has notes". */
+    fun stepCell(step: String, notes: Boolean) = "Step $step" + if (notes) PAD_HAS_NOTES else ""
+
+    /** The panel's knobs, every note on the step (upper-cased where shown), and their names for screen readers. */
+    const val VEL = "Vel"
+    const val LEN = "Len"
+    const val VELOCITY = "Velocity"
+    const val NOTE_LENGTH = "Note length"
+
+    /** BAR's pages under a pattern longer than a bar; "Bar 2" for screen readers. */
+    const val BAR = "Bar"
+    fun barPage(bar: Int) = "Bar $bar"
+
+    /** The panel's latches: NUDGE (a tap picks a lit pad for − / +) and CORRECT (timing correct), upper-cased where shown. */
+    const val NUDGE = "Nudge"
+    const val CORRECT = "Correct"
+
+    /** NUDGE with a note picked: "Nudge · KICK". */
+    fun nudgeChip(word: String?) = if (word == null) NUDGE else "$NUDGE · $word"
+
+    /** What NUDGE and CORRECT do, after their state for screen readers. */
+    const val NUDGE_NOTE = "Tap a lit pad to pick it, then − and + move its note."
+    const val CORRECT_NOTE = "Tap a pad to put its notes on the grid. While the pattern plays, hold one to correct it as it passes."
+
+    /** Added to a pad's or key's name for screen readers in the STEP panel: on the cursor's step, and picked for − / +. */
+    const val ON_STEP = ", on the step"
+    const val PICKED = ", picked"
+
+    /** A long press on a lit pad or key: picked for − / +; its action's name for screen readers. */
+    const val PICK = "Pick to nudge"
+
+    private fun signedTicks(n: Int) = when {
+        n > 0 -> "+$n"
+        n < 0 -> "−${-n}"
+        else -> "0"
+    }
+
     // ---------- FX: the master effect, the sends, the output compressor and the sidechain (an addition) ----------
     /** FX, the fourth function key: its two words. A tap opens the FX sheet; held, the pads play the punch-ins. */
     const val FN_FX = "FX"

@@ -368,5 +368,24 @@ class FeatureTextTest {
         )
         assertEquals("1 corrected", MirrorText.correctedLine(1))
         assertEquals("3 corrected", MirrorText.correctedLine(3))
+        // The STEP panel's status, and what screen readers say.
+        assertEquals("+ SNARE", MirrorText.stepPlaced("SNARE"))
+        assertEquals("SNARE on step 1.2.1", MirrorText.stepPlacedSpoken("SNARE", "1.2.1"))
+        assertEquals("KICK \u2192 1.2.2", MirrorText.stepNudged("KICK", "1.2.2"))
+        assertEquals("KICK moved to step 1.2.2", MirrorText.stepNudgedSpoken("KICK", "1.2.2"))
+        assertEquals(listOf("KICK +1 tk", "KICK \u22122 tk", "KICK 0 tk"), listOf(1, -2, 0).map { MirrorText.stepShifted("KICK", it) })
+        assertEquals(
+            listOf("KICK 1 tick later", "KICK 2 ticks earlier", "KICK back in place"),
+            listOf(1, -2, 0).map { MirrorText.stepShiftedSpoken("KICK", it) },
+        )
+        assertEquals(listOf("Step 1.2.1", "Step 1.2.1, 1 note", "Step 1.2.1, 2 notes"), listOf(0, 1, 2).map { MirrorText.stepSpoken("1.2.1", it) })
+        // The STEP chip and panel.
+        assertEquals("STEP 1.2.1", MirrorText.stepStatus("1.2.1"))
+        assertEquals(listOf("Step 1.2.1, has notes", "Step 2.4.4"), listOf(MirrorText.stepCell("1.2.1", true), MirrorText.stepCell("2.4.4", false)))
+        assertEquals("Bar 2", MirrorText.barPage(2))
+        assertEquals(listOf("NUDGE", "NUDGE \u00B7 KICK"), listOf(MirrorText.nudgeChip(null), MirrorText.nudgeChip("KICK")).map { it.uppercase() })
+        assertEquals(listOf("STEP", "VEL", "LEN", "BAR", "CORRECT"), listOf(MirrorText.STEP, MirrorText.VEL, MirrorText.LEN, MirrorText.BAR, MirrorText.CORRECT).map { it.uppercase() })
+        assertEquals("Tap a lit pad to pick it, then \u2212 and + move its note.", MirrorText.NUDGE_NOTE)
+        assertEquals("Step through the pattern", CoachText.STEP)
     }
 }

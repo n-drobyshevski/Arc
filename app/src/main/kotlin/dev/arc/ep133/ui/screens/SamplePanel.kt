@@ -122,6 +122,11 @@ import kotlin.math.roundToInt
  * in a frame of its own before the motion starts its clock
  * ([SamplePanel.start]), so a slow first frame doesn't skip the start of it.
  *
+ * STEP's panel (an addition, after the device's step sequencing) comes out
+ * of the same place on the same timeline, all of it on the dark screen: the
+ * header STEP's row, the strip its controls, and no plate ([PanelKind]). The
+ * two never show at once; the panel says which it is.
+ *
  * The swipe on the pads is a trigger, not a drag the panel follows: a
  * pointer handler of its own on the pads ([panelSwipe]), not a pager,
  * because a pad sounds the moment it is touched (holdToPlay takes the press
@@ -134,16 +139,23 @@ import kotlin.math.roundToInt
  * takes the finger from its first touch, keeps it.
  */
 
+/** Which panel the display line grows into: SAMPLE's, or STEP's ([SamplePanel.kind]). */
+internal enum class PanelKind { SAMPLE, STEP }
+
 /**
  * Where Live's SAMPLE panel is: [progress] 0 with the function keys, 1 with
  * the panel unrolled, in between as far as it has unrolled while it opens
  * or closes. [open] is where it rests or is on its way to; [moving],
  * whether it is on its way. [fixed] holds the panel where it started
- * (screenshots): nothing moves it.
+ * (screenshots): nothing moves it. [kind] is which panel it is, SAMPLE's
+ * or STEP's, from [start]'s too.
  */
 @Stable
-internal class SamplePanel(start: Float, val fixed: Boolean = false) {
+internal class SamplePanel(start: Float, val fixed: Boolean = false, kind: PanelKind = PanelKind.SAMPLE) {
     private val time = Animatable(start, PANEL_THRESHOLD).also { it.updateBounds(0f, 1f) }
+
+    /** Which panel comes out: set while it is closed (or before it opens), so what shows doesn't change as it moves. */
+    var kind by mutableStateOf(kind)
 
     // Each start and go counts one: an animation a later one cut short doesn't say it has stopped.
     private var runs = 0

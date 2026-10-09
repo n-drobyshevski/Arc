@@ -27,6 +27,8 @@ export const CoachText = {
   RECORD: 'Record a pattern: tap, then PLAY; hold for its settings',
   PATTERN_PLAY: 'Play the pattern from bar 1',
   ERASE: "Erase a pad's notes",
+  /** The STEP chip beside ERASE while the pattern is stopped: the STEP panel. */
+  STEP: 'Step through the pattern',
   OCTAVE: 'Octave',
   SCALE: 'Scale',
   KEY: 'Key',
