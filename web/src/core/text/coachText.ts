@@ -9,16 +9,16 @@ export const CoachText = {
   CLOSE_HINT: 'Tap anywhere to close',
 
   BACK_UP: 'Back up',
-  /** The connection key while connected: its name; a tap says HOLD_TO_DISCONNECT, a hold disconnects. */
+  /** Web only until the phone ships hold-to-disconnect: the connected key's title and tooltip; a tap says HOLD_TO_DISCONNECT, a hold disconnects. */
   CONNECTED: 'EP-133 connected: hold to disconnect',
+  /** Web only: the connected key's name for a screen reader, which hears HOLD_TO_DISCONNECT as its description. */
+  CONNECTED_NAME: 'EP-133 connected',
   CONNECTION: 'Connection',
   DISCONNECTED: 'Connect the EP-133',
-  /** A tap on the connected key (the toast), and what a screen reader hears with it. */
+  /** Web only: a tap on the connected key (the toast), and what a screen reader hears with it. */
   HOLD_TO_DISCONNECT: 'Hold to disconnect',
-  /** The same for a screen reader as a button of its own, beside the connection key. */
+  /** Web only: the same for a screen reader as a button of its own, beside the connection key. */
   DISCONNECT: 'Disconnect',
-  /** Live's top bar while the sound goes to Bluetooth, which plays late: the key's name and tag. */
-  BLUETOOTH: 'Bluetooth delay',
   SETTINGS: 'Settings',
   /** The web's desktop top bar: its System / Light / Dark switch, in the settings key's place. */
   THEME: 'Light or dark',
@@ -30,6 +30,8 @@ export const CoachText = {
   TEMPO: 'Click: tap; hold for tempo',
   /** The mic key in Live's top bar: a tap opens the SAMPLE panel, another closes it. */
   SAMPLE: 'Sample',
+  /** The amber Bluetooth key in Live's top bar, while the sound goes to Bluetooth: a tap says that it plays late. */
+  BLUETOOTH: 'Bluetooth delay',
   /** The pattern's keys on Live's display line: RECORD arms (a hold opens the pattern sheet), PLAY starts at bar 1. */
   RECORD: 'Record a pattern: tap, then PLAY; hold for its settings',
   PATTERN_PLAY: 'Play the pattern from bar 1',

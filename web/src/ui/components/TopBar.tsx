@@ -87,9 +87,9 @@ export function TopBar(props: TopBarProps): JSX.Element {
                 label={CoachText.BLUETOOTH}
                 ariaLabel={MirrorText.WIRELESS_DELAY}
                 face="var(--warn)"
-                ink="var(--display)"
+                ink="var(--tag-ink)"
                 onClick={() => props.onNote(MirrorText.WIRELESS_DELAY)}
-                iconSize={16}
+                iconSize={20}
               />
             </span>
             <span class="top-bar__gap" />
@@ -102,6 +102,7 @@ export function TopBar(props: TopBarProps): JSX.Element {
                 key="on"
                 icon={ArcIcon.DOT}
                 label={CoachText.CONNECTED}
+                ariaLabel={CoachText.CONNECTED_NAME}
                 face="var(--ok)"
                 ink="var(--on-ok)"
                 onClick={() => props.onNote(CoachText.HOLD_TO_DISCONNECT)}

@@ -107,8 +107,8 @@ const yellowTag = (label: string): CoachMarkSpec => ({ label, face: COACH_YELLOW
  */
 export const COACH_MARKS: Readonly<Record<CoachId, CoachMarkSpec>> = Object.freeze({
   'top.sections': navyTag(CoachText.SECTIONS),
-  // Live's amber key while the sound plays late (the face of the key itself).
-  'top.bluetooth': { label: CoachText.BLUETOOTH, face: 'var(--warn)', ink: 'var(--display)' },
+  // Live's amber key while the sound plays late (the face of the key itself; Chrome.kt's TagInk).
+  'top.bluetooth': { label: CoachText.BLUETOOTH, face: 'var(--warn)', ink: 'var(--tag-ink)' },
   'top.connection': navyTag(CoachText.CONNECTION),
   'top.help': { label: CoachText.HELP, face: 'var(--ink)', ink: 'var(--shell)' },
   // Web: the desk's theme switch, after the ? key (the nav rail's Settings key
@@ -151,8 +151,8 @@ export function coachSpecFor(id: string, el: Element): CoachMarkSpec | null {
   let spec = base
   // Chrome.kt: the connection tag is green (ok) while connected, navy while not.
   if (id === 'top.connection') {
-    const label = CoachText.CONNECTED.replace(/"/g, '\\"')
-    const on = el.getAttribute('aria-label') === CoachText.CONNECTED || el.querySelector(`[aria-label="${label}"]`) !== null
+    const label = CoachText.CONNECTED_NAME.replace(/"/g, '\\"')
+    const on = el.getAttribute('aria-label') === CoachText.CONNECTED_NAME || el.querySelector(`[aria-label="${label}"]`) !== null
     if (on) spec = { label: CoachText.CONNECTION, face: 'var(--ok)', ink: 'var(--on-ok)' }
   }
   const label = el.getAttribute('data-coach-label') ?? spec?.label

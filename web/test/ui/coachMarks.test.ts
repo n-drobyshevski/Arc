@@ -18,18 +18,19 @@ describe('the moved keys\' tags', () => {
     expect(COACH_MARKS['tools.settings']).toEqual({ label: CoachText.SETTINGS, face: 'var(--graphite)', ink: 'var(--shell)' })
   })
 
-  it('the Bluetooth key is top.bluetooth: amber with dark ink, named Bluetooth delay', () => {
+  it('the Bluetooth key is top.bluetooth: amber with the tag ink, named Bluetooth delay', () => {
     expect(COACH_IDS).toContain('top.bluetooth')
     expect(CoachText.BLUETOOTH).toBe('Bluetooth delay')
-    expect(COACH_MARKS['top.bluetooth']).toEqual({ label: 'Bluetooth delay', face: 'var(--warn)', ink: 'var(--display)' })
+    expect(COACH_MARKS['top.bluetooth']).toEqual({ label: 'Bluetooth delay', face: 'var(--warn)', ink: 'var(--tag-ink)' })
   })
 
   it('the connection key says hold: its name, the hint and the screen readers\' button', () => {
     expect(CoachText.CONNECTED).toBe('EP-133 connected: hold to disconnect')
+    expect(CoachText.CONNECTED_NAME).toBe('EP-133 connected')
     expect(CoachText.HOLD_TO_DISCONNECT).toBe('Hold to disconnect')
     expect(CoachText.DISCONNECT).toBe('Disconnect')
     // The overlay still tells the connected key from the other by its name.
-    const el = { getAttribute: (n: string) => (n === 'aria-label' ? CoachText.CONNECTED : null), querySelector: () => null } as unknown as Element
+    const el = { getAttribute: (n: string) => (n === 'aria-label' ? CoachText.CONNECTED_NAME : null), querySelector: () => null } as unknown as Element
     expect(coachSpecFor('top.connection', el)).toEqual({ label: CoachText.CONNECTION, face: 'var(--ok)', ink: 'var(--on-ok)' })
   })
 

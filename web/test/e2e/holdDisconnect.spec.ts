@@ -59,6 +59,32 @@ test('letting go early cancels: no disconnect, the ring goes', async ({ page }) 
   await expect(connected(page)).toBeVisible()
 })
 
+test('no name tooltip pops up under the key during the hold', async ({ page }) => {
+  await open(page)
+  await pressDown(page)
+  await expect(ring(page)).toBeVisible()
+  // Past the 500 ms long press, well inside the second.
+  await page.waitForTimeout(800)
+  await expect(page.locator('.icon-block__tip')).toHaveCount(0)
+  await expect(connected(page)).toBeVisible()
+  await page.mouse.move(300, 400)
+  await page.mouse.up()
+})
+
+test('a key that goes busy mid-hold does not disconnect', async ({ page }) => {
+  await open(page)
+  await connected(page).focus()
+  await page.keyboard.down('Enter')
+  await expect(ring(page)).toBeVisible()
+  // Something starts a transfer (the key is disabled while busy), as a click on its button would.
+  await page.getByRole('button', { name: 'Back up device' }).dispatchEvent('click')
+  await expect(connected(page)).toBeDisabled()
+  await expect(ring(page)).toHaveCount(0)
+  await page.waitForTimeout(1200)
+  await page.keyboard.up('Enter')
+  await expect(offline(page)).toHaveCount(0)
+})
+
 test('moving the pointer off the key cancels it', async ({ page }) => {
   await open(page)
   await pressDown(page)

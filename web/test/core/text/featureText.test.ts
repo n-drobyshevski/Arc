@@ -259,12 +259,10 @@ describe('FeatureTextTest', () => {
     expect(SettingsText.delayNow(220, 0)).toBe("Now: the output counts about 220 ms, all of Bluetooth's delay, so nothing more is made up.")
     expect(SettingsText.delayNow(null, 180)).toBe('Now: not measured, counted as about 180 ms.')
     expect(SettingsText.DELAY_NONE).toBe("Now: the sound isn't going to Bluetooth, so nothing is made up for.")
-    // The top bar's Bluetooth key and the connection key's hold (web: the phone's own wording).
-    expect(CoachText.BLUETOOTH).toBe('Bluetooth delay')
-    expect(CoachText.HOLD_TO_DISCONNECT).toBe('Hold to disconnect')
-    // The sentence leads with the delay, as a toast may be cut short.
+    // The key's sentence leads with the delay, as a toast may cut it short.
     expect(MirrorText.WIRELESS_DELAY.startsWith('Bluetooth plays late')).toBe(true)
     expect(MirrorText.wirelessMadeUp(180)).toBe('Bluetooth plays late (about 180 ms): arc makes up for it')
+    expect(CoachText.BLUETOOTH).toBe('Bluetooth delay')
   })
 
   it('pattern text', () => {
@@ -465,5 +463,12 @@ describe('FeatureTextTest', () => {
     expect([MirrorText.STEP, MirrorText.VEL, MirrorText.LEN, MirrorText.BAR, MirrorText.CORRECT].map((w) => w.toUpperCase())).toEqual(['STEP', 'VEL', 'LEN', 'BAR', 'CORRECT'])
     expect(MirrorText.NUDGE_NOTE).toBe('Tap a lit pad to pick it, then \u2212 and + move its note.')
     expect(CoachText.STEP).toBe('Step through the pattern')
+  })
+
+  it('connection key text (web only)', () => {
+    expect(CoachText.CONNECTED).toBe('EP-133 connected: hold to disconnect')
+    expect(CoachText.CONNECTED_NAME).toBe('EP-133 connected')
+    expect(CoachText.HOLD_TO_DISCONNECT).toBe('Hold to disconnect')
+    expect(CoachText.DISCONNECT).toBe('Disconnect')
   })
 })

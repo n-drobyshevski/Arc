@@ -16,6 +16,9 @@
 // [onClick]'s. Enter or Space held does the same (a tap of either is
 // [onClick] too), and [describedBy] points a screen reader at the hint. The
 // ring still completes under prefers-reduced-motion, drawn full from the start.
+// Such a key has no long-press tooltip (it would pop up mid-hold, over what the
+// ring is for): its title names it, and its tap explains it. A hold under way
+// is dropped when the key is disabled.
 import type { CSSProperties, JSX, Ref, TargetedKeyboardEvent, TargetedPointerEvent } from 'preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { Icon, type ArcIcon } from './Icons'
@@ -183,12 +186,16 @@ export function IconBlock(props: IconBlockProps): JSX.Element {
     hold.cancel()
     setHolding(false)
   }
+  // A key that goes disabled mid-hold (busy with a read) must not act when the second is up.
+  useEffect(() => {
+    if (disabled) stopHold()
+  }, [disabled])
 
   const onPointerDown = (e: TargetedPointerEvent<HTMLButtonElement>): void => {
     if (disabled || (e.pointerType === 'mouse' && e.button !== 0)) return
     start.current = { x: e.clientX, y: e.clientY }
-    press.down()
     if (onHold) startHold()
+    else press.down()
   }
   const onPointerMove = (e: TargetedPointerEvent<HTMLButtonElement>): void => {
     const s = start.current
@@ -243,7 +250,7 @@ export function IconBlock(props: IconBlockProps): JSX.Element {
           if (typeof r === 'function') r(el)
           else if (r) r.current = el
         }}
-        class={`icon-block cap-3d${round ? ' icon-block--round cap-3d--round' : ''}${checked ? ' is-down' : ''}${props.iconAlso !== undefined ? ' icon-block--pair' : ''}`}
+        class={`icon-block cap-3d${round ? ' icon-block--round cap-3d--round' : ''}${checked ? ' is-down' : ''}`}
         style={style}
         disabled={disabled}
         role={radio ? 'radio' : undefined}

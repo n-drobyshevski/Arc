@@ -19,8 +19,6 @@
   -webkit-touch-callout: none;
 }
 .icon-block--round { border-radius: 50%; }
-/* Two glyphs side by side (the Bluetooth key's Bluetooth and clock). */
-.icon-block--pair { gap: 2px; }
 
 .icon-block:disabled { opacity: var(--icon-disabled); }
 

@@ -29,6 +29,9 @@ async function lateLive(page: Page, ms = 140): Promise<void> {
 }
 
 const bar = (page: Page) => page.getByRole('banner')
+/** A Bluetooth or clock glyph anywhere on Live's display lines (the key is the bar's alone). */
+const onLines = (page: Page) =>
+  page.locator('.live-strip svg[data-icon="BLUETOOTH"], .live-display svg[data-icon="BLUETOOTH"], .live-strip svg[data-icon="CLOCK"], .live-display svg[data-icon="CLOCK"]')
 const key = (page: Page) => bar(page).getByRole('button', { name: SENTENCE })
 
 test.describe('on a phone', () => {
@@ -56,16 +59,23 @@ test.describe('on a phone', () => {
     })
     expect(look.face).toBe('rgb(232, 165, 62)')
     expect(look.warn.toLowerCase()).toBe('#e8a53e')
-    // Dark on the amber: the display's dark.
-    const [r, g, b] = look.ink.match(/\d+/g)!.map(Number)
-    expect(Math.max(r!, g!, b!)).toBeLessThan(60)
+    // Dark on the amber: the tag ink, as on the phone (the same in light and dark).
+    expect(look.ink).toBe('rgb(30, 31, 33)')
+    // Both glyphs at 20 px side by side with no gap, as the phone draws them.
+    const [bt, clock] = await Promise.all([
+      key(page).locator('svg[data-icon="BLUETOOTH"]').boundingBox(),
+      key(page).locator('svg[data-icon="CLOCK"]').boundingBox(),
+    ])
+    expect(bt!.width).toBe(20)
+    expect(clock!.width).toBe(20)
+    expect(clock!.x - (bt!.x + bt!.width)).toBeCloseTo(0, 0)
     // The bar has nothing else new: the tag, this key, the connection key, ? (and the screen readers' Disconnect).
     await expect(bar(page).getByRole('button')).toHaveCount(5)
   })
 
   test('the lines no longer have a chip: the hit shows, and the words are the same', async ({ page }) => {
     await lateLive(page)
-    await expect(page.locator('[data-late-chip]')).toHaveCount(0)
+    await expect(onLines(page)).toHaveCount(0)
     await expect(page.locator('.live-strip__line')).toHaveText(WAITING)
     await expect(page.locator('.live-strip__line')).not.toHaveText(SENTENCE)
     await demo(page, (d) => d.clock('start'))
@@ -83,7 +93,7 @@ test.describe('on a phone', () => {
     await page.getByRole('radio', { name: 'All groups' }).click()
     await page.keyboard.press('Escape')
     await expect(page.locator('.live-display')).toBeVisible()
-    await expect(page.locator('[data-late-chip]')).toHaveCount(0)
+    await expect(onLines(page)).toHaveCount(0)
     await expect(key(page)).toBeVisible()
   })
 
@@ -163,7 +173,7 @@ test.describe('on the desktop', () => {
     )
     expect(xs).toEqual([...xs].sort((a, b) => a - b))
     expect(new Set(xs).size).toBe(3)
-    await expect(page.locator('[data-late-chip]')).toHaveCount(0)
+    await expect(onLines(page)).toHaveCount(0)
     await expect(page.locator('.live-strip__line')).toHaveText(WAITING)
   })
 })
