@@ -1265,6 +1265,7 @@ fun MirrorScreen(
                                         mode = modeStrip,
                                         pressure = notePressure,
                                         step = keysStep,
+                                        tall = true,
                                     )
                                 }
                                 if (!stepHost) {
@@ -1278,7 +1279,7 @@ fun MirrorScreen(
                                         val width = maxWidth
                                         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                             lineMorph(Modifier.fillMaxWidth(), samplePanelFit(width, null), width, 10.dp, BodyCorner, keysLine, fnRow)
-                                            PadsGlide(panel, Modifier.fillMaxWidth().weight(1f).then(swipe), scaleOf = { w, h -> koUnit(w, h, 3) }) {
+                                            PadsGlide(panel, Modifier.fillMaxWidth().weight(1f).then(swipe), scaleOf = { w, h -> koUnit(w, h, 3, tall = true) }, scaleYOf = { w, h -> koBody(w, h, 3) }) {
                                                 Box { grid(Modifier.fillMaxSize()); gridOver() }
                                             }
                                         }
@@ -1307,6 +1308,7 @@ fun MirrorScreen(
                                         arpLit = arpLitPads,
                                         onPadPressure = padPressure,
                                         step = padStep,
+                                        tall = true,
                                     )
                                 }
                                 if (!morphs) {
@@ -1320,7 +1322,7 @@ fun MirrorScreen(
                                         val width = maxWidth
                                         Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                             lineMorph(Modifier.fillMaxWidth(), fit, width, 10.dp, BodyCorner, padsLine, fnRow)
-                                            PadsGlide(panel, Modifier.fillMaxWidth().weight(1f).then(swipe), scaleOf = { w, h -> koUnit(w, h, 3) }) {
+                                            PadsGlide(panel, Modifier.fillMaxWidth().weight(1f).then(swipe), scaleOf = { w, h -> koUnit(w, h, 3, tall = true) }, scaleYOf = { w, h -> koBody(w, h, 3) }) {
                                                 Box { body(Modifier.fillMaxSize()); gridOver() }
                                             }
                                         }
@@ -1881,6 +1883,8 @@ private fun Group(
     step: PadStep? = null,
     /** The group keys' pattern numbers ([GroupNumbers]), where there is something to say. */
     groupNumbers: GroupNumbers? = null,
+    /** The big grid upright: its pads grow taller into height the body leaves ([padFit]). */
+    tall: Boolean = false,
 ) {
     val c = LocalArcColors.current
     val lit = st.pads.filterKeys { it.group == group }
@@ -1920,7 +1924,7 @@ private fun Group(
         val groupKeys: (@Composable (KoGeom) -> Unit)? = onSelectGroup?.let { select ->
             { k -> for (g in 0..3) GroupKey(g, group, st, now, select, Modifier.width(k.u), keyMin = 0.dp, ko = k, numbers = groupNumbers) }
         }
-        KoDeck(modifier, groupKeys, mode) { o, k -> pad(PhysicalPad(group, o), k) }
+        KoDeck(modifier, groupKeys, mode, tall) { o, k -> pad(PhysicalPad(group, o), k) }
         return
     }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1983,43 +1987,84 @@ private fun Deck(modifier: Modifier, content: @Composable ColumnScope.(gap: Dp) 
 /**
  * The big grid drawn as the Guide draws the K.O. II (KoPanel, a 560-wide
  * device whose pad column is 64.9 wide): every length a share of [u], one
- * pad's width. A pad is 1.08 times as wide as high; over each row of pads a
+ * pad's width. A pad is [KoPadRatio] times as wide as high, or [h] where the
+ * upright grid has grown them taller ([padFit]); over each row of pads a
  * line of the words printed on the body; the body's edge offset down and right.
  */
-private class KoGeom(val u: Dp) {
+private class KoGeom(val u: Dp, val h: Dp = u / KoPadRatio) {
     /** The printed line over a row, and the gaps around it. */
     val line = u * 0.215f
     val gy = u * 0.077f
     val gx = u * 0.215f
-    /** A pad's height. */
-    val h = u / 1.08f
     val keyShape = RoundedCornerShape(maxOf(6.dp, u * 0.092f))
     val led = (u * 0.085f).coerceIn(5.dp, 7.dp)
 
     companion object {
-        /**
-         * As big as [w] x [h] lets the body be, with [cols] columns (pads and
-         * group keys): wide, 2 x 0.277 + the gaps + the edge + the mode strip
-         * ([ModeStripWidth]); high, 0.215 + four rows of (0.215 + 0.077 +
-         * 0.926) + three gaps + 0.31 + the edge.
-         */
-        fun fit(w: Dp, h: Dp, cols: Int) = KoGeom(
-            minOf((w - CapDx - 2.dp - ModeStripWidth) / (cols * 1.215f + 0.401f), (h - CapDy - 2.dp) / 5.72f, 170.dp).coerceAtLeast(0.dp),
-        )
+        /** As big as [w] x [h] lets the body be, with [cols] columns (pads and group keys): see [padFit]. */
+        fun fit(w: Dp, h: Dp, cols: Int, tall: Boolean = false): KoGeom = padFit(w, h, cols, tall).let { KoGeom(it.width, it.height) }
     }
 
     /** The body's width with [cols] columns, its edge and mode strip in it. */
     fun width(cols: Int): Dp = u * (cols * 1.215f + 0.401f) + CapDx + 2.dp + ModeStripWidth
 }
 
-/** The big grid's pad width in a [w] x [h] room with [cols] columns ([KoGeom.fit]). */
+/** A pad of the K.O. II is this much wider than high. */
+private const val KoPadRatio = 1.08f
+
+/** The body's height in pad widths, the pads [KoPadRatio] as wide as high: 0.215 + four rows of (0.215 + 0.077 + 0.926) + three gaps + 0.31 + the edge. */
+private const val KoBodyHeight = 5.72f
+
+/** The widest a pad is, in dp. */
+private val KoPadMax = 170.dp
+
+/** The tallest the upright grid's pads grow: this times their width. */
+internal const val KoPadTallest = 1.15f
+
+/**
+ * One pad of the big grid: [width] and [height], and the [body] they make
+ * (the plate, its edge and the pads' own, in a room's height).
+ */
+internal data class PadFit(val width: Dp, val height: Dp) {
+    val body: Dp get() = width * KoBodyHeight + (height - width / KoPadRatio) * PadNotes.ROWS.size
+}
+
+/**
+ * How big the big grid's pads are in a [w] x [h] room with [cols] columns
+ * (pads and group keys): as wide as the body's width, its edge and the mode strip
+ * ([ModeStripWidth]) let them be, or as the room's height lets the body (0.215 +
+ * four rows of (0.215 + 0.077 + 0.926) + three gaps + 0.31 + the edge) be, up to
+ * [KoPadMax]; high, a pad is [KoPadRatio] times as wide as high.
+ *
+ * [tall] (the upright grid): where the width is what limits, the body is
+ * shorter than the room, and the pads take that height instead, shared by the four
+ * rows, up to [KoPadTallest] times their width. The room's width is not any
+ * more than it was and the gaps are the same, so this only makes the pads taller;
+ * a room the pads already fill (a small phone) is as it was.
+ */
+internal fun padFit(w: Dp, h: Dp, cols: Int, tall: Boolean = false): PadFit {
+    val room = h - CapDy - 2.dp
+    val u = minOf((w - CapDx - 2.dp - ModeStripWidth) / (cols * 1.215f + 0.401f), room / KoBodyHeight, KoPadMax).coerceAtLeast(0.dp)
+    val flat = u / KoPadRatio
+    if (!tall) return PadFit(u, flat)
+    val spare = room - u * KoBodyHeight
+    return PadFit(u, flat + (spare / PadNotes.ROWS.size).coerceIn(0.dp, u * KoPadTallest - flat))
+}
+
+/** The big grid's pad width in a [w] x [h] room with [cols] columns ([padFit]). */
 internal fun koPadWidth(w: Dp, h: Dp, cols: Int): Dp = KoGeom.fit(w, h, cols).u
 
 /**
  * The big grid's pad width (px) in a room [w] x [h] px with [cols] columns
- * ([KoGeom.fit]): how big it is, for [PadsGlide].
+ * ([padFit], [tall]: the upright grid): how big it is, for [PadsGlide].
  */
-internal fun Density.koUnit(w: Int, h: Int, cols: Int): Float = KoGeom.fit(w.toDp(), h.toDp(), cols).u.toPx()
+internal fun Density.koUnit(w: Int, h: Int, cols: Int, tall: Boolean = false): Float = padFit(w.toDp(), h.toDp(), cols, tall).width.toPx()
+
+/**
+ * The upright grid's body height (px) in a room [w] x [h] px with [cols] columns
+ * ([padFit]): its pads grow taller than their width says, so [PadsGlide]
+ * scales its height by this.
+ */
+internal fun Density.koBody(w: Int, h: Int, cols: Int): Float = padFit(w.toDp(), h.toDp(), cols, tall = true).body.toPx()
 
 /** How wide the big grid's body is with [cols] columns, as tall as [h] lets it be ([KoGeom.fit]) whatever the width. */
 internal fun koDeckWidth(h: Dp, cols: Int): Dp = KoGeom.fit(Dp.Infinity, h, cols).width(cols)
@@ -2031,7 +2076,8 @@ internal fun koDeckWidth(h: Dp, cols: Int): Dp = KoGeom.fit(Dp.Infinity, h, cols
  * device's group keys are (a phone on its side). [mode]: KEYS / PADS in the
  * body's right margin ([ModeStrip]), given that margin, the keys' height, and
  * its words' size. The LEDs before the printed words stay unlit: on the
- * device they mark the knobs' pages, not the pads.
+ * device they mark the knobs' pages, not the pads. [tall]: the upright grid,
+ * whose pads grow taller into height the body leaves ([padFit]).
  * While the SAMPLE panel moves, the room it is given stays as it was and the
  * drawing glides instead ([PadsGlide]), so this lays out (and its keys
  * compose) once per opening or closing, not on every frame.
@@ -2041,11 +2087,12 @@ private fun KoDeck(
     modifier: Modifier,
     groupKeys: (@Composable (KoGeom) -> Unit)?,
     mode: (@Composable (Modifier, Dp) -> Unit)?,
+    tall: Boolean = false,
     key: @Composable (offset: Int, k: KoGeom) -> Unit,
 ) {
     val ko = LocalHwColors.current.ko
     BoxWithConstraints(modifier, contentAlignment = Alignment.Center) {
-        val k = KoGeom.fit(maxWidth, maxHeight, if (groupKeys != null) 4 else 3)
+        val k = KoGeom.fit(maxWidth, maxHeight, if (groupKeys != null) 4 else 3, tall)
         val radius = k.u * 0.277f
         val body = Modifier
             .drawBehind {
@@ -3082,6 +3129,8 @@ private fun KeysGrid(
     pressure: ((note: Int, pressure: Float) -> Unit)? = null,
     /** The STEP panel open: the keys whose notes are on the cursor's step lit, the one picked ringed, by MIDI note ([PadStep]). */
     step: PadStep? = null,
+    /** Upright: the keys grow taller into height the body leaves ([padFit]). */
+    tall: Boolean = false,
 ) {
     val c = LocalArcColors.current
     val notes = Keys.notes(keys.root, keys.scale, keys.octave)
@@ -3105,7 +3154,7 @@ private fun KeysGrid(
     // its digit, its octave where a pad shows its sample.
     val hw = LocalHwColors.current
     val density = LocalDensity.current
-    KoDeck(modifier, groupKeys = null, mode) { o, k ->
+    KoDeck(modifier, groupKeys = null, mode, tall) { o, k ->
         val note = notes[o]
         // The note the arp sounds now lights its key as a device note does.
         val g = if (note in keys.arpLit) 1f else lit[o] ?: 0f

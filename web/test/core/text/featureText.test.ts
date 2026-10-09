@@ -15,6 +15,7 @@ import { transportState } from '../../../src/core/features/transport'
 import { CoachText } from '../../../src/core/text/coachText'
 import { FeatureText } from '../../../src/core/text/featureText'
 import { MirrorText } from '../../../src/core/text/mirrorText'
+import { NavText } from '../../../src/core/text/navText'
 import { SettingsText } from '../../../src/core/text/settingsText'
 
 describe('FeatureTextTest', () => {
@@ -263,6 +264,15 @@ describe('FeatureTextTest', () => {
     expect(MirrorText.WIRELESS_DELAY.startsWith('Bluetooth plays late')).toBe(true)
     expect(MirrorText.wirelessMadeUp(180)).toBe('Bluetooth plays late (about 180 ms): arc makes up for it')
     expect(CoachText.BLUETOOTH).toBe('Bluetooth delay')
+  })
+
+  it('connection key text', () => {
+    expect(NavText.HOLD_TO_DISCONNECT).toBe('Hold to disconnect')
+    expect(CoachText.CONNECTED_HOLD).toBe('EP-133 connected: hold to disconnect')
+    expect(CoachText.CONNECTION_HOLD).toBe('Connection: hold to disconnect')
+    expect(CoachText.DISCONNECT).toBe('Disconnect')
+    // The web's key still disconnects on a tap.
+    expect(CoachText.CONNECTED).toBe('EP-133 connected: tap to disconnect')
   })
 
   it('pattern text', () => {

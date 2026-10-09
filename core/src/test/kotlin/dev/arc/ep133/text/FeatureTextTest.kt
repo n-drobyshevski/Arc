@@ -283,6 +283,16 @@ class FeatureTextTest {
     }
 
     @Test
+    fun `connection key text`() {
+        assertEquals("Hold to disconnect", NavText.HOLD_TO_DISCONNECT)
+        assertEquals("EP-133 connected: hold to disconnect", CoachText.CONNECTED_HOLD)
+        assertEquals("Connection: hold to disconnect", CoachText.CONNECTION_HOLD)
+        assertEquals("Disconnect", CoachText.DISCONNECT)
+        // The web's key still disconnects on a tap.
+        assertEquals("EP-133 connected: tap to disconnect", CoachText.CONNECTED)
+    }
+
+    @Test
     fun `pattern text`() {
         val a7 = PhysicalPad(0, 9)
         assertEquals("Pattern", MirrorText.PATTERN)

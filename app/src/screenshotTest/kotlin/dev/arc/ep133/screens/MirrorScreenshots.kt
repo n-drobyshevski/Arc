@@ -162,6 +162,8 @@ private fun Framed(
     sample: SampleKey? = if (tab == Tab.LIVE) SampleKey(false) {} else null,
     /** Live's Bluetooth key in the top bar, while the sound goes to Bluetooth. */
     late: LateKey? = null,
+    /** The connection key's ring part-way, as while it is held. */
+    holdProgress: Float = 0f,
     content: @Composable () -> Unit,
 ) {
     ArcTheme(dark = dark) {
@@ -176,13 +178,14 @@ private fun Framed(
                     ArcShell(
                         tab = tab, onTab = {},
                         connected = connected, canConnect = true,
-                        onConnect = {}, onDebug = {}, onSettings = {}, onHelp = {},
+                        onConnect = {}, onDisconnect = {}, onHint = {}, haptics = false, onDebug = {}, onSettings = {}, onHelp = {},
                         guideOpen = guideOpen, onGuide = {},
                         guide = { GuideScreen(onBack = {}) },
                         middle = pill.takeIf { tab == Tab.LIVE && liveInBar(LocalArcWindow.current) },
                         initialMenuOpen = menu,
                         sample = sample,
                         late = late,
+                        holdProgress = holdProgress,
                         content = content,
                     )
                 }
@@ -196,7 +199,7 @@ private fun Framed(
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null, arp: LiveArp? = null, voices: Set<String>? = null, step: LiveStep? = null, scene: LiveScene? = null) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null, arp: LiveArp? = null, voices: Set<String>? = null, step: LiveStep? = null, scene: LiveScene? = null, holdProgress: Float = 0f) {
     val mirror = MirrorUi(state, loading = loading, error = error, offline = offline, offlineProjects = offlineProjects)
     // PROJECT as MainActivity works it out; TEMPO's light caught on a beat while the click is on; FX named on its light,
     // held while [punch] gives the punch-ins.
@@ -222,6 +225,7 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
         toastAction = toastAction,
         sample = SampleKey(sampleUi.state.on && !keys.on) {},
         late = LateKey {}.takeIf { wireless },
+        holdProgress = holdProgress,
     ) {
         MirrorScreen(
             mirror = mirror,
@@ -359,6 +363,23 @@ fun GuideOverlayLiveBluetoothPreview() = Live(playing, oneGroup = true, guide = 
 @Preview(name = "Live bluetooth toast", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
 fun LiveBluetoothToastPreview() = Live(playing, oneGroup = true, wireless = true, transport = patternUi(canUndo = true), toast = MirrorText.wirelessMadeUp(180))
+
+// The connection key held while connected: a ring fills round its edge over a second, then the EP-133 disconnects.
+// A tap only shows "Hold to disconnect".
+@PreviewTest
+@Preview(name = "Top bar disconnect hold", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun TopBarDisconnectHoldPreview() = Live(playing, oneGroup = true, holdProgress = 0.6f)
+
+@PreviewTest
+@Preview(name = "Top bar disconnect hold dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun TopBarDisconnectHoldDarkPreview() = Live(playing, dark = true, oneGroup = true, holdProgress = 0.6f)
+
+@PreviewTest
+@Preview(name = "Top bar disconnect hold 360 bluetooth", widthDp = 360, heightDp = 740, showBackground = true)
+@Composable
+fun TopBarDisconnectHold360Preview() = Live(wirelessState, oneGroup = true, wireless = true, holdProgress = 0.3f, toast = dev.arc.ep133.text.NavText.HOLD_TO_DISCONNECT)
 
 // On its side the line sits in the top bar beside the key, its chips glyphs alone.
 @PreviewTest

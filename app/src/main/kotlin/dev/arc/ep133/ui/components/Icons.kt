@@ -24,7 +24,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathMeasure
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
@@ -185,6 +187,30 @@ private fun DrawScope.draw(icon: ArcIcon, color: Color) {
     }
 }
 
+/** How wide a held key's ring is, and how far in from the key's edge it runs. */
+private val RingStroke = 3.dp
+private val RingInset = 3.5.dp
+
+/**
+ * A held key's ring in [color], [progress] (0 to 1) of the way clockwise from the top
+ * middle round the key's edge, over a faint track once it has started. It is read as
+ * the key draws, so filling it recomposes nothing. Drawn over the face (and so travels with it).
+ */
+private fun Modifier.fillRing(color: Color, round: Boolean, progress: () -> Float): Modifier = drawWithContent {
+    drawContent()
+    val p = progress().coerceIn(0f, 1f)
+    if (p <= 0f) return@drawWithContent
+    val inset = RingInset.toPx()
+    val radius = if (round) size.minDimension / 2f else 8.dp.toPx()
+    val path = edgePath(size.width, size.height, radius, inset)
+    val stroke = Stroke(RingStroke.toPx(), cap = StrokeCap.Round)
+    drawPath(path, color.copy(alpha = 0.25f), style = stroke)
+    val part = Path()
+    val measure = PathMeasure().apply { setPath(path, false) }
+    measure.getSegment(0f, measure.length * p, part, true)
+    drawPath(part, color, style = stroke)
+}
+
 /**
  * A square (or round) icon key, drawn as a cap (see [cap]) whose face travels
  * onto its edge while pressed. Long-press shows its name; screen readers read
@@ -192,6 +218,10 @@ private fun DrawScope.draw(icon: ArcIcon, color: Color) {
  * [state] where it has one (a key that is on or off). [beside]: a second icon
  * after [icon], the same size. The touch area stays at least 44dp even when
  * the face is drawn smaller.
+ * [hold]: the key is held, not tapped ([KeyHold]): a tap calls [onClick] (to say
+ * so), and a hold of a second fills a ring round the key's edge and calls
+ * [KeyHold.onHold]; [ring] draws it part-way regardless (for screenshots). A held key
+ * shows no tooltip, as the press is the hold's.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -209,13 +239,18 @@ fun IconBlock(
     state: String? = null,
     beside: ArcIcon? = null,
     description: String = label,
+    hold: KeyHold? = null,
+    ring: Float = 0f,
 ) {
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
+    val held = hold?.let { rememberHeldKey(it, enabled, source, onClick) }
     TooltipBox(
         positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Below),
         tooltip = { PlainTooltip { Text(label.uppercase(), style = ArcType.capsKeySmall) } },
         state = rememberTooltipState(),
+        // The tooltip's own long-press would take the hold's pointer events (and TalkBack's long click).
+        enableUserInput = hold == null,
     ) {
         Box(
             modifier
@@ -228,11 +263,19 @@ fun IconBlock(
                     dy = if (round) RoundCapDy else CapDy,
                     alpha = if (enabled) 1f else 0.4f,
                 )
-                .clickable(interactionSource = source, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
+                .then(
+                    if (hold == null || held == null) {
+                        Modifier.clickable(interactionSource = source, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
+                    } else {
+                        held.modifier
+                    },
+                )
                 .semantics {
                     contentDescription = description
                     if (state != null) stateDescription = state
-                },
+                    if (hold != null) heldKeyActions(hold, enabled, onClick)
+                }
+                .then(if (held != null || ring > 0f) Modifier.fillRing(ink, round, { maxOf(ring, held?.ring?.floatValue ?: 0f) }) else Modifier),
             contentAlignment = Alignment.Center,
         ) {
             if (beside == null) {

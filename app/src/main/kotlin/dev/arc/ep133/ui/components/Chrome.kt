@@ -155,6 +155,12 @@ fun ArcShell(
     connected: Boolean,
     canConnect: Boolean,
     onConnect: () -> Unit,
+    /** The connection key held for a second while connected. */
+    onDisconnect: () -> Unit,
+    /** A tap on the connection key while connected is given the sentence that says to hold, to show as a toast. */
+    onHint: (String) -> Unit,
+    /** Whether the connection key ticks under the finger (Settings, Haptics). */
+    haptics: Boolean,
     onDebug: () -> Unit,
     onSettings: () -> Unit,
     onHelp: () -> Unit,
@@ -169,6 +175,8 @@ fun ArcShell(
     late: LateKey? = null,
     /** For screenshots: start with the section list open. */
     initialMenuOpen: Boolean = false,
+    /** For screenshots: the connection key's ring part-way, as while it is held. */
+    holdProgress: Float = 0f,
     content: @Composable () -> Unit,
 ) {
     var menuOpen by rememberSaveable { mutableStateOf(initialMenuOpen) }
@@ -182,11 +190,15 @@ fun ArcShell(
                     connected = connected,
                     canConnect = canConnect,
                     onConnect = onConnect,
+                    onDisconnect = onDisconnect,
+                    onHint = onHint,
+                    haptics = haptics,
                     onDebug = onDebug,
                     onHelp = onHelp,
                     middle = middle,
                     sample = sample,
                     late = late,
+                    holdProgress = holdProgress,
                 )
             },
         ) {
@@ -209,8 +221,12 @@ fun ArcShell(
 /**
  * The section tag, then icon keys as in the pocket operator app's top row: the
  * connection key is green with a dot while the EP-133 is connected (a tap
- * disconnects) and navy with a ring when not, then the guide overlay (?).
- * Their names show on long-press, in the overlay and to screen readers. On
+ * says to hold, and a hold of a second disconnects, a ring filling round the
+ * key meanwhile) and navy with a ring when not (a tap connects), then the
+ * guide overlay (?).
+ * Their names show on long-press (not the connected key's, which a long press
+ * holds), in the overlay and to screen readers (which also get Disconnect as an
+ * action of the connected key, with no hold). On
  * Live, while the sound goes to Bluetooth, an amber key with the Bluetooth
  * rune and a clock ([late], an addition) comes right before the connection
  * key: a tap says that Bluetooth plays late. Back up lives on the Backups
@@ -228,11 +244,16 @@ fun TopBar(
     connected: Boolean,
     canConnect: Boolean,
     onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
+    onHint: (String) -> Unit,
+    haptics: Boolean,
     onDebug: () -> Unit,
     onHelp: () -> Unit = {},
     middle: (@Composable BoxScope.() -> Unit)? = null,
     sample: SampleKey? = null,
     late: LateKey? = null,
+    /** For screenshots: the connection key's ring part-way, as while it is held. */
+    holdProgress: Float = 0f,
 ) {
     val c = LocalArcColors.current
     val window = LocalArcWindow.current
@@ -265,10 +286,13 @@ fun TopBar(
             }
             if (late != null) LateBlock(late)
             if (connected) {
+                // A tap only says to hold: letting go early, or sliding off, leaves the EP-133 connected.
                 IconBlock(
-                    ArcIcon.DOT, CoachText.CONNECTED, c.ok, c.onOk, onConnect,
-                    Modifier.coachMark("top.connection", CoachText.CONNECTION, c.ok, c.onOk),
+                    ArcIcon.DOT, CoachText.CONNECTED_HOLD, c.ok, c.onOk, { onHint(NavText.HOLD_TO_DISCONNECT) },
+                    Modifier.coachMark("top.connection", CoachText.CONNECTION_HOLD, c.ok, c.onOk),
                     enabled = canConnect, iconSize = 16.dp,
+                    hold = KeyHold(CoachText.DISCONNECT, haptics, onDisconnect),
+                    ring = holdProgress,
                 )
             } else {
                 IconBlock(

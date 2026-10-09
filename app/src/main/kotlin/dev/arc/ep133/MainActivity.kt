@@ -1034,6 +1034,10 @@ class MainActivity : ComponentActivity() {
                     connected = state.connected,
                     canConnect = state.midiSupported && !state.busy,
                     onConnect = { controller.connect() },
+                    // Connected, connect() lets go of the session: held for a second, the connection key's tap only toasts that.
+                    onDisconnect = { controller.connect() },
+                    onHint = { controller.toast(it) },
+                    haptics = appSettings.haptics,
                     onDebug = { debug = true },
                     onSettings = { settingsOpen = true },
                     onHelp = { coach = true },

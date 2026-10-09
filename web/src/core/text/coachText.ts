@@ -10,7 +10,14 @@ export const CoachText = {
 
   BACK_UP: 'Back up',
   CONNECTED: 'EP-133 connected: tap to disconnect',
+  // Web delta: the web's connection key still disconnects on a tap; the hold is Android's.
+  /** Android's connection key while connected: a tap only says to hold (NavText.HOLD_TO_DISCONNECT), so its name does too. */
+  CONNECTED_HOLD: 'EP-133 connected: hold to disconnect',
   CONNECTION: 'Connection',
+  /** The guide overlay's tag on Android's connection key while connected. */
+  CONNECTION_HOLD: 'Connection: hold to disconnect',
+  /** The connection key's action for a screen reader, which disconnects without the timed hold. */
+  DISCONNECT: 'Disconnect',
   DISCONNECTED: 'Connect the EP-133',
   SETTINGS: 'Settings',
   /** The web's desktop top bar: its System / Light / Dark switch, in the settings key's place. */
