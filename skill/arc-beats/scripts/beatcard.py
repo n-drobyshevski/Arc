@@ -5,7 +5,7 @@ Reads the text card format of references/beat-card.md the way Arc does (the
 reading rules there are the spec) and works on it. Python 3.9+, standard
 library only.
 
-    beatcard.py check   [CARD|-] [--json]
+    beatcard.py check   [CARD|-] [--json] [--sounds SOUNDS.txt]
     beatcard.py analyse [CARD|-] [--json] [--recipes genres.md]
     beatcard.py midi    [CARD|-] [-o OUT.mid] [--loops N] [--channel 1-16]
     beatcard.py grid    [CARD|-]
@@ -14,6 +14,14 @@ CARD is a file; without it, or with "-", the card is read from standard
 input. Anything before the first line starting with ARC BEAT is ignored, so
 a whole chat reply works too. Exit status: 0 fine, 1 the card has errors,
 2 the command line or a file is wrong.
+
+Effect lines (fx, send, comp, sidechain) in the header and pad lines inside
+a section are read and checked the way Arc reads them; grid and analyse show
+them. SOUNDS.txt is the user's sound list as Arc's share adds it after the card
+(a header line, then one "<slot> <name>" line per sound; the header is
+optional; so is the note after it about names like 200.pcm, which is skipped).
+With it, check warns about each sound line whose slot or name isn't in the
+list, and notes each one that uses a slot the EP-133 keeps without a name.
 """
 
 from __future__ import annotations
@@ -39,6 +47,8 @@ MAX_NOTES = 2048
 NAME_MAX = 40
 TEMPO_MIN, TEMPO_MAX = 40.0, 240.0
 SWING_MIN, SWING_MAX = 50, 75
+#: The EP-133's sound slots.
+SLOT_MIN, SLOT_MAX = 1, 999
 
 #: Step sizes in ticks (96 a beat, 384 a bar).
 STEP_TICKS = {"1/8": 48, "1/16": 24, "1/32": 12, "1/8T": 32, "1/16T": 16}
@@ -74,8 +84,28 @@ ASSUMED_KIT = {
     "AENTER": "crash",
 }
 
+#: The master effects an fx line names, in the order Arc offers them.
+FX_TYPES = ("none", "delay", "reverb", "distortion", "chorus", "filter", "compressor")
+#: The settings a pad line can give, in the order Arc writes them.
+PAD_SETTINGS = ("pitch", "level", "pan", "attack", "release", "mode")
+PLAY_MODES = ("oneshot", "key", "legato")
+#: The lines that set the project's FX; header only.
+FX_WORDS = ("fx", "send", "comp", "sidechain")
+#: What the two knobs of each effect do: (X name, Y name).
+FX_KNOBS = {
+    "delay": ("length", "feedback"),
+    "reverb": ("size", "colour"),
+    "distortion": ("drive", "colour"),
+    "chorus": ("rate", "feedback"),
+    "filter": ("cutoff", "resonance"),
+    "compressor": ("drive", "speed"),
+}
+#: The pad sheet's ranges (PadSettings).
+PITCH_MAX, LEVEL_MAX, PAN_MAX, ENV_MAX = 12, 100, 16, 255
+
 ERROR = "error"
 WARNING = "warning"
+NOTE = "note"
 
 
 @dataclass
@@ -115,6 +145,70 @@ class Row:
 
 
 @dataclass
+class Sound:
+    """A sound line: the slot a pad should play and, when given, the name the user's list has for it."""
+
+    slot: int
+    name: str  # "" when the line gave none
+    line: int
+
+
+@dataclass
+class PadShape:
+    """A pad line: the pad's shaping, only the settings the line gave (None for the rest)."""
+
+    line: int
+    pitch: Optional[float] = None  # semitones, -12..12
+    level: Optional[int] = None  # 0..100
+    pan: Optional[int] = None  # -16..16, negative is left
+    attack: Optional[int] = None  # envelope ticks 0..255
+    release: Optional[int] = None  # envelope ticks 0..255
+    mode: Optional[str] = None  # oneshot, key or legato
+
+    def given(self) -> Dict[str, object]:
+        """The settings given, by name, in the order Arc writes them."""
+        return {k: getattr(self, k) for k in PAD_SETTINGS if getattr(self, k) is not None}
+
+
+@dataclass
+class CardComp:
+    """A comp line: off, or on with a drive and a speed (percent 0..100)."""
+
+    on: bool
+    drive: float = 50.0
+    speed: float = 50.0
+
+
+@dataclass
+class CardSidechain:
+    """A sidechain line: off, or the pad that ducks the groups (0..3) for a length and a shape (percent 0..100)."""
+
+    on: bool
+    group: int = 0
+    pad: int = 0
+    groups: List[int] = field(default_factory=list)
+    length: float = 30.0
+    shape: float = 50.0
+
+
+@dataclass
+class Fx:
+    """The card's effect lines; each kind is None when the card has no such line. Knobs are percent, 0..100."""
+
+    effect: Optional[str] = None  # one of FX_TYPES
+    x: Optional[float] = None
+    y: Optional[float] = None
+    sends: Optional[Dict[int, float]] = None  # group 0..3 -> percent; the groups left out play 0
+    comp: Optional[CardComp] = None
+    sidechain: Optional[CardSidechain] = None
+    line: int = 0  # the first effect line
+
+    def kinds(self) -> List[str]:
+        """The kinds of line the card has: fx, send, comp, sidechain."""
+        return [k for k, present in (("fx", self.effect is not None), ("send", self.sends is not None), ("comp", self.comp is not None), ("sidechain", self.sidechain is not None)) if present]
+
+
+@dataclass
 class Pattern:
     group: int  # 0..3
     number: Optional[int]
@@ -123,6 +217,8 @@ class Pattern:
     line: int = 0
     rows: List[Row] = field(default_factory=list)
     hits: List[Hit] = field(default_factory=list)
+    sounds: Dict[int, Sound] = field(default_factory=dict)  # by pad offset
+    pads: Dict[int, PadShape] = field(default_factory=dict)  # by pad offset
 
     @property
     def letter(self) -> str:
@@ -143,6 +239,10 @@ class Pattern:
                 names[r.pad] = r.name
         return names
 
+    def sound_names(self) -> Dict[int, str]:
+        """The names the sound lines give, by pad."""
+        return {pad: s.name for pad, s in self.sounds.items() if s.name}
+
 
 @dataclass
 class Card:
@@ -151,6 +251,9 @@ class Card:
     swing: int = 50
     patterns: List[Pattern] = field(default_factory=list)
     problems: List[Problem] = field(default_factory=list)
+    fx: Optional[Fx] = None
+    #: The pads Arc's share says have no sound, from its comment "# no sound on: D7 C7" (empty when it has none).
+    silent_pads: List[str] = field(default_factory=list)
 
     @property
     def errors(self) -> List[Problem]:
@@ -236,6 +339,20 @@ def _tokens(text: str) -> List[str]:
     return [t for t in re.split(r"[ \t\u00a0]+", text) if t]
 
 
+def clean_text(text: str) -> str:
+    """A name as a card keeps it: no #, | or line breaks (they would end it), single spaces (BeatCards.cleanText)."""
+    return re.sub(r"[#|\t\r\n\u00a0 ]+", " ", text).strip()
+
+
+def same_name(a: str, b: str) -> bool:
+    """Whether two sound names are the same to Arc: ignoring case, spaces round them and a ".wav" ending (PadSoundCache.sameName)."""
+    def norm(s: str) -> str:
+        s = s.strip().lower()
+        return (s[:-4] if s.endswith(".wav") else s).strip()
+
+    return norm(a) == norm(b)
+
+
 def strip_comment(line: str) -> str:
     """Drop a comment: a # at the start of the line or after a blank. (C#4 keeps its sharp.)"""
     m = re.search(r"(^|[ \t\u00a0])#", line)
@@ -247,6 +364,11 @@ def strip_comment(line: str) -> str:
 # ---------------------------------------------------------------------------
 
 _HEADER_WORDS = ("name", "tempo", "swing")
+_PERCENT = re.compile(r"[0-9]{1,3}(\.[0-9])?")
+_PERCENT_TEXT = "0 to 100, whole or with one decimal"
+_PITCH = re.compile(r"[+-]?[0-9]{1,2}(\.[0-9]{1,2})?")
+_SIGNED = re.compile(r"[+-]?[0-9]{1,9}")
+_FX_LIST = "none, delay, reverb, distortion, chorus, filter or compressor"
 _NOTE_KEYS = ("at", "t", "vel", "gate", "note", "semi")
 _STEP_CHARS = {"X": 127, "x": 100, "o": 64, **{str(n): 14 * n for n in range(1, 10)}}
 _CARD_START = re.compile(r"[ \t ]*ARC[ \t ]+BEAT(?:[ \t ]|\Z)", re.I)
@@ -275,6 +397,7 @@ class _Reader:
         self.in_notes = False
         self.section_lines = 0
         self.seen_groups: Dict[int, int] = {}
+        self.fx = Fx()
 
     def err(self, line: int, code: str, message: str) -> None:
         self.card.problems.append(Problem(line, ERROR, code, message))
@@ -301,6 +424,7 @@ class _Reader:
         self.close()
         if self.section_lines == 0:
             self.err(start + 1, "no-sections", "the card has no section: add [A], [B], [C] or [D] with grid rows")
+        self.card.fx = self.fx if self.fx.kinds() else None
         return self.card
 
     def version(self, start: int) -> bool:
@@ -326,6 +450,12 @@ class _Reader:
             return
         if text.lower() == "notes":
             self.in_notes = True
+        elif _tokens(text)[0].lower() == "sound":
+            self.sound(n, text)
+        elif _tokens(text)[0].lower() == "pad":
+            self.pad_line(n, text)
+        elif _tokens(text)[0].lower() in FX_WORDS:
+            self.err(n, "late-fx", "'%s' belongs before the first section" % _tokens(text)[0])
         elif self.in_notes:
             self.note(n, text)
         elif "|" in text:
@@ -347,6 +477,12 @@ class _Reader:
         rest = _trim(text[len(word) :])
         if key == "notes":
             self.err(n, "notes-outside-section", "'notes' has to come inside a section like [A]")
+        elif key == "sound":
+            self.err(n, "sound-outside-section", "'sound' has to come after a section line like [A]")
+        elif key == "pad":
+            self.err(n, "pad-outside-section", "'pad' has to come after a section line like [A]")
+        elif key in FX_WORDS:
+            self.fx_line(n, word, key, _tokens(rest))
         elif "|" in text or _first_is_pad(text):
             self.err(n, "row-outside-section", "a grid row has to come after a section line like [A]")
         elif key in _HEADER_WORDS:
@@ -521,6 +657,219 @@ class _Reader:
         return "row %s has %d steps, needs %d (%d bar%s of %d): %d too many, starting in bar %d" % (
             label, total, need, bars, "" if bars == 1 else "s", per_bar, total - need, bars + 1)
 
+    # -- sound lines -------------------------------------------------------
+
+    def sound(self, n: int, text: str) -> None:
+        """sound <pad> <slot> [name], anywhere in a section (after notes too). A second line for a pad replaces the first."""
+        pattern = self.draft
+        assert pattern is not None
+        rest = _trim(text[len(_tokens(text)[0]) :])
+        parts = _tokens(rest)
+        if not parts:
+            self.err(n, "bad-sound", "a sound line looks like 'sound A7 12 Kick': the pad, the slot, then the name if you know it")
+            return
+        try:
+            group, offset = parse_pad(parts[0])
+        except ValueError as e:
+            self.err(n, "bad-pad", str(e))
+            return
+        if group != pattern.group:
+            self.err(n, "wrong-group", "pad %s is in group %s but the section is [%s]" % (parts[0], GROUPS[group], pattern.letter))
+            return
+        rest = _trim(rest[len(parts[0]) :])
+        slot_text = _tokens(rest)[0] if rest else ""
+        if not (re.fullmatch(r"[0-9]{1,9}", slot_text) and SLOT_MIN <= int(slot_text) <= SLOT_MAX):
+            self.err(n, "bad-slot", "sound slot '%s' must be a whole number from %d to %d" % (slot_text, SLOT_MIN, SLOT_MAX))
+            return
+        old = pattern.sounds.get(offset)
+        if old is not None:
+            self.warn(n, "duplicate-sound", "%s already has a sound on line %d; the later line is kept" % (pad_label(pattern.group, offset), old.line))
+        pattern.sounds[offset] = Sound(int(slot_text), clean_text(rest[len(slot_text) :]), n)
+
+    # -- effect lines (header only) -----------------------------------------
+
+    @staticmethod
+    def percent(token: str) -> Optional[float]:
+        """A knob value as a card writes it, 0 to 100 (whole or one decimal); None when it isn't one."""
+        if not _PERCENT.fullmatch(token) or float(token) > 100:
+            return None
+        return float(token)
+
+    def extra(self, n: int, word: str, tokens: List[str], start: int) -> None:
+        """Words left over after the line's last value are ignored, with a warning."""
+        if len(tokens) > start:
+            self.warn(n, "fx-extra", "the %s line has extra words from '%s'; ignored" % (word, tokens[start]))
+
+    def fx_line(self, n: int, word: str, key: str, t: List[str]) -> None:
+        """fx / send / comp / sidechain; [t] are the words after [word]. A line with a fault changes nothing."""
+        fx = self.fx
+        if key == "fx":
+            effect = next((e for e in FX_TYPES if t and e == t[0].lower()), None)
+            if effect is None:
+                self.err(n, "bad-fx", "fx needs an effect: %s" % _FX_LIST if not t else "'%s' is not an effect: use %s" % (t[0], _FX_LIST))
+                return
+            x = y = 50.0
+            if len(t) > 1:
+                x = self.percent(t[1])
+                if x is None:
+                    self.err(n, "bad-fx-value", "fx x '%s' must be %s" % (t[1], _PERCENT_TEXT))
+                    return
+            if len(t) > 2:
+                y = self.percent(t[2])
+                if y is None:
+                    self.err(n, "bad-fx-value", "fx y '%s' must be %s" % (t[2], _PERCENT_TEXT))
+                    return
+            self.extra(n, word, t, 3)
+            if fx.effect is not None:
+                self.warn(n, "duplicate-fx", "two fx lines; the later is kept")
+            fx.effect, fx.x, fx.y = effect, x, y
+        elif key == "send":
+            if not t:
+                self.err(n, "bad-send", "a send line looks like 'send A 40 B 20': a group, then 0 to 100, as often as needed")
+                return
+            line: Dict[int, float] = {}
+            for i in range(0, len(t), 2):
+                if len(t[i]) != 1 or t[i] not in GROUPS:
+                    self.err(n, "bad-send", "'%s' is not a group: use A to D" % t[i])
+                    return
+                if i + 1 >= len(t):
+                    self.err(n, "bad-send", "send %s needs a value, %s" % (t[i], _PERCENT_TEXT))
+                    return
+                value = self.percent(t[i + 1])
+                if value is None:
+                    self.err(n, "bad-send", "send %s '%s' must be %s" % (t[i], t[i + 1], _PERCENT_TEXT))
+                    return
+                line[GROUPS.index(t[i])] = value
+            fx.sends = {**(fx.sends or {}), **line}
+        elif key == "comp":
+            if not t:
+                self.err(n, "bad-comp", "a comp line looks like 'comp off' or 'comp 40 60': a drive and a speed")
+                return
+            if t[0].lower() == "off":
+                self.extra(n, word, t, 1)
+                comp = CardComp(False)
+            else:
+                drive = self.percent(t[0])
+                if drive is None:
+                    self.err(n, "bad-comp", "comp drive '%s' must be %s, or use comp off" % (t[0], _PERCENT_TEXT))
+                    return
+                if len(t) < 2:
+                    self.err(n, "bad-comp", "comp needs a speed after the drive, like 'comp 40 60'")
+                    return
+                speed = self.percent(t[1])
+                if speed is None:
+                    self.err(n, "bad-comp", "comp speed '%s' must be %s" % (t[1], _PERCENT_TEXT))
+                    return
+                self.extra(n, word, t, 2)
+                comp = CardComp(True, drive, speed)
+            if fx.comp is not None:
+                self.warn(n, "duplicate-comp", "two comp lines; the later is kept")
+            fx.comp = comp
+        else:
+            if not t:
+                self.err(n, "bad-sidechain", "a sidechain line looks like 'sidechain off' or 'sidechain A7 BC': the pad, then the groups it ducks")
+                return
+            if t[0].lower() == "off":
+                self.extra(n, word, t, 1)
+                side = CardSidechain(False)
+            else:
+                try:
+                    group, offset = parse_pad(t[0])
+                except ValueError as e:
+                    self.err(n, "bad-pad", str(e))
+                    return
+                if len(t) < 2:
+                    self.err(n, "bad-sidechain", "sidechain %s needs the groups it ducks, like 'sidechain A7 BC'" % t[0])
+                    return
+                if not re.fullmatch(r"[A-D]+", t[1]):
+                    self.err(n, "bad-sidechain", "sidechain groups '%s' must be the letters A to D, like BC" % t[1])
+                    return
+                length, shape = 30.0, 50.0
+                if len(t) > 2:
+                    length = self.percent(t[2])
+                    if length is None:
+                        self.err(n, "bad-sidechain", "sidechain length '%s' must be %s" % (t[2], _PERCENT_TEXT))
+                        return
+                if len(t) > 3:
+                    shape = self.percent(t[3])
+                    if shape is None:
+                        self.err(n, "bad-sidechain", "sidechain shape '%s' must be %s" % (t[3], _PERCENT_TEXT))
+                        return
+                self.extra(n, word, t, 4)
+                side = CardSidechain(True, group, offset, sorted({GROUPS.index(c) for c in t[1]}), length, shape)
+            if fx.sidechain is not None:
+                self.warn(n, "duplicate-sidechain", "two sidechain lines; the later is kept")
+            fx.sidechain = side
+        if not fx.line:
+            fx.line = n
+
+    # -- pad lines ----------------------------------------------------------
+
+    @staticmethod
+    def whole(value: str, low: int, high: int) -> Optional[int]:
+        """A whole number from [low] to [high] (a + or - allowed); None when it isn't one."""
+        if not _SIGNED.fullmatch(value) or not low <= int(value) <= high:
+            return None
+        return int(value)
+
+    def pad_line(self, n: int, text: str) -> None:
+        """pad <pad> [pitch n] [level n] [pan n] [attack n] [release n] [mode m], anywhere in a section. A second line for a pad merges into the first."""
+        pattern = self.draft
+        assert pattern is not None
+        t = _tokens(text)
+        if len(t) < 2:
+            self.err(n, "bad-pad-line", "a pad line looks like 'pad A7 pitch -7 level 90': the pad, then its settings")
+            return
+        try:
+            group, offset = parse_pad(t[1])
+        except ValueError as e:
+            self.err(n, "bad-pad", str(e))
+            return
+        if group != pattern.group:
+            self.err(n, "wrong-group", "pad %s is in group %s but the section is [%s]" % (t[1], GROUPS[group], pattern.letter))
+            return
+        label = pad_label(group, offset)
+        shape = PadShape(n)
+        i = 2
+        while i < len(t):
+            word = t[i].lower()
+            value = t[i + 1] if i + 1 < len(t) else None
+            if word not in PAD_SETTINGS:
+                self.warn(n, "unknown-pad-setting", "unknown setting '%s' on the %s pad line ignored (use %s)" % (t[i], label, ", ".join(PAD_SETTINGS)))
+                i += 2 if value is not None and value.lower() not in PAD_SETTINGS else 1
+                continue
+            if value is None:
+                self.err(n, "bad-pad-line", "%s pad: %s needs a value" % (label, word))
+                return
+            if word == "pitch":
+                if not _PITCH.fullmatch(value) or abs(float(value)) > PITCH_MAX:
+                    self.err(n, "bad-pad-line", "%s pad: pitch '%s' must be -12 to 12 semitones, whole or with up to two decimals" % (label, value))
+                    return
+                shape.pitch = float(value) + 0.0
+            elif word == "mode":
+                if value.lower() not in PLAY_MODES:
+                    self.err(n, "bad-pad-line", "%s pad: mode '%s' must be oneshot, key or legato" % (label, value))
+                    return
+                shape.mode = value.lower()
+            else:
+                low, high = {"level": (0, LEVEL_MAX), "pan": (-PAN_MAX, PAN_MAX)}.get(word, (0, ENV_MAX))
+                number = self.whole(value, low, high)
+                if number is None:
+                    self.err(n, "bad-pad-line", "%s pad: %s '%s' must be a whole number from %d to %d%s" % (label, word, value, low, high, ", negative is left" if word == "pan" else ""))
+                    return
+                setattr(shape, word, number + 0)
+            i += 2
+        if not shape.given():
+            self.err(n, "bad-pad-line", "%s pad: give at least one of pitch, level, pan, attack, release or mode" % label)
+            return
+        before = pattern.pads.get(offset)
+        if before is not None:
+            self.warn(n, "duplicate-pad-line", "%s already has a pad line on line %d; merged, the later settings win" % (label, before.line))
+            for key, value in before.given().items():
+                if getattr(shape, key) is None:
+                    setattr(shape, key, value)
+        pattern.pads[offset] = shape
+
     # -- notes list --------------------------------------------------------
 
     def note(self, n: int, text: str) -> None:
@@ -642,11 +991,109 @@ class _Reader:
         pattern.hits = sorted(order, key=lambda h: (h.tick, h.pad, h.semi if h.semi is not None else -1000))
 
 
+_SILENT_COMMENT = re.compile(r"^[ \t\u00a0]*#[ \t\u00a0]*no sound on:(.*)$", re.IGNORECASE)
+_SILENT_PAD = re.compile(r"^([A-D])(ENTER|[E.0-9])$")
+
+
+def silent_pads_of(text: str) -> List[str]:
+    """The pads named by the share comment "# no sound on: C7 D7" inside the card (between its ARC BEAT line and its closing fence or END), as written, in order, once each. Readers ignore the comment; this reads it for the analysis."""
+    out: List[str] = []
+    started = False
+    for line in _LINE_BREAK.split(text[1:] if text.startswith("\ufeff") else text):
+        t = line.strip()
+        if not started:
+            started = re.match(r"^ARC[ \t\u00a0]+BEAT(?:[ \t\u00a0]|$)", t, re.IGNORECASE) is not None
+            continue
+        if t == "```" or t.upper() == "END":
+            break
+        m = _SILENT_COMMENT.match(line)
+        if m:
+            for word in m.group(1).split():
+                if _SILENT_PAD.match(word) and word not in out:
+                    out.append(word)
+    return out
+
+
 def parse_card(text: str) -> Card:
     """Read a card from [text] by the rules of references/beat-card.md; problems are in card.problems, by line."""
     card = _Reader(text).read()
     card.problems.sort(key=lambda p: p.line)  # stable, as Arc's reader sorts them
+    card.silent_pads = silent_pads_of(text)
     return card
+
+
+# ---------------------------------------------------------------------------
+# Sound lists: the user's sounds, as Arc's share adds them after a card
+# ---------------------------------------------------------------------------
+
+
+def parse_sound_list(text: str) -> Dict[int, str]:
+    """Slot -> name from a sound list: lines of "<slot> <name>", in the share's text or on their own. The header line and any other line that doesn't start with a slot are skipped; a slot given twice keeps the later."""
+    out: Dict[int, str] = {}
+    for line in _LINE_BREAK.split(text[1:] if text.startswith("\ufeff") else text):
+        m = re.fullmatch(r"[ \t\u00a0]*([0-9]{1,3})(?:[ \t\u00a0]+(.*))?", line)
+        if m and SLOT_MIN <= int(m.group(1)) <= SLOT_MAX:
+            out[int(m.group(1))] = clean_text(m.group(2) or "")
+    return out
+
+
+def unnamed_slot(slot: int, name: Optional[str]) -> bool:
+    """Whether [name] is the one the EP-133 gives a sound nobody named, its slot's file ("200.pcm" for slot 200): a factory sound whose name can't be checked (FactorySounds.unnamed)."""
+    return name is not None and name.strip().lower() == "%03d.pcm" % slot
+
+
+def resolve_sound(sound: Sound, available: Dict[int, str], current: Optional[int] = None) -> Optional[int]:
+    """The slot Arc would use for a sound line, by the spec's import rule; None when it would skip the line.
+
+    The slot is used when it holds the named sound (same_name) or, with no name,
+    when the list has it. Otherwise the name is looked up: the pad's own slot
+    [current] if it holds it, else the lowest slot that does. Failing that, a
+    slot the list has under an unnamed name ("200.pcm") is used all the same.
+    """
+    name = None if unnamed_slot(sound.slot, sound.name) else sound.name  # "200.pcm" for slot 200 is no name
+    if sound.slot in available and (not name or same_name(clean_text(available[sound.slot]), name)):
+        return sound.slot
+    if name:
+        same = sorted(slot for slot, have in available.items() if same_name(clean_text(have), name))
+        if current is not None and current in same:
+            return current
+        if same:
+            return same[0]
+    return sound.slot if unnamed_slot(sound.slot, available.get(sound.slot)) else None
+
+
+def check_sounds(card: Card, available: Dict[int, str]) -> List[Problem]:
+    """A warning for each sound line whose slot or name isn't in [available] (slot -> name): the slot holds another sound, the sound is in another slot (which Arc would use) or in none. Lines that use a slot listed unnamed ("200.pcm") get one note between them, at the first: their names can't be checked."""
+    out: List[Problem] = []
+    unnamed: List[Tuple[int, str, int]] = []  # (line, pad, slot): one note for them all, not one a line
+    for pattern in card.patterns:
+        for pad in KEYPAD_ORDER:
+            sound = pattern.sounds.get(pad)
+            if sound is None:
+                continue
+            label = pad_label(pattern.group, pad)
+            slot = resolve_sound(sound, available)
+            if slot is not None and unnamed_slot(slot, available.get(slot)):
+                unnamed.append((sound.line, label, slot))
+            if slot == sound.slot:
+                continue
+            holds = available.get(sound.slot)
+            where = "slot %d holds '%s'" % (sound.slot, holds) if holds is not None else "slot %d isn't in the sound list" % sound.slot
+            if slot is not None:
+                out.append(Problem(sound.line, WARNING, "sound-moved", "%s: %s, not '%s'; that sound is in slot %d ('%s'), which Arc will use instead" % (
+                    label, where, sound.name, slot, available[slot])))
+            elif sound.name:
+                out.append(Problem(sound.line, WARNING, "sound-missing", "%s: %s, and no slot holds '%s'; Arc will skip this sound line" % (label, where, sound.name)))
+            else:
+                out.append(Problem(sound.line, WARNING, "sound-missing", "%s: %s; Arc will skip this sound line" % (label, where)))
+    if len(unnamed) == 1:
+        line, label, slot = unnamed[0]
+        out.append(Problem(line, NOTE, "sound-unnamed", "%s: slot %d is a factory sound without a name; using it by slot" % (label, slot)))
+    elif unnamed:
+        unnamed.sort()
+        out.append(Problem(unnamed[0][0], NOTE, "sound-unnamed", "%s: slots %s are factory sounds without a name; using them by slot" % (
+            ", ".join(u[1] for u in unnamed), ", ".join(str(u[2]) for u in unnamed))))
+    return sorted(out, key=lambda p: p.line)
 
 
 # ---------------------------------------------------------------------------
@@ -678,19 +1125,89 @@ def role_of(name: str) -> Optional[str]:
     return None
 
 
+#: The factory pack's slot blocks (FeatureText.FACTORY_BLOCKS): the role a slot suggests when its sound has no name. 500-599 is melodic, no drum role.
+FACTORY_ROLES = ((1, 99, "kick", "kicks"), (100, 199, "snare", "snares"), (200, 299, "hat", "hats"), (300, 399, "perc", "percussion"), (400, 499, "bass", "bass"), (500, 599, None, "melodic"))
+#: Roles that count as the same kind of sound when a row's label and its sound line's slot are compared.
+_FAMILY = {"kick": "kick", "snare": "backbeat", "clap": "backbeat", "rim": "backbeat", "hat": "hat", "cymbal": "hat", "perc": "perc", "tom": "perc", "bass": "bass"}
+
+
+def factory_block(slot: int) -> Optional[Tuple[Optional[str], str]]:
+    """(role, block name) of the factory block [slot] is in, or None outside 1-599."""
+    for lo, hi, role, block in FACTORY_ROLES:
+        if lo <= slot <= hi:
+            return role, block
+    return None
+
+
+def _sound_role(sound: Optional[Sound]) -> Tuple[Optional[str], Optional[str]]:
+    """The role a sound line suggests and how: by its name ("name"), or by its factory block when it has no real name ("slot")."""
+    if sound is None:
+        return None, None
+    if sound.name and not unnamed_slot(sound.slot, sound.name):
+        role = role_of(sound.name)
+        if role:
+            return role, "name"
+    block = factory_block(sound.slot)
+    return (block[0], "slot") if block and block[0] else (None, None)
+
+
 def pad_roles(pattern: Pattern) -> Dict[int, Tuple[Optional[str], bool, str]]:
-    """For each pad of [pattern] with pad hits: (role, assumed, name). Unnamed pads fall back to the assumed kit."""
-    names = pattern.pad_names()
+    """
+    For each pad of [pattern] with pad hits: (role, assumed, name), the role its rhythm is read with. It comes from the
+    pad's sound line's name, else its row's label, else (group A) the assumed kit's pad, else the factory block of the
+    sound line's slot (a sound named like "200.pcm" says nothing by its name). The name shown is the first real one.
+    """
+    rows = pattern.pad_names()
     out: Dict[int, Tuple[Optional[str], bool, str]] = {}
     for hit in pattern.hits:
         if hit.semi is not None or hit.pad in out:
             continue
-        name = names.get(hit.pad, "")
-        assumed = False
-        if not name:
-            name = ASSUMED_KIT.get(pad_label(pattern.group, hit.pad), "") if pattern.group == 0 else ""
-            assumed = name != ""
-        out[hit.pad] = (role_of(name) if name else None, assumed, name)
+        sound = pattern.sounds.get(hit.pad)
+        real = sound.name if sound and sound.name and not unnamed_slot(sound.slot, sound.name) else ""
+        row = rows.get(hit.pad, "")
+        if row and unnamed_slot(sound.slot if sound else -1, row):
+            row = ""  # Arc labels a row with the pad's sound name, "343.pcm" for an unnamed one: no more telling
+        by_sound, how = _sound_role(sound)
+        kit = ASSUMED_KIT.get(pad_label(pattern.group, hit.pad), "") if pattern.group == 0 else ""
+        if real and how == "name":
+            out[hit.pad] = (by_sound, False, real)
+        elif row and role_of(row):
+            out[hit.pad] = (role_of(row), False, real or row)
+        elif kit and not real and not row:
+            out[hit.pad] = (role_of(kit), True, kit)
+        elif how == "slot":
+            out[hit.pad] = (by_sound, False, real or row or "slot %d (%s)" % (sound.slot, factory_block(sound.slot)[1]))
+        else:
+            name = real or row
+            out[hit.pad] = (role_of(name) if name else None, False, name)
+    return out
+
+
+def sound_mismatches(pattern: Pattern) -> List[dict]:
+    """
+    Pads whose rhythm reads as one kind of sound ([pad_roles]: the row's label, or the assumed kit's pad) while the
+    sound line suggests another: a kick row playing slot 343, in the factory's percussion block, say. Worth a remark
+    (the beat may not sound as its rows read) and maybe a sound swap.
+    """
+    roles = pad_roles(pattern)
+    out = []
+    for pad in sorted(pattern.sounds, key=KEYPAD_ORDER.index):
+        if pad not in roles:
+            continue
+        row_role, assumed, name = roles[pad]
+        sound = pattern.sounds[pad]
+        sound_role, how = _sound_role(sound)
+        if row_role and sound_role and _FAMILY.get(row_role) != _FAMILY.get(sound_role):
+            block = factory_block(sound.slot)
+            out.append({
+                "pad": pad_label(pattern.group, pad),
+                "row": name,
+                "row_role": row_role,
+                "row_assumed": assumed,
+                "slot": sound.slot,
+                "sound_role": sound_role,
+                "by": "the factory %s block" % block[1] if how == "slot" and block else "its name",
+            })
     return out
 
 
@@ -808,6 +1325,7 @@ def pattern_report(pattern: Pattern, card: Card) -> dict:
             "name": name,
             "role": role,
             "name_assumed": assumed,
+            "sound": _sound_data(pattern.sounds.get(pad)),
             "hits": len(mine),
             "per_bar": per_bar(mine),
             "velocity": _velocity([h.vel for h in mine]),
@@ -861,6 +1379,9 @@ def pattern_report(pattern: Pattern, card: Card) -> dict:
         "hits_per_bar": per_bar(hits),
         "density_pct": round(100 * sum(occupied) / (16 * bars), 1),
         "pads": pads,
+        "sounds": {pad_label(pattern.group, pad): _sound_data(pattern.sounds[pad]) for pad in KEYPAD_ORDER if pad in pattern.sounds},
+        "pad_shaping": pad_shaping(pattern),
+        "sound_mismatches": sound_mismatches(pattern),
         "keys": keys_report,
         "roles": by_role,
         "velocity": _velocity([h.vel for h in hits]),
@@ -875,6 +1396,14 @@ def pattern_report(pattern: Pattern, card: Card) -> dict:
         "features": features,
         "variation": _variation(pattern, hits),
     }
+
+
+def _sound_data(sound: Optional[Sound]) -> Optional[dict]:
+    return None if sound is None else {"slot": sound.slot, "name": sound.name or None}
+
+
+def _sound_text(label: str, sound: Sound) -> str:
+    return "%s slot %d%s" % (label, sound.slot, " " + sound.name if sound.name else "")
 
 
 def _role_bars(hits: List[Hit], bars: int) -> List[set]:
@@ -1006,6 +1535,8 @@ def fingerprint(card: Card) -> Dict[str, set]:
     for pattern in card.patterns:
         roles = pad_roles(pattern)
         hits = [h for h in pattern.hits if h.semi is None]
+        if not hits:
+            continue  # a group of KEYS notes only (bass, chords) has no drums: its bars mustn't dilute theirs
         bars_total += pattern.bars
         for key, wanted in (("kick", ("kick",)), ("backbeat", BACKBEAT_ROLES[:2]), ("hat", ("hat",))):
             for slots in _role_slots(hits, roles, wanted, pattern.bars):
@@ -1082,11 +1613,146 @@ def analyse_card(card: Card, recipes: Optional[List[dict]] = None) -> dict:
         "tempo": card.tempo,
         "swing": card.swing,
         "groups": [p.letter for p in card.patterns],
+        "fx": describe_fx(card.fx) if card.fx is not None else None,
+        "silent_pads": list(card.silent_pads),
         "pad_hits": len(all_hits),
         "keys_notes": sum(1 for p in card.patterns for h in p.hits if h.semi is not None),
         "velocity": _velocity([h.vel for h in all_hits]),
         "patterns": patterns,
         "similar_to": similarity(card, recipes) if recipes else [],
+    }
+
+
+# ---------------------------------------------------------------------------
+# FX and pad shaping, read aloud
+# ---------------------------------------------------------------------------
+
+#: The delay's tempo-synced lengths, shortest first: X picks one of twelve (FxKnobs.DELAY_DIVISIONS).
+DELAY_DIVISIONS = ("1/32", "1/16T", "1/16", "1/8T", "1/16D", "1/8", "1/4T", "1/8D", "1/4", "1/2T", "1/4D", "1/2")
+#: The compressor's attack and release in ms: Y picks one of eight, fast to slow (FxKnobs.COMP_SPEEDS).
+COMP_SPEEDS = ("0.5/40", "1/60", "2/100", "5/150", "10/200", "15/300", "20/400", "30/600")
+
+
+def _round(v: float) -> int:
+    """Round half up, as Arc's readouts do."""
+    return int(math.floor(v + 0.5))
+
+
+def _times(v: float) -> str:
+    """A gain as "2.5x", whole from 10 up ("40x")."""
+    return "%.1fx" % v if _round(v * 10) < 100 else "%dx" % _round(v)
+
+
+def _hz(v: float) -> str:
+    """A frequency as "400", "1.2k", whole kHz from 10k up."""
+    r = _round(v)
+    if r < 1000:
+        return str(r)
+    t = _round(v / 100)
+    return "%d.%dk" % (t // 10, t % 10) if t < 100 else "%dk" % _round(v / 1000)
+
+
+def _tilt(k: float, low: str, high: str, flat: str) -> str:
+    """Y from the centre, as the XY pad reads it: "DARK 40", "FLAT", "BRIGHT 20"."""
+    t = _round((k - 0.5) * 200)
+    return "%s %d" % (low, -t) if t < 0 else "%s %d" % (high, t) if t > 0 else flat
+
+
+def fx_readout(effect: str, x: float, y: float) -> Tuple[str, str]:
+    """What the X and Y knobs (percent) of [effect] come to, as the FX sheet reads them (FxSettings.xReadout and yReadout)."""
+    kx, ky = x / 100.0, y / 100.0
+    if effect == "delay":
+        return DELAY_DIVISIONS[min(11, int(kx * 12))], "%d%%" % _round(0.95 * ky * 100)
+    if effect == "reverb":
+        return "%d%%" % _round(kx * 100), _tilt(ky, "dark", "bright", "flat")
+    if effect == "distortion":
+        return _times(1 + 39 * kx * kx), _tilt(ky, "low-pass", "high-pass", "open")
+    if effect == "chorus":
+        return "%.2f Hz" % (0.05 + 4.95 * kx ** 3), "%d%%" % _round(0.7 * ky * 100)
+    if effect == "filter":
+        if kx < 0.47:
+            cutoff = "low-pass " + _hz(60 + 19940 * (kx / 0.47) ** 3)
+        elif kx > 0.53:
+            cutoff = "high-pass " + _hz(20 + 7980 * ((kx - 0.53) / 0.47) ** 3)
+        else:
+            cutoff = "open"
+        return cutoff, "Q %.1f" % (0.5 + 7.5 * ky)
+    if effect == "compressor":
+        return _times(1 + 7 * kx * kx), COMP_SPEEDS[min(7, int(ky * 8))] + " ms"
+    return "", ""
+
+
+def _percent_text(v: float) -> str:
+    return "%g%%" % v
+
+
+def describe_fx(fx: Fx) -> dict:
+    """The card's effect lines as plain data with readable values: the effect and what its knobs do, the sends, the compressor and the sidechain."""
+    out: dict = {"line": fx.line, "effect": None, "sends": None, "comp": None, "sidechain": None}
+    if fx.effect is not None:
+        item: dict = {"type": fx.effect}
+        if fx.effect != "none":
+            xr, yr = fx_readout(fx.effect, fx.x if fx.x is not None else 50.0, fx.y if fx.y is not None else 50.0)
+            xn, yn = FX_KNOBS[fx.effect]
+            item.update({"x": fx.x, "y": fx.y, "x_name": xn, "y_name": yn, "x_reads": xr, "y_reads": yr})
+        out["effect"] = item
+    if fx.sends is not None:
+        out["sends"] = {GROUPS[g]: fx.sends.get(g, 0.0) for g in range(4)}
+    if fx.comp is not None:
+        if fx.comp.on:
+            xr, yr = fx_readout("compressor", fx.comp.drive, fx.comp.speed)
+            out["comp"] = {"on": True, "drive": fx.comp.drive, "speed": fx.comp.speed, "drive_reads": xr, "speed_reads": yr}
+        else:
+            out["comp"] = {"on": False}
+    if fx.sidechain is not None:
+        sc = fx.sidechain
+        if sc.on:
+            out["sidechain"] = {"on": True, "pad": pad_label(sc.group, sc.pad), "ducks": [GROUPS[g] for g in sc.groups], "length": sc.length, "shape": sc.shape}
+        else:
+            out["sidechain"] = {"on": False}
+    return out
+
+
+def fx_lines(info: dict) -> List[str]:
+    """describe_fx's data as one readable line each: effect, sends, comp, sidechain (only those the card has)."""
+    out: List[str] = []
+    e = info["effect"]
+    if e is not None:
+        if e["type"] == "none":
+            out.append("fx none")
+        else:
+            out.append("fx %s %g %g: %s %s, %s %s" % (e["type"], e["x"], e["y"], e["x_name"], e["x_reads"], e["y_name"], e["y_reads"]))
+    if info["sends"] is not None:
+        out.append("send: " + ", ".join("%s %s" % (g, _percent_text(v)) for g, v in info["sends"].items()))
+    c = info["comp"]
+    if c is not None:
+        out.append("comp off" if not c["on"] else "comp %g %g: drive %s, speed %s" % (c["drive"], c["speed"], c["drive_reads"], c["speed_reads"]))
+    s = info["sidechain"]
+    if s is not None:
+        out.append("sidechain off" if not s["on"] else "sidechain: %s ducks %s (length %s, shape %s)" % (s["pad"], " ".join(s["ducks"]), _percent_text(s["length"]), _percent_text(s["shape"])))
+    return out
+
+
+def pad_shape_text(shape: PadShape) -> str:
+    """A pad line's settings read aloud: "pitch -7 st, level 90, pan L4, attack 3, release 20, mode key"."""
+    parts = []
+    for key, value in shape.given().items():
+        if key == "pitch":
+            parts.append("pitch %+g st" % value if value else "pitch 0 st")
+        elif key == "pan":
+            parts.append("pan %s" % ("L%d" % -value if value < 0 else "R%d" % value if value > 0 else "centre"))
+        else:
+            parts.append("%s %s" % (key, value))
+    return ", ".join(parts)
+
+
+def pad_shaping(pattern: Pattern) -> Dict[str, dict]:
+    """A pattern's pad lines as plain data, by pad label in keypad order: the pad's name (when it has one), its settings and how they read."""
+    names = {**pattern.sound_names(), **pattern.pad_names()}
+    return {
+        pad_label(pattern.group, pad): {"name": names.get(pad) or None, **pattern.pads[pad].given(), "reads": pad_shape_text(pattern.pads[pad]), "line": pattern.pads[pad].line}
+        for pad in KEYPAD_ORDER
+        if pad in pattern.pads
     }
 
 
@@ -1114,15 +1780,23 @@ def render_grid(card: Card) -> str:
         meta.append("%g BPM" % card.tempo)
     meta.append("swing %d%%" % card.swing)
     out.append("%s   %s" % (title, "   ".join(meta)))
+    if card.fx is not None:
+        for text in fx_lines(describe_fx(card.fx)):
+            out.append(text)
     for pattern in card.patterns:
         t = pattern.step_ticks
         per_beat = TICKS_PER_BEAT // t if TICKS_PER_BEAT % t == 0 else 4
         per_bar = TICKS_PER_BAR // t
-        names = pattern.pad_names()
+        names = {**pattern.sound_names(), **pattern.pad_names()}  # a row's own name first, the sound line's when it has none
         out.append("")
         out.append("[%s%s] %d bar%s, step %s%s" % (
             pattern.letter, "%02d" % pattern.number if pattern.number else "", pattern.bars, "" if pattern.bars == 1 else "s",
             pattern.step, ", swung" if pattern.step in SWING_STEPS and card.swing > 50 else ""))
+        for pad in KEYPAD_ORDER:
+            if pad in pattern.sounds:
+                out.append("sound " + _sound_text(pad_label(pattern.group, pad), pattern.sounds[pad]))
+        for label, shape in pad_shaping(pattern).items():
+            out.append("pad %s: %s" % (label, shape["reads"]))
         label_width = max([len(pad_label(pattern.group, o)) + 1 + len(names.get(o, "")) for o in range(12)] + [4])
         # Beat numbers over the steps.
         head = ""
@@ -1264,23 +1938,37 @@ def summary_line(card: Card) -> str:
     for p in card.patterns:
         pads = len({h.pad for h in p.hits if h.semi is None})
         keys = sum(1 for h in p.hits if h.semi is not None)
-        parts.append("%s: %d bar%s step %s, %d pad%s, %d hit%s%s" % (
+        parts.append("%s: %d bar%s step %s, %d pad%s, %d hit%s%s%s" % (
             p.letter, p.bars, "" if p.bars == 1 else "s", p.step, pads, "" if pads == 1 else "s",
             sum(1 for h in p.hits if h.semi is None), "" if sum(1 for h in p.hits if h.semi is None) == 1 else "s",
-            ", %d KEYS note%s" % (keys, "" if keys == 1 else "s") if keys else ""))
+            ", %d KEYS note%s" % (keys, "" if keys == 1 else "s") if keys else "",
+            ", %d sound%s" % (len(p.sounds), "" if len(p.sounds) == 1 else "s") if p.sounds else "") + (
+            ", %d pad line%s" % (len(p.pads), "" if len(p.pads) == 1 else "s") if p.pads else ""))
     head = "OK"
     if card.name:
         head += ' "%s"' % card.name
     if card.tempo is not None:
         head += ", %g BPM" % card.tempo
     head += ", swing %d" % card.swing
+    if card.fx is not None:
+        head += ", fx (%s)" % ", ".join(card.fx.kinds())
     return head + " | " + "; ".join(parts)
+
+
+def _sound_line(label: str, snd: dict) -> str:
+    return "%s slot %d%s" % (label, snd["slot"], " " + snd["name"] if snd["name"] else "")
 
 
 def render_analysis(report: dict) -> str:
     out: List[str] = []
     head = report["name"] or "(no name)"
     out.append("%s | tempo %s | swing %s | groups %s" % (head, report["tempo"] if report["tempo"] is not None else "-", report["swing"], " ".join(report["groups"])))
+    if report.get("silent_pads"):
+        out.append("silent pads (no sound on the EP-133, from the share's comment): %s" % " ".join(report["silent_pads"]))
+    if report.get("fx"):
+        out.append("fx:")
+        for text in fx_lines(report["fx"]):
+            out.append("  " + text)
     v = report["velocity"]
     out.append("pad hits %d, KEYS notes %d, velocity %s-%s (mean %s, stdev %s, %d distinct; %d ghost, %d normal, %d accent)" % (
         report["pad_hits"], report["keys_notes"], v["min"], v["max"], v["mean"], v["stdev"], v["distinct"], v["ghosts"], v["normal"], v["accents"]))
@@ -1292,6 +1980,10 @@ def render_analysis(report: dict) -> str:
             out.append("[%s] %s, KEYS notes only" % (p["group"], bars))
             for label, k in p["keys"].items():
                 out.append("  KEYS %-5s %d notes, %s to %s, %d pitches" % (label, k["notes"], k["lowest"], k["highest"], k["distinct_pitches"]))
+            for label, snd in p["sounds"].items():
+                out.append("  sound %s" % _sound_line(label, snd))
+            for label, shape in p["pad_shaping"].items():
+                out.append("  pad %s%s: %s" % (label, " " + shape["name"] if shape["name"] else "", shape["reads"]))
             var = p["variation"]
             out.append("  variation: %d distinct bar%s of %d" % (var["distinct_bars"], "" if var["distinct_bars"] == 1 else "s", var["bars"]))
             continue
@@ -1307,6 +1999,12 @@ def render_analysis(report: dict) -> str:
             name = pad["name"] + (" (assumed)" if pad["name_assumed"] else "")
             out.append("  %-7s %-12s %2d hits, vel %s-%s, longest gap %s steps%s" % (
                 label, name, pad["hits"], vel["min"], vel["max"], gap["steps"] if gap else "-", ", ghosts %d" % vel["ghosts"] if vel["ghosts"] else ""))
+        for label, snd in p["sounds"].items():
+            out.append("  sound %s" % _sound_line(label, snd))
+        for label, shape in p["pad_shaping"].items():
+            out.append("  pad %s%s: %s" % (label, " " + shape["name"] if shape["name"] else "", shape["reads"]))
+        for m in p.get("sound_mismatches", []):
+            out.append("  mismatch %s: the rhythm reads as %s%s, but slot %d is a %s by %s" % (m["pad"], m["row_role"], " (assumed kit)" if m["row_assumed"] else "", m["slot"], m["sound_role"], m["by"]))
         for role, r in p["roles"].items():
             out.append("  role %-7s slots of a bar %s (%d hits, syncopation %s)" % (role, r["slots"], r["hits"], r["syncopation"]))
         for label, k in p["keys"].items():
@@ -1365,9 +2063,19 @@ def _load(args: argparse.Namespace, quiet_ok: bool = False) -> Optional[Card]:
 def cmd_check(args: argparse.Namespace) -> int:
     try:
         card = parse_card(_read(args.card))
+        available = None
+        if args.sounds:
+            with open(args.sounds, encoding="utf-8", errors="replace") as f:
+                available = parse_sound_list(f.read())
     except OSError as e:
         print("beatcard: %s" % e, file=sys.stderr)
         return 2
+    if available is not None:
+        if not available:
+            print("beatcard: no sounds found in %s: expected lines like '12 Kick 808'" % args.sounds, file=sys.stderr)
+            return 2
+        card.problems.extend(check_sounds(card, available))
+        card.problems.sort(key=lambda p: p.line)
     if args.json:
         print(json.dumps({"ok": card.ok, "problems": [p.to_dict() for p in card.problems]}, indent=2))
         return 0 if card.ok else 1
@@ -1431,6 +2139,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = add("check", cmd_check, "read a card and print its problems with line numbers")
     p.add_argument("--json", action="store_true", help="print the problems as JSON")
+    p.add_argument("--sounds", metavar="FILE", help="the user's sound list (Arc's share text, or lines of '<slot> <name>'): warn about sound lines whose slot or name isn't in it")
     p = add("analyse", cmd_analyse, "describe a card's groove, density, velocity, swing and gaps", ("analyze",))
     p.add_argument("--json", action="store_true", help="print the report as JSON")
     p.add_argument("--recipes", help="genres.md to compare with (default: the skill's own)")

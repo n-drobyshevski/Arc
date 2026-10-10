@@ -1,22 +1,124 @@
 package dev.arc.ep133.features
 
+import dev.arc.ep133.formats.fx.clamp01
+import dev.arc.ep133.text.ClaudeText
 import java.util.Locale
+import kotlin.math.roundToInt
 
 /**
  * A beat as an ARC BEAT text card (skill/arc-beats/references/beat-card.md):
  * an optional [name] (up to 40 characters), the [tempo] it is meant for (40
  * to 240 BPM), the [swing] of its grid rows (50..75, 50 straight, as the
- * device's TIMING) and its [sections], one for each group at most.
+ * device's TIMING) and its [sections], one for each group at most. [fx] is
+ * the project's effect lines, null when the card has none.
  */
 data class BeatCard(
     val name: String? = null,
     val tempo: Double? = null,
     val swing: Int = TimingSettings.SWING_MIN,
     val sections: List<CardSection> = emptyList(),
+    val fx: CardFx? = null,
 )
 
-/** One group's pattern on a card: [group] 0..3 (A..D), the pattern [number] 1..99 it was written as (a hint, null when the card gave none) and the [pattern] itself. */
-data class CardSection(val group: Int, val number: Int?, val pattern: Pattern)
+/**
+ * The effect lines of a card (the spec's "Effects"), each kind apart and null
+ * when the card has no such line, so a card sets only what it says. Knobs are
+ * 0..1 floats (the card's percent / 100). [type] is the `fx` line's effect
+ * with its [x] and [y] (0.5 when the line gave none); [sends] is the `send`
+ * lines' groups (0..3) with their sends, the groups left out being 0 once
+ * applied; [comp] is the `comp` line (off is `Comp(on = false)`); [sidechain]
+ * is the `sidechain` line (off is `Sidechain(on = false)`).
+ */
+data class CardFx(
+    val type: FxType? = null,
+    val x: Float? = null,
+    val y: Float? = null,
+    val sends: Map<Int, Float>? = null,
+    val comp: Comp? = null,
+    val sidechain: Sidechain? = null,
+)
+
+/**
+ * A `pad` line of a card (the spec's "Pad shaping"): the settings it gave,
+ * null for the rest. [pitch] is in semitones (-12..12), [level] 0..100, [pan]
+ * -16..16, [attack] and [release] envelope ticks 0..255 and [mode] the play
+ * mode, all as the pad sheet has them ([PadSettings]).
+ */
+data class CardPad(
+    val pitch: Double? = null,
+    val level: Int? = null,
+    val pan: Int? = null,
+    val attack: Int? = null,
+    val release: Int? = null,
+    val mode: PlayMode? = null,
+) {
+    /** Whether the line gave no setting at all. */
+    val isEmpty: Boolean get() = pitch == null && level == null && pan == null && attack == null && release == null && mode == null
+
+    /** These settings, with [later]'s over them where it gives one. */
+    fun merged(later: CardPad): CardPad = CardPad(
+        pitch = later.pitch ?: pitch,
+        level = later.level ?: level,
+        pan = later.pan ?: pan,
+        attack = later.attack ?: attack,
+        release = later.release ?: release,
+        mode = later.mode ?: mode,
+    )
+}
+
+/**
+ * One group's pattern on a card: [group] 0..3 (A..D), the pattern [number]
+ * 1..99 it was written as (a hint, null when the card gave none), the
+ * [pattern] itself, the [sounds] its pads should play and the [pads]' shaping
+ * (a `pad` line each), both by pad offset.
+ */
+data class CardSection(
+    val group: Int,
+    val number: Int?,
+    val pattern: Pattern,
+    val sounds: Map<Int, CardSound> = emptyMap(),
+    val pads: Map<Int, CardPad> = emptyMap(),
+)
+
+/**
+ * A sound line of a card: the EP-133 sound [slot] (1..999) a pad should play
+ * and, when the card gave it, the sound's [name] as the user's list has it,
+ * which lets Arc check that the slot still holds that sound.
+ */
+data class CardSound(val slot: Int, val name: String? = null)
+
+/** What [BeatCards.resolveSounds] makes of a sound line. */
+enum class SoundStatus {
+    /** The sound is on the slot to put on the pad: a change. */
+    CHANGE,
+
+    /** The pad already plays the sound: nothing to do. */
+    SAME,
+
+    /** The line's slot didn't hold the named sound (or was empty), but another slot does: still a change, to that slot. */
+    FOUND_BY_NAME,
+
+    /** Neither the slot nor the name is among the sounds: the line is skipped. */
+    MISSING,
+}
+
+/**
+ * A sound line matched to the user's sounds: the [pad] and what the card
+ * [wanted], the [slot] and [name] to put on it (null for both when [status]
+ * is [SoundStatus.MISSING]), the slot the pad plays now ([currentSlot], null
+ * when not known) and the [status]. [unverified] is set when the slot is a
+ * factory sound the EP-133 lists without a name ("200.pcm", see
+ * [FactorySounds.unnamed]): it is used by its slot, as its name can't be checked.
+ */
+data class SoundPick(
+    val pad: PhysicalPad,
+    val wanted: CardSound,
+    val slot: Int?,
+    val name: String?,
+    val currentSlot: Int?,
+    val status: SoundStatus,
+    val unverified: Boolean = false,
+)
 
 /** Something wrong with a card, at [line] (counted from 1 in the text read): an [error] stops the card being read, a warning doesn't. */
 data class CardProblem(val line: Int, val message: String, val error: Boolean)
@@ -54,6 +156,10 @@ object BeatCards {
     private const val TEMPO_MIN = 40.0
     private const val TEMPO_MAX = 240.0
 
+    /** The sound slots of the EP-133. */
+    private const val SLOT_MIN = 1
+    private const val SLOT_MAX = 999
+
     /** A note's gate when it gives none: a 1/16. */
     private const val DEFAULT_GATE = 24
 
@@ -72,6 +178,17 @@ object BeatCards {
 
     private val NOTE_KEYS = setOf("at", "t", "vel", "gate", "note", "semi")
     private val HEADER_KEYS = setOf("name", "tempo", "swing")
+
+    /** The effect lines: header only. */
+    private val FX_KEYS = setOf("fx", "send", "comp", "sidechain")
+    private val PAD_KEYS = setOf("pitch", "level", "pan", "attack", "release", "mode")
+    private const val FX_WORDS = "none, delay, reverb, distortion, chorus, filter or compressor"
+
+    /** A knob value as a card writes it: 0 to 100, whole or with one decimal. */
+    private val PERCENT = Regex("^\\d{1,3}(\\.\\d)?$")
+    private const val PERCENT_TEXT = "0 to 100, whole or with one decimal"
+    private val PITCH_TEXT = Regex("^[+-]?\\d{1,2}(\\.\\d{1,2})?$")
+    private val GROUP_LIST = Regex("^[A-D]+$")
 
     private val CARD_START = Regex("^ARC[ \\t\\u00A0]+BEAT(?:[ \\t\\u00A0]|$)", RegexOption.IGNORE_CASE)
     private val PAD = Regex("^([A-D])(ENTER|[E.0-9])$")
@@ -111,6 +228,12 @@ object BeatCards {
     ) {
         /** The notes read, with the line each came from. */
         val hits = ArrayList<Pair<PatternNote, Int>>()
+
+        /** The sound lines read, by pad offset. */
+        val sounds = LinkedHashMap<Int, CardSound>()
+
+        /** The pad lines read (merged when a pad has more than one), by pad offset. */
+        val pads = LinkedHashMap<Int, CardPad>()
         var inNotes = false
     }
 
@@ -119,6 +242,12 @@ object BeatCards {
         private var name: String? = null
         private var tempo: Double? = null
         private var swing = TimingSettings.SWING_MIN
+        private var fxType: FxType? = null
+        private var fxX: Float? = null
+        private var fxY: Float? = null
+        private var fxSends: LinkedHashMap<Int, Float>? = null
+        private var fxComp: Comp? = null
+        private var fxSidechain: Sidechain? = null
         private val sections = ArrayList<CardSection>()
         private val groups = HashSet<Int>()
         private var draft: Draft? = null
@@ -144,7 +273,13 @@ object BeatCards {
 
         private fun result(): CardRead {
             val sorted = problems.sortedBy { it.line }
-            return CardRead(if (sorted.any { it.error }) null else BeatCard(name, tempo, swing, sections), sorted)
+            return CardRead(if (sorted.any { it.error }) null else BeatCard(name, tempo, swing, sections, cardFx()), sorted)
+        }
+
+        // The effect lines read, or null when the card has none.
+        private fun cardFx(): CardFx? {
+            val fx = CardFx(fxType, fxX, fxY, fxSends?.toMap(), fxComp, fxSidechain)
+            return fx.takeUnless { it == CardFx() }
         }
 
         private fun error(line: Int, message: String) {
@@ -182,6 +317,9 @@ object BeatCards {
             if (d.skip) return
             when {
                 line.equals("notes", ignoreCase = true) -> d.inNotes = true
+                tokens(line)[0].equals("sound", ignoreCase = true) -> sound(d, no, line)
+                tokens(line)[0].equals("pad", ignoreCase = true) -> padLine(d, no, line)
+                tokens(line)[0].lowercase() in FX_KEYS -> error(no, "'${tokens(line)[0]}' belongs before the first section.")
                 d.inNotes -> note(d, no, line)
                 '|' in line -> row(d, no, line)
                 firstIsPad(line) -> error(no, "${tokens(line)[0]} needs a | before its steps.")
@@ -200,7 +338,8 @@ object BeatCards {
             val key = word.lowercase()
             val rest = trim(line.substring(word.length))
             when {
-                '|' in line || firstIsPad(line) || key == "notes" -> error(no, "'$word' needs a section first, such as [A].")
+                '|' in line || firstIsPad(line) || key == "notes" || key == "sound" || key == "pad" -> error(no, "'$word' needs a section first, such as [A].")
+                key in FX_KEYS -> fxLine(no, word, key, tokens(rest))
                 key == "name" -> when {
                     rest.isEmpty() -> warn(no, "Name is empty, ignored.")
                     rest.codePointCount(0, rest.length) > MAX_NAME -> {
@@ -308,7 +447,7 @@ object BeatCards {
                 }
             }
             if (kept.size > Seq.MAX_NOTES) error(d.line, "Group ${'A' + d.group} has ${kept.size} notes, the most is ${Seq.MAX_NOTES}.")
-            if (!d.dropped) sections += CardSection(d.group, d.number, Pattern(d.bars, kept.sortedWith(NOTE_ORDER)))
+            if (!d.dropped) sections += CardSection(d.group, d.number, Pattern(d.bars, kept.sortedWith(NOTE_ORDER)), d.sounds, d.pads)
         }
 
         // ---- grid rows ----
@@ -363,6 +502,190 @@ object BeatCards {
             }
             for ((k, v, held) in hits) d.hits += PatternNote(Steps.tickOf(k, d.step, swing), pad.offset, held * d.step.ticks, null, v) to no
         }
+
+        // ---- sound lines ----
+
+        // sound <pad> <slot> [name], anywhere in a section (after notes too). A second line for a pad replaces the first.
+        private fun sound(d: Draft, no: Int, line: String) {
+            var rest = trim(line.substring(tokens(line)[0].length))
+            val padToken = tokens(rest).firstOrNull()
+            if (padToken == null) {
+                error(no, "A sound line needs a pad and a slot, as in sound A7 12 Kick.")
+                return
+            }
+            val pad = parsePad(padToken)
+            if (pad == null) {
+                error(no, "'$padToken' isn't a pad. Use A to D, then . 0 E or 1 to 9.")
+                return
+            }
+            val label = padText(pad.group, pad.offset)
+            if (pad.group != d.group) {
+                error(no, "$label is in group ${'A' + pad.group}, but the section is [${'A' + d.group}].")
+                return
+            }
+            rest = trim(rest.substring(padToken.length))
+            val slotToken = tokens(rest).firstOrNull()
+            val slot = slotToken?.takeIf { INT.matches(it) }?.toInt()?.takeIf { it in SLOT_MIN..SLOT_MAX }
+            if (slot == null) {
+                error(no, "$label sound: the slot must be a whole number from $SLOT_MIN to $SLOT_MAX.")
+                return
+            }
+            val name = cleanText(rest.substring(slotToken.length), Int.MAX_VALUE).ifEmpty { null }
+            if (pad.offset in d.sounds) warn(no, "$label has two sound lines, kept the later.")
+            d.sounds[pad.offset] = CardSound(slot, name)
+        }
+
+        // ---- effect lines (header only) ----
+
+        // fx / send / comp / sidechain: [t] are the words after [word]. A line with a fault changes nothing.
+        private fun fxLine(no: Int, word: String, key: String, t: List<String>) {
+            when (key) {
+                "fx" -> {
+                    val type = t.firstOrNull()?.let { w -> FxType.entries.firstOrNull { it.name.equals(w, ignoreCase = true) } }
+                    if (type == null) {
+                        error(no, if (t.isEmpty()) "fx needs an effect: $FX_WORDS." else "'${t[0]}' isn't an effect. Use $FX_WORDS.")
+                        return
+                    }
+                    val x = if (t.size > 1) percent(t[1]) ?: return error(no, "fx x must be $PERCENT_TEXT.") else 0.5f
+                    val y = if (t.size > 2) percent(t[2]) ?: return error(no, "fx y must be $PERCENT_TEXT.") else 0.5f
+                    extra(no, word, t, 3)
+                    if (fxType != null) warn(no, "Two fx lines, kept the later.")
+                    fxType = type
+                    fxX = x
+                    fxY = y
+                }
+                "send" -> {
+                    if (t.isEmpty()) {
+                        error(no, "send needs a group and a value, as in send A 40 B 20.")
+                        return
+                    }
+                    val line = LinkedHashMap<Int, Float>()
+                    var i = 0
+                    while (i < t.size) {
+                        val g = t[i]
+                        if (g.length != 1 || g[0] !in 'A'..'D') {
+                            error(no, "'$g' isn't a group. Use A to D.")
+                            return
+                        }
+                        val v = t.getOrNull(i + 1)
+                        if (v == null) {
+                            error(no, "send $g needs a value, $PERCENT_TEXT.")
+                            return
+                        }
+                        line[g[0] - 'A'] = percent(v) ?: return error(no, "send $g must be $PERCENT_TEXT.")
+                        i += 2
+                    }
+                    fxSends = (fxSends ?: LinkedHashMap()).also { it.putAll(line) }
+                }
+                "comp" -> {
+                    if (t.isEmpty()) {
+                        error(no, "comp needs off, or a drive and a speed, as in comp 40 60.")
+                        return
+                    }
+                    val c = if (t[0].equals("off", ignoreCase = true)) {
+                        extra(no, word, t, 1)
+                        Comp(false)
+                    } else {
+                        val drive = percent(t[0]) ?: return error(no, "comp drive must be $PERCENT_TEXT, or use comp off.")
+                        val speed = t.getOrNull(1)?.let { percent(it) ?: return error(no, "comp speed must be $PERCENT_TEXT.") }
+                            ?: return error(no, "comp needs a speed after the drive, as in comp 40 60.")
+                        extra(no, word, t, 2)
+                        Comp(true, drive, speed)
+                    }
+                    if (fxComp != null) warn(no, "Two comp lines, kept the later.")
+                    fxComp = c
+                }
+                else -> {
+                    if (t.isEmpty()) {
+                        error(no, "sidechain needs off, or a pad and the groups it ducks, as in sidechain A7 BC.")
+                        return
+                    }
+                    val sc = if (t[0].equals("off", ignoreCase = true)) {
+                        extra(no, word, t, 1)
+                        Sidechain(on = false)
+                    } else {
+                        val pad = parsePad(t[0]) ?: return error(no, "'${t[0]}' isn't a pad. Use A to D, then . 0 E or 1 to 9.")
+                        val groups = t.getOrNull(1) ?: return error(no, "sidechain ${t[0]} needs the groups it ducks, as in sidechain A7 BC.")
+                        if (!GROUP_LIST.matches(groups)) return error(no, "'$groups' isn't a list of groups. Use the letters A to D, as in BC.")
+                        val length = if (t.size > 2) percent(t[2]) ?: return error(no, "sidechain length must be $PERCENT_TEXT.") else 0.3f
+                        val shape = if (t.size > 3) percent(t[3]) ?: return error(no, "sidechain shape must be $PERCENT_TEXT.") else 0.5f
+                        extra(no, word, t, 4)
+                        Sidechain(true, pad.group, pad.offset, groups.fold(0) { m, c -> m or (1 shl (c - 'A')) }, length, shape)
+                    }
+                    if (fxSidechain != null) warn(no, "Two sidechain lines, kept the later.")
+                    fxSidechain = sc
+                }
+            }
+        }
+
+        // Words left over after the line's last value ([t] from index [from]) are ignored, with a warning.
+        private fun extra(no: Int, word: String, t: List<String>, from: Int) {
+            if (t.size > from) warn(no, "The $word line has extra words from '${t[from]}', ignored.")
+        }
+
+        // A knob value, 0 to 100 as a card writes it, as 0..1; null when it isn't one.
+        private fun percent(token: String): Float? =
+            token.takeIf { PERCENT.matches(it) }?.toDouble()?.takeIf { it <= 100.0 }?.let { (it / 100.0).toFloat() }
+
+        // ---- pad lines ----
+
+        // pad <pad> [pitch n] [level n] [pan n] [attack n] [release n] [mode m], anywhere in a section. A second line for a pad merges into the first.
+        private fun padLine(d: Draft, no: Int, line: String) {
+            val t = tokens(line)
+            val padToken = t.getOrNull(1)
+            if (padToken == null) {
+                error(no, "A pad line needs a pad and a setting, as in pad A7 pitch -7 level 90.")
+                return
+            }
+            val pad = parsePad(padToken)
+            if (pad == null) {
+                error(no, "'$padToken' isn't a pad. Use A to D, then . 0 E or 1 to 9.")
+                return
+            }
+            val label = padText(pad.group, pad.offset)
+            if (pad.group != d.group) {
+                error(no, "$label is in group ${'A' + pad.group}, but the section is [${'A' + d.group}].")
+                return
+            }
+            var shaping = CardPad()
+            var i = 2
+            while (i < t.size) {
+                val key = t[i].lowercase()
+                val v = t.getOrNull(i + 1)
+                if (key !in PAD_KEYS) {
+                    warn(no, "Unknown setting '${t[i]}' on $label pad, ignored.")
+                    i += if (v != null && v.lowercase() !in PAD_KEYS) 2 else 1
+                    continue
+                }
+                if (v == null) {
+                    error(no, "$label pad: $key needs a value.")
+                    return
+                }
+                shaping = when (key) {
+                    "pitch" -> {
+                        val n = v.takeIf { PITCH_TEXT.matches(it) }?.toDouble()?.takeIf { it in -PadSettings.PITCH_MAX..PadSettings.PITCH_MAX }
+                            ?: return error(no, "$label pad: pitch must be -12 to 12 semitones, whole or with up to two decimals.")
+                        shaping.copy(pitch = n + 0.0)
+                    }
+                    "level" -> shaping.copy(level = padInt(v, 0, PadSettings.LEVEL_MAX) ?: return error(no, "$label pad: level must be a whole number from 0 to ${PadSettings.LEVEL_MAX}."))
+                    "pan" -> shaping.copy(pan = padInt(v, -PadSettings.PAN_MAX, PadSettings.PAN_MAX) ?: return error(no, "$label pad: pan must be a whole number from -${PadSettings.PAN_MAX} to ${PadSettings.PAN_MAX}, negative is left."))
+                    "attack" -> shaping.copy(attack = padInt(v, 0, PadSettings.ENV_MAX) ?: return error(no, "$label pad: attack must be a whole number from 0 to ${PadSettings.ENV_MAX}."))
+                    "release" -> shaping.copy(release = padInt(v, 0, PadSettings.ENV_MAX) ?: return error(no, "$label pad: release must be a whole number from 0 to ${PadSettings.ENV_MAX}."))
+                    else -> shaping.copy(mode = PlayMode.of(v.lowercase()) ?: return error(no, "$label pad: mode must be oneshot, key or legato."))
+                }
+                i += 2
+            }
+            if (shaping.isEmpty) {
+                error(no, "$label pad: give at least one of pitch, level, pan, attack, release or mode.")
+                return
+            }
+            val before = d.pads[pad.offset]
+            if (before != null) warn(no, "$label has two pad lines, merged, the later settings win.")
+            d.pads[pad.offset] = before?.merged(shaping) ?: shaping
+        }
+
+        // A whole number (a + or - allowed) from [lo] to [hi]; null when it isn't one.
+        private fun padInt(v: String, lo: Int, hi: Int): Int? = v.takeIf { SIGNED.matches(it) }?.toIntOrNull()?.takeIf { it in lo..hi }
 
         // ---- notes list ----
 
@@ -538,24 +861,76 @@ object BeatCards {
 
     /**
      * [card] as text, as the spec's writing rules have it. [names] gives the
-     * sound name a row shows after its pad (null for none). With [tidy],
+     * sound name a row shows after its pad (null for none). A section's
+     * sound lines come right after its line, in keypad order, each with its
+     * name when it has one. With [tidy],
      * velocities are rounded to 127, 100 or 64 (ties up) and gates under a
      * step become a step, for every note, and the card says so in a comment.
+     * The [silent] pads ([silentPads]) are listed in a comment of their own
+     * right after the header ([ClaudeText.noSoundOn]); readers ignore it.
      * The text ends in a newline.
      */
-    fun write(card: BeatCard, names: (PhysicalPad) -> String? = { null }, tidy: Boolean = false): String {
+    fun write(card: BeatCard, names: (PhysicalPad) -> String? = { null }, tidy: Boolean = false, silent: List<PhysicalPad> = emptyList()): String {
         val swing = TimingSettings.clampSwing(card.swing)
         val out = ArrayList<String>()
         out += "ARC BEAT $VERSION"
         card.name?.let { cleanText(it, MAX_NAME) }?.takeIf { it.isNotEmpty() }?.let { out += "name $it" }
         card.tempo?.let { out += "tempo ${tempoText(it)}" }
         out += "swing $swing"
+        card.fx?.let { writeFx(out, it) }
+        if (silent.isNotEmpty()) out += ClaudeText.noSoundOn(silent)
         if (tidy) out += TIDY_COMMENT
         for (s in card.sections.sortedBy { it.group }) {
             out += ""
             writeSection(out, s, swing, names, tidy)
         }
         return out.joinToString("\n", postfix = "\n")
+    }
+
+    // The effect lines: fx (when there is an effect line), send, comp, sidechain; knobs as whole percents.
+    private fun writeFx(out: MutableList<String>, fx: CardFx) {
+        fx.type?.let { type ->
+            out += "fx ${type.name.lowercase()}" + if (type == FxType.NONE) "" else " ${percentText(fx.x ?: 0.5f)} ${percentText(fx.y ?: 0.5f)}"
+        }
+        fx.sends?.entries?.filter { it.key in 0..3 }?.sortedBy { it.key }?.takeIf { it.isNotEmpty() }?.let { sends ->
+            out += "send " + sends.joinToString(" ") { "${'A' + it.key} ${percentText(it.value)}" }
+        }
+        fx.comp?.let { out += if (it.on) "comp ${percentText(it.x)} ${percentText(it.y)}" else "comp off" }
+        fx.sidechain?.let { sc ->
+            val dests = sc.dests and FxSettings.ALL_GROUPS
+            out += if (sc.on && dests != 0) {
+                "sidechain ${padText(sc.group.coerceIn(0, 3), sc.pad.coerceIn(0, 11))} " +
+                    (0..3).filter { dests and (1 shl it) != 0 }.joinToString("") { "${'A' + it}" } +
+                    " ${percentText(sc.x)} ${percentText(sc.y)}"
+            } else {
+                "sidechain off"
+            }
+        }
+    }
+
+    // A knob (0..1) as a card's whole percent.
+    private fun percentOf(v: Float): Int = (clamp01(v) * 100f).roundToInt()
+
+    private fun percentText(v: Float): String = percentOf(v).toString()
+
+    // A pad line: the settings given, in the spec's order.
+    private fun padLineText(group: Int, offset: Int, p: CardPad): String {
+        val sb = StringBuilder("pad ${padText(group, offset)}")
+        p.pitch?.let { sb.append(" pitch ").append(pitchText(it)) }
+        p.level?.let { sb.append(" level $it") }
+        p.pan?.let { sb.append(" pan $it") }
+        p.attack?.let { sb.append(" attack $it") }
+        p.release?.let { sb.append(" release $it") }
+        p.mode?.let { sb.append(" mode ${it.id}") }
+        return sb.toString()
+    }
+
+    // Semitones to two decimals, as few as needed: 7, -7.5, 0.25.
+    private fun pitchText(v: Double): String {
+        val h = Math.round(v.coerceIn(-PadSettings.PITCH_MAX, PadSettings.PITCH_MAX) * 100).toInt()
+        val a = Math.abs(h)
+        val frac = if (a % 100 == 0) "" else "." + (a % 100).toString().padStart(2, '0').trimEnd('0')
+        return (if (h < 0) "-" else "") + (a / 100) + frac
     }
 
     private fun writeSection(out: MutableList<String>, s: CardSection, swing: Int, names: (PhysicalPad) -> String?, tidy: Boolean) {
@@ -568,6 +943,15 @@ object BeatCards {
         val count = p.bars * per
         val stepOf = rowSteps(notes, step, swing, count)
         out += "[${'A' + g}${s.number?.let { "%02d".format(Locale.ROOT, it) } ?: ""}] bars ${p.bars} step ${step.id}"
+        for (offset in KEYPAD) {
+            val sound = s.sounds[offset]?.takeIf { it.slot in SLOT_MIN..SLOT_MAX } ?: continue
+            val name = sound.name?.let { cleanText(it, Int.MAX_VALUE) }.orEmpty()
+            out += "sound ${padText(g, offset)} ${sound.slot}" + if (name.isEmpty()) "" else " $name"
+        }
+        for (offset in KEYPAD) {
+            val pad = s.pads[offset]?.takeUnless { it.isEmpty } ?: continue
+            out += padLineText(g, offset, pad)
+        }
         val rows = KEYPAD.filter { offset -> notes.indices.any { stepOf[it] >= 0 && notes[it].offset == offset } }
         val nameOf = rows.associateWith { names(PhysicalPad(g, it))?.let { n -> cleanText(n, Int.MAX_VALUE) }.orEmpty() }
         val longest = nameOf.values.maxOfOrNull { it.length } ?: 0
@@ -672,17 +1056,245 @@ object BeatCards {
      * order (all of them when none has notes), and the swing [timingSwing]
      * when every pad hit of every section sits on the swung 1/16 grid, else
      * 50, so a card never loses a hit's place to a swing it doesn't fit.
+     * [sounds] gives the sound a pad plays (null when not known): each
+     * section gets a sound for every pad its notes use that has one. [fx] is
+     * the project's FX, written as effect lines unless they leave the sound
+     * as it is ([fxOf]); [pads] gives a pad's settings (null when not known):
+     * each section gets a `pad` line for every pad its notes use whose
+     * settings differ from the defaults ([padOf]).
      */
-    fun fromPatterns(name: String?, tempo: Double?, timingSwing: Int, sections: List<CardSection>): BeatCard {
+    fun fromPatterns(
+        name: String?,
+        tempo: Double?,
+        timingSwing: Int,
+        sections: List<CardSection>,
+        sounds: (PhysicalPad) -> CardSound? = { null },
+        fx: FxSettings? = null,
+        pads: (PhysicalPad) -> PadSettings? = { null },
+    ): BeatCard {
         val kept = sections.filter { !it.pattern.isEmpty }.ifEmpty { sections }.sortedBy { it.group }
+            .map { s -> s.copy(sounds = s.sounds + soundsUsed(s, sounds), pads = s.pads + padsUsed(s, pads)) }
         val s = TimingSettings.clampSwing(timingSwing)
         val swing = if (s > TimingSettings.SWING_MIN && kept.all { fitsSwung(it.pattern, s) }) s else TimingSettings.SWING_MIN
-        return BeatCard(name, tempo, swing, kept)
+        return BeatCard(name, tempo, swing, kept, fx?.let(::fxOf))
+    }
+
+    // The sound of each pad the section's notes use, for those [sounds] knows.
+    private fun soundsUsed(s: CardSection, sounds: (PhysicalPad) -> CardSound?): Map<Int, CardSound> {
+        val out = LinkedHashMap<Int, CardSound>()
+        for (offset in KEYPAD) {
+            if (s.pattern.notes.none { it.offset == offset }) continue
+            sounds(PhysicalPad(s.group, offset))?.let { out[offset] = it }
+        }
+        return out
+    }
+
+    // The shaping of each pad the section's notes use that has any, for those [pads] knows.
+    private fun padsUsed(s: CardSection, pads: (PhysicalPad) -> PadSettings?): Map<Int, CardPad> {
+        val out = LinkedHashMap<Int, CardPad>()
+        for (offset in KEYPAD) {
+            if (s.pattern.notes.none { it.offset == offset }) continue
+            pads(PhysicalPad(s.group, offset))?.let(::padOf)?.let { out[offset] = it }
+        }
+        return out
+    }
+
+    /**
+     * The effect lines for a project's [fx], as a share writes them, with the
+     * knobs in whole percents (so the card reads back as this one): the
+     * effect and its knobs, the groups sending above 0, the compressor and
+     * the sidechain when they are on. Null when none of that makes a sound
+     * (no effect, no send, compressor and sidechain off).
+     */
+    fun fxOf(fx: FxSettings): CardFx? {
+        val c = fx.clamped()
+        val sends = c.sends.withIndex().filter { percentOf(it.value) > 0 }.associate { it.index to knob(it.value) }
+        val comp = c.comp.takeIf { it.on }?.let { Comp(true, knob(it.x), knob(it.y)) }
+        val sc = c.sidechain.takeIf { it.on && it.dests != 0 }?.copy(x = knob(c.sidechain.x), y = knob(c.sidechain.y))
+        if (c.type == FxType.NONE && sends.isEmpty() && comp == null && sc == null) return null
+        val none = c.type == FxType.NONE
+        return CardFx(c.type, if (none) 0.5f else knob(c.x), if (none) 0.5f else knob(c.y), sends.ifEmpty { null }, comp, sc)
+    }
+
+    // A knob at its whole percent, as a card holds it.
+    private fun knob(v: Float): Float = (percentOf(v) / 100.0).toFloat()
+
+    /**
+     * A pad's [settings] as a `pad` line holds them: only what differs from the
+     * defaults (pitch not 0, level not 100, pan not 0, attack not 0, mode not
+     * oneshot, and release when it isn't what the mode starts with: 255 for
+     * oneshot, [PadSettings.KEY_RELEASE] for the others). Null when none does.
+     * Only the fields the card format carries.
+     */
+    fun padOf(settings: PadSettings): CardPad? {
+        val c = settings.clamped(null)
+        val d = PadSettings.DEFAULT
+        val release = if (c.mode == PlayMode.ONESHOT) PadSettings.ENV_MAX else PadSettings.KEY_RELEASE
+        val pad = CardPad(
+            pitch = c.pitch.takeIf { it != d.pitch }?.plus(0.0),
+            level = c.level.takeIf { it != d.level },
+            pan = c.pan.takeIf { it != d.pan },
+            attack = c.attack.takeIf { it != d.attack },
+            release = c.release.takeIf { it != release },
+            mode = c.mode.takeIf { it != d.mode },
+        )
+        return pad.takeUnless { it.isEmpty }
+    }
+
+    // ---- Applying ----
+
+    /**
+     * [current] with the card's effect lines on it, each kind apart: the `fx`
+     * line sets the effect (and its knobs, unless it is none, which leaves
+     * them where they are); the `send` lines set the groups they name and
+     * every other group to 0; `comp` sets the compressor (off keeps its
+     * knobs); `sidechain` sets the sidechain (off keeps its source and
+     * groups). A kind the card has no line for stays as it is. Every value is
+     * held in range.
+     */
+    fun applyFx(current: FxSettings, fx: CardFx): FxSettings {
+        var out = current
+        fx.type?.let { out = out.withType(it) }
+        if (fx.type != FxType.NONE && (fx.x != null || fx.y != null)) out = out.withXY(fx.x ?: out.x, fx.y ?: out.y)
+        fx.sends?.let { sends -> for (g in 0 until FxSettings.GROUPS) out = out.withSend(g, sends[g] ?: 0f) }
+        fx.comp?.let { out = out.withComp(if (it.on) it else out.comp.copy(on = false)) }
+        fx.sidechain?.let { out = out.withSidechain(if (it.on) it else out.sidechain.copy(on = false)) }
+        return out.clamped()
+    }
+
+    /**
+     * [current] with the card's `pad` line on it, the settings it gives and
+     * no others. The mode goes first, as the pad sheet's MODE knob does
+     * ([PadSettings.withMode]: leaving oneshot sets the release to the key
+     * default), so a release the line gives is the one that stays. Every
+     * value is clamped as the sheet does.
+     */
+    fun applyPad(current: PadSettings, pad: CardPad): PadSettings {
+        var out = current
+        pad.mode?.let { out = out.withMode(it) }
+        pad.pitch?.let { out = out.copy(pitch = it) }
+        pad.level?.let { out = out.copy(level = it) }
+        pad.pan?.let { out = out.copy(pan = it) }
+        pad.attack?.let { out = out.copy(attack = it) }
+        pad.release?.let { out = out.copy(release = it) }
+        return out.clamped(null)
     }
 
     private fun fitsSwung(p: Pattern, swing: Int): Boolean {
         val count = p.lengthTicks / Timing.SIXTEENTH.ticks
         return p.notes.all { it.semitones != null || it.tick >= p.lengthTicks || gridStep(it.tick, Timing.SIXTEENTH, swing, count) != null }
+    }
+
+    // ---- Sounds ----
+
+    /**
+     * The pads [card]'s notes use (pad hits and KEYS notes alike; a note past its pattern's end doesn't play) that would
+     * be silent: [slotOf] gives no sound for them now (null) and no sound line of the card puts one on them. In keypad
+     * order for each group. Empty when the pads are not [known] (nothing read yet): then a pad with no slot is not
+     * known to be empty.
+     */
+    fun silentPads(card: BeatCard, slotOf: (PhysicalPad) -> Int?, known: Boolean): List<PhysicalPad> {
+        if (!known) return emptyList()
+        val out = ArrayList<PhysicalPad>()
+        for (s in card.sections.sortedBy { it.group }) {
+            val used = usedOffsets(s)
+            for (offset in KEYPAD) {
+                if (offset !in used || s.sounds[offset]?.slot in SLOT_MIN..SLOT_MAX) continue
+                val pad = PhysicalPad(s.group, offset)
+                if (slotOf(pad) == null && pad !in out) out += pad
+            }
+        }
+        return out
+    }
+
+    /** How many notes of [s] play on each pad (pad offset to count; a note past the pattern's end doesn't play). */
+    fun notesByPad(s: CardSection): Map<Int, Int> =
+        s.pattern.notes.filter { it.tick in 0 until s.pattern.lengthTicks }.groupingBy { it.offset }.eachCount()
+
+    // The offsets of the pads [s]'s notes play on.
+    private fun usedOffsets(s: CardSection): Set<Int> = notesByPad(s).keys
+
+    /**
+     * The names to show and match for the device's sounds ([device], slot to
+     * name): a slot the device lists unnamed ([FactorySounds.unnamed], "200.pcm")
+     * takes the name the [factory] pack has for that slot when it has one
+     * (not blank, and not unnamed itself); every other slot is as the device
+     * has it.
+     */
+    fun soundNames(device: Map<Int, String>, factory: Map<Int, String>?): Map<Int, String> {
+        if (factory == null) return device
+        return device.mapValues { (slot, name) ->
+            val named = factory[slot]
+            if (named != null && FactorySounds.unnamed(slot, name) && named.isNotBlank() && !FactorySounds.unnamed(slot, named)) named else name
+        }
+    }
+
+    /**
+     * The card's sound lines matched to the user's sounds, in the card's
+     * order (sections as given, pads in keypad order). [available] is slot to
+     * name ([soundNames]), [current] the slot a pad plays now (null when not
+     * known). A line with a name is matched like this: the slot is used when
+     * it holds a sound of that name ([PadSoundCache.sameName]: ignoring case,
+     * spaces and ".wav"); otherwise the sound is looked up by name and the
+     * slot that holds it is used (the pad's own slot first, then the lowest);
+     * failing that, a slot that is there but unnamed ("200.pcm", a factory
+     * sound whose name can't be checked) is used all the same, as a pick
+     * that is [SoundPick.unverified]; else the line is [SoundStatus.MISSING].
+     * A line without a name uses its slot when [available] has it. A pick
+     * whose slot is already on the pad is [SoundStatus.SAME], found by name
+     * or not.
+     */
+    fun resolveSounds(card: BeatCard, available: Map<Int, String>, current: (PhysicalPad) -> Int?): List<SoundPick> {
+        val picks = ArrayList<SoundPick>()
+        for (s in card.sections) {
+            for (offset in KEYPAD) {
+                val wanted = s.sounds[offset] ?: continue
+                val pad = PhysicalPad(s.group, offset)
+                val now = current(pad)
+                // The device's own file name for the slot ("200.pcm") says nothing about the sound: it counts as no name.
+                val name = wanted.name?.takeIf { it.isNotBlank() && !FactorySounds.unnamed(wanted.slot, it) }
+                val direct = wanted.slot.takeIf { it in available && (name == null || holds(available[it], name)) }
+                val byName = if (direct == null && name != null) lookUp(available, name, now) else null
+                val slot = direct ?: byName ?: wanted.slot.takeIf { unnamedIn(available, it) }
+                val unverified = slot != null && unnamedIn(available, slot)
+                picks += when {
+                    slot == null -> SoundPick(pad, wanted, null, null, now, SoundStatus.MISSING)
+                    slot == now -> SoundPick(pad, wanted, slot, available[slot], now, SoundStatus.SAME, unverified)
+                    else -> SoundPick(pad, wanted, slot, available[slot], now, if (byName != null) SoundStatus.FOUND_BY_NAME else SoundStatus.CHANGE, unverified)
+                }
+            }
+        }
+        return picks
+    }
+
+    // Whether [slot] is in [available] under the name the EP-133 gives a sound nobody named ("200.pcm").
+    private fun unnamedIn(available: Map<Int, String>, slot: Int): Boolean = available[slot]?.let { FactorySounds.unnamed(slot, it) } == true
+
+    // The slot holding a sound called [name]: the pad's own ([now]) when it does, else the lowest; null when none.
+    private fun lookUp(available: Map<Int, String>, name: String, now: Int?): Int? {
+        val same = available.filter { holds(it.value, name) }.keys
+        return if (now != null && now in same) now else same.minOrNull()
+    }
+
+    // Whether a sound named [have] is the one called [name] (the card's name is cleaned, so the list's is too).
+    private fun holds(have: String?, name: String): Boolean = have != null && PadSoundCache.sameName(cleanText(have, Int.MAX_VALUE), name)
+
+    /**
+     * The sound list Arc adds after a shared card: [ClaudeText.soundListHeader]
+     * for [source] (the EP-133, the last read or the factory pack, as
+     * [ClaudeText] words them), then one line "slot name" for each sound of
+     * [available] from slot 1 to 999, in slot order. Names are cleaned as the
+     * card's are, so a name read from the list reads back the same. When any
+     * listed name is unnamed ("200.pcm"), [ClaudeText.UNNAMED_SOUNDS_NOTE]
+     * follows the header. The text ends in a newline.
+     */
+    fun soundList(source: String, available: Map<Int, String>): String {
+        val out = ArrayList<String>()
+        out += ClaudeText.soundListHeader(source)
+        val lines = available.keys.filter { it in SLOT_MIN..SLOT_MAX }.sorted().map { slot -> slot to cleanText(available.getValue(slot), Int.MAX_VALUE) }
+        if (lines.any { (slot, name) -> FactorySounds.unnamed(slot, name) }) out += ClaudeText.UNNAMED_SOUNDS_NOTE
+        for ((slot, name) in lines) out += if (name.isEmpty()) "$slot" else "$slot $name"
+        return out.joinToString("\n", postfix = "\n")
     }
 
     // ---- Import ----

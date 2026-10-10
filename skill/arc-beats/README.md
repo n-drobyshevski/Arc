@@ -29,8 +29,8 @@ Claude Code picks it up the next time it starts, and uses it whenever you talk a
 
 ## Using it with Arc
 
-1. In Arc's **Live** screen open **Live tools**, find **CLAUDE**, and use **SHARE SCENE** or **SHARE** (the group shown) to send a beat to the Claude app, so Claude sees your pad names. Or ask Claude to make something new.
-2. Claude replies with a card in a code block. Copy it and tap **PASTE BEAT** (or share the reply to Arc), then **IMPORT** on the sheet, and play. One undo removes it.
+1. In Arc's **Live** screen open **Live tools**, find **CLAUDE**, and use **SHARE SCENE** or **SHARE** (the group shown) to send a beat to the Claude app, so Claude sees your pad names. Tick **With my sound list** first and Claude also gets the sounds on your EP-133, and can choose them for the pads with `sound` lines. Or ask Claude to make something new.
+2. Claude replies with a card in a code block. Copy it and tap **PASTE BEAT** (or share the reply to Arc), then **IMPORT** on the sheet, and play. One undo removes it. If the card picks sounds, the sheet lists each as old to new with a tick box; the ticked ones can be put on your pads (this is the one thing a card can change on the EP-133).
 
 [references/arc-app.md](references/arc-app.md) has the details Claude uses. **Learn with Claude**, also under CLAUDE, starts lesson 1 in the Claude app.
 
@@ -40,12 +40,12 @@ Claude Code picks it up the next time it starts, and uses it whenever you talk a
 |---|---|
 | `SKILL.md` | The skill: what Claude does for each of the three jobs |
 | `references/beat-card.md` | The card format, the spec both Arc and the script follow |
-| `references/genres.md` | The assumed kit and 16 genre recipes, each a valid card |
+| `references/genres.md` | The assumed kit and 28 genre recipes (a techno family among them), each a valid card |
 | `references/lessons.md` | Twelve lessons from a first beat to sampling |
 | `references/analysis.md` | How to read the script's report, the checklist and the vocabulary |
 | `references/arc-app.md` | What each Arc screen does, for Claude to explain |
 | `references/ep133-guide.md` | The 100 official OS 2.5 key combinations. **Generated, do not edit** |
-| `scripts/beatcard.py` | `check`, `analyse`, `grid` and `midi`; Python 3.9+, standard library only |
+| `scripts/beatcard.py` | `check` (also `--sounds` to check sound lines against your sound list), `analyse`, `grid` and `midi`; Python 3.9+, standard library only |
 | `scripts/test_beatcard.py` | Tests; also checks every card in the references |
 
 ## Working on the skill

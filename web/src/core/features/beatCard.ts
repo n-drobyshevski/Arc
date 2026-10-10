@@ -13,40 +13,179 @@
 //   function from a PhysicalPad (or undefined, for none) giving a name or null.
 // - CardImport.fullGroup is null (not absent) when nothing is full; `placed`
 //   holds [group, pattern number] tuples where the Kotlin has Pairs.
+// - A section's `sounds` is a ReadonlyMap from pad offset to CardSound, built
+//   by `cardSound()`; `available` in resolveSounds is a ReadonlyMap from slot to
+//   name; SoundStatus is a const object plus a string union of its names.
+// - A section's `pads` is a ReadonlyMap from pad offset to CardPad, built by
+//   `cardPad()`; the card's `fx` is a CardFx built by `cardFx()` (its `sends` a
+//   ReadonlyMap from group to send). Knobs are floats kept with Math.fround, as
+//   in fxSettings.ts. CardPad's methods are the functions `cardPadIsEmpty` and
+//   `mergedCardPad`.
 
+import { clamp01 } from '../formats/fx/fxMath'
+import { FX_TYPES, FxSettings, FxType, comp, sidechain, type Comp, type Sidechain } from './fxSettings'
 import { Keys } from './keys'
 import { LABELS, ROWS, noteName, physicalPad, type PhysicalPad } from './padNotes'
 import { Pattern, ProjectSeq, Seq, Timing, TimingSettings, pattern, patternNote, scene, timingTicks, type PatternNote } from './pattern'
+import { PadSettings, PlayMode } from './padSettings'
+import { PadSoundCache } from './padSoundCache'
+import { unnamed } from './factorySounds'
 import { SceneOps } from './scenes'
 import { Steps } from './steps'
 import { BEATS_PER_BAR } from './tempo'
+import { ClaudeText } from '../text/claudeText'
 
 /**
  * A beat as an ARC BEAT text card: an optional [name] (up to 40 characters),
  * the [tempo] it is meant for (40 to 240 BPM), the [swing] of its grid rows
  * (50..75, 50 straight, as the device's TIMING) and its [sections], one for
- * each group at most.
+ * each group at most. [fx] is the project's effect lines, null when the card
+ * has none.
  */
 export interface BeatCard {
   readonly name: string | null
   readonly tempo: number | null
   readonly swing: number
   readonly sections: readonly CardSection[]
+  readonly fx: CardFx | null
 }
 
-export function beatCard(name: string | null = null, tempo: number | null = null, swing: number = TimingSettings.SWING_MIN, sections: readonly CardSection[] = []): BeatCard {
-  return { name, tempo, swing, sections }
+export function beatCard(
+  name: string | null = null,
+  tempo: number | null = null,
+  swing: number = TimingSettings.SWING_MIN,
+  sections: readonly CardSection[] = [],
+  fx: CardFx | null = null,
+): BeatCard {
+  return { name, tempo, swing, sections, fx }
 }
 
-/** One group's pattern on a card: [group] 0..3 (A..D), the pattern [number] 1..99 it was written as (a hint, null when the card gave none) and the [pattern] itself. */
+/**
+ * The effect lines of a card (the spec's "Effects"), each kind apart and null
+ * when the card has no such line, so a card sets only what it says. Knobs are
+ * 0..1 floats (the card's percent / 100). [type] is the `fx` line's effect with
+ * its [x] and [y] (0.5 when the line gave none); [sends] is the `send` lines'
+ * groups (0..3) with their sends, the groups left out being 0 once applied;
+ * [comp] is the `comp` line (off is `comp({ on: false })`); [sidechain] is the
+ * `sidechain` line (off is `sidechain({ on: false })`).
+ */
+export interface CardFx {
+  readonly type: FxType | null
+  readonly x: number | null
+  readonly y: number | null
+  readonly sends: ReadonlyMap<number, number> | null
+  readonly comp: Comp | null
+  readonly sidechain: Sidechain | null
+}
+
+export function cardFx(fields: Partial<CardFx> = {}): CardFx {
+  const c = { type: null, x: null, y: null, sends: null, comp: null, sidechain: null, ...fields }
+  return { type: c.type, x: c.x === null ? null : Math.fround(c.x), y: c.y === null ? null : Math.fround(c.y), sends: c.sends, comp: c.comp, sidechain: c.sidechain }
+}
+
+/**
+ * A `pad` line of a card (the spec's "Pad shaping"): the settings it gave, null
+ * for the rest. [pitch] is in semitones (-12..12), [level] 0..100, [pan]
+ * -16..16, [attack] and [release] envelope ticks 0..255 and [mode] the play
+ * mode, all as the pad sheet has them (PadSettings).
+ */
+export interface CardPad {
+  readonly pitch: number | null
+  readonly level: number | null
+  readonly pan: number | null
+  readonly attack: number | null
+  readonly release: number | null
+  readonly mode: PlayMode | null
+}
+
+export function cardPad(fields: Partial<CardPad> = {}): CardPad {
+  return { pitch: null, level: null, pan: null, attack: null, release: null, mode: null, ...fields }
+}
+
+/** Whether the line gave no setting at all. */
+export function cardPadIsEmpty(p: CardPad): boolean {
+  return p.pitch === null && p.level === null && p.pan === null && p.attack === null && p.release === null && p.mode === null
+}
+
+/** [p]'s settings, with [later]'s over them where it gives one. */
+export function mergedCardPad(p: CardPad, later: CardPad): CardPad {
+  return {
+    pitch: later.pitch ?? p.pitch,
+    level: later.level ?? p.level,
+    pan: later.pan ?? p.pan,
+    attack: later.attack ?? p.attack,
+    release: later.release ?? p.release,
+    mode: later.mode ?? p.mode,
+  }
+}
+
+/**
+ * One group's pattern on a card: [group] 0..3 (A..D), the pattern [number]
+ * 1..99 it was written as (a hint, null when the card gave none), the
+ * [pattern] itself, the [sounds] its pads should play and the [pads]' shaping
+ * (a `pad` line each), both by pad offset.
+ */
 export interface CardSection {
   readonly group: number
   readonly number: number | null
   readonly pattern: Pattern
+  readonly sounds: ReadonlyMap<number, CardSound>
+  readonly pads: ReadonlyMap<number, CardPad>
 }
 
-export function cardSection(group: number, number: number | null, pat: Pattern): CardSection {
-  return { group, number, pattern: pat }
+export function cardSection(
+  group: number,
+  number: number | null,
+  pat: Pattern,
+  sounds: ReadonlyMap<number, CardSound> = new Map(),
+  pads: ReadonlyMap<number, CardPad> = new Map(),
+): CardSection {
+  return { group, number, pattern: pat, sounds, pads }
+}
+
+/**
+ * A sound line of a card: the EP-133 sound [slot] (1..999) a pad should play
+ * and, when the card gave it, the sound's [name] as the user's list has it,
+ * which lets Arc check that the slot still holds that sound.
+ */
+export interface CardSound {
+  readonly slot: number
+  readonly name: string | null
+}
+
+export function cardSound(slot: number, name: string | null = null): CardSound {
+  return { slot, name }
+}
+
+/** What `BeatCards.resolveSounds` makes of a sound line. */
+export type SoundStatus = 'CHANGE' | 'SAME' | 'FOUND_BY_NAME' | 'MISSING'
+export const SoundStatus = {
+  /** The sound is on the slot to put on the pad: a change. */
+  CHANGE: 'CHANGE',
+  /** The pad already plays the sound: nothing to do. */
+  SAME: 'SAME',
+  /** The line's slot didn't hold the named sound (or was empty), but another slot does: still a change, to that slot. */
+  FOUND_BY_NAME: 'FOUND_BY_NAME',
+  /** Neither the slot nor the name is among the sounds: the line is skipped. */
+  MISSING: 'MISSING',
+} as const
+
+/**
+ * A sound line matched to the user's sounds: the [pad] and what the card
+ * [wanted], the [slot] and [name] to put on it (null for both when [status]
+ * is MISSING), the slot the pad plays now ([currentSlot], null when not known)
+ * and the [status]. [unverified] is set when the slot is a factory sound the
+ * EP-133 lists without a name ("200.pcm", see FactorySounds.unnamed): it is
+ * used by its slot, as its name can't be checked.
+ */
+export interface SoundPick {
+  readonly pad: PhysicalPad
+  readonly wanted: CardSound
+  readonly slot: number | null
+  readonly name: string | null
+  readonly currentSlot: number | null
+  readonly status: SoundStatus
+  readonly unverified: boolean
 }
 
 /** Something wrong with a card, at [line] (counted from 1 in the text read): an [error] stops the card being read, a warning doesn't. */
@@ -85,6 +224,10 @@ const TIDY_COMMENT = '# tidied: velocities and short gates rounded'
 const TEMPO_MIN = 40
 const TEMPO_MAX = 240
 
+/** The sound slots of the EP-133. */
+const SLOT_MIN = 1
+const SLOT_MAX = 999
+
 /** A note's gate when it gives none: a 1/16. */
 const DEFAULT_GATE = 24
 
@@ -110,6 +253,17 @@ const KEYPAD: readonly number[] = ROWS.flat()
 
 const NOTE_KEYS = new Set(['at', 't', 'vel', 'gate', 'note', 'semi'])
 const HEADER_KEYS = new Set(['name', 'tempo', 'swing'])
+
+/** The effect lines: header only. */
+const FX_KEYS = new Set(['fx', 'send', 'comp', 'sidechain'])
+const PAD_KEYS = new Set(['pitch', 'level', 'pan', 'attack', 'release', 'mode'])
+const FX_WORDS = 'none, delay, reverb, distortion, chorus, filter or compressor'
+
+/** A knob value as a card writes it: 0 to 100, whole or with one decimal. */
+const PERCENT = /^\d{1,3}(\.\d)?$/
+const PERCENT_TEXT = '0 to 100, whole or with one decimal'
+const PITCH_TEXT = /^[+-]?\d{1,2}(\.\d{1,2})?$/
+const GROUP_LIST = /^[A-D]+$/
 
 const CARD_START = /^ARC[ \t\u00A0]+BEAT(?:[ \t\u00A0]|$)/i
 const PAD = /^([A-D])(ENTER|[E.0-9])$/
@@ -234,11 +388,15 @@ interface Draft {
   readonly dropped: boolean
   /** The notes read, with the line each came from. */
   readonly hits: { note: PatternNote; line: number }[]
+  /** The sound lines read, by pad offset. */
+  readonly sounds: Map<number, CardSound>
+  /** The pad lines read (merged when a pad has more than one), by pad offset. */
+  readonly pads: Map<number, CardPad>
   inNotes: boolean
 }
 
 function newDraft(line: number, group: number, number: number | null, bars: number, step: Timing, skip: boolean, dropped: boolean): Draft {
-  return { line, group, number, bars, step, skip, dropped, hits: [], inNotes: false }
+  return { line, group, number, bars, step, skip, dropped, hits: [], sounds: new Map(), pads: new Map(), inNotes: false }
 }
 
 /** Whether [text] has an ARC BEAT line: what [read] starts from, so a text without one is no card at all (not a card with a mistake). */
@@ -259,6 +417,12 @@ function read(text: string): CardRead {
   let name: string | null = null
   let tempo: number | null = null
   let swing: number = TimingSettings.SWING_MIN
+  let fxType: FxType | null = null
+  let fxX: number | null = null
+  let fxY: number | null = null
+  let fxSends: Map<number, number> | null = null
+  let fxComp: Comp | null = null
+  let fxSidechain: Sidechain | null = null
   const sections: CardSection[] = []
   const groups = new Set<number>()
   let draft: Draft | null = null
@@ -273,8 +437,13 @@ function read(text: string): CardRead {
   const result = (): CardRead => {
     // Array.prototype.sort is stable, as Kotlin's sortedBy.
     const sorted = [...problems].sort((a, b) => a.line - b.line)
-    return { card: sorted.some((p) => p.error) ? null : { name, tempo, swing, sections }, problems: sorted }
+    return { card: sorted.some((p) => p.error) ? null : { name, tempo, swing, sections, fx: readFx() }, problems: sorted }
   }
+  // The effect lines read, or null when the card has none.
+  const readFx = (): CardFx | null =>
+    fxType === null && fxX === null && fxY === null && fxSends === null && fxComp === null && fxSidechain === null
+      ? null
+      : { type: fxType, x: fxX, y: fxY, sends: fxSends === null ? null : new Map(fxSends), comp: fxComp, sidechain: fxSidechain }
 
   // The version after ARC BEAT; false when the card can't be read at all.
   const version = (no: number, t: string[]): boolean => {
@@ -310,7 +479,7 @@ function read(text: string): CardRead {
       }
     }
     if (kept.length > Seq.MAX_NOTES) error(d.line, `Group ${letter(d.group)} has ${kept.length} notes, the most is ${Seq.MAX_NOTES}.`)
-    if (!d.dropped) sections.push({ group: d.group, number: d.number, pattern: pattern(d.bars, kept.sort(noteOrder)) })
+    if (!d.dropped) sections.push({ group: d.group, number: d.number, pattern: pattern(d.bars, kept.sort(noteOrder)), sounds: d.sounds, pads: d.pads })
   }
 
   // A section line that can't be used: its body is skipped.
@@ -378,8 +547,10 @@ function read(text: string): CardRead {
     const word = tokens(line)[0]!
     const key = word.toLowerCase()
     const rest = trim(line.slice(word.length))
-    if (line.includes('|') || firstIsPad(line) || key === 'notes') {
+    if (line.includes('|') || firstIsPad(line) || key === 'notes' || key === 'sound' || key === 'pad') {
       error(no, `'${word}' needs a section first, such as [A].`)
+    } else if (FX_KEYS.has(key)) {
+      fxLine(no, word, key, tokens(rest))
     } else if (key === 'name') {
       if (rest === '') warn(no, 'Name is empty, ignored.')
       else if (Array.from(rest).length > MAX_NAME) {
@@ -559,6 +730,203 @@ function read(text: string): CardRead {
     d.hits.push({ note: patternNote(tick, pad.offset, gate, semi, vel), line: no })
   }
 
+  // sound <pad> <slot> [name], anywhere in a section (after notes too). A second line for a pad replaces the first.
+  const sound = (d: Draft, no: number, line: string): void => {
+    let rest = trim(line.slice(tokens(line)[0]!.length))
+    const padToken = tokens(rest)[0]
+    if (padToken === undefined) {
+      error(no, 'A sound line needs a pad and a slot, as in sound A7 12 Kick.')
+      return
+    }
+    const pad = parsePad(padToken)
+    if (pad === null) {
+      error(no, `'${padToken}' isn't a pad. Use A to D, then . 0 E or 1 to 9.`)
+      return
+    }
+    const label = padText(pad.group, pad.offset)
+    if (pad.group !== d.group) {
+      error(no, `${label} is in group ${letter(pad.group)}, but the section is [${letter(d.group)}].`)
+      return
+    }
+    rest = trim(rest.slice(padToken.length))
+    const slotToken = tokens(rest)[0]
+    const slot = slotToken !== undefined && INT.test(slotToken) ? Number(slotToken) : 0
+    if (slot < SLOT_MIN || slot > SLOT_MAX) {
+      error(no, `${label} sound: the slot must be a whole number from ${SLOT_MIN} to ${SLOT_MAX}.`)
+      return
+    }
+    const name = cleanText(rest.slice(slotToken!.length), Infinity)
+    if (d.sounds.has(pad.offset)) warn(no, `${label} has two sound lines, kept the later.`)
+    d.sounds.set(pad.offset, { slot, name: name === '' ? null : name })
+  }
+
+  // ---- effect lines (header only) ----
+
+  // A knob value, 0 to 100 as a card writes it, as 0..1; null when it isn't one.
+  const percent = (token: string): number | null => {
+    if (!PERCENT.test(token)) return null
+    const n = Number(token)
+    return n <= 100 ? Math.fround(n / 100) : null
+  }
+
+  // Words left over after the line's last value ([t] from index [from]) are ignored, with a warning.
+  const extra = (no: number, word: string, t: string[], from: number): void => {
+    if (t.length > from) warn(no, `The ${word} line has extra words from '${t[from]}', ignored.`)
+  }
+
+  // fx / send / comp / sidechain: [t] are the words after [word]. A line with a fault changes nothing.
+  const fxLine = (no: number, word: string, key: string, t: string[]): void => {
+    if (key === 'fx') {
+      const w = t[0]
+      const type = w === undefined ? undefined : FX_TYPES.find((x) => x === w.toUpperCase())
+      if (type === undefined) {
+        error(no, t.length === 0 ? `fx needs an effect: ${FX_WORDS}.` : `'${t[0]}' isn't an effect. Use ${FX_WORDS}.`)
+        return
+      }
+      let x = 0.5
+      let y = 0.5
+      if (t.length > 1) {
+        const v = percent(t[1]!)
+        if (v === null) return error(no, `fx x must be ${PERCENT_TEXT}.`)
+        x = v
+      }
+      if (t.length > 2) {
+        const v = percent(t[2]!)
+        if (v === null) return error(no, `fx y must be ${PERCENT_TEXT}.`)
+        y = v
+      }
+      extra(no, word, t, 3)
+      if (fxType !== null) warn(no, 'Two fx lines, kept the later.')
+      fxType = type
+      fxX = Math.fround(x)
+      fxY = Math.fround(y)
+    } else if (key === 'send') {
+      if (t.length === 0) return error(no, 'send needs a group and a value, as in send A 40 B 20.')
+      const line = new Map<number, number>()
+      for (let i = 0; i < t.length; i += 2) {
+        const g = t[i]!
+        if (g.length !== 1 || g < 'A' || g > 'D') return error(no, `'${g}' isn't a group. Use A to D.`)
+        const token = t[i + 1]
+        if (token === undefined) return error(no, `send ${g} needs a value, ${PERCENT_TEXT}.`)
+        const v = percent(token)
+        if (v === null) return error(no, `send ${g} must be ${PERCENT_TEXT}.`)
+        line.set(g.charCodeAt(0) - 65, v)
+      }
+      const sends = fxSends ?? new Map<number, number>()
+      for (const [g, v] of line) sends.set(g, v)
+      fxSends = sends
+    } else if (key === 'comp') {
+      if (t.length === 0) return error(no, 'comp needs off, or a drive and a speed, as in comp 40 60.')
+      let c: Comp
+      if (t[0]!.toLowerCase() === 'off') {
+        extra(no, word, t, 1)
+        c = comp()
+      } else {
+        const drive = percent(t[0]!)
+        if (drive === null) return error(no, `comp drive must be ${PERCENT_TEXT}, or use comp off.`)
+        if (t.length < 2) return error(no, 'comp needs a speed after the drive, as in comp 40 60.')
+        const speed = percent(t[1]!)
+        if (speed === null) return error(no, `comp speed must be ${PERCENT_TEXT}.`)
+        extra(no, word, t, 2)
+        c = comp({ on: true, x: drive, y: speed })
+      }
+      if (fxComp !== null) warn(no, 'Two comp lines, kept the later.')
+      fxComp = c
+    } else {
+      if (t.length === 0) return error(no, 'sidechain needs off, or a pad and the groups it ducks, as in sidechain A7 BC.')
+      let sc: Sidechain
+      if (t[0]!.toLowerCase() === 'off') {
+        extra(no, word, t, 1)
+        sc = sidechain({ on: false })
+      } else {
+        const pad = parsePad(t[0]!)
+        if (pad === null) return error(no, `'${t[0]}' isn't a pad. Use A to D, then . 0 E or 1 to 9.`)
+        const groups = t[1]
+        if (groups === undefined) return error(no, `sidechain ${t[0]} needs the groups it ducks, as in sidechain A7 BC.`)
+        if (!GROUP_LIST.test(groups)) return error(no, `'${groups}' isn't a list of groups. Use the letters A to D, as in BC.`)
+        let length = 0.3
+        let shape = 0.5
+        if (t.length > 2) {
+          const v = percent(t[2]!)
+          if (v === null) return error(no, `sidechain length must be ${PERCENT_TEXT}.`)
+          length = v
+        }
+        if (t.length > 3) {
+          const v = percent(t[3]!)
+          if (v === null) return error(no, `sidechain shape must be ${PERCENT_TEXT}.`)
+          shape = v
+        }
+        extra(no, word, t, 4)
+        const dests = [...groups].reduce((m, c) => m | (1 << (c.charCodeAt(0) - 65)), 0)
+        sc = sidechain({ on: true, group: pad.group, pad: pad.offset, dests, x: length, y: shape })
+      }
+      if (fxSidechain !== null) warn(no, 'Two sidechain lines, kept the later.')
+      fxSidechain = sc
+    }
+  }
+
+  // ---- pad lines ----
+
+  // A whole number (a + or - allowed) from [lo] to [hi]; null when it isn't one.
+  const padInt = (v: string, lo: number, hi: number): number | null => {
+    if (!SIGNED.test(v)) return null
+    const n = Number(v) + 0
+    return n >= lo && n <= hi ? n : null
+  }
+
+  // pad <pad> [pitch n] [level n] [pan n] [attack n] [release n] [mode m], anywhere in a section. A second line for a pad merges into the first.
+  const padLine = (d: Draft, no: number, line: string): void => {
+    const t = tokens(line)
+    const padToken = t[1]
+    if (padToken === undefined) return error(no, 'A pad line needs a pad and a setting, as in pad A7 pitch -7 level 90.')
+    const pad = parsePad(padToken)
+    if (pad === null) return error(no, `'${padToken}' isn't a pad. Use A to D, then . 0 E or 1 to 9.`)
+    const label = padText(pad.group, pad.offset)
+    if (pad.group !== d.group) return error(no, `${label} is in group ${letter(pad.group)}, but the section is [${letter(d.group)}].`)
+    let shaping = cardPad()
+    let i = 2
+    while (i < t.length) {
+      const key = t[i]!.toLowerCase()
+      const v = t[i + 1]
+      if (!PAD_KEYS.has(key)) {
+        warn(no, `Unknown setting '${t[i]}' on ${label} pad, ignored.`)
+        i += v !== undefined && !PAD_KEYS.has(v.toLowerCase()) ? 2 : 1
+        continue
+      }
+      if (v === undefined) return error(no, `${label} pad: ${key} needs a value.`)
+      if (key === 'pitch') {
+        const n = PITCH_TEXT.test(v) ? Number(v) : NaN
+        if (!(n >= -PadSettings.PITCH_MAX && n <= PadSettings.PITCH_MAX)) return error(no, `${label} pad: pitch must be -12 to 12 semitones, whole or with up to two decimals.`)
+        shaping = { ...shaping, pitch: n + 0 }
+      } else if (key === 'level') {
+        const n = padInt(v, 0, PadSettings.LEVEL_MAX)
+        if (n === null) return error(no, `${label} pad: level must be a whole number from 0 to ${PadSettings.LEVEL_MAX}.`)
+        shaping = { ...shaping, level: n }
+      } else if (key === 'pan') {
+        const n = padInt(v, -PadSettings.PAN_MAX, PadSettings.PAN_MAX)
+        if (n === null) return error(no, `${label} pad: pan must be a whole number from -${PadSettings.PAN_MAX} to ${PadSettings.PAN_MAX}, negative is left.`)
+        shaping = { ...shaping, pan: n }
+      } else if (key === 'attack') {
+        const n = padInt(v, 0, PadSettings.ENV_MAX)
+        if (n === null) return error(no, `${label} pad: attack must be a whole number from 0 to ${PadSettings.ENV_MAX}.`)
+        shaping = { ...shaping, attack: n }
+      } else if (key === 'release') {
+        const n = padInt(v, 0, PadSettings.ENV_MAX)
+        if (n === null) return error(no, `${label} pad: release must be a whole number from 0 to ${PadSettings.ENV_MAX}.`)
+        shaping = { ...shaping, release: n }
+      } else {
+        const m = PlayMode.of(v.toLowerCase())
+        if (m === null) return error(no, `${label} pad: mode must be oneshot, key or legato.`)
+        shaping = { ...shaping, mode: m }
+      }
+      i += 2
+    }
+    if (cardPadIsEmpty(shaping)) return error(no, `${label} pad: give at least one of pitch, level, pan, attack, release or mode.`)
+    const before = d.pads.get(pad.offset)
+    if (before !== undefined) warn(no, `${label} has two pad lines, merged, the later settings win.`)
+    d.pads.set(pad.offset, before === undefined ? shaping : mergedCardPad(before, shaping))
+  }
+
   const lineAt = (no: number, line: string): void => {
     if (line.startsWith('[')) {
       section(no, line)
@@ -571,6 +939,9 @@ function read(text: string): CardRead {
     }
     if (d.skip) return
     if (line.toLowerCase() === 'notes') d.inNotes = true
+    else if (tokens(line)[0]!.toLowerCase() === 'sound') sound(d, no, line)
+    else if (tokens(line)[0]!.toLowerCase() === 'pad') padLine(d, no, line)
+    else if (FX_KEYS.has(tokens(line)[0]!.toLowerCase())) error(no, `'${tokens(line)[0]}' belongs before the first section.`)
     else if (d.inNotes) note(d, no, line)
     else if (line.includes('|')) row(d, no, line)
     else if (firstIsPad(line)) error(no, `${tokens(line)[0]} needs a | before its steps.`)
@@ -602,12 +973,14 @@ function read(text: string): CardRead {
 
 /**
  * [card] as text, as the spec's writing rules have it. [names] gives the
- * sound name a row shows after its pad (null for none). With [tidy],
- * velocities are rounded to 127, 100 or 64 (ties up) and gates under a step
- * become a step, for every note, and the card says so in a comment. The text
- * ends in a newline.
+ * sound name a row shows after its pad (null for none). A section's sound
+ * lines come right after its line, in keypad order, each with its name when it
+ * has one. With [tidy], velocities are rounded to 127, 100 or 64 (ties up) and gates under a step
+ * become a step, for every note, and the card says so in a comment. The [silent]
+ * pads (silentPads) are listed in a comment of their own right after the header
+ * (ClaudeText.noSoundOn); readers ignore it. The text ends in a newline.
  */
-function write(card: BeatCard, names: (pad: PhysicalPad) => string | null = () => null, tidy = false): string {
+function write(card: BeatCard, names: (pad: PhysicalPad) => string | null = () => null, tidy = false, silent: readonly PhysicalPad[] = []): string {
   const swing = TimingSettings.clampSwing(card.swing)
   const out: string[] = []
   out.push(`ARC BEAT ${VERSION}`)
@@ -615,12 +988,63 @@ function write(card: BeatCard, names: (pad: PhysicalPad) => string | null = () =
   if (title !== '') out.push(`name ${title}`)
   if (card.tempo !== null) out.push(`tempo ${tempoText(card.tempo)}`)
   out.push(`swing ${swing}`)
+  if (card.fx !== null) writeFx(out, card.fx)
+  if (silent.length > 0) out.push(ClaudeText.noSoundOn(silent))
   if (tidy) out.push(TIDY_COMMENT)
   for (const s of [...card.sections].sort((a, b) => a.group - b.group)) {
     out.push('')
     writeSection(out, s, swing, names, tidy)
   }
   return out.join('\n') + '\n'
+}
+
+// The effect lines: fx (when there is an effect line), send, comp, sidechain; knobs as whole percents.
+function writeFx(out: string[], fx: CardFx): void {
+  if (fx.type !== null) out.push(`fx ${fx.type.toLowerCase()}` + (fx.type === FxType.NONE ? '' : ` ${percentText(fx.x ?? 0.5)} ${percentText(fx.y ?? 0.5)}`))
+  if (fx.sends !== null) {
+    const sends = [...fx.sends].filter(([g]) => g >= 0 && g <= 3).sort((a, b) => a[0] - b[0])
+    if (sends.length > 0) out.push('send ' + sends.map(([g, v]) => `${letter(g)} ${percentText(v)}`).join(' '))
+  }
+  if (fx.comp !== null) out.push(fx.comp.on ? `comp ${percentText(fx.comp.x)} ${percentText(fx.comp.y)}` : 'comp off')
+  if (fx.sidechain !== null) {
+    const sc = fx.sidechain
+    const dests = sc.dests & FxSettings.ALL_GROUPS
+    if (sc.on && dests !== 0) {
+      const groups = [0, 1, 2, 3].filter((g) => (dests & (1 << g)) !== 0).map(letter).join('')
+      out.push(`sidechain ${padText(coerceIn(sc.group, 0, 3), coerceIn(sc.pad, 0, 11))} ${groups} ${percentText(sc.x)} ${percentText(sc.y)}`)
+    } else out.push('sidechain off')
+  }
+}
+
+const coerceIn = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
+
+// A knob (0..1) as a card's whole percent.
+function percentOf(v: number): number {
+  return Math.round(Math.fround(clamp01(v) * 100))
+}
+
+function percentText(v: number): string {
+  return String(percentOf(v))
+}
+
+// A pad line: the settings given, in the spec's order.
+function padLineText(group: number, offset: number, p: CardPad): string {
+  let s = `pad ${padText(group, offset)}`
+  if (p.pitch !== null) s += ` pitch ${pitchText(p.pitch)}`
+  if (p.level !== null) s += ` level ${p.level}`
+  if (p.pan !== null) s += ` pan ${p.pan}`
+  if (p.attack !== null) s += ` attack ${p.attack}`
+  if (p.release !== null) s += ` release ${p.release}`
+  if (p.mode !== null) s += ` mode ${p.mode}`
+  return s
+}
+
+// Semitones to two decimals, as few as needed: 7, -7.5, 0.25.
+function pitchText(v: number): string {
+  const h = Math.round(coerceIn(v, -PadSettings.PITCH_MAX, PadSettings.PITCH_MAX) * 100)
+  const a = Math.abs(h)
+  const frac = a % 100 === 0 ? '' : '.' + String(a % 100).padStart(2, '0').replace(/0+$/, '')
+  return (h < 0 ? '-' : '') + Math.trunc(a / 100) + frac
 }
 
 function writeSection(out: string[], s: CardSection, swing: number, names: (pad: PhysicalPad) => string | null, tidy: boolean): void {
@@ -636,6 +1060,17 @@ function writeSection(out: string[], s: CardSection, swing: number, names: (pad:
   const stepOf = rowSteps(notes, step, swing, count)
   const number = s.number === null ? '' : String(s.number).padStart(2, '0')
   out.push(`[${letter(g)}${number}] bars ${p.bars} step ${step}`)
+  for (const offset of KEYPAD) {
+    const snd = s.sounds.get(offset)
+    if (snd === undefined || snd.slot < SLOT_MIN || snd.slot > SLOT_MAX) continue
+    const name = snd.name === null ? '' : cleanText(snd.name, Infinity)
+    out.push(`sound ${padText(g, offset)} ${snd.slot}` + (name === '' ? '' : ` ${name}`))
+  }
+  for (const offset of KEYPAD) {
+    const pad = s.pads.get(offset)
+    if (pad === undefined || cardPadIsEmpty(pad)) continue
+    out.push(padLineText(g, offset, pad))
+  }
   const rows = KEYPAD.filter((offset) => notes.some((n, i) => stepOf[i]! >= 0 && n.offset === offset))
   const nameOf = new Map<number, string>()
   for (const offset of rows) nameOf.set(offset, cleanText(names(physicalPad(g, offset)) ?? '', Infinity))
@@ -760,20 +1195,267 @@ function tempoText(t: number): string {
  * A card for [sections] (an export): the sections with notes, in group order
  * (all of them when none has notes), and the swing [timingSwing] when every
  * pad hit of every section sits on the swung 1/16 grid, else 50, so a card
- * never loses a hit's place to a swing it doesn't fit.
+ * never loses a hit's place to a swing it doesn't fit. [sounds] gives the
+ * sound a pad plays (null when not known): each section gets a sound for every
+ * pad its notes use that has one. [fx] is the project's FX, written as effect
+ * lines unless they leave the sound as it is (fxOf); [pads] gives a pad's
+ * settings (null when not known): each section gets a `pad` line for every pad
+ * its notes use whose settings differ from the defaults (padOf).
  */
-function fromPatterns(name: string | null, tempo: number | null, timingSwing: number, sections: readonly CardSection[]): BeatCard {
+function fromPatterns(
+  name: string | null,
+  tempo: number | null,
+  timingSwing: number,
+  sections: readonly CardSection[],
+  sounds: (pad: PhysicalPad) => CardSound | null = () => null,
+  fx: FxSettings | null = null,
+  pads: (pad: PhysicalPad) => PadSettings | null = () => null,
+): BeatCard {
   const withNotes = sections.filter((s) => !Pattern.isEmpty(s.pattern))
-  const kept = [...(withNotes.length > 0 ? withNotes : sections)].sort((a, b) => a.group - b.group)
+  const kept = [...(withNotes.length > 0 ? withNotes : sections)]
+    .sort((a, b) => a.group - b.group)
+    .map((s) => ({ ...s, sounds: new Map([...s.sounds, ...soundsUsed(s, sounds)]), pads: new Map([...s.pads, ...padsUsed(s, pads)]) }))
   const s = TimingSettings.clampSwing(timingSwing)
   const swing = s > TimingSettings.SWING_MIN && kept.every((x) => fitsSwung(x.pattern, s)) ? s : TimingSettings.SWING_MIN
-  return { name, tempo, swing, sections: kept }
+  return { name, tempo, swing, sections: kept, fx: fx === null ? null : fxOf(fx) }
+}
+
+// The sound of each pad the section's notes use, for those [sounds] knows.
+function soundsUsed(s: CardSection, sounds: (pad: PhysicalPad) => CardSound | null): Map<number, CardSound> {
+  const out = new Map<number, CardSound>()
+  for (const offset of KEYPAD) {
+    if (!s.pattern.notes.some((n) => n.offset === offset)) continue
+    const snd = sounds(physicalPad(s.group, offset))
+    if (snd !== null) out.set(offset, snd)
+  }
+  return out
+}
+
+// The shaping of each pad the section's notes use that has any, for those [pads] knows.
+function padsUsed(s: CardSection, pads: (pad: PhysicalPad) => PadSettings | null): Map<number, CardPad> {
+  const out = new Map<number, CardPad>()
+  for (const offset of KEYPAD) {
+    if (!s.pattern.notes.some((n) => n.offset === offset)) continue
+    const settings = pads(physicalPad(s.group, offset))
+    const pad = settings === null ? null : padOf(settings)
+    if (pad !== null) out.set(offset, pad)
+  }
+  return out
+}
+
+// A knob at its whole percent, as a card holds it.
+function knob(v: number): number {
+  return Math.fround(percentOf(v) / 100)
+}
+
+/**
+ * The effect lines for a project's [fx], as a share writes them, with the knobs
+ * in whole percents (so the card reads back as this one): the effect and its
+ * knobs, the groups sending above 0, the compressor and the sidechain when they
+ * are on. Null when none of that makes a sound (no effect, no send, compressor
+ * and sidechain off).
+ */
+function fxOf(fx: FxSettings): CardFx | null {
+  const c = FxSettings.clamped(fx)
+  const sends = new Map<number, number>()
+  c.sends.forEach((v, g) => {
+    if (percentOf(v) > 0) sends.set(g, knob(v))
+  })
+  const cp = c.comp.on ? comp({ on: true, x: knob(c.comp.x), y: knob(c.comp.y) }) : null
+  const sc = c.sidechain.on && c.sidechain.dests !== 0 ? sidechain({ ...c.sidechain, x: knob(c.sidechain.x), y: knob(c.sidechain.y) }) : null
+  if (c.type === FxType.NONE && sends.size === 0 && cp === null && sc === null) return null
+  const none = c.type === FxType.NONE
+  return cardFx({ type: c.type, x: none ? 0.5 : knob(c.x), y: none ? 0.5 : knob(c.y), sends: sends.size === 0 ? null : sends, comp: cp, sidechain: sc })
+}
+
+/**
+ * A pad's [settings] as a `pad` line holds them: only what differs from the
+ * defaults (pitch not 0, level not 100, pan not 0, attack not 0, mode not
+ * oneshot, and release when it isn't what the mode starts with: 255 for
+ * oneshot, KEY_RELEASE for the others). Null when none does. Only the fields
+ * the card format carries.
+ */
+function padOf(settings: PadSettings): CardPad | null {
+  const c = PadSettings.clamped(settings, null)
+  const d = PadSettings.DEFAULT
+  const release = c.mode === PlayMode.ONESHOT ? PadSettings.ENV_MAX : PadSettings.KEY_RELEASE
+  const pad = cardPad({
+    pitch: c.pitch !== d.pitch ? c.pitch + 0 : null,
+    level: c.level !== d.level ? c.level : null,
+    pan: c.pan !== d.pan ? c.pan : null,
+    attack: c.attack !== d.attack ? c.attack : null,
+    release: c.release !== release ? c.release : null,
+    mode: c.mode !== d.mode ? c.mode : null,
+  })
+  return cardPadIsEmpty(pad) ? null : pad
+}
+
+// ---- Applying ----
+
+/**
+ * [current] with the card's effect lines on it, each kind apart: the `fx` line
+ * sets the effect (and its knobs, unless it is none, which leaves them where
+ * they are); the `send` lines set the groups they name and every other group
+ * to 0; `comp` sets the compressor (off keeps its knobs); `sidechain` sets the
+ * sidechain (off keeps its source and groups). A kind the card has no line for
+ * stays as it is. Every value is held in range.
+ */
+function applyFx(current: FxSettings, fx: CardFx): FxSettings {
+  let out = current
+  if (fx.type !== null) out = FxSettings.withType(out, fx.type)
+  if (fx.type !== FxType.NONE && (fx.x !== null || fx.y !== null)) out = FxSettings.withXY(out, fx.x ?? out.x, fx.y ?? out.y)
+  const sends = fx.sends
+  if (sends !== null) for (let g = 0; g < FxSettings.GROUPS; g++) out = FxSettings.withSend(out, g, sends.get(g) ?? 0)
+  if (fx.comp !== null) out = FxSettings.withComp(out, fx.comp.on ? fx.comp : { ...out.comp, on: false })
+  if (fx.sidechain !== null) out = FxSettings.withSidechain(out, fx.sidechain.on ? fx.sidechain : { ...out.sidechain, on: false })
+  return FxSettings.clamped(out)
+}
+
+/**
+ * [current] with the card's `pad` line on it, the settings it gives and no
+ * others. The mode goes first, as the pad sheet's MODE knob does
+ * (PadSettings.withMode: leaving oneshot sets the release to the key default),
+ * so a release the line gives is the one that stays. Every value is clamped as
+ * the sheet does.
+ */
+function applyPad(current: PadSettings, pad: CardPad): PadSettings {
+  let out = current
+  if (pad.mode !== null) out = PadSettings.withMode(out, pad.mode)
+  if (pad.pitch !== null) out = { ...out, pitch: pad.pitch }
+  if (pad.level !== null) out = { ...out, level: pad.level }
+  if (pad.pan !== null) out = { ...out, pan: pad.pan }
+  if (pad.attack !== null) out = { ...out, attack: pad.attack }
+  if (pad.release !== null) out = { ...out, release: pad.release }
+  return PadSettings.clamped(out, null)
 }
 
 function fitsSwung(p: Pattern, swing: number): boolean {
   const len = Pattern.lengthTicks(p)
   const count = len / timingTicks(Timing.SIXTEENTH)
   return p.notes.every((n) => n.semitones !== null || n.tick >= len || gridStep(n.tick, Timing.SIXTEENTH, swing, count) !== null)
+}
+
+// ---- Sounds ----
+
+/** How many notes of [s] play on each pad (pad offset to count; a note past the pattern's end doesn't play). */
+function notesByPad(s: CardSection): Map<number, number> {
+  const len = Pattern.lengthTicks(s.pattern)
+  const out = new Map<number, number>()
+  for (const n of s.pattern.notes) if (n.tick >= 0 && n.tick < len) out.set(n.offset, (out.get(n.offset) ?? 0) + 1)
+  return out
+}
+
+/**
+ * The pads [card]'s notes use (pad hits and KEYS notes alike; a note past its pattern's end doesn't play) that would
+ * be silent: [slotOf] gives no sound for them now (null) and no sound line of the card puts one on them. In keypad
+ * order for each group. Empty when the pads are not [known] (nothing read yet): then a pad with no slot is not
+ * known to be empty.
+ */
+function silentPads(card: BeatCard, slotOf: (pad: PhysicalPad) => number | null, known: boolean): PhysicalPad[] {
+  if (!known) return []
+  const out: PhysicalPad[] = []
+  for (const s of [...card.sections].sort((a, b) => a.group - b.group)) {
+    const used = notesByPad(s)
+    for (const offset of KEYPAD) {
+      if (!used.has(offset)) continue
+      const line = s.sounds.get(offset)
+      if (line !== undefined && line.slot >= SLOT_MIN && line.slot <= SLOT_MAX) continue
+      const pad = physicalPad(s.group, offset)
+      if (slotOf(pad) === null && !out.some((p) => p.group === pad.group && p.offset === pad.offset)) out.push(pad)
+    }
+  }
+  return out
+}
+
+// Whether a sound named [have] is the one called [name] (the card's name is cleaned, so the list's is too).
+function holds(have: string | undefined, name: string): boolean {
+  return have !== undefined && PadSoundCache.sameName(cleanText(have, Infinity), name)
+}
+
+// The slot holding a sound called [name]: the pad's own ([now]) when it does, else the lowest; null when none.
+function lookUp(available: ReadonlyMap<number, string>, name: string, now: number | null): number | null {
+  const same = [...available].filter(([, n]) => holds(n, name)).map(([slot]) => slot)
+  if (now !== null && same.includes(now)) return now
+  return same.length === 0 ? null : Math.min(...same)
+}
+
+/**
+ * The names to show and match for the device's sounds ([device], slot to
+ * name): a slot the device lists unnamed (FactorySounds.unnamed, "200.pcm")
+ * takes the name the [factory] pack has for that slot when it has one (not
+ * blank, and not unnamed itself); every other slot is as the device has it.
+ */
+function soundNames(device: ReadonlyMap<number, string>, factory: ReadonlyMap<number, string> | null): Map<number, string> {
+  const out = new Map(device)
+  if (factory === null) return out
+  for (const [slot, name] of device) {
+    const named = factory.get(slot)
+    if (named !== undefined && unnamed(slot, name) && named.trim() !== '' && !unnamed(slot, named)) out.set(slot, named)
+  }
+  return out
+}
+
+// Whether [slot] is in [available] under the name the EP-133 gives a sound nobody named ("200.pcm").
+function unnamedIn(available: ReadonlyMap<number, string>, slot: number): boolean {
+  const name = available.get(slot)
+  return name !== undefined && unnamed(slot, name)
+}
+
+/**
+ * The card's sound lines matched to the user's sounds, in the card's order
+ * (sections as given, pads in keypad order). [available] is slot to name
+ * (soundNames), [current] the slot a pad plays now (null when not known). A
+ * line with a name is matched like this: the slot is used when it holds a
+ * sound of that name (PadSoundCache.sameName: ignoring case, spaces and
+ * ".wav"); otherwise the sound is looked up by name and the slot that holds it
+ * is used (the pad's own slot first, then the lowest); failing that, a slot
+ * that is there but unnamed ("200.pcm", a factory sound whose name can't be
+ * checked) is used all the same, as a pick that is `unverified`; else the line
+ * is MISSING. A line without a name uses its slot when [available] has it. A
+ * pick whose slot is already on the pad is SAME, found by name or not.
+ */
+function resolveSounds(card: BeatCard, available: ReadonlyMap<number, string>, current: (pad: PhysicalPad) => number | null): SoundPick[] {
+  const picks: SoundPick[] = []
+  for (const s of card.sections) {
+    for (const offset of KEYPAD) {
+      const wanted = s.sounds.get(offset)
+      if (wanted === undefined) continue
+      const pad = physicalPad(s.group, offset)
+      const now = current(pad)
+      // The device's own file name for the slot ("200.pcm") says nothing about the sound: it counts as no name.
+      const name = wanted.name !== null && wanted.name.trim() !== '' && !unnamed(wanted.slot, wanted.name) ? wanted.name : null
+      const direct = available.has(wanted.slot) && (name === null || holds(available.get(wanted.slot), name)) ? wanted.slot : null
+      const byName = direct === null && name !== null ? lookUp(available, name, now) : null
+      const slot = direct ?? byName ?? (unnamedIn(available, wanted.slot) ? wanted.slot : null)
+      if (slot === null) {
+        picks.push({ pad, wanted, slot: null, name: null, currentSlot: now, status: SoundStatus.MISSING, unverified: false })
+        continue
+      }
+      const unverified = unnamedIn(available, slot)
+      const status = slot === now ? SoundStatus.SAME : byName !== null ? SoundStatus.FOUND_BY_NAME : SoundStatus.CHANGE
+      picks.push({ pad, wanted, slot, name: available.get(slot) ?? null, currentSlot: now, status, unverified })
+    }
+  }
+  return picks
+}
+
+/**
+ * The sound list Arc adds after a shared card: ClaudeText.soundListHeader for
+ * [source] (the EP-133, the last read or the factory pack, as ClaudeText words
+ * them), then one line "slot name" for each sound of [available] from slot 1 to
+ * 999, in slot order. Names are cleaned as the card's are, so a name read from
+ * the list reads back the same. When any listed name is unnamed ("200.pcm"),
+ * ClaudeText.UNNAMED_SOUNDS_NOTE follows the header. The text ends in a newline.
+ */
+function soundList(source: string, available: ReadonlyMap<number, string>): string {
+  const out: string[] = [ClaudeText.soundListHeader(source)]
+  const lines = [...available.keys()]
+    .filter((k) => k >= SLOT_MIN && k <= SLOT_MAX)
+    .sort((a, b) => a - b)
+    .map((slot): [number, string] => [slot, cleanText(available.get(slot)!, Infinity)])
+  if (lines.some(([slot, name]) => unnamed(slot, name))) out.push(ClaudeText.UNNAMED_SOUNDS_NOTE)
+  for (const [slot, name] of lines) out.push(name === '' ? `${slot}` : `${slot} ${name}`)
+  return out.join('\n') + '\n'
 }
 
 // ---- Import ----
@@ -809,4 +1491,4 @@ function plan(seq: ProjectSeq, card: BeatCard): CardImport {
 }
 
 /** The Kotlin `BeatCards` object. */
-export const BeatCards = { VERSION, MAX_NAME, TIDY_COMMENT, read, hasCard, write, fromPatterns, plan } as const
+export const BeatCards = { VERSION, MAX_NAME, TIDY_COMMENT, read, hasCard, write, fromPatterns, fxOf, padOf, applyFx, applyPad, resolveSounds, soundNames, soundList, silentPads, notesByPad, plan } as const

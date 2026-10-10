@@ -25,6 +25,7 @@ import dev.arc.ep133.features.MirrorState
 import dev.arc.ep133.features.PadLight
 import dev.arc.ep133.features.PadOrder
 import dev.arc.ep133.features.PhysicalPad
+import dev.arc.ep133.features.SoundSource
 import dev.arc.ep133.protocol.DeviceInfo
 import dev.arc.ep133.protocol.Storage
 import dev.arc.ep133.text.BackupDevice
@@ -92,7 +93,21 @@ import dev.arc.ep133.features.TimingSettings
 import dev.arc.ep133.ui.screens.PatternSheetContent
 import dev.arc.ep133.ui.screens.BeatImportSheetContent
 import dev.arc.ep133.ui.screens.ClaudeUi
+import dev.arc.ep133.controller.BeatFxUi
+import dev.arc.ep133.controller.beatFxUi
+import dev.arc.ep133.controller.padShapingUi
+import dev.arc.ep133.features.PadSettings
+import dev.arc.ep133.features.PlayMode
+import dev.arc.ep133.controller.PadShapingUi
+import dev.arc.ep133.controller.SilentUi
+import dev.arc.ep133.controller.SoundChoices
+import dev.arc.ep133.controller.SoundSet
+import dev.arc.ep133.controller.SoundsUi
 import dev.arc.ep133.controller.beatImportUi
+import dev.arc.ep133.controller.silentUi
+import dev.arc.ep133.controller.soundsUi
+import dev.arc.ep133.features.BeatCard
+import dev.arc.ep133.text.ClaudeText
 import dev.arc.ep133.features.BeatCards
 import dev.arc.ep133.features.Pattern
 import dev.arc.ep133.features.PatternNote
@@ -2056,7 +2071,8 @@ fun GuideFromEdgePreview() {
 
 // Beat cards. Live tools' CLAUDE section, after the view settings and before TAKES: SHARE SCENE, SHARE for the group shown
 // (A, pattern 1) and the orange PASTE BEAT, then the skill's link and Learn with Claude; its sample scene is S02.
-private val claudeShares = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true))
+// "With my sound list" under the two SHARE keys, ticked, with the sounds Arc knows.
+private val claudeShares = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212)
 
 @PreviewTest
 @Preview(name = "Live tools claude", widthDp = 412, heightDp = 960, showBackground = true)
@@ -2064,12 +2080,13 @@ private val claudeShares = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2),
 fun LiveToolsClaudePreview() = Live(lastRead, oneGroup = true, tools = true, claude = claudeShares)
 
 // Nothing to share: both SHARE keys dimmed (and still announced), PASTE BEAT as it was; the dark theme, with TAKES under it.
+// "With my sound list" is left unticked (kept like the other Live preferences).
 @PreviewTest
 @Preview(name = "Live tools claude dark", widthDp = 412, heightDp = 960, showBackground = true)
 @Composable
 fun LiveToolsClaudeDarkPreview() = Live(
     lastRead, dark = true, oneGroup = true, tools = true, takes = someTakes, offline = "Last seen Oct 5, 2:02 PM",
-    claude = ClaudeUi(scene = "S01", numbers = listOf(1, 1, 1, 1)),
+    claude = ClaudeUi(scene = "S01", numbers = listOf(1, 1, 1, 1), sounds = 212, withSounds = false),
 )
 
 // The beat card sheet, as a card arrives (pasted, or Claude's reply shared to arc). A project whose A has patterns 1 to 3 with
@@ -2123,12 +2140,26 @@ wobble 3
 """
 
 @Composable
-private fun BeatSheet(text: String, seq: ProjectSeq = beatSeq, dark: Boolean = false, initialSetTempo: Boolean = false) {
-    val ui = beatImportUi(BeatCards.read(text), seq, 122.0) { names[it] }
+private fun BeatSheet(
+    text: String,
+    seq: ProjectSeq = beatSeq,
+    dark: Boolean = false,
+    initialSetTempo: Boolean = false,
+    sounds: (BeatCard) -> SoundsUi? = { null },
+    fx: (BeatCard) -> BeatFxUi? = { null },
+    shaping: (BeatCard) -> PadShapingUi? = { null },
+    silent: (BeatCard) -> SilentUi? = { null },
+    initialPicked: List<Pair<PhysicalPad, Int>> = emptyList(),
+    initialPicking: PhysicalPad? = null,
+) {
+    val ui = beatImportUi(BeatCards.read(text), seq, 122.0, { names[it] }, fx = fx, shaping = shaping, sounds = sounds, silent = silent)
     Framed(Tab.LIVE, dark = dark) {
         MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
         ArcSheet(visible = true, onDismiss = {}) {
-            BeatImportSheetContent(ui, onCancel = {}, onImport = {}, onCopyProblems = {}, initialSetTempo = initialSetTempo)
+            BeatImportSheetContent(
+                ui, onCancel = {}, onImport = { _, _, _, _, _ -> }, onCopyProblems = {},
+                initialSetTempo = initialSetTempo, initialPicked = initialPicked, initialPicking = initialPicking,
+            )
         }
     }
 }
@@ -2160,3 +2191,224 @@ fun BeatSheetFullGroupPreview() {
     for (n in 1..99) full = full.withPattern(1, n, Pattern(1, listOf(PatternNote(0, 9, 24))))
     BeatSheet(NIGHT_DRIVE, seq = full)
 }
+
+// A card with sound lines: A7 and A9 change their pads' sounds (ticked, the old one struck through), A4 plays its sound
+// already, and A5's is not in the user's list (amber, the reason, no box). The sounds on the pads now, and the list:
+private val soundNow = mapOf(PhysicalPad(0, 9) to 5, PhysicalPad(0, 11) to 90, PhysicalPad(0, 6) to 200)
+private val soundWas = mapOf(PhysicalPad(0, 9) to "KICK DUSTY", PhysicalPad(0, 11) to "SNARE OLD", PhysicalPad(0, 6) to "HAT CLOSED")
+private val soundList = SoundSet(
+    ClaudeText.SOUNDS_FROM_DEVICE,
+    mapOf(5 to "KICK DUSTY", 12 to "MICRO KICK", 90 to "SNARE OLD", 105 to "SNARE TIGHT", 200 to "HAT CLOSED"),
+)
+
+private fun sheetSounds(offline: Boolean): (BeatCard) -> SoundsUi? =
+    { card -> soundsUi(card, soundList, { soundNow[it] }, { soundWas[it] }, offline, if (offline) null else 3) }
+
+private const val SOUND_BEAT = """ARC BEAT 1
+name Micro kit
+tempo 96
+
+[A] bars 1 step 1/16
+sound A7 12 MICRO KICK
+sound A9 105 SNARE TIGHT
+sound A4 200 HAT CLOSED
+sound A5 301 RIM DUSTY
+A7 | X... ..x. X... .... |
+A9 | .... X... .... X... |
+A4 | x.x. x.x. x.x. x.x. |
+A5 | .... .... ..o. .... |
+"""
+
+// The SOUNDS block (connected): PUT ON PADS on, the two changes ticked, "already there", the missing sound in amber, and
+// the note saying how many pads are written, in which project.
+@PreviewTest
+@Preview(name = "Beat sheet sounds", widthDp = 360, heightDp = 1010, showBackground = true)
+@Composable
+fun BeatSheetSoundsPreview() = BeatSheet(SOUND_BEAT, sounds = sheetSounds(false))
+
+// The same offline, dark: the note says the changes stay in arc until the EP-133 connects.
+@PreviewTest
+@Preview(name = "Beat sheet sounds offline dark", widthDp = 360, heightDp = 1010, showBackground = true)
+@Composable
+fun BeatSheetSoundsOfflineDarkPreview() = BeatSheet(SOUND_BEAT, dark = true, sounds = sheetSounds(true))
+
+// An EP-133 that lists its factory sounds without names ("012.pcm"): the card's names can't be checked, so the rows use
+// the slots, show the device's name and say what the card called it; A5's slot isn't there at all.
+private val unnamedList = SoundSet(
+    ClaudeText.SOUNDS_FROM_DEVICE,
+    mapOf(5 to "KICK DUSTY", 12 to "012.pcm", 90 to "SNARE OLD", 105 to "105.pcm", 200 to "200.pcm", 343 to "343.pcm"),
+)
+
+private const val UNNAMED_BEAT = """ARC BEAT 1
+name Factory kit
+tempo 96
+
+[A] bars 1 step 1/16
+sound A7 12 KICK DEEP
+sound A9 105 SNARE TIGHT
+sound A4 200 HH CLOSED
+sound A5 301 RIM DUSTY
+A7 | X... ..x. X... .... |
+A9 | .... X... .... X... |
+A4 | x.x. x.x. x.x. x.x. |
+A5 | .... .... ..o. .... |
+"""
+
+// The SOUNDS block with factory sounds the EP-133 keeps unnamed: ticked as any change, the device's name in bold and
+// "Card says ... name not checked" under it.
+@PreviewTest
+@Preview(name = "Beat sheet sounds unnamed", widthDp = 360, heightDp = 1010, showBackground = true)
+@Composable
+fun BeatSheetSoundsUnnamedPreview() =
+    BeatSheet(UNNAMED_BEAT, sounds = { card -> soundsUi(card, unnamedList, { soundNow[it] }, { soundWas[it] }, offline = false, project = 3) })
+
+// A card with FX lines: the project has a reverb on group A, the card swaps it for a distortion, sends A and B to it, turns
+// the compressor on and makes A7 duck B and C. The FX block comes after the tempo row, before the pads (no sound lines here).
+private val projectFx = FxSettings(FxType.REVERB, 0.5f, 0.5f, listOf(0.5f, 0f, 0f, 0f))
+
+private const val FX_BEAT = """ARC BEAT 1
+name Breakcore
+tempo 180
+fx distortion 55 40
+send A 80 B 20
+comp 40 30
+sidechain A7 BC 25 70
+
+[A] bars 1 step 1/16
+A7 kick      | X... ..x. X... .X.. |
+A9 snare     | .... X... .x.. X.xo |
+A4 hat       | xxxx xxxx xxxx xxxo |
+"""
+
+// The FX block (light, small phone): APPLY FX on, the effect struck through and the card's after the arrow, the sends, the
+// compressor and the duck in words, and the note saying where the FX play and that UNDO puts the old ones back.
+@PreviewTest
+@Preview(name = "Beat sheet fx", widthDp = 360, heightDp = 1010, showBackground = true)
+@Composable
+fun BeatSheetFxPreview() = BeatSheet(FX_BEAT, fx = { beatFxUi(it, projectFx) })
+
+// A card with pad lines and sound lines: A7 and A9 get new sounds (their shaping starts from the defaults), A4 has what
+// the card says already, A8 keeps its sound and changes, A5 has no sound at all. The settings the pads have now:
+private val padNow = mapOf(PhysicalPad(0, 6) to PadSettings.DEFAULT.withMode(PlayMode.KEY).copy(release = 20))
+
+private const val SHAPE_BEAT = """ARC BEAT 1
+name Micro kit shaped
+tempo 96
+
+[A] bars 1 step 1/16
+sound A7 12 MICRO KICK
+sound A9 105 SNARE TIGHT
+sound A4 200 HAT CLOSED
+sound A5 301 RIM DUSTY
+pad A7 pitch -2 level 90
+pad A9 pitch 2 release 40 mode key
+pad A4 mode key release 20
+pad A8 level 80 pan 4
+pad A5 pan -4
+A7 | X... ..x. X... .... |
+A9 | .... X... .... X... |
+A4 | x.x. x.x. x.x. x.x. |
+A8 | .... .... ..o. .... |
+A5 | .... .... ..o. .... |
+"""
+
+private fun sheetShaping(offline: Boolean): (BeatCard) -> PadShapingUi? = { card ->
+    padShapingUi(
+        card,
+        now = { padNow[it] },
+        hasSound = { it in setOf(PhysicalPad(0, 9), PhysicalPad(0, 10), PhysicalPad(0, 11), PhysicalPad(0, 6)) },
+        names = { names[it] },
+        offline = offline,
+    )
+}
+
+// SOUNDS and PAD SHAPING together (dark): the new sounds ticked, and the shaping rows after them: old struck through, new in
+// bold, the pad with the settings already "Already set", the pad with no sound amber, and the note about writing the pads.
+@PreviewTest
+@Preview(name = "Beat sheet pad shaping dark", widthDp = 360, heightDp = 1500, showBackground = true)
+@Composable
+fun BeatSheetPadShapingDarkPreview() = BeatSheet(SHAPE_BEAT, dark = true, sounds = sheetSounds(false), shaping = sheetShaping(false))
+
+private const val ABSENT_BEAT = """ARC BEAT 1
+name Bass line
+tempo 96
+
+[A] bars 1 step 1/16
+sound A7 301 RIM DUSTY
+sound A9 410 SUB LOW
+A7 | X... ..x. X... .... |
+A9 | .... X... .... X... |
+"""
+
+// Every sound line is nowhere in the user's list: all amber, no PUT ON PADS, and the hint to share with the sound list.
+@PreviewTest
+@Preview(name = "Beat sheet sounds none", widthDp = 360, heightDp = 860, showBackground = true)
+@Composable
+fun BeatSheetSoundsNonePreview() = BeatSheet(ABSENT_BEAT, sounds = sheetSounds(false))
+
+// A card whose melody on D7 and bass on C7 are KEYS notes on pads that have no sound on this EP-133 (groups C and D are
+// empty), and no sound lines: D7 plays 12 notes, C7 6. The pads now (A7 and A9 have a sound), and the sounds to pick from:
+private val heldNow = mapOf(PhysicalPad(0, 9) to 5, PhysicalPad(0, 11) to 90)
+private val pickable = listOf(
+    SoundEntry(5, "KICK DUSTY", 234_000), SoundEntry(90, "SNARE OLD", 206_000), SoundEntry(105, "SNARE TIGHT", 207_000),
+    SoundEntry(200, "HAT CLOSED", 98_000), SoundEntry(410, "SUB BASS", 310_000), SoundEntry(512, "PIANO", 402_000),
+    SoundEntry(515, "RHODES", 390_000), SoundEntry(530, "STRINGS", 612_000),
+)
+
+private const val SILENT_BEAT = """ARC BEAT 1
+name Moody keys
+tempo 108
+
+[A] bars 1 step 1/16
+A7 | X... ..x. X... .... |
+A9 | .... X... .... X... |
+
+[C] bars 1 step 1/16
+notes
+C7 at 1.1.1 note C2 gate 1/4
+C7 at 1.2.2 note C2 gate 1/8
+C7 at 1.3.1 note G1 gate 1/4
+C7 at 1.4.1 note A#1 gate 1/8
+C7 at 1.4.3 note C2 gate 1/8
+C7 at 1.4.4 note D2 gate 1/16
+
+[D] bars 1 step 1/16
+notes
+D7 at 1.1.1 note E4
+D7 at 1.1.3 note G4
+D7 at 1.2.1 note B4
+D7 at 1.2.3 note G4
+D7 at 1.3.1 note E4
+D7 at 1.3.3 note G4
+D7 at 1.4.1 note D4
+D7 at 1.4.2 note E4
+D7 at 1.4.3 note G4
+D7 at 1.4.4 note B4
+D7 at 1.1.2 vel 80 note B3
+D7 at 1.3.2 vel 80 note B3
+"""
+
+private fun sheetSilent(offline: Boolean = false): (BeatCard) -> SilentUi? = { card ->
+    silentUi(card, { heldNow[it] }, known = true, SoundChoices(SoundSource.DEVICE, pickable, emptySet()), offline, if (offline) null else 3)
+}
+
+// The SILENT PADS block (light, small phone): C7 and D7 play KEYS notes on pads with no sound, so they will be silent;
+// each row says how many notes and has PICK SOUND. There is no SOUNDS block (the card has no sound lines).
+@PreviewTest
+@Preview(name = "Beat sheet silent pads", widthDp = 360, heightDp = 1120, showBackground = true)
+@Composable
+fun BeatSheetSilentPadsPreview() = BeatSheet(SILENT_BEAT, silent = sheetSilent())
+
+// After picking PIANO for D7 (dark): D7's row says "\u2192 512 PIANO" with CHANGE, and a ticked row has joined a SOUNDS block
+// ("No sound" struck through, then 512 PIANO, "Picked here"): IMPORT writes it with the card's sounds. C7 is still silent.
+@PreviewTest
+@Preview(name = "Beat sheet silent pad picked dark", widthDp = 360, heightDp = 1500, showBackground = true)
+@Composable
+fun BeatSheetSilentPadPickedDarkPreview() =
+    BeatSheet(SILENT_BEAT, dark = true, silent = sheetSilent(), initialPicked = listOf(PhysicalPad(3, 9) to 512))
+
+// PICK SOUND's picker for D7 (light): the pad sheet's list, with its search, hundreds and preview keys, and a key back to the card.
+@PreviewTest
+@Preview(name = "Beat sheet silent pad picker", widthDp = 360, heightDp = 780, showBackground = true)
+@Composable
+fun BeatSheetSilentPadPickerPreview() = BeatSheet(SILENT_BEAT, silent = sheetSilent(), initialPicking = PhysicalPad(3, 9))
