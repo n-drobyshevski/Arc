@@ -68,9 +68,11 @@ import {
 import { DEFAULT_KEYS, keysDisplayNote, keysLit, octaves, upperOctave, type KeysPicker, type KeysUi } from '../live/keys'
 import { PressTracker, type PressTarget } from '../live/press'
 import { PickWord, WordButton } from '../live/Words'
+import { NO_REC, RecChip, TakesSection, type RecUi, type TakesUi } from '../live/Takes'
 import './MirrorScreen.css'
 
 export type { KeysPicker, KeysUi } from '../live/keys'
+export type { RecUi, TakesUi } from '../live/Takes'
 
 /** What the KEYS controls do (Kotlin KeysActions). */
 export interface KeysActions {
@@ -120,6 +122,10 @@ export interface MirrorScreenProps {
   /** The KEYS list open over the grid (a navigation layer, so Back closes it); see [KeysPicker]. */
   picker?: KeysPicker | null
   onPicker?: (picker: KeysPicker | null) => void
+  /** REC on the display (none without [RecUi.onRec]). */
+  rec?: RecUi
+  /** Live tools' takes, shown when there is REC. */
+  takes?: TakesUi
 }
 
 
@@ -239,8 +245,15 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     if (!keys.on && hitPad !== null) actions.onSelect?.(hitPad)
   }, [st.lastHit, keys.on])
 
+  const rec = props.rec ?? NO_REC
+  // Screenshots keep the armed dot from blinking.
+  const still = props.fixedNow != null
+  const takesSection = rec.onRec && props.takes ? <TakesSection takes={props.takes} /> : null
   const panel = keys.on ? (
-    <KeysPanel keys={keys} actions={actions} />
+    <>
+      <KeysPanel keys={keys} actions={actions} />
+      {takesSection}
+    </>
   ) : (
     <>
       <Caption text={MirrorText.VIEW} align="start" />
@@ -257,6 +270,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         </GridPlate>
       )}
       {st.lastKeysNote !== null && <KeysStrip st={st} last={st.lastKeysNote} />}
+      {takesSection}
       <Notes st={st} mirror={mirror} onPadOrder={onPadOrder} tapToPlay={onPad !== null} />
     </>
   )
@@ -290,13 +304,13 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
             )}
             {keys.on && keyNotes ? (
               <>
-                <KeysDisplay st={st} mirror={mirror} keys={keys} />
+                <KeysDisplay st={st} mirror={mirror} keys={keys} rec={rec} still={still} />
                 <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={actions} tracker={tracker} />
                 <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} />
               </>
             ) : (
               <>
-                <DisplayStrip st={st} mirror={mirror} />
+                <DisplayStrip st={st} mirror={mirror} rec={rec} still={still} />
                 <Group
                   group={group}
                   st={st}
@@ -319,7 +333,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
               <Caption text={MirrorText.TITLE} as="h1" />
               {onBack && <CloseKey class="live__close" onClick={onBack} description={GUIDE_CLOSE} />}
             </div>
-            <Display st={st} mirror={mirror} initialNoteOpen={props.initialNoteOpen ?? false} />
+            <Display st={st} mirror={mirror} initialNoteOpen={props.initialNoteOpen ?? false} rec={rec} still={still} />
             <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} />
             {/* Four groups in a row when there is room, two by two on a phone. */}
             <div class="live__groups">
@@ -349,10 +363,12 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
  * The one-group view's display as a single dark line: play state, tempo and
  * project on the left, the pad just played on the right.
  */
-function DisplayStrip(props: { st: MirrorState; mirror: MirrorUi | null }): JSX.Element {
+function DisplayStrip(props: { st: MirrorState; mirror: MirrorUi | null; rec: RecUi; still: boolean }): JSX.Element {
   const { st, mirror } = props
   return (
-    <div class="live-strip" aria-live="polite">
+    <div class="live-strip">
+      <RecChip rec={props.rec} still={props.still} />
+      <span class="live-strip__live" aria-live="polite">
       {st.playing === true && <span class="live-strip__sub live-strip__ink" role="img" aria-label={MirrorText.PLAYING}>{'▶'}</span>}
       {st.playing === false && <span class="live-strip__sub live-strip__dim" role="img" aria-label={MirrorText.STOPPED}>{'■'}</span>}
       {st.playing === null && mirror?.offline != null && (
@@ -363,13 +379,16 @@ function DisplayStrip(props: { st: MirrorState; mirror: MirrorUi | null }): JSX.
         <span class="live-strip__sub live-strip__dim">{MirrorText.projectShort(st.activeProject)}</span>
       )}
       <span class="live-strip__line">{displayLine(st, mirror)}</span>
+      </span>
     </div>
   )
 }
 
-function Display(props: { st: MirrorState; mirror: MirrorUi | null; initialNoteOpen: boolean }): JSX.Element {
+function Display(props: { st: MirrorState; mirror: MirrorUi | null; initialNoteOpen: boolean; rec: RecUi; still: boolean }): JSX.Element {
   const { st, mirror } = props
   const offline = showOffline(st, mirror)
+  // REC ends the top line, unless the transport fills it on a phone: then the big line below.
+  const recOnTop = st.playing === null
   // Why it is offline stays folded under the word until asked for, so the pads keep the room.
   const [noteOpen, setNoteOpen] = useState(props.initialNoteOpen)
   return (
@@ -393,10 +412,14 @@ function Display(props: { st: MirrorState; mirror: MirrorUi | null; initialNoteO
         {st.activeProject !== null && (
           <span class="t-display-sub live-display__dim">{MirrorText.project(st.activeProject)}</span>
         )}
+        {recOnTop && <RecChip rec={props.rec} still={props.still} />}
       </div>
-      <p class={`live-display__line t-stat-free${displayLineSmall(st, mirror) ? ' live-display__line--small' : ''}`}>
-        {displayLine(st, mirror)}
-      </p>
+      <div class="live-display__lineRow">
+        <p class={`live-display__line t-stat-free${displayLineSmall(st, mirror) ? ' live-display__line--small' : ''}`}>
+          {displayLine(st, mirror)}
+        </p>
+        {!recOnTop && <RecChip rec={props.rec} still={props.still} />}
+      </div>
       {/* Offline, the folded note; else the all-groups view explains clock out. */}
       {offline
         ? noteOpen && (
@@ -690,16 +713,19 @@ function ModeRow(props: {
 }
 
 /** The KEYS display line: KEYS and the last note on the left, the sound it plays on the right. */
-function KeysDisplay(props: { st: MirrorState; mirror: MirrorUi | null; keys: KeysUi }): JSX.Element {
+function KeysDisplay(props: { st: MirrorState; mirror: MirrorUi | null; keys: KeysUi; rec: RecUi; still: boolean }): JSX.Element {
   const { st, mirror, keys } = props
   const note = keysDisplayNote(keys, st.lastNote)
   return (
-    <div class="live-strip" aria-live="polite">
+    <div class="live-strip">
+      <RecChip rec={props.rec} still={props.still} />
+      <span class="live-strip__live" aria-live="polite">
       <span class="live-strip__sub live-strip__dim">{MirrorText.MODE_KEYS.toUpperCase()}</span>
       {note !== null && <span class="live-strip__sub live-strip__ink">{MirrorText.noteName(note, keys.names)}</span>}
       {mirror?.offline != null && <span class="live-strip__sub live-strip__dim">{MirrorText.OFFLINE}</span>}
       <span class="live-strip__line">
         {keys.pad !== null ? MirrorText.keysSound(keys.pad, keys.padName) : MirrorText.NO_SOUND}
+      </span>
       </span>
     </div>
   )

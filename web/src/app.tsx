@@ -328,6 +328,24 @@ function TabScreen(props: { view: NavView }): JSX.Element {
             onKeyUp: (k) => c.releaseKey(k),
             onSelect: (pad) => c.selectKeysPad(pad),
           }}
+          rec={c.canRecord ? { state: c.rec.value, onRec: () => c.toggleRec() } : undefined}
+          takes={{
+            list: state.takes,
+            playing: c.playing.value,
+            keyOf: (t) => c.takeKey(t),
+            fmtWhen: (ms) => c.fmtDateTime(ms),
+            connected: state.device !== null,
+            canShare: c.canShareTakes,
+            onPlay: (t) => void c.playTake(t),
+            onStop: () => c.stopPlayback(),
+            onShare: (t) => void c.shareTake(t),
+            onSave: (t) => void c.saveTake(t),
+            onToDevice: (t) => {
+              void c.takeToDevice(t)
+              nav.selectTab('device')
+            },
+            onDelete: (t) => void c.deleteTake(t),
+          }}
         />
       )
     }
