@@ -40,7 +40,7 @@ Claude Code picks it up the next time it starts, and uses it whenever you talk a
 |---|---|
 | `SKILL.md` | The skill: what Claude does for each of the three jobs |
 | `references/beat-card.md` | The card format, the spec both Arc and the script follow |
-| `references/genres.md` | The assumed kit and 27 genre recipes (a techno family among them), each a valid card |
+| `references/genres.md` | The assumed kit and 28 genre recipes (a techno family among them), each a valid card |
 | `references/lessons.md` | Twelve lessons from a first beat to sampling |
 | `references/analysis.md` | How to read the script's report, the checklist and the vocabulary |
 | `references/arc-app.md` | What each Arc screen does, for Claude to explain |

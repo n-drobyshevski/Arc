@@ -1,6 +1,6 @@
 ---
 name: arc-beats
-description: Build, analyse and teach beats for the teenage engineering EP-133 K.O. II (KO2) together with the Arc companion app. Writes drum patterns, grooves and basslines as ARC BEAT text cards the user pastes into Arc, reads and improves cards copied out of Arc, and teaches the EP-133 and beat making step by step with the official key combos. Use whenever the user mentions the EP-133, K.O. II, KO2, Arc, a beat card or ARC BEAT, a drum pattern, groove, swing, hi-hats, scenes or patterns for the EP-133, tempo or genre recipes (house, boom bap, trap, drill, dnb, garage, dembow and more), or wants to learn the EP-133 or beat making.
+description: Build, analyse and teach beats for the teenage engineering EP-133 K.O. II (KO2) together with the Arc companion app. Writes drum patterns, grooves and basslines as ARC BEAT text cards the user pastes into Arc, reads and improves cards copied out of Arc, and teaches the EP-133 and beat making step by step with the official key combos. Use whenever the user mentions the EP-133, K.O. II, KO2, Arc, a beat card or ARC BEAT, a drum pattern, groove, swing, hi-hats, scenes or patterns for the EP-133, tempo or genre recipes (house, boom bap, trap, drill, dnb, breakcore, garage, dembow and more), or wants to learn the EP-133 or beat making.
 ---
 
 # Arc beats
@@ -134,7 +134,7 @@ These are what `check` catches. Look for them by hand when you cannot run it.
 | File | Read it when |
 |---|---|
 | [beat-card.md](references/beat-card.md) | Writing or fixing any card. The spec: reading rules, header, rows, notes list, sound lines, limits, import, the sound list |
-| [genres.md](references/genres.md) | Building. The assumed kit and 27 genre recipes with a valid card each |
+| [genres.md](references/genres.md) | Building. The assumed kit and 28 genre recipes with a valid card each |
 | [lessons.md](references/lessons.md) | Teaching. Twelve lessons with device steps, Arc steps, exercises and checks |
 | [ep133-guide.md](references/ep133-guide.md) | Any question about key combinations. 100 official OS 2.5 combos by section, with steps and sources. Generated; do not edit |
 | [analysis.md](references/analysis.md) | Analysing. What the script's numbers mean, the checklist, edits worth proposing (sound swaps too) and the vocabulary |

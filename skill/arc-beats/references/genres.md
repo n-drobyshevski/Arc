@@ -1,6 +1,6 @@
 # Genre recipes
 
-Twenty-seven starting points, including a techno family of twelve (Techno, Detroit, minimal, dub, acid, hypnotic, peak-time, melodic, industrial, hard techno, schranz and hard groove), each a complete ARC BEAT card (see [beat-card.md](beat-card.md) for the format). Use them as a base: change the tempo and a few steps and say what you changed. The cards are checked by the skill's test, so they are valid as written.
+Twenty-eight starting points, including a techno family of twelve (Techno, Detroit, minimal, dub, acid, hypnotic, peak-time, melodic, industrial, hard techno, schranz and hard groove), each a complete ARC BEAT card (see [beat-card.md](beat-card.md) for the format). Use them as a base: change the tempo and a few steps and say what you changed. The cards are checked by the skill's test, so they are valid as written.
 
 `scripts/beatcard.py analyse` compares a user's beat with these recipes, reading the `BPM:` and `Swing:` lines and the card of each section below. Keep that shape if you add a recipe: a `##` heading, the two lines, then one fenced card.
 
@@ -609,6 +609,47 @@ A9 snare       | .... X..o .o.X ...o | .... X..o .... X..o |
 A4 closed hat  | x.x. x.x. x.x. x.x. | x.x. x.x. x.x. x.x. |
 A5 open hat    | .... .... .... .... | .... .... .... ..x. |
 ```
+
+## Breakcore
+- BPM: 160-200
+- Swing: 50
+- Feel: a chopped amen break played too fast and cut to pieces. A distorted kick (A7 doubled with A8) and snare jump around the bar, the snare stutters and rolls on a 1/32 grid, a ride-style open hat keeps a ragged time and a crash marks the bar. Bar 2 is the chaos: a double-time hat burst, a scattered kick and a 32nd snare roll into the next loop. A low sub hit on B7 lands under the crash. Distort and shorten the kicks on the device to taste.
+
+```
+ARC BEAT 1
+name Amen shred
+tempo 180
+swing 50
+
+[A] bars 2 step 1/16
+A7 kick        | X.x. ..x. .xx. .... | X..x ..x. xx.x ..x. |
+A8 kick 2      | x... .... .x.. .... | x..x .... x... .... |
+A9 snare       | .... X..o .o.. ..X. | .... X.oX .oX. .... |
+A5 open hat    | x.x. x.x. x.x. x.x. | x... x... x... .... |
+A4 closed hat  | .... .... .... .... | .... .... .... xxxx |
+AENTER crash   | X... .... .... .... | .... .... .... .... |
+notes
+A9 at 1.3.4 vel 70
+A9 at 1.3.4+12 vel 100
+A7 at 2.2.3+12 vel 90
+A9 at 2.4.1 vel 50
+A9 at 2.4.1+12 vel 60
+A9 at 2.4.2 vel 72
+A9 at 2.4.2+12 vel 84
+A9 at 2.4.3 vel 96
+A9 at 2.4.3+12 vel 108
+A9 at 2.4.4 vel 118
+A9 at 2.4.4+12 vel 127
+
+[B] bars 2
+notes
+B7 at 1.1.1 note E1 gate 1/4 vel 120
+B7 at 1.3.3 note E1 gate 1/8 vel 90
+B7 at 2.1.1 note E1 gate 1/4 vel 120
+B7 at 2.4.1 note G1 gate 1/8 vel 110
+```
+
+The snare roll and the stutters sit in the `notes` list because they fall between sixteenths (`+12` is half a sixteenth, a 32nd). Bar 2 is the chaos bar: swap it for bar 1 on most passes and bring it in every fourth bar. The hat burst (`xxxx`) in bar 2 is a double-time moment; the roll takes over from it.
 
 ## UK garage
 - BPM: 130-136
