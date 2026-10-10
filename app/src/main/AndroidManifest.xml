@@ -62,6 +62,13 @@
                 <data android:pathPattern=".*\\..*\\.pak" />
                 <data android:pathPattern=".*\\..*\\..*\\.pak" />
             </intent-filter>
+
+            <!-- Claude's reply shared to arc: a beat card in text (MainActivity.handleIntent reads it, and says so when there is none). -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity>
 
         <service

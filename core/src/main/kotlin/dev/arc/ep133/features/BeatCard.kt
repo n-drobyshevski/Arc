@@ -95,6 +95,9 @@ object BeatCards {
      */
     fun read(text: String): CardRead = Reader(text.removePrefix("\uFEFF").lines()).run()
 
+    /** Whether [text] has an ARC BEAT line: what [read] starts from, so a text without one is no card at all (not a card with a mistake). */
+    fun hasCard(text: String): Boolean = text.removePrefix("\uFEFF").lines().any { CARD_START.containsMatchIn(trim(it)) }
+
     private class Draft(
         val line: Int,
         val group: Int,

@@ -94,6 +94,17 @@ describe('BeatCardTest', () => {
     expect(section(r3).pattern.notes.length).toBe(1)
   })
 
+  it('a text has a card when it has an ARC BEAT line, mistakes or not', () => {
+    expect(BeatCards.hasCard(`ARC BEAT 1\n[A]\n${bar}`)).toBe(true)
+    expect(BeatCards.hasCard('Sure:\n```\n  arc beat 1\r\n[A]')).toBe(true)
+    expect(BeatCards.hasCard('\uFEFFARC BEAT')).toBe(true)
+    // A card with a mistake is still a card; a mention of the name, or none, isn't.
+    expect(BeatCards.hasCard('ARC BEAT x\n[A]')).toBe(true)
+    expect(BeatCards.hasCard('Here is your ARC BEAT: enjoy')).toBe(false)
+    expect(BeatCards.hasCard(`[A]\n${bar}`)).toBe(false)
+    expect(BeatCards.hasCard('')).toBe(false)
+  })
+
   it('comments, blank lines and the case of keywords', () => {
     const r = read('ARC BEAT 1 # version', '# a whole line', '', 'name Foo # trailing', '[A] # section', 'A7 | X... .... .... .... | # kick', '   ', '# end')
     expect(problems(r)).toEqual([])

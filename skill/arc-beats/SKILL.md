@@ -59,19 +59,19 @@ The pad letters and numbers are as printed on the device: the keypad runs `7 8 9
 ## BUILD: make a beat
 
 1. **Ask only what is missing.** If the user gave a genre, a feel or a tempo, do not ask again. If they gave none, ask one short question with a default ("Which style? I'll start with boom bap at 90 BPM if you don't mind."). Do not interview them.
-2. **Know the pads.** The card is better if it carries the user's real pad names. Ask them once to open Live, choose the pattern, use **Copy for Claude** and paste it here (see [arc-app.md](references/arc-app.md)); then use their names. If they would rather not, assume the factory-style kit in [genres.md](references/genres.md) (kick A7, snare A9, closed hat A4 ...), **say it is an assumption**, and say pads can be remapped later.
+2. **Know the pads.** The card is better if it carries the user's real pad names. Ask them once to open Live tools in Live, choose the pattern, use **SHARE** under CLAUDE and send it here (see [arc-app.md](references/arc-app.md)); then use their names. If they would rather not, assume the factory-style kit in [genres.md](references/genres.md) (kick A7, snare A9, closed hat A4 ...), **say it is an assumption**, and say pads can be remapped later.
 3. **Start from the closest recipe** in [genres.md](references/genres.md) and change the tempo, swing and a few steps for what they asked. Use bass, chords or a lead on groups B-D (played in KEYS, written in the `notes` list) when the style needs them. Beats that loop for 4 or 8 bars with a fill in the last bar feel more alive than one bar on repeat.
 4. **Write a complete, valid card** in **one fenced block**: the version line first, every row the right length. Put nothing but the card in the fence.
 5. **Check it.** When code execution is available, save the card to a file and run:
    `python3 scripts/beatcard.py check beat.txt`
    Fix every error and re-check until it prints `OK`. Warnings are worth reading too. The error messages name the line; do not show the user a card that fails. Use `grid` to look at it once. Without code execution, go through "Mistakes to avoid" below by hand.
 6. **Explain in 2-4 lines**: the feel, the tempo and swing, and one thing to try changing. Then tell them how to use it:
-   *Copy the card, open Live in Arc, choose Paste beat, and play it. Arc offers to set the tempo, adds the pattern in the next free slot without overwriting anything, and one undo takes it back.* (Use the real button name from [arc-app.md](references/arc-app.md); the buttons may change.)
+   *Copy the card, open Live tools in Arc, tap PASTE BEAT under CLAUDE, check the sheet and tap IMPORT, then play it. Arc adds the pattern in the next free slot without overwriting anything, offers the tempo on a chip, and one undo takes it back.* (The buttons are named in [arc-app.md](references/arc-app.md).)
 7. Offer one next step: a variation, a fill, a bass line or a MIDI file for a DAW (`scripts/beatcard.py midi`).
 
 ## ANALYSE: improve a beat
 
-1. **Get the card.** If the user describes a beat without one, ask them to use **Copy for Claude** in Arc and paste it. If they paste a card with errors, run `check`, tell them the lines in plain words and fix them.
+1. **Get the card.** If the user describes a beat without one, ask them to use **SHARE SCENE** or **SHARE** under CLAUDE in Live tools and send it to you. If they paste a card with errors, run `check`, tell them the lines in plain words and fix them.
 2. **Run the script** when code execution is available: `check`, then `analyse` (and `grid` to see it). In the report, *density* is the share of 16th slots that have a hit, a *ghost* is a velocity of 70 or less and an *accent* 120 or more, *syncopation* is labelled straight (2 or less), some (up to 6) or syncopated, and *closest genre recipes* compares the beat with [genres.md](references/genres.md). [analysis.md](references/analysis.md) says what each field means. Without code execution, read the card yourself with the same checklist and say your numbers are estimates.
 3. **Say what you see**, briefly and in this order, starting with something good:
    - groove and feel (where the backbeat is, where the kick sits, what style it is closest to),
@@ -131,4 +131,4 @@ These are what `check` catches. Look for them by hand when you cannot run it.
 | [lessons.md](references/lessons.md) | Teaching. Twelve lessons with device steps, Arc steps, exercises and checks |
 | [ep133-guide.md](references/ep133-guide.md) | Any question about key combinations. 100 official OS 2.5 combos by section, with steps and sources. Generated; do not edit |
 | [analysis.md](references/analysis.md) | Analysing. What the script's numbers mean, the checklist, edits worth proposing and the vocabulary |
-| [arc-app.md](references/arc-app.md) | Explaining Arc, or telling the user where to tap, including Copy for Claude and Paste beat |
+| [arc-app.md](references/arc-app.md) | Explaining Arc, or telling the user where to tap, including SHARE and PASTE BEAT |

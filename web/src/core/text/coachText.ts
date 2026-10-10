@@ -49,6 +49,8 @@ export const CoachText = {
   EDIT: "Change a pad's sound",
   /** The ARP / RPT switch on the pads' plate, and LATCH under it. */
   ARP: 'Arp or repeat: hold pads',
+  /** The beat cards' card in Live tools: share a pattern or scene to Claude, paste Claude's card back. */
+  CLAUDE: 'Share a beat with Claude, paste one back',
 
   SEARCH: 'Search sounds',
   IMPORT: 'Import a .pak',

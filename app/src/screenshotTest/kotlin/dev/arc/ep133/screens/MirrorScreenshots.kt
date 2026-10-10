@@ -90,6 +90,13 @@ import dev.arc.ep133.features.ArpOrder
 import dev.arc.ep133.features.ArpSettings
 import dev.arc.ep133.features.TimingSettings
 import dev.arc.ep133.ui.screens.PatternSheetContent
+import dev.arc.ep133.ui.screens.BeatImportSheetContent
+import dev.arc.ep133.ui.screens.ClaudeUi
+import dev.arc.ep133.controller.beatImportUi
+import dev.arc.ep133.features.BeatCards
+import dev.arc.ep133.features.Pattern
+import dev.arc.ep133.features.PatternNote
+import dev.arc.ep133.features.ProjectSeq
 import dev.arc.ep133.ui.screens.FxPage
 import dev.arc.ep133.ui.screens.FxSheetContent
 import dev.arc.ep133.ui.screens.FxUi
@@ -199,7 +206,7 @@ private fun Framed(
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null, arp: LiveArp? = null, voices: Set<String>? = null, step: LiveStep? = null, scene: LiveScene? = null, holdProgress: Float = 0f) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null, arp: LiveArp? = null, voices: Set<String>? = null, step: LiveStep? = null, scene: LiveScene? = null, holdProgress: Float = 0f, claude: ClaudeUi? = null) {
     // As the controller has it: the last read's day alone for a short line ("Seen Oct 5").
     val offlineShort = offline?.takeIf { it.startsWith("Last seen ") }?.let { MirrorText.seen(it.removePrefix("Last seen ").substringBefore(",")) }
     val mirror = MirrorUi(state, loading = loading, error = error, offline = offline, offlineShort = offlineShort, offlineProjects = offlineProjects)
@@ -261,6 +268,7 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
             step = stepUi,
             scene = sceneUi,
             onSettings = {},
+            claude = claude,
         )
     }
 }
@@ -2044,4 +2052,111 @@ fun GuideFromEdgePreview() {
     Framed(Tab.BACKUPS, guideOpen = true) {
         MainScreen(state = connectedState, fmtDay = { "" }, onBackup = {}, onImport = {}, onOpen = {})
     }
+}
+
+// Beat cards. Live tools' CLAUDE section, after the view settings and before TAKES: SHARE SCENE, SHARE for the group shown
+// (A, pattern 1) and the orange PASTE BEAT, then the skill's link and Learn with Claude; its sample scene is S02.
+private val claudeShares = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true))
+
+@PreviewTest
+@Preview(name = "Live tools claude", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudePreview() = Live(lastRead, oneGroup = true, tools = true, claude = claudeShares)
+
+// Nothing to share: both SHARE keys dimmed (and still announced), PASTE BEAT as it was; the dark theme, with TAKES under it.
+@PreviewTest
+@Preview(name = "Live tools claude dark", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeDarkPreview() = Live(
+    lastRead, dark = true, oneGroup = true, tools = true, takes = someTakes, offline = "Last seen Oct 5, 2:02 PM",
+    claude = ClaudeUi(scene = "S01", numbers = listOf(1, 1, 1, 1)),
+)
+
+// The beat card sheet, as a card arrives (pasted, or Claude's reply shared to arc). A project whose A has patterns 1 to 3 with
+// notes, playing at 122 BPM: a card of one group goes into A's next free pattern, 4.
+private val beatSeq = ProjectSeq.DEFAULT
+    .withPattern(0, 1, Pattern(1, listOf(PatternNote(0, 9, 24))))
+    .withPattern(0, 2, Pattern(1, listOf(PatternNote(0, 9, 24))))
+    .withPattern(0, 3, Pattern(1, listOf(PatternNote(0, 9, 24))))
+
+private const val BOOM_BAP = """Sure! Here is a two bar lazy boom bap:
+```
+ARC BEAT 1
+name Lazy boom bap
+tempo 92
+swing 50
+
+[A] bars 2 step 1/16
+A7 kick      | X... ..x. X... .... | X... ..x. X.x. .... |
+A9 snare     | .... X... .... X..o | .... X... .... X..o |
+A4 hat       | x.x. x.x. x.x. x.xo | x.x. x.x. x.x. x.xo |
+wobble 3
+```"""
+
+private const val NIGHT_DRIVE = """ARC BEAT 1
+name Night drive
+tempo 118
+swing 58
+
+[A] bars 1 step 1/16
+A7 kick      | X... .... X..x .... |
+A9 snare     | .... X... .... X... |
+A4 hat       | x.x. x.x. x.x. x.x. |
+
+[B] bars 2 step 1/16
+B7 bass c1   | X... ..x. .... X... | ..x. .... X... x... |
+B8 bass d1   | .... .... ..x. .... | .... X... .... .... |
+
+[C] bars 4 step 1/16
+C2 vox chop  | .... .... .... X... | .... .... .... .... | .... .... X... .... | .... .... .... X... |
+"""
+
+private const val BROKEN = """ARC BEAT 1
+name Half a beat
+tempo 400
+
+[A] bars 1 step 1/16
+A7 kick      | X... ..x. X... |
+A9 snare     | .... X... .... X... |
+A4 hat       | x.x. x.x. x.x. x.xo
+wobble 3
+"""
+
+@Composable
+private fun BeatSheet(text: String, seq: ProjectSeq = beatSeq, dark: Boolean = false, initialSetTempo: Boolean = false) {
+    val ui = beatImportUi(BeatCards.read(text), seq, 122.0) { names[it] }
+    Framed(Tab.LIVE, dark = dark) {
+        MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
+        ArcSheet(visible = true, onDismiss = {}) {
+            BeatImportSheetContent(ui, onCancel = {}, onImport = {}, onCopyProblems = {}, initialSetTempo = initialSetTempo)
+        }
+    }
+}
+
+// One group, two bars, a warning on its line, the tempo chip (off: Arc stays at 122), on a small phone.
+@PreviewTest
+@Preview(name = "Beat sheet one group", widthDp = 360, heightDp = 780, showBackground = true)
+@Composable
+fun BeatSheetOneGroupPreview() = BeatSheet(BOOM_BAP)
+
+// Three groups: a new scene to play them, a long pattern's first two bars and "+2 bars", the swing said, the tempo chip chosen.
+@PreviewTest
+@Preview(name = "Beat sheet scene dark", widthDp = 393, heightDp = 1100, showBackground = true)
+@Composable
+fun BeatSheetSceneDarkPreview() = BeatSheet(NIGHT_DRIVE, dark = true, initialSetTempo = true)
+
+// A card that can't be read: its errors and warning by line, COPY PROBLEMS, and IMPORT off with the reason.
+@PreviewTest
+@Preview(name = "Beat sheet errors", widthDp = 360, heightDp = 760, showBackground = true)
+@Composable
+fun BeatSheetErrorsPreview() = BeatSheet(BROKEN)
+
+// Group B full (all 99 patterns have notes): IMPORT is off, and the sheet says which group.
+@PreviewTest
+@Preview(name = "Beat sheet full group", widthDp = 393, heightDp = 1100, showBackground = true)
+@Composable
+fun BeatSheetFullGroupPreview() {
+    var full = beatSeq
+    for (n in 1..99) full = full.withPattern(1, n, Pattern(1, listOf(PatternNote(0, 9, 24))))
+    BeatSheet(NIGHT_DRIVE, seq = full)
 }

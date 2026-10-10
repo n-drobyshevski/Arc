@@ -62,18 +62,32 @@ The mic key in the top bar opens **SAMPLE**: hold a pad to record a sound into i
 
 Theme, connect automatically, keep the screen on, how many backups to keep, Live's options (pad numbering, note names, key labels, piano size, haptics, whether SAMPLE's takes open a review sheet), the debug log, the version.
 
-## Cards: Copy for Claude and Paste beat
+## Cards: sharing a beat and pasting one back (Android)
 
-> This section is the one to update when the buttons change. The exact names and places are still being designed; use these generic names and tell the user where to look.
+In Live, open **Live tools** (the strip on the right edge). Between the view settings and TAKES is a **CLAUDE** section (its **(i)** explains beat cards and how to add this skill). Its card, **Beat cards**, has three keys:
 
-- **Copy for Claude** copies a pattern, or a whole scene, from Live as an **ARC BEAT card** (see [beat-card.md](beat-card.md)): plain text with the tempo, the swing, one section for each group and a row for each pad with its **sound name**, followed by a `notes` list for anything that does not fit the grid. Asking the user to use it means the card carries their real pad names, so you can tell a kick from a snare.
-- **Paste beat** reads a card back in. Each section goes into its group's **next free pattern**, nothing is overwritten, and a card with more than one section also adds a new scene pointing at the new patterns. The card's tempo is **offered**, not forced, and one undo removes everything. If a card has a mistake, Arc says which line and why; the user can paste that message back to you.
-- Both work with the clipboard, so the user can paste a card into a chat and paste your reply back.
-- The pattern is a practice copy in Arc: pasting never writes to the EP-133.
+- **SHARE SCENE S02** sends the scene playing as an **ARC BEAT card** (see [beat-card.md](beat-card.md)): its four patterns, the blank ones left out.
+- **SHARE A · 01** sends one pattern: the playing pattern of the group shown (the label follows the group and the pattern number).
+- **PASTE BEAT** reads the card on the clipboard.
 
-How to tell the user (adapt to the real buttons):
+A share opens the phone's share sheet with plain text: a line asking you to analyse the beat with this skill, then the card in a code block. It carries the tempo Live plays at, the TIMING swing, one section for each group and a row for each pad with its **sound name** (so you can tell a kick from a snare), a `notes` list for anything that does not fit the grid, and a `# tidied` comment: velocities are rounded to 127, 100 or 64 and short gates to a step. The share keys are dimmed when the scene or pattern has no notes.
 
-1. Open **Live** and choose the pattern or scene.
-2. Use **Copy for Claude**, then paste it into the chat.
-3. After your reply, copy the card from the code block and use **Paste beat** in Live.
-4. Play it. Use undo to take it back.
+Under the card are two links: **Get the arc-beats skill** (the zip, for Settings, Capabilities, Skills in the Claude app) and **Learn with Claude**, which shares a starter prompt for lesson 1 of [lessons.md](lessons.md).
+
+Getting a card back: the user copies it from your code block and taps **PASTE BEAT**, or shares your reply from the Claude app to Arc, which opens Live with the same sheet. Text with no `ARC BEAT` line gets the message "No beat card in that text."
+
+The **beat card sheet** shows the card's name (or "Beat card") and what is in it, such as "Beat card · 4 bars · 5 pads · 23 hits", then for each group a read-only step grid (a row for each pad, lit by how hard each hit is; the first two bars of a long pattern, then "+2 bars"). Under the grids:
+
+- **Goes to A · 04 (next free)**: each section goes into its group's next free pattern. Nothing is overwritten.
+- **New scene S03**: a card with more than one section also adds a scene that plays the new patterns, the groups the card does not have keeping the patterns of the scene playing.
+- **Tempo 92** with a chip, **SET · NOW 122**: the card's tempo is only offered, and the chip is off until the user turns it on. It is hidden when the tempo is the same or the card has none.
+- **Swing 58 · placed in the notes**: the swing is already in where the hits sit; nothing is set.
+- The card's mistakes, with their lines (warnings amber, errors red), and **COPY PROBLEMS**, which copies them as text for the user to paste to you.
+
+**IMPORT** puts the patterns in; it is off, with the reason, when the card has errors ("Fix the errors to import this card.") or a group has no free pattern ("Group B has no free pattern."). **CANCEL** closes the sheet. One undo (the arrow next to the pattern keys, or UNDO in the Pattern sheet) takes the whole import back, and the toast says so: "Imported to A · 04. UNDO takes it back." It plays at once, stopped or playing, and works offline. The patterns are a practice copy in Arc: importing never writes to the EP-133.
+
+How to tell the user:
+
+1. Open **Live**, then **Live tools**, and find **CLAUDE**. Choose the scene or pattern to share: **SHARE SCENE** or **SHARE** (the group shown), then send it to the Claude app or paste it into the chat.
+2. After your reply, copy the card from the code block and tap **PASTE BEAT** in Live tools (or share your reply to Arc). Check the sheet and tap **IMPORT**.
+3. Play it. Tap the undo arrow to take it back.

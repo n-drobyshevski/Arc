@@ -1,6 +1,7 @@
 // Port of core/src/test/kotlin/dev/arc/ep133/text/FeatureTextTest.kt
 import { describe, expect, it } from 'vitest'
 import { ARP_ORDERS, arpNote } from '../../../src/core/features/arp'
+import type { CardProblem } from '../../../src/core/features/beatCard'
 import { DiffResult, ProjectDiff, ProjectState, SoundDiff, SoundState } from '../../../src/core/features/backupDiff'
 import { NoteNames, SCALES } from '../../../src/core/features/keys'
 import { FX_TYPES, FxType } from '../../../src/core/features/fxSettings'
@@ -13,6 +14,7 @@ import { SampleSource } from '../../../src/core/features/sampleSource'
 import { SWITCH_TIMES, SceneOps, SwitchTime } from '../../../src/core/features/scenes'
 import { transportState } from '../../../src/core/features/transport'
 import { CoachText } from '../../../src/core/text/coachText'
+import { ClaudeText } from '../../../src/core/text/claudeText'
 import { FeatureText } from '../../../src/core/text/featureText'
 import { MirrorText } from '../../../src/core/text/mirrorText'
 import { NavText } from '../../../src/core/text/navText'
@@ -474,5 +476,70 @@ describe('FeatureTextTest', () => {
     expect(MirrorText.NUDGE_NOTE).toBe('Tap a lit pad to pick it, then \u2212 and + move its note.')
     expect(CoachText.STEP).toBe('Step through the pattern')
     expect(MirrorText.STEP_GROUP).toBe('Editing in step')
+  })
+
+  it('claude text', () => {
+    // Live tools: the section, its card and the links.
+    expect([ClaudeText.CLAUDE, ClaudeText.BEAT_CARDS].map((w) => w.toUpperCase())).toEqual(['CLAUDE', 'BEAT CARDS'])
+    expect([ClaudeText.shareScene('S02'), ClaudeText.sharePattern(0, 1), ClaudeText.PASTE_BEAT].map((w) => w.toUpperCase())).toEqual(['SHARE SCENE S02', 'SHARE A \u00B7 01', 'PASTE BEAT'])
+    expect([ClaudeText.shareSceneName('S02', false), ClaudeText.shareSceneName('S02', true), ClaudeText.sharePatternName(1, 12, false), ClaudeText.sharePatternName(1, 12, true)]).toEqual([
+      'Share scene S02 with Claude',
+      'Share scene S02 with Claude, no notes yet',
+      'Share B \u00B7 12 with Claude',
+      'Share B \u00B7 12 with Claude, no notes yet',
+    ])
+    expect(ClaudeText.SKILL_URL).toBe('https://arc-pi-mauve.vercel.app/arc-beats-skill.zip')
+    expect(ClaudeText.LEARN_PROMPT.startsWith('Use the arc-beats skill.')).toBe(true)
+    expect(CoachText.CLAUDE).toBe('Share a beat with Claude, paste one back')
+    // What is shared: the card in a fenced block after the prompt, named by where it sits.
+    expect([ClaudeText.patternCardName(1, 1), ClaudeText.patternCardName(99, 9), ClaudeText.sceneCardName(1)]).toEqual(['P01 S02', 'P99 S10', 'S02'])
+    expect(ClaudeText.shareSubject('P01 S02')).toBe('Arc beat P01 S02')
+    expect(ClaudeText.shareText('Analyse this beat:', 'ARC BEAT 1\nswing 50\n')).toBe('Analyse this beat:\n\n```\nARC BEAT 1\nswing 50\n```\n')
+    expect(ClaudeText.NO_CARD).toBe('No beat card in that text.')
+    // The sheet.
+    expect([ClaudeText.summary(4, 5, 23), ClaudeText.summary(1, 1, 1)]).toEqual(['Beat card \u00B7 4 bars \u00B7 5 pads \u00B7 23 hits', 'Beat card \u00B7 1 bar \u00B7 1 pad \u00B7 1 hit'])
+    expect([ClaudeText.place(0, 4), ClaudeText.place(3, 99)]).toEqual(['A \u00B7 04', 'D \u00B7 99'])
+    expect([ClaudeText.sectionTitle(0, 2, '1/16'), ClaudeText.sectionTitle(2, 1, '1/16T')]).toEqual(['Group A \u00B7 2 bars \u00B7 1/16', 'Group C \u00B7 1 bar \u00B7 1/16T'])
+    expect([1, 6].map((n) => ClaudeText.moreBars(n))).toEqual(['+1 bar', '+6 bars'])
+    expect([physicalPad(0, 9), physicalPad(0, 2), physicalPad(1, 0)].map((p) => ClaudeText.padLabel(p))).toEqual(['A7', 'AE', 'B.'])
+    expect([ClaudeText.rowName(physicalPad(0, 9), 'kick', 4), ClaudeText.rowName(physicalPad(0, 9), null, 1), ClaudeText.rowName(physicalPad(0, 2), null, 2)]).toEqual([
+      'A7 kick: 4 hits',
+      'A7: 1 hit',
+      'A enter: 2 hits',
+    ])
+    expect(ClaudeText.gridName(0, 2, '1/16', 3)).toBe('Group A, 2 bars, 1/16, 3 pads')
+    expect(ClaudeText.goesTo(0, 4)).toBe('A \u00B7 04 (next free)')
+    expect([ClaudeText.GOES_TO, MirrorText.NEW_SCENE, ClaudeText.TEMPO]).toEqual(['Goes to', 'New scene', 'Tempo'])
+    expect(ClaudeText.tempoChip(122).toUpperCase()).toBe('SET \u00B7 NOW 122')
+    expect([true, false].map((on) => ClaudeText.tempoChipName('92', 122, on))).toEqual(['Set the tempo to 92, now 122', 'Keep the tempo at 122, the card says 92'])
+    expect(ClaudeText.swingLine(58)).toBe('Swing 58 \u00B7 placed in the notes')
+    // Problems: listed, announced and copied for Claude.
+    const warning: CardProblem = { line: 7, message: "Unknown word 'foo', ignored.", error: false }
+    const error: CardProblem = { line: 12, message: 'A7 needs a | before its steps.', error: true }
+    expect(ClaudeText.problemLine(warning)).toBe("Line 7: Unknown word 'foo', ignored.")
+    expect([warning, error].map((p) => ClaudeText.problemName(p))).toEqual(["Warning, line 7: Unknown word 'foo', ignored.", 'Error, line 12: A7 needs a | before its steps.'])
+    expect(ClaudeText.problemsReport([warning, error])).toBe(
+      "Arc found problems in the beat card:\n- Line 7 (warning): Unknown word 'foo', ignored.\n- Line 12 (error): A7 needs a | before its steps.\nPlease fix them and send the whole card again.",
+    )
+    // IMPORT, and why it can't.
+    expect([ClaudeText.COPY_PROBLEMS, ClaudeText.IMPORT].map((w) => w.toUpperCase())).toEqual(['COPY PROBLEMS', 'IMPORT'])
+    expect(ClaudeText.groupFull(1)).toBe('Group B has no free pattern.')
+    expect([
+      ClaudeText.imported([[0, 4]], null),
+      ClaudeText.imported(
+        [
+          [0, 4],
+          [1, 2],
+        ],
+        'S03',
+      ),
+      ClaudeText.imported(
+        [
+          [0, 4],
+          [1, 2],
+        ],
+        null,
+      ),
+    ]).toEqual(['Imported to A \u00B7 04. UNDO takes it back.', 'Imported to scene S03. UNDO takes it back.', 'Imported to A \u00B7 04, B \u00B7 02. UNDO takes it back.'])
   })
 })

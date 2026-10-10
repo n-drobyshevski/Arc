@@ -62,6 +62,7 @@ import dev.arc.ep133.ui.screens.PadSheetContent
 import dev.arc.ep133.ui.screens.ProjectSheetContent
 import dev.arc.ep133.ui.screens.SampleReviewSheetContent
 import dev.arc.ep133.ui.screens.TempoSheetContent
+import dev.arc.ep133.ui.screens.BeatImportSheetContent
 import dev.arc.ep133.ui.screens.PatternSheetContent
 import dev.arc.ep133.ui.screens.FxSheetContent
 import dev.arc.ep133.ui.screens.SearchScreen
@@ -224,14 +225,68 @@ class MainActivity : ComponentActivity() {
         outState.putString(KEY_PENDING_MIC, pendingMic)
     }
 
-    /** A .pak opened from Files (or another app) lands here. */
+    /**
+     * A .pak opened from Files (or another app) lands here, and so does text shared to arc (Claude's reply, a beat
+     * card: its sheet opens over Live, or the toast says there is none in it).
+     */
     private fun handleIntent(intent: Intent?) {
-        if (intent?.action != Intent.ACTION_VIEW) return
+        val view = intent?.action == Intent.ACTION_VIEW
+        val send = intent?.action == Intent.ACTION_SEND && intent.type?.startsWith("text/") == true
+        if (intent == null || !view && !send) return
         // Reopening the task from Recents replays the original intent: don't import twice.
         if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY == 0) {
-            intent.data?.let { controller.importUri(it) }
+            if (view) {
+                intent.data?.let { controller.importUri(it) }
+            } else {
+                controller.receiveBeat(intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString())
+            }
         }
         setIntent(Intent(this, MainActivity::class.java))
+    }
+
+    /** PASTE BEAT: the clipboard's text (null when it holds none, or can't be read). */
+    private fun clipboardText(): String? = try {
+        getSystemService(ClipboardManager::class.java).primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
+    } catch (e: RuntimeException) {
+        null
+    }
+
+    /** SHARE (scene when [group] is null) through the system chooser: the card's prompt and text, as plain text. */
+    private fun shareBeat(group: Int?) {
+        val share = controller.beatShare(group) ?: return
+        sendText(share.subject, share.text, dev.arc.ep133.text.ClaudeText.SHARE_TITLE)
+    }
+
+    /** Learn with Claude: a starter prompt to send to the Claude app. */
+    private fun learnWithClaude() {
+        sendText(dev.arc.ep133.text.ClaudeText.LEARN, dev.arc.ep133.text.ClaudeText.LEARN_PROMPT, dev.arc.ep133.text.ClaudeText.LEARN_TITLE)
+    }
+
+    private fun sendText(subject: String, text: String, title: String) {
+        try {
+            Files.shareText(this, subject, text, title)
+        } catch (e: java.io.IOException) {
+            controller.toast(dev.arc.ep133.text.ClaudeText.NO_APP, error = true)
+        }
+    }
+
+    /** Get the arc-beats skill: its zip, opened as a link. */
+    private fun openSkill() {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(dev.arc.ep133.text.ClaudeText.SKILL_URL)))
+        } catch (e: android.content.ActivityNotFoundException) {
+            controller.toast(dev.arc.ep133.text.ClaudeText.NO_APP, error = true)
+        }
+    }
+
+    /** COPY PROBLEMS: what the sheet lists, for Claude to read when pasted back into the chat. */
+    private fun copyProblems(problems: List<dev.arc.ep133.features.CardProblem>) {
+        try {
+            getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(dev.arc.ep133.text.ClaudeText.COPY_PROBLEMS, dev.arc.ep133.text.ClaudeText.problemsReport(problems)))
+            controller.toast(dev.arc.ep133.text.ClaudeText.PROBLEMS_COPIED)
+        } catch (e: RuntimeException) {
+            controller.toast(e.message ?: e.toString(), error = true)
+        }
     }
 
     private fun writePending(uri: Uri?) {
@@ -574,6 +629,7 @@ class MainActivity : ComponentActivity() {
                     projectSheet = false
                     patternSheet = false
                     fxSheet = false
+                    controller.dismissBeat()
                     punchOff()
                     controller.setPatternErase(false)
                 }
@@ -673,6 +729,23 @@ class MainActivity : ComponentActivity() {
         // SCENES: the pattern each group plays and the scene, for the S01 chip, the panel it opens, the group keys' numbers
         // and (SCENE CHANGE) the pattern sheet.
         val scene by controller.scene.collectAsStateWithLifecycle()
+        // A beat card waiting on its sheet: pasted in Live tools, or shared to arc (which opens over Live).
+        val beatImport by controller.beatImport.collectAsStateWithLifecycle()
+        LaunchedEffect(beatImport != null) {
+            if (beatImport == null) return@LaunchedEffect
+            // Shared to arc from another app, or pasted: its sheet opens over Live, whatever was on.
+            debug = false
+            settingsOpen = false
+            guideOpen = false
+            search = false
+            comparePickFor = null
+            compareIds = null
+            contentsId = null
+            padsFor = null
+            detailId = null
+            restoreId = null
+            if (tab != Tab.LIVE) selectTab(Tab.LIVE)
+        }
         val liveTransport = remember(pattern, scene.switchTime) {
             dev.arc.ep133.ui.screens.TransportUi(
                 phase = pattern.phase,
@@ -858,7 +931,7 @@ class MainActivity : ComponentActivity() {
             clip = controller::sampleClip,
             lastTake = lastTake,
             // A sheet over Live keeps Back: the SAMPLE panel's would otherwise take it first.
-            sheetOpen = review != null || padSheet != null || tempoSheet || projectSheet || patternSheet || fxSheet || fontLicence || padsFor != null ||
+            sheetOpen = review != null || padSheet != null || tempoSheet || projectSheet || patternSheet || fxSheet || beatImport != null || fontLicence || padsFor != null ||
                 detail != null || restore != null || comparePickFor != null || state.task != null,
             onOpen = {
                 if (!sample.on) {
@@ -1140,6 +1213,17 @@ class MainActivity : ComponentActivity() {
                             step = liveStep,
                             scene = liveScene,
                             onSettings = { settingsOpen = true },
+                            // CLAUDE in Live tools: the scene and the patterns of its groups, which the share keys name.
+                            claude = dev.arc.ep133.ui.screens.ClaudeUi(
+                                scene = scene.label,
+                                numbers = scene.groups.map { it.number },
+                                hasNotes = scene.groups.map { it.number in it.filled },
+                                onShareScene = { shareBeat(null) },
+                                onSharePattern = ::shareBeat,
+                                onPaste = { controller.receiveBeat(clipboardText()) },
+                                onGetSkill = ::openSkill,
+                                onLearn = ::learnWithClaude,
+                            ),
                         )
                         Tab.DEVICE -> DeviceScreen(
                             state = state,
@@ -1245,6 +1329,18 @@ class MainActivity : ComponentActivity() {
                     }
                     ArcSheet(visible = patternSheet, onDismiss = { patternSheet = false }) {
                         PatternSheetContent(liveTransport, onDone = { patternSheet = false })
+                    }
+                    // A beat card, read and planned into the project's patterns: IMPORT is one UNDO step. It keeps showing while it closes.
+                    val lastBeat = remember { mutableStateOf(beatImport) }.apply { if (beatImport != null) value = beatImport }.value
+                    ArcSheet(visible = beatImport != null, onDismiss = controller::dismissBeat) {
+                        lastBeat?.let { b ->
+                            BeatImportSheetContent(
+                                ui = b,
+                                onCancel = controller::dismissBeat,
+                                onImport = controller::importBeat,
+                                onCopyProblems = ::copyProblems,
+                            )
+                        }
                     }
                     ArcSheet(visible = fxSheet, onDismiss = { fxSheet = false }) {
                         FxSheetContent(

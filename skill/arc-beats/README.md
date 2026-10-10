@@ -29,10 +29,10 @@ Claude Code picks it up the next time it starts, and uses it whenever you talk a
 
 ## Using it with Arc
 
-1. In Arc's **Live** screen, play or choose a pattern and use **Copy for Claude**. Paste the card into the chat so Claude sees your pad names. Or ask Claude to make something new.
-2. Claude replies with a card in a code block. Copy it, use **Paste beat** in Arc, and play. One undo removes it.
+1. In Arc's **Live** screen open **Live tools**, find **CLAUDE**, and use **SHARE SCENE** or **SHARE** (the group shown) to send a beat to the Claude app, so Claude sees your pad names. Or ask Claude to make something new.
+2. Claude replies with a card in a code block. Copy it and tap **PASTE BEAT** (or share the reply to Arc), then **IMPORT** on the sheet, and play. One undo removes it.
 
-(The buttons are still being designed; [references/arc-app.md](references/arc-app.md) holds the names Claude uses.)
+[references/arc-app.md](references/arc-app.md) has the details Claude uses. **Learn with Claude**, also under CLAUDE, starts lesson 1 in the Claude app.
 
 ## What is in the folder
 

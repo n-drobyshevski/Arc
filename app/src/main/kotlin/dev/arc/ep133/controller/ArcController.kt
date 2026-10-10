@@ -3746,6 +3746,11 @@ class ArcController(
     /** SCENE for Live: the scene, each group's pattern and what waits to take over, the panel, the 1–99 grid, the CLIP row and the status line. */
     val scene: StateFlow<SceneUi> = _scene.asStateFlow()
 
+    private val _beatImport = MutableStateFlow<BeatImportUi?>(null)
+
+    /** The beat card waiting on its sheet (null for none): what was pasted or shared to arc, planned into the project's patterns. */
+    val beatImport: StateFlow<BeatImportUi?> = _beatImport
+
     init {
         liveAudio.sequencer = patternScheduler
         // Make up for Bluetooth delay: the setting, to Live's output (which reads it on its own threads).
@@ -3897,6 +3902,8 @@ class ArcController(
         _pattern.update { patternShown(it, projectPatterns, transport.state, patternRecorder.canUndo) }
         publishStep()
         publishScene()
+        // A beat card waiting on its sheet is planned into the patterns as they are now (another project, a pick, a recording).
+        _beatImport.value?.let { showBeat(it.read) }
     }
 
     /**
@@ -5065,6 +5072,75 @@ class ArcController(
     // The follow loop wakes now, so a pick just queued is found on its tick.
     private fun wakePattern() {
         if (patternLoop?.isActive == true) followPattern()
+    }
+
+    // ---------- BEAT CARDS: share a pattern or scene to Claude, paste Claude's card back (an addition) ----------
+
+    /**
+     * What SHARE sends: [group]'s playing pattern, or (null) the scene playing, as an ARC BEAT card at the tempo Live
+     * plays at and the TIMING swing, with the pads' names; null when there are no notes in it. The patterns are the
+     * project's as they stand, a pattern still recording included.
+     */
+    fun beatShare(group: Int?): BeatShare? {
+        if (group != null && group !in 0..3) return null
+        val bpm = patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo)
+        return beatShare(projectSeq, group, bpm, settings.value.timingSwing, ::mirrorName)
+    }
+
+    /**
+     * A text from PASTE BEAT (the clipboard) or shared to arc: with an ARC BEAT line in it, the card is read and planned
+     * into the project's patterns as they stand ([BeatCards.plan]) and its sheet opens ([beatImport]); with none the
+     * toast says so. Nothing changes until [importBeat]. Works offline and while stopped or playing: the plan reads
+     * the patterns once they are loaded, so a card never lands on a project's notes before they are read.
+     */
+    fun receiveBeat(text: String?) {
+        if (text == null || !dev.arc.ep133.features.BeatCards.hasCard(text)) {
+            toast(dev.arc.ep133.text.ClaudeText.NO_CARD)
+            return
+        }
+        scope.launch {
+            loadPatterns()
+            showBeat(dev.arc.ep133.features.BeatCards.read(text))
+        }
+    }
+
+    // The sheet for [read], planned into the project's patterns as they are now.
+    private fun showBeat(read: dev.arc.ep133.features.CardRead) {
+        _beatImport.value = beatImportUi(read, projectSeq, patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo), ::mirrorName)
+    }
+
+    /** The sheet closes (CANCEL, a tap outside, Back, another section): nothing was imported. */
+    fun dismissBeat() {
+        _beatImport.value = null
+    }
+
+    /**
+     * IMPORT: the card is planned again into the patterns as they are now (the sheet's plan may be old) and applied as
+     * one UNDO step ([applyBeat]: its patterns into the next free slots, a new scene for a card of several groups, else
+     * the patterns picked in the scene playing), kept, and the sheet closes. With [setTempo] the card's tempo becomes
+     * the phone's. It takes over at once, whether stopped or playing, as COMMIT and a paste do: the sequencer plays the
+     * new patterns from its next tick, the picks waiting go. Where a group has no free pattern now the sheet stays,
+     * with the reason.
+     */
+    fun importBeat(setTempo: Boolean) {
+        val ui = _beatImport.value ?: return
+        val card = ui.card ?: return
+        var applied: BeatApplied? = null
+        sceneEdit {
+            val a = applyBeat(projectSeq, card, patternRecorder)
+            applied = a
+            if (a.seq !== projectSeq) sceneDesk.cancel()
+            a.seq
+        }
+        val a = applied ?: return
+        if (a.fullGroup != null) {
+            showBeat(ui.read)
+            toast(dev.arc.ep133.text.ClaudeText.groupFull(a.fullGroup), error = true)
+            return
+        }
+        _beatImport.value = null
+        if (setTempo) card.tempo?.let { setTempo(dev.arc.ep133.features.Tempo.round(it)) }
+        toast(beatImported(a))
     }
 
     // ---------- PROJECT: the next project (an addition) ----------

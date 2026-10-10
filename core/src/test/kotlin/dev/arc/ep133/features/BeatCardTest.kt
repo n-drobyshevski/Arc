@@ -83,6 +83,18 @@ class BeatCardTest {
     }
 
     @Test
+    fun `a text has a card when it has an ARC BEAT line, mistakes or not`() {
+        assertTrue(BeatCards.hasCard("ARC BEAT 1\n[A]\n$bar"))
+        assertTrue(BeatCards.hasCard("Sure:\n```\n  arc beat 1\r\n[A]"))
+        assertTrue(BeatCards.hasCard("\uFEFFARC BEAT"))
+        // A card with a mistake is still a card; a mention of the name, or none, isn't.
+        assertTrue(BeatCards.hasCard("ARC BEAT x\n[A]"))
+        assertFalse(BeatCards.hasCard("Here is your ARC BEAT: enjoy"))
+        assertFalse(BeatCards.hasCard("[A]\n$bar"))
+        assertFalse(BeatCards.hasCard(""))
+    }
+
+    @Test
     fun `comments, blank lines and the case of keywords`() {
         val r = read("ARC BEAT 1 # version", "# a whole line", "", "name Foo # trailing", "[A] # section", "A7 | X... .... .... .... | # kick", "   ", "# end")
         assertEquals(emptyList<String>(), problems(r))

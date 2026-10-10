@@ -241,6 +241,11 @@ function newDraft(line: number, group: number, number: number | null, bars: numb
   return { line, group, number, bars, step, skip, dropped, hits: [], inNotes: false }
 }
 
+/** Whether [text] has an ARC BEAT line: what [read] starts from, so a text without one is no card at all (not a card with a mistake). */
+function hasCard(text: string): boolean {
+  return text.replace(/^\uFEFF/, '').split(/\r\n|\r|\n/).some((l) => CARD_START.test(trim(l)))
+}
+
 /**
  * The card in [text]. What comes before the first ARC BEAT line is ignored,
  * and reading stops at a line that is just ``` or END; see the spec for the
@@ -804,4 +809,4 @@ function plan(seq: ProjectSeq, card: BeatCard): CardImport {
 }
 
 /** The Kotlin `BeatCards` object. */
-export const BeatCards = { VERSION, MAX_NAME, TIDY_COMMENT, read, write, fromPatterns, plan } as const
+export const BeatCards = { VERSION, MAX_NAME, TIDY_COMMENT, read, hasCard, write, fromPatterns, plan } as const

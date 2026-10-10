@@ -505,6 +505,11 @@ fun MirrorScreen(
     scene: LiveScene? = null,
     /** Opens Settings, from the first row of Live tools (an addition; null hides the row). */
     onSettings: (() -> Unit)? = null,
+    /**
+     * CLAUDE (an addition; null hides it): Live tools' beat cards, before TAKES: SHARE for the scene playing and for the group
+     * shown ([stepGroupFor]: on KEYS the sound's), PASTE BEAT, and the links to the arc-beats skill and to learn with Claude.
+     */
+    claude: ClaudeUi? = null,
 ) {
     val sounding = voices?.collectAsStateWithLifecycle()?.value
     // The pads held for note repeat are ringed too, and those it sounds lit.
@@ -951,6 +956,7 @@ fun MirrorScreen(
                     OfflinePadsRow(offlinePads, onResetPads)
                     if (keys.on) {
                         KeysPanel(keys, keysActions, piano = piano != null)
+                        if (claude != null) ClaudeSection(claude, stepGroup ?: group)
                         if (take != null) TakesSection(takes, take)
                     } else {
                         GridPlate {
@@ -988,6 +994,7 @@ fun MirrorScreen(
                             }
                         }
                         KeysMonitor(st, keys.names)
+                        if (claude != null) ClaudeSection(claude, stepGroup ?: group)
                         if (take != null) TakesSection(takes, take)
                         Notes(st, mirror, tapToPlay = onPad != null, sideways = sideways)
                     }
