@@ -15,12 +15,12 @@ test('the Device view draws the EP-133 and follows the device', async ({ page })
   await expect(ep).toBeVisible()
   await expect(page.locator('.ep-plate__status')).toHaveText(/project 1/i)
 
-  // The clock lights PLAY and puts the tempo on the display.
+  // The clock lights the display's ▶ and puts the tempo on it.
   await demo(page, (d) => {
     d.clock(122)
     d.clock('start')
   })
-  await expect(ep.getByRole('button', { name: /^PLAY, Playing$/ })).toBeVisible()
+  await expect(page.locator('.ep-play')).toHaveClass(/is-on/)
   // A pad played on the device glows on the drawn one.
   const pads = ep.locator('[data-pad]')
   await expect(pads).toHaveCount(12)
@@ -51,9 +51,12 @@ test('the Device view draws the EP-133 and follows the device', async ({ page })
   await takes.getByRole('button', { name: /^Take, waiting/ }).click()
   await expect(page.locator('.ep-plate__status')).toHaveText(/project 1/i)
 
-  // RECORD (the pattern's, which the web has not) and the other keys show their shortcuts.
-  await ep.getByRole('button', { name: 'RECORD' }).click()
-  await expect(page.getByRole('dialog', { name: 'RECORD on the EP-133' })).toBeVisible()
+  // RECORD is the pattern's: a tap arms it, another disarms (pattern.spec.ts plays it).
+  await ep.getByRole('button', { name: 'Record, off' }).click()
+  await ep.getByRole('button', { name: 'Record, armed' }).click()
+  await expect(ep.getByRole('button', { name: 'Record, off' })).toBeVisible()
+
+  // The other keys show their shortcuts.
   await ep.getByRole('button', { name: 'SOUND / EDIT' }).click()
   const card = page.getByRole('dialog', { name: 'SOUND on the EP-133' })
   await expect(card).toBeVisible()

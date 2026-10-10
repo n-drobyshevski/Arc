@@ -264,7 +264,6 @@ export function TransportKeys(props: { t: TransportUi; compact?: boolean; still?
         class={`transport-key transport-key--record${live ? ' is-filled' : ''}${armed ? ' is-armed' : ''}${props.still ? ' is-still' : ''}`}
         aria-label={recordName(ui)}
         aria-description={MirrorText.RECORD_HOLD}
-        data-coach="live.record"
         {...press.record}
       >
         <span class="transport-key__dot" aria-hidden="true" />
