@@ -5,8 +5,11 @@
 // - The pads play as the grid's do (hold = gate, a finger per pad); in KEYS
 //   they are the 12 notes. They glow from the device like the grid's, through
 //   the same [data-pad] / [data-key] / [data-group] glow the screen writes.
-// - A–D pick the group shown, KEYS switches PADS / KEYS, RECORD is REC, and
-//   −/+ change the octave in KEYS or step through the groups in PADS.
+// - A–D pick the group shown, KEYS switches PADS / KEYS, and −/+ change the
+//   octave in KEYS or step through the groups in PADS. RECORD is the
+//   pattern's on Android; the web has no pattern recording yet, so it shows
+//   its shortcuts as the other keys do. TAKE stays in Live tools; a take going
+//   shows on the display (● and the time) and the plate.
 // - PLAY lights while the device plays (MIDI clock); the display shows the
 //   tempo in seven segments, ▶ and ● (REC), the A–D boxes, a ring with a
 //   quarter per group, and the piano in KEYS. The plate, where the unit
@@ -26,10 +29,10 @@ import type { MirrorUi } from '../../state/types'
 import { ComboLine } from '../components/GuideKeys'
 import { of as keymapOf } from '../../core/text/guideKeymap'
 import { displayLine, glow, glowCss, groupGlow } from './glow'
-import { keysLit, upperOctave, type KeysUi } from './keys'
+import { keysLit, upperOctave, type KeysShown } from './keys'
 import type { PressTarget, PressTracker } from './press'
 import { cardName, cardSearch, shortcutsFor, type CardKey } from './shortcuts'
-import type { RecUi } from './Takes'
+import type { TakeUi } from './Takes'
 import './DeviceView.css'
 
 /** The photo's size: everything below is placed in these units, then scaled. */
@@ -63,10 +66,10 @@ function Digit(props: { ch: string; dot?: boolean }): JSX.Element {
 }
 
 /** The three digits: the tempo, the take's time while recording, OFF when offline. */
-export function displayDigits(st: MirrorState, mirror: MirrorUi | null, rec: RecUi): { text: string; dot: boolean; bpm: boolean } {
+export function displayDigits(st: MirrorState, mirror: MirrorUi | null, take: TakeUi | null): { text: string; dot: boolean; bpm: boolean } {
   if (mirror?.offline != null && st.playing === null) return { text: 'OFF', dot: false, bpm: false }
-  if (rec.state.kind === 'recording') {
-    const s = Math.min(rec.state.seconds, 599)
+  if (take?.state.kind === 'recording') {
+    const s = Math.min(take.state.seconds, 599)
     return { text: `${Math.trunc(s / 60)}${String(s % 60).padStart(2, '0')}`, dot: true, bpm: false }
   }
   if (st.bpm === null) return { text: '---', dot: false, bpm: false }
@@ -74,9 +77,9 @@ export function displayDigits(st: MirrorState, mirror: MirrorUi | null, rec: Rec
 }
 
 /** The plate's orange line: REC, offline, or the project. */
-export function plateStatus(st: MirrorState, mirror: MirrorUi | null, rec: RecUi): string {
-  if (rec.state.kind === 'recording') return `${MirrorText.REC} ${MirrorText.takeLength(rec.state.seconds)}`
-  if (rec.state.kind === 'armed') return WebText.REC_ARMED
+export function plateStatus(st: MirrorState, mirror: MirrorUi | null, take: TakeUi | null): string {
+  if (take?.state.kind === 'recording') return MirrorText.takeBadge(take.state.seconds)
+  if (take?.state.kind === 'armed') return WebText.TAKE_ARMED
   if (mirror?.offline != null && st.playing === null) return `${MirrorText.OFFLINE} · ${mirror.offline}`
   return st.activeProject !== null ? MirrorText.project(st.activeProject) : MirrorText.TITLE
 }
@@ -84,7 +87,9 @@ export function plateStatus(st: MirrorState, mirror: MirrorUi | null, rec: RecUi
 export interface DeviceViewProps {
   st: MirrorState
   mirror: MirrorUi | null
-  keys: KeysUi
+  keys: KeysShown
+  /** The notes playing here (KEYS rings them). */
+  playingNotes: ReadonlySet<number>
   /** KEYS's 12 notes by pad offset (null in PADS). */
   keyNotes: readonly number[] | null
   nameOf: (pad: PhysicalPad) => string | null
@@ -95,11 +100,12 @@ export interface DeviceViewProps {
   onOctave?: ((octave: number) => void) | undefined
   /** What a press on a pad plays (null: the pads stay still). */
   press: (pad: PhysicalPad) => PressTarget | null
-  /** A KEYS key's press. */
-  keyPress: (offset: number) => PressTarget
+  /** A KEYS key's press, by its note. */
+  keyPress: (note: number) => PressTarget
   playingPads: ReadonlySet<number>
   tracker: PressTracker
-  rec: RecUi
+  /** TAKE, for the display (null: no TAKE). */
+  take: TakeUi | null
   still: boolean
   /** Opens the shortcut guide searched for [query]. */
   onGuide?: ((query: string) => void) | undefined
@@ -115,7 +121,7 @@ const at = (x: number, y: number, w?: number, h?: number): CSSProperties => ({
 })
 
 export function DeviceView(props: DeviceViewProps): JSX.Element {
-  const { st, mirror, keys, keyNotes, nameOf, now, group, rec } = props
+  const { st, mirror, keys, keyNotes, nameOf, now, group, take } = props
   const box = useRef<HTMLDivElement | null>(null)
   const [scale, setScale] = useState(0.4)
   const [card, setCard] = useState<{ key: CardKey; x: number; y: number; above: number } | null>(null)
@@ -136,7 +142,7 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
   }, [])
 
   const offline = mirror?.offline != null && st.playing === null
-  const digits = displayDigits(st, mirror, rec)
+  const digits = displayDigits(st, mirror, take)
   const lit = keyNotes ? keysLit(st.notes, keyNotes, now) : null
 
   const step = (d: number): void => {
@@ -179,7 +185,7 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
           <div class="ep-a ep-plate" aria-hidden="true" />
           {[[18, 112], [928, 112], [18, 438], [928, 438]].map(([x, y]) => <span key={`${x}:${y}`} class="ep-a ep-screw" style={at(x!, y!)} aria-hidden="true" />)}
           <span class="ep-a ep-plate__title" aria-hidden="true">K.O. Ⅱ</span>
-          <span class="ep-a ep-plate__status" aria-live="polite">{plateStatus(st, mirror, rec)}</span>
+          <span class="ep-a ep-plate__status" aria-live="polite">{plateStatus(st, mirror, take)}</span>
           <span class="ep-a ep-plate__hit" aria-live="polite">
             {keys.on ? (keys.pad !== null ? MirrorText.keysSound(keys.pad, keys.padName) : MirrorText.NO_SOUND) : displayLine(st, mirror)}
           </span>
@@ -209,7 +215,7 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
             {[...digits.text].map((ch, i) => <Digit key={i} ch={ch} dot={digits.dot && i === 0} />)}
           </span>
           <span class={`ep-a ep-dtxt ep-bpm${digits.bpm ? ' ep-lit' : ' ep-dim'}`} aria-hidden="true">BPM</span>
-          <span class={`ep-a ep-rec${rec.state.kind === 'recording' ? ' is-on' : rec.state.kind === 'armed' && !props.still ? ' is-armed' : rec.state.kind === 'armed' ? ' is-on' : ''}`} aria-hidden="true" />
+          <span class={`ep-a ep-rec${take?.state.kind === 'recording' ? ' is-on' : take?.state.kind === 'armed' ? (props.still ? ' is-on' : ' is-armed') : ''}`} aria-hidden="true" />
           <span class={`ep-a ep-play${st.playing === true ? ' is-on' : ''}`} aria-hidden="true" />
           <svg class={`ep-a ep-metro${st.playing === true ? ' is-on' : ''}`} viewBox="0 0 40 52" aria-hidden="true">
             <path d="M14 4 h12 l10 44 h-32 z M20 40 L32 8" />
@@ -338,12 +344,12 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
                     <button
                       key={`k${o}`}
                       type="button"
-                      class={`ep-a ep-pad ep-pad--key${upperOctave(note, keys.octave) ? ' ep-pad--upper' : ''}${keys.playingNotes.has(note) ? ' is-playing' : ''}`}
+                      class={`ep-a ep-pad ep-pad--key${upperOctave(note, keys.octave) ? ' ep-pad--upper' : ''}${props.playingNotes.has(note) ? ' is-playing' : ''}`}
                       style={{ ...style, '--glow': glowCss(lit.get(o) ?? 0) }}
                       data-key={o}
                       aria-label={MirrorText.noteName(note, keys.names)}
                       aria-description={MirrorText.PLAY}
-                      {...props.hold(props.keyPress(o))}
+                      {...props.hold(props.keyPress(note))}
                     >
                       <span class="ep-pad__ring">{Keys.name(note, keys.names)}</span>
                       <span class="ep-pad__oct">{Keys.octaveOf(note)}</span>
@@ -402,11 +408,10 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
           </button>
           <button
             type="button"
-            class={`ep-a ep-key ep-key--orange ep-key--word${rec.state.kind === 'recording' ? ' is-on' : ''}${rec.state.kind === 'armed' && !props.still ? ' is-armed' : ''}`}
+            class="ep-a ep-key ep-key--orange ep-key--word"
             style={at(1050, 1735, 130, 128)}
-            aria-label={MirrorText.takeDescription(rec.state)}
-            disabled={!rec.onRec}
-            onClick={() => rec.onRec?.()}
+            aria-haspopup="dialog"
+            onClick={(e) => openCard('RECORD', e)}
           >
             RECORD
           </button>

@@ -620,6 +620,11 @@ export const MirrorText = {
   TAKES_HINT:
     'Tap TAKE, then play: recording starts with the first sound, or when the EP-133 starts playing, and stops when you tap TAKE again or, if its PLAY started it, when the EP-133 stops.',
 
+  /** "Take 0:12": the TAKE key and the display's badge while a take is recorded. */
+  takeBadge(seconds: number): string {
+    return `${MirrorText.TAKE} ${MirrorText.takeLength(seconds)}`
+  },
+
   /** What the TAKE key does now, for screen readers. */
   takeDescription(state: RecState): string {
     switch (state.kind) {

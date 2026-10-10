@@ -5,9 +5,10 @@ import { WebText } from '../../src/core/text/webText'
 import { emptyMirrorState, type MirrorUi } from '../../src/state/types'
 import { displayDigits, firstSentence, plateStatus } from '../../src/ui/live/DeviceView'
 import { cardSearch, shortcutsFor } from '../../src/ui/live/shortcuts'
-import type { RecUi } from '../../src/ui/live/Takes'
+import type { TakeUi } from '../../src/ui/live/Takes'
 
-const idle: RecUi = { state: { kind: 'idle' }, onRec: () => {} }
+const noop = (): void => {}
+const idle: TakeUi = { state: { kind: 'idle' }, onTake: noop }
 const st = (over: Partial<ReturnType<typeof emptyMirrorState>> = {}) => ({ ...emptyMirrorState(), ...over })
 const ui = (over: Partial<MirrorUi> = {}): MirrorUi => ({ state: st(), loading: false, error: null, offline: null, ...over })
 
@@ -21,8 +22,8 @@ describe('the seven-segment digits', () => {
     expect(displayDigits(st(), ui({ offline: 'Last seen Oct 5, 2:04 PM' }), idle)).toEqual({ text: 'OFF', dot: false, bpm: false })
   })
   it("show the take's time while recording, minutes then a dot", () => {
-    expect(displayDigits(st({ bpm: 120 }), ui(), { state: { kind: 'recording', seconds: 72 } })).toEqual({ text: '112', dot: true, bpm: false })
-    expect(displayDigits(st(), ui(), { state: { kind: 'recording', seconds: 5 } }).text).toBe('005')
+    expect(displayDigits(st({ bpm: 120 }), ui(), { state: { kind: 'recording', seconds: 72 }, onTake: noop })).toEqual({ text: '112', dot: true, bpm: false })
+    expect(displayDigits(st(), ui(), { state: { kind: 'recording', seconds: 5 }, onTake: noop }).text).toBe('005')
   })
 })
 
@@ -32,8 +33,8 @@ describe('the plate', () => {
     expect(plateStatus(st(), ui(), idle)).toBe(MirrorText.TITLE)
   })
   it('says REC and offline', () => {
-    expect(plateStatus(st(), ui(), { state: { kind: 'armed' } })).toBe(WebText.REC_ARMED)
-    expect(plateStatus(st(), ui(), { state: { kind: 'recording', seconds: 12 } })).toBe('Rec 0:12')
+    expect(plateStatus(st(), ui(), { state: { kind: 'armed' }, onTake: noop })).toBe(WebText.TAKE_ARMED)
+    expect(plateStatus(st(), ui(), { state: { kind: 'recording', seconds: 12 }, onTake: noop })).toBe('Take 0:12')
     expect(plateStatus(st(), ui({ offline: 'Last seen Oct 5, 2:04 PM' }), idle)).toBe('Offline · Last seen Oct 5, 2:04 PM')
   })
 })

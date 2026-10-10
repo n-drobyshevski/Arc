@@ -133,8 +133,10 @@ export const WebText = {
     return `All ${key} shortcuts`
   },
   NO_SHORTCUTS: 'No shortcuts in the guide use this key on its own.',
-  /** The plate's line while REC waits. */
-  REC_ARMED: 'Rec armed: play a pad or start the EP-133',
+  /** Live tools' third view on the desk: the EP-133 drawn whole. */
+  VIEW_DEVICE: 'Device',
+  /** The plate's line while TAKE waits. */
+  TAKE_ARMED: 'Take armed: play a pad or start the EP-133',
   /** −/+ in the pads view. */
   PREV_GROUP: 'Previous group',
   NEXT_GROUP: 'Next group',

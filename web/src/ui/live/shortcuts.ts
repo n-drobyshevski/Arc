@@ -17,6 +17,7 @@ export type CardKey =
   | 'KNOBX'
   | 'KNOBY'
   | 'PLAY'
+  | 'RECORD'
   | 'VOLUME'
 
 /** How each key is named in the guide's combos, and on the card. */
@@ -33,6 +34,7 @@ const KEYS: Record<CardKey, { readonly match: RegExp | null; readonly name: stri
   KNOBX: { match: /KNOB ?X\b/, name: 'Knob X', search: 'knob X' },
   KNOBY: { match: /KNOB ?Y\b/, name: 'Knob Y', search: 'knob Y' },
   PLAY: { match: /\bPLAY\b/, name: 'PLAY', search: 'PLAY' },
+  RECORD: { match: /\bRECORD\b/, name: 'RECORD', search: 'RECORD' },
   VOLUME: { match: null, name: 'VOLUME', search: 'volume' },
 }
 

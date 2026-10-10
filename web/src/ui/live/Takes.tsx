@@ -1,15 +1,19 @@
-// Port of MirrorScreen.kt's RecChip and TakesSection (app/src/main/kotlin/dev/arc/ep133/ui/screens/MirrorScreen.kt)
+// Port of MirrorScreen.kt's TakesSection and PatternLine.kt's TakeBadge
+// (app/src/main/kotlin/dev/arc/ep133/ui/screens/)
 //
-// REC on the display line, and Live tools' takes.
+// TAKE (REC before RECORD was the pattern's) in Live tools: its key, then the
+// takes. While a take is armed or recorded, a badge on the display shows it
+// and stops it.
 //
 // Web deltas:
-// - The armed dot's blink is a CSS animation (Kotlin's infinite transition,
-//   450 ms each way); it stands still under prefers-reduced-motion, or when
-//   [still] (screenshots).
+// - The armed dot's blink is a CSS animation; it stands still under
+//   prefers-reduced-motion, or when [still] (screenshots).
 // - A take's row is a disclosure button (aria-expanded) over its actions,
 //   where Kotlin's Plate is clickable as a whole.
-// - Share is left out where the browser can't share a file ([TakesUi.canShare]):
+// - Share is left out where the browser can't share a file ([TakesUi.canShare]);
 //   Save WAV is then the way out, and the note says so.
+// - CaptionInfo's two notes (TAKES_HINT, TAKES_NOTE) show under the list:
+//   the hint while there are no takes, the note once there are.
 import type { JSX } from 'preact'
 import { useState } from 'preact/hooks'
 import type { RecState } from '../../core/features/takeRecorder'
@@ -22,10 +26,10 @@ import { Caption } from '../components/Caption'
 import { Key } from '../components/Key'
 import './Takes.css'
 
-/** The REC key's state and what a tap does (Kotlin RecUi); no [onRec]: no REC (no chip, no takes). */
-export interface RecUi {
+/** The TAKE key's state and what a tap does (Kotlin TakeUi). */
+export interface TakeUi {
   readonly state: RecState
-  readonly onRec?: (() => void) | null
+  readonly onTake: () => void
 }
 
 /** Live tools' takes (Kotlin TakesUi). */
@@ -47,37 +51,44 @@ export interface TakesUi {
   readonly onDelete: (t: TakeInfo) => void
 }
 
-export const NO_REC: RecUi = { state: { kind: 'idle' } }
-
 /**
- * REC on the display line: a dot and the word, dim while off. Armed, the dot
- * blinks until the first sound; recording, it is lit and the time runs.
+ * The display's TAKE badge, only while a take is armed or recorded: a dot,
+ * blinking while armed, and "TAKE 0:12". A tap stops the take (or the arm).
  */
-export function RecChip(props: { rec: RecUi; still?: boolean }): JSX.Element | null {
-  const { rec } = props
-  const onRec = rec.onRec
-  if (!onRec) return null
-  const s = rec.state
-  const cls = ['rec-chip', s.kind !== 'idle' ? 'is-on' : '', s.kind === 'armed' && !props.still ? 'is-armed' : ''].filter(Boolean).join(' ')
+export function TakeBadge(props: { take: TakeUi | null | undefined; still?: boolean }): JSX.Element | null {
+  const take = props.take
+  if (!take || take.state.kind === 'idle') return null
+  const s = take.state
+  const cls = ['take-badge', s.kind === 'armed' && !props.still ? 'is-armed' : ''].filter(Boolean).join(' ')
   return (
-    <button type="button" class={cls} aria-label={MirrorText.takeDescription(s)} onClick={onRec}>
-      <span class="rec-chip__dot" aria-hidden="true" />
-      <span class="rec-chip__label" aria-hidden="true">
-        {s.kind === 'recording' ? MirrorText.takeLength(s.seconds) : MirrorText.REC.toUpperCase()}
+    <button type="button" class={cls} aria-label={MirrorText.takeDescription(s)} onClick={take.onTake}>
+      <span class="take-badge__dot" aria-hidden="true" />
+      <span class="take-badge__label" aria-hidden="true">
+        {(s.kind === 'recording' ? MirrorText.takeBadge(s.seconds) : MirrorText.TAKE).toUpperCase()}
       </span>
     </button>
   )
 }
 
-/** Live tools' takes: each plays, and unfolds to share, save, send to the EP-133 or delete. */
-export function TakesSection(props: { takes: TakesUi }): JSX.Element {
+/** Live tools' TAKE key and takes: each plays, and unfolds to share, save, send to the EP-133 or delete. */
+export function TakesSection(props: { takes: TakesUi; take: TakeUi }): JSX.Element {
   const t = props.takes
+  const s = props.take.state
   const [open, setOpen] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<string | null>(null)
   return (
     <section class="takes" aria-label={MirrorText.TAKES}>
       <Caption text={MirrorText.TAKES} align="start" as="h3" />
-      {t.list.length === 0 && <p class="t-small takes__note">{MirrorText.TAKES_HINT}</p>}
+      <Key
+        class="takes__key"
+        text={'● ' + (s.kind === 'recording' ? MirrorText.takeBadge(s.seconds) : MirrorText.TAKE)}
+        size="small"
+        block
+        variant={s.kind !== 'idle' ? 'signal' : 'normal'}
+        aria-label={MirrorText.takeDescription(s)}
+        aria-pressed={s.kind !== 'idle'}
+        onClick={props.take.onTake}
+      />
       {t.list.length > 0 && (
         <ul class="takes__list">
           {t.list.map((take) => {
@@ -145,7 +156,9 @@ export function TakesSection(props: { takes: TakesUi }): JSX.Element {
           })}
         </ul>
       )}
-      {t.list.length > 0 && <p class="t-small takes__note">{t.canShare ? WebText.TAKES_NOTE : WebText.TAKES_NOTE_SAVE_ONLY}</p>}
+      <p class="t-small takes__note">
+        {t.list.length === 0 ? MirrorText.TAKES_HINT : t.canShare ? WebText.TAKES_NOTE : WebText.TAKES_NOTE_SAVE_ONLY}
+      </p>
     </section>
   )
 }
