@@ -3,7 +3,7 @@
 // recording on its press, presses become notes on TIMING's grid, the count-in
 // is counted, the sheet's edits and settings, and the patterns are kept.
 import 'fake-indexeddb/auto'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Patterns, ProjectPatterns, Seq } from '../../src/core/features/pattern'
 import { physicalPad } from '../../src/core/features/padNotes'
 import { MirrorText } from '../../src/core/text/mirrorText'
@@ -11,7 +11,18 @@ import { memoryStorage } from '../../src/platform/storage/settings'
 import { countInBeat, patternBpm, pressSkip, pressTickAt } from '../../src/state/patternPlan'
 import { disposeAll, liveHarness, until, type LiveHarness } from './liveHarness'
 
-afterEach(() => disposeAll())
+// performance.now() starts near 0 in a fresh worker: the tests' presses a second back would be before it began,
+// which a press's time never is. A clock 100 s on keeps them after it.
+let clockSpy: { mockRestore(): void } | null = null
+beforeEach(() => {
+  const real = performance.now.bind(performance)
+  clockSpy = vi.spyOn(performance, 'now').mockImplementation(() => real() + 100_000)
+})
+
+afterEach(() => {
+  disposeAll()
+  clockSpy?.mockRestore()
+})
 
 const A0 = physicalPad(0, 0)
 const B3 = physicalPad(1, 3)
