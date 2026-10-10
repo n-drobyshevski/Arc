@@ -18,6 +18,7 @@ npm run build        # dist/ with the service worker and manifest
 npm run preview      # serve dist/
 npm run e2e          # Playwright smoke test against the built app (see Testing)
 npm run gen:guide    # regenerate src/core/text/guideData.ts from core's GuideText.kt
+npm run gen:skill    # regenerate the Claude skill's ep133-guide.md and public/arc-beats-skill.zip (see ../skill/arc-beats)
 npm run gen:icons    # redraw public/icons/ (icon.svg and the PNGs) from the launcher icon's shapes, in Chromium
 node scripts/shot.mjs out.png '/backups' --query=demo [--dark] [--size=393x852]   # screenshot a screen
 ```

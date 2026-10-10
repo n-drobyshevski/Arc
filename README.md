@@ -161,6 +161,19 @@ As on the EP-133 (OS 2.5), where each group holds up to 99 patterns of its own l
 - A screen reader hears the panel as a pane: the scene (**Scene 2 of 3, patterns A 1, B 3, C 1, D 2**), each change once (**Group B, pattern 5, at bar end**), − and + for each group and for the scene, NEXT FREE, COMMIT and CLR / DEL (a long click does the hold), CHANGE with its choice, the CLIP segments and every cell of the grid.
 - Nothing goes to the EP-133. The web has the core (the scenes, patterns, copy and paste, undo, the file and the text) with the same tests, but no screens or sequencer yet.
 
+## Claude and beat cards (Android)
+
+A **beat card** is a beat as plain text, **ARC BEAT**: the tempo, the swing, and for each group a row of steps for every pad, with the sound's name. Claude can read one to analyse or improve it, and write one back; Arc reads it into a new pattern. The format is in [`skill/arc-beats/references/beat-card.md`](skill/arc-beats/references/beat-card.md); `BeatCard.kt` reads, writes and plans it, and `beatCard.ts` is its twin in the web app.
+
+- **Where:** a **CLAUDE** section in Live tools, after the view settings and before TAKES, on every layout. Its info key says what a beat card is and how to give Claude the skill.
+- **The card, Beat cards:** three full-width keys. **SHARE SCENE S02** sends the scene playing, its four patterns (the blank ones left out); **SHARE A · 01** sends the playing pattern of the group shown (its label follows the group and the pattern number); **PASTE BEAT** (orange) reads the clipboard. The share keys are dimmed, and still announced, when there are no notes to share.
+- **Sharing** goes through the system share sheet as plain text: a line asking Claude to analyse the beat with the arc-beats skill and suggest 2–3 edits as a new card, then the card in a fenced block, written with the sounds' names, at the tempo Live plays at and TIMING's swing (kept only where every hit sits on it), velocities and short gates rounded. Send it to the Claude app, or copy it into any chat.
+- **Getting a card back:** copy Claude's reply and tap **PASTE BEAT**, or share the reply from the Claude app to arc, which opens Live with the same sheet. A text with no ARC BEAT line toasts **No beat card in that text.**
+- **The sheet** (a card pasted, or shared to arc) shows the card's name and what is in it (**Beat card · 4 bars · 5 pads · 23 hits**), a read-only step grid for each group (a row for each pad with its name, cells lit by how hard it is hit; the first two bars of a long pattern, then **+N bars**), and where it goes: each group's **next free pattern**, and **a new scene** for a card of several groups. The card's tempo is only offered, on a chip (**SET · NOW 122**, off until chosen); its swing is already in the notes. Mistakes are listed with their lines (warnings amber, errors red), and **COPY PROBLEMS** copies them to paste back to Claude. **IMPORT** is off, with the reason, when the card can't be read or a group has no free pattern.
+- **Import** never overwrites a pattern, and is one **UNDO** step (↶ on the line, and the Pattern sheet's): the patterns, the new scene and the pick go back as they were. It takes over at once, stopped or playing, as COMMIT does. It works offline and while stopped.
+- **The patterns stay in arc**, in `patterns.json` with the rest; nothing goes to the EP-133.
+- **The skill:** **Get the arc-beats skill** downloads [`arc-beats-skill.zip`](https://arc-pi-mauve.vercel.app/arc-beats-skill.zip). In the Claude app open claude.ai → Settings → Capabilities → Skills and upload the zip; in Claude Code copy `skill/arc-beats` to `~/.claude/skills/arc-beats`. **Learn with Claude** shares a starter prompt (lesson 1, one step at a time) to the Claude app. The web has the card's core and text with the same tests, but no screens.
+
 ## Web app
 
 The same app runs in Chrome or Edge, on a computer or an Android phone, at **https://arc-pi-mauve.vercel.app**. It talks to the EP-133 over USB-C with WebMIDI. Everything above is there: backup, restore, the library, contents, compare, search, the device browser, sample upload with trim, pads, the live mirror (opening on Live, shown as one group with A–D by default, pads that sound while held, chords of up to 8 sounds, KEYS with solfège or letter note names and, wherever it fits, the piano, and Offline from the last read, where EDIT and the desktop's **Sounds** tab change pads in arc only until the EP-133 connects), settings, the shortcut guide and the debug log. It looks and reads like the Android app, and its `.pak` files and `library.json` are the same files the Android app writes, so a library moves between the two.
@@ -209,6 +222,7 @@ npm run dev        # http://localhost:5173, add ?demo for the simulated device
 npm run check      # typecheck, unit tests (Vitest), production build
 npm run e2e        # Playwright smoke test of the built app in Chromium (once: npx playwright install chromium)
 npm run gen:guide  # regenerate src/core/text/guideData.ts from core's GuideText.kt
+npm run gen:skill  # regenerate the Claude skill's EP-133 guide and web/public/arc-beats-skill.zip from skill/arc-beats
 ```
 
 [`web/README.md`](web/README.md) has the layout of the code and how it maps to the Kotlin. [`.github/workflows/web.yml`](.github/workflows/web.yml) runs the typecheck, tests, build and smoke test on every pull request and push to `main` that touches `web/`.

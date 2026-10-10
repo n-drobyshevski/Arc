@@ -4,7 +4,7 @@
   "installCommand": "npm ci --prefix web",
   "buildCommand": "npm run build --prefix web",
   "outputDirectory": "web/dist",
-  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- web reference version.properties vercel.json",
+  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- web reference skill version.properties vercel.json",
   "redirects": [
     {
       "source": "/icon-board",

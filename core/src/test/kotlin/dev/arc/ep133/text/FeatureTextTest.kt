@@ -2,6 +2,7 @@ package dev.arc.ep133.text
 
 import dev.arc.ep133.features.ArpNote
 import dev.arc.ep133.features.ArpOrder
+import dev.arc.ep133.features.CardProblem
 import dev.arc.ep133.features.DiffResult
 import dev.arc.ep133.features.FxType
 import dev.arc.ep133.features.KeyMark
@@ -482,5 +483,66 @@ class FeatureTextTest {
         assertEquals("Tap a lit pad to pick it, then \u2212 and + move its note.", MirrorText.NUDGE_NOTE)
         assertEquals("Step through the pattern", CoachText.STEP)
         assertEquals("Editing in step", MirrorText.STEP_GROUP)
+    }
+
+    @Test
+    fun `claude text`() {
+        // Live tools: the section, its card and the links.
+        assertEquals(listOf("CLAUDE", "BEAT CARDS"), listOf(ClaudeText.CLAUDE, ClaudeText.BEAT_CARDS).map { it.uppercase() })
+        assertEquals(
+            listOf("SHARE SCENE S02", "SHARE A \u00B7 01", "PASTE BEAT"),
+            listOf(ClaudeText.shareScene("S02"), ClaudeText.sharePattern(0, 1), ClaudeText.PASTE_BEAT).map { it.uppercase() },
+        )
+        assertEquals(
+            listOf("Share scene S02 with Claude", "Share scene S02 with Claude, no notes yet", "Share B \u00B7 12 with Claude", "Share B \u00B7 12 with Claude, no notes yet"),
+            listOf(ClaudeText.shareSceneName("S02", false), ClaudeText.shareSceneName("S02", true), ClaudeText.sharePatternName(1, 12, false), ClaudeText.sharePatternName(1, 12, true)),
+        )
+        assertEquals("https://arc-pi-mauve.vercel.app/arc-beats-skill.zip", ClaudeText.SKILL_URL)
+        assertTrue(ClaudeText.LEARN_PROMPT.startsWith("Use the arc-beats skill."))
+        assertEquals("Share a beat with Claude, paste one back", CoachText.CLAUDE)
+        // What is shared: the card in a fenced block after the prompt, named by where it sits.
+        assertEquals(listOf("P01 S02", "P99 S10", "S02"), listOf(ClaudeText.patternCardName(1, 1), ClaudeText.patternCardName(99, 9), ClaudeText.sceneCardName(1)))
+        assertEquals("Arc beat P01 S02", ClaudeText.shareSubject("P01 S02"))
+        assertEquals("Analyse this beat:\n\n```\nARC BEAT 1\nswing 50\n```\n", ClaudeText.shareText("Analyse this beat:", "ARC BEAT 1\nswing 50\n"))
+        assertEquals("No beat card in that text.", ClaudeText.NO_CARD)
+        // The sheet.
+        assertEquals(
+            listOf("Beat card \u00B7 4 bars \u00B7 5 pads \u00B7 23 hits", "Beat card \u00B7 1 bar \u00B7 1 pad \u00B7 1 hit"),
+            listOf(ClaudeText.summary(4, 5, 23), ClaudeText.summary(1, 1, 1)),
+        )
+        assertEquals(listOf("A \u00B7 04", "D \u00B7 99"), listOf(ClaudeText.place(0, 4), ClaudeText.place(3, 99)))
+        assertEquals(listOf("Group A \u00B7 2 bars \u00B7 1/16", "Group C \u00B7 1 bar \u00B7 1/16T"), listOf(ClaudeText.sectionTitle(0, 2, "1/16"), ClaudeText.sectionTitle(2, 1, "1/16T")))
+        assertEquals(listOf("+1 bar", "+6 bars"), listOf(1, 6).map(ClaudeText::moreBars))
+        assertEquals(listOf("A7", "AE", "B."), listOf(PhysicalPad(0, 9), PhysicalPad(0, 2), PhysicalPad(1, 0)).map(ClaudeText::padLabel))
+        assertEquals(
+            listOf("A7 kick: 4 hits", "A7: 1 hit", "A enter: 2 hits"),
+            listOf(ClaudeText.rowName(PhysicalPad(0, 9), "kick", 4), ClaudeText.rowName(PhysicalPad(0, 9), null, 1), ClaudeText.rowName(PhysicalPad(0, 2), null, 2)),
+        )
+        assertEquals("Group A, 2 bars, 1/16, 3 pads", ClaudeText.gridName(0, 2, "1/16", 3))
+        assertEquals("A \u00B7 04 (next free)", ClaudeText.goesTo(0, 4))
+        assertEquals(listOf("Goes to", "New scene", "Tempo"), listOf(ClaudeText.GOES_TO, MirrorText.NEW_SCENE, ClaudeText.TEMPO))
+        assertEquals("SET \u00B7 NOW 122", ClaudeText.tempoChip(122).uppercase())
+        assertEquals(listOf("Set the tempo to 92, now 122", "Keep the tempo at 122, the card says 92"), listOf(true, false).map { ClaudeText.tempoChipName("92", 122, it) })
+        assertEquals("Swing 58 \u00B7 placed in the notes", ClaudeText.swingLine(58))
+        // Problems: listed, announced and copied for Claude.
+        val warning = CardProblem(7, "Unknown word 'foo', ignored.", false)
+        val error = CardProblem(12, "A7 needs a | before its steps.", true)
+        assertEquals("Line 7: Unknown word 'foo', ignored.", ClaudeText.problemLine(warning))
+        assertEquals(listOf("Warning, line 7: Unknown word 'foo', ignored.", "Error, line 12: A7 needs a | before its steps."), listOf(warning, error).map(ClaudeText::problemName))
+        assertEquals(
+            "Arc found problems in the beat card:\n- Line 7 (warning): Unknown word 'foo', ignored.\n- Line 12 (error): A7 needs a | before its steps.\nPlease fix them and send the whole card again.",
+            ClaudeText.problemsReport(listOf(warning, error)),
+        )
+        // IMPORT, and why it can't.
+        assertEquals(listOf("COPY PROBLEMS", "IMPORT"), listOf(ClaudeText.COPY_PROBLEMS, ClaudeText.IMPORT).map { it.uppercase() })
+        assertEquals("Group B has no free pattern.", ClaudeText.groupFull(1))
+        assertEquals(
+            listOf("Imported to A \u00B7 04. UNDO takes it back.", "Imported to scene S03. UNDO takes it back.", "Imported to A \u00B7 04, B \u00B7 02. UNDO takes it back."),
+            listOf(
+                ClaudeText.imported(listOf(0 to 4), null),
+                ClaudeText.imported(listOf(0 to 4, 1 to 2), "S03"),
+                ClaudeText.imported(listOf(0 to 4, 1 to 2), null),
+            ),
+        )
     }
 }

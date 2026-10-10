@@ -50,6 +50,8 @@ object CoachText {
     const val EDIT = "Change a pad's sound"
     /** The ARP / RPT switch on the pads' plate, and LATCH under it. */
     const val ARP = "Arp or repeat: hold pads"
+    /** The beat cards' card in Live tools: share a pattern or scene to Claude, paste Claude's card back. */
+    const val CLAUDE = "Share a beat with Claude, paste one back"
 
     const val SEARCH = "Search sounds"
     const val IMPORT = "Import a .pak"

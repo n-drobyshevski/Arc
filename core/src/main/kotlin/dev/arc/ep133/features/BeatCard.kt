@@ -1,0 +1,721 @@
+package dev.arc.ep133.features
+
+import java.util.Locale
+
+/**
+ * A beat as an ARC BEAT text card (skill/arc-beats/references/beat-card.md):
+ * an optional [name] (up to 40 characters), the [tempo] it is meant for (40
+ * to 240 BPM), the [swing] of its grid rows (50..75, 50 straight, as the
+ * device's TIMING) and its [sections], one for each group at most.
+ */
+data class BeatCard(
+    val name: String? = null,
+    val tempo: Double? = null,
+    val swing: Int = TimingSettings.SWING_MIN,
+    val sections: List<CardSection> = emptyList(),
+)
+
+/** One group's pattern on a card: [group] 0..3 (A..D), the pattern [number] 1..99 it was written as (a hint, null when the card gave none) and the [pattern] itself. */
+data class CardSection(val group: Int, val number: Int?, val pattern: Pattern)
+
+/** Something wrong with a card, at [line] (counted from 1 in the text read): an [error] stops the card being read, a warning doesn't. */
+data class CardProblem(val line: Int, val message: String, val error: Boolean)
+
+/** A card as read: the [card], or null when any problem is an error, and all the [problems] by line. */
+data class CardRead(val card: BeatCard?, val problems: List<CardProblem>)
+
+/**
+ * A card planned into a project's sequencer: the [seq] after it, the
+ * (group, pattern number) slots it filled ([placed], in the card's order),
+ * and whether it added a scene ([newScene]). [fullGroup] is the group whose
+ * bank had no free pattern when nothing could be placed: then [seq] is the
+ * very one given and [placed] is empty. It is null otherwise.
+ */
+data class CardImport(
+    val seq: ProjectSeq,
+    val placed: List<Pair<Int, Int>>,
+    val newScene: Boolean,
+    val fullGroup: Int? = null,
+)
+
+/**
+ * The ARC BEAT text card, version 1: reading it, writing it and planning it
+ * into a project. Pure. The text is the spec's: grid rows for what sits on a
+ * step, a notes list for what doesn't, so a card Arc wrote reads back to the
+ * same patterns and writes out as the same text.
+ */
+object BeatCards {
+    const val VERSION = 1
+    const val MAX_NAME = 40
+
+    /** The comment a tidied card carries. */
+    const val TIDY_COMMENT = "# tidied: velocities and short gates rounded"
+
+    private const val TEMPO_MIN = 40.0
+    private const val TEMPO_MAX = 240.0
+
+    /** A note's gate when it gives none: a 1/16. */
+    private const val DEFAULT_GATE = 24
+
+    /** The least width of the sound name column, when any row has a name. */
+    private const val NAME_WIDTH = 9
+
+    /** The steps a card may read in, and those it writes in (first that fits). */
+    private val READ_STEPS = listOf(Timing.EIGHTH, Timing.SIXTEENTH, Timing.THIRTY_SECOND, Timing.EIGHTH_T, Timing.SIXTEENTH_T)
+    private val WRITE_STEPS = listOf(Timing.SIXTEENTH, Timing.SIXTEENTH_T, Timing.THIRTY_SECOND)
+
+    /** The gate words, in ticks. */
+    private val GATES = mapOf("1/4" to 96, "1/8" to 48, "1/16" to 24, "1/32" to 12, "1/8T" to 32, "1/16T" to 16)
+
+    /** The pads in the order rows go: the keypad from top to bottom (7 8 9 4 5 6 1 2 3 . 0 E). */
+    private val KEYPAD = PadNotes.ROWS.flatten()
+
+    private val NOTE_KEYS = setOf("at", "t", "vel", "gate", "note", "semi")
+    private val HEADER_KEYS = setOf("name", "tempo", "swing")
+
+    private val CARD_START = Regex("^ARC[ \\t\\u00A0]+BEAT(?:[ \\t\\u00A0]|$)", RegexOption.IGNORE_CASE)
+    private val PAD = Regex("^([A-D])(ENTER|[E.0-9])$")
+    private val SECTION = Regex("^([A-D])(\\d*)$")
+    private val AT = Regex("^(\\d{1,6})\\.(\\d{1,6})\\.(\\d{1,6})([+-]\\d{1,6})?$")
+    private val NOTE_NAME = Regex("^[A-G]#?(?:-1|\\d)$")
+    private val TEXT_BREAKS = Regex("[#|\\t\\r\\n\\u00A0 ]+")
+
+    /** MIDI note by name, C-1 (0) to G9 (127), as [PadNotes.noteName] names them. */
+    private val NOTE_NUMBERS: Map<String, Int> by lazy { (0..127).associateBy { PadNotes.noteName(it) } }
+
+    // ---- Reading ----
+
+    /**
+     * The card in [text]. What comes before the first ARC BEAT line is
+     * ignored, and reading stops at a line that is just ``` or END; see the
+     * spec for the rest. A # starts a comment at the start of a line or after
+     * a space, so a sharp in a note name (C#3) stays. Lines count from 1 in
+     * [text]. The card is null when any problem is an error; warnings leave
+     * it readable.
+     */
+    fun read(text: String): CardRead = Reader(text.removePrefix("\uFEFF").lines()).run()
+
+    /** Whether [text] has an ARC BEAT line: what [read] starts from, so a text without one is no card at all (not a card with a mistake). */
+    fun hasCard(text: String): Boolean = text.removePrefix("\uFEFF").lines().any { CARD_START.containsMatchIn(trim(it)) }
+
+    private class Draft(
+        val line: Int,
+        val group: Int,
+        val number: Int?,
+        val bars: Int,
+        val step: Timing,
+        /** The section's own line was wrong: its body is skipped, as it would only repeat the fault. */
+        val skip: Boolean,
+        /** A second section of a group already read: read for its problems, then dropped. */
+        val dropped: Boolean,
+    ) {
+        /** The notes read, with the line each came from. */
+        val hits = ArrayList<Pair<PatternNote, Int>>()
+        var inNotes = false
+    }
+
+    private class Reader(private val lines: List<String>) {
+        private val problems = ArrayList<CardProblem>()
+        private var name: String? = null
+        private var tempo: Double? = null
+        private var swing = TimingSettings.SWING_MIN
+        private val sections = ArrayList<CardSection>()
+        private val groups = HashSet<Int>()
+        private var draft: Draft? = null
+        private var sectionLines = 0
+
+        fun run(): CardRead {
+            val start = lines.indexOfFirst { CARD_START.containsMatchIn(trim(it)) }
+            if (start < 0) {
+                error(1, "No ARC BEAT line found.")
+                return result()
+            }
+            if (!version(start + 1, tokens(stripComment(lines[start])))) return result()
+            for (i in start + 1 until lines.size) {
+                val line = trim(stripComment(lines[i]))
+                if (line == "```" || line.equals("END", ignoreCase = true)) break
+                if (line.isEmpty()) continue
+                lineAt(i + 1, line)
+            }
+            close()
+            if (sectionLines == 0) error(start + 1, "The card has no section, such as [A].")
+            return result()
+        }
+
+        private fun result(): CardRead {
+            val sorted = problems.sortedBy { it.line }
+            return CardRead(if (sorted.any { it.error }) null else BeatCard(name, tempo, swing, sections), sorted)
+        }
+
+        private fun error(line: Int, message: String) {
+            problems += CardProblem(line, message, true)
+        }
+
+        private fun warn(line: Int, message: String) {
+            problems += CardProblem(line, message, false)
+        }
+
+        // The version after ARC BEAT; false when the card can't be read at all.
+        private fun version(no: Int, t: List<String>): Boolean {
+            val v = t.getOrNull(2)
+            if (v == null || !v.all { it in '0'..'9' } || v.length > 6 || v.toInt() < 1) {
+                error(no, "ARC BEAT needs a version, as in ARC BEAT $VERSION.")
+                return false
+            }
+            if (v.toInt() > VERSION) {
+                error(no, "This card was made by a newer Arc (version ${v.toInt()}).")
+                return false
+            }
+            return true
+        }
+
+        private fun lineAt(no: Int, line: String) {
+            if (line.startsWith("[")) {
+                section(no, line)
+                return
+            }
+            val d = draft
+            if (d == null) {
+                header(no, line)
+                return
+            }
+            if (d.skip) return
+            when {
+                line.equals("notes", ignoreCase = true) -> d.inNotes = true
+                d.inNotes -> note(d, no, line)
+                '|' in line -> row(d, no, line)
+                firstIsPad(line) -> error(no, "${tokens(line)[0]} needs a | before its steps.")
+                else -> {
+                    val word = tokens(line)[0]
+                    if (word.lowercase() in HEADER_KEYS) warn(no, "'$word' belongs before the first section, ignored.")
+                    else warn(no, "Unknown word '$word', ignored.")
+                }
+            }
+        }
+
+        // ---- header ----
+
+        private fun header(no: Int, line: String) {
+            val word = tokens(line)[0]
+            val key = word.lowercase()
+            val rest = trim(line.substring(word.length))
+            when {
+                '|' in line || firstIsPad(line) || key == "notes" -> error(no, "'$word' needs a section first, such as [A].")
+                key == "name" -> when {
+                    rest.isEmpty() -> warn(no, "Name is empty, ignored.")
+                    rest.codePointCount(0, rest.length) > MAX_NAME -> {
+                        warn(no, "Name is longer than $MAX_NAME characters, shortened.")
+                        name = trim(cut(rest, MAX_NAME))
+                    }
+                    else -> name = rest
+                }
+                key == "tempo" -> {
+                    val t = tokens(rest)
+                    val v = if (t.size == 1 && Regex("^\\d{1,3}(\\.\\d)?$").matches(t[0])) t[0].toDouble() else null
+                    if (v == null || v < TEMPO_MIN || v > TEMPO_MAX) error(no, "Tempo must be 40 to 240, whole or with one decimal.")
+                    else tempo = v
+                }
+                key == "swing" -> {
+                    val t = tokens(rest)
+                    val v = if (t.size == 1 && Regex("^\\d{1,3}$").matches(t[0])) t[0].toInt() else null
+                    if (v == null || v < TimingSettings.SWING_MIN || v > TimingSettings.SWING_MAX) error(no, "Swing must be a whole number from 50 to 75.")
+                    else swing = v
+                }
+                else -> warn(no, "Unknown header word '$word', ignored.")
+            }
+        }
+
+        // ---- sections ----
+
+        private fun section(no: Int, line: String) {
+            close()
+            sectionLines++
+            val end = line.indexOf(']')
+            if (end < 0) {
+                skipped(no, "A section needs a closing ], as in [A].")
+                return
+            }
+            val m = SECTION.find(trim(line.substring(1, end)))
+            if (m == null) {
+                skipped(no, "A section needs a group A to D, as in [A] or [A07].")
+                return
+            }
+            val group = m.groupValues[1][0] - 'A'
+            val digits = m.groupValues[2]
+            val number = if (digits.isEmpty()) null else digits.toIntOrNull()?.takeIf { digits.length <= 2 && it in 1..Seq.MAX_PATTERNS }
+            if (digits.isNotEmpty() && number == null) {
+                skipped(no, "The pattern number in [${m.groupValues[1]}$digits] must be 1 to ${Seq.MAX_PATTERNS}.")
+                return
+            }
+            val t = tokens(line.substring(end + 1))
+            var bars = Seq.DEFAULT_BARS
+            var step = Timing.SIXTEENTH
+            var bad = false
+            var i = 0
+            while (i < t.size) {
+                val key = t[i].lowercase()
+                val v = t.getOrNull(i + 1)
+                when (key) {
+                    "bars" -> {
+                        val n = v?.takeIf { it.length <= 3 && it.all { c -> c in '0'..'9' } }?.toInt()
+                        if (n == null || n !in 1..Seq.MAX_BARS) {
+                            error(no, "bars must be a whole number from 1 to ${Seq.MAX_BARS}.")
+                            bad = true
+                        } else bars = n
+                        i += 2
+                    }
+                    "step" -> {
+                        val s = READ_STEPS.firstOrNull { it.id.equals(v, ignoreCase = true) }
+                        if (s == null) {
+                            error(no, "step must be one of ${READ_STEPS.joinToString(" ") { it.id }}.")
+                            bad = true
+                        } else step = s
+                        i += 2
+                    }
+                    else -> {
+                        warn(no, "Unknown option '${t[i]}' on [${m.groupValues[1]}], ignored.")
+                        i += if (v != null && v.lowercase() !in setOf("bars", "step")) 2 else 1
+                    }
+                }
+            }
+            val dropped = !groups.add(group)
+            if (dropped) error(no, "Group ${'A' + group} has two sections.")
+            draft = Draft(no, group, number, bars, step, skip = bad, dropped = dropped)
+        }
+
+        // A section line that can't be used: its body is skipped.
+        private fun skipped(no: Int, message: String) {
+            error(no, message)
+            draft = Draft(no, 0, null, Seq.DEFAULT_BARS, Timing.SIXTEENTH, skip = true, dropped = true)
+        }
+
+        // The section's pattern: duplicates folded, the limit checked.
+        private fun close() {
+            val d = draft ?: return
+            draft = null
+            if (d.skip) return
+            val kept = ArrayList<PatternNote>()
+            val at = HashMap<Triple<Int, Int, Int?>, Int>()
+            for ((n, no) in d.hits) {
+                val key = Triple(n.offset, n.tick, n.semitones)
+                val j = at[key]
+                if (j == null) {
+                    at[key] = kept.size
+                    kept += n
+                } else {
+                    warn(no, "${padText(d.group, n.offset)} has two hits at ${atText(n.tick)}, kept the louder.")
+                    if (n.velocity > kept[j].velocity) kept[j] = n
+                }
+            }
+            if (kept.size > Seq.MAX_NOTES) error(d.line, "Group ${'A' + d.group} has ${kept.size} notes, the most is ${Seq.MAX_NOTES}.")
+            if (!d.dropped) sections += CardSection(d.group, d.number, Pattern(d.bars, kept.sortedWith(NOTE_ORDER)))
+        }
+
+        // ---- grid rows ----
+
+        private fun row(d: Draft, no: Int, line: String) {
+            val bar = line.indexOf('|')
+            val head = tokens(line.substring(0, bar))
+            val pad = head.firstOrNull()?.let { parsePad(it) }
+            if (pad == null) {
+                error(no, if (head.isEmpty()) "A row needs a pad before its first |." else "'${head[0]}' isn't a pad. Use A to D, then . 0 E or 1 to 9.")
+                return
+            }
+            val label = padText(pad.group, pad.offset)
+            if (pad.group != d.group) {
+                error(no, "$label is in group ${'A' + pad.group}, but the section is [${'A' + d.group}].")
+                return
+            }
+            val per = Seq.TICKS_PER_BAR / d.step.ticks
+            val total = d.bars * per
+            val steps = line.substring(bar + 1).filter { !isSpace(it) && it != '|' }
+            val hits = ArrayList<IntArray>() // step, velocity, steps held
+            var open = false
+            for ((k, c) in steps.withIndex()) {
+                val v = velocityOf(c)
+                when {
+                    v != null -> {
+                        hits += intArrayOf(k, v, 1)
+                        open = true
+                    }
+                    c == '-' -> {
+                        if (!open) {
+                            error(no, "$label bar ${k / per + 1} has a - with no hit before it.")
+                            return
+                        }
+                        hits.last()[2]++
+                    }
+                    c == '.' -> open = false
+                    else -> {
+                        error(no, "$label bar ${k / per + 1} has '$c', which isn't one of X x o 1-9 - or .")
+                        return
+                    }
+                }
+            }
+            if (steps.length < total) {
+                val has = steps.length % per
+                error(no, "$label bar ${steps.length / per + 1} has $has ${if (has == 1) "step" else "steps"}, needs $per.")
+                return
+            }
+            if (steps.length > total) {
+                error(no, "$label has ${steps.length} steps, needs $total.")
+                return
+            }
+            for ((k, v, held) in hits) d.hits += PatternNote(Steps.tickOf(k, d.step, swing), pad.offset, held * d.step.ticks, null, v) to no
+        }
+
+        // ---- notes list ----
+
+        private fun note(d: Draft, no: Int, line: String) {
+            val t = tokens(line)
+            val pad = parsePad(t[0])
+            if (pad == null) {
+                error(no, "'${t[0]}' isn't a pad. Use A to D, then . 0 E or 1 to 9.")
+                return
+            }
+            val label = padText(pad.group, pad.offset)
+            if (pad.group != d.group) {
+                error(no, "$label is in group ${'A' + pad.group}, but the section is [${'A' + d.group}].")
+                return
+            }
+            var tick: Int? = null
+            var tickKey = ""
+            var vel = 127
+            var gate = DEFAULT_GATE
+            var semi: Int? = null
+            var semiKey = ""
+            var i = 1
+            while (i < t.size) {
+                val key = t[i].lowercase()
+                val v = t.getOrNull(i + 1)
+                if (key !in NOTE_KEYS) {
+                    warn(no, "Unknown option '${t[i]}' on $label note, ignored.")
+                    i += if (v != null && v.lowercase() !in NOTE_KEYS) 2 else 1
+                    continue
+                }
+                if (v == null) {
+                    error(no, "$label note: $key needs a value.")
+                    return
+                }
+                when (key) {
+                    "at", "t" -> {
+                        if (tickKey.isNotEmpty() && tickKey != key) {
+                            error(no, "$label note has both at and t.")
+                            return
+                        }
+                        tickKey = key
+                        tick = if (key == "t") v.toIntOrNull()?.takeIf { INT.matches(v) } else atTick(v)
+                        if (tick == null) {
+                            error(no, if (key == "t") "$label note: t needs a whole tick number." else "$label note: at needs bar.beat.sixteenth, with beat and sixteenth 1 to 4, as in 1.2.3 or 1.2.3+6.")
+                            return
+                        }
+                    }
+                    "vel" -> {
+                        vel = v.toIntOrNull()?.takeIf { INT.matches(v) && it in 1..127 } ?: run {
+                            error(no, "$label note: vel must be 1 to 127.")
+                            return
+                        }
+                    }
+                    "gate" -> {
+                        gate = GATES[v.uppercase()] ?: v.toIntOrNull()?.takeIf { INT.matches(v) && it >= 1 } ?: run {
+                            error(no, "$label note: gate must be a tick count or one of ${GATES.keys.joinToString(" ")}.")
+                            return
+                        }
+                    }
+                    "note" -> {
+                        if (semiKey == "semi") {
+                            error(no, "$label note has both note and semi.")
+                            return
+                        }
+                        semiKey = "note"
+                        semi = (if (NOTE_NAME.matches(v)) NOTE_NUMBERS[v] else null)?.minus(Keys.ROOT_NOTE) ?: run {
+                            error(no, "$label note: note must be a name from C-1 to G9, such as C4.")
+                            return
+                        }
+                    }
+                    else -> {
+                        if (semiKey == "note") {
+                            error(no, "$label note has both note and semi.")
+                            return
+                        }
+                        semiKey = "semi"
+                        semi = v.toIntOrNull()?.takeIf { SIGNED.matches(v) && it in -127..127 } ?: run {
+                            error(no, "$label note: semi must be -127 to 127.")
+                            return
+                        }
+                    }
+                }
+                i += 2
+            }
+            if (tick == null) {
+                error(no, "$label note needs at or t to place it.")
+                return
+            }
+            val length = d.bars * Seq.TICKS_PER_BAR
+            if (tick !in 0 until length) {
+                error(no, "$label note at tick $tick is outside the pattern (0 to ${length - 1}).")
+                return
+            }
+            d.hits += PatternNote(tick, pad.offset, gate, semi, vel) to no
+        }
+
+        // bar.beat.sixteenth with its leftover ticks, as a tick; null when it isn't one.
+        private fun atTick(v: String): Int? {
+            val m = AT.find(v) ?: return null
+            val (bar, beat, six) = m.groupValues.drop(1).take(3).map { it.toInt() }
+            if (bar < 1 || beat !in 1..Tempo.BEATS_PER_BAR || six !in 1..4) return null
+            val adjust = m.groupValues[4].let { if (it.isEmpty()) 0 else it.toInt() }
+            return (bar - 1) * Seq.TICKS_PER_BAR + (beat - 1) * Seq.PPQN + (six - 1) * 24 + adjust
+        }
+    }
+
+    private val INT = Regex("^\\d{1,9}$")
+    private val SIGNED = Regex("^[+-]?\\d{1,9}$")
+    private val NOTE_ORDER = compareBy<PatternNote>({ it.tick }, { it.offset }, { it.semitones ?: Int.MIN_VALUE })
+
+    private fun isSpace(c: Char) = c == ' ' || c == '\t' || c == '\u00A0'
+
+    private fun trim(s: String) = s.trim { isSpace(it) }
+
+    // A # starts a comment at the start of a line or after a space; one inside a word is a sharp (note C#3).
+    private fun stripComment(s: String): String {
+        for (i in s.indices) if (s[i] == '#' && (i == 0 || isSpace(s[i - 1]))) return s.substring(0, i)
+        return s
+    }
+
+    private fun tokens(s: String) = s.split(' ', '\t', '\u00A0').filter { it.isNotEmpty() }
+
+    // [s] cut to at most [max] characters, a surrogate pair counting as one so it is never split.
+    private fun cut(s: String, max: Int): String =
+        if (s.codePointCount(0, s.length) <= max) s else s.substring(0, s.offsetByCodePoints(0, max))
+
+    private fun firstIsPad(line: String) = parsePad(tokens(line)[0]) != null
+
+    // "A7", "A." or "AENTER" (or "AE") as a pad; null when it isn't one. Case counts.
+    private fun parsePad(token: String): PhysicalPad? {
+        val m = PAD.find(token) ?: return null
+        val label = if (m.groupValues[2] == "E") "ENTER" else m.groupValues[2]
+        return PhysicalPad(m.groupValues[1][0] - 'A', PadNotes.LABELS.indexOf(label))
+    }
+
+    /** A pad as a card writes it: its group letter and label, ENTER as E. */
+    private fun padText(group: Int, offset: Int): String = "${'A' + group}${if (offset == 2) "E" else PadNotes.LABELS[offset]}"
+
+    // The velocity a step character plays at; null when it isn't a hit.
+    private fun velocityOf(c: Char): Int? = when (c) {
+        'X' -> 127
+        'x' -> 100
+        'o' -> 64
+        in '1'..'9' -> 14 * (c - '0')
+        else -> null
+    }
+
+    // The step character for a velocity; null when no character gives it.
+    private fun charOf(velocity: Int): Char? = when {
+        velocity == 127 -> 'X'
+        velocity == 100 -> 'x'
+        velocity == 64 -> 'o'
+        velocity in 14..126 && velocity % 14 == 0 -> '0' + velocity / 14
+        else -> null
+    }
+
+    /** [tick] as the notes list gives it: bar.beat.sixteenth, and the ticks left over as +n (or -n before the next sixteenth). */
+    private fun atText(tick: Int): String {
+        val bar = tick / Seq.TICKS_PER_BAR
+        val within = tick % Seq.TICKS_PER_BAR
+        var sixteenth = within / 24
+        var left = within % 24
+        // Past halfway the next sixteenth is nearer; the last of a bar keeps its +n.
+        if (left > 12 && sixteenth < 15) {
+            sixteenth++
+            left -= 24
+        }
+        val suffix = if (left > 0) "+$left" else if (left < 0) "$left" else ""
+        return "${bar + 1}.${sixteenth / 4 + 1}.${sixteenth % 4 + 1}$suffix"
+    }
+
+    // ---- Writing ----
+
+    /**
+     * [card] as text, as the spec's writing rules have it. [names] gives the
+     * sound name a row shows after its pad (null for none). With [tidy],
+     * velocities are rounded to 127, 100 or 64 (ties up) and gates under a
+     * step become a step, for every note, and the card says so in a comment.
+     * The text ends in a newline.
+     */
+    fun write(card: BeatCard, names: (PhysicalPad) -> String? = { null }, tidy: Boolean = false): String {
+        val swing = TimingSettings.clampSwing(card.swing)
+        val out = ArrayList<String>()
+        out += "ARC BEAT $VERSION"
+        card.name?.let { cleanText(it, MAX_NAME) }?.takeIf { it.isNotEmpty() }?.let { out += "name $it" }
+        card.tempo?.let { out += "tempo ${tempoText(it)}" }
+        out += "swing $swing"
+        if (tidy) out += TIDY_COMMENT
+        for (s in card.sections.sortedBy { it.group }) {
+            out += ""
+            writeSection(out, s, swing, names, tidy)
+        }
+        return out.joinToString("\n", postfix = "\n")
+    }
+
+    private fun writeSection(out: MutableList<String>, s: CardSection, swing: Int, names: (PhysicalPad) -> String?, tidy: Boolean) {
+        val p = s.pattern
+        val g = s.group
+        var notes = unique(p.notes.filter { it.tick in 0 until p.lengthTicks })
+        val step = stepFor(p, notes, swing)
+        if (tidy) notes = notes.map { tidied(it, step.ticks) }
+        val per = Seq.TICKS_PER_BAR / step.ticks
+        val count = p.bars * per
+        val stepOf = rowSteps(notes, step, swing, count)
+        out += "[${'A' + g}${s.number?.let { "%02d".format(Locale.ROOT, it) } ?: ""}] bars ${p.bars} step ${step.id}"
+        val rows = KEYPAD.filter { offset -> notes.indices.any { stepOf[it] >= 0 && notes[it].offset == offset } }
+        val nameOf = rows.associateWith { names(PhysicalPad(g, it))?.let { n -> cleanText(n, Int.MAX_VALUE) }.orEmpty() }
+        val longest = nameOf.values.maxOfOrNull { it.length } ?: 0
+        val width = if (longest > 0) maxOf(NAME_WIDTH, longest) else 0
+        for (offset in rows) {
+            val chars = CharArray(count) { '.' }
+            for (i in notes.indices) {
+                if (stepOf[i] < 0 || notes[i].offset != offset) continue
+                val k = stepOf[i]
+                chars[k] = charOf(notes[i].velocity)!!
+                for (j in 1 until notes[i].gate / step.ticks) chars[k + j] = '-'
+            }
+            val label = padText(g, offset)
+            val head = if (width > 0) "$label ${nameOf.getValue(offset).padEnd(width)}" else label
+            val bars = chars.concatToString().chunked(per).joinToString(" | ") { it.chunked(4).joinToString(" ") }
+            out += "$head | $bars |"
+        }
+        val rest = notes.indices.filter { stepOf[it] < 0 }.map { notes[it] }
+            .sortedWith(compareBy<PatternNote>({ KEYPAD.indexOf(it.offset) }, { it.tick }, { it.semitones ?: Int.MIN_VALUE }))
+        if (rest.isEmpty()) return
+        out += "notes"
+        for (n in rest) out += noteText(g, n)
+    }
+
+    // The notes with the same pad, tick and pitch folded into the louder (the first when level), as reading folds them.
+    private fun unique(notes: List<PatternNote>): List<PatternNote> {
+        val kept = ArrayList<PatternNote>()
+        val at = HashMap<Triple<Int, Int, Int?>, Int>()
+        for (n in notes) {
+            val key = Triple(n.offset, n.tick, n.semitones)
+            val j = at[key]
+            if (j == null) {
+                at[key] = kept.size
+                kept += n
+            } else if (n.velocity > kept[j].velocity) kept[j] = n
+        }
+        return kept
+    }
+
+    // The first of 1/16, 1/16T, 1/32 that puts every pad hit on its grid; 1/16 when none does.
+    private fun stepFor(p: Pattern, notes: List<PatternNote>, swing: Int): Timing =
+        WRITE_STEPS.firstOrNull { t ->
+            val count = p.lengthTicks / t.ticks
+            notes.all { it.semitones != null || gridStep(it.tick, t, swing, count) != null }
+        } ?: Timing.SIXTEENTH
+
+    // The step [tick] is on at [t], or null when it is between steps.
+    private fun gridStep(tick: Int, t: Timing, swing: Int, count: Int): Int? {
+        val k = Steps.indexOf(tick, t, swing, count)
+        return k.takeIf { Steps.tickOf(it, t, swing) == tick }
+    }
+
+    // For each note, its step when it goes on a row (-1 when it goes in the notes list).
+    private fun rowSteps(notes: List<PatternNote>, step: Timing, swing: Int, count: Int): IntArray {
+        val stepOf = IntArray(notes.size) { -1 }
+        for (offset in 0..11) {
+            val onPad = notes.indices
+                .filter { notes[it].semitones == null && notes[it].offset == offset }
+                .mapNotNull { i -> gridStep(notes[i].tick, step, swing, count)?.let { i to it } }
+                .sortedBy { it.second }
+            // From the last hit back, so a hold is checked against the next hit that is on the row.
+            var next = count
+            for ((i, k) in onPad.asReversed()) {
+                val n = notes[i]
+                if (charOf(n.velocity) == null || n.gate < step.ticks || n.gate % step.ticks != 0) continue
+                if (k + n.gate / step.ticks > next) continue
+                stepOf[i] = k
+                next = k
+            }
+        }
+        return stepOf
+    }
+
+    private fun tidied(n: PatternNote, stepTicks: Int): PatternNote =
+        n.copy(velocity = roundVelocity(n.velocity), gate = maxOf(n.gate, stepTicks))
+
+    // The nearest of 127, 100 and 64; halfway goes up.
+    private fun roundVelocity(v: Int): Int = if (v >= 114) 127 else if (v >= 82) 100 else 64
+
+    // One line of the notes list.
+    private fun noteText(group: Int, n: PatternNote): String {
+        val sb = StringBuilder("${padText(group, n.offset)} at ${atText(n.tick)}")
+        if (n.velocity != 127) sb.append(" vel ${n.velocity}")
+        n.semitones?.let { sb.append(if (Keys.ROOT_NOTE + it in 0..127) " note ${PadNotes.noteName(Keys.ROOT_NOTE + it)}" else " semi $it") }
+        if (n.gate != DEFAULT_GATE) sb.append(" gate ${GATES.entries.firstOrNull { it.value == n.gate }?.key ?: n.gate}")
+        return sb.toString()
+    }
+
+    // Text for the header or a row: no #, | or line breaks (they would end it), single spaces, at most [max] characters.
+    private fun cleanText(s: String, max: Int): String = cut(s.replace(TEXT_BREAKS, " ").trim(), max).trim()
+
+    // 92 for 92.0, 92.5 for 92.5: whole or one decimal.
+    private fun tempoText(t: Double): String {
+        val r = Math.round(t * 10) / 10.0
+        return if (r == Math.floor(r)) r.toLong().toString() else String.format(Locale.ROOT, "%.1f", r)
+    }
+
+    // ---- From patterns ----
+
+    /**
+     * A card for [sections] (an export): the sections with notes, in group
+     * order (all of them when none has notes), and the swing [timingSwing]
+     * when every pad hit of every section sits on the swung 1/16 grid, else
+     * 50, so a card never loses a hit's place to a swing it doesn't fit.
+     */
+    fun fromPatterns(name: String?, tempo: Double?, timingSwing: Int, sections: List<CardSection>): BeatCard {
+        val kept = sections.filter { !it.pattern.isEmpty }.ifEmpty { sections }.sortedBy { it.group }
+        val s = TimingSettings.clampSwing(timingSwing)
+        val swing = if (s > TimingSettings.SWING_MIN && kept.all { fitsSwung(it.pattern, s) }) s else TimingSettings.SWING_MIN
+        return BeatCard(name, tempo, swing, kept)
+    }
+
+    private fun fitsSwung(p: Pattern, swing: Int): Boolean {
+        val count = p.lengthTicks / Timing.SIXTEENTH.ticks
+        return p.notes.all { it.semitones != null || it.tick >= p.lengthTicks || gridStep(it.tick, Timing.SIXTEENTH, swing, count) != null }
+    }
+
+    // ---- Import ----
+
+    /**
+     * [card] planned into [seq]: each section's pattern goes into its
+     * group's next free pattern ([SceneOps.nextFree]), and nothing is
+     * overwritten. A card of more than one section also adds a new scene
+     * ([SceneOps.newScene], selected) that plays the new patterns, the
+     * groups the card doesn't have keeping the numbers of the scene
+     * playing; there is none when the project already has 99 scenes
+     * ([CardImport.newScene] false, the patterns still placed). A card of
+     * one section leaves the scene alone: the caller picks the pattern from
+     * [CardImport.placed]. When a group has no free pattern (all 99 hold
+     * notes), nothing is placed: the result has [seq] as it was, no
+     * [CardImport.placed] and that group in [CardImport.fullGroup].
+     */
+    fun plan(seq: ProjectSeq, card: BeatCard): CardImport {
+        var out = seq
+        val placed = ArrayList<Pair<Int, Int>>()
+        for (s in card.sections) {
+            if (s.group !in 0..3) continue
+            val n = SceneOps.nextFree(out, s.group)
+            if (!out.pattern(s.group, n).isEmpty) return CardImport(seq, emptyList(), false, s.group)
+            val p = s.pattern
+            out = out.withPattern(s.group, n, Pattern(p.bars, p.notes.take(Seq.MAX_NOTES).map { it.copy(id = 0) }))
+            placed += s.group to n
+        }
+        if (placed.size < 2) return CardImport(out, placed, false)
+        val withScene = SceneOps.newScene(out)
+        if (withScene.scenes.size == out.scenes.size) return CardImport(out, placed, false)
+        val numbers = List(4) { g -> placed.lastOrNull { it.first == g }?.second ?: seq.selected(g) }
+        val scenes = withScene.scenes.dropLast(1) + Scene(numbers)
+        return CardImport(withScene.withScenes(scenes, withScene.scene), placed, true)
+    }
+}
