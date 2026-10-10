@@ -453,6 +453,10 @@ ARC BEAT 1
 name Hard groove workout
 tempo 140
 swing 56
+fx distortion 35 45
+send B 40
+comp 45 60
+sidechain A7 B 25 60
 
 [A] bars 2 step 1/16
 A7 kick        | X... X... X... X... | X... X... X... X... |

@@ -1144,11 +1144,13 @@ class UnnamedSounds(unittest.TestCase):
         found = bc.check_sounds(card, self.UNNAMED)
         self.assertEqual([(p.line, p.level, p.code) for p in found], [
             (3, bc.NOTE, "sound-unnamed"),
-            (5, bc.NOTE, "sound-unnamed"),
             (6, bc.WARNING, "sound-missing"),
         ])
-        self.assertEqual(found[0].message, "A7: slot 200 is a factory sound without a name; using it by slot")
-        self.assertEqual(str(found[0]), "line 3: note: A7: slot 200 is a factory sound without a name; using it by slot")
+        self.assertEqual(str(found[0]), "line 3: note: A7, A9: slots 200, 201 are factory sounds without a name; using them by slot")
+
+    def test_a_single_unnamed_slot_gets_its_own_note(self):
+        found = bc.check_sounds(one("[A]\nsound A7 200 HH SNAPPY\n" + BAR + "\n"), self.UNNAMED)
+        self.assertEqual([str(p) for p in found], ["line 3: note: A7: slot 200 is a factory sound without a name; using it by slot"])
 
     def test_the_share_s_note_about_unnamed_names_is_skipped_in_the_list(self):
         shared = "My EP-133's sounds (slot name), from the EP-133:\nNames like 200.pcm are factory sounds the EP-133 keeps without a name. " \

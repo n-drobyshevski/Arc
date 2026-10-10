@@ -1037,8 +1037,9 @@ def resolve_sound(sound: Sound, available: Dict[int, str], current: Optional[int
 
 
 def check_sounds(card: Card, available: Dict[int, str]) -> List[Problem]:
-    """A warning for each sound line whose slot or name isn't in [available] (slot -> name): the slot holds another sound, the sound is in another slot (which Arc would use) or in none. A line that uses a slot listed unnamed ("200.pcm") gets a note: its name can't be checked."""
+    """A warning for each sound line whose slot or name isn't in [available] (slot -> name): the slot holds another sound, the sound is in another slot (which Arc would use) or in none. Lines that use a slot listed unnamed ("200.pcm") get one note between them, at the first: their names can't be checked."""
     out: List[Problem] = []
+    unnamed: List[Tuple[int, str, int]] = []  # (line, pad, slot): one note for them all, not one a line
     for pattern in card.patterns:
         for pad in KEYPAD_ORDER:
             sound = pattern.sounds.get(pad)
@@ -1047,7 +1048,7 @@ def check_sounds(card: Card, available: Dict[int, str]) -> List[Problem]:
             label = pad_label(pattern.group, pad)
             slot = resolve_sound(sound, available)
             if slot is not None and unnamed_slot(slot, available.get(slot)):
-                out.append(Problem(sound.line, NOTE, "sound-unnamed", "%s: slot %d is a factory sound without a name; using it by slot" % (label, slot)))
+                unnamed.append((sound.line, label, slot))
             if slot == sound.slot:
                 continue
             holds = available.get(sound.slot)
@@ -1059,6 +1060,13 @@ def check_sounds(card: Card, available: Dict[int, str]) -> List[Problem]:
                 out.append(Problem(sound.line, WARNING, "sound-missing", "%s: %s, and no slot holds '%s'; Arc will skip this sound line" % (label, where, sound.name)))
             else:
                 out.append(Problem(sound.line, WARNING, "sound-missing", "%s: %s; Arc will skip this sound line" % (label, where)))
+    if len(unnamed) == 1:
+        line, label, slot = unnamed[0]
+        out.append(Problem(line, NOTE, "sound-unnamed", "%s: slot %d is a factory sound without a name; using it by slot" % (label, slot)))
+    elif unnamed:
+        unnamed.sort()
+        out.append(Problem(unnamed[0][0], NOTE, "sound-unnamed", "%s: slots %s are factory sounds without a name; using them by slot" % (
+            ", ".join(u[1] for u in unnamed), ", ".join(str(u[2]) for u in unnamed))))
     return sorted(out, key=lambda p: p.line)
 
 
