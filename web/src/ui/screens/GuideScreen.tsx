@@ -38,6 +38,8 @@ export interface GuideScreenProps {
   /** Closes the guide (the close key and Escape); undefined on a guide page with no close key. */
   onBack?: () => void
   class?: string
+  /** A search to show (web: the device view's "All … shortcuts"); a new object each time it is asked for. */
+  search?: { readonly query: string } | null
 }
 
 /** Opens [url] in a new tab; a blocked pop-up just does nothing (runCatching { uri.openUri }). */
@@ -63,6 +65,11 @@ export function GuideScreen(props: GuideScreenProps): JSX.Element {
   const list = useRef<HTMLDivElement>(null)
   const root = useRef<HTMLDivElement>(null)
   const ids = useId()
+
+  // Asked to search (from a key's shortcuts): the field shows it.
+  useEffect(() => {
+    if (props.search) setQuery(props.search.query)
+  }, [props.search])
 
   // A new tab starts at its top.
   useEffect(() => {

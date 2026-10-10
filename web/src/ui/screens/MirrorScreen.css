@@ -596,3 +596,16 @@
 @media (prefers-reduced-motion: reduce) {
   .live-rec.is-armed .live-rec__dot { animation: none; }
 }
+
+/* The device view: the drawing takes the height left, centred. */
+.live__device {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-10);
+  width: 100%;
+  height: 100%;
+  margin: 0 auto;
+  padding: var(--space-8) calc(var(--side-strip-width) + var(--space-8)) var(--space-16) var(--gutter-start);
+}
+.live__device > .live-mode { flex: none; max-width: var(--one-group-max); width: 100%; align-self: center; }

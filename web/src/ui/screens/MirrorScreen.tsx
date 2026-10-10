@@ -29,6 +29,8 @@
 //   with detail 0: it plays the whole sound (hold = false).
 // - The offline note's fold is a button with aria-expanded (Kotlin's
 //   stateDescription NOTE_SHOWN / NOTE_HIDDEN).
+// - Web only: from DEVICE_VIEW_MIN wide, Live draws the EP-133 K.O. II itself
+//   (live/DeviceView.tsx) in place of the grid; the tools panel keeps Follow.
 // - Web only for now: the pads, the KEYS keys and the group keys take the
 //   EP-133 K.O. II's colours (black keys on its grey body, light A–D keys
 //   with their icons and LEDs), and an orange RECORD key ends the group row.
@@ -73,6 +75,7 @@ import { DEFAULT_KEYS, keysDisplayNote, keysLit, octaves, upperOctave, type Keys
 import { PressTracker, type PressTarget } from '../live/press'
 import { PickWord, WordButton } from '../live/Words'
 import { NO_REC, RecChip, TakesSection, type RecUi, type TakesUi } from '../live/Takes'
+import { DeviceView } from '../live/DeviceView'
 import './MirrorScreen.css'
 
 export type { KeysPicker, KeysUi } from '../live/keys'
@@ -130,7 +133,14 @@ export interface MirrorScreenProps {
   rec?: RecUi
   /** Live tools' takes, shown when there is REC. */
   takes?: TakesUi
+  /** Opens the shortcut guide searched for [query] (the device view's key cards). */
+  onGuide?: (query: string) => void
+  /** Draw the EP-133 when Live is at least [DEVICE_VIEW_MIN] wide (default true); false keeps the grid. */
+  deviceView?: boolean
 }
+
+/** From this width on, Live draws the EP-133 itself (web only). */
+export const DEVICE_VIEW_MIN = 900
 
 
 /** The MIDI event clock the mirror's times are on (MIDIMessageEvent.timeStamp). */
@@ -233,12 +243,25 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     }
   }, [pads, notes, keyNotes, fixedNow])
 
+  // Wide enough, Live draws the device (web only).
+  const [wide, setWide] = useState(false)
+  useLayoutEffect(() => {
+    const el = root.current
+    if (!el || props.deviceView === false || typeof ResizeObserver === 'undefined') return
+    const fit = (): void => setWide(el.clientWidth >= DEVICE_VIEW_MIN)
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [props.deviceView])
+  const device = wide && props.deviceView !== false
+
   // The group shown in the one-group view; Follow switches it to the group just played.
   const [group, setGroup] = useState(props.initialGroup ?? 0)
   const hitGroup = st.lastHit?.pad?.group ?? null
   useEffect(() => {
-    if (oneGroup && follow && hitGroup !== null) setGroup(hitGroup)
-  }, [hitGroup, st.lastHit, follow, oneGroup])
+    if ((oneGroup || device) && follow && hitGroup !== null) setGroup(hitGroup)
+  }, [hitGroup, st.lastHit, follow, oneGroup, device])
 
   // In the pads view, the pad just played on the device is the sound KEYS will play.
   // A list left open when KEYS went off (a reload, another tab) closes with it.
@@ -263,15 +286,20 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     </>
   ) : (
     <>
-      <Caption text={MirrorText.VIEW} align="start" />
-      <TextToggle
-        class="live-tools__view"
-        options={[MirrorText.ALL_GROUPS, MirrorText.ONE_GROUP]}
-        selected={oneGroup ? 1 : 0}
-        onSelect={(i) => props.onOneGroup(i === 1)}
-        label={MirrorText.VIEW}
-      />
-      {oneGroup && (
+      {/* The device view shows one group at a time already: only Follow applies. */}
+      {!device && (
+        <>
+          <Caption text={MirrorText.VIEW} align="start" />
+          <TextToggle
+            class="live-tools__view"
+            options={[MirrorText.ALL_GROUPS, MirrorText.ONE_GROUP]}
+            selected={oneGroup ? 1 : 0}
+            onSelect={(i) => props.onOneGroup(i === 1)}
+            label={MirrorText.VIEW}
+          />
+        </>
+      )}
+      {(oneGroup || device) && (
         <GridPlate>
           <SwitchRow title={MirrorText.FOLLOW} note={MirrorText.FOLLOW_NOTE} on={follow} onChange={props.onFollow} />
         </GridPlate>
@@ -299,7 +327,31 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         title={MirrorText.TOOLS}
         panel={panel}
       >
-        {oneGroup || keys.on ? (
+        {device ? (
+          <div class="live__device">
+            <DeviceView
+              st={st}
+              mirror={mirror}
+              keys={keys}
+              keyNotes={keyNotes}
+              nameOf={nameOf}
+              now={now}
+              group={group}
+              onGroup={setGroup}
+              onMode={actions.onMode}
+              onOctave={actions.onOctave}
+              press={padPress}
+              keyPress={(o) => ({ press: (hold) => actions.onKey?.(o, hold), release: () => actions.onKeyUp?.(o) })}
+              playingPads={playingPads}
+              tracker={tracker}
+              rec={rec}
+              still={still}
+              onGuide={props.onGuide}
+              hold={(target) => holdHandlers(tracker, target, false)}
+            />
+            {keys.on && <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} />}
+          </div>
+        ) : oneGroup || keys.on ? (
           // One group (or the keys) fills the screen without scrolling: the display line, the grid
           // (its rows share whatever height is left) and the group keys.
           <div class="live__one">

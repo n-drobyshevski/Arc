@@ -12,6 +12,7 @@
 // Sheets live in ui/sheets (Device: pads / upload / trim; Backups: detail,
 // compare picker, restore, delete; the font licence and progress sheets).
 import { Component, type ComponentChildren, type JSX } from 'preact'
+import { signal } from '@preact/signals'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { MirrorText } from './core/text/mirrorText'
 import { SettingsText } from './core/text/settingsText'
@@ -52,6 +53,9 @@ import { MirrorScreen } from './ui/screens/MirrorScreen'
 import { PICK_PREFIX as PICK, keysPickerOf } from './ui/live/keys'
 import { SearchScreen } from './ui/screens/SearchScreen'
 import { SettingsScreen } from './ui/screens/SettingsScreen'
+
+/** The guide's search when a device key's card asks for it (web only). */
+const guideSearch = signal<{ readonly query: string } | null>(null)
 import { BackupPadsSheet, DevicePadsSheet } from './ui/sheets/PadsSheet'
 import { FontLicenceSheet } from './ui/sheets/FontLicenceSheet'
 import { DeviceUploadSheet } from './ui/sheets/UploadSheet'
@@ -240,7 +244,7 @@ function Root(): JSX.Element {
           onHelp={() => nav.open(overlayLayer('coach'))}
           guideOpen={v.guide}
           onGuide={(open) => (open ? nav.openScreen({ kind: 'guide' }) : nav.close(screenLayer({ kind: 'guide' })))}
-          guide={<GuideScreen onBack={() => nav.close(screenLayer({ kind: 'guide' }))} />}
+          guide={<GuideScreen onBack={() => nav.close(screenLayer({ kind: 'guide' }))} search={guideSearch.value} />}
         >
           <TabScreen view={v} />
         </Shell>
@@ -329,6 +333,10 @@ function TabScreen(props: { view: NavView }): JSX.Element {
             onSelect: (pad) => c.selectKeysPad(pad),
           }}
           rec={c.canRecord ? { state: c.rec.value, onRec: () => c.toggleRec() } : undefined}
+          onGuide={(query) => {
+            guideSearch.value = { query }
+            nav.openScreen({ kind: 'guide' })
+          }}
           takes={{
             list: state.takes,
             playing: c.playing.value,

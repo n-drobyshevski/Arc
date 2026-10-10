@@ -2,6 +2,9 @@
 // the take in Live tools, its actions, and the device's PLAY starting an armed take.
 import { demo, expect, test } from './fixtures'
 
+// The phone layout (the display strip's REC chip); the device view has its own spec.
+test.use({ viewport: { width: 412, height: 843 } })
+
 test('REC records a pad into a take that Live tools lists', async ({ page }) => {
   await page.goto('/?demo')
   await expect(page).toHaveURL(/#\/live$/)
