@@ -301,6 +301,7 @@ export class ArcController {
       fmtDateTime: (ms) => this.fmtDateTime(ms),
       deviceRead: () => void this.offerOfflinePads(),
       transport: (playing) => (playing ? deps.liveAudio.transportStarted?.() : deps.liveAudio.transportStopped?.()),
+      midi: (e) => this.pattern.midi(e),
     })
   }
 
@@ -551,8 +552,9 @@ export class ArcController {
       void this.live.openAudio()
       return
     }
-    // The pattern stops with the sound (Android's focus lost).
+    // The pattern and the click stop with the sound (Android's focus lost).
     this.pattern.stop()
+    this.pattern.setClick(false)
     this.live.suspendAudio()
     this.audioClose = this.deps.setTimeout(() => {
       this.audioClose = null

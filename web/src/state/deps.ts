@@ -19,6 +19,7 @@
 
 import type { RecState } from '../core/features/takeRecorder'
 import type { LiveSeqPlan, LiveTimeline, RecordedTake } from '../platform/audio/liveAudio'
+import type { Beat, BeatGrid } from '../core/features/tempo'
 import type { TakeStore } from '../platform/storage/takeStore'
 import type { ReadonlySignal } from '@preact/signals'
 import { signal } from '@preact/signals'
@@ -209,6 +210,13 @@ export interface LiveAudioDeps {
   readonly timeline?: ReadonlySignal<LiveTimeline | null>
   /** A pad the patterns play has no sound in the plan (pad key group × 12 + offset): the controller loads it. */
   onSeqMissing?(listener: (pad: number) => void): () => void
+  /**
+   * TEMPO's click on or off: free at [bpm], on the EP-133's beats ([grid])
+   * while it sends its clock, on the pattern's while it runs. False when there is no output.
+   */
+  setClick?(on: boolean, bpm: number, grid: BeatGrid | null): boolean
+  /** Each click, with when it is heard: TEMPO's light. */
+  onBeat?(listener: (beat: Beat) => void): () => void
 }
 
 export type { LiveSeqPlan, LiveTimeline }

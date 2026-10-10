@@ -29,15 +29,12 @@ interface Released {
 }
 
 class FakeSink implements ScheduleSink {
-  readonly events: (Started | Released | 'flush' | { click: number; accent: boolean })[] = []
+  readonly events: (Started | Released | 'flush')[] = []
   get starts(): Started[] {
     return this.events.filter((e): e is Started => typeof e === 'object' && 'semitones' in e)
   }
   get releases(): Released[] {
-    return this.events.filter((e): e is Released => typeof e === 'object' && 'key' in e && !('semitones' in e))
-  }
-  get clicks(): { click: number; accent: boolean }[] {
-    return this.events.filter((e): e is { click: number; accent: boolean } => typeof e === 'object' && 'click' in e)
+    return this.events.filter((e): e is Released => typeof e === 'object' && !('semitones' in e))
   }
   startAt(key: string, _v: PadVoice, semitones: number, tag: number, shape: VoiceShape, frame: number): boolean {
     this.events.push({ key, semitones, tag, shape, at: frame })
@@ -45,9 +42,6 @@ class FakeSink implements ScheduleSink {
   }
   releaseAt(key: string, frame: number, tag: number): void {
     this.events.push({ key, at: frame, tag })
-  }
-  click(frame: number, accent: boolean): void {
-    this.events.push({ click: frame, accent })
   }
   flushTimed(): void {
     this.events.push('flush')
@@ -88,7 +82,7 @@ describe('PatternScheduler', () => {
     }
   })
 
-  it('puts tick 0 later by a count-in and a lead, and clicks the count-in', () => {
+  it('puts tick 0 later by a count-in and a lead', () => {
     const s = new PatternScheduler()
     s.plan = plan(0, beats)
     const sink = new FakeSink()
@@ -96,12 +90,8 @@ describe('PatternScheduler', () => {
     run(s, sink, 0, 2 * bar)
     const zero = ahead + 0.15 * rate + bar
     expect(sink.starts[0]?.at).toBe(zero)
-    expect(sink.clicks).toEqual([
-      { click: zero - bar, accent: true },
-      { click: zero - 72000, accent: false },
-      { click: zero - 48000, accent: false },
-      { click: zero - 24000, accent: false },
-    ])
+    expect(s.countingIn(zero - 1)).toBe(true)
+    expect(s.countingIn(zero)).toBe(false)
   })
 
   it('neither repeats nor skips a note through tempo changes', () => {

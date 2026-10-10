@@ -3,6 +3,7 @@ import { signal, type Signal } from '@preact/signals'
 import { WebLatencyHint } from '../../src/core/text/latencyText'
 import type { LiveAudioDeps, LiveEngineInfo, LivePress, LiveSeqPlan, LiveTimeline } from '../../src/state/deps'
 import { transportClock } from '../../src/core/features/sequencer'
+import type { Beat } from '../../src/core/features/tempo'
 import type { RecState } from '../../src/core/features/takeRecorder'
 import type { RecordedTake } from '../../src/platform/audio/liveAudio'
 
@@ -43,6 +44,10 @@ export interface FakeLiveAudio extends LiveAudioDeps {
   runAt(zeroMs: number, bpm?: number): void
   /** Tells a pad the patterns play has no sound. */
   missing(pad: number): void
+  /** TEMPO's click calls in order: "click:<on>:<bpm>:<grid|free>". */
+  readonly clickLog: string[]
+  /** A click heard, as the output tells it. */
+  beat(b: Beat): void
 }
 
 /** [withLate]: with a `late` signal of its own, as the real LiveAudio (the controller then follows it). */
@@ -54,6 +59,7 @@ export function fakeLiveAudio(withLate = false): FakeLiveAudio {
   const rec = signal<RecState>({ kind: 'idle' })
   const timeline = signal<LiveTimeline | null>(null)
   const missingL = new Set<(pad: number) => void>()
+  const beatL = new Set<(b: Beat) => void>()
   const set = (f: (s: Set<string>) => void): void => {
     const next = new Set(voices.peek())
     f(next)
@@ -179,6 +185,18 @@ export function fakeLiveAudio(withLate = false): FakeLiveAudio {
     },
     missing(pad) {
       for (const l of [...missingL]) l(pad)
+    },
+    clickLog: [],
+    setClick(on, bpm, grid) {
+      a.clickLog.push(`click:${on}:${bpm}:${grid === null ? 'free' : 'grid'}`)
+      return a.available
+    },
+    onBeat(l) {
+      beatL.add(l)
+      return () => beatL.delete(l)
+    },
+    beat(b) {
+      for (const l of [...beatL]) l(b)
     },
     latencyHint: signal<WebLatencyHint>(WebLatencyHint.ZERO),
     engine: signal<LiveEngineInfo | null>(null),
