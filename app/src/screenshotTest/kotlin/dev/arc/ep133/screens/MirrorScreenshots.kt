@@ -200,7 +200,9 @@ private fun Framed(
 
 @Composable
 private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null, arp: LiveArp? = null, voices: Set<String>? = null, step: LiveStep? = null, scene: LiveScene? = null, holdProgress: Float = 0f) {
-    val mirror = MirrorUi(state, loading = loading, error = error, offline = offline, offlineProjects = offlineProjects)
+    // As the controller has it: the last read's day alone for a short line ("Seen Oct 5").
+    val offlineShort = offline?.takeIf { it.startsWith("Last seen ") }?.let { MirrorText.seen(it.removePrefix("Last seen ").substringBefore(",")) }
+    val mirror = MirrorUi(state, loading = loading, error = error, offline = offline, offlineShort = offlineShort, offlineProjects = offlineProjects)
     // PROJECT as MainActivity works it out; TEMPO's light caught on a beat while the click is on; FX named on its light,
     // held while [punch] gives the punch-ins.
     val functions = FunctionKeysUi(project = projectKeyOf(mirror, busy = false), clickOn = clickOn, beatLit = clickOn, fx = fx, fxHeld = punch != null)
@@ -1524,6 +1526,12 @@ fun LiveSceneLineSidewaysPreview() = Live(
 @Preview(name = "Live scene line stopped", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
 fun LiveSceneLineStoppedPreview() = Live(playing, oneGroup = true, transport = patternUi(canUndo = true), scene = LiveScene(scenePanel.copy(open = false), still = true))
+
+// Offline beside the keys: "Last seen Oct 5, 1:02 PM" would be cut, so the line reads "Seen Oct 5".
+@PreviewTest
+@Preview(name = "Live offline line", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveOfflineLinePreview() = Live(lastRead, oneGroup = true, offline = "Last seen Oct 5, 1:02 PM", transport = patternUi(), scene = LiveScene(scenePanel.copy(open = false), still = true))
 
 @PreviewTest
 @Preview(name = "Pattern sheet", widthDp = 393, heightDp = 852, showBackground = true)

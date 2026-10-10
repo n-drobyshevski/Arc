@@ -174,6 +174,7 @@ class FeatureTextTest {
         // Project 1 unless PROJECT stepped on; a last read keeps its own note.
         assertEquals(MirrorText.factoryNote(1), MirrorText.offlineNote(MirrorText.FACTORY))
         assertEquals(MirrorText.OFFLINE_NOTE, MirrorText.offlineNote(MirrorText.lastSeen("5 Oct, 14:02"), 3))
+        assertEquals("Seen 5 Oct", MirrorText.seen("5 Oct"))
         assertTrue(MirrorText.LISTEN_ONLY.endsWith("in EDIT, switch projects with PROJECT, or keep a sample in SAMPLE."))
         assertEquals("Next project: tap; hold + pad 1–9 to pick", CoachText.PROJECT)
         assertEquals("Project 3, shown", MirrorText.projectChoice(3, shown = true))

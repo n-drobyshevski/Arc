@@ -31,6 +31,8 @@ object MirrorText {
     const val NOTE_HIDDEN = "Tap for a note"
     /** "Last seen 5 Oct, 14:02", for the display while offline. */
     fun lastSeen(at: String) = "Last seen $at"
+    /** "Seen 5 Oct", the day alone: [lastSeen] where the line is too short for it (the one-group line beside its keys). */
+    fun seen(day: String) = "Seen $day"
     // Not connected, with the factory sounds in the library: one of their projects (the first unless PROJECT steps on).
     const val FACTORY = "Factory sounds"
     fun factoryNote(project: Int) = "Not connected: these are the EP-133's factory sounds, project $project as it ships. Connect your EP-133 to see it live."

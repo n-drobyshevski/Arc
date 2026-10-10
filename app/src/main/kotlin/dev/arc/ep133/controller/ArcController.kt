@@ -143,6 +143,8 @@ data class MirrorUi(
     val error: String? = null,
     /** Not connected, showing the last read instead: when it was made ("Last seen 5 Oct, 14:02"). */
     val offline: String? = null,
+    /** [offline]'s last read as its day alone ("Seen 5 Oct"), for a line too short for it; null for the factory sounds. */
+    val offlineShort: String? = null,
     /** The device's sounds as Live read them, for EDIT's pad sheet (empty until read, and offline). */
     val sounds: List<dev.arc.ep133.protocol.SoundEntry> = emptyList(),
     /** Offline: the sounds EDIT's pad sheet lists instead, played and put on pads in arc only. */
@@ -1162,6 +1164,10 @@ class ArcController(
 
     fun fmtDateTime(ms: Long): String = fmtDate(ms)
 
+    /** The day alone, "Oct 5" (in the phone's order). */
+    fun fmtMonthDay(ms: Long): String =
+        Format.date(ms, DateFormat.getBestDateTimePattern(Locale.getDefault(), "MMMd"))
+
     fun backup(): Job = scope.launch {
         val s = session ?: return@launch
         val saved = runTask(Strings.BACKING_UP) { onProgress, signal ->
@@ -1680,8 +1686,9 @@ class ArcController(
         preloadPads(m)
         // Every factory project's line is FACTORY (refreshOffline goes by it); offlineNote names the project.
         val offline = lastRead?.takeIf { fromRead }?.let { dev.arc.ep133.text.MirrorText.lastSeen(fmtDateTime(it.savedAt)) } ?: dev.arc.ep133.text.MirrorText.FACTORY
+        val offlineShort = lastRead?.takeIf { fromRead }?.let { dev.arc.ep133.text.MirrorText.seen(fmtMonthDay(it.savedAt)) }
         _state.update {
-            it.copy(mirror = MirrorUi(m.snapshot(System.nanoTime()), loading = false, offline = offline, offlineSounds = sounds, offlineProjects = views))
+            it.copy(mirror = MirrorUi(m.snapshot(System.nanoTime()), loading = false, offline = offline, offlineShort = offlineShort, offlineSounds = sounds, offlineProjects = views))
         }
     }
 

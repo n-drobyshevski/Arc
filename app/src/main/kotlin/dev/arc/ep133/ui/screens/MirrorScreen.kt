@@ -1791,13 +1791,15 @@ private fun DisplayStrip(
                 val tempo = st.bpm?.let(MirrorText::bpm)
                 val clock = listOfNotNull(glyph, tempo).fold(0.dp) { a, w -> a + width(w, ArcType.displaySub) + 10.dp }
                 val shown = clock > 0.dp && maxWidth - clock >= minOf(MainMin, width(main, ArcType.displayHead))
+                // Offline, "Last seen Oct 5, 1:02 PM" gives way to "Seen Oct 5" where it would be cut (still said in full).
+                val short = mirror?.offlineShort?.takeIf { main == mirror.offline && width(main, ArcType.displayHead) > maxWidth - if (shown) clock else 0.dp }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     if (shown) {
                         glyph?.let { Text(it, style = ArcType.displaySub, color = if (st.playing == true) c.displayInk else c.displayDim) }
                         tempo?.let { Text(it, style = ArcType.displaySub, color = c.displayInk, maxLines = 1, softWrap = false) }
                     }
                     Text(
-                        main,
+                        short ?: main,
                         style = ArcType.displayHead,
                         color = c.displayInk,
                         maxLines = 1,

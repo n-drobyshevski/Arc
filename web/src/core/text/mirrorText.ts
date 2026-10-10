@@ -39,6 +39,10 @@ export const MirrorText = {
   lastSeen(at: string): string {
     return `Last seen ${at}`
   },
+  /** "Seen 5 Oct", the day alone: [lastSeen] where the line is too short for it (the one-group line beside its keys). */
+  seen(day: string): string {
+    return `Seen ${day}`
+  },
   // Not connected, with the factory sounds in the library: one of their projects (the first unless PROJECT steps on).
   FACTORY: 'Factory sounds',
   factoryNote(project: number): string {
