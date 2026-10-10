@@ -1777,25 +1777,42 @@ private fun DisplayStrip(
     val said = spoken(listOfNotNull(played, st.bpm?.let(MirrorText::bpm), st.activeProject?.let(MirrorText::project), main).joinToString(", "))
     PatternLine(transport, take, still, compact, step) {
         SpokenLine(said) {
-            // Offline and the project are only said: the top bar and the PROJECT key show them.
-            when (st.playing) {
-                true -> Text("\u25B6", style = ArcType.displaySub, color = c.displayInk)
-                false -> Text("\u25A0", style = ArcType.displaySub, color = c.displayDim)
-                null -> Unit
+            // Offline and the project are only said: the top bar and the PROJECT key show them. The device's ▶/■ and
+            // tempo give way together where they would leave the main line less than [MainMin] (or its whole, if shorter).
+            BoxWithConstraints(Modifier.weight(1f)) {
+                val measurer = rememberTextMeasurer()
+                val density = LocalDensity.current
+                fun width(s: String, style: androidx.compose.ui.text.TextStyle) = with(density) { measurer.measure(s, style, maxLines = 1, softWrap = false).size.width.toDp() }
+                val glyph = when (st.playing) {
+                    true -> "\u25B6"
+                    false -> "\u25A0"
+                    null -> null
+                }
+                val tempo = st.bpm?.let(MirrorText::bpm)
+                val clock = listOfNotNull(glyph, tempo).fold(0.dp) { a, w -> a + width(w, ArcType.displaySub) + 10.dp }
+                val shown = clock > 0.dp && maxWidth - clock >= minOf(MainMin, width(main, ArcType.displayHead))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (shown) {
+                        glyph?.let { Text(it, style = ArcType.displaySub, color = if (st.playing == true) c.displayInk else c.displayDim) }
+                        tempo?.let { Text(it, style = ArcType.displaySub, color = c.displayInk, maxLines = 1, softWrap = false) }
+                    }
+                    Text(
+                        main,
+                        style = ArcType.displayHead,
+                        color = c.displayInk,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
-            st.bpm?.let { Text(MirrorText.bpm(it), style = ArcType.displaySub, color = c.displayInk, maxLines = 1) }
-            Text(
-                main,
-                style = ArcType.displayHead,
-                color = c.displayInk,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = androidx.compose.ui.text.style.TextAlign.End,
-                modifier = Modifier.weight(1f),
-            )
         }
     }
 }
+
+/** The room the one-group line keeps for its main line (the hit) before the device's ▶/■ and tempo beside it give way. */
+private val MainMin = 96.dp
 
 /**
  * The words of a display line, read as one polite live region ([said]). The
