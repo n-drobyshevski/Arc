@@ -31,6 +31,7 @@ import type { ShareResult } from '../platform/share/share'
 import type { SoundPlayer } from '../platform/audio/player'
 import type { RecordedTake } from '../platform/audio/liveAudio'
 import type { RecState } from '../core/features/takeRecorder'
+import type { TakeStore } from '../platform/storage/takeStore'
 
 /** MidiConnector: support, the silent permission probe, access, open and attach/detach. */
 export interface MidiDeps {
@@ -187,6 +188,8 @@ export interface FileDeps {
 /** Files.share. 'saved' means the browser could not share files and saved instead. */
 export interface ShareDeps {
   share(name: string, data: FileData, mime: string, title: string, text?: string): Promise<ShareResult>
+  /** Whether this browser can share a file (navigator.canShare with files); where not, Share is left out. */
+  canShareFiles?(): boolean
 }
 
 /** The activity lifecycle: started/stopped becomes tab visible/hidden. */
@@ -218,6 +221,8 @@ export interface Deps {
   liveAudio: LiveAudioDeps
   /** Where Live's copies of the device's pad sounds are kept (Android files/pad-sounds). */
   padSounds: PadSoundStore
+  /** Where Live's takes are kept (Android files/takes); without it there is no REC. */
+  takes?: TakeStore
   /** Live's last read, shown while the device is not connected. */
   lastRead: LastReadDeps
   /** Screen wake lock: on while a task runs, or Live is open with keepScreenOn. */

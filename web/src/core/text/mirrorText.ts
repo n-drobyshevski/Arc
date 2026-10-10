@@ -7,6 +7,7 @@
 import { Keys, NoteNames, Scale } from '../features/keys'
 import type { Hit } from '../features/liveMirror'
 import { noteName, type PhysicalPad } from '../features/padNotes'
+import { TakeRecorder, type RecState } from '../features/takeRecorder'
 import { FeatureText } from './featureText'
 
 export const MirrorText = {
@@ -172,5 +173,47 @@ export const MirrorText = {
 
   channel(ch: number): string {
     return `ch ${ch}`
+  },
+
+  // ---------- REC: takes of what is played on the phone ----------
+  REC: 'Rec',
+  TAKES: 'Takes',
+  NO_TAKES:
+    'Tap REC on the display, then play: recording starts with the first sound, or when the EP-133 starts playing, and stops when you tap REC again or, if its PLAY started it, when the EP-133 stops.',
+  TAKES_NOTE:
+    "A take holds the pads and keys played on the phone, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save or Share copies one out.",
+  TO_DEVICE: 'To EP-133',
+  DELETE_TAKE: 'Delete this take?',
+  NO_OUTPUT: 'There is no sound output to record from.',
+  SHARE_TAKE_FAILED: 'Sharing failed. Use Save WAV instead.',
+
+  /** What the REC key does now, for screen readers. */
+  recDescription(state: RecState): string {
+    switch (state.kind) {
+      case 'idle':
+        return 'Record. Recording starts with the first sound you play, or when the EP-133 starts playing.'
+      case 'armed':
+        return "Record, waiting for the first sound or the EP-133's PLAY. Tap to cancel."
+      case 'recording':
+        return `Recording, ${MirrorText.takeLength(state.seconds)}. Tap to stop.`
+    }
+  },
+
+  /** "0:12", "10:00". */
+  takeLength(seconds: number): string {
+    const s = Math.trunc(seconds)
+    return `${Math.trunc(s / 60)}:${String(s % 60).padStart(2, '0')}`
+  },
+
+  takeSaved(seconds: number): string {
+    return `Take saved (${MirrorText.takeLength(seconds)}). It's in Live tools.`
+  },
+
+  takeAtLimit(seconds: number): string {
+    return `The take reached ${TakeRecorder.MAX_SECONDS / 60} minutes and was saved (${MirrorText.takeLength(seconds)}).`
+  },
+
+  takeFailed(reason: string): string {
+    return `The take couldn't be saved: ${reason}`
   },
 } as const

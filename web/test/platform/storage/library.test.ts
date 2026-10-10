@@ -89,7 +89,7 @@ describe('IndexedDB arc v2', () => {
 
     const lib = await openLib(name)
     expect(lib.db.version).toBe(DB_VERSION)
-    expect([...lib.db.objectStoreNames].sort()).toEqual(['backups', 'files', 'indexed', 'kv', 'names', 'padSounds'])
+    expect([...lib.db.objectStoreNames].sort()).toEqual(['backups', 'files', 'indexed', 'kv', 'names', 'padSounds', 'takes'])
     const idx = await transact(lib.db, STORE.backups, 'readonly', (t) => [...t.objectStore(STORE.backups).indexNames])
     expect(idx).toEqual(['createdAt'])
 
@@ -109,7 +109,7 @@ describe('IndexedDB arc v2', () => {
 
   it('creates every store on a fresh database', async () => {
     const db = await openArcDb({ name: freshName() })
-    expect([...db.objectStoreNames].sort()).toEqual(['backups', 'files', 'indexed', 'kv', 'names', 'padSounds'])
+    expect([...db.objectStoreNames].sort()).toEqual(['backups', 'files', 'indexed', 'kv', 'names', 'padSounds', 'takes'])
     db.close()
   })
 })

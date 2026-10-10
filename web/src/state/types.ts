@@ -13,6 +13,7 @@
 //   [canPickFolder] (File System Access is Chromium only).
 // - UiState.keysPad is a PhysicalPad (compare with padKey(), not ===).
 
+import type { TakeInfo } from '../platform/storage/takeStore'
 import type { Pak } from '../core/backup/pak'
 import type { DiffResult } from '../core/features/backupDiff'
 import type { DeviceContents, SoundDetails } from '../core/features/deviceBrowser'
@@ -159,6 +160,8 @@ export interface UiState {
   readonly canPickFolder: boolean
   /** Web: the library folder's name while it is in use (folderStatus 'granted'), for WebText.folderNote. */
   readonly folderName: string | null
+  /** Live's takes, newest first (ArcController.takes). */
+  readonly takes: readonly TakeInfo[]
 }
 
 /** The three tabs under the top bar (ui/components Tab). */
@@ -199,6 +202,7 @@ export function emptyMirrorState(padOrder: PadOrder = PadOrder.FROM_TOP): Mirror
 /** UiState(midiSupported = midi.supported) with every other field at its default. */
 export function initialState(midiSupported = true, canPickFolder = false): UiState {
   return {
+    takes: [],
     midiSupported,
     connected: false,
     device: null,

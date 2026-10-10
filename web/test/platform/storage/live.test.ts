@@ -53,8 +53,8 @@ describe('IndexedDB arc v3', () => {
 
     const db = await openArcDb({ name })
     expect(db.version).toBe(DB_VERSION)
-    expect(DB_VERSION).toBe(3)
-    expect([...db.objectStoreNames].sort()).toEqual(['backups', 'files', 'indexed', 'kv', 'names', 'padSounds'])
+    expect(DB_VERSION).toBe(4)
+    expect([...db.objectStoreNames].sort()).toEqual(['backups', 'files', 'indexed', 'kv', 'names', 'padSounds', 'takes'])
     expect(await transact(db, STORE.kv, 'readonly', (t) => request(t.objectStore(STORE.kv).get('folderPicked')))).toEqual({ key: 'folderPicked', value: true })
     expect(await transact(db, STORE.names, 'readonly', (t) => request(t.objectStore(STORE.names).count()))).toBe(1)
     db.close()

@@ -58,6 +58,8 @@ export interface MirrorHost {
   live: LiveSounds
   /** "5 Oct, 14:02" for the offline line. */
   fmtDateTime(ms: number): string
+  /** The EP-133 started ([playing]) or stopped (MIDI Start/Continue, Stop): REC follows it. */
+  transport?(playing: boolean): void
 }
 
 /** Kotlin String.toDoubleOrNull (Java's float syntax, no surrounding blanks). */
@@ -192,7 +194,12 @@ export class MirrorController {
     this.mirrorSession = s
     host.store.update((st) => ({ ...st, mirror: { state: m.snapshot(host.perfNow()), loading: true, error: null, offline: null } }))
     // Listen first, so nothing played while reading is missed.
-    this.unlisten = events((e) => m.onMidi(e))
+    this.unlisten = events((e) => {
+      m.onMidi(e)
+      // An armed take starts with the device's PLAY, and one it started ends with its STOP.
+      if (e.type === 'Start' || e.type === 'Continue') host.transport?.(true)
+      else if (e.type === 'Stop') host.transport?.(false)
+    })
     this.pushOff = s.onPush((f) => {
       const fid = parsePadPush(f)
       if (!fid) return

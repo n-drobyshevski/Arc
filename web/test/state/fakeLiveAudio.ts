@@ -1,5 +1,7 @@
 // A LiveAudioDeps that records what the controller asks of Live's output (state tests).
-import { signal } from '@preact/signals'
+import { signal, type Signal } from '@preact/signals'
+import type { RecState } from '../../src/core/features/takeRecorder'
+import type { RecordedTake } from '../../src/platform/audio/liveAudio'
 import type { LiveAudioDeps, LivePress } from '../../src/state/deps'
 
 export interface FakeLiveAudio extends LiveAudioDeps {
@@ -16,12 +18,19 @@ export interface FakeLiveAudio extends LiveAudioDeps {
   started(id: string, ms: number, route?: string): void
   /** Reports a slow (Bluetooth-like) output. */
   slow(ms: number): void
+  readonly rec: Signal<RecState>
+  /** REC calls in order: arm, stop, transport:start, transport:stop. */
+  readonly recLog: string[]
+  /** Ends the take as the output would: [take] or null, and whether the limit ended it. */
+  endTake(take: RecordedTake | null, limit?: boolean): void
 }
 
 export function fakeLiveAudio(): FakeLiveAudio {
   const voices = signal<ReadonlySet<string>>(new Set())
   const startedL = new Set<(id: string, ms: number, route: string) => void>()
   const slowL = new Set<(ms: number) => void>()
+  const takeL = new Set<(t: RecordedTake | null, limit: boolean) => void>()
+  const rec = signal<RecState>({ kind: 'idle' })
   const set = (f: (s: Set<string>) => void): void => {
     const next = new Set(voices.peek())
     f(next)
@@ -84,6 +93,31 @@ export function fakeLiveAudio(): FakeLiveAudio {
     },
     slow(ms) {
       for (const l of slowL) l(ms)
+    },
+    rec,
+    recLog: [],
+    arm() {
+      a.recLog.push('arm')
+      if (!a.available) return false
+      if (rec.peek().kind === 'idle') rec.value = { kind: 'armed' }
+      return true
+    },
+    stopRecording() {
+      a.recLog.push('stop')
+    },
+    transportStarted() {
+      a.recLog.push('transport:start')
+    },
+    transportStopped() {
+      a.recLog.push('transport:stop')
+    },
+    onTake(l) {
+      takeL.add(l)
+      return () => takeL.delete(l)
+    },
+    endTake(take, limit = false) {
+      rec.value = { kind: 'idle' }
+      for (const l of [...takeL]) l(take, limit)
     },
   }
   return a
