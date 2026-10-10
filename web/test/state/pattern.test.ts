@@ -283,11 +283,17 @@ describe('PATTERN', () => {
   it('ERASE: a pad held while playing erases its notes as they pass, only there', async () => {
     const h = await liveOn()
     const p = h.c.pattern
+    // The pad's sound in memory first: the timed presses below don't wait for a load.
+    await h.c.playPad(A0)
+    h.c.releasePad(A0)
     p.setCountIn(false)
     p.setTiming('1/4')
+    // The clock held still, so a slow run can't age the presses' own times (they count only up to a second back).
+    const held = performance.now()
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => held)
     p.recordDown(now())
     p.play()
-    // 240 BPM: 250 ms a beat (a press's own time counts only up to a second back).
+    // 240 BPM: 250 ms a beat.
     const zero = now() - 900
     h.liveAudio.runAt(zero, 240)
     for (const b of [0, 1, 2, 3]) {
@@ -301,6 +307,7 @@ describe('PATTERN', () => {
     await h.c.playPad(A0, true, false, zero + 230)
     h.c.releasePad(A0, zero + 560)
     expect(notes(h, 0).map((n) => n.tick)).toEqual([0, 288])
+    clock.mockRestore()
   })
 
   it('ERASE: KEYS notes erase their own pitch on the KEYS pad', async () => {

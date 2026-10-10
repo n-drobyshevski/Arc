@@ -160,6 +160,7 @@ import { tick } from '../../platform/haptics'
 import { PickWord, WordButton } from '../live/Words'
 import { TakeBadge, TakesSection, type TakeUi, type TakesUi } from '../live/Takes'
 import { PatternLine, TransportContext } from '../live/PatternLine'
+import { FunctionRow } from '../live/FunctionRow'
 import { DeviceView } from '../live/DeviceView'
 import { useDesk, useFinePointer, useWindowSize } from '../useDesk'
 import './MirrorScreen.css'
@@ -858,6 +859,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   const modeLead = <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} plan={plan} part="lead" />
   const modePicks = <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} plan={plan} part="picks" />
   // On a phone on its side the line is in the top bar instead.
+  // TEMPO (and, in later rounds, the other function keys) over the pads, upright; none sideways or in EDIT.
+  const fnRow = inBar || editing ? null : <FunctionRow class="live__fn" />
   const displayStrip = inBar ? null : editing ? <EditStrip /> : <DisplayStrip st={st} mirror={mirror} take={take} still={fixedNow !== null} />
   const allGroups = (
     <div class="live__all">
@@ -866,6 +869,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         {onBack && <CloseKey class="live__close" onClick={onBack} description={GUIDE_CLOSE} />}
       </div>
       {inBar ? null : editing ? <EditStrip /> : <Display st={st} mirror={mirror} initialNoteOpen={props.initialNoteOpen ?? false} onGetFactory={props.onGetFactory ?? null} take={take} still={fixedNow !== null} />}
+      {fnRow}
       {modeRow}
       {/* Four groups in a row when there is room, two by two on a phone. */}
       <div class="live__groups">
@@ -896,6 +900,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         )}
         <div class="live-piano__body">
           {!inBar && <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={pianoRange} />}
+          {fnRow}
           {modeRow}
           <div
             class="live-piano__keys"
@@ -957,6 +962,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
       body = (
         <div class="live-ko live-ko--keys">
           <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={null} />
+          {fnRow}
           {modeRow}
           <div class="live-ko__body">
             <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} haptic={haptic} keysRef={gridKeys} />
@@ -968,6 +974,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         <div class="live-ko">
           {editTab}
           {displayStrip}
+          {fnRow}
           {modeRow}
           <div class="live-ko__body">
             <GroupKeys keyboard={keyHints} group={group} st={st} now={now} onSelect={setGroup} vertical />
@@ -981,6 +988,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         <div class="live-row desk-paper" style={{ '--row-pad': `${rowPad}px` }}>
           {editTab}
           {displayStrip}
+          {fnRow}
           {modeRow}
           <div class="live-row__groups">
             {[0, 1, 2, 3].map((g) => (
@@ -1034,6 +1042,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         ) : keys.on && keyNotes ? (
           <>
             {!inBar && <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={null} />}
+            {fnRow}
             <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} haptic={haptic} keysRef={gridKeys} />
             {modeRow}
           </>
@@ -1054,6 +1063,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         ) : (
           <>
             {displayStrip}
+            {fnRow}
             <Group group={group} st={st} nameOf={nameOf} now={now} big coach ui={padUi} tracker={tracker} keyHints={keyHints} />
             {modeRow}
             <GroupKeys keyboard={keyHints} group={group} st={st} now={now} onSelect={setGroup} />

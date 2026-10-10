@@ -12,7 +12,7 @@
 //   tick heard is the tick stamped.
 // - Times are performance.now() milliseconds where Kotlin's are System.nanoTime.
 
-import { Pattern, ProjectPatterns, Seq, Timing } from '../core/features/pattern'
+import { Pattern, ProjectPatterns, Seq, Timing, TimingSettings } from '../core/features/pattern'
 import type { PatternRecorder } from '../core/features/patternRecorder'
 import { Tempo } from '../core/features/tempo'
 import type { TransportPhase, TransportState } from '../core/features/transport'
@@ -33,6 +33,8 @@ export interface PatternUiState {
   readonly recording: boolean
   readonly countIn: number | null
   readonly timing: Timing
+  /** TIMING whole: the interval, its swing and quantize or free time (the tempo sheet's TIMING page). */
+  readonly timingSettings: TimingSettings
   readonly countInOn: boolean
   readonly autoLength: boolean
   readonly bars: readonly number[]
@@ -51,6 +53,7 @@ export const PATTERN_UI: PatternUiState = Object.freeze({
   recording: false,
   countIn: null,
   timing: Timing.DEFAULT,
+  timingSettings: TimingSettings.DEFAULT,
   countInOn: true,
   autoLength: false,
   bars: [Seq.DEFAULT_BARS, Seq.DEFAULT_BARS, Seq.DEFAULT_BARS, Seq.DEFAULT_BARS],

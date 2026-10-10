@@ -269,7 +269,7 @@ export class PatternDesk {
 
   private withSettings(ui: PatternUiState): PatternUiState {
     const s = this.settings
-    return { ...ui, timing: TimingSettings.record(s.timing), countInOn: s.countIn, autoLength: s.autoLength }
+    return { ...ui, timing: TimingSettings.record(s.timing), timingSettings: s.timing, countInOn: s.countIn, autoLength: s.autoLength }
   }
 
   /** The pattern's tempo: the EP-133's while it sends its clock, else Live's own. */
@@ -679,6 +679,21 @@ export class PatternDesk {
     const cur = this.settings.timing
     const timing = t === 'off' ? TimingSettings.withQuantize(cur, false) : TimingSettings.withQuantize(TimingSettings.withInterval(cur, t), true)
     this.changeSettings({ ...this.settings, timing })
+  }
+
+  /** TIMING's interval: the step the grid recording snaps to (kept). */
+  setTimingInterval(t: Timing): void {
+    this.changeSettings({ ...this.settings, timing: TimingSettings.withInterval(this.settings.timing, t) })
+  }
+
+  /** TIMING's swing, 50 to 75 % (kept). */
+  setTimingSwing(percent: number): void {
+    this.changeSettings({ ...this.settings, timing: TimingSettings.withSwing(this.settings.timing, Math.round(percent)) })
+  }
+
+  /** TIMING's quantize (true) or free time (false), for recording (kept). */
+  setTimingQuantize(on: boolean): void {
+    this.changeSettings({ ...this.settings, timing: TimingSettings.withQuantize(this.settings.timing, on) })
   }
 
   /** COUNT-IN: RECORD then PLAY counts a bar in first. Kept. */
