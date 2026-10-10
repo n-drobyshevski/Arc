@@ -52,3 +52,27 @@ test('a wide Live draws the EP-133 and follows the device', async ({ page }) => 
   await expect(page.getByRole('region', { name: 'Shortcut guide' })).toBeVisible()
   await expect(page.getByRole('region', { name: 'Shortcut guide' }).getByRole('searchbox')).toHaveValue('SOUND')
 })
+
+test('the computer keyboard plays Live, and the tools stay open beside the device', async ({ page }) => {
+  await page.goto('/?demo')
+  const ep = page.getByRole('group', { name: 'EP-133 K.O. II' })
+  await expect(ep).toBeVisible()
+  // Docked at this width: the tools are a column of their own, with the takes.
+  const dock = page.getByRole('complementary', { name: 'Live tools' })
+  await expect(dock).toBeVisible()
+  await expect(dock.getByRole('region', { name: 'Takes' })).toBeVisible()
+
+  await page.keyboard.press('F3')
+  await expect(ep.getByRole('tab', { name: 'Group C' })).toHaveAttribute('aria-selected', 'true')
+  await page.keyboard.press('Minus')
+  await expect(ep.getByRole('tab', { name: 'Group B' })).toHaveAttribute('aria-selected', 'true')
+  await page.keyboard.press('KeyK')
+  await expect(ep.locator('[data-key]')).toHaveCount(12)
+  await page.keyboard.press('KeyK')
+  await expect(ep.locator('[data-pad]')).toHaveCount(12)
+  await page.keyboard.press('KeyR')
+  await expect(ep.getByRole('button', { name: /^Record, waiting/ })).toBeVisible()
+  await page.keyboard.press('KeyR')
+  await expect(ep.getByRole('button', { name: /^Record\. / })).toBeVisible()
+})
+

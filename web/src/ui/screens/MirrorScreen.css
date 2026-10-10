@@ -609,3 +609,31 @@
   padding: var(--space-8) calc(var(--side-strip-width) + var(--space-8)) var(--space-16) var(--gutter-start);
 }
 .live__device > .live-mode { flex: none; max-width: var(--one-group-max); width: 100%; align-self: center; }
+
+/* Docked tools (web only, 1200 px and wider): the device, then the tools in a column of their own. */
+.live--docked {
+  display: flex;
+  align-items: stretch;
+}
+.live--docked .live__main {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+}
+.live--docked .live__device { padding-right: var(--space-16); }
+.live-dock {
+  flex: none;
+  width: 340px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-10);
+  padding: 12px 20px 24px 20px;
+  border-left: 1px solid var(--key-edge);
+  background: var(--shell);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.live-dock > * { flex: none; }

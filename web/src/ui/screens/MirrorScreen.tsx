@@ -29,6 +29,9 @@
 //   with detail 0: it plays the whole sound (hold = false).
 // - The offline note's fold is a button with aria-expanded (Kotlin's
 //   stateDescription NOTE_SHOWN / NOTE_HIDDEN).
+// - Web only: the computer's keys play too (PAD_KEYS: the numpad, or four
+//   letter rows), held as a gate; F1–F4 pick the group, K switches KEYS, R is
+//   REC, and − / + change the octave in KEYS or the group in PADS.
 // - Web only: from DEVICE_VIEW_MIN wide, Live draws the EP-133 K.O. II itself
 //   (live/DeviceView.tsx) in place of the grid; the tools panel keeps Follow.
 // - Web only for now: the pads, the KEYS keys and the group keys take the
@@ -40,7 +43,7 @@
 //   'pick:scale' / 'pick:octave'); without them each word keeps its own state.
 import { Fragment, type ButtonHTMLAttributes, type ComponentChildren, type JSX } from 'preact'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { Keys, SCALES, type Scale } from '../../core/features/keys'
+import { Keys, MAX_OCTAVE, MIN_OCTAVE, SCALES, type Scale } from '../../core/features/keys'
 import type { MirrorState, PadLight } from '../../core/features/liveMirror'
 import { PadOrder } from '../../core/features/padPush'
 import { ROWS, noteName, padKey, physicalPad, type PhysicalPad } from '../../core/features/padNotes'
@@ -141,6 +144,35 @@ export interface MirrorScreenProps {
 
 /** From this width on, Live draws the EP-133 itself (web only). */
 export const DEVICE_VIEW_MIN = 900
+/**
+ * The computer's keys that play the pads (web only), by KeyboardEvent.code:
+ * the numpad as the device lays them out, and four rows of a laptop's
+ * letters (1 2 3 / Q W E / A S D / Z X C) for one without a numpad.
+ */
+export const PAD_KEYS: Readonly<Record<string, string>> = {
+  Numpad7: '7', Numpad8: '8', Numpad9: '9',
+  Numpad4: '4', Numpad5: '5', Numpad6: '6',
+  Numpad1: '1', Numpad2: '2', Numpad3: '3',
+  NumpadDecimal: '.', Numpad0: '0', NumpadEnter: 'ENTER',
+  Digit1: '7', Digit2: '8', Digit3: '9',
+  KeyQ: '4', KeyW: '5', KeyE: '6',
+  KeyA: '1', KeyS: '2', KeyD: '3',
+  KeyZ: '.', KeyX: '0', KeyC: 'ENTER',
+}
+
+/** A pad's offset in its group from its label (the inverse of padNotes' labels). */
+const OFFSET_OF: ReadonlyMap<string, number> = new Map(ROWS.flat().map((o) => [physicalPad(0, o).label, o]))
+
+/** Whether a key press belongs to a field or a modifier shortcut rather than to the pads. */
+function notForPads(e: KeyboardEvent): boolean {
+  if (e.ctrlKey || e.metaKey || e.altKey) return true
+  const t = e.target as HTMLElement | null
+  if (!t || typeof t.closest !== 'function') return false
+  return t.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"], [role="dialog"], [role="listbox"]') !== null
+}
+
+/** From this width on, Live tools stay open beside the device (web only). */
+export const DOCKED_TOOLS_MIN = 1200
 
 
 /** The MIDI event clock the mirror's times are on (MIDIMessageEvent.timeStamp). */
@@ -243,18 +275,19 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     }
   }, [pads, notes, keyNotes, fixedNow])
 
-  // Wide enough, Live draws the device (web only).
-  const [wide, setWide] = useState(false)
+  // Wide enough, Live draws the device; wider still, the tools stay open beside it (web only).
+  const [width, setWidth] = useState(0)
   useLayoutEffect(() => {
     const el = root.current
     if (!el || props.deviceView === false || typeof ResizeObserver === 'undefined') return
-    const fit = (): void => setWide(el.clientWidth >= DEVICE_VIEW_MIN)
+    const fit = (): void => setWidth(el.clientWidth)
     fit()
     const ro = new ResizeObserver(fit)
     ro.observe(el)
     return () => ro.disconnect()
   }, [props.deviceView])
-  const device = wide && props.deviceView !== false
+  const device = width >= DEVICE_VIEW_MIN && props.deviceView !== false
+  const docked = device && width >= DOCKED_TOOLS_MIN
 
   // The group shown in the one-group view; Follow switches it to the group just played.
   const [group, setGroup] = useState(props.initialGroup ?? 0)
@@ -310,6 +343,68 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     </>
   )
 
+  // The computer's keys (web only): pads (held = gate), F1–F4 groups, K for KEYS, R for REC, − / + as the device's.
+  const kb = useRef({ group, keys, actions, onPad, rec, onPadUp: props.onPadUp, oneGroup, device })
+  kb.current = { group, keys, actions, onPad, rec, onPadUp: props.onPadUp, oneGroup, device }
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const held = new Map<string, () => void>()
+    const down = (e: KeyboardEvent): void => {
+      if (notForPads(e)) return
+      const k = kb.current
+      const label = PAD_KEYS[e.code]
+      if (label !== undefined) {
+        e.preventDefault()
+        if (e.repeat || held.has(e.code)) return
+        const o = OFFSET_OF.get(label)
+        if (o === undefined) return
+        if (k.keys.on) {
+          k.actions.onKey?.(o, true)
+          held.set(e.code, () => k.actions.onKeyUp?.(o))
+        } else if (k.onPad) {
+          const pad = physicalPad(k.group, o)
+          k.onPad(pad, true)
+          held.set(e.code, () => k.onPadUp?.(pad))
+        }
+        return
+      }
+      if (e.repeat) return
+      const f = /^F([1-4])$/.exec(e.code)
+      if (f) {
+        e.preventDefault()
+        setGroup(Number(f[1]) - 1)
+      } else if (e.code === 'KeyK') {
+        k.actions.onMode?.(!k.keys.on)
+      } else if (e.code === 'KeyR') {
+        k.rec.onRec?.()
+      } else if (e.code === 'Minus' || e.code === 'NumpadSubtract' || e.code === 'Equal' || e.code === 'NumpadAdd') {
+        const d = e.code === 'Minus' || e.code === 'NumpadSubtract' ? -1 : 1
+        if (k.keys.on) k.actions.onOctave?.(Math.max(MIN_OCTAVE, Math.min(MAX_OCTAVE, k.keys.octave + d)))
+        else setGroup((g) => Math.max(0, Math.min(3, g + d)))
+      }
+    }
+    const up = (e: KeyboardEvent): void => {
+      const release = held.get(e.code)
+      if (!release) return
+      held.delete(e.code)
+      release()
+    }
+    // A key still down when the window loses focus never sends its keyup.
+    const releaseAll = (): void => {
+      for (const r of held.values()) r()
+      held.clear()
+    }
+    window.addEventListener('keydown', down)
+    window.addEventListener('keyup', up)
+    window.addEventListener('blur', releaseAll)
+    return () => {
+      window.removeEventListener('keydown', down)
+      window.removeEventListener('keyup', up)
+      window.removeEventListener('blur', releaseAll)
+      releaseAll()
+    }
+  }, [])
+
   const padPress = (pad: PhysicalPad): PressTarget | null =>
     onPad === null
       ? null
@@ -318,15 +413,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           release: () => props.onPadUp?.(pad),
         }
 
-  return (
-    <div ref={root} class="live" data-screen="live">
-      <SideZone
-        open={props.toolsOpen}
-        onOpen={() => props.onTools(true)}
-        onClose={() => props.onTools(false)}
-        title={MirrorText.TOOLS}
-        panel={panel}
-      >
+  const content = (
+    <>
         {device ? (
           <div class="live__device">
             <DeviceView
@@ -425,7 +513,31 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
             </div>
           </div>
         )}
-      </SideZone>
+    </>
+  )
+
+  return (
+    <div ref={root} class={`live${docked ? ' live--docked' : ''}`} data-screen="live">
+      {docked ? (
+        // Wide enough, the tools stay open beside the device (web only): no strip, no Back to close them.
+        <>
+          <div class="live__main">{content}</div>
+          <aside class="live-dock" aria-labelledby="live-dock-title">
+            <Caption text={MirrorText.TOOLS} align="start" as="h2" id="live-dock-title" />
+            {panel}
+          </aside>
+        </>
+      ) : (
+        <SideZone
+          open={props.toolsOpen}
+          onOpen={() => props.onTools(true)}
+          onClose={() => props.onTools(false)}
+          title={MirrorText.TOOLS}
+          panel={panel}
+        >
+          {content}
+        </SideZone>
+      )}
     </div>
   )
 }
