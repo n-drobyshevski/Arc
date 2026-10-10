@@ -543,12 +543,13 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
     </div>
     <div class="backlog">
       <div class="bl"><b>REC engine</b><p>Port <code>TakeRecorder.kt</code> to <code>web/src/core/features/takeRecorder.ts</code>, with the same tests. Tap the mix in <code>MixerHost.render</code> (<code>platform/audio/liveMixer.ts</code>), so a take holds exactly what the browser played. Cap a take at 10 minutes, as Android does.</p></div>
-      <div class="bl"><b>Takes storage and actions</b><p>Add an IndexedDB <code>takes</code> store in <code>platform/storage/db.ts</code>, kept apart from <code>arc-demo</code>. Also copy takes into the library folder when one is picked (<code>platform/storage/external.ts</code>), as Android keeps them in Documents/arc. Wire Play/Stop, Save WAV (<code>files/save</code>), Share (only where Web Share takes files), and Delete with the inline confirmation. To EP-133 opens <code>UploadSheet</code> with the WAV.</p></div>
+      <div class="bl"><b>Takes storage and actions</b><p>Add an IndexedDB <code>takes</code> store in <code>platform/storage/db.ts</code>, kept apart from <code>arc-demo</code>. Also copy takes into the library folder when one is picked (<code>platform/storage/external.ts</code>), as Android keeps them in Documents/arc. Wire Play/Stop, Save WAV (<code>files/save</code>), and Delete with the inline confirmation. Share shows only where <code>navigator.canShare({ files })</code> is true, which is mostly phones; desktop rows have no Share. To EP-133 works as on Android: it switches to Device and opens <code>UploadSheet</code> with the take loaded, so you can pick a slot and trim first.</p></div>
       <div class="bl"><b>REC chip and Takes UI on the existing grid</b><p>Copy the REC and take strings from <code>MirrorText.kt</code> into <code>mirrorText.ts</code>. Add the chip to the display strip and the panel, and a Takes section in Live tools. Add Playwright steps for arm, record, stop and the new row.</p></div>
-      <div class="bl"><b>Phone grid in the K.O. II's colours</b><p>Restyle the one-group grid with black pads, light A–D keys with their icons and LEDs, and an orange RECORD key next to D. The layout and touch behaviour stay the same, and the PO-style grid stays on Android unless you want it there too.</p></div>
+      <div class="bl"><b>Phone grid in the K.O. II's colours</b><p>Restyle the one-group grid with black pads, light A–D keys with their icons and LEDs, and an orange RECORD key next to D. The layout and touch behaviour stay the same. This is web only for now: Android keeps its PO-style grid, so this step doesn't touch Kotlin and diverges from Android on purpose.</p></div>
       <div class="bl"><b>Device view</b><p>New <code>web/src/ui/live/DeviceView.tsx</code>. It reuses <code>glow.ts</code>, the <code>press.ts</code> gate and chord logic, the KEYS note maths in <code>keys.ts</code>, and the Knob and Fader visuals from <code>GuideKeys.tsx</code>. <code>MirrorScreen.tsx</code> picks the view at 900 px or wider. Add the keyboard map (numpad, QWERTY rows, F1–F4, K, R, −/+), and −/+ stepping through groups in PADS.</p></div>
       <div class="bl"><b>Shortcut cards</b><p>Filter <code>guideData.ts</code> by key name for the card, and add a "show all" link to <code>#/guide</code> with the filter applied. Add the new tags to the guide overlay.</p></div>
       <div class="bl"><b>Docked tools at 1200 px</b><p><code>SideZone</code> becomes a docked column at that width. Back no longer closes it there.</p></div>
+      <div class="bl"><b>Later: record the EP-133's own sound</b><p>A source switch on REC: arc's sound, or the device's sound over USB audio through <code>getUserMedia</code> (asks for microphone permission). This goes beyond Android, so it comes after everything above.</p></div>
       <div class="bl"><b>Clear the "Check" items</b><p>Clear the open questions from the audit: the first-run overlay, the toast lifetime, the Settings storage line, the project tile sizes, and the pads sheet rows.</p></div>
     </div>
     <p class="foot">Made from <code>app/src/screenshotTestDebug/reference</code> and <code>npm run dev</code> with <code>?demo</code>. Source is in <code>design/web-sync/</code>. arc is not affiliated with teenage engineering.</p>
@@ -937,9 +938,8 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
       </div>
       ${t.open ? `<div class="take__more">
         <button type="button" class="akey">Save WAV</button>
-        <button type="button" class="akey">Share</button>
         <button type="button" class="akey" ${live ? '' : 'disabled title="Connect the EP-133 first"'}>To EP-133</button>
-        <button type="button" class="akey akey--danger" data-act="del">Delete</button>
+        <button type="button" class="akey akey--danger" data-act="del" style="grid-column:1 / -1">Delete</button>
         ${t.confirm ? `<div class="take__confirm"><span>Delete this take?</span><span style="display:flex;gap:6px"><button type="button" class="akey" data-act="cancel">Cancel</button><button type="button" class="akey akey--signal" data-act="really">Delete</button></span></div>` : ''}
       </div>` : ''}
     </div>`
@@ -1057,7 +1057,7 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
     { t: 'Web · REC armed', d: 'The chip\'s dot and the RECORD key blink every 450 ms. Nothing is recorded until a pad sounds.', o: { rec: 'armed' } },
     { t: 'Web · Recording in KEYS', d: 'The chip turns into an orange-ringed timer. Tapping it stops and saves the take.', o: { rec: 'rec', keys: true, glow: { '9': 0.6, 'ENTER': 1 } } },
     { t: 'Android · Recording in KEYS', img: 'audit/android/rec-recording-keys.jpg', d: 'The reference for the timer chip.' },
-    { t: 'Web · Live tools with takes', d: 'Takes come first in the panel. Tapping a row unfolds Save WAV, Share, To EP-133 and Delete.', o: { tools: true } },
+    { t: 'Web · Live tools with takes', d: 'Takes come first in the panel. Tapping a row unfolds Save WAV, Share (on phones that can share files), To EP-133 and Delete.', o: { tools: true } },
     { t: 'Android · Live tools with takes', img: 'audit/android/tools-takes.jpg', d: 'The reference. The web copy says "in this browser" in place of "on the phone".' },
   ]
   const phones = document.getElementById('phones')
