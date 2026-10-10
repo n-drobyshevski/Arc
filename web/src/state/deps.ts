@@ -13,12 +13,18 @@
 //
 // Live (ported from main's Live KEYS / pad playback delta): [LiveAudioDeps] is
 // Android's LiveAudio (one low-latency output mixing the pads and keys),
-// [Deps.padSounds] the folder PadSoundCache keeps its copies in, and
-// [Deps.lastRead] Live's last read of the device (files/live-last.json).
+// [Deps.padSounds] the folder PadSoundCache keeps its copies in,
+// [Deps.lastRead] Live's last read of the device (files/live-last.json) and
+// [Deps.offlinePads] its pad changes made offline (files/live-pads.json).
 
+import type { RecState } from '../core/features/takeRecorder'
+import type { RecordedTake } from '../platform/audio/liveAudio'
+import type { TakeStore } from '../platform/storage/takeStore'
 import type { ReadonlySignal } from '@preact/signals'
 import { signal } from '@preact/signals'
 import type { PadSoundStore } from '../core/features/padSoundCache'
+import type { WebLatencyHint } from '../core/text/latencyText'
+import type { VoiceShape } from '../core/formats/voiceMixer'
 import type { TrafficLog } from '../core/protocol/trafficLog'
 import type { MidiAccessLike, MidiDeviceEvent, MidiPermission, OpenMidi } from '../platform/midi/webmidi'
 import type { ReleaseLock } from '../platform/midi/owner'
@@ -29,9 +35,6 @@ import type { PickOptions, ReadableFile } from '../platform/files/pick'
 import type { FileData, SaveResult } from '../platform/files/save'
 import type { ShareResult } from '../platform/share/share'
 import type { SoundPlayer } from '../platform/audio/player'
-import type { RecordedTake } from '../platform/audio/liveAudio'
-import type { RecState } from '../core/features/takeRecorder'
-import type { TakeStore } from '../platform/storage/takeStore'
 
 /** MidiConnector: support, the silent permission probe, access, open and attach/detach. */
 export interface MidiDeps {
@@ -86,8 +89,22 @@ export interface LivePress {
   readonly pitch: number
   /** True: sounds until release(id), then fades quickly (the EP-133's gate). False: plays to the end. */
   readonly gate: boolean
-  /** When the finger came down (Deps.perfNow, ms), for the latency note. */
+  /** When the finger came down (Deps.perfNow, ms: the input event's own time), for the latency note. */
   readonly pressedAt?: number
+  /** How the pad plays it: VoiceShape's fields over the defaults (its FX group and sidechain source among them). */
+  readonly shape?: Partial<VoiceShape>
+}
+
+/**
+ * Live's output as the debug screen's latency test names it: [label] is its
+ * row (LatencyText.webEngine: the latencyHint and rate, the key in
+ * LatencyStats), with the delay the output reported last, for the estimate line.
+ */
+export interface LiveEngineInfo {
+  readonly label: string
+  readonly baseMs: number
+  /** Null where the browser doesn't report the output's own delay. */
+  readonly outputMs: number | null
 }
 
 /**
@@ -98,12 +115,19 @@ export interface LivePress {
  */
 export interface LiveAudioDeps {
   /**
-   * Opens the output (Live came on screen); nothing is heard until a voice
-   * starts. [sampleRate]: a rate to ask for (default: the output's own).
-   * False when there is no output.
+   * Opens the output (Live came on screen) or wakes a suspended one, ready
+   * before the first press; nothing is heard until a voice starts.
+   * [sampleRate]: a rate to ask for (default: the output's own). False when
+   * there is no output.
    */
   open(sampleRate?: number): boolean | Promise<boolean>
-  /** Closes it (Live left the screen); what was sounding stops. Loaded samples may be dropped. */
+  /**
+   * Live left the screen or the tab was hidden: what was sounding stops, and
+   * the output is suspended but kept, with its samples, for a quick return
+   * (absent: [close]).
+   */
+  suspend?(): void
+  /** Lets the output go (long away, or the page unloads); what was sounding stops. Loaded samples may be dropped. */
   close(): void
   /** Wakes the output: call synchronously from a tap, before any await (browsers start audio only after one). */
   resumeInGesture(): void
@@ -120,21 +144,43 @@ export interface LiveAudioDeps {
   press(id: string, key: string, options: LivePress): boolean
   /** The finger left: voice [id] fades out (it still sounds a moment when the tap was very short). */
   release(id: string): void
+  /** The press became a scroll: voice [id] ends at once (a short fade, however short the press was). */
+  cut(id: string): void
   stopAll(): void
+  /**
+   * Sets up the mix's FX bus (VoiceMixer.control: an FxControl command with
+   * its index and two values); kept for the next output, a punch-in excepted
+   * (absent: no FX).
+   */
+  control?(what: number, index: number, x: number, y: number): void
   /** The voices sounding (pad and key ids), for the rings (ArcController.liveKeys). */
   readonly voices: ReadonlySignal<ReadonlySet<string>>
   /** How the output was set up, for the debug log ("48000 Hz, …"), "" before it opens. */
   readonly description: string
-  /** Each voice's delay from its press to its first frame leaving the output, and where the output goes. */
-  onStarted(listener: (id: string, latencyMs: number, route: string) => void): () => void
+  /**
+   * Each voice's delay from its press to its first frame leaving the output,
+   * where the output goes, and (where the output names it) its latency-test row.
+   */
+  onStarted(listener: (id: string, latencyMs: number, route: string, engine?: LiveEngineInfo) => void): () => void
   /** The output looks like Bluetooth (its own delay, [outputMs]); the controller says so once. */
   onSlowOutput?(listener: (outputMs: number) => void): () => void
+  /**
+   * The output's whole delay in ms while it is long enough to be heard against
+   * the finger, else null (absent: from [onSlowOutput] only): Live's display line says so.
+   */
+  readonly late?: ReadonlySignal<number | null>
   /** Lines for the debug log (how the output was set up, or why there is none). */
   onLog?(listener: (line: string) => void): () => void
-  // REC (LiveAudio.kt's takes); an output without them has no REC.
-  /** The REC key's state. */
+  /** The debug screen's latencyHint choice (absent: no choice to make). */
+  readonly latencyHint?: ReadonlySignal<WebLatencyHint>
+  /** Changes it: kept, and an open output is reopened at the new hint. */
+  setLatencyHint?(choice: WebLatencyHint): void
+  /** The open output's latency-test row once it is set up (again whenever its reported delay changes), else null. */
+  readonly engine?: ReadonlySignal<LiveEngineInfo | null>
+  // TAKE (LiveAudio.kt's takes); an output without them has no TAKE.
+  /** The TAKE key's state. */
   readonly rec?: ReadonlySignal<RecState>
-  /** Arms REC: the next sound (or the EP-133's PLAY) starts a take. False when there is no output. */
+  /** Arms TAKE: the next sound (or the EP-133's PLAY) starts a take. False when there is no output. */
   arm?(): boolean
   /** Stops the take: what was recorded is handed to [onTake]. */
   stopRecording?(): void
@@ -158,6 +204,7 @@ export function nullLiveAudio(): LiveAudioDeps {
     unload: () => {},
     press: () => false,
     release: () => {},
+    cut: () => {},
     stopAll: () => {},
     voices,
     description: '',
@@ -169,6 +216,13 @@ export function nullLiveAudio(): LiveAudioDeps {
 export interface LastReadDeps {
   load(): string | null | Promise<string | null>
   save(json: string): void | Promise<void>
+}
+
+/** Live's pad changes made offline (OfflinePads JSON): Android's files/live-pads.json. */
+export interface OfflinePadsDeps {
+  load(): string | null | Promise<string | null>
+  /** Null removes them. */
+  save(json: string | null): void | Promise<void>
 }
 
 /** Files.kt and the activity's pickers. */
@@ -192,10 +246,23 @@ export interface ShareDeps {
   canShareFiles?(): boolean
 }
 
+/**
+ * teenage engineering's site, for the factory sounds (FactorySounds): [path]s
+ * on its origin, read through arc's own (platform/net/factory). A cancel
+ * rejects with CancelledError.
+ */
+export interface FactoryDeps {
+  text(path: string, signal: AbortSignal): Promise<string>
+  /** The file, with its progress as it arrives ([total] null when the server doesn't say). */
+  bytes(path: string, signal: AbortSignal, onProgress: (done: number, total: number | null) => void): Promise<Uint8Array>
+}
+
 /** The activity lifecycle: started/stopped becomes tab visible/hidden. */
 export interface VisibilityDeps {
   visible(): boolean
   subscribe(listener: (visible: boolean) => void): () => void
+  /** The page is being unloaded or put in the back-forward cache (pagehide): onDestroy's stand-in. */
+  onPageHide?(listener: () => void): () => void
 }
 
 /** The document title (the progress notification's stand-in). */
@@ -221,10 +288,14 @@ export interface Deps {
   liveAudio: LiveAudioDeps
   /** Where Live's copies of the device's pad sounds are kept (Android files/pad-sounds). */
   padSounds: PadSoundStore
-  /** Where Live's takes are kept (Android files/takes); without it there is no REC. */
+  /** Where Live's takes are kept (Android files/takes); without it there is no TAKE. */
   takes?: TakeStore
   /** Live's last read, shown while the device is not connected. */
   lastRead: LastReadDeps
+  /** Live's pad changes made offline, until the EP-133 connects (or Reset pads). */
+  offlinePads: OfflinePadsDeps
+  /** Where the factory sounds are downloaded from; absent: they can't be. */
+  factory?: FactoryDeps | undefined
   /** Screen wake lock: on while a task runs, or Live is open with keepScreenOn. */
   wakeLock: { set(on: boolean): Promise<void> }
   trafficLog: TrafficLog
@@ -234,6 +305,12 @@ export interface Deps {
   perfNow(): number
   setTimeout(fn: () => void, ms: number): unknown
   clearTimeout(handle: unknown): void
+  /**
+   * Runs [fn] at the display's next frame (requestAnimationFrame), or after a
+   * short timer where frames don't come (no window, a hidden tab); returns
+   * a cancel. Absent: the short timer.
+   */
+  requestFrame?: ((fn: () => void) => () => void) | undefined
   /** Adds a beforeunload guard (preventDefault) until the returned function is called. */
   guardUnload(): () => void
   visibility: VisibilityDeps

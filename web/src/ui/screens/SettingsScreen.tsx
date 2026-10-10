@@ -13,6 +13,8 @@
 //   Documents/arc" ([settingsFolder]): reconnect a remembered folder whose
 //   permission lapsed, pick one, restore from another, or, where the browser
 //   can't keep a folder, export the library (plus restore from a folder).
+//   That row's note (the folder's state) is behind its ⓘ key; the storage
+//   note sits under the card, as in Kotlin.
 // - The two confirm dialogs (rememberSaveable confirmKeep / confirmForget) are
 //   navigation layers, dialog 'prune:<keep>' and 'forget', so Back closes them
 //   and a reload keeps them.
@@ -21,10 +23,29 @@
 //   Clear sets it to nothing, as in Kotlin.
 // - The pad order is not a signal (c.padOrder() is read when Root renders), so
 //   the screen keeps its own copy from here on, as the Kotlin does.
-import type { JSX } from 'preact'
-import { useEffect, useId, useLayoutEffect, useRef, useState } from 'preact/hooks'
+// - The Step 1c rows: each setting is a SettingRow (its name and the control
+//   on the right, its notes behind an ⓘ key) in a RowCard. What
+//   arc keeps in the browser (learned names, pad sounds) is its own danger
+//   group, "Saved in this browser" (WebText.SAVED_HERE), with red text actions.
+// - "Piano keys" greys out the sizes that don't fit Live's piano in this
+//   window. The piano's real width is only known in Live, so it is estimated
+//   from the window ([pianoRoomEstimate]: the window less Live's chrome); on a
+//   portrait phone, which plays on the grid, from the window turned sideways.
+// - "Haptics" shows only where the browser can vibrate
+//   ([SettingsScreenProps.hapticsSupported]): iOS Safari has no vibration
+//   API and desktop browsers no motor, so the row is hidden there rather than
+//   left dead.
+// - The keys view (keysViewWide / keysViewTall) has no row here: Live's
+//   Pads / Piano switch remembers it per window shape.
+// - Web only, the desktop page (from 1024px wide, theme/desk.css): one paper
+//   card, a section nav on its left (the section in view lit by its LED, as
+//   the nav rail's keys) and the sections scrolling in the pane beside it.
+import type { ComponentChildren, JSX } from 'preact'
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { NOTE_NAMES, type NoteNames } from '../../core/features/keys'
 import type { PadOrder } from '../../core/features/padPush'
+import { choiceOf as pianoChoiceOf, fits as pianoFits, switchShown } from '../../core/features/piano'
+import { FeatureText } from '../../core/text/featureText'
 import { Format } from '../../core/text/format'
 import { MirrorText } from '../../core/text/mirrorText'
 import { SettingsText, THEME_CHOICES, type ThemeChoice } from '../../core/text/settingsText'
@@ -35,11 +56,13 @@ import { useNav } from '../AppContext'
 import { Caption } from '../components/Caption'
 import { Dialog } from '../components/Dialog'
 import { CloseKey } from '../components/GuideKeys'
-import { GridPlate, PlateLine } from '../components/GridPlate'
+import { HwToggle } from '../components/HwToggle'
 import { Key } from '../components/Key'
 import { Segmented } from '../components/Segmented'
-import { SwitchRow } from '../components/SwitchRow'
+import { LinkRow, RowAction, RowCard, SettingRow } from '../components/SettingRow'
+import { pianoWidth } from '../live/keyboard'
 import { dialogLayer } from '../nav'
+import { useDesk } from '../useDesk'
 import './SettingsScreen.css'
 
 export interface SettingsScreenProps {
@@ -59,8 +82,18 @@ export interface SettingsScreenProps {
   /** Space taken by Live's copies of the pad sounds (bytes). */
   padSoundsSize?: () => Promise<number>
   onClearPadSounds?: () => void
-  /** Note names on the keys: solfège or letters. */
+  /** KEYS' note names: solfège or letters. */
   onNoteNames?: (names: NoteNames) => void
+  onShowNames?: (on: boolean) => void
+  /** Live's piano size: white keys (Piano.CHOICES), null for Auto. */
+  onPianoWhites?: (whites: number | null) => void
+  /** Web, on a desktop: Computer keyboard (single keys on or off, keyPrefs) and its keys sheet; absent elsewhere. */
+  computerKeys?: { on: boolean; onChange: (on: boolean) => void; onShow: () => void } | undefined
+  /** The factory sounds (FactorySounds): whether the library has them, and the download; absent where they can't be downloaded. */
+  factorySounds?: { saved: boolean; onGet: () => void } | undefined
+  /** Web: whether this browser can vibrate (platform/haptics.ts); the Haptics row shows only then. */
+  hapticsSupported?: boolean
+  onHaptics?: (on: boolean) => void
   /** Web: give the remembered library folder's permission back. */
   onReconnectFolder: () => void
   /** Web: zip of the library where no folder can be picked. */
@@ -73,6 +106,87 @@ export interface SettingsScreenProps {
 
 /** PadOrder.entries, in declaration order (the Segmented's indices). */
 const PAD_ORDERS: readonly PadOrder[] = ['FROM_TOP', 'FROM_BOTTOM']
+
+/** The page's sections, in order: the desktop nav's entries and the headings' ids. */
+export const SECTIONS = ['appearance', 'device', 'library', 'live', 'saved', 'about'] as const
+export type SettingsSection = (typeof SECTIONS)[number]
+
+/** A section's heading. */
+export function sectionTitle(s: SettingsSection): string {
+  switch (s) {
+    case 'appearance':
+      return SettingsText.APPEARANCE
+    case 'device':
+      return SettingsText.DEVICE
+    case 'library':
+      return SettingsText.LIBRARY
+    case 'live':
+      return SettingsText.LIVE
+    case 'saved':
+      return WebText.SAVED_HERE
+    case 'about':
+      return SettingsText.ABOUT
+  }
+}
+
+/**
+ * The section the desktop nav lights while the pane is scrolled to
+ * [scrollTop]: the last one whose top has reached the pane's top (within
+ * [slack]), and the last section once the pane can't scroll further.
+ * [tops] are the sections' offsets in the pane, in order.
+ */
+export function sectionInView(tops: readonly number[], scrollTop: number, atEnd: boolean, slack = 24): number {
+  if (tops.length === 0) return 0
+  if (atEnd) return tops.length - 1
+  let at = 0
+  tops.forEach((top, i) => {
+    if (top - scrollTop <= slack) at = i
+  })
+  return at
+}
+
+// The desk's page column around Live (theme/desk.css): the nav rail, the ruled
+// gutters (from 1280) and the top bar's row, which Live's box caps at.
+const RAIL = 104
+const DESK_GUTTER = 56
+const TOP_BAR_MAX = 1200
+
+/**
+ * About how wide Live's piano is in a [windowWidth] × [windowHeight] window
+ * (Settings can't measure it: Live isn't on screen). The piano spans the
+ * page column in Keys mode, its tools behind the edge strip, so this is
+ * Live's box less its chrome (live/keyboard.ts pianoWidth, which Live itself
+ * uses). A portrait phone plays on the grid; its piano shows only turned
+ * sideways, so the window's height stands in for the width.
+ */
+export function pianoRoomEstimate(windowWidth: number, windowHeight: number): number {
+  const landscape = windowWidth > windowHeight
+  const width = switchShown(landscape, windowWidth) ? windowWidth : windowHeight
+  const desk = width >= 1024
+  const live = desk ? Math.min(TOP_BAR_MAX, width - RAIL - (width >= 1280 ? 2 * DESK_GUTTER : 0)) : width
+  return pianoWidth(live, desk)
+}
+
+/** Per Piano.CHOICES: whether that size can't be had in [room] (Auto always can). */
+export function pianoChoicesOff(room: number): boolean[] {
+  return SettingsText.PIANO_CHOICES.map((w) => w !== null && !pianoFits(room, w))
+}
+
+/** The window's size, kept up to date. */
+function useWindowSize(): { width: number; height: number } {
+  const read = (): { width: number; height: number } =>
+    typeof window === 'undefined' ? { width: 0, height: 0 } : { width: window.innerWidth, height: window.innerHeight }
+  const [size, setSize] = useState(read)
+  useEffect(() => {
+    const on = (): void => setSize((s) => {
+      const n = read()
+      return n.width === s.width && n.height === s.height ? s : n
+    })
+    window.addEventListener('resize', on)
+    return () => window.removeEventListener('resize', on)
+  }, [])
+  return size
+}
 
 /** The confirm dialogs' layer ids. */
 const FORGET = 'forget'
@@ -128,13 +242,13 @@ export function pruneDialogId(keep: number): string {
 
 export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
   const { settings, state } = props
+  const factory = props.factorySounds
   const nav = useNav()
   const v = nav.view.value
+  const desk = useDesk()
+  const win = useWindowSize()
   const root = useRef<HTMLDivElement | null>(null)
-  const themeId = useId()
-  const keepId = useId()
-  const orderId = useId()
-  const namesId = useId()
+  const pane = useRef<HTMLDivElement | null>(null)
 
   // Read when the page opens; Clear sets it to nothing.
   const [soundsSize, setSoundsSize] = useState<number | null>(null)
@@ -163,13 +277,52 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
     root.current?.focus({ preventScroll: true })
   }, [])
 
+  // The desk's section nav: the section in view is lit; a tap scrolls to one.
+  const [active, setActive] = useState(0)
+  // After a tap, the tapped section stays lit while the pane scrolls to it.
+  const holdUntil = useRef(0)
+  useEffect(() => {
+    const el = pane.current
+    if (!desk || !el) return
+    let raf = 0
+    const spy = (): void => {
+      raf = 0
+      if (performance.now() < holdUntil.current) return
+      const tops = SECTIONS.map((s) => el.querySelector<HTMLElement>(`[data-section="${s}"]`)?.offsetTop ?? 0)
+      const atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 2
+      // A section counts as in view once its caption is in the pane's top quarter.
+      setActive(sectionInView(tops, el.scrollTop, atEnd && el.scrollTop > 0, el.clientHeight / 4))
+    }
+    const onScroll = (): void => {
+      if (!raf) raf = requestAnimationFrame(spy)
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      el.removeEventListener('scroll', onScroll)
+      if (raf) cancelAnimationFrame(raf)
+    }
+  }, [desk])
+  const goTo = (i: number): void => {
+    const el = pane.current
+    const section = el?.querySelector<HTMLElement>(`[data-section="${SECTIONS[i]}"]`)
+    if (!el || !section) return
+    setActive(i)
+    holdUntil.current = performance.now() + 900
+    const smooth = !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    el.scrollTo({ top: section.offsetTop - 8, behavior: smooth ? 'smooth' : 'auto' })
+    section.querySelector<HTMLElement>('h2')?.focus({ preventScroll: true })
+  }
+
   const confirmKeep = pruneKeepOf(v.dialogs)
   const confirmForget = v.dialogs.includes(FORGET)
 
   const folderInUse = state.folderPicked
   const totalSize = state.backups.reduce((sum, b) => sum + b.size, 0)
-  const note = WebText.storageNote(state.backups.length, totalSize, state.spaceLeft)
+  const storage = WebText.storageNote(state.backups.length, totalSize, state.spaceLeft)
   const folder = settingsFolder(state)
+
+  const pianoChoice = pianoChoiceOf(settings.pianoWhites)
+  const pianoOff = pianoChoicesOff(pianoRoomEstimate(win.width, win.height))
 
   const folderKey = (k: FolderKey): JSX.Element => {
     switch (k) {
@@ -184,111 +337,287 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
     }
   }
 
+  const titleId = 'settings-title'
+  const title = <Caption text={SettingsText.TITLE} as="h1" id={titleId} class="settings__title" />
+  const close = <CloseKey class="settings__close" onClick={props.onBack} description={SettingsText.CLOSE} />
+
   return (
-    <div ref={root} class="settings" data-screen="settings" tabIndex={-1} aria-labelledby={`${themeId}-title`}>
+    <div ref={root} class="settings" data-screen="settings" tabIndex={-1} aria-labelledby={titleId}>
       <div class="settings__column">
-        <header class="settings__head">
-          <Caption text={SettingsText.TITLE} as="h1" id={`${themeId}-title`} class="settings__title" />
-          <CloseKey class="settings__close" onClick={props.onBack} description={SettingsText.CLOSE} />
-        </header>
+        {desk ? (
+          <nav class="settings__nav" aria-labelledby={titleId}>
+            {title}
+            <ul class="settings__nav-list">
+              {SECTIONS.map((s, i) => (
+                <li key={s}>
+                  <button
+                    type="button"
+                    class={`settings__nav-item${i === active ? ' is-on' : ''}`}
+                    aria-current={i === active ? 'true' : undefined}
+                    onClick={() => goTo(i)}
+                  >
+                    <span class="settings__led" aria-hidden="true" />
+                    {sectionTitle(s)}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </nav>
+        ) : (
+          <header class="settings__head">
+            {title}
+            {close}
+          </header>
+        )}
 
-        <Section text={SettingsText.APPEARANCE} />
-        <Label text={SettingsText.THEME} id={themeId} />
-        <Segmented
-          options={THEME_CHOICES.map((t) => SettingsText.theme(t))}
-          selected={Math.max(0, THEME_CHOICES.indexOf(settings.theme))}
-          onSelect={(i) => {
-            const t = THEME_CHOICES[i]
-            if (t !== undefined) props.onTheme(t)
-          }}
-          labelledBy={themeId}
-        />
+        <div class="settings__pane">
+          {desk && <div class="settings__pane-head">{close}</div>}
+          <div ref={pane} class="settings__scroll">
+            <Section id="appearance">
+              <RowCard>
+                <SettingRow
+                  title={SettingsText.THEME}
+                  control={({ titleId: t }) => (
+                    <Segmented
+                      compact
+                      options={THEME_CHOICES.map((c) => SettingsText.theme(c))}
+                      selected={Math.max(0, THEME_CHOICES.indexOf(settings.theme))}
+                      onSelect={(i) => {
+                        const c = THEME_CHOICES[i]
+                        if (c !== undefined) props.onTheme(c)
+                      }}
+                      labelledBy={t}
+                    />
+                  )}
+                />
+              </RowCard>
+            </Section>
 
-        <Section text={SettingsText.DEVICE} />
-        <GridPlate>
-          <SwitchRow
-            title={SettingsText.AUTO_CONNECT}
-            note={SettingsText.AUTO_CONNECT_NOTE}
-            on={settings.autoConnect}
-            onChange={props.onAutoConnect}
-          />
-          <PlateLine />
-          <SwitchRow
-            title={SettingsText.KEEP_SCREEN_ON}
-            note={WebText.KEEP_SCREEN_ON_NOTE}
-            on={settings.keepScreenOn}
-            onChange={props.onKeepScreenOn}
-          />
-        </GridPlate>
+            <Section id="device">
+              <RowCard>
+                <SettingRow
+                  title={SettingsText.AUTO_CONNECT}
+                  note={SettingsText.AUTO_CONNECT_NOTE}
+                  control={(ids) => (
+                    <HwToggle
+                      on={settings.autoConnect}
+                      onChange={props.onAutoConnect}
+                      labelledBy={ids.titleId}
+                      describedBy={ids.noteId}
+                    />
+                  )}
+                />
+                <SettingRow
+                  title={SettingsText.KEEP_SCREEN_ON}
+                  note={WebText.KEEP_SCREEN_ON_NOTE}
+                  control={(ids) => (
+                    <HwToggle
+                      on={settings.keepScreenOn}
+                      onChange={props.onKeepScreenOn}
+                      labelledBy={ids.titleId}
+                      describedBy={ids.noteId}
+                    />
+                  )}
+                />
+              </RowCard>
+            </Section>
 
-        <Section text={SettingsText.LIBRARY} />
-        {note.length !== 0 && <p class="t-small settings__note">{note}</p>}
-        {folder.note.length !== 0 && <p class="t-small settings__note">{folder.note}</p>}
-        <div class="settings__row">{folder.keys.map(folderKey)}</div>
-        <Label text={SettingsText.KEEP} id={keepId} />
-        <Segmented
-          options={SettingsText.KEEP_CHOICES.map((k) => SettingsText.keepLabel(k))}
-          selected={keepIndex(settings.keepLast)}
-          onSelect={(i) => {
-            const keep = SettingsText.KEEP_CHOICES[i] ?? null
-            // Fewer than are saved now deletes the oldest: ask first.
-            if (keep !== null && props.pruneCount(keep) > 0) nav.open(dialogLayer(pruneDialogId(keep)))
-            else props.onKeepLast(keep)
-          }}
-          labelledBy={keepId}
-        />
-        <p class="t-small settings__note">{WebText.keepNote(folderInUse)}</p>
+            <Section id="library">
+              <RowCard>
+                <SettingRow
+                  title={WebText.LIBRARY_FOLDER}
+                  note={folder.note.length !== 0 ? folder.note : undefined}
+                  stack
+                  control={() => <div class="settings__keys">{folder.keys.map(folderKey)}</div>}
+                />
+                <SettingRow
+                  title={SettingsText.KEEP}
+                  note={SettingsText.KEEP_SHORT}
+                  info={WebText.keepNote(folderInUse)}
+                  control={(ids) => (
+                    <Segmented
+                      compact
+                      options={SettingsText.KEEP_CHOICES.map((k) => SettingsText.keepLabel(k))}
+                      selected={keepIndex(settings.keepLast)}
+                      onSelect={(i) => {
+                        const keep = SettingsText.KEEP_CHOICES[i] ?? null
+                        // Fewer than are saved now deletes the oldest: ask first.
+                        if (keep !== null && props.pruneCount(keep) > 0) nav.open(dialogLayer(pruneDialogId(keep)))
+                        else props.onKeepLast(keep)
+                      }}
+                      labelledBy={ids.titleId}
+                      describedBy={ids.noteId}
+                    />
+                  )}
+                />
+              </RowCard>
+              {storage.length !== 0 && <p class="t-small settings__storage">{storage}</p>}
+            </Section>
 
-        <Section text={SettingsText.LIVE} />
-        <Label text={MirrorText.PAD_ORDER} id={orderId} />
-        <Segmented
-          options={[MirrorText.FROM_TOP, MirrorText.FROM_BOTTOM]}
-          selected={Math.max(0, PAD_ORDERS.indexOf(order))}
-          onSelect={(i) => {
-            const o = PAD_ORDERS[i]
-            if (o === undefined) return
-            setOrder(o)
-            props.onPadOrder(o)
-          }}
-          labelledBy={orderId}
-        />
-        <p class="t-small settings__note">{MirrorText.ORDER_NOTE}</p>
-        <Label text={MirrorText.NOTE_NAMES} id={namesId} />
-        <Segmented
-          options={NOTE_NAMES.map((n) => MirrorText.noteNames(n))}
-          selected={Math.max(0, NOTE_NAMES.indexOf(settings.keysNames))}
-          onSelect={(i) => {
-            const n = NOTE_NAMES[i]
-            if (n !== undefined) props.onNoteNames?.(n)
-          }}
-          labelledBy={namesId}
-        />
-        <p class="t-small settings__note">{MirrorText.NOTE_NAMES_NOTE}</p>
-        <Key text={SettingsText.FORGET_NAMES} size="small" block onClick={() => nav.open(dialogLayer(FORGET))} />
-        <div class="settings__sounds">
-          <p class="t-body15 settings__sounds-size">
-            {WebText.padSounds(Format.bytes(soundsSize ?? 0))}
-          </p>
-          <Key
-            text={SettingsText.CLEAR}
-            size="small"
-            disabled={(soundsSize ?? 0) <= 0}
-            onClick={() => {
-              props.onClearPadSounds?.()
-              setSoundsSize(0)
-            }}
-          />
+            <Section id="live">
+              <RowCard>
+                <SettingRow
+                  title={MirrorText.PAD_ORDER}
+                  info={MirrorText.ORDER_NOTE}
+                  control={(ids) => (
+                    <Segmented
+                      compact
+                      options={[MirrorText.FROM_TOP_SHORT, MirrorText.FROM_BOTTOM_SHORT]}
+                      descriptions={[MirrorText.FROM_TOP, MirrorText.FROM_BOTTOM]}
+                      selected={Math.max(0, PAD_ORDERS.indexOf(order))}
+                      onSelect={(i) => {
+                        const o = PAD_ORDERS[i]
+                        if (o === undefined) return
+                        setOrder(o)
+                        props.onPadOrder(o)
+                      }}
+                      labelledBy={ids.titleId}
+                    />
+                  )}
+                />
+                <SettingRow
+                  title={MirrorText.NOTE_NAMES}
+                  note={SettingsText.NOTE_NAMES_SHORT}
+                  info={MirrorText.NOTE_NAMES_NOTE}
+                  control={(ids) => (
+                    <Segmented
+                      compact
+                      options={NOTE_NAMES.map((n) => MirrorText.noteNames(n))}
+                      selected={Math.max(0, NOTE_NAMES.indexOf(settings.keysNames))}
+                      onSelect={(i) => {
+                        const n = NOTE_NAMES[i]
+                        if (n !== undefined) props.onNoteNames?.(n)
+                      }}
+                      labelledBy={ids.titleId}
+                      describedBy={ids.noteId}
+                    />
+                  )}
+                />
+                <SettingRow
+                  title={MirrorText.SHOW_NAMES}
+                  note={SettingsText.SHOW_NAMES_SHORT}
+                  info={MirrorText.SHOW_NAMES_NOTE}
+                  control={(ids) => (
+                    <HwToggle
+                      on={settings.keysShowNames}
+                      onChange={(on) => props.onShowNames?.(on)}
+                      labelledBy={ids.titleId}
+                      describedBy={ids.noteId}
+                    />
+                  )}
+                />
+                <SettingRow
+                  title={SettingsText.PIANO_KEYS}
+                  note={SettingsText.PIANO_KEYS_SHORT}
+                  info={SettingsText.PIANO_KEYS_NOTE}
+                  stack
+                  control={(ids) => (
+                    <Segmented
+                      compact
+                      fill
+                      class="settings__piano"
+                      options={SettingsText.PIANO_CHOICES.map((w) => SettingsText.pianoKeys(w))}
+                      descriptions={SettingsText.PIANO_CHOICES.map((w) => SettingsText.pianoKeysDescription(w))}
+                      selected={Math.max(0, SettingsText.PIANO_CHOICES.indexOf(pianoChoice))}
+                      disabled={pianoOff}
+                      disabledNote={SettingsText.DOESNT_FIT}
+                      onSelect={(i) => props.onPianoWhites?.(SettingsText.PIANO_CHOICES[i] ?? null)}
+                      labelledBy={ids.titleId}
+                      describedBy={ids.noteId}
+                    />
+                  )}
+                />
+                {props.hapticsSupported === true && (
+                  <SettingRow
+                    title={SettingsText.HAPTICS}
+                    note={SettingsText.HAPTICS_NOTE}
+                    control={(ids) => (
+                      <HwToggle
+                        on={settings.haptics}
+                        onChange={(on) => props.onHaptics?.(on)}
+                        labelledBy={ids.titleId}
+                        describedBy={ids.noteId}
+                      />
+                    )}
+                  />
+                )}
+                {props.computerKeys !== undefined && (
+                  <SettingRow
+                    title={WebText.COMPUTER_KEYS}
+                    note={WebText.COMPUTER_KEYS_NOTE}
+                    control={(ids) => (
+                      <span class="settings__keys">
+                        <RowAction text={WebText.SHOW_KEYS} describedBy={ids.titleId} onClick={props.computerKeys!.onShow} />
+                        <HwToggle
+                          on={props.computerKeys!.on}
+                          onChange={props.computerKeys!.onChange}
+                          labelledBy={ids.titleId}
+                          describedBy={ids.noteId}
+                        />
+                      </span>
+                    )}
+                  />
+                )}
+                {factory !== undefined && (
+                  <SettingRow
+                    title={FeatureText.FACTORY_SOUNDS}
+                    note={factory.saved ? FeatureText.FACTORY_SAVED : FeatureText.FACTORY_NOTE}
+                    control={(ids) => (
+                      <RowAction
+                        text={factory.saved ? FeatureText.SAVED : FeatureText.GET}
+                        describedBy={ids.titleId}
+                        disabled={factory.saved || state.busy}
+                        onClick={factory.onGet}
+                      />
+                    )}
+                  />
+                )}
+              </RowCard>
+            </Section>
+
+            <Section id="saved">
+              <RowCard danger>
+                <SettingRow
+                  title={SettingsText.LEARNED_NAMES}
+                  note={SettingsText.LEARNED_NAMES_SHORT}
+                  control={(ids) => (
+                    <RowAction
+                      text={SettingsText.FORGET}
+                      danger
+                      describedBy={ids.titleId}
+                      onClick={() => nav.open(dialogLayer(FORGET))}
+                    />
+                  )}
+                />
+                <SettingRow
+                  title={SettingsText.padSoundsShort(Format.bytes(soundsSize ?? 0))}
+                  note={SettingsText.PAD_SOUNDS_SHORT_NOTE}
+                  control={(ids) => (
+                    <RowAction
+                      text={SettingsText.CLEAR}
+                      danger
+                      describedBy={ids.titleId}
+                      disabled={(soundsSize ?? 0) <= 0}
+                      onClick={() => {
+                        props.onClearPadSounds?.()
+                        setSoundsSize(0)
+                      }}
+                    />
+                  )}
+                />
+              </RowCard>
+            </Section>
+
+            <Section id="about">
+              <RowCard>
+                <SettingRow title={SettingsText.version(props.version)} note={SettingsText.LICENCE_NOTE} />
+                <LinkRow title={SettingsText.SOURCE} onClick={props.onSource} />
+                <LinkRow title={SettingsText.FONT_LICENCE} onClick={props.onFontLicence} />
+                <LinkRow title={SettingsText.DEBUG_LOG} onClick={props.onDebug} />
+              </RowCard>
+            </Section>
+          </div>
         </div>
-        <p class="t-small settings__note">{SettingsText.PAD_SOUNDS_NOTE}</p>
-
-        <Section text={SettingsText.ABOUT} />
-        <p class="t-bold settings__version">{SettingsText.version(props.version)}</p>
-        <p class="t-small settings__note">{SettingsText.LICENCE_NOTE}</p>
-        <div class="settings__row">
-          <Key text={SettingsText.SOURCE} size="small" block onClick={props.onSource} />
-          <Key text={SettingsText.FONT_LICENCE} size="small" block onClick={props.onFontLicence} />
-        </div>
-        <Key text={SettingsText.DEBUG_LOG} size="small" variant="quiet" block onClick={props.onDebug} />
       </div>
 
       <Dialog
@@ -320,12 +649,15 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
   )
 }
 
-/** Caption(text, padding(top = 18), align = Start). */
-function Section(props: { text: string }): JSX.Element {
-  return <Caption text={props.text} align="start" as="h2" class="settings__section" />
-}
-
-/** Text(text, ArcType.semi, ink). */
-function Label(props: { text: string; id: string }): JSX.Element {
-  return <p id={props.id} class="t-semi settings__label">{props.text}</p>
+/** A section: its caption (a heading the nav moves focus to) over its card. */
+function Section(props: { id: SettingsSection; children: ComponentChildren }): JSX.Element {
+  const headId = `settings-${props.id}`
+  return (
+    <section class="settings__group" data-section={props.id} aria-labelledby={headId}>
+      <h2 id={headId} class="caption caption--start settings__section" tabIndex={-1}>
+        {sectionTitle(props.id)}
+      </h2>
+      {props.children}
+    </section>
+  )
 }

@@ -1,16 +1,19 @@
 package dev.arc.ep133.audio
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
-import android.media.AudioFormat
 import android.media.AudioManager
-import android.media.AudioTimestamp
-import android.media.AudioTrack
+import dev.arc.ep133.features.Beat
+import dev.arc.ep133.features.BeatGrid
+import dev.arc.ep133.features.FrameClock
 import dev.arc.ep133.features.RecState
 import dev.arc.ep133.features.TakeRecorder
 import dev.arc.ep133.formats.VoiceMixer
+import dev.arc.ep133.formats.VoiceShape
+import dev.arc.ep133.text.LiveEngine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
@@ -18,56 +21,208 @@ import java.util.concurrent.Executors
 
 /**
  * Live's sound output (an addition): one low-latency stream, open while Live
- * is on screen, that [VoiceMixer] fills with the pads and keys being played.
+ * is on screen, that a [VoiceMixer] fills with the pads and keys being played.
  * A press only adds a voice, so it is heard after one or two of the output's
- * buffers (a few milliseconds each) rather than after a new track is set up.
+ * bursts (a few milliseconds each) rather than after a new track is set up.
  *
- * The stream runs at the phone's own sample rate with Android's low-latency
- * mode, which is what lets it take the fast mixer path; the EP-133's 46875 Hz
- * sounds are converted as they are mixed. It starts with a buffer of two
- * bursts and grows by one whenever the output runs dry.
+ * It runs on one of two outputs ([LiveOutput]), both at the phone's own
+ * sample rate (the EP-133's 46875 Hz sounds are converted as they are mixed),
+ * both starting at a two-burst buffer that grows after the output runs dry
+ * and shrinks back after a quiet while:
+ * - native ([NativeLiveOutput]): an Oboe (AAudio) stream, exclusive (MMAP)
+ *   where the phone grants it, mixed in its own audio callback by the C++ port
+ *   of the mixer; it reopens on the new route after a headphone plug or unplug.
+ * - AudioTrack ([TrackLiveOutput]): Android's low-latency AudioTrack mode,
+ *   mixed on a Kotlin thread just before each burst is due.
+ * Native is preferred; AudioTrack is used when the library doesn't load (as in
+ * the JVM tests), when a native stream won't open, and for the rest of the
+ * run once the native one has died or stalled while playing ([EngineChoice]),
+ * which then hands over to AudioTrack at once. The debug screen's latency
+ * test can ask for AudioTrack instead ([engine]), as it is now or as it was
+ * before the latency work (blocking writes). Both are tagged as a game's
+ * sound (USAGE_GAME, music content), which is what Live is: sound that answers
+ * a touch. Its volume is still media's, audio focus is asked for with the
+ * same attributes, and previews ([SoundPlayer]) stay media. The old AudioTrack
+ * way is tagged media (USAGE_MEDIA), as Live was then, focus included; touch
+ * input is still delivered unbuffered while Live is shown, so it measures the
+ * output as it was, not the whole of the old press path.
  *
- * [onStarted] gets each voice's latency: from the press ([VoiceMixer.start]'s
- * tag, System.nanoTime) to when its first frame leaves the output, and where
- * the output goes. It is called on the audio thread.
+ * [wireless] says when the output goes to Bluetooth or a hearing aid, which
+ * plays late whatever the app does; Live's display line says so. It follows
+ * the route as it changes (a headset connecting while Live is open).
+ * [latencyMs] is the output's own latency about every second while it is open
+ * (Oboe's estimate for the native one, the frames in flight by the timestamp
+ * for AudioTrack): the part of the output's delay that its own stamp counts.
+ * With [makeUpDelay] on, a wireless output's delay that the stamp leaves out
+ * ([delayNs], [OutputDelay.ms]) is made up for where the phone lines up with
+ * sound outside it ([OutputDelay] says where). [delayNs] is a plain volatile
+ * read, for the audio threads.
+ *
+ * [onStarted] gets each voice's latency: from the press ([play]'s pressedAt)
+ * to when its first frame leaves the output, from the output's timestamp,
+ * where the output goes and which engine played it ([LiveEngineInfo.label],
+ * also in [engineInfo]). It is called on the output's thread with the bare
+ * numbers: it should hand them on, not format them there. [onOutput] gets the
+ * output's [description] again whenever it changes after [open] (a native
+ * stream reopened or tuned its buffer, or the switch to AudioTrack), also on
+ * that thread; and on the caller's when a press or REC opened it after [open]
+ * had failed.
  *
  * REC ([arm]) records the mix into a take: from the first sound after it (or
  * the EP-133 starting to play, [transportStarted]) to [stopRecording], Live
  * closing, [TakeRecorder.MAX_SECONDS], or the device stopping when its PLAY
  * started the take ([transportStopped]). [onTake] gets
  * the file (null when nothing was played or it couldn't be written), and
- * whether the limit stopped it, on the take's writer thread.
+ * whether the limit stopped it, on the take's writer thread. SAMPLE's RSP
+ * takes the same mix beside it ([sampleTap], before REC sees each block),
+ * with the output's timestamp so a press finds the frame heard then; the tap
+ * is let go of, and told it is lost, when the output closes, gives out or
+ * fails, since the next output counts its frames afresh. So REC and RSP can
+ * run at once.
+ *
+ * The TEMPO key's click ([startClick]) is a stream of its own
+ * ([MetronomeOutput]), not a voice: REC never has it, and it carries on
+ * while the output reopens. It shares the output's audio focus ([FocusHold]):
+ * focus stays while it is on, and a call or another app taking focus stops
+ * it as it stops the voices.
+ *
+ * The pattern sequencer ([sequencer], a [MixScheduler]) schedules into the
+ * same mix, on the output's thread before each block, with the output's
+ * stamp while it runs or RECORD is armed; it is told [MixScheduler.lost] when the output
+ * reopens (a native stream; a track rerouted keeps its frames), gives out,
+ * fails or closes, and re-anchors. Focus is
+ * asked for when it starts and held while it runs, sounding or not; a call
+ * or another app taking focus is told to [onFocusLost], which stops it.
+ *
+ * The mix's FX bus ([control], an addition) is set up command by command,
+ * from any thread, and each setting's last value is kept ([FxSetup]): an
+ * output opened afresh, or a native stream reopened on another route, gets
+ * them all again, so the effect, sends, compressor, sidechain and tempo
+ * outlive the output they were set on. Punch-ins are not kept.
  */
 class LiveAudio(
     context: Context,
-    private val onStarted: (key: String, latencyMs: Double, route: AudioDeviceInfo?) -> Unit = { _, _, _ -> },
+    private val onStarted: (key: String, latencyMs: Double, route: AudioDeviceInfo?, engine: String) -> Unit = { _, _, _, _ -> },
     private val onTake: (file: File?, seconds: Double, limit: Boolean, error: String?) -> Unit = { _, _, _, _ -> },
-) {
+    private val onOutput: (description: String) -> Unit = {},
+) : MixSource {
     private val audio = context.getSystemService(AudioManager::class.java)
-    private val attributes = AudioAttributes.Builder()
-        .setUsage(AudioAttributes.USAGE_MEDIA)
-        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-        .build()
+    private val attributes = attributes(AudioAttributes.USAGE_GAME)
+    // The old AudioTrack way's ([LiveEngine.TRACK_OLD]): media, as Live was before the latency work.
+    private val oldAttributes = attributes(AudioAttributes.USAGE_MEDIA)
     // Focus is asked for when something sounds and let go once all is quiet, off the
     // UI and audio threads: a press must not wait for it.
     private val focusThread = Executors.newSingleThreadExecutor { r -> Thread(r, "arc-focus").apply { isDaemon = true } }
-    private val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
-        .setAudioAttributes(attributes)
-        // A call or another app taking the output over stops the sounds.
-        .setOnAudioFocusChangeListener { change -> if (change < 0) stopAll() }
-        .build()
-    @Volatile private var focused = false
+    private val gameFocus = focusRequest(attributes)
+    private val oldFocus = focusRequest(oldAttributes)
+    // The request for the open output's attributes; the one held is let go of as it was asked for.
+    @Volatile private var focus = gameFocus
+    // Whether focus is held, for the voices and the click together; it queues the asks and let-gos.
+    private val hold = FocusHold<AudioFocusRequest>(::ask, ::letGo)
+
+    // The click, and who is told when something other than [stopClick] stops it; under [clickLock].
+    private val clickLock = Any()
+    @Volatile private var click: MetronomeOutput? = null
+    private var clickStopped: (() -> Unit)? = null
 
     private val _keys = MutableStateFlow<Set<String>>(emptySet())
     /** The voices sounding (pad and key ids), for the rings. */
     val keys: StateFlow<Set<String>> = _keys
 
-    private class Stream(val track: AudioTrack, val mixer: VoiceMixer, val burst: Int) {
-        @Volatile var running = true
-        lateinit var thread: Thread
+    private val _wireless = MutableStateFlow(false)
+    /** Whether the open output goes to a wireless device ([isWireless]); false while closed. */
+    val wireless: StateFlow<Boolean> = _wireless
+
+    private val _latency = MutableStateFlow<Int?>(null)
+    /**
+     * The open output's latency in milliseconds, told about once a second
+     * (see [LiveListener.latency]); null while closed or while it can't be
+     * measured. It is what the output's stamp already counts of its delay, and
+     * is not what is made up for ([delayNs]); a wireless route's is more when
+     * the audio HAL reports the link.
+     */
+    val latencyMs: StateFlow<Int?> = _latency
+
+    private val _madeUp = MutableStateFlow<Int?>(null)
+    /**
+     * The delay in all, in milliseconds ([OutputDelay.totalMs]), while it is
+     * made up for (the output wireless and [makeUpDelay] on), else null: the
+     * Bluetooth key's words.
+     */
+    val madeUpFor: StateFlow<Int?> = _madeUp
+
+    // The delay made up for now, in nanoseconds; 0 unless the output is wireless and [makingUp] is on.
+    @Volatile private var delay = 0L
+    @Volatile private var makingUp = true
+
+    /**
+     * Whether the delay of a wireless output is made up for (the setting;
+     * on until set otherwise). Any thread.
+     */
+    fun makeUpDelay(on: Boolean) {
+        makingUp = on
+        refreshDelay()
     }
 
-    @Volatile private var stream: Stream? = null
+    /**
+     * The part of the output's delay that its stamp leaves out, in
+     * nanoseconds, to be made up for ([OutputDelay.ms]): 0 wired, closed or
+     * with [makeUpDelay] off. Read without a lock, on any thread (the click's
+     * included).
+     */
+    val delayNs: Long get() = delay
+
+    // The delay follows three inputs set from four threads (the main one, the output's, the route's and the settings'); it
+    // is worked out under a lock from what they all hold by then, so the last to write leaves it right. Readers don't lock.
+    @Synchronized
+    private fun refreshDelay() {
+        val wireless = _wireless.value
+        val latency = _latency.value
+        delay = OutputDelay.nanos(OutputDelay.ms(makingUp, wireless, latency))
+        _madeUp.value = if (makingUp && wireless) OutputDelay.totalMs(latency) else null
+    }
+
+    // The route's wireless state, and the delay that follows it.
+    private fun setWireless(wireless: Boolean) {
+        _wireless.value = wireless
+        refreshDelay()
+    }
+
+    private fun setLatency(ms: Int?) {
+        _latency.value = ms
+        refreshDelay()
+    }
+
+    private val _engine = MutableStateFlow<LiveEngineInfo?>(null)
+    /**
+     * The engine the output opened on and its buffer now, for the latency
+     * test; the last one stays after Live closes (null before the first open).
+     */
+    val engineInfo: StateFlow<LiveEngineInfo?> = _engine
+
+    private val engines = EngineChoice { NativeAudio.loaded }
+
+    /**
+     * The debug screen's engine choice: [LiveEngine.AUTO] (native, else
+     * AudioTrack), or AudioTrack as now or the old way. It applies from the
+     * next [open]: the caller reopens an open output.
+     */
+    var engine: LiveEngine
+        get() = engines.engine
+        set(value) {
+            engines.engine = value
+        }
+
+    // Key numbers for the native engine, kept across outputs.
+    private val keyIds = LiveKeys()
+
+    // The FX bus's settings, kept across outputs; also the lock that keeps a setting from slipping
+    // between an output opening and its replay.
+    private val fx = FxSetup()
+
+    @Volatile private var output: LiveOutput? = null
+    // What the open output's thread reports into; a new one for each output.
+    @Volatile private var session: Session? = null
 
     private class Take(val recorder: TakeRecorder, val writer: TakeWriter) {
         @Volatile var limit = false
@@ -76,82 +231,181 @@ class LiveAudio(
     private val _rec = MutableStateFlow<RecState>(RecState.Idle)
     /** The REC key's state. */
     val rec: StateFlow<RecState> = _rec
-    // A take armed but not yet picked up by the audio thread, and a stop asked for.
+    // A take armed but not yet picked up by the output's thread, and a stop asked for.
     @Volatile private var armed: Take? = null
     @Volatile private var stopAsked = false
     // The device's PLAY and STOP (MIDI clock), passed to the take on the audio thread.
     @Volatile private var transportStartAsked = false
     @Volatile private var transportStopAsked = false
 
-    /** How the output was set up, for the debug log: "48000 Hz, 192-frame bursts, low-latency path". */
+    // SAMPLE's RSP, fed on the output's thread; set and cleared under this object's lock.
+    @Volatile private var tap: MixTap? = null
+
+    /**
+     * Who takes the mix beside REC (SAMPLE's RSP, an addition): each block,
+     * and the output's clock, on the output's thread, from the next block.
+     * Cleared, and told [MixTap.lost], when the output closes, gives out or fails.
+     */
+    override var sampleTap: MixTap?
+        get() = tap
+        set(value) {
+            synchronized(this) {
+                tap = value
+                // The native engine hands the mix over from now, as for REC.
+                if (value != null) output?.recordFromNow()
+            }
+        }
+
+    /** The open output's sample rate, null while closed. */
+    override val mixRate: Int? get() = output?.rate
+
+    /**
+     * The pattern sequencer, fed on the output's thread before each block
+     * and with its stamp while it runs or RECORD is armed (an addition);
+     * null for none.
+     */
+    @Volatile var sequencer: MixScheduler? = null
+
+    /**
+     * Focus was taken by a call or another app's sound
+     * ([AudioManager.AUDIOFOCUS_LOSS], [AudioManager.AUDIOFOCUS_LOSS_TRANSIENT];
+     * not a notification's ducking), on the main thread: the voices have
+     * stopped, and the sequencer is to stop too.
+     */
+    var onFocusLost: (change: Int) -> Unit = {}
+
+    private fun focusRequest(attributes: AudioAttributes) = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+        .setAudioAttributes(attributes)
+        // A call or another app taking the output over stops the sounds.
+        .setOnAudioFocusChangeListener { change -> if (change < 0) focusLost(change) }
+        .build()
+
+    companion object {
+        private fun attributes(usage: Int) = AudioAttributes.Builder()
+            .setUsage(usage)
+            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+            .build()
+
+        /** Why RSP's tap was let go of ([MixTap.lost]): Live closed, its native engine gave out, or its output failed. */
+        const val TAP_CLOSED = "Live's sound closed"
+        const val TAP_GAVE_OUT = "Live's sound reopened"
+        const val TAP_FAILED = "Live's sound stopped"
+
+        /**
+         * Whether output device [type] is wireless, and so heard late: Bluetooth
+         * (classic or LE) or a hearing aid. The newer types are plain numbers on
+         * older Android versions, where they simply never occur.
+         */
+        @SuppressLint("InlinedApi")
+        fun isWireless(type: Int?): Boolean = when (type) {
+            AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, AudioDeviceInfo.TYPE_BLE_HEADSET, AudioDeviceInfo.TYPE_BLE_SPEAKER,
+            AudioDeviceInfo.TYPE_BLE_BROADCAST, AudioDeviceInfo.TYPE_HEARING_AID,
+            -> true
+            else -> false
+        }
+    }
+
+    /**
+     * How the output was set up, for the debug log: "48000 Hz, 96-frame
+     * bursts, AAudio exclusive (MMAP)", "…, AAudio shared", or "48000 Hz,
+     * 192-frame bursts, AudioTrack low-latency path".
+     */
     var description = ""
         private set
+
+    /** Whether the output is open. */
+    val isOpen: Boolean get() = output != null
 
     /** Opens the output (Live came on screen); nothing is heard until a voice starts. */
     @Synchronized
     fun open(): Boolean {
-        if (stream != null) return true
-        val rate = audio.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)?.toIntOrNull() ?: 48000
-        val burst = audio.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER)?.toIntOrNull()?.takeIf { it > 0 } ?: 256
-        val mask = AudioFormat.CHANNEL_OUT_STEREO
-        val minBuffer = AudioTrack.getMinBufferSize(rate, mask, AudioFormat.ENCODING_PCM_16BIT)
-        if (minBuffer <= 0) return false
-        val track = runCatching {
-            AudioTrack.Builder()
-                .setAudioAttributes(attributes)
-                .setAudioFormat(
-                    AudioFormat.Builder()
-                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                        .setSampleRate(rate)
-                        .setChannelMask(mask)
-                        .build(),
-                )
-                .setTransferMode(AudioTrack.MODE_STREAM)
-                .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
-                // Room to grow into when the output runs dry; what is used is set below.
-                .setBufferSizeInBytes(maxOf(minBuffer, burst * 8 * 4))
-                .build()
-        }.getOrNull() ?: return false
-        if (track.state != AudioTrack.STATE_INITIALIZED) {
-            track.release()
-            return false
-        }
-        // Two bursts on the fast path; a phone that doesn't grant it gets its usual buffer.
-        val fast = track.performanceMode == AudioTrack.PERFORMANCE_MODE_LOW_LATENCY
-        track.setBufferSizeInFrames(if (fast) burst * 2 else minBuffer / 4)
-        description = "${track.sampleRate} Hz, $burst-frame bursts, " + if (fast) "low-latency path" else "normal path (no low-latency output)"
-        val s = Stream(track, VoiceMixer(track.sampleRate), burst)
-        stream = s
-        track.play()
-        s.thread = Thread({ run(s) }, "arc-live-audio").apply {
-            isDaemon = true
-            start()
-        }
+        if (output != null) return true
+        val s = Session()
+        val old = engines.old
+        val o = openNative(s) ?: TrackLiveOutput.open(audio, if (old) oldAttributes else attributes, s, old) ?: return false
+        focus = if (old && o is TrackLiveOutput) oldFocus else gameFocus
+        description = o.description
+        s.sink = o
+        // The last output's is gone; the new one tells its own within a second.
+        setLatency(null)
+        session = s
+        output = o
+        // After [output]: a setting sent meanwhile went to this output, or is in the replay.
+        replayFx(o)
+        _engine.value = o.engine
+        // After [output]: a route the thread reports meanwhile is no older than this one.
+        setWireless(isWireless(o.route?.type))
         return true
+    }
+
+    /** Opened by a press or REC, not by Live coming on screen ([open] had failed): told to [onOutput] like a change. */
+    @Synchronized
+    private fun openLate(): Boolean {
+        if (output != null) return true
+        if (!open()) return false
+        onOutput(description)
+        return true
+    }
+
+    private fun openNative(s: Session): LiveOutput? {
+        if (!engines.native()) return null
+        return NativeLiveOutput.open(audio, keyIds, s).also { engines.opened(it != null) }
     }
 
     /** Closes the output (Live left the screen); what was sounding stops. */
     fun close() {
-        val s = synchronized(this) { stream.also { stream = null } } ?: return
-        s.running = false
+        var t: MixTap? = null
+        val o = synchronized(this) {
+            session?.running = false
+            session = null
+            t = tap
+            tap = null
+            output.also { output = null }
+        }
+        t?.lost(TAP_CLOSED)
+        // The next output counts its frames afresh.
+        sequencer?.lost()
+        o ?: return
+        o.close()
         _keys.value = emptySet()
         _rec.value = RecState.Idle
-        letGoOfFocus()
+        setWireless(false)
+        setLatency(null)
+        // The click keeps it while on; [stopClick] lets go of it then.
+        hold.idle()
+    }
+
+    /**
+     * Gets [pcm] ready to [play], so its first press doesn't copy it (the
+     * native output copies a sound into the engine's memory; AudioTrack needs
+     * nothing). It may take a few milliseconds: not on the main thread. Does
+     * nothing while closed, so call it again for what's kept after [open].
+     */
+    fun prepare(pcm: ShortArray, channels: Int) {
+        output?.prepare(pcm, channels)
     }
 
     /**
      * Plays [pcm] as voice [key] ([semitones] from its own pitch) until
      * [release]; [pressedAt] (System.nanoTime) is when the finger came down.
-     * Opens the output first if Live hasn't. False when there is no output.
+     * [shape] is how the pad plays it, as the EP-133's SOUND EDIT has it
+     * (its own pitch, level, pan, trim, attack, release, play mode and mute
+     * group; [VoiceShape.DEFAULT], Live's own way, unless given). Opens the
+     * output first if Live hasn't. False when there is no output.
      */
-    fun play(key: String, pcm: ShortArray, channels: Int, sampleRate: Int, semitones: Int, pressedAt: Long): Boolean {
-        if (stream == null && !open()) return false
-        val s = stream ?: return false
-        s.mixer.start(key, pcm, channels, sampleRate, semitones, pressedAt)
-        if (!focused) {
-            focused = true
-            focusThread.execute { audio.requestAudioFocus(focus) }
-        }
+    fun play(
+        key: String,
+        pcm: ShortArray,
+        channels: Int,
+        sampleRate: Int,
+        semitones: Int,
+        pressedAt: Long,
+        shape: VoiceShape = VoiceShape.DEFAULT,
+    ): Boolean {
+        if (output == null && !openLate()) return false
+        val o = output ?: return false
+        if (!o.start(key, pcm, channels, sampleRate, semitones, pressedAt, shape)) return false
+        hold.sound(focus)
         return true
     }
 
@@ -162,9 +416,9 @@ class LiveAudio(
     @Synchronized
     fun arm(file: File): Boolean {
         if (_rec.value != RecState.Idle) return true
-        if (stream == null && !open()) return false
-        val s = stream ?: return false
-        val rate = s.track.sampleRate
+        if (output == null && !openLate()) return false
+        val o = output ?: return false
+        val rate = o.rate
         lateinit var take: Take
         take = Take(
             TakeRecorder(rate),
@@ -173,6 +427,7 @@ class LiveAudio(
         take.recorder.arm()
         stopAsked = false
         armed = take
+        o.recordFromNow()
         _rec.value = RecState.Armed
         return true
     }
@@ -192,99 +447,168 @@ class LiveAudio(
         if (_rec.value != RecState.Idle) transportStopAsked = true
     }
 
+    /** Lets go of voice [key] (every voice of a KEY-mode pad's; a ONESHOT one plays on to its end). */
     fun release(key: String) {
-        stream?.mixer?.release(key)
+        output?.release(key)
+    }
+
+    /** Ends voice [key] at once, in a few milliseconds: the press turned out to be a scroll. */
+    fun cut(key: String) {
+        output?.cut(key)
     }
 
     fun stopAll() {
-        stream?.mixer?.stopAll()
+        output?.stopAll()
+    }
+
+    /**
+     * Sets up the mix's FX bus: [what] is one of
+     * [dev.arc.ep133.formats.fx.FxControl]'s commands, with its [index], [x]
+     * and [y]. It reaches the open output at its next block, and is kept for
+     * the next output (a punch-in excepted). Any thread; it never opens the
+     * output.
+     */
+    fun control(what: Int, index: Int, x: Float, y: Float) {
+        synchronized(fx) {
+            fx.record(what, index, x, y)
+            output?.control(what, index, x, y)
+        }
+    }
+
+    /** Sends every FX setting kept to [o]: it opened afresh, or its stream reopened. */
+    private fun replayFx(o: LiveOutput) {
+        synchronized(fx) { fx.replay(o::control) }
     }
 
     /** Where the output goes now, once it is open. */
-    fun route(): AudioDeviceInfo? = stream?.track?.routedDevice
+    fun route(): AudioDeviceInfo? = output?.route
 
-    private fun letGoOfFocus() {
-        if (!focused) return
-        focused = false
-        focusThread.execute { audio.abandonAudioFocusRequest(focus) }
+    /** Whether the click is on. */
+    val clicking: Boolean get() = click != null
+
+    /**
+     * Starts the click at [bpm], or on the EP-133's beats while [grid] gives
+     * them (asked before each burst with the time now; null: run free). A grid
+     * of the EP-133's is the caller's to send early by [delayNs] when it lines
+     * up with sound outside the phone ([OutputDelay.earlier]); the pattern's
+     * own is not. [onBeat] gets each click when it is scheduled, with when it
+     * is heard ([delayNs] after the output's stamp has it), on the click's thread; [onStopped] is told when something other than
+     * [stopClick] stops it: focus taken, or the output failing. Already on,
+     * only [bpm] is taken. Needs no open output. False when there is no output.
+     */
+    fun startClick(bpm: Int, grid: (now: Long) -> BeatGrid? = { null }, onBeat: (Beat) -> Unit = {}, onStopped: () -> Unit = {}): Boolean {
+        synchronized(clickLock) {
+            click?.let {
+                it.bpm = bpm
+                return true
+            }
+            val c = MetronomeOutput.open(audio, attributes, bpm, grid, { delay }, onBeat, ::clickEnded) ?: return false
+            click = c
+            clickStopped = onStopped
+            hold.clickOn(focus)
+        }
+        return true
     }
 
-    private fun run(s: Stream) {
-        android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
-        val out = ShortArray(s.burst * 2)
-        val ts = AudioTimestamp()
-        var underruns = 0
-        var quietSince = 0L
-        var take: Take? = null
-        try {
-            while (s.running) {
-                armed?.let {
-                    armed = null
-                    take?.let { t -> end(t) }
-                    take = it
-                }
-                if (transportStartAsked) {
-                    transportStartAsked = false
-                    take?.recorder?.transportStart()
-                }
-                if (transportStopAsked) {
-                    transportStopAsked = false
-                    if (take?.recorder?.byTransport == true) stopAsked = true
-                }
-                if (stopAsked) {
-                    stopAsked = false
-                    take?.let { end(it) }
-                    take = null
-                    if (armed == null) _rec.value = RecState.Idle
-                }
-                val at = s.mixer.frame
-                s.mixer.render(out, s.burst)
-                val started = s.mixer.started.toList()
-                take?.let { t ->
-                    val k = t.recorder.onBurst(out, s.burst, at, started.minOfOrNull { it.frame })
-                    if (k != null) t.writer.write(out, k.from, k.frames)
-                    if (k?.last == true) {
-                        t.limit = true
-                        end(t)
-                        take = null
-                        _rec.value = RecState.Idle
-                    } else if (t.recorder.state == TakeRecorder.State.RECORDING) {
-                        val now = RecState.Recording(t.recorder.seconds)
-                        if (s.running && _rec.value != now) _rec.value = now
-                    }
-                }
-                if (s.track.write(out, 0, out.size, AudioTrack.WRITE_BLOCKING) < 0) break
-                if (started.isNotEmpty()) report(s, started, ts)
-                val keys = s.mixer.keys
-                if (s.running && keys != _keys.value) _keys.value = keys
-                // Quiet for two seconds: other apps may have the output back.
-                if (keys.isEmpty()) {
-                    if (quietSince == 0L) quietSince = System.nanoTime()
-                    if (focused && System.nanoTime() - quietSince > 2_000_000_000L) letGoOfFocus()
-                } else {
-                    quietSince = 0L
-                }
-                // The output ran dry: a burst more of buffer, while there is room.
-                val u = s.track.underrunCount
-                if (u > underruns) {
-                    underruns = u
-                    val size = s.track.bufferSizeInFrames
-                    if (size + s.burst <= s.track.bufferCapacityInFrames) s.track.setBufferSizeInFrames(size + s.burst)
-                }
-            }
-        } finally {
-            // Live closing ends the take; it is saved like any other.
-            take?.let { end(it) }
-            armed?.let {
-                armed = null
-                end(it)
-            }
-            runCatching {
-                s.track.pause()
-                s.track.flush()
-            }
-            s.track.release()
+    /** The click's tempo, from the beat after the next; nothing while it is off. */
+    fun setClickTempo(bpm: Int) {
+        click?.bpm = bpm
+    }
+
+    /** Stops the click (onStopped isn't told). The focus goes once all is quiet, as after the voices. */
+    fun stopClick() {
+        stopClick(null)
+    }
+
+    /** Stops the click if it is [only] (any, when null); its onStopped is told unless [only] is null. */
+    private fun stopClick(only: MetronomeOutput?, tell: Boolean = only != null) {
+        val stopped = synchronized(clickLock) {
+            val c = click ?: return
+            if (only != null && c !== only) return
+            click = null
+            c.close()
+            hold.clickOff()
+            // No output to count the quiet: let go now.
+            if (output == null) hold.idle()
+            clickStopped.also { clickStopped = null }
         }
+        if (tell) stopped?.invoke()
+    }
+
+    /** The click's output failed under it (on its thread). */
+    private fun clickEnded(c: MetronomeOutput) = stopClick(c)
+
+    /**
+     * Focus was taken ([change] < 0): the voices stop. A call or another
+     * app's sound ([AudioManager.AUDIOFOCUS_LOSS], [AudioManager.AUDIOFOCUS_LOSS_TRANSIENT])
+     * also stops the click and lets go, so the next sound asks again; a
+     * notification's ducking leaves the click on, as Android ducks it.
+     */
+    private fun focusLost(change: Int) {
+        stopAll()
+        if (change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK) return
+        click?.let { stopClick(it, tell = true) }
+        hold.lost()
+        onFocusLost(change)
+    }
+
+    private fun ask(f: AudioFocusRequest) {
+        focusThread.execute { audio.requestAudioFocus(f) }
+    }
+
+    private fun letGo(f: AudioFocusRequest) {
+        focusThread.execute { audio.abandonAudioFocusRequest(f) }
+    }
+
+    /** The native engine gave out under [s]: what plays next goes through AudioTrack. */
+    private fun gaveOut(s: Session) {
+        // All under the lock: a press's [openLate] can't open another native engine in between,
+        // nor can [close] slip in and leave the AudioTrack output open after Live left.
+        var t: MixTap? = null
+        val reopened = synchronized(this) {
+            if (session !== s) return
+            engines.gaveOut()
+            session = null
+            output = null
+            // The next output counts its frames from 0: the tap's frames so far are done with.
+            t = tap
+            tap = null
+            open().also {
+                if (!it) {
+                    setWireless(false)
+                    setLatency(null)
+                }
+            }
+        }
+        _keys.value = emptySet()
+        _rec.value = RecState.Idle
+        sequencer?.lost()
+        // After the reopen, so RSP finds the new output when it opens again.
+        t?.lost(TAP_GAVE_OUT)
+        if (reopened) onOutput(description)
+    }
+
+    /**
+     * [s]'s output failed under it, its thread gone (not closed, nor given
+     * out): Live lets go of it as [close] does, so the next press opens a
+     * new one, and RSP is told, since nothing feeds its tap any more.
+     */
+    private fun failed(s: Session) {
+        var t: MixTap? = null
+        synchronized(this) {
+            if (session !== s) return
+            session = null
+            output = null
+            t = tap
+            tap = null
+        }
+        _keys.value = emptySet()
+        _rec.value = RecState.Idle
+        setWireless(false)
+        setLatency(null)
+        sequencer?.lost()
+        hold.idle()
+        t?.lost(TAP_FAILED)
     }
 
     /** Ends [t]: its writer keeps what was recorded up to the last sound. */
@@ -292,21 +616,138 @@ class LiveAudio(
         t.writer.finish(t.recorder.stop())
     }
 
-    /** When each new voice's first frame is heard, from the output's timestamp. */
-    private fun report(s: Stream, started: List<VoiceMixer.Started>, ts: AudioTimestamp) {
-        val rate = s.track.sampleRate.toDouble()
-        val now = System.nanoTime()
-        val (atNanos, atFrame) = if (s.track.getTimestamp(ts)) {
-            ts.nanoTime to ts.framePosition
-        } else {
-            // No timestamp yet (the output just opened): what is written but not played.
-            now to s.track.playbackHeadPosition.toLong()
+    /**
+     * One output's side of Live (the same for both): REC's take, the
+     * sequencer, the keys and focus, all on that output's thread. [running]
+     * goes false when Live closes, so a late report doesn't overwrite the
+     * closed state.
+     */
+    private inner class Session : LiveListener {
+        @Volatile var running = true
+        // The output the sequencer schedules into, once [open] has it.
+        @Volatile var sink: ScheduleSink? = null
+        private var take: Take? = null
+        private var shown: Set<String> = emptySet()
+        // Whether the sequencer ran at the last block: focus is asked for as it starts.
+        private var sequencing = false
+
+        override val recording: Boolean get() = take != null || armed != null || tap != null
+
+        // Armed too: a pad's press may start the sequencer, on the frame heard then.
+        override val clocked: Boolean get() = sequencer?.let { it.running || it.armed } == true
+
+        override fun beforeBlock(rendered: Long, rate: Int) {
+            // Not after Live closed: the sequencer may be on another output by now.
+            if (running) {
+                val seq = sequencer
+                sink?.let { seq?.fill(it, rendered, rate) }
+                val on = seq?.running == true
+                if (on && !sequencing) hold.sound(focus)
+                sequencing = on
+            }
+            armed?.let {
+                armed = null
+                take?.let { t -> end(t) }
+                take = it
+            }
+            if (transportStartAsked) {
+                transportStartAsked = false
+                take?.recorder?.transportStart()
+            }
+            if (transportStopAsked) {
+                transportStopAsked = false
+                if (take?.recorder?.byTransport == true) stopAsked = true
+            }
+            if (stopAsked) {
+                stopAsked = false
+                take?.let { end(it) }
+                take = null
+                if (armed == null) _rec.value = RecState.Idle
+            }
         }
-        val route = s.track.routedDevice
-        for (v in started) {
-            if (v.tag == 0L) continue
-            val heardAt = atNanos + ((v.frame - atFrame) / rate * 1e9).toLong()
-            onStarted(v.key, (heardAt - v.tag) / 1e6, route)
+
+        override fun mixed(out: ShortArray, frames: Int, at: Long, firstStart: Long?, rate: Int) {
+            // RSP first: it only reads the block. Not after Live closed: a tap set since is another output's.
+            if (running) tap?.mixed(out, frames, at, rate)
+            val t = take ?: return
+            // A native stream reopened at another rate: the take so far is kept, at its own.
+            if (rate != t.recorder.outRate) {
+                end(t)
+                take = null
+                if (running) _rec.value = RecState.Idle
+                return
+            }
+            val k = t.recorder.onBurst(out, frames, at, firstStart)
+            if (k != null) t.writer.write(out, k.from, k.frames)
+            if (k?.last == true) {
+                // The last burst of a take stopped at a frame isn't the limit.
+                t.limit = t.recorder.frames >= t.recorder.maxFrames
+                end(t)
+                take = null
+                _rec.value = RecState.Idle
+            } else if (t.recorder.state == TakeRecorder.State.RECORDING) {
+                // A new state only when the seconds shown change.
+                val seconds = t.recorder.seconds
+                if (running && (_rec.value as? RecState.Recording)?.seconds != seconds) _rec.value = RecState.Recording(seconds)
+            }
         }
+
+        override fun clock(frame: Long, nanos: Long, rate: Int) {
+            if (!running) return
+            val c = FrameClock(frame, nanos, rate)
+            tap?.clock(c)
+            sequencer?.clock(c)
+        }
+
+        override fun started(key: String, latencyMs: Double, route: AudioDeviceInfo?, engine: String) = onStarted(key, latencyMs, route, engine)
+
+        override fun keys(keys: Set<String>) {
+            if (keys !== shown) {
+                shown = keys
+                if (running) _keys.value = keys
+            }
+            // Quiet for two seconds, the click and the sequencer off: other apps may have the output back.
+            hold.quiet(keys.isEmpty() && sequencer?.running != true, System.nanoTime())
+        }
+
+        override fun routed(route: AudioDeviceInfo?) {
+            if (!running || session !== this) return
+            setWireless(isWireless(route?.type))
+            // A native stream reopened: what was scheduled is dropped. Not the track's (re)route, told on its
+            // first block too: its frames go on and what waits in its mixer stays; the stamp follows the delay.
+            (sink as? NativeLiveOutput)?.let {
+                sequencer?.lost()
+                // The engine keeps its FX settings across a reopen; sent again all the same, as to a new output.
+                replayFx(it)
+            }
+        }
+
+        override fun changed(description: String) {
+            if (!running || session !== this) return
+            this@LiveAudio.description = description
+            onOutput(description)
+        }
+
+        override fun latency(ms: Int?) {
+            if (running && session === this) setLatency(ms)
+        }
+
+        override fun tuned(engine: LiveEngineInfo) {
+            if (running && session === this) _engine.value = engine
+        }
+
+        override fun ended() {
+            // Live closing ends the take; it is saved like any other.
+            take?.let { end(it) }
+            take = null
+            armed?.let {
+                armed = null
+                end(it)
+            }
+        }
+
+        override fun gaveOut() = gaveOut(this)
+
+        override fun failed() = failed(this)
     }
 }

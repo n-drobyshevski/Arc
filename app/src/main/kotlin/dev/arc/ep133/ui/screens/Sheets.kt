@@ -173,6 +173,24 @@ fun DeleteDialog(title: String, onConfirm: () -> Unit, onDismiss: () -> Unit) {
     )
 }
 
+/**
+ * The EP-133 connected with Live's offline pad changes kept: put the [count]
+ * of them and the [samples] recorded in SAMPLE on it ([onWrite]), or leave
+ * the device as it is ([onDiscard], also Back or a tap outside, as the web's
+ * Esc; recordings then go to Takes).
+ */
+@Composable
+fun OfflinePadsDialog(count: Int, samples: Int = 0, onWrite: () -> Unit, onDiscard: () -> Unit) {
+    val c = LocalArcColors.current
+    AlertDialog(
+        onDismissRequest = onDiscard,
+        containerColor = c.shell,
+        text = { Text(dev.arc.ep133.text.MirrorText.putOffline(count, samples), style = ArcType.body15, color = c.ink) },
+        confirmButton = { TextButton(onClick = onWrite) { Text(dev.arc.ep133.text.MirrorText.WRITE, style = ArcType.bold, color = c.navy) } },
+        dismissButton = { TextButton(onClick = onDiscard) { Text(dev.arc.ep133.text.MirrorText.DISCARD, style = ArcType.bold, color = c.graphite) } },
+    )
+}
+
 /** The restore sheet (`#restore-sheet`). */
 @Composable
 fun ColumnScope.RestoreSheetContent(
@@ -274,6 +292,10 @@ fun ColumnScope.ProgressSheetContent(task: TaskUi, onCancel: () -> Unit) {
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier.heightIn(min = 24.dp),
     )
-    Text(Strings.KEEP_SCREEN_ON, style = ArcType.small, color = c.graphite)
+    Text(
+        if (task.title == dev.arc.ep133.text.FeatureText.GETTING_FACTORY) dev.arc.ep133.text.FeatureText.FACTORY_KEEP_OPEN else Strings.KEEP_SCREEN_ON,
+        style = ArcType.small,
+        color = c.graphite,
+    )
     ArcKey(Strings.CANCEL, onCancel, Modifier.fillMaxWidth(), style = KeyStyle.Quiet, enabled = !task.cancelling)
 }

@@ -72,11 +72,16 @@ const pwa = VitePWA({
   },
   workbox: {
     navigateFallback: 'index.html',
+    // The icon board (public/icon-board/) is a static page beside the app: its
+    // navigations go to the network, and it isn't precached with the app.
+    navigateFallbackDenylist: [/^\/icon-board(?:[/?]|$)/],
     globPatterns: ['**/*.{js,css,html,svg,png,woff2,txt}'],
     globIgnores: [
       // ?demo only: fetched (and runtime-cached) when someone opens the demo.
       '**/demo-*.js',
       '**/*.map',
+      // The icon board, above.
+      'icon-board/**',
       // Manrope: precache the latin and latin-ext subsets the UI text uses. The
       // others load by unicode-range only when a backup name needs them.
       '**/manrope-cyrillic-*',
@@ -99,9 +104,22 @@ const pwa = VitePWA({
   },
 })
 
+// teenage engineering's EP Sample Tool, where the factory sounds come from
+// (platform/net/factory): their server sends no CORS headers, so arc reads it
+// through its own origin. vercel.json forwards the same path in production.
+const sampleTool = {
+  '/te/apps/ep-sample-tool': {
+    target: 'https://teenage.engineering',
+    changeOrigin: true,
+    rewrite: (path: string) => path.replace(/^\/te/, ''),
+  },
+}
+
 export default defineConfig({
   plugins: [preact(), pwa],
   base: './',
+  server: { proxy: sampleTool },
+  preview: { proxy: sampleTool },
   define: {
     __ARC_VERSION__: JSON.stringify(version),
     __ARC_BUILD__: JSON.stringify(buildName(version)),

@@ -16,13 +16,41 @@
 // Web deltas: all times are MILLISECONDS on one clock (MIDIMessageEvent
 // timeStamp / performance.now()), where the Kotlin uses nanoseconds;
 // @Synchronized is dropped (single-threaded JS); pads are keyed by
-// padKey() = group * 12 + offset.
+// padKey() = group * 12 + offset; padSamples keys a pad by group * 100 +
+// its number where Kotlin uses a Pair, and distinct() compares the fields;
+// PadSample's `file` is optional, absent being Kotlin's default null.
 
 import type { MidiEvent } from '../protocol/midiInput'
 import { pad as padOfNote, padKey, type PhysicalPad } from './padNotes'
 import type { LiveSnapshot } from './liveSnapshot'
-import { PadOrder } from './padPush'
+import { OfflinePads, SoundSource, type OfflinePad } from './offlinePads'
+import { PadOrder, topNumber } from './padPush'
 import { groupOrder, type PadGroup } from './projectPads'
+
+/**
+ * Where a physical pad's sound is set (an addition): the active [project]'s
+ * pad file for [group] and [pad] (its number in the project file, pNN), and
+ * the [slot] its pad record holds now (null when empty or not in the records).
+ */
+export interface PadTarget {
+  readonly project: number
+  readonly group: number
+  readonly pad: number
+  readonly slot: number | null
+}
+
+/**
+ * The sound to play for a pad (an addition): its [slot] and [name], and
+ * whether it is a factory sound put on the pad offline ([factory]), which
+ * plays from the factory pack first. A sample recorded in arc and not on the
+ * device yet has slot 0 and plays from its [file] in arc's samples folder.
+ */
+export interface PadSample {
+  readonly slot: number
+  readonly name: string
+  readonly factory: boolean
+  readonly file?: string | null
+}
 
 /** A pad file id from a pad push: project 1..99, group 0..3 (A..D) and the pad's number in the project file (pNN). */
 export interface PadFid {
@@ -95,6 +123,7 @@ export class LiveMirror {
   private activeProject: number | null = null
   private layout = new Map<string, ReadonlyMap<number, number | null>>()
   private names: ReadonlyMap<number, string> = new Map()
+  private local: OfflinePads = OfflinePads.EMPTY
   private readonly learned: Map<number, number>
   private pushesSeen = false
   private padOrder: PadOrder
@@ -136,14 +165,23 @@ export class LiveMirror {
     this.renameLastHit()
   }
 
-  /** Names the last hit again from the current layout and links. */
+  /** Names the last hit again from the current layout, links and pad changes. */
   private renameLastHit(): void {
     const h = this.lastHit
     if (!h) return
     const p = h.pad
     if (!p) return
-    const slot = this.slotOf(p)
-    this.lastHit = { ...h, slot, name: slot != null ? (this.names.get(slot) ?? null) : null }
+    this.lastHit = { ...h, slot: this.slotOf(p), name: this.nameOf(p) }
+  }
+
+  /**
+   * The pad changes made offline (OfflinePads), only ever set on a mirror
+   * showing the last read without the device: pads, names and their samples
+   * follow them, while [saved] keeps what the device read.
+   */
+  setLocal(pads: OfflinePads): void {
+    this.local = pads
+    this.renameLastHit()
   }
 
   setNames(slotNames: ReadonlyMap<number, string>): void {
@@ -188,14 +226,13 @@ export class LiveMirror {
           }
           this.pendingNote.set(pad.group, { pad, at: e.time })
           this.tryLink(pad.group)
-          const slot = this.slotOf(pad)
           this.lastHit = {
             pad,
             note: e.note,
             channel: e.channel,
             velocity: e.velocity,
-            slot,
-            name: slot != null ? (this.names.get(slot) ?? null) : null,
+            slot: this.slotOf(pad),
+            name: this.nameOf(pad),
           }
         }
         break
@@ -277,27 +314,152 @@ export class LiveMirror {
   }
 
   /**
-   * The slot on a physical pad in the active project. Counted from the top,
-   * the pad's number is the learned pad file id term; counted from the
-   * bottom, it is the official note order plus one (see PadOrder).
+   * A physical pad's number in the project file, to name it. Counted from
+   * the top, it is the learned pad file id term; counted from the bottom,
+   * the official note order plus one (see PadOrder).
+   */
+  private numberOf(pad: { readonly group: number; readonly offset: number }): number | null {
+    return this.padOrder === PadOrder.FROM_TOP ? (this.learned.get(pad.offset) ?? null) : pad.offset + 1
+  }
+
+  /**
+   * The sound put on [pad] offline, if any: the change for the active
+   * project's pad at the number a write would use (padNumber), so a pad
+   * placed before it was pressed shows its change too.
+   */
+  localOf(pad: { readonly group: number; readonly offset: number }): OfflinePad | null {
+    if (OfflinePads.size(this.local) === 0) return null
+    const project = this.activeProject
+    if (project === null) return null
+    if (this.pushedProject != null && this.pushedProject !== project) return null
+    const number = this.padNumber(pad)
+    if (number === null) return null
+    return OfflinePads.at(this.local, project, pad.group, number)
+  }
+
+  /**
+   * The slot on a physical pad in the active project: its offline change,
+   * else the project's pad layout at its number (numberOf). None for a
+   * sample recorded in arc: it has no slot until it is uploaded.
    */
   slotOf(pad: { readonly group: number; readonly offset: number }): number | null {
     // The device moved to another project whose pads aren't read yet: no name rather than a wrong one.
     if (this.pushedProject != null && this.pushedProject !== this.activeProject) return null
-    let number: number
-    if (this.padOrder === PadOrder.FROM_TOP) {
-      const n = this.learned.get(pad.offset)
-      if (n === undefined) return null
-      number = n
-    } else {
-      number = pad.offset + 1
-    }
-    return this.layout.get(String.fromCharCode(97 + pad.group))?.get(number) ?? null
+    const local = this.localOf(pad)
+    if (local !== null) return slotIn(local)
+    const number = this.numberOf(pad)
+    return number === null ? null : this.slotAt(pad.group, number)
   }
 
+  /** The name on a physical pad: its offline change's, else the sound list's for its slot. */
   nameOf(pad: { readonly group: number; readonly offset: number }): string | null {
+    const local = this.localOf(pad)
+    if (local !== null) return local.name
     const slot = this.slotOf(pad)
     return slot != null ? (this.names.get(slot) ?? null) : null
+  }
+
+  /** The sound to play for [pad]: its offline change, else the read's slot and name; null when either is unknown. */
+  sampleOf(pad: { readonly group: number; readonly offset: number }): PadSample | null {
+    const local = this.localOf(pad)
+    if (local !== null) return sampleIn(local)
+    const slot = this.slotOf(pad)
+    if (slot === null) return null
+    const name = this.names.get(slot)
+    return name === undefined ? null : { slot, name, factory: false }
+  }
+
+  /**
+   * Every sound on the active project's pads, each once, by slot: the read's
+   * layout with the offline changes over it. What to load before a pad is
+   * pressed.
+   */
+  padSamples(): PadSample[] {
+    // Keyed by group * 100 + pad number (Kotlin: a Pair).
+    const byPad = new Map<number, PadSample>()
+    for (const [name, pads] of this.layout) {
+      if (name.length !== 1) continue
+      const group = name.charCodeAt(0) - 97
+      for (const [number, slot] of pads) {
+        if (slot === null) continue
+        const n = this.names.get(slot)
+        if (n === undefined) continue
+        byPad.set(group * 100 + number, { slot, name: n, factory: false })
+      }
+    }
+    for (const p of this.local.list) {
+      if (p.project === this.activeProject) {
+        byPad.set(p.group * 100 + p.pad, sampleIn(p))
+      }
+    }
+    // distinct(): data class equality.
+    const seen = new Set<string>()
+    const out: PadSample[] = []
+    for (const s of byPad.values()) {
+      const k = JSON.stringify([s.slot, s.factory, s.file ?? null, s.name])
+      if (seen.has(k)) continue
+      seen.add(k)
+      out.push(s)
+    }
+    // Stable, as Kotlin's sortedWith is.
+    return out.sort((a, b) => a.slot - b.slot || Number(a.factory) - Number(b.factory))
+  }
+
+  /** The slot the read's layout has on the active project's pad [pad] of [group] (no offline change). */
+  slotAt(group: number, pad: number): number | null {
+    return this.layout.get(String.fromCharCode(97 + group))?.get(pad) ?? null
+  }
+
+  /**
+   * A physical pad's number in the project file, to write its sound: the
+   * learned number, else (counting from the top, before any press) the
+   * numbering kmorrill's notes give, '7' = 1 down to ENTER = 12; counted
+   * from the bottom, the official note order plus one (see PadOrder).
+   * Null when that numbering's number already belongs to another, learned
+   * key: the device numbers its pads otherwise, and a write would land on
+   * that key's pad. The pad has to be pressed on the EP-133 first.
+   */
+  padNumber(pad: { readonly group: number; readonly offset: number }): number | null {
+    if (this.padOrder !== PadOrder.FROM_TOP) return pad.offset + 1
+    const learned = this.learned.get(pad.offset)
+    if (learned !== undefined) return learned
+    const top = topNumber(pad.offset)
+    return [...this.learned.values()].includes(top) ? null : top
+  }
+
+  /**
+   * Where [pad]'s sound is set in the active project, and the slot on it now,
+   * its offline change's if it has one (none for a sample recorded in arc;
+   * for the pad sheet's "now" line and for undo). Null while the active
+   * project is unknown, the device moved to one not read yet, or the pad's
+   * number isn't known (padNumber).
+   */
+  target(pad: { readonly group: number; readonly offset: number }): PadTarget | null {
+    const project = this.activeProject
+    if (project === null) return null
+    if (this.pushedProject != null && this.pushedProject !== project) return null
+    const number = this.padNumber(pad)
+    if (number === null) return null
+    const change = OfflinePads.at(this.local, project, pad.group, number)
+    const slot = change !== null ? slotIn(change) : this.slotAt(pad.group, number)
+    return { project, group: pad.group, pad: number, slot }
+  }
+
+  /**
+   * arc put [slot] on [t]'s pad (or put the old one back): the layout follows
+   * at once, so names and the saved read update without reading the project
+   * again. Ignored if the active project changed meanwhile.
+   */
+  assigned(t: PadTarget, slot: number | null): void {
+    if (t.project !== this.activeProject) return
+    const group = String.fromCharCode(97 + t.group)
+    const pads = new Map(this.layout.get(group) ?? [])
+    pads.set(t.pad, slot)
+    // Pads by number, as projectPads reads them (Kotlin toSortedMap).
+    const next = new Map(this.layout)
+    next.set(group, new Map([...pads.entries()].sort((a, b) => a[0] - b[0])))
+    this.layout = next
+    this.renameLastHit()
   }
 
   /** The state at [now] (ms): released pads past their fade are dropped, and a stale tempo is cleared. */
@@ -328,6 +490,17 @@ export class LiveMirror {
       lastNote: this.lastNote,
     }
   }
+}
+
+/** What an offline change plays: a recorded sample brings its file along. */
+function sampleIn(p: OfflinePad): PadSample {
+  const s = { slot: p.slot, name: p.name, factory: p.source === SoundSource.FACTORY }
+  return p.file != null ? { ...s, file: p.file } : s
+}
+
+/** An offline change's slot on the device; a recorded sample's slot 0 is a placeholder, not a slot. */
+function slotIn(p: OfflinePad): number | null {
+  return p.source === SoundSource.RECORDED ? null : p.slot
 }
 
 function sameFid(a: PadFid, b: PadFid): boolean {

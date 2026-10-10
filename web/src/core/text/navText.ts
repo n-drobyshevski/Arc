@@ -20,6 +20,9 @@ export const NavText = {
   GUIDE: 'Guide',
   BACK_UP: 'Back up',
   TABS,
+  // Web delta: the web's connection key still disconnects on a tap; the hold is Android's.
+  /** The toast a tap on the connection key shows while connected: it takes a hold of one second to disconnect. */
+  HOLD_TO_DISCONNECT: 'Hold to disconnect',
   /** The section tag's spoken name: "Live, sections". */
   sectionTag(section: string): string {
     return `${section}, ${TABS}`

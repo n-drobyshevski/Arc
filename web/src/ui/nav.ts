@@ -39,7 +39,7 @@ export type Screen =
 /**
  * The overlay layers. [id] says which one, for sheets and dialogs:
  * 'detail:<backupId>', 'restore:<backupId>', 'comparePick:<backupId>',
- * 'pads:backup:<id>:<n>', 'pads:device:<n>', 'upload', 'trim:<i>', 'licence', 'progress' (app.tsx keeps it in step with state.task);
+ * 'pads:backup:<id>:<n>', 'pads:device:<n>', 'upload', 'trim:<i>', 'licence', 'keys' (the Keyboard keys sheet), 'progress' (app.tsx keeps it in step with state.task);
  * dialogs: 'delete', 'prune:<keep>', 'forget', 'pick:scale' / 'pick:octave' (Live's KEYS lists).
  */
 export type OverlayKind = 'dialog' | 'side' | 'menu' | 'coach' | 'sheet'
@@ -413,6 +413,11 @@ export class Nav {
   /** While it answers true, Back does nothing (the modal progress sheet: ArcSheet(onDismiss = null)). */
   setBackGuard(fn: () => boolean): void {
     this.backGuard = fn
+  }
+
+  /** Whether Back may act now (the progress sheet's guard isn't up). */
+  canBack(): boolean {
+    return !this.backGuard()
   }
 
   get current(): NavView {

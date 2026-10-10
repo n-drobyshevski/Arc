@@ -1,8 +1,21 @@
 package dev.arc.ep133.text
 
+import dev.arc.ep133.features.FactorySounds
+import dev.arc.ep133.features.FxSettings
+import dev.arc.ep133.features.FxType
 import dev.arc.ep133.features.Hit
 import dev.arc.ep133.features.PadNotes
+import dev.arc.ep133.features.PhysicalPad
+import dev.arc.ep133.features.ProjectSeq
+import dev.arc.ep133.features.ProjectSource
+import dev.arc.ep133.features.SampleSource
+import dev.arc.ep133.features.Seq
+import dev.arc.ep133.features.SwitchTime
+import dev.arc.ep133.features.Timing
+import dev.arc.ep133.features.TransportPhase
+import dev.arc.ep133.features.TransportState
 import dev.arc.ep133.util.jsToFixed
+import kotlin.math.roundToInt
 
 /** Text for the live mirror (an addition to the web version). */
 object MirrorText {
@@ -18,6 +31,15 @@ object MirrorText {
     const val NOTE_HIDDEN = "Tap for a note"
     /** "Last seen 5 Oct, 14:02", for the display while offline. */
     fun lastSeen(at: String) = "Last seen $at"
+    /** "Seen 5 Oct", the day alone: [lastSeen] where the line is too short for it (the one-group line beside its keys). */
+    fun seen(day: String) = "Seen $day"
+    // Not connected, with the factory sounds in the library: one of their projects (the first unless PROJECT steps on).
+    const val FACTORY = "Factory sounds"
+    fun factoryNote(project: Int) = "Not connected: these are the EP-133's factory sounds, project $project as it ships. Connect your EP-133 to see it live."
+    // Not connected and never read: a way to play without it.
+    const val GET_FACTORY = "Get the factory sounds to play without it"
+    /** The note under "Offline" for the display's offline line ([lastSeen] or [FACTORY]), showing [project]. */
+    fun offlineNote(offline: String, project: Int = FactorySounds.PROJECT) = if (offline == FACTORY) factoryNote(project) else OFFLINE_NOTE
     const val PLAYING = "Playing"
     const val STOPPED = "Stopped"
     const val NO_TRANSPORT = "Play/stop and tempo need MIDI clock out: SHIFT + ERASE, then 102 and ENTER."
@@ -26,12 +48,15 @@ object MirrorText {
     const val LEARN_NOTE = "Sample names are learned as you press pads: one press of a key, in any group, names that key in every group, and arc remembers it."
     const val COMMUNITY_NOTE = "Pads follow the official MIDI note map; play/stop and tempo are standard MIDI clock messages. Naming the samples relies on community notes about the device's SysEx, not on the official guide."
     const val NO_PUSHES = "No pad messages from the device yet, so samples can't be named. Pads still light up."
-    const val LISTEN_ONLY = "arc only reads from the device here (sound names, the active project's pads, and the samples on them, to keep a copy); nothing on it is changed."
+    /** How Live uses the device: it reads, and writes only a pad's sound (in EDIT) and the active project (PROJECT), when asked. */
+    const val LISTEN_ONLY = "arc reads the device here (sound names, the active project's pads, and the samples on them, to keep a copy). It changes the device only when you give a pad another sound in EDIT, switch projects with PROJECT, or keep a sample in SAMPLE."
 
     // Tapping a pad plays its sample on the phone.
     const val TAP_NOTE = "Hold a pad to hear its sample on the phone (it stops when you let go): from arc's copy of the device's sounds, a backup, or the device."
     const val NO_SAMPLE = "arc doesn't know this pad's sample yet."
     const val NO_COPY = "This sample isn't saved on the phone or in a backup yet."
+    // The same for a factory sound (FactorySounds.unnamed) while the pack isn't in the library.
+    const val NO_COPY_FACTORY = "This factory sample isn't saved on the phone yet: Settings → Live → Factory sounds → Get."
     const val SOUNDS_CLEARED = "Saved pad sounds cleared."
     const val PLAY = "Play"
 
@@ -43,15 +68,118 @@ object MirrorText {
     const val PICK_SOUND = "Tap a pad in Pads first: Keys plays that pad's sample."
     const val NO_SOUND = "No sound picked"
 
+    // KEYS on the grid or the piano: two small icon keys after the KEYS word, remembered per window shape.
+    const val KEYS_VIEW = "Keys view"
+    const val VIEW_PADS = "Pads"
+    const val VIEW_PIANO = "Piano"
+    /** What each icon key shows, for screen readers and long-press. */
+    fun keysView(piano: Boolean) = if (piano) "Keys on a piano" else "Keys on the pads"
+    /** Why the piano key is greyed out. */
+    const val PIANO_NO_ROOM = "No room for the piano here"
+
+    // ---------- The function keys over the pads: PROJECT, KEYS (MODE_KEYS over MODE_PADS) and TEMPO ----------
+    /** The keys' two words: the main one on the cap, the second on its coloured lower half. */
+    const val FN_PROJECT = "Project"
+    const val FN_PROJECT_SUB = "1\u20139"
+    const val FN_TEMPO = "Tempo"
+    const val FN_TEMPO_SUB = "Tap"
+    /** SOUND: EDIT on or off (its lower half says EDIT); held, the sheet of the pad played last. */
+    const val FN_SOUND = "Sound"
+    const val SOUND_SHEET = "Pad's sound"
+    const val PLAY_A_PAD = "Play a pad first: SOUND held opens its sound."
+
+    /** PROJECT for screen readers: "Project 3", "Factory project 3", or "No project" before one is read. */
+    fun projectKeyState(n: Int?, source: ProjectSource) = when {
+        n == null -> "No project"
+        source == ProjectSource.FACTORY -> "Factory project $n"
+        else -> project(n)
+    }
+    const val PROJECT_NEXT = "Next project"
+    /** PROJECT held: the project sheet, its title, and each key there for screen readers. */
+    const val PICK_PROJECT = "Choose a project"
+    const val PROJECT_TITLE = "Project"
+    fun projectChoice(n: Int, shown: Boolean) = project(n) + if (shown) ", shown" else ""
+    /** Why PROJECT is greyed out. */
+    const val PROJECT_UNAVAILABLE = "Connect the EP-133 or get the factory sounds to change projects"
+    /** A pad tapped in EDIT while the device switches projects. */
+    const val PROJECT_SWITCHING = "The EP-133 is switching projects. Try again in a moment."
+    fun projectFailed(reason: String) = "The project couldn't be switched: $reason"
+
+    // TEMPO: a click on the phone. Tap turns it on or off; hold opens the tempo sheet.
+    const val CLICK = "Click"
+    /** TEMPO for screen readers: "On, 120 BPM", "Off, 98 BPM, from the EP-133". */
+    fun clickState(on: Boolean, bpm: Int, following: Boolean) =
+        (if (on) "On" else "Off") + ", ${tempoValue(bpm)}" + if (following) ", from the EP-133" else ""
+    const val SET_TEMPO = "Set tempo"
+    const val TEMPO_TITLE = "Tempo"
+    /** The sheet's big pad for screen readers (it shows [FN_TEMPO_SUB]). */
+    const val TAP_TEMPO = "Tap tempo"
+    const val SLOWER = "Slower"
+    const val FASTER = "Faster"
+    /** The sheet while the EP-133 sends MIDI clock: its tempo leads, so − + and TAP rest. */
+    const val FOLLOWING = "Following the EP-133's tempo (MIDI clock)."
+    /** "120 BPM". */
+    fun tempoValue(bpm: Int) = "$bpm BPM"
+    /** "120", under a narrow key. */
+    fun tempoShort(bpm: Int) = "$bpm"
+
     /** The mode word under the grid, for screen readers: what it shows and what a tap does. */
     fun modeSwitch(keysOn: Boolean) = if (keysOn) "Keys. Tap for pads." else "Pads. Tap for keys."
 
     fun scaleChoice(s: dev.arc.ep133.features.Scale) = "Scale: ${scaleName(s)}. Tap to change."
     const val KEYS_NOTE = "Keys plays the pad last tapped (or played on the EP-133 in Pads) as notes. Notes the EP-133 sends in its own KEYS mode light their key."
+    const val PIANO_HINT = "Turn the phone sideways for a piano (with auto-rotate off, tap the rotate button Android shows)."
     const val LEGEND = "Colours"
-    const val LEGEND_OCTAVE = "Ring: the octave, navy and orange in turn (its number is in the corner)"
+    const val LEGEND_ROOT = "Orange ring: the key's root"
+    const val LEGEND_IN_SCALE = "Ring: in the scale"
+    /** The same, when the keys show their names (and no rings). */
+    const val LEGEND_ROOT_NAMED = "Orange name: the key's root"
+    const val LEGEND_IN_SCALE_NAMED = "Name: in the scale"
+    /** The piano's root, which has no ring. */
+    const val LEGEND_ROOT_BAR = "Orange bar: the key's root"
+    // The piano's rows: it shows every note, so the ones outside the scale too.
+    const val LEGEND_OUT = "Dimmed: outside the scale (still plays)"
+    const val LEGEND_C = "Number: the octave, on each C"
     const val LEGEND_DEVICE = "Filled: played on the EP-133"
     const val LEGEND_PHONE = "Outlined: playing on the phone"
+
+    // The piano in landscape: − and + step the octave, and the key gets its own word.
+    const val OCTAVE_DOWN = "Octave down"
+    const val OCTAVE_UP = "Octave up"
+
+    /** "KEY DO", the key word above the piano. */
+    fun keyWord(root: Int, names: dev.arc.ep133.features.NoteNames) = "$KEY ${dev.arc.ep133.features.Keys.name(root, names)}"
+
+    fun keyChoice(root: Int, names: dev.arc.ep133.features.NoteNames) = "$KEY: ${dev.arc.ep133.features.Keys.name(root, names)}. Tap to change."
+
+    /** "MAJ", the scale word when the row above the piano runs out of room. */
+    fun scaleCode(s: dev.arc.ep133.features.Scale) = when (s) {
+        dev.arc.ep133.features.Scale.CHROMATIC -> "Chr"
+        dev.arc.ep133.features.Scale.MAJOR -> "Maj"
+        dev.arc.ep133.features.Scale.MINOR -> "Min"
+        dev.arc.ep133.features.Scale.DORIAN -> "Dor"
+        dev.arc.ep133.features.Scale.PHRYGIAN -> "Phr"
+        dev.arc.ep133.features.Scale.LYDIAN -> "Lyd"
+        dev.arc.ep133.features.Scale.MIXOLYDIAN -> "Mix"
+        // The word is upper-cased, so the two pentatonics differ in letters, not case.
+        dev.arc.ep133.features.Scale.MAJOR_PENTATONIC -> "Maj.P"
+        dev.arc.ep133.features.Scale.MINOR_PENTATONIC -> "Min.P"
+        dev.arc.ep133.features.Scale.BLUES -> "Blu"
+    }
+
+    /** A piano key for screen readers: "LA4, root", "LA4, in the scale" or "FA4, outside the scale". */
+    fun pianoKey(note: Int, names: dev.arc.ep133.features.NoteNames, mark: dev.arc.ep133.features.KeyMark) = noteName(note, names) + when (mark) {
+        dev.arc.ep133.features.KeyMark.ROOT -> ", root"
+        dev.arc.ep133.features.KeyMark.IN -> ", in the scale"
+        dev.arc.ep133.features.KeyMark.OUT -> ", outside the scale"
+    }
+
+    /** "Keyboard, DO3 to DO5", the piano as a whole for screen readers. */
+    fun pianoRange(lo: Int, hi: Int, names: dev.arc.ep133.features.NoteNames) = "Keyboard, ${noteName(lo, names)} to ${noteName(hi, names)}"
+
+    /** "DO2, below the keys": a note from the EP-133 the piano doesn't reach, for the display and the tick at that end. */
+    fun outOfRange(note: Int, names: dev.arc.ep133.features.NoteNames, below: Boolean) =
+        noteName(note, names) + if (below) ", below the keys" else ", above the keys"
 
     fun scaleName(s: dev.arc.ep133.features.Scale) = when (s) {
         dev.arc.ep133.features.Scale.CHROMATIC -> "Chromatic"
@@ -75,23 +203,34 @@ object MirrorText {
     fun noteName(note: Int, names: dev.arc.ep133.features.NoteNames = dev.arc.ep133.features.NoteNames.SOLFEGE) =
         dev.arc.ep133.features.Keys.name(note, names) + dev.arc.ep133.features.Keys.octaveOf(note)
 
-    const val NOTE_NAMES = "Note names on the keys"
+    const val NOTE_NAMES = "Note names"
 
     /** The debug log's line for a Live sound: "live:0:3 heard 31 ms after the press (phone speaker)". */
     fun latencyNote(key: String, ms: Double, route: String) = "$key heard ${"%.0f".format(ms)} ms after the press ($route)"
     const val BLUETOOTH_DELAY = "Sound goes to Bluetooth, which plays late (often 0.2 s or more). Wired headphones or the phone speaker are much quicker."
+    /** The Bluetooth key in Live's top bar, for as long as the sound goes to Bluetooth: the toast a tap shows and what a screen reader says. */
+    const val WIRELESS_DELAY = "Bluetooth plays late: wired or the speaker is quicker"
+    /** The same while Make up for Bluetooth delay is on, with the delay it makes up for: "Bluetooth plays late (about 180 ms): arc makes up for it". */
+    fun wirelessMadeUp(ms: Int) = "Bluetooth plays late (about $ms ms): arc makes up for it"
+    /** The same where the route isn't known but the output's own delay is long: "Sound plays 140 ms late: wired output is quicker". */
+    fun slowOutput(ms: Int) = "Sound plays $ms ms late: wired output is quicker"
     fun noteNames(n: dev.arc.ep133.features.NoteNames) = when (n) {
         dev.arc.ep133.features.NoteNames.SOLFEGE -> "DO RE MI"
         dev.arc.ep133.features.NoteNames.LETTERS -> "C D E"
     }
+    const val SHOW_NAMES = "Key labels"
+    const val SHOW_NAMES_NOTE = "Off, the keys show only their rings and octave numbers; the display line still names the note."
     const val NOTE_NAMES_NOTE = "How KEYS names its notes and the key picker: fixed-do solfège (DO is C) or letters, sharps as C#, D#."
 
     /** "A 7 · kick", the KEYS sound. */
     fun keysSound(pad: dev.arc.ep133.features.PhysicalPad, name: String?) = "${pad.groupLetter} ${pad.label}" + (name?.let { " \u00B7 $it" } ?: "")
 
-    const val PAD_ORDER = "Pad numbers in project files"
+    const val PAD_ORDER = "Pad numbers"
     const val FROM_TOP = "From the top"
     const val FROM_BOTTOM = "From the bottom"
+    /** The same two, on the compact segmented control in Settings. */
+    const val FROM_TOP_SHORT = "Top"
+    const val FROM_BOTTOM_SHORT = "Bottom"
     const val ORDER_NOTE = "Community notes disagree on how project files number the pads. If the names look wrong, try the other way."
     const val GROUP = "Group"
 
@@ -102,6 +241,25 @@ object MirrorText {
     const val TOOLS = "Live tools"
     const val VIEW = "View"
     const val FOLLOW_NOTE = "Follow switches to the group of the pad just played."
+
+    // Live tools, redesigned: the long notes fold under one disclosure each.
+    const val HOW_LIVE_READS = "How Live reads the EP-133"
+    const val HOW_KEYS_WORKS = "How Keys works"
+    /** The tools column's two tabs on a wide window: the tools, and the device's sounds to drag onto pads. */
+    const val TAB_TOOLS = "Tools"
+    const val TAB_SOUNDS = "Sounds"
+    /** The hint beside the one-octave key picker. */
+    const val KEY_HINT = "tap a note"
+
+    /** "Keys \u00B7 MI4", the small display of the last note in the tools (upper-cased where shown). */
+    fun lastNote(note: Int, names: dev.arc.ep133.features.NoteNames) = "$KEYS \u00B7 ${noteName(note, names)}"
+
+    // The colours as compact chips (the long rows stay for screen readers).
+    const val CHIP_DEVICE = "Played on the EP-133"
+    const val CHIP_PHONE = "Playing on the phone"
+    const val CHIP_ROOT = "Root"
+    const val CHIP_OUT = "Outside the scale"
+
     fun groupKey(group: Int) = ('A' + group).toString()
 
     fun bpm(bpm: Double) = "${jsToFixed(bpm, 1)} BPM"
@@ -120,22 +278,171 @@ object MirrorText {
 
     fun channel(ch: Int) = "ch $ch"
 
-    // ---------- REC: takes of what is played on the phone ----------
+    // ---------- EDIT: giving a pad another sound (community notes, see Device.assignPad) ----------
+    /** The edge tab under GUIDE, upper-case like it. */
+    const val EDIT_TAB = "EDIT"
+    /** The tab for screen readers: what it does now. */
+    fun editTab(on: Boolean) = if (on) "Editing pads. Tap to stop." else "Edit pads: change a pad's sound."
+    /** The display line while EDIT is on, after the EDIT word. */
+    const val EDIT_LINE = "Tap a pad to change its sound"
+
+    /** "Pad A 8", the pad sheet's title. */
+    fun padTitle(pad: dev.arc.ep133.features.PhysicalPad) = "Pad ${pad.groupLetter} ${pad.label}"
+
+    /** "now 101 snare 2", or "now empty": the sound on the pad, under the title. */
+    fun padNow(slot: Int?, name: String?) =
+        "now " + if (slot == null) EMPTY else FeatureText.slot(slot) + (name?.let { " $it" } ?: "")
+
+    /** "Project 1 \u00B7 now 101 snare 2". */
+    fun padSheetLine(n: Int, slot: Int?, name: String?) = "${project(n)} \u00B7 ${padNow(slot, name)}"
+    const val EMPTY = "empty"
+    const val FIND_FOR_PAD = "Find a sound for this pad"
+    /** Marks the sound on the pad now in the sheet's list (upper-cased where shown). */
+    const val ON_PAD = "On pad"
+    const val UPLOAD_NEW = "Upload a new sample\u2026"
+    const val ASSIGN_NOTE = "The pad takes the new sound at once. Its own settings (level, pitch and the rest) start again from the sample's, as when you change a pad's sound on the EP-133."
+
+    /** "Pad A 8: vox chop", the toast after a pad got another sound (with UNDO). */
+    fun assigned(pad: dev.arc.ep133.features.PhysicalPad, name: String) = "Pad ${pad.groupLetter} ${pad.label}: $name"
+    const val UNDO = "Undo"
+    /** "Pad A 8: back to snare 2", after UNDO. */
+    fun restored(pad: dev.arc.ep133.features.PhysicalPad, name: String) = "Pad ${pad.groupLetter} ${pad.label}: back to $name"
+
+    /** "snare 2 \u2192 vox chop", on a pad while a sound is dragged over it. */
+    fun dropPreview(old: String?, new: String) = "${old ?: EMPTY} \u2192 $new"
+
+    const val EDIT_OFFLINE = "Connect your EP-133 to change a pad's sound."
+    const val EDIT_NO_PROJECT = "arc hasn't read the active project yet. Wait a moment, or press a pad on the EP-133."
+    const val EDIT_PRESS_FIRST = "arc doesn't know which pad this is yet. Press it once on the EP-133, then tap it here."
+    const val NO_FREE_SLOT = "No free slot left on the device. Delete a sound there first."
+    fun assignFailed(reason: String) = "The pad's sound couldn't be changed: $reason"
+    fun undoFailed(reason: String) = "The old sound couldn't be put back: $reason"
+    fun uploadFailed(reason: String) = "The sample couldn't be uploaded: $reason"
+
+    // ---------- EDIT: a pad's SOUND EDIT settings (community notes, see Device.writePadSettings) ----------
+    /** The pages, as the device prints them (upper-cased where shown), in [pageName]'s order. */
+    const val PAGE_SOUND = "Sound"
+    const val PAGE_TRIM = "Trim"
+    const val PAGE_ENV = "Env"
+    const val PAGE_MIDI = "Midi"
+    const val PAGE_MUTE = "Mute"
+    /** Page [i]'s name: Sound, Trim, Env, Midi, Mute. */
+    fun pageName(i: Int) = listOf(PAGE_SOUND, PAGE_TRIM, PAGE_ENV, PAGE_MIDI, PAGE_MUTE)[i]
+
+    /** The knobs' names. */
+    const val PITCH = "Pitch"
+    const val LEVEL = "Level"
+    const val MODE = "Mode"
+    const val PAN = "Pan"
+    const val START = "Start"
+    const val LENGTH = "Length"
+    const val ATTACK = "Attack"
+    const val RELEASE = "Release"
+    const val CHANNEL = "Channel"
+    const val MUTE_GROUP = "Mute group"
+    /** A knob's readout while its value isn't known (the trim before the sample's length is). */
+    const val NO_VALUE = "\u2014"
+
+    /** "+1.5", "-12", "0": semitones, at most two decimals. */
+    fun pitchLabel(semitones: Double): String {
+        val r = Math.round(semitones * 100) / 100.0
+        if (r == 0.0 || r.isNaN()) return "0"
+        return (if (r > 0) "+" else "-") + dev.arc.ep133.util.jsNumberToString(Math.abs(r))
+    }
+
+    /** "100". */
+    fun levelLabel(level: Int) = "$level"
+
+    /** "C" in the middle, "L8" to the left, "R16" to the right. */
+    fun panLabel(pan: Int) = when {
+        pan < 0 -> "L${-pan}"
+        pan > 0 -> "R$pan"
+        else -> "C"
+    }
+
+    fun modeLabel(m: dev.arc.ep133.features.PlayMode) = when (m) {
+        dev.arc.ep133.features.PlayMode.ONESHOT -> "Oneshot"
+        dev.arc.ep133.features.PlayMode.KEY -> "Key"
+        dev.arc.ep133.features.PlayMode.LEGATO -> "Legato"
+    }
+
+    /** "0.25 s": [frames] at [rate] frames a second. */
+    fun secondsLabel(frames: Long, rate: Double) = "${jsToFixed(if (rate > 0) frames / rate else 0.0, 2)} s"
+
+    /** An envelope time as the device keeps it, 0..255 (its milliseconds aren't known for sure). */
+    fun envLabel(ticks: Int) = "$ticks"
+
+    /** "1".."16" for channels 0..15. */
+    fun channelLabel(ch: Int) = "${ch + 1}"
+
+    fun onOff(on: Boolean) = if (on) "On" else "Off"
+
+    /** A knob for screen readers: "Pitch: +1.5." */
+    fun knobDescription(name: String, value: String) = "$name: $value."
+
+    /** TRIM's waveform for screen readers: "Plays 46875 frames from frame 1200." */
+    fun trimDescription(start: Long, length: Long) = "Plays $length frames from frame $start."
+    /** Under ENV while the pad is Oneshot, which plays to the end. */
+    const val ONESHOT_RELEASE = "Oneshot plays to the end: release is for Key and Legato."
+    /** Under MUTE. */
+    const val MUTE_NOTE = "Pads with the mute group on cut each other off within their group: playing one stops the others."
+
+    /** The pad sheet's note under the knobs: while the pad's settings are read, offline, or else. */
+    const val PAD_READING = "Reading the pad's settings\u2026"
+    /** The EP-133 didn't answer for the pad's settings: the knobs rest. */
+    const val PAD_READ_FAILED = "The EP-133 didn't send this pad's settings. Close the sheet and open it again to retry."
+    const val PAD_SETTINGS_OFFLINE = "Offline, the pad's settings change in arc only. When you connect, arc asks before putting them on the EP-133."
+    const val PAD_SETTINGS_NOTE = "Turns go on the EP-133 as soon as you let go."
+    /** The key that folds the sheet's sound list away while the settings show, and back. */
+    const val CHANGE_SOUND = "Change sound"
+    const val HIDE_SOUNDS = "Hide sounds"
+    fun padSettingsFailed(reason: String) = "The pad's settings couldn't be changed: $reason"
+
+    // ---------- Offline: the sounds panel and pad changes in arc only, put on the EP-133 when it connects ----------
+    /** The Device / Factory switch over the sound list. */
+    const val SOURCE = "Sounds from"
+    const val SOURCE_DEVICE = "Device"
+    const val SOURCE_FACTORY = "Factory"
+    /** A device sound arc has no copy or backup of, dimmed in the list. */
+    const val NEEDS_DEVICE = "Needs the EP-133"
+
+    /** "Pad A 8: kick, in arc until you connect", the toast after a pad got another sound offline. */
+    fun assignedOffline(pad: dev.arc.ep133.features.PhysicalPad, name: String) = "${assigned(pad, name)}, in arc until you connect"
+    const val ASSIGN_NOTE_OFFLINE = "Offline, the pad changes in arc only. When you connect, arc asks before putting it on the EP-133."
+
+    /** The Live tools row while offline changes are kept, with [RESET_PADS]. */
+    const val OFFLINE_PADS = "Offline pad changes"
+    fun offlinePadsNote(n: Int) =
+        "${Format.plural(n, "pad")} changed in arc only. When you connect, arc asks before putting ${if (n == 1) "it" else "them"} on the EP-133."
+    const val RESET_PADS = "Reset pads"
+    const val PADS_RESET = "Pads back to the EP-133's sounds."
+
+    /**
+     * The question when the EP-133 connects with offline changes kept: [WRITE] or [DISCARD].
+     * [n] counts the pad changes and [samples] the new recordings waiting to go on, so a
+     * prompt for recordings alone doesn't call them pad changes.
+     */
+    fun putOffline(n: Int, samples: Int = 0) = "Put " + when {
+        samples == 0 -> Format.plural(n, "offline pad change")
+        n == 0 -> Format.plural(samples, "new sample")
+        else -> "${Format.plural(n, "offline pad change")} and ${Format.plural(samples, "new sample")}"
+    } + " on the EP-133?"
+    const val WRITE = "Write"
+    const val DISCARD = "Discard"
+    /** "2 pads put on the EP-133. 1 skipped: …", after [WRITE]. */
+    fun offlineWritten(written: Int, skipped: Int) = "${Format.plural(written, "pad")} put on the EP-133." +
+        if (skipped == 0) "" else " $skipped skipped: the EP-133 has another sound or project there now."
+    const val OFFLINE_DISCARDED = "Offline pad changes discarded."
+
+    // ---------- TAKE: takes of what is played on the phone ----------
+    /** SAMPLE's take going on, for screen readers ("Pad A 1, Rec"). */
     const val REC = "Rec"
     const val TAKES = "Takes"
-    const val NO_TAKES = "Tap REC on the display, then play: recording starts with the first sound, or when the EP-133 starts playing, and stops when you tap REC again or, if its PLAY started it, when the EP-133 stops."
     const val TAKES_NOTE = "A take holds the pads and keys played on the phone, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save or Share copies one out."
     const val TO_DEVICE = "To EP-133"
     const val DELETE_TAKE = "Delete this take?"
     const val NO_OUTPUT = "There is no sound output to record from."
     const val SHARE_TAKE_FAILED = "Sharing failed. Use Save WAV instead."
-
-    /** What the REC key does now, for screen readers. */
-    fun recDescription(state: dev.arc.ep133.features.RecState) = when (state) {
-        dev.arc.ep133.features.RecState.Idle -> "Record. Recording starts with the first sound you play, or when the EP-133 starts playing."
-        dev.arc.ep133.features.RecState.Armed -> "Record, waiting for the first sound or the EP-133's PLAY. Tap to cancel."
-        is dev.arc.ep133.features.RecState.Recording -> "Recording, ${takeLength(state.seconds.toDouble())}. Tap to stop."
-    }
 
     /** "0:12", "10:00". */
     fun takeLength(seconds: Double): String {
@@ -149,4 +456,735 @@ object MirrorText {
         "The take reached ${dev.arc.ep133.features.TakeRecorder.MAX_SECONDS / 60} minutes and was saved (${takeLength(seconds)})."
 
     fun takeFailed(reason: String) = "The take couldn't be saved: $reason"
+
+    // REC is called TAKE now that RECORD is the pattern's, as on the device; it moves to Live tools.
+    const val TAKE = "Take"
+    const val TAKES_HINT = "Tap TAKE, then play: recording starts with the first sound, or when the EP-133 starts playing, and stops when you tap TAKE again or, if its PLAY started it, when the EP-133 stops."
+
+    /** What the TAKE key does now, for screen readers. */
+    fun takeDescription(state: dev.arc.ep133.features.RecState) = when (state) {
+        dev.arc.ep133.features.RecState.Idle -> "Take. Recording starts with the first sound you play, or when the EP-133 starts playing."
+        dev.arc.ep133.features.RecState.Armed -> "Take, waiting for the first sound or the EP-133's PLAY. Tap to cancel."
+        is dev.arc.ep133.features.RecState.Recording -> "Recording a take, ${takeLength(state.seconds.toDouble())}. Tap to stop."
+    }
+
+    /** "Take 0:12" (upper-cased where shown), by the display line while a take records; a tap stops it. */
+    fun takeBadge(seconds: Double) = "$TAKE ${takeLength(seconds)}"
+
+    // ---------- SAMPLE: recording into a pad (an addition) ----------
+    /** The sources' words, upper-cased where shown, as the device prints them. */
+    const val MIC = "Mic"
+    const val RSP = "Rsp"
+    const val USB = "Usb"
+    const val STEREO = "Stereo"
+
+    /** "Rsp St", the source chip (upper-cased where shown: "RSP ST"); mono has no mark, as on the device. */
+    fun sourceShort(s: SampleSource, stereo: Boolean) = when (s) {
+        SampleSource.MIC -> MIC
+        SampleSource.RSP -> RSP
+        SampleSource.USB -> USB
+    } + if (stereo) " St" else ""
+
+    /** The source spelt out for screen readers: "Phone mic, mono", "EP-133 over USB, stereo". */
+    fun sourceName(s: SampleSource, stereo: Boolean) = when (s) {
+        SampleSource.MIC -> "Phone mic"
+        SampleSource.RSP -> "Resample the phone's sound"
+        SampleSource.USB -> "EP-133 over USB"
+    } + if (stereo) ", stereo" else ", mono"
+    /** The − and + either side of the source chip. */
+    const val PREV_SOURCE = "Previous source"
+    const val NEXT_SOURCE = "Next source"
+
+    // KNOB X is [LEVEL] (the input's gain) and KNOB Y the threshold, as on the device.
+    /** THRESHOLD under knob Y; [THRESHOLD_NAME] for screen readers, where the short word reads badly. */
+    const val THRESHOLD = "Thresh"
+    const val THRESHOLD_NAME = "Threshold"
+
+    /** "+12 dB", "−6 dB" or "0 dB": the input's gain under LEVEL. */
+    fun gainReadout(db: Int) = when {
+        db > 0 -> "+$db dB"
+        db < 0 -> "\u2212${-db} dB"
+        else -> "0 dB"
+    }
+
+    /** "−24 dB", or "Off" with no threshold (recording starts at the press). */
+    fun thresholdReadout(db: Int?) = if (db == null) onOff(false) else gainReadout(db)
+
+    /** A take of a set length, in bars of the tempo: "Free" (until you let go), "1 bar", "2 bars". */
+    const val BARS = "Bars"
+    fun barsChoice(n: Int?) = if (n == null) "Free" else Format.plural(n, "bar")
+
+    /**
+     * The switch for hands-free takes, for one hand or a screen reader; while
+     * one goes on (or counts in, or waits) its key reads STOP ([FeatureText.STOP]).
+     */
+    const val LATCH = "Latch"
+    const val LATCH_NOTE = "Latch on: tap a pad to record hands-free. Tap it again or STOP to stop."
+    /** The meter, for screen readers, and its clip light. */
+    const val INPUT_LEVEL = "Input level"
+    const val CLIPPING = "Clipping"
+
+    // The display line in the mode, grown into the SAMPLE panel: the tag, then what happens next.
+    const val SAMPLE_TAG = "Sample"
+    const val SAMPLE_READY = "Hold a pad to record"
+    const val SAMPLE_READY_LATCH = "Tap a pad to record hands-free"
+    /** Armed with a threshold: the take starts with the first sound loud enough. */
+    const val SAMPLE_WAITING = "Waiting for sound"
+    /** A take of set bars from USB while the EP-133 sends MIDI clock: it starts with the device's PLAY. */
+    const val WAITING_FOR_PLAY = "Press PLAY on the EP-133"
+    fun countIn(beat: Int) = "Count-in $beat"
+
+    /** "0:04 / 0:20": the take so far, and the longest it can be. */
+    fun sampleTime(seconds: Int, max: Int) = "${takeLength(seconds.toDouble())} / ${takeLength(max.toDouble())}"
+
+    /** "Takes up to 40 s": the panel's wave strip before the first take, the longest one can be. */
+    fun sampleMax(seconds: Int) = "Takes up to $seconds s"
+
+    /** "Pad A 7: uploading, 40%"; without [percent] as a screen reader hears it, once rather than at each step. */
+    fun sampleUploading(pad: PhysicalPad, percent: Int? = null) = "${padTitle(pad)}: uploading" + (percent?.let { ", $it%" } ?: "")
+
+    /** A full-length take won't fit in the EP-133's free space, so takes stop sooner. */
+    const val DISK_LOW = "Disk low"
+    fun diskLow(seconds: Int) = "$DISK_LOW: room for $seconds s"
+
+    /** Added to a pad's name for screen readers in the mode: ", has a sound" or ", empty". */
+    fun padSampleState(filled: Boolean) = if (filled) ", has a sound" else ", empty"
+    /** Added to the take's pad instead: recording into it, or waiting to (for sound, the count-in or PLAY). */
+    const val PAD_RECORDING = ", recording"
+    const val PAD_WAITING = ", waiting to record"
+    /** A pad's click in the mode for screen readers, which can't hold: a latched take, its end, or (before it starts) its cancel. */
+    const val RECORD_HANDS_FREE = "Record hands-free"
+    const val STOP_RECORDING = "Stop recording"
+    const val CANCEL_RECORDING = "Cancel recording"
+
+    /** A short tap on an empty pad in the mode. */
+    const val HOLD_TO_RECORD = "Hold the pad to record. A tap plays a pad that has a sound."
+    /** The mic permission was refused for good, with [MIC_SETTINGS] to open the app's settings. */
+    const val NO_MIC = "arc needs the microphone to sample the mic or USB. RSP works without it."
+    const val MIC_SETTINGS = "Settings"
+    const val USB_EXPERIMENTAL = "USB sampling is experimental. The EP-133 needs OS 2.5 and its sound going out over USB."
+    const val USB_GONE = "The USB input went away. What was recorded is kept."
+    fun inputFailed(reason: String) = "The input couldn't be opened: $reason"
+    /** Android silences the mic while another app (a call, say) records. */
+    const val MIC_BUSY = "Another app is using the mic."
+    /** On return, after the take stopped because arc left the screen. */
+    const val SAMPLE_BACKGROUND = "Sampling stopped when arc left the screen. The recording is kept."
+
+    // The review sheet after a take: trim and hear it, then KEEP, RETAKE or DISCARD (with UNDO).
+    const val REVIEW_TITLE = "New sample"
+
+    /** "Pad A 7 \u00B7 0:04 \u00B7 RSP ST", under the review sheet's title. */
+    fun reviewLine(pad: PhysicalPad, seconds: Double, source: SampleSource, stereo: Boolean) =
+        "${padTitle(pad)} \u00B7 ${takeLength(seconds)} \u00B7 ${sourceShort(source, stereo).uppercase()}"
+    const val NORMALIZE = "Normalize"
+    const val NORMALIZE_NOTE = "Raises the sample so its loudest point is at 0 dB."
+    const val TRIM_SILENCE = "Trim silence"
+    const val TRIM_SILENCE_NOTE = "Starts the sample where the sound starts."
+    const val RETAKE = "Retake"
+    const val KEEP = "Keep"
+
+    /** "Slot 214, the next free one": where KEEP puts the sample (− and + step over the free slots). */
+    fun slotLine(slot: Int, next: Boolean) = "Slot $slot" + if (next) ", the next free one" else ""
+    /** The − and + either side of the slot line. */
+    const val PREV_SLOT = "Previous free slot"
+    const val NEXT_SLOT = "Next free slot"
+    /** Offline, the slot is picked on upload: the free ones aren't known until then. */
+    const val SLOT_WHEN_CONNECTED = "Goes into the next free slot when the EP-133 connects."
+
+    /** "Pad A 7: kept in arc. It goes on the EP-133 when you connect.", after KEEP offline. */
+    fun sampleQueued(pad: PhysicalPad) = "${padTitle(pad)}: kept in arc. It goes on the EP-133 when you connect."
+    /** "Pad A 7: new sample on the EP-133.", once the upload is done. */
+    fun sampleSaved(pad: PhysicalPad) = "${padTitle(pad)}: new sample on the EP-133."
+    /** A pad pressed for a sound only the EP-133 has while a new sample goes up to it, Live playing on. */
+    const val DEVICE_UPLOADING = "The EP-133 is taking a new sample. This sound plays once it's done."
+    const val SAMPLE_DISCARDED = "Sample discarded."
+    /** A take with no pad to go on (no project read yet): it isn't lost. */
+    const val KEPT_IN_TAKES = "Kept in Takes: read a project on the EP-133 to put samples on pads."
+    /** "2 samples kept in Takes.", after offline recordings were discarded or reset: never dropped. */
+    fun samplesToTakes(n: Int) = "${Format.plural(n, "sample")} kept in Takes."
+
+    /** SAMPLE's BARS choice for a take as long as the pattern (upper-cased where shown: "PTN"). */
+    const val PTN = "Ptn"
+    const val PTN_NAME = "The pattern's length"
+    const val PTN_NOTE = "Records as long as the longest pattern, from its start: at once when stopped, else from the next loop."
+
+    // ---------- PATTERN: the pads played into a looping pattern with RECORD and PLAY, as on the device ----------
+    // PLAY, UNDO and LENGTH are the words above; a running pattern's key reads STOP ([FeatureText.STOP]).
+    /** The sheet held RECORD opens. */
+    const val PATTERN = "Pattern"
+    const val RECORD = "Record"
+    const val ERASE = "Erase"
+    const val TIMING = "Timing"
+    const val COUNT_IN = "Count-in"
+    const val COUNT_IN_NOTE = "RECORD then PLAY counts a bar in. RECORD and PLAY together start at once."
+    /** AUTO length: a pattern recorded from stop into an empty group ends where you stop. */
+    const val AUTO = "Auto"
+    const val AUTO_NOTE = "An empty group recorded from stop ends where you stop: 1, 2, 4 or 8 bars."
+    const val CLEAR = "Clear"
+    const val CLEAR_ALL = "Clear all"
+    /** SHIFT + + on the device: twice as long, the notes copied in. [DOUBLE_NAME] for screen readers. */
+    const val DOUBLE = "\u00D72"
+    const val DOUBLE_NAME = "Double the length"
+    /** The − and + either side of a group's length. */
+    const val SHORTER = "Shorter"
+    const val LONGER = "Longer"
+    const val PATTERN_NOTE = "Patterns stay in arc and play on the phone."
+
+    /** "2.3 / 4": bar 2, beat 3 of a 4-bar pattern, on the display line while it runs. */
+    fun patternPosition(bar: Int, beat: Int, bars: Int) = "$bar.$beat / $bars"
+
+    /** "2.3 / 4 \u00B7 1/16" while recording: the grid the notes snap to as well. */
+    fun patternRecording(bar: Int, beat: Int, bars: Int, timing: Timing) = "${patternPosition(bar, beat, bars)} \u00B7 ${timingLabel(timing)}"
+
+    /** "/ 4" beside the count-in's big digit ([countIn] for screen readers). */
+    fun countInOf(beats: Int) = "/ $beats"
+
+    /** "Play a pad or PLAY \u00B7 1/16" on the display line while RECORD is armed: what starts it (a pad at once, PLAY after the count-in), and the grid. */
+    fun patternArmed(timing: Timing) = "Play a pad or PLAY \u00B7 ${timingLabel(timing)}"
+
+    /** TIMING's choices: Off, 1/1, 1/2, 1/4, 1/8, 1/8T, 1/16, 1/16T, 1/32. */
+    fun timingLabel(t: Timing) = if (t == Timing.OFF) onOff(false) else t.id
+
+    /**
+     * The display line while the arp plays: "ARP \u00B7 1/16 \u00B7 DO FA LA" (KEYS,
+     * the notes held by [names]), "REPEAT \u00B7 1/16 \u00B7 A 7, B 1" for note repeat
+     * (PADS: [repeat]), the pads held; "ARP \u221E \u00B7 \u2026" latched.
+     */
+    fun arpLine(repeat: Boolean, latch: Boolean, interval: Timing, notes: List<dev.arc.ep133.features.ArpNote>, names: dev.arc.ep133.features.NoteNames): String {
+        val words = notes.map { n -> n.semitones?.let { dev.arc.ep133.features.Keys.name(dev.arc.ep133.features.Keys.ROOT_NOTE + it, names) } ?: "${n.pad.groupLetter} ${n.pad.label}" }
+        val head = (if (repeat) "REPEAT" else "ARP") + if (latch) " \u221E" else ""
+        return "$head \u00B7 ${timingLabel(interval)} \u00B7 ${words.joinToString(if (repeat) ", " else " ")}"
+    }
+
+    /** A TIMING choice for screen readers: a triplet ("1/8T") said as "1/8 triplet". */
+    fun timingName(t: Timing) =
+        if (t == Timing.OFF) "Timing off: notes stay where you play them" else "Timing ${t.id}: notes snap to the nearest ${timingSpoken(t)}"
+
+    private fun timingSpoken(t: Timing) = if (t.id.endsWith("T")) t.id.dropLast(1) + " triplet" else t.id
+
+    // ---------- ARP: the arpeggiator and note repeat, and TIMING (an addition: the device's TIMING + pads) ----------
+    /** The switch on the pads' plate: ARP in KEYS, RPT (note repeat) in PADS; their names for screen readers. */
+    const val ARP = "Arp"
+    const val RPT = "Rpt"
+    const val ARP_NAME = "Arpeggiator"
+    const val RPT_NAME = "Note repeat"
+
+    /** LATCH greyed out while the arp is off: why. */
+    fun arpFirst(repeat: Boolean) = "Turn on ${if (repeat) "RPT" else "ARP"} first"
+
+    /** The tempo sheet's two pages: TEMPO (the click) and [TIMING]. */
+    const val TEMPO_TAB = "Tempo"
+    const val INTERVAL = "Interval"
+    const val SWING = "Swing"
+    const val GATE = "Gate"
+    /** SWING's knob rests at the other intervals. */
+    const val SWING_NOTE = "Swing plays at 1/8 and 1/16."
+    const val QUANTIZE = "Quantize"
+    const val FREE_TIME = "Free time"
+    const val QUANTIZE_NOTE = "Quantize: notes you record snap to the interval. Free time: they stay where you play them."
+    const val TIMING_NOTE = "The interval is the step the arp and note repeat play at, and the grid recording snaps to."
+    const val ARP_SECTION = "Arp and repeat"
+    const val ORDER = "Order"
+    const val OCTAVES = "Octaves"
+    /** Beside GATE's knob: what it sets. */
+    const val GATE_NOTE = "How long each note sounds, as a share of the step."
+    const val ARP_LATCH_NOTE = "Latch on: the notes play on after you let go. The next press starts a new set."
+
+    /** A knob's percent: "56%". */
+    fun percent(v: Int) = "$v%"
+
+    /** An INTERVAL choice for screen readers: "Interval 1/8 triplet". */
+    fun intervalName(t: Timing) = "Interval ${timingSpoken(t)}"
+
+    /** The arp's orders as their keys print them, and in full for screen readers. */
+    fun arpOrderName(o: dev.arc.ep133.features.ArpOrder) = when (o) {
+        dev.arc.ep133.features.ArpOrder.PLAYED -> "Played"
+        dev.arc.ep133.features.ArpOrder.UP -> "Up"
+        dev.arc.ep133.features.ArpOrder.DOWN -> "Down"
+        dev.arc.ep133.features.ArpOrder.UP_DOWN -> "Up-dn"
+        dev.arc.ep133.features.ArpOrder.RANDOM -> "Random"
+    }
+
+    fun arpOrderSpoken(o: dev.arc.ep133.features.ArpOrder) = when (o) {
+        dev.arc.ep133.features.ArpOrder.PLAYED -> "As played"
+        dev.arc.ep133.features.ArpOrder.UP_DOWN -> "Up and down"
+        else -> arpOrderName(o)
+    }
+
+    /** "A \u00B7 2 bars", a group's length in the sheet; "Group A, 2 bars" for screen readers. */
+    fun groupLength(group: Int, bars: Int) = "${'A' + group} \u00B7 ${Format.plural(bars, "bar")}"
+    fun groupLengthName(group: Int, bars: Int) = "Group ${'A' + group}, ${Format.plural(bars, "bar")}"
+
+    /** CLEAR asks in the sheet: one group's notes, or every group's. */
+    fun clearAsk(group: Int?) = if (group == null) "Clear every group's notes?" else "Clear group ${'A' + group}'s notes?"
+    fun cleared(group: Int?) = if (group == null) "Patterns cleared." else "Group ${'A' + group} cleared."
+
+    /** ERASE on: what a pad does now. */
+    const val ERASE_NOTE = "Tap a pad to erase its notes. Hold one while the pattern plays to erase it as it passes."
+    /** "Pad A 7: notes erased.", after a tap in ERASE. */
+    fun erased(pad: PhysicalPad) = "${padTitle(pad)}: notes erased."
+    /** Added to a pad's name for screen readers in ERASE. */
+    const val PAD_HAS_NOTES = ", has notes"
+
+    /** "3 pads not loaded": pads the pattern plays whose sounds aren't on the phone yet. */
+    fun missingPads(n: Int) = "${Format.plural(n, "pad")} not loaded"
+    const val MISSING_NOTE = "Their sounds aren't on the phone yet. They play once arc has them."
+
+    /** The RECORD key for screen readers: "Record, armed". */
+    fun recordDescription(state: TransportState) = "$RECORD, " + when {
+        state.phase == TransportPhase.ARMED || state.phase == TransportPhase.COUNT_IN && state.recording -> "armed"
+        state.recording -> "recording"
+        else -> "off"
+    }
+    /** What a hold on RECORD does, for screen readers. */
+    const val RECORD_HOLD = "Pattern settings"
+
+    /** The PLAY key for screen readers: "Play, bar 2 of 4". */
+    fun playDescription(state: TransportState, bar: Int, bars: Int) = when (state.phase) {
+        TransportPhase.STOPPED, TransportPhase.ARMED -> PLAY
+        TransportPhase.COUNT_IN -> "$PLAY, counting in"
+        TransportPhase.PLAYING -> "$PLAY, bar $bar of $bars"
+    }
+
+    /** Said once when the transport changes: "Record armed", "Counting in", "Recording", "Playing", "Stopped". */
+    fun transportAnnouncement(state: TransportState) = when (state.phase) {
+        TransportPhase.STOPPED -> STOPPED
+        TransportPhase.ARMED -> "Record armed"
+        TransportPhase.COUNT_IN -> "Counting in"
+        TransportPhase.PLAYING -> if (state.recording) "Recording" else PLAYING
+    }
+
+    // ---------- SCENES: the pattern each group plays, picked as MAIN and GROUP do on the device; copy and paste ----------
+    /** "P01": a group's pattern [n] (1..99). */
+    fun patternLabel(n: Int) = "P${twoDigits(n)}"
+
+    /** "S01": the scene at [index] (from 0), shown from 1. */
+    fun sceneLabel(index: Int) = "S${twoDigits(index + 1)}"
+
+    /** "A01": [group]'s pattern [n], as the group keys and the scene line show it. */
+    fun groupPattern(group: Int, n: Int) = "${'A' + group}${twoDigits(n)}"
+
+    /** "S01 · A01 B03 C01 D02": the scene playing, and each group's pattern in it. */
+    fun sceneLine(seq: ProjectSeq) = "${sceneLabel(seq.scene)} · " + (0 until 4).joinToString(" ") { g -> groupPattern(g, seq.selected(g)) }
+
+    /** The scene change setting's choices (410 to 412 on the device). */
+    fun switchName(t: SwitchTime) = when (t) {
+        SwitchTime.IMMEDIATE -> "Immediate"
+        SwitchTime.BAR -> "Bar end"
+        SwitchTime.PATTERN -> "Pattern end"
+    }
+
+    /** "P01 → P05": a group's pattern playing, and the one waiting to take over. */
+    fun queuedLabel(from: Int, to: Int) = "${patternLabel(from)} → ${patternLabel(to)}"
+
+    /** What SHIFT + C copied: pattern [n], [bar] (as shown, from 1) or a pad's notes (the pad's [name]). */
+    fun copiedPattern(n: Int) = "${patternLabel(n)} copied."
+    fun copiedBar(bar: Int) = "Bar $bar copied."
+    fun copiedPad(name: String) = "$name copied."
+
+    /** Where SHIFT + D pasted: into pattern [n], [bar] (from 1) or onto a pad (its [name]). */
+    fun pastedPattern(n: Int) = "Pasted into ${patternLabel(n)}."
+    fun pastedBar(bar: Int) = "Pasted into bar $bar."
+    fun pastedPad(name: String) = "Pasted onto $name."
+
+    /** ERASE + MAIN held: CLR emptied the scene's patterns, DEL deleted the empty scene. */
+    const val CLEARED_SCENE = "Scene cleared."
+    const val DELETED_SCENE = "Scene deleted."
+
+    // The scene panel's status line (upper-cased where shown) and what a screen reader is told of each change.
+    /** When a pick takes over, for the status and screen readers: "now", "at bar end", "at pattern end". */
+    fun switchAt(t: SwitchTime) = when (t) {
+        SwitchTime.IMMEDIATE -> "now"
+        SwitchTime.BAR -> "at bar end"
+        SwitchTime.PATTERN -> "at pattern end"
+    }
+
+    /** "B → 05": group [group] changing to pattern [to]. */
+    fun groupMove(group: Int, to: Int) = "${'A' + group} \u2192 ${twoDigits(to)}"
+
+    /** "→ S03": the scene waiting to take over. */
+    fun sceneMove(index: Int) = "\u2192 ${sceneLabel(index)}"
+
+    /** "B → 05 at bar end": what waits ([move]: groupMove's, or sceneMove's) and for when. */
+    fun queuedLine(move: String, t: SwitchTime) = "$move ${switchAt(t)}"
+
+    /** "S03 committed": COMMIT made the scene at [index]. */
+    fun sceneCommitted(index: Int) = "${sceneLabel(index)} committed"
+
+    /** COMMIT with 99 scenes already. */
+    const val SCENES_FULL = "No room for another scene"
+
+    /** "S05 cleared", "S05 deleted": what ERASE + MAIN held did to the scene at [index]. */
+    fun sceneCleared(index: Int) = "${sceneLabel(index)} cleared"
+    fun sceneDeleted(index: Int) = "${sceneLabel(index)} deleted"
+
+    /** "B · pick 01–99": the grid open over the pads for [group]. */
+    fun gridStatus(group: Int) = "${'A' + group} \u00B7 pick 01\u201399"
+
+    /** "A01 copied", "A bar 2 copied", "KICK copied": [what] the clip took; "A05 pasted", "SNARE pasted": where it went. */
+    fun clipCopied(what: String) = "$what copied"
+    fun clipPasted(what: String) = "$what pasted"
+
+    /** The PAD clip's two stages: COPY waits for the pad to copy, then PASTE for the pad ([word], the one copied) to paste onto. */
+    const val PAD_TAP_SOURCE = "Tap a pad"
+    fun padTapTarget(word: String) = "$word \u2192 tap target"
+
+    /** PASTE with nothing of its kind copied. */
+    const val NO_PATTERN_COPIED = "No pattern copied"
+    const val NO_BAR_COPIED = "No bar copied"
+    const val NO_PAD_COPIED = "No pad copied"
+
+    /** A scene for screen readers: "Scene 2 of 3, patterns A 1, B 3, C 1, D 2". */
+    fun sceneSpoken(index: Int, count: Int, patterns: List<Int>) =
+        "Scene ${index + 1} of $count, patterns " + patterns.mapIndexed { g, n -> "${'A' + g} $n" }.joinToString(", ")
+
+    /** A group's pattern for screen readers: "Group B, pattern 5, 4 bars". */
+    fun patternSpoken(group: Int, n: Int, bars: Int) = "Group ${'A' + group}, pattern $n, $bars ${if (bars == 1) "bar" else "bars"}"
+
+    /** A change waiting, for screen readers: "Group B, pattern 5, at bar end", "Scene 3, at pattern end". */
+    fun patternQueuedSpoken(group: Int, n: Int, t: SwitchTime) = "Group ${'A' + group}, pattern $n, ${switchAt(t)}"
+    fun sceneQueuedSpoken(index: Int, t: SwitchTime) = "Scene ${index + 1}, ${switchAt(t)}"
+
+    /** COMMIT for screen readers: "Scene 3 committed". */
+    fun sceneCommittedSpoken(index: Int) = "Scene ${index + 1} committed"
+
+    // The scene panel's own words (upper-cased where shown) and their names for screen readers.
+    /** The panel's name, and ✕ closing it; the S01 chip on the display line for screen readers: "Scenes, scene 2 of 3". */
+    const val SCENE_NAME = "Scenes and patterns"
+    const val CLOSE_SCENE = "Close scenes and patterns"
+    fun sceneChipName(index: Int, count: Int) = "Scenes, scene ${index + 1} of $count"
+
+    /** The panel's status while nothing else is said: "Scene 2 of 3". */
+    fun sceneStatus(index: Int, count: Int) = "Scene ${index + 1} of $count"
+
+    /** "03": a pattern's number as the group keys and columns show it; "03→05": the one playing and the one waiting. */
+    fun patternNumber(n: Int) = twoDigits(n)
+    fun numberMove(n: Int, to: Int) = "${twoDigits(n)}\u2192${twoDigits(to)}"
+
+    /** The head's − and + around the scene; + on the last scene makes a new one. */
+    const val PREV_SCENE = "Previous scene"
+    const val NEXT_SCENE = "Next scene"
+    const val NEW_SCENE = "New scene"
+
+    /** A group's column: its name for screen readers ("Group B, pattern 3, has notes"), and what its number does. */
+    fun groupColumn(group: Int, n: Int, notes: Boolean) = "$GROUP ${'A' + group}, pattern $n" + if (notes) PAD_HAS_NOTES else ""
+    const val PICK_PATTERN = "Pick a pattern"
+    fun groupPrevious(group: Int) = "$GROUP ${'A' + group}, previous pattern"
+    fun groupNext(group: Int) = "$GROUP ${'A' + group}, next pattern"
+
+    /** NEXT FREE: the first pattern after this one with no notes ("Group B, next free pattern"). */
+    const val NEXT_FREE = "Next free"
+    fun groupNextFree(group: Int) = "$GROUP ${'A' + group}, next free pattern"
+
+    /** A group key's pattern for screen readers, after its name: ", pattern 3", and ", changing to 5" while one waits. */
+    fun groupKeyPattern(n: Int, queued: Int?) = ", pattern $n" + (queued?.let { ", changing to $it" } ?: "")
+
+    /** COMMIT (duplicates the scene), and what it does for screen readers. */
+    const val COMMIT = "Commit"
+    const val COMMIT_NOTE = "Makes a new scene after this one, with copies of the patterns in free slots."
+
+    /** CLR and DEL, the hold key (DEL when the scene is empty): its name, what holding does, and the status while it is held ("Hold · Del S05"). */
+    const val CLR = "Clr"
+    const val DEL = "Del"
+    fun eraseSceneName(delete: Boolean) = if (delete) "Delete scene" else "Clear scene"
+    const val HOLD_NOTE = "Hold for two seconds."
+    fun eraseHolding(delete: Boolean, scene: String) = "Hold \u00B7 ${if (delete) DEL else CLR} $scene"
+
+    /** CHANGE: when a pick takes over. The chip's name for screen readers ("Scene change: Bar end") and what a tap does. */
+    const val CHANGE = "Change"
+    fun changeName(t: SwitchTime) = "Scene change: ${switchName(t)}"
+    const val CHANGE_NOTE = "Tap to change when a pick takes over: now, at bar end, or at pattern end. Stopped, it is always at once."
+
+    /** The pattern sheet's SCENE CHANGE row, the same setting: its caption and a line under the choices. */
+    const val SCENE_CHANGE = "Scene change"
+    const val SCENE_CHANGE_NOTE = "Playing: a new pattern or scene waits for the bar's or pattern's end. Stopped: always at once."
+
+    /** CLIP: PTN, BAR and PAD (their names for screen readers), COPY and PASTE, and the bar pages' row ("Group A · bar", "Clip · A bar 2"). */
+    const val CLIP = "Clip"
+    const val CLIP_PAD = "Pad"
+    const val CLIP_PTN_NAME = "Whole pattern"
+    const val CLIP_BAR_NAME = "One bar"
+    const val CLIP_PAD_NAME = "One pad's notes"
+    const val COPY = "Copy"
+    const val PASTE = "Paste"
+    fun barPagesGroup(group: Int) = "$GROUP ${'A' + group} \u00B7 bar"
+    fun clipHeld(what: String) = "$CLIP \u00B7 $what"
+
+    /** The 1–99 grid over the pads: its name, ✕ closing it, its title ("Group B") and the pattern it starts on ("P03 · 4 bars"). */
+    const val GRID_NAME = "Pattern grid"
+    const val CLOSE_GRID = "Close pattern grid"
+    fun gridTitle(group: Int) = "$GROUP ${'A' + group}"
+    fun gridDetail(n: Int, bars: Int) = "${patternLabel(n)} \u00B7 ${Format.plural(bars, "bar")}"
+
+    /** A cell of the grid for screen readers: "Pattern 5, has notes" (the pattern playing is selected; the next free one says so). */
+    fun patternCell(n: Int, notes: Boolean) = "Pattern $n" + if (notes) PAD_HAS_NOTES else ""
+
+    /** The grid's legend (upper-cased where shown). */
+    const val GRID_HAS_NOTES = "Has notes"
+    const val GRID_EMPTY = "Empty"
+    const val GRID_PLAYING = "Playing"
+
+    private fun twoDigits(n: Int) = n.toString().padStart(2, '0')
+
+    // ---------- STEP: the pattern a step at a time while stopped, and timing correct, as on the device ----------
+    /**
+     * The step cursor as the device shows it: bar, beat and the step in the
+     * beat, from 1 ("1.2.1" is the 5th 1/16). At a beat or longer the third
+     * is 1; triplets count 1..3 in a beat at 1/8T, 1..6 at 1/16T.
+     */
+    fun stepLabel(step: Int, interval: Timing): String {
+        val t = step * interval.ticks
+        val sub = if (interval.ticks < Seq.PPQN) t % Seq.PPQN / interval.ticks + 1 else 1
+        return "${t / Seq.TICKS_PER_BAR + 1}.${t % Seq.TICKS_PER_BAR / Seq.PPQN + 1}.$sub"
+    }
+
+    /** A note's length on a step: an interval's word ("1/16"), "1 bar", sixteenths ("3/16"), else ticks ("50 tk"). */
+    fun gateLabel(ticks: Int): String {
+        if (ticks == Seq.TICKS_PER_BAR) return "1 bar"
+        Timing.intervals.firstOrNull { it.ticks == ticks }?.let { return it.id }
+        val sixteenth = Timing.SIXTEENTH.ticks
+        return if (ticks % sixteenth == 0) "${ticks / sixteenth}/16" else "$ticks tk"
+    }
+
+    /** "3 corrected": the notes timing correct put on the grid. */
+    fun correctedLine(n: Int) = "$n corrected"
+
+    /** The STEP panel's status as RECORD + pad puts a note on the step: "+ SNARE". */
+    fun stepPlaced(word: String) = "+ $word"
+
+    /** A note put on a step, for screen readers: "SNARE on step 1.2.1". */
+    fun stepPlacedSpoken(word: String, step: String) = "$word on step $step"
+
+    /** "KICK → 1.2.2": the note picked, nudged, and the step it sits on now. */
+    fun stepNudged(word: String, step: String) = "$word → $step"
+
+    /** A nudge for screen readers: "KICK moved to step 1.2.2". */
+    fun stepNudgedSpoken(word: String, step: String) = "$word moved to step $step"
+
+    /** "KICK +1 tk": a held pad's notes moved by CORRECT's − / +, the ticks so far ("−2 tk" earlier). */
+    fun stepShifted(word: String, ticks: Int) = "$word ${signedTicks(ticks)} tk"
+
+    /** A shift for screen readers: "KICK 1 tick later", "KICK 2 ticks earlier", "KICK back in place". */
+    fun stepShiftedSpoken(word: String, ticks: Int): String {
+        if (ticks == 0) return "$word back in place"
+        val n = Math.abs(ticks)
+        return "$word $n ${if (n == 1) "tick" else "ticks"} ${if (ticks > 0) "later" else "earlier"}"
+    }
+
+    /** The step cursor for screen readers: "Step 1.2.1", and ", 2 notes" with notes on it. */
+    fun stepSpoken(step: String, notes: Int) = "Step $step" + when (notes) {
+        0 -> ""
+        1 -> ", 1 note"
+        else -> ", $notes notes"
+    }
+
+    /** The STEP chip on the stopped display line and the panel it opens (upper-cased where shown); its name for screen readers. */
+    const val STEP = "Step"
+    const val STEP_NAME = "Step editing"
+    const val CLOSE_STEP = "Close step editing"
+
+    /** "STEP 1.2.1": the panel's status line while nothing else is said. */
+    fun stepStatus(step: String) = "STEP $step"
+
+    /** The panel's RECORD, held: what it does, for screen readers (a click holds it until the next). */
+    const val STEP_RECORD_NOTE = "Hold and tap a pad to put it on the step"
+
+    /** − and + either side of the strip. */
+    const val PREV_STEP = "Previous step"
+    const val NEXT_STEP = "Next step"
+
+    /** A cell of the strip for screen readers: "Step 1.2.1, has notes". */
+    fun stepCell(step: String, notes: Boolean) = "Step $step" + if (notes) PAD_HAS_NOTES else ""
+
+    /** The panel's knobs, every note on the step (upper-cased where shown), and their names for screen readers. */
+    const val VEL = "Vel"
+    const val LEN = "Len"
+    const val VELOCITY = "Velocity"
+    const val NOTE_LENGTH = "Note length"
+
+    /** BAR's pages under a pattern longer than a bar; "Bar 2" for screen readers. */
+    const val BAR = "Bar"
+    fun barPage(bar: Int) = "Bar $bar"
+
+    /** The panel's latches: NUDGE (a tap picks a lit pad for − / +) and CORRECT (timing correct), upper-cased where shown. */
+    const val NUDGE = "Nudge"
+    const val CORRECT = "Correct"
+
+    /** NUDGE with a note picked: "Nudge · KICK". */
+    fun nudgeChip(word: String?) = if (word == null) NUDGE else "$NUDGE · $word"
+
+    /** What NUDGE and CORRECT do, after their state for screen readers. */
+    const val NUDGE_NOTE = "Tap a lit pad to pick it, then − and + move its note."
+    const val CORRECT_NOTE = "Tap a pad to put its notes on the grid. While the pattern plays, hold one to correct it as it passes."
+
+    /** Added to a pad's or key's name for screen readers in the STEP panel: on the cursor's step, and picked for − / +. */
+    const val ON_STEP = ", on the step"
+    const val PICKED = ", picked"
+
+    /** A group's state for screen readers on the all-groups page while the STEP panel is open on it (the group its pads' notes go to). */
+    const val STEP_GROUP = "Editing in step"
+
+    /** A long press on a lit pad or key: picked for − / +; its action's name for screen readers. */
+    const val PICK = "Pick to nudge"
+
+    private fun signedTicks(n: Int) = when {
+        n > 0 -> "+$n"
+        n < 0 -> "−${-n}"
+        else -> "0"
+    }
+
+    // ---------- FX: the master effect, the sends, the output compressor and the sidechain (an addition) ----------
+    /** FX, the fourth function key: its two words. A tap opens the FX sheet; held, the pads play the punch-ins. */
+    const val FN_FX = "FX"
+    const val FN_FX_SUB = "Page"
+    /** FX for screen readers, before the effect on ([fxName]): "Effects, Delay". */
+    const val FX_EFFECTS = "Effects"
+    const val FX_SHEET = "Effect settings"
+    const val PUNCH_INS = "Punch-ins"
+
+    /** An effect's name for screen readers and the XY pad: "Delay", or "Off" for none. */
+    fun fxName(type: FxType) = when (type) {
+        FxType.NONE -> onOff(false)
+        FxType.DELAY -> "Delay"
+        FxType.REVERB -> "Reverb"
+        FxType.DISTORTION -> "Distortion"
+        FxType.CHORUS -> "Chorus"
+        FxType.FILTER -> "Filter"
+        FxType.COMPRESSOR -> "Compressor"
+    }
+
+    /** Its three letters, as the sheet's row and the narrow column's key print them: DLY, REV, DST, CHO, FLT, CMP; OFF for none. */
+    fun fxCode(type: FxType) = when (type) {
+        FxType.NONE -> "OFF"
+        FxType.DELAY -> "DLY"
+        FxType.REVERB -> "REV"
+        FxType.DISTORTION -> "DST"
+        FxType.CHORUS -> "CHO"
+        FxType.FILTER -> "FLT"
+        FxType.COMPRESSOR -> "CMP"
+    }
+
+    /** The word on FX's light in the row, no longer than six letters so four keys fit across a narrow phone: "Delay", "Dist", "FX off". */
+    fun fxKeyLabel(type: FxType) = when (type) {
+        FxType.NONE -> "FX off"
+        FxType.DISTORTION -> "Dist"
+        FxType.COMPRESSOR -> "Comp"
+        else -> fxName(type)
+    }
+
+    /** "Effects, Delay", the FX key as a screen reader says it. */
+    fun fxKeyDescription(type: FxType) = "$FX_EFFECTS, ${fxName(type)}"
+
+    /** The FX sheet's title and its two pages. */
+    const val FX_TITLE = "FX"
+    const val FX_EFFECT = "Effect"
+    const val FX_OUTPUT = "Output"
+
+    /** An effect in the sheet's row for screen readers: the one on says a tap turns it off. */
+    fun fxChoice(type: FxType, on: Boolean) = fxName(type) + if (on) ", on. Tap again to turn it off." else ""
+
+    /** The XY pad: its name, and what X and Y do now: "Length 1/8D, feedback 38%". */
+    const val XY_PAD = "X and Y"
+    fun xyState(type: FxType, x: Float, y: Float, bpm: Float) =
+        "${knobWord(FxSettings.xLabel(type))} ${FxSettings.xReadout(type, x, bpm)}, " +
+            "${FxSettings.yLabel(type).lowercase()} ${FxSettings.yReadout(type, y)}"
+
+    /** "1/8D · 38%", the pad's readout under the effect's name. */
+    fun xyReadout(type: FxType, x: Float, y: Float, bpm: Float) = "${FxSettings.xReadout(type, x, bpm)} \u00B7 ${FxSettings.yReadout(type, y)}"
+
+    /** A screen reader's step on the pad: "Length up", "Feedback down". */
+    fun xyStep(label: String, up: Boolean) = knobWord(label) + if (up) " up" else " down"
+
+    /** The pad with no effect on. */
+    const val XY_OFF = "Pick an effect to play X and Y"
+
+    /** Each group's send to the effect: "Send A", its value 0 to 100. */
+    const val SENDS = "Sends"
+    fun sendName(group: Int) = "Send ${groupKey(group)}"
+    fun sendValue(v: Float) = "${(v * 100f).roundToInt()}"
+
+    /** OUTPUT: the compressor after everything, and the sidechain. */
+    const val OUTPUT_COMP = "Output comp"
+    const val OUTPUT_COMP_NOTE = "Evens out everything the phone plays, last."
+    const val DRIVE = "Drive"
+    const val SPEED = "Speed"
+    const val SIDECHAIN = "Sidechain"
+    const val SIDECHAIN_NOTE = "Each hit of the source pad ducks the groups picked, then lets them back up."
+    const val SC_SOURCE = "Source"
+    const val SHAPE = "Shape"
+    const val DUCKS = "Ducks"
+
+    /** "A 7 kick", the sidechain's source (its pad alone while its sound isn't known). */
+    fun sidechainSource(pad: PhysicalPad, name: String?) = "${pad.groupLetter} ${pad.label}" + (name?.let { " $it" } ?: "")
+
+    /** SOURCE for screen readers: "Sidechain source, A 7 kick". */
+    fun sidechainSourceDescription(pad: PhysicalPad, name: String?) = "$SIDECHAIN ${SC_SOURCE.lowercase()}, ${sidechainSource(pad, name)}"
+
+    /** What a tap on SOURCE does: "Set to B 1", the pad played last. */
+    fun setSource(pad: PhysicalPad) = "Set to ${pad.groupLetter} ${pad.label}"
+
+    /** SOURCE with no pad played yet. */
+    const val PLAY_FOR_SOURCE = "Play a pad to pick it"
+
+    /** A group's key under DUCKS for screen readers: "Duck group A". */
+    fun duckChoice(group: Int) = "Duck group ${groupKey(group)}"
+
+    /** How long the duck lasts: "180 ms". */
+    fun sidechainLength(x: Float) = "${(30f + 570f * x).roundToInt()} ms"
+
+    /** How it comes back up: "SNAP 40" (fast, then easing), "EVEN", "PUMP 40" (slow, then fast). */
+    fun sidechainShape(y: Float): String {
+        val tilt = ((y - 0.5f) * 200f).roundToInt()
+        return if (tilt < 0) "SNAP ${-tilt}" else if (tilt > 0) "PUMP $tilt" else "EVEN"
+    }
+
+    /** Under the sheet's pad cap: what holding it does. */
+    const val FX_HEAR = "Hold the pad to hear it through the effects."
+
+    /** Under the cap with no effect on: the pad plays dry. */
+    const val FX_HEAR_OFF = "No effect on: pick one, then hold the pad to hear it."
+
+    /** Under the cap when the pad's group ([letter]) sends nothing: the pad plays dry. */
+    fun fxHearNoSend(letter: Char) = "Group $letter sends nothing to the effect: raise its fader to hear it."
+
+    /** Before any pad was played: the cap has no pad to play yet. */
+    const val FX_HEAR_NONE = "Play a pad in Live to hear the effects here."
+
+    /** The sheet's note: the effects are the phone's alone. */
+    const val FX_NOTE = "The effects play in Live's sound on the phone; the EP-133's own FX stay as they are."
+
+    /**
+     * FX held: the pads play the twelve punch-ins. Each one's name where a pad
+     * prints its sound, in slot order ('.' PITCH RND, '0' SLICE, ENTER STUTTER,
+     * '1' REPEAT ... '9' DECIMATE): "Repeat", "Oct ↓".
+     */
+    fun punchName(slot: Int) = PUNCH_NAMES[slot]
+    private val PUNCH_NAMES = listOf(
+        "Pitch rnd", "Slice", "Stutter", "Repeat", "Tape stop", "Filter LFO",
+        "LPF", "HPF", "Send FX", "Tremolo", "Oct ↓", "Decimate",
+    )
+
+    /** Its name in full for screen readers: "Beat repeat", "Octave down". */
+    fun punchDescription(slot: Int) = PUNCH_WORDS[slot]
+    private val PUNCH_WORDS = listOf(
+        "Pitch random", "Slice", "Stutter", "Beat repeat", "Tape stop", "Filter LFO",
+        "Low-pass filter", "High-pass filter", "Send to FX", "Tremolo", "Octave down", "Decimator",
+    )
+
+    /** Printed small under a punch-in's name while it isn't held. */
+    const val PUNCH_HOLD = "hold"
+
+    /** A punch-in pad's click for screen readers (no finger to hold: it stays in until clicked again), and its state while in. */
+    const val PUNCH_IN = "Punch in"
+    const val PUNCH_OUT = "Let go"
+    const val PUNCHED_IN = "In"
+
+    /** The display line while punch-ins are held, in the order pressed: "PUNCH · REPEAT + LPF". */
+    fun punchLine(slots: Collection<Int>) = "PUNCH · " + slots.joinToString(" + ") { punchName(it).uppercase() }
+
+    /** That line as a screen reader says it: "Punch-ins, Beat repeat, Low-pass filter". */
+    fun punchSpoken(slots: Collection<Int>) = (listOf(PUNCH_INS) + slots.map(::punchDescription)).joinToString(", ")
+
+    /** A knob's printed name as a word: "LENGTH" to "Length". */
+    private fun knobWord(label: String) = label.lowercase().replaceFirstChar { it.uppercaseChar() }
 }

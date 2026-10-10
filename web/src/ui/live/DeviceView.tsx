@@ -23,7 +23,8 @@ import { CLOSE } from '../../core/text/guideText'
 import { MirrorText } from '../../core/text/mirrorText'
 import { WebText } from '../../core/text/webText'
 import type { MirrorUi } from '../../state/types'
-import { ComboView } from '../components/GuideKeys'
+import { ComboLine } from '../components/GuideKeys'
+import { of as keymapOf } from '../../core/text/guideKeymap'
 import { displayLine, glow, glowCss, groupGlow } from './glow'
 import { keysLit, upperOctave, type KeysUi } from './keys'
 import type { PressTarget, PressTracker } from './press'
@@ -337,7 +338,7 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
                     <button
                       key={`k${o}`}
                       type="button"
-                      class={`ep-a ep-pad ep-pad--key${upperOctave(note, keys.octave) ? ' ep-pad--upper' : ''}${keys.playingKeys.has(o) ? ' is-playing' : ''}`}
+                      class={`ep-a ep-pad ep-pad--key${upperOctave(note, keys.octave) ? ' ep-pad--upper' : ''}${keys.playingNotes.has(note) ? ' is-playing' : ''}`}
                       style={{ ...style, '--glow': glowCss(lit.get(o) ?? 0) }}
                       data-key={o}
                       aria-label={MirrorText.noteName(note, keys.names)}
@@ -403,7 +404,7 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
             type="button"
             class={`ep-a ep-key ep-key--orange ep-key--word${rec.state.kind === 'recording' ? ' is-on' : ''}${rec.state.kind === 'armed' && !props.still ? ' is-armed' : ''}`}
             style={at(1050, 1735, 130, 128)}
-            aria-label={MirrorText.recDescription(rec.state)}
+            aria-label={MirrorText.takeDescription(rec.state)}
             disabled={!rec.onRec}
             onClick={() => rec.onRec?.()}
           >
@@ -478,7 +479,7 @@ function ShortcutCard(props: {
       {entries.length === 0 && key !== 'VOLUME' && <p class="t-small ep-card__text">{WebText.NO_SHORTCUTS}</p>}
       {entries.map((e) => (
         <div key={e.combo} class="ep-card__row">
-          <ComboView combo={parse(e.combo!)} spoken={e.keys} class="ep-card__combo" />
+          {keymapOf(e) !== null && <ComboLine combo={parse(e.combo!)} keymap={keymapOf(e)!} spoken={e.keys} class="ep-card__combo" />}
           <p class="t-small ep-card__text">{firstSentence(e.action)}</p>
         </div>
       ))}

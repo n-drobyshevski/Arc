@@ -2,6 +2,7 @@ package dev.arc.ep133.text
 
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -113,5 +114,93 @@ class GuideTextTest {
         assertThrows<IllegalArgumentException> { GuideCombo.parse("SHIFT + A / B") }
         assertEquals("FX", GuideText.tab(GuideText.sections[3]))
         assertEquals("SOUNDS", GuideText.tab(GuideText.sections[0]))
+    }
+
+    @Test
+    fun `every combo maps onto the panel`() {
+        for (e in all) {
+            val map = PanelKeymap.of(e) ?: continue
+            assertTrue(map.options.isNotEmpty() && map.options.all { it.isNotEmpty() }, e.combo)
+            for (option in map.options) for (step in option) assertTrue(step.keys.isNotEmpty(), e.combo)
+            // A step that turns lights a knob, one that moves lights the fader, one that types lights the digits.
+            for (step in map.steps) when (step.kind) {
+                StepKind.TURN -> assertTrue(step.keys.any { it == PanelKey.X || it == PanelKey.Y }, e.combo)
+                StepKind.MOVE -> assertTrue(PanelKey.FADER in step.keys, e.combo)
+                StepKind.TYPE -> assertTrue(step.keys.containsAll(PanelKey.DIGITS), e.combo)
+                else -> Unit
+            }
+        }
+        // Each key the illustration draws has a printed name.
+        for (k in PanelKey.entries) assertTrue(GuideText.panelLabel(k).isNotEmpty())
+        assertEquals(12, PanelKey.PADS.toSet().size)
+    }
+
+    @Test
+    fun `combos read as steps on the panel`() {
+        // Hold SOUND, then type on the pads: two numbered steps.
+        val load = PanelKeymap.parse("hold:SOUND + dial:0-9")
+        assertEquals(listOf(KeymapStep(listOf(PanelKey.SOUND), StepKind.HOLD), KeymapStep(PanelKey.DIGITS, StepKind.TYPE)), load.steps)
+        assertNull(load.mode)
+        // Pressed together, one step; then a press.
+        val sys = PanelKeymap.parse("SHIFT + ERASE > dial:0-9 > ENTER")
+        assertEquals(
+            listOf(
+                KeymapStep(listOf(PanelKey.SHIFT, PanelKey.ERASE), StepKind.PRESS),
+                KeymapStep(PanelKey.DIGITS, StepKind.TYPE),
+                KeymapStep(listOf(PanelKey.ENTER), StepKind.PRESS),
+            ),
+            sys.steps,
+        )
+        // A mode, and alternatives.
+        val knobs = PanelKeymap.parse("[In SOUND mode] turn:KNOB X / turn:KNOB Y")
+        assertEquals("SOUND", knobs.mode)
+        assertEquals("In SOUND mode", knobs.context)
+        assertEquals(listOf(KeymapStep(listOf(PanelKey.X, PanelKey.Y), StepKind.TURN, either = true)), knobs.steps)
+        assertEquals("SAMPLE", PanelKeymap.parse("[In sample mode] hold:pad").mode)
+        assertEquals("MAIN", PanelKeymap.parse("[In MAIN] SHIFT + C > SHIFT + D").mode)
+        assertNull(PanelKeymap.parse("[While playing] FX").mode)
+        assertNull(PanelKeymap.parse("[In system settings] dial:0-9 > ENTER").mode)
+        // Held alone; a pad is any of the twelve; A-D any group.
+        assertEquals(listOf(KeymapStep(PanelKey.PADS, StepKind.HOLD)), PanelKeymap.parse("[In SOUND mode] hold:pad").steps)
+        assertEquals(
+            listOf(KeymapStep(listOf(PanelKey.SOUND), StepKind.PRESS), KeymapStep(PanelKey.GROUPS, StepKind.PRESS), KeymapStep(PanelKey.PADS, StepKind.PRESS)),
+            PanelKeymap.parse("SOUND > A-D > pad").steps,
+        )
+        // Held through the next step: not held again.
+        assertEquals(
+            listOf(
+                KeymapStep(PanelKey.PADS, StepKind.HOLD),
+                KeymapStep(listOf(PanelKey.SHIFT, PanelKey.C), StepKind.PRESS),
+                KeymapStep(listOf(PanelKey.SHIFT, PanelKey.D), StepKind.PRESS),
+            ),
+            PanelKeymap.parse("hold:pad + SHIFT + C > hold:pad + SHIFT + D").steps,
+        )
+        // Moving the fader with a group held; pressing twice; two ways.
+        assertEquals(
+            listOf(KeymapStep(PanelKey.GROUPS, StepKind.HOLD), KeymapStep(listOf(PanelKey.FADER), StepKind.MOVE)),
+            PanelKeymap.parse("hold:A-D + move:FADER").steps,
+        )
+        assertEquals(StepKind.TWICE, PanelKeymap.parse("[In SOUND mode] SHIFT + x2:C > A-D > SHIFT + D").steps[0].kind)
+        val tempo = PanelKeymap.parse("TEMPO > turn:KNOB X | hold:TEMPO + dial:0-9")
+        assertEquals(2, tempo.options.size)
+        assertEquals(setOf(PanelKey.TEMPO, PanelKey.X), tempo.keys)
+        assertEquals(listOf(PanelKey.MINUS, PanelKey.PLUS), PanelKeymap.parse("RECORD > -/+").steps[1].keys)
+        assertEquals(PanelKey.DIGITS.drop(1), PanelKeymap.parse("hold:MAIN + 1-9").steps[1].keys)
+    }
+
+    @Test
+    fun `list and illustration words`() {
+        assertEquals("Search 93 shortcuts", GuideText.searchCount(93))
+        assertEquals("SOUND MODE", GuideText.modeTag("SOUND"))
+        assertEquals("SAMPLE MODE", GuideText.modeTag("sample"))
+        assertEquals("TYPE", GuideText.tag(KeyAction.DIAL))
+        assertEquals("HOLD", GuideText.tag(KeyAction.HOLD))
+        assertNull(GuideText.stepTag(StepKind.PRESS))
+        assertEquals("HOLD", GuideText.stepTag(StepKind.HOLD))
+        assertEquals("type a number on the pads", GuideText.stepWord(StepKind.TYPE))
+        assertEquals("Step 2", GuideText.step(2))
+        assertEquals("Edit", GuideText.panelSub(PanelKey.SOUND))
+        assertNull(GuideText.panelSub(PanelKey.PLAY))
+        assertEquals("Metronome", GuideText.knobLabel(PanelKey.Y))
     }
 }

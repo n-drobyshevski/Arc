@@ -18,6 +18,8 @@ npm run build        # dist/ with the service worker and manifest
 npm run preview      # serve dist/
 npm run e2e          # Playwright smoke test against the built app (see Testing)
 npm run gen:guide    # regenerate src/core/text/guideData.ts from core's GuideText.kt
+npm run gen:skill    # regenerate the Claude skill's ep133-guide.md and public/arc-beats-skill.zip (see ../skill/arc-beats)
+npm run gen:icons    # redraw public/icons/ (icon.svg and the PNGs) from the launcher icon's shapes, in Chromium
 node scripts/shot.mjs out.png '/backups' --query=demo [--dark] [--size=393x852]   # screenshot a screen
 ```
 
@@ -44,6 +46,7 @@ platform/       the browser behind small interfaces (the Android parts of app/)
   share/          navigator.share with a save fallback
   audio/          playback (SoundPlayer); Live's low-latency output (LiveAudio, an AudioWorklet mixer)
   wakelock/       screen wake lock (TransferService, keepScreenOn)
+  haptics.ts      the pads' and keys' haptic tick (navigator.vibrate, where there is one)
 state/          the controller the UI talks to (ArcController.kt); see state/README.md
 boot/           browserDeps.ts: wires platform/ into the controller's Deps
 ui/             components, screens, sheets, navigation, theme; see ui/README.md
@@ -61,7 +64,7 @@ Each file is a port of one Kotlin file (sometimes a few) and says so on its firs
 ```
 
 - `core/src/main/kotlin/dev/arc/ep133/<pkg>/X.kt` becomes `src/core/<pkg>/x.ts`, line by line where the protocol is concerned. The Kotlin core is itself a port of `../reference/`, which stays the read-only spec; when they disagree, the header comment says which one this file follows.
-- `app/.../controller/ArcController.kt` is `src/state/` (split into controller, connection, tasks, mirror, live). `app/.../midi`, `data`, `files` and `audio` are `src/platform/`. Compose screens in `app/.../ui/` are `src/ui/` with the same names.
+- `app/.../controller/ArcController.kt` is `src/state/` (split into controller, connection, tasks, mirror, live). `app/.../midi`, `data`, `files` and `audio` are `src/platform/`; Live's native audio engine (`app/src/main/cpp`, C++ on Oboe) has no port: the AudioWorklet (`liveWorklet.ts`, `liveMixer.ts`) runs the TypeScript mixer in its place. Compose screens in `app/.../ui/` are `src/ui/` with the same names.
 - Text is never retyped: screens use `core/text/*`, which copy the Kotlin strings. Only sentences about the phone, Android, Documents/arc or the share sheet are reworded, all in `webText.ts`. The guide data is generated from `GuideText.kt` (`npm run gen:guide`), and a test fails when it is stale.
 - Web stand-ins for Android features (foreground service, Documents/arc, the VIEW intent, share sheet) are listed in the header of the file that replaces them.
 
@@ -72,7 +75,7 @@ Never edit `../core`, `../app` or `../reference` from here. A behaviour change g
 - **Unit tests** (`test/**/*.test.ts`, Vitest, Node): `test/core` mirrors the Kotlin tests (`ProtocolTest`, `SessionTest`, `E2eTest`, `PakCompatTest`, `QuirksTest`, ...) and keeps their names and cases. `test/platform` runs storage against `fake-indexeddb` and MIDI against `test/helpers/fakeMidiAccess.ts`. `test/state` drives the controller against the simulator. `test/ui` covers the pure UI logic.
 - **The simulator**, `test/helpers/mockDevice.ts`, is a port of Kotlin's `MockEP133` (itself `reference/test/mock-device.js`), strict in the same places. The same simulator powers `?demo`.
 - **Compatibility:** `test/core/backup/pakCompat.test.ts` opens `../reference/test/fixtures/sample.pak` in place, backs up the same simulated device and compares every entry with the JS output byte for byte (compressed bytes may differ). Fixtures are read from `reference/`, never copied.
-- **Smoke test** (`test/e2e/smoke.spec.ts`, Playwright, Chromium): builds the app, serves it with `vite preview` on 127.0.0.1:4173 and walks through the main flows with `?demo`, plus a page without WebMIDI. Once per machine: `npx playwright install chromium`, or point `CHROMIUM_PATH` at a Chromium already installed.
+- **Smoke test** (`test/e2e/smoke.spec.ts`, Playwright, Chromium): builds the app, serves it with `vite preview` on 127.0.0.1:4173 and walks through the main flows with `?demo`, plus a page without WebMIDI; the other specs there check single features (haptics, the piano's raw pointer moves). Once per machine: `npx playwright install chromium`, or point `CHROMIUM_PATH` at a Chromium already installed.
 - CI (`../.github/workflows/web.yml`) runs typecheck, tests, build and the smoke test on pull requests and pushes to `main` that touch `web/`, `reference/`, `version.properties` or `vercel.json`.
 
 Unit tests run in UTC (`TZ=UTC` in the npm scripts); the smoke test also pins the `en-US` locale.
@@ -97,3 +100,5 @@ Without `?demo`, headless Chromium leaves `requestMIDIAccess()` waiting on a per
 ## Deploy
 
 `../vercel.json` (repository root) is the build: `npm ci --prefix web`, `npm run build --prefix web`, output `web/dist`, with cache headers for `sw.js`, `manifest.webmanifest` and `assets/`, `Permissions-Policy: midi=(self)`, and a Content-Security-Policy (same-origin scripts and connections only, `data:` fonts for Vite's inlined Manrope subsets, `frame-ancestors 'none'`). A new external origin or an inline script needs a matching change there. Vercel skips the build when nothing under `web/`, `reference/`, `version.properties` or `vercel.json` changed. The Vercel project is `arc`.
+
+`public/icon-board/` is the launcher icon board, a standalone design page served at `/icon-board/` (`vercel.json` redirects `/icon-board` there, so its relative paths resolve). It is not part of the app: the service worker neither precaches it nor answers its navigations (`globIgnores` and `navigateFallbackDenylist` in `vite.config.ts`). It fits the same CSP, with its script in `board.js` and its two fonts, Chakra Petch and IBM Plex Sans (SIL OFL), in `fonts/`.

@@ -1,12 +1,10 @@
 package dev.arc.ep133.ui.components
 
-import androidx.compose.ui.semantics.stateDescription
 import dev.arc.ep133.text.SettingsText
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -14,19 +12,23 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.absoluteOffset
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -34,13 +36,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
-import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -60,12 +63,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import kotlinx.coroutines.launch
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
@@ -93,25 +102,27 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
+import dev.arc.ep133.ui.theme.ArcColors
 import dev.arc.ep133.ui.theme.ArcType
 import dev.arc.ep133.ui.theme.LocalArcColors
 import kotlinx.coroutines.delay
 import kotlin.math.floor
 import kotlin.math.max
+import kotlin.math.roundToInt
 
 enum class KeyStyle { Normal, Signal, Quiet, Navy }
 
 enum class KeySize { Normal, Small, Wide }
 
-private val KeyEasing = CubicBezierEasing(0.25f, 0.1f, 0.25f, 1f)
-
 /**
- * A physical key: pale (or orange) top with a bottom edge that the key
- * travels down onto while pressed (`.key` in styles.css). Flatter than the
- * web version's, with an uppercase label, after the pocket operator app.
+ * A physical key: a pale (or orange, or navy) cap whose face travels onto its
+ * edge while pressed (see [cap]), with an uppercase label, after the pocket
+ * operator app. [down] keeps it pressed (a choice that is on). Quiet keys are
+ * flat graphite text.
  */
 @Composable
 fun ArcKey(
@@ -122,20 +133,18 @@ fun ArcKey(
     size: KeySize = KeySize.Normal,
     enabled: Boolean = true,
     textColor: Color? = null,
+    down: Boolean = false,
 ) {
     val c = LocalArcColors.current
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val press by animateFloatAsState(
-        targetValue = if (pressed && enabled && style != KeyStyle.Quiet) 1f else 0f,
-        animationSpec = tween(60, easing = KeyEasing),
-        label = "key",
-    )
+    val press = capPress((down || pressed && enabled) && style != KeyStyle.Quiet)
     val (bg, fg, edge) = when (style) {
         KeyStyle.Normal -> Triple(c.key, c.ink, c.keyEdge)
         KeyStyle.Signal -> Triple(c.signal, c.onSignal, c.signalEdge)
         KeyStyle.Quiet -> Triple(Color.Transparent, c.graphite, Color.Transparent)
-        KeyStyle.Navy -> Triple(c.navy, c.onNavy, c.navy.copy(alpha = 0.55f))
+        // Opaque: a see-through edge would show the page through the cap's side.
+        KeyStyle.Navy -> Triple(c.navy, c.onNavy, capEdge(c.navy))
     }
     val (minH, padV, padH, ts) = when (size) {
         KeySize.Normal -> KeyDims(48.dp, 15.dp, 18.dp, ArcType.capsKey)
@@ -146,24 +155,11 @@ fun ArcKey(
     val alpha = if (enabled) 1f else 0.45f
     Box(
         modifier = modifier
-            .graphicsLayer { translationY = press * KeyTravel.toPx() }
-            .drawBehind {
-                // box-shadow: 0 3px 0 edge. Only the strip below the face is drawn,
-                // outside the faded layer, so a disabled key keeps its (faded) edge.
-                if (style != KeyStyle.Quiet) {
-                    val edgePx = (1f - press) * KeyTravel.toPx()
-                    if (edgePx > 0f) {
-                        val r = CornerRadius(KeyRadius.toPx())
-                        val face = Path().apply { addRoundRect(RoundRect(0f, 0f, this@drawBehind.size.width, this@drawBehind.size.height, r)) }
-                        val below = Path().apply { addRoundRect(RoundRect(0f, edgePx, this@drawBehind.size.width, this@drawBehind.size.height + edgePx, r)) }
-                        drawPath(Path().apply { op(below, face, PathOperation.Difference) }, edge.copy(alpha = edge.alpha * alpha))
-                    }
-                }
-            }
-            // opacity: .45 fades the face and label together
-            .graphicsLayer { this.alpha = alpha }
-            .clip(shape)
-            .background(bg)
+            // opacity: .45 fades the face, label and edge together
+            .then(
+                if (style == KeyStyle.Quiet) Modifier.graphicsLayer { this.alpha = alpha }
+                else Modifier.cap(bg, edge, shape, press, alpha = alpha),
+            )
             .clickable(interactionSource = interaction, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
             .heightIn(min = minH)
             .padding(vertical = padV, horizontal = padH),
@@ -174,7 +170,6 @@ fun ArcKey(
 }
 
 private val KeyRadius = 8.dp
-private val KeyTravel = 2.dp
 
 private data class KeyDims(val minH: Dp, val padV: Dp, val padH: Dp, val style: TextStyle)
 
@@ -236,6 +231,27 @@ fun DisplayPanel(modifier: Modifier = Modifier, content: @Composable ColumnScope
 
 private val PanelRadius = 22.dp
 
+/**
+ * The display as one dark line: Live's display line, and the device on a
+ * phone on its side. [compact] fits it in the top bar; [color] lights it
+ * (Live's EDIT line is signal orange).
+ */
+@Composable
+fun DisplayLine(modifier: Modifier = Modifier, compact: Boolean = false, color: Color? = null, content: @Composable RowScope.() -> Unit) {
+    val c = LocalArcColors.current
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(if (compact) 12.dp else 14.dp))
+            .background(color ?: c.display)
+            .heightIn(min = if (compact) 44.dp else 48.dp)
+            .padding(horizontal = if (compact) 12.dp else 14.dp, vertical = if (compact) 4.dp else 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        content = content,
+    )
+}
+
 /** A small centred uppercase label above a panel ("VIDEO", "KEYPAD" in the pocket operator app). */
 @Composable
 fun Caption(text: String, modifier: Modifier = Modifier, color: Color? = null, align: TextAlign = TextAlign.Center) {
@@ -256,13 +272,15 @@ fun Caption(text: String, modifier: Modifier = Modifier, color: Color? = null, a
  * operator app's pad grid. Put [PlateLine] between rows.
  */
 @Composable
-fun GridPlate(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+fun GridPlate(modifier: Modifier = Modifier, outline: Color? = null, content: @Composable ColumnScope.() -> Unit) {
     val c = LocalArcColors.current
     Column(
         modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(PlateRadius))
-            .background(c.plate),
+            .background(c.plate)
+            // An outline marks a group whose actions can't be undone (the settings' saved data).
+            .then(if (outline != null) Modifier.border(1.5.dp, outline, RoundedCornerShape(PlateRadius)) else Modifier),
         content = content,
     )
 }
@@ -290,87 +308,99 @@ fun Modifier.plateRow(first: Boolean, last: Boolean, plate: Color, line: Color):
         .background(plate)
         .drawBehind { if (!first) drawRect(line, size = androidx.compose.ui.geometry.Size(size.width, 1.dp.toPx())) }
 
-/** A row of blocks to switch between views: navy when selected, pale grey otherwise (like the tabs). */
-@Composable
-fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
-    val c = LocalArcColors.current
-    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        options.forEachIndexed { i, label ->
-            val on = i == selected
-            Box(
-                Modifier
-                    .weight(1f)
-                    .heightIn(min = 44.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(if (on) c.navy else c.tabOff)
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Tab) { onSelect(i) }
-                    .semantics { this.selected = on }
-                    .padding(horizontal = 4.dp, vertical = 12.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(label.uppercase(), style = ArcType.capsKeySmall, color = if (on) c.onNavy else c.onTabOff, maxLines = 1, textAlign = TextAlign.Center)
-            }
-        }
-    }
-}
-
-/** A setting that is on or off: its name and note, and an ON / OFF block (navy when on). */
-@Composable
-fun SwitchRow(title: String, note: String, on: Boolean, onChange: (Boolean) -> Unit) {
-    val c = LocalArcColors.current
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Switch) { onChange(!on) }
-            .semantics { stateDescription = if (on) SettingsText.ON else SettingsText.OFF }
-            .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, style = ArcType.bold, color = c.ink)
-            Text(note, style = ArcType.small, color = c.graphite)
-        }
-        Box(
-            Modifier
-                .widthIn(min = 56.dp)
-                .heightIn(min = 34.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(if (on) c.navy else c.tabOff)
-                .padding(horizontal = 10.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text((if (on) SettingsText.ON else SettingsText.OFF).uppercase(), style = ArcType.capsKeySmall, color = if (on) c.onNavy else c.onTabOff)
-        }
-    }
-}
-
 /**
- * A quiet switch between views: words side by side, the chosen one in ink and
- * underlined (like the pocket operator app's DRUMS / KEYPAD), the others grey.
+ * A row of blocks to switch between views: navy and down when selected, pale
+ * grey otherwise (like the tabs). [compact]: the smaller caps on the right of a
+ * settings row, pale keys like the hardware toggle, as wide as they need (or
+ * the width they are given). [enabled] greys out a choice that can't be taken
+ * now; [descriptions] read each choice out in full for screen readers.
  */
 @Composable
-fun TextToggle(options: List<String>, selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
-    val c = LocalArcColors.current
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
-        options.forEachIndexed { i, label ->
-            val on = i == selected
-            Column(
-                Modifier
-                    .clip(RoundedCornerShape(6.dp))
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Tab) { onSelect(i) }
-                    .semantics { this.selected = on }
-                    .heightIn(min = 40.dp)
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                Text(label.uppercase(), style = ArcType.capsKeySmall, color = if (on) c.ink else c.graphite, maxLines = 1)
-                Box(Modifier.height(2.dp).width(18.dp).background(if (on) c.navy else Color.Transparent))
+fun Segmented(
+    options: List<String>,
+    selected: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+    enabled: List<Boolean>? = null,
+    descriptions: List<String>? = null,
+) {
+    val key: @Composable (Int, Modifier) -> Unit = { i, m ->
+        SegmentKey(options[i], i == selected, enabled?.getOrNull(i) ?: true, descriptions?.getOrNull(i), compact, m) { onSelect(i) }
+    }
+    if (!compact) {
+        Row(modifier.fillMaxWidth().selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (i in options.indices) key(i, Modifier.weight(1f))
+        }
+        return
+    }
+    // Compact: each key as wide as its label, the width given past that shared out evenly;
+    // short of room, the keys with labels of several words give up width (in proportion to
+    // what wrapping saves them) and wrap, never narrower than their longest word.
+    Layout(content = { for (i in options.indices) key(i, Modifier) }, modifier = modifier.selectableGroup()) { keys, constraints ->
+        val gap = 6.dp.roundToPx()
+        val natural = keys.map { it.maxIntrinsicWidth(Constraints.Infinity) }
+        val least = keys.map { it.minIntrinsicWidth(Constraints.Infinity) }
+        val gaps = gap * (keys.size - 1).coerceAtLeast(0)
+        val total = natural.sum() + gaps
+        val room = if (constraints.hasBoundedWidth) constraints.maxWidth else total
+        val widths = if (room >= total) {
+            val extra = room - total
+            natural.mapIndexed { i, w -> w + extra / keys.size + if (i < extra % keys.size) 1 else 0 }
+        } else {
+            val slack = natural.indices.sumOf { natural[it] - least[it] }.coerceAtLeast(1)
+            val short = minOf(total - room, slack)
+            natural.indices.map { natural[it] - (natural[it] - least[it]) * short / slack }
+        }
+        val h = keys.indices.maxOfOrNull { keys[it].minIntrinsicHeight(widths[it]) } ?: 0
+        val placed = keys.mapIndexed { i, m -> m.measure(Constraints.fixed(widths[i], h)) }
+        layout(widths.sum() + gap * (keys.size - 1).coerceAtLeast(0), h) {
+            var x = 0
+            for (p in placed) {
+                p.placeRelative(x, 0)
+                x += p.width + gap
             }
         }
     }
 }
+
+/** One of [Segmented]'s keys. */
+@Composable
+private fun SegmentKey(label: String, on: Boolean, can: Boolean, description: String?, compact: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    val c = LocalArcColors.current
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val face = when {
+        on -> c.navy
+        compact -> c.key
+        else -> c.tabOff
+    }
+    val edge = if (compact && !on) c.keyEdge else capEdge(face)
+    Box(
+        modifier
+            .heightIn(min = if (compact) 36.dp else 44.dp)
+            // A cap; the chosen one stays down.
+            .cap(face, edge, RoundedCornerShape(if (compact) 8.dp else 10.dp), capPress(on || pressed && can), alpha = if (can) 1f else 0.45f)
+            .clickable(interactionSource = source, indication = null, enabled = can, role = Role.Tab, onClick = onClick)
+            .semantics {
+                this.selected = on
+                if (description != null) contentDescription = description
+            }
+            .padding(horizontal = if (compact) 10.dp else 4.dp, vertical = if (compact) 9.dp else 12.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        val ink = when {
+            on -> c.onNavy
+            compact -> c.graphite
+            else -> c.onTabOff
+        }
+        // A compact key short of room wraps its word onto a second line.
+        Text(label.uppercase(), style = ArcType.capsKeySmall, color = ink, maxLines = if (compact) 2 else 1, textAlign = TextAlign.Center)
+    }
+}
+
+/** A word's ink: quiet caption grey, so the pads stay the loudest thing on the page; paler when [dim] (not taken, or not available). */
+fun ArcColors.wordInk(dim: Boolean = false): Color = if (dim) graphite.copy(alpha = 0.45f) else graphite
 
 /**
  * A word under the grid as the pocket operator app shows DRUMS / KEYPAD:
@@ -390,8 +420,7 @@ fun WordButton(
     top: Boolean = false,
 ) {
     val c = LocalArcColors.current
-    // Quiet: caption grey, so the pads stay the loudest thing on the page.
-    val ink = if (dim) c.graphite.copy(alpha = 0.45f) else c.graphite
+    val ink = c.wordInk(dim)
     // The touch area is 44dp tall; the mark and the word stay centred on each other,
     // at its middle or (with [top]) its top.
     Box(
@@ -411,24 +440,26 @@ fun WordButton(
 }
 
 /**
- * A round play key for a list row: navy with a triangle, orange with a square
- * while playing, faded while the device is busy with something else.
+ * A round play key for a list row: a pale cap with a navy triangle, orange with
+ * a square while playing, faded while the device is busy with something else.
  */
 @Composable
 fun PlayKey(playing: Boolean, enabled: Boolean, description: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
     val c = LocalArcColors.current
-    // Quiet until it plays: an outline with a navy triangle, filled orange while playing.
-    val face = if (playing) c.signal else Color.Transparent
+    val face = if (playing) c.signal else c.key
+    val edge = if (playing) c.signalEdge else c.keyEdge
     val ink = if (playing) c.onSignal else c.navy
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
     Box(
         modifier
             .size(40.dp)
-            .graphicsLayer { alpha = if (enabled || playing) 1f else 0.4f }
-            .clip(CircleShape)
-            .background(face)
-            .then(if (playing) Modifier else Modifier.border(1.5.dp, c.navy.copy(alpha = 0.6f), CircleShape))
+            .cap(
+                face, edge, CircleShape, capPress(pressed && (enabled || playing)),
+                dx = RoundCapDx, dy = RoundCapDy, alpha = if (enabled || playing) 1f else 0.4f,
+            )
             .clickable(
-                interactionSource = remember { MutableInteractionSource() },
+                interactionSource = source,
                 indication = null,
                 enabled = enabled || playing,
                 role = Role.Button,
@@ -530,7 +561,6 @@ fun ArcSheet(visible: Boolean, onDismiss: (() -> Unit)?, grip: Boolean = true, c
     BackHandler(enabled = visible) { onDismiss?.invoke() }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val wide = maxWidth >= 640.dp
-        val screenHeight = maxHeight
         val rise = with(LocalDensity.current) { 40.dp.roundToPx() }
         AnimatedVisibility(visible, enter = fadeIn(tween(220)), exit = ExitTransition.None) {
             Box(
@@ -540,50 +570,65 @@ fun ArcSheet(visible: Boolean, onDismiss: (() -> Unit)?, grip: Boolean = true, c
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onDismiss?.invoke() },
             )
         }
-        // @keyframes rise: from translateY(40px) and opacity 0, 220ms; dialog.close() has no animation.
-        // On wide screens (min-width: 640px) the sheet is a centred dialog.
-        AnimatedVisibility(
-            visible,
-            modifier = Modifier.align(if (wide) Alignment.Center else Alignment.BottomCenter),
-            enter = slideInVertically(tween(220, easing = SheetEasing)) { rise } + fadeIn(tween(220, easing = SheetEasing)),
-            exit = ExitTransition.None,
-        ) {
-            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
-                val shape = if (wide) RoundedCornerShape(22.dp) else RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)
-                Column(
-                    Modifier
-                        .widthIn(max = 560.dp)
-                        .fillMaxWidth()
-                        .heightIn(max = screenHeight * 0.92f)
-                        .clip(shape)
-                        .background(c.shell)
-                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
-                        .imePadding()
-                        .verticalScroll(rememberScrollState())
-                        .windowInsetsPadding(WindowInsets.navigationBars)
-                        .padding(start = 18.dp, end = 18.dp, top = if (grip) 10.dp else 22.dp, bottom = 22.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp),
-                ) {
-                    if (grip) {
-                        Box(
-                            Modifier
-                                .align(Alignment.CenterHorizontally)
-                                .size(40.dp, 5.dp)
-                                .clip(RoundedCornerShape(3.dp))
-                                .background(c.keyEdge),
-                        )
+        // The sheet keeps to the safe area, so its height cap counts from under the status bar and it
+        // centres between side bars. A bottom sheet's face still reaches under the navigation bar (its
+        // content keeps clear of it); the dialog keeps clear of it, and of the keyboard, altogether.
+        val insets = if (wide) WindowInsets.safeDrawing else WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal)
+        BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(insets)) {
+            val screenHeight = maxHeight
+            // @keyframes rise: from translateY(40px) and opacity 0, 220ms; dialog.close() has no animation.
+            // On wide screens (min-width: 640px) the sheet is a centred dialog.
+            AnimatedVisibility(
+                visible,
+                modifier = Modifier.align(if (wide) Alignment.Center else Alignment.BottomCenter),
+                enter = slideInVertically(tween(220, easing = SheetEasing)) { rise } + fadeIn(tween(220, easing = SheetEasing)),
+                exit = ExitTransition.None,
+            ) {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
+                    val shape = if (wide) RoundedCornerShape(22.dp) else RoundedCornerShape(topStart = 22.dp, topEnd = 22.dp)
+                    Column(
+                        Modifier
+                            .widthIn(max = 560.dp)
+                            .fillMaxWidth()
+                            .heightIn(max = screenHeight * 0.92f)
+                            .clip(shape)
+                            .background(c.shell)
+                            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+                            .imePadding()
+                            .verticalScroll(rememberScrollState())
+                            // Nothing left to add in the dialog: its box took the bars.
+                            .windowInsetsPadding(WindowInsets.navigationBars)
+                            .padding(start = 18.dp, end = 18.dp, top = if (grip) 10.dp else 22.dp, bottom = 22.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        if (grip) {
+                            Box(
+                                Modifier
+                                    .align(Alignment.CenterHorizontally)
+                                    .size(40.dp, 5.dp)
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .background(c.keyEdge),
+                            )
+                        }
+                        content()
                     }
-                    content()
                 }
             }
         }
     }
 }
 
+/** The narrowest top-bar middle a toast takes: two lines of a message still read there. */
+private val BarToastMin = 200.dp
+
 /**
  * A toast at the bottom of the screen; errors get an orange left border and
  * stay longer. Swiping it sideways or down dismisses it at once, as with a
- * notification.
+ * notification. In a short window (a phone on its side) it takes the top
+ * bar's middle instead, so it never covers the keys: two lines at most until
+ * a tap unfolds the rest, and it is swiped away up or sideways. Where that
+ * middle is too narrow to read (a split screen) or there is no top bar (a
+ * full-screen page), it stays at the bottom.
  */
 @Composable
 fun ArcToast(
@@ -594,46 +639,77 @@ fun ArcToast(
     modifier: Modifier = Modifier,
     /** Room left at the bottom, above the tab bar. */
     bottomInset: Dp = 0.dp,
+    /** A key at the toast's end ("UNDO") and what it does; a toast with one stays longer. */
+    action: String? = null,
+    onAction: (() -> Unit)? = null,
 ) {
     val c = LocalArcColors.current
-    var shown by remember { mutableStateOf<Triple<Long, String, Boolean>?>(null) }
-    LaunchedEffect(id) {
+    val density = LocalDensity.current
+    // In the bar: over its middle, measured from where this toast's own box sits.
+    val slot = LocalBarSlot.current?.bounds?.takeIf { LocalArcWindow.current.short && it.width >= with(density) { BarToastMin.toPx() } }
+    val inBar = slot != null
+    // One already up when this is first drawn (a screenshot) shows in that first frame.
+    var shown by remember { mutableStateOf(id?.let { Triple(it, text, error) }) }
+    // The action of the toast shown, kept with it while it fades out.
+    var shownAction by remember { mutableStateOf(action?.let { a -> onAction?.let { a to it } }) }
+    // Unfolding a toast in the bar starts its time again, to read the rest.
+    var unfolded by remember(shown?.first) { mutableStateOf(false) }
+    LaunchedEffect(id, unfolded) {
         if (id != null) {
             shown = Triple(id, text, error)
-            delay(if (error) 7000 else 3200)
+            shownAction = action?.let { a -> onAction?.let { a to it } }
+            delay(if (error) 7000 else if (shownAction != null) 6000 else 3200)
             onTimeout(id)
         }
     }
-    AnimatedVisibility(id != null, modifier = modifier, enter = fadeIn(), exit = fadeOut()) {
+    var origin by remember { mutableStateOf(Offset.Zero) }
+    AnimatedVisibility(
+        id != null,
+        modifier = if (inBar) modifier.fillMaxSize().onPlaced { origin = it.positionInRoot() } else modifier,
+        enter = fadeIn(),
+        exit = fadeOut(),
+    ) {
         val s = shown ?: return@AnimatedVisibility
         val scope = androidx.compose.runtime.rememberCoroutineScope()
         // How far the toast has been dragged; each toast starts in place.
         val dx = remember(s.first) { androidx.compose.animation.core.Animatable(0f) }
         val dy = remember(s.first) { androidx.compose.animation.core.Animatable(0f) }
         var box by remember { mutableStateOf(androidx.compose.ui.unit.IntSize(1, 1)) }
-        val fling = with(LocalDensity.current) { 700.dp.toPx() }
+        val fling = with(density) { 700.dp.toPx() }
+        // Which way it leaves along the height: down at the bottom, up out of the bar.
+        val away = if (inBar) -1f else 1f
         val dismiss = {
             scope.launch {
                 // Off the way it was going, then gone.
-                if (kotlin.math.abs(dx.value) >= dy.value) {
+                if (kotlin.math.abs(dx.value) >= kotlin.math.abs(dy.value)) {
                     dx.animateTo(if (dx.value < 0) -box.width * 1.2f else box.width * 1.2f, tween(160))
                 } else {
-                    dy.animateTo(box.height * 1.5f, tween(160))
+                    dy.animateTo(away * box.height * 1.5f, tween(160))
                 }
                 onTimeout(s.first)
             }
             Unit
         }
-        Row(
+        val place = if (slot == null) {
             Modifier
                 .windowInsetsPadding(WindowInsets.safeDrawing)
                 .padding(bottom = bottomInset)
                 .padding(16.dp)
                 .widthIn(max = 528.dp)
                 .fillMaxWidth()
+        } else {
+            // (Its box fills the screen, so it measures loose from the top left.) The slot is
+            // where it is on screen, so it is placed left to right in a right-to-left layout too.
+            Modifier
+                .wrapContentSize(AbsoluteAlignment.TopLeft)
+                .absoluteOffset { IntOffset((slot.left - origin.x).roundToInt(), (slot.center.y - origin.y).roundToInt() - 22.dp.roundToPx()) }
+                .width(with(density) { slot.width.toDp() })
+        }
+        Row(
+            place
                 .onSizeChanged { box = it }
                 // Read before the layer moves the toast, so the finger's speed is measured on screen.
-                .pointerInput(s.first) {
+                .pointerInput(s.first, inBar) {
                     val tracker = androidx.compose.ui.input.pointer.util.VelocityTracker()
                     detectDragGestures(
                         onDragStart = { tracker.resetTracking() },
@@ -642,16 +718,16 @@ fun ArcToast(
                             tracker.addPosition(change.uptimeMillis, change.position)
                             scope.launch {
                                 dx.snapTo(dx.value + drag.x)
-                                // Down only: up would cover the page.
-                                dy.snapTo((dy.value + drag.y).coerceAtLeast(0f))
+                                // Down only: up would cover the page. In the bar, up only: down would cover the keys.
+                                dy.snapTo(if (inBar) (dy.value + drag.y).coerceAtMost(0f) else (dy.value + drag.y).coerceAtLeast(0f))
                             }
                         },
                         onDragEnd = {
                             val v = tracker.calculateVelocity()
                             val sideways = kotlin.math.abs(dx.value) > box.width * 0.3f ||
                                 kotlin.math.abs(v.x) > fling && kotlin.math.abs(v.x) > kotlin.math.abs(v.y)
-                            val down = dy.value > box.height * 0.5f || v.y > fling && v.y > kotlin.math.abs(v.x)
-                            if (sideways || down) {
+                            val off = away * dy.value > box.height * 0.5f || away * v.y > fling && away * v.y > kotlin.math.abs(v.x)
+                            if (sideways || off) {
                                 dismiss()
                             } else {
                                 scope.launch { dx.animateTo(0f) }
@@ -664,34 +740,78 @@ fun ArcToast(
                         },
                     )
                 }
+                .then(if (inBar) Modifier.pointerInput(s.first) { detectTapGestures { unfolded = !unfolded } } else Modifier)
                 .graphicsLayer {
                     translationX = dx.value
                     translationY = dy.value
                     // Fades as it leaves.
-                    val gone = maxOf(kotlin.math.abs(dx.value) / box.width, dy.value / box.height)
+                    val gone = maxOf(kotlin.math.abs(dx.value) / box.width, kotlin.math.abs(dy.value) / box.height)
                     alpha = 1f - 0.7f * gone.coerceIn(0f, 1f)
                 }
                 .clip(RoundedCornerShape(12.dp))
                 .background(c.display)
-                .height(androidx.compose.foundation.layout.IntrinsicSize.Min)
+                .then(
+                    when {
+                        !inBar -> Modifier.height(androidx.compose.foundation.layout.IntrinsicSize.Min)
+                        // Unfolded, as tall as the text, growing down from the bar.
+                        unfolded -> Modifier.heightIn(min = 44.dp).height(androidx.compose.foundation.layout.IntrinsicSize.Min)
+                        else -> Modifier.height(44.dp)
+                    },
+                )
                 .semantics {
                     liveRegion = LiveRegionMode.Polite
-                    customActions = listOf(
+                    customActions = listOfNotNull(
+                        shownAction?.let { (label, run) ->
+                            androidx.compose.ui.semantics.CustomAccessibilityAction(label) {
+                                run()
+                                onTimeout(s.first)
+                                true
+                            }
+                        },
                         androidx.compose.ui.semantics.CustomAccessibilityAction(SettingsText.DISMISS) {
                             onTimeout(s.first)
                             true
                         },
                     )
                 },
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             // .toast.error { border-left: 5px solid var(--signal) }
             if (s.third) Box(Modifier.width(5.dp).fillMaxHeight().background(c.signal))
-            Text(
-                s.second,
-                style = ArcType.body15.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
-                color = c.displayInk,
-                modifier = Modifier.padding(vertical = 14.dp, horizontal = 16.dp),
-            )
+            if (inBar) {
+                // Two lines of 13 sp fit the bar's 44 dp; what doesn't fit ends in an ellipsis.
+                Text(
+                    s.second,
+                    style = ArcType.tiny.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, lineHeight = 1.2.em),
+                    color = c.displayInk,
+                    maxLines = if (unfolded) Int.MAX_VALUE else 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = shownAction != null).padding(vertical = 4.dp, horizontal = 12.dp),
+                )
+            } else {
+                Text(
+                    s.second,
+                    style = ArcType.body15.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold),
+                    color = c.displayInk,
+                    modifier = Modifier.weight(1f, fill = shownAction != null).padding(vertical = 14.dp, horizontal = 16.dp),
+                )
+            }
+            shownAction?.let { (label, run) ->
+                // The action as a word in signal orange at the end, its touch area the toast's height.
+                Box(
+                    Modifier
+                        .fillMaxHeight()
+                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button) {
+                            run()
+                            onTimeout(s.first)
+                        }
+                        .heightIn(min = 44.dp)
+                        .padding(horizontal = 16.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(label.uppercase(), style = ArcType.capsKey, color = c.signal, maxLines = 1)
+                }
+            }
         }
     }
 }
@@ -699,7 +819,8 @@ fun ArcToast(
 /** A labelled text field (`.field` in styles.css). */
 @Composable
 fun ArcField(
-    label: String,
+    /** The caption over the field; null for none (a search field whose placeholder says it all). */
+    label: String?,
     value: String,
     onValueChange: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -710,12 +831,14 @@ fun ArcField(
     keyboardOptions: KeyboardOptions? = null,
     /** The field's colour; the pale key colour unless it sits on a pale page. */
     background: Color? = null,
+    /** An icon before the text (the search glass). */
+    icon: ArcIcon? = null,
 ) {
     val c = LocalArcColors.current
     val source = remember { MutableInteractionSource() }
     val focused by source.collectIsFocusedAsState()
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(label.uppercase(), style = ArcType.caps, color = c.graphite)
+        if (label != null) Text(label.uppercase(), style = ArcType.caps, color = c.graphite)
         val style = (if (singleLine) ArcType.fieldInput else ArcType.notesInput).copy(color = c.ink)
         BasicTextField(
             value = value,
@@ -749,9 +872,12 @@ fun ArcField(
                     drawRect(c.line.copy(alpha = 0.5f), topLeft = Offset(0f, size.height - h), size = androidx.compose.ui.geometry.Size(size.width, h))
                 },
             decorationBox = { inner ->
-                Box(Modifier.padding(vertical = 12.dp, horizontal = 14.dp)) {
-                    if (value.isEmpty() && placeholder.isNotEmpty()) Text(placeholder, style = style.copy(color = c.graphite))
-                    inner()
+                Row(Modifier.padding(vertical = 12.dp, horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    if (icon != null) Icon(icon, c.graphite, size = 20.dp)
+                    Box(Modifier.weight(1f)) {
+                        if (value.isEmpty() && placeholder.isNotEmpty()) Text(placeholder, style = style.copy(color = c.graphite))
+                        inner()
+                    }
                 }
             },
         )

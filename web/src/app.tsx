@@ -11,14 +11,42 @@
 //
 // Sheets live in ui/sheets (Device: pads / upload / trim; Backups: detail,
 // compare picker, restore, delete; the font licence and progress sheets).
+//
+// Web only, the desktop layout (from 1024px wide, ui/useDesk.ts): every screen
+// sits in the page column of a "desk" (theme/desk.css) right of the nav rail
+// (ui/components/NavRail.tsx), between the ruled edge columns:
+//
+//   div.app.is-desk > CoachHost > div.desk [ NavRail | div.app__screen ]
+//
+// The guide overlay's host then holds the rail too (its Guide key carries the
+// edge.guide mark); it shows over the shell only, as on the phone. The top
+// bar has the theme switch (Settings → Theme, marked top.theme) after the ? key,
+// and the rail's Settings key stands for the phone's entries. Below 1024px the tree is the phone's, unchanged.
+//
+// Live's EDIT (Root's editPads): on while Live shows its pads; its tab is the
+// shell's second edge tab (on the desk, MirrorScreen hangs it on the K.O. II
+// panel), its pad sheet 'edit:<group>:<offset>' (ui/sheets/PadEditSheet), and
+// a new sample goes through the Device tab's upload sheet, mounted on Live too.
+// EDIT's sheet closes when the EP-133 comes or goes, and EDIT ends when it goes (Root's
+// LaunchedEffect(ready)). Web delta: EDIT stays on when the EP-133 comes, since on the web
+// it can be switched on before the first read (the keyboard's E as the page opens), and
+// waits for that read rather than being turned off by it.
+// Offline the pads change in arc only; once the EP-133 is read again a dialog
+// asks whether to write those changes (state.offlinePrompt: Write, or Discard
+// with Esc, the scrim or its other key; not a navigation layer).
+//
+// On a phone on its side (ui/live/window.ts liveInBar; never on the desk),
+// Live's display line rides in the top bar's middle (LiveBar, MirrorScreen's
+// LivePill) and the page leaves it out.
 import { Component, type ComponentChildren, type JSX } from 'preact'
-import { signal } from '@preact/signals'
 import { useEffect, useRef, useState } from 'preact/hooks'
+import { FactorySounds } from './core/features/factorySounds'
 import { MirrorText } from './core/text/mirrorText'
 import { SettingsText } from './core/text/settingsText'
 import { Strings } from './core/text/strings'
 import { WebText } from './core/text/webText'
 import { attachDrop, isPakName } from './platform/files/pick'
+import { supported as hapticsSupported } from './platform/haptics'
 import type { ArcController } from './state/controller'
 import { emptyMirrorState, type MirrorUi, type TaskUi } from './state/types'
 import { APP_BUILD } from './version'
@@ -32,11 +60,15 @@ import {
   overlayLayer,
   rootView,
   screenLayer,
+  selectTab as tabStack,
   sheetLayer,
   type NavView,
 } from './ui/nav'
 import { CoachHost, useCoachFirstRun } from './ui/components/Coach'
+import { Dialog } from './ui/components/Dialog'
+import { EditEdgeTab } from './ui/components/EditEdgeTab'
 import { Key } from './ui/components/Key'
+import { NavRail } from './ui/components/NavRail'
 import { Sheet } from './ui/components/Sheet'
 import { Shell } from './ui/components/Shell'
 import { ControllerToast } from './ui/components/Toast'
@@ -49,20 +81,26 @@ import { GuideScreen } from './ui/screens/GuideScreen'
 import { MainScreen } from './ui/screens/MainScreen'
 import { BackupsSheets } from './ui/sheets/BackupsSheets'
 import { ProgressSheet } from './ui/sheets/ProgressSheet'
-import { MirrorScreen } from './ui/screens/MirrorScreen'
-import { PICK_PREFIX as PICK, keysPickerOf } from './ui/live/keys'
+import { LivePill, MirrorScreen, type LivePlaying } from './ui/screens/MirrorScreen'
+import { PICK_PREFIX as PICK, keysPickerOf, type KeysShown } from './ui/live/keys'
+import { liveInBar } from './ui/live/window'
+import type { NoteRange } from './core/features/piano'
 import { SearchScreen } from './ui/screens/SearchScreen'
 import { SettingsScreen } from './ui/screens/SettingsScreen'
-
-/** The guide's search when a device key's card asks for it (web only). */
-const guideSearch = signal<{ readonly query: string } | null>(null)
+import { EDIT_PREFIX, editPadOf, PadEditSheet } from './ui/sheets/PadEditSheet'
 import { BackupPadsSheet, DevicePadsSheet } from './ui/sheets/PadsSheet'
 import { FontLicenceSheet } from './ui/sheets/FontLicenceSheet'
 import { DeviceUploadSheet } from './ui/sheets/UploadSheet'
+import { useDesk, useFinePointer, useWindowSize } from './ui/useDesk'
+import { useAppKeys } from './ui/useAppKeys'
+import { KeyboardKeysSheet } from './ui/sheets/KeyboardKeysSheet'
+import { computerKeys, setComputerKeys } from './ui/keyPrefs'
 import './app.css'
 
 /** The progress sheet's layer id. */
 const PROGRESS = 'progress'
+/** The Keyboard keys sheet (web, desktop: ?). */
+const KEYS_SHEET = 'keys'
 
 export interface AppProps {
   controller: ArcController
@@ -116,6 +154,38 @@ function Root(): JSX.Element {
   const state = c.state.value
   const settings = c.settings.value
   const playing = c.playing.value
+  const desk = useDesk()
+  const fine = useFinePointer()
+  // The computer keyboard (web, desktop): ? the keys sheet, Esc, Ctrl/Cmd+Z, and the screen's own (Live's).
+  useAppKeys(desk || fine, {
+    view: v,
+    canBack: () => nav.canBack(),
+    undo: state.toast?.action != null ? () => c.runToastAction(state.toast!.id) : null,
+    openHelp: () => nav.open(sheetLayer(KEYS_SHEET)),
+    back: () => nav.back(),
+  })
+  // Live's EDIT (giving a pad another sound): on Live, in PADS, until switched off or left.
+  const [editPads, setEditPads] = useState(false)
+  const canEdit = v.tab === 'live' && !settings.liveKeys
+  useEffect(() => {
+    if (!canEdit && editPads) setEditPads(false)
+  }, [canEdit, editPads])
+  // EDIT writes to the device, or offline changes pads in arc only: its pad sheet closes when the
+  // device comes or goes, so none stays open on the other side, and EDIT ends when it goes.
+  const ready = state.device !== null
+  const editReady = useRef(ready)
+  useEffect(() => {
+    if (editReady.current === ready) return
+    editReady.current = ready
+    if (!ready) setEditPads(false)
+    const pad = editPadOf(v.sheets)
+    if (pad !== null) nav.close(sheetLayer(`${EDIT_PREFIX}${pad.group}:${pad.offset}`))
+  }, [ready])
+  // On a phone on its side, Live's display line rides in the top bar; the piano's
+  // notes (while it shows) let it name a device note past them.
+  const win = useWindowSize()
+  const liveBar = v.tab === 'live' && !desk && liveInBar(win)
+  const [pianoRange, setPianoRange] = useState<NoteRange | null>(null)
 
   // The guide overlay, once by itself on the first start (coach_seen), over the
   // shell. Not for automated browsers (screenshots, e2e), where it would only be in the way.
@@ -150,6 +220,13 @@ function Root(): JSX.Element {
         onSave={() => void c.saveLog()}
         onCopy={() => void c.copyLog()}
         onBack={closeScreen(screenLayer({ kind: 'debug' }))}
+        latency={{
+          latency: c.liveLatency.value,
+          inUse: c.liveEngine.value?.label ?? null,
+          hint: c.liveLatencyHint?.value ?? null,
+          onHint: (h) => c.setLiveLatencyHint(h),
+          onReset: () => c.resetLatency(),
+        }}
       />
     )
   } else if (view === 'settings') {
@@ -168,7 +245,15 @@ function Root(): JSX.Element {
         onForgetNames={() => c.forgetLearned()}
         padSoundsSize={() => c.padSoundsSize()}
         onClearPadSounds={() => void c.clearPadSounds()}
+        factorySounds={
+          c.canGetFactory ? { saved: FactorySounds.inLibrary(state.backups) !== null, onGet: () => void c.getFactorySounds() } : undefined
+        }
+        computerKeys={desk || fine ? { on: computerKeys.value, onChange: setComputerKeys, onShow: () => nav.open(sheetLayer(KEYS_SHEET)) } : undefined}
         onNoteNames={(n) => c.setKeysNames(n)}
+        onShowNames={(on) => c.setKeysShowNames(on)}
+        onPianoWhites={(w) => c.setPianoWhites(w)}
+        hapticsSupported={hapticsSupported()}
+        onHaptics={(on) => c.setHaptics(on)}
         onRestoreFolder={() => void c.pickFolder()}
         onReconnectFolder={() => void c.reconnectFolder()}
         onExportLibrary={() => void c.exportLibrary()}
@@ -228,28 +313,36 @@ function Root(): JSX.Element {
     )
   } else {
     page = (
-      <CoachHost visible={v.coach} onDismiss={() => nav.close(overlayLayer('coach'))}>
-        <Shell
-          tab={v.tab}
-          onTab={(t) => nav.selectTab(t)}
-          menuOpen={v.menu}
-          onMenu={(open) => (open ? nav.open(overlayLayer('menu')) : nav.close(overlayLayer('menu')))}
-          connected={state.connected}
-          canConnect={state.midiSupported && !state.busy}
-          canBackup={state.midiSupported && state.device !== null && !state.busy}
-          onBackup={() => void c.backup()}
-          onConnect={() => void c.connect()}
-          onDebug={() => nav.openScreen({ kind: 'debug' })}
-          onSettings={() => nav.openScreen({ kind: 'settings' })}
-          onHelp={() => nav.open(overlayLayer('coach'))}
-          guideOpen={v.guide}
-          onGuide={(open) => (open ? nav.openScreen({ kind: 'guide' }) : nav.close(screenLayer({ kind: 'guide' })))}
-          guide={<GuideScreen onBack={() => nav.close(screenLayer({ kind: 'guide' }))} search={guideSearch.value} />}
-        >
-          <TabScreen view={v} />
-        </Shell>
-      </CoachHost>
+      <Shell
+        tab={v.tab}
+        onTab={(t) => nav.selectTab(t)}
+        menuOpen={v.menu}
+        onMenu={(open) => (open ? nav.open(overlayLayer('menu')) : nav.close(overlayLayer('menu')))}
+        connected={state.connected}
+        canConnect={state.midiSupported && !state.busy}
+        onConnect={() => void c.connect()}
+        onNote={(text) => c.toast(text)}
+        // Read by the top bar alone, so a new delay re-renders only that.
+        late={v.tab === 'live' ? c.liveLate : null}
+        onDebug={() => nav.openScreen({ kind: 'debug' })}
+        // The section list's last entry: the list closes and Settings opens in its place.
+        onSettings={() => nav.replace(overlayLayer('menu'), screenLayer({ kind: 'settings' }))}
+        onHelp={() => nav.open(overlayLayer('coach'))}
+        theme={settings.theme}
+        onTheme={(t) => c.setTheme(t)}
+        guideOpen={v.guide}
+        onGuide={(open) => (open ? nav.openScreen({ kind: 'guide' }) : nav.close(screenLayer({ kind: 'guide' })))}
+        guide={<GuideScreen onBack={() => nav.close(screenLayer({ kind: 'guide' }))} />}
+        desk={desk}
+        // Live's EDIT tab under GUIDE (on the desk it hangs on the K.O. II panel instead).
+        edgeTab={canEdit && !desk ? <EditEdgeTab on={editPads} onChange={setEditPads} inert={v.menu} /> : undefined}
+        middle={liveBar ? <LiveBar pianoRange={pianoRange} editing={editPads} /> : undefined}
+      >
+        <TabScreen view={v} editPads={editPads} onEditPads={setEditPads} inBar={liveBar} onPianoRange={setPianoRange} />
+      </Shell>
     )
+    // On the desk the overlay's host is around the whole desk instead (the rail's marks too).
+    if (!desk) page = <CoachHost visible={v.coach} onDismiss={() => nav.close(overlayLayer('coach'))}>{page}</CoachHost>
   }
 
   const tabs = onTabs(v)
@@ -261,15 +354,54 @@ function Root(): JSX.Element {
     if (progressShown && !has) nav.open(sheetLayer(PROGRESS))
     else if (!progressShown && has) nav.close(sheetLayer(PROGRESS))
   }, [progressShown])
+  const screen = <div class="app__screen" data-view={view}>{page}</div>
+  const guide = screenLayer({ kind: 'guide' })
   return (
-    <div class="app">
-      <div class="app__screen" data-view={view}>{page}</div>
+    <div class={desk ? 'app is-desk' : 'app'}>
+      {desk ? (
+        <CoachHost visible={v.coach && view === 'shell'} onDismiss={() => nav.close(overlayLayer('coach'))}>
+          <div class="desk desk-edges">
+            <NavRail
+              current={view === 'settings' ? 'settings' : v.tab}
+              guideOpen={view === 'shell' && v.guide}
+              // The section list covers the page and holds the focus: the rail waits under it.
+              inert={view === 'shell' && v.menu}
+              onTab={(t) => nav.selectTab(t)}
+              onGuide={() => {
+                if (view === 'shell') {
+                  if (v.guide) nav.close(guide)
+                  else nav.open(guide)
+                } else {
+                  // From a full screen: back to its section, the guide over it.
+                  nav.go([...tabStack(nav.stack.peek(), v.tab), guide])
+                }
+              }}
+              onSettings={() => nav.openScreen({ kind: 'settings' })}
+            />
+            {screen}
+          </div>
+        </CoachHost>
+      ) : screen}
       {/* The Device tab's sheets: pads 'pads:device:<n>', upload / trim from state.browser.draft. */}
       {tabs && v.tab === 'device' && <><DevicePadsSheet view={v} /><DeviceUploadSheet view={v} /></>}
+      {/* Live's EDIT: the pad sheet 'edit:<group>:<offset>', and the upload / trim sheets for a new sample. */}
+      {tabs && v.tab === 'live' && <><PadEditSheet view={v} /><DeviceUploadSheet view={v} /></>}
       {/* The Backups tab's sheets: detail 'detail:<id>', compare picker 'comparePick:<id>',
           restore 'restore:<id>', the delete dialog 'delete'. */}
       {tabs && v.tab === 'backups' && <BackupsSheets view={v} />}
+      {/* The Keyboard keys sheet 'keys' (?), over whatever screen it was opened on. */}
+      <KeyboardKeysSheet open={v.sheets.includes(KEYS_SHEET)} onDismiss={() => nav.close(sheetLayer(KEYS_SHEET))} />
       <ProgressSlot task={progressShown ? state.task : null} onCancel={() => c.cancelTask()} />
+      {/* The EP-133 connected with offline pad changes kept: write them, or discard them. */}
+      <Dialog
+        open={state.offlinePrompt !== null}
+        text={MirrorText.putOffline(state.offlinePrompt ?? 0)}
+        confirm={MirrorText.WRITE}
+        cancel={MirrorText.DISCARD}
+        confirmColor="var(--navy)"
+        onConfirm={() => void c.writeOfflinePads()}
+        onDismiss={() => c.discardOfflinePads()}
+      />
       <ToastLayer raise={state.toast?.id ?? null}>
         <ControllerToast controller={c} />
         <UpdatePrompt />
@@ -278,8 +410,60 @@ function Root(): JSX.Element {
   )
 }
 
+/** Live's display line in the top bar (a phone on its side); it alone re-renders as notes play. */
+function LiveBar(props: { pianoRange: NoteRange | null; editing: boolean }): JSX.Element {
+  const c = useController()
+  return (
+    <LivePill
+      mirror={liveMirror(c)}
+      keys={liveKeys(c)}
+      playing={livePlaying(c)}
+      editing={props.editing}
+      pianoRange={props.pianoRange}
+    />
+  )
+}
+
+/** What Live shows: the mirror, or offline its last read, or a note to connect. */
+function liveMirror(c: ArcController): MirrorUi | null {
+  const state = c.state.value
+  return state.mirror ?? (state.device === null
+    ? { state: emptyMirrorState(c.padOrder()), loading: false, error: MirrorText.NOT_CONNECTED }
+    : null)
+}
+
+/** KEYS as the settings and the controller have it (MainActivity's KeysUi, less what plays). */
+function liveKeys(c: ArcController): KeysShown {
+  const settings = c.settings.value
+  const state = c.state.value
+  return {
+    on: settings.liveKeys,
+    root: settings.keysRoot,
+    scale: settings.keysScale,
+    octave: settings.keysOctave,
+    names: settings.keysNames,
+    showNames: settings.keysShowNames,
+    pad: state.keysPad,
+    padName: state.keysPad ? c.mirrorName(state.keysPad) : null,
+    pianoWhites: settings.pianoWhites,
+  }
+}
+
+/** What sounds on the phone, as signals read by each pad and key: a voice doesn't re-render the screen. */
+function livePlaying(c: ArcController): LivePlaying {
+  return { pads: c.playingPads, notes: c.playingNotes }
+}
+
 /** The section under the top bar (Root's `when (tab)`). */
-function TabScreen(props: { view: NavView }): JSX.Element {
+function TabScreen(props: {
+  view: NavView
+  editPads: boolean
+  onEditPads: (on: boolean) => void
+  /** Live's display line is in the top bar (a phone on its side). */
+  inBar: boolean
+  /** The piano's notes while it shows, for the line in the top bar. */
+  onPianoRange: (r: NoteRange | null) => void
+}): JSX.Element {
   const c = useController()
   const nav = useNav()
   const v = props.view
@@ -287,20 +471,21 @@ function TabScreen(props: { view: NavView }): JSX.Element {
   const settings = c.settings.value
   switch (v.tab) {
     case 'live': {
-      const mirror: MirrorUi | null = state.mirror ?? (state.device === null
-        ? { state: emptyMirrorState(c.padOrder()), loading: false, error: MirrorText.NOT_CONNECTED }
-        : null)
       return (
         <MirrorScreen
-          mirror={mirror}
+          mirror={liveMirror(c)}
+          onGetFactory={c.canGetFactory && FactorySounds.inLibrary(state.backups) === null ? () => void c.getFactorySounds() : null}
+          offlinePads={state.offlinePads > 0 ? { count: state.offlinePads, onReset: () => c.resetOfflinePads() } : null}
+          onStop={() => c.stopPlayback()}
           nameOf={(pad) => c.mirrorName(pad)}
-          onPadOrder={(o) => c.setPadOrder(o)}
           oneGroup={settings.liveOneGroup}
           onOneGroup={(on) => c.setLiveOneGroup(on)}
           follow={settings.liveFollow}
           onFollow={(on) => c.setLiveFollow(on)}
           toolsOpen={v.side}
           onTools={(open) => (open ? nav.open(overlayLayer('side')) : nav.close(overlayLayer('side')))}
+          // The tools' first row: they close and Settings opens in their place.
+          onSettings={() => nav.replace(overlayLayer('side'), screenLayer({ kind: 'settings' }))}
           picker={keysPickerOf(v.dialogs)}
           onPicker={(p) => {
             // One list at a time: a dialog layer 'pick:<what>', so Back closes it (Kotlin's focusable Popup).
@@ -310,49 +495,44 @@ function TabScreen(props: { view: NavView }): JSX.Element {
             } else if (cur === undefined) nav.open(dialogLayer(PICK + p))
             else if (cur !== PICK + p) nav.replace(dialogLayer(cur), dialogLayer(PICK + p))
           }}
-          onPad={(pad, hold) => void c.playPad(pad, hold)}
+          onPad={(pad, hold, unsure, at) => void c.playPad(pad, hold, unsure, at)}
+          onPadKept={(pad) => void c.keepPad(pad)}
           onPadUp={(pad) => c.releasePad(pad)}
-          playingPads={c.playingPads.value}
-          keys={{
-            on: settings.liveKeys,
-            root: settings.keysRoot,
-            scale: settings.keysScale,
-            octave: settings.keysOctave,
-            names: settings.keysNames,
-            pad: state.keysPad,
-            padName: state.keysPad ? c.mirrorName(state.keysPad) : null,
-            playingKeys: c.playingKeys.value,
+          onPadCut={(pad) => c.cutPad(pad)}
+          // Signals, read by each pad and key: a voice doesn't re-render this screen.
+          playing={livePlaying(c)}
+          haptics={settings.haptics}
+          keys={liveKeys(c)}
+          inBar={props.inBar}
+          onPianoRange={props.onPianoRange}
+          keysViewWide={settings.keysViewWide}
+          keysViewTall={settings.keysViewTall}
+          edit={{
+            on: props.editPads,
+            connected: state.device !== null,
+            offline: state.device === null ? (state.mirror?.offlineSounds ?? null) : null,
+            onChange: props.onEditPads,
+            onPad: (pad) => {
+              if (c.editTarget(pad) !== null) nav.open(sheetLayer(`${EDIT_PREFIX}${pad.group}:${pad.offset}`))
+            },
+            onDropSlot: (pad, slot, source) => void c.assignPad(pad, slot, source),
+            onDropFile: (pad, file) => void c.uploadForPad(pad, [file]),
+            sounds: c.liveSounds(),
+            playing: c.playing.value,
+            onPlay: (slot, source) => void c.playLiveSound(slot, source),
+            onStop: () => c.stopPlayback(),
+            onUpload: (files) => void c.dropSamples(files),
+            nameNow: (pad) => c.padSoundName(pad),
           }}
           keysActions={{
             onMode: (on) => c.setLiveKeys(on),
             onRoot: (r) => c.setKeysRoot(r),
             onScale: (s) => c.setKeysScale(s),
             onOctave: (o) => c.setKeysOctave(o),
-            onKey: (k, hold) => void c.playKey(k, hold),
-            onKeyUp: (k) => c.releaseKey(k),
+            onNote: (n, hold, at) => void c.playNote(n, hold, at),
+            onNoteUp: (n) => c.releaseNote(n),
+            onView: (wide, view) => c.setKeysView(wide, view),
             onSelect: (pad) => c.selectKeysPad(pad),
-          }}
-          rec={c.canRecord ? { state: c.rec.value, onRec: () => c.toggleRec() } : undefined}
-          onGuide={(query) => {
-            guideSearch.value = { query }
-            nav.openScreen({ kind: 'guide' })
-          }}
-          takes={{
-            list: state.takes,
-            playing: c.playing.value,
-            keyOf: (t) => c.takeKey(t),
-            fmtWhen: (ms) => c.fmtDateTime(ms),
-            connected: state.device !== null,
-            canShare: c.canShareTakes,
-            onPlay: (t) => void c.playTake(t),
-            onStop: () => c.stopPlayback(),
-            onShare: (t) => void c.shareTake(t),
-            onSave: (t) => void c.saveTake(t),
-            onToDevice: (t) => {
-              void c.takeToDevice(t)
-              nav.selectTab('device')
-            },
-            onDelete: (t) => void c.deleteTake(t),
           }}
         />
       )

@@ -1,0 +1,714 @@
+// Port of core/src/test/kotlin/dev/arc/ep133/features/BeatCardTest.kt (the same cases, in the same order).
+import { readFileSync } from 'node:fs'
+import { describe, expect, it } from 'vitest'
+import { BeatCards, beatCard, cardSection, type BeatCard, type CardRead, type CardSection } from '../../../src/core/features/beatCard'
+import { padKey, physicalPad, type PhysicalPad } from '../../../src/core/features/padNotes'
+import { Pattern, ProjectSeq, Seq, Timing, pattern, patternNote, projectSeq, scene, type PatternNote } from '../../../src/core/features/pattern'
+import { Steps } from '../../../src/core/features/steps'
+
+/** The spec's own text: its first fenced block is the example card. */
+const spec = readFileSync(new URL('../../../../skill/arc-beats/references/beat-card.md', import.meta.url), 'utf8')
+const example = spec.slice(spec.indexOf('```\n') + 4).split('\n```')[0]!
+
+const named = (entries: [PhysicalPad, string][]) => {
+  const m = new Map(entries.map(([p, n]) => [padKey(p), n]))
+  return (p: PhysicalPad): string | null => m.get(padKey(p)) ?? null
+}
+const exampleNames = named([
+  [physicalPad(0, 9), 'kick'],
+  [physicalPad(0, 11), 'snare'],
+  [physicalPad(0, 6), 'hat'],
+])
+
+const hit = (tick: number, offset: number, gate = 24, semi: number | null = null, vel = 127): PatternNote => patternNote(tick, offset, gate, semi, vel)
+
+const key = (n: PatternNote): string => `${n.tick}/${n.offset}/${n.gate}/${n.semitones}/${n.velocity}`
+
+/** A pattern's notes as a sorted list: the order and the ids don't count. */
+const keys = (p: Pattern): string[] => p.notes.map(key).sort()
+const keyList = (...notes: PatternNote[]): string[] => notes.map(key).sort()
+
+const problems = (r: CardRead): string[] => r.problems.map((p) => `${p.line} ${p.error ? 'error' : 'warning'}: ${p.message}`)
+
+const text = (...lines: string[]): string => lines.join('\n')
+
+const bar = 'A7 | X... .... .... .... |'
+
+const read = (...lines: string[]): CardRead => BeatCards.read(text(...lines))
+
+const section = (r: CardRead, i = 0): CardSection => r.card!.sections[i]!
+
+const card = (sections: CardSection[], swing = 50): BeatCard => beatCard(null, null, swing, sections)
+
+const a = (notes: PatternNote[] = [], o: { bars?: number; group?: number; number?: number | null } = {}): CardSection =>
+  cardSection(o.group ?? 0, o.number ?? null, pattern(o.bars ?? 1, notes))
+
+/** What follows the header: the text after its blank line, without the last newline. */
+const body = (s: string): string => s.slice(s.indexOf('\n\n') + 2).trimEnd()
+
+const rowOf = (s: string, label: string): string => s.split('\n').find((l) => l.startsWith(label))!
+
+describe('BeatCardTest', () => {
+  // ---- reading ----
+
+  it("the spec's example card reads, and writes back as itself", () => {
+    const r = BeatCards.read(example)
+    expect(problems(r)).toEqual([])
+    const c = r.card!
+    expect(c.name).toBe('Lazy boom bap')
+    expect(c.tempo).toBe(92)
+    expect(c.swing).toBe(58)
+    expect(c.sections.length).toBe(1)
+    expect(c.sections[0]!.group).toBe(0)
+    expect(c.sections[0]!.number).toBeNull()
+    expect(c.sections[0]!.pattern.bars).toBe(1)
+    // The odd steps play 4 ticks late at swing 58; the notes list isn't swung.
+    const kick = [0, 144, 192].map((t) => key(hit(t, 9, 24, null, t === 144 ? 100 : 127)))
+    const snare = [key(hit(96, 11)), key(hit(288, 11)), key(hit(364, 11, 24, null, 64))]
+    const hat = [0, 48, 96, 144, 192, 240, 288, 336].map((t) => key(hit(t, 6, 24, null, 100))).concat(key(hit(364, 6, 24, null, 64)))
+    const notes = [key(hit(366, 11, 24, null, 50)), key(hit(0, 3, 48, 0))]
+    expect(keys(c.sections[0]!.pattern)).toEqual([...kick, ...snare, ...hat, ...notes].sort())
+    expect(c.sections[0]!.pattern.notes.length).toBe(kick.length + snare.length + hat.length + notes.length)
+    expect(BeatCards.write(c, exampleNames)).toBe(example + '\n')
+    // The whole spec file reads as the example: the text before it and the closing fence are left out.
+    expect(BeatCards.read(spec).card).toEqual(c)
+  })
+
+  it('text around the card is ignored, and reading stops at a closing fence or END', () => {
+    const chat = text('Sure, here is a beat:', '', '```text', 'ARC BEAT 1', '[A]', bar, '```', 'Hope you like it!', '[B]', 'B7 | oops |')
+    const r = BeatCards.read(chat)
+    expect(problems(r)).toEqual([])
+    expect(r.card!.sections.length).toBe(1)
+    expect(keys(section(r).pattern)).toEqual(keyList(hit(0, 9)))
+    // Lines count in the text given, chat and all.
+    const bad = text('Sure:', '```', 'ARC BEAT 1', '[A]', 'A9 | X... .... .... ... |', '```')
+    expect(problems(BeatCards.read(bad))).toEqual(['5 error: A9 bar 1 has 15 steps, needs 16.'])
+    for (const end of ['END', 'end', '  End  ']) {
+      const r2 = read('ARC BEAT 1', '[A]', bar, end, '[B]', 'B7 | oops |')
+      expect(r2.card!.sections.map((s) => s.group)).toEqual([0])
+      expect(problems(r2)).toEqual([])
+    }
+    // Chat text that merely mentions the name isn't the start; CRLF line ends and a byte order mark are fine.
+    const r3 = BeatCards.read(`\uFEFFHere is your ARC BEAT:\r\nARC BEAT 1\r\n[A]\r\n${bar}\r\n`)
+    expect(problems(r3)).toEqual([])
+    expect(section(r3).pattern.notes.length).toBe(1)
+  })
+
+  it('a text has a card when it has an ARC BEAT line, mistakes or not', () => {
+    expect(BeatCards.hasCard(`ARC BEAT 1\n[A]\n${bar}`)).toBe(true)
+    expect(BeatCards.hasCard('Sure:\n```\n  arc beat 1\r\n[A]')).toBe(true)
+    expect(BeatCards.hasCard('\uFEFFARC BEAT')).toBe(true)
+    // A card with a mistake is still a card; a mention of the name, or none, isn't.
+    expect(BeatCards.hasCard('ARC BEAT x\n[A]')).toBe(true)
+    expect(BeatCards.hasCard('Here is your ARC BEAT: enjoy')).toBe(false)
+    expect(BeatCards.hasCard(`[A]\n${bar}`)).toBe(false)
+    expect(BeatCards.hasCard('')).toBe(false)
+  })
+
+  it('comments, blank lines and the case of keywords', () => {
+    const r = read('ARC BEAT 1 # version', '# a whole line', '', 'name Foo # trailing', '[A] # section', 'A7 | X... .... .... .... | # kick', '   ', '# end')
+    expect(problems(r)).toEqual([])
+    expect(r.card!.name).toBe('Foo')
+    expect(section(r).pattern.notes.length).toBe(1)
+    const up = read('arc beat 1', 'NAME Foo', 'TEMPO 100', 'SWING 60', '[A] BARS 1 STEP 1/16', bar, 'NOTES', 'A9 AT 1.1.1 VEL 5 GATE 1/8 NOTE C4')
+    expect(problems(up)).toEqual([])
+    expect(up.card).toEqual(beatCard('Foo', 100, 60, up.card!.sections))
+    expect(keys(section(up).pattern)).toEqual(keyList(hit(0, 9), hit(0, 11, 48, 0, 5)))
+    // Pad labels, X and x, and note names do count.
+    expect(problems(read('ARC BEAT 1', '[A]', 'a7 | X... .... .... .... |'))).toEqual(["3 error: 'a7' isn't a pad. Use A to D, then . 0 E or 1 to 9."])
+    expect(problems(read('ARC BEAT 1', '[A]', bar, 'notes', 'A9 at 1.1.1 note c4'))).toEqual(['5 error: A9 note: note must be a name from C-1 to G9, such as C4.'])
+  })
+
+  it('a card needs its version, and a newer one is refused', () => {
+    expect(problems(BeatCards.read(`[A]\n${bar}`))).toEqual(['1 error: No ARC BEAT line found.'])
+    expect(problems(BeatCards.read(''))).toEqual(['1 error: No ARC BEAT line found.'])
+    expect(problems(BeatCards.read(`ARC BEAT\n[A]\n${bar}`))).toEqual(['1 error: ARC BEAT needs a version, as in ARC BEAT 1.'])
+    expect(problems(BeatCards.read(`ARC BEAT one\n[A]\n${bar}`))).toEqual(['1 error: ARC BEAT needs a version, as in ARC BEAT 1.'])
+    expect(problems(BeatCards.read(`ARC BEAT 0\n[A]\n${bar}`))).toEqual(['1 error: ARC BEAT needs a version, as in ARC BEAT 1.'])
+    const newer = BeatCards.read(`ARC BEAT 2\nfuture 1\n[A]\n${bar}`)
+    expect(newer.card).toBeNull()
+    expect(problems(newer)).toEqual(['1 error: This card was made by a newer Arc (version 2).'])
+    expect(problems(BeatCards.read('\nARC BEAT 1\nname Empty'))).toEqual(['2 error: The card has no section, such as [A].'])
+  })
+
+  it('the header', () => {
+    const r = read('ARC BEAT 1', 'name Lazy boom bap', 'tempo 92.5', 'swing 66', '[A]', bar)
+    expect(r.card).toEqual(beatCard('Lazy boom bap', 92.5, 66, r.card!.sections))
+    const bare = read('ARC BEAT 1', '[A]', bar).card!
+    expect(bare.name).toBeNull()
+    expect(bare.tempo).toBeNull()
+    expect(bare.swing).toBe(50)
+    // The range of each word.
+    expect(read('ARC BEAT 1', 'tempo 40', '[A]', bar).card!.tempo).toBe(40)
+    expect(read('ARC BEAT 1', 'tempo 240.0', '[A]', bar).card!.tempo).toBe(240)
+    expect(read('ARC BEAT 1', 'swing 75', '[A]', bar).card!.swing).toBe(75)
+    for (const t of ['39.9', '241', 'abc', '92.55', '-92', '', '92 bpm']) {
+      expect(problems(read('ARC BEAT 1', `tempo ${t}`, '[A]', bar)), t).toEqual(['2 error: Tempo must be 40 to 240, whole or with one decimal.'])
+    }
+    for (const s of ['49', '76', '58.5', 'x', '']) {
+      expect(problems(read('ARC BEAT 1', `swing ${s}`, '[A]', bar)), s).toEqual(['2 error: Swing must be a whole number from 50 to 75.'])
+    }
+    // A title is kept to 40 characters; the last of a repeated word counts.
+    const long = read('ARC BEAT 1', 'name ' + 'x'.repeat(45), '[A]', bar)
+    expect(problems(long)).toEqual(['2 warning: Name is longer than 40 characters, shortened.'])
+    expect(long.card!.name).toBe('x'.repeat(40))
+    expect(problems(read('ARC BEAT 1', 'name', '[A]', bar))).toEqual(['2 warning: Name is empty, ignored.'])
+    // Characters are counted and cut as whole characters: a surrogate pair is never split.
+    const smile = '\u{1F600}'
+    const fit = read('ARC BEAT 1', 'name a' + smile.repeat(20), '[A]', bar)
+    expect(problems(fit)).toEqual([])
+    expect(fit.card!.name).toBe('a' + smile.repeat(20))
+    const wide = read('ARC BEAT 1', 'name a' + smile.repeat(45), '[A]', bar)
+    expect(problems(wide)).toEqual(['2 warning: Name is longer than 40 characters, shortened.'])
+    expect(wide.card!.name).toBe('a' + smile.repeat(39))
+    expect(read('ARC BEAT 1', 'tempo 90', 'tempo 100', '[A]', bar).card!.tempo).toBe(100)
+    // Words a newer card may add, and header words too late, only warn.
+    const odd = read('ARC BEAT 1', 'groove 3', '[A]', bar, 'tempo 100')
+    expect(problems(odd)).toEqual(["2 warning: Unknown header word 'groove', ignored.", "5 warning: 'tempo' belongs before the first section, ignored."])
+    expect(odd.card!.tempo).toBeNull()
+    // Rows and notes need a section.
+    expect(problems(read('ARC BEAT 1', bar, '[A]', bar))).toEqual(["2 error: 'A7' needs a section first, such as [A]."])
+    expect(problems(read('ARC BEAT 1', 'notes', '[A]', bar))).toEqual(["2 error: 'notes' needs a section first, such as [A]."])
+  })
+
+  it('sections', () => {
+    const r = read('ARC BEAT 1', '[A07] bars 2 step 1/8', 'A7 | X... .... |  X... .... |', '', '[D] step 1/16T', 'D7 | Xxo. .... .... .... .... .... |')
+    expect(problems(r)).toEqual([])
+    expect(r.card!.sections.map((s) => s.group)).toEqual([0, 3])
+    expect(r.card!.sections.map((s) => s.number)).toEqual([7, null])
+    expect(r.card!.sections.map((s) => s.pattern.bars)).toEqual([2, 1])
+    // 1/8 steps are 48 ticks; 1/16T steps 16.
+    expect(keys(section(r, 0).pattern)).toEqual(keyList(hit(0, 9, 48), hit(384, 9, 48)))
+    expect(keys(section(r, 1).pattern)).toEqual(keyList(hit(0, 9, 16), hit(16, 9, 16, null, 100), hit(32, 9, 16, null, 64)))
+    // The pattern number is 1 to 99, written with or without a zero.
+    expect(read('ARC BEAT 1', '[A1]', bar).card!.sections[0]!.number).toBe(1)
+    expect(read('ARC BEAT 1', '[A99]', bar).card!.sections[0]!.number).toBe(99)
+    for (const s of ['[A100]', '[A0]', '[A00]', '[A123]']) {
+      const digits = s.slice(2, s.length - 1)
+      expect(problems(read('ARC BEAT 1', s, bar)), s).toEqual([`2 error: The pattern number in [A${digits}] must be 1 to 99.`])
+    }
+    // Faults on the section line; its rows aren't blamed for them.
+    expect(problems(read('ARC BEAT 1', '[E]', 'E7 | X |'))).toEqual(['2 error: A section needs a group A to D, as in [A] or [A07].'])
+    expect(problems(read('ARC BEAT 1', '[]', bar))).toEqual(['2 error: A section needs a group A to D, as in [A] or [A07].'])
+    expect(problems(read('ARC BEAT 1', '[a]', bar))).toEqual(['2 error: A section needs a group A to D, as in [A] or [A07].'])
+    expect(problems(read('ARC BEAT 1', '[A bars 2', bar))).toEqual(['2 error: A section needs a closing ], as in [A].'])
+    for (const b of ['0', '100', 'x', '-1', '']) {
+      expect(problems(read('ARC BEAT 1', `[A] bars ${b}`, bar)), b).toEqual(['2 error: bars must be a whole number from 1 to 99.'])
+    }
+    expect(problems(read('ARC BEAT 1', '[A] step 1/4', bar))).toEqual(['2 error: step must be one of 1/8 1/16 1/32 1/8T 1/16T.'])
+    expect(problems(read('ARC BEAT 1', '[A] step', bar))).toEqual(['2 error: step must be one of 1/8 1/16 1/32 1/8T 1/16T.'])
+    expect(read('ARC BEAT 1', '[A] bars 99', 'A7 | ' + 'X... .... .... .... '.repeat(99) + '|').card!.sections[0]!.pattern.bars).toBe(99)
+    // A group comes once; the second is still read, for its own faults.
+    const twice = read('ARC BEAT 1', '[A]', bar, '[B]', 'B7 | X... .... .... .... |', '[A]', 'A9 | X... |')
+    expect(problems(twice)).toEqual(['6 error: Group A has two sections.', '7 error: A9 bar 1 has 4 steps, needs 16.'])
+    expect(twice.card).toBeNull()
+    // Words a newer card may add only warn, with their value.
+    const newer = read('ARC BEAT 1', '[A] colour red bars 2 loud', 'A7 | X... .... .... .... | .... .... .... .... |')
+    expect(problems(newer)).toEqual(["2 warning: Unknown option 'colour' on [A], ignored.", "2 warning: Unknown option 'loud' on [A], ignored."])
+    expect(section(newer).pattern.bars).toBe(2)
+    // A card with no [ line has no section.
+    expect(problems(read('ARC BEAT 1'))).toEqual(['1 error: The card has no section, such as [A].'])
+  })
+
+  it('grid rows', () => {
+    // Every step character, and a hold.
+    const r = read('ARC BEAT 1', '[A]', 'A7 kick drum | Xxo1 9--. .... .... |')
+    expect(problems(r)).toEqual([])
+    expect(keys(section(r).pattern)).toEqual(keyList(hit(0, 9), hit(24, 9, 24, null, 100), hit(48, 9, 24, null, 64), hit(72, 9, 24, null, 14), hit(96, 9, 72, null, 126)))
+    // Pads are written as printed on the device; ENTER is E; the name is for reading only.
+    const pads = read(
+      'ARC BEAT 1', '[A]',
+      'A. | X... .... .... .... |', 'A0|.X.. .... .... ....|', 'AE | ..X. .... .... .... |', 'AENTER | ...X .... .... .... |',
+      'A1 | .... X... .... .... |', 'A2 | .... .X.. .... .... |', 'A3 | .... ..X. .... .... |', 'A4 | .... ...X .... .... |',
+      'A5 | .... .... X... .... |', 'A6 | .... .... .X.. .... |', 'A7 | .... .... ..X. .... |', 'A8 | .... .... ...X .... |',
+      'A9 | .... .... .... X... |',
+    )
+    expect(problems(pads)).toEqual([])
+    expect(section(pads).pattern.notes.map((n) => n.offset)).toEqual([0, 1, 2, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+    expect(section(pads).pattern.notes.map((n) => n.tick).sort((x, y) => x - y)).toEqual(Array.from({ length: 13 }, (_, i) => i * 24))
+    // Spaces and bars between the steps don't count; the hold goes across a bar line.
+    const two = read('ARC BEAT 1', '[A] bars 2', 'A7 | .... .... .... ...X | -- .. .... .... ...x |')
+    expect(keys(section(two).pattern)).toEqual(keyList(hit(360, 9, 72), hit(744, 9, 24, null, 100)))
+    // A pad may have more than one row.
+    const ghosts = read('ARC BEAT 1', '[A]', 'A4 | x... x... x... x... |', 'A4 | .o.. .o.. .o.. .o.. |')
+    expect(section(ghosts).pattern.notes.length).toBe(8)
+    expect(problems(ghosts)).toEqual([])
+    // The same pad at the same tick is one hit, the louder, with a warning at the later row.
+    for (const rows of [['x...', 'X...'], ['X...', 'x...'], ['X...', 'X...']]) {
+      const dup = read('ARC BEAT 1', '[A]', `A7 | ${rows[0]} .... .... .... |`, `A7 | ${rows[1]} .... .... .... |`)
+      expect(problems(dup)).toEqual(['4 warning: A7 has two hits at 1.1.1, kept the louder.'])
+      expect(section(dup).pattern.notes.map((n) => n.velocity)).toEqual([127])
+    }
+  })
+
+  it('grid row errors name the row and the bar', () => {
+    const one = (lines: string[], header = '[A]'): string[] => problems(BeatCards.read(text('ARC BEAT 1', header, ...lines)))
+    expect(one(['A7 | X... .... .... ... |'])).toEqual(['3 error: A7 bar 1 has 15 steps, needs 16.'])
+    expect(one(['A7 | X... .... .... .... | .... .... .... ... |'], '[A] bars 2')).toEqual(['3 error: A7 bar 2 has 15 steps, needs 16.'])
+    expect(one([bar], '[A] bars 2')).toEqual(['3 error: A7 bar 2 has 0 steps, needs 16.'])
+    expect(one(['A7 | |'])).toEqual(['3 error: A7 bar 1 has 0 steps, needs 16.'])
+    expect(one(['A7 | X... .... .... .... . |'])).toEqual(['3 error: A7 has 17 steps, needs 16.'])
+    expect(one(['A7 | ' + 'X... .... .... .... '.repeat(2) + '. |'], '[A] bars 2')).toEqual(['3 error: A7 has 33 steps, needs 32.'])
+    expect(one(['A7 | X |'], '[A] step 1/8')).toEqual(['3 error: A7 bar 1 has 1 step, needs 8.'])
+    expect(one(['A7 | ' + '.'.repeat(20) + ' |'], '[A] step 1/16T')).toEqual(['3 error: A7 bar 1 has 20 steps, needs 24.'])
+    expect(one(['A7 | X... .... .... ...z |'])).toEqual(["3 error: A7 bar 1 has 'z', which isn't one of X x o 1-9 - or ."])
+    expect(one(['A7 | X... .... .... .... | 0... .... .... .... |'], '[A] bars 2')).toEqual(["3 error: A7 bar 2 has '0', which isn't one of X x o 1-9 - or ."])
+    expect(one(['A7 | O... .... .... .... |'])).toEqual(["3 error: A7 bar 1 has 'O', which isn't one of X x o 1-9 - or ."])
+    expect(one(['A7 | -... .... .... .... |'])).toEqual(['3 error: A7 bar 1 has a - with no hit before it.'])
+    expect(one(['A7 | X.-. .... .... .... |'])).toEqual(['3 error: A7 bar 1 has a - with no hit before it.'])
+    expect(one(['B7 | X... .... .... .... |'])).toEqual(['3 error: B7 is in group B, but the section is [A].'])
+    expect(one(['Q7 | X... .... .... .... |'])).toEqual(["3 error: 'Q7' isn't a pad. Use A to D, then . 0 E or 1 to 9."])
+    expect(one(['A10 | X... .... .... .... |'])).toEqual(["3 error: 'A10' isn't a pad. Use A to D, then . 0 E or 1 to 9."])
+    expect(one(['| X... .... .... .... |'])).toEqual(['3 error: A row needs a pad before its first |.'])
+    expect(one(['A7 X... .... .... ....'])).toEqual(['3 error: A7 needs a | before its steps.'])
+    // Words that aren't rows only warn.
+    expect(one(['groove 3'])).toEqual(["3 warning: Unknown word 'groove', ignored."])
+    // Each fault is its own line; the card is not read.
+    const many = BeatCards.read(text('ARC BEAT 1', '[A]', 'A7 | X |', 'A8 | X... .... .... .... |', 'A9 | z |'))
+    expect(many.card).toBeNull()
+    expect(many.problems.map((p) => p.line)).toEqual([3, 5])
+    expect(many.problems.every((p) => p.error)).toBe(true)
+  })
+
+  it('swing bends the odd steps of 1_8 and 1_16 rows only', () => {
+    const ticks = (header: string, swing: number, row: string): number[] =>
+      read('ARC BEAT 1', `swing ${swing}`, header, `A7 | ${row} |`).card!.sections[0]!.pattern.notes.map((n) => n.tick)
+    expect(ticks('[A]', 50, 'XXXX .... .... ....')).toEqual([0, 24, 48, 72])
+    expect(ticks('[A]', 58, 'XXXX .... .... ....')).toEqual([0, 28, 48, 76])
+    expect(ticks('[A]', 75, 'XXXX .... .... ....')).toEqual([0, 36, 48, 84])
+    expect(ticks('[A] step 1/8', 66, 'XXXX ....')).toEqual([0, 63, 96, 159])
+    expect(ticks('[A] step 1/8', 75, 'XXXX ....')).toEqual([0, 72, 96, 168])
+    // Triplets and 32nds stay straight.
+    expect(ticks('[A] step 1/8T', 75, 'XXXX .... ....')).toEqual([0, 32, 64, 96])
+    expect(ticks('[A] step 1/16T', 75, 'XXXX ' + '....'.repeat(5))).toEqual([0, 16, 32, 48])
+    expect(ticks('[A] step 1/32', 75, 'XXXX ' + '....'.repeat(7))).toEqual([0, 12, 24, 36])
+    // The notes list never swings; a hold keeps its length.
+    const r = read('ARC BEAT 1', 'swing 75', '[A]', 'A7 | .X-. .... .... .... |', 'notes', 'A9 at 1.1.2', 'A9 t 24 vel 50')
+    expect(problems(r)).toEqual(['7 warning: A9 has two hits at 1.1.2, kept the louder.'])
+    expect(keys(section(r).pattern)).toEqual(keyList(hit(36, 9, 48), hit(24, 11)))
+  })
+
+  it('the notes list', () => {
+    const r = read(
+      'ARC BEAT 1', '[A] bars 2', 'notes',
+      'A9 at 1.1.1', 'A9 at 1.2.3+8', 'A9 at 1.1.2-3', 'A9 at 2.1.1', 'A9 t 100 vel 64 gate 10',
+      'A1 at 1.1.1 note C4', 'A1 at 1.1.2 note C-1', 'A1 at 1.1.3 note G9', 'A1 at 1.1.4 note C#3',
+      'AE at 1.2.1 semi -127', 'AE at 1.2.2 semi 127', 'AE at 1.2.3 semi +3', 'A. at 1.2.4 SEMI 0',
+    )
+    expect(problems(r)).toEqual([])
+    const want = keyList(
+      hit(0, 11), hit(152, 11), hit(21, 11), hit(384, 11), hit(100, 11, 10, null, 64),
+      hit(0, 3, 24, 0), hit(24, 3, 24, -60), hit(48, 3, 24, 67), hit(72, 3, 24, -11),
+      hit(96, 2, 24, -127), hit(120, 2, 24, 127), hit(144, 2, 24, 3), hit(168, 0, 24, 0),
+    )
+    expect(keys(section(r).pattern)).toEqual(want)
+    // Defaults are vel 127, a 1/16 gate and a pad hit; every gate word.
+    const gates = read('ARC BEAT 1', '[A]', 'notes', 'A9 t 0', 'A9 t 1 gate 1/4', 'A9 t 2 gate 1/8', 'A9 t 3 gate 1/16', 'A9 t 4 gate 1/32', 'A9 t 5 gate 1/8T', 'A9 t 6 gate 1/16T', 'A9 t 7 gate 1/8t', 'A9 t 8 gate 1')
+    expect(section(gates).pattern.notes.map((n) => n.gate)).toEqual([24, 96, 48, 24, 12, 32, 16, 32, 1])
+    expect(section(gates).pattern.notes.every((n) => n.velocity === 127 && n.semitones === null)).toBe(true)
+    // KEYS notes of one pad at one tick are different notes; the same pitch is one.
+    const chord = read('ARC BEAT 1', '[A]', 'notes', 'A9 t 0 note C4', 'A9 t 0 note E4', 'A9 t 0', 'A9 t 0 note C4 vel 50')
+    expect(problems(chord)).toEqual(['7 warning: A9 has two hits at 1.1.1, kept the louder.'])
+    expect(keys(section(chord).pattern)).toEqual(keyList(hit(0, 11, 24, 0), hit(0, 11, 24, 4), hit(0, 11)))
+    // Options come in any order.
+    const order = read('ARC BEAT 1', '[A]', 'notes', 'A9 gate 1/8 note D4 vel 20 at 1.1.1')
+    expect(keys(section(order).pattern)).toEqual(keyList(hit(0, 11, 48, 2, 20)))
+  })
+
+  it('notes list errors', () => {
+    const one = (lines: string[], header = '[A]'): string[] => problems(BeatCards.read(text('ARC BEAT 1', header, 'notes', ...lines)))
+    const at = 'at needs bar.beat.sixteenth, with beat and sixteenth 1 to 4, as in 1.2.3 or 1.2.3+6.'
+    expect(one(['A9 vel 50'])).toEqual(['4 error: A9 note needs at or t to place it.'])
+    expect(one(['A9 t 384'])).toEqual(['4 error: A9 note at tick 384 is outside the pattern (0 to 383).'])
+    expect(one(['A9 at 2.1.1'])).toEqual(['4 error: A9 note at tick 384 is outside the pattern (0 to 383).'])
+    expect(one(['A9 at 1.1.1-1'])).toEqual(['4 error: A9 note at tick -1 is outside the pattern (0 to 383).'])
+    expect(one(['A9 at 2.4.4+24'], '[A] bars 2')).toEqual(['4 error: A9 note at tick 768 is outside the pattern (0 to 767).'])
+    for (const bad of ['1.5.1', '1.1.5', '0.1.1', '1.0.1', '1.1', '1.1.1.1', 'x', '1.1.1+', '1.1.1+x']) expect(one([`A9 at ${bad}`]), bad).toEqual([`4 error: A9 note: ${at}`])
+    for (const bad of ['x', '-1', '1.5']) expect(one([`A9 t ${bad}`]), bad).toEqual(['4 error: A9 note: t needs a whole tick number.'])
+    for (const bad of ['0', '128', 'x', '-5']) expect(one([`A9 t 0 vel ${bad}`]), bad).toEqual(['4 error: A9 note: vel must be 1 to 127.'])
+    for (const bad of ['0', '1/3', 'x', '-5']) expect(one([`A9 t 0 gate ${bad}`]), bad).toEqual(['4 error: A9 note: gate must be a tick count or one of 1/4 1/8 1/16 1/32 1/8T 1/16T.'])
+    for (const bad of ['H4', 'G#9', 'C', 'C10', 'Db4', 'c4', '60']) expect(one([`A9 t 0 note ${bad}`]), bad).toEqual(['4 error: A9 note: note must be a name from C-1 to G9, such as C4.'])
+    for (const bad of ['128', '-128', 'x']) expect(one([`A9 t 0 semi ${bad}`]), bad).toEqual(['4 error: A9 note: semi must be -127 to 127.'])
+    expect(one(['A9 at 1.1.1 t 0'])).toEqual(['4 error: A9 note has both at and t.'])
+    expect(one(['A9 t 0 note C4 semi 1'])).toEqual(['4 error: A9 note has both note and semi.'])
+    expect(one(['A9 t 0 semi 1 note C4'])).toEqual(['4 error: A9 note has both note and semi.'])
+    expect(one(['A9 at'])).toEqual(['4 error: A9 note: at needs a value.'])
+    expect(one(['B9 t 0'])).toEqual(['4 error: B9 is in group B, but the section is [A].'])
+    expect(one(['Z9 t 0'])).toEqual(["4 error: 'Z9' isn't a pad. Use A to D, then . 0 E or 1 to 9."])
+    // A word that isn't an option warns, and so does the value after it.
+    const warn = BeatCards.read(text('ARC BEAT 1', '[A]', 'notes', 'A9 t 0 colour red vel 50 loud'))
+    expect(problems(warn)).toEqual(["4 warning: Unknown option 'colour' on A9 note, ignored.", "4 warning: Unknown option 'loud' on A9 note, ignored."])
+    expect(keys(warn.card!.sections[0]!.pattern)).toEqual(keyList(hit(0, 11, 24, null, 50)))
+    // Rows can't follow the notes list: what is in it is a note.
+    const row = BeatCards.read(text('ARC BEAT 1', '[A]', 'notes', 'A9 | X... .... .... .... |'))
+    expect(row.card).toBeNull()
+    expect(problems(row)).toContain('4 error: A9 note needs at or t to place it.')
+    // The next section ends the list.
+    const next = read('ARC BEAT 1', '[A]', 'notes', 'A9 t 0', '[B]', 'B7 | X... .... .... .... |')
+    expect(problems(next)).toEqual([])
+    expect(next.card!.sections.map((s) => s.pattern.notes.length)).toEqual([1, 1])
+  })
+
+  it('at most 2048 notes in a pattern', () => {
+    const steps = 99 * 32
+    const make = (hits: number): CardRead => BeatCards.read(text('ARC BEAT 1', '[A] bars 99 step 1/32', 'A7 | ' + 'x'.repeat(hits) + '.'.repeat(steps - hits) + ' |'))
+    expect(problems(make(2048))).toEqual([])
+    expect(make(2048).card!.sections[0]!.pattern.notes.length).toBe(2048)
+    const over = make(2049)
+    expect(problems(over)).toEqual(['2 error: Group A has 2049 notes, the most is 2048.'])
+    expect(over.card).toBeNull()
+    // Notes folded into one don't count twice.
+    const folded = read('ARC BEAT 1', '[A]', 'notes', ...Array.from({ length: 3000 }, () => 'A9 t 5'))
+    expect(folded.problems.length).toBe(2999)
+    expect(folded.problems.some((p) => p.error)).toBe(false)
+    expect(section(folded).pattern.notes.length).toBe(1)
+  })
+
+  // ---- writing ----
+
+  it('the header, the sections in order, and the name', () => {
+    const c = beatCard('  Lazy # boom |bap  ', 92.5, 66, [a([hit(0, 9)], { group: 2 }), a([hit(0, 9)], { group: 0, number: 2 })])
+    const want =
+      text(
+        'ARC BEAT 1', 'name Lazy boom bap', 'tempo 92.5', 'swing 66', '',
+        '[A02] bars 1 step 1/16', 'A7 | X... .... .... .... |', '',
+        '[C] bars 1 step 1/16', 'C7 | X... .... .... .... |',
+      ) + '\n'
+    expect(BeatCards.write(c)).toBe(want)
+    expect(BeatCards.write({ ...c, sections: [...c.sections].reverse() })).toBe(BeatCards.write(c))
+    // Tempo is whole or one decimal; the name keeps to 40 characters; no title, no tempo, no line.
+    expect(BeatCards.write({ ...c, tempo: 90 })).toContain('\ntempo 90\n')
+    expect(BeatCards.write({ ...c, tempo: 92.04 })).toContain('\ntempo 92\n')
+    expect(BeatCards.write({ ...c, tempo: 92.06 })).toContain('\ntempo 92.1\n')
+    expect(BeatCards.write({ ...c, name: 'y'.repeat(50) })).toContain(`\nname ${'y'.repeat(40)}\n`)
+    expect(BeatCards.write({ ...c, name: 'a' + '\u{1F600}'.repeat(50) })).toContain(`\nname a${'\u{1F600}'.repeat(39)}\n`)
+    const plain = BeatCards.write({ ...c, name: null, tempo: null, swing: 50 })
+    expect(plain.startsWith('ARC BEAT 1\nswing 50\n\n[A02]')).toBe(true)
+    expect(BeatCards.write({ ...c, name: ' # | ' })).not.toContain('name')
+  })
+
+  it('a pattern is written on the first of 1_16, 1_16T and 1_32 that fits its hits', () => {
+    // Triplets.
+    const triplets = a([hit(0, 9, 16), hit(16, 9, 16, null, 100), hit(32, 9, 16, null, 64)])
+    expect(body(BeatCards.write(card([triplets])))).toBe(text('[A] bars 1 step 1/16T', 'A7 | Xxo. .... .... .... .... .... |'))
+    // 32nds.
+    expect(body(BeatCards.write(card([a([hit(0, 9, 12), hit(12, 9, 12)])])))).toBe(text('[A] bars 1 step 1/32', 'A7 | XX.. .... .... .... .... .... .... .... |'))
+    // Straight hits stay on 1/16 though they would fit 1/32.
+    expect(BeatCards.write(card([a([hit(0, 9), hit(48, 9)])]))).toContain('step 1/16\n')
+    // KEYS notes and hits past the end don't choose the step.
+    expect(BeatCards.write(card([a([hit(0, 9), hit(5, 3, 24, 0), hit(400, 9)])]))).toContain('step 1/16\n')
+    // None fits: 1/16, and the hit that doesn't fit goes to the notes list.
+    expect(body(BeatCards.write(card([a([hit(0, 9), hit(5, 9)])])))).toBe(text('[A] bars 1 step 1/16', 'A7 | X... .... .... .... |', 'notes', 'A7 at 1.1.1+5'))
+    expect(body(BeatCards.write(card([a([hit(5, 9)])])))).toBe(text('[A] bars 1 step 1/16', 'notes', 'A7 at 1.1.1+5'))
+  })
+
+  it("rows go in keypad order, in groups of 4 with a bar between bars, after the sound's name", () => {
+    const c = card([a(Array.from({ length: 12 }, (_, i) => hit(0, i)))])
+    const labels = BeatCards.write(c).split('\n').filter((l) => l.startsWith('A') && l.includes(' | ')).map((l) => l.split(' ')[0])
+    expect(labels).toEqual(['A7', 'A8', 'A9', 'A4', 'A5', 'A6', 'A1', 'A2', 'A3', 'A.', 'A0', 'AE'])
+    const names = named([
+      [physicalPad(0, 9), 'kick'],
+      [physicalPad(0, 11), 'a|b # c'],
+    ])
+    const two = card([a([hit(0, 9), hit(384 + 72, 9), hit(96, 11), hit(0, 6)], { bars: 2, number: 3 })])
+    const want = text(
+      '[A03] bars 2 step 1/16',
+      'A7 kick      | X... .... .... .... | ...X .... .... .... |',
+      'A9 a b c     | .... X... .... .... | .... .... .... .... |',
+      'A4' + ' '.repeat(11) + '| X... .... .... .... | .... .... .... .... |',
+    )
+    expect(body(BeatCards.write(two, names))).toBe(want)
+    // A long name widens the column; no names, no column.
+    expect(rowOf(BeatCards.write(card([a([hit(0, 9)])]), () => 'twelve sound'), 'A7')).toBe('A7 twelve sound | X... .... .... .... |')
+    expect(rowOf(BeatCards.write(card([a([hit(0, 9)])])), 'A7')).toBe('A7 | X... .... .... .... |')
+    // Another group's pads are asked for by their own group.
+    const b = BeatCards.write(card([a([hit(0, 9)], { group: 1 })]), (p) => (padKey(p) === padKey(physicalPad(1, 9)) ? 'bass' : 'wrong'))
+    expect(rowOf(b, 'B7')).toBe('B7 bass      | X... .... .... .... |')
+  })
+
+  it('velocities and holds are written as characters, the rest goes to the notes list', () => {
+    const c = card([
+      a([
+        hit(0, 6), hit(48, 6, 72, null, 100), hit(144, 6, 24, null, 64),
+        hit(96, 11, 60), hit(240, 11, 24, null, 42), hit(366, 11, 24, null, 50),
+        hit(23, 6),
+        hit(0, 3, 72), hit(48, 3), hit(0, 3, 48, 0),
+        hit(0, 0, 24, 67), hit(24, 0, 24, 68), hit(48, 0, 24, -100),
+      ]),
+    ])
+    const want = text(
+      '[A] bars 1 step 1/16',
+      'A9 | .... .... ..3. .... |',
+      'A4 | X.x- -.o. .... .... |',
+      'A1 | ..X. .... .... .... |',
+      'notes',
+      'A9 at 1.2.1 gate 60',
+      'A9 at 1.4.4+6 vel 50',
+      'A4 at 1.1.2-1',
+      'A1 at 1.1.1 gate 72',
+      'A1 at 1.1.1 note C4 gate 1/8',
+      'A. at 1.1.1 note G9',
+      'A. at 1.1.2 semi 68',
+      'A. at 1.1.3 semi -100',
+    )
+    expect(body(BeatCards.write(c))).toBe(want)
+    // Every velocity character and its value.
+    const vels: [number, string][] = [[127, 'X'], [100, 'x'], [64, 'o'], [14, '1'], [28, '2'], [42, '3'], [56, '4'], [70, '5'], [84, '6'], [98, '7'], [112, '8'], [126, '9']]
+    const row = rowOf(BeatCards.write(card([a(vels.map(([v], i) => hit(i * 24, 9, 24, null, v)))])), 'A7')
+    expect(row).toBe('A7 | ' + vels.map(([, ch]) => ch).join('').match(/.{4}/g)!.join(' ') + ' .... |')
+    // A hold that stops at the next hit fits; one into it doesn't; one past the end doesn't.
+    expect(BeatCards.write(card([a([hit(0, 9, 48), hit(48, 9)])]))).toContain('A7 | X-X. ')
+    expect(BeatCards.write(card([a([hit(0, 9, 72), hit(48, 9)])]))).toContain('\nnotes\nA7 at 1.1.1 gate 72\n')
+    expect(BeatCards.write(card([a([hit(360, 9, 48)])]))).toContain('\nnotes\nA7 at 1.4.4 gate 1/8\n')
+    // Two hits on one pad and tick are one, the louder, as reading has it; notes past the end are left out.
+    const dup = BeatCards.write(card([a([hit(0, 9, 24, null, 100), hit(0, 9), hit(400, 9), hit(384, 3, 24, 0)])]))
+    expect(body(dup)).toBe(text('[A] bars 1 step 1/16', 'A7 | X... .... .... .... |'))
+    // Gates that are a listed value are written as it.
+    const gates = [96, 48, 12, 32, 16, 100]
+    const written = BeatCards.write(card([a(gates.map((g, i) => hit(i * 30, 3, g, 0)))]))
+    const gateLines = text(
+      'A1 at 1.1.1 note C4 gate 1/4',
+      'A1 at 1.1.2+6 note C4 gate 1/8',
+      'A1 at 1.1.3+12 note C4 gate 1/32',
+      'A1 at 1.2.1-6 note C4 gate 1/8T',
+      'A1 at 1.2.2 note C4 gate 1/16T',
+      'A1 at 1.2.3+6 note C4 gate 100',
+    )
+    expect(body(written)).toBe(text('[A] bars 1 step 1/16', 'notes', gateLines))
+  })
+
+  it('rows use the swing of the card', () => {
+    const p = a([hit(0, 9), hit(28, 9)])
+    expect(body(BeatCards.write(card([p], 58)))).toBe(text('[A] bars 1 step 1/16', 'A7 | XX.. .... .... .... |'))
+    expect(body(BeatCards.write(card([p], 50)))).toBe(text('[A] bars 1 step 1/16', 'A7 | X... .... .... .... |', 'notes', 'A7 at 1.1.2+4'))
+    expect(BeatCards.write(card([p], 58)).startsWith('ARC BEAT 1\nswing 58\n')).toBe(true)
+    // Swing is held to 50..75 when written.
+    expect(BeatCards.write(card([p], 99)).startsWith('ARC BEAT 1\nswing 75\n')).toBe(true)
+    // Triplets are not swung: the card's swing doesn't move them.
+    const triplets = a([hit(0, 9, 16), hit(16, 9, 16)])
+    expect(body(BeatCards.write(card([triplets], 70)))).toBe(text('[A] bars 1 step 1/16T', 'A7 | XX.. .... .... .... .... .... |'))
+  })
+
+  it('tidy rounds velocities and short gates, and says so', () => {
+    const p = a([hit(0, 9, 10, null, 90), hit(24, 9, 24, null, 113), hit(48, 9, 24, null, 114), hit(72, 9, 24, null, 81), hit(96, 9, 30, null, 82)])
+    const raw = BeatCards.write(card([p]))
+    expect(raw).not.toContain('tidied')
+    expect(body(raw)).toBe(
+      text('[A] bars 1 step 1/16', 'notes', 'A7 at 1.1.1 vel 90 gate 10', 'A7 at 1.1.2 vel 113', 'A7 at 1.1.3 vel 114', 'A7 at 1.1.4 vel 81', 'A7 at 1.2.1 vel 82 gate 30'),
+    )
+    const tidy = BeatCards.write(card([p]), () => null, true)
+    expect(tidy).toBe(
+      text(
+        'ARC BEAT 1', 'swing 50', '# tidied: velocities and short gates rounded', '',
+        '[A] bars 1 step 1/16', 'A7 | xxXo .... .... .... |', 'notes', 'A7 at 1.2.1 vel 100 gate 30',
+      ) + '\n',
+    )
+    // The comment is a comment: the tidied card reads back as the tidied pattern.
+    const back = BeatCards.read(tidy)
+    expect(problems(back)).toEqual([])
+    expect(keys(section(back).pattern)).toEqual(keyList(hit(0, 9, 24, null, 100), hit(24, 9, 24, null, 100), hit(48, 9), hit(72, 9, 24, null, 64), hit(96, 9, 30, null, 100)))
+    // KEYS notes are rounded too.
+    const keysCard = BeatCards.write(card([a([hit(0, 3, 5, 0, 70)])]), () => null, true)
+    expect(keysCard.endsWith('\nnotes\nA1 at 1.1.1 vel 64 note C4\n')).toBe(true)
+  })
+
+  // ---- round trips ----
+
+  const rich = (): BeatCard => {
+    const x = cardSection(
+      0,
+      4,
+      pattern(2, [
+        hit(0, 9), hit(28, 9, 24, null, 100), hit(48, 9, 72, null, 64), hit(384 + 96, 11), hit(366, 11, 24, null, 50), hit(456, 11), hit(23, 6, 12),
+        hit(0, 3, 48, 0), hit(96, 3, 24, 7, 90), hit(96, 3, 24, 4, 90), hit(200, 1, 100, -100),
+        hit(500, 4, 96), hit(520, 4, 32), hit(760, 5, 16, null, 14),
+      ]),
+    )
+    const y = cardSection(2, null, pattern(1, [hit(0, 9, 16), hit(16, 9, 16, null, 100), hit(32, 9, 16, null, 64), hit(48, 6, 16, 12)]))
+    const z = cardSection(3, 99, pattern(1, [hit(0, 0, 12), hit(12, 0, 12), hit(36, 0, 12, null, 42), hit(60, 2)]))
+    return beatCard('Rich beat', 87.5, 58, [x, y, z])
+  }
+
+  it('a card Arc wrote reads back to the same patterns and writes out as the same text', () => {
+    const names = named([
+      [physicalPad(0, 9), 'kick'],
+      [physicalPad(2, 9), 'tom'],
+      [physicalPad(3, 0), 'shaker'],
+    ])
+    for (const c of [rich(), BeatCards.read(example).card!, beatCard(null, null, 50, [a([hit(0, 9)])])]) {
+      const out = BeatCards.write(c, names)
+      const back = BeatCards.read(out)
+      expect(problems(back), out).toEqual([])
+      const b = back.card!
+      expect(b.name).toBe(c.name)
+      expect(b.tempo).toBe(c.tempo)
+      expect(b.swing).toBe(c.swing)
+      expect(b.sections.map((s) => [s.group, s.number])).toEqual(c.sections.map((s) => [s.group, s.number]))
+      const sorted = [...c.sections].sort((p, q) => p.group - q.group)
+      sorted.forEach((x, i) => {
+        const y = b.sections[i]!
+        expect(y.pattern.bars).toBe(x.pattern.bars)
+        expect(keys(y.pattern), out).toEqual(keys(x.pattern))
+        expect(y.pattern.notes.length).toBe(x.pattern.notes.length)
+      })
+      expect(BeatCards.write(b, names)).toBe(out)
+    }
+    // Reading puts the notes in tick order, with no ids.
+    const order = BeatCards.read(BeatCards.write(rich())).card!.sections[0]!.pattern.notes
+    expect(order.map((n) => n.tick)).toEqual([...order].map((n) => n.tick).sort((x, y) => x - y))
+    expect(order.every((n) => n.id === 0)).toBe(true)
+    // Everything in the rich card that has to leave the rows did.
+    const out = BeatCards.write(rich())
+    expect(out).toContain('notes\n')
+    expect(out).toContain('[A04] bars 2 step 1/16')
+    expect(out).toContain('[C] bars 1 step 1/16T')
+    expect(out).toContain('[D99] bars 1 step 1/32')
+  })
+
+  it('a card of every pattern shape round trips', () => {
+    // A bar of each step, with holds, accents, ghosts and odd steps; at several swings.
+    for (const swing of [50, 54, 58, 66, 75]) {
+      for (const bars of [1, 2, 3]) {
+        const notes: PatternNote[] = []
+        for (let k = 0; k < bars * 16; k++) {
+          const tick = Steps.tickOf(k, Timing.SIXTEENTH, swing)
+          if (k % 3 === 0) notes.push(hit(tick, k % 12, 24 * (1 + (k % 2)), null, [127, 100, 64, 14 * (1 + (k % 9))][k % 4]!))
+          if (k % 5 === 0) notes.push(hit(tick + 3, (k + 4) % 12, 24, (k % 13) - 6))
+        }
+        const c = beatCard(null, null, swing, [cardSection(1, null, pattern(bars, notes))])
+        const out = BeatCards.write(c)
+        const back = BeatCards.read(out)
+        expect(problems(back), out).toEqual([])
+        expect(keys(back.card!.sections[0]!.pattern), out).toEqual(keys(c.sections[0]!.pattern))
+        expect(BeatCards.write(back.card!)).toBe(out)
+      }
+    }
+  })
+
+  // ---- from patterns ----
+
+  it('the swing of an export is the timing swing only when the hits fit that grid', () => {
+    const swung = a([hit(0, 9), hit(28, 9), hit(48, 9, 24, null, 100), hit(76, 11)])
+    expect(BeatCards.fromPatterns('n', 90, 58, [swung]).swing).toBe(58)
+    expect(BeatCards.fromPatterns('n', 90, 50, [swung]).swing).toBe(50)
+    // Hits on the straight odd steps, on triplets or between steps do not fit a swung grid.
+    expect(BeatCards.fromPatterns(null, null, 58, [a([hit(0, 9), hit(24, 9)])]).swing).toBe(50)
+    expect(BeatCards.fromPatterns(null, null, 58, [a([hit(0, 9, 16), hit(16, 9, 16)])]).swing).toBe(50)
+    expect(BeatCards.fromPatterns(null, null, 58, [a([hit(5, 9)])]).swing).toBe(50)
+    // Hits on the even steps fit every swing; KEYS notes, hits past the end and empty patterns don't count.
+    expect(BeatCards.fromPatterns(null, null, 66, [a([hit(0, 9), hit(48, 9), hit(5, 3, 24, 0), hit(400, 9)])]).swing).toBe(66)
+    expect(BeatCards.fromPatterns(null, null, 66, [a()]).swing).toBe(66)
+    // Every section has to fit.
+    expect(BeatCards.fromPatterns(null, null, 58, [swung, a([hit(24, 9)], { group: 1 })]).swing).toBe(50)
+    expect(BeatCards.fromPatterns(null, null, 58, [swung, a([hit(0, 9)], { group: 1 })]).swing).toBe(58)
+    // The swing is held to 50..75.
+    expect(BeatCards.fromPatterns(null, null, 99, [a([hit(0, 9)])]).swing).toBe(75)
+    expect(BeatCards.fromPatterns(null, null, 10, [a([hit(0, 9)])]).swing).toBe(50)
+    // The card written from it reads back to the same pattern.
+    const c = BeatCards.fromPatterns('n', 90, 58, [swung])
+    expect(keys(BeatCards.read(BeatCards.write(c)).card!.sections[0]!.pattern)).toEqual(keys(swung.pattern))
+  })
+
+  it('an export holds the sections with notes, in group order', () => {
+    const sections = [a([hit(0, 9)], { group: 3 }), a([], { group: 1 }), a([hit(0, 9)], { group: 0, number: 2 }), a([], { bars: 4, group: 2 })]
+    const c = BeatCards.fromPatterns('Scene', 100, 50, sections)
+    expect(c.sections.map((s) => s.group)).toEqual([0, 3])
+    expect(c.name).toBe('Scene')
+    expect(c.tempo).toBe(100)
+    // A pattern with no notes alone is kept, as written (a card needs a section).
+    const blank = BeatCards.fromPatterns(null, null, 50, [a([], { bars: 2, group: 2 })])
+    expect(blank.sections.map((s) => s.group)).toEqual([2])
+    expect(BeatCards.read(BeatCards.write(blank)).card).toEqual(blank)
+  })
+
+  // ---- import ----
+
+  const kick = pattern(1, [hit(0, 9)])
+
+  const project = (playing: number[] = [1, 5, 1, 7]): ProjectSeq =>
+    projectSeq(
+      [
+        new Map([[1, kick], [2, kick], [3, kick]]),
+        new Map(),
+        new Map(),
+        new Map([[7, kick]]),
+      ],
+      [scene(playing)],
+    )
+
+  it('a card goes into the next free pattern of each group, and a new scene plays them', () => {
+    const c = card([a([hit(0, 9), hit(24, 11)], { bars: 2 }), a([hit(24, 3)], { group: 2, number: 5 })])
+    const seq = project()
+    const plan = BeatCards.plan(seq, c)
+    expect(plan.fullGroup).toBeNull()
+    expect(plan.newScene).toBe(true)
+    // Group A's 2 and 3 have notes: the next free is 4. Group C's bank is empty: 2.
+    expect(plan.placed).toEqual([[0, 4], [2, 2]])
+    expect(keys(ProjectSeq.pattern(plan.seq, 0, 4))).toEqual(keys(c.sections[0]!.pattern))
+    expect(ProjectSeq.pattern(plan.seq, 0, 4).bars).toBe(2)
+    expect(keys(ProjectSeq.pattern(plan.seq, 2, 2))).toEqual(keys(c.sections[1]!.pattern))
+    expect(ProjectSeq.pattern(plan.seq, 0, 4).notes.every((n) => n.id === 0)).toBe(true)
+    // Nothing was overwritten.
+    for (let n = 1; n <= 3; n++) expect(ProjectSeq.pattern(plan.seq, 0, n)).toBe(kick)
+    expect(ProjectSeq.pattern(plan.seq, 3, 7)).toBe(kick)
+    expect(plan.seq.banks[1]).toEqual(seq.banks[1])
+    // The new scene is the last, selected; groups the card hasn't keep the scene playing's numbers.
+    expect(plan.seq.scenes.length).toBe(2)
+    expect(plan.seq.scene).toBe(1)
+    expect(ProjectSeq.current(plan.seq).patterns).toEqual([4, 5, 2, 7])
+    expect(plan.seq.scenes[0]).toEqual(scene([1, 5, 1, 7]))
+    // The card is the same planned from any scene playing.
+    expect(ProjectSeq.current(BeatCards.plan(project([1, 6, 1, 8]), c).seq).patterns).toEqual([4, 6, 2, 8])
+  })
+
+  it('one section goes in without a new scene, and the next card goes after it', () => {
+    const c = card([a([hit(0, 9)], { group: 2 })])
+    const first = BeatCards.plan(project(), c)
+    expect(first.placed).toEqual([[2, 2]])
+    expect(first.newScene).toBe(false)
+    expect(first.fullGroup).toBeNull()
+    expect(first.seq.scenes).toEqual(project().scenes)
+    expect(first.seq.scene).toBe(0)
+    expect(keys(ProjectSeq.pattern(first.seq, 2, 2))).toEqual(keys(c.sections[0]!.pattern))
+    const second = BeatCards.plan(first.seq, c)
+    expect(second.placed).toEqual([[2, 3]])
+    expect(keys(ProjectSeq.pattern(second.seq, 2, 2))).toEqual(keys(c.sections[0]!.pattern))
+    expect(keys(ProjectSeq.pattern(second.seq, 2, 3))).toEqual(keys(c.sections[0]!.pattern))
+    // Counting starts after the pattern selected.
+    expect(BeatCards.plan(project([5, 1, 1, 1]), card([a([hit(0, 9)])])).placed).toEqual([[0, 6]])
+    // A card with no section changes nothing.
+    const none = BeatCards.plan(project(), beatCard())
+    expect(none.placed).toEqual([])
+    expect(none.newScene).toBe(false)
+    expect(none.seq).toEqual(project())
+  })
+
+  it('a group with every pattern used stops the whole card', () => {
+    const full = new Map(Array.from({ length: Seq.MAX_PATTERNS }, (_, i) => [i + 1, kick] as [number, Pattern]))
+    const seq = projectSeq([new Map(), full, new Map(), new Map()])
+    const plan = BeatCards.plan(seq, card([a([hit(0, 9)]), a([hit(0, 9)], { group: 1 })]))
+    expect(plan.seq).toBe(seq)
+    expect(plan.placed).toEqual([])
+    expect(plan.newScene).toBe(false)
+    expect(plan.fullGroup).toBe(1)
+    // A card without that group goes in.
+    const other = BeatCards.plan(seq, card([a([hit(0, 9)]), a([hit(0, 9)], { group: 2 })]))
+    expect(other.fullGroup).toBeNull()
+    expect(other.placed).toEqual([[0, 2], [2, 2]])
+    // Patterns with no notes are free, however long.
+    const rest = new Map(Array.from({ length: Seq.MAX_PATTERNS - 1 }, (_, i) => [i + 2, kick] as [number, Pattern]))
+    rest.set(1, pattern(3))
+    const blanks = projectSeq([rest, new Map(), new Map(), new Map()])
+    expect(BeatCards.plan(blanks, card([a([hit(0, 9)])])).placed).toEqual([[0, 1]])
+  })
+
+  it('no new scene past 99 scenes, but the patterns are still placed', () => {
+    const seq = projectSeq([], Array.from({ length: Seq.MAX_SCENES }, () => scene()))
+    const plan = BeatCards.plan(seq, card([a([hit(0, 9)]), a([hit(0, 9)], { group: 1 })]))
+    expect(plan.newScene).toBe(false)
+    expect(plan.placed).toEqual([[0, 2], [1, 2]])
+    expect(plan.seq.scenes.length).toBe(Seq.MAX_SCENES)
+    expect(plan.seq.scene).toBe(0)
+    expect(ProjectSeq.pattern(plan.seq, 1, 2).notes.length).toBe(1)
+  })
+})

@@ -4,11 +4,17 @@
     <!-- USB MIDI. Not required: without MIDI the library (import, share, save) still works. -->
     <uses-feature android:name="android.software.midi" android:required="false" />
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+    <!-- SAMPLE records the mic or the EP-133 over USB audio. Not required: RSP and the rest work without one. -->
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Only to download the EP-133's factory sounds from teenage engineering, when asked (FactoryDownload). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Only while SAMPLE mode is open with the mic or USB as its source (InputCapture); asked for then. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
     <application
         android:name=".ArcApp"
@@ -20,10 +26,13 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Arc">
 
+        <!-- Turning the phone resizes the window instead of recreating the activity,
+             so Live keeps its mirror and the notes still sounding. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -52,6 +61,13 @@
                 <data android:pathPattern=".*\\.pak" />
                 <data android:pathPattern=".*\\..*\\.pak" />
                 <data android:pathPattern=".*\\..*\\..*\\.pak" />
+            </intent-filter>
+
+            <!-- Claude's reply shared to arc: a beat card in text (MainActivity.handleIntent reads it, and says so when there is none). -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
 

@@ -52,7 +52,8 @@ class Takes(private val dir: File) {
                 val bb = ByteBuffer.wrap(h).order(ByteOrder.LITTLE_ENDIAN)
                 val ch = bb.getShort(22).toInt() and 0xFFFF
                 val rate = bb.getInt(24)
-                val data = (size - 44) / 4 * 4
+                // Whole frames: SAMPLE's recordings moved in here may be mono.
+                val data = if (ch > 0) (size - 44) / (2 * ch) * (2 * ch) else 0L
                 if (ch > 0 && rate > 0 && bb.getInt(40).toLong() and 0xFFFFFFFFL != data) {
                     r.seek(0)
                     r.write(Wav.header(data, ch, rate))

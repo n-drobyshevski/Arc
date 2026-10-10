@@ -57,3 +57,6 @@
   background: var(--shell);
 }
 .pick__list--end { left: auto; right: 0; }
+.pick__list--down { top: 0; bottom: auto; }
+/* A grid of choices (the keys), row by row in cells of one width. */
+.pick__list--grid { display: grid; column-gap: var(--space-4); }

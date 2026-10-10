@@ -8,9 +8,9 @@ import { readFile } from '../../src/platform/files/pick'
 import { openMidi, probePermission, requestMidiAccess, watchMidi, webMidiSupported } from '../../src/platform/midi/webmidi'
 import { nullChannel } from '../../src/platform/storage/channel'
 import { Library } from '../../src/platform/storage/library'
-import { CoachPrefs, LastReadPrefs, MirrorPrefs, SettingsStore, memoryStorage } from '../../src/platform/storage/settings'
+import { CoachPrefs, LastReadPrefs, OfflinePadsPrefs, MirrorPrefs, SettingsStore, memoryStorage } from '../../src/platform/storage/settings'
 import { createController, type ArcController } from '../../src/state/controller'
-import type { Deps } from '../../src/state/deps'
+import type { Deps, FactoryDeps } from '../../src/state/deps'
 import type { ToastMsg, UiState } from '../../src/state/types'
 import { DemoData } from '../helpers/demoData'
 import { connectMock, fakeNavigator, type FakeEp } from '../helpers/fakeMidiAccess'
@@ -32,6 +32,8 @@ export interface LiveHarness {
   takes: ReturnType<typeof memoryTakeStore>
   toasts: ToastMsg[]
   setVisible(v: boolean): void
+  /** The page is going away (pagehide). */
+  pageHide(): void
 }
 
 export interface LiveHarnessOptions {
@@ -41,6 +43,10 @@ export interface LiveHarnessOptions {
   /** No EP-133 plugged in. */
   unplugged?: boolean
   now?: () => number
+  /** The fake output has a `late` signal of its own, as the real LiveAudio. */
+  late?: boolean
+  /** teenage engineering's site, for the factory sounds. */
+  factory?: FactoryDeps
 }
 
 const all: LiveHarness[] = []
@@ -65,9 +71,10 @@ export async function liveHarness(opts: LiveHarnessOptions = {}): Promise<LiveHa
   const library = opts.library ?? (await freshLibrary())
   const storage = opts.storage ?? memoryStorage()
   const padSounds = opts.padSounds ?? memoryPadSoundStore()
-  const liveAudio = fakeLiveAudio()
+  const liveAudio = fakeLiveAudio(opts.late ?? false)
   const takes = memoryTakeStore()
   const visListeners = new Set<(v: boolean) => void>()
+  const hideListeners = new Set<() => void>()
   let visible = true
   const deps: Deps = {
     midi: {
@@ -89,6 +96,8 @@ export async function liveHarness(opts: LiveHarnessOptions = {}): Promise<LiveHa
     padSounds,
     takes,
     lastRead: new LastReadPrefs(storage),
+    offlinePads: new OfflinePadsPrefs(storage),
+    factory: opts.factory,
     wakeLock: { set: async () => {} },
     trafficLog: new TrafficLog(),
     now: opts.now ?? (() => Date.now()),
@@ -101,6 +110,10 @@ export async function liveHarness(opts: LiveHarnessOptions = {}): Promise<LiveHa
       subscribe: (l) => {
         visListeners.add(l)
         return () => visListeners.delete(l)
+      },
+      onPageHide: (l) => {
+        hideListeners.add(l)
+        return () => hideListeners.delete(l)
       },
     },
     title: { get: () => 'arc', set: () => {} },
@@ -126,6 +139,9 @@ export async function liveHarness(opts: LiveHarnessOptions = {}): Promise<LiveHa
     setVisible(v) {
       visible = v
       for (const l of [...visListeners]) l(v)
+    },
+    pageHide() {
+      for (const l of [...hideListeners]) l()
     },
   }
   all.push(h)

@@ -176,6 +176,15 @@ export class PadSoundCache {
     })
   }
 
+  /** The name each copy was read with, by slot: which device sounds Live can play without the device. */
+  copies(): Promise<Map<number, string>> {
+    return this.locked(async () => {
+      const out = new Map<number, string>()
+      for (const [slot, e] of await this.entries()) out.set(slot, e.name)
+      return out
+    })
+  }
+
   /** Space used, in bytes. */
   bytes(): Promise<number> {
     return this.locked(() => this.total())

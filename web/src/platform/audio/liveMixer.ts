@@ -4,23 +4,28 @@
 // ScriptProcessorNode; either way the main thread only sends ToMixer commands
 // and hears back FromMixer reports.
 //
-// Web delta from LiveAudio.kt: Kotlin's stream thread both renders and
-// reports; here the render loop lives where the browser runs audio, so the
-// samples are sent over once ('load', by id) and a press only names one
-// ('start'), which keeps a press cheap. Each render reports the voices that
+// Web delta from LiveAudio.kt: Kotlin's output renders on its own thread
+// (the native engine's callback, or the AudioTrack loop) with the samples it
+// was handed in memory, and reports back to Kotlin (the native one through
+// queues a poll thread reads); here the render loop lives where the browser
+// runs audio, so the samples are sent over once ('load', by id) and a press
+// only names one ('start'), which keeps a press cheap. Each render reports the voices that
 // began, with the context time of their first frame, and the keys sounding
-// when they change.
+// when they change. A start may carry its voice's shape (VoiceShape's
+// fields over the defaults, as VoiceShape.of takes them: the FX bus's group
+// and the sidechain's source among them), and 'control' sets up the mixer's
+// FX bus (VoiceMixer.control).
 //
-// REC (LiveAudio.kt's take): 'arm' gives the host a core TakeRecorder, fed
-// each render as Kotlin's stream thread feeds it; what it keeps is sent over
-// in 'take' chunks of interleaved 16-bit frames (Kotlin's TakeWriter queue),
+// TAKE (LiveAudio.kt's take): 'arm' gives the host a core TakeRecorder, fed
+// each render as Kotlin's output feeds it; what it keeps is sent over in
+// 'take' chunks of interleaved 16-bit frames (Kotlin's TakeWriter queue),
 // then 'takeEnd' with the frames to keep. 'transport' is the EP-133's PLAY
 // and STOP (MIDI clock), as LiveAudio.kt's transportStarted/Stopped.
 //
 // Imports only core modules: this file is bundled into the worklet.
 
 import { TakeRecorder, type RecState } from '../../core/features/takeRecorder'
-import { VoiceMixer } from '../../core/formats/voiceMixer'
+import { VoiceMixer, VoiceShape } from '../../core/formats/voiceMixer'
 
 /** The AudioWorkletProcessor's registered name. */
 export const LIVE_PROCESSOR = 'arc-live-mixer'
@@ -30,7 +35,11 @@ export type ToMixer =
   /** Keeps sample [id] ready (16-bit, interleaved) until 'unload'. */
   | { readonly t: 'load'; readonly id: number; readonly pcm: Int16Array }
   | { readonly t: 'unload'; readonly id: number }
-  /** VoiceMixer.start with a loaded sample; [tag] is the press time (performance.now() ms), 0 for none. */
+  /**
+   * VoiceMixer.start with a loaded sample; [tag] is the press time
+   * (performance.now() ms), 0 for none; [shape] the voice's VoiceShape
+   * fields over the defaults (VoiceShape.of), none: VoiceShape.DEFAULT.
+   */
   | {
       readonly t: 'start'
       readonly key: string
@@ -39,15 +48,33 @@ export type ToMixer =
       readonly sampleRate: number
       readonly semitones: number
       readonly tag: number
+      readonly shape?: Partial<VoiceShape>
     }
   | { readonly t: 'release'; readonly key: string }
+  /** VoiceMixer.cut: the voice ends in CHOKE_MS, minimum gate or not (a press that became a scroll). */
+  | { readonly t: 'cut'; readonly key: string }
   | { readonly t: 'stopAll' }
-  /** Arms REC: the next sound (or the device's PLAY) starts a take. */
+  /** VoiceMixer.control: FxControl command [what] (FX_TYPE to PUNCH) with its [index], [x] and [y]. */
+  | { readonly t: 'control'; readonly what: number; readonly index: number; readonly x: number; readonly y: number }
+  /** Arms TAKE: the next sound (or the device's PLAY) starts a take. */
   | { readonly t: 'arm' }
   /** Stops the take (or disarms): what was recorded is sent, then 'takeEnd'. */
   | { readonly t: 'stopRec' }
   /** The EP-133 started ([playing]) or stopped playing. */
   | { readonly t: 'transport'; readonly playing: boolean }
+
+/**
+ * [m] as it is posted to the worklet, and what moves with it: a 'load' takes
+ * a copy of just its samples (a view's whole buffer would be cloned
+ * otherwise) whose buffer is transferred, so the main thread's own array is
+ * never detached and no second clone waits in the port. Every other command
+ * is posted as it is.
+ */
+export function transferable(m: ToMixer): [ToMixer, Transferable[]] {
+  if (m.t !== 'load') return [m, []]
+  const pcm = m.pcm.slice()
+  return [{ t: 'load', id: m.id, pcm }, [pcm.buffer]]
+}
 
 /** A voice that began: its press [tag] and the context time ([time], s) its first frame plays at. */
 export interface StartedVoice {
@@ -61,7 +88,7 @@ export type FromMixer =
   | { readonly t: 'started'; readonly voices: readonly StartedVoice[] }
   /** The keys sounding (VoiceMixer.keys), sent when they change. */
   | { readonly t: 'keys'; readonly keys: readonly string[] }
-  /** The REC key's state, sent when it changes. */
+  /** The TAKE key's state, sent when it changes. */
   | { readonly t: 'rec'; readonly state: RecState }
   /** Recorded frames of the take going (stereo, interleaved), in order. */
   | { readonly t: 'take'; readonly pcm: Int16Array }
@@ -76,6 +103,8 @@ export class MixerHost {
   readonly mixer: VoiceMixer
   private readonly samples = new Map<number, Int16Array>()
   private lastKeys: ReadonlySet<string>
+  /** The longest take, in frames (TakeRecorder.MAX_SECONDS); tests make it short. */
+  maxTakeFrames: number
   private recorder: TakeRecorder | null = null
   private lastRec: RecState = { kind: 'idle' }
   private burst = new Int16Array(0)
@@ -107,14 +136,21 @@ export class MixerHost {
       case 'start': {
         const pcm = this.samples.get(m.id)
         if (pcm === undefined || !(m.channels >= 1 && m.channels <= 2)) return
-        this.mixer.start(m.key, pcm, m.channels, m.sampleRate, m.semitones, m.tag)
+        const shape = m.shape === undefined ? VoiceShape.DEFAULT : VoiceShape.of(m.shape)
+        this.mixer.start(m.key, pcm, m.channels, m.sampleRate, m.semitones, m.tag, shape)
         return
       }
       case 'release':
         this.mixer.release(m.key)
         return
+      case 'cut':
+        this.mixer.cut(m.key)
+        return
       case 'stopAll':
         this.mixer.stopAll()
+        return
+      case 'control':
+        this.mixer.control(m.what, m.index, m.x, m.y)
         return
       case 'arm':
         if (this.recorder !== null) return
@@ -135,9 +171,6 @@ export class MixerHost {
     }
   }
 
-  /** The longest take, in frames (TakeRecorder.MAX_SECONDS); tests make it short. */
-  maxTakeFrames: number
-
   private setRec(state: RecState): void {
     const last = this.lastRec
     if (last.kind === state.kind && (state.kind !== 'recording' || (last.kind === 'recording' && last.seconds === state.seconds))) return
@@ -156,9 +189,8 @@ export class MixerHost {
       out[2 * i] = Math.trunc(left[i]! * 32768)
       out[2 * i + 1] = Math.trunc(right[i]! * 32768)
     }
-    const started = this.mixer.started
     let first: number | null = null
-    for (const s of started) if (first === null || s.frame < first) first = s.frame
+    for (const s of this.mixer.started) if (first === null || s.frame < first) first = s.frame
     const k = r.onBurst(out, frames, at, first)
     if (k !== null) this.keep(out, k.from, k.frames)
     if (k?.last === true) this.endTake(true)
@@ -195,7 +227,10 @@ export class MixerHost {
     this.setRec({ kind: 'idle' })
   }
 
-  /** Mixes [frames] frames into [left]/[right]; [time] is the context time the first one plays at. */
+  /**
+   * Mixes [frames] frames into [left]/[right]; [time] is the context time the
+   * first one plays at. A quantum allocates only when it has news to post.
+   */
   render(left: Float32Array, right: Float32Array, frames: number, time: number): void {
     const before = this.mixer.frame
     this.mixer.renderPlanar(left, right, frames)

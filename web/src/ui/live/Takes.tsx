@@ -60,7 +60,7 @@ export function RecChip(props: { rec: RecUi; still?: boolean }): JSX.Element | n
   const s = rec.state
   const cls = ['rec-chip', s.kind !== 'idle' ? 'is-on' : '', s.kind === 'armed' && !props.still ? 'is-armed' : ''].filter(Boolean).join(' ')
   return (
-    <button type="button" class={cls} aria-label={MirrorText.recDescription(s)} onClick={onRec}>
+    <button type="button" class={cls} aria-label={MirrorText.takeDescription(s)} onClick={onRec}>
       <span class="rec-chip__dot" aria-hidden="true" />
       <span class="rec-chip__label" aria-hidden="true">
         {s.kind === 'recording' ? MirrorText.takeLength(s.seconds) : MirrorText.REC.toUpperCase()}
@@ -77,7 +77,7 @@ export function TakesSection(props: { takes: TakesUi }): JSX.Element {
   return (
     <section class="takes" aria-label={MirrorText.TAKES}>
       <Caption text={MirrorText.TAKES} align="start" as="h3" />
-      {t.list.length === 0 && <p class="t-small takes__note">{MirrorText.NO_TAKES}</p>}
+      {t.list.length === 0 && <p class="t-small takes__note">{MirrorText.TAKES_HINT}</p>}
       {t.list.length > 0 && (
         <ul class="takes__list">
           {t.list.map((take) => {

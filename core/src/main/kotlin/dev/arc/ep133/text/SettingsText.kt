@@ -1,5 +1,6 @@
 package dev.arc.ep133.text
 
+import dev.arc.ep133.features.Piano
 import dev.arc.ep133.text.Format.plural
 
 /** The theme the app uses (an addition to the web version). */
@@ -21,12 +22,17 @@ object SettingsText {
     }
 
     const val DEVICE = "Device"
-    const val AUTO_CONNECT = "Connect when plugged in"
+    const val AUTO_CONNECT = "Auto-connect"
     const val AUTO_CONNECT_NOTE = "arc connects by itself when an EP-133 is plugged in."
-    const val KEEP_SCREEN_ON = "Keep the screen on in Live"
+    const val KEEP_SCREEN_ON = "Screen on in Live"
     const val KEEP_SCREEN_ON_NOTE = "The phone doesn't sleep while the Live tab is open."
     const val ON = "On"
     const val OFF = "Off"
+
+    // Each row: its name and the control on the right; an info key opens its
+    // one-line note under the row (and the long note, where there is more to say).
+    /** The info key, for screen readers; it says whether the note is open. */
+    const val MORE_INFO = "More about this"
 
     const val LIBRARY = "Library"
     const val KEEP = "Keep"
@@ -34,6 +40,8 @@ object SettingsText {
 
     /** null keeps every backup. */
     val KEEP_CHOICES: List<Int?> = listOf(null, 5, 10, 20)
+    /** The row's short note; [KEEP_NOTE] is the long one. */
+    const val KEEP_SHORT = "Older backups beyond this many are deleted."
     fun keepLabel(n: Int?) = n?.toString() ?: "All"
 
     fun pruneConfirm(n: Int) =
@@ -50,6 +58,61 @@ object SettingsText {
     const val PAD_SOUNDS_NOTE = "Live keeps a copy of the samples on your pads, so they play without the EP-133."
     const val CLEAR = "Clear"
     fun padSounds(size: String) = "$PAD_SOUNDS: $size"
+
+    // Live's choices as short rows, and what arc keeps on the phone in a group of its own.
+    const val NOTE_NAMES_SHORT = "DO is C (fixed-do), or letters."
+    const val SHOW_NAMES_SHORT = "Off: rings and octave numbers only."
+    const val PIANO_KEYS = "Piano keys"
+    const val PIANO_KEYS_SHORT = "Auto shows as many as fit."
+    const val PIANO_KEYS_NOTE = "How many keys Live's piano shows. A key is never narrower than a fingertip, so a size the window is too narrow for falls back to the largest that fits."
+    /** null is Auto; the rest are white keys (Piano.WHITES). */
+    val PIANO_CHOICES: List<Int?> = Piano.CHOICES
+    fun pianoKeys(whites: Int?) = when (whites) {
+        null -> "Auto"
+        8 -> "1 octave"
+        12 -> "1\u00BD"
+        15 -> "2"
+        22 -> "3 octaves"
+        else -> "$whites keys"
+    }
+    /** The same, spelt out for screen readers. */
+    fun pianoKeysDescription(whites: Int?) = when (whites) {
+        null -> "Auto: as many keys as fit"
+        8 -> "1 octave"
+        12 -> "1\u00BD octaves"
+        15 -> "2 octaves"
+        22 -> "3 octaves"
+        else -> "$whites white keys"
+    }
+    /** Why a piano size is greyed out. */
+    const val DOESNT_FIT = "Too wide for this window"
+    const val HAPTICS = "Haptics"
+    const val HAPTICS_NOTE = "A light tick when a pad or key goes down."
+    /** Making up for the delay of a Bluetooth or hearing-aid output (an addition). */
+    const val MAKE_UP_DELAY = "Make up for Bluetooth delay"
+    const val MAKE_UP_DELAY_NOTE = "Bluetooth plays late. With this on, the playhead follows what you hear, a pad you play along to a pattern is recorded where you heard the beat, and the click lands on the EP-133's beat. Wired headphones and the speaker are not changed."
+    /** The row's note while the sound isn't going to Bluetooth. */
+    const val DELAY_NONE = "Now: the sound isn't going to Bluetooth, so nothing is made up for."
+    /**
+     * The row's note on a Bluetooth output: the output's own [latencyMs] (what its clock counts of the delay; null when it
+     * can't be told) and [madeUpMs], the rest that arc makes up for.
+     */
+    fun delayNow(latencyMs: Int?, madeUpMs: Int) = when {
+        latencyMs == null -> "Now: not measured, counted as about $madeUpMs ms."
+        madeUpMs > 0 -> "Now: the output counts about $latencyMs ms; arc makes up the other $madeUpMs ms."
+        else -> "Now: the output counts about $latencyMs ms, all of Bluetooth's delay, so nothing more is made up."
+    }
+    /** SAMPLE's review sheet after each take (an addition: the EP-133 puts a take straight on its pad). */
+    const val REVIEW_SAMPLES = "Review samples"
+    const val REVIEW_SAMPLES_NOTE = "After each recording, trim and hear it before it goes on the pad. Off, it goes straight on, as on the EP-133."
+
+    const val SAVED_HERE = "Saved on the phone"
+    const val LEARNED_NAMES = "Learned sample names"
+    const val LEARNED_NAMES_SHORT = "They come back as you press pads in Live."
+    const val PAD_SOUNDS_SHORT = "Pad sounds"
+    /** "Pad sounds \u00B7 69 KB". */
+    fun padSoundsShort(size: String) = "$PAD_SOUNDS_SHORT \u00B7 $size"
+    const val PAD_SOUNDS_SHORT_NOTE = "Copies of your pad samples, to play without the EP-133."
 
     const val ABOUT = "About"
     fun version(v: String) = "arc $v"

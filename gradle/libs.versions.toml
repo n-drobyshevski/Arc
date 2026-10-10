@@ -12,6 +12,8 @@ activityCompose = "1.13.0"
 lifecycle = "2.11.0"
 room = "2.8.5"
 junit = "6.1.3"
+# Google's low-latency audio library (AAudio), a prefab AAR for Live's native output.
+oboe = "1.11.0"
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
@@ -34,6 +36,7 @@ room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
 junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+oboe = { module = "com.google.oboe:oboe", version.ref = "oboe" }
 
 screenshot-validation-api = { module = "com.android.tools.screenshot:screenshot-validation-api", version.ref = "screenshot" }
 

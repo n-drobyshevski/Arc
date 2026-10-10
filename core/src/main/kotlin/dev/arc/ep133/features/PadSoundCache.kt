@@ -97,6 +97,10 @@ class PadSoundCache(private val dir: File, private val capBytes: Long = 256L * 1
         save()
     }
 
+    /** The name each copy was read with, by slot: which device sounds Live can play without the device. */
+    @Synchronized
+    fun copies(): Map<Int, String> = entries().mapValues { it.value.name }
+
     /** Space used, in bytes. */
     @Synchronized
     fun bytes(): Long = entries().keys.sumOf { file(it).length() }

@@ -346,10 +346,13 @@ describe('Nav', () => {
     nav.start()
     let modal = true
     nav.setBackGuard(() => modal)
+    // Esc asks first (useAppKeys): no Back while the guard is up.
+    expect(nav.canBack()).toBe(false)
     await w.back()
     expect(stackKeys(nav)).toEqual(['tab:live', 'screen:#/settings'])
     expect(w.location.hash).toBe('#/settings')
     modal = false
+    expect(nav.canBack()).toBe(true)
     await w.back()
     expect(stackKeys(nav)).toEqual(['tab:live'])
   })

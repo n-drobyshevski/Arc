@@ -1,4 +1,15 @@
-/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/MirrorScreen.kt */
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/MirrorScreen.kt
+ * The pads, the KEYS keys and the group keys are hardware caps
+ * (theme/cap.css) sitting in the device's body (Deck).
+ *
+ * Web only, from 1024px wide (the desk, see the end): the K.O. II panel sized
+ * by the room with container units, its group keys a column on the left; the
+ * all-groups row (live/desk.ts holds its numbers too); the tools docked (in
+ * PADS, with the TOOLS / SOUNDS tabs) and EDIT's tab on the panel's side.
+ *
+ * Web only, the piano page (.live-piano): its paddings, the display line, the
+ * row and the legend are live/keyboard.ts's numbers (the piano's room): change
+ * both together. The view switch, − / + and the EDIT pad marks are here too. */
 
 /* Box(fillMaxSize, shell): the side zone fills the section's page. */
 .live {
@@ -109,6 +120,20 @@
   -webkit-tap-highlight-color: transparent;
 }
 .live-display__fold:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+/* Never read: the factory sounds to get, a link in the display's ink. */
+.live-display__get {
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--display-ink);
+  text-align: start;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.live-display__get:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
 /* AnimatedVisibility(expandVertically + fadeIn). */
 .live-display__note { animation: live-note-in 220ms ease-out; }
 @keyframes live-note-in {
@@ -153,6 +178,15 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* In the top bar (a phone on its side, LivePill): one bar tall (44), radius 12, a little
+ * tighter. The note takes at most half the line, so a long one ("DO6, above the keys")
+ * never squeezes out the sound. */
+.live-strip--bar {
+  min-height: 44px;
+  padding: var(--space-4) var(--space-12);
+  border-radius: 12px;
+}
+.live-strip--bar .live-strip__note { max-width: 50%; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---------- a group of pads ---------- */
 
@@ -172,43 +206,94 @@
 .live-group__caption {
   --live-caption: color-mix(in oklab, var(--signal) var(--glow-pct), var(--graphite));
 }
+/* Web: the group the computer keyboard's pad keys play, all groups shown. */
+.live-group__caption[data-target] .caption {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
+}
 
-.live-group--big .live-group__plate { flex: 1 1 0; min-height: 0; }
+/* The deck: the device's body around the caps. Its padding leaves room on the
+ * right and below for the caps' edges. 10 between caps (6 in the small grids). */
+.live-deck {
+  --deck-gap: 10px;
+  --deck-pad: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--deck-gap);
+  padding: var(--deck-pad) calc(var(--deck-pad) + var(--cap-dx)) calc(var(--deck-pad) + var(--cap-dy)) var(--deck-pad);
+  border-radius: var(--radius-plate);
+  background: var(--ko-body);
+}
+.live-group:not(.live-group--big) .live-deck {
+  --deck-gap: 6px;
+  --deck-pad: 8px;
+  border-radius: var(--radius-strip);
+}
+.live-group--big .live-deck { flex: 1 1 0; min-height: 0; }
 
-.live-group__row {
+.live-deck__row {
   display: flex;
   align-items: stretch;
+  gap: var(--deck-gap);
 }
-.live-group--big .live-group__row { flex: 1 1 0; min-height: 0; }
-
-.live-group__divider {
-  flex: none;
-  width: 1px;
-  background: var(--line);
-}
+.live-group--big .live-deck__row { flex: 1 1 0; min-height: 0; }
 
 /* ---------- a pad ---------- */
 
+/* A dark cap in the K.O. II's own colours (the Guide's, the same in both themes):
+ * lerp(dark face, signal, glow), its edge with it, and a light around it while lit. */
 .live-pad {
-  position: relative;
+  --cap-face: color-mix(in oklab, var(--signal) var(--glow-pct), var(--ko-dark-face));
+  --cap-edge: color-mix(in oklab, var(--signal-edge) var(--glow-pct), var(--ko-dark-edge));
+  --cap-glow: color-mix(in oklab, var(--signal) calc(var(--glow-pct) * 0.6), transparent);
+  --cap-glow-blur: calc(var(--glow, 0) * 18px);
+  /* The label on top, the sample at the bottom: stacked, so on a small pad the
+   * name shortens rather than running into the label. */
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   flex: 1 1 0;
   min-width: 0;
   aspect-ratio: 1;
   padding: 5px 7px 5px 6px;
-  background: color-mix(in oklab, var(--signal) var(--glow-pct), var(--plate));
+  border-radius: 6px;
   overflow: hidden;
 }
 .live-pad--big {
   aspect-ratio: auto;
   padding: var(--space-10);
+  border-radius: var(--radius-key);
 }
 
-/* The sample: tiny 10sp (14 on the big grid), line height 1.1em, two lines (three). */
+/* The key's label, top left as on the K.O. II: semi 15sp (10 for ENTER), 28 / 15 on the big grid. */
+.live-pad__label {
+  flex: none;
+  padding-block: var(--trim-1);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--hw-dark-ink));
+}
+.live-pad__label--wide { font-size: 10px; }
+/* The dot key's dot, about a fifth of the digits' height, where a digit's foot would be. */
+.live-pad__dot {
+  display: inline-block;
+  width: 0.24em;
+  height: 0.24em;
+  margin: 0.5em 0.1em 0.06em;
+  border-radius: 50%;
+  background: currentColor;
+}
+.live-pad--big .live-pad__label { font-size: 28px; }
+.live-pad--big .live-pad__label--wide { font-size: 15px; }
+
+/* The sample, bottom left: tiny 10sp (14 on the big grid), line height 1.1em, two lines (three). */
 .live-pad__name {
-  position: absolute;
-  top: 5px;
-  left: 6px;
-  right: 7px;
+  margin-top: auto;
+  min-height: 0;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -218,38 +303,18 @@
   font-weight: 500;
   line-height: 1.1;
   overflow-wrap: anywhere;
-  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--graphite));
+  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--hw-dark-dim));
 }
 .live-pad--big .live-pad__name {
-  top: var(--space-10);
-  left: var(--space-10);
-  right: var(--space-10);
   -webkit-line-clamp: 3;
   font-size: 14px;
 }
-
-/* The key's label, bottom end: semi 15sp (10 for ENTER), 28 / 15 on the big grid. */
-.live-pad__label {
-  position: absolute;
-  right: 7px;
-  bottom: 5px;
-  padding-block: var(--trim-1);
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 1;
-  letter-spacing: 0.04em;
-  white-space: nowrap;
-  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--ink));
-}
-.live-pad__label--wide { font-size: 10px; }
 
 /* A pad that plays while held: a real button, no browser chrome, no long-press menu or selection.
  * The big grid takes every touch (it never scrolls); the all-groups page lets a vertical drag scroll. */
 .live-pad--press,
 .live-key {
-  display: block;
   border: 0;
-  border-radius: 0;
   margin: 0;
   font: inherit;
   text-align: start;
@@ -271,14 +336,9 @@
   position: absolute;
   inset: 0;
   border: 2px solid var(--signal);
+  border-radius: inherit;
   pointer-events: none;
 }
-.live-pad--big .live-pad__label {
-  right: var(--space-10);
-  bottom: var(--space-10);
-  font-size: 28px;
-}
-.live-pad--big .live-pad__label--wide { font-size: 15px; }
 
 /* ---------- the mode row (PADS / KEYS, scale, octave) ---------- */
 
@@ -299,51 +359,63 @@
   display: flex;
   flex-direction: column;
 }
-.live-kgrid__plate { flex: 1 1 0; min-height: 0; }
-.live-kgrid .live-group__row { flex: 1 1 0; min-height: 0; }
-
-/* A key: lerp(plate, signal, glow); its ring navy (orange an octave up), onSignal when lit. */
-.live-key {
-  --key-ring: var(--navy);
-  position: relative;
-  display: flex;
+/* Upright, the body in the middle of the room left for it (live-deck--ko). */
+.live__one > .live-kgrid {
+  container-type: size;
   align-items: center;
   justify-content: center;
-  flex: 1 1 0;
-  min-width: 0;
-  padding: 0;
-  background: color-mix(in oklab, var(--signal) var(--glow-pct), var(--plate));
+}
+
+/* A key: a dark cap in the K.O. II's colours, lerp(dark face, signal, glow); its name (or ring)
+ * where a pad prints its digit, pale (orange an octave up), onSignal when lit. */
+.live-key {
+  --key-ring: var(--hw-ring);
+  --cap-face: color-mix(in oklab, var(--signal) var(--glow-pct), var(--ko-dark-face));
+  --cap-edge: color-mix(in oklab, var(--signal-edge) var(--glow-pct), var(--ko-dark-edge));
+  --cap-glow: color-mix(in oklab, var(--signal) calc(var(--glow-pct) * 0.6), transparent);
+  --cap-glow-blur: calc(var(--glow, 0) * 18px);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  flex: none;
+  width: var(--u);
+  height: var(--kd-h);
+  padding: calc(var(--u) * 0.06) calc(var(--u) * 0.1);
+  border-radius: max(6px, calc(var(--u) * 0.092));
   overflow: hidden;
 }
 .live-key--upper { --key-ring: var(--signal); }
-/* Canvas(fillMaxSize.padding(8)): a circle of the smaller side, stroke 9% of it. */
+/* A ring the digit's height, its stroke 14% of it. */
 .live-key__ring {
-  position: absolute;
-  inset: var(--space-8);
-  width: calc(100% - 2 * var(--space-8));
-  height: calc(100% - 2 * var(--space-8));
+  flex: none;
+  width: calc(clamp(15px, calc(var(--u) * 0.277), 34px) * 0.8);
+  height: calc(clamp(15px, calc(var(--u) * 0.277), 34px) * 0.8);
+  margin-top: calc(clamp(15px, calc(var(--u) * 0.277), 34px) * 0.12);
   stroke: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--key-ring));
+  /* The stroke reaches the viewBox's edge: don't shave it. */
+  overflow: visible;
   pointer-events: none;
 }
-/* semi 22sp, 0.02em. */
+.live-key__ring circle { stroke-width: 14px; r: 43px; }
+/* The name as a pad's digit: plain, a little over a quarter of the key's width. */
 .live-key__name {
-  position: relative;
-  font-size: 22px;
-  font-weight: 600;
-  line-height: 1.5;
+  padding-block: var(--trim-1);
+  font-size: clamp(15px, calc(var(--u) * 0.277), 34px);
+  font-weight: 500;
+  line-height: 1;
   letter-spacing: 0.02em;
   white-space: nowrap;
-  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--ink));
+  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--hw-dark-ink));
 }
-/* The octave number, bottom end (tiny 11sp, 6 / 4 in). */
+/* An octave up, the name is orange, as the ring would be. */
+.live-key--upper .live-key__name { color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--signal)); }
+/* The octave number where a pad shows its sample, bottom left. */
 .live-key__octave {
-  position: absolute;
-  right: var(--space-6);
-  bottom: var(--space-4);
-  font-size: 11px;
+  margin-top: auto;
+  font-size: clamp(10px, calc(var(--u) * 0.13), 14px);
   font-weight: 500;
-  line-height: 1.5;
-  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--graphite));
+  line-height: 1.1;
+  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--hw-dark-dim));
 }
 
 /* ---------- the group keys ---------- */
@@ -352,47 +424,317 @@
   display: flex;
   gap: var(--space-8);
 }
-/* navy for the group shown, else lerp(tabOff, signal, sounding); ArcType.tab at 22sp. */
-.live-keys__key {
+/* An LED over a pale cap, as on the K.O. II. The group shown: the cap stays
+ * down and its LED is lit; a sounding group tints both toward signal. */
+.live-keys__slot {
   display: flex;
-  align-items: center;
-  justify-content: center;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--space-6);
   flex: 1 1 0;
   min-width: 0;
+}
+.live-keys__led {
+  align-self: center;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--hw-led-on) var(--glow-pct), var(--hw-led-off));
+}
+.live-keys__slot.is-on .live-keys__led {
+  background: var(--hw-led-on);
+  box-shadow: 0 0 6px var(--hw-led-on);
+}
+/* lerp(pale face, signal, sounding), in the K.O. II's colours: its letter in the top left
+ * corner and its function's glyph under it, as printed on the device. */
+.live-keys__key {
+  --cap-face: color-mix(in oklab, var(--signal) var(--glow-pct), var(--ko-light-face));
+  --cap-edge: color-mix(in oklab, var(--signal-edge) var(--glow-pct), var(--ko-light-edge));
+  --cap-ink: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--ko-light-ink));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  min-width: 0;
   min-height: 52px;
+  padding: 5px 8px 7px;
+  border: 0;
   border-radius: var(--radius-field);
-  background: color-mix(in oklab, var(--signal) var(--glow-pct), var(--tab-off));
-  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--on-tab-off));
-  font-size: 22px;
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: var(--track-tab);
-  text-transform: uppercase;
   user-select: none;
   -webkit-user-select: none;
 }
+.live-keys__letter {
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 1;
+}
+.live-keys__glyph {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-opacity: 0.8;
+}
 .live-keys__key.is-on {
-  background: var(--navy);
-  color: var(--on-navy);
+  --cap-ink: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--ko-dark-face));
 }
 
-/* ---------- the tools panel ---------- */
+/* The group keys as a column on the K.O. II's body (the desk, a phone on its side; sized below,
+ * with the deck). */
+.live-keys--vertical { flex-direction: column; }
 
-.live-tools__view { align-self: flex-start; }
+/* A phone on its side (Android's sideways grid): the K.O. II's body as big as the room, the
+ * group keys a column left of the pads (live-deck--ko below). */
+.live__one--side { max-width: var(--wide-max); }
+.live__one--side > .live__side {
+  flex: 1 1 0;
+  min-height: 0;
+  container-type: size;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.live__side {
+  --side-tools: 44px;
+  gap: var(--space-12);
+}
+/* The mode word turned a quarter turn as the edge tabs' words are, in a narrow column left of
+ * the body, in the middle of its height (Android's SidewaysPadsControls). */
+.live__side-tools {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--side-tools);
+  align-self: stretch;
+}
+.live__side-tools .live-mode {
+  flex: none;
+  margin-top: 0;
+  padding: 0;
+}
+/* The word read from the bottom up, as the edge tabs' are, its mark turned with it (and on the
+ * right, the scale and the octave words; their lists stay level). */
+.live__side-tools .word,
+.live__side-end .pick > .word {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  min-height: 0;
+  min-width: 44px;
+  padding: 0 6px;
+  justify-content: center;
+}
+.live__side-tools .word svg { transform: rotate(90deg); }
 
-.live-tools__note { margin: 0; color: var(--graphite); }
+/* KEYS' grid on its side: the turned word over the view switch on the left, the scale and the
+ * octave on the right, both in the middle of the keys' height; the body as big as what's left. */
+.live__side--keys {
+  --side-tools: 44px;
+  --side-end: 44px;
+}
+.live-mode--lead {
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-16);
+}
+.live__side-end {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--side-end);
+  align-self: stretch;
+}
+.live-mode--picks {
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-16);
+  margin-top: 0;
+  padding: 0;
+}
+.live__side--keys > .live-kgrid { flex: none !important; }
+.live__one--side > .live__side--keys > .live-kgrid > .live-deck--ko {
+  --u: clamp(0px, min((100cqw - var(--side-tools) - var(--side-end) - 2 * var(--space-12) - var(--cap-dx) - 2px) / 4.046, (100cqh - var(--cap-dy) - 2px) / 5.72), 170px);
+}
+.live__side > .ko-body {
+  --ko-cols: 4;
+  /* As .ko-body's, less the column on the left and its gap. */
+  --u: clamp(0px, min((100cqw - var(--side-tools) - var(--space-12) - var(--cap-dx) - 2px) / (var(--ko-cols) * 1.215 + 0.401), (100cqh - var(--cap-dy) - 2px) / 5.72), 170px);
+  display: flex;
+  gap: var(--kd-gx);
+}
+.live__side .live-group--big { flex: none !important; }
 
-.live-tools__keys {
+/* ---------- the K.O. II deck (the big grid) ----------
+ * Drawn as the Guide draws the device (components/KoPanel, a 560-wide K.O. II whose pad
+ * column is 64.9 wide): every length a share of --u, one pad's width. A pad is 1.08 times
+ * as wide as high; over each row of pads, a line of the words printed on the body, each
+ * after its LED (unlit: they mark the device's knob pages, not the pads); the body's edge
+ * offset down and right like a cap's. --u is as big as the room lets the body be (a size
+ * container around it), at most 170. */
+@property --u {
+  syntax: '<length>';
+  inherits: true;
+  initial-value: 0px;
+}
+.live-deck--ko,
+.ko-body,
+.live-ko {
+  --kd-line: calc(var(--u) * 0.215);
+  --kd-gy: calc(var(--u) * 0.077);
+  --kd-gx: calc(var(--u) * 0.215);
+  --kd-h: calc(var(--u) / 1.08);
+}
+/* The body: its padding, corners and edge, and (from --ko-cols columns of pads and groups) how
+ * big a pad can be: wide, 2 x 0.277 + the gaps + the edge; high, 0.215 + four rows of
+ * (0.215 + 0.077 + 0.926) + three gaps + 0.31 + the edge. */
+.ko-body,
+.live__one > .live-group--big > .live-deck--ko,
+.live__one > .live-kgrid > .live-deck--ko,
+.live__side--keys > .live-kgrid > .live-deck--ko {
+  --ko-cols: 3;
+  --u: clamp(0px, min((100cqw - var(--cap-dx) - 2px) / (var(--ko-cols) * 1.215 + 0.401), (100cqh - var(--cap-dy) - 2px) / 5.72), 170px);
+  flex: none;
+  padding: calc(var(--u) * 0.215) calc(var(--u) * 0.277 + var(--cap-dx)) calc(var(--u) * 0.31 + var(--cap-dy)) calc(var(--u) * 0.277);
+  border-radius: calc(var(--u) * 0.277);
+  background: var(--ko-body);
+  box-shadow: calc(var(--u) * 0.062) calc(var(--u) * 0.092) 0 var(--ko-edge);
+}
+/* Upright, the grid alone is the body, in the middle of the room left for it. */
+.live__one > .live-group--big {
+  container-type: size;
+  align-items: center;
+  justify-content: center;
+}
+.live-deck--ko {
+  gap: var(--kd-gy);
+}
+.live-deck--ko .live-deck__row { min-height: 0; }
+.live__side .live-deck--ko,
+.live-ko .live-deck--ko {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+.live-group--big .live-deck--ko,
+.live-kgrid .live-deck--ko { flex: none; }
+.live-deck--ko .live-deck__row {
+  flex: none;
+  gap: var(--kd-gx);
+  height: var(--kd-h);
+}
+.live-deck--ko .live-pad--big {
+  flex: none;
+  width: var(--u);
+  height: var(--kd-h);
+  padding: calc(var(--u) * 0.06) calc(var(--u) * 0.1);
+  border-radius: max(6px, calc(var(--u) * 0.092));
+}
+/* The digit as the device prints it: plain, a little over a quarter of the pad's width. */
+.live-deck--ko .live-pad__label { font-size: clamp(15px, calc(var(--u) * 0.277), 34px); font-weight: 500; }
+.live-deck--ko .live-pad__label--wide { font-size: clamp(10px, calc(var(--u) * 0.15), 15px); font-weight: 600; }
+.live-deck--ko .live-pad__name { font-size: clamp(10px, calc(var(--u) * 0.13), 14px); }
+
+/* The printed line: each pad column's word after its LED, the LED a fifth of the way in. */
+.live-deck__print {
+  display: flex;
+  gap: var(--kd-gx);
+  height: var(--kd-line);
+}
+.live-deck__word {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--u) * 0.12);
+  width: var(--u);
+  padding-inline-start: calc(var(--u) * 0.2);
+  overflow: hidden;
+  white-space: nowrap;
+  font-size: clamp(7px, calc(var(--u) * 0.135), 11px);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ko-label);
+}
+.ko-led {
+  flex: none;
+  width: clamp(5px, calc(var(--u) * 0.085), 7px);
+  height: clamp(5px, calc(var(--u) * 0.085), 7px);
+  border-radius: 50%;
+  background: var(--ko-led-off);
+}
+
+/* The group keys on the body (a phone on its side, the desk): a pad-sized column, each LED on
+ * the printed line and its key a pad row high, so they line up with the pads. */
+.ko-body .live-keys--vertical,
+.live-ko .live-keys--vertical {
+  flex: none;
+  gap: var(--kd-gy);
+  width: var(--u);
+  padding-bottom: 0;
+}
+.ko-body .live-keys--vertical .live-keys__slot,
+.live-ko .live-keys--vertical .live-keys__slot {
+  flex: none;
+  gap: var(--kd-gy);
+}
+.ko-body .live-keys__led,
+.live-ko .live-keys__led {
+  align-self: flex-start;
+  width: clamp(5px, calc(var(--u) * 0.085), 7px);
+  height: clamp(5px, calc(var(--u) * 0.085), 7px);
+  margin-block: calc((var(--kd-line) - clamp(5px, calc(var(--u) * 0.085), 7px)) / 2);
+  margin-inline-start: calc(var(--u) * 0.2);
+}
+.ko-body .live-keys--vertical .live-keys__key,
+.live-ko .live-keys--vertical .live-keys__key {
+  flex: none;
+  height: var(--kd-h);
+  min-height: 0;
+  padding: calc(var(--u) * 0.06) calc(var(--u) * 0.1) calc(var(--u) * 0.16);
+  border-radius: max(6px, calc(var(--u) * 0.092));
+}
+.ko-body .live-keys__letter,
+.live-ko .live-keys__letter { font-size: clamp(15px, calc(var(--u) * 0.277), 34px); }
+.ko-body .live-keys__glyph,
+.live-ko .live-keys__glyph {
+  width: clamp(10px, calc(var(--u) * 0.185), 18px);
+  height: clamp(10px, calc(var(--u) * 0.185), 18px);
+}
+
+/* ---------- the tools panel (the Step 1c rows, components/SettingRow.css) ---------- */
+
+/* The last note: a small dark display, "KEYS · F5" and the channel over the strip. */
+.live-tools__last {
   display: flex;
   flex-direction: column;
-  gap: var(--space-6);
+  gap: var(--space-10);
+  padding: var(--space-10) var(--space-12) var(--space-12);
+  border-radius: var(--radius-small-plate);
+  background: var(--display);
+  color: var(--display-ink);
 }
+.live-tools__last-line {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-8);
+  margin: 0;
+  font-size: var(--size-display-sub);
+  font-weight: var(--weight-semi);
+  letter-spacing: var(--track-word);
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+.live-tools__last-ch { color: var(--display-dim); text-transform: none; }
 
 /* Two octaves: white keys 1px in from each side, radius 3; black keys 0.6 high, radius 2. */
 .keys-strip {
   position: relative;
   width: 100%;
-  height: 56px;
+  height: 54px;
 }
 .keys-strip__key {
   position: absolute;
@@ -412,17 +754,58 @@
 }
 .keys-strip__key.is-on { background: var(--signal); }
 
-.live-tools__notes {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-8);
-}
-.live-tools__order-caption { margin-top: var(--space-8); }
-.live-tools__orders {
-  display: flex;
+/* A tools card that isn't a list of rows (the key picker, the colours). */
+.live-tools__card {
   gap: var(--space-10);
+  padding: var(--space-14) var(--space-16) var(--space-16);
 }
-.live-tools__orders > .key { flex: 1 1 0; min-width: 0; }
+.live-tools__card > * + * { border-top: 0; }
+.live-tools__title {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--size-body15);
+  font-weight: var(--weight-semi);
+  line-height: 1.4;
+}
+.live-tools__hint {
+  margin-inline-start: var(--space-6);
+  color: var(--graphite);
+  font-size: var(--size-tiny);
+  font-weight: var(--weight-regular);
+}
+/* A short note among the tools (no piano upright, what clock out is for). */
+.live-tools__note { margin: 0; color: var(--graphite); }
+
+/* The colours as chips: a 12 square swatch and the words, pale pills that wrap. */
+.live-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.live-chips__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: var(--space-6) var(--space-10);
+  border-radius: 999px;
+  background: var(--shell);
+  color: var(--graphite);
+  font-size: var(--size-tiny);
+  line-height: 1.3;
+}
+.live-chips__swatch {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+.live-chips__swatch--device { background: var(--signal); }
+.live-chips__swatch--here { box-shadow: inset 0 0 0 2px var(--signal); }
+.live-chips__swatch--root { height: 3px; border-radius: 1px; background: var(--signal); }
+.live-chips__swatch--out { background: var(--key-out); }
 
 /* ---------- the KEYS tools ---------- */
 
@@ -456,184 +839,453 @@
   border-radius: 4px;
 }
 .live-legend__key svg { display: block; width: 100%; height: 100%; }
-.live-legend__key--outline { box-shadow: inset 0 0 0 2px var(--signal); }
-
-/* REC sits before the display's live text, which screen readers follow on its own. */
-.live-strip__live {
-  flex: 1 1 0;
-  min-width: 0;
+/* A named key in miniature: its name, 9px semibold, centred. */
+.live-legend__name {
   display: flex;
   align-items: center;
-  gap: var(--space-10);
-}
-/* The big line with REC after it when the transport fills the top line. */
-.live-display__lineRow {
-  display: flex;
-  align-items: center;
-  gap: var(--space-12);
-}
-.live-display__lineRow > .live-display__line { flex: 1 1 0; min-width: 0; }
-
-/* ---------- the K.O. II's look (web only for now) ----------
- * The pads are the device's black keys on its grey body, with gaps between
- * them; the number sits top-left in a light weight, the sample bottom-left.
- * A lit pad still turns signal orange with the glow. The KEYS keys match.
- * The group keys are the device's light A–D keys, each with its icon and an
- * LED that lights for the group shown and glows while the group sounds. */
-
-.live .live-group__plate,
-.live .live-kgrid__plate {
-  gap: 6px;
-  padding: 6px;
-  background: var(--dev-body);
-}
-.live .live-group--big .live-group__plate,
-.live .live-kgrid__plate {
-  gap: var(--space-10);
-  padding: var(--space-10);
-}
-.live .live-group__plate > .plate-line,
-.live .live-kgrid__plate > .plate-line,
-.live .live-group__divider { display: none; }
-.live .live-group__row { gap: 6px; }
-.live .live-group--big .live-group__row,
-.live .live-kgrid .live-group__row { gap: var(--space-10); }
-
-.live .live-pad,
-.live .live-key {
-  border-radius: 6px;
-  background: color-mix(in oklab, var(--signal) var(--glow-pct), var(--dev-pad));
-  box-shadow: 0 3px 0 color-mix(in oklab, var(--dev-signal-edge) var(--glow-pct), var(--dev-pad-edge));
-}
-.live .live-pad--big,
-.live .live-kgrid .live-key { border-radius: 10px; box-shadow: 0 4px 0 color-mix(in oklab, var(--dev-signal-edge) var(--glow-pct), var(--dev-pad-edge)); }
-.live .live-pad.is-playing::after,
-.live .live-key.is-playing::after { border-radius: inherit; }
-
-.live .live-pad__label {
-  left: 6px;
-  right: auto;
-  top: 3px;
-  bottom: auto;
-  font-weight: 300;
-  letter-spacing: 0;
-  color: var(--dev-pad-ink);
-}
-.live .live-pad__label--wide { top: 6px; font-weight: 500; letter-spacing: 0.04em; }
-.live .live-pad__name {
-  top: auto;
-  bottom: 5px;
-  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--dev-pad-dim));
-}
-.live .live-pad--big .live-pad__label {
-  left: var(--space-12);
-  top: var(--space-6);
-  font-size: 34px;
-}
-.live .live-pad--big .live-pad__label--wide { top: var(--space-12); font-size: 15px; }
-.live .live-pad--big .live-pad__name { bottom: var(--space-10); }
-
-.live .live-key { --key-ring: var(--dev-pad-ring); }
-.live .live-key--upper { --key-ring: var(--signal); }
-.live .live-key__name { color: var(--dev-pad-ink); }
-.live .live-key__octave { color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--dev-pad-dim)); }
-
-/* The group keys and RECORD, on a strip of the body. */
-.live-keyrow {
-  display: flex;
-  gap: var(--space-10);
-  padding: var(--space-10) var(--space-10) var(--space-12);
-  border-radius: var(--radius-strip);
-  background: var(--dev-body);
-}
-.live-keyrow > .live-keys { flex: 4 1 0; min-width: 0; gap: var(--space-10); }
-.live .live-keys__key {
-  position: relative;
-  min-height: 54px;
-  border-radius: 9px;
-  background: linear-gradient(180deg, var(--dev-light), var(--dev-light-low));
-  box-shadow: 0 4px 0 var(--dev-light-edge);
-  color: var(--dev-light-ink);
-  font-weight: 300;
-  transition: transform 60ms, box-shadow 60ms;
-}
-.live .live-keys__key:active { transform: translateY(3px); box-shadow: 0 1px 0 var(--dev-light-edge); }
-.live .live-keys__key.is-on { background: linear-gradient(180deg, var(--dev-light), var(--dev-light-low)); color: var(--dev-light-ink); }
-.live-keys__letter { position: absolute; left: 8px; top: 3px; font-size: 22px; line-height: 1.1; }
-.live-keys__icon { position: absolute; left: 0; right: 0; bottom: 6px; text-align: center; font-size: 15px; line-height: 1; }
-/* The LED: lit for the group shown, glowing with the group's sound. */
-.live-keys__key::after {
-  content: '';
-  position: absolute;
-  right: 7px;
-  top: 7px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: color-mix(in oklab, var(--dev-led) var(--glow-pct), var(--dev-led-off));
-}
-.live-keys__key.is-on::after { background: var(--dev-led); box-shadow: 0 0 8px 2px rgb(255 60 0 / 0.6); }
-
-/* RECORD: the device's orange key, its dot white; armed it blinks, recording it is ringed. */
-.live-rec {
-  flex: 1 1 0;
-  min-width: 0;
-  min-height: 54px;
-  display: grid;
-  place-items: center;
-  border: 0;
-  border-radius: 9px;
-  background: linear-gradient(180deg, #FF6220, #F04700);
-  box-shadow: 0 4px 0 var(--dev-signal-edge);
-  cursor: pointer;
-  transition: transform 60ms, box-shadow 60ms;
-}
-.live-rec:active { transform: translateY(3px); box-shadow: 0 1px 0 var(--dev-signal-edge); }
-.live-rec:focus-visible { outline: 3px solid var(--navy); outline-offset: 2px; }
-.live-rec__dot { width: 16px; height: 16px; border-radius: 50%; background: #FFFFFF; }
-.live-rec.is-on { box-shadow: 0 4px 0 var(--dev-signal-edge), 0 0 0 3px #FFFFFF; }
-.live-rec.is-armed .live-rec__dot { animation: rec-blink 450ms ease-in-out infinite alternate; }
-@media (prefers-reduced-motion: reduce) {
-  .live-rec.is-armed .live-rec__dot { animation: none; }
-}
-
-/* The device view: the drawing takes the height left, centred. */
-.live__device {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: var(--space-10);
+  justify-content: center;
   width: 100%;
   height: 100%;
-  margin: 0 auto;
-  padding: var(--space-8) calc(var(--side-strip-width) + var(--space-8)) var(--space-16) var(--gutter-start);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
 }
-.live__device > .live-mode { flex: none; max-width: var(--one-group-max); width: 100%; align-self: center; }
+.live-legend__key--outline { box-shadow: inset 0 0 0 2px var(--signal); }
 
-/* Docked tools (web only, 1200 px and wider): the device, then the tools in a column of their own. */
-.live--docked {
+/* ---------- EDIT (giving a pad another sound) ---------- */
+
+/* The display line while EDIT is on: signal orange, EDIT and what a tap does. */
+.live-strip--edit { background: var(--signal); }
+.live-strip--edit .live-strip__sub { color: color-mix(in oklab, var(--on-signal) 82%, var(--signal)); }
+.live-strip--edit .live-strip__line {
+  color: var(--on-signal);
+  text-align: start;
+  white-space: normal;
+}
+
+/* A pad in EDIT: a signal outline inside it and a ⇄ badge top right. */
+.live-pad.is-editing::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 2px solid color-mix(in oklab, var(--signal) 75%, transparent);
+  border-radius: inherit;
+  pointer-events: none;
+}
+.live-pad__swap {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  background: var(--signal);
+  color: var(--on-signal);
+  font-size: 11px;
+  line-height: 1;
+}
+.live-pad--big .live-pad__swap {
+  top: 8px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  font-size: 15px;
+}
+
+/* The desk: the pad a sound or file is dragged over, a dashed signal outline, DROP top right. */
+.live-pad.is-drop {
+  --cap-face: color-mix(in oklab, var(--hw-dark-face) 80%, var(--signal));
+  outline: 3px dashed var(--signal);
+  outline-offset: 3px;
+  overflow: visible;
+}
+.live-pad.is-drop .live-pad__name { color: var(--hw-dark-ink); }
+.live-pad__drop {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: var(--signal);
+  color: var(--on-signal);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.2;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* ---------- the KEYS view switch and the row over the piano ---------- */
+
+/* The mode word with the view switch right after it. */
+.live-mode__lead {
   display: flex;
-  align-items: stretch;
+  align-items: flex-start;
+  gap: var(--space-12);
 }
-.live--docked .live__main {
-  flex: 1 1 auto;
-  min-width: 0;
-  height: 100%;
-  overflow: hidden;
-}
-.live--docked .live__device { padding-right: var(--space-16); }
-.live-dock {
+
+/* The view words, printed as on the K.O. II's body: each after its LED, the view shown lit and in
+ * ink, the other grey. 44 high to touch. On the desk's body, the body's own label ink. */
+.live-view {
+  --view-on: var(--ink);
+  --view-off: var(--graphite);
   flex: none;
-  width: 340px;
+  display: inline-flex;
+  gap: var(--space-4);
+}
+.live-ko .live-view { --view-on: var(--ko-label); --view-off: color-mix(in oklab, var(--ko-label) 55%, var(--ko-body)); }
+.live-view--vertical {
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-8);
+}
+/* Turned as the mode word over them is: read from the bottom up, the LED first. */
+.live-view--vertical .live-view__word {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  min-height: 0;
+  min-width: 44px;
+  padding: var(--space-2) 0;
+  justify-content: center;
+}
+.live-view__word {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 44px;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--view-off);
+  cursor: pointer;
+}
+.live-view__word.is-on { color: var(--view-on); }
+.live-view__led {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--hw-led-off);
+}
+.live-view__word.is-on .live-view__led {
+  background: var(--hw-led-on);
+  box-shadow: 0 0 6px var(--hw-led-on);
+}
+.live-view__word:disabled { opacity: 0.45; cursor: default; }
+.live-view__word:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
+
+/* Over the piano (Android's SidewaysRow): mode, switch, scale and key at the start, − OCT + at the end. */
+.live-mode.live-mode--sideways {
+  justify-content: flex-start;
+  gap: var(--space-24);
+  min-height: 44px;
+  margin-top: 0;
+}
+.live-mode--sideways > .live-view { align-self: center; margin-inline-start: calc(var(--space-12) - var(--space-24)); }
+.live-mode__gap { flex: 1 1 0; min-width: 0; margin-inline-start: calc(-1 * var(--space-24)); }
+.live-mode--sideways > .live-step + .pick,
+.live-mode--sideways > .pick + .live-step { margin-inline-start: calc(-1 * var(--space-24)); }
+
+/* − and + by the octave word: 48 wide however tight the row, greyed at either end. */
+.live-step {
+  flex: none;
+  display: grid;
+  place-items: center;
+  min-width: 48px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--graphite);
+  font: inherit;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.live-step:disabled { color: color-mix(in srgb, var(--graphite) 45%, transparent); cursor: default; }
+.live-step:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+
+/* ---------- the piano (KEYS on a wide window) ---------- */
+
+/* The page: the display line, the row, the keys (their height set by the room, --piano-h). */
+.live-piano {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
   height: 100%;
+  padding: var(--space-4) calc(var(--side-strip-width) + var(--space-4)) var(--space-12) var(--gutter-start);
+}
+.live-piano__body {
   display: flex;
   flex-direction: column;
   gap: var(--space-10);
-  padding: 12px 20px 24px 20px;
-  border-left: 1px solid var(--key-edge);
-  background: var(--shell);
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
 }
-.live-dock > * { flex: none; }
+.live-piano__body > * { flex: none; }
+.live-piano__keys { display: flex; flex-direction: column; }
+.live-piano .piano { flex: none; }
+.live-piano .piano__plate { height: var(--piano-h); }
+/* On the desk the keys sit straight on the panel's body. */
+.piano.piano--flat {
+  padding: 0 var(--cap-dx) var(--cap-dy) 0;
+  border-radius: 0;
+  background: none;
+}
+
+/* The colours, under the piano on the desk. */
+.live-piano__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8) var(--space-24);
+  margin: var(--space-14) 0 0;
+  padding: 0 var(--space-6);
+  list-style: none;
+  color: var(--graphite);
+  font-size: var(--size-small);
+  line-height: 1.4;
+}
+.live-piano__legend li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+.live-piano__legend .live-chips__swatch { width: 16px; height: 16px; }
+.live-piano__legend .live-chips__swatch--root { width: 22px; height: 4px; }
+
+/* ---------- the desk's Sounds tab ---------- */
+
+.live-tabs {
+  display: flex;
+  gap: var(--space-6);
+  padding: 0 var(--cap-dx) var(--cap-dy) 0;
+}
+.live-tabs__tab {
+  display: grid;
+  place-items: center;
+  --cap-face: var(--key);
+  --cap-edge: var(--key-edge);
+  --cap-ink: var(--graphite);
+  flex: 1 1 0;
+  min-height: 38px;
+  border: 0;
+  border-radius: var(--radius-key);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.live-tabs__tab.is-on {
+  --cap-face: var(--navy);
+  --cap-edge: color-mix(in oklab, var(--navy) 70%, black);
+  --cap-ink: var(--on-navy);
+}
+.live-tabs__tab:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-offset); }
+
+/* It takes the docked column's height left under the tabs (the list scrolls inside). */
+.side-zone__dock > .live-sounds { flex: 1 1 0; }
+.live-sounds {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  min-height: 0;
+}
+.live-sounds > .snd { flex: 1 1 0; min-height: 0; }
+.live-sounds__hint { flex: none; margin: 0; color: var(--graphite); }
+/* The drop zone: a dashed box; signal while a file is over it. */
+.live-sounds__drop {
+  flex: none;
+  padding: var(--space-14);
+  border: 2px dashed color-mix(in srgb, var(--graphite) 50%, transparent);
+  border-radius: var(--radius-small-plate);
+  color: var(--graphite);
+  font-size: var(--size-small);
+  line-height: 1.4;
+  text-align: center;
+}
+.live-sounds__drop.is-over {
+  border-color: var(--signal);
+  background: color-mix(in srgb, var(--signal) 10%, transparent);
+  color: var(--ink);
+}
+
+/* ---------- the desk (web only) ---------- */
+
+@media (min-width: 1024px) {
+  /* The page column's row, lined up with the top bar's (--top-bar-max, --desk-pad);
+   * the tools docked on its right (SideZone.css). */
+  .live {
+    max-width: var(--top-bar-max);
+    margin: 0 auto;
+    padding: var(--space-4) var(--desk-pad) var(--space-22);
+  }
+
+  .live-stage {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-10);
+    height: 100%;
+  }
+  .live-stage > * { flex: none; }
+  /* The room for the panel: a size container (the K.O. II measures itself on it). */
+  .live-stage__box {
+    flex: 1 1 0;
+    min-height: 0;
+    container-type: size;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+  }
+
+  /* The K.O. II: the device's body with the display line and the mode row over the keys (its
+   * size, corners and edge below, from --u). Display line, 6, mode row (44 to touch), 6, grid:
+   * Android's 10 between line and row, about. */
+  .live-ko {
+    --ko-gap: 6px;
+    --ko-strip: 56px;
+    --ko-mode: 44px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--ko-gap);
+  }
+  .live-ko > * { flex: none; }
+  .live-ko > .live-strip {
+    height: var(--ko-strip);
+    padding-inline: 18px;
+  }
+  .live-ko__body { display: flex; }
+
+  /* The mode row over the grid (Android's sideways order): mode and scale at the start, the
+   * octave at the end, the words in the middle of their touch height; the lists open down. */
+  .live-ko .live-mode,
+  .live-row .live-mode {
+    justify-content: flex-start;
+    gap: var(--space-24);
+    height: var(--ko-mode, 44px);
+    margin-top: 0;
+  }
+  .live-ko .live-mode > :nth-child(3) { margin-inline-start: auto; }
+  .live-ko .live-mode .word--top,
+  .live-row .live-mode .word--top {
+    align-items: center;
+    padding-top: 6px;
+  }
+  .live-ko .pick__list,
+  .live-row .pick__list {
+    top: 0;
+    bottom: auto;
+  }
+
+  /* The K.O. II's body drawn as the Guide draws it (live-deck--ko): the group keys and three
+   * pads across (KEYS: three keys), as big as the room lets them: wide, cols x 1.215 + 0.401;
+   * high, the 18 over the strip, the strip, the mode row and their gaps (130 in all), then the
+   * four rows, 0.31 and the edge (5.505). */
+  .live-ko {
+    --ko-cols: 4;
+    --u: clamp(0px, min((100cqw - var(--cap-dx) - 8px) / (var(--ko-cols) * 1.215 + 0.401), (100cqh - 130px - var(--cap-dy) - 8px) / 5.505), 190px);
+    width: calc(var(--u) * (var(--ko-cols) * 1.215 + 0.339) + var(--cap-dx));
+    height: auto;
+    padding: 18px calc(var(--u) * 0.277 + var(--cap-dx)) calc(var(--u) * 0.31 + var(--cap-dy)) calc(var(--u) * 0.277);
+    border-radius: calc(var(--u) * 0.277);
+    background: var(--ko-body);
+    box-shadow: calc(var(--u) * 0.062) calc(var(--u) * 0.092) 0 var(--ko-edge);
+  }
+  .live-ko--keys { --ko-cols: 3; }
+  .live-ko > .live-ko__body {
+    flex: none;
+    gap: var(--kd-gx);
+  }
+  .live-ko .live-kgrid { min-width: 0; }
+  .live-ko .live-group--big,
+  .live-ko .live-kgrid { flex: none !important; }
+  .live-ko .live-deck--ko { padding: 0; }
+
+  /* All groups in one row on a paper card, as wide as the room; pads [--row-pad] high
+   * (live/desk.ts rowPadSize: square at most, 40 at least). */
+  .live-row {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-6);
+    width: 100%;
+    padding: var(--space-20);
+  }
+  .live-row > * { flex: none; }
+  .live-row > .live-strip {
+    height: 56px;
+    padding-inline: 18px;
+  }
+  .live-row__groups {
+    display: flex;
+    gap: var(--space-14);
+  }
+  .live-row .live-group { flex: 1 1 0; }
+  .live-row .live-pad {
+    aspect-ratio: auto;
+    height: var(--row-pad);
+  }
+
+  /* Too small a room for that: the phone's scrolling page on a paper card. */
+  .live-scroll {
+    width: 100%;
+    height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .live-scroll .live__all { padding: var(--space-4) var(--space-16) var(--space-24); }
+
+  /* The tools behind the strip (KEYS): the page keeps clear of it. */
+  .side-zone:not(.side-zone--docked) .live-stage { padding-right: calc(var(--side-strip-width) + var(--space-4)); }
+
+  /* EDIT's tab on the panel's left side: outside the K.O. II, rounded on its left; on a card's edge elsewhere. */
+  .live-ko,
+  .live-row,
+  .live-scroll-wrap { position: relative; }
+  .live-scroll-wrap { width: 100%; height: 100%; }
+  .live-edit-tab {
+    position: absolute;
+    z-index: 2;
+    top: 50%;
+    transform: translateY(-50%);
+  }
+  .live-ko > .live-edit-tab {
+    right: 100%;
+    border-radius: var(--radius-key) 0 0 var(--radius-key);
+  }
+  /* Room for it beside the rail when the panel fills the width (1024 wide). */
+  .live-stage__box:has(> .live-ko > .live-edit-tab) { padding-inline-start: var(--edge-tab-width); }
+  .live-row > .live-edit-tab,
+  .live-scroll-wrap > .live-edit-tab { left: -2px; }
+  .live-scroll-wrap .live-scroll .live__all { padding-left: var(--space-24); }
+
+  /* The piano across the page column, on the device's body, the legend under it; centred in the height. */
+  .live-piano.live-piano--desk {
+    justify-content: center;
+    padding: 0 calc(var(--side-strip-width) + var(--space-4)) 0 0;
+  }
+  .live-piano--desk .live-piano__body {
+    --ko-edge: color-mix(in oklab, var(--hw-body) 70%, black);
+    gap: var(--space-14);
+    padding: 18px 20px 22px;
+    border-radius: 26px;
+    background: var(--hw-body);
+    box-shadow: 4px 6px 0 var(--ko-edge);
+  }
+  .live-piano--desk .live-strip {
+    height: 56px;
+    padding-inline: 18px;
+  }
+}

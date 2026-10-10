@@ -4,7 +4,10 @@
 //
 //   /sounds    node 1000, children are sample slots 1..999 (raw s16le PCM + JSON metadata)
 //   /projects  node 2000, project N lives at 3000 + (N-1)*1000 and reads/writes as a TAR
+//   pads       zero-byte files under each project: 3200 + (N-1)*1000 + group*100 + pad (padPush.node)
 
+import { node as padNode } from '../features/padPush'
+import { toMeta, type PadSettings } from '../features/padSettings'
 import { crc32 } from '../formats/crc32'
 import { DeviceError } from './errors'
 import {
@@ -75,12 +78,61 @@ export const PROJECTS_NODE = 2000
 export const MAX_SAMPLE_RATE = 46875
 export const MAX_SOUND_NAME = 20
 
+/** The device's projects, 1..9 (the PROJECT key's numbers, and the ones a backup probes). */
+export const PROJECT_COUNT = 9
+
 export const projectNode = (n: number): number => 3000 + (n - 1) * 1000
 
 export function projectFromNode(node: number): number | null {
   if (node < 3000 || (node - 3000) % 1000 !== 0) return null
   const n = (node - 3000) / 1000 + 1
   return n >= 1 && n <= 99 ? n : null
+}
+
+/** Kotlin String.toDoubleOrNull (Java's float syntax, no surrounding blanks). */
+function ktToDoubleOrNull(s: string): number | null {
+  if (!/^[+-]?(NaN|Infinity|((\d+\.?\d*|\.\d+)([eE][+-]?\d+)?)[fFdD]?)$/.test(s)) return null
+  const v = Number(s.replace(/[fFdD]$/, ''))
+  return Number.isNaN(v) && !/NaN/.test(s) ? null : v
+}
+
+/** Kotlin Double.toInt(): toward zero, NaN is 0, clamped to Int. */
+function ktToInt(d: number): number {
+  if (Number.isNaN(d)) return 0
+  if (d >= 2147483647) return 2147483647
+  if (d <= -2147483648) return -2147483648
+  return Math.trunc(d)
+}
+
+/**
+ * The project an "active" value of /projects' metadata names (a node, as a
+ * number or a numeric string), or null when it names none. The Kotlin
+ * `(active as? JsonPrimitive)?.content?.toDoubleOrNull()?.toInt()?.let(::projectFromNode)`.
+ */
+export function projectOfActive(active: JsonValue | undefined): number | null {
+  if (active === undefined || active === null) return null
+  if (typeof active === 'object') return null
+  const content = typeof active === 'string' ? active : String(active)
+  const d = ktToDoubleOrNull(content)
+  return d === null ? null : projectFromNode(ktToInt(d))
+}
+
+/** The project the device plays now, from /projects' metadata; null when it names none. */
+export async function activeProject(session: Session): Promise<number | null> {
+  return projectOfActive(asObject(await getMetadata(session, PROJECTS_NODE)).active)
+}
+
+/**
+ * Makes project [n] the active one, as PROJECT on the device does: the
+ * METADATA SET of {"active": node} on /projects that [writeProject] and a
+ * restore use to make the device load a project. Kotlin's `require` is a
+ * RangeError.
+ */
+export async function setActiveProject(session: Session, n: number): Promise<void> {
+  if (!(Number.isInteger(n) && n >= 1 && n <= PROJECT_COUNT)) {
+    throw new RangeError(`Project ${n} doesn't exist. Projects go from 1 to ${PROJECT_COUNT}.`)
+  }
+  await setMetadata(session, PROJECTS_NODE, { active: projectNode(n) })
 }
 
 /** Per-sound settings worth carrying through a backup. */
@@ -226,6 +278,66 @@ export async function writeSound(session: Session, sound: SoundData, opts: Write
     const same = typeof crc === 'number' && crc === crc32(pcm)
     if (!same) throw new DeviceError(`Sound ${slot} did not verify after upload (checksum mismatch)`)
   }
+}
+
+/**
+ * The metadata that puts sample [slot] on a pad (an addition to the web
+ * version): `{"sym": slot}`. Only `sym` is written. The device then re-syncs
+ * the pad's other fields from the new sample, so the pad's own tweaks reset,
+ * as when a sound is assigned on the device itself. Kotlin's `require` is a
+ * RangeError.
+ */
+export function padPatch(slot: number): JsonObject {
+  if (!(Number.isInteger(slot) && slot >= 1 && slot <= 999)) throw new RangeError(`Slot ${slot} doesn't exist. Slots go from 1 to 999.`)
+  return { sym: slot }
+}
+
+/**
+ * Puts sample [slot] on [pad] (1..12, its number in the project file) of
+ * [group] (0..3 = A..D) in [project]: a METADATA SET on the pad's file
+ * (community notes, kmorrill/ep-series-sysex docs/file-protocol.md; not in
+ * the official guide). The pad's `sym` reads 0 until written, so the slot on
+ * a pad now comes from the project's pad records (projectPads).
+ */
+export async function assignPad(session: Session, project: number, group: number, pad: number, slot: number): Promise<void> {
+  const node = padNode({ project, group, pad })
+  await setMetadata(session, node, padPatch(slot))
+}
+
+/**
+ * The metadata of [pad] (1..12, its number in the project file) of [group]
+ * (0..3 = A..D) in [project], where the device keeps the pad's SOUND EDIT
+ * settings (an addition; read with PadSettings.fromMeta): a METADATA GET on
+ * the pad's file. Community notes, not the official guide:
+ * ZacharySBrown/ep133-ppak PROTOCOL.md and wil-gerard/ep133-mcp
+ * docs/research/pad-params-proof.md (hardware-checked on OS 2.5.1). A pad
+ * never written may read little more than `{"sym":0}` (PadSettings.written);
+ * a pad the device doesn't have reads `{}`.
+ */
+export async function readPad(session: Session, project: number, group: number, pad: number): Promise<JsonObject> {
+  return asObject(await getMetadata(session, padNode({ project, group, pad })))
+}
+
+/**
+ * Gives [pad] of [group] in [project] the SOUND EDIT [settings], with sample
+ * [slot] on it (an addition): a METADATA SET of PadSettings.toMeta on the
+ * pad's file, [frames] being the sample's length when known (for the trim).
+ * Always the full record, `sym` included: per the notes in [readPad], a
+ * partial write can make the device re-sync every field from the sample and
+ * drop the pad's other settings, and the play and time modes go as strings,
+ * or the device refuses the write (status 1).
+ */
+export async function writePadSettings(
+  session: Session,
+  project: number,
+  group: number,
+  pad: number,
+  slot: number,
+  settings: PadSettings,
+  frames: number | null,
+): Promise<void> {
+  const node = padNode({ project, group, pad })
+  await setMetadata(session, node, toMeta(settings, slot, frames))
 }
 
 /** Upload a project TAR and make the device reload it. */

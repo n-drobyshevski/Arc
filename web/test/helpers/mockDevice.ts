@@ -9,12 +9,21 @@
 // [echoPagesBigEndian], [corruptCrcUploads], [reportCrc], [silent],
 // [hideProjectList], [emptyPages], plus [pushPadActive]. The after-PUT re-init
 // is set synchronously after the reply (Kotlin), not in a queueMicrotask (JS).
+// A pad's `sym` write lands in its project's pad record, as Live's EDIT
+// expects of the device (community notes; see device.assignPad), so ?demo
+// shows a changed pad after the next read. Each pad file of a project the
+// mock holds also has metadata ([padMeta]): {"sym":0} until written, merged
+// into by every SET, which is refused (status 1) when `sound.playmode` or
+// `time.mode` isn't a string, as the device does (see device.writePadSettings).
 
+import { fid as padFid, node as padNode } from '../../src/core/features/padPush'
 import { crc32 } from '../../src/core/formats/crc32'
+import { readTar } from '../../src/core/formats/tar'
 import { be16, be32, decodeFrame, readBe16, readBe32, u14le, type Frame } from '../../src/core/protocol/frame'
 import { pack7 } from '../../src/core/protocol/packed7'
 import type { Transport } from '../../src/core/protocol/transport'
 import { bytes } from '../../src/core/util/bytes'
+import { tarFile } from './bytes'
 import { responseFrame } from './scriptedTransport'
 
 export type Json = Record<string, unknown>
@@ -102,6 +111,8 @@ export class MockEP133 {
   readonly sounds = new Map<number, StoredSound>()
   readonly projects = new Map<number, Uint8Array>()
   readonly projectsMeta: Json = {}
+  /** Pad file node to the metadata written to it; a pad not here reads {"sym":0}. */
+  private readonly padsMeta = new Map<number, Json>()
   deviceId = 0x33
   needsInit = false
   dropped = 0
@@ -295,7 +306,19 @@ export class MockEP133 {
   private metaFor(node: number): Json | null {
     if (node === 1000) return { max_capacity: this.capacity, free_space_in_bytes: this.capacity - this.used }
     if (node === 2000) return this.projectsMeta
-    return this.sounds.get(node)?.meta ?? null
+    const s = this.sounds.get(node)
+    if (s) return s.meta
+    const fid = padFid(node)
+    return fid === null ? null : this.padMeta(fid.project, fid.group, fid.pad)
+  }
+
+  /**
+   * What a GET of that pad's file returns: what was written to it, or
+   * {"sym":0} if nothing was; null when the mock has no such project.
+   */
+  padMeta(project: number, group: number, pad: number): Json | null {
+    if (!this.projects.has(project)) return null
+    return this.padsMeta.get(padNode({ project, group, pad })) ?? { sym: 0 }
   }
 
   private getMeta(f: Frame, node: number, page: number): void {
@@ -319,10 +342,53 @@ export class MockEP133 {
     if (node === 2000) putAll(this.projectsMeta, obj)
     else {
       const s = this.sounds.get(node)
-      if (!s) return this.reply(f, 1)
-      putAll(s.meta, obj)
+      if (s) putAll(s.meta, obj)
+      else if (padFid(node) === null || !this.setPad(node, obj)) return this.reply(f, 1)
     }
     this.reply(f, 0)
+  }
+
+  /**
+   * A SET on a pad's file: refused with a play or time mode that isn't a
+   * string, else merged into its metadata, and "sym" goes into the record.
+   */
+  private setPad(node: number, patch: Json): boolean {
+    for (const k of ['sound.playmode', 'time.mode']) {
+      if (Object.prototype.hasOwnProperty.call(patch, k) && typeof patch[k] !== 'string') return false
+    }
+    if (!this.setPadSym(node, patch)) return false
+    const fid = padFid(node)
+    if (fid === null) return false
+    let meta = this.padsMeta.get(node)
+    if (!meta) {
+      meta = { ...this.padMeta(fid.project, fid.group, fid.pad) }
+      this.padsMeta.set(node, meta)
+    }
+    putAll(meta, patch)
+    return true
+  }
+
+  /** A pad's "sym" becomes the slot in its record (pads/<group>/pNN, bytes 1-2), added if the project has none. */
+  private setPadSym(node: number, patch: Json): boolean {
+    const fid = padFid(node)
+    const tar = fid === null ? undefined : this.projects.get(fid.project)
+    if (fid === null || !tar) return false
+    const sym = patch.sym
+    if (typeof sym !== 'number') return true
+    const slot = Math.trunc(sym)
+    const group = 'abcd'[fid.group]!
+    const entries = [...readTar(tar).entries()]
+    const at = entries.findIndex(([name, rec]) => {
+      const m = /(?:^|\/)pads\/([^/]+)\/p([0-9]+)$/.exec(name)
+      return m !== null && m[1] === group && Number(m[2]) === fid.pad && rec.length >= 3
+    })
+    const rec = at >= 0 ? entries[at]![1].slice() : new Uint8Array(26)
+    rec[1] = slot & 0xff
+    rec[2] = (slot >> 8) & 0xff
+    if (at >= 0) entries[at] = [entries[at]![0], rec]
+    else entries.push([`pads/${group}/p${String(fid.pad).padStart(2, '0')}`, rec])
+    this.projects.set(fid.project, tarFile(entries))
+    return true
   }
 
   // Guarded, unlike the JS: a node that is not on the 1000 grid is no project.

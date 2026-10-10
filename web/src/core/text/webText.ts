@@ -99,6 +99,10 @@ export const WebText = {
     "Hold a pad to hear its sample here (it stops when you let go): from arc's copy of the device's sounds, a backup, or the device.",
   /** Replaces MirrorText.NO_COPY "This sample isn't saved on the phone or in a backup yet." */
   LIVE_NO_COPY: "This sample isn't saved in this browser or in a backup yet.",
+  /** Replaces MirrorText.NO_COPY_FACTORY ("on the phone"). */
+  LIVE_NO_COPY_FACTORY: "This factory sample isn't saved in this browser yet: Settings → Live → Factory sounds → Get.",
+  /** Replaces MirrorText.PIANO_HINT "Turn the phone sideways for a piano (with auto-rotate off, …)". */
+  LIVE_PIANO_HINT: 'Turn the screen sideways, or make the window wider than it is tall, for a piano.',
   /** Replaces MirrorText.LEGEND_PHONE "Outlined: playing on the phone". */
   LIVE_LEGEND_HERE: 'Outlined: playing here',
   /**
@@ -142,6 +146,20 @@ export const WebText = {
   padSounds(size: string): string {
     return `${WebText.PAD_SOUNDS}: ${size}`
   },
+  /** Replaces SettingsText.SAVED_HERE "Saved on the phone", the group title for what Settings can clear. */
+  SAVED_HERE: 'Saved in this browser',
+  /** Replaces MirrorText.CHIP_PHONE "Playing on the phone". */
+  CHIP_HERE: 'Playing here',
+
+  // ---------- Live: sounds onto pads with the mouse (no Android counterpart) ----------
+  /** Under the SOUNDS tab's list on a wide window. */
+  DRAG_HINT: 'Drag a sound onto a pad of the active project. Right-click a pad for more.',
+  /** The same while offline: changes stay in arc until the EP-133 connects. */
+  DRAG_HINT_OFFLINE: 'Offline: drag a sound onto a pad to change it in arc only. Dimmed sounds need the EP-133.',
+  /** The drop zone under the list. */
+  DROP_SAMPLE: 'Drop a WAV here or on a pad to upload it to a free slot',
+  /** The tag on the pad a sound or file is dragged over. */
+  DROP: 'Drop',
 
   // ---------- library folder (FeatureText folder text; Documents/arc → File System Access) ----------
   LIBRARY_FOLDER: 'Library folder',
@@ -197,6 +215,53 @@ export const WebText = {
       // ISO_INSTANT leaves out a zero fraction of a second.
       `Exported ${new Date(nowMs).toISOString().replace('.000Z', 'Z')}`,
     ]
+  },
+
+  // ---------- the computer keyboard (desktop; no Android counterpart) ----------
+  // Never "shortcuts": that word is the EP-133's own, in the Guide.
+  KEYS_TITLE: 'Keyboard keys',
+  KEYS_NOW: 'Keys that work here now. Single keys pause while you type in a field.',
+  /** The sheet opened away from Live (Settings): all of Live's keys. */
+  KEYS_ALL: "Live's keys, and the ones that work everywhere. Single keys pause while you type in a field.",
+  /** The sheet with single keys switched off. */
+  KEYS_OFF: 'Single keys are off: Settings → Live → Computer keyboard turns them on.',
+  KEYS_PADS: 'Live, pads',
+  KEYS_EDIT: 'Live, EDIT',
+  KEYS_GRID: 'Live, keys',
+  KEYS_PIANO: 'Live, piano',
+  KEYS_EVERYWHERE: 'Everywhere',
+  KEY_PADS: 'Hold to play the pads, as on the EP-133',
+  KEY_PADS_ROW: 'The same pads, by their numbers',
+  KEY_GROUP: 'Group A to D',
+  KEY_EDIT: 'EDIT on or off',
+  KEY_EDIT_PAD: "Open that pad's sound",
+  KEY_VIEW_PADS: 'All groups or one group',
+  KEY_FOLLOW: 'Follow on or off',
+  KEY_FIND: 'Find a sound',
+  KEY_MODE: 'Pads or keys',
+  KEY_GRID: 'Hold to play the keys',
+  KEY_PIANO: 'Play the piano',
+  KEY_OCTAVE: 'Octave down, up',
+  KEY_ROOT: 'Key down, up',
+  KEY_SCALE: 'Scale before, after',
+  KEY_VIEW_KEYS: 'Grid or piano',
+  KEY_HELP: 'These keys',
+  KEY_ESCAPE: 'Close a screen; in Live, leave EDIT or stop the sound',
+  KEY_UNDO: 'Undo a new pad sound, while its UNDO shows',
+  /** The tools panel's line in PADS. */
+  LIVE_PADS_KEYS_HINT: 'Keyboard: 1 to 9 or the number pad play pads · A to D group · E edit · M keys · ? all keys',
+  /** The KEYS tools panel's line. */
+  LIVE_KEYS_KEYS_HINT: 'Keyboard: M pads · Z X octave · [ ] key · Shift+[ ] scale · ? all keys',
+  COMPUTER_KEYS: 'Computer keyboard',
+  COMPUTER_KEYS_NOTE: 'Single keys play Live and run its controls. Show keys lists them.',
+  SHOW_KEYS: 'Show keys',
+  /** What a key just switched, for screen readers: "Follow, on". */
+  switched(label: string, on: boolean): string {
+    return `${label}, ${on ? 'on' : 'off'}`
+  },
+  /** A control's tooltip with its key: "EDIT (E)". */
+  keyHint(label: string, key: string): string {
+    return `${label} (${key})`
   },
 
   // ---------- app updates (PWA; no Android counterpart) ----------

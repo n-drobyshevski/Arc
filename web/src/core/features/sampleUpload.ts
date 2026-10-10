@@ -14,9 +14,11 @@
 import { restorePak, type Progress, type RestoreResult } from '../backup/backup'
 import type { Pak, PakSound } from '../backup/pak'
 import { decodeWav, encodeWav } from '../formats/wav'
-import { cleanSoundName } from '../protocol/device'
+import { assignPad, cleanSoundName, listSounds } from '../protocol/device'
 import type { JsonObject } from '../protocol/fs'
 import type { Session } from '../protocol/session'
+import { MirrorText } from '../text/mirrorText'
+import type { PadTarget } from './liveMirror'
 import { cut, frames, shiftLoops, type TrimRange } from './sampleTrim'
 
 /** A WAV file to load into a sample slot, optionally only frames [trim.start, trim.end) of it. */
@@ -121,6 +123,40 @@ export async function upload(session: Session, items: readonly UploadItem[], opt
   })
 }
 
+/**
+ * Live's "Upload a new sample…" on a pad (an addition): [wav] goes into the
+ * first free slot, through [upload], then onto [target]'s pad with assignPad.
+ * Returns the slot it went into. The slots in use are listed on the device
+ * first, besides [occupied] (the caller's own list, which can be stale): a
+ * sound recorded on the EP-133 meanwhile, or an earlier upload whose
+ * assignment failed, is never overwritten. A given [slot] (SAMPLE's review
+ * picks one) is used only while that list still has it free; otherwise the
+ * upload fails with nothing written.
+ */
+export async function uploadToPad(
+  session: Session,
+  fileName: string,
+  wav: Uint8Array,
+  occupied: ReadonlySet<number>,
+  target: PadTarget,
+  trim: TrimRange | null = null,
+  opts: UploadOptions = {},
+  slot: number | null = null,
+): Promise<number> {
+  const used = new Set([...occupied, ...(await listSounds(session)).map((e) => e.slot)])
+  if (slot !== null && used.has(slot)) throw new UploadError(slotTaken(slot))
+  const into = slot ?? nextFree(used, new Set())
+  if (into === null) throw new UploadError(MirrorText.NO_FREE_SLOT)
+  await upload(session, [UploadItem(into, nameFor(fileName), wav, trim)], opts)
+  await assignPad(session, target.project, target.group, target.pad, into)
+  return into
+}
+
+/** Why a picked slot can't be used: a sound went there after it was picked. */
+function slotTaken(slot: number): string {
+  return `Slot ${slot} has a sound now. Pick another slot.`
+}
+
 /** The Kotlin `object SampleUpload`. */
 export const SampleUpload = {
   FIRST_SLOT,
@@ -131,4 +167,5 @@ export const SampleUpload = {
   validate,
   asPak,
   upload,
+  uploadToPad,
 } as const

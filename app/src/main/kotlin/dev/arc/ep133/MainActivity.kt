@@ -8,6 +8,9 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.InputDevice
+import android.view.MotionEvent
+import android.view.View
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -17,6 +20,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -54,6 +58,13 @@ import dev.arc.ep133.ui.screens.DebugScreen
 import dev.arc.ep133.ui.screens.GuideScreen
 import dev.arc.ep133.ui.screens.MirrorScreen
 import dev.arc.ep133.ui.screens.PadsSheetContent
+import dev.arc.ep133.ui.screens.PadSheetContent
+import dev.arc.ep133.ui.screens.ProjectSheetContent
+import dev.arc.ep133.ui.screens.SampleReviewSheetContent
+import dev.arc.ep133.ui.screens.TempoSheetContent
+import dev.arc.ep133.ui.screens.BeatImportSheetContent
+import dev.arc.ep133.ui.screens.PatternSheetContent
+import dev.arc.ep133.ui.screens.FxSheetContent
 import dev.arc.ep133.ui.screens.SearchScreen
 import dev.arc.ep133.ui.screens.SettingsScreen
 import dev.arc.ep133.ui.screens.DeviceScreen
@@ -89,6 +100,14 @@ class MainActivity : ComponentActivity() {
         controller.pickForUpload(uris)
     }
 
+    // EDIT's "Upload a new sample…": one file, for the pad whose sheet asked for it.
+    private var padUploadFor: Pair<dev.arc.ep133.features.PhysicalPad, dev.arc.ep133.features.PadTarget>? = null
+    private val padUploadLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val (pad, target) = padUploadFor ?: return@registerForActivityResult
+        padUploadFor = null
+        if (uri != null) withNotifications { controller.uploadToPad(uri, pad, target) }
+    }
+
     private val importLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) controller.importUri(uri)
     }
@@ -119,10 +138,64 @@ class MainActivity : ComponentActivity() {
     // The transfer does not wait for the answer: it works without the notification.
     private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
+    /**
+     * What SAMPLE asked the mic permission for ([withMicrophone]): [MIC_ENTER]
+     * or "step:<n>". Kept in the saved state, because the answer can reach a
+     * recreated activity; it is acted on then.
+     */
+    private var pendingMic: String? = null
+
+    // Android's question about the mic is out ([withMicrophone]); a second one is never sent meanwhile,
+    // as Android would answer it "no" at once. With whether it would have shown a rationale then, and
+    // when it went (SystemClock.elapsedRealtime), for [refusedForGood].
+    private var micAsking = false
+    private var micRationaleBefore = false
+    private var micAskedAt = 0L
+
+    // SAMPLE's mic and USB inputs: the answer goes to what asked ([pendingMic]); refused, RSP stands in.
+    private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        val what = pendingMic
+        pendingMic = null
+        val asking = micAsking
+        micAsking = false
+        val prefs = getPreferences(MODE_PRIVATE)
+        if (granted) {
+            prefs.edit { remove(PREF_MIC_REFUSED) }
+        } else if (refusedForGood(asking)) {
+            prefs.edit { putBoolean(PREF_MIC_REFUSED, true) }
+            noMicToast()
+        }
+        micAnswered(what, granted)
+    }
+
+    // Whether Live is in front, so its touches go unbuffered ([unbufferedTouch]); main thread only.
+    private var liveTouch = false
+
+    /**
+     * While Live is in front ([on]), touches reach the pads and keys as they
+     * come rather than batched to the next frame, so a press or a slide onto a
+     * key sounds up to a frame sooner. Elsewhere the app keeps Android's
+     * batching. Android 11 and later take it for all pointer input (the
+     * touchscreen, a mouse or stylus) on [view]; Android 10 only gesture by
+     * gesture, asked at each first touch ([dispatchTouchEvent]).
+     */
+    private fun unbufferedTouch(view: View, on: Boolean) {
+        liveTouch = on
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) view.requestUnbufferedDispatch(if (on) InputDevice.SOURCE_CLASS_POINTER else InputDevice.SOURCE_CLASS_NONE)
+    }
+
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (liveTouch && Build.VERSION.SDK_INT < Build.VERSION_CODES.R && ev.actionMasked == MotionEvent.ACTION_DOWN) {
+            window.decorView.requestUnbufferedDispatch(ev)
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         pendingSave = savedInstanceState?.getString(KEY_PENDING_SAVE)
+        pendingMic = savedInstanceState?.getString(KEY_PENDING_MIC)
         if (savedInstanceState == null) handleIntent(intent)
         setContent {
             val settings by controller.settings.collectAsStateWithLifecycle()
@@ -149,16 +222,71 @@ class MainActivity : ComponentActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putString(KEY_PENDING_SAVE, pendingSave)
+        outState.putString(KEY_PENDING_MIC, pendingMic)
     }
 
-    /** A .pak opened from Files (or another app) lands here. */
+    /**
+     * A .pak opened from Files (or another app) lands here, and so does text shared to arc (Claude's reply, a beat
+     * card: its sheet opens over Live, or the toast says there is none in it).
+     */
     private fun handleIntent(intent: Intent?) {
-        if (intent?.action != Intent.ACTION_VIEW) return
+        val view = intent?.action == Intent.ACTION_VIEW
+        val send = intent?.action == Intent.ACTION_SEND && intent.type?.startsWith("text/") == true
+        if (intent == null || !view && !send) return
         // Reopening the task from Recents replays the original intent: don't import twice.
         if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY == 0) {
-            intent.data?.let { controller.importUri(it) }
+            if (view) {
+                intent.data?.let { controller.importUri(it) }
+            } else {
+                controller.receiveBeat(intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString())
+            }
         }
         setIntent(Intent(this, MainActivity::class.java))
+    }
+
+    /** PASTE BEAT: the clipboard's text (null when it holds none, or can't be read). */
+    private fun clipboardText(): String? = try {
+        getSystemService(ClipboardManager::class.java).primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(this)?.toString()
+    } catch (e: RuntimeException) {
+        null
+    }
+
+    /** SHARE (scene when [group] is null) through the system chooser: the card's prompt and text, as plain text. */
+    private fun shareBeat(group: Int?) {
+        val share = controller.beatShare(group) ?: return
+        sendText(share.subject, share.text, dev.arc.ep133.text.ClaudeText.SHARE_TITLE)
+    }
+
+    /** Learn with Claude: a starter prompt to send to the Claude app. */
+    private fun learnWithClaude() {
+        sendText(dev.arc.ep133.text.ClaudeText.LEARN, dev.arc.ep133.text.ClaudeText.LEARN_PROMPT, dev.arc.ep133.text.ClaudeText.LEARN_TITLE)
+    }
+
+    private fun sendText(subject: String, text: String, title: String) {
+        try {
+            Files.shareText(this, subject, text, title)
+        } catch (e: java.io.IOException) {
+            controller.toast(dev.arc.ep133.text.ClaudeText.NO_APP, error = true)
+        }
+    }
+
+    /** Get the arc-beats skill: its zip, opened as a link. */
+    private fun openSkill() {
+        try {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(dev.arc.ep133.text.ClaudeText.SKILL_URL)))
+        } catch (e: android.content.ActivityNotFoundException) {
+            controller.toast(dev.arc.ep133.text.ClaudeText.NO_APP, error = true)
+        }
+    }
+
+    /** COPY PROBLEMS: what the sheet lists, for Claude to read when pasted back into the chat. */
+    private fun copyProblems(problems: List<dev.arc.ep133.features.CardProblem>) {
+        try {
+            getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(dev.arc.ep133.text.ClaudeText.COPY_PROBLEMS, dev.arc.ep133.text.ClaudeText.problemsReport(problems)))
+            controller.toast(dev.arc.ep133.text.ClaudeText.PROBLEMS_COPIED)
+        } catch (e: RuntimeException) {
+            controller.toast(e.message ?: e.toString(), error = true)
+        }
     }
 
     private fun writePending(uri: Uri?) {
@@ -211,6 +339,104 @@ class MainActivity : ComponentActivity() {
             notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
         block()
+    }
+
+    private fun micGranted(): Boolean =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
+    /**
+     * SAMPLE's mic, for [what] ([MIC_ENTER], or "step:<n>" for −/+): with the
+     * permission it goes ahead at once. Refused for good (as an answer found
+     * it, [refusedForGood], and Android still shows no rationale), a toast
+     * says so with a key to the app's settings, and [what] goes ahead without
+     * it (RSP stands in). Else Android asks, and [what] goes ahead with the
+     * answer, even in a recreated activity ([pendingMic]); while it asks, a
+     * second ask (a quick double tap on −/+) does nothing.
+     */
+    private fun withMicrophone(what: String) {
+        if (micGranted()) return micAnswered(what, true)
+        val rationale = shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)
+        if (getPreferences(MODE_PRIVATE).getBoolean(PREF_MIC_REFUSED, false) && !rationale) {
+            noMicToast()
+            return micAnswered(what, false)
+        }
+        if (micAsking) return
+        micAsking = true
+        micRationaleBefore = rationale
+        micAskedAt = android.os.SystemClock.elapsedRealtime()
+        pendingMic = what
+        micPermission.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    /**
+     * Whether a "no" from Android means it won't ask again: no rationale now,
+     * and either there was one before the question (the "no" that ends the
+     * asking) or the answer came back too soon for anyone to have seen a
+     * question ([MIC_AUTO_REFUSAL_MS]). The question dismissed, or the first
+     * "no", leaves it to ask again, as does an "Only this time" that has run
+     * out. [asked]: this activity sent the question (else, recreated
+     * meanwhile, only the rationale is known).
+     */
+    private fun refusedForGood(asked: Boolean): Boolean {
+        if (shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)) return false
+        if (!asked) return false
+        return micRationaleBefore || android.os.SystemClock.elapsedRealtime() - micAskedAt < MIC_AUTO_REFUSAL_MS
+    }
+
+    /** The mic refused for good: a toast says so, with a key to the app's settings. */
+    private fun noMicToast() {
+        // The application's context, so the toast's key doesn't keep this activity.
+        val app = applicationContext
+        controller.toast(dev.arc.ep133.text.MirrorText.NO_MIC, error = true, action = dev.arc.ep133.text.MirrorText.MIC_SETTINGS) {
+            runCatching {
+                app.startActivity(
+                    Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", app.packageName, null))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+        }
+    }
+
+    /**
+     * SAMPLE's [what] goes ahead, the mic [granted] or not. A −/+ refused
+     * leaves the input where it was rather than stepping on past the mic and
+     * USB to another RSP input nobody picked.
+     */
+    private fun micAnswered(what: String?, granted: Boolean) {
+        when {
+            what == MIC_ENTER -> controller.enterSample(granted)
+            what != null && what.startsWith(MIC_STEP) && granted -> what.removePrefix(MIC_STEP).toIntOrNull()?.let { controller.stepSampleInput(it, true) }
+        }
+    }
+
+    /**
+     * The SAMPLE panel opened (a swipe, or the mic key in the top bar): the
+     * mode opens, asking for the mic first when the input last chosen needs
+     * it (MIC or USB); RSP doesn't, and opens with whatever Android last said.
+     */
+    private fun enterSample() {
+        val input = controller.sample.value.input
+        if (input.source == dev.arc.ep133.features.SampleSource.RSP) controller.enterSample(micGranted()) else withMicrophone(MIC_ENTER)
+    }
+
+    /**
+     * SAMPLE's − or + ([step]): with the mic allowed, the input that many
+     * places on among all offered. Without it, a step that lands on the mic
+     * or USB (as they would be offered, [now] showing whether USB is plugged
+     * in) asks for the mic first ([withMicrophone]); one that lands on RSP
+     * goes ahead as it is.
+     */
+    private fun stepSampleSource(step: Int, now: dev.arc.ep133.controller.SampleUiState) {
+        if (micGranted()) return controller.stepSampleInput(step, true)
+        val offered = dev.arc.ep133.features.SampleInput.ORDER.filter {
+            when (it.source) {
+                dev.arc.ep133.features.SampleSource.MIC -> !it.stereo
+                dev.arc.ep133.features.SampleSource.RSP -> true
+                dev.arc.ep133.features.SampleSource.USB -> now.usb
+            }
+        }
+        val next = dev.arc.ep133.features.SampleInput.cycle(offered, now.input, step)
+        if (next.source == dev.arc.ep133.features.SampleSource.RSP) controller.stepSampleInput(step, false) else withMicrophone(MIC_STEP + step)
     }
 
     private fun savePak(b: BackupRecord) {
@@ -323,8 +549,17 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun Root() {
+        // The delay Live makes up for while its sound goes to Bluetooth, for the Bluetooth key's words: the flow, which
+        // only the key reads (it is told every second).
+        CompositionLocalProvider(dev.arc.ep133.ui.components.LocalDelayMadeUp provides controller.delayMadeUpFor) { RootContent() }
+    }
+
+    @Composable
+    private fun RootContent() {
         val state by controller.state.collectAsStateWithLifecycle()
         var debug by rememberSaveable { mutableStateOf(false) }
+        // The debug screen's latency test folded out, kept while Live is played in between.
+        var latencyOpen by rememberSaveable { mutableStateOf(false) }
         var settingsOpen by rememberSaveable { mutableStateOf(false) }
         var fontLicence by rememberSaveable { mutableStateOf(false) }
         // The guide overlay: from the ? key, and once by itself on the first start.
@@ -355,6 +590,26 @@ class MainActivity : ComponentActivity() {
         var notesField by rememberSaveable { mutableStateOf("") }
         // The EP-133 shortcut guide, slid in from the left-edge tab.
         var guideOpen by rememberSaveable { mutableStateOf(false) }
+        // Live's EDIT (the tab under GUIDE), and the pad whose sheet is open with where its sound is set.
+        var liveEdit by rememberSaveable { mutableStateOf(false) }
+        var padSheet by remember { mutableStateOf<Pair<dev.arc.ep133.features.PhysicalPad, dev.arc.ep133.features.PadTarget>?>(null) }
+        // The pad sheet's settings: asked for as it opens, let go of as it closes.
+        val padEdit by controller.padEdit.collectAsStateWithLifecycle()
+        LaunchedEffect(padSheet) {
+            val open = padSheet
+            if (open != null) controller.openPadEdit(open.first, open.second) else controller.closePadEdit()
+        }
+        // TEMPO held: the tempo sheet; PROJECT held: the project sheet; RECORD held: the pattern sheet; FX tapped: the FX sheet.
+        var tempoSheet by rememberSaveable { mutableStateOf(false) }
+        var projectSheet by rememberSaveable { mutableStateOf(false) }
+        var patternSheet by rememberSaveable { mutableStateOf(false) }
+        var fxSheet by rememberSaveable { mutableStateOf(false) }
+        // FX held: the pads play the punch-ins until it lets go, which lets go of every one held.
+        var punchMode by remember { mutableStateOf(false) }
+        fun punchOff() {
+            if (punchMode) controller.punchAllUp()
+            punchMode = false
+        }
         // The mirror listens only while its tab is in front (not under the debug, settings or guide screen).
         val live = tab == Tab.LIVE && !debug && !settingsOpen && !guideOpen
         val appSettings by controller.settings.collectAsStateWithLifecycle()
@@ -364,8 +619,19 @@ class MainActivity : ComponentActivity() {
             // Leaving a tab does what its Done key used to.
             when (tab) {
                 Tab.LIVE -> {
+                    // SAMPLE goes with Live (closing its sound, below, would end it too).
+                    controller.exitSample()
                     controller.closeMirror()
                     controller.stopPlayback()
+                    liveEdit = false
+                    padSheet = null
+                    tempoSheet = false
+                    projectSheet = false
+                    patternSheet = false
+                    fxSheet = false
+                    controller.dismissBeat()
+                    punchOff()
+                    controller.setPatternErase(false)
                 }
                 Tab.DEVICE -> {
                     padsFor = null
@@ -384,9 +650,23 @@ class MainActivity : ComponentActivity() {
             view.keepScreenOn = keepOn
             onDispose { view.keepScreenOn = false }
         }
+        DisposableEffect(live) {
+            unbufferedTouch(view, live)
+            onDispose { unbufferedTouch(view, false) }
+        }
         // The mirror (re)starts when it opens and whenever a device is (re)connected or
         // goes away; without one it shows the last read.
         val ready = state.device != null
+        // EDIT writes to the device, or offline changes pads in arc only: it ends when the device
+        // comes or goes, so no pad sheet stays open on the other side (not on a recreation).
+        var editReady by rememberSaveable { mutableStateOf(ready) }
+        LaunchedEffect(ready) {
+            if (ready != editReady) {
+                editReady = ready
+                liveEdit = false
+                padSheet = null
+            }
+        }
         // Only while the app is in front: in the background nothing listens or redraws.
         val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
         LaunchedEffect(live, ready) {
@@ -396,7 +676,8 @@ class MainActivity : ComponentActivity() {
                     try {
                         kotlinx.coroutines.awaitCancellation()
                     } finally {
-                        controller.pauseMirror()
+                        // A recreation (dark mode, language) keeps the mirror; the new activity takes it over.
+                        if (!isChangingConfigurations) controller.pauseMirror()
                     }
                 }
             }
@@ -410,7 +691,11 @@ class MainActivity : ComponentActivity() {
                     try {
                         kotlinx.coroutines.awaitCancellation()
                     } finally {
-                        controller.closeLiveAudio()
+                        // Nor does it cut the notes still sounding. Stopped (below STARTED), arc left the screen
+                        // rather than Live: a take it stops says so when it arrives.
+                        if (!isChangingConfigurations) {
+                            controller.closeLiveAudio(background = !lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED))
+                        }
                     }
                 }
             }
@@ -432,10 +717,75 @@ class MainActivity : ComponentActivity() {
         // After a recreation (or process death) the opened backup has to be read again.
         LaunchedEffect(contentsBackup?.id) { contentsBackup?.let { controller.openContents(it) } }
         val playing by controller.player.playing.collectAsStateWithLifecycle()
-        // Everything sounding, for Live's rings (several pads or keys for a chord).
-        val playingKeys by controller.liveKeys.collectAsStateWithLifecycle()
         val rec by controller.rec.collectAsStateWithLifecycle()
+        // Live's sound goes to Bluetooth: the top bar's Bluetooth key says it plays late (and the settings row).
+        val liveWireless by controller.liveWireless.collectAsStateWithLifecycle()
         val takes by controller.takes.collectAsStateWithLifecycle()
+        // TAKE in Live tools, and its badge on Live's display line while it records, on the page or in the top bar.
+        val liveTake = dev.arc.ep133.ui.screens.TakeUi(rec, controller::toggleTake)
+        // RECORD and PLAY on Live's display line: the pads played into a pattern that plays on the phone. A hold on
+        // RECORD opens the pattern sheet; where the pattern is is read as the line draws, not collected.
+        val pattern by controller.pattern.collectAsStateWithLifecycle()
+        // SCENES: the pattern each group plays and the scene, for the S01 chip, the panel it opens, the group keys' numbers
+        // and (SCENE CHANGE) the pattern sheet.
+        val scene by controller.scene.collectAsStateWithLifecycle()
+        // A beat card waiting on its sheet: pasted in Live tools, or shared to arc (which opens over Live).
+        val beatImport by controller.beatImport.collectAsStateWithLifecycle()
+        LaunchedEffect(beatImport != null) {
+            if (beatImport == null) return@LaunchedEffect
+            // Shared to arc from another app, or pasted: its sheet opens over Live, whatever was on.
+            debug = false
+            settingsOpen = false
+            guideOpen = false
+            search = false
+            comparePickFor = null
+            compareIds = null
+            contentsId = null
+            padsFor = null
+            detailId = null
+            restoreId = null
+            if (tab != Tab.LIVE) selectTab(Tab.LIVE)
+        }
+        val liveTransport = remember(pattern, scene.switchTime) {
+            dev.arc.ep133.ui.screens.TransportUi(
+                phase = pattern.phase,
+                recording = pattern.recording,
+                countIn = pattern.countIn,
+                timing = pattern.timing,
+                switchTime = scene.switchTime,
+                countInOn = pattern.countInOn,
+                autoLength = pattern.autoLength,
+                bars = pattern.bars,
+                hasNotes = pattern.hasNotes,
+                focusGroup = pattern.focusGroup,
+                erase = pattern.erase,
+                canUndo = pattern.canUndo,
+                missing = pattern.missing,
+                notePads = pattern.notePads,
+                position = controller::patternPosition,
+                onRecordDown = controller::patternRecordDown,
+                onRecordUp = controller::patternRecordUp,
+                onPlay = { recordHeld -> controller.patternPlay(recordHeld) },
+                onSheet = { patternSheet = true },
+                onErase = { on ->
+                    // A pad tapped erases instead of opening its sheet: EDIT goes.
+                    if (on) liveEdit = false
+                    controller.setPatternErase(on)
+                },
+                onUndo = controller::undoPattern,
+                onTiming = controller::setPatternTiming,
+                onSwitchTime = controller::setSceneSwitch,
+                onCountIn = controller::setPatternCountIn,
+                onAutoLength = controller::setPatternAutoLength,
+                onLength = controller::setPatternLength,
+                onDouble = controller::doublePattern,
+                onClear = controller::clearPattern,
+                onErasePadDown = { pad, at -> controller.erasePadDown(pad, at) },
+                onErasePadUp = { pad, at -> controller.erasePadUp(pad, at) },
+                onEraseNoteDown = controller::eraseNoteDown,
+                onEraseNoteUp = controller::eraseNoteUp,
+            )
+        }
         val compareA = compareIds?.substringBefore('|')?.let { id -> state.backups.firstOrNull { it.id == id } }
         val compareB = compareIds?.substringAfter('|')?.let { id -> state.backups.firstOrNull { it.id == id } }
         // Also runs again after a recreation, when the result is gone.
@@ -444,9 +794,212 @@ class MainActivity : ComponentActivity() {
         }
 
         val onTabs = !debug && !settingsOpen && (compareA == null || compareB == null) && contentsBackup == null && !search
+        // Live's view of the device and of KEYS, for its screen and (on a phone on its side) the top bar.
+        val mirror = state.mirror ?: if (!ready) {
+            dev.arc.ep133.controller.MirrorUi(loading = false, error = dev.arc.ep133.text.MirrorText.NOT_CONNECTED)
+        } else {
+            null
+        }
+        val keys = dev.arc.ep133.ui.screens.KeysUi(
+            on = appSettings.liveKeys,
+            root = appSettings.keysRoot,
+            scale = appSettings.keysScale,
+            octave = appSettings.keysOctave,
+            names = appSettings.keysNames,
+            showNames = appSettings.keysShowNames,
+            pianoWhites = appSettings.pianoWhites,
+            viewWide = appSettings.keysViewWide,
+            viewTall = appSettings.keysViewTall,
+            pad = state.keysPad,
+            padName = state.keysPad?.let(controller::mirrorName),
+        )
+        // Live's function keys: PROJECT steps through the projects, KEYS is the mode, TEMPO the phone's click.
+        val metronome by controller.metronome.collectAsStateWithLifecycle()
+        val sample by controller.sample.collectAsStateWithLifecycle()
+        val lastTake by controller.sampleLastTake.collectAsStateWithLifecycle()
+        // SAMPLE's take before KEEP: dismissed, it is discarded (the toast offers UNDO).
+        val review by controller.sampleReview.collectAsStateWithLifecycle()
+        // FX: the project's effect, sends, output compressor and sidechain, for the FX key and sheet.
+        val fx by controller.fx.collectAsStateWithLifecycle()
+        // The punch-ins held while FX is, in the order pressed: lit on the pads and named on the display line.
+        val punches by controller.punches.collectAsStateWithLifecycle()
+        // ARP / RPT and LATCH on the pads' plate: the notes held arpeggiate (KEYS) or repeat (PADS) at TIMING's interval.
+        val arp by controller.arp.collectAsStateWithLifecycle()
+        val liveArp = remember(arp) {
+            dev.arc.ep133.ui.screens.LiveArp(
+                ui = arp,
+                onOn = controller::setArpOn,
+                onLatch = controller::setArpLatch,
+                onNotePressure = controller::notePressure,
+                onPadPressure = controller::padPressure,
+            )
+        }
+        // STEP: the STEP chip on the stopped display line unrolls the panel over the function keys, where − / + step
+        // through the pattern, RECORD held puts pads on the step, VEL and LEN set it, NUDGE and CORRECT; CORRECT stays lit
+        // on the line while the pattern plays, a pad held correcting its notes as they pass.
+        val step by controller.step.collectAsStateWithLifecycle()
+        val liveStep = remember(step, appSettings.keysNames) {
+            dev.arc.ep133.ui.screens.LiveStep(
+                ui = step,
+                pickedWord = step.picked?.let { dev.arc.ep133.controller.stepWord(it, controller.mirrorName(it.pad), appSettings.keysNames) },
+                onOpen = { group ->
+                    // The pads place, pick and sound in the panel: EDIT goes.
+                    liveEdit = false
+                    controller.setStepOpen(true, group)
+                },
+                onClose = { controller.setStepOpen(false) },
+                onGroup = controller::setStepGroup,
+                onRecordDown = controller::stepRecordDown,
+                onRecordUp = controller::stepRecordUp,
+                onPlay = controller::stepPlay,
+                onPadDown = { pad, at, pressure -> controller.stepPadDown(pad, at, pressure) },
+                onPadUp = { pad, at -> controller.stepPadUp(pad, at) },
+                onNoteDown = { note, at, pressure -> controller.stepNoteDown(note, at, pressure) },
+                onNoteUp = { note, at -> controller.stepNoteUp(note, at) },
+                onPadPick = controller::stepPadPick,
+                onNotePick = controller::stepNotePick,
+                onMinus = controller::stepMinus,
+                onPlus = controller::stepPlus,
+                onJump = controller::stepJump,
+                onPage = controller::stepPage,
+                onVelocity = controller::setStepVelocity,
+                onGate = controller::setStepGate,
+                onKnobEnd = controller::stepKnobEnd,
+                onNudge = controller::setStepNudge,
+                onCorrect = controller::setStepCorrect,
+                onCorrectPadDown = { pad, at -> controller.correctPadDown(pad, at) },
+                onCorrectPadUp = { pad, at -> controller.correctPadUp(pad, at) },
+                onCorrectNoteDown = controller::correctNoteDown,
+                onCorrectNoteUp = controller::correctNoteUp,
+            )
+        }
+        // SCENES: the S01 chip beside STEP's (the scene's readout while the pattern plays) unrolls the panel over the function
+        // keys, where the groups' patterns and the scenes are picked (a pick waits for its bar or pattern end while it plays),
+        // COMMIT, CLR / DEL held, CHANGE, and COPY and PASTE of a pattern, a bar or a pad's notes. The panel stays open while it plays.
+        val liveScene = remember(scene, pattern.phase) {
+            dev.arc.ep133.ui.screens.LiveScene(
+                ui = scene,
+                running = pattern.phase == dev.arc.ep133.features.TransportPhase.PLAYING || pattern.phase == dev.arc.ep133.features.TransportPhase.COUNT_IN,
+                onOpen = { group ->
+                    // The pads stay the player's, so EDIT goes: a tap on one gives it another sound, not a pattern.
+                    liveEdit = false
+                    controller.setSceneOpen(true, group)
+                },
+                onClose = { controller.setSceneOpen(false) },
+                onGroup = controller::setSceneGroup,
+                onPlay = { controller.patternPlay(false) },
+                onScene = controller::sceneStep,
+                onPatternStep = controller::scenePatternStep,
+                onPatternPick = controller::scenePatternPick,
+                onNextFree = controller::scenePatternNextFree,
+                onGrid = controller::sceneGrid,
+                onCommit = controller::sceneCommit,
+                onErase = controller::sceneEraseHold,
+                onSwitch = controller::setSceneSwitch,
+                onClipMode = controller::setClipMode,
+                onBar = controller::setClipBar,
+                onCopy = controller::clipCopy,
+                onPaste = controller::clipPaste,
+            )
+        }
+        val functions = dev.arc.ep133.ui.screens.FunctionKeysUi(
+            // SOUND held: the sheet of the pad played last (its tap is EDIT, below).
+            onPadSound = {
+                val pad = state.keysPad
+                if (pad == null) controller.toast(dev.arc.ep133.text.MirrorText.PLAY_A_PAD) else controller.editTarget(pad)?.let { padSheet = pad to it }
+            },
+            project = dev.arc.ep133.ui.screens.projectKeyOf(mirror, state.busy),
+            onProject = controller::stepProject,
+            onPickProject = { projectSheet = true },
+            onSelectProject = controller::selectProject,
+            clickOn = metronome.on,
+            bpm = metronome.bpm,
+            beats = controller.beats,
+            onClick = controller::setClick,
+            onTempo = { tempoSheet = true },
+            fx = fx.type,
+            onFx = { fxSheet = true },
+            onFxHold = { down -> if (down) punchMode = true else punchOff() },
+            fxHeld = punchMode,
+        )
+        // The SAMPLE panel in the function keys' place: a swipe on Live's pads opens it and SAMPLE mode (asking for
+        // the mic first where the input needs it), a swipe back or Back leaves it; the pads record while
+        // it is open. The mic key in the top bar works the mode, and the panel follows.
+        val sampleUi = dev.arc.ep133.ui.screens.SampleUi(
+            state = sample,
+            level = controller::sampleLevel,
+            clip = controller::sampleClip,
+            lastTake = lastTake,
+            // A sheet over Live keeps Back: the SAMPLE panel's would otherwise take it first.
+            sheetOpen = review != null || padSheet != null || tempoSheet || projectSheet || patternSheet || fxSheet || beatImport != null || fontLicence || padsFor != null ||
+                detail != null || restore != null || comparePickFor != null || state.task != null,
+            onOpen = {
+                if (!sample.on) {
+                    // The pads record in the mode: EDIT and the sheets over them go.
+                    liveEdit = false
+                    padSheet = null
+                    tempoSheet = false
+                    patternSheet = false
+                    fxSheet = false
+                    enterSample()
+                }
+            },
+            onClose = { controller.exitSample() },
+            onStop = controller::stopSample,
+            onSource = { step -> stepSampleSource(step, sample) },
+            onStereo = { stereo -> controller.setSampleInput(sample.input.copy(stereo = stereo)) },
+            onGain = controller::setSampleGain,
+            onThreshold = controller::setSampleThreshold,
+            onBars = controller::setSampleBars,
+            // PTN, after 16 BARS while the project has notes: a take the pattern's length.
+            hasPattern = pattern.anyNotes,
+            pattern = sample.pattern,
+            onPattern = controller::setSamplePattern,
+            onLatch = controller::setSampleLatch,
+            onPadDown = { pad, at, unsure -> controller.samplePadDown(pad, at, unsure) },
+            onPadUp = controller::samplePadUp,
+            onPadKept = controller::samplePadKept,
+            onPadCut = controller::samplePadCut,
+            onLatchPad = { pad -> controller.latchSample(pad) },
+        )
+        // The piano's notes while it shows, so the bar's display line can name a device note past its ends.
+        var pianoRange by remember { mutableStateOf<IntRange?>(null) }
+        // How far Live's SAMPLE panel has cross-faded its header in, while Live shows: the bar's line follows it.
+        var sampleHeader by remember { mutableStateOf<(() -> Float)?>(null) }
+        val liveBar = tab == Tab.LIVE && dev.arc.ep133.ui.screens.liveInBar(dev.arc.ep133.ui.components.LocalArcWindow.current)
+        // Live's mic key in the top bar, while Live has a mirror or offline pads: lit while SAMPLE's panel is open. A
+        // tap opens it as a swipe does (from KEYS, Live goes to PADS for it in the same tap), or closes it, with a tick.
+        val feel = androidx.compose.ui.platform.LocalHapticFeedback.current
+        val sampleKey = if (tab == Tab.LIVE && mirror != null) {
+            val panelOpen = sample.on && !appSettings.liveKeys
+            dev.arc.ep133.ui.components.SampleKey(panelOpen) {
+                if (appSettings.haptics) feel.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.SegmentTick)
+                if (panelOpen) {
+                    controller.exitSample()
+                } else {
+                    if (appSettings.liveKeys) controller.setLiveKeys(false)
+                    sampleUi.onOpen()
+                }
+            }
+        } else {
+            null
+        }
+        // Live's Bluetooth key in the top bar, while the sound goes to Bluetooth: a tap toasts the sentence it reads.
+        val lateKey = remember(controller) { dev.arc.ep133.ui.components.LateKey { controller.toast(it) } }.takeIf { tab == Tab.LIVE && liveWireless }
         Box(Modifier.fillMaxSize()) {
             if (debug) {
-                DebugScreen(controller.trafficLog, ::shareLog, ::saveLog, ::copyLog) { debug = false }
+                val latency by controller.latency.collectAsStateWithLifecycle()
+                DebugScreen(
+                    controller.trafficLog, ::shareLog, ::saveLog, ::copyLog,
+                    latency = dev.arc.ep133.ui.screens.LatencyUi(
+                        state = latency,
+                        engine = appSettings.liveEngine,
+                        onEngine = controller::setLiveEngine,
+                        onReset = controller::resetLatency,
+                        open = latencyOpen,
+                        onOpen = { latencyOpen = it },
+                    ),
+                ) { debug = false }
             } else if (settingsOpen) {
                 val uri = androidx.compose.ui.platform.LocalUriHandler.current
                 SettingsScreen(
@@ -463,7 +1016,15 @@ class MainActivity : ComponentActivity() {
                     onForgetNames = controller::forgetLearned,
                     padSoundsSize = controller::padSoundsSize,
                     onClearPadSounds = { controller.clearPadSounds() },
+                    onGetFactory = { controller.getFactorySounds() },
                     onNoteNames = controller::setKeysNames,
+                    onShowNames = controller::setKeysShowNames,
+                    onPianoWhites = controller::setPianoWhites,
+                    onHaptics = controller::setHaptics,
+                    onMakeUpDelay = controller::setMakeUpDelay,
+                    wireless = liveWireless,
+                    latency = controller.outputLatencyMs,
+                    onReviewSamples = controller::setReviewSamples,
                     onRestoreFolder = { folderLauncher.launch(dev.arc.ep133.data.ExternalLibrary.INITIAL_FOLDER) },
                     // No browser installed: nothing to open.
                     onSource = { runCatching { uri.openUri(dev.arc.ep133.text.SettingsText.SOURCE_URL) } },
@@ -545,62 +1106,63 @@ class MainActivity : ComponentActivity() {
                     onTab = { selectTab(it) },
                     connected = state.connected,
                     canConnect = state.midiSupported && !state.busy,
-                    canBackup = state.midiSupported && state.device != null && !state.busy,
-                    onBackup = { withNotifications { controller.backup() } },
                     onConnect = { controller.connect() },
+                    // Connected, connect() lets go of the session: held for a second, the connection key's tap only toasts that.
+                    onDisconnect = { controller.connect() },
+                    onHint = { controller.toast(it) },
+                    haptics = appSettings.haptics,
                     onDebug = { debug = true },
                     onSettings = { settingsOpen = true },
                     onHelp = { coach = true },
                     guideOpen = guideOpen,
                     onGuide = { guideOpen = it },
                     guide = { GuideScreen(onBack = { guideOpen = false }) },
+                    // On a phone on its side, Live's display line rides in the top bar.
+                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, transport = liveTransport, take = liveTake, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys, sample = sampleUi, punch = punches, arp = arp.line, header = sampleHeader, step = liveStep, scene = liveScene, sceneOpens = appSettings.liveOneGroup && !appSettings.liveKeys) }) else null,
+                    sample = sampleKey,
+                    late = lateKey,
                 ) {
                     // Back from another section returns to Live, the home section, first.
                     BackHandler(enabled = tab != Tab.LIVE) { selectTab(Tab.LIVE) }
                     when (tab) {
                         Tab.LIVE -> MirrorScreen(
-                            mirror = state.mirror ?: if (!ready) {
-                                dev.arc.ep133.controller.MirrorUi(loading = false, error = dev.arc.ep133.text.MirrorText.NOT_CONNECTED)
-                            } else {
-                                null
-                            },
+                            mirror = mirror,
                             nameOf = controller::mirrorName,
-                            onPadOrder = controller::setPadOrder,
-                            onPad = { pad, hold -> controller.playPad(pad, hold) },
+                            onGetFactory = if (dev.arc.ep133.features.FactorySounds.inLibrary(state.backups) == null) ({ controller.getFactorySounds() }) else null,
+                            offlinePads = state.offlinePads,
+                            onResetPads = { controller.resetOfflinePads() },
+                            onPad = { pad, hold, unsure, pressedAt -> controller.playPad(pad, hold, unsure, pressedAt) },
+                            onPadKept = { pad -> controller.keepPad(pad) },
                             onPadUp = controller::releasePad,
-                            keys = dev.arc.ep133.ui.screens.KeysUi(
-                                on = appSettings.liveKeys,
-                                root = appSettings.keysRoot,
-                                scale = appSettings.keysScale,
-                                octave = appSettings.keysOctave,
-                                names = appSettings.keysNames,
-                                pad = state.keysPad,
-                                padName = state.keysPad?.let(controller::mirrorName),
-                                playingKeys = playingKeys.mapNotNullTo(LinkedHashSet()) { it.removePrefix("keys:").takeIf { _ -> it.startsWith("keys:") }?.toIntOrNull() },
-                            ),
+                            onPadCut = controller::cutPad,
+                            keys = keys,
                             keysActions = remember(controller) {
                                 dev.arc.ep133.ui.screens.KeysActions(
-                                    onMode = controller::setLiveKeys,
+                                    // The keys play notes, not pads to record into: SAMPLE closes for them.
+                                    onMode = { on ->
+                                        if (on) controller.exitSample()
+                                        controller.setLiveKeys(on)
+                                    },
                                     onRoot = controller::setKeysRoot,
                                     onScale = controller::setKeysScale,
                                     onOctave = controller::setKeysOctave,
-                                    onKey = { k, hold -> controller.playKey(k, hold) },
-                                    onKeyUp = controller::releaseKey,
+                                    onNote = { note, hold, pressedAt -> controller.playNote(note, hold, pressedAt) },
+                                    onNoteUp = controller::releaseNote,
                                     onSelect = controller::selectKeysPad,
+                                    onView = controller::setKeysView,
                                 )
                             },
-                            playingPads = playingKeys.mapNotNullTo(HashSet()) { k ->
-                                k.split(':').takeIf { it.size == 3 && it[0] == "live" }?.let { p ->
-                                    val g = p[1].toIntOrNull()
-                                    val o = p[2].toIntOrNull()
-                                    if (g != null && o != null) dev.arc.ep133.features.PhysicalPad(g, o) else null
-                                }
-                            },
+                            // Everything sounding, for the rings (several pads or notes for a chord):
+                            // collected inside Live, so a voice starting doesn't recompose the whole app.
+                            voices = controller.liveKeys,
+                            haptics = appSettings.haptics,
                             oneGroup = appSettings.liveOneGroup,
                             onOneGroup = controller::setLiveOneGroup,
                             follow = appSettings.liveFollow,
                             onFollow = controller::setLiveFollow,
-                            rec = dev.arc.ep133.ui.screens.RecUi(rec, controller::toggleRec),
+                            onPianoRange = { pianoRange = it },
+                            transport = liveTransport,
+                            take = liveTake,
                             takes = dev.arc.ep133.ui.screens.TakesUi(
                                 list = takes,
                                 playing = playing,
@@ -616,6 +1178,51 @@ class MainActivity : ComponentActivity() {
                                     selectTab(Tab.DEVICE)
                                 },
                                 onDelete = { controller.deleteTake(it) },
+                            ),
+                            edit = dev.arc.ep133.ui.screens.EditUi(
+                                on = liveEdit,
+                                onEdit = { on ->
+                                    // With the device there to write to, or offline a last read (or the factory sounds) to change in arc.
+                                    if (on && !ready && mirror?.offline == null) {
+                                        controller.toast(dev.arc.ep133.text.MirrorText.EDIT_OFFLINE)
+                                    } else {
+                                        // A tap on a pad gives it another sound: SAMPLE, STEP, SCENE, ERASE and CORRECT close for it.
+                                        if (on) {
+                                            controller.exitSample()
+                                            controller.setStepOpen(false)
+                                            controller.setSceneOpen(false)
+                                            controller.setPatternErase(false)
+                                            if (step.correct) controller.setStepCorrect(false)
+                                        }
+                                        liveEdit = on
+                                    }
+                                },
+                                onPad = { pad -> controller.editTarget(pad)?.let { padSheet = pad to it } },
+                            ),
+                            functions = functions,
+                            // FX held: the one-group pads play the punch-ins, straight to the effects (no voice, nothing recorded).
+                            punch = dev.arc.ep133.ui.screens.PunchUi(
+                                held = punches,
+                                onDown = controller::punchDown,
+                                onMove = controller::punchMove,
+                                onUp = controller::punchUp,
+                            ),
+                            sample = sampleUi,
+                            onSampleHeader = { sampleHeader = it },
+                            arp = liveArp,
+                            step = liveStep,
+                            scene = liveScene,
+                            onSettings = { settingsOpen = true },
+                            // CLAUDE in Live tools: the scene and the patterns of its groups, which the share keys name.
+                            claude = dev.arc.ep133.ui.screens.ClaudeUi(
+                                scene = scene.label,
+                                numbers = scene.groups.map { it.number },
+                                hasNotes = scene.groups.map { it.number in it.filled },
+                                onShareScene = { shareBeat(null) },
+                                onSharePattern = ::shareBeat,
+                                onPaste = { controller.receiveBeat(clipboardText()) },
+                                onGetSkill = ::openSkill,
+                                onLearn = ::learnWithClaude,
                             ),
                         )
                         Tab.DEVICE -> DeviceScreen(
@@ -647,6 +1254,140 @@ class MainActivity : ComponentActivity() {
             }
             // The tab screens' sheets, over the frame (same condition as the branch above).
             if (onTabs) {
+                if (tab == Tab.LIVE) {
+                    val lastPadSheet = remember { mutableStateOf(padSheet) }.apply { if (padSheet != null) value = padSheet }.value
+                    fun closePadSheet() {
+                        padSheet = null
+                        if (playing?.startsWith("device:") == true || playing?.startsWith("factory:") == true) controller.stopPlayback()
+                    }
+                    ArcSheet(visible = padSheet != null, onDismiss = { closePadSheet() }) {
+                        lastPadSheet?.let { (pad, target) ->
+                            // Offline: the last read's and the factory pack's lists, the pad changing in arc only.
+                            val offline = mirror?.offlineSounds?.takeIf { !ready }
+                            PadSheetContent(
+                                pad = pad,
+                                target = target,
+                                sounds = if (offline != null) offline.device.orEmpty() else mirror?.sounds.orEmpty(),
+                                playing = playing,
+                                busy = state.busy && offline == null,
+                                onPlay = { slot, source -> controller.playLiveSound(slot, source) },
+                                onStop = controller::stopPlayback,
+                                onPick = { slot, source ->
+                                    closePadSheet()
+                                    controller.assignPad(pad, target, slot, source)
+                                },
+                                onUpload = if (offline != null) null else ({
+                                    closePadSheet()
+                                    padUploadFor = pad to target
+                                    padUploadLauncher.launch(arrayOf("audio/*", "application/octet-stream"))
+                                }),
+                                factory = offline?.factory,
+                                unavailable = offline?.unavailable.orEmpty(),
+                                padSource = offline?.let { controller.mirrorLocal(pad)?.source ?: it.base } ?: dev.arc.ep133.features.SoundSource.DEVICE,
+                                offline = offline != null,
+                                readSlot = offline?.let { controller.mirrorReadSlot(target) },
+                                localName = offline?.let { controller.mirrorLocal(pad)?.name },
+                                edit = padEdit?.takeIf { it.target == target },
+                                onEdit = controller::adjustPad,
+                                // The cap plays the pad as Live does, with its settings (a try, never a pattern's note).
+                                onPadDown = { controller.playPad(pad, record = false) },
+                                onPadUp = { controller.releasePad(pad) },
+                                haptics = appSettings.haptics,
+                            )
+                        }
+                    }
+                    ArcSheet(visible = projectSheet, onDismiss = { projectSheet = false }) {
+                        ProjectSheetContent(
+                            choices = dev.arc.ep133.ui.screens.projectChoicesOf(mirror, state.busy),
+                            onPick = controller::selectProject,
+                            onDone = { projectSheet = false },
+                        )
+                    }
+                    ArcSheet(visible = tempoSheet, onDismiss = { tempoSheet = false }) {
+                        TempoSheetContent(
+                            bpm = metronome.bpm,
+                            deviceBpm = mirror?.state?.bpm,
+                            on = metronome.on,
+                            onOn = controller::setClick,
+                            onBpm = controller::setTempo,
+                            onTap = { controller.tapTempo(it) },
+                            onDone = { tempoSheet = false },
+                            // TIMING: the interval the arp steps at and recording snaps to, and the arp's settings.
+                            timing = dev.arc.ep133.ui.screens.TimingUi(
+                                timing = arp.timing,
+                                arp = arp.settings,
+                                onInterval = controller::setTimingInterval,
+                                onSwing = controller::setTimingSwing,
+                                onQuantize = controller::setTimingQuantize,
+                                onOrder = controller::setArpOrder,
+                                onOctaves = controller::setArpOctaves,
+                                onGate = controller::setArpGate,
+                                onLatch = controller::setArpLatch,
+                                haptics = appSettings.haptics,
+                            ),
+                        )
+                    }
+                    ArcSheet(visible = patternSheet, onDismiss = { patternSheet = false }) {
+                        PatternSheetContent(liveTransport, onDone = { patternSheet = false })
+                    }
+                    // A beat card, read and planned into the project's patterns: IMPORT is one UNDO step. It keeps showing while it closes.
+                    val lastBeat = remember { mutableStateOf(beatImport) }.apply { if (beatImport != null) value = beatImport }.value
+                    ArcSheet(visible = beatImport != null, onDismiss = controller::dismissBeat) {
+                        lastBeat?.let { b ->
+                            BeatImportSheetContent(
+                                ui = b,
+                                onCancel = controller::dismissBeat,
+                                onImport = controller::importBeat,
+                                onCopyProblems = ::copyProblems,
+                            )
+                        }
+                    }
+                    ArcSheet(visible = fxSheet, onDismiss = { fxSheet = false }) {
+                        FxSheetContent(
+                            dev.arc.ep133.ui.screens.FxUi(
+                                settings = fx,
+                                // The tempo Live plays at: the EP-133's while it sends its clock, else the phone's.
+                                bpm = dev.arc.ep133.controller.patternBpm(mirror?.state?.bpm, appSettings.liveTempo).toFloat(),
+                                selected = state.keysPad,
+                                nameOf = controller::mirrorName,
+                                // An effect put on with no send anywhere: the group of the pad played last sends to it.
+                                onType = { controller.setFxType(it, state.keysPad?.group) },
+                                onXY = controller::setFxXY,
+                                onSend = controller::setFxSend,
+                                onComp = { on, x, y -> controller.setComp(on, x, y) },
+                                onSidechainOn = controller::setSidechainOn,
+                                onSidechainSource = controller::setSidechainSource,
+                                onSidechainDest = controller::toggleSidechainDest,
+                                onSidechainXY = controller::setSidechainXY,
+                                haptics = appSettings.haptics,
+                                // The cap plays the pad as Live does, through the effects (a try, never a pattern's note).
+                                onPadDown = { controller.playPad(it, record = false) },
+                                onPadUp = controller::releasePad,
+                            ),
+                            onDone = { fxSheet = false },
+                        )
+                    }
+                    // SAMPLE's review sheet (its take collected above).
+                    val lastReview = remember { mutableStateOf(review) }.apply { if (review != null) value = review }.value
+                    ArcSheet(visible = review != null, onDismiss = { controller.discardSample() }) {
+                        lastReview?.let { r ->
+                            SampleReviewSheetContent(
+                                review = r,
+                                playing = playing == dev.arc.ep133.controller.REVIEW_KEY,
+                                haptics = appSettings.haptics,
+                                onTrim = controller::setReviewTrim,
+                                onNormalize = controller::setReviewNormalize,
+                                onTrimSilence = controller::setReviewTrimSilence,
+                                onSlot = controller::stepReviewSlot,
+                                onPlay = { controller.playReview() },
+                                onStop = controller::stopReview,
+                                onRetake = controller::retakeSample,
+                                onKeep = controller::keepSample,
+                                onDiscard = controller::discardSample,
+                            )
+                        }
+                    }
+                }
                 if (tab == Tab.DEVICE) {
                     val draft = state.browser.draft
                     val lastDraft = remember { mutableStateOf(draft) }.apply { if (draft != null) value = draft }.value
@@ -800,12 +1541,17 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Transfers can start from any tab (Back up is in the top bar).
+                // Transfers can start from any tab (a restore or upload away from Backups).
                 val task = state.task
                 val lastTask = remember { mutableStateOf(task) }.apply { if (task != null) value = task }.value
                 ArcSheet(visible = task != null, onDismiss = null, grip = false) {
                     lastTask?.let { ProgressSheetContent(it, onCancel = controller::cancelTask) }
                 }
+            }
+
+            // The EP-133 connected with offline pad changes kept: write them or leave the device as it is.
+            state.offlinePrompt?.let { p ->
+                dev.arc.ep133.ui.screens.OfflinePadsDialog(p.changes, p.samples, onWrite = { controller.writeOfflinePads() }, onDiscard = { controller.discardOfflinePads() })
             }
 
             val toast = state.toast
@@ -814,6 +1560,8 @@ class MainActivity : ComponentActivity() {
                 text = toast?.text.orEmpty(),
                 error = toast?.error ?: false,
                 onTimeout = controller::dismissToast,
+                action = toast?.action,
+                onAction = toast?.onAction,
                 modifier = Modifier.align(Alignment.BottomCenter),
             )
         }
@@ -821,6 +1569,17 @@ class MainActivity : ComponentActivity() {
 }
 
 private const val KEY_PENDING_SAVE = "pending_save"
+private const val KEY_PENDING_MIC = "pending_mic"
+
+/** What SAMPLE asks the mic for ([MainActivity.withMicrophone]): to open the mode, or −/+ by the number after it. */
+private const val MIC_ENTER = "enter"
+private const val MIC_STEP = "step:"
+
+/** The preference that says Android refused the mic for good, as an answer found it ([MainActivity.refusedForGood]). */
+private const val PREF_MIC_REFUSED = "mic_refused"
+
+/** A "no" to the mic sooner than this after asking came without a question shown: Android no longer asks. */
+private const val MIC_AUTO_REFUSAL_MS = 300L
 private const val COPY_LIMIT = 200_000
 
 /** versionName without enabling the BuildConfig feature. */

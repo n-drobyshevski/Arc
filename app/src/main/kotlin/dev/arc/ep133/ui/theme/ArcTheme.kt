@@ -20,6 +20,9 @@ import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import dev.arc.ep133.R
+import dev.arc.ep133.ui.components.DarkHwColors
+import dev.arc.ep133.ui.components.LightHwColors
+import dev.arc.ep133.ui.components.LocalHwColors
 
 /**
  * Colour tokens from reference/styles.css, taken from the device itself: a
@@ -42,6 +45,8 @@ data class ArcColors(
     val displayDim: Color,
     val segmentOff: Color,
     val danger: Color,
+    /** A warning: amber, 7:1 or more on the dark display in either theme (the top bar's Bluetooth key takes it as its face). */
+    val warn: Color,
     /** Selected tab and choice keys. */
     val navy: Color,
     val onNavy: Color,
@@ -54,6 +59,24 @@ data class ArcColors(
     /** The "connected" block. */
     val ok: Color,
     val onOk: Color,
+    /**
+     * Live's landscape piano: its key faces, the names and rings on black
+     * keys, and the faces of keys outside the scale (dimmed: each face pulled
+     * toward a mid grey, to 1.4:1 from its own colour, and the two dimmed
+     * faces 1.3:1 or more apart). The line between white keys also outlines
+     * the black ones, so every key's edge is 3:1 or more against its
+     * neighbours.
+     */
+    val pianoWhite: Color,
+    val pianoBlack: Color,
+    val onPianoBlack: Color,
+    val keyOut: Color,
+    val keyOutBlack: Color,
+    val pianoLine: Color,
+    /** The signal orange drawn on the piano's white keys, 3:1 or more there: a held key's outline, the tick for a note past the end, the dark theme's root. */
+    val pianoSignal: Color,
+    /** The octave digit on a C other than OCT's own (which is in ink). */
+    val pianoDigit: Color,
 ) {
     val scrim: Color get() = Color(20, 20, 18).copy(alpha = 0.45f)
 }
@@ -72,6 +95,7 @@ val LightArcColors = ArcColors(
     displayDim = Color(0xFF8A8C83),
     segmentOff = Color(0xFF3A3D36),
     danger = Color(0xFFB3261E),
+    warn = Color(0xFFE8A53E),
     navy = Color(0xFF1F2558),
     onNavy = Color(0xFFF4F2EE),
     tabOff = Color(0xFFD3D2DA),
@@ -80,6 +104,15 @@ val LightArcColors = ArcColors(
     line = Color(0xFF1E1F21),
     ok = Color(0xFF17613F),
     onOk = Color(0xFFF4F2EE),
+    pianoWhite = Color(0xFFF5F4F0),
+    pianoBlack = Color(0xFF1E1F21),
+    // The dark theme's navy: pale enough to read on a black key.
+    onPianoBlack = Color(0xFFAEB4F0),
+    keyOut = Color(0xFFCDCCCC),
+    keyOutBlack = Color(0xFF3A3B3F),
+    pianoLine = Color(0xFF1E1F21),
+    pianoSignal = Color(0xFFFF4C00),
+    pianoDigit = Color(0xFF55545C),
 )
 
 val DarkArcColors = LightArcColors.copy(
@@ -94,6 +127,7 @@ val DarkArcColors = LightArcColors.copy(
     segmentOff = Color(0xFF2A2D27),
     signalEdge = Color(0xFFA83200),
     danger = Color(0xFFFF8A80),
+    warn = Color(0xFFFFC15E),
     navy = Color(0xFFAEB4F0),
     onNavy = Color(0xFF14162B),
     tabOff = Color(0xFF3A3B44),
@@ -102,6 +136,17 @@ val DarkArcColors = LightArcColors.copy(
     line = Color(0xFF0E0F10),
     ok = Color(0xFF3FA877),
     onOk = Color(0xFF0E1A14),
+    // White keys lifted off the shell; black keys darker than it, held apart from the
+    // white ones by a light grey outline (their faces alone are under 3:1). Dimmed, the
+    // white keys darken and the black ones lighten, still 1.4:1 apart.
+    pianoWhite = Color(0xFF5D5E65),
+    pianoBlack = Color(0xFF121314),
+    keyOut = Color(0xFF46474C),
+    keyOutBlack = Color(0xFF303135),
+    pianoLine = Color(0xFFB2B3B5),
+    // The signal orange is only 2:1 on those white keys: a lighter one there.
+    pianoSignal = Color(0xFFFFA070),
+    pianoDigit = Color(0xFFBCBDBF),
 )
 
 val LocalArcColors = staticCompositionLocalOf { LightArcColors }
@@ -194,8 +239,11 @@ fun ArcTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> U
     MaterialTheme(colorScheme = scheme, typography = typography) {
         CompositionLocalProvider(
             LocalArcColors provides c,
+            LocalHwColors provides if (dark) DarkHwColors else LightHwColors,
             LocalTextSelectionColors provides TextSelectionColors(handleColor = c.signal, backgroundColor = c.signal.copy(alpha = 0.3f)),
-            content = content,
-        )
+        ) {
+            // Here, so the app and every screenshot get the window's size.
+            dev.arc.ep133.ui.components.ProvideArcWindow(content)
+        }
     }
 }

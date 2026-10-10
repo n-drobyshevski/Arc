@@ -1,4 +1,8 @@
-/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/SideZone.kt */
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/SideZone.kt
+ *
+ * Web only, from 1024px wide (the desk): docked, the page and the panel sit
+ * side by side, the panel a 340 wide paper card (.desk-paper) the zone's
+ * height that scrolls by itself; no strip, scrim or slide. */
 
 /* BoxWithConstraints(fillMaxSize): the page, the strip over its right edge, the panel over both. */
 .side-zone {
@@ -91,4 +95,35 @@
 @media (prefers-reduced-motion: reduce) {
   .side-zone__scrim,
   .side-zone__panel { transition: none; }
+}
+
+/* ---------- docked (the desk, web only) ---------- */
+
+@media (min-width: 1024px) {
+  .side-zone--docked {
+    display: flex;
+    gap: var(--space-22);
+    /* The page's cap shadows reach past its box. */
+    overflow: visible;
+  }
+  .side-zone--docked > .side-zone__content {
+    position: relative;
+    inset: auto;
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: visible;
+  }
+  .side-zone__dock {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-12);
+    width: 340px;
+    padding: var(--space-20);
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .side-zone__dock > * { flex: none; }
+  .side-zone__dock-title { padding-inline: var(--space-2); font-weight: var(--weight-bold); }
 }

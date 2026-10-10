@@ -1,5 +1,8 @@
 package dev.arc.ep133.protocol
 
+import dev.arc.ep133.features.PadFid
+import dev.arc.ep133.features.PadPush
+import dev.arc.ep133.features.PadSettings
 import dev.arc.ep133.formats.Crc32
 import dev.arc.ep133.formats.JsJson
 import dev.arc.ep133.formats.asObject
@@ -20,6 +23,7 @@ import kotlinx.serialization.json.JsonPrimitive
 //
 //   /sounds    node 1000, children are sample slots 1..999 (raw s16le PCM + JSON metadata)
 //   /projects  node 2000, project N lives at 3000 + (N-1)*1000 and reads/writes as a TAR
+//   pads       zero-byte files under each project: 3200 + (N-1)*1000 + group*100 + pad (PadPush.node)
 
 data class Storage(val total: Double, val free: Double, val used: Double)
 
@@ -49,12 +53,36 @@ object Device {
     const val MAX_SAMPLE_RATE = 46875
     const val MAX_SOUND_NAME = 20
 
+    /** The device's projects, 1..9 (the PROJECT key's numbers, and the ones a backup probes). */
+    const val PROJECT_COUNT = 9
+
     fun projectNode(n: Int): Int = 3000 + (n - 1) * 1000
 
     fun projectFromNode(node: Int): Int? {
         if (node < 3000 || (node - 3000) % 1000 != 0) return null
         val n = (node - 3000) / 1000 + 1
         return if (n in 1..99) n else null
+    }
+
+    /**
+     * The project an "active" value of /projects' metadata names (a node, as
+     * a number or a numeric string), or null when it names none.
+     */
+    fun projectOfActive(active: JsonElement?): Int? =
+        (active as? JsonPrimitive)?.content?.toDoubleOrNull()?.toInt()?.let(::projectFromNode)
+
+    /** The project the device plays now, from /projects' metadata; null when it names none. */
+    suspend fun activeProject(session: Session): Int? =
+        projectOfActive(Fs.getMetadata(session, PROJECTS_NODE).asObject()["active"])
+
+    /**
+     * Makes project [n] the active one, as PROJECT on the device does: the
+     * METADATA SET of {"active": node} on /projects that [writeProject] and a
+     * restore use to make the device load a project.
+     */
+    suspend fun setActiveProject(session: Session, n: Int) {
+        require(n in 1..PROJECT_COUNT) { "Project $n doesn't exist. Projects go from 1 to $PROJECT_COUNT." }
+        Fs.setMetadata(session, PROJECTS_NODE, JsonObject(mapOf("active" to JsJson.number(projectNode(n)))))
     }
 
     /** Per-sound settings worth carrying through a backup. */
@@ -215,6 +243,65 @@ object Device {
             val same = crc.isJsNumber && crc.numberOrNull == Crc32.of(sound.pcm).toDouble()
             if (!same) throw DeviceError("Sound ${sound.slot} did not verify after upload (checksum mismatch)")
         }
+    }
+
+    /**
+     * The metadata that puts sample [slot] on a pad (an addition to the web
+     * version): `{"sym": slot}`. Only `sym` is written. The device then
+     * re-syncs the pad's other fields from the new sample, so the pad's own
+     * tweaks reset, as when a sound is assigned on the device itself.
+     */
+    fun padPatch(slot: Int): JsonObject {
+        require(slot in 1..999) { "Slot $slot doesn't exist. Slots go from 1 to 999." }
+        return JsonObject(mapOf("sym" to JsJson.number(slot)))
+    }
+
+    /**
+     * Puts sample [slot] on [pad] (1..12, its number in the project file) of
+     * [group] (0..3 = A..D) in [project]: a METADATA SET on the pad's file
+     * (community notes, kmorrill/ep-series-sysex docs/file-protocol.md; not in
+     * the official guide). The pad's `sym` reads 0 until written, so the slot
+     * on a pad now comes from the project's pad records (ProjectPads).
+     */
+    suspend fun assignPad(session: Session, project: Int, group: Int, pad: Int, slot: Int) {
+        val node = PadPush.node(PadFid(project, group, pad))
+        Fs.setMetadata(session, node, padPatch(slot))
+    }
+
+    /**
+     * The metadata of [pad] (1..12, its number in the project file) of [group]
+     * (0..3 = A..D) in [project], where the device keeps the pad's SOUND EDIT
+     * settings (an addition; read with PadSettings.fromMeta): a METADATA GET
+     * on the pad's file. Community notes, not the official guide:
+     * ZacharySBrown/ep133-ppak PROTOCOL.md and wil-gerard/ep133-mcp
+     * docs/research/pad-params-proof.md (hardware-checked on OS 2.5.1). A pad
+     * never written may read little more than `{"sym":0}`
+     * (PadSettings.written); a pad the device doesn't have reads `{}`.
+     */
+    suspend fun readPad(session: Session, project: Int, group: Int, pad: Int): JsonObject =
+        Fs.getMetadata(session, PadPush.node(PadFid(project, group, pad))).asObject()
+
+    /**
+     * Gives [pad] of [group] in [project] the SOUND EDIT [settings], with
+     * sample [slot] on it (an addition): a METADATA SET of
+     * [PadSettings.toMeta] on the pad's file, [frames] being the sample's
+     * length when known (for the trim). Always the full record, `sym`
+     * included: per the notes in [readPad], a partial write can make the
+     * device re-sync every field from the sample and drop the pad's other
+     * settings, and the play and time modes go as strings, or the device
+     * refuses the write (status 1).
+     */
+    suspend fun writePadSettings(
+        session: Session,
+        project: Int,
+        group: Int,
+        pad: Int,
+        slot: Int,
+        settings: PadSettings,
+        frames: Long?,
+    ) {
+        val node = PadPush.node(PadFid(project, group, pad))
+        Fs.setMetadata(session, node, settings.toMeta(slot, frames))
     }
 
     /** Upload a project TAR and make the device reload it. */

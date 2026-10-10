@@ -7,6 +7,11 @@
 // whole drawing, as the Kotlin size parameter does (stroke scales with it).
 // They draw in currentColor. IconBlock (the key around an icon) lives in
 // IconBlock.tsx.
+//
+// Web only: SYSTEM, SUN and MOON, the desktop top bar's theme switch
+// (ThemeSwitch.tsx; Kotlin has no theme key outside Settings), drawn in the
+// same way: a ring half filled, a disc with eight rays at the gear's 45°
+// steps, a crescent. Kotlin's GRID, PIANO and EXCHANGE are not ported (unused here).
 import type { JSX } from 'preact'
 import './Icons.css'
 
@@ -22,6 +27,11 @@ export const ArcIcon = {
   IMPORT: 'IMPORT',
   FOLLOW: 'FOLLOW',
   SWAP: 'SWAP',
+  BLUETOOTH: 'BLUETOOTH',
+  CLOCK: 'CLOCK',
+  SYSTEM: 'SYSTEM',
+  SUN: 'SUN',
+  MOON: 'MOON',
 } as const
 export type ArcIcon = (typeof ArcIcon)[keyof typeof ArcIcon]
 
@@ -236,6 +246,99 @@ export function Swap(props: IconProps): JSX.Element {
   )
 }
 
+/**
+ * The rune: a spine with two arrowheads on its right, crossed by the strokes
+ * from its left (stroke × 1.1, round caps and joins).
+ */
+export function Bluetooth(props: IconProps): JSX.Element {
+  return (
+    <Svg {...props} name="BLUETOOTH">
+      <path
+        d={`M${n(W * 0.24)} ${n(W * 0.68)}L${n(W * 0.76)} ${n(W * 0.3)}L${C} ${n(W * 0.08)}V${n(W * 0.92)}L${n(W * 0.76)} ${n(W * 0.7)}L${n(W * 0.24)} ${n(W * 0.32)}`}
+        stroke="currentColor"
+        stroke-width={n(STROKE * 1.1)}
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </Svg>
+  )
+}
+
+/** A face r = .4w with its two hands: late. */
+export function Clock(props: IconProps): JSX.Element {
+  return (
+    <Svg {...props} name="CLOCK">
+      <circle cx={C} cy={C} r={n(W * 0.4)} stroke="currentColor" stroke-width={n(STROKE)} />
+      <path
+        d={`M${C} ${n(C - W * 0.22)}V${C}L${n(C + W * 0.16)} ${n(C + W * 0.1)}`}
+        stroke="currentColor"
+        stroke-width={n(STROKE)}
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </Svg>
+  )
+}
+
+/** Web only. Theme System: RING with its left half filled (sweeping from the top through the left). */
+export function System(props: IconProps): JSX.Element {
+  const r = W * 0.32
+  return (
+    <Svg {...props} name="SYSTEM">
+      <circle cx={C} cy={C} r={n(r)} stroke="currentColor" stroke-width={n(STROKE)} />
+      <path d={`M${C} ${n(C - r)}A${n(r)} ${n(r)} 0 0 0 ${C} ${n(C + r)}Z`} fill="currentColor" />
+    </Svg>
+  )
+}
+
+/** Web only. Theme Light: a disc r = .2w and eight rays from .3w to .42w in 45° steps (stroke × .9, round caps). */
+export function Sun(props: IconProps): JSX.Element {
+  let rays = ''
+  for (let i = 0; i < 8; i++) {
+    const a = rad(i * 45)
+    const x = Math.cos(a)
+    const y = Math.sin(a)
+    rays += `M${n(C + W * 0.3 * x)} ${n(C + W * 0.3 * y)}L${n(C + W * 0.42 * x)} ${n(C + W * 0.42 * y)}`
+  }
+  return (
+    <Svg {...props} name="SUN">
+      <circle cx={C} cy={C} r={n(W * 0.2)} fill="currentColor" />
+      <path d={rays} stroke="currentColor" stroke-width={n(STROKE * 0.9)} stroke-linecap="round" />
+    </Svg>
+  )
+}
+
+// MOON: a disc r = .36w with a disc r = .29w taken out of its top right (centre
+// .22w right and .16w up), as one path: the outer circle's long way between
+// the two crossing points, then the cut's short way back.
+const MOON_R = W * 0.36
+const CUT_R = W * 0.29
+const CUT = { x: C + W * 0.22, y: C - W * 0.16 }
+const MOON_D = (() => {
+  const dx = CUT.x - C
+  const dy = CUT.y - C
+  const d = Math.hypot(dx, dy)
+  const a = (d * d - CUT_R * CUT_R + MOON_R * MOON_R) / (2 * d)
+  const h = Math.sqrt(MOON_R * MOON_R - a * a)
+  const ux = dx / d
+  const uy = dy / d
+  const p1 = { x: C + a * ux - h * uy, y: C + a * uy + h * ux }
+  const p2 = { x: C + a * ux + h * uy, y: C + a * uy - h * ux }
+  return (
+    `M${n(p1.x)} ${n(p1.y)}A${n(MOON_R)} ${n(MOON_R)} 0 1 1 ${n(p2.x)} ${n(p2.y)}` +
+    `A${n(CUT_R)} ${n(CUT_R)} 0 0 0 ${n(p1.x)} ${n(p1.y)}Z`
+  )
+})()
+
+/** Web only. Theme Dark: a crescent. */
+export function Moon(props: IconProps): JSX.Element {
+  return (
+    <Svg {...props} name="MOON">
+      <path d={MOON_D} fill="currentColor" />
+    </Svg>
+  )
+}
+
 const BY_NAME: Readonly<Record<ArcIcon, (p: IconProps) => JSX.Element>> = {
   DOT: Dot,
   RING: Ring,
@@ -247,6 +350,11 @@ const BY_NAME: Readonly<Record<ArcIcon, (p: IconProps) => JSX.Element>> = {
   IMPORT: Import,
   FOLLOW: Follow,
   SWAP: Swap,
+  BLUETOOTH: Bluetooth,
+  CLOCK: Clock,
+  SYSTEM: System,
+  SUN: Sun,
+  MOON: Moon,
 }
 
 /** `Icon(icon, color, modifier, size)`: draws [icon] by name. */

@@ -101,7 +101,20 @@
   pointer-events: none;
 }
 
-/* "TAP ANYWHERE TO CLOSE": ArcType.caps in graphite, centred at 72% of the height. */
+/* Reads the safe area (a notch, a side navigation bar) for the placement. */
+.coach__insets {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* "TAP ANYWHERE TO CLOSE": ArcType.caps in graphite, centred at 72% of the height
+ * (or, a tag there, in the tallest gap between the tags: hintTop sets top). */
 .coach__hint {
   position: absolute;
   left: 50%;

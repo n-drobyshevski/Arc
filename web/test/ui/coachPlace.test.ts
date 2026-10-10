@@ -1,15 +1,20 @@
 // Tests for the guide overlay's tag placement (src/ui/coachPlace.ts), a port of
 // CoachOverlay in app/src/main/kotlin/dev/arc/ep133/ui/components/Coach.kt.
-// The expected numbers are worked out from the Kotlin loop by hand.
+// The expected numbers are worked out from the Kotlin loop by hand; the crowded
+// rules (a short window) are checked by what they keep clear.
 import { describe, expect, it } from 'vitest'
 import {
   COACH_METRICS,
   arrowHead,
+  clearArrows,
   coerceIn,
+  crosses,
   edgeOf,
   hintTop,
   inflate,
   isTall,
+  layoutTags,
+  occlusions,
   overlaps,
   placeTags,
   placementOrder,
@@ -17,6 +22,7 @@ import {
   type Box,
   type CoachMarkInput,
   type MeasureTag,
+  type PlacedTag,
 } from '../../src/ui/coachPlace'
 
 const VP = { width: 400, height: 800 }
@@ -275,22 +281,42 @@ describe('side tags (narrow controls on an edge)', () => {
     expect(bottom!.rect.bottom).toBe(800 - 8)
   })
 
-  it('places side tags first, and the others keep clear of their hook', () => {
+  it('places the tags beside their controls first, then the side tab, centred where that is clear', () => {
     const guide = mark('edge.guide', at(0, 300, 24, 112), 'ab')
-    // A control in the upper half whose tag would hang into the hook's room.
+    // A control in the upper half whose tag hangs just above the hook's room.
     const near = mark('near', at(0, 240, 40, 10), 'ab')
-    const ps = placeTags([near, guide], VP, measure)
-    expect(ps.map((p) => p.mark.id)).toEqual(['edge.guide', 'near'])
-    // Guide tab: 28×38 at top 356-19 = 337; room from 307. Near's tag would start at 260..288 (clear).
-    expect(ps[1]!.rect.top).toBe(250 + 10)
+    const ps = placeTags([guide, near], VP, measure)
+    expect(ps.map((p) => p.mark.id)).toEqual(['near', 'edge.guide'])
+    // Near's tag 260..288 (inflated: ..294); the guide tab 28×38 at 356-19 = 337, its room from 307.
+    expect(ps[0]!.rect.top).toBe(250 + 10)
+    expect(ps[1]!.rect.top).toBe(337)
+  })
+
+  it('slides a side tab down off a tag in its way, while its hook still meets the control', () => {
+    const guide = mark('edge.guide', at(0, 300, 24, 112), 'ab')
     const lower = mark('lower', at(0, 270, 40, 10), 'ab')
-    const qs = placeTags([lower, guide], VP, measure)
-    // 290..318 touches the room (307..375, inflated by 6): out three steps, past the tab.
-    expect(qs[1]!.rect.top).toBe(280 + 10 + 3 * STEP)
+    const [tag, side] = placeTags([lower, guide], VP, measure)
+    // Lower's tag 290..318, inflated to 324: the room (30 over the tab) must start there, so
+    // the tab, 4 at a time from 337, lands at 357.
+    expect(tag!.rect.top).toBe(290)
+    expect(side!.rect.top).toBe(357)
+    expect(side!.room!.top).toBe(327)
+  })
+
+  it('puts a side tab with no room first, and the tag in its way moves out instead', () => {
+    const guide = mark('edge.guide', at(0, 300, 24, 112), 'ab')
+    const big = mark('big', at(0, 200, 40, 10), 'big')
+    // BIG is 240 high: hanging from 220, it covers every place the tab could slide to.
+    const m: MeasureTag = (text, max) => (text === 'BIG' ? { width: 30, height: 240 } : measure(text, max))
+    const ps = placeTags([big, guide], VP, m)
+    expect(ps.map((p) => p.mark.id)).toEqual(['edge.guide', 'big'])
+    expect(ps[0]!.rect.top).toBe(337)
+    // 220..472 touches the room (307..375): out by 252 + 6.
+    expect(ps[1]!.rect.top).toBe(220 + 252 + 6)
   })
 
   it('draws the hook up from the inner side and across to an arrowhead at the edge', () => {
-    const left = sideHook(at(0, 300, 28, 178), -1, 400)
+    const left = sideHook(at(0, 300, 28, 178), -1, 0)
     // inner 22, bottom 292, bend 274, turn 6, ends 7 short of the tip at 6.
     expect(left.line).toBe('M22 292L22 280Q22 274 16 274L13 274')
     expect(left.head[0]).toEqual({ x: 6, y: 274 })
@@ -301,5 +327,289 @@ describe('side tags (narrow controls on an edge)', () => {
     expect(right.line).toBe('M378 292L378 280Q378 274 384 274L387 274')
     expect(right.head[0]).toEqual({ x: 394, y: 274 })
     expect(right.head[1].x).toBeCloseTo(394 - 9.1)
+  })
+
+  it('stands a tab on the safe area’s edge where its control does (a notch), and on the screen’s where it hugs that', () => {
+    const safe = { left: 44, top: 0, right: 30, bottom: 0 }
+    const inset = mark('g', at(44, 300, 24, 112), 'ab')
+    expect(edgeOf(inset, VP)).toBe(0)
+    expect(edgeOf(inset, VP, safe)).toBe(-1)
+    const [p] = placeTags([inset], VP, measure, { safe })
+    expect(p!.rect.left).toBe(44)
+    expect(p!.edge).toBe(44)
+    const [q] = placeTags([mark('g', at(0, 300, 24, 112), 'ab')], VP, measure, { safe })
+    expect(q!.rect.left).toBe(0)
+    expect(q!.edge).toBe(0)
+    const [r] = placeTags([mark('s', at(400 - 30 - 24, 200, 24, 112), 'ab')], VP, measure, { safe })
+    expect(r!.side).toBe(1)
+    expect(r!.rect.right).toBe(400 - 30)
+    expect(r!.edge).toBe(400 - 30)
+    expect(sideHook(r!.rect, 1, r!.edge!).head[0].x).toBe(400 - 30 - 6)
+  })
+})
+
+describe('two side tabs on one edge with no room for both', () => {
+  it('gives the lower one an ordinary tag by its tab, none on another', () => {
+    // A phone on its side: GUIDE and EDIT on the left edge, 388 high, their words too long to stack.
+    const vp = { width: 867, height: 388 }
+    const guide = mark('edge.guide', at(0, 60, 22, 112), 'x'.repeat(16))
+    const edit = mark('edge.edit', at(0, 190, 22, 112), 'y'.repeat(20))
+    for (const crowded of [false, true]) {
+      const ps = placeTags([guide, edit], vp, measure, { crowded })
+      const g = ps.find((p) => p.mark.id === 'edge.guide')!
+      const e = ps.find((p) => p.mark.id === 'edge.edit')!
+      expect(g.side).toBe(-1)
+      expect(e.side).toBe(0)
+      expect(e.tip).not.toBeNull()
+      expect(overlaps(g.room!, e.rect)).toBe(false)
+    }
+  })
+})
+
+describe('crosses and arrowheads across', () => {
+  it('finds an arrow running over a box, down or across; ending on its edge is not running over it', () => {
+    const r = at(100, 100, 50, 30)
+    expect(crosses({ x: 120, y: 50 }, { x: 120, y: 200 }, r)).toBe(true)
+    expect(crosses({ x: 160, y: 50 }, { x: 160, y: 200 }, r)).toBe(false)
+    // A tag's own arrow leaves its top edge.
+    expect(crosses({ x: 120, y: 50 }, { x: 120, y: 100 }, r)).toBe(false)
+    expect(crosses({ x: 50, y: 110 }, { x: 200, y: 110 }, r)).toBe(true)
+    expect(crosses({ x: 50, y: 110 }, { x: 100, y: 110 }, r)).toBe(false)
+  })
+
+  it('points across at a control beside its tag', () => {
+    const [tip, a, b] = arrowHead({ x: 50, y: 100 }, { x: 80, y: 100 })
+    expect(tip).toEqual({ x: 50, y: 100 })
+    expect(a.x).toBeCloseTo(58.4)
+    expect(a.y).toBe(93)
+    expect(b.x).toBeCloseTo(58.4)
+    expect(b.y).toBe(107)
+    const [, c] = arrowHead({ x: 200, y: 100 }, { x: 170, y: 100 })
+    expect(c.x).toBeCloseTo(191.6)
+  })
+})
+
+describe('crowded (a short window)', () => {
+  const SHORT = { width: 800, height: 360 }
+  const r = (p: PlacedTag): Box => p.room ?? p.rect
+  const inner = (b: Box): Box => inflate(b, -1)
+
+  it('keeps a tag off the control under its own, beside it instead (the arrow across)', () => {
+    const a = mark('a', at(100, 20, 40, 40))
+    const b = mark('b', at(100, 70, 40, 40))
+    const [plainA] = placeTags([a, b], SHORT, measure)
+    expect(overlaps(plainA!.rect, inner(b.bounds))).toBe(true)
+    const ps = placeTags([a, b], SHORT, measure, { crowded: true })
+    const tagA = ps.find((p) => p.mark.id === 'a')!
+    expect(overlaps(tagA.rect, inner(b.bounds))).toBe(false)
+    // Beside a, on the side with more room, level with it.
+    expect(tagA.rect.left).toBe(140 + COACH_METRICS.gap)
+    expect(tagA.tip).toEqual({ x: 142, y: 40 })
+    expect(tagA.tail).toEqual({ x: 150, y: 40 })
+    for (const p of ps) for (const q of ps) if (p !== q) expect(overlaps(r(p), r(q))).toBe(false)
+  })
+
+  it('keeps tags off the controls with no tag of their own (the octave’s − and +)', () => {
+    const a = mark('a', at(100, 20, 40, 40))
+    const minus = at(100, 70, 40, 40)
+    const [plain] = placeTags([a], SHORT, measure, { clear: [minus] })
+    expect(overlaps(plain!.rect, inner(minus))).toBe(true)
+    const [p] = placeTags([a], SHORT, measure, { crowded: true, clear: [minus] })
+    expect(overlaps(p!.rect, inner(minus))).toBe(false)
+  })
+
+  it('keeps tags off an edge tab, sliding while the tag still meets its arrow', () => {
+    const guide = mark('edge.guide', at(0, 100, 24, 112), 'ab')
+    const word = mark('word', at(10, 80, 60, 20), 'ab')
+    const plain = placeTags([guide, word], SHORT, measure).find((p) => p.mark.id === 'word')!
+    expect(overlaps(plain.rect, inner(guide.bounds))).toBe(true)
+    const p = placeTags([guide, word], SHORT, measure, { crowded: true }).find((q) => q.mark.id === 'word')!
+    expect(overlaps(p.rect, inner(guide.bounds))).toBe(false)
+    expect(p.rect.top).toBe(110)
+    expect(p.tip!.x).toBe(40)
+    expect(p.tip!.x).toBeGreaterThanOrEqual(p.rect.left + COACH_METRICS.padX)
+  })
+
+  it('leaves no arrow running across another tag or control in a crowded row', () => {
+    // Five keys in a row under a sixth, as the top bar over a row of words.
+    const keys = [0, 1, 2, 3, 4].map((i) => mark(`k${i}`, at(300 + i * 52, 12, 44, 44), `key ${i}`))
+    const row = mark('row', at(300, 70, 260, 30), 'row')
+    const ps = placeTags([...keys, row], SHORT, measure, { crowded: true })
+    expect(ps).toHaveLength(6)
+    for (const p of ps) {
+      expect(r(p).top).toBeGreaterThanOrEqual(0)
+      expect(r(p).bottom).toBeLessThanOrEqual(SHORT.height)
+      for (const m of [...keys, row]) if (m !== p.mark) expect(overlaps(p.rect, inner(m.bounds))).toBe(false)
+      for (const q of ps) if (q !== p) expect(overlaps(r(p), r(q))).toBe(false)
+    }
+  })
+
+  it('measures each label once, however many places and orders it tries', () => {
+    const seen = new Map<string, number>()
+    const m: MeasureTag = (text, max) => {
+      seen.set(`${text}|${max}`, (seen.get(`${text}|${max}`) ?? 0) + 1)
+      return measure(text, max)
+    }
+    const keys = [0, 1, 2, 3].map((i) => mark(`k${i}`, at(300 + i * 30, 12, 24, 24), `key ${i}`))
+    placeTags([...keys, mark('g', at(0, 100, 24, 112), 'guide')], SHORT, m, { crowded: true })
+    expect([...seen.values()].every((n) => n === 1)).toBe(true)
+  })
+})
+
+describe('occlusions', () => {
+  const tag = (m: CoachMarkInput, rect: Box): PlacedTag => ({ mark: m, text: m.label.toUpperCase(), textSize: { width: 20, height: 16 }, rect, tip: null, tail: null, side: 0 })
+
+  it('counts a tag over a quarter of a control, not a sliver of its touch area', () => {
+    const a = mark('a', at(100, 20, 40, 40))
+    const b = mark('b', at(100, 100, 40, 40))
+    expect(occlusions([tag(a, at(100, 125, 40, 30)), tag(b, at(200, 300, 40, 28))], VP)).toBe(1)
+    // 5 of b's 40 high: an eighth.
+    expect(occlusions([tag(a, at(100, 135, 40, 30)), tag(b, at(200, 300, 40, 28))], VP)).toBe(0)
+  })
+
+  it('counts tags on each other, off the screen and over an untagged control', () => {
+    const a = mark('a', at(100, 20, 40, 40))
+    const b = mark('b', at(300, 20, 40, 40))
+    expect(occlusions([tag(a, at(100, 200, 40, 28)), tag(b, at(120, 210, 40, 28))], VP)).toBe(1)
+    expect(occlusions([tag(a, at(-10, 200, 40, 28))], VP)).toBe(1)
+    expect(occlusions([tag(a, at(100, 200, 40, 28))], VP, { clear: [at(100, 200, 40, 40)] })).toBe(1)
+  })
+
+  it('lets a tall area’s tag sit in it', () => {
+    const pads = mark('pads', at(40, 200, 320, 400))
+    expect(occlusions([tag(pads, at(150, 390, 100, 28))], VP)).toBe(0)
+  })
+})
+
+describe('layoutTags (the overlay’s placement)', () => {
+  it('is crowded in a short window', () => {
+    const short = { width: 800, height: 479 }
+    const marks = [mark('a', at(100, 20, 40, 40)), mark('b', at(100, 70, 40, 40))]
+    expect(layoutTags(marks, short, measure)).toEqual(clearArrows(placeTags(marks, short, measure, { crowded: true }), short))
+  })
+
+  it('keeps the plain places in a taller window where they hide nothing', () => {
+    const marks = [mark('a', at(100, 20, 40, 40)), mark('b', at(300, 20, 40, 40))]
+    expect(layoutTags(marks, VP, measure)).toEqual(placeTags(marks, VP, measure))
+  })
+
+  it('turns crowded in a taller window where a tag hides a control and the crowded rules hide fewer', () => {
+    const a = mark('a', at(100, 20, 40, 40))
+    const b = mark('b', at(100, 70, 40, 40))
+    expect(occlusions(placeTags([a, b], VP, measure), VP)).toBeGreaterThan(0)
+    const ps = layoutTags([a, b], VP, measure)
+    expect(occlusions(ps, VP)).toBe(0)
+    expect(overlaps(ps.find((p) => p.mark.id === 'a')!.rect, inflate(b.bounds, -1))).toBe(false)
+  })
+})
+
+describe('the placing order', () => {
+  const r = (p: PlacedTag): Box => p.room ?? p.rect
+  const crossings = (ps: readonly PlacedTag[]): number =>
+    ps.reduce((n, p) => n + ps.filter((q) => q !== p && p.tip !== null && p.tail !== null && crosses(p.tip, p.tail, r(q))).length, 0)
+  // Four keys side by side, 44 wide, as the top bar once laid them out (back up, connection, ? and the gear): the tags
+  // are what the placing is tested on, so the ids are the ones that moved, wherever they sit now.
+  const DESK = { width: 1280, height: 800 }
+  const bar = [
+    mark('backups.backup', at(780, 12, 44, 44), 'Back up'),
+    mark('top.connection', at(832, 12, 44, 44), 'Connection'),
+    mark('top.help', at(896, 12, 44, 44), "What's what"),
+    mark('tools.settings', at(948, 12, 44, 44), 'Settings'),
+  ]
+
+  it('left to right, the gear’s arrow runs under the ? key’s tag', () => {
+    expect(crossings(placeTags(bar, DESK, measure))).toBeGreaterThan(0)
+  })
+
+  it('is reworked around it, plain places and all (reorder), so no arrow runs under a tag', () => {
+    const ps = placeTags(bar, DESK, measure, { reorder: true })
+    expect(crossings(ps)).toBe(0)
+    for (const p of ps) for (const q of ps) if (p !== q) expect(overlaps(r(p), r(q))).toBe(false)
+    // The overlay's placement: the same rows (the last pass may nudge a tag off an arrow's margin).
+    const laid = layoutTags(bar, DESK, measure)
+    expect(laid.map((p) => [p.mark.id, p.rect.top])).toEqual(ps.map((p) => [p.mark.id, p.rect.top]))
+    expect(crossings(laid)).toBe(0)
+  })
+
+  it('with Live\'s Bluetooth key before the connection key, the tags still clear each other', () => {
+    // A phone 360 wide: the bar is the tag, then the Bluetooth key, the connection key and ? (the real
+    // measure is in the e2e test; here every letter is 10px).
+    const PHONE = { width: 360, height: 780 }
+    const keys = [
+      mark('top.sections', at(16, 12, 126, 44), 'Sections'),
+      mark('top.bluetooth', at(184, 12, 44, 44), 'Bluetooth delay'),
+      mark('top.connection', at(236, 12, 44, 44), 'Connection'),
+      mark('top.help', at(300, 12, 44, 44), "What's what"),
+    ]
+    const ps = layoutTags(keys, PHONE, measure)
+    expect(ps).toHaveLength(keys.length)
+    for (const p of ps) for (const q of ps) if (p !== q) expect(overlaps(r(p), r(q))).toBe(false)
+    // The desk: the same key before the connection key in the 1200 row.
+    const wide = [mark('top.bluetooth', at(780, 12, 44, 44), 'Bluetooth delay'), ...bar.slice(1, 3)]
+    const laid = layoutTags(wide, DESK, measure)
+    expect(crossings(laid)).toBe(0)
+    for (const p of laid) for (const q of laid) if (p !== q) expect(overlaps(r(p), r(q))).toBe(false)
+  })
+
+  it('when crowded, is reworked around tags on each other too', () => {
+    // A phone on its side, Backups: the top bar, back up, search and import under it, the list below.
+    const SMALL = { width: 692, height: 336 }
+    const marks = [
+      mark('top.sections', at(16, 6, 126, 44), 'Sections'),
+      mark('top.connection', at(572, 6, 44, 44), 'Connection'),
+      mark('top.help', at(636, 6, 44, 44), "What's what"),
+      mark('backups.backup', at(462, 102, 44, 44), 'Back up'),
+      mark('backups.search', at(514, 102, 44, 44), 'Search sounds'),
+      mark('backups.import', at(566, 102, 44, 44), 'Import a .pak'),
+      mark('backups.open', at(96, 156, 514, 75), 'Tap a backup to open it'),
+      mark('edge.guide', at(0, 60, 22, 112), 'EP-133 shortcuts'),
+    ]
+    const ps = placeTags(marks, SMALL, measure, { crowded: true })
+    expect(ps).toHaveLength(marks.length)
+    for (const p of ps) for (const q of ps) if (p !== q) expect(overlaps(p.rect, q.rect)).toBe(false)
+  })
+})
+
+describe('clearArrows', () => {
+  const P = mark('p', at(100, 20, 40, 40))
+  const Q = mark('q', at(130, 20, 20, 20))
+  const p: PlacedTag = { mark: P, text: 'P', textSize: { width: 42, height: 16 }, rect: at(90, 70, 60, 28), tip: { x: 120, y: 62 }, tail: { x: 120, y: 70 }, side: 0 }
+  // Q's tag hangs lower: its arrow runs down past P's tag at x 140.
+  const q: PlacedTag = { mark: Q, text: 'Q', textSize: { width: 22, height: 16 }, rect: at(120, 120, 40, 28), tip: { x: 140, y: 42 }, tail: { x: 140, y: 120 }, side: 0 }
+
+  it('slides a tag off an arrow running under it, to the nearest place still on its own arrow', () => {
+    const [moved, same] = clearArrows([p, q], VP)
+    // Clear once its right edge, plus the arrow's 3px, is short of 140: left 76 (2 at a time from 90).
+    expect(moved!.rect).toEqual(at(76, 70, 60, 28))
+    expect(moved!.tip).toEqual(p.tip)
+    expect(moved!.tail).toEqual(p.tail)
+    expect(same).toBe(q)
+  })
+
+  it('leaves a tag where it is when sliding would put it on another tag', () => {
+    const R = mark('r', at(30, 20, 20, 20))
+    const blocker: PlacedTag = { ...p, mark: R, rect: at(20, 70, 60, 28), tip: { x: 40, y: 42 }, tail: { x: 40, y: 70 } }
+    const out = clearArrows([p, q, blocker], VP)
+    expect(out[0]!.rect).toEqual(p.rect)
+  })
+})
+
+describe('hintTop', () => {
+  const hint = { width: 200, height: 16 }
+  const tagAt = (rect: Box): PlacedTag => ({ mark: mark('t', rect), text: 'T', textSize: { width: 10, height: 16 }, rect, tip: null, tail: null, side: 0 })
+
+  it('stays at 72% where no tag is', () => {
+    expect(hintTop(VP, [tagAt(at(100, 100, 200, 40))], hint)).toBeCloseTo(576)
+  })
+
+  it('moves to the middle of the tallest gap between the tags across its width', () => {
+    // The tag (inflated: 554..606) leaves 8..554 above it and 606..792 below.
+    expect(hintTop(VP, [tagAt(at(100, 560, 200, 40))], hint)).toBe((8 + 554 - 16) / 2)
+    expect(hintTop(VP, [tagAt(at(100, 560, 200, 40))], hint, { left: 0, top: 40, right: 0, bottom: 0 })).toBe((48 + 554 - 16) / 2)
+  })
+
+  it('stays put when no gap is tall enough', () => {
+    const tags = Array.from({ length: 20 }, (_, i) => tagAt(at(100, i * 40, 200, 30)))
+    expect(hintTop(VP, tags, hint)).toBeCloseTo(576)
   })
 })

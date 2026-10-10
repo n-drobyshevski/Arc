@@ -1,4 +1,7 @@
-/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/SearchScreen.kt */
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/SearchScreen.kt
+ *
+ * Web only, from 1024px wide (the desk, theme/desk.css): the column widens to
+ * 720 on a paper card that fills the window's height. */
 
 /* Box(fillMaxSize, shell, TopCenter) > LazyColumn(widthIn(max 560), contentPadding 16,
  * 10 between items). Full screens scroll the page (app.css). */
@@ -68,4 +71,21 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ---------- the desk (web only) ---------- */
+
+@media (min-width: 1024px) {
+  /* The card fills the page column's height (the column is one window high at least). */
+  .search {
+    align-items: stretch;
+    padding: var(--space-18) var(--desk-pad) var(--space-22);
+  }
+
+  .search__column {
+    max-width: var(--wide-max);
+    padding: var(--space-22) var(--space-24);
+    background: var(--desk-paper);
+    border-radius: var(--radius-plate);
+  }
 }

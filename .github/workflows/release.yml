@@ -48,6 +48,15 @@ jobs:
       - name: Accept Android SDK licences
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 
+      # The NDK and CMake for Live's native audio engine, as in android.yml.
+      - name: Install the NDK and CMake
+        run: |
+          ndk="$(sed -n 's/^ *ndkVersion = "\(.*\)"/\1/p' app/build.gradle.kts)"
+          cmake="$(sed -n 's/^ *version = "\([0-9.]*\)"/\1/p' app/build.gradle.kts)"
+          test -n "$ndk" -a -n "$cmake" || { echo "::error::ndkVersion or the CMake version not found in app/build.gradle.kts"; exit 1; }
+          echo "NDK $ndk, CMake $cmake"
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;$ndk" "cmake;$cmake" > /dev/null
+
       # ARC_RELEASE names the build exactly X.Y.Z (no -dev suffix).
       - name: Test, lint and build
         env:

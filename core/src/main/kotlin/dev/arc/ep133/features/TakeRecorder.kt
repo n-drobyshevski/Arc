@@ -17,6 +17,10 @@ sealed interface RecState {
  * an armed take, from the next burst, so the take lines up with the device's
  * bar; such a take is [byTransport], and the device stopping ends it.
  *
+ * A take locked to the pattern is armed at a mix frame instead ([armAt]): it
+ * starts there, sound or not, and is stopped at one ([stopAt]), keeping the
+ * silence up to it, so it is exactly the frames between.
+ *
  * Only the output's thread calls it: [onBurst] once for each burst the mixer
  * renders, before the next.
  */
@@ -42,6 +46,8 @@ class TakeRecorder(val outRate: Int, val maxFrames: Long = MAX_SECONDS.toLong() 
     var audible = 0L
         private set
 
+    val seconds: Int get() = (frames / outRate).toInt()
+
     /** Whether the device's PLAY started the take, so the device stopping ends it. */
     var byTransport = false
         private set
@@ -49,13 +55,18 @@ class TakeRecorder(val outRate: Int, val maxFrames: Long = MAX_SECONDS.toLong() 
     // The device started playing while armed: the next burst starts the take.
     private var startNext = false
 
-    val seconds: Int get() = (frames / outRate).toInt()
+    // [armAt]'s frame (null: the first sound's), [stopAt]'s (none: MAX_VALUE), the take's first mix frame.
+    private var startAt: Long? = null
+    private var endAt = Long.MAX_VALUE
+    private var first = 0L
 
     fun arm() {
         if (state != State.IDLE) return
         state = State.ARMED
         frames = 0
         audible = 0
+        startAt = null
+        endAt = Long.MAX_VALUE
         byTransport = false
         startNext = false
     }
@@ -63,6 +74,27 @@ class TakeRecorder(val outRate: Int, val maxFrames: Long = MAX_SECONDS.toLong() 
     /** The EP-133 started playing: an armed take starts with the next burst. */
     fun transportStart() {
         if (state == State.ARMED) startNext = true
+    }
+
+    /** Arms the take to start at mix frame [frame], whether or not anything sounds then; armed already, it starts there instead. */
+    fun armAt(frame: Long) {
+        if (state == State.RECORDING) return
+        state = State.ARMED
+        frames = 0
+        audible = 0
+        startAt = frame
+        endAt = Long.MAX_VALUE
+        byTransport = false
+        startNext = false
+    }
+
+    /**
+     * Ends the take at mix frame [frame], keeping the silence up to it: the
+     * burst that reaches it is the last ([Keep.last]). A frame already
+     * recorded past ends it there.
+     */
+    fun stopAt(frame: Long) {
+        if (state != State.IDLE) endAt = frame
     }
 
     /**
@@ -75,19 +107,25 @@ class TakeRecorder(val outRate: Int, val maxFrames: Long = MAX_SECONDS.toLong() 
             State.IDLE -> return null
             State.ARMED -> {
                 if (startNext) {
+                    // The device's PLAY: from this burst on, so the take lines up with it.
                     startNext = false
                     byTransport = true
                     state = State.RECORDING
+                    first = at
                     0
                 } else {
-                    if (firstStart == null) return null
+                    val start = startAt ?: firstStart ?: return null
+                    // Armed at a frame: not yet. Come late, it starts with this burst.
+                    if (start >= at + frames) return null
                     state = State.RECORDING
-                    (firstStart - at).coerceIn(0, frames.toLong()).toInt()
+                    (start - at).coerceIn(0, frames.toLong()).toInt().also { first = at + it }
                 }
             }
             State.RECORDING -> 0
         }
-        val n = minOf((frames - from).toLong(), maxFrames - this.frames).toInt()
+        // Up to [stopAt]'s frame, if it comes in this burst (or came already).
+        val left = if (endAt == Long.MAX_VALUE) Long.MAX_VALUE else maxOf(0L, endAt - (at + from))
+        val n = minOf((frames - from).toLong(), maxFrames - this.frames, left).toInt()
         for (i in n - 1 downTo 0) {
             val j = 2 * (from + i)
             if (out[j].toInt() != 0 || out[j + 1].toInt() != 0) {
@@ -96,16 +134,26 @@ class TakeRecorder(val outRate: Int, val maxFrames: Long = MAX_SECONDS.toLong() 
             }
         }
         this.frames += n
-        val last = this.frames >= maxFrames
+        val stopped = endAt != Long.MAX_VALUE && at + from + n >= endAt
+        // Stopped at a frame: the silence before it is kept too.
+        if (stopped) audible = keptTo(endAt)
+        val last = this.frames >= maxFrames || stopped
         if (last) state = State.IDLE
         return Keep(from, n, last)
     }
 
-    /** Stops: the frames the take keeps, 0 when nothing was played since REC. */
+    /** Stops: the frames the take keeps, 0 when nothing was played since REC (nor did an [armAt] frame come). */
     fun stop(): Long {
-        val keep = if (state == State.ARMED) 0L else audible
+        val keep = when {
+            state == State.ARMED -> 0L
+            state == State.RECORDING && endAt != Long.MAX_VALUE -> keptTo(endAt)
+            else -> audible
+        }
         state = State.IDLE
         startNext = false
         return keep
     }
+
+    /** The frames recorded up to mix frame [end], silent or not. */
+    private fun keptTo(end: Long): Long = (end - first).coerceIn(0L, frames)
 }

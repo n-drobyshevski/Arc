@@ -1,6 +1,7 @@
 package dev.arc.ep133.features
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Test
 
 class LearnedLinksTest {
@@ -20,5 +21,19 @@ class LearnedLinksTest {
         // Key 2's restored pad 12 now belongs to key 5, so it goes.
         assertEquals(mapOf(0 to 10, 1 to 11, 5 to 12), LearnedLinks.merge(restored, local))
         assertEquals(restored, LearnedLinks.merge(restored, emptyMap()))
+    }
+
+    @Test
+    fun `offline, unlearned pads are numbered from the top row, never over a learned number`() {
+        val top = LearnedLinks.offline(emptyMap())
+        assertEquals(12, top.size)
+        assertEquals(1, top[9]) // '7'
+        assertEquals(10, top[0]) // '.'
+        assertEquals(12, top[2]) // ENTER
+        // '7' learned as p02: '8' (p02 from the top) is left unlinked; the rest as before.
+        val some = LearnedLinks.offline(mapOf(9 to 2))
+        assertEquals(2, some[9])
+        assertFalse(10 in some)
+        assertEquals(10, some[0])
     }
 }

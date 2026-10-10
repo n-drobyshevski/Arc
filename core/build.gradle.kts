@@ -22,7 +22,7 @@ kotlin {
 
 tasks.withType<JavaCompile>().configureEach { options.release.set(17) }
 
-// The version written into every .pak ("arc 0.2.0"), from version.properties.
+// The version written into every .pak ("arc 0.3.5"), from version.properties.
 val arcVersion = rootProject.extra["arcVersion"] as String
 val generateVersion by tasks.registering {
     val out = layout.buildDirectory.dir("generated/version")
@@ -63,6 +63,10 @@ tasks.test {
     inputs.file(ref.resolve("test/fixtures/sample.pak"))
     inputs.file(ref.resolve("src/backup.js"))
     inputs.file(rootProject.file("version.properties"))
+    // The beat card spec: its example card is read in place by the card tests.
+    val beatCardSpec = rootProject.file("skill/arc-beats/references/beat-card.md")
+    inputs.file(beatCardSpec)
+    systemProperty("arc.beatCardSpec", beatCardSpec.absolutePath)
     systemProperty("arc.referenceDir", ref.absolutePath)
     systemProperty("arc.versionFile", rootProject.file("version.properties").absolutePath)
     systemProperty("junit.jupiter.execution.timeout.default", "60 s")

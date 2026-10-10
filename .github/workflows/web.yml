@@ -5,6 +5,7 @@ on:
     paths:
       - 'web/**'
       - 'reference/**'
+      - 'skill/**'
       - 'version.properties'
       - 'vercel.json'
       - '.github/workflows/web.yml'
@@ -13,6 +14,7 @@ on:
     paths:
       - 'web/**'
       - 'reference/**'
+      - 'skill/**'
       - 'version.properties'
       - 'vercel.json'
       - '.github/workflows/web.yml'
@@ -43,6 +45,9 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - run: npm ci
+      - name: Test the arc-beats skill script
+        working-directory: .
+        run: python3 skill/arc-beats/scripts/test_beatcard.py
       - run: npm run typecheck
       - run: npm test
       - run: npm run build

@@ -1,12 +1,30 @@
 package dev.arc.ep133.text
 
+import dev.arc.ep133.features.ArpNote
+import dev.arc.ep133.features.ArpOrder
+import dev.arc.ep133.features.CardProblem
 import dev.arc.ep133.features.DiffResult
+import dev.arc.ep133.features.FxType
+import dev.arc.ep133.features.KeyMark
+import dev.arc.ep133.features.NoteNames
+import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.ProjectDiff
+import dev.arc.ep133.features.ProjectSeq
+import dev.arc.ep133.features.ProjectSource
 import dev.arc.ep133.features.ProjectState
+import dev.arc.ep133.features.RecState
+import dev.arc.ep133.features.SampleSource
+import dev.arc.ep133.features.Scale
+import dev.arc.ep133.features.SceneOps
 import dev.arc.ep133.features.SoundDiff
 import dev.arc.ep133.features.SoundState
+import dev.arc.ep133.features.SwitchTime
+import dev.arc.ep133.features.Timing
+import dev.arc.ep133.features.TransportPhase
+import dev.arc.ep133.features.TransportState
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class FeatureTextTest {
@@ -61,5 +79,470 @@ class FeatureTextTest {
         assertEquals("999 ms", FeatureText.duration(0.9994))
         assertEquals("Trimmed to 1.4 s", FeatureText.trimmed(1.38))
         assertEquals("120 ms to 1.5 s, 1.4 s long", FeatureText.selection(0.12, 1.5))
+    }
+
+    @Test
+    fun `piano and key text`() {
+        val solfege = NoteNames.SOLFEGE
+        assertEquals("KEY DO", MirrorText.keyWord(0, solfege).uppercase())
+        assertEquals("Key A#", MirrorText.keyWord(10, NoteNames.LETTERS))
+        assertEquals("Key: DO. Tap to change.", MirrorText.keyChoice(0, solfege))
+        assertEquals("Key: F#. Tap to change.", MirrorText.keyChoice(6, NoteNames.LETTERS))
+        assertEquals("LA4, root", MirrorText.pianoKey(69, solfege, KeyMark.ROOT))
+        assertEquals("LA4, in the scale", MirrorText.pianoKey(69, solfege, KeyMark.IN))
+        assertEquals("FA4, outside the scale", MirrorText.pianoKey(65, solfege, KeyMark.OUT))
+        assertEquals("F#4, outside the scale", MirrorText.pianoKey(66, NoteNames.LETTERS, KeyMark.OUT))
+        assertEquals("Keyboard, DO3 to DO5", MirrorText.pianoRange(48, 72, solfege))
+        assertEquals("Keyboard, C7 to G9", MirrorText.pianoRange(96, 127, NoteNames.LETTERS))
+        assertEquals("DO2, below the keys", MirrorText.outOfRange(36, solfege, below = true))
+        assertEquals("E6, above the keys", MirrorText.outOfRange(88, NoteNames.LETTERS, below = false))
+        // Short scale words, still told apart once upper-cased, and never wider than five.
+        val codes = Scale.entries.map { MirrorText.scaleCode(it).uppercase() }
+        assertEquals(listOf("CHR", "MAJ", "MIN", "DOR", "PHR", "LYD", "MIX", "MAJ.P", "MIN.P", "BLU"), codes)
+        assertEquals(codes.size, codes.toSet().size)
+        assertTrue(codes.all { it.length <= 5 })
+    }
+
+    @Test
+    fun `device, settings and pad edit text`() {
+        assertEquals("free of 64 MB", FeatureText.freeOf(64.0 * 1048576))
+        assertEquals(listOf("Kicks", "Snares", "Hats", "Perc", "Bass", "Melodic", null), listOf(1, 100, 200, 300, 400, 500, 600).map(FeatureText::factoryCategory))
+        assertEquals("Kicks", FeatureText.factoryCategory(99))
+        assertEquals(null, FeatureText.factoryCategory(900))
+        assertEquals("In P3 \u00B7 7", FeatureText.inProject(3, 7))
+        assertEquals("P3", FeatureText.projectBadge(3))
+        assertEquals("352 KB \u00B7 7 sounds", FeatureText.projectSummary(352L * 1024, 7))
+        assertEquals("12 \u00B7 2.0 MB", FeatureText.soundsTotal(12, 2.0 * 1048576))
+        assertEquals(listOf("Auto", "1 octave", "1\u00BD", "2", "3 octaves"), SettingsText.PIANO_CHOICES.map(SettingsText::pianoKeys))
+        assertEquals("1\u00BD octaves", SettingsText.pianoKeysDescription(12))
+        assertEquals("Pad sounds \u00B7 69 KB", SettingsText.padSoundsShort("69 KB"))
+        val a8 = PhysicalPad(0, 10)
+        assertEquals("Pad A 8", MirrorText.padTitle(a8))
+        assertEquals("Project 1 \u00B7 now 101 snare 2", MirrorText.padSheetLine(1, 101, "snare 2"))
+        assertEquals("now empty", MirrorText.padNow(null, null))
+        assertEquals("now 007", MirrorText.padNow(7, null))
+        assertEquals("Pad A 8: vox chop", MirrorText.assigned(a8, "vox chop"))
+        assertEquals("Pad A 8: back to snare 2", MirrorText.restored(a8, "snare 2"))
+        assertEquals("snare 2 \u2192 vox chop", MirrorText.dropPreview("snare 2", "vox chop"))
+        assertEquals("empty \u2192 vox chop", MirrorText.dropPreview(null, "vox chop"))
+        assertEquals("KEYS \u00B7 FA5", MirrorText.lastNote(77, NoteNames.SOLFEGE).uppercase())
+        assertEquals("Keys on a piano", MirrorText.keysView(true))
+        assertEquals("Pad A 8: kick, in arc until you connect", MirrorText.assignedOffline(a8, "kick"))
+        assertEquals("1 pad changed in arc only. When you connect, arc asks before putting it on the EP-133.", MirrorText.offlinePadsNote(1))
+        assertEquals("3 pads changed in arc only. When you connect, arc asks before putting them on the EP-133.", MirrorText.offlinePadsNote(3))
+        assertEquals("Put 1 offline pad change on the EP-133?", MirrorText.putOffline(1))
+        assertEquals("Put 2 offline pad changes on the EP-133?", MirrorText.putOffline(2))
+        assertEquals("2 pads put on the EP-133.", MirrorText.offlineWritten(2, 0))
+        assertEquals("1 pad put on the EP-133. 1 skipped: the EP-133 has another sound or project there now.", MirrorText.offlineWritten(1, 1))
+    }
+
+    @Test
+    fun `pad settings text`() {
+        assertEquals(listOf("Sound", "Trim", "Env", "Midi", "Mute"), (0..4).map(MirrorText::pageName))
+        assertEquals("MUTE GROUP", MirrorText.MUTE_GROUP.uppercase())
+        assertEquals(listOf("+1.5", "-12", "0", "+0.25", "-0.07", "0", "+12"), listOf(1.5, -12.0, 0.0, 0.25, -0.0701, -0.004, 12.0).map(MirrorText::pitchLabel))
+        assertEquals("100", MirrorText.levelLabel(100))
+        assertEquals(listOf("L16", "L8", "C", "R1", "R16"), listOf(-16, -8, 0, 1, 16).map(MirrorText::panLabel))
+        assertEquals(listOf("Oneshot", "Key", "Legato"), dev.arc.ep133.features.PlayMode.entries.map(MirrorText::modeLabel))
+        assertEquals("0.25 s", MirrorText.secondsLabel(11719, 46875.0))
+        assertEquals("1.00 s", MirrorText.secondsLabel(46875, 46875.0))
+        assertEquals("0.00 s", MirrorText.secondsLabel(100, 0.0))
+        assertEquals("255", MirrorText.envLabel(255))
+        assertEquals(listOf("1", "16"), listOf(0, 15).map(MirrorText::channelLabel))
+        assertEquals(listOf("On", "Off"), listOf(true, false).map(MirrorText::onOff))
+        assertEquals("Pitch: +1.5.", MirrorText.knobDescription(MirrorText.PITCH, MirrorText.pitchLabel(1.5)))
+        assertEquals("Plays 46875 frames from frame 1200.", MirrorText.trimDescription(1200, 46875))
+        assertEquals("The pad's settings couldn't be changed: timeout", MirrorText.padSettingsFailed("timeout"))
+    }
+
+    @Test
+    fun `function keys and offline notes`() {
+        assertEquals("1\u20139", MirrorText.FN_PROJECT_SUB)
+        assertEquals("Project 3", MirrorText.projectKeyState(3, ProjectSource.DEVICE))
+        assertEquals("Project 3", MirrorText.projectKeyState(3, ProjectSource.LAST_READ))
+        assertEquals("Factory project 3", MirrorText.projectKeyState(3, ProjectSource.FACTORY))
+        assertEquals("No project", MirrorText.projectKeyState(null, ProjectSource.DEVICE))
+        assertEquals("P3", MirrorText.projectShort(3))
+        assertEquals("The project couldn't be switched: timeout", MirrorText.projectFailed("timeout"))
+        assertEquals("On, 120 BPM", MirrorText.clickState(true, 120, following = false))
+        assertEquals("Off, 98 BPM, from the EP-133", MirrorText.clickState(false, 98, following = true))
+        assertEquals("120 BPM", MirrorText.tempoValue(120))
+        assertEquals("120", MirrorText.tempoShort(120))
+        assertEquals(
+            "Not connected: these are the EP-133's factory sounds, project 3 as it ships. Connect your EP-133 to see it live.",
+            MirrorText.offlineNote(MirrorText.FACTORY, 3),
+        )
+        // Project 1 unless PROJECT stepped on; a last read keeps its own note.
+        assertEquals(MirrorText.factoryNote(1), MirrorText.offlineNote(MirrorText.FACTORY))
+        assertEquals(MirrorText.OFFLINE_NOTE, MirrorText.offlineNote(MirrorText.lastSeen("5 Oct, 14:02"), 3))
+        assertEquals("Seen 5 Oct", MirrorText.seen("5 Oct"))
+        assertTrue(MirrorText.LISTEN_ONLY.endsWith("in EDIT, switch projects with PROJECT, or keep a sample in SAMPLE."))
+        assertEquals("Next project: tap; hold + pad 1–9 to pick", CoachText.PROJECT)
+        assertEquals("Project 3, shown", MirrorText.projectChoice(3, shown = true))
+        assertEquals("Project 4", MirrorText.projectChoice(4, shown = false))
+        assertEquals("Sound", MirrorText.FN_SOUND)
+        assertEquals("Pad's sound", MirrorText.SOUND_SHEET)
+        assertEquals("Click: tap; hold for tempo", CoachText.TEMPO)
+    }
+
+    @Test
+    fun `fx text`() {
+        assertEquals(listOf("FX", "PAGE"), listOf(MirrorText.FN_FX, MirrorText.FN_FX_SUB).map { it.uppercase() })
+        assertEquals(listOf("OFF", "DLY", "REV", "DST", "CHO", "FLT", "CMP"), FxType.entries.map(MirrorText::fxCode))
+        // The key's word stays six letters at most, for four keys across a narrow phone.
+        assertEquals(listOf("FX off", "Delay", "Reverb", "Dist", "Chorus", "Filter", "Comp"), FxType.entries.map(MirrorText::fxKeyLabel))
+        assertTrue(FxType.entries.all { MirrorText.fxKeyLabel(it).length <= 6 })
+        assertEquals("Effects, Distortion", MirrorText.fxKeyDescription(FxType.DISTORTION))
+        assertEquals("Effects, Off", MirrorText.fxKeyDescription(FxType.NONE))
+        assertEquals("Reverb, on. Tap again to turn it off.", MirrorText.fxChoice(FxType.REVERB, on = true))
+        assertEquals("Reverb", MirrorText.fxChoice(FxType.REVERB, on = false))
+        assertEquals("Group B sends nothing to the effect: raise its fader to hear it.", MirrorText.fxHearNoSend('B'))
+        assertEquals("Length 1/8D, feedback 38%", MirrorText.xyState(FxType.DELAY, 0.625f, 0.4f, 120f))
+        assertEquals("Cutoff OPEN, reso Q 4.3", MirrorText.xyState(FxType.FILTER, 0.5f, 0.5f, 120f))
+        assertEquals("1/8D \u00B7 38%", MirrorText.xyReadout(FxType.DELAY, 0.625f, 0.4f, 120f))
+        assertEquals(listOf("Length up", "Feedback down"), listOf(MirrorText.xyStep("LENGTH", true), MirrorText.xyStep("FEEDBACK", false)))
+        assertEquals("Send C", MirrorText.sendName(2))
+        assertEquals(listOf("0", "62", "100"), listOf(0f, 0.62f, 1f).map(MirrorText::sendValue))
+        val a7 = PhysicalPad(0, 9)
+        assertEquals("A 7 kick", MirrorText.sidechainSource(a7, "kick"))
+        assertEquals("A 7", MirrorText.sidechainSource(a7, null))
+        assertEquals("Sidechain source, A 7 kick", MirrorText.sidechainSourceDescription(a7, "kick"))
+        assertEquals("Set to B 1", MirrorText.setSource(PhysicalPad(1, 3)))
+        assertEquals("Duck group D", MirrorText.duckChoice(3))
+        assertEquals(listOf("30 ms", "201 ms", "600 ms"), listOf(0f, 0.3f, 1f).map(MirrorText::sidechainLength))
+        assertEquals(listOf("SNAP 60", "EVEN", "PUMP 40"), listOf(0.2f, 0.5f, 0.7f).map(MirrorText::sidechainShape))
+    }
+
+    @Test
+    fun `punch text`() {
+        // Slot order, '.' to '9', as the pads print them while FX is held.
+        assertEquals(
+            listOf("PITCH RND", "SLICE", "STUTTER", "REPEAT", "TAPE STOP", "FILTER LFO", "LPF", "HPF", "SEND FX", "TREMOLO", "OCT \u2193", "DECIMATE"),
+            (0 until 12).map { MirrorText.punchName(it).uppercase() },
+        )
+        assertEquals(listOf("Beat repeat", "Octave down"), listOf(3, 10).map(MirrorText::punchDescription))
+        assertEquals("PUNCH \u00B7 REPEAT + LPF", MirrorText.punchLine(linkedSetOf(3, 6)))
+        assertEquals("Punch-ins, Beat repeat, Low-pass filter", MirrorText.punchSpoken(linkedSetOf(3, 6)))
+    }
+
+    @Test
+    fun `sample text`() {
+        val a7 = PhysicalPad(0, 9)
+        assertEquals("Sample", MirrorText.SAMPLE_TAG)
+        assertEquals("Latch on: tap a pad to record hands-free. Tap it again or STOP to stop.", MirrorText.LATCH_NOTE)
+        // LATCH reads STOP while a hands-free take goes on: the shared word.
+        assertEquals("STOP", FeatureText.STOP.uppercase())
+        assertEquals(listOf("MIC", "RSP ST", "USB"), listOf(SampleSource.MIC to false, SampleSource.RSP to true, SampleSource.USB to false).map { (s, st) -> MirrorText.sourceShort(s, st).uppercase() })
+        assertEquals("Phone mic, mono", MirrorText.sourceName(SampleSource.MIC, false))
+        assertEquals("Resample the phone's sound, stereo", MirrorText.sourceName(SampleSource.RSP, true))
+        assertEquals("EP-133 over USB, mono", MirrorText.sourceName(SampleSource.USB, false))
+        // LEVEL is the pad sheet's knob word; SAMPLE's KNOB X reuses it.
+        assertEquals("Level", MirrorText.LEVEL)
+        assertEquals(listOf("+12 dB", "\u22126 dB", "0 dB"), listOf(12, -6, 0).map(MirrorText::gainReadout))
+        assertEquals(listOf("Off", "\u221224 dB", "0 dB"), listOf(null, -24, 0).map(MirrorText::thresholdReadout))
+        assertEquals(listOf("Free", "1 bar", "2 bars"), listOf(null, 1, 2).map(MirrorText::barsChoice))
+        assertEquals("Count-in 3", MirrorText.countIn(3))
+        assertEquals("0:04 / 0:20", MirrorText.sampleTime(4, 20))
+        assertEquals("0:39 / 0:40", MirrorText.sampleTime(39, 40))
+        assertEquals("Takes up to 40 s", MirrorText.sampleMax(40))
+        assertEquals("Pad A 7: uploading, 40%", MirrorText.sampleUploading(a7, 40))
+        assertEquals("Disk low: room for 12 s", MirrorText.diskLow(12))
+        assertEquals("Pad A 7: uploading", MirrorText.sampleUploading(a7))
+        assertEquals("Pad A 7, has a sound", MirrorText.padTitle(a7) + MirrorText.padSampleState(true))
+        assertEquals(", empty", MirrorText.padSampleState(false))
+        assertEquals("The input couldn't be opened: busy", MirrorText.inputFailed("busy"))
+        // The seconds are cut, not rounded, as the take's time is.
+        assertEquals("Pad A 7 \u00B7 0:04 \u00B7 RSP ST", MirrorText.reviewLine(a7, 4.7, SampleSource.RSP, true))
+        assertEquals("Pad A 7 \u00B7 1:05 \u00B7 MIC", MirrorText.reviewLine(a7, 65.0, SampleSource.MIC, false))
+        assertEquals("Slot 214, the next free one", MirrorText.slotLine(214, next = true))
+        assertEquals("Slot 300", MirrorText.slotLine(300, next = false))
+        assertEquals("Pad A 7: kept in arc. It goes on the EP-133 when you connect.", MirrorText.sampleQueued(a7))
+        assertEquals("Pad A 7: new sample on the EP-133.", MirrorText.sampleSaved(a7))
+        assertEquals("The EP-133 is taking a new sample. This sound plays once it's done.", MirrorText.DEVICE_UPLOADING)
+        assertEquals("1 sample kept in Takes.", MirrorText.samplesToTakes(1))
+        assertEquals("3 samples kept in Takes.", MirrorText.samplesToTakes(3))
+        // The offline prompt counts recordings apart from pad changes.
+        assertEquals("Put 2 offline pad changes on the EP-133?", MirrorText.putOffline(2, samples = 0))
+        assertEquals("Put 1 new sample on the EP-133?", MirrorText.putOffline(0, samples = 1))
+        assertEquals("Put 1 offline pad change and 2 new samples on the EP-133?", MirrorText.putOffline(1, samples = 2))
+        assertEquals("Review samples", SettingsText.REVIEW_SAMPLES)
+        assertTrue(SettingsText.REVIEW_SAMPLES_NOTE.endsWith("as on the EP-133."))
+        assertEquals("Sample", CoachText.SAMPLE)
+    }
+
+    @Test
+    fun `bluetooth delay text`() {
+        assertEquals("Make up for Bluetooth delay", SettingsText.MAKE_UP_DELAY)
+        assertTrue(SettingsText.MAKE_UP_DELAY_NOTE.endsWith("are not changed."))
+        assertEquals("Now: the output counts about 40 ms; arc makes up the other 140 ms.", SettingsText.delayNow(40, 140))
+        assertEquals("Now: the output counts about 220 ms, all of Bluetooth's delay, so nothing more is made up.", SettingsText.delayNow(220, 0))
+        assertEquals("Now: not measured, counted as about 180 ms.", SettingsText.delayNow(null, 180))
+        assertEquals("Now: the sound isn't going to Bluetooth, so nothing is made up for.", SettingsText.DELAY_NONE)
+        // The key's sentence leads with the delay, as a toast may cut it short.
+        assertTrue(MirrorText.WIRELESS_DELAY.startsWith("Bluetooth plays late"))
+        assertEquals("Bluetooth plays late (about 180 ms): arc makes up for it", MirrorText.wirelessMadeUp(180))
+        assertEquals("Bluetooth delay", CoachText.BLUETOOTH)
+    }
+
+    @Test
+    fun `connection key text`() {
+        assertEquals("Hold to disconnect", NavText.HOLD_TO_DISCONNECT)
+        assertEquals("EP-133 connected: hold to disconnect", CoachText.CONNECTED)
+        assertEquals("EP-133 connected", CoachText.CONNECTED_NAME)
+        assertEquals("Connection: hold to disconnect", CoachText.CONNECTION_HOLD)
+        assertEquals("Disconnect", CoachText.DISCONNECT)
+    }
+
+    @Test
+    fun `pattern text`() {
+        val a7 = PhysicalPad(0, 9)
+        assertEquals("Pattern", MirrorText.PATTERN)
+        assertEquals(
+            listOf("RECORD", "PLAY", "STOP", "ERASE", "UNDO", "TIMING", "LENGTH", "AUTO", "COUNT-IN", "CLEAR", "CLEAR ALL"),
+            listOf(
+                MirrorText.RECORD, MirrorText.PLAY, FeatureText.STOP, MirrorText.ERASE, MirrorText.UNDO, MirrorText.TIMING,
+                MirrorText.LENGTH, MirrorText.AUTO, MirrorText.COUNT_IN, MirrorText.CLEAR, MirrorText.CLEAR_ALL,
+            ).map { it.uppercase() },
+        )
+        assertEquals("×2", MirrorText.DOUBLE)
+        assertEquals("2.3 / 4", MirrorText.patternPosition(2, 3, 4))
+        assertEquals("2.3 / 4 · 1/16", MirrorText.patternRecording(2, 3, 4, Timing.SIXTEENTH))
+        assertEquals("1.1 / 1 · Off", MirrorText.patternRecording(1, 1, 1, Timing.OFF))
+        assertEquals("Count-in 3", MirrorText.countIn(3))
+        assertEquals("/ 4", MirrorText.countInOf(4))
+        assertEquals("Play a pad or PLAY · 1/16", MirrorText.patternArmed(Timing.SIXTEENTH))
+        assertEquals("Play a pad or PLAY · Off", MirrorText.patternArmed(Timing.OFF))
+        assertEquals(listOf("Off", "1/1", "1/2", "1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32"), Timing.entries.map(MirrorText::timingLabel))
+        assertEquals("Timing 1/16: notes snap to the nearest 1/16", MirrorText.timingName(Timing.SIXTEENTH))
+        assertEquals("Timing 1/8T: notes snap to the nearest 1/8 triplet", MirrorText.timingName(Timing.EIGHTH_T))
+        assertEquals("Timing off: notes stay where you play them", MirrorText.timingName(Timing.OFF))
+        val c4 = ArpNote(a7, 0)
+        val held = listOf(ArpNote(a7, 5), ArpNote(a7, 9), c4)
+        assertEquals("ARP · 1/16 · FA LA DO", MirrorText.arpLine(false, false, Timing.SIXTEENTH, held, NoteNames.SOLFEGE))
+        assertEquals("ARP ∞ · 1/8T · F A C", MirrorText.arpLine(false, true, Timing.EIGHTH_T, held, NoteNames.LETTERS))
+        assertEquals(
+            "REPEAT · 1/32 · A 7, B ENTER",
+            MirrorText.arpLine(true, false, Timing.THIRTY_SECOND, listOf(ArpNote(a7, null), ArpNote(PhysicalPad(1, 2), null)), NoteNames.SOLFEGE),
+        )
+        // The ARP / RPT switch and the tempo sheet's TIMING page.
+        assertEquals(listOf("ARP", "RPT"), listOf(MirrorText.ARP, MirrorText.RPT).map { it.uppercase() })
+        assertEquals("Turn on RPT first", MirrorText.arpFirst(repeat = true))
+        assertEquals("Arp or repeat: hold pads", CoachText.ARP)
+        assertEquals("Interval 1/16 triplet", MirrorText.intervalName(Timing.SIXTEENTH_T))
+        assertEquals("56%", MirrorText.percent(56))
+        assertEquals("How long each note sounds, as a share of the step.", MirrorText.GATE_NOTE)
+        assertEquals(listOf("Played", "Up", "Down", "Up-dn", "Random"), ArpOrder.entries.map(MirrorText::arpOrderName))
+        assertEquals(listOf("As played", "Up and down"), listOf(ArpOrder.PLAYED, ArpOrder.UP_DOWN).map(MirrorText::arpOrderSpoken))
+        assertEquals("A · 1 bar", MirrorText.groupLength(0, 1))
+        assertEquals("Group D, 16 bars", MirrorText.groupLengthName(3, 16))
+        assertEquals("Clear group B's notes?", MirrorText.clearAsk(1))
+        assertEquals("Clear every group's notes?", MirrorText.clearAsk(null))
+        assertEquals("Group C cleared.", MirrorText.cleared(2))
+        assertEquals("Patterns cleared.", MirrorText.cleared(null))
+        assertEquals("Pad A 7: notes erased.", MirrorText.erased(a7))
+        assertEquals("Pad A 7, has notes", MirrorText.padTitle(a7) + MirrorText.PAD_HAS_NOTES)
+        assertEquals("1 pad not loaded", MirrorText.missingPads(1))
+        assertEquals("3 pads not loaded", MirrorText.missingPads(3))
+        assertEquals("Patterns stay in arc and play on the phone.", MirrorText.PATTERN_NOTE)
+        // The keys for screen readers, and what is said when the transport changes.
+        val stopped = TransportState()
+        val armed = TransportState(TransportPhase.ARMED)
+        val counting = TransportState(TransportPhase.COUNT_IN, recording = true)
+        val recording = TransportState(TransportPhase.PLAYING, recording = true)
+        val playing = TransportState(TransportPhase.PLAYING)
+        assertEquals(
+            listOf("Record, off", "Record, armed", "Record, armed", "Record, recording", "Record, off"),
+            listOf(stopped, armed, counting, recording, playing).map(MirrorText::recordDescription),
+        )
+        assertEquals("Record, off", MirrorText.recordDescription(TransportState(TransportPhase.COUNT_IN)))
+        assertEquals(
+            listOf("Play", "Play", "Play, counting in", "Play, bar 2 of 4", "Play, bar 2 of 4"),
+            listOf(stopped, armed, counting, recording, playing).map { MirrorText.playDescription(it, 2, 4) },
+        )
+        assertEquals(
+            listOf("Stopped", "Record armed", "Counting in", "Recording", "Playing"),
+            listOf(stopped, armed, counting, recording, playing).map(MirrorText::transportAnnouncement),
+        )
+        // SAMPLE's BARS choice for the pattern's length.
+        assertEquals("PTN", MirrorText.PTN.uppercase())
+        // REC is TAKE now.
+        assertEquals("TAKE 0:12", MirrorText.takeBadge(12.9).uppercase())
+        assertEquals("Take. Recording starts with the first sound you play, or when the EP-133 starts playing.", MirrorText.takeDescription(RecState.Idle))
+        assertEquals("Take, waiting for the first sound or the EP-133's PLAY. Tap to cancel.", MirrorText.takeDescription(RecState.Armed))
+        assertEquals("Recording a take, 1:05. Tap to stop.", MirrorText.takeDescription(RecState.Recording(65)))
+        assertTrue(MirrorText.TAKES_HINT.startsWith("Tap TAKE, then play"))
+        assertEquals("Record a pattern: tap, then PLAY; hold for its settings", CoachText.RECORD)
+    }
+
+    @Test
+    fun `scene text`() {
+        assertEquals(listOf("P01", "P05", "P99"), listOf(1, 5, 99).map(MirrorText::patternLabel))
+        // The scene's index, shown from 1.
+        assertEquals(listOf("S01", "S10", "S99"), listOf(0, 9, 98).map(MirrorText::sceneLabel))
+        val seq = SceneOps.selectPattern(SceneOps.selectPattern(ProjectSeq.DEFAULT, 1, 3), 3, 2)
+        assertEquals("S01 \u00B7 A01 B03 C01 D02", MirrorText.sceneLine(seq))
+        assertEquals("S02 \u00B7 A02 B02 C02 D02", MirrorText.sceneLine(SceneOps.newScene(ProjectSeq.DEFAULT)))
+        assertEquals(listOf("Immediate", "Bar end", "Pattern end"), SwitchTime.entries.map(MirrorText::switchName))
+        assertEquals("P01 \u2192 P05", MirrorText.queuedLabel(1, 5))
+        assertEquals("P03 copied.", MirrorText.copiedPattern(3))
+        assertEquals("Bar 2 copied.", MirrorText.copiedBar(2))
+        assertEquals("KICK copied.", MirrorText.copiedPad("KICK"))
+        assertEquals("Pasted into P05.", MirrorText.pastedPattern(5))
+        assertEquals("Pasted into bar 2.", MirrorText.pastedBar(2))
+        assertEquals("Pasted onto SNARE.", MirrorText.pastedPad("SNARE"))
+        assertEquals("Scene cleared.", MirrorText.CLEARED_SCENE)
+        assertEquals("Scene deleted.", MirrorText.DELETED_SCENE)
+    }
+
+    @Test
+    fun `scene panel text`() {
+        assertEquals("B03", MirrorText.groupPattern(1, 3))
+        assertEquals(listOf("now", "at bar end", "at pattern end"), SwitchTime.entries.map(MirrorText::switchAt))
+        assertEquals("B \u2192 05", MirrorText.groupMove(1, 5))
+        assertEquals("\u2192 S03", MirrorText.sceneMove(2))
+        assertEquals("B \u2192 05 at bar end", MirrorText.queuedLine(MirrorText.groupMove(1, 5), SwitchTime.BAR))
+        assertEquals("\u2192 S03 at pattern end", MirrorText.queuedLine(MirrorText.sceneMove(2), SwitchTime.PATTERN))
+        assertEquals("S03 committed", MirrorText.sceneCommitted(2))
+        assertEquals("S05 cleared", MirrorText.sceneCleared(4))
+        assertEquals("S05 deleted", MirrorText.sceneDeleted(4))
+        assertEquals("B \u00B7 pick 01\u201399", MirrorText.gridStatus(1))
+        assertEquals("A bar 2 copied", MirrorText.clipCopied("A bar 2"))
+        assertEquals("SNARE pasted", MirrorText.clipPasted("SNARE"))
+        assertEquals("Tap a pad", MirrorText.PAD_TAP_SOURCE)
+        assertEquals("KICK \u2192 tap target", MirrorText.padTapTarget("KICK"))
+        assertEquals(listOf("No pattern copied", "No bar copied", "No pad copied"), listOf(MirrorText.NO_PATTERN_COPIED, MirrorText.NO_BAR_COPIED, MirrorText.NO_PAD_COPIED))
+        // For screen readers.
+        assertEquals("Scene 2 of 3, patterns A 1, B 3, C 1, D 2", MirrorText.sceneSpoken(1, 3, listOf(1, 3, 1, 2)))
+        assertEquals("Group B, pattern 5, 4 bars", MirrorText.patternSpoken(1, 5, 4))
+        assertEquals("Group A, pattern 1, 1 bar", MirrorText.patternSpoken(0, 1, 1))
+        assertEquals("Group B, pattern 5, at bar end", MirrorText.patternQueuedSpoken(1, 5, SwitchTime.BAR))
+        assertEquals("Scene 3, at pattern end", MirrorText.sceneQueuedSpoken(2, SwitchTime.PATTERN))
+        assertEquals("Scene 3 committed", MirrorText.sceneCommittedSpoken(2))
+    }
+
+    @Test
+    fun `scene panel labels`() {
+        assertEquals("Scenes, scene 2 of 3", MirrorText.sceneChipName(1, 3))
+        assertEquals("Scene 2 of 3", MirrorText.sceneStatus(1, 3))
+        assertEquals(listOf("03", "03\u219205"), listOf(MirrorText.patternNumber(3), MirrorText.numberMove(3, 5)))
+        assertEquals(listOf("Group B, pattern 3, has notes", "Group B, pattern 3"), listOf(true, false).map { MirrorText.groupColumn(1, 3, it) })
+        assertEquals(listOf("Group B, previous pattern", "Group B, next pattern", "Group B, next free pattern"), listOf(MirrorText.groupPrevious(1), MirrorText.groupNext(1), MirrorText.groupNextFree(1)))
+        assertEquals(listOf(", pattern 3", ", pattern 3, changing to 5"), listOf(null, 5).map { MirrorText.groupKeyPattern(3, it) })
+        // CLR and DEL, the hold key.
+        assertEquals(listOf("Clear scene", "Delete scene"), listOf(false, true).map(MirrorText::eraseSceneName))
+        assertEquals(listOf("HOLD \u00B7 CLR S02", "HOLD \u00B7 DEL S05"), listOf(MirrorText.eraseHolding(false, "S02"), MirrorText.eraseHolding(true, "S05")).map { it.uppercase() })
+        assertEquals(listOf("Scene change: Immediate", "Scene change: Bar end", "Scene change: Pattern end"), SwitchTime.entries.map(MirrorText::changeName))
+        // CLIP.
+        assertEquals(listOf("PTN", "BAR", "PAD", "COPY", "PASTE"), listOf(MirrorText.PTN, MirrorText.BAR, MirrorText.CLIP_PAD, MirrorText.COPY, MirrorText.PASTE).map { it.uppercase() })
+        assertEquals(listOf("Group A \u00B7 bar", "Clip \u00B7 A bar 2"), listOf(MirrorText.barPagesGroup(0), MirrorText.clipHeld("A bar 2")))
+        // The 1-99 grid.
+        assertEquals(listOf("Group B", "P03 \u00B7 4 bars", "P03 \u00B7 1 bar"), listOf(MirrorText.gridTitle(1), MirrorText.gridDetail(3, 4), MirrorText.gridDetail(3, 1)))
+        assertEquals(listOf("Pattern 5, has notes", "Pattern 6"), listOf(MirrorText.patternCell(5, true), MirrorText.patternCell(6, false)))
+        assertEquals("Pick patterns and scenes, copy and paste", CoachText.SCENE)
+    }
+
+    @Test
+    fun `step text`() {
+        // bar.beat.step, from 1: the 5th 1/16 is 1.2.1.
+        assertEquals(
+            listOf("1.1.1", "1.2.1", "1.2.2", "1.4.4", "2.1.1"),
+            listOf(0, 4, 5, 15, 16).map { MirrorText.stepLabel(it, Timing.SIXTEENTH) },
+        )
+        assertEquals("1.2.2", MirrorText.stepLabel(3, Timing.EIGHTH))
+        assertEquals("1.1.8", MirrorText.stepLabel(7, Timing.THIRTY_SECOND))
+        // A beat or longer: the step is 1.
+        assertEquals("1.4.1", MirrorText.stepLabel(3, Timing.QUARTER))
+        assertEquals("2.1.1", MirrorText.stepLabel(2, Timing.HALF))
+        assertEquals("3.1.1", MirrorText.stepLabel(2, Timing.WHOLE))
+        // Triplets: 1..3 in a beat at 1/8T, 1..6 at 1/16T.
+        assertEquals("1.2.3", MirrorText.stepLabel(5, Timing.EIGHTH_T))
+        assertEquals("1.2.6", MirrorText.stepLabel(11, Timing.SIXTEENTH_T))
+        assertEquals(
+            listOf("1/16", "1 bar", "1/2", "1/4", "1/8", "1/8T", "1/16T", "1/32", "3/16", "5/16", "15/16", "50 tk", "1 tk"),
+            listOf(24, 384, 192, 96, 48, 32, 16, 12, 72, 120, 360, 50, 1).map(MirrorText::gateLabel),
+        )
+        assertEquals("1 corrected", MirrorText.correctedLine(1))
+        assertEquals("3 corrected", MirrorText.correctedLine(3))
+        // The STEP panel's status, and what screen readers say.
+        assertEquals("+ SNARE", MirrorText.stepPlaced("SNARE"))
+        assertEquals("SNARE on step 1.2.1", MirrorText.stepPlacedSpoken("SNARE", "1.2.1"))
+        assertEquals("KICK \u2192 1.2.2", MirrorText.stepNudged("KICK", "1.2.2"))
+        assertEquals("KICK moved to step 1.2.2", MirrorText.stepNudgedSpoken("KICK", "1.2.2"))
+        assertEquals(listOf("KICK +1 tk", "KICK \u22122 tk", "KICK 0 tk"), listOf(1, -2, 0).map { MirrorText.stepShifted("KICK", it) })
+        assertEquals(
+            listOf("KICK 1 tick later", "KICK 2 ticks earlier", "KICK back in place"),
+            listOf(1, -2, 0).map { MirrorText.stepShiftedSpoken("KICK", it) },
+        )
+        assertEquals(listOf("Step 1.2.1", "Step 1.2.1, 1 note", "Step 1.2.1, 2 notes"), listOf(0, 1, 2).map { MirrorText.stepSpoken("1.2.1", it) })
+        // The STEP chip and panel.
+        assertEquals("STEP 1.2.1", MirrorText.stepStatus("1.2.1"))
+        assertEquals(listOf("Step 1.2.1, has notes", "Step 2.4.4"), listOf(MirrorText.stepCell("1.2.1", true), MirrorText.stepCell("2.4.4", false)))
+        assertEquals("Bar 2", MirrorText.barPage(2))
+        assertEquals(listOf("NUDGE", "NUDGE \u00B7 KICK"), listOf(MirrorText.nudgeChip(null), MirrorText.nudgeChip("KICK")).map { it.uppercase() })
+        assertEquals(listOf("STEP", "VEL", "LEN", "BAR", "CORRECT"), listOf(MirrorText.STEP, MirrorText.VEL, MirrorText.LEN, MirrorText.BAR, MirrorText.CORRECT).map { it.uppercase() })
+        assertEquals("Tap a lit pad to pick it, then \u2212 and + move its note.", MirrorText.NUDGE_NOTE)
+        assertEquals("Step through the pattern", CoachText.STEP)
+        assertEquals("Editing in step", MirrorText.STEP_GROUP)
+    }
+
+    @Test
+    fun `claude text`() {
+        // Live tools: the section, its card and the links.
+        assertEquals(listOf("CLAUDE", "BEAT CARDS"), listOf(ClaudeText.CLAUDE, ClaudeText.BEAT_CARDS).map { it.uppercase() })
+        assertEquals(
+            listOf("SHARE SCENE S02", "SHARE A \u00B7 01", "PASTE BEAT"),
+            listOf(ClaudeText.shareScene("S02"), ClaudeText.sharePattern(0, 1), ClaudeText.PASTE_BEAT).map { it.uppercase() },
+        )
+        assertEquals(
+            listOf("Share scene S02 with Claude", "Share scene S02 with Claude, no notes yet", "Share B \u00B7 12 with Claude", "Share B \u00B7 12 with Claude, no notes yet"),
+            listOf(ClaudeText.shareSceneName("S02", false), ClaudeText.shareSceneName("S02", true), ClaudeText.sharePatternName(1, 12, false), ClaudeText.sharePatternName(1, 12, true)),
+        )
+        assertEquals("https://arc-pi-mauve.vercel.app/arc-beats-skill.zip", ClaudeText.SKILL_URL)
+        assertTrue(ClaudeText.LEARN_PROMPT.startsWith("Use the arc-beats skill."))
+        assertEquals("Share a beat with Claude, paste one back", CoachText.CLAUDE)
+        // What is shared: the card in a fenced block after the prompt, named by where it sits.
+        assertEquals(listOf("P01 S02", "P99 S10", "S02"), listOf(ClaudeText.patternCardName(1, 1), ClaudeText.patternCardName(99, 9), ClaudeText.sceneCardName(1)))
+        assertEquals("Arc beat P01 S02", ClaudeText.shareSubject("P01 S02"))
+        assertEquals("Analyse this beat:\n\n```\nARC BEAT 1\nswing 50\n```\n", ClaudeText.shareText("Analyse this beat:", "ARC BEAT 1\nswing 50\n"))
+        assertEquals("No beat card in that text.", ClaudeText.NO_CARD)
+        // The sheet.
+        assertEquals(
+            listOf("Beat card \u00B7 4 bars \u00B7 5 pads \u00B7 23 hits", "Beat card \u00B7 1 bar \u00B7 1 pad \u00B7 1 hit"),
+            listOf(ClaudeText.summary(4, 5, 23), ClaudeText.summary(1, 1, 1)),
+        )
+        assertEquals(listOf("A \u00B7 04", "D \u00B7 99"), listOf(ClaudeText.place(0, 4), ClaudeText.place(3, 99)))
+        assertEquals(listOf("Group A \u00B7 2 bars \u00B7 1/16", "Group C \u00B7 1 bar \u00B7 1/16T"), listOf(ClaudeText.sectionTitle(0, 2, "1/16"), ClaudeText.sectionTitle(2, 1, "1/16T")))
+        assertEquals(listOf("+1 bar", "+6 bars"), listOf(1, 6).map(ClaudeText::moreBars))
+        assertEquals(listOf("A7", "AE", "B."), listOf(PhysicalPad(0, 9), PhysicalPad(0, 2), PhysicalPad(1, 0)).map(ClaudeText::padLabel))
+        assertEquals(
+            listOf("A7 kick: 4 hits", "A7: 1 hit", "A enter: 2 hits"),
+            listOf(ClaudeText.rowName(PhysicalPad(0, 9), "kick", 4), ClaudeText.rowName(PhysicalPad(0, 9), null, 1), ClaudeText.rowName(PhysicalPad(0, 2), null, 2)),
+        )
+        assertEquals("Group A, 2 bars, 1/16, 3 pads", ClaudeText.gridName(0, 2, "1/16", 3))
+        assertEquals("A \u00B7 04 (next free)", ClaudeText.goesTo(0, 4))
+        assertEquals(listOf("Goes to", "New scene", "Tempo"), listOf(ClaudeText.GOES_TO, MirrorText.NEW_SCENE, ClaudeText.TEMPO))
+        assertEquals("SET \u00B7 NOW 122", ClaudeText.tempoChip(122).uppercase())
+        assertEquals(listOf("Set the tempo to 92, now 122", "Keep the tempo at 122, the card says 92"), listOf(true, false).map { ClaudeText.tempoChipName("92", 122, it) })
+        assertEquals("Swing 58 \u00B7 placed in the notes", ClaudeText.swingLine(58))
+        // Problems: listed, announced and copied for Claude.
+        val warning = CardProblem(7, "Unknown word 'foo', ignored.", false)
+        val error = CardProblem(12, "A7 needs a | before its steps.", true)
+        assertEquals("Line 7: Unknown word 'foo', ignored.", ClaudeText.problemLine(warning))
+        assertEquals(listOf("Warning, line 7: Unknown word 'foo', ignored.", "Error, line 12: A7 needs a | before its steps."), listOf(warning, error).map(ClaudeText::problemName))
+        assertEquals(
+            "Arc found problems in the beat card:\n- Line 7 (warning): Unknown word 'foo', ignored.\n- Line 12 (error): A7 needs a | before its steps.\nPlease fix them and send the whole card again.",
+            ClaudeText.problemsReport(listOf(warning, error)),
+        )
+        // IMPORT, and why it can't.
+        assertEquals(listOf("COPY PROBLEMS", "IMPORT"), listOf(ClaudeText.COPY_PROBLEMS, ClaudeText.IMPORT).map { it.uppercase() })
+        assertEquals("Group B has no free pattern.", ClaudeText.groupFull(1))
+        assertEquals(
+            listOf("Imported to A \u00B7 04. UNDO takes it back.", "Imported to scene S03. UNDO takes it back.", "Imported to A \u00B7 04, B \u00B7 02. UNDO takes it back."),
+            listOf(
+                ClaudeText.imported(listOf(0 to 4), null),
+                ClaudeText.imported(listOf(0 to 4, 1 to 2), "S03"),
+                ClaudeText.imported(listOf(0 to 4, 1 to 2), null),
+            ),
+        )
     }
 }

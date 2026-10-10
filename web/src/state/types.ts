@@ -12,6 +12,12 @@
 //   (a remembered folder may need a tap to be used again) and
 //   [canPickFolder] (File System Access is Chromium only).
 // - UiState.keysPad is a PhysicalPad (compare with padKey(), not ===).
+// - Live's EDIT (pad assignment): ToastMsg.action is the toast's UNDO word,
+//   whose closure the controller keeps (runToastAction); BrowserUi.draftPad
+//   is the pad an upload draft's sample goes onto.
+// - Live offline (an addition): MirrorUi.offlineSounds (the Device / Factory
+//   lists), UiState.offlinePads (changes kept) and UiState.offlinePrompt (the
+//   question once the EP-133 connects).
 
 import type { TakeInfo } from '../platform/storage/takeStore'
 import type { Pak } from '../core/backup/pak'
@@ -19,12 +25,13 @@ import type { DiffResult } from '../core/features/backupDiff'
 import type { DeviceContents, SoundDetails } from '../core/features/deviceBrowser'
 import type { SearchGroup } from '../core/features/librarySearch'
 import type { MirrorState } from '../core/features/liveMirror'
+import type { SoundSource } from '../core/features/offlinePads'
 import type { PhysicalPad } from '../core/features/padNotes'
 import { PadOrder } from '../core/features/padPush'
 import type { PakCompareResult } from '../core/features/pakCompare'
 import type { PadGroup } from '../core/features/projectPads'
 import type { TrimRange } from '../core/features/sampleTrim'
-import type { Storage } from '../core/protocol/device'
+import type { SoundEntry, Storage } from '../core/protocol/device'
 import type { DeviceInfo } from '../core/protocol/session'
 import type { BackupRecord, RestoreSelection } from '../core/text/libraryRules'
 import type { FolderStatus } from '../platform/storage/library'
@@ -51,6 +58,8 @@ export interface ToastMsg {
   readonly id: number
   readonly text: string
   readonly error: boolean
+  /** A key on the toast (Live's UNDO), its word; the controller runs it (runToastAction). */
+  readonly action?: string | undefined
 }
 
 /** One picked file. [error] is set when it can't be uploaded (not a usable WAV). */
@@ -80,6 +89,8 @@ export interface BrowserUi {
   readonly reading: ReadingKey | null
   /** WAV files picked for upload, waiting for their slots to be confirmed. */
   readonly draft: readonly UploadDraftItem[] | null
+  /** Live's EDIT: the pad the draft's sample goes onto once uploaded (null: a plain upload). */
+  readonly draftPad?: PhysicalPad | null
 }
 
 /** Sound search across saved backups: the query, its results, and whether older backups are still being indexed. */
@@ -102,6 +113,20 @@ export interface PakCompareUi {
   readonly error: string | null
 }
 
+/**
+ * The sounds Live offers without the device (an addition): the last read's
+ * sound list ([device], sizes unknown, null before any read) and the saved
+ * factory pack's ([factory], null without it). [base] is the list the pads
+ * shown come from (FACTORY for the factory sounds' first project); the
+ * device sounds arc can't play without the EP-133 are [unavailable].
+ */
+export interface OfflineSounds {
+  readonly base: SoundSource
+  readonly device: readonly SoundEntry[] | null
+  readonly factory: readonly SoundEntry[] | null
+  readonly unavailable: ReadonlySet<number>
+}
+
 /** The live mirror: what the device is playing, plus loading and errors. */
 export interface MirrorUi {
   readonly state: MirrorState
@@ -109,6 +134,8 @@ export interface MirrorUi {
   readonly error: string | null
   /** Not connected, showing the last read instead: when it was made ("Last seen 5 Oct, 14:02"). */
   readonly offline?: string | null | undefined
+  /** Offline: the sounds to preview and put on the pads in arc only. */
+  readonly offlineSounds?: OfflineSounds | null | undefined
 }
 
 /** A backup opened for its contents screen (sounds and projects, playback, export). */
@@ -160,6 +187,10 @@ export interface UiState {
   readonly canPickFolder: boolean
   /** Web: the library folder's name while it is in use (folderStatus 'granted'), for WebText.folderNote. */
   readonly folderName: string | null
+  /** Live's pad changes made offline and kept (Reset pads), 0 when none. */
+  readonly offlinePads: number
+  /** The EP-133 connected with offline pad changes kept: how many, while it asks to write them. */
+  readonly offlinePrompt: number | null
   /** Live's takes, newest first (ArcController.takes). */
   readonly takes: readonly TakeInfo[]
 }
@@ -225,5 +256,7 @@ export function initialState(midiSupported = true, canPickFolder = false): UiSta
     folderStatus: 'none',
     canPickFolder,
     folderName: null,
+    offlinePads: 0,
+    offlinePrompt: null,
   }
 }

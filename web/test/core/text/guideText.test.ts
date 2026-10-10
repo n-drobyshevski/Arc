@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import * as GuideCombo from '../../../src/core/text/guideCombo'
 import { ComboKeyError, ComboSyntaxError, KeyAction, KeyKind, comboStep, keyCap } from '../../../src/core/text/guideCombo'
+import { DIGITS, GROUPS, PADS, PANEL_KEYS, PanelKeymap, keymapStep } from '../../../src/core/text/guideKeymap'
 import * as GuideText from '../../../src/core/text/guideText'
 
 const all = GuideText.sections.flatMap((s) => s.entries)
@@ -148,6 +149,82 @@ describe('GuideTextTest', () => {
     expect(() => GuideCombo.parse('SHIFT + A / B')).toThrow(ComboSyntaxError)
     expect(GuideText.tab(GuideText.sections[3]!)).toBe('FX')
     expect(GuideText.tab(GuideText.sections[0]!)).toBe('SOUNDS')
+  })
+
+  it('every combo maps onto the panel', () => {
+    for (const e of all) {
+      const map = PanelKeymap.of(e)
+      if (map === null) continue
+      expect(map.options.length > 0 && map.options.every((o) => o.length > 0), e.combo!).toBe(true)
+      for (const option of map.options) for (const step of option) expect(step.keys.length, e.combo!).toBeGreaterThan(0)
+      // A step that turns lights a knob, one that moves lights the fader, one that types lights the digits.
+      for (const step of map.steps) {
+        if (step.kind === 'TURN') expect(step.keys.some((k) => k === 'X' || k === 'Y'), e.combo!).toBe(true)
+        if (step.kind === 'MOVE') expect(step.keys.includes('FADER'), e.combo!).toBe(true)
+        if (step.kind === 'TYPE') expect(DIGITS.every((d) => step.keys.includes(d)), e.combo!).toBe(true)
+      }
+    }
+    // Each key the illustration draws has a printed name.
+    for (const k of PANEL_KEYS) expect(GuideText.panelLabel(k).length).toBeGreaterThan(0)
+    expect(new Set(PADS).size).toBe(12)
+  })
+
+  it('combos read as steps on the panel', () => {
+    // Hold SOUND, then type on the pads: two numbered steps.
+    const load = PanelKeymap.parse('hold:SOUND + dial:0-9')
+    expect(load.steps).toEqual([keymapStep(['SOUND'], 'HOLD'), keymapStep(DIGITS, 'TYPE')])
+    expect(load.mode).toBeNull()
+    // Pressed together, one step; then a press.
+    expect(PanelKeymap.parse('SHIFT + ERASE > dial:0-9 > ENTER').steps).toEqual([
+      keymapStep(['SHIFT', 'ERASE'], 'PRESS'),
+      keymapStep(DIGITS, 'TYPE'),
+      keymapStep(['ENTER'], 'PRESS'),
+    ])
+    // A mode, and alternatives.
+    const knobs = PanelKeymap.parse('[In SOUND mode] turn:KNOB X / turn:KNOB Y')
+    expect(knobs.mode).toBe('SOUND')
+    expect(knobs.context).toBe('In SOUND mode')
+    expect(knobs.steps).toEqual([keymapStep(['X', 'Y'], 'TURN', true)])
+    expect(PanelKeymap.parse('[In sample mode] hold:pad').mode).toBe('SAMPLE')
+    expect(PanelKeymap.parse('[In MAIN] SHIFT + C > SHIFT + D').mode).toBe('MAIN')
+    expect(PanelKeymap.parse('[While playing] FX').mode).toBeNull()
+    expect(PanelKeymap.parse('[In system settings] dial:0-9 > ENTER').mode).toBeNull()
+    // Held alone; a pad is any of the twelve; A-D any group.
+    expect(PanelKeymap.parse('[In SOUND mode] hold:pad').steps).toEqual([keymapStep(PADS, 'HOLD')])
+    expect(PanelKeymap.parse('SOUND > A-D > pad').steps).toEqual([
+      keymapStep(['SOUND'], 'PRESS'),
+      keymapStep(GROUPS, 'PRESS'),
+      keymapStep(PADS, 'PRESS'),
+    ])
+    // Held through the next step: not held again.
+    expect(PanelKeymap.parse('hold:pad + SHIFT + C > hold:pad + SHIFT + D').steps).toEqual([
+      keymapStep(PADS, 'HOLD'),
+      keymapStep(['SHIFT', 'C'], 'PRESS'),
+      keymapStep(['SHIFT', 'D'], 'PRESS'),
+    ])
+    // Moving the fader with a group held; pressing twice; two ways.
+    expect(PanelKeymap.parse('hold:A-D + move:FADER').steps).toEqual([keymapStep(GROUPS, 'HOLD'), keymapStep(['FADER'], 'MOVE')])
+    expect(PanelKeymap.parse('[In SOUND mode] SHIFT + x2:C > A-D > SHIFT + D').steps[0]!.kind).toBe('TWICE')
+    const tempo = PanelKeymap.parse('TEMPO > turn:KNOB X | hold:TEMPO + dial:0-9')
+    expect(tempo.options.length).toBe(2)
+    expect(tempo.keys).toEqual(new Set(['TEMPO', 'X']))
+    expect(PanelKeymap.parse('RECORD > -/+').steps[1]!.keys).toEqual(['MINUS', 'PLUS'])
+    expect(PanelKeymap.parse('hold:MAIN + 1-9').steps[1]!.keys).toEqual(DIGITS.slice(1))
+  })
+
+  it('list and illustration words', () => {
+    expect(GuideText.searchCount(93)).toBe('Search 93 shortcuts')
+    expect(GuideText.modeTag('SOUND')).toBe('SOUND MODE')
+    expect(GuideText.modeTag('sample')).toBe('SAMPLE MODE')
+    expect(GuideText.tag(KeyAction.DIAL)).toBe('TYPE')
+    expect(GuideText.tag(KeyAction.HOLD)).toBe('HOLD')
+    expect(GuideText.stepTag('PRESS')).toBeNull()
+    expect(GuideText.stepTag('HOLD')).toBe('HOLD')
+    expect(GuideText.stepWord('TYPE')).toBe('type a number on the pads')
+    expect(GuideText.step(2)).toBe('Step 2')
+    expect(GuideText.panelSub('SOUND')).toBe('Edit')
+    expect(GuideText.panelSub('PLAY')).toBeNull()
+    expect(GuideText.knobLabel('Y')).toBe('Metronome')
   })
 })
 

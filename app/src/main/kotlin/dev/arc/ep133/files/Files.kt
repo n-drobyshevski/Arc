@@ -59,6 +59,21 @@ object Files {
         }
     }
 
+    /** [text] as text/plain through the system chooser ([title] on it), with [subject] for apps that take one. Throws if nothing can receive it. */
+    fun shareText(context: Context, subject: String, text: String, title: String? = null) {
+        val send = Intent(Intent.ACTION_SEND)
+            .setType("text/plain")
+            .putExtra(Intent.EXTRA_SUBJECT, subject)
+            .putExtra(Intent.EXTRA_TEXT, text)
+        val chooser = Intent.createChooser(send, title)
+        if (context !is android.app.Activity) chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        try {
+            context.startActivity(chooser)
+        } catch (e: ActivityNotFoundException) {
+            throw IOException("no app to share with", e)
+        }
+    }
+
     /** Writes [bytes] to a document the user picked with the Storage Access Framework. */
     fun writeTo(context: Context, uri: Uri, bytes: ByteArray) {
         val out = context.contentResolver.openOutputStream(uri, "wt") ?: throw IOException("Could not open the file for writing")

@@ -22,6 +22,7 @@ import { IdbPadSoundStore } from '../platform/storage/padSoundStore'
 import {
   CoachPrefs,
   LastReadPrefs,
+  OfflinePadsPrefs,
   MirrorPrefs,
   SettingsStore,
   browserStorage,
@@ -37,9 +38,13 @@ import { IdbTakeStore, memoryTakeStore, type TakeStore } from '../platform/stora
 import { WebAudioPlayer } from '../platform/audio/player'
 import { LiveAudio } from '../platform/audio/liveAudio'
 import { createWakeLock } from '../platform/wakelock/wakeLock'
+import { browserFactory } from '../platform/net/factory'
 import { unavailableLibrary, type Deps, type LibraryApi } from '../state/deps'
 
 type Timer = ReturnType<typeof globalThis.setTimeout>
+
+/** Deps.requestFrame's timer where the display gives no frames (a hidden tab): about one frame. */
+const FRAME_MS = 16
 
 /** ?demo's library channel (BroadcastChannel) and device lock, apart from the real ones. */
 export const DEMO_CHANNEL_NAME = `${CHANNEL_NAME}-demo`
@@ -71,7 +76,8 @@ export interface BrowserDepsOptions {
    */
   demo?: boolean
   /**
-   * Where settings, mirror preferences and Live's last read are kept. Default:
+   * Where settings, mirror preferences and Live's last read (and its
+   * offline pad changes) are kept. Default:
    * localStorage, or memory with [demo]. main.tsx passes the one it read the
    * theme from.
    */
@@ -149,12 +155,23 @@ export async function createBrowserDeps(options: BrowserDepsOptions = {}): Promi
     padSounds,
     takes,
     lastRead: new LastReadPrefs(storage),
+    offlinePads: new OfflinePadsPrefs(storage),
+    factory: browserFactory(() => doc?.baseURI ?? globalThis.location.href),
     wakeLock,
     trafficLog: new TrafficLog(),
     now: () => Date.now(),
     perfNow: () => performance.now(),
     setTimeout: (fn, ms) => globalThis.setTimeout(fn, ms),
     clearTimeout: (h) => globalThis.clearTimeout(h as Timer),
+    requestFrame: (fn) => {
+      // A hidden tab gets no frames: a short timer then.
+      if (!win || typeof win.requestAnimationFrame !== 'function' || doc?.visibilityState === 'hidden') {
+        const t = globalThis.setTimeout(fn, FRAME_MS)
+        return () => globalThis.clearTimeout(t)
+      }
+      const h = win.requestAnimationFrame(() => fn())
+      return () => win.cancelAnimationFrame(h)
+    },
     guardUnload() {
       if (!win) return () => {}
       const onBeforeUnload = (e: BeforeUnloadEvent): void => {
@@ -172,6 +189,11 @@ export async function createBrowserDeps(options: BrowserDepsOptions = {}): Promi
         const on = (): void => listener(doc.visibilityState === 'visible')
         doc.addEventListener('visibilitychange', on)
         return () => doc.removeEventListener('visibilitychange', on)
+      },
+      onPageHide(listener) {
+        if (!win) return () => {}
+        win.addEventListener('pagehide', listener)
+        return () => win.removeEventListener('pagehide', listener)
       },
     },
     title: {

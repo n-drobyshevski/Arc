@@ -1,0 +1,50 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Chrome.kt (EditEdgeTab)
+ * GuideEdgeTab's look (22×112, rounded on its right), an LED near its top. */
+
+.edit-edge-tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--edge-tab-width);
+  height: var(--edge-tab-height);
+  padding: 0;
+  border: 0;
+  border-radius: 0 var(--radius-key) var(--radius-key) 0;
+  background: var(--tab-off);
+  color: var(--on-tab-off);
+  overflow: hidden;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.edit-edge-tab:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+.edit-edge-tab.is-on { background: var(--signal); color: var(--on-signal); }
+
+/* The LED, 6 round, 9 from the top: unlit, or white when on. */
+.edit-edge-tab__led {
+  position: absolute;
+  top: 9px;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  border-radius: 50%;
+  background: var(--hw-led-off);
+}
+.edit-edge-tab.is-on .edit-edge-tab__led {
+  background: var(--on-signal);
+  box-shadow: 0 0 6px var(--on-signal);
+}
+
+/* capsKeySmall, a quarter turn anticlockwise (reads bottom to top), a little under the middle (clear of the LED). */
+.edit-edge-tab__text {
+  margin-top: 8px;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  white-space: nowrap;
+  font-size: var(--size-caps-key-small);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: var(--track-caps-key);
+  text-transform: uppercase;
+}

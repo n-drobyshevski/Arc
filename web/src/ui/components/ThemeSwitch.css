@@ -1,0 +1,9 @@
+/* Web only: the desktop top bar's theme switch (ThemeSwitch.tsx). Three 36px
+ * icon caps (IconBlock), 6 apart, centred on the bar's 44px keys. */
+
+.theme-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-6);
+  flex: none;
+}

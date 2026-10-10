@@ -1,0 +1,149 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Cap.kt: hardware key caps.
+ *
+ * A cap is a flat face over a flat edge offset down and to the right, the way
+ * the EP-133 Sample Tool draws the K.O. II: two solid layers, no gradient,
+ * highlight or soft shadow.
+ * Pressed (:active, [data-down] set while a finger holds it, or latched: .is-down,
+ * [aria-pressed=true]), the face travels onto its edge as the K.O. II's mechanical
+ * keys do (core KeyMotion): straight down to a hard stop, and let go, back up on
+ * the switch's spring a little past rest before it settles. Both come from one
+ * number, --cap-p (0 up, 1 down, under 0 past rest), so the face and its edge
+ * always agree; the light around a lit pad isn't animated, so it follows the
+ * sound at once. Where @property isn't known, a cap jumps between the two.
+ *
+ * Per element: --cap-face (required), --cap-ink, --cap-edge (default: the face
+ * 30% darker), --cap-dx / --cap-dy (the edge offset), and --cap-glow /
+ * --cap-glow-blur (a light around a lit pad). .cap-3d--round: a knob's shorter edge.
+ * Import after tokens.css. */
+
+/* ---- Cap tokens (Cap.kt HwColors, kept here rather than in tokens.css,
+ * which mirrors ArcTheme.kt exactly) ---- */
+:root {
+  --cap-dx: 2px;            /* the edge, right of the face (the guide's caps: 2 right, 3 down) */
+  --cap-dy: 3px;            /* and below it; also how far the face travels when pressed */
+  /* The K.O. II's keys, the same in both themes: dark number pads with pale
+   * labels, pale group keys (A-D) with grey labels (the guide caps' colours). */
+  --hw-dark-face: #232425;
+  /* Lighter than the face, as the Sample Tool draws a dark key's side. */
+  --hw-dark-edge: #3B3C3E;
+  --hw-dark-ink: #EDECE8;
+  --hw-dark-dim: #A9AAA6;
+  --hw-light-face: var(--guide-light-face);
+  --hw-light-edge: var(--guide-light-edge);
+  --hw-light-ink: var(--guide-light-ink);
+  --hw-led-on: var(--signal);
+  /* A KEYS key's ring for the first octave (the next is signal orange). */
+  --hw-ring: color-mix(in oklab, var(--hw-dark-ink) 70%, transparent);
+  /* The body the pads sit in, and an unlit LED. */
+  --hw-body: #C9CAC5;
+  --hw-led-off: #9C9C97;
+
+  /* The Guide's K.O. II illustration (Cap.kt KoColors): the device's own
+   * colours, the same in both themes but for the body's edge, which must show
+   * on a dark page. Keys come as face, edge (the side under it) and ink;
+   * knobs as skirt, skirt edge, cap, cap edge. */
+  --ko-body: #D6D5D0;
+  --ko-edge: #AFAEA8;
+  /* The cream panel at the top, the ports strip and the labels printed on the body. */
+  --ko-panel: #E6E4DF;
+  --ko-label: #3B3C3E;
+  --ko-grille: #9A9A97;
+  --ko-grille-hole: #1B1B1B;
+  --ko-screen: #111210;
+  --ko-screen-ink: #E9E7DF;
+  --ko-screen-tag: #EDECE8;
+  --ko-screen-tag-ink: #111111;
+  --ko-dark-face: #232425;
+  --ko-dark-edge: #050505;
+  --ko-dark-ink: #EDECE8;
+  --ko-light-face: #EEEDE9;
+  --ko-light-edge: #A9A8A2;
+  --ko-light-ink: #6A6B6E;
+  /* A two-tier key's pale lower half: its ink, and the rule under ERASE. */
+  --ko-tier-ink: #5A5B5D;
+  --ko-tier-line: #D0CFCA;
+  /* PLAY, and the grey lower half of TEMPO / LOOP. */
+  --ko-grey-face: #7E7F81;
+  --ko-grey-edge: #5A5B5D;
+  --ko-grey-ink: #F0EFEB;
+  --ko-loop-face: #8E8F91;
+  --ko-led-off: #8E8E8B;
+  --ko-led-on: #FF3B1A;
+  --ko-port-light: #F1F0EC;
+  --ko-port-light-ink: #444444;
+  --ko-port-dark: #111111;
+  --ko-port-dark-ink: #DDDDDD;
+  --ko-port-ink: #555555;
+  /* The Y knob's tag. */
+  --ko-y-tag: #1E1F21;
+  --ko-fader-track: #111111;
+  --ko-fader-edge: #555555;
+  --ko-knob-white: #EAE9E5;
+  --ko-knob-white-edge: #BDBCB7;
+  --ko-knob-white-cap: #F7F6F3;
+  --ko-knob-white-cap-edge: #D3D2CD;
+  --ko-knob-orange: #FF5410;
+  --ko-knob-orange-edge: #B83600;
+  --ko-knob-orange-cap: #FF6A26;
+  --ko-knob-orange-cap-edge: #D94300;
+  --ko-knob-black: #28292B;
+  --ko-knob-black-edge: #050506;
+  --ko-knob-black-cap: #36373A;
+  --ko-knob-black-cap-edge: #0B0B0C;
+}
+:root[data-theme=dark] {
+  --hw-body: #3A3B3F;
+  --hw-led-off: #55565A;
+  --hw-dark-edge: #606165; /* stands out from the dark body */
+  --ko-edge: #0E0F10;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme=light]) {
+    --hw-body: #3A3B3F;
+    --hw-led-off: #55565A;
+    --hw-dark-edge: #606165; /* stands out from the dark body */
+    --ko-edge: #0E0F10;
+  }
+}
+
+/* A cap's travel, animatable (a registered number; inherits: false, so a cap inside a cap keeps its own). */
+@property --cap-p {
+  syntax: '<number>';
+  inherits: false;
+  initial-value: 0;
+}
+
+/* The defaults weigh nothing, so a component's own --cap-* always wins. */
+:where(.cap-3d) {
+  --cap-edge: color-mix(in oklab, var(--cap-face) 70%, black);
+  --cap-ink: currentColor;
+  --cap-glow: transparent;
+  --cap-glow-blur: 0px;
+}
+:where(.cap-3d--round) { --cap-dx: 1px; --cap-dy: 2px; }
+
+.cap-3d {
+  --cap-p: 0;
+  position: relative;
+  background: var(--cap-face);
+  color: var(--cap-ink);
+  transform: translate(calc(var(--cap-dx) * var(--cap-p)), calc(var(--cap-dy) * var(--cap-p)));
+  box-shadow:
+    calc(var(--cap-dx) * (1 - var(--cap-p))) calc(var(--cap-dy) * (1 - var(--cap-p))) 0 var(--cap-edge),
+    0 0 var(--cap-glow-blur) var(--cap-glow);
+  /* Let go: the spring. */
+  transition: --cap-p var(--key-up-ms) var(--key-spring);
+}
+
+.cap-3d:not(:disabled):active,
+.cap-3d[data-down],
+.cap-3d[aria-pressed='true'],
+.cap-3d.is-down {
+  --cap-p: 1;
+  /* Pressed: at an even speed into the stop. */
+  transition: --cap-p var(--key-down-ms) linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cap-3d { transition: none !important; }
+}

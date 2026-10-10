@@ -31,6 +31,10 @@ export type TakeState = 'IDLE' | 'ARMED' | 'RECORDING'
  * an armed take, from the next burst, so the take lines up with the device's
  * bar; such a take is [byTransport], and the device stopping ends it.
  *
+ * A take locked to the pattern is armed at a mix frame instead ([armAt]): it
+ * starts there, sound or not, and is stopped at one ([stopAt]), keeping the
+ * silence up to it, so it is exactly the frames between.
+ *
  * Only the output's thread calls it: [onBurst] once for each burst the mixer
  * renders, before the next.
  */
@@ -44,6 +48,10 @@ export class TakeRecorder {
   private _byTransport = false
   // The device started playing while armed: the next burst starts the take.
   private startNext = false
+  // [armAt]'s frame (null: the first sound's), [stopAt]'s (none: Infinity), the take's first mix frame.
+  private startAt: number | null = null
+  private endAt = Infinity
+  private first = 0
 
   constructor(
     readonly outRate: number,
@@ -80,6 +88,29 @@ export class TakeRecorder {
     this._audible = 0
     this._byTransport = false
     this.startNext = false
+    this.startAt = null
+    this.endAt = Infinity
+  }
+
+  /** Arms the take to start at mix frame [frame], whether or not anything sounds then; armed already, it starts there instead. */
+  armAt(frame: number): void {
+    if (this._state === 'RECORDING') return
+    this._state = 'ARMED'
+    this._frames = 0
+    this._audible = 0
+    this.startAt = frame
+    this.endAt = Infinity
+    this._byTransport = false
+    this.startNext = false
+  }
+
+  /**
+   * Ends the take at mix frame [frame], keeping the silence up to it: the
+   * burst that reaches it is the last ([Keep.last]). A frame already
+   * recorded past ends it there.
+   */
+  stopAt(frame: number): void {
+    if (this._state !== 'IDLE') this.endAt = frame
   }
 
   /** The EP-133 started playing: an armed take starts with the next burst. */
@@ -99,21 +130,29 @@ export class TakeRecorder {
         return null
       case 'ARMED':
         if (this.startNext) {
+          // The device's PLAY: from this burst on, so the take lines up with it.
           this.startNext = false
           this._byTransport = true
           this._state = 'RECORDING'
+          this.first = at
           from = 0
         } else {
-          if (firstStart === null) return null
+          const start = this.startAt ?? firstStart
+          if (start === null) return null
+          // Armed at a frame: not yet. Come late, it starts with this burst.
+          if (start >= at + frames) return null
           this._state = 'RECORDING'
-          from = Math.min(Math.max(firstStart - at, 0), frames)
+          from = Math.min(Math.max(start - at, 0), frames)
+          this.first = at + from
         }
         break
       case 'RECORDING':
         from = 0
         break
     }
-    const n = Math.min(frames - from, this.maxFrames - this._frames)
+    // Up to [stopAt]'s frame, if it comes in this burst (or came already).
+    const left = this.endAt === Infinity ? Infinity : Math.max(0, this.endAt - (at + from))
+    const n = Math.min(frames - from, this.maxFrames - this._frames, left)
     for (let i = n - 1; i >= 0; i--) {
       const j = 2 * (from + i)
       if (out[j] !== 0 || out[j + 1] !== 0) {
@@ -122,16 +161,25 @@ export class TakeRecorder {
       }
     }
     this._frames += n
-    const last = this._frames >= this.maxFrames
+    const stopped = this.endAt !== Infinity && at + from + n >= this.endAt
+    // Stopped at a frame: the silence before it is kept too.
+    if (stopped) this._audible = this.keptTo(this.endAt)
+    const last = this._frames >= this.maxFrames || stopped
     if (last) this._state = 'IDLE'
     return { from, frames: n, last }
   }
 
-  /** Stops: the frames the take keeps, 0 when nothing was played since REC. */
+  /** Stops: the frames the take keeps, 0 when nothing was played since REC (nor did an [armAt] frame come). */
   stop(): number {
-    const keep = this._state === 'ARMED' ? 0 : this._audible
+    const keep =
+      this._state === 'ARMED' ? 0 : this._state === 'RECORDING' && this.endAt !== Infinity ? this.keptTo(this.endAt) : this._audible
     this._state = 'IDLE'
     this.startNext = false
     return keep
+  }
+
+  /** The frames recorded up to mix frame [end], silent or not. */
+  private keptTo(end: number): number {
+    return Math.min(Math.max(end - this.first, 0), this._frames)
   }
 }

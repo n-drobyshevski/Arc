@@ -1,8 +1,10 @@
 package dev.arc.ep133.formats
 
+import org.junit.jupiter.api.Assertions.assertArrayEquals
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import kotlin.math.pow
 
 class VoiceMixerTest {
     // 1000 Hz output: one frame per millisecond, so gates and fades are easy to count.
@@ -111,6 +113,34 @@ class VoiceMixerTest {
     }
 
     @Test
+    fun `past the limit a voice let go of goes before an older held one`() {
+        val m = mixer(max = 2)
+        m.start("a", steady(1000), 1, 1000)
+        m.start("b", steady(1000), 1, 1000)
+        render(m, 1)
+        // b still sounds out its gate, but it was let go of.
+        m.release("b")
+        m.start("c", steady(1000), 1, 1000)
+        render(m, 1)
+        assertEquals(setOf("a", "c"), m.keys)
+    }
+
+    @Test
+    fun `a held chord survives a run of ten keys`() {
+        val m = mixer()
+        for (k in listOf("note:60", "note:64", "note:67")) m.start(k, steady(1000), 1, 1000)
+        render(m, 1)
+        // A glissando: each key let go of as the next plays, all still in their gates.
+        for (n in 72 until 82) {
+            m.release("note:${n - 1}")
+            m.start("note:$n", steady(1000), 1, 1000)
+            render(m, 1)
+        }
+        assertTrue(m.keys.containsAll(listOf("note:60", "note:64", "note:67", "note:81")))
+        assertEquals(VoiceMixer.MAX_VOICES, m.keys.size)
+    }
+
+    @Test
     fun `stop fades everything out`() {
         val m = mixer()
         m.start("a", steady(1000), 1, 1000)
@@ -139,5 +169,470 @@ class VoiceMixerTest {
         m.release("nothing")
         m.start("a", steady(10), 1, 1000)
         assertEquals(1000, left(render(m, 1))[0])
+    }
+
+    @Test
+    fun `a cut ends the voice within the choke, not the minimum gate`() {
+        val m = mixer()
+        m.start("a", steady(1000), 1, 1000)
+        render(m, 10)
+        // Well inside MIN_GATE_MS: the press turned into a scroll.
+        m.cut("a")
+        val out = left(render(m, 20))
+        assertTrue(out[0] in 1..1000)
+        assertEquals(0, out[VoiceMixer.CHOKE_MS + 1])
+        assertEquals(emptySet<String>(), m.keys)
+    }
+
+    @Test
+    fun `a cut in the same render as its start still fades, without a click`() {
+        val m = mixer()
+        m.start("a", steady(1000), 1, 1000)
+        m.cut("a")
+        val out = left(render(m, 10))
+        assertEquals(1000, out[0])
+        assertEquals(0, out[VoiceMixer.CHOKE_MS + 1])
+        assertEquals(listOf("a"), m.started.map { it.key })
+    }
+
+    @Test
+    fun `a cut of a voice already let go of ends it at once`() {
+        val m = mixer()
+        m.start("a", steady(1000), 1, 1000)
+        m.release("a")
+        render(m, 5)
+        m.cut("a")
+        assertEquals(0, left(render(m, 10))[VoiceMixer.CHOKE_MS + 1])
+    }
+
+    @Test
+    fun `a cut leaves the other voices alone`() {
+        val m = mixer()
+        m.start("a", steady(1000, 1000), 1, 1000)
+        m.start("b", steady(1000, 2000), 1, 1000)
+        render(m, 5)
+        m.cut("a")
+        val out = left(render(m, 10))
+        assertEquals(2000, out[VoiceMixer.CHOKE_MS + 1])
+        assertEquals(setOf("b"), m.keys)
+    }
+
+    @Test
+    fun `a cut of a key not playing does nothing`() {
+        val m = mixer()
+        m.start("a", steady(1000), 1, 1000)
+        render(m, 1)
+        m.cut("nothing")
+        assertEquals(1000, left(render(m, 10))[9])
+        assertEquals(setOf("a"), m.keys)
+    }
+
+    @Test
+    fun `keys and started stay right over many renders`() {
+        val m = mixer()
+        val out = ShortArray(200 * 2)
+        for (n in 0 until 300) {
+            val at = m.frame
+            m.start("a", steady(1000), 1, 1000, tag = n.toLong())
+            m.start("b", steady(1000), 1, 1000)
+            m.render(out, 10)
+            assertEquals(listOf(VoiceMixer.Started("a", n.toLong(), at), VoiceMixer.Started("b", 0, at)), m.started)
+            assertEquals(setOf("a", "b"), m.keys)
+            // Unchanged keys are the same set, not a new one per render.
+            val held = m.keys
+            m.render(out, 10)
+            assertTrue(m.started.isEmpty())
+            assertTrue(held === m.keys)
+            m.cut("b")
+            m.render(out, 10)
+            assertEquals(setOf("a"), m.keys)
+            m.release("a")
+            m.render(out, 200)
+            assertEquals(emptySet<String>(), m.keys)
+            assertEquals(0, out[2 * 199].toInt())
+        }
+        assertEquals(300L * 230, m.frame)
+    }
+
+    // Voice shapes (an addition): the EP-133's SOUND EDIT settings, as the mixer plays them.
+
+    @Test
+    fun `the default shape plays as the mixer always has`() {
+        val plain = mixer()
+        val shaped = mixer()
+        val pcm = ShortArray(300) { (it * 97 % 2000 - 1000).toShort() }
+        plain.start("a", pcm, 1, 1500, semitones = 5)
+        shaped.start("a", pcm, 1, 1500, semitones = 5, shape = VoiceShape(semitones = 0.0))
+        plain.release("a")
+        shaped.release("a")
+        assertArrayEquals(render(plain, 200), render(shaped, 200))
+        assertEquals(VoiceMixer.pitchRatio(7), VoiceMixer.pitchRatio(7.0))
+        assertEquals(VoiceShape.DEFAULT, VoiceShape())
+    }
+
+    @Test
+    fun `a shape's semitones add to the start's, fractions too`() {
+        val m = mixer()
+        m.start("k", ShortArray(9) { (it * 100).toShort() }, 1, 1000, semitones = 5, shape = VoiceShape(semitones = 7.0))
+        assertEquals(listOf(0, 200, 400, 600, 800, 0), left(render(m, 6)))
+        assertEquals(2.0.pow(0.5 / 12), VoiceMixer.pitchRatio(0.5))
+    }
+
+    @Test
+    fun `gain scales the level`() {
+        val m = mixer()
+        m.start("a", steady(10), 1, 1000, shape = VoiceShape(gain = 0.5f))
+        assertEquals(listOf(500, 500), render(m, 1).map { it.toInt() })
+        m.start("a", steady(10), 1, 1000, shape = VoiceShape(gain = 0f))
+        render(m, VoiceMixer.CHOKE_MS + 1)
+        assertEquals(listOf(0, 0), render(m, 1).map { it.toInt() })
+        // Silent, but sounding.
+        assertEquals(setOf("a"), m.keys)
+    }
+
+    @Test
+    fun `pan turns one side down, never the other up`() {
+        val m = mixer()
+        m.start("a", steady(10), 1, 1000, shape = VoiceShape(pan = -16))
+        assertEquals(listOf(1000, 0), render(m, 1).map { it.toInt() })
+        m.cut("a")
+        render(m, VoiceMixer.CHOKE_MS + 1)
+        m.start("b", steady(10), 1, 1000, shape = VoiceShape(pan = 8))
+        assertEquals(listOf(500, 1000), render(m, 1).map { it.toInt() })
+        // Past the end of the scale it stays hard over.
+        m.start("b", steady(10), 1, 1000, shape = VoiceShape(pan = 99))
+        render(m, VoiceMixer.CHOKE_MS + 1)
+        assertEquals(listOf(0, 1000), render(m, 1).map { it.toInt() })
+    }
+
+    @Test
+    fun `a trimmed sound plays from its start to before its end`() {
+        val m = mixer()
+        val ramp = ShortArray(10) { (it * 100).toShort() }
+        m.start("a", ramp, 1, 1000, shape = VoiceShape(start = 2, end = 5))
+        assertEquals(listOf(200, 300, 400, 0), left(render(m, 4)))
+        // One frame is still a sound.
+        m.start("a", ramp, 1, 1000, shape = VoiceShape(start = 7, end = 8))
+        assertEquals(listOf(700, 0), left(render(m, 2)))
+        // Past the sound's frames, clamped to them.
+        m.start("a", ramp, 1, 1000, shape = VoiceShape(start = 8, end = 400))
+        assertEquals(listOf(800, 900, 0), left(render(m, 3)))
+    }
+
+    @Test
+    fun `a trim with nothing left plays nothing and cuts nothing`() {
+        val m = mixer()
+        m.start("a", steady(1000), 1, 1000)
+        render(m, 1)
+        m.start("a", steady(1000), 1, 1000, shape = VoiceShape(start = 6, end = 6))
+        m.start("a", steady(1000), 1, 1000, shape = VoiceShape(start = 2000))
+        assertEquals(1000, left(render(m, 10))[9])
+        assertTrue(m.started.isEmpty())
+        assertEquals(setOf("a"), m.keys)
+    }
+
+    @Test
+    fun `an attack fades the voice in from silence`() {
+        val m = mixer()
+        m.start("a", steady(1000), 1, 1000, shape = VoiceShape(attackMs = 4))
+        assertEquals(listOf(0, 250, 500, 750, 1000, 1000), left(render(m, 6)))
+    }
+
+    @Test
+    fun `a longer release fades out longer, a shorter one no faster than the fade`() {
+        val m = mixer()
+        m.start("a", steady(1000), 1, 1000, shape = VoiceShape(releaseMs = 100))
+        render(m, 100)
+        m.release("a")
+        val out = left(render(m, 120))
+        assertTrue(out[50] in 400..600)
+        assertEquals(0, out[101])
+        m.start("b", steady(1000), 1, 1000, shape = VoiceShape(releaseMs = 1))
+        render(m, 100)
+        m.release("b")
+        val short = left(render(m, 40))
+        assertTrue(short[VoiceMixer.FADE_MS / 2] in 400..600)
+        assertEquals(0, short[VoiceMixer.FADE_MS + 1])
+    }
+
+    @Test
+    fun `a one-shot plays to its end, release or not`() {
+        val m = mixer()
+        m.start("a", steady(200), 1, 1000, shape = VoiceShape(mode = VoiceMode.ONESHOT))
+        m.release("a")
+        val out = left(render(m, 210))
+        assertEquals(1000, out[199])
+        assertEquals(0, out[200])
+        // The same key again starts it over; a cut still ends it.
+        m.start("a", steady(200, 1000), 1, 1000, shape = VoiceShape(mode = VoiceMode.ONESHOT))
+        render(m, 10)
+        m.start("a", steady(200, 2000), 1, 1000, shape = VoiceShape(mode = VoiceMode.ONESHOT))
+        assertEquals(2000, left(render(m, 10))[VoiceMixer.CHOKE_MS + 1])
+        m.cut("a")
+        assertEquals(0, left(render(m, 10))[VoiceMixer.CHOKE_MS + 1])
+    }
+
+    @Test
+    fun `past the limit a one-shot let go of goes before an older held voice`() {
+        val m = mixer(max = 2)
+        m.start("held", steady(1000, 1000), 1, 1000)
+        m.start("tail", steady(1000, 2000), 1, 1000, shape = VoiceShape(mode = VoiceMode.ONESHOT))
+        render(m, 1)
+        // The one-shot plays on after its release, but it was let go of: it goes first.
+        m.release("tail")
+        render(m, 1)
+        m.start("new", steady(1000, 4000), 1, 1000)
+        render(m, 1)
+        assertEquals(setOf("held", "new"), m.keys)
+        assertEquals(5000, left(render(m, 10))[VoiceMixer.CHOKE_MS + 1])
+    }
+
+    @Test
+    fun `in key mode the same key again adds a voice, and release takes them all`() {
+        val m = mixer()
+        val key = VoiceShape(mode = VoiceMode.KEY)
+        m.start("k", steady(1000), 1, 1000, shape = key)
+        render(m, 10)
+        m.start("k", steady(1000), 1, 1000, shape = key)
+        m.start("k", steady(1000), 1, 1000, shape = key)
+        assertEquals(3000, left(render(m, 1))[0])
+        // Still one key.
+        assertEquals(setOf("k"), m.keys)
+        m.release("k")
+        val out = left(render(m, 100))
+        assertEquals(0, out[VoiceMixer.MIN_GATE_MS + VoiceMixer.FADE_MS + 1])
+        assertEquals(emptySet<String>(), m.keys)
+        m.start("k", steady(1000), 1, 1000, shape = key)
+        m.start("k", steady(1000), 1, 1000, shape = key)
+        render(m, 1)
+        m.cut("k")
+        assertEquals(0, left(render(m, 10))[VoiceMixer.CHOKE_MS + 1])
+        assertEquals(emptySet<String>(), m.keys)
+    }
+
+    @Test
+    fun `key mode's voices still count against the limit`() {
+        val m = mixer(max = 2)
+        val key = VoiceShape(mode = VoiceMode.KEY)
+        m.start("k", steady(1000, 100), 1, 1000, shape = key)
+        m.start("k", steady(1000, 200), 1, 1000, shape = key)
+        m.start("k", steady(1000, 400), 1, 1000, shape = key)
+        render(m, 1)
+        assertEquals(600, left(render(m, 10))[9])
+    }
+
+    @Test
+    fun `legato on a held voice changes its pitch where it is`() {
+        val m = mixer()
+        val sound = ShortArray(100) { (it * 10).toShort() }
+        val legato = VoiceShape(mode = VoiceMode.LEGATO)
+        m.start("l", sound, 1, 1000, shape = legato)
+        assertEquals(listOf(0, 10, 20, 30), left(render(m, 4)))
+        m.start("l", sound, 1, 1000, semitones = 12, tag = 9, shape = legato)
+        // On from frame 4, twice as fast, no cut.
+        assertEquals(listOf(40, 60, 80, 100), left(render(m, 4)))
+        assertEquals(listOf(VoiceMixer.Started("l", 9, 4)), m.started)
+        assertEquals(setOf("l"), m.keys)
+    }
+
+    @Test
+    fun `legato on another sound, or once let go of, starts over`() {
+        val m = mixer()
+        val sound = ShortArray(1000) { 1000 }
+        val other = ShortArray(1000) { 2000 }
+        val legato = VoiceShape(mode = VoiceMode.LEGATO)
+        m.start("l", sound, 1, 1000, shape = legato)
+        render(m, 10)
+        m.start("l", other, 1, 1000, shape = legato)
+        val out = left(render(m, 10))
+        // The old voice is cut while the new one plays.
+        assertTrue(out[0] in 2000..3000)
+        assertEquals(2000, out[VoiceMixer.CHOKE_MS + 1])
+        m.release("l")
+        render(m, 70)
+        m.start("l", other, 1, 1000, semitones = 12, shape = legato)
+        render(m, 1)
+        // A new voice (the old one still fading out its release).
+        assertEquals(listOf(VoiceMixer.Started("l", 0, 90)), m.started)
+        // The fading one is cut short under it: the new one alone.
+        assertEquals(2000, left(render(m, 10))[VoiceMixer.CHOKE_MS + 1])
+    }
+
+    @Test
+    fun `a mute group cuts the group's other voices only`() {
+        val m = mixer()
+        m.start("open", steady(1000, 1000), 1, 1000, shape = VoiceShape(muteGroup = 1))
+        m.start("ride", steady(1000, 300), 1, 1000, shape = VoiceShape(muteGroup = 2))
+        m.start("kick", steady(1000, 50), 1, 1000)
+        render(m, 10)
+        m.start("closed", steady(1000, 2000), 1, 1000, shape = VoiceShape(muteGroup = 1))
+        assertEquals(2350, left(render(m, 10))[VoiceMixer.CHOKE_MS + 1])
+        assertEquals(setOf("ride", "kick", "closed"), m.keys)
+    }
+
+    @Test
+    fun `a cut inside the attack fades from where the fade is, without a click`() {
+        val m = mixer()
+        m.start("a", steady(1000), 1, 1000, shape = VoiceShape(attackMs = 10))
+        render(m, 5)
+        m.cut("a")
+        val out = left(render(m, 6))
+        // Never above the attack's level at the cut, then gone within the choke.
+        assertTrue(out.all { it <= 700 })
+        assertEquals(0, out[VoiceMixer.CHOKE_MS])
+    }
+
+    // Timed commands (an addition): the pattern sequencer's notes, each on its frame.
+
+    @Test
+    fun `a timed start lands on its frame inside the render`() {
+        val m = mixer()
+        render(m, 16)
+        m.start("a", steady(100), 1, 1000, tag = -1, at = 20)
+        val out = left(render(m, 16))
+        assertEquals(List(4) { 0 } + List(12) { 1000 }, out)
+        assertEquals(listOf(VoiceMixer.Started("a", -1, 20)), m.started)
+        assertEquals(setOf("a"), m.keys)
+        assertEquals(32L, m.frame)
+    }
+
+    @Test
+    fun `a timed start on the render's end waits for the next one`() {
+        val m = mixer()
+        m.start("a", steady(100), 1, 1000, at = 16)
+        assertEquals(List(16) { 0 }, left(render(m, 16)))
+        assertEquals(emptyList<VoiceMixer.Started>(), m.started)
+        assertEquals(1000, left(render(m, 1))[0])
+        assertEquals(listOf(VoiceMixer.Started("a", 0, 16)), m.started)
+    }
+
+    @Test
+    fun `a late timed start plays at the render's start, after the commands that aren't timed`() {
+        val m = mixer()
+        render(m, 16)
+        m.start("late", steady(100, 1000), 1, 1000, tag = -1, at = 3)
+        m.start("now", steady(100, 2000), 1, 1000, tag = 5)
+        assertEquals(3000, left(render(m, 1))[0])
+        assertEquals(listOf(VoiceMixer.Started("now", 5, 16), VoiceMixer.Started("late", -1, 16)), m.started)
+    }
+
+    @Test
+    fun `timed commands at one frame keep their order`() {
+        val m = mixer()
+        // The second start of the key cuts the first: the order they were sent in.
+        m.start("a", steady(100, 1000), 1, 1000, tag = 1, at = 4)
+        m.start("a", steady(100, 2000), 1, 1000, tag = 2, at = 4)
+        m.start("b", steady(100, 10), 1, 1000, tag = 3, at = 2)
+        render(m, 8)
+        assertEquals(listOf(2L to 3L, 4L to 1L, 4L to 2L), m.started.map { it.frame to it.tag })
+        assertEquals(2010, left(render(m, 8))[VoiceMixer.CHOKE_MS + 1])
+    }
+
+    @Test
+    fun `a timed release lets go at its frame`() {
+        val m = mixer()
+        m.start("a", steady(1000), 1, 1000)
+        render(m, 100)
+        m.release("a", at = 110)
+        val out = left(render(m, 40))
+        assertEquals(1000, out[9])
+        assertEquals(1000, out[10])
+        assertEquals(0, out[10 + VoiceMixer.FADE_MS + 1])
+    }
+
+    @Test
+    fun `a tagged release lets go of only the voice started with that tag`() {
+        val m = mixer()
+        m.start("p", steady(1000, 1000), 1, 1000, tag = -5, at = 0)
+        render(m, 8)
+        // A press of the same pad takes over; the sequencer's note-off leaves it alone.
+        m.start("p", steady(1000, 2000), 1, 1000, tag = 77)
+        m.release("p", at = 10, tag = -5)
+        val out = left(render(m, 200))
+        assertEquals(2000, out[199])
+        assertEquals(setOf("p"), m.keys)
+        m.release("p", tag = 77)
+        render(m, 200)
+        assertEquals(emptySet<String>(), m.keys)
+    }
+
+    @Test
+    fun `a tagged release takes one of a key-mode key's voices`() {
+        val m = mixer()
+        val key = VoiceShape(mode = VoiceMode.KEY)
+        m.start("k", steady(1000, 1000), 1, 1000, tag = -1, shape = key)
+        m.start("k", steady(1000, 300), 1, 1000, tag = 9, shape = key)
+        m.release("k", at = 0, tag = -1)
+        val out = left(render(m, 200))
+        assertEquals(1300, out[0])
+        assertEquals(300, out[199])
+    }
+
+    @Test
+    fun `a legato press carrying on the sequencer's voice takes its tag`() {
+        val m = mixer()
+        val legato = VoiceShape(mode = VoiceMode.LEGATO)
+        val sound = steady(1000)
+        m.start("l", sound, 1, 1000, tag = -7, shape = legato, at = 0)
+        render(m, 8)
+        m.start("l", sound, 1, 1000, semitones = 12, tag = 12, shape = legato)
+        // The sequencer's note-off finds no voice of its own.
+        m.release("l", at = 10, tag = -7)
+        render(m, 200)
+        assertEquals(setOf("l"), m.keys)
+    }
+
+    @Test
+    fun `a timed start chokes its mute group on its frame`() {
+        val m = mixer()
+        m.start("open", steady(1000, 1000), 1, 1000, shape = VoiceShape(muteGroup = 1))
+        render(m, 8)
+        m.start("closed", steady(1000, 2000), 1, 1000, shape = VoiceShape(muteGroup = 1), at = 12)
+        val out = left(render(m, 16))
+        assertEquals(1000, out[3])
+        // Both while the open one chokes, then the closed one alone.
+        assertTrue(out[4] in 2001..3000)
+        assertEquals(2000, out[4 + VoiceMixer.CHOKE_MS + 1])
+    }
+
+    @Test
+    fun `flushTimed drops what waits, not what is sent after it`() {
+        val m = mixer()
+        m.start("a", steady(100, 1000), 1, 1000, at = 40)
+        render(m, 16)
+        m.start("b", steady(100, 2000), 1, 1000, at = 20)
+        m.flushTimed()
+        m.start("c", steady(100, 4000), 1, 1000, at = 24)
+        val out = left(render(m, 32))
+        assertEquals(0, out[7])
+        assertEquals(4000, out[8])
+        assertEquals(4000, out[31])
+        assertEquals(listOf("c"), m.started.map { it.key })
+    }
+
+    @Test
+    fun `a render split by timed commands plays as renders split at their frames`() {
+        val pcm = ShortArray(3000) { ((it * 7919) % 20000 - 10000).toShort() }
+        val shape = VoiceShape(attackMs = 7, releaseMs = 40, pan = 3)
+        val timed = VoiceMixer(44100)
+        timed.start("a", pcm, 1, 46875, 3, tag = -1, shape = shape, at = 37)
+        timed.start("b", pcm, 1, 46875, -5, tag = -2, at = 100)
+        timed.release("a", at = 3000, tag = -1)
+        val one = ShortArray(4096 * 2).also { timed.render(it, 4096) }
+        val split = VoiceMixer(44100)
+        val parts = ShortArray(4096 * 2)
+        fun part(from: Int, to: Int) {
+            val out = ShortArray((to - from) * 2)
+            split.render(out, to - from)
+            out.copyInto(parts, from * 2)
+        }
+        part(0, 37)
+        split.start("a", pcm, 1, 46875, 3, tag = -1, shape = shape)
+        part(37, 100)
+        split.start("b", pcm, 1, 46875, -5, tag = -2)
+        part(100, 3000)
+        split.release("a")
+        part(3000, 4096)
+        assertArrayEquals(parts, one)
     }
 }

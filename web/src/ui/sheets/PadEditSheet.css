@@ -1,0 +1,44 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/PadSheet.kt (PadSheetContent: EDIT's pad sheet) */
+
+.pad-edit__head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-14);
+}
+
+/* The pad, small: a dark cap (theme/cap.css), its label top left and the sample at the bottom. */
+.pad-edit__cap {
+  --cap-face: var(--hw-dark-face);
+  --cap-edge: var(--hw-dark-edge);
+  --cap-ink: var(--hw-dark-ink);
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  width: 64px;
+  height: 64px;
+  padding: var(--space-6) var(--space-8);
+  border-radius: var(--radius-key);
+  overflow: hidden;
+}
+.pad-edit__label {
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.04em;
+}
+.pad-edit__name {
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.1;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--hw-dark-dim);
+}
+
+.pad-edit__words { min-width: 0; }
+.pad-edit__title { margin: 0; }
+.pad-edit__title:focus { outline: none; }
+.pad-edit__line { margin: 2px 0 0; color: var(--graphite); }
+.pad-edit__note { margin: 0; color: var(--graphite); }

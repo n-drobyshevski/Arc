@@ -1,0 +1,165 @@
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/PianoKeyboard.kt
+ *
+ * The piano: caps in the device's body (theme/cap.css), white keys side by
+ * side with 4px of body between them, black keys over them. A key's face is
+ * lerp(its colour, signal, glow) as the pads' are (--glow on [data-note]).
+ * Web: a key under the mouse is tinted; letters from the computer keyboard
+ * sit small on the keys they play. */
+
+/* The body around the keys: 10 each side (DeckInset), the caps' edge on the right and below.
+ * Its colour comes from the panel it sits in (.live-piano), else the body's. */
+.piano {
+  display: flex;
+  min-height: 0;
+  padding: 10px calc(10px + var(--cap-dx)) calc(10px + var(--cap-dy)) 10px;
+  border-radius: var(--radius-plate);
+  background: var(--hw-body);
+  /* Low notes on the left in every language, as on the instrument. */
+  direction: ltr;
+}
+
+.piano__plate {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  /* The root's orange on a white key, 3:1 or more (Kotlin rootOn): the darker edge on the light theme's pale keys. */
+  --piano-root: var(--signal-edge);
+}
+:root[data-theme=dark] .piano__plate { --piano-root: var(--piano-signal); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme=light]) .piano__plate { --piano-root: var(--piano-signal); }
+}
+
+.piano__key {
+  --glow-pct: calc(var(--glow, 0) * 100%);
+  --hot-pct: calc(clamp(0, (var(--glow, 0) - 0.3) * 1000000, 1) * 100%);
+  --cap-face: color-mix(in oklab, var(--signal) var(--glow-pct), var(--piano-base));
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+/* The key in the Tab order (a roving tabindex): a white key's ring stays under the black
+ * keys beside it, a black key's rises over its neighbours. */
+.piano__key:focus-visible { outline: var(--focus-ring); outline-offset: -3px; }
+
+/* White keys: the piano's white (dimmed outside the scale), radius 6 at the foot. */
+.piano__key--white {
+  --piano-base: var(--piano-white);
+  --cap-edge: color-mix(in oklab, var(--signal-edge) var(--glow-pct), color-mix(in oklab, var(--piano-base) 70%, black));
+  /* The name, digit and bar stand on a foot 14 from the bottom. */
+  gap: 6px;
+  padding-bottom: 18px;
+  border-radius: 0 0 6px 6px;
+  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--ink));
+}
+.piano__key--white.is-out { --piano-base: var(--key-out); }
+
+/* Black keys over them: dark caps, outlined (in the dark theme the line holds them apart from the whites). */
+.piano__key--black {
+  --piano-base: var(--piano-black);
+  --cap-edge: color-mix(in oklab, var(--signal-edge) var(--glow-pct), var(--hw-dark-edge));
+  z-index: 1;
+  padding-bottom: 14px;
+  border-radius: 0 0 4px 4px;
+  outline: 1px solid var(--piano-line);
+  outline-offset: -1px;
+  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--on-piano-black));
+}
+.piano__key--black.is-out { --piano-base: var(--key-out-black); }
+.piano__key--black:focus-visible { outline: var(--focus-ring); z-index: 3; }
+
+@media (hover: hover) {
+  .piano__key--white:hover { --piano-base: color-mix(in oklab, var(--piano-white) 86%, var(--signal)); }
+  .piano__key--white.is-out:hover { --piano-base: color-mix(in oklab, var(--key-out) 86%, var(--signal)); }
+  .piano__key--black:hover { --piano-base: color-mix(in oklab, var(--piano-black) 80%, var(--signal)); }
+}
+
+/* The name: semi 13 (11 on a black key), larger on wide keys; the root's in orange. */
+.piano__name {
+  font-size: clamp(13px, calc(var(--white-w, 44px) * 0.3), 19px);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.piano__key--black .piano__name { font-size: clamp(11px, calc(var(--white-w, 44px) * 0.22), 14px); }
+.piano__key--white.is-root .piano__name { color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--piano-root)); }
+.piano__key--black.is-root .piano__name { color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--signal)); }
+
+/* The root's bar at the key's foot, 7 up, 3 high, about half the key wide. */
+.piano__bar {
+  position: absolute;
+  left: 50%;
+  bottom: 7px;
+  width: min(26px, 55%);
+  height: 3px;
+  border-radius: 2px;
+  transform: translateX(-50%);
+  background: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--piano-root));
+}
+.piano__key--black .piano__bar { background: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--signal)); }
+
+/* Each C's octave over its name, tiny 11; OCT's own C in ink. */
+.piano__digit {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--piano-digit));
+}
+.piano__digit--own { color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--ink)); }
+
+/* Web: the computer keyboard's letter, small: over a white key's digit and name, near a black key's top. */
+.piano__hint {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--piano-digit));
+}
+.piano__key--white .piano__hint { margin-bottom: auto; margin-top: calc(var(--black-h, 0px) + 8px); }
+.piano__key--black .piano__hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 12px;
+  text-align: center;
+  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--on-piano-black));
+  opacity: 0.7;
+}
+
+/* Playing here: the piano orange inside the key's face, 2 wide. */
+.piano__key.is-playing::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--piano-signal);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+/* ◂ or ▸ near the top of the piano's end, over the keys: a device note past them that way. */
+.piano__tick {
+  position: absolute;
+  z-index: 2;
+  top: min(20px, 30%);
+  width: 0;
+  height: 0;
+  margin-top: -6px;
+  border-block: 6px solid transparent;
+  pointer-events: none;
+}
+.piano__tick--below { left: 8px; border-right: 8px solid var(--piano-signal); }
+.piano__tick--above { right: 8px; border-left: 8px solid var(--piano-signal); }

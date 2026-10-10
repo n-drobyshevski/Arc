@@ -1,4 +1,7 @@
-/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt (ArcToast) */
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Components.kt (ArcToast)
+ *
+ * Web only, from 1024px wide (the desk): the host spans the page column (right
+ * of the nav rail, inside the ruled edges), so the toast centres over the page. */
 
 .toast-host {
   position: fixed;
@@ -78,6 +81,13 @@
   text-transform: uppercase;
 }
 
+@media (min-width: 1024px) {
+  .toast-host {
+    left: calc(var(--desk-gutter) + var(--rail-width));
+    right: var(--desk-gutter);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .toast.is-returning, .toast.is-leaving { transition: none; }
 }
@@ -97,9 +107,57 @@
 
 /* ArcType.body15 at SemiBold */
 .toast__text {
+  flex: 1 1 auto;
   min-width: 0;
   padding: 14px 16px;
   font-size: var(--size-body15);
   font-weight: 600;
   line-height: 1.5;
+}
+
+/* Web: the toast's key (Live's UNDO): capsKey in signal orange, the toast's height to tap. */
+.toast__action {
+  flex: none;
+  align-self: stretch;
+  min-width: var(--tap-min);
+  padding: 0 var(--space-16);
+  border: 0;
+  background: none;
+  color: var(--signal);
+  font: inherit;
+  font-size: var(--size-caps-key);
+  font-weight: 700;
+  letter-spacing: var(--track-caps-key);
+  text-transform: uppercase;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.toast__action:focus-visible { outline: var(--focus-ring); outline-offset: -3px; }
+
+/* A short window wider than tall (a phone on its side, where Live's display line is in
+ * the top bar: ui/live/window.ts liveInBar): at the top, over the top bar's middle
+ * between the tag and the keys, never over the keys of the piano or the bar's icons.
+ * Two lines at most there, a size down. Not on the desk (its own column, above). */
+@media (orientation: landscape) and (max-height: 479px) and (min-width: 600px) and (max-width: 1023px) {
+  .toast-host {
+    top: 0;
+    bottom: auto;
+    padding:
+      6px
+      calc(244px + env(safe-area-inset-right, 0px))
+      0
+      calc(148px + env(safe-area-inset-left, 0px));
+  }
+  .toast-live { padding: 0; }
+  .toast-frame { max-width: 560px; }
+  .toast__text {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
+    padding-block: 12px;
+    font-size: 13px;
+  }
+  /* One line is as tall as the display line beside it (44). */
+  .toast { min-height: 44px; }
 }

@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -24,7 +25,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -34,13 +34,21 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.draw.dropShadow
+import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -56,12 +64,17 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.arc.ep133.text.CoachText
+import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.text.NavText
 import dev.arc.ep133.ui.theme.ArcType
 import dev.arc.ep133.ui.theme.LocalArcColors
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 /** The sections, switched from the tag at the top left. */
 enum class Tab(val label: String) {
@@ -69,6 +82,33 @@ enum class Tab(val label: String) {
     LIVE(NavText.LIVE),
     DEVICE(NavText.DEVICE),
 }
+
+/**
+ * Live's SAMPLE key in the top bar (an addition): a mic key that is lit
+ * while SAMPLE's panel is open ([on]). A tap ([onTap]) opens the panel, or
+ * closes it while it is open.
+ */
+@Immutable
+data class SampleKey(val on: Boolean, val onTap: () -> Unit)
+
+/**
+ * Live's Bluetooth key in the top bar (an addition), there while the sound
+ * goes to Bluetooth, which plays late. A tap ([onTap]) is given the sentence
+ * that says so ([MirrorText.WIRELESS_DELAY], or [MirrorText.wirelessMadeUp]
+ * with the delay when it is made up for) to show as a toast.
+ */
+@Immutable
+data class LateKey(val onTap: (String) -> Unit)
+
+/**
+ * The delay Live is making up for, in milliseconds, while its sound goes to
+ * Bluetooth and Make up for Bluetooth delay is on ([dev.arc.ep133.audio.OutputDelay.totalMs]);
+ * null otherwise. The Bluetooth key ([LateKey]) says so. The flow itself is
+ * what is provided (it never changes, so providing it recomposes nothing) and
+ * only the key reads it: the figure is told every second, and the whole
+ * screen would follow it.
+ */
+val LocalDelayMadeUp = staticCompositionLocalOf<StateFlow<Int?>> { MutableStateFlow(null) }
 
 /** How wide the left-edge guide tab is (screens keep this much gutter on the left). */
 val EdgeTabWidth: Dp = 22.dp
@@ -114,17 +154,29 @@ fun ArcShell(
     onTab: (Tab) -> Unit,
     connected: Boolean,
     canConnect: Boolean,
-    canBackup: Boolean,
-    onBackup: () -> Unit,
     onConnect: () -> Unit,
+    /** The connection key held for a second while connected. */
+    onDisconnect: () -> Unit,
+    /** A tap on the connection key while connected is given the sentence that says to hold, to show as a toast. */
+    onHint: (String) -> Unit,
+    /** Whether the connection key ticks under the finger (Settings, Haptics). */
+    haptics: Boolean,
     onDebug: () -> Unit,
     onSettings: () -> Unit,
     onHelp: () -> Unit,
     guideOpen: Boolean,
     onGuide: (Boolean) -> Unit,
     guide: @Composable () -> Unit,
+    /** Fills the top bar's middle (Live's display line, in a short window). */
+    middle: (@Composable BoxScope.() -> Unit)? = null,
+    /** Live's SAMPLE key in the top bar (an addition; null for none, as on the other sections). */
+    sample: SampleKey? = null,
+    /** Live's Bluetooth key in the top bar (an addition; null for none, as while the sound doesn't go to Bluetooth). */
+    late: LateKey? = null,
     /** For screenshots: start with the section list open. */
     initialMenuOpen: Boolean = false,
+    /** For screenshots: the connection key's ring part-way, as while it is held. */
+    holdProgress: Float = 0f,
     content: @Composable () -> Unit,
 ) {
     var menuOpen by rememberSaveable { mutableStateOf(initialMenuOpen) }
@@ -137,19 +189,28 @@ fun ArcShell(
                     onSections = { menuOpen = !menuOpen },
                     connected = connected,
                     canConnect = canConnect,
-                    canBackup = canBackup,
-                    onBackup = onBackup,
                     onConnect = onConnect,
+                    onDisconnect = onDisconnect,
+                    onHint = onHint,
+                    haptics = haptics,
                     onDebug = onDebug,
-                    onSettings = onSettings,
                     onHelp = onHelp,
+                    middle = middle,
+                    sample = sample,
+                    late = late,
+                    holdProgress = holdProgress,
                 )
             },
         ) {
             content()
-            GuideEdgeTab({ onGuide(true) }, Modifier.align(Alignment.CenterStart).offset(y = (-80).dp))
+            GuideEdgeTab({ onGuide(true) }, Modifier.align(Alignment.CenterStart).aboveMiddle())
             // Under the top bar, so the tag stays in view above the list.
-            SectionMenu(menuOpen, tab, onPick = { menuOpen = false; onTab(it) }, onDismiss = { menuOpen = false })
+            SectionMenu(
+                menuOpen, tab,
+                onPick = { menuOpen = false; onTab(it) },
+                onSettings = { menuOpen = false; onSettings() },
+                onDismiss = { menuOpen = false },
+            )
         }
         AnimatedVisibility(guideOpen, enter = slideInHorizontally { -it }, exit = slideOutHorizontally { -it }) {
             guide()
@@ -159,11 +220,22 @@ fun ArcShell(
 
 /**
  * The section tag, then icon keys as in the pocket operator app's top row: the
- * orange REC-style dot backs up, the connection key is green with a dot while
- * the EP-133 is connected (a tap disconnects) and navy with a ring when not,
- * then the guide overlay (?) and settings. Their names show on long-press,
- * in the overlay and to screen readers. Long-pressing the tag opens the
- * debug screen (as the wordmark did).
+ * connection key is green with a dot while the EP-133 is connected (a tap
+ * says to hold, and a hold of a second disconnects, a ring filling round the
+ * key meanwhile) and navy with a ring when not (a tap connects), then the
+ * guide overlay (?).
+ * Their names show on long-press (not the connected key's, which a long press
+ * holds), in the overlay and to screen readers (which also get Disconnect as an
+ * action of the connected key, with no hold). On
+ * Live, while the sound goes to Bluetooth, an amber key with the Bluetooth
+ * rune and a clock ([late], an addition) comes right before the connection
+ * key: a tap says that Bluetooth plays late. Back up lives on the Backups
+ * screen, and Settings in Live's tools and the section list under the tag
+ * ([SectionMenu]). Long-pressing the tag opens the debug
+ * screen (as the wordmark did). The room between the tag and the keys holds
+ * [middle]; a toast in a short window takes its place. On Live, a mic key
+ * ([sample], an addition) comes before ?, round as it is, and orange while
+ * SAMPLE's panel is open.
  */
 @Composable
 fun TopBar(
@@ -171,17 +243,30 @@ fun TopBar(
     onSections: () -> Unit,
     connected: Boolean,
     canConnect: Boolean,
-    canBackup: Boolean,
-    onBackup: () -> Unit,
     onConnect: () -> Unit,
+    onDisconnect: () -> Unit,
+    onHint: (String) -> Unit,
+    haptics: Boolean,
     onDebug: () -> Unit,
-    onSettings: () -> Unit = {},
     onHelp: () -> Unit = {},
+    middle: (@Composable BoxScope.() -> Unit)? = null,
+    sample: SampleKey? = null,
+    late: LateKey? = null,
+    /** For screenshots: the connection key's ring part-way, as while it is held. */
+    holdProgress: Float = 0f,
 ) {
     val c = LocalArcColors.current
+    val window = LocalArcWindow.current
+    val slot = LocalBarSlot.current
+    DisposableEffect(slot) { onDispose { slot?.bounds = null } }
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
         Row(
-            Modifier.widthIn(max = 720.dp).fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 10.dp),
+            Modifier
+                // Wider on a phone on its side, where the middle holds Live's display line.
+                .widthIn(max = if (window.landscape) 1200.dp else 720.dp)
+                .fillMaxWidth()
+                // 56 dp tall instead of 66 when the window is short.
+                .padding(start = 16.dp, end = 16.dp, top = if (window.short) 6.dp else 12.dp, bottom = if (window.short) 6.dp else 10.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -189,17 +274,25 @@ fun TopBar(
                 section, onSections, onDebug,
                 Modifier.coachMark("top.sections", CoachText.SECTIONS, c.navy, c.onNavy),
             )
-            Spacer(Modifier.weight(1f))
-            IconBlock(
-                ArcIcon.DOT, CoachText.BACK_UP, c.signal, c.onSignal, onBackup,
-                Modifier.coachMark("top.backup", CoachText.BACK_UP, c.signal, c.onSignal),
-                enabled = canBackup,
-            )
+            // As tall as the keys; empty, it is just the space between.
+            Box(
+                Modifier
+                    .weight(1f)
+                    .heightIn(min = 44.dp)
+                    .onGloballyPositioned { slot?.bounds = it.boundsInRoot() },
+                contentAlignment = Alignment.Center,
+            ) {
+                middle?.invoke(this)
+            }
+            if (late != null) LateBlock(late)
             if (connected) {
+                // A tap only says to hold: letting go early, or sliding off, leaves the EP-133 connected.
                 IconBlock(
-                    ArcIcon.DOT, CoachText.CONNECTED, c.ok, c.onOk, onConnect,
-                    Modifier.coachMark("top.connection", CoachText.CONNECTION, c.ok, c.onOk),
+                    ArcIcon.DOT, CoachText.CONNECTED, c.ok, c.onOk, { onHint(NavText.HOLD_TO_DISCONNECT) },
+                    Modifier.coachMark("top.connection", CoachText.CONNECTION_HOLD, c.ok, c.onOk),
                     enabled = canConnect, iconSize = 16.dp,
+                    hold = KeyHold(CoachText.DISCONNECT, haptics, onDisconnect),
+                    ring = holdProgress,
                 )
             } else {
                 IconBlock(
@@ -209,18 +302,44 @@ fun TopBar(
                 )
             }
             Spacer(Modifier.width(4.dp))
+            if (sample != null) {
+                IconBlock(
+                    ArcIcon.MIC, MirrorText.SAMPLE_TAG,
+                    if (sample.on) c.signal else c.tabOff,
+                    if (sample.on) c.onSignal else c.navy,
+                    sample.onTap,
+                    Modifier.coachMark("top.sample", CoachText.SAMPLE, c.signal, c.onSignal),
+                    round = true,
+                    state = MirrorText.onOff(sample.on),
+                )
+            }
             IconBlock(
                 ArcIcon.HELP, CoachText.HELP, c.tabOff, c.navy, onHelp,
                 Modifier.coachMark("top.help", CoachText.HELP, c.ink, c.shell),
                 round = true,
             )
-            IconBlock(
-                ArcIcon.GEAR, CoachText.SETTINGS, c.tabOff, c.navy, onSettings,
-                Modifier.coachMark("top.settings", CoachText.SETTINGS, c.graphite, c.shell),
-                round = true, iconSize = 24.dp,
-            )
         }
     }
+}
+
+/**
+ * [late]'s key: the warn colour with the EDIT tag's dark ink, the connection key's size.
+ * Long-press names it; a screen reader reads the sentence a tap shows.
+ * It alone reads the delay made up for ([LocalDelayMadeUp]).
+ */
+@Composable
+private fun LateBlock(late: LateKey) {
+    val c = LocalArcColors.current
+    val madeUp by LocalDelayMadeUp.current.collectAsStateWithLifecycle()
+    val words = madeUp?.let(MirrorText::wirelessMadeUp) ?: MirrorText.WIRELESS_DELAY
+    IconBlock(
+        ArcIcon.BLUETOOTH, CoachText.BLUETOOTH, c.warn, TagInk,
+        { late.onTap(words) },
+        Modifier.coachMark("top.bluetooth", CoachText.BLUETOOTH, c.warn, TagInk),
+        iconSize = 20.dp,
+        beside = ArcIcon.CLOCK,
+        description = words,
+    )
 }
 
 /** A block with an arrow point on its right, like the pocket operator app's EDIT tag. */
@@ -259,11 +378,13 @@ private fun SectionTag(section: Tab, onClick: () -> Unit, onLongPress: () -> Uni
 }
 
 /**
- * The sections, as blocks stacked under the section tag (drawn in place, not
- * in a popup window): the current one navy. A tap outside closes the list.
+ * The sections, as caps stacked under the section tag (drawn in place, not
+ * in a popup window): the current one navy and down. After them, under a thin
+ * rule, Settings (an addition), a cap like an unselected tab with the gear
+ * before its word. A tap outside closes the list.
  */
 @Composable
-fun SectionMenu(open: Boolean, current: Tab, onPick: (Tab) -> Unit, onDismiss: () -> Unit) {
+fun SectionMenu(open: Boolean, current: Tab, onPick: (Tab) -> Unit, onSettings: () -> Unit, onDismiss: () -> Unit) {
     val c = LocalArcColors.current
     AnimatedVisibility(open, enter = fadeIn(), exit = fadeOut()) {
         Box(
@@ -278,19 +399,43 @@ fun SectionMenu(open: Boolean, current: Tab, onPick: (Tab) -> Unit, onDismiss: (
             ) {
                 for (t in Tab.entries) {
                     val on = t == current
+                    val source = remember { MutableInteractionSource() }
+                    val pressed by source.collectIsPressedAsState()
                     Box(
                         Modifier
                             .widthIn(min = 150.dp)
                             .heightIn(min = 48.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(if (on) c.navy else c.key)
-                            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Tab) { onPick(t) }
+                            .cap(
+                                if (on) c.navy else c.key,
+                                if (on) capEdge(c.navy) else c.keyEdge,
+                                RoundedCornerShape(8.dp),
+                                capPress(on || pressed),
+                            )
+                            .clickable(interactionSource = source, indication = null, role = Role.Tab) { onPick(t) }
                             .semantics { selected = on }
                             .padding(horizontal = 16.dp),
                         contentAlignment = Alignment.CenterStart,
                     ) {
                         Text(t.label.uppercase(), style = ArcType.tab, color = if (on) c.onNavy else c.ink)
                     }
+                }
+                // A wider gap, then the page that is no section (a rule would cross the page behind the scrim).
+                Spacer(Modifier.height(8.dp))
+                val source = remember { MutableInteractionSource() }
+                val pressed by source.collectIsPressedAsState()
+                Row(
+                    Modifier
+                        .widthIn(min = 150.dp)
+                        .heightIn(min = 48.dp)
+                        .cap(c.key, c.keyEdge, RoundedCornerShape(8.dp), capPress(pressed))
+                        .clickable(interactionSource = source, indication = null, role = Role.Button, onClick = onSettings)
+                        .semantics { contentDescription = CoachText.SETTINGS }
+                        .padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    Icon(ArcIcon.GEAR, c.ink, size = 20.dp)
+                    Text(CoachText.SETTINGS.uppercase(), style = ArcType.tab, color = c.ink)
                 }
             }
         }
@@ -301,35 +446,93 @@ fun SectionMenu(open: Boolean, current: Tab, onPick: (Tab) -> Unit, onDismiss: (
 @Composable
 fun GuideEdgeTab(onClick: () -> Unit, modifier: Modifier = Modifier) {
     val c = LocalArcColors.current
-    Box(
-        modifier
-            .width(EdgeTabWidth)
-            .height(112.dp)
-            .clip(RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp))
-            // Quiet, like an unselected key: always there, never the loudest thing on the page.
-            .background(c.tabOff)
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+    EdgeTab(
+        NavText.GUIDE_TAB, onClick, modifier,
+        Modifier
             .semantics {
                 role = Role.Button
                 contentDescription = CoachText.GUIDE_TAB
             }
             .coachMark("edge.guide", CoachText.GUIDE_TAB, c.navy, c.onNavy),
+    )
+}
+
+/**
+ * A vertical tab on the left edge, its [word] reading bottom to top, as the
+ * PO's side tabs: quiet, like an unselected key, unless [face] says otherwise.
+ * [led]: a small LED near its top. [marks] (what screen readers and the
+ * guide overlay read) go on the tab itself, inside the safe area.
+ */
+@Composable
+private fun EdgeTab(
+    word: String,
+    onClick: () -> Unit,
+    modifier: Modifier,
+    marks: Modifier,
+    face: Color? = null,
+    ink: Color? = null,
+    led: Color? = null,
+    ledGlow: Boolean = false,
+) {
+    val c = LocalArcColors.current
+    Box(
+        modifier
+            // Clear of a navigation bar or a cutout on that side.
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Start))
+            .width(EdgeTabWidth)
+            .height(EdgeTabHeight)
+            .clip(RoundedCornerShape(topEnd = 8.dp, bottomEnd = 8.dp))
+            // Quiet, like an unselected key: always there, never the loudest thing on the page.
+            .background(face ?: c.tabOff)
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+            .then(marks),
         contentAlignment = Alignment.Center,
     ) {
-        // The word reads bottom to top, as on the PO's side tabs.
-        Text(
-            NavText.GUIDE_TAB.uppercase(),
-            style = ArcType.capsKeySmall,
-            color = c.onTabOff,
-            maxLines = 1,
-            softWrap = false,
-            modifier = Modifier.rotateVertical(),
-        )
+        if (led != null) {
+            Box(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 9.dp)
+                    .size(6.dp)
+                    .then(if (ledGlow) Modifier.dropShadow(CircleShape, Shadow(radius = 6.dp, color = led)) else Modifier)
+                    .clip(CircleShape)
+                    .background(led),
+            )
+        }
+        // The tab is only so wide, so the word grows with the text size only so far.
+        val density = LocalDensity.current
+        CompositionLocalProvider(LocalDensity provides Density(density.density, minOf(density.fontScale, 1.3f))) {
+            Text(
+                word.uppercase(),
+                style = ArcType.capsKeySmall,
+                color = ink ?: c.onTabOff,
+                maxLines = 1,
+                softWrap = false,
+                // Below the LED, if there is one.
+                modifier = Modifier.padding(top = if (led != null) 10.dp else 0.dp).rotateVertical(),
+            )
+        }
     }
 }
 
+private val EdgeTabHeight = 112.dp
+
+/**
+ * Lifts the guide tab 80 dp above the page's middle, or less on a short page,
+ * so it keeps 8 dp clear of the top bar.
+ */
+private fun Modifier.aboveMiddle(): Modifier = layout { measurable, constraints ->
+    val p = measurable.measure(constraints)
+    val lift = guideLift(constraints)
+    layout(p.width, p.height) { p.place(0, -lift) }
+}
+
+/** How far [aboveMiddle] lifts the guide tab, in px. */
+private fun androidx.compose.ui.layout.MeasureScope.guideLift(constraints: androidx.compose.ui.unit.Constraints): Int =
+    if (constraints.hasBoundedHeight) minOf(80.dp.roundToPx(), constraints.maxHeight / 2 - 64.dp.roundToPx()) else 80.dp.roundToPx()
+
 /** Turns a single line of text a quarter turn anticlockwise, swapping its width and height for layout. */
-private fun Modifier.rotateVertical(): Modifier = layout { measurable, constraints ->
+internal fun Modifier.rotateVertical(): Modifier = layout { measurable, constraints ->
     val p = measurable.measure(constraints.copy(minWidth = 0, maxWidth = androidx.compose.ui.unit.Constraints.Infinity, minHeight = 0))
     layout(p.height, p.width) {
         p.placeWithLayer(-(p.width - p.height) / 2, (p.width - p.height) / 2) { rotationZ = -90f }

@@ -14,6 +14,8 @@
     "test": "TZ=UTC vitest run",
     "test:watch": "TZ=UTC vitest",
     "gen:guide": "node scripts/gen-guide-data.mjs",
+    "gen:skill": "node scripts/gen-skill-guide.mjs",
+    "gen:icons": "node scripts/icons.mjs",
     "e2e": "playwright test",
     "check": "npm run typecheck && npm test && npm run build"
   },

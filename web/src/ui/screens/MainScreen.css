@@ -1,4 +1,9 @@
-/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/MainScreen.kt */
+/* Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/MainScreen.kt
+ *
+ * Web only, from 1024px wide (the desk, theme/desk.css): .main-screen--desk,
+ * two columns up to 1200 on the top bar's sides (--desk-pad): a sticky 400
+ * side column (device, big key, notes, banner) and the library up to 760, the
+ * footer at its foot. */
 
 /* Box(fillMaxSize, shell, TopCenter) > Column(widthIn(max 560), padding start EdgeTabWidth + 8,
  * end 16, top 4, bottom 24; 12 between children). The padding is inside the 560. */
@@ -97,6 +102,41 @@
   gap: var(--space-8);
 }
 .main-screen__footer { padding: var(--space-8) var(--space-2); }
+
+/* ---------- the desk (web only) ---------- */
+
+/* MainScreen renders .main-screen--desk only while useDesk() is true; the query
+ * repeats it so a stale class can never reach the phone layout. */
+@media (min-width: 1024px) {
+  .main-screen--desk .main-screen__column {
+    flex-direction: row;
+    align-items: stretch;
+    gap: 22px;
+    max-width: var(--top-bar-max);
+    padding: var(--space-4) var(--desk-pad) 22px;
+  }
+  /* Stays in view while the list scrolls (.shell__page is the scroller). */
+  .main-screen__side {
+    position: sticky;
+    top: var(--space-4);
+    align-self: flex-start;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-12);
+    flex: 0 1 400px;
+    min-width: 300px;
+  }
+  .main-screen__main {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-12);
+    flex: 1 1 480px;
+    max-width: 760px;
+    min-width: 0;
+  }
+  .main-screen--desk .main-screen__library { padding-top: 0; }
+  .main-screen--desk .main-screen__footer { margin-top: auto; }
+}
 
 /* ---------- BackupList ---------- */
 
