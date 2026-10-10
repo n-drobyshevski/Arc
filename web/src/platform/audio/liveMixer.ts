@@ -22,10 +22,21 @@
 // then 'takeEnd' with the frames to keep. 'transport' is the EP-133's PLAY
 // and STOP (MIDI clock), as LiveAudio.kt's transportStarted/Stopped.
 //
-// Imports only core modules: this file is bundled into the worklet.
+// PATTERN (PatternScheduler.kt): 'plan' hands the host's PatternScheduler
+// what it plays (the patterns, and the pads' sounds by the ids loaded here),
+// 'play' and 'stopSeq' start and stop it, and 'seqArmed' asks for the
+// output's stamps while RECORD waits for a press. It reports its clock
+// ('timeline'), the pads it has no sound for ('missing') and, while it runs
+// or is armed, where the mix is ('stamp': mix frame [frame] plays at context
+// time [time]), for the main thread's own stamp.
+//
+// Imports only core modules (and the scheduler, which does too): this file is bundled into the worklet.
 
 import { TakeRecorder, type RecState } from '../../core/features/takeRecorder'
+import type { ProjectPatterns } from '../../core/features/pattern'
+import type { PhaseAnchors, TransportClock } from '../../core/features/sequencer'
 import { VoiceMixer, VoiceShape } from '../../core/formats/voiceMixer'
+import { ClickSound, PatternScheduler, type PadVoice, type ScheduleSink } from './patternScheduler'
 
 /** The AudioWorkletProcessor's registered name. */
 export const LIVE_PROCESSOR = 'arc-live-mixer'
@@ -62,6 +73,30 @@ export type ToMixer =
   | { readonly t: 'stopRec' }
   /** The EP-133 started ([playing]) or stopped playing. */
   | { readonly t: 'transport'; readonly playing: boolean }
+  /** What the pattern sequencer plays (SeqPlan): its sounds by loaded sample id, [skip] as [note id, pass] pairs. */
+  | {
+      readonly t: 'plan'
+      readonly patterns: ProjectPatterns
+      readonly voices: readonly PlanVoice[]
+      readonly skip: readonly (readonly [number, number])[]
+      readonly bpm: number
+      readonly phase: PhaseAnchors
+    }
+  /** PatternScheduler.play: tick 0 at mix frame [atFrame] (a press), else a lookahead and [leadMs] on, after [countInBars]. */
+  | { readonly t: 'play'; readonly countInBars: number; readonly leadMs: number; readonly atFrame: number | null; readonly atPress: boolean }
+  | { readonly t: 'stopSeq' }
+  /** RECORD waits for a press: the mix's stamps are wanted. */
+  | { readonly t: 'seqArmed'; readonly armed: boolean }
+
+/** A pad's sound in a plan: pad key (group × 12 + offset) and the loaded sample [id]; the shapes' fields over the defaults. */
+export interface PlanVoice {
+  readonly pad: number
+  readonly id: number
+  readonly channels: number
+  readonly sampleRate: number
+  readonly shape?: Partial<VoiceShape>
+  readonly keysShape?: Partial<VoiceShape>
+}
 
 /**
  * [m] as it is posted to the worklet, and what moves with it: a 'load' takes
@@ -94,6 +129,15 @@ export type FromMixer =
   | { readonly t: 'take'; readonly pcm: Int16Array }
   /** The take ended: its first [keep] frames are kept (0: nothing was played); [limit] when the limit ended it. */
   | { readonly t: 'takeEnd'; readonly keep: number; readonly limit: boolean }
+  /** The pattern's clock (anchored, or a new tempo); null when it stopped. */
+  | { readonly t: 'timeline'; readonly clock: TransportClock | null }
+  /** A pad the patterns play has no sound in the plan (pad key). */
+  | { readonly t: 'missing'; readonly pad: number }
+  /** Mix frame [frame] plays at context time [time] (s). */
+  | { readonly t: 'stamp'; readonly frame: number; readonly time: number }
+
+// The count-in's click: straight to the mix, a little quieter than a pad.
+const CLICK_SHAPE = VoiceShape.of({ releaseMs: 2 })
 
 /** A VoiceMixer at [rate] that takes ToMixer commands and [post]s FromMixer reports. */
 export class MixerHost {
@@ -110,6 +154,12 @@ export class MixerHost {
   private burst = new Int16Array(0)
   private chunk = new Int16Array(MixerHost.TAKE_CHUNK_FRAMES * 2)
   private chunkFrames = 0
+  /** The pattern sequencer, run before each render. */
+  readonly seq = new PatternScheduler()
+  private seqArmed = false
+  private stampedAt = Number.NEGATIVE_INFINITY
+  private readonly clicks: [Int16Array, Int16Array]
+  private readonly sink: ScheduleSink
 
   constructor(
     readonly rate: number,
@@ -118,6 +168,26 @@ export class MixerHost {
     this.mixer = new VoiceMixer(rate)
     this.lastKeys = this.mixer.keys
     this.maxTakeFrames = TakeRecorder.MAX_SECONDS * rate
+    this.clicks = [ClickSound.render(rate, false), ClickSound.render(rate, true)]
+    const mixer = this.mixer
+    const samples = this.samples
+    const clickFrames = this.clicks[0].length
+    this.sink = {
+      startAt(key, v, semitones, tag, shape, frame) {
+        const pcm = samples.get(v.id)
+        if (pcm === undefined) return false
+        mixer.start(key, pcm, v.channels, v.rate, semitones, tag, shape, frame)
+        return true
+      },
+      releaseAt: (key, frame, tag) => mixer.release(key, frame, tag),
+      click: (frame, accent, tag) => {
+        mixer.start('click', this.clicks[accent ? 1 : 0], 1, rate, 0, tag, CLICK_SHAPE, frame)
+        mixer.release('click', frame + clickFrames, tag)
+      },
+      flushTimed: () => mixer.flushTimed(),
+    }
+    this.seq.onMissing = (pad) => post({ t: 'missing', pad })
+    this.seq.onTimeline = (clock) => post({ t: 'timeline', clock })
   }
 
   /** Samples held, for tests. */
@@ -160,6 +230,31 @@ export class MixerHost {
         return
       case 'stopRec':
         if (this.recorder !== null) this.endTake(false)
+        return
+      case 'plan': {
+        const voices = new Map<number, PadVoice>()
+        for (const v of m.voices) {
+          voices.set(v.pad, {
+            id: v.id,
+            channels: v.channels,
+            rate: v.sampleRate,
+            shape: v.shape === undefined ? VoiceShape.DEFAULT : VoiceShape.of(v.shape),
+            keysShape: v.keysShape === undefined ? VoiceShape.DEFAULT : VoiceShape.of(v.keysShape),
+          })
+        }
+        this.seq.plan = { patterns: m.patterns, voices, skip: new Map(m.skip), bpm: m.bpm, phase: m.phase }
+        return
+      }
+      case 'play':
+        this.seq.play(m.countInBars, m.leadMs, m.atFrame, m.atPress)
+        this.stampedAt = Number.NEGATIVE_INFINITY
+        return
+      case 'stopSeq':
+        this.seq.stop()
+        return
+      case 'seqArmed':
+        this.seqArmed = m.armed
+        this.stampedAt = Number.NEGATIVE_INFINITY
         return
       case 'transport': {
         const r = this.recorder
@@ -233,6 +328,12 @@ export class MixerHost {
    */
   render(left: Float32Array, right: Float32Array, frames: number, time: number): void {
     const before = this.mixer.frame
+    this.seq.fill(this.sink, before, this.rate)
+    // Where the mix is, a few times a second while the pattern runs or RECORD waits: the main thread's stamp.
+    if ((this.seq.running || this.seqArmed) && before - this.stampedAt >= this.rate / 4) {
+      this.stampedAt = before
+      this.post({ t: 'stamp', frame: before, time })
+    }
     this.mixer.renderPlanar(left, right, frames)
     this.record(left, right, frames, before)
     const started = this.mixer.started
