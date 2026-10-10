@@ -210,7 +210,7 @@ A5 open hat    | .... .... .... .... | .... .... .... ..x. |
 ## UK garage
 - BPM: 130-136
 - Swing: 56-62
-- Feel: shuffled and skippy. Every sixteenth gets a hat and the swing pushes the off hats late. Snare on 2 and 4, kick on 1 and on the "and" of 3.
+- Feel: shuffled and skippy. Every sixteenth gets a hat and the swing pushes the off hats late. Snare on 2 and 4, kick on 1 and on the "and" of 3. A bouncy bass that jumps an octave.
 
 ```
 ARC BEAT 1
@@ -223,7 +223,18 @@ A7 kick        | X... .... ..x. .... |
 A9 snare       | .... X... .... X... |
 A4 closed hat  | xoxo xoxo xoxo xoxo |
 A1 rim         | ..o. .... ...o .... |
+
+[B] bars 1
+notes
+B7 at 1.1.1 note G1 gate 1/8
+B7 at 1.1.4+4 note G2 vel 90
+B7 at 1.2.3 note G1 vel 100
+B7 at 1.3.3 note A#1 gate 1/8
+B7 at 1.4.2+4 note G1 vel 90
+B7 at 1.4.4+4 note D2 vel 100
 ```
+
+The bass on B7 is played in KEYS. Its notes on the off sixteenths carry `+4`, the swing of 58 by hand, so they sit with the swung hats (see BUILD in SKILL.md).
 
 ## Breakbeat
 - BPM: 120-135

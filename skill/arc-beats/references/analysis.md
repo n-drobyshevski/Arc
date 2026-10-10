@@ -26,7 +26,7 @@ If code execution is not available, read the card yourself with the same checkli
 | `swing` | `header`, `applies`, `measured`, `swung_hits` | If `applies` is false the swing line does nothing. `measured` near `header` means the grid obeys it |
 | `features` | Recognised patterns: four on the floor, backbeat, half-time backbeat, offbeat hats, eighth or sixteenth hats, ghost notes, syncopated kick, 3-3-2 pulse, swung | Vocabulary, not verdicts |
 | `variation` | `distinct_bars`, `identical_bars`, `last_bar_busier` | One distinct bar in four is a plain loop. A busier last bar is a fill |
-| `similar_to` | The closest genre recipes in genres.md (drums 55%, tempo 35%, swing 10%; a tempo that fits only at half or double speed counts for less and says so) | 80 and up: that style. 60 to 80: a cousin. Say "closest to" and name the difference |
+| `similar_to` | The closest genre recipes in genres.md (drums 55%, tempo 35%, swing 10%; a tempo that fits only at half or double speed counts for less and says so) | 80 and up: that style. 60 to 80: a cousin. Say "closest to" and name the difference. If the top match is *outside the usual range* but a close second fits the tempo, name the one that fits as the style, and the top one as the drum pattern it borrows |
 
 Pads with no sound name get the assumed kit's names (`name_assumed`). Say so ("I assumed A7 is your kick"), or better, ask the user to copy the pattern from Arc so the card carries their names. A pad's role comes from its `sound` line name first, then its row label: if the two disagree (a row called `kick` over a `sound` line for a snare), say so, because the sound line is what Arc will put on the pad.
 
