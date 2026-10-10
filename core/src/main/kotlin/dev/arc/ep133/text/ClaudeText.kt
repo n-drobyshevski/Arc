@@ -1,7 +1,12 @@
 package dev.arc.ep133.text
 
 import dev.arc.ep133.features.CardProblem
+import dev.arc.ep133.features.CardFx
+import dev.arc.ep133.features.FxSettings
+import dev.arc.ep133.features.FxType
+import dev.arc.ep133.features.PadSettings
 import dev.arc.ep133.features.PhysicalPad
+import kotlin.math.roundToInt
 
 /**
  * Live tools' CLAUDE section and the beat card sheet (an addition): sharing a
@@ -58,7 +63,7 @@ object ClaudeText {
     /** The line before the card in the shared text. */
     const val SHARE_PROMPT =
         "Analyse this EP-133 beat from Arc with the arc-beats skill, then suggest 2-3 edits as a new card. " +
-            "Keep its sound lines, or choose sounds from my sound list if one follows the card:"
+            "Keep its sound, FX and pad lines, or choose sounds from my sound list if one follows the card:"
     const val SHARE_TITLE = "Share beat card"
 
     /** "P01 S02": pattern [n] (1..99) of the scene at [scene] (from 0), a card's name. */
@@ -200,6 +205,107 @@ object ClaudeText {
     /** The same, offline: the changes are Arc's own until the EP-133 connects. */
     const val SOUNDS_OFFLINE_NOTE = "Saved as offline pad changes; they go to the EP-133 when you reconnect."
 
+    // ---------- The sheet: FX and pad shaping ----------
+    /** The FX block's header, and the switch beside it that decides whether the card's FX replace the project's (on to begin with). */
+    const val FX = "FX"
+    const val APPLY_FX = "Apply FX"
+    fun applyFxName(on: Boolean) = if (on) "Apply the card's FX to this project" else "Leave this project's FX as they are"
+
+    /** Under the FX rows: they replace this project's FX in Arc, which play on the phone. */
+    const val FX_BLOCK_NOTE = "Replaces this project's FX on the phone (the EP-133's own FX don't change). UNDO puts the old FX back."
+
+    /** The pad shaping rows' header: each pad's pitch, level, pan, attack, release or mode, old to new, ticked to be applied. */
+    const val PAD_SHAPING = "Pad shaping"
+
+    /** Under the pad shaping rows, connected and offline. */
+    const val PAD_SHAPING_NOTE = "Writes the ticked pads' settings on the EP-133. UNDO puts the old ones back."
+    const val PAD_SHAPING_OFFLINE_NOTE = "Saved as offline pad settings; they go to the EP-133 when you reconnect."
+
+    /** A row of the FX or pad shaping blocks: what it is ([label]), and its value [old] and [new]. */
+    data class Change(val label: String, val old: String, val new: String) {
+        /** Whether the card leaves it as it is: the row says [ALREADY_SET] and has no tick box. */
+        val same: Boolean get() = old == new
+    }
+
+    /** What a row says when the project has the card's value already. */
+    const val ALREADY_SET = "Already set"
+
+    /** What a pad shaping row says when the pad has no sound to shape (and no sound row of the card is going onto it). */
+    const val PAD_NO_SOUND = "No sound on this pad"
+
+    /** A pad shaping row for screen readers: "A9: Pitch 0 becomes Pitch 2", "A9: already set", "A9: no sound on this pad". */
+    fun padRowName(c: Change?, pad: PhysicalPad, noSound: Boolean) =
+        if (noSound) "${padLabel(pad)}: ${PAD_NO_SOUND.lowercase()}" else if (c == null) "${padLabel(pad)}: ${ALREADY_SET.lowercase()}" else changeName(c)
+
+    /** The FX rows' labels. */
+    const val FX_EFFECT = "Effect"
+    const val FX_SENDS = "Sends"
+    const val FX_COMP = "Comp"
+    const val FX_DUCK = "Duck"
+
+    /** The master effect as a row says it: "DISTORTION \u00B7 DRIVE 12.3x \u00B7 LP 20", "OFF" for none. */
+    fun fxEffectText(s: FxSettings): String =
+        if (s.type == FxType.NONE) MirrorText.fxName(FxType.NONE).uppercase()
+        else "${MirrorText.fxName(s.type).uppercase()} \u00B7 ${FxSettings.xLabel(s.type)} ${FxSettings.xReadout(s.type, s.x)} \u00B7 ${FxSettings.yReadout(s.type, s.y)}"
+
+    /** The four sends as a row says them, the groups above 0 in percent: "A 80% \u00B7 B 20% \u00B7 C 0 \u00B7 D 0". */
+    fun fxSendsText(s: FxSettings): String =
+        s.sends.withIndex().joinToString(" \u00B7 ") { (g, v) ->
+            val p = (v * 100f).roundToInt()
+            "${'A' + g} " + if (p > 0) "$p%" else "0"
+        }
+
+    /** The master compressor: "OFF", or "ON \u00B7 DRIVE 2.1x \u00B7 5/150" (drive and speed as the XY pad reads them). */
+    fun fxCompText(s: FxSettings): String =
+        if (!s.comp.on) MirrorText.onOff(false).uppercase()
+        else "${MirrorText.onOff(true).uppercase()} \u00B7 ${FxSettings.xLabel(FxType.COMPRESSOR)} ${FxSettings.xReadout(FxType.COMPRESSOR, s.comp.x)} \u00B7 ${FxSettings.yReadout(FxType.COMPRESSOR, s.comp.y)}"
+
+    /** The sidechain, in words: "OFF", or "A7 ducks B C \u00B7 180 ms \u00B7 SNAP 40" (the FX sheet's length and shape). */
+    fun fxSidechainText(s: FxSettings): String {
+        val sc = s.sidechain
+        if (!sc.on || sc.dests and FxSettings.ALL_GROUPS == 0) return MirrorText.onOff(false).uppercase()
+        val groups = (0 until FxSettings.GROUPS).filter { sc.dests and (1 shl it) != 0 }.joinToString(" ") { "${'A' + it}" }
+        return "${padLabel(PhysicalPad(sc.group, sc.pad))} ducks $groups \u00B7 ${MirrorText.sidechainLength(sc.x)} \u00B7 ${MirrorText.sidechainShape(sc.y)}"
+    }
+
+    /**
+     * The FX rows for a card that sets the kinds [fx] gives, from the project's [old] FX to [now] (the card applied,
+     * [dev.arc.ep133.features.BeatCards.applyFx]): the effect, sends, comp and duck, in that order, each only when the card has
+     * a line for it. A row the project has already ([Change.same]) is kept, to say so.
+     */
+    fun fxRows(old: FxSettings, now: FxSettings, fx: CardFx): List<Change> = listOfNotNull(
+        if (fx.type != null) Change(FX_EFFECT, fxEffectText(old), fxEffectText(now)) else null,
+        if (fx.sends != null) Change(FX_SENDS, fxSendsText(old), fxSendsText(now)) else null,
+        if (fx.comp != null) Change(FX_COMP, fxCompText(old), fxCompText(now)) else null,
+        if (fx.sidechain != null) Change(FX_DUCK, fxSidechainText(old), fxSidechainText(now)) else null,
+    )
+
+    /** One setting of a pad's shaping row: its [name] ("Pitch"), and its value [old] and [new] ("0", "+2"). */
+    data class PadPart(val name: String, val old: String, val new: String)
+
+    /**
+     * The settings of a pad that differ from [old] to [new], as the pad sheet reads them, in the sheet's order. Only
+     * pitch, level, pan, attack, release and mode count (the card carries no more). Empty when none differs.
+     */
+    fun padParts(old: PadSettings, new: PadSettings): List<PadPart> = listOfNotNull(
+        if (old.pitch != new.pitch) PadPart(MirrorText.PITCH, MirrorText.pitchLabel(old.pitch), MirrorText.pitchLabel(new.pitch)) else null,
+        if (old.level != new.level) PadPart(MirrorText.LEVEL, MirrorText.levelLabel(old.level), MirrorText.levelLabel(new.level)) else null,
+        if (old.pan != new.pan) PadPart(MirrorText.PAN, MirrorText.panLabel(old.pan), MirrorText.panLabel(new.pan)) else null,
+        if (old.attack != new.attack) PadPart(MirrorText.ATTACK, MirrorText.envLabel(old.attack), MirrorText.envLabel(new.attack)) else null,
+        if (old.release != new.release) PadPart(MirrorText.RELEASE, MirrorText.envLabel(old.release), MirrorText.envLabel(new.release)) else null,
+        if (old.mode != new.mode) PadPart(MirrorText.MODE, MirrorText.modeLabel(old.mode), MirrorText.modeLabel(new.mode)) else null,
+    )
+
+    /** A pad's shaping row as text, if the card changes it: the pad ("A7"), "Pitch 0 \u00B7 Level 100" to "Pitch -7 \u00B7 Level 90". */
+    fun padChange(pad: PhysicalPad, old: PadSettings, new: PadSettings): Change? {
+        val parts = padParts(old, new)
+        if (parts.isEmpty()) return null
+        return Change(padLabel(pad), parts.joinToString(" \u00B7 ") { "${it.name} ${it.old}" }, parts.joinToString(" \u00B7 ") { "${it.name} ${it.new}" })
+    }
+
+    /** A row for screen readers: "Effect: OFF becomes REVERB \u00B7 SIZE 50% \u00B7 FLAT", "A7: Pitch 0 becomes Pitch -7", or "Comp: OFF, already set". */
+    fun changeName(c: Change) = if (c.same) "${c.label}: ${c.new}, ${ALREADY_SET.lowercase()}" else "${c.label}: ${c.old} becomes ${c.new}"
+
     // CANCEL is [Strings.CANCEL].
     const val IMPORT = "Import"
 
@@ -211,9 +317,10 @@ object ClaudeText {
      * IMPORT's toast: where it went, and how to take it back. One pattern is
      * named; several go in the scene they made ([scene], "S03"), or are listed
      * where there was no room for a scene. [sounds] put on pads are counted,
-     * and so are the [skipped] ones that had no pad to go on.
+     * and so are the [skipped] ones that had no pad to go on. The card's [fx]
+     * applied and the [pads] shaped are named after them.
      */
-    fun imported(places: List<Pair<Int, Int>>, scene: String?, sounds: Int = 0, skipped: Int = 0): String {
+    fun imported(places: List<Pair<Int, Int>>, scene: String?, sounds: Int = 0, skipped: Int = 0, fx: Boolean = false, pads: Int = 0, padsSkipped: Int = 0): String {
         val where = when {
             scene != null -> "scene $scene"
             else -> places.joinToString(", ") { place(it.first, it.second) }
@@ -224,7 +331,12 @@ object ClaudeText {
             skipped > 0 -> ", ${Format.plural(skipped, "sound")} skipped"
             else -> ""
         }
-        return "Imported to $where$extra. UNDO takes it back."
+        val applied = listOfNotNull(if (fx) FX else null, if (pads > 0) Format.plural(pads, "pad setting") else null).joinToString(" and ")
+        val shaping = listOfNotNull(
+            applied.takeIf { it.isNotEmpty() }?.let { "$it applied" },
+            if (padsSkipped > 0) "${Format.plural(padsSkipped, "pad setting")} skipped" else null,
+        )
+        return "Imported to $where$extra." + (if (shaping.isEmpty()) "" else " " + shaping.joinToString(", ") + ".") + " UNDO takes it back."
     }
 
     /**
@@ -237,6 +349,29 @@ object ClaudeText {
     /** After UNDO took an import back: the old sounds on [back] pads again, and the [empty] ones that had none before can't be emptied again. */
     fun soundsRestored(back: Int, empty: Int) =
         "Old sounds back on ${Format.plural(back, "pad")}" + (if (empty > 0) ", $empty had none before" else "") + "."
+
+    /**
+     * After UNDO took an import back, what was put back: the old sounds on [back] pads, with the [empty] ones that had none
+     * before (they can't be emptied again), the old settings on [shaped] pads, and the old FX ([fx]). Sounds first. When
+     * nothing of that was put back (the shaped pads were turned since), it only says the import is taken back.
+     */
+    fun importUndone(back: Int, empty: Int, shaped: Int, fx: Boolean): String {
+        val parts = listOfNotNull(
+            if (back > 0 || empty > 0) soundsRestored(back, empty).removeSuffix(".") else null,
+            if (shaped > 0) "old settings back on ${Format.plural(shaped, "pad")}" else null,
+            if (fx) "old FX back" else null,
+        )
+        if (parts.isEmpty()) return "Import taken back."
+        return parts.joinToString(", ").replaceFirstChar { it.uppercase() } + "."
+    }
+
+    /**
+     * IMPORT's toast when a pad's settings couldn't be written: [reason], then what stays: the patterns, the pads
+     * [written] so far, and the FX if they went on.
+     */
+    fun shapingFailed(reason: String, written: Int, fx: Boolean) =
+        MirrorText.padSettingsFailed(reason) + ". The patterns stay imported" +
+            (if (fx) ", the FX applied" else "") + (if (written > 0) " and ${Format.plural(written, "pad")} shaped" else "") + ". UNDO takes it back."
 
     private fun twoDigits(n: Int) = n.toString().padStart(2, '0')
 }

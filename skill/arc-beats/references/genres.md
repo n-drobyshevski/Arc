@@ -4,6 +4,8 @@ Twenty-eight starting points, including a techno family of twelve (Techno, Detro
 
 `scripts/beatcard.py analyse` compares a user's beat with these recipes, reading the `BPM:` and `Swing:` lines and the card of each section below. Keep that shape if you add a recipe: a `##` heading, the two lines, then one fenced card.
 
+Some styles are defined by their effects, and those recipes carry `fx`, `send`, `comp` and `sidechain` lines right after `swing` (see "Effects" in [beat-card.md](beat-card.md)): house (sidechain pump), dub techno (delay), industrial techno, hard techno, schranz and breakcore (distortion and compression) and lo-fi (low-pass filter). A line under the card says in one sentence what they do. The importing user can switch **APPLY FX** off to keep their own FX; a recipe without these lines leaves the FX alone. Write them only when the style needs them.
+
 ## The assumed kit
 
 When the user has not copied a pattern out of Arc, the card does not know what is on their pads. Then use this layout and say it is an assumption: *"I've assumed a drum kit on group A (kick on 7, snare on 9 ...). If your pads differ, copy a pattern from Arc and I'll use your pad names."* It is a common layout, not something read from the device: the official factory pack groups its sounds by slot number (kicks 1-99, snares 100-199, hi-hats 200-299, percussion 300-399, bass 400-499, melodic 500-599), but which sound sits on which pad is the user's to change.
@@ -29,6 +31,7 @@ ARC BEAT 1
 name House groove
 tempo 124
 swing 52
+sidechain A7 B 30 55
 
 [A] bars 1 step 1/16
 A7 kick        | X... X... X... X... |
@@ -43,6 +46,8 @@ B7 at 1.2.3 note E2 gate 1/8
 B7 at 1.3.3 note G2 gate 1/8
 B7 at 1.4.3 note E2 gate 1/8
 ```
+
+The `sidechain` line makes the kick (A7) duck the bass group (B) every time it plays: the bass pumps back up between the kicks. Turn the 30 (length) up for a longer pump.
 
 ## Techno
 - BPM: 126-138
@@ -134,6 +139,8 @@ ARC BEAT 1
 name Dub chord echo
 tempo 122
 swing 52
+fx delay 62 60
+send C 30
 
 [A] bars 1 step 1/16
 A7 kick        | X... X... X... X... |
@@ -158,7 +165,7 @@ C7 at 2.4.2+1 note A3 gate 1/4 vel 60
 C7 at 2.4.2+1 note C4 gate 1/4 vel 60
 ```
 
-The echo is written by hand: each stab repeats three sixteenths later at a lower velocity. The repeat that lands on an off sixteenth carries `+1`, the swing of 52.
+The echo is written by hand: each stab repeats three sixteenths later at a lower velocity. The repeat that lands on an off sixteenth carries `+1`, the swing of 52. The `fx delay` line adds a real delay on the chords (62 is a dotted eighth, three sixteenths, the same spacing, and 60 a long tail of repeats), and `send C 30` sends a third of the chord group to it, so the echoes get wetter and longer. Raise the send for more dub, or drop the quieter hand-written repeats and let the delay do all the work.
 
 ## Acid techno
 - BPM: 135-150
@@ -321,6 +328,9 @@ ARC BEAT 1
 name Industrial pressure
 tempo 136
 swing 50
+fx distortion 65 35
+send A 50 B 60
+comp 55 30
 
 [A] bars 2 step 1/16
 A7 kick        | X... X... X... X... | X... X... X... X... |
@@ -342,7 +352,7 @@ B7 at 2.1.2 note C1 gate 1/4 vel 110
 B7 at 2.3.2 note C#1 gate 1/4 vel 100
 ```
 
-The four notes after the grid are the harsh off-grid hits: each sits a few ticks off a sixteenth, so they land just before or after the grid.
+The four notes after the grid are the harsh off-grid hits: each sits a few ticks off a sixteenth, so they land just before or after the grid. The effect lines do the distorting for you: `fx distortion 65 35` is heavy drive with a dark tone, `send A 50 B 60` runs about half the drums and most of the bass through it, and `comp 55 30` squeezes everything together with a quick compressor.
 
 ## Hard techno
 - BPM: 145-160
@@ -354,6 +364,9 @@ ARC BEAT 1
 name Hard techno pound
 tempo 152
 swing 50
+fx distortion 45 55
+send A 25 B 35
+comp 50 25
 
 [A] bars 1 step 1/16
 A7 kick        | X... X... X... X... |
@@ -376,6 +389,8 @@ B7 at 1.4.3 note F1 gate 1/16 vel 90
 B7 at 1.4.4 note F1 gate 1/16 vel 100
 ```
 
+The effect lines give the kick its edge: `fx distortion 45 55` is a medium drive with a neutral tone, `send A 25 B 35` mixes some of the drums and the rumble into it, and `comp 50 25` glues the mix with a fast compressor.
+
 ## Schranz
 - BPM: 150-160
 - Swing: 50
@@ -386,6 +401,9 @@ ARC BEAT 1
 name Schranz pressure
 tempo 152
 swing 50
+fx distortion 60 40
+send A 35 B 45
+comp 65 20
 
 [A] bars 2 step 1/16
 A7 kick        | X... X... X... X... | X... X... X... X.X. |
@@ -423,7 +441,7 @@ B7 at 2.4.3 note G#1 gate 1/16 vel 90
 B7 at 2.4.4 note G#1 gate 1/16 vel 100
 ```
 
-Bar 2 is the fill: a doubled kick, the clap roll, thinner hats and a bass that steps up. Repeat bar 1 for longer phrases and use bar 2 every fourth or eighth bar.
+Bar 2 is the fill: a doubled kick, the clap roll, thinner hats and a bass that steps up. Repeat bar 1 for longer phrases and use bar 2 every fourth or eighth bar. The effect lines are the schranz sound: `fx distortion 60 40` is a strong, slightly dark drive, `send A 35 B 45` pushes the drums and the rumble into it, and `comp 65 20` is a hard, fast compressor that makes everything breathe with the kick.
 
 ## Hard groove
 - BPM: 135-145
@@ -492,6 +510,8 @@ ARC BEAT 1
 name Dusty lo-fi
 tempo 76
 swing 62
+fx filter 27 20
+send A 100 C 100
 
 [A] bars 1 step 1/16
 A7 kick        | 8... ..6. .... .5.. |
@@ -506,6 +526,8 @@ C7 at 1.1.1 note E4 gate 1/4
 C7 at 1.1.1 note G4 gate 1/4
 C7 at 1.1.1 note B4 gate 1/4
 ```
+
+`fx filter 27 20` is a low-pass filter (any cutoff below 50 is low-pass) set low and with a little resonance, and `send A 100 C 100` runs the drums and the chord through it, so everything loses its highs and sounds like an old tape. Move the 27 down for a duller sound, up for a brighter one.
 
 ## Trap
 - BPM: 130-150 (a half-time feel: the snare is on 3 and the hats run double)
@@ -620,6 +642,9 @@ ARC BEAT 1
 name Amen shred
 tempo 180
 swing 50
+fx distortion 55 50
+send A 45 B 30
+comp 60 15
 
 [A] bars 2 step 1/16
 A7 kick        | X.x. ..x. .xx. .... | X..x ..x. xx.x ..x. |
@@ -649,7 +674,7 @@ B7 at 2.1.1 note E1 gate 1/4 vel 120
 B7 at 2.4.1 note G1 gate 1/8 vel 110
 ```
 
-The snare roll and the stutters sit in the `notes` list because they fall between sixteenths (`+12` is half a sixteenth, a 32nd). Bar 2 is the chaos bar: swap it for bar 1 on most passes and bring it in every fourth bar. The hat burst (`xxxx`) in bar 2 is a double-time moment; the roll takes over from it.
+The snare roll and the stutters sit in the `notes` list because they fall between sixteenths (`+12` is half a sixteenth, a 32nd). Bar 2 is the chaos bar: swap it for bar 1 on most passes and bring it in every fourth bar. The hat burst (`xxxx`) in bar 2 is a double-time moment; the roll takes over from it. The effect lines crush the break: `fx distortion 55 50` is a hard, neutral drive, `send A 45 B 30` mixes the drums and the sub into it, and `comp 60 15` is a very fast compressor that pumps the whole loop.
 
 ## UK garage
 - BPM: 130-136

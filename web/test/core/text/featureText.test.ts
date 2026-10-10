@@ -1,14 +1,14 @@
 // Port of core/src/test/kotlin/dev/arc/ep133/text/FeatureTextTest.kt
 import { describe, expect, it } from 'vitest'
 import { ARP_ORDERS, arpNote } from '../../../src/core/features/arp'
-import type { CardProblem } from '../../../src/core/features/beatCard'
+import { cardFx, type CardProblem } from '../../../src/core/features/beatCard'
 import { DiffResult, ProjectDiff, ProjectState, SoundDiff, SoundState } from '../../../src/core/features/backupDiff'
 import { NoteNames, SCALES } from '../../../src/core/features/keys'
-import { FX_TYPES, FxType } from '../../../src/core/features/fxSettings'
+import { FX_TYPES, FxSettings, FxType, comp, sidechain } from '../../../src/core/features/fxSettings'
 import { KeyMark } from '../../../src/core/features/piano'
 import { physicalPad } from '../../../src/core/features/padNotes'
 import { ProjectSeq, TIMINGS, Timing } from '../../../src/core/features/pattern'
-import { PLAY_MODES } from '../../../src/core/features/padSettings'
+import { PLAY_MODES, PadSettings } from '../../../src/core/features/padSettings'
 import { ProjectSource } from '../../../src/core/features/projectStep'
 import { SampleSource } from '../../../src/core/features/sampleSource'
 import { SWITCH_TIMES, SceneOps, SwitchTime } from '../../../src/core/features/scenes'
@@ -497,7 +497,7 @@ describe('FeatureTextTest', () => {
     expect(ClaudeText.shareText('Analyse this beat:', 'ARC BEAT 1\nswing 50\n')).toBe('Analyse this beat:\n\n```\nARC BEAT 1\nswing 50\n```\n')
     expect(ClaudeText.NO_CARD).toBe('No beat card in that text.')
     // The prompt asks for the sound lines kept, or sounds chosen from the list that follows the card.
-    expect(ClaudeText.SHARE_PROMPT.includes('sound list') && ClaudeText.SHARE_PROMPT.endsWith(':')).toBe(true)
+    expect(ClaudeText.SHARE_PROMPT.includes('sound list') && ClaudeText.SHARE_PROMPT.includes('FX and pad lines') && ClaudeText.SHARE_PROMPT.endsWith(':')).toBe(true)
     expect([212, 1].map((n) => ClaudeText.withSoundList(n))).toEqual(['With my sound list \u00B7 212 sounds', 'With my sound list \u00B7 1 sound'])
     // The sound list after a shared card.
     expect([ClaudeText.SOUNDS_FROM_DEVICE, ClaudeText.SOUNDS_FROM_LAST_READ, ClaudeText.SOUNDS_FROM_FACTORY].map((s) => ClaudeText.soundListHeader(s))).toEqual([
@@ -579,5 +579,91 @@ describe('FeatureTextTest', () => {
         null,
       ),
     ]).toEqual(['Imported to A \u00B7 04. UNDO takes it back.', 'Imported to scene S03. UNDO takes it back.', 'Imported to A \u00B7 04, B \u00B7 02. UNDO takes it back.'])
+  })
+
+  it('claude fx and pad shaping text', () => {
+    expect([ClaudeText.FX, ClaudeText.APPLY_FX, ClaudeText.PAD_SHAPING]).toEqual(['FX', 'Apply FX', 'Pad shaping'])
+    expect([ClaudeText.applyFxName(true), ClaudeText.applyFxName(false)]).toEqual(["Apply the card's FX to this project", "Leave this project's FX as they are"])
+    const off = FxSettings.DEFAULT
+    const on = FxSettings.of({
+      type: FxType.DELAY,
+      x: 0.7,
+      y: 0.45,
+      sends: [0.2, 0, 0.355, 0],
+      comp: comp({ on: true, x: 0.4, y: 0.6 }),
+      sidechain: sidechain({ on: true, group: 0, pad: 9, dests: 0b0110, x: 0.25, y: 0.7 }),
+    })
+    expect([ClaudeText.fxEffectText(off), ClaudeText.fxSendsText(off), ClaudeText.fxCompText(off), ClaudeText.fxSidechainText(off)]).toEqual([
+      'OFF',
+      'A 0 \u00B7 B 0 \u00B7 C 0 \u00B7 D 0',
+      'OFF',
+      'OFF',
+    ])
+    expect([ClaudeText.fxEffectText(on), ClaudeText.fxSendsText(on), ClaudeText.fxCompText(on), ClaudeText.fxSidechainText(on)]).toEqual([
+      'DELAY \u00B7 LENGTH 1/4 \u00B7 43%',
+      'A 20% \u00B7 B 0 \u00B7 C 36% \u00B7 D 0',
+      'ON \u00B7 DRIVE 2.1x \u00B7 10/200',
+      `A7 ducks B C \u00B7 ${MirrorText.sidechainLength(0.25)} \u00B7 ${MirrorText.sidechainShape(0.7)}`,
+    ])
+    expect(ClaudeText.fxEffectText(FxSettings.of({ type: FxType.DISTORTION, x: 0.55, y: 0.4 }))).toBe('DISTORTION \u00B7 DRIVE 13x \u00B7 LP 20')
+    // Rows are the kinds the card has a line for, in the order effect, sends, comp, duck; an unchanged one says so.
+    const all = cardFx({ type: FxType.DELAY, sends: new Map([[0, 0.2]]), comp: comp({ on: true }), sidechain: sidechain({ on: true }) })
+    const rows = ClaudeText.fxRows(off, on, all)
+    expect(rows.map((r) => r.label)).toEqual(['Effect', 'Sends', 'Comp', 'Duck'])
+    expect(rows.map((r) => ClaudeText.isSame(r))).toEqual([false, false, false, false])
+    expect(rows[0]).toEqual({ label: 'Effect', old: 'OFF', new: 'DELAY \u00B7 LENGTH 1/4 \u00B7 43%' })
+    expect(ClaudeText.fxRows(off, on, cardFx({ type: FxType.DELAY, comp: comp({ on: false }) })).map((r) => r.label)).toEqual(['Effect', 'Comp'])
+    expect(ClaudeText.fxRows(on, on, all).map((r) => ClaudeText.isSame(r))).toEqual([true, true, true, true])
+    expect(ClaudeText.fxRows(off, on, cardFx())).toEqual([])
+    expect(ClaudeText.fxSidechainText({ ...on, sidechain: sidechain({ on: true, dests: 0 }) })).toBe('OFF')
+    expect(ClaudeText.ALREADY_SET).toBe('Already set')
+    expect(ClaudeText.changeName({ label: 'Effect', old: 'OFF', new: 'REVERB' })).toBe('Effect: OFF becomes REVERB')
+    expect(ClaudeText.changeName({ label: 'Comp', old: 'OFF', new: 'OFF' })).toBe('Comp: OFF, already set')
+
+    const pad = physicalPad(0, 9)
+    const d = PadSettings.DEFAULT
+    expect(ClaudeText.padChange(pad, d, { ...d, start: 5, muteGroup: true, midiChannel: 2 })).toBeNull()
+    expect(ClaudeText.padChange(pad, d, { ...d, pitch: -7, level: 90 })).toEqual({ label: 'A7', old: 'Pitch 0 \u00B7 Level 100', new: 'Pitch -7 \u00B7 Level 90' })
+    expect(ClaudeText.padChange(physicalPad(0, 2), d, { ...d, pan: -4, attack: 3, release: 20, mode: 'key' })).toEqual({
+      label: 'AE',
+      old: 'Pan C \u00B7 Attack 0 \u00B7 Release 255 \u00B7 Mode Oneshot',
+      new: 'Pan L4 \u00B7 Attack 3 \u00B7 Release 20 \u00B7 Mode Key',
+    })
+    expect(ClaudeText.padParts(d, { ...d, pitch: 2, release: 40, start: 9 })).toEqual([
+      { name: 'Pitch', old: '0', new: MirrorText.pitchLabel(2) },
+      { name: 'Release', old: '255', new: '40' },
+    ])
+    expect([ClaudeText.importUndone(2, 1, 0, false), ClaudeText.importUndone(0, 0, 3, false), ClaudeText.importUndone(1, 0, 2, true), ClaudeText.importUndone(0, 0, 0, true), ClaudeText.importUndone(0, 0, 0, false)]).toEqual([
+      'Old sounds back on 2 pads, 1 had none before.',
+      'Old settings back on 3 pads.',
+      'Old sounds back on 1 pad, old settings back on 2 pads, old FX back.',
+      'Old FX back.',
+      'Import taken back.',
+    ])
+    expect(ClaudeText.importUndone(2, 1, 0, false)).toBe(ClaudeText.soundsRestored(2, 1))
+    expect(ClaudeText.shapingFailed('busy', 2, true)).toBe(
+      "The pad's settings couldn't be changed: busy. The patterns stay imported, the FX applied and 2 pads shaped. UNDO takes it back.",
+    )
+    expect([
+      ClaudeText.imported([[0, 4]], null, 0, 0, true),
+      ClaudeText.imported([[0, 4]], null, 0, 0, false, 1),
+      ClaudeText.imported([[0, 4]], null, 2, 0, true, 3),
+    ]).toEqual([
+      'Imported to A \u00B7 04. FX applied. UNDO takes it back.',
+      'Imported to A \u00B7 04. 1 pad setting applied. UNDO takes it back.',
+      'Imported to A \u00B7 04 and 2 sounds. FX and 3 pad settings applied. UNDO takes it back.',
+    ])
+    expect([
+      ClaudeText.imported([[0, 4]], null, 0, 0, true, 3, 1),
+      ClaudeText.imported([[0, 4]], null, 0, 0, false, 0, 2),
+    ]).toEqual([
+      'Imported to A \u00B7 04. FX and 3 pad settings applied, 1 pad setting skipped. UNDO takes it back.',
+      'Imported to A \u00B7 04. 2 pad settings skipped. UNDO takes it back.',
+    ])
+    expect([
+      ClaudeText.padRowName(null, physicalPad(0, 11), true),
+      ClaudeText.padRowName(null, physicalPad(0, 11), false),
+      ClaudeText.padRowName({ label: 'A9', old: 'Pitch 0', new: 'Pitch 2' }, physicalPad(0, 11), false),
+    ]).toEqual(['A9: no sound on this pad', 'A9: already set', 'A9: Pitch 0 becomes Pitch 2'])
   })
 })

@@ -335,6 +335,14 @@ class Errors(unittest.TestCase):
         "bad-sound": "ARC BEAT 1\n[A]\nsound\n",
         "bad-slot": "ARC BEAT 1\n[A]\nsound A7 1000 Kick\n",
         "sound-outside-section": "ARC BEAT 1\nsound A7 12\n" + kick(),
+        "bad-fx": "ARC BEAT 1\nfx flanger\n" + kick(),
+        "bad-fx-value": "ARC BEAT 1\nfx delay 101\n" + kick(),
+        "bad-send": "ARC BEAT 1\nsend E 10\n" + kick(),
+        "bad-comp": "ARC BEAT 1\ncomp 40\n" + kick(),
+        "bad-sidechain": "ARC BEAT 1\nsidechain A7\n" + kick(),
+        "late-fx": "ARC BEAT 1\n" + kick() + "fx delay\n",
+        "pad-outside-section": "ARC BEAT 1\npad A7 level 5\n" + kick(),
+        "bad-pad-line": "ARC BEAT 1\n" + kick() + "pad A7 level 101\n",
     }
 
     def test_every_case_gives_its_error(self):
@@ -1278,6 +1286,244 @@ def cards_in(name):
     return bc.split_cards(read(os.path.join(REFS, name)))
 
 
+class Effects(unittest.TestCase):
+    """The effect lines of the header, read the way BeatCards.read does (same errors and warnings, same line numbers)."""
+
+    def fx(self, *lines):
+        return bc.parse_card("ARC BEAT 1\n" + "".join(l + "\n" for l in lines) + kick())
+
+    def test_a_card_without_effect_lines_has_no_fx(self):
+        self.assertIsNone(bc.parse_card(spec_card()).fx)
+
+    def test_all_four_kinds_read(self):
+        card = self.fx("fx delay 40 55", "send A 20 C 35.5", "comp 40 60", "sidechain A7 BC 25 70")
+        self.assertEqual(card.problems, [])
+        fx = card.fx
+        self.assertEqual((fx.effect, fx.x, fx.y), ("delay", 40.0, 55.0))
+        self.assertEqual(fx.sends, {0: 20.0, 2: 35.5})
+        self.assertEqual(fx.comp, bc.CardComp(True, 40.0, 60.0))
+        self.assertEqual(fx.sidechain, bc.CardSidechain(True, 0, 9, [1, 2], 25.0, 70.0))
+        self.assertEqual(fx.kinds(), ["fx", "send", "comp", "sidechain"])
+        self.assertEqual(fx.line, 2)
+
+    def test_knobs_default_the_words_ignore_case_and_each_kind_stands_alone(self):
+        fx = self.fx("FX Reverb", "sidechain B. A").fx
+        self.assertEqual((fx.effect, fx.x, fx.y), ("reverb", 50.0, 50.0))
+        self.assertIsNone(fx.sends)
+        self.assertIsNone(fx.comp)
+        # Length and shape default to 30 and 50; the pad's own group may be in the list.
+        self.assertEqual(fx.sidechain, bc.CardSidechain(True, 1, 0, [0], 30.0, 50.0))
+        self.assertEqual(self.fx("comp OFF").fx.comp, bc.CardComp(False))
+        self.assertEqual(self.fx("sidechain off").fx.sidechain, bc.CardSidechain(False))
+        self.assertEqual(self.fx("send B 100").fx.sends, {1: 100.0})
+        self.assertEqual(self.fx("fx none").fx.effect, "none")
+        self.assertEqual(self.fx("fx filter 7.5 0").fx.x, 7.5)
+        self.assertEqual(self.fx("fx filter 7.5 0").fx.y, 0.0)
+
+    def test_send_lines_add_up_and_a_group_given_twice_keeps_the_later_value(self):
+        card = self.fx("send A 10 B 20", "send B 30 D 40 A 50")
+        self.assertEqual(card.problems, [])
+        self.assertEqual(card.fx.sends, {0: 50.0, 1: 30.0, 3: 40.0})
+
+    def test_a_second_fx_comp_or_sidechain_line_replaces_the_first_with_a_warning(self):
+        card = self.fx("fx delay 10 10", "fx reverb 20 30", "comp 10 10", "comp off", "sidechain A7 B", "sidechain A9 C")
+        self.assertEqual([(p.line, p.code) for p in card.problems], [(3, "duplicate-fx"), (5, "duplicate-comp"), (7, "duplicate-sidechain")])
+        self.assertTrue(card.ok)
+        fx = card.fx
+        self.assertEqual((fx.effect, fx.x, fx.y), ("reverb", 20.0, 30.0))
+        self.assertEqual(fx.comp, bc.CardComp(False))
+        self.assertEqual(fx.sidechain, bc.CardSidechain(True, 0, 11, [2], 30.0, 50.0))
+
+    def test_mistakes_are_errors_with_their_line(self):
+        cases = [
+            ("fx", "bad-fx"),
+            ("fx flanger", "bad-fx"),
+            ("fx delay 101", "bad-fx-value"),
+            ("fx delay 50 -1", "bad-fx-value"),
+            ("fx delay 5.55", "bad-fx-value"),
+            ("send", "bad-send"),
+            ("send E 10", "bad-send"),
+            ("send a 10", "bad-send"),
+            ("send A 10 B", "bad-send"),
+            ("send A 101", "bad-send"),
+            ("comp", "bad-comp"),
+            ("comp on", "bad-comp"),
+            ("comp 40", "bad-comp"),
+            ("comp 40 200", "bad-comp"),
+            ("sidechain", "bad-sidechain"),
+            ("sidechain A17 B", "bad-pad"),
+            ("sidechain A7", "bad-sidechain"),
+            ("sidechain A7 25", "bad-sidechain"),
+            ("sidechain A7 bc", "bad-sidechain"),
+            ("sidechain A7 B 120", "bad-sidechain"),
+            ("sidechain A7 B 20 x", "bad-sidechain"),
+        ]
+        for line, code in cases:
+            card = self.fx(line)
+            self.assertFalse(card.ok, line)
+            self.assertEqual([(p.line, p.code) for p in card.errors], [(2, code)], line)
+
+    def test_a_line_with_a_fault_sets_nothing(self):
+        self.assertIsNone(self.fx("fx flanger").fx)
+        self.assertIsNone(self.fx("send A 10 B 200").fx)
+        self.assertIsNone(self.fx("comp 40 200").fx)
+
+    def test_left_over_words_are_ignored_with_a_warning(self):
+        for line in ("fx delay 10 20 oops", "comp off x", "comp 40 60 x", "sidechain A7 B 10 20 z", "sidechain off x"):
+            card = self.fx(line)
+            self.assertTrue(card.ok, line)
+            self.assertEqual([(p.line, p.code) for p in card.problems], [(2, "fx-extra")], line)
+        self.assertEqual(self.fx("fx delay 10 20 oops").fx.effect, "delay")
+
+    def test_effect_lines_after_the_first_section_are_errors(self):
+        card = bc.parse_card("ARC BEAT 1\n" + kick() + "fx delay\nsend A 10\n[B]\nB7 | X... .... .... .... |\ncomp off\nsidechain off\n")
+        self.assertEqual([(p.line, p.code) for p in card.errors], [(4, "late-fx"), (5, "late-fx"), (8, "late-fx"), (9, "late-fx")])
+        # Inside the notes list too.
+        card = bc.parse_card("ARC BEAT 1\n" + kick() + "notes\nFX delay\n")
+        self.assertEqual([(p.line, p.code) for p in card.errors], [(5, "late-fx")])
+
+    def test_summary_names_the_kinds(self):
+        card = self.fx("fx delay", "comp off")
+        self.assertIn("fx (fx, comp)", bc.summary_line(card))
+        self.assertNotIn("fx (", bc.summary_line(bc.parse_card(spec_card())))
+
+
+class PadLines(unittest.TestCase):
+    """The pad lines of a section, read the way BeatCards.read does."""
+
+    def pads(self, *lines):
+        return bc.parse_card("ARC BEAT 1\n[A]\nA7 | X... .... .... .... |\n" + "".join(l + "\n" for l in lines))
+
+    def test_the_settings_a_line_gives(self):
+        card = self.pads("pad A7 pitch -7.5 level 90 pan -4 attack 3 release 20 mode Key", "pad A. level 0", "pad AE mode legato", "pad A1 pitch +3 pan 16")
+        self.assertEqual(card.problems, [])
+        pads = card.patterns[0].pads
+        self.assertEqual(pads[9].given(), {"pitch": -7.5, "level": 90, "pan": -4, "attack": 3, "release": 20, "mode": "key"})
+        self.assertEqual(pads[0].given(), {"level": 0})
+        self.assertEqual(pads[2].given(), {"mode": "legato"})
+        self.assertEqual(pads[3].given(), {"pitch": 3.0, "pan": 16})
+        self.assertEqual(pads[9].line, 4)
+
+    def test_the_ends_of_the_ranges_and_a_pad_line_after_the_notes_list(self):
+        card = bc.parse_card("ARC BEAT 1\n[B]\nnotes\nB7 at 1.1.1\npad B7 pitch -12 level 100 pan 0 attack 255 release 0\npad B8 pitch 12.00 pan -16\n")
+        self.assertEqual(card.problems, [])
+        self.assertEqual(card.patterns[0].pads[9].given(), {"pitch": -12.0, "level": 100, "pan": 0, "attack": 255, "release": 0})
+        self.assertEqual(card.patterns[0].pads[10].given(), {"pitch": 12.0, "pan": -16})
+
+    def test_a_second_line_merges_the_later_settings_winning(self):
+        card = self.pads("pad A7 pitch 1 level 50", "pad A7 level 60 pan 2", "pad A8 level 1 level 2")
+        self.assertEqual([(p.line, p.code) for p in card.problems], [(5, "duplicate-pad-line")])
+        self.assertEqual(card.patterns[0].pads[9].given(), {"pitch": 1.0, "level": 60, "pan": 2})
+        self.assertEqual(card.patterns[0].pads[10].given(), {"level": 2})
+
+    def test_a_sections_without_pad_lines_has_none(self):
+        self.assertEqual(self.pads().patterns[0].pads, {})
+
+    def test_mistakes_are_errors_with_their_line(self):
+        cases = [
+            ("pad", "bad-pad-line"),
+            ("pad X7 level 5", "bad-pad"),
+            ("pad B7 level 5", "wrong-group"),
+            ("pad A7", "bad-pad-line"),
+            ("pad A7 pitch", "bad-pad-line"),
+            ("pad A7 pitch 12.5", "bad-pad-line"),
+            ("pad A7 pitch 1.234", "bad-pad-line"),
+            ("pad A7 level 101", "bad-pad-line"),
+            ("pad A7 level 50.5", "bad-pad-line"),
+            ("pad A7 pan 17", "bad-pad-line"),
+            ("pad A7 attack 256", "bad-pad-line"),
+            ("pad A7 release -1", "bad-pad-line"),
+            ("pad A7 mode loop", "bad-pad-line"),
+        ]
+        for line, code in cases:
+            card = self.pads(line)
+            self.assertFalse(card.ok, line)
+            self.assertEqual([(p.line, p.code) for p in card.errors], [(4, code)], line)
+
+    def test_an_unknown_setting_is_a_warning_and_all_unknown_is_an_error(self):
+        card = self.pads("pad A7 level 5 colour red")
+        self.assertTrue(card.ok)
+        self.assertEqual([(p.line, p.code) for p in card.problems], [(4, "unknown-pad-setting")])
+        self.assertEqual(card.patterns[0].pads[9].given(), {"level": 5})
+        card = self.pads("pad A7 colour red")
+        self.assertEqual([(p.line, p.level, p.code) for p in card.problems], [(4, "warning", "unknown-pad-setting"), (4, "error", "bad-pad-line")])
+
+    def test_the_summary_counts_pad_lines(self):
+        self.assertIn("2 pad lines", bc.summary_line(self.pads("pad A7 level 5", "pad A8 pan 1")))
+
+
+class FxAndPadsReport(unittest.TestCase):
+    CARD = (
+        "ARC BEAT 1\nname Fx\nfx delay 40 55\nsend A 20 C 35.5\ncomp 40 60\nsidechain A7 BC 25 70\n"
+        "[A]\nsound A7 12 Kick\nA7 kick | X... .... .... .... |\nA4 | .... x... .... .... |\n"
+        "pad A7 pitch -7.5 level 90 pan -4 mode key\npad A4 attack 3\n"
+    )
+
+    def setUp(self):
+        self.card = bc.parse_card(self.CARD)
+        self.assertEqual(self.card.problems, [])
+        self.report = bc.analyse_card(self.card)
+
+    def test_analyse_reports_the_effects_readably(self):
+        fx = self.report["fx"]
+        self.assertEqual(fx["effect"]["type"], "delay")
+        self.assertEqual((fx["effect"]["x_name"], fx["effect"]["x_reads"]), ("length", "1/16D"))
+        self.assertEqual((fx["effect"]["y_name"], fx["effect"]["y_reads"]), ("feedback", "52%"))
+        self.assertEqual(fx["sends"], {"A": 20.0, "B": 0.0, "C": 35.5, "D": 0.0})
+        self.assertEqual(fx["comp"], {"on": True, "drive": 40.0, "speed": 60.0, "drive_reads": "2.1x", "speed_reads": "10/200 ms"})
+        self.assertEqual(fx["sidechain"], {"on": True, "pad": "A7", "ducks": ["B", "C"], "length": 25.0, "shape": 70.0})
+
+    def test_analyse_without_effects_has_no_fx(self):
+        self.assertIsNone(bc.analyse_card(bc.parse_card(spec_card()))["fx"])
+        self.assertEqual(bc.analyse_card(bc.parse_card(spec_card()))["patterns"][0]["pad_shaping"], {})
+
+    def test_analyse_reports_the_pad_shaping_per_pad(self):
+        shaping = self.report["patterns"][0]["pad_shaping"]
+        self.assertEqual(list(shaping), ["A7", "A4"])
+        self.assertEqual(shaping["A7"]["name"], "kick")
+        self.assertEqual(shaping["A7"]["pitch"], -7.5)
+        self.assertEqual(shaping["A7"]["reads"], "pitch -7.5 st, level 90, pan L4, mode key")
+        self.assertEqual(shaping["A4"]["reads"], "attack 3")
+
+    def test_the_text_report_and_the_grid_show_them(self):
+        text = bc.render_analysis(self.report)
+        for line in (
+            "fx delay 40 55: length 1/16D, feedback 52%",
+            "send: A 20%, B 0%, C 35.5%, D 0%",
+            "comp 40 60: drive 2.1x, speed 10/200 ms",
+            "sidechain: A7 ducks B C (length 25%, shape 70%)",
+            "pad A7 kick: pitch -7.5 st, level 90, pan L4, mode key",
+            "pad A4: attack 3",
+        ):
+            self.assertIn(line, text)
+        grid = bc.render_grid(self.card)
+        for line in ("fx delay 40 55: length 1/16D, feedback 52%", "sidechain: A7 ducks B C (length 25%, shape 70%)", "pad A7: pitch -7.5 st, level 90, pan L4, mode key"):
+            self.assertIn(line, grid)
+
+    def test_readouts_follow_the_fx_sheet(self):
+        self.assertEqual(bc.fx_readout("delay", 100, 100), ("1/2", "95%"))
+        self.assertEqual(bc.fx_readout("reverb", 64, 50), ("64%", "flat"))
+        self.assertEqual(bc.fx_readout("reverb", 64, 20), ("64%", "dark 60"))
+        self.assertEqual(bc.fx_readout("distortion", 50, 90), ("11x", "high-pass 80"))
+        self.assertEqual(bc.fx_readout("distortion", 100, 50), ("40x", "open"))
+        self.assertEqual(bc.fx_readout("chorus", 0, 100), ("0.05 Hz", "70%"))
+        self.assertEqual(bc.fx_readout("filter", 50, 0), ("open", "Q 0.5"))
+        self.assertEqual(bc.fx_readout("filter", 0, 100), ("low-pass 60", "Q 8.0"))
+        self.assertEqual(bc.fx_readout("filter", 100, 50), ("high-pass 8.0k", "Q 4.2"))
+        self.assertEqual(bc.fx_readout("compressor", 100, 99), ("8.0x", "30/600 ms"))
+        self.assertEqual(bc.fx_readout("compressor", 0, 0), ("1.0x", "0.5/40 ms"))
+
+    def test_the_cli_shows_them(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "fx.txt")
+            with open(path, "w") as f:
+                f.write(self.CARD)
+            for command, needle in (("analyse", "fx delay 40 55"), ("grid", "pad A7: pitch -7.5 st"), ("check", "fx (fx, send, comp, sidechain)")):
+                out = subprocess.run([sys.executable, "-B", os.path.join(HERE, "beatcard.py"), command, path], capture_output=True, text=True)
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertIn(needle, out.stdout)
+
+
 class SkillFiles(unittest.TestCase):
     def test_every_card_in_the_references_is_valid_and_has_no_warnings(self):
         total = 0
@@ -1380,6 +1626,40 @@ class SkillFiles(unittest.TestCase):
         for mod in re.findall(r"^(?:import|from) ([a-z_]+)", source, re.M):
             if stdlib is not None:
                 self.assertIn(mod, stdlib | {"__future__"}, mod)
+
+    def test_punch_in_tips_name_the_twelve_punch_ins_as_arc_does(self):
+        text = read(os.path.join(SKILL, "SKILL.md"))
+        self.assertIn("## PUNCH-IN TIPS", text)
+        section = text.split("## PUNCH-IN TIPS", 1)[1].split("\n## ", 1)[0]
+        rows = re.findall(r"^\| (\S+) \| ([^|]+?) \|", section, re.M)
+        rows = [(p, n) for p, n in rows if p not in ("Pad", "---")]
+        self.assertEqual(len(rows), 12)
+        # The slots run from the "." pad to the 9 pad; the table lists them as the keypad prints them.
+        pads = [".", "0", "ENTER", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+        self.assertEqual(sorted(p.replace("\u2022", ".") for p, _ in rows), sorted(pads))
+        # Arc's own names (MirrorText.PUNCH_NAMES) when the repo is around, slot by slot.
+        source = os.path.join(SKILL, "..", "..", "core", "src", "main", "kotlin", "dev", "arc", "ep133", "text", "MirrorText.kt")
+        if os.path.exists(source):
+            block = re.search(r"PUNCH_NAMES = listOf\((.*?)\n    \)", read(source), re.S).group(1)
+            names = re.findall(r'"([^"]+)"', block)
+            self.assertEqual(len(names), 12)
+            by_pad = {p.replace("\u2022", "."): n for p, n in rows}
+            for pad, name in zip(pads, names):
+                self.assertEqual(by_pad[pad], name, pad)
+        self.assertIn("`FX-6`", section)
+        self.assertIn("### FX-6 ", read(os.path.join(REFS, "ep133-guide.md")))
+        self.assertIn("in your reply only", section)
+        self.assertIn("never write them as lines in a card", section.lower())
+
+    def test_the_pad_ranges_in_the_spec_are_the_pad_sheets(self):
+        spec = read(os.path.join(REFS, "beat-card.md"))
+        self.assertIn("-12 to 12", spec)
+        self.assertEqual((bc.PITCH_MAX, bc.LEVEL_MAX, bc.PAN_MAX, bc.ENV_MAX), (12, 100, 16, 255))
+        source = os.path.join(SKILL, "..", "..", "core", "src", "main", "kotlin", "dev", "arc", "ep133", "features", "PadSettings.kt")
+        if os.path.exists(source):
+            kotlin = read(source)
+            for name, value in (("PITCH_MAX", "12.0"), ("LEVEL_MAX", "100"), ("PAN_MAX", "16"), ("ENV_MAX", "255")):
+                self.assertRegex(kotlin, r"const val %s = %s\b" % (name, re.escape(value)))
 
     def test_the_spec_example_is_the_first_card_in_the_spec(self):
         self.assertTrue(bc.parse_card(spec_card()).ok)

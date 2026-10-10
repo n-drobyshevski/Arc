@@ -2,11 +2,18 @@ package dev.arc.ep133.controller
 
 import dev.arc.ep133.features.BeatCard
 import dev.arc.ep133.features.BeatCards
+import dev.arc.ep133.features.CardFx
+import dev.arc.ep133.features.CardPad
 import dev.arc.ep133.features.CardSection
 import dev.arc.ep133.features.CardSound
+import dev.arc.ep133.features.Comp
+import dev.arc.ep133.features.FxSettings
+import dev.arc.ep133.features.FxType
 import dev.arc.ep133.features.OfflinePad
 import dev.arc.ep133.features.OfflinePads
+import dev.arc.ep133.features.PadSettings
 import dev.arc.ep133.features.PadTarget
+import dev.arc.ep133.features.PlayMode
 import dev.arc.ep133.features.SoundSource
 import dev.arc.ep133.features.SoundStatus
 import dev.arc.ep133.protocol.SoundEntry
@@ -379,5 +386,80 @@ class BeatPlanTest {
         val edited = recorder.editSeq(applied.seq, with(applied.seq, 1, 1, pattern(hit(0))))
         assertFalse(isBefore(recorder.undo(edited)!!, seq))
         assertTrue(isBefore(recorder.undo(applied.seq)!!, seq))
+    }
+
+    // ---- FX and pad shaping ----
+
+    @Test
+    fun `a share carries the project's FX and each used pad's settings, and nothing when they are the defaults`() {
+        val seq = with(ProjectSeq.DEFAULT, 0, 1, pattern(hit(0), hit(96, 11)))
+        val plain = beatShare(seq, 0, 120.0, 50, nameOf, fx = FxSettings.DEFAULT, pads = { PadSettings.DEFAULT })!!.text
+        assertFalse(plain.contains("\nfx ") || plain.contains("\npad "))
+        val fx = FxSettings(FxType.DISTORTION, 0.55f, 0.5f, listOf(0.45f, 0.3f, 0f, 0f), Comp(true, 0.6f, 0.15f))
+        val shaped = mapOf(kick to PadSettings.DEFAULT.copy(pitch = -2.0, level = 80), PhysicalPad(0, 11) to PadSettings.DEFAULT.withMode(PlayMode.KEY).copy(release = 20))
+        val text = beatShare(seq, 0, 120.0, 50, nameOf, fx = fx, pads = { shaped[it] })!!.text
+        val card = BeatCards.read(text).card!!
+        assertEquals(FxType.DISTORTION, card.fx!!.type)
+        assertEquals(mapOf(0 to 0.45f, 1 to 0.3f), card.fx!!.sends)
+        assertEquals(true, card.fx!!.comp!!.on)
+        val pads = card.sections.single().pads
+        assertEquals(CardPad(pitch = -2.0, level = 80), pads[9])
+        assertEquals(CardPad(release = 20, mode = PlayMode.KEY), pads[11])
+        // The share's FX come before the first section, as the spec has them.
+        assertTrue(text.indexOf("\nfx distortion") in 1 until text.indexOf("[A"))
+    }
+
+    @Test
+    fun `the FX block has a row for each kind the card sets, and says so when the project has it already`() {
+        val now = FxSettings(FxType.REVERB, 0.5f, 0.5f, listOf(0.5f, 0f, 0f, 0f))
+        val c = card(section(0, pattern(hit(0)))).copy(
+            fx = CardFx(type = FxType.DISTORTION, x = 0.55f, y = 0.4f, sends = mapOf(0 to 0.5f), comp = Comp(false)),
+        )
+        val ui = beatFxUi(c, now)!!
+        assertEquals(listOf("Effect", "Sends", "Comp"), ui.rows.map { it.label })
+        // The sends A 50% say the same; the comp is off already: only the effect changes.
+        assertEquals(listOf(false, true, true), ui.rows.map { it.same })
+        assertTrue(ui.changes)
+        assertEquals("REVERB \u00B7 SIZE 50% \u00B7 FLAT", ui.rows[0].old)
+        assertEquals("DISTORTION \u00B7 DRIVE 13x \u00B7 LP 20", ui.rows[0].new)
+        // Everything the card says is set already: the block stays, with nothing to apply.
+        val same = beatFxUi(c.copy(fx = CardFx(sends = mapOf(0 to 0.5f))), now)!!
+        assertFalse(same.changes)
+        // No FX line, no block; the sheet carries it.
+        assertNull(beatFxUi(card(section(0, pattern(hit(0)))), now))
+        assertEquals(3, beatImportUi(read(c), ProjectSeq.DEFAULT, 120.0, nameOf, fx = { beatFxUi(it, now) }).fx!!.rows.size)
+        assertNull(beatImportUi(read(c), ProjectSeq.DEFAULT, 120.0, nameOf).fx)
+    }
+
+    @Test
+    fun `the pad shaping rows are the card's pad lines in keypad order, starting from the defaults when a new sound goes on`() {
+        val shaped = PadSettings.DEFAULT.copy(pitch = 2.0)
+        val snare = PhysicalPad(0, 11)
+        val c = card(
+            CardSection(0, null, pattern(hit(0)), pads = mapOf(11 to CardPad(pitch = 2.0, release = 40, mode = PlayMode.KEY), 9 to CardPad(pitch = 2.0), 0 to CardPad(level = 90))),
+        )
+        val ui = padShapingUi(c, { if (it == kick) shaped else null }, { it != PhysicalPad(0, 0) }, nameOf, offline = false)!!
+        // Keypad order: 7 (offset 9), 9 (offset 11), then . (offset 0).
+        assertEquals(listOf(kick, snare, PhysicalPad(0, 0)), ui.rows.map { it.pad })
+        assertEquals(listOf("kick", "snare", null), ui.rows.map { it.name })
+        val (k, sn, none) = ui.rows
+        // A7 has pitch +2 already; A9 changes pitch, release and mode.
+        assertTrue(k.parts(false).isEmpty())
+        assertFalse(k.changes(false))
+        assertEquals(listOf("Pitch", "Release", "Mode"), sn.parts(false).map { it.name })
+        assertTrue(sn.changes(false))
+        // A new sound resets the pad: its row starts from the defaults, so A7's pitch is a change then.
+        assertEquals(listOf("Pitch"), k.parts(true).map { it.name })
+        assertTrue(k.changes(true))
+        // A pad with no sound can't be shaped, unless a sound is going onto it.
+        assertFalse(none.changes(false))
+        assertTrue(none.changes(true))
+        assertEquals(PadSettings.DEFAULT.copy(level = 90), none.after(true))
+        assertNull(padShapingUi(card(section(0, pattern(hit(0)))), { null }, { true }, nameOf, offline = true))
+        // IMPORT shapes the ticked pads, in section and keypad order.
+        assertEquals(listOf(snare to CardPad(pitch = 2.0, release = 40, mode = PlayMode.KEY)), padShapes(c, setOf(snare)))
+        assertEquals(listOf(9, 11), padShapes(c, setOf(snare, kick)).map { it.first.offset })
+        assertEquals(emptyList<Pair<PhysicalPad, CardPad>>(), padShapes(c, emptySet()))
+        assertEquals("Imported to A \u00B7 02. FX applied. UNDO takes it back.", beatImported(BeatApplied(ProjectSeq.DEFAULT, listOf(0 to 2), null, null), fx = true))
     }
 }

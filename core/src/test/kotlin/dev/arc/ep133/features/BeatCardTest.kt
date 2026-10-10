@@ -968,4 +968,313 @@ class BeatCardTest {
         assertEquals(0, plan.seq.scene)
         assertEquals(1, plan.seq.pattern(1, 2).notes.size)
     }
+
+    // ---- effects and pad shaping ----
+
+    private fun pad(group: Int, offset: Int) = PhysicalPad(group, offset)
+
+    private fun fxCard(vararg lines: String, tail: String = bar) = read("ARC BEAT 1", *lines, "[A]", tail)
+
+    @Test
+    fun `a card without effect lines has no fx, and an all effect card reads`() {
+        assertNull(BeatCards.read(example).card!!.fx)
+        val r = fxCard("fx delay 40 55", "send A 20 C 35.5", "comp 40 60", "sidechain A7 BC 25 70")
+        assertEquals(emptyList<String>(), problems(r))
+        val fx = r.card!!.fx!!
+        assertEquals(FxType.DELAY, fx.type)
+        assertEquals(0.4f, fx.x)
+        assertEquals(0.55f, fx.y)
+        assertEquals(mapOf(0 to 0.2f, 2 to 0.355f), fx.sends)
+        assertEquals(Comp(true, 0.4f, 0.6f), fx.comp)
+        assertEquals(Sidechain(true, 0, 9, 0b0110, 0.25f, 0.7f), fx.sidechain)
+    }
+
+    @Test
+    fun `effect lines default their knobs, any case, and each kind stands alone`() {
+        val fx = fxCard("FX Reverb", "sidechain B. A").card!!.fx!!
+        assertEquals(FxType.REVERB, fx.type)
+        assertEquals(0.5f, fx.x)
+        assertEquals(0.5f, fx.y)
+        assertNull(fx.sends)
+        assertNull(fx.comp)
+        // Length and shape default to 30 and 50; the pad's own group may be in the list.
+        assertEquals(Sidechain(true, 1, 0, 0b0001, 0.3f, 0.5f), fx.sidechain)
+        assertEquals(CardFx(comp = Comp(false)), fxCard("comp OFF").card!!.fx)
+        assertEquals(CardFx(sidechain = Sidechain(on = false)), fxCard("sidechain off").card!!.fx)
+        assertEquals(CardFx(sends = mapOf(1 to 1f)), fxCard("send B 100").card!!.fx)
+        assertEquals(CardFx(FxType.NONE, 0.5f, 0.5f), fxCard("fx none").card!!.fx)
+        // Whole or one decimal, as the knob's percent.
+        assertEquals(0.075f, fxCard("fx filter 7.5 0").card!!.fx!!.x)
+        assertEquals(0f, fxCard("fx filter 7.5 0").card!!.fx!!.y)
+    }
+
+    @Test
+    fun `send lines add up, a group given twice keeps the later value`() {
+        val r = fxCard("send A 10 B 20", "send B 30 D 40 A 50")
+        assertEquals(emptyList<String>(), problems(r))
+        assertEquals(mapOf(0 to 0.5f, 1 to 0.3f, 3 to 0.4f), r.card!!.fx!!.sends)
+    }
+
+    @Test
+    fun `a second fx, comp or sidechain line replaces the first, with a warning`() {
+        val r = fxCard("fx delay 10 10", "fx reverb 20 30", "comp 10 10", "comp off", "sidechain A7 B", "sidechain A9 C")
+        assertEquals(
+            listOf("3 warning: Two fx lines, kept the later.", "5 warning: Two comp lines, kept the later.", "7 warning: Two sidechain lines, kept the later."),
+            problems(r),
+        )
+        val fx = r.card!!.fx!!
+        assertEquals(CardFx(FxType.REVERB, 0.2f, 0.3f, null, Comp(false), Sidechain(true, 0, 11, 0b0100, 0.3f, 0.5f)), fx)
+    }
+
+    @Test
+    fun `effect line mistakes are errors with their line, extra words a warning`() {
+        fun one(line: String) = problems(fxCard(line)).single()
+        val types = "none, delay, reverb, distortion, chorus, filter or compressor"
+        assertEquals("2 error: fx needs an effect: $types.", one("fx"))
+        assertEquals("2 error: 'flanger' isn't an effect. Use $types.", one("fx flanger"))
+        assertEquals("2 error: fx x must be 0 to 100, whole or with one decimal.", one("fx delay 101"))
+        assertEquals("2 error: fx y must be 0 to 100, whole or with one decimal.", one("fx delay 50 -1"))
+        assertEquals("2 error: fx x must be 0 to 100, whole or with one decimal.", one("fx delay 5.55"))
+        assertEquals("2 error: send needs a group and a value, as in send A 40 B 20.", one("send"))
+        assertEquals("2 error: 'E' isn't a group. Use A to D.", one("send E 10"))
+        assertEquals("2 error: 'a' isn't a group. Use A to D.", one("send a 10"))
+        assertEquals("2 error: send B needs a value, 0 to 100, whole or with one decimal.", one("send A 10 B"))
+        assertEquals("2 error: send A must be 0 to 100, whole or with one decimal.", one("send A 101"))
+        assertEquals("2 error: comp needs off, or a drive and a speed, as in comp 40 60.", one("comp"))
+        assertEquals("2 error: comp drive must be 0 to 100, whole or with one decimal, or use comp off.", one("comp on"))
+        assertEquals("2 error: comp needs a speed after the drive, as in comp 40 60.", one("comp 40"))
+        assertEquals("2 error: comp speed must be 0 to 100, whole or with one decimal.", one("comp 40 200"))
+        assertEquals("2 error: sidechain needs off, or a pad and the groups it ducks, as in sidechain A7 BC.", one("sidechain"))
+        assertEquals("2 error: 'A17' isn't a pad. Use A to D, then . 0 E or 1 to 9.", one("sidechain A17 B"))
+        assertEquals("2 error: sidechain A7 needs the groups it ducks, as in sidechain A7 BC.", one("sidechain A7"))
+        assertEquals("2 error: '25' isn't a list of groups. Use the letters A to D, as in BC.", one("sidechain A7 25"))
+        assertEquals("2 error: 'bc' isn't a list of groups. Use the letters A to D, as in BC.", one("sidechain A7 bc"))
+        assertEquals("2 error: sidechain length must be 0 to 100, whole or with one decimal.", one("sidechain A7 B 120"))
+        assertEquals("2 error: sidechain shape must be 0 to 100, whole or with one decimal.", one("sidechain A7 B 20 x"))
+        // A line with a fault sets nothing, and the card isn't read.
+        assertNull(fxCard("fx flanger").card)
+        // Left-over words are ignored.
+        assertEquals("2 warning: The fx line has extra words from 'oops', ignored.", one("fx delay 10 20 oops"))
+        assertEquals("2 warning: The comp line has extra words from 'x', ignored.", one("comp off x"))
+        assertEquals("2 warning: The sidechain line has extra words from 'z', ignored.", one("sidechain A7 B 10 20 z"))
+        assertEquals(CardFx(FxType.DELAY, 0.1f, 0.2f), fxCard("fx delay 10 20 oops").card!!.fx)
+    }
+
+    @Test
+    fun `effect lines after the first section are errors, and a pad line before it needs a section`() {
+        val late = read("ARC BEAT 1", "[A]", bar, "fx delay", "send A 10", "[B]", "B7 | X... .... .... .... |", "comp off", "sidechain off")
+        assertEquals(
+            listOf(
+                "4 error: 'fx' belongs before the first section.",
+                "5 error: 'send' belongs before the first section.",
+                "8 error: 'comp' belongs before the first section.",
+                "9 error: 'sidechain' belongs before the first section.",
+            ),
+            problems(late),
+        )
+        assertNull(late.card)
+        // Even inside the notes list.
+        assertEquals(listOf("5 error: 'FX' belongs before the first section."), problems(read("ARC BEAT 1", "[A]", bar, "notes", "FX delay")))
+        assertEquals(listOf("2 error: 'pad' needs a section first, such as [A]."), problems(read("ARC BEAT 1", "pad A7 level 10", "[A]", bar)))
+    }
+
+    @Test
+    fun `pad lines read the settings they give`() {
+        val r = read("ARC BEAT 1", "[A]", bar, "pad A7 pitch -7.5 level 90 pan -4 attack 3 release 20 mode Key", "pad A. level 0", "pad AE mode legato", "pad A1 pitch +3 pan 16")
+        assertEquals(emptyList<String>(), problems(r))
+        assertEquals(
+            mapOf(
+                9 to CardPad(-7.5, 90, -4, 3, 20, PlayMode.KEY),
+                0 to CardPad(level = 0),
+                2 to CardPad(mode = PlayMode.LEGATO),
+                3 to CardPad(pitch = 3.0, pan = 16),
+            ),
+            section(r).pads,
+        )
+        // The ranges' ends, and a pad line after the notes list is still a pad line.
+        val ends = read("ARC BEAT 1", "[B]", "notes", "B7 at 1.1.1", "pad B7 pitch -12 level 100 pan 0 attack 255 release 0", "pad B8 pitch 12.00 pan -16")
+        assertEquals(emptyList<String>(), problems(ends))
+        assertEquals(CardPad(-12.0, 100, 0, 255, 0), section(ends).pads[9])
+        assertEquals(CardPad(pitch = 12.0, pan = -16), section(ends).pads[10])
+        // A second line merges, the later settings winning; the same setting twice on a line keeps the later.
+        val twice = read("ARC BEAT 1", "[A]", bar, "pad A7 pitch 1 level 50", "pad A7 level 60 pan 2", "pad A8 level 1 level 2")
+        assertEquals(listOf("5 warning: A7 has two pad lines, merged, the later settings win."), problems(twice))
+        assertEquals(CardPad(1.0, 60, 2), section(twice).pads[9])
+        assertEquals(CardPad(level = 2), section(twice).pads[10])
+        assertEquals(emptyMap<Int, CardPad>(), section(read("ARC BEAT 1", "[A]", bar)).pads)
+    }
+
+    @Test
+    fun `pad line mistakes are errors with their line, an unknown setting a warning`() {
+        fun one(line: String) = problems(read("ARC BEAT 1", "[A]", bar, line)).single()
+        assertEquals("4 error: A pad line needs a pad and a setting, as in pad A7 pitch -7 level 90.", one("pad"))
+        assertEquals("4 error: 'X7' isn't a pad. Use A to D, then . 0 E or 1 to 9.", one("pad X7 level 5"))
+        assertEquals("4 error: B7 is in group B, but the section is [A].", one("pad B7 level 5"))
+        assertEquals("4 error: A7 pad: give at least one of pitch, level, pan, attack, release or mode.", one("pad A7"))
+        assertEquals("4 error: A7 pad: pitch needs a value.", one("pad A7 pitch"))
+        assertEquals("4 error: A7 pad: pitch must be -12 to 12 semitones, whole or with up to two decimals.", one("pad A7 pitch 12.5"))
+        assertEquals("4 error: A7 pad: pitch must be -12 to 12 semitones, whole or with up to two decimals.", one("pad A7 pitch 1.234"))
+        assertEquals("4 error: A7 pad: level must be a whole number from 0 to 100.", one("pad A7 level 101"))
+        assertEquals("4 error: A7 pad: level must be a whole number from 0 to 100.", one("pad A7 level 50.5"))
+        assertEquals("4 error: A7 pad: pan must be a whole number from -16 to 16, negative is left.", one("pad A7 pan 17"))
+        assertEquals("4 error: A7 pad: attack must be a whole number from 0 to 255.", one("pad A7 attack 256"))
+        assertEquals("4 error: A7 pad: release must be a whole number from 0 to 255.", one("pad A7 release -1"))
+        assertEquals("4 error: A7 pad: mode must be oneshot, key or legato.", one("pad A7 mode loop"))
+        assertEquals("4 warning: Unknown setting 'colour' on A7 pad, ignored.", problems(read("ARC BEAT 1", "[A]", bar, "pad A7 level 5 colour red")).single())
+        // All unknown: nothing given.
+        assertEquals(
+            listOf("4 warning: Unknown setting 'colour' on A7 pad, ignored.", "4 error: A7 pad: give at least one of pitch, level, pan, attack, release or mode."),
+            problems(read("ARC BEAT 1", "[A]", bar, "pad A7 colour red")),
+        )
+        assertNull(read("ARC BEAT 1", "[A]", bar, "pad A7 level 101").card)
+    }
+
+    @Test
+    fun `a card with effects and pad shaping writes them in the spec's order and reads back as itself`() {
+        val fx = CardFx(FxType.DISTORTION, 0.6f, 0.35f, mapOf(0 to 0.2f, 1 to 0.05f), Comp(true, 0.4f, 0.6f), Sidechain(true, 0, 9, 0b0110, 0.25f, 0.7f))
+        val pads = mapOf(9 to CardPad(-7.0, level = 90), 3 to CardPad(pan = -4, release = 20, mode = PlayMode.KEY), 4 to CardPad(pitch = 0.25, attack = 5), 0 to CardPad(pitch = -0.5))
+        val c = BeatCard("Fx", 140.0, 56, listOf(a(hit(0, 9), hit(48, 3), sounds = mapOf(9 to snd(12, "Kick"), 3 to snd(300))).copy(pads = pads)), fx)
+        val t = BeatCards.write(c)
+        assertEquals(
+            listOf(
+                "ARC BEAT 1", "name Fx", "tempo 140", "swing 56",
+                "fx distortion 60 35", "send A 20 B 5", "comp 40 60", "sidechain A7 BC 25 70",
+                "",
+                "[A] bars 1 step 1/16",
+                "sound A7 12 Kick", "sound A1 300",
+                "pad A7 pitch -7 level 90", "pad A1 pan -4 release 20 mode key", "pad A2 pitch 0.25 attack 5", "pad A. pitch -0.5",
+            ),
+            t.lines().take(16),
+        )
+        val r = BeatCards.read(t)
+        assertEquals(emptyList<String>(), problems(r))
+        assertEquals(fx, r.card!!.fx)
+        assertEquals(pads, section(r).pads)
+        assertEquals(c.sections[0].sounds, section(r).sounds)
+        assertEquals(t, BeatCards.write(r.card!!))
+        // The tidy comment follows the effect lines, and the other kinds of line stay out when the card has none.
+        val tidy = BeatCards.write(BeatCard(null, null, 50, listOf(a(hit(0, 9))), CardFx(sends = mapOf(2 to 1f))), tidy = true).lines()
+        assertEquals(listOf("ARC BEAT 1", "swing 50", "send C 100", BeatCards.TIDY_COMMENT), tidy.take(4))
+        assertFalse(BeatCards.write(card(a(hit(0, 9)))).lines().any { it.startsWith("fx") || it.startsWith("send") || it.startsWith("pad") })
+        // off lines, and a sidechain with no groups written as off.
+        val off = BeatCards.write(BeatCard(null, null, 50, listOf(a(hit(0, 9))), CardFx(FxType.NONE, comp = Comp(false), sidechain = Sidechain(on = true, dests = 0)))).lines()
+        assertEquals(listOf("fx none", "comp off", "sidechain off"), off.slice(2..4))
+    }
+
+    @Test
+    fun `fromPatterns writes the fx only when they make a sound, and pad lines only for what differs`() {
+        val sections = listOf(a(hit(0, 9), hit(0, 6), hit(24, 7)))
+        assertNull(BeatCards.fromPatterns(null, null, 50, sections, fx = FxSettings.DEFAULT).fx)
+        assertNull(BeatCards.fromPatterns(null, null, 50, sections).fx)
+        // Knobs moved, but no effect, send, compressor or sidechain on: nothing to say.
+        assertNull(BeatCards.fromPatterns(null, null, 50, sections, fx = FxSettings(x = 0.9f, comp = Comp(false, 0.2f, 0.2f))).fx)
+        val fx = FxSettings(
+            FxType.REVERB, 0.337f, 0.5f, listOf(0.2f, 0f, 0.004f, 0.5f), Comp(true, 0.4f, 0.6f),
+            Sidechain(true, 0, 9, 0b0110, 0.25f, 0.7f),
+        )
+        val c = BeatCards.fromPatterns(null, null, 50, sections, fx = fx)
+        // Whole percents, the groups above 0 only: 0.004 is 0.
+        assertEquals(CardFx(FxType.REVERB, 0.34f, 0.5f, mapOf(0 to 0.2f, 3 to 0.5f), Comp(true, 0.4f, 0.6f), Sidechain(true, 0, 9, 0b0110, 0.25f, 0.7f)), c.fx)
+        assertEquals(c, BeatCards.read(BeatCards.write(c)).card!!.copy(sections = c.sections))
+        // Only a compressor on: the effect line is there too.
+        val only = BeatCards.fromPatterns(null, null, 50, sections, fx = FxSettings(comp = Comp(true, 0.5f, 0.5f)))
+        assertEquals(CardFx(FxType.NONE, 0.5f, 0.5f, null, Comp(true, 0.5f, 0.5f), null), only.fx)
+        assertEquals(listOf("fx none", "comp 50 50"), BeatCards.write(only).lines().slice(2..3))
+        // A sidechain on with no groups does nothing.
+        assertNull(BeatCards.fromPatterns(null, null, 50, sections, fx = FxSettings(sidechain = Sidechain(on = true, dests = 0))).fx)
+
+        val settings = mapOf(
+            pad(0, 9) to PadSettings(pitch = -7.0, level = 90),
+            pad(0, 6) to PadSettings(mode = PlayMode.KEY, release = 20, attack = 4),
+            pad(0, 7) to PadSettings(), // the defaults
+            pad(0, 8) to PadSettings(pan = 3), // no note: no line
+        )
+        val shaped = BeatCards.fromPatterns(null, null, 50, sections, pads = { settings[it] })
+        assertEquals(mapOf(9 to CardPad(pitch = -7.0, level = 90), 6 to CardPad(attack = 4, release = 20, mode = PlayMode.KEY)), shaped.sections[0].pads)
+        // Key mode's own release (15) isn't written; the oneshot default (255) neither; 255 in key mode is.
+        assertEquals(CardPad(mode = PlayMode.KEY), BeatCards.padOf(PadSettings(mode = PlayMode.KEY, release = 15)))
+        assertEquals(CardPad(mode = PlayMode.LEGATO, release = 255), BeatCards.padOf(PadSettings(mode = PlayMode.LEGATO, release = 255)))
+        assertEquals(CardPad(release = 40), BeatCards.padOf(PadSettings(release = 40)))
+        assertNull(BeatCards.padOf(PadSettings()))
+        // The fields the card carries only: trim, mute and MIDI channel don't count.
+        assertNull(BeatCards.padOf(PadSettings(start = 100, end = 900, muteGroup = true, midiChannel = 3, timeMode = "bar")))
+        // A setting out of range is held in it, as the sheet does.
+        assertEquals(CardPad(pitch = 12.0, level = 0), BeatCards.padOf(PadSettings(pitch = 30.0, level = -5)))
+        // The text reads back as the card.
+        val back = BeatCards.read(BeatCards.write(shaped)).card!!
+        assertEquals(shaped.sections[0].pads, back.sections[0].pads)
+        assertEquals(listOf("pad A7 pitch -7 level 90", "pad A4 attack 4 release 20 mode key"), BeatCards.write(shaped).lines().filter { it.startsWith("pad") })
+    }
+
+    @Test
+    fun `applying effect lines sets each kind apart`() {
+        val now = FxSettings(
+            FxType.DELAY, 0.3f, 0.4f, listOf(0.1f, 0.2f, 0.3f, 0.4f), Comp(true, 0.7f, 0.8f),
+            Sidechain(true, 1, 4, 0b1000, 0.6f, 0.2f),
+        )
+        // Nothing on the card: nothing changes.
+        assertEquals(now, BeatCards.applyFx(now, CardFx()))
+        // The effect line: type and knobs, the rest alone.
+        assertEquals(now.copy(type = FxType.CHORUS, x = 0.8f, y = 0.1f), BeatCards.applyFx(now, CardFx(FxType.CHORUS, 0.8f, 0.1f)))
+        // None leaves the knobs.
+        assertEquals(now.copy(type = FxType.NONE), BeatCards.applyFx(now, CardFx(FxType.NONE, 0.5f, 0.5f)))
+        // Sends: the groups named, the others 0.
+        assertEquals(now.copy(sends = listOf(0f, 0.9f, 0f, 0.25f)), BeatCards.applyFx(now, CardFx(sends = mapOf(1 to 0.9f, 3 to 0.25f))))
+        // The compressor: on with its knobs, or off keeping them.
+        assertEquals(now.copy(comp = Comp(true, 0.1f, 0.2f)), BeatCards.applyFx(now, CardFx(comp = Comp(true, 0.1f, 0.2f))))
+        assertEquals(now.copy(comp = Comp(false, 0.7f, 0.8f)), BeatCards.applyFx(now, CardFx(comp = Comp(false))))
+        // The sidechain: on as written, or off keeping its source and groups.
+        assertEquals(now.copy(sidechain = Sidechain(true, 0, 9, 0b0110, 0.25f, 0.7f)), BeatCards.applyFx(now, CardFx(sidechain = Sidechain(true, 0, 9, 0b0110, 0.25f, 0.7f))))
+        assertEquals(now.copy(sidechain = Sidechain(false, 1, 4, 0b1000, 0.6f, 0.2f)), BeatCards.applyFx(now, CardFx(sidechain = Sidechain(on = false))))
+        // From a read card, onto the default.
+        val card = fxCard("fx delay 40 55", "send A 20 C 35", "comp 40 60", "sidechain A7 BC 25 70").card!!
+        val applied = BeatCards.applyFx(FxSettings.DEFAULT, card.fx!!)
+        assertEquals(FxSettings(FxType.DELAY, 0.4f, 0.55f, listOf(0.2f, 0f, 0.35f, 0f), Comp(true, 0.4f, 0.6f), Sidechain(true, 0, 9, 0b0110, 0.25f, 0.7f)), applied)
+        // A share's own card applies to the same settings.
+        val own = FxSettings(FxType.FILTER, 0.2f, 0.6f, listOf(0.5f, 0f, 0f, 0.25f), Comp(true, 0.3f, 0.9f), Sidechain(true, 2, 11, 0b0011, 0.4f, 0.8f))
+        assertEquals(own, BeatCards.applyFx(FxSettings.DEFAULT, BeatCards.fxOf(own)!!))
+        // Out of range values are held in it.
+        assertEquals(1f, BeatCards.applyFx(now, CardFx(sends = mapOf(0 to 7f))).sends[0])
+    }
+
+    @Test
+    fun `applying a pad line sets the settings it gives, as the pad sheet does`() {
+        val now = PadSettings(pitch = 2.0, level = 80, pan = 3, attack = 10, release = 255, start = 5, end = 900, muteGroup = true, midiChannel = 4, timeMode = "bpm")
+        assertEquals(now, BeatCards.applyPad(now, CardPad()))
+        assertEquals(now.copy(pitch = -7.5, level = 0), BeatCards.applyPad(now, CardPad(pitch = -7.5, level = 0)))
+        assertEquals(now.copy(pan = -16, attack = 255), BeatCards.applyPad(now, CardPad(pan = -16, attack = 255)))
+        // Leaving oneshot sets the key release, as the sheet's MODE knob does; a release on the line wins.
+        assertEquals(now.copy(mode = PlayMode.KEY, release = PadSettings.KEY_RELEASE), BeatCards.applyPad(now, CardPad(mode = PlayMode.KEY)))
+        assertEquals(now.copy(mode = PlayMode.KEY, release = 20), BeatCards.applyPad(now, CardPad(mode = PlayMode.KEY, release = 20)))
+        assertEquals(now.copy(mode = PlayMode.LEGATO, release = 0), BeatCards.applyPad(now, CardPad(release = 0, mode = PlayMode.LEGATO)))
+        // Back to oneshot: plays to the end.
+        val key = now.copy(mode = PlayMode.KEY, release = 40)
+        assertEquals(key.copy(mode = PlayMode.ONESHOT, release = 255), BeatCards.applyPad(key, CardPad(mode = PlayMode.ONESHOT)))
+        // The same mode again changes nothing; a release alone keeps the mode.
+        assertEquals(key, BeatCards.applyPad(key, CardPad(mode = PlayMode.KEY)))
+        assertEquals(key.copy(release = 90), BeatCards.applyPad(key, CardPad(release = 90)))
+        // Clamped like the sheet, whatever the card object holds.
+        assertEquals(now.copy(pitch = 12.0, level = 100, pan = -16, attack = 0), BeatCards.applyPad(now, CardPad(pitch = 40.0, level = 400, pan = -50, attack = -3)))
+        // A share's own pad line applies to the same settings.
+        val own = PadSettings(pitch = -7.0, level = 90, pan = -4, attack = 3, release = 20, mode = PlayMode.KEY)
+        assertEquals(own, BeatCards.applyPad(PadSettings.DEFAULT, BeatCards.padOf(own)!!))
+    }
+
+    @Test
+    fun `every recipe card in the skill reads cleanly, and the ones with effect lines carry them`() {
+        val genres = File(System.getProperty("arc.beatCardSpec")!!).parentFile.resolve("genres.md").readText()
+        val cards = Regex("```\\n(ARC BEAT 1\\n.*?)\\n```", RegexOption.DOT_MATCHES_ALL).findAll(genres).map { it.groupValues[1] }.toList()
+        assertTrue(cards.size >= 28)
+        for (text in cards) {
+            val r = BeatCards.read(text)
+            assertEquals(emptyList<String>(), problems(r), text.lines().getOrNull(1))
+            // What is read writes back to a card that reads the same.
+            assertEquals(r.card!!.fx, BeatCards.read(BeatCards.write(r.card!!)).card!!.fx)
+        }
+        val withFx = cards.map { BeatCards.read(it).card!! }.filter { it.fx != null }
+        assertEquals(setOf("House groove", "Dub chord echo", "Industrial pressure", "Hard techno pound", "Schranz pressure", "Dusty lo-fi", "Amen shred"), withFx.map { it.name }.toSet())
+        val house = withFx.first { it.name == "House groove" }.fx!!
+        assertEquals(Sidechain(true, 0, 9, 0b0010, 0.3f, 0.55f), house.sidechain)
+        assertEquals(FxType.FILTER, withFx.first { it.name == "Dusty lo-fi" }.fx!!.type)
+    }
 }

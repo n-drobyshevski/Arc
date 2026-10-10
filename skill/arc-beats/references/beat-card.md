@@ -77,6 +77,38 @@ A line `sound <pad> <slot> [name]` inside a section says which sound that pad sh
 - **Errors:** a pad from another group, or a slot outside 1–999.
 - **Picking slots:** use only slots from the user's sound list, which Arc adds after the card when it shares. Without a list, write no sound lines and say which kind of sound fits each pad. The factory ranges are kicks 1–99, snares 100–199, hats 200–299, percussion 300–399, bass 400–499 and melodic 500–599, but the user may have changed them.
 
+## Effects (header lines, all optional)
+These lines set the project's FX in Arc: the same master effect, sends, compressor and sidechain as Arc's FX sheet. Like the header, they come before the first section. Knob values are percentages, 0–100, as the knob's travel.
+| Line | Meaning |
+|---|---|
+| `fx <type> [x] [y]` | The master effect: `none`, `delay`, `reverb`, `distortion`, `chorus`, `filter` or `compressor`. X and Y default to 50. Their meaning depends on the type: delay length and feedback; reverb size and colour; distortion drive and colour; chorus rate and feedback; filter cutoff (below 50 low-pass, above 50 high-pass, 50 open) and resonance; compressor drive and speed |
+| `send <G> <0-100> [<G> <0-100> ...]` | How much of each group, A–D, goes to the effect. Groups the line leaves out are set to 0 |
+| `comp off` or `comp <drive> <speed>` | The master compressor after everything: off, or on with drive and speed |
+| `sidechain off` or `sidechain <pad> <groups> [length] [shape]` | A pad that ducks whole groups each time it plays, such as `sidechain A7 BC 25 70` (A7 ducks B and C). Length and shape default to 30 and 50. The pad's own group may be in the list |
+
+- Each kind of line is independent: a card with only `fx` and `send` leaves the compressor and sidechain as they are.
+- **Errors:** an unknown effect type, a value outside 0–100 (whole, or with one decimal), a group outside A–D, a bad pad, a sidechain with no groups, or an effect line after the first section.
+- **Warnings:** words left over at the end of a line are ignored.
+- **Repeats:** a second line of the same kind replaces the first, with a warning. `send` lines are the exception: they add up, and a group given twice keeps its later value.
+- **Where they play:** the FX are Arc's, per project, and play on the phone. The EP-133's own FX settings are neither read nor written.
+
+### Pad shaping (inside a section)
+`pad <pad> [pitch <n>] [level <n>] [pan <n>] [attack <n>] [release <n>] [mode oneshot|key|legato]` shapes how a pad plays its sound, as the pad sheet's knobs do (Arc's PadSettings). The pad is written as in grid rows and must be in the section's group. At least one setting must be given, each with its value, in any order. The ranges are the pad sheet's own:
+
+| Setting | Write | Range | Meaning |
+|---|---|---|---|
+| `pitch` | semitones, whole or up to two decimals, `+` allowed | -12 to 12, default 0 | 0 is the sound's own pitch, plus is higher: `pitch -7` is a fifth down, `pitch 3.5` a little over a minor third up. The sheet's fine step is 0.1 |
+| `level` | whole number | 0–100, default 100 | The pad's volume, 100 full |
+| `pan` | whole number | -16 to 16, default 0 | Negative is left, positive right, 0 the centre: `pan -4` is L4 on the sheet |
+| `attack` | whole number of envelope ticks | 0–255, default 0 | How slowly the sound fades in. Every tick is about 10 ms (not verified on the device) |
+| `release` | whole number of envelope ticks | 0–255 | How long the sound takes to fade out after the pad is let go. It is heard in `key` and `legato` only: a `oneshot` pad plays to the end (release 255), so to shorten a hat or an 808 write `mode key release 20` |
+| `mode` | `oneshot`, `key` or `legato` | | How the sound plays (SND-9 in ep133-guide.md). `oneshot` is monophonic and plays the whole sample. `key` is polyphonic, so copies of the sound overlap, and fades out by the release. `legato` is monophonic and continues from the current position when the note changes while held. Leaving `oneshot` sets the release to 15 (the device's key default) unless the line gives `release` |
+
+- A second `pad` line for the same pad merges into the first, later values winning, with a warning. A setting written twice on one line keeps the later value.
+- **Errors:** a pad that isn't one or is in another group, a line with no setting, a setting with no value, or a value that isn't a number in its range (or a mode that isn't one of the three).
+- **Warnings:** an unknown setting is ignored.
+- Connected, the shaping is written to the EP-133's pad; offline, it becomes Arc's offline pad setting.
+
 ## Limits and checks
 - At most 2048 notes in a pattern; more is an error.
 - Two hits on the same pad at the same tick count as one: the louder is kept, with a warning.
@@ -84,10 +116,10 @@ A line `sound <pad> <slot> [name]` inside a section says which sound that pad sh
 - Every problem carries its line number and a short reason, which the user can paste back to Claude.
 
 ## Writing rules (Arc's export, so a card read back gives the same card)
-- The header gets `name` (the pattern's place, e.g. `P01 S02`), `tempo` (Arc's tempo) and `swing`. Swing is the TIMING swing when every grid note sits on that swung grid, otherwise 50.
+- The header gets `name` (the pattern's place, e.g. `P01 S02`), `tempo` (Arc's tempo) and `swing`. Swing is the TIMING swing when every grid note sits on that swung grid, otherwise 50. The project's effect lines follow (see "FX in Arc's share").
 - Groups with notes come in order, as `[Gnn]`. A scene export holds the 4 playing patterns, skipping blank ones; a pattern export holds just that one.
 - `step` is the first of 1/16, 1/16T, 1/32 that puts every pad hit on the grid. When none does, 1/16 is used and the hits that don't fit go to `notes`.
-- **Sounds:** right after the section line, a `sound` line for each pad the section's notes use whose slot Arc knows, in keypad order, with the sound's name when Arc knows it. Pads that only appear in `notes` get one too.
+- **Sounds:** right after the section line, a `sound` line for each pad the section's notes use whose slot Arc knows, in keypad order, with the sound's name when Arc knows it. Pads that only appear in `notes` get one too. The `pad` lines (see "FX in Arc's share") come after them.
 - **Rows:** one for each pad that has grid hits, in keypad order (7 8 9 4 5 6 1 2 3 . 0 E), followed by Arc's sound name for that pad when it knows one.
   - A note goes on a row when it is a pad hit (no semi), on the swung grid, its velocity is 127, 100, 64 or 14·n, its gate is a whole number of steps, and its holds don't run into the next hit on the row. Otherwise it goes to `notes`, written exactly.
   - Steps are grouped by 4 with spaces, with `|` between bars.
@@ -105,7 +137,13 @@ A line `sound <pad> <slot> [name]` inside a section says which sound that pad sh
   - Failing that, the line is skipped with a warning.
   - A pad that already plays the sound is left alone.
 - **Applying sounds:** connected, the chosen sounds are written to the EP-133's pads in the active project, and those pads' own settings reset to the sound's. Offline, they become Arc's offline pad changes, which go to the device on reconnect. The import sheet lists each change with a tick box, all ticked by default.
-- One undo removes all of it, the pads' sounds included.
+- **FX and pad shaping:** the import sheet has an FX block, which lists the effect, sends, compressor and sidechain as old → new, with an APPLY FX switch that is on by default. It also lists each pad's shaping as old → new, ticked, next to the SOUNDS block. Importing applies what is switched on and ticked. A pad's new sound goes on first, so its shaping lands on the new sound (a sound change resets the pad's own settings). APPLY FX replaces only the kinds of FX the card has a line for.
+- One undo removes all of it: the pads' sounds, the FX and the pad shaping.
+
+## FX in Arc's share
+When the project's FX aren't the default, Arc's share writes them as the effect lines above, right after the `swing` line: `fx`, then `send` for the groups above 0, then `comp` and `sidechain` when they are on. The effect line is written whenever any of them is (`fx none` when only a compressor or sidechain is on). Knobs are written as whole percents, and a sidechain always with its length and shape. With no effect, no send and the compressor and sidechain off, nothing is written.
+
+The pad shaping of each pad the section's notes use is written as `pad` lines right after the section's sound lines, in keypad order. A line holds only the settings that differ from the pad's defaults, in the order `pitch level pan attack release mode`: pitch not 0, level not 100, pan not 0, attack not 0, mode not `oneshot`, and release when it isn't what the mode starts with (255 for `oneshot`, 15 for the others). A pad with nothing to write gets no line.
 
 ## Sound list (Arc's share, outside the card)
 When sharing, Arc can add the user's sounds after the card's closing fence, so Claude can choose from them. The list starts with a line `My EP-133's sounds (slot name), from <the EP-133 | the last read | the factory pack>:`, followed by one sound per line as `<slot> <name>` in slot order. It isn't part of the card, and readers ignore it, because they stop at the card's closing fence.

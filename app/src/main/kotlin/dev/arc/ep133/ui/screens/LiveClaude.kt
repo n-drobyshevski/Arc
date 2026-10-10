@@ -57,8 +57,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dev.arc.ep133.controller.BeatFxUi
 import dev.arc.ep133.controller.BeatGridUi
 import dev.arc.ep133.controller.BeatImportUi
+import dev.arc.ep133.controller.PadShapeRowUi
+import dev.arc.ep133.controller.PadShapingUi
 import dev.arc.ep133.controller.SoundRowUi
 import dev.arc.ep133.controller.SoundsUi
 import dev.arc.ep133.controller.Weight
@@ -208,16 +211,20 @@ private fun SoundListTick(count: Int, on: Boolean, onChange: (Boolean) -> Unit) 
  * groups adds, its tempo (a chip sets it: off until chosen), its swing, and its
  * problems with their lines (COPY PROBLEMS copies them for Claude). When the
  * card has sound lines a SOUNDS block follows the rows: a line for each, ticked
- * to be put on its pad (PUT ON PADS switches them all). IMPORT puts it all in
- * as one UNDO step; it is off, and says why, when the card can't be read or a
- * group is full. [onImport] gets whether the tempo is to be set and the pads
- * whose sounds are to be put on.
+ * to be put on its pad (PUT ON PADS switches them all). A card with FX lines has
+ * an FX block before the sounds (a row for each kind it sets, the project's FX
+ * struck through and the card's after them; APPLY FX switches them), and a card
+ * with pad lines a PAD SHAPING block after them (a row for each pad, ticked).
+ * IMPORT puts it all in as one UNDO step; it is off, and says why, when the card
+ * can't be read or a group is full. [onImport] gets whether the tempo is to be
+ * set, the pads whose sounds are to be put on, whether the FX are to be applied
+ * and the pads whose settings are to be written.
  */
 @Composable
 fun ColumnScope.BeatImportSheetContent(
     ui: BeatImportUi,
     onCancel: () -> Unit,
-    onImport: (setTempo: Boolean, soundPads: Set<PhysicalPad>) -> Unit,
+    onImport: (setTempo: Boolean, soundPads: Set<PhysicalPad>, applyFx: Boolean, shapePads: Set<PhysicalPad>) -> Unit,
     onCopyProblems: (List<CardProblem>) -> Unit,
     /** For screenshots: start with the tempo chip chosen. */
     initialSetTempo: Boolean = false,
@@ -228,6 +235,11 @@ fun ColumnScope.BeatImportSheetContent(
     // The sounds: all put on pads, bar the rows unticked (a pad is group * 16 + offset).
     var putOnPads by rememberSaveable { mutableStateOf(true) }
     var unticked by rememberSaveable { mutableStateOf(emptyList<Int>()) }
+    // The FX: applied unless switched off. The pad shaping rows: all ticked, bar the ones unticked.
+    var applyFx by rememberSaveable { mutableStateOf(true) }
+    var shapeOff by rememberSaveable { mutableStateOf(emptyList<Int>()) }
+    // Whether a new sound is going onto the pad (its row ticked): its settings start again, which the shaping rows start from.
+    val soundGoing = { pad: PhysicalPad -> putOnPads && ui.sounds?.changes.orEmpty().any { it.pad == pad && padKey(it.pad) !in unticked } }
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(ui.title, style = ArcType.heading, color = c.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
         ui.summary?.let { Text(it, style = ArcType.small, color = c.graphite) }
@@ -260,12 +272,20 @@ fun ColumnScope.BeatImportSheetContent(
             }
         }
     }
+    ui.fx?.let { FxBlock(it, applyFx) { applyFx = !applyFx } }
     ui.sounds?.let { sounds ->
         val ticked = if (putOnPads) sounds.changes.filter { padKey(it.pad) !in unticked } else emptyList()
         SoundsBlock(
             sounds, putOnPads, { putOnPads = !putOnPads }, ticked.size,
             isTicked = { putOnPads && padKey(it.pad) !in unticked },
             onTick = { row -> unticked = if (padKey(row.pad) in unticked) unticked - padKey(row.pad) else unticked + padKey(row.pad) },
+        )
+    }
+    ui.shaping?.let { shaping ->
+        PadShapingBlock(
+            shaping, soundGoing,
+            isTicked = { padKey(it.pad) !in shapeOff },
+            onTick = { row -> shapeOff = if (padKey(row.pad) in shapeOff) shapeOff - padKey(row.pad) else shapeOff + padKey(row.pad) },
         )
     }
     ui.swing?.let { Text(ClaudeText.swingLine(it), style = ArcType.small, color = c.graphite) }
@@ -290,7 +310,8 @@ fun ColumnScope.BeatImportSheetContent(
             ClaudeText.IMPORT,
             {
                 val pads = if (putOnPads) ui.sounds?.changes.orEmpty().filter { padKey(it.pad) !in unticked }.mapTo(HashSet()) { it.pad } else emptySet()
-                onImport(setTempo && tempo != null, pads)
+                val shaped = ui.shaping?.rows.orEmpty().filter { it.changes(soundGoing(it.pad)) && padKey(it.pad) !in shapeOff }.mapTo(HashSet()) { it.pad }
+                onImport(setTempo && tempo != null, pads, applyFx && ui.fx != null, shaped)
             },
             Modifier.weight(1f),
             style = KeyStyle.Signal,
@@ -343,7 +364,12 @@ private fun SoundsBlock(
 
 /** The PUT ON PADS chip: navy while the ticked sounds go onto the pads, a flat pill while they don't. */
 @Composable
-private fun PutOnPadsChip(on: Boolean, count: Int, onToggle: () -> Unit) {
+private fun PutOnPadsChip(on: Boolean, count: Int, onToggle: () -> Unit) =
+    SwitchChip(ClaudeText.PUT_ON_PADS, ClaudeText.putOnPadsName(on, count), on, onToggle)
+
+/** A block's chip: [text] in navy while [on], a flat pill while it isn't; a tap switches it, and screen readers hear [description]. */
+@Composable
+private fun SwitchChip(text: String, description: String, on: Boolean, onToggle: () -> Unit) {
     val c = LocalArcColors.current
     Box(
         Modifier
@@ -352,13 +378,159 @@ private fun PutOnPadsChip(on: Boolean, count: Int, onToggle: () -> Unit) {
             .background(if (on) c.navy else c.shell)
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Switch, onClick = onToggle)
             .semantics {
-                contentDescription = ClaudeText.putOnPadsName(on, count)
+                contentDescription = description
                 stateDescription = if (on) SettingsText.ON else SettingsText.OFF
             }
             .padding(horizontal = 14.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Text(ClaudeText.PUT_ON_PADS.uppercase(), style = ArcType.capsKeySmall, color = if (on) c.onNavy else c.ink, maxLines = 1)
+        Text(text.uppercase(), style = ArcType.capsKeySmall, color = if (on) c.onNavy else c.ink, maxLines = 1)
+    }
+}
+
+/**
+ * The FX block: its header with the APPLY FX chip (on by default; shown when some row changes the FX), a row for each
+ * kind of FX the card has a line for ([FxRow]), and under them what applying does ([on]). With the chip off the rows are
+ * dimmed: the project's FX stay as they are.
+ */
+@Composable
+private fun FxBlock(fx: BeatFxUi, on: Boolean, onToggle: () -> Unit) {
+    val c = LocalArcColors.current
+    GridPlate {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(ClaudeText.FX.uppercase(), style = ArcType.caps, color = c.graphite, maxLines = 1, modifier = Modifier.weight(1f))
+            if (fx.changes) SwitchChip(ClaudeText.APPLY_FX, ClaudeText.applyFxName(on), on, onToggle)
+        }
+        for (row in fx.rows) {
+            PlateLine()
+            FxRow(row, on)
+        }
+    }
+    if (on && fx.changes) Text(ClaudeText.FX_BLOCK_NOTE, style = ArcType.small, color = c.graphite)
+}
+
+/** The width of the label column of an FX row, and of a pad shaping row's pad. */
+private val FxLabelWidth = 62.dp
+
+/**
+ * One kind of FX: its label (EFFECT, SENDS, COMP, DUCK), the project's value struck through and the card's after an
+ * arrow; "Already set" under the value when the project has it. Dimmed while APPLY FX is off ([on]).
+ */
+@Composable
+private fun FxRow(row: ClaudeText.Change, on: Boolean) {
+    val c = LocalArcColors.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .alpha(if (row.same || on) 1f else 0.5f)
+            .semantics(mergeDescendants = true) { contentDescription = ClaudeText.changeName(row) },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(row.label.uppercase(), style = ArcType.caps, color = c.graphite, maxLines = 1, modifier = Modifier.width(FxLabelWidth))
+        if (row.same) {
+            Column(Modifier.weight(1f)) {
+                Text(row.new, style = ArcType.small, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                Text(ClaudeText.ALREADY_SET, style = ArcType.tiny, color = c.graphite, maxLines = 1)
+            }
+        } else {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    row.old, style = ArcType.small, color = c.graphite, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    textDecoration = TextDecoration.LineThrough,
+                )
+                Text("\u2192 " + row.new, style = ArcType.small, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+/**
+ * The PAD SHAPING block: its header and a row for each pad line of the card ([PadShapeRow]), and under them what writing
+ * them does when some row is ticked: on the EP-133, or kept in Arc until it connects. [soundGoing]: a new sound is going onto
+ * the pad (the rows start from the defaults then).
+ */
+@Composable
+private fun PadShapingBlock(shaping: PadShapingUi, soundGoing: (PhysicalPad) -> Boolean, isTicked: (PadShapeRowUi) -> Boolean, onTick: (PadShapeRowUi) -> Unit) {
+    val c = LocalArcColors.current
+    val ticked = shaping.rows.count { it.changes(soundGoing(it.pad)) && isTicked(it) }
+    GridPlate {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(ClaudeText.PAD_SHAPING.uppercase(), style = ArcType.caps, color = c.graphite, maxLines = 1)
+        }
+        for (row in shaping.rows) {
+            PlateLine()
+            PadShapeRow(row, soundGoing(row.pad), isTicked(row)) { onTick(row) }
+        }
+    }
+    if (ticked > 0) Text(if (shaping.offline) ClaudeText.PAD_SHAPING_OFFLINE_NOTE else ClaudeText.PAD_SHAPING_NOTE, style = ArcType.small, color = c.graphite)
+}
+
+/**
+ * One pad line: a tick box (when there is something to change), the pad, and each setting it changes, the old value struck
+ * through and the new one after an arrow ("pitch 0 \u2192 +2 \u00B7 release 255 \u2192 40"). A pad that has them says "Already set",
+ * and one with no sound (and none going onto it) is amber with the reason; neither has a box.
+ */
+@Composable
+private fun PadShapeRow(row: PadShapeRowUi, soundGoing: Boolean, ticked: Boolean, onTick: () -> Unit) {
+    val c = LocalArcColors.current
+    val parts = row.parts(soundGoing)
+    val noSound = !row.hasSound && !soundGoing
+    val changes = row.changes(soundGoing)
+    val change = parts.takeIf { it.isNotEmpty() }?.let { ClaudeText.padChange(row.pad, row.base(soundGoing), row.after(soundGoing)) }
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .then(
+                if (changes) Modifier.toggleable(value = ticked, interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Checkbox) { onTick() }
+                else Modifier,
+            )
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .semantics(mergeDescendants = true) { contentDescription = ClaudeText.padRowName(change, row.pad, noSound) },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(Modifier.width(22.dp), contentAlignment = Alignment.Center) {
+            when {
+                changes -> TickBox(ticked)
+                noSound -> Box(Modifier.width(4.dp).height(28.dp).clip(RoundedCornerShape(2.dp)).background(c.warn))
+            }
+        }
+        Text(ClaudeText.padLabel(row.pad), style = ArcType.fieldLabel, color = c.ink, maxLines = 1, modifier = Modifier.width(28.dp))
+        Column(Modifier.weight(1f).alpha(if (changes && !ticked) 0.5f else 1f)) {
+            when {
+                noSound -> Text(ClaudeText.PAD_NO_SOUND, style = ArcType.small, color = c.ink, maxLines = 2)
+                parts.isEmpty() -> {
+                    row.name?.let { Text(it, style = ArcType.fieldLabel, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                    Text(ClaudeText.ALREADY_SET, style = ArcType.tiny, color = c.graphite, maxLines = 1)
+                }
+                else -> {
+                    Text(
+                        buildAnnotatedString {
+                            for ((i, p) in parts.withIndex()) {
+                                if (i > 0) append("  \u00B7  ")
+                                withStyle(SpanStyle(color = c.graphite)) { append(p.name.lowercase() + " ") }
+                                withStyle(SpanStyle(color = c.graphite, textDecoration = TextDecoration.LineThrough)) { append(p.old) }
+                                append(" \u2192 ")
+                                withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = c.ink)) { append(p.new) }
+                            }
+                        },
+                        style = ArcType.small, maxLines = 3, overflow = TextOverflow.Ellipsis,
+                    )
+                    row.name?.let { Text(it, style = ArcType.tiny, color = c.graphite, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                }
+            }
+        }
     }
 }
 

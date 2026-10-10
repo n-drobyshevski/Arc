@@ -92,6 +92,12 @@ import dev.arc.ep133.features.TimingSettings
 import dev.arc.ep133.ui.screens.PatternSheetContent
 import dev.arc.ep133.ui.screens.BeatImportSheetContent
 import dev.arc.ep133.ui.screens.ClaudeUi
+import dev.arc.ep133.controller.BeatFxUi
+import dev.arc.ep133.controller.beatFxUi
+import dev.arc.ep133.controller.padShapingUi
+import dev.arc.ep133.features.PadSettings
+import dev.arc.ep133.features.PlayMode
+import dev.arc.ep133.controller.PadShapingUi
 import dev.arc.ep133.controller.SoundSet
 import dev.arc.ep133.controller.SoundsUi
 import dev.arc.ep133.controller.beatImportUi
@@ -2136,12 +2142,14 @@ private fun BeatSheet(
     dark: Boolean = false,
     initialSetTempo: Boolean = false,
     sounds: (BeatCard) -> SoundsUi? = { null },
+    fx: (BeatCard) -> BeatFxUi? = { null },
+    shaping: (BeatCard) -> PadShapingUi? = { null },
 ) {
-    val ui = beatImportUi(BeatCards.read(text), seq, 122.0, { names[it] }, sounds)
+    val ui = beatImportUi(BeatCards.read(text), seq, 122.0, { names[it] }, fx = fx, shaping = shaping, sounds = sounds)
     Framed(Tab.LIVE, dark = dark) {
         MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
         ArcSheet(visible = true, onDismiss = {}) {
-            BeatImportSheetContent(ui, onCancel = {}, onImport = { _, _ -> }, onCopyProblems = {}, initialSetTempo = initialSetTempo)
+            BeatImportSheetContent(ui, onCancel = {}, onImport = { _, _, _, _ -> }, onCopyProblems = {}, initialSetTempo = initialSetTempo)
         }
     }
 }
@@ -2243,6 +2251,73 @@ A5 | .... .... ..o. .... |
 @Composable
 fun BeatSheetSoundsUnnamedPreview() =
     BeatSheet(UNNAMED_BEAT, sounds = { card -> soundsUi(card, unnamedList, { soundNow[it] }, { soundWas[it] }, offline = false, project = 3) })
+
+// A card with FX lines: the project has a reverb on group A, the card swaps it for a distortion, sends A and B to it, turns
+// the compressor on and makes A7 duck B and C. The FX block comes after the tempo row, before the pads (no sound lines here).
+private val projectFx = FxSettings(FxType.REVERB, 0.5f, 0.5f, listOf(0.5f, 0f, 0f, 0f))
+
+private const val FX_BEAT = """ARC BEAT 1
+name Breakcore
+tempo 180
+fx distortion 55 40
+send A 80 B 20
+comp 40 30
+sidechain A7 BC 25 70
+
+[A] bars 1 step 1/16
+A7 kick      | X... ..x. X... .X.. |
+A9 snare     | .... X... .x.. X.xo |
+A4 hat       | xxxx xxxx xxxx xxxo |
+"""
+
+// The FX block (light, small phone): APPLY FX on, the effect struck through and the card's after the arrow, the sends, the
+// compressor and the duck in words, and the note saying where the FX play and that UNDO puts the old ones back.
+@PreviewTest
+@Preview(name = "Beat sheet fx", widthDp = 360, heightDp = 1010, showBackground = true)
+@Composable
+fun BeatSheetFxPreview() = BeatSheet(FX_BEAT, fx = { beatFxUi(it, projectFx) })
+
+// A card with pad lines and sound lines: A7 and A9 get new sounds (their shaping starts from the defaults), A4 has what
+// the card says already, A8 keeps its sound and changes, A5 has no sound at all. The settings the pads have now:
+private val padNow = mapOf(PhysicalPad(0, 6) to PadSettings.DEFAULT.withMode(PlayMode.KEY).copy(release = 20))
+
+private const val SHAPE_BEAT = """ARC BEAT 1
+name Micro kit shaped
+tempo 96
+
+[A] bars 1 step 1/16
+sound A7 12 MICRO KICK
+sound A9 105 SNARE TIGHT
+sound A4 200 HAT CLOSED
+sound A5 301 RIM DUSTY
+pad A7 pitch -2 level 90
+pad A9 pitch 2 release 40 mode key
+pad A4 mode key release 20
+pad A8 level 80 pan 4
+pad A5 pan -4
+A7 | X... ..x. X... .... |
+A9 | .... X... .... X... |
+A4 | x.x. x.x. x.x. x.x. |
+A8 | .... .... ..o. .... |
+A5 | .... .... ..o. .... |
+"""
+
+private fun sheetShaping(offline: Boolean): (BeatCard) -> PadShapingUi? = { card ->
+    padShapingUi(
+        card,
+        now = { padNow[it] },
+        hasSound = { it in setOf(PhysicalPad(0, 9), PhysicalPad(0, 10), PhysicalPad(0, 11), PhysicalPad(0, 6)) },
+        names = { names[it] },
+        offline = offline,
+    )
+}
+
+// SOUNDS and PAD SHAPING together (dark): the new sounds ticked, and the shaping rows after them: old struck through, new in
+// bold, the pad with the settings already "Already set", the pad with no sound amber, and the note about writing the pads.
+@PreviewTest
+@Preview(name = "Beat sheet pad shaping dark", widthDp = 360, heightDp = 1500, showBackground = true)
+@Composable
+fun BeatSheetPadShapingDarkPreview() = BeatSheet(SHAPE_BEAT, dark = true, sounds = sheetSounds(false), shaping = sheetShaping(false))
 
 private const val ABSENT_BEAT = """ARC BEAT 1
 name Bass line

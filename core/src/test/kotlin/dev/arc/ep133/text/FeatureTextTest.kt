@@ -3,10 +3,14 @@ package dev.arc.ep133.text
 import dev.arc.ep133.features.ArpNote
 import dev.arc.ep133.features.ArpOrder
 import dev.arc.ep133.features.CardProblem
+import dev.arc.ep133.features.Comp
 import dev.arc.ep133.features.DiffResult
+import dev.arc.ep133.features.CardFx
+import dev.arc.ep133.features.FxSettings
 import dev.arc.ep133.features.FxType
 import dev.arc.ep133.features.KeyMark
 import dev.arc.ep133.features.NoteNames
+import dev.arc.ep133.features.PadSettings
 import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.ProjectDiff
 import dev.arc.ep133.features.ProjectSeq
@@ -14,9 +18,11 @@ import dev.arc.ep133.features.ProjectSource
 import dev.arc.ep133.features.ProjectState
 import dev.arc.ep133.features.RecState
 import dev.arc.ep133.features.SampleSource
+import dev.arc.ep133.features.PlayMode
 import dev.arc.ep133.features.Scale
 import dev.arc.ep133.features.SceneOps
 import dev.arc.ep133.features.SoundDiff
+import dev.arc.ep133.features.Sidechain
 import dev.arc.ep133.features.SoundState
 import dev.arc.ep133.features.SwitchTime
 import dev.arc.ep133.features.Timing
@@ -506,7 +512,7 @@ class FeatureTextTest {
         assertEquals("Analyse this beat:\n\n```\nARC BEAT 1\nswing 50\n```\n", ClaudeText.shareText("Analyse this beat:", "ARC BEAT 1\nswing 50\n"))
         assertEquals("No beat card in that text.", ClaudeText.NO_CARD)
         // The prompt asks for the sound lines kept, or sounds chosen from the list that follows the card.
-        assertTrue(ClaudeText.SHARE_PROMPT.contains("sound list") && ClaudeText.SHARE_PROMPT.endsWith(":"))
+        assertTrue(ClaudeText.SHARE_PROMPT.contains("sound list") && ClaudeText.SHARE_PROMPT.contains("FX and pad lines") && ClaudeText.SHARE_PROMPT.endsWith(":"))
         assertEquals(listOf("With my sound list \u00B7 212 sounds", "With my sound list \u00B7 1 sound"), listOf(212, 1).map(ClaudeText::withSoundList))
         // The sound list after a shared card.
         assertEquals(
@@ -592,6 +598,114 @@ class FeatureTextTest {
                 ClaudeText.imported(listOf(0 to 4), null),
                 ClaudeText.imported(listOf(0 to 4, 1 to 2), "S03"),
                 ClaudeText.imported(listOf(0 to 4, 1 to 2), null),
+            ),
+        )
+    }
+
+    @Test
+    fun `claude fx and pad shaping text`() {
+        assertEquals(listOf("FX", "Apply FX", "Pad shaping"), listOf(ClaudeText.FX, ClaudeText.APPLY_FX, ClaudeText.PAD_SHAPING))
+        assertEquals(
+            listOf("Apply the card's FX to this project", "Leave this project's FX as they are"),
+            listOf(ClaudeText.applyFxName(true), ClaudeText.applyFxName(false)),
+        )
+        val off = FxSettings.DEFAULT
+        val on = FxSettings(
+            FxType.DELAY, 0.7f, 0.45f, listOf(0.2f, 0f, 0.355f, 0f), Comp(true, 0.4f, 0.6f),
+            Sidechain(true, 0, 9, 0b0110, 0.25f, 0.7f),
+        )
+        assertEquals(
+            listOf("OFF", "A 0 \u00B7 B 0 \u00B7 C 0 \u00B7 D 0", "OFF", "OFF"),
+            listOf(ClaudeText.fxEffectText(off), ClaudeText.fxSendsText(off), ClaudeText.fxCompText(off), ClaudeText.fxSidechainText(off)),
+        )
+        assertEquals(
+            listOf(
+                "DELAY \u00B7 LENGTH 1/4 \u00B7 43%",
+                "A 20% \u00B7 B 0 \u00B7 C 36% \u00B7 D 0",
+                "ON \u00B7 DRIVE 2.1x \u00B7 10/200",
+                "A7 ducks B C \u00B7 ${MirrorText.sidechainLength(0.25f)} \u00B7 ${MirrorText.sidechainShape(0.7f)}",
+            ),
+            listOf(ClaudeText.fxEffectText(on), ClaudeText.fxSendsText(on), ClaudeText.fxCompText(on), ClaudeText.fxSidechainText(on)),
+        )
+        assertEquals("DISTORTION \u00B7 DRIVE 13x \u00B7 LP 20", ClaudeText.fxEffectText(FxSettings(FxType.DISTORTION, 0.55f, 0.4f)))
+        // Rows are the kinds the card has a line for, in the order effect, sends, comp, duck; an unchanged one says so.
+        val all = CardFx(FxType.DELAY, sends = mapOf(0 to 0.2f), comp = Comp(true), sidechain = Sidechain(true))
+        val rows = ClaudeText.fxRows(off, on, all)
+        assertEquals(listOf("Effect", "Sends", "Comp", "Duck"), rows.map { it.label })
+        assertEquals(listOf(false, false, false, false), rows.map { it.same })
+        assertEquals(ClaudeText.Change("Effect", "OFF", "DELAY \u00B7 LENGTH 1/4 \u00B7 43%"), rows[0])
+        assertEquals(listOf("Effect", "Comp"), ClaudeText.fxRows(off, on, CardFx(type = FxType.DELAY, comp = Comp(false))).map { it.label })
+        assertEquals(listOf(true, true, true, true), ClaudeText.fxRows(on, on, all).map { it.same })
+        assertEquals(emptyList<ClaudeText.Change>(), ClaudeText.fxRows(off, on, CardFx()))
+        assertEquals("OFF", ClaudeText.fxSidechainText(on.copy(sidechain = Sidechain(on = true, dests = 0))))
+        assertEquals("Already set", ClaudeText.ALREADY_SET)
+        assertEquals("Effect: OFF becomes REVERB", ClaudeText.changeName(ClaudeText.Change("Effect", "OFF", "REVERB")))
+        assertEquals("Comp: OFF, already set", ClaudeText.changeName(ClaudeText.Change("Comp", "OFF", "OFF")))
+
+        val pad = PhysicalPad(0, 9)
+        val d = PadSettings()
+        assertEquals(null, ClaudeText.padChange(pad, d, d.copy(start = 5, muteGroup = true, midiChannel = 2)))
+        assertEquals(
+            ClaudeText.Change("A7", "Pitch 0 \u00B7 Level 100", "Pitch -7 \u00B7 Level 90"),
+            ClaudeText.padChange(pad, d, d.copy(pitch = -7.0, level = 90)),
+        )
+        assertEquals(
+            ClaudeText.Change("AE", "Pan C \u00B7 Attack 0 \u00B7 Release 255 \u00B7 Mode Oneshot", "Pan L4 \u00B7 Attack 3 \u00B7 Release 20 \u00B7 Mode Key"),
+            ClaudeText.padChange(PhysicalPad(0, 2), d, d.copy(pan = -4, attack = 3, release = 20, mode = PlayMode.KEY)),
+        )
+        assertEquals(
+            listOf(ClaudeText.PadPart("Pitch", "0", MirrorText.pitchLabel(2.0)), ClaudeText.PadPart("Release", "255", "40")),
+            ClaudeText.padParts(d, d.copy(pitch = 2.0, release = 40, start = 9)),
+        )
+        assertEquals(
+            listOf(
+                "Old sounds back on 2 pads, 1 had none before.",
+                "Old settings back on 3 pads.",
+                "Old sounds back on 1 pad, old settings back on 2 pads, old FX back.",
+                "Old FX back.",
+                "Import taken back.",
+            ),
+            listOf(
+                ClaudeText.importUndone(2, 1, 0, false),
+                ClaudeText.importUndone(0, 0, 3, false),
+                ClaudeText.importUndone(1, 0, 2, true),
+                ClaudeText.importUndone(0, 0, 0, true),
+                ClaudeText.importUndone(0, 0, 0, false),
+            ),
+        )
+        assertEquals(ClaudeText.soundsRestored(2, 1), ClaudeText.importUndone(2, 1, 0, false))
+        assertEquals(
+            "The pad's settings couldn't be changed: busy. The patterns stay imported, the FX applied and 2 pads shaped. UNDO takes it back.",
+            ClaudeText.shapingFailed("busy", 2, true),
+        )
+        assertEquals(
+            listOf(
+                "Imported to A \u00B7 04. FX applied. UNDO takes it back.",
+                "Imported to A \u00B7 04. 1 pad setting applied. UNDO takes it back.",
+                "Imported to A \u00B7 04 and 2 sounds. FX and 3 pad settings applied. UNDO takes it back.",
+            ),
+            listOf(
+                ClaudeText.imported(listOf(0 to 4), null, fx = true),
+                ClaudeText.imported(listOf(0 to 4), null, pads = 1),
+                ClaudeText.imported(listOf(0 to 4), null, 2, fx = true, pads = 3),
+            ),
+        )
+        assertEquals(
+            listOf(
+                "Imported to A \u00B7 04. FX and 3 pad settings applied, 1 pad setting skipped. UNDO takes it back.",
+                "Imported to A \u00B7 04. 2 pad settings skipped. UNDO takes it back.",
+            ),
+            listOf(
+                ClaudeText.imported(listOf(0 to 4), null, fx = true, pads = 3, padsSkipped = 1),
+                ClaudeText.imported(listOf(0 to 4), null, padsSkipped = 2),
+            ),
+        )
+        assertEquals(
+            listOf("A9: no sound on this pad", "A9: already set", "A9: Pitch 0 becomes Pitch 2"),
+            listOf(
+                ClaudeText.padRowName(null, PhysicalPad(0, 11), true),
+                ClaudeText.padRowName(null, PhysicalPad(0, 11), false),
+                ClaudeText.padRowName(ClaudeText.Change("A9", "Pitch 0", "Pitch 2"), PhysicalPad(0, 11), false),
             ),
         )
     }

@@ -9,14 +9,31 @@
 // - [places] in `imported` are [group, number] tuples where the Kotlin has Pairs.
 // - CANCEL is Strings.CANCEL and the new scene's words are MirrorText's, as in
 //   the Kotlin.
+// - `Change` is a plain interface (`ClaudeText.isSame` is the Kotlin `same`); the FX sheet's texts take FxSettings values.
 
-import type { CardProblem } from '../features/beatCard'
-import type { PhysicalPad } from '../features/padNotes'
+import type { CardFx, CardProblem } from '../features/beatCard'
+import { FxSettings, FxType } from '../features/fxSettings'
+import type { PadSettings } from '../features/padSettings'
+import { physicalPad, type PhysicalPad } from '../features/padNotes'
 import { FeatureText } from './featureText'
 import { plural } from './format'
 import { MirrorText } from './mirrorText'
 
 const groupLetter = (group: number) => String.fromCharCode(65 + group)
+
+/** A row of the FX or pad shaping blocks: what it is ([label]), and its value [old] and [new]. */
+export interface Change {
+  readonly label: string
+  readonly old: string
+  readonly new: string
+}
+
+/** One setting of a pad's shaping row: its [name] ("Pitch"), and its value [old] and [new] ("0", "+2"). */
+export interface PadPart {
+  readonly name: string
+  readonly old: string
+  readonly new: string
+}
 
 function twoDigits(n: number): string {
   return String(n).padStart(2, '0')
@@ -93,7 +110,7 @@ export const ClaudeText = {
   /** The line before the card in the shared text. */
   SHARE_PROMPT:
     'Analyse this EP-133 beat from Arc with the arc-beats skill, then suggest 2-3 edits as a new card. ' +
-    'Keep its sound lines, or choose sounds from my sound list if one follows the card:',
+    'Keep its sound, FX and pad lines, or choose sounds from my sound list if one follows the card:',
   SHARE_TITLE: 'Share beat card',
 
   /** "P01 S02": pattern [n] (1..99) of the scene at [scene] (from 0), a card's name. */
@@ -282,6 +299,118 @@ export const ClaudeText = {
   /** The same, offline: the changes are Arc's own until the EP-133 connects. */
   SOUNDS_OFFLINE_NOTE: 'Saved as offline pad changes; they go to the EP-133 when you reconnect.',
 
+  // ---------- The sheet: FX and pad shaping ----------
+  /** The FX block's header, and the switch beside it that decides whether the card's FX replace the project's (on to begin with). */
+  FX: 'FX',
+  APPLY_FX: 'Apply FX',
+  applyFxName(on: boolean): string {
+    return on ? "Apply the card's FX to this project" : "Leave this project's FX as they are"
+  },
+
+  /** Under the FX rows: they replace this project's FX in Arc and play on the phone. */
+  FX_BLOCK_NOTE: "Replaces this project's FX on the phone (the EP-133's own FX don't change). UNDO puts the old FX back.",
+
+  /** The pad shaping rows' header: each pad's pitch, level, pan, attack, release or mode, old to new, ticked to be applied. */
+  PAD_SHAPING: 'Pad shaping',
+
+  /** Under the pad shaping rows, connected and offline. */
+  PAD_SHAPING_NOTE: "Writes the ticked pads' settings on the EP-133. UNDO puts the old ones back.",
+  PAD_SHAPING_OFFLINE_NOTE: 'Saved as offline pad settings; they go to the EP-133 when you reconnect.',
+
+  /** What a row says when the project has the card's value already. */
+  ALREADY_SET: 'Already set',
+
+  /** What a pad shaping row says when the pad has no sound to shape (and no sound row of the card is going onto it). */
+  PAD_NO_SOUND: 'No sound on this pad',
+
+  /** A pad shaping row for screen readers: "A9: Pitch 0 becomes Pitch 2", "A9: already set", "A9: no sound on this pad". */
+  padRowName(c: Change | null, pad: PhysicalPad, noSound: boolean): string {
+    if (noSound) return `${padLabel(pad)}: ${ClaudeText.PAD_NO_SOUND.toLowerCase()}`
+    return c === null ? `${padLabel(pad)}: ${ClaudeText.ALREADY_SET.toLowerCase()}` : ClaudeText.changeName(c)
+  },
+
+  /** Whether the card leaves a row as it is: it says [ALREADY_SET] and has no tick box. */
+  isSame(c: Change): boolean {
+    return c.old === c.new
+  },
+
+  /** The FX rows' labels. */
+  FX_EFFECT: 'Effect',
+  FX_SENDS: 'Sends',
+  FX_COMP: 'Comp',
+  FX_DUCK: 'Duck',
+
+  /** The master effect as a row says it: "DISTORTION \u00B7 DRIVE 12.3x \u00B7 LP 20", "OFF" for none. */
+  fxEffectText(s: FxSettings): string {
+    if (s.type === FxType.NONE) return MirrorText.fxName(FxType.NONE).toUpperCase()
+    return `${MirrorText.fxName(s.type).toUpperCase()} \u00B7 ${FxSettings.xLabel(s.type)} ${FxSettings.xReadout(s.type, s.x)} \u00B7 ${FxSettings.yReadout(s.type, s.y)}`
+  },
+
+  /** The four sends as a row says them, the groups above 0 in percent: "A 80% \u00B7 B 20% \u00B7 C 0 \u00B7 D 0". */
+  fxSendsText(s: FxSettings): string {
+    return s.sends
+      .map((v, g) => {
+        const p = Math.round(Math.fround(v * 100))
+        return `${groupLetter(g)} ` + (p > 0 ? `${p}%` : '0')
+      })
+      .join(' \u00B7 ')
+  },
+
+  /** The master compressor: "OFF", or "ON \u00B7 DRIVE 2.1x \u00B7 5/150" (drive and speed as the XY pad reads them). */
+  fxCompText(s: FxSettings): string {
+    if (!s.comp.on) return MirrorText.onOff(false).toUpperCase()
+    return `${MirrorText.onOff(true).toUpperCase()} \u00B7 ${FxSettings.xLabel(FxType.COMPRESSOR)} ${FxSettings.xReadout(FxType.COMPRESSOR, s.comp.x)} \u00B7 ${FxSettings.yReadout(FxType.COMPRESSOR, s.comp.y)}`
+  },
+
+  /** The sidechain, in words: "OFF", or "A7 ducks B C \u00B7 180 ms \u00B7 SNAP 40" (the FX sheet's length and shape). */
+  fxSidechainText(s: FxSettings): string {
+    const sc = s.sidechain
+    if (!sc.on || (sc.dests & FxSettings.ALL_GROUPS) === 0) return MirrorText.onOff(false).toUpperCase()
+    const groups = [0, 1, 2, 3].filter((g) => (sc.dests & (1 << g)) !== 0).map(groupLetter).join(' ')
+    return `${padLabel(physicalPad(sc.group, sc.pad))} ducks ${groups} \u00B7 ${MirrorText.sidechainLength(sc.x)} \u00B7 ${MirrorText.sidechainShape(sc.y)}`
+  },
+
+  /**
+   * The FX rows for a card that sets the kinds [fx] gives, from the project's [old] FX to [now] (the card applied,
+   * BeatCards.applyFx): the effect, sends, comp and duck, in that order, each only when the card has a line for it. A row
+   * the project has already (`isSame`) is kept, to say so.
+   */
+  fxRows(old: FxSettings, now: FxSettings, fx: CardFx): Change[] {
+    const rows: Change[] = []
+    if (fx.type !== null) rows.push({ label: ClaudeText.FX_EFFECT, old: ClaudeText.fxEffectText(old), new: ClaudeText.fxEffectText(now) })
+    if (fx.sends !== null) rows.push({ label: ClaudeText.FX_SENDS, old: ClaudeText.fxSendsText(old), new: ClaudeText.fxSendsText(now) })
+    if (fx.comp !== null) rows.push({ label: ClaudeText.FX_COMP, old: ClaudeText.fxCompText(old), new: ClaudeText.fxCompText(now) })
+    if (fx.sidechain !== null) rows.push({ label: ClaudeText.FX_DUCK, old: ClaudeText.fxSidechainText(old), new: ClaudeText.fxSidechainText(now) })
+    return rows
+  },
+
+  /**
+   * The settings of a pad that differ from [old] to [now], as the pad sheet reads them, in the sheet's order. Only pitch,
+   * level, pan, attack, release and mode count (the card carries no more). Empty when none differs.
+   */
+  padParts(old: PadSettings, now: PadSettings): PadPart[] {
+    const parts: PadPart[] = []
+    if (old.pitch !== now.pitch) parts.push({ name: MirrorText.PITCH, old: MirrorText.pitchLabel(old.pitch), new: MirrorText.pitchLabel(now.pitch) })
+    if (old.level !== now.level) parts.push({ name: MirrorText.LEVEL, old: MirrorText.levelLabel(old.level), new: MirrorText.levelLabel(now.level) })
+    if (old.pan !== now.pan) parts.push({ name: MirrorText.PAN, old: MirrorText.panLabel(old.pan), new: MirrorText.panLabel(now.pan) })
+    if (old.attack !== now.attack) parts.push({ name: MirrorText.ATTACK, old: MirrorText.envLabel(old.attack), new: MirrorText.envLabel(now.attack) })
+    if (old.release !== now.release) parts.push({ name: MirrorText.RELEASE, old: MirrorText.envLabel(old.release), new: MirrorText.envLabel(now.release) })
+    if (old.mode !== now.mode) parts.push({ name: MirrorText.MODE, old: MirrorText.modeLabel(old.mode), new: MirrorText.modeLabel(now.mode) })
+    return parts
+  },
+
+  /** A pad's shaping row as text, if the card changes it: the pad ("A7"), "Pitch 0 \u00B7 Level 100" to "Pitch -7 \u00B7 Level 90". */
+  padChange(pad: PhysicalPad, old: PadSettings, now: PadSettings): Change | null {
+    const parts = ClaudeText.padParts(old, now)
+    if (parts.length === 0) return null
+    return { label: padLabel(pad), old: parts.map((p) => `${p.name} ${p.old}`).join(' \u00B7 '), new: parts.map((p) => `${p.name} ${p.new}`).join(' \u00B7 ') }
+  },
+
+  /** A row for screen readers: "Effect: OFF becomes REVERB \u00B7 SIZE 50% \u00B7 FLAT", "A7: Pitch 0 becomes Pitch -7", or "Comp: OFF, already set". */
+  changeName(c: Change): string {
+    return ClaudeText.isSame(c) ? `${c.label}: ${c.new}, ${ClaudeText.ALREADY_SET.toLowerCase()}` : `${c.label}: ${c.old} becomes ${c.new}`
+  },
+
   // CANCEL is Strings.CANCEL.
   IMPORT: 'Import',
 
@@ -295,15 +424,18 @@ export const ClaudeText = {
    * IMPORT's toast: where it went, and how to take it back. One pattern is
    * named; several go in the scene they made ([scene], "S03"), or are listed
    * where there was no room for a scene. [sounds] put on pads are counted,
-   * and so are the [skipped] ones that had no pad to go on.
+   * and so are the [skipped] ones that had no pad to go on. The card's [fx]
+   * applied and the [pads] shaped are named after them, and the [padsSkipped] that could not be.
    */
-  imported(places: readonly (readonly [number, number])[], scene: string | null, sounds = 0, skipped = 0): string {
+  imported(places: readonly (readonly [number, number])[], scene: string | null, sounds = 0, skipped = 0, fx = false, pads = 0, padsSkipped = 0): string {
     const where = scene != null ? `scene ${scene}` : places.map(([g, n]) => place(g, n)).join(', ')
     let extra = ''
     if (sounds > 0 && skipped > 0) extra = ` and ${plural(sounds, 'sound')}, ${skipped} skipped`
     else if (sounds > 0) extra = ` and ${plural(sounds, 'sound')}`
     else if (skipped > 0) extra = `, ${plural(skipped, 'sound')} skipped`
-    return `Imported to ${where}${extra}. UNDO takes it back.`
+    const applied = [fx ? ClaudeText.FX : null, pads > 0 ? plural(pads, 'pad setting') : null].filter((x) => x !== null).join(' and ')
+    const shaping = [applied === '' ? null : `${applied} applied`, padsSkipped > 0 ? `${plural(padsSkipped, 'pad setting')} skipped` : null].filter((x) => x !== null)
+    return `Imported to ${where}${extra}.` + (shaping.length === 0 ? '' : ` ${shaping.join(', ')}.`) + ' UNDO takes it back.'
   },
 
   /**
@@ -317,5 +449,28 @@ export const ClaudeText = {
   /** After UNDO took an import back: the old sounds on [back] pads again, and the [empty] ones that had none before can't be emptied again. */
   soundsRestored(back: number, empty: number): string {
     return `Old sounds back on ${plural(back, 'pad')}` + (empty > 0 ? `, ${empty} had none before` : '') + '.'
+  },
+
+  /**
+   * After UNDO took an import back, what was put back: the old sounds on [back] pads, with the [empty] ones that had none
+   * before (they can't be emptied again), the old settings on [shaped] pads, and the old FX ([fx]). Sounds first. When
+   * nothing of that was put back (the shaped pads were turned since), it only says the import is taken back.
+   */
+  importUndone(back: number, empty: number, shaped: number, fx: boolean): string {
+    const parts: string[] = []
+    if (back > 0 || empty > 0) parts.push(ClaudeText.soundsRestored(back, empty).replace(/\.$/, ''))
+    if (shaped > 0) parts.push(`old settings back on ${plural(shaped, 'pad')}`)
+    if (fx) parts.push('old FX back')
+    if (parts.length === 0) return 'Import taken back.'
+    const text = parts.join(', ')
+    return text.charAt(0).toUpperCase() + text.slice(1) + '.'
+  },
+
+  /**
+   * IMPORT's toast when a pad's settings couldn't be written: [reason], then what stays: the patterns, the pads
+   * [written] so far, and the FX if they went on.
+   */
+  shapingFailed(reason: string, written: number, fx: boolean): string {
+    return MirrorText.padSettingsFailed(reason) + '. The patterns stay imported' + (fx ? ', the FX applied' : '') + (written > 0 ? ` and ${plural(written, 'pad')} shaped` : '') + '. UNDO takes it back.'
   },
 } as const

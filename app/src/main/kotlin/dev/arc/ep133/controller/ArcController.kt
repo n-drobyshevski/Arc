@@ -4465,9 +4465,9 @@ class ArcController(
      * edit of the scenes (COMMIT, CLR, DEL, a paste), the project's scenes, banks and picks as they were then.
      * A pick waiting goes.
      *
-     * An IMPORT that put sounds on pads is one step with them ([beatUndos]): when this takes the sequencer back to
-     * how it was before such an import, the pads get their old sounds again too, so UNDO here, in the import's toast
-     * and on the pattern line are the same thing. Once other edits come after the import, UNDO takes those back
+     * An IMPORT that put sounds on pads, shaped them or applied FX is one step with them ([beatUndos]): when this takes
+     * the sequencer back to how it was before such an import, the pads get their old sounds and settings again too, and
+     * the project its old FX, so UNDO here, in the import's toast and on the pattern line are the same thing. Once other edits come after the import, UNDO takes those back
      * first and the pads keep the card's sounds until the import itself is undone (they are the project's sounds,
      * not part of the other edits). A pad whose sound was an offline change that has since gone to the EP-133, or
      * one the import found empty, can't be put back.
@@ -4482,9 +4482,14 @@ class ArcController(
         showPattern()
         val taken = seq?.let { c -> beatUndos.lastOrNull { it.recorder === rec && it.restores(c) } } ?: return
         beatUndos.remove(taken)
-        // Marked even with no pads yet: the writes still running see it and put back what they did ([putSounds]).
+        // Marked even with no pads yet: the writes still running see it and put back what they did ([putTail]).
         taken.undone = true
-        if (!taken.writing && taken.pads.isNotEmpty()) scope.launch { putBack(taken) }
+        // The FX come back at once, while the sounds and pad settings are written (or being written) after.
+        taken.fxRestored = restoreFx(taken)
+        if (!taken.writing) {
+            if (taken.pads.isNotEmpty() || taken.shaped.isNotEmpty()) scope.launch { putBack(taken) }
+            else if (taken.fxRestored) toast(dev.arc.ep133.text.ClaudeText.importUndone(0, 0, 0, true))
+        }
     }
 
     /** ERASE on or off: on, a pad tapped erases its notes, and one held while playing erases them as they pass. CORRECT goes off with it on. */
@@ -5113,8 +5118,8 @@ class ArcController(
     /**
      * What SHARE sends: [group]'s playing pattern, or (null) the scene playing, as an ARC BEAT card at the tempo Live
      * plays at and the TIMING swing, with the pads' names and a sound line for each pad it uses (the slot and name Live
-     * shows on it); null when there are no notes in it. With "With my sound list" on, the sounds Arc knows follow the
-     * card ([soundSetOf]). The patterns are the project's as they stand, a pattern still recording included.
+     * shows on it); null when there are no notes in it. The project's FX and the settings of the pads it uses are written
+     * as the card's effect and `pad` lines. With "With my sound list" on, the sounds Arc knows follow the card ([soundSetOf]). The patterns are the project's as they stand, a pattern still recording included.
      */
     fun beatShare(group: Int?): BeatShare? {
         if (group != null && group !in 0..3) return null
@@ -5126,7 +5131,9 @@ class ArcController(
             m?.slotOf(pad)?.let { slot -> dev.arc.ep133.features.CardSound(slot, set?.names?.get(slot) ?: m.nameOf(pad)) }
         }
         val list = if (settings.value.shareSounds) set else null
-        return beatShare(projectSeq, group, bpm, settings.value.timingSwing, ::mirrorName, sounds, list)
+        // The project's FX and each pad's settings go in the card too (the pad lines only where they differ from the defaults).
+        val shaping = { pad: dev.arc.ep133.features.PhysicalPad -> m?.target(pad)?.let { padSettings[padKey(it)] } }
+        return beatShare(projectSeq, group, bpm, settings.value.timingSwing, ::mirrorName, sounds, list, fxDesk.fx.value, shaping)
     }
 
     /** "With my sound list" on or off (kept like the other Live preferences). */
@@ -5155,9 +5162,20 @@ class ArcController(
         val set = soundSetOf(_state.value.mirror, _state.value.factoryNames)
         val offline = _state.value.device == null
         val project = m?.snapshot(System.nanoTime())?.activeProject
-        _beatImport.value = beatImportUi(read, projectSeq, patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo), ::mirrorName) { card ->
-            soundsUi(card, set, { pad -> m?.slotOf(pad) }, ::mirrorName, offline, project)
-        }
+        _beatImport.value = beatImportUi(
+            read, projectSeq, patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo), ::mirrorName,
+            sounds = { card -> soundsUi(card, set, { pad -> m?.slotOf(pad) }, ::mirrorName, offline, project) },
+            fx = { card -> beatFxUi(card, fxDesk.fx.value) },
+            shaping = { card ->
+                padShapingUi(
+                    card,
+                    now = { pad -> m?.target(pad)?.let { padSettings[padKey(it)] } },
+                    hasSound = { pad -> m?.target(pad)?.slot != null },
+                    names = ::mirrorName,
+                    offline = offline,
+                )
+            },
+        )
     }
 
     /** The sheet closes (CANCEL, a tap outside, Back, another section): nothing was imported. */
@@ -5175,8 +5193,18 @@ class ArcController(
      *
      * [soundPads] are the pads whose sound lines the sheet had ticked: after the patterns each is matched again to the
      * sounds as they are now ([BeatCards.resolveSounds]) and put on its pad ([putSounds]), in the same UNDO step.
+     *
+     * With [applyFx] the card's FX replace the project's, the kinds it has a line for ([BeatCards.applyFx]), at once and
+     * through [fxDesk], so the mixer plays them and fx.json keeps them. [shapePads] are the pads whose `pad` lines the sheet
+     * had ticked: once their sounds are on, each pad's settings are written ([shapePads]) on the EP-133, or kept as
+     * offline pad settings. All of it is one UNDO step with the patterns and the sounds ([BeatUndo]).
      */
-    fun importBeat(setTempo: Boolean, soundPads: Set<dev.arc.ep133.features.PhysicalPad> = emptySet()) {
+    fun importBeat(
+        setTempo: Boolean,
+        soundPads: Set<dev.arc.ep133.features.PhysicalPad> = emptySet(),
+        applyFx: Boolean = false,
+        shapePads: Set<dev.arc.ep133.features.PhysicalPad> = emptySet(),
+    ) {
         val ui = _beatImport.value ?: return
         val card = ui.card ?: return
         var applied: BeatApplied? = null
@@ -5199,13 +5227,28 @@ class ArcController(
         val entry = BeatUndo(patternRecorder, before, a.seq)
         beatUndos.addLast(entry)
         while (beatUndos.size > MAX_BEAT_UNDOS) beatUndos.removeFirst()
+        // The FX go on at once (in memory); UNDO puts the project's old ones back while they are still as the import left them.
+        val fxCard = card.fx?.takeIf { applyFx }
+        if (fxCard != null) {
+            val project = fxDesk.project
+            val old = fxDesk.of(project)
+            val new = dev.arc.ep133.features.BeatCards.applyFx(old, fxCard)
+            if (new != old) {
+                fxDesk.replace(project, new)
+                entry.fxProject = project
+                entry.fxBefore = old
+                entry.fxAfter = new
+            }
+        }
+        val fxApplied = entry.fxBefore != null
         val picks = importPicks(card, soundPads)
-        entry.writing = picks.isNotEmpty()
-        if (picks.isEmpty()) {
-            toast(beatImported(a), action = dev.arc.ep133.text.MirrorText.UNDO, onAction = { undoImport(entry) })
+        val shapes = padShapes(card, shapePads)
+        entry.writing = picks.isNotEmpty() || shapes.isNotEmpty()
+        if (!entry.writing) {
+            toast(beatImported(a, fx = fxApplied), action = dev.arc.ep133.text.MirrorText.UNDO, onAction = { undoImport(entry) })
             return
         }
-        scope.launch { putSounds(a, entry, picks) }
+        scope.launch { putTail(a, entry, picks, shapes) }
     }
 
     /** The sounds an IMPORT put on pads, or would: one UNDO step with the patterns ([BeatUndo]). */
@@ -5214,7 +5257,7 @@ class ArcController(
     /**
      * One IMPORT, to be taken back by UNDO: the [recorder] it went through, the sequencer as it was [before] and as it
      * stood [after] it (the toast's UNDO only acts while it still does). While its sounds are being
-     * [writing], UNDO only marks it [undone]: the writes stop and put back what they did ([putSounds]). If
+     * [writing] (its sounds, then its pad settings), UNDO only marks it [undone]: the writes stop and put back what they did ([putTail]). If
      * it put sounds on [pads], their targets hold the sound each pad had ([PadBack.target]'s slot; null when none was
      * known), and an import made [offline] keeps the offline pad changes and settings as they were.
      */
@@ -5229,6 +5272,17 @@ class ArcController(
         var offline = false
         var padsBefore: dev.arc.ep133.features.OfflinePads = dev.arc.ep133.features.OfflinePads.EMPTY
         var settingsBefore: dev.arc.ep133.features.OfflinePadSettings = dev.arc.ep133.features.OfflinePadSettings.EMPTY
+
+        /** The FX it replaced: project [fxProject]'s FX [fxBefore] became [fxAfter]; null when it left them as they were. [fxRestored]: UNDO put them back. */
+        var fxProject = 0
+        var fxBefore: dev.arc.ep133.features.FxSettings? = null
+        var fxAfter: dev.arc.ep133.features.FxSettings? = null
+        var fxRestored = false
+
+        /** The pads whose settings it wrote ([ShapeBack]), and for an import made [shapedOffline] the offline settings as they were before. */
+        var shaped: List<ShapeBack> = emptyList()
+        var shapedOffline = false
+        var shapeSettingsBefore: dev.arc.ep133.features.OfflinePadSettings = dev.arc.ep133.features.OfflinePadSettings.EMPTY
 
         /** Whether UNDO went back to the sequencer before this import ([c], what the recorder gave back; open groups come back closed). */
         fun restores(c: dev.arc.ep133.features.ProjectSeq) = isBefore(c, before)
@@ -5252,15 +5306,65 @@ class ArcController(
             .filter { it.pad in ticked && it.slot != null && (it.status == dev.arc.ep133.features.SoundStatus.CHANGE || it.status == dev.arc.ep133.features.SoundStatus.FOUND_BY_NAME) }
     }
 
+    /** [putSounds]'s result: the pads [done], the [skipped] picks, the recordings that went to Takes ([moved]) and why it stopped ([failure]; null when it didn't). */
+    private class SoundsPut(val done: List<PadBack>, val skipped: Int, val moved: Int, val failure: String?)
+
+    /** One pad shaped by an IMPORT, to be taken back by UNDO: the [pad], its [target], and its settings [before] and [after] the card's line. */
+    private class ShapeBack(
+        val pad: dev.arc.ep133.features.PhysicalPad,
+        val target: dev.arc.ep133.features.PadTarget,
+        val before: dev.arc.ep133.features.PadSettings,
+        val after: dev.arc.ep133.features.PadSettings,
+    )
+
+    /** [shapePads]'s result: the pads [done], the [skipped] ones (no target or sound, or settings not known) and why it stopped ([failure]). */
+    private class ShapingPut(val done: List<ShapeBack>, val skipped: Int, val failure: String?)
+
     /**
-     * IMPORT's second half, after the patterns went in ([applied]): each of [picks] put on its pad, one after the
-     * other, with no toast of its own. Connected, each pad is looked up as EDIT does ([padTargetOrWhy]) and written
-     * ([writePadQuiet]); offline they become offline pad changes in one go ([putSoundsOffline]). A pad with no
-     * target (its number not known yet, a project not read, PROJECT switching) or, offline, a sound Arc can't play is
-     * skipped and counted in the toast. A write that fails stops it: the toast says why, the patterns and the pads
-     * done stay, and UNDO takes all of it back. [entry] keeps what UNDO needs.
+     * IMPORT's second half, after the patterns (and the FX) went in ([applied]): the sounds ([putSounds]), then the pad
+     * settings ([shapePads]) of the pads whose sound, if it was to change, went on (settings written before a new sound
+     * would be reset by it, and written to the old sound if it didn't go on). No toast until all is done: it says what
+     * was done, or what stopped it. UNDO during the writes ([BeatUndo.undone]) stops them and puts back what they did.
+     * [entry] keeps what UNDO needs.
      */
-    private suspend fun putSounds(applied: BeatApplied, entry: BeatUndo, picks: List<dev.arc.ep133.features.SoundPick>) {
+    private suspend fun putTail(
+        applied: BeatApplied,
+        entry: BeatUndo,
+        picks: List<dev.arc.ep133.features.SoundPick>,
+        shapes: List<Pair<dev.arc.ep133.features.PhysicalPad, dev.arc.ep133.features.CardPad>>,
+    ) {
+        val s = if (picks.isEmpty()) SoundsPut(emptyList(), 0, 0, null) else putSounds(entry, picks)
+        val missed = picks.mapTo(HashSet()) { it.pad } - s.done.mapTo(HashSet()) { it.pad }
+        val toShape = shapes.filter { it.first !in missed }
+        val sh = if (s.failure == null && !entry.undone && toShape.isNotEmpty()) shapePads(entry, toShape) else ShapingPut(emptyList(), 0, null)
+        entry.writing = false
+        if (entry.undone) {
+            // The patterns (and the FX) are back already: the pads done follow them, with no import toast.
+            if (entry.pads.isNotEmpty() || entry.shaped.isNotEmpty()) putBack(entry)
+            return
+        }
+        val undo = { undoImport(entry) }
+        val fx = entry.fxBefore != null
+        val soundWhy = s.failure
+        val shapeWhy = sh.failure
+        when {
+            soundWhy != null -> toast(dev.arc.ep133.text.ClaudeText.soundsFailed(soundWhy, s.done.size), error = true, action = dev.arc.ep133.text.MirrorText.UNDO, onAction = undo)
+            shapeWhy != null -> toast(dev.arc.ep133.text.ClaudeText.shapingFailed(shapeWhy, sh.done.size, fx), error = true, action = dev.arc.ep133.text.MirrorText.UNDO, onAction = undo)
+            else -> toast(
+                beatImported(applied, s.done.size, s.skipped, fx, sh.done.size, shapes.size - toShape.size + sh.skipped) + samplesMoved(s.moved),
+                action = dev.arc.ep133.text.MirrorText.UNDO, onAction = undo,
+            )
+        }
+    }
+
+    /**
+     * Each of [picks] put on its pad, one after the other, with no toast of its own. Connected, each pad is looked up as EDIT
+     * does ([padTargetOrWhy]) and written ([writePadQuiet]); offline they become offline pad changes in one go
+     * ([putSoundsOffline]). A pad with no target (its number not known yet, a project not read, PROJECT switching) or,
+     * offline, a sound Arc can't play is skipped and counted. A write that fails stops it: [SoundsPut.failure] says why,
+     * the pads done stay. [entry] keeps what UNDO needs.
+     */
+    private suspend fun putSounds(entry: BeatUndo, picks: List<dev.arc.ep133.features.SoundPick>): SoundsPut {
         var skipped = 0
         var moved = 0
         var failure: String? = null
@@ -5291,19 +5395,83 @@ class ArcController(
             }
         }
         entry.pads = done.toList()
-        entry.writing = false
-        if (entry.undone) {
-            // The patterns are back already: the pads done follow them, with no import toast.
-            if (done.isNotEmpty()) putBack(entry)
-            return
+        return SoundsPut(done, skipped, moved, failure)
+    }
+
+    /** The frames of [pad]'s sound when Arc holds it in memory (a pad's settings carry its trim; null when not known). */
+    private fun cachedFrames(pad: dev.arc.ep133.features.PhysicalPad): Long? {
+        val sample = mirror?.sampleOf(pad) ?: return null
+        val a = padMemory[sampleKey(sample)] ?: return null
+        return (a.pcm.size / a.channels).toLong()
+    }
+
+    /**
+     * The card's `pad` lines ([shapes]) put on their pads, in order, as EDIT's knobs would ([BeatCards.applyPad] on the
+     * settings the pad has now): connected, the EP-133 is asked for the pad's own settings first (they may have been turned
+     * on the device), and the whole record is written ([writePadSettingsQuiet]); offline they become offline pad settings in
+     * one go, as EDIT keeps them. A pad whose settings are not known (nothing read, no answer) or that has no sound is
+     * skipped and counted; a pad that has the settings already is left alone. The pad plays with them on the phone from its
+     * next note ([refreshPatternPlan]). A failed write stops it ([ShapingPut.failure]); the pads done stay.
+     */
+    private suspend fun shapePads(entry: BeatUndo, shapes: List<Pair<dev.arc.ep133.features.PhysicalPad, dev.arc.ep133.features.CardPad>>): ShapingPut {
+        val offline = _state.value.device == null
+        val m = mirror
+        val done = ArrayList<ShapeBack>()
+        var skipped = 0
+        var failure: String? = null
+        val storeBefore = if (offline) loadOfflinePadSettings() else dev.arc.ep133.features.OfflinePadSettings.EMPTY
+        var store = storeBefore
+        for ((pad, line) in shapes) {
+            if (entry.undone) break
+            val t = (padTargetOrWhy(pad) as? PadTargetOrWhy.Found)?.target
+            val slot = t?.slot
+            if (t == null || slot == null) {
+                skipped++
+                continue
+            }
+            val key = padKey(t)
+            val frames = cachedFrames(pad)
+            if (offline) {
+                val kept = store.at(t.project, t.group, t.pad)?.takeIf { it.slot == slot }
+                val base = kept?.settings ?: padSettings[key] ?: dev.arc.ep133.features.PadSettings.DEFAULT
+                val after = dev.arc.ep133.features.BeatCards.applyPad(base, line)
+                if (after == base) continue
+                store = store.put(dev.arc.ep133.features.OfflinePadSetting(t.project, t.group, t.pad, slot, after, kept?.base ?: base, frames))
+                done += ShapeBack(pad, t, base, after)
+                continue
+            }
+            val meta = exclusive("pad", quiet = true, wait = true) { s -> Device.readPad(s, t.project, t.group, t.pad) }
+            val known = padSettings[key]
+            val read = meta?.takeIf { dev.arc.ep133.features.PadSettings.written(it) }
+                ?.let { dev.arc.ep133.features.PadSettings.fromMeta(it, known ?: dev.arc.ep133.features.PadSettings.DEFAULT) }
+            // No answer and nothing known: a write would put guesses over the pad.
+            val base = read ?: known
+            if (base == null) {
+                skipped++
+                continue
+            }
+            val after = dev.arc.ep133.features.BeatCards.applyPad(base, line)
+            if (after == base) continue
+            val w = writePadSettingsQuiet(t, after, frames)
+            if (!w.ok) {
+                failure = w.error ?: dev.arc.ep133.text.MirrorText.EDIT_OFFLINE
+                break
+            }
+            padSettings = padSettings + (key to after)
+            done += ShapeBack(pad, t, base, after)
+            entry.shaped = done.toList()
         }
-        val undo = { undoImport(entry) }
-        val why = failure
-        if (why != null) {
-            toast(dev.arc.ep133.text.ClaudeText.soundsFailed(why, done.size), error = true, action = dev.arc.ep133.text.MirrorText.UNDO, onAction = undo)
-        } else {
-            toast(beatImported(applied, done.size, skipped) + samplesMoved(moved), action = dev.arc.ep133.text.MirrorText.UNDO, onAction = undo)
+        if (offline && done.isNotEmpty()) {
+            // Offline nothing is awaited above: kept in one go, unless the connection came meanwhile.
+            if (mirror !== m || entry.undone) return ShapingPut(emptyList(), skipped + done.size, null)
+            saveOfflinePadSettings(store)
+            for (b in done) padSettings = padSettings + (padKey(b.target) to b.after)
+            entry.shaped = done.toList()
+            entry.shapedOffline = true
+            entry.shapeSettingsBefore = storeBefore
         }
+        if (done.isNotEmpty()) refreshPatternPlan()
+        return ShapingPut(done, skipped, failure)
     }
 
     /** [putSoundsOffline]'s result: the pads [done], the [skipped] picks and the recordings that went to Takes ([moved]). */
@@ -5350,28 +5518,65 @@ class ArcController(
     }
 
     /**
-     * UNDO of an import that put sounds on pads ([BeatUndo]): connected, each pad gets the slot it had written back
-     * ([writePadQuiet]; one that was empty can't be emptied again), and a failure says why and stops; offline, the pads'
+     * UNDO of an import that put sounds on pads or shaped them ([BeatUndo]); the FX are back already ([restoreFx]).
+     * Connected, each shaped pad gets its old settings written back ([writePadSettingsQuiet]), unless it was turned since
+     * or its sound was changed by the import too (the new sound reset the settings, and the old ones are gone: the pad
+     * gets the sound back, and with it what the device gives that sound), then each pad gets the slot it had written back
+     * ([writePadQuiet]; one that was empty can't be emptied again); a failure says why and stops. Offline, the pads'
      * offline changes and settings are put back as they were ([offlineRestore]), while arc is still offline: once the
      * EP-133 connected, the changes were asked about, and written or dropped, so there is nothing of the import's left.
      */
     private suspend fun putBack(e: BeatUndo) {
-        if (e.offline) {
-            val m = mirror?.takeIf { mirrorSession == null && _state.value.device == null } ?: return
+        val fx = e.fxRestored
+        // The shaped pads whose sound the import kept, and that nobody has turned since: the ones whose settings come back.
+        val soundKeys = e.pads.mapTo(HashSet()) { padKey(it.target) }
+        val shaped = e.shaped.filter { padKey(it.target) !in soundKeys && padSettings[padKey(it.target)] == it.after }
+        if (e.offline || e.shapedOffline) {
+            val m = mirror?.takeIf { mirrorSession == null && _state.value.device == null }
+            if (m == null) {
+                if (fx) toast(dev.arc.ep133.text.ClaudeText.importUndone(0, 0, 0, true))
+                return
+            }
             val targets = e.pads.map { it.target }
-            val pads = offlineRestore(loadOfflinePads(), e.padsBefore, targets)
-            val settings = targets.fold(loadOfflinePadSettings()) { all, t ->
-                e.settingsBefore.at(t.project, t.group, t.pad)?.let(all::put) ?: all.drop(t.project, t.group, t.pad)
+            var pads = loadOfflinePads()
+            var settings = loadOfflinePadSettings()
+            if (e.offline) {
+                pads = offlineRestore(pads, e.padsBefore, targets)
+                settings = targets.fold(settings) { all, t ->
+                    e.settingsBefore.at(t.project, t.group, t.pad)?.let(all::put) ?: all.drop(t.project, t.group, t.pad)
+                }
+            }
+            if (e.shapedOffline) {
+                settings = shaped.fold(settings) { all, b ->
+                    val t = b.target
+                    e.shapeSettingsBefore.at(t.project, t.group, t.pad)?.let(all::put) ?: all.drop(t.project, t.group, t.pad)
+                }
             }
             if (mirror !== m) return
-            saveOfflinePads(pads)
+            if (e.offline) saveOfflinePads(pads)
             saveOfflinePadSettings(settings)
-            padSettings = settings.byPad()
-            padSaved.clear()
-            localChanged(m, pads)
-            toast(dev.arc.ep133.text.ClaudeText.soundsRestored(targets.size, 0))
+            if (e.offline) {
+                padSettings = settings.byPad()
+                padSaved.clear()
+            }
+            // What Arc knew of each pad before the import.
+            for (b in shaped) padSettings = padSettings + (padKey(b.target) to b.before)
+            if (e.offline) localChanged(m, pads) else refreshPatternPlan()
+            // Sounds written while connected can't be put back offline: only an offline import's sounds are restored here.
+            toast(dev.arc.ep133.text.ClaudeText.importUndone(if (e.offline) targets.size else 0, 0, shaped.size, fx))
             return
         }
+        var restored = 0
+        for (b in shaped) {
+            val w = writePadSettingsQuiet(b.target, b.before, cachedFrames(b.pad))
+            if (!w.ok) {
+                toast(dev.arc.ep133.text.MirrorText.padSettingsFailed(w.error ?: dev.arc.ep133.text.MirrorText.EDIT_OFFLINE), error = true)
+                return
+            }
+            padSettings = padSettings + (padKey(b.target) to b.before)
+            restored++
+        }
+        if (restored > 0) refreshPatternPlan()
         var back = 0
         var empty = 0
         for (b in e.pads) {
@@ -5387,7 +5592,20 @@ class ArcController(
             }
             back++
         }
-        toast(dev.arc.ep133.text.ClaudeText.soundsRestored(back, empty))
+        toast(dev.arc.ep133.text.ClaudeText.importUndone(back, empty, restored, fx))
+    }
+
+    /**
+     * UNDO of an import that applied FX ([BeatUndo.fxBefore]): the project's old FX are put back, but only while they are
+     * still as the import left them. FX turned since stay as they are (the card's FX can't be told from the edits then).
+     * True when they were put back.
+     */
+    private fun restoreFx(e: BeatUndo): Boolean {
+        val before = e.fxBefore ?: return false
+        val after = e.fxAfter ?: return false
+        if (fxDesk.of(e.fxProject) != after) return false
+        fxDesk.replace(e.fxProject, before)
+        return true
     }
 
     // ---------- PROJECT: the next project (an addition) ----------
@@ -5785,6 +6003,10 @@ class ArcController(
             it.pads = emptyList()
             it.offline = false
         }
+        beatUndos.filter { it.shapedOffline }.forEach {
+            it.shaped = emptyList()
+            it.shapedOffline = false
+        }
     }
 
     private suspend fun keepUnwritten(done: List<OfflinePad>, unplaced: List<OfflinePad>) {
@@ -6090,7 +6312,26 @@ class ArcController(
         frames: Long?,
         revert: Boolean = true,
     ): Boolean {
-        val slot = t.slot ?: return false
+        val w = writePadSettingsQuiet(t, settings, frames)
+        if (w.ok) return true
+        val key = padKey(t)
+        toast(w.error?.let(dev.arc.ep133.text.MirrorText::padSettingsFailed) ?: dev.arc.ep133.text.MirrorText.EDIT_OFFLINE, error = true)
+        // Back to what the device has, unless a newer turn is on its way (or nothing is known of it).
+        val back = padSaved[key]
+        if (revert && back != null && padPending?.first?.let(::padKey) != key) {
+            padSettings = padSettings + (key to back)
+            _padEdit.update { e -> e?.takeIf { padKey(it.target) == key }?.copy(settings = back) ?: e }
+        }
+        return false
+    }
+
+    /** [writePadSettings] with no toast and no revert: the result says why a write failed (an IMPORT's, or its UNDO's). */
+    private suspend fun writePadSettingsQuiet(
+        t: dev.arc.ep133.features.PadTarget,
+        settings: dev.arc.ep133.features.PadSettings,
+        frames: Long?,
+    ): PadWrite {
+        val slot = t.slot ?: return PadWrite(false)
         var error: String? = null
         val ok = exclusive("pad", quiet = true, wait = true) { s ->
             try {
@@ -6102,19 +6343,11 @@ class ArcController(
                 false
             }
         }
-        val key = padKey(t)
         if (ok == true) {
-            padSaved[key] = settings
-            return true
+            padSaved[padKey(t)] = settings
+            return PadWrite(true)
         }
-        toast(error?.let(dev.arc.ep133.text.MirrorText::padSettingsFailed) ?: dev.arc.ep133.text.MirrorText.EDIT_OFFLINE, error = true)
-        // Back to what the device has, unless a newer turn is on its way (or nothing is known of it).
-        val back = padSaved[key]
-        if (revert && back != null && padPending?.first?.let(::padKey) != key) {
-            padSettings = padSettings + (key to back)
-            _padEdit.update { e -> e?.takeIf { padKey(it.target) == key }?.copy(settings = back) ?: e }
-        }
-        return false
+        return PadWrite(false, error)
     }
 
     /**

@@ -1,7 +1,9 @@
 // Port of core/src/test/kotlin/dev/arc/ep133/features/BeatCardTest.kt (the same cases, in the same order).
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { BeatCards, SoundStatus, beatCard, cardSection, cardSound, type BeatCard, type CardRead, type CardSection, type CardSound, type SoundPick } from '../../../src/core/features/beatCard'
+import { BeatCards, SoundStatus, beatCard, cardFx, cardPad, cardSection, cardSound, type BeatCard, type CardPad, type CardRead, type CardSection, type CardSound, type SoundPick } from '../../../src/core/features/beatCard'
+import { FxSettings, FxType, comp, sidechain } from '../../../src/core/features/fxSettings'
+import { PadSettings, PlayMode } from '../../../src/core/features/padSettings'
 import { padKey, physicalPad, type PhysicalPad } from '../../../src/core/features/padNotes'
 import { Pattern, ProjectSeq, Seq, Timing, pattern, patternNote, projectSeq, scene, type PatternNote } from '../../../src/core/features/pattern'
 import { Steps } from '../../../src/core/features/steps'
@@ -41,8 +43,8 @@ const section = (r: CardRead, i = 0): CardSection => r.card!.sections[i]!
 
 const card = (sections: CardSection[], swing = 50): BeatCard => beatCard(null, null, swing, sections)
 
-const a = (notes: PatternNote[] = [], o: { bars?: number; group?: number; number?: number | null; sounds?: Map<number, CardSound> } = {}): CardSection =>
-  cardSection(o.group ?? 0, o.number ?? null, pattern(o.bars ?? 1, notes), o.sounds ?? new Map())
+const a = (notes: PatternNote[] = [], o: { bars?: number; group?: number; number?: number | null; sounds?: Map<number, CardSound>; pads?: Map<number, CardPad> } = {}): CardSection =>
+  cardSection(o.group ?? 0, o.number ?? null, pattern(o.bars ?? 1, notes), o.sounds ?? new Map(), o.pads ?? new Map())
 
 const snd = (slot: number, name: string | null = null): CardSound => cardSound(slot, name)
 
@@ -943,5 +945,345 @@ describe('BeatCardTest', () => {
     expect(plan.seq.scenes.length).toBe(Seq.MAX_SCENES)
     expect(plan.seq.scene).toBe(0)
     expect(ProjectSeq.pattern(plan.seq, 1, 2).notes.length).toBe(1)
+  })
+
+  // ---- effects and pad shaping ----
+
+  const f = Math.fround
+  const pad = (group: number, offset: number): PhysicalPad => physicalPad(group, offset)
+  const fxCard = (...lines: string[]): CardRead => read('ARC BEAT 1', ...lines, '[A]', bar)
+  const sendsOf = (...entries: [number, number][]): Map<number, number> => new Map(entries.map(([g, v]) => [g, f(v)]))
+  const ps = (o: Partial<PadSettings> = {}): PadSettings => ({ ...PadSettings.DEFAULT, ...o })
+
+  it('a card without effect lines has no fx, and an all effect card reads', () => {
+    expect(BeatCards.read(example).card!.fx).toBeNull()
+    const r = fxCard('fx delay 40 55', 'send A 20 C 35.5', 'comp 40 60', 'sidechain A7 BC 25 70')
+    expect(problems(r)).toEqual([])
+    const fx = r.card!.fx!
+    expect(fx.type).toBe(FxType.DELAY)
+    expect(fx.x).toBe(f(0.4))
+    expect(fx.y).toBe(f(0.55))
+    expect(fx.sends).toEqual(sendsOf([0, 0.2], [2, 0.355]))
+    expect(fx.comp).toEqual(comp({ on: true, x: 0.4, y: 0.6 }))
+    expect(fx.sidechain).toEqual(sidechain({ on: true, group: 0, pad: 9, dests: 0b0110, x: 0.25, y: 0.7 }))
+  })
+
+  it('effect lines default their knobs, any case, and each kind stands alone', () => {
+    const fx = fxCard('FX Reverb', 'sidechain B. A').card!.fx!
+    expect(fx.type).toBe(FxType.REVERB)
+    expect(fx.x).toBe(0.5)
+    expect(fx.y).toBe(0.5)
+    expect(fx.sends).toBeNull()
+    expect(fx.comp).toBeNull()
+    // Length and shape default to 30 and 50; the pad's own group may be in the list.
+    expect(fx.sidechain).toEqual(sidechain({ on: true, group: 1, pad: 0, dests: 0b0001, x: 0.3, y: 0.5 }))
+    expect(fxCard('comp OFF').card!.fx).toEqual(cardFx({ comp: comp({ on: false }) }))
+    expect(fxCard('sidechain off').card!.fx).toEqual(cardFx({ sidechain: sidechain({ on: false }) }))
+    expect(fxCard('send B 100').card!.fx).toEqual(cardFx({ sends: sendsOf([1, 1]) }))
+    expect(fxCard('fx none').card!.fx).toEqual(cardFx({ type: FxType.NONE, x: 0.5, y: 0.5 }))
+    // Whole or one decimal, as the knob's percent.
+    expect(fxCard('fx filter 7.5 0').card!.fx!.x).toBe(f(0.075))
+    expect(fxCard('fx filter 7.5 0').card!.fx!.y).toBe(0)
+  })
+
+  it('send lines add up, a group given twice keeps the later value', () => {
+    const r = fxCard('send A 10 B 20', 'send B 30 D 40 A 50')
+    expect(problems(r)).toEqual([])
+    expect(r.card!.fx!.sends).toEqual(sendsOf([0, 0.5], [1, 0.3], [3, 0.4]))
+  })
+
+  it('a second fx, comp or sidechain line replaces the first, with a warning', () => {
+    const r = fxCard('fx delay 10 10', 'fx reverb 20 30', 'comp 10 10', 'comp off', 'sidechain A7 B', 'sidechain A9 C')
+    expect(problems(r)).toEqual(['3 warning: Two fx lines, kept the later.', '5 warning: Two comp lines, kept the later.', '7 warning: Two sidechain lines, kept the later.'])
+    expect(r.card!.fx).toEqual(
+      cardFx({ type: FxType.REVERB, x: 0.2, y: 0.3, comp: comp({ on: false }), sidechain: sidechain({ on: true, group: 0, pad: 11, dests: 0b0100, x: 0.3, y: 0.5 }) }),
+    )
+  })
+
+  it('effect line mistakes are errors with their line, extra words a warning', () => {
+    const one = (line: string): string => {
+      const p = problems(fxCard(line))
+      expect(p.length).toBe(1)
+      return p[0]!
+    }
+    const types = 'none, delay, reverb, distortion, chorus, filter or compressor'
+    expect(one('fx')).toBe(`2 error: fx needs an effect: ${types}.`)
+    expect(one('fx flanger')).toBe(`2 error: 'flanger' isn't an effect. Use ${types}.`)
+    expect(one('fx delay 101')).toBe('2 error: fx x must be 0 to 100, whole or with one decimal.')
+    expect(one('fx delay 50 -1')).toBe('2 error: fx y must be 0 to 100, whole or with one decimal.')
+    expect(one('fx delay 5.55')).toBe('2 error: fx x must be 0 to 100, whole or with one decimal.')
+    expect(one('send')).toBe('2 error: send needs a group and a value, as in send A 40 B 20.')
+    expect(one('send E 10')).toBe("2 error: 'E' isn't a group. Use A to D.")
+    expect(one('send a 10')).toBe("2 error: 'a' isn't a group. Use A to D.")
+    expect(one('send A 10 B')).toBe('2 error: send B needs a value, 0 to 100, whole or with one decimal.')
+    expect(one('send A 101')).toBe('2 error: send A must be 0 to 100, whole or with one decimal.')
+    expect(one('comp')).toBe('2 error: comp needs off, or a drive and a speed, as in comp 40 60.')
+    expect(one('comp on')).toBe('2 error: comp drive must be 0 to 100, whole or with one decimal, or use comp off.')
+    expect(one('comp 40')).toBe('2 error: comp needs a speed after the drive, as in comp 40 60.')
+    expect(one('comp 40 200')).toBe('2 error: comp speed must be 0 to 100, whole or with one decimal.')
+    expect(one('sidechain')).toBe('2 error: sidechain needs off, or a pad and the groups it ducks, as in sidechain A7 BC.')
+    expect(one('sidechain A17 B')).toBe("2 error: 'A17' isn't a pad. Use A to D, then . 0 E or 1 to 9.")
+    expect(one('sidechain A7')).toBe('2 error: sidechain A7 needs the groups it ducks, as in sidechain A7 BC.')
+    expect(one('sidechain A7 25')).toBe("2 error: '25' isn't a list of groups. Use the letters A to D, as in BC.")
+    expect(one('sidechain A7 bc')).toBe("2 error: 'bc' isn't a list of groups. Use the letters A to D, as in BC.")
+    expect(one('sidechain A7 B 120')).toBe('2 error: sidechain length must be 0 to 100, whole or with one decimal.')
+    expect(one('sidechain A7 B 20 x')).toBe('2 error: sidechain shape must be 0 to 100, whole or with one decimal.')
+    // A line with a fault sets nothing, and the card isn't read.
+    expect(fxCard('fx flanger').card).toBeNull()
+    // Left-over words are ignored.
+    expect(one('fx delay 10 20 oops')).toBe("2 warning: The fx line has extra words from 'oops', ignored.")
+    expect(one('comp off x')).toBe("2 warning: The comp line has extra words from 'x', ignored.")
+    expect(one('sidechain A7 B 10 20 z')).toBe("2 warning: The sidechain line has extra words from 'z', ignored.")
+    expect(fxCard('fx delay 10 20 oops').card!.fx).toEqual(cardFx({ type: FxType.DELAY, x: 0.1, y: 0.2 }))
+  })
+
+  it('effect lines after the first section are errors, and a pad line before it needs a section', () => {
+    const late = read('ARC BEAT 1', '[A]', bar, 'fx delay', 'send A 10', '[B]', 'B7 | X... .... .... .... |', 'comp off', 'sidechain off')
+    expect(problems(late)).toEqual([
+      "4 error: 'fx' belongs before the first section.",
+      "5 error: 'send' belongs before the first section.",
+      "8 error: 'comp' belongs before the first section.",
+      "9 error: 'sidechain' belongs before the first section.",
+    ])
+    expect(late.card).toBeNull()
+    // Even inside the notes list.
+    expect(problems(read('ARC BEAT 1', '[A]', bar, 'notes', 'FX delay'))).toEqual(["5 error: 'FX' belongs before the first section."])
+    expect(problems(read('ARC BEAT 1', 'pad A7 level 10', '[A]', bar))).toEqual(["2 error: 'pad' needs a section first, such as [A]."])
+  })
+
+  it('pad lines read the settings they give', () => {
+    const r = read('ARC BEAT 1', '[A]', bar, 'pad A7 pitch -7.5 level 90 pan -4 attack 3 release 20 mode Key', 'pad A. level 0', 'pad AE mode legato', 'pad A1 pitch +3 pan 16')
+    expect(problems(r)).toEqual([])
+    expect(section(r).pads).toEqual(
+      new Map([
+        [9, cardPad({ pitch: -7.5, level: 90, pan: -4, attack: 3, release: 20, mode: PlayMode.KEY })],
+        [0, cardPad({ level: 0 })],
+        [2, cardPad({ mode: PlayMode.LEGATO })],
+        [3, cardPad({ pitch: 3, pan: 16 })],
+      ]),
+    )
+    // The ranges' ends, and a pad line after the notes list is still a pad line.
+    const ends = read('ARC BEAT 1', '[B]', 'notes', 'B7 at 1.1.1', 'pad B7 pitch -12 level 100 pan 0 attack 255 release 0', 'pad B8 pitch 12.00 pan -16')
+    expect(problems(ends)).toEqual([])
+    expect(section(ends).pads.get(9)).toEqual(cardPad({ pitch: -12, level: 100, pan: 0, attack: 255, release: 0 }))
+    expect(section(ends).pads.get(10)).toEqual(cardPad({ pitch: 12, pan: -16 }))
+    // A second line merges, the later settings winning; the same setting twice on a line keeps the later.
+    const twice = read('ARC BEAT 1', '[A]', bar, 'pad A7 pitch 1 level 50', 'pad A7 level 60 pan 2', 'pad A8 level 1 level 2')
+    expect(problems(twice)).toEqual(['5 warning: A7 has two pad lines, merged, the later settings win.'])
+    expect(section(twice).pads.get(9)).toEqual(cardPad({ pitch: 1, level: 60, pan: 2 }))
+    expect(section(twice).pads.get(10)).toEqual(cardPad({ level: 2 }))
+    expect(section(read('ARC BEAT 1', '[A]', bar)).pads.size).toBe(0)
+  })
+
+  it('pad line mistakes are errors with their line, an unknown setting a warning', () => {
+    const one = (line: string): string => {
+      const p = problems(read('ARC BEAT 1', '[A]', bar, line))
+      expect(p.length).toBe(1)
+      return p[0]!
+    }
+    expect(one('pad')).toBe('4 error: A pad line needs a pad and a setting, as in pad A7 pitch -7 level 90.')
+    expect(one('pad X7 level 5')).toBe("4 error: 'X7' isn't a pad. Use A to D, then . 0 E or 1 to 9.")
+    expect(one('pad B7 level 5')).toBe('4 error: B7 is in group B, but the section is [A].')
+    expect(one('pad A7')).toBe('4 error: A7 pad: give at least one of pitch, level, pan, attack, release or mode.')
+    expect(one('pad A7 pitch')).toBe('4 error: A7 pad: pitch needs a value.')
+    expect(one('pad A7 pitch 12.5')).toBe('4 error: A7 pad: pitch must be -12 to 12 semitones, whole or with up to two decimals.')
+    expect(one('pad A7 pitch 1.234')).toBe('4 error: A7 pad: pitch must be -12 to 12 semitones, whole or with up to two decimals.')
+    expect(one('pad A7 level 101')).toBe('4 error: A7 pad: level must be a whole number from 0 to 100.')
+    expect(one('pad A7 level 50.5')).toBe('4 error: A7 pad: level must be a whole number from 0 to 100.')
+    expect(one('pad A7 pan 17')).toBe('4 error: A7 pad: pan must be a whole number from -16 to 16, negative is left.')
+    expect(one('pad A7 attack 256')).toBe('4 error: A7 pad: attack must be a whole number from 0 to 255.')
+    expect(one('pad A7 release -1')).toBe('4 error: A7 pad: release must be a whole number from 0 to 255.')
+    expect(one('pad A7 mode loop')).toBe('4 error: A7 pad: mode must be oneshot, key or legato.')
+    expect(one('pad A7 level 5 colour red')).toBe("4 warning: Unknown setting 'colour' on A7 pad, ignored.")
+    // All unknown: nothing given.
+    expect(problems(read('ARC BEAT 1', '[A]', bar, 'pad A7 colour red'))).toEqual([
+      "4 warning: Unknown setting 'colour' on A7 pad, ignored.",
+      '4 error: A7 pad: give at least one of pitch, level, pan, attack, release or mode.',
+    ])
+    expect(read('ARC BEAT 1', '[A]', bar, 'pad A7 level 101').card).toBeNull()
+  })
+
+  it("a card with effects and pad shaping writes them in the spec's order and reads back as itself", () => {
+    const fx = cardFx({
+      type: FxType.DISTORTION,
+      x: 0.6,
+      y: 0.35,
+      sends: sendsOf([0, 0.2], [1, 0.05]),
+      comp: comp({ on: true, x: 0.4, y: 0.6 }),
+      sidechain: sidechain({ on: true, group: 0, pad: 9, dests: 0b0110, x: 0.25, y: 0.7 }),
+    })
+    const pads = new Map([
+      [9, cardPad({ pitch: -7, level: 90 })],
+      [3, cardPad({ pan: -4, release: 20, mode: PlayMode.KEY })],
+      [4, cardPad({ pitch: 0.25, attack: 5 })],
+      [0, cardPad({ pitch: -0.5 })],
+    ])
+    const c = beatCard('Fx', 140, 56, [a([hit(0, 9), hit(48, 3)], { sounds: sm([9, snd(12, 'Kick')], [3, snd(300)]), pads })], fx)
+    const t = BeatCards.write(c)
+    expect(t.split('\n').slice(0, 16)).toEqual([
+      'ARC BEAT 1', 'name Fx', 'tempo 140', 'swing 56',
+      'fx distortion 60 35', 'send A 20 B 5', 'comp 40 60', 'sidechain A7 BC 25 70',
+      '',
+      '[A] bars 1 step 1/16',
+      'sound A7 12 Kick', 'sound A1 300',
+      'pad A7 pitch -7 level 90', 'pad A1 pan -4 release 20 mode key', 'pad A2 pitch 0.25 attack 5', 'pad A. pitch -0.5',
+    ])
+    const r = BeatCards.read(t)
+    expect(problems(r)).toEqual([])
+    expect(r.card!.fx).toEqual(fx)
+    expect(section(r).pads).toEqual(pads)
+    expect(section(r).sounds).toEqual(c.sections[0]!.sounds)
+    expect(BeatCards.write(r.card!)).toBe(t)
+    // The tidy comment follows the effect lines, and the other kinds of line stay out when the card has none.
+    const tidy = BeatCards.write(beatCard(null, null, 50, [a([hit(0, 9)])], cardFx({ sends: sendsOf([2, 1]) })), undefined, true).split('\n')
+    expect(tidy.slice(0, 4)).toEqual(['ARC BEAT 1', 'swing 50', 'send C 100', BeatCards.TIDY_COMMENT])
+    expect(BeatCards.write(card([a([hit(0, 9)])])).split('\n').some((l) => l.startsWith('fx') || l.startsWith('send') || l.startsWith('pad'))).toBe(false)
+    // off lines, and a sidechain with no groups written as off.
+    const off = BeatCards.write(beatCard(null, null, 50, [a([hit(0, 9)])], cardFx({ type: FxType.NONE, comp: comp({ on: false }), sidechain: sidechain({ on: true, dests: 0 }) }))).split('\n')
+    expect(off.slice(2, 5)).toEqual(['fx none', 'comp off', 'sidechain off'])
+  })
+
+  it('fromPatterns writes the fx only when they make a sound, and pad lines only for what differs', () => {
+    const sections = [a([hit(0, 9), hit(0, 6), hit(24, 7)])]
+    const from = (fx: FxSettings | null = null, pads?: (p: PhysicalPad) => PadSettings | null): BeatCard => BeatCards.fromPatterns(null, null, 50, sections, undefined, fx, pads)
+    expect(from(FxSettings.DEFAULT).fx).toBeNull()
+    expect(from().fx).toBeNull()
+    // Knobs moved, but no effect, send, compressor or sidechain on: nothing to say.
+    expect(from(FxSettings.of({ x: 0.9, comp: comp({ on: false, x: 0.2, y: 0.2 }) })).fx).toBeNull()
+    const fx = FxSettings.of({
+      type: FxType.REVERB,
+      x: 0.337,
+      y: 0.5,
+      sends: [0.2, 0, 0.004, 0.5],
+      comp: comp({ on: true, x: 0.4, y: 0.6 }),
+      sidechain: sidechain({ on: true, group: 0, pad: 9, dests: 0b0110, x: 0.25, y: 0.7 }),
+    })
+    const c = from(fx)
+    // Whole percents, the groups above 0 only: 0.004 is 0.
+    expect(c.fx).toEqual(
+      cardFx({
+        type: FxType.REVERB,
+        x: 0.34,
+        y: 0.5,
+        sends: sendsOf([0, 0.2], [3, 0.5]),
+        comp: comp({ on: true, x: 0.4, y: 0.6 }),
+        sidechain: sidechain({ on: true, group: 0, pad: 9, dests: 0b0110, x: 0.25, y: 0.7 }),
+      }),
+    )
+    expect({ ...BeatCards.read(BeatCards.write(c)).card!, sections: c.sections }).toEqual(c)
+    // Only a compressor on: the effect line is there too.
+    const only = from(FxSettings.of({ comp: comp({ on: true, x: 0.5, y: 0.5 }) }))
+    expect(only.fx).toEqual(cardFx({ type: FxType.NONE, x: 0.5, y: 0.5, comp: comp({ on: true, x: 0.5, y: 0.5 }) }))
+    expect(BeatCards.write(only).split('\n').slice(2, 4)).toEqual(['fx none', 'comp 50 50'])
+    // A sidechain on with no groups does nothing.
+    expect(from(FxSettings.of({ sidechain: sidechain({ on: true, dests: 0 }) })).fx).toBeNull()
+
+    const settings = new Map<number, PadSettings>([
+      [padKey(pad(0, 9)), ps({ pitch: -7, level: 90 })],
+      [padKey(pad(0, 6)), ps({ mode: PlayMode.KEY, release: 20, attack: 4 })],
+      [padKey(pad(0, 7)), ps()], // the defaults
+      [padKey(pad(0, 8)), ps({ pan: 3 })], // no note: no line
+    ])
+    const shaped = from(null, (p) => settings.get(padKey(p)) ?? null)
+    expect(shaped.sections[0]!.pads).toEqual(
+      new Map([
+        [9, cardPad({ pitch: -7, level: 90 })],
+        [6, cardPad({ attack: 4, release: 20, mode: PlayMode.KEY })],
+      ]),
+    )
+    // Key mode's own release (15) isn't written; the oneshot default (255) neither; 255 in key mode is.
+    expect(BeatCards.padOf(ps({ mode: PlayMode.KEY, release: 15 }))).toEqual(cardPad({ mode: PlayMode.KEY }))
+    expect(BeatCards.padOf(ps({ mode: PlayMode.LEGATO, release: 255 }))).toEqual(cardPad({ mode: PlayMode.LEGATO, release: 255 }))
+    expect(BeatCards.padOf(ps({ release: 40 }))).toEqual(cardPad({ release: 40 }))
+    expect(BeatCards.padOf(ps())).toBeNull()
+    // The fields the card carries only: trim, mute and MIDI channel don't count.
+    expect(BeatCards.padOf(ps({ start: 100, end: 900, muteGroup: true, midiChannel: 3, timeMode: 'bar' }))).toBeNull()
+    // A setting out of range is held in it, as the sheet does.
+    expect(BeatCards.padOf(ps({ pitch: 30, level: -5 }))).toEqual(cardPad({ pitch: 12, level: 0 }))
+    // The text reads back as the card.
+    const back = BeatCards.read(BeatCards.write(shaped)).card!
+    expect(back.sections[0]!.pads).toEqual(shaped.sections[0]!.pads)
+    expect(BeatCards.write(shaped).split('\n').filter((l) => l.startsWith('pad'))).toEqual(['pad A7 pitch -7 level 90', 'pad A4 attack 4 release 20 mode key'])
+  })
+
+  it('applying effect lines sets each kind apart', () => {
+    const now = FxSettings.of({
+      type: FxType.DELAY,
+      x: 0.3,
+      y: 0.4,
+      sends: [0.1, 0.2, 0.3, 0.4],
+      comp: comp({ on: true, x: 0.7, y: 0.8 }),
+      sidechain: sidechain({ on: true, group: 1, pad: 4, dests: 0b1000, x: 0.6, y: 0.2 }),
+    })
+    // Nothing on the card: nothing changes.
+    expect(BeatCards.applyFx(now, cardFx())).toEqual(now)
+    // The effect line: type and knobs, the rest alone.
+    expect(BeatCards.applyFx(now, cardFx({ type: FxType.CHORUS, x: 0.8, y: 0.1 }))).toEqual({ ...now, type: FxType.CHORUS, x: f(0.8), y: f(0.1) })
+    // None leaves the knobs.
+    expect(BeatCards.applyFx(now, cardFx({ type: FxType.NONE, x: 0.5, y: 0.5 }))).toEqual({ ...now, type: FxType.NONE })
+    // Sends: the groups named, the others 0.
+    expect(BeatCards.applyFx(now, cardFx({ sends: sendsOf([1, 0.9], [3, 0.25]) }))).toEqual({ ...now, sends: [0, f(0.9), 0, f(0.25)] })
+    // The compressor: on with its knobs, or off keeping them.
+    expect(BeatCards.applyFx(now, cardFx({ comp: comp({ on: true, x: 0.1, y: 0.2 }) }))).toEqual({ ...now, comp: comp({ on: true, x: 0.1, y: 0.2 }) })
+    expect(BeatCards.applyFx(now, cardFx({ comp: comp({ on: false }) }))).toEqual({ ...now, comp: comp({ on: false, x: 0.7, y: 0.8 }) })
+    // The sidechain: on as written, or off keeping its source and groups.
+    const on = sidechain({ on: true, group: 0, pad: 9, dests: 0b0110, x: 0.25, y: 0.7 })
+    expect(BeatCards.applyFx(now, cardFx({ sidechain: on }))).toEqual({ ...now, sidechain: on })
+    expect(BeatCards.applyFx(now, cardFx({ sidechain: sidechain({ on: false }) }))).toEqual({ ...now, sidechain: sidechain({ on: false, group: 1, pad: 4, dests: 0b1000, x: 0.6, y: 0.2 }) })
+    // From a read card, onto the default.
+    const read1 = fxCard('fx delay 40 55', 'send A 20 C 35', 'comp 40 60', 'sidechain A7 BC 25 70').card!
+    expect(BeatCards.applyFx(FxSettings.DEFAULT, read1.fx!)).toEqual(
+      FxSettings.of({ type: FxType.DELAY, x: 0.4, y: 0.55, sends: [0.2, 0, 0.35, 0], comp: comp({ on: true, x: 0.4, y: 0.6 }), sidechain: on }),
+    )
+    // A share's own card applies to the same settings.
+    const own = FxSettings.of({
+      type: FxType.FILTER,
+      x: 0.2,
+      y: 0.6,
+      sends: [0.5, 0, 0, 0.25],
+      comp: comp({ on: true, x: 0.3, y: 0.9 }),
+      sidechain: sidechain({ on: true, group: 2, pad: 11, dests: 0b0011, x: 0.4, y: 0.8 }),
+    })
+    expect(BeatCards.applyFx(FxSettings.DEFAULT, BeatCards.fxOf(own)!)).toEqual(own)
+    // Out of range values are held in it.
+    expect(BeatCards.applyFx(now, cardFx({ sends: sendsOf([0, 7]) })).sends[0]).toBe(1)
+  })
+
+  it('applying a pad line sets the settings it gives, as the pad sheet does', () => {
+    const now = ps({ pitch: 2, level: 80, pan: 3, attack: 10, release: 255, start: 5, end: 900, muteGroup: true, midiChannel: 4, timeMode: 'bpm' })
+    expect(BeatCards.applyPad(now, cardPad())).toEqual(now)
+    expect(BeatCards.applyPad(now, cardPad({ pitch: -7.5, level: 0 }))).toEqual({ ...now, pitch: -7.5, level: 0 })
+    expect(BeatCards.applyPad(now, cardPad({ pan: -16, attack: 255 }))).toEqual({ ...now, pan: -16, attack: 255 })
+    // Leaving oneshot sets the key release, as the sheet's MODE knob does; a release on the line wins.
+    expect(BeatCards.applyPad(now, cardPad({ mode: PlayMode.KEY }))).toEqual({ ...now, mode: PlayMode.KEY, release: PadSettings.KEY_RELEASE })
+    expect(BeatCards.applyPad(now, cardPad({ mode: PlayMode.KEY, release: 20 }))).toEqual({ ...now, mode: PlayMode.KEY, release: 20 })
+    expect(BeatCards.applyPad(now, cardPad({ release: 0, mode: PlayMode.LEGATO }))).toEqual({ ...now, mode: PlayMode.LEGATO, release: 0 })
+    // Back to oneshot: plays to the end.
+    const key = { ...now, mode: PlayMode.KEY, release: 40 }
+    expect(BeatCards.applyPad(key, cardPad({ mode: PlayMode.ONESHOT }))).toEqual({ ...key, mode: PlayMode.ONESHOT, release: 255 })
+    // The same mode again changes nothing; a release alone keeps the mode.
+    expect(BeatCards.applyPad(key, cardPad({ mode: PlayMode.KEY }))).toEqual(key)
+    expect(BeatCards.applyPad(key, cardPad({ release: 90 }))).toEqual({ ...key, release: 90 })
+    // Clamped like the sheet, whatever the card object holds.
+    expect(BeatCards.applyPad(now, cardPad({ pitch: 40, level: 400, pan: -50, attack: -3 }))).toEqual({ ...now, pitch: 12, level: 100, pan: -16, attack: 0 })
+    // A share's own pad line applies to the same settings.
+    const own = ps({ pitch: -7, level: 90, pan: -4, attack: 3, release: 20, mode: PlayMode.KEY })
+    expect(BeatCards.applyPad(PadSettings.DEFAULT, BeatCards.padOf(own)!)).toEqual(own)
+  })
+
+  it('every recipe card in the skill reads cleanly, and the ones with effect lines carry them', () => {
+    const genres = readFileSync(new URL('../../../../skill/arc-beats/references/genres.md', import.meta.url), 'utf8')
+    const cards = [...genres.matchAll(/```\n(ARC BEAT 1\n[\s\S]*?)\n```/g)].map((m) => m[1]!)
+    expect(cards.length).toBeGreaterThanOrEqual(28)
+    for (const t of cards) {
+      const r = BeatCards.read(t)
+      expect(problems(r)).toEqual([])
+      // What is read writes back to a card that reads the same.
+      expect(BeatCards.read(BeatCards.write(r.card!)).card!.fx).toEqual(r.card!.fx)
+    }
+    const withFx = cards.map((t) => BeatCards.read(t).card!).filter((c) => c.fx !== null)
+    expect(withFx.map((c) => c.name).sort()).toEqual(['Amen shred', 'Dub chord echo', 'Dusty lo-fi', 'Hard techno pound', 'House groove', 'Industrial pressure', 'Schranz pressure'])
+    expect(withFx.find((c) => c.name === 'House groove')!.fx!.sidechain).toEqual(sidechain({ on: true, group: 0, pad: 9, dests: 0b0010, x: 0.3, y: 0.55 }))
+    expect(withFx.find((c) => c.name === 'Dusty lo-fi')!.fx!.type).toBe(FxType.FILTER)
   })
 })

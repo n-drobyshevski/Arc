@@ -26,6 +26,8 @@ If code execution is not available, read the card yourself with the same checkli
 | `swing` | `header`, `applies`, `measured`, `swung_hits` | If `applies` is false the swing line does nothing. `measured` near `header` means the grid obeys it |
 | `features` | Recognised patterns: four on the floor, backbeat, half-time backbeat, offbeat hats, eighth or sixteenth hats, ghost notes, syncopated kick, 3-3-2 pulse, swung | Vocabulary, not verdicts |
 | `sound_mismatches` | Pads whose rhythm reads as one kind of sound (the row's label, or the assumed kit's pad when Arc only gave `343.pcm`) while the sound line's name or factory block says another: a kick row on slot 343, in the percussion block | Say it first: the beat may not sound like its rows read. Unless the user chose those sounds on purpose, propose a swap to a slot in the right block from their list |
+| `fx` | The card's effect lines as readable values, `null` with none: `effect` (type, X and Y as percents, and what they come to: "length 1/8D", "feedback 57%", "cutoff low-pass 3.8k"), `sends` (A to D in percent, the groups the line left out as 0), `comp` (on or off, drive and speed), `sidechain` (the pad, the groups it ducks, length and shape) | No `fx` means the project's FX are the default: nothing on. Say what each does to the sound, and whether it suits the style (see "FX and pad shaping" below) |
+| `pad_shaping` | For each pattern, the `pad` lines by pad: `name`, the settings given (`pitch`, `level`, `pan`, `attack`, `release`, `mode`) and `reads`, the same in words | Empty means the pads play as their sounds are. A pitch, a short release or a lower level is a deliberate choice: comment on it |
 | `variation` | `distinct_bars`, `identical_bars`, `last_bar_busier` | One distinct bar in four is a plain loop. A busier last bar is a fill |
 | `similar_to` | The closest genre recipes in genres.md (drums 55%, tempo 35%, swing 10%; a tempo that fits only at half or double speed counts for less and says so) | 80 and up: that style. 60 to 80: a cousin. Say "closest to" and name the difference. If the top match is *outside the usual range* but a close second fits the tempo, name the one that fits as the style, and the top one as the drum pattern it borrows |
 
@@ -47,7 +49,7 @@ Go in order, a sentence or two each, and start with something that works.
 
 Two or three, not ten. Each is concrete (a pad, a step, a number) and says what it changes in the sound. Then return a complete new card in one fenced block and say in a line each what changed. Keep the user's pad names and tempo unless changing them on purpose. Remind them that pasting adds a new pattern and overwrites nothing.
 
-Good edits are small: swap a sound (see below); move or remove a kick; add a ghost `o` before a snare or lower the offbeat hats; change swing by 2 to 4 points; make the last bar a fill (more snare, hats stop, a roll in the `notes` list); double the length (`bars 2`) and change the second bar; add a bass or chord line in another group.
+Good edits are small: swap a sound (see below); change an FX or a pad setting (see "FX and pad shaping"); move or remove a kick; add a ghost `o` before a snare or lower the offbeat hats; change swing by 2 to 4 points; make the last bar a fill (more snare, hats stop, a roll in the `notes` list); double the length (`bars 2`) and change the second bar; add a bass or chord line in another group.
 
 ## Sound swaps
 
@@ -63,6 +65,49 @@ A9 snare | .... X... .... X... |
 - Say how it lands: the import sheet lists each change as old → new with a tick box, and **IMPORT** writes the ticked sounds to the pads of the active project and resets those pads' settings while **PUT ON PADS** is on (it starts on; the chip switches all the ticks off and on); offline it becomes Arc's offline pad change. The user can untick a swap they do not want, and one undo takes it back.
 - With `check --sounds sounds.txt` (their share text saved to a file) you can confirm that every slot and name is in their list.
 - Without the list, describe the swap instead ("a shorter, drier snare") and do not write a sound line.
+
+## FX and pad shaping
+
+When the share carries `fx`, `send`, `comp`, `sidechain` or `pad` lines, they are part of the sound: read them as you read the notes, and comment on them in plain words. When it has none, the FX are off and the pads play as their sounds do.
+
+**Reading them** (the numbers are percents; `analyse` turns them into words):
+
+- **fx:** the effect and its two knobs. A delay's X is its length in beats (62 is a dotted eighth), Y its feedback (the number of repeats). A reverb's X is size, Y colour (down is dark). Distortion X is drive, Y colour. Chorus X is rate, Y feedback. A filter's X is the cutoff: below 50 low-pass, above 50 high-pass, 50 open; Y is resonance. A compressor's X is drive, Y speed.
+- **send:** how much of each group goes into the effect. Delay, reverb and chorus keep most of the dry sound as the send rises, so 30 is a touch of echo. Distortion, filter and compressor take the dry sound's place, so 100 is fully distorted or filtered. A group with no send is dry.
+- **comp:** the compressor on the whole mix. A fast speed (low) with high drive is pumping and aggressive, slow and low is glue.
+- **sidechain:** which pad ducks which groups, how long (length) and how it recovers (shape, low is a snap back, high a slow pump). Hardly any beat needs more than the kick ducking the bass.
+- **pad lines:** a pitch changes the sound's pitch (a kick or 808 pitched down is longer and deeper), level and pan place it, attack softens the start, a short release shortens the tail in `key` or `legato`.
+
+**Editing them.** FX and pad changes are as fair as note edits, when the sound needs it. Write the line itself, not words about it:
+
+| The sound is ... | Edit |
+|---|---|
+| chords too dry for the style | `send C 30` with `fx delay 62 55`, or `fx reverb 60 55` |
+| echo washing out the beat | lower the send (`send C 15`) or the feedback (`fx delay 62 35`) |
+| bass fights the kick | `sidechain A7 B 30 55`, or a longer length |
+| mix flat, no punch | `comp 45 30`, a fast speed and moderate drive |
+| a loop too bright and harsh | `fx filter 30 20` with the sends at 100 (low-pass) |
+| an 808 too high or too long | `pad B7 pitch -5`, `pad B7 mode key release 40` |
+| open hat ringing over the next hit | `pad A5 mode key release 15` |
+| one pad too loud | `pad A9 level 80` |
+
+- Each kind of line is independent, and `send` sets the groups it leaves out to 0, so write the whole `send` line when you change one group. A card with no effect lines leaves the user's FX alone; to turn something off, write it (`fx none`, `comp off`, `sidechain off`).
+- Say what the edit does in a line, and that the import sheet shows the FX and each pad's change as old → new (APPLY FX on at first; pad changes ticked).
+- The user can switch **APPLY FX** off to keep their own FX, so a groove edit never needs to touch them.
+
+### Genre FX recipes
+
+The recipes in [genres.md](genres.md) carry these where the style needs them. Start from the lines there:
+
+| Style | Lines | What they do |
+|---|---|---|
+| House | `sidechain A7 B 30 55` | the kick ducks the bass: the pump |
+| Dub techno | `fx delay 62 60`, `send C 30` | a dotted-eighth delay with long repeats on the chords |
+| Industrial techno | `fx distortion 65 35`, `send A 50 B 60`, `comp 55 30` | heavy dark distortion on drums and bass, squeezed together |
+| Hard techno | `fx distortion 45 55`, `send A 25 B 35`, `comp 50 25` | a medium drive that gives the kick its edge, glued by a fast compressor |
+| Schranz | `fx distortion 60 40`, `send A 35 B 45`, `comp 65 20` | a strong drive and a hard fast compressor that pumps with the kick |
+| Breakcore | `fx distortion 55 50`, `send A 45 B 30`, `comp 60 15` | the break crushed and pumped |
+| Lo-fi | `fx filter 27 20`, `send A 100 C 100` | a low-pass over the drums and chords: dull, tape-like |
 
 ## Vocabulary
 
@@ -81,6 +126,7 @@ Give a short gloss the first time.
 - **Gate / velocity:** how long a note sounds / how hard it is hit.
 - **Quantise / free time:** snap notes to the grid / leave them where played.
 - **Step / bar:** one cell of the grid (a 16th by default) / 4 beats, 16 steps at 1/16.
+- **Send:** how much of a group goes into the master effect. **Sidechain:** one sound (the kick) pushes another (the bass) down each time it plays, so they pump instead of clashing. **Release:** how long a sound takes to fade out. **Punch-in:** a live effect held with FX and a pad (see PUNCH-IN TIPS in SKILL.md).
 
 ## A short reply
 

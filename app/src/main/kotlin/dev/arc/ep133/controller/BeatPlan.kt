@@ -2,11 +2,14 @@ package dev.arc.ep133.controller
 
 import dev.arc.ep133.features.BeatCard
 import dev.arc.ep133.features.BeatCards
+import dev.arc.ep133.features.CardPad
 import dev.arc.ep133.features.CardProblem
 import dev.arc.ep133.features.CardRead
 import dev.arc.ep133.features.CardSection
 import dev.arc.ep133.features.CardSound
+import dev.arc.ep133.features.FxSettings
 import dev.arc.ep133.features.OfflinePads
+import dev.arc.ep133.features.PadSettings
 import dev.arc.ep133.features.PadSoundCache
 import dev.arc.ep133.features.PadNotes
 import dev.arc.ep133.features.PatternRecorder
@@ -61,7 +64,9 @@ internal fun soundSetOf(m: MirrorUi?, factory: Map<Int, String>? = null): SoundS
  * The text [group]'s playing pattern in [seq] shares (null [group]: the scene playing, its four patterns, the blank ones
  * left out), as an ARC BEAT card tidied and written with the pads' [names], at [tempo] and the TIMING [swing]
  * ([BeatCards.fromPatterns] keeps the swing only where every hit sits on it). Each pad the notes use gets a sound line
- * with the slot and name [sounds] knows for it. With a [list], the sounds Arc knows follow the card's closing fence
+ * with the slot and name [sounds] knows for it. The project's [fx] and each used pad's settings ([pads]; null when not
+ * known) are written as the card's effect and `pad` lines ([BeatCards.fromPatterns] leaves out what is at the defaults).
+ * With a [list], the sounds Arc knows follow the card's closing fence
  * ([BeatCards.soundList]), for Claude to choose from. Null when there is nothing to share: no notes in it.
  */
 internal fun beatShare(
@@ -72,12 +77,14 @@ internal fun beatShare(
     names: (PhysicalPad) -> String?,
     sounds: (PhysicalPad) -> CardSound? = { null },
     list: SoundSet? = null,
+    fx: FxSettings? = null,
+    pads: (PhysicalPad) -> PadSettings? = { null },
 ): BeatShare? {
     val groups = if (group == null) 0..3 else group..group
     val sections = groups.map { g -> CardSection(g, seq.selected(g), seq.pattern(g, seq.selected(g))) }
     if (sections.all { it.pattern.isEmpty }) return null
     val name = if (group == null) ClaudeText.sceneCardName(seq.scene) else ClaudeText.patternCardName(seq.selected(group), seq.scene)
-    val card = BeatCards.fromPatterns(name, tempo, swing, sections, sounds)
+    val card = BeatCards.fromPatterns(name, tempo, swing, sections, sounds, fx, pads)
     val text = ClaudeText.shareText(ClaudeText.SHARE_PROMPT, BeatCards.write(card, names, tidy = true))
     // The list follows the closing fence after a blank line (the card's text ends in a newline); readers stop at the fence.
     return BeatShare(ClaudeText.shareSubject(name), if (list == null) text else text + "\n" + BeatCards.soundList(list.source, list.names))
@@ -154,6 +161,73 @@ internal fun soundsUi(
 }
 
 /**
+ * The sheet's FX block: a row for each kind of FX the card has a line for (effect, sends, comp, duck), the project's
+ * FX now and what they become ([ClaudeText.fxRows]); a row the project has already says so ([ClaudeText.Change.same]).
+ */
+class BeatFxUi(val rows: List<ClaudeText.Change>) {
+    /** Whether some row changes the project's FX (APPLY FX has something to do). */
+    val changes: Boolean get() = rows.any { !it.same }
+}
+
+/** [card]'s FX line(s) against the project's FX [now] ([BeatCards.applyFx]); null when the card has none. */
+internal fun beatFxUi(card: BeatCard, now: FxSettings): BeatFxUi? {
+    val fx = card.fx ?: return null
+    return ClaudeText.fxRows(now, BeatCards.applyFx(now, fx), fx).takeIf { it.isNotEmpty() }?.let(::BeatFxUi)
+}
+
+/**
+ * A card's `pad` line on the sheet: the [pad], its sound [name], what the card says ([card]) and the pad's settings
+ * [now] ([hasSound]: it plays a sound now, which its settings shape). A pad whose sound is changed by the same import starts
+ * from the defaults, because a new sound resets its settings ([base]).
+ */
+class PadShapeRowUi(val pad: PhysicalPad, val name: String?, val card: CardPad, val now: PadSettings, val hasSound: Boolean) {
+    /** What the card is applied to: the pad's settings, or the defaults when a new sound is going onto it ([soundChanges]). */
+    fun base(soundChanges: Boolean): PadSettings = if (soundChanges) PadSettings.DEFAULT else now
+
+    /** The settings after the card's line ([BeatCards.applyPad]). */
+    fun after(soundChanges: Boolean): PadSettings = BeatCards.applyPad(base(soundChanges), card)
+
+    /** The settings that change, old to new ([ClaudeText.padParts]); empty when the pad has them already. */
+    fun parts(soundChanges: Boolean): List<ClaudeText.PadPart> = ClaudeText.padParts(base(soundChanges), after(soundChanges))
+
+    /** Whether the row can be ticked: there is a sound to shape (or one going on) and something to change. */
+    fun changes(soundChanges: Boolean): Boolean = (hasSound || soundChanges) && parts(soundChanges).isNotEmpty()
+}
+
+/** The sheet's PAD SHAPING block: a [rows] for each pad line of the card, [offline] when the settings stay in Arc until the EP-133 connects. */
+class PadShapingUi(val rows: List<PadShapeRowUi>, val offline: Boolean)
+
+/**
+ * [card]'s pad lines as the sheet's rows, in keypad order for each section: each pad's settings [now] (the defaults when
+ * not known), whether it has a sound ([hasSound]) and its sound's name [names]. Null when the card has no pad line.
+ */
+internal fun padShapingUi(
+    card: BeatCard,
+    now: (PhysicalPad) -> PadSettings?,
+    hasSound: (PhysicalPad) -> Boolean,
+    names: (PhysicalPad) -> String?,
+    offline: Boolean,
+): PadShapingUi? {
+    val rows = card.sections.flatMap { s ->
+        KEYPAD.mapNotNull { offset ->
+            val line = s.pads[offset]?.takeUnless { it.isEmpty } ?: return@mapNotNull null
+            val pad = PhysicalPad(s.group, offset)
+            PadShapeRowUi(pad, names(pad), line, now(pad) ?: PadSettings.DEFAULT, hasSound(pad))
+        }
+    }
+    return rows.takeIf { it.isNotEmpty() }?.let { PadShapingUi(it, offline) }
+}
+
+/** [card]'s pad lines for the pads in [pads], in section and keypad order: what IMPORT shapes. */
+internal fun padShapes(card: BeatCard, pads: Set<PhysicalPad>): List<Pair<PhysicalPad, CardPad>> =
+    card.sections.flatMap { s ->
+        KEYPAD.mapNotNull { offset ->
+            val line = s.pads[offset]?.takeUnless { it.isEmpty } ?: return@mapNotNull null
+            PhysicalPad(s.group, offset).takeIf { it in pads }?.let { it to line }
+        }
+    }
+
+/**
  * The pad changes [after] an import put on [targets] offline, taken back: each pad has the change it had [before]
  * (none: the read's sound again). A recording that was on a pad went to Takes when the import replaced it, so its change
  * isn't put back.
@@ -174,8 +248,9 @@ internal fun isBefore(c: ProjectSeq, before: ProjectSeq): Boolean = c == before 
  * The beat card sheet's state: what was [read] (the card, or its problems), its [grids], the title and [summary]
  * (null for a card that can't be read), where it would go ([placed]: group and pattern number; [scene]: the index of
  * the scene it adds), the [tempo] it offers (null when it has none or Arc's is the same; [tempoNow] is Arc's), the
- * [swing] it says (null when straight), why IMPORT is off ([blocked]; null when it isn't) and the [sounds] its sound
- * lines choose (null when it has none).
+ * [swing] it says (null when straight), why IMPORT is off ([blocked]; null when it isn't), the [sounds] its sound
+ * lines choose (null when it has none), its [fx] against the project's and the [shaping] its pad lines give (null when
+ * it has none).
  */
 class BeatImportUi(
     val read: CardRead,
@@ -189,6 +264,8 @@ class BeatImportUi(
     val swing: Int?,
     val blocked: String?,
     val sounds: SoundsUi? = null,
+    val fx: BeatFxUi? = null,
+    val shaping: PadShapingUi? = null,
 ) {
     val card: BeatCard? get() = read.card
 
@@ -207,9 +284,18 @@ private val KEYPAD = PadNotes.ROWS.flatten()
 /**
  * [read] (a card read from [text], say) planned into [seq] ([BeatCards.plan]) and drawn for the sheet: the pads of
  * each section by [names], Arc's tempo [now]. The tempo is offered as a whole number, which is what Arc keeps. [sounds] are
- * the card's sound lines matched ([soundsUi]).
+ * the card's sound lines matched ([soundsUi]), [fx] its FX against the project's ([beatFxUi]) and [shaping] its pad lines
+ * ([padShapingUi]).
  */
-internal fun beatImportUi(read: CardRead, seq: ProjectSeq, now: Double, names: (PhysicalPad) -> String?, sounds: (BeatCard) -> SoundsUi? = { null }): BeatImportUi {
+internal fun beatImportUi(
+    read: CardRead,
+    seq: ProjectSeq,
+    now: Double,
+    names: (PhysicalPad) -> String?,
+    fx: (BeatCard) -> BeatFxUi? = { null },
+    shaping: (BeatCard) -> PadShapingUi? = { null },
+    sounds: (BeatCard) -> SoundsUi? = { null },
+): BeatImportUi {
     val card = read.card
     val nowBpm = Tempo.round(now)
     if (card == null) return BeatImportUi(read, ClaudeText.CARD, null, emptyList(), emptyList(), null, null, nowBpm, null, ClaudeText.FIX_ERRORS)
@@ -231,6 +317,8 @@ internal fun beatImportUi(read: CardRead, seq: ProjectSeq, now: Double, names: (
         swing = card.swing.takeIf { it > TimingSettings.SWING_MIN },
         blocked = plan.fullGroup?.let(ClaudeText::groupFull),
         sounds = sounds(card),
+        fx = fx(card),
+        shaping = shaping(card),
     )
 }
 
@@ -283,6 +371,9 @@ internal fun applyBeat(seq: ProjectSeq, card: BeatCard, recorder: PatternRecorde
     return BeatApplied(out, plan.placed, if (plan.newScene) out.scene else null, null)
 }
 
-/** IMPORT's toast for [applied], with the [sounds] put on pads and the [skipped] ones that had no pad to go on. */
-internal fun beatImported(applied: BeatApplied, sounds: Int = 0, skipped: Int = 0): String =
-    ClaudeText.imported(applied.placed, applied.scene?.let(MirrorText::sceneLabel), sounds, skipped)
+/**
+ * IMPORT's toast for [applied], with the [sounds] put on pads and the [skipped] ones that had no pad to go on, the card's
+ * [fx] put on, and the [pads] shaped and the [padsSkipped] that could not be.
+ */
+internal fun beatImported(applied: BeatApplied, sounds: Int = 0, skipped: Int = 0, fx: Boolean = false, pads: Int = 0, padsSkipped: Int = 0): String =
+    ClaudeText.imported(applied.placed, applied.scene?.let(MirrorText::sceneLabel), sounds, skipped, fx, pads, padsSkipped)
