@@ -33,7 +33,8 @@ import { canPickFolder, pickFolder } from '../platform/storage/external'
 import { pickFiles, readFile } from '../platform/files/pick'
 import { saveBytes } from '../platform/files/save'
 import { onLaunchFiles } from '../platform/files/launchQueue'
-import { shareFile } from '../platform/share/share'
+import { canShareFiles, shareFile } from '../platform/share/share'
+import { IdbTakeStore, memoryTakeStore, type TakeStore } from '../platform/storage/takeStore'
 import { WebAudioPlayer } from '../platform/audio/player'
 import { LiveAudio } from '../platform/audio/liveAudio'
 import { createWakeLock } from '../platform/wakelock/wakeLock'
@@ -99,6 +100,7 @@ export async function createBrowserDeps(options: BrowserDepsOptions = {}): Promi
   const storage = options.storage ?? pageStorage(demo)
   let library: LibraryApi
   let padSounds: PadSoundStore
+  let takes: TakeStore
   try {
     const dbOptions: OpenOptions = {}
     if (demo) dbOptions.name = DEMO_DB_NAME
@@ -107,11 +109,14 @@ export async function createBrowserDeps(options: BrowserDepsOptions = {}): Promi
     const lib = await Library.open(demo ? { dbOptions, channel: browserChannel(DEMO_CHANNEL_NAME) } : { dbOptions })
     library = lib
     padSounds = new IdbPadSoundStore(lib.db)
+    takes = new IdbTakeStore(lib.db)
   } catch (e) {
     // Without a database the app still starts; every library action says why it failed.
     library = unavailableLibrary(e)
     // Live's pad copies then last for the session.
     padSounds = memoryPadSoundStore()
+    // And takes too.
+    takes = memoryTakeStore()
   }
   const settings = new SettingsStore(storage)
   const mirrorPrefs = new MirrorPrefs(storage)
@@ -143,10 +148,12 @@ export async function createBrowserDeps(options: BrowserDepsOptions = {}): Promi
     },
     share: {
       share: (name, data, mime, title, text) => shareFile(name, data, mime, title, text === undefined ? {} : { text }),
+      canShareFiles: () => canShareFiles(),
     },
     player,
     liveAudio,
     padSounds,
+    takes,
     lastRead: new LastReadPrefs(storage),
     offlinePads: new OfflinePadsPrefs(storage),
     factory: browserFactory(() => doc?.baseURI ?? globalThis.location.href),

@@ -39,6 +39,16 @@ export function browserShareEnv(): ShareEnv {
   }
 }
 
+/** Whether [env] can share a file at all (a WAV, say): where not, Share is better left out than saving instead. */
+export function canShareFiles(env: ShareEnv = browserShareEnv()): boolean {
+  if (!env.share || !env.canShare || typeof File !== 'function') return false
+  try {
+    return env.canShare({ files: [new File([new Uint8Array(0)], 'take.wav', { type: 'audio/wav' })] })
+  } catch {
+    return false
+  }
+}
+
 export interface ShareOptions {
   /** EXTRA_TEXT; defaults to Strings.SHARE_TITLE_PREFIX + title, as MainActivity.shareBytes does. */
   text?: string

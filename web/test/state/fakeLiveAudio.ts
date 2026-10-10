@@ -2,6 +2,8 @@
 import { signal, type Signal } from '@preact/signals'
 import { WebLatencyHint } from '../../src/core/text/latencyText'
 import type { LiveAudioDeps, LiveEngineInfo, LivePress } from '../../src/state/deps'
+import type { RecState } from '../../src/core/features/takeRecorder'
+import type { RecordedTake } from '../../src/platform/audio/liveAudio'
 
 export interface FakeLiveAudio extends LiveAudioDeps {
   readonly loaded: Map<string, { pcm: Int16Array; channels: number; sampleRate: number }>
@@ -25,6 +27,11 @@ export interface FakeLiveAudio extends LiveAudioDeps {
   readonly engine: Signal<LiveEngineInfo | null>
   /** The latencyHint choices made, in order. */
   readonly hints: WebLatencyHint[]
+  readonly rec: Signal<RecState>
+  /** TAKE calls in order: arm, stop, transport:start, transport:stop. */
+  readonly recLog: string[]
+  /** Ends the take as the output would: [take] or null, and whether the limit ended it. */
+  endTake(take: RecordedTake | null, limit?: boolean): void
 }
 
 /** [withLate]: with a `late` signal of its own, as the real LiveAudio (the controller then follows it). */
@@ -32,6 +39,8 @@ export function fakeLiveAudio(withLate = false): FakeLiveAudio {
   const voices = signal<ReadonlySet<string>>(new Set())
   const startedL = new Set<(id: string, ms: number, route: string, engine?: LiveEngineInfo) => void>()
   const slowL = new Set<(ms: number) => void>()
+  const takeL = new Set<(t: RecordedTake | null, limit: boolean) => void>()
+  const rec = signal<RecState>({ kind: 'idle' })
   const set = (f: (s: Set<string>) => void): void => {
     const next = new Set(voices.peek())
     f(next)
@@ -104,6 +113,31 @@ export function fakeLiveAudio(withLate = false): FakeLiveAudio {
     },
     slow(ms) {
       for (const l of slowL) l(ms)
+    },
+    rec,
+    recLog: [],
+    arm() {
+      a.recLog.push('arm')
+      if (!a.available) return false
+      if (rec.peek().kind === 'idle') rec.value = { kind: 'armed' }
+      return true
+    },
+    stopRecording() {
+      a.recLog.push('stop')
+    },
+    transportStarted() {
+      a.recLog.push('transport:start')
+    },
+    transportStopped() {
+      a.recLog.push('transport:stop')
+    },
+    onTake(l) {
+      takeL.add(l)
+      return () => takeL.delete(l)
+    },
+    endTake(take, limit = false) {
+      rec.value = { kind: 'idle' }
+      for (const l of [...takeL]) l(take, limit)
     },
     latencyHint: signal<WebLatencyHint>(WebLatencyHint.ZERO),
     engine: signal<LiveEngineInfo | null>(null),

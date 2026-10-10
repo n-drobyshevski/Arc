@@ -111,6 +111,37 @@ export const WebText = {
    */
   LIVE_SLOW_OUTPUT:
     'Sound plays late here (often 0.2 s or more), as it does over Bluetooth. A wired output or the built-in speakers are much quicker.',
+  /** Replaces MirrorText.TAKES_NOTE "A take holds the pads and keys played on the phone, …". */
+  TAKES_NOTE:
+    "A take holds the pads and keys played in this browser, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save or Share copies one out.",
+  /** Takes' "Save or Share" where the browser can't share files: Save WAV is the only way out. */
+  TAKES_NOTE_SAVE_ONLY:
+    "A take holds the pads and keys played in this browser, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save WAV copies one out.",
+  // ---------- Live's device view (web only: the EP-133 drawn on a wide screen) ----------
+  /** The device view's label for screen readers. */
+  DEVICE_VIEW: 'EP-133 K.O. II',
+  /** A key's shortcuts card: "SOUND on the EP-133". */
+  keyOnDevice(key: string): string {
+    return `${key} on the EP-133`
+  },
+  /** Under a key's shortcuts: what the key does in arc. */
+  DEVICE_KEY_NOTE: 'arc only listens in Live. This key works on the device.',
+  DEVICE_PLAY_NOTE: 'Lit while the EP-133 plays. arc never starts or stops the device.',
+  DEVICE_VOLUME_NOTE: "The device's own volume. Sound played in arc follows this computer's volume.",
+  /** The link to the guide, searched for the key. */
+  allShortcuts(key: string): string {
+    return `All ${key} shortcuts`
+  },
+  NO_SHORTCUTS: 'No shortcuts in the guide use this key on its own.',
+  /** Live tools' third view on the desk: the EP-133 drawn whole. */
+  VIEW_DEVICE: 'Device',
+  /** The plate's line while TAKE waits. */
+  TAKE_ARMED: 'Take armed: play a pad or start the EP-133',
+  /** −/+ in the pads view. */
+  PREV_GROUP: 'Previous group',
+  NEXT_GROUP: 'Next group',
+  OCTAVE_DOWN: 'Octave down',
+  OCTAVE_UP: 'Octave up',
   /** Replaces SettingsText.PAD_SOUNDS "Pad sounds saved on the phone". */
   PAD_SOUNDS: 'Pad sounds saved in this browser',
   /** SettingsText.padSounds with [PAD_SOUNDS]. */

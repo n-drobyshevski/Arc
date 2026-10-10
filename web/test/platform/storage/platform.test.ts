@@ -84,7 +84,7 @@ describe('openArcDb across tabs', () => {
     await vi.waitFor(() => expect(blocked).toBe(1))
     v1.close()
     const db = await opening
-    expect(db.version).toBe(3)
+    expect(db.version).toBe(4)
     db.close()
   })
 
@@ -93,7 +93,7 @@ describe('openArcDb across tabs', () => {
     let told = 0
     const db = await openArcDb({ name, onVersionChange: () => told++ })
     const v4 = await new Promise<IDBDatabase>((resolve, reject) => {
-      const req = indexedDB.open(name, 4)
+      const req = indexedDB.open(name, 5)
       req.onsuccess = () => resolve(req.result)
       req.onerror = () => reject(req.error)
     })

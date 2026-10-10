@@ -68,8 +68,10 @@ import java.util.concurrent.Executors
  * that thread; and on the caller's when a press or REC opened it after [open]
  * had failed.
  *
- * REC ([arm]) records the mix into a take: from the first sound after it to
- * [stopRecording], Live closing or [TakeRecorder.MAX_SECONDS]. [onTake] gets
+ * REC ([arm]) records the mix into a take: from the first sound after it (or
+ * the EP-133 starting to play, [transportStarted]) to [stopRecording], Live
+ * closing, [TakeRecorder.MAX_SECONDS], or the device stopping when its PLAY
+ * started the take ([transportStopped]). [onTake] gets
  * the file (null when nothing was played or it couldn't be written), and
  * whether the limit stopped it, on the take's writer thread. SAMPLE's RSP
  * takes the same mix beside it ([sampleTap], before REC sees each block),
@@ -232,6 +234,9 @@ class LiveAudio(
     // A take armed but not yet picked up by the output's thread, and a stop asked for.
     @Volatile private var armed: Take? = null
     @Volatile private var stopAsked = false
+    // The device's PLAY and STOP (MIDI clock), passed to the take on the audio thread.
+    @Volatile private var transportStartAsked = false
+    @Volatile private var transportStopAsked = false
 
     // SAMPLE's RSP, fed on the output's thread; set and cleared under this object's lock.
     @Volatile private var tap: MixTap? = null
@@ -430,6 +435,16 @@ class LiveAudio(
     /** Stops the take: what was recorded is saved (nothing, if nothing was played). */
     fun stopRecording() {
         if (_rec.value != RecState.Idle) stopAsked = true
+    }
+
+    /** The EP-133 started playing (MIDI Start or Continue): an armed take starts now. */
+    fun transportStarted() {
+        if (_rec.value == RecState.Armed) transportStartAsked = true
+    }
+
+    /** The EP-133 stopped (MIDI Stop): a take its PLAY started ends. */
+    fun transportStopped() {
+        if (_rec.value != RecState.Idle) transportStopAsked = true
     }
 
     /** Lets go of voice [key] (every voice of a KEY-mode pad's; a ONESHOT one plays on to its end). */
@@ -634,6 +649,14 @@ class LiveAudio(
                 armed = null
                 take?.let { t -> end(t) }
                 take = it
+            }
+            if (transportStartAsked) {
+                transportStartAsked = false
+                take?.recorder?.transportStart()
+            }
+            if (transportStopAsked) {
+                transportStopAsked = false
+                if (take?.recorder?.byTransport == true) stopAsked = true
             }
             if (stopAsked) {
                 stopAsked = false

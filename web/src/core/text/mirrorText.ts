@@ -4,8 +4,6 @@
 //
 // Web deltas:
 // - jsToFixed and String.format("%.0f") are native toFixed.
-// - The web has no REC (TAKE), so only its takeLength is here, for SAMPLE's
-//   times; TAKE's words are Android's only.
 
 import type { ArpNote, ArpOrder } from '../features/arp'
 import { FactorySounds } from '../features/factorySounds'
@@ -20,6 +18,7 @@ import { ProjectSource } from '../features/projectStep'
 import { SampleSource } from '../features/sampleSource'
 import { SwitchTime } from '../features/scenes'
 import type { TransportState } from '../features/transport'
+import { TakeRecorder, type RecState } from '../features/takeRecorder'
 import { FeatureText } from './featureText'
 import { plural } from './format'
 
@@ -586,11 +585,56 @@ export const MirrorText = {
   },
   OFFLINE_DISCARDED: 'Offline pad changes discarded.',
 
+  // ---------- TAKE: takes of what is played on the phone ----------
+  /** SAMPLE's take going on, for screen readers ("Pad A 1, Rec"). */
+  REC: 'Rec',
+  TAKES: 'Takes',
+  TAKES_NOTE:
+    "A take holds the pads and keys played on the phone, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save or Share copies one out.",
+  TO_DEVICE: 'To EP-133',
+  DELETE_TAKE: 'Delete this take?',
+  NO_OUTPUT: 'There is no sound output to record from.',
+  SHARE_TAKE_FAILED: 'Sharing failed. Use Save WAV instead.',
+
   /** "0:12", "10:00". */
   takeLength(seconds: number): string {
     // Kotlin's toLong(): toward zero.
     const s = Math.trunc(seconds)
     return `${Math.trunc(s / 60)}:${String(s % 60).padStart(2, '0')}`
+  },
+
+  takeSaved(seconds: number): string {
+    return `Take saved (${MirrorText.takeLength(seconds)}). It's in Live tools.`
+  },
+
+  takeAtLimit(seconds: number): string {
+    return `The take reached ${TakeRecorder.MAX_SECONDS / 60} minutes and was saved (${MirrorText.takeLength(seconds)}).`
+  },
+
+  takeFailed(reason: string): string {
+    return `The take couldn't be saved: ${reason}`
+  },
+
+  // REC is called TAKE now that RECORD is the pattern's, as on the device; it moves to Live tools.
+  TAKE: 'Take',
+  TAKES_HINT:
+    'Tap TAKE, then play: recording starts with the first sound, or when the EP-133 starts playing, and stops when you tap TAKE again or, if its PLAY started it, when the EP-133 stops.',
+
+  /** "Take 0:12": the TAKE key and the display's badge while a take is recorded. */
+  takeBadge(seconds: number): string {
+    return `${MirrorText.TAKE} ${MirrorText.takeLength(seconds)}`
+  },
+
+  /** What the TAKE key does now, for screen readers. */
+  takeDescription(state: RecState): string {
+    switch (state.kind) {
+      case 'idle':
+        return 'Take. Recording starts with the first sound you play, or when the EP-133 starts playing.'
+      case 'armed':
+        return "Take, waiting for the first sound or the EP-133's PLAY. Tap to cancel."
+      case 'recording':
+        return `Recording a take, ${MirrorText.takeLength(state.seconds)}. Tap to stop.`
+    }
   },
 
   // ---------- SAMPLE: recording into a pad (an addition) ----------

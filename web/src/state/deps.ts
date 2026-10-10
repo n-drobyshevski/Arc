@@ -17,6 +17,9 @@
 // [Deps.lastRead] Live's last read of the device (files/live-last.json) and
 // [Deps.offlinePads] its pad changes made offline (files/live-pads.json).
 
+import type { RecState } from '../core/features/takeRecorder'
+import type { RecordedTake } from '../platform/audio/liveAudio'
+import type { TakeStore } from '../platform/storage/takeStore'
 import type { ReadonlySignal } from '@preact/signals'
 import { signal } from '@preact/signals'
 import type { PadSoundStore } from '../core/features/padSoundCache'
@@ -174,6 +177,19 @@ export interface LiveAudioDeps {
   setLatencyHint?(choice: WebLatencyHint): void
   /** The open output's latency-test row once it is set up (again whenever its reported delay changes), else null. */
   readonly engine?: ReadonlySignal<LiveEngineInfo | null>
+  // TAKE (LiveAudio.kt's takes); an output without them has no TAKE.
+  /** The TAKE key's state. */
+  readonly rec?: ReadonlySignal<RecState>
+  /** Arms TAKE: the next sound (or the EP-133's PLAY) starts a take. False when there is no output. */
+  arm?(): boolean
+  /** Stops the take: what was recorded is handed to [onTake]. */
+  stopRecording?(): void
+  /** The EP-133 started playing (MIDI Start or Continue). */
+  transportStarted?(): void
+  /** The EP-133 stopped (MIDI Stop). */
+  transportStopped?(): void
+  /** A take ended: its WAV, or null when nothing was played; [limit] when the 10-minute limit ended it. */
+  onTake?(listener: (take: RecordedTake | null, limit: boolean) => void): () => void
 }
 
 /** A Live output that never opens (tests, or a browser without Web Audio). */
@@ -226,6 +242,8 @@ export interface FileDeps {
 /** Files.share. 'saved' means the browser could not share files and saved instead. */
 export interface ShareDeps {
   share(name: string, data: FileData, mime: string, title: string, text?: string): Promise<ShareResult>
+  /** Whether this browser can share a file (navigator.canShare with files); where not, Share is left out. */
+  canShareFiles?(): boolean
 }
 
 /**
@@ -270,6 +288,8 @@ export interface Deps {
   liveAudio: LiveAudioDeps
   /** Where Live's copies of the device's pad sounds are kept (Android files/pad-sounds). */
   padSounds: PadSoundStore
+  /** Where Live's takes are kept (Android files/takes); without it there is no TAKE. */
+  takes?: TakeStore
   /** Live's last read, shown while the device is not connected. */
   lastRead: LastReadDeps
   /** Live's pad changes made offline, until the EP-133 connects (or Reset pads). */

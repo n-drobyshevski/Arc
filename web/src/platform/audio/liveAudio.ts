@@ -83,6 +83,8 @@
 //   as they are (Kotlin hands over a whole VoiceShape).
 
 import { signal, type ReadonlySignal, type Signal } from '@preact/signals'
+import { REC_ARMED, REC_IDLE, type RecState } from '../../core/features/takeRecorder'
+import { wavHeader } from '../../core/formats/wav'
 import { LatencyText, WebLatencyHint } from '../../core/text/latencyText'
 import { WebText } from '../../core/text/webText'
 import type { VoiceShape } from '../../core/formats/voiceMixer'
@@ -299,6 +301,39 @@ export function heardAt(
   return now + (time - ctx.currentTime) * 1000 + l.baseMs + l.outputMs
 }
 
+/** A take TAKE recorded: a 16-bit stereo WAV of [frames] frames at [rate]. */
+export interface RecordedTake {
+  readonly wav: Blob
+  readonly frames: number
+  readonly rate: number
+  readonly seconds: number
+}
+
+/** How long Live letting the output go waits for the mixer to finish a take before it is cut where it is. */
+export const TAKE_END_WAIT_MS = 2000
+
+/** The WAV of [chunks] (interleaved stereo frames, in order), cut to its first [keep] frames. */
+export function takeWav(chunks: readonly Int16Array[], keep: number, rate: number): Blob {
+  const parts: BlobPart[] = [wavHeader(keep * 4, 2, rate) as BlobPart]
+  let left = keep * 2
+  for (const c of chunks) {
+    if (left <= 0) break
+    const n = Math.min(left, c.length)
+    const part = n === c.length ? c : c.subarray(0, n)
+    // WAV is little-endian, as every browser's Int16Array is.
+    parts.push(new Uint8Array(part.buffer, part.byteOffset, n * 2) as BlobPart)
+    left -= n
+  }
+  return new Blob(parts, { type: 'audio/wav' })
+}
+
+/** The take being received from an output. */
+interface Receiving {
+  readonly chunks: Int16Array[]
+  frames: number
+  readonly rate: number
+}
+
 /** How the output was set up, for the debug log: "48000 Hz, AudioWorklet, base latency 5 ms, output latency 21 ms". */
 export function describeOutput(ctx: LiveContextLike, kind: string): string {
   const l = outputLatency(ctx)
@@ -340,6 +375,10 @@ interface Stream {
   recheck: boolean
   /** Its row in the latency test as last read ([LiveAudio.engineOf]); null before it is set up. */
   engine: OutputEngine | null
+  /** Let go with a take going: still listening for its end. */
+  ending: boolean
+  /** The take being received from this output. */
+  receiving: Receiving | null
 }
 
 const EMPTY: ReadonlySet<string> = new Set()
@@ -378,6 +417,10 @@ export class LiveAudio {
   private readonly startedListeners = new Set<(id: string, latencyMs: number, route: string, engine: OutputEngine) => void>()
   private readonly slowListeners = new Set<(outputMs: number) => void>()
   private readonly logListeners = new Set<(line: string) => void>()
+  private readonly takeListeners = new Set<(take: RecordedTake | null, limit: boolean) => void>()
+  private readonly _rec = signal<RecState>(REC_IDLE)
+  /** The TAKE key's state. */
+  readonly rec: ReadonlySignal<RecState> = this._rec
 
   constructor(private readonly backend: LiveBackend = browserLiveBackend()) {
     this.steppedBack = backend.savedHint?.() === 'interactive'
@@ -445,6 +488,45 @@ export class LiveAudio {
   }
 
   /**
+   * A take ended: the WAV, or null when nothing was played; [limit] when
+   * TakeRecorder.MAX_SECONDS ended it.
+   */
+  onTake(listener: (take: RecordedTake | null, limit: boolean) => void): () => void {
+    return add(this.takeListeners, listener)
+  }
+
+  /**
+   * Arms TAKE: the next sound (or the EP-133's PLAY) starts a take. Opens the
+   * output first if Live hasn't. False when there is no output.
+   */
+  arm(): boolean {
+    if (this._rec.value.kind !== 'idle') return true
+    const s = this.ensure()
+    if (!s) return false
+    s.parked = false
+    wake(s.ctx)
+    s.receiving = { chunks: [], frames: 0, rate: s.ctx.sampleRate }
+    send(s, { t: 'arm' })
+    this._rec.value = REC_ARMED
+    return true
+  }
+
+  /** Stops the take: what was recorded is saved (nothing, if nothing was played). */
+  stopRecording(): void {
+    if (this._rec.value.kind !== 'idle' && this.stream) send(this.stream, { t: 'stopRec' })
+  }
+
+  /** The EP-133 started playing (MIDI Start or Continue): an armed take starts now. */
+  transportStarted(): void {
+    if (this._rec.value.kind === 'armed' && this.stream) send(this.stream, { t: 'transport', playing: true })
+  }
+
+  /** The EP-133 stopped (MIDI Stop): a take its PLAY started ends. */
+  transportStopped(): void {
+    if (this._rec.value.kind !== 'idle' && this.stream) send(this.stream, { t: 'transport', playing: false })
+  }
+
+  /**
    * Live came on screen: sets the output up now, before any press (the
    * worklet loaded, the samples sent), or wakes a suspended one. Before the
    * page's first tap it stays suspended and the first press wakes it.
@@ -498,14 +580,45 @@ export class LiveAudio {
     this._voices.value = EMPTY
     this._late.value = null
     this._engine.value = null
+    const recording = this._rec.value.kind !== 'idle'
+    this._rec.value = REC_IDLE
     if (!s) return
     this.checkGlitches(s)
     s.closed = true
     s.pending.length = 0
     s.pendingLoads.clear()
     s.urgent.clear()
+    if (recording && s.link && s.receiving) {
+      // A take going is saved like any other: the mixer sends what it has and how much to keep, then the output goes.
+      s.ending = true
+      s.link.send({ t: 'stopAll' })
+      s.link.send({ t: 'stopRec' })
+      setTimeout(() => {
+        if (!s.ending) return
+        // No end came: keep all that arrived.
+        this.endTake(s, s.receiving?.frames ?? 0, false)
+        this.shut(s)
+      }, TAKE_END_WAIT_MS)
+      return
+    }
+    s.receiving = null
+    this.shut(s)
+  }
+
+  private shut(s: Stream): void {
+    s.ending = false
     if (s.link) quietly(() => s.link?.close())
     s.ctx.close().catch(() => undefined)
+  }
+
+  private endTake(s: Stream, keep: number, limit: boolean): void {
+    const r = s.receiving
+    s.receiving = null
+    if (!r) return
+    const kept = Math.min(keep, r.frames)
+    const take: RecordedTake | null =
+      kept > 0 ? { wav: takeWav(r.chunks, kept, r.rate), frames: kept, rate: r.rate, seconds: kept / r.rate } : null
+    for (const f of [...this.takeListeners]) f(take, limit)
   }
 
   /** Creates or wakes the output. Call synchronously in a press handler, before any await. */
@@ -652,6 +765,8 @@ export class LiveAudio {
       pressedAt: Number.NEGATIVE_INFINITY,
       recheck: false,
       engine: null,
+      ending: false,
+      receiving: null,
     }
     this.stream = s
     // The samples loaded, ready again, and the FX bus as it was set up (before any press).
@@ -738,7 +853,8 @@ export class LiveAudio {
    * samples go over again, as for any new one), woken when the page has had a tap.
    */
   private replaceStale(s: Stream): void {
-    if (s.closed || this.stream !== s || s.hint === this.hint || this._voices.value.size !== 0) return
+    // Not while a take goes: it would be cut in two.
+    if (s.closed || this.stream !== s || s.hint === this.hint || this._voices.value.size !== 0 || this._rec.value.kind !== 'idle') return
     const wait = s.pressedAt + REPLACE_QUIET_MS - this.backend.now()
     if (wait > 0) {
       if (!s.recheck) {
@@ -756,8 +872,25 @@ export class LiveAudio {
   }
 
   private received(s: Stream, m: FromMixer): void {
+    // A take's chunks and end still arrive from an output let go mid-take.
+    if (m.t === 'take' || m.t === 'takeEnd') {
+      if (this.stream !== s && !s.ending) return
+      if (m.t === 'take') {
+        if (s.receiving) {
+          s.receiving.chunks.push(m.pcm)
+          s.receiving.frames += m.pcm.length / 2
+        }
+        return
+      }
+      this.endTake(s, m.keep, m.limit)
+      if (s.ending) this.shut(s)
+      return
+    }
     if (s.closed || this.stream !== s) return
     switch (m.t) {
+      case 'rec':
+        this._rec.value = m.state
+        return
       case 'keys':
         this._voices.value = m.keys.length === 0 ? EMPTY : new Set(m.keys)
         // Quiet: an output that glitched can go now.

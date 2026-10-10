@@ -38,6 +38,7 @@
 // On a phone on its side (ui/live/window.ts liveInBar; never on the desk),
 // Live's display line rides in the top bar's middle (LiveBar, MirrorScreen's
 // LivePill) and the page leaves it out.
+import { signal } from '@preact/signals'
 import { Component, type ComponentChildren, type JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { FactorySounds } from './core/features/factorySounds'
@@ -147,6 +148,32 @@ export function App(props: AppProps): JSX.Element {
 }
 
 /** Root(): the screens by priority, the sheets over them, the toast over everything. */
+
+/** The guide's search when a device key's card asks for it (web only). */
+const guideSearch = signal<{ readonly query: string } | null>(null)
+
+/** Live's device view on the desk (web only), remembered in this browser. */
+const DEVICE_VIEW_KEY = 'arc.liveDeviceView'
+const deviceView = signal<boolean>(readDeviceView())
+
+function readDeviceView(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(DEVICE_VIEW_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function setDeviceView(on: boolean): void {
+  deviceView.value = on
+  try {
+    if (on) globalThis.localStorage?.setItem(DEVICE_VIEW_KEY, '1')
+    else globalThis.localStorage?.removeItem(DEVICE_VIEW_KEY)
+  } catch {
+    // Kept for this page only.
+  }
+}
+
 function Root(): JSX.Element {
   const c = useController()
   const nav = useNav()
@@ -332,7 +359,7 @@ function Root(): JSX.Element {
         onTheme={(t) => c.setTheme(t)}
         guideOpen={v.guide}
         onGuide={(open) => (open ? nav.openScreen({ kind: 'guide' }) : nav.close(screenLayer({ kind: 'guide' })))}
-        guide={<GuideScreen onBack={() => nav.close(screenLayer({ kind: 'guide' }))} />}
+        guide={<GuideScreen onBack={() => nav.close(screenLayer({ kind: 'guide' }))} search={guideSearch.value} />}
         desk={desk}
         // Live's EDIT tab under GUIDE (on the desk it hangs on the K.O. II panel instead).
         edgeTab={canEdit && !desk ? <EditEdgeTab on={editPads} onChange={setEditPads} inert={v.menu} /> : undefined}
@@ -474,6 +501,30 @@ function TabScreen(props: {
       return (
         <MirrorScreen
           mirror={liveMirror(c)}
+          take={c.canRecord ? { state: c.rec.value, onTake: () => c.toggleTake() } : null}
+          deviceView={deviceView.value}
+          onDeviceView={(on) => setDeviceView(on)}
+          onGuide={(query) => {
+            guideSearch.value = { query }
+            nav.openScreen({ kind: 'guide' })
+          }}
+          takes={{
+            list: state.takes,
+            playing: c.playing.value,
+            keyOf: (t) => c.takeKey(t),
+            fmtWhen: (ms) => c.fmtDateTime(ms),
+            connected: state.device !== null,
+            canShare: c.canShareTakes,
+            onPlay: (t) => void c.playTake(t),
+            onStop: () => c.stopPlayback(),
+            onShare: (t) => void c.shareTake(t),
+            onSave: (t) => void c.saveTake(t),
+            onToDevice: (t) => {
+              void c.takeToDevice(t)
+              nav.selectTab('device')
+            },
+            onDelete: (t) => void c.deleteTake(t),
+          }}
           onGetFactory={c.canGetFactory && FactorySounds.inLibrary(state.backups) === null ? () => void c.getFactorySounds() : null}
           offlinePads={state.offlinePads > 0 ? { count: state.offlinePads, onReset: () => c.resetOfflinePads() } : null}
           onStop={() => c.stopPlayback()}

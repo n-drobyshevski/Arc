@@ -16,6 +16,7 @@ import { DemoData } from '../helpers/demoData'
 import { connectMock, fakeNavigator, type FakeEp } from '../helpers/fakeMidiAccess'
 import type { MockEP133 } from '../helpers/mockDevice'
 import { fakeLiveAudio, type FakeLiveAudio } from './fakeLiveAudio'
+import { memoryTakeStore } from '../../src/platform/storage/takeStore'
 
 let dbCount = 0
 
@@ -28,6 +29,7 @@ export interface LiveHarness {
   storage: ReturnType<typeof memoryStorage>
   padSounds: ReturnType<typeof memoryPadSoundStore>
   liveAudio: FakeLiveAudio
+  takes: ReturnType<typeof memoryTakeStore>
   toasts: ToastMsg[]
   setVisible(v: boolean): void
   /** The page is going away (pagehide). */
@@ -70,6 +72,7 @@ export async function liveHarness(opts: LiveHarnessOptions = {}): Promise<LiveHa
   const storage = opts.storage ?? memoryStorage()
   const padSounds = opts.padSounds ?? memoryPadSoundStore()
   const liveAudio = fakeLiveAudio(opts.late ?? false)
+  const takes = memoryTakeStore()
   const visListeners = new Set<(v: boolean) => void>()
   const hideListeners = new Set<() => void>()
   let visible = true
@@ -91,6 +94,7 @@ export async function liveHarness(opts: LiveHarnessOptions = {}): Promise<LiveHa
     player: new NullPlayer(),
     liveAudio,
     padSounds,
+    takes,
     lastRead: new LastReadPrefs(storage),
     offlinePads: new OfflinePadsPrefs(storage),
     factory: opts.factory,
@@ -130,6 +134,7 @@ export async function liveHarness(opts: LiveHarnessOptions = {}): Promise<LiveHa
     storage,
     padSounds,
     liveAudio,
+    takes,
     toasts,
     setVisible(v) {
       visible = v

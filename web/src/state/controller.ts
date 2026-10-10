@@ -68,6 +68,9 @@ import { compare as comparePaks } from '../core/features/pakCompare'
 import { frames, seconds, type TrimRange } from '../core/features/sampleTrim'
 import { nameFor, nextFree, upload, UploadItem } from '../core/features/sampleUpload'
 import { decodeWav } from '../core/formats/wav'
+import { REC_IDLE, type RecState } from '../core/features/takeRecorder'
+import type { RecordedTake } from '../platform/audio/liveAudio'
+import type { TakeInfo } from '../platform/storage/takeStore'
 import { assignPad as writePadSound, type SoundEntry } from '../core/protocol/device'
 import { CancelledError } from '../core/protocol/errors'
 import { download } from '../core/protocol/fs'
@@ -154,6 +157,8 @@ export class ArcController {
   readonly coach: GuidePrefs
   /** The Live voices sounding on the phone (pad "live:g:o" and key "keys:i" ids), for the rings (ArcController.liveKeys). */
   readonly liveVoices: ReadonlySignal<ReadonlySet<string>>
+  /** The TAKE key's state (ArcController.rec). */
+  readonly rec: ReadonlySignal<RecState>
   /** The pads sounding on the phone, as padKey numbers (MainActivity's playingPads). */
   readonly playingPads: ReadonlySignal<ReadonlySet<number>>
   /** The KEYS notes sounding on the phone (grid and piano), first pressed first (MainActivity's playingNotes). */
@@ -220,6 +225,7 @@ export class ArcController {
       markSeen: () => this.setGuideSeen(),
     }
     this.liveVoices = deps.liveAudio.voices
+    this.rec = deps.liveAudio.rec ?? signal<RecState>(REC_IDLE)
     this.playingPads = computed(() => {
       const out = new Set<number>()
       for (const k of this.liveVoices.value) {
@@ -282,6 +288,7 @@ export class ArcController {
       live: this.live,
       fmtDateTime: (ms) => this.fmtDateTime(ms),
       deviceRead: () => void this.offerOfflinePads(),
+      transport: (playing) => (playing ? deps.liveAudio.transportStarted?.() : deps.liveAudio.transportStopped?.()),
     })
   }
 
@@ -321,6 +328,8 @@ export class ArcController {
       )
     }
     if (audio.onLog) this.cleanups.push(audio.onLog((line) => this.trafficLog.note(line)))
+    if (audio.onTake) this.cleanups.push(audio.onTake((take, limit) => void this.takeDone(take, limit)))
+    void this.loadTakes()
     this.cleanups.push(lib.subscribe(() => void this.reloadLibrary()))
     this.cleanups.push(
       deps.settings.subscribe((s) => {
@@ -1783,6 +1792,136 @@ export class ArcController {
 
   pakBlob(b: BackupRecord): Promise<Blob> {
     return this.deps.library.blob(b.id)
+  }
+
+  // ---------- takes: Live recorded (an addition) ----------
+
+  /** Whether TAKE can work here: an output that records, and somewhere to keep takes. */
+  get canRecord(): boolean {
+    return this.deps.takes !== undefined && this.deps.liveAudio.arm !== undefined
+  }
+
+  /** Whether a take's Share is offered (only where the browser can share a file). */
+  get canShareTakes(): boolean {
+    return this.deps.share.canShareFiles?.() === true
+  }
+
+  private async loadTakes(): Promise<void> {
+    const store = this.deps.takes
+    if (!store) return
+    let takes: TakeInfo[] = []
+    try {
+      takes = await store.list()
+    } catch {
+      // As Kotlin's getOrDefault(emptyList()).
+    }
+    this.store.update((st) => ({ ...st, takes }))
+  }
+
+  /** TAKE (REC before RECORD was the pattern's): arms a take (the next sound starts it), or stops the one going. Call from a tap. */
+  toggleRec(): void {
+    const audio = this.deps.liveAudio
+    if (this.rec.peek().kind !== 'idle') {
+      audio.stopRecording?.()
+      return
+    }
+    if (!this.canRecord || audio.arm?.() !== true) this.toast(MirrorText.NO_OUTPUT, true)
+  }
+
+  /** TAKE (REC's new name, in Live tools): as [toggleRec]. */
+  toggleTake(): void {
+    this.toggleRec()
+  }
+
+  /** A take ended: saved, nothing played, or not kept. */
+  private async takeDone(take: RecordedTake | null, limit: boolean): Promise<void> {
+    const store = this.deps.takes
+    if (!take || !store) return
+    try {
+      const t = await store.add(take, this.deps.now())
+      this.trafficLog.note(`take ${t.name}: ${take.seconds.toFixed(1)} s`)
+      await this.loadTakes()
+      this.toast(limit ? MirrorText.takeAtLimit(take.seconds) : MirrorText.takeSaved(take.seconds))
+    } catch (e) {
+      this.toast(MirrorText.takeFailed(errorText(e)), true)
+    }
+  }
+
+  /** The player's key for a take, to show Stop on its row. */
+  takeKey(t: TakeInfo): string {
+    return 'take:' + t.name
+  }
+
+  private async takeBytes(t: TakeInfo): Promise<Uint8Array> {
+    const wav = await this.deps.takes?.read(t.name)
+    if (!wav) throw new Error(`${t.name}: not found`)
+    return new Uint8Array(await wav.arrayBuffer())
+  }
+
+  /** Plays a take here (a list's single sound: it stops the one before). Call from a tap. */
+  async playTake(t: TakeInfo): Promise<void> {
+    this.deps.player.resumeInGesture()
+    const token = ++this.playToken
+    let w
+    try {
+      w = decodeWav(await this.takeBytes(t))
+    } catch (e) {
+      this.toast(errorText(e), true)
+      return
+    }
+    if (token !== this.playToken) return
+    await this.startSound(this.takeKey(t), w.pcm, w.channels, w.sampleRate)
+  }
+
+  async deleteTake(t: TakeInfo): Promise<void> {
+    if (this.deps.player.playing.peek() === this.takeKey(t)) this.stopPlayback()
+    try {
+      await this.deps.takes?.delete(t.name)
+    } catch (e) {
+      this.toast(errorText(e), true)
+    }
+    await this.loadTakes()
+  }
+
+  /** Saves a take's WAV. Call from a tap. */
+  saveTake(t: TakeInfo): Promise<void> {
+    return this.saveFile(t.name, () => this.takeBytes(t), WAV_MIME)
+  }
+
+  /** Shares a take's WAV. Call from a tap. */
+  async shareTake(t: TakeInfo): Promise<void> {
+    try {
+      const r = await this.deps.share.share(t.name, () => this.takeBytes(t), WAV_MIME, t.name)
+      if (r === 'saved') this.toast(WebText.savedInstead(t.name))
+    } catch {
+      this.toast(MirrorText.SHARE_TAKE_FAILED, true)
+    }
+  }
+
+  /**
+   * Proposes a take for upload to a free slot: the Device tab's upload sheet,
+   * with its trim. The UI switches to Device, which reads the device as it
+   * opens; the free slot is picked once that read is in (10 s at most).
+   */
+  async takeToDevice(t: TakeInfo): Promise<void> {
+    let bytes: Uint8Array
+    try {
+      bytes = await this.takeBytes(t)
+    } catch (e) {
+      this.toast(errorText(e), true)
+      return
+    }
+    let contents = this.store.get().browser.contents
+    if (contents === null) {
+      contents = await Promise.race([
+        this.store.waitFor((st) => st.browser.contents !== null).then((st) => st.browser.contents),
+        new Promise<null>((r) => this.deps.setTimeout(() => r(null), 10_000)),
+      ])
+    }
+    const w = decodeWav(bytes)
+    const slot = nextFree(contents?.occupiedSlots ?? new Set<number>(), new Set<number>())
+    const item: UploadDraftItem = { fileName: t.name, name: nameFor(t.name), slot, wav: bytes, error: null, trim: null, sampleRate: w.sampleRate }
+    this.store.update((st) => ({ ...st, browser: { ...st.browser, draft: [item] } }))
   }
 
   // ---------- save and share (MainActivity) ----------

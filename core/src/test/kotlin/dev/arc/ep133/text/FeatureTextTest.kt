@@ -367,8 +367,8 @@ class FeatureTextTest {
         assertEquals("PTN", MirrorText.PTN.uppercase())
         // REC is TAKE now.
         assertEquals("TAKE 0:12", MirrorText.takeBadge(12.9).uppercase())
-        assertEquals("Take. Recording starts with the first sound you play.", MirrorText.takeDescription(RecState.Idle))
-        assertEquals("Take, waiting for the first sound. Tap to cancel.", MirrorText.takeDescription(RecState.Armed))
+        assertEquals("Take. Recording starts with the first sound you play, or when the EP-133 starts playing.", MirrorText.takeDescription(RecState.Idle))
+        assertEquals("Take, waiting for the first sound or the EP-133's PLAY. Tap to cancel.", MirrorText.takeDescription(RecState.Armed))
         assertEquals("Recording a take, 1:05. Tap to stop.", MirrorText.takeDescription(RecState.Recording(65)))
         assertTrue(MirrorText.TAKES_HINT.startsWith("Tap TAKE, then play"))
         assertEquals("Record a pattern: tap, then PLAY; hold for its settings", CoachText.RECORD)

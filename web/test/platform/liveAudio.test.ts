@@ -12,6 +12,9 @@ import {
   MixerHost,
   REPLACE_QUIET_MS,
   SLOW_OUTPUT_MS,
+  TAKE_END_WAIT_MS,
+  takeWav,
+  type RecordedTake,
   browserLiveBackend,
   describeOutput,
   heardAt,
@@ -34,6 +37,7 @@ import {
 } from '../../src/platform/audio/liveAudio'
 import { WebLatencyHint } from '../../src/core/text/latencyText'
 import { VoiceMixer, VoiceShape } from '../../src/core/formats/voiceMixer'
+import { decodeWav } from '../../src/core/formats/wav'
 import { FxControl } from '../../src/core/formats/fx/fxBus'
 import { WebText } from '../../src/core/text/webText'
 import type { LiveAudioDeps } from '../../src/state/deps'
@@ -1371,5 +1375,176 @@ describe('browserLiveBackend latency choice', () => {
     } finally {
       store.localStorage = before
     }
+  })
+})
+
+describe('MixerHost REC (LiveAudio.kt takes)', () => {
+  const recHost = () => {
+    const out: FromMixer[] = []
+    const h = new MixerHost(RATE, (m) => out.push(m))
+    h.handle({ t: 'load', id: 1, pcm: tone(300) })
+    return { h, out, render: (n = 128) => h.render(new Float32Array(n), new Float32Array(n), n, 0) }
+  }
+  const takeFrames = (out: FromMixer[]) => out.reduce((n, m) => n + (m.t === 'take' ? m.pcm.length / 2 : 0), 0)
+  const recs = (out: FromMixer[]) => out.flatMap((m) => (m.t === 'rec' ? [m.state.kind] : []))
+
+  it('arms, starts with the first sound, and keeps up to its last sound', () => {
+    const { h, out, render } = recHost()
+    h.handle({ t: 'arm' })
+    render()
+    expect(takeFrames(out)).toBe(0)
+    h.handle({ t: 'start', key: 'k', id: 1, channels: 1, sampleRate: RATE, semitones: 0, tag: 0 })
+    render()
+    render()
+    render()
+    h.handle({ t: 'stopRec' })
+    const end = out.find((m) => m.t === 'takeEnd')
+    // The tone's 300 frames are kept; the silence after it is sent but not kept.
+    expect(end).toEqual({ t: 'takeEnd', keep: 300, limit: false })
+    expect(takeFrames(out)).toBe(384)
+    expect(recs(out)).toEqual(['armed', 'recording', 'idle'])
+    const first = out.find((m) => m.t === 'take')
+    expect(first?.t === 'take' && first.pcm[0]).toBe(10000)
+  })
+
+  it('a take with nothing played keeps nothing', () => {
+    const { h, out, render } = recHost()
+    h.handle({ t: 'arm' })
+    render()
+    h.handle({ t: 'stopRec' })
+    expect(out.filter((m) => m.t === 'takeEnd')).toEqual([{ t: 'takeEnd', keep: 0, limit: false }])
+  })
+
+  it("the device's PLAY starts an armed take and its STOP ends it", () => {
+    const { h, out, render } = recHost()
+    h.handle({ t: 'arm' })
+    h.handle({ t: 'transport', playing: true })
+    render()
+    h.handle({ t: 'start', key: 'k', id: 1, channels: 1, sampleRate: RATE, semitones: 0, tag: 0 })
+    render(512)
+    h.handle({ t: 'transport', playing: false })
+    // 128 silent frames in front, then the tone.
+    expect(out.find((m) => m.t === 'takeEnd')).toEqual({ t: 'takeEnd', keep: 128 + 300, limit: false })
+  })
+
+  it("the device stopping doesn't end a take a sound started", () => {
+    const { h, out, render } = recHost()
+    h.handle({ t: 'arm' })
+    h.handle({ t: 'start', key: 'k', id: 1, channels: 1, sampleRate: RATE, semitones: 0, tag: 0 })
+    render()
+    h.handle({ t: 'transport', playing: false })
+    expect(out.some((m) => m.t === 'takeEnd')).toBe(false)
+    h.handle({ t: 'stopRec' })
+    expect(out.some((m) => m.t === 'takeEnd')).toBe(true)
+  })
+
+  it('stops by itself at the limit, sending long takes in chunks', () => {
+    const { h, out, render } = recHost()
+    h.maxTakeFrames = MixerHost.TAKE_CHUNK_FRAMES + 100
+    h.handle({ t: 'arm' })
+    h.handle({ t: 'transport', playing: true })
+    for (let i = 0; i < 80; i++) render()
+    const chunks = out.filter((m) => m.t === 'take')
+    expect(chunks.map((m) => (m.t === 'take' ? m.pcm.length / 2 : 0))).toEqual([MixerHost.TAKE_CHUNK_FRAMES, 100])
+    expect(out.filter((m) => m.t === 'takeEnd')).toEqual([{ t: 'takeEnd', keep: 0, limit: true }])
+    expect(recs(out).at(-1)).toBe('idle')
+  })
+})
+
+describe('LiveAudio REC', () => {
+  async function recording() {
+    const b = new FakeBackend()
+    const live = new LiveAudio(b)
+    const takes: { take: RecordedTake | null; limit: boolean }[] = []
+    live.onTake((take, limit) => takes.push({ take, limit }))
+    live.preload('kick', tone(300), 1, RATE)
+    expect(live.arm()).toBe(true)
+    await flush()
+    return { b, live, takes }
+  }
+  const wavOf = async (t: RecordedTake) => decodeWav(new Uint8Array(await t.wav.arrayBuffer()))
+
+  it('arms, records the pads played and hands over a WAV of them', async () => {
+    const { b, live, takes } = await recording()
+    expect(live.rec.value).toEqual({ kind: 'armed' })
+    live.press('live:0:9', 'kick', { pitch: 0, gate: false })
+    b.link.render(0)
+    expect(live.rec.value).toEqual({ kind: 'recording', seconds: 0 })
+    b.link.render(128 / RATE)
+    b.link.render(256 / RATE)
+    live.stopRecording()
+    expect(live.rec.value).toEqual({ kind: 'idle' })
+    expect(takes).toHaveLength(1)
+    const t = takes[0]!.take!
+    expect(t.frames).toBe(300)
+    expect(t.seconds).toBeCloseTo(300 / RATE, 9)
+    const w = await wavOf(t)
+    expect(w.channels).toBe(2)
+    expect(w.sampleRate).toBe(RATE)
+    expect(w.pcm.length).toBe(300 * 4)
+    expect(new DataView(w.pcm.buffer, w.pcm.byteOffset).getInt16(0, true)).toBe(10000)
+  })
+
+  it('nothing played: no take', async () => {
+    const { b, live, takes } = await recording()
+    b.link.render(0)
+    live.stopRecording()
+    expect(takes).toEqual([{ take: null, limit: false }])
+  })
+
+  it("follows the EP-133's PLAY and STOP", async () => {
+    const { b, live, takes } = await recording()
+    live.transportStarted()
+    b.link.render(0)
+    expect(live.rec.value.kind).toBe('recording')
+    live.press('live:0:9', 'kick', { pitch: 0, gate: false })
+    b.link.render(128 / RATE, 512)
+    live.transportStopped()
+    expect(takes[0]!.take!.frames).toBe(128 + 300)
+    expect(live.rec.value.kind).toBe('idle')
+  })
+
+  it('Live closing mid-take saves it before the output goes', async () => {
+    const { b, live, takes } = await recording()
+    live.press('live:0:9', 'kick', { pitch: 0, gate: false })
+    b.link.render(0)
+    const link = b.link
+    live.close()
+    // The fake mixer ends the take as the stop arrives, so the output closes at once.
+    expect(takes[0]!.take!.frames).toBe(128)
+    expect(link.closed).toBe(true)
+    expect(b.ctx.closed).toBe(true)
+    expect(live.rec.value.kind).toBe('idle')
+  })
+
+  it('a mixer that never answers: the take is cut where it is', async () => {
+    const { b, live, takes } = await recording()
+    live.press('live:0:9', 'kick', { pitch: 0, gate: false })
+    b.link.render(0)
+    b.link.host.handle = () => undefined
+    const link = b.link
+    const real = globalThis.setTimeout
+    let later: (() => void) | null = null
+    globalThis.setTimeout = ((fn: () => void, ms: number) => {
+      if (ms === TAKE_END_WAIT_MS) later = fn
+      return 0
+    }) as typeof setTimeout
+    try {
+      live.close()
+    } finally {
+      globalThis.setTimeout = real
+    }
+    expect(link.closed).toBe(false)
+    // Nothing reached the main thread yet: the chunk is still on the audio side.
+    later!()
+    expect(takes).toEqual([{ take: null, limit: false }])
+    expect(link.closed).toBe(true)
+  })
+
+  it('takeWav cuts the chunks to the frames kept', async () => {
+    const a = Int16Array.from([1, 2, 3, 4])
+    const c = Int16Array.from([5, 6, 7, 8])
+    const w = decodeWav(new Uint8Array(await takeWav([a, c], 3, 1000).arrayBuffer()))
+    expect([...new Int16Array(w.pcm.slice().buffer)]).toEqual([1, 2, 3, 4, 5, 6])
   })
 })

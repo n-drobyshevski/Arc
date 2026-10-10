@@ -158,6 +158,8 @@ import { SLOT_MIME, SOURCE_MIME, SoundPicker } from '../live/SoundPicker'
 import { dragMayHaveAudio, isAudioFile } from '../../platform/files/pick'
 import { tick } from '../../platform/haptics'
 import { PickWord, WordButton } from '../live/Words'
+import { TakeBadge, TakesSection, type TakeUi, type TakesUi } from '../live/Takes'
+import { DeviceView } from '../live/DeviceView'
 import { useDesk, useFinePointer, useWindowSize } from '../useDesk'
 import './MirrorScreen.css'
 
@@ -280,6 +282,14 @@ export interface MirrorScreenProps {
   inBar?: boolean
   /** The piano's notes while it shows, null otherwise: the line in the top bar names a device note past them. */
   onPianoRange?: (range: NoteRange | null) => void
+  /** TAKE: its key and the takes in Live tools, its badge on the display; none, no TAKE (Kotlin's null TakeUi). */
+  take?: TakeUi | null
+  takes?: TakesUi
+  /** Web only, on the desk: the EP-133 K.O. II drawn whole (live/DeviceView), else main's layouts. */
+  deviceView?: boolean
+  onDeviceView?: (on: boolean) => void
+  /** Opens the shortcut guide searched for [query] (the device view's key cards). */
+  onGuide?: (query: string) => void
 }
 
 
@@ -436,6 +446,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   const root = useRef<HTMLDivElement | null>(null)
   const now = fixedNow ?? perfNow()
   const desk = useDesk()
+  // The device view: chosen in Live tools, on the desk only (web only).
+  const device = desk && props.deviceView === true && props.onDeviceView !== undefined
   const fine = useFinePointer()
   const win = useWindowSize()
   // Live's own box: the piano's room comes off it (live/keyboard.ts).
@@ -445,7 +457,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   const room = useBoxSize(box, desk)
   const rowPad = desk && !oneGroup && !keys.on ? rowPadSize(room.width, room.height) : null
   // KEYS on the piano or the grid: the view remembered for this window's shape, and the room.
-  const plan = pianoFor(
+  const shape = pianoFor(
     win.width,
     win.height,
     live.width,
@@ -457,6 +469,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     keys.octave,
     inBar,
   )
+  // The device view plays KEYS on its own pads, as the EP-133 does, unless the piano was chosen.
+  const plan: PianoPlan = device && shape.view !== KeysView.PIANO ? { ...shape, range: null } : shape
   const pianoRange = keys.on ? plan.range : null
   // The line in the top bar names a device note past the piano's ends.
   const rangeKey = pianoRange ? `${pianoRange.first}:${pianoRange.last}` : null
@@ -528,8 +542,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   const [group, setGroup] = useState(props.initialGroup ?? 0)
   const hitGroup = st.lastHit?.pad?.group ?? null
   useEffect(() => {
-    if (oneGroup && follow && hitGroup !== null) setGroup(hitGroup)
-  }, [hitGroup, st.lastHit, follow, oneGroup])
+    if ((oneGroup || device) && follow && hitGroup !== null) setGroup(hitGroup)
+  }, [hitGroup, st.lastHit, follow, oneGroup, device])
 
   // In the pads view, the pad just played on the device is the sound KEYS will play.
   // A list left open when KEYS went off (a reload, another tab) closes with it.
@@ -607,12 +621,15 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
       />
     </RowCard>
   )
+  const take = props.take ?? null
+  const takesSection = take && props.takes ? <TakesSection takes={props.takes} take={take} /> : null
   const tools = keys.on ? (
     <>
       {settingsRow}
       {factoryRow}
       {offlinePadsRow}
       <KeysPanel keys={keys} actions={actions} piano={pianoRange !== null} hint={!plan.switchShown} keyboard={keyHints} />
+      {takesSection}
     </>
   ) : (
     <>
@@ -627,14 +644,17 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
             <Segmented
               compact
               fill
-              options={[MirrorText.ALL_GROUPS, MirrorText.ONE_GROUP]}
-              selected={oneGroup ? 1 : 0}
-              onSelect={(i) => props.onOneGroup(i === 1)}
+              options={desk && props.onDeviceView ? [MirrorText.ALL_GROUPS, MirrorText.ONE_GROUP, WebText.VIEW_DEVICE] : [MirrorText.ALL_GROUPS, MirrorText.ONE_GROUP]}
+              selected={device ? 2 : oneGroup ? 1 : 0}
+              onSelect={(i) => {
+                props.onDeviceView?.(i === 2)
+                if (i !== 2) props.onOneGroup(i === 1)
+              }}
               labelledBy={ids.titleId}
             />
           )}
         />
-        {oneGroup && (
+        {(oneGroup || device) && (
           <SettingRow
             title={MirrorText.FOLLOW}
             note={MirrorText.FOLLOW_NOTE}
@@ -646,6 +666,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
       </RowCard>
       {st.lastKeysNote !== null && <KeysStrip st={st} last={st.lastKeysNote} names={keys.names} />}
       {keyHints && <p class="t-small live-tools__note">{WebText.LIVE_PADS_KEYS_HINT}</p>}
+      {takesSection}
       <Notes st={st} mirror={mirror} tapToPlay={onPad !== null} hint={!plan.switchShown} transport={inBar} />
     </>
   )
@@ -836,14 +857,14 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   const modeLead = <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} plan={plan} part="lead" />
   const modePicks = <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} plan={plan} part="picks" />
   // On a phone on its side the line is in the top bar instead.
-  const displayStrip = inBar ? null : editing ? <EditStrip /> : <DisplayStrip st={st} mirror={mirror} />
+  const displayStrip = inBar ? null : editing ? <EditStrip /> : <DisplayStrip st={st} mirror={mirror} take={take} still={fixedNow !== null} />
   const allGroups = (
     <div class="live__all">
       <div class="live__head">
         <Caption text={MirrorText.TITLE} as="h1" />
         {onBack && <CloseKey class="live__close" onClick={onBack} description={GUIDE_CLOSE} />}
       </div>
-      {inBar ? null : editing ? <EditStrip /> : <Display st={st} mirror={mirror} initialNoteOpen={props.initialNoteOpen ?? false} onGetFactory={props.onGetFactory ?? null} />}
+      {inBar ? null : editing ? <EditStrip /> : <Display st={st} mirror={mirror} initialNoteOpen={props.initialNoteOpen ?? false} onGetFactory={props.onGetFactory ?? null} take={take} still={fixedNow !== null} />}
       {modeRow}
       {/* Four groups in a row when there is room, two by two on a phone. */}
       <div class="live__groups">
@@ -898,6 +919,34 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           </div>
         </div>
         {desk && <PianoLegend />}
+      </div>
+    )
+  } else if (device) {
+    // The device view: the EP-133 K.O. II drawn whole, in the room left of the docked tools (web only).
+    page = (
+      <div class="live__device">
+        <DeviceView
+          st={st}
+          mirror={mirror}
+          keys={keys}
+          keyNotes={keyNotes}
+          playingNotes={playing.notes.value}
+          nameOf={nameOf}
+          now={now}
+          group={group}
+          onGroup={setGroup}
+          onMode={actions.onMode}
+          onOctave={actions.onOctave}
+          press={padPress}
+          keyPress={(n) => ({ press: (hold) => keyPress.onNote(n, hold), release: () => keyPress.onNoteUp(n) })}
+          playingPads={playing.pads.value}
+          tracker={tracker}
+          take={take}
+          still={fixedNow !== null}
+          onGuide={props.onGuide}
+          hold={(target) => holdHandlers(tracker, target, false, haptic)}
+        />
+        {keys.on && modeRow}
       </div>
     )
   } else if (desk) {
@@ -1184,10 +1233,11 @@ function PianoLegend(): JSX.Element {
  * project on the left, the pad just played on the right. [compact]: one bar
  * tall, in the top bar ([LivePill]).
  */
-function DisplayStrip(props: { st: MirrorState; mirror: MirrorUi | null; compact?: boolean }): JSX.Element {
+function DisplayStrip(props: { st: MirrorState; mirror: MirrorUi | null; compact?: boolean; take?: TakeUi | null; still?: boolean }): JSX.Element {
   const { st, mirror } = props
   return (
     <div class={`live-strip${props.compact ? ' live-strip--bar' : ''}`} aria-live="polite">
+      <TakeBadge take={props.take} still={props.still} />
       {st.playing === true && <span class="live-strip__sub live-strip__ink" role="img" aria-label={MirrorText.PLAYING}>{'▶'}</span>}
       {st.playing === false && <span class="live-strip__sub live-strip__dim" role="img" aria-label={MirrorText.STOPPED}>{'■'}</span>}
       {/* Offline and the project are only read out: the top bar and the PROJECT key show them. */}
@@ -1204,6 +1254,8 @@ function Display(props: {
   mirror: MirrorUi | null
   initialNoteOpen: boolean
   onGetFactory: (() => void) | null
+  take?: TakeUi | null
+  still?: boolean
 }): JSX.Element {
   const { st, mirror } = props
   const offline = showOffline(st, mirror)
@@ -1231,6 +1283,7 @@ function Display(props: {
         {st.activeProject !== null && (
           <span class="t-display-sub live-display__dim">{MirrorText.project(st.activeProject)}</span>
         )}
+        <TakeBadge take={props.take} still={props.still} />
       </div>
       <p class={`live-display__line t-stat-free${displayLineSmall(st, mirror) ? ' live-display__line--small' : ''}`}>
         {displayLine(st, mirror)}

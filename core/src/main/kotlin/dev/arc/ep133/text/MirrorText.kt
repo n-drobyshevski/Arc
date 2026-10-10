@@ -459,12 +459,12 @@ object MirrorText {
 
     // REC is called TAKE now that RECORD is the pattern's, as on the device; it moves to Live tools.
     const val TAKE = "Take"
-    const val TAKES_HINT = "Tap TAKE, then play: recording starts with the first sound and stops when you tap TAKE again."
+    const val TAKES_HINT = "Tap TAKE, then play: recording starts with the first sound, or when the EP-133 starts playing, and stops when you tap TAKE again or, if its PLAY started it, when the EP-133 stops."
 
     /** What the TAKE key does now, for screen readers. */
     fun takeDescription(state: dev.arc.ep133.features.RecState) = when (state) {
-        dev.arc.ep133.features.RecState.Idle -> "Take. Recording starts with the first sound you play."
-        dev.arc.ep133.features.RecState.Armed -> "Take, waiting for the first sound. Tap to cancel."
+        dev.arc.ep133.features.RecState.Idle -> "Take. Recording starts with the first sound you play, or when the EP-133 starts playing."
+        dev.arc.ep133.features.RecState.Armed -> "Take, waiting for the first sound or the EP-133's PLAY. Tap to cancel."
         is dev.arc.ep133.features.RecState.Recording -> "Recording a take, ${takeLength(state.seconds.toDouble())}. Tap to stop."
     }
 
