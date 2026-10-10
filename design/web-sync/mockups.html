@@ -1,0 +1,966 @@
+<title>Arc Web Sync</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
+<style>
+/* Layout: one long review page in Arc's own skin (web/src/ui/theme/tokens.css).
+   Each section is a mock "screen" on the shell colour, followed by notes in the plate style. */
+:root {
+  --shell: #E6E2DB; --key: #F4F2EE; --key-edge: #C6C2B9; --ink: #1F2558; --graphite: #6B6A72;
+  --signal: #FF4C00; --signal-edge: #C23A00; --on-signal: #FFFFFF;
+  --display: #262823; --display-ink: #E9E7DF; --display-dim: #8A8C83; --segment-off: #3A3D36;
+  --danger: #B3261E; --navy: #1F2558; --on-navy: #F4F2EE; --tab-off: #D3D2DA; --on-tab-off: #5C5B6C;
+  --plate: #D7D8D4; --line: #1E1F21; --ok: #17613F; --on-ok: #F4F2EE;
+  --tag-face: #C9A227; --tag-ink: #1E1F21; --coach: #D4A300;
+  --page: #E9E6E0; --frame: #CFCBC3; --scrim: rgba(20,20,18,.45);
+  /* The drawn EP-133 is a physical object: same colours in both themes. */
+  --dev-body: #D9D8D2; --dev-body-hi: #E7E6E1; --dev-body-lo: #BDBCB5; --dev-print: #55575A;
+  --dev-dark: #4A4B4D; --dev-dark-edge: #1E1F21; --dev-dark-ink: #EDECE8;
+  --dev-light: #ECEBE7; --dev-light-edge: #A9A8A2; --dev-pad: #E3E2DD; --dev-pad-edge: #B4B3AC;
+  --dev-knob: #3B3C3E; --dev-hole: #8F8E88;
+  --font: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --shell: #1C1D1E; --key: #2B2C2E; --key-edge: #0E0F10; --ink: #ECEBE6; --graphite: #9A9B9D;
+  --signal-edge: #A83200; --display: #121410; --display-dim: #7C7E76; --segment-off: #2A2D27;
+  --danger: #FF8A80; --navy: #AEB4F0; --on-navy: #14162B; --tab-off: #3A3B44; --on-tab-off: #A3A4AE;
+  --plate: #2E2F33; --line: #0E0F10; --ok: #3FA877; --on-ok: #0E1A14;
+  --page: #161718; --frame: #2A2B2D; --scrim: rgba(0,0,0,.55); color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --shell: #1C1D1E; --key: #2B2C2E; --key-edge: #0E0F10; --ink: #ECEBE6; --graphite: #9A9B9D;
+  --signal-edge: #A83200; --display: #121410; --display-dim: #7C7E76; --segment-off: #2A2D27;
+  --danger: #FF8A80; --navy: #AEB4F0; --on-navy: #14162B; --tab-off: #3A3B44; --on-tab-off: #A3A4AE;
+  --plate: #2E2F33; --line: #0E0F10; --ok: #3FA877; --on-ok: #0E1A14;
+  --page: #161718; --frame: #2A2B2D; --scrim: rgba(0,0,0,.55); color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { background: var(--page); color: var(--ink); font-family: var(--font); font-weight: 500; font-size: 16px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+.wrap { max-width: 1240px; margin: 0 auto; padding-inline: 16px; padding-block: 24px 80px; }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+p { margin: 0; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+.caps { font-size: 13px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--graphite); }
+.dim { color: var(--graphite); }
+.small { font-size: 14px; }
+
+/* ---------- header ---------- */
+.head { display: grid; gap: 18px; padding-block: 8px 28px; }
+.head__row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
+.tag { display: inline-flex; align-items: center; height: 44px; padding: 0 30px 0 16px; background: var(--tag-face); color: var(--tag-ink);
+  font-weight: 800; font-size: 17px; letter-spacing: .05em; clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 50%, calc(100% - 18px) 100%, 0 100%); }
+.head h1 { font-size: clamp(30px, 5vw, 46px); font-weight: 800; letter-spacing: -.03em; line-height: 1.08; max-width: 18ch; }
+.head__lede { max-width: 64ch; color: var(--graphite); font-size: 17px; }
+.seg { display: inline-flex; gap: 6px; }
+.seg button { border: 0; border-radius: 10px; padding: 9px 14px; font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  background: var(--tab-off); color: var(--on-tab-off); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--navy); color: var(--on-navy); }
+
+.toc { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: var(--page); border-bottom: 1px solid var(--key-edge);
+  display: flex; gap: 22px; overflow-x: auto; padding-block: 12px; margin-bottom: 8px; scrollbar-width: none; }
+.toc a { white-space: nowrap; text-decoration: none; color: var(--graphite); font-size: 14px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; padding-bottom: 4px; }
+.toc a:hover { color: var(--ink); box-shadow: inset 0 -2px 0 var(--ink); }
+
+section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top: 56px; }
+.s__head { display: grid; gap: 8px; max-width: 72ch; }
+.s__head h2 { font-size: clamp(22px, 3vw, 30px); font-weight: 800; letter-spacing: -.02em; }
+.s__head p { color: var(--graphite); }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.chip { border: 0; border-radius: 10px; padding: 8px 12px; font-size: 13px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  background: var(--tab-off); color: var(--on-tab-off); cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--navy); color: var(--on-navy); }
+.hint { font-size: 14px; color: var(--graphite); }
+
+/* ---------- scaled stage: a fixed-size design scaled to fit ---------- */
+.stage { width: 100%; position: relative; overflow: hidden; border-radius: 18px; }
+.stage__inner { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+
+/* ---------- desktop window ---------- */
+.win { width: 1200px; height: 860px; background: var(--shell); border-radius: 18px; border: 1px solid var(--frame); overflow: hidden; position: relative;
+  display: grid; grid-template-rows: 40px 1fr; }
+.win__bar { background: var(--frame); display: flex; align-items: center; gap: 8px; padding: 0 16px; }
+.win__dot { width: 12px; height: 12px; border-radius: 50%; background: var(--key-edge); }
+.win__url { margin-left: 18px; flex: 1; max-width: 460px; height: 26px; border-radius: 8px; background: var(--shell); color: var(--graphite); font-size: 13px; display: flex; align-items: center; padding: 0 12px; }
+.app { position: relative; display: grid; grid-template-columns: 1fr 344px; min-height: 0; }
+.app__main { position: relative; display: grid; grid-template-rows: auto 1fr; min-width: 0; }
+
+.topbar { display: flex; align-items: center; gap: 10px; padding: 14px 24px 0 24px; }
+.topbar .tag { height: 46px; font-size: 18px; }
+.topbar__keys { margin-left: auto; display: flex; gap: 10px; }
+.ikey { width: 46px; height: 46px; border-radius: 8px; border: 0; display: grid; place-items: center; cursor: default; }
+.ikey--signal { background: var(--signal); box-shadow: 0 2px 0 var(--signal-edge); }
+.ikey--ok { background: var(--ok); box-shadow: 0 2px 0 rgba(0,0,0,.3); }
+.ikey--navy { background: var(--navy); }
+.ikey--round { border-radius: 50%; background: var(--tab-off); color: var(--navy); font-weight: 800; font-size: 20px; }
+.ikey .d { width: 14px; height: 14px; border-radius: 50%; background: #fff; }
+.ikey--ok .d { width: 10px; height: 10px; background: var(--on-ok); }
+.ikey--navy .d { width: 14px; height: 14px; background: transparent; border: 2.5px solid var(--on-navy); }
+.ikey.is-pale { opacity: .45; }
+
+.edge-guide { position: absolute; left: 0; top: 300px; width: 30px; height: 140px; background: var(--tab-off); border-radius: 0 10px 10px 0;
+  display: grid; place-items: center; color: var(--on-tab-off); font-weight: 700; font-size: 13px; letter-spacing: .1em; z-index: 3; }
+.edge-guide span { transform: rotate(-90deg); }
+
+.devwrap { display: grid; place-items: center; padding: 14px 20px 24px 40px; min-height: 0; }
+
+/* ---------- docked Live tools ---------- */
+.tools { background: var(--shell); border-left: 1px solid var(--key-edge); padding: 22px 22px 22px 22px; display: grid; align-content: start; gap: 16px; overflow: auto; }
+.tools__title { display: flex; justify-content: space-between; align-items: center; }
+.tt { display: flex; gap: 18px; }
+.tt button { background: none; border: 0; padding: 4px 0 6px; font-size: 13px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--graphite); cursor: pointer; }
+.tt button[aria-pressed="true"] { color: var(--ink); box-shadow: inset 0 -2px 0 var(--ink); }
+.takes { display: grid; gap: 8px; }
+.take { background: var(--plate); border-radius: 14px; overflow: hidden; }
+.take__row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; cursor: pointer; }
+.take__meta { flex: 1; min-width: 0; display: grid; }
+.take__date { font-weight: 800; font-size: 16px; }
+.take__len { color: var(--graphite); font-size: 14px; }
+.akey { border: 0; border-radius: 8px; background: var(--key); box-shadow: 0 2px 0 var(--key-edge); padding: 9px 12px; font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink); cursor: pointer; }
+.akey:active { transform: translateY(2px); box-shadow: 0 0 0 var(--key-edge); }
+.akey--signal { background: var(--signal); color: var(--on-signal); box-shadow: 0 2px 0 var(--signal-edge); }
+.akey--danger { color: var(--danger); }
+.akey[disabled] { opacity: .45; cursor: not-allowed; }
+.take__more { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 14px 14px; }
+.take__confirm { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; justify-content: space-between; background: var(--shell); border-radius: 10px; padding: 8px 10px; font-size: 14px; font-weight: 700; }
+.tools p { font-size: 14px; color: var(--graphite); }
+.segrow { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.segrow span { border-radius: 10px; padding: 10px; text-align: center; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; background: var(--key); box-shadow: 0 2px 0 var(--key-edge); }
+.segrow span.on { background: var(--navy); color: var(--on-navy); box-shadow: none; }
+
+/* ---------- the EP-133 ---------- */
+.ep { --u: 1px; width: 760px; background: linear-gradient(170deg, var(--dev-body-hi), var(--dev-body) 40%, var(--dev-body) 80%, var(--dev-body-lo));
+  border-radius: 26px; padding: 26px 28px 28px; position: relative; color: var(--dev-print);
+  box-shadow: 0 1px 0 rgba(255,255,255,.7) inset, 0 -2px 0 rgba(0,0,0,.08) inset, 0 18px 40px -18px rgba(0,0,0,.45), 0 2px 0 var(--dev-body-lo); }
+.ep__top { display: grid; grid-template-columns: 150px 1fr 170px; gap: 22px; align-items: stretch; height: 132px; }
+.grille { display: grid; grid-template-columns: repeat(9, 1fr); gap: 6px; align-content: center; padding: 6px 4px; }
+.grille i { width: 9px; height: 9px; border-radius: 50%; background: var(--dev-hole); box-shadow: inset 0 1.5px 1px rgba(0,0,0,.45); }
+.lcd { background: var(--display); border-radius: 12px; padding: 12px 16px; display: grid; grid-template-rows: auto 1fr auto; color: var(--display-ink);
+  box-shadow: inset 0 3px 8px rgba(0,0,0,.5), 0 1px 0 rgba(255,255,255,.6); min-width: 0; font-family: var(--font); }
+.lcd__r1 { display: flex; gap: 12px; align-items: center; font-size: 14px; font-weight: 600; }
+.lcd__r1 .sp { flex: 1; }
+.lcd__big { font-size: 27px; font-weight: 800; letter-spacing: -.01em; align-self: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lcd__r3 { display: flex; gap: 6px; align-items: center; }
+.lcd__seg { flex: 1; display: grid; grid-template-columns: repeat(16, 1fr); gap: 3px; }
+.lcd__seg i { height: 6px; border-radius: 1px; background: var(--segment-off); }
+.lcd__seg i.on { background: var(--display-ink); }
+.lcd__seg i.beat { background: var(--signal); }
+.lcd .dimt { color: var(--display-dim); }
+.rec { display: inline-flex; align-items: center; gap: 7px; border: 1.5px solid var(--display-dim); color: var(--display-dim); border-radius: 9px; padding: 3px 9px; font-size: 13px; font-weight: 700; letter-spacing: .04em; }
+.rec i { width: 9px; height: 9px; border-radius: 50%; background: var(--display-dim); }
+.rec.is-armed i { background: var(--signal); animation: blink .9s steps(1) infinite; }
+.rec.is-armed { color: var(--display-ink); }
+.rec.is-on { border-color: var(--signal); color: var(--display-ink); }
+.rec.is-on i { background: var(--signal); }
+@keyframes blink { 50% { opacity: 0; } }
+
+.knobs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: center; justify-items: center; }
+.knob { display: grid; justify-items: center; gap: 6px; font-size: 12px; font-weight: 700; letter-spacing: .08em; cursor: pointer; border: 0; background: none; padding: 0; color: var(--dev-print); }
+.knob__cap { width: 62px; height: 62px; border-radius: 50%; position: relative;
+  background: radial-gradient(circle at 40% 35%, #5A5B5E, var(--dev-knob) 60%, #232426); box-shadow: 0 4px 0 #1b1c1d, 0 6px 10px rgba(0,0,0,.35); }
+.knob__cap::after { content: ""; position: absolute; left: 50%; top: 7px; width: 3px; height: 15px; margin-left: -1.5px; border-radius: 2px; background: var(--dev-dark-ink); transform-origin: 50% 24px; transform: rotate(var(--rot, -40deg)); }
+
+.ep__mid { display: grid; grid-template-columns: 1fr 64px 1fr; gap: 16px; align-items: center; height: 64px; margin-top: 16px; }
+.fader { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: center; cursor: pointer; border: 0; background: none; padding: 0; color: var(--dev-print); }
+.fader b { font-size: 12px; letter-spacing: .08em; }
+.fader__track { height: 10px; border-radius: 6px; background: #8E8D87; box-shadow: inset 0 2px 3px rgba(0,0,0,.45); position: relative; }
+.fader__cap { position: absolute; top: 50%; left: 62%; width: 30px; height: 28px; margin: -14px 0 0 -15px; border-radius: 6px; background: var(--dev-light); box-shadow: 0 3px 0 var(--dev-light-edge), 0 5px 8px rgba(0,0,0,.25); }
+.fader__cap::after { content: ""; position: absolute; left: 50%; top: 5px; bottom: 5px; width: 2px; margin-left: -1px; background: var(--dev-print); }
+.ep__brand { justify-self: end; text-align: right; font-size: 12px; line-height: 1.25; letter-spacing: .08em; font-weight: 700; color: var(--dev-print); }
+.ep__brand b { display: block; font-size: 20px; letter-spacing: -.01em; font-weight: 800; }
+
+.ep__keys { display: grid; grid-template-columns: 276px 64px 1fr; gap: 16px; margin-top: 18px; }
+.fkeys { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(4, 1fr); gap: 14px 12px; }
+.gkeys { display: grid; grid-template-rows: repeat(4, 1fr); gap: 14px; }
+.k { position: relative; border: 0; border-radius: 9px; cursor: pointer; display: grid; place-items: center; font-family: var(--mono); font-size: 12px; font-weight: 700; letter-spacing: .04em;
+  background: var(--dev-dark); color: var(--dev-dark-ink); box-shadow: 0 4px 0 var(--dev-dark-edge), 0 6px 8px rgba(0,0,0,.18); transition: transform 60ms, box-shadow 60ms; height: 78px; }
+.k:active, .k.is-down { transform: translateY(3px); box-shadow: 0 1px 0 var(--dev-dark-edge); }
+.k--light { background: var(--dev-light); color: var(--dev-print); box-shadow: 0 4px 0 var(--dev-light-edge), 0 6px 8px rgba(0,0,0,.14); }
+.k--light:active { box-shadow: 0 1px 0 var(--dev-light-edge); }
+.k--half { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; background: none; box-shadow: none; height: 78px; padding: 0; }
+.k--half .k { height: 78px; font-size: 20px; }
+.k--group { font-family: var(--font); font-size: 20px; font-weight: 800; }
+.k__glyph { font-size: 15px; }
+.k .led { position: absolute; top: 8px; right: 8px; width: 7px; height: 7px; border-radius: 50%; background: rgba(0,0,0,.35); }
+.k.is-lit .led { background: var(--signal); box-shadow: 0 0 8px 2px rgba(255,76,0,.75); }
+.k.is-sel { background: #2E3060; }
+.k.is-sel .led { background: var(--dev-dark-ink); box-shadow: 0 0 6px rgba(255,255,255,.6); }
+.k.is-glow .led { background: var(--signal); opacity: var(--g, 1); box-shadow: 0 0 8px 2px rgba(255,76,0,.6); }
+.k .acts { position: absolute; left: 50%; bottom: -11px; width: 18px; height: 3px; margin-left: -9px; border-radius: 2px; background: var(--signal); }
+.k.is-dim { opacity: .55; }
+.rec-dot { width: 13px; height: 13px; border-radius: 50%; background: var(--signal); display: inline-block; }
+
+.pads { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(4, 1fr); gap: 14px; }
+.pad { --glow: 0; position: relative; height: 78px; border: 0; border-radius: 10px; cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; padding: 7px 9px;
+  background: color-mix(in oklab, var(--signal) calc(var(--glow) * 100%), var(--dev-pad));
+  box-shadow: 0 4px 0 color-mix(in oklab, var(--signal-edge) calc(var(--glow) * 100%), var(--dev-pad-edge)), 0 6px 8px rgba(0,0,0,.14);
+  display: grid; grid-template-rows: 1fr auto; text-align: left; font-family: var(--font); color: var(--navy); }
+.pad.is-down { transform: translateY(3px); box-shadow: 0 1px 0 var(--dev-pad-edge); }
+.pad__name { font-size: 12px; font-weight: 600; line-height: 1.15; color: #55575A; overflow: hidden; }
+.pad__num { justify-self: end; font-size: 22px; font-weight: 700; line-height: 1; color: #1F2558; }
+.pad__num.word { font-size: 12px; letter-spacing: .06em; }
+.pad.is-lit .pad__name, .pad.is-lit .pad__num { color: #fff; }
+.pad.is-playing::after { content: ""; position: absolute; inset: -4px; border-radius: 13px; border: 2.5px solid var(--signal); pointer-events: none; }
+.pad__ring { position: absolute; left: 50%; top: 46%; width: 50px; height: 50px; margin: -25px 0 0 -25px; border-radius: 50%; border: 5px solid #1F2558; display: grid; place-items: center;
+  font-size: 13px; font-weight: 800; color: #1F2558; }
+.pad__ring.hi { border-color: var(--signal); }
+.pad.is-lit .pad__ring { border-color: #fff; color: #fff; }
+.pad__oct { position: absolute; right: 8px; bottom: 6px; font-size: 11px; color: #6B6A72; }
+.pad.is-lit .pad__oct { color: #fff; }
+
+.ep.is-offline .lcd { color: var(--display-dim); }
+
+/* guide tags on the device */
+.ctag { position: absolute; z-index: 6; background: var(--navy); color: var(--on-navy); font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+  padding: 6px 9px; border-radius: 6px; white-space: nowrap; pointer-events: none; box-shadow: 0 2px 6px rgba(0,0,0,.25); }
+.ctag.y { background: var(--coach); color: #1E1F21; }
+.ctag.o { background: var(--signal); color: #fff; }
+.ctag.g { background: var(--ok); color: var(--on-ok); }
+.cscrim { position: absolute; inset: 0; background: color-mix(in oklab, var(--shell) 55%, transparent); z-index: 5; pointer-events: none; }
+.cclose { position: absolute; left: 0; right: 0; bottom: 22px; text-align: center; z-index: 6; font-size: 13px; font-weight: 700; letter-spacing: .12em; color: var(--graphite); }
+
+/* shortcut popover */
+.pop { position: absolute; z-index: 8; width: 300px; background: var(--key); color: var(--ink); border-radius: 14px; padding: 14px 16px; box-shadow: 0 12px 30px rgba(0,0,0,.28); display: grid; gap: 10px; }
+.pop h4 { margin: 0; font-size: 13px; letter-spacing: .1em; text-transform: uppercase; color: var(--graphite); font-weight: 700; display: flex; justify-content: space-between; }
+.pop h4 button { border: 0; background: none; cursor: pointer; color: var(--graphite); font-size: 16px; line-height: 1; padding: 0; }
+.pop .row { display: grid; gap: 2px; }
+.pop code { font-family: var(--mono); font-size: 12px; font-weight: 700; background: var(--dev-dark); color: var(--dev-dark-ink); border-radius: 5px; padding: 2px 6px; justify-self: start; }
+.pop p { font-size: 14px; }
+.pop .note { font-size: 13px; color: var(--graphite); border-top: 1px solid var(--key-edge); padding-top: 8px; }
+
+.toast { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 9; background: var(--display); color: var(--display-ink); border-left: 5px solid var(--signal);
+  border-radius: 12px; padding: 12px 16px; font-size: 15px; white-space: nowrap; }
+
+/* ---------- legend / notes ---------- */
+.legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.lg { background: var(--plate); border-radius: 18px; padding: 16px 18px; display: grid; gap: 8px; align-content: start; }
+.lg h3 { font-size: 17px; font-weight: 800; display: flex; align-items: center; gap: 10px; }
+.lg ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 15px; }
+.sw { display: inline-block; width: 18px; height: 18px; border-radius: 5px; flex: none; }
+.sw--acts { background: var(--dev-dark); box-shadow: inset 0 -4px 0 var(--signal); }
+.sw--mirror { background: var(--dev-dark); box-shadow: inset 0 0 0 5px var(--dev-dark), inset 0 0 0 9px var(--signal); }
+.sw--guide { background: var(--dev-light); border: 1px solid var(--dev-light-edge); }
+.callout { border-left: 4px solid var(--coach); background: var(--plate); padding: 12px 16px; border-radius: 4px 14px 14px 4px; font-size: 15px; max-width: 80ch; }
+
+/* ---------- phones ---------- */
+.phones { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 18px; align-items: start; }
+.ph { display: grid; gap: 10px; min-width: 0; }
+.ph__cap { display: grid; gap: 2px; }
+.ph__cap b { font-size: 16px; font-weight: 800; }
+.ph__screen { width: 100%; max-width: 100%; aspect-ratio: 412 / 843; border-radius: 22px; overflow: hidden; border: 1px solid var(--frame); background: var(--shell); position: relative; }
+.ph img { width: 100%; height: auto; display: block; border-radius: 22px; border: 1px solid var(--frame); }
+.pm { width: 412px; height: 843px; background: var(--shell); position: absolute; left: 0; top: 0; transform-origin: 0 0; padding: 12px 16px; display: grid; grid-template-rows: auto auto 1fr auto auto; gap: 12px; }
+.pm__bar { display: flex; align-items: center; gap: 8px; }
+.pm__bar .tag { height: 44px; font-size: 17px; }
+.pm__bar .ikey { width: 44px; height: 44px; }
+.pm__strip { background: var(--display); color: var(--display-ink); border-radius: 18px; height: 56px; display: flex; align-items: center; gap: 12px; padding: 0 16px; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; }
+.pm__strip .last { margin-left: auto; font-weight: 800; font-size: 17px; }
+.pm__grid { background: var(--plate); border-radius: 18px; overflow: hidden; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(4, 1fr); }
+.pm__cell { --glow: 0; position: relative; background: color-mix(in oklab, var(--signal) calc(var(--glow) * 100%), var(--plate)); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 8px 10px; display: grid; grid-template-rows: 1fr auto; }
+.pm__cell:nth-child(3n) { border-right: 0; }
+.pm__cell:nth-last-child(-n+3) { border-bottom: 0; }
+.pm__cell .n { justify-self: end; font-size: 26px; font-weight: 700; color: var(--ink); }
+.pm__cell .nm { font-size: 14px; color: var(--graphite); }
+.pm__cell.lit .n, .pm__cell.lit .nm { color: #fff; }
+.pm__words { display: flex; justify-content: space-between; color: var(--graphite); font-size: 15px; letter-spacing: .04em; padding: 0 4px; }
+.pm__groups { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.pm__groups span { height: 52px; border-radius: 10px; display: grid; place-items: center; font-size: 22px; font-weight: 800; background: var(--tab-off); color: var(--on-tab-off); }
+.pm__groups span.on { background: var(--navy); color: var(--on-navy); }
+.pm__groups span.glow { background: color-mix(in oklab, var(--signal) 80%, var(--plate)); color: #fff; }
+.pm__sheet { position: absolute; inset: 70px 0 0 60px; background: var(--shell); border-radius: 22px 0 0 0; box-shadow: -10px 0 30px rgba(0,0,0,.25); padding: 22px 18px; display: grid; align-content: start; gap: 14px; }
+.pm__scrim { position: absolute; inset: 70px 0 0 0; background: var(--scrim); }
+
+/* ---------- widths ---------- */
+.widths { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.wd { background: var(--plate); border-radius: 18px; padding: 16px; display: grid; gap: 12px; align-content: start; }
+.wd__px { font-weight: 800; font-size: 20px; }
+.wd__px small { font-size: 13px; color: var(--graphite); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; display: block; }
+.sch { height: 130px; background: var(--shell); border-radius: 10px; padding: 8px; display: grid; gap: 6px; }
+.sch div { border-radius: 4px; }
+.sch .b { background: var(--tab-off); }
+.sch .d { background: var(--dev-body); border: 1px solid var(--dev-body-lo); border-radius: 8px; }
+.sch .o { background: color-mix(in oklab, var(--signal) 30%, var(--tab-off)); }
+.sch .hat { background: repeating-linear-gradient(45deg, var(--tab-off) 0 3px, transparent 3px 7px); }
+
+/* ---------- audit ---------- */
+.filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.audit { display: grid; gap: 16px; }
+.au { background: var(--plate); border-radius: 18px; padding: 16px; display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); gap: 20px; align-items: start; }
+.au__imgs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.au__imgs figure { margin: 0; display: grid; gap: 6px; }
+.au__imgs figcaption { font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--graphite); }
+.au__imgs img { width: 100%; height: auto; border-radius: 10px; display: block; border: 1px solid var(--frame); background: var(--shell); }
+.au__body { display: grid; gap: 10px; min-width: 0; align-content: start; }
+.au__title { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.au__title h3 { font-size: 19px; font-weight: 800; }
+.au ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 15px; }
+.pill { font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px; }
+.pill--fix { background: var(--signal); color: #fff; }
+.pill--check { background: var(--coach); color: #1E1F21; }
+.pill--same { background: var(--ok); color: var(--on-ok); }
+@media (max-width: 720px) { .au { grid-template-columns: 1fr; } }
+
+/* ---------- backlog ---------- */
+.backlog { display: grid; gap: 10px; counter-reset: b; }
+.bl { background: var(--plate); border-radius: 14px; padding: 14px 16px 14px 56px; position: relative; display: grid; gap: 4px; }
+.bl::before { counter-increment: b; content: counter(b); position: absolute; left: 16px; top: 13px; width: 28px; height: 28px; border-radius: 8px; background: var(--navy); color: var(--on-navy); display: grid; place-items: center; font-weight: 800; font-size: 15px; }
+.bl b { font-size: 17px; font-weight: 800; }
+.bl p { font-size: 15px; color: var(--graphite); }
+.bl code, .notes code { font-family: var(--mono); font-size: 13px; background: var(--shell); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.foot { margin-top: 40px; color: var(--graphite); font-size: 14px; border-top: 1px solid var(--key-edge); padding-top: 16px; }
+
+@media (prefers-reduced-motion: reduce) { .rec.is-armed i { animation: none; } .k, .pad { transition: none; } }
+</style>
+
+<div class="wrap">
+  <header class="head">
+    <div class="head__row">
+      <span class="tag">WEB SYNC</span>
+      <div class="seg" role="group" aria-label="Theme">
+        <button type="button" data-theme-set="system" aria-pressed="true">System</button>
+        <button type="button" data-theme-set="light" aria-pressed="false">Light</button>
+        <button type="button" data-theme-set="dark" aria-pressed="false">Dark</button>
+      </div>
+    </div>
+    <h1>The web app, caught up with Android</h1>
+    <p class="head__lede">Mockups for review before any code. On a wide screen, Live draws the EP-133 itself: the pads play, A–D, KEYS, RECORD and −/+ act in arc, and the rest of the keys show their shortcuts. REC and takes come over from Android. Phones keep the grid they have now. Everything below is clickable.</p>
+  </header>
+
+  <nav class="toc" aria-label="On this page">
+    <a href="#device">Device view</a>
+    <a href="#keys">What each key does</a>
+    <a href="#phone">Phone REC</a>
+    <a href="#widths">Widths</a>
+    <a href="#audit">Audit</a>
+    <a href="#build">Build order</a>
+  </nav>
+
+  <!-- ================= 1. DEVICE VIEW ================= -->
+  <section class="s" id="device">
+    <div class="s__head">
+      <span class="caps">Live · 1200 px window</span>
+      <h2>The EP-133 on a wide screen</h2>
+      <p>The device replaces the four-group grid when the window is wide. Live tools sit docked on the right, with Takes at the top. Pick a state or play it yourself: hold pads, tap A–D, KEYS, RECORD, −/+, or any dark key.</p>
+    </div>
+    <div class="chips" role="group" aria-label="Device state">
+      <button type="button" class="chip" data-preset="idle" aria-pressed="false">Connected</button>
+      <button type="button" class="chip" data-preset="playing" aria-pressed="true">Playing</button>
+      <button type="button" class="chip" data-preset="keys" aria-pressed="false">KEYS mode</button>
+      <button type="button" class="chip" data-preset="armed" aria-pressed="false">REC armed</button>
+      <button type="button" class="chip" data-preset="recording" aria-pressed="false">Recording</button>
+      <button type="button" class="chip" data-preset="offline" aria-pressed="false">Offline</button>
+      <button type="button" class="chip" data-preset="coach" aria-pressed="false">Guide tags</button>
+    </div>
+    <div class="stage" id="deskStage" data-w="1200" data-h="860">
+      <div class="stage__inner">
+        <div class="win" id="win">
+          <div class="win__bar"><span class="win__dot"></span><span class="win__dot"></span><span class="win__dot"></span><span class="win__url">arc-pi-mauve.vercel.app/#/live</span></div>
+          <div class="app">
+            <div class="app__main">
+              <div class="topbar">
+                <span class="tag">LIVE</span>
+                <div class="topbar__keys">
+                  <span class="ikey ikey--signal" id="tbBackup"><span class="d"></span></span>
+                  <span class="ikey ikey--ok" id="tbConn"><span class="d"></span></span>
+                  <span class="ikey ikey--round">?</span>
+                  <span class="ikey ikey--round" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24"><path fill="currentColor" d="M19.4 13a7.5 7.5 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7 7 0 0 0-1.7 1l-2.4-1-2 3.4L6.6 11a7.5 7.5 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.3 2.5h4l.4-2.5a7 7 0 0 0 1.7-1l2.4 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg></span>
+                </div>
+              </div>
+              <div class="devwrap"><div id="ep"></div></div>
+              <div class="edge-guide"><span>GUIDE</span></div>
+            </div>
+            <aside class="tools" id="tools"></aside>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="hint">The window is drawn at 1200 px and scaled to fit this page. The key layout is drawn from memory of the unit and its manual; check the key positions against a real EP-133 before building.</p>
+  </section>
+
+  <!-- ================= 2. KEY MAP ================= -->
+  <section class="s" id="keys">
+    <div class="s__head">
+      <span class="caps">Behaviour</span>
+      <h2>What each key does in arc</h2>
+      <p>Over MIDI, arc only hears notes, the clock and a few SysEx messages. It can't tell when SOUND or FX is pressed on the device, so those keys don't pretend to light up. A tap on one of them opens its shortcuts from the guide instead.</p>
+    </div>
+    <div class="legend">
+      <div class="lg">
+        <h3><span class="sw sw--acts"></span>Acts in arc</h3>
+        <ul>
+          <li><b>Pads</b>: hold to hear the sample in the browser. Several fingers play a chord.</li>
+          <li><b>A–D</b>: pick the group the pads play. The navy key is the group shown.</li>
+          <li><b>KEYS</b>: switch between PADS and KEYS. In KEYS the pads become notes of the last sound.</li>
+          <li><b>RECORD</b>: arm REC. Recording starts with the first sound, and a second tap stops and saves the take.</li>
+          <li><b>− / +</b>: octave down or up in KEYS. In PADS they are dimmed.</li>
+        </ul>
+      </div>
+      <div class="lg">
+        <h3><span class="sw sw--mirror"></span>Lights from the EP-133</h3>
+        <ul>
+          <li><b>Pads</b> glow orange with velocity and fade over 300 ms, the same as the grid.</li>
+          <li><b>A–D</b>: the light shows which groups are sounding. Follow moves the selection.</li>
+          <li><b>PLAY</b> is lit while the device plays, from MIDI clock start and stop.</li>
+          <li><b>KEYS</b> is lit while the device sends KEYS notes.</li>
+          <li><b>Screen</b>: play state, BPM, project, the last hit, and REC.</li>
+        </ul>
+      </div>
+      <div class="lg">
+        <h3><span class="sw sw--guide"></span>Shows its shortcuts</h3>
+        <ul>
+          <li><b>SOUND, MAIN, TEMPO, SAMPLE, FX, TIMING, ERASE, SHIFT</b>, the <b>X / Y knobs</b> and the <b>fader</b> open a card with their combos from the shortcut guide.</li>
+          <li>The card links to the full guide, already filtered to that key.</li>
+          <li>Nothing is ever sent to the device. arc only reads in Live.</li>
+        </ul>
+      </div>
+    </div>
+    <p class="callout"><b>Keyboard:</b> the pads follow the numpad (7 8 9 / 4 5 6 / 1 2 3 / . 0 Enter). A–D follow the F1–F4 keys, K toggles KEYS, R toggles REC, and the minus and plus keys change the octave. The guide overlay lists them.</p>
+  </section>
+
+  <!-- ================= 3. PHONE ================= -->
+  <section class="s" id="phone">
+    <div class="s__head">
+      <span class="caps">Phone · 412 px · existing grid</span>
+      <h2>REC and takes on the phone</h2>
+      <p>The phone layout doesn't change. The display strip gains Android's REC chip, and Live tools gain the Takes list. Each web mock below has the Android screen it copies next to it.</p>
+    </div>
+    <div class="phones" id="phones"></div>
+  </section>
+
+  <!-- ================= 4. WIDTHS ================= -->
+  <section class="s" id="widths">
+    <div class="s__head">
+      <span class="caps">Breakpoints</span>
+      <h2>Which width gets the device</h2>
+      <p>Live picks its layout from its own width (a container query, as the four-across grid does today), not from the device. The saved "All groups / One group" choice still applies below 900 px.</p>
+    </div>
+    <div class="widths">
+      <div class="wd"><div class="wd__px"><small>1200 px and wider</small>Device + docked tools</div>
+        <div class="sch" style="grid-template-columns: 1fr 70px;"><div class="d"></div><div class="b"></div></div>
+        <p class="small dim">Live tools stay open on the right. The takes list is always visible.</p></div>
+      <div class="wd"><div class="wd__px"><small>900 – 1199 px</small>Device, tools slide in</div>
+        <div class="sch" style="grid-template-columns: 1fr 10px;"><div class="d"></div><div class="hat"></div></div>
+        <p class="small dim">The device fills the width. Tools open from the hatched strip, as they do today.</p></div>
+      <div class="wd"><div class="wd__px"><small>640 – 899 px</small>Four groups across</div>
+        <div class="sch" style="grid-template-columns: repeat(4,1fr); grid-template-rows: 30px 1fr;"><div class="b" style="grid-column: 1 / -1; background: var(--display);"></div><div class="o"></div><div class="b"></div><div class="b"></div><div class="b"></div></div>
+        <p class="small dim">Today's tablet layout, the same as Android's Live tablet.</p></div>
+      <div class="wd"><div class="wd__px"><small>Under 640 px</small>One group</div>
+        <div class="sch" style="grid-template-rows: 16px 1fr 18px; justify-self: center; width: 70px;"><div class="b" style="background: var(--display);"></div><div class="b"></div><div class="o"></div></div>
+        <p class="small dim">Today's phone layout, plus REC.</p></div>
+    </div>
+  </section>
+
+  <!-- ================= 5. AUDIT ================= -->
+  <section class="s" id="audit">
+    <div class="s__head">
+      <span class="caps">Android reference vs web ?demo · 412 px</span>
+      <h2>Screen-by-screen audit</h2>
+      <p>The left images are Android's screenshot-test references. The right images are the web app, captured today in demo mode at the same width. Apart from REC and takes, the port is close. The differences found are listed under each pair.</p>
+    </div>
+    <div class="filters" role="group" aria-label="Filter">
+      <button type="button" class="chip" data-filter="all" aria-pressed="true">All</button>
+      <button type="button" class="chip" data-filter="fix" aria-pressed="false">Fix</button>
+      <button type="button" class="chip" data-filter="check" aria-pressed="false">Check</button>
+      <button type="button" class="chip" data-filter="same" aria-pressed="false">Same</button>
+    </div>
+    <div class="audit" id="audit-list"></div>
+  </section>
+
+  <!-- ================= 6. BUILD ================= -->
+  <section class="s" id="build">
+    <div class="s__head">
+      <span class="caps">After sign-off</span>
+      <h2>Build order</h2>
+      <p>The repo rule still holds: Kotlin <code>core/</code> first, then the web port, which carries the "Port of …" header. Each step ships on its own and passes <code>npm run check</code>.</p>
+    </div>
+    <div class="backlog">
+      <div class="bl"><b>REC engine</b><p>Port <code>TakeRecorder.kt</code> to <code>web/src/core/features/takeRecorder.ts</code>, with the same tests. Tap the mix in <code>MixerHost.render</code> (<code>platform/audio/liveMixer.ts</code>), so a take holds exactly what the browser played. Cap a take at 10 minutes, as Android does.</p></div>
+      <div class="bl"><b>Takes storage and actions</b><p>Add an IndexedDB <code>takes</code> store in <code>platform/storage/db.ts</code> and keep it apart from <code>arc-demo</code>. Wire Play/Stop, Save WAV (<code>files/save</code>), Share (only where Web Share takes files), and Delete with the inline confirmation. To EP-133 opens <code>UploadSheet</code> with the WAV.</p></div>
+      <div class="bl"><b>REC chip and Takes UI on the existing grid</b><p>Copy the REC and take strings from <code>MirrorText.kt</code> into <code>mirrorText.ts</code>. Add the chip to the display strip and the panel, and a Takes section in Live tools. Add Playwright steps for arm, record, stop and the new row.</p></div>
+      <div class="bl"><b>Device view</b><p>New <code>web/src/ui/live/DeviceView.tsx</code>. It reuses <code>glow.ts</code>, the <code>press.ts</code> gate and chord logic, the KEYS note maths in <code>keys.ts</code>, and the Knob and Fader visuals from <code>GuideKeys.tsx</code>. <code>MirrorScreen.tsx</code> picks the view at 900 px or wider.</p></div>
+      <div class="bl"><b>Shortcut cards</b><p>Filter <code>guideData.ts</code> by key name for the card, and add a "show all" link to <code>#/guide</code> with the filter applied. Add the new tags to the guide overlay.</p></div>
+      <div class="bl"><b>Docked tools at 1200 px</b><p><code>SideZone</code> becomes a docked column at that width. Back no longer closes it there.</p></div>
+      <div class="bl"><b>Clear the "Check" items</b><p>Clear the open questions from the audit: the first-run overlay, the toast lifetime, the Settings storage line, the project tile sizes, and the pads sheet rows.</p></div>
+    </div>
+    <p class="foot">Made from <code>app/src/screenshotTestDebug/reference</code> and <code>npm run dev</code> with <code>?demo</code>. Source is in <code>design/web-sync/</code>. arc is not affiliated with teenage engineering.</p>
+  </section>
+</div>
+
+<script>
+(() => {
+  'use strict'
+  const COMBOS = {"SOUND":[{"combo":"SOUND > A-D > pad","action":"Load a sample onto a pad: in SOUND mode, pick a group and then press the pad you want to load"},{"combo":"[In SOUND mode] -/+","action":"Step through the sample library one slot at a time to change the sound on the selected pad"},{"combo":"SHIFT + SOUND > -/+","action":"Open SOUND EDIT for the selected sound and move between its six edit pages"}],"MAIN":[{"combo":"MAIN","action":"Leave sample mode."},{"combo":"hold:MAIN + 1-9","action":"Load a different project (there are 9 project slots)"},{"combo":"hold:MAIN + ENTER","action":"Song mode: open the song list editor and arrange scenes"}],"TEMPO":[{"combo":"hold:SAMPLE + TEMPO","action":"Detect the tempo of audio coming in through line in or the mic. The device shows the tempo it found and sets the project tempo to match."},{"combo":"TEMPO > turn:KNOB Y","action":"Metronome volume, and making the metronome play during normal playback"},{"combo":"MAIN + TEMPO > turn:KNOB X / turn:KNOB Y","action":"Set the current pattern's time signature"}],"SAMPLE":[{"combo":"SAMPLE","action":"Enter sample mode. Every pad lights up and the LEDs blink to show the sampler is ready."},{"combo":"SAMPLE > + > pad","action":"Resample a chord into another group. Pick the sound and turn on KEYS mode. Enter the sampler, choose resampling as the source, pick the destination group, and start hands-free sampling on a pad. Go back to the group with the sound, play the chord, then stop."},{"combo":"hold:SAMPLE + TEMPO","action":"Detect the tempo of audio coming in through line in or the mic. The device shows the tempo it found and sets the project tempo to match."}],"FX":[{"combo":"FX > -/+","action":"Cycle through the available master effects: delay, reverb, distortion, chorus, filter and compressor"},{"combo":"SHIFT + FX > +","action":"Go to the sidechain page inside the output settings"},{"combo":"[While playing] FX","action":"Open the FX page while the pattern is running. This is where you choose the single master effect that all groups send to."}],"TIMING":[{"combo":"TIMING > - / +","action":"Switch between quantized recording and free-time recording"},{"combo":"hold:TIMING + pad","action":"Note repeat: play a pad over and over at the current interval (also used to record hi-hat rolls)"},{"combo":"TIMING > turn:KNOB X","action":"Choose the step resolution (note interval)"}],"ERASE":[{"combo":"SHIFT + ERASE","action":"Open the system settings"},{"combo":"RECORD > ERASE > +","action":"Overwrite recording: clear the existing recording and replace it with the new take"},{"combo":"hold:ERASE + FADER","action":"Delete fader automation. With playback stopped, hold the combo (about 2 seconds, until FDR then DEL shows) to clear automation for all assignments. During playback, it removes fader moves as the pattern runs. Add the assignment's pad to clear only that one parameter."}],"SHIFT":[{"combo":"SHIFT + B","action":"Undo"},{"combo":"SHIFT + FADER","action":"Put the fader's virtual position back to the default for every assignment in the current group (screen shows RES). Doing the combo again reverses the reset (screen shows SET)."},{"combo":"SHIFT + ERASE","action":"Open the system settings"}],"KNOBX":[{"combo":"TIMING > turn:KNOB X","action":"Choose the step resolution (note interval)"},{"combo":"[In sample mode] turn:KNOB X","action":"Set the input recording level."},{"combo":"SHIFT + SOUND > + > turn:KNOB X","action":"Make a sample play backwards"}],"KNOBY":[{"combo":"TEMPO > turn:KNOB Y","action":"Metronome volume, and making the metronome play during normal playback"},{"combo":"TIMING > turn:KNOB Y","action":"Set the swing amount"},{"combo":"[In sample mode] turn:KNOB Y","action":"Set the threshold, so recording only starts once the incoming sound is loud enough."}],"FADER":[{"combo":"SHIFT + FADER","action":"Put the fader's virtual position back to the default for every assignment in the current group (screen shows RES). Doing the combo again reverses the reset (screen shows SET)."},{"combo":"hold:FADER + pad","action":"Pick which parameter the fader controls for the current group. By default it controls group level. The other options are the labels printed above the pads."},{"combo":"hold:ERASE + FADER","action":"Delete fader automation. With playback stopped, hold the combo (about 2 seconds, until FDR then DEL shows) to clear automation for all assignments. During playback, it removes fader moves as the pattern runs. Add the assignment's pad to clear only that one parameter."}],"PLAY":[{"combo":"RECORD > PLAY","action":"Start live recording after a four-beat count-in (from stopped)"},{"combo":"RECORD + PLAY","action":"Start live recording right away, with no count-in"},{"combo":"RECORD > SHIFT + PLAY","action":"Record from the start of the pattern instead of from the current bar"}],"RECORD":[{"combo":"RECORD > -/+","action":"Set the pattern length in bars (shorter or longer)"},{"combo":"RECORD > PLAY","action":"Start live recording after a four-beat count-in (from stopped)"},{"combo":"RECORD + PLAY","action":"Start live recording right away, with no count-in"}],"KEYS":[{"combo":"pad > KEYS","action":"Turn on keys mode, which plays the selected pad's sample chromatically across all 12 pads"},{"combo":"hold:KEYS + -/+ | hold:KEYS + pad","action":"Keys mode: move up or down an octave, or transpose the root note"},{"combo":"hold:KEYS + turn:KNOB X | hold:KEYS + turn:KNOB Y","action":"Keys mode: change the key, or change the scale"}]}
+
+  // ---------- theme ----------
+  const root = document.documentElement
+  const themeBtns = document.querySelectorAll('[data-theme-set]')
+  function setTheme(t) {
+    if (t === 'system') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', t)
+    themeBtns.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.themeSet === t)))
+    try { localStorage.setItem('arc-sync-theme', t) } catch (e) {}
+  }
+  themeBtns.forEach((b) => b.addEventListener('click', () => setTheme(b.dataset.themeSet)))
+  try { const t = localStorage.getItem('arc-sync-theme'); if (t) setTheme(t) } catch (e) {}
+
+  // ---------- scaled stages ----------
+  function fitStage(stage) {
+    const inner = stage.firstElementChild
+    const w = Number(stage.dataset.w), h = Number(stage.dataset.h)
+    const s = Math.min(1, stage.clientWidth / w)
+    inner.style.transform = `scale(${s})`
+    stage.style.height = h * s + 'px'
+  }
+  function fitPhone(screen) {
+    const pm = screen.firstElementChild
+    pm.style.transform = `scale(${screen.clientWidth / 412})`
+  }
+  const ro = new ResizeObserver((entries) => entries.forEach((e) => {
+    if (e.target.classList.contains('stage')) fitStage(e.target); else fitPhone(e.target)
+  }))
+
+  // ---------- music data (padNotes: rows 7 8 9 / 4 5 6 / 1 2 3 / . 0 ENTER) ----------
+  const ROWS = [['7', '8', '9'], ['4', '5', '6'], ['1', '2', '3'], ['.', '0', 'ENTER']]
+  const LABELS = ['.', '0', 'ENTER', '1', '2', '3', '4', '5', '6', '7', '8', '9']
+  const GROUPS = ['A', 'B', 'C', 'D']
+  const NAMES = [
+    { '7': 'kick', '8': 'kick 2', '9': 'snare', '4': 'hat closed', '5': 'hat open', '6': 'clap', '1': 'rim', '2': 'tom low', '.': 'perc' },
+    { '7': 'bass c1', '8': 'bass d1' },
+    { '2': 'vox chop' },
+    { '7': 'stab', '1': 'riser' },
+  ]
+  const SLOTS = { kick: '001', 'kick 2': '002', snare: '003', 'hat closed': '004', 'hat open': '005', clap: '006', rim: '007', 'tom low': '008', perc: '009', 'bass c1': '101', 'bass d1': '102', 'vox chop': '140', stab: '205', riser: '206' }
+  const SOLFEGE = ['DO', 'DI', 'RE', 'RI', 'MI', 'FA', 'FI', 'SO', 'SI', 'LA', 'LI', 'TI']
+  const MAJOR = [0, 2, 4, 5, 7, 9, 11]
+  const note = (label) => LABELS.indexOf(label)
+
+  // KEYS: 12 keys from bottom-left, left to right, then up (Android's KEYS grid).
+  function keyNotes(oct) {
+    const out = []
+    for (let i = 0; i < 12; i++) {
+      const deg = MAJOR[i % 7] + 12 * Math.floor(i / 7)
+      out.push({ name: SOLFEGE[deg % 12], oct: oct + Math.floor(deg / 12) })
+    }
+    return out
+  }
+  function keyIndexAt(r, c) { return (3 - r) * 3 + c }
+
+  // ---------- state ----------
+  const S = {
+    connected: true, playing: true, bpm: '122.0', project: 3, group: 0, keys: false, octave: 4,
+    rec: 'idle', recStart: 0, recSecs: 0, offline: false, coach: false, keysFromDevice: false,
+    glow: [new Map(), new Map(), new Map(), new Map()], playingPads: new Set(), groupGlow: [0, 0, 0, 0],
+    last: 'A 7 · 001 kick · 124', pop: null, toast: null, view: 'device',
+    takes: [
+      { id: 2, date: 'Oct 10, 9:12 PM', secs: 47, open: false, confirm: false, playing: false },
+      { id: 1, date: 'Oct 9, 6:40 PM', secs: 73, open: false, confirm: false, playing: false },
+    ],
+  }
+  const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
+  const el = (h) => { const t = document.createElement('template'); t.innerHTML = h.trim(); return t.content.firstElementChild }
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+
+  // ---------- device ----------
+  const epHost = document.getElementById('ep')
+  const win = document.getElementById('win')
+  function fkey(id, label, opts = {}) {
+    const cls = ['k', opts.light ? 'k--light' : '', opts.group ? 'k--group' : ''].filter(Boolean).join(' ')
+    return `<button type="button" class="${cls}" data-key="${id}" aria-label="${esc(opts.aria || label)}"><span class="led"></span>${label}${opts.acts ? '<span class="acts"></span>' : ''}</button>`
+  }
+  function renderDevice() {
+    const fk = [
+      fkey('SOUND', 'SOUND'), fkey('MAIN', 'MAIN'), fkey('TEMPO', 'TEMPO'),
+      fkey('SAMPLE', 'SAMPLE'), fkey('FX', 'FX'), fkey('TIMING', 'TIMING'),
+      fkey('KEYS', 'KEYS', { acts: true }), fkey('ERASE', 'ERASE'), fkey('SHIFT', 'SHIFT', { light: true }),
+      fkey('RECORD', '<span class="rec-dot"></span>', { acts: true, aria: 'RECORD' }), fkey('PLAY', '<span class="k__glyph">▶</span>', { aria: 'PLAY' }),
+      `<div class="k--half">${fkey('MINUS', '−', { light: true, acts: true, aria: 'minus' })}${fkey('PLUS', '+', { light: true, acts: true, aria: 'plus' })}</div>`,
+    ].join('')
+    const gk = GROUPS.map((g, i) => fkey('G' + i, g, { group: true, acts: true, aria: 'Group ' + g })).join('')
+    const holes = Array.from({ length: 54 }, () => '<i></i>').join('')
+    const pads = ROWS.flat().map((l) => `<button type="button" class="pad" data-label="${l}"></button>`).join('')
+    epHost.replaceWith(el(`<div class="ep" id="ep">
+      <div class="ep__top">
+        <div class="grille" aria-hidden="true">${holes}</div>
+        <div class="lcd" id="lcd"></div>
+        <div class="knobs">
+          <button type="button" class="knob" data-key="KNOBX"><span class="knob__cap" style="--rot:-50deg"></span>X</button>
+          <button type="button" class="knob" data-key="KNOBY"><span class="knob__cap" style="--rot:30deg"></span>Y</button>
+        </div>
+      </div>
+      <div class="ep__mid">
+        <button type="button" class="fader" data-key="FADER"><b>FADER</b><span class="fader__track"><span class="fader__cap"></span></span></button>
+        <span></span>
+        <div class="ep__brand">EP-133<b>K.O. II</b></div>
+      </div>
+      <div class="ep__keys">
+        <div class="fkeys">${fk}</div>
+        <div class="gkeys">${gk}</div>
+        <div class="pads" id="pads">${pads}</div>
+      </div>
+    </div>`))
+    const ep = document.getElementById('ep')
+    ep.addEventListener('click', onKey)
+    bindPads(ep.querySelector('#pads'))
+  }
+
+  function padName(g, l) { return NAMES[g][l] || '' }
+  function update() {
+    const ep = document.getElementById('ep')
+    ep.classList.toggle('is-offline', S.offline)
+    // screen
+    const lcd = document.getElementById('lcd')
+    const recCls = S.rec === 'armed' ? 'is-armed' : S.rec === 'rec' ? 'is-on' : ''
+    const recTxt = S.rec === 'rec' ? fmt(S.recSecs) : 'REC'
+    const segs = Array.from({ length: 16 }, (_, i) => `<i class="${S.playing && !S.offline ? (i === beat ? 'beat' : i < beat ? 'on' : '') : ''}"></i>`).join('')
+    const head = S.offline
+      ? `<span>OFFLINE</span><span class="dimt">P${S.project}</span><span class="sp"></span>`
+      : S.keys
+        ? `<span class="dimt">KEYS</span><span>${keyNotes(S.octave)[0].name}${S.octave}</span><span class="sp"></span><span class="dimt">OCT ${S.octave}</span>`
+        : `<span>${S.playing ? '▶ PLAYING' : '■ STOPPED'}</span><span class="sp"></span><span>${S.bpm} BPM</span><span class="dimt">P${S.project}</span>`
+    const big = S.offline ? 'Last seen Oct 5, 2:04 PM' : S.keys ? `${GROUPS[S.group]} 7 · ${padName(S.group, '7') || 'kick'}` : S.last
+    lcd.innerHTML = `<div class="lcd__r1">${head}</div><div class="lcd__big">${esc(big)}</div>
+      <div class="lcd__r3"><span class="rec ${recCls}"><i></i>${recTxt}</span><span class="lcd__seg">${segs}</span><span class="dimt" style="font-size:13px;font-weight:700">${GROUPS[S.group]}</span></div>`
+    // keys
+    const keyEl = (id) => ep.querySelector(`[data-key="${id}"]`)
+    keyEl('PLAY').classList.toggle('is-lit', S.playing && !S.offline)
+    keyEl('KEYS').classList.toggle('is-sel', S.keys)
+    keyEl('KEYS').classList.toggle('is-lit', S.keysFromDevice && !S.offline)
+    keyEl('RECORD').classList.toggle('is-lit', S.rec !== 'idle')
+    keyEl('MINUS').classList.toggle('is-dim', !S.keys)
+    keyEl('PLUS').classList.toggle('is-dim', !S.keys)
+    GROUPS.forEach((_, i) => {
+      const k = keyEl('G' + i)
+      k.classList.toggle('is-sel', i === S.group)
+      const g = S.groupGlow[i]
+      k.classList.toggle('is-glow', g > 0.02 && i !== S.group)
+      k.style.setProperty('--g', g.toFixed(2))
+    })
+    // pads
+    const kn = keyNotes(S.octave)
+    ep.querySelectorAll('.pad').forEach((p, idx) => {
+      const r = Math.floor(idx / 3), c = idx % 3, l = p.dataset.label
+      const g = S.glow[S.group].get(l) || 0
+      p.style.setProperty('--glow', g.toFixed(3))
+      p.classList.toggle('is-lit', g > 0.35)
+      p.classList.toggle('is-playing', S.playingPads.has(S.group + l))
+      if (S.keys) {
+        const n = kn[keyIndexAt(r, c)]
+        p.innerHTML = `<span class="pad__ring ${n.oct > S.octave ? 'hi' : ''}">${n.name}</span><span class="pad__oct">${n.oct}</span>`
+        p.setAttribute('aria-label', n.name + n.oct)
+      } else {
+        const nm = padName(S.group, l)
+        p.innerHTML = `<span class="pad__name">${esc(nm)}</span><span class="pad__num ${l === 'ENTER' ? 'word' : ''}">${l}</span>`
+        p.setAttribute('aria-label', `${GROUPS[S.group]} ${l}${nm ? ', ' + nm : ''}`)
+      }
+    })
+    // top bar
+    const conn = document.getElementById('tbConn')
+    conn.className = 'ikey ' + (S.offline ? 'ikey--navy' : 'ikey--ok')
+    document.getElementById('tbBackup').classList.toggle('is-pale', S.offline)
+    renderTools(); renderOverlay()
+  }
+
+  // beat counter for the screen's 16 segments
+  let beat = 0
+  setInterval(() => { if (S.playing && !S.offline) { beat = (beat + 1) % 16; if (!dragging) updateLcdOnly() } }, 60000 / 122 / 4)
+  function updateLcdOnly() { const segs = document.querySelectorAll('#lcd .lcd__seg i'); segs.forEach((s, i) => { s.className = i === beat ? 'beat' : i < beat ? 'on' : '' }) }
+  setInterval(() => { if (S.rec === 'rec') { S.recSecs = (Date.now() - S.recStart) / 1000; const r = document.querySelector('#lcd .rec'); if (r) r.lastChild.textContent = fmt(S.recSecs) } }, 250)
+
+  // ---------- glow fade (300 ms, as ui/live/glow.ts) ----------
+  const fading = new Map()
+  let raf = 0
+  function fade() {
+    const now = performance.now()
+    let alive = false
+    fading.forEach((f, key) => {
+      const t = Math.min(1, (now - f.t0) / 300)
+      const v = f.from * (1 - t)
+      S.glow[f.g].set(f.l, v)
+      if (t >= 1) { fading.delete(key); S.glow[f.g].delete(f.l) } else alive = true
+    })
+    for (let g = 0; g < 4; g++) S.groupGlow[g] = Math.max(0, ...S.glow[g].values())
+    update()
+    raf = alive ? requestAnimationFrame(fade) : 0
+  }
+  function hit(g, l, vel) {
+    fading.delete(g + l)
+    S.glow[g].set(l, 0.45 + 0.55 * vel)
+    S.groupGlow[g] = Math.max(S.groupGlow[g], 0.45 + 0.55 * vel)
+  }
+  function release(g, l) {
+    fading.set(g + l, { g, l, from: S.glow[g].get(l) || 0, t0: performance.now() })
+    if (!raf) raf = requestAnimationFrame(fade)
+  }
+
+  // ---------- pads (hold = gate) ----------
+  let dragging = false
+  function bindPads(host) {
+    const down = new Map()
+    host.addEventListener('pointerdown', (e) => {
+      const p = e.target.closest('.pad'); if (!p) return
+      e.preventDefault(); p.setPointerCapture(e.pointerId)
+      const l = p.dataset.label, g = S.group
+      down.set(e.pointerId, { g, l, p }); p.classList.add('is-down')
+      S.playingPads.add(g + l); hit(g, l, 0.9)
+      if (S.rec === 'armed') { S.rec = 'rec'; S.recStart = Date.now(); S.recSecs = 0 }
+      const nm = padName(g, l)
+      if (!S.keys) S.last = `${GROUPS[g]} ${l}${nm ? ' · ' + nm : ''}`
+      closePop(); update()
+    })
+    const up = (e) => {
+      const d = down.get(e.pointerId); if (!d) return
+      down.delete(e.pointerId); d.p.classList.remove('is-down')
+      S.playingPads.delete(d.g + d.l); release(d.g, d.l)
+    }
+    host.addEventListener('pointerup', up); host.addEventListener('pointercancel', up)
+  }
+
+  // ---------- keys ----------
+  function onKey(e) {
+    const k = e.target.closest('[data-key]'); if (!k) return
+    const id = k.dataset.key
+    if (id.startsWith('G')) { S.group = Number(id.slice(1)); closePop(); return update() }
+    if (id === 'KEYS') { S.keys = !S.keys; closePop(); return update() }
+    if (id === 'MINUS' || id === 'PLUS') {
+      if (!S.keys) return showToast('− and + change the octave in KEYS.')
+      S.octave = Math.max(0, Math.min(8, S.octave + (id === 'PLUS' ? 1 : -1))); return update()
+    }
+    if (id === 'RECORD') { toggleRec(); return }
+    openPop(k, id)
+  }
+  function toggleRec() {
+    if (S.rec === 'idle') { S.rec = 'armed'; update(); return }
+    if (S.rec === 'armed') { S.rec = 'idle'; update(); return }
+    const secs = Math.max(1, Math.round((Date.now() - S.recStart) / 1000))
+    S.rec = 'idle'
+    S.takes.unshift({ id: Date.now(), date: 'Oct 10, ' + new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), secs, open: false, confirm: false, playing: false })
+    showToast(`Take saved (${fmt(secs)}). It's in Live tools.`)
+    update()
+  }
+  const KEY_NAMES = { KNOBX: 'Knob X', KNOBY: 'Knob Y', FADER: 'Fader', PLAY: 'PLAY' }
+  function openPop(k, id) {
+    closePop()
+    const list = COMBOS[id] || []
+    const r = k.getBoundingClientRect(), w = win.getBoundingClientRect()
+    const s = w.width / win.offsetWidth
+    let x = (r.left - w.left) / s, y = (r.bottom - w.top) / s + 10
+    if (x + 300 > 1180) x = 1180 - 300
+    const note = id === 'PLAY' ? 'Lit while the EP-133 plays. arc never starts or stops the device.' : 'arc only reads in Live. This key works on the device.'
+    const pop = el(`<div class="pop" role="dialog" aria-label="${esc(KEY_NAMES[id] || id)} shortcuts" style="left:${x}px;top:${y}px">
+      <h4>${esc(KEY_NAMES[id] || id)} on the EP-133 <button type="button" aria-label="Close">×</button></h4>
+      ${list.slice(0, 3).map((c) => `<div class="row"><code>${esc(c.combo.replace(/hold:|turn:/g, ''))}</code><p>${esc(c.action.split('. ')[0].replace(/\.$/, ''))}.</p></div>`).join('')}
+      <p class="note">${note} <b>All ${esc(KEY_NAMES[id] || id)} shortcuts →</b></p></div>`)
+    pop.querySelector('button').addEventListener('click', closePop)
+    win.appendChild(pop); S.pop = pop
+    const ph = pop.offsetHeight
+    if (y + ph > 846) { x = Math.min((r.right - w.left) / s + 12, 1180 - 300); y = Math.max(52, 846 - ph) ; pop.style.left = x + 'px'; pop.style.top = y + 'px' }
+  }
+  function closePop() { if (S.pop) { S.pop.remove(); S.pop = null } }
+  let toastT = 0
+  function showToast(msg) {
+    document.querySelectorAll('#win .toast').forEach((t) => t.remove())
+    const t = el(`<div class="toast" role="status">${esc(msg)}</div>`)
+    win.querySelector('.app__main').appendChild(t)
+    clearTimeout(toastT); toastT = setTimeout(() => t.remove(), 3200)
+  }
+
+  // ---------- tools panel ----------
+  const tools = document.getElementById('tools')
+  function renderTools() {
+    tools.innerHTML = `
+      <div class="tools__title"><span class="caps">Live tools</span></div>
+      <span class="caps">View</span>
+      <div class="tt" role="group" aria-label="View">
+        <button type="button" aria-pressed="true">Device</button><button type="button" aria-pressed="false">All groups</button><button type="button" aria-pressed="false">One group</button>
+      </div>
+      <span class="caps">Takes</span>
+      <div class="takes">${S.takes.length ? S.takes.map(takeHtml).join('') : `<p>Tap RECORD, then play: recording starts with the first sound and stops when you tap RECORD again.</p>`}</div>
+      <p>A take holds the pads and keys played in this browser, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save or Share copies one out.</p>
+      <span class="caps">Pad numbers in project files</span>
+      <div class="segrow"><span class="on">From the top</span><span>From the bottom</span></div>`
+  }
+  function takeHtml(t) {
+    const live = S.connected && !S.offline
+    return `<div class="take" data-take="${t.id}">
+      <div class="take__row" data-act="open" role="button" tabindex="0" aria-expanded="${t.open}">
+        <span class="take__meta"><span class="take__date">${esc(t.date)}</span><span class="take__len">${fmt(t.secs)}</span></span>
+        <button type="button" class="akey" data-act="play">${t.playing ? 'Stop' : 'Play'}</button>
+      </div>
+      ${t.open ? `<div class="take__more">
+        <button type="button" class="akey">Save WAV</button>
+        <button type="button" class="akey">Share</button>
+        <button type="button" class="akey" ${live ? '' : 'disabled title="Connect the EP-133 first"'}>To EP-133</button>
+        <button type="button" class="akey akey--danger" data-act="del">Delete</button>
+        ${t.confirm ? `<div class="take__confirm"><span>Delete this take?</span><span style="display:flex;gap:6px"><button type="button" class="akey" data-act="cancel">Cancel</button><button type="button" class="akey akey--signal" data-act="really">Delete</button></span></div>` : ''}
+      </div>` : ''}
+    </div>`
+  }
+  tools.addEventListener('click', (e) => {
+    const box = e.target.closest('[data-take]'); if (!box) return
+    const t = S.takes.find((x) => String(x.id) === box.dataset.take); if (!t) return
+    const act = e.target.closest('[data-act]')?.dataset.act
+    if (act === 'play') { S.takes.forEach((x) => { if (x !== t) x.playing = false }); t.playing = !t.playing }
+    else if (act === 'del') t.confirm = true
+    else if (act === 'cancel') t.confirm = false
+    else if (act === 'really') S.takes = S.takes.filter((x) => x !== t)
+    else if (act === 'open') { t.open = !t.open; t.confirm = false }
+    renderTools()
+  })
+
+  // ---------- guide overlay ----------
+  function renderOverlay() {
+    win.querySelectorAll('.ctag, .cscrim, .cclose').forEach((n) => n.remove())
+    if (!S.coach) return
+    const at = (sel, text, cls, dx = 0, dy = 0) => {
+      const n = win.querySelector(sel); if (!n) return
+      const r = n.getBoundingClientRect(), w = win.getBoundingClientRect(), s = w.width / win.offsetWidth
+      win.appendChild(el(`<span class="ctag ${cls}" style="left:${(r.left - w.left) / s + dx}px;top:${(r.top - w.top) / s + dy}px">${text}</span>`))
+    }
+    win.appendChild(el('<div class="cscrim"></div>'))
+    at('.topbar .tag', 'Sections', '', 0, 52)
+    at('#tbBackup', 'Back up', 'o', -20, 52)
+    at('#tbConn', 'Connection', 'g', -24, 88)
+    at('.pads', 'Pads light as you play', 'y', 60, 150)
+    at('.gkeys', 'Pick a group', '', -20, -30)
+    at('[data-key="KEYS"]', 'Pads or keys', '', -10, -30)
+    at('[data-key="RECORD"]', 'Record a take', 'o', -14, 84)
+    at('[data-key="PLAY"]', 'Lit while it plays', '', -24, 84)
+    at('[data-key="SOUND"]', 'Tap a key for its shortcuts', '', -6, -30)
+    at('.lcd', 'Tempo, project, last hit', '', 30, 104)
+    at('.tools .takes', 'Your takes', '', 0, -30)
+    at('.edge-guide', 'EP-133 shortcuts', '', 36, 50)
+    win.appendChild(el('<div class="cclose">TAP ANYWHERE TO CLOSE</div>'))
+  }
+  win.addEventListener('click', (e) => { if (S.coach && !e.target.closest('.chip')) { S.coach = false; setPresetChip(null); update() } }, true)
+
+  // ---------- presets ----------
+  const chips = document.querySelectorAll('[data-preset]')
+  function setPresetChip(id) { chips.forEach((c) => c.setAttribute('aria-pressed', String(c.dataset.preset === id))) }
+  function clearGlow() { S.glow.forEach((m) => m.clear()); fading.clear(); S.groupGlow = [0, 0, 0, 0]; S.playingPads.clear() }
+  const PRESETS = {
+    idle() { Object.assign(S, { playing: false, offline: false, keys: false, rec: 'idle', group: 0, last: 'A 7 · 001 kick · 124', keysFromDevice: false }) },
+    playing() {
+      Object.assign(S, { playing: true, offline: false, keys: false, rec: 'idle', group: 0, last: 'A 7 · 001 kick · 124', keysFromDevice: false })
+      S.glow[0].set('7', 1); S.glow[0].set('4', 0.55); S.glow[1].set('7', 0.85); S.glow[2].set('2', 0.7)
+      S.groupGlow = [1, 0.85, 0.7, 0]
+    },
+    keys() {
+      Object.assign(S, { playing: true, offline: false, keys: true, rec: 'idle', group: 0, octave: 4, keysFromDevice: true })
+      S.glow[0].set('9', 0.6); S.glow[0].set('ENTER', 1)
+    },
+    armed() { PRESETS.idle(); S.rec = 'armed'; S.playing = true },
+    recording() { PRESETS.playing(); S.rec = 'rec'; S.recStart = Date.now() - 12000; S.recSecs = 12 },
+    offline() { Object.assign(S, { playing: false, offline: true, keys: false, rec: 'idle', group: 0, keysFromDevice: false }) },
+    coach() { PRESETS.idle(); S.coach = true },
+  }
+  chips.forEach((c) => c.addEventListener('click', (e) => {
+    e.stopPropagation()
+    clearGlow(); closePop(); S.coach = false
+    PRESETS[c.dataset.preset](); setPresetChip(c.dataset.preset); update()
+  }))
+
+  // ---------- keyboard ----------
+  const KB = { '7': '7', '8': '8', '9': '9', '4': '4', '5': '5', '6': '6', '1': '1', '2': '2', '3': '3', '.': '.', '0': '0', Enter: 'ENTER' }
+  const held = new Set()
+  document.addEventListener('keydown', (e) => {
+    if (e.repeat || e.target.closest('input, textarea') || document.getElementById('deskStage').getBoundingClientRect().bottom < 0) return
+    const l = KB[e.key]
+    if (l && !held.has(l)) { held.add(l); S.playingPads.add(S.group + l); hit(S.group, l, 0.9); if (S.rec === 'armed') { S.rec = 'rec'; S.recStart = Date.now() } update(); return }
+    if (/^F[1-4]$/.test(e.key)) { e.preventDefault(); S.group = Number(e.key[1]) - 1; update() }
+    else if (e.key === 'k' || e.key === 'K') { S.keys = !S.keys; update() }
+    else if (e.key === 'r' || e.key === 'R') toggleRec()
+    else if ((e.key === '-' || e.key === '+') && S.keys) { S.octave = Math.max(0, Math.min(8, S.octave + (e.key === '+' ? 1 : -1))); update() }
+    else if (e.key === 'Escape') closePop()
+  })
+  document.addEventListener('keyup', (e) => { const l = KB[e.key]; if (l && held.has(l)) { held.delete(l); S.playingPads.delete(S.group + l); release(S.group, l) } })
+
+  // ---------- phones ----------
+  function phoneHtml(o) {
+    const recCls = o.rec === 'armed' ? 'is-armed' : o.rec === 'rec' ? 'is-on' : ''
+    const cells = ROWS.flat().map((l) => {
+      const g = (o.glow || {})[l] || 0
+      const inner = o.keys
+        ? (() => { const idx = ROWS.flat().indexOf(l); const n = keyNotes(4)[keyIndexAt(Math.floor(idx / 3), idx % 3)]; return `<span class="pad__ring ${n.oct > 4 ? 'hi' : ''}" style="width:96px;height:96px;margin:-48px 0 0 -48px;border-width:9px;font-size:24px;${g > .35 ? 'border-color:#fff;color:#fff' : ''}">${n.name}</span><span class="pad__oct" style="font-size:14px;${g > .35 ? 'color:#fff' : ''}">${n.oct}</span>` })()
+        : `<span class="nm">${esc(NAMES[0][l] || '')}</span><span class="n" ${l === 'ENTER' ? 'style="font-size:15px;letter-spacing:.06em"' : ''}>${l}</span>`
+      return `<div class="pm__cell ${g > .35 ? 'lit' : ''}" style="--glow:${g}">${inner}</div>`
+    }).join('')
+    const strip = o.keys
+      ? `<span class="rec ${recCls}"><i></i>${o.rec === 'rec' ? '0:12' : 'REC'}</span><span style="color:var(--display-dim)">KEYS</span><span>DO5</span><span class="last">A 7 · kick</span>`
+      : `<span class="rec ${recCls}"><i></i>${o.rec === 'rec' ? '0:12' : 'REC'}</span><span>▶</span><span>122.0 BPM</span><span style="color:var(--display-dim)">P3</span><span class="last">A 7 · 001 kick</span>`
+    const sheet = o.tools ? `<div class="pm__scrim"></div><div class="pm__sheet">
+        <span class="caps">Live tools</span>
+        <span class="caps">Takes</span>
+        <div class="takes">${[{ date: 'Oct 10, 9:12 PM', secs: 47, playing: true }, { date: 'Oct 9, 6:40 PM', secs: 73 }].map((t, i) => `<div class="take"><div class="take__row"><span class="take__meta"><span class="take__date">${t.date}</span><span class="take__len">${fmt(t.secs)}</span></span><span class="akey">${t.playing ? 'Stop' : 'Play'}</span></div>${i === 0 ? '<div class="take__more"><span class="akey" style="text-align:center">Save WAV</span><span class="akey" style="text-align:center">Share</span><span class="akey" style="text-align:center">To EP-133</span><span class="akey akey--danger" style="text-align:center">Delete</span></div>' : ''}</div>`).join('')}</div>
+        <p class="small dim">A take holds the pads and keys played in this browser, connected or not, not the EP-133's own sound.</p></div>` : ''
+    return `<div class="pm">
+      <div class="pm__bar"><span class="tag">LIVE</span><span style="margin-left:auto" class="ikey ikey--signal"><span class="d"></span></span><span class="ikey ikey--ok"><span class="d"></span></span><span class="ikey ikey--round">?</span></div>
+      <div class="pm__strip">${strip}</div>
+      <div class="pm__grid">${cells}</div>
+      <div class="pm__words"><span>⧉ ${o.keys ? 'KEYS' : 'PADS'}</span>${o.keys ? '<span>MAJOR ▾</span><span>OCT 4 ▾</span>' : ''}</div>
+      ${o.keys ? '<div></div>' : '<div class="pm__groups"><span class="on">A</span><span class="glow">B</span><span>C</span><span>D</span></div>'}
+      ${sheet}</div>`
+  }
+  const PHONES = [
+    { t: 'Web · REC idle', d: 'The chip sits at the left of the strip, dimmed, as on Android.', o: { rec: 'idle', glow: { '7': 1, '4': 0.5 } } },
+    { t: 'Android · REC armed', img: 'audit/android/rec-armed.jpg', d: 'The reference. Armed: the dot blinks until the first sound.' },
+    { t: 'Web · REC armed', d: 'The dot blinks every 450 ms. Nothing is recorded until a pad sounds.', o: { rec: 'armed' } },
+    { t: 'Web · Recording in KEYS', d: 'The chip turns into an orange-ringed timer. Tapping it stops and saves the take.', o: { rec: 'rec', keys: true, glow: { '9': 0.6, 'ENTER': 1 } } },
+    { t: 'Android · Recording in KEYS', img: 'audit/android/rec-recording-keys.jpg', d: 'The reference for the timer chip.' },
+    { t: 'Web · Live tools with takes', d: 'Takes come first in the panel. Tapping a row unfolds Save WAV, Share, To EP-133 and Delete.', o: { tools: true } },
+    { t: 'Android · Live tools with takes', img: 'audit/android/tools-takes.jpg', d: 'The reference. The web copy says "in this browser" in place of "on the phone".' },
+  ]
+  const phones = document.getElementById('phones')
+  PHONES.forEach((p) => {
+    const node = el(`<div class="ph"><div class="ph__cap"><b>${esc(p.t)}</b><span class="small dim">${esc(p.d)}</span></div>
+      ${p.img ? `<img src="${p.img}" alt="${esc(p.t)}" loading="lazy" width="412" height="842">` : `<div class="ph__screen">${phoneHtml(p.o)}</div>`}</div>`)
+    phones.appendChild(node)
+    const sc = node.querySelector('.ph__screen'); if (sc) { ro.observe(sc); fitPhone(sc) }
+  })
+
+  // ---------- audit ----------
+  const AUDIT = [
+    { k: 'live-one-group', t: 'Live, one group', s: 'fix', n: ['The REC chip is missing at the left of the display strip.', 'Pad names: the Android preview has every name learned already. The web demo learns them as pads are pressed, so blank pads are expected here.', 'Group keys, Follow, the PADS word and the hatched tools strip all match.'] },
+    { k: 'live-all-groups', t: 'Live, all groups', s: 'fix', n: ['The REC chip is missing from the right of the last hit in the display panel.', 'The panel, captions, 2×2 groups and glow match.'] },
+    { k: 'live-keys', t: 'Live, KEYS', s: 'fix', n: ['The REC chip is missing.', 'Rings, octave colours, note names and the scale and octave words match. The scale differs only because the two captures used different settings.'] },
+    { k: 'live-tools', t: 'Live tools', s: 'fix', n: ['There is no Takes section and no takes note (see the Android reference in Phone REC above).', 'View, Follow, the notes and pad order match.'] },
+    { k: 'live-offline', t: 'Live, offline', s: 'fix', n: ['REC only: Android can still record while offline, from arc\'s copy of the pad sounds.', 'Offline, Project and Last seen match. The web capture is the all-groups view.'] },
+    { k: 'live-guide-overlay', t: 'Guide overlay', s: 'check', n: ['The tags and colours match.', 'In two dev-server runs the overlay didn\'t open by itself on the first visit, so I opened it with ?. The e2e smoke test expects it on the built app. Check on a fresh profile.', 'Once REC lands, it needs a tag on both apps.'] },
+    { k: 'section-menu', t: 'Section menu', s: 'same', n: ['Same three keys, the same navy for the current section, and the same scrim.'] },
+    { k: 'backups', t: 'Backups', s: 'same', n: ['Same device panel, meter and stats.', 'The web shows its empty state because the demo starts with no backups. "Restore from a folder" is the browser\'s version of Documents/arc, on purpose.'] },
+    { k: 'device-sounds', t: 'Device, sounds', s: 'same', n: ['Same storage panel, grouping by hundreds, sizes and Play keys.'] },
+    { k: 'device-projects', t: 'Device, projects', s: 'check', n: ['Project tiles read 0 B in the demo. This is likely the simulator\'s empty project files; confirm on hardware.', 'The web adds "Tap a project to see its sounds and pads." under the tiles. Android has no such line.'] },
+    { k: 'pads-sheet', t: 'Pads sheet', s: 'check', n: ['Android (from a backup) draws all 12 pads per group, with "Empty" under the unused ones.', 'The web sheet from the device draws one row per group here, with hatched cells and no "Empty" label. Check whether it trims empty rows or the demo project only has those pads.'] },
+    { k: 'settings', t: 'Settings', s: 'check', n: ['Android opens Library with "3 backups, 137 MB stored on this phone". The web capture had no backups, so the line may only be hidden. Check with one backup.', 'The browser wording ("in this browser", "Pick a library folder") is intended.'] },
+    { k: 'guide', t: 'Shortcut guide', s: 'same', n: ['Same tabs, search and key caps. guideData.ts is generated and checked against GuideText.kt.'] },
+    { k: 'live-one-group-dark', t: 'Live, dark', s: 'fix', n: ['The REC chip is missing. The dark tokens match: navy turns lavender and the plate is charcoal.'] },
+    { k: 'live-keys-dark', t: 'KEYS, dark', s: 'fix', n: ['The REC chip is missing. Otherwise the same.'] },
+    { k: 'backups-dark', t: 'Backups, dark', s: 'same', n: ['The same tokens in both apps.'] },
+    { k: 'device-sounds-dark', t: 'Device, dark', s: 'check', n: ['Same layout. The "EP-133 was disconnected" toast stayed up across several screens after the cable went back in. Android toasts can be swiped away; check whether the web toast times out.'] },
+    { k: 'settings-dark', t: 'Settings, dark', s: 'same', n: ['Same as the light theme.'] },
+  ]
+  const list = document.getElementById('audit-list')
+  const PILL = { fix: 'Fix', check: 'Check', same: 'Same' }
+  AUDIT.forEach((a) => list.appendChild(el(`<article class="au" data-s="${a.s}">
+    <div class="au__imgs">
+      <figure><figcaption>Android</figcaption><img src="audit/android/${a.k}.jpg" alt="Android: ${esc(a.t)}" loading="lazy" width="412" height="843"></figure>
+      <figure><figcaption>Web</figcaption><img src="audit/web/${a.k}.jpg" alt="Web: ${esc(a.t)}" loading="lazy" width="412" height="843"></figure>
+    </div>
+    <div class="au__body"><div class="au__title"><h3>${esc(a.t)}</h3><span class="pill pill--${a.s}">${PILL[a.s]}</span></div>
+      <ul>${a.n.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>
+  </article>`)))
+  document.querySelectorAll('[data-filter]').forEach((b) => b.addEventListener('click', () => {
+    document.querySelectorAll('[data-filter]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)))
+    list.querySelectorAll('.au').forEach((n) => { n.hidden = b.dataset.filter !== 'all' && n.dataset.s !== b.dataset.filter })
+  }))
+
+  // ---------- boot ----------
+  renderDevice()
+  PRESETS.playing(); update()
+  const stage = document.getElementById('deskStage'); ro.observe(stage); fitStage(stage)
+  window.addEventListener('resize', () => { if (S.coach) renderOverlay() })
+})()
+</script>
