@@ -505,6 +505,14 @@ class FeatureTextTest {
         assertEquals("Arc beat P01 S02", ClaudeText.shareSubject("P01 S02"))
         assertEquals("Analyse this beat:\n\n```\nARC BEAT 1\nswing 50\n```\n", ClaudeText.shareText("Analyse this beat:", "ARC BEAT 1\nswing 50\n"))
         assertEquals("No beat card in that text.", ClaudeText.NO_CARD)
+        // The prompt asks for the sound lines kept, or sounds chosen from the list that follows the card.
+        assertTrue(ClaudeText.SHARE_PROMPT.contains("sound list") && ClaudeText.SHARE_PROMPT.endsWith(":"))
+        assertEquals(listOf("With my sound list \u00B7 212 sounds", "With my sound list \u00B7 1 sound"), listOf(212, 1).map(ClaudeText::withSoundList))
+        // The sound list after a shared card.
+        assertEquals(
+            listOf("My EP-133's sounds (slot name), from the EP-133:", "My EP-133's sounds (slot name), from the last read:", "My EP-133's sounds (slot name), from the factory pack:"),
+            listOf(ClaudeText.SOUNDS_FROM_DEVICE, ClaudeText.SOUNDS_FROM_LAST_READ, ClaudeText.SOUNDS_FROM_FACTORY).map(ClaudeText::soundListHeader),
+        )
         // The sheet.
         assertEquals(
             listOf("Beat card \u00B7 4 bars \u00B7 5 pads \u00B7 23 hits", "Beat card \u00B7 1 bar \u00B7 1 pad \u00B7 1 hit"),
@@ -536,6 +544,46 @@ class FeatureTextTest {
         // IMPORT, and why it can't.
         assertEquals(listOf("COPY PROBLEMS", "IMPORT"), listOf(ClaudeText.COPY_PROBLEMS, ClaudeText.IMPORT).map { it.uppercase() })
         assertEquals("Group B has no free pattern.", ClaudeText.groupFull(1))
+        // The sounds a card puts on pads: the block, its rows and its notes.
+        assertEquals(listOf("SOUNDS", "PUT ON PADS"), listOf(ClaudeText.SOUNDS, ClaudeText.PUT_ON_PADS).map { it.uppercase() })
+        assertEquals(listOf("Put 2 sounds on the pads", "Leave the pads' sounds as they are"), listOf(ClaudeText.putOnPadsName(true, 2), ClaudeText.putOnPadsName(false, 2)))
+        assertEquals(listOf("012 Micro kick", "012"), listOf(ClaudeText.soundName(12, "Micro kick"), ClaudeText.soundName(12, null)))
+        assertEquals(listOf("Not on your EP-133: 301 Rim dusty", "Not on your EP-133: 301"), listOf(ClaudeText.soundMissing(301, "Rim dusty"), ClaudeText.soundMissing(301, null)))
+        assertEquals("Already there", ClaudeText.ALREADY_THERE)
+        assertEquals(
+            listOf("A7: Kick dusty becomes 012 Micro kick", "A7: 012 Micro kick", "A7: 012 Micro kick, already there", "AE: Not on your EP-133: 301 Rim dusty"),
+            listOf(
+                ClaudeText.soundRowName(PhysicalPad(0, 9), "Kick dusty", "012 Micro kick"),
+                ClaudeText.soundRowName(PhysicalPad(0, 9), null, "012 Micro kick"),
+                ClaudeText.soundRowSame(PhysicalPad(0, 9), "012 Micro kick"),
+                ClaudeText.soundRowMissing(PhysicalPad(0, 2), 301, "Rim dusty"),
+            ),
+        )
+        assertEquals(
+            "Writes 2 pads in project 3 on the EP-133. Their pitch, level and other settings reset to the sound's. UNDO puts the old sounds back.",
+            ClaudeText.soundsNote(2, 3),
+        )
+        assertEquals(
+            "Writes 1 pad in the active project on the EP-133. Their pitch, level and other settings reset to the sound's. UNDO puts the old sounds back.",
+            ClaudeText.soundsNote(1, null),
+        )
+        assertEquals("Saved as offline pad changes; they go to the EP-133 when you reconnect.", ClaudeText.SOUNDS_OFFLINE_NOTE)
+        assertEquals(
+            listOf(
+                "Imported to A \u00B7 04 and 2 sounds. UNDO takes it back.",
+                "Imported to A \u00B7 04 and 1 sound, 1 skipped. UNDO takes it back.",
+                "Imported to A \u00B7 04, 3 sounds skipped. UNDO takes it back.",
+            ),
+            listOf(ClaudeText.imported(listOf(0 to 4), null, 2), ClaudeText.imported(listOf(0 to 4), null, 1, 1), ClaudeText.imported(listOf(0 to 4), null, 0, 3)),
+        )
+        assertEquals(
+            listOf(
+                "The pad's sound couldn't be changed: busy. The patterns stay imported. UNDO takes it back.",
+                "The pad's sound couldn't be changed: busy. The patterns stay imported and 2 pads changed. UNDO takes it back.",
+            ),
+            listOf(ClaudeText.soundsFailed("busy", 0), ClaudeText.soundsFailed("busy", 2)),
+        )
+        assertEquals(listOf("Old sounds back on 2 pads.", "Old sounds back on 1 pad, 1 had none before."), listOf(ClaudeText.soundsRestored(2, 0), ClaudeText.soundsRestored(1, 1)))
         assertEquals(
             listOf("Imported to A \u00B7 04. UNDO takes it back.", "Imported to scene S03. UNDO takes it back.", "Imported to A \u00B7 04, B \u00B7 02. UNDO takes it back."),
             listOf(

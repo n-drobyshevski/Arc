@@ -12,7 +12,9 @@
 
 import type { CardProblem } from '../features/beatCard'
 import type { PhysicalPad } from '../features/padNotes'
+import { FeatureText } from './featureText'
 import { plural } from './format'
+import { MirrorText } from './mirrorText'
 
 const groupLetter = (group: number) => String.fromCharCode(65 + group)
 
@@ -86,7 +88,9 @@ export const ClaudeText = {
 
   // ---------- Sharing ----------
   /** The line before the card in the shared text. */
-  SHARE_PROMPT: 'Analyse this EP-133 beat from Arc with the arc-beats skill, then suggest 2-3 edits as a new card:',
+  SHARE_PROMPT:
+    'Analyse this EP-133 beat from Arc with the arc-beats skill, then suggest 2-3 edits as a new card. ' +
+    'Keep its sound lines, or choose sounds from my sound list if one follows the card:',
   SHARE_TITLE: 'Share beat card',
 
   /** "P01 S02": pattern [n] (1..99) of the scene at [scene] (from 0), a card's name. */
@@ -107,6 +111,25 @@ export const ClaudeText = {
   /** The shared text: [prompt], a blank line and [card] (which ends in a newline) in a fenced block. */
   shareText(prompt: string, card: string): string {
     return prompt + '\n\n```\n' + card + '```\n'
+  },
+
+  // ---------- The sound list ----------
+  /** Where the sound list Arc adds after a shared card came from: the EP-133 itself, its last read, or the factory pack. */
+  SOUNDS_FROM_DEVICE: 'the EP-133',
+  SOUNDS_FROM_LAST_READ: 'the last read',
+  SOUNDS_FROM_FACTORY: 'the factory pack',
+
+  /** The line before the sound list (the spec's): "My EP-133's sounds (slot name), from the EP-133:". [source] is one of the three above. */
+  soundListHeader(source: string): string {
+    return `My EP-133's sounds (slot name), from ${source}:`
+  },
+
+  /**
+   * The tick box under the share keys: "With my sound list · 212 sounds" ([count] is how many Arc knows: the EP-133's,
+   * the last read's or the factory pack's). Off, the card is shared with its sound lines alone.
+   */
+  withSoundList(count: number): string {
+    return `With my sound list \u00B7 ${plural(count, 'sound')}`
   },
 
   // ---------- Receiving ----------
@@ -192,6 +215,49 @@ export const ClaudeText = {
     )
   },
 
+  // ---------- The sheet: sounds ----------
+  /** The block's header, and the chip beside it that decides whether the ticked sounds go onto the pads (on to begin with). */
+  SOUNDS: 'Sounds',
+  PUT_ON_PADS: 'Put on pads',
+  putOnPadsName(on: boolean, count: number): string {
+    return on ? `Put ${plural(count, 'sound')} on the pads` : "Leave the pads' sounds as they are"
+  },
+
+  /** A sound as the rows write it: "012 Micro kick", just "012" when the card or the list gives no name. */
+  soundName(slot: number, name: string | null): string {
+    return FeatureText.slot(slot) + (name != null ? ` ${name}` : '')
+  },
+
+  /** What a row says in place of a new sound: the pad plays it already. */
+  ALREADY_THERE: 'Already there',
+
+  /** What a row says when the sound is nowhere in the user's list: "Not on your EP-133: 301 Rim dusty". */
+  soundMissing(slot: number, name: string | null): string {
+    return `Not on your EP-133: ${ClaudeText.soundName(slot, name)}`
+  },
+
+  /** A row for screen readers: "A7: Kick dusty becomes 012 Micro kick", "A7: 012 Micro kick, already there", or the missing reason. */
+  soundRowName(pad: PhysicalPad, old: string | null, change: string): string {
+    return `${padLabel(pad)}: ` + (old != null ? `${old} becomes ` : '') + change
+  },
+  soundRowSame(pad: PhysicalPad, sound: string): string {
+    return `${padLabel(pad)}: ${sound}, ${ClaudeText.ALREADY_THERE.toLowerCase()}`
+  },
+  soundRowMissing(pad: PhysicalPad, slot: number, name: string | null): string {
+    return `${padLabel(pad)}: ${ClaudeText.soundMissing(slot, name)}`
+  },
+
+  /** The note under the rows, connected: [pads] ticked, in [project] (null while it isn't known). */
+  soundsNote(pads: number, project: number | null): string {
+    return (
+      `Writes ${plural(pads, 'pad')} in ${project != null ? `project ${project}` : 'the active project'} on the EP-133. ` +
+      "Their pitch, level and other settings reset to the sound's. UNDO puts the old sounds back."
+    )
+  },
+
+  /** The same, offline: the changes are Arc's own until the EP-133 connects. */
+  SOUNDS_OFFLINE_NOTE: 'Saved as offline pad changes; they go to the EP-133 when you reconnect.',
+
   // CANCEL is Strings.CANCEL.
   IMPORT: 'Import',
 
@@ -204,10 +270,28 @@ export const ClaudeText = {
   /**
    * IMPORT's toast: where it went, and how to take it back. One pattern is
    * named; several go in the scene they made ([scene], "S03"), or are listed
-   * where there was no room for a scene.
+   * where there was no room for a scene. [sounds] put on pads are counted,
+   * and so are the [skipped] ones that had no pad to go on.
    */
-  imported(places: readonly (readonly [number, number])[], scene: string | null): string {
+  imported(places: readonly (readonly [number, number])[], scene: string | null, sounds = 0, skipped = 0): string {
     const where = scene != null ? `scene ${scene}` : places.map(([g, n]) => place(g, n)).join(', ')
-    return `Imported to ${where}. UNDO takes it back.`
+    let extra = ''
+    if (sounds > 0 && skipped > 0) extra = ` and ${plural(sounds, 'sound')}, ${skipped} skipped`
+    else if (sounds > 0) extra = ` and ${plural(sounds, 'sound')}`
+    else if (skipped > 0) extra = `, ${plural(skipped, 'sound')} skipped`
+    return `Imported to ${where}${extra}. UNDO takes it back.`
+  },
+
+  /**
+   * IMPORT's toast when a pad's sound couldn't be written ([reason]): the patterns stay in, with the [written] pads
+   * that did change, and UNDO takes all of it back.
+   */
+  soundsFailed(reason: string, written: number): string {
+    return MirrorText.assignFailed(reason) + '. The patterns stay imported' + (written > 0 ? ` and ${plural(written, 'pad')} changed` : '') + '. UNDO takes it back.'
+  },
+
+  /** After UNDO took an import back: the old sounds on [back] pads again, and the [empty] ones that had none before can't be emptied again. */
+  soundsRestored(back: number, empty: number): string {
+    return `Old sounds back on ${plural(back, 'pad')}` + (empty > 0 ? `, ${empty} had none before` : '') + '.'
   },
 } as const

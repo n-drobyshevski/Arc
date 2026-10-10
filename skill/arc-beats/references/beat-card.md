@@ -67,6 +67,16 @@ After a line that is just `notes` (inside a section), each line is one note:
 - **KEYS notes:** `note C4` is MIDI 60, KEYS mode's root, so `semi = midi - 60`. Use them for melodies and bass played in KEYS mode on that pad's sound.
 - The tick must fall inside the pattern (0 to `bars*384 - 1`).
 
+### Sounds
+A line `sound <pad> <slot> [name]` inside a section says which sound that pad should play. Use it to choose the kit, not just the rhythm.
+- **Pad:** written as in grid rows, and it must belong to the section's group. A pad can get a sound line even if it has no notes, for example to set up a kit.
+- **Slot:** the EP-133's sound slot, 1–999.
+- **Name:** optional. It is the sound's name as the user's list gives it, everything after the slot up to a comment. With a name, Arc checks that the slot holds that sound, which guards against a slot that changed.
+- **Where:** anywhere in the section, before or after the grid rows. A sound line after `notes` still counts as a sound line, not a note.
+- A second sound line for the same pad replaces the first, with a warning.
+- **Errors:** a pad from another group, or a slot outside 1–999.
+- **Picking slots:** use only slots from the user's sound list, which Arc adds after the card when it shares. Without a list, write no sound lines and say which kind of sound fits each pad. The factory ranges are kicks 1–99, snares 100–199, hats 200–299, percussion 300–399, bass 400–499 and melodic 500–599, but the user may have changed them.
+
 ## Limits and checks
 - At most 2048 notes in a pattern; more is an error.
 - Two hits on the same pad at the same tick count as one: the louder is kept, with a warning.
@@ -77,6 +87,7 @@ After a line that is just `notes` (inside a section), each line is one note:
 - The header gets `name` (the pattern's place, e.g. `P01 S02`), `tempo` (Arc's tempo) and `swing`. Swing is the TIMING swing when every grid note sits on that swung grid, otherwise 50.
 - Groups with notes come in order, as `[Gnn]`. A scene export holds the 4 playing patterns, skipping blank ones; a pattern export holds just that one.
 - `step` is the first of 1/16, 1/16T, 1/32 that puts every pad hit on the grid. When none does, 1/16 is used and the hits that don't fit go to `notes`.
+- **Sounds:** right after the section line, a `sound` line for each pad the section's notes use whose slot Arc knows, in keypad order, with the sound's name when Arc knows it. Pads that only appear in `notes` get one too.
 - **Rows:** one for each pad that has grid hits, in keypad order (7 8 9 4 5 6 1 2 3 . 0 E), followed by Arc's sound name for that pad when it knows one.
   - A note goes on a row when it is a pad hit (no semi), on the swung grid, its velocity is 127, 100, 64 or 14·n, its gate is a whole number of steps, and its holds don't run into the next hit on the row. Otherwise it goes to `notes`, written exactly.
   - Steps are grouped by 4 with spaces, with `|` between bars.
@@ -87,4 +98,13 @@ After a line that is just `notes` (inside a section), each line is one note:
 - Each section's pattern goes into its group's next free pattern slot (`SceneOps.nextFree`). Nothing is overwritten.
 - A card with more than one section also adds a new scene pointing at the new patterns; groups the card doesn't have keep pattern 1's number from the scene playing.
 - The tempo is offered, not forced.
-- One undo removes all of it.
+- **Sound lines:** each one is matched to the user's sounds: the EP-133's list when connected, or the last read or factory pack offline.
+  - A slot that holds the named sound (same name, ignoring case, spaces and ".wav") is used.
+  - When the name doesn't match the slot, or the slot is empty, Arc looks the name up and uses the slot that holds it. Failing that, the line is skipped with a warning.
+  - A pad that already plays the sound is left alone.
+- **Applying sounds:** connected, the chosen sounds are written to the EP-133's pads in the active project, and those pads' own settings reset to the sound's. Offline, they become Arc's offline pad changes, which go to the device on reconnect. The import sheet lists each change with a tick box, all ticked by default.
+- One undo removes all of it, the pads' sounds included.
+
+## Sound list (Arc's share, outside the card)
+When sharing, Arc can add the user's sounds after the card's closing fence, so Claude can choose from them. The list starts with a line `My EP-133's sounds (slot name), from <the EP-133 | the last read | the factory pack>:`, followed by one sound per line as `<slot> <name>` in slot order. It isn't part of the card, and readers ignore it, because they stop at the card's closing fence.
+

@@ -92,7 +92,12 @@ import dev.arc.ep133.features.TimingSettings
 import dev.arc.ep133.ui.screens.PatternSheetContent
 import dev.arc.ep133.ui.screens.BeatImportSheetContent
 import dev.arc.ep133.ui.screens.ClaudeUi
+import dev.arc.ep133.controller.SoundSet
+import dev.arc.ep133.controller.SoundsUi
 import dev.arc.ep133.controller.beatImportUi
+import dev.arc.ep133.controller.soundsUi
+import dev.arc.ep133.features.BeatCard
+import dev.arc.ep133.text.ClaudeText
 import dev.arc.ep133.features.BeatCards
 import dev.arc.ep133.features.Pattern
 import dev.arc.ep133.features.PatternNote
@@ -2056,7 +2061,8 @@ fun GuideFromEdgePreview() {
 
 // Beat cards. Live tools' CLAUDE section, after the view settings and before TAKES: SHARE SCENE, SHARE for the group shown
 // (A, pattern 1) and the orange PASTE BEAT, then the skill's link and Learn with Claude; its sample scene is S02.
-private val claudeShares = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true))
+// "With my sound list" under the two SHARE keys, ticked, with the sounds Arc knows.
+private val claudeShares = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212)
 
 @PreviewTest
 @Preview(name = "Live tools claude", widthDp = 412, heightDp = 960, showBackground = true)
@@ -2064,12 +2070,13 @@ private val claudeShares = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2),
 fun LiveToolsClaudePreview() = Live(lastRead, oneGroup = true, tools = true, claude = claudeShares)
 
 // Nothing to share: both SHARE keys dimmed (and still announced), PASTE BEAT as it was; the dark theme, with TAKES under it.
+// "With my sound list" is left unticked (kept like the other Live preferences).
 @PreviewTest
 @Preview(name = "Live tools claude dark", widthDp = 412, heightDp = 960, showBackground = true)
 @Composable
 fun LiveToolsClaudeDarkPreview() = Live(
     lastRead, dark = true, oneGroup = true, tools = true, takes = someTakes, offline = "Last seen Oct 5, 2:02 PM",
-    claude = ClaudeUi(scene = "S01", numbers = listOf(1, 1, 1, 1)),
+    claude = ClaudeUi(scene = "S01", numbers = listOf(1, 1, 1, 1), sounds = 212, withSounds = false),
 )
 
 // The beat card sheet, as a card arrives (pasted, or Claude's reply shared to arc). A project whose A has patterns 1 to 3 with
@@ -2123,12 +2130,18 @@ wobble 3
 """
 
 @Composable
-private fun BeatSheet(text: String, seq: ProjectSeq = beatSeq, dark: Boolean = false, initialSetTempo: Boolean = false) {
-    val ui = beatImportUi(BeatCards.read(text), seq, 122.0) { names[it] }
+private fun BeatSheet(
+    text: String,
+    seq: ProjectSeq = beatSeq,
+    dark: Boolean = false,
+    initialSetTempo: Boolean = false,
+    sounds: (BeatCard) -> SoundsUi? = { null },
+) {
+    val ui = beatImportUi(BeatCards.read(text), seq, 122.0, { names[it] }, sounds)
     Framed(Tab.LIVE, dark = dark) {
         MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
         ArcSheet(visible = true, onDismiss = {}) {
-            BeatImportSheetContent(ui, onCancel = {}, onImport = {}, onCopyProblems = {}, initialSetTempo = initialSetTempo)
+            BeatImportSheetContent(ui, onCancel = {}, onImport = { _, _ -> }, onCopyProblems = {}, initialSetTempo = initialSetTempo)
         }
     }
 }
@@ -2160,3 +2173,43 @@ fun BeatSheetFullGroupPreview() {
     for (n in 1..99) full = full.withPattern(1, n, Pattern(1, listOf(PatternNote(0, 9, 24))))
     BeatSheet(NIGHT_DRIVE, seq = full)
 }
+
+// A card with sound lines: A7 and A9 change their pads' sounds (ticked, the old one struck through), A4 plays its sound
+// already, and A5's is not in the user's list (amber, the reason, no box). The sounds on the pads now, and the list:
+private val soundNow = mapOf(PhysicalPad(0, 9) to 5, PhysicalPad(0, 11) to 90, PhysicalPad(0, 6) to 200)
+private val soundWas = mapOf(PhysicalPad(0, 9) to "KICK DUSTY", PhysicalPad(0, 11) to "SNARE OLD", PhysicalPad(0, 6) to "HAT CLOSED")
+private val soundList = SoundSet(
+    ClaudeText.SOUNDS_FROM_DEVICE,
+    mapOf(5 to "KICK DUSTY", 12 to "MICRO KICK", 90 to "SNARE OLD", 105 to "SNARE TIGHT", 200 to "HAT CLOSED"),
+)
+
+private fun sheetSounds(offline: Boolean): (BeatCard) -> SoundsUi? =
+    { card -> soundsUi(card, soundList, { soundNow[it] }, { soundWas[it] }, offline, if (offline) null else 3) }
+
+private const val SOUND_BEAT = """ARC BEAT 1
+name Micro kit
+tempo 96
+
+[A] bars 1 step 1/16
+sound A7 12 MICRO KICK
+sound A9 105 SNARE TIGHT
+sound A4 200 HAT CLOSED
+sound A5 301 RIM DUSTY
+A7 | X... ..x. X... .... |
+A9 | .... X... .... X... |
+A4 | x.x. x.x. x.x. x.x. |
+A5 | .... .... ..o. .... |
+"""
+
+// The SOUNDS block (connected): PUT ON PADS on, the two changes ticked, "already there", the missing sound in amber, and
+// the note saying how many pads are written, in which project.
+@PreviewTest
+@Preview(name = "Beat sheet sounds", widthDp = 360, heightDp = 1010, showBackground = true)
+@Composable
+fun BeatSheetSoundsPreview() = BeatSheet(SOUND_BEAT, sounds = sheetSounds(false))
+
+// The same offline, dark: the note says the changes stay in arc until the EP-133 connects.
+@PreviewTest
+@Preview(name = "Beat sheet sounds offline dark", widthDp = 360, heightDp = 1010, showBackground = true)
+@Composable
+fun BeatSheetSoundsOfflineDarkPreview() = BeatSheet(SOUND_BEAT, dark = true, sounds = sheetSounds(true))

@@ -5,7 +5,7 @@ Reads the text card format of references/beat-card.md the way Arc does (the
 reading rules there are the spec) and works on it. Python 3.9+, standard
 library only.
 
-    beatcard.py check   [CARD|-] [--json]
+    beatcard.py check   [CARD|-] [--json] [--sounds SOUNDS.txt]
     beatcard.py analyse [CARD|-] [--json] [--recipes genres.md]
     beatcard.py midi    [CARD|-] [-o OUT.mid] [--loops N] [--channel 1-16]
     beatcard.py grid    [CARD|-]
@@ -14,6 +14,11 @@ CARD is a file; without it, or with "-", the card is read from standard
 input. Anything before the first line starting with ARC BEAT is ignored, so
 a whole chat reply works too. Exit status: 0 fine, 1 the card has errors,
 2 the command line or a file is wrong.
+
+SOUNDS.txt is the user's sound list as Arc's share adds it after the card
+(a header line, then one "<slot> <name>" line per sound; the header is
+optional). With it, check warns about each sound line whose slot or name
+isn't in the list.
 """
 
 from __future__ import annotations
@@ -39,6 +44,8 @@ MAX_NOTES = 2048
 NAME_MAX = 40
 TEMPO_MIN, TEMPO_MAX = 40.0, 240.0
 SWING_MIN, SWING_MAX = 50, 75
+#: The EP-133's sound slots.
+SLOT_MIN, SLOT_MAX = 1, 999
 
 #: Step sizes in ticks (96 a beat, 384 a bar).
 STEP_TICKS = {"1/8": 48, "1/16": 24, "1/32": 12, "1/8T": 32, "1/16T": 16}
@@ -115,6 +122,15 @@ class Row:
 
 
 @dataclass
+class Sound:
+    """A sound line: the slot a pad should play and, when given, the name the user's list has for it."""
+
+    slot: int
+    name: str  # "" when the line gave none
+    line: int
+
+
+@dataclass
 class Pattern:
     group: int  # 0..3
     number: Optional[int]
@@ -123,6 +139,7 @@ class Pattern:
     line: int = 0
     rows: List[Row] = field(default_factory=list)
     hits: List[Hit] = field(default_factory=list)
+    sounds: Dict[int, Sound] = field(default_factory=dict)  # by pad offset
 
     @property
     def letter(self) -> str:
@@ -142,6 +159,10 @@ class Pattern:
             if r.name and r.pad not in names:
                 names[r.pad] = r.name
         return names
+
+    def sound_names(self) -> Dict[int, str]:
+        """The names the sound lines give, by pad."""
+        return {pad: s.name for pad, s in self.sounds.items() if s.name}
 
 
 @dataclass
@@ -236,6 +257,20 @@ def _tokens(text: str) -> List[str]:
     return [t for t in re.split(r"[ \t\u00a0]+", text) if t]
 
 
+def clean_text(text: str) -> str:
+    """A name as a card keeps it: no #, | or line breaks (they would end it), single spaces (BeatCards.cleanText)."""
+    return re.sub(r"[#|\t\r\n\u00a0 ]+", " ", text).strip()
+
+
+def same_name(a: str, b: str) -> bool:
+    """Whether two sound names are the same to Arc: ignoring case, spaces round them and a ".wav" ending (PadSoundCache.sameName)."""
+    def norm(s: str) -> str:
+        s = s.strip().lower()
+        return (s[:-4] if s.endswith(".wav") else s).strip()
+
+    return norm(a) == norm(b)
+
+
 def strip_comment(line: str) -> str:
     """Drop a comment: a # at the start of the line or after a blank. (C#4 keeps its sharp.)"""
     m = re.search(r"(^|[ \t\u00a0])#", line)
@@ -326,6 +361,8 @@ class _Reader:
             return
         if text.lower() == "notes":
             self.in_notes = True
+        elif _tokens(text)[0].lower() == "sound":
+            self.sound(n, text)
         elif self.in_notes:
             self.note(n, text)
         elif "|" in text:
@@ -347,6 +384,8 @@ class _Reader:
         rest = _trim(text[len(word) :])
         if key == "notes":
             self.err(n, "notes-outside-section", "'notes' has to come inside a section like [A]")
+        elif key == "sound":
+            self.err(n, "sound-outside-section", "'sound' has to come after a section line like [A]")
         elif "|" in text or _first_is_pad(text):
             self.err(n, "row-outside-section", "a grid row has to come after a section line like [A]")
         elif key in _HEADER_WORDS:
@@ -521,6 +560,35 @@ class _Reader:
         return "row %s has %d steps, needs %d (%d bar%s of %d): %d too many, starting in bar %d" % (
             label, total, need, bars, "" if bars == 1 else "s", per_bar, total - need, bars + 1)
 
+    # -- sound lines -------------------------------------------------------
+
+    def sound(self, n: int, text: str) -> None:
+        """sound <pad> <slot> [name], anywhere in a section (after notes too). A second line for a pad replaces the first."""
+        pattern = self.draft
+        assert pattern is not None
+        rest = _trim(text[len(_tokens(text)[0]) :])
+        parts = _tokens(rest)
+        if not parts:
+            self.err(n, "bad-sound", "a sound line looks like 'sound A7 12 Kick': the pad, the slot, then the name if you know it")
+            return
+        try:
+            group, offset = parse_pad(parts[0])
+        except ValueError as e:
+            self.err(n, "bad-pad", str(e))
+            return
+        if group != pattern.group:
+            self.err(n, "wrong-group", "pad %s is in group %s but the section is [%s]" % (parts[0], GROUPS[group], pattern.letter))
+            return
+        rest = _trim(rest[len(parts[0]) :])
+        slot_text = _tokens(rest)[0] if rest else ""
+        if not (re.fullmatch(r"[0-9]{1,9}", slot_text) and SLOT_MIN <= int(slot_text) <= SLOT_MAX):
+            self.err(n, "bad-slot", "sound slot '%s' must be a whole number from %d to %d" % (slot_text, SLOT_MIN, SLOT_MAX))
+            return
+        old = pattern.sounds.get(offset)
+        if old is not None:
+            self.warn(n, "duplicate-sound", "%s already has a sound on line %d; the later line is kept" % (pad_label(pattern.group, offset), old.line))
+        pattern.sounds[offset] = Sound(int(slot_text), clean_text(rest[len(slot_text) :]), n)
+
     # -- notes list --------------------------------------------------------
 
     def note(self, n: int, text: str) -> None:
@@ -650,6 +718,63 @@ def parse_card(text: str) -> Card:
 
 
 # ---------------------------------------------------------------------------
+# Sound lists: the user's sounds, as Arc's share adds them after a card
+# ---------------------------------------------------------------------------
+
+
+def parse_sound_list(text: str) -> Dict[int, str]:
+    """Slot -> name from a sound list: lines of "<slot> <name>", in the share's text or on their own. The header line and any other line that doesn't start with a slot are skipped; a slot given twice keeps the later."""
+    out: Dict[int, str] = {}
+    for line in _LINE_BREAK.split(text[1:] if text.startswith("\ufeff") else text):
+        m = re.fullmatch(r"[ \t\u00a0]*([0-9]{1,3})(?:[ \t\u00a0]+(.*))?", line)
+        if m and SLOT_MIN <= int(m.group(1)) <= SLOT_MAX:
+            out[int(m.group(1))] = clean_text(m.group(2) or "")
+    return out
+
+
+def resolve_sound(sound: Sound, available: Dict[int, str], current: Optional[int] = None) -> Optional[int]:
+    """The slot Arc would use for a sound line, by the spec's import rule; None when it would skip the line.
+
+    The slot is used when it holds the named sound (same_name) or, with no name,
+    when the list has it. Otherwise the name is looked up: the pad's own slot
+    [current] if it holds it, else the lowest slot that does.
+    """
+    name = sound.name
+    if sound.slot in available and (not name or same_name(clean_text(available[sound.slot]), name)):
+        return sound.slot
+    if not name:
+        return None
+    same = sorted(slot for slot, have in available.items() if same_name(clean_text(have), name))
+    if current is not None and current in same:
+        return current
+    return same[0] if same else None
+
+
+def check_sounds(card: Card, available: Dict[int, str]) -> List[Problem]:
+    """A warning for each sound line whose slot or name isn't in [available] (slot -> name): the slot holds another sound, the sound is in another slot (which Arc would use) or in none."""
+    out: List[Problem] = []
+    for pattern in card.patterns:
+        for pad in KEYPAD_ORDER:
+            sound = pattern.sounds.get(pad)
+            if sound is None:
+                continue
+            label = pad_label(pattern.group, pad)
+            slot = resolve_sound(sound, available)
+            if slot == sound.slot:
+                continue
+            holds = available.get(sound.slot)
+            where = "slot %d holds '%s'" % (sound.slot, holds) if holds is not None else "slot %d isn't in the sound list" % sound.slot
+            if slot is not None:
+                out.append(Problem(sound.line, WARNING, "sound-moved", "%s: %s, not '%s'; that sound is in slot %d ('%s'), which Arc will use instead" % (
+                    label, where, sound.name, slot, available[slot])))
+            elif sound.name:
+                out.append(Problem(sound.line, WARNING, "sound-missing", "%s: %s, and no slot holds '%s'; Arc will skip this sound line" % (label, where, sound.name)))
+            else:
+                out.append(Problem(sound.line, WARNING, "sound-missing", "%s: %s; Arc will skip this sound line" % (label, where)))
+    return sorted(out, key=lambda p: p.line)
+
+
+# ---------------------------------------------------------------------------
 # Roles: what a pad's sound is, by its name
 # ---------------------------------------------------------------------------
 
@@ -679,8 +804,8 @@ def role_of(name: str) -> Optional[str]:
 
 
 def pad_roles(pattern: Pattern) -> Dict[int, Tuple[Optional[str], bool, str]]:
-    """For each pad of [pattern] with pad hits: (role, assumed, name). Unnamed pads fall back to the assumed kit."""
-    names = pattern.pad_names()
+    """For each pad of [pattern] with pad hits: (role, assumed, name). The name is the pad's sound line's, else its row's; unnamed pads fall back to the assumed kit."""
+    names = {**pattern.pad_names(), **pattern.sound_names()}  # a sound line's name comes before the row's
     out: Dict[int, Tuple[Optional[str], bool, str]] = {}
     for hit in pattern.hits:
         if hit.semi is not None or hit.pad in out:
@@ -808,6 +933,7 @@ def pattern_report(pattern: Pattern, card: Card) -> dict:
             "name": name,
             "role": role,
             "name_assumed": assumed,
+            "sound": _sound_data(pattern.sounds.get(pad)),
             "hits": len(mine),
             "per_bar": per_bar(mine),
             "velocity": _velocity([h.vel for h in mine]),
@@ -861,6 +987,7 @@ def pattern_report(pattern: Pattern, card: Card) -> dict:
         "hits_per_bar": per_bar(hits),
         "density_pct": round(100 * sum(occupied) / (16 * bars), 1),
         "pads": pads,
+        "sounds": {pad_label(pattern.group, pad): _sound_data(pattern.sounds[pad]) for pad in KEYPAD_ORDER if pad in pattern.sounds},
         "keys": keys_report,
         "roles": by_role,
         "velocity": _velocity([h.vel for h in hits]),
@@ -875,6 +1002,14 @@ def pattern_report(pattern: Pattern, card: Card) -> dict:
         "features": features,
         "variation": _variation(pattern, hits),
     }
+
+
+def _sound_data(sound: Optional[Sound]) -> Optional[dict]:
+    return None if sound is None else {"slot": sound.slot, "name": sound.name or None}
+
+
+def _sound_text(label: str, sound: Sound) -> str:
+    return "%s slot %d%s" % (label, sound.slot, " " + sound.name if sound.name else "")
 
 
 def _role_bars(hits: List[Hit], bars: int) -> List[set]:
@@ -1118,11 +1253,14 @@ def render_grid(card: Card) -> str:
         t = pattern.step_ticks
         per_beat = TICKS_PER_BEAT // t if TICKS_PER_BEAT % t == 0 else 4
         per_bar = TICKS_PER_BAR // t
-        names = pattern.pad_names()
+        names = {**pattern.sound_names(), **pattern.pad_names()}  # a row's own name first, the sound line's when it has none
         out.append("")
         out.append("[%s%s] %d bar%s, step %s%s" % (
             pattern.letter, "%02d" % pattern.number if pattern.number else "", pattern.bars, "" if pattern.bars == 1 else "s",
             pattern.step, ", swung" if pattern.step in SWING_STEPS and card.swing > 50 else ""))
+        for pad in KEYPAD_ORDER:
+            if pad in pattern.sounds:
+                out.append("sound " + _sound_text(pad_label(pattern.group, pad), pattern.sounds[pad]))
         label_width = max([len(pad_label(pattern.group, o)) + 1 + len(names.get(o, "")) for o in range(12)] + [4])
         # Beat numbers over the steps.
         head = ""
@@ -1264,10 +1402,11 @@ def summary_line(card: Card) -> str:
     for p in card.patterns:
         pads = len({h.pad for h in p.hits if h.semi is None})
         keys = sum(1 for h in p.hits if h.semi is not None)
-        parts.append("%s: %d bar%s step %s, %d pad%s, %d hit%s%s" % (
+        parts.append("%s: %d bar%s step %s, %d pad%s, %d hit%s%s%s" % (
             p.letter, p.bars, "" if p.bars == 1 else "s", p.step, pads, "" if pads == 1 else "s",
             sum(1 for h in p.hits if h.semi is None), "" if sum(1 for h in p.hits if h.semi is None) == 1 else "s",
-            ", %d KEYS note%s" % (keys, "" if keys == 1 else "s") if keys else ""))
+            ", %d KEYS note%s" % (keys, "" if keys == 1 else "s") if keys else "",
+            ", %d sound%s" % (len(p.sounds), "" if len(p.sounds) == 1 else "s") if p.sounds else ""))
     head = "OK"
     if card.name:
         head += ' "%s"' % card.name
@@ -1275,6 +1414,10 @@ def summary_line(card: Card) -> str:
         head += ", %g BPM" % card.tempo
     head += ", swing %d" % card.swing
     return head + " | " + "; ".join(parts)
+
+
+def _sound_line(label: str, snd: dict) -> str:
+    return "%s slot %d%s" % (label, snd["slot"], " " + snd["name"] if snd["name"] else "")
 
 
 def render_analysis(report: dict) -> str:
@@ -1292,6 +1435,8 @@ def render_analysis(report: dict) -> str:
             out.append("[%s] %s, KEYS notes only" % (p["group"], bars))
             for label, k in p["keys"].items():
                 out.append("  KEYS %-5s %d notes, %s to %s, %d pitches" % (label, k["notes"], k["lowest"], k["highest"], k["distinct_pitches"]))
+            for label, snd in p["sounds"].items():
+                out.append("  sound %s" % _sound_line(label, snd))
             var = p["variation"]
             out.append("  variation: %d distinct bar%s of %d" % (var["distinct_bars"], "" if var["distinct_bars"] == 1 else "s", var["bars"]))
             continue
@@ -1307,6 +1452,8 @@ def render_analysis(report: dict) -> str:
             name = pad["name"] + (" (assumed)" if pad["name_assumed"] else "")
             out.append("  %-7s %-12s %2d hits, vel %s-%s, longest gap %s steps%s" % (
                 label, name, pad["hits"], vel["min"], vel["max"], gap["steps"] if gap else "-", ", ghosts %d" % vel["ghosts"] if vel["ghosts"] else ""))
+        for label, snd in p["sounds"].items():
+            out.append("  sound %s" % _sound_line(label, snd))
         for role, r in p["roles"].items():
             out.append("  role %-7s slots of a bar %s (%d hits, syncopation %s)" % (role, r["slots"], r["hits"], r["syncopation"]))
         for label, k in p["keys"].items():
@@ -1365,9 +1512,19 @@ def _load(args: argparse.Namespace, quiet_ok: bool = False) -> Optional[Card]:
 def cmd_check(args: argparse.Namespace) -> int:
     try:
         card = parse_card(_read(args.card))
+        available = None
+        if args.sounds:
+            with open(args.sounds, encoding="utf-8", errors="replace") as f:
+                available = parse_sound_list(f.read())
     except OSError as e:
         print("beatcard: %s" % e, file=sys.stderr)
         return 2
+    if available is not None:
+        if not available:
+            print("beatcard: no sounds found in %s: expected lines like '12 Kick 808'" % args.sounds, file=sys.stderr)
+            return 2
+        card.problems.extend(check_sounds(card, available))
+        card.problems.sort(key=lambda p: p.line)
     if args.json:
         print(json.dumps({"ok": card.ok, "problems": [p.to_dict() for p in card.problems]}, indent=2))
         return 0 if card.ok else 1
@@ -1431,6 +1588,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = add("check", cmd_check, "read a card and print its problems with line numbers")
     p.add_argument("--json", action="store_true", help="print the problems as JSON")
+    p.add_argument("--sounds", metavar="FILE", help="the user's sound list (Arc's share text, or lines of '<slot> <name>'): warn about sound lines whose slot or name isn't in it")
     p = add("analyse", cmd_analyse, "describe a card's groove, density, velocity, swing and gaps", ("analyze",))
     p.add_argument("--json", action="store_true", help="print the report as JSON")
     p.add_argument("--recipes", help="genres.md to compare with (default: the skill's own)")

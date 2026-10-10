@@ -22,10 +22,10 @@ If a request mixes them (build a beat and explain how to enter it on the device)
 ## Things that are always true
 
 - **Never invent an EP-133 key combination.** Use only [ep133-guide.md](references/ep133-guide.md), the 100 combos of the official guide for OS 2.5, each with its source. If a combo is not there, say *"that isn't in the official guide"*; do not guess. Combos can change between OS versions, so remind the user to check on their device.
-- **Arc patterns stay in Arc.** A pasted card is never written to the EP-133. To get a beat onto the device the user plays or steps it in there. Say this the first time the user expects otherwise.
-- **A pattern plays whatever sound is on the pad.** The names in a card are labels for reading. If the user's pads hold other sounds, the beat plays those.
+- **Arc patterns stay in Arc.** A pasted card's patterns are never written to the EP-133. To get a beat onto the device the user plays or steps it in there. Say this the first time the user expects otherwise. Only a card's `sound` lines can change the device: on the import sheet Arc lists each sound change with a tick box, and **IMPORT** writes the ticked ones to the pads of the active project (and resets those pads' own settings) while **PUT ON PADS** is on, which it is at first; that chip switches all the ticks off and on. Say so when you write sound lines.
+- **A pattern plays whatever sound is on the pad.** The names after a row's pad are labels for reading. If the user's pads hold other sounds, the beat plays those, unless the user lets the card's `sound` lines put its sounds on the pads.
 - **Tempo is app-wide.** A card's tempo is offered when pasted, never forced. Changing it later changes every pattern.
-- **Be honest about what you know.** The pad layout is the user's own. Do not claim to know which sound is on a pad unless the card names it.
+- **Be honest about what you know.** The pad layout and the sound library are the user's own. Do not claim to know which sound is on a pad unless the card names it, and never name a sound or a slot that is not in their sound list.
 - **Keep it plain.** Short sentences, plain English, no jargon without a gloss the first time (*backbeat: the snare on 2 and 4*).
 
 ## The card in one minute
@@ -52,6 +52,7 @@ A1 at 1.1.1 note C4 gate 1/8
 - A row is `pad  sound name  |  steps  |`. Pad is the group letter plus `.` `0` `E` `1`-`9`: `A7`. Steps: `X` 127, `x` 100, `o` 64, digit 1-9 = 14 times the digit, `-` holds the hit before it a step longer, `.` rest. **A row must have exactly bars x steps-per-bar steps.** Spaces and `|` between them are ignored.
 - `notes` then lines like `B7 at 1.2.3 note E2 gate 1/8`: anything off the grid, quieter details and **KEYS** melodies and basslines. `note C4` is the sample's own pitch.
 - Swing only moves odd steps of 1/8 and 1/16 grid rows, never the notes list.
+- `sound A7 12 Kick 808` (anywhere in a section, even after `notes`) picks the sound for a pad: the EP-133 sound slot (1-999) from the user's sound list, then the name as the list gives it. Use it only when you have their list; a slot you made up would put the wrong sound on their pad. A second line for the same pad replaces the first; the pad must be in the section's group.
 - Write sharps as `C#4`. Anything after ` #` is a comment. Do not start any line of your reply with the words `ARC BEAT` except the card's own first line; Arc takes the first such line as the card.
 
 The pad letters and numbers are as printed on the device: the keypad runs `7 8 9 / 4 5 6 / 1 2 3 / . 0 ENTER` in each of the groups A, B, C and D.
@@ -59,14 +60,14 @@ The pad letters and numbers are as printed on the device: the keypad runs `7 8 9
 ## BUILD: make a beat
 
 1. **Ask only what is missing.** If the user gave a genre, a feel or a tempo, do not ask again. If they gave none, ask one short question with a default ("Which style? I'll start with boom bap at 90 BPM if you don't mind."). Do not interview them.
-2. **Know the pads.** The card is better if it carries the user's real pad names. Ask them once to open Live tools in Live, choose the pattern, use **SHARE** under CLAUDE and send it here (see [arc-app.md](references/arc-app.md)); then use their names. If they would rather not, assume the factory-style kit in [genres.md](references/genres.md) (kick A7, snare A9, closed hat A4 ...), **say it is an assumption**, and say pads can be remapped later.
+2. **Know the pads and the sounds.** A beat is only as good as its sounds, and they are the user's own. Ask them once to open Live tools in Live, choose the pattern, tick **With my sound list** under CLAUDE, use **SHARE** and send it here (see [arc-app.md](references/arc-app.md)). You then get their real pad names and, after the card, their **sound list** (one `slot name` line per sound). Choose each pad's sound from that list, by name or kind (a kick for A7, a tight closed hat for A4, a bass for B7) and write a `sound` line for it with the slot and name copied from the list. Use only slots that are in the list; never invent a slot or a name, and leave a pad without a sound line when nothing in the list fits. Say in a line which sounds you picked and why. If they would rather not share, or there is no list, write **no sound lines**: name the kind of sound for each pad in the row label (`kick`, `closed hat`), assume the factory-style kit in [genres.md](references/genres.md) (kick A7, snare A9, closed hat A4 ...), **say it is an assumption**, and say they can pick the sounds on the pads themselves or share their sound list for you to choose.
 3. **Start from the closest recipe** in [genres.md](references/genres.md) and change the tempo, swing and a few steps for what they asked. Use bass, chords or a lead on groups B-D (played in KEYS, written in the `notes` list) when the style needs them. Beats that loop for 4 or 8 bars with a fill in the last bar feel more alive than one bar on repeat.
 4. **Write a complete, valid card** in **one fenced block**: the version line first, every row the right length. Put nothing but the card in the fence.
 5. **Check it.** When code execution is available, save the card to a file and run:
    `python3 scripts/beatcard.py check beat.txt`
-   Fix every error and re-check until it prints `OK`. Warnings are worth reading too. The error messages name the line; do not show the user a card that fails. Use `grid` to look at it once. Without code execution, go through "Mistakes to avoid" below by hand.
+   Fix every error and re-check until it prints `OK`. Warnings are worth reading too. The error messages name the line; do not show the user a card that fails. Use `grid` to look at it once. If you chose sounds, save the user's sound list to `sounds.txt` (their share text works as it is) and run `python3 scripts/beatcard.py check beat.txt --sounds sounds.txt`: it warns about each sound line whose slot or name is not in the list, and says which slot holds the name. Without code execution, go through "Mistakes to avoid" below by hand.
 6. **Explain in 2-4 lines**: the feel, the tempo and swing, and one thing to try changing. Then tell them how to use it:
-   *Copy the card, open Live tools in Arc, tap PASTE BEAT under CLAUDE, check the sheet and tap IMPORT, then play it. Arc adds the pattern in the next free slot without overwriting anything, offers the tempo on a chip, and one undo takes it back.* (The buttons are named in [arc-app.md](references/arc-app.md).)
+   *Copy the card, open Live tools in Arc, tap PASTE BEAT under CLAUDE, check the sheet and tap IMPORT, then play it. Arc adds the pattern in the next free slot without overwriting anything, offers the tempo on a chip, and one undo takes it back.* If the card has sound lines, add: *The sheet also lists the sounds, each old → new with a tick box. Tap IMPORT to load them onto the pads while PUT ON PADS is on, as it is at first (that chip switches all the ticks off and on; connected, IMPORT writes to the EP-133's pads in the active project and resets those pads' settings; offline it becomes Arc's offline pad change and goes to the device when you connect). Untick any you want to keep.* (The buttons are named in [arc-app.md](references/arc-app.md).)
 7. Offer one next step: a variation, a fill, a bass line or a MIDI file for a DAW (`scripts/beatcard.py midi`).
 
 ## ANALYSE: improve a beat
@@ -80,7 +81,7 @@ The pad letters and numbers are as printed on the device: the keypad runs `7 8 9
    - swing (value, and whether it suits the tempo),
    - space (where nothing plays),
    - arrangement (does it change over the bars? is there a fill?).
-4. **Suggest 2 or 3 concrete edits**: a pad, a step, a number, and what it will change in the sound. Not a list of ten.
+4. **Suggest 2 or 3 concrete edits**: a pad, a step, a number, and what it will change in the sound. Not a list of ten. If the user shared their sound list, a swap can be one of them: a snare that is too long for the tempo, a hat that is too bright. Suggest another sound from the list and write it as a `sound` line (see [analysis.md](references/analysis.md)); never suggest a sound that is not in the list.
 5. **Return a complete new card** in one fenced block with those edits applied, check it with the script, and say in one line each what changed. Keep the user's pad names and tempo unless you are changing them on purpose. Remind them that pasting adds a new pattern and does not overwrite theirs.
 
 ## LEARN: teach the EP-133 and beat making
@@ -101,8 +102,9 @@ Python 3.9+, no installs. Run from the skill folder (or use the full path to the
 | Command | What it does |
 |---|---|
 | `python3 scripts/beatcard.py check CARD` | Reads the card by the rules in beat-card.md. Prints problems with line numbers (`line 7: error: ...`) and exits 1 on errors; otherwise prints a summary. Reads standard input without a file |
-| `python3 scripts/beatcard.py analyse CARD` | Groove report: hits for each group and pad, density, velocity spread, swing, syncopation, longest gap, which steps carry kick, snare and hat sounds by name, the closest genre recipes. `--json` for the fields |
-| `python3 scripts/beatcard.py grid CARD` | Prints the step grid, with the swing shown, for looking at |
+| `python3 scripts/beatcard.py check CARD --sounds sounds.txt` | Also checks every sound line against the user's sound list (save their share text, or lines of `slot name`, in the file): a warning for each slot or name that is not in it, naming the slot that holds the sound if it moved |
+| `python3 scripts/beatcard.py analyse CARD` | Groove report: hits for each group and pad, density, velocity spread, swing, syncopation, longest gap, which steps carry kick, snare and hat sounds by name (a pad's sound line name first, then its row label), the sound lines, the closest genre recipes. `--json` for the fields |
+| `python3 scripts/beatcard.py grid CARD` | Prints the step grid, with the swing and the sound lines shown, for looking at |
 | `python3 scripts/beatcard.py midi CARD -o beat.mid` | Writes a standard MIDI file at the card's tempo for a DAW. Pads become the EP-133's notes 36-83 and KEYS notes 60 + semi on separate tracks |
 
 `CARD` is a file; the card may sit inside a longer chat message or a code fence, as Arc does. When a user pastes an error message from Arc, treat it like the script's: it names a line and a reason.
@@ -119,6 +121,7 @@ These are what `check` catches. Look for them by hand when you cannot run it.
 - A gate that is not ticks or one of `1/4 1/8 1/16 1/32 1/8T 1/16T` (so no `1/2`; use ticks, like `gate 192`). A note without `at` or `t`. `note` and `semi` together. A lowercase note name (`c4`).
 - A note beyond the pattern's end (a 1-bar pattern ends at tick 383).
 - A row of steps outside a `[X]` section, or grid rows after `notes`.
+- **Sound lines:** a slot that is not in the user's list (or not 1-999), a name that is not the list's spelling, a pad from another group than the section, a sound line before the first `[X]` section, or any sound line at all when you have no list. A sound line is `sound A7 12 Kick 808`, never a row with a `|`.
 - Two notes on the same pad at the same tick (only the louder stays; it is a warning).
 - Text before the card is fine; text that starts a line with `ARC BEAT` is not.
 
@@ -126,9 +129,9 @@ These are what `check` catches. Look for them by hand when you cannot run it.
 
 | File | Read it when |
 |---|---|
-| [beat-card.md](references/beat-card.md) | Writing or fixing any card. The spec: reading rules, header, rows, notes list, limits, import |
+| [beat-card.md](references/beat-card.md) | Writing or fixing any card. The spec: reading rules, header, rows, notes list, sound lines, limits, import, the sound list |
 | [genres.md](references/genres.md) | Building. The assumed kit and 16 genre recipes with a valid card each |
 | [lessons.md](references/lessons.md) | Teaching. Twelve lessons with device steps, Arc steps, exercises and checks |
 | [ep133-guide.md](references/ep133-guide.md) | Any question about key combinations. 100 official OS 2.5 combos by section, with steps and sources. Generated; do not edit |
-| [analysis.md](references/analysis.md) | Analysing. What the script's numbers mean, the checklist, edits worth proposing and the vocabulary |
-| [arc-app.md](references/arc-app.md) | Explaining Arc, or telling the user where to tap, including SHARE and PASTE BEAT |
+| [analysis.md](references/analysis.md) | Analysing. What the script's numbers mean, the checklist, edits worth proposing (sound swaps too) and the vocabulary |
+| [arc-app.md](references/arc-app.md) | Explaining Arc, or telling the user where to tap, including SHARE, With my sound list, PASTE BEAT and the sounds on the import sheet |

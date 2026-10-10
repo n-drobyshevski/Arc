@@ -332,6 +332,9 @@ class Errors(unittest.TestCase):
         "too-many-notes": "ARC BEAT 1\n[A] bars 8\nnotes\n" + "".join("A7 t %d\n" % t for t in range(0, 1025))
         + "".join("A8 t %d\n" % t for t in range(0, 1025)),
         "no-sections": "ARC BEAT 1\nname Nothing here\n",
+        "bad-sound": "ARC BEAT 1\n[A]\nsound\n",
+        "bad-slot": "ARC BEAT 1\n[A]\nsound A7 1000 Kick\n",
+        "sound-outside-section": "ARC BEAT 1\nsound A7 12\n" + kick(),
     }
 
     def test_every_case_gives_its_error(self):
@@ -932,6 +935,255 @@ class Cli(unittest.TestCase):
             finally:
                 os.unlink(f.name)
         self.assertIn("Lazy boom bap", out.getvalue())
+
+
+# ---------------------------------------------------------------------------
+# Sounds: sound lines, the user's sound list, and what they change in the reports
+# ---------------------------------------------------------------------------
+
+
+def sounds_of(card, i=0):
+    """A pattern's sound lines as {pad: (slot, name)}, the pad as offset."""
+    return {pad: (s.slot, s.name) for pad, s in card.patterns[i].sounds.items()}
+
+
+def messages(card):
+    return ["%d %s %s" % (p.line, p.level, p.code) for p in card.problems]
+
+
+BAR = "A7 | X... .... .... .... |"
+
+#: The same cases as BeatCardTest.kt and beatCard.test.ts.
+LIBRARY = {12: "Kick 808", 14: "Snare.wav", 20: "Hat", 30: "Clap", 31: " clap.WAV "}
+
+
+class SoundLines(unittest.TestCase):
+    def test_sound_lines_give_a_pad_its_slot_and_name_anywhere_in_the_section(self):
+        card = one("[A]\nsound A7 12 Kick 808\nsound A9 140\nSOUND AENTER 7   Open   hat  # soft\nSound A. 999 Last.wav\nsound A1 5 Kick#2\n" + BAR + "\n")
+        self.assertEqual(card.problems, [])
+        self.assertEqual(sounds_of(card), {9: (12, "Kick 808"), 11: (140, ""), 2: (7, "Open hat"), 0: (999, "Last.wav"), 3: (5, "Kick 2")})
+        # Before or after the rows, and after notes, where the lines that follow are still notes.
+        after = one("[A]\nsound A7 12 Kick\n" + BAR + "\nnotes\nA9 at 1.1.1\nsound A9 140 Snare\nA5 at 1.2.1\n"
+                    "[B]\nB7 | X... .... .... .... |\nsound B7 3\n")
+        self.assertEqual(after.problems, [])
+        self.assertEqual(sounds_of(after), {9: (12, "Kick"), 11: (140, "Snare")})
+        self.assertEqual(len(after.patterns[0].hits), 3)
+        self.assertEqual(sounds_of(after, 1), {9: (3, "")})
+        # A pad with no notes can have a sound; a section with no sound lines has none.
+        self.assertEqual(sounds_of(one("[A]\nsound A1 8\n" + BAR + "\n")), {3: (8, "")})
+        self.assertEqual(sounds_of(one("[A]\n" + BAR + "\n")), {})
+        self.assertEqual(sounds_of(one("[A]\nsound A1 8\n")), {3: (8, "")})
+        # The slots run 1 to 999.
+        self.assertEqual(sounds_of(one("[A]\nsound A7 001\n")), {9: (1, "")})
+
+    def test_sound_line_errors_name_the_line(self):
+        cases = [
+            ("sound B7 12", "wrong-group"),
+            ("sound A7 0", "bad-slot"),
+            ("sound A7 1000", "bad-slot"),
+            ("sound A7 -1", "bad-slot"),
+            ("sound A7 12.5", "bad-slot"),
+            ("sound A7 kick", "bad-slot"),
+            ("sound A7", "bad-slot"),
+            ("sound kick 12", "bad-pad"),
+            ("sound a7 12", "bad-pad"),
+            ("sound", "bad-sound"),
+        ]
+        for line, code in cases:
+            card = bc.parse_card("ARC BEAT 1\n[A]\n%s\n%s\n" % (line, BAR))
+            self.assertEqual([(p.line, p.level, p.code) for p in card.problems], [(3, bc.ERROR, code)], line)
+        # After notes the line is still a sound line; before any section it has no place.
+        self.assertEqual(messages(one("[A]\n" + BAR + "\nnotes\nsound B7 12\n")), ["5 error wrong-group"])
+        self.assertEqual(messages(bc.parse_card("ARC BEAT 1\nsound A7 12\n[A]\n" + BAR + "\n")), ["2 error sound-outside-section"])
+        # Lines of a skipped section are not read; those of a second section of a group are read for their faults, then dropped.
+        self.assertEqual(messages(one("[A] bars 0\nsound A7 0\n")), ["2 error bad-bars"])
+        self.assertEqual(messages(one("[A]\n" + BAR + "\n[A]\nsound A7 0\n")), ["4 error duplicate-group", "5 error bad-slot"])
+
+    def test_a_second_sound_line_for_a_pad_replaces_the_first_with_a_warning(self):
+        card = one("[A]\nsound A7 12 Kick\n" + BAR + "\nsound A8 3\nsound A7 14\n")
+        self.assertEqual([(p.line, p.level, p.code) for p in card.problems], [(6, bc.WARNING, "duplicate-sound")])
+        self.assertTrue(card.ok)
+        self.assertEqual(sounds_of(card), {9: (14, ""), 10: (3, "")})
+
+    def test_the_sound_line_is_remembered(self):
+        card = one("[A]\n\nsound A7 12 Kick\n")
+        self.assertEqual(card.patterns[0].sounds[9].line, 4)
+
+    def test_the_summary_counts_sounds(self):
+        self.assertIn(", 2 sounds", bc.summary_line(one("[A]\nsound A7 12 Kick\nsound A9 3\n" + BAR + "\n")))
+        self.assertIn(", 1 sound", bc.summary_line(one("[A]\nsound A7 12 Kick\n" + BAR + "\n")))
+        self.assertNotIn("sound", bc.summary_line(one("[A]\n" + BAR + "\n")))
+
+
+class SoundLists(unittest.TestCase):
+    def test_a_share_text_header_is_skipped_and_slots_are_read_in_order(self):
+        text = "My EP-133's sounds (slot name), from the EP-133:\n12 Kick  808\n14 Snare.wav\n20 Hat #2\n21\n"
+        self.assertEqual(bc.parse_sound_list(text), {12: "Kick 808", 14: "Snare.wav", 20: "Hat 2", 21: ""})
+
+    def test_a_list_without_a_header_and_other_lines(self):
+        text = "\ufeff\n12 Kick 808\n\nnot a sound\n0 zero\n1000 big\n12x no\n  7\tShaker  \n12 Kick again\n"
+        self.assertEqual(bc.parse_sound_list(text), {12: "Kick again", 7: "Shaker"})
+
+    def test_a_whole_share_text_works_as_the_list(self):
+        shared = "Look:\n\n```\nARC BEAT 1\nname X\ntempo 92\nswing 50\n\n[A] bars 1 step 1/16\nsound A7 12 Kick 808\n" \
+                 "A7 Kick 808 | X... .... .... .... |\nnotes\nA9 at 1.1.1\n```\nMy EP-133's sounds (slot name), from the last read:\n12 Kick 808\n14 Snare\n"
+        self.assertEqual(bc.parse_sound_list(shared), {12: "Kick 808", 14: "Snare"})
+
+    def test_same_name_ignores_case_spaces_and_wav(self):
+        self.assertTrue(bc.same_name("kick 808", "Kick 808"))
+        self.assertTrue(bc.same_name(" Snare.WAV ", "snare"))
+        self.assertTrue(bc.same_name("Snare.wav ", "snare.wav"))
+        self.assertFalse(bc.same_name("Snare 2", "snare"))
+
+    def test_sound_lines_are_matched_by_slot_and_name(self):
+        def resolve(slot, name, current=None):
+            return bc.resolve_sound(bc.Sound(slot, name, 1), LIBRARY, current)
+
+        self.assertEqual(resolve(12, "kick 808"), 12)  # slot holds the name, ignoring case
+        self.assertEqual(resolve(14, "SNARE"), 14)  # ... and ".wav"
+        self.assertEqual(resolve(13, "Hat"), 20)  # slot is empty: the name is found
+        self.assertEqual(resolve(99, "Clap"), 30)  # two slots hold it: the lowest
+        self.assertEqual(resolve(77, "clap", 31), 31)  # ... but the pad's own first
+        self.assertIsNone(resolve(99, ""))  # no name and no such slot
+        self.assertIsNone(resolve(500, "Cymbal"))  # nowhere
+        self.assertEqual(resolve(20, ""), 20)  # no name, the slot is there
+        self.assertEqual(resolve(12, "Snare"), 14)  # the slot holds another sound: the name is found elsewhere
+
+    def test_check_sounds_warns_about_each_line_that_is_not_in_the_list(self):
+        card = one("[A]\nsound A7 12 kick 808\nsound A8 14 SNARE\nsound A9 13 Hat\nsound A4 99 Clap\nsound A6 99\nsound A1 500 Cymbal\n"
+                   "sound A2 12 Snare\nsound A3 20\nsound A5 12 Hat\n" + BAR + "\n")
+        found = bc.check_sounds(card, LIBRARY)
+        self.assertEqual([(p.line, p.level, p.code) for p in found], [
+            (5, bc.WARNING, "sound-moved"),
+            (6, bc.WARNING, "sound-moved"),
+            (7, bc.WARNING, "sound-missing"),
+            (8, bc.WARNING, "sound-missing"),
+            (9, bc.WARNING, "sound-moved"),
+            (11, bc.WARNING, "sound-moved"),
+        ])
+        text = [p.message for p in found]
+        self.assertIn("A9: slot 13 isn't in the sound list, not 'Hat'; that sound is in slot 20 ('Hat'), which Arc will use instead", text)
+        self.assertIn("A2: slot 12 holds 'Kick 808', not 'Snare'; that sound is in slot 14 ('Snare.wav'), which Arc will use instead", text)
+        self.assertIn("A1: slot 500 isn't in the sound list, and no slot holds 'Cymbal'; Arc will skip this sound line", text)
+        self.assertIn("A6: slot 99 isn't in the sound list; Arc will skip this sound line", text)
+        self.assertIn("A5: slot 12 holds 'Kick 808', not 'Hat'; that sound is in slot 20 ('Hat'), which Arc will use instead", text)
+        # A card without sound lines has nothing to warn about, and so has one that matches.
+        self.assertEqual(bc.check_sounds(one("[A]\n" + BAR + "\n"), LIBRARY), [])
+        self.assertEqual(bc.check_sounds(one("[A]\nsound A7 12 Kick 808\n" + BAR + "\n"), LIBRARY), [])
+        # A name that no slot holds, on a slot that holds another sound.
+        gone = bc.check_sounds(one("[A]\nsound A7 12 Kick\n" + BAR + "\n"), LIBRARY)
+        self.assertEqual([p.message for p in gone], ["A7: slot 12 holds 'Kick 808', and no slot holds 'Kick'; Arc will skip this sound line"])
+
+
+class SoundReports(unittest.TestCase):
+    CARD = "[A]\nsound A7 12 Kick 808\nsound A2 300 Open Hat\nA7 thing | X... .... X... .... |\nA9 | .... X... .... X... |\nA4 hat | x.x. x.x. x.x. x.x. |\n"
+
+    def test_analyse_takes_the_role_from_the_sound_line_before_the_row_label(self):
+        report = bc.analyse_card(one(self.CARD))["patterns"][0]
+        a7 = report["pads"]["A7"]
+        self.assertEqual((a7["name"], a7["role"], a7["name_assumed"]), ("Kick 808", "kick", False))
+        self.assertEqual(a7["sound"], {"slot": 12, "name": "Kick 808"})
+        # The row's own label is used where there is no sound line; the assumed kit where there is neither.
+        self.assertEqual((report["pads"]["A4"]["name"], report["pads"]["A4"]["role"], report["pads"]["A4"]["sound"]), ("hat", "hat", None))
+        self.assertEqual((report["pads"]["A9"]["name"], report["pads"]["A9"]["name_assumed"], report["pads"]["A9"]["role"]), ("snare", True, "snare"))
+        # Even a row that names another sound: the sound line wins.
+        swapped = bc.analyse_card(one("[A]\nsound A7 3 Snare\nA7 kick | X... .... .... .... |\n"))["patterns"][0]
+        self.assertEqual((swapped["pads"]["A7"]["name"], swapped["pads"]["A7"]["role"]), ("Snare", "snare"))
+        # A sound line with no name leaves the row's label in charge.
+        bare = bc.analyse_card(one("[A]\nsound A7 3\nA7 kick | X... .... .... .... |\n"))["patterns"][0]
+        self.assertEqual((bare["pads"]["A7"]["name"], bare["pads"]["A7"]["role"], bare["pads"]["A7"]["sound"]), ("kick", "kick", {"slot": 3, "name": None}))
+
+    def test_analyse_lists_the_sounds_of_all_pads_in_keypad_order(self):
+        report = bc.analyse_card(one(self.CARD))["patterns"][0]
+        self.assertEqual(list(report["sounds"]), ["A7", "A2"])
+        self.assertEqual(report["sounds"]["A2"], {"slot": 300, "name": "Open Hat"})
+        text = bc.render_analysis(bc.analyse_card(one(self.CARD)))
+        self.assertIn("sound A7 slot 12 Kick 808", text)
+        self.assertIn("sound A2 slot 300 Open Hat", text)
+        self.assertNotIn("sound", bc.render_analysis(bc.analyse_card(one("[A]\n" + BAR + "\n"))).replace("sounds", ""))
+        # A group of KEYS notes only lists them too.
+        keys_only = bc.render_analysis(bc.analyse_card(one("[A]\nsound A1 500 Pad\nnotes\nA1 at 1.1.1 note C4\n")))
+        self.assertIn("sound A1 slot 500 Pad", keys_only)
+
+    def test_the_grid_shows_sound_lines_and_falls_back_to_their_names(self):
+        text = bc.render_grid(one(self.CARD))
+        lines = text.splitlines()
+        i = lines.index("sound A7 slot 12 Kick 808")
+        self.assertEqual(lines[i + 1], "sound A2 slot 300 Open Hat")
+        rows = {l.split()[0]: l for l in lines if l.startswith("A") and "|" not in l[:3] and ("X" in l or "x" in l)}
+        self.assertIn("A7 thing", rows["A7"])  # the row's own label
+        # A row with no label shows the sound line's name.
+        named = bc.render_grid(one("[A]\nsound A7 12 Kick 808\n" + BAR + "\n"))
+        self.assertTrue(any(l.startswith("A7 Kick 808") for l in named.splitlines()), named)
+        self.assertNotIn("sound", bc.render_grid(one("[A]\n" + BAR + "\n")))
+
+
+class SoundsCli(unittest.TestCase):
+    def run_cli(self, *args, stdin=None):
+        return subprocess.run([sys.executable, os.path.join(HERE, "beatcard.py")] + list(args), input=stdin, capture_output=True, text=True)
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.list = os.path.join(self.dir.name, "sounds.txt")
+        with open(self.list, "w", encoding="utf-8") as f:
+            f.write("My EP-133's sounds (slot name), from the EP-133:\n" + "".join("%d %s\n" % kv for kv in sorted(LIBRARY.items())))
+        self.card = "ARC BEAT 1\n[A]\nsound A7 12 Kick 808\nsound A9 13 Hat\nsound A8 99 Cymbal\n" + BAR + "\n"
+
+    def test_check_with_a_sound_list_warns_per_sound_line_and_exits_0(self):
+        r = self.run_cli("check", "--sounds", self.list, stdin=self.card)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = r.stdout.splitlines()
+        self.assertEqual(len([l for l in out if "warning" in l]), 2)
+        self.assertIn("line 4: warning: A9: slot 13 isn't in the sound list, not 'Hat'; that sound is in slot 20 ('Hat'), which Arc will use instead", out)
+        self.assertIn("line 5: warning: A8: slot 99 isn't in the sound list, and no slot holds 'Cymbal'; Arc will skip this sound line", out)
+        self.assertTrue(out[-1].startswith("OK"))
+        self.assertIn(", 3 sounds", out[-1])
+
+    def test_check_without_the_option_does_not_look_at_sounds(self):
+        r = self.run_cli("check", stdin=self.card)
+        self.assertEqual(r.returncode, 0)
+        self.assertNotIn("warning", r.stdout)
+
+    def test_a_matching_card_has_no_warnings(self):
+        r = self.run_cli("check", "--sounds", self.list, stdin="ARC BEAT 1\n[A]\nsound A7 12 kick 808\nsound A8 14\n" + BAR + "\n")
+        self.assertEqual(r.returncode, 0)
+        self.assertNotIn("warning", r.stdout)
+
+    def test_problems_come_in_line_order_with_the_card_s_own(self):
+        r = self.run_cli("check", "--sounds", self.list, stdin="ARC BEAT 1\nfoo\n[A]\nsound A9 13 Hat\nbar\n" + BAR + "\n")
+        lines = [l for l in r.stdout.splitlines() if l.startswith("line")]
+        self.assertEqual([l.split(":")[0] for l in lines], ["line 2", "line 4", "line 5"])
+
+    def test_json_carries_the_sound_warnings(self):
+        import json
+        r = self.run_cli("check", "--json", "--sounds", self.list, stdin=self.card)
+        data = json.loads(r.stdout)
+        self.assertTrue(data["ok"])
+        self.assertEqual([(p["line"], p["code"]) for p in data["problems"]], [(4, "sound-moved"), (5, "sound-missing")])
+
+    def test_the_whole_share_text_is_a_fine_list(self):
+        shared = os.path.join(self.dir.name, "shared.txt")
+        with open(shared, "w", encoding="utf-8") as f:
+            f.write("```\n" + self.card + "```\nMy EP-133's sounds (slot name), from the last read:\n12 Kick 808\n13 Hat\n99 Cymbal\n")
+        r = self.run_cli("check", shared, "--sounds", shared)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("warning", r.stdout)
+
+    def test_a_list_without_sounds_or_a_missing_file_exits_2(self):
+        empty = os.path.join(self.dir.name, "empty.txt")
+        with open(empty, "w", encoding="utf-8") as f:
+            f.write("nothing here\n")
+        r = self.run_cli("check", "--sounds", empty, stdin=self.card)
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("no sounds found", r.stderr)
+        r = self.run_cli("check", "--sounds", os.path.join(self.dir.name, "nope.txt"), stdin=self.card)
+        self.assertEqual(r.returncode, 2)
+
+    def test_a_card_with_errors_still_exits_1(self):
+        r = self.run_cli("check", "--sounds", self.list, stdin="ARC BEAT 1\ntempo 9\n" + self.card[len("ARC BEAT 1\n"):])
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("line 2: error:", r.stdout)
 
 
 # ---------------------------------------------------------------------------

@@ -56,7 +56,9 @@ object ClaudeText {
 
     // ---------- Sharing ----------
     /** The line before the card in the shared text. */
-    const val SHARE_PROMPT = "Analyse this EP-133 beat from Arc with the arc-beats skill, then suggest 2-3 edits as a new card:"
+    const val SHARE_PROMPT =
+        "Analyse this EP-133 beat from Arc with the arc-beats skill, then suggest 2-3 edits as a new card. " +
+            "Keep its sound lines, or choose sounds from my sound list if one follows the card:"
     const val SHARE_TITLE = "Share beat card"
 
     /** "P01 S02": pattern [n] (1..99) of the scene at [scene] (from 0), a card's name. */
@@ -70,6 +72,21 @@ object ClaudeText {
 
     /** The shared text: [prompt], a blank line and [card] (which ends in a newline) in a fenced block. */
     fun shareText(prompt: String, card: String) = prompt + "\n\n```\n" + card + "```\n"
+
+    // ---------- The sound list ----------
+    /** Where the sound list Arc adds after a shared card came from: the EP-133 itself, its last read, or the factory pack. */
+    const val SOUNDS_FROM_DEVICE = "the EP-133"
+    const val SOUNDS_FROM_LAST_READ = "the last read"
+    const val SOUNDS_FROM_FACTORY = "the factory pack"
+
+    /** The line before the sound list (the spec's): "My EP-133's sounds (slot name), from the EP-133:". [source] is one of the three above. */
+    fun soundListHeader(source: String) = "My EP-133's sounds (slot name), from $source:"
+
+    /**
+     * The tick box under the share keys: "With my sound list · 212 sounds" ([count] is how many Arc knows: the EP-133's,
+     * the last read's or the factory pack's). Off, the card is shared with its sound lines alone.
+     */
+    fun withSoundList(count: Int) = "With my sound list \u00B7 ${Format.plural(count, "sound")}"
 
     // ---------- Receiving ----------
     /** A text with no ARC BEAT line in it: from PASTE BEAT, or shared to Arc. */
@@ -134,6 +151,35 @@ object ClaudeText {
             problems.joinToString("") { "- Line ${it.line} (${if (it.error) "error" else "warning"}): ${it.message}\n" } +
             "Please fix them and send the whole card again."
 
+    // ---------- The sheet: sounds ----------
+    /** The block's header, and the chip beside it that decides whether the ticked sounds go onto the pads (on to begin with). */
+    const val SOUNDS = "Sounds"
+    const val PUT_ON_PADS = "Put on pads"
+    fun putOnPadsName(on: Boolean, count: Int) =
+        if (on) "Put ${Format.plural(count, "sound")} on the pads" else "Leave the pads' sounds as they are"
+
+    /** A sound as the rows write it: "012 Micro kick", just "012" when the card or the list gives no name. */
+    fun soundName(slot: Int, name: String?) = FeatureText.slot(slot) + (name?.let { " $it" } ?: "")
+
+    /** What a row says in place of a new sound: the pad plays it already. */
+    const val ALREADY_THERE = "Already there"
+
+    /** What a row says when the sound is nowhere in the user's list: "Not on your EP-133: 301 Rim dusty". */
+    fun soundMissing(slot: Int, name: String?) = "Not on your EP-133: ${soundName(slot, name)}"
+
+    /** A row for screen readers: "A7: Kick dusty becomes 012 Micro kick", "A7: 012 Micro kick, already there", or the missing reason. */
+    fun soundRowName(pad: PhysicalPad, old: String?, change: String) = padLabel(pad) + ": " + (old?.let { "$it becomes " } ?: "") + change
+    fun soundRowSame(pad: PhysicalPad, sound: String) = "${padLabel(pad)}: $sound, ${ALREADY_THERE.lowercase()}"
+    fun soundRowMissing(pad: PhysicalPad, slot: Int, name: String?) = "${padLabel(pad)}: ${soundMissing(slot, name)}"
+
+    /** The note under the rows, connected: [pads] ticked, in [project] (null while it isn't known). */
+    fun soundsNote(pads: Int, project: Int?) =
+        "Writes ${Format.plural(pads, "pad")} in ${project?.let { "project $it" } ?: "the active project"} on the EP-133. " +
+            "Their pitch, level and other settings reset to the sound's. UNDO puts the old sounds back."
+
+    /** The same, offline: the changes are Arc's own until the EP-133 connects. */
+    const val SOUNDS_OFFLINE_NOTE = "Saved as offline pad changes; they go to the EP-133 when you reconnect."
+
     // CANCEL is [Strings.CANCEL].
     const val IMPORT = "Import"
 
@@ -144,15 +190,33 @@ object ClaudeText {
     /**
      * IMPORT's toast: where it went, and how to take it back. One pattern is
      * named; several go in the scene they made ([scene], "S03"), or are listed
-     * where there was no room for a scene.
+     * where there was no room for a scene. [sounds] put on pads are counted,
+     * and so are the [skipped] ones that had no pad to go on.
      */
-    fun imported(places: List<Pair<Int, Int>>, scene: String?): String {
+    fun imported(places: List<Pair<Int, Int>>, scene: String?, sounds: Int = 0, skipped: Int = 0): String {
         val where = when {
             scene != null -> "scene $scene"
             else -> places.joinToString(", ") { place(it.first, it.second) }
         }
-        return "Imported to $where. UNDO takes it back."
+        val extra = when {
+            sounds > 0 && skipped > 0 -> " and ${Format.plural(sounds, "sound")}, $skipped skipped"
+            sounds > 0 -> " and ${Format.plural(sounds, "sound")}"
+            skipped > 0 -> ", ${Format.plural(skipped, "sound")} skipped"
+            else -> ""
+        }
+        return "Imported to $where$extra. UNDO takes it back."
     }
+
+    /**
+     * IMPORT's toast when a pad's sound couldn't be written ([reason]): the patterns stay in, with the [written] pads
+     * that did change, and UNDO takes all of it back.
+     */
+    fun soundsFailed(reason: String, written: Int) =
+        MirrorText.assignFailed(reason) + ". The patterns stay imported" + (if (written > 0) " and ${Format.plural(written, "pad")} changed" else "") + ". UNDO takes it back."
+
+    /** After UNDO took an import back: the old sounds on [back] pads again, and the [empty] ones that had none before can't be emptied again. */
+    fun soundsRestored(back: Int, empty: Int) =
+        "Old sounds back on ${Format.plural(back, "pad")}" + (if (empty > 0) ", $empty had none before" else "") + "."
 
     private fun twoDigits(n: Int) = n.toString().padStart(2, '0')
 }

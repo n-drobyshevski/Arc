@@ -13,13 +13,18 @@
 //   function from a PhysicalPad (or undefined, for none) giving a name or null.
 // - CardImport.fullGroup is null (not absent) when nothing is full; `placed`
 //   holds [group, pattern number] tuples where the Kotlin has Pairs.
+// - A section's `sounds` is a ReadonlyMap from pad offset to CardSound, built
+//   by `cardSound()`; `available` in resolveSounds is a ReadonlyMap from slot to
+//   name; SoundStatus is a const object plus a string union of its names.
 
 import { Keys } from './keys'
 import { LABELS, ROWS, noteName, physicalPad, type PhysicalPad } from './padNotes'
 import { Pattern, ProjectSeq, Seq, Timing, TimingSettings, pattern, patternNote, scene, timingTicks, type PatternNote } from './pattern'
+import { PadSoundCache } from './padSoundCache'
 import { SceneOps } from './scenes'
 import { Steps } from './steps'
 import { BEATS_PER_BAR } from './tempo'
+import { ClaudeText } from '../text/claudeText'
 
 /**
  * A beat as an ARC BEAT text card: an optional [name] (up to 40 characters),
@@ -38,15 +43,62 @@ export function beatCard(name: string | null = null, tempo: number | null = null
   return { name, tempo, swing, sections }
 }
 
-/** One group's pattern on a card: [group] 0..3 (A..D), the pattern [number] 1..99 it was written as (a hint, null when the card gave none) and the [pattern] itself. */
+/**
+ * One group's pattern on a card: [group] 0..3 (A..D), the pattern [number]
+ * 1..99 it was written as (a hint, null when the card gave none), the
+ * [pattern] itself and the [sounds] its pads should play, by pad offset.
+ */
 export interface CardSection {
   readonly group: number
   readonly number: number | null
   readonly pattern: Pattern
+  readonly sounds: ReadonlyMap<number, CardSound>
 }
 
-export function cardSection(group: number, number: number | null, pat: Pattern): CardSection {
-  return { group, number, pattern: pat }
+export function cardSection(group: number, number: number | null, pat: Pattern, sounds: ReadonlyMap<number, CardSound> = new Map()): CardSection {
+  return { group, number, pattern: pat, sounds }
+}
+
+/**
+ * A sound line of a card: the EP-133 sound [slot] (1..999) a pad should play
+ * and, when the card gave it, the sound's [name] as the user's list has it,
+ * which lets Arc check that the slot still holds that sound.
+ */
+export interface CardSound {
+  readonly slot: number
+  readonly name: string | null
+}
+
+export function cardSound(slot: number, name: string | null = null): CardSound {
+  return { slot, name }
+}
+
+/** What `BeatCards.resolveSounds` makes of a sound line. */
+export type SoundStatus = 'CHANGE' | 'SAME' | 'FOUND_BY_NAME' | 'MISSING'
+export const SoundStatus = {
+  /** The sound is on the slot to put on the pad: a change. */
+  CHANGE: 'CHANGE',
+  /** The pad already plays the sound: nothing to do. */
+  SAME: 'SAME',
+  /** The line's slot didn't hold the named sound (or was empty), but another slot does: still a change, to that slot. */
+  FOUND_BY_NAME: 'FOUND_BY_NAME',
+  /** Neither the slot nor the name is among the sounds: the line is skipped. */
+  MISSING: 'MISSING',
+} as const
+
+/**
+ * A sound line matched to the user's sounds: the [pad] and what the card
+ * [wanted], the [slot] and [name] to put on it (null for both when [status]
+ * is MISSING), the slot the pad plays now ([currentSlot], null when not known)
+ * and the [status].
+ */
+export interface SoundPick {
+  readonly pad: PhysicalPad
+  readonly wanted: CardSound
+  readonly slot: number | null
+  readonly name: string | null
+  readonly currentSlot: number | null
+  readonly status: SoundStatus
 }
 
 /** Something wrong with a card, at [line] (counted from 1 in the text read): an [error] stops the card being read, a warning doesn't. */
@@ -84,6 +136,10 @@ const TIDY_COMMENT = '# tidied: velocities and short gates rounded'
 
 const TEMPO_MIN = 40
 const TEMPO_MAX = 240
+
+/** The sound slots of the EP-133. */
+const SLOT_MIN = 1
+const SLOT_MAX = 999
 
 /** A note's gate when it gives none: a 1/16. */
 const DEFAULT_GATE = 24
@@ -234,11 +290,13 @@ interface Draft {
   readonly dropped: boolean
   /** The notes read, with the line each came from. */
   readonly hits: { note: PatternNote; line: number }[]
+  /** The sound lines read, by pad offset. */
+  readonly sounds: Map<number, CardSound>
   inNotes: boolean
 }
 
 function newDraft(line: number, group: number, number: number | null, bars: number, step: Timing, skip: boolean, dropped: boolean): Draft {
-  return { line, group, number, bars, step, skip, dropped, hits: [], inNotes: false }
+  return { line, group, number, bars, step, skip, dropped, hits: [], sounds: new Map(), inNotes: false }
 }
 
 /** Whether [text] has an ARC BEAT line: what [read] starts from, so a text without one is no card at all (not a card with a mistake). */
@@ -310,7 +368,7 @@ function read(text: string): CardRead {
       }
     }
     if (kept.length > Seq.MAX_NOTES) error(d.line, `Group ${letter(d.group)} has ${kept.length} notes, the most is ${Seq.MAX_NOTES}.`)
-    if (!d.dropped) sections.push({ group: d.group, number: d.number, pattern: pattern(d.bars, kept.sort(noteOrder)) })
+    if (!d.dropped) sections.push({ group: d.group, number: d.number, pattern: pattern(d.bars, kept.sort(noteOrder)), sounds: d.sounds })
   }
 
   // A section line that can't be used: its body is skipped.
@@ -378,7 +436,7 @@ function read(text: string): CardRead {
     const word = tokens(line)[0]!
     const key = word.toLowerCase()
     const rest = trim(line.slice(word.length))
-    if (line.includes('|') || firstIsPad(line) || key === 'notes') {
+    if (line.includes('|') || firstIsPad(line) || key === 'notes' || key === 'sound') {
       error(no, `'${word}' needs a section first, such as [A].`)
     } else if (key === 'name') {
       if (rest === '') warn(no, 'Name is empty, ignored.')
@@ -559,6 +617,36 @@ function read(text: string): CardRead {
     d.hits.push({ note: patternNote(tick, pad.offset, gate, semi, vel), line: no })
   }
 
+  // sound <pad> <slot> [name], anywhere in a section (after notes too). A second line for a pad replaces the first.
+  const sound = (d: Draft, no: number, line: string): void => {
+    let rest = trim(line.slice(tokens(line)[0]!.length))
+    const padToken = tokens(rest)[0]
+    if (padToken === undefined) {
+      error(no, 'A sound line needs a pad and a slot, as in sound A7 12 Kick.')
+      return
+    }
+    const pad = parsePad(padToken)
+    if (pad === null) {
+      error(no, `'${padToken}' isn't a pad. Use A to D, then . 0 E or 1 to 9.`)
+      return
+    }
+    const label = padText(pad.group, pad.offset)
+    if (pad.group !== d.group) {
+      error(no, `${label} is in group ${letter(pad.group)}, but the section is [${letter(d.group)}].`)
+      return
+    }
+    rest = trim(rest.slice(padToken.length))
+    const slotToken = tokens(rest)[0]
+    const slot = slotToken !== undefined && INT.test(slotToken) ? Number(slotToken) : 0
+    if (slot < SLOT_MIN || slot > SLOT_MAX) {
+      error(no, `${label} sound: the slot must be a whole number from ${SLOT_MIN} to ${SLOT_MAX}.`)
+      return
+    }
+    const name = cleanText(rest.slice(slotToken!.length), Infinity)
+    if (d.sounds.has(pad.offset)) warn(no, `${label} has two sound lines, kept the later.`)
+    d.sounds.set(pad.offset, { slot, name: name === '' ? null : name })
+  }
+
   const lineAt = (no: number, line: string): void => {
     if (line.startsWith('[')) {
       section(no, line)
@@ -571,6 +659,7 @@ function read(text: string): CardRead {
     }
     if (d.skip) return
     if (line.toLowerCase() === 'notes') d.inNotes = true
+    else if (tokens(line)[0]!.toLowerCase() === 'sound') sound(d, no, line)
     else if (d.inNotes) note(d, no, line)
     else if (line.includes('|')) row(d, no, line)
     else if (firstIsPad(line)) error(no, `${tokens(line)[0]} needs a | before its steps.`)
@@ -602,8 +691,9 @@ function read(text: string): CardRead {
 
 /**
  * [card] as text, as the spec's writing rules have it. [names] gives the
- * sound name a row shows after its pad (null for none). With [tidy],
- * velocities are rounded to 127, 100 or 64 (ties up) and gates under a step
+ * sound name a row shows after its pad (null for none). A section's sound
+ * lines come right after its line, in keypad order, each with its name when it
+ * has one. With [tidy], velocities are rounded to 127, 100 or 64 (ties up) and gates under a step
  * become a step, for every note, and the card says so in a comment. The text
  * ends in a newline.
  */
@@ -636,6 +726,12 @@ function writeSection(out: string[], s: CardSection, swing: number, names: (pad:
   const stepOf = rowSteps(notes, step, swing, count)
   const number = s.number === null ? '' : String(s.number).padStart(2, '0')
   out.push(`[${letter(g)}${number}] bars ${p.bars} step ${step}`)
+  for (const offset of KEYPAD) {
+    const snd = s.sounds.get(offset)
+    if (snd === undefined || snd.slot < SLOT_MIN || snd.slot > SLOT_MAX) continue
+    const name = snd.name === null ? '' : cleanText(snd.name, Infinity)
+    out.push(`sound ${padText(g, offset)} ${snd.slot}` + (name === '' ? '' : ` ${name}`))
+  }
   const rows = KEYPAD.filter((offset) => notes.some((n, i) => stepOf[i]! >= 0 && n.offset === offset))
   const nameOf = new Map<number, string>()
   for (const offset of rows) nameOf.set(offset, cleanText(names(physicalPad(g, offset)) ?? '', Infinity))
@@ -760,20 +856,102 @@ function tempoText(t: number): string {
  * A card for [sections] (an export): the sections with notes, in group order
  * (all of them when none has notes), and the swing [timingSwing] when every
  * pad hit of every section sits on the swung 1/16 grid, else 50, so a card
- * never loses a hit's place to a swing it doesn't fit.
+ * never loses a hit's place to a swing it doesn't fit. [sounds] gives the
+ * sound a pad plays (null when not known): each section gets a sound for every
+ * pad its notes use that has one.
  */
-function fromPatterns(name: string | null, tempo: number | null, timingSwing: number, sections: readonly CardSection[]): BeatCard {
+function fromPatterns(
+  name: string | null,
+  tempo: number | null,
+  timingSwing: number,
+  sections: readonly CardSection[],
+  sounds: (pad: PhysicalPad) => CardSound | null = () => null,
+): BeatCard {
   const withNotes = sections.filter((s) => !Pattern.isEmpty(s.pattern))
-  const kept = [...(withNotes.length > 0 ? withNotes : sections)].sort((a, b) => a.group - b.group)
+  const kept = [...(withNotes.length > 0 ? withNotes : sections)]
+    .sort((a, b) => a.group - b.group)
+    .map((s) => ({ ...s, sounds: new Map([...s.sounds, ...soundsUsed(s, sounds)]) }))
   const s = TimingSettings.clampSwing(timingSwing)
   const swing = s > TimingSettings.SWING_MIN && kept.every((x) => fitsSwung(x.pattern, s)) ? s : TimingSettings.SWING_MIN
   return { name, tempo, swing, sections: kept }
+}
+
+// The sound of each pad the section's notes use, for those [sounds] knows.
+function soundsUsed(s: CardSection, sounds: (pad: PhysicalPad) => CardSound | null): Map<number, CardSound> {
+  const out = new Map<number, CardSound>()
+  for (const offset of KEYPAD) {
+    if (!s.pattern.notes.some((n) => n.offset === offset)) continue
+    const snd = sounds(physicalPad(s.group, offset))
+    if (snd !== null) out.set(offset, snd)
+  }
+  return out
 }
 
 function fitsSwung(p: Pattern, swing: number): boolean {
   const len = Pattern.lengthTicks(p)
   const count = len / timingTicks(Timing.SIXTEENTH)
   return p.notes.every((n) => n.semitones !== null || n.tick >= len || gridStep(n.tick, Timing.SIXTEENTH, swing, count) !== null)
+}
+
+// ---- Sounds ----
+
+// Whether a sound named [have] is the one called [name] (the card's name is cleaned, so the list's is too).
+function holds(have: string | undefined, name: string): boolean {
+  return have !== undefined && PadSoundCache.sameName(cleanText(have, Infinity), name)
+}
+
+// The slot holding a sound called [name]: the pad's own ([now]) when it does, else the lowest; null when none.
+function lookUp(available: ReadonlyMap<number, string>, name: string, now: number | null): number | null {
+  const same = [...available].filter(([, n]) => holds(n, name)).map(([slot]) => slot)
+  if (now !== null && same.includes(now)) return now
+  return same.length === 0 ? null : Math.min(...same)
+}
+
+/**
+ * The card's sound lines matched to the user's sounds, in the card's order
+ * (sections as given, pads in keypad order). [available] is slot to name,
+ * [current] the slot a pad plays now (null when not known). A line with a name
+ * is matched like this: the slot is used when it holds a sound of that name
+ * (PadSoundCache.sameName: ignoring case, spaces and ".wav"); otherwise the
+ * sound is looked up by name and the slot that holds it is used (the pad's own
+ * slot first, then the lowest); failing that the line is MISSING. A line
+ * without a name uses its slot when [available] has it. A pick whose slot is
+ * already on the pad is SAME, found by name or not.
+ */
+function resolveSounds(card: BeatCard, available: ReadonlyMap<number, string>, current: (pad: PhysicalPad) => number | null): SoundPick[] {
+  const picks: SoundPick[] = []
+  for (const s of card.sections) {
+    for (const offset of KEYPAD) {
+      const wanted = s.sounds.get(offset)
+      if (wanted === undefined) continue
+      const pad = physicalPad(s.group, offset)
+      const now = current(pad)
+      const name = wanted.name !== null && wanted.name.trim() !== '' ? wanted.name : null
+      const direct = available.has(wanted.slot) && (name === null || holds(available.get(wanted.slot), name)) ? wanted.slot : null
+      const byName = direct === null && name !== null ? lookUp(available, name, now) : null
+      const slot = direct ?? byName
+      if (slot === null) picks.push({ pad, wanted, slot: null, name: null, currentSlot: now, status: SoundStatus.MISSING })
+      else if (slot === now) picks.push({ pad, wanted, slot, name: available.get(slot) ?? null, currentSlot: now, status: SoundStatus.SAME })
+      else picks.push({ pad, wanted, slot, name: available.get(slot) ?? null, currentSlot: now, status: byName !== null ? SoundStatus.FOUND_BY_NAME : SoundStatus.CHANGE })
+    }
+  }
+  return picks
+}
+
+/**
+ * The sound list Arc adds after a shared card: ClaudeText.soundListHeader for
+ * [source] (the EP-133, the last read or the factory pack, as ClaudeText words
+ * them), then one line "slot name" for each sound of [available] from slot 1 to
+ * 999, in slot order. Names are cleaned as the card's are, so a name read from
+ * the list reads back the same. The text ends in a newline.
+ */
+function soundList(source: string, available: ReadonlyMap<number, string>): string {
+  const out: string[] = [ClaudeText.soundListHeader(source)]
+  for (const slot of [...available.keys()].filter((k) => k >= SLOT_MIN && k <= SLOT_MAX).sort((a, b) => a - b)) {
+    const name = cleanText(available.get(slot)!, Infinity)
+    out.push(name === '' ? `${slot}` : `${slot} ${name}`)
+  }
+  return out.join('\n') + '\n'
 }
 
 // ---- Import ----
@@ -809,4 +987,4 @@ function plan(seq: ProjectSeq, card: BeatCard): CardImport {
 }
 
 /** The Kotlin `BeatCards` object. */
-export const BeatCards = { VERSION, MAX_NAME, TIDY_COMMENT, read, hasCard, write, fromPatterns, plan } as const
+export const BeatCards = { VERSION, MAX_NAME, TIDY_COMMENT, read, hasCard, write, fromPatterns, resolveSounds, soundList, plan } as const

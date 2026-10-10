@@ -3,6 +3,13 @@ package dev.arc.ep133.controller
 import dev.arc.ep133.features.BeatCard
 import dev.arc.ep133.features.BeatCards
 import dev.arc.ep133.features.CardSection
+import dev.arc.ep133.features.CardSound
+import dev.arc.ep133.features.OfflinePad
+import dev.arc.ep133.features.OfflinePads
+import dev.arc.ep133.features.PadTarget
+import dev.arc.ep133.features.SoundSource
+import dev.arc.ep133.features.SoundStatus
+import dev.arc.ep133.protocol.SoundEntry
 import dev.arc.ep133.features.Pattern
 import dev.arc.ep133.features.PatternNote
 import dev.arc.ep133.features.PatternRecorder
@@ -237,5 +244,108 @@ class BeatPlanTest {
         assertSame(seq, applied.seq)
         assertTrue(applied.placed.isEmpty())
         assertFalse(recorder.canUndo)
+    }
+
+    // ---- sounds ----
+
+    private fun entries(vararg e: Pair<Int, String>) = e.map { SoundEntry(it.first, it.second, 0) }
+
+    private val micro = PhysicalPad(0, 9)
+    private val rim = PhysicalPad(0, 11)
+    private val pads = mapOf(micro to (12 to "Kick dusty"), rim to (300 to "Rim"))
+
+    @Test
+    fun `a share has a sound line for each pad it uses, and the sound list after the closing fence when asked`() {
+        val seq = with(ProjectSeq.DEFAULT, 0, 1, pattern(hit(0), hit(96, 11)))
+        val sounds = { pad: PhysicalPad -> pads[pad]?.let { CardSound(it.first, it.second) } }
+        val plain = beatShare(seq, 0, 120.0, 50, nameOf, sounds)!!
+        val card = BeatCards.read(plain.text).card!!
+        assertEquals(mapOf(9 to CardSound(12, "Kick dusty"), 11 to CardSound(300, "Rim")), card.sections.single().sounds)
+        assertTrue(plain.text.endsWith("\n```\n"))
+        // With the list: a blank line after the fence, the header, and the sounds in slot order; the card reads the same.
+        val list = SoundSet(ClaudeText.SOUNDS_FROM_LAST_READ, mapOf(300 to "Rim", 12 to "Kick dusty"))
+        val full = beatShare(seq, 0, 120.0, 50, nameOf, sounds, list)!!
+        assertEquals(plain.text + "\n" + ClaudeText.soundListHeader(ClaudeText.SOUNDS_FROM_LAST_READ) + "\n12 Kick dusty\n300 Rim\n", full.text)
+        assertEquals(card, BeatCards.read(full.text).card)
+        // A pad with no known sound gets no line.
+        assertEquals(emptyMap<Int, CardSound>(), BeatCards.read(beatShare(seq, 0, 120.0, 50, nameOf)!!.text).card!!.sections.single().sounds)
+    }
+
+    @Test
+    fun `the sounds Arc knows are the EP-133's while connected, and the view's list offline`() {
+        assertNull(soundSetOf(null))
+        assertNull(soundSetOf(MirrorUi()))
+        val connected = soundSetOf(MirrorUi(sounds = entries(1 to "Kick", 2 to "Snare")))!!
+        assertEquals(ClaudeText.SOUNDS_FROM_DEVICE, connected.source)
+        assertEquals(mapOf(1 to "Kick", 2 to "Snare"), connected.names)
+        assertEquals(2, connected.size)
+        val device = entries(5 to "Kick")
+        val factory = entries(1 to "Pack kick", 2 to "Pack snare", 3 to "Pack hat")
+        fun offline(base: SoundSource, d: List<SoundEntry>? = device, f: List<SoundEntry>? = factory) =
+            soundSetOf(MirrorUi(offline = "Last seen", offlineSounds = OfflineSounds(base, d, f, emptySet())))
+        assertEquals(ClaudeText.SOUNDS_FROM_LAST_READ to mapOf(5 to "Kick"), offline(SoundSource.DEVICE)!!.let { it.source to it.names })
+        assertEquals(ClaudeText.SOUNDS_FROM_FACTORY, offline(SoundSource.FACTORY)!!.source)
+        assertEquals(3, offline(SoundSource.FACTORY)!!.size)
+        assertNull(offline(SoundSource.FACTORY, f = null))
+        assertNull(soundSetOf(MirrorUi(offline = "Factory sounds")))
+    }
+
+    @Test
+    fun `the sheet's sound rows are the card's lines matched to the sounds, with the old names`() {
+        val sections = CardSection(
+            0, null, pattern(hit(0), hit(96, 11)),
+            mapOf(9 to CardSound(12, "Micro kick"), 11 to CardSound(300, "Rim dusty"), 0 to CardSound(40, "Hat")),
+        )
+        val card = card(sections)
+        val set = SoundSet(ClaudeText.SOUNDS_FROM_DEVICE, mapOf(12 to "Micro kick", 40 to "Hat", 77 to "Other"))
+        val current = mapOf(micro to 5, PhysicalPad(0, 0) to 40)
+        val ui = soundsUi(card, set, { current[it] }, { if (it == micro) "Kick dusty" else null }, offline = false, project = 3)!!
+        assertEquals(3, ui.project)
+        assertFalse(ui.offline)
+        // Keypad order: 7 (offset 9), 9 (offset 11), then . (offset 0).
+        assertEquals(listOf(micro, rim, PhysicalPad(0, 0)), ui.rows.map { it.pad })
+        assertEquals(listOf(SoundStatus.CHANGE, SoundStatus.MISSING, SoundStatus.SAME), ui.rows.map { it.pick.status })
+        assertEquals(listOf("Kick dusty", null, null), ui.rows.map { it.oldName })
+        // Only the change can be ticked.
+        assertEquals(listOf(micro), ui.changes.map { it.pad })
+        // No sounds known at all: every line is missing. A card without sound lines has no block.
+        assertEquals(List(3) { SoundStatus.MISSING }, soundsUi(card, null, { null }, nameOf, offline = true, project = null)!!.rows.map { it.pick.status })
+        assertNull(soundsUi(card(section(0, pattern(hit(0)))), set, { null }, nameOf, offline = false, project = 1))
+        // The sheet carries them.
+        val sheet = beatImportUi(read(card), ProjectSeq.DEFAULT, 120.0, nameOf) { soundsUi(it, set, { null }, nameOf, offline = false, project = 2) }
+        assertEquals(3, sheet.sounds!!.rows.size)
+        assertNull(beatImportUi(read(card), ProjectSeq.DEFAULT, 120.0, nameOf).sounds)
+    }
+
+    @Test
+    fun `taking the sounds back offline restores each pad's change as it was, or drops it, never a recording gone to Takes`() {
+        val a = PadTarget(1, 0, 1, 10)
+        val b = PadTarget(1, 0, 2, 11)
+        val c = PadTarget(1, 0, 3, 12)
+        val oldA = OfflinePad(1, 0, 1, 20, "Old A", SoundSource.DEVICE)
+        val recorded = OfflinePad(1, 0, 3, 0, "Take", SoundSource.RECORDED, "take.wav")
+        val before = OfflinePads(listOf(oldA, recorded))
+        // The import replaced all three pads' changes; a fourth change of the user's came after.
+        val other = OfflinePad(1, 1, 1, 9, "Other", SoundSource.DEVICE)
+        val after = OfflinePads(listOf(OfflinePad(1, 0, 1, 31, "New A", SoundSource.FACTORY), OfflinePad(1, 0, 2, 32, "New B", SoundSource.FACTORY), OfflinePad(1, 0, 3, 33, "New C", SoundSource.FACTORY), other))
+        val restored = offlineRestore(after, before, listOf(a, b, c))
+        assertEquals(oldA, restored.at(1, 0, 1))
+        assertNull(restored.at(1, 0, 2))
+        assertNull(restored.at(1, 0, 3))
+        assertEquals(other, restored.at(1, 1, 1))
+        assertEquals(2, restored.size)
+    }
+
+    @Test
+    fun `UNDO is the import's when it goes back to the sequencer before it, and not when an edit came between`() {
+        val recorder = PatternRecorder()
+        val seq = with(ProjectSeq.DEFAULT, 0, 1, pattern(hit(0, 11)))
+        recorder.seq = seq
+        val applied = applyBeat(seq, card(section(0, pattern(hit(0)))), recorder)
+        // A later edit of the banks: its undo is not the import's.
+        recorder.seq = applied.seq
+        val edited = recorder.editSeq(applied.seq, with(applied.seq, 1, 1, pattern(hit(0))))
+        assertFalse(isBefore(recorder.undo(edited)!!, seq))
+        assertTrue(isBefore(recorder.undo(applied.seq)!!, seq))
     }
 }

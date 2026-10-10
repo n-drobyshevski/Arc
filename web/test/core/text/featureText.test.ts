@@ -496,6 +496,15 @@ describe('FeatureTextTest', () => {
     expect(ClaudeText.shareSubject('P01 S02')).toBe('Arc beat P01 S02')
     expect(ClaudeText.shareText('Analyse this beat:', 'ARC BEAT 1\nswing 50\n')).toBe('Analyse this beat:\n\n```\nARC BEAT 1\nswing 50\n```\n')
     expect(ClaudeText.NO_CARD).toBe('No beat card in that text.')
+    // The prompt asks for the sound lines kept, or sounds chosen from the list that follows the card.
+    expect(ClaudeText.SHARE_PROMPT.includes('sound list') && ClaudeText.SHARE_PROMPT.endsWith(':')).toBe(true)
+    expect([212, 1].map((n) => ClaudeText.withSoundList(n))).toEqual(['With my sound list \u00B7 212 sounds', 'With my sound list \u00B7 1 sound'])
+    // The sound list after a shared card.
+    expect([ClaudeText.SOUNDS_FROM_DEVICE, ClaudeText.SOUNDS_FROM_LAST_READ, ClaudeText.SOUNDS_FROM_FACTORY].map((s) => ClaudeText.soundListHeader(s))).toEqual([
+      "My EP-133's sounds (slot name), from the EP-133:",
+      "My EP-133's sounds (slot name), from the last read:",
+      "My EP-133's sounds (slot name), from the factory pack:",
+    ])
     // The sheet.
     expect([ClaudeText.summary(4, 5, 23), ClaudeText.summary(1, 1, 1)]).toEqual(['Beat card \u00B7 4 bars \u00B7 5 pads \u00B7 23 hits', 'Beat card \u00B7 1 bar \u00B7 1 pad \u00B7 1 hit'])
     expect([ClaudeText.place(0, 4), ClaudeText.place(3, 99)]).toEqual(['A \u00B7 04', 'D \u00B7 99'])
@@ -524,6 +533,33 @@ describe('FeatureTextTest', () => {
     // IMPORT, and why it can't.
     expect([ClaudeText.COPY_PROBLEMS, ClaudeText.IMPORT].map((w) => w.toUpperCase())).toEqual(['COPY PROBLEMS', 'IMPORT'])
     expect(ClaudeText.groupFull(1)).toBe('Group B has no free pattern.')
+    // The sounds a card puts on pads: the block, its rows and its notes.
+    expect([ClaudeText.SOUNDS, ClaudeText.PUT_ON_PADS].map((w) => w.toUpperCase())).toEqual(['SOUNDS', 'PUT ON PADS'])
+    expect([ClaudeText.putOnPadsName(true, 2), ClaudeText.putOnPadsName(false, 2)]).toEqual(['Put 2 sounds on the pads', "Leave the pads' sounds as they are"])
+    expect([ClaudeText.soundName(12, 'Micro kick'), ClaudeText.soundName(12, null)]).toEqual(['012 Micro kick', '012'])
+    expect([ClaudeText.soundMissing(301, 'Rim dusty'), ClaudeText.soundMissing(301, null)]).toEqual(['Not on your EP-133: 301 Rim dusty', 'Not on your EP-133: 301'])
+    expect(ClaudeText.ALREADY_THERE).toBe('Already there')
+    expect([
+      ClaudeText.soundRowName(physicalPad(0, 9), 'Kick dusty', '012 Micro kick'),
+      ClaudeText.soundRowName(physicalPad(0, 9), null, '012 Micro kick'),
+      ClaudeText.soundRowSame(physicalPad(0, 9), '012 Micro kick'),
+      ClaudeText.soundRowMissing(physicalPad(0, 2), 301, 'Rim dusty'),
+    ]).toEqual(['A7: Kick dusty becomes 012 Micro kick', 'A7: 012 Micro kick', 'A7: 012 Micro kick, already there', 'AE: Not on your EP-133: 301 Rim dusty'])
+    expect(ClaudeText.soundsNote(2, 3)).toBe("Writes 2 pads in project 3 on the EP-133. Their pitch, level and other settings reset to the sound's. UNDO puts the old sounds back.")
+    expect(ClaudeText.soundsNote(1, null)).toBe(
+      "Writes 1 pad in the active project on the EP-133. Their pitch, level and other settings reset to the sound's. UNDO puts the old sounds back.",
+    )
+    expect(ClaudeText.SOUNDS_OFFLINE_NOTE).toBe('Saved as offline pad changes; they go to the EP-133 when you reconnect.')
+    expect([ClaudeText.imported([[0, 4]], null, 2), ClaudeText.imported([[0, 4]], null, 1, 1), ClaudeText.imported([[0, 4]], null, 0, 3)]).toEqual([
+      'Imported to A \u00B7 04 and 2 sounds. UNDO takes it back.',
+      'Imported to A \u00B7 04 and 1 sound, 1 skipped. UNDO takes it back.',
+      'Imported to A \u00B7 04, 3 sounds skipped. UNDO takes it back.',
+    ])
+    expect([ClaudeText.soundsFailed('busy', 0), ClaudeText.soundsFailed('busy', 2)]).toEqual([
+      "The pad's sound couldn't be changed: busy. The patterns stay imported. UNDO takes it back.",
+      "The pad's sound couldn't be changed: busy. The patterns stay imported and 2 pads changed. UNDO takes it back.",
+    ])
+    expect([ClaudeText.soundsRestored(2, 0), ClaudeText.soundsRestored(1, 1)]).toEqual(['Old sounds back on 2 pads.', 'Old sounds back on 1 pad, 1 had none before.'])
     expect([
       ClaudeText.imported([[0, 4]], null),
       ClaudeText.imported(

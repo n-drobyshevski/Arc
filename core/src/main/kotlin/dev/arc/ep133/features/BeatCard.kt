@@ -1,5 +1,6 @@
 package dev.arc.ep133.features
 
+import dev.arc.ep133.text.ClaudeText
 import java.util.Locale
 
 /**
@@ -15,8 +16,54 @@ data class BeatCard(
     val sections: List<CardSection> = emptyList(),
 )
 
-/** One group's pattern on a card: [group] 0..3 (A..D), the pattern [number] 1..99 it was written as (a hint, null when the card gave none) and the [pattern] itself. */
-data class CardSection(val group: Int, val number: Int?, val pattern: Pattern)
+/**
+ * One group's pattern on a card: [group] 0..3 (A..D), the pattern [number]
+ * 1..99 it was written as (a hint, null when the card gave none), the
+ * [pattern] itself and the [sounds] its pads should play, by pad offset.
+ */
+data class CardSection(
+    val group: Int,
+    val number: Int?,
+    val pattern: Pattern,
+    val sounds: Map<Int, CardSound> = emptyMap(),
+)
+
+/**
+ * A sound line of a card: the EP-133 sound [slot] (1..999) a pad should play
+ * and, when the card gave it, the sound's [name] as the user's list has it,
+ * which lets Arc check that the slot still holds that sound.
+ */
+data class CardSound(val slot: Int, val name: String? = null)
+
+/** What [BeatCards.resolveSounds] makes of a sound line. */
+enum class SoundStatus {
+    /** The sound is on the slot to put on the pad: a change. */
+    CHANGE,
+
+    /** The pad already plays the sound: nothing to do. */
+    SAME,
+
+    /** The line's slot didn't hold the named sound (or was empty), but another slot does: still a change, to that slot. */
+    FOUND_BY_NAME,
+
+    /** Neither the slot nor the name is among the sounds: the line is skipped. */
+    MISSING,
+}
+
+/**
+ * A sound line matched to the user's sounds: the [pad] and what the card
+ * [wanted], the [slot] and [name] to put on it (null for both when [status]
+ * is [SoundStatus.MISSING]), the slot the pad plays now ([currentSlot], null
+ * when not known) and the [status].
+ */
+data class SoundPick(
+    val pad: PhysicalPad,
+    val wanted: CardSound,
+    val slot: Int?,
+    val name: String?,
+    val currentSlot: Int?,
+    val status: SoundStatus,
+)
 
 /** Something wrong with a card, at [line] (counted from 1 in the text read): an [error] stops the card being read, a warning doesn't. */
 data class CardProblem(val line: Int, val message: String, val error: Boolean)
@@ -53,6 +100,10 @@ object BeatCards {
 
     private const val TEMPO_MIN = 40.0
     private const val TEMPO_MAX = 240.0
+
+    /** The sound slots of the EP-133. */
+    private const val SLOT_MIN = 1
+    private const val SLOT_MAX = 999
 
     /** A note's gate when it gives none: a 1/16. */
     private const val DEFAULT_GATE = 24
@@ -111,6 +162,9 @@ object BeatCards {
     ) {
         /** The notes read, with the line each came from. */
         val hits = ArrayList<Pair<PatternNote, Int>>()
+
+        /** The sound lines read, by pad offset. */
+        val sounds = LinkedHashMap<Int, CardSound>()
         var inNotes = false
     }
 
@@ -182,6 +236,7 @@ object BeatCards {
             if (d.skip) return
             when {
                 line.equals("notes", ignoreCase = true) -> d.inNotes = true
+                tokens(line)[0].equals("sound", ignoreCase = true) -> sound(d, no, line)
                 d.inNotes -> note(d, no, line)
                 '|' in line -> row(d, no, line)
                 firstIsPad(line) -> error(no, "${tokens(line)[0]} needs a | before its steps.")
@@ -200,7 +255,7 @@ object BeatCards {
             val key = word.lowercase()
             val rest = trim(line.substring(word.length))
             when {
-                '|' in line || firstIsPad(line) || key == "notes" -> error(no, "'$word' needs a section first, such as [A].")
+                '|' in line || firstIsPad(line) || key == "notes" || key == "sound" -> error(no, "'$word' needs a section first, such as [A].")
                 key == "name" -> when {
                     rest.isEmpty() -> warn(no, "Name is empty, ignored.")
                     rest.codePointCount(0, rest.length) > MAX_NAME -> {
@@ -308,7 +363,7 @@ object BeatCards {
                 }
             }
             if (kept.size > Seq.MAX_NOTES) error(d.line, "Group ${'A' + d.group} has ${kept.size} notes, the most is ${Seq.MAX_NOTES}.")
-            if (!d.dropped) sections += CardSection(d.group, d.number, Pattern(d.bars, kept.sortedWith(NOTE_ORDER)))
+            if (!d.dropped) sections += CardSection(d.group, d.number, Pattern(d.bars, kept.sortedWith(NOTE_ORDER)), d.sounds)
         }
 
         // ---- grid rows ----
@@ -362,6 +417,38 @@ object BeatCards {
                 return
             }
             for ((k, v, held) in hits) d.hits += PatternNote(Steps.tickOf(k, d.step, swing), pad.offset, held * d.step.ticks, null, v) to no
+        }
+
+        // ---- sound lines ----
+
+        // sound <pad> <slot> [name], anywhere in a section (after notes too). A second line for a pad replaces the first.
+        private fun sound(d: Draft, no: Int, line: String) {
+            var rest = trim(line.substring(tokens(line)[0].length))
+            val padToken = tokens(rest).firstOrNull()
+            if (padToken == null) {
+                error(no, "A sound line needs a pad and a slot, as in sound A7 12 Kick.")
+                return
+            }
+            val pad = parsePad(padToken)
+            if (pad == null) {
+                error(no, "'$padToken' isn't a pad. Use A to D, then . 0 E or 1 to 9.")
+                return
+            }
+            val label = padText(pad.group, pad.offset)
+            if (pad.group != d.group) {
+                error(no, "$label is in group ${'A' + pad.group}, but the section is [${'A' + d.group}].")
+                return
+            }
+            rest = trim(rest.substring(padToken.length))
+            val slotToken = tokens(rest).firstOrNull()
+            val slot = slotToken?.takeIf { INT.matches(it) }?.toInt()?.takeIf { it in SLOT_MIN..SLOT_MAX }
+            if (slot == null) {
+                error(no, "$label sound: the slot must be a whole number from $SLOT_MIN to $SLOT_MAX.")
+                return
+            }
+            val name = cleanText(rest.substring(slotToken.length), Int.MAX_VALUE).ifEmpty { null }
+            if (pad.offset in d.sounds) warn(no, "$label has two sound lines, kept the later.")
+            d.sounds[pad.offset] = CardSound(slot, name)
         }
 
         // ---- notes list ----
@@ -538,7 +625,9 @@ object BeatCards {
 
     /**
      * [card] as text, as the spec's writing rules have it. [names] gives the
-     * sound name a row shows after its pad (null for none). With [tidy],
+     * sound name a row shows after its pad (null for none). A section's
+     * sound lines come right after its line, in keypad order, each with its
+     * name when it has one. With [tidy],
      * velocities are rounded to 127, 100 or 64 (ties up) and gates under a
      * step become a step, for every note, and the card says so in a comment.
      * The text ends in a newline.
@@ -568,6 +657,11 @@ object BeatCards {
         val count = p.bars * per
         val stepOf = rowSteps(notes, step, swing, count)
         out += "[${'A' + g}${s.number?.let { "%02d".format(Locale.ROOT, it) } ?: ""}] bars ${p.bars} step ${step.id}"
+        for (offset in KEYPAD) {
+            val sound = s.sounds[offset]?.takeIf { it.slot in SLOT_MIN..SLOT_MAX } ?: continue
+            val name = sound.name?.let { cleanText(it, Int.MAX_VALUE) }.orEmpty()
+            out += "sound ${padText(g, offset)} ${sound.slot}" + if (name.isEmpty()) "" else " $name"
+        }
         val rows = KEYPAD.filter { offset -> notes.indices.any { stepOf[it] >= 0 && notes[it].offset == offset } }
         val nameOf = rows.associateWith { names(PhysicalPad(g, it))?.let { n -> cleanText(n, Int.MAX_VALUE) }.orEmpty() }
         val longest = nameOf.values.maxOfOrNull { it.length } ?: 0
@@ -672,17 +766,98 @@ object BeatCards {
      * order (all of them when none has notes), and the swing [timingSwing]
      * when every pad hit of every section sits on the swung 1/16 grid, else
      * 50, so a card never loses a hit's place to a swing it doesn't fit.
+     * [sounds] gives the sound a pad plays (null when not known): each
+     * section gets a sound for every pad its notes use that has one.
      */
-    fun fromPatterns(name: String?, tempo: Double?, timingSwing: Int, sections: List<CardSection>): BeatCard {
+    fun fromPatterns(
+        name: String?,
+        tempo: Double?,
+        timingSwing: Int,
+        sections: List<CardSection>,
+        sounds: (PhysicalPad) -> CardSound? = { null },
+    ): BeatCard {
         val kept = sections.filter { !it.pattern.isEmpty }.ifEmpty { sections }.sortedBy { it.group }
+            .map { s -> s.copy(sounds = s.sounds + soundsUsed(s, sounds)) }
         val s = TimingSettings.clampSwing(timingSwing)
         val swing = if (s > TimingSettings.SWING_MIN && kept.all { fitsSwung(it.pattern, s) }) s else TimingSettings.SWING_MIN
         return BeatCard(name, tempo, swing, kept)
     }
 
+    // The sound of each pad the section's notes use, for those [sounds] knows.
+    private fun soundsUsed(s: CardSection, sounds: (PhysicalPad) -> CardSound?): Map<Int, CardSound> {
+        val out = LinkedHashMap<Int, CardSound>()
+        for (offset in KEYPAD) {
+            if (s.pattern.notes.none { it.offset == offset }) continue
+            sounds(PhysicalPad(s.group, offset))?.let { out[offset] = it }
+        }
+        return out
+    }
+
     private fun fitsSwung(p: Pattern, swing: Int): Boolean {
         val count = p.lengthTicks / Timing.SIXTEENTH.ticks
         return p.notes.all { it.semitones != null || it.tick >= p.lengthTicks || gridStep(it.tick, Timing.SIXTEENTH, swing, count) != null }
+    }
+
+    // ---- Sounds ----
+
+    /**
+     * The card's sound lines matched to the user's sounds, in the card's
+     * order (sections as given, pads in keypad order). [available] is slot to
+     * name, [current] the slot a pad plays now (null when not known). A line
+     * with a name is matched like this: the slot is used when it holds a
+     * sound of that name ([PadSoundCache.sameName]: ignoring case, spaces and
+     * ".wav"); otherwise the sound is looked up by name and the slot that
+     * holds it is used (the pad's own slot first, then the lowest); failing
+     * that the line is [SoundStatus.MISSING]. A line without a name uses its
+     * slot when [available] has it. A pick whose slot is already on the pad
+     * is [SoundStatus.SAME], found by name or not.
+     */
+    fun resolveSounds(card: BeatCard, available: Map<Int, String>, current: (PhysicalPad) -> Int?): List<SoundPick> {
+        val picks = ArrayList<SoundPick>()
+        for (s in card.sections) {
+            for (offset in KEYPAD) {
+                val wanted = s.sounds[offset] ?: continue
+                val pad = PhysicalPad(s.group, offset)
+                val now = current(pad)
+                val name = wanted.name?.takeIf { it.isNotBlank() }
+                val direct = wanted.slot.takeIf { it in available && (name == null || holds(available[it], name)) }
+                val byName = if (direct == null && name != null) lookUp(available, name, now) else null
+                val slot = direct ?: byName
+                picks += when {
+                    slot == null -> SoundPick(pad, wanted, null, null, now, SoundStatus.MISSING)
+                    slot == now -> SoundPick(pad, wanted, slot, available[slot], now, SoundStatus.SAME)
+                    else -> SoundPick(pad, wanted, slot, available[slot], now, if (byName != null) SoundStatus.FOUND_BY_NAME else SoundStatus.CHANGE)
+                }
+            }
+        }
+        return picks
+    }
+
+    // The slot holding a sound called [name]: the pad's own ([now]) when it does, else the lowest; null when none.
+    private fun lookUp(available: Map<Int, String>, name: String, now: Int?): Int? {
+        val same = available.filter { holds(it.value, name) }.keys
+        return if (now != null && now in same) now else same.minOrNull()
+    }
+
+    // Whether a sound named [have] is the one called [name] (the card's name is cleaned, so the list's is too).
+    private fun holds(have: String?, name: String): Boolean = have != null && PadSoundCache.sameName(cleanText(have, Int.MAX_VALUE), name)
+
+    /**
+     * The sound list Arc adds after a shared card: [ClaudeText.soundListHeader]
+     * for [source] (the EP-133, the last read or the factory pack, as
+     * [ClaudeText] words them), then one line "slot name" for each sound of
+     * [available] from slot 1 to 999, in slot order. Names are cleaned as the
+     * card's are, so a name read from the list reads back the same. The text
+     * ends in a newline.
+     */
+    fun soundList(source: String, available: Map<Int, String>): String {
+        val out = ArrayList<String>()
+        out += ClaudeText.soundListHeader(source)
+        for (slot in available.keys.filter { it in SLOT_MIN..SLOT_MAX }.sorted()) {
+            val name = cleanText(available.getValue(slot), Int.MAX_VALUE)
+            out += if (name.isEmpty()) "$slot" else "$slot $name"
+        }
+        return out.joinToString("\n", postfix = "\n")
     }
 
     // ---- Import ----

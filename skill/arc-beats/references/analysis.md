@@ -17,7 +17,8 @@ If code execution is not available, read the card yourself with the same checkli
 | `pad_hits`, `keys_notes` | Notes on the pads, and notes played in KEYS mode (pitched, from the `notes` list) | Hits are the drums. KEYS notes are bass or melody. No KEYS notes means no pitch: ask if it is meant to be a drum loop |
 | `hits_per_bar` | Pad hits in each bar (the text report says "16 a bar", or "by bar: 17, 14" when they differ) | Equal numbers mean the bars repeat; a higher last bar is often a fill |
 | `density_pct` | Share of the 16th slots of a bar where any pad plays | Under 40 sparse, 40 to 70 normal, over 80 busy. Trap and drill sit low, jungle and footwork high |
-| `pads.*` | Per pad: `name`, `role`, `name_assumed`, `hits`, `per_bar`, `velocity`, `longest_gap`, `positions` | The kick usually has the fewest hits, hats the most |
+| `pads.*` | Per pad: `name`, `role`, `name_assumed`, `sound`, `hits`, `per_bar`, `velocity`, `longest_gap`, `positions` | The kick usually has the fewest hits, hats the most. `name` is the pad's `sound` line name when it has one, else its row label |
+| `sounds` | The card's `sound` lines for each pad (`slot`, `name`), pads with no hits too | Which sound each pad is asked to play. Empty means the card leaves the pads' sounds alone |
 | `velocity` | `min`, `max`, `mean`, `stdev`, `distinct`, and counts of `ghosts` (70 and under; `o` is 64), `normal` and `accents` (120 and up, `X`) | `stdev` under 5 with one `distinct` value is machine-flat. Over 15 is very dynamic |
 | `roles.*.slots` | 16 characters showing which 16th slots of a bar a kind of sound (kick, snare, clap, hat ...) plays, all bars folded together | Slots 0 4 8 12 are the beats, 2 6 10 14 the "ands". This is where "the snare is on 2 and 4" comes from |
 | `syncopation` | `score` (bar average, hats, cymbals and percussion left out), `label`, `by_pad`, `counted_pads` | Up to 2 straight, up to 6 some syncopation, over 6 syncopated. `by_pad` shows who carries it |
@@ -27,7 +28,7 @@ If code execution is not available, read the card yourself with the same checkli
 | `variation` | `distinct_bars`, `identical_bars`, `last_bar_busier` | One distinct bar in four is a plain loop. A busier last bar is a fill |
 | `similar_to` | The closest genre recipes in genres.md (drums 55%, tempo 35%, swing 10%; a tempo that fits only at half or double speed counts for less and says so) | 80 and up: that style. 60 to 80: a cousin. Say "closest to" and name the difference |
 
-Pads with no sound name get the assumed kit's names (`name_assumed`). Say so ("I assumed A7 is your kick"), or better, ask the user to copy the pattern from Arc so the card carries their names.
+Pads with no sound name get the assumed kit's names (`name_assumed`). Say so ("I assumed A7 is your kick"), or better, ask the user to copy the pattern from Arc so the card carries their names. A pad's role comes from its `sound` line name first, then its row label: if the two disagree (a row called `kick` over a `sound` line for a snare), say so, because the sound line is what Arc will put on the pad.
 
 ## The checklist
 
@@ -45,7 +46,22 @@ Go in order, a sentence or two each, and start with something that works.
 
 Two or three, not ten. Each is concrete (a pad, a step, a number) and says what it changes in the sound. Then return a complete new card in one fenced block and say in a line each what changed. Keep the user's pad names and tempo unless changing them on purpose. Remind them that pasting adds a new pattern and overwrites nothing.
 
-Good edits are small: move or remove a kick; add a ghost `o` before a snare or lower the offbeat hats; change swing by 2 to 4 points; make the last bar a fill (more snare, hats stop, a roll in the `notes` list); double the length (`bars 2`) and change the second bar; add a bass or chord line in another group.
+Good edits are small: swap a sound (see below); move or remove a kick; add a ghost `o` before a snare or lower the offbeat hats; change swing by 2 to 4 points; make the last bar a fill (more snare, hats stop, a roll in the `notes` list); double the length (`bars 2`) and change the second bar; add a bass or chord line in another group.
+
+## Sound swaps
+
+When the user shared their sound list (the tick box **With my sound list**, see [arc-app.md](arc-app.md)), a sound swap is a fair edit: the groove is right but a sound is wrong for it. Typical reasons: a kick with a long tail that blurs the bass, a closed hat that rings, a snare that is thin for the tempo, one sound used for two jobs. Say what is wrong in plain words, pick a better sound **from their list** by name (never one that is not in it), and write it as a `sound` line in the new card, with the slot and name copied exactly:
+
+```
+[A] bars 1 step 1/16
+sound A9 140 Snare Tight
+A9 snare | .... X... .... X... |
+```
+
+- Only change sounds you have a reason to change; leave the other pads without a line, so Arc keeps what is on them.
+- Say how it lands: the import sheet lists each change as old → new with a tick box, and **IMPORT** writes the ticked sounds to the pads of the active project and resets those pads' settings while **PUT ON PADS** is on (it starts on; the chip switches all the ticks off and on); offline it becomes Arc's offline pad change. The user can untick a swap they do not want, and one undo takes it back.
+- With `check --sounds sounds.txt` (their share text saved to a file) you can confirm that every slot and name is in their list.
+- Without the list, describe the swap instead ("a shorter, drier snare") and do not write a sound line.
 
 ## Vocabulary
 

@@ -21,7 +21,7 @@ Pick the lesson that fits what they say they can already do. Skip ahead freely; 
 - Hear what is on a pad by pressing it. Hold the pad in SOUND mode to see the sample's name (`SND-5`); step through the library with `SND-2`; put a chosen sound on a pad with `SND-1`.
 - Pressing a pad to play it is not a combo, so it is not in the guide. Just press it.
 
-**In Arc:** open Live and play the pads. Switch group with the A-D keys under the grid. Tap a pad and watch the display name the sound. On a phone, one group fills the screen.
+**In Arc:** open Live and play the pads. Switch group with the A-D keys under the grid. Tap a pad and watch the display name the sound. On a phone, one group fills the screen. A card can also choose the sound on a pad with a `sound` line (`sound A7 12 Kick 808`, slot and name from your own sound list); that needs the list, which Arc adds to a share when **With my sound list** is ticked, so teach it only after the user has shared one.
 
 **Exercise:** four kicks, one on every beat. It is the simplest beat there is (*four on the floor*).
 
@@ -369,4 +369,4 @@ D9 chop 3 | .... .... .... x... | .... .... x... .... |
 D4 chop 4 | .... ..x. .... .... | .... .... .... ..x. |
 ```
 
-**Check:** what happens if the pads of group D hold other sounds when you paste this? *Answer: the pattern plays whatever sound is on those pads; the names in the card are only labels.*
+**Check:** what happens if the pads of group D hold other sounds when you paste this? *Answer: the pattern plays whatever sound is on those pads; the names in the rows are only labels. (A `sound` line would pick the sound, and Arc asks before it puts one on a pad.)*

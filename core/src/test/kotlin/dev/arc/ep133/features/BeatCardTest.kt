@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import dev.arc.ep133.text.ClaudeText
 import java.io.File
 
 class BeatCardTest {
@@ -33,7 +34,10 @@ class BeatCardTest {
 
     private fun card(vararg sections: CardSection, swing: Int = 50) = BeatCard(null, null, swing, sections.toList())
 
-    private fun a(vararg notes: PatternNote, bars: Int = 1, group: Int = 0, number: Int? = null) = CardSection(group, number, Pattern(bars, notes.toList()))
+    private fun a(vararg notes: PatternNote, bars: Int = 1, group: Int = 0, number: Int? = null, sounds: Map<Int, CardSound> = emptyMap()) =
+        CardSection(group, number, Pattern(bars, notes.toList()), sounds)
+
+    private fun snd(slot: Int, name: String? = null) = CardSound(slot, name)
 
     // ---- reading ----
 
@@ -634,6 +638,184 @@ class BeatCardTest {
         val blank = BeatCards.fromPatterns(null, null, 50, listOf(a(bars = 2, group = 2)))
         assertEquals(listOf(2), blank.sections.map { it.group })
         assertEquals(blank, BeatCards.read(BeatCards.write(blank)).card)
+    }
+
+    // ---- sounds ----
+
+    @Test
+    fun `sound lines give a pad its slot and name, anywhere in the section`() {
+        val r = read(
+            "ARC BEAT 1", "[A]",
+            "sound A7 12 Kick 808",
+            "sound A9 140",
+            "SOUND AENTER 7   Open   hat  # soft",
+            "Sound A. 999 Last.wav",
+            "sound A1 5 Kick#2",
+            bar,
+        )
+        assertEquals(emptyList<String>(), problems(r))
+        assertEquals(mapOf(9 to snd(12, "Kick 808"), 11 to snd(140), 2 to snd(7, "Open hat"), 0 to snd(999, "Last.wav"), 3 to snd(5, "Kick 2")), section(r).sounds)
+        // Before or after the rows, and after notes, where the lines that follow are still notes.
+        val after = read(
+            "ARC BEAT 1", "[A]", "sound A7 12 Kick", bar, "notes", "A9 at 1.1.1", "sound A9 140 Snare", "A5 at 1.2.1",
+            "[B]", "B7 | X... .... .... .... |", "sound B7 3",
+        )
+        assertEquals(emptyList<String>(), problems(after))
+        assertEquals(mapOf(9 to snd(12, "Kick"), 11 to snd(140, "Snare")), section(after).sounds)
+        assertEquals(3, section(after).pattern.notes.size)
+        assertEquals(mapOf(9 to snd(3)), section(after, 1).sounds)
+        // A pad with no notes can have a sound; a section with no sound lines has none.
+        assertEquals(mapOf(3 to snd(8)), section(read("ARC BEAT 1", "[A]", "sound A1 8", bar)).sounds)
+        assertEquals(emptyMap<Int, CardSound>(), section(read("ARC BEAT 1", "[A]", bar)).sounds)
+        assertEquals(mapOf(3 to snd(8)), section(read("ARC BEAT 1", "[A]", "sound A1 8")).sounds)
+        // The slots run 1 to 999.
+        assertEquals(mapOf(9 to snd(1)), section(read("ARC BEAT 1", "[A]", "sound A7 001")).sounds)
+    }
+
+    @Test
+    fun `sound line errors and warnings name the line`() {
+        val errors = listOf(
+            "sound B7 12" to "3 error: B7 is in group B, but the section is [A].",
+            "sound A7 0" to "3 error: A7 sound: the slot must be a whole number from 1 to 999.",
+            "sound A7 1000" to "3 error: A7 sound: the slot must be a whole number from 1 to 999.",
+            "sound A7 -1" to "3 error: A7 sound: the slot must be a whole number from 1 to 999.",
+            "sound A7 12.5" to "3 error: A7 sound: the slot must be a whole number from 1 to 999.",
+            "sound A7 kick" to "3 error: A7 sound: the slot must be a whole number from 1 to 999.",
+            "sound A7" to "3 error: A7 sound: the slot must be a whole number from 1 to 999.",
+            "sound kick 12" to "3 error: 'kick' isn't a pad. Use A to D, then . 0 E or 1 to 9.",
+            "sound a7 12" to "3 error: 'a7' isn't a pad. Use A to D, then . 0 E or 1 to 9.",
+            "sound" to "3 error: A sound line needs a pad and a slot, as in sound A7 12 Kick.",
+        )
+        for ((line, message) in errors) {
+            val r = read("ARC BEAT 1", "[A]", line, bar)
+            assertEquals(listOf(message), problems(r), line)
+            assertNull(r.card, line)
+        }
+        // After notes the line is still a sound line; before any section it has no place.
+        assertEquals(listOf("5 error: B7 is in group B, but the section is [A]."), problems(read("ARC BEAT 1", "[A]", bar, "notes", "sound B7 12")))
+        assertEquals(listOf("2 error: 'sound' needs a section first, such as [A]."), problems(read("ARC BEAT 1", "sound A7 12", "[A]", bar)))
+        // A second line for a pad replaces the first, nameless or not.
+        val twice = read("ARC BEAT 1", "[A]", "sound A7 12 Kick", bar, "sound A8 3", "sound A7 14")
+        assertEquals(listOf("6 warning: A7 has two sound lines, kept the later."), problems(twice))
+        assertEquals(mapOf(9 to snd(14), 10 to snd(3)), section(twice).sounds)
+        // Lines of a skipped section are not read; those of a second section of a group are read for their faults, then dropped.
+        assertEquals(listOf("2 error: bars must be a whole number from 1 to 99."), problems(read("ARC BEAT 1", "[A] bars 0", "sound A7 0")))
+        val dup = read("ARC BEAT 1", "[A]", bar, "[A]", "sound A7 0")
+        assertEquals(listOf("4 error: Group A has two sections.", "5 error: A7 sound: the slot must be a whole number from 1 to 999."), problems(dup))
+    }
+
+    @Test
+    fun `a section's sound lines are written right after its line, in keypad order`() {
+        val s = a(
+            hit(0, 9), hit(96, 11),
+            sounds = mapOf(0 to snd(5, "Cowbell"), 9 to snd(12, "Kick 808"), 11 to snd(140), 3 to snd(7, "Big  Kick#2"), 4 to snd(300, "  ")),
+        )
+        val lines = BeatCards.write(card(s), names = { if (it.offset == 9) "kick" else null }).lines()
+        assertEquals(
+            listOf("[A] bars 1 step 1/16", "sound A7 12 Kick 808", "sound A9 140", "sound A1 7 Big Kick 2", "sound A2 300", "sound A. 5 Cowbell"),
+            lines.drop(3).take(6),
+        )
+        assertTrue(lines[9].startsWith("A7 kick "))
+        // Slots a card can't read are left out.
+        val bad = BeatCards.write(card(a(hit(0, 9), sounds = mapOf(9 to snd(0, "Kick"), 11 to snd(1000)))))
+        assertFalse(bad.contains("sound"))
+        // A section with sounds and no notes still writes them.
+        assertEquals(listOf("[B] bars 1 step 1/16", "sound B7 9 Kick"), BeatCards.write(card(a(group = 1, sounds = mapOf(9 to snd(9, "Kick"))))).lines().drop(3).take(2))
+    }
+
+    @Test
+    fun `a card with sounds round trips`() {
+        val base = rich()
+        val sounds = listOf(
+            mapOf(9 to snd(12, "Kick 808"), 3 to snd(7), 4 to snd(200, "Open hat")),
+            mapOf(9 to snd(40, "Tom")),
+            mapOf(0 to snd(999, "Shaker.wav"), 2 to snd(1)),
+        )
+        val c = base.copy(sections = base.sections.zip(sounds) { s, m -> s.copy(sounds = m) })
+        val text = BeatCards.write(c)
+        val back = BeatCards.read(text)
+        assertEquals(emptyList<String>(), problems(back), text)
+        assertEquals(c.sections.map { it.sounds }, back.card!!.sections.map { it.sounds })
+        assertEquals(text, BeatCards.write(back.card!!))
+        assertTrue(text.contains("[A04] bars 2 step 1/16\nsound A7 12 Kick 808\nsound A1 7\nsound A2 200 Open hat\n"))
+        // The sound list Arc adds after the closing fence is not part of the card.
+        val shared = "Check this:\n\n```\n" + text + "```\n" + BeatCards.soundList(ClaudeText.SOUNDS_FROM_DEVICE, mapOf(12 to "Kick 808", 7 to "Snare"))
+        val viaShare = BeatCards.read(shared)
+        assertEquals(emptyList<String>(), problems(viaShare))
+        assertEquals(back.card, viaShare.card)
+    }
+
+    @Test
+    fun `an export gives each pad its notes use the sound it plays`() {
+        val sections = listOf(a(hit(0, 9), hit(96, 3, semi = 0), group = 0), a(hit(0, 9), group = 1))
+        val known = mapOf(PhysicalPad(0, 9) to snd(12, "Kick"), PhysicalPad(0, 3) to snd(30, "Bass"), PhysicalPad(0, 4) to snd(99, "Unused"), PhysicalPad(1, 9) to snd(13))
+        val c = BeatCards.fromPatterns("n", null, 50, sections, sounds = { known[it] })
+        // KEYS notes count as use; a pad no note uses is left out.
+        assertEquals(mapOf(9 to snd(12, "Kick"), 3 to snd(30, "Bass")), c.sections[0].sounds)
+        assertEquals(mapOf(9 to snd(13)), c.sections[1].sounds)
+        // A pad the lookup doesn't know gets none, and without a lookup there are none.
+        assertEquals(mapOf(9 to snd(12, "Kick")), BeatCards.fromPatterns(null, null, 50, sections.take(1), sounds = { known[it]?.takeIf { s -> s.slot == 12 } }).sections[0].sounds)
+        assertEquals(listOf(emptyMap<Int, CardSound>(), emptyMap()), BeatCards.fromPatterns(null, null, 50, sections).sections.map { it.sounds })
+        // The sounds are on the card written, and read back.
+        assertEquals(c.sections.map { it.sounds }, BeatCards.read(BeatCards.write(c)).card!!.sections.map { it.sounds })
+    }
+
+    private val library = mapOf(12 to "Kick 808", 14 to "Snare.wav", 20 to "Hat", 30 to "Clap", 31 to " clap.WAV ")
+
+    private fun pick(p: SoundPick) = "${p.pad.groupLetter}${p.pad.label} ${p.status} ${p.slot} ${p.name} ${p.currentSlot}"
+
+    @Test
+    fun `sound lines are matched to the user's sounds by slot and name`() {
+        val sounds = mapOf(
+            9 to snd(12, "kick 808"), // slot holds the name, ignoring case
+            10 to snd(14, "SNARE"), // ... and ".wav"
+            11 to snd(13, "Hat"), // slot is empty: the name is found in 20
+            6 to snd(99, "Clap"), // two slots hold it: the lowest
+            7 to snd(77, "clap"), // ... but the pad's own first
+            8 to snd(99), // no name and no such slot
+            3 to snd(500, "Cymbal"), // nowhere
+            4 to snd(20, "Hat"), // already on the pad
+            5 to snd(20), // no name, the slot is there
+            0 to snd(12, "Snare"), // the slot holds another sound: the name is found in 14
+        )
+        val current = mapOf(PhysicalPad(0, 9) to 3, PhysicalPad(0, 7) to 31, PhysicalPad(0, 4) to 20, PhysicalPad(0, 3) to 8, PhysicalPad(0, 11) to 20)
+        val c = BeatCard(null, null, 50, listOf(a(sounds = sounds), a(group = 1, sounds = mapOf(9 to snd(12)))))
+        val picks = BeatCards.resolveSounds(c, library) { current[it] }
+        assertEquals(
+            listOf(
+                "A7 CHANGE 12 Kick 808 3",
+                "A8 CHANGE 14 Snare.wav null",
+                "A9 SAME 20 Hat 20",
+                "A4 FOUND_BY_NAME 30 Clap null",
+                "A5 SAME 31  clap.WAV  31",
+                "A6 MISSING null null null",
+                "A1 MISSING null null 8",
+                "A2 SAME 20 Hat 20",
+                "A3 CHANGE 20 Hat null",
+                "A. FOUND_BY_NAME 14 Snare.wav null",
+                "B7 CHANGE 12 Kick 808 null",
+            ),
+            picks.map(::pick),
+        )
+        assertEquals(snd(13, "Hat"), picks[2].wanted)
+        assertEquals(PhysicalPad(1, 9), picks.last().pad)
+        // A pad that plays another sound is a change; one that plays the named sound by another slot is a change to that slot.
+        val moved = BeatCards.resolveSounds(BeatCard(null, null, 50, listOf(a(sounds = mapOf(9 to snd(13, "Hat"))))), library) { 12 }
+        assertEquals(listOf("A7 FOUND_BY_NAME 20 Hat 12"), moved.map(::pick))
+        // A card with no sound lines, or no sounds to choose from.
+        assertEquals(emptyList<SoundPick>(), BeatCards.resolveSounds(BeatCard(null, null, 50, listOf(a(hit(0, 9)))), library) { null })
+        assertEquals(listOf(SoundStatus.MISSING), BeatCards.resolveSounds(c.copy(sections = listOf(a(sounds = mapOf(9 to snd(12, "Kick"))))), emptyMap()) { null }.map { it.status })
+    }
+
+    @Test
+    fun `the sound list is a header and a line for each sound in slot order`() {
+        val text = BeatCards.soundList(ClaudeText.SOUNDS_FROM_DEVICE, mapOf(20 to "Hat #2", 14 to "Snare.wav", 12 to "Kick  808", 21 to " ", 1000 to "x", 0 to "y"))
+        assertEquals("My EP-133's sounds (slot name), from the EP-133:\n12 Kick 808\n14 Snare.wav\n20 Hat 2\n21\n", text)
+        assertEquals("My EP-133's sounds (slot name), from the last read:\n", BeatCards.soundList(ClaudeText.SOUNDS_FROM_LAST_READ, emptyMap()))
+        assertEquals("My EP-133's sounds (slot name), from the factory pack:\n1 Kick\n", BeatCards.soundList(ClaudeText.SOUNDS_FROM_FACTORY, mapOf(1 to "Kick")))
+        // A name read from the list is the one the card writes, so it matches.
+        val c = BeatCard(null, null, 50, listOf(a(sounds = mapOf(9 to snd(20, "Hat 2")))))
+        assertEquals(listOf(SoundStatus.CHANGE), BeatCards.resolveSounds(c, mapOf(20 to "Hat #2")) { null }.map { it.status })
     }
 
     // ---- import ----
