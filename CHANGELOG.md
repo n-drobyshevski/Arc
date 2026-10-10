@@ -7,6 +7,10 @@ version fixes bugs. The version itself is set in `version.properties`.
 ## [Unreleased]
 
 ### Added
+- Web: Live's **REC** and **Takes**, as on Android: the REC chip on the display, takes kept in the browser (up to 10 minutes each) and listed in Live tools, where each plays, saves as WAV, shares (where the browser can share a file), goes **To EP-133** through the upload sheet, or is deleted.
+- Web: on a wide window (900 px and up) Live draws the **EP-133 K.O. II** itself. Its pads play and light from the device, A–D pick the group, KEYS switches mode, RECORD is REC, −/+ change the octave in KEYS or the group in PADS, and PLAY lights with the device's clock. The display shows the tempo, play and REC and the groups sounding; the plate shows the project and the last hit. Every other key and knob shows its shortcuts from the guide. From 1200 px, Live tools stay open beside it.
+- Web: the computer keyboard plays Live: the numpad (or 1 2 3 / Q W E / A S D / Z X C on a laptop) plays the pads while held, F1–F4 pick the group, K switches KEYS, R is REC, − / + as on the device.
+- Web: Live's pads and keys take the K.O. II's colours on the phone too (black pads on the grey body, light A–D keys with their icons and LEDs, an orange RECORD key). Android keeps the pocket operator look for now.
 - Live: **REC** records what you play on the phone (pads and keys, chords and KEYS pitch included), with or without the EP-133. It starts with the first sound after REC and stops at the next tap (or 10 minutes), leaving out the silence at the end. Takes are stereo WAVs listed in Live tools → Takes, where each plays, shares, saves, deletes, or goes **To EP-133** through the upload sheet while the device is connected.
 - Web app (`web/`, https://arc-pi-mauve.vercel.app): the whole Android app in the browser, for Chrome, Edge and other Chromium browsers on computers and Android, over USB-C with WebMIDI. Same `.pak` files and `library.json` as the Android app.
   - Live starts on one group (the large grid with A–D); the view switch in Live tools still shows all four.
@@ -27,6 +31,7 @@ version fixes bugs. The version itself is set in `version.properties`.
 - Live: a one-group view, a large grid of one group with A–D keys to switch and Follow to jump to the group just played. It fits one screen without scrolling (checked at Pixel 7 and 360 dp sizes). The choice is kept in the settings.
 
 ### Changed
+- Live: an armed REC also starts when the EP-133 starts playing (MIDI Start or Continue), keeping the silence before the first sound so the take lines up with the device; a take started that way ends when the EP-133 stops. A take started by a sound still runs until REC is tapped again.
 - Live: much less delay between a press and its sound. Live keeps one low-latency output open while it is on screen and mixes the pads and keys into it itself (no new audio track per press, the phone's own sample rate, KEYS pitched as it plays), and loads the active project's pad samples into memory when it opens. Arc's pad-sound copies no longer rewrite their index on every press. The debug log shows each press's delay; Bluetooth's own delay is pointed out once.
 - Messages at the bottom of the screen can be swiped away, sideways or down, as a notification is; they spring back on a short drag. Screen readers get a Dismiss action.
 - Live: pads and keys sound only while held, as in the EP-133's gate mode, and fade out quickly when the finger lifts, instead of playing the whole sample on a tap. On the scrolling all-groups page a press waits a moment so a scroll plays nothing. A screen reader's Play still plays the whole sample.
