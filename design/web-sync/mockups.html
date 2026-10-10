@@ -258,6 +258,14 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
 .fader__cap { position: absolute; left: 33px; top: 120px; width: 60px; height: 60px; border-radius: 50%; background: radial-gradient(circle at 45% 35%, #A3A3A1, #7B7B79 70%); box-shadow: 0 4px 0 #4a4a49, 0 8px 10px rgba(0,0,0,.35); }
 .ep.is-offline .disp ~ .seg7 .on { fill: #6a6a6c; }
 
+.rec { display: inline-flex; align-items: center; gap: 7px; border: 1.5px solid var(--display-dim); color: var(--display-dim); border-radius: 9px; padding: 3px 9px; font-size: 13px; font-weight: 700; letter-spacing: .04em; }
+.rec i { width: 9px; height: 9px; border-radius: 50%; background: var(--display-dim); }
+.rec.is-armed i { background: var(--signal); animation: blink .9s steps(1) infinite; }
+.rec.is-armed { color: var(--display-ink); }
+.rec.is-on { border-color: var(--signal); color: var(--display-ink); }
+.rec.is-on i { background: var(--signal); }
+@keyframes blink { 50% { opacity: 0; } }
+
 /* guide tags on the device */
 .ctag { position: absolute; z-index: 6; background: var(--navy); color: var(--on-navy); font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
   padding: 6px 9px; border-radius: 6px; white-space: nowrap; pointer-events: none; box-shadow: 0 2px 6px rgba(0,0,0,.25); }
@@ -303,18 +311,27 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
 .pm__bar .ikey { width: 44px; height: 44px; }
 .pm__strip { background: var(--display); color: var(--display-ink); border-radius: 18px; height: 56px; display: flex; align-items: center; gap: 12px; padding: 0 16px; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; }
 .pm__strip .last { margin-left: auto; font-weight: 800; font-size: 17px; }
-.pm__grid { background: var(--plate); border-radius: 18px; overflow: hidden; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(4, 1fr); }
-.pm__cell { --glow: 0; position: relative; background: color-mix(in oklab, var(--signal) calc(var(--glow) * 100%), var(--plate)); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 8px 10px; display: grid; grid-template-rows: 1fr auto; }
-.pm__cell:nth-child(3n) { border-right: 0; }
-.pm__cell:nth-last-child(-n+3) { border-bottom: 0; }
-.pm__cell .n { justify-self: end; font-size: 26px; font-weight: 700; color: var(--ink); }
-.pm__cell .nm { font-size: 14px; color: var(--graphite); }
-.pm__cell.lit .n, .pm__cell.lit .nm { color: #fff; }
+.pm__grid { background: var(--dev-body); border-radius: 18px; padding: 10px; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(4, 1fr); gap: 10px 10px; }
+.pm__cell { --glow: 0; position: relative; border-radius: 10px; padding: 6px 12px 10px; display: grid; grid-template-rows: auto 1fr;
+  background: color-mix(in oklab, var(--signal) calc(var(--glow) * 100%), #1E1E1F); box-shadow: 0 5px 0 color-mix(in oklab, #A33000 calc(var(--glow) * 100%), #040404); }
+.pm__cell .n { font-size: 34px; font-weight: 300; line-height: 1.15; color: #F1F1F1; }
+.pm__cell .n.word { font-size: 15px; font-weight: 500; letter-spacing: .04em; justify-self: center; padding-top: 8px; }
+.pm__cell .nm { align-self: end; font-size: 14px; line-height: 1.2; color: #8C8C8C; }
+.pm__cell.lit .nm { color: #fff; }
 .pm__words { display: flex; justify-content: space-between; color: var(--graphite); font-size: 15px; letter-spacing: .04em; padding: 0 4px; }
-.pm__groups { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-.pm__groups span { height: 52px; border-radius: 10px; display: grid; place-items: center; font-size: 22px; font-weight: 800; background: var(--tab-off); color: var(--on-tab-off); }
-.pm__groups span.on { background: var(--navy); color: var(--on-navy); }
-.pm__groups span.glow { background: color-mix(in oklab, var(--signal) 80%, var(--plate)); color: #fff; }
+.pm__groups { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; background: var(--dev-body); border-radius: 14px; padding: 12px 10px 14px; }
+.pm__groups span { position: relative; height: 54px; border-radius: 9px; background: linear-gradient(180deg, #EFEEEB, #DDDCD8); box-shadow: 0 4px 0 #9C9B96; color: #8A8984; }
+.pm__groups b { position: absolute; left: 8px; top: 2px; font-size: 22px; font-weight: 300; }
+.pm__groups i { position: absolute; left: 0; right: 0; bottom: 6px; text-align: center; font-style: normal; font-size: 16px; }
+.pm__groups span::after { content: ""; position: absolute; right: 7px; top: 7px; width: 8px; height: 8px; border-radius: 50%; background: #74736F; }
+.pm__groups span.on::after { background: #FF3300; box-shadow: 0 0 8px 2px rgba(255,60,0,.6); }
+.pm__groups span.glow::after { background: #FF3300; opacity: .6; }
+.pm__groups span.rec { background: linear-gradient(180deg, #FF6220, #F04700); box-shadow: 0 4px 0 #A33000; display: grid; place-items: center; }
+.pm__groups span.rec::after { display: none; }
+.pm__groups span.rec em { width: 16px; height: 16px; border-radius: 50%; background: #fff; }
+.pm__groups span.rec.armed { animation: armed2 .9s steps(1) infinite; }
+.pm__groups span.rec.on { box-shadow: 0 4px 0 #A33000, 0 0 0 3px #fff; }
+@keyframes armed2 { 50% { box-shadow: 0 4px 0 #A33000, 0 0 0 3px #fff; } }
 .pm__sheet { position: absolute; inset: 70px 0 0 60px; background: var(--shell); border-radius: 22px 0 0 0; box-shadow: -10px 0 30px rgba(0,0,0,.25); padding: 22px 18px; display: grid; align-content: start; gap: 14px; }
 .pm__scrim { position: absolute; inset: 70px 0 0 0; background: var(--scrim); }
 
@@ -358,7 +375,7 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
 .notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
 .foot { margin-top: 40px; color: var(--graphite); font-size: 14px; border-top: 1px solid var(--key-edge); padding-top: 16px; }
 
-@media (prefers-reduced-motion: reduce) { .rec.is-armed i { animation: none; } .k, .pad { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .rec.is-armed i, .d-rec.blink, .key--orange.is-armed, .pm__groups span.rec.armed { animation: none; } .key, .pad { transition: none; } }
 </style>
 
 <div class="wrap">
@@ -441,7 +458,7 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
           <li><b>A–D</b>: pick the group the pads play. The navy key is the group shown.</li>
           <li><b>KEYS</b>: switch between PADS and KEYS. In KEYS the pads become notes of the last sound.</li>
           <li><b>RECORD</b>: arm REC. Recording starts with the first sound, and a second tap stops and saves the take.</li>
-          <li><b>− / +</b>: octave down or up in KEYS. In PADS they are dimmed.</li>
+          <li><b>− / +</b>: octave down or up in KEYS, previous or next group in PADS. Their LEDs show which way can still move.</li>
         </ul>
       </div>
       <div class="lg">
@@ -465,15 +482,15 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
         </ul>
       </div>
     </div>
-    <p class="callout"><b>Keyboard:</b> the pads follow the numpad (7 8 9 / 4 5 6 / 1 2 3 / . 0 Enter). A–D follow the F1–F4 keys, K toggles KEYS, R toggles REC, and the minus and plus keys change the octave. The guide overlay lists them.</p>
+    <p class="callout"><b>Keyboard:</b> the numpad plays the pads as laid out on the device (7 8 9 / 4 5 6 / 1 2 3 / . 0 Enter). Laptops without one use four QWERTY rows: 1 2 3 / Q W E / A S D / Z X C. Holding a key holds the gate. F1–F4 pick A–D, K toggles KEYS, R arms or stops REC, and − / + do what the device's −/+ do. The guide overlay lists them. Try them on the device above.</p>
   </section>
 
   <!-- ================= 3. PHONE ================= -->
   <section class="s" id="phone">
     <div class="s__head">
-      <span class="caps">Phone · 412 px · existing grid</span>
+      <span class="caps">Phone · 412 px · one-group grid</span>
       <h2>REC and takes on the phone</h2>
-      <p>The phone layout doesn't change. The display strip gains Android's REC chip, and Live tools gain the Takes list. Each web mock below has the Android screen it copies next to it.</p>
+      <p>The phone keeps its one-group layout and takes on the K.O. II's colours. The display strip gains Android's REC chip, the group row gains an orange RECORD key, and Live tools gain the Takes list. Each web mock below has the Android screen it copies next to it.</p>
     </div>
     <div class="phones" id="phones"></div>
   </section>
@@ -526,9 +543,10 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
     </div>
     <div class="backlog">
       <div class="bl"><b>REC engine</b><p>Port <code>TakeRecorder.kt</code> to <code>web/src/core/features/takeRecorder.ts</code>, with the same tests. Tap the mix in <code>MixerHost.render</code> (<code>platform/audio/liveMixer.ts</code>), so a take holds exactly what the browser played. Cap a take at 10 minutes, as Android does.</p></div>
-      <div class="bl"><b>Takes storage and actions</b><p>Add an IndexedDB <code>takes</code> store in <code>platform/storage/db.ts</code> and keep it apart from <code>arc-demo</code>. Wire Play/Stop, Save WAV (<code>files/save</code>), Share (only where Web Share takes files), and Delete with the inline confirmation. To EP-133 opens <code>UploadSheet</code> with the WAV.</p></div>
+      <div class="bl"><b>Takes storage and actions</b><p>Add an IndexedDB <code>takes</code> store in <code>platform/storage/db.ts</code>, kept apart from <code>arc-demo</code>. Also copy takes into the library folder when one is picked (<code>platform/storage/external.ts</code>), as Android keeps them in Documents/arc. Wire Play/Stop, Save WAV (<code>files/save</code>), Share (only where Web Share takes files), and Delete with the inline confirmation. To EP-133 opens <code>UploadSheet</code> with the WAV.</p></div>
       <div class="bl"><b>REC chip and Takes UI on the existing grid</b><p>Copy the REC and take strings from <code>MirrorText.kt</code> into <code>mirrorText.ts</code>. Add the chip to the display strip and the panel, and a Takes section in Live tools. Add Playwright steps for arm, record, stop and the new row.</p></div>
-      <div class="bl"><b>Device view</b><p>New <code>web/src/ui/live/DeviceView.tsx</code>. It reuses <code>glow.ts</code>, the <code>press.ts</code> gate and chord logic, the KEYS note maths in <code>keys.ts</code>, and the Knob and Fader visuals from <code>GuideKeys.tsx</code>. <code>MirrorScreen.tsx</code> picks the view at 900 px or wider.</p></div>
+      <div class="bl"><b>Phone grid in the K.O. II's colours</b><p>Restyle the one-group grid with black pads, light A–D keys with their icons and LEDs, and an orange RECORD key next to D. The layout and touch behaviour stay the same, and the PO-style grid stays on Android unless you want it there too.</p></div>
+      <div class="bl"><b>Device view</b><p>New <code>web/src/ui/live/DeviceView.tsx</code>. It reuses <code>glow.ts</code>, the <code>press.ts</code> gate and chord logic, the KEYS note maths in <code>keys.ts</code>, and the Knob and Fader visuals from <code>GuideKeys.tsx</code>. <code>MirrorScreen.tsx</code> picks the view at 900 px or wider. Add the keyboard map (numpad, QWERTY rows, F1–F4, K, R, −/+), and −/+ stepping through groups in PADS.</p></div>
       <div class="bl"><b>Shortcut cards</b><p>Filter <code>guideData.ts</code> by key name for the card, and add a "show all" link to <code>#/guide</code> with the filter applied. Add the new tags to the guide overlay.</p></div>
       <div class="bl"><b>Docked tools at 1200 px</b><p><code>SideZone</code> becomes a docked column at that width. Back no longer closes it there.</p></div>
       <div class="bl"><b>Clear the "Check" items</b><p>Clear the open questions from the audit: the first-run overlay, the toast lifetime, the Settings storage line, the project tile sizes, and the pads sheet rows.</p></div>
@@ -754,10 +772,8 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
     keyEl('KEYS').classList.toggle('is-sel', S.keys)
     keyEl('RECORD').classList.toggle('is-armed', S.rec === 'armed')
     keyEl('RECORD').classList.toggle('is-on', S.rec === 'rec')
-    keyEl('MINUS').classList.toggle('is-dimk', !S.keys)
-    keyEl('PLUS').classList.toggle('is-dimk', !S.keys)
-    $('ledMinus').classList.toggle('on', S.keys && S.octave > 0)
-    $('ledPlus').classList.toggle('on', S.keys && S.octave < 8)
+    $('ledMinus').classList.toggle('on', S.keys ? S.octave > 0 : S.group > 0)
+    $('ledPlus').classList.toggle('on', S.keys ? S.octave < 8 : S.group < 3)
     GROUPS.forEach((_, i) => {
       const l = $('gled' + i)
       l.classList.toggle('on', !S.offline && (i === S.group || S.groupGlow[i] > 0.1))
@@ -852,12 +868,14 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
     const id = k.dataset.key
     if (id.startsWith('G')) { S.group = Number(id.slice(1)); closePop(); return update() }
     if (id === 'KEYS') { S.keys = !S.keys; closePop(); return update() }
-    if (id === 'MINUS' || id === 'PLUS') {
-      if (!S.keys) return showToast('− and + change the octave in KEYS.')
-      S.octave = Math.max(0, Math.min(8, S.octave + (id === 'PLUS' ? 1 : -1))); return update()
-    }
+    if (id === 'MINUS' || id === 'PLUS') { step(id === 'PLUS' ? 1 : -1); return }
     if (id === 'RECORD') { toggleRec(); return }
     openPop(k, id)
+  }
+  // − / +: octave in KEYS, previous / next group in PADS.
+  function step(d) {
+    if (S.keys) S.octave = Math.max(0, Math.min(8, S.octave + d)); else S.group = Math.max(0, Math.min(3, S.group + d))
+    closePop(); update()
   }
   function toggleRec() {
     if (S.rec === 'idle') { S.rec = 'armed'; update(); return }
@@ -991,19 +1009,21 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
   }))
 
   // ---------- keyboard ----------
-  const KB = { '7': '7', '8': '8', '9': '9', '4': '4', '5': '5', '6': '6', '1': '1', '2': '2', '3': '3', '.': '.', '0': '0', Enter: 'ENTER' }
+  // Numpad as on the device, and QWERTY rows for laptops: 1 2 3 / Q W E / A S D / Z X C.
+  const KB = { Numpad7: '7', Numpad8: '8', Numpad9: '9', Numpad4: '4', Numpad5: '5', Numpad6: '6', Numpad1: '1', Numpad2: '2', Numpad3: '3', NumpadDecimal: '.', Numpad0: '0', NumpadEnter: 'ENTER',
+    Digit1: '7', Digit2: '8', Digit3: '9', KeyQ: '4', KeyW: '5', KeyE: '6', KeyA: '1', KeyS: '2', KeyD: '3', KeyZ: '.', KeyX: '0', KeyC: 'ENTER' }
   const held = new Set()
   document.addEventListener('keydown', (e) => {
     if (e.repeat || e.target.closest('input, textarea') || document.getElementById('deskStage').getBoundingClientRect().bottom < 0) return
-    const l = KB[e.key]
-    if (l && !held.has(l)) { held.add(l); S.playingPads.add(S.group + l); hit(S.group, l, 0.9); if (S.rec === 'armed') { S.rec = 'rec'; S.recStart = Date.now() } update(); return }
+    const l = KB[e.code]
+    if (l && !held.has(l)) { held.add(l); S.playingPads.add(S.group + l); hit(S.group, l, 0.9); if (!S.keys) S.last = `${GROUPS[S.group]} ${l}${padName(S.group, l) ? ' · ' + padName(S.group, l) : ''}`; if (S.rec === 'armed') { S.rec = 'rec'; S.recStart = Date.now() } update(); return }
     if (/^F[1-4]$/.test(e.key)) { e.preventDefault(); S.group = Number(e.key[1]) - 1; update() }
     else if (e.key === 'k' || e.key === 'K') { S.keys = !S.keys; update() }
     else if (e.key === 'r' || e.key === 'R') toggleRec()
-    else if ((e.key === '-' || e.key === '+') && S.keys) { S.octave = Math.max(0, Math.min(8, S.octave + (e.key === '+' ? 1 : -1))); update() }
+    else if (e.key === '-' || e.key === '+' || e.key === '=') step(e.key === '-' ? -1 : 1)
     else if (e.key === 'Escape') closePop()
   })
-  document.addEventListener('keyup', (e) => { const l = KB[e.key]; if (l && held.has(l)) { held.delete(l); S.playingPads.delete(S.group + l); release(S.group, l) } })
+  document.addEventListener('keyup', (e) => { const l = KB[e.code]; if (l && held.has(l)) { held.delete(l); S.playingPads.delete(S.group + l); release(S.group, l) } })
 
   // ---------- phones ----------
   function phoneHtml(o) {
@@ -1012,7 +1032,7 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
       const g = (o.glow || {})[l] || 0
       const inner = o.keys
         ? (() => { const idx = ROWS.flat().indexOf(l); const n = keyNotes(4)[keyIndexAt(Math.floor(idx / 3), idx % 3)]; return `<span class="pad__ring ${n.oct > 4 ? 'hi' : ''}" style="width:96px;height:96px;margin:-48px 0 0 -48px;border-width:9px;font-size:24px;${g > .35 ? 'border-color:#fff;color:#fff' : ''}">${n.name}</span><span class="pad__oct" style="font-size:14px;${g > .35 ? 'color:#fff' : ''}">${n.oct}</span>` })()
-        : `<span class="nm">${esc(NAMES[0][l] || '')}</span><span class="n" ${l === 'ENTER' ? 'style="font-size:15px;letter-spacing:.06em"' : ''}>${l}</span>`
+        : `<span class="n ${l === 'ENTER' ? 'word' : ''}">${l === '.' ? '•' : l}</span><span class="nm">${esc(NAMES[0][l] || '')}</span>`
       return `<div class="pm__cell ${g > .35 ? 'lit' : ''}" style="--glow:${g}">${inner}</div>`
     }).join('')
     const strip = o.keys
@@ -1028,13 +1048,13 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
       <div class="pm__strip">${strip}</div>
       <div class="pm__grid">${cells}</div>
       <div class="pm__words"><span>⧉ ${o.keys ? 'KEYS' : 'PADS'}</span>${o.keys ? '<span>MAJOR ▾</span><span>OCT 4 ▾</span>' : ''}</div>
-      ${o.keys ? '<div></div>' : '<div class="pm__groups"><span class="on">A</span><span class="glow">B</span><span>C</span><span>D</span></div>'}
+      ${o.keys ? '<div></div>' : `<div class="pm__groups">${GROUPS.map((g, i) => `<span class="${i === 0 ? 'on' : i === 1 ? 'glow' : ''}"><b>${g}</b><i>${GROUP_ICONS[i]}</i></span>`).join('')}<span class="rec ${o.rec === 'armed' ? 'armed' : o.rec === 'rec' ? 'on' : ''}"><em></em></span></div>`}
       ${sheet}</div>`
   }
   const PHONES = [
-    { t: 'Web · REC idle', d: 'The chip sits at the left of the strip, dimmed, as on Android.', o: { rec: 'idle', glow: { '7': 1, '4': 0.5 } } },
+    { t: 'Web · REC idle', d: 'Same one-group layout, in the K.O. II\'s colours: black pads, light A–D keys with their icons and LED, and an orange RECORD key. The REC chip in the strip shows the state, as on Android.', o: { rec: 'idle', glow: { '7': 1, '4': 0.5 } } },
     { t: 'Android · REC armed', img: 'audit/android/rec-armed.jpg', d: 'The reference. Armed: the dot blinks until the first sound.' },
-    { t: 'Web · REC armed', d: 'The dot blinks every 450 ms. Nothing is recorded until a pad sounds.', o: { rec: 'armed' } },
+    { t: 'Web · REC armed', d: 'The chip\'s dot and the RECORD key blink every 450 ms. Nothing is recorded until a pad sounds.', o: { rec: 'armed' } },
     { t: 'Web · Recording in KEYS', d: 'The chip turns into an orange-ringed timer. Tapping it stops and saves the take.', o: { rec: 'rec', keys: true, glow: { '9': 0.6, 'ENTER': 1 } } },
     { t: 'Android · Recording in KEYS', img: 'audit/android/rec-recording-keys.jpg', d: 'The reference for the timer chip.' },
     { t: 'Web · Live tools with takes', d: 'Takes come first in the panel. Tapping a row unfolds Save WAV, Share, To EP-133 and Delete.', o: { tools: true } },
