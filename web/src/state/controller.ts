@@ -51,7 +51,7 @@
 //   actions take the press's event timeStamp ([at]) for the latency note.
 
 import { computed, signal, type ReadonlySignal, type Signal } from '@preact/signals'
-import { MAX_OCTAVE, MIN_OCTAVE, type NoteNames, type Scale } from '../core/features/keys'
+import { Keys, MAX_OCTAVE, MIN_OCTAVE, type NoteNames, type Scale } from '../core/features/keys'
 import { choiceOf as pianoChoiceOf, type KeysView } from '../core/features/piano'
 import { padKey, type PhysicalPad } from '../core/features/padNotes'
 import type { PadTarget } from '../core/features/liveMirror'
@@ -90,11 +90,12 @@ import { logFileName } from '../platform/files/save'
 import type { FileData } from '../platform/files/save'
 import { FileListTarget, type ExternalTarget } from '../platform/storage/external'
 import { describeForRestore } from '../platform/storage/library'
-import { indexSettings, type AppSettings } from '../platform/storage/settings'
+import { PatternPrefs, indexSettings, memoryStorage, type AppSettings } from '../platform/storage/settings'
 import { keepScreenOn } from '../platform/wakelock/wakeLock'
 import { Connection, connectionPhase, type ConnectionPhase } from './connection'
 import type { Deps, LiveEngineInfo } from './deps'
-import { LiveSounds, type LiveLatency } from './live'
+import { LiveSounds, noteVoice, padVoice, pressTime, type LiveLatency } from './live'
+import { PatternDesk } from './pattern'
 import { MirrorController } from './mirror'
 import { PreviewCache, type DecodedSound } from './previewCache'
 import { createStore, type Store } from './store'
@@ -159,6 +160,8 @@ export class ArcController {
   readonly liveVoices: ReadonlySignal<ReadonlySet<string>>
   /** The TAKE key's state (ArcController.rec). */
   readonly rec: ReadonlySignal<RecState>
+  /** PATTERN: Live's own patterns, recorded and played on its output (state/pattern.ts). */
+  readonly pattern: PatternDesk
   /** The pads sounding on the phone, as padKey numbers (MainActivity's playingPads). */
   readonly playingPads: ReadonlySignal<ReadonlySet<number>>
   /** The KEYS notes sounding on the phone (grid and piano), first pressed first (MainActivity's playingNotes). */
@@ -272,6 +275,13 @@ export class ArcController {
       toastOnce: (text, error) => this.toastOnce(text, error),
     })
     this.liveLatency = this.live.latency
+    this.pattern = new PatternDesk({
+      store: this.store,
+      deps,
+      prefs: deps.patternPrefs ?? new PatternPrefs(memoryStorage()),
+      live: this.live,
+      toast,
+    })
     this.store.update((s) => ({ ...s, keysPad: deps.mirrorPrefs.savedKeysPad() }))
     this.mirror = new MirrorController({
       store: this.store,
@@ -328,6 +338,25 @@ export class ArcController {
       )
     }
     if (audio.onLog) this.cleanups.push(audio.onLog((line) => this.trafficLog.note(line)))
+    // PATTERN: the kept patterns, the project Live shows (its own patterns) and the device's tempo.
+    void this.pattern.load()
+    let project: number | null = null
+    let bpm: number | null = null
+    this.cleanups.push(
+      this.store.subscribe((st) => {
+        const p = st.mirror?.state.activeProject ?? null
+        if (p !== null && p !== project) {
+          project = p
+          void this.pattern.switchProject(p)
+        }
+        const b = st.mirror?.state.bpm ?? null
+        if (b !== bpm) {
+          bpm = b
+          this.pattern.tempoChanged()
+        }
+      }),
+    )
+    this.cleanups.push(() => this.pattern.dispose())
     if (audio.onTake) this.cleanups.push(audio.onTake((take, limit) => void this.takeDone(take, limit)))
     void this.loadTakes()
     this.cleanups.push(lib.subscribe(() => void this.reloadLibrary()))
@@ -520,6 +549,8 @@ export class ArcController {
       void this.live.openAudio()
       return
     }
+    // The pattern stops with the sound (Android's focus lost).
+    this.pattern.stop()
     this.live.suspendAudio()
     this.audioClose = this.deps.setTimeout(() => {
       this.audioClose = null
@@ -1053,7 +1084,9 @@ export class ArcController {
    * [at]: the press's event timeStamp, for the latency note.
    */
   playPad(pad: PhysicalPad, hold = true, unsure = false, at?: number): Promise<void> {
-    return this.live.playPad(pad, hold, unsure, at)
+    const done = this.live.playPad(pad, hold, unsure, at)
+    this.pattern.press(pad, null, padVoice(pad), pressTime(at, this.deps.perfNow()), hold)
+    return done
   }
 
   /** The unsure press on the pad was a press after all: it becomes the KEYS sound (and one not in memory loads). */
@@ -1061,14 +1094,16 @@ export class ArcController {
     return this.live.keepPad(pad)
   }
 
-  /** The finger left the pad: its sound fades out. */
-  releasePad(pad: PhysicalPad): void {
+  /** The finger left the pad: its sound fades out. [at]: the lift's event timeStamp, for the note's gate. */
+  releasePad(pad: PhysicalPad, at?: number): void {
     this.live.releasePad(pad)
+    this.pattern.release(padVoice(pad), pressTime(at, this.deps.perfNow()))
   }
 
   /** The press on the pad turned into a scroll (the all-groups page): its sound ends at once. */
   cutPad(pad: PhysicalPad): void {
     this.live.cutPad(pad)
+    this.pattern.cut(padVoice(pad))
   }
 
   /** The sound KEYS plays: the pad last tapped, or last played on the device in the pads view. */
@@ -1078,7 +1113,10 @@ export class ArcController {
 
   /** Plays MIDI [note] on the KEYS sound (a grid key or a piano key) until [releaseNote]; [hold] false plays to the end. Call from the press ([at]: its timeStamp). */
   playNote(note: number, hold = true, at?: number): Promise<void> {
-    return this.live.playNote(note, hold, at)
+    const done = this.live.playNote(note, hold, at)
+    const pad = this.store.get().keysPad
+    if (pad !== null) this.pattern.press(pad, note - Keys.ROOT_NOTE, noteVoice(note), pressTime(at, this.deps.perfNow()), hold)
+    return done
   }
 
   /** The debug screen's latencyHint choice: Live's output reopens at the new hint. */
@@ -1092,8 +1130,9 @@ export class ArcController {
   }
 
   /** The last finger left the note: it fades out. */
-  releaseNote(note: number): void {
+  releaseNote(note: number, at?: number): void {
     this.live.releaseNote(note)
+    this.pattern.release(noteVoice(note), pressTime(at, this.deps.perfNow()))
   }
 
   // ---------- Live's EDIT: another sound on a pad (an addition, see device.assignPad) ----------

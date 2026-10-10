@@ -36,6 +36,8 @@ import {
   type ToMixer,
 } from '../../src/platform/audio/liveAudio'
 import { WebLatencyHint } from '../../src/core/text/latencyText'
+import { pattern, patternNote, projectPatterns } from '../../src/core/features/pattern'
+import { PhaseAnchors } from '../../src/core/features/sequencer'
 import { VoiceMixer, VoiceShape } from '../../src/core/formats/voiceMixer'
 import { decodeWav } from '../../src/core/formats/wav'
 import { FxControl } from '../../src/core/formats/fx/fxBus'
@@ -1546,5 +1548,57 @@ describe('LiveAudio REC', () => {
     const c = Int16Array.from([5, 6, 7, 8])
     const w = decodeWav(new Uint8Array(await takeWav([a, c], 3, 1000).arrayBuffer()))
     expect([...new Int16Array(w.pcm.slice().buffer)]).toEqual([1, 2, 3, 4, 5, 6])
+  })
+})
+
+describe('LiveAudio PATTERN', () => {
+  const plan = (voices: Map<number, string>) => ({
+    patterns: projectPatterns([pattern(1, [patternNote(0, 0, 24)]), pattern(), pattern(), pattern()]),
+    voices,
+    skip: new Map<number, number>(),
+    bpm: 120,
+    phase: PhaseAnchors.ZERO,
+  })
+
+  it('sends the plan with its sounds, plays it and follows its clock', async () => {
+    const b = new FakeBackend()
+    const live = new LiveAudio(b)
+    live.preload('kick', tone(300), 1, RATE)
+    live.seqPlan(plan(new Map([[0, 'kick'], [1, 'nothing']])))
+    expect(live.seqPlay(0, 0, null)).toBe(true)
+    await flush()
+    const sent = b.link.sent.find((m) => m.t === 'plan')
+    expect(sent).toMatchObject({ t: 'plan', voices: [{ pad: 0, id: 1, channels: 1, sampleRate: RATE }], bpm: 120 })
+    b.ctx.timestamp = { contextTime: 1, performanceTime: 5000 }
+    for (let i = 0; i < 20; i++) b.link.render(1 + (i * 128) / RATE)
+    const tl = live.timeline.value
+    expect(tl?.clock).toEqual({ anchorFrame: 2400, rate: RATE, bpm: 120 })
+    expect(tl?.frames).toEqual({ frame: 0, ms: 5000, rate: RATE })
+    // The note's voice sounds from tick 0 on.
+    expect(live.voices.value.has('live:0:0')).toBe(true)
+    live.seqStop()
+    expect(live.timeline.value).toBeNull()
+    expect(b.link.sent.at(-1)).toEqual({ t: 'stopSeq' })
+  })
+
+  it("armed, a press's frame comes from the mix's stamp", async () => {
+    const b = new FakeBackend()
+    const live = new LiveAudio(b)
+    live.open()
+    await flush()
+    live.seqArm(true)
+    b.ctx.timestamp = { contextTime: 1, performanceTime: 5000 }
+    b.link.render(1)
+    expect(live.seqPlay(0, 0, 5010)).toBe(true)
+    expect(b.link.sent.at(-1)).toEqual({ t: 'play', countInBars: 0, leadMs: 0, atFrame: 480, atPress: true })
+  })
+
+  it('a new output is told RECORD waits', async () => {
+    const b = new FakeBackend()
+    const live = new LiveAudio(b)
+    live.seqArm(true)
+    live.open()
+    await flush()
+    expect(b.link.sent.map((m) => m.t)).toContain('seqArmed')
   })
 })

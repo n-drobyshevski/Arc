@@ -154,6 +154,8 @@ const message = (e: unknown): string => (e instanceof Error ? e.message || Strin
 const KV_DIR = 'dirHandle'
 const KV_PICKED = 'folderPicked'
 const KV_OVERRIDE = 'fileOverride:'
+/** The kv row Live's patterns are kept in (an addition): one JSON for every project, as Android's patterns.json. */
+const KV_PATTERNS = 'patterns'
 
 /** A promise-chain mutex (kotlinx Mutex.withLock, not reentrant). */
 class Mutex {
@@ -777,6 +779,25 @@ export class Library {
     if (live !== null) await mem.write(LIVE_FILE, live)
     const entries = [...mem.files].map(([path, f]) => ({ path, data: f.data, compress: path === INDEX_FILE || path === LIVE_FILE }))
     return writeZip(entries, { date: this.now() })
+  }
+
+  // ---------- PATTERN: Live's patterns (Android's files/patterns.json) ----------
+
+  /** The patterns' JSON (Patterns.toJson), or null when none were kept. */
+  async readPatterns(): Promise<string | null> {
+    const v = await this.kvGet(KV_PATTERNS)
+    return typeof v === 'string' ? v : null
+  }
+
+  /** Keeps the patterns' JSON; null forgets them. */
+  async writePatterns(json: string | null): Promise<void> {
+    if (json !== null) {
+      await this.kvPut(KV_PATTERNS, json)
+      return
+    }
+    await transact(this.db, STORE.kv, 'readwrite', (t) => {
+      t.objectStore(STORE.kv).delete(KV_PATTERNS)
+    })
   }
 
   // ---------- kv ----------

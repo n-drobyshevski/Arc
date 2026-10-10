@@ -21,6 +21,7 @@ import { Library } from '../platform/storage/library'
 import { IdbPadSoundStore } from '../platform/storage/padSoundStore'
 import {
   CoachPrefs,
+  PatternPrefs,
   LastReadPrefs,
   OfflinePadsPrefs,
   MirrorPrefs,
@@ -139,6 +140,7 @@ export async function createBrowserDeps(options: BrowserDepsOptions = {}): Promi
     settings,
     mirrorPrefs,
     coach: new CoachPrefs(storage),
+    patternPrefs: new PatternPrefs(storage),
     files: {
       pick: (options) => pickFiles(options),
       read: (file) => readFile(file),

@@ -18,7 +18,7 @@
 // [Deps.offlinePads] its pad changes made offline (files/live-pads.json).
 
 import type { RecState } from '../core/features/takeRecorder'
-import type { RecordedTake } from '../platform/audio/liveAudio'
+import type { LiveSeqPlan, LiveTimeline, RecordedTake } from '../platform/audio/liveAudio'
 import type { TakeStore } from '../platform/storage/takeStore'
 import type { ReadonlySignal } from '@preact/signals'
 import { signal } from '@preact/signals'
@@ -29,7 +29,7 @@ import type { TrafficLog } from '../core/protocol/trafficLog'
 import type { MidiAccessLike, MidiDeviceEvent, MidiPermission, OpenMidi } from '../platform/midi/webmidi'
 import type { ReleaseLock } from '../platform/midi/owner'
 import type { Library } from '../platform/storage/library'
-import type { CoachPrefs, MirrorPrefs, SettingsStore } from '../platform/storage/settings'
+import type { CoachPrefs, MirrorPrefs, PatternPrefs, SettingsStore } from '../platform/storage/settings'
 import type { ExternalTarget } from '../platform/storage/external'
 import type { PickOptions, ReadableFile } from '../platform/files/pick'
 import type { FileData, SaveResult } from '../platform/files/save'
@@ -81,6 +81,8 @@ export type LibraryApi = Pick<
   | 'target'
   | 'settings'
   | 'onExternalError'
+  | 'readPatterns'
+  | 'writePatterns'
 >
 
 /** The press options of [LiveAudioDeps.press]. */
@@ -190,7 +192,26 @@ export interface LiveAudioDeps {
   transportStopped?(): void
   /** A take ended: its WAV, or null when nothing was played; [limit] when the 10-minute limit ended it. */
   onTake?(listener: (take: RecordedTake | null, limit: boolean) => void): () => void
+  // PATTERN (LiveAudio.kt's sequencer, PatternScheduler); an output without them has no pattern playback.
+  /** What the pattern sequencer plays; kept for the next output too. */
+  seqPlan?(plan: LiveSeqPlan): void
+  /**
+   * Starts it: tick 0 after [countInBars] bars a lookahead on, and [leadMs]
+   * later still, or (a pad's press) on the frame heard at [atMs]
+   * (performance.now()). Opens the output first if Live hasn't. False when there is no output.
+   */
+  seqPlay?(countInBars: number, leadMs: number, atMs: number | null): boolean
+  /** Stops it: what waits is dropped, and the notes sounding let go of. */
+  seqStop?(): void
+  /** RECORD waits for a press: the output keeps its stamp, so the press finds its frame. */
+  seqArm?(armed: boolean): void
+  /** Where the transport is in heard time: null while stopped and until the output's first stamp. */
+  readonly timeline?: ReadonlySignal<LiveTimeline | null>
+  /** A pad the patterns play has no sound in the plan (pad key group × 12 + offset): the controller loads it. */
+  onSeqMissing?(listener: (pad: number) => void): () => void
 }
+
+export type { LiveSeqPlan, LiveTimeline }
 
 /** A Live output that never opens (tests, or a browser without Web Audio). */
 export function nullLiveAudio(): LiveAudioDeps {
@@ -281,6 +302,8 @@ export interface Deps {
   mirrorPrefs: MirrorPrefs
   /** Where the first-run guide's flag was before AppSettings.guideSeen (MainActivity coach_seen), read to carry it over. */
   coach: CoachPrefs
+  /** PATTERN's settings (TIMING, COUNT-IN, AUTO, Live's tempo); absent: kept for the session only. */
+  patternPrefs?: PatternPrefs
   files: FileDeps
   share: ShareDeps
   player: SoundPlayer
@@ -361,5 +384,8 @@ export function unavailableLibrary(error: unknown): LibraryApi {
     target: null,
     settings: () => ({}),
     onExternalError: () => {},
+    // Live's patterns are kept for the session only.
+    readPatterns: async () => null,
+    writePatterns: nothing,
   }
 }

@@ -57,7 +57,7 @@ import type { NameEntry } from '../core/features/librarySearch'
 import type { LiveMirror, PadSample } from '../core/features/liveMirror'
 import { fromJson as snapshotFromJson, toJson as snapshotToJson, type LiveSnapshot } from '../core/features/liveSnapshot'
 import { OfflinePads, SoundSource } from '../core/features/offlinePads'
-import { padKey, type PhysicalPad } from '../core/features/padNotes'
+import { padKey, physicalPad, type PhysicalPad } from '../core/features/padNotes'
 import { PadSoundCache } from '../core/features/padSoundCache'
 import { newestBackupWith, unavailable } from '../core/features/padSounds'
 import { decodeWav, encodeWav, isSilent } from '../core/formats/wav'
@@ -632,6 +632,44 @@ export class LiveSounds {
   /** The sound on [pad] (its offline change first), when the mirror knows it. */
   private padSample(pad: PhysicalPad): PadSample | null {
     return this.host.mirror()?.sampleOf(pad) ?? null
+  }
+
+  // ---------- PATTERN: the sounds the patterns play (an addition) ----------
+
+  /**
+   * The patterns' sound for pad key [pad]: its sample's key, sent to Live's
+   * output, when it is in memory; 'missing' when the pad has a sample not in
+   * memory; null for an empty pad.
+   */
+  patternVoice(pad: number): string | 'missing' | null {
+    const sample = this.padSample(physicalPad(Math.floor(pad / 12), pad % 12))
+    if (sample === null) return null
+    const key = memoryKey(sample.slot, sample.name)
+    const a = this.padMemory.get(key)
+    if (a === undefined || a.silent) return a === undefined ? 'missing' : null
+    const out = this.host.deps.liveAudio
+    if (!out.has(key)) out.preload(key, a.pcm, a.channels, a.sampleRate)
+    return key
+  }
+
+  /**
+   * Pad key [pad]'s sound into memory for the patterns, as the preload has it:
+   * arc's copy or a backup, no device, no toast. True when it is in memory now.
+   */
+  async loadForPattern(pad: number): Promise<boolean> {
+    const sample = this.padSample(physicalPad(Math.floor(pad / 12), pad % 12))
+    if (sample === null) return false
+    const { slot, name, factory } = sample
+    if (this.padMemory.has(memoryKey(slot, name))) return true
+    let a: PadAudio | null
+    try {
+      a = await this.loadPadAudio(slot, name, factory)
+    } catch {
+      a = null
+    }
+    if (a === null || this.host.mirror() === null) return false
+    this.keepInMemory(slot, name, a)
+    return true
   }
 
   /** A pad's sample from the first place that has it; null after a toast says why. */

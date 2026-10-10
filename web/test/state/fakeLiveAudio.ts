@@ -1,7 +1,8 @@
 // A LiveAudioDeps that records what the controller asks of Live's output (state tests).
 import { signal, type Signal } from '@preact/signals'
 import { WebLatencyHint } from '../../src/core/text/latencyText'
-import type { LiveAudioDeps, LiveEngineInfo, LivePress } from '../../src/state/deps'
+import type { LiveAudioDeps, LiveEngineInfo, LivePress, LiveSeqPlan, LiveTimeline } from '../../src/state/deps'
+import { transportClock } from '../../src/core/features/sequencer'
 import type { RecState } from '../../src/core/features/takeRecorder'
 import type { RecordedTake } from '../../src/platform/audio/liveAudio'
 
@@ -32,6 +33,16 @@ export interface FakeLiveAudio extends LiveAudioDeps {
   readonly recLog: string[]
   /** Ends the take as the output would: [take] or null, and whether the limit ended it. */
   endTake(take: RecordedTake | null, limit?: boolean): void
+  // PATTERN
+  /** The plans handed over, in order. */
+  readonly plans: LiveSeqPlan[]
+  /** PATTERN calls in order: "play:<countIn>:<leadMs>:<atMs>", "stop", "arm:<bool>". */
+  readonly seqLog: string[]
+  readonly timeline: Signal<LiveTimeline | null>
+  /** The output's clock as the mixer would tell it: tick 0 heard at [zeroMs] (performance.now()), at [bpm]; 48 kHz. */
+  runAt(zeroMs: number, bpm?: number): void
+  /** Tells a pad the patterns play has no sound. */
+  missing(pad: number): void
 }
 
 /** [withLate]: with a `late` signal of its own, as the real LiveAudio (the controller then follows it). */
@@ -41,6 +52,8 @@ export function fakeLiveAudio(withLate = false): FakeLiveAudio {
   const slowL = new Set<(ms: number) => void>()
   const takeL = new Set<(t: RecordedTake | null, limit: boolean) => void>()
   const rec = signal<RecState>({ kind: 'idle' })
+  const timeline = signal<LiveTimeline | null>(null)
+  const missingL = new Set<(pad: number) => void>()
   const set = (f: (s: Set<string>) => void): void => {
     const next = new Set(voices.peek())
     f(next)
@@ -138,6 +151,34 @@ export function fakeLiveAudio(withLate = false): FakeLiveAudio {
     endTake(take, limit = false) {
       rec.value = { kind: 'idle' }
       for (const l of [...takeL]) l(take, limit)
+    },
+    plans: [],
+    seqLog: [],
+    timeline,
+    seqPlan(plan) {
+      a.plans.push(plan)
+    },
+    seqPlay(countInBars, leadMs, atMs) {
+      a.seqLog.push(`play:${countInBars}:${leadMs}:${atMs}`)
+      return a.available
+    },
+    seqStop() {
+      a.seqLog.push('stop')
+      timeline.value = null
+    },
+    seqArm(armed) {
+      a.seqLog.push(`arm:${armed}`)
+    },
+    onSeqMissing(l) {
+      missingL.add(l)
+      return () => missingL.delete(l)
+    },
+    runAt(zeroMs, bpm = 120) {
+      // Mix frame 0 heard at 0 ms: tick 0 on the frame heard at [zeroMs].
+      timeline.value = { clock: transportClock(Math.round(zeroMs * 48), 48000, bpm), frames: { frame: 0, ms: 0, rate: 48000 } }
+    },
+    missing(pad) {
+      for (const l of [...missingL]) l(pad)
     },
     latencyHint: signal<WebLatencyHint>(WebLatencyHint.ZERO),
     engine: signal<LiveEngineInfo | null>(null),
