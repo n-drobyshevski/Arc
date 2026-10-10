@@ -21,6 +21,7 @@ import { Keys } from './keys'
 import { LABELS, ROWS, noteName, physicalPad, type PhysicalPad } from './padNotes'
 import { Pattern, ProjectSeq, Seq, Timing, TimingSettings, pattern, patternNote, scene, timingTicks, type PatternNote } from './pattern'
 import { PadSoundCache } from './padSoundCache'
+import { unnamed } from './factorySounds'
 import { SceneOps } from './scenes'
 import { Steps } from './steps'
 import { BEATS_PER_BAR } from './tempo'
@@ -90,7 +91,9 @@ export const SoundStatus = {
  * A sound line matched to the user's sounds: the [pad] and what the card
  * [wanted], the [slot] and [name] to put on it (null for both when [status]
  * is MISSING), the slot the pad plays now ([currentSlot], null when not known)
- * and the [status].
+ * and the [status]. [unverified] is set when the slot is a factory sound the
+ * EP-133 lists without a name ("200.pcm", see FactorySounds.unnamed): it is
+ * used by its slot, as its name can't be checked.
  */
 export interface SoundPick {
   readonly pad: PhysicalPad
@@ -99,6 +102,7 @@ export interface SoundPick {
   readonly name: string | null
   readonly currentSlot: number | null
   readonly status: SoundStatus
+  readonly unverified: boolean
 }
 
 /** Something wrong with a card, at [line] (counted from 1 in the text read): an [error] stops the card being read, a warning doesn't. */
@@ -908,15 +912,39 @@ function lookUp(available: ReadonlyMap<number, string>, name: string, now: numbe
 }
 
 /**
+ * The names to show and match for the device's sounds ([device], slot to
+ * name): a slot the device lists unnamed (FactorySounds.unnamed, "200.pcm")
+ * takes the name the [factory] pack has for that slot when it has one (not
+ * blank, and not unnamed itself); every other slot is as the device has it.
+ */
+function soundNames(device: ReadonlyMap<number, string>, factory: ReadonlyMap<number, string> | null): Map<number, string> {
+  const out = new Map(device)
+  if (factory === null) return out
+  for (const [slot, name] of device) {
+    const named = factory.get(slot)
+    if (named !== undefined && unnamed(slot, name) && named.trim() !== '' && !unnamed(slot, named)) out.set(slot, named)
+  }
+  return out
+}
+
+// Whether [slot] is in [available] under the name the EP-133 gives a sound nobody named ("200.pcm").
+function unnamedIn(available: ReadonlyMap<number, string>, slot: number): boolean {
+  const name = available.get(slot)
+  return name !== undefined && unnamed(slot, name)
+}
+
+/**
  * The card's sound lines matched to the user's sounds, in the card's order
- * (sections as given, pads in keypad order). [available] is slot to name,
- * [current] the slot a pad plays now (null when not known). A line with a name
- * is matched like this: the slot is used when it holds a sound of that name
- * (PadSoundCache.sameName: ignoring case, spaces and ".wav"); otherwise the
- * sound is looked up by name and the slot that holds it is used (the pad's own
- * slot first, then the lowest); failing that the line is MISSING. A line
- * without a name uses its slot when [available] has it. A pick whose slot is
- * already on the pad is SAME, found by name or not.
+ * (sections as given, pads in keypad order). [available] is slot to name
+ * (soundNames), [current] the slot a pad plays now (null when not known). A
+ * line with a name is matched like this: the slot is used when it holds a
+ * sound of that name (PadSoundCache.sameName: ignoring case, spaces and
+ * ".wav"); otherwise the sound is looked up by name and the slot that holds it
+ * is used (the pad's own slot first, then the lowest); failing that, a slot
+ * that is there but unnamed ("200.pcm", a factory sound whose name can't be
+ * checked) is used all the same, as a pick that is `unverified`; else the line
+ * is MISSING. A line without a name uses its slot when [available] has it. A
+ * pick whose slot is already on the pad is SAME, found by name or not.
  */
 function resolveSounds(card: BeatCard, available: ReadonlyMap<number, string>, current: (pad: PhysicalPad) => number | null): SoundPick[] {
   const picks: SoundPick[] = []
@@ -926,13 +954,18 @@ function resolveSounds(card: BeatCard, available: ReadonlyMap<number, string>, c
       if (wanted === undefined) continue
       const pad = physicalPad(s.group, offset)
       const now = current(pad)
-      const name = wanted.name !== null && wanted.name.trim() !== '' ? wanted.name : null
+      // The device's own file name for the slot ("200.pcm") says nothing about the sound: it counts as no name.
+      const name = wanted.name !== null && wanted.name.trim() !== '' && !unnamed(wanted.slot, wanted.name) ? wanted.name : null
       const direct = available.has(wanted.slot) && (name === null || holds(available.get(wanted.slot), name)) ? wanted.slot : null
       const byName = direct === null && name !== null ? lookUp(available, name, now) : null
-      const slot = direct ?? byName
-      if (slot === null) picks.push({ pad, wanted, slot: null, name: null, currentSlot: now, status: SoundStatus.MISSING })
-      else if (slot === now) picks.push({ pad, wanted, slot, name: available.get(slot) ?? null, currentSlot: now, status: SoundStatus.SAME })
-      else picks.push({ pad, wanted, slot, name: available.get(slot) ?? null, currentSlot: now, status: byName !== null ? SoundStatus.FOUND_BY_NAME : SoundStatus.CHANGE })
+      const slot = direct ?? byName ?? (unnamedIn(available, wanted.slot) ? wanted.slot : null)
+      if (slot === null) {
+        picks.push({ pad, wanted, slot: null, name: null, currentSlot: now, status: SoundStatus.MISSING, unverified: false })
+        continue
+      }
+      const unverified = unnamedIn(available, slot)
+      const status = slot === now ? SoundStatus.SAME : byName !== null ? SoundStatus.FOUND_BY_NAME : SoundStatus.CHANGE
+      picks.push({ pad, wanted, slot, name: available.get(slot) ?? null, currentSlot: now, status, unverified })
     }
   }
   return picks
@@ -943,14 +976,17 @@ function resolveSounds(card: BeatCard, available: ReadonlyMap<number, string>, c
  * [source] (the EP-133, the last read or the factory pack, as ClaudeText words
  * them), then one line "slot name" for each sound of [available] from slot 1 to
  * 999, in slot order. Names are cleaned as the card's are, so a name read from
- * the list reads back the same. The text ends in a newline.
+ * the list reads back the same. When any listed name is unnamed ("200.pcm"),
+ * ClaudeText.UNNAMED_SOUNDS_NOTE follows the header. The text ends in a newline.
  */
 function soundList(source: string, available: ReadonlyMap<number, string>): string {
   const out: string[] = [ClaudeText.soundListHeader(source)]
-  for (const slot of [...available.keys()].filter((k) => k >= SLOT_MIN && k <= SLOT_MAX).sort((a, b) => a - b)) {
-    const name = cleanText(available.get(slot)!, Infinity)
-    out.push(name === '' ? `${slot}` : `${slot} ${name}`)
-  }
+  const lines = [...available.keys()]
+    .filter((k) => k >= SLOT_MIN && k <= SLOT_MAX)
+    .sort((a, b) => a - b)
+    .map((slot): [number, string] => [slot, cleanText(available.get(slot)!, Infinity)])
+  if (lines.some(([slot, name]) => unnamed(slot, name))) out.push(ClaudeText.UNNAMED_SOUNDS_NOTE)
+  for (const [slot, name] of lines) out.push(name === '' ? `${slot}` : `${slot} ${name}`)
   return out.join('\n') + '\n'
 }
 
@@ -987,4 +1023,4 @@ function plan(seq: ProjectSeq, card: BeatCard): CardImport {
 }
 
 /** The Kotlin `BeatCards` object. */
-export const BeatCards = { VERSION, MAX_NAME, TIDY_COMMENT, read, hasCard, write, fromPatterns, resolveSounds, soundList, plan } as const
+export const BeatCards = { VERSION, MAX_NAME, TIDY_COMMENT, read, hasCard, write, fromPatterns, resolveSounds, soundNames, soundList, plan } as const

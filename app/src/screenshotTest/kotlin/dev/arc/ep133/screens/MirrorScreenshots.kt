@@ -2213,3 +2213,50 @@ fun BeatSheetSoundsPreview() = BeatSheet(SOUND_BEAT, sounds = sheetSounds(false)
 @Preview(name = "Beat sheet sounds offline dark", widthDp = 360, heightDp = 1010, showBackground = true)
 @Composable
 fun BeatSheetSoundsOfflineDarkPreview() = BeatSheet(SOUND_BEAT, dark = true, sounds = sheetSounds(true))
+
+// An EP-133 that lists its factory sounds without names ("012.pcm"): the card's names can't be checked, so the rows use
+// the slots, show the device's name and say what the card called it; A5's slot isn't there at all.
+private val unnamedList = SoundSet(
+    ClaudeText.SOUNDS_FROM_DEVICE,
+    mapOf(5 to "KICK DUSTY", 12 to "012.pcm", 90 to "SNARE OLD", 105 to "105.pcm", 200 to "200.pcm", 343 to "343.pcm"),
+)
+
+private const val UNNAMED_BEAT = """ARC BEAT 1
+name Factory kit
+tempo 96
+
+[A] bars 1 step 1/16
+sound A7 12 KICK DEEP
+sound A9 105 SNARE TIGHT
+sound A4 200 HH CLOSED
+sound A5 301 RIM DUSTY
+A7 | X... ..x. X... .... |
+A9 | .... X... .... X... |
+A4 | x.x. x.x. x.x. x.x. |
+A5 | .... .... ..o. .... |
+"""
+
+// The SOUNDS block with factory sounds the EP-133 keeps unnamed: ticked as any change, the device's name in bold and
+// "Card says ... name not checked" under it.
+@PreviewTest
+@Preview(name = "Beat sheet sounds unnamed", widthDp = 360, heightDp = 1010, showBackground = true)
+@Composable
+fun BeatSheetSoundsUnnamedPreview() =
+    BeatSheet(UNNAMED_BEAT, sounds = { card -> soundsUi(card, unnamedList, { soundNow[it] }, { soundWas[it] }, offline = false, project = 3) })
+
+private const val ABSENT_BEAT = """ARC BEAT 1
+name Bass line
+tempo 96
+
+[A] bars 1 step 1/16
+sound A7 301 RIM DUSTY
+sound A9 410 SUB LOW
+A7 | X... ..x. X... .... |
+A9 | .... X... .... X... |
+"""
+
+// Every sound line is nowhere in the user's list: all amber, no PUT ON PADS, and the hint to share with the sound list.
+@PreviewTest
+@Preview(name = "Beat sheet sounds none", widthDp = 360, heightDp = 860, showBackground = true)
+@Composable
+fun BeatSheetSoundsNonePreview() = BeatSheet(ABSENT_BEAT, sounds = sheetSounds(false))

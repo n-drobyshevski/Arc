@@ -331,6 +331,7 @@ private fun SoundsBlock(
             SoundRow(row, isTicked(row), on) { onTick(row) }
         }
     }
+    if (sounds.noneFound) Text(ClaudeText.NONE_ON_DEVICE, style = ArcType.small, color = c.graphite)
     if (on && ticked > 0) {
         Text(
             if (sounds.offline) ClaudeText.SOUNDS_OFFLINE_NOTE else ClaudeText.soundsNote(ticked, sounds.project),
@@ -372,12 +373,14 @@ private fun SoundRow(row: SoundRowUi, ticked: Boolean, chipOn: Boolean, onTick: 
     val pick = row.pick
     val wanted = pick.wanted
     val missing = pick.status == SoundStatus.MISSING
-    val now = if (missing) null else ClaudeText.soundName(pick.slot ?: wanted.slot, pick.name)
+    // A sound listed unnamed is its file name ("012.pcm") already: the slot isn't said twice.
+    val now = if (missing) null else if (pick.unverified && pick.name != null) pick.name else ClaudeText.soundName(pick.slot ?: wanted.slot, pick.name)
+    val cardSays = row.cardSays
     val description = when {
         missing -> ClaudeText.soundRowMissing(pick.pad, wanted.slot, wanted.name)
         pick.status == SoundStatus.SAME -> ClaudeText.soundRowSame(pick.pad, now.orEmpty())
         else -> ClaudeText.soundRowName(pick.pad, row.oldName, now.orEmpty())
-    }
+    } + (cardSays?.let { ". " + ClaudeText.cardSays(it) } ?: "")
     Row(
         Modifier
             .fillMaxWidth()
@@ -408,17 +411,20 @@ private fun SoundRow(row: SoundRowUi, ticked: Boolean, chipOn: Boolean, onTick: 
                 Text(now.orEmpty(), style = ArcType.fieldLabel, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(ClaudeText.ALREADY_THERE, style = ArcType.tiny, color = c.graphite, maxLines = 1)
             }
-            else -> Text(
-                buildAnnotatedString {
-                    row.oldName?.let {
-                        withStyle(SpanStyle(color = c.graphite, textDecoration = TextDecoration.LineThrough)) { append(it) }
-                        append("  \u2192  ")
-                    }
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = c.ink)) { append(now.orEmpty()) }
-                },
-                style = ArcType.small, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f).alpha(dim),
-            )
+            else -> Column(Modifier.weight(1f).alpha(dim)) {
+                Text(
+                    buildAnnotatedString {
+                        row.oldName?.let {
+                            withStyle(SpanStyle(color = c.graphite, textDecoration = TextDecoration.LineThrough)) { append(it) }
+                            append("  \u2192  ")
+                        }
+                        withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = c.ink)) { append(now.orEmpty()) }
+                    },
+                    style = ArcType.small, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                )
+                // A factory sound the EP-133 lists without a name: used by its slot, the card's name not checked.
+                cardSays?.let { Text(ClaudeText.cardSays(it), style = ArcType.tiny, color = c.graphite, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+            }
         }
     }
 }

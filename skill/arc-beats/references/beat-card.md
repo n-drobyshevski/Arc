@@ -99,12 +99,16 @@ A line `sound <pad> <slot> [name]` inside a section says which sound that pad sh
 - A card with more than one section also adds a new scene pointing at the new patterns; groups the card doesn't have keep pattern 1's number from the scene playing.
 - The tempo is offered, not forced.
 - **Sound lines:** each one is matched to the user's sounds: the EP-133's list when connected, or the last read or factory pack offline.
-  - A slot that holds the named sound (same name, ignoring case, spaces and ".wav") is used.
-  - When the name doesn't match the slot, or the slot is empty, Arc looks the name up and uses the slot that holds it. Failing that, the line is skipped with a warning.
+  - A slot that holds the named sound (same name, ignoring case, spaces and ".wav") is used. A name like `200.pcm` on its own slot 200 counts as no name: the slot is used if it is in the list, whatever it is called there (the factory pack may have named it).
+  - When the name doesn't match the slot, or the slot is empty, Arc looks the name up and uses the slot that holds it.
+  - Failing that, a slot that is in the list under an unnamed name (`200.pcm`, see "Sound list") is accepted by its slot, whatever name the card gave: it is a factory sound whose name can't be checked. The sheet shows the device's name and "Card says <name> · name not checked".
+  - Failing that, the line is skipped with a warning.
   - A pad that already plays the sound is left alone.
 - **Applying sounds:** connected, the chosen sounds are written to the EP-133's pads in the active project, and those pads' own settings reset to the sound's. Offline, they become Arc's offline pad changes, which go to the device on reconnect. The import sheet lists each change with a tick box, all ticked by default.
 - One undo removes all of it, the pads' sounds included.
 
 ## Sound list (Arc's share, outside the card)
 When sharing, Arc can add the user's sounds after the card's closing fence, so Claude can choose from them. The list starts with a line `My EP-133's sounds (slot name), from <the EP-133 | the last read | the factory pack>:`, followed by one sound per line as `<slot> <name>` in slot order. It isn't part of the card, and readers ignore it, because they stop at the card's closing fence.
+
+The EP-133 lists its factory sounds without names: a slot's name is its file name, `200.pcm` for slot 200. When Arc has the factory pack (**Get** on the Factory sounds row in Live tools) it lists the pack's name for those slots instead, so they read as `200 HH CLOSED`. When some listed name is still like that, Arc adds one line right after the header: `Names like 200.pcm are factory sounds the EP-133 keeps without a name. By slot: kicks 1-99, snares 100-199, hats 200-299, percussion 300-399, bass 400-499, melodic 500-599.` Readers skip it, as they skip the header.
 

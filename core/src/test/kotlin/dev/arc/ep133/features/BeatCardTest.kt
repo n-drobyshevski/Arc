@@ -818,6 +818,71 @@ class BeatCardTest {
         assertEquals(listOf(SoundStatus.CHANGE), BeatCards.resolveSounds(c, mapOf(20 to "Hat #2")) { null }.map { it.status })
     }
 
+    @Test
+    fun `sound names take the factory pack's name for a slot the device lists unnamed`() {
+        val device = mapOf(1 to "001.pcm", 200 to "200.pcm", 201 to " 201.PCM ", 202 to "202.pcm", 203 to "203.pcm", 204 to "Mine", 300 to "300.pcm")
+        val factory = mapOf(1 to "KICK 808", 200 to "HH CLOSED", 201 to "HH OPEN", 202 to "202.pcm", 203 to "  ", 204 to "Factory", 999 to "Other")
+        assertEquals(
+            mapOf(1 to "KICK 808", 200 to "HH CLOSED", 201 to "HH OPEN", 202 to "202.pcm", 203 to "203.pcm", 204 to "Mine", 300 to "300.pcm"),
+            BeatCards.soundNames(device, factory),
+        )
+        // Without the pack the device's names stand.
+        assertEquals(device, BeatCards.soundNames(device, null))
+        assertEquals(device, BeatCards.soundNames(device, emptyMap()))
+    }
+
+    @Test
+    fun `a card name that is its own slot's file name counts as no name`() {
+        // The skill has Claude copy "200.pcm"; after the factory pack the slot is named, and the line still resolves.
+        val available = mapOf(200 to "HH CLOSED")
+        val picks = BeatCards.resolveSounds(BeatCard(null, null, 50, listOf(a(sounds = mapOf(9 to snd(200, "200.pcm"))))), available) { null }
+        assertEquals(listOf("A7 CHANGE 200 HH CLOSED null false"), picks.map { pick(it) + " " + it.unverified })
+    }
+
+    @Test
+    fun `an unnamed slot is used by its slot, unverified`() {
+        val available = mapOf(200 to "200.pcm", 201 to "201.pcm", 205 to "HH CLOSED", 12 to "Kick")
+        val current = mapOf(PhysicalPad(0, 9) to 200, PhysicalPad(0, 10) to 200)
+        val sounds = mapOf(
+            9 to snd(200, "HH CLOSED"), // the slot is unnamed, but the name is found in 205 first
+            10 to snd(200, "SNARE"), // the name is nowhere: the unnamed slot is used, and it is on the pad already
+            11 to snd(201, "SNARE"), // ... a change
+            6 to snd(201), // no name
+            7 to snd(201, "201.pcm"), // the card gave the device's own name
+            8 to snd(12, "Snare"), // a named slot with another sound: missing
+            5 to snd(202, "HH OPEN"), // no such slot
+        )
+        val picks = BeatCards.resolveSounds(BeatCard(null, null, 50, listOf(a(sounds = sounds))), available) { current[it] }
+        assertEquals(
+            listOf(
+                "A7 FOUND_BY_NAME 205 HH CLOSED 200 false",
+                "A8 SAME 200 200.pcm 200 true",
+                "A9 CHANGE 201 201.pcm null true",
+                "A4 CHANGE 201 201.pcm null true",
+                "A5 CHANGE 201 201.pcm null true",
+                "A6 MISSING null null null false",
+                "A3 MISSING null null null false",
+            ),
+            picks.map { pick(it) + " " + it.unverified },
+        )
+        // Named sounds are never unverified.
+        val named = BeatCards.resolveSounds(BeatCard(null, null, 50, listOf(a(sounds = mapOf(9 to snd(12, "Kick"))))), available) { null }
+        assertEquals(listOf(false), named.map { it.unverified })
+    }
+
+    @Test
+    fun `the sound list notes the factory sounds without names, when it lists one`() {
+        val note = "Names like 200.pcm are factory sounds the EP-133 keeps without a name. By slot: kicks 1-99, snares 100-199, hats 200-299, percussion 300-399, bass 400-499, melodic 500-599."
+        assertEquals(note, ClaudeText.UNNAMED_SOUNDS_NOTE)
+        val text = BeatCards.soundList(ClaudeText.SOUNDS_FROM_DEVICE, mapOf(200 to "200.pcm", 12 to "Kick", 343 to "HH"))
+        assertEquals("My EP-133's sounds (slot name), from the EP-133:\n$note\n12 Kick\n200 200.pcm\n343 HH\n", text)
+        // A name that is another slot's file name is a name; none unnamed: no note.
+        assertFalse(BeatCards.soundList(ClaudeText.SOUNDS_FROM_DEVICE, mapOf(200 to "201.pcm", 12 to "Kick")).contains("Names like"))
+        // The note is not part of a card.
+        val shared = "```\n" + BeatCards.write(BeatCard(null, null, 50, listOf(a(hit(0, 9))))) + "```\n" + text
+        assertEquals(1, BeatCards.read(shared).card!!.sections.size)
+    }
+
     // ---- import ----
 
     private val kick = Pattern(1, listOf(hit(0, 9)))

@@ -539,6 +539,8 @@ describe('FeatureTextTest', () => {
     expect([ClaudeText.soundName(12, 'Micro kick'), ClaudeText.soundName(12, null)]).toEqual(['012 Micro kick', '012'])
     expect([ClaudeText.soundMissing(301, 'Rim dusty'), ClaudeText.soundMissing(301, null)]).toEqual(['Not on your EP-133: 301 Rim dusty', 'Not on your EP-133: 301'])
     expect(ClaudeText.ALREADY_THERE).toBe('Already there')
+    expect(ClaudeText.cardSays('HH CLOSED')).toBe('Card says HH CLOSED \u00B7 name not checked')
+    expect(ClaudeText.NONE_ON_DEVICE).toBe('None of these sounds are on your EP-133. Share a beat with your sound list so Claude picks from yours.')
     expect([
       ClaudeText.soundRowName(physicalPad(0, 9), 'Kick dusty', '012 Micro kick'),
       ClaudeText.soundRowName(physicalPad(0, 9), null, '012 Micro kick'),

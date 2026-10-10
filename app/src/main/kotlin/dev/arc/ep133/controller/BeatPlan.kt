@@ -7,6 +7,7 @@ import dev.arc.ep133.features.CardRead
 import dev.arc.ep133.features.CardSection
 import dev.arc.ep133.features.CardSound
 import dev.arc.ep133.features.OfflinePads
+import dev.arc.ep133.features.PadSoundCache
 import dev.arc.ep133.features.PadNotes
 import dev.arc.ep133.features.PatternRecorder
 import dev.arc.ep133.features.PhysicalPad
@@ -40,15 +41,20 @@ internal class SoundSet(val source: String, val names: Map<Int, String>) {
 
 /**
  * The sounds [m] (Live's mirror) can choose from: the EP-133's, read, while connected; offline the list the view shows,
- * the last read's or the factory pack's ([OfflineSounds.base]). Null when none is known (nothing read, or no pack).
+ * the last read's or the factory pack's ([OfflineSounds.base]). Null when none is known (nothing read, or no pack). A
+ * sound the EP-133 lists unnamed ("200.pcm") has the name [factory] (the pack's, by slot; null without the pack) gives it
+ * ([BeatCards.soundNames]).
  */
-internal fun soundSetOf(m: MirrorUi?): SoundSet? {
+internal fun soundSetOf(m: MirrorUi?, factory: Map<Int, String>? = null): SoundSet? {
     if (m == null) return null
-    if (m.offline == null) return m.sounds.takeIf { it.isNotEmpty() }?.let { SoundSet(ClaudeText.SOUNDS_FROM_DEVICE, it.associate { e -> e.slot to e.name }) }
+    if (m.offline == null) return m.sounds.takeIf { it.isNotEmpty() }?.let { SoundSet(ClaudeText.SOUNDS_FROM_DEVICE, BeatCards.soundNames(it.associate { e -> e.slot to e.name }, factory)) }
     val o = m.offlineSounds ?: return null
-    val factory = o.base == SoundSource.FACTORY
-    val list = (if (factory) o.factory else o.device)?.takeIf { it.isNotEmpty() } ?: return null
-    return SoundSet(if (factory) ClaudeText.SOUNDS_FROM_FACTORY else ClaudeText.SOUNDS_FROM_LAST_READ, list.associate { e -> e.slot to e.name })
+    val fromPack = o.base == SoundSource.FACTORY
+    val list = (if (fromPack) o.factory else o.device)?.takeIf { it.isNotEmpty() } ?: return null
+    return SoundSet(
+        if (fromPack) ClaudeText.SOUNDS_FROM_FACTORY else ClaudeText.SOUNDS_FROM_LAST_READ,
+        BeatCards.soundNames(list.associate { e -> e.slot to e.name }, factory),
+    )
 }
 
 /**
@@ -108,6 +114,13 @@ class SoundRowUi(val pick: SoundPick, val oldName: String?) {
 
     /** Whether the row can be ticked: the sound is somewhere in the list and not on the pad yet. */
     val changes: Boolean get() = pick.status == SoundStatus.CHANGE || pick.status == SoundStatus.FOUND_BY_NAME
+
+    /**
+     * The name the card gave a sound used by its slot because the EP-133 lists it unnamed ("200.pcm"), for the line
+     * "Card says HH CLOSED". Null for any other row, and when the card named no other sound than the one shown.
+     */
+    val cardSays: String?
+        get() = pick.takeIf { it.unverified }?.wanted?.name?.takeIf { it.isNotBlank() && !PadSoundCache.sameName(it, pick.name.orEmpty()) }
 }
 
 /**
@@ -117,6 +130,9 @@ class SoundRowUi(val pick: SoundPick, val oldName: String?) {
 class SoundsUi(val rows: List<SoundRowUi>, val offline: Boolean, val project: Int?) {
     /** The rows that can be ticked. */
     val changes: List<SoundRowUi> get() = rows.filter { it.changes }
+
+    /** Whether no sound line is on the user's EP-133 (every row is missing): the sheet says to share with the sound list. */
+    val noneFound: Boolean get() = rows.isNotEmpty() && rows.all { it.pick.status == SoundStatus.MISSING }
 }
 
 /**

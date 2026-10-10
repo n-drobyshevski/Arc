@@ -1075,6 +1075,50 @@ class SoundLists(unittest.TestCase):
         self.assertEqual([p.message for p in gone], ["A7: slot 12 holds 'Kick 808', and no slot holds 'Kick'; Arc will skip this sound line"])
 
 
+class UnnamedSounds(unittest.TestCase):
+    UNNAMED = {12: "012.pcm", 200: "200.pcm", 201: " 201.PCM ", 205: "HH CLOSED", 300: "Rim"}
+
+    def test_unnamed_slot_is_the_zero_padded_slot_and_pcm(self):
+        self.assertTrue(bc.unnamed_slot(200, "200.pcm"))
+        self.assertTrue(bc.unnamed_slot(12, " 012.PCM "))
+        self.assertFalse(bc.unnamed_slot(12, "12.pcm"))
+        self.assertFalse(bc.unnamed_slot(12, "013.pcm"))
+        self.assertFalse(bc.unnamed_slot(12, "Kick"))
+        self.assertFalse(bc.unnamed_slot(12, None))
+
+    def test_a_slot_listed_unnamed_is_used_by_its_slot(self):
+        def resolve(slot, name, current=None):
+            return bc.resolve_sound(bc.Sound(slot, name, 1), self.UNNAMED, current)
+
+        self.assertEqual(resolve(200, "HH SNAPPY"), 200)  # the name is nowhere: the unnamed slot is used
+        self.assertEqual(resolve(200, ""), 200)
+        self.assertEqual(resolve(200, "200.pcm"), 200)
+        self.assertEqual(resolve(200, "HH CLOSED"), 205)  # the name is found in another slot first
+        self.assertIsNone(resolve(202, "HH OPEN"))  # no such slot
+        self.assertIsNone(resolve(300, "Snare"))  # a named slot holding another sound
+
+    def test_a_name_that_is_its_slots_file_name_counts_as_no_name(self):
+        # The skill has Claude copy "200.pcm"; after the factory pack the slot is named, and the line still resolves.
+        self.assertEqual(bc.resolve_sound(bc.Sound(200, "200.pcm", 1), {200: "HH CLOSED"}), 200)
+        self.assertEqual(bc.check_sounds(one("[A]\nsound A7 200 200.pcm\n" + BAR + "\n"), {200: "HH CLOSED"}), [])
+
+    def test_check_sounds_notes_an_unnamed_slot_and_warns_about_the_rest(self):
+        card = one("[A]\nsound A7 200 HH SNAPPY\nsound A8 205 HH CLOSED\nsound A9 201 201.pcm\nsound A4 202 HH OPEN\n" + BAR + "\n")
+        found = bc.check_sounds(card, self.UNNAMED)
+        self.assertEqual([(p.line, p.level, p.code) for p in found], [
+            (3, bc.NOTE, "sound-unnamed"),
+            (5, bc.NOTE, "sound-unnamed"),
+            (6, bc.WARNING, "sound-missing"),
+        ])
+        self.assertEqual(found[0].message, "A7: slot 200 is a factory sound without a name; using it by slot")
+        self.assertEqual(str(found[0]), "line 3: note: A7: slot 200 is a factory sound without a name; using it by slot")
+
+    def test_the_share_s_note_about_unnamed_names_is_skipped_in_the_list(self):
+        shared = "My EP-133's sounds (slot name), from the EP-133:\nNames like 200.pcm are factory sounds the EP-133 keeps without a name. " \
+                 "By slot: kicks 1-99, snares 100-199, hats 200-299, percussion 300-399, bass 400-499, melodic 500-599.\n12 Kick\n200 200.pcm\n"
+        self.assertEqual(bc.parse_sound_list(shared), {12: "Kick", 200: "200.pcm"})
+
+
 class SoundReports(unittest.TestCase):
     CARD = "[A]\nsound A7 12 Kick 808\nsound A2 300 Open Hat\nA7 thing | X... .... X... .... |\nA9 | .... X... .... X... |\nA4 hat | x.x. x.x. x.x. x.x. |\n"
 
@@ -1139,6 +1183,16 @@ class SoundsCli(unittest.TestCase):
         self.assertIn("line 5: warning: A8: slot 99 isn't in the sound list, and no slot holds 'Cymbal'; Arc will skip this sound line", out)
         self.assertTrue(out[-1].startswith("OK"))
         self.assertIn(", 3 sounds", out[-1])
+
+    def test_an_unnamed_slot_is_a_note_not_a_warning(self):
+        with open(self.list, "w", encoding="utf-8") as f:
+            f.write("My EP-133's sounds (slot name), from the EP-133:\nNames like 200.pcm are factory sounds the EP-133 keeps without a name. By slot: kicks 1-99.\n12 Kick 808\n200 200.pcm\n")
+        r = self.run_cli("check", "--sounds", self.list, stdin="ARC BEAT 1\n[A]\nsound A4 200 HH CLOSED\n" + BAR + "\n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        out = r.stdout.splitlines()
+        self.assertIn("line 3: note: A4: slot 200 is a factory sound without a name; using it by slot", out)
+        self.assertNotIn("warning", r.stdout)
+        self.assertTrue(out[-1].startswith("OK"))
 
     def test_check_without_the_option_does_not_look_at_sounds(self):
         r = self.run_cli("check", stdin=self.card)

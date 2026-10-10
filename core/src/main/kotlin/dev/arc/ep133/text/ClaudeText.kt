@@ -82,6 +82,17 @@ object ClaudeText {
     /** The line before the sound list (the spec's): "My EP-133's sounds (slot name), from the EP-133:". [source] is one of the three above. */
     fun soundListHeader(source: String) = "My EP-133's sounds (slot name), from $source:"
 
+    // The words the factory blocks ([FeatureText.FACTORY_BLOCKS], in order) go by in the sound list's note.
+    private val FACTORY_WORDS = listOf("kicks", "snares", "hats", "percussion", "bass", "melodic")
+
+    /**
+     * The line after the header when some listed name is a slot's file name ("200.pcm"): the EP-133 keeps its factory
+     * sounds without names, so the slot says what a sound is. "Names like 200.pcm are factory sounds the EP-133 keeps
+     * without a name. By slot: kicks 1-99, snares 100-199, ..., melodic 500-599."
+     */
+    val UNNAMED_SOUNDS_NOTE: String = "Names like 200.pcm are factory sounds the EP-133 keeps without a name. By slot: " +
+        FeatureText.FACTORY_BLOCKS.zip(FACTORY_WORDS) { r, w -> "$w ${r.first}-${r.last}" }.joinToString(", ") + "."
+
     /**
      * The tick box under the share keys: "With my sound list · 212 sounds" ([count] is how many Arc knows: the EP-133's,
      * the last read's or the factory pack's). Off, the card is shared with its sound lines alone.
@@ -166,6 +177,15 @@ object ClaudeText {
 
     /** What a row says when the sound is nowhere in the user's list: "Not on your EP-133: 301 Rim dusty". */
     fun soundMissing(slot: Int, name: String?) = "Not on your EP-133: ${soundName(slot, name)}"
+
+    /**
+     * The small line under a sound the EP-133 lists without a name ("200.pcm"), used by its slot: "Card says HH CLOSED \u00B7 name not
+     * checked" ([name] is the card's).
+     */
+    fun cardSays(name: String) = "Card says $name \u00B7 name not checked"
+
+    /** Under the rows when no sound line of the card is on the user's EP-133. */
+    const val NONE_ON_DEVICE = "None of these sounds are on your EP-133. Share a beat with your sound list so Claude picks from yours."
 
     /** A row for screen readers: "A7: Kick dusty becomes 012 Micro kick", "A7: 012 Micro kick, already there", or the missing reason. */
     fun soundRowName(pad: PhysicalPad, old: String?, change: String) = padLabel(pad) + ": " + (old?.let { "$it becomes " } ?: "") + change

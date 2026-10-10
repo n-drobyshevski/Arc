@@ -318,6 +318,38 @@ class BeatPlanTest {
     }
 
     @Test
+    fun `the factory pack names the sounds the EP-133 lists unnamed, in the sound set and the sheet`() {
+        val pack = mapOf(12 to "KICK DEEP", 200 to "HH CLOSED", 201 to "201.pcm")
+        val connected = MirrorUi(sounds = entries(12 to "012.pcm", 200 to "200.pcm", 201 to "201.pcm", 5 to "Mine"))
+        assertEquals(mapOf(12 to "KICK DEEP", 200 to "HH CLOSED", 201 to "201.pcm", 5 to "Mine"), soundSetOf(connected, pack)!!.names)
+        assertEquals(mapOf(12 to "012.pcm", 200 to "200.pcm", 201 to "201.pcm", 5 to "Mine"), soundSetOf(connected)!!.names)
+        val offline = MirrorUi(offline = "Last seen", offlineSounds = OfflineSounds(SoundSource.DEVICE, entries(200 to "200.pcm"), entries(200 to "HH CLOSED"), emptySet()))
+        assertEquals(ClaudeText.SOUNDS_FROM_LAST_READ to mapOf(200 to "HH CLOSED"), soundSetOf(offline, pack)!!.let { it.source to it.names })
+        // With the names, a card's line is found; without them it is taken by its slot, unverified, and the row says what the card called it.
+        val card = card(CardSection(0, null, pattern(hit(0)), mapOf(9 to CardSound(200, "HH CLOSED"), 11 to CardSound(201, "SNARE"), 0 to CardSound(201, "201.pcm"), 3 to CardSound(5, "Mine"))))
+        fun rows(set: SoundSet?) = soundsUi(card, set, { null }, nameOf, offline = false, project = 1)!!.rows
+        // Keypad order: 7, 9, 1, then . (offsets 9, 11, 3, 0). Slot 201 is unnamed in the pack too.
+        val named = rows(soundSetOf(connected, pack))
+        assertEquals(listOf(false, true, false, true), named.map { it.pick.unverified })
+        assertEquals(listOf(null, "SNARE", null, null), named.map { it.cardSays })
+        val bare = rows(soundSetOf(connected))
+        assertEquals(listOf(true, true, false, true), bare.map { it.pick.unverified })
+        // The card's name is only quoted where it differs from what the row shows.
+        assertEquals(listOf("HH CLOSED", "SNARE", null, null), bare.map { it.cardSays })
+        assertEquals(List(4) { SoundStatus.CHANGE }, bare.map { it.pick.status })
+    }
+
+    @Test
+    fun `the hint to share the sound list shows when every sound line is missing`() {
+        val card = card(CardSection(0, null, pattern(hit(0)), mapOf(9 to CardSound(301, "Rim"), 11 to CardSound(410, null))))
+        val set = SoundSet(ClaudeText.SOUNDS_FROM_DEVICE, mapOf(12 to "Kick", 301 to "Rim"))
+        assertTrue(soundsUi(card, SoundSet(ClaudeText.SOUNDS_FROM_DEVICE, mapOf(12 to "Kick")), { null }, nameOf, offline = false, project = 1)!!.noneFound)
+        assertTrue(soundsUi(card, null, { null }, nameOf, offline = false, project = 1)!!.noneFound)
+        // One found is enough to leave it out.
+        assertFalse(soundsUi(card, set, { null }, nameOf, offline = false, project = 1)!!.noneFound)
+    }
+
+    @Test
     fun `taking the sounds back offline restores each pad's change as it was, or drops it, never a recording gone to Takes`() {
         val a = PadTarget(1, 0, 1, 10)
         val b = PadTarget(1, 0, 2, 11)

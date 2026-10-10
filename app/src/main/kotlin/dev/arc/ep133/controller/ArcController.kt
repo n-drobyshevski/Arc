@@ -199,6 +199,11 @@ data class UiState(
     val backups: List<BackupRecord> = emptyList(),
     /** False until the library has been read once (the empty state stays hidden until then). */
     val libraryLoaded: Boolean = false,
+    /**
+     * The factory pack's name for each sound, once the library has the pack and it was read (null otherwise): what a
+     * slot the EP-133 lists unnamed ("200.pcm") is called in the sound list a share carries and in a card's sound lines.
+     */
+    val factoryNames: Map<Int, String>? = null,
     val freshId: String? = null,
     val task: TaskUi? = null,
     val spaceLeft: Long? = null,
@@ -953,6 +958,7 @@ class ArcController(
                 .catch { e -> toast(Strings.libraryFailed(e.message ?: e.toString()), error = true) }
                 .collect { list ->
                     _state.update { it.copy(backups = list, libraryLoaded = true, spaceLeft = runCatching { library.spaceLeft() }.getOrNull()) }
+                    refreshFactoryNames()
                     refreshOffline()
                 }
         }
@@ -1729,6 +1735,17 @@ class ArcController(
         }
         factorySnaps = b.id to snaps
         return snaps
+    }
+
+    /**
+     * [UiState.factoryNames] from the library's factory pack: read once per pack ([factorySnapshots] keeps it), so
+     * sharing and receiving a beat never open the pack themselves. Cleared when the pack is deleted.
+     */
+    private fun refreshFactoryNames() {
+        scope.launch {
+            val names = factorySnapshots().values.firstOrNull()?.names?.takeIf { it.isNotEmpty() }
+            _state.update { if (it.factoryNames == names) it else it.copy(factoryNames = names) }
+        }
     }
 
     /**
@@ -5103,10 +5120,12 @@ class ArcController(
         if (group != null && group !in 0..3) return null
         val bpm = patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo)
         val m = mirror
+        val set = soundSetOf(_state.value.mirror, _state.value.factoryNames)
+        // The pad's sound as the list names it, the factory pack's name standing in for an unnamed "200.pcm".
         val sounds = { pad: dev.arc.ep133.features.PhysicalPad ->
-            m?.slotOf(pad)?.let { slot -> dev.arc.ep133.features.CardSound(slot, m.nameOf(pad)) }
+            m?.slotOf(pad)?.let { slot -> dev.arc.ep133.features.CardSound(slot, set?.names?.get(slot) ?: m.nameOf(pad)) }
         }
-        val list = if (settings.value.shareSounds) soundSetOf(_state.value.mirror) else null
+        val list = if (settings.value.shareSounds) set else null
         return beatShare(projectSeq, group, bpm, settings.value.timingSwing, ::mirrorName, sounds, list)
     }
 
@@ -5133,7 +5152,7 @@ class ArcController(
     // The sheet for [read], planned into the project's patterns as they are now.
     private fun showBeat(read: dev.arc.ep133.features.CardRead) {
         val m = mirror
-        val set = soundSetOf(_state.value.mirror)
+        val set = soundSetOf(_state.value.mirror, _state.value.factoryNames)
         val offline = _state.value.device == null
         val project = m?.snapshot(System.nanoTime())?.activeProject
         _beatImport.value = beatImportUi(read, projectSeq, patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo), ::mirrorName) { card ->
@@ -5227,7 +5246,7 @@ class ArcController(
     /** The sound lines the sheet had ticked ([ticked]) that still change their pad: the card matched to the sounds as they are now. */
     private fun importPicks(card: dev.arc.ep133.features.BeatCard, ticked: Set<dev.arc.ep133.features.PhysicalPad>): List<dev.arc.ep133.features.SoundPick> {
         if (ticked.isEmpty()) return emptyList()
-        val set = soundSetOf(_state.value.mirror) ?: return emptyList()
+        val set = soundSetOf(_state.value.mirror, _state.value.factoryNames) ?: return emptyList()
         val m = mirror
         return dev.arc.ep133.features.BeatCards.resolveSounds(card, set.names) { pad -> m?.slotOf(pad) }
             .filter { it.pad in ticked && it.slot != null && (it.status == dev.arc.ep133.features.SoundStatus.CHANGE || it.status == dev.arc.ep133.features.SoundStatus.FOUND_BY_NAME) }

@@ -17,8 +17,9 @@ a whole chat reply works too. Exit status: 0 fine, 1 the card has errors,
 
 SOUNDS.txt is the user's sound list as Arc's share adds it after the card
 (a header line, then one "<slot> <name>" line per sound; the header is
-optional). With it, check warns about each sound line whose slot or name
-isn't in the list.
+optional; so is the note after it about names like 200.pcm, which is skipped).
+With it, check warns about each sound line whose slot or name isn't in the
+list, and notes each one that uses a slot the EP-133 keeps without a name.
 """
 
 from __future__ import annotations
@@ -83,6 +84,7 @@ ASSUMED_KIT = {
 
 ERROR = "error"
 WARNING = "warning"
+NOTE = "note"
 
 
 @dataclass
@@ -732,26 +734,33 @@ def parse_sound_list(text: str) -> Dict[int, str]:
     return out
 
 
+def unnamed_slot(slot: int, name: Optional[str]) -> bool:
+    """Whether [name] is the one the EP-133 gives a sound nobody named, its slot's file ("200.pcm" for slot 200): a factory sound whose name can't be checked (FactorySounds.unnamed)."""
+    return name is not None and name.strip().lower() == "%03d.pcm" % slot
+
+
 def resolve_sound(sound: Sound, available: Dict[int, str], current: Optional[int] = None) -> Optional[int]:
     """The slot Arc would use for a sound line, by the spec's import rule; None when it would skip the line.
 
     The slot is used when it holds the named sound (same_name) or, with no name,
     when the list has it. Otherwise the name is looked up: the pad's own slot
-    [current] if it holds it, else the lowest slot that does.
+    [current] if it holds it, else the lowest slot that does. Failing that, a
+    slot the list has under an unnamed name ("200.pcm") is used all the same.
     """
-    name = sound.name
+    name = None if unnamed_slot(sound.slot, sound.name) else sound.name  # "200.pcm" for slot 200 is no name
     if sound.slot in available and (not name or same_name(clean_text(available[sound.slot]), name)):
         return sound.slot
-    if not name:
-        return None
-    same = sorted(slot for slot, have in available.items() if same_name(clean_text(have), name))
-    if current is not None and current in same:
-        return current
-    return same[0] if same else None
+    if name:
+        same = sorted(slot for slot, have in available.items() if same_name(clean_text(have), name))
+        if current is not None and current in same:
+            return current
+        if same:
+            return same[0]
+    return sound.slot if unnamed_slot(sound.slot, available.get(sound.slot)) else None
 
 
 def check_sounds(card: Card, available: Dict[int, str]) -> List[Problem]:
-    """A warning for each sound line whose slot or name isn't in [available] (slot -> name): the slot holds another sound, the sound is in another slot (which Arc would use) or in none."""
+    """A warning for each sound line whose slot or name isn't in [available] (slot -> name): the slot holds another sound, the sound is in another slot (which Arc would use) or in none. A line that uses a slot listed unnamed ("200.pcm") gets a note: its name can't be checked."""
     out: List[Problem] = []
     for pattern in card.patterns:
         for pad in KEYPAD_ORDER:
@@ -760,6 +769,8 @@ def check_sounds(card: Card, available: Dict[int, str]) -> List[Problem]:
                 continue
             label = pad_label(pattern.group, pad)
             slot = resolve_sound(sound, available)
+            if slot is not None and unnamed_slot(slot, available.get(slot)):
+                out.append(Problem(sound.line, NOTE, "sound-unnamed", "%s: slot %d is a factory sound without a name; using it by slot" % (label, slot)))
             if slot == sound.slot:
                 continue
             holds = available.get(sound.slot)

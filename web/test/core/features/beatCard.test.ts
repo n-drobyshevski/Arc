@@ -799,6 +799,61 @@ describe('BeatCardTest', () => {
     expect(BeatCards.resolveSounds(c, new Map([[20, 'Hat #2']]), () => null).map((p) => p.status)).toEqual([SoundStatus.CHANGE])
   })
 
+  it("sound names take the factory pack's name for a slot the device lists unnamed", () => {
+    const device = new Map([[1, '001.pcm'], [200, '200.pcm'], [201, ' 201.PCM '], [202, '202.pcm'], [203, '203.pcm'], [204, 'Mine'], [300, '300.pcm']])
+    const factory = new Map([[1, 'KICK 808'], [200, 'HH CLOSED'], [201, 'HH OPEN'], [202, '202.pcm'], [203, '  '], [204, 'Factory'], [999, 'Other']])
+    expect([...BeatCards.soundNames(device, factory)]).toEqual([[1, 'KICK 808'], [200, 'HH CLOSED'], [201, 'HH OPEN'], [202, '202.pcm'], [203, '203.pcm'], [204, 'Mine'], [300, '300.pcm']])
+    // Without the pack the device's names stand.
+    expect(BeatCards.soundNames(device, null)).toEqual(device)
+    expect(BeatCards.soundNames(device, new Map())).toEqual(device)
+  })
+
+  it("a card name that is its own slot's file name counts as no name", () => {
+    // The skill has Claude copy "200.pcm"; after the factory pack the slot is named, and the line still resolves.
+    const available = new Map([[200, 'HH CLOSED']])
+    const picks = BeatCards.resolveSounds(beatCard(null, null, 50, [a([], { sounds: sm([9, snd(200, '200.pcm')]) })]), available, () => null)
+    expect(picks.map((p) => `${pick(p)} ${p.unverified}`)).toEqual(['A7 CHANGE 200 HH CLOSED null false'])
+  })
+
+  it('an unnamed slot is used by its slot, unverified', () => {
+    const available = new Map([[200, '200.pcm'], [201, '201.pcm'], [205, 'HH CLOSED'], [12, 'Kick']])
+    const currents = new Map([[padKey(physicalPad(0, 9)), 200], [padKey(physicalPad(0, 10)), 200]])
+    const sounds = sm(
+      [9, snd(200, 'HH CLOSED')], // the slot is unnamed, but the name is found in 205 first
+      [10, snd(200, 'SNARE')], // the name is nowhere: the unnamed slot is used, and it is on the pad already
+      [11, snd(201, 'SNARE')], // ... a change
+      [6, snd(201)], // no name
+      [7, snd(201, '201.pcm')], // the card gave the device's own name
+      [8, snd(12, 'Snare')], // a named slot with another sound: missing
+      [5, snd(202, 'HH OPEN')], // no such slot
+    )
+    const picks = BeatCards.resolveSounds(beatCard(null, null, 50, [a([], { sounds })]), available, (p) => currents.get(padKey(p)) ?? null)
+    expect(picks.map((p) => `${pick(p)} ${p.unverified}`)).toEqual([
+      'A7 FOUND_BY_NAME 205 HH CLOSED 200 false',
+      'A8 SAME 200 200.pcm 200 true',
+      'A9 CHANGE 201 201.pcm null true',
+      'A4 CHANGE 201 201.pcm null true',
+      'A5 CHANGE 201 201.pcm null true',
+      'A6 MISSING null null null false',
+      'A3 MISSING null null null false',
+    ])
+    // Named sounds are never unverified.
+    const named = BeatCards.resolveSounds(beatCard(null, null, 50, [a([], { sounds: sm([9, snd(12, 'Kick')]) })]), available, () => null)
+    expect(named.map((p) => p.unverified)).toEqual([false])
+  })
+
+  it('the sound list notes the factory sounds without names, when it lists one', () => {
+    const note = 'Names like 200.pcm are factory sounds the EP-133 keeps without a name. By slot: kicks 1-99, snares 100-199, hats 200-299, percussion 300-399, bass 400-499, melodic 500-599.'
+    expect(ClaudeText.UNNAMED_SOUNDS_NOTE).toBe(note)
+    const text = BeatCards.soundList(ClaudeText.SOUNDS_FROM_DEVICE, new Map([[200, '200.pcm'], [12, 'Kick'], [343, 'HH']]))
+    expect(text).toBe(`My EP-133's sounds (slot name), from the EP-133:\n${note}\n12 Kick\n200 200.pcm\n343 HH\n`)
+    // A name that is another slot's file name is a name; none unnamed: no note.
+    expect(BeatCards.soundList(ClaudeText.SOUNDS_FROM_DEVICE, new Map([[200, '201.pcm'], [12, 'Kick']]))).not.toContain('Names like')
+    // The note is not part of a card.
+    const shared = '```\n' + BeatCards.write(beatCard(null, null, 50, [a([hit(0, 9)])])) + '```\n' + text
+    expect(BeatCards.read(shared).card!.sections.length).toBe(1)
+  })
+
   // ---- import ----
 
   const kick = pattern(1, [hit(0, 9)])

@@ -54,7 +54,9 @@ enum class SoundStatus {
  * A sound line matched to the user's sounds: the [pad] and what the card
  * [wanted], the [slot] and [name] to put on it (null for both when [status]
  * is [SoundStatus.MISSING]), the slot the pad plays now ([currentSlot], null
- * when not known) and the [status].
+ * when not known) and the [status]. [unverified] is set when the slot is a
+ * factory sound the EP-133 lists without a name ("200.pcm", see
+ * [FactorySounds.unnamed]): it is used by its slot, as its name can't be checked.
  */
 data class SoundPick(
     val pad: PhysicalPad,
@@ -63,6 +65,7 @@ data class SoundPick(
     val name: String?,
     val currentSlot: Int?,
     val status: SoundStatus,
+    val unverified: Boolean = false,
 )
 
 /** Something wrong with a card, at [line] (counted from 1 in the text read): an [error] stops the card being read, a warning doesn't. */
@@ -801,16 +804,34 @@ object BeatCards {
     // ---- Sounds ----
 
     /**
+     * The names to show and match for the device's sounds ([device], slot to
+     * name): a slot the device lists unnamed ([FactorySounds.unnamed], "200.pcm")
+     * takes the name the [factory] pack has for that slot when it has one
+     * (not blank, and not unnamed itself); every other slot is as the device
+     * has it.
+     */
+    fun soundNames(device: Map<Int, String>, factory: Map<Int, String>?): Map<Int, String> {
+        if (factory == null) return device
+        return device.mapValues { (slot, name) ->
+            val named = factory[slot]
+            if (named != null && FactorySounds.unnamed(slot, name) && named.isNotBlank() && !FactorySounds.unnamed(slot, named)) named else name
+        }
+    }
+
+    /**
      * The card's sound lines matched to the user's sounds, in the card's
      * order (sections as given, pads in keypad order). [available] is slot to
-     * name, [current] the slot a pad plays now (null when not known). A line
-     * with a name is matched like this: the slot is used when it holds a
-     * sound of that name ([PadSoundCache.sameName]: ignoring case, spaces and
-     * ".wav"); otherwise the sound is looked up by name and the slot that
-     * holds it is used (the pad's own slot first, then the lowest); failing
-     * that the line is [SoundStatus.MISSING]. A line without a name uses its
-     * slot when [available] has it. A pick whose slot is already on the pad
-     * is [SoundStatus.SAME], found by name or not.
+     * name ([soundNames]), [current] the slot a pad plays now (null when not
+     * known). A line with a name is matched like this: the slot is used when
+     * it holds a sound of that name ([PadSoundCache.sameName]: ignoring case,
+     * spaces and ".wav"); otherwise the sound is looked up by name and the
+     * slot that holds it is used (the pad's own slot first, then the lowest);
+     * failing that, a slot that is there but unnamed ("200.pcm", a factory
+     * sound whose name can't be checked) is used all the same, as a pick
+     * that is [SoundPick.unverified]; else the line is [SoundStatus.MISSING].
+     * A line without a name uses its slot when [available] has it. A pick
+     * whose slot is already on the pad is [SoundStatus.SAME], found by name
+     * or not.
      */
     fun resolveSounds(card: BeatCard, available: Map<Int, String>, current: (PhysicalPad) -> Int?): List<SoundPick> {
         val picks = ArrayList<SoundPick>()
@@ -819,19 +840,24 @@ object BeatCards {
                 val wanted = s.sounds[offset] ?: continue
                 val pad = PhysicalPad(s.group, offset)
                 val now = current(pad)
-                val name = wanted.name?.takeIf { it.isNotBlank() }
+                // The device's own file name for the slot ("200.pcm") says nothing about the sound: it counts as no name.
+                val name = wanted.name?.takeIf { it.isNotBlank() && !FactorySounds.unnamed(wanted.slot, it) }
                 val direct = wanted.slot.takeIf { it in available && (name == null || holds(available[it], name)) }
                 val byName = if (direct == null && name != null) lookUp(available, name, now) else null
-                val slot = direct ?: byName
+                val slot = direct ?: byName ?: wanted.slot.takeIf { unnamedIn(available, it) }
+                val unverified = slot != null && unnamedIn(available, slot)
                 picks += when {
                     slot == null -> SoundPick(pad, wanted, null, null, now, SoundStatus.MISSING)
-                    slot == now -> SoundPick(pad, wanted, slot, available[slot], now, SoundStatus.SAME)
-                    else -> SoundPick(pad, wanted, slot, available[slot], now, if (byName != null) SoundStatus.FOUND_BY_NAME else SoundStatus.CHANGE)
+                    slot == now -> SoundPick(pad, wanted, slot, available[slot], now, SoundStatus.SAME, unverified)
+                    else -> SoundPick(pad, wanted, slot, available[slot], now, if (byName != null) SoundStatus.FOUND_BY_NAME else SoundStatus.CHANGE, unverified)
                 }
             }
         }
         return picks
     }
+
+    // Whether [slot] is in [available] under the name the EP-133 gives a sound nobody named ("200.pcm").
+    private fun unnamedIn(available: Map<Int, String>, slot: Int): Boolean = available[slot]?.let { FactorySounds.unnamed(slot, it) } == true
 
     // The slot holding a sound called [name]: the pad's own ([now]) when it does, else the lowest; null when none.
     private fun lookUp(available: Map<Int, String>, name: String, now: Int?): Int? {
@@ -847,16 +873,16 @@ object BeatCards {
      * for [source] (the EP-133, the last read or the factory pack, as
      * [ClaudeText] words them), then one line "slot name" for each sound of
      * [available] from slot 1 to 999, in slot order. Names are cleaned as the
-     * card's are, so a name read from the list reads back the same. The text
-     * ends in a newline.
+     * card's are, so a name read from the list reads back the same. When any
+     * listed name is unnamed ("200.pcm"), [ClaudeText.UNNAMED_SOUNDS_NOTE]
+     * follows the header. The text ends in a newline.
      */
     fun soundList(source: String, available: Map<Int, String>): String {
         val out = ArrayList<String>()
         out += ClaudeText.soundListHeader(source)
-        for (slot in available.keys.filter { it in SLOT_MIN..SLOT_MAX }.sorted()) {
-            val name = cleanText(available.getValue(slot), Int.MAX_VALUE)
-            out += if (name.isEmpty()) "$slot" else "$slot $name"
-        }
+        val lines = available.keys.filter { it in SLOT_MIN..SLOT_MAX }.sorted().map { slot -> slot to cleanText(available.getValue(slot), Int.MAX_VALUE) }
+        if (lines.any { (slot, name) -> FactorySounds.unnamed(slot, name) }) out += ClaudeText.UNNAMED_SOUNDS_NOTE
+        for ((slot, name) in lines) out += if (name.isEmpty()) "$slot" else "$slot $name"
         return out.joinToString("\n", postfix = "\n")
     }
 

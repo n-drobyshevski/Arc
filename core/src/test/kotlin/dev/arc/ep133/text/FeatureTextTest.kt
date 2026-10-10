@@ -550,6 +550,8 @@ class FeatureTextTest {
         assertEquals(listOf("012 Micro kick", "012"), listOf(ClaudeText.soundName(12, "Micro kick"), ClaudeText.soundName(12, null)))
         assertEquals(listOf("Not on your EP-133: 301 Rim dusty", "Not on your EP-133: 301"), listOf(ClaudeText.soundMissing(301, "Rim dusty"), ClaudeText.soundMissing(301, null)))
         assertEquals("Already there", ClaudeText.ALREADY_THERE)
+        assertEquals("Card says HH CLOSED \u00B7 name not checked", ClaudeText.cardSays("HH CLOSED"))
+        assertEquals("None of these sounds are on your EP-133. Share a beat with your sound list so Claude picks from yours.", ClaudeText.NONE_ON_DEVICE)
         assertEquals(
             listOf("A7: Kick dusty becomes 012 Micro kick", "A7: 012 Micro kick", "A7: 012 Micro kick, already there", "AE: Not on your EP-133: 301 Rim dusty"),
             listOf(
