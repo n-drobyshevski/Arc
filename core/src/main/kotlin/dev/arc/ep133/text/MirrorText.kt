@@ -123,7 +123,7 @@ object MirrorText {
     // ---------- REC: takes of what is played on the phone ----------
     const val REC = "Rec"
     const val TAKES = "Takes"
-    const val NO_TAKES = "Tap REC on the display, then play: recording starts with the first sound and stops when you tap REC again."
+    const val NO_TAKES = "Tap REC on the display, then play: recording starts with the first sound, or when the EP-133 starts playing, and stops when you tap REC again or, if its PLAY started it, when the EP-133 stops."
     const val TAKES_NOTE = "A take holds the pads and keys played on the phone, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save or Share copies one out."
     const val TO_DEVICE = "To EP-133"
     const val DELETE_TAKE = "Delete this take?"
@@ -132,8 +132,8 @@ object MirrorText {
 
     /** What the REC key does now, for screen readers. */
     fun recDescription(state: dev.arc.ep133.features.RecState) = when (state) {
-        dev.arc.ep133.features.RecState.Idle -> "Record. Recording starts with the first sound you play."
-        dev.arc.ep133.features.RecState.Armed -> "Record, waiting for the first sound. Tap to cancel."
+        dev.arc.ep133.features.RecState.Idle -> "Record. Recording starts with the first sound you play, or when the EP-133 starts playing."
+        dev.arc.ep133.features.RecState.Armed -> "Record, waiting for the first sound or the EP-133's PLAY. Tap to cancel."
         is dev.arc.ep133.features.RecState.Recording -> "Recording, ${takeLength(state.seconds.toDouble())}. Tap to stop."
     }
 

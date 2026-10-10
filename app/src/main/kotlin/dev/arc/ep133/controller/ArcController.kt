@@ -726,6 +726,12 @@ class ArcController(
         val listen = scope.launch(Dispatchers.Default) {
             events.collect {
                 m.onMidi(it)
+                // An armed take starts with the device's PLAY, and one it started ends with its STOP.
+                when (it) {
+                    is dev.arc.ep133.protocol.MidiEvent.Start, is dev.arc.ep133.protocol.MidiEvent.Continue -> liveAudio.transportStarted()
+                    is dev.arc.ep133.protocol.MidiEvent.Stop -> liveAudio.transportStopped()
+                    else -> Unit
+                }
                 dirty.set(true)
             }
         }

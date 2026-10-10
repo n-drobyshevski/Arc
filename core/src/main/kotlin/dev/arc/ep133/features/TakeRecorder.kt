@@ -13,6 +13,10 @@ sealed interface RecState {
  * the EP-133's sampler), and it runs until [stop] or [maxFrames]. Silence
  * after the last sound is left out when it stops.
  *
+ * The EP-133 starting to play (MIDI clock start, [transportStart]) also starts
+ * an armed take, from the next burst, so the take lines up with the device's
+ * bar; such a take is [byTransport], and the device stopping ends it.
+ *
  * Only the output's thread calls it: [onBurst] once for each burst the mixer
  * renders, before the next.
  */
@@ -38,6 +42,13 @@ class TakeRecorder(val outRate: Int, val maxFrames: Long = MAX_SECONDS.toLong() 
     var audible = 0L
         private set
 
+    /** Whether the device's PLAY started the take, so the device stopping ends it. */
+    var byTransport = false
+        private set
+
+    // The device started playing while armed: the next burst starts the take.
+    private var startNext = false
+
     val seconds: Int get() = (frames / outRate).toInt()
 
     fun arm() {
@@ -45,6 +56,13 @@ class TakeRecorder(val outRate: Int, val maxFrames: Long = MAX_SECONDS.toLong() 
         state = State.ARMED
         frames = 0
         audible = 0
+        byTransport = false
+        startNext = false
+    }
+
+    /** The EP-133 started playing: an armed take starts with the next burst. */
+    fun transportStart() {
+        if (state == State.ARMED) startNext = true
     }
 
     /**
@@ -56,9 +74,16 @@ class TakeRecorder(val outRate: Int, val maxFrames: Long = MAX_SECONDS.toLong() 
         val from = when (state) {
             State.IDLE -> return null
             State.ARMED -> {
-                if (firstStart == null) return null
-                state = State.RECORDING
-                (firstStart - at).coerceIn(0, frames.toLong()).toInt()
+                if (startNext) {
+                    startNext = false
+                    byTransport = true
+                    state = State.RECORDING
+                    0
+                } else {
+                    if (firstStart == null) return null
+                    state = State.RECORDING
+                    (firstStart - at).coerceIn(0, frames.toLong()).toInt()
+                }
             }
             State.RECORDING -> 0
         }
@@ -80,6 +105,7 @@ class TakeRecorder(val outRate: Int, val maxFrames: Long = MAX_SECONDS.toLong() 
     fun stop(): Long {
         val keep = if (state == State.ARMED) 0L else audible
         state = State.IDLE
+        startNext = false
         return keep
     }
 }

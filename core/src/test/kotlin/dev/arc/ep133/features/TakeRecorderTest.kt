@@ -79,6 +79,40 @@ class TakeRecorderTest {
     }
 
     @Test
+    fun `the device starting to play starts an armed take at the next burst`() {
+        val r = TakeRecorder(1000)
+        r.transportStart() // Not armed: nothing happens.
+        r.arm()
+        assertNull(r.onBurst(burst(8), 8, 0, null))
+        r.transportStart()
+        assertEquals(TakeRecorder.State.ARMED, r.state)
+        // The whole burst is kept, silent as it is, so the take lines up with the device.
+        val k = r.onBurst(burst(8), 8, 8, null)!!
+        assertEquals(0, k.from)
+        assertEquals(8, k.frames)
+        assertTrue(r.byTransport)
+        val out = burst(8)
+        out[2 * 3] = 9
+        r.onBurst(out, 8, 16, 18)
+        // The silence in front is kept, the silence after the last sound isn't.
+        assertEquals(12L, r.stop())
+    }
+
+    @Test
+    fun `a take started by a sound doesn't follow the device`() {
+        val r = TakeRecorder(1000)
+        r.arm()
+        r.onBurst(burst(8, 1), 8, 0, 0)
+        r.transportStart()
+        assertFalse(r.byTransport)
+        // A start that came too late for its take is forgotten once it stops.
+        r.stop()
+        r.arm()
+        assertNull(r.onBurst(burst(8), 8, 8, null))
+        assertFalse(r.byTransport)
+    }
+
+    @Test
     fun `seconds count the recorded frames`() {
         val r = TakeRecorder(10)
         r.arm()

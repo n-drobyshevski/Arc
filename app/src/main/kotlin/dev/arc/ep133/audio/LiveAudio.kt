@@ -31,8 +31,10 @@ import java.util.concurrent.Executors
  * tag, System.nanoTime) to when its first frame leaves the output, and where
  * the output goes. It is called on the audio thread.
  *
- * REC ([arm]) records the mix into a take: from the first sound after it to
- * [stopRecording], Live closing or [TakeRecorder.MAX_SECONDS]. [onTake] gets
+ * REC ([arm]) records the mix into a take: from the first sound after it (or
+ * the EP-133 starting to play, [transportStarted]) to [stopRecording], Live
+ * closing, [TakeRecorder.MAX_SECONDS], or the device stopping when its PLAY
+ * started the take ([transportStopped]). [onTake] gets
  * the file (null when nothing was played or it couldn't be written), and
  * whether the limit stopped it, on the take's writer thread.
  */
@@ -77,6 +79,9 @@ class LiveAudio(
     // A take armed but not yet picked up by the audio thread, and a stop asked for.
     @Volatile private var armed: Take? = null
     @Volatile private var stopAsked = false
+    // The device's PLAY and STOP (MIDI clock), passed to the take on the audio thread.
+    @Volatile private var transportStartAsked = false
+    @Volatile private var transportStopAsked = false
 
     /** How the output was set up, for the debug log: "48000 Hz, 192-frame bursts, low-latency path". */
     var description = ""
@@ -177,6 +182,16 @@ class LiveAudio(
         if (_rec.value != RecState.Idle) stopAsked = true
     }
 
+    /** The EP-133 started playing (MIDI Start or Continue): an armed take starts now. */
+    fun transportStarted() {
+        if (_rec.value == RecState.Armed) transportStartAsked = true
+    }
+
+    /** The EP-133 stopped (MIDI Stop): a take its PLAY started ends. */
+    fun transportStopped() {
+        if (_rec.value != RecState.Idle) transportStopAsked = true
+    }
+
     fun release(key: String) {
         stream?.mixer?.release(key)
     }
@@ -207,6 +222,14 @@ class LiveAudio(
                     armed = null
                     take?.let { t -> end(t) }
                     take = it
+                }
+                if (transportStartAsked) {
+                    transportStartAsked = false
+                    take?.recorder?.transportStart()
+                }
+                if (transportStopAsked) {
+                    transportStopAsked = false
+                    if (take?.recorder?.byTransport == true) stopAsked = true
                 }
                 if (stopAsked) {
                     stopAsked = false
