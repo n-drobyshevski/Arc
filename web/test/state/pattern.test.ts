@@ -24,6 +24,8 @@ async function liveOn(): Promise<LiveHarness> {
   await h.c.connect()
   h.c.setLive(true)
   await until(h, (s) => s.mirror !== null && !s.mirror.loading && !s.busy && s.mirror.offline == null)
+  // The patterns are the device's project's (switching to it would stop the transport mid-test).
+  await vi.waitFor(() => expect(h.c.pattern.ui.value.project).toBe(1))
   return h
 }
 
