@@ -457,7 +457,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   const room = useBoxSize(box, desk)
   const rowPad = desk && !oneGroup && !keys.on ? rowPadSize(room.width, room.height) : null
   // KEYS on the piano or the grid: the view remembered for this window's shape, and the room.
-  const plan = pianoFor(
+  const shape = pianoFor(
     win.width,
     win.height,
     live.width,
@@ -469,6 +469,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     keys.octave,
     inBar,
   )
+  // The device view plays KEYS on its own pads, as the EP-133 does, unless the piano was chosen.
+  const plan: PianoPlan = device && shape.view !== KeysView.PIANO ? { ...shape, range: null } : shape
   const pianoRange = keys.on ? plan.range : null
   // The line in the top bar names a device note past the piano's ends.
   const rangeKey = pianoRange ? `${pianoRange.first}:${pianoRange.last}` : null

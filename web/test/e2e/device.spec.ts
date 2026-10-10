@@ -1,13 +1,17 @@
-// The device view (web only): on a wide window Live draws the EP-133 K.O. II and
-// the simulated device drives it; its keys act in arc or show their shortcuts.
+// The device view (web only): on the desk, Live tools' View has a third choice
+// that draws the EP-133 K.O. II, which the simulated device drives; its keys
+// act in arc or show their shortcuts.
 import { demo, expect, test } from './fixtures'
 
 test.use({ viewport: { width: 1440, height: 1000 } })
 
-test('a wide Live draws the EP-133 and follows the device', async ({ page }) => {
+test('the Device view draws the EP-133 and follows the device', async ({ page }) => {
   await page.goto('/?demo')
   await expect(page).toHaveURL(/#\/live$/)
+  // The desk's own layout is the default.
   const ep = page.getByRole('group', { name: 'EP-133 K.O. II' })
+  await expect(ep).toHaveCount(0)
+  await page.getByRole('radio', { name: 'Device' }).click()
   await expect(ep).toBeVisible()
   await expect(page.locator('.ep-plate__status')).toHaveText(/project 1/i)
 
@@ -38,13 +42,18 @@ test('a wide Live draws the EP-133 and follows the device', async ({ page }) => 
   await expect(ep.locator('[data-key]')).toHaveCount(12)
   await ep.getByRole('button', { name: 'Octave up' }).click()
   await ep.getByRole('button', { name: 'Keys', exact: true }).click()
+  await expect(pads).toHaveCount(12)
 
-  // RECORD arms REC.
-  await ep.getByRole('button', { name: /^Record\. / }).click()
-  await expect(ep.getByRole('button', { name: /^Record, waiting/ })).toBeVisible()
-  await ep.getByRole('button', { name: /^Record, waiting/ }).click()
+  // TAKE in the tools shows on the drawn plate.
+  const takes = page.getByRole('region', { name: 'Takes' })
+  await takes.getByRole('button', { name: /^Take\. / }).click()
+  await expect(page.locator('.ep-plate__status')).toHaveText(/take armed/i)
+  await takes.getByRole('button', { name: /^Take, waiting/ }).click()
+  await expect(page.locator('.ep-plate__status')).toHaveText(/project 1/i)
 
-  // Any other key shows its shortcuts, and the guide opens searched for it.
+  // RECORD (the pattern's, which the web has not) and the other keys show their shortcuts.
+  await ep.getByRole('button', { name: 'RECORD' }).click()
+  await expect(page.getByRole('dialog', { name: 'RECORD on the EP-133' })).toBeVisible()
   await ep.getByRole('button', { name: 'SOUND / EDIT' }).click()
   const card = page.getByRole('dialog', { name: 'SOUND on the EP-133' })
   await expect(card).toBeVisible()
@@ -53,26 +62,12 @@ test('a wide Live draws the EP-133 and follows the device', async ({ page }) => 
   await expect(page.getByRole('region', { name: 'Shortcut guide' }).getByRole('searchbox')).toHaveValue('SOUND')
 })
 
-test('the computer keyboard plays Live, and the tools stay open beside the device', async ({ page }) => {
+test('the Device view is kept for the next visit', async ({ page }) => {
   await page.goto('/?demo')
-  const ep = page.getByRole('group', { name: 'EP-133 K.O. II' })
-  await expect(ep).toBeVisible()
-  // Docked at this width: the tools are a column of their own, with the takes.
-  const dock = page.getByRole('complementary', { name: 'Live tools' })
-  await expect(dock).toBeVisible()
-  await expect(dock.getByRole('region', { name: 'Takes' })).toBeVisible()
-
-  await page.keyboard.press('F3')
-  await expect(ep.getByRole('tab', { name: 'Group C' })).toHaveAttribute('aria-selected', 'true')
-  await page.keyboard.press('Minus')
-  await expect(ep.getByRole('tab', { name: 'Group B' })).toHaveAttribute('aria-selected', 'true')
-  await page.keyboard.press('KeyK')
-  await expect(ep.locator('[data-key]')).toHaveCount(12)
-  await page.keyboard.press('KeyK')
-  await expect(ep.locator('[data-pad]')).toHaveCount(12)
-  await page.keyboard.press('KeyR')
-  await expect(ep.getByRole('button', { name: /^Record, waiting/ })).toBeVisible()
-  await page.keyboard.press('KeyR')
-  await expect(ep.getByRole('button', { name: /^Record\. / })).toBeVisible()
+  await page.getByRole('radio', { name: 'Device' }).click()
+  await expect(page.getByRole('group', { name: 'EP-133 K.O. II' })).toBeVisible()
+  await page.reload()
+  await expect(page.getByRole('group', { name: 'EP-133 K.O. II' })).toBeVisible()
+  await page.getByRole('radio', { name: 'All groups' }).click()
+  await expect(page.getByRole('group', { name: 'EP-133 K.O. II' })).toHaveCount(0)
 })
-
