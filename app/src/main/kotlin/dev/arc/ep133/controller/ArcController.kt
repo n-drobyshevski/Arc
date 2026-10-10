@@ -5119,7 +5119,7 @@ class ArcController(
      * What SHARE sends: [group]'s playing pattern, or (null) the scene playing, as an ARC BEAT card at the tempo Live
      * plays at and the TIMING swing, with the pads' names and a sound line for each pad it uses (the slot and name Live
      * shows on it); null when there are no notes in it. The project's FX and the settings of the pads it uses are written
-     * as the card's effect and `pad` lines. With "With my sound list" on, the sounds Arc knows follow the card ([soundSetOf]). The patterns are the project's as they stand, a pattern still recording included.
+     * as the card's effect and `pad` lines, and the used pads with no sound as a comment. With "With my sound list" on, the sounds Arc knows follow the card ([soundSetOf]). The patterns are the project's as they stand, a pattern still recording included.
      */
     fun beatShare(group: Int?): BeatShare? {
         if (group != null && group !in 0..3) return null
@@ -5133,7 +5133,9 @@ class ArcController(
         val list = if (settings.value.shareSounds) set else null
         // The project's FX and each pad's settings go in the card too (the pad lines only where they differ from the defaults).
         val shaping = { pad: dev.arc.ep133.features.PhysicalPad -> m?.target(pad)?.let { padSettings[padKey(it)] } }
-        return beatShare(projectSeq, group, bpm, settings.value.timingSwing, ::mirrorName, sounds, list, fxDesk.fx.value, shaping)
+        // The pads the notes use that have no sound are named in a comment, once the pads are read (the share's "# no sound on:").
+        val held = { pad: dev.arc.ep133.features.PhysicalPad -> m?.soundSlot(pad) }
+        return beatShare(projectSeq, group, bpm, settings.value.timingSwing, ::mirrorName, sounds, list, fxDesk.fx.value, shaping, held, m?.padsKnown() == true)
     }
 
     /** "With my sound list" on or off (kept like the other Live preferences). */
@@ -5175,6 +5177,10 @@ class ArcController(
                     offline = offline,
                 )
             },
+            // The pads the card plays that have no sound (once the pads are read): PICK SOUND chooses among the sounds the SOUNDS block uses.
+            silent = { card ->
+                silentUi(card, { pad -> m?.soundSlot(pad) }, m?.padsKnown() == true, soundChoicesOf(_state.value.mirror, _state.value.factoryNames), offline, project)
+            },
         )
     }
 
@@ -5192,7 +5198,9 @@ class ArcController(
      * with the reason.
      *
      * [soundPads] are the pads whose sound lines the sheet had ticked: after the patterns each is matched again to the
-     * sounds as they are now ([BeatCards.resolveSounds]) and put on its pad ([putSounds]), in the same UNDO step.
+     * sounds as they are now ([BeatCards.resolveSounds]) and put on its pad ([putSounds]), in the same UNDO step. The sounds
+     * the user [pickedSounds] for the pads the card leaves silent (pad to slot; they are in [soundPads] too, being ticked)
+     * go on their pads the same way, as extra picks of the same step.
      *
      * With [applyFx] the card's FX replace the project's, the kinds it has a line for ([BeatCards.applyFx]), at once and
      * through [fxDesk], so the mixer plays them and fx.json keeps them. [shapePads] are the pads whose `pad` lines the sheet
@@ -5204,6 +5212,7 @@ class ArcController(
         soundPads: Set<dev.arc.ep133.features.PhysicalPad> = emptySet(),
         applyFx: Boolean = false,
         shapePads: Set<dev.arc.ep133.features.PhysicalPad> = emptySet(),
+        pickedSounds: Map<dev.arc.ep133.features.PhysicalPad, Int> = emptyMap(),
     ) {
         val ui = _beatImport.value ?: return
         val card = ui.card ?: return
@@ -5241,7 +5250,7 @@ class ArcController(
             }
         }
         val fxApplied = entry.fxBefore != null
-        val picks = importPicks(card, soundPads)
+        val picks = importPicks(card, soundPads, pickedSounds)
         val shapes = padShapes(card, shapePads)
         entry.writing = picks.isNotEmpty() || shapes.isNotEmpty()
         if (!entry.writing) {
@@ -5297,13 +5306,23 @@ class ArcController(
         undoPattern()
     }
 
-    /** The sound lines the sheet had ticked ([ticked]) that still change their pad: the card matched to the sounds as they are now. */
-    private fun importPicks(card: dev.arc.ep133.features.BeatCard, ticked: Set<dev.arc.ep133.features.PhysicalPad>): List<dev.arc.ep133.features.SoundPick> {
+    /**
+     * The sound lines the sheet had ticked ([ticked]) that still change their pad: the card matched to the sounds as they are
+     * now, and after them the sounds [picked] for silent pads (ticked too), each a change unless its pad has the sound now.
+     */
+    private fun importPicks(
+        card: dev.arc.ep133.features.BeatCard,
+        ticked: Set<dev.arc.ep133.features.PhysicalPad>,
+        picked: Map<dev.arc.ep133.features.PhysicalPad, Int> = emptyMap(),
+    ): List<dev.arc.ep133.features.SoundPick> {
         if (ticked.isEmpty()) return emptyList()
         val set = soundSetOf(_state.value.mirror, _state.value.factoryNames) ?: return emptyList()
         val m = mirror
-        return dev.arc.ep133.features.BeatCards.resolveSounds(card, set.names) { pad -> m?.slotOf(pad) }
+        val lines = dev.arc.ep133.features.BeatCards.resolveSounds(card, set.names) { pad -> m?.slotOf(pad) }
             .filter { it.pad in ticked && it.slot != null && (it.status == dev.arc.ep133.features.SoundStatus.CHANGE || it.status == dev.arc.ep133.features.SoundStatus.FOUND_BY_NAME) }
+        // A picked pad is one the card has no sound line for; were it to have one, the card's line is the one that goes on.
+        val own = lines.mapTo(HashSet()) { it.pad }
+        return lines + pickedSounds(picked.filterKeys { it in ticked && it !in own }, set.names) { pad -> m?.slotOf(pad) }
     }
 
     /** [putSounds]'s result: the pads [done], the [skipped] picks, the recordings that went to Takes ([moved]) and why it stopped ([failure]; null when it didn't). */

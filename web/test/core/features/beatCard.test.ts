@@ -1271,6 +1271,79 @@ describe('BeatCardTest', () => {
     expect(BeatCards.applyPad(PadSettings.DEFAULT, BeatCards.padOf(own)!)).toEqual(own)
   })
 
+  it('silent pads are the pads the notes use that have no sound and no sound line, in keypad order for each group', () => {
+    // Offsets: 9 is the 7 key, 6 the 4 key, 3 the 1 key (see PadNotes.ROWS); the keypad goes 7 8 9 4 5 6 1 2 3 . 0 E.
+    const a7 = physicalPad(0, 9)
+    const a4 = physicalPad(0, 6)
+    const a1 = physicalPad(0, 3)
+    const c7 = physicalPad(2, 9)
+    const d7 = physicalPad(3, 9)
+    const c = card([
+      a([hit(0, 3), hit(48, 6), hit(0, 9)], { group: 0 }),
+      a([hit(0, 9, 24, 0), hit(24, 9, 24, 4), hit(48, 9, 24, 7)], { group: 2 }),
+      a([hit(0, 9, 24, 0), hit(96, 9, 24, 3)], { group: 3 }),
+    ])
+    // Pad hits and KEYS notes both count; a pad with a sound is not silent.
+    expect(BeatCards.silentPads(c, (p) => (padKey(p) === padKey(a7) ? 12 : null), true)).toEqual([a4, a1, c7, d7])
+    // The pads aren't read yet: nothing is known to be empty.
+    expect(BeatCards.silentPads(c, () => null, false)).toEqual([])
+    // A sound line of the card is a sound: the pad it is on isn't silent.
+    const lined = card([
+      a([hit(0, 9), hit(0, 6)], { group: 0, sounds: new Map([[6, snd(100)]]) }),
+      a([hit(0, 9, 24, 0)], { group: 3, sounds: new Map([[9, snd(512, 'PIANO')]]) }),
+    ])
+    expect(BeatCards.silentPads(lined, () => null, true)).toEqual([a7])
+    expect(BeatCards.silentPads(lined, () => 5, true)).toEqual([])
+    // Sections in any order come out by group, and a pad is listed once.
+    const shuffled = card([a([hit(0, 9, 24, 0)], { group: 3 }), a([hit(0, 9)], { group: 0 }), a([hit(0, 9), hit(0, 3)], { group: 0 })])
+    expect(BeatCards.silentPads(shuffled, () => null, true)).toEqual([a7, a1, d7])
+    // A note past the pattern's end doesn't play, so its pad isn't used.
+    const past = card([a([hit(0, 9), hit(Seq.TICKS_PER_BAR, 6)], { group: 1 })])
+    expect(BeatCards.silentPads(past, () => null, true)).toEqual([physicalPad(1, 9)])
+    // A card with no notes has none.
+    expect(BeatCards.silentPads(card([a([], { group: 1 })]), () => null, true)).toEqual([])
+  })
+
+  it('a sound line with a slot out of range is no sound, and notes are counted by pad', () => {
+    const bad = card([a([hit(0, 9)], { group: 0, sounds: new Map([[9, snd(0)]]) })])
+    expect(BeatCards.silentPads(bad, () => null, true)).toEqual([physicalPad(0, 9)])
+    const s = a([hit(0, 9), hit(48, 9), hit(0, 10, 24, 0), hit(Seq.TICKS_PER_BAR + 5, 6)], { group: 0 })
+    expect([...BeatCards.notesByPad(s)]).toEqual([[9, 2], [10, 1]])
+  })
+
+  it('the pads with no sound are one comment right after the header, which readers ignore', () => {
+    const d7 = physicalPad(3, 9)
+    const c7 = physicalPad(2, 9)
+    const c = beatCard('Test', 92, 50, [a([hit(0, 9)])])
+    const plain = BeatCards.write(c)
+    expect(plain.includes('no sound')).toBe(false)
+    const t = BeatCards.write(c, undefined, false, [c7, d7])
+    expect(ClaudeText.noSoundOn([c7, d7])).toBe('# no sound on: C7 D7')
+    expect(t.split('\n').slice(0, 6)).toEqual(['ARC BEAT 1', 'name Test', 'tempo 92', 'swing 50', '# no sound on: C7 D7', ''])
+    // Tidy cards carry it too, before their own comment.
+    const tidy = BeatCards.write(c, undefined, true, [d7]).split('\n')
+    expect(tidy[4]).toBe('# no sound on: D7')
+    expect(tidy[5]).toBe(BeatCards.TIDY_COMMENT)
+    // The comment changes nothing about what is read.
+    const r = BeatCards.read(t)
+    expect(problems(r)).toEqual([])
+    expect(r.card).toEqual(BeatCards.read(plain).card)
+    // ENTER is E, as the card writes its pad.
+    expect(ClaudeText.noSoundOn([physicalPad(0, 2)])).toBe('# no sound on: AE')
+  })
+
+  it('the silent pads rows are worded for one note or several', () => {
+    const d7 = physicalPad(3, 9)
+    expect(ClaudeText.silentRow(d7, 12)).toBe('D7 \u00B7 12 notes, no sound: they will be silent')
+    expect(ClaudeText.silentRow(d7, 1)).toBe('D7 \u00B7 1 note, no sound: it will be silent')
+    expect(ClaudeText.silentRowName(d7, 12)).toBe('D7: 12 notes, no sound, they will be silent')
+    expect(ClaudeText.pickedRowName(d7, '512 PIANO')).toBe('D7: will get 512 PIANO')
+    expect(ClaudeText.pickSoundName(d7)).toBe('Pick a sound for D7')
+    expect(ClaudeText.changePickName(d7, '512 PIANO')).toBe('Pick another sound for D7, now 512 PIANO')
+    expect(ClaudeText.pickTitle(d7)).toBe('Sound for D7')
+    expect(ClaudeText.pickLine(12)).toBe('12 notes of the card play on this pad.')
+  })
+
   it('every recipe card in the skill reads cleanly, and the ones with effect lines carry them', () => {
     const genres = readFileSync(new URL('../../../../skill/arc-beats/references/genres.md', import.meta.url), 'utf8')
     const cards = [...genres.matchAll(/```\n(ARC BEAT 1\n[\s\S]*?)\n```/g)].map((m) => m[1]!)
@@ -1282,7 +1355,7 @@ describe('BeatCardTest', () => {
       expect(BeatCards.read(BeatCards.write(r.card!)).card!.fx).toEqual(r.card!.fx)
     }
     const withFx = cards.map((t) => BeatCards.read(t).card!).filter((c) => c.fx !== null)
-    expect(withFx.map((c) => c.name).sort()).toEqual(['Amen shred', 'Dub chord echo', 'Dusty lo-fi', 'Hard techno pound', 'House groove', 'Industrial pressure', 'Schranz pressure'])
+    expect(withFx.map((c) => c.name).sort()).toEqual(['Amen shred', 'Dub chord echo', 'Dusty lo-fi', 'Hard groove workout', 'Hard techno pound', 'House groove', 'Industrial pressure', 'Schranz pressure'])
     expect(withFx.find((c) => c.name === 'House groove')!.fx!.sidechain).toEqual(sidechain({ on: true, group: 0, pad: 9, dests: 0b0010, x: 0.3, y: 0.55 }))
     expect(withFx.find((c) => c.name === 'Dusty lo-fi')!.fx!.type).toBe(FxType.FILTER)
   })

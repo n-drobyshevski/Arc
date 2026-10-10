@@ -351,6 +351,27 @@ export class LiveMirror {
     return number === null ? null : this.slotAt(pad.group, number)
   }
 
+  /**
+   * Whether the active project's pads have been read (or loaded from the last read), so that a pad with no slotOf has
+   * no sound, rather than none being known yet. False while nothing was read and while the device is in a project not
+   * read yet.
+   */
+  padsKnown(): boolean {
+    return this.activeProject !== null && this.layout.size > 0 && !(this.pushedProject != null && this.pushedProject !== this.activeProject)
+  }
+
+  /**
+   * The slot that tells whether [pad] has a sound, for a pad Arc is to call silent when it has none (padsKnown): its
+   * slotOf; 0 for a sample recorded in arc (it has no slot until uploaded, but it plays); else the layout's slot at the
+   * number a write would use (target), which a pad not pressed yet has though slotOf doesn't. Null: no sound.
+   */
+  soundSlot(pad: { readonly group: number; readonly offset: number }): number | null {
+    const slot = this.slotOf(pad)
+    if (slot !== null) return slot
+    if (this.localOf(pad) !== null) return 0
+    return this.target(pad)?.slot ?? null
+  }
+
   /** The name on a physical pad: its offline change's, else the sound list's for its slot. */
   nameOf(pad: { readonly group: number; readonly offset: number }): string | null {
     const local = this.localOf(pad)

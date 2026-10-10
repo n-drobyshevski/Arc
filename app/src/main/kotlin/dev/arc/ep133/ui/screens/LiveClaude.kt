@@ -62,15 +62,20 @@ import dev.arc.ep133.controller.BeatGridUi
 import dev.arc.ep133.controller.BeatImportUi
 import dev.arc.ep133.controller.PadShapeRowUi
 import dev.arc.ep133.controller.PadShapingUi
+import dev.arc.ep133.controller.SilentRowUi
+import dev.arc.ep133.controller.SilentUi
 import dev.arc.ep133.controller.SoundRowUi
 import dev.arc.ep133.controller.SoundsUi
 import dev.arc.ep133.controller.Weight
+import dev.arc.ep133.controller.pickedRow
 import dev.arc.ep133.features.CardProblem
 import dev.arc.ep133.features.PhysicalPad
+import dev.arc.ep133.features.SoundSource
 import dev.arc.ep133.features.SoundStatus
 import dev.arc.ep133.features.Tempo
 import dev.arc.ep133.text.ClaudeText
 import dev.arc.ep133.text.CoachText
+import dev.arc.ep133.text.Format
 import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.text.SettingsText
 import dev.arc.ep133.text.Strings
@@ -217,17 +222,29 @@ private fun SoundListTick(count: Int, on: Boolean, onChange: (Boolean) -> Unit) 
  * with pad lines a PAD SHAPING block after them (a row for each pad, ticked).
  * IMPORT puts it all in as one UNDO step; it is off, and says why, when the card
  * can't be read or a group is full. [onImport] gets whether the tempo is to be
- * set, the pads whose sounds are to be put on, whether the FX are to be applied
- * and the pads whose settings are to be written.
+ * set, the pads whose sounds are to be put on, whether the FX are to be applied,
+ * the pads whose settings are to be written and the sounds picked for silent pads.
+ *
+ * A card that plays pads with no sound has a SILENT PADS block before the sounds
+ * (amber): a row for each, with PICK SOUND, which swaps the sheet for the pad
+ * sheet's sound list ([SoundChooser]: search, hundreds, preview) listed with
+ * [player]. A pick doesn't touch the pad: it adds a ticked row to SOUNDS (nothing
+ * to something) that IMPORT puts on the pad with the card's own sounds, in the same
+ * UNDO step; the silent row then says "\u2192 512 PIANO" with a CHANGE key.
  */
 @Composable
 fun ColumnScope.BeatImportSheetContent(
     ui: BeatImportUi,
     onCancel: () -> Unit,
-    onImport: (setTempo: Boolean, soundPads: Set<PhysicalPad>, applyFx: Boolean, shapePads: Set<PhysicalPad>) -> Unit,
+    onImport: (setTempo: Boolean, soundPads: Set<PhysicalPad>, applyFx: Boolean, shapePads: Set<PhysicalPad>, picked: Map<PhysicalPad, Int>) -> Unit,
     onCopyProblems: (List<CardProblem>) -> Unit,
     /** For screenshots: start with the tempo chip chosen. */
     initialSetTempo: Boolean = false,
+    /** The preview of the sounds PICK SOUND lists: what plays, and the keys that play and stop it. */
+    player: PickPlayerUi = PickPlayerUi(),
+    /** For screenshots: start with these sounds picked for silent pads (pad, slot), or the picker of this pad open. */
+    initialPicked: List<Pair<PhysicalPad, Int>> = emptyList(),
+    initialPicking: PhysicalPad? = null,
 ) {
     val c = LocalArcColors.current
     // Chosen on this sheet only: a card's tempo never replaces Arc's unasked.
@@ -235,11 +252,41 @@ fun ColumnScope.BeatImportSheetContent(
     // The sounds: all put on pads, bar the rows unticked (a pad is group * 16 + offset).
     var putOnPads by rememberSaveable { mutableStateOf(true) }
     var unticked by rememberSaveable { mutableStateOf(emptyList<Int>()) }
+    // The sounds picked for silent pads (a pad's key and a slot, [pickedCode]) and the pad whose picker is open (-1: none).
+    var picked by rememberSaveable { mutableStateOf(initialPicked.map { (pad, slot) -> pickedCode(pad, slot) }) }
+    var picking by rememberSaveable { mutableStateOf(initialPicking?.let(::padKey) ?: -1) }
     // The FX: applied unless switched off. The pad shaping rows: all ticked, bar the ones unticked.
     var applyFx by rememberSaveable { mutableStateOf(true) }
     var shapeOff by rememberSaveable { mutableStateOf(emptyList<Int>()) }
+    val silent = ui.silent
+    if (silent != null && picking >= 0) {
+        val row = silent.rows.firstOrNull { padKey(it.pad) == picking }
+        if (row != null) {
+            SoundPicker(
+                row, silent, player,
+                onPick = { slot, _ ->
+                    picked = picked.filter { pickedPad(it) != picking } + pickedCode(row.pad, slot)
+                    // A pick is ticked to begin with, even where the pad's earlier pick was unticked.
+                    unticked = unticked - picking
+                    picking = -1
+                },
+                onBack = { picking = -1 },
+            )
+            return
+        }
+        picking = -1
+    }
+    // The picks as SOUNDS rows, in pad order: only for pads the card still leaves silent.
+    val pickedRows = if (silent == null) emptyList() else picked.sorted().mapNotNull { code ->
+        val row = silent.rows.firstOrNull { padKey(it.pad) == pickedPad(code) } ?: return@mapNotNull null
+        val slot = pickedSlot(code)
+        pickedRow(row.pad, slot, silent.choices?.names?.get(slot))
+    }
+    // The card's own sound rows, with the picked ones after them.
+    val sounds = if (pickedRows.isEmpty() || silent == null) ui.sounds
+    else SoundsUi(ui.sounds?.rows.orEmpty() + pickedRows, ui.sounds?.offline ?: silent.offline, ui.sounds?.project ?: silent.project)
     // Whether a new sound is going onto the pad (its row ticked): its settings start again, which the shaping rows start from.
-    val soundGoing = { pad: PhysicalPad -> putOnPads && ui.sounds?.changes.orEmpty().any { it.pad == pad && padKey(it.pad) !in unticked } }
+    val soundGoing = { pad: PhysicalPad -> putOnPads && sounds?.changes.orEmpty().any { it.pad == pad && padKey(it.pad) !in unticked } }
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(ui.title, style = ArcType.heading, color = c.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
         ui.summary?.let { Text(it, style = ArcType.small, color = c.graphite) }
@@ -273,10 +320,22 @@ fun ColumnScope.BeatImportSheetContent(
         }
     }
     ui.fx?.let { FxBlock(it, applyFx) { applyFx = !applyFx } }
-    ui.sounds?.let { sounds ->
-        val ticked = if (putOnPads) sounds.changes.filter { padKey(it.pad) !in unticked } else emptyList()
+    if (silent != null) {
+        SilentBlock(
+            silent,
+            // A pad's pick counts while its SOUNDS row is ticked (and PUT ON PADS is on): otherwise the pad stays silent.
+            soundOf = { pad ->
+                val code = picked.firstOrNull { pickedPad(it) == padKey(pad) }
+                if (code == null || !putOnPads || padKey(pad) in unticked) null
+                else ClaudeText.soundName(pickedSlot(code), silent.choices?.names?.get(pickedSlot(code)))
+            },
+            onPick = { picking = padKey(it) },
+        )
+    }
+    sounds?.let { all ->
+        val ticked = if (putOnPads) all.changes.filter { padKey(it.pad) !in unticked } else emptyList()
         SoundsBlock(
-            sounds, putOnPads, { putOnPads = !putOnPads }, ticked.size,
+            all, putOnPads, { putOnPads = !putOnPads }, ticked.size,
             isTicked = { putOnPads && padKey(it.pad) !in unticked },
             onTick = { row -> unticked = if (padKey(row.pad) in unticked) unticked - padKey(row.pad) else unticked + padKey(row.pad) },
         )
@@ -309,9 +368,11 @@ fun ColumnScope.BeatImportSheetContent(
         ArcKey(
             ClaudeText.IMPORT,
             {
-                val pads = if (putOnPads) ui.sounds?.changes.orEmpty().filter { padKey(it.pad) !in unticked }.mapTo(HashSet()) { it.pad } else emptySet()
+                val pads = if (putOnPads) sounds?.changes.orEmpty().filter { padKey(it.pad) !in unticked }.mapTo(HashSet()) { it.pad } else emptySet()
                 val shaped = ui.shaping?.rows.orEmpty().filter { it.changes(soundGoing(it.pad)) && padKey(it.pad) !in shapeOff }.mapTo(HashSet()) { it.pad }
-                onImport(setTempo && tempo != null, pads, applyFx && ui.fx != null, shaped)
+                // The picked sounds that are ticked: they are in [pads] too, being SOUNDS rows.
+                val chosen = pickedRows.filter { it.pad in pads }.associate { it.pad to it.pick.slot!! }
+                onImport(setTempo && tempo != null, pads, applyFx && ui.fx != null, shaped, chosen)
             },
             Modifier.weight(1f),
             style = KeyStyle.Signal,
@@ -321,6 +382,137 @@ fun ColumnScope.BeatImportSheetContent(
 }
 
 private fun padKey(pad: PhysicalPad) = pad.group * 16 + pad.offset
+
+// A sound picked for a silent pad as one number: the pad's key and the slot (1..999), so the picks keep through a rotation.
+private fun pickedCode(pad: PhysicalPad, slot: Int) = padKey(pad) * 1024 + slot
+
+private fun pickedPad(code: Int) = code / 1024
+
+private fun pickedSlot(code: Int) = code % 1024
+
+/** The preview of the sounds PICK SOUND lists: the player's key of the one playing ([playing]), whether the device is [busy], and the keys that play and stop. */
+class PickPlayerUi(
+    val playing: String? = null,
+    val busy: Boolean = false,
+    val onPlay: (Int, SoundSource) -> Unit = { _, _ -> },
+    val onStop: () -> Unit = {},
+)
+
+/**
+ * The SILENT PADS block (amber): its header and a row for each pad the card plays that has no sound ([SilentRow]), and under
+ * them what a pick does. [soundOf] gives the sound picked for a pad ("512 PIANO") while its SOUNDS row is ticked, else null.
+ */
+@Composable
+private fun SilentBlock(silent: SilentUi, soundOf: (PhysicalPad) -> String?, onPick: (PhysicalPad) -> Unit) {
+    val c = LocalArcColors.current
+    GridPlate {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Box(Modifier.width(4.dp).height(16.dp).clip(RoundedCornerShape(2.dp)).background(c.warn))
+            Text(ClaudeText.SILENT_PADS.uppercase(), style = ArcType.caps, color = c.graphite, maxLines = 1, modifier = Modifier.weight(1f))
+        }
+        for (row in silent.rows) {
+            PlateLine()
+            SilentRow(row, soundOf(row.pad), silent.choices != null) { onPick(row.pad) }
+        }
+    }
+    Text(ClaudeText.SILENT_NOTE, style = ArcType.small, color = c.graphite)
+}
+
+/**
+ * One silent pad: an amber bar, "D7 \u00B7 12 notes, no sound: they will be silent" and its PICK SOUND key (no key when Arc
+ * knows no sounds to pick from). Once a sound is picked ([sound], "512 PIANO") the bar is navy, the row says "\u2192 512 PIANO" and
+ * the key is CHANGE.
+ */
+@Composable
+private fun SilentRow(row: SilentRowUi, sound: String?, canPick: Boolean, onPick: () -> Unit) {
+    val c = LocalArcColors.current
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Box(Modifier.width(4.dp).height(32.dp).clip(RoundedCornerShape(2.dp)).background(if (sound == null) c.warn else c.navy))
+        Column(
+            Modifier
+                .weight(1f)
+                .semantics(mergeDescendants = true) {
+                    contentDescription = if (sound == null) ClaudeText.silentRowName(row.pad, row.notes) else ClaudeText.pickedRowName(row.pad, sound)
+                },
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            if (sound == null) {
+                Text(ClaudeText.silentRow(row.pad, row.notes), style = ArcType.small, color = c.ink)
+            } else {
+                Text(ClaudeText.padLabel(row.pad) + " \u00B7 " + Format.plural(row.notes, "note"), style = ArcType.small, color = c.graphite)
+                Text("\u2192 $sound", style = ArcType.small, fontWeight = FontWeight.Bold, color = c.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+        }
+        if (canPick) {
+            ArcKey(
+                if (sound == null) ClaudeText.PICK_SOUND else ClaudeText.CHANGE_PICK,
+                onPick,
+                Modifier.semantics(mergeDescendants = true) {
+                    contentDescription = if (sound == null) ClaudeText.pickSoundName(row.pad) else ClaudeText.changePickName(row.pad, sound)
+                },
+                size = KeySize.Small,
+            )
+        }
+    }
+}
+
+/**
+ * PICK SOUND's picker, in place of the sheet: the pad's cap and what it plays in the card, the pad sheet's sound list
+ * ([SoundChooser]: the search, the hundreds, a preview on each sound) and a key back to the card. A tap on a sound
+ * picks it ([onPick]; nothing is written yet, see [BeatImportSheetContent]). The list is the one IMPORT picks from: the
+ * EP-133's while connected, offline the view's (so no Device / Factory switch, and no upload).
+ */
+@Composable
+private fun ColumnScope.SoundPicker(row: SilentRowUi, silent: SilentUi, player: PickPlayerUi, onPick: (Int, SoundSource) -> Unit, onBack: () -> Unit) {
+    val c = LocalArcColors.current
+    val choices = silent.choices
+    val stop = { if (player.playing != null) player.onStop() }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        PadCap(row.pad, null)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(ClaudeText.pickTitle(row.pad), style = ArcType.heading, color = c.ink)
+            Text(ClaudeText.pickLine(row.notes), style = ArcType.small, color = c.graphite)
+        }
+    }
+    if (choices != null) {
+        val fromPack = choices.source == SoundSource.FACTORY
+        SoundChooser(
+            key = "pick:${padKey(row.pad)}",
+            now = null,
+            sounds = if (fromPack) emptyList() else choices.entries,
+            playing = player.playing,
+            busy = player.busy,
+            onPlay = player.onPlay,
+            onStop = player.onStop,
+            onPick = { slot, source ->
+                stop()
+                onPick(slot, source)
+            },
+            note = ClaudeText.PICK_NOTE,
+            factory = if (fromPack) choices.entries else null,
+            unavailable = choices.unavailable,
+            padSource = choices.source,
+            offline = silent.offline,
+        )
+    }
+    ArcKey(
+        ClaudeText.PICK_BACK,
+        {
+            stop()
+            onBack()
+        },
+        Modifier.fillMaxWidth(),
+        style = KeyStyle.Quiet,
+    )
+}
 
 /**
  * The SOUNDS block: its header with the PUT ON PADS chip (shown when some row can be ticked; [on] by default), a row
@@ -355,7 +547,13 @@ private fun SoundsBlock(
     if (sounds.noneFound) Text(ClaudeText.NONE_ON_DEVICE, style = ArcType.small, color = c.graphite)
     if (on && ticked > 0) {
         Text(
-            if (sounds.offline) ClaudeText.SOUNDS_OFFLINE_NOTE else ClaudeText.soundsNote(ticked, sounds.project),
+            if (sounds.offline) {
+                ClaudeText.SOUNDS_OFFLINE_NOTE
+            } else {
+                // A pad with no sound can't be emptied again by UNDO: a ticked pick (or any such row) stays on it.
+                val keeps = sounds.rows.any { it.changes && isTicked(it) && (it.picked || it.oldName == ClaudeText.NO_SOUND) }
+                ClaudeText.soundsNote(ticked, sounds.project, keeps)
+            },
             style = ArcType.small,
             color = c.graphite,
         )
@@ -596,6 +794,8 @@ private fun SoundRow(row: SoundRowUi, ticked: Boolean, chipOn: Boolean, onTick: 
                 )
                 // A factory sound the EP-133 lists without a name: used by its slot, the card's name not checked.
                 cardSays?.let { Text(ClaudeText.cardSays(it), style = ArcType.tiny, color = c.graphite, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                // A sound the user picked for a silent pad, not the card's.
+                if (row.picked) Text(ClaudeText.PICKED_HERE, style = ArcType.tiny, color = c.graphite, maxLines = 1)
             }
         }
     }

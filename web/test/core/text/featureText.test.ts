@@ -551,6 +551,12 @@ describe('FeatureTextTest', () => {
     expect(ClaudeText.soundsNote(1, null)).toBe(
       "Writes 1 pad in the active project on the EP-133. Their pitch, level and other settings reset to the sound's. UNDO puts the old sounds back.",
     )
+    expect(ClaudeText.soundsNote(1, 3, true)).toBe(
+      "Writes 1 pad in project 3 on the EP-133. Their pitch, level and other settings reset to the sound's. UNDO puts the old sounds back, but a pad that had none keeps its new one.",
+    )
+    expect(ClaudeText.PICK_NOTE).toBe(
+      'The sound goes on the pad with IMPORT, in the same step as the card. UNDO takes the patterns back; connected, the pad keeps the sound.',
+    )
     expect(ClaudeText.SOUNDS_OFFLINE_NOTE).toBe('Saved as offline pad changes; they go to the EP-133 when you reconnect.')
     expect([ClaudeText.imported([[0, 4]], null, 2), ClaudeText.imported([[0, 4]], null, 1, 1), ClaudeText.imported([[0, 4]], null, 0, 3)]).toEqual([
       'Imported to A \u00B7 04 and 2 sounds. UNDO takes it back.',

@@ -252,6 +252,8 @@ class Card:
     patterns: List[Pattern] = field(default_factory=list)
     problems: List[Problem] = field(default_factory=list)
     fx: Optional[Fx] = None
+    #: The pads Arc's share says have no sound, from its comment "# no sound on: D7 C7" (empty when it has none).
+    silent_pads: List[str] = field(default_factory=list)
 
     @property
     def errors(self) -> List[Problem]:
@@ -989,10 +991,34 @@ class _Reader:
         pattern.hits = sorted(order, key=lambda h: (h.tick, h.pad, h.semi if h.semi is not None else -1000))
 
 
+_SILENT_COMMENT = re.compile(r"^[ \t\u00a0]*#[ \t\u00a0]*no sound on:(.*)$", re.IGNORECASE)
+_SILENT_PAD = re.compile(r"^([A-D])(ENTER|[E.0-9])$")
+
+
+def silent_pads_of(text: str) -> List[str]:
+    """The pads named by the share comment "# no sound on: C7 D7" inside the card (between its ARC BEAT line and its closing fence or END), as written, in order, once each. Readers ignore the comment; this reads it for the analysis."""
+    out: List[str] = []
+    started = False
+    for line in _LINE_BREAK.split(text[1:] if text.startswith("\ufeff") else text):
+        t = line.strip()
+        if not started:
+            started = re.match(r"^ARC[ \t\u00a0]+BEAT(?:[ \t\u00a0]|$)", t, re.IGNORECASE) is not None
+            continue
+        if t == "```" or t.upper() == "END":
+            break
+        m = _SILENT_COMMENT.match(line)
+        if m:
+            for word in m.group(1).split():
+                if _SILENT_PAD.match(word) and word not in out:
+                    out.append(word)
+    return out
+
+
 def parse_card(text: str) -> Card:
     """Read a card from [text] by the rules of references/beat-card.md; problems are in card.problems, by line."""
     card = _Reader(text).read()
     card.problems.sort(key=lambda p: p.line)  # stable, as Arc's reader sorts them
+    card.silent_pads = silent_pads_of(text)
     return card
 
 
@@ -1588,6 +1614,7 @@ def analyse_card(card: Card, recipes: Optional[List[dict]] = None) -> dict:
         "swing": card.swing,
         "groups": [p.letter for p in card.patterns],
         "fx": describe_fx(card.fx) if card.fx is not None else None,
+        "silent_pads": list(card.silent_pads),
         "pad_hits": len(all_hits),
         "keys_notes": sum(1 for p in card.patterns for h in p.hits if h.semi is not None),
         "velocity": _velocity([h.vel for h in all_hits]),
@@ -1936,6 +1963,8 @@ def render_analysis(report: dict) -> str:
     out: List[str] = []
     head = report["name"] or "(no name)"
     out.append("%s | tempo %s | swing %s | groups %s" % (head, report["tempo"] if report["tempo"] is not None else "-", report["swing"], " ".join(report["groups"])))
+    if report.get("silent_pads"):
+        out.append("silent pads (no sound on the EP-133, from the share's comment): %s" % " ".join(report["silent_pads"]))
     if report.get("fx"):
         out.append("fx:")
         for text in fx_lines(report["fx"]):

@@ -575,6 +575,14 @@ class FeatureTextTest {
             "Writes 1 pad in the active project on the EP-133. Their pitch, level and other settings reset to the sound's. UNDO puts the old sounds back.",
             ClaudeText.soundsNote(1, null),
         )
+        assertEquals(
+            "Writes 1 pad in project 3 on the EP-133. Their pitch, level and other settings reset to the sound's. UNDO puts the old sounds back, but a pad that had none keeps its new one.",
+            ClaudeText.soundsNote(1, 3, keeps = true),
+        )
+        assertEquals(
+            "The sound goes on the pad with IMPORT, in the same step as the card. UNDO takes the patterns back; connected, the pad keeps the sound.",
+            ClaudeText.PICK_NOTE,
+        )
         assertEquals("Saved as offline pad changes; they go to the EP-133 when you reconnect.", ClaudeText.SOUNDS_OFFLINE_NOTE)
         assertEquals(
             listOf(

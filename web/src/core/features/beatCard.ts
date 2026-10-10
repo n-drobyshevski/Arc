@@ -976,10 +976,11 @@ function read(text: string): CardRead {
  * sound name a row shows after its pad (null for none). A section's sound
  * lines come right after its line, in keypad order, each with its name when it
  * has one. With [tidy], velocities are rounded to 127, 100 or 64 (ties up) and gates under a step
- * become a step, for every note, and the card says so in a comment. The text
- * ends in a newline.
+ * become a step, for every note, and the card says so in a comment. The [silent]
+ * pads (silentPads) are listed in a comment of their own right after the header
+ * (ClaudeText.noSoundOn); readers ignore it. The text ends in a newline.
  */
-function write(card: BeatCard, names: (pad: PhysicalPad) => string | null = () => null, tidy = false): string {
+function write(card: BeatCard, names: (pad: PhysicalPad) => string | null = () => null, tidy = false, silent: readonly PhysicalPad[] = []): string {
   const swing = TimingSettings.clampSwing(card.swing)
   const out: string[] = []
   out.push(`ARC BEAT ${VERSION}`)
@@ -988,6 +989,7 @@ function write(card: BeatCard, names: (pad: PhysicalPad) => string | null = () =
   if (card.tempo !== null) out.push(`tempo ${tempoText(card.tempo)}`)
   out.push(`swing ${swing}`)
   if (card.fx !== null) writeFx(out, card.fx)
+  if (silent.length > 0) out.push(ClaudeText.noSoundOn(silent))
   if (tidy) out.push(TIDY_COMMENT)
   for (const s of [...card.sections].sort((a, b) => a.group - b.group)) {
     out.push('')
@@ -1335,6 +1337,36 @@ function fitsSwung(p: Pattern, swing: number): boolean {
 
 // ---- Sounds ----
 
+/** How many notes of [s] play on each pad (pad offset to count; a note past the pattern's end doesn't play). */
+function notesByPad(s: CardSection): Map<number, number> {
+  const len = Pattern.lengthTicks(s.pattern)
+  const out = new Map<number, number>()
+  for (const n of s.pattern.notes) if (n.tick >= 0 && n.tick < len) out.set(n.offset, (out.get(n.offset) ?? 0) + 1)
+  return out
+}
+
+/**
+ * The pads [card]'s notes use (pad hits and KEYS notes alike; a note past its pattern's end doesn't play) that would
+ * be silent: [slotOf] gives no sound for them now (null) and no sound line of the card puts one on them. In keypad
+ * order for each group. Empty when the pads are not [known] (nothing read yet): then a pad with no slot is not
+ * known to be empty.
+ */
+function silentPads(card: BeatCard, slotOf: (pad: PhysicalPad) => number | null, known: boolean): PhysicalPad[] {
+  if (!known) return []
+  const out: PhysicalPad[] = []
+  for (const s of [...card.sections].sort((a, b) => a.group - b.group)) {
+    const used = notesByPad(s)
+    for (const offset of KEYPAD) {
+      if (!used.has(offset)) continue
+      const line = s.sounds.get(offset)
+      if (line !== undefined && line.slot >= SLOT_MIN && line.slot <= SLOT_MAX) continue
+      const pad = physicalPad(s.group, offset)
+      if (slotOf(pad) === null && !out.some((p) => p.group === pad.group && p.offset === pad.offset)) out.push(pad)
+    }
+  }
+  return out
+}
+
 // Whether a sound named [have] is the one called [name] (the card's name is cleaned, so the list's is too).
 function holds(have: string | undefined, name: string): boolean {
   return have !== undefined && PadSoundCache.sameName(cleanText(have, Infinity), name)
@@ -1459,4 +1491,4 @@ function plan(seq: ProjectSeq, card: BeatCard): CardImport {
 }
 
 /** The Kotlin `BeatCards` object. */
-export const BeatCards = { VERSION, MAX_NAME, TIDY_COMMENT, read, hasCard, write, fromPatterns, fxOf, padOf, applyFx, applyPad, resolveSounds, soundNames, soundList, plan } as const
+export const BeatCards = { VERSION, MAX_NAME, TIDY_COMMENT, read, hasCard, write, fromPatterns, fxOf, padOf, applyFx, applyPad, resolveSounds, soundNames, soundList, silentPads, notesByPad, plan } as const

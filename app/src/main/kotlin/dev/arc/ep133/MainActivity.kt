@@ -1335,13 +1335,28 @@ class MainActivity : ComponentActivity() {
                     }
                     // A beat card, read and planned into the project's patterns: IMPORT is one UNDO step. It keeps showing while it closes.
                     val lastBeat = remember { mutableStateOf(beatImport) }.apply { if (beatImport != null) value = beatImport }.value
-                    ArcSheet(visible = beatImport != null, onDismiss = controller::dismissBeat) {
+                    // A preview started by PICK SOUND stops with the sheet, as the pad sheet's does.
+                    fun closeBeatSheet() {
+                        if (playing?.startsWith("device:") == true || playing?.startsWith("factory:") == true) controller.stopPlayback()
+                        controller.dismissBeat()
+                    }
+                    ArcSheet(visible = beatImport != null, onDismiss = { closeBeatSheet() }) {
                         lastBeat?.let { b ->
                             BeatImportSheetContent(
                                 ui = b,
-                                onCancel = controller::dismissBeat,
-                                onImport = controller::importBeat,
+                                onCancel = { closeBeatSheet() },
+                                onImport = { tempo, soundPads, fx, shapePads, picked ->
+                                    if (playing?.startsWith("device:") == true || playing?.startsWith("factory:") == true) controller.stopPlayback()
+                                    controller.importBeat(tempo, soundPads, fx, shapePads, picked)
+                                },
                                 onCopyProblems = ::copyProblems,
+                                // PICK SOUND lists the sounds the card's sound lines choose from, played as the pad sheet plays them.
+                                player = dev.arc.ep133.ui.screens.PickPlayerUi(
+                                    playing = playing,
+                                    busy = state.busy && ready,
+                                    onPlay = { slot, source -> controller.playLiveSound(slot, source) },
+                                    onStop = controller::stopPlayback,
+                                ),
                             )
                         }
                     }

@@ -9,6 +9,7 @@ has the frontmatter and size Claude expects.
 """
 
 import io
+import json
 import os
 import re
 import struct
@@ -1524,6 +1525,59 @@ class FxAndPadsReport(unittest.TestCase):
                 out = subprocess.run([sys.executable, "-B", os.path.join(HERE, "beatcard.py"), command, path], capture_output=True, text=True)
                 self.assertEqual(out.returncode, 0, out.stderr)
                 self.assertIn(needle, out.stdout)
+
+
+class SilentPads(unittest.TestCase):
+    """Arc's share names the pads the notes use that have no sound in one comment: "# no sound on: C7 D7"."""
+
+    CARD = """ARC BEAT 1
+name Moody keys
+tempo 108
+swing 50
+# no sound on: C7 D7 AE
+# tidied: velocities and short gates rounded
+
+[A] bars 1 step 1/16
+A7 | X... .... .... .... |
+
+[D] bars 1 step 1/16
+notes
+D7 at 1.1.1 note E4
+"""
+
+    def test_the_comment_is_read_as_silent_pads_and_changes_nothing_else(self):
+        card = bc.parse_card(self.CARD)
+        self.assertTrue(card.ok)
+        self.assertEqual(card.problems, [])
+        self.assertEqual(card.silent_pads, ["C7", "D7", "AE"])
+        plain = bc.parse_card(self.CARD.replace("# no sound on: C7 D7 AE\n", ""))
+        self.assertEqual(plain.silent_pads, [])
+        self.assertEqual(bc.summary_line(card), bc.summary_line(plain))
+
+    def test_analyse_reports_silent_pads_and_the_text_report_shows_them(self):
+        report = bc.analyse_card(bc.parse_card(self.CARD))
+        self.assertEqual(report["silent_pads"], ["C7", "D7", "AE"])
+        self.assertIn("silent pads (no sound on the EP-133, from the share's comment): C7 D7 AE", bc.render_analysis(report))
+        none = bc.analyse_card(bc.parse_card(self.CARD.replace("# no sound on: C7 D7 AE\n", "")))
+        self.assertEqual(none["silent_pads"], [])
+        self.assertNotIn("silent pads", bc.render_analysis(none))
+
+    def test_only_the_card_counts_and_words_that_are_not_pads_are_left_out(self):
+        text = "# no sound on: Z9\n```\n" + self.CARD.replace("C7 D7 AE", "d7 B. XX B9 B9") + "```\n# no sound on: A1\n"
+        self.assertEqual(bc.parse_card(text).silent_pads, ["B.", "B9"])
+        # Case of the keywords doesn't matter; a hash inside a word is no comment.
+        self.assertEqual(bc.parse_card(self.CARD.replace("# no sound on:", "#NO SOUND ON:")).silent_pads, ["C7", "D7", "AE"])
+
+    def test_the_cli_reports_it(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "silent.txt")
+            with open(path, "w") as f:
+                f.write(self.CARD)
+            out = subprocess.run([sys.executable, "-B", os.path.join(HERE, "beatcard.py"), "analyse", path, "--json"], capture_output=True, text=True)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertEqual(json.loads(out.stdout)["silent_pads"], ["C7", "D7", "AE"])
+            out = subprocess.run([sys.executable, "-B", os.path.join(HERE, "beatcard.py"), "analyse", path], capture_output=True, text=True)
+            self.assertIn("silent pads", out.stdout)
 
 
 class SkillFiles(unittest.TestCase):

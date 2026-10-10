@@ -1261,6 +1261,86 @@ class BeatCardTest {
     }
 
     @Test
+    fun `silent pads are the pads the notes use that have no sound and no sound line, in keypad order for each group`() {
+        // Offsets: 9 is the 7 key, 6 the 4 key, 3 the 1 key (see PadNotes.ROWS); the keypad goes 7 8 9 4 5 6 1 2 3 . 0 E.
+        val a7 = PhysicalPad(0, 9)
+        val a4 = PhysicalPad(0, 6)
+        val a1 = PhysicalPad(0, 3)
+        val c7 = PhysicalPad(2, 9)
+        val d7 = PhysicalPad(3, 9)
+        val card = card(
+            a(hit(0, 3), hit(48, 6), hit(0, 9), group = 0),
+            a(hit(0, 9, semi = 0), hit(24, 9, semi = 4), hit(48, 9, semi = 7), group = 2),
+            a(hit(0, 9, semi = 0), hit(96, 9, semi = 3), group = 3),
+        )
+        // Pad hits and KEYS notes both count; a pad with a sound is not silent.
+        assertEquals(listOf(a4, a1, c7, d7), BeatCards.silentPads(card, { if (it == a7) 12 else null }, known = true))
+        // The pads aren't read yet: nothing is known to be empty.
+        assertEquals(emptyList<PhysicalPad>(), BeatCards.silentPads(card, { null }, known = false))
+        // A sound line of the card is a sound: the pad it is on isn't silent.
+        val lined = card(
+            a(hit(0, 9), hit(0, 6), group = 0, sounds = mapOf(6 to snd(100))),
+            a(hit(0, 9, semi = 0), group = 3, sounds = mapOf(9 to snd(512, "PIANO"))),
+        )
+        assertEquals(listOf(a7), BeatCards.silentPads(lined, { null }, known = true))
+        assertEquals(emptyList<PhysicalPad>(), BeatCards.silentPads(lined, { 5 }, known = true))
+        // Sections in any order come out by group, and a pad is listed once.
+        val shuffled = card(a(hit(0, 9, semi = 0), group = 3), a(hit(0, 9), group = 0), a(hit(0, 9), hit(0, 3), group = 0))
+        assertEquals(listOf(a7, a1, d7), BeatCards.silentPads(shuffled, { null }, known = true))
+        // A note past the pattern's end doesn't play, so its pad isn't used.
+        val past = card(a(hit(0, 9), hit(Seq.TICKS_PER_BAR, 6), group = 1))
+        assertEquals(listOf(PhysicalPad(1, 9)), BeatCards.silentPads(past, { null }, known = true))
+        // A card with no notes has none.
+        assertEquals(emptyList<PhysicalPad>(), BeatCards.silentPads(card(a(group = 1)), { null }, known = true))
+    }
+
+    @Test
+    fun `a sound line with a slot out of range is no sound, and notes are counted by pad`() {
+        val bad = card(a(hit(0, 9), group = 0, sounds = mapOf(9 to snd(0))))
+        assertEquals(listOf(PhysicalPad(0, 9)), BeatCards.silentPads(bad, { null }, known = true))
+        val s = a(hit(0, 9), hit(48, 9), hit(0, 10, semi = 0), hit(Seq.TICKS_PER_BAR + 5, 6), group = 0)
+        assertEquals(mapOf(9 to 2, 10 to 1), BeatCards.notesByPad(s))
+    }
+
+    @Test
+    fun `the pads with no sound are one comment right after the header, which readers ignore`() {
+        val d7 = PhysicalPad(3, 9)
+        val c7 = PhysicalPad(2, 9)
+        val c = BeatCard("Test", 92.0, 50, listOf(a(hit(0, 9))))
+        val plain = BeatCards.write(c)
+        assertFalse(plain.contains("no sound"))
+        val text = BeatCards.write(c, silent = listOf(c7, d7))
+        assertEquals("# no sound on: C7 D7", ClaudeText.noSoundOn(listOf(c7, d7)))
+        assertEquals(
+            listOf("ARC BEAT 1", "name Test", "tempo 92", "swing 50", "# no sound on: C7 D7", ""),
+            text.lines().take(6),
+        )
+        // Tidy cards carry it too, before their own comment.
+        val tidy = BeatCards.write(c, tidy = true, silent = listOf(d7)).lines()
+        assertEquals("# no sound on: D7", tidy[4])
+        assertEquals(BeatCards.TIDY_COMMENT, tidy[5])
+        // The comment changes nothing about what is read.
+        val r = BeatCards.read(text)
+        assertEquals(emptyList<String>(), problems(r))
+        assertEquals(BeatCards.read(plain).card, r.card)
+        // ENTER is E, as the card writes its pad.
+        assertEquals("# no sound on: AE", ClaudeText.noSoundOn(listOf(PhysicalPad(0, 2))))
+    }
+
+    @Test
+    fun `the silent pads rows are worded for one note or several`() {
+        val d7 = PhysicalPad(3, 9)
+        assertEquals("D7 \u00B7 12 notes, no sound: they will be silent", ClaudeText.silentRow(d7, 12))
+        assertEquals("D7 \u00B7 1 note, no sound: it will be silent", ClaudeText.silentRow(d7, 1))
+        assertEquals("D7: 12 notes, no sound, they will be silent", ClaudeText.silentRowName(d7, 12))
+        assertEquals("D7: will get 512 PIANO", ClaudeText.pickedRowName(d7, "512 PIANO"))
+        assertEquals("Pick a sound for D7", ClaudeText.pickSoundName(d7))
+        assertEquals("Pick another sound for D7, now 512 PIANO", ClaudeText.changePickName(d7, "512 PIANO"))
+        assertEquals("Sound for D7", ClaudeText.pickTitle(d7))
+        assertEquals("12 notes of the card play on this pad.", ClaudeText.pickLine(12))
+    }
+
+    @Test
     fun `every recipe card in the skill reads cleanly, and the ones with effect lines carry them`() {
         val genres = File(System.getProperty("arc.beatCardSpec")!!).parentFile.resolve("genres.md").readText()
         val cards = Regex("```\\n(ARC BEAT 1\\n.*?)\\n```", RegexOption.DOT_MATCHES_ALL).findAll(genres).map { it.groupValues[1] }.toList()
@@ -1272,7 +1352,7 @@ class BeatCardTest {
             assertEquals(r.card!!.fx, BeatCards.read(BeatCards.write(r.card!!)).card!!.fx)
         }
         val withFx = cards.map { BeatCards.read(it).card!! }.filter { it.fx != null }
-        assertEquals(setOf("House groove", "Dub chord echo", "Industrial pressure", "Hard techno pound", "Schranz pressure", "Dusty lo-fi", "Amen shred"), withFx.map { it.name }.toSet())
+        assertEquals(setOf("House groove", "Dub chord echo", "Industrial pressure", "Hard techno pound", "Schranz pressure", "Hard groove workout", "Dusty lo-fi", "Amen shred"), withFx.map { it.name }.toSet())
         val house = withFx.first { it.name == "House groove" }.fx!!
         assertEquals(Sidechain(true, 0, 9, 0b0010, 0.3f, 0.55f), house.sidechain)
         assertEquals(FxType.FILTER, withFx.first { it.name == "Dusty lo-fi" }.fx!!.type)

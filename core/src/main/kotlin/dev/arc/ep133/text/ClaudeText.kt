@@ -197,13 +197,53 @@ object ClaudeText {
     fun soundRowSame(pad: PhysicalPad, sound: String) = "${padLabel(pad)}: $sound, ${ALREADY_THERE.lowercase()}"
     fun soundRowMissing(pad: PhysicalPad, slot: Int, name: String?) = "${padLabel(pad)}: ${soundMissing(slot, name)}"
 
-    /** The note under the rows, connected: [pads] ticked, in [project] (null while it isn't known). */
-    fun soundsNote(pads: Int, project: Int?) =
+    /**
+     * The note under the rows, connected: [pads] ticked, in [project] (null while it isn't known). With [keeps] some
+     * ticked pad has no sound yet, and UNDO can't empty it again: it keeps the new one.
+     */
+    fun soundsNote(pads: Int, project: Int?, keeps: Boolean = false) =
         "Writes ${Format.plural(pads, "pad")} in ${project?.let { "project $it" } ?: "the active project"} on the EP-133. " +
-            "Their pitch, level and other settings reset to the sound's. UNDO puts the old sounds back."
+            "Their pitch, level and other settings reset to the sound's. UNDO puts the old sounds back" +
+            (if (keeps) ", but a pad that had none keeps its new one." else ".")
 
     /** The same, offline: the changes are Arc's own until the EP-133 connects. */
     const val SOUNDS_OFFLINE_NOTE = "Saved as offline pad changes; they go to the EP-133 when you reconnect."
+
+    // ---------- Silent pads ----------
+    /**
+     * The comment a share carries right after the card's header when Arc knows the pads: the pads the card uses that have no
+     * sound, in keypad order for each group ("# no sound on: C7 D7"). Readers ignore comments; Claude reads it.
+     */
+    fun noSoundOn(pads: List<PhysicalPad>) = "# no sound on: " + pads.joinToString(" ") { padLabel(it) }
+
+    /** The SILENT PADS block's header, and its row: "D7 \u00B7 12 notes, no sound: they will be silent". */
+    const val SILENT_PADS = "Silent pads"
+    fun silentRow(pad: PhysicalPad, notes: Int) =
+        "${padLabel(pad)} \u00B7 ${Format.plural(notes, "note")}, no sound: ${if (notes == 1) "it" else "they"} will be silent"
+
+    /** The row's keys: PICK SOUND opens the picker, CHANGE (once a sound is picked) opens it again. */
+    const val PICK_SOUND = "Pick sound"
+    const val CHANGE_PICK = "Change"
+
+    /** Under the block: what a sound picked here does. */
+    const val SILENT_NOTE = "A pad with no sound plays nothing. Pick a sound for it: it goes on the pad with IMPORT, with the card's other sounds."
+
+    /** A silent row for screen readers: "D7: 12 notes, no sound, they will be silent", and once picked "D7: will get 512 PIANO". */
+    fun silentRowName(pad: PhysicalPad, notes: Int) =
+        "${padLabel(pad)}: ${Format.plural(notes, "note")}, no sound, ${if (notes == 1) "it" else "they"} will be silent"
+    fun pickedRowName(pad: PhysicalPad, sound: String) = "${padLabel(pad)}: will get $sound"
+    fun pickSoundName(pad: PhysicalPad) = "Pick a sound for ${padLabel(pad)}"
+    fun changePickName(pad: PhysicalPad, sound: String) = "Pick another sound for ${padLabel(pad)}, now $sound"
+
+    /** The picker's title, the line under it, the note under the list, and the key back to the card. */
+    fun pickTitle(pad: PhysicalPad) = "Sound for ${padLabel(pad)}"
+    fun pickLine(notes: Int) = "${Format.plural(notes, "note")} of the card play on this pad."
+    const val PICK_NOTE = "The sound goes on the pad with IMPORT, in the same step as the card. UNDO takes the patterns back; connected, the pad keeps the sound."
+    const val PICK_BACK = "Back to the card"
+
+    /** A picked sound's row in SOUNDS: what the pad has now ("No sound", struck through) and the small line that says who chose it. */
+    const val NO_SOUND = "No sound"
+    const val PICKED_HERE = "Picked here"
 
     // ---------- The sheet: FX and pad shaping ----------
     /** The FX block's header, and the switch beside it that decides whether the card's FX replace the project's (on to begin with). */

@@ -25,6 +25,7 @@ import dev.arc.ep133.features.MirrorState
 import dev.arc.ep133.features.PadLight
 import dev.arc.ep133.features.PadOrder
 import dev.arc.ep133.features.PhysicalPad
+import dev.arc.ep133.features.SoundSource
 import dev.arc.ep133.protocol.DeviceInfo
 import dev.arc.ep133.protocol.Storage
 import dev.arc.ep133.text.BackupDevice
@@ -98,9 +99,12 @@ import dev.arc.ep133.controller.padShapingUi
 import dev.arc.ep133.features.PadSettings
 import dev.arc.ep133.features.PlayMode
 import dev.arc.ep133.controller.PadShapingUi
+import dev.arc.ep133.controller.SilentUi
+import dev.arc.ep133.controller.SoundChoices
 import dev.arc.ep133.controller.SoundSet
 import dev.arc.ep133.controller.SoundsUi
 import dev.arc.ep133.controller.beatImportUi
+import dev.arc.ep133.controller.silentUi
 import dev.arc.ep133.controller.soundsUi
 import dev.arc.ep133.features.BeatCard
 import dev.arc.ep133.text.ClaudeText
@@ -2144,12 +2148,18 @@ private fun BeatSheet(
     sounds: (BeatCard) -> SoundsUi? = { null },
     fx: (BeatCard) -> BeatFxUi? = { null },
     shaping: (BeatCard) -> PadShapingUi? = { null },
+    silent: (BeatCard) -> SilentUi? = { null },
+    initialPicked: List<Pair<PhysicalPad, Int>> = emptyList(),
+    initialPicking: PhysicalPad? = null,
 ) {
-    val ui = beatImportUi(BeatCards.read(text), seq, 122.0, { names[it] }, fx = fx, shaping = shaping, sounds = sounds)
+    val ui = beatImportUi(BeatCards.read(text), seq, 122.0, { names[it] }, fx = fx, shaping = shaping, sounds = sounds, silent = silent)
     Framed(Tab.LIVE, dark = dark) {
         MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
         ArcSheet(visible = true, onDismiss = {}) {
-            BeatImportSheetContent(ui, onCancel = {}, onImport = { _, _, _, _ -> }, onCopyProblems = {}, initialSetTempo = initialSetTempo)
+            BeatImportSheetContent(
+                ui, onCancel = {}, onImport = { _, _, _, _, _ -> }, onCopyProblems = {},
+                initialSetTempo = initialSetTempo, initialPicked = initialPicked, initialPicking = initialPicking,
+            )
         }
     }
 }
@@ -2335,3 +2345,70 @@ A9 | .... X... .... X... |
 @Preview(name = "Beat sheet sounds none", widthDp = 360, heightDp = 860, showBackground = true)
 @Composable
 fun BeatSheetSoundsNonePreview() = BeatSheet(ABSENT_BEAT, sounds = sheetSounds(false))
+
+// A card whose melody on D7 and bass on C7 are KEYS notes on pads that have no sound on this EP-133 (groups C and D are
+// empty), and no sound lines: D7 plays 12 notes, C7 6. The pads now (A7 and A9 have a sound), and the sounds to pick from:
+private val heldNow = mapOf(PhysicalPad(0, 9) to 5, PhysicalPad(0, 11) to 90)
+private val pickable = listOf(
+    SoundEntry(5, "KICK DUSTY", 234_000), SoundEntry(90, "SNARE OLD", 206_000), SoundEntry(105, "SNARE TIGHT", 207_000),
+    SoundEntry(200, "HAT CLOSED", 98_000), SoundEntry(410, "SUB BASS", 310_000), SoundEntry(512, "PIANO", 402_000),
+    SoundEntry(515, "RHODES", 390_000), SoundEntry(530, "STRINGS", 612_000),
+)
+
+private const val SILENT_BEAT = """ARC BEAT 1
+name Moody keys
+tempo 108
+
+[A] bars 1 step 1/16
+A7 | X... ..x. X... .... |
+A9 | .... X... .... X... |
+
+[C] bars 1 step 1/16
+notes
+C7 at 1.1.1 note C2 gate 1/4
+C7 at 1.2.2 note C2 gate 1/8
+C7 at 1.3.1 note G1 gate 1/4
+C7 at 1.4.1 note A#1 gate 1/8
+C7 at 1.4.3 note C2 gate 1/8
+C7 at 1.4.4 note D2 gate 1/16
+
+[D] bars 1 step 1/16
+notes
+D7 at 1.1.1 note E4
+D7 at 1.1.3 note G4
+D7 at 1.2.1 note B4
+D7 at 1.2.3 note G4
+D7 at 1.3.1 note E4
+D7 at 1.3.3 note G4
+D7 at 1.4.1 note D4
+D7 at 1.4.2 note E4
+D7 at 1.4.3 note G4
+D7 at 1.4.4 note B4
+D7 at 1.1.2 vel 80 note B3
+D7 at 1.3.2 vel 80 note B3
+"""
+
+private fun sheetSilent(offline: Boolean = false): (BeatCard) -> SilentUi? = { card ->
+    silentUi(card, { heldNow[it] }, known = true, SoundChoices(SoundSource.DEVICE, pickable, emptySet()), offline, if (offline) null else 3)
+}
+
+// The SILENT PADS block (light, small phone): C7 and D7 play KEYS notes on pads with no sound, so they will be silent;
+// each row says how many notes and has PICK SOUND. There is no SOUNDS block (the card has no sound lines).
+@PreviewTest
+@Preview(name = "Beat sheet silent pads", widthDp = 360, heightDp = 1120, showBackground = true)
+@Composable
+fun BeatSheetSilentPadsPreview() = BeatSheet(SILENT_BEAT, silent = sheetSilent())
+
+// After picking PIANO for D7 (dark): D7's row says "\u2192 512 PIANO" with CHANGE, and a ticked row has joined a SOUNDS block
+// ("No sound" struck through, then 512 PIANO, "Picked here"): IMPORT writes it with the card's sounds. C7 is still silent.
+@PreviewTest
+@Preview(name = "Beat sheet silent pad picked dark", widthDp = 360, heightDp = 1500, showBackground = true)
+@Composable
+fun BeatSheetSilentPadPickedDarkPreview() =
+    BeatSheet(SILENT_BEAT, dark = true, silent = sheetSilent(), initialPicked = listOf(PhysicalPad(3, 9) to 512))
+
+// PICK SOUND's picker for D7 (light): the pad sheet's list, with its search, hundreds and preview keys, and a key back to the card.
+@PreviewTest
+@Preview(name = "Beat sheet silent pad picker", widthDp = 360, heightDp = 780, showBackground = true)
+@Composable
+fun BeatSheetSilentPadPickerPreview() = BeatSheet(SILENT_BEAT, silent = sheetSilent(), initialPicking = PhysicalPad(3, 9))

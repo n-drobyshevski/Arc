@@ -119,6 +119,7 @@ These lines set the project's FX in Arc: the same master effect, sends, compress
 - The header gets `name` (the pattern's place, e.g. `P01 S02`), `tempo` (Arc's tempo) and `swing`. Swing is the TIMING swing when every grid note sits on that swung grid, otherwise 50. The project's effect lines follow (see "FX in Arc's share").
 - Groups with notes come in order, as `[Gnn]`. A scene export holds the 4 playing patterns, skipping blank ones; a pattern export holds just that one.
 - `step` is the first of 1/16, 1/16T, 1/32 that puts every pad hit on the grid. When none does, 1/16 is used and the hits that don't fit go to `notes`.
+- **No sound:** when Arc knows the pads, a comment `# no sound on: <pads>` right after the header lists the used pads with no sound (see "FX in Arc's share").
 - **Sounds:** right after the section line, a `sound` line for each pad the section's notes use whose slot Arc knows, in keypad order, with the sound's name when Arc knows it. Pads that only appear in `notes` get one too. The `pad` lines (see "FX in Arc's share") come after them.
 - **Rows:** one for each pad that has grid hits, in keypad order (7 8 9 4 5 6 1 2 3 . 0 E), followed by Arc's sound name for that pad when it knows one.
   - A note goes on a row when it is a pad hit (no semi), on the swung grid, its velocity is 127, 100, 64 or 14·n, its gate is a whole number of steps, and its holds don't run into the next hit on the row. Otherwise it goes to `notes`, written exactly.
@@ -142,6 +143,8 @@ These lines set the project's FX in Arc: the same master effect, sends, compress
 
 ## FX in Arc's share
 When the project's FX aren't the default, Arc's share writes them as the effect lines above, right after the `swing` line: `fx`, then `send` for the groups above 0, then `comp` and `sidechain` when they are on. The effect line is written whenever any of them is (`fx none` when only a compressor or sidechain is on). Knobs are written as whole percents, and a sidechain always with its length and shape. With no effect, no send and the compressor and sidechain off, nothing is written.
+
+When Arc knows the pads (Live has read them), the share also carries one comment line right after the header, before the first section, naming the pads the card's notes use (pad hits and KEYS notes) that have no sound on the user's EP-133 and get none from a `sound` line: `# no sound on: C7 D7`, in keypad order for each group. Readers ignore it, as they ignore any comment; it tells you those pads are empty, so their notes would play nothing. A card Arc can't tell (pads not read) has no such line.
 
 The pad shaping of each pad the section's notes use is written as `pad` lines right after the section's sound lines, in keypad order. A line holds only the settings that differ from the pad's defaults, in the order `pitch level pan attack release mode`: pitch not 0, level not 100, pan not 0, attack not 0, mode not `oneshot`, and release when it isn't what the mode starts with (255 for `oneshot`, 15 for the others). A pad with nothing to write gets no line.
 

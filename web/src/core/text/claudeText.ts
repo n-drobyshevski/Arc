@@ -288,16 +288,70 @@ export const ClaudeText = {
     return `${padLabel(pad)}: ${ClaudeText.soundMissing(slot, name)}`
   },
 
-  /** The note under the rows, connected: [pads] ticked, in [project] (null while it isn't known). */
-  soundsNote(pads: number, project: number | null): string {
+  /**
+   * The note under the rows, connected: [pads] ticked, in [project] (null while it isn't known). With [keeps] some
+   * ticked pad has no sound yet, and UNDO can't empty it again: it keeps the new one.
+   */
+  soundsNote(pads: number, project: number | null, keeps = false): string {
     return (
       `Writes ${plural(pads, 'pad')} in ${project != null ? `project ${project}` : 'the active project'} on the EP-133. ` +
-      "Their pitch, level and other settings reset to the sound's. UNDO puts the old sounds back."
+      "Their pitch, level and other settings reset to the sound's. UNDO puts the old sounds back" +
+      (keeps ? ', but a pad that had none keeps its new one.' : '.')
     )
   },
 
   /** The same, offline: the changes are Arc's own until the EP-133 connects. */
   SOUNDS_OFFLINE_NOTE: 'Saved as offline pad changes; they go to the EP-133 when you reconnect.',
+
+  // ---------- Silent pads ----------
+  /**
+   * The comment a share carries right after the card's header when Arc knows the pads: the pads the card uses that have no
+   * sound, in keypad order for each group ("# no sound on: C7 D7"). Readers ignore comments; Claude reads it.
+   */
+  noSoundOn(pads: readonly PhysicalPad[]): string {
+    return '# no sound on: ' + pads.map(padLabel).join(' ')
+  },
+
+  /** The SILENT PADS block's header, and its row: "D7 · 12 notes, no sound: they will be silent". */
+  SILENT_PADS: 'Silent pads',
+  silentRow(pad: PhysicalPad, notes: number): string {
+    return `${padLabel(pad)} \u00B7 ${plural(notes, 'note')}, no sound: ${notes === 1 ? 'it' : 'they'} will be silent`
+  },
+
+  /** The row's keys: PICK SOUND opens the picker, CHANGE (once a sound is picked) opens it again. */
+  PICK_SOUND: 'Pick sound',
+  CHANGE_PICK: 'Change',
+
+  /** Under the block: what a sound picked here does. */
+  SILENT_NOTE: "A pad with no sound plays nothing. Pick a sound for it: it goes on the pad with IMPORT, with the card's other sounds.",
+
+  /** A silent row for screen readers: "D7: 12 notes, no sound, they will be silent", and once picked "D7: will get 512 PIANO". */
+  silentRowName(pad: PhysicalPad, notes: number): string {
+    return `${padLabel(pad)}: ${plural(notes, 'note')}, no sound, ${notes === 1 ? 'it' : 'they'} will be silent`
+  },
+  pickedRowName(pad: PhysicalPad, sound: string): string {
+    return `${padLabel(pad)}: will get ${sound}`
+  },
+  pickSoundName(pad: PhysicalPad): string {
+    return `Pick a sound for ${padLabel(pad)}`
+  },
+  changePickName(pad: PhysicalPad, sound: string): string {
+    return `Pick another sound for ${padLabel(pad)}, now ${sound}`
+  },
+
+  /** The picker's title, the line under it, the note under the list, and the key back to the card. */
+  pickTitle(pad: PhysicalPad): string {
+    return `Sound for ${padLabel(pad)}`
+  },
+  pickLine(notes: number): string {
+    return `${plural(notes, 'note')} of the card play on this pad.`
+  },
+  PICK_NOTE: 'The sound goes on the pad with IMPORT, in the same step as the card. UNDO takes the patterns back; connected, the pad keeps the sound.',
+  PICK_BACK: 'Back to the card',
+
+  /** A picked sound's row in SOUNDS: what the pad has now ("No sound", struck through) and the small line that says who chose it. */
+  NO_SOUND: 'No sound',
+  PICKED_HERE: 'Picked here',
 
   // ---------- The sheet: FX and pad shaping ----------
   /** The FX block's header, and the switch beside it that decides whether the card's FX replace the project's (on to begin with). */

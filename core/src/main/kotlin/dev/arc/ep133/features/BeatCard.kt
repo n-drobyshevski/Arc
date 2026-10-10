@@ -866,9 +866,11 @@ object BeatCards {
      * name when it has one. With [tidy],
      * velocities are rounded to 127, 100 or 64 (ties up) and gates under a
      * step become a step, for every note, and the card says so in a comment.
+     * The [silent] pads ([silentPads]) are listed in a comment of their own
+     * right after the header ([ClaudeText.noSoundOn]); readers ignore it.
      * The text ends in a newline.
      */
-    fun write(card: BeatCard, names: (PhysicalPad) -> String? = { null }, tidy: Boolean = false): String {
+    fun write(card: BeatCard, names: (PhysicalPad) -> String? = { null }, tidy: Boolean = false, silent: List<PhysicalPad> = emptyList()): String {
         val swing = TimingSettings.clampSwing(card.swing)
         val out = ArrayList<String>()
         out += "ARC BEAT $VERSION"
@@ -876,6 +878,7 @@ object BeatCards {
         card.tempo?.let { out += "tempo ${tempoText(it)}" }
         out += "swing $swing"
         card.fx?.let { writeFx(out, it) }
+        if (silent.isNotEmpty()) out += ClaudeText.noSoundOn(silent)
         if (tidy) out += TIDY_COMMENT
         for (s in card.sections.sortedBy { it.group }) {
             out += ""
@@ -1183,6 +1186,33 @@ object BeatCards {
     }
 
     // ---- Sounds ----
+
+    /**
+     * The pads [card]'s notes use (pad hits and KEYS notes alike; a note past its pattern's end doesn't play) that would
+     * be silent: [slotOf] gives no sound for them now (null) and no sound line of the card puts one on them. In keypad
+     * order for each group. Empty when the pads are not [known] (nothing read yet): then a pad with no slot is not
+     * known to be empty.
+     */
+    fun silentPads(card: BeatCard, slotOf: (PhysicalPad) -> Int?, known: Boolean): List<PhysicalPad> {
+        if (!known) return emptyList()
+        val out = ArrayList<PhysicalPad>()
+        for (s in card.sections.sortedBy { it.group }) {
+            val used = usedOffsets(s)
+            for (offset in KEYPAD) {
+                if (offset !in used || s.sounds[offset]?.slot in SLOT_MIN..SLOT_MAX) continue
+                val pad = PhysicalPad(s.group, offset)
+                if (slotOf(pad) == null && pad !in out) out += pad
+            }
+        }
+        return out
+    }
+
+    /** How many notes of [s] play on each pad (pad offset to count; a note past the pattern's end doesn't play). */
+    fun notesByPad(s: CardSection): Map<Int, Int> =
+        s.pattern.notes.filter { it.tick in 0 until s.pattern.lengthTicks }.groupingBy { it.offset }.eachCount()
+
+    // The offsets of the pads [s]'s notes play on.
+    private fun usedOffsets(s: CardSection): Set<Int> = notesByPad(s).keys
 
     /**
      * The names to show and match for the device's sounds ([device], slot to

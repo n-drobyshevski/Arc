@@ -3,6 +3,7 @@ package dev.arc.ep133.controller
 import dev.arc.ep133.features.BeatCard
 import dev.arc.ep133.features.BeatCards
 import dev.arc.ep133.features.CardFx
+import dev.arc.ep133.features.CardProblem
 import dev.arc.ep133.features.CardPad
 import dev.arc.ep133.features.CardSection
 import dev.arc.ep133.features.CardSound
@@ -354,6 +355,110 @@ class BeatPlanTest {
         assertTrue(soundsUi(card, null, { null }, nameOf, offline = false, project = 1)!!.noneFound)
         // One found is enough to leave it out.
         assertFalse(soundsUi(card, set, { null }, nameOf, offline = false, project = 1)!!.noneFound)
+    }
+
+    // ---- silent pads ----
+
+    private val d7 = PhysicalPad(3, 9)
+    private val c7 = PhysicalPad(2, 9)
+
+    /** A kit on A7, a bass on C7 (three KEYS notes) and a melody on D7 (two). */
+    private fun melody() = seqOf(
+        0 to pattern(hit(0), hit(96)),
+        2 to pattern(PatternNote(0, 9, 24, 0, 127), PatternNote(96, 9, 24, 3, 127), PatternNote(192, 9, 24, 7, 127)),
+        3 to pattern(PatternNote(0, 9, 24, 12, 127), PatternNote(48, 9, 24, 15, 127)),
+    )
+
+    private fun seqOf(vararg patterns: Pair<Int, Pattern>): ProjectSeq {
+        var seq = ProjectSeq.DEFAULT
+        for ((g, p) in patterns) seq = with(seq, g, 1, p)
+        return seq
+    }
+
+    @Test
+    fun `a share names the pads it uses that have no sound, once the pads are known, in one comment after the header`() {
+        val held = mapOf(micro to 12)
+        val sounds = { pad: PhysicalPad -> held[pad]?.let { CardSound(it, "Kick dusty") } }
+        val shared = beatShare(melody(), null, 120.0, 50, nameOf, sounds, held = { held[it] }, padsKnown = true)!!
+        val lines = shared.text.lines()
+        assertEquals("# no sound on: C7 D7", lines[lines.indexOf("swing 50") + 1])
+        // The card reads the same with it.
+        val card = BeatCards.read(shared.text)
+        assertEquals(emptyList<CardProblem>(), card.problems)
+        assertEquals(listOf(c7, d7), BeatCards.silentPads(card.card!!, { held[it] }, known = true))
+        // Pads not read yet: nothing is said. A pad with a sound line isn't named.
+        assertFalse(beatShare(melody(), null, 120.0, 50, nameOf, sounds, held = { held[it] }, padsKnown = false)!!.text.contains("no sound on"))
+        val all = beatShare(melody(), null, 120.0, 50, nameOf, held = { 1 }, padsKnown = true)!!
+        assertFalse(all.text.contains("no sound on"))
+        // A group's share names only its own pads.
+        assertTrue(beatShare(melody(), 3, 120.0, 50, nameOf, held = { null }, padsKnown = true)!!.text.contains("# no sound on: D7\n"))
+    }
+
+    @Test
+    fun `the silent pads block has a row for each pad with its notes, and none when the pads are not known or all have a sound`() {
+        val card = BeatCards.read(BeatCards.write(BeatCards.fromPatterns(null, 120.0, 50, listOf(2, 3, 0).map { CardSection(it, null, melody().pattern(it, 1)) }))).card!!
+        val choices = SoundChoices(SoundSource.DEVICE, listOf(SoundEntry(512, "PIANO", 0)), emptySet())
+        val held = { pad: PhysicalPad -> if (pad == micro) 12 else null }
+        val ui = silentUi(card, held, known = true, choices, offline = false, project = 3)!!
+        assertEquals(listOf(c7, d7), ui.rows.map { it.pad })
+        assertEquals(listOf(3, 2), ui.rows.map { it.notes })
+        assertEquals(3, ui.project)
+        assertFalse(ui.offline)
+        assertNull(silentUi(card, held, known = false, choices, offline = false, project = 3))
+        assertNull(silentUi(card, { 1 }, known = true, choices, offline = false, project = 3))
+        // No sound list known: the rows stay, without a way to pick.
+        assertNull(silentUi(card, held, known = true, null, offline = true, project = null)!!.choices)
+        // The sheet carries it, and a card that isn't readable has none.
+        assertEquals(2, beatImportUi(read(card), ProjectSeq.DEFAULT, 120.0, nameOf, silent = { silentUi(it, held, true, choices, false, 3) }).silent!!.rows.size)
+        assertNull(beatImportUi(read(card), ProjectSeq.DEFAULT, 120.0, nameOf).silent)
+    }
+
+    @Test
+    fun `the sounds to pick from are the ones the sound rows choose from, named as the sound set names them`() {
+        val pack = mapOf(12 to "KICK DEEP")
+        val connected = MirrorUi(sounds = entries(12 to "012.pcm", 512 to "PIANO"))
+        val c = soundChoicesOf(connected, pack)!!
+        assertEquals(SoundSource.DEVICE, c.source)
+        assertEquals(soundSetOf(connected, pack)!!.names, c.names)
+        assertEquals(listOf(12, 512), c.entries.map { it.slot })
+        assertNull(soundChoicesOf(null))
+        assertNull(soundChoicesOf(MirrorUi()))
+        // Offline: the view's list, the last read's with the slots Arc has no audio for, or the factory pack's.
+        val device = entries(5 to "Kick", 6 to "Snare")
+        val factory = entries(1 to "Pack kick", 2 to "Pack snare", 3 to "Pack hat")
+        val off = MirrorUi(offline = "Last seen", offlineSounds = OfflineSounds(SoundSource.DEVICE, device, factory, setOf(6)))
+        val read = soundChoicesOf(off)!!
+        assertEquals(SoundSource.DEVICE to setOf(6), read.source to read.unavailable)
+        assertEquals(soundSetOf(off)!!.names, read.names)
+        val pk = soundChoicesOf(off.copy(offlineSounds = OfflineSounds(SoundSource.FACTORY, device, factory, setOf(6))))!!
+        assertEquals(SoundSource.FACTORY to emptySet<Int>(), pk.source to pk.unavailable)
+        assertEquals(3, pk.entries.size)
+        assertNull(soundChoicesOf(MirrorUi(offline = "Factory sounds")))
+        assertNull(soundChoicesOf(off.copy(offlineSounds = OfflineSounds(SoundSource.FACTORY, device, null, emptySet()))))
+    }
+
+    @Test
+    fun `a picked sound is a sound row that changes the silent pad from no sound, and an extra pick for IMPORT`() {
+        val row = pickedRow(d7, 512, "PIANO")
+        assertTrue(row.changes)
+        assertTrue(row.picked)
+        assertEquals(SoundStatus.CHANGE, row.pick.status)
+        assertEquals(512, row.pick.slot)
+        assertEquals("PIANO", row.pick.name)
+        assertEquals(ClaudeText.NO_SOUND, row.oldName)
+        assertFalse(row.pick.unverified)
+        assertNull(row.cardSays)
+        // A sound the EP-133 lists unnamed is used by its slot, as a card's line would be.
+        val unnamed = pickedRow(d7, 512, "512.pcm")
+        assertTrue(unnamed.pick.unverified)
+        assertNull(unnamed.cardSays)
+        // IMPORT matches the picks to the sounds as they are then: a slot no longer listed is left out, as is a pad that has it already.
+        val names = mapOf(512 to "PIANO", 515 to "RHODES")
+        val picks = pickedSounds(mapOf(d7 to 512, c7 to 515, micro to 999), names) { if (it == c7) 515 else null }
+        assertEquals(listOf(d7), picks.map { it.pad })
+        assertEquals(listOf(SoundStatus.CHANGE), picks.map { it.status })
+        assertEquals(512, picks.single().slot)
+        assertNull(picks.single().currentSlot)
     }
 
     @Test
