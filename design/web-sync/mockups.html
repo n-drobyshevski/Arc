@@ -457,7 +457,7 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
           <li><b>Pads</b>: hold to hear the sample in the browser. Several fingers play a chord.</li>
           <li><b>A–D</b>: pick the group the pads play. The navy key is the group shown.</li>
           <li><b>KEYS</b>: switch between PADS and KEYS. In KEYS the pads become notes of the last sound.</li>
-          <li><b>RECORD</b>: arm REC. Recording starts with the first sound, and a second tap stops and saves the take.</li>
+          <li><b>RECORD</b>: arm REC. Recording starts with the first sound or when the EP-133 starts playing (MIDI clock start). It stops on a second tap, when the EP-133 stops, or at 10 minutes, and the take is saved.</li>
           <li><b>− / +</b>: octave down or up in KEYS, previous or next group in PADS. Their LEDs show which way can still move.</li>
         </ul>
       </div>
@@ -539,10 +539,10 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
     <div class="s__head">
       <span class="caps">After sign-off</span>
       <h2>Build order</h2>
-      <p>The repo rule still holds: Kotlin <code>core/</code> first, then the web port, which carries the "Port of …" header. Each step ships on its own and passes <code>npm run check</code>.</p>
+      <p>The repo rule still holds: Kotlin <code>core/</code> first, then the web port, which carries the "Port of …" header. Every step is committed to <code>claude/zealous-shannon-p1p9ip</code> and passes <code>npm run check</code> (and the Gradle tests where Kotlin changes). One PR at the end.</p>
     </div>
     <div class="backlog">
-      <div class="bl"><b>REC engine</b><p>Port <code>TakeRecorder.kt</code> to <code>web/src/core/features/takeRecorder.ts</code>, with the same tests. Tap the mix in <code>MixerHost.render</code> (<code>platform/audio/liveMixer.ts</code>), so a take holds exactly what the browser played. Cap a take at 10 minutes, as Android does.</p></div>
+      <div class="bl"><b>REC engine</b><p>Port <code>TakeRecorder.kt</code> to <code>web/src/core/features/takeRecorder.ts</code>, with the same tests. Tap the mix in <code>MixerHost.render</code> (<code>platform/audio/liveMixer.ts</code>), so a take holds exactly what the browser played. Cap a take at 10 minutes, as Android does. New rule: armed REC also starts on MIDI clock start, and a take that began that way stops on clock stop. Put this in <code>TakeRecorder.kt</code> first, so Android follows the transport too, then port it. Takes are named by date and time, as on Android.</p></div>
       <div class="bl"><b>Takes storage and actions</b><p>Add an IndexedDB <code>takes</code> store in <code>platform/storage/db.ts</code>, kept apart from <code>arc-demo</code>. Also copy takes into the library folder when one is picked (<code>platform/storage/external.ts</code>), as Android keeps them in Documents/arc. Wire Play/Stop, Save WAV (<code>files/save</code>), and Delete with the inline confirmation. Share shows only where <code>navigator.canShare({ files })</code> is true, which is mostly phones; desktop rows have no Share. To EP-133 works as on Android: it switches to Device and opens <code>UploadSheet</code> with the take loaded, so you can pick a slot and trim first.</p></div>
       <div class="bl"><b>REC chip and Takes UI on the existing grid</b><p>Copy the REC and take strings from <code>MirrorText.kt</code> into <code>mirrorText.ts</code>. Add the chip to the display strip and the panel, and a Takes section in Live tools. Add Playwright steps for arm, record, stop and the new row.</p></div>
       <div class="bl"><b>Phone grid in the K.O. II's colours</b><p>Restyle the one-group grid with black pads, light A–D keys with their icons and LEDs, and an orange RECORD key next to D. The layout and touch behaviour stay the same. This is web only for now: Android keeps its PO-style grid, so this step doesn't touch Kotlin and diverges from Android on purpose.</p></div>
@@ -751,7 +751,7 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
     // plate: arc's own lines where the unit prints its name
     $('plStatus').textContent = S.offline ? 'OFFLINE · LAST SEEN OCT 5, 2:04 PM'
       : S.rec === 'rec' ? `REC ${fmt(S.recSecs)} · TAP RECORD TO STOP`
-      : S.rec === 'armed' ? 'REC ARMED · PLAY TO START'
+      : S.rec === 'armed' ? 'REC ARMED · PLAY A PAD OR START THE EP-133'
       : `LIVE · PROJECT ${S.project}`
     $('plHit').textContent = S.keys ? `KEYS · ${kn[0].name}${S.octave} · ${GROUPS[S.group]}7 ${(padName(S.group, '7') || 'kick').toUpperCase()}` : S.last.toUpperCase()
     // display
@@ -924,7 +924,7 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
         <button type="button" aria-pressed="true">Device</button><button type="button" aria-pressed="false">All groups</button><button type="button" aria-pressed="false">One group</button>
       </div>
       <span class="caps">Takes</span>
-      <div class="takes">${S.takes.length ? S.takes.map(takeHtml).join('') : `<p>Tap RECORD, then play: recording starts with the first sound and stops when you tap RECORD again.</p>`}</div>
+      <div class="takes">${S.takes.length ? S.takes.map(takeHtml).join('') : `<p>Tap RECORD, then play or start the EP-133: recording starts with the first sound or the device's PLAY, and stops when you tap RECORD again or the device stops.</p>`}</div>
       <p>A take holds the pads and keys played in this browser, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save or Share copies one out.</p>
       <span class="caps">Pad numbers in project files</span>
       <div class="segrow"><span class="on">From the top</span><span>From the bottom</span></div>`
@@ -1054,7 +1054,7 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
   const PHONES = [
     { t: 'Web · REC idle', d: 'Same one-group layout, in the K.O. II\'s colours: black pads, light A–D keys with their icons and LED, and an orange RECORD key. The REC chip in the strip shows the state, as on Android.', o: { rec: 'idle', glow: { '7': 1, '4': 0.5 } } },
     { t: 'Android · REC armed', img: 'audit/android/rec-armed.jpg', d: 'The reference. Armed: the dot blinks until the first sound.' },
-    { t: 'Web · REC armed', d: 'The chip\'s dot and the RECORD key blink every 450 ms. Nothing is recorded until a pad sounds.', o: { rec: 'armed' } },
+    { t: 'Web · REC armed', d: 'The chip\'s dot and the RECORD key blink every 450 ms. Recording starts at the first sound or when the EP-133 starts playing.', o: { rec: 'armed' } },
     { t: 'Web · Recording in KEYS', d: 'The chip turns into an orange-ringed timer. Tapping it stops and saves the take.', o: { rec: 'rec', keys: true, glow: { '9': 0.6, 'ENTER': 1 } } },
     { t: 'Android · Recording in KEYS', img: 'audit/android/rec-recording-keys.jpg', d: 'The reference for the timer chip.' },
     { t: 'Web · Live tools with takes', d: 'Takes come first in the panel. Tapping a row unfolds Save WAV, Share (on phones that can share files), To EP-133 and Delete.', o: { tools: true } },
