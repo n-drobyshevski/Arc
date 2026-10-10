@@ -81,7 +81,7 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
 .stage__inner { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
 
 /* ---------- desktop window ---------- */
-.win { width: 1200px; height: 860px; background: var(--shell); border-radius: 18px; border: 1px solid var(--frame); overflow: hidden; position: relative;
+.win { width: 1200px; height: 1000px; background: var(--shell); border-radius: 18px; border: 1px solid var(--frame); overflow: hidden; position: relative;
   display: grid; grid-template-rows: 40px 1fr; }
 .win__bar { background: var(--frame); display: flex; align-items: center; gap: 8px; padding: 0 16px; }
 .win__dot { width: 12px; height: 12px; border-radius: 50%; background: var(--key-edge); }
@@ -106,7 +106,7 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
   display: grid; place-items: center; color: var(--on-tab-off); font-weight: 700; font-size: 13px; letter-spacing: .1em; z-index: 3; }
 .edge-guide span { transform: rotate(-90deg); }
 
-.devwrap { display: grid; place-items: center; padding: 14px 20px 24px 40px; min-height: 0; }
+.devwrap { display: grid; place-items: center; padding: 10px 20px 30px 40px; min-height: 0; }
 
 /* ---------- docked Live tools ---------- */
 .tools { background: var(--shell); border-left: 1px solid var(--key-edge); padding: 22px 22px 22px 22px; display: grid; align-content: start; gap: 16px; overflow: auto; }
@@ -132,87 +132,131 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
 .segrow span { border-radius: 10px; padding: 10px; text-align: center; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; background: var(--key); box-shadow: 0 2px 0 var(--key-edge); }
 .segrow span.on { background: var(--navy); color: var(--on-navy); box-shadow: none; }
 
-/* ---------- the EP-133 ---------- */
-.ep { --u: 1px; width: 760px; background: linear-gradient(170deg, var(--dev-body-hi), var(--dev-body) 40%, var(--dev-body) 80%, var(--dev-body-lo));
-  border-radius: 26px; padding: 26px 28px 28px; position: relative; color: var(--dev-print);
-  box-shadow: 0 1px 0 rgba(255,255,255,.7) inset, 0 -2px 0 rgba(0,0,0,.08) inset, 0 18px 40px -18px rgba(0,0,0,.45), 0 2px 0 var(--dev-body-lo); }
-.ep__top { display: grid; grid-template-columns: 150px 1fr 170px; gap: 22px; align-items: stretch; height: 132px; }
-.grille { display: grid; grid-template-columns: repeat(9, 1fr); gap: 6px; align-content: center; padding: 6px 4px; }
-.grille i { width: 9px; height: 9px; border-radius: 50%; background: var(--dev-hole); box-shadow: inset 0 1.5px 1px rgba(0,0,0,.45); }
-.lcd { background: var(--display); border-radius: 12px; padding: 12px 16px; display: grid; grid-template-rows: auto 1fr auto; color: var(--display-ink);
-  box-shadow: inset 0 3px 8px rgba(0,0,0,.5), 0 1px 0 rgba(255,255,255,.6); min-width: 0; font-family: var(--font); }
-.lcd__r1 { display: flex; gap: 12px; align-items: center; font-size: 14px; font-weight: 600; }
-.lcd__r1 .sp { flex: 1; }
-.lcd__big { font-size: 27px; font-weight: 800; letter-spacing: -.01em; align-self: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.lcd__r3 { display: flex; gap: 6px; align-items: center; }
-.lcd__seg { flex: 1; display: grid; grid-template-columns: repeat(16, 1fr); gap: 3px; }
-.lcd__seg i { height: 6px; border-radius: 1px; background: var(--segment-off); }
-.lcd__seg i.on { background: var(--display-ink); }
-.lcd__seg i.beat { background: var(--signal); }
-.lcd .dimt { color: var(--display-dim); }
-.rec { display: inline-flex; align-items: center; gap: 7px; border: 1.5px solid var(--display-dim); color: var(--display-dim); border-radius: 9px; padding: 3px 9px; font-size: 13px; font-weight: 700; letter-spacing: .04em; }
-.rec i { width: 9px; height: 9px; border-radius: 50%; background: var(--display-dim); }
-.rec.is-armed i { background: var(--signal); animation: blink .9s steps(1) infinite; }
-.rec.is-armed { color: var(--display-ink); }
-.rec.is-on { border-color: var(--signal); color: var(--display-ink); }
-.rec.is-on i { background: var(--signal); }
-@keyframes blink { 50% { opacity: 0; } }
-
-.knobs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: center; justify-items: center; }
-.knob { display: grid; justify-items: center; gap: 6px; font-size: 12px; font-weight: 700; letter-spacing: .08em; cursor: pointer; border: 0; background: none; padding: 0; color: var(--dev-print); }
-.knob__cap { width: 62px; height: 62px; border-radius: 50%; position: relative;
-  background: radial-gradient(circle at 40% 35%, #5A5B5E, var(--dev-knob) 60%, #232426); box-shadow: 0 4px 0 #1b1c1d, 0 6px 10px rgba(0,0,0,.35); }
-.knob__cap::after { content: ""; position: absolute; left: 50%; top: 7px; width: 3px; height: 15px; margin-left: -1.5px; border-radius: 2px; background: var(--dev-dark-ink); transform-origin: 50% 24px; transform: rotate(var(--rot, -40deg)); }
-
-.ep__mid { display: grid; grid-template-columns: 1fr 64px 1fr; gap: 16px; align-items: center; height: 64px; margin-top: 16px; }
-.fader { display: grid; grid-template-columns: auto 1fr; gap: 12px; align-items: center; cursor: pointer; border: 0; background: none; padding: 0; color: var(--dev-print); }
-.fader b { font-size: 12px; letter-spacing: .08em; }
-.fader__track { height: 10px; border-radius: 6px; background: #8E8D87; box-shadow: inset 0 2px 3px rgba(0,0,0,.45); position: relative; }
-.fader__cap { position: absolute; top: 50%; left: 62%; width: 30px; height: 28px; margin: -14px 0 0 -15px; border-radius: 6px; background: var(--dev-light); box-shadow: 0 3px 0 var(--dev-light-edge), 0 5px 8px rgba(0,0,0,.25); }
-.fader__cap::after { content: ""; position: absolute; left: 50%; top: 5px; bottom: 5px; width: 2px; margin-left: -1px; background: var(--dev-print); }
-.ep__brand { justify-self: end; text-align: right; font-size: 12px; line-height: 1.25; letter-spacing: .08em; font-weight: 700; color: var(--dev-print); }
-.ep__brand b { display: block; font-size: 20px; letter-spacing: -.01em; font-weight: 800; }
-
-.ep__keys { display: grid; grid-template-columns: 276px 64px 1fr; gap: 16px; margin-top: 18px; }
-.fkeys { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(4, 1fr); gap: 14px 12px; }
-.gkeys { display: grid; grid-template-rows: repeat(4, 1fr); gap: 14px; }
-.k { position: relative; border: 0; border-radius: 9px; cursor: pointer; display: grid; place-items: center; font-family: var(--mono); font-size: 12px; font-weight: 700; letter-spacing: .04em;
-  background: var(--dev-dark); color: var(--dev-dark-ink); box-shadow: 0 4px 0 var(--dev-dark-edge), 0 6px 8px rgba(0,0,0,.18); transition: transform 60ms, box-shadow 60ms; height: 78px; }
-.k:active, .k.is-down { transform: translateY(3px); box-shadow: 0 1px 0 var(--dev-dark-edge); }
-.k--light { background: var(--dev-light); color: var(--dev-print); box-shadow: 0 4px 0 var(--dev-light-edge), 0 6px 8px rgba(0,0,0,.14); }
-.k--light:active { box-shadow: 0 1px 0 var(--dev-light-edge); }
-.k--half { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; background: none; box-shadow: none; height: 78px; padding: 0; }
-.k--half .k { height: 78px; font-size: 20px; }
-.k--group { font-family: var(--font); font-size: 20px; font-weight: 800; }
-.k__glyph { font-size: 15px; }
-.k .led { position: absolute; top: 8px; right: 8px; width: 7px; height: 7px; border-radius: 50%; background: rgba(0,0,0,.35); }
-.k.is-lit .led { background: var(--signal); box-shadow: 0 0 8px 2px rgba(255,76,0,.75); }
-.k.is-sel { background: #2E3060; }
-.k.is-sel .led { background: var(--dev-dark-ink); box-shadow: 0 0 6px rgba(255,255,255,.6); }
-.k.is-glow .led { background: var(--signal); opacity: var(--g, 1); box-shadow: 0 0 8px 2px rgba(255,76,0,.6); }
-.k .acts { position: absolute; left: 50%; bottom: -11px; width: 18px; height: 3px; margin-left: -9px; border-radius: 2px; background: var(--signal); }
-.k.is-dim { opacity: .55; }
-.rec-dot { width: 13px; height: 13px; border-radius: 50%; background: var(--signal); display: inline-block; }
-
-.pads { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(4, 1fr); gap: 14px; }
-.pad { --glow: 0; position: relative; height: 78px; border: 0; border-radius: 10px; cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; padding: 7px 9px;
-  background: color-mix(in oklab, var(--signal) calc(var(--glow) * 100%), var(--dev-pad));
-  box-shadow: 0 4px 0 color-mix(in oklab, var(--signal-edge) calc(var(--glow) * 100%), var(--dev-pad-edge)), 0 6px 8px rgba(0,0,0,.14);
-  display: grid; grid-template-rows: 1fr auto; text-align: left; font-family: var(--font); color: var(--navy); }
-.pad.is-down { transform: translateY(3px); box-shadow: 0 1px 0 var(--dev-pad-edge); }
-.pad__name { font-size: 12px; font-weight: 600; line-height: 1.15; color: #55575A; overflow: hidden; }
-.pad__num { justify-self: end; font-size: 22px; font-weight: 700; line-height: 1; color: #1F2558; }
-.pad__num.word { font-size: 12px; letter-spacing: .06em; }
-.pad.is-lit .pad__name, .pad.is-lit .pad__num { color: #fff; }
-.pad.is-playing::after { content: ""; position: absolute; inset: -4px; border-radius: 13px; border: 2.5px solid var(--signal); pointer-events: none; }
-.pad__ring { position: absolute; left: 50%; top: 46%; width: 50px; height: 50px; margin: -25px 0 0 -25px; border-radius: 50%; border: 5px solid #1F2558; display: grid; place-items: center;
-  font-size: 13px; font-weight: 800; color: #1F2558; }
+/* ---------- the EP-133 K.O. II, drawn at the photo's 1444 × 2000 and scaled by --k ---------- */
+.epbox { --k: .43; width: calc(1444px * var(--k)); height: calc(2000px * var(--k)); position: relative; }
+.ep { position: absolute; left: 0; top: 0; width: 1444px; height: 2000px; transform: scale(var(--k)); transform-origin: 0 0; border-radius: 34px; overflow: hidden;
+  background: linear-gradient(180deg, var(--dev-body-hi) 0%, var(--dev-body) 55%, var(--dev-body-lo) 100%); font-family: var(--font); color: var(--dev-print);
+  box-shadow: inset 0 2px 0 rgba(255,255,255,.7), inset 0 -3px 0 rgba(0,0,0,.08); }
+.epbox::after { content: ""; position: absolute; inset: 8px 4px -10px; border-radius: 20px; box-shadow: 0 24px 40px -18px rgba(0,0,0,.55); z-index: -1; }
+.ep .a { position: absolute; }
+/* jack strip */
+.jack { top: 35px; height: 65px; display: grid; place-items: center; font-size: 27px; letter-spacing: .03em; }
+.jack--out { left: 68px; width: 130px; background: var(--dev-light); color: #444; }
+.jack--in { left: 330px; width: 130px; background: var(--signal); color: #fff; }
+.jack--sync { left: 527px; width: 325px; background: #161617; color: #eee; grid-template-columns: 1fr 1fr; padding-top: 10px; }
+.jack--sync::before { content: "I        O                I        O"; position: absolute; top: 2px; left: 60px; font-size: 14px; white-space: pre; color: #bbb; }
+.jack--usb { left: 1050px; width: 130px; background: #8B8A86; color: #f2f2f2; }
+.jack--pow { left: 1245px; width: 130px; color: #444; }
+.pow-nub { left: 1312px; top: 4px; width: 34px; height: 32px; border-radius: 6px 6px 0 0; background: linear-gradient(90deg, #FF6A2A, var(--signal)); }
+/* plate + grille */
+.plate { left: 5px; top: 100px; width: 980px; height: 390px; background: linear-gradient(180deg, #EEEDEA, #E5E4E0); }
+.screw { width: 36px; height: 36px; border-radius: 50%; background: #E1E0DC; box-shadow: inset 0 2px 4px rgba(0,0,0,.14), 0 1px 0 rgba(255,255,255,.8); }
+.plate__title { left: 66px; top: 150px; font-size: 96px; font-weight: 300; letter-spacing: -.05em; line-height: 1; color: #262625; }
+.plate__status { left: 70px; top: 256px; font-size: 40px; letter-spacing: .01em; color: var(--signal); white-space: nowrap; }
+.plate__hit { left: 68px; top: 430px; width: 880px; font-size: 42px; letter-spacing: .01em; color: #262625; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.grille { left: 985px; top: 100px; width: 455px; height: 390px;
+  background: radial-gradient(circle, #121212 0 10.5px, transparent 11.5px) 3px 3px / 32.4px 32.4px, linear-gradient(160deg, #828285, #5d5d60); }
+/* display */
+.disp { left: 5px; top: 490px; width: 1435px; height: 395px; background: linear-gradient(180deg, #151516, #0A0A0B 40%, #0C0C0D); box-shadow: inset 0 0 0 2px #000; }
+.disp::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 55%, rgba(255,255,255,.035) 56%, transparent 75%); }
+.dg { color: #262628; }
+.lit { color: #F2F2F2; }
+.d-batt { left: 78px; top: 566px; width: 46px; height: 22px; background: #E5321B; border-radius: 3px; }
+.d-batt::after { content: ""; position: absolute; right: -8px; top: 6px; width: 6px; height: 10px; background: #E5321B; }
+.d-txt { font-size: 26px; letter-spacing: .04em; }
+.d-grp { left: 212px; width: 42px; height: 50px; border: 2px solid #2a2a2c; border-radius: 4px; display: grid; place-items: center; font-size: 30px; color: #2e2e30; }
+.d-grp.on { background: #F2F2F2; border-color: #F2F2F2; color: #111; }
+.d-grp.snd { background: var(--signal); border-color: var(--signal); color: #fff; }
+.d-piano { left: 76px; top: 694px; width: 56px; height: 52px; display: flex; gap: 3px; }
+.d-piano i { flex: 1; background: #232325; border-radius: 1px; }
+.d-piano.on i { background: #F2F2F2; }
+.d-mode { left: 275px; top: 765px; width: 112px; height: 38px; display: grid; place-items: center; font-size: 26px; background: #262628; color: #0b0b0b; }
+.d-mode.on { background: #F2F2F2; }
+.d-bar { left: 468px; top: 563px; font-size: 27px; padding: 2px 8px; border: 2px solid #2a1512; color: #2a1512; border-radius: 4px; }
+.d-bpm { left: 798px; top: 568px; font-size: 27px; }
+.seg7 { left: 548px; top: 568px; display: flex; gap: 8px; }
+.seg7 svg { width: 66px; height: 108px; display: block; }
+.seg7 .on { fill: #F2F2F2; } .seg7 .off { fill: #1E1E20; }
+.d-rec { left: 536px; top: 697px; width: 46px; height: 46px; border-radius: 50%; background: #2a1310; }
+.d-rec.on { background: #FF2A00; box-shadow: 0 0 18px rgba(255,42,0,.6); }
+.d-rec.blink { background: #FF2A00; animation: blink .9s steps(1) infinite; }
+.d-play { left: 606px; top: 698px; width: 0; height: 0; border-left: 40px solid #262628; border-top: 22px solid transparent; border-bottom: 22px solid transparent; }
+.d-play.on { border-left-color: #F2F2F2; }
+.d-metro { left: 802px; top: 628px; width: 40px; height: 52px; }
+.d-metro path { fill: none; stroke: #2a2a2c; stroke-width: 4; }
+.d-metro.on path { stroke: #F2F2F2; }
+.d-fx { left: 862px; top: 694px; font-size: 46px; font-weight: 500; }
+.d-bars { width: 54px; height: 32px; background: repeating-linear-gradient(90deg, #3a1210 0 5px, transparent 5px 9px); }
+.d-ring { left: 1056px; top: 562px; width: 118px; height: 118px; }
+.d-ring circle { fill: none; stroke-width: 22; }
+.d-stereo { left: 990px; top: 565px; font-size: 16px; text-align: center; }
+.d-stereo b { display: block; font-size: 40px; line-height: .9; letter-spacing: -.25em; margin-left: -.2em; font-weight: 400; }
+.d-dots { width: 22px; height: 46px; background: radial-gradient(circle, #1d2a3d 0 4px, transparent 4.5px) 0 0 / 11px 11px; }
+.d-q { left: 1258px; top: 694px; font-size: 52px; font-weight: 400; }
+/* controls: printed labels and LEDs */
+.lbl { font-size: 26px; letter-spacing: .03em; color: #4a4a48; white-space: nowrap; }
+.lbl--red { color: #E8441A; }
+.led { width: 20px; height: 20px; border-radius: 50%; background: #74736F; box-shadow: inset 0 2px 3px rgba(0,0,0,.4); }
+.led.on { background: #FF3300; box-shadow: 0 0 14px 4px rgba(255,60,0,.6); }
+.line { background: #4a4a48; }
+.line--red { background: #E8441A; }
+.knob { border: 0; padding: 0; border-radius: 50%; cursor: pointer; width: 130px; height: 130px; }
+.knob::after { content: ""; position: absolute; left: 30px; top: 30px; width: 70px; height: 70px; border-radius: 50%; }
+.knob--vol { background: radial-gradient(circle at 45% 35%, #FBFBF9, #E3E2DE 70%, #CFCECA); box-shadow: 0 8px 0 #A9A8A3, 0 14px 18px rgba(0,0,0,.25); }
+.knob--vol::after { background: radial-gradient(circle at 45% 35%, #FFFFFF, #ECEBE8); box-shadow: 0 3px 6px rgba(0,0,0,.18); }
+.knob--x { background: radial-gradient(circle at 45% 35%, #FF7A3A, var(--signal) 60%, #D63E00); box-shadow: 0 8px 0 #9E2F00, 0 14px 18px rgba(0,0,0,.3); }
+.knob--x::after { background: radial-gradient(circle at 45% 35%, #FF7F45, #F04800); box-shadow: 0 4px 8px rgba(0,0,0,.25); }
+.knob--y { background: radial-gradient(circle at 45% 35%, #3A3A3B, #161617 65%); box-shadow: 0 8px 0 #000, 0 14px 18px rgba(0,0,0,.35); }
+.knob--y::after { background: radial-gradient(circle at 45% 35%, #333, #111); box-shadow: 0 4px 8px rgba(0,0,0,.5); }
+.badge { width: 32px; height: 32px; display: grid; place-items: center; font-size: 24px; border-radius: 3px; color: #fff; }
+/* keys */
+.key { border: 0; padding: 0; border-radius: 12px; cursor: pointer; font-family: var(--font); transition: transform 60ms, box-shadow 60ms; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+.key--black { background: linear-gradient(180deg, #2C2C2D, #1B1B1C); color: #F1F1F1; box-shadow: 0 9px 0 #040404, 0 14px 16px rgba(0,0,0,.35); }
+.key--light { background: linear-gradient(180deg, #EFEEEB, #DDDCD8); color: #3d3d3b; box-shadow: 0 9px 0 #9C9B96, 0 14px 16px rgba(0,0,0,.22); }
+.key--orange { background: linear-gradient(180deg, #FF6220, #F04700); color: #fff; box-shadow: 0 9px 0 #A33000, 0 14px 16px rgba(0,0,0,.25); }
+.key--grey { background: linear-gradient(180deg, #7C7C7B, #676766); color: #EDEDED; box-shadow: 0 9px 0 #383837, 0 14px 16px rgba(0,0,0,.25); }
+.key:active, .key.is-down { transform: translateY(7px); box-shadow: 0 2px 0 rgba(0,0,0,.55); }
+.key--slim { display: grid; place-items: center; font-size: 28px; letter-spacing: .02em; }
+.key--split { display: grid; grid-template-rows: 1fr 1fr; gap: 3px; background: #121213; box-shadow: 0 9px 0 #6d6c68, 0 14px 16px rgba(0,0,0,.25); }
+.key--split .h { display: grid; place-items: center; font-size: 28px; letter-spacing: .02em; }
+.h--black { background: linear-gradient(180deg, #2C2C2D, #1D1D1E); color: #F1F1F1; }
+.h--light { background: linear-gradient(180deg, #EAE9E6, #DEDDD9); color: #3d3d3b; }
+.h--lighter { background: linear-gradient(180deg, #F2F1EE, #E4E3DF); color: #3d3d3b; }
+.h--orange { background: linear-gradient(180deg, #FF6220, #F04700); color: #fff; }
+.h--grey { background: linear-gradient(180deg, #9A9995, #8A8985); color: #f4f4f4; }
+.key--group { text-align: left; }
+.key__letter { position: absolute; left: 20px; top: 8px; font-size: 56px; font-weight: 300; color: #8A8984; line-height: 1.1; }
+.key__icon { position: absolute; left: 0; right: 0; bottom: 18px; text-align: center; font-size: 38px; color: #8A8984; line-height: 1; }
+.key--sign { font-size: 76px; font-weight: 200; line-height: 1; color: #555; display: grid; place-items: center; }
+.key--word { display: grid; justify-items: center; align-content: start; padding-top: 16px; font-size: 28px; letter-spacing: .02em; }
+.key.is-sel { color: #FF6A2A; }
+.key.is-dimk { opacity: .6; }
+.key--orange.is-armed { animation: armed .9s steps(1) infinite; }
+.key--orange.is-on { box-shadow: 0 9px 0 #A33000, 0 0 0 6px rgba(255,255,255,.85), 0 0 30px 8px rgba(255,76,0,.55); }
+.key--grey.is-lit { background: linear-gradient(180deg, #8E8E8D, #7A7A79); box-shadow: 0 9px 0 #383837, 0 0 26px 6px rgba(255,255,255,.35); }
+@keyframes armed { 50% { box-shadow: 0 9px 0 #A33000, 0 0 0 6px rgba(255,255,255,.85); } }
+/* pads: black keys that take the signal colour as they sound */
+.pad { --glow: 0; border: 0; padding: 0; border-radius: 12px; cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; font-family: var(--font); text-align: left; color: #F1F1F1;
+  background: color-mix(in oklab, var(--signal) calc(var(--glow) * 100%), #1E1E1F);
+  box-shadow: 0 9px 0 color-mix(in oklab, #A33000 calc(var(--glow) * 100%), #040404), 0 14px 16px rgba(0,0,0,.35); transition: transform 60ms; }
+.pad.is-down { transform: translateY(7px); box-shadow: 0 2px 0 #040404; }
+.pad__num { position: absolute; left: 22px; top: 6px; font-size: 58px; font-weight: 300; line-height: 1.1; }
+.pad__num.word { left: 0; right: 0; top: 20px; text-align: center; font-size: 28px; font-weight: 400; letter-spacing: .02em; }
+.pad__num.dot { top: 0; left: 26px; font-size: 50px; }
+.pad__name { position: absolute; left: 18px; right: 12px; bottom: 12px; font-size: 24px; line-height: 1.1; color: #8C8C8C; }
+.pad.is-lit .pad__name { color: #fff; }
+.pad.is-playing::after { content: ""; position: absolute; inset: -9px; border-radius: 18px; border: 6px solid var(--signal); pointer-events: none; }
+.pad__ring { position: absolute; left: 50%; top: 52%; width: 84px; height: 84px; margin: -42px 0 0 -42px; border-radius: 50%; border: 9px solid #D9D8D3; display: grid; place-items: center; font-size: 24px; font-weight: 700; color: #F1F1F1; }
 .pad__ring.hi { border-color: var(--signal); }
-.pad.is-lit .pad__ring { border-color: #fff; color: #fff; }
-.pad__oct { position: absolute; right: 8px; bottom: 6px; font-size: 11px; color: #6B6A72; }
+.pad.is-lit .pad__ring { border-color: #fff; }
+.pad__oct { position: absolute; right: 12px; bottom: 8px; font-size: 20px; color: #8C8C8C; }
 .pad.is-lit .pad__oct { color: #fff; }
-
-.ep.is-offline .lcd { color: var(--display-dim); }
+/* fader */
+.fader { left: 70px; top: 1420px; width: 126px; height: 306px; border: 0; padding: 0; background: none; cursor: pointer; }
+.fader__slot { position: absolute; left: 54px; top: 8px; width: 18px; height: 290px; border-radius: 9px; background: #111; box-shadow: inset 0 3px 4px #000; }
+.fader__tick { position: absolute; left: 8px; right: 6px; top: 149px; height: 2px; background: #6b6b69; }
+.fader__cap { position: absolute; left: 33px; top: 120px; width: 60px; height: 60px; border-radius: 50%; background: radial-gradient(circle at 45% 35%, #A3A3A1, #7B7B79 70%); box-shadow: 0 4px 0 #4a4a49, 0 8px 10px rgba(0,0,0,.35); }
+.ep.is-offline .disp ~ .seg7 .on { fill: #6a6a6c; }
 
 /* guide tags on the device */
 .ctag { position: absolute; z-index: 6; background: var(--navy); color: var(--on-navy); font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
@@ -345,7 +389,7 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
     <div class="s__head">
       <span class="caps">Live · 1200 px window</span>
       <h2>The EP-133 on a wide screen</h2>
-      <p>The device replaces the four-group grid when the window is wide. Live tools sit docked on the right, with Takes at the top. Pick a state or play it yourself: hold pads, tap A–D, KEYS, RECORD, −/+, or any dark key.</p>
+      <p>The K.O. II replaces the four-group grid when the window is wide. Live tools sit docked on the right, with Takes at the top. Pick a state or play it yourself: hold the black pads, tap A–D, KEYS, RECORD, −/+, or any other key or knob.</p>
     </div>
     <div class="chips" role="group" aria-label="Device state">
       <button type="button" class="chip" data-preset="idle" aria-pressed="false">Connected</button>
@@ -356,7 +400,7 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
       <button type="button" class="chip" data-preset="offline" aria-pressed="false">Offline</button>
       <button type="button" class="chip" data-preset="coach" aria-pressed="false">Guide tags</button>
     </div>
-    <div class="stage" id="deskStage" data-w="1200" data-h="860">
+    <div class="stage" id="deskStage" data-w="1200" data-h="1000">
       <div class="stage__inner">
         <div class="win" id="win">
           <div class="win__bar"><span class="win__dot"></span><span class="win__dot"></span><span class="win__dot"></span><span class="win__url">arc-pi-mauve.vercel.app/#/live</span></div>
@@ -379,7 +423,7 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
         </div>
       </div>
     </div>
-    <p class="hint">The window is drawn at 1200 px and scaled to fit this page. The key layout is drawn from memory of the unit and its manual; check the key positions against a real EP-133 before building.</p>
+    <p class="hint">The window is drawn at 1200 px and scaled to fit this page. The device is traced from the K.O. II product photo: the same positions, colours, two-tone keys, printed labels and LEDs.</p>
   </section>
 
   <!-- ================= 2. KEY MAP ================= -->
@@ -404,16 +448,18 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
         <h3><span class="sw sw--mirror"></span>Lights from the EP-133</h3>
         <ul>
           <li><b>Pads</b> glow orange with velocity and fade over 300 ms, the same as the grid.</li>
-          <li><b>A–D</b>: the light shows which groups are sounding. Follow moves the selection.</li>
-          <li><b>PLAY</b> is lit while the device plays, from MIDI clock start and stop.</li>
-          <li><b>KEYS</b> is lit while the device sends KEYS notes.</li>
-          <li><b>Screen</b>: play state, BPM, project, the last hit, and REC.</li>
+          <li><b>Group LEDs</b> (the dots above A–D) light for the group shown and flicker with the groups that sound. Follow moves the selection.</li>
+          <li><b>PLAY</b> brightens while the device plays, from MIDI clock start and stop.</li>
+          <li><b>Display</b>: BPM in the seven-segment digits, ▶ while playing, ● for REC (blinking when armed), the A–D boxes, the four-colour ring (one quarter per group), the piano icon in KEYS, and the metronome ticking on the beat.</li>
+          <li><b>Plate</b>: where the unit prints its name, arc writes the project and connection (orange line) and the last hit (black line).</li>
         </ul>
       </div>
       <div class="lg">
         <h3><span class="sw sw--guide"></span>Shows its shortcuts</h3>
         <ul>
-          <li><b>SOUND, MAIN, TEMPO, SAMPLE, FX, TIMING, ERASE, SHIFT</b>, the <b>X / Y knobs</b> and the <b>fader</b> open a card with their combos from the shortcut guide.</li>
+          <li>The two-tone keys (<b>SOUND/EDIT, MAIN/COMMIT, TEMPO/LOOP, SAMPLE/CHOP, TIMING/CORRECT, FX/OUTPUT, ERASE/SYSTEM</b>), <b>SHIFT</b>, <b>FADER</b>, the <b>X / Y knobs</b> and the fader open a card with their combos from the shortcut guide.</li>
+          <li><b>VOLUME</b> explains that arc's sound follows the computer's volume.</li>
+          <li>The printed LEDs next to LEVEL, PITCH, LPF and the other fader labels stay dark: arc can't see the fader's assignment.</li>
           <li>The card links to the full guide, already filtered to that key.</li>
           <li>Nothing is ever sent to the device. arc only reads in Live.</li>
         </ul>
@@ -564,83 +610,160 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
   const el = (h) => { const t = document.createElement('template'); t.innerHTML = h.trim(); return t.content.firstElementChild }
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
 
-  // ---------- device ----------
+  // ---------- device (EP-133 K.O. II, coordinates from the product photo, 1444 × 2000) ----------
   const epHost = document.getElementById('ep')
   const win = document.getElementById('win')
-  function fkey(id, label, opts = {}) {
-    const cls = ['k', opts.light ? 'k--light' : '', opts.group ? 'k--group' : ''].filter(Boolean).join(' ')
-    return `<button type="button" class="${cls}" data-key="${id}" aria-label="${esc(opts.aria || label)}"><span class="led"></span>${label}${opts.acts ? '<span class="acts"></span>' : ''}</button>`
+  const at = (x, y, w, h) => `left:${x}px;top:${y}px;${w ? `width:${w}px;` : ''}${h ? `height:${h}px;` : ''}`
+  const COLS = [461, 657, 853]
+  const ROWY = [1147, 1343, 1538, 1735]
+  const GROUP_ICONS = ['✳', '↩', '↥', '↧']
+  function split(id, x, y, top, bottom, topCls, botCls) {
+    return `<button type="button" class="a key key--split" data-key="${id}" style="${at(x, y, 130, 130)}" aria-label="${top} / ${bottom}">
+      <span class="h ${topCls}">${top}</span><span class="h ${botCls}">${bottom}</span></button>`
   }
+  function slim(id, x, y, label, cls) { return `<button type="button" class="a key key--slim ${cls}" data-key="${id}" style="${at(x, y, 130, 64)}">${label}</button>` }
+  function led(x, y, id) { return `<span class="a led" ${id ? `id="${id}"` : ''} style="${at(x - 10, y - 10)}"></span>` }
+  function lbl(x, y, t, cls = '') { return `<span class="a lbl ${cls}" style="${at(x, y - 16)}">${t}</span>` }
+
+  // Seven-segment digits like the K.O. II's display, with the unlit segments faintly visible.
+  const SEG = { '0': 'abcdef', '1': 'bc', '2': 'abdeg', '3': 'abcdg', '4': 'bcfg', '5': 'acdfg', '6': 'acdefg', '7': 'abc', '8': 'abcdefg', '9': 'abcdfg', O: 'abcdef', F: 'aefg', '-': 'g', ' ': '' }
+  const SEGR = { a: [10, 0, 46, 11], b: [56, 9, 11, 44], c: [56, 57, 11, 44], d: [10, 97, 46, 11], e: [0, 57, 11, 44], f: [0, 9, 11, 44], g: [10, 48.5, 46, 11] }
+  function digit(ch, dp) {
+    const on = SEG[ch] ?? ''
+    const rects = Object.entries(SEGR).map(([k, [x, y, w, h]]) => `<rect class="${on.includes(k) ? 'on' : 'off'}" x="${x}" y="${y}" width="${w}" height="${h}" rx="4"/>`).join('')
+    return `<svg viewBox="0 0 80 108" aria-hidden="true">${rects}<circle class="${dp ? 'on' : 'off'}" cx="74" cy="102" r="6"/></svg>`
+  }
+
   function renderDevice() {
-    const fk = [
-      fkey('SOUND', 'SOUND'), fkey('MAIN', 'MAIN'), fkey('TEMPO', 'TEMPO'),
-      fkey('SAMPLE', 'SAMPLE'), fkey('FX', 'FX'), fkey('TIMING', 'TIMING'),
-      fkey('KEYS', 'KEYS', { acts: true }), fkey('ERASE', 'ERASE'), fkey('SHIFT', 'SHIFT', { light: true }),
-      fkey('RECORD', '<span class="rec-dot"></span>', { acts: true, aria: 'RECORD' }), fkey('PLAY', '<span class="k__glyph">▶</span>', { aria: 'PLAY' }),
-      `<div class="k--half">${fkey('MINUS', '−', { light: true, acts: true, aria: 'minus' })}${fkey('PLUS', '+', { light: true, acts: true, aria: 'plus' })}</div>`,
-    ].join('')
-    const gk = GROUPS.map((g, i) => fkey('G' + i, g, { group: true, acts: true, aria: 'Group ' + g })).join('')
-    const holes = Array.from({ length: 54 }, () => '<i></i>').join('')
-    const pads = ROWS.flat().map((l) => `<button type="button" class="pad" data-label="${l}"></button>`).join('')
-    epHost.replaceWith(el(`<div class="ep" id="ep">
-      <div class="ep__top">
-        <div class="grille" aria-hidden="true">${holes}</div>
-        <div class="lcd" id="lcd"></div>
-        <div class="knobs">
-          <button type="button" class="knob" data-key="KNOBX"><span class="knob__cap" style="--rot:-50deg"></span>X</button>
-          <button type="button" class="knob" data-key="KNOBY"><span class="knob__cap" style="--rot:30deg"></span>Y</button>
-        </div>
-      </div>
-      <div class="ep__mid">
-        <button type="button" class="fader" data-key="FADER"><b>FADER</b><span class="fader__track"><span class="fader__cap"></span></span></button>
-        <span></span>
-        <div class="ep__brand">EP-133<b>K.O. II</b></div>
-      </div>
-      <div class="ep__keys">
-        <div class="fkeys">${fk}</div>
-        <div class="gkeys">${gk}</div>
-        <div class="pads" id="pads">${pads}</div>
-      </div>
-    </div>`))
+    const screws = [[18, 112], [928, 112], [18, 438], [928, 438]].map(([x, y]) => `<span class="a screw" style="${at(x, y)}"></span>`).join('')
+    const groups = GROUPS.map((g, i) => `<span class="a d-grp" data-dgrp="${i}" style="${at(212, 562 + i * 66)}">${g}</span>`).join('')
+    const gkeys = GROUPS.map((g, i) => `<button type="button" class="a key key--light key--group" data-key="G${i}" style="${at(265, ROWY[i], 130, 128)}" aria-label="Group ${g}">
+        <span class="key__letter">${g}</span><span class="key__icon" aria-hidden="true">${GROUP_ICONS[i]}</span></button>`).join('')
+    const pads = ROWS.map((row, r) => row.map((l, c) => `<button type="button" class="a pad" data-label="${l}" style="${at(COLS[c], ROWY[r], 130, 128)}"></button>`).join('')).join('')
+    const ledRow = (y, labels, red = []) => [297, 493, 689, 885].map((x, i) => led(x, y, i === 0 ? `gled${[1112, 1307, 1503, 1700].indexOf(y)}` : '') + (labels[i - 1] ? lbl(x + 30, y, labels[i - 1], red.includes(i) ? '' : '') : '')).join('')
+    epHost.replaceWith(el(`<div class="epbox" id="ep"><div class="ep">
+      <span class="a jack jack--out">OUTPUT</span><span class="a jack jack--in">INPUT</span>
+      <span class="a jack jack--sync"><span>SYNC</span><span>MIDI</span></span><span class="a jack jack--usb">USB</span><span class="a jack jack--pow">POWER</span><span class="a pow-nub"></span>
+      <div class="a plate"></div>${screws}
+      <span class="a plate__title">K.O. Ⅱ</span>
+      <span class="a plate__status" id="plStatus"></span>
+      <span class="a plate__hit" id="plHit"></span>
+      <div class="a grille" aria-hidden="true"></div>
+      <div class="a disp"></div>
+      <span class="a d-batt"></span>
+      <span class="a d-txt dg" style="${at(78, 634)}">MUTE</span>
+      <span class="a d-piano" id="dPiano"><i></i><i></i><i></i><i></i><i></i></span>
+      ${groups}
+      <span class="a d-mode" id="dMode">PADS</span>
+      <span class="a d-txt dg" style="${at(300, 566)}">SYNC</span>
+      <span class="a d-txt dg" style="${at(345, 634)}">PASTE</span>
+      <span class="a d-txt dg" style="${at(470, 634)}">TIC</span>
+      <span class="a d-bar">BAR</span>
+      <span class="a seg7" id="dSeg"></span>
+      <span class="a d-txt d-bpm dg" id="dBpm">BPM</span>
+      <span class="a d-rec" id="dRec"></span>
+      <span class="a d-play" id="dPlay"></span>
+      <svg class="a d-metro" id="dMetro" viewBox="0 0 40 52" aria-hidden="true"><path d="M14 4 h12 l10 44 h-32 z M20 40 L32 8"/></svg>
+      <span class="a d-bars" style="${at(795, 704)}"></span><span class="a d-fx dg">FX</span><span class="a d-bars" style="${at(928, 704)}"></span>
+      <span class="a d-stereo dg"><b>OO</b>STEREO</span>
+      <svg class="a d-ring" id="dRing" viewBox="0 0 118 118" aria-hidden="true"></svg>
+      <span class="a d-dots" style="${at(1203, 630)}"></span><span class="a d-dots" style="${at(1203, 694)}"></span><span class="a d-dots" style="${at(1203, 760)}"></span>
+      <span class="a d-q dg">Q</span><span class="a d-txt dg" style="${at(1318, 730)}">FREE</span>
+      <span class="a d-txt dg" style="${at(1310, 760)}">SWING</span>
+
+      <span class="a lbl" style="${at(90, 902)}">VOLUME</span>
+      <button type="button" class="a knob knob--vol" data-key="VOLUME" style="${at(68, 950)}" aria-label="Volume"></button>
+      ${split('SOUND', 265, 950, 'SOUND', 'EDIT', 'h--black', 'h--light')}
+      ${split('MAIN', 461, 950, 'MAIN', 'COMMIT', 'h--black', 'h--orange')}
+      ${split('TEMPO', 657, 950, 'TEMPO', 'LOOP', 'h--black', 'h--grey')}
+      <span class="a line" style="${at(722, 917, 2, 30)}"></span><span class="a line" style="${at(722, 917, 345, 2)}"></span>
+      <span class="a lbl" style="${at(1090, 917)}">BPM</span><span class="a line" style="${at(1160, 917, 70, 2)}"></span><span class="a lbl" style="${at(1242, 917)}">METRONOME</span>
+      <button type="button" class="a knob knob--x" data-key="KNOBX" style="${at(1049, 950)}" aria-label="Knob X"></button>
+      <button type="button" class="a knob knob--y" data-key="KNOBY" style="${at(1245, 950)}" aria-label="Knob Y"></button>
+      <span class="a badge" style="${at(1098, 1098)}background:#F23A1A">X</span><span class="a badge" style="${at(1294, 1098)}background:#111">Y</span>
+      <span class="a line--red" style="${at(1016, 1015, 2, 162)}"></span><span class="a line--red" style="${at(1016, 1015, 30, 2)}"></span><span class="a line--red" style="${at(1016, 1175, 34, 2)}"></span>
+      <span class="a lbl lbl--red" style="${at(986, 1110)}transform:rotate(-90deg);background:var(--dev-body);padding:0 6px">GAIN</span>
+      <span class="a line" style="${at(1408, 1015, 2, 162)}"></span><span class="a line" style="${at(1380, 1015, 30, 2)}"></span><span class="a line" style="${at(1380, 1175, 30, 2)}"></span>
+      <span class="a lbl" style="${at(1370, 1104)}transform:rotate(-90deg);background:var(--dev-body);padding:0 6px">SWING</span>
+
+      ${ledRow(1112, ['LEVEL', 'PITCH', 'TIME'])}
+      ${ledRow(1307, ['LPF', 'HPF', '→ FX'])}
+      ${ledRow(1503, ['ATK', 'REL', 'PAN'])}
+      ${ledRow(1700, ['TUNE', 'VEL', 'MOD'])}
+      ${led(1082, 1700, 'ledMinus')}${led(1147, 1700, 'ledPlus')}
+
+      ${slim('KEYS', 68, 1147, 'KEYS', 'key--black')}
+      ${slim('FADERKEY', 68, 1277, 'FADER', 'key--black')}
+      <button type="button" class="a fader" data-key="FADER" aria-label="Fader"><span class="fader__slot"></span><span class="fader__tick"></span><span class="fader__cap"></span></button>
+      ${slim('SHIFT', 68, 1800, 'SHIFT', 'key--light')}
+      ${gkeys}
+      <div id="pads">${pads}</div>
+      ${split('SAMPLE', 1050, 1147, 'SAMPLE', 'CHOP', 'h--orange', 'h--light')}
+      ${split('TIMING', 1246, 1147, 'TIMING', 'CORRECT', 'h--black', 'h--light')}
+      ${split('FX', 1050, 1343, 'FX', 'OUTPUT', 'h--black', 'h--light')}
+      ${split('ERASE', 1246, 1343, 'ERASE', 'SYSTEM', 'h--lighter', 'h--light')}
+      <button type="button" class="a key key--light key--sign" data-key="MINUS" style="${at(1050, 1538, 130, 128)}" aria-label="minus">−</button>
+      <button type="button" class="a key key--light key--sign" data-key="PLUS" style="${at(1246, 1538, 130, 128)}" aria-label="plus">+</button>
+      <button type="button" class="a key key--orange key--word" data-key="RECORD" style="${at(1050, 1735, 130, 128)}">RECORD</button>
+      <button type="button" class="a key key--grey key--word" data-key="PLAY" style="${at(1246, 1735, 130, 128)}">PLAY</button>
+    </div></div>`))
     const ep = document.getElementById('ep')
     ep.addEventListener('click', onKey)
     bindPads(ep.querySelector('#pads'))
   }
 
   function padName(g, l) { return NAMES[g][l] || '' }
+  function ringSvg() {
+    // Four quarter arcs, one per group: A top-left, B top-right, C bottom-right, D bottom-left.
+    const C = 2 * Math.PI * 47, q = C / 4
+    const cols = ['#FF4C00', '#E5397A', '#3E8FDA', '#FF6A2A']
+    const starts = [2, 3, 0, 1]
+    return cols.map((c, i) => {
+      const o = i === S.group ? 1 : 0.18 + 0.82 * S.groupGlow[i]
+      return `<circle cx="59" cy="59" r="47" stroke="${c}" stroke-opacity="${S.offline ? 0.15 : o.toFixed(2)}" stroke-dasharray="${q - 6} ${C - q + 6}" stroke-dashoffset="${-starts[i] * q}" transform="rotate(0 59 59)"/>`
+    }).join('')
+  }
   function update() {
-    const ep = document.getElementById('ep')
+    const box = document.getElementById('ep')
+    const ep = box.firstElementChild
     ep.classList.toggle('is-offline', S.offline)
-    // screen
-    const lcd = document.getElementById('lcd')
-    const recCls = S.rec === 'armed' ? 'is-armed' : S.rec === 'rec' ? 'is-on' : ''
-    const recTxt = S.rec === 'rec' ? fmt(S.recSecs) : 'REC'
-    const segs = Array.from({ length: 16 }, (_, i) => `<i class="${S.playing && !S.offline ? (i === beat ? 'beat' : i < beat ? 'on' : '') : ''}"></i>`).join('')
-    const head = S.offline
-      ? `<span>OFFLINE</span><span class="dimt">P${S.project}</span><span class="sp"></span>`
-      : S.keys
-        ? `<span class="dimt">KEYS</span><span>${keyNotes(S.octave)[0].name}${S.octave}</span><span class="sp"></span><span class="dimt">OCT ${S.octave}</span>`
-        : `<span>${S.playing ? '▶ PLAYING' : '■ STOPPED'}</span><span class="sp"></span><span>${S.bpm} BPM</span><span class="dimt">P${S.project}</span>`
-    const big = S.offline ? 'Last seen Oct 5, 2:04 PM' : S.keys ? `${GROUPS[S.group]} 7 · ${padName(S.group, '7') || 'kick'}` : S.last
-    lcd.innerHTML = `<div class="lcd__r1">${head}</div><div class="lcd__big">${esc(big)}</div>
-      <div class="lcd__r3"><span class="rec ${recCls}"><i></i>${recTxt}</span><span class="lcd__seg">${segs}</span><span class="dimt" style="font-size:13px;font-weight:700">${GROUPS[S.group]}</span></div>`
-    // keys
+    const $ = (id) => document.getElementById(id)
+    const kn = keyNotes(S.octave)
+    // plate: arc's own lines where the unit prints its name
+    $('plStatus').textContent = S.offline ? 'OFFLINE · LAST SEEN OCT 5, 2:04 PM'
+      : S.rec === 'rec' ? `REC ${fmt(S.recSecs)} · TAP RECORD TO STOP`
+      : S.rec === 'armed' ? 'REC ARMED · PLAY TO START'
+      : `LIVE · PROJECT ${S.project}`
+    $('plHit').textContent = S.keys ? `KEYS · ${kn[0].name}${S.octave} · ${GROUPS[S.group]}7 ${(padName(S.group, '7') || 'kick').toUpperCase()}` : S.last.toUpperCase()
+    // display
+    const digits = S.offline ? 'OFF' : S.rec === 'rec' ? String(Math.floor(S.recSecs / 60)) + String(Math.floor(S.recSecs % 60)).padStart(2, '0') : S.bpm.split('.')[0].padStart(3, ' ')
+    $('dSeg').innerHTML = [...digits].map((d, i) => digit(d, S.rec === 'rec' && !S.offline && i === 0)).join('')
+    $('dBpm').className = 'a d-txt d-bpm ' + (!S.offline && S.rec !== 'rec' ? 'lit' : 'dg')
+    $('dRec').className = 'a d-rec' + (S.rec === 'rec' ? ' on' : S.rec === 'armed' ? ' blink' : '')
+    $('dPlay').className = 'a d-play' + (S.playing && !S.offline ? ' on' : '')
+    $('dPiano').className = 'a d-piano' + (S.keys ? ' on' : '')
+    $('dMode').className = 'a d-mode on'; $('dMode').textContent = S.keys ? 'KEYS' : 'PADS'
+    $('dRing').innerHTML = ringSvg()
+    ep.querySelectorAll('[data-dgrp]').forEach((d) => {
+      const i = Number(d.dataset.dgrp)
+      d.className = 'a d-grp' + (S.offline ? '' : i === S.group ? ' on' : S.groupGlow[i] > 0.1 ? ' snd' : '')
+    })
+    // keys and LEDs
     const keyEl = (id) => ep.querySelector(`[data-key="${id}"]`)
     keyEl('PLAY').classList.toggle('is-lit', S.playing && !S.offline)
     keyEl('KEYS').classList.toggle('is-sel', S.keys)
-    keyEl('KEYS').classList.toggle('is-lit', S.keysFromDevice && !S.offline)
-    keyEl('RECORD').classList.toggle('is-lit', S.rec !== 'idle')
-    keyEl('MINUS').classList.toggle('is-dim', !S.keys)
-    keyEl('PLUS').classList.toggle('is-dim', !S.keys)
+    keyEl('RECORD').classList.toggle('is-armed', S.rec === 'armed')
+    keyEl('RECORD').classList.toggle('is-on', S.rec === 'rec')
+    keyEl('MINUS').classList.toggle('is-dimk', !S.keys)
+    keyEl('PLUS').classList.toggle('is-dimk', !S.keys)
+    $('ledMinus').classList.toggle('on', S.keys && S.octave > 0)
+    $('ledPlus').classList.toggle('on', S.keys && S.octave < 8)
     GROUPS.forEach((_, i) => {
-      const k = keyEl('G' + i)
-      k.classList.toggle('is-sel', i === S.group)
-      const g = S.groupGlow[i]
-      k.classList.toggle('is-glow', g > 0.02 && i !== S.group)
-      k.style.setProperty('--g', g.toFixed(2))
+      const l = $('gled' + i)
+      l.classList.toggle('on', !S.offline && (i === S.group || S.groupGlow[i] > 0.1))
+      l.style.opacity = i === S.group || S.offline ? '' : String(0.35 + 0.65 * S.groupGlow[i])
     })
     // pads
-    const kn = keyNotes(S.octave)
     ep.querySelectorAll('.pad').forEach((p, idx) => {
       const r = Math.floor(idx / 3), c = idx % 3, l = p.dataset.label
       const g = S.glow[S.group].get(l) || 0
@@ -653,22 +776,26 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
         p.setAttribute('aria-label', n.name + n.oct)
       } else {
         const nm = padName(S.group, l)
-        p.innerHTML = `<span class="pad__name">${esc(nm)}</span><span class="pad__num ${l === 'ENTER' ? 'word' : ''}">${l}</span>`
+        const cls = l === 'ENTER' ? 'word' : l === '.' ? 'dot' : ''
+        p.innerHTML = `<span class="pad__num ${cls}">${l === '.' ? '•' : l}</span><span class="pad__name">${esc(nm)}</span>`
         p.setAttribute('aria-label', `${GROUPS[S.group]} ${l}${nm ? ', ' + nm : ''}`)
       }
     })
     // top bar
-    const conn = document.getElementById('tbConn')
+    const conn = $('tbConn')
     conn.className = 'ikey ' + (S.offline ? 'ikey--navy' : 'ikey--ok')
-    document.getElementById('tbBackup').classList.toggle('is-pale', S.offline)
+    $('tbBackup').classList.toggle('is-pale', S.offline)
     renderTools(); renderOverlay()
   }
 
-  // beat counter for the screen's 16 segments
+  // The metronome icon ticks on each beat of the MIDI clock.
   let beat = 0
-  setInterval(() => { if (S.playing && !S.offline) { beat = (beat + 1) % 16; if (!dragging) updateLcdOnly() } }, 60000 / 122 / 4)
-  function updateLcdOnly() { const segs = document.querySelectorAll('#lcd .lcd__seg i'); segs.forEach((s, i) => { s.className = i === beat ? 'beat' : i < beat ? 'on' : '' }) }
-  setInterval(() => { if (S.rec === 'rec') { S.recSecs = (Date.now() - S.recStart) / 1000; const r = document.querySelector('#lcd .rec'); if (r) r.lastChild.textContent = fmt(S.recSecs) } }, 250)
+  setInterval(() => {
+    if (!S.playing || S.offline) return
+    beat = (beat + 1) % 4
+    const m = document.getElementById('dMetro'); if (m) m.classList.toggle('on', beat === 0 || beat === 2)
+  }, 60000 / 122 / 2)
+  setInterval(() => { if (S.rec === 'rec') { const s = Math.floor((Date.now() - S.recStart) / 1000); if (s !== Math.floor(S.recSecs)) { S.recSecs = s; update() } } }, 250)
 
   // ---------- glow fade (300 ms, as ui/live/glow.ts) ----------
   const fading = new Map()
@@ -741,15 +868,15 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
     showToast(`Take saved (${fmt(secs)}). It's in Live tools.`)
     update()
   }
-  const KEY_NAMES = { KNOBX: 'Knob X', KNOBY: 'Knob Y', FADER: 'Fader', PLAY: 'PLAY' }
+  const KEY_NAMES = { KNOBX: 'Knob X', KNOBY: 'Knob Y', FADER: 'Fader', FADERKEY: 'FADER', PLAY: 'PLAY', VOLUME: 'Volume', SOUND: 'SOUND', MAIN: 'MAIN', TEMPO: 'TEMPO', SAMPLE: 'SAMPLE', TIMING: 'TIMING', FX: 'FX', ERASE: 'ERASE', SHIFT: 'SHIFT' }
   function openPop(k, id) {
     closePop()
-    const list = COMBOS[id] || []
+    const list = COMBOS[id === 'FADERKEY' ? 'FADER' : id] || []
     const r = k.getBoundingClientRect(), w = win.getBoundingClientRect()
     const s = w.width / win.offsetWidth
     let x = (r.left - w.left) / s, y = (r.bottom - w.top) / s + 10
     if (x + 300 > 1180) x = 1180 - 300
-    const note = id === 'PLAY' ? 'Lit while the EP-133 plays. arc never starts or stops the device.' : 'arc only reads in Live. This key works on the device.'
+    const note = id === 'PLAY' ? 'Lit while the EP-133 plays. arc never starts or stops the device.' : id === 'VOLUME' ? 'The device\'s own volume. Sound played in arc follows this computer\'s volume.' : 'arc only reads in Live. This key works on the device.'
     const pop = el(`<div class="pop" role="dialog" aria-label="${esc(KEY_NAMES[id] || id)} shortcuts" style="left:${x}px;top:${y}px">
       <h4>${esc(KEY_NAMES[id] || id)} on the EP-133 <button type="button" aria-label="Close">×</button></h4>
       ${list.slice(0, 3).map((c) => `<div class="row"><code>${esc(c.combo.replace(/hold:|turn:/g, ''))}</code><p>${esc(c.action.split('. ')[0].replace(/\.$/, ''))}.</p></div>`).join('')}
@@ -757,7 +884,7 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
     pop.querySelector('button').addEventListener('click', closePop)
     win.appendChild(pop); S.pop = pop
     const ph = pop.offsetHeight
-    if (y + ph > 846) { x = Math.min((r.right - w.left) / s + 12, 1180 - 300); y = Math.max(52, 846 - ph) ; pop.style.left = x + 'px'; pop.style.top = y + 'px' }
+    if (y + ph > 986) { x = Math.min((r.right - w.left) / s + 12, 1180 - 300); y = Math.max(52, 986 - ph) ; pop.style.left = x + 'px'; pop.style.top = y + 'px' }
   }
   function closePop() { if (S.pop) { S.pop.remove(); S.pop = null } }
   let toastT = 0
@@ -824,13 +951,13 @@ section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top
     at('.topbar .tag', 'Sections', '', 0, 52)
     at('#tbBackup', 'Back up', 'o', -20, 52)
     at('#tbConn', 'Connection', 'g', -24, 88)
-    at('.pads', 'Pads light as you play', 'y', 60, 150)
-    at('.gkeys', 'Pick a group', '', -20, -30)
-    at('[data-key="KEYS"]', 'Pads or keys', '', -10, -30)
-    at('[data-key="RECORD"]', 'Record a take', 'o', -14, 84)
-    at('[data-key="PLAY"]', 'Lit while it plays', '', -24, 84)
-    at('[data-key="SOUND"]', 'Tap a key for its shortcuts', '', -6, -30)
-    at('.lcd', 'Tempo, project, last hit', '', 30, 104)
+    at('[data-label="5"]', 'Pads light as you play', 'y', -60, 70)
+    at('[data-key="G1"]', 'Pick a group', '', -40, 20)
+    at('[data-key="KEYS"]', 'Pads or keys', '', -10, -34)
+    at('[data-key="RECORD"]', 'Record a take', 'o', -40, -34)
+    at('[data-key="PLAY"]', 'Lit while it plays', '', -60, 62)
+    at('[data-key="TEMPO"]', 'Tap any other key for its shortcuts', '', -80, -34)
+    at('#dSeg', 'Tempo, play, REC, groups', '', -20, 50)
     at('.tools .takes', 'Your takes', '', 0, -30)
     at('.edge-guide', 'EP-133 shortcuts', '', 36, 50)
     win.appendChild(el('<div class="cclose">TAP ANYWHERE TO CLOSE</div>'))
