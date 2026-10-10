@@ -1026,7 +1026,7 @@ def _jaccard(a: set, b: set) -> Optional[float]:
 
 
 def similarity(card: Card, recipes: List[dict], top: int = 3) -> List[dict]:
-    """The genre recipes the card is closest to: drum slots 70%, tempo 20%, swing 10% (missing parts are left out)."""
+    """The genre recipes the card is closest to: drum slots 55%, tempo 35%, swing 10% (missing parts are left out). A tempo felt at half or double speed counts for less than one in range."""
     mine = fingerprint(card)
     scored = []
     for r in recipes:
@@ -1042,19 +1042,21 @@ def similarity(card: Card, recipes: List[dict], top: int = 3) -> List[dict]:
         if dw == 0:
             continue
         parts.append(drums / dw)
-        weights.append(0.7)
+        weights.append(0.55)
         tempo_note = None
         if card.tempo is not None and r["bpm"] is not None:
             lo, hi = r["bpm"]
             best = 0.0
-            for factor, penalty in ((1.0, 1.0), (2.0, 0.9), (0.5, 0.9)):
+            for factor, penalty in ((1.0, 1.0), (2.0, 0.6), (0.5, 0.6)):
                 t = card.tempo * factor
                 d = 0.0 if lo <= t <= hi else min(abs(t - lo), abs(t - hi))
-                best = max(best, penalty * max(0.0, 1 - d / (0.25 * (lo + hi) / 2)))
-                if factor == 1.0 and d == 0:
-                    tempo_note = "tempo in range"
+                score = penalty * max(0.0, 1 - d / (0.25 * (lo + hi) / 2))
+                if score > best:
+                    best = score
+                    if d == 0:
+                        tempo_note = "tempo in range" if factor == 1.0 else "tempo in range at %s speed" % ("double" if factor == 2.0 else "half")
             parts.append(best)
-            weights.append(0.2)
+            weights.append(0.35)
         if r["swing"] is not None:
             lo_s, hi_s = r["swing"]
             d = 0 if lo_s <= card.swing <= hi_s else min(abs(card.swing - lo_s), abs(card.swing - hi_s))
@@ -1284,8 +1286,21 @@ def render_analysis(report: dict) -> str:
         report["pad_hits"], report["keys_notes"], v["min"], v["max"], v["mean"], v["stdev"], v["distinct"], v["ghosts"], v["normal"], v["accents"]))
     for p in report["patterns"]:
         out.append("")
-        out.append("[%s] %d bar%s, step %s, %d pad hits (%s a bar), density %s%% of 16th slots" % (
-            p["group"], p["bars"], "" if p["bars"] == 1 else "s", p["step"], p["pad_hits"], "/".join(str(n) for n in p["hits_per_bar"]), p["density_pct"]))
+        bars = "%d bar%s, step %s" % (p["bars"], "" if p["bars"] == 1 else "s", p["step"])
+        if p["pad_hits"] == 0:
+            # A group of KEYS notes only (bass, chords, a lead): the drum figures would all read 0.
+            out.append("[%s] %s, KEYS notes only" % (p["group"], bars))
+            for label, k in p["keys"].items():
+                out.append("  KEYS %-5s %d notes, %s to %s, %d pitches" % (label, k["notes"], k["lowest"], k["highest"], k["distinct_pitches"]))
+            var = p["variation"]
+            out.append("  variation: %d distinct bar%s of %d" % (var["distinct_bars"], "" if var["distinct_bars"] == 1 else "s", var["bars"]))
+            continue
+        per_bar = p["hits_per_bar"]
+        if len(set(per_bar)) <= 1:
+            spread = "%d a bar" % (per_bar[0] if per_bar else 0)
+        else:
+            spread = "by bar: %s" % ", ".join(str(n) for n in per_bar)
+        out.append("[%s] %s, %d pad hits (%s), density %s%% of 16th slots" % (p["group"], bars, p["pad_hits"], spread, p["density_pct"]))
         for label, pad in p["pads"].items():
             gap = pad["longest_gap"]
             vel = pad["velocity"]

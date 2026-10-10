@@ -15,7 +15,7 @@ If code execution is not available, read the card yourself with the same checkli
 | Field | Meaning | How to read it |
 |---|---|---|
 | `pad_hits`, `keys_notes` | Notes on the pads, and notes played in KEYS mode (pitched, from the `notes` list) | Hits are the drums. KEYS notes are bass or melody. No KEYS notes means no pitch: ask if it is meant to be a drum loop |
-| `hits_per_bar` | Pad hits in each bar | Equal numbers mean the bars repeat; a higher last bar is often a fill |
+| `hits_per_bar` | Pad hits in each bar (the text report says "16 a bar", or "by bar: 17, 14" when they differ) | Equal numbers mean the bars repeat; a higher last bar is often a fill |
 | `density_pct` | Share of the 16th slots of a bar where any pad plays | Under 40 sparse, 40 to 70 normal, over 80 busy. Trap and drill sit low, jungle and footwork high |
 | `pads.*` | Per pad: `name`, `role`, `name_assumed`, `hits`, `per_bar`, `velocity`, `longest_gap`, `positions` | The kick usually has the fewest hits, hats the most |
 | `velocity` | `min`, `max`, `mean`, `stdev`, `distinct`, and counts of `ghosts` (70 and under; `o` is 64), `normal` and `accents` (120 and up, `X`) | `stdev` under 5 with one `distinct` value is machine-flat. Over 15 is very dynamic |
@@ -25,7 +25,7 @@ If code execution is not available, read the card yourself with the same checkli
 | `swing` | `header`, `applies`, `measured`, `swung_hits` | If `applies` is false the swing line does nothing. `measured` near `header` means the grid obeys it |
 | `features` | Recognised patterns: four on the floor, backbeat, half-time backbeat, offbeat hats, eighth or sixteenth hats, ghost notes, syncopated kick, 3-3-2 pulse, swung | Vocabulary, not verdicts |
 | `variation` | `distinct_bars`, `identical_bars`, `last_bar_busier` | One distinct bar in four is a plain loop. A busier last bar is a fill |
-| `similar_to` | The closest genre recipes in genres.md (drums 70%, tempo 20%, swing 10%) | 80 and up: that style. 60 to 80: a cousin. Say "closest to" and name the difference |
+| `similar_to` | The closest genre recipes in genres.md (drums 55%, tempo 35%, swing 10%; a tempo that fits only at half or double speed counts for less and says so) | 80 and up: that style. 60 to 80: a cousin. Say "closest to" and name the difference |
 
 Pads with no sound name get the assumed kit's names (`name_assumed`). Say so ("I assumed A7 is your kick"), or better, ask the user to copy the pattern from Arc so the card carries their names.
 

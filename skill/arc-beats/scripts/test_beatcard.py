@@ -695,6 +695,29 @@ class Analyse(unittest.TestCase):
             top = bc.similarity(bc.parse_card(text), recipes, 1)
             self.assertEqual((top[0]["genre"], top[0]["score"]), (heading, 100), heading)
 
+    def test_a_half_speed_tempo_ranks_below_one_in_range(self):
+        # A lo-fi beat at 80: Footwork (about 160) fits only at double speed, so lo-fi stays well ahead and the note says why.
+        recipes = bc.load_recipes(os.path.join(REFS, "genres.md"))
+        card = bc.parse_card("ARC BEAT 1\ntempo 80\nswing 62\n[A] bars 2\n"
+                             "A7 kick | 8... ..6. ..7. .... | 8... ..6. .... .5.. |\n"
+                             "A9 snare | .... 7... .... 7..3 | .... 7... ..3. 7.3. |\n"
+                             "A4 closed hat | 5.3. 5.3. 5.3. 5.3. | 5.3. 5.3. 5.3. 5.4. |\n")
+        top = bc.similarity(card, recipes, 16)
+        self.assertEqual(top[0]["genre"], "Lo-fi")
+        by = {s["genre"]: s for s in top}
+        self.assertGreaterEqual(top[0]["score"] - by["Footwork"]["score"], 15)
+        self.assertEqual(by["Footwork"]["tempo"], "tempo in range at double speed")
+
+    def test_report_names_hits_by_bar_and_keys_only_groups(self):
+        card = bc.parse_card("ARC BEAT 1\n[A] bars 2\nA7 kick | X... X... X... X... | X... X... X.X. X.X. |\n"
+                             "[C] bars 2\nnotes\nC7 at 1.1.1 note A3 gate 384\nC7 at 2.1.1 note F3 gate 384\n")
+        text = bc.render_analysis(bc.analyse_card(card))
+        self.assertIn("10 pad hits (by bar: 4, 6)", text)
+        self.assertIn("[C] 2 bars, step 1/16, KEYS notes only", text)
+        self.assertNotIn("[C] 2 bars, step 1/16, 0 pad hits", text)
+        same = bc.render_analysis(bc.analyse_card(bc.parse_card(ASSUMED)))
+        self.assertRegex(same, r"pad hits \(\d+ a bar\)")
+
     def test_role_names(self):
         for name, role in (("kick", "kick"), ("BD 2", "kick"), ("bass drum", "kick"), ("snare", "snare"), ("SD", "snare"),
                            ("clap", "clap"), ("closed hat", "hat"), ("open hi-hat", "hat"), ("HH", "hat"), ("crash", "cymbal"),
