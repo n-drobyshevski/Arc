@@ -25,6 +25,7 @@ If code execution is not available, read the card yourself with the same checkli
 | `longest_gap` | Longest stretch with nothing playing, in 16th steps, and where it starts. Loops round | Over 4 steps is a deliberate hole, 8 a breath, none means no space |
 | `swing` | `header`, `applies`, `measured`, `swung_hits` | If `applies` is false the swing line does nothing. `measured` near `header` means the grid obeys it |
 | `features` | Recognised patterns: four on the floor, backbeat, half-time backbeat, offbeat hats, eighth or sixteenth hats, ghost notes, syncopated kick, 3-3-2 pulse, swung | Vocabulary, not verdicts |
+| `sound_mismatches` | Pads whose rhythm reads as one kind of sound (the row's label, or the assumed kit's pad when Arc only gave `343.pcm`) while the sound line's name or factory block says another: a kick row on slot 343, in the percussion block | Say it first: the beat may not sound like its rows read. Unless the user chose those sounds on purpose, propose a swap to a slot in the right block from their list |
 | `variation` | `distinct_bars`, `identical_bars`, `last_bar_busier` | One distinct bar in four is a plain loop. A busier last bar is a fill |
 | `similar_to` | The closest genre recipes in genres.md (drums 55%, tempo 35%, swing 10%; a tempo that fits only at half or double speed counts for less and says so) | 80 and up: that style. 60 to 80: a cousin. Say "closest to" and name the difference. If the top match is *outside the usual range* but a close second fits the tempo, name the one that fits as the style, and the top one as the drum pattern it borrows |
 
@@ -37,7 +38,7 @@ Go in order, a sentence or two each, and start with something that works.
 1. **Groove and feel.** Where is the backbeat (snare or clap on 2 and 4 is full time, only on 3 is half-time)? Where do the kicks land against it? Straight 8ths, 16ths or triplets? Name the closest style.
 2. **Density.** Busy or sparse for the genre? Which pad adds the most? A beat that is full everywhere leaves no room for bass or vocal.
 3. **Velocity.** A hat row of all `x` sounds like a machine. Suggest accents on the beats, ghosts between (`X x o`), a quiet hit before a loud one.
-4. **Swing.** 50 is straight, 54 to 58 a light shuffle, 62 and up lazy. Swing moves only 1/8 and 1/16 grid rows; hits in the `notes` list are never swung, so a roll stays tight.
+4. **Swing.** 50 is straight, 54 to 58 a light shuffle, 62 and up lazy. Swing moves only the in-between 16ths, so hats that sit only on the 8ths don't swing at all: add quiet off-16th hats if they should. Swing moves only 1/8 and 1/16 grid rows; hits in the `notes` list are never swung, so a roll stays tight.
 5. **Space.** Where does nothing play? Leaving out a kick on one beat, or the hats for half a bar, often beats adding a hit.
 6. **Arrangement.** One bar on repeat? Beats change every 4 or 8 bars, with a fill in the bar before. Does the card use B, C, D (bass, chords, lead) or only drums?
 7. **Tempo.** Does the BPM fit the style (genres.md)? A half-time genre at 70 can be felt as 140.

@@ -721,6 +721,35 @@ class Analyse(unittest.TestCase):
         same = bc.render_analysis(bc.analyse_card(bc.parse_card(ASSUMED)))
         self.assertRegex(same, r"pad hits \(\d+ a bar\)")
 
+    def test_unnamed_sounds_read_by_the_assumed_kit_and_flag_a_mismatch(self):
+        # Arc's share for an EP-133 whose factory sounds have no names: rows and sound lines say only "343.pcm".
+        card = bc.parse_card("ARC BEAT 1\ntempo 118\n[A01] bars 1\nsound A7 343 343.pcm\nsound A9 200 200.pcm\nsound A4 320 320.pcm\n"
+                             "A7 343.pcm | X... ..X. X... .... |\nA9 200.pcm | .... X... .... X... |\nA4 320.pcm | x.x. x.x. x.x. x.x. |\n")
+        r = bc.analyse_card(card)["patterns"][0]
+        self.assertEqual((r["pads"]["A7"]["role"], r["pads"]["A7"]["name_assumed"]), ("kick", True))
+        self.assertIn("backbeat (snare or clap on 2 and 4)", r["features"])
+        self.assertEqual([(m["pad"], m["sound_role"]) for m in r["sound_mismatches"]], [("A7", "perc"), ("A9", "hat"), ("A4", "perc")])
+        self.assertIn("mismatch A7: the rhythm reads as kick (assumed kit), but slot 343 is a perc by the factory percussion block",
+                      bc.render_analysis(bc.analyse_card(card)))
+
+    def test_unnamed_sound_on_another_group_takes_its_factory_block(self):
+        card = bc.parse_card("ARC BEAT 1\n[B]\nsound B7 5 005.pcm\nB7 | X... X... X... X... |\n")
+        self.assertEqual(bc.analyse_card(card)["patterns"][0]["pads"]["B7"]["role"], "kick")
+
+    def test_a_labelled_row_matches_its_sound_block(self):
+        card = bc.parse_card("ARC BEAT 1\n[A]\nsound A7 1 001.pcm\nA7 kick | X... X... X... X... |\n")
+        r = bc.analyse_card(card)["patterns"][0]
+        self.assertEqual(r["pads"]["A7"]["role"], "kick")
+        self.assertEqual(r["sound_mismatches"], [])
+
+    def test_keys_only_groups_do_not_dilute_the_drums(self):
+        recipes = bc.load_recipes(os.path.join(REFS, "genres.md"))
+        drums = "ARC BEAT 1\ntempo 124\n[A] bars 2\nA7 kick | X... X... X... X... | X... X... X... X... |\nA6 clap | .... X... .... X... | .... X... .... X... |\n"
+        keys = "[B] bars 2\nnotes\nB7 at 1.1.3 note A1\n[C] bars 2\nnotes\nC7 at 1.1.1 note C4\n"
+        alone = bc.similarity(bc.parse_card(drums), recipes, 1)[0]
+        both = bc.similarity(bc.parse_card(drums + keys), recipes, 1)[0]
+        self.assertEqual((both["genre"], both["drums"]), (alone["genre"], alone["drums"]))
+
     def test_role_names(self):
         for name, role in (("kick", "kick"), ("BD 2", "kick"), ("bass drum", "kick"), ("snare", "snare"), ("SD", "snare"),
                            ("clap", "clap"), ("closed hat", "hat"), ("open hi-hat", "hat"), ("HH", "hat"), ("crash", "cymbal"),

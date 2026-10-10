@@ -814,19 +814,89 @@ def role_of(name: str) -> Optional[str]:
     return None
 
 
+#: The factory pack's slot blocks (FeatureText.FACTORY_BLOCKS): the role a slot suggests when its sound has no name. 500-599 is melodic, no drum role.
+FACTORY_ROLES = ((1, 99, "kick", "kicks"), (100, 199, "snare", "snares"), (200, 299, "hat", "hats"), (300, 399, "perc", "percussion"), (400, 499, "bass", "bass"), (500, 599, None, "melodic"))
+#: Roles that count as the same kind of sound when a row's label and its sound line's slot are compared.
+_FAMILY = {"kick": "kick", "snare": "backbeat", "clap": "backbeat", "rim": "backbeat", "hat": "hat", "cymbal": "hat", "perc": "perc", "tom": "perc", "bass": "bass"}
+
+
+def factory_block(slot: int) -> Optional[Tuple[Optional[str], str]]:
+    """(role, block name) of the factory block [slot] is in, or None outside 1-599."""
+    for lo, hi, role, block in FACTORY_ROLES:
+        if lo <= slot <= hi:
+            return role, block
+    return None
+
+
+def _sound_role(sound: Optional[Sound]) -> Tuple[Optional[str], Optional[str]]:
+    """The role a sound line suggests and how: by its name ("name"), or by its factory block when it has no real name ("slot")."""
+    if sound is None:
+        return None, None
+    if sound.name and not unnamed_slot(sound.slot, sound.name):
+        role = role_of(sound.name)
+        if role:
+            return role, "name"
+    block = factory_block(sound.slot)
+    return (block[0], "slot") if block and block[0] else (None, None)
+
+
 def pad_roles(pattern: Pattern) -> Dict[int, Tuple[Optional[str], bool, str]]:
-    """For each pad of [pattern] with pad hits: (role, assumed, name). The name is the pad's sound line's, else its row's; unnamed pads fall back to the assumed kit."""
-    names = {**pattern.pad_names(), **pattern.sound_names()}  # a sound line's name comes before the row's
+    """
+    For each pad of [pattern] with pad hits: (role, assumed, name), the role its rhythm is read with. It comes from the
+    pad's sound line's name, else its row's label, else (group A) the assumed kit's pad, else the factory block of the
+    sound line's slot (a sound named like "200.pcm" says nothing by its name). The name shown is the first real one.
+    """
+    rows = pattern.pad_names()
     out: Dict[int, Tuple[Optional[str], bool, str]] = {}
     for hit in pattern.hits:
         if hit.semi is not None or hit.pad in out:
             continue
-        name = names.get(hit.pad, "")
-        assumed = False
-        if not name:
-            name = ASSUMED_KIT.get(pad_label(pattern.group, hit.pad), "") if pattern.group == 0 else ""
-            assumed = name != ""
-        out[hit.pad] = (role_of(name) if name else None, assumed, name)
+        sound = pattern.sounds.get(hit.pad)
+        real = sound.name if sound and sound.name and not unnamed_slot(sound.slot, sound.name) else ""
+        row = rows.get(hit.pad, "")
+        if row and unnamed_slot(sound.slot if sound else -1, row):
+            row = ""  # Arc labels a row with the pad's sound name, "343.pcm" for an unnamed one: no more telling
+        by_sound, how = _sound_role(sound)
+        kit = ASSUMED_KIT.get(pad_label(pattern.group, hit.pad), "") if pattern.group == 0 else ""
+        if real and how == "name":
+            out[hit.pad] = (by_sound, False, real)
+        elif row and role_of(row):
+            out[hit.pad] = (role_of(row), False, real or row)
+        elif kit and not real and not row:
+            out[hit.pad] = (role_of(kit), True, kit)
+        elif how == "slot":
+            out[hit.pad] = (by_sound, False, real or row or "slot %d (%s)" % (sound.slot, factory_block(sound.slot)[1]))
+        else:
+            name = real or row
+            out[hit.pad] = (role_of(name) if name else None, False, name)
+    return out
+
+
+def sound_mismatches(pattern: Pattern) -> List[dict]:
+    """
+    Pads whose rhythm reads as one kind of sound ([pad_roles]: the row's label, or the assumed kit's pad) while the
+    sound line suggests another: a kick row playing slot 343, in the factory's percussion block, say. Worth a remark
+    (the beat may not sound as its rows read) and maybe a sound swap.
+    """
+    roles = pad_roles(pattern)
+    out = []
+    for pad in sorted(pattern.sounds, key=KEYPAD_ORDER.index):
+        if pad not in roles:
+            continue
+        row_role, assumed, name = roles[pad]
+        sound = pattern.sounds[pad]
+        sound_role, how = _sound_role(sound)
+        if row_role and sound_role and _FAMILY.get(row_role) != _FAMILY.get(sound_role):
+            block = factory_block(sound.slot)
+            out.append({
+                "pad": pad_label(pattern.group, pad),
+                "row": name,
+                "row_role": row_role,
+                "row_assumed": assumed,
+                "slot": sound.slot,
+                "sound_role": sound_role,
+                "by": "the factory %s block" % block[1] if how == "slot" and block else "its name",
+            })
     return out
 
 
@@ -999,6 +1069,7 @@ def pattern_report(pattern: Pattern, card: Card) -> dict:
         "density_pct": round(100 * sum(occupied) / (16 * bars), 1),
         "pads": pads,
         "sounds": {pad_label(pattern.group, pad): _sound_data(pattern.sounds[pad]) for pad in KEYPAD_ORDER if pad in pattern.sounds},
+        "sound_mismatches": sound_mismatches(pattern),
         "keys": keys_report,
         "roles": by_role,
         "velocity": _velocity([h.vel for h in hits]),
@@ -1152,6 +1223,8 @@ def fingerprint(card: Card) -> Dict[str, set]:
     for pattern in card.patterns:
         roles = pad_roles(pattern)
         hits = [h for h in pattern.hits if h.semi is None]
+        if not hits:
+            continue  # a group of KEYS notes only (bass, chords) has no drums: its bars mustn't dilute theirs
         bars_total += pattern.bars
         for key, wanted in (("kick", ("kick",)), ("backbeat", BACKBEAT_ROLES[:2]), ("hat", ("hat",))):
             for slots in _role_slots(hits, roles, wanted, pattern.bars):
@@ -1465,6 +1538,8 @@ def render_analysis(report: dict) -> str:
                 label, name, pad["hits"], vel["min"], vel["max"], gap["steps"] if gap else "-", ", ghosts %d" % vel["ghosts"] if vel["ghosts"] else ""))
         for label, snd in p["sounds"].items():
             out.append("  sound %s" % _sound_line(label, snd))
+        for m in p.get("sound_mismatches", []):
+            out.append("  mismatch %s: the rhythm reads as %s%s, but slot %d is a %s by %s" % (m["pad"], m["row_role"], " (assumed kit)" if m["row_assumed"] else "", m["slot"], m["sound_role"], m["by"]))
         for role, r in p["roles"].items():
             out.append("  role %-7s slots of a bar %s (%d hits, syncopation %s)" % (role, r["slots"], r["hits"], r["syncopation"]))
         for label, k in p["keys"].items():
