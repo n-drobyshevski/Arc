@@ -1313,3 +1313,17 @@
   min-height: 36px;
   padding-bottom: 6px;
 }
+
+/* ERASE on (PatternLine.kt eraseDot): a signal dot on the pads with notes, the others dimmed. */
+.live-pad.is-erase-dim { opacity: 0.45; }
+.live-pad.is-erase-dot::before {
+  content: '';
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--signal);
+  pointer-events: none;
+}

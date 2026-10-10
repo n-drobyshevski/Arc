@@ -102,3 +102,8 @@
   transform: scaleX(0);
 }
 .pattern-frame.is-recording .pattern-frame__fill { background: var(--signal); }
+
+/* ERASE and ↶ (EditChips). */
+.transport-key--erase { letter-spacing: 0.04em; }
+.transport-key--erase.is-on { color: var(--signal); }
+.transport-key--undo { font-size: 18px; }

@@ -52,6 +52,25 @@ export const COUNT_IN_LEAD_MS = 150
 /** The transport's loop wakes at least this often (ms). */
 export const PATTERN_LOOP_MS = 100
 
+/** And this often while ERASE is held on a pad, so the notes go before the sequencer sends them. */
+export const PATTERN_ERASE_MS = 20
+
+/** A pad held in ERASE shorter than this is a tap: it erases the pad's every note. */
+export const ERASE_TAP_MS = 200
+
+/** How far ahead of the mix the sequencer sends notes (PatternScheduler's LOOKAHEAD_MS). */
+const LOOKAHEAD_MS = 50
+
+/** A pad (a KEYS note on it: [semitones]) held in ERASE from [downAt]; [from] is the tick it has erased to, once it holds. */
+interface EraseHold {
+  readonly pad: PhysicalPad
+  readonly semitones: number | null
+  readonly downAt: number
+  from: number | null
+}
+
+const eraseKey = (pad: PhysicalPad, semitones: number | null): string => `${pad.group}:${pad.offset}:${semitones ?? 'n'}`
+
 export interface PatternHost {
   store: Store<UiState>
   deps: Pick<Deps, 'liveAudio' | 'library' | 'perfNow' | 'setTimeout' | 'clearTimeout'>
@@ -101,6 +120,8 @@ export class PatternDesk {
   // The timeline of the run before the transport last started: not this run's.
   private stale: LiveTimeline | null = null
   private sent: SentPlan | null = null
+  // ERASE held on pads while playing, by eraseKey.
+  private readonly eraseHolds = new Map<string, EraseHold>()
   private readonly cleanups: (() => void)[] = []
 
   constructor(private readonly host: PatternHost) {
@@ -399,6 +420,7 @@ export class PatternDesk {
     this.host.deps.liveAudio.seqStop?.()
     this.pressAt = null
     this.held.clear()
+    this.eraseHolds.clear()
     this.skip = new Map()
     this._ui.value = { ...this._ui.peek(), countIn: null }
     this.refreshPlan()
@@ -434,7 +456,7 @@ export class PatternDesk {
         const tick = clockTickAt(tl.clock, frameAt(tl.frames, now))
         this.followTick(tick)
         const next = msOf(tl.clock, (Math.floor(tick / Seq.PPQN) + 1) * Seq.PPQN, tl.frames)
-        wait = Math.min(Math.max(Math.floor(next - now) + 1, 1), PATTERN_LOOP_MS)
+        wait = Math.min(Math.max(Math.floor(next - now) + 1, 1), this.eraseHolds.size === 0 ? PATTERN_LOOP_MS : PATTERN_ERASE_MS)
       } else {
         wait = 20
       }
@@ -457,6 +479,82 @@ export class PatternDesk {
       this.markPasses(tick)
       this.setPatterns(this.recorder.grow(this.current, tick))
     }
+    this.eraseHeld()
+  }
+
+  // ---------- ERASE ----------
+
+  /** ERASE on or off: on, a pad tapped erases its notes, and one held while playing erases them as they pass. */
+  setErase(on: boolean): void {
+    if (!on) this.eraseHolds.clear()
+    if (this._ui.peek().erase === on) return
+    this._ui.value = { ...this._ui.peek(), erase: on }
+  }
+
+  /** Whether ERASE takes the pads' presses (it is on). */
+  get erasing(): boolean {
+    return this._ui.peek().erase
+  }
+
+  /** A pad (a KEYS note on it: [semitones]) pressed in ERASE at [at]: what it erases is known as it is let go of, or held. */
+  erasePadDown(pad: PhysicalPad, at: number, semitones: number | null = null): void {
+    this.eraseHolds.set(eraseKey(pad, semitones), { pad, semitones, downAt: at, from: null })
+    // Held while playing: the loop looks more often.
+    if (this.running() && this.loop !== null) {
+      this.stopLoop()
+      this.follow()
+    }
+  }
+
+  /**
+   * The pad pressed in ERASE let go of at [releasedAt]. A tap, or any press
+   * while not playing, erases its every note (a toast says so); held while
+   * playing, it erased its notes as they passed, up to here.
+   */
+  erasePadUp(pad: PhysicalPad, releasedAt: number, semitones: number | null = null): void {
+    const k = eraseKey(pad, semitones)
+    const h = this.eraseHolds.get(k)
+    if (h === undefined) return
+    this.eraseHolds.delete(k)
+    const tl = this.timeline()
+    if (tl === null || this.transport.state.phase !== 'PLAYING' || (h.from === null && releasedAt - h.downAt < ERASE_TAP_MS)) {
+      const p = this.recorder.erasePad(this.current, pad, semitones)
+      if (p === this.current) return
+      this.setPatterns(p)
+      this.host.toast(MirrorText.erased(pad))
+      return
+    }
+    const from = h.from ?? Math.max(clockTickAt(tl.clock, frameAt(tl.frames, h.downAt)), 0)
+    const to = clockTickAt(tl.clock, frameAt(tl.frames, releasedAt))
+    if (to > from) this.setPatterns(this.recorder.eraseRange(this.current, pad, semitones, from, to))
+  }
+
+  /** The press in ERASE turned into a scroll: it erases nothing. */
+  eraseCut(pad: PhysicalPad, semitones: number | null = null): void {
+    this.eraseHolds.delete(eraseKey(pad, semitones))
+  }
+
+  /**
+   * The pads held in ERASE while playing erase their notes as the playhead
+   * passes, from where each was pressed on, a lookahead ahead: the notes
+   * about to be sent go before they are. A hold shorter than a tap erases
+   * nothing here ([erasePadUp] takes the pad's every note).
+   */
+  private eraseHeld(): void {
+    if (this.eraseHolds.size === 0 || this.transport.state.phase !== 'PLAYING') return
+    const tl = this.timeline()
+    if (tl === null) return
+    const now = this.host.deps.perfNow()
+    const to = clockTickAt(tl.clock, frameAt(tl.frames, now + LOOKAHEAD_MS))
+    let p = this.current
+    for (const h of this.eraseHolds.values()) {
+      if (now - h.downAt < ERASE_TAP_MS) continue
+      const from = h.from ?? Math.max(clockTickAt(tl.clock, frameAt(tl.frames, h.downAt)), 0)
+      if (to <= from) continue
+      p = this.recorder.eraseRange(p, h.pad, h.semitones, from, to)
+      h.from = to
+    }
+    this.setPatterns(p)
   }
 
   private stopLoop(): void {

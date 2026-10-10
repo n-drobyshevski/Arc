@@ -107,7 +107,7 @@
 // the tools then count those changes, with Reset pads ([offlinePads]).
 import { Fragment, h, type ButtonHTMLAttributes, type Component, type ComponentChildren, type FunctionComponent, type JSX, type TargetedDragEvent } from 'preact'
 import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { computed, signal, type ReadonlySignal } from '@preact/signals'
+import { computed, signal, useComputed, type ReadonlySignal } from '@preact/signals'
 import { Keys, MAX_OCTAVE, MIN_OCTAVE, SCALES, type NoteNames, type Scale } from '../../core/features/keys'
 import type { MirrorState, PadLight } from '../../core/features/liveMirror'
 import { KeysView, type NoteRange } from '../../core/features/piano'
@@ -1586,6 +1586,20 @@ function editHandlers(st: EditPress, press: PressTarget | null, open: () => void
 }
 
 /** A pad renders again only when what it shows or does changed (not with every mirror state). */
+/**
+ * A pad's mark while ERASE is on: true when the patterns have notes on it,
+ * false when they don't, null with ERASE off. Only a change of the mark
+ * re-renders the pad.
+ */
+function useEraseMark(key: number): boolean | null {
+  const t = useContext(TransportContext)
+  const mark = useComputed(() => {
+    const u = t?.ui
+    return u === undefined || !u.erase ? null : u.notePads.has(key)
+  })
+  return mark.value
+}
+
 const Pad = memo(
   PadCap,
   (a: PadProps, b: PadProps) =>
@@ -1621,13 +1635,16 @@ function PadCap(props: PadProps): JSX.Element {
   // The glow at this render (the screen's frame loop keeps it moving while it fades).
   const g = light ? glow(light, ui.fixedNow ?? perfNow()) : 0
   const wide = pad.label.length > 1
-  const label = `${pad.groupLetter} ${pad.label}` + (name !== null ? `, ${name}` : '')
   const key = padKey(pad)
+  // ERASE on: a dot on the pads with notes, the others dimmed (Kotlin eraseDot).
+  const mark = useEraseMark(key)
+  const label = `${pad.groupLetter} ${pad.label}` + (name !== null ? `, ${name}` : '') + (mark === true ? MirrorText.PAD_HAS_NOTES : '')
   const dropping = ui.drop !== null && ui.drop.at === key
   const cls =
     `live-pad cap-3d${big ? ' live-pad--big' : ''}${playing ? ' is-playing' : ''}` +
     (ui.editing ? ' is-editing' : '') +
-    (dropping ? ' is-drop' : '')
+    (dropping ? ' is-drop' : '') +
+    (mark === true ? ' is-erase-dot' : mark === false ? ' is-erase-dim' : '')
   // Over a pad, a dragged sound shows what it would replace: "snare 2 → vox chop".
   const shown = dropping && ui.drop?.name != null ? MirrorText.dropPreview(name ?? ui.drop.nameNow(pad), ui.drop.name) : name
   const content = (
@@ -1699,7 +1716,7 @@ function PadCap(props: PadProps): JSX.Element {
       type="button"
       class={`${cls} live-pad--press${scroll ? ' live-pad--scroll' : ''}`}
       aria-label={label}
-      aria-description={ui.editing ? MirrorText.EDIT_LINE : MirrorText.PLAY}
+      aria-description={ui.editing ? MirrorText.EDIT_LINE : mark !== null ? MirrorText.ERASE : MirrorText.PLAY}
       aria-keyshortcuts={props.keyHint ? (pad.label === 'ENTER' ? 'Enter' : pad.label) : undefined}
       data-pad={key}
       style={{ '--glow': glowCss(g) }}

@@ -458,6 +458,8 @@ function transportUi(c: ArcController, openSheet: () => void): TransportUi | nul
     onRecordUp: (at) => p.recordUp(at),
     onPlay: (held) => p.play(held),
     onSheet: openSheet,
+    onErase: (on) => p.setErase(on),
+    onUndo: () => p.undo(),
   }
 }
 
@@ -480,6 +482,11 @@ function LivePatternSheet(props: { view: NavView }): JSX.Element | null {
         onAutoLength: (on) => p.setAutoLength(on),
         onUndo: () => p.undo(),
         onClear: (g) => p.clear(g),
+        onErase: (on) => {
+          p.setErase(on)
+          // On, the sheet makes way for the pads.
+          if (on) nav.close(sheetLayer(PATTERN_SHEET))
+        },
       }}
     />
   )

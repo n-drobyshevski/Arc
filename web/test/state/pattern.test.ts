@@ -253,4 +253,72 @@ describe('PATTERN', () => {
     h.c.pattern.setAutoLength(true)
     expect(h.c.pattern.ui.value).toMatchObject({ timing: '1/8', autoLength: true })
   })
+
+  it('ERASE: a tap on a pad erases its notes and plays nothing', async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    p.recordDown(now())
+    await h.c.playPad(A0, true, false, now())
+    h.c.releasePad(A0)
+    p.stop()
+    expect(p.ui.value.hasNotes[0]).toBe(true)
+    p.setErase(true)
+    expect(p.ui.value.erase).toBe(true)
+    const presses = h.liveAudio.presses.length
+    await h.c.playPad(A0, true, false, now())
+    h.c.releasePad(A0, now())
+    expect(h.liveAudio.presses.length).toBe(presses)
+    expect(p.ui.value.hasNotes[0]).toBe(false)
+    expect(h.toasts.at(-1)?.text).toBe(MirrorText.erased(A0))
+    // An unsure press that turned into a scroll erases nothing.
+    p.setErase(false)
+    p.undo()
+    p.setErase(true)
+    await h.c.playPad(A0, true, true, now())
+    h.c.cutPad(A0)
+    expect(p.ui.value.hasNotes[0]).toBe(true)
+  })
+
+  it('ERASE: a pad held while playing erases its notes as they pass, only there', async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    p.setCountIn(false)
+    p.setTiming('1/4')
+    p.recordDown(now())
+    p.play()
+    // 240 BPM: 250 ms a beat (a press's own time counts only up to a second back).
+    const zero = now() - 900
+    h.liveAudio.runAt(zero, 240)
+    for (const b of [0, 1, 2, 3]) {
+      await h.c.playPad(A0, true, false, zero + b * 250)
+      h.c.releasePad(A0, zero + b * 250 + 50)
+    }
+    p.recordDown(now())
+    expect(notes(h, 0).map((n) => n.tick)).toEqual([0, 96, 192, 288])
+    p.setErase(true)
+    // Held from tick 88 to tick 215: beats 2 and 3 go.
+    await h.c.playPad(A0, true, false, zero + 230)
+    h.c.releasePad(A0, zero + 560)
+    expect(notes(h, 0).map((n) => n.tick)).toEqual([0, 288])
+  })
+
+  it('ERASE: KEYS notes erase their own pitch on the KEYS pad', async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    await h.c.playPad(A0)
+    h.c.releasePad(A0)
+    p.setCountIn(false)
+    p.recordDown(now())
+    p.play()
+    h.liveAudio.runAt(now())
+    await h.c.playNote(67, true, now())
+    h.c.releaseNote(67)
+    await h.c.playNote(64, true, now())
+    h.c.releaseNote(64)
+    p.stop()
+    p.setErase(true)
+    await h.c.playNote(67, true, now())
+    h.c.releaseNote(67, now())
+    expect(notes(h, 0).map((n) => n.semitones)).toEqual([4])
+  })
 })
