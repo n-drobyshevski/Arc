@@ -209,6 +209,7 @@ npm run dev        # http://localhost:5173, add ?demo for the simulated device
 npm run check      # typecheck, unit tests (Vitest), production build
 npm run e2e        # Playwright smoke test of the built app in Chromium (once: npx playwright install chromium)
 npm run gen:guide  # regenerate src/core/text/guideData.ts from core's GuideText.kt
+npm run gen:skill  # regenerate the Claude skill's EP-133 guide and web/public/arc-beats-skill.zip from skill/arc-beats
 ```
 
 [`web/README.md`](web/README.md) has the layout of the code and how it maps to the Kotlin. [`.github/workflows/web.yml`](.github/workflows/web.yml) runs the typecheck, tests, build and smoke test on every pull request and push to `main` that touches `web/`.

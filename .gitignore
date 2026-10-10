@@ -14,6 +14,10 @@ captures/
 *.iml
 .DS_Store
 
+# Python bytecode (skill/arc-beats/scripts when its tests run in place)
+__pycache__/
+*.pyc
+
 # Web app (web/)
 node_modules/
 web/dist/
