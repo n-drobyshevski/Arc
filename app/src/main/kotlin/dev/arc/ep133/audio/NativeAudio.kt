@@ -148,4 +148,11 @@ internal object NativeAudio {
      * one reopening).
      */
     @JvmStatic external fun timestamp(handle: Long, out: LongArray): Int
+
+    /**
+     * The stream's output latency in milliseconds, as Oboe works it out from
+     * the frames written and the stream's timestamp; -1 when it can't be
+     * told (no stream, no timestamp yet, one reopening).
+     */
+    @JvmStatic external fun latency(handle: Long): Int
 }

@@ -51,6 +51,12 @@ data class AppSettings(
     val pianoWhites: Int? = null,
     /** A light tick when a pad or key is pressed in Live (the phone's own touch feedback setting still applies). */
     val haptics: Boolean = true,
+    /**
+     * Make up for the delay of a Bluetooth or hearing-aid output (an addition): what lines up with sound
+     * outside the phone is sent earlier, and the playhead and a recorded press follow what is heard.
+     * Nothing changes on a wired output or the speaker.
+     */
+    val makeUpDelay: Boolean = true,
     /** Live's click (TEMPO): the phone's tempo in BPM, Tempo.MIN..MAX. The click itself always starts off. */
     val liveTempo: Int = Tempo.DEFAULT,
     /**
@@ -182,6 +188,7 @@ class SettingsStore internal constructor(private val prefs: SharedPreferences) {
         keysViewTall = runCatching { KeysView.valueOf(prefs.getString("keysViewTall", null) ?: "") }.getOrDefault(KeysView.AUTO),
         pianoWhites = Piano.choiceOf(prefs.getInt("pianoWhites", 0)),
         haptics = prefs.getBoolean("haptics", true),
+        makeUpDelay = prefs.getBoolean("makeUpDelay", true),
         liveTempo = Tempo.clamp(prefs.getInt("liveTempo", Tempo.DEFAULT)),
         liveEngine = liveEngineOf(prefs.getString(LIVE_ENGINE, null)),
         sampleSource = SampleSource.of(prefs.getString("sampleSource", null) ?: "") ?: SampleSource.MIC,
@@ -301,6 +308,7 @@ internal fun AppSettings.values(): Map<String, String> = linkedMapOf(
     // Stored like keepLast: 0 for Auto.
     "pianoWhites" to (pianoWhites ?: 0).toString(),
     "haptics" to haptics.toString(),
+    "makeUpDelay" to makeUpDelay.toString(),
     "liveTempo" to liveTempo.toString(),
     "sampleSource" to sampleSource.id,
     "sampleStereo" to sampleStereo.toString(),
@@ -354,6 +362,7 @@ internal fun AppSettings.withIndex(map: Map<String, String>): AppSettings = copy
         else -> Piano.choiceOf(n) ?: pianoWhites
     },
     haptics = map["app.haptics"]?.toBooleanStrictOrNull() ?: haptics,
+    makeUpDelay = map["app.makeUpDelay"]?.toBooleanStrictOrNull() ?: makeUpDelay,
     // A tempo arc doesn't offer leaves the choice as it is.
     liveTempo = map["app.liveTempo"]?.toIntOrNull()?.takeIf { it in Tempo.MIN..Tempo.MAX } ?: liveTempo,
     sampleSource = map["app.sampleSource"]?.let(SampleSource::of) ?: sampleSource,

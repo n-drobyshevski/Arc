@@ -2,6 +2,7 @@ package dev.arc.ep133.controller
 
 import dev.arc.ep133.features.NoteNames
 import dev.arc.ep133.features.Pattern
+import dev.arc.ep133.features.PhaseAnchors
 import dev.arc.ep133.features.PatternNote
 import dev.arc.ep133.features.PatternRecorder
 import dev.arc.ep133.features.PhysicalPad
@@ -242,6 +243,85 @@ class ScenePlanTest {
         assertEquals(1, out.scene)
         assertEquals(0, desk.waiting)
         assertEquals("Scene 2 of 2, patterns A 2, B 2, C 2, D 2", desk.said)
+    }
+
+    @Test
+    fun `a pattern taking over starts at its bar 1 on that tick, and only the groups it changes`() {
+        val seq = ProjectSeq(scenes = listOf(Scene(listOf(1, 1, 1, 1)), Scene(listOf(1, 3, 1, 4))))
+        assertEquals(PhaseAnchors.ZERO, desk.phase)
+        // A scene change: the groups that change start at the scene's tick, the others go on.
+        desk.pickScene(seq, 1, 100.0, SwitchTime.BAR)
+        desk.due(seq, 384.0)
+        assertEquals(listOf(0L, 384L, 0L, 384L), (0 until 4).map { desk.phase.of(it) })
+        // A pick of a group: now, the next whole tick.
+        val out = SceneOps.selectScene(seq, 1)
+        desk.pickPattern(out, 2, 5, 500.2, SwitchTime.IMMEDIATE)
+        assertEquals(384L, desk.phase.of(1))
+        val after = desk.due(out, 501.0)
+        assertEquals(5, after.selected(2))
+        assertEquals(listOf(0L, 384L, 501L, 384L), (0 until 4).map { desk.phase.of(it) })
+        // The transport starting afresh, or another project, puts them back to bar 1.
+        desk.restart()
+        assertEquals(PhaseAnchors.ZERO, desk.phase)
+        desk.pickPattern(after, 0, 7, 10.0, SwitchTime.IMMEDIATE)
+        desk.due(after, 11.0)
+        assertEquals(10L, desk.phase.of(0))
+        desk.reset()
+        assertEquals(PhaseAnchors.ZERO, desk.phase)
+    }
+
+    @Test
+    fun `STOP leaves where the patterns started alone, the next PLAY putting them back`() {
+        val seq = twoScenes()
+        desk.pickPattern(seq, 0, 9, 100.0, SwitchTime.BAR)
+        val out = desk.flush(seq)
+        assertEquals(9, out.selected(0))
+        assertEquals(PhaseAnchors.ZERO, desk.phase)
+    }
+
+    @Test
+    fun `Bar end and Pattern end for a group's pick are its own pattern's lines from where it started`() {
+        // Group A's 2-bar pattern 2 started at tick 100 (an immediate pick).
+        val seq = with(with(idle, 0, 1, 2), 0, 2, 2)
+        desk.pickPattern(seq, 0, 2, 100.0, SwitchTime.IMMEDIATE)
+        val on = desk.due(seq, 100.0)
+        assertEquals(100L, desk.phase.of(0))
+        fun queuedAt(at: Double, time: SwitchTime): Long {
+            desk.pickPattern(on, 0, 7, at, time)
+            return desk.targets(on).getValue(0).at
+        }
+        assertEquals(484L, queuedAt(300.0, SwitchTime.BAR))
+        assertEquals(868L, queuedAt(300.0, SwitchTime.PATTERN))
+        // A line the press is on switches there.
+        assertEquals(868L, queuedAt(868.0, SwitchTime.PATTERN))
+        assertEquals(1636L, queuedAt(868.5, SwitchTime.PATTERN))
+        // Another group goes by the transport's lines.
+        desk.pickPattern(on, 1, 7, 300.0, SwitchTime.BAR)
+        assertEquals(384L, desk.targets(on).getValue(1).at)
+    }
+
+    @Test
+    fun `a scene's Bar end is the transport's line, its Pattern end the earliest end of the longest patterns from where they started`() {
+        // Groups A and B on 4-bar patterns 3, started at ticks 100 and 300.
+        val seq = with(with(twoScenes(), 0, 3, 4), 1, 3, 4)
+        desk.pickPattern(seq, 0, 3, 100.0, SwitchTime.IMMEDIATE)
+        val a = desk.due(seq, 100.0)
+        desk.pickPattern(a, 1, 3, 300.0, SwitchTime.IMMEDIATE)
+        val on = desk.due(a, 300.0)
+        assertEquals(listOf(100L, 300L, 0L, 0L), (0 until 4).map { desk.phase.of(it) })
+        desk.pickScene(on, 1, 500.0, SwitchTime.PATTERN)
+        assertEquals(setOf(1636L), desk.targets(on).values.map { it.at }.toSet())
+        desk.pickScene(on, 1, 500.0, SwitchTime.BAR)
+        assertEquals(setOf(768L), desk.targets(on).values.map { it.at }.toSet())
+    }
+
+    @Test
+    fun `an open pattern left closes by its own bars`() {
+        val open = Pattern(2, listOf(PatternNote(10, 0, 24)), open = true)
+        // Started at tick 384: at global 384 + 700 it is in its bar 2.
+        assertEquals(2, closedAt(open, 384.0 + 700, 384).bars)
+        assertEquals(4, closedAt(open, 384.0 + 1000, 384).bars)
+        assertEquals(4, closedAt(open, 384.0 * 3 - 1, 0).bars)
     }
 
     @Test
@@ -525,7 +605,7 @@ class ScenePlanTest {
     }
 
     @Test
-    fun `closing keeps the picks waiting and the clipboard, another project drops them`() {
+    fun `closing keeps the picks waiting and the clipboard, another project drops the picks and keeps the clipboard`() {
         val seq = with(idle, 0, 1, 1, note(0))
         desk.open(2)
         assertEquals(2, desk.group)
@@ -540,8 +620,23 @@ class ScenePlanTest {
         assertEquals(ClipMode.PTN, desk.ui(seq, SwitchTime.BAR).clip?.mode)
         desk.reset()
         assertEquals(0, desk.waiting)
-        assertNull(desk.ui(seq, SwitchTime.BAR).clip)
         assertNull(desk.dueTick())
+        // The clipboard is the device's too: it stays for the other project.
+        assertEquals(ClipUi(ClipMode.PTN, "C01"), desk.ui(seq, SwitchTime.BAR).clip)
+    }
+
+    @Test
+    fun `a pattern copied in one project pastes in another`() {
+        val rec = PatternRecorder()
+        val a = with(idle, 0, 1, 1, note(0))
+        desk.open(0)
+        desk.copy(a)
+        desk.reset()
+        val b = idle
+        rec.seq = b
+        val out = desk.paste(b, rec)
+        assertEquals(listOf(note(0)), out.pattern(0, 1).notes.map { it.copy(id = 0) })
+        assertEquals(ClipMode.PTN, desk.clipMode)
     }
 
     @Test

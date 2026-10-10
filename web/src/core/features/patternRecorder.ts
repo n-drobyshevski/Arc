@@ -5,9 +5,10 @@
 // keeps the undo checkpoints (SHIFT + B on the device).
 //
 // Ticks are global: counted from the transport's tick 0 (PLAY starts at bar
-// 1), negative during the count-in. A group's pattern takes them mod its
-// length, except while it is open: then its tick is the global one, and it
-// grows instead of looping (grow).
+// 1), negative during the count-in. A group's pattern takes them from its
+// anchor (phase: where it started, bar 1 of the pattern) mod its length
+// (localTick), except while it is open: then its tick is the global one less
+// the anchor, and it grows instead of looping (grow).
 //
 // Undo: a checkpoint is the whole of the project's sequencer (seq, with the
 // patterns as they were), pushed on the first change after a punch-in or a
@@ -29,6 +30,8 @@
 // - Kotlin's Long ticks and passes are whole JS numbers.
 // - settle's (offset, semitones, tick) Triples are "offset:semitones:tick"
 //   strings.
+// - phase is a getter and a setter over a private field, as the Kotlin
+//   property's custom setter; correctPad's inRun is a trailing boolean.
 
 import type { PhysicalPad } from './padNotes'
 import {
@@ -45,7 +48,7 @@ import {
   timingTicks,
   type PatternNote,
 } from './pattern'
-import { passOf } from './sequencer'
+import { PhaseAnchors, localTick, passOf, sinceAnchor } from './sequencer'
 import { Steps } from './steps'
 
 /** A note recorded: the [patterns] with it and its [id] (0: nothing recorded), and the pass the scheduler skips, if any. */
@@ -69,6 +72,9 @@ export interface Corrected {
 
 /** With TIMING OFF, a note this near one on the same pad and pitch replaces it. */
 const OVERDUB_TICKS = 6
+
+/** The gesture of the pads held to correct while playing: one run, whatever the pad. */
+const CORRECT_RUN = 'correct'
 
 // A pad held in ERASE while playing: where its last range ended, and whether it pushed its checkpoint.
 interface EraseRun {
@@ -95,6 +101,7 @@ export class PatternRecorder {
   private lastRun: string | null = null
   // Whether that run has pushed its checkpoint.
   private runPushed = false
+  private _phase: PhaseAnchors = PhaseAnchors.ZERO
 
   /**
    * The project's sequencer as it stands, which the patterns handed to the
@@ -103,6 +110,21 @@ export class PatternRecorder {
    * the edit.
    */
   seq: ProjectSeq = ProjectSeq.DEFAULT
+
+  /**
+   * Where each group's pattern started, which the global ticks handed to the
+   * edits are counted from; the caller sets it as the transport starts (all 0)
+   * and as a pick takes over a group.
+   */
+  get phase(): PhaseAnchors {
+    return this._phase
+  }
+
+  set phase(value: PhaseAnchors) {
+    // A group whose pattern starts afresh counts its passes anew.
+    for (let g = 0; g < 4; g++) if (PhaseAnchors.of(value, g) !== PhaseAnchors.of(this._phase, g)) this.lastPass[g] = null
+    this._phase = value
+  }
 
   constructor(private readonly maxUndo = 32) {}
 
@@ -146,7 +168,8 @@ export class PatternRecorder {
         out = ProjectPatterns.with(out, g, pattern(this.openedFrom[g]!, pat.notes))
       } else {
         const last = Math.max(...pat.notes.map((n) => n.tick))
-        const elapsed = Math.max(Math.ceil(tickNow / Seq.TICKS_PER_BAR), Math.trunc(last / Seq.TICKS_PER_BAR) + 1)
+        const now = localTick(tickNow, PhaseAnchors.of(this.phase, g), pat)
+        const elapsed = Math.max(Math.ceil(now / Seq.TICKS_PER_BAR), Math.trunc(last / Seq.TICKS_PER_BAR) + 1)
         out = ProjectPatterns.with(out, g, pattern(autoBars(elapsed), pat.notes))
       }
     }
@@ -156,9 +179,9 @@ export class PatternRecorder {
   /**
    * A pad (or a KEYS note on it, [semitones]) pressed at global [tick]; the
    * phone played it at [heardTick], at [velocity] (1..127). On [timing]'s
-   * grid, swung by [swing], a press up to half a step before tick 0 records
-   * at 0 and earlier ones nothing. A note on the
-   * same pad and pitch at that tick (with OFF, within 6 ticks) is replaced.
+   * grid (the pattern's own: from its anchor), swung by [swing], a press up to
+   * half a step before the pattern's tick 0 records at 0 and earlier ones
+   * nothing. A note on the same pad and pitch at that tick (with OFF, within 6 ticks) is replaced.
    * When the grid put the note after [heardTick], the pass it lands in is to
    * be skipped (skipPass): it was heard.
    */
@@ -173,12 +196,14 @@ export class PatternRecorder {
     velocity = 127,
   ): Recorded {
     this.breakRuns()
-    const q = quantize(timing, tick, swing)
+    const anchor = PhaseAnchors.of(this.phase, pad.group)
+    // On the pattern's own time, from its anchor: its grid is the pattern's.
+    const q = quantize(timing, sinceAnchor(tick, anchor), swing)
     if (q < 0) return { patterns: p, id: 0, skipPass: null }
-    const grown = this.grow(p, q)
+    const grown = this.grow(p, q + anchor)
     const pat = ProjectPatterns.group(grown, pad.group)
     const len = Pattern.lengthTicks(pat)
-    const local = pat.open ? q : floorMod(q, len)
+    const local = localTick(q + anchor, anchor, pat)
     const near = timing === Timing.OFF ? OVERDUB_TICKS : 0
     // A note left past the end (the length made shorter) isn't played, so nothing played replaces it.
     const kept = pat.notes.filter(
@@ -190,8 +215,8 @@ export class PatternRecorder {
     const gate = timing === Timing.OFF ? timingTicks(Timing.SIXTEENTH) : timingTicks(timing)
     const out = ProjectPatterns.with(grown, pad.group, { ...pat, notes: [...kept, patternNote(local, pad.offset, gate, semitones, velocity, id)] })
     this.checkpoint(p)
-    this.held.set(id, q)
-    return { patterns: out, id, skipPass: q > heardTick ? passOf(q, len) : null }
+    this.held.set(id, q + anchor)
+    return { patterns: out, id, skipPass: q + anchor > heardTick ? passOf(q + anchor, len, anchor) : null }
   }
 
   /** Note [id] let go of at global [tick]: its gate runs from its start on the grid to here, 1 tick to the pattern's length. */
@@ -206,7 +231,7 @@ export class PatternRecorder {
       const n = pat.notes[i]!
       const len = Pattern.lengthTicks(pat)
       // From the global start while it is known; else (an undo in between) from where it sits, wrapping.
-      const delta = start !== undefined ? tick - start : floorMod(tick - n.tick, len)
+      const delta = start !== undefined ? tick - start : floorMod(localTick(tick, PhaseAnchors.of(this.phase, g), pat) - n.tick, len)
       const gate = Math.min(Math.max(Math.floor(delta + 0.5), 1), len)
       const notes = [...pat.notes]
       notes[i] = { ...n, gate }
@@ -231,8 +256,9 @@ export class PatternRecorder {
 
   /**
    * ERASE held on [pad] while playing: its notes from global [fromTick] to
-   * [toTick], wrapping round the pattern. Ranges that follow on from the last
-   * one on the same pad are the same gesture: one checkpoint.
+   * [toTick] (nothing before the pattern started), wrapping round the pattern.
+   * Ranges that follow on from the last one on the same pad are the same
+   * gesture: one checkpoint.
    */
   eraseRange(p: ProjectPatterns, pad: PhysicalPad, semitones: number | null, fromTick: number, toTick: number): ProjectPatterns {
     const last = this.lastErase
@@ -241,12 +267,15 @@ export class PatternRecorder {
     const run: EraseRun = { pad, semitones, end: toTick, pushed: goingOn && last?.pushed === true }
     this.lastErase = run
     this.lastRun = null
-    if (toTick <= fromTick) return p
     const pat = ProjectPatterns.group(p, pad.group)
+    const anchor = PhaseAnchors.of(this.phase, pad.group)
+    // What passed before the pattern started was another's.
+    const start = Math.max(fromTick, anchor)
+    if (toTick <= start) return p
     const len = Pattern.lengthTicks(pat)
-    const whole = !pat.open && toTick - fromTick >= len
-    const from = pat.open ? fromTick : floorMod(fromTick, len)
-    const to = pat.open ? toTick : floorMod(toTick, len)
+    const whole = !pat.open && toTick - start >= len
+    const from = localTick(start, anchor, pat)
+    const to = localTick(toTick, anchor, pat)
     // Notes left past the end aren't played, so the playhead never passes them.
     const inRange = (t: number): boolean => (pat.open || t < len) && (whole || (from <= to ? t >= from && t < to : t >= from || t < to))
     const out = ProjectPatterns.with(p, pad.group, { ...pat, notes: pat.notes.filter((n) => !(on(n, pad, semitones) && inRange(n.tick))) })
@@ -293,14 +322,15 @@ export class PatternRecorder {
     return this.edit(p, ProjectPatterns.with(p, group, pattern(bars, notes)))
   }
 
-  /** Open groups grow to take in [tickNow]: 1, 2, 4 or 8 bars; past 8 they close and loop. */
+  /** Open groups grow to take in global [tickNow] (from their anchors): 1, 2, 4 or 8 bars; past 8 they close and loop. */
   grow(p: ProjectPatterns, tickNow: number): ProjectPatterns {
-    if (tickNow < 0) return p
     let out = p
-    const need = Math.floor(tickNow / Seq.TICKS_PER_BAR) + 1
     for (let g = 0; g < 4; g++) {
       const pat = ProjectPatterns.group(p, g)
       if (!pat.open) continue
+      const now = localTick(tickNow, PhaseAnchors.of(this.phase, g), pat)
+      if (now < 0) continue
+      const need = Math.floor(now / Seq.TICKS_PER_BAR) + 1
       const bars = Math.max(pat.bars, autoBars(need))
       const open = need <= Seq.MAX_AUTO_BARS
       if (bars !== pat.bars || open !== pat.open) out = ProjectPatterns.with(out, g, { ...pat, bars, open })
@@ -402,23 +432,24 @@ export class PatternRecorder {
    * SHIFT + TIMING and a pad, stopped (timing correct): all of [pad]'s notes
    * that play (every pitch, or only [semitones]) onto [interval]'s grid swung
    * by [swing], wrapping round the pattern. Of two of one pitch that land on
-   * the same tick, the first (in tick order) stays.
+   * the same tick, the first (in tick order) stays. A tap with other pads held
+   * ([inRun]) is part of their gesture (correctRange): one checkpoint with
+   * theirs.
    */
-  correctPad(p: ProjectPatterns, pad: PhysicalPad, semitones: number | null, interval: Timing, swing: number): Corrected {
-    this.breakRuns()
+  correctPad(p: ProjectPatterns, pad: PhysicalPad, semitones: number | null, interval: Timing, swing: number, inRun = false): Corrected {
+    if (!inRun) this.breakRuns()
     const pat = ProjectPatterns.group(p, pad.group)
-    if (pat.open) return { patterns: p, moved: 0 }
+    if (pat.open) return { patterns: inRun ? this.gesture(CORRECT_RUN, CORRECT_RUN, p, p) : p, moved: 0 }
     const len = Pattern.lengthTicks(pat)
     const { patterns, moved } = correct(p, pat, pad, semitones, interval, swing, (t) => t < len)
-    return { patterns: this.edit(p, patterns), moved }
+    return { patterns: inRun ? this.gesture(CORRECT_RUN, CORRECT_RUN, p, patterns) : this.edit(p, patterns), moved }
   }
 
   /**
    * SHIFT + TIMING with [pad] held while playing: its notes from global
    * [fromTick] to [toTick] (as eraseRange takes them) corrected as correctPad
-   * does. Ranges that follow on from the last one on the same pad are the
-   * same gesture: one checkpoint. Corrected.moved counts this range's notes
-   * only.
+   * does. Every range, of any pad, from the first hold to endRun is the same
+   * gesture: one checkpoint. Corrected.moved counts this range's notes only.
    */
   correctRange(
     p: ProjectPatterns,
@@ -429,16 +460,16 @@ export class PatternRecorder {
     interval: Timing,
     swing: number,
   ): Corrected {
-    // The run's key ends where its range does, so only a range that follows on goes on with it.
-    const key = `correct:${pad.group}:${pad.offset}:${semitones}`
     const pat = ProjectPatterns.group(p, pad.group)
-    if (pat.open || toTick <= fromTick) return { patterns: this.gesture(`${key}@${fromTick}`, `${key}@${toTick}`, p, p), moved: 0 }
+    const anchor = PhaseAnchors.of(this.phase, pad.group)
+    const start = Math.max(fromTick, anchor)
+    if (pat.open || toTick <= start) return { patterns: this.gesture(CORRECT_RUN, CORRECT_RUN, p, p), moved: 0 }
     const len = Pattern.lengthTicks(pat)
-    const whole = toTick - fromTick >= len
-    const from = floorMod(fromTick, len)
-    const to = floorMod(toTick, len)
+    const whole = toTick - start >= len
+    const from = localTick(start, anchor, pat)
+    const to = localTick(toTick, anchor, pat)
     const { patterns, moved } = correct(p, pat, pad, semitones, interval, swing, (t) => t < len && (whole || (from <= to ? t >= from && t < to : t >= from || t < to)))
-    return { patterns: this.gesture(`${key}@${fromTick}`, `${key}@${toTick}`, p, patterns), moved }
+    return { patterns: this.gesture(CORRECT_RUN, CORRECT_RUN, p, patterns), moved }
   }
 
   /** The knob let go of or the pad lifted: the next step edit or correct is a gesture of its own. */

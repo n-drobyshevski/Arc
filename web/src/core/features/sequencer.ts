@@ -13,6 +13,9 @@
 //   `frameOf(clock, t)`), also on the `TransportClock` object.
 // - PatternPlayer.window takes the skip map as a ReadonlyMap and fills an
 //   array (emptied first) for the Kotlin MutableList.
+// - PhaseAnchors is a plain readonly interface with a const object of the
+//   same name for ZERO, of and with; localTick's Double and Long overloads are
+//   one function (a whole tick in, a whole tick out).
 // - Kotlin's Long frames, ticks and passes are whole JS numbers;
 //   PatternPosition's fraction is a double where the Kotlin's is a Float.
 
@@ -77,6 +80,34 @@ export function msOf(c: TransportClock, tick: number, out: FrameClock): number {
 /** The Kotlin `TransportClock`'s members. */
 export const TransportClock = { framesPerTick, frameOf, tickAt, retempo, rebase, beatGrid, msOf } as const
 
+/**
+ * Where each group's pattern started: the global tick of its local tick 0,
+ * one for each group (0..3). A pattern switched in while the transport runs
+ * starts at its bar 1 on the tick the switch takes over, as the device starts
+ * it, so its local tick is the global one less its anchor (localTick); all
+ * are 0 when the transport starts (ZERO).
+ */
+export interface PhaseAnchors {
+  readonly ticks: readonly number[]
+}
+
+/** [group]'s anchor; 0 for a group out of range. */
+function anchorOf(a: PhaseAnchors, group: number): number {
+  return a.ticks[group] ?? 0
+}
+
+/** [group]'s pattern starts at global [tick]. */
+function withAnchor(a: PhaseAnchors, group: number, tick: number): PhaseAnchors {
+  if (group < 0 || group > 3 || anchorOf(a, group) === tick) return a
+  return { ticks: [0, 1, 2, 3].map((g) => (g === group ? tick : anchorOf(a, g))) }
+}
+
+export const PhaseAnchors = {
+  ZERO: { ticks: [0, 0, 0, 0] } as PhaseAnchors,
+  of: anchorOf,
+  with: withAnchor,
+} as const
+
 /** A note of [group]'s pattern to play: at global [startTick], mix frame [startFrame]. */
 export interface SeqNote {
   readonly group: number
@@ -100,7 +131,8 @@ const ORDER = (a: SeqNote, b: SeqNote): number => (a.startTick !== b.startTick ?
  * [[from], [to]), so windows back to back miss and repeat none. Negative
  * ticks (the count-in) play nothing; an open pattern plays once, not
  * looping. [skip] gives a note's id the pass not to play (it was heard live
- * as it was recorded). Nothing is allocated but the notes.
+ * as it was recorded), counted from the group's anchor in [phase] (nothing of
+ * a pattern plays before it). Nothing is allocated but the notes.
  */
 function window(
   p: ProjectPatterns,
@@ -109,6 +141,7 @@ function window(
   to: number,
   skip: ReadonlyMap<number, number>,
   out: SeqNote[],
+  phase: PhaseAnchors = PhaseAnchors.ZERO,
 ): void {
   out.length = 0
   if (to <= from) return
@@ -118,12 +151,14 @@ function window(
   for (let g = 0; g < 4; g++) {
     const pat = ProjectPatterns.group(p, g)
     const len = Pattern.lengthTicks(pat)
+    const anchor = anchorOf(phase, g)
+    const start = Math.max(first, anchor)
     for (const n of pat.notes) {
       if (n.tick >= len) continue
-      let pass = pat.open ? 0 : Math.floor((first - n.tick + len - 1) / len)
-      let t = n.tick + pass * len
+      let pass = pat.open ? 0 : firstPassAtOrAfter(start, n.tick, len, anchor)
+      let t = globalTickOf(n.tick, pass, len, anchor)
       while (t < end) {
-        if (t >= first && (n.id === 0 || skip.size === 0 || skip.get(n.id) !== pass)) {
+        if (t >= start && (n.id === 0 || skip.size === 0 || skip.get(n.id) !== pass)) {
           out.push({ group: g, note: n, startTick: t, startFrame: frameOf(clock, t) })
         }
         if (pat.open) break
@@ -138,14 +173,48 @@ function window(
 /** Which notes of a project's patterns play in a stretch of mix frames. */
 export const PatternPlayer = { window } as const
 
-/** Which pass of a pattern [lengthTicks] long global [globalTick] falls in: 0 for the first, −1 in the count-in. */
-export function passOf(globalTick: number, lengthTicks: number): number {
-  return Math.floor(globalTick / lengthTicks)
+/**
+ * The time since a pattern's [anchor] (PhaseAnchors) at [globalTick]: what
+ * localTick takes the loop out of, and what a press is quantized on.
+ */
+export function sinceAnchor(globalTick: number, anchor: number): number {
+  return globalTick - anchor
 }
 
-/** The first loop start (a whole number of [lengthTicks]) at or after [globalTick]: 0 during the count-in. */
-export function nextLoopStart(globalTick: number, lengthTicks: number): number {
-  return Math.max(Math.ceil(globalTick / lengthTicks), 0) * lengthTicks
+/**
+ * [globalTick] on a pattern's own clock (where a global tick becomes a local
+ * one, with sinceAnchor, passOf, firstPassAtOrAfter and globalTickOf): the time
+ * since its [anchor] (PhaseAnchors), round its loop unless it is open, where it
+ * grows instead. Below 0 before the anchor for an open pattern.
+ */
+export function localTick(globalTick: number, anchor: number, p: Pattern): number {
+  const t = sinceAnchor(globalTick, anchor)
+  if (p.open) return t
+  const len = Pattern.lengthTicks(p)
+  return t - Math.floor(t / len) * len
+}
+
+/**
+ * Which pass of a pattern [lengthTicks] long global [globalTick] falls in,
+ * counted from its [anchor]: 0 for the first, −1 before it (the count-in).
+ */
+export function passOf(globalTick: number, lengthTicks: number, anchor = 0): number {
+  return Math.floor(sinceAnchor(globalTick, anchor) / lengthTicks)
+}
+
+/** The first pass in which a note at [noteTick] of a pattern [lengthTicks] long plays at or after global [globalTick], counted from its [anchor]. */
+export function firstPassAtOrAfter(globalTick: number, noteTick: number, lengthTicks: number, anchor = 0): number {
+  return Math.floor((sinceAnchor(globalTick, anchor) - noteTick + lengthTicks - 1) / lengthTicks)
+}
+
+/** The global tick a note at [noteTick] plays in [pass] of a pattern [lengthTicks] long, counted from its [anchor]. */
+export function globalTickOf(noteTick: number, pass: number, lengthTicks: number, anchor = 0): number {
+  return anchor + noteTick + pass * lengthTicks
+}
+
+/** The first loop start (the [anchor] and a whole number of [lengthTicks] on) at or after [globalTick]: the anchor before it (the count-in). */
+export function nextLoopStart(globalTick: number, lengthTicks: number, anchor = 0): number {
+  return anchor + Math.max(Math.ceil((globalTick - anchor) / lengthTicks), 0) * lengthTicks
 }
 
 /** Where a pattern is: [bar] and [beat] from 1, of [bars], and [fraction] of the way through the loop (0..1). */
@@ -156,10 +225,10 @@ export interface PatternPosition {
   readonly fraction: number
 }
 
-/** Where [p] is at global [globalTick]; the count-in shows its start. */
-export function positionOf(globalTick: number, p: Pattern): PatternPosition {
+/** Where [p], started at global tick [anchor], is at global [globalTick]; the count-in (and before the anchor) shows its start. */
+export function positionOf(globalTick: number, p: Pattern, anchor = 0): PatternPosition {
   const len = Pattern.lengthTicks(p)
-  const t = globalTick <= 0 ? 0 : p.open ? globalTick : globalTick - Math.floor(globalTick / len) * len
+  const t = globalTick <= anchor ? 0 : localTick(globalTick, anchor, p)
   const bar = Math.floor(t / Seq.TICKS_PER_BAR)
   const beat = Math.floor((t - bar * Seq.TICKS_PER_BAR) / Seq.PPQN)
   return { bar: bar + 1, beat: beat + 1, bars: p.bars, fraction: Math.min(Math.max(t / len, 0), 1) }

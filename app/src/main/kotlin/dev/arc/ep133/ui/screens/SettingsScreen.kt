@@ -52,6 +52,8 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.arc.ep133.audio.OutputDelay
 import dev.arc.ep133.controller.UiState
 import dev.arc.ep133.data.AppSettings
 import dev.arc.ep133.features.FactorySounds
@@ -79,12 +81,14 @@ import dev.arc.ep133.ui.components.SettingRow
 import dev.arc.ep133.ui.components.SwitchRow
 import dev.arc.ep133.ui.theme.ArcType
 import dev.arc.ep133.ui.theme.LocalArcColors
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
 /**
  * The settings (an addition to the web version): theme, connecting, the
  * screen in Live, how many backups to keep, Live's pad numbering, note names,
- * piano size, haptics and SAMPLE's review, what arc keeps on the phone, and about arc. Each setting is
+ * piano size, haptics, making up for Bluetooth delay and SAMPLE's review, what arc keeps on the phone, and about arc. Each setting is
  * one row (its name and control; an info key after the name for its notes), rows
  * grouped in plates. On a phone the plates are one scroll; on a wide window a
  * list of the sections sits on the left, its LED on the section in view.
@@ -111,6 +115,10 @@ fun SettingsScreen(
     onShowNames: (Boolean) -> Unit = {},
     onPianoWhites: (Int?) -> Unit = {},
     onHaptics: (Boolean) -> Unit = {},
+    /** Make up for Bluetooth delay (an addition), with whether Live's sound goes to Bluetooth now and the output's latency in ms, if known. */
+    onMakeUpDelay: (Boolean) -> Unit = {},
+    wireless: Boolean = false,
+    latency: StateFlow<Int?> = MutableStateFlow(null),
     /** SAMPLE's review sheet after each take, or straight onto the pad (an addition). */
     onReviewSamples: (Boolean) -> Unit = {},
     /** Downloads the factory sounds (FactorySounds); null hides the row. */
@@ -216,6 +224,8 @@ fun SettingsScreen(
                 }
                 PlateLine()
                 SwitchRow(SettingsText.HAPTICS, SettingsText.HAPTICS_NOTE, settings.haptics, onHaptics)
+                PlateLine()
+                MakeUpDelayRow(settings.makeUpDelay, onMakeUpDelay, wireless, latency)
                 PlateLine()
                 SwitchRow(SettingsText.REVIEW_SAMPLES, SettingsText.REVIEW_SAMPLES_NOTE, settings.reviewSamples, onReviewSamples)
                 if (onGetFactory != null) {
@@ -329,6 +339,24 @@ private class Section(val title: String, val content: @Composable ColumnScope.()
  * The wide layout: the section list on the left (a tap scrolls to its
  * section; the LED follows the one in view), the plates on the right.
  */
+/**
+ * Make up for Bluetooth delay's row. Its ⓘ shows the delay in use now: what the
+ * output's own clock counts ([latency], told every second, read here so only the
+ * row follows it) and what is made up beyond it, nothing while the sound isn't
+ * going to Bluetooth.
+ */
+@Composable
+private fun MakeUpDelayRow(on: Boolean, onChange: (Boolean) -> Unit, wireless: Boolean, latency: StateFlow<Int?>) {
+    val measured = latency.collectAsStateWithLifecycle().value?.takeIf { it > 0 }
+    SwitchRow(
+        SettingsText.MAKE_UP_DELAY,
+        SettingsText.MAKE_UP_DELAY_NOTE,
+        on,
+        onChange,
+        info = if (wireless) SettingsText.delayNow(measured, OutputDelay.ms(true, true, measured)) else SettingsText.DELAY_NONE,
+    )
+}
+
 @Composable
 private fun WideSettings(sections: List<Section>, onBack: () -> Unit) {
     val c = LocalArcColors.current

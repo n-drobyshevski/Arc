@@ -162,4 +162,99 @@ class SequencerTest {
         // Open, it doesn't loop.
         assertEquals(PatternPosition(2, 1, 2, 0.5f), positionOf(384.0, Pattern(2, open = true)))
     }
+
+    @Test
+    fun `a pattern plays from its anchor, bar 1 where it started`() {
+        // A 2-bar pattern with a note on its bar 1 and one on its bar 2, switched in at the odd bar 2 (tick 384).
+        val p = ProjectPatterns().with(0, Pattern(2, notes(0, 384)))
+        val clock = TransportClock(0, 48_000, 120.0)
+        val out = ArrayList<SeqNote>()
+        val from = clock.frameOf(384)
+        val to = clock.frameOf(384 + 3L * 384)
+        // Locked to the transport's bar 1 its bar 2 would be heard first, at 384.
+        PatternPlayer.window(p, clock, from, to, emptyMap(), out)
+        assertEquals(listOf(384L to 384, 768L to 0, 1_152L to 384), out.map { it.startTick to it.note.tick })
+        // From its anchor its bar 1 is, and its bar 2 a bar on.
+        PatternPlayer.window(p, clock, from, to, emptyMap(), out, PhaseAnchors.ZERO.with(0, 384))
+        assertEquals(listOf(384L to 0, 768L to 384, 1_152L to 0), out.map { it.startTick to it.note.tick })
+        // Nothing of a pattern plays before its anchor, and another group goes on as it was.
+        val two = p.with(1, Pattern(2, notes(0, offset = 1)))
+        PatternPlayer.window(two, clock, 0, clock.frameOf(3L * 384), emptyMap(), out, PhaseAnchors.ZERO.with(0, 384))
+        assertEquals(listOf(0L to 1, 384L to 0, 768L to 0, 768L to 1), out.map { it.startTick to it.group })
+    }
+
+    @Test
+    fun `windows back to back from an anchor miss and repeat none`() {
+        val p = ProjectPatterns().with(0, Pattern(2, notes(0, 100, 384)))
+        val clock = TransportClock(0, 48_000, 120.0)
+        val phase = PhaseAnchors.ZERO.with(0, 200)
+        val whole = ArrayList<SeqNote>()
+        PatternPlayer.window(p, clock, 0, clock.frameOf(4L * 384), emptyMap(), whole, phase)
+        val parts = ArrayList<SeqNote>()
+        val out = ArrayList<SeqNote>()
+        var f = 0L
+        while (f < clock.frameOf(4L * 384)) {
+            PatternPlayer.window(p, clock, f, f + 777, emptyMap(), out, phase)
+            parts += out
+            f += 777
+        }
+        assertEquals(whole.map { it.startTick }, parts.map { it.startTick })
+        assertEquals(listOf(200L, 300L, 584L, 968L, 1_068L, 1_352L), whole.map { it.startTick })
+    }
+
+    @Test
+    fun `passes skipped are counted from the anchor`() {
+        val p = ProjectPatterns().with(0, Pattern(1, listOf(PatternNote(0, 0, 24, id = 7))))
+        val clock = TransportClock(0, 48_000, 120.0)
+        val out = ArrayList<SeqNote>()
+        PatternPlayer.window(p, clock, clock.frameOf(100), clock.frameOf(100 + 3L * 384), mapOf(7 to 1L), out, PhaseAnchors.ZERO.with(0, 100))
+        // Pass 1 from the anchor (tick 484) is the one left out.
+        assertEquals(listOf(100L, 868L), out.map { it.startTick })
+    }
+
+    @Test
+    fun `an open pattern and a window of another phase`() {
+        val open = ProjectPatterns().with(0, Pattern(2, notes(100), open = true))
+        val clock = TransportClock(0, 48_000, 120.0)
+        val out = ArrayList<SeqNote>()
+        PatternPlayer.window(open, clock, 0, clock.frameOf(4L * 384), emptyMap(), out, PhaseAnchors.ZERO.with(0, 200))
+        assertEquals(listOf(300L), out.map { it.startTick })
+    }
+
+    @Test
+    fun `local ticks are the time since the anchor, round the loop unless open`() {
+        val two = Pattern(2)
+        assertEquals(0.0, localTick(768.0, 768, two))
+        assertEquals(10.0, localTick(778.0, 768, two))
+        assertEquals(10.0, localTick(778.0 + 768, 768, two))
+        assertEquals(758.0, localTick(-10.0, 0, two))
+        assertEquals(10L, localTick(778L + 768, 768, two))
+        assertEquals(778.0, localTick(778.0, 0, Pattern(2, open = true)))
+        assertEquals(10.0, localTick(778.0, 768, Pattern(2, open = true)))
+        assertEquals(-10.0, localTick(758.0, 768, Pattern(2, open = true)))
+        assertEquals(0L, passOf(1_151, 768, 384))
+        assertEquals(1L, passOf(1_152, 768, 384))
+        assertEquals(-1L, passOf(383, 768, 384))
+        assertEquals(-16.0, sinceAnchor(368.0, 384))
+        assertEquals(16L, sinceAnchor(400L, 384))
+        // The first pass a note at 10 plays at or after a tick: this one while it hasn't passed, the next once it has.
+        assertEquals(0L, firstPassAtOrAfter(394, 10, 768, 384))
+        assertEquals(1L, firstPassAtOrAfter(395, 10, 768, 384))
+        assertEquals(-1L, firstPassAtOrAfter(-1_000, 10, 768, 384))
+        assertEquals(394L, globalTickOf(10, 0, 768, 384))
+        assertEquals(1_162L, globalTickOf(10, 1, 768, 384))
+        assertEquals(384L, nextLoopStart(100.0, 768, 384))
+        assertEquals(1_152L, nextLoopStart(385.0, 768, 384))
+        assertEquals(1_152L, nextLoopStart(1_152.0, 768, 384))
+    }
+
+    @Test
+    fun `the position counts from the anchor`() {
+        val two = Pattern(2)
+        // Switched in at tick 384 (an odd bar): its bar 1 there, its bar 2 a bar on, its bar 1 again at 1152.
+        assertEquals(PatternPosition(1, 1, 2, 0f), positionOf(384.0, two, 384))
+        assertEquals(PatternPosition(1, 1, 2, 0f), positionOf(100.0, two, 384))
+        assertEquals(PatternPosition(2, 3, 2, 0.75f), positionOf(384.0 + 384 + 192, two, 384))
+        assertEquals(PatternPosition(1, 1, 2, 0f), positionOf(1_152.0, two, 384))
+    }
 }

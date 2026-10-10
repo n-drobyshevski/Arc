@@ -15,6 +15,7 @@ import { transportState } from '../../../src/core/features/transport'
 import { CoachText } from '../../../src/core/text/coachText'
 import { FeatureText } from '../../../src/core/text/featureText'
 import { MirrorText } from '../../../src/core/text/mirrorText'
+import { NavText } from '../../../src/core/text/navText'
 import { SettingsText } from '../../../src/core/text/settingsText'
 
 describe('FeatureTextTest', () => {
@@ -157,6 +158,7 @@ describe('FeatureTextTest', () => {
     // Project 1 unless PROJECT stepped on; a last read keeps its own note.
     expect(MirrorText.offlineNote(MirrorText.FACTORY)).toBe(MirrorText.factoryNote(1))
     expect(MirrorText.offlineNote(MirrorText.lastSeen('5 Oct, 14:02'), 3)).toBe(MirrorText.OFFLINE_NOTE)
+    expect(MirrorText.seen('5 Oct')).toBe('Seen 5 Oct')
     // Web delta: no PROJECT key on the web.
     expect(MirrorText.LISTEN_ONLY.endsWith('another sound in EDIT.')).toBe(true)
     expect(CoachText.PROJECT).toBe('Next project: tap; hold + pad 1–9 to pick')
@@ -250,6 +252,27 @@ describe('FeatureTextTest', () => {
     expect(SettingsText.REVIEW_SAMPLES).toBe('Review samples')
     expect(SettingsText.REVIEW_SAMPLES_NOTE.endsWith('as on the EP-133.')).toBe(true)
     expect(CoachText.SAMPLE).toBe('Sample')
+  })
+
+  it('bluetooth delay text', () => {
+    expect(SettingsText.MAKE_UP_DELAY).toBe('Make up for Bluetooth delay')
+    expect(SettingsText.MAKE_UP_DELAY_NOTE.endsWith('are not changed.')).toBe(true)
+    expect(SettingsText.delayNow(40, 140)).toBe('Now: the output counts about 40 ms; arc makes up the other 140 ms.')
+    expect(SettingsText.delayNow(220, 0)).toBe("Now: the output counts about 220 ms, all of Bluetooth's delay, so nothing more is made up.")
+    expect(SettingsText.delayNow(null, 180)).toBe('Now: not measured, counted as about 180 ms.')
+    expect(SettingsText.DELAY_NONE).toBe("Now: the sound isn't going to Bluetooth, so nothing is made up for.")
+    // The key's sentence leads with the delay, as a toast may cut it short.
+    expect(MirrorText.WIRELESS_DELAY.startsWith('Bluetooth plays late')).toBe(true)
+    expect(MirrorText.wirelessMadeUp(180)).toBe('Bluetooth plays late (about 180 ms): arc makes up for it')
+    expect(CoachText.BLUETOOTH).toBe('Bluetooth delay')
+  })
+
+  it('connection key text', () => {
+    expect(NavText.HOLD_TO_DISCONNECT).toBe('Hold to disconnect')
+    expect(CoachText.CONNECTED).toBe('EP-133 connected: hold to disconnect')
+    expect(CoachText.CONNECTED_NAME).toBe('EP-133 connected')
+    expect(CoachText.CONNECTION_HOLD).toBe('Connection: hold to disconnect')
+    expect(CoachText.DISCONNECT).toBe('Disconnect')
   })
 
   it('pattern text', () => {
@@ -450,5 +473,6 @@ describe('FeatureTextTest', () => {
     expect([MirrorText.STEP, MirrorText.VEL, MirrorText.LEN, MirrorText.BAR, MirrorText.CORRECT].map((w) => w.toUpperCase())).toEqual(['STEP', 'VEL', 'LEN', 'BAR', 'CORRECT'])
     expect(MirrorText.NUDGE_NOTE).toBe('Tap a lit pad to pick it, then \u2212 and + move its note.')
     expect(CoachText.STEP).toBe('Step through the pattern')
+    expect(MirrorText.STEP_GROUP).toBe('Editing in step')
   })
 })

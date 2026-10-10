@@ -77,6 +77,66 @@ internal data class StepPress(val patterns: ProjectPatterns, val plays: Boolean)
 /** − or + in the STEP panel: the [patterns] after it, and whether the cursor moved on (its notes [audition]). */
 internal data class StepMove(val patterns: ProjectPatterns, val audition: Boolean)
 
+/**
+ * The views of Live that offer the STEP panel: one group's pads, the four
+ * groups on the all-groups page, KEYS' grid and KEYS' piano (each upright or
+ * on its side). Every one of them has the STEP chip where it shows the
+ * pattern's chips ([stepOffered]).
+ */
+internal enum class StepView { ONE_GROUP, ALL_GROUPS, KEYS_GRID, PIANO }
+
+/** The view Live shows with KEYS [keysOn] on the [piano] (else its grid), or the pads' [oneGroup] (else the four groups). */
+internal fun stepView(keysOn: Boolean, piano: Boolean, oneGroup: Boolean): StepView = when {
+    keysOn && piano -> StepView.PIANO
+    keysOn -> StepView.KEYS_GRID
+    oneGroup -> StepView.ONE_GROUP
+    else -> StepView.ALL_GROUPS
+}
+
+/**
+ * Whether Live offers the STEP chip and panel ([step] STEP given, [onLive] the
+ * Live tab, [transport] the pattern's): in every [StepView], whichever way the
+ * phone is held. (The panel opens only while the pattern is stopped: [stepOpens].)
+ */
+internal fun stepOffered(step: Boolean, onLive: Boolean, transport: Boolean): Boolean = step && onLive && transport
+
+/** How the STEP panel comes out in a view: the display line growing into it, or its own face in the function keys' place. */
+internal enum class StepHosting {
+    /** The display line on the page grows into the panel over the function keys, which fade away ([SamplePanel]'s morph). */
+    MORPH,
+
+    /** The panel in the function keys' place (KEYS' grid on its side) or in a column left of the keys (the short piano), with a header of its own. */
+    SLOT,
+}
+
+/**
+ * How the STEP panel is hosted in [view], held [sideways] or upright, with the
+ * window [short] (a phone on its side). The pads' views always let the line
+ * grow into the panel (where the line rides in the top bar, the page under it
+ * takes the panel in the function keys' place instead, whatever this says);
+ * KEYS' grid on its side takes it in the function keys' column (the keys
+ * narrowing beside it), and the short window's piano (it has no function keys,
+ * and no height to spare) in a new column left of the keys.
+ */
+internal fun stepHosting(view: StepView, sideways: Boolean, short: Boolean): StepHosting = when (view) {
+    StepView.KEYS_GRID -> if (sideways) StepHosting.SLOT else StepHosting.MORPH
+    StepView.PIANO -> if (short) StepHosting.SLOT else StepHosting.MORPH
+    StepView.ONE_GROUP, StepView.ALL_GROUPS -> StepHosting.MORPH
+}
+
+/**
+ * The group the STEP panel edits in [view]: the KEYS sound's ([keysGroup]; null
+ * with no sound picked) on KEYS' grid and piano, else the [group] shown: on one
+ * group's pads the group key selected, and on the all-groups page (where there
+ * are no group keys) the one last selected, then whichever group a pad was
+ * pressed in last ([StepDesk.press] moves the panel there, on the step it
+ * shows).
+ */
+internal fun stepGroupFor(view: StepView, group: Int, keysGroup: Int?): Int? = when (view) {
+    StepView.KEYS_GRID, StepView.PIANO -> keysGroup
+    StepView.ONE_GROUP, StepView.ALL_GROUPS -> group
+}
+
 /** Whether the STEP panel opens with the transport in [phase]: stopped, or armed (disarmed first, as STOP does). */
 internal fun stepOpens(phase: TransportPhase): Boolean = phase == TransportPhase.STOPPED || phase == TransportPhase.ARMED
 
@@ -249,7 +309,9 @@ internal class StepDesk(private val word: (StepNote) -> String) {
 
     /**
      * A finger down on voice [key] in the open panel, on [note] (its group
-     * becomes the panel's), at the touch's [pressure] (NaN: none told). With
+     * becomes the panel's, on the step the cursor shows: the all-groups page
+     * has all four groups' pads under the one panel), at the touch's
+     * [pressure] (NaN: none told). With
      * the panel's RECORD held it is placed on the cursor's step
      * ([PatternRecorder.stepPlace]) at the pressure's velocity, on a phone
      * that tells pressure (else 127). Else, with NUDGE waiting, it is picked
@@ -257,7 +319,12 @@ internal class StepDesk(private val word: (StepNote) -> String) {
      * CORRECT on its notes go onto the grid as it lets go ([release]).
      */
     fun press(key: String, note: StepNote, pressure: Float, p: ProjectPatterns, recorder: PatternRecorder, t: TimingSettings): StepPress {
-        group(note.pad.group)
+        if (note.pad.group != group) {
+            // The panel shows a step: the pad's group takes it over, rather than its own saved cursor.
+            val shown = cursor(p, t.interval)
+            group(note.pad.group)
+            setCursor(shown, t.interval)
+        }
         status = null
         val level = sense.level(pressure)
         if (!recordHeld && nudgePick) {
@@ -387,8 +454,10 @@ internal class StepDesk(private val word: (StepNote) -> String) {
      * the playhead passes ([PatternRecorder.correctRange]), from where each
      * was pressed up to global tick [to] (a lookahead ahead) at [now];
      * [tickAt] is the tick heard at a time. A hold shorter than a tap
-     * corrects nothing here ([holdUp] takes the pad's every note). Each
-     * hold is one UNDO step; the line counts the notes corrected.
+     * corrects nothing here ([holdUp] takes the pad's every note). All the
+     * pads held together, from the first down to the last up, are one UNDO
+     * step ([PatternRecorder.correctRange]'s run, ended by [holdUp] and
+     * [holdsEnd]); the line counts the notes corrected.
      */
     fun held(p: ProjectPatterns, recorder: PatternRecorder, t: TimingSettings, to: Double, now: Long, tickAt: (Long) -> Double): ProjectPatterns {
         var out = p
@@ -415,7 +484,8 @@ internal class StepDesk(private val word: (StepNote) -> String) {
     fun holdUp(key: String, releasedAt: Long, p: ProjectPatterns, recorder: PatternRecorder, t: TimingSettings, tickAt: ((Long) -> Double)?): ProjectPatterns {
         val h = holds.remove(key) ?: return p
         val out = if (tickAt == null || h.from == null && releasedAt - h.downAt < ERASE_TAP_NS) {
-            recorder.correctPad(p, h.note.pad, h.note.semitones, t.interval, t.swing).also { corrected += it.moved }.patterns
+            // Part of the gesture of the pads held with it, from the first down to the last up.
+            recorder.correctPad(p, h.note.pad, h.note.semitones, t.interval, t.swing, inRun = true).also { corrected += it.moved }.patterns
         } else {
             val from = h.from ?: maxOf(tickAt(h.downAt), 0.0)
             val to = tickAt(releasedAt)

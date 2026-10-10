@@ -5,10 +5,7 @@
 // two-octave keyboard's geometry and the display's main line.
 //
 // Web deltas: times are milliseconds on the MIDI event clock (performance.now),
-// where the Kotlin uses System.nanoTime; FADE_NS 300 ms is FADE_MS here. The
-// display line says when Live's output plays late ([late], from its latency:
-// MirrorText.slowOutput), as Android says Bluetooth from the route
-// (MirrorText.WIRELESS_DELAY).
+// where the Kotlin uses System.nanoTime; FADE_NS 300 ms is FADE_MS here.
 
 import type { Hit, MirrorState, PadLight } from '../../core/features/liveMirror'
 import { MirrorText } from '../../core/text/mirrorText'
@@ -94,16 +91,15 @@ export function keysLayout(last: number): KeyRect[] {
 // ---------- the display ----------
 
 /**
- * The display's main line: the error, "Reading…", the hit, that Live's sound
- * plays late ([late]: the output's delay in ms, null when it isn't heard),
- * offline the time of the last read ("Last seen Oct 5, 2:02 PM"), or "Press a pad".
+ * The display's main line: the error, "Reading…", the hit, offline the time
+ * of the last read ("Last seen Oct 5, 2:02 PM"), or "Press a pad". That Live's
+ * sound plays late is not said here but by the top bar's Bluetooth key.
  */
-export function displayLine(st: MirrorState, mirror: MirrorUi | null, late: number | null = null): string {
+export function displayLine(st: MirrorState, mirror: MirrorUi | null): string {
   const hit: Hit | null = st.lastHit
   if (mirror?.error != null) return mirror.error
   if (mirror?.loading === true && hit === null) return MirrorText.READING
   if (hit !== null) return MirrorText.hit(hit)
-  if (late !== null) return MirrorText.slowOutput(late)
   if (mirror?.offline != null) return mirror.offline
   return MirrorText.WAITING
 }
@@ -113,11 +109,9 @@ export function showOffline(st: MirrorState, mirror: MirrorUi | null): boolean {
   return mirror?.offline != null && st.playing === null
 }
 
-/** The offline line ("Last seen …") and the late note are longer than a hit: the display draws them a size down (22 for 26). */
-export function displayLineSmall(st: MirrorState, mirror: MirrorUi | null, late: number | null = null): boolean {
-  if (st.lastHit !== null) return false
-  if (mirror?.offline != null) return true
-  return late !== null && mirror?.error == null && mirror?.loading !== true
+/** The offline line ("Last seen …") and "Press a pad on the EP-133." are longer than a hit: the display draws them a size down (22 for 26). */
+export function displayLineSmall(st: MirrorState, mirror: MirrorUi | null): boolean {
+  return st.lastHit === null && mirror?.error == null && mirror?.loading !== true
 }
 
 /** The all-groups display's transport word: "▶ Playing", "■ Stopped", or nothing before any clock. */

@@ -22,7 +22,8 @@ import kotlin.math.roundToLong
  *   click, at the phone's tempo, counting on from the device's beat.
  *
  * Each click's [Beat] is when it is heard, so the TEMPO key's light can wait
- * for it. A bar's first beat is accented (beat 0, 4, 8 …) while the bar is
+ * for it: when the stamp leaves out [delayNs] of the output's delay
+ * ([OutputDelay]), that long after the stream's stamp has it. A bar's first beat is accented (beat 0, 4, 8 …) while the bar is
  * known: always in a free run from the start, only after a Start when
  * following ([BeatGrid.barKnown]).
  */
@@ -56,10 +57,11 @@ internal class ClickScheduler(private val rate: Int) {
 
     /**
      * The clicks in the block of [frames] from stream frame [from]: at
-     * [bpm] in a free run, else on [grid]'s beats. [stampFrame] is heard at
-     * [stampNanos] (System.nanoTime). The list is reused by the next call.
+     * [bpm] in a free run, else on [grid]'s beats. [stampFrame] is presented
+     * at [stampNanos] (System.nanoTime) and heard [delayNs] later.
+     * The list is reused by the next call.
      */
-    fun block(from: Long, frames: Int, bpm: Int, grid: BeatGrid?, stampFrame: Long, stampNanos: Long): List<Click> {
+    fun block(from: Long, frames: Int, bpm: Int, grid: BeatGrid?, stampFrame: Long, stampNanos: Long, delayNs: Long = 0L): List<Click> {
         clicks.clear()
         val end = from + frames
         fun frameOf(t: Long): Double = stampFrame + (t - stampNanos) * framesPerNs
@@ -73,7 +75,7 @@ internal class ClickScheduler(private val rate: Int) {
                 if (f >= end) break
                 if (last.isNaN() || f - last >= MIN_GAP * period) {
                     barKnown = grid.barKnown
-                    click(f, from, i, timeOf(f))
+                    click(f, from, i, timeOf(f) + delayNs)
                     index = i + 1
                 }
                 i++
@@ -93,7 +95,7 @@ internal class ClickScheduler(private val rate: Int) {
         while (true) {
             val f = next.roundToLong()
             if (f >= end) break
-            click(f, from, index, timeOf(f))
+            click(f, from, index, timeOf(f) + delayNs)
             index++
             next += rate * 60.0 / Tempo.clamp(bpm)
         }

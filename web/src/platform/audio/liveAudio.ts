@@ -65,8 +65,8 @@
 //   WebText.ROUTE, and Bluetooth (SoundPlayer.isBluetooth) is guessed from a
 //   large output latency: [onSlowOutput] fires once per LiveAudio (once a run,
 //   as ArcController's toldBluetooth). [late] is the output's delay while it
-//   is long enough to be heard ([LATE_OUTPUT_MS]), for Live's display line,
-//   where Android names Bluetooth from the route (LiveAudio.wireless).
+//   is long enough to be heard ([LATE_OUTPUT_MS]), for the top bar's Bluetooth
+//   key, where Android names Bluetooth from the route (LiveAudio.wireless).
 // - Listeners are added after construction (the controller is made after its
 //   deps); the debug-log lines ("live audio: …") come through [onLog].
 // - The latency test's row ([engine], [OutputEngine]) is named from the
@@ -105,8 +105,8 @@ export const SLOW_OUTPUT_MS = 120
 
 /**
  * An output latency at least this long is heard against the finger
- * (whatever the route): [LiveAudio.late] reports it, and Live's display line
- * says so (MirrorText.slowOutput).
+ * (whatever the route): [LiveAudio.late] reports it, and Live's top bar
+ * shows its Bluetooth key (MirrorText.WIRELESS_DELAY).
  */
 export const LATE_OUTPUT_MS = 80
 

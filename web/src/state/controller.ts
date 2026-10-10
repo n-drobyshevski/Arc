@@ -43,7 +43,7 @@
 //   [resetOfflinePads]); once the EP-133 is read again it asks whether to
 //   write those changes ([offerOfflinePads], [writeOfflinePads] /
 //   [discardOfflinePads]). [playLiveSound] previews the offline lists.
-// - [liveLate]: Live's output delay, for the display line's note, from the
+// - [liveLate]: Live's output delay, for the top bar's Bluetooth key, from the
 //   output's latency (LiveAudioDeps.late); Android names Bluetooth from the route (liveWireless).
 // - The debug screen's latency test: [liveLatency] / [resetLatency] (live.ts),
 //   [liveEngine] (the row in use) and [liveLatencyHint] / [setLiveLatencyHint],
@@ -160,7 +160,7 @@ export class ArcController {
   readonly playingNotes: ReadonlySignal<ReadonlySet<number>>
   /**
    * Live's output delay in ms while it is long enough to be heard against the
-   * finger, else null: the display line says so (MirrorText.slowOutput).
+   * finger, else null: Live's top bar shows its Bluetooth key then.
    * From LiveAudioDeps.late, or, without it, the slow output it reports.
    */
   readonly liveLate: ReadonlySignal<number | null>

@@ -15,6 +15,8 @@
 import type { ComponentChildren, JSX } from 'preact'
 import { useId, useState } from 'preact/hooks'
 import { SettingsText } from '../../core/text/settingsText'
+import type { CoachId } from './Coach'
+import { Icon, type ArcIcon } from './Icons'
 import './SettingRow.css'
 
 /** The ids a row's control is named and described by. */
@@ -133,12 +135,14 @@ export function RowAction(props: {
 /**
  * A row that opens something (Source code, Font licence, Debug log): the whole
  * row is the button, so it has no ⓘ key (Kotlin's note behind one: none here
- * has a note).
+ * has a note). [icon]: drawn before the name (Live tools' Settings row).
+ * [coach]: the guide overlay's id for it (data-coach).
  */
-export function LinkRow(props: { title: string; onClick: () => void }): JSX.Element {
+export function LinkRow(props: { title: string; onClick: () => void; icon?: ArcIcon; coach?: CoachId }): JSX.Element {
   return (
-    <button type="button" class="setting-row link-row" onClick={props.onClick}>
+    <button type="button" class={`setting-row link-row${props.icon ? ' link-row--icon' : ''}`} data-coach={props.coach} onClick={props.onClick}>
       <span class="setting-row__line">
+        {props.icon && <Icon icon={props.icon} size={22} />}
         <span class="setting-row__text">
           <span class="setting-row__title">{props.title}</span>
         </span>

@@ -532,7 +532,9 @@ class PatternRecorderTest {
         assertEquals(p0, r.undoPlaying(p))
         assertNull(r.undoPlaying(p0))
         // Let go and held again: another gesture.
+        r.endRun()
         var q = r.correctRange(p0, a3, null, 0.0, 50.0, sixteenth, 50).patterns
+        r.endRun()
         val again = r.correctRange(q, a3, null, 300.0, 384.0 + 150, sixteenth, 50)
         assertEquals(1, again.moved)
         q = again.patterns
@@ -585,5 +587,132 @@ class PatternRecorderTest {
         assertSame(p, r.shiftPad(p, a3, null, 1))
         assertEquals(PatternRecorder.Corrected(p, 0), r.correctPad(p, a3, null, Timing.QUARTER, 50))
         assertEquals(PatternRecorder.Corrected(p, 0), r.correctRange(p, a3, null, 0.0, 50.0, Timing.QUARTER, 50))
+    }
+
+    @Test
+    fun `two pads held to correct while playing are one checkpoint`() {
+        val r = PatternRecorder()
+        val p0 = one(PatternNote(10, 3, 24), PatternNote(100, 3, 24), PatternNote(15, 4, 24), PatternNote(200, 4, 24))
+        var p = p0
+        var moved = 0
+        // The two pads' ranges come in turn, as the desk finds them.
+        for ((from, to) in listOf(0.0 to 50.0, 50.0 to 150.0, 150.0 to 250.0)) {
+            for (pad in listOf(a3, a4)) {
+                val c = r.correctRange(p, pad, null, from, to, sixteenth, 50)
+                moved += c.moved
+                p = c.patterns
+            }
+        }
+        assertEquals(4, moved)
+        assertEquals(listOf(0, 96, 24, 192), ticks(p))
+        assertEquals(p0, r.undoPlaying(p))
+        assertNull(r.undoPlaying(p0))
+        // A pad tapped with the others held is part of it; the last one up ends the gesture.
+        var q = r.correctRange(p0, a3, null, 0.0, 50.0, sixteenth, 50).patterns
+        val tap = r.correctPad(q, a4, null, sixteenth, 50, inRun = true)
+        assertEquals(2, tap.moved)
+        q = r.correctRange(tap.patterns, a3, null, 50.0, 150.0, sixteenth, 50).patterns
+        assertEquals(p0, r.undoPlaying(q))
+        assertNull(r.undoPlaying(p0))
+        r.endRun()
+        // The next gesture is a checkpoint of its own.
+        val next = r.correctRange(p0, a3, null, 0.0, 50.0, sixteenth, 50).patterns
+        assertEquals(p0, r.undoPlaying(next))
+    }
+
+    @Test
+    fun `a tap alone is one checkpoint in a run or not`() {
+        val r = PatternRecorder()
+        val p0 = one(PatternNote(10, 3, 24))
+        val p = r.correctPad(p0, a3, null, sixteenth, 50, inRun = true).patterns
+        assertEquals(listOf(0), ticks(p))
+        r.endRun()
+        val q = r.correctPad(p, a3, null, Timing.QUARTER, 50, inRun = true)
+        assertEquals(0, q.moved)
+        assertEquals(p0, r.undoPlaying(p))
+    }
+
+    @Test
+    fun `a pattern switched in at an odd bar records from its own bar 1`() {
+        val r = PatternRecorder()
+        r.phase = PhaseAnchors.ZERO.with(0, 384)
+        val p0 = ProjectPatterns().with(0, Pattern(2))
+        // Pressed on its bar 2 (global 818): its tick 434, on the grid 432.
+        val on = r.hit(p0, a3, 384.0 + 434)
+        assertEquals(listOf(432), ticks(on.patterns))
+        // A press before it started is another pattern's: nothing recorded.
+        assertEquals(0, r.hit(p0, a3, 100.0).id)
+        // Its second pass is its tick 0 again: global 1152.
+        assertEquals(listOf(0), ticks(r.hit(p0, a3, 384.0 + 768).patterns))
+        // The group that wasn't switched goes by the transport's bars.
+        assertEquals(listOf(96), ticks(r.hit(ProjectPatterns().with(1, Pattern(2)), b0, 768.0 + 96).patterns, 1))
+        // The press heard at its 380 but snapped to its 384 skips the pass it lands in, counted from the start.
+        val late = r.noteOn(p0, a3, null, 384.0 + 380, 384.0 + 380, sixteenth)
+        assertEquals(listOf(384), ticks(late.patterns))
+        assertEquals(0L, late.skipPass)
+        assertEquals(1L, r.noteOn(p0, a3, null, 384.0 + 768 + 380, 384.0 + 768 + 380, sixteenth).skipPass)
+    }
+
+    @Test
+    fun `the gate of a note in a switched pattern runs from its start, and a release after an undo from where it sits`() {
+        val r = PatternRecorder()
+        r.phase = PhaseAnchors.ZERO.with(0, 384)
+        val on = r.hit(ProjectPatterns().with(0, Pattern(2)), a3, 384.0 + 101)
+        assertEquals(44, r.noteOff(on.patterns, on.id, 384.0 + 140.2).group(0).notes[0].gate)
+        val p = ProjectPatterns().with(0, Pattern(1, listOf(PatternNote(370, 3, 24, id = 5))))
+        assertEquals(30, r.noteOff(p, 5, 384.0 + 384 * 2 + 16).group(0).notes[0].gate)
+    }
+
+    @Test
+    fun `erasing and correcting while playing go by the pattern's own ticks`() {
+        val r = PatternRecorder()
+        r.phase = PhaseAnchors.ZERO.with(0, 384)
+        val p = ProjectPatterns().with(0, Pattern(1, listOf(PatternNote(10, 3, 24), PatternNote(200, 3, 24), PatternNote(370, 3, 24))))
+        // 384 + 190..384 + 210 is 190..210 of the pattern.
+        assertEquals(listOf(10, 370), ticks(r.eraseRange(p, a3, null, 384.0 + 190, 384.0 + 210)))
+        // What passed before the pattern started was another's.
+        assertEquals(listOf(10, 200, 370), ticks(r.eraseRange(p, a3, null, 100.0, 384.0 - 1)))
+        assertEquals(listOf(200, 370), ticks(r.eraseRange(p, a3, null, 300.0, 384.0 + 50)))
+        val c = r.correctRange(one(PatternNote(205, 3, 24)), a3, null, 384.0 + 190, 384.0 + 215, sixteenth, 50)
+        assertEquals(1, c.moved)
+        assertEquals(listOf(216), ticks(c.patterns))
+    }
+
+    @Test
+    fun `auto length goes by the pattern's own bars`() {
+        val r = PatternRecorder()
+        val p = r.punchIn(ProjectPatterns(), fromStop = true, autoLength = true)
+        r.phase = PhaseAnchors.ZERO.with(0, 384)
+        // Global 384 + 100 is its bar 1; 384 + 384 is its bar 2.
+        assertEquals(1, r.grow(p, 384.0 + 100).group(0).bars)
+        assertEquals(2, r.grow(p, 384.0 * 2).group(0).bars)
+        assertEquals(1, r.grow(p, 384.0 * 2 - 1).group(0).bars)
+        // Group B was not switched.
+        assertEquals(2, r.grow(p, 384.0 * 2 - 1).group(1).bars)
+        val noted = r.hit(p, a3, 384.0 + 100).patterns
+        assertEquals(1, r.punchOut(noted, 384.0 + 300).group(0).bars)
+        assertEquals(2, r.punchOut(noted, 384.0 * 2 + 10).group(0).bars)
+    }
+
+    @Test
+    fun `a group switched in counts its passes anew`() {
+        val r = PatternRecorder()
+        val p0 = r.punchIn(ProjectPatterns(), fromStop = false, autoLength = false)
+        val a = r.hit(p0, a3, 10.0).patterns
+        r.passed(0, 0)
+        val b = r.hit(a, a3, 100.0).patterns
+        // The same pass: no checkpoint of its own.
+        r.passed(0, 0)
+        val c = r.hit(b, a3, 200.0).patterns
+        assertEquals(a, r.undoPlaying(c))
+        r.punchIn(c, fromStop = false, autoLength = false)
+        val d0 = r.hit(c, a3, 300.0).patterns
+        r.passed(0, 0)
+        r.hit(d0, a3, 310.0)
+        // A pattern takes over: its pass 0 is a pass of its own, though the number is the same.
+        r.phase = PhaseAnchors.ZERO.with(0, 384)
+        r.passed(0, 0)
+        val d = r.hit(d0, a3, 384.0 + 30).patterns
+        assertEquals(d0, r.undoPlaying(d))
     }
 }

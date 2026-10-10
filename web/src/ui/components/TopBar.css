@@ -3,7 +3,7 @@
  * Web only, from 1024px wide (the desk): the row spans the page column up to
  * 1200 (--top-bar-max, theme/desk.css; Android's landscape TopBar is 1200dp
  * wide too), its sides on the desk's --desk-pad, and the theme switch
- * (ThemeSwitch.css) stands in the settings key's place, 20 after the ? key. */
+ * (ThemeSwitch.css) comes 20 after the ? key. */
 
 .top-bar {
   display: flex;
@@ -28,16 +28,6 @@
 .top-bar__gap { flex: 0 1 var(--space-8); min-width: var(--space-4); }
 .top-bar__gap--wide { flex-basis: 20px; }
 .top-bar__item { display: inline-flex; flex: none; }
-
-/* Narrow phones. Android's row squeezes the settings key out when the tag is
- * long (BACKUPS needs 386px); here the gaps shrink first (proportionally, so
- * the wide one gives way most), then below 356px the tag tightens, so every
- * key keeps its 44px target and nothing overflows at 320px. */
-@media (max-width: 355px) {
-  .top-bar__row { padding-left: var(--space-10); padding-right: var(--space-10); }
-  .top-bar__row .section-tag__face { padding: 0 20px 0 10px; }
-  .top-bar__row .section-tag__text { font-size: var(--size-tab); }
-}
 
 /* The desk: the page column's row (SectionMenu.css lines its list up with these numbers). */
 @media (min-width: 1024px) {

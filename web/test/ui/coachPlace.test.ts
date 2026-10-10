@@ -507,13 +507,14 @@ describe('the placing order', () => {
   const r = (p: PlacedTag): Box => p.room ?? p.rect
   const crossings = (ps: readonly PlacedTag[]): number =>
     ps.reduce((n, p) => n + ps.filter((q) => q !== p && p.tip !== null && p.tail !== null && crosses(p.tip, p.tail, r(q))).length, 0)
-  // A computer's top bar: back up, connection, ? and the gear, 44 wide, as the web lays them out.
+  // Four keys side by side, 44 wide, as the top bar once laid them out (back up, connection, ? and the gear): the tags
+  // are what the placing is tested on, so the ids are the ones that moved, wherever they sit now.
   const DESK = { width: 1280, height: 800 }
   const bar = [
-    mark('top.backup', at(780, 12, 44, 44), 'Back up'),
+    mark('backups.backup', at(780, 12, 44, 44), 'Back up'),
     mark('top.connection', at(832, 12, 44, 44), 'Connection'),
     mark('top.help', at(896, 12, 44, 44), "What's what"),
-    mark('top.settings', at(948, 12, 44, 44), 'Settings'),
+    mark('tools.settings', at(948, 12, 44, 44), 'Settings'),
   ]
 
   it('left to right, the gear’s arrow runs under the ? key’s tag', () => {
@@ -530,15 +531,34 @@ describe('the placing order', () => {
     expect(crossings(laid)).toBe(0)
   })
 
+  it('with Live\'s Bluetooth key before the connection key, the tags still clear each other', () => {
+    // A phone 360 wide: the bar is the tag, then the Bluetooth key, the connection key and ? (the real
+    // measure is in the e2e test; here every letter is 10px).
+    const PHONE = { width: 360, height: 780 }
+    const keys = [
+      mark('top.sections', at(16, 12, 126, 44), 'Sections'),
+      mark('top.bluetooth', at(184, 12, 44, 44), 'Bluetooth delay'),
+      mark('top.connection', at(236, 12, 44, 44), 'Connection'),
+      mark('top.help', at(300, 12, 44, 44), "What's what"),
+    ]
+    const ps = layoutTags(keys, PHONE, measure)
+    expect(ps).toHaveLength(keys.length)
+    for (const p of ps) for (const q of ps) if (p !== q) expect(overlaps(r(p), r(q))).toBe(false)
+    // The desk: the same key before the connection key in the 1200 row.
+    const wide = [mark('top.bluetooth', at(780, 12, 44, 44), 'Bluetooth delay'), ...bar.slice(1, 3)]
+    const laid = layoutTags(wide, DESK, measure)
+    expect(crossings(laid)).toBe(0)
+    for (const p of laid) for (const q of laid) if (p !== q) expect(overlaps(r(p), r(q))).toBe(false)
+  })
+
   it('when crowded, is reworked around tags on each other too', () => {
-    // A phone on its side, Backups: the top bar, search and import under it, the list below.
+    // A phone on its side, Backups: the top bar, back up, search and import under it, the list below.
     const SMALL = { width: 692, height: 336 }
     const marks = [
       mark('top.sections', at(16, 6, 126, 44), 'Sections'),
-      mark('top.backup', at(464, 6, 44, 44), 'Back up'),
-      mark('top.connection', at(516, 6, 44, 44), 'Connection'),
-      mark('top.help', at(580, 6, 44, 44), "What's what"),
-      mark('top.settings', at(632, 6, 44, 44), 'Settings'),
+      mark('top.connection', at(572, 6, 44, 44), 'Connection'),
+      mark('top.help', at(636, 6, 44, 44), "What's what"),
+      mark('backups.backup', at(462, 102, 44, 44), 'Back up'),
       mark('backups.search', at(514, 102, 44, 44), 'Search sounds'),
       mark('backups.import', at(566, 102, 44, 44), 'Import a .pak'),
       mark('backups.open', at(96, 156, 514, 75), 'Tap a backup to open it'),

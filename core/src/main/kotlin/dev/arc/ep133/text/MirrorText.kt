@@ -31,6 +31,8 @@ object MirrorText {
     const val NOTE_HIDDEN = "Tap for a note"
     /** "Last seen 5 Oct, 14:02", for the display while offline. */
     fun lastSeen(at: String) = "Last seen $at"
+    /** "Seen 5 Oct", the day alone: [lastSeen] where the line is too short for it (the one-group line beside its keys). */
+    fun seen(day: String) = "Seen $day"
     // Not connected, with the factory sounds in the library: one of their projects (the first unless PROJECT steps on).
     const val FACTORY = "Factory sounds"
     fun factoryNote(project: Int) = "Not connected: these are the EP-133's factory sounds, project $project as it ships. Connect your EP-133 to see it live."
@@ -206,8 +208,10 @@ object MirrorText {
     /** The debug log's line for a Live sound: "live:0:3 heard 31 ms after the press (phone speaker)". */
     fun latencyNote(key: String, ms: Double, route: String) = "$key heard ${"%.0f".format(ms)} ms after the press ($route)"
     const val BLUETOOTH_DELAY = "Sound goes to Bluetooth, which plays late (often 0.2 s or more). Wired headphones or the phone speaker are much quicker."
-    /** Live's display line while the sound goes to Bluetooth; the line may cut it short, so the delay comes first. */
+    /** The Bluetooth key in Live's top bar, for as long as the sound goes to Bluetooth: the toast a tap shows and what a screen reader says. */
     const val WIRELESS_DELAY = "Bluetooth plays late: wired or the speaker is quicker"
+    /** The same while Make up for Bluetooth delay is on, with the delay it makes up for: "Bluetooth plays late (about 180 ms): arc makes up for it". */
+    fun wirelessMadeUp(ms: Int) = "Bluetooth plays late (about $ms ms): arc makes up for it"
     /** The same where the route isn't known but the output's own delay is long: "Sound plays 140 ms late: wired output is quicker". */
     fun slowOutput(ms: Int) = "Sound plays $ms ms late: wired output is quicker"
     fun noteNames(n: dev.arc.ep133.features.NoteNames) = when (n) {
@@ -1016,6 +1020,9 @@ object MirrorText {
     /** Added to a pad's or key's name for screen readers in the STEP panel: on the cursor's step, and picked for − / +. */
     const val ON_STEP = ", on the step"
     const val PICKED = ", picked"
+
+    /** A group's state for screen readers on the all-groups page while the STEP panel is open on it (the group its pads' notes go to). */
+    const val STEP_GROUP = "Editing in step"
 
     /** A long press on a lit pad or key: picked for − / +; its action's name for screen readers. */
     const val PICK = "Pick to nudge"

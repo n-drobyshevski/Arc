@@ -88,6 +88,20 @@ object SettingsText {
     const val DOESNT_FIT = "Too wide for this window"
     const val HAPTICS = "Haptics"
     const val HAPTICS_NOTE = "A light tick when a pad or key goes down."
+    /** Making up for the delay of a Bluetooth or hearing-aid output (an addition). */
+    const val MAKE_UP_DELAY = "Make up for Bluetooth delay"
+    const val MAKE_UP_DELAY_NOTE = "Bluetooth plays late. With this on, the playhead follows what you hear, a pad you play along to a pattern is recorded where you heard the beat, and the click lands on the EP-133's beat. Wired headphones and the speaker are not changed."
+    /** The row's note while the sound isn't going to Bluetooth. */
+    const val DELAY_NONE = "Now: the sound isn't going to Bluetooth, so nothing is made up for."
+    /**
+     * The row's note on a Bluetooth output: the output's own [latencyMs] (what its clock counts of the delay; null when it
+     * can't be told) and [madeUpMs], the rest that arc makes up for.
+     */
+    fun delayNow(latencyMs: Int?, madeUpMs: Int) = when {
+        latencyMs == null -> "Now: not measured, counted as about $madeUpMs ms."
+        madeUpMs > 0 -> "Now: the output counts about $latencyMs ms; arc makes up the other $madeUpMs ms."
+        else -> "Now: the output counts about $latencyMs ms, all of Bluetooth's delay, so nothing more is made up."
+    }
     /** SAMPLE's review sheet after each take (an addition: the EP-133 puts a take straight on its pad). */
     const val REVIEW_SAMPLES = "Review samples"
     const val REVIEW_SAMPLES_NOTE = "After each recording, trim and hear it before it goes on the pad. Off, it goes straight on, as on the EP-133."

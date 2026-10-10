@@ -1,19 +1,28 @@
 // Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Chrome.kt (SectionMenu)
 //
 // The sections, as blocks stacked under the section tag (drawn in place, not
-// in a popup window): the current one navy. A tap outside closes the list.
-// It fades in and out; it sits under the top bar, so the tag stays in view.
+// in a popup window): the current one navy. After them, set apart by a gap,
+// Settings (an addition), a block like an unselected one with the gear before
+// its word. A tap outside closes the list. It fades in and out; it sits under
+// the top bar, so the tag stays in view.
+//
+// Web only, on the desk: no Settings entry ([onSettings] left out), as the
+// nav rail has its key.
 import type { JSX, TargetedKeyboardEvent } from 'preact'
 import { useEffect, useRef } from 'preact/hooks'
+import { CoachText } from '../../core/text/coachText'
 import { NavText } from '../../core/text/navText'
 import type { Tab } from '../../state/types'
 import { TAB_ENTRIES, tabLabel } from './Chrome'
+import { ArcIcon, Icon } from './Icons'
 import './SectionMenu.css'
 
 export interface SectionMenuProps {
   open: boolean
   current: Tab
   onPick: (t: Tab) => void
+  /** Opens Settings, the entry after the sections (the caller closes the list); left out: no entry. */
+  onSettings?: () => void
   onDismiss: () => void
   id?: string
 }
@@ -65,6 +74,17 @@ export function SectionMenu(props: SectionMenuProps): JSX.Element {
             </button>
           )
         })}
+        {props.onSettings && (
+          <button
+            type="button"
+            class="section-menu__item section-menu__settings cap-3d"
+            tabIndex={open ? 0 : -1}
+            onClick={props.onSettings}
+          >
+            <Icon icon={ArcIcon.GEAR} size={20} />
+            {CoachText.SETTINGS}
+          </button>
+        )}
       </nav>
     </div>
   )

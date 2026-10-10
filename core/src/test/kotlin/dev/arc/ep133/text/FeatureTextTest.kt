@@ -174,6 +174,7 @@ class FeatureTextTest {
         // Project 1 unless PROJECT stepped on; a last read keeps its own note.
         assertEquals(MirrorText.factoryNote(1), MirrorText.offlineNote(MirrorText.FACTORY))
         assertEquals(MirrorText.OFFLINE_NOTE, MirrorText.offlineNote(MirrorText.lastSeen("5 Oct, 14:02"), 3))
+        assertEquals("Seen 5 Oct", MirrorText.seen("5 Oct"))
         assertTrue(MirrorText.LISTEN_ONLY.endsWith("in EDIT, switch projects with PROJECT, or keep a sample in SAMPLE."))
         assertEquals("Next project: tap; hold + pad 1–9 to pick", CoachText.PROJECT)
         assertEquals("Project 3, shown", MirrorText.projectChoice(3, shown = true))
@@ -266,6 +267,29 @@ class FeatureTextTest {
         assertEquals("Review samples", SettingsText.REVIEW_SAMPLES)
         assertTrue(SettingsText.REVIEW_SAMPLES_NOTE.endsWith("as on the EP-133."))
         assertEquals("Sample", CoachText.SAMPLE)
+    }
+
+    @Test
+    fun `bluetooth delay text`() {
+        assertEquals("Make up for Bluetooth delay", SettingsText.MAKE_UP_DELAY)
+        assertTrue(SettingsText.MAKE_UP_DELAY_NOTE.endsWith("are not changed."))
+        assertEquals("Now: the output counts about 40 ms; arc makes up the other 140 ms.", SettingsText.delayNow(40, 140))
+        assertEquals("Now: the output counts about 220 ms, all of Bluetooth's delay, so nothing more is made up.", SettingsText.delayNow(220, 0))
+        assertEquals("Now: not measured, counted as about 180 ms.", SettingsText.delayNow(null, 180))
+        assertEquals("Now: the sound isn't going to Bluetooth, so nothing is made up for.", SettingsText.DELAY_NONE)
+        // The key's sentence leads with the delay, as a toast may cut it short.
+        assertTrue(MirrorText.WIRELESS_DELAY.startsWith("Bluetooth plays late"))
+        assertEquals("Bluetooth plays late (about 180 ms): arc makes up for it", MirrorText.wirelessMadeUp(180))
+        assertEquals("Bluetooth delay", CoachText.BLUETOOTH)
+    }
+
+    @Test
+    fun `connection key text`() {
+        assertEquals("Hold to disconnect", NavText.HOLD_TO_DISCONNECT)
+        assertEquals("EP-133 connected: hold to disconnect", CoachText.CONNECTED)
+        assertEquals("EP-133 connected", CoachText.CONNECTED_NAME)
+        assertEquals("Connection: hold to disconnect", CoachText.CONNECTION_HOLD)
+        assertEquals("Disconnect", CoachText.DISCONNECT)
     }
 
     @Test
@@ -457,5 +481,6 @@ class FeatureTextTest {
         assertEquals(listOf("STEP", "VEL", "LEN", "BAR", "CORRECT"), listOf(MirrorText.STEP, MirrorText.VEL, MirrorText.LEN, MirrorText.BAR, MirrorText.CORRECT).map { it.uppercase() })
         assertEquals("Tap a lit pad to pick it, then \u2212 and + move its note.", MirrorText.NUDGE_NOTE)
         assertEquals("Step through the pattern", CoachText.STEP)
+        assertEquals("Editing in step", MirrorText.STEP_GROUP)
     }
 }

@@ -10,8 +10,15 @@ object CoachText {
     const val CLOSE_HINT = "Tap anywhere to close"
 
     const val BACK_UP = "Back up"
-    const val CONNECTED = "EP-133 connected: tap to disconnect"
+    /** The connection key while connected: a tap only says to hold ([NavText.HOLD_TO_DISCONNECT]), so its name does too. */
+    const val CONNECTED = "EP-133 connected: hold to disconnect"
+    /** The web's connected key for a screen reader, which hears [NavText.HOLD_TO_DISCONNECT] as its description. */
+    const val CONNECTED_NAME = "EP-133 connected"
     const val CONNECTION = "Connection"
+    /** The guide overlay's tag on the connection key while connected. */
+    const val CONNECTION_HOLD = "Connection: hold to disconnect"
+    /** The connection key's action for a screen reader, which disconnects without the timed hold. */
+    const val DISCONNECT = "Disconnect"
     const val DISCONNECTED = "Connect the EP-133"
     const val SETTINGS = "Settings"
     /** The web's desktop top bar: its System / Light / Dark switch, in the settings key's place. */
@@ -24,6 +31,8 @@ object CoachText {
     const val TEMPO = "Click: tap; hold for tempo"
     /** The mic key in Live's top bar: a tap opens the SAMPLE panel, another closes it. */
     const val SAMPLE = "Sample"
+    /** The amber Bluetooth key in Live's top bar, while the sound goes to Bluetooth: a tap says that it plays late. */
+    const val BLUETOOTH = "Bluetooth delay"
     /** The pattern's keys on Live's display line: RECORD arms (a hold opens the pattern sheet), PLAY starts at bar 1. */
     const val RECORD = "Record a pattern: tap, then PLAY; hold for its settings"
     const val PATTERN_PLAY = "Play the pattern from bar 1"

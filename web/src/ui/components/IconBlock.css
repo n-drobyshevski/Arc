@@ -22,6 +22,31 @@
 
 .icon-block:disabled { opacity: var(--icon-disabled); }
 
+/* The ring a held key (onHold) fills over HOLD_MS, from the top round the clock, in the key's ink. */
+.icon-block__ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+  pointer-events: none;
+  color: var(--cap-ink);
+}
+.icon-block__ring circle { fill: none; stroke: currentColor; stroke-width: 3; }
+.icon-block__ring-track { opacity: 0.3; }
+.icon-block__ring-fill {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: icon-block-ring linear forwards;
+}
+@keyframes icon-block-ring {
+  to { stroke-dashoffset: 0; }
+}
+/* No sweep, but the same wait: the ring is there full while it runs. */
+@media (prefers-reduced-motion: reduce) {
+  .icon-block__ring-fill { animation: none; stroke-dashoffset: 0; }
+}
+
 /* PlainTooltip (inverseSurface = display, inverseOnSurface = displayInk), below the anchor. */
 .icon-block__tip {
   position: absolute;

@@ -172,18 +172,21 @@ object SceneOps {
      * The global tick at which a change queued at [globalTick] takes over a
      * group whose pattern is [currentLengthTicks] long: at once (the next
      * whole tick), at the next bar line, or at the next end of the group's
-     * pattern. A press exactly on a line switches there. Stopped, the caller
-     * switches at once whatever [time] is. A scene's change queues each
-     * group: under PATTERN each has its own tick, under BAR they share one.
+     * pattern. The lines are the pattern's own, counted from the global tick
+     * it started at ([anchor], [PhaseAnchors]); a scene's BAR, shared by all
+     * groups, goes by the transport's (anchor 0). A press exactly on a line
+     * switches there. Stopped, the caller switches at once whatever [time]
+     * is. A scene's change queues each group: under PATTERN each has its own
+     * tick, under BAR they share one.
      */
-    fun switchTick(time: SwitchTime, globalTick: Double, currentLengthTicks: Int): Long = when (time) {
+    fun switchTick(time: SwitchTime, globalTick: Double, currentLengthTicks: Int, anchor: Long = 0L): Long = when (time) {
         SwitchTime.IMMEDIATE -> ceil(globalTick).toLong()
-        SwitchTime.BAR -> nextLine(globalTick, Seq.TICKS_PER_BAR)
-        SwitchTime.PATTERN -> nextLine(globalTick, currentLengthTicks.coerceAtLeast(1))
+        SwitchTime.BAR -> nextLine(globalTick, Seq.TICKS_PER_BAR, anchor)
+        SwitchTime.PATTERN -> nextLine(globalTick, currentLengthTicks.coerceAtLeast(1), anchor)
     }
 
-    // The first multiple of [every] at or after [tick].
-    private fun nextLine(tick: Double, every: Int): Long = ceil(tick / every).toLong() * every
+    // The first [anchor] plus a multiple of [every] at or after [tick].
+    private fun nextLine(tick: Double, every: Int, anchor: Long): Long = anchor + ceil((tick - anchor) / every).toLong() * every
 
     // [p] as a copy goes in another slot: closed, its notes' ids 0.
     private fun copyOf(p: Pattern): Pattern = Pattern(p.bars, p.notes.map { it.copy(id = 0) })

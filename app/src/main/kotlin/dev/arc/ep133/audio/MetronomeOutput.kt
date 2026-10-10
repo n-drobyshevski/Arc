@@ -22,7 +22,10 @@ import java.util.concurrent.locks.LockSupport
  * the device's beats before each burst (null: run free); [onBeat] gets each
  * click as it is scheduled, with when it will be heard, on the thread;
  * [onEnded] is told, on it too, when the output fails rather than [close]
- * ending it.
+ * ending it. [delay] is how late the output is heard now, in nanoseconds
+ * ([OutputDelay]), asked for before each burst without a lock: each click's
+ * [Beat] is heard that long after the output's stamp has it. The grid itself is
+ * the caller's to send early (the EP-133's beats are, [OutputDelay.earlier]).
  * [LiveAudio] owns it and its audio focus.
  */
 internal class MetronomeOutput private constructor(
@@ -30,6 +33,7 @@ internal class MetronomeOutput private constructor(
     private val burst: Int,
     bpm: Int,
     private val grid: (now: Long) -> BeatGrid?,
+    private val delay: () -> Long,
     private val onBeat: (Beat) -> Unit,
     private val onEnded: (MetronomeOutput) -> Unit,
 ) {
@@ -43,6 +47,7 @@ internal class MetronomeOutput private constructor(
             attributes: AudioAttributes,
             bpm: Int,
             grid: (now: Long) -> BeatGrid?,
+            delay: () -> Long,
             onBeat: (Beat) -> Unit,
             onEnded: (MetronomeOutput) -> Unit,
         ): MetronomeOutput? {
@@ -76,7 +81,7 @@ internal class MetronomeOutput private constructor(
                 track.release()
                 return null
             }
-            return MetronomeOutput(track, burst, bpm, grid, onBeat, onEnded).apply { thread.start() }
+            return MetronomeOutput(track, burst, bpm, grid, delay, onBeat, onEnded).apply { thread.start() }
         }
     }
 
@@ -106,7 +111,7 @@ internal class MetronomeOutput private constructor(
                 val stamped = track.getTimestamp(ts)
                 val stampFrame = if (stamped) ts.framePosition else track.playbackHeadPosition.toLong() and 0xFFFFFFFFL
                 val stampNanos = if (stamped) ts.nanoTime else now
-                val clicks = scheduler.block(written, burst, bpm, grid(now), stampFrame, stampNanos)
+                val clicks = scheduler.block(written, burst, bpm, grid(now), stampFrame, stampNanos, delay())
                 sound.fill(out, burst, clicks)
                 for (i in clicks.indices) onBeat(clicks[i].beat)
                 var off = 0

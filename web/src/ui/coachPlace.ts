@@ -706,7 +706,7 @@ export function occlusions(placed: readonly PlacedTag[], viewport: Size, opts: O
  * Slides each tag that another tag's arrow runs under sideways off it, where
  * the tag still meets its own (up or down) arrow, stays on the screen and
  * clear of the other tags, their arrows and any control it didn't already
- * touch (the gear's arrow running down behind "What's what" in the top bar).
+ * touch (an arrow running down behind a neighbour's tag in a row of keys).
  * The nearest such place wins; a tag with nowhere to go stays.
  */
 export function clearArrows(placed: readonly PlacedTag[], viewport: Size, opts: Omit<PlaceOptions, 'crowded'> = {}): PlacedTag[] {

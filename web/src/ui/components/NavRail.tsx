@@ -7,10 +7,11 @@
 // and settings at the bottom. Each key has an LED above it; the current one is
 // held down, navy, its LED lit. The keys do what the phone's controls do: a
 // section key is the section list's pick (selectTab), Guide is the GUIDE edge
-// tab (hidden on the desk; its coach mark moves here) and Settings the top
-// bar's gear (the desk's top bar has the theme switch in its place; the key's
-// own word says what the gear's coach tag did, so it carries none). The
-// section tag and its list stay in the top bar.
+// tab (hidden on the desk; its coach mark moves here) and Settings the entry the
+// phone has after the sections and first in Live's tools (the desk's section
+// list and tools leave it out; the key's own word says what a coach tag
+// would, so it carries none). The section tag and its list stay in the top
+// bar, with the theme switch.
 import type { JSX, TargetedKeyboardEvent } from 'preact'
 import { useRef } from 'preact/hooks'
 import { CoachText } from '../../core/text/coachText'

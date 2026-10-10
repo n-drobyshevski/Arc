@@ -1,5 +1,6 @@
 package dev.arc.ep133.controller
 
+import dev.arc.ep133.audio.OutputDelay
 import dev.arc.ep133.audio.PadVoice
 import dev.arc.ep133.audio.PcmSound
 import dev.arc.ep133.features.PatternRecorder
@@ -129,6 +130,18 @@ internal fun pressTickAt(nanos: Long, pressAt: Long, bpm: Double): Double = (nan
  */
 internal fun pressSkip(skipPass: Long?, first: Boolean, early: Boolean): Long? = skipPass ?: 0L.takeIf { first || early }
 
+/**
+ * The global tick a live press is recorded at: the tick the player [heard]
+ * at it (some of the output's delay is left out of the clock,
+ * [dev.arc.ep133.audio.OutputDelay]) rather than the one the [stamped] clock
+ * has; before the run is heard, [dev.arc.ep133.audio.OutputDelay.placed] says
+ * where ([countedIn]: the run began with a count-in). The [first] note of a run
+ * a press started is its tick 0 (the clock began on it). Without a delay the
+ * two ticks are the same, and so is the result.
+ */
+internal fun pressPlace(first: Boolean, stamped: Double, heard: Double, countedIn: Boolean): Double =
+    if (first) stamped else OutputDelay.placed(stamped, heard, countedIn)
+
 /** The count-in's beat heard at global [tick], 1..4 through the bar before tick 0; null before it and from tick 0. */
 internal fun countInBeat(tick: Double): Int? {
     if (tick >= 0) return null
@@ -142,11 +155,19 @@ internal fun ticksToFrames(ticks: Long, bpm: Double, rate: Int): Long = floor(ti
 /**
  * [p] with the notes [held] (by id, their pads or keys still down) ended at
  * global [tick], as recording stops there ([recorder]'s punch-out or stop):
- * each keeps the gate it had up to then, not a grid step.
+ * each keeps the gate it had up to then, not a grid step. A note whose start
+ * was moved from where it was heard ([shifts], by id, in ticks) ends that far
+ * on from [tick] too, as its release does.
  */
-internal fun heldNotesEnded(p: ProjectPatterns, recorder: PatternRecorder, held: Collection<Int>, tick: Double): ProjectPatterns {
+internal fun heldNotesEnded(
+    p: ProjectPatterns,
+    recorder: PatternRecorder,
+    held: Collection<Int>,
+    tick: Double,
+    shifts: Map<Int, Double> = emptyMap(),
+): ProjectPatterns {
     var out = p
-    for (id in held) out = recorder.noteOff(out, id, tick)
+    for (id in held) out = recorder.noteOff(out, id, tick + (shifts[id] ?: 0.0))
     return out
 }
 

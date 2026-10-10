@@ -8,6 +8,7 @@ import dev.arc.ep133.features.FrameClock
 import dev.arc.ep133.features.Keys
 import dev.arc.ep133.features.Pattern
 import dev.arc.ep133.features.PatternPlayer
+import dev.arc.ep133.features.PhaseAnchors
 import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.ProjectPatterns
 import dev.arc.ep133.features.SeqNote
@@ -46,10 +47,10 @@ data class QueuedSwitch(val pattern: Pattern, val atTick: Long)
  * [dev.arc.ep133.features.PatternRecorder.Recorded.skipPass]) and the tempo,
  * [bpm]. [queued] gives a group (0..3) the pattern that takes over from a
  * tick: its notes before the tick come from [patterns], those from it on
- * from the queued one, each at the global tick mod its own pattern's length
- * (patterns stay locked to bar 1, as arc's clock is, so a 2-bar pattern
- * switched in at an odd bar starts at its bar 2; the device starts it at
- * its bar 1). Made anew for each change, never changed in place.
+ * from the queued one, which starts at its bar 1 on that tick, as the
+ * device starts it. Each group's pattern loops from its own anchor in
+ * [phase] (where it started: 0, bar 1, unless it was switched in since the
+ * transport started). Made anew for each change, never changed in place.
  */
 class SeqPlan(
     val patterns: ProjectPatterns,
@@ -57,6 +58,7 @@ class SeqPlan(
     val skip: Map<Int, Long>,
     val bpm: Double,
     val queued: Map<Int, QueuedSwitch> = emptyMap(),
+    val phase: PhaseAnchors = PhaseAnchors.ZERO,
 ) {
     companion object {
         val EMPTY = SeqPlan(ProjectPatterns(), emptyMap(), emptyMap(), Tempo.DEFAULT.toDouble())
@@ -87,14 +89,25 @@ class ArpPlan(
 class ArpStep(val note: ArpNote, val globalTick: Long, val gateTicks: Int)
 
 /**
- * Where the transport is in heard time (an addition): its [clock] (ticks to
- * mix frames) through the output's stamp [frames] (mix frames to
+ * Where the transport is in time (an addition): its [clock] (ticks to mix
+ * frames) through the output's stamp [frames] (mix frames to
  * System.nanoTime), so a press's time finds its tick and a tick its time.
+ * [tickAt] and [nanosOf] are by the stamp, when the output presents a tick;
+ * a wireless output's stamp may leave part of its delay out, which
+ * [heardTickAt] and [heardNanosOf] add ([OutputDelay]).
  */
 class Timeline(val clock: TransportClock, val frames: FrameClock) {
     /** The tick heard at [nanos] (System.nanoTime), fractional; below 0 in the count-in. */
     fun tickAt(nanos: Long): Double =
         (frames.frame + (nanos - frames.nanos) / 1e9 * frames.rate - clock.anchorFrame) / clock.framesPerTick
+
+    /**
+     * The tick the player hears at [nanos], when the stamp leaves [delayNs] of
+     * the output's delay out ([OutputDelay]): the one it has that long before. What the
+     * eye follows and where a live press lands go by this; the notes
+     * themselves are not moved. [delayNs] 0 is [tickAt].
+     */
+    fun heardTickAt(nanos: Long, delayNs: Long): Double = if (delayNs == 0L) tickAt(nanos) else tickAt(nanos) - OutputDelay.ticks(delayNs, clock.bpm)
 
     /** The click's beats: beat 0 on tick 0, the count-in's −4..−1. */
     fun grid(): BeatGrid = clock.beatGrid(frames)
@@ -102,8 +115,11 @@ class Timeline(val clock: TransportClock, val frames: FrameClock) {
     /** The mix frame tick [t] plays at. */
     fun frameOfTick(t: Long): Long = clock.frameOf(t)
 
-    /** When tick [t] is heard (System.nanoTime). */
+    /** When the stamp has tick [t] presented (System.nanoTime). */
     fun nanosOf(t: Long): Long = clock.nanosOf(t, frames)
+
+    /** When tick [t] is heard when the stamp leaves [delayNs] out: [delayNs] after [nanosOf]. */
+    fun heardNanosOf(t: Long, delayNs: Long): Long = nanosOf(t) + delayNs
 }
 
 /**
@@ -144,6 +160,14 @@ interface MixScheduler {
  * once disarmed). A new [SeqPlan.bpm] takes over where scheduling
  * has got to. Notes are counted by tick across windows, so a tempo change's
  * rounding neither repeats a note nor skips one.
+ *
+ * That clock follows nothing outside the phone (only its tempo can be the
+ * EP-133's), so over a wireless output ([OutputDelay]) the notes are not sent
+ * earlier: every sound the phone makes is as late as the next, and the pattern
+ * stays in step with the click and with what a press plays. What moves is what
+ * is heard against the stamp: the [timeline]'s [Timeline.heardTickAt] is what
+ * the playhead and a live press go by. (The click that follows the EP-133's
+ * clock does line up with outside sound, and is sent earlier.)
  *
  * A pad hit plays as voice "live:<group>:<offset>", the pad's own key (the
  * rings light as for a press); a KEYS note as "seq:<group>:<offset>:<midi>".
@@ -288,9 +312,10 @@ class PatternScheduler(
     private var missingOf: SeqPlan? = null
     private val missing = HashSet<PhysicalPad>()
 
-    // The queued patterns of [switchOf] as a project's patterns (a blank one for a group with none), and their notes in a window.
+    // The queued patterns of [switchOf] as a project's patterns (a blank one for a group with none), where each starts, and their notes in a window.
     private var switchOf: SeqPlan? = null
     private var switched = ProjectPatterns()
+    private var switchedPhase = PhaseAnchors.ZERO
     private val switchedNotes = ArrayList<SeqNote>()
 
     // Keys and pads made once, so a note finds them without a new string or object.
@@ -399,7 +424,7 @@ class PatternScheduler(
         // From the first tick not sent; one fallen further behind than the lookahead is let go.
         val from = maxOf(c.frameOf(nextTick), rendered - ahead)
         if (to > from) {
-            PatternPlayer.window(p.patterns, c, from, to, p.skip, notes)
+            PatternPlayer.window(p.patterns, c, from, to, p.skip, notes, p.phase)
             if (p.queued.isNotEmpty()) switchIn(p, c, from, to)
             for (i in notes.indices) start(sink, p, notes[i])
             nextTick = firstTick(c, to)
@@ -416,10 +441,17 @@ class PatternScheduler(
         if (switchOf !== p) {
             switchOf = p
             var q = ProjectPatterns()
-            for ((g, s) in p.queued) if (g in 0..3) q = q.with(g, s.pattern)
+            var ph = PhaseAnchors.ZERO
+            for ((g, s) in p.queued) {
+                if (g !in 0..3) continue
+                q = q.with(g, s.pattern)
+                // The queued pattern starts at its bar 1 where it takes over.
+                ph = ph.with(g, s.atTick)
+            }
             switched = q
+            switchedPhase = ph
         }
-        PatternPlayer.window(switched, c, from, to, emptyMap(), switchedNotes)
+        PatternPlayer.window(switched, c, from, to, emptyMap(), switchedNotes, switchedPhase)
         var k = 0
         for (i in notes.indices) {
             val n = notes[i]

@@ -39,6 +39,10 @@ export const MirrorText = {
   lastSeen(at: string): string {
     return `Last seen ${at}`
   },
+  /** "Seen 5 Oct", the day alone: [lastSeen] where the line is too short for it (the one-group line beside its keys). */
+  seen(day: string): string {
+    return `Seen ${day}`
+  },
   // Not connected, with the factory sounds in the library: one of their projects (the first unless PROJECT steps on).
   FACTORY: 'Factory sounds',
   factoryNote(project: number): string {
@@ -279,8 +283,12 @@ export const MirrorText = {
   },
   BLUETOOTH_DELAY:
     'Sound goes to Bluetooth, which plays late (often 0.2 s or more). Wired headphones or the phone speaker are much quicker.',
-  /** Live's display line while the sound goes to Bluetooth; the line may cut it short, so the delay comes first. */
+  /** The Bluetooth key in Live's top bar, for as long as the sound goes to Bluetooth: the toast a tap shows and what a screen reader says. */
   WIRELESS_DELAY: 'Bluetooth plays late: wired or the speaker is quicker',
+  /** The same while Make up for Bluetooth delay is on, with the delay it makes up for: "Bluetooth plays late (about 180 ms): arc makes up for it". */
+  wirelessMadeUp(ms: number): string {
+    return `Bluetooth plays late (about ${ms} ms): arc makes up for it`
+  },
   /** The same where the route isn't known but the output's own delay is long: "Sound plays 140 ms late: wired output is quicker". */
   slowOutput(ms: number): string {
     return `Sound plays ${ms} ms late: wired output is quicker`
@@ -1305,6 +1313,9 @@ export const MirrorText = {
   /** Added to a pad's or key's name for screen readers in the STEP panel: on the cursor's step, and picked for − / +. */
   ON_STEP: ', on the step',
   PICKED: ', picked',
+
+  /** A group's state for screen readers on the all-groups page while the STEP panel is open on it (the group its pads' notes go to). */
+  STEP_GROUP: 'Editing in step',
 
   /** A long press on a lit pad or key: picked for − / +; its action's name for screen readers. */
   PICK: 'Pick to nudge',

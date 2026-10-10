@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -493,6 +494,13 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun Root() {
+        // The delay Live makes up for while its sound goes to Bluetooth, for the Bluetooth key's words: the flow, which
+        // only the key reads (it is told every second).
+        CompositionLocalProvider(dev.arc.ep133.ui.components.LocalDelayMadeUp provides controller.delayMadeUpFor) { RootContent() }
+    }
+
+    @Composable
+    private fun RootContent() {
         val state by controller.state.collectAsStateWithLifecycle()
         var debug by rememberSaveable { mutableStateOf(false) }
         // The debug screen's latency test folded out, kept while Live is played in between.
@@ -654,7 +662,7 @@ class MainActivity : ComponentActivity() {
         LaunchedEffect(contentsBackup?.id) { contentsBackup?.let { controller.openContents(it) } }
         val playing by controller.player.playing.collectAsStateWithLifecycle()
         val rec by controller.rec.collectAsStateWithLifecycle()
-        // Live's sound goes to Bluetooth: its display line says it plays late.
+        // Live's sound goes to Bluetooth: the top bar's Bluetooth key says it plays late (and the settings row).
         val liveWireless by controller.liveWireless.collectAsStateWithLifecycle()
         val takes by controller.takes.collectAsStateWithLifecycle()
         // TAKE in Live tools, and its badge on Live's display line while it records, on the page or in the top bar.
@@ -903,6 +911,8 @@ class MainActivity : ComponentActivity() {
         } else {
             null
         }
+        // Live's Bluetooth key in the top bar, while the sound goes to Bluetooth: a tap toasts the sentence it reads.
+        val lateKey = remember(controller) { dev.arc.ep133.ui.components.LateKey { controller.toast(it) } }.takeIf { tab == Tab.LIVE && liveWireless }
         Box(Modifier.fillMaxSize()) {
             if (debug) {
                 val latency by controller.latency.collectAsStateWithLifecycle()
@@ -938,6 +948,9 @@ class MainActivity : ComponentActivity() {
                     onShowNames = controller::setKeysShowNames,
                     onPianoWhites = controller::setPianoWhites,
                     onHaptics = controller::setHaptics,
+                    onMakeUpDelay = controller::setMakeUpDelay,
+                    wireless = liveWireless,
+                    latency = controller.outputLatencyMs,
                     onReviewSamples = controller::setReviewSamples,
                     onRestoreFolder = { folderLauncher.launch(dev.arc.ep133.data.ExternalLibrary.INITIAL_FOLDER) },
                     // No browser installed: nothing to open.
@@ -1020,9 +1033,11 @@ class MainActivity : ComponentActivity() {
                     onTab = { selectTab(it) },
                     connected = state.connected,
                     canConnect = state.midiSupported && !state.busy,
-                    canBackup = state.midiSupported && state.device != null && !state.busy,
-                    onBackup = { withNotifications { controller.backup() } },
                     onConnect = { controller.connect() },
+                    // Connected, connect() lets go of the session: held for a second, the connection key's tap only toasts that.
+                    onDisconnect = { controller.connect() },
+                    onHint = { controller.toast(it) },
+                    haptics = appSettings.haptics,
                     onDebug = { debug = true },
                     onSettings = { settingsOpen = true },
                     onHelp = { coach = true },
@@ -1030,8 +1045,9 @@ class MainActivity : ComponentActivity() {
                     onGuide = { guideOpen = it },
                     guide = { GuideScreen(onBack = { guideOpen = false }) },
                     // On a phone on its side, Live's display line rides in the top bar.
-                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, transport = liveTransport, take = liveTake, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys, wireless = liveWireless, sample = sampleUi, punch = punches, arp = arp.line, header = sampleHeader, step = liveStep, stepOpens = appSettings.liveOneGroup && !appSettings.liveKeys, scene = liveScene, sceneOpens = appSettings.liveOneGroup && !appSettings.liveKeys) }) else null,
+                    middle = if (liveBar) ({ dev.arc.ep133.ui.screens.LivePill(mirror, keys, transport = liveTransport, take = liveTake, pianoRange = pianoRange, editing = liveEdit, voices = controller.liveKeys, sample = sampleUi, punch = punches, arp = arp.line, header = sampleHeader, step = liveStep, scene = liveScene, sceneOpens = appSettings.liveOneGroup && !appSettings.liveKeys) }) else null,
                     sample = sampleKey,
+                    late = lateKey,
                 ) {
                     // Back from another section returns to Live, the home section, first.
                     BackHandler(enabled = tab != Tab.LIVE) { selectTab(Tab.LIVE) }
@@ -1067,7 +1083,6 @@ class MainActivity : ComponentActivity() {
                             // collected inside Live, so a voice starting doesn't recompose the whole app.
                             voices = controller.liveKeys,
                             haptics = appSettings.haptics,
-                            wireless = liveWireless,
                             oneGroup = appSettings.liveOneGroup,
                             onOneGroup = controller::setLiveOneGroup,
                             follow = appSettings.liveFollow,
@@ -1124,6 +1139,7 @@ class MainActivity : ComponentActivity() {
                             arp = liveArp,
                             step = liveStep,
                             scene = liveScene,
+                            onSettings = { settingsOpen = true },
                         )
                         Tab.DEVICE -> DeviceScreen(
                             state = state,
@@ -1429,7 +1445,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                // Transfers can start from any tab (Back up is in the top bar).
+                // Transfers can start from any tab (a restore or upload away from Backups).
                 val task = state.task
                 val lastTask = remember { mutableStateOf(task) }.apply { if (task != null) value = task }.value
                 ArcSheet(visible = task != null, onDismiss = null, grip = false) {

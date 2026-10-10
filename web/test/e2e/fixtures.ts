@@ -76,15 +76,17 @@ export async function selectTab(page: Page, name: 'Backups' | 'Live' | 'Device')
 
 /**
  * Opens Settings: the nav rail's Settings key on the desktop layout (from
- * 1024px wide, where the top bar has the theme switch in the gear's place),
- * the top bar's gear below it.
+ * 1024px wide), the last entry of the section list the tag opens below it
+ * (Live's tools have a Settings row too).
  */
 export async function openSettings(page: Page): Promise<void> {
   const desk = (page.viewportSize()?.width ?? 0) >= 1024
-  const key = desk
-    ? page.locator('.nav-rail').getByRole('button', { name: 'Settings', exact: true })
-    : page.getByRole('banner').getByRole('button', { name: 'Settings', exact: true })
-  await key.click()
+  if (desk) {
+    await page.locator('.nav-rail').getByRole('button', { name: 'Settings', exact: true }).click()
+  } else {
+    await page.getByRole('banner').getByRole('button', { name: /, Sections$/ }).click()
+    await page.getByRole('navigation', { name: 'Sections' }).getByRole('button', { name: 'Settings', exact: true }).click()
+  }
   await expect(page.locator('.app__screen[data-view="settings"]')).toBeVisible()
 }
 

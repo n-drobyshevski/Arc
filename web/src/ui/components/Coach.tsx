@@ -61,13 +61,13 @@ export const COACH_YELLOW_INK = 'var(--coach-yellow-ink)'
 /** Every control the overlay knows, by screen. */
 export const COACH_IDS = [
   'top.sections',
-  'top.backup',
+  'top.bluetooth',
   'top.connection',
   'top.help',
-  'top.settings',
   'top.theme',
   'edge.guide',
   'edge.edit',
+  'backups.backup',
   'backups.search',
   'backups.import',
   'backups.open',
@@ -81,6 +81,7 @@ export const COACH_IDS = [
   'live.groups',
   'live.sounds',
   'side.more',
+  'tools.settings',
   'device.refresh',
   'device.add',
   'device.switch',
@@ -106,16 +107,17 @@ const yellowTag = (label: string): CoachMarkSpec => ({ label, face: COACH_YELLOW
  */
 export const COACH_MARKS: Readonly<Record<CoachId, CoachMarkSpec>> = Object.freeze({
   'top.sections': navyTag(CoachText.SECTIONS),
-  'top.backup': { label: CoachText.BACK_UP, face: 'var(--signal)', ink: 'var(--on-signal)' },
+  // Live's amber key while the sound plays late (the face of the key itself; Chrome.kt's TagInk).
+  'top.bluetooth': { label: CoachText.BLUETOOTH, face: 'var(--warn)', ink: 'var(--tag-ink)' },
   'top.connection': navyTag(CoachText.CONNECTION),
   'top.help': { label: CoachText.HELP, face: 'var(--ink)', ink: 'var(--shell)' },
-  'top.settings': { label: CoachText.SETTINGS, face: 'var(--graphite)', ink: 'var(--shell)' },
-  // Web: the desk's theme switch, in the settings key's place (no top.settings
-  // there: the nav rail's Settings key says it in words).
+  // Web: the desk's theme switch, after the ? key (the nav rail's Settings key
+  // says Settings in words).
   'top.theme': navyTag(CoachText.THEME),
   'edge.guide': navyTag(CoachText.GUIDE_TAB),
   // Live's EDIT tab (under GUIDE): an edge-hook side tag on the phone.
   'edge.edit': navyTag(CoachText.EDIT),
+  'backups.backup': { label: CoachText.BACK_UP, face: 'var(--signal)', ink: 'var(--on-signal)' },
   'backups.search': navyTag(CoachText.SEARCH),
   'backups.import': navyTag(CoachText.IMPORT),
   'backups.open': yellowTag(CoachText.OPEN_BACKUP),
@@ -132,6 +134,8 @@ export const COACH_MARKS: Readonly<Record<CoachId, CoachMarkSpec>> = Object.free
   // The desk's Sounds tab, beside the K.O. II.
   'live.sounds': yellowTag(CoachText.SOUNDS_TAB),
   'side.more': { label: CoachText.MORE_TOOLS, face: 'var(--ink)', ink: 'var(--shell)' },
+  // Live tools' first row (an addition), tagged while the tools are open.
+  'tools.settings': { label: CoachText.SETTINGS, face: 'var(--graphite)', ink: 'var(--shell)' },
   'device.refresh': navyTag(CoachText.REFRESH),
   'device.add': { label: CoachText.ADD_SAMPLES, face: 'var(--signal)', ink: 'var(--on-signal)' },
   'device.switch': yellowTag(CoachText.SOUNDS_PROJECTS),
@@ -147,8 +151,8 @@ export function coachSpecFor(id: string, el: Element): CoachMarkSpec | null {
   let spec = base
   // Chrome.kt: the connection tag is green (ok) while connected, navy while not.
   if (id === 'top.connection') {
-    const label = CoachText.CONNECTED.replace(/"/g, '\\"')
-    const on = el.getAttribute('aria-label') === CoachText.CONNECTED || el.querySelector(`[aria-label="${label}"]`) !== null
+    const label = CoachText.CONNECTED_NAME.replace(/"/g, '\\"')
+    const on = el.getAttribute('aria-label') === CoachText.CONNECTED_NAME || el.querySelector(`[aria-label="${label}"]`) !== null
     if (on) spec = { label: CoachText.CONNECTION, face: 'var(--ok)', ink: 'var(--on-ok)' }
   }
   const label = el.getAttribute('data-coach-label') ?? spec?.label

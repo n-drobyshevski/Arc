@@ -92,15 +92,26 @@ import kotlin.math.roundToInt
  * STEP on Live (an addition, after the EP-133's own step sequencing: − / +
  * while stopped, RECORD + pad, SHIFT + KNOB X / Y, SHIFT + pad then − / +,
  * and SHIFT + TIMING's timing correct). A STEP chip on the stopped display
- * line ([PatternLine]) unrolls the line into the STEP panel over the
+ * line ([PatternLine]; on the all-groups page in the pattern's row under
+ * the big line, [PatternRow]) unrolls the line into the STEP panel over the
  * function keys, as SAMPLE's does ([SampleMorph], [PanelKind.STEP]), all of
  * it on the line's dark screen: the panel's RECORD (held), PLAY, the status
  * and ✕ in the line's own row ([StepHeader]); then − and + either side of
  * the strip, one bar of steps with the cursor on it, and under them VEL and
  * LEN, BAR's pages, NUDGE and CORRECT ([StepDeck]). Where the line rides in
- * the top bar, the panel comes out in the function keys' column with its
- * own header ([StepBodyFace]). The pads (or KEYS keys) on the cursor's step
- * are outlined in signal orange, the one picked for − / + ringed ([PadStep]).
+ * the top bar, or there is no room for it to grow (KEYS' grid and the short
+ * piano, on a phone's side: [StepHosting.SLOT]), the panel comes out in the
+ * function keys' column (the short piano has none: in a new column left of
+ * its keys) with its own header ([StepBodyFace]), the keys narrowing beside it. The pads (or KEYS keys) on the cursor's step are
+ * outlined in signal orange, the one picked for − / + ringed ([PadStep]; on
+ * the piano its keys).
+ *
+ * It is offered in every view of Live ([StepView]) and edits the group shown
+ * ([stepGroupFor]): one group's, the KEYS sound's (KEYS' grid and the piano
+ * place their notes by pitch), and on the all-groups page, which has no group
+ * keys, the group selected last on one group's page, then whichever group a
+ * pad was pressed in last: the panel follows it, the group's caption in
+ * signal orange.
  */
 
 /**
@@ -157,9 +168,11 @@ class LiveStep(
  * on the cursor's step ([lit]: pad offsets, or KEYS' MIDI notes), the one
  * [picked] for − / +, whether the panel's RECORD is held ([placing]: a pad
  * held lights up as it goes on the step), and a long press picking one
- * ([onPick], by offset or note: false where it has no note there).
+ * ([onPick], by offset or note: false where it has no note there). [edited]:
+ * the group's pads on the all-groups page, where the panel edits this one
+ * (its caption in signal orange).
  */
-internal class PadStep(val lit: Set<Int>, val picked: Int?, val placing: Boolean, val onPick: (Int) -> Boolean)
+internal class PadStep(val lit: Set<Int>, val picked: Int?, val placing: Boolean, val edited: Boolean = false, val onPick: (Int) -> Boolean)
 
 /**
  * The touch's pressure as a pad or key goes down ([holdToPlay] writes it just
@@ -666,3 +679,6 @@ private val PageKeyWidth = 26.dp
 
 /** From this wide the knobs' row has room for NUDGE and CORRECT at its end. */
 internal val StepRowMin = 316.dp
+
+/** The least width of STEP's column on a phone's side: the room VEL, LEN and two of BAR's pages take (a longer pattern's pages scroll). */
+internal val StepColumnMin = 272.dp

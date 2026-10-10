@@ -172,4 +172,52 @@ class ClickSchedulerTest {
         assertTrue(run(s, 0, 5L * 24000, grid = { unknown }).none { it.second.accent })
         assertTrue(run(s, 5L * 24000, 15L * 24000).none { it.second.accent })
     }
+    @Test
+    fun `a click is heard the delay after it leaves the output, and leaves it where it did`() {
+        val late = 180L * ms
+        val plain = ClickScheduler(rate)
+        val delayed = ClickScheduler(rate)
+        for (from in listOf(0L, 192L, 24000L - 96, 24000L)) {
+            val a = plain.block(from, 192, 120, null, 0L, t0).map { it.offset to it.beat }
+            val b = delayed.block(from, 192, 120, null, 0L, t0, late).map { it.offset to it.beat }
+            assertEquals(a.map { it.first }, b.map { it.first })
+            assertEquals(a.map { it.second.index }, b.map { it.second.index })
+            assertEquals(a.map { it.second.at + late }, b.map { it.second.at })
+        }
+    }
+
+    @Test
+    fun `no delay changes nothing, wired or not`() {
+        val grid = BeatGrid(anchor = t0 + 100 * ms, beatIndex = 8, periodNs = 5e8, barKnown = true)
+        val a = run(ClickScheduler(rate), 0, 60_000, grid = { grid })
+        val b = ArrayList<Pair<Long, Beat>>()
+        val s = ClickScheduler(rate)
+        var f = 0L
+        while (f < 60_000) {
+            for (c in s.block(f, 192, 120, grid, 0L, t0, 0L)) if (f + c.offset < 60_000) b += (f + c.offset) to c.beat
+            f += 192
+        }
+        assertEquals(a, b)
+    }
+
+    @Test
+    fun `the EP-133's beats sent early by the delay are heard on the device's beat`() {
+        val delay = 180L * ms
+        val device = BeatGrid(anchor = t0 + 1000 * ms, beatIndex = 0, periodNs = 5e8, barKnown = true)
+        val early = OutputDelay.earlier(device, delay)
+        val s = ClickScheduler(rate)
+        val out = ArrayList<Pair<Long, Beat>>()
+        var f = 0L
+        while (f < 120_000) {
+            for (c in s.block(f, 192, 120, early, 0L, t0, delay)) out += (f + c.offset) to c.beat
+            f += 192
+        }
+        assertTrue(out.size >= 4)
+        for ((frame, beat) in out) {
+            // Heard on the device's beat, to a frame ...
+            assertTrue(abs(beat.at - device.at(beat.index)) <= 1_000_000_000L / rate) { "beat ${beat.index} heard at ${beat.at}" }
+            // ... having left the output that much sooner.
+            assertTrue(abs(time(frame) - (device.at(beat.index) - delay)) <= 1_000_000_000L / rate)
+        }
+    }
 }

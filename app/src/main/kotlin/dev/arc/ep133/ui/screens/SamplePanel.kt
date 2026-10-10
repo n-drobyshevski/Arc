@@ -897,6 +897,9 @@ internal fun Modifier.unrollMaxHeight(panel: SamplePanel, closed: Dp, open: Dp):
  * drawing is scaled by its share between the two rooms, around their
  * middles where [centred] (the big grid sits in the middle of its room),
  * else from their top left. A finger finds each pad where it is drawn.
+ * [scaleYOf]: the same for the pads' height, where it doesn't follow their
+ * width (the upright grid's pads grow taller into spare height, [koBody]);
+ * null scales the height as the width.
  *
  * Not all of the pads grow and shrink with their room (their words and
  * LEDs keep to a smallest and largest size, a caption and the gaps between
@@ -907,7 +910,7 @@ internal fun Modifier.unrollMaxHeight(panel: SamplePanel, closed: Dp, open: Dp):
  * [PADS_SETTLE_MS]: they settle rather than jump.
  */
 @Composable
-internal fun PadsGlide(panel: SamplePanel, modifier: Modifier, centred: Boolean = true, scaleOf: Density.(w: Int, h: Int) -> Float, content: @Composable () -> Unit) {
+internal fun PadsGlide(panel: SamplePanel, modifier: Modifier, centred: Boolean = true, scaleOf: Density.(w: Int, h: Int) -> Float, scaleYOf: (Density.(w: Int, h: Int) -> Float)? = null, content: @Composable () -> Unit) {
     val rest = remember(panel) { RestRoom() }
     // The pads as drawn while the panel moves; once it rests, a picture of their last frame over them, fading.
     val drawn = rememberGraphicsLayer()
@@ -949,10 +952,12 @@ internal fun PadsGlide(panel: SamplePanel, modifier: Modifier, centred: Boolean 
         val h = if (constraints.hasBoundedHeight) constraints.maxHeight else p.height
         val from = scaleOf(p.width, p.height)
         val s = if (at == constraints || from <= 0f) 1f else scaleOf(w, h) / from
+        val fromY = scaleYOf?.invoke(this, p.width, p.height) ?: 0f
+        val sy = if (scaleYOf == null || at == constraints || fromY <= 0f) s else scaleYOf(this, w, h) / fromY
         layout(w, h) {
             p.placeWithLayer(0, 0) {
                 scaleX = s
-                scaleY = s
+                scaleY = sy
                 if (centred) {
                     transformOrigin = TransformOrigin.Center
                     translationX = (w - p.width) / 2f

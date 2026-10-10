@@ -133,6 +133,21 @@ export const SettingsText = {
   DOESNT_FIT: 'Too wide for this window',
   HAPTICS: 'Haptics',
   HAPTICS_NOTE: 'A light tick when a pad or key goes down.',
+  /** Making up for the delay of a Bluetooth or hearing-aid output (an addition). */
+  MAKE_UP_DELAY: 'Make up for Bluetooth delay',
+  MAKE_UP_DELAY_NOTE:
+    "Bluetooth plays late. With this on, the playhead follows what you hear, a pad you play along to a pattern is recorded where you heard the beat, and the click lands on the EP-133's beat. Wired headphones and the speaker are not changed.",
+  /** The row's note while the sound isn't going to Bluetooth. */
+  DELAY_NONE: "Now: the sound isn't going to Bluetooth, so nothing is made up for.",
+  /**
+   * The row's note on a Bluetooth output: the output's own `latencyMs` (what its clock counts of the delay; null when it
+   * can't be told) and `madeUpMs`, the rest that arc makes up for.
+   */
+  delayNow(latencyMs: number | null, madeUpMs: number): string {
+    if (latencyMs === null) return `Now: not measured, counted as about ${madeUpMs} ms.`
+    if (madeUpMs > 0) return `Now: the output counts about ${latencyMs} ms; arc makes up the other ${madeUpMs} ms.`
+    return `Now: the output counts about ${latencyMs} ms, all of Bluetooth's delay, so nothing more is made up.`
+  },
   /** SAMPLE's review sheet after each take (an addition: the EP-133 puts a take straight on its pad). */
   REVIEW_SAMPLES: 'Review samples',
   REVIEW_SAMPLES_NOTE:

@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -23,7 +24,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathMeasure
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
@@ -40,7 +43,7 @@ import dev.arc.ep133.ui.theme.ArcType
  * Small geometric icons, drawn rather than taken from an icon set, so they
  * match the pocket operator app's flat shapes (REC dot, play triangle, gear).
  */
-enum class ArcIcon { DOT, RING, GEAR, HELP, REFRESH, PLUS, SEARCH, IMPORT, FOLLOW, SWAP, EXCHANGE, MIC }
+enum class ArcIcon { DOT, RING, GEAR, HELP, REFRESH, PLUS, SEARCH, IMPORT, FOLLOW, SWAP, EXCHANGE, MIC, BLUETOOTH, CLOCK }
 
 @Composable
 fun Icon(icon: ArcIcon, color: Color, modifier: Modifier = Modifier, size: Dp = 22.dp) {
@@ -153,6 +156,29 @@ private fun DrawScope.draw(icon: ArcIcon, color: Color) {
             drawArc(color, 0f, 180f, false, topLeft = Offset(c.x - r, holder - r), size = Size(2 * r, 2 * r), style = Stroke(stroke, cap = StrokeCap.Round))
             drawLine(color, Offset(c.x, holder + r), Offset(c.x, w * 0.9f), stroke, StrokeCap.Round)
         }
+        ArcIcon.BLUETOOTH -> {
+            // The rune: a spine with two arrowheads on its right, crossed by the strokes from its left.
+            val x = c.x
+            val rune = Path().apply {
+                moveTo(w * 0.24f, w * 0.68f)
+                lineTo(w * 0.76f, w * 0.30f)
+                lineTo(x, w * 0.08f)
+                lineTo(x, w * 0.92f)
+                lineTo(w * 0.76f, w * 0.70f)
+                lineTo(w * 0.24f, w * 0.32f)
+            }
+            drawPath(rune, color, style = Stroke(stroke * 1.1f, cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+        }
+        ArcIcon.CLOCK -> {
+            // A face with its two hands: late.
+            drawCircle(color, radius = w * 0.4f, style = Stroke(stroke))
+            val hands = Path().apply {
+                moveTo(c.x, c.y - w * 0.22f)
+                lineTo(c.x, c.y)
+                lineTo(c.x + w * 0.16f, c.y + w * 0.1f)
+            }
+            drawPath(hands, color, style = Stroke(stroke, cap = StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+        }
         ArcIcon.FOLLOW -> {
             // A target: follow the group being played.
             drawCircle(color, radius = w * 0.38f, style = Stroke(stroke))
@@ -161,11 +187,41 @@ private fun DrawScope.draw(icon: ArcIcon, color: Color) {
     }
 }
 
+/** How wide a held key's ring is, and how far in from the key's edge it runs. */
+private val RingStroke = 3.dp
+private val RingInset = 3.5.dp
+
+/**
+ * A held key's ring in [color], [progress] (0 to 1) of the way clockwise from the top
+ * middle round the key's edge, over a faint track once it has started. It is read as
+ * the key draws, so filling it recomposes nothing. Drawn over the face (and so travels with it).
+ */
+private fun Modifier.fillRing(color: Color, round: Boolean, progress: () -> Float): Modifier = drawWithContent {
+    drawContent()
+    val p = progress().coerceIn(0f, 1f)
+    if (p <= 0f) return@drawWithContent
+    val inset = RingInset.toPx()
+    val radius = if (round) size.minDimension / 2f else 8.dp.toPx()
+    val path = edgePath(size.width, size.height, radius, inset)
+    val stroke = Stroke(RingStroke.toPx(), cap = StrokeCap.Round)
+    drawPath(path, color.copy(alpha = 0.25f), style = stroke)
+    val part = Path()
+    val measure = PathMeasure().apply { setPath(path, false) }
+    measure.getSegment(0f, measure.length * p, part, true)
+    drawPath(part, color, style = stroke)
+}
+
 /**
  * A square (or round) icon key, drawn as a cap (see [cap]) whose face travels
  * onto its edge while pressed. Long-press shows its name; screen readers read
- * [label], then [state] where it has one (a key that is on or off). The touch
- * area stays at least 44dp even when the face is drawn smaller.
+ * [label] (or [description], where the key says more than its name), then
+ * [state] where it has one (a key that is on or off). [beside]: a second icon
+ * after [icon], the same size. The touch area stays at least 44dp even when
+ * the face is drawn smaller.
+ * [hold]: the key is held, not tapped ([KeyHold]): a tap calls [onClick] (to say
+ * so), and a hold of a second fills a ring round the key's edge and calls
+ * [KeyHold.onHold]; [ring] draws it part-way regardless (for screenshots). A held key
+ * shows no tooltip, as the press is the hold's.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -181,13 +237,20 @@ fun IconBlock(
     iconSize: Dp = 22.dp,
     round: Boolean = false,
     state: String? = null,
+    beside: ArcIcon? = null,
+    description: String = label,
+    hold: KeyHold? = null,
+    ring: Float = 0f,
 ) {
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
+    val held = hold?.let { rememberHeldKey(it, enabled, source, onClick) }
     TooltipBox(
         positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Below),
         tooltip = { PlainTooltip { Text(label.uppercase(), style = ArcType.capsKeySmall) } },
         state = rememberTooltipState(),
+        // The tooltip's own long-press would take the hold's pointer events (and TalkBack's long click).
+        enableUserInput = hold == null,
     ) {
         Box(
             modifier
@@ -200,14 +263,29 @@ fun IconBlock(
                     dy = if (round) RoundCapDy else CapDy,
                     alpha = if (enabled) 1f else 0.4f,
                 )
-                .clickable(interactionSource = source, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
+                .then(
+                    if (hold == null || held == null) {
+                        Modifier.clickable(interactionSource = source, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
+                    } else {
+                        held.modifier
+                    },
+                )
                 .semantics {
-                    contentDescription = label
+                    contentDescription = description
                     if (state != null) stateDescription = state
-                },
+                    if (hold != null) heldKeyActions(hold, enabled, onClick)
+                }
+                .then(if (held != null || ring > 0f) Modifier.fillRing(ink, round, { maxOf(ring, held?.ring?.floatValue ?: 0f) }) else Modifier),
             contentAlignment = Alignment.Center,
         ) {
-            Icon(icon, ink, size = iconSize)
+            if (beside == null) {
+                Icon(icon, ink, size = iconSize)
+            } else {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(icon, ink, size = iconSize)
+                    Icon(beside, ink, size = iconSize)
+                }
+            }
         }
     }
 }

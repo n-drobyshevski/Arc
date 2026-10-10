@@ -9,8 +9,15 @@ export const CoachText = {
   CLOSE_HINT: 'Tap anywhere to close',
 
   BACK_UP: 'Back up',
-  CONNECTED: 'EP-133 connected: tap to disconnect',
+  /** The connection key while connected: a tap only says to hold (NavText.HOLD_TO_DISCONNECT), so its name does too. */
+  CONNECTED: 'EP-133 connected: hold to disconnect',
+  /** The web's connected key for a screen reader, which hears NavText.HOLD_TO_DISCONNECT as its description. */
+  CONNECTED_NAME: 'EP-133 connected',
   CONNECTION: 'Connection',
+  /** The guide overlay's tag on the connection key while connected. */
+  CONNECTION_HOLD: 'Connection: hold to disconnect',
+  /** The connection key's action for a screen reader, which disconnects without the timed hold. */
+  DISCONNECT: 'Disconnect',
   DISCONNECTED: 'Connect the EP-133',
   SETTINGS: 'Settings',
   /** The web's desktop top bar: its System / Light / Dark switch, in the settings key's place. */
@@ -23,6 +30,8 @@ export const CoachText = {
   TEMPO: 'Click: tap; hold for tempo',
   /** The mic key in Live's top bar: a tap opens the SAMPLE panel, another closes it. */
   SAMPLE: 'Sample',
+  /** The amber Bluetooth key in Live's top bar, while the sound goes to Bluetooth: a tap says that it plays late. */
+  BLUETOOTH: 'Bluetooth delay',
   /** The pattern's keys on Live's display line: RECORD arms (a hold opens the pattern sheet), PLAY starts at bar 1. */
   RECORD: 'Record a pattern: tap, then PLAY; hold for its settings',
   PATTERN_PLAY: 'Play the pattern from bar 1',

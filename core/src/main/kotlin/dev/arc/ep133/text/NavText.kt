@@ -12,6 +12,8 @@ object NavText {
     const val GUIDE = "Guide"
     const val BACK_UP = "Back up"
     const val TABS = "Sections"
+    /** The toast a tap on the connection key shows while connected: it takes a hold of one second to disconnect. */
+    const val HOLD_TO_DISCONNECT = "Hold to disconnect"
     /** The section tag's spoken name: "Live, sections". */
     fun sectionTag(section: String) = "$section, $TABS"
     /** The left-edge tab that slides the EP-133 shortcut guide in. */

@@ -9,7 +9,17 @@
 // Web only: [checked] makes the key one radio of a group (the desk's theme
 // switch, ThemeSwitch.tsx): role=radio with aria-checked, held down while
 // checked, and a [data-roving] item for the group's arrow keys ([tabIndex]).
-import type { CSSProperties, JSX, Ref, TargetedPointerEvent } from 'preact'
+//
+// Web only too: [onHold] makes the key one that acts on a hold (the connection
+// key's disconnect, as the phone's). A pointer held for HOLD_MS fills a ring on
+// the key and then calls [onHold]; letting go early cancels it, and a tap is
+// [onClick]'s. Enter or Space held does the same (a tap of either is
+// [onClick] too), and [describedBy] points a screen reader at the hint. The
+// ring still completes under prefers-reduced-motion, drawn full from the start.
+// Such a key has no long-press tooltip (it would pop up mid-hold, over what the
+// ring is for): its title names it, and its tap explains it. A hold under way
+// is dropped when the key is disabled.
+import type { CSSProperties, JSX, Ref, TargetedKeyboardEvent, TargetedPointerEvent } from 'preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { Icon, type ArcIcon } from './Icons'
 import './IconBlock.css'
@@ -18,6 +28,8 @@ import './IconBlock.css'
 export const LONG_PRESS_MS = 500
 /** How long the tooltip stays up after a long press (Material TooltipDefaults: 1500 ms). */
 export const TOOLTIP_MS = 1500
+/** How long a key with [IconBlockProps.onHold] is held to act. */
+export const HOLD_MS = 1000
 
 export interface LongPressTimers {
   set(fn: () => void, ms: number): number
@@ -98,6 +110,10 @@ export interface IconBlockProps {
   icon: ArcIcon
   /** The name: aria-label, title and the long-press tooltip (uppercased). */
   label: string
+  /** Web only: what a screen reader reads instead of [label], where the name is a short word and the sentence is the label. */
+  ariaLabel?: string
+  /** Web only: a second glyph beside [icon] (the top bar's Bluetooth and clock). */
+  iconAlso?: ArcIcon
   /** Face colour, a CSS colour (e.g. 'var(--signal)'). */
   face: string
   /** Icon colour. */
@@ -111,6 +127,10 @@ export interface IconBlockProps {
   /** Circle instead of the 8px rounded square. */
   round?: boolean
   class?: string
+  /** Web only: held for [HOLD_MS] (a pointer, or Enter or Space) this is called after a ring has filled; [onClick] is then only for a tap. */
+  onHold?: () => void
+  /** Web only: id of the element that says how to use the key (aria-describedby). */
+  describedBy?: string
   /** Web only: a radio of a group (role=radio, aria-checked), held down while true. */
   checked?: boolean
   /** The roving tab stop of a radio group (0 on the checked one, -1 on the rest). */
@@ -122,7 +142,7 @@ export interface IconBlockProps {
 }
 
 export function IconBlock(props: IconBlockProps): JSX.Element {
-  const { icon, label, face, ink, onClick, disabled = false, size = 44, iconSize = 22, round = false, checked } = props
+  const { icon, label, face, ink, onClick, disabled = false, size = 44, iconSize = 22, round = false, checked, onHold } = props
   const radio = checked !== undefined
   const [tip, setTip] = useState<TipAlign | null>(null)
   const self = useRef<HTMLButtonElement | null>(null)
@@ -140,30 +160,77 @@ export function IconBlock(props: IconBlockProps): JSX.Element {
     }, browserTimers),
     [],
   )
+  // The hold: the same timing as the long press, over HOLD_MS; the ring is drawn while it runs.
+  const [holding, setHolding] = useState(false)
+  const holdRef = useRef(onHold)
+  holdRef.current = onHold
+  const keyHold = useRef(false)
+  const hold = useMemo(
+    () => createLongPress(() => {
+      setHolding(false)
+      holdRef.current?.()
+    }, browserTimers, HOLD_MS),
+    [],
+  )
   useEffect(() => () => {
     press.dispose()
+    hold.dispose()
     if (hide.current !== null) window.clearTimeout(hide.current)
-  }, [press])
+  }, [press, hold])
+  const startHold = (): void => {
+    hold.down()
+    setHolding(true)
+  }
+  const stopHold = (): void => {
+    keyHold.current = false
+    hold.cancel()
+    setHolding(false)
+  }
+  // A key that goes disabled mid-hold (busy with a read) must not act when the second is up.
+  useEffect(() => {
+    if (disabled) stopHold()
+  }, [disabled])
 
   const onPointerDown = (e: TargetedPointerEvent<HTMLButtonElement>): void => {
     if (disabled || (e.pointerType === 'mouse' && e.button !== 0)) return
     start.current = { x: e.clientX, y: e.clientY }
-    press.down()
+    if (onHold) startHold()
+    else press.down()
   }
   const onPointerMove = (e: TargetedPointerEvent<HTMLButtonElement>): void => {
     const s = start.current
     if (s && Math.hypot(e.clientX - s.x, e.clientY - s.y) > SLOP) {
       start.current = null
       press.cancel()
+      if (!keyHold.current) stopHold()
     }
   }
   const end = (): void => {
     start.current = null
     press.up()
+    if (!keyHold.current) stopHold()
   }
   const cancel = (): void => {
     start.current = null
     press.cancel()
+    if (!keyHold.current) stopHold()
+  }
+  // Enter or Space held fills the ring too; its tap is handled here, so the browser's click (on Enter's keydown, Space's keyup) is held back.
+  const isActivate = (e: KeyboardEvent): boolean => e.key === 'Enter' || e.key === ' '
+  const onKeyDown = (e: TargetedKeyboardEvent<HTMLButtonElement>): void => {
+    if (!onHold || disabled || !isActivate(e)) return
+    e.preventDefault()
+    if (e.repeat || keyHold.current) return
+    keyHold.current = true
+    startHold()
+  }
+  const onKeyUp = (e: TargetedKeyboardEvent<HTMLButtonElement>): void => {
+    if (!onHold || !isActivate(e)) return
+    e.preventDefault()
+    if (!keyHold.current) return
+    const done = hold.consumeClick()
+    stopHold()
+    if (!done) onClick()
   }
 
   const style: CSSProperties = {
@@ -190,20 +257,33 @@ export function IconBlock(props: IconBlockProps): JSX.Element {
         aria-checked={radio ? checked : undefined}
         tabIndex={props.tabIndex}
         data-roving={radio ? '' : undefined}
-        aria-label={label}
+        aria-label={props.ariaLabel ?? label}
+        aria-describedby={props.describedBy}
         title={label}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={end}
         onPointerCancel={cancel}
         onPointerLeave={cancel}
+        onKeyDown={onKeyDown}
+        onKeyUp={onKeyUp}
+        onBlur={stopHold}
         onContextMenu={(e) => { if (start.current !== null || tip) e.preventDefault() }}
         onClick={() => {
-          if (press.consumeClick()) return
+          // Both are asked, so each forgets its long press; the hold's swallows the click that ends it.
+          const swallow = [press.consumeClick(), hold.consumeClick()].some(Boolean)
+          if (swallow) return
           onClick()
         }}
       >
         <Icon icon={icon} size={iconSize} />
+        {props.iconAlso !== undefined && <Icon icon={props.iconAlso} size={iconSize} />}
+        {holding && (
+          <svg class="icon-block__ring" viewBox="0 0 44 44" aria-hidden="true">
+            <circle class="icon-block__ring-track" cx="22" cy="22" r="18" />
+            <circle class="icon-block__ring-fill" cx="22" cy="22" r="18" pathLength="1" style={{ animationDuration: `${HOLD_MS}ms` }} />
+          </svg>
+        )}
       </button>
       {tip && (
         <span class={`icon-block__tip icon-block__tip--${tip}`} role="tooltip" aria-hidden="true">

@@ -106,20 +106,20 @@ describe('display', () => {
     expect(displayLine(st(), null)).toBe(MirrorText.WAITING)
   })
 
-  it('says the sound plays late after the hit, before offline and waiting, a size down', () => {
+  it('leaves "plays late" to the top bar: the main line is the same, offline or not', () => {
     const offline = ui({ offline: MirrorText.lastSeen('5 Oct, 14:02') })
-    expect(displayLine(st(), ui(), 140)).toBe('Sound plays 140 ms late: wired output is quicker')
-    expect(displayLine(st(), offline, 140)).toBe(MirrorText.slowOutput(140))
-    expect(displayLine(st(), null, 140)).toBe(MirrorText.slowOutput(140))
-    expect(displayLine(st({ lastHit: hit }), ui(), 140)).toBe('A 7 · 001 kick · 124')
-    expect(displayLine(st(), ui({ loading: true }), 140)).toBe(MirrorText.READING)
-    expect(displayLine(st(), ui({ error: 'Nope' }), 140)).toBe('Nope')
-    expect(displayLine(st(), offline, null)).toBe(MirrorText.lastSeen('5 Oct, 14:02'))
-    expect(displayLineSmall(st(), ui(), 140)).toBe(true)
-    expect(displayLineSmall(st(), ui(), null)).toBe(false)
-    expect(displayLineSmall(st({ lastHit: hit }), ui(), 140)).toBe(false)
-    expect(displayLineSmall(st(), ui({ loading: true }), 140)).toBe(false)
+    expect(displayLine(st(), offline)).toBe(MirrorText.lastSeen('5 Oct, 14:02'))
+    expect(displayLine(st(), null)).toBe(MirrorText.WAITING)
+  })
+
+  it('draws the lines that are longer than a hit a size down: offline and waiting', () => {
+    const offline = ui({ offline: MirrorText.lastSeen('5 Oct, 14:02') })
     expect(displayLineSmall(st(), offline)).toBe(true)
+    expect(displayLineSmall(st(), ui())).toBe(true)
+    expect(displayLineSmall(st(), null)).toBe(true)
+    expect(displayLineSmall(st({ lastHit: hit }), ui())).toBe(false)
+    expect(displayLineSmall(st(), ui({ loading: true }))).toBe(false)
+    expect(displayLineSmall(st(), ui({ error: 'Nope' }))).toBe(false)
   })
 
   it('shows the transport only once the clock said something', () => {

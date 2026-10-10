@@ -15,9 +15,11 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -36,11 +38,13 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -84,18 +88,25 @@ import dev.arc.ep133.ui.theme.LocalArcColors
 
 /*
  * The pattern's RECORD and PLAY on Live's display line (an addition, after
- * the EP-133's own keys; "Line" in the mockup): ● RECORD and ▶ PLAY chips
- * at the line's start, on the page and, icon-only, in the top bar's pill.
+ * the EP-133's own keys; "Line" in the mockup): ● RECORD and ▶ PLAY as one
+ * segmented key at the line's start (one rounded border round both cells,
+ * a hairline between them), on the page and, icon-only, in the top bar's
+ * pill. RECORD shows its dot alone on a phone and its word too only on a
+ * wide line (a tablet). The line's other keys group the same way: the
+ * scene's S01 and STEP share a second key, ERASE and ↶ a third; CORRECT and
+ * TAKE's badge stand alone. Each cell is a button of its own (its touch, its
+ * gestures, its place in the ? guide); the group only draws the border, the
+ * divider and, clipped to its shape, the cell that is filled.
  * While the pattern runs the line's words give way to its counter ("2.3 / 4",
- * and the grid while recording), a loop hairline along its foot, ERASE and ↶
- * chips; while it counts in, the beat as a big digit. A tap on RECORD arms,
+ * and the grid while recording), a loop hairline along its foot, ERASE and ↶;
+ * while it counts in, the beat as a big digit. A tap on RECORD arms,
  * a hold opens the pattern sheet ([PatternSheetContent]); held while playing
  * it records only while held, as on the device. TAKE (once REC) records
  * Live's sound from Live tools; while it runs a small badge on the line says
  * so, and a tap on it stops it. STEP sits beside them while the pattern is
  * stopped and opens the STEP panel ([StepLine], [LiveStep]); while it plays
  * with timing correct on, CORRECT is lit there and its count in the words'
- * place. The scene's S01 chip comes after PLAY and opens the SCENE panel
+ * place. The scene's S01 cell comes after PLAY and opens the SCENE panel
  * ([SceneLine], [LiveScene]); while the pattern plays the scene reads
  * "S02 · A01 B03→05 C01 D02" in the words' place, the queued group blinking.
  */
@@ -159,12 +170,12 @@ internal class SceneLine(
 )
 
 /**
- * Live's display line with the pattern's keys: RECORD and PLAY (from
+ * Live's display line with the pattern's keys: RECORD and PLAY in one key (from
  * [transport]; null for none), then while the pattern is armed, counts in,
  * plays or erases its words ([PatternWords]), else [idle], the line's own;
  * and TAKE's badge while a take records ([take]). [step]: STEP's chip while
  * stopped and CORRECT's while playing ([StepLine]). [compact]: one bar tall,
- * in the top bar ([LivePill]), the chips icon-only. [still]: a picture
+ * in the top bar ([LivePill]), the keys icon-only. [still]: a picture
  * (screenshots), nothing moving.
  */
 @Composable
@@ -194,21 +205,21 @@ internal fun PatternLine(
         // On a wide line (a tablet) ERASE and ↶ fit beside the line's own words too; else only while the pattern runs.
         val wide = maxWidth >= WideLine
         val chipWord = scene?.ui?.label.takeIf { stopped || playing && readout == null }
-        val fit = if (t != null && t.hasWords()) lineFit(t, take.takeIf { taking }, compact, maxWidth, correct = correct, scene = chipWord, readout = readout?.ui?.let(::sceneReadout)) else LineFit()
+        val fit = if (t != null && t.hasWords()) lineFit(t, take.takeIf { taking }, compact, maxWidth, correct = correct, scene = chipWord, readout = readout?.ui?.let(::sceneReadout)) else LineFit(recordWord = wide && !compact)
         // While it plays the chip comes last: only where everything else fits with it.
         val sceneChip = scene != null && (stopped || playing && readout == null && fit.scene)
         val stepFit = if (t != null && stepping) stepFit(t, take.takeIf { taking }, compact, maxWidth, wide, scene = chipWord) else StepFit.NONE
         DisplayLine(track.frame, compact = compact) {
             if (t != null) {
                 TransportChips(t, beat.value, compact, still || reduce, recordWord = fit.recordWord)
-                if (scene != null && sceneChip) SceneChip(scene, compact)
+                // The scene and STEP share a key; each shows where it fits, the scene's first.
+                SceneStepKeys(scene.takeIf { sceneChip }, step.takeIf { stepFit != StepFit.NONE }, compact, stepWord = stepFit == StepFit.WORD)
                 if (t.hasWords()) {
                     EditChips(t, compact, show = fit.edit && t.phase != TransportPhase.COUNT_IN && t.phase != TransportPhase.ARMED)
                     if (correct && step != null) CorrectChip(step, compact)
                     PatternWords(t, beat.value, compact, corrected = step?.status?.takeIf { correct }, readout = readout, steady = still || reduce)
                 } else {
                     if (wide) EditChips(t, compact, show = true)
-                    if (step != null && stepFit != StepFit.NONE) StepChip(step, compact, word = stepFit == StepFit.WORD)
                     idle()
                 }
             } else {
@@ -219,30 +230,53 @@ internal fun PatternLine(
     }
 }
 
-/** From this wide the line keeps ERASE and ↶ while the pattern is stopped. */
+/** From this wide the line keeps ERASE and ↶ while the pattern is stopped, and RECORD its word. */
 private val WideLine = 520.dp
 
 /**
  * What fits on the line beside the pattern's words: ERASE and ↶ ([edit]),
- * RECORD's word ([recordWord]) and TAKE's ([takeWord]), given up in that
- * order where the line is short (a phone, large text), so the counter is
- * never cut; and the scene's chip ([scene]) while the pattern plays, there only
- * where all the rest fits with it.
+ * RECORD's word ([recordWord]; only a wide line has it at all) and TAKE's
+ * ([takeWord]), given up in that order where the line is short (a phone,
+ * large text), so the counter is never cut; and the scene's cell ([scene])
+ * while the pattern plays, there only where all the rest fits with it.
  */
 private class LineFit(val edit: Boolean = true, val recordWord: Boolean = true, val takeWord: Boolean = true, val scene: Boolean = false)
 
 /**
- * The line's chips and words measured as they are drawn ([compact]: the top
- * bar's, in less padding): a word's width, and a chip's from its glyph and
- * word.
+ * The line's keys and words measured as they are drawn ([compact]: the top
+ * bar's, in less padding): a word's width, a standalone chip's from its glyph
+ * and word, a cell's the same in a group's padding, and a group's from its
+ * cells (a hairline between them, the border shared, no gap inside).
  */
-private class ChipSizes(private val measurer: TextMeasurer, private val density: Density, compact: Boolean) {
+private class ChipSizes(private val measurer: TextMeasurer, private val density: Density, private val compact: Boolean) {
     private val pad = (if (compact) 7.dp else 8.dp) * 2 + 2.dp
+    private val cellPad = (if (compact) CellPadCompact else CellPad) * 2
 
     fun text(s: String, style: TextStyle): Dp = with(density) { measurer.measure(s, style, maxLines = 1, softWrap = false).size.width.toDp() }
 
-    /** A chip: its glyph (and the gap after it) and its word, in its padding and border; never narrower than its touch. */
+    /** A standalone chip: its glyph (and the gap after it) and its word, in its padding and border; never narrower than its touch. */
     fun chip(glyph: Dp, word: Dp): Dp = maxOf(32.dp, glyph + (if (glyph > 0.dp && word > 0.dp) 6.dp else 0.dp) + word + pad)
+
+    /** A cell of a group: as [chip], in the cell's padding; the border is the group's. */
+    fun cell(glyph: Dp, word: Dp): Dp = maxOf(32.dp, glyph + (if (glyph > 0.dp && word > 0.dp) 6.dp else 0.dp) + word + cellPad)
+
+    /** A group of two cells ([first], [second]; 0 for one not shown): their widths and a [GroupDivider] between them if both show; 0 for none. */
+    fun group(first: Dp, second: Dp = 0.dp): Dp = first + second + if (first > 0.dp && second > 0.dp) GroupDivider else 0.dp
+
+    /** RECORD and PLAY, RECORD with its [word] or its dot alone. */
+    fun transport(word: Boolean): Dp = group(cell(DotWidth, if (word) text(MirrorText.RECORD.uppercase(), ArcType.displaySub) else 0.dp), cell(DotWidth, 0.dp))
+
+    /** The scene's cell, for its [label] (0 for none). */
+    fun scene(label: String?): Dp = if (label != null) cell(0.dp, text(label, SceneStyle)) else 0.dp
+
+    /** ERASE and ↶, each where shown. */
+    fun edit(erase: Boolean, undo: Boolean): Dp = group(
+        if (erase) cell(0.dp, text(MirrorText.ERASE.uppercase(), ArcType.displaySub)) else 0.dp,
+        if (undo) cell(UndoWidth, 0.dp) else 0.dp,
+    )
+
+    /** STEP's cell, with its word or as its glyph. */
+    fun step(word: Boolean): Dp = cell(if (word) 0.dp else StepGlyphWidth, if (word) text(MirrorText.STEP.uppercase(), ArcType.displaySub) else 0.dp)
 }
 
 /** Whether [items] (0 for one not shown) fit on a line [width] wide, [padding] inside either end, the line's 10 dp between them. */
@@ -253,11 +287,11 @@ private fun lineFits(items: List<Dp>, width: Dp, padding: Dp): Boolean {
 
 /**
  * [LineFit] for [t]'s words (and [take]'s badge, while it records; and
- * CORRECT's chip, [correct], which always stays; and the scene's chip,
+ * CORRECT's chip, [correct], which always stays; and the scene's cell,
  * [scene] its word, when it has one; and the scene's readout, [readout] its
  * parts, while the pattern plays, which keeps the room it needs before the
- * chips beside it give way, and shortens itself where they have) on a line
- * [width] wide, [padding] inside either end: the chips and the words measured as they are drawn, the
+ * keys beside it give way, and shortens itself where they have) on a line
+ * [width] wide, [padding] inside either end: the keys and the words measured as they are drawn, the
  * counter at its widest for the pattern's length so it doesn't flip from
  * bar to bar.
  */
@@ -284,67 +318,83 @@ private fun lineFit(t: TransportUi, take: TakeUi?, compact: Boolean, width: Dp, 
         recording != null -> chip(8.dp, text((if (word) MirrorText.takeBadge(recording.seconds.toDouble()) else MirrorText.takeLength(recording.seconds.toDouble())).uppercase(), takeStyle))
         else -> chip(8.dp, if (word) text(MirrorText.TAKE.uppercase(), takeStyle) else 0.dp)
     }
-    val edit = if (t.phase == TransportPhase.PLAYING || t.phase == TransportPhase.STOPPED || t.erase) {
-        listOfNotNull(
-            chip(0.dp, text(MirrorText.ERASE.uppercase(), ArcType.displaySub)).takeIf { t.erase || t.hasNotes.any { it } },
-            chip(12.dp, 0.dp).takeIf { t.canUndo },
-        )
-    } else {
-        emptyList()
-    }
-    val erase = if (t.erase) edit.take(1) else emptyList()
-    val record = chip(10.dp, if (compact) 0.dp else text(MirrorText.RECORD.uppercase(), ArcType.displaySub))
-    val recordDot = chip(10.dp, 0.dp)
-    // PLAY, and CORRECT beside it while it is lit (it stays: it is what turns timing correct off while playing).
-    val play = chip(10.dp, 0.dp) + if (correct) chip(0.dp, text(MirrorText.CORRECT.uppercase(), ArcType.displaySub)) + 10.dp else 0.dp
-    val sceneChip = if (scene != null) chip(0.dp, text(scene.uppercase(), ArcType.displaySub)) else 0.dp
+    val editing = t.phase == TransportPhase.PLAYING || t.phase == TransportPhase.STOPPED || t.erase
+    val hasErase = editing && (t.erase || t.hasNotes.any { it })
+    val edit = sizes.edit(hasErase, editing && t.canUndo)
+    val erase = if (t.erase) sizes.edit(true, false) else 0.dp
+    // RECORD's word only where the line is wide; a phone has its dot.
+    val wordy = !compact && width >= WideLine
+    val record = sizes.transport(wordy)
+    val recordDot = sizes.transport(false)
+    // CORRECT beside the keys while it is lit (it stays: it is what turns timing correct off while playing).
+    val correctChip = if (correct) chip(0.dp, text(MirrorText.CORRECT.uppercase(), ArcType.displaySub)) else 0.dp
+    val sceneKey = sizes.scene(scene)
     // The readout in full, its parts and the gaps between them.
     val sceneWords = if (readout != null) readout.fold(0.dp) { a, w -> a + text(w, ReadoutStyle) } + ReadoutGap * (readout.size - 1) else 0.dp
     fun fits(items: List<Dp>): Boolean = lineFits(items, width, padding)
-    val rest = listOf(words, takeChip(true), sceneWords)
-    val wordsAndEdit = listOf(record, play) + edit + rest
-    val wordsAndErase = listOf(record, play) + erase + rest
-    val dotAndErase = listOf(recordDot, play) + erase + rest
-    // The chip while it plays comes last: it is there where the line has room left over for it.
-    fun roomy(items: List<Dp>): Boolean = fits(items + sceneChip)
+    val rest = listOf(correctChip, words, takeChip(true), sceneWords)
+    val wordsAndEdit = listOf(record, edit) + rest
+    val wordsAndErase = listOf(record, erase) + rest
+    val dotAndErase = listOf(recordDot, erase) + rest
+    // The cell while it plays comes last: it is there where the line has room left over for it.
+    fun roomy(items: List<Dp>): Boolean = fits(items + sceneKey)
     return when {
-        fits(wordsAndEdit) -> LineFit(scene = roomy(wordsAndEdit))
-        fits(wordsAndErase) -> LineFit(edit = false, scene = roomy(wordsAndErase))
+        fits(wordsAndEdit) -> LineFit(recordWord = wordy, scene = roomy(wordsAndEdit))
+        fits(wordsAndErase) -> LineFit(edit = false, recordWord = wordy, scene = roomy(wordsAndErase))
         fits(dotAndErase) -> LineFit(edit = false, recordWord = false, scene = roomy(dotAndErase))
         else -> LineFit(edit = false, recordWord = false, takeWord = false)
     }
 }
 
-/** How STEP's chip shows on the stopped line: with its word, as its glyph alone, or not at all. */
+/** How STEP's cell shows on the stopped line: with its word, as its glyph alone, or not at all. */
 private enum class StepFit { WORD, GLYPH, NONE }
 
 /**
- * How STEP's chip fits on the stopped line [width] wide beside RECORD, PLAY,
- * ERASE and ↶ ([wide]: on the line while stopped), the scene's chip ([scene]
- * its word, when it has one) and [take]'s badge while
- * it records: with its word while the line's own words keep [IdleRoomy]
- * (the tempo and the hit), else its glyph alone ([compact]: always) while
- * they keep [IdleMin], else not at all.
+ * How STEP's cell fits on the stopped line [width] wide beside RECORD and
+ * PLAY, ERASE and ↶ ([wide]: on the line while stopped, and RECORD with its
+ * word), the scene's cell ([scene] its word, when it has one, in a key with
+ * STEP's) and [take]'s badge while it records: with its word on a wide line
+ * while the line's own words keep [IdleRoomy] (the tempo and the hit), else
+ * its glyph alone (a phone's line and [compact]: always) while they keep
+ * [IdleMin], else not at all.
  */
 @Composable
 private fun stepFit(t: TransportUi, take: TakeUi?, compact: Boolean, width: Dp, wide: Boolean, padding: Dp = if (compact) 12.dp else 14.dp, scene: String? = null): StepFit {
     val sizes = ChipSizes(rememberTextMeasurer(), LocalDensity.current, compact)
-    val chips = listOfNotNull(
-        sizes.chip(10.dp, if (compact) 0.dp else sizes.text(MirrorText.RECORD.uppercase(), ArcType.displaySub)),
-        sizes.chip(10.dp, 0.dp),
-        scene?.let { sizes.chip(0.dp, sizes.text(it.uppercase(), ArcType.displaySub)) },
-        sizes.chip(0.dp, sizes.text(MirrorText.ERASE.uppercase(), ArcType.displaySub)).takeIf { wide && t.hasNotes.any { it } },
-        sizes.chip(12.dp, 0.dp).takeIf { wide && t.canUndo },
-        take?.let { sizes.chip(8.dp, sizes.text(MirrorText.TAKE.uppercase(), ArcType.displaySub.copy(fontSize = 12.sp, fontFeatureSettings = "tnum"))) },
+    val chips = listOf(
+        sizes.transport(wide && !compact),
+        sizes.edit(wide && t.hasNotes.any { it }, wide && t.canUndo),
+        take?.let { sizes.chip(8.dp, sizes.text(MirrorText.TAKE.uppercase(), ArcType.displaySub.copy(fontSize = 12.sp, fontFeatureSettings = "tnum"))) } ?: 0.dp,
     )
+    val sceneKey = sizes.scene(scene)
     return when {
-        !compact && lineFits(chips + sizes.chip(0.dp, sizes.text(MirrorText.STEP.uppercase(), ArcType.displaySub)) + IdleRoomy, width, padding) -> StepFit.WORD
-        lineFits(chips + sizes.chip(StepGlyphWidth, 0.dp) + IdleMin, width, padding) -> StepFit.GLYPH
+        !compact && wide && lineFits(chips + sizes.group(sceneKey, sizes.step(word = true)) + IdleRoomy, width, padding) -> StepFit.WORD
+        lineFits(chips + sizes.group(sceneKey, sizes.step(word = false)) + IdleMin, width, padding) -> StepFit.GLYPH
         else -> StepFit.NONE
     }
 }
 
-/** The room the stopped line keeps for its own words beside STEP's chip: with its word, and at least, with its glyph. */
+/**
+ * How STEP's cell fits in the all-groups display's pattern row [width] wide
+ * ([stepFit]'s for a row with no words of its own while stopped): after RECORD
+ * (its word where [fit] has it) and PLAY, with ERASE and ↶ ([edit], where they
+ * show): with its word, else its glyph, else not at all.
+ */
+@Composable
+private fun stepRowFit(t: TransportUi, width: Dp, fit: LineFit, edit: Boolean): StepFit {
+    val sizes = ChipSizes(rememberTextMeasurer(), LocalDensity.current, compact = false)
+    val chips = listOf(
+        sizes.transport(fit.recordWord),
+        sizes.edit(edit && (t.erase || t.hasNotes.any { it }), edit && t.canUndo),
+    )
+    return when {
+        lineFits(chips + sizes.step(word = true), width, 0.dp) -> StepFit.WORD
+        lineFits(chips + sizes.step(word = false), width, 0.dp) -> StepFit.GLYPH
+        else -> StepFit.NONE
+    }
+}
+
+/** The room the stopped line keeps for its own words beside STEP's cell: with its word, and at least, with its glyph. */
 private val IdleRoomy = 140.dp
 private val IdleMin = 64.dp
 
@@ -447,26 +497,39 @@ private fun Modifier.patternFrame(
     drawRoundRect(if (recording) signal else ink, Offset(x, y), Size(length * f.coerceIn(0f, 1f), h), CornerRadius(h / 2))
 }
 
+/** RECORD is lit while it records (the pattern plays with it on), and armed while it waits for PLAY or counts a recording in. */
+private fun TransportUi.recordLive(): Boolean = recording && phase == TransportPhase.PLAYING
+private fun TransportUi.recordArmed(): Boolean = phase == TransportPhase.ARMED || phase == TransportPhase.COUNT_IN && recording
+
 /**
- * ● RECORD and ▶ PLAY ([compact]: their glyphs alone). RECORD: dim while
- * off, its light blinking while armed (and while a recording counts in),
- * the chip lit signal while it records. PLAY: ▶ while stopped, ■ while the
- * pattern runs (a tap stops it). [steady] keeps the light from blinking
- * (screenshots, reduced motion).
+ * ● RECORD and ▶ PLAY as one segmented key ([compact]: their glyphs alone;
+ * RECORD's word [recordWord] only where the line has room for it). RECORD:
+ * dim while off, its light blinking while armed (and while a recording
+ * counts in), its cell filled signal while it records. PLAY: ▶ while
+ * stopped, ■ while the pattern runs (a tap stops it). The key's border is
+ * signal while RECORD is armed or records, else the display's ink while the
+ * pattern runs. [steady] keeps the light from blinking (screenshots, reduced
+ * motion).
  */
 @Composable
 private fun TransportChips(t: TransportUi, beat: LineBeat?, compact: Boolean, steady: Boolean, recordWord: Boolean = true) {
+    val c = LocalArcColors.current
     val hold = remember { RecordHold() }
-    RecordChip(t, hold, compact, steady, word = recordWord && !compact)
-    PlayChip(t, hold, beat, compact)
+    val running = t.phase == TransportPhase.PLAYING || t.phase == TransportPhase.COUNT_IN
+    val border = groupBorder(signal = t.recordLive() || t.recordArmed(), lit = c.displayInk.takeIf { running })
+    LineGroup(border) {
+        RecordChip(t, hold, compact, steady, word = recordWord && !compact)
+        GroupDivide(border)
+        PlayChip(t, hold, beat, compact)
+    }
 }
 
 @Composable
 private fun RecordChip(t: TransportUi, hold: RecordHold, compact: Boolean, steady: Boolean, word: Boolean) {
     val c = LocalArcColors.current
     val ui by rememberUpdatedState(t)
-    val live = t.recording && t.phase == TransportPhase.PLAYING
-    val armed = t.phase == TransportPhase.ARMED || t.phase == TransportPhase.COUNT_IN && t.recording
+    val live = t.recordLive()
+    val armed = t.recordArmed()
     val blink = if (armed && !steady) {
         androidx.compose.animation.core.rememberInfiniteTransition(label = "record").animateFloat(
             1f,
@@ -536,7 +599,7 @@ private fun RecordChip(t: TransportUi, hold: RecordHold, compact: Boolean, stead
                 true
             }
         }
-    LineChip(
+    LineCell(
         gesture.then(if (compact) Modifier.coachClear("live.record") else Modifier.coachMark("live.record", CoachText.RECORD, c.signal, c.onSignal)),
         lit = live || armed,
         filled = live,
@@ -560,7 +623,6 @@ private const val RECORD_BLINK_MS = 450
 
 @Composable
 private fun PlayChip(t: TransportUi, hold: RecordHold, beat: LineBeat?, compact: Boolean) {
-    val c = LocalArcColors.current
     val ui by rememberUpdatedState(t)
     val running = t.phase == TransportPhase.PLAYING || t.phase == TransportPhase.COUNT_IN
     // With RECORD down (waiting to be a tap), it goes first: RECORD + PLAY starts recording at once.
@@ -589,7 +651,7 @@ private fun PlayChip(t: TransportUi, hold: RecordHold, beat: LineBeat?, compact:
             }
         }
         .coachClear("live.play")
-    LineChip(gesture, lit = running, filled = false, compact = compact, litColor = c.displayInk) { ink ->
+    LineCell(gesture, lit = running, filled = false, compact = compact) { ink ->
         Canvas(Modifier.size(10.dp)) {
             if (running) {
                 val s = size.width * 0.8f
@@ -608,49 +670,77 @@ private fun PlayChip(t: TransportUi, hold: RecordHold, beat: LineBeat?, compact:
 }
 
 /**
- * ERASE (a latch: while on a pad erases its notes) and ↶ (undo), on the
- * line where they fit ([show]): ERASE while the project has notes, and
- * always while on (so it can go off); ↶ while there is something to undo.
+ * ERASE (a latch: while on a pad erases its notes) and ↶ (undo) as one
+ * segmented key, on the line where they fit ([show]): ERASE while the
+ * project has notes, and always while on (so it can go off); ↶ while there is
+ * something to undo. With only one of them the key is that one cell. Its
+ * border is signal while ERASE is on.
  */
 @Composable
 private fun EditChips(t: TransportUi, compact: Boolean, show: Boolean) {
     val c = LocalArcColors.current
-    if (t.erase || show && t.hasNotes.any { it }) {
-        LineChip(
-            Modifier
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button) { t.onErase(!t.erase) }
-                .semantics(mergeDescendants = true) {
-                    contentDescription = MirrorText.ERASE
-                    stateDescription = MirrorText.onOff(t.erase)
-                }
-                .then(if (compact) Modifier.coachClear("live.erase") else Modifier.coachMark("live.erase", CoachText.ERASE, c.signal, c.onSignal)),
-            lit = t.erase,
-            filled = false,
-            compact = compact,
-        ) { ink ->
-            Text(MirrorText.ERASE.uppercase(), style = ArcType.displaySub, color = ink, maxLines = 1, softWrap = false)
+    val erase = t.erase || show && t.hasNotes.any { it }
+    val undo = t.canUndo && show
+    if (!erase && !undo) return
+    val border = groupBorder(signal = t.erase)
+    LineGroup(border) {
+        if (erase) {
+            LineCell(
+                Modifier
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button) { t.onErase(!t.erase) }
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = MirrorText.ERASE
+                        stateDescription = MirrorText.onOff(t.erase)
+                    }
+                    .then(if (compact) Modifier.coachClear("live.erase") else Modifier.coachMark("live.erase", CoachText.ERASE, c.signal, c.onSignal)),
+                lit = t.erase,
+                filled = false,
+                compact = compact,
+            ) { ink ->
+                Text(MirrorText.ERASE.uppercase(), style = ArcType.displaySub, color = ink, maxLines = 1, softWrap = false)
+            }
         }
-    }
-    if (t.canUndo && show) {
-        LineChip(
-            Modifier
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = t.onUndo)
-                .semantics(mergeDescendants = true) { contentDescription = MirrorText.UNDO },
-            lit = false,
-            filled = false,
-            compact = compact,
-        ) { ink -> UndoGlyph(ink) }
+        if (erase && undo) GroupDivide(border)
+        if (undo) {
+            LineCell(
+                Modifier
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = t.onUndo)
+                    .semantics(mergeDescendants = true) { contentDescription = MirrorText.UNDO },
+                lit = false,
+                filled = false,
+                compact = compact,
+            ) { ink -> UndoGlyph(ink) }
+        }
     }
 }
 
 /**
- * STEP ([word]: its word, else its glyph), on the stopped line where the page
- * can show the panel: a tap opens the STEP panel over the function keys.
+ * The scene's cell and STEP's as one segmented key, each where it shows
+ * ([scene], [step]; with one the key is that cell, with neither nothing):
+ * the scene's brighter, so the key's border is the display's brighter dim
+ * with it, the dim border without.
+ */
+@Composable
+private fun SceneStepKeys(scene: SceneLine?, step: StepLine?, compact: Boolean, stepWord: Boolean) {
+    if (scene == null && step == null) return
+    val c = LocalArcColors.current
+    val border = groupBorder(signal = false, lit = c.displayDim.takeIf { scene != null })
+    LineGroup(border) {
+        if (scene != null) SceneChip(scene, compact)
+        if (scene != null && step != null) GroupDivide(border)
+        if (step != null) StepChip(step, compact, word = stepWord)
+    }
+}
+
+/**
+ * STEP's cell ([word]: its word, else its glyph), on the stopped line where
+ * the page can show the panel: a tap opens the STEP panel over the function
+ * keys.
  */
 @Composable
 private fun StepChip(step: StepLine, compact: Boolean, word: Boolean) {
     val c = LocalArcColors.current
-    LineChip(
+    LineCell(
         Modifier
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = step.onOpen)
             .semantics(mergeDescendants = true) { contentDescription = MirrorText.STEP_NAME }
@@ -680,14 +770,14 @@ internal fun StepGlyph(color: Color) {
 private val StepGlyphWidth = 14.dp
 
 /**
- * The scene's chip ("S01"), on the line where the page can show the SCENE
- * panel: a tap opens it. Its border and word a shade brighter than the dim
- * chips', as it says something.
+ * The scene's cell ("S01"), on the line where the page can show the SCENE
+ * panel: a tap opens it. Its word (and its key's border, [SceneStepKeys]) a
+ * shade brighter than the dim cells', as it says something.
  */
 @Composable
 private fun SceneChip(scene: SceneLine, compact: Boolean) {
     val c = LocalArcColors.current
-    LineChip(
+    LineCell(
         Modifier
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = scene.onOpen)
             .semantics(mergeDescendants = true) { contentDescription = MirrorText.sceneChipName(scene.ui.index, scene.ui.count) }
@@ -695,9 +785,8 @@ private fun SceneChip(scene: SceneLine, compact: Boolean) {
         lit = true,
         filled = false,
         compact = compact,
-        litColor = c.displayDim,
     ) { ink ->
-        Text(scene.ui.label, style = ArcType.displaySub.copy(fontFeatureSettings = "tnum"), color = ink, maxLines = 1, softWrap = false)
+        Text(scene.ui.label, style = SceneStyle, color = ink, maxLines = 1, softWrap = false)
     }
 }
 
@@ -752,6 +841,9 @@ private fun SceneReadout(scene: SceneLine, steady: Boolean, modifier: Modifier) 
         }
     }
 }
+
+/** The scene cell's print. */
+private val SceneStyle = ArcType.displaySub.copy(fontFeatureSettings = "tnum")
 
 /** The room between the readout's parts, and the readout's print: a size under the line's words, so the scene fits beside the counter. */
 private val ReadoutGap = 5.dp
@@ -892,10 +984,12 @@ internal fun TransportUi.hasWords(): Boolean = phase != TransportPhase.STOPPED |
 
 /**
  * The pattern's row in the all-groups display ([Display]): RECORD and PLAY,
- * ERASE and ↶ where they fit, CORRECT while it plays with timing correct on
- * ([step]), and its words while it has some, as on the
- * line ([PatternLine]); [beatState] from the display's [patternTrack]. The row is
- * there while stopped too, so the pads don't move as the pattern starts.
+ * STEP's cell while it is stopped (the panel opens on the group last
+ * selected or pressed: [LiveStep]), ERASE and ↶ where they fit, CORRECT while it
+ * plays with timing correct on ([step]), and its words while it has some, as
+ * on the line ([PatternLine]); [beatState] from the display's [patternTrack].
+ * The row is there while stopped too, so the pads don't move as the pattern
+ * starts.
  */
 @Composable
 internal fun PatternRow(t: TransportUi, beatState: State<LineBeat?>, still: Boolean, step: StepLine? = null) {
@@ -904,9 +998,13 @@ internal fun PatternRow(t: TransportUi, beatState: State<LineBeat?>, still: Bool
         val beat = beatState.value
         val correct = step != null && step.correct && t.phase == TransportPhase.PLAYING
         val fit = lineFit(t, null, compact = false, width = maxWidth, padding = 0.dp, correct = correct)
+        val stepping = step != null && step.opens && t.phase == TransportPhase.STOPPED && !t.erase
+        val edit = fit.edit && t.phase != TransportPhase.COUNT_IN && t.phase != TransportPhase.ARMED
+        val stepFit = if (stepping) stepRowFit(t, maxWidth, fit, edit) else StepFit.NONE
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             TransportChips(t, beat, compact = false, steady = still || reducedMotion(), recordWord = fit.recordWord)
-            EditChips(t, compact = false, show = fit.edit && t.phase != TransportPhase.COUNT_IN && t.phase != TransportPhase.ARMED)
+            SceneStepKeys(scene = null, step.takeIf { stepFit != StepFit.NONE }, compact = false, stepWord = stepFit == StepFit.WORD)
+            EditChips(t, compact = false, show = edit)
             if (correct && step != null) CorrectChip(step, compact = false)
             if (t.hasWords()) PatternWords(t, beat, compact = false, corrected = step?.status?.takeIf { correct }) else Box(Modifier.weight(1f))
         }
@@ -914,9 +1012,11 @@ internal fun PatternRow(t: TransportUi, beatState: State<LineBeat?>, still: Bool
 }
 
 /**
- * A chip on the dark line: a thin border, dim while off, [lit] in signal
+ * A standalone chip on the dark line (CORRECT, TAKE's badge, and the STEP
+ * and SCENE panels' own): a thin border, dim while off, [lit] in signal
  * (or [litColor]), the chip [filled] signal while recording; [content] gets
- * its ink. As tall as the line to touch, however small it looks.
+ * its ink. As tall as the line to touch, however small it looks. The line's
+ * keys are cells of a [LineGroup] instead ([LineCell]).
  */
 @Composable
 internal fun LineChip(
@@ -940,6 +1040,99 @@ internal fun LineChip(
                 .then(if (filled) Modifier.background(c.signal, shape) else Modifier)
                 .border(1.dp, if (filled || lit) litColor ?: c.signal else c.displayDim.copy(alpha = 0.5f), shape)
                 .padding(horizontal = if (compact) 7.dp else 8.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) { content(ink) }
+    }
+}
+
+/** A group's look: 32 dp tall inside the 40 dp touch row, its corners 9 dp, a 1 dp hairline between its cells. */
+private val GroupHeight = 32.dp
+private val GroupCorner = 9.dp
+private val GroupDivider = 1.dp
+
+/** A cell's padding either side of its content, and its glyphs' widths. */
+private val CellPad = 10.dp
+private val CellPadCompact = 7.dp
+private val DotWidth = 10.dp
+private val UndoWidth = 12.dp
+
+/**
+ * A segmented key's border: [signal] where a cell is lit signal (or filled),
+ * else [lit], the ink of the brightest other cell, else the dim border the
+ * line's chips have.
+ */
+@Composable
+private fun groupBorder(signal: Boolean, lit: Color? = null): Color {
+    val c = LocalArcColors.current
+    return when {
+        signal -> c.signal
+        lit != null -> lit
+        else -> c.displayDim.copy(alpha = 0.5f)
+    }
+}
+
+/**
+ * Cells ([LineCell]) in one key on the dark line: a single rounded [border]
+ * round them, [GroupDivide]d from each other by a hairline of the same
+ * colour. The key draws only itself: its cells keep their own touch, gestures
+ * and semantics, and one filled signal (RECORD recording) fills just its cell,
+ * clipped to the key's shape on its outer side. [GroupHeight] tall in the
+ * middle of the cells' 40 dp touch row.
+ */
+@Composable
+private fun LineGroup(border: Color, content: @Composable RowScope.() -> Unit) {
+    Row(
+        Modifier.drawWithContent {
+            val h = GroupHeight.toPx()
+            val top = (size.height - h) / 2
+            val r = GroupCorner.toPx()
+            val w = 1.dp.toPx()
+            clipPath(Path().apply { addRoundRect(RoundRect(0f, top, size.width, top + h, CornerRadius(r))) }) {
+                this@drawWithContent.drawContent()
+            }
+            drawRoundRect(border, Offset(w / 2, top + w / 2), Size(size.width - w, h - w), CornerRadius(r - w / 2), style = Stroke(w))
+        },
+        verticalAlignment = Alignment.CenterVertically,
+        content = content,
+    )
+}
+
+/** The hairline between two cells of a [LineGroup], in the group's [border] colour. */
+@Composable
+private fun GroupDivide(border: Color) {
+    Box(Modifier.width(GroupDivider).height(GroupHeight).background(border))
+}
+
+/**
+ * A key of the line, a cell of a [LineGroup] (which draws its border): at
+ * least 40 dp tall and 32 dp wide to touch, its content in 10 dp of padding
+ * (7 dp [compact]), [lit] in brighter ink, [filled] signal across the cell
+ * with the ink on it; [content] gets its ink.
+ */
+@Composable
+private fun LineCell(
+    modifier: Modifier,
+    lit: Boolean,
+    filled: Boolean,
+    compact: Boolean,
+    content: @Composable RowScope.(ink: Color) -> Unit,
+) {
+    val c = LocalArcColors.current
+    val ink = when {
+        filled -> c.onSignal
+        lit -> c.displayInk
+        else -> c.displayDim
+    }
+    Box(
+        modifier
+            .heightIn(min = 40.dp)
+            .widthIn(min = 32.dp)
+            .then(if (filled) Modifier.background(c.signal) else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        Row(
+            Modifier.padding(horizontal = if (compact) CellPadCompact else CellPad),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) { content(ink) }

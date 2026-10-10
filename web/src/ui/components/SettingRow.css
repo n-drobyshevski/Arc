@@ -131,6 +131,9 @@
 .link-row:active { background: var(--row-pressed); }
 .link-row:focus-visible { outline-offset: -3px; }
 .link-row__chevron { flex: none; color: var(--graphite); }
+/* With an icon before the name (Live tools' Settings row): 10 between, the icon in ink, a row 56 high. */
+.link-row--icon .setting-row__line { gap: var(--space-10); min-height: 56px; padding-block: var(--space-12); }
+.link-row--icon .arc-icon { color: var(--ink); }
 .row-card > .link-row:last-child { border-radius: 0 0 var(--radius-plate) var(--radius-plate); }
 
 /* A disclosure: ⓘ, the title and a chevron that turns down when open. */

@@ -14,6 +14,7 @@ import {
   type ProjectPatterns as Patterns,
 } from '../../../src/core/features/pattern'
 import { PatternRecorder, type Corrected, type Nudged } from '../../../src/core/features/patternRecorder'
+import { PhaseAnchors } from '../../../src/core/features/sequencer'
 
 const a3 = physicalPad(0, 3)
 const a4 = physicalPad(0, 4)
@@ -525,7 +526,9 @@ describe('PatternRecorderTest', () => {
     expect(undoPlaying(r, p)).toEqual(p0)
     expect(undoPlaying(r, p0)).toBeNull()
     // Let go and held again: another gesture.
+    r.endRun()
     let q = r.correctRange(p0, a3, null, 0.0, 50.0, sixteenth, 50).patterns
+    r.endRun()
     const again = r.correctRange(q, a3, null, 300.0, 384.0 + 150, sixteenth, 50)
     expect(again.moved).toBe(1)
     q = again.patterns
@@ -577,5 +580,129 @@ describe('PatternRecorderTest', () => {
     expect(r.shiftPad(p, a3, null, 1)).toBe(p)
     expect(r.correctPad(p, a3, null, Timing.QUARTER, 50)).toEqual(corrected(p, 0))
     expect(r.correctRange(p, a3, null, 0.0, 50.0, Timing.QUARTER, 50)).toEqual(corrected(p, 0))
+  })
+
+  it('two pads held to correct while playing are one checkpoint', () => {
+    const r = new PatternRecorder()
+    const p0 = one(patternNote(10, 3, 24), patternNote(100, 3, 24), patternNote(15, 4, 24), patternNote(200, 4, 24))
+    let p = p0
+    let moved = 0
+    // The two pads' ranges come in turn, as the desk finds them.
+    for (const [from, to] of [
+      [0.0, 50.0],
+      [50.0, 150.0],
+      [150.0, 250.0],
+    ] as const) {
+      for (const pad of [a3, a4]) {
+        const c = r.correctRange(p, pad, null, from, to, sixteenth, 50)
+        moved += c.moved
+        p = c.patterns
+      }
+    }
+    expect(moved).toBe(4)
+    expect(ticks(p)).toEqual([0, 96, 24, 192])
+    expect(undoPlaying(r, p)).toEqual(p0)
+    expect(undoPlaying(r, p0)).toBeNull()
+    // A pad tapped with the others held is part of it; the last one up ends the gesture.
+    let q = r.correctRange(p0, a3, null, 0.0, 50.0, sixteenth, 50).patterns
+    const tap = r.correctPad(q, a4, null, sixteenth, 50, true)
+    expect(tap.moved).toBe(2)
+    q = r.correctRange(tap.patterns, a3, null, 50.0, 150.0, sixteenth, 50).patterns
+    expect(undoPlaying(r, q)).toEqual(p0)
+    expect(undoPlaying(r, p0)).toBeNull()
+    r.endRun()
+    // The next gesture is a checkpoint of its own.
+    const next = r.correctRange(p0, a3, null, 0.0, 50.0, sixteenth, 50).patterns
+    expect(undoPlaying(r, next)).toEqual(p0)
+  })
+
+  it('a tap alone is one checkpoint in a run or not', () => {
+    const r = new PatternRecorder()
+    const p0 = one(patternNote(10, 3, 24))
+    const p = r.correctPad(p0, a3, null, sixteenth, 50, true).patterns
+    expect(ticks(p)).toEqual([0])
+    r.endRun()
+    const q = r.correctPad(p, a3, null, Timing.QUARTER, 50, true)
+    expect(q.moved).toBe(0)
+    expect(undoPlaying(r, p)).toEqual(p0)
+  })
+
+  it('a pattern switched in at an odd bar records from its own bar 1', () => {
+    const r = new PatternRecorder()
+    r.phase = PhaseAnchors.with(PhaseAnchors.ZERO, 0, 384)
+    const p0 = withGroup(0, pattern(2))
+    // Pressed on its bar 2 (global 818): its tick 434, on the grid 432.
+    const on = hit(r, p0, a3, 384.0 + 434)
+    expect(ticks(on.patterns)).toEqual([432])
+    // A press before it started is another pattern's: nothing recorded.
+    expect(hit(r, p0, a3, 100.0).id).toBe(0)
+    // Its second pass is its tick 0 again: global 1152.
+    expect(ticks(hit(r, p0, a3, 384.0 + 768).patterns)).toEqual([0])
+    // The group that wasn't switched goes by the transport's bars.
+    expect(ticks(hit(r, withGroup(1, pattern(2)), b0, 768.0 + 96).patterns, 1)).toEqual([96])
+    // The press heard at its 380 but snapped to its 384 skips the pass it lands in, counted from the start.
+    const late = r.noteOn(p0, a3, null, 384.0 + 380, 384.0 + 380, sixteenth)
+    expect(ticks(late.patterns)).toEqual([384])
+    expect(late.skipPass).toBe(0)
+    expect(r.noteOn(p0, a3, null, 384.0 + 768 + 380, 384.0 + 768 + 380, sixteenth).skipPass).toBe(1)
+  })
+
+  it('the gate of a note in a switched pattern runs from its start, and a release after an undo from where it sits', () => {
+    const r = new PatternRecorder()
+    r.phase = PhaseAnchors.with(PhaseAnchors.ZERO, 0, 384)
+    const on = hit(r, withGroup(0, pattern(2)), a3, 384.0 + 101)
+    expect(notesOf(r.noteOff(on.patterns, on.id, 384.0 + 140.2))[0]!.gate).toBe(44)
+    const p = withGroup(0, pattern(1, [patternNote(370, 3, 24, null, 127, 5)]))
+    expect(notesOf(r.noteOff(p, 5, 384.0 + 384 * 2 + 16))[0]!.gate).toBe(30)
+  })
+
+  it("erasing and correcting while playing go by the pattern's own ticks", () => {
+    const r = new PatternRecorder()
+    r.phase = PhaseAnchors.with(PhaseAnchors.ZERO, 0, 384)
+    const p = one(patternNote(10, 3, 24), patternNote(200, 3, 24), patternNote(370, 3, 24))
+    // 384 + 190..384 + 210 is 190..210 of the pattern.
+    expect(ticks(r.eraseRange(p, a3, null, 384.0 + 190, 384.0 + 210))).toEqual([10, 370])
+    // What passed before the pattern started was another's.
+    expect(ticks(r.eraseRange(p, a3, null, 100.0, 384.0 - 1))).toEqual([10, 200, 370])
+    expect(ticks(r.eraseRange(p, a3, null, 300.0, 384.0 + 50))).toEqual([200, 370])
+    const c = r.correctRange(one(patternNote(205, 3, 24)), a3, null, 384.0 + 190, 384.0 + 215, sixteenth, 50)
+    expect(c.moved).toBe(1)
+    expect(ticks(c.patterns)).toEqual([216])
+  })
+
+  it("auto length goes by the pattern's own bars", () => {
+    const r = new PatternRecorder()
+    const p = r.punchIn(projectPatterns(), true, true)
+    r.phase = PhaseAnchors.with(PhaseAnchors.ZERO, 0, 384)
+    // Global 384 + 100 is its bar 1; 384 + 384 is its bar 2.
+    expect(ProjectPatterns.group(r.grow(p, 384.0 + 100), 0).bars).toBe(1)
+    expect(ProjectPatterns.group(r.grow(p, 384.0 * 2), 0).bars).toBe(2)
+    expect(ProjectPatterns.group(r.grow(p, 384.0 * 2 - 1), 0).bars).toBe(1)
+    // Group B was not switched.
+    expect(ProjectPatterns.group(r.grow(p, 384.0 * 2 - 1), 1).bars).toBe(2)
+    const noted = hit(r, p, a3, 384.0 + 100).patterns
+    expect(ProjectPatterns.group(r.punchOut(noted, 384.0 + 300), 0).bars).toBe(1)
+    expect(ProjectPatterns.group(r.punchOut(noted, 384.0 * 2 + 10), 0).bars).toBe(2)
+  })
+
+  it('a group switched in counts its passes anew', () => {
+    const r = new PatternRecorder()
+    const p0 = r.punchIn(projectPatterns(), false, false)
+    const a = hit(r, p0, a3, 10.0).patterns
+    r.passed(0, 0)
+    const b = hit(r, a, a3, 100.0).patterns
+    // The same pass: no checkpoint of its own.
+    r.passed(0, 0)
+    const c = hit(r, b, a3, 200.0).patterns
+    expect(undoPlaying(r, c)).toEqual(a)
+    r.punchIn(c, false, false)
+    const d0 = hit(r, c, a3, 300.0).patterns
+    r.passed(0, 0)
+    hit(r, d0, a3, 310.0)
+    // A pattern takes over: its pass 0 is a pass of its own, though the number is the same.
+    r.phase = PhaseAnchors.with(PhaseAnchors.ZERO, 0, 384)
+    r.passed(0, 0)
+    const d = hit(r, d0, a3, 384.0 + 30).patterns
+    expect(undoPlaying(r, d)).toEqual(d0)
   })
 })

@@ -28,10 +28,11 @@ import java.util.concurrent.locks.LockSupport
  * to the listener), the keys sounding, xruns, the REC mix (into the take, as
  * the AudioTrack output does, and while it or the clock is wanted the
  * stream's timestamp about every 100 ms, for SAMPLE and the sequencer), the
- * mix frames rendered so far (where the sequencer schedules from), a stream
- * reopened (new route, rate or mode), and whether the engine still runs:
- * dead, or no callback for [STALL_NS] while it should play, and it gives
- * out, so Live falls back to AudioTrack.
+ * output's latency about every second (Oboe's own estimate, for the delay
+ * Bluetooth adds), the mix frames rendered so far (where the sequencer
+ * schedules from), a stream reopened (new route, rate or mode), and whether
+ * the engine still runs: dead, or no callback for [STALL_NS] while it should
+ * play, and it gives out, so Live falls back to AudioTrack.
  * That thread also closes the engine when [close] asks.
  */
 internal class NativeLiveOutput private constructor(
@@ -188,6 +189,8 @@ internal class NativeLiveOutput private constructor(
         // The mix's clock, told apart from [stamp]: that one is the voices' this poll.
         val clockStamp = LongArray(2)
         var clocked = 0L
+        // When the latency was last told (0: not yet, so the first poll tells it).
+        var measured = 0L
         val watch = StallWatch(STALL_NS)
         // The engine counts its streams from 1, the one [open] started.
         var generation = 1L
@@ -201,6 +204,8 @@ internal class NativeLiveOutput private constructor(
                 if (generation != reports[2]) {
                     // The stream reopened: its rate, route and mode may be new.
                     generation = reports[2]
+                    // Another route's latency: told afresh at once.
+                    measured = 0L
                     if (NativeAudio.info(handle, info)) {
                         rate = info[NativeAudio.RATE]
                         route = findRoute(info[NativeAudio.DEVICE])
@@ -258,6 +263,12 @@ internal class NativeLiveOutput private constructor(
                         clocked = now
                         listener.clock(clockStamp[0], clockStamp[1], rate)
                     }
+                }
+                val at = System.nanoTime()
+                if (measured == 0L || at - measured >= LiveListener.LATENCY_NS) {
+                    measured = at
+                    // None while the stream reopens or has no timestamp yet: told so, and again at the next.
+                    listener.latency(NativeAudio.latency(handle).takeIf { it > 0 })
                 }
                 listener.keys(keys)
                 if (state == NativeAudio.DEAD || watch.stalled(reports[0], state == NativeAudio.RUNNING, System.nanoTime())) {

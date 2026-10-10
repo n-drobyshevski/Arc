@@ -20,8 +20,8 @@
 //
 // The guide overlay's host then holds the rail too (its Guide key carries the
 // edge.guide mark); it shows over the shell only, as on the phone. The top
-// bar has the theme switch (Settings → Theme, marked top.theme) in place of
-// the settings key. Below 1024px the tree is the phone's, unchanged.
+// bar has the theme switch (Settings → Theme, marked top.theme) after the ? key,
+// and the rail's Settings key stands for the phone's entries. Below 1024px the tree is the phone's, unchanged.
 //
 // Live's EDIT (Root's editPads): on while Live shows its pads; its tab is the
 // shell's second edge tab (on the desk, MirrorScreen hangs it on the K.O. II
@@ -320,11 +320,13 @@ function Root(): JSX.Element {
         onMenu={(open) => (open ? nav.open(overlayLayer('menu')) : nav.close(overlayLayer('menu')))}
         connected={state.connected}
         canConnect={state.midiSupported && !state.busy}
-        canBackup={state.midiSupported && state.device !== null && !state.busy}
-        onBackup={() => void c.backup()}
         onConnect={() => void c.connect()}
+        onNote={(text) => c.toast(text)}
+        // Read by the top bar alone, so a new delay re-renders only that.
+        late={v.tab === 'live' ? c.liveLate : null}
         onDebug={() => nav.openScreen({ kind: 'debug' })}
-        onSettings={() => nav.openScreen({ kind: 'settings' })}
+        // The section list's last entry: the list closes and Settings opens in its place.
+        onSettings={() => nav.replace(overlayLayer('menu'), screenLayer({ kind: 'settings' }))}
         onHelp={() => nav.open(overlayLayer('coach'))}
         theme={settings.theme}
         onTheme={(t) => c.setTheme(t)}
@@ -416,7 +418,6 @@ function LiveBar(props: { pianoRange: NoteRange | null; editing: boolean }): JSX
       mirror={liveMirror(c)}
       keys={liveKeys(c)}
       playing={livePlaying(c)}
-      late={c.liveLate}
       editing={props.editing}
       pianoRange={props.pianoRange}
     />
@@ -483,6 +484,8 @@ function TabScreen(props: {
           onFollow={(on) => c.setLiveFollow(on)}
           toolsOpen={v.side}
           onTools={(open) => (open ? nav.open(overlayLayer('side')) : nav.close(overlayLayer('side')))}
+          // The tools' first row: they close and Settings opens in their place.
+          onSettings={() => nav.replace(overlayLayer('side'), screenLayer({ kind: 'settings' }))}
           picker={keysPickerOf(v.dialogs)}
           onPicker={(p) => {
             // One list at a time: a dialog layer 'pick:<what>', so Back closes it (Kotlin's focusable Popup).
@@ -499,8 +502,6 @@ function TabScreen(props: {
           // Signals, read by each pad and key: a voice doesn't re-render this screen.
           playing={livePlaying(c)}
           haptics={settings.haptics}
-          // Read by the display line alone, so a new delay re-renders only that.
-          outputLate={c.liveLate}
           keys={liveKeys(c)}
           inBar={props.inBar}
           onPianoRange={props.onPianoRange}

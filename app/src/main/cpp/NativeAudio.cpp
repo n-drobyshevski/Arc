@@ -5,7 +5,7 @@
 //
 // Threads, as the Kotlin side keeps them: one producer at a time (load,
 // unload, start, release, releaseAt, cut, stopAll, flushTimed, control), one poll
-// thread (poll, readMix, timestamp, info, and finally shutdown and destroy),
+// thread (poll, readMix, timestamp, latency, info, and finally shutdown and destroy),
 // REC's flag from either.
 #include <jni.h>
 
@@ -184,6 +184,11 @@ JNIEXPORT jint JNICALL Java_dev_arc_ep133_audio_NativeAudio_timestamp(JNIEnv *en
     const int kind = e == nullptr ? 0 : e->timestamp(stamp);
     if (kind != 0) env->SetLongArrayRegion(out, 0, 2, reinterpret_cast<const jlong *>(stamp));
     return kind;
+}
+
+JNIEXPORT jint JNICALL Java_dev_arc_ep133_audio_NativeAudio_latency(JNIEnv *, jclass, jlong handle) {
+    LiveEngine *e = engine(handle);
+    return e == nullptr ? -1 : e->latencyMs();
 }
 
 }  // extern "C"
