@@ -473,3 +473,126 @@
   gap: var(--space-12);
 }
 .live-display__lineRow > .live-display__line { flex: 1 1 0; min-width: 0; }
+
+/* ---------- the K.O. II's look (web only for now) ----------
+ * The pads are the device's black keys on its grey body, with gaps between
+ * them; the number sits top-left in a light weight, the sample bottom-left.
+ * A lit pad still turns signal orange with the glow. The KEYS keys match.
+ * The group keys are the device's light A–D keys, each with its icon and an
+ * LED that lights for the group shown and glows while the group sounds. */
+
+.live .live-group__plate,
+.live .live-kgrid__plate {
+  gap: 6px;
+  padding: 6px;
+  background: var(--dev-body);
+}
+.live .live-group--big .live-group__plate,
+.live .live-kgrid__plate {
+  gap: var(--space-10);
+  padding: var(--space-10);
+}
+.live .live-group__plate > .plate-line,
+.live .live-kgrid__plate > .plate-line,
+.live .live-group__divider { display: none; }
+.live .live-group__row { gap: 6px; }
+.live .live-group--big .live-group__row,
+.live .live-kgrid .live-group__row { gap: var(--space-10); }
+
+.live .live-pad,
+.live .live-key {
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--signal) var(--glow-pct), var(--dev-pad));
+  box-shadow: 0 3px 0 color-mix(in oklab, var(--dev-signal-edge) var(--glow-pct), var(--dev-pad-edge));
+}
+.live .live-pad--big,
+.live .live-kgrid .live-key { border-radius: 10px; box-shadow: 0 4px 0 color-mix(in oklab, var(--dev-signal-edge) var(--glow-pct), var(--dev-pad-edge)); }
+.live .live-pad.is-playing::after,
+.live .live-key.is-playing::after { border-radius: inherit; }
+
+.live .live-pad__label {
+  left: 6px;
+  right: auto;
+  top: 3px;
+  bottom: auto;
+  font-weight: 300;
+  letter-spacing: 0;
+  color: var(--dev-pad-ink);
+}
+.live .live-pad__label--wide { top: 6px; font-weight: 500; letter-spacing: 0.04em; }
+.live .live-pad__name {
+  top: auto;
+  bottom: 5px;
+  color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--dev-pad-dim));
+}
+.live .live-pad--big .live-pad__label {
+  left: var(--space-12);
+  top: var(--space-6);
+  font-size: 34px;
+}
+.live .live-pad--big .live-pad__label--wide { top: var(--space-12); font-size: 15px; }
+.live .live-pad--big .live-pad__name { bottom: var(--space-10); }
+
+.live .live-key { --key-ring: var(--dev-pad-ring); }
+.live .live-key--upper { --key-ring: var(--signal); }
+.live .live-key__name { color: var(--dev-pad-ink); }
+.live .live-key__octave { color: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--dev-pad-dim)); }
+
+/* The group keys and RECORD, on a strip of the body. */
+.live-keyrow {
+  display: flex;
+  gap: var(--space-10);
+  padding: var(--space-10) var(--space-10) var(--space-12);
+  border-radius: var(--radius-strip);
+  background: var(--dev-body);
+}
+.live-keyrow > .live-keys { flex: 4 1 0; min-width: 0; gap: var(--space-10); }
+.live .live-keys__key {
+  position: relative;
+  min-height: 54px;
+  border-radius: 9px;
+  background: linear-gradient(180deg, var(--dev-light), var(--dev-light-low));
+  box-shadow: 0 4px 0 var(--dev-light-edge);
+  color: var(--dev-light-ink);
+  font-weight: 300;
+  transition: transform 60ms, box-shadow 60ms;
+}
+.live .live-keys__key:active { transform: translateY(3px); box-shadow: 0 1px 0 var(--dev-light-edge); }
+.live .live-keys__key.is-on { background: linear-gradient(180deg, var(--dev-light), var(--dev-light-low)); color: var(--dev-light-ink); }
+.live-keys__letter { position: absolute; left: 8px; top: 3px; font-size: 22px; line-height: 1.1; }
+.live-keys__icon { position: absolute; left: 0; right: 0; bottom: 6px; text-align: center; font-size: 15px; line-height: 1; }
+/* The LED: lit for the group shown, glowing with the group's sound. */
+.live-keys__key::after {
+  content: '';
+  position: absolute;
+  right: 7px;
+  top: 7px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--dev-led) var(--glow-pct), var(--dev-led-off));
+}
+.live-keys__key.is-on::after { background: var(--dev-led); box-shadow: 0 0 8px 2px rgb(255 60 0 / 0.6); }
+
+/* RECORD: the device's orange key, its dot white; armed it blinks, recording it is ringed. */
+.live-rec {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 54px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 9px;
+  background: linear-gradient(180deg, #FF6220, #F04700);
+  box-shadow: 0 4px 0 var(--dev-signal-edge);
+  cursor: pointer;
+  transition: transform 60ms, box-shadow 60ms;
+}
+.live-rec:active { transform: translateY(3px); box-shadow: 0 1px 0 var(--dev-signal-edge); }
+.live-rec:focus-visible { outline: 3px solid var(--navy); outline-offset: 2px; }
+.live-rec__dot { width: 16px; height: 16px; border-radius: 50%; background: #FFFFFF; }
+.live-rec.is-on { box-shadow: 0 4px 0 var(--dev-signal-edge), 0 0 0 3px #FFFFFF; }
+.live-rec.is-armed .live-rec__dot { animation: rec-blink 450ms ease-in-out infinite alternate; }
+@media (prefers-reduced-motion: reduce) {
+  .live-rec.is-armed .live-rec__dot { animation: none; }
+}

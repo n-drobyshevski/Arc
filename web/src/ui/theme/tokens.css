@@ -146,6 +146,20 @@
   /* Live keyboard strip (MirrorScreen.kt KeyBlack / KeyWhite). */
   --keys-black: #1E1F21;
   --keys-white: #F3F2EE;
+  /* The EP-133 K.O. II's own colours, for Live's pads and keys (web only for now). */
+  --dev-body: #D3D2CD;
+  --dev-pad: #1E1E1F;
+  --dev-pad-edge: #040404;
+  --dev-pad-ink: #F1F1F1;
+  --dev-pad-dim: #8C8C8C;
+  --dev-pad-ring: #D9D8D3;
+  --dev-signal-edge: #A33000;
+  --dev-light: #ECEBE7;
+  --dev-light-low: #DDDCD8;
+  --dev-light-edge: #9C9B96;
+  --dev-light-ink: #7E7D78;
+  --dev-led-off: #74736F;
+  --dev-led: #FF3300;
 
   /* ---- Typography (ArcTheme.kt Manrope, BaseText, ArcType) ---- */
   --font: 'Manrope', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;

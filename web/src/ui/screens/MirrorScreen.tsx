@@ -29,6 +29,10 @@
 //   with detail 0: it plays the whole sound (hold = false).
 // - The offline note's fold is a button with aria-expanded (Kotlin's
 //   stateDescription NOTE_SHOWN / NOTE_HIDDEN).
+// - Web only for now: the pads, the KEYS keys and the group keys take the
+//   EP-133 K.O. II's colours (black keys on its grey body, light A–D keys
+//   with their icons and LEDs), and an orange RECORD key ends the group row.
+//   The layout and what a touch does are Android's.
 // - The scale and octave lists (Kotlin's focusable Popups, which Back
 //   dismisses) are navigation layers too: [picker] / [onPicker] (dialog
 //   'pick:scale' / 'pick:octave'); without them each word keeps its own state.
@@ -133,6 +137,9 @@ export interface MirrorScreenProps {
 const perfNow = (): number => (typeof performance !== 'undefined' ? performance.now() : Date.now())
 
 const NO_PADS: ReadonlySet<number> = new Set()
+
+/** The icons printed on the device's A–D keys. */
+const GROUP_ICONS = ['✳', '↩', '↥', '↧'] as const
 
 /** Writes every pad's, key's and group's glow at [now] straight into the DOM (the frame loop's step). */
 function applyGlow(
@@ -323,7 +330,19 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
                   tracker={tracker}
                 />
                 <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} />
-                <GroupKeys group={group} st={st} now={now} onSelect={setGroup} />
+                <div class="live-keyrow">
+                  <GroupKeys group={group} st={st} now={now} onSelect={setGroup} />
+                  {rec.onRec && (
+                    <button
+                      type="button"
+                      class={`live-rec${rec.state.kind !== 'idle' ? ' is-on' : ''}${rec.state.kind === 'armed' && !still ? ' is-armed' : ''}`}
+                      aria-label={MirrorText.recDescription(rec.state)}
+                      onClick={rec.onRec}
+                    >
+                      <span class="live-rec__dot" aria-hidden="true" />
+                    </button>
+                  )}
+                </div>
               </>
             )}
           </div>
@@ -525,7 +544,8 @@ function GroupKeys(props: { group: number; st: MirrorState; now: number; onSelec
             style={{ '--glow': glowCss(groupGlow(st.pads, g, now)) }}
             onClick={() => onSelect(g)}
           >
-            {MirrorText.groupKey(g)}
+            <span class="live-keys__letter" aria-hidden="true">{MirrorText.groupKey(g)}</span>
+            <span class="live-keys__icon" aria-hidden="true">{GROUP_ICONS[g]}</span>
           </button>
         )
       })}
