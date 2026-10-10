@@ -29,6 +29,8 @@ import type { PickOptions, ReadableFile } from '../platform/files/pick'
 import type { FileData, SaveResult } from '../platform/files/save'
 import type { ShareResult } from '../platform/share/share'
 import type { SoundPlayer } from '../platform/audio/player'
+import type { RecordedTake } from '../platform/audio/liveAudio'
+import type { RecState } from '../core/features/takeRecorder'
 
 /** MidiConnector: support, the silent permission probe, access, open and attach/detach. */
 export interface MidiDeps {
@@ -128,6 +130,19 @@ export interface LiveAudioDeps {
   onSlowOutput?(listener: (outputMs: number) => void): () => void
   /** Lines for the debug log (how the output was set up, or why there is none). */
   onLog?(listener: (line: string) => void): () => void
+  // REC (LiveAudio.kt's takes); an output without them has no REC.
+  /** The REC key's state. */
+  readonly rec?: ReadonlySignal<RecState>
+  /** Arms REC: the next sound (or the EP-133's PLAY) starts a take. False when there is no output. */
+  arm?(): boolean
+  /** Stops the take: what was recorded is handed to [onTake]. */
+  stopRecording?(): void
+  /** The EP-133 started playing (MIDI Start or Continue). */
+  transportStarted?(): void
+  /** The EP-133 stopped (MIDI Stop). */
+  transportStopped?(): void
+  /** A take ended: its WAV, or null when nothing was played; [limit] when the 10-minute limit ended it. */
+  onTake?(listener: (take: RecordedTake | null, limit: boolean) => void): () => void
 }
 
 /** A Live output that never opens (tests, or a browser without Web Audio). */

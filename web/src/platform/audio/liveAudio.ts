@@ -39,8 +39,14 @@
 //   as ArcController's toldBluetooth).
 // - Listeners are added after construction (the controller is made after its
 //   deps); the debug-log lines ("live audio: …") come through [onLog].
+// - REC: the take is recorded on the audio side (MixerHost) and sent over in
+//   chunks; [onTake] gets it as a WAV Blob in memory (Kotlin's TakeWriter
+//   writes a file as it goes). Live closing mid-take still saves it: the
+//   output stays up until the mixer has sent the end (TAKE_END_WAIT_MS at most).
 
 import { signal, type ReadonlySignal } from '@preact/signals'
+import { REC_ARMED, REC_IDLE, type RecState } from '../../core/features/takeRecorder'
+import { wavHeader } from '../../core/formats/wav'
 import { WebText } from '../../core/text/webText'
 import { LIVE_PROCESSOR, MixerHost, type FromMixer, type ToMixer } from './liveMixer'
 // The AudioWorklet module's URL: Vite bundles liveWorklet.ts (with the core
@@ -158,6 +164,32 @@ export function heardAt(
   return now + (time - ctx.currentTime) * 1000 + l.baseMs + l.outputMs
 }
 
+/** A take REC recorded: a 16-bit stereo WAV of [frames] frames at [rate]. */
+export interface RecordedTake {
+  readonly wav: Blob
+  readonly frames: number
+  readonly rate: number
+  readonly seconds: number
+}
+
+/** How long Live closing waits for the mixer to finish a take before it is cut where it is. */
+export const TAKE_END_WAIT_MS = 2000
+
+/** The WAV of [chunks] (interleaved stereo frames, in order), cut to its first [keep] frames. */
+export function takeWav(chunks: readonly Int16Array[], keep: number, rate: number): Blob {
+  const parts: BlobPart[] = [wavHeader(keep * 4, 2, rate) as BlobPart]
+  let left = keep * 2
+  for (const c of chunks) {
+    if (left <= 0) break
+    const n = Math.min(left, c.length)
+    const part = n === c.length ? c : c.subarray(0, n)
+    // WAV is little-endian, as every browser's Int16Array is.
+    parts.push(new Uint8Array(part.buffer, part.byteOffset, n * 2) as BlobPart)
+    left -= n
+  }
+  return new Blob(parts, { type: 'audio/wav' })
+}
+
 /** How the output was set up, for the debug log: "48000 Hz, AudioWorklet, base latency 5 ms, output latency 21 ms". */
 export function describeOutput(ctx: LiveContextLike, kind: string): string {
   const l = outputLatency(ctx)
@@ -183,6 +215,17 @@ interface Stream {
   readonly loaded: Set<number>
   closed: boolean
   ran: boolean
+  /** Closed with a take going: still listening for its end. */
+  ending: boolean
+  /** The take being received from this output. */
+  receiving: Receiving | null
+}
+
+/** The take being received. */
+interface Receiving {
+  readonly chunks: Int16Array[]
+  frames: number
+  readonly rate: number
 }
 
 const EMPTY: ReadonlySet<string> = new Set()
@@ -203,6 +246,10 @@ export class LiveAudio {
   private readonly startedListeners = new Set<(id: string, latencyMs: number, route: string) => void>()
   private readonly slowListeners = new Set<(outputMs: number) => void>()
   private readonly logListeners = new Set<(line: string) => void>()
+  private readonly takeListeners = new Set<(take: RecordedTake | null, limit: boolean) => void>()
+  private readonly _rec = signal<RecState>(REC_IDLE)
+  /** The REC key's state. */
+  readonly rec: ReadonlySignal<RecState> = this._rec
 
   constructor(private readonly backend: LiveBackend = browserLiveBackend()) {}
 
@@ -237,6 +284,44 @@ export class LiveAudio {
   }
 
   /**
+   * A take ended: the WAV, or null when nothing was played; [limit] when
+   * TakeRecorder.MAX_SECONDS ended it.
+   */
+  onTake(listener: (take: RecordedTake | null, limit: boolean) => void): () => void {
+    return add(this.takeListeners, listener)
+  }
+
+  /**
+   * Arms REC: the next sound (or the EP-133's PLAY) starts a take. Opens the
+   * output first if Live hasn't. False when there is no output.
+   */
+  arm(): boolean {
+    if (this._rec.value.kind !== 'idle') return true
+    const s = this.ensure()
+    if (!s) return false
+    wake(s.ctx)
+    s.receiving = { chunks: [], frames: 0, rate: s.ctx.sampleRate }
+    send(s, { t: 'arm' })
+    this._rec.value = REC_ARMED
+    return true
+  }
+
+  /** Stops the take: what was recorded is saved (nothing, if nothing was played). */
+  stopRecording(): void {
+    if (this._rec.value.kind !== 'idle' && this.stream) send(this.stream, { t: 'stopRec' })
+  }
+
+  /** The EP-133 started playing (MIDI Start or Continue): an armed take starts now. */
+  transportStarted(): void {
+    if (this._rec.value.kind === 'armed' && this.stream) send(this.stream, { t: 'transport', playing: true })
+  }
+
+  /** The EP-133 stopped (MIDI Stop): a take its PLAY started ends. */
+  transportStopped(): void {
+    if (this._rec.value.kind !== 'idle' && this.stream) send(this.stream, { t: 'transport', playing: false })
+  }
+
+  /**
    * Live came on screen. Sets the output up when the page has had a tap
    * (else the first press does). [sampleRate]: a rate to ask for. False when
    * there is no audio output at all.
@@ -249,17 +334,51 @@ export class LiveAudio {
     return this.ensure() !== null
   }
 
-  /** Live left the screen: the output is let go and what was sounding stops. The samples stay loaded. */
+  /**
+   * Live left the screen: the output is let go and what was sounding stops.
+   * The samples stay loaded. A take going ends and is saved, like any other.
+   */
   close(): void {
     const s = this.stream
     this.stream = null
     this.ungated.clear()
     this._voices.value = EMPTY
+    const recording = this._rec.value.kind !== 'idle'
+    this._rec.value = REC_IDLE
     if (!s) return
     s.closed = true
     s.pending.length = 0
+    if (recording && s.link && s.receiving) {
+      // The mixer sends what it has and how much to keep; then the output goes.
+      s.ending = true
+      s.link.send({ t: 'stopAll' })
+      s.link.send({ t: 'stopRec' })
+      setTimeout(() => {
+        if (!s.ending) return
+        // No end came: keep all that arrived.
+        this.endTake(s, s.receiving?.frames ?? 0, false)
+        this.shut(s)
+      }, TAKE_END_WAIT_MS)
+      return
+    }
+    s.receiving = null
+    this.shut(s)
+  }
+
+  private shut(s: Stream): void {
+    s.ending = false
     if (s.link) quietly(() => s.link?.close())
     s.ctx.close().catch(() => undefined)
+  }
+
+  private endTake(s: Stream, keep: number, limit: boolean): void {
+    const r = s.receiving
+    s.receiving = null
+    if (!r) return
+    const kept = Math.min(keep, r.frames)
+    const take: RecordedTake | null =
+      kept > 0 ? { wav: takeWav(r.chunks, kept, r.rate), frames: kept, rate: r.rate, seconds: kept / r.rate } : null
+    for (const f of [...this.takeListeners]) f(take, limit)
   }
 
   /** Creates or wakes the output. Call synchronously in a press handler, before any await. */
@@ -362,7 +481,7 @@ export class LiveAudio {
       this.note(`live audio: no output (${message(e)})`)
     }
     if (!ctx) return null
-    const s: Stream = { ctx, link: null, pending: [], loaded: new Set(), closed: false, ran: false }
+    const s: Stream = { ctx, link: null, pending: [], loaded: new Set(), closed: false, ran: false, ending: false, receiving: null }
     this.stream = s
     // The samples loaded, ready again.
     for (const sample of this.samples.values()) this.load(s, sample)
@@ -418,8 +537,25 @@ export class LiveAudio {
   }
 
   private received(s: Stream, m: FromMixer): void {
+    // A take's chunks and end still arrive from an output closed mid-take.
+    if (m.t === 'take' || m.t === 'takeEnd') {
+      if (this.stream !== s && !s.ending) return
+      if (m.t === 'take') {
+        if (s.receiving) {
+          s.receiving.chunks.push(m.pcm)
+          s.receiving.frames += m.pcm.length / 2
+        }
+        return
+      }
+      this.endTake(s, m.keep, m.limit)
+      if (s.ending) this.shut(s)
+      return
+    }
     if (s.closed || this.stream !== s) return
     switch (m.t) {
+      case 'rec':
+        this._rec.value = m.state
+        return
       case 'keys':
         this._voices.value = m.keys.length === 0 ? EMPTY : new Set(m.keys)
         return
