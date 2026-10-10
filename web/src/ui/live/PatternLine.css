@@ -1,0 +1,104 @@
+/* PatternLine.kt's look on the display line: RECORD and PLAY as one key of
+ * two cells, the words, and the frame while the pattern plays. */
+
+.transport-keys {
+  flex: none;
+  display: inline-flex;
+  align-items: stretch;
+  border: 1px solid var(--display-dim);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.transport-keys.is-lit { border-color: var(--display-ink); }
+.transport-keys.is-signal { border-color: var(--signal); }
+.transport-keys__divide { width: 1px; background: currentColor; color: var(--display-dim); opacity: 0.6; }
+.transport-keys.is-lit .transport-keys__divide { color: var(--display-ink); }
+.transport-keys.is-signal .transport-keys__divide { color: var(--signal); }
+
+.transport-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 36px;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: none;
+  background: none;
+  color: var(--display-ink);
+  font: inherit;
+  font-size: var(--size-display-sub);
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.transport-keys--compact .transport-key { min-width: 32px; padding: 3px 8px; }
+.transport-key:focus-visible { outline: var(--focus-ring); outline-offset: -3px; }
+.transport-key__dot { width: 10px; height: 10px; border-radius: 50%; background: var(--display-dim); }
+.transport-key--record.is-armed .transport-key__dot { background: var(--signal); animation: rec-blink 450ms ease-in-out infinite alternate; }
+.transport-key--record.is-armed.is-still .transport-key__dot { animation: none; }
+.transport-key--record.is-filled { background: var(--signal); color: var(--on-signal); }
+.transport-key--record.is-filled .transport-key__dot { background: var(--on-signal); }
+.transport-key__word { white-space: nowrap; }
+.transport-key__play {
+  width: 10px;
+  height: 10px;
+  background: var(--display-ink);
+  clip-path: polygon(15% 0, 100% 50%, 15% 100%);
+}
+.transport-key__stop { width: 8px; height: 8px; background: var(--display-ink); }
+@media (prefers-reduced-motion: reduce) {
+  .transport-key--record.is-armed .transport-key__dot { animation: none; }
+}
+
+.pattern-words { flex: 1 1 auto; min-width: 0; display: flex; justify-content: flex-end; }
+.pattern-words__shown { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+.pattern-words__note {
+  color: var(--display-dim);
+  font-size: var(--size-display-sub);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pattern-words__num {
+  color: var(--display-ink);
+  font-size: var(--size-display-sub);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.pattern-words__count {
+  color: var(--signal);
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.pattern-words__count--compact { font-size: 24px; }
+
+/* Laid over its line: the line is position: relative. */
+.pattern-frame { position: absolute; inset: 0; border-radius: inherit; pointer-events: none; }
+.pattern-frame.is-recording { box-shadow: inset 0 0 0 1.5px var(--signal); }
+.pattern-frame__track {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 3px;
+  height: 2px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--display-ink) 12%, transparent);
+  overflow: hidden;
+}
+.pattern-frame__fill {
+  position: absolute;
+  inset: 0;
+  border-radius: 1px;
+  background: var(--display-ink);
+  transform-origin: left center;
+  transform: scaleX(0);
+}
+.pattern-frame.is-recording .pattern-frame__fill { background: var(--signal); }

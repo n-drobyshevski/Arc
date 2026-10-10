@@ -40,7 +40,7 @@
 // LivePill) and the page leaves it out.
 import { signal } from '@preact/signals'
 import { Component, type ComponentChildren, type JSX } from 'preact'
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { FactorySounds } from './core/features/factorySounds'
 import { MirrorText } from './core/text/mirrorText'
 import { SettingsText } from './core/text/settingsText'
@@ -95,6 +95,8 @@ import { DeviceUploadSheet } from './ui/sheets/UploadSheet'
 import { useDesk, useFinePointer, useWindowSize } from './ui/useDesk'
 import { useAppKeys } from './ui/useAppKeys'
 import { KeyboardKeysSheet } from './ui/sheets/KeyboardKeysSheet'
+import { PatternSheet } from './ui/sheets/PatternSheet'
+import { TransportContext, type TransportUi } from './ui/live/PatternLine'
 import { computerKeys, setComputerKeys } from './ui/keyPrefs'
 import './app.css'
 
@@ -102,6 +104,8 @@ import './app.css'
 const PROGRESS = 'progress'
 /** The Keyboard keys sheet (web, desktop: ?). */
 const KEYS_SHEET = 'keys'
+/** Live's pattern sheet (RECORD held). */
+const PATTERN_SHEET = 'pattern'
 
 export interface AppProps {
   controller: ArcController
@@ -191,6 +195,8 @@ function Root(): JSX.Element {
     openHelp: () => nav.open(sheetLayer(KEYS_SHEET)),
     back: () => nav.back(),
   })
+  // PATTERN: RECORD and PLAY on Live's display lines, read through the context (its signal re-renders the lines only).
+  const transport = useMemo(() => transportUi(c, () => nav.open(sheetLayer(PATTERN_SHEET))), [c])
   // Live's EDIT (giving a pad another sound): on Live, in PADS, until switched off or left.
   const [editPads, setEditPads] = useState(false)
   const canEdit = v.tab === 'live' && !settings.liveKeys
@@ -384,6 +390,7 @@ function Root(): JSX.Element {
   const screen = <div class="app__screen" data-view={view}>{page}</div>
   const guide = screenLayer({ kind: 'guide' })
   return (
+    <TransportContext.Provider value={transport}>
     <div class={desk ? 'app is-desk' : 'app'}>
       {desk ? (
         <CoachHost visible={v.coach && view === 'shell'} onDismiss={() => nav.close(overlayLayer('coach'))}>
@@ -412,7 +419,7 @@ function Root(): JSX.Element {
       {/* The Device tab's sheets: pads 'pads:device:<n>', upload / trim from state.browser.draft. */}
       {tabs && v.tab === 'device' && <><DevicePadsSheet view={v} /><DeviceUploadSheet view={v} /></>}
       {/* Live's EDIT: the pad sheet 'edit:<group>:<offset>', and the upload / trim sheets for a new sample. */}
-      {tabs && v.tab === 'live' && <><PadEditSheet view={v} /><DeviceUploadSheet view={v} /></>}
+      {tabs && v.tab === 'live' && <><PadEditSheet view={v} /><DeviceUploadSheet view={v} /><LivePatternSheet view={v} /></>}
       {/* The Backups tab's sheets: detail 'detail:<id>', compare picker 'comparePick:<id>',
           restore 'restore:<id>', the delete dialog 'delete'. */}
       {tabs && v.tab === 'backups' && <BackupsSheets view={v} />}
@@ -434,6 +441,47 @@ function Root(): JSX.Element {
         <UpdatePrompt />
       </ToastLayer>
     </div>
+    </TransportContext.Provider>
+  )
+}
+
+/** PATTERN's keys for Live's lines (Kotlin TransportUi), its state read from the controller's signal as each line renders. */
+function transportUi(c: ArcController, openSheet: () => void): TransportUi | null {
+  const p = c.pattern
+  if (!p.available) return null
+  return {
+    get ui() {
+      return p.ui.value
+    },
+    position: (ms) => p.position(ms),
+    onRecordDown: (at) => p.recordDown(at),
+    onRecordUp: (at) => p.recordUp(at),
+    onPlay: (held) => p.play(held),
+    onSheet: openSheet,
+  }
+}
+
+/** RECORD held: the pattern sheet 'pattern', on Live. */
+function LivePatternSheet(props: { view: NavView }): JSX.Element | null {
+  const c = useController()
+  const nav = useNav()
+  const p = c.pattern
+  if (!p.available) return null
+  return (
+    <PatternSheet
+      open={props.view.sheets.includes(PATTERN_SHEET)}
+      ui={p.ui.value}
+      onDismiss={() => nav.close(sheetLayer(PATTERN_SHEET))}
+      actions={{
+        onLength: (g, bars) => p.setLength(g, bars),
+        onDouble: (g) => p.double(g),
+        onTiming: (t) => p.setTiming(t),
+        onCountIn: (on) => p.setCountIn(on),
+        onAutoLength: (on) => p.setAutoLength(on),
+        onUndo: () => p.undo(),
+        onClear: (g) => p.clear(g),
+      }}
+    />
   )
 }
 
