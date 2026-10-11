@@ -533,12 +533,14 @@
 }
 .live__side-tools .word svg { transform: rotate(90deg); }
 
-/* KEYS' grid on its side: the turned word over the view switch on the left, the scale and the
- * octave on the right, both in the middle of the keys' height; the body as big as what's left. */
+/* KEYS' grid on its side: the view switch on the left (none where it isn't offered: no column,
+ * nor the gap before it), the scale and the octave on the right, both in the middle of the keys'
+ * height; the body as big as what's left. */
 .live__side--keys {
   --side-tools: 44px;
   --side-end: 44px;
 }
+.live__side--keys.live__side--bare { --side-tools: calc(0px - var(--space-12)); }
 .live-mode--lead {
   flex-direction: column;
   align-items: center;
@@ -561,12 +563,12 @@
 }
 .live__side--keys > .live-kgrid { flex: none !important; }
 .live__one--side > .live__side--keys > .live-kgrid > .live-deck--ko {
-  --u: clamp(0px, min((100cqw - var(--side-tools) - var(--side-end) - 2 * var(--space-12) - var(--cap-dx) - 2px) / 4.046, (100cqh - var(--cap-dy) - 2px) / 5.72), 170px);
+  --u: clamp(0px, min((100cqw - var(--side-tools) - var(--side-end) - 2 * var(--space-12) - var(--cap-dx) - 2px - 16px) / 4.046, (100cqh - var(--cap-dy) - 2px) / 5.72), 170px);
 }
 .live__side > .ko-body {
   --ko-cols: 4;
-  /* As .ko-body's, less the column on the left and its gap. */
-  --u: clamp(0px, min((100cqw - var(--side-tools) - var(--space-12) - var(--cap-dx) - 2px) / (var(--ko-cols) * 1.215 + 0.401), (100cqh - var(--cap-dy) - 2px) / 5.72), 170px);
+  /* As .ko-body's, less KEYS / PADS' 16 (the plate's right margin wider by it). */
+  --u: clamp(0px, min((100cqw - var(--cap-dx) - 2px - 16px) / (var(--ko-cols) * 1.215 + 0.401), (100cqh - var(--cap-dy) - 2px) / 5.72), 170px);
   display: flex;
   gap: var(--kd-gx);
 }
@@ -1196,22 +1198,32 @@
 
   /* The K.O. II's body drawn as the Guide draws it (live-deck--ko): the group keys and three
    * pads across (KEYS: three keys), as big as the room lets them: wide, cols x 1.215 + 0.401;
-   * high, the 18 over the strip, the strip, the mode row and their gaps (130 in all), then the
-   * four rows, 0.31 and the edge (5.505). */
+   * high, the 18 over the strip, the strip, the function keys, KEYS' mode row and their gaps
+   * (204 in all; the pads, no mode row: 154), then the four rows, 0.31 and the edge (5.505).
+   * KEYS / PADS in the right margin, 16 wider (Kotlin ModeStripWidth). */
   .live-ko {
     --ko-cols: 4;
-    --u: clamp(0px, min((100cqw - var(--cap-dx) - 8px) / (var(--ko-cols) * 1.215 + 0.401), (100cqh - 130px - var(--cap-dy) - 8px) / 5.505), 190px);
-    width: calc(var(--u) * (var(--ko-cols) * 1.215 + 0.339) + var(--cap-dx));
+    --ko-over: 204px;
+    --u: clamp(0px, min((100cqw - var(--cap-dx) - 8px - 16px) / (var(--ko-cols) * 1.215 + 0.401), (100cqh - var(--ko-over) - var(--cap-dy) - 8px) / 5.505), 190px);
+    width: calc(var(--u) * (var(--ko-cols) * 1.215 + 0.339) + var(--cap-dx) + 16px);
     height: auto;
-    padding: 18px calc(var(--u) * 0.277 + var(--cap-dx)) calc(var(--u) * 0.31 + var(--cap-dy)) calc(var(--u) * 0.277);
+    padding: 18px calc(var(--u) * 0.277 + var(--cap-dx) + 16px) calc(var(--u) * 0.31 + var(--cap-dy)) calc(var(--u) * 0.277);
     border-radius: calc(var(--u) * 0.277);
     background: var(--ko-body);
     box-shadow: calc(var(--u) * 0.062) calc(var(--u) * 0.092) 0 var(--ko-edge);
   }
   .live-ko--keys { --ko-cols: 3; }
+  .live-ko--pads { --ko-over: 154px; }
   .live-ko > .live-ko__body {
     flex: none;
+    position: relative;
     gap: var(--kd-gx);
+  }
+  /* KEYS / PADS beside the keys, in the margin right of them. */
+  .live-ko__body > .mode-strip {
+    top: 0;
+    bottom: 0;
+    right: calc(0px - var(--u) * 0.277 - 16px);
   }
   .live-ko .live-kgrid { min-width: 0; }
   .live-ko .live-group--big,
@@ -1362,14 +1374,20 @@
 /* On a phone on its side, the panel over the side columns. */
 .live__side-step { flex: none; }
 
-/* The upright grid (one group, KEYS' grid). KEYS / PADS printed in the plate's right margin
- * (Kotlin ModeStrip, ModeStripWidth 16): upright,
- * one group and KEYS' grid give the strip 16px of their width, the margin widening by it. */
+/* KEYS / PADS printed in the plate's right margin (Kotlin ModeStrip, ModeStripWidth 16): one
+ * group and KEYS' grid give the strip 16px of their width, the margin widening by it (on its
+ * side and on the desk, their --u rules above). */
+.live__one > .live-group--big > .live-deck--strip,
+.live__one > .live-kgrid > .live-deck--strip,
+.live__side--keys > .live-kgrid > .live-deck--strip,
+.ko-body--strip {
+  position: relative;
+  padding-right: calc(var(--u) * 0.277 + var(--cap-dx) + 16px);
+}
+/* Upright, as tall as a tall phone lets them. */
 .live__one > .live-group--big > .live-deck--strip,
 .live__one > .live-kgrid > .live-deck--strip {
   --u: clamp(0px, min((100cqw - var(--cap-dx) - 2px - 16px) / (var(--ko-cols) * 1.215 + 0.401), (100cqh - var(--cap-dy) - 2px) / 5.72), 170px);
-  position: relative;
-  padding-right: calc(var(--u) * 0.277 + var(--cap-dx) + 16px);
   /* Bigger pads on tall phones (Kotlin padFit, tall): where the width limits the pads, the four
    * rows share the height the body leaves, the pads growing taller (never wider), up to 1.15 times
    * their width; a room the body already fills (a small phone) is as it was. */

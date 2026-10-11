@@ -907,12 +907,12 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
       plan={plan}
     />
   )
-  // Upright, one group and KEYS' grid print KEYS / PADS (and ARP) on the plate; KEYS keeps the rest of its row under it.
+  // One group and KEYS' grid print KEYS / PADS (and ARP) on the plate (upright, on its side, the desk); KEYS keeps the rest of its row.
   const modeStrip = <ModeStrip keysOn={keys.on} onMode={actions.onMode} />
   const plateRow = (
     <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} plan={plan} onPlate />
   )
-  // The KEYS grid on a phone on its side: the row's two halves, either side of the keys.
+  // The KEYS grid on a phone on its side: the rest of the row's two halves, either side of the keys.
   const modeLead = <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} plan={plan} part="lead" />
   const modePicks = <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} plan={plan} part="picks" />
   // On a phone on its side the line is in the top bar instead.
@@ -1039,22 +1039,23 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         <div class="live-ko live-ko--keys">
           <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={null} />
           {fnRow}
-          {modeRow}
+          {plateRow}
           <div class="live-ko__body">
             <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} haptic={haptic} keysRef={gridKeys} />
+            {modeStrip}
           </div>
         </div>
       )
     } else if (oneGroup) {
       body = (
-        <div class="live-ko">
+        <div class="live-ko live-ko--pads">
           {editTab}
           {displayStrip}
           {fnRow}
-          {modeRow}
           <div class="live-ko__body">
             <GroupKeys keyboard={keyHints} group={group} st={st} now={now} onSelect={setGroup} vertical />
             <Group group={group} st={st} nameOf={nameOf} now={now} big coach ui={padUi} tracker={tracker} keyHints={keyHints} />
+            {modeStrip}
           </div>
         </div>
       )
@@ -1105,14 +1106,14 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         )}
         {keys.on && keyNotes && sideways ? (
           // KEYS on the pads on a phone on its side: the keys on the K.O. II's body as big as the
-          // room, the mode word (turned) and the view switch a column on their left, the scale and
-          // the octave one on their right.
+          // room, KEYS / PADS on its plate, the view switch (where offered) a column on their left,
+          // the scale and the octave one on their right (Android's SidewaysKeysLead).
           <>
             {!inBar && <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={null} />}
             {sideStep}
-            <div class="live__side live__side--keys">
-              <div class="live__side-tools">{modeLead}</div>
-              <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} haptic={haptic} keysRef={gridKeys} />
+            <div class={`live__side live__side--keys${plan.switchShown ? '' : ' live__side--bare'}`}>
+              {plan.switchShown && <div class="live__side-tools">{modeLead}</div>}
+              <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} haptic={haptic} keysRef={gridKeys} strip={modeStrip} />
               <div class="live__side-end">{modePicks}</div>
             </div>
           </>
@@ -1125,16 +1126,16 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           </>
         ) : sideways ? (
           // A phone on its side (Android's sideways grid): the K.O. II's body as big as the room,
-          // the group keys a column left of the pads, as on the device, and the mode word turned
-          // a quarter turn left of the body rather than a row under it, so the pads get its height.
+          // the group keys a column left of the pads, as on the device, and KEYS / PADS on the
+          // plate right of them rather than a row under it, so the pads get its height.
           <>
             {displayStrip}
             {sideStep}
             <div class="live__side">
-              <div class="live__side-tools">{modeRow}</div>
-              <div class="ko-body">
+              <div class="ko-body ko-body--strip">
                 <GroupKeys keyboard={keyHints} group={group} st={st} now={now} onSelect={setGroup} vertical />
                 <Group group={group} st={st} nameOf={nameOf} now={now} big coach ui={padUi} tracker={tracker} keyHints={keyHints} />
+                {modeStrip}
               </div>
             </div>
           </>
@@ -2019,9 +2020,9 @@ function ModeRow(props: {
   /** Whether the piano shows (and the switch is offered) in this window. */
   plan: PianoPlan
   /**
-   * The KEYS grid on a phone on its side: only the mode word (turned) and the
-   * view switch ('lead', a column left of the keys), or only the scale and the
-   * octave, turned too ('picks', a column on their right; the scale's list
+   * The KEYS grid on a phone on its side, KEYS / PADS and ARP on its plate: only
+   * the view switch ('lead', a column left of the keys), or only the scale and
+   * the octave, turned ('picks', a column on their right; the scale's list
    * opens down, the octave's up).
    */
   part?: 'lead' | 'picks'
@@ -2058,18 +2059,10 @@ function ModeRow(props: {
   )
   // ARP (RPT in PADS) and LATCH after the mode word (LiveArp.kt's ArpRowWords).
   const arpWords = <ArpWords repeat={!keys.on} top={!piano && part === undefined} />
-  if (part === 'lead') {
-    return (
-      <div class="live-mode live-mode--lead">
-        <span class="live-mode__turned">{modeWord}</span>
-        {viewSwitch}
-      </div>
-    )
-  }
+  if (part === 'lead') return viewSwitch ? <div class="live-mode live-mode--lead">{viewSwitch}</div> : null
   if (part === 'picks') {
     return (
       <div class="live-mode live-mode--picks">
-        {arpWords}
         <PickWord
           label={MirrorText.scaleName(keys.scale)}
           options={SCALES}
