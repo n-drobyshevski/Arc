@@ -64,9 +64,8 @@ export const MirrorText = {
     "Pads follow the official MIDI note map; play/stop and tempo are standard MIDI clock messages. Naming the samples relies on community notes about the device's SysEx, not on the official guide.",
   NO_PUSHES: "No pad messages from the device yet, so samples can't be named. Pads still light up.",
   /** How Live uses the device: it reads, and writes only a pad's sound (in EDIT) and the active project (PROJECT), when asked. */
-  // Web delta: the web has no PROJECT key (Android's Live function keys), so it isn't named here.
   LISTEN_ONLY:
-    "arc reads the device here (sound names, the active project's pads, and the samples on them, to keep a copy). It changes the device only when you give a pad another sound in EDIT.",
+    "arc reads the device here (sound names, the active project's pads, and the samples on them, to keep a copy). It changes the device only when you give a pad another sound in EDIT, switch projects with PROJECT, or keep a sample in SAMPLE.",
 
   // Tapping a pad plays its sample on the phone.
   TAP_NOTE:

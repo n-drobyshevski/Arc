@@ -23,9 +23,10 @@ test('SAMPLE: the panel, a held take, the review sheet, UNDO and KEEP', async ({
   await expect(mic).toHaveAttribute('aria-pressed', 'true')
   const panel = page.getByRole('region', { name: 'Sample' })
   await expect(panel).toBeVisible()
-  // Refused: RSP stands in, and the toast says why.
-  await expect(page.locator('.toast')).toContainText('arc needs the microphone to sample it. RSP works without it.')
+  // Refused: RSP stands in (the toast saying why is checked in test/state/sample.test.ts: here
+  // the demo's own "ready to work offline" toast may take its place).
   await expect(panel).toContainText('RSP')
+  await expect(panel.getByRole('status')).toHaveAttribute('aria-label', /^Resample arc's sound/)
   await expect(panel).toContainText('Hold a pad to record')
   // In the function keys' place.
   await expect(page.getByRole('button', { name: 'Effects' })).toHaveCount(0)
