@@ -1362,13 +1362,18 @@
 /* On a phone on its side, the panel over the side columns. */
 .live__side-step { flex: none; }
 
-/* KEYS / PADS printed in the plate's right margin (Kotlin ModeStrip, ModeStripWidth 16): upright,
+/* The upright grid (one group, KEYS' grid). KEYS / PADS printed in the plate's right margin
+ * (Kotlin ModeStrip, ModeStripWidth 16): upright,
  * one group and KEYS' grid give the strip 16px of their width, the margin widening by it. */
 .live__one > .live-group--big > .live-deck--strip,
 .live__one > .live-kgrid > .live-deck--strip {
   --u: clamp(0px, min((100cqw - var(--cap-dx) - 2px - 16px) / (var(--ko-cols) * 1.215 + 0.401), (100cqh - var(--cap-dy) - 2px) / 5.72), 170px);
   position: relative;
   padding-right: calc(var(--u) * 0.277 + var(--cap-dx) + 16px);
+  /* Bigger pads on tall phones (Kotlin padFit, tall): where the width limits the pads, the four
+   * rows share the height the body leaves, the pads growing taller (never wider), up to 1.15 times
+   * their width; a room the body already fills (a small phone) is as it was. */
+  --kd-h: calc(var(--u) / 1.08 + clamp(0px, (100cqh - var(--cap-dy) - 2px - var(--u) * 5.72) / 4, var(--u) * 1.15 - var(--u) / 1.08));
 }
 .mode-strip {
   position: absolute;
