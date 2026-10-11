@@ -36,6 +36,7 @@ import type { Deps, LiveTimeline } from './deps'
 import type { LiveSounds } from './live'
 import { sameShape } from './padShape'
 import {
+  ERASE_TAP_MS,
   PATTERN_UI,
   countInBeat,
   heldNotesEnded,
@@ -63,11 +64,11 @@ export const PATTERN_ERASE_MS = 20
 /** How often the click looks whether the EP-133's clock came or went (ms). */
 const CLICK_WATCH_MS = 500
 
-/** A pad held in ERASE shorter than this is a tap: it erases the pad's every note. */
-export const ERASE_TAP_MS = 200
 
 /** How far ahead of the mix the sequencer sends notes (PatternScheduler's LOOKAHEAD_MS). */
 const LOOKAHEAD_MS = 50
+
+export { ERASE_TAP_MS }
 
 /** A pad (a KEYS note on it: [semitones]) held in ERASE from [downAt]; [from] is the tick it has erased to, once it holds. */
 interface EraseHold {
