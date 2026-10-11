@@ -445,9 +445,9 @@ describe('shareFile', () => {
     expect(d.title).toBe('My')
     expect(d.text).toBe('EP-133 backup: My')
     expect(d.files).toHaveLength(1)
-    expect(d.files[0]?.name).toBe('my.pak')
-    expect(d.files[0]?.type).toBe('application/zip')
-    expect(new Uint8Array(await (d.files[0] as File).arrayBuffer())).toEqual(bytes(1, 2))
+    expect(d.files?.[0]?.name).toBe('my.pak')
+    expect(d.files?.[0]?.type).toBe('application/zip')
+    expect(new Uint8Array(await (d.files?.[0] as File).arrayBuffer())).toEqual(bytes(1, 2))
     expect(s.save.downloads).toEqual([])
   })
 

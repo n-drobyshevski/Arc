@@ -35,7 +35,7 @@ import type { CoachPrefs, MirrorPrefs, PatternPrefs, SettingsStore } from '../pl
 import type { ExternalTarget } from '../platform/storage/external'
 import type { PickOptions, ReadableFile } from '../platform/files/pick'
 import type { FileData, SaveResult } from '../platform/files/save'
-import type { ShareResult } from '../platform/share/share'
+import type { ShareResult, TextShareResult } from '../platform/share/share'
 import type { SoundPlayer } from '../platform/audio/player'
 
 /** MidiConnector: support, the silent permission probe, access, open and attach/detach. */
@@ -290,6 +290,8 @@ export interface ShareDeps {
   share(name: string, data: FileData, mime: string, title: string, text?: string): Promise<ShareResult>
   /** Whether this browser can share a file (navigator.canShare with files); where not, Share is left out. */
   canShareFiles?(): boolean
+  /** Plain text through the share sheet (a beat card); 'unsupported' where there is none. */
+  shareText?(title: string, text: string): Promise<TextShareResult>
 }
 
 /**
@@ -367,8 +369,8 @@ export interface Deps {
   title: TitleDeps
   /** launchQueue: files opened with the installed app. False when nothing will ever arrive. */
   launchFiles(onFiles: (files: File[]) => void): boolean
-  /** navigator.clipboard.writeText, where there is one. */
-  clipboard?: { writeText(text: string): Promise<void> } | undefined
+  /** navigator.clipboard.writeText (and readText, where the browser lets a page read it), where there is one. */
+  clipboard?: { writeText(text: string): Promise<void>; readText?(): Promise<string> } | undefined
   /** For the debug log header (Build fields on Android). */
   userAgent: string
   /** Settings changed in another tab (the window "storage" event). */

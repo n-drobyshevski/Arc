@@ -38,6 +38,8 @@ import { ClockFollow, TapTempo, Tempo, type Beat, type BeatGrid } from '../core/
 import type { MidiEvent } from '../core/protocol/midiInput'
 import { ArpSettings, type ArpNote, type ArpOrder } from '../core/features/arp'
 import { OutputDelay } from '../core/features/outputDelay'
+import { BeatCards, type CardRead } from '../core/features/beatCard'
+import { ClaudeText } from '../core/text/claudeText'
 import { FeatureText } from '../core/text/featureText'
 import { MirrorText } from '../core/text/mirrorText'
 import type { PatternPrefs, PatternSettings } from '../platform/storage/settings'
@@ -61,6 +63,7 @@ import {
   type PatternUiState,
 } from './patternPlan'
 import { ARP_PRESSURE_MS, ARP_UI, ArpDesk, type ArpUi } from './arpPlan'
+import { applyBeat, beatImportUi, beatImported, beatShare, type BeatApplied, type BeatImportUi, type BeatShare } from './beatPlan'
 import { ClipMode, PadStage, SCENE_UI, SceneDesk, type SceneUi } from './scenePlan'
 import { CORRECT_SHOWN_MS, STEP_UI, StepDesk, arpTakesPress, auditionMs, stepOpens, stepWord, type StepNote, type StepUi } from './stepPlan'
 import type { Store } from './store'
@@ -109,6 +112,8 @@ export interface PatternHost {
   stepWord?(n: StepNote): string
   /** How KEYS names its notes (the arp's line); letters when not given. */
   noteNames?(): NoteNames
+  /** [pad]'s sound name as Live shows it (a beat card's rows), or null. */
+  padName?(pad: PhysicalPad): string | null
 }
 
 /** The plan last handed to the sequencer, to tell when a new one changes anything. */
@@ -327,6 +332,9 @@ export class PatternDesk {
     this._ui.value = this.withSettings(patternShown(this._ui.peek(), this.current, this.transport.state, this.recorder.canUndo))
     this.publishStep()
     this.publishScene()
+    // A beat card waiting on its sheet is planned into the patterns as they are now (another project, a pick, a recording).
+    const waiting = this._beat.peek()
+    if (waiting !== null) this.showBeat(waiting.read)
   }
 
   /** The project's sequencer is [seq] now (a scene or pattern picked, a scene edited): the plan and Live follow, and it is kept. */
@@ -1456,6 +1464,85 @@ export class PatternDesk {
 
   private noteNames(): NoteNames {
     return this.host.noteNames?.() ?? NoteNames.LETTERS
+  }
+
+  // ---------- BEAT CARDS: share a pattern or scene to Claude, paste Claude's card back (an addition) ----------
+
+  private readonly _beat = signal<BeatImportUi | null>(null)
+  /** The beat card sheet's state while a card waits on it (pasted or shared to arc), else null. */
+  readonly beat: ReadonlySignal<BeatImportUi | null> = this._beat
+
+  /**
+   * What SHARE sends: [group]'s playing pattern, or (null) the scene playing,
+   * as an ARC BEAT card at the tempo Live plays at and the TIMING swing, with
+   * the pads' names; null when there are no notes in it. The patterns are the
+   * project's as they stand, a pattern still recording included.
+   */
+  beatShare(group: number | null): BeatShare | null {
+    if (group !== null && (group < 0 || group > 3)) return null
+    return beatShare(this.seq, group, this.bpm(), this.settings.timing.swing, (pad) => this.padName(pad))
+  }
+
+  /**
+   * A text pasted (PASTE BEAT, or a paste on Live): with an ARC BEAT line in
+   * it, the card is read and planned into the project's patterns as they stand
+   * (BeatCards.plan) and its sheet opens ([beat]); with none the toast says so.
+   * Nothing changes until [importBeat]. The plan reads the patterns once they
+   * are loaded, so a card never lands on a project's notes before they are read.
+   */
+  async receiveBeat(text: string | null): Promise<void> {
+    if (text === null || !BeatCards.hasCard(text)) {
+      this.host.toast(ClaudeText.NO_CARD)
+      return
+    }
+    await this.load()
+    this.showBeat(BeatCards.read(text))
+  }
+
+  // The sheet for [read], planned into the project's patterns as they are now.
+  private showBeat(read: CardRead): void {
+    this._beat.value = beatImportUi(read, this.seq, this.bpm(), (pad) => this.padName(pad))
+  }
+
+  /** The sheet closes (CANCEL, a tap outside, Back, another section): nothing was imported. */
+  dismissBeat(): void {
+    this._beat.value = null
+  }
+
+  /**
+   * IMPORT: the card is planned again into the patterns as they are now and
+   * applied as one UNDO step (applyBeat: its patterns into the next free
+   * slots, a new scene for a card of several groups, else the patterns picked
+   * in the scene playing), kept, and the sheet closes. With [setTempo] the
+   * card's tempo becomes the phone's. It takes over at once, stopped or
+   * playing, as COMMIT does; the picks waiting go. Where a group has no free
+   * pattern now the sheet stays, with the reason.
+   */
+  importBeat(setTempo: boolean): void {
+    const ui = this._beat.peek()
+    const card = ui?.read.card ?? null
+    if (ui === null || card === null) return
+    let applied: BeatApplied | null = null
+    this.sceneEdit(() => {
+      const a = applyBeat(this.seq, card, this.recorder)
+      applied = a
+      if (a.seq !== this.seq) this.sceneDesk.cancel()
+      return a.seq
+    })
+    const a = applied as BeatApplied | null
+    if (a === null) return
+    if (a.fullGroup !== null) {
+      this.showBeat(ui.read)
+      this.host.toast(ClaudeText.groupFull(a.fullGroup), true)
+      return
+    }
+    this._beat.value = null
+    if (setTempo && card.tempo !== null) this.setTempo(Tempo.round(card.tempo))
+    this.host.toast(beatImported(a))
+  }
+
+  private padName(pad: PhysicalPad): string | null {
+    return this.host.padName?.(pad) ?? null
   }
 
   // ---------- the sheet ----------

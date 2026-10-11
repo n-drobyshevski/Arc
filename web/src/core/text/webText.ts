@@ -137,6 +137,13 @@ export const WebText = {
   NO_SHORTCUTS: 'No shortcuts in the guide use this key on its own.',
   /** Live tools' third view on the desk: the EP-133 drawn whole. */
   VIEW_DEVICE: 'Device',
+  /** A beat card or prompt copied where the browser has no share sheet (Android's chooser). */
+  CARD_COPIED: 'Copied. Paste it to Claude.',
+  /** PASTE BEAT where the page can't read the clipboard: the box a paste goes into. */
+  PASTE_HERE: 'Paste the beat card here',
+  PASTE_HERE_NOTE: 'This browser lets a page read the clipboard only from a paste: press Ctrl+V (⌘V), or long-press and Paste.',
+  /** Replaces ClaudeText.LEARN_PROMPT, which says Android. */
+  LEARN_PROMPT: 'Use the arc-beats skill. Teach me the EP-133 K.O. II from lesson 1, one step at a time. I use the Arc web app.',
   /** After a pad's or KEYS key's name for screen readers while it is held for the arp or note repeat (Android outlines it only). */
   ARP_HELD: ', held for the arp',
   /** The plate's line while TAKE waits. */

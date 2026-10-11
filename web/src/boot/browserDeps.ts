@@ -35,7 +35,7 @@ import { canPickFolder, pickFolder } from '../platform/storage/external'
 import { pickFiles, readFile } from '../platform/files/pick'
 import { saveBytes } from '../platform/files/save'
 import { onLaunchFiles } from '../platform/files/launchQueue'
-import { canShareFiles, shareFile } from '../platform/share/share'
+import { canShareFiles, shareFile, shareText } from '../platform/share/share'
 import { IdbTakeStore, memoryTakeStore, type TakeStore } from '../platform/storage/takeStore'
 import { WebAudioPlayer } from '../platform/audio/player'
 import { LiveAudio } from '../platform/audio/liveAudio'
@@ -152,6 +152,7 @@ export async function createBrowserDeps(options: BrowserDepsOptions = {}): Promi
     share: {
       share: (name, data, mime, title, text) => shareFile(name, data, mime, title, text === undefined ? {} : { text }),
       canShareFiles: () => canShareFiles(),
+      shareText: (title, text) => shareText(title, text),
     },
     player,
     liveAudio,
@@ -207,7 +208,12 @@ export async function createBrowserDeps(options: BrowserDepsOptions = {}): Promi
       },
     },
     launchFiles: (onFiles) => onLaunchFiles(onFiles),
-    clipboard: nav?.clipboard ? { writeText: (t) => nav.clipboard.writeText(t) } : undefined,
+    clipboard: nav?.clipboard
+      ? {
+          writeText: (t) => nav.clipboard.writeText(t),
+          ...(typeof nav.clipboard.readText === 'function' ? { readText: () => nav.clipboard.readText() } : {}),
+        }
+      : undefined,
     userAgent: nav?.userAgent ?? '',
     onStorageChange(listener) {
       // ?demo's settings are in memory: another tab's change is not its own.

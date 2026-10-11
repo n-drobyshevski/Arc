@@ -5,6 +5,9 @@
 // chooser. Closing the share sheet is not an error (AbortError is ignored). A
 // browser that can't share files saves the file instead and says so: the
 // caller shows WebText.savedInstead(name) when this returns 'saved'.
+// [shareText] shares plain text (Files.shareText: a beat card, a prompt), or
+// says 'unsupported' where the browser has no share sheet, for the caller to
+// copy it instead.
 
 import { Strings } from '../../core/text/strings'
 import { browserSaveEnv, isAbort, mimeFor, saveBytes, toBlob, type FileData, type SaveEnv } from '../files/save'
@@ -13,7 +16,7 @@ import { browserSaveEnv, isAbort, mimeFor, saveBytes, toBlob, type FileData, typ
 export type ShareResult = 'shared' | 'cancelled' | 'saved'
 
 export interface ShareDataLike {
-  files: File[]
+  files?: File[]
   title?: string
   text?: string
 }
@@ -88,6 +91,25 @@ export async function shareFile(
   }
   try {
     await env.share(payload)
+    return 'shared'
+  } catch (e) {
+    if (isAbort(e)) return 'cancelled'
+    throw new Error(Strings.SHARE_FAILED, { cause: e })
+  }
+}
+
+/** What a text share did: shared, sheet closed, or no share sheet here (the caller copies the text instead). */
+export type TextShareResult = 'shared' | 'cancelled' | 'unsupported'
+
+/**
+ * Shares [text] with [title] as its subject through the browser's share sheet
+ * (Files.shareText's ACTION_SEND of plain text). Rejects with
+ * Strings.SHARE_FAILED when the share itself fails. Call it from a click.
+ */
+export async function shareText(title: string, text: string, env: ShareEnv = browserShareEnv()): Promise<TextShareResult> {
+  if (!env.share) return 'unsupported'
+  try {
+    await env.share({ title, text })
     return 'shared'
   } catch (e) {
     if (isAbort(e)) return 'cancelled'

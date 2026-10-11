@@ -53,6 +53,8 @@
 import { computed, effect, signal, type ReadonlySignal, type Signal } from '@preact/signals'
 import { Keys, MAX_OCTAVE, MIN_OCTAVE, type NoteNames, type Scale } from '../core/features/keys'
 import { arpNote } from '../core/features/arp'
+import type { CardProblem } from '../core/features/beatCard'
+import { ClaudeText } from '../core/text/claudeText'
 
 // An arp voice's key split at ':': "arp", group, offset, and semitones or "n" (a pad hit).
 function arpVoiceKey(p: readonly string[]): boolean {
@@ -331,6 +333,7 @@ export class ArcController {
       stepWord: (n) => stepWord(n, n.semitones === null ? this.mirrorName(n.pad) : null, this.deps.settings.settings.keysNames),
       shapeOf: (pad, keys) => this.shapeFor({ group: Math.floor(pad / 12), offset: pad % 12 }, keys),
       noteNames: () => this.deps.settings.settings.keysNames,
+      padName: (pad) => this.mirrorName(pad),
     })
     this.padEdit = new PadEditDesk({
       store: this.store,
@@ -574,6 +577,9 @@ export class ArcController {
     if (prev === next) return
     if (prev === 'live') {
       this.liveTab = false
+      // The beat card sheet goes with Live.
+      this.pattern.dismissBeat()
+      this._beatPasting.value = false
       this.closeMirror()
       this.stopPlayback()
       // closeMirror leaves [mirrorWanted] alone; settle it now, even when no state changed.
@@ -2424,6 +2430,85 @@ export class ArcController {
   shareLog(): Promise<void> {
     const text = this.logText()
     return this.shareBytes(this.logFileName(), TEXT_MIME, Strings.DEBUG_TITLE, new TextEncoder().encode(text), Strings.DEBUG_TITLE)
+  }
+
+  // ---------- BEAT CARDS: Live tools' CLAUDE section (MainActivity's shareBeat, clipboardText, copyProblems) ----------
+
+  private readonly _beatPasting = signal(false)
+  /** PASTE BEAT found the clipboard closed to the page: a box waits for a paste (web delta). */
+  readonly beatPasting: ReadonlySignal<boolean> = this._beatPasting
+
+  /**
+   * SHARE (the scene playing when [group] is null): the card's prompt and text
+   * through the share sheet, or, where the browser has none, copied to the
+   * clipboard with a toast saying so. Nothing when there are no notes.
+   */
+  async shareBeat(group: number | null): Promise<void> {
+    const share = this.pattern.beatShare(group)
+    if (share === null) return
+    await this.sendText(share.subject, share.text)
+  }
+
+  /** Learn with Claude where there is no link to follow: the starter prompt, shared or copied. */
+  async learnWithClaude(): Promise<void> {
+    await this.sendText(ClaudeText.LEARN_TITLE, WebText.LEARN_PROMPT)
+  }
+
+  private async sendText(subject: string, text: string): Promise<void> {
+    try {
+      const r = (await this.deps.share.shareText?.(subject, text)) ?? 'unsupported'
+      if (r !== 'unsupported') return
+      const cb = this.deps.clipboard
+      if (!cb) throw new Error(ClaudeText.NO_APP)
+      await cb.writeText(text)
+      this.toast(WebText.CARD_COPIED)
+    } catch (e) {
+      this.toast(errorText(e), true)
+    }
+  }
+
+  /**
+   * PASTE BEAT: the clipboard's text, read as a beat card (its sheet opens, or
+   * a toast says there is no card). Where the page can't read the clipboard
+   * (the browser has no readText, or says no), a box waits for a paste
+   * instead ([beatPasting]).
+   */
+  async pasteBeat(): Promise<void> {
+    const read = this.deps.clipboard?.readText
+    if (read) {
+      try {
+        const text = await read.call(this.deps.clipboard)
+        this._beatPasting.value = false
+        await this.pattern.receiveBeat(text)
+        return
+      } catch {
+        // Denied: the paste box below.
+      }
+    }
+    this._beatPasting.value = true
+  }
+
+  /** A text pasted on Live, or into PASTE BEAT's box: a beat card's sheet opens, else the toast says there is none. */
+  async receiveBeat(text: string | null): Promise<void> {
+    this._beatPasting.value = false
+    await this.pattern.receiveBeat(text)
+  }
+
+  /** PASTE BEAT's box closed without a paste. */
+  cancelBeatPaste(): void {
+    this._beatPasting.value = false
+  }
+
+  /** COPY PROBLEMS: what the sheet lists, for Claude to read when pasted back into the chat. */
+  async copyProblems(problems: readonly CardProblem[]): Promise<void> {
+    try {
+      const cb = this.deps.clipboard
+      if (!cb) throw new Error(ClaudeText.NO_APP)
+      await cb.writeText(ClaudeText.problemsReport(problems))
+      this.toast(ClaudeText.PROBLEMS_COPIED)
+    } catch (e) {
+      this.toast(errorText(e), true)
+    }
   }
 
   /** Copies the latest part of the log (MainActivity.copyLog's COPY_LIMIT). */
