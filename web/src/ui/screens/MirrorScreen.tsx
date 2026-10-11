@@ -562,6 +562,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   // STEP: the panel open, on the group Live shows (KEYS: the KEYS sound's), as Kotlin's LaunchedEffect(stepGroup).
   const stepCtx = useStep()
   const stepOpen = useComputed(() => stepCtx?.ui.open ?? false).value
+  // The group the open panel edits: with all four groups, its caption turns orange.
+  const stepEdited = useComputed(() => (stepCtx?.ui.open ? stepCtx.ui.group : null)).value
   const stepGroup = keys.on ? (keys.pad?.group ?? null) : group
   useEffect(() => {
     if (stepOpen && stepGroup !== null) stepCtx?.onGroup(stepGroup)
@@ -730,6 +732,10 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   const fnKeys = useContext(FunctionKeysContext)
   const fnKeysNow = useRef(fnKeys)
   fnKeysNow.current = fnKeys
+  // With all four groups and STEP open, a pad pressed in another group makes it the page's group: the panel goes there
+  // (Kotlin stepPadDown), as do the scene's CLIP row and the keyboard's target.
+  const stepFollow = useRef<((pad: PhysicalPad) => void) | null>(null)
+  stepFollow.current = stepOpen && !oneGroup && !keys.on && !device ? (pad) => pad.group !== group && setGroup(pad.group) : null
   const padPress = useMemo(
     () =>
       (pad: PhysicalPad): PressTarget | null => {
@@ -739,6 +745,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           // Unsure only when something will settle it.
           press: (hold, unsure, at) => {
             if (projectHold?.press(key, pad.label, fnKeysNow.current?.project ?? null)) return
+            stepFollow.current?.(pad)
             latest.current.onPad?.(pad, hold, (unsure ?? false) && latest.current.onPadKept !== undefined, at)
           },
           release: () => {
@@ -950,7 +957,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
       <div class="live__groups">
         <div class="live__grid">
           {[0, 1, 2, 3].map((g) => (
-            <Group key={g} group={g} st={st} nameOf={nameOf} now={now} ui={padUi} tracker={tracker} target={keyHints && g === group} keyHints={keyHints && g === group} />
+            <Group key={g} group={g} st={st} nameOf={nameOf} now={now} ui={padUi} tracker={tracker} target={keyHints && g === group} keyHints={keyHints && g === group} edited={stepEdited === g} />
           ))}
         </div>
       </div>
@@ -961,6 +968,34 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     <EditEdgeTab class="live-edit-tab" on={edit.on} onChange={edit.onChange} keyShortcut={keyHints ? 'E' : undefined} />
   ) : null
 
+  // KEYS on a phone on its side (the grid or the piano) has no height to give: STEP's panel comes out in a column left
+  // of the keys (Kotlin's StepHosting.SLOT), the keys narrowing beside it.
+  const stepColumn = sideways && stepOpen && !sampleOpen
+  const pianoKeys = pianoRange !== null ? (
+    <div
+      class="live-piano__keys"
+      data-coach="live.keys"
+      data-coach-label={CoachText.PIANO}
+      data-coach-face={COACH_YELLOW}
+      data-coach-ink={COACH_YELLOW_INK}
+    >
+      <PianoKeyboard
+        class={desk ? 'piano--flat' : undefined}
+        range={pianoRange}
+        st={st}
+        keys={keys}
+        playingNotes={playing.notes}
+        haptics={haptic}
+        now={now}
+        onNote={(n, hold, at) => actions.onNote?.(n, hold, at)}
+        onNoteUp={(n) => actions.onNoteUp?.(n)}
+        computer={desk || fine}
+        onOctave={(o) => actions.onOctave?.(o)}
+        step={pianoStep}
+        onPick={(n) => stepCtx?.onNotePick(n)}
+      />
+    </div>
+  ) : null
   let page: JSX.Element
   if (pianoRange !== null) {
     // KEYS on the piano: the display line, the row over the keys, the keys across the page
@@ -975,37 +1010,23 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         )}
         <div class="live-piano__body">
           {!inBar && <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={pianoRange} />}
-          {fnRow}
+          {!stepColumn && fnRow}
           {modeRow}
-          <div
-            class="live-piano__keys"
-            data-coach="live.keys"
-            data-coach-label={CoachText.PIANO}
-            data-coach-face={COACH_YELLOW}
-            data-coach-ink={COACH_YELLOW_INK}
-          >
-            <PianoKeyboard
-              class={desk ? 'piano--flat' : undefined}
-              range={pianoRange}
-              st={st}
-              keys={keys}
-              playingNotes={playing.notes}
-              haptics={haptic}
-              now={now}
-              onNote={(n, hold, at) => actions.onNote?.(n, hold, at)}
-              onNoteUp={(n) => actions.onNoteUp?.(n)}
-              computer={desk || fine}
-              onOctave={(o) => actions.onOctave?.(o)}
-              step={pianoStep}
-              onPick={(n) => stepCtx?.onNotePick(n)}
-            />
-          </div>
+          {stepColumn ? (
+            <div class="live-piano__row">
+              <div class="live-piano__step">
+                <StepPanel class="live__fn" />
+              </div>
+              {pianoKeys}
+            </div>
+          ) : (
+            pianoKeys
+          )}
         </div>
         {desk && <PianoLegend />}
       </div>
     )
   } else if (device) {
-    // The device view: the EP-133 K.O. II drawn whole, in the room left of the docked tools (web only).
     page = (
       <div class="live__device">
         <DeviceView
@@ -1070,7 +1091,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           {modeRow}
           <div class="live-row__groups">
             {[0, 1, 2, 3].map((g) => (
-              <Group key={g} group={g} st={st} nameOf={nameOf} now={now} fill ui={padUi} tracker={tracker} target={keyHints && g === group} keyHints={keyHints && g === group} />
+              <Group key={g} group={g} st={st} nameOf={nameOf} now={now} fill ui={padUi} tracker={tracker} target={keyHints && g === group} keyHints={keyHints && g === group} edited={stepEdited === g} />
             ))}
           </div>
         </div>
@@ -1111,8 +1132,14 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           // the scale and the octave one on their right (Android's SidewaysKeysLead).
           <>
             {!inBar && <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={null} />}
-            {sideStep}
-            <div class={`live__side live__side--keys${plan.switchShown ? '' : ' live__side--bare'}`}>
+            {!stepColumn && sideStep}
+            <div class={`live__side live__side--keys${plan.switchShown ? '' : ' live__side--bare'}${stepColumn ? ' live__side--panel' : ''}`}>
+              {/* STEP's panel in a column left of the keys, which narrow beside it (Kotlin's StepHosting.SLOT). */}
+              {stepColumn && (
+                <div class="live__side-panel">
+                  <StepPanel class="live__fn" />
+                </div>
+              )}
               {plan.switchShown && <div class="live__side-tools">{modeLead}</div>}
               <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} haptic={haptic} keysRef={gridKeys} strip={modeStrip} />
               <div class="live__side-end">{modePicks}</div>
@@ -1521,6 +1548,8 @@ interface GroupProps {
   coach?: boolean
   /** Web: the group the computer keyboard's pad keys play (all groups shown); its caption is marked. */
   target?: boolean
+  /** The STEP panel edits this group (all four groups): the caption in signal orange, said as such. */
+  edited?: boolean
   /** Web: the computer keyboard's pad keys play this group's pads (they say their keys). */
   keyHints?: boolean
   /** KEYS / PADS printed in the big grid's right margin ([ModeStrip]), where the plate has one. */
@@ -1539,13 +1568,14 @@ function Group(props: GroupProps): JSX.Element {
       data-coach={props.coach ? 'live.pads' : undefined}
     >
       {/* The caption turns orange while one of the group's pads sounds (the big grid's
-          group shows on its key below instead). */}
+          group shows on its key below instead), and while the STEP panel edits the group. */}
       {!big && (
         <div
-          class="live-group__caption"
+          class={`live-group__caption${props.edited ? ' is-step-edited' : ''}`}
           data-group={group}
           data-target={props.target ? '' : undefined}
           aria-current={props.target ? 'true' : undefined}
+          aria-description={props.edited ? MirrorText.STEP_GROUP : undefined}
           style={{ '--glow': glowCss(groupGlow(st.pads, group, now)) }}
         >
           <Caption text={`${MirrorText.GROUP} ${letter}`} as="h2" color="var(--live-caption)" />

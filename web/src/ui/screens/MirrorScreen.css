@@ -1450,3 +1450,42 @@
   padding: 4px 0;
   font-size: clamp(9px, calc(var(--u) * 0.11), 12px);
 }
+
+/* STEP on a phone on its side, KEYS on the grid or the piano: the panel in a column left of the keys (Kotlin's
+ * StepHosting.SLOT, sidePanelWidth 240–380; the piano's at least StepColumnMin 272), the keys narrowing beside it.
+ * A window too short for the panel scrolls it, never the keys. */
+/* The panel takes what the keys at their full height leave (Kotlin sidePanelWidth(room - others - gaps, deck)). The
+ * value is substituted where it is used, inside the side row's size container. */
+.live__side--panel {
+  --side-panel: clamp(240px, 100cqw - var(--side-tools) - var(--side-end) - 3 * var(--space-12) - ((100cqh - var(--cap-dy) - 2px) / 5.72 * 4.046 + var(--cap-dx) + 2px + 16px), 380px);
+}
+.live__side-panel {
+  flex: none;
+  align-self: stretch;
+  width: var(--side-panel);
+  min-height: 0;
+  overflow-y: auto;
+}
+.live__one--side > .live__side--keys.live__side--panel > .live-kgrid > .live-deck--strip {
+  --u: clamp(0px, min((100cqw - var(--side-panel) - var(--side-tools) - var(--side-end) - 3 * var(--space-12) - var(--cap-dx) - 2px - 16px) / 4.046, (100cqh - var(--cap-dy) - 2px) / 5.72), 170px);
+}
+.live-piano__row {
+  flex: 1 1 auto !important;
+  min-height: 0;
+  display: flex;
+  gap: var(--space-12);
+  align-items: flex-start;
+}
+.live-piano__step {
+  flex: none;
+  align-self: stretch;
+  width: clamp(272px, 40%, 380px);
+  min-height: 0;
+  overflow-y: auto;
+}
+.live-piano__row > .live-piano__keys { flex: 1 1 0; min-width: 0; }
+
+/* All four groups: the group the STEP panel edits, its caption in signal orange. */
+.live-group__caption.is-step-edited { --live-caption: var(--signal); }
+/* With the panel beside them the keys keep their size: the row may take the window's width. */
+.live__one--side:has(> .live__side--panel) { max-width: none; }
