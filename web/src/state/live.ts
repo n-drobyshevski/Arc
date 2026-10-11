@@ -61,6 +61,7 @@ import { padKey, physicalPad, type PhysicalPad } from '../core/features/padNotes
 import { PadSoundCache } from '../core/features/padSoundCache'
 import { newestBackupWith, unavailable } from '../core/features/padSounds'
 import { decodeWav, encodeWav, isSilent } from '../core/formats/wav'
+import { Arp } from '../core/features/arp'
 import type { VoiceShape } from '../core/formats/voiceMixer'
 import type { SoundEntry } from '../core/protocol/device'
 import { download } from '../core/protocol/fs'
@@ -168,7 +169,7 @@ export interface LiveHost {
   store: Store<UiState>
   deps: Pick<
     Deps,
-    'liveAudio' | 'padSounds' | 'lastRead' | 'offlinePads' | 'library' | 'mirrorPrefs' | 'settings' | 'player' | 'trafficLog' | 'now' | 'perfNow'
+    'liveAudio' | 'padSounds' | 'lastRead' | 'offlinePads' | 'library' | 'mirrorPrefs' | 'settings' | 'player' | 'trafficLog' | 'now' | 'perfNow' | 'setTimeout' | 'clearTimeout'
   >
   tasks: Pick<Tasks, 'exclusive' | 'waitTurn'>
   session(): Session | null
@@ -659,6 +660,57 @@ export class LiveSounds {
   /** The sound on [pad] (its offline change first), when the mirror knows it. */
   private padSample(pad: PhysicalPad): PadSample | null {
     return this.host.mirror()?.sampleOf(pad) ?? null
+  }
+
+  // ---------- STEP: the cursor's notes heard (an addition) ----------
+
+  // The STEP panel's notes sounding, by voice key, each with its let-go timer.
+  private readonly auditions = new Map<string, unknown>()
+
+  /**
+   * STEP's audition: [pad]'s note (KEYS: [semitones] from its pitch) on the
+   * pattern's own voice [key], as a press of it would sound, at [velocity],
+   * let go of after [ms]. Only from memory (a sound not there loads quietly,
+   * as the patterns' do); a finger holding [key] sounds it already.
+   */
+  audition(key: string, pad: PhysicalPad, semitones: number | null, velocity: number, ms: number): void {
+    const { host } = this
+    if (this.held.has(key) || this.auditions.has(key)) return
+    const sample = this.padSample(pad)
+    if (sample === null) return
+    const mk = memoryKey(sample.slot, sample.name)
+    const a = this.padMemory.get(mk)
+    if (a === undefined) {
+      void this.loadForPattern(pad.group * 12 + pad.offset)
+      return
+    }
+    if (a.silent) return
+    const out = host.deps.liveAudio
+    if (!out.has(mk)) out.preload(mk, a.pcm, a.channels, a.sampleRate)
+    const base = host.shapeOf?.(pad, semitones !== null) ?? {}
+    const g = Arp.velocityGain(velocity)
+    const shape = g === 1 ? base : { ...base, gain: (base.gain ?? 1) * g }
+    if (!out.press(key, mk, { pitch: semitones ?? 0, gate: true, pressedAt: host.deps.perfNow(), shape })) return
+    this.auditions.set(
+      key,
+      host.deps.setTimeout(() => {
+        this.auditions.delete(key)
+        if (!this.held.has(key)) out.release(key)
+      }, ms),
+    )
+  }
+
+  /**
+   * The notes STEP auditions still sounding are let go of now (a finger
+   * holding one keeps it): before the next audition, and as the transport
+   * starts, whose notes ring on the same voice keys.
+   */
+  auditionsEnd(): void {
+    for (const [key, timer] of this.auditions) {
+      this.host.deps.clearTimeout(timer)
+      if (!this.held.has(key)) this.host.deps.liveAudio.release(key)
+    }
+    this.auditions.clear()
   }
 
   // ---------- PATTERN: the sounds the patterns play (an addition) ----------

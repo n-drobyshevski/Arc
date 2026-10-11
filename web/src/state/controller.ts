@@ -101,6 +101,7 @@ import type { Deps, LiveEngineInfo } from './deps'
 import { LiveSounds, noteVoice, padVoice, pressTime, type LiveLatency } from './live'
 import { FxKeeper, duckSource } from './fx'
 import { voiceShape } from './padShape'
+import { stepWord } from './stepPlan'
 import { PadEditDesk } from './padEdit'
 import { PatternDesk } from './pattern'
 import { patternBpm } from './patternPlan'
@@ -176,6 +177,10 @@ export class ArcController {
   readonly padEdit: PadEditDesk
   // Presses in ERASE on the scrolling page that may still turn into a scroll: when each went down, by pad key.
   private readonly eraseUnsure = new Map<number, number>()
+  // The pads and KEYS notes whose press went to the STEP panel or CORRECT (pad key, or 1000 + MIDI note),
+  // so their release goes there too; and their unsure presses on the scrolling page, with when they went down.
+  private readonly pressTaken = new Map<number, 'step' | 'correct'>()
+  private readonly pressUnsure = new Map<number, { readonly kind: 'step' | 'correct'; readonly at: number }>()
   /** The pads sounding on the phone, as padKey numbers (MainActivity's playingPads). */
   readonly playingPads: ReadonlySignal<ReadonlySet<number>>
   /** The KEYS notes sounding on the phone (grid and piano), first pressed first (MainActivity's playingNotes). */
@@ -300,6 +305,7 @@ export class ArcController {
       prefs: deps.patternPrefs ?? new PatternPrefs(memoryStorage()),
       live: this.live,
       toast,
+      stepWord: (n) => stepWord(n, n.semitones === null ? this.mirrorName(n.pad) : null, this.deps.settings.settings.keysNames),
       shapeOf: (pad, keys) => this.shapeFor({ group: Math.floor(pad / 12), offset: pad % 12 }, keys),
     })
     this.padEdit = new PadEditDesk({
@@ -1147,6 +1153,32 @@ export class ArcController {
    */
   playPad(pad: PhysicalPad, hold = true, unsure = false, at?: number): Promise<void> {
     const pressedAt = pressTime(at, this.deps.perfNow())
+    const k = padKey(pad)
+    // The order a press goes: STEP, ERASE, CORRECT, then play.
+    if (this.pattern.stepping) {
+      // Placed and sounded once it is a press, not a scroll ([keepPad]).
+      if (hold && unsure) {
+        this.pressUnsure.set(k, { kind: 'step', at: pressedAt })
+        return Promise.resolve()
+      }
+      const done = this.stepPadDown(pad, hold, at)
+      // A screen reader's click: a tap.
+      if (hold) this.pressTaken.set(k, 'step')
+      else this.pattern.stepUp(padVoice(pad))
+      return done
+    }
+    if (!this.pattern.erasing && this.pattern.correcting) {
+      if (!hold) {
+        this.pattern.correctPadDown(pad, pressedAt)
+        this.pattern.correctPadUp(pad, pressedAt)
+      } else if (unsure) {
+        this.pressUnsure.set(k, { kind: 'correct', at: pressedAt })
+      } else {
+        this.pressTaken.set(k, 'correct')
+        this.pattern.correctPadDown(pad, pressedAt)
+      }
+      return Promise.resolve()
+    }
     // ERASE takes the press: nothing sounds, the pad's notes go (a screen reader's click is a tap).
     if (this.pattern.erasing) {
       if (!hold) {
@@ -1196,8 +1228,40 @@ export class ArcController {
     this.live.releasePad(pad)
   }
 
+  /**
+   * A press in the open STEP panel on [pad]: placed on the cursor's step
+   * with the panel's RECORD held, picked with NUDGE waiting, and sounding
+   * unless it was picked; never recorded into the pattern.
+   */
+  private stepPadDown(pad: PhysicalPad, hold: boolean, at?: number): Promise<void> {
+    const plays = this.pattern.stepDown(padVoice(pad), { pad, semitones: null })
+    return plays ? this.live.playPad(pad, hold, false, at) : Promise.resolve()
+  }
+
+  /** A long press on [pad] in the STEP panel: picked for − / + (every pitch on it); false when it has no note on the step. */
+  stepPadPick(pad: PhysicalPad): boolean {
+    return this.pattern.stepPick({ pad, semitones: null })
+  }
+
+  /** KEYS in the STEP panel: a long press on MIDI [note] of the KEYS sound picks that note, as [stepPadPick]. */
+  stepNotePick(note: number): boolean {
+    const pad = this.store.get().keysPad
+    return pad !== null && this.pattern.stepPick({ pad, semitones: note - Keys.ROOT_NOTE })
+  }
+
   /** The unsure press on the pad was a press after all: it becomes the KEYS sound (and one not in memory loads). */
   keepPad(pad: PhysicalPad): Promise<void> {
+    const k = padKey(pad)
+    const u = this.pressUnsure.get(k)
+    if (u !== undefined) {
+      this.pressUnsure.delete(k)
+      this.pressTaken.set(k, u.kind)
+      if (u.kind === 'correct') {
+        this.pattern.correctPadDown(pad, u.at)
+        return Promise.resolve()
+      }
+      return this.stepPadDown(pad, true, u.at)
+    }
     const erasedAt = this.eraseUnsure.get(padKey(pad))
     if (erasedAt !== undefined) {
       this.eraseUnsure.delete(padKey(pad))
@@ -1210,6 +1274,31 @@ export class ArcController {
   /** The finger left the pad: its sound fades out. [at]: the lift's event timeStamp, for the note's gate. */
   releasePad(pad: PhysicalPad, at?: number): void {
     const releasedAt = pressTime(at, this.deps.perfNow())
+    const k = padKey(pad)
+    // Unsure in STEP or CORRECT and lifted inside the scroll window: a tap.
+    const u = this.pressUnsure.get(k)
+    if (u !== undefined) {
+      this.pressUnsure.delete(k)
+      if (u.kind === 'correct') {
+        this.pattern.correctPadDown(pad, u.at)
+        this.pattern.correctPadUp(pad, releasedAt)
+      } else {
+        void this.stepPadDown(pad, false, u.at)
+        this.pattern.stepUp(padVoice(pad))
+      }
+      return
+    }
+    const taken = this.pressTaken.get(k)
+    if (taken !== undefined) {
+      this.pressTaken.delete(k)
+      if (taken === 'correct') {
+        this.pattern.correctPadUp(pad, releasedAt)
+      } else {
+        this.live.releasePad(pad)
+        this.pattern.stepUp(padVoice(pad))
+      }
+      return
+    }
     // Unsure in ERASE and lifted inside the scroll window: a tap.
     const erasedAt = this.eraseUnsure.get(padKey(pad))
     if (erasedAt !== undefined) {
@@ -1223,6 +1312,18 @@ export class ArcController {
 
   /** The press on the pad turned into a scroll (the all-groups page): its sound ends at once. */
   cutPad(pad: PhysicalPad): void {
+    const k = padKey(pad)
+    if (this.pressUnsure.delete(k)) return
+    const taken = this.pressTaken.get(k)
+    if (taken !== undefined) {
+      this.pressTaken.delete(k)
+      if (taken === 'correct') this.pattern.correctPadUp(pad, this.deps.perfNow())
+      else {
+        this.live.cutPad(pad)
+        this.pattern.stepUp(padVoice(pad))
+      }
+      return
+    }
     this.eraseUnsure.delete(padKey(pad))
     this.pattern.eraseCut(pad)
     this.live.cutPad(pad)
@@ -1252,6 +1353,28 @@ export class ArcController {
   playNote(note: number, hold = true, at?: number): Promise<void> {
     const pressedAt = pressTime(at, this.deps.perfNow())
     const pad = this.store.get().keysPad
+    // In the STEP panel a key places, picks or sounds its note there.
+    if (this.pattern.stepping) {
+      if (pad === null) {
+        this.toastOnce(MirrorText.PICK_SOUND)
+        return Promise.resolve()
+      }
+      const plays = this.pattern.stepDown(noteVoice(note), { pad, semitones: note - Keys.ROOT_NOTE })
+      const done = plays ? this.live.playNote(note, hold, at) : Promise.resolve()
+      // A screen reader's click: a tap.
+      if (hold) this.pressTaken.set(1000 + note, 'step')
+      else this.pattern.stepUp(noteVoice(note))
+      return done
+    }
+    // CORRECT while playing: a key corrects its note on the KEYS sound, silently.
+    if (!this.pattern.erasing && this.pattern.correcting) {
+      if (pad !== null) {
+        this.pattern.correctPadDown(pad, pressedAt, note - Keys.ROOT_NOTE)
+        if (!hold) this.pattern.correctPadUp(pad, pressedAt, note - Keys.ROOT_NOTE)
+        else this.pressTaken.set(1000 + note, 'correct')
+      }
+      return Promise.resolve()
+    }
     // ERASE takes the note: its notes on the KEYS sound go.
     if (this.pattern.erasing) {
       if (pad !== null) {
@@ -1278,6 +1401,18 @@ export class ArcController {
   /** The last finger left the note: it fades out. */
   releaseNote(note: number, at?: number): void {
     const pad = this.store.get().keysPad
+    const taken = this.pressTaken.get(1000 + note)
+    if (taken !== undefined) {
+      this.pressTaken.delete(1000 + note)
+      if (taken === 'correct') {
+        if (pad !== null) this.pattern.correctPadUp(pad, pressTime(at, this.deps.perfNow()), note - Keys.ROOT_NOTE)
+      } else {
+        this.pattern.stepUp(noteVoice(note))
+      }
+      // A key held from before still lets go of its note.
+      this.live.releaseNote(note)
+      return
+    }
     if (pad !== null) this.pattern.erasePadUp(pad, pressTime(at, this.deps.perfNow()), note - Keys.ROOT_NOTE)
     this.live.releaseNote(note)
     this.pattern.release(noteVoice(note), pressTime(at, this.deps.perfNow()))
