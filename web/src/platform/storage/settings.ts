@@ -30,6 +30,7 @@ import { physicalPad, type PhysicalPad } from '../../core/features/padNotes'
 import { PadOrder } from '../../core/features/padPush'
 import { KeysView, choiceOf as pianoChoiceOf, keysViewOf } from '../../core/features/piano'
 import { ArpOrder, ArpSettings } from '../../core/features/arp'
+import { SampleSource } from '../../core/features/sampleSource'
 import { Timing, TimingSettings } from '../../core/features/pattern'
 import { SwitchTime } from '../../core/features/scenes'
 import { Tempo } from '../../core/features/tempo'
@@ -67,6 +68,72 @@ export interface AppSettings {
   readonly haptics: boolean
   /** Make up for Bluetooth delay: the playhead, a press's place and the click on the EP-133's clock follow what is heard. */
   readonly makeUpDelay: boolean
+  /** SAMPLE's input (an addition): its source and whether it records in stereo. */
+  readonly sampleSource: SampleSource
+  readonly sampleStereo: boolean
+  /** SAMPLE's LEVEL per source, in dB: the mic is quiet, so it starts higher. */
+  readonly sampleGainMic: number
+  readonly sampleGainRsp: number
+  readonly sampleGainUsb: number
+  /** SAMPLE's threshold in dBFS; null records from the press. */
+  readonly sampleThreshold: number | null
+  /** The bars a hands-free take lasts, after a bar's count-in; null (Free) runs until STOP. */
+  readonly sampleBars: number | null
+  /** A take opens the review sheet before it goes on its pad (off: straight on, as on the EP-133). */
+  readonly reviewSamples: boolean
+  /** The review's switches, kept for the next take. */
+  readonly sampleNormalize: boolean
+  readonly sampleTrimSilence: boolean
+  /** BARS on PTN: a hands-free take lasts the pattern's length, from its next loop start. */
+  readonly samplePattern: boolean
+}
+
+/** SAMPLE's LEVEL for the mic until one is chosen, in dB. */
+export const SAMPLE_GAIN_MIC = 12
+
+/** The LEVEL knob's range, in dB. */
+export const SAMPLE_GAINS = { min: -12, max: 30 } as const
+
+/** The threshold knob's range in dBFS, below Off. */
+export const SAMPLE_THRESHOLDS = { min: -60, max: 0 } as const
+
+/** BARS' choices for a hands-free take: Free (null), then these. */
+export const SAMPLE_BARS: readonly number[] = [1, 2, 4, 8, 16]
+
+/** [s]'s LEVEL for [source], in dB (AppSettings.sampleGain). */
+export function sampleGain(s: AppSettings, source: SampleSource): number {
+  return source === 'mic' ? s.sampleGainMic : source === 'rsp' ? s.sampleGainRsp : s.sampleGainUsb
+}
+
+/** [s] with [source]'s LEVEL at [db] (AppSettings.withSampleGain). */
+export function withSampleGain(s: AppSettings, source: SampleSource, db: number): AppSettings {
+  return source === 'mic' ? { ...s, sampleGainMic: db } : source === 'rsp' ? { ...s, sampleGainRsp: db } : { ...s, sampleGainUsb: db }
+}
+
+const inRange = (v: number, r: { readonly min: number; readonly max: number }): boolean => v >= r.min && v <= r.max
+
+/** A stored LEVEL in range, else null (sampleGainOf). */
+export function sampleGainOf(db: number | null | undefined): number | null {
+  return typeof db === 'number' && Number.isFinite(db) && inRange(db, SAMPLE_GAINS) ? db : null
+}
+
+/** A stored threshold: "off" (or anything unreadable or out of range) is none (sampleThresholdOf). */
+export function sampleThresholdOf(stored: string | null | undefined): number | null {
+  if (stored == null) return null
+  const v = ktToFloatOrNull(stored)
+  return v !== null && inRange(v, SAMPLE_THRESHOLDS) ? v : null
+}
+
+/** Kotlin's String.toFloatOrNull, for the numbers Float.toString writes ("12.0", "-6.5"). */
+function ktToFloatOrNull(s: string): number | null {
+  if (!/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?[fFdD]?$/.test(s)) return null
+  const v = Number.parseFloat(s)
+  return Number.isFinite(v) ? Math.fround(v) : null
+}
+
+/** A Float as Kotlin's toString writes it: "12.0", "-6.5". */
+function ktFloat(v: number): string {
+  return Number.isInteger(v) ? `${v}.0` : String(v)
 }
 
 export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
@@ -89,6 +156,17 @@ export const DEFAULT_SETTINGS: AppSettings = Object.freeze({
   pianoWhites: null,
   haptics: true,
   makeUpDelay: true,
+  sampleSource: 'mic',
+  sampleStereo: false,
+  sampleGainMic: SAMPLE_GAIN_MIC,
+  sampleGainRsp: 0,
+  sampleGainUsb: 0,
+  sampleThreshold: null,
+  sampleBars: null,
+  reviewSamples: true,
+  sampleNormalize: false,
+  sampleTrimSilence: false,
+  samplePattern: false,
 })
 
 /** Every setting's key, in Android's order (SettingsStore.values()). */
@@ -111,6 +189,17 @@ export const SETTING_KEYS = Object.freeze([
   'pianoWhites',
   'haptics',
   'makeUpDelay',
+  'sampleSource',
+  'sampleStereo',
+  'sampleGainMic',
+  'sampleGainRsp',
+  'sampleGainUsb',
+  'sampleThreshold',
+  'sampleBars',
+  'reviewSamples',
+  'sampleNormalize',
+  'sampleTrimSilence',
+  'samplePattern',
 ] as const)
 export type SettingKey = (typeof SETTING_KEYS)[number]
 
@@ -277,6 +366,17 @@ export function readSettings(raw: string | null): AppSettings {
     pianoWhites: pianoChoiceOf(int('pianoWhites', 0)),
     haptics: bool('haptics', true),
     makeUpDelay: bool('makeUpDelay', true),
+    sampleSource: (typeof o.sampleSource === 'string' ? SampleSource.of(o.sampleSource) : null) ?? 'mic',
+    sampleStereo: bool('sampleStereo', false),
+    sampleGainMic: sampleGainOf(o.sampleGainMic as number) ?? SAMPLE_GAIN_MIC,
+    sampleGainRsp: sampleGainOf(o.sampleGainRsp as number) ?? 0,
+    sampleGainUsb: sampleGainOf(o.sampleGainUsb as number) ?? 0,
+    sampleThreshold: typeof o.sampleThreshold === 'number' ? sampleThresholdOf(ktFloat(o.sampleThreshold)) : null,
+    sampleBars: SAMPLE_BARS.includes(int('sampleBars', 0)) ? int('sampleBars', 0) : null,
+    reviewSamples: bool('reviewSamples', true),
+    sampleNormalize: bool('sampleNormalize', false),
+    sampleTrimSilence: bool('sampleTrimSilence', false),
+    samplePattern: bool('samplePattern', false),
   }
 }
 
@@ -284,6 +384,9 @@ export function readSettings(raw: string | null): AppSettings {
 function storedValue(s: AppSettings, k: SettingKey): string | number | boolean {
   if (k === 'keepLast') return s.keepLast ?? 0
   if (k === 'pianoWhites') return s.pianoWhites ?? 0
+  // Off and Free: "off" and 0, as on Android.
+  if (k === 'sampleThreshold') return s.sampleThreshold ?? 'off'
+  if (k === 'sampleBars') return s.sampleBars ?? 0
   return s[k]
 }
 
@@ -320,6 +423,17 @@ export function settingValues(s: AppSettings): Record<SettingKey, string> {
     pianoWhites: String(s.pianoWhites ?? 0),
     haptics: String(s.haptics),
     makeUpDelay: String(s.makeUpDelay),
+    sampleSource: s.sampleSource,
+    sampleStereo: String(s.sampleStereo),
+    sampleGainMic: ktFloat(s.sampleGainMic),
+    sampleGainRsp: ktFloat(s.sampleGainRsp),
+    sampleGainUsb: ktFloat(s.sampleGainUsb),
+    sampleThreshold: s.sampleThreshold === null ? 'off' : ktFloat(s.sampleThreshold),
+    sampleBars: String(s.sampleBars ?? 0),
+    reviewSamples: String(s.reviewSamples),
+    sampleNormalize: String(s.sampleNormalize),
+    sampleTrimSilence: String(s.sampleTrimSilence),
+    samplePattern: String(s.samplePattern),
   }
 }
 
@@ -358,6 +472,10 @@ export function settingsFromIndex(map: Readonly<Record<string, string>>, cur: Ap
   const octave = n('app.keysOctave')
   // 0 is Auto; a size arc doesn't offer leaves the choice as it is.
   const whites = n('app.pianoWhites')
+  const floatOf = (k: string): number | null => {
+    const v = get(map, k)
+    return v === undefined ? null : ktToFloatOrNull(v)
+  }
   return {
     theme: themeOf(get(map, 'app.theme')) ?? cur.theme,
     autoConnect: b('app.autoConnect') ?? cur.autoConnect,
@@ -377,6 +495,17 @@ export function settingsFromIndex(map: Readonly<Record<string, string>>, cur: Ap
     pianoWhites: whites === null ? cur.pianoWhites : whites === 0 ? null : (pianoChoiceOf(whites) ?? cur.pianoWhites),
     haptics: b('app.haptics') ?? cur.haptics,
     makeUpDelay: b('app.makeUpDelay') ?? cur.makeUpDelay,
+    sampleSource: SampleSource.of(get(map, 'app.sampleSource') ?? '') ?? cur.sampleSource,
+    sampleStereo: b('app.sampleStereo') ?? cur.sampleStereo,
+    sampleGainMic: sampleGainOf(floatOf('app.sampleGainMic')) ?? cur.sampleGainMic,
+    sampleGainRsp: sampleGainOf(floatOf('app.sampleGainRsp')) ?? cur.sampleGainRsp,
+    sampleGainUsb: sampleGainOf(floatOf('app.sampleGainUsb')) ?? cur.sampleGainUsb,
+    sampleThreshold: ((v) => (v === undefined ? cur.sampleThreshold : v === 'off' ? null : (sampleThresholdOf(v) ?? cur.sampleThreshold)))(get(map, 'app.sampleThreshold')),
+    sampleBars: ((v) => (v === null ? cur.sampleBars : v === 0 ? null : SAMPLE_BARS.includes(v) ? v : cur.sampleBars))(n('app.sampleBars')),
+    reviewSamples: b('app.reviewSamples') ?? cur.reviewSamples,
+    sampleNormalize: b('app.sampleNormalize') ?? cur.sampleNormalize,
+    sampleTrimSilence: b('app.sampleTrimSilence') ?? cur.sampleTrimSilence,
+    samplePattern: b('app.samplePattern') ?? cur.samplePattern,
   }
 }
 

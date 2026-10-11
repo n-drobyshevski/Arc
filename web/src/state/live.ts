@@ -114,6 +114,16 @@ export function memoryKey(slot: number, name: string): string {
   return `${slot}:${ktTrim(name).toLowerCase()}`
 }
 
+/** The key a SAMPLE recording kept on a pad is kept under (ArcController.recordedKey): "rec:<file>". */
+export function recordedKey(file: string): string {
+  return `rec:${file}`
+}
+
+/** The key [s] is kept under: its recording's, or its slot and name. */
+export function sampleKey(s: PadSample): string {
+  return s.file != null ? recordedKey(s.file) : memoryKey(s.slot, s.name)
+}
+
 /**
  * An input event's timeStamp further than this before the press's handler
  * runs is not taken for its time: an old browser's epoch timeStamp, or one
@@ -169,7 +179,7 @@ export interface LiveHost {
   store: Store<UiState>
   deps: Pick<
     Deps,
-    'liveAudio' | 'padSounds' | 'lastRead' | 'offlinePads' | 'library' | 'mirrorPrefs' | 'settings' | 'player' | 'trafficLog' | 'now' | 'perfNow' | 'setTimeout' | 'clearTimeout'
+    'liveAudio' | 'padSounds' | 'lastRead' | 'offlinePads' | 'library' | 'mirrorPrefs' | 'settings' | 'player' | 'trafficLog' | 'now' | 'perfNow' | 'setTimeout' | 'clearTimeout' | 'samples'
   >
   tasks: Pick<Tasks, 'exclusive' | 'waitTurn'>
   session(): Session | null
@@ -470,7 +480,25 @@ export class LiveSounds {
   // ---------- samples in memory ----------
 
   private keepInMemory(slot: number, name: string, a: PadAudio): void {
-    const key = memoryKey(slot, name)
+    this.keepUnder(memoryKey(slot, name), a)
+  }
+
+  /** A SAMPLE recording kept on a pad ([file] in the samples store), into memory: the pad plays it at once. */
+  keepRecorded(file: string, pcm: Int16Array, channels: number, sampleRate: number): void {
+    this.keepUnder(recordedKey(file), padAudioOf(s16leBytes(pcm), channels, sampleRate))
+  }
+
+  /** A recording up on the EP-133 (or let go of): out of memory. */
+  forgetRecorded(file: string): void {
+    const key = recordedKey(file)
+    const a = this.padMemory.get(key)
+    if (a === undefined) return
+    this.padMemoryBytes -= padBytes(a)
+    this.padMemory.delete(key)
+    this.host.deps.liveAudio.unload(key)
+  }
+
+  private keepUnder(key: string, a: PadAudio): void {
     const prev = this.padMemory.get(key)
     if (prev !== undefined) {
       this.padMemoryBytes -= padBytes(prev)
@@ -542,17 +570,18 @@ export class LiveSounds {
     const gen = ++this.preloadGen
     return (async () => {
       // The pads' sounds with the offline changes over them, each once.
-      for (const { slot, name, factory } of m.padSamples()) {
+      for (const sample of m.padSamples()) {
         if (gen !== this.preloadGen || this.host.mirror() !== m) return
-        if (this.padMemory.has(memoryKey(slot, name)) || this.padLoads.has(memoryKey(slot, name))) continue
+        const key = sampleKey(sample)
+        if (this.padMemory.has(key) || this.padLoads.has(key)) continue
         let a: PadAudio | null
         try {
-          a = await this.loadPadAudio(slot, name, factory)
+          a = await this.loadSample(sample)
         } catch {
           a = null
         }
         if (a === null) continue
-        if (gen === this.preloadGen && this.host.mirror() === m) this.keepInMemory(slot, name, a)
+        if (gen === this.preloadGen && this.host.mirror() === m) this.keepUnder(key, a)
       }
     })()
   }
@@ -561,6 +590,17 @@ export class LiveSounds {
    * A sample from arc's copy or a backup, decoded; null when neither has it.
    * A factory sound put on a pad offline ([factory]) comes from the pack first.
    */
+  private async loadSample(s: PadSample): Promise<PadAudio | null> {
+    if (s.file != null) {
+      // A SAMPLE recording not on the EP-133 yet: from the samples store.
+      const wav = (await this.host.deps.samples?.read(s.file)) ?? null
+      if (wav === null) return null
+      const w = decodeWav(wav)
+      return padAudioOf(w.pcm, w.channels, Math.trunc(w.sampleRate))
+    }
+    return this.loadPadAudio(s.slot, s.name, s.factory)
+  }
+
   private async loadPadAudio(slot: number, name: string, factory = false): Promise<PadAudio | null> {
     const wav = await this.padWav(slot, name, factory)
     if (wav === null) return null
@@ -678,7 +718,7 @@ export class LiveSounds {
     if (this.held.has(key) || this.auditions.has(key)) return
     const sample = this.padSample(pad)
     if (sample === null) return
-    const mk = memoryKey(sample.slot, sample.name)
+    const mk = sampleKey(sample)
     const a = this.padMemory.get(mk)
     if (a === undefined) {
       void this.loadForPattern(pad.group * 12 + pad.offset)
@@ -723,7 +763,7 @@ export class LiveSounds {
   patternVoice(pad: number): string | 'missing' | null {
     const sample = this.padSample(physicalPad(Math.floor(pad / 12), pad % 12))
     if (sample === null) return null
-    const key = memoryKey(sample.slot, sample.name)
+    const key = sampleKey(sample)
     const a = this.padMemory.get(key)
     if (a === undefined || a.silent) return a === undefined ? 'missing' : null
     const out = this.host.deps.liveAudio
@@ -738,16 +778,16 @@ export class LiveSounds {
   async loadForPattern(pad: number): Promise<boolean> {
     const sample = this.padSample(physicalPad(Math.floor(pad / 12), pad % 12))
     if (sample === null) return false
-    const { slot, name, factory } = sample
-    if (this.padMemory.has(memoryKey(slot, name))) return true
+    const key = sampleKey(sample)
+    if (this.padMemory.has(key)) return true
     let a: PadAudio | null
     try {
-      a = await this.loadPadAudio(slot, name, factory)
+      a = await this.loadSample(sample)
     } catch {
       a = null
     }
     if (a === null || this.host.mirror() === null) return false
-    this.keepInMemory(slot, name, a)
+    this.keepUnder(key, a)
     return true
   }
 
@@ -760,9 +800,19 @@ export class LiveSounds {
       return null
     }
     const { slot, name, factory } = sample
-    const key = memoryKey(slot, name)
+    const key = sampleKey(sample)
     const mem = this.fromMemory(key)
     if (mem) return { key, audio: mem }
+    if (sample.file != null) {
+      // A recording arc kept: from the samples store, never the device.
+      const a = await this.loadSample(sample).catch(() => null)
+      if (a === null) {
+        if (!quiet) host.toastOnce(WebText.LIVE_NO_COPY)
+        return null
+      }
+      if (host.mirror() !== null) this.keepUnder(key, a)
+      return { key, audio: a }
+    }
     // One load for every press waiting on this sound.
     let load = this.padLoads.get(key)
     if (load === undefined) {
@@ -901,8 +951,8 @@ export class LiveSounds {
     const token = host.playToken()
     // In memory: plays now, without waiting a turn.
     const sample = this.padSample(pad)
-    const mem = sample ? this.fromMemory(memoryKey(sample.slot, sample.name)) : null
-    if (sample && mem) this.startHeld(id, pad, hold, memoryKey(sample.slot, sample.name), mem, 0, pressedAt, true)
+    const mem = sample ? this.fromMemory(sampleKey(sample)) : null
+    if (sample && mem) this.startHeld(id, pad, hold, sampleKey(sample), mem, 0, pressedAt, true)
     if (unsure && hold) {
       // Not yet the latest press either: a scroll mustn't drop another press's late load.
       this.unsure.set(id, { started: mem !== null, pressedAt, token })
@@ -974,9 +1024,9 @@ export class LiveSounds {
     }
     const pitch = note - Keys.ROOT_NOTE
     const sample = this.padSample(pad)
-    const mem = sample ? this.fromMemory(memoryKey(sample.slot, sample.name)) : null
+    const mem = sample ? this.fromMemory(sampleKey(sample)) : null
     if (sample && mem) {
-      this.startHeld(id, pad, hold, memoryKey(sample.slot, sample.name), mem, pitch, pressedAt, true, true)
+      this.startHeld(id, pad, hold, sampleKey(sample), mem, pitch, pressedAt, true, true)
       return Promise.resolve()
     }
     return (async () => {

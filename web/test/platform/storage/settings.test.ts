@@ -24,6 +24,26 @@ import {
   type AppSettings,
 } from '../../../src/platform/storage/settings'
 
+describe('SAMPLE settings', () => {
+  it('store and index as Android: Off and Free as "off" and 0, floats as Float.toString', async () => {
+    const { SettingsStore: Store, settingsToIndex, settingsFromIndex } = await import('../../../src/platform/storage/settings')
+    const storage = memoryStorage()
+    const s = new Store(storage)
+    s.update((c) => ({ ...c, sampleSource: 'rsp', sampleGainRsp: 6, sampleThreshold: -24.5, sampleBars: 4, reviewSamples: false }))
+    const idx = settingsToIndex(s.settings)
+    expect(idx['app.sampleSource']).toBe('rsp')
+    expect(idx['app.sampleGainRsp']).toBe('6.0')
+    expect(idx['app.sampleThreshold']).toBe('-24.5')
+    expect(idx['app.sampleBars']).toBe('4')
+    expect(idx['app.reviewSamples']).toBe('false')
+    const back = new Store(storage).settings
+    expect(back).toMatchObject({ sampleSource: 'rsp', sampleGainRsp: 6, sampleThreshold: -24.5, sampleBars: 4, reviewSamples: false })
+    // Off, Free, and a level out of range from library.json.
+    const off = settingsFromIndex({ 'app.sampleThreshold': 'off', 'app.sampleBars': '0', 'app.sampleGainMic': '99.0' }, back)
+    expect(off).toMatchObject({ sampleThreshold: null, sampleBars: null, sampleGainMic: 12 })
+  })
+})
+
 describe('SettingsStore', () => {
   it('starts with the Android defaults, except one group in Live', () => {
     const s = new SettingsStore(memoryStorage())
@@ -46,6 +66,17 @@ describe('SettingsStore', () => {
       pianoWhites: null,
       haptics: true,
       makeUpDelay: true,
+      sampleSource: 'mic',
+      sampleStereo: false,
+      sampleGainMic: 12,
+      sampleGainRsp: 0,
+      sampleGainUsb: 0,
+      sampleThreshold: null,
+      sampleBars: null,
+      reviewSamples: true,
+      sampleNormalize: false,
+      sampleTrimSilence: false,
+      samplePattern: false,
     })
     expect(DEFAULT_SETTINGS).toEqual(s.settings)
   })
@@ -126,6 +157,17 @@ describe('SettingsStore', () => {
       'app.pianoWhites',
       'app.haptics',
       'app.makeUpDelay',
+      'app.sampleSource',
+      'app.sampleStereo',
+      'app.sampleGainMic',
+      'app.sampleGainRsp',
+      'app.sampleGainUsb',
+      'app.sampleThreshold',
+      'app.sampleBars',
+      'app.reviewSamples',
+      'app.sampleNormalize',
+      'app.sampleTrimSilence',
+      'app.samplePattern',
     ])
   })
 

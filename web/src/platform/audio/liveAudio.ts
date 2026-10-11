@@ -101,6 +101,8 @@ import { FxSetup } from './fxSetup'
 import { OutputDelay } from '../../core/features/outputDelay'
 import { LIVE_PROCESSOR, MixerHost, transferable, type FromMixer, type PlanVoice, type ToMixer } from './liveMixer'
 import type { ArpStep } from './patternScheduler'
+import type { TapPhase, TapTake } from './sampleTap'
+import { PeakMeter } from '../../core/features/peakMeter'
 // The AudioWorklet module's URL: Vite bundles liveWorklet.ts (with the core
 // mixer) into one self-contained script. (`new URL('./liveWorklet.ts',
 // import.meta.url)` would copy the TypeScript unbuilt: Vite only bundles that
@@ -514,6 +516,15 @@ export class LiveAudio {
   private seqClock: TransportClock | null = null
   private plan: LiveSeqPlan | null = null
   private arp: LiveArpPlan | null = null
+  // SAMPLE's RSP as asked: open on each new output while wanted.
+  private sampleAsk: { stereo: boolean; gain: number; threshold: number | null } | null = null
+  private readonly sampleTakeListeners = new Set<(take: TapTake) => void>()
+  private readonly _samplePhase = signal<TapPhase>({ kind: 'ready' })
+  /** SAMPLE's take as the audio thread has it: waiting, recording, or ready. */
+  readonly samplePhase: ReadonlySignal<TapPhase> = this._samplePhase
+  private readonly _sampleLevel = signal<{ readonly level: number; readonly clip: boolean }>({ level: 0, clip: false })
+  /** RSP's level (0..1 across −60..0 dBFS) and its clip light, a few times a second while open. */
+  readonly sampleLevel: ReadonlySignal<{ readonly level: number; readonly clip: boolean }> = this._sampleLevel
   private readonly arpStepListeners = new Set<(step: ArpStep) => void>()
   private seqArmed = false
   private readonly _rec = signal<RecState>(REC_IDLE)
@@ -688,6 +699,89 @@ export class LiveAudio {
     return add(this.arpStepListeners, listener)
   }
 
+  // ---------- SAMPLE: RSP, Live's mix recorded into a pad (SampleRecorder's mix side) ----------
+
+  /**
+   * Opens RSP on Live's mix ([stereo] or mixed down) at [gainDb], an armed
+   * take waiting for [thresholdDb] (null: none). Opens the output; false
+   * when there is none.
+   */
+  sampleOpen(stereo: boolean, gainDb: number, thresholdDb: number | null): boolean {
+    this.sampleAsk = { stereo, gain: PeakMeter.fromDb(gainDb), threshold: thresholdDb === null ? null : PeakMeter.fromDb(thresholdDb) }
+    const s = this.ensure()
+    if (!s) {
+      this.sampleAsk = null
+      return false
+    }
+    s.parked = false
+    wake(s.ctx)
+    send(s, { t: 'sampleOpen', stereo, gain: this.sampleAsk.gain })
+    return true
+  }
+
+  /** RSP's level and threshold, from the next block. */
+  sampleSet(gainDb: number, thresholdDb: number | null): void {
+    const a = this.sampleAsk
+    if (a === null) return
+    this.sampleAsk = { ...a, gain: PeakMeter.fromDb(gainDb), threshold: thresholdDb === null ? null : PeakMeter.fromDb(thresholdDb) }
+    if (this.stream) send(this.stream, { t: 'sampleSet', gain: this.sampleAsk.gain })
+  }
+
+  /** Closes RSP: a take going on ends with what was recorded. */
+  sampleClose(): void {
+    this.sampleAsk = null
+    if (this.stream) send(this.stream, { t: 'sampleClose' })
+    this._samplePhase.value = { kind: 'ready' }
+    this._sampleLevel.value = { level: 0, clip: false }
+  }
+
+  /** The rate a take is made at: the open output's (null: none open). */
+  get sampleRate(): number | null {
+    return this.stream?.ctx.sampleRate ?? null
+  }
+
+  /**
+   * Arms a take into [pad] (pad key) from what was heard at [atMs]
+   * (performance.now(); null: where the mix is), or from the threshold's
+   * crossing after it; [latched] hands-free; at most [maxFrames].
+   */
+  sampleArm(pad: number, atMs: number | null, latched: boolean, maxFrames: number): void {
+    const s = this.stream
+    if (!s || this.sampleAsk === null) return
+    send(s, { t: 'sampleAsk', ask: { kind: 'arm', pad, at: this.mixFrameAt(s, atMs), latched, maxFrames, threshold: this.sampleAsk.threshold } })
+  }
+
+  /** Schedules a take of exactly [length] frames into [pad] from mix frame [start] (bars, a pattern's loop). */
+  sampleSchedule(pad: number, start: number, length: number, maxFrames: number): void {
+    if (this.stream && this.sampleAsk !== null) send(this.stream, { t: 'sampleAsk', ask: { kind: 'schedule', pad, start, length, maxFrames } })
+  }
+
+  /** The mix frame heard at [atMs] (performance.now()), by the latest stamp; null without one. */
+  sampleFrameAt(atMs: number): number | null {
+    const s = this.stream
+    return s ? this.mixFrameAt(s, atMs) : null
+  }
+
+  /** Stops the take at what was heard at [atMs] (null: where the mix is), keeping what came before. */
+  sampleStop(atMs: number | null = null): void {
+    const s = this.stream
+    if (s) send(s, { t: 'sampleAsk', ask: { kind: 'stop', at: this.mixFrameAt(s, atMs) } })
+  }
+
+  /** Throws the take away (a tap, or a press that became a scroll). */
+  sampleCancel(): void {
+    if (this.stream) send(this.stream, { t: 'sampleAsk', ask: { kind: 'cancel' } })
+  }
+
+  /** Each take SAMPLE made. */
+  onSampleTake(listener: (take: TapTake) => void): () => void {
+    return add(this.sampleTakeListeners, listener)
+  }
+
+  private mixFrameAt(s: Stream, atMs: number | null): number | null {
+    return atMs !== null && s.stamp !== null ? Math.round(frameAt(s.stamp, atMs)) : null
+  }
+
   /** RECORD waits for a press: the mixer sends its stamps meanwhile. */
   seqArm(armed: boolean): void {
     this.seqArmed = armed
@@ -833,6 +927,9 @@ export class LiveAudio {
     this.ungated.clear()
     this._voices.value = EMPTY
     this._late.value = null
+    // SAMPLE's take goes with the output; RSP opens again on the next one while wanted.
+    this._samplePhase.value = { kind: 'ready' }
+    this._sampleLevel.value = { level: 0, clip: false }
     this.wireless = false
     this.counted = null
     this.refreshDelay()
@@ -1039,6 +1136,8 @@ export class LiveAudio {
     if (this.seqArmed) send(s, { t: 'seqArmed', armed: true })
     // The arp playing on: from where the new output's mix is.
     if (this.arp !== null) this.sendArp(s, this.arp)
+    // SAMPLE's RSP on the new output's mix.
+    if (this.sampleAsk !== null) send(s, { t: 'sampleOpen', stereo: this.sampleAsk.stereo, gain: this.sampleAsk.gain })
     // The click goes on with the new output.
     if (this.clickAsk.on) this.sendClick(s)
     ctx.addEventListener?.('statechange', () => this.stateChanged(s))
@@ -1207,6 +1306,15 @@ export class LiveAudio {
         for (const f of [...this.beatListeners]) f({ index: m.index, at, accent: m.accent })
         return
       }
+      case 'samplePhase':
+        this._samplePhase.value = m.phase
+        return
+      case 'sampleLevel':
+        this._sampleLevel.value = { level: m.level, clip: m.clip }
+        return
+      case 'sampleTake':
+        for (const f of [...this.sampleTakeListeners]) f(m.take)
+        return
       case 'arpStep':
         for (const f of [...this.arpStepListeners]) f(m.step)
         return

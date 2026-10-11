@@ -20,6 +20,7 @@
 import type { RecState } from '../core/features/takeRecorder'
 import type { LiveArpPlan, LiveSeqPlan, LiveTimeline, RecordedTake } from '../platform/audio/liveAudio'
 import type { ArpStep } from '../platform/audio/patternScheduler'
+import type { SampleStore } from '../platform/storage/sampleStore'
 import type { Beat, BeatGrid } from '../core/features/tempo'
 import type { TakeStore } from '../platform/storage/takeStore'
 import type { ReadonlySignal } from '@preact/signals'
@@ -340,6 +341,8 @@ export interface Deps {
   padSounds: PadSoundStore
   /** Where Live's takes are kept (Android files/takes); without it there is no TAKE. */
   takes?: TakeStore
+  /** Where SAMPLE's recordings wait until they are on the EP-133 (Android files/samples); without it there is no SAMPLE. */
+  samples?: SampleStore
   /** Live's last read, shown while the device is not connected. */
   lastRead: LastReadDeps
   /** Live's pad changes made offline, until the EP-133 connects (or Reset pads). */

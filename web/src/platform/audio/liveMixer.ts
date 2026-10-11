@@ -39,6 +39,7 @@ import type { PhaseAnchors, TransportClock } from '../../core/features/sequencer
 import { VoiceMixer, VoiceShape } from '../../core/formats/voiceMixer'
 import { PatternScheduler, type ArpStep, type PadVoice, type ScheduleSink } from './patternScheduler'
 import { ClickScheduler, ClickTrack, type Click, type FrameGrid } from './clickScheduler'
+import { SampleTap, type TapAsk, type TapPhase, type TapTake } from './sampleTap'
 import { Seq } from '../../core/features/pattern'
 import { framesPerTick, frameOf } from '../../core/features/sequencer'
 
@@ -91,6 +92,14 @@ export type ToMixer =
   /** PatternScheduler.play: tick 0 at mix frame [atFrame] (a press), else a lookahead and [leadMs] on, after [countInBars]. */
   | { readonly t: 'play'; readonly countInBars: number; readonly leadMs: number; readonly atFrame: number | null; readonly atPress: boolean }
   | { readonly t: 'stopSeq' }
+  /** SAMPLE's RSP opens on the mix: [stereo] or mixed down, its level [gain] (linear); an arm brings its threshold. */
+  | { readonly t: 'sampleOpen'; readonly stereo: boolean; readonly gain: number }
+  /** SAMPLE's RSP closes: a take going on ends with what was recorded. */
+  | { readonly t: 'sampleClose' }
+  /** RSP's level, from the next block. */
+  | { readonly t: 'sampleSet'; readonly gain: number }
+  /** A take armed, scheduled, stopped or thrown away (SampleTap's TapAsk). */
+  | { readonly t: 'sampleAsk'; readonly ask: TapAsk }
   /** What the arp or note repeat plays (ArpPlan, its sounds by loaded sample id); null stops it. */
   | { readonly t: 'arp'; readonly plan: ArpPlanMessage | null }
   /** RECORD waits for a press: the mix's stamps are wanted. */
@@ -158,6 +167,12 @@ export type FromMixer =
   | { readonly t: 'takeEnd'; readonly keep: number; readonly limit: boolean }
   /** The pattern's clock (anchored, or a new tempo); null when it stopped. */
   | { readonly t: 'timeline'; readonly clock: TransportClock | null }
+  /** SAMPLE's take: waiting, recording or ready again. */
+  | { readonly t: 'samplePhase'; readonly phase: TapPhase }
+  /** RSP's level (0..1 across −60..0 dBFS) and whether it clipped in the last second, a few times a second. */
+  | { readonly t: 'sampleLevel'; readonly level: number; readonly clip: boolean }
+  /** A take SAMPLE made. */
+  | { readonly t: 'sampleTake'; readonly take: TapTake }
   /** A step the arp played on the pattern's clock, once mixed: for RECORD. */
   | { readonly t: 'arpStep'; readonly step: ArpStep }
   /** A pad the patterns play has no sound in the plan (pad key). */
@@ -196,6 +211,8 @@ export class MixerHost {
   /** The longest take, in frames (TakeRecorder.MAX_SECONDS); tests make it short. */
   maxTakeFrames: number
   private recorder: TakeRecorder | null = null
+  // SAMPLE's RSP, while open.
+  private tap: SampleTap | null = null
   private lastRec: RecState = { kind: 'idle' }
   private burst = new Int16Array(0)
   private chunk = new Int16Array(MixerHost.TAKE_CHUNK_FRAMES * 2)
@@ -293,6 +310,30 @@ export class MixerHost {
       case 'stopSeq':
         this.seq.stop()
         return
+      case 'sampleOpen': {
+        this.tap?.close()
+        const post = this.post
+        const tap = new SampleTap(this.rate, m.stereo, {
+          phase: (phase) => post({ t: 'samplePhase', phase }),
+          level: (level, clip) => post({ t: 'sampleLevel', level, clip }),
+          take: (take) => post({ t: 'sampleTake', take }),
+        })
+        tap.gain = m.gain
+        this.tap = tap
+        // A press finds its frame by the stamps: they go while SAMPLE is open.
+        this.stampedAt = Number.NEGATIVE_INFINITY
+        return
+      }
+      case 'sampleClose':
+        this.tap?.close()
+        this.tap = null
+        return
+      case 'sampleSet':
+        if (this.tap !== null) this.tap.gain = m.gain
+        return
+      case 'sampleAsk':
+        this.tap?.ask(m.ask)
+        return
       case 'arp': {
         const a = m.plan
         this.seq.arp = a === null ? null : { ...a, voices: padVoices(a.voices) }
@@ -353,7 +394,8 @@ export class MixerHost {
   /** Records what the recorder keeps of the burst just rendered (planar -1..1, as 16-bit frames). */
   private record(left: Float32Array, right: Float32Array, frames: number, at: number): void {
     const r = this.recorder
-    if (r === null) return
+    const tap = this.tap
+    if (r === null && tap === null) return
     if (this.burst.length < frames * 2) this.burst = new Int16Array(frames * 2)
     const out = this.burst
     // The mix's 16-bit levels, as Kotlin's render gives them (x / 32768 * 32768 is exact).
@@ -361,6 +403,9 @@ export class MixerHost {
       out[2 * i] = Math.trunc(left[i]! * 32768)
       out[2 * i + 1] = Math.trunc(right[i]! * 32768)
     }
+    // SAMPLE's RSP takes the same mix, before the click (LiveAudio's sampleTap).
+    tap?.mixed(out, frames, at)
+    if (r === null) return
     let first: number | null = null
     for (const s of this.mixer.started) if (first === null || s.frame < first) first = s.frame
     const k = r.onBurst(out, frames, at, first)
@@ -407,7 +452,7 @@ export class MixerHost {
     const before = this.mixer.frame
     this.seq.fill(this.sink, before, this.rate)
     // Where the mix is, a few times a second while the pattern runs, RECORD waits or the click sounds: the main thread's stamp.
-    if ((this.seq.running || this.seqArmed || this.clickOn) && before - this.stampedAt >= this.rate / 4) {
+    if ((this.seq.running || this.seqArmed || this.clickOn || this.tap !== null) && before - this.stampedAt >= this.rate / 4) {
       this.stampedAt = before
       this.post({ t: 'stamp', frame: before, time, freeTick: this.seq.freeTick })
     }

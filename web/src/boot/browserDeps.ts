@@ -36,6 +36,7 @@ import { pickFiles, readFile } from '../platform/files/pick'
 import { saveBytes } from '../platform/files/save'
 import { onLaunchFiles } from '../platform/files/launchQueue'
 import { canShareFiles, shareFile, shareText } from '../platform/share/share'
+import { IdbSampleStore, MemorySampleStore, type SampleStore } from '../platform/storage/sampleStore'
 import { IdbTakeStore, memoryTakeStore, type TakeStore } from '../platform/storage/takeStore'
 import { WebAudioPlayer } from '../platform/audio/player'
 import { LiveAudio } from '../platform/audio/liveAudio'
@@ -103,6 +104,7 @@ export async function createBrowserDeps(options: BrowserDepsOptions = {}): Promi
   let library: LibraryApi
   let padSounds: PadSoundStore
   let takes: TakeStore
+  let samples: SampleStore
   try {
     const dbOptions: OpenOptions = {}
     if (demo) dbOptions.name = DEMO_DB_NAME
@@ -112,13 +114,15 @@ export async function createBrowserDeps(options: BrowserDepsOptions = {}): Promi
     library = lib
     padSounds = new IdbPadSoundStore(lib.db)
     takes = new IdbTakeStore(lib.db)
+    samples = new IdbSampleStore(lib.db)
   } catch (e) {
     // Without a database the app still starts; every library action says why it failed.
     library = unavailableLibrary(e)
     // Live's pad copies then last for the session.
     padSounds = memoryPadSoundStore()
-    // And takes too.
+    // And takes too, and SAMPLE's recordings.
     takes = memoryTakeStore()
+    samples = new MemorySampleStore()
   }
   const settings = new SettingsStore(storage)
   const mirrorPrefs = new MirrorPrefs(storage)
@@ -158,6 +162,7 @@ export async function createBrowserDeps(options: BrowserDepsOptions = {}): Promi
     liveAudio,
     padSounds,
     takes,
+    samples,
     lastRead: new LastReadPrefs(storage),
     offlinePads: new OfflinePadsPrefs(storage),
     offlinePadSettings: new OfflinePadsPrefs(storage, LIVE_PAD_SETTINGS_KEY),
