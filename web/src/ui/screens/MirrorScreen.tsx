@@ -167,6 +167,7 @@ import { StepPanel, useStep, useStepNoteMark, useStepPadMark } from '../live/Ste
 import { ArpWords, useArpLine, useArpNote, useArpPad } from '../live/ArpWords'
 import { ClaudeSection } from '../live/ClaudeSection'
 import { ScenePanel, useScene } from '../live/ScenePanel'
+import { SamplePanel, useSample, useSamplePadLed } from '../live/SamplePanel'
 import { punchSlotForPad } from '../../state/fx'
 import { useDesk, useFinePointer, useWindowSize } from '../useDesk'
 import './MirrorScreen.css'
@@ -565,6 +566,9 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   // SCENE: the panel open, its focused column the group Live shows.
   const sceneCtx = useScene()
   const sceneOpen = useComputed(() => sceneCtx?.ui.open ?? false).value
+  // SAMPLE: the panel open (its pads light as the K.O. II's do).
+  const sampleCtx = useSample()
+  const sampleOpen = useComputed(() => sampleCtx?.ui.on ?? false).value
   useEffect(() => {
     if (sceneOpen && stepGroup !== null) sceneCtx?.onGroup(stepGroup)
   }, [sceneOpen, stepGroup])
@@ -908,8 +912,22 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   // The function keys over the pads, upright (none sideways); SOUND turns EDIT off again, so they stay in EDIT.
   // STEP's panel takes the function keys' place while it is open (on a phone on its side, the tools' column).
   // So does SCENE's (the two never open together).
-  const fnRow = stepOpen ? <StepPanel class="live__fn" /> : sceneOpen ? <ScenePanel class="live__fn" /> : inBar ? null : <FunctionRow class="live__fn" />
-  const sideStep = stepOpen ? <StepPanel class="live__fn live__side-step" /> : sceneOpen ? <ScenePanel class="live__fn live__side-step" /> : null
+  const fnRow = sampleOpen ? (
+    <SamplePanel class="live__fn" />
+  ) : stepOpen ? (
+    <StepPanel class="live__fn" />
+  ) : sceneOpen ? (
+    <ScenePanel class="live__fn" />
+  ) : inBar ? null : (
+    <FunctionRow class="live__fn" />
+  )
+  const sideStep = sampleOpen ? (
+    <SamplePanel class="live__fn live__side-step" />
+  ) : stepOpen ? (
+    <StepPanel class="live__fn live__side-step" />
+  ) : sceneOpen ? (
+    <ScenePanel class="live__fn live__side-step" />
+  ) : null
   const displayStrip = inBar ? null : editing ? <EditStrip /> : <DisplayStrip st={st} mirror={mirror} take={take} still={fixedNow !== null} />
   const allGroups = (
     <div class="live__all">
@@ -1759,12 +1777,15 @@ function PadCap(props: PadProps): JSX.Element {
   const stepMark = useStepPadMark(pad)
   // Held for note repeat: ringed.
   const arpHeld = useArpPad(pad)
+  // SAMPLE on: empty pads blink, those with a sound ringed, the take's pad lit.
+  const sampleLight = useSamplePadLed(pad, name !== null)
   const label =
     `${pad.groupLetter} ${pad.label}` +
     (name !== null ? `, ${name}` : '') +
     (mark === true ? MirrorText.PAD_HAS_NOTES : '') +
     (stepMark === 'picked' ? MirrorText.PICKED : stepMark === 'lit' ? MirrorText.ON_STEP : '') +
-    (arpHeld ? WebText.ARP_HELD : '')
+    (arpHeld ? WebText.ARP_HELD : '') +
+    (sampleLight === 'RECORDING' ? ', ' + MirrorText.REC : sampleLight === 'WAITING' ? ', ' + MirrorText.SAMPLE_WAITING : '')
   const dropping = ui.drop !== null && ui.drop.at === key
   const cls =
     `live-pad cap-3d${big ? ' live-pad--big' : ''}${playing ? ' is-playing' : ''}` +
@@ -1772,7 +1793,8 @@ function PadCap(props: PadProps): JSX.Element {
     (dropping ? ' is-drop' : '') +
     (mark === true ? ' is-erase-dot' : mark === false ? ' is-erase-dim' : '') +
     (stepMark === 'picked' ? ' is-step-picked' : stepMark === 'lit' ? ' is-step-lit' : '') +
-    (arpHeld ? ' is-arp-held' : '')
+    (arpHeld ? ' is-arp-held' : '') +
+    (sampleLight !== null ? ` is-sample-${sampleLight.toLowerCase()}` : '')
   // Over a pad, a dragged sound shows what it would replace: "snare 2 → vox chop".
   const shown = dropping && ui.drop?.name != null ? MirrorText.dropPreview(name ?? ui.drop.nameNow(pad), ui.drop.name) : name
   const content = (

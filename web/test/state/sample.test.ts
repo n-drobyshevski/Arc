@@ -4,7 +4,7 @@
 // KEEP puts it on its pad: connected it uploads, offline it waits as a recorded
 // change for Write (or goes to Takes when the changes are discarded).
 import 'fake-indexeddb/auto'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { physicalPad } from '../../src/core/features/padNotes'
 import { SampleCapture } from '../../src/core/features/sampleCapture'
 import { SoundSource } from '../../src/core/features/offlinePads'
@@ -13,7 +13,17 @@ import type { TapTake } from '../../src/platform/audio/sampleTap'
 import { memoryStorage } from '../../src/platform/storage/settings'
 import { disposeAll, liveHarness, until, type LiveHarness } from './liveHarness'
 
-afterEach(() => disposeAll())
+// A worker's clock starts near 0: a press 400 ms ago must still be a real time (pressTime).
+let clockSpy: { mockRestore(): void } | null = null
+beforeEach(() => {
+  const real = performance.now.bind(performance)
+  clockSpy = vi.spyOn(performance, 'now').mockImplementation(() => real() + 100_000)
+})
+
+afterEach(() => {
+  disposeAll()
+  clockSpy?.mockRestore()
+})
 
 // With pad numbers counted from the bottom, pad offset k of group A is a/p(k+1):
 // project 1 holds clap (slot 5) on a/p05.

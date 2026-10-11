@@ -27,6 +27,7 @@ export const ArcIcon = {
   IMPORT: 'IMPORT',
   FOLLOW: 'FOLLOW',
   SWAP: 'SWAP',
+  MIC: 'MIC',
   BLUETOOTH: 'BLUETOOTH',
   CLOCK: 'CLOCK',
   SYSTEM: 'SYSTEM',
@@ -264,6 +265,27 @@ export function Bluetooth(props: IconProps): JSX.Element {
   )
 }
 
+/**
+ * A microphone (Live's SAMPLE key): a capsule body (.3w wide, .48w tall from
+ * .08w) in a U-shaped holder (r = .25w about .42w) on a stem to .9w.
+ */
+export function Mic(props: IconProps): JSX.Element {
+  const body = W * 0.3
+  const r = W * 0.25
+  const holder = W * 0.42
+  return (
+    <Svg {...props} name="MIC">
+      <rect x={n(C - body / 2)} y={n(W * 0.08)} width={n(body)} height={n(W * 0.48)} rx={n(body / 2)} fill="currentColor" />
+      <path
+        d={`M${n(C - r)} ${n(holder)}A${n(r)} ${n(r)} 0 0 0 ${n(C + r)} ${n(holder)}M${C} ${n(holder + r)}V${n(W * 0.9)}`}
+        stroke="currentColor"
+        stroke-width={n(STROKE)}
+        stroke-linecap="round"
+      />
+    </Svg>
+  )
+}
+
 /** A face r = .4w with its two hands: late. */
 export function Clock(props: IconProps): JSX.Element {
   return (
@@ -352,6 +374,7 @@ const BY_NAME: Readonly<Record<ArcIcon, (p: IconProps) => JSX.Element>> = {
   SWAP: Swap,
   BLUETOOTH: Bluetooth,
   CLOCK: Clock,
+  MIC: Mic,
   SYSTEM: System,
   SUN: Sun,
   MOON: Moon,

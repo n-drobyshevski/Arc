@@ -99,6 +99,8 @@ export interface SettingsScreenProps {
   onHaptics?: (on: boolean) => void
   /** Make up for Bluetooth delay; [bluetooth] is the output's latency (ms) while it is taken for Bluetooth, else null. */
   onMakeUpDelay?: (on: boolean) => void
+  /** SAMPLE's review sheet after each take; absent where this browser can't sample (no row). */
+  onReviewSamples?: (on: boolean) => void
   bluetooth?: number | null
   /** Web: give the remembered library folder's permission back. */
   onReconnectFolder: () => void
@@ -557,6 +559,15 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
                         labelledBy={ids.titleId}
                         describedBy={ids.noteId}
                       />
+                    )}
+                  />
+                )}
+                {props.onReviewSamples !== undefined && (
+                  <SettingRow
+                    title={SettingsText.REVIEW_SAMPLES}
+                    note={SettingsText.REVIEW_SAMPLES_NOTE}
+                    control={(ids) => (
+                      <HwToggle on={settings.reviewSamples} onChange={(on) => props.onReviewSamples?.(on)} labelledBy={ids.titleId} describedBy={ids.noteId} />
                     )}
                   />
                 )}

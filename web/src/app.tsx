@@ -38,7 +38,7 @@
 // On a phone on its side (ui/live/window.ts liveInBar; never on the desk),
 // Live's display line rides in the top bar's middle (LiveBar, MirrorScreen's
 // LivePill) and the page leaves it out.
-import { signal, useComputed } from '@preact/signals'
+import { computed, signal, useComputed } from '@preact/signals'
 import { Component, type ComponentChildren, type JSX } from 'preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { FactorySounds } from './core/features/factorySounds'
@@ -48,7 +48,7 @@ import { Strings } from './core/text/strings'
 import { WebText } from './core/text/webText'
 import { attachDrop, isPakName } from './platform/files/pick'
 import { supported as hapticsSupported } from './platform/haptics'
-import type { ArcController } from './state/controller'
+import { REVIEW_KEY, type ArcController } from './state/controller'
 import { emptyMirrorState, type MirrorUi, type TaskUi } from './state/types'
 import { APP_BUILD } from './version'
 import { AppProvider, useController, useNav } from './ui/AppContext'
@@ -104,6 +104,8 @@ import { SceneContext, type SceneActions } from './ui/live/ScenePanel'
 import { ArpContext, type ArpActions } from './ui/live/ArpWords'
 import { ClaudeContext, learnUrl, type ClaudeActions } from './ui/live/ClaudeSection'
 import { BeatImportSheet } from './ui/sheets/BeatImportSheet'
+import { SampleContext, type SampleActions } from './ui/live/SamplePanel'
+import { SampleReviewSheet } from './ui/sheets/SampleReviewSheet'
 import { BeatCards } from './core/features/beatCard'
 import { stepWord } from './state/stepPlan'
 import { projectChoicesOf, projectKeyOf, projectKeyState } from './ui/live/projectKey'
@@ -121,6 +123,8 @@ const KEYS_SHEET = 'keys'
 /** Live's pattern sheet (RECORD held). */
 const PATTERN_SHEET = 'pattern'
 const BEAT_SHEET = 'beat'
+/** SAMPLE's review sheet after a take. */
+const REVIEW_SHEET = 'sample-review'
 /** Live's tempo sheet (TEMPO held). */
 const TEMPO_SHEET = 'tempo'
 /** Live's project sheet (PROJECT held). */
@@ -223,6 +227,9 @@ function Root(): JSX.Element {
   const scenes = useMemo(() => sceneUi(c), [c])
   const arp = useMemo(() => arpUi(c), [c])
   const claude = useMemo(() => claudeUi(c), [c])
+  const sample = useMemo(() => sampleUi(c), [c])
+  // The top bar's mic key: its light read there alone.
+  const micKey = useMemo(() => (sample === null ? null : { on: computed(() => c.sample.ui.value.on), onTap: () => c.toggleSample() }), [c, sample])
   // PROJECT held: the pads printed 1 to 9 pick a project instead of sounding.
   const projectHold = useMemo(() => new ProjectHold(), [])
   // Live's EDIT (giving a pad another sound): on Live, in PADS, until switched off or left.
@@ -375,6 +382,7 @@ function Root(): JSX.Element {
         hapticsSupported={hapticsSupported()}
         onHaptics={(on) => c.setHaptics(on)}
         onMakeUpDelay={(on) => c.setMakeUpDelay(on)}
+        onReviewSamples={c.sample.available ? (on) => c.sample.setReviewSamples(on) : undefined}
         bluetooth={c.liveBluetooth.value}
         onRestoreFolder={() => void c.pickFolder()}
         onReconnectFolder={() => void c.reconnectFolder()}
@@ -447,6 +455,7 @@ function Root(): JSX.Element {
         // Read by the top bar alone, so a new delay re-renders only that.
         late={v.tab === 'live' ? c.liveLate : null}
         madeUp={v.tab === 'live' ? c.delayMadeUpFor : null}
+        sample={v.tab === 'live' ? micKey : null}
         onDebug={() => nav.openScreen({ kind: 'debug' })}
         // The section list's last entry: the list closes and Settings opens in its place.
         onSettings={() => nav.replace(overlayLayer('menu'), screenLayer({ kind: 'settings' }))}
@@ -483,6 +492,7 @@ function Root(): JSX.Element {
     <TransportContext.Provider value={transport}>
     <StepContext.Provider value={step}>
     <SceneContext.Provider value={scenes}>
+    <SampleContext.Provider value={sample}>
     <ArpContext.Provider value={arp}>
     <ClaudeContext.Provider value={claude}>
     <TempoContext.Provider value={tempo}>
@@ -517,7 +527,7 @@ function Root(): JSX.Element {
       {/* The Device tab's sheets: pads 'pads:device:<n>', upload / trim from state.browser.draft. */}
       {tabs && v.tab === 'device' && <><DevicePadsSheet view={v} /><DeviceUploadSheet view={v} /></>}
       {/* Live's EDIT: the pad sheet 'edit:<group>:<offset>', and the upload / trim sheets for a new sample. */}
-      {tabs && v.tab === 'live' && <><PadEditSheet view={v} /><DeviceUploadSheet view={v} /><LivePatternSheet view={v} /><LiveTempoSheet view={v} /><LiveProjectSheet view={v} /><LiveFxSheet view={v} /><LiveBeatSheet view={v} /></>}
+      {tabs && v.tab === 'live' && <><PadEditSheet view={v} /><DeviceUploadSheet view={v} /><LivePatternSheet view={v} /><LiveTempoSheet view={v} /><LiveProjectSheet view={v} /><LiveFxSheet view={v} /><LiveBeatSheet view={v} /><LiveReviewSheet view={v} /></>}
       {/* The Backups tab's sheets: detail 'detail:<id>', compare picker 'comparePick:<id>',
           restore 'restore:<id>', the delete dialog 'delete'. */}
       {tabs && v.tab === 'backups' && <BackupsSheets view={v} />}
@@ -545,6 +555,7 @@ function Root(): JSX.Element {
     </TempoContext.Provider>
     </ClaudeContext.Provider>
     </ArpContext.Provider>
+    </SampleContext.Provider>
     </SceneContext.Provider>
     </StepContext.Provider>
     </TransportContext.Provider>
@@ -675,7 +686,11 @@ function sceneUi(c: ArcController): SceneActions | null {
       const ph = p.ui.value.phase
       return ph === 'PLAYING' || ph === 'COUNT_IN'
     },
-    onOpen: () => p.setSceneOpen(true),
+    onOpen: () => {
+      // The panels share the function keys' place.
+      c.sample.exit()
+      p.setSceneOpen(true)
+    },
     onClose: () => p.setSceneOpen(false),
     onGroup: (g) => p.setSceneGroup(g),
     onPlay: () => p.play(),
@@ -692,6 +707,80 @@ function sceneUi(c: ArcController): SceneActions | null {
     onCopy: () => p.clipCopy(),
     onPaste: () => p.clipPaste(),
   }
+}
+
+/** SAMPLE's panel and pads for Live (Kotlin SampleUi), its state read from the controller's signals as each part renders. */
+function sampleUi(c: ArcController): SampleActions | null {
+  const d = c.sample
+  if (!d.available) return null
+  return {
+    get ui() {
+      return d.ui.value
+    },
+    level: d.level,
+    get lastTake() {
+      return d.lastTake.value
+    },
+    onToggle: () => c.toggleSample(),
+    onClose: () => d.exit(),
+    onStop: () => d.stop(),
+    onSource: (step) => d.stepInput(step),
+    onStereo: (on) => d.setInput({ source: d.ui.peek().input.source, stereo: on }),
+    onGain: (db) => d.setGain(db),
+    onThreshold: (db) => d.setThreshold(db),
+    onLatch: (on) => d.setLatch(on),
+  }
+}
+
+/**
+ * SAMPLE's review sheet (Kotlin's review sheet layer): open while a take
+ * waits on it. Back, or the scrim, is a DISCARD (with UNDO on the toast).
+ */
+function LiveReviewSheet(props: { view: NavView }): JSX.Element | null {
+  const c = useController()
+  const nav = useNav()
+  const d = c.sample
+  const review = d.review.value
+  const playing = c.playing.value === REVIEW_KEY
+  const has = props.view.sheets.includes(REVIEW_SHEET)
+  const opened = useRef(false)
+  useEffect(() => {
+    if (review !== null && !has) {
+      if (opened.current) {
+        // The layer closed (Back) while the take waits.
+        opened.current = false
+        c.stopReview()
+        d.discardSample()
+      } else {
+        nav.open(sheetLayer(REVIEW_SHEET))
+      }
+    } else if (review === null && has) {
+      nav.close(sheetLayer(REVIEW_SHEET))
+    }
+    if (has) opened.current = true
+    if (review === null && !has) opened.current = false
+  }, [review !== null, has])
+  if (!d.available) return null
+  const done = (run: () => void) => () => {
+    c.stopReview()
+    run()
+  }
+  return (
+    <SampleReviewSheet
+      open={review !== null && has}
+      review={review}
+      playing={playing}
+      onTrim={(start, length) => d.setReviewTrim(start, length)}
+      onNormalize={(on) => d.setReviewNormalize(on)}
+      onTrimSilence={(on) => d.setReviewTrimSilence(on)}
+      onSlot={(step) => d.stepReviewSlot(step)}
+      onPlay={() => c.playReview()}
+      onStop={() => c.stopReview()}
+      onRetake={done(() => d.retakeSample())}
+      onKeep={done(() => d.keepSample())}
+      onDiscard={done(() => d.discardSample())}
+    />
+  )
 }
 
 /** Live tools' CLAUDE (Kotlin ClaudeUi), its state read from the controller's signals as the section renders. */
@@ -740,7 +829,10 @@ function stepUi(c: ArcController): StepActions | null {
       const n = p.step.value.picked
       return n === null ? null : stepWord(n, n.semitones === null ? c.mirrorName(n.pad) : null, c.settings.value.keysNames)
     },
-    onOpen: () => p.setStepOpen(true),
+    onOpen: () => {
+      c.sample.exit()
+      p.setStepOpen(true)
+    },
     onClose: () => p.setStepOpen(false),
     onRecordDown: () => p.stepRecordDown(),
     onRecordUp: () => p.stepRecordUp(),

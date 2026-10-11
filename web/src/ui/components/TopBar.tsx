@@ -21,8 +21,8 @@
 //
 // Web only, on the desk (from 1024px wide, [themeSwitch] set by Shell): the
 // theme switch (ThemeSwitch.tsx: System / Light / Dark) after the ? key; the
-// nav rail's Settings key opens Settings there. Live's mic key (SAMPLE) isn't
-// ported.
+// nav rail's Settings key opens Settings there. Live's mic key (SAMPLE, [sample])
+// is a toggle (aria-pressed) to screen readers, where Kotlin gives its state in words.
 import type { ComponentChildren, JSX } from 'preact'
 import type { ReadonlySignal } from '@preact/signals'
 import { CoachText } from '../../core/text/coachText'
@@ -61,6 +61,8 @@ export interface TopBarProps {
   onHelp: () => void
   /** The desk: the theme switch after the ? key. */
   themeSwitch?: ThemeSwitchProps
+  /** Live's SAMPLE key (Kotlin SampleKey): lit while SAMPLE's panel is open ([on], read here alone); null for none. */
+  sample?: { readonly on: ReadonlySignal<boolean>; onTap(): void } | null
   /** In place of the gap after the tag: Live's display line on a phone on its side. */
   middle?: ComponentChildren
 }
@@ -135,6 +137,7 @@ export function TopBar(props: TopBarProps): JSX.Element {
           )}
         </span>
         <span class="top-bar__gap top-bar__gap--wide" />
+        {props.sample && <SampleKey sample={props.sample} />}
         <span data-coach="top.help" class="top-bar__item">
           <IconBlock
             icon={ArcIcon.HELP}
@@ -155,5 +158,26 @@ export function TopBar(props: TopBarProps): JSX.Element {
         )}
       </div>
     </header>
+  )
+}
+
+/** The mic key before ?: round as it is, orange while SAMPLE's panel is open. */
+function SampleKey(props: { sample: NonNullable<TopBarProps['sample']> }): JSX.Element {
+  const on = props.sample.on.value
+  return (
+    <>
+      <span data-coach="top.sample" class="top-bar__item">
+        <IconBlock
+          icon={ArcIcon.MIC}
+          label={MirrorText.SAMPLE_TAG}
+          face={on ? 'var(--signal)' : 'var(--tab-off)'}
+          ink={on ? 'var(--on-signal)' : 'var(--navy)'}
+          onClick={props.sample.onTap}
+          pressed={on}
+          round
+        />
+      </span>
+      <span class="top-bar__gap" />
+    </>
   )
 }

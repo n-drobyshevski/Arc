@@ -71,8 +71,9 @@ test.describe('on a phone', () => {
     expect(bt!.width).toBe(20)
     expect(clock!.width).toBe(20)
     expect(clock!.x - (bt!.x + bt!.width)).toBeCloseTo(0, 0)
-    // The bar has nothing else new: the tag, this key, the connection key, ? (and the screen readers' Disconnect).
-    await expect(bar(page).getByRole('button')).toHaveCount(5)
+    // The bar has nothing else new: the tag, this key, the connection key, Live's mic key (SAMPLE), ?
+    // (and the screen readers' Disconnect).
+    await expect(bar(page).getByRole('button')).toHaveCount(6)
   })
 
   test('the lines no longer have a chip: the hit shows, and the words are the same', async ({ page }) => {

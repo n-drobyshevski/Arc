@@ -277,6 +277,18 @@ export const WebText = {
     return `${label} (${key})`
   },
 
+  // ---------- SAMPLE (Live) ----------
+  /** The SAMPLE panel's ✕ (Kotlin closes it with a swipe or Back). */
+  CLOSE_SAMPLE: 'Close sampling',
+  /**
+   * A source's name for screen readers: MirrorText.sourceName with arc's
+   * sound for RSP (the web resamples arc's own mix, not the phone's).
+   */
+  sampleSourceName(source: 'mic' | 'rsp' | 'usb', stereo: boolean): string {
+    const name = source === 'mic' ? 'Microphone' : source === 'rsp' ? "Resample arc's sound" : 'EP-133 over USB'
+    return name + (stereo ? ', stereo' : ', mono')
+  },
+
   // ---------- app updates (PWA; no Android counterpart) ----------
   UPDATE_READY: 'A new version of arc is ready.',
   UPDATE_RELOAD: 'Reload',

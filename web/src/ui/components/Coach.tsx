@@ -64,6 +64,7 @@ export const COACH_IDS = [
   'top.sections',
   'top.bluetooth',
   'top.connection',
+  'top.sample',
   'top.help',
   'top.theme',
   'edge.guide',
@@ -113,6 +114,8 @@ export const COACH_MARKS: Readonly<Record<CoachId, CoachMarkSpec>> = Object.free
   // Live's amber key while the sound plays late (the face of the key itself; Chrome.kt's TagInk).
   'top.bluetooth': { label: CoachText.BLUETOOTH, face: 'var(--warn)', ink: 'var(--tag-ink)' },
   'top.connection': navyTag(CoachText.CONNECTION),
+  // Live's mic key (Chrome.kt: the signal tag).
+  'top.sample': { label: CoachText.SAMPLE, face: 'var(--signal)', ink: 'var(--on-signal)' },
   'top.help': { label: CoachText.HELP, face: 'var(--ink)', ink: 'var(--shell)' },
   // Web: the desk's theme switch, after the ? key (the nav rail's Settings key
   // says Settings in words).

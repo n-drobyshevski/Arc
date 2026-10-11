@@ -2283,6 +2283,30 @@ export class ArcController {
   }
 
   /** Live plays the keys (one sound as notes) instead of the pads. */
+  /**
+   * The mic key in Live's top bar: SAMPLE opens (from KEYS too: Live goes to
+   * the pads for it), or closes while it is open. Call from the tap: the
+   * output wakes in it.
+   */
+  toggleSample(): void {
+    if (this.sample.open) return this.sample.exit()
+    this.deps.liveAudio.resumeInGesture()
+    if (this.settingsSignal.peek().liveKeys) this.setLiveKeys(false)
+    this.sample.enter()
+  }
+
+  /** The review sheet's play key: the part kept, as KEEP would put it on the pad. Call from the tap. */
+  playReview(): void {
+    const r = this.sample.reviewSound()
+    if (r === null) return
+    void this.playNow(REVIEW_KEY, new Uint8Array(r.pcm.buffer, r.pcm.byteOffset, r.pcm.byteLength), r.channels, r.rate)
+  }
+
+  /** The review's sound stops (its key again, or the sheet closing). */
+  stopReview(): void {
+    if (this.deps.player.playing.peek() === REVIEW_KEY) this.deps.player.stop()
+  }
+
   setLiveKeys(on: boolean): void {
     this.changeSettings((s) => ({ ...s, liveKeys: on }))
   }
@@ -2672,6 +2696,9 @@ export class ArcController {
     }
   }
 }
+
+/** The key the review sheet's take plays under (SoundPlayer.playing). */
+export const REVIEW_KEY = 'sample:review'
 
 /** " 2 samples kept in Takes." after a toast, when [n] recordings went there. */
 function samplesMoved(n: number): string {
