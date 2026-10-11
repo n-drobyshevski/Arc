@@ -907,6 +907,11 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
       plan={plan}
     />
   )
+  // Upright, one group and KEYS' grid print KEYS / PADS (and ARP) on the plate; KEYS keeps the rest of its row under it.
+  const modeStrip = <ModeStrip keysOn={keys.on} onMode={actions.onMode} />
+  const plateRow = (
+    <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} plan={plan} onPlate />
+  )
   // The KEYS grid on a phone on its side: the row's two halves, either side of the keys.
   const modeLead = <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} plan={plan} part="lead" />
   const modePicks = <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} plan={plan} part="picks" />
@@ -1115,8 +1120,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           <>
             {!inBar && <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={null} />}
             {fnRow}
-            <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} haptic={haptic} keysRef={gridKeys} />
-            {modeRow}
+            <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} haptic={haptic} keysRef={gridKeys} strip={modeStrip} />
+            {plateRow}
           </>
         ) : sideways ? (
           // A phone on its side (Android's sideways grid): the K.O. II's body as big as the room,
@@ -1137,8 +1142,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           <>
             {displayStrip}
             {fnRow}
-            <Group group={group} st={st} nameOf={nameOf} now={now} big coach ui={padUi} tracker={tracker} keyHints={keyHints} />
-            {modeRow}
+            <Group group={group} st={st} nameOf={nameOf} now={now} big coach ui={padUi} tracker={tracker} keyHints={keyHints} strip={modeStrip} />
             <GroupKeys keyboard={keyHints} group={group} st={st} now={now} onSelect={setGroup} />
           </>
         )}
@@ -1483,6 +1487,8 @@ interface GroupProps {
   target?: boolean
   /** Web: the computer keyboard's pad keys play this group's pads (they say their keys). */
   keyHints?: boolean
+  /** KEYS / PADS printed in the big grid's right margin ([ModeStrip]), where the plate has one. */
+  strip?: JSX.Element
   ui: PadUi
   tracker: PressTracker
 }
@@ -1511,7 +1517,7 @@ function Group(props: GroupProps): JSX.Element {
       )}
       {/* The pads are caps sitting in the device's body (Deck). The big grid is the K.O. II's
           own: over each row of pads the words printed on the body, each after its LED. */}
-      <div class={`live-deck${big ? ' live-deck--ko' : ''}`} role="group" aria-label={`${MirrorText.GROUP} ${letter}`}>
+      <div class={`live-deck${big ? ' live-deck--ko' : ''}${props.strip ? ' live-deck--strip' : ''}`} role="group" aria-label={`${MirrorText.GROUP} ${letter}`}>
         {ROWS.map((offsets, r) => (
           <Fragment key={r}>
             {big && (
@@ -1547,7 +1553,40 @@ function Group(props: GroupProps): JSX.Element {
             </div>
           </Fragment>
         ))}
+        {props.strip}
       </div>
+    </div>
+  )
+}
+
+/**
+ * KEYS / PADS printed in the K.O. plate's right margin (Kotlin ModeStrip):
+ * the two words turned to read upward, KEYS over PADS with a short line
+ * between, the mode shown in ink and the other grey; the whole strip is one
+ * key that shows the other mode. ARP (RPT in PADS) and LATCH keep to its
+ * lower half (LiveArp.kt's ArpStripSwitches).
+ * Web delta: a button (its name says what it shows and what a tap does, as
+ * the mode word's), not a switch.
+ */
+function ModeStrip(props: { keysOn: boolean; onMode?: (keysOn: boolean) => void }): JSX.Element {
+  const { keysOn } = props
+  return (
+    <div class="mode-strip">
+      <button
+        type="button"
+        class="mode-strip__key"
+        aria-label={MirrorText.modeSwitch(keysOn)}
+        onClick={() => props.onMode?.(!keysOn)}
+        data-coach="live.mode"
+        data-coach-label={CoachText.MODE}
+        data-coach-face="var(--navy)"
+        data-coach-ink="var(--on-navy)"
+      >
+        <span class={`mode-strip__word${keysOn ? ' is-on' : ''}`} aria-hidden="true">{MirrorText.MODE_KEYS.toUpperCase()}</span>
+        <span class="mode-strip__line" aria-hidden="true" />
+        <span class={`mode-strip__word${keysOn ? '' : ' is-on'}`} aria-hidden="true">{MirrorText.MODE_PADS.toUpperCase()}</span>
+      </button>
+      <ArpWords repeat={!keysOn} strip />
     </div>
   )
 }
@@ -1986,7 +2025,9 @@ function ModeRow(props: {
    * opens down, the octave's up).
    */
   part?: 'lead' | 'picks'
-}): JSX.Element {
+  /** The mode and ARP are printed on the plate ([ModeStrip]): the row keeps the rest (none in PADS). */
+  onPlate?: boolean
+}): JSX.Element | null {
   const { keys, actions, picker, onPicker, plan, part } = props
   const pick = (which: KeysPicker): { open?: boolean; onOpen?: (open: boolean) => void } =>
     onPicker
@@ -2058,14 +2099,16 @@ function ModeRow(props: {
     )
   }
   if (piano) return <SidewaysRow keys={keys} actions={actions} pick={pick} mode={modeWord} view={viewSwitch} arp={arpWords} />
+  const onPlate = props.onPlate === true
+  if (onPlate && !keys.on) return null
   return (
     // Spread across the row: mode at the start, octave at the end, scale between; pulled
     // up close under the grid (the words keep their full touch height).
     <div class="live-mode">
       <span class="live-mode__lead">
-        {modeWord}
+        {!onPlate && modeWord}
         {viewSwitch}
-        {arpWords}
+        {!onPlate && arpWords}
       </span>
       {keys.on && (
         <>
@@ -2328,6 +2371,8 @@ function KeysGrid(props: {
   haptic: boolean
   /** Filled with the computer keyboard's way in (web): its keys are fingers of their own. */
   keysRef?: { current: GridKeys | null }
+  /** KEYS / PADS printed in the plate's right margin ([ModeStrip]). */
+  strip?: JSX.Element
 }): JSX.Element {
   const { st, keys, keyNotes, now, tracker } = props
   // How lit each key is: the brightest device note that falls on it.
@@ -2387,7 +2432,7 @@ function KeysGrid(props: {
       data-coach-ink={COACH_YELLOW_INK}
     >
       {/* On the K.O. II's body as the big grid's pads are (live-deck--ko), the words printed over each row. */}
-      <div class="live-deck live-deck--ko live-kgrid__plate" role="group" aria-label={MirrorText.MODE_KEYS}>
+      <div class={`live-deck live-deck--ko live-kgrid__plate${props.strip ? ' live-deck--strip' : ''}`} role="group" aria-label={MirrorText.MODE_KEYS}>
         {ROWS.map((offsets, r) => (
           <Fragment key={r}>
             <div class="live-deck__print" aria-hidden="true">
@@ -2415,6 +2460,7 @@ function KeysGrid(props: {
             </div>
           </Fragment>
         ))}
+        {props.strip}
       </div>
     </div>
   )

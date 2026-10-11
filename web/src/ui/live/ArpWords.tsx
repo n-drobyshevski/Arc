@@ -79,14 +79,14 @@ export function useArpNote(note: number): number {
  * [top]: the words at the top of their touch area, as the mode word in a
  * row hugging the grid above.
  */
-export function ArpWords(props: { repeat: boolean; top?: boolean }): JSX.Element | null {
+export function ArpWords(props: { repeat: boolean; top?: boolean; strip?: boolean }): JSX.Element | null {
   const a = useArp()
   if (a === null) return null
   const ui = a.ui
   const { repeat } = props
   return (
     <span
-      class={`arp-words${props.top ? ' arp-words--top' : ''}`}
+      class={`arp-words${props.top ? ' arp-words--top' : ''}${props.strip ? ' arp-words--strip' : ''}`}
       data-coach="live.arp"
       data-coach-label={CoachText.ARP}
       data-coach-face="var(--navy)"

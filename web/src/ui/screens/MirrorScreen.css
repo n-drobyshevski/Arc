@@ -1361,3 +1361,61 @@
 .live-pad.is-step-picked .live-pad__label { color: var(--signal); }
 /* On a phone on its side, the panel over the side columns. */
 .live__side-step { flex: none; }
+
+/* KEYS / PADS printed in the plate's right margin (Kotlin ModeStrip, ModeStripWidth 16): upright,
+ * one group and KEYS' grid give the strip 16px of their width, the margin widening by it. */
+.live__one > .live-group--big > .live-deck--strip,
+.live__one > .live-kgrid > .live-deck--strip {
+  --u: clamp(0px, min((100cqw - var(--cap-dx) - 2px - 16px) / (var(--ko-cols) * 1.215 + 0.401), (100cqh - var(--cap-dy) - 2px) / 5.72), 170px);
+  position: relative;
+  padding-right: calc(var(--u) * 0.277 + var(--cap-dx) + 16px);
+}
+.mode-strip {
+  position: absolute;
+  top: calc(var(--u) * 0.215);
+  bottom: calc(var(--u) * 0.31 + var(--cap-dy));
+  right: var(--cap-dx);
+  width: calc(var(--u) * 0.277 + 16px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+/* The words read from the bottom up, as the edge tabs' are; the mode shown in the plate's print, the other grey. */
+.mode-strip__key {
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.mode-strip__key:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
+.mode-strip__word {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: clamp(9px, calc(var(--u) * 0.11), 12px);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--ko-led-off);
+  white-space: nowrap;
+}
+.mode-strip__word.is-on { color: var(--ko-label); font-weight: 700; }
+.mode-strip__line { flex: none; width: 1.5px; height: 14px; border-radius: 1px; background: var(--ko-edge); }
+/* ARP (RPT) and LATCH in the strip's lower half, turned as the words are. */
+.arp-words--strip { flex: 1 1 0; min-height: 0; flex-direction: column; justify-content: center; gap: 2px; }
+.arp-words--strip .arp-word {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  min-height: 0;
+  min-width: 32px;
+  padding: 4px 0;
+  font-size: clamp(9px, calc(var(--u) * 0.11), 12px);
+}

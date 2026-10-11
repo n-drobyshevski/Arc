@@ -1,5 +1,5 @@
-// ARP end to end, on the simulated EP-133 of ?demo: RPT and LATCH after the
-// PADS word (LATCH resting till RPT is on); a pad tapped with LATCH on keeps
+// ARP end to end, on the simulated EP-133 of ?demo: RPT and LATCH under KEYS /
+// PADS on the plate's strip (LATCH resting till RPT is on); a pad tapped with LATCH on keeps
 // repeating, ringed, and names the display line; RPT off lets it go. The
 // tempo sheet's TIMING page sets the arp's order, octaves and LATCH.
 import { expect, test } from './fixtures'
@@ -10,7 +10,7 @@ test('ARP: note repeat latched on a pad, and the arp section of TIMING', async (
   await page.goto('/?demo')
   await expect(page.locator('.live-strip')).toContainText('Project 1')
   const rpt = page.getByRole('switch', { name: 'Note repeat' })
-  const latch = page.locator('.live-mode').getByRole('switch', { name: 'Latch' })
+  const latch = page.locator('.mode-strip').getByRole('switch', { name: 'Latch' })
   await expect(rpt).toHaveAttribute('aria-checked', 'false')
   await expect(latch).toHaveAttribute('aria-disabled', 'true')
   await rpt.click()
