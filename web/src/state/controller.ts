@@ -52,6 +52,7 @@
 
 import { computed, signal, type ReadonlySignal, type Signal } from '@preact/signals'
 import { Keys, MAX_OCTAVE, MIN_OCTAVE, type NoteNames, type Scale } from '../core/features/keys'
+import { arpNote } from '../core/features/arp'
 import { choiceOf as pianoChoiceOf, type KeysView } from '../core/features/piano'
 import { padKey, type PhysicalPad } from '../core/features/padNotes'
 import type { PadTarget } from '../core/features/liveMirror'
@@ -307,6 +308,7 @@ export class ArcController {
       toast,
       stepWord: (n) => stepWord(n, n.semitones === null ? this.mirrorName(n.pad) : null, this.deps.settings.settings.keysNames),
       shapeOf: (pad, keys) => this.shapeFor({ group: Math.floor(pad / 12), offset: pad % 12 }, keys),
+      noteNames: () => this.deps.settings.settings.keysNames,
     })
     this.padEdit = new PadEditDesk({
       store: this.store,
@@ -614,8 +616,9 @@ export class ArcController {
       void this.live.openAudio()
       return
     }
-    // The pattern and the click stop with the sound (Android's focus lost).
+    // The pattern, the arp and the click stop with the sound (Android's focus lost).
     this.pattern.stop()
+    this.pattern.arpClear()
     this.pattern.setClick(false)
     // A punch-in lasts while it is held.
     this.fx.desk.punchAllUp()
@@ -635,6 +638,8 @@ export class ArcController {
   /** Live's output let go at once (the page goes away, or the controller is disposed). */
   private dropLiveAudio(): void {
     this.cancelAudioClose()
+    // The arp's notes go with the output; it stays on.
+    this.pattern.arpClear()
     this.live.closeAudio()
     // Coming back (from the back-forward cache) opens it again.
     this.audioWanted = false
@@ -986,6 +991,7 @@ export class ArcController {
 
   stopPlayback(): void {
     this.playToken++
+    this.pattern.arpClear()
     this.live.stopAll()
     this.deps.player.stop()
   }
@@ -1140,6 +1146,7 @@ export class ArcController {
 
   /** Closes it (Live left the screen); driven by [setLive] / [tabChanged]. */
   closeLiveAudio(): void {
+    this.pattern.arpClear()
     this.live.closeAudio()
   }
 
@@ -1192,6 +1199,13 @@ export class ArcController {
       } else {
         this.pattern.erasePadDown(pad, pressedAt)
       }
+      return Promise.resolve()
+    }
+    // The arp on (RPT): the press holds the pad for note repeat, not played or recorded itself.
+    // One a scroll may yet take becomes the KEYS sound, and starts RECORD armed, once kept ([keepPad]).
+    if (this.pattern.arpTakes(hold)) {
+      if (!unsure) this.live.selectKeysPad(pad)
+      this.pattern.arpPress(padVoice(pad), arpNote(pad, null), false, pressedAt, hold, unsure)
       return Promise.resolve()
     }
     const done = this.live.playPad(pad, hold, unsure, at)
@@ -1256,6 +1270,11 @@ export class ArcController {
   keepPad(pad: PhysicalPad): Promise<void> {
     // One the PAD flow was waiting for: its tap.
     if (this.pattern.sceneTapKept(pad, padVoice(pad))) return Promise.resolve()
+    // One the arp holds: neither played nor recorded itself.
+    if (this.pattern.arpKeep(padVoice(pad))) {
+      this.live.selectKeysPad(pad)
+      return Promise.resolve()
+    }
     const k = padKey(pad)
     const u = this.pressUnsure.get(k)
     if (u !== undefined) {
@@ -1280,6 +1299,9 @@ export class ArcController {
   releasePad(pad: PhysicalPad, at?: number): void {
     // Unsure for the PAD flow and lifted inside the scroll window: its tap.
     if (this.pattern.sceneTapKept(pad, padVoice(pad))) return
+    // One the arp holds, unsure and lifted inside the scroll window, was a tap; its note goes with the finger (unless latched).
+    if (this.pattern.arpKeep(padVoice(pad))) this.live.selectKeysPad(pad)
+    this.pattern.arpRelease(padVoice(pad))
     const releasedAt = pressTime(at, this.deps.perfNow())
     const k = padKey(pad)
     // Unsure in STEP or CORRECT and lifted inside the scroll window: a tap.
@@ -1320,6 +1342,8 @@ export class ArcController {
   /** The press on the pad turned into a scroll (the all-groups page): its sound ends at once. */
   cutPad(pad: PhysicalPad): void {
     if (this.pattern.sceneTapCut(padVoice(pad))) return
+    // Nor does it repeat.
+    this.pattern.arpCut(padVoice(pad))
     const k = padKey(pad)
     if (this.pressUnsure.delete(k)) return
     const taken = this.pressTaken.get(k)
@@ -1391,6 +1415,12 @@ export class ArcController {
       }
       return Promise.resolve()
     }
+    // The arp on: the note joins the arp's, neither played nor recorded itself.
+    if (this.pattern.arpTakes(hold)) {
+      if (pad === null) this.toastOnce(MirrorText.PICK_SOUND)
+      else this.pattern.arpPress(noteVoice(note), arpNote(pad, note - Keys.ROOT_NOTE), true, pressedAt, hold)
+      return Promise.resolve()
+    }
     const done = this.live.playNote(note, hold, at)
     if (pad !== null) this.pattern.press(pad, note - Keys.ROOT_NOTE, noteVoice(note), pressedAt, hold)
     return done
@@ -1401,6 +1431,16 @@ export class ArcController {
     this.deps.liveAudio.setLatencyHint?.(choice)
   }
 
+  /** KEYS [note] held at [pressure] (the pointer's own, while the arp is on): its velocity, on a device that tells pressure. */
+  notePressure(note: number, pressure: number): void {
+    this.pattern.arpPressure(noteVoice(note), pressure)
+  }
+
+  /** [pad] held at [pressure] (the pointer's own, while note repeat is on): its velocity, on a device that tells pressure. */
+  padPressure(pad: PhysicalPad, pressure: number): void {
+    this.pattern.arpPressure(padVoice(pad), pressure)
+  }
+
   /** The latency test's Reset: every engine's times go (the engines tried keep their rows). */
   resetLatency(): void {
     this.live.resetLatency()
@@ -1408,6 +1448,8 @@ export class ArcController {
 
   /** The last finger left the note: it fades out. */
   releaseNote(note: number, at?: number): void {
+    // A note the arp holds goes with the finger (unless latched).
+    this.pattern.arpRelease(noteVoice(note))
     const pad = this.store.get().keysPad
     const taken = this.pressTaken.get(1000 + note)
     if (taken !== undefined) {
@@ -2087,6 +2129,8 @@ export class ArcController {
   /** How KEYS names its notes (Settings → Live → Note names). */
   setKeysNames(names: NoteNames): void {
     this.changeSettings((s) => ({ ...s, keysNames: names }))
+    // The arp's line names its notes so.
+    this.pattern.refreshArp()
   }
 
   setKeysShowNames(on: boolean): void {

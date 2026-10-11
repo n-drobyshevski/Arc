@@ -36,11 +36,12 @@ import { PhaseAnchors, passOf, positionOf, tickAt as clockTickAt, msOf, type Pat
 import { Transport, type TransportAction } from '../core/features/transport'
 import { ClockFollow, TapTempo, Tempo, type Beat } from '../core/features/tempo'
 import type { MidiEvent } from '../core/protocol/midiInput'
+import { ArpSettings, type ArpNote, type ArpOrder } from '../core/features/arp'
 import { FeatureText } from '../core/text/featureText'
 import { MirrorText } from '../core/text/mirrorText'
 import type { PatternPrefs, PatternSettings } from '../platform/storage/settings'
 import type { VoiceShape } from '../core/formats/voiceMixer'
-import type { Deps, LiveTimeline } from './deps'
+import type { ArpStep, Deps, LiveTimeline } from './deps'
 import type { LiveSounds } from './live'
 import { sameShape } from './padShape'
 import {
@@ -57,8 +58,9 @@ import {
   withoutNote,
   type PatternUiState,
 } from './patternPlan'
+import { ARP_PRESSURE_MS, ARP_UI, ArpDesk, type ArpUi } from './arpPlan'
 import { ClipMode, PadStage, SCENE_UI, SceneDesk, type SceneUi } from './scenePlan'
-import { CORRECT_SHOWN_MS, STEP_UI, StepDesk, auditionMs, stepOpens, stepWord, type StepNote, type StepUi } from './stepPlan'
+import { CORRECT_SHOWN_MS, STEP_UI, StepDesk, arpTakesPress, auditionMs, stepOpens, stepWord, type StepNote, type StepUi } from './stepPlan'
 import type { Store } from './store'
 import type { UiState } from './types'
 
@@ -103,6 +105,8 @@ export interface PatternHost {
   shapeOf?(pad: number, keys: boolean): Partial<VoiceShape>
   /** A note as STEP's status line names it (stepWord: the KEYS note, the pad's sound, else the pad). */
   stepWord?(n: StepNote): string
+  /** How KEYS names its notes (the arp's line); letters when not given. */
+  noteNames?(): NoteNames
 }
 
 /** The plan last handed to the sequencer, to tell when a new one changes anything. */
@@ -186,6 +190,9 @@ export class PatternDesk {
     this.metronome = this._metronome
     const audio = host.deps.liveAudio
     if (audio.onSeqMissing) this.cleanups.push(audio.onSeqMissing(() => this.refreshPlan()))
+    // A step the arp played while the pattern runs: recorded here.
+    if (audio.onArpStep) this.cleanups.push(audio.onArpStep((step) => this.recordArpStep(step)))
+    this._arp.value = this.arpDesk.ui(this.settings.arpOn, this.settings.arp, this.settings.timing, this.noteNames())
     if (audio.onBeat) this.cleanups.push(audio.onBeat((b) => (this._beats.value = b)))
     // The output went (Live left the screen long, or a new output): the transport stops with it.
     if (audio.timeline) {
@@ -205,6 +212,7 @@ export class PatternDesk {
   }
 
   dispose(): void {
+    this.cancelArpPressure()
     this.stopLoop()
     this.cancelCorrectedShown()
     this.watchClick(false)
@@ -263,6 +271,8 @@ export class PatternDesk {
     // The scene panel and its picks waiting are the other project's: dropped, not applied by the STOP.
     this.sceneDesk.reset()
     this.sceneTaps.clear()
+    // The arp's notes were the other project's pads.
+    this.arpClear()
     this.stop()
     this.closeStep()
     this.save()
@@ -279,6 +289,7 @@ export class PatternDesk {
   /** The device's tempo changed (or stopped coming): the plan follows. */
   tempoChanged(): void {
     this.refreshPlan()
+    this.publishArp()
   }
 
   private get recorder(): PatternRecorder {
@@ -771,6 +782,7 @@ export class PatternDesk {
     if (this.transport.state.phase === 'ARMED') this.stop()
     this.setErase(false)
     this.closeScene()
+    this.arpClear()
     this.stepDesk.openOn(this.project, group)
     this.publishStep()
   }
@@ -1221,6 +1233,190 @@ export class PatternDesk {
     this.publishScene()
   }
 
+  // ---------- ARP: the arpeggiator (KEYS) and note repeat (PADS), on TIMING's interval (an addition) ----------
+
+  // The arp's notes, the pads loading for it and those found nowhere this run, and pressure's last plan and the next.
+  private readonly arpDesk = new ArpDesk()
+  private readonly arpLoading = new Set<number>()
+  private readonly arpTried = new Set<number>()
+  private arpPressureAt = Number.NEGATIVE_INFINITY
+  private arpPressureTimer: unknown = null
+  private readonly _arp = signal<ArpUi>(ARP_UI)
+  /** The arp as Live shows it: on, LATCH, the notes held, and the display line while it plays. */
+  readonly arp: ReadonlySignal<ArpUi> = this._arp
+
+  /** ARP (KEYS) / RPT (PADS) on or off (kept); off, the notes it held go and it stops. */
+  setArpOn(on: boolean): void {
+    if (!on) this.arpClear()
+    this.changeSettings({ ...this.settings, arpOn: on })
+  }
+
+  /** The order KEYS's held notes play in (kept). */
+  setArpOrder(order: ArpOrder): void {
+    this.changeSettings({ ...this.settings, arp: ArpSettings.withOrder(this.settings.arp, order) })
+  }
+
+  /** Over 1 to 3 octaves (kept). */
+  setArpOctaves(n: number): void {
+    this.changeSettings({ ...this.settings, arp: ArpSettings.withOctaves(this.settings.arp, n) })
+  }
+
+  /** Each note held for 10..100 % of a step (kept). */
+  setArpGate(percent: number): void {
+    this.changeSettings({ ...this.settings, arp: ArpSettings.withGate(this.settings.arp, Math.round(percent)) })
+  }
+
+  /** LATCH (kept): the notes play on after the fingers are up; off, those no finger holds go. */
+  setArpLatch(on: boolean): void {
+    if (!on) this.arpDesk.unlatch()
+    this.changeSettings({ ...this.settings, arp: ArpSettings.withLatch(this.settings.arp, on) })
+  }
+
+  /** Whether the arp takes a press: it is on, and the press holds (a screen reader's tap only latched); not in the STEP panel. */
+  arpTakes(hold: boolean): boolean {
+    return arpTakesPress(this.settings.arpOn, this.settings.arp.latch, hold, this.stepDesk.open)
+  }
+
+  /**
+   * A press on voice [key] at [pressedAt] while the arp is on: [note]
+   * joins the arp's notes ([keys]: a KEYS note; else a pad for note
+   * repeat), neither played nor recorded itself; the sequencer plays it on
+   * the next step (the first of a run on the press). With RECORD armed,
+   * the recording starts on it, as on a press's (one [unsure], once kept:
+   * [arpKeep]); the arp's steps are what it records.
+   */
+  arpPress(key: string, note: ArpNote, keys: boolean, pressedAt: number, hold: boolean, unsure = false): void {
+    if (!unsure) this.padDown(pressedAt)
+    const latch = this.settings.arp.latch
+    if (this.arpDesk.press(key, note, keys, pressedAt, latch, unsure)) this.arpTried.clear()
+    // A tap that never lets go (latched, or it wouldn't be here): up at once, its note kept.
+    if (!hold) this.arpDesk.release(key, latch)
+    this.publishArp()
+  }
+
+  /** The unsure press on voice [key] the arp holds was a press after all: RECORD armed starts on it. False when the arp doesn't hold it. */
+  arpKeep(key: string): boolean {
+    const at = this.arpDesk.keep(key)
+    if (at === null) return false
+    this.padDown(at)
+    return true
+  }
+
+  /** The finger left voice [key]: a note the arp holds goes with it (unless latched). */
+  arpRelease(key: string): void {
+    if (this.arpDesk.release(key, this.settings.arp.latch)) this.publishArp()
+  }
+
+  /** The press on voice [key] was a scroll after all: nor does it repeat. */
+  arpCut(key: string): void {
+    if (this.arpDesk.cut(key)) this.publishArp()
+  }
+
+  /** Voice [key] held at [pressure] (the touch's own, while the arp is on): its velocity, on a device that tells pressure. */
+  arpPressure(key: string, pressure: number): void {
+    if (!this.arpDesk.pressure(key, pressure)) return
+    if (this.arpPressureTimer !== null) return
+    const deps = this.host.deps
+    const wait = ARP_PRESSURE_MS - (deps.perfNow() - this.arpPressureAt)
+    if (wait <= 0) {
+      this.arpPressureAt = deps.perfNow()
+      this.publishArp()
+      return
+    }
+    this.arpPressureTimer = deps.setTimeout(() => {
+      this.arpPressureTimer = null
+      this.arpPressureAt = deps.perfNow()
+      this.publishArp()
+    }, wait)
+  }
+
+  /** The arp's notes go (another project, the output closed, playback stopped); it stays on. */
+  arpClear(): void {
+    this.cancelArpPressure()
+    this.arpDesk.clear()
+    this.publishArp()
+  }
+
+  /**
+   * Hands the sequencer what the arp plays: on, its notes, on their pads'
+   * sounds in memory as a press plays them, at TIMING and the arp's
+   * settings and the pattern's tempo; null (it stops) off or with none. A
+   * pad whose sound isn't in memory loads, and the plan follows. Live's
+   * line follows too. (The KEYS names changed: [refreshArp].)
+   */
+  private publishArp(): void {
+    const s = this.settings
+    let plan = null
+    if (s.arpOn && this.arpDesk.notes.length > 0) {
+      const pads = new Set(this.arpDesk.notes.map((n) => n.pad.group * 12 + n.pad.offset))
+      const { voices, missing } = patternVoices(pads, (pad) => this.host.live.patternVoice(pad))
+      const shapes = new Map<number, Partial<VoiceShape>>()
+      const keysShapes = new Map<number, Partial<VoiceShape>>()
+      const shapeOf = this.host.shapeOf
+      if (shapeOf) {
+        for (const pad of voices.keys()) {
+          shapes.set(pad, shapeOf(pad, false))
+          keysShapes.set(pad, shapeOf(pad, true))
+        }
+      }
+      for (const pad of missing) this.loadArpPad(pad)
+      plan = this.arpDesk.plan({ voices, shapes, keysShapes }, s.timing, s.arp, this.bpm())
+    }
+    this.host.deps.liveAudio.arpPlan?.(plan)
+    this._arp.value = this.arpDesk.ui(s.arpOn, s.arp, s.timing, this.noteNames())
+  }
+
+  /** The KEYS names changed (or a pad's sound): the line and the plan follow. */
+  refreshArp(): void {
+    this.publishArp()
+  }
+
+  // [pad]'s sound into memory for the arp, as a press loads it (once a run: one found nowhere isn't asked again).
+  private loadArpPad(pad: number): void {
+    if (this.arpTried.has(pad) || this.arpLoading.has(pad)) return
+    this.arpLoading.add(pad)
+    void this.host.live.loadForPattern(pad).then(
+      (ok) => {
+        this.arpLoading.delete(pad)
+        if (ok) this.publishArp()
+        else this.arpTried.add(pad)
+      },
+      () => {
+        this.arpLoading.delete(pad)
+        this.arpTried.add(pad)
+      },
+    )
+  }
+
+  /**
+   * A step the arp played on the pattern's clock (told by the output once
+   * mixed): while recording, a note of the pattern where it played, at its
+   * velocity and as long as its gate. It is on the grid already, so TIMING
+   * doesn't move it.
+   */
+  private recordArpStep(step: ArpStep): void {
+    if (!this.transport.state.recording) return
+    const n = step.note
+    const tick = step.globalTick
+    this.sceneDue(tick)
+    this.groups.add(n.pad.group)
+    this.markPasses(tick)
+    const r = this.recorder.noteOn(this.current, n.pad, n.semitones, tick, tick, 'off', this.settings.timing.swing, n.velocity)
+    if (r.id === 0) return
+    this._ui.value = { ...this._ui.peek(), focusGroup: n.pad.group }
+    this.setPatterns(this.recorder.noteOff(r.patterns, r.id, tick + step.gateTicks))
+  }
+
+  private cancelArpPressure(): void {
+    if (this.arpPressureTimer === null) return
+    this.host.deps.clearTimeout(this.arpPressureTimer)
+    this.arpPressureTimer = null
+  }
+
+  private noteNames(): NoteNames {
+    return this.host.noteNames?.() ?? NoteNames.LETTERS
+  }
+
   // ---------- the sheet ----------
 
   /** [group]'s length, 1 to 99 bars; notes past the end are kept, not played. */
@@ -1293,9 +1489,15 @@ export class PatternDesk {
   }
 
   private changeSettings(s: PatternSettings): void {
+    const was = this.settings
     this.settings = s
     this.host.prefs.save(s)
     this._ui.value = this.withSettings(this._ui.peek())
+    // TIMING, the arp's settings, ARP on or off (off, its notes go): the arp follows.
+    if (s.timing !== was.timing || s.arp !== was.arp || s.arpOn !== was.arpOn) {
+      if (!s.arpOn) this.arpDesk.clear()
+      this.publishArp()
+    }
   }
 
   // ---------- TEMPO: a click on the phone (an addition) ----------
@@ -1331,6 +1533,7 @@ export class PatternDesk {
     this.changeSettings({ ...this.settings, liveTempo: t })
     this._metronome.value = { ...this._metronome.peek(), bpm: t }
     this.refreshPlan()
+    this.publishArp()
     this.sendClick()
   }
 

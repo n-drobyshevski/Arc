@@ -88,13 +88,15 @@ import { wavHeader } from '../../core/formats/wav'
 import { LatencyText, WebLatencyHint } from '../../core/text/latencyText'
 import { WebText } from '../../core/text/webText'
 import type { VoiceShape } from '../../core/formats/voiceMixer'
-import { Seq, type Pattern, type ProjectPatterns } from '../../core/features/pattern'
+import type { ArpNote, ArpSettings } from '../../core/features/arp'
+import { Seq, type Pattern, type ProjectPatterns, type TimingSettings } from '../../core/features/pattern'
 import { frameAt, type FrameClock } from '../../core/features/sampleTiming'
 import type { PhaseAnchors, TransportClock } from '../../core/features/sequencer'
 import type { Beat, BeatGrid } from '../../core/features/tempo'
 import type { FrameGrid } from './clickScheduler'
 import { FxSetup } from './fxSetup'
 import { LIVE_PROCESSOR, MixerHost, transferable, type FromMixer, type PlanVoice, type ToMixer } from './liveMixer'
+import type { ArpStep } from './patternScheduler'
 // The AudioWorklet module's URL: Vite bundles liveWorklet.ts (with the core
 // mixer) into one self-contained script. (`new URL('./liveWorklet.ts',
 // import.meta.url)` would copy the TypeScript unbuilt: Vite only bundles that
@@ -330,6 +332,27 @@ export interface LiveSeqPlan {
 }
 
 /**
+ * What the arp or note repeat plays (PatternScheduler's ArpPlan): the notes
+ * held, their pads' sounds by preloaded sample key ([voices], by pad key) and
+ * how they play ([shapes], [keysShapes]; a pad left out plays on its group's
+ * bus), KEYS's arp or PADS's note repeat ([keys]), TIMING, the arp's
+ * settings, the tempo, the RANDOM order's [seed] and the run's press
+ * ([pressMs], performance.now(): another one starts the run again).
+ */
+export interface LiveArpPlan {
+  readonly notes: readonly ArpNote[]
+  readonly voices: ReadonlyMap<number, string>
+  readonly shapes?: ReadonlyMap<number, Partial<VoiceShape>>
+  readonly keysShapes?: ReadonlyMap<number, Partial<VoiceShape>>
+  readonly keys: boolean
+  readonly timing: TimingSettings
+  readonly settings: ArpSettings
+  readonly bpm: number
+  readonly seed: number
+  readonly pressMs: number
+}
+
+/**
  * Where the transport is (PatternScheduler.kt's Timeline): its [clock] (ticks
  * to mix frames) and the output's stamp [frames] (mix frames to the
  * performance.now() they are heard at).
@@ -470,6 +493,8 @@ export class LiveAudio {
   // The pattern's clock as the mixer last told it, the plan it plays, and whether RECORD waits for a press.
   private seqClock: TransportClock | null = null
   private plan: LiveSeqPlan | null = null
+  private arp: LiveArpPlan | null = null
+  private readonly arpStepListeners = new Set<(step: ArpStep) => void>()
   private seqArmed = false
   private readonly _rec = signal<RecState>(REC_IDLE)
   /** The TAKE key's state. */
@@ -620,6 +645,29 @@ export class LiveAudio {
     if (this.stream) send(this.stream, { t: 'stopSeq' })
   }
 
+  /**
+   * What the arp or note repeat plays (null, or no notes: it stops); a run's
+   * press is placed by the output's latest stamp. Opens the output for notes.
+   */
+  arpPlan(plan: LiveArpPlan | null): void {
+    const on = plan !== null && plan.notes.length > 0
+    this.arp = on ? plan : null
+    if (!on) {
+      if (this.stream) send(this.stream, { t: 'arp', plan: null })
+      return
+    }
+    const s = this.ensure()
+    if (!s) return
+    s.parked = false
+    wake(s.ctx)
+    this.sendArp(s, plan)
+  }
+
+  /** A step the arp played on the pattern's clock: for RECORD. */
+  onArpStep(listener: (step: ArpStep) => void): () => void {
+    return add(this.arpStepListeners, listener)
+  }
+
   /** RECORD waits for a press: the mixer sends its stamps meanwhile. */
   seqArm(armed: boolean): void {
     this.seqArmed = armed
@@ -682,6 +730,21 @@ export class LiveAudio {
     }
     const queued = plan.queued !== undefined ? [...plan.queued].map(([group, q]) => ({ group, pattern: q.pattern, atTick: q.atTick })) : undefined
     send(s, { t: 'plan', patterns: plan.patterns, voices, skip: [...plan.skip], bpm: plan.bpm, phase: plan.phase, queued })
+  }
+
+  private sendArp(s: Stream, plan: LiveArpPlan): void {
+    const voices: PlanVoice[] = []
+    for (const [pad, key] of plan.voices) {
+      const sample = this.samples.get(key)
+      if (!sample || !(sample.channels >= 1 && sample.channels <= 2)) continue
+      this.load(s, sample)
+      const bus: Partial<VoiceShape> = { bus: Math.floor(pad / 12) }
+      voices.push({ pad, id: sample.id, channels: sample.channels, sampleRate: sample.sampleRate, shape: plan.shapes?.get(pad) ?? bus, keysShape: plan.keysShapes?.get(pad) ?? bus })
+    }
+    const stamp = s.stamp
+    const atFrame = stamp !== null ? frameAt(stamp, plan.pressMs) : null
+    const { notes, keys, timing, settings, bpm, seed, pressMs } = plan
+    send(s, { t: 'arp', plan: { notes, voices, keys, timing, settings, bpm, seed, pressMs, atFrame } })
   }
 
   /** The timeline anew when the clock changed, or the stamp drifted from the one shown by more than a millisecond. */
@@ -951,6 +1014,8 @@ export class LiveAudio {
     for (const c of this.fx.commands()) send(s, { t: 'control', what: c.what, index: c.index, x: c.x, y: c.y })
     // RECORD waiting for a press: the new output's stamps are wanted at once.
     if (this.seqArmed) send(s, { t: 'seqArmed', armed: true })
+    // The arp playing on: from where the new output's mix is.
+    if (this.arp !== null) this.sendArp(s, this.arp)
     // The click goes on with the new output.
     if (this.clickAsk.on) this.sendClick(s)
     ctx.addEventListener?.('statechange', () => this.stateChanged(s))
@@ -1087,6 +1152,9 @@ export class LiveAudio {
         for (const f of [...this.beatListeners]) f({ index: m.index, at, accent: m.accent })
         return
       }
+      case 'arpStep':
+        for (const f of [...this.arpStepListeners]) f(m.step)
+        return
       case 'missing':
         for (const f of [...this.missingListeners]) f(m.pad)
         return

@@ -29,6 +29,7 @@ import { LearnedLinks } from '../../core/features/learnedLinks'
 import { physicalPad, type PhysicalPad } from '../../core/features/padNotes'
 import { PadOrder } from '../../core/features/padPush'
 import { KeysView, choiceOf as pianoChoiceOf, keysViewOf } from '../../core/features/piano'
+import { ArpOrder, ArpSettings } from '../../core/features/arp'
 import { Timing, TimingSettings } from '../../core/features/pattern'
 import { SwitchTime } from '../../core/features/scenes'
 import { Tempo } from '../../core/features/tempo'
@@ -671,7 +672,8 @@ export class OfflinePadsPrefs {
 
 /**
  * PATTERN's settings (AppSettings.kt's timingInterval, timingSwing,
- * timingQuantize, patternCountIn, patternAutoLength and liveTempo), under
+ * timingQuantize, patternCountIn, patternAutoLength, liveTempo, sceneSwitch
+ * and the arp's), under
  * Android's names. Web delta: kept apart from AppSettings, in their own
  * localStorage key, and not written into library.json.
  */
@@ -685,6 +687,10 @@ export interface PatternSettings {
   readonly liveTempo: number
   /** When a pattern or scene picked while playing takes over (SCENE's CHANGE; Kotlin sceneSwitch). */
   readonly sceneSwitch: SwitchTime
+  /** ARP (KEYS) / RPT (PADS) on. */
+  readonly arpOn: boolean
+  /** The arp's order, octaves, gate and LATCH (Kotlin arpOrder, arpOctaves, arpGate, arpLatch). */
+  readonly arp: ArpSettings
 }
 
 export const DEFAULT_PATTERN_SETTINGS: PatternSettings = Object.freeze({
@@ -693,9 +699,16 @@ export const DEFAULT_PATTERN_SETTINGS: PatternSettings = Object.freeze({
   autoLength: false,
   liveTempo: Tempo.DEFAULT,
   sceneSwitch: SwitchTime.DEFAULT,
+  arpOn: false,
+  arp: ArpSettings.DEFAULT,
 })
 
 export const PATTERN_KEY = 'arc.pattern'
+
+// A whole number in [lo]..[hi], else null.
+function intIn(v: unknown, lo: number, hi: number): number | null {
+  return typeof v === 'number' && Number.isInteger(v) && v >= lo && v <= hi ? v : null
+}
 
 export class PatternPrefs {
   constructor(private readonly storage: KeyValueStorage = browserStorage()) {}
@@ -723,6 +736,13 @@ export class PatternPrefs {
       autoLength: typeof o.patternAutoLength === 'boolean' ? o.patternAutoLength : d.autoLength,
       liveTempo: typeof o.liveTempo === 'number' && Number.isFinite(o.liveTempo) ? Tempo.clamp(Math.round(o.liveTempo)) : d.liveTempo,
       sceneSwitch: (typeof o.sceneSwitch === 'string' ? SwitchTime.of(o.sceneSwitch) : null) ?? d.sceneSwitch,
+      arpOn: typeof o.arpOn === 'boolean' ? o.arpOn : d.arpOn,
+      arp: ArpSettings.of({
+        order: (typeof o.arpOrder === 'string' ? ArpOrder.of(o.arpOrder) : null) ?? d.arp.order,
+        octaves: intIn(o.arpOctaves, ArpSettings.MIN_OCTAVES, ArpSettings.MAX_OCTAVES) ?? d.arp.octaves,
+        gate: intIn(o.arpGate, ArpSettings.MIN_GATE, ArpSettings.MAX_GATE) ?? d.arp.gate,
+        latch: typeof o.arpLatch === 'boolean' ? o.arpLatch : d.arp.latch,
+      }),
     }
   }
 
@@ -735,6 +755,11 @@ export class PatternPrefs {
       patternAutoLength: p.autoLength,
       liveTempo: p.liveTempo,
       sceneSwitch: p.sceneSwitch,
+      arpOn: p.arpOn,
+      arpOrder: p.arp.order,
+      arpOctaves: p.arp.octaves,
+      arpGate: p.arp.gate,
+      arpLatch: p.arp.latch,
     }
     try {
       this.storage.setItem(PATTERN_KEY, JSON.stringify(o))

@@ -1,7 +1,7 @@
 // A LiveAudioDeps that records what the controller asks of Live's output (state tests).
 import { signal, type Signal } from '@preact/signals'
 import { WebLatencyHint } from '../../src/core/text/latencyText'
-import type { LiveAudioDeps, LiveEngineInfo, LivePress, LiveSeqPlan, LiveTimeline } from '../../src/state/deps'
+import type { ArpStep, LiveArpPlan, LiveAudioDeps, LiveEngineInfo, LivePress, LiveSeqPlan, LiveTimeline } from '../../src/state/deps'
 import { transportClock } from '../../src/core/features/sequencer'
 import type { Beat } from '../../src/core/features/tempo'
 import type { RecState } from '../../src/core/features/takeRecorder'
@@ -44,6 +44,10 @@ export interface FakeLiveAudio extends LiveAudioDeps {
   runAt(zeroMs: number, bpm?: number): void
   /** Tells a pad the patterns play has no sound. */
   missing(pad: number): void
+  /** The arp's plans, in order (null: it stopped). */
+  readonly arps: (LiveArpPlan | null)[]
+  /** A step the arp played on the pattern's clock, as the output tells it. */
+  arpStep(step: ArpStep): void
   /** TEMPO's click calls in order: "click:<on>:<bpm>:<grid|free>". */
   readonly clickLog: string[]
   /** A click heard, as the output tells it. */
@@ -61,6 +65,7 @@ export function fakeLiveAudio(withLate = false): FakeLiveAudio {
   const rec = signal<RecState>({ kind: 'idle' })
   const timeline = signal<LiveTimeline | null>(null)
   const missingL = new Set<(pad: number) => void>()
+  const arpStepL = new Set<(step: ArpStep) => void>()
   const beatL = new Set<(b: Beat) => void>()
   const set = (f: (s: Set<string>) => void): void => {
     const next = new Set(voices.peek())
@@ -191,6 +196,17 @@ export function fakeLiveAudio(withLate = false): FakeLiveAudio {
     },
     missing(pad) {
       for (const l of [...missingL]) l(pad)
+    },
+    arps: [],
+    arpPlan(plan) {
+      a.arps.push(plan)
+    },
+    onArpStep(l) {
+      arpStepL.add(l)
+      return () => arpStepL.delete(l)
+    },
+    arpStep(step) {
+      for (const l of [...arpStepL]) l(step)
     },
     clickLog: [],
     setClick(on, bpm, grid) {

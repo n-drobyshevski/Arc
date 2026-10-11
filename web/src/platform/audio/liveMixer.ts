@@ -33,10 +33,11 @@
 // Imports only core modules (and the scheduler, which does too): this file is bundled into the worklet.
 
 import { TakeRecorder, type RecState } from '../../core/features/takeRecorder'
-import type { Pattern, ProjectPatterns } from '../../core/features/pattern'
+import type { ArpNote, ArpSettings } from '../../core/features/arp'
+import type { Pattern, ProjectPatterns, TimingSettings } from '../../core/features/pattern'
 import type { PhaseAnchors, TransportClock } from '../../core/features/sequencer'
 import { VoiceMixer, VoiceShape } from '../../core/formats/voiceMixer'
-import { PatternScheduler, type PadVoice, type ScheduleSink } from './patternScheduler'
+import { PatternScheduler, type ArpStep, type PadVoice, type ScheduleSink } from './patternScheduler'
 import { ClickScheduler, ClickTrack, type Click, type FrameGrid } from './clickScheduler'
 import { Seq } from '../../core/features/pattern'
 import { framesPerTick, frameOf } from '../../core/features/sequencer'
@@ -90,6 +91,8 @@ export type ToMixer =
   /** PatternScheduler.play: tick 0 at mix frame [atFrame] (a press), else a lookahead and [leadMs] on, after [countInBars]. */
   | { readonly t: 'play'; readonly countInBars: number; readonly leadMs: number; readonly atFrame: number | null; readonly atPress: boolean }
   | { readonly t: 'stopSeq' }
+  /** What the arp or note repeat plays (ArpPlan, its sounds by loaded sample id); null stops it. */
+  | { readonly t: 'arp'; readonly plan: ArpPlanMessage | null }
   /** RECORD waits for a press: the mix's stamps are wanted. */
   | { readonly t: 'seqArmed'; readonly armed: boolean }
   /**
@@ -107,6 +110,19 @@ export interface PlanVoice {
   readonly sampleRate: number
   readonly shape?: Partial<VoiceShape>
   readonly keysShape?: Partial<VoiceShape>
+}
+
+/** ArpPlan as it is posted: its sounds as PlanVoices. */
+export interface ArpPlanMessage {
+  readonly notes: readonly ArpNote[]
+  readonly voices: readonly PlanVoice[]
+  readonly keys: boolean
+  readonly timing: TimingSettings
+  readonly settings: ArpSettings
+  readonly bpm: number
+  readonly seed: number
+  readonly pressMs: number
+  readonly atFrame: number | null
 }
 
 /**
@@ -142,6 +158,8 @@ export type FromMixer =
   | { readonly t: 'takeEnd'; readonly keep: number; readonly limit: boolean }
   /** The pattern's clock (anchored, or a new tempo); null when it stopped. */
   | { readonly t: 'timeline'; readonly clock: TransportClock | null }
+  /** A step the arp played on the pattern's clock, once mixed: for RECORD. */
+  | { readonly t: 'arpStep'; readonly step: ArpStep }
   /** A pad the patterns play has no sound in the plan (pad key). */
   | { readonly t: 'missing'; readonly pad: number }
   /** Mix frame [frame] plays at context time [time] (s). */
@@ -151,6 +169,21 @@ export type FromMixer =
   | { readonly t: 'beat'; readonly index: number; readonly time: number; readonly accent: boolean }
 
 const NO_CLICKS: readonly Click[] = []
+
+// A plan's PlanVoices as the scheduler holds them, by pad key.
+function padVoices(list: readonly PlanVoice[]): Map<number, PadVoice> {
+  const voices = new Map<number, PadVoice>()
+  for (const v of list) {
+    voices.set(v.pad, {
+      id: v.id,
+      channels: v.channels,
+      rate: v.sampleRate,
+      shape: v.shape === undefined ? VoiceShape.DEFAULT : VoiceShape.of(v.shape),
+      keysShape: v.keysShape === undefined ? VoiceShape.DEFAULT : VoiceShape.of(v.keysShape),
+    })
+  }
+  return voices
+}
 
 /** A VoiceMixer at [rate] that takes ToMixer commands and [post]s FromMixer reports. */
 export class MixerHost {
@@ -203,6 +236,7 @@ export class MixerHost {
     }
     this.seq.onMissing = (pad) => post({ t: 'missing', pad })
     this.seq.onTimeline = (clock) => post({ t: 'timeline', clock })
+    this.seq.onArpStep = (step) => post({ t: 'arpStep', step })
   }
 
   /** Samples held, for tests. */
@@ -247,16 +281,7 @@ export class MixerHost {
         if (this.recorder !== null) this.endTake(false)
         return
       case 'plan': {
-        const voices = new Map<number, PadVoice>()
-        for (const v of m.voices) {
-          voices.set(v.pad, {
-            id: v.id,
-            channels: v.channels,
-            rate: v.sampleRate,
-            shape: v.shape === undefined ? VoiceShape.DEFAULT : VoiceShape.of(v.shape),
-            keysShape: v.keysShape === undefined ? VoiceShape.DEFAULT : VoiceShape.of(v.keysShape),
-          })
-        }
+        const voices = padVoices(m.voices)
         const queued = m.queued !== undefined && m.queued.length > 0 ? new Map(m.queued.map((q) => [q.group, { pattern: q.pattern, atTick: q.atTick }])) : undefined
         this.seq.plan = { patterns: m.patterns, voices, skip: new Map(m.skip), bpm: m.bpm, phase: m.phase, queued }
         return
@@ -268,6 +293,11 @@ export class MixerHost {
       case 'stopSeq':
         this.seq.stop()
         return
+      case 'arp': {
+        const a = m.plan
+        this.seq.arp = a === null ? null : { ...a, voices: padVoices(a.voices) }
+        return
+      }
       case 'seqArmed':
         this.seqArmed = m.armed
         this.stampedAt = Number.NEGATIVE_INFINITY

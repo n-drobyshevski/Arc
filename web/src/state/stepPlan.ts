@@ -161,6 +161,11 @@ export function stepOpens(phase: TransportPhase): boolean {
   return phase === 'STOPPED' || phase === 'ARMED'
 }
 
+/** Whether the arp takes a press: it is on, and the press holds (a screen reader's tap, which never lets go, only latched); not in the STEP panel ([stepping]). */
+export function arpTakesPress(arpOn: boolean, latch: boolean, hold: boolean, stepping: boolean): boolean {
+  return !stepping && arpOn && (hold || latch)
+}
+
 /** Whether a pad or KEYS press arms the pattern's recording: RECORD armed, and not in SAMPLE ([sampling]) or the STEP panel ([stepping]). */
 export function pressArms(phase: TransportPhase, sampling: boolean, stepping: boolean): boolean {
   return phase === 'ARMED' && !sampling && !stepping
