@@ -16,8 +16,8 @@
 //   for RSP alone.
 
 import type { OfflinePad, OfflinePads } from '../core/features/offlinePads'
-import type { PadTarget } from '../core/features/liveMirror'
-import type { PhysicalPad } from '../core/features/padNotes'
+import type { LiveMirror, PadTarget } from '../core/features/liveMirror'
+import { physicalPad, type PhysicalPad } from '../core/features/padNotes'
 import type { SamplePhase } from '../core/features/sampleCapture'
 import type { End } from '../core/features/sampleCapture'
 import { applyGain, cut, frames as pcmFrames, leadingSilence, normalizeGain, peaks } from '../core/features/sampleEdit'
@@ -315,4 +315,13 @@ export function connectedLocal(pads: OfflinePads, uploading: ReadonlySet<string>
 export function recordingsLetGo(before: OfflinePads, after: OfflinePads, going: ReadonlySet<string>): OfflinePad[] {
   const kept = new Set(after.list.map((it) => it.file).filter((f): f is string => f != null))
   return before.list.filter((it) => it.source === SoundSource.RECORDED && it.file != null && !kept.has(it.file) && !going.has(it.file))
+}
+
+/** The physical pad of [group] numbered [number] in the project file, if [m] knows it: an upload's progress shows on it (ArcController.physicalPadOf). */
+export function physicalPadOf(m: LiveMirror, group: number, number: number): PhysicalPad | null {
+  for (let o = 0; o < 12; o++) {
+    const p = physicalPad(group, o)
+    if (m.padNumber(p) === number) return p
+  }
+  return null
 }

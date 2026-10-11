@@ -502,6 +502,11 @@ export class PatternDesk {
     this.act(() => this.transport.stop())
   }
 
+  /** Recording stops (kept); PLAY goes on (SAMPLE opening, for a take of what it plays). */
+  recordOff(): void {
+    this.act(() => this.transport.punchOut())
+  }
+
   /**
    * A pad or KEYS note played at [at]: with RECORD armed, the recording
    * starts right there, bar 1 on the press. True when it did: that press is the run's first note.

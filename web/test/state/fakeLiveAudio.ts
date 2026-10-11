@@ -6,6 +6,7 @@ import { transportClock } from '../../src/core/features/sequencer'
 import type { Beat } from '../../src/core/features/tempo'
 import type { RecState } from '../../src/core/features/takeRecorder'
 import type { RecordedTake } from '../../src/platform/audio/liveAudio'
+import type { TapPhase, TapTake } from '../../src/platform/audio/sampleTap'
 
 export interface FakeLiveAudio extends LiveAudioDeps {
   readonly loaded: Map<string, { pcm: Int16Array; channels: number; sampleRate: number }>
@@ -56,6 +57,13 @@ export interface FakeLiveAudio extends LiveAudioDeps {
   beat(b: Beat): void
   /** FX bus commands in order: [what, index, x, y]. */
   readonly controls: [number, number, number, number][]
+  // SAMPLE
+  /** SAMPLE calls in order: "open:<stereo>:<gain>:<threshold>", "set:…", "close", "arm:<pad>:<latched>:<max>", "stop", "cancel". */
+  readonly sampleLog: string[]
+  readonly samplePhase: Signal<TapPhase>
+  readonly sampleLevel: Signal<{ readonly level: number; readonly clip: boolean }>
+  /** A take the tap made, as the output tells it (its phase back to ready first). */
+  sampleTake(t: TapTake): void
 }
 
 /** [withLate]: with a `late` signal of its own, as the real LiveAudio (the controller then follows it). */
@@ -69,6 +77,7 @@ export function fakeLiveAudio(withLate = false): FakeLiveAudio {
   const missingL = new Set<(pad: number) => void>()
   const arpStepL = new Set<(step: ArpStep) => void>()
   const beatL = new Set<(b: Beat) => void>()
+  const sampleL = new Set<(t: TapTake) => void>()
   const set = (f: (s: Set<string>) => void): void => {
     const next = new Set(voices.peek())
     f(next)
@@ -222,6 +231,40 @@ export function fakeLiveAudio(withLate = false): FakeLiveAudio {
     },
     beat(b) {
       for (const l of [...beatL]) l(b)
+    },
+    sampleLog: [],
+    samplePhase: signal<TapPhase>({ kind: 'ready' }),
+    sampleLevel: signal({ level: 0, clip: false }),
+    sampleRate: 48000,
+    sampleOpen(stereo, gain, threshold) {
+      a.sampleLog.push(`open:${stereo}:${gain}:${threshold}`)
+      return a.available
+    },
+    sampleSet(gain, threshold) {
+      a.sampleLog.push(`set:${gain}:${threshold}`)
+    },
+    sampleClose() {
+      a.sampleLog.push('close')
+      a.samplePhase.value = { kind: 'ready' }
+    },
+    sampleArm(pad, _at, latched, max) {
+      a.sampleLog.push(`arm:${pad}:${latched}:${max}`)
+      a.samplePhase.value = { kind: 'waiting', pad, latched }
+    },
+    sampleStop() {
+      a.sampleLog.push('stop')
+    },
+    sampleCancel() {
+      a.sampleLog.push('cancel')
+      a.samplePhase.value = { kind: 'ready' }
+    },
+    onSampleTake(l) {
+      sampleL.add(l)
+      return () => sampleL.delete(l)
+    },
+    sampleTake(t) {
+      a.samplePhase.value = { kind: 'ready' }
+      for (const l of [...sampleL]) l(t)
     },
     latencyHint: signal<WebLatencyHint>(WebLatencyHint.ZERO),
     engine: signal<LiveEngineInfo | null>(null),

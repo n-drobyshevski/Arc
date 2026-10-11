@@ -532,7 +532,7 @@ function Root(): JSX.Element {
         cancel={MirrorText.DISCARD}
         confirmColor="var(--navy)"
         onConfirm={() => void c.writeOfflinePads()}
-        onDismiss={() => c.discardOfflinePads()}
+        onDismiss={() => void c.discardOfflinePads()}
       />
       <ToastLayer raise={state.toast?.id ?? null}>
         <ControllerToast controller={c} />
@@ -957,7 +957,7 @@ function TabScreen(props: {
             onDelete: (t) => void c.deleteTake(t),
           }}
           onGetFactory={c.canGetFactory && FactorySounds.inLibrary(state.backups) === null ? () => void c.getFactorySounds() : null}
-          offlinePads={state.offlinePads > 0 ? { count: state.offlinePads, onReset: () => c.resetOfflinePads() } : null}
+          offlinePads={state.offlinePads > 0 ? { count: state.offlinePads, onReset: () => void c.resetOfflinePads() } : null}
           onStop={() => c.stopPlayback()}
           nameOf={(pad) => c.mirrorName(pad)}
           oneGroup={settings.liveOneGroup}

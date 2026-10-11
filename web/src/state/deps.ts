@@ -20,6 +20,7 @@
 import type { RecState } from '../core/features/takeRecorder'
 import type { LiveArpPlan, LiveSeqPlan, LiveTimeline, RecordedTake } from '../platform/audio/liveAudio'
 import type { ArpStep } from '../platform/audio/patternScheduler'
+import type { TapPhase, TapTake } from '../platform/audio/sampleTap'
 import type { SampleStore } from '../platform/storage/sampleStore'
 import type { Beat, BeatGrid } from '../core/features/tempo'
 import type { TakeStore } from '../platform/storage/takeStore'
@@ -235,6 +236,27 @@ export interface LiveAudioDeps {
   setClick?(on: boolean, bpm: number, grid: BeatGrid | null): boolean
   /** Each click, with when it is heard: TEMPO's light. */
   onBeat?(listener: (beat: Beat) => void): () => void
+  // SAMPLE (LiveAudio.kt's SampleRecorder, its mix side: RSP); an output without them has no SAMPLE.
+  /** Opens RSP on Live's mix ([stereo] or mixed down) at [gainDb], a take waiting for [thresholdDb] (null: none). False when there is no output. */
+  sampleOpen?(stereo: boolean, gainDb: number, thresholdDb: number | null): boolean
+  /** RSP's level and threshold, from the next block. */
+  sampleSet?(gainDb: number, thresholdDb: number | null): void
+  /** Closes RSP: a take going on ends with what was recorded. */
+  sampleClose?(): void
+  /** The rate a take is made at: the open output's (null: none open). */
+  readonly sampleRate?: number | null
+  /** Arms a take into [pad] (pad key) from what was heard at [atMs] (null: now); [latched] hands-free; at most [maxFrames]. */
+  sampleArm?(pad: number, atMs: number | null, latched: boolean, maxFrames: number): void
+  /** Stops the take at what was heard at [atMs] (null: now), keeping what came before. */
+  sampleStop?(atMs?: number | null): void
+  /** Throws the take away. */
+  sampleCancel?(): void
+  /** What RSP's take is doing, for SAMPLE's header. */
+  readonly samplePhase?: ReadonlySignal<TapPhase>
+  /** RSP's level (0..1) and whether it clipped, for the meter. */
+  readonly sampleLevel?: ReadonlySignal<{ readonly level: number; readonly clip: boolean }>
+  /** Each take SAMPLE made. */
+  onSampleTake?(listener: (take: TapTake) => void): () => void
 }
 
 export type { ArpStep, LiveArpPlan, LiveSeqPlan, LiveTimeline }

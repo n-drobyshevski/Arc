@@ -63,7 +63,7 @@ function arpVoiceKey(p: readonly string[]): boolean {
 import { choiceOf as pianoChoiceOf, type KeysView } from '../core/features/piano'
 import { padKey, type PhysicalPad } from '../core/features/padNotes'
 import type { PadTarget } from '../core/features/liveMirror'
-import { OfflinePads, SoundSource } from '../core/features/offlinePads'
+import { OfflinePads, SoundSource, type OfflinePad } from '../core/features/offlinePads'
 import { backupDevice, restorePak } from '../core/backup/backup'
 import { describePak, openPak, type PakDescription, type PakSound } from '../core/backup/pak'
 import { project as exportProject, projectFileName, soundFileName, soundWav } from '../core/backup/pakExport'
@@ -74,7 +74,7 @@ import { search as searchLibrary, type NameEntry } from '../core/features/librar
 import type { PadOrder } from '../core/features/padPush'
 import { compare as comparePaks } from '../core/features/pakCompare'
 import { frames, seconds, type TrimRange } from '../core/features/sampleTrim'
-import { nameFor, nextFree, upload, UploadItem } from '../core/features/sampleUpload'
+import { nameFor, nextFree, upload, uploadToPad, UploadItem } from '../core/features/sampleUpload'
 import { FxControl } from '../core/formats/fx/fxBus'
 import type { VoiceShape } from '../core/formats/voiceMixer'
 import type { PadSettings } from '../core/features/padSettings'
@@ -112,6 +112,8 @@ import { voiceShape } from './padShape'
 import { stepWord } from './stepPlan'
 import { PadEditDesk } from './padEdit'
 import { PatternDesk } from './pattern'
+import { SampleDesk } from './sample'
+import { physicalPadOf } from './samplePlan'
 import { patternBpm } from './patternPlan'
 import { MirrorController } from './mirror'
 import { PreviewCache, type DecodedSound } from './previewCache'
@@ -183,6 +185,8 @@ export class ArcController {
   readonly fx: FxKeeper
   /** EDIT: the pads' sound settings as arc knows them, and the pad sheet's. */
   readonly padEdit: PadEditDesk
+  /** SAMPLE: recording into a pad (Live's mix). */
+  readonly sample: SampleDesk
   // Presses in ERASE on the scrolling page that may still turn into a scroll: when each went down, by pad key.
   private readonly eraseUnsure = new Map<number, number>()
   // The pads and KEYS notes whose press went to the STEP panel or CORRECT (pad key, or 1000 + MIDI note),
@@ -363,12 +367,51 @@ export class ArcController {
       toast,
       live: this.live,
       fmtDateTime: (ms) => this.fmtDateTime(ms),
-      deviceRead: () => void this.offerOfflinePads(),
+      deviceRead: () => {
+        void this.offerOfflinePads()
+        void this.sample.shownAgain()
+      },
       transport: (playing) => (playing ? deps.liveAudio.transportStarted?.() : deps.liveAudio.transportStopped?.()),
       midi: (e) => this.pattern.midi(e),
       padsRead: (project, layout) => this.padEdit.padsRead(project, layout),
       padsOffline: () => void this.padEdit.padsOffline(),
       padAssigned: (t) => this.padEdit.forget(t),
+    })
+    this.sample = new SampleDesk({
+      deps,
+      live: this.live,
+      settings: () => this.settingsSignal.peek(),
+      changeSettings: (change) => this.changeSettings(change),
+      toast,
+      toastWith: (text, label, run) => this.toastWith(text, label, run),
+      editTarget: (pad, quiet) => this.editTarget(pad, quiet),
+      online: () => this.deviceReady && this.mirror.current !== null && this.mirror.offline === null,
+      free: () => (this.deviceReady ? (this.store.get().device?.storage.free ?? null) : null),
+      deviceSlots: () => this.store.get().browser.contents?.occupiedSlots ?? new Set(this.live.deviceSoundList().map((snd) => snd.slot)),
+      padHasSound: (pad) => this.padSoundName(pad) !== null,
+      playPad: (pad, hold, unsure, at) => void this.live.playPad(pad, hold, unsure, at),
+      releasePad: (pad) => this.live.releasePad(pad),
+      keepPad: (pad) => void this.live.keepPad(pad),
+      cutPad: (pad) => this.live.cutPad(pad),
+      makeRoom: () => {
+        // The panels share the function keys' place: SAMPLE's closes STEP's and SCENE's.
+        this.pattern.setStepOpen(false)
+        this.pattern.setSceneOpen(false)
+        this.closePadEdit()
+        this.pattern.setClick(false)
+        // PATTERN stops recording; PLAY goes on, for a take of what it plays.
+        this.pattern.recordOff()
+      },
+      localChanged: (pads) => {
+        const m = this.mirror.current
+        if (m === null) return
+        m.setLocal(pads)
+        this.mirror.localChanged()
+        this.pattern.refreshPlan()
+      },
+      forgetPadSettings: (t) => this.padEdit.forget(t),
+      upload: (name, wav, t, slot, onProgress) => this.uploadRecording(name, wav, t, slot, onProgress),
+      takesChanged: () => void this.loadTakes(),
     })
   }
 
@@ -451,6 +494,9 @@ export class ArcController {
     this.cleanups.push(() => this.fx.dispose())
     if (audio.onTake) this.cleanups.push(audio.onTake((take, limit) => void this.takeDone(take, limit)))
     void this.loadTakes()
+    // SAMPLE: recordings left from before this start that no pad change names go to Takes.
+    this.cleanups.push(() => this.sample.dispose())
+    void this.sample.moveStrays(deps.now())
     this.cleanups.push(lib.subscribe(() => void this.reloadLibrary()))
     this.cleanups.push(
       deps.settings.subscribe((s) => {
@@ -644,7 +690,8 @@ export class ArcController {
       void this.live.openAudio()
       return
     }
-    // The pattern, the arp and the click stop with the sound (Android's focus lost).
+    // SAMPLE closes (a take going on is kept), and the pattern, the arp and the click stop with the sound (Android's focus lost).
+    this.sample.exit()
     this.pattern.stop()
     this.pattern.arpClear()
     this.pattern.setClick(false)
@@ -666,6 +713,7 @@ export class ArcController {
   /** Live's output let go at once (the page goes away, or the controller is disposed). */
   private dropLiveAudio(): void {
     this.cancelAudioClose()
+    this.sample.exit()
     // The arp's notes go with the output; it stays on.
     this.pattern.arpClear()
     this.live.closeAudio()
@@ -1189,6 +1237,12 @@ export class ArcController {
   playPad(pad: PhysicalPad, hold = true, unsure = false, at?: number): Promise<void> {
     const pressedAt = pressTime(at, this.deps.perfNow())
     const k = padKey(pad)
+    // SAMPLE takes the press: held, it records into the pad (a screen reader's click latches a take).
+    if (this.sample.open) {
+      if (hold) this.sample.padDown(pad, pressedAt, unsure)
+      else this.sample.latchTake(pad, pressedAt)
+      return Promise.resolve()
+    }
     // The order a press goes: STEP, ERASE, CORRECT, then play.
     if (this.pattern.stepping) {
       // Placed and sounded once it is a press, not a scroll ([keepPad]).
@@ -1296,6 +1350,10 @@ export class ArcController {
 
   /** The unsure press on the pad was a press after all: it becomes the KEYS sound (and one not in memory loads). */
   keepPad(pad: PhysicalPad): Promise<void> {
+    if (this.sample.open) {
+      this.sample.padKept(pad)
+      return Promise.resolve()
+    }
     // One the PAD flow was waiting for: its tap.
     if (this.pattern.sceneTapKept(pad, padVoice(pad))) return Promise.resolve()
     // One the arp holds: neither played nor recorded itself.
@@ -1325,6 +1383,7 @@ export class ArcController {
 
   /** The finger left the pad: its sound fades out. [at]: the lift's event timeStamp, for the note's gate. */
   releasePad(pad: PhysicalPad, at?: number): void {
+    if (this.sample.open) return this.sample.padUp(pad, pressTime(at, this.deps.perfNow()))
     // Unsure for the PAD flow and lifted inside the scroll window: its tap.
     if (this.pattern.sceneTapKept(pad, padVoice(pad))) return
     // One the arp holds, unsure and lifted inside the scroll window, was a tap; its note goes with the finger (unless latched).
@@ -1369,6 +1428,7 @@ export class ArcController {
 
   /** The press on the pad turned into a scroll (the all-groups page): its sound ends at once. */
   cutPad(pad: PhysicalPad): void {
+    if (this.sample.open) return this.sample.padCut(pad)
     if (this.pattern.sceneTapCut(padVoice(pad))) return
     // Nor does it repeat.
     this.pattern.arpCut(padVoice(pad))
@@ -1677,24 +1737,86 @@ export class ArcController {
     return true
   }
 
-  /** Reset pads: the offline changes go, and the pads show what the last read had. */
-  resetOfflinePads(): void {
-    this.live.setOfflinePads(OfflinePads.EMPTY)
+  /** Reset pads: the offline changes go (recordings to Takes), and the pads show what the last read had. */
+  async resetOfflinePads(): Promise<void> {
+    const moved = await this.dropOfflinePads()
     this.padEdit.saveOffline(OfflinePadSettings.EMPTY)
     void this.padEdit.padsOffline()
     const m = this.mirror.offline
     if (m !== null) {
-      m.setLocal(OfflinePads.EMPTY)
+      m.setLocal(await this.live.loadOfflinePads())
       this.mirror.localChanged()
+      this.pattern.refreshPlan()
     }
-    this.toast(MirrorText.PADS_RESET)
+    this.toast(MirrorText.PADS_RESET + samplesMoved(moved))
+  }
+
+  /** Drops the offline pad changes but the recordings uploading now, the other recordings moved to Takes; how many were. */
+  private async dropOfflinePads(): Promise<number> {
+    const uploading = this.sample.uploadingNow()
+    const list = (await this.live.loadOfflinePads()).list
+    const going = (p: OfflinePad): boolean => p.file != null && uploading.has(p.file)
+    this.live.setOfflinePads({ list: list.filter(going) })
+    return this.sample.recordingsToTakes(list.filter((p) => !going(p)))
+  }
+
+  /**
+   * SAMPLE's upload of a recording kept: [wav] into a free slot ([slot] when
+   * the review picked one), then onto [t]'s pad, while Live plays on, its
+   * progress to [onProgress]. The pad's copy is kept, then the mirror's
+   * names and the pad follow. The slot, or null once a toast said why not.
+   */
+  private async uploadRecording(name: string, wav: Uint8Array, t: PadTarget, slot: number | null, onProgress: (fraction: number) => void): Promise<number | null> {
+    const s = this.conn.session
+    if (s === null) {
+      this.toast(MirrorText.EDIT_OFFLINE)
+      return null
+    }
+    let error: string | null = null
+    let into: number | null = null
+    // After whatever holds the device, waiting again when something took it first.
+    while (into === null && error === null && this.conn.session === s) {
+      await this.store.waitFor((st) => !st.busy)
+      const occupied = this.store.get().browser.contents?.occupiedSlots ?? new Set(this.live.deviceSoundList().map((snd) => snd.slot))
+      into = await this.tasks.exclusive('upload', true, async (ss) => {
+        try {
+          return await uploadToPad(ss, name, wav, occupied, t, null, { onProgress: (p) => onProgress(p.fraction) }, slot)
+        } catch (e) {
+          error = errorText(e)
+          return null
+        }
+      })
+    }
+    if (error !== null) this.toast(MirrorText.uploadFailed(error), true)
+    if (into === null) {
+      if (this.conn.session !== s) this.toast(MirrorText.EDIT_OFFLINE)
+      return null
+    }
+    // The new sound's name and size, and the space left (SAMPLE's "Disk low").
+    await this.refreshAll(true)
+    const e = this.store.get().browser.contents?.sounds.find((snd) => snd.slot === into)
+    // Kept before the pad's copy is looked for, so the copy never reads it back.
+    if (e !== undefined) {
+      try {
+        const w = decodeWav(wav)
+        await this.live.keepPadSound(into, e.name, e.size, w.pcm, w.channels, w.sampleRate)
+      } catch {
+        // Its copy is read from the device instead.
+      }
+    }
+    const m = this.mirror.current
+    this.mirror.assigned({ ...t, slot: t.slot ?? m?.slotAt(t.group, t.pad) ?? null }, into)
+    return into
   }
 
   /** The EP-133 was read: with offline pad changes kept, it asks whether to write them (UiState.offlinePrompt). */
   async offerOfflinePads(): Promise<void> {
     // Still writing them (Live left and came back meanwhile): not asked again.
     if (this.offlineWrite !== null) return
-    const n = OfflinePads.size(await this.live.loadOfflinePads()) + (await this.padEdit.offlineCount())
+    // Recordings uploading now aren't asked about: they are on their way already.
+    const uploading = this.sample.uploadingNow()
+    const pads = (await this.live.loadOfflinePads()).list.filter((p) => p.file == null || !uploading.has(p.file))
+    const n = pads.length + (await this.padEdit.offlineCount())
     if (n === 0 || !this.deviceReady) return
     this.store.update((st) => ({ ...st, offlinePrompt: n }))
   }
@@ -1726,13 +1848,37 @@ export class ArcController {
       this.toast(MirrorText.EDIT_OFFLINE)
       return
     }
-    const pads = (await this.live.loadOfflinePads()).list
+    // Recordings uploading now are left to their upload (SampleDesk).
+    const uploading = this.sample.uploadingNow()
+    const pads = (await this.live.loadOfflinePads()).list.filter((p) => p.file == null || !uploading.has(p.file))
     let written = 0
     let skipped = 0
+    // Recordings that couldn't go on: to Takes, never dropped.
+    const unplaced: OfflinePad[] = []
+    // What the connection going keeps: the changes not written yet (and what came since).
+    const keepUnwritten = async (i: number): Promise<void> => {
+      const done = pads.slice(0, i)
+      this.live.setOfflinePads({ list: (await this.live.loadOfflinePads()).list.filter((x) => !done.some((d) => sameChange(d, x))) })
+      await this.sample.recordingsToTakes(unplaced)
+    }
     for (const [i, p] of pads.entries()) {
+      // Replaced meanwhile by a take kept on its pad (which goes up on its own, the old one into Takes).
+      if (!(await this.live.loadOfflinePads()).list.some((x) => sameChange(x, p))) continue
       const names = new Map(this.liveSounds().map((snd) => [snd.slot, snd.name]))
       if (!OfflinePads.fits(p, m.snapshot(this.deps.perfNow()).activeProject, names)) {
         skipped++
+        if (p.source === SoundSource.RECORDED) unplaced.push(p)
+        continue
+      }
+      // A recording: never on the device yet, whatever the pad has now it goes on it.
+      if (p.source === SoundSource.RECORDED) {
+        const into = this.conn.session === s ? await this.sample.uploadRecorded(p, physicalPadOf(m, p.group, p.pad)) : null
+        if (into !== null) written++
+        else if (this.conn.session !== s) return keepUnwritten(i)
+        else {
+          skipped++
+          unplaced.push(p)
+        }
         continue
       }
       const now = m.slotAt(p.group, p.pad)
@@ -1749,14 +1895,15 @@ export class ArcController {
         written++
       } else if (this.conn.session !== s) {
         // The connection went: this change and the rest are kept.
-        this.live.setOfflinePads({ list: pads.slice(i) })
-        return
+        return keepUnwritten(i)
       } else {
         if (r !== null && r.error !== null) this.toast(MirrorText.assignFailed(r.error), true)
         skipped++
       }
     }
-    this.live.setOfflinePads(OfflinePads.EMPTY)
+    // Changes made meanwhile (a recording kept) stay for their own upload or the next question.
+    this.live.setOfflinePads({ list: (await this.live.loadOfflinePads()).list.filter((x) => !pads.some((d) => sameChange(d, x))) })
+    await this.sample.recordingsToTakes(unplaced)
     // Then the settings turned offline, on the pads of the project they were turned in that still
     // hold the sound they were turned for: only what was turned changes, the rest is the device's now.
     const turned = await this.padEdit.writeOffline(s, m.snapshot(this.deps.perfNow()).activeProject, (g, p) => m.slotAt(g, p))
@@ -1765,11 +1912,11 @@ export class ArcController {
   }
 
   /** Discard: the offline changes go; the EP-133 keeps what it has. */
-  discardOfflinePads(): void {
+  async discardOfflinePads(): Promise<void> {
     this.store.update((st) => ({ ...st, offlinePrompt: null }))
-    this.live.setOfflinePads(OfflinePads.EMPTY)
+    const moved = await this.dropOfflinePads()
     this.padEdit.saveOffline(OfflinePadSettings.EMPTY)
-    this.toast(MirrorText.OFFLINE_DISCARDED)
+    this.toast(MirrorText.OFFLINE_DISCARDED + samplesMoved(moved))
   }
 
   /**
@@ -2524,4 +2671,22 @@ export class ArcController {
       this.toast(errorText(e), true)
     }
   }
+}
+
+/** " 2 samples kept in Takes." after a toast, when [n] recordings went there. */
+function samplesMoved(n: number): string {
+  return n > 0 ? ' ' + MirrorText.samplesToTakes(n) : ''
+}
+
+/** Whether two offline changes are the same one (OfflinePad's equality). */
+function sameChange(a: OfflinePad, b: OfflinePad): boolean {
+  return (
+    a.project === b.project &&
+    a.group === b.group &&
+    a.pad === b.pad &&
+    a.slot === b.slot &&
+    a.name === b.name &&
+    a.source === b.source &&
+    (a.file ?? null) === (b.file ?? null)
+  )
 }
