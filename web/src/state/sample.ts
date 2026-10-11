@@ -28,8 +28,10 @@ import type { PadTarget } from '../core/features/liveMirror'
 import { OfflinePads, SoundSource, type OfflinePad } from '../core/features/offlinePads'
 import { padFromKey, padKey, type PhysicalPad } from '../core/features/padNotes'
 import { SamplePhase } from '../core/features/sampleCapture'
+import { CountIn } from '../core/features/sampleTiming'
+import { BEATS_PER_BAR, type Beat } from '../core/features/tempo'
 import { toWavBytes } from '../core/features/sampleEdit'
-import { SampleInput, SampleLimits, SampleName, type SampleSource } from '../core/features/sampleSource'
+import { SampleInput, SampleLimits, SampleName, barFrames, type SampleSource } from '../core/features/sampleSource'
 import { MirrorText } from '../core/text/mirrorText'
 import { WebText } from '../core/text/webText'
 import type { TapPhase, TapTake } from '../platform/audio/sampleTap'
@@ -44,6 +46,7 @@ import {
 } from '../platform/storage/settings'
 import type { Deps } from './deps'
 import type { LiveSounds } from './live'
+import type { PatternDesk } from './pattern'
 import {
   SAMPLE_TAP_MS,
   SAMPLE_UI,
@@ -66,7 +69,7 @@ import {
 
 /** What the SAMPLE desk asks of the controller: the device side, the pads' play, the toasts. */
 export interface SampleHost {
-  deps: Pick<Deps, 'liveAudio' | 'samples' | 'takes' | 'perfNow' | 'now' | 'settings'>
+  deps: Pick<Deps, 'liveAudio' | 'samples' | 'takes' | 'perfNow' | 'now' | 'settings' | 'setTimeout' | 'clearTimeout'>
   live: Pick<LiveSounds, 'keepRecorded' | 'forgetRecorded' | 'loadOfflinePads' | 'setOfflinePads'>
   settings(): AppSettings
   changeSettings(change: (s: AppSettings) => AppSettings): void
@@ -101,6 +104,20 @@ export interface SampleHost {
   upload(name: string, wav: Uint8Array, t: PadTarget, slot: number | null, onProgress: (fraction: number) => void): Promise<number | null>
   /** Takes changed (a recording put there). */
   takesChanged(): void
+  /** The patterns, for a hands-free take of set bars (PatternDesk's SAMPLE section). */
+  patterns: Pick<PatternDesk, 'playing' | 'clickOn' | 'tempo' | 'setClick' | 'playForTake' | 'takeSpan'>
+  /** Whether the project has notes: PTN is offered. */
+  hasNotes(): boolean
+}
+
+/** How long a count-in waits for the click's next beat, or a take for the patterns' timeline, before it gives up (ms). */
+export const BEAT_WAIT_MS = 2000
+
+/** A hands-free take of set bars before it starts: counting in on the click ([beat]), or waiting for the patterns' bar; [cancel] ends it. */
+interface Count {
+  readonly pad: PhysicalPad
+  beat: number | null
+  readonly cancel: () => void
 }
 
 /** A recording kept while connected, waiting its turn to upload: its [file], [pad], and the [slot] picked (null: the next free one); [held] is the slot its review showed. */
@@ -154,6 +171,8 @@ export class SampleDesk {
   private readonly played = new Set<number>()
   // A take asked of the tap that it hasn't said it is waiting for yet (its phase still the last one's).
   private armed = false
+  // A hands-free take of set bars before it starts.
+  private count: Count | null = null
   private discarded: SampleReview | null = null
   // Recordings kept while connected, waiting to upload; the one going up; those going up, those that failed.
   private readonly queue: QueuedSample[] = []
@@ -291,6 +310,7 @@ export class SampleDesk {
     for (const k of this.played) this.host.releasePad(padFromKey(k))
     this.played.clear()
     this.armed = false
+    this.count?.cancel()
     this.opening++
     this.opened = null
     this.host.deps.liveAudio.sampleClose?.()
@@ -338,6 +358,12 @@ export class SampleDesk {
     this.publish()
   }
 
+  /** BARS on PTN (or off it): a hands-free take lasts the patterns' length (kept). */
+  setPattern(on: boolean): void {
+    this.host.changeSettings((s) => ({ ...s, samplePattern: on }))
+    this.publish()
+  }
+
   /** LATCH: a tap on a pad records hands-free (not kept). */
   setLatch(on: boolean): void {
     this.latch = on
@@ -356,9 +382,9 @@ export class SampleDesk {
     return this.armed || this.tapPhase.kind !== 'ready'
   }
 
-  // A take goes on: held, or the tap's.
+  // A take goes on: held, the tap's, or one of set bars counting in or waiting for its bar.
   private going(): boolean {
-    return this.held !== null || this.tapGoing()
+    return this.held !== null || this.tapGoing() || this.count !== null
   }
 
   /**
@@ -370,7 +396,7 @@ export class SampleDesk {
    */
   padDown(pad: PhysicalPad, at: number, unsure = false): void {
     if (!this.on) return
-    const handsFree = this.latched !== null && this.tapGoing()
+    const handsFree = this.latched !== null && (this.tapGoing() || this.count !== null)
     switch (samplePress(pad, this.held?.pad ?? null, this.latched, handsFree, this.going(), this.latch, unsure)) {
       case 'STOP':
         this.stopAt(at)
@@ -454,13 +480,161 @@ export class SampleDesk {
     this.host.deps.liveAudio.sampleCancel?.()
   }
 
-  /** A tap on [pad] with LATCH on (or a screen reader's click): a hands-free take into it, until [stop]. A latch while one goes on stops it. */
+  /**
+   * A tap on [pad] with LATCH on (or a screen reader's click): a hands-free
+   * take into it, until [stop]. With BARS set it lasts that long, after a
+   * bar's count-in on the click ([countIn]); while the patterns play, from
+   * their next bar. On PTN (with notes in the project) it lasts the
+   * patterns' length from their next loop start ([onPattern]). A latch
+   * while one goes on stops it.
+   */
   latchTake(pad: PhysicalPad, at: number = this.host.deps.perfNow()): void {
     if (!this.on) return
-    if (this.latched !== null && this.tapGoing()) return this.stop()
-    if (this.held !== null) return
+    if (this.count !== null || (this.latched !== null && this.tapGoing())) return this.stop()
+    if (this.held !== null || this.opened === null) return
     this.latched = pad
-    if (!this.arm(pad, at, true)) this.latched = null
+    const s = this.host.settings()
+    const bars = s.sampleBars
+    if (s.samplePattern && this.host.hasNotes()) this.onPattern(pad, null)
+    else if (bars === null) {
+      if (!this.arm(pad, at, true)) this.latched = null
+    } else if (this.host.patterns.playing) this.onPattern(pad, bars)
+    else this.countIn(pad, bars)
+  }
+
+  /**
+   * A bar's count-in on the click before a take of [bars] bars into [pad]:
+   * the click comes on for it (and goes off again at the downbeat, if it
+   * was off), each beat shows as it is heard, and the take is scheduled for
+   * the downbeat after the count, its length in bars of the tempo. A click
+   * that never comes ends it.
+   */
+  private countIn(pad: PhysicalPad, bars: number): void {
+    const audio = this.host.deps.liveAudio
+    const pat = this.host.patterns
+    if (!audio.onBeat || !audio.sampleScheduleAt) {
+      this.latched = null
+      return
+    }
+    const { setTimeout, clearTimeout } = this.host.deps
+    const clickWas = pat.clickOn
+    const counter = new CountIn()
+    let started = false
+    let plain = 0
+    let wait: unknown = null
+    let unsub: (() => void) | null = null
+    const timers = new Set<unknown>()
+    const c: Count = {
+      pad,
+      beat: null,
+      cancel: () => {
+        if (this.count !== c) return
+        this.count = null
+        unsub?.()
+        if (wait !== null) clearTimeout(wait)
+        for (const t of timers) clearTimeout(t)
+        if (!clickWas) pat.setClick(false)
+        if (!started && samePad(this.latched, pad)) this.latched = null
+        this.publish()
+      },
+    }
+    // At the moment [atMs] is heard, [run].
+    const when = (atMs: number, run: () => void): void => {
+      const t = setTimeout(() => {
+        timers.delete(t)
+        if (this.count === c) run()
+      }, Math.max(0, atMs - this.host.deps.perfNow()))
+      timers.add(t)
+    }
+    const waitAgain = (): void => {
+      if (wait !== null) clearTimeout(wait)
+      wait = setTimeout(() => c.cancel(), BEAT_WAIT_MS)
+    }
+    this.count = c
+    unsub = audio.onBeat((beat: Beat) => {
+      if (this.count !== c || started) return
+      waitAgain()
+      // Following the EP-133's clock before a Start, no beat is accented: a bar of them counts from the next.
+      const accented = beat.accent || ++plain > BEATS_PER_BAR
+      if (accented) plain = 0
+      const periodMs = 60000 / pat.tempo()
+      const step = counter.onBeat({ ...beat, accent: accented }, periodMs)
+      if (step.type === 'Waiting') return
+      if (step.type === 'Counting') {
+        when(beat.at, () => {
+          c.beat = step.beat
+          this.publish()
+        })
+        return
+      }
+      const rate = audio.sampleRate ?? null
+      if (rate === null) return c.cancel()
+      started = true
+      this.armed = true
+      audio.sampleScheduleAt?.(padKey(pad), step.atMs, barFrames(bars, 60000 / periodMs, rate), this.maxFrames(rate))
+      when(beat.at, () => {
+        c.beat = counter.beats
+        this.publish()
+      })
+      // The count is over at the downbeat: the click goes back as it was, and the take shows.
+      when(step.atMs, () => c.cancel())
+    })
+    if (!clickWas) pat.setClick(true)
+    if (!pat.clickOn) return c.cancel()
+    waitAgain()
+    this.publish()
+  }
+
+  /**
+   * A hands-free take into [pad] in step with the patterns: [bars] bars
+   * from the next bar, or (null: PTN) the longest group's length from the
+   * patterns' next loop start. Stopped, the patterns start for it (not
+   * recording), the take from bar 1. RSP's take starts at that mix frame
+   * itself; the mic's at the moment it is heard.
+   */
+  private onPattern(pad: PhysicalPad, bars: number | null): void {
+    const audio = this.host.deps.liveAudio
+    const pat = this.host.patterns
+    const fromStop = !pat.playing
+    if ((fromStop && !pat.playForTake()) || !audio.timeline) {
+      this.latched = null
+      return
+    }
+    const { setTimeout, clearTimeout } = this.host.deps
+    const rsp = this.opened?.source === 'rsp'
+    // The mix is taken where it is (RSP); the mic hears the loop as the player does, late over Bluetooth.
+    const late = rsp ? 0 : (audio.delayMs ?? 0)
+    let started = false
+    let wait: unknown = null
+    let unsub: (() => void) | null = null
+    const c: Count = {
+      pad,
+      beat: null,
+      cancel: () => {
+        if (this.count !== c) return
+        this.count = null
+        unsub?.()
+        if (wait !== null) clearTimeout(wait)
+        if (!started && samePad(this.latched, pad)) this.latched = null
+        this.publish()
+      },
+    }
+    const tryNow = (): void => {
+      if (this.count !== c || started) return
+      const span = pat.takeSpan(bars, fromStop, late)
+      const rate = audio.sampleRate ?? null
+      if (span === null || rate === null) return
+      started = true
+      this.armed = true
+      const length = span.endFrame - span.startFrame
+      if (rsp) audio.sampleSchedule?.(padKey(pad), span.startFrame, length, this.maxFrames(rate))
+      else audio.sampleScheduleAt?.(padKey(pad), span.heardMs, length, this.maxFrames(rate))
+      c.cancel()
+    }
+    this.count = c
+    this.publish()
+    wait = setTimeout(() => c.cancel(), BEAT_WAIT_MS)
+    unsub = audio.timeline.subscribe(() => tryNow())
   }
 
   /** STOP (LATCH's key during a hands-free take): it stops now. */
@@ -469,6 +643,7 @@ export class SampleDesk {
   }
 
   private stopAt(at: number): void {
+    this.count?.cancel()
     this.latched = null
     this.latchPress = null
     this.host.deps.liveAudio.sampleStop?.(at)
@@ -480,7 +655,7 @@ export class SampleDesk {
     if (this.opened === null) return false
     const audio = this.host.deps.liveAudio
     const rate = audio.sampleRate ?? null
-    const max = rate === null ? 0 : sampleMaxFrames(this.stereo, rate, this.on ? this.host.free() : null)
+    const max = rate === null ? 0 : this.maxFrames(rate)
     if (max <= 0 || !audio.sampleArm) {
       this.host.toast(MirrorText.diskLow(0), true)
       return false
@@ -488,6 +663,11 @@ export class SampleDesk {
     this.armed = true
     audio.sampleArm(padKey(pad), at, latched, max)
     return true
+  }
+
+  // The longest take at [rate]: the device's limit, less when its space is short.
+  private maxFrames(rate: number): number {
+    return sampleMaxFrames(this.stereo, rate, this.on ? this.host.free() : null)
   }
 
   // ---------- a take ----------
@@ -826,6 +1006,9 @@ export class SampleDesk {
   }
 
   private phaseNow(): SamplePhase {
+    const c = this.count
+    // A take of set bars before it starts: its count-in's beat, or waiting for its bar.
+    if (c !== null && this.tapPhase.kind === 'ready') return c.beat !== null ? SamplePhase.CountIn(c.pad, c.beat) : SamplePhase.Waiting(c.pad, true)
     const p = this.tapPhase
     if (p.kind === 'waiting') return SamplePhase.Waiting(padFromKey(p.pad), p.latched)
     if (p.kind === 'recording') return SamplePhase.Recording(padFromKey(p.pad), p.seconds, p.maxSeconds, p.latched)

@@ -830,6 +830,18 @@ export class LiveAudio {
     if (this.stream && this.sampleAsk !== null) send(this.stream, { t: 'sampleAsk', ask: { kind: 'schedule', pad, start, length, maxFrames } })
   }
 
+  /**
+   * Schedules a take of exactly [length] frames into [pad] from what is
+   * heard at [atMs] (a count-in's downbeat; on the mic, the sound made then).
+   * Nothing without a stamp to place it by.
+   */
+  sampleScheduleAt(pad: number, atMs: number, length: number, maxFrames: number): void {
+    const s = this.stream
+    if (!s || this.sampleAsk === null) return
+    const start = this.tapFrameAt(s, atMs)
+    if (start !== null) send(s, { t: 'sampleAsk', ask: { kind: 'schedule', pad, start, length, maxFrames } })
+  }
+
   /** The mix frame heard at [atMs] (performance.now()), by the latest stamp; null without one. */
   sampleFrameAt(atMs: number): number | null {
     const s = this.stream

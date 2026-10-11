@@ -729,6 +729,11 @@ function sampleUi(c: ArcController): SampleActions | null {
     onGain: (db) => d.setGain(db),
     onThreshold: (db) => d.setThreshold(db),
     onLatch: (on) => d.setLatch(on),
+    onBars: (bars) => d.setBars(bars),
+    onPattern: (on) => d.setPattern(on),
+    get hasPattern() {
+      return c.pattern.ui.value.hasNotes.some(Boolean)
+    },
   }
 }
 

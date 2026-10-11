@@ -10,7 +10,8 @@
 // in orange) and what happens next; the wave strip under it shows the input
 // while a take waits or records, else the last take; the controls under that
 // are − / source / +, STEREO, LATCH (STOP while a hands-free take goes on),
-// LEVEL (the input's gain) and THRESH (the level a take waits for). The pads
+// LEVEL (the input's gain), THRESH (the level a take waits for) and BARS (a
+// hands-free take's length: Free, 1–16 bars, or PTN, the patterns'). The pads
 // light as the K.O. II lights them in the mode: empty pads blink, those with
 // a sound are ringed, the take's pad lit.
 //
@@ -19,7 +20,6 @@
 //   do (Kotlin's SampleSlot), with a ✕ of its own; the swipe on the pads
 //   that opens it isn't here, and the mic key and the ✕ close it, not Back.
 // - The knobs are sliders (KnobSlider), as the web's other knobs.
-// - BARS isn't on the panel yet: a hands-free take runs until STOP.
 // - RSP only, so − / + and STEREO step between RSP and RSP ST; the sources'
 //   names say arc's sound, not the phone's (WebText.sampleSourceName).
 // - No haptics.
@@ -34,7 +34,7 @@ import type { Peak } from '../../core/features/sampleTrim'
 import { FeatureText } from '../../core/text/featureText'
 import { MirrorText } from '../../core/text/mirrorText'
 import { WebText } from '../../core/text/webText'
-import { SAMPLE_GAINS, SAMPLE_GAIN_MIC } from '../../platform/storage/settings'
+import { SAMPLE_BARS, SAMPLE_GAINS, SAMPLE_GAIN_MIC } from '../../platform/storage/settings'
 import type { SampleUiState } from '../../state/samplePlan'
 import { KnobSlider } from '../components/KnobSlider'
 import './SamplePanel.css'
@@ -58,6 +58,12 @@ export interface SampleActions {
   onGain(db: number): void
   onThreshold(db: number | null): void
   onLatch(on: boolean): void
+  /** BARS: Free (null) or a number of bars. */
+  onBars(bars: number | null): void
+  /** BARS on PTN, the patterns' length, or off it. */
+  onPattern(on: boolean): void
+  /** Whether the project has notes: PTN comes after 16. */
+  readonly hasPattern: boolean
 }
 
 /** SAMPLE on Live; null where this browser can't sample. */
@@ -149,6 +155,19 @@ export function thresholdKnob(db: number | null): number {
 /** The threshold at THRESH's place [v]: Off at the left end, else −60..0 dBFS in whole dB. */
 export function thresholdOfKnob(v: number): number | null {
   return v < THRESHOLD_OFF + 0.5 ? null : Math.min(Math.max(Math.round(v), -60), 0)
+}
+
+/** BARS' next choice from [bars]: Free, 1, 2, 4, 8, 16, then Free again (one that isn't a choice counts as Free). */
+export function nextBars(bars: number | null): number | null {
+  const choices: (number | null)[] = [null, ...SAMPLE_BARS]
+  return choices[(Math.max(choices.indexOf(bars), 0) + 1) % choices.length] ?? null
+}
+
+/** BARS' next choice from [bars] (or PTN, [pattern]): as [nextBars], with PTN after 16 while the project has notes ([hasPattern]), then Free again. */
+export function nextBarsPick(bars: number | null, pattern: boolean, hasPattern: boolean): { readonly bars: number | null; readonly pattern: boolean } {
+  if (pattern && hasPattern) return { bars: null, pattern: false }
+  if (hasPattern && bars === SAMPLE_BARS[SAMPLE_BARS.length - 1]) return { bars, pattern: true }
+  return { bars: nextBars(bars), pattern: false }
 }
 
 /** [pad]'s light while SAMPLE is open ([filled]: it has a sound), else null. */
@@ -374,7 +393,32 @@ function SampleControls(props: { s: SampleActions }): JSX.Element {
           description={MirrorText.knobDescription(MirrorText.THRESHOLD_NAME, thresh)}
           onChange={(v) => s.onThreshold(thresholdOfKnob(v))}
         />
+        <BarsKey s={s} />
       </div>
     </div>
+  )
+}
+
+/** BARS and its choice ("FREE", "2 BARS", "PTN"); a tap steps to the next ([nextBarsPick]). */
+function BarsKey(props: { s: SampleActions }): JSX.Element {
+  const { s } = props
+  const bars = s.ui.bars
+  const pattern = s.ui.pattern && s.hasPattern
+  const choice = pattern ? MirrorText.PTN : MirrorText.barsChoice(bars)
+  return (
+    <button
+      type="button"
+      class="sample-key sample-key--bars"
+      aria-label={MirrorText.knobDescription(MirrorText.BARS, pattern ? MirrorText.PTN_NAME : choice)}
+      onClick={() => {
+        const next = nextBarsPick(bars, pattern, s.hasPattern)
+        if (next.pattern !== pattern) s.onPattern(next.pattern)
+        if (!next.pattern && next.bars !== bars) s.onBars(next.bars)
+      }}
+    >
+      {/* "2 BARS" says it already; Free and PTN say what is free, or the pattern's. */}
+      {(bars === null || pattern) && <span class="sample-key__dim">{MirrorText.BARS.toUpperCase()}</span>}
+      {choice.toUpperCase()}
+    </button>
   )
 }

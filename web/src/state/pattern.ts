@@ -32,7 +32,7 @@ import { frameAt } from '../core/features/sampleTiming'
 import { Steps } from '../core/features/steps'
 import type { SwitchTime } from '../core/features/scenes'
 import { NoteNames, ROOT_NOTE } from '../core/features/keys'
-import { PhaseAnchors, passOf, positionOf, tickAt as clockTickAt, msOf, type PatternPosition } from '../core/features/sequencer'
+import { PhaseAnchors, frameOf, nextLoopStart, passOf, positionOf, tickAt as clockTickAt, msOf, type PatternPosition } from '../core/features/sequencer'
 import { Transport, type TransportAction } from '../core/features/transport'
 import { ClockFollow, TapTempo, Tempo, type Beat, type BeatGrid } from '../core/features/tempo'
 import type { MidiEvent } from '../core/protocol/midiInput'
@@ -71,6 +71,9 @@ import type { UiState } from './types'
 
 /** A count-in's bar 1 starts this much later still: time for the click to start before its first beat. */
 export const COUNT_IN_LEAD_MS = 150
+
+/** How far ahead the patterns start for a SAMPLE take from stop (ArcController's PATTERN_TAKE_LEAD_NS). */
+export const TAKE_LEAD_MS = 100
 
 /** The transport's loop wakes at least this often (ms). */
 export const PATTERN_LOOP_MS = 100
@@ -507,6 +510,69 @@ export class PatternDesk {
     this.act(() => this.transport.punchOut())
   }
 
+  // ---------- SAMPLE: takes in step with the patterns ----------
+
+  // The lead a start for a SAMPLE take has (0 otherwise).
+  private takeLead = 0
+
+  /** Whether the patterns play (counting in or playing): a take of set bars goes by them. */
+  get playing(): boolean {
+    return this.running()
+  }
+
+  /** The tempo the click and the patterns go at. */
+  tempo(): number {
+    return this.bpm()
+  }
+
+  /** Whether TEMPO's click is on. */
+  get clickOn(): boolean {
+    return this._metronome.peek().on
+  }
+
+  /** The patterns start for a take, from bar 1, a moment ahead (armed: disarmed; never recording). False when they couldn't. */
+  playForTake(): boolean {
+    this.act(() => this.transport.punchOut())
+    this.takeLead = TAKE_LEAD_MS
+    try {
+      this.act(() => this.transport.play(false, false))
+    } finally {
+      this.takeLead = 0
+    }
+    return this.running()
+  }
+
+  /**
+   * Where a take in step with the patterns goes, once their timeline is out:
+   * [bars] bars from the next bar, or (null: PTN) the longest group's length
+   * from the patterns' next loop start; from bar 1 when they just started
+   * for it ([fromStop]). The ticks [start, end), the mix frames they play at,
+   * and when the start is heard (ms, [late] the delay made up for, as the mic
+   * hears it). Null before the timeline is out, or with no pattern for PTN.
+   */
+  takeSpan(bars: number | null, fromStop: boolean, late: number): { start: number; end: number; startFrame: number; endFrame: number; heardMs: number } | null {
+    const tl = this.timeline()
+    if (tl === null) return null
+    const p = this.current
+    const len = bars !== null ? bars * Seq.TICKS_PER_BAR : ProjectPatterns.longestTicks(p)
+    if (len <= 0) return null
+    // The patterns' loop is the longest group's, from where it started; a bar count goes by the transport's bars.
+    let anchor = 0
+    if (bars === null) {
+      for (let g = 0; g < 4; g++) {
+        if (Pattern.lengthTicks(ProjectPatterns.group(p, g)) === len) {
+          anchor = PhaseAnchors.of(this.sceneDesk.phase, g)
+          break
+        }
+      }
+    }
+    // A moment ahead, so the take is asked for before it starts.
+    const heard = clockTickAt(tl.clock, frameAt(tl.frames, this.host.deps.perfNow() + LOOKAHEAD_MS)) - OutputDelay.ticks(late, tl.clock.bpm)
+    const start = fromStop ? 0 : nextLoopStart(heard, bars === null ? len : Seq.TICKS_PER_BAR, anchor)
+    const end = start + len
+    return { start, end, startFrame: Math.round(frameOf(tl.clock, start)), endFrame: Math.round(frameOf(tl.clock, end)), heardMs: msOf(tl.clock, start, tl.frames) + late }
+  }
+
   /**
    * A pad or KEYS note played at [at]: with RECORD armed, the recording
    * starts right there, bar 1 on the press. True when it did: that press is the run's first note.
@@ -561,7 +627,7 @@ export class PatternDesk {
     this._ui.value = { ...this._ui.peek(), countIn: null }
     if (record) this.setPatterns(this.recorder.punchIn(this.current, true, this.settings.autoLength))
     this.refreshPlan()
-    if (!audio.seqPlay || !audio.seqPlay(countInBars, countInBars > 0 ? COUNT_IN_LEAD_MS : 0, at)) {
+    if (!audio.seqPlay || !audio.seqPlay(countInBars, countInBars > 0 ? COUNT_IN_LEAD_MS : this.takeLead, at)) {
       this.transport.stop()
       this.host.toast(MirrorText.NO_OUTPUT, true)
       return

@@ -272,6 +272,68 @@ describe('SAMPLE', () => {
     await vi.waitFor(() => expect(h.liveAudio.sampleLog.filter((l) => l === 'close').length).toBe(2))
   })
 
+  it('BARS: a tap counts a bar in on the click, then a take of that many bars is scheduled for the downbeat', async () => {
+    const h = await liveOn()
+    const s = h.c.sample
+    s.enter()
+    s.setLatch(true)
+    s.setBars(2)
+    expect(h.c.pattern.clickOn).toBe(false)
+    await h.c.playPad(A5, true, false, now())
+    h.c.releasePad(A5, now())
+    // The click comes on for the count, and the pad waits.
+    expect(h.c.pattern.clickOn).toBe(true)
+    expect(s.ui.value.phase).toEqual({ type: 'Waiting', pad: A5, latched: true })
+    // A bar's beats at 120 BPM (500 ms apart), the downbeat accented; they were heard a moment ago.
+    const t0 = now() - 2100
+    for (let i = 0; i < 3; i++) h.liveAudio.beat({ index: i, at: t0 + 500 * i, accent: i === 0 })
+    await vi.waitFor(() => expect(s.ui.value.phase).toEqual({ type: 'CountIn', pad: A5, beat: 3 }))
+    expect(h.liveAudio.sampleLog.some((l) => l.startsWith('schedule'))).toBe(false)
+    h.liveAudio.beat({ index: 3, at: t0 + 1500, accent: false })
+    // Two bars at 120 BPM and 48 kHz from the beat after the fourth.
+    await vi.waitFor(() => expect(h.liveAudio.sampleLog.at(-1)).toBe(`scheduleAt:4:${Math.round(t0 + 2000)}:192000`))
+    // The count over, the click goes back off.
+    await vi.waitFor(() => expect(h.c.pattern.clickOn).toBe(false))
+    expect(s.ui.value.phase).toEqual({ type: 'Waiting', pad: A5, latched: true })
+  })
+
+  it('BARS: a tap on the pad while it counts in stops it, with nothing recorded', async () => {
+    const h = await liveOn()
+    const s = h.c.sample
+    s.enter()
+    s.setLatch(true)
+    s.setBars(1)
+    await h.c.playPad(A5, true, false, now())
+    h.c.releasePad(A5, now())
+    h.liveAudio.beat({ index: 0, at: now() - 10, accent: true })
+    await h.c.playPad(A5, true, false, now())
+    h.c.releasePad(A5, now())
+    expect(s.ui.value.phase).toEqual({ type: 'Ready' })
+    expect(h.c.pattern.clickOn).toBe(false)
+    h.liveAudio.beat({ index: 1, at: now(), accent: false })
+    expect(h.liveAudio.sampleLog.some((l) => l.startsWith('schedule'))).toBe(false)
+  })
+
+  it('BARS while the pattern plays: the take is scheduled from its next bar, on the mix frames (RSP)', async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    p.setCountIn(false)
+    p.play()
+    // Tick 0 heard 700 ms ago at 120 BPM: the next bar starts 1300 ms on.
+    const zero = now() - 700
+    h.liveAudio.runAt(zero)
+    await vi.waitFor(() => expect(p.ui.value.phase).toBe('PLAYING'))
+    const s = h.c.sample
+    s.enter()
+    s.setLatch(true)
+    s.setBars(1)
+    await h.c.playPad(A5, true, false, now())
+    h.c.releasePad(A5, now())
+    // A bar at 120 BPM, 48 kHz: 96000 frames, from the frame of the next bar's tick.
+    const at = Math.round(zero * 48) + 96000
+    await vi.waitFor(() => expect(h.liveAudio.sampleLog.at(-1)).toBe(`schedule:4:${at}:96000`))
+  })
+
   it('leaving Live closes SAMPLE', async () => {
     const h = await liveOn()
     h.c.sample.enter()

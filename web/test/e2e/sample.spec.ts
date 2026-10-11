@@ -2,7 +2,8 @@
 // opens the panel in the function keys' place (lit while open); a pad held records
 // into it (the header counts the take, the pad lit); let go, the review sheet opens
 // with the slot it goes into; DISCARD lets it go with UNDO on the toast, and UNDO
-// brings it back; KEEP uploads it. LATCH reads STOP while a hands-free take goes on.
+// brings it back; KEEP uploads it. LATCH reads STOP while a hands-free take goes on;
+// with BARS set, a tap counts a bar in and the take ends by itself.
 // The mic is refused here, so RSP (Live's own mix) stands in, as it does for a
 // person who says no (sampleMic.spec.ts records from a fake mic).
 import { expect, test } from './fixtures'
@@ -64,6 +65,18 @@ test('SAMPLE: the panel, a held take, the review sheet, UNDO and KEEP', async ({
   await expect(stop).toBeVisible()
   await stop.click()
   await expect(review).toBeVisible()
+  await review.getByRole('button', { name: 'Discard' }).click()
+
+  // BARS 1: a tap counts a bar in on the click, records a bar, and the take comes in by itself.
+  const bars = panel.getByRole('button', { name: /^Bars/ })
+  await bars.click()
+  await expect(bars).toHaveAccessibleName(/1 bar/)
+  await page.locator('[data-pad="8"]').click()
+  await expect(panel).toContainText('Count-in')
+  await expect(review).toBeVisible()
+  // A bar at the demo's 120 BPM.
+  await expect(review).toContainText('0:02')
+  await expect(review.getByRole('slider', { name: /Length/ })).toHaveAccessibleDescription(/2\.00 s/)
   await review.getByRole('button', { name: 'Discard' }).click()
 
   // The ✕ closes the panel; the function keys are back.

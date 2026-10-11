@@ -255,6 +255,10 @@ export interface LiveAudioDeps {
   readonly sampleRate?: number | null
   /** Arms a take into [pad] (pad key) from what was heard at [atMs] (null: now); [latched] hands-free; at most [maxFrames]. */
   sampleArm?(pad: number, atMs: number | null, latched: boolean, maxFrames: number): void
+  /** Schedules a take of exactly [length] frames into [pad] from mix frame [start] (RSP in step with the patterns). */
+  sampleSchedule?(pad: number, start: number, length: number, maxFrames: number): void
+  /** The same from what is heard at [atMs] (a count-in's downbeat; on the mic, the sound made then). */
+  sampleScheduleAt?(pad: number, atMs: number, length: number, maxFrames: number): void
   /** Stops the take at what was heard at [atMs] (null: now), keeping what came before. */
   sampleStop?(atMs?: number | null): void
   /** Throws the take away. */

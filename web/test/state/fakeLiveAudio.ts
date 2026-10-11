@@ -260,6 +260,14 @@ export function fakeLiveAudio(withLate = false): FakeLiveAudio {
       a.sampleLog.push(`arm:${pad}:${latched}:${max}`)
       a.samplePhase.value = { kind: 'waiting', pad, latched }
     },
+    sampleSchedule(pad, start, length) {
+      a.sampleLog.push(`schedule:${pad}:${start}:${length}`)
+      a.samplePhase.value = { kind: 'waiting', pad, latched: true }
+    },
+    sampleScheduleAt(pad, atMs, length) {
+      a.sampleLog.push(`scheduleAt:${pad}:${Math.round(atMs)}:${length}`)
+      a.samplePhase.value = { kind: 'waiting', pad, latched: true }
+    },
     sampleStop() {
       a.sampleLog.push('stop')
     },

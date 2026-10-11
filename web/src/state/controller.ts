@@ -412,6 +412,8 @@ export class ArcController {
       forgetPadSettings: (t) => this.padEdit.forget(t),
       upload: (name, wav, t, slot, onProgress) => this.uploadRecording(name, wav, t, slot, onProgress),
       takesChanged: () => void this.loadTakes(),
+      patterns: this.pattern,
+      hasNotes: () => this.pattern.ui.peek().hasNotes.some(Boolean),
     })
   }
 

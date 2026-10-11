@@ -105,7 +105,9 @@
   letter-spacing: 0.06em;
   white-space: nowrap;
 }
-.sample-panel__knobs { display: flex; gap: 16px; }
+.sample-panel__knobs { display: flex; align-items: center; gap: 16px; }
+.sample-key--bars { flex: none; flex-direction: column; gap: 0; height: 44px; line-height: 1.2; }
+.sample-key__dim { color: var(--hw-dark-dim); font-size: 9px; }
 
 .sample-key {
   display: inline-flex;
