@@ -700,7 +700,7 @@ export class LiveSounds {
   }
 
   /** A pad's sample from the first place that has it; null after a toast says why. */
-  private async padAudio(pad: PhysicalPad): Promise<{ key: string; audio: PadAudio } | null> {
+  async padAudio(pad: PhysicalPad): Promise<{ key: string; audio: PadAudio } | null> {
     const { host } = this
     const sample = this.padSample(pad)
     if (sample === null) {

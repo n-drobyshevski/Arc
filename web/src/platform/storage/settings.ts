@@ -115,6 +115,8 @@ export const KEYS_PAD_KEY = 'arc.mirror.keysPad'
 export const COACH_KEY = 'arc.coachSeen'
 export const LIVE_KEY = 'arc.live'
 export const LIVE_PADS_KEY = 'arc.live.pads'
+/** EDIT's pad settings turned offline (OfflinePadSettings JSON; Android's files/live-pad-settings.json). */
+export const LIVE_PAD_SETTINGS_KEY = 'arc.live.padSettings'
 
 /** The DOM Storage calls used here. */
 export interface KeyValueStorage {
@@ -641,11 +643,15 @@ export class LastReadPrefs {
  * (Android's files/live-pads.json). Not copied to the library folder.
  */
 export class OfflinePadsPrefs {
-  constructor(private readonly storage: KeyValueStorage = browserStorage()) {}
+  /** [key]: LIVE_PAD_SETTINGS_KEY keeps EDIT's pad settings turned offline the same way. */
+  constructor(
+    private readonly storage: KeyValueStorage = browserStorage(),
+    private readonly key: string = LIVE_PADS_KEY,
+  ) {}
 
   load(): string | null {
     try {
-      return this.storage.getItem(LIVE_PADS_KEY)
+      return this.storage.getItem(this.key)
     } catch {
       return null
     }
@@ -654,8 +660,8 @@ export class OfflinePadsPrefs {
   /** Null removes them. */
   save(json: string | null): void {
     try {
-      if (json === null) this.storage.removeItem(LIVE_PADS_KEY)
-      else this.storage.setItem(LIVE_PADS_KEY, json)
+      if (json === null) this.storage.removeItem(this.key)
+      else this.storage.setItem(this.key, json)
     } catch {
       // Kept in memory for this session (the controller holds them).
     }

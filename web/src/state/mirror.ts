@@ -30,7 +30,7 @@
 import { getMetadata, isJsonObject, type JsonValue } from '../core/protocol/fs'
 import { PROJECTS_NODE, PROJECT_COUNT, activeProject as deviceActiveProject, projectOfActive, setActiveProject, type SoundEntry } from '../core/protocol/device'
 import type { Session } from '../core/protocol/session'
-import { contents, projectLayout } from '../core/features/deviceBrowser'
+import { contents, projectLayout, type ProjectLayout } from '../core/features/deviceBrowser'
 import { LearnedLinks } from '../core/features/learnedLinks'
 import { ProjectStep } from '../core/features/projectStep'
 import { FactorySounds } from '../core/features/factorySounds'
@@ -38,7 +38,6 @@ import { CLOCK_TIMEOUT_MS, FADE_MS, LiveMirror, type Hit, type MirrorState, type
 import type { PhysicalPad } from '../core/features/padNotes'
 import { SoundSource } from '../core/features/offlinePads'
 import { parse as parsePadPush, type PadOrder } from '../core/features/padPush'
-import type { PadGroup } from '../core/features/projectPads'
 import { MirrorText } from '../core/text/mirrorText'
 import { SettingsText } from '../core/text/settingsText'
 import type { MirrorPrefs } from '../platform/storage/settings'
@@ -79,6 +78,12 @@ export interface MirrorHost {
   midi?(e: MidiEvent): void
   /** The device's sounds and pads were read: offline pad changes kept may be written now. */
   deviceRead(): void
+  /** Live's [project] was read ([layout]: its pads and their sound settings; null when it couldn't be). */
+  padsRead?(project: number | null, layout: ProjectLayout | null): void
+  /** Live opened without the device: the pads play with the settings turned offline. */
+  padsOffline?(): void
+  /** A pad got another sound ([t], its target before): its settings are the sample's again. */
+  padAssigned?(t: PadTarget): void
 }
 
 /** The project an "active" value names: device.projectOfActive, kept under this name for its callers. */
@@ -282,15 +287,16 @@ export class MirrorController {
           active = undefined
         }
         const project = activeProject(active)
-        let groups: PadGroup[] = []
+        let layout: ProjectLayout | null = null
         if (project !== null) {
           try {
-            groups = (await projectLayout(ss, project)).pads
+            layout = await projectLayout(ss, project)
           } catch {
-            groups = []
+            layout = null
           }
         }
-        m.setProject(project, groups)
+        m.setProject(project, layout?.pads ?? [])
+        host.padsRead?.(project, layout)
         return true
       })
     }
@@ -343,6 +349,8 @@ export class MirrorController {
     const m = new LiveMirror(LearnedLinks.offline(host.prefs.loadLearned()), host.prefs.savedPadOrder(), () => {})
     m.load(snap)
     m.setLocal(pads)
+    // And with the settings turned offline.
+    host.padsOffline?.()
     this.mirror = m
     this.mirrorSession = null
     void host.live.preloadPads(m)
@@ -438,15 +446,15 @@ export class MirrorController {
             tapped = this.projectTarget !== want
             if (tapped) return null
             // Empty projects may have no pads to read: they show empty.
-            let groups: PadGroup[] = []
+            let layout: ProjectLayout | null = null
             if (now !== null) {
               try {
-                groups = (await projectLayout(ss, now)).pads
+                layout = await projectLayout(ss, now)
               } catch {
-                groups = []
+                layout = null
               }
             }
-            return { now, groups }
+            return { now, groups: layout?.pads ?? [], layout }
           } catch (e) {
             failed = e instanceof Error ? e.message || String(e) : String(e)
             return null
@@ -467,6 +475,7 @@ export class MirrorController {
           return
         }
         m.setProject(read.now, read.groups)
+        host.padsRead?.(read.now, read.layout)
         host.live.saveLastRead(m)
         void host.live.preloadPads(m)
         void host.live.copyPadSounds(m, s)
@@ -517,10 +526,11 @@ export class MirrorController {
 
   private loadProject(m: LiveMirror, project: number): void {
     void (async () => {
-      const groups = await this.host.tasks.exclusive('mirror', true, async (ss) => (await projectLayout(ss, project)).pads)
-      if (groups === null) return
+      const layout = await this.host.tasks.exclusive('mirror', true, (ss) => projectLayout(ss, project))
+      if (layout === null) return
       if (this.mirror === m) {
-        m.setProject(project, groups)
+        m.setProject(project, layout.pads)
+        this.host.padsRead?.(project, layout)
         this.host.live.saveLastRead(m)
         void this.host.live.preloadPads(m)
         const s = this.host.session()
@@ -539,6 +549,7 @@ export class MirrorController {
     const m = this.mirror
     if (!m) return
     m.assigned(t, slot)
+    this.host.padAssigned?.(t)
     this.host.live.saveLastRead(m)
     void this.host.live.preloadPads(m)
     const s = this.host.session()
