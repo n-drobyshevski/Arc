@@ -859,8 +859,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   const modeLead = <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} plan={plan} part="lead" />
   const modePicks = <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} plan={plan} part="picks" />
   // On a phone on its side the line is in the top bar instead.
-  // TEMPO (and, in later rounds, the other function keys) over the pads, upright; none sideways or in EDIT.
-  const fnRow = inBar || editing ? null : <FunctionRow class="live__fn" />
+  // The function keys over the pads, upright (none sideways); SOUND turns EDIT off again, so they stay in EDIT.
+  const fnRow = inBar ? null : <FunctionRow class="live__fn" />
   const displayStrip = inBar ? null : editing ? <EditStrip /> : <DisplayStrip st={st} mirror={mirror} take={take} still={fixedNow !== null} />
   const allGroups = (
     <div class="live__all">

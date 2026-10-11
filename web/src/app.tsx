@@ -97,7 +97,7 @@ import { useAppKeys } from './ui/useAppKeys'
 import { KeyboardKeysSheet } from './ui/sheets/KeyboardKeysSheet'
 import { PatternSheet } from './ui/sheets/PatternSheet'
 import { TransportContext, type TransportUi } from './ui/live/PatternLine'
-import { TempoContext, type TempoUi } from './ui/live/FunctionRow'
+import { FunctionKeysContext, TempoContext, type FunctionKeysUi, type TempoUi } from './ui/live/FunctionRow'
 import { TempoSheet } from './ui/sheets/TempoSheet'
 import { computerKeys, setComputerKeys } from './ui/keyPrefs'
 import './app.css'
@@ -219,6 +219,29 @@ function Root(): JSX.Element {
     const pad = editPadOf(v.sheets)
     if (pad !== null) nav.close(sheetLayer(`${EDIT_PREFIX}${pad.group}:${pad.offset}`))
   }, [ready])
+  // Live's function keys over the pads: SOUND (EDIT, and the pad played last's sheet); TEMPO is [tempo].
+  const fnKeys: FunctionKeysUi = {
+    sound: {
+      editOn: editPads && !settings.liveKeys,
+      enabled: v.tab === 'live',
+      onTap: () => {
+        // In KEYS it goes back to the pads with EDIT on.
+        if (settings.liveKeys) {
+          c.setLiveKeys(false)
+          setEditPads(true)
+        } else {
+          setEditPads(!editPads)
+        }
+      },
+      onHold: () => {
+        const pad = state.keysPad
+        if (pad === null) c.toast(MirrorText.PLAY_A_PAD)
+        else if (c.editTarget(pad) !== null) nav.open(sheetLayer(`${EDIT_PREFIX}${pad.group}:${pad.offset}`))
+      },
+    },
+    project: null,
+    fx: null,
+  }
   // On a phone on its side, Live's display line rides in the top bar; the piano's
   // notes (while it shows) let it name a device note past them.
   const win = useWindowSize()
@@ -397,6 +420,7 @@ function Root(): JSX.Element {
   return (
     <TransportContext.Provider value={transport}>
     <TempoContext.Provider value={tempo}>
+    <FunctionKeysContext.Provider value={fnKeys}>
     <div class={desk ? 'app is-desk' : 'app'}>
       {desk ? (
         <CoachHost visible={v.coach && view === 'shell'} onDismiss={() => nav.close(overlayLayer('coach'))}>
@@ -447,6 +471,7 @@ function Root(): JSX.Element {
         <UpdatePrompt />
       </ToastLayer>
     </div>
+    </FunctionKeysContext.Provider>
     </TempoContext.Provider>
     </TransportContext.Provider>
   )
