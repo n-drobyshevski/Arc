@@ -25,7 +25,7 @@ test('TEMPO: the click, and the tempo sheet', async ({ page }) => {
   await expect(sheet.getByRole('status')).toHaveText('121 BPM')
   await sheet.getByRole('switch', { name: 'Click' }).click()
   await expect(click).toHaveAttribute('aria-checked', 'true')
-  await expect(page.locator('.fn-key__label')).toHaveText('121 BPM')
+  await expect(click.locator('.fn-key__label')).toHaveText('121 BPM')
   // TIMING's page: the interval and free time.
   await sheet.getByRole('radio', { name: 'Timing' }).click()
   await sheet.getByRole('radio', { name: /Interval 1\/8$/ }).click()

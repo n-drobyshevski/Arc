@@ -2,7 +2,8 @@
 
 .fn-row { display: flex; gap: 8px; width: 100%; max-width: calc(132px * 4 + 8px * 3); }
 .fn-key {
-  flex: 0 1 132px;
+  flex: 1 1 0;
+  max-width: 132px;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -70,3 +71,8 @@
 .fn-key__word { color: var(--ko-dark-ink, #EDECE8); }
 .fn-key__sub { background: var(--ko-light-face, #EEEDE9); color: var(--ko-tier-ink, #5A5B5D); }
 .fn-key__sub--signal { background: var(--signal); color: var(--on-signal); }
+
+.fn-key__led.is-on { background: var(--signal); box-shadow: 0 0 0 3px color-mix(in srgb, var(--signal) 35%, transparent); }
+.fn-key[aria-disabled='true'] { opacity: 0.45; cursor: default; }
+/* FX held: the upper half lit. */
+.fn-key.is-held .fn-key__word { background: var(--signal); color: var(--on-signal); }

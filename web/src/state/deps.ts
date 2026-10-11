@@ -84,6 +84,8 @@ export type LibraryApi = Pick<
   | 'onExternalError'
   | 'readPatterns'
   | 'writePatterns'
+  | 'readFx'
+  | 'writeFx'
 >
 
 /** The press options of [LiveAudioDeps.press]. */
@@ -395,5 +397,7 @@ export function unavailableLibrary(error: unknown): LibraryApi {
     // Live's patterns are kept for the session only.
     readPatterns: async () => null,
     writePatterns: nothing,
+    readFx: async () => null,
+    writeFx: nothing,
   }
 }

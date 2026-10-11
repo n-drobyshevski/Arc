@@ -178,6 +178,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* The punch-ins held (FX held), in signal orange from the start (LivePunch). */
+.live-strip__punch {
+  color: var(--signal);
+  text-align: start;
+}
 /* In the top bar (a phone on its side, LivePill): one bar tall (44), radius 12, a little
  * tighter. The note takes at most half the line, so a long one ("DO6, above the keys")
  * never squeezes out the sound. */

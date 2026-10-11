@@ -1,0 +1,143 @@
+/* FxSheet.kt's look: EFFECT / OUTPUT beside the title, the pad played last as a cap,
+ * the effects' row, the XY pad on the display (196 high) beside four send faders;
+ * OUTPUT's plates. */
+
+.fx-sheet .sheet__panel > * { flex-shrink: 0; }
+.fx-sheet__head { display: flex; align-items: center; gap: 12px; }
+.fx-sheet__title { flex: 1 1 auto; margin: 0; color: var(--ink); }
+.fx-sheet__tabs { flex: none; width: 200px; max-width: 55%; }
+.fx-sheet__note { margin: 0; color: var(--graphite); }
+.fx-sheet__note.is-signal { color: var(--signal); }
+
+/* ---------- the pad played last ---------- */
+.fx-hear { display: flex; align-items: center; gap: 14px; }
+.fx-hear__cap {
+  --cap-face: var(--ko-dark-face, #232425);
+  --cap-edge: var(--ko-dark-edge, #050505);
+  flex: none;
+  width: 56px;
+  height: 56px;
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 8px;
+  display: flex;
+  align-items: flex-start;
+  color: var(--ko-dark-ink, #EDECE8);
+  font: inherit;
+  font-size: 18px;
+  font-weight: 500;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+.fx-hear__cap:disabled { opacity: 0.45; cursor: default; }
+.fx-hear__dot { display: block; width: 6px; height: 6px; margin-top: 8px; border-radius: 50%; background: currentColor; }
+.fx-hear__text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.fx-hear__title { margin: 0; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- EFFECT ---------- */
+.fx-sheet__mix { display: flex; gap: 14px; height: 196px; }
+
+.fx-xy {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  border-radius: 14px;
+  background: var(--display);
+  overflow: hidden;
+  touch-action: none;
+  cursor: crosshair;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.fx-xy.is-off { cursor: default; }
+.fx-xy:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+.fx-xy__line { position: absolute; background: color-mix(in srgb, var(--display-dim) 35%, transparent); }
+.fx-xy__line--v { left: 50%; top: 0; bottom: 0; width: 1px; }
+.fx-xy__line--h { top: 50%; left: 0; right: 0; height: 1px; }
+/* The dot, kept whole inside the pad, in its glow. */
+.fx-xy__dot {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  left: clamp(0px, calc(var(--x) * 100% - 9px), calc(100% - 18px));
+  top: clamp(0px, calc((1 - var(--y)) * 100% - 9px), calc(100% - 18px));
+  border-radius: 50%;
+  background: var(--signal);
+  box-shadow: 0 0 0 7px color-mix(in srgb, var(--signal) 30%, transparent);
+  pointer-events: none;
+}
+.fx-xy__word {
+  position: absolute;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1.3;
+  color: var(--display-dim);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.fx-xy__name { top: 10px; left: 10px; display: flex; flex-direction: column; gap: 2px; color: var(--display-ink); }
+.fx-xy.is-off .fx-xy__name { color: var(--display-dim); }
+.fx-xy__readout { font-variant-numeric: tabular-nums; }
+.fx-xy__y { top: 10px; right: 10px; }
+.fx-xy__x { bottom: 10px; left: 10px; }
+.fx-xy__off {
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  text-align: center;
+  white-space: normal;
+}
+
+.fx-sends { flex: none; display: flex; gap: 6px; }
+.fx-send { width: 28px; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.fx-send__track {
+  position: relative;
+  flex: 1 1 auto;
+  width: 22px;
+  border-radius: 6px;
+  background: var(--plate);
+  overflow: hidden;
+  touch-action: none;
+  cursor: ns-resize;
+}
+.fx-send__track:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+.fx-send__fill { position: absolute; left: 0; right: 0; bottom: 0; background: var(--navy); }
+.fx-send.is-selected .fx-send__fill { background: var(--signal); }
+.fx-send__letter { font-size: var(--size-caps-key-small); font-weight: 700; line-height: 1.1; color: var(--ink); }
+.fx-send.is-selected .fx-send__letter { color: var(--signal); }
+.fx-send__value { font-size: var(--size-tiny); line-height: 1.2; color: var(--graphite); font-variant-numeric: tabular-nums; }
+
+/* ---------- OUTPUT ---------- */
+.fx-row { display: flex; align-items: center; gap: 12px; min-height: 56px; padding: 10px 16px; }
+.fx-row__text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.fx-row__title { margin: 0; color: var(--ink); }
+.fx-row__one { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fx-ducks .fx-row__title { flex: none; margin-inline-end: 4px; }
+.fx-ducks__keys { flex: 1 1 auto; display: flex; gap: 8px; }
+.fx-duck {
+  --cap-face: var(--key);
+  --cap-edge: var(--key-edge);
+  flex: 1 1 0;
+  min-height: 36px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  color: var(--graphite);
+  font: inherit;
+  font-size: var(--size-caps-key-small);
+  font-weight: 700;
+  cursor: pointer;
+}
+.fx-duck.is-on { --cap-face: var(--navy); --cap-edge: color-mix(in oklab, var(--navy) 70%, black); color: var(--on-navy); }
+
+.fx-knobs { display: flex; gap: 16px; padding: 12px 16px; }
+.fx-knob { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 4px; color: var(--ink); }
+.fx-knob__label { color: var(--ink); }
+.fx-knob input { width: 100%; accent-color: var(--signal); }
+.fx-knob__value { font-size: var(--size-small); color: var(--graphite); font-variant-numeric: tabular-nums; }

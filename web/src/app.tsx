@@ -38,7 +38,7 @@
 // On a phone on its side (ui/live/window.ts liveInBar; never on the desk),
 // Live's display line rides in the top bar's middle (LiveBar, MirrorScreen's
 // LivePill) and the page leaves it out.
-import { signal } from '@preact/signals'
+import { signal, useComputed } from '@preact/signals'
 import { Component, type ComponentChildren, type JSX } from 'preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { FactorySounds } from './core/features/factorySounds'
@@ -97,8 +97,13 @@ import { useAppKeys } from './ui/useAppKeys'
 import { KeyboardKeysSheet } from './ui/sheets/KeyboardKeysSheet'
 import { PatternSheet } from './ui/sheets/PatternSheet'
 import { TransportContext, type TransportUi } from './ui/live/PatternLine'
-import { TempoContext, type TempoUi } from './ui/live/FunctionRow'
+import { FunctionKeysContext, ProjectHold, ProjectHoldContext, TempoContext, type FunctionKeysUi, type ProjectUi, type TempoUi } from './ui/live/FunctionRow'
+import { PunchContext, type PunchUi } from './ui/live/LivePunch'
+import { projectChoicesOf, projectKeyOf, projectKeyState } from './ui/live/projectKey'
+import { ProjectSheet } from './ui/sheets/ProjectSheet'
 import { TempoSheet } from './ui/sheets/TempoSheet'
+import { FxSheet } from './ui/sheets/FxSheet'
+import { patternBpm } from './state/patternPlan'
 import { computerKeys, setComputerKeys } from './ui/keyPrefs'
 import './app.css'
 
@@ -110,6 +115,10 @@ const KEYS_SHEET = 'keys'
 const PATTERN_SHEET = 'pattern'
 /** Live's tempo sheet (TEMPO held). */
 const TEMPO_SHEET = 'tempo'
+/** Live's project sheet (PROJECT held). */
+const PROJECT_SHEET = 'project'
+/** FX tapped: the effect, its sends, the compressor and the sidechain. */
+const FX_SHEET = 'fx'
 
 export interface AppProps {
   controller: ArcController
@@ -202,6 +211,8 @@ function Root(): JSX.Element {
   // PATTERN: RECORD and PLAY on Live's display lines, read through the context (its signal re-renders the lines only).
   const transport = useMemo(() => transportUi(c, () => nav.open(sheetLayer(PATTERN_SHEET))), [c])
   const tempo = useMemo(() => tempoUi(c, () => nav.open(sheetLayer(TEMPO_SHEET))), [c])
+  // PROJECT held: the pads printed 1 to 9 pick a project instead of sounding.
+  const projectHold = useMemo(() => new ProjectHold(), [])
   // Live's EDIT (giving a pad another sound): on Live, in PADS, until switched off or left.
   const [editPads, setEditPads] = useState(false)
   const canEdit = v.tab === 'live' && !settings.liveKeys
@@ -219,6 +230,65 @@ function Root(): JSX.Element {
     const pad = editPadOf(v.sheets)
     if (pad !== null) nav.close(sheetLayer(`${EDIT_PREFIX}${pad.group}:${pad.offset}`))
   }, [ready])
+  // FX held: the pads play the punch-ins until it lets go, which lets go of every one held (MainActivity punchMode).
+  const [fxHeld, setFxHeld] = useState(false)
+  const punchOff = (): void => {
+    c.fx.desk.punchAllUp()
+    setFxHeld(false)
+  }
+  useEffect(() => {
+    if (v.tab !== 'live' && fxHeld) punchOff()
+  }, [v.tab])
+  // Only the effect's type re-renders the shell (its knobs turn many times a second).
+  const fxType = useComputed(() => c.fx.desk.fx.value.type).value
+  const punches = c.fx.desk.punches.value
+  const punchOn = fxHeld && v.tab === 'live' && !settings.liveKeys
+  const punch: PunchUi | null = useMemo(
+    () =>
+      punchOn
+        ? {
+            held: punches,
+            onDown: (slot, depth) => c.fx.desk.punchDown(slot, depth),
+            onMove: (slot, depth) => c.fx.desk.punchMove(slot, depth),
+            onUp: (slot) => c.fx.desk.punchUp(slot),
+            haptic: settings.haptics,
+          }
+        : null,
+    [c, punchOn, punches, settings.haptics],
+  )
+  // Live's function keys over the pads: SOUND (EDIT, and the pad played last's sheet); TEMPO is [tempo].
+  const fnKeys: FunctionKeysUi = {
+    sound: {
+      editOn: editPads && !settings.liveKeys,
+      enabled: v.tab === 'live',
+      onTap: () => {
+        // In KEYS it goes back to the pads with EDIT on.
+        if (settings.liveKeys) {
+          c.setLiveKeys(false)
+          setEditPads(true)
+        } else {
+          setEditPads(!editPads)
+        }
+      },
+      onHold: () => {
+        const pad = state.keysPad
+        if (pad === null) c.toast(MirrorText.PLAY_A_PAD)
+        else if (c.editTarget(pad) !== null) nav.open(sheetLayer(`${EDIT_PREFIX}${pad.group}:${pad.offset}`))
+      },
+    },
+    project: v.tab === 'live' ? projectUi(c, state.busy, () => nav.open(sheetLayer(PROJECT_SHEET))) : null,
+    fx:
+      v.tab === 'live'
+        ? {
+            label: MirrorText.fxKeyLabel(fxType),
+            name: MirrorText.fxName(fxType),
+            on: fxType !== 'NONE',
+            held: fxHeld,
+            onSheet: () => nav.open(sheetLayer(FX_SHEET)),
+            onHold: (down) => (down ? setFxHeld(true) : punchOff()),
+          }
+        : null,
+  }
   // On a phone on its side, Live's display line rides in the top bar; the piano's
   // notes (while it shows) let it name a device note past them.
   const win = useWindowSize()
@@ -397,6 +467,9 @@ function Root(): JSX.Element {
   return (
     <TransportContext.Provider value={transport}>
     <TempoContext.Provider value={tempo}>
+    <FunctionKeysContext.Provider value={fnKeys}>
+    <ProjectHoldContext.Provider value={projectHold}>
+    <PunchContext.Provider value={punch}>
     <div class={desk ? 'app is-desk' : 'app'}>
       {desk ? (
         <CoachHost visible={v.coach && view === 'shell'} onDismiss={() => nav.close(overlayLayer('coach'))}>
@@ -425,7 +498,7 @@ function Root(): JSX.Element {
       {/* The Device tab's sheets: pads 'pads:device:<n>', upload / trim from state.browser.draft. */}
       {tabs && v.tab === 'device' && <><DevicePadsSheet view={v} /><DeviceUploadSheet view={v} /></>}
       {/* Live's EDIT: the pad sheet 'edit:<group>:<offset>', and the upload / trim sheets for a new sample. */}
-      {tabs && v.tab === 'live' && <><PadEditSheet view={v} /><DeviceUploadSheet view={v} /><LivePatternSheet view={v} /><LiveTempoSheet view={v} /></>}
+      {tabs && v.tab === 'live' && <><PadEditSheet view={v} /><DeviceUploadSheet view={v} /><LivePatternSheet view={v} /><LiveTempoSheet view={v} /><LiveProjectSheet view={v} /><LiveFxSheet view={v} /></>}
       {/* The Backups tab's sheets: detail 'detail:<id>', compare picker 'comparePick:<id>',
           restore 'restore:<id>', the delete dialog 'delete'. */}
       {tabs && v.tab === 'backups' && <BackupsSheets view={v} />}
@@ -447,6 +520,9 @@ function Root(): JSX.Element {
         <UpdatePrompt />
       </ToastLayer>
     </div>
+    </PunchContext.Provider>
+    </ProjectHoldContext.Provider>
+    </FunctionKeysContext.Provider>
     </TempoContext.Provider>
     </TransportContext.Provider>
   )
@@ -474,6 +550,34 @@ function tempoUi(c: ArcController, openSheet: () => void): TempoUi | null {
   }
 }
 
+/** PROJECT as its key shows it (Kotlin projectKeyOf), and what it does. */
+function projectUi(c: ArcController, busy: boolean, openSheet: () => void): ProjectUi {
+  const k = projectKeyOf(liveMirror(c), busy)
+  return {
+    shown: k.shown,
+    state: projectKeyState(k),
+    enabled: k.enabled,
+    switching: k.switching,
+    onStep: () => c.stepProject(),
+    onPick: openSheet,
+    onSelect: (n) => c.selectProject(n),
+  }
+}
+
+/** PROJECT held and let go of: the project sheet 'project', on Live. */
+function LiveProjectSheet(props: { view: NavView }): JSX.Element {
+  const c = useController()
+  const nav = useNav()
+  return (
+    <ProjectSheet
+      open={props.view.sheets.includes(PROJECT_SHEET)}
+      choices={projectChoicesOf(liveMirror(c), c.state.value.busy)}
+      onPick={(n) => c.selectProject(n)}
+      onDismiss={() => nav.close(sheetLayer(PROJECT_SHEET))}
+    />
+  )
+}
+
 /** TEMPO held: the tempo sheet 'tempo', on Live. */
 function LiveTempoSheet(props: { view: NavView }): JSX.Element | null {
   const c = useController()
@@ -495,6 +599,38 @@ function LiveTempoSheet(props: { view: NavView }): JSX.Element | null {
       onSwing={(v) => p.setTimingSwing(v)}
       onQuantize={(on) => p.setTimingQuantize(on)}
       onDismiss={() => nav.close(sheetLayer(TEMPO_SHEET))}
+    />
+  )
+}
+
+/** FX tapped: the project's effect, its sends, the compressor and the sidechain; the pad played last to hear them on. */
+function LiveFxSheet(props: { view: NavView }): JSX.Element {
+  const c = useController()
+  const nav = useNav()
+  const d = c.fx.desk
+  const fx = d.fx.value
+  const state = c.state.value
+  const selected = state.keysPad
+  return (
+    <FxSheet
+      open={props.view.sheets.includes(FX_SHEET)}
+      settings={fx}
+      bpm={patternBpm(state.mirror?.state.bpm, c.pattern.metronome.value.bpm)}
+      selected={selected}
+      nameOf={(pad) => c.mirrorName(pad)}
+      // An effect put on with no send anywhere: the group of the pad played last sends to it.
+      onType={(t) => d.setType(t, selected?.group ?? null)}
+      onXY={(x, y) => d.setXY(x, y)}
+      onSend={(g, v) => d.setSend(g, v)}
+      onComp={(on, x, y) => d.setComp({ on, x, y })}
+      onSidechainOn={(on) => d.setSidechainOn(on)}
+      onSidechainSource={(g, pad) => d.setSidechainSource(g, pad)}
+      onSidechainDest={(g) => d.toggleSidechainDest(g)}
+      onSidechainXY={(x, y) => d.setSidechainXY(x, y)}
+      // The cap plays the pad as Live does, through the effects (a try, never a pattern's note).
+      onPadDown={(pad, at) => void c.tryPad(pad, at)}
+      onPadUp={(pad) => c.releaseTry(pad)}
+      onDismiss={() => nav.close(sheetLayer(FX_SHEET))}
     />
   )
 }
