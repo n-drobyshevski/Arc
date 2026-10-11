@@ -1,0 +1,48 @@
+/* Punch-ins (LivePunch.kt's PunchPad): FX held, each pad of the big grid names its effect.
+ * The cap is the pad's own (live-pad, glow 1 while held), the words its: the name where the
+ * pad prints its sound, "hold" at the foot, or the depth's bar while held. */
+.live-punch {
+  /* The pad's glow (MirrorScreen.css resolves it on [data-pad]; a punch-in pad has none). */
+  --glow-pct: calc(var(--glow, 0) * 100%);
+  justify-content: space-between;
+  gap: 4px;
+  color: var(--ko-dark-ink, #EDECE8);
+  text-align: left;
+  touch-action: none;
+}
+.live-punch.is-held { color: var(--on-signal); }
+
+.live-punch__name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  font-size: clamp(10px, calc(var(--u, 72px) * 0.15), 15px);
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: 0.04em;
+  overflow-wrap: anywhere;
+}
+
+.live-punch__hold {
+  font-size: clamp(10px, calc(var(--u, 72px) * 0.13), 14px);
+  line-height: 1.1;
+  color: var(--hw-dark-dim);
+}
+
+/* The depth: a pale track, filled as far as the finger presses. */
+.live-punch__bar {
+  display: block;
+  width: 85%;
+  height: clamp(3px, calc(var(--u, 72px) * 0.045), 5px);
+  margin-bottom: calc(var(--u, 72px) * 0.04);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--on-signal) 30%, transparent);
+  overflow: hidden;
+}
+.live-punch__fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--on-signal);
+}

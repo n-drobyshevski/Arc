@@ -38,7 +38,7 @@
 // On a phone on its side (ui/live/window.ts liveInBar; never on the desk),
 // Live's display line rides in the top bar's middle (LiveBar, MirrorScreen's
 // LivePill) and the page leaves it out.
-import { signal } from '@preact/signals'
+import { signal, useComputed } from '@preact/signals'
 import { Component, type ComponentChildren, type JSX } from 'preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { FactorySounds } from './core/features/factorySounds'
@@ -98,6 +98,7 @@ import { KeyboardKeysSheet } from './ui/sheets/KeyboardKeysSheet'
 import { PatternSheet } from './ui/sheets/PatternSheet'
 import { TransportContext, type TransportUi } from './ui/live/PatternLine'
 import { FunctionKeysContext, ProjectHold, ProjectHoldContext, TempoContext, type FunctionKeysUi, type ProjectUi, type TempoUi } from './ui/live/FunctionRow'
+import { PunchContext, type PunchUi } from './ui/live/LivePunch'
 import { projectChoicesOf, projectKeyOf, projectKeyState } from './ui/live/projectKey'
 import { ProjectSheet } from './ui/sheets/ProjectSheet'
 import { TempoSheet } from './ui/sheets/TempoSheet'
@@ -114,6 +115,8 @@ const PATTERN_SHEET = 'pattern'
 const TEMPO_SHEET = 'tempo'
 /** Live's project sheet (PROJECT held). */
 const PROJECT_SHEET = 'project'
+/** FX tapped: the effect, its sends, the compressor and the sidechain. */
+const FX_SHEET = 'fx'
 
 export interface AppProps {
   controller: ArcController
@@ -225,6 +228,32 @@ function Root(): JSX.Element {
     const pad = editPadOf(v.sheets)
     if (pad !== null) nav.close(sheetLayer(`${EDIT_PREFIX}${pad.group}:${pad.offset}`))
   }, [ready])
+  // FX held: the pads play the punch-ins until it lets go, which lets go of every one held (MainActivity punchMode).
+  const [fxHeld, setFxHeld] = useState(false)
+  const punchOff = (): void => {
+    c.fx.desk.punchAllUp()
+    setFxHeld(false)
+  }
+  useEffect(() => {
+    if (v.tab !== 'live' && fxHeld) punchOff()
+  }, [v.tab])
+  // Only the effect's type re-renders the shell (its knobs turn many times a second).
+  const fxType = useComputed(() => c.fx.desk.fx.value.type).value
+  const punches = c.fx.desk.punches.value
+  const punchOn = fxHeld && v.tab === 'live' && !settings.liveKeys
+  const punch: PunchUi | null = useMemo(
+    () =>
+      punchOn
+        ? {
+            held: punches,
+            onDown: (slot, depth) => c.fx.desk.punchDown(slot, depth),
+            onMove: (slot, depth) => c.fx.desk.punchMove(slot, depth),
+            onUp: (slot) => c.fx.desk.punchUp(slot),
+            haptic: settings.haptics,
+          }
+        : null,
+    [c, punchOn, punches, settings.haptics],
+  )
   // Live's function keys over the pads: SOUND (EDIT, and the pad played last's sheet); TEMPO is [tempo].
   const fnKeys: FunctionKeysUi = {
     sound: {
@@ -246,7 +275,17 @@ function Root(): JSX.Element {
       },
     },
     project: v.tab === 'live' ? projectUi(c, state.busy, () => nav.open(sheetLayer(PROJECT_SHEET))) : null,
-    fx: null,
+    fx:
+      v.tab === 'live'
+        ? {
+            label: MirrorText.fxKeyLabel(fxType),
+            name: MirrorText.fxName(fxType),
+            on: fxType !== 'NONE',
+            held: fxHeld,
+            onSheet: () => nav.open(sheetLayer(FX_SHEET)),
+            onHold: (down) => (down ? setFxHeld(true) : punchOff()),
+          }
+        : null,
   }
   // On a phone on its side, Live's display line rides in the top bar; the piano's
   // notes (while it shows) let it name a device note past them.
@@ -428,6 +467,7 @@ function Root(): JSX.Element {
     <TempoContext.Provider value={tempo}>
     <FunctionKeysContext.Provider value={fnKeys}>
     <ProjectHoldContext.Provider value={projectHold}>
+    <PunchContext.Provider value={punch}>
     <div class={desk ? 'app is-desk' : 'app'}>
       {desk ? (
         <CoachHost visible={v.coach && view === 'shell'} onDismiss={() => nav.close(overlayLayer('coach'))}>
@@ -478,6 +518,7 @@ function Root(): JSX.Element {
         <UpdatePrompt />
       </ToastLayer>
     </div>
+    </PunchContext.Provider>
     </ProjectHoldContext.Provider>
     </FunctionKeysContext.Provider>
     </TempoContext.Provider>

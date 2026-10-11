@@ -162,6 +162,8 @@ import { TakeBadge, TakesSection, type TakeUi, type TakesUi } from '../live/Take
 import { PatternLine, TransportContext } from '../live/PatternLine'
 import { FunctionKeysContext, FunctionRow, ProjectHoldContext } from '../live/FunctionRow'
 import { DeviceView } from '../live/DeviceView'
+import { PunchPad, usePunch } from '../live/LivePunch'
+import { punchSlotForPad } from '../../state/fx'
 import { useDesk, useFinePointer, useWindowSize } from '../useDesk'
 import './MirrorScreen.css'
 
@@ -1261,6 +1263,20 @@ function PianoLegend(): JSX.Element {
  */
 function DisplayStrip(props: { st: MirrorState; mirror: MirrorUi | null; compact?: boolean; take?: TakeUi | null; still?: boolean }): JSX.Element {
   const { st, mirror } = props
+  // The punch-ins held name the line, in the order pressed.
+  const punch = usePunch()
+  if (punch !== null && punch.held.size > 0) {
+    return (
+      <div class={`live-strip${props.compact ? ' live-strip--bar' : ''}`} aria-live="polite">
+        <PatternLine compact={props.compact} still={props.still}>
+          <span class="live-strip__line live-strip__punch" aria-label={MirrorText.punchSpoken(punch.held)}>
+            {MirrorText.punchLine(punch.held)}
+          </span>
+        </PatternLine>
+        <TakeBadge take={props.take} still={props.still} />
+      </div>
+    )
+  }
   return (
     <div class={`live-strip${props.compact ? ' live-strip--bar' : ''}`} aria-live="polite">
       <PatternLine compact={props.compact} still={props.still}>
@@ -1403,6 +1419,7 @@ interface GroupProps {
 
 function Group(props: GroupProps): JSX.Element {
   const { group, st, nameOf, now, big = false, fill = false, ui, tracker } = props
+  const punch = usePunch()
   const letter = MirrorText.groupKey(group)
   return (
     <div
@@ -1440,6 +1457,9 @@ function Group(props: GroupProps): JSX.Element {
             <div class="live-deck__row">
               {offsets.map((o) => {
                 const pad = physicalPad(group, o)
+                // FX held: the big grid's pads are the punch-ins, by the label printed on each.
+                const slot = big && punch !== null ? punchSlotForPad(o) : -1
+                if (slot >= 0) return <PunchPad key={o} slot={slot} punch={punch!} />
                 return (
                   <Pad
                     key={o}
