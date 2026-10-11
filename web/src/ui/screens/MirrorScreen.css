@@ -1332,3 +1332,14 @@
   background: var(--signal);
   pointer-events: none;
 }
+
+/* STEP open (LiveStep.kt PadStep): the pads (KEYS keys) on the cursor's step outlined in signal orange,
+ * their digit orange; the one picked for − / + ringed thicker. An outline, so the cap keeps its edge. */
+.live-pad.is-step-lit,
+.live-key.is-step-lit { outline: 2px solid var(--signal); outline-offset: -4px; }
+.live-pad.is-step-picked,
+.live-key.is-step-picked { outline: 3px solid var(--signal); outline-offset: -5px; }
+.live-pad.is-step-lit .live-pad__label,
+.live-pad.is-step-picked .live-pad__label { color: var(--signal); }
+/* On a phone on its side, the panel over the side columns. */
+.live__side-step { flex: none; }

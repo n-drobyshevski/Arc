@@ -99,6 +99,8 @@ import { PatternSheet } from './ui/sheets/PatternSheet'
 import { TransportContext, type TransportUi } from './ui/live/PatternLine'
 import { FunctionKeysContext, ProjectHold, ProjectHoldContext, TempoContext, type FunctionKeysUi, type ProjectUi, type TempoUi } from './ui/live/FunctionRow'
 import { PunchContext, type PunchUi } from './ui/live/LivePunch'
+import { StepContext, type StepActions } from './ui/live/StepPanel'
+import { stepWord } from './state/stepPlan'
 import { projectChoicesOf, projectKeyOf, projectKeyState } from './ui/live/projectKey'
 import { ProjectSheet } from './ui/sheets/ProjectSheet'
 import { TempoSheet } from './ui/sheets/TempoSheet'
@@ -211,6 +213,7 @@ function Root(): JSX.Element {
   // PATTERN: RECORD and PLAY on Live's display lines, read through the context (its signal re-renders the lines only).
   const transport = useMemo(() => transportUi(c, () => nav.open(sheetLayer(PATTERN_SHEET))), [c])
   const tempo = useMemo(() => tempoUi(c, () => nav.open(sheetLayer(TEMPO_SHEET))), [c])
+  const step = useMemo(() => stepUi(c), [c])
   // PROJECT held: the pads printed 1 to 9 pick a project instead of sounding.
   const projectHold = useMemo(() => new ProjectHold(), [])
   // Live's EDIT (giving a pad another sound): on Live, in PADS, until switched off or left.
@@ -466,6 +469,7 @@ function Root(): JSX.Element {
   const guide = screenLayer({ kind: 'guide' })
   return (
     <TransportContext.Provider value={transport}>
+    <StepContext.Provider value={step}>
     <TempoContext.Provider value={tempo}>
     <FunctionKeysContext.Provider value={fnKeys}>
     <ProjectHoldContext.Provider value={projectHold}>
@@ -524,6 +528,7 @@ function Root(): JSX.Element {
     </ProjectHoldContext.Provider>
     </FunctionKeysContext.Provider>
     </TempoContext.Provider>
+    </StepContext.Provider>
     </TransportContext.Provider>
   )
 }
@@ -633,6 +638,38 @@ function LiveFxSheet(props: { view: NavView }): JSX.Element {
       onDismiss={() => nav.close(sheetLayer(FX_SHEET))}
     />
   )
+}
+
+/** STEP's chip, panel and pads for Live (Kotlin LiveStep), its state read from the controller's signal as each part renders. */
+function stepUi(c: ArcController): StepActions | null {
+  const p = c.pattern
+  if (!p.available) return null
+  return {
+    get ui() {
+      return p.step.value
+    },
+    get pickedWord() {
+      const n = p.step.value.picked
+      return n === null ? null : stepWord(n, n.semitones === null ? c.mirrorName(n.pad) : null, c.settings.value.keysNames)
+    },
+    onOpen: () => p.setStepOpen(true),
+    onClose: () => p.setStepOpen(false),
+    onRecordDown: () => p.stepRecordDown(),
+    onRecordUp: () => p.stepRecordUp(),
+    onPlay: () => p.stepPlay(),
+    onMinus: () => p.stepBy(-1),
+    onPlus: () => p.stepBy(1),
+    onJump: (step) => p.stepJump(step),
+    onPage: (bar) => p.stepPageTo(bar),
+    onVelocity: (v) => p.setStepVelocity(v),
+    onGate: (t) => p.setStepGate(t),
+    onKnobEnd: () => p.stepKnobEnd(),
+    onNudge: (on) => p.setStepNudge(on),
+    onCorrect: (on) => p.setStepCorrect(on),
+    onPadPick: (pad) => c.stepPadPick(pad),
+    onNotePick: (note) => c.stepNotePick(note),
+    onGroup: (g) => p.setStepGroup(g),
+  }
 }
 
 /** PATTERN's keys for Live's lines (Kotlin TransportUi), its state read from the controller's signal as each line renders. */

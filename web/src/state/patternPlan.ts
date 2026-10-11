@@ -67,6 +67,9 @@ export const PATTERN_UI: PatternUiState = Object.freeze({
   project: 0,
 })
 
+/** A pad held in ERASE (or CORRECT) shorter than this is a tap: it takes the pad's every note. */
+export const ERASE_TAP_MS = 200
+
 /** Counting in or playing: the sequencer runs. */
 export function patternRunning(ui: Pick<PatternUiState, 'phase'>): boolean {
   return ui.phase === 'COUNT_IN' || ui.phase === 'PLAYING'

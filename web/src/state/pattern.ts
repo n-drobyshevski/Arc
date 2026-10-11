@@ -12,9 +12,12 @@
 // - The patterns are kept in the library database's kv store
 //   (Library.readPatterns / writePatterns), Android's files/patterns.json.
 // - The settings are PatternPrefs (localStorage), not AppSettings.
-// - No scenes, STEP, ERASE, CORRECT, arp, SAMPLE's PTN take or Bluetooth
-//   delay make-up yet: the web plays and records the patterns of the scene
-//   a project starts on, and the tick heard is the tick stamped.
+// - No scenes, arp, SAMPLE's PTN take or Bluetooth delay make-up yet: the
+//   web plays and records the patterns of the scene a project starts on,
+//   and the tick heard is the tick stamped.
+// - STEP (StepPlan.kt's StepDesk) and CORRECT are this desk's, as ERASE is:
+//   ArcController's STEP section lives here, the controller routing the
+//   presses to it.
 // - The follow loop is a timer (setTimeout), not a coroutine; the click for
 //   the count-in is the sequencer's own (PatternScheduler).
 // - Times are performance.now() milliseconds where Kotlin's are System.nanoTime.
@@ -24,6 +27,8 @@ import { physicalPad, type PhysicalPad } from '../core/features/padNotes'
 import { Pattern, Patterns, ProjectPatterns, ProjectSeq, Seq, TimingSettings, type Timing } from '../core/features/pattern'
 import { PatternRecorder } from '../core/features/patternRecorder'
 import { frameAt } from '../core/features/sampleTiming'
+import { Steps } from '../core/features/steps'
+import { NoteNames, ROOT_NOTE } from '../core/features/keys'
 import { PhaseAnchors, passOf, positionOf, tickAt as clockTickAt, msOf, type PatternPosition } from '../core/features/sequencer'
 import { Transport, type TransportAction } from '../core/features/transport'
 import { ClockFollow, TapTempo, Tempo, type Beat } from '../core/features/tempo'
@@ -36,6 +41,7 @@ import type { Deps, LiveTimeline } from './deps'
 import type { LiveSounds } from './live'
 import { sameShape } from './padShape'
 import {
+  ERASE_TAP_MS,
   PATTERN_UI,
   countInBeat,
   heldNotesEnded,
@@ -48,6 +54,7 @@ import {
   withoutNote,
   type PatternUiState,
 } from './patternPlan'
+import { CORRECT_SHOWN_MS, STEP_UI, StepDesk, auditionMs, stepOpens, stepWord, type StepNote, type StepUi } from './stepPlan'
 import type { Store } from './store'
 import type { UiState } from './types'
 
@@ -63,11 +70,11 @@ export const PATTERN_ERASE_MS = 20
 /** How often the click looks whether the EP-133's clock came or went (ms). */
 const CLICK_WATCH_MS = 500
 
-/** A pad held in ERASE shorter than this is a tap: it erases the pad's every note. */
-export const ERASE_TAP_MS = 200
 
 /** How far ahead of the mix the sequencer sends notes (PatternScheduler's LOOKAHEAD_MS). */
 const LOOKAHEAD_MS = 50
+
+export { ERASE_TAP_MS }
 
 /** A pad (a KEYS note on it: [semitones]) held in ERASE from [downAt]; [from] is the tick it has erased to, once it holds. */
 interface EraseHold {
@@ -83,10 +90,12 @@ export interface PatternHost {
   store: Store<UiState>
   deps: Pick<Deps, 'liveAudio' | 'library' | 'perfNow' | 'setTimeout' | 'clearTimeout'>
   prefs: PatternPrefs
-  live: Pick<LiveSounds, 'patternVoice' | 'loadForPattern'>
+  live: Pick<LiveSounds, 'patternVoice' | 'loadForPattern' | 'audition' | 'auditionsEnd'>
   toast(text: string, error?: boolean): void
   /** How [pad]'s (pad key) voices play: its sound settings and FX bus; [keys]: its KEYS notes. */
   shapeOf?(pad: number, keys: boolean): Partial<VoiceShape>
+  /** A note as STEP's status line names it (stepWord: the KEYS note, the pad's sound, else the pad). */
+  stepWord?(n: StepNote): string
 }
 
 /** The plan last handed to the sequencer, to tell when a new one changes anything. */
@@ -143,6 +152,12 @@ export class PatternDesk {
   /** Each beat for TEMPO's light, with when it is heard: the click's while it sounds, else the EP-133's from its clock. */
   readonly beats: ReadonlySignal<Beat | null> = this._beats
   private readonly clockFollow = new ClockFollow()
+  // STEP: the panel and CORRECT (StepPlan.kt's StepDesk), what Live shows of them, and the line's count going.
+  private readonly stepDesk: StepDesk
+  private readonly _step: Signal<StepUi> = signal(STEP_UI)
+  /** STEP as Live shows it: the panel, its cursor's step, CORRECT and the status line. */
+  readonly step: ReadonlySignal<StepUi> = this._step
+  private stepShown: unknown = null
   private readonly taps = new TapTempo()
 
   constructor(private readonly host: PatternHost) {
@@ -150,6 +165,7 @@ export class PatternDesk {
     this._ui = signal(this.withSettings(PATTERN_UI))
     this.ui = this._ui
     this._metronome = signal<Metronome>({ on: false, bpm: this.settings.liveTempo })
+    this.stepDesk = new StepDesk((n) => host.stepWord?.(n) ?? stepWord(n, null, NoteNames.LETTERS))
     this.metronome = this._metronome
     const audio = host.deps.liveAudio
     if (audio.onSeqMissing) this.cleanups.push(audio.onSeqMissing(() => this.refreshPlan()))
@@ -173,6 +189,7 @@ export class PatternDesk {
 
   dispose(): void {
     this.stopLoop()
+    this.cancelCorrectedShown()
     this.watchClick(false)
     for (const c of this.cleanups.splice(0)) c()
   }
@@ -227,8 +244,10 @@ export class PatternDesk {
     await this.load()
     if (project === this.project) return
     this.stop()
+    this.closeStep()
     this.save()
     this.project = project
+    this.stepDesk.project = project
     this.useSeq(Patterns.of(this.patterns, project))
     this.skip = new Map()
     this.tried.clear()
@@ -271,6 +290,7 @@ export class PatternDesk {
 
   private show(): void {
     this._ui.value = this.withSettings(patternShown(this._ui.peek(), this.current, this.transport.state, this.recorder.canUndo))
+    this.publishStep()
   }
 
   private withSettings(ui: PatternUiState): PatternUiState {
@@ -412,6 +432,9 @@ export class PatternDesk {
     const a = step()
     switch (a.type) {
       case 'Start':
+        // The transport leaves STOPPED: the panel folds, and its auditions go (the notes ring on the same keys).
+        this.closeStep()
+        this.host.live.auditionsEnd()
         this.start(a.countInBars, a.record, a.at)
         break
       case 'Stop':
@@ -463,6 +486,10 @@ export class PatternDesk {
     this.pressAt = null
     this.held.clear()
     this.eraseHolds.clear()
+    if (this.stepDesk.holding) {
+      this.stepDesk.holdsEnd(this.recorder)
+      this.stepCorrectedShown()
+    }
     this.skip = new Map()
     this._ui.value = { ...this._ui.peek(), countIn: null }
     this.refreshPlan()
@@ -498,7 +525,7 @@ export class PatternDesk {
         const tick = clockTickAt(tl.clock, frameAt(tl.frames, now))
         this.followTick(tick)
         const next = msOf(tl.clock, (Math.floor(tick / Seq.PPQN) + 1) * Seq.PPQN, tl.frames)
-        wait = Math.min(Math.max(Math.floor(next - now) + 1, 1), this.eraseHolds.size === 0 ? PATTERN_LOOP_MS : PATTERN_ERASE_MS)
+        wait = Math.min(Math.max(Math.floor(next - now) + 1, 1), this.eraseHolds.size === 0 && !this.stepDesk.holding ? PATTERN_LOOP_MS : PATTERN_ERASE_MS)
       } else {
         wait = 20
       }
@@ -522,6 +549,7 @@ export class PatternDesk {
       this.setPatterns(this.recorder.grow(this.current, tick))
     }
     this.eraseHeld()
+    this.correctHeld()
   }
 
   // ---------- ERASE ----------
@@ -529,6 +557,8 @@ export class PatternDesk {
   /** ERASE on or off: on, a pad tapped erases its notes, and one held while playing erases them as they pass. */
   setErase(on: boolean): void {
     if (!on) this.eraseHolds.clear()
+    // ERASE and CORRECT take the same presses: one goes off as the other comes on.
+    if (on && this.stepDesk.correct) this.setStepCorrect(false)
     if (this._ui.peek().erase === on) return
     this._ui.value = { ...this._ui.peek(), erase: on }
   }
@@ -658,6 +688,256 @@ export class PatternDesk {
     if (id === undefined) return
     this.held.delete(key)
     this.setPatterns(withoutNote(this.current, id))
+  }
+
+  // ---------- STEP: the pattern a step at a time while stopped, and timing correct (an addition) ----------
+
+  /** Whether the STEP panel is open: the pads and keys place, pick or sound there, and never record into the pattern. */
+  get stepping(): boolean {
+    return this.stepDesk.open
+  }
+
+  /** Whether CORRECT takes the pads' presses: on, while the pattern plays (and neither STEP nor ERASE does). */
+  get correcting(): boolean {
+    return this.stepDesk.correct && this.transport.state.phase === 'PLAYING' && !this.stepDesk.open && !this.erasing
+  }
+
+  /**
+   * The STEP panel opened ([on]) on [group] (Live's one group shown, or the
+   * KEYS sound's), or closed (✕). It opens only while stopped (armed, RECORD
+   * is disarmed first, as STOP does), and ERASE goes off. Closing lets go of
+   * the pick, NUDGE, the panel's RECORD and its status; CORRECT stays.
+   */
+  setStepOpen(on: boolean, group: number = this.stepDesk.group): void {
+    if (!on) {
+      this.closeStep()
+      return
+    }
+    if (this.stepDesk.open) {
+      this.setStepGroup(group)
+      return
+    }
+    if (!stepOpens(this.transport.state.phase)) return
+    if (this.transport.state.phase === 'ARMED') this.stop()
+    this.setErase(false)
+    this.stepDesk.openOn(this.project, group)
+    this.publishStep()
+  }
+
+  /** Live shows [group] now (another group, or the KEYS sound's): the panel steps through it, at that group's cursor. */
+  setStepGroup(group: number): void {
+    this.stepDesk.setGroup(group)
+    this.publishStep()
+  }
+
+  /** The panel's RECORD goes down: while it is held, a pad or key tapped goes on the cursor's step. Not the transport's RECORD. */
+  stepRecordDown(): void {
+    this.stepAct(() => this.stepDesk.record(true))
+  }
+
+  /** The panel's RECORD comes up: a tap only sounds again. */
+  stepRecordUp(): void {
+    this.stepAct(() => this.stepDesk.record(false))
+  }
+
+  /** The panel's PLAY: the panel folds and the patterns play from bar 1 (CORRECT stays as it is). */
+  stepPlay(): void {
+    this.closeStep()
+    this.play()
+  }
+
+  /**
+   * A press in the open panel on [note] by voice [key], at the touch's
+   * [pressure] (NaN: none told): with the panel's RECORD held it goes on the
+   * cursor's step; with NUDGE waiting it is picked instead; else it only
+   * sounds, and with CORRECT on its notes go onto the grid as it lets go.
+   * True when it sounds (the caller plays it, never into the pattern).
+   */
+  stepDown(key: string, note: StepNote, pressure = Number.NaN): boolean {
+    if (!this.stepDesk.open) return false
+    const r = this.stepDesk.press(key, note, pressure, this.current, this.recorder, this.settings.timing)
+    this.setPatterns(r.patterns)
+    this.publishStep()
+    return r.plays
+  }
+
+  /** The finger on voice [key] in the panel let go of: CORRECT's tap, or the end of − / +'s shift. */
+  stepUp(key: string): void {
+    if (!this.stepDesk.open) return
+    this.setPatterns(this.stepDesk.release(key, this.current, this.recorder, this.settings.timing))
+    this.publishStep()
+  }
+
+  /**
+   * A long press on [note] in the panel: picked for − / + to nudge, when it
+   * has a note on the cursor's step; picked already, it is let go of. False
+   * when it has none there, and with CORRECT on.
+   */
+  stepPick(note: StepNote): boolean {
+    if (!this.stepDesk.open) return false
+    const picked = this.stepDesk.pick(note, this.current, this.recorder, this.settings.timing)
+    this.publishStep()
+    return picked
+  }
+
+  /**
+   * The panel's − ([dir] -1) or + (1): with CORRECT on and a pad held, its
+   * notes a tick earlier or later; else, a note picked, it is nudged and the
+   * cursor follows it; else the cursor moves a step, wrapping round the
+   * pattern, and its notes sound.
+   */
+  stepBy(dir: number): void {
+    if (!this.stepDesk.open) return
+    const r = this.stepDesk.minusPlus(dir, this.current, this.recorder, this.settings.timing)
+    this.setPatterns(r.patterns)
+    this.publishStep()
+    if (r.audition) this.auditionStep()
+  }
+
+  /** The strip's step [step] tapped: the cursor jumps there and its notes sound; the pick goes. */
+  stepJump(step: number): void {
+    if (!this.stepDesk.open) return
+    this.stepDesk.jump(step, this.current, this.recorder, this.settings.timing)
+    this.publishStep()
+    this.auditionStep()
+  }
+
+  /** BAR's page [bar] (from 0) tapped: the cursor jumps to that bar's first step, as [stepJump]. */
+  stepPageTo(bar: number): void {
+    if (!this.stepDesk.open) return
+    this.stepDesk.page(bar, this.current, this.recorder, this.settings.timing)
+    this.publishStep()
+    this.auditionStep()
+  }
+
+  /** VEL's knob: every note on the cursor's step at [velocity], 1..127. A turn is one UNDO step ([stepKnobEnd]). */
+  setStepVelocity(velocity: number): void {
+    this.stepAct(() => this.setPatterns(this.stepDesk.velocity(velocity, this.current, this.recorder, this.settings.timing)))
+  }
+
+  /** LEN's knob: every note on the cursor's step [ticks] long, snapped to STEP_GATES. A turn is one UNDO step. */
+  setStepGate(ticks: number): void {
+    this.stepAct(() => this.setPatterns(this.stepDesk.gate(ticks, this.current, this.recorder, this.settings.timing)))
+  }
+
+  /** VEL's or LEN's knob let go of: the next turn is an UNDO step of its own. */
+  stepKnobEnd(): void {
+    this.recorder.endRun()
+  }
+
+  /** NUDGE latched ([on]): a tap picks its pad, as a long press does; off, the pick goes. CORRECT goes off with it on. */
+  setStepNudge(on: boolean): void {
+    this.stepAct(() => this.stepDesk.nudge(on, this.recorder))
+  }
+
+  /**
+   * CORRECT on or off (timing correct, SHIFT + TIMING on the device): in the
+   * panel a pad tapped puts its every note on TIMING's grid and swing; while
+   * playing a pad held puts its notes on the grid as they play, the line
+   * counting them. NUDGE and the pick go either way; ERASE goes off with it on.
+   */
+  setStepCorrect(on: boolean): void {
+    if (on) this.setErase(false)
+    this.stepDesk.setCorrect(on, this.recorder)
+    this.cancelCorrectedShown()
+    this.publishStep()
+  }
+
+  /** A pad (a KEYS note on it: [semitones]) pressed at [at] with CORRECT on while playing: what it corrects is known as it is let go of, or held. */
+  correctPadDown(pad: PhysicalPad, at: number, semitones: number | null = null): void {
+    if (!this.stepDesk.correct) return
+    this.cancelCorrectedShown()
+    this.stepDesk.holdDown(eraseKey(pad, semitones), { pad, semitones }, at)
+    this.publishStep()
+    // Held while playing: the loop looks more often.
+    if (this.running() && this.loop !== null) {
+      this.stopLoop()
+      this.follow()
+    }
+  }
+
+  /**
+   * The pad pressed with CORRECT on let go of at [releasedAt]. A tap, or any
+   * press while not playing, puts its every note on the grid; held while
+   * playing, it corrected its notes as they passed, up to here. The line says
+   * how many, a moment longer.
+   */
+  correctPadUp(pad: PhysicalPad, releasedAt: number, semitones: number | null = null): void {
+    const tl = this.transport.state.phase === 'PLAYING' ? this.timeline() : null
+    const tickAt = tl === null ? null : (ms: number): number => clockTickAt(tl.clock, frameAt(tl.frames, ms))
+    this.setPatterns(this.stepDesk.holdUp(eraseKey(pad, semitones), releasedAt, this.current, this.recorder, this.settings.timing, tickAt))
+    this.publishStep()
+    if (!this.stepDesk.holding) this.stepCorrectedShown()
+  }
+
+  /** Live's STEP follows the patterns, TIMING and the desk. */
+  private publishStep(): void {
+    if (this.stepDesk === undefined) return
+    this._step.value = this.stepDesk.ui(this.current, this.settings.timing)
+  }
+
+  // [change] done on the desk, while the panel is open, and Live follows.
+  private stepAct(change: () => void): void {
+    if (!this.stepDesk.open) return
+    change()
+    this.publishStep()
+  }
+
+  /** The panel closes (✕, PLAY, the transport starting, another project), if it was open. */
+  private closeStep(): void {
+    if (!this.stepDesk.open) return
+    this.stepDesk.close(this.recorder)
+    this.publishStep()
+  }
+
+  /**
+   * The notes on the cursor's step sound, each as a press of its pad (or
+   * KEYS note) would, at its velocity: let go of after its gate at the
+   * pattern's tempo, 60 ms to 1.5 s. Only from memory; the last audition's
+   * notes still sounding are let go of first.
+   */
+  private auditionStep(): void {
+    const { live } = this.host
+    live.auditionsEnd()
+    const t = this.settings.timing
+    const g = this.stepDesk.group
+    const notes = Steps.notesOn(ProjectPatterns.group(this.current, g), this.stepDesk.cursor(this.current, t.interval), t.interval, t.swing)
+    const bpm = this.bpm()
+    for (const n of notes) {
+      // The pattern's own voice keys: a pad hit rings its pad, a KEYS note its key.
+      const key = n.semitones !== null ? `seq:${g}:${n.offset}:${ROOT_NOTE + n.semitones}` : `live:${g}:${n.offset}`
+      live.audition(key, physicalPad(g, n.offset), n.semitones, n.velocity, auditionMs(n.gate, bpm))
+    }
+  }
+
+  /**
+   * The pads held to correct while playing put their notes on the grid as
+   * the playhead passes, a lookahead ahead, so the notes go before the
+   * sequencer sends them, as [eraseHeld] does; the line counts them.
+   */
+  private correctHeld(): void {
+    if (!this.stepDesk.holding || this.transport.state.phase !== 'PLAYING') return
+    const tl = this.timeline()
+    if (tl === null) return
+    const now = this.host.deps.perfNow()
+    const to = clockTickAt(tl.clock, frameAt(tl.frames, now + LOOKAHEAD_MS))
+    this.setPatterns(this.stepDesk.held(this.current, this.recorder, this.settings.timing, to, now, (ms) => clockTickAt(tl.clock, frameAt(tl.frames, ms))))
+    this.publishStep()
+  }
+
+  /** The line's count of the notes corrected while playing goes a moment after the last pad held lets go. */
+  private stepCorrectedShown(): void {
+    this.cancelCorrectedShown()
+    this.stepShown = this.host.deps.setTimeout(() => {
+      this.stepShown = null
+      this.stepDesk.correctedShown()
+      this.publishStep()
+    }, CORRECT_SHOWN_MS)
+  }
+
+  private cancelCorrectedShown(): void {
+    if (this.stepShown !== null) this.host.deps.clearTimeout(this.stepShown)
+    this.stepShown = null
   }
 
   // ---------- the sheet ----------
