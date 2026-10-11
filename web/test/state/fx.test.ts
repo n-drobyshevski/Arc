@@ -234,6 +234,15 @@ describe('FX in the controller', () => {
     expect(h.liveAudio.controls.at(-1)).toEqual([FxControl.PUNCH, 3, 0, 0])
   })
 
+  it("the sheet's cap plays a pad through the effects, and lets it go", async () => {
+    const h = await liveOn()
+    await vi.waitFor(() => expect(h.liveAudio.loaded.has('1:kick')).toBe(true), { timeout: 5000 })
+    await h.c.tryPad(physicalPad(0, 0))
+    expect(h.liveAudio.presses.at(-1)).toMatchObject({ id: 'live:0:0', options: { gate: true, shape: { bus: 0 } } })
+    h.c.releaseTry(physicalPad(0, 0))
+    expect(h.liveAudio.releases.at(-1)).toBe('live:0:0')
+  })
+
   it("keeps each project's settings in the library", async () => {
     const h = await liveOn()
     await vi.waitFor(() => expect(h.c.fx.desk.loaded).toBe(true))

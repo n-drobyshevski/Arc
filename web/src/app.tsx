@@ -102,6 +102,8 @@ import { PunchContext, type PunchUi } from './ui/live/LivePunch'
 import { projectChoicesOf, projectKeyOf, projectKeyState } from './ui/live/projectKey'
 import { ProjectSheet } from './ui/sheets/ProjectSheet'
 import { TempoSheet } from './ui/sheets/TempoSheet'
+import { FxSheet } from './ui/sheets/FxSheet'
+import { patternBpm } from './state/patternPlan'
 import { computerKeys, setComputerKeys } from './ui/keyPrefs'
 import './app.css'
 
@@ -496,7 +498,7 @@ function Root(): JSX.Element {
       {/* The Device tab's sheets: pads 'pads:device:<n>', upload / trim from state.browser.draft. */}
       {tabs && v.tab === 'device' && <><DevicePadsSheet view={v} /><DeviceUploadSheet view={v} /></>}
       {/* Live's EDIT: the pad sheet 'edit:<group>:<offset>', and the upload / trim sheets for a new sample. */}
-      {tabs && v.tab === 'live' && <><PadEditSheet view={v} /><DeviceUploadSheet view={v} /><LivePatternSheet view={v} /><LiveTempoSheet view={v} /><LiveProjectSheet view={v} /></>}
+      {tabs && v.tab === 'live' && <><PadEditSheet view={v} /><DeviceUploadSheet view={v} /><LivePatternSheet view={v} /><LiveTempoSheet view={v} /><LiveProjectSheet view={v} /><LiveFxSheet view={v} /></>}
       {/* The Backups tab's sheets: detail 'detail:<id>', compare picker 'comparePick:<id>',
           restore 'restore:<id>', the delete dialog 'delete'. */}
       {tabs && v.tab === 'backups' && <BackupsSheets view={v} />}
@@ -597,6 +599,38 @@ function LiveTempoSheet(props: { view: NavView }): JSX.Element | null {
       onSwing={(v) => p.setTimingSwing(v)}
       onQuantize={(on) => p.setTimingQuantize(on)}
       onDismiss={() => nav.close(sheetLayer(TEMPO_SHEET))}
+    />
+  )
+}
+
+/** FX tapped: the project's effect, its sends, the compressor and the sidechain; the pad played last to hear them on. */
+function LiveFxSheet(props: { view: NavView }): JSX.Element {
+  const c = useController()
+  const nav = useNav()
+  const d = c.fx.desk
+  const fx = d.fx.value
+  const state = c.state.value
+  const selected = state.keysPad
+  return (
+    <FxSheet
+      open={props.view.sheets.includes(FX_SHEET)}
+      settings={fx}
+      bpm={patternBpm(state.mirror?.state.bpm, c.pattern.metronome.value.bpm)}
+      selected={selected}
+      nameOf={(pad) => c.mirrorName(pad)}
+      // An effect put on with no send anywhere: the group of the pad played last sends to it.
+      onType={(t) => d.setType(t, selected?.group ?? null)}
+      onXY={(x, y) => d.setXY(x, y)}
+      onSend={(g, v) => d.setSend(g, v)}
+      onComp={(on, x, y) => d.setComp({ on, x, y })}
+      onSidechainOn={(on) => d.setSidechainOn(on)}
+      onSidechainSource={(g, pad) => d.setSidechainSource(g, pad)}
+      onSidechainDest={(g) => d.toggleSidechainDest(g)}
+      onSidechainXY={(x, y) => d.setSidechainXY(x, y)}
+      // The cap plays the pad as Live does, through the effects (a try, never a pattern's note).
+      onPadDown={(pad, at) => void c.tryPad(pad, at)}
+      onPadUp={(pad) => c.releaseTry(pad)}
+      onDismiss={() => nav.close(sheetLayer(FX_SHEET))}
     />
   )
 }

@@ -1144,6 +1144,19 @@ export class ArcController {
     return done
   }
 
+  /**
+   * The FX sheet's cap: [pad] plays as Live plays it, through the effects,
+   * until [releaseTry]; a try, so never a pattern's note, nor ERASE's.
+   */
+  tryPad(pad: PhysicalPad, at?: number): Promise<void> {
+    return this.live.playPad(pad, true, false, at)
+  }
+
+  /** The finger left the FX sheet's cap. */
+  releaseTry(pad: PhysicalPad): void {
+    this.live.releasePad(pad)
+  }
+
   /** The unsure press on the pad was a press after all: it becomes the KEYS sound (and one not in memory loads). */
   keepPad(pad: PhysicalPad): Promise<void> {
     const erasedAt = this.eraseUnsure.get(padKey(pad))
