@@ -13,8 +13,8 @@
 //
 // Web deltas: the Bluetooth key shows when Live's output delay is long enough
 // to be heard (LiveAudio.late), as the web can't tell Bluetooth from any other
-// slow output, and it never makes up for it, so its sentence is always
-// MirrorText.WIRELESS_DELAY (never wirelessMadeUp). Screen readers, for whom a
+// slow output; its sentence is MirrorText.wirelessMadeUp while the delay is
+// made up for ([madeUp]), else MirrorText.WIRELESS_DELAY. Screen readers, for whom a
 // hold is no gesture, hear the hint as the connected key's description and find
 // a Disconnect button of its own beside it (visually hidden, out of the tab
 // order: the keyboard holds Enter or Space).
@@ -55,6 +55,8 @@ export interface TopBarProps {
    * re-renders the bar, not the page.
    */
   late?: ReadonlySignal<number | null> | null
+  /** The Bluetooth delay in all (ms) while it is made up for, else null (LiveAudio.madeUpFor); null off Live. */
+  madeUp?: ReadonlySignal<number | null> | null
   onDebug: () => void
   onHelp: () => void
   /** The desk: the theme switch after the ? key. */
@@ -67,7 +69,9 @@ export interface TopBarProps {
 const HOLD_HINT_ID = 'arc-hold-to-disconnect'
 
 export function TopBar(props: TopBarProps): JSX.Element {
-  const wireless = (props.late?.value ?? null) !== null
+  const madeUp = props.madeUp?.value ?? null
+  const wireless = (props.late?.value ?? null) !== null || madeUp !== null
+  const words = madeUp !== null ? MirrorText.wirelessMadeUp(madeUp) : MirrorText.WIRELESS_DELAY
   return (
     <header class="top-bar">
       <div class="top-bar__row">
@@ -86,10 +90,10 @@ export function TopBar(props: TopBarProps): JSX.Element {
                 icon={ArcIcon.BLUETOOTH}
                 iconAlso={ArcIcon.CLOCK}
                 label={CoachText.BLUETOOTH}
-                ariaLabel={MirrorText.WIRELESS_DELAY}
+                ariaLabel={words}
                 face="var(--warn)"
                 ink="var(--tag-ink)"
-                onClick={() => props.onNote(MirrorText.WIRELESS_DELAY)}
+                onClick={() => props.onNote(words)}
                 iconSize={20}
               />
             </span>

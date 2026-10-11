@@ -175,6 +175,14 @@ export interface LiveAudioDeps {
    * the finger, else null (absent: from [onSlowOutput] only): Live's display line says so.
    */
   readonly late?: ReadonlySignal<number | null>
+  /** The Bluetooth delay in all (ms) while it is made up for, else null: the Bluetooth key's words (LiveAudio.madeUpFor). */
+  readonly madeUpFor?: ReadonlySignal<number | null>
+  /** The open output's latency (ms) while it is taken for Bluetooth, else null (LiveAudio.bluetooth). */
+  readonly bluetooth?: ReadonlySignal<number | null>
+  /** Whether the delay of an output taken for Bluetooth is made up for (Settings). */
+  makeUpDelay?(on: boolean): void
+  /** The part of the output's delay its stamp leaves out (ms), made up for; 0 when nothing is (LiveAudio.delayMs). */
+  readonly delayMs?: number
   /** Lines for the debug log (how the output was set up, or why there is none). */
   onLog?(listener: (line: string) => void): () => void
   /** The debug screen's latencyHint choice (absent: no choice to make). */

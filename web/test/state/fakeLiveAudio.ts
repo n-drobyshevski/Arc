@@ -44,6 +44,8 @@ export interface FakeLiveAudio extends LiveAudioDeps {
   runAt(zeroMs: number, bpm?: number): void
   /** Tells a pad the patterns play has no sound. */
   missing(pad: number): void
+  /** The Bluetooth delay made up for (ms); 0 unless a test sets it. */
+  delayMs: number
   /** The arp's plans, in order (null: it stopped). */
   readonly arps: (LiveArpPlan | null)[]
   /** A step the arp played on the pattern's clock, as the output tells it. */
@@ -197,6 +199,7 @@ export function fakeLiveAudio(withLate = false): FakeLiveAudio {
     missing(pad) {
       for (const l of [...missingL]) l(pad)
     },
+    delayMs: 0,
     arps: [],
     arpPlan(plan) {
       a.arps.push(plan)

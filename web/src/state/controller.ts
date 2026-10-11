@@ -50,7 +50,7 @@
 //   the web's stand-in for Android's audio engine choice (LatencyText). Play
 //   actions take the press's event timeStamp ([at]) for the latency note.
 
-import { computed, signal, type ReadonlySignal, type Signal } from '@preact/signals'
+import { computed, effect, signal, type ReadonlySignal, type Signal } from '@preact/signals'
 import { Keys, MAX_OCTAVE, MIN_OCTAVE, type NoteNames, type Scale } from '../core/features/keys'
 import { arpNote } from '../core/features/arp'
 
@@ -197,6 +197,10 @@ export class ArcController {
    * From LiveAudioDeps.late, or, without it, the slow output it reports.
    */
   readonly liveLate: ReadonlySignal<number | null>
+  /** The Bluetooth delay in ms while it is made up for, else null: the Bluetooth key's words (LiveAudio.madeUpFor). */
+  readonly delayMadeUpFor: ReadonlySignal<number | null>
+  /** The output's latency (ms) while it is taken for Bluetooth, else null: Settings' note on what is made up. */
+  readonly liveBluetooth: ReadonlySignal<number | null>
   private readonly slowMs = signal<number | null>(null)
   /** The debug screen's latency test: each engine's press-to-sound times this session. */
   readonly liveLatency: ReadonlySignal<LiveLatency>
@@ -285,6 +289,10 @@ export class ArcController {
     })
     const late = deps.liveAudio.late
     this.liveLate = late ?? this.slowMs
+    this.delayMadeUpFor = deps.liveAudio.madeUpFor ?? signal(null)
+    this.liveBluetooth = deps.liveAudio.bluetooth ?? signal(null)
+    // Make up for Bluetooth delay: the setting, to Live's output.
+    this.cleanups.push(effect(() => deps.liveAudio.makeUpDelay?.(this.settings.value.makeUpDelay)))
     this.liveEngine = deps.liveAudio.engine ?? signal(null)
     this.liveLatencyHint = deps.liveAudio.latencyHint ?? null
     this.visible = deps.visibility.visible()
@@ -2162,6 +2170,11 @@ export class ArcController {
   }
 
   /** A light tick when a pad or key goes down (Settings → Live → Haptics). */
+  /** Make up for Bluetooth delay (Settings → Live). */
+  setMakeUpDelay(on: boolean): void {
+    this.changeSettings((s) => ({ ...s, makeUpDelay: on }))
+  }
+
   setHaptics(on: boolean): void {
     this.changeSettings((s) => ({ ...s, haptics: on }))
   }

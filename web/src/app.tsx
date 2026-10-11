@@ -369,6 +369,8 @@ function Root(): JSX.Element {
         onPianoWhites={(w) => c.setPianoWhites(w)}
         hapticsSupported={hapticsSupported()}
         onHaptics={(on) => c.setHaptics(on)}
+        onMakeUpDelay={(on) => c.setMakeUpDelay(on)}
+        bluetooth={c.liveBluetooth.value}
         onRestoreFolder={() => void c.pickFolder()}
         onReconnectFolder={() => void c.reconnectFolder()}
         onExportLibrary={() => void c.exportLibrary()}
@@ -439,6 +441,7 @@ function Root(): JSX.Element {
         onNote={(text) => c.toast(text)}
         // Read by the top bar alone, so a new delay re-renders only that.
         late={v.tab === 'live' ? c.liveLate : null}
+        madeUp={v.tab === 'live' ? c.delayMadeUpFor : null}
         onDebug={() => nav.openScreen({ kind: 'debug' })}
         // The section list's last entry: the list closes and Settings opens in its place.
         onSettings={() => nav.replace(overlayLayer('menu'), screenLayer({ kind: 'settings' }))}

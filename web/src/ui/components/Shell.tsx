@@ -38,6 +38,8 @@ export interface ShellProps {
   onNote: (text: string) => void
   /** Live's output delay (ms) while it is heard, for the top bar's Bluetooth key; null off Live. */
   late?: ReadonlySignal<number | null> | null
+  /** The Bluetooth delay while it is made up for (TopBar's [madeUp]). */
+  madeUp?: ReadonlySignal<number | null> | null
   onDebug: () => void
   /** Settings, the last entry of the section list (the list closes with it; none on the desk). */
   onSettings: () => void
@@ -82,6 +84,7 @@ export function Shell(props: ShellProps): JSX.Element {
           onConnect={props.onConnect}
           onNote={props.onNote}
           late={props.late}
+          madeUp={props.madeUp}
           onDebug={props.onDebug}
           onHelp={props.onHelp}
           {...(props.desk ? { themeSwitch: { theme: props.theme, onTheme: props.onTheme } } : {})}

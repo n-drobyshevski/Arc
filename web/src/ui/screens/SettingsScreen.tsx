@@ -31,6 +31,8 @@
 //   window. The piano's real width is only known in Live, so it is estimated
 //   from the window ([pianoRoomEstimate]: the window less Live's chrome); on a
 //   portrait phone, which plays on the grid, from the window turned sideways.
+// - "Make up for Bluetooth delay" takes a long output latency for Bluetooth
+//   (browsers don't name the route); its note says what the output counts.
 // - "Haptics" shows only where the browser can vibrate
 //   ([SettingsScreenProps.hapticsSupported]): iOS Safari has no vibration
 //   API and desktop browsers no motor, so the row is hidden there rather than
@@ -56,6 +58,7 @@ import { useNav } from '../AppContext'
 import { Caption } from '../components/Caption'
 import { Dialog } from '../components/Dialog'
 import { CloseKey } from '../components/GuideKeys'
+import { OutputDelay } from '../../core/features/outputDelay'
 import { HwToggle } from '../components/HwToggle'
 import { Key } from '../components/Key'
 import { Segmented } from '../components/Segmented'
@@ -94,6 +97,9 @@ export interface SettingsScreenProps {
   /** Web: whether this browser can vibrate (platform/haptics.ts); the Haptics row shows only then. */
   hapticsSupported?: boolean
   onHaptics?: (on: boolean) => void
+  /** Make up for Bluetooth delay; [bluetooth] is the output's latency (ms) while it is taken for Bluetooth, else null. */
+  onMakeUpDelay?: (on: boolean) => void
+  bluetooth?: number | null
   /** Web: give the remembered library folder's permission back. */
   onReconnectFolder: () => void
   /** Web: zip of the library where no folder can be picked. */
@@ -525,6 +531,19 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
                       labelledBy={ids.titleId}
                       describedBy={ids.noteId}
                     />
+                  )}
+                />
+                {/* What the output's clock counts of the delay and what arc makes up beyond it; nothing off Bluetooth. */}
+                <SettingRow
+                  title={SettingsText.MAKE_UP_DELAY}
+                  note={SettingsText.MAKE_UP_DELAY_NOTE}
+                  info={
+                    props.bluetooth != null
+                      ? SettingsText.delayNow(props.bluetooth > 0 ? props.bluetooth : null, OutputDelay.ms(true, true, props.bluetooth))
+                      : SettingsText.DELAY_NONE
+                  }
+                  control={(ids) => (
+                    <HwToggle on={settings.makeUpDelay} onChange={(on) => props.onMakeUpDelay?.(on)} labelledBy={ids.titleId} describedBy={ids.noteId} />
                   )}
                 />
                 {props.hapticsSupported === true && (

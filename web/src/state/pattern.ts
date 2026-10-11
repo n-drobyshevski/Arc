@@ -34,9 +34,10 @@ import type { SwitchTime } from '../core/features/scenes'
 import { NoteNames, ROOT_NOTE } from '../core/features/keys'
 import { PhaseAnchors, passOf, positionOf, tickAt as clockTickAt, msOf, type PatternPosition } from '../core/features/sequencer'
 import { Transport, type TransportAction } from '../core/features/transport'
-import { ClockFollow, TapTempo, Tempo, type Beat } from '../core/features/tempo'
+import { ClockFollow, TapTempo, Tempo, type Beat, type BeatGrid } from '../core/features/tempo'
 import type { MidiEvent } from '../core/protocol/midiInput'
 import { ArpSettings, type ArpNote, type ArpOrder } from '../core/features/arp'
+import { OutputDelay } from '../core/features/outputDelay'
 import { FeatureText } from '../core/text/featureText'
 import { MirrorText } from '../core/text/mirrorText'
 import type { PatternPrefs, PatternSettings } from '../platform/storage/settings'
@@ -52,6 +53,7 @@ import {
   patternBpm,
   patternShown,
   patternVoices,
+  pressPlace,
   pressSkip,
   pressTickAt,
   sameVoices,
@@ -141,6 +143,8 @@ export class PatternDesk {
   // The pads and notes held while recording, by their voice's key: their notes, for the gate.
   private readonly held = new Map<string, number>()
   private countedIn = false
+  // A held note's start moved off where it was heard (pressPlace): its release moves as far.
+  private readonly shifts = new Map<number, number>()
   // The pass of each note recorded that was heard live as it was played (by its id): not played again.
   private skip: ReadonlyMap<number, number> = new Map()
   // The groups recorded into since the punch-in: each of their passes is an UNDO step.
@@ -425,6 +429,27 @@ export class PatternDesk {
     return this.pressAt !== null && this.running() ? pressTickAt(ms, this.pressAt, this.sent?.bpm ?? this.bpm()) : null
   }
 
+  /**
+   * How late Live's output is heard now (ms): what is made up for
+   * (OutputDelay); 0 wired, with the setting off, or closed.
+   */
+  private heardDelay(): number {
+    return this.host.deps.liveAudio.delayMs ?? 0
+  }
+
+  /**
+   * The tick the player hears at [ms], as [tickAt] but through the output's
+   * delay: what the playhead shows and where a live press lands. The
+   * pattern's clock is arc's own and its notes stay where they are; only
+   * what is lined up with the ear moves.
+   */
+  private heardTickAt(ms: number): number | null {
+    const d = this.heardDelay()
+    const tl = this.timeline()
+    if (tl !== null) return clockTickAt(tl.clock, frameAt(tl.frames, ms)) - OutputDelay.ticks(d, tl.clock.bpm)
+    return this.pressAt !== null && this.running() ? pressTickAt(ms - d, this.pressAt, this.sent?.bpm ?? this.bpm()) : null
+  }
+
   private running(): boolean {
     const ph = this.transport.state.phase
     return ph === 'COUNT_IN' || ph === 'PLAYING'
@@ -440,7 +465,7 @@ export class PatternDesk {
     const tl = this.timeline()
     if (tl === null) return null
     const g = Math.min(Math.max(this._ui.peek().focusGroup, 0), 3)
-    return positionOf(clockTickAt(tl.clock, frameAt(tl.frames, ms)), ProjectPatterns.group(this.current, g), 0)
+    return positionOf(clockTickAt(tl.clock, frameAt(tl.frames, ms)) - OutputDelay.ticks(this.heardDelay(), tl.clock.bpm), ProjectPatterns.group(this.current, g), 0)
   }
 
   // ---------- the transport ----------
@@ -511,6 +536,7 @@ export class PatternDesk {
     // PLAY starts the passes from 0: what was heard live in another run is played again.
     this.skip = new Map()
     this.held.clear()
+    this.shifts.clear()
     this.groups.clear()
     this.tried.clear()
     this.pressAt = at
@@ -541,6 +567,7 @@ export class PatternDesk {
     this.sceneFlush()
     this.pressAt = null
     this.held.clear()
+    this.shifts.clear()
     this.eraseHolds.clear()
     if (this.stepDesk.holding) {
       this.stepDesk.holdsEnd(this.recorder)
@@ -562,6 +589,7 @@ export class PatternDesk {
     // A pad or key still held ends its note here: a lift after the punch-out records nothing.
     const p = heldNotesEnded(this.current, this.recorder, this.held.values(), tick)
     this.held.clear()
+    this.shifts.clear()
     this.setPatterns(this.recorder.punchOut(p, tick))
     this.save()
   }
@@ -593,7 +621,9 @@ export class PatternDesk {
   private followTick(tick: number): void {
     if (this.transport.state.phase === 'COUNT_IN') {
       if (tick < 0) {
-        const beat = countInBeat(tick)
+        // The count-in's beat as it is heard.
+        const tl = this.timeline()
+        const beat = countInBeat(tl === null ? tick : tick - OutputDelay.ticks(this.heardDelay(), tl.clock.bpm))
         if (this._ui.peek().countIn !== beat) this._ui.value = { ...this._ui.peek(), countIn: beat }
         return
       }
@@ -655,7 +685,7 @@ export class PatternDesk {
       this.host.toast(MirrorText.erased(pad))
       return
     }
-    const from = h.from ?? Math.max(clockTickAt(tl.clock, frameAt(tl.frames, h.downAt)), 0)
+    const from = h.from ?? Math.max(this.heardTickAt(h.downAt) ?? 0, 0)
     const to = clockTickAt(tl.clock, frameAt(tl.frames, releasedAt))
     if (to > from) this.setPatterns(this.recorder.eraseRange(this.current, pad, semitones, from, to))
   }
@@ -680,7 +710,7 @@ export class PatternDesk {
     let p = this.current
     for (const h of this.eraseHolds.values()) {
       if (now - h.downAt < ERASE_TAP_MS) continue
-      const from = h.from ?? Math.max(clockTickAt(tl.clock, frameAt(tl.frames, h.downAt)), 0)
+      const from = h.from ?? Math.max(this.heardTickAt(h.downAt) ?? 0, 0)
       if (to <= from) continue
       p = this.recorder.eraseRange(p, h.pad, h.semitones, from, to)
       h.from = to
@@ -713,11 +743,15 @@ export class PatternDesk {
   press(pad: PhysicalPad, semitones: number | null, key: string, pressedAt: number, hold: boolean): void {
     const first = this.padDown(pressedAt)
     if (!this.transport.state.recording) return
-    const tick = this.tickAt(pressedAt)
-    if (tick === null) return
+    const stamped = this.tickAt(pressedAt)
+    // The player reacts to what is heard, which Bluetooth plays late: the press is where it was heard
+    // (before the run is heard, see OutputDelay.placed). The press that started the run is its tick 0.
+    const heard = this.heardTickAt(pressedAt)
+    if (stamped === null || heard === null) return
     // A pick whose tick the press is past takes over first: the note goes to the pattern playing then.
-    this.sceneDue(tick)
+    this.sceneDue(heard)
     this.groups.add(pad.group)
+    const tick = pressPlace(first, stamped, heard, this.countedIn)
     this.markPasses(tick)
     const now = this.tickAt(this.host.deps.perfNow()) ?? tick
     const r = this.recorder.noteOn(this.current, pad, semitones, tick, now, TimingSettings.record(this.settings.timing), this.settings.timing.swing)
@@ -728,7 +762,12 @@ export class PatternDesk {
     const before = this.held.get(key)
     this.held.delete(key)
     const p = before !== undefined ? this.recorder.noteOff(r.patterns, before, tick) : r.patterns
-    if (hold) this.held.set(key, r.id)
+    if (before !== undefined) this.shifts.delete(before)
+    if (hold) {
+      this.held.set(key, r.id)
+      // Its release follows the note: it is heard where it is let go, and moved as far as the start was.
+      if (tick !== heard) this.shifts.set(r.id, tick - heard)
+    }
     this._ui.value = { ...this._ui.peek(), focusGroup: pad.group }
     this.setPatterns(p)
   }
@@ -738,9 +777,11 @@ export class PatternDesk {
     const id = this.held.get(key)
     if (id === undefined) return
     this.held.delete(key)
-    const tick = this.tickAt(releasedAt)
-    if (tick === null) return
-    this.setPatterns(this.recorder.noteOff(this.current, id, tick))
+    const shift = this.shifts.get(id) ?? 0
+    this.shifts.delete(id)
+    const heard = this.heardTickAt(releasedAt)
+    if (heard === null) return
+    this.setPatterns(this.recorder.noteOff(this.current, id, heard + shift))
   }
 
   /** The press on [key] was a scroll after all: the note it recorded goes. */
@@ -1516,7 +1557,7 @@ export class PatternDesk {
     const audio = this.host.deps.liveAudio
     if (!audio.setClick) return
     if (on === this._metronome.peek().on) return
-    if (on && !audio.setClick(true, this.settings.liveTempo, this.clockFollow.grid(this.host.deps.perfNow()))) {
+    if (on && !audio.setClick(true, this.settings.liveTempo, this.clickGrid())) {
       this.host.toast(FeatureText.NO_AUDIO_OUTPUT, true)
       return
     }
@@ -1555,9 +1596,15 @@ export class PatternDesk {
 
   private sendClick(): void {
     if (!this._metronome.peek().on) return
-    const grid = this.clockFollow.grid(this.host.deps.perfNow())
+    const grid = this.clickGrid()
     this.followed = grid !== null
     this.host.deps.liveAudio.setClick?.(true, this.settings.liveTempo, grid)
+  }
+
+  /** The EP-133's beats while it sends its clock, sent earlier by the delay made up for, so they are heard on the device's (OutputDelay.earlier). */
+  private clickGrid(): BeatGrid | null {
+    const g = this.clockFollow.grid(this.host.deps.perfNow())
+    return g === null ? null : OutputDelay.earlier(g, this.heardDelay())
   }
 
   // Whether the click last sent followed the EP-133, and the watch that notices its clock stopping.

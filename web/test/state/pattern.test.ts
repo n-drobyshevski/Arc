@@ -165,6 +165,26 @@ describe('PATTERN', () => {
     expect(notes(h, 1)[0]?.tick).toBe(50)
   })
 
+  it('over Bluetooth, made up for: a press lands where it was heard, and its gate ends where the release was', async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    p.setTiming('off')
+    p.setCountIn(false)
+    p.recordDown(now())
+    p.play()
+    // 180 ms left out of the stamp: 34.56 ticks at 120 BPM.
+    h.liveAudio.delayMs = 180
+    const zero = now() - 600
+    h.liveAudio.runAt(zero)
+    await h.c.playPad(B3, true, false, zero + 260)
+    h.c.releasePad(B3, zero + 520)
+    // 260 ms is tick 49.92 by the stamp, 15.36 as heard; the release 99.84, heard 65.28.
+    const n = notes(h, 1)[0]
+    expect(n?.tick).toBe(15)
+    expect(n?.gate).toBe(50)
+    p.stop()
+  })
+
   it('no output: says so, and stays stopped', async () => {
     const h = await liveHarness()
     h.liveAudio.available = false

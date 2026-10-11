@@ -45,6 +45,7 @@ describe('SettingsStore', () => {
       keysViewTall: 'AUTO',
       pianoWhites: null,
       haptics: true,
+      makeUpDelay: true,
     })
     expect(DEFAULT_SETTINGS).toEqual(s.settings)
   })
@@ -124,6 +125,7 @@ describe('SettingsStore', () => {
       'app.keysViewTall',
       'app.pianoWhites',
       'app.haptics',
+      'app.makeUpDelay',
     ])
   })
 

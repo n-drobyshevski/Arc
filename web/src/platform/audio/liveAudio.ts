@@ -67,6 +67,9 @@
 //   as ArcController's toldBluetooth). [late] is the output's delay while it
 //   is long enough to be heard ([LATE_OUTPUT_MS]), for the top bar's Bluetooth
 //   key, where Android names Bluetooth from the route (LiveAudio.wireless).
+//   Make up for Bluetooth delay ([makeUpDelay], [delayMs], [madeUpFor]) takes
+//   the same guess for wireless: the latency the context reports is what its
+//   stamp counts, and OutputDelay.ms the rest of a typical link's delay.
 // - Listeners are added after construction (the controller is made after its
 //   deps); the debug-log lines ("live audio: …") come through [onLog].
 // - The latency test's row ([engine], [OutputEngine]) is named from the
@@ -95,6 +98,7 @@ import type { PhaseAnchors, TransportClock } from '../../core/features/sequencer
 import type { Beat, BeatGrid } from '../../core/features/tempo'
 import type { FrameGrid } from './clickScheduler'
 import { FxSetup } from './fxSetup'
+import { OutputDelay } from '../../core/features/outputDelay'
 import { LIVE_PROCESSOR, MixerHost, transferable, type FromMixer, type PlanVoice, type ToMixer } from './liveMixer'
 import type { ArpStep } from './patternScheduler'
 // The AudioWorklet module's URL: Vite bundles liveWorklet.ts (with the core
@@ -461,6 +465,22 @@ export class LiveAudio {
    * and changed only by [LATE_STEP_MS] or more.
    */
   readonly late: ReadonlySignal<number | null> = this._late
+  private readonly _madeUp = signal<number | null>(null)
+  /**
+   * The delay in all (ms, OutputDelay.totalMs) while it is made up for (the
+   * output taken for Bluetooth, [makeUpDelay] on), else null: the Bluetooth
+   * key's words.
+   */
+  readonly madeUpFor: ReadonlySignal<number | null> = this._madeUp
+  private readonly _bluetooth = signal<number | null>(null)
+  /** The open output's latency (ms) while it is long enough to be taken for Bluetooth, else null: Settings' note on what is made up. */
+  readonly bluetooth: ReadonlySignal<number | null> = this._bluetooth
+  // Whether a wireless output's delay is made up for, and the delay made up for now (ms).
+  private makingUp = true
+  private delay = 0
+  // The open output's latency as last read: taken for Bluetooth, and the part of it the stamp counts.
+  private wireless = false
+  private counted: number | null = null
   private readonly _latencyHint: Signal<WebLatencyHint>
   /** The debug screen's latencyHint choice ([setLatencyHint]); ZERO unless changed there. */
   readonly latencyHint: ReadonlySignal<WebLatencyHint>
@@ -813,6 +833,9 @@ export class LiveAudio {
     this.ungated.clear()
     this._voices.value = EMPTY
     this._late.value = null
+    this.wireless = false
+    this.counted = null
+    this.refreshDelay()
     this._engine.value = null
     const recording = this._rec.value.kind !== 'idle'
     this._rec.value = REC_IDLE
@@ -1071,9 +1094,40 @@ export class LiveAudio {
     this.checkSlow(s)
   }
 
-  /** [late], and the Bluetooth guess (once per LiveAudio), from the output's latency now. */
+  /** Whether the delay of an output taken for Bluetooth is made up for (Settings; on until set otherwise). */
+  makeUpDelay(on: boolean): void {
+    this.makingUp = on
+    this.refreshDelay()
+  }
+
+  /**
+   * The part of the output's delay its stamp leaves out, in ms, to be made up
+   * for (OutputDelay.ms): 0 when it isn't taken for Bluetooth, closed, or
+   * with [makeUpDelay] off.
+   */
+  get delayMs(): number {
+    return this.delay
+  }
+
+  private refreshDelay(): void {
+    this.delay = OutputDelay.ms(this.makingUp, this.wireless, this.counted)
+    const madeUp = this.makingUp && this.wireless ? OutputDelay.totalMs(this.counted) : null
+    if (madeUp !== this._madeUp.peek()) this._madeUp.value = madeUp
+    const bluetooth = this.wireless ? this.counted : null
+    if (bluetooth !== this._bluetooth.peek()) this._bluetooth.value = bluetooth
+  }
+
+  /** [late], the Bluetooth guess (once per LiveAudio), and the delay made up for, from the output's latency now. */
   private checkSlow(s: Stream): void {
     const l = outputLatency(s.ctx)
+    // Browsers don't name the route: a long latency is taken for Bluetooth, and is what the stamp counts.
+    const wireless = isSlowOutput(l)
+    const counted = Math.round(l.baseMs + l.outputMs)
+    if (wireless !== this.wireless || counted !== this.counted) {
+      this.wireless = wireless
+      this.counted = counted
+      this.refreshDelay()
+    }
     const late = lateBy(l)
     const shown = this._late.value
     if (late === null || shown === null || Math.abs(late - shown) >= LATE_STEP_MS) this._late.value = late
@@ -1148,7 +1202,8 @@ export class LiveAudio {
         return
       }
       case 'beat': {
-        const at = heardAt(m.time, this.backend.now(), s.ctx)
+        // Heard the delay made up for after the stamp has it (TEMPO's light follows the ear).
+        const at = heardAt(m.time, this.backend.now(), s.ctx) + this.delay
         for (const f of [...this.beatListeners]) f({ index: m.index, at, accent: m.accent })
         return
       }

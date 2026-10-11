@@ -2,14 +2,16 @@
 // key (a Bluetooth glyph and a clock) right before the connection key, in
 // Chromium with the simulated EP-133 of ?demo. The output's latency is made long
 // (140 ms) before the app loads; once a press wakes the output, LiveAudio.late
-// reaches the bar through ArcController.liveLate. The display lines no longer
+// reaches the bar through ArcController.liveLate. Taken for Bluetooth (120 ms
+// and up) with Make up for Bluetooth delay on (the default), the key says arc
+// makes up for the delay (a typical link's 180 ms). The display lines no longer
 // carry it: their words stay the hit or "Press a pad on the EP-133.". A tap on
 // the key says why in the toast, a long press names it, the guide overlay tags
 // it, and it is on Live only.
 import type { Page } from '@playwright/test'
 import { coachHides, demo, expect, test } from './fixtures'
 
-const SENTENCE = 'Bluetooth plays late: wired or the speaker is quicker'
+const SENTENCE = 'Bluetooth plays late (about 180 ms): arc makes up for it'
 const WAITING = 'Press a pad on the EP-133.'
 
 /** Live on the demo device, its output [ms] late (baseLatency 0), woken by a press. */
