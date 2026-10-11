@@ -164,6 +164,7 @@ import { FunctionKeysContext, FunctionRow, ProjectHoldContext } from '../live/Fu
 import { DeviceView } from '../live/DeviceView'
 import { PunchPad, usePunch } from '../live/LivePunch'
 import { StepPanel, useStep, useStepNoteMark, useStepPadMark } from '../live/StepPanel'
+import { ScenePanel, useScene } from '../live/ScenePanel'
 import { punchSlotForPad } from '../../state/fx'
 import { useDesk, useFinePointer, useWindowSize } from '../useDesk'
 import './MirrorScreen.css'
@@ -552,6 +553,12 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   useEffect(() => {
     if (stepOpen && stepGroup !== null) stepCtx?.onGroup(stepGroup)
   }, [stepOpen, stepGroup])
+  // SCENE: the panel open, its focused column the group Live shows.
+  const sceneCtx = useScene()
+  const sceneOpen = useComputed(() => sceneCtx?.ui.open ?? false).value
+  useEffect(() => {
+    if (sceneOpen && stepGroup !== null) sceneCtx?.onGroup(stepGroup)
+  }, [sceneOpen, stepGroup])
   const hitGroup = st.lastHit?.pad?.group ?? null
   useEffect(() => {
     if ((oneGroup || device) && follow && hitGroup !== null) setGroup(hitGroup)
@@ -886,8 +893,9 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   // On a phone on its side the line is in the top bar instead.
   // The function keys over the pads, upright (none sideways); SOUND turns EDIT off again, so they stay in EDIT.
   // STEP's panel takes the function keys' place while it is open (on a phone on its side, the tools' column).
-  const fnRow = stepOpen ? <StepPanel class="live__fn" /> : inBar ? null : <FunctionRow class="live__fn" />
-  const sideStep = stepOpen ? <StepPanel class="live__fn live__side-step" /> : null
+  // So does SCENE's (the two never open together).
+  const fnRow = stepOpen ? <StepPanel class="live__fn" /> : sceneOpen ? <ScenePanel class="live__fn" /> : inBar ? null : <FunctionRow class="live__fn" />
+  const sideStep = stepOpen ? <StepPanel class="live__fn live__side-step" /> : sceneOpen ? <ScenePanel class="live__fn live__side-step" /> : null
   const displayStrip = inBar ? null : editing ? <EditStrip /> : <DisplayStrip st={st} mirror={mirror} take={take} still={fixedNow !== null} />
   const allGroups = (
     <div class="live__all">

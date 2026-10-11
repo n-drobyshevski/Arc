@@ -12,9 +12,9 @@
 //   a right-click opens it too. Enter or Space is a tap.
 // - The frame time is requestAnimationFrame's; the counter re-renders once a
 //   beat, the hairline is moved straight on its element each frame.
-// - No scene keys on the line yet; no measuring of what fits (the counter
-//   keeps its room, RECORD's word only where [word]). STEP and CORRECT's
-//   chips are StepPanel.tsx's StepKeys.
+// - No measuring of what fits (the counter keeps its room, RECORD's word
+//   only where [word]). STEP and CORRECT's chips are StepPanel.tsx's
+//   StepKeys, the scene's S01 chip ScenePanel.tsx's SceneChip.
 import { createContext, type ButtonHTMLAttributes, type ComponentChildren, type JSX } from 'preact'
 import { useContext, useEffect, useRef, useState } from 'preact/hooks'
 import type { PatternPosition } from '../../core/features/sequencer'
@@ -22,6 +22,7 @@ import { BEATS_PER_BAR } from '../../core/features/tempo'
 import type { TransportState } from '../../core/features/transport'
 import { MirrorText } from '../../core/text/mirrorText'
 import type { PatternUiState } from '../../state/patternPlan'
+import { SceneChip } from './ScenePanel'
 import { StepKeys } from './StepPanel'
 import './PatternLine.css'
 
@@ -423,6 +424,7 @@ export function PatternLine(props: { compact?: boolean; still?: boolean; word?: 
     <>
       <TransportKeys t={t} compact={props.compact} still={props.still} word={props.word} />
       {/* STEP while stopped (the panel opens in the function keys' place); CORRECT while it plays with it on. */}
+      <SceneChip compact={props.compact} />
       <StepKeys phase={t.ui.phase} erase={t.ui.erase} compact={props.compact} />
       {/* ERASE and ↶: while it plays or erases, and on a wide line ([word]) while stopped too; never armed or counting in. */}
       {(t.ui.phase === 'PLAYING' || t.ui.phase === 'STOPPED') && (hasWords(t.ui) || props.word) && <EditKeys t={t} compact={props.compact} />}
