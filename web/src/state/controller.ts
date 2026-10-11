@@ -1179,6 +1179,9 @@ export class ArcController {
       }
       return Promise.resolve()
     }
+    // The PAD flow of SCENE's CLIP row waiting for a pad: the tap is its, neither played nor recorded
+    // (one a scroll may yet take, once kept: [keepPad]).
+    if (!this.pattern.erasing && this.pattern.scenePadTap(pad, padVoice(pad), hold && unsure)) return Promise.resolve()
     // ERASE takes the press: nothing sounds, the pad's notes go (a screen reader's click is a tap).
     if (this.pattern.erasing) {
       if (!hold) {
@@ -1251,6 +1254,8 @@ export class ArcController {
 
   /** The unsure press on the pad was a press after all: it becomes the KEYS sound (and one not in memory loads). */
   keepPad(pad: PhysicalPad): Promise<void> {
+    // One the PAD flow was waiting for: its tap.
+    if (this.pattern.sceneTapKept(pad, padVoice(pad))) return Promise.resolve()
     const k = padKey(pad)
     const u = this.pressUnsure.get(k)
     if (u !== undefined) {
@@ -1273,6 +1278,8 @@ export class ArcController {
 
   /** The finger left the pad: its sound fades out. [at]: the lift's event timeStamp, for the note's gate. */
   releasePad(pad: PhysicalPad, at?: number): void {
+    // Unsure for the PAD flow and lifted inside the scroll window: its tap.
+    if (this.pattern.sceneTapKept(pad, padVoice(pad))) return
     const releasedAt = pressTime(at, this.deps.perfNow())
     const k = padKey(pad)
     // Unsure in STEP or CORRECT and lifted inside the scroll window: a tap.
@@ -1312,6 +1319,7 @@ export class ArcController {
 
   /** The press on the pad turned into a scroll (the all-groups page): its sound ends at once. */
   cutPad(pad: PhysicalPad): void {
+    if (this.pattern.sceneTapCut(padVoice(pad))) return
     const k = padKey(pad)
     if (this.pressUnsure.delete(k)) return
     const taken = this.pressTaken.get(k)

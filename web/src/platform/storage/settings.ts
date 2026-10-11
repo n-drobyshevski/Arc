@@ -30,6 +30,7 @@ import { physicalPad, type PhysicalPad } from '../../core/features/padNotes'
 import { PadOrder } from '../../core/features/padPush'
 import { KeysView, choiceOf as pianoChoiceOf, keysViewOf } from '../../core/features/piano'
 import { Timing, TimingSettings } from '../../core/features/pattern'
+import { SwitchTime } from '../../core/features/scenes'
 import { Tempo } from '../../core/features/tempo'
 import { ThemeChoice } from '../../core/text/settingsText'
 
@@ -682,6 +683,8 @@ export interface PatternSettings {
   readonly autoLength: boolean
   /** The pattern's tempo while the EP-133 sends no clock. */
   readonly liveTempo: number
+  /** When a pattern or scene picked while playing takes over (SCENE's CHANGE; Kotlin sceneSwitch). */
+  readonly sceneSwitch: SwitchTime
 }
 
 export const DEFAULT_PATTERN_SETTINGS: PatternSettings = Object.freeze({
@@ -689,6 +692,7 @@ export const DEFAULT_PATTERN_SETTINGS: PatternSettings = Object.freeze({
   countIn: true,
   autoLength: false,
   liveTempo: Tempo.DEFAULT,
+  sceneSwitch: SwitchTime.DEFAULT,
 })
 
 export const PATTERN_KEY = 'arc.pattern'
@@ -718,6 +722,7 @@ export class PatternPrefs {
       countIn: typeof o.patternCountIn === 'boolean' ? o.patternCountIn : d.countIn,
       autoLength: typeof o.patternAutoLength === 'boolean' ? o.patternAutoLength : d.autoLength,
       liveTempo: typeof o.liveTempo === 'number' && Number.isFinite(o.liveTempo) ? Tempo.clamp(Math.round(o.liveTempo)) : d.liveTempo,
+      sceneSwitch: (typeof o.sceneSwitch === 'string' ? SwitchTime.of(o.sceneSwitch) : null) ?? d.sceneSwitch,
     }
   }
 
@@ -729,6 +734,7 @@ export class PatternPrefs {
       patternCountIn: p.countIn,
       patternAutoLength: p.autoLength,
       liveTempo: p.liveTempo,
+      sceneSwitch: p.sceneSwitch,
     }
     try {
       this.storage.setItem(PATTERN_KEY, JSON.stringify(o))

@@ -12,9 +12,11 @@
 // - The patterns are kept in the library database's kv store
 //   (Library.readPatterns / writePatterns), Android's files/patterns.json.
 // - The settings are PatternPrefs (localStorage), not AppSettings.
-// - No scenes, arp, SAMPLE's PTN take or Bluetooth delay make-up yet: the
-//   web plays and records the patterns of the scene a project starts on,
-//   and the tick heard is the tick stamped.
+// - No arp, SAMPLE's PTN take or Bluetooth delay make-up yet: the tick heard
+//   is the tick stamped.
+// - SCENES (ScenePlan.kt's SceneDesk) are this desk's too: ArcController's
+//   SCENES section lives here, a pick's tick no earlier than the
+//   sequencer's free tick as the output's stamps last told it.
 // - STEP (StepPlan.kt's StepDesk) and CORRECT are this desk's, as ERASE is:
 //   ArcController's STEP section lives here, the controller routing the
 //   presses to it.
@@ -28,6 +30,7 @@ import { Pattern, Patterns, ProjectPatterns, ProjectSeq, Seq, TimingSettings, ty
 import { PatternRecorder } from '../core/features/patternRecorder'
 import { frameAt } from '../core/features/sampleTiming'
 import { Steps } from '../core/features/steps'
+import type { SwitchTime } from '../core/features/scenes'
 import { NoteNames, ROOT_NOTE } from '../core/features/keys'
 import { PhaseAnchors, passOf, positionOf, tickAt as clockTickAt, msOf, type PatternPosition } from '../core/features/sequencer'
 import { Transport, type TransportAction } from '../core/features/transport'
@@ -54,6 +57,7 @@ import {
   withoutNote,
   type PatternUiState,
 } from './patternPlan'
+import { ClipMode, PadStage, SCENE_UI, SceneDesk, type SceneUi } from './scenePlan'
 import { CORRECT_SHOWN_MS, STEP_UI, StepDesk, auditionMs, stepOpens, stepWord, type StepNote, type StepUi } from './stepPlan'
 import type { Store } from './store'
 import type { UiState } from './types'
@@ -70,6 +74,9 @@ export const PATTERN_ERASE_MS = 20
 /** How often the click looks whether the EP-133's clock came or went (ms). */
 const CLICK_WATCH_MS = 500
 
+
+/** A pick waiting takes over once the playhead heard is this far past its tick (Kotlin SCENE_GRACE_NS). */
+const SCENE_GRACE_MS = 100
 
 /** How far ahead of the mix the sequencer sends notes (PatternScheduler's LOOKAHEAD_MS). */
 const LOOKAHEAD_MS = 50
@@ -106,6 +113,8 @@ interface SentPlan {
   readonly voices: ReadonlyMap<number, string>
   readonly shapes: ReadonlyMap<number, Partial<VoiceShape>>
   readonly keysShapes: ReadonlyMap<number, Partial<VoiceShape>>
+  readonly queued: ReadonlyMap<number, { readonly pattern: Pattern; readonly atTick: number }>
+  readonly phase: PhaseAnchors
 }
 
 export class PatternDesk {
@@ -158,6 +167,13 @@ export class PatternDesk {
   /** STEP as Live shows it: the panel, its cursor's step, CORRECT and the status line. */
   readonly step: ReadonlySignal<StepUi> = this._step
   private stepShown: unknown = null
+  // SCENES: the scenes, the picks waiting and the CLIP row (ScenePlan.kt's SceneDesk), what Live shows of them,
+  // and the pads whose unsure press the PAD flow waits to take.
+  private readonly sceneDesk: SceneDesk
+  private readonly _scene: Signal<SceneUi> = signal(SCENE_UI)
+  /** SCENES as Live shows them: the scene, its groups' patterns and what waits, the panel and its CLIP row. */
+  readonly scene: ReadonlySignal<SceneUi> = this._scene
+  private readonly sceneTaps = new Set<string>()
   private readonly taps = new TapTempo()
 
   constructor(private readonly host: PatternHost) {
@@ -166,6 +182,7 @@ export class PatternDesk {
     this.ui = this._ui
     this._metronome = signal<Metronome>({ on: false, bpm: this.settings.liveTempo })
     this.stepDesk = new StepDesk((n) => host.stepWord?.(n) ?? stepWord(n, null, NoteNames.LETTERS))
+    this.sceneDesk = new SceneDesk((pad) => host.stepWord?.({ pad, semitones: null }) ?? stepWord({ pad, semitones: null }, null, NoteNames.LETTERS))
     this.metronome = this._metronome
     const audio = host.deps.liveAudio
     if (audio.onSeqMissing) this.cleanups.push(audio.onSeqMissing(() => this.refreshPlan()))
@@ -243,6 +260,9 @@ export class PatternDesk {
   async switchProject(project: number): Promise<void> {
     await this.load()
     if (project === this.project) return
+    // The scene panel and its picks waiting are the other project's: dropped, not applied by the STOP.
+    this.sceneDesk.reset()
+    this.sceneTaps.clear()
     this.stop()
     this.closeStep()
     this.save()
@@ -291,6 +311,17 @@ export class PatternDesk {
   private show(): void {
     this._ui.value = this.withSettings(patternShown(this._ui.peek(), this.current, this.transport.state, this.recorder.canUndo))
     this.publishStep()
+    this.publishScene()
+  }
+
+  /** The project's sequencer is [seq] now (a scene or pattern picked, a scene edited): the plan and Live follow, and it is kept. */
+  private setSeq(seq: ProjectSeq): void {
+    if (seq === this.seq) return
+    this.useSeq(seq)
+    this.touched = true
+    this.refreshPlan()
+    this.show()
+    if (!this.transport.state.recording) this.save()
   }
 
   private withSettings(ui: PatternUiState): PatternUiState {
@@ -312,7 +343,15 @@ export class PatternDesk {
     const audio = this.host.deps.liveAudio
     if (!audio.seqPlan) return
     const p = this.current
-    const { voices, missing } = patternVoices(ProjectPatterns.usedPads(p), (pad) => this.host.live.patternVoice(pad))
+    // Where each pattern started, for the recording's ticks as for the sequencer's.
+    const phase = this.sceneDesk.phase
+    this.recorder.phase = phase
+    // The picks waiting, as the patterns that take over: read from the sequencer as it stands.
+    const queued = new Map<number, { readonly pattern: Pattern; readonly atTick: number }>()
+    for (const [g, q] of this.sceneDesk.targets(this.seq)) queued.set(g, { pattern: ProjectSeq.pattern(this.seq, g, q.to), atTick: q.at })
+    const pads = ProjectPatterns.usedPads(p)
+    for (const [g, q] of queued) for (const n of Pattern.playable(q.pattern)) pads.add(g * 12 + n.offset)
+    const { voices, missing } = patternVoices(pads, (pad) => this.host.live.patternVoice(pad))
     const bpm = this.bpm()
     const shapes = new Map<number, Partial<VoiceShape>>()
     const keysShapes = new Map<number, Partial<VoiceShape>>()
@@ -329,12 +368,14 @@ export class PatternDesk {
       old.patterns !== p ||
       old.skip !== this.skip ||
       old.bpm !== bpm ||
+      old.phase !== phase ||
+      !sameQueued(old.queued, queued) ||
       !sameVoices(old.voices, voices) ||
       !sameShapes(old.shapes, shapes) ||
       !sameShapes(old.keysShapes, keysShapes)
     ) {
-      this.sent = { patterns: p, skip: this.skip, bpm, voices, shapes, keysShapes }
-      audio.seqPlan({ patterns: p, voices, skip: this.skip, bpm, phase: PhaseAnchors.ZERO, shapes, keysShapes })
+      this.sent = { patterns: p, skip: this.skip, bpm, voices, shapes, keysShapes, queued, phase }
+      audio.seqPlan({ patterns: p, voices, skip: this.skip, bpm, phase, shapes, keysShapes, queued })
     }
     for (const pad of missing) this.loadPad(pad)
     if (this._ui.peek().missing !== missing.size) this._ui.value = { ...this._ui.peek(), missing: missing.size }
@@ -463,6 +504,8 @@ export class PatternDesk {
     this.tried.clear()
     this.pressAt = at
     this.sawTimeline = false
+    // Every pattern starts at bar 1.
+    this.sceneDesk.restart()
     this.countedIn = countInBars > 0
     this.stale = audio.timeline?.peek() ?? null
     this._ui.value = { ...this._ui.peek(), countIn: null }
@@ -483,6 +526,8 @@ export class PatternDesk {
       this.setPatterns(this.recorder.punchOut(heldNotesEnded(this.current, this.recorder, this.held.values(), tick), tick))
     }
     this.host.deps.liveAudio.seqStop?.()
+    // A pick still waiting takes over at once, as every change does while stopped.
+    this.sceneFlush()
     this.pressAt = null
     this.held.clear()
     this.eraseHolds.clear()
@@ -544,6 +589,8 @@ export class PatternDesk {
       this.transport.countedIn()
       this.show()
     }
+    const graced = this.tickAt(this.host.deps.perfNow() - SCENE_GRACE_MS)
+    if (graced !== null) this.sceneDue(graced)
     if (this.transport.state.recording && tick >= 0) {
       this.markPasses(tick)
       this.setPatterns(this.recorder.grow(this.current, tick))
@@ -559,6 +606,7 @@ export class PatternDesk {
     if (!on) this.eraseHolds.clear()
     // ERASE and CORRECT take the same presses: one goes off as the other comes on.
     if (on && this.stepDesk.correct) this.setStepCorrect(false)
+    if (on) this.endPadStage()
     if (this._ui.peek().erase === on) return
     this._ui.value = { ...this._ui.peek(), erase: on }
   }
@@ -656,6 +704,8 @@ export class PatternDesk {
     if (!this.transport.state.recording) return
     const tick = this.tickAt(pressedAt)
     if (tick === null) return
+    // A pick whose tick the press is past takes over first: the note goes to the pattern playing then.
+    this.sceneDue(tick)
     this.groups.add(pad.group)
     this.markPasses(tick)
     const now = this.tickAt(this.host.deps.perfNow()) ?? tick
@@ -720,6 +770,7 @@ export class PatternDesk {
     if (!stepOpens(this.transport.state.phase)) return
     if (this.transport.state.phase === 'ARMED') this.stop()
     this.setErase(false)
+    this.closeScene()
     this.stepDesk.openOn(this.project, group)
     this.publishStep()
   }
@@ -838,6 +889,8 @@ export class PatternDesk {
    */
   setStepCorrect(on: boolean): void {
     if (on) this.setErase(false)
+    // A pad tapped is corrected, not the PAD flow's.
+    if (on) this.endPadStage()
     this.stepDesk.setCorrect(on, this.recorder)
     this.cancelCorrectedShown()
     this.publishStep()
@@ -940,6 +993,234 @@ export class PatternDesk {
     this.stepShown = null
   }
 
+  // ---------- SCENES: the pattern each group plays, switched while playing, and copy and paste (an addition) ----------
+
+  /**
+   * The scene panel opened ([on]) with column [group] focused, or closed (✕).
+   * It opens whatever the transport does and stays open while it plays; it
+   * shares the function keys' place with STEP's panel: opening it closes it.
+   * Closing drops the grid and the PAD flow; the picks waiting and the clipboard stay.
+   */
+  setSceneOpen(on: boolean, group: number = this.sceneDesk.group): void {
+    if (!on) {
+      this.closeScene()
+      return
+    }
+    if (this.sceneDesk.open) {
+      this.setSceneGroup(group)
+      return
+    }
+    this.closeStep()
+    this.sceneDesk.openOn(group)
+    this.publishScene()
+  }
+
+  /** Live shows [group] now (or its column was tapped): the CLIP row's pattern and bar work on it. */
+  setSceneGroup(group: number): void {
+    this.sceneDesk.focus(group)
+    this.publishScene()
+  }
+
+  /** [group]'s − (-1) or + (+1): the pattern number as shown a step on, wrapping round 1..99; at once while stopped, else queued. */
+  scenePatternStep(group: number, dir: number): void {
+    this.scenePick((at, time) => this.sceneDesk.stepPattern(this.seq, group, dir, at, time))
+  }
+
+  /** [group]'s pattern [n] picked on the 1–99 grid: as [scenePatternStep]. The grid closes. */
+  scenePatternPick(group: number, n: number): void {
+    this.scenePick((at, time) => this.sceneDesk.pickPattern(this.seq, group, n, at, time))
+  }
+
+  /** NEXT FREE: the first pattern of [group] after the number shown with no notes, as [scenePatternStep]. */
+  scenePatternNextFree(group: number): void {
+    this.scenePick((at, time) => this.sceneDesk.pickNextFree(this.seq, group, at, time))
+  }
+
+  /** The 1–99 grid opens over the pads for [group], or closes (null). */
+  sceneGrid(group: number | null): void {
+    this.sceneDesk.grid(group)
+    this.publishScene()
+  }
+
+  /** The scene's − (-1) or + (+1), from the one shown; + past the last is a new one. At once while stopped, else queued for all four groups. */
+  sceneStep(dir: number): void {
+    this.scenePick((at, time) => this.sceneDesk.stepScene(this.seq, dir, at, time))
+  }
+
+  /** COMMIT: the scene copied right after itself, into the groups' next free patterns, and selected (one UNDO step). */
+  sceneCommit(): void {
+    this.sceneEdit(() => this.sceneDesk.commit(this.seq, this.recorder))
+  }
+
+  /** The CLR / DEL key held its 2 s: an empty scene that isn't the only one is deleted, any other emptied (one UNDO step). */
+  sceneEraseHold(): void {
+    const at = this.sceneTickNow()
+    if (at !== null) this.sceneDue(at)
+    const r = this.sceneDesk.erase(this.seq, this.recorder)
+    if (r !== null) {
+      this.setSeq(r.seq)
+      this.host.toast(r.erase === 'cleared' ? MirrorText.CLEARED_SCENE : MirrorText.DELETED_SCENE)
+    }
+    this.publishScene()
+  }
+
+  /** CHANGE (kept): when a pick made while playing takes over. */
+  setSceneSwitch(time: SwitchTime): void {
+    this.changeSettings({ ...this.settings, sceneSwitch: time })
+    this.publishScene()
+  }
+
+  /** The CLIP row's PTN, BAR or PAD; a PAD flow waiting is dropped. */
+  setClipMode(mode: ClipMode): void {
+    this.sceneDesk.mode(mode)
+    this.publishScene()
+  }
+
+  /** The bar page BAR copies and pastes, [bar] from 0. */
+  setClipBar(bar: number): void {
+    this.sceneDesk.page(bar)
+    this.publishScene()
+  }
+
+  /** COPY: in PTN the focused group's pattern, in BAR its bar page; in PAD it waits for a tap on the pad to copy. */
+  clipCopy(): void {
+    this.sceneDesk.copy(this.seq)
+    this.stageBegun()
+    this.publishScene()
+  }
+
+  /** PASTE: in PTN the clipboard's pattern, in BAR its notes (one UNDO step each); in PAD it waits for the pad to paste onto. */
+  clipPaste(): void {
+    this.sceneEdit(() => {
+      const out = this.sceneDesk.paste(this.seq, this.recorder)
+      this.stageBegun()
+      return out
+    })
+  }
+
+  /** Whether the PAD flow waits for a pad: a pad's press is its tap, neither played nor recorded. */
+  get padStaged(): boolean {
+    return this.sceneDesk.padStage !== PadStage.NONE
+  }
+
+  /**
+   * A pad pressed while the PAD flow waits, by voice [key]: the pad COPY
+   * takes, or the pad PASTE puts the clipboard's notes on. An [unsure] press
+   * (the scrolling page) waits for [sceneTapKept]. False when none waits.
+   */
+  scenePadTap(pad: PhysicalPad, key: string, unsure = false): boolean {
+    if (this.sceneDesk.padStage === PadStage.NONE) return false
+    if (unsure) {
+      this.sceneTaps.add(key)
+      return true
+    }
+    this.sceneEdit(() => this.sceneDesk.padTap(pad, this.seq, this.recorder))
+    return true
+  }
+
+  /** The unsure press by [key] the PAD flow waited for was a press after all: its tap. False when none waited for it. */
+  sceneTapKept(pad: PhysicalPad, key: string): boolean {
+    if (!this.sceneTaps.delete(key)) return false
+    this.sceneEdit(() => this.sceneDesk.padTap(pad, this.seq, this.recorder))
+    return true
+  }
+
+  /** The unsure press by [key] was a scroll: no tap. False when none waited for it. */
+  sceneTapCut(key: string): boolean {
+    return this.sceneTaps.delete(key)
+  }
+
+  /** Live's SCENE follows the sequencer, the settings and the desk. */
+  private publishScene(): void {
+    if (this.sceneDesk === undefined) return
+    this._scene.value = this.sceneDesk.ui(this.seq, this.settings.sceneSwitch)
+  }
+
+  // A pick: the desk plays it at once while stopped ([at] null) or queues it for its tick; the sequencer, its plan and Live follow.
+  // A pick waiting that the sequencer may have played from already takes over first, not replaced.
+  private scenePick(pick: (at: number | null, time: SwitchTime) => ProjectSeq): void {
+    const at = this.sceneTickNow()
+    if (at !== null) this.sceneDue(at)
+    this.setSeq(pick(at, this.settings.sceneSwitch))
+    // A queue made or dropped: the plan has it.
+    this.refreshPlan()
+    this.publishScene()
+    // On its tick, not the next beat's.
+    if (this.sceneDesk.waiting > 0 && this.loop !== null) this.follow()
+  }
+
+  // An edit of the sequencer on the desk (already one UNDO step), and Live follows; a pick passed takes over first.
+  private sceneEdit(edit: () => ProjectSeq): void {
+    const at = this.sceneTickNow()
+    if (at !== null) this.sceneDue(at)
+    this.setSeq(edit())
+    this.publishScene()
+  }
+
+  // The PAD flow began waiting for a pad: ERASE and CORRECT go off, whose taps are their own.
+  private stageBegun(): void {
+    if (this.sceneDesk.padStage === PadStage.NONE) return
+    if (this.erasing) this.setErase(false)
+    if (this.stepDesk.correct) this.setStepCorrect(false)
+  }
+
+  // Running, the tick a pick made now goes from: the one heard, but no earlier than the sequencer can still switch at.
+  // Null while stopped (or not heard yet): a pick plays at once.
+  private sceneTickNow(): number | null {
+    if (!this.running()) return null
+    const now = this.host.deps.perfNow()
+    const heard = this.tickAt(now)
+    if (heard === null) return null
+    const free = this.host.deps.liveAudio.seqFreeTick?.(now) ?? null
+    return free === null ? heard : Math.max(heard, free)
+  }
+
+  // The PAD flow is dropped (ERASE or CORRECT came on).
+  private endPadStage(): void {
+    if (this.sceneDesk === undefined || this.sceneDesk.padStage === PadStage.NONE) return
+    this.sceneDesk.endStage()
+    this.publishScene()
+  }
+
+  /** The panel closes (✕, STEP, another project), if it was open. */
+  private closeScene(): void {
+    if (!this.sceneDesk.open) return
+    this.sceneDesk.close()
+    this.sceneTaps.clear()
+    this.publishScene()
+  }
+
+  // The picks waiting whose tick the playhead has passed ([tick], as heard) take over: the sequencer takes the pattern,
+  // which the sequencer's plan was playing from the tick already.
+  private sceneDue(tick: number): void {
+    const waiting = this.sceneDesk.waiting
+    if (waiting === 0) return
+    const started = this.sceneDesk.phase
+    const out = this.sceneDesk.due(this.seq, tick)
+    if (this.sceneDesk.waiting === waiting && out === this.seq) return
+    // The notes heard live in a pattern left are not of the one that starts: its passes are counted from its own start.
+    if (this.skip.size > 0) {
+      const left = new Set<number>()
+      for (let g = 0; g < 4; g++) {
+        if (PhaseAnchors.of(this.sceneDesk.phase, g) === PhaseAnchors.of(started, g)) continue
+        for (const n of ProjectPatterns.group(this.current, g).notes) left.add(n.id)
+      }
+      if (left.size > 0) this.skip = new Map([...this.skip].filter(([id]) => !left.has(id)))
+    }
+    this.setSeq(out)
+    // The queue went: the plan has none.
+    this.refreshPlan()
+    this.publishScene()
+  }
+
+  // STOP: every pick waiting takes over at once.
+  private sceneFlush(): void {
+    if (this.sceneDesk.waiting === 0) return
+    this.setSeq(this.sceneDesk.flush(this.seq))
+    this.refreshPlan()
+    this.publishScene()
+  }
+
   // ---------- the sheet ----------
 
   /** [group]'s length, 1 to 99 bars; notes past the end are kept, not played. */
@@ -968,6 +1249,8 @@ export class PatternDesk {
   /** UNDO: back to before the last pass recorded, clear or length change. */
   undo(): void {
     const seq = this.recorder.undo(this.seq)
+    // A pick waiting goes.
+    if (seq !== null) this.sceneDesk.cancel()
     if (seq !== null && seq !== this.seq) {
       this.useSeq(seq)
       this.touched = true
@@ -1113,5 +1396,18 @@ export function padOf(key: number): PhysicalPad {
 function sameShapes(a: ReadonlyMap<number, Partial<VoiceShape>>, b: ReadonlyMap<number, Partial<VoiceShape>>): boolean {
   if (a.size !== b.size) return false
   for (const [pad, sh] of a) if (!b.has(pad) || !sameShape(sh, b.get(pad))) return false
+  return true
+}
+
+/** Whether two plans' queued switches are the same: the same groups, each to the same pattern at the same tick. */
+function sameQueued(
+  a: ReadonlyMap<number, { readonly pattern: Pattern; readonly atTick: number }>,
+  b: ReadonlyMap<number, { readonly pattern: Pattern; readonly atTick: number }>,
+): boolean {
+  if (a.size !== b.size) return false
+  for (const [g, q] of a) {
+    const o = b.get(g)
+    if (o === undefined || o.pattern !== q.pattern || o.atTick !== q.atTick) return false
+  }
   return true
 }
