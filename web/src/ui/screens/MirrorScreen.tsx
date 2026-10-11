@@ -159,7 +159,8 @@ import { dragMayHaveAudio, isAudioFile } from '../../platform/files/pick'
 import { tick } from '../../platform/haptics'
 import { PickWord, WordButton } from '../live/Words'
 import { TakeBadge, TakesSection, type TakeUi, type TakesUi } from '../live/Takes'
-import { PatternLine, TransportContext } from '../live/PatternLine'
+import { idleFit } from '../live/lineFit'
+import { PatternLine, TransportContext, useLineMeasure } from '../live/PatternLine'
 import { FunctionKeysContext, FunctionRow, ProjectHoldContext } from '../live/FunctionRow'
 import { DeviceView } from '../live/DeviceView'
 import { PunchPad, usePunch } from '../live/LivePunch'
@@ -1330,12 +1331,11 @@ function DisplayStrip(props: { st: MirrorState; mirror: MirrorUi | null; compact
   if (punch !== null && punch.held.size > 0) {
     return (
       <div class={`live-strip${props.compact ? ' live-strip--bar' : ''}`} aria-live="polite">
-        <PatternLine compact={props.compact} still={props.still}>
+        <PatternLine compact={props.compact} still={props.still} take={props.take ?? null}>
           <span class="live-strip__line live-strip__punch" aria-label={MirrorText.punchSpoken(punch.held)}>
             {MirrorText.punchLine(punch.held)}
           </span>
         </PatternLine>
-        <TakeBadge take={props.take} still={props.still} />
       </div>
     )
   }
@@ -1343,26 +1343,61 @@ function DisplayStrip(props: { st: MirrorState; mirror: MirrorUi | null; compact
   if (arpLine !== null) {
     return (
       <div class={`live-strip${props.compact ? ' live-strip--bar' : ''}`} aria-live="polite">
-        <PatternLine compact={props.compact} still={props.still}>
+        <PatternLine compact={props.compact} still={props.still} take={props.take ?? null}>
           <span class="live-strip__line live-strip__punch">{arpLine}</span>
         </PatternLine>
-        <TakeBadge take={props.take} still={props.still} />
       </div>
     )
   }
   return (
     <div class={`live-strip${props.compact ? ' live-strip--bar' : ''}`} aria-live="polite">
-      <PatternLine compact={props.compact} still={props.still}>
-        {st.playing === true && <span class="live-strip__sub live-strip__ink" role="img" aria-label={MirrorText.PLAYING}>{'▶'}</span>}
-        {st.playing === false && <span class="live-strip__sub live-strip__dim" role="img" aria-label={MirrorText.STOPPED}>{'■'}</span>}
-        {/* Offline and the project are only read out: the top bar and the PROJECT key show them. */}
-        {st.playing === null && mirror?.offline != null && <span class="sr-only">{MirrorText.OFFLINE}</span>}
-        {st.bpm !== null && <span class="live-strip__sub live-strip__ink">{MirrorText.bpm(st.bpm)}</span>}
-        {st.activeProject !== null && <span class="sr-only">{MirrorText.project(st.activeProject)}</span>}
-        <span class="live-strip__line">{displayLine(st, mirror)}</span>
+      <PatternLine compact={props.compact} still={props.still} take={props.take ?? null}>
+        <IdleWords st={st} mirror={mirror} />
       </PatternLine>
-      <TakeBadge take={props.take} still={props.still} />
     </div>
+  )
+}
+
+/**
+ * The one-group line's own words: the device's ▶/■ and tempo, then the hit.
+ * ▶/■ and the tempo give way together where they would leave the hit less
+ * than MAIN_MIN (or its whole, if shorter); offline, "Last seen Oct 5, 1:02
+ * PM" gives way to "Seen Oct 5" where it would be cut. Screen readers hear
+ * them all in full, offline and the project too (the top bar and the PROJECT
+ * key show those).
+ */
+function IdleWords(props: { st: MirrorState; mirror: MirrorUi | null }): JSX.Element {
+  const { st, mirror } = props
+  const box = useRef<HTMLSpanElement>(null)
+  const { width, measure } = useLineMeasure(box, true)
+  const glyph = st.playing === true ? '▶' : st.playing === false ? '■' : null
+  const tempo = st.bpm !== null ? MirrorText.bpm(st.bpm) : null
+  const main = displayLine(st, mirror)
+  const fit = width === null || measure === null ? { clock: true, short: false } : idleFit(measure, [glyph, tempo].filter((w): w is string => w !== null), main, width)
+  const short = fit.short && mirror?.offlineShort && main === mirror.offline ? mirror.offlineShort : null
+  const said = st.playing === true ? MirrorText.PLAYING : st.playing === false ? MirrorText.STOPPED : null
+  return (
+    <span ref={box} class="live-strip__idle">
+      {glyph !== null &&
+        (fit.clock ? (
+          <span class={`live-strip__sub ${st.playing ? 'live-strip__ink' : 'live-strip__dim'}`} role="img" aria-label={said ?? undefined}>
+            {glyph}
+          </span>
+        ) : (
+          <span class="sr-only">{said}</span>
+        ))}
+      {st.playing === null && mirror?.offline != null && <span class="sr-only">{MirrorText.OFFLINE}</span>}
+      {tempo !== null && <span class={fit.clock ? 'live-strip__sub live-strip__ink' : 'sr-only'}>{tempo}</span>}
+      {st.activeProject !== null && <span class="sr-only">{MirrorText.project(st.activeProject)}</span>}
+      {short !== null ? (
+        <span class="live-strip__line">
+          <span aria-hidden="true">{short}</span>
+          <span class="sr-only">{main}</span>
+        </span>
+      ) : (
+        <span class="live-strip__line">{main}</span>
+      )}
+    </span>
   )
 }
 
@@ -1436,7 +1471,7 @@ function PatternRow(props: { still?: boolean }): JSX.Element | null {
   if (t === null) return null
   return (
     <div class="live-display__pattern">
-      <PatternLine still={props.still} word />
+      <PatternLine still={props.still} row />
     </div>
   )
 }

@@ -280,6 +280,8 @@ export class PatternDesk {
   async switchProject(project: number): Promise<void> {
     await this.load()
     if (project === this.project) return
+    // STEP opened before any project was known (the patterns still loading) stays open, on the project read.
+    const stepping = this.project === 0 && this.stepDesk.open ? this.stepDesk.group : null
     // The scene panel and its picks waiting are the other project's: dropped, not applied by the STOP.
     this.sceneDesk.reset()
     this.sceneTaps.clear()
@@ -296,6 +298,10 @@ export class PatternDesk {
     this._ui.value = { ...this._ui.peek(), project }
     this.refreshPlan()
     this.show()
+    if (stepping !== null) {
+      this.stepDesk.openOn(project, stepping)
+      this.publishStep()
+    }
   }
 
   /** The device's tempo changed (or stopped coming): the plan follows. */

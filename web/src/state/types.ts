@@ -134,6 +134,8 @@ export interface MirrorUi {
   readonly error: string | null
   /** Not connected, showing the last read instead: when it was made ("Last seen 5 Oct, 14:02"). */
   readonly offline?: string | null | undefined
+  /** [offline] where the line is too short for it: the day alone ("Seen 5 Oct"); null with the factory sounds. */
+  readonly offlineShort?: string | null | undefined
   /** Offline: the sounds to preview and put on the pads in arc only. */
   readonly offlineSounds?: OfflineSounds | null | undefined
   /** Offline: the projects PROJECT steps through (the last read's and the factory pack's), in order. */

@@ -1,6 +1,6 @@
 // Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/LiveScene.kt (LiveScene, worthSaying,
 // sceneReadout, sceneSaid, SceneHeader, SceneDeck, GroupColumn, EraseKey, ClipModes, PatternGrid)
-// and PatternLine.kt's SceneChip
+// and PatternLine.kt's SceneChip (a cell of the scene and STEP's key)
 //
 // Scenes on Live (an addition, after the EP-133's own patterns and scenes:
 // GROUP + − / +, MAIN + − / +, COMMIT, ERASE + MAIN held, SHIFT + C / D and
@@ -18,6 +18,8 @@
 //   its own header); the 1–99 grid opens inside the panel, under its rows,
 //   rather than over the pads. Not in the desk's Device view yet, and the
 //   group keys don't carry the numbers.
+// - The readout while the pattern plays is in the scene's cell (Android: in
+//   the line's words, beside the counter).
 // - CLR / DEL's 2 s hold is a pointer (or Enter / Space) held on the key, its
 //   fill moved by CSS; a screen reader's click (no hold) acts at once.
 
@@ -89,38 +91,35 @@ export function sceneSaid(ui: SceneUi): string {
 }
 
 /**
- * The S01 chip on the line: it opens the panel; while the pattern plays and
- * the scene is worth saying, the scene's readout follows it (a change
- * waiting blinks). Hidden while the panel is open.
+ * The scene's cell on the line (in one key with STEP's, PatternLine.tsx's
+ * SceneStepKeys): S01, a tap opens the panel; while the pattern plays and the
+ * scene is worth saying, its [readout] instead (a change waiting blinks).
  */
-export function SceneChip(props: { compact?: boolean }): JSX.Element | null {
+export function SceneCell(props: { readout: readonly string[] | null }): JSX.Element | null {
   const s = useScene()
   if (s === null) return null
   const ui = s.ui
-  if (ui.open) return null
-  const readout = s.running && worthSaying(ui) ? sceneReadout(ui) : null
+  const readout = props.readout
   return (
-    <div class={`transport-keys${props.compact ? ' transport-keys--compact' : ''}`}>
-      <button
-        type="button"
-        class="transport-key scene-chip"
-        aria-label={MirrorText.sceneChipName(ui.index, ui.count)}
-        aria-description={readout !== null ? sceneSaid(ui) : undefined}
-        onClick={() => s.onOpen()}
-      >
-        {readout === null ? (
-          <span aria-hidden="true">{ui.label}</span>
-        ) : (
-          <span class="scene-chip__readout" aria-hidden="true">
-            {readout.map((part, i) => (
-              <span key={i} class={part.includes('→') ? 'is-queued' : undefined}>
-                {part}
-              </span>
-            ))}
-          </span>
-        )}
-      </button>
-    </div>
+    <button
+      type="button"
+      class="transport-key scene-chip"
+      aria-label={MirrorText.sceneChipName(ui.index, ui.count)}
+      aria-description={readout !== null ? sceneSaid(ui) : undefined}
+      onClick={() => s.onOpen()}
+    >
+      {readout === null ? (
+        <span aria-hidden="true">{ui.label}</span>
+      ) : (
+        <span class="scene-chip__readout" aria-hidden="true">
+          {readout.map((part, i) => (
+            <span key={i} class={part.includes('→') ? 'is-queued' : undefined}>
+              {part}
+            </span>
+          ))}
+        </span>
+      )}
+    </button>
   )
 }
 

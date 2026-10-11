@@ -644,6 +644,8 @@ describe('Live offline', () => {
     await until(h, (s) => s.mirror?.offline != null)
     const m = h.c.state.value.mirror!
     expect(m.offline).toBe(MirrorText.lastSeen(h.c.fmtDateTime(Date.UTC(2026, 9, 5, 12, 2))))
+    // Where the line is short, the day alone (MirrorScreen's IdleWords).
+    expect(m.offlineShort).toBe(MirrorText.seen(h.c.fmtMonthDay(Date.UTC(2026, 9, 5, 12, 2))))
     expect(m.error).toBeNull()
     expect(h.c.mirrorName(A1)).toBe('kick')
   })

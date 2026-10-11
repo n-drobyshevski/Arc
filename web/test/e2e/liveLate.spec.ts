@@ -84,9 +84,10 @@ test.describe('on a phone', () => {
     await demo(page, (d) => d.clock('start'))
     await demo(page, (d) => d.noteOn(37, 127))
     const strip = page.locator('.live-strip').first()
-    await expect(strip.getByRole('img', { name: 'Playing' })).toBeVisible()
-    await expect(strip.getByText(/ BPM$/)).not.toHaveClass(/sr-only/)
     await expect(strip.locator('.live-strip__line')).toHaveText(/^A .+ · 127$/)
+    // The device's ▶ and tempo give way to the hit on a phone's line (as Android's), and are still said.
+    await expect(strip).toContainText('Playing')
+    await expect(strip.getByText(/ BPM$/)).toHaveCount(1)
     // KEYS keeps its word on the line, too.
     await page.keyboard.press('KeyM')
     await expect(strip.getByText('KEYS', { exact: true })).not.toHaveClass(/sr-only/)

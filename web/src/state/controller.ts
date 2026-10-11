@@ -90,7 +90,7 @@ import type { TrafficLog } from '../core/protocol/trafficLog'
 import { FeatureText } from '../core/text/featureText'
 import type { WebLatencyHint } from '../core/text/latencyText'
 import { MirrorText } from '../core/text/mirrorText'
-import { DATE_TIME_PATTERN, DAY_PATTERN, date as formatDate } from '../core/text/format'
+import { DATE_TIME_PATTERN, DAY_PATTERN, MONTH_DAY_PATTERN, date as formatDate } from '../core/text/format'
 import { BackupDevice, fileNameFor, importTitle, toPrune, type BackupRecord, type RestoreSelection } from '../core/text/libraryRules'
 import { SettingsText, type ThemeChoice } from '../core/text/settingsText'
 import { Strings } from '../core/text/strings'
@@ -367,6 +367,7 @@ export class ArcController {
       toast,
       live: this.live,
       fmtDateTime: (ms) => this.fmtDateTime(ms),
+      fmtMonthDay: (ms) => this.fmtMonthDay(ms),
       deviceRead: () => {
         void this.offerOfflinePads()
         void this.sample.shownAgain()
@@ -819,6 +820,11 @@ export class ArcController {
 
   fmtDateTime(ms: number): string {
     return this.fmtDate(ms)
+  }
+
+  /** The day alone, "Oct 5" (in the browser's order). */
+  fmtMonthDay(ms: number): string {
+    return formatDate(ms, MONTH_DAY_PATTERN)
   }
 
   async backup(): Promise<void> {
