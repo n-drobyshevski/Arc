@@ -16,7 +16,8 @@
 //   stamp), so there is no waiting for a stamp here, nor PRESS_WAIT_NS: a
 //   press with no stamp anchors on the frames rendered (Kotlin's fallback).
 // - No lost(): a new stream is a new worklet, and a new scheduler.
-// - No queued switches (scenes) and no arp (ArpRunner): the web has neither yet.
+// - No arp (ArpRunner) yet. A queued switch's [freeTick] goes back to the
+//   main thread with the output's stamps (liveMixer.ts), not as a volatile.
 // - The count-in's click is MixerHost's (clickScheduler.ts), on [clock]'s
 //   beats while [countingIn]: Kotlin's controller turns its click stream on
 //   for it.
@@ -24,7 +25,7 @@
 
 import { Arp } from '../../core/features/arp'
 import { Keys } from '../../core/features/keys'
-import { ProjectPatterns, Seq, projectPatterns } from '../../core/features/pattern'
+import { ProjectPatterns, Seq, projectPatterns, type Pattern } from '../../core/features/pattern'
 import {
   PatternPlayer,
   PhaseAnchors,
@@ -47,12 +48,21 @@ export interface PadVoice {
   readonly keysShape: VoiceShape
 }
 
+/** A pattern waiting to take over a group (a pick made while the sequencer plays): [pattern] plays from global tick [atTick] on. */
+export interface QueuedSwitch {
+  readonly pattern: Pattern
+  readonly atTick: number
+}
+
 /**
  * What the sequencer plays: the project's [patterns], the sounds on their
  * pads ([voices], by pad key group × 12 + offset; a note on a pad not in it
  * is told to [PatternScheduler.onMissing]), [skip] (a note's id to the pass
- * not to play) and the tempo, [bpm]. Each group's pattern loops from its own
- * anchor in [phase]. Made anew for each change, never changed in place.
+ * not to play) and the tempo, [bpm]. [queued] gives a group (0..3) the
+ * pattern that takes over from a tick: its notes before the tick come from
+ * [patterns], those from it on from the queued one, which starts at its bar
+ * 1 on that tick. Each group's pattern loops from its own anchor in [phase].
+ * Made anew for each change, never changed in place.
  */
 export interface SeqPlan {
   readonly patterns: ProjectPatterns
@@ -60,6 +70,7 @@ export interface SeqPlan {
   readonly skip: ReadonlyMap<number, number>
   readonly bpm: number
   readonly phase: PhaseAnchors
+  readonly queued?: ReadonlyMap<number, QueuedSwitch>
 }
 
 export const EMPTY_PLAN: SeqPlan = {
@@ -171,6 +182,19 @@ export class PatternScheduler {
   private countFrom = 0
   private nextTag = -1
   private readonly notes: SeqNote[] = []
+  // The queued patterns of the plan last switched in, as patterns playing from their own anchors.
+  private switchOf: SeqPlan | null = null
+  private switched: ProjectPatterns = projectPatterns()
+  private switchedPhase: PhaseAnchors = PhaseAnchors.ZERO
+  private readonly switchedNotes: SeqNote[] = []
+  /**
+   * The first tick a plan published now is sure to reach before it is sent
+   * (for a [SeqPlan.queued] switch while it plays): a lookahead past the
+   * first tick not sent yet. A switch at an earlier tick would find the old
+   * pattern's notes from it sent already, and the queued one's never.
+   * -Infinity until the transport's first block is sent.
+   */
+  freeTick = Number.NEGATIVE_INFINITY
   private held: Held[] = []
   private missingOf: SeqPlan | null = null
   private readonly missing = new Set<number>()
@@ -204,12 +228,14 @@ export class PatternScheduler {
    */
   play(countInBars: number, leadMs = 0, atFrame: number | null = null, atPress = atFrame !== null): void {
     this.on = true
+    this.freeTick = Number.NEGATIVE_INFINITY
     this.asks.push({ kind: 'play', countInBars: Math.max(countInBars, 0), leadMs: Math.max(leadMs, 0), atFrame, atPress })
   }
 
   /** Stops it: on the next [fill], what waits is dropped and the notes sounding let go of. */
   stop(): void {
     this.on = false
+    this.freeTick = Number.NEGATIVE_INFINITY
     this.asks.push({ kind: 'stop' })
   }
 
@@ -237,12 +263,44 @@ export class PatternScheduler {
     const from = Math.max(frameOf(c, this.nextTick), rendered - ahead)
     if (to > from) {
       PatternPlayer.window(p.patterns, c, from, to, p.skip, this.notes, p.phase)
+      if (p.queued !== undefined && p.queued.size > 0) this.switchIn(p, c, from, to)
       for (const n of this.notes) this.start(sink, p, n)
       this.nextTick = firstTick(c, to)
     }
+    this.freeTick = Math.max(this.nextTick, firstTick(c, to + ahead))
     this.scheduledTo = to
     this.releases(sink, c, to, rendered)
     this.publish()
+  }
+
+  // [notes] (the plan's patterns' window) with each queued group's notes from its switch's tick on taken from the queued pattern instead.
+  private switchIn(p: SeqPlan, c: TransportClock, from: number, to: number): void {
+    const queued = p.queued!
+    if (this.switchOf !== p) {
+      this.switchOf = p
+      let q = projectPatterns()
+      let ph = PhaseAnchors.ZERO
+      for (const [g, sw] of queued) {
+        if (g < 0 || g > 3) continue
+        q = ProjectPatterns.with(q, g, sw.pattern)
+        // The queued pattern starts at its bar 1 where it takes over.
+        ph = PhaseAnchors.with(ph, g, sw.atTick)
+      }
+      this.switched = q
+      this.switchedPhase = ph
+    }
+    PatternPlayer.window(this.switched, c, from, to, new Map(), this.switchedNotes, this.switchedPhase)
+    const kept = this.notes.filter((n) => {
+      const sw = queued.get(n.group)
+      return sw === undefined || n.startTick < sw.atTick
+    })
+    for (const n of this.switchedNotes) {
+      const sw = queued.get(n.group)
+      if (sw !== undefined && n.startTick >= sw.atTick) kept.push(n)
+    }
+    kept.sort((a, b) => a.startTick - b.startTick || a.group - b.group)
+    this.notes.length = 0
+    this.notes.push(...kept)
   }
 
   private anchor(a: Extract<Ask, { kind: 'play' }>, rendered: number, rate: number): void {

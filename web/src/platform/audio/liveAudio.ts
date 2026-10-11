@@ -88,7 +88,7 @@ import { wavHeader } from '../../core/formats/wav'
 import { LatencyText, WebLatencyHint } from '../../core/text/latencyText'
 import { WebText } from '../../core/text/webText'
 import type { VoiceShape } from '../../core/formats/voiceMixer'
-import type { ProjectPatterns } from '../../core/features/pattern'
+import { Seq, type Pattern, type ProjectPatterns } from '../../core/features/pattern'
 import { frameAt, type FrameClock } from '../../core/features/sampleTiming'
 import type { PhaseAnchors, TransportClock } from '../../core/features/sequencer'
 import type { Beat, BeatGrid } from '../../core/features/tempo'
@@ -325,6 +325,8 @@ export interface LiveSeqPlan {
    */
   readonly shapes?: ReadonlyMap<number, Partial<VoiceShape>>
   readonly keysShapes?: ReadonlyMap<number, Partial<VoiceShape>>
+  /** The patterns waiting to take over a group (scenes): each from its global tick, at its bar 1 there. */
+  readonly queued?: ReadonlyMap<number, { readonly pattern: Pattern; readonly atTick: number }>
 }
 
 /**
@@ -417,6 +419,8 @@ interface Stream {
   receiving: Receiving | null
   /** The mix's latest stamp: mix frame to the performance.now() it is heard at (PATTERN). */
   stamp: FrameClock | null
+  /** The sequencer's free tick at the stamp's frame (-Infinity stopped): what a queued switch may take over at. */
+  freeTick: number
 }
 
 const EMPTY: ReadonlySet<string> = new Set()
@@ -596,6 +600,19 @@ export class LiveAudio {
     return true
   }
 
+  /**
+   * The first tick a queued switch made at [atMs] (performance.now()) can
+   * take over at (PatternScheduler.freeTick, as of the latest stamp and
+   * carried on to [atMs] at the transport's tempo); null while stopped.
+   */
+  seqFreeTick(atMs: number): number | null {
+    const s = this.stream
+    const c = this.seqClock
+    if (s === null || c === null || s.stamp === null || !Number.isFinite(s.freeTick)) return null
+    const later = frameAt(s.stamp, atMs) - s.stamp.frame
+    return s.freeTick + Math.max(later, 0) * ((c.bpm * Seq.PPQN) / (60 * c.rate))
+  }
+
   /** Stops the pattern: what waits is dropped, what sounds let go of. */
   seqStop(): void {
     this.seqClock = null
@@ -663,7 +680,8 @@ export class LiveAudio {
       const keysShape = plan.keysShapes?.get(pad) ?? bus
       voices.push({ pad, id: sample.id, channels: sample.channels, sampleRate: sample.sampleRate, shape, keysShape })
     }
-    send(s, { t: 'plan', patterns: plan.patterns, voices, skip: [...plan.skip], bpm: plan.bpm, phase: plan.phase })
+    const queued = plan.queued !== undefined ? [...plan.queued].map(([group, q]) => ({ group, pattern: q.pattern, atTick: q.atTick })) : undefined
+    send(s, { t: 'plan', patterns: plan.patterns, voices, skip: [...plan.skip], bpm: plan.bpm, phase: plan.phase, queued })
   }
 
   /** The timeline anew when the clock changed, or the stamp drifted from the one shown by more than a millisecond. */
@@ -925,6 +943,7 @@ export class LiveAudio {
       ending: false,
       receiving: null,
       stamp: null,
+      freeTick: Number.NEGATIVE_INFINITY,
     }
     this.stream = s
     // The samples loaded, ready again, and the FX bus as it was set up (before any press).
@@ -1057,6 +1076,7 @@ export class LiveAudio {
       case 'stamp': {
         const first = s.stamp === null
         s.stamp = { frame: m.frame, ms: heardAt(m.time, this.backend.now(), s.ctx), rate: s.ctx.sampleRate }
+        s.freeTick = m.freeTick
         this.showTimeline(s)
         // The EP-133's beats could wait for a stamp to be mapped.
         if (first && this.clickAsk.on && this.clickAsk.grid !== null) this.sendClick(s)

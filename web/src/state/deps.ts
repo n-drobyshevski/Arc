@@ -206,6 +206,8 @@ export interface LiveAudioDeps {
   seqPlay?(countInBars: number, leadMs: number, atMs: number | null): boolean
   /** Stops it: what waits is dropped, and the notes sounding let go of. */
   seqStop?(): void
+  /** The first tick a queued switch (scenes) made at [atMs] can take over at; null while stopped (LiveAudio.seqFreeTick). */
+  seqFreeTick?(atMs: number): number | null
   /** RECORD waits for a press: the output keeps its stamp, so the press finds its frame. */
   seqArm?(armed: boolean): void
   /** Where the transport is in heard time: null while stopped and until the output's first stamp. */

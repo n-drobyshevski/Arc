@@ -33,7 +33,7 @@
 // Imports only core modules (and the scheduler, which does too): this file is bundled into the worklet.
 
 import { TakeRecorder, type RecState } from '../../core/features/takeRecorder'
-import type { ProjectPatterns } from '../../core/features/pattern'
+import type { Pattern, ProjectPatterns } from '../../core/features/pattern'
 import type { PhaseAnchors, TransportClock } from '../../core/features/sequencer'
 import { VoiceMixer, VoiceShape } from '../../core/formats/voiceMixer'
 import { PatternScheduler, type PadVoice, type ScheduleSink } from './patternScheduler'
@@ -84,6 +84,8 @@ export type ToMixer =
       readonly skip: readonly (readonly [number, number])[]
       readonly bpm: number
       readonly phase: PhaseAnchors
+      /** The patterns waiting to take over a group (scenes), each from its global tick. */
+      readonly queued?: readonly { readonly group: number; readonly pattern: Pattern; readonly atTick: number }[]
     }
   /** PatternScheduler.play: tick 0 at mix frame [atFrame] (a press), else a lookahead and [leadMs] on, after [countInBars]. */
   | { readonly t: 'play'; readonly countInBars: number; readonly leadMs: number; readonly atFrame: number | null; readonly atPress: boolean }
@@ -143,7 +145,8 @@ export type FromMixer =
   /** A pad the patterns play has no sound in the plan (pad key). */
   | { readonly t: 'missing'; readonly pad: number }
   /** Mix frame [frame] plays at context time [time] (s). */
-  | { readonly t: 'stamp'; readonly frame: number; readonly time: number }
+  /** Where the mix is: frame [frame] plays at context time [time]; the sequencer's [freeTick] then (-Infinity stopped). */
+  | { readonly t: 'stamp'; readonly frame: number; readonly time: number; readonly freeTick: number }
   /** A click: beat [index], played at context time [time] (s), [accent] on a bar's first. */
   | { readonly t: 'beat'; readonly index: number; readonly time: number; readonly accent: boolean }
 
@@ -254,7 +257,8 @@ export class MixerHost {
             keysShape: v.keysShape === undefined ? VoiceShape.DEFAULT : VoiceShape.of(v.keysShape),
           })
         }
-        this.seq.plan = { patterns: m.patterns, voices, skip: new Map(m.skip), bpm: m.bpm, phase: m.phase }
+        const queued = m.queued !== undefined && m.queued.length > 0 ? new Map(m.queued.map((q) => [q.group, { pattern: q.pattern, atTick: q.atTick }])) : undefined
+        this.seq.plan = { patterns: m.patterns, voices, skip: new Map(m.skip), bpm: m.bpm, phase: m.phase, queued }
         return
       }
       case 'play':
@@ -375,7 +379,7 @@ export class MixerHost {
     // Where the mix is, a few times a second while the pattern runs, RECORD waits or the click sounds: the main thread's stamp.
     if ((this.seq.running || this.seqArmed || this.clickOn) && before - this.stampedAt >= this.rate / 4) {
       this.stampedAt = before
-      this.post({ t: 'stamp', frame: before, time })
+      this.post({ t: 'stamp', frame: before, time, freeTick: this.seq.freeTick })
     }
     this.mixer.renderPlanar(left, right, frames)
     this.record(left, right, frames, before)
