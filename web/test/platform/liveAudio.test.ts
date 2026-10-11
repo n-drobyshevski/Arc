@@ -1581,18 +1581,22 @@ describe('LiveAudio PATTERN', () => {
     expect(b.link.sent.at(-1)).toEqual({ t: 'stopSeq' })
   })
 
-  it("puts each pad on its group's FX bus, the sidechain's source ducking", async () => {
+  it("plays each pad as its shapes say, else on its group's FX bus", async () => {
     const b = new FakeBackend()
     const live = new LiveAudio(b)
     live.preload('kick', tone(300), 1, RATE)
     live.open()
     await flush()
-    live.seqPlan({ ...plan(new Map([[0, 'kick'], [13, 'kick']])), duckPad: 13 })
+    live.seqPlan({
+      ...plan(new Map([[0, 'kick'], [13, 'kick']])),
+      shapes: new Map([[13, { bus: 1, duckSource: true, semitones: -3 }]]),
+      keysShapes: new Map([[13, { bus: 1, mode: 'GATE' as const }]]),
+    })
     const sent = b.link.sent.filter((m) => m.t === 'plan').at(-1)
     expect(sent).toMatchObject({
       voices: [
         { pad: 0, shape: { bus: 0 }, keysShape: { bus: 0 } },
-        { pad: 13, shape: { bus: 1, duckSource: true }, keysShape: { bus: 1, duckSource: true } },
+        { pad: 13, shape: { bus: 1, duckSource: true, semitones: -3 }, keysShape: { bus: 1, mode: 'GATE' } },
       ],
     })
   })

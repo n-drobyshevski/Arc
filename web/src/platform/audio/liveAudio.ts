@@ -318,8 +318,13 @@ export interface LiveSeqPlan {
   readonly skip: ReadonlyMap<number, number>
   readonly bpm: number
   readonly phase: PhaseAnchors
-  /** The pad (pad key) whose voices duck the sidechain's groups; each voice is on its group's FX bus. */
-  readonly duckPad?: number | null
+  /**
+   * How each pad's voices play (pad key: its sound settings, its group's FX
+   * bus, the sidechain's source); [keysShapes] for its KEYS notes. A pad left
+   * out plays on its group's bus.
+   */
+  readonly shapes?: ReadonlyMap<number, Partial<VoiceShape>>
+  readonly keysShapes?: ReadonlyMap<number, Partial<VoiceShape>>
 }
 
 /**
@@ -653,8 +658,10 @@ export class LiveAudio {
       const sample = this.samples.get(key)
       if (!sample || !(sample.channels >= 1 && sample.channels <= 2)) continue
       this.load(s, sample)
-      const shape: Partial<VoiceShape> = pad === plan.duckPad ? { bus: Math.floor(pad / 12), duckSource: true } : { bus: Math.floor(pad / 12) }
-      voices.push({ pad, id: sample.id, channels: sample.channels, sampleRate: sample.sampleRate, shape, keysShape: shape })
+      const bus: Partial<VoiceShape> = { bus: Math.floor(pad / 12) }
+      const shape = plan.shapes?.get(pad) ?? bus
+      const keysShape = plan.keysShapes?.get(pad) ?? bus
+      voices.push({ pad, id: sample.id, channels: sample.channels, sampleRate: sample.sampleRate, shape, keysShape })
     }
     send(s, { t: 'plan', patterns: plan.patterns, voices, skip: [...plan.skip], bpm: plan.bpm, phase: plan.phase })
   }

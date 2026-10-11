@@ -327,6 +327,8 @@ export interface Deps {
   lastRead: LastReadDeps
   /** Live's pad changes made offline, until the EP-133 connects (or Reset pads). */
   offlinePads: OfflinePadsDeps
+  /** EDIT's pad settings turned offline (files/live-pad-settings.json); absent: kept for this session only. */
+  offlinePadSettings?: OfflinePadsDeps
   /** Where the factory sounds are downloaded from; absent: they can't be. */
   factory?: FactoryDeps | undefined
   /** Screen wake lock: on while a task runs, or Live is open with keepScreenOn. */

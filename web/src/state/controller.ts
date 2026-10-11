@@ -68,6 +68,9 @@ import { compare as comparePaks } from '../core/features/pakCompare'
 import { frames, seconds, type TrimRange } from '../core/features/sampleTrim'
 import { nameFor, nextFree, upload, UploadItem } from '../core/features/sampleUpload'
 import { FxControl } from '../core/formats/fx/fxBus'
+import type { VoiceShape } from '../core/formats/voiceMixer'
+import type { PadSettings } from '../core/features/padSettings'
+import { OfflinePadSettings } from '../core/features/offlinePadSettings'
 import { decodeWav } from '../core/formats/wav'
 import { REC_IDLE, type RecState } from '../core/features/takeRecorder'
 import type { RecordedTake } from '../platform/audio/liveAudio'
@@ -91,12 +94,14 @@ import { logFileName } from '../platform/files/save'
 import type { FileData } from '../platform/files/save'
 import { FileListTarget, type ExternalTarget } from '../platform/storage/external'
 import { describeForRestore } from '../platform/storage/library'
-import { PatternPrefs, indexSettings, memoryStorage, type AppSettings } from '../platform/storage/settings'
+import { LIVE_PAD_SETTINGS_KEY, OfflinePadsPrefs, PatternPrefs, indexSettings, memoryStorage, type AppSettings } from '../platform/storage/settings'
 import { keepScreenOn } from '../platform/wakelock/wakeLock'
 import { Connection, connectionPhase, type ConnectionPhase } from './connection'
 import type { Deps, LiveEngineInfo } from './deps'
 import { LiveSounds, noteVoice, padVoice, pressTime, type LiveLatency } from './live'
-import { FxKeeper } from './fx'
+import { FxKeeper, duckSource } from './fx'
+import { voiceShape } from './padShape'
+import { PadEditDesk } from './padEdit'
 import { PatternDesk } from './pattern'
 import { patternBpm } from './patternPlan'
 import { MirrorController } from './mirror'
@@ -167,6 +172,8 @@ export class ArcController {
   readonly pattern: PatternDesk
   /** FX: every project's settings, the one Live shows, the punch-ins held. */
   readonly fx: FxKeeper
+  /** EDIT: the pads' sound settings as arc knows them, and the pad sheet's. */
+  readonly padEdit: PadEditDesk
   // Presses in ERASE on the scrolling page that may still turn into a scroll: when each went down, by pad key.
   private readonly eraseUnsure = new Map<number, number>()
   /** The pads sounding on the phone, as padKey numbers (MainActivity's playingPads). */
@@ -284,7 +291,7 @@ export class ArcController {
       playToken: () => this.playToken,
       toast,
       toastOnce: (text, error) => this.toastOnce(text, error),
-      shapeOf: (pad) => this.fx.shapeOf(pad),
+      shapeOf: (pad, keys) => this.shapeFor(pad, keys),
     })
     this.liveLatency = this.live.latency
     this.pattern = new PatternDesk({
@@ -293,10 +300,20 @@ export class ArcController {
       prefs: deps.patternPrefs ?? new PatternPrefs(memoryStorage()),
       live: this.live,
       toast,
-      duckPad: () => {
-        const c = this.fx.desk.fx.peek().sidechain
-        return c.on ? c.group * 12 + c.pad : null
-      },
+      shapeOf: (pad, keys) => this.shapeFor({ group: Math.floor(pad / 12), offset: pad % 12 }, keys),
+    })
+    this.padEdit = new PadEditDesk({
+      store: this.store,
+      tasks: this.tasks,
+      session: () => this.conn.session,
+      connected: () => this.deviceReady,
+      // TRIM's length and waveform load quietly: the sheet says nothing of a sample not known yet.
+      padAudio: (pad) => this.live.padAudio(pad, true),
+      prefs: deps.offlinePadSettings ?? new OfflinePadsPrefs(memoryStorage(), LIVE_PAD_SETTINGS_KEY),
+      toast,
+      setTimeout: (fn, ms) => deps.setTimeout(fn, ms),
+      clearTimeout: (h) => deps.clearTimeout(h),
+      changed: () => this.pattern.refreshPlan(),
     })
     this.store.update((s) => ({ ...s, keysPad: deps.mirrorPrefs.savedKeysPad() }))
     this.mirror = new MirrorController({
@@ -316,6 +333,9 @@ export class ArcController {
       deviceRead: () => void this.offerOfflinePads(),
       transport: (playing) => (playing ? deps.liveAudio.transportStarted?.() : deps.liveAudio.transportStopped?.()),
       midi: (e) => this.pattern.midi(e),
+      padsRead: (project, layout) => this.padEdit.padsRead(project, layout),
+      padsOffline: () => void this.padEdit.padsOffline(),
+      padAssigned: (t) => this.padEdit.forget(t),
     })
   }
 
@@ -1145,6 +1165,25 @@ export class ArcController {
   }
 
   /**
+   * How [pad] plays on the phone: its sound settings as known, made a voice
+   * shape; unknown, as a pad always has. KEYS ([keys]) plays each note on its
+   * own, so LEGATO's one voice across notes becomes a held note there. Either
+   * way it is on its group's FX bus, and ducks the sidechain's groups when it
+   * is the source (KEYS' notes too, when their pad is).
+   */
+  private shapeFor(pad: { readonly group: number; readonly offset: number }, keys = false): Partial<VoiceShape> {
+    const duck = duckSource(this.fx.desk.fx.peek(), pad)
+    const s = this.padSettingsOf(pad)
+    if (s === null) return duck ? { bus: pad.group, duckSource: true } : { bus: pad.group }
+    return voiceShape(s, pad.group, keys, duck)
+  }
+
+  /** [pad]'s sound settings as arc knows them (Live's project), null when unknown. */
+  private padSettingsOf(pad: { readonly group: number; readonly offset: number }): PadSettings | null {
+    return this.padEdit.settingsOf(this.mirror.current?.target(pad) ?? null)
+  }
+
+  /**
    * The FX sheet's cap: [pad] plays as Live plays it, through the effects,
    * until [releaseTry]; a try, so never a pattern's note, nor ERASE's.
    */
@@ -1325,6 +1364,27 @@ export class ArcController {
     return t
   }
 
+  /**
+   * EDIT's sheet opened on [pad]: its sound settings show as arc knows them
+   * and, connected, are read from the EP-133 (PadEditDesk.open); none for a
+   * pad that can't be changed or has no sound.
+   */
+  openPadEdit(pad: PhysicalPad): void {
+    const t = this.editTarget(pad, true)
+    if (t === null) this.padEdit.close()
+    else this.padEdit.open(pad, t)
+  }
+
+  /** EDIT's sheet closed: a turn not yet written still goes on the device. */
+  closePadEdit(): void {
+    this.padEdit.close()
+  }
+
+  /** A knob turned on the open pad sheet: the pad plays so at once, and the EP-133 gets it once the turning rests. */
+  adjustPad(settings: PadSettings): void {
+    this.padEdit.adjust(settings)
+  }
+
   /** Writes [slot] onto [t]'s pad; the error text, null when done (or nothing was written: busy). */
   private async writePad(t: PadTarget, slot: number): Promise<{ error: string | null } | null> {
     return this.tasks.exclusive('assign', true, async (s) => {
@@ -1397,6 +1457,8 @@ export class ArcController {
         : OfflinePads.put(pads, { project: t.project, group: t.group, pad: t.pad, slot, name: snd.name, source })
     this.live.setOfflinePads(next)
     m.setLocal(next)
+    // The new sound comes with its own settings, as on the device.
+    this.padEdit.forget(t)
     this.mirror.localChanged()
     this.toast(MirrorText.assignedOffline(pad, snd.name))
     return true
@@ -1405,6 +1467,8 @@ export class ArcController {
   /** Reset pads: the offline changes go, and the pads show what the last read had. */
   resetOfflinePads(): void {
     this.live.setOfflinePads(OfflinePads.EMPTY)
+    this.padEdit.saveOffline(OfflinePadSettings.EMPTY)
+    void this.padEdit.padsOffline()
     const m = this.mirror.offline
     if (m !== null) {
       m.setLocal(OfflinePads.EMPTY)
@@ -1417,7 +1481,7 @@ export class ArcController {
   async offerOfflinePads(): Promise<void> {
     // Still writing them (Live left and came back meanwhile): not asked again.
     if (this.offlineWrite !== null) return
-    const n = OfflinePads.size(await this.live.loadOfflinePads())
+    const n = OfflinePads.size(await this.live.loadOfflinePads()) + (await this.padEdit.offlineCount())
     if (n === 0 || !this.deviceReady) return
     this.store.update((st) => ({ ...st, offlinePrompt: n }))
   }
@@ -1480,13 +1544,18 @@ export class ArcController {
       }
     }
     this.live.setOfflinePads(OfflinePads.EMPTY)
-    this.toast(MirrorText.offlineWritten(written, skipped))
+    // Then the settings turned offline, on the pads of the project they were turned in that still
+    // hold the sound they were turned for: only what was turned changes, the rest is the device's now.
+    const turned = await this.padEdit.writeOffline(s, m.snapshot(this.deps.perfNow()).activeProject, (g, p) => m.slotAt(g, p))
+    if (turned.lost) return
+    this.toast(MirrorText.offlineWritten(written + turned.written, skipped + turned.skipped))
   }
 
   /** Discard: the offline changes go; the EP-133 keeps what it has. */
   discardOfflinePads(): void {
     this.store.update((st) => ({ ...st, offlinePrompt: null }))
     this.live.setOfflinePads(OfflinePads.EMPTY)
+    this.padEdit.saveOffline(OfflinePadSettings.EMPTY)
     this.toast(MirrorText.OFFLINE_DISCARDED)
   }
 

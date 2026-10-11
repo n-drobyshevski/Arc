@@ -184,6 +184,8 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
     await page.locator('[data-pad]', { hasText: 'kick' }).first().click()
     const sheet = page.getByRole('dialog', { name: /^Pad A / })
     await expect(sheet).toBeVisible()
+    // The pad's settings show first; its sounds wait behind CHANGE SOUND.
+    await sheet.getByRole('button', { name: /change sound/i }).click()
     await sheet.getByRole('button', { name: /^002/ }).click()
     await expect(page.getByRole('status')).toContainText(': snare')
     await expect(page.locator('[data-pad]', { hasText: 'snare' })).toHaveCount(1)
