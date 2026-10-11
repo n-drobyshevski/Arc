@@ -68,6 +68,8 @@ import { compare as comparePaks } from '../core/features/pakCompare'
 import { frames, seconds, type TrimRange } from '../core/features/sampleTrim'
 import { nameFor, nextFree, upload, UploadItem } from '../core/features/sampleUpload'
 import { FxControl } from '../core/formats/fx/fxBus'
+import type { VoiceShape } from '../core/formats/voiceMixer'
+import type { PadSettings } from '../core/features/padSettings'
 import { decodeWav } from '../core/formats/wav'
 import { REC_IDLE, type RecState } from '../core/features/takeRecorder'
 import type { RecordedTake } from '../platform/audio/liveAudio'
@@ -96,7 +98,8 @@ import { keepScreenOn } from '../platform/wakelock/wakeLock'
 import { Connection, connectionPhase, type ConnectionPhase } from './connection'
 import type { Deps, LiveEngineInfo } from './deps'
 import { LiveSounds, noteVoice, padVoice, pressTime, type LiveLatency } from './live'
-import { FxKeeper } from './fx'
+import { FxKeeper, duckSource } from './fx'
+import { voiceShape } from './padShape'
 import { PatternDesk } from './pattern'
 import { patternBpm } from './patternPlan'
 import { MirrorController } from './mirror'
@@ -284,7 +287,7 @@ export class ArcController {
       playToken: () => this.playToken,
       toast,
       toastOnce: (text, error) => this.toastOnce(text, error),
-      shapeOf: (pad) => this.fx.shapeOf(pad),
+      shapeOf: (pad, keys) => this.shapeFor(pad, keys),
     })
     this.liveLatency = this.live.latency
     this.pattern = new PatternDesk({
@@ -293,10 +296,7 @@ export class ArcController {
       prefs: deps.patternPrefs ?? new PatternPrefs(memoryStorage()),
       live: this.live,
       toast,
-      duckPad: () => {
-        const c = this.fx.desk.fx.peek().sidechain
-        return c.on ? c.group * 12 + c.pad : null
-      },
+      shapeOf: (pad, keys) => this.shapeFor({ group: Math.floor(pad / 12), offset: pad % 12 }, keys),
     })
     this.store.update((s) => ({ ...s, keysPad: deps.mirrorPrefs.savedKeysPad() }))
     this.mirror = new MirrorController({
@@ -1142,6 +1142,25 @@ export class ArcController {
     const done = this.live.playPad(pad, hold, unsure, at)
     this.pattern.press(pad, null, padVoice(pad), pressedAt, hold)
     return done
+  }
+
+  /**
+   * How [pad] plays on the phone: its sound settings as known, made a voice
+   * shape; unknown, as a pad always has. KEYS ([keys]) plays each note on its
+   * own, so LEGATO's one voice across notes becomes a held note there. Either
+   * way it is on its group's FX bus, and ducks the sidechain's groups when it
+   * is the source (KEYS' notes too, when their pad is).
+   */
+  private shapeFor(pad: { readonly group: number; readonly offset: number }, keys = false): Partial<VoiceShape> {
+    const duck = duckSource(this.fx.desk.fx.peek(), pad)
+    const s = this.padSettingsOf(pad)
+    if (s === null) return duck ? { bus: pad.group, duckSource: true } : { bus: pad.group }
+    return voiceShape(s, pad.group, keys, duck)
+  }
+
+  /** [pad]'s sound settings as arc knows them (Live's project), null when unknown. */
+  private padSettingsOf(_pad: { readonly group: number; readonly offset: number }): PadSettings | null {
+    return null
   }
 
   /**

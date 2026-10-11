@@ -31,8 +31,10 @@ import type { MidiEvent } from '../core/protocol/midiInput'
 import { FeatureText } from '../core/text/featureText'
 import { MirrorText } from '../core/text/mirrorText'
 import type { PatternPrefs, PatternSettings } from '../platform/storage/settings'
+import type { VoiceShape } from '../core/formats/voiceMixer'
 import type { Deps, LiveTimeline } from './deps'
 import type { LiveSounds } from './live'
+import { sameShape } from './padShape'
 import {
   PATTERN_UI,
   countInBeat,
@@ -83,8 +85,8 @@ export interface PatternHost {
   prefs: PatternPrefs
   live: Pick<LiveSounds, 'patternVoice' | 'loadForPattern'>
   toast(text: string, error?: boolean): void
-  /** The pad (pad key) whose voices duck the sidechain (FX), if any. */
-  duckPad?(): number | null
+  /** How [pad]'s (pad key) voices play: its sound settings and FX bus; [keys]: its KEYS notes. */
+  shapeOf?(pad: number, keys: boolean): Partial<VoiceShape>
 }
 
 /** The plan last handed to the sequencer, to tell when a new one changes anything. */
@@ -93,7 +95,8 @@ interface SentPlan {
   readonly skip: ReadonlyMap<number, number>
   readonly bpm: number
   readonly voices: ReadonlyMap<number, string>
-  readonly duckPad: number | null
+  readonly shapes: ReadonlyMap<number, Partial<VoiceShape>>
+  readonly keysShapes: ReadonlyMap<number, Partial<VoiceShape>>
 }
 
 export class PatternDesk {
@@ -291,11 +294,27 @@ export class PatternDesk {
     const p = this.current
     const { voices, missing } = patternVoices(ProjectPatterns.usedPads(p), (pad) => this.host.live.patternVoice(pad))
     const bpm = this.bpm()
-    const duckPad = this.host.duckPad?.() ?? null
+    const shapes = new Map<number, Partial<VoiceShape>>()
+    const keysShapes = new Map<number, Partial<VoiceShape>>()
+    const shapeOf = this.host.shapeOf
+    if (shapeOf) {
+      for (const pad of voices.keys()) {
+        shapes.set(pad, shapeOf(pad, false))
+        keysShapes.set(pad, shapeOf(pad, true))
+      }
+    }
     const old = this.sent
-    if (old === null || old.patterns !== p || old.skip !== this.skip || old.bpm !== bpm || old.duckPad !== duckPad || !sameVoices(old.voices, voices)) {
-      this.sent = { patterns: p, skip: this.skip, bpm, voices, duckPad }
-      audio.seqPlan({ patterns: p, voices, skip: this.skip, bpm, phase: PhaseAnchors.ZERO, duckPad })
+    if (
+      old === null ||
+      old.patterns !== p ||
+      old.skip !== this.skip ||
+      old.bpm !== bpm ||
+      !sameVoices(old.voices, voices) ||
+      !sameShapes(old.shapes, shapes) ||
+      !sameShapes(old.keysShapes, keysShapes)
+    ) {
+      this.sent = { patterns: p, skip: this.skip, bpm, voices, shapes, keysShapes }
+      audio.seqPlan({ patterns: p, voices, skip: this.skip, bpm, phase: PhaseAnchors.ZERO, shapes, keysShapes })
     }
     for (const pad of missing) this.loadPad(pad)
     if (this._ui.peek().missing !== missing.size) this._ui.value = { ...this._ui.peek(), missing: missing.size }
@@ -808,4 +827,11 @@ export interface Metronome {
 /** A pad key's pad. */
 export function padOf(key: number): PhysicalPad {
   return physicalPad(Math.floor(key / 12), key % 12)
+}
+
+/** Whether two plans' voices play alike: the same pads, each with the same shape. */
+function sameShapes(a: ReadonlyMap<number, Partial<VoiceShape>>, b: ReadonlyMap<number, Partial<VoiceShape>>): boolean {
+  if (a.size !== b.size) return false
+  for (const [pad, sh] of a) if (!b.has(pad) || !sameShape(sh, b.get(pad))) return false
+  return true
 }

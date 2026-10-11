@@ -181,8 +181,8 @@ export interface LiveHost {
   toast(text: string, error?: boolean): void
   /** A toast, unless the same text is already showing (a press can raise one, and a slide presses many). */
   toastOnce(text: string, error?: boolean): void
-  /** How a voice of [pad] plays (its FX bus, whether it ducks the sidechain); the defaults when left out. */
-  shapeOf?(pad: { readonly group: number; readonly offset: number }): Partial<VoiceShape>
+  /** How a voice of [pad] plays (its sound settings, its FX bus; [keys]: a KEYS note); the defaults when left out. */
+  shapeOf?(pad: { readonly group: number; readonly offset: number }, keys: boolean): Partial<VoiceShape>
 }
 
 export class LiveSounds {
@@ -924,12 +924,12 @@ export class LiveSounds {
     const sample = this.padSample(pad)
     const mem = sample ? this.fromMemory(memoryKey(sample.slot, sample.name)) : null
     if (sample && mem) {
-      this.startHeld(id, pad, hold, memoryKey(sample.slot, sample.name), mem, pitch, pressedAt, true)
+      this.startHeld(id, pad, hold, memoryKey(sample.slot, sample.name), mem, pitch, pressedAt, true, true)
       return Promise.resolve()
     }
     return (async () => {
       const got = await this.padAudio(pad)
-      if (got !== null && token === host.playToken()) this.startHeld(id, pad, hold, got.key, got.audio, pitch, pressedAt, false)
+      if (got !== null && token === host.playToken()) this.startHeld(id, pad, hold, got.key, got.audio, pitch, pressedAt, false, true)
     })()
   }
 
@@ -952,9 +952,19 @@ export class LiveSounds {
    *
    * [measured]: the sample was in memory at the press, so its latency goes
    * into the latency test; a load's time would only blur it. [pad]: whose
-   * voice it is (KEYS': the sound's pad), for its shape (host.shapeOf).
+   * voice it is (KEYS': the sound's pad, [keys]), for its shape (host.shapeOf).
    */
-  private startHeld(id: string, pad: { readonly group: number; readonly offset: number }, hold: boolean, key: string, a: PadAudio, semitones: number, pressedAt: number, measured: boolean): void {
+  private startHeld(
+    id: string,
+    pad: { readonly group: number; readonly offset: number },
+    hold: boolean,
+    key: string,
+    a: PadAudio,
+    semitones: number,
+    pressedAt: number,
+    measured: boolean,
+    keys = false,
+  ): void {
     const { host } = this
     const out = host.deps.liveAudio
     if (this.cuts.delete(id)) return
@@ -969,7 +979,7 @@ export class LiveSounds {
     // loaded voice that was never heard (cut first).
     if (measured) this.unmeasured.delete(id)
     else this.unmeasured.add(id)
-    const shape = host.shapeOf?.(pad)
+    const shape = host.shapeOf?.(pad, keys)
     if (!out.press(id, key, shape === undefined ? { pitch: semitones, gate: hold, pressedAt } : { pitch: semitones, gate: hold, pressedAt, shape })) {
       this.unmeasured.delete(id)
       host.toastOnce(FeatureText.NO_AUDIO_OUTPUT, true)
