@@ -163,6 +163,7 @@ import { PatternLine, TransportContext } from '../live/PatternLine'
 import { FunctionKeysContext, FunctionRow, ProjectHoldContext } from '../live/FunctionRow'
 import { DeviceView } from '../live/DeviceView'
 import { PunchPad, usePunch } from '../live/LivePunch'
+import { StepPanel, useStep, useStepNoteMark, useStepPadMark } from '../live/StepPanel'
 import { punchSlotForPad } from '../../state/fx'
 import { useDesk, useFinePointer, useWindowSize } from '../useDesk'
 import './MirrorScreen.css'
@@ -544,6 +545,13 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
 
   // The group shown in the one-group view; Follow switches it to the group just played.
   const [group, setGroup] = useState(props.initialGroup ?? 0)
+  // STEP: the panel open, on the group Live shows (KEYS: the KEYS sound's), as Kotlin's LaunchedEffect(stepGroup).
+  const stepCtx = useStep()
+  const stepOpen = useComputed(() => stepCtx?.ui.open ?? false).value
+  const stepGroup = keys.on ? (keys.pad?.group ?? null) : group
+  useEffect(() => {
+    if (stepOpen && stepGroup !== null) stepCtx?.onGroup(stepGroup)
+  }, [stepOpen, stepGroup])
   const hitGroup = st.lastHit?.pad?.group ?? null
   useEffect(() => {
     if ((oneGroup || device) && follow && hitGroup !== null) setGroup(hitGroup)
@@ -877,7 +885,9 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   const modePicks = <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} plan={plan} part="picks" />
   // On a phone on its side the line is in the top bar instead.
   // The function keys over the pads, upright (none sideways); SOUND turns EDIT off again, so they stay in EDIT.
-  const fnRow = inBar ? null : <FunctionRow class="live__fn" />
+  // STEP's panel takes the function keys' place while it is open (on a phone on its side, the tools' column).
+  const fnRow = stepOpen ? <StepPanel class="live__fn" /> : inBar ? null : <FunctionRow class="live__fn" />
+  const sideStep = stepOpen ? <StepPanel class="live__fn live__side-step" /> : null
   const displayStrip = inBar ? null : editing ? <EditStrip /> : <DisplayStrip st={st} mirror={mirror} take={take} still={fixedNow !== null} />
   const allGroups = (
     <div class="live__all">
@@ -1050,6 +1060,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           // the octave one on their right.
           <>
             {!inBar && <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={null} />}
+            {sideStep}
             <div class="live__side live__side--keys">
               <div class="live__side-tools">{modeLead}</div>
               <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} haptic={haptic} keysRef={gridKeys} />
@@ -1069,6 +1080,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           // a quarter turn left of the body rather than a row under it, so the pads get its height.
           <>
             {displayStrip}
+            {sideStep}
             <div class="live__side">
               <div class="live__side-tools">{modeRow}</div>
               <div class="ko-body">
@@ -1658,6 +1670,28 @@ const Pad = memo(
     a.keyHint === b.keyHint,
 )
 
+/** STEP's long press (Kotlin's pick for − / +): [start] runs its action after STEP_PICK_MS unless [stop] comes first. */
+const STEP_PICK_MS = 500
+
+function useLongPress(): { start(fn: () => void): void; stop(): void } {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const api = useRef({
+    start(fn: () => void): void {
+      api.current.stop()
+      timer.current = setTimeout(() => {
+        timer.current = null
+        fn()
+      }, STEP_PICK_MS)
+    },
+    stop(): void {
+      if (timer.current !== null) clearTimeout(timer.current)
+      timer.current = null
+    },
+  })
+  useEffect(() => () => api.current.stop(), [])
+  return api.current
+}
+
 function PadCap(props: PadProps): JSX.Element {
   const { pad, light, name, big, scroll, ui, tracker } = props
   // Playing on the phone: a signal-orange ring inside the pad (only this pad re-renders when it changes).
@@ -1665,6 +1699,8 @@ function PadCap(props: PadProps): JSX.Element {
   const press = ui.press(pad)
   const edit = useRef<EditPress>(newEditPress())
   const holds = useRef(new Set<number>())
+  const stepCtx = useStep()
+  const pickTimer = useLongPress()
   const btn = useRef<HTMLButtonElement>(null)
   const editMode = ui.editing && ui.edit !== null
   // EDIT on or off, or the pad gone (another view), with a finger still down: the
@@ -1683,13 +1719,20 @@ function PadCap(props: PadProps): JSX.Element {
   const key = padKey(pad)
   // ERASE on: a dot on the pads with notes, the others dimmed (Kotlin eraseDot).
   const mark = useEraseMark(key)
-  const label = `${pad.groupLetter} ${pad.label}` + (name !== null ? `, ${name}` : '') + (mark === true ? MirrorText.PAD_HAS_NOTES : '')
+  // STEP open on this group: the pads on the cursor's step outlined, the one picked for − / + ringed.
+  const stepMark = useStepPadMark(pad)
+  const label =
+    `${pad.groupLetter} ${pad.label}` +
+    (name !== null ? `, ${name}` : '') +
+    (mark === true ? MirrorText.PAD_HAS_NOTES : '') +
+    (stepMark === 'picked' ? MirrorText.PICKED : stepMark === 'lit' ? MirrorText.ON_STEP : '')
   const dropping = ui.drop !== null && ui.drop.at === key
   const cls =
     `live-pad cap-3d${big ? ' live-pad--big' : ''}${playing ? ' is-playing' : ''}` +
     (ui.editing ? ' is-editing' : '') +
     (dropping ? ' is-drop' : '') +
-    (mark === true ? ' is-erase-dot' : mark === false ? ' is-erase-dim' : '')
+    (mark === true ? ' is-erase-dot' : mark === false ? ' is-erase-dim' : '') +
+    (stepMark === 'picked' ? ' is-step-picked' : stepMark === 'lit' ? ' is-step-lit' : '')
   // Over a pad, a dragged sound shows what it would replace: "snare 2 → vox chop".
   const shown = dropping && ui.drop?.name != null ? MirrorText.dropPreview(name ?? ui.drop.nameNow(pad), ui.drop.name) : name
   const content = (
@@ -1770,6 +1813,16 @@ function PadCap(props: PadProps): JSX.Element {
       onPointerDown={(e) => {
         edit.current.pointer = e.pointerType
         onPointerDown?.(e)
+        // STEP: a long press picks the pad for − / +.
+        if (stepMark !== null && e.button === 0) pickTimer.start(() => stepCtx?.onPadPick(pad))
+      }}
+      onPointerUp={(e) => {
+        pickTimer.stop()
+        handlers.onPointerUp?.(e)
+      }}
+      onPointerCancel={(e) => {
+        pickTimer.stop()
+        handlers.onPointerCancel?.(e)
       }}
       onContextMenu={(e) => {
         e.preventDefault()
@@ -2341,20 +2394,41 @@ const KeyCap = memo(
 function KeyCapView(props: KeyCapProps): JSX.Element {
   const { index: k, note, keys, press } = props
   const playing = useHas(props.playing, note)
+  // STEP open on the KEYS sound's group: its notes on the cursor's step outlined, the one picked ringed.
+  const stepMark = useStepNoteMark(note, keys.pad)
+  const stepCtx = useStep()
+  const pickTimer = useLongPress()
   const target: PressTarget = {
     press: (hold, _unsure, at) => press.down(k, note, hold, at),
     release: () => press.up(k),
   }
-  const cls = 'live-key cap-3d' + (upperOctave(note, keys.octave) ? ' live-key--upper' : '') + (playing ? ' is-playing' : '')
+  const cls =
+    'live-key cap-3d' +
+    (upperOctave(note, keys.octave) ? ' live-key--upper' : '') +
+    (playing ? ' is-playing' : '') +
+    (stepMark === 'picked' ? ' is-step-picked' : stepMark === 'lit' ? ' is-step-lit' : '')
+  const handlers = holdHandlers(props.tracker, target, false, props.haptic)
   return (
     <button
       type="button"
       class={cls}
-      aria-label={MirrorText.noteName(note, keys.names)}
+      aria-label={MirrorText.noteName(note, keys.names) + (stepMark === 'picked' ? MirrorText.PICKED : stepMark === 'lit' ? MirrorText.ON_STEP : '')}
       aria-description={MirrorText.PLAY}
       data-key={k}
       style={{ '--glow': glowCss(props.lit) }}
-      {...holdHandlers(props.tracker, target, false, props.haptic)}
+      {...handlers}
+      onPointerDown={(e) => {
+        handlers.onPointerDown?.(e)
+        if (stepMark !== null && e.button === 0) pickTimer.start(() => stepCtx?.onNotePick(note))
+      }}
+      onPointerUp={(e) => {
+        pickTimer.stop()
+        handlers.onPointerUp?.(e)
+      }}
+      onPointerCancel={(e) => {
+        pickTimer.stop()
+        handlers.onPointerCancel?.(e)
+      }}
     >
       {/* Named, the name alone, in the ring's colour; unnamed, a ring the digit's height. Both where
           a pad prints its digit, the octave where a pad shows its sample. */}
