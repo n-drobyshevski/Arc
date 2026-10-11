@@ -5,11 +5,13 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 import kotlin.math.abs
 import kotlin.math.floor
 
@@ -92,9 +94,13 @@ data class Scene(val patterns: List<Int> = List(4) { 1 }) {
  * a bank is blank (a bar, no notes): a bank never holds one, so projects
  * with the same patterns are equal. `ProjectSeq(...)` keeps that true, with
  * 4 banks, 1 to 99 scenes and the index on one of them; the default is one
- * scene of patterns 1 and nothing in the banks.
+ * scene of patterns 1 and nothing in the banks. The [chain] is the order the
+ * scenes play in ([Chain]); its steps name scenes by index, so only the
+ * functions that change the scenes together with the chain
+ * ([withSceneRemoved], [withSceneInserted], [withScenes] with a chain) keep
+ * it pointing at the right ones.
  */
-data class ProjectSeq private constructor(val banks: List<Map<Int, Pattern>>, val scenes: List<Scene>, val scene: Int) {
+data class ProjectSeq private constructor(val banks: List<Map<Int, Pattern>>, val scenes: List<Scene>, val scene: Int, val chain: Chain) {
     /** The scene playing. */
     val current: Scene get() = scenes[scene]
 
@@ -118,11 +124,44 @@ data class ProjectSeq private constructor(val banks: List<Map<Int, Pattern>>, va
     fun withPattern(group: Int, n: Int, p: Pattern): ProjectSeq {
         if (n !in 1..Seq.MAX_PATTERNS || pattern(group, n) == p) return this
         val bank = if (p == BLANK) banks[group] - n else banks[group] + (n to p)
-        return ProjectSeq(banks.mapIndexed { g, old -> if (g == group) bank else old }, scenes, scene)
+        return ProjectSeq(banks.mapIndexed { g, old -> if (g == group) bank else old }, scenes, scene, chain)
     }
 
-    /** Other [scenes], the one at [scene] playing (held to them). */
-    fun withScenes(scenes: List<Scene>, scene: Int = this.scene): ProjectSeq = ProjectSeq.invoke(banks, scenes, scene)
+    /**
+     * Other [scenes], the one at [scene] playing (held to them), and [chain]
+     * (the chain as it is by default) held to them: a step naming a scene
+     * past the last is dropped. Nothing is renumbered; for scenes taken out
+     * or put in the middle use [withSceneRemoved] or [withSceneInserted].
+     */
+    fun withScenes(scenes: List<Scene>, scene: Int = this.scene, chain: Chain = this.chain): ProjectSeq =
+        ProjectSeq.invoke(banks, scenes, scene, chain)
+
+    /** Another [chain], held to the scenes there are ([Chain.held]). */
+    fun withChain(chain: Chain): ProjectSeq = if (chain == this.chain) this else ProjectSeq.invoke(banks, scenes, scene, chain)
+
+    /**
+     * Scene [index] taken out, the later ones moving down: the chain loses
+     * its steps and the later scenes' steps name the scene before. The scene
+     * playing becomes [select] (an index in the scenes left; the one that
+     * moved into [index]'s place, held to the scenes left, when it was the
+     * one playing; the same scene when it was another one).
+     */
+    fun withSceneRemoved(index: Int, select: Int = if (scene > index) scene - 1 else scene): ProjectSeq {
+        if (index !in scenes.indices || scenes.size <= 1) return this
+        return ProjectSeq.invoke(banks, scenes.filterIndexed { i, _ -> i != index }, select, chain.withoutScene(index))
+    }
+
+    /**
+     * [s] inserted as scene [index] (0..the scene count; past the end it
+     * goes last), the later ones moving up: the chain's steps naming them
+     * name the scene after. The scene playing becomes [select] (an index in
+     * the new scenes; [index] by default). None past [Seq.MAX_SCENES] scenes.
+     */
+    fun withSceneInserted(index: Int, s: Scene, select: Int = index.coerceIn(0, scenes.size)): ProjectSeq {
+        if (scenes.size >= Seq.MAX_SCENES) return this
+        val at = index.coerceIn(0, scenes.size)
+        return ProjectSeq.invoke(banks, scenes.take(at) + s + scenes.drop(at), select, chain.withSceneInsertedAt(at))
+    }
 
     /** No pattern has notes, whatever the lengths and scenes. */
     val isEmpty: Boolean get() = banks.all { bank -> bank.values.all { it.isEmpty } }
@@ -133,10 +172,15 @@ data class ProjectSeq private constructor(val banks: List<Map<Int, Pattern>>, va
         val DEFAULT = ProjectSeq()
 
         /** A project's sequencer with blank patterns left out of the banks, 1 to 99 scenes and [scene] held to them. */
-        operator fun invoke(banks: List<Map<Int, Pattern>> = emptyList(), scenes: List<Scene> = listOf(Scene()), scene: Int = 0): ProjectSeq {
+        operator fun invoke(
+            banks: List<Map<Int, Pattern>> = emptyList(),
+            scenes: List<Scene> = listOf(Scene()),
+            scene: Int = 0,
+            chain: Chain = Chain.EMPTY,
+        ): ProjectSeq {
             val b = List(4) { g -> banks.getOrNull(g).orEmpty().filter { (n, p) -> n in 1..Seq.MAX_PATTERNS && p != BLANK } }
             val s = scenes.take(Seq.MAX_SCENES).ifEmpty { listOf(Scene()) }
-            return ProjectSeq(b, s, scene.coerceIn(0, s.lastIndex))
+            return ProjectSeq(b, s, scene.coerceIn(0, s.lastIndex), chain.held(s.size))
         }
     }
 }
@@ -154,12 +198,13 @@ data class Patterns(val projects: Map<Int, ProjectSeq> = emptyMap()) {
         Patterns(if (blank(p)) projects - project else projects + (project to p))
 
     /**
-     * Version 2: each project's scenes and the patterns in its banks with
-     * notes or another length only; the open flag and the notes' ids aren't
-     * written.
+     * Version 3: each project's scenes and the patterns in its banks with
+     * notes or another length only, and its chain (`"chain":{"on":true,
+     * "steps":[[scene index, passes], ...]}`) unless it is blank; the open
+     * flag and the notes' ids aren't written.
      */
     fun toJson(): String = buildJsonObject {
-        put("v", 2)
+        put("v", 3)
         putJsonArray("projects") {
             for ((project, p) in projects.entries.sortedBy { it.key }) {
                 if (blank(p)) continue
@@ -168,6 +213,14 @@ data class Patterns(val projects: Map<Int, ProjectSeq> = emptyMap()) {
                     put("scene", p.scene)
                     putJsonArray("scenes") {
                         for (s in p.scenes) add(JsonArray(s.patterns.map { JsonPrimitive(it) }))
+                    }
+                    if (!p.chain.isBlank) {
+                        putJsonObject("chain") {
+                            put("on", p.chain.on)
+                            putJsonArray("steps") {
+                                for (step in p.chain.steps) add(JsonArray(listOf(JsonPrimitive(step.scene), JsonPrimitive(step.passes))))
+                            }
+                        }
                     }
                     putJsonArray("groups") {
                         p.banks.forEachIndexed { g, bank ->
@@ -202,25 +255,27 @@ data class Patterns(val projects: Map<Int, ProjectSeq> = emptyMap()) {
         val EMPTY = Patterns()
 
         private fun blank(p: Pattern) = p.isEmpty && p.bars == Seq.DEFAULT_BARS
-        private fun blank(p: ProjectSeq) = p.scenes == ProjectSeq.DEFAULT.scenes && p.banks.all { bank -> bank.values.all(::blank) }
+        private fun blank(p: ProjectSeq) = p.scenes == ProjectSeq.DEFAULT.scenes && p.chain.isBlank && p.banks.all { bank -> bank.values.all(::blank) }
 
         /**
-         * Null when the text is not a version this one can read (1 or 2);
+         * Null when the text is not a version this one can read (1, 2 or 3);
          * entries it can't read are skipped (as [OfflinePads.fromJson]): a
-         * project, a scene, a group, a pattern or a note. Version 1 kept one
-         * pattern a group: it reads as pattern 1, in the one scene. A later
-         * entry for the same group (version 1) or pattern (version 2) wins;
-         * in version 2 a later entry for the same project replaces it.
+         * project, a scene, a group, a pattern, a note or a chain step.
+         * Version 1 kept one pattern a group: it reads as pattern 1, in the
+         * one scene. Version 2 added the scenes and the banks, version 3 the
+         * chain (a version 2 file has none). A later entry for the same group
+         * (version 1) or pattern (version 2 and 3) wins; in versions 2 and 3
+         * a later entry for the same project replaces it.
          */
         fun fromJson(text: String): Patterns? = runCatching {
             val o = Json.parseToJsonElement(text).jsonObject
             val v = int(o, "v")
-            if (v != 1 && v != 2) return null
+            if (v != 1 && v != 2 && v != 3) return null
             var out = EMPTY
             for (e in (o["projects"] as? JsonArray).orEmpty()) {
                 val f = e as? JsonObject ?: continue
                 val project = int(f, "project")?.takeIf { it in 0..99 } ?: continue
-                out = out.put(project, if (v == 1) readV1(f, out.of(project)) else readV2(f))
+                out = out.put(project, if (v == 1) readV1(f, out.of(project)) else readV2(f, withChain = v >= 3))
             }
             out
         }.getOrNull()
@@ -237,13 +292,13 @@ data class Patterns(val projects: Map<Int, ProjectSeq> = emptyMap()) {
             return p
         }
 
-        // A version 2 project: its scenes (one of patterns 1 when none can be read) and its banks.
-        private fun readV2(f: JsonObject): ProjectSeq {
+        // A version 2 or 3 project: its scenes (one of patterns 1 when none can be read), its banks and, from version 3, its chain.
+        private fun readV2(f: JsonObject, withChain: Boolean): ProjectSeq {
             val scenes = (f["scenes"] as? JsonArray).orEmpty().mapNotNull { se ->
                 val ns = (se as? JsonArray)?.map { int(it)?.takeIf { n -> n in 1..Seq.MAX_PATTERNS } }
                 if (ns == null || ns.size != 4 || null in ns) null else Scene(ns.filterNotNull())
             }
-            var p = ProjectSeq(scenes = scenes, scene = int(f, "scene") ?: 0)
+            var p = ProjectSeq(scenes = scenes, scene = int(f, "scene") ?: 0, chain = if (withChain) readChain(f) else Chain.EMPTY)
             for (ge in (f["groups"] as? JsonArray).orEmpty()) {
                 val gf = ge as? JsonObject ?: continue
                 val g = int(gf, "group")?.takeIf { it in 0..3 } ?: continue
@@ -255,6 +310,19 @@ data class Patterns(val projects: Map<Int, ProjectSeq> = emptyMap()) {
                 }
             }
             return p
+        }
+
+        // A project's chain: the steps it can read (a scene index from 0 and passes, held to 1..8; the project holds them to its scenes) and whether it is on.
+        private fun readChain(f: JsonObject): Chain {
+            val c = f["chain"] as? JsonObject ?: return Chain.EMPTY
+            val steps = ArrayList<ChainStep>()
+            for (se in (c["steps"] as? JsonArray).orEmpty()) {
+                val a = (se as? JsonArray)?.takeIf { it.size == 2 } ?: continue
+                val scene = int(a[0])?.takeIf { it >= 0 } ?: continue
+                val passes = int(a[1]) ?: continue
+                steps += ChainStep(scene, passes.coerceIn(Chain.MIN_PASSES, Chain.MAX_PASSES))
+            }
+            return Chain(steps, (c["on"] as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull == true)
         }
 
         // A pattern's notes, at most its cap; those it can't read are skipped.

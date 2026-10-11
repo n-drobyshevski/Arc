@@ -77,6 +77,26 @@ A line `sound <pad> <slot> [name]` inside a section says which sound that pad sh
 - **Errors:** a pad from another group, or a slot outside 1–999.
 - **Picking slots:** use only slots from the user's sound list, which Arc adds after the card when it shares. Without a list, write no sound lines and say which kind of sound fits each pad. The factory ranges are kicks 1–99, snares 100–199, hats 200–299, percussion 300–399, bass 400–499 and melodic 500–599, but the user may have changed them.
 
+## Scenes and chains (optional)
+One card can hold several scenes, which together make a track idea (intro, drop, breakdown, drop), and the order to play them in.
+- **`scene [name]`** starts a scene. Everything up to the next `scene` line belongs to it: its `[A]`–`[D]` sections with their rows, `notes`, `sound` and `pad` lines. The name is optional and at most 40 characters. Arc shows it on the import sheet, but scenes keep no names in Arc.
+- **Scene count:** a card with no `scene` line is one scene, as before. Once a card has a `scene` line, a section before the first one is an error. A card holds at most 16 scenes.
+- **Groups:** inside a scene each group appears at most once. A group that a scene leaves out plays the previous scene's pattern for it, the same pattern rather than a copy. In the first scene, a left-out group keeps the pattern the scene playing gives it, as before.
+- **`chain <step> ...`**, a header line before the first `scene`, gives the play order. A step is a scene number from the card, counting from 1, optionally with its passes: `2` or `2x4`. Passes are 1–8 and default to 1. The chain loops at its end, holds 1 to 64 steps, and may repeat scenes, as in `chain 1x2 2 1x2 3`.
+  - **Errors:** a step naming a scene the card doesn't have, passes outside 1–8, more than 64 steps, or a `chain` line in a card with no `scene` lines.
+  - **Repeats:** a second `chain` line replaces the first, with a warning.
+- **Effects** stay project-wide. A card's effect lines apply to every scene, because the EP-133 and Arc keep FX per project, not per scene. To change FX between scenes, play punch-ins live.
+- **Writing:** Arc writes `chain` after the effect lines, and each scene as `scene` plus a name if any, followed by its sections in group order. A section that only repeats the previous scene's pattern is left out.
+
+### Chains in Arc
+A project in Arc can have a chain: steps of (scene, passes), at most 64. Arc plays it while the chain is on.
+- **Passes:** each scene plays its passes, then the next step's scene takes over at the end of the current scene's longest pattern. After the last step the chain goes back to the first.
+- **Starting:** PLAY starts from the first step that has the scene showing, or from the first step.
+- **By hand:** choosing a scene by hand turns the chain off.
+- **Editing scenes:** deleting a scene removes its steps. Scenes that move up or down keep their steps.
+- **Saving and undo:** the chain is saved with the project, and the scenes' undo covers it.
+
+
 ## Effects (header lines, all optional)
 These lines set the project's FX in Arc: the same master effect, sends, compressor and sidechain as Arc's FX sheet. Like the header, they come before the first section. Knob values are percentages, 0–100, as the knob's travel.
 | Line | Meaning |
@@ -139,7 +159,9 @@ These lines set the project's FX in Arc: the same master effect, sends, compress
   - A pad that already plays the sound is left alone.
 - **Applying sounds:** connected, the chosen sounds are written to the EP-133's pads in the active project, and those pads' own settings reset to the sound's. Offline, they become Arc's offline pad changes, which go to the device on reconnect. The import sheet lists each change with a tick box, all ticked by default.
 - **FX and pad shaping:** the import sheet has an FX block, which lists the effect, sends, compressor and sidechain as old → new, with an APPLY FX switch that is on by default. It also lists each pad's shaping as old → new, ticked, next to the SOUNDS block. Importing applies what is switched on and ticked. A pad's new sound goes on first, so its shaping lands on the new sound (a sound change resets the pad's own settings). APPLY FX replaces only the kinds of FX the card has a line for.
-- One undo removes all of it: the pads' sounds, the FX and the pad shaping.
+- **Scenes:** a card with `scene` lines adds one new scene per card scene, after the project's scenes. Each section takes its group's next free pattern; nothing is overwritten. The sheet lists each scene with its new number and patterns.
+- **Chain:** with SET CHAIN on (the default), a card's `chain` replaces the project's chain, mapped to the new scene numbers, and turns it on.
+- One undo removes all of it: the pads' sounds, the FX, the pad shaping, the new scenes and the chain.
 
 ## FX in Arc's share
 When the project's FX aren't the default, Arc's share writes them as the effect lines above, right after the `swing` line: `fx`, then `send` for the groups above 0, then `comp` and `sidechain` when they are on. The effect line is written whenever any of them is (`fx none` when only a compressor or sidechain is on). Knobs are written as whole percents, and a sidechain always with its length and shape. With no effect, no send and the compressor and sidechain off, nothing is written.

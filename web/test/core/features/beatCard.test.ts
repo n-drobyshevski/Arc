@@ -1,7 +1,8 @@
 // Port of core/src/test/kotlin/dev/arc/ep133/features/BeatCardTest.kt (the same cases, in the same order).
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { BeatCards, SoundStatus, beatCard, cardFx, cardPad, cardSection, cardSound, type BeatCard, type CardPad, type CardRead, type CardSection, type CardSound, type SoundPick } from '../../../src/core/features/beatCard'
+import { BeatCards, SoundStatus, beatCard, withSections, cardFx, cardPad, cardSection, cardSound, type BeatCard, type CardPad, type CardRead, type CardSection, type CardSound, type SoundPick } from '../../../src/core/features/beatCard'
+import { chain, chainStep } from '../../../src/core/features/chain'
 import { FxSettings, FxType, comp, sidechain } from '../../../src/core/features/fxSettings'
 import { PadSettings, PlayMode } from '../../../src/core/features/padSettings'
 import { padKey, physicalPad, type PhysicalPad } from '../../../src/core/features/padNotes'
@@ -384,7 +385,7 @@ describe('BeatCardTest', () => {
         '[C] bars 1 step 1/16', 'C7 | X... .... .... .... |',
       ) + '\n'
     expect(BeatCards.write(c)).toBe(want)
-    expect(BeatCards.write({ ...c, sections: [...c.sections].reverse() })).toBe(BeatCards.write(c))
+    expect(BeatCards.write(withSections(c, [...c.sections].reverse()))).toBe(BeatCards.write(c))
     // Tempo is whole or one decimal; the name keeps to 40 characters; no title, no tempo, no line.
     expect(BeatCards.write({ ...c, tempo: 90 })).toContain('\ntempo 90\n')
     expect(BeatCards.write({ ...c, tempo: 92.04 })).toContain('\ntempo 92\n')
@@ -714,7 +715,7 @@ describe('BeatCardTest', () => {
       sm([9, snd(40, 'Tom')]),
       sm([0, snd(999, 'Shaker.wav')], [2, snd(1)]),
     ]
-    const c: BeatCard = { ...base, sections: base.sections.map((s, i) => ({ ...s, sounds: sounds[i]! })) }
+    const c: BeatCard = withSections(base, base.sections.map((s, i) => ({ ...s, sounds: sounds[i]! })))
     const text = BeatCards.write(c)
     const back = BeatCards.read(text)
     expect(problems(back), text).toEqual([])
@@ -1170,7 +1171,7 @@ describe('BeatCardTest', () => {
         sidechain: sidechain({ on: true, group: 0, pad: 9, dests: 0b0110, x: 0.25, y: 0.7 }),
       }),
     )
-    expect({ ...BeatCards.read(BeatCards.write(c)).card!, sections: c.sections }).toEqual(c)
+    expect(withSections(BeatCards.read(BeatCards.write(c)).card!, c.sections)).toEqual(c)
     // Only a compressor on: the effect line is there too.
     const only = from(FxSettings.of({ comp: comp({ on: true, x: 0.5, y: 0.5 }) }))
     expect(only.fx).toEqual(cardFx({ type: FxType.NONE, x: 0.5, y: 0.5, comp: comp({ on: true, x: 0.5, y: 0.5 }) }))
@@ -1347,7 +1348,7 @@ describe('BeatCardTest', () => {
   it('every recipe card in the skill reads cleanly, and the ones with effect lines carry them', () => {
     const genres = readFileSync(new URL('../../../../skill/arc-beats/references/genres.md', import.meta.url), 'utf8')
     const cards = [...genres.matchAll(/```\n(ARC BEAT 1\n[\s\S]*?)\n```/g)].map((m) => m[1]!)
-    expect(cards.length).toBeGreaterThanOrEqual(28)
+    expect(cards.length).toBeGreaterThanOrEqual(29)
     for (const t of cards) {
       const r = BeatCards.read(t)
       expect(problems(r)).toEqual([])
@@ -1355,8 +1356,18 @@ describe('BeatCardTest', () => {
       expect(BeatCards.read(BeatCards.write(r.card!)).card!.fx).toEqual(r.card!.fx)
     }
     const withFx = cards.map((t) => BeatCards.read(t).card!).filter((c) => c.fx !== null)
-    expect(withFx.map((c) => c.name).sort()).toEqual(['Amen shred', 'Dub chord echo', 'Dusty lo-fi', 'Hard groove workout', 'Hard techno pound', 'House groove', 'Industrial pressure', 'Schranz pressure'])
+    expect(withFx.map((c) => c.name).sort()).toEqual(['Amen shred', 'Breakcore track', 'Dub chord echo', 'Dusty lo-fi', 'Hard groove workout', 'Hard techno pound', 'House groove', 'Industrial pressure', 'Schranz pressure'])
     expect(withFx.find((c) => c.name === 'House groove')!.fx!.sidechain).toEqual(sidechain({ on: true, group: 0, pad: 9, dests: 0b0010, x: 0.3, y: 0.55 }))
     expect(withFx.find((c) => c.name === 'Dusty lo-fi')!.fx!.type).toBe(FxType.FILTER)
+    // The one card of scenes: five scenes and a chain, and it reads back as itself.
+    const track = withFx.find((c) => c.name === 'Breakcore track')!
+    expect(track.scenes.map((s) => s.name)).toEqual(['Intro', 'Drop', 'Breakdown', 'Build', 'Drop 2'])
+    expect(track.chain).toEqual([[1, 2], [2, 2], [3, 1], [4, 1], [5, 2]])
+    expect(track.scenes.map((s) => s.sections.map((x) => x.group))).toEqual([[0, 1], [0, 1], [0, 1], [0], [0, 1]])
+    expect(BeatCards.read(BeatCards.write(track)).card).toEqual(track)
+    // Planned into a project, it adds its five scenes and chain.
+    const plan = BeatCards.plan(ProjectSeq.DEFAULT, track)
+    expect(plan.scenes).toEqual([1, 2, 3, 4, 5])
+    expect(plan.seq.chain).toEqual(chain([chainStep(1, 2), chainStep(2, 2), chainStep(3, 1), chainStep(4, 1), chainStep(5, 2)], true))
   })
 })

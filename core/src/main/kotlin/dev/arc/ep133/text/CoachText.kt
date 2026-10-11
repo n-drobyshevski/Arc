@@ -41,6 +41,8 @@ object CoachText {
     const val STEP = "Step through the pattern"
     /** The scene chip beside it (and the readout while the pattern plays): the scene panel. */
     const val SCENE = "Pick patterns and scenes, copy and paste"
+    /** The CHAIN row in the SCENE panel: the order the scenes play in. */
+    const val CHAIN = "Chain scenes: tap a step for passes, hold to remove"
     const val OCTAVE = "Octave"
     const val SCALE = "Scale"
     const val KEY = "Key"

@@ -12,6 +12,7 @@
 // - `Change` is a plain interface (`ClaudeText.isSame` is the Kotlin `same`); the FX sheet's texts take FxSettings values.
 
 import type { CardFx, CardProblem } from '../features/beatCard'
+import type { ChainStep } from '../features/chain'
 import { FxSettings, FxType } from '../features/fxSettings'
 import type { PadSettings } from '../features/padSettings'
 import { physicalPad, type PhysicalPad } from '../features/padNotes'
@@ -92,6 +93,20 @@ export const ClaudeText = {
   PASTE_BEAT_NAME: 'Paste a beat card from the clipboard',
   NOTHING_TO_SHARE,
 
+  /** SHARE CHAIN: the project's chain as a card of scenes, and the same key for screen readers ("Share the chain with Claude, 4 steps"). */
+  SHARE_CHAIN: 'Share chain',
+  /** The key itself: "SHARE CHAIN · 3 SCENES", the scenes the chain plays (each once). */
+  shareChainKey(scenes: number): string {
+    return `${ClaudeText.SHARE_CHAIN} \u00B7 ${plural(scenes, 'scene')}`
+  },
+
+  shareChainName(steps: number): string {
+    return `Share the chain with Claude, ${plural(steps, 'step')}`
+  },
+
+  /** The chain's share, for a project with no chain: nothing to share. */
+  NO_CHAIN_TO_SHARE: 'Add scenes to the chain to share it',
+
   /** The two links under the card. */
   GET_SKILL: 'Get the arc-beats skill',
   LEARN: 'Learn with Claude',
@@ -112,6 +127,16 @@ export const ClaudeText = {
     'Analyse this EP-133 beat from Arc with the arc-beats skill, then suggest 2-3 edits as a new card. ' +
     'Keep its sound, FX and pad lines, or choose sounds from my sound list if one follows the card:',
   SHARE_TITLE: 'Share beat card',
+
+  /** The line before a shared chain: an arrangement of several scenes (its `chain` line gives their order). */
+  SHARE_CHAIN_PROMPT:
+    'Analyse this EP-133 arrangement from Arc with the arc-beats skill: comment on its energy curve, contrast, length and transitions, ' +
+    'then suggest 2-3 edits as a new card of scenes with a chain line. ' +
+    'Keep its sound, FX and pad lines, or choose sounds from my sound list if one follows the card:',
+  SHARE_CHAIN_TITLE: 'Share chain as a beat card',
+
+  /** "Chain": a chain's card, as the share's subject names it ("Arc beat Chain"). */
+  CHAIN_CARD_NAME: 'Chain',
 
   /** "P01 S02": pattern [n] (1..99) of the scene at [scene] (from 0), a card's name. */
   patternCardName(n: number, scene: number): string {
@@ -474,22 +499,82 @@ export const ClaudeText = {
     return `Group ${groupLetter(group)} has no free pattern.`
   },
 
+  // ---------- Scenes and chain (a card with scene lines) ----------
+  /** The import sheet's block of the card's scenes, and a row's title: "Scene 2" or "Scene 2 · Drop" (the name is the card's; Arc keeps none). */
+  SCENES: 'Scenes',
+  cardScene(number: number, name: string | null): string {
+    return `Scene ${number}` + (name !== null ? ` \u00B7 ${name}` : '')
+  },
+
+  /** Where the card's scene goes: "S05 · A04 B02 C01 D01", the new scene's label and the patterns it plays. */
+  cardSceneGoes(index: number, patterns: readonly number[]): string {
+    return `${ClaudeText.sceneCardName(index)} \u00B7 ` + patterns.map((n, g) => `${groupLetter(g)}${twoDigits(n)}`).join(' ')
+  },
+
+  /**
+   * Where the card's scene goes, as its row says it: "new S03 · A 04 · B 02 · C (same)". A group the card has in some
+   * scene shows its new pattern ([parts]: group, number), or "(same)" where this scene leaves it out (null).
+   */
+  cardSceneTarget(index: number, parts: readonly (readonly [number, number | null])[]): string {
+    return `new ${ClaudeText.sceneCardName(index)}` + parts.map(([g, n]) => ` \u00B7 ${groupLetter(g)} ` + (n !== null ? twoDigits(n) : '(same)')).join('')
+  },
+
+  /** The chain the import sets, on the new scenes: "S03×2 → S04 → S03×2 → S05" (×passes when more than one). */
+  chainImport(steps: readonly ChainStep[]): string {
+    return steps.map((s) => ClaudeText.sceneCardName(s.scene) + (s.passes > 1 ? `\u00D7${s.passes}` : '')).join(' \u2192 ')
+  },
+
+  /** A row for screen readers: "Scene 2, Drop, becomes S05, patterns A 4, B 2, C 1, D 1". */
+  cardSceneName(number: number, name: string | null, index: number, patterns: readonly number[]): string {
+    return `Scene ${number}` + (name !== null ? `, ${name}` : '') + `, becomes ${ClaudeText.sceneCardName(index)}, patterns ` + patterns.map((n, g) => `${groupLetter(g)} ${n}`).join(', ')
+  },
+
+  /** A card scene with no section under its title: it plays the scene before's patterns. */
+  SCENE_SAME: 'Plays the same patterns as the scene before.',
+
+  /** The scene rows when no scene can be added (the project has 99). */
+  NO_ROOM_FOR_SCENES: "No room for the card's scenes: the project has too many. Its patterns still go in.",
+
+  /** SET CHAIN: the switch for the card's chain, its name for screen readers and the line under it. */
+  SET_CHAIN: 'Set chain',
+  setChainName(on: boolean, steps: number): string {
+    return (on ? "Set the project's chain from the card" : "Leave the project's chain as it is") + `, ${plural(steps, 'step')}`
+  },
+  SET_CHAIN_NOTE: "Replaces this project's chain with the card's, on the new scenes, and turns it on. UNDO takes it back.",
+
+  /** The card's chain as the sheet shows it: "1×2 2 1×2 3" (card scene numbers; ×passes when more than one). */
+  chainText(steps: readonly (readonly [number, number])[]): string {
+    return steps.map(([scene, passes]) => (passes === 1 ? `${scene}` : `${scene}\u00D7${passes}`)).join(' ')
+  },
+
   /**
    * IMPORT's toast: where it went, and how to take it back. One pattern is
    * named; several go in the scene they made ([scene], "S03"), or are listed
    * where there was no room for a scene. [sounds] put on pads are counted,
    * and so are the [skipped] ones that had no pad to go on. The card's [fx]
    * applied and the [pads] shaped are named after them, and the [padsSkipped] that could not be.
+   * A card of [scenes] several scenes names the range they made ([scene], "S04–S07", as "scenes
+   * S04–S07"), and says when its chain was set ([chain]).
    */
-  imported(places: readonly (readonly [number, number])[], scene: string | null, sounds = 0, skipped = 0, fx = false, pads = 0, padsSkipped = 0): string {
-    const where = scene != null ? `scene ${scene}` : places.map(([g, n]) => place(g, n)).join(', ')
+  imported(
+    places: readonly (readonly [number, number])[],
+    scene: string | null,
+    sounds = 0,
+    skipped = 0,
+    fx = false,
+    pads = 0,
+    padsSkipped = 0,
+    scenes = 1,
+    chain = false,
+  ): string {
+    const where = scene != null ? (scenes > 1 ? 'scenes ' : 'scene ') + scene : places.map(([g, n]) => place(g, n)).join(', ')
     let extra = ''
     if (sounds > 0 && skipped > 0) extra = ` and ${plural(sounds, 'sound')}, ${skipped} skipped`
     else if (sounds > 0) extra = ` and ${plural(sounds, 'sound')}`
     else if (skipped > 0) extra = `, ${plural(skipped, 'sound')} skipped`
     const applied = [fx ? ClaudeText.FX : null, pads > 0 ? plural(pads, 'pad setting') : null].filter((x) => x !== null).join(' and ')
     const shaping = [applied === '' ? null : `${applied} applied`, padsSkipped > 0 ? `${plural(padsSkipped, 'pad setting')} skipped` : null].filter((x) => x !== null)
-    return `Imported to ${where}${extra}.` + (shaping.length === 0 ? '' : ` ${shaping.join(', ')}.`) + ' UNDO takes it back.'
+    return `Imported to ${where}${extra}.` + (shaping.length === 0 ? '' : ` ${shaping.join(', ')}.`) + (chain ? ' Chain set.' : '') + ' UNDO takes it back.'
   },
 
   /**

@@ -1,5 +1,9 @@
 package dev.arc.ep133.controller
 
+import dev.arc.ep133.features.Chain
+import dev.arc.ep133.features.ChainOps
+import dev.arc.ep133.features.ChainPlay
+import dev.arc.ep133.features.ChainStep
 import dev.arc.ep133.features.NoteNames
 import dev.arc.ep133.features.Pattern
 import dev.arc.ep133.features.PhaseAnchors
@@ -642,6 +646,271 @@ class ScenePlanTest {
     @Test
     fun `CHANGE cycles Immediate, Bar end, Pattern end`() {
         assertEquals(listOf(SwitchTime.BAR, SwitchTime.PATTERN, SwitchTime.IMMEDIATE), SwitchTime.entries.map { it.cycled() })
+    }
+
+    // ---------- the chain ----------
+
+    // Three scenes, A's patterns 1, 2 and 3 of 2, 1 and 2 bars (so a scene's pass is 768, 384 and 768 ticks): S01 = A1, S02 = A2, S03 = A3.
+    private fun threeScenes(): ProjectSeq {
+        var s = SceneOps.newScene(SceneOps.newScene(idle))
+        s = with(with(with(s, 0, 1, 2), 0, 2, 1), 0, 3, 2)
+        s = s.withScenes(listOf(Scene(listOf(1, 1, 1, 1)), Scene(listOf(2, 1, 1, 1)), Scene(listOf(3, 1, 1, 1))), 0)
+        return s
+    }
+
+    private fun chained(seq: ProjectSeq, vararg steps: ChainStep, on: Boolean = true) = seq.withChain(Chain(steps.toList(), on))
+
+    @Test
+    fun `PLAY with the chain on starts at the first step with the scene showing, else the first step, and a pass ends at the longest pattern's end`() {
+        val seq = chained(threeScenes(), ChainStep(0, 2), ChainStep(1), ChainStep(2), ChainStep(1, 4))
+        // Scene 3 showing: its step; the first pass ends at 2 bars.
+        val d = SceneDesk { "" }
+        val at3 = SceneOps.selectScene(seq, 2)
+        assertSame(at3, d.chainStart(at3))
+        assertEquals(ChainPlay(2), d.run?.play)
+        assertEquals(768L, d.run?.end)
+        // Scene 2 showing: the first step that has it (step 1, not step 3).
+        val at2 = SceneOps.selectScene(seq, 1)
+        d.chainStart(at2)
+        assertEquals(ChainPlay(1), d.run?.play)
+        assertEquals(384L, d.run?.end)
+        // Off: nothing plays.
+        d.chainStart(chained(seq, on = false))
+        assertNull(d.run)
+        // A scene in no step: the first step's scene is picked.
+        val lone = chained(threeScenes(), ChainStep(1), ChainStep(2))
+        val out = d.chainStart(lone)
+        assertEquals(1, out.scene)
+        assertEquals(ChainPlay(0), d.run?.play)
+        // Nothing to play with no steps.
+        assertNull(SceneDesk { "" }.also { it.chainStart(chained(threeScenes(), on = true)) }.run)
+    }
+
+    @Test
+    fun `a pass that stays on its scene only counts, and the pass after the last switches the scene at the pattern's end through the plan`() {
+        val seq = chained(threeScenes(), ChainStep(0, 2), ChainStep(1))
+        desk.restart()
+        desk.chainStart(seq)
+        // The scene change is queued for the pass's end only on the last pass: now pass 1 of 2, nothing waits in the plan.
+        assertTrue(desk.targets(seq).isEmpty())
+        assertEquals(768L, desk.dueTick())
+        // Not over yet.
+        assertSame(seq, desk.due(seq, 767.0))
+        assertEquals(ChainPlay(0, 1), desk.run?.play)
+        // Pass 2 of 2: S01 goes on; the next end is 2 bars on, and now the plan has S02 waiting for it.
+        assertSame(seq, desk.due(seq, 768.0))
+        assertEquals(ChainPlay(0, 2), desk.run?.play)
+        assertEquals(768L, desk.run?.from)
+        assertEquals(1536L, desk.run?.end)
+        assertEquals(mapOf(0 to QueuedPick(2, 1536L, SwitchTime.PATTERN)), desk.targets(seq))
+        // The panel doesn't show the chain's change as a waiting pick.
+        assertNull(desk.ui(seq, SwitchTime.IMMEDIATE).groups[0].queued)
+        assertNull(desk.ui(seq, SwitchTime.IMMEDIATE).status)
+        // The end of the last pass: S02 takes over, A's pattern starting at the tick (the sample-accurate switch of a pick).
+        val out = desk.due(seq, 1536.0)
+        assertEquals(1, out.scene)
+        assertEquals(1536L, desk.phase.of(0))
+        assertEquals(ChainPlay(1, 1), desk.run?.play)
+        // S02's pass is a bar from where it started.
+        assertEquals(1920L, desk.run?.end)
+        assertEquals("Chain step 2 of 2, pass 1 of 1", desk.said)
+    }
+
+    @Test
+    fun `the chain loops - after the last step the first, and a late follow takes several passes at once`() {
+        val seq = chained(threeScenes(), ChainStep(1), ChainStep(2))
+        desk.restart()
+        val start = desk.chainStart(seq)
+        assertEquals(0, seq.scene)
+        // S01 isn't in a step: S02 (the first step) was picked.
+        assertEquals(1, start.scene)
+        assertEquals(384L, desk.run?.end)
+        // The follow loop is late: the first pass (384), S03's (to 1152) are over, and the chain is back on S02 for the pass to 1536.
+        val out = desk.due(start, 1300.0)
+        assertEquals(1, out.scene)
+        assertEquals(ChainPlay(0, 1), desk.run?.play)
+        assertEquals(1536L, desk.run?.end)
+        assertEquals(1152L, desk.phase.of(0))
+    }
+
+    @Test
+    fun `a scene or pattern picked by hand turns the chain off and stops it, a pick of what plays does not`() {
+        val seq = chained(threeScenes(), ChainStep(0), ChainStep(1))
+        desk.restart()
+        desk.chainStart(seq)
+        // Of what plays: nothing changes.
+        assertSame(seq, desk.pickScene(seq, 0, 100.0, SwitchTime.BAR))
+        assertSame(seq, desk.pickPattern(seq, 0, 1, 100.0, SwitchTime.BAR))
+        assertTrue(seq.chain.on)
+        assertTrue(desk.run != null)
+        // A scene queued by hand: the chain is off at once, and the scene waits as it was picked.
+        val out = desk.pickScene(seq, 2, 100.0, SwitchTime.BAR)
+        assertFalse(out.chain.on)
+        assertEquals(2, out.chain.steps.size)
+        assertNull(desk.run)
+        assertEquals(mapOf(0 to QueuedPick(3, 384L, SwitchTime.BAR)), desk.targets(out))
+        // Each way of picking by hand.
+        for (pick in listOf<(SceneDesk, ProjectSeq) -> ProjectSeq>(
+            { d, s -> d.stepScene(s, 1, null, SwitchTime.BAR) },
+            { d, s -> d.pickPattern(s, 1, 9, null, SwitchTime.BAR) },
+            { d, s -> d.pickPattern(s, 1, 9, 100.0, SwitchTime.BAR) },
+            { d, s -> d.stepPattern(s, 0, 1, 100.0, SwitchTime.PATTERN) },
+            { d, s -> d.pickNextFree(s, 2, null, SwitchTime.BAR) },
+        )) {
+            val d = SceneDesk { "" }
+            d.restart()
+            d.chainStart(seq)
+            assertFalse(pick(d, seq).chain.on)
+            assertNull(d.run)
+        }
+    }
+
+    @Test
+    fun `COMMIT turns the chain off in its one UNDO step, and a full project leaves it on`() {
+        val rec = PatternRecorder()
+        val seq = chained(threeScenes(), ChainStep(0), ChainStep(2))
+        rec.seq = seq
+        desk.restart()
+        desk.chainStart(seq)
+        val out = desk.commit(seq, rec)
+        assertEquals(1, out.scene)
+        assertFalse(out.chain.on)
+        // The later scene's step moved up with it.
+        assertEquals(listOf(0, 3), out.chain.steps.map { it.scene })
+        assertNull(desk.run)
+        // One step back: the chain is on again, the scenes as they were.
+        assertEquals(seq, rec.undo(out))
+        // At 99 scenes nothing is committed and the chain stays.
+        val full = chained(fullScenes(), ChainStep(0), on = true)
+        val d = SceneDesk { "" }
+        assertSame(full, d.commit(full, PatternRecorder().also { it.seq = full }))
+        assertTrue(full.chain.on)
+    }
+
+    @Test
+    fun `the chain's edits are one UNDO step each, and the steps and ON come back with UNDO`() {
+        val rec = PatternRecorder()
+        var seq = SceneOps.selectScene(threeScenes(), 1)
+        rec.seq = seq
+        val states = ArrayList<ProjectSeq>()
+        fun step(next: ProjectSeq): ProjectSeq {
+            states += seq
+            return next.also { seq = it }
+        }
+        step(desk.chainAdd(seq, rec))
+        assertEquals(listOf(ChainStep(1)), seq.chain.steps)
+        assertEquals("S02 added to chain", desk.status)
+        step(desk.chainOn(seq, true, rec))
+        assertTrue(seq.chain.on)
+        step(desk.chainCycle(seq, 0, rec))
+        step(desk.chainCycle(seq, 0, rec))
+        assertEquals(4, seq.chain.steps[0].passes)
+        assertEquals("Chain step 1 of 1, scene 2, 4 passes", desk.said)
+        step(desk.chainRemove(seq, 0, rec))
+        // Its last step gone, the chain is off.
+        assertTrue(seq.chain.isBlank)
+        assertFalse(seq.chain.on)
+        for (before in states.reversed()) {
+            seq = rec.undo(seq)!!
+            assertEquals(before, seq)
+        }
+        assertNull(rec.undo(seq))
+        // Full at 64 steps: the status says so and nothing is pushed.
+        var long = threeScenes()
+        repeat(Chain.MAX_STEPS) { long = ChainOps.add(long, 0) }
+        rec.seq = long
+        assertSame(long, desk.chainAdd(long, rec))
+        assertEquals("Chain is full", desk.status)
+        assertNull(rec.undo(long))
+    }
+
+    @Test
+    fun `STOP drops the pass but not the chain, and the chain joins a transport that plays when it is turned on`() {
+        val seq = chained(threeScenes(), ChainStep(0), ChainStep(1))
+        desk.restart()
+        desk.chainStart(seq)
+        desk.chainStop()
+        assertNull(desk.run)
+        assertTrue(seq.chain.on)
+        // Playing with the chain off: nothing; turned on at tick 100.5, the scene showing finishes its pass (the end at 768).
+        val off = chained(seq, on = false)
+        assertFalse(desk.chainSync(off, true, 100.5))
+        assertNull(desk.run)
+        assertTrue(desk.chainSync(seq, true, 100.5))
+        assertEquals(ChainPlay(0), desk.run?.play)
+        assertEquals(100L, desk.run?.from)
+        assertEquals(768L, desk.run?.end)
+        // A pick waiting at the time is the chain's to take over.
+        // Nothing changed again.
+        assertFalse(desk.chainSync(seq, true, 200.0))
+        // Off again, or stopped: it goes.
+        assertTrue(desk.chainSync(off, true, 200.0))
+        assertNull(desk.run)
+        desk.chainSync(seq, true, 100.5)
+        assertTrue(desk.chainSync(seq, false, null))
+        assertNull(desk.run)
+    }
+
+    @Test
+    fun `a scene the chain has no step for finishes its pass, then the chain starts at its first step, adding the scene finds it`() {
+        val seq = chained(threeScenes(), ChainStep(1), ChainStep(2))
+        desk.restart()
+        // Joined on S01, which is in no step.
+        assertTrue(desk.chainSync(seq, true, 0.5))
+        assertEquals(ChainPlay(2), desk.run?.play)
+        assertEquals(768L, desk.run?.end)
+        // It is not lit, and the chain's change is S02 at the pass's end.
+        assertNull(desk.ui(seq, SwitchTime.BAR).chain.step)
+        assertEquals(mapOf(0 to QueuedPick(2, 768L, SwitchTime.PATTERN)), desk.targets(seq))
+        // Following again changes nothing.
+        assertFalse(desk.chainSync(seq, true, 10.0))
+        // The pass ends: the first step's scene.
+        val out = desk.due(seq, 768.0)
+        assertEquals(1, out.scene)
+        assertEquals(ChainPlay(0), desk.run?.play)
+        // ＋ with S01 showing finds its step.
+        val d = SceneDesk { "" }
+        d.restart()
+        d.chainSync(seq, true, 0.5)
+        val added = ChainOps.add(seq, 0)
+        // (The place past the last step is the new step now: nothing to find again, and it is lit.)
+        assertFalse(d.chainSync(added, true, 20.0))
+        assertEquals(ChainPlay(2), d.run?.play)
+        assertEquals(2, d.ui(added, SwitchTime.BAR).chain.step)
+    }
+
+    @Test
+    fun `a user's pick due before the chain's change stays, the chain's change takes the group over after it`() {
+        val seq = chained(threeScenes(), ChainStep(0), ChainStep(1))
+        desk.restart()
+        desk.chainStart(seq)
+        // A group's pick turns the chain off, so the two meet only when it is turned on while the pick waits (the chain then takes over).
+        val picked = desk.pickPattern(seq, 1, 5, 100.0, SwitchTime.BAR)
+        assertFalse(picked.chain.on)
+        assertNull(desk.run)
+        assertTrue(desk.chainSync(seq, true, 100.5))
+        assertEquals(0, desk.waiting)
+        assertEquals(mapOf(0 to QueuedPick(2, 768L, SwitchTime.PATTERN)), desk.targets(seq))
+    }
+
+    @Test
+    fun `the chain row shows the steps, the step lit with its pass held to its passes, and what ＋ adds`() {
+        val seq = SceneOps.selectScene(chained(threeScenes(), ChainStep(0, 2), ChainStep(2)), 2)
+        desk.restart()
+        desk.chainStart(seq)
+        val ui = desk.ui(seq, SwitchTime.BAR).chain
+        assertEquals(seq.chain, ui.chain)
+        assertEquals(2, ui.scene)
+        assertEquals(1, ui.step)
+        assertEquals(1, ui.pass)
+        assertTrue(ui.canAdd)
+        assertTrue(ui.canTurnOn)
+        // Edited under it: a pass past the step's passes reads as its last.
+        assertEquals(2, ChainUi(Chain(listOf(ChainStep(0, 2))), 0, ChainPlay(0, 5)).pass)
+        // Stopped: no step lit.
+        desk.chainStop()
+        assertNull(desk.ui(seq, SwitchTime.BAR).chain.step)
+        assertEquals(1, desk.ui(seq, SwitchTime.BAR).chain.pass)
     }
 
     @Test

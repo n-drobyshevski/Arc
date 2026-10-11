@@ -3911,6 +3911,8 @@ class ArcController(
     private fun setSeq(seq: dev.arc.ep133.features.ProjectSeq) {
         if (seq === projectSeq) return
         useSeq(seq)
+        // The chain playing follows the scenes and the chain as they are now (turned on or off, edited, a scene deleted).
+        chainFollow()
         patternsTouched = true
         refreshPatternPlan()
         showPattern()
@@ -4080,6 +4082,8 @@ class ArcController(
         patternSkip = emptyMap()
         // Every pattern starts at bar 1 again.
         sceneDesk.restart()
+        // With the chain on it starts at the first step that has the scene showing, else its first step (that scene is picked).
+        setSeq(sceneDesk.chainStart(projectSeq))
         patternHeld.clear()
         patternShifts.clear()
         patternGroups.clear()
@@ -4105,6 +4109,8 @@ class ArcController(
             setPatterns(patternRecorder.punchOut(heldNotesEnded(projectPatterns, patternRecorder, patternHeld.values, tick, patternShifts), tick))
         }
         patternScheduler.stop()
+        // The chain keeps its place in the arrangement (on or off, its steps); the pass count goes.
+        sceneDesk.chainStop()
         // A pick still waiting takes over at once, as every change does while stopped.
         sceneFlush()
         patternPressAt = null
@@ -4186,6 +4192,11 @@ class ArcController(
             showPattern()
         }
         sceneDue(tl.heardTickAt(now - SCENE_GRACE_NS, late))
+        // A chain turned on while the clock wasn't heard yet joins now.
+        if (chainFollow()) {
+            refreshPatternPlan()
+            publishScene()
+        }
         val st = transport.state
         if (st.recording && tick >= 0) {
             markPasses(tick)
@@ -4961,9 +4972,15 @@ class ArcController(
     /**
      * COMMIT (SHIFT + MAIN on the device): the scene is copied right after itself, into the groups' next free
      * patterns, and selected: one UNDO step. At once even while playing, the copies being what plays; the picks
-     * waiting go. At 99 scenes the status says so.
+     * waiting go. At 99 scenes the status says so. The chain's steps after the scene move up with their scenes, and
+     * the chain is turned off (the copy is a scene picked by hand), in the same step.
      */
-    fun sceneCommit() = sceneEdit { sceneDesk.commit(projectSeq, patternRecorder) }
+    fun sceneCommit() {
+        val chained = projectSeq.chain.on
+        sceneEdit { sceneDesk.commit(projectSeq, patternRecorder) }
+        // The copy is selected, a scene picked by hand: the chain went off with it, in the same UNDO step.
+        if (chained && !projectSeq.chain.on) toast(dev.arc.ep133.text.MirrorText.CHAIN_OFF_BY_HAND)
+    }
 
     /**
      * The CLR / DEL key held its 2 s (ERASE + MAIN on the device): an empty scene that isn't the only one is
@@ -5026,6 +5043,50 @@ class ArcController(
         return true
     }
 
+    // ---------- CHAIN: the CHAIN row of the SCENE panel ----------
+
+    /**
+     * ＋ on the CHAIN row: a step for the scene shown, one pass, at the end of the chain (one UNDO step); the status
+     * says so, or that the chain has 64 steps already.
+     */
+    fun chainAdd() = sceneEdit { sceneDesk.chainAdd(projectSeq, patternRecorder) }
+
+    /** A tap on step [index]: its passes go to the next of ×1 ×2 ×4 ×8, round to ×1 (one UNDO step). */
+    fun chainCyclePasses(index: Int) = sceneEdit { sceneDesk.chainCycle(projectSeq, index, patternRecorder) }
+
+    /** The screen reader's "Fewer passes" on step [index]: its passes go to the one before of ×1 ×2 ×4 ×8, round to ×8 (one UNDO step). */
+    fun chainFewerPasses(index: Int) = sceneEdit { sceneDesk.chainFewer(projectSeq, index, patternRecorder) }
+
+    /** A long press on step [index]: it is removed (one UNDO step); the chain turns off with its last step. */
+    fun chainRemove(index: Int) = sceneEdit { sceneDesk.chainRemove(projectSeq, index, patternRecorder) }
+
+    /**
+     * ON on the CHAIN row: the chain on or off (one UNDO step; it can't be on with no steps). On while the transport
+     * plays, the scene showing finishes its pass, and the chain goes on from its step; PLAY with it on starts it at the
+     * first step that has the scene showing, else its first step.
+     */
+    fun chainOn(on: Boolean) = sceneEdit { sceneDesk.chainOn(projectSeq, on, patternRecorder) }
+
+    /**
+     * How far along its pass the chain is, 0..1, as heard at [now] (System.nanoTime), for the bar under the row, read as
+     * it draws; null while the chain isn't playing or the transport isn't heard yet.
+     */
+    fun chainProgress(now: Long): Float? {
+        val r = sceneDesk.run ?: return null
+        if (!patternRunning()) return null
+        val tl = heardTimeline() ?: return null
+        val t = tl.heardTickAt(now, heardDelay())
+        val length = (r.end - r.from).coerceAtLeast(1L)
+        return ((t - r.from) / length).coerceIn(0.0, 1.0).toFloat()
+    }
+
+    // The chain playing follows the sequencer ([SceneDesk.chainSync]) while the transport runs: joined when it is turned on
+    // (the first tick a change can still reach), dropped when it is off. Whether the chain playing changed.
+    private fun chainFollow(): Boolean {
+        val running = patternRunning()
+        return sceneDesk.chainSync(projectSeq, running, if (running) sceneTickNow() else null)
+    }
+
     /** Live's SCENE follows the sequencer, the settings and the desk. */
     private fun publishScene() {
         _scene.value = sceneDesk.ui(projectSeq, settings.value.sceneSwitch)
@@ -5036,7 +5097,10 @@ class ArcController(
     private inline fun scenePick(pick: (at: Double?, time: dev.arc.ep133.features.SwitchTime) -> dev.arc.ep133.features.ProjectSeq) {
         val at = sceneTickNow()
         if (at != null) sceneDue(at)
+        val chained = projectSeq.chain.on
         setSeq(pick(at, settings.value.sceneSwitch))
+        // A scene or pattern picked by hand turns the chain off.
+        if (chained && !projectSeq.chain.on) toast(dev.arc.ep133.text.MirrorText.CHAIN_OFF_BY_HAND)
         // A queue made or dropped: the plan has it.
         refreshPatternPlan()
         publishScene()
@@ -5085,10 +5149,12 @@ class ArcController(
      */
     private fun sceneDue(tick: Double) {
         val waiting = sceneDesk.waiting
-        if (waiting == 0) return
+        val chain = sceneDesk.run
+        if (waiting == 0 && chain == null) return
         val started = sceneDesk.phase
         val out = sceneDesk.due(projectSeq, tick)
-        if (sceneDesk.waiting == waiting && out === projectSeq) return
+        // Nothing passed: no pick took over and the chain is where it was.
+        if (sceneDesk.waiting == waiting && out === projectSeq && sceneDesk.run === chain) return
         // The notes heard live in a pattern left are not of the one that starts: its passes are counted from its own start.
         if (patternSkip.isNotEmpty()) {
             val left = (0 until 4).filter { sceneDesk.phase.of(it) != started.of(it) }.flatMapTo(HashSet()) { g -> projectPatterns.group(g).notes.map { it.id } }
@@ -5136,6 +5202,26 @@ class ArcController(
         // The pads the notes use that have no sound are named in a comment, once the pads are read (the share's "# no sound on:").
         val held = { pad: dev.arc.ep133.features.PhysicalPad -> m?.soundSlot(pad) }
         return beatShare(projectSeq, group, bpm, settings.value.timingSwing, ::mirrorName, sounds, list, fxDesk.fx.value, shaping, held, m?.padsKnown() == true)
+    }
+
+    /**
+     * What SHARE CHAIN sends: the project's chain as a card of scenes ([beatShareChain]: the scenes in the order they first play, the
+     * `chain` line with the passes), with the pads' names, a sound line for each pad, the project's FX and the pads' settings, the
+     * pads with no sound in a comment and, with "With my sound list" on, the sounds Arc knows, as [beatShare] has them. Null when the
+     * chain has no steps.
+     */
+    fun beatShareChain(): BeatShare? {
+        if (projectSeq.chain.isBlank) return null
+        val bpm = patternBpm(_state.value.mirror?.state?.bpm, settings.value.liveTempo)
+        val m = mirror
+        val set = soundSetOf(_state.value.mirror, _state.value.factoryNames)
+        val sounds = { pad: dev.arc.ep133.features.PhysicalPad ->
+            m?.slotOf(pad)?.let { slot -> dev.arc.ep133.features.CardSound(slot, set?.names?.get(slot) ?: m.nameOf(pad)) }
+        }
+        val list = if (settings.value.shareSounds) set else null
+        val shaping = { pad: dev.arc.ep133.features.PhysicalPad -> m?.target(pad)?.let { padSettings[padKey(it)] } }
+        val held = { pad: dev.arc.ep133.features.PhysicalPad -> m?.soundSlot(pad) }
+        return beatShareChain(projectSeq, bpm, settings.value.timingSwing, ::mirrorName, sounds, list, fxDesk.fx.value, shaping, held, m?.padsKnown() == true)
     }
 
     /** "With my sound list" on or off (kept like the other Live preferences). */
@@ -5206,6 +5292,9 @@ class ArcController(
      * through [fxDesk], so the mixer plays them and fx.json keeps them. [shapePads] are the pads whose `pad` lines the sheet
      * had ticked: once their sounds are on, each pad's settings are written ([shapePads]) on the EP-133, or kept as
      * offline pad settings. All of it is one UNDO step with the patterns and the sounds ([BeatUndo]).
+     *
+     * A card of scenes adds a scene for each of its own, and with [setChain] (the sheet's SET CHAIN) its chain replaces the project's,
+     * on the new scenes, and is turned on: part of the same one UNDO step, the sequencer's (the transport playing, the chain joins at once).
      */
     fun importBeat(
         setTempo: Boolean,
@@ -5213,6 +5302,7 @@ class ArcController(
         applyFx: Boolean = false,
         shapePads: Set<dev.arc.ep133.features.PhysicalPad> = emptySet(),
         pickedSounds: Map<dev.arc.ep133.features.PhysicalPad, Int> = emptyMap(),
+        setChain: Boolean = true,
     ) {
         val ui = _beatImport.value ?: return
         val card = ui.card ?: return
@@ -5220,7 +5310,7 @@ class ArcController(
         // The sequencer as it was: UNDO is that one, once the sounds are back with it.
         val before = projectSeq
         sceneEdit {
-            val a = applyBeat(projectSeq, card, patternRecorder)
+            val a = applyBeat(projectSeq, card, patternRecorder, setChain)
             applied = a
             if (a.seq !== projectSeq) sceneDesk.cancel()
             a.seq

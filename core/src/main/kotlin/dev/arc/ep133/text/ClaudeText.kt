@@ -1,6 +1,7 @@
 package dev.arc.ep133.text
 
 import dev.arc.ep133.features.CardProblem
+import dev.arc.ep133.features.ChainStep
 import dev.arc.ep133.features.CardFx
 import dev.arc.ep133.features.FxSettings
 import dev.arc.ep133.features.FxType
@@ -44,6 +45,16 @@ object ClaudeText {
     const val PASTE_BEAT_NAME = "Paste a beat card from the clipboard"
     const val NOTHING_TO_SHARE = ", no notes yet"
 
+    /** SHARE CHAIN: the project's chain as a card of scenes, and the same key for screen readers ("Share the chain with Claude, 4 steps"). */
+    const val SHARE_CHAIN = "Share chain"
+    /** The key itself: "SHARE CHAIN · 3 SCENES", the scenes the chain plays (each once). */
+    fun shareChainKey(scenes: Int) = "$SHARE_CHAIN \u00B7 ${Format.plural(scenes, "scene")}"
+
+    fun shareChainName(steps: Int) = "Share the chain with Claude, ${Format.plural(steps, "step")}"
+
+    /** The chain's share, for a project with no chain: nothing to share. */
+    const val NO_CHAIN_TO_SHARE = "Add scenes to the chain to share it"
+
     /** The two links under the card. */
     const val GET_SKILL = "Get the arc-beats skill"
     const val LEARN = "Learn with Claude"
@@ -65,6 +76,16 @@ object ClaudeText {
         "Analyse this EP-133 beat from Arc with the arc-beats skill, then suggest 2-3 edits as a new card. " +
             "Keep its sound, FX and pad lines, or choose sounds from my sound list if one follows the card:"
     const val SHARE_TITLE = "Share beat card"
+
+    /** The line before a shared chain: an arrangement of several scenes (its `chain` line gives their order). */
+    const val SHARE_CHAIN_PROMPT =
+        "Analyse this EP-133 arrangement from Arc with the arc-beats skill: comment on its energy curve, contrast, length and transitions, " +
+            "then suggest 2-3 edits as a new card of scenes with a chain line. " +
+            "Keep its sound, FX and pad lines, or choose sounds from my sound list if one follows the card:"
+    const val SHARE_CHAIN_TITLE = "Share chain as a beat card"
+
+    /** "Chain": a chain's card, as the share's subject names it ("Arc beat Chain"). */
+    const val CHAIN_CARD_NAME = "Chain"
 
     /** "P01 S02": pattern [n] (1..99) of the scene at [scene] (from 0), a card's name. */
     fun patternCardName(n: Int, scene: Int) = "P${twoDigits(n)} S${twoDigits(scene + 1)}"
@@ -353,16 +374,67 @@ object ClaudeText {
     const val FIX_ERRORS = "Fix the errors to import this card."
     fun groupFull(group: Int) = "Group ${'A' + group} has no free pattern."
 
+    // ---------- Scenes and chain (a card with scene lines) ----------
+    /** The import sheet's block of the card's scenes, and a row's title: "Scene 2" or "Scene 2 · Drop" (the name is the card's; Arc keeps none). */
+    const val SCENES = "Scenes"
+    fun cardScene(number: Int, name: String?) = "Scene $number" + (name?.let { " \u00B7 $it" } ?: "")
+
+    /** Where the card's scene goes: "S05 · A04 B02 C01 D01", the new scene's label and the patterns it plays. */
+    fun cardSceneGoes(index: Int, patterns: List<Int>) =
+        "${sceneCardName(index)} \u00B7 " + patterns.mapIndexed { g, n -> "${'A' + g}${twoDigits(n)}" }.joinToString(" ")
+
+    /**
+     * Where the card's scene goes, as its row says it: "new S03 · A 04 · B 02 · C (same)". A group the card has in some
+     * scene shows its new pattern ([parts]: group to number), or "(same)" where this scene leaves it out (null).
+     */
+    fun cardSceneTarget(index: Int, parts: List<Pair<Int, Int?>>) =
+        "new ${sceneCardName(index)}" + parts.joinToString("") { (g, n) -> " \u00B7 ${'A' + g} " + (if (n != null) twoDigits(n) else "(same)") }
+
+    /** The chain the import sets, on the new scenes: "S03×2 → S04 → S03×2 → S05" (×passes when more than one). */
+    fun chainImport(steps: List<ChainStep>) =
+        steps.joinToString(" \u2192 ") { sceneCardName(it.scene) + if (it.passes > 1) "\u00D7${it.passes}" else "" }
+
+    /** A row for screen readers: "Scene 2, Drop, becomes S05, patterns A 4, B 2, C 1, D 1". */
+    fun cardSceneName(number: Int, name: String?, index: Int, patterns: List<Int>) =
+        "Scene $number" + (name?.let { ", $it" } ?: "") + ", becomes ${sceneCardName(index)}, patterns " +
+            patterns.mapIndexed { g, n -> "${'A' + g} $n" }.joinToString(", ")
+
+    /** A card scene with no section under its title: it plays the scene before's patterns. */
+    const val SCENE_SAME = "Plays the same patterns as the scene before."
+
+    /** The scene rows when no scene can be added (the project has 99). */
+    const val NO_ROOM_FOR_SCENES = "No room for the card's scenes: the project has too many. Its patterns still go in."
+
+    /** SET CHAIN: the switch for the card's chain, its name for screen readers and the line under it. */
+    const val SET_CHAIN = "Set chain"
+    fun setChainName(on: Boolean, steps: Int) = (if (on) "Set the project's chain from the card" else "Leave the project's chain as it is") + ", ${Format.plural(steps, "step")}"
+    const val SET_CHAIN_NOTE = "Replaces this project's chain with the card's, on the new scenes, and turns it on. UNDO takes it back."
+
+    /** The card's chain as the sheet shows it: "1×2 2 1×2 3" (card scene numbers; ×passes when more than one). */
+    fun chainText(steps: List<Pair<Int, Int>>) = steps.joinToString(" ") { (scene, passes) -> if (passes == 1) "$scene" else "$scene\u00D7$passes" }
+
     /**
      * IMPORT's toast: where it went, and how to take it back. One pattern is
      * named; several go in the scene they made ([scene], "S03"), or are listed
      * where there was no room for a scene. [sounds] put on pads are counted,
      * and so are the [skipped] ones that had no pad to go on. The card's [fx]
-     * applied and the [pads] shaped are named after them.
+     * applied and the [pads] shaped are named after them. A card of [scenes]
+     * several scenes names the range they made ([scene], "S04\u2013S07", as
+     * "scenes S04\u2013S07"), and says when its chain was set ([chain]).
      */
-    fun imported(places: List<Pair<Int, Int>>, scene: String?, sounds: Int = 0, skipped: Int = 0, fx: Boolean = false, pads: Int = 0, padsSkipped: Int = 0): String {
+    fun imported(
+        places: List<Pair<Int, Int>>,
+        scene: String?,
+        sounds: Int = 0,
+        skipped: Int = 0,
+        fx: Boolean = false,
+        pads: Int = 0,
+        padsSkipped: Int = 0,
+        scenes: Int = 1,
+        chain: Boolean = false,
+    ): String {
         val where = when {
-            scene != null -> "scene $scene"
+            scene != null -> (if (scenes > 1) "scenes " else "scene ") + scene
             else -> places.joinToString(", ") { place(it.first, it.second) }
         }
         val extra = when {
@@ -376,7 +448,7 @@ object ClaudeText {
             applied.takeIf { it.isNotEmpty() }?.let { "$it applied" },
             if (padsSkipped > 0) "${Format.plural(padsSkipped, "pad setting")} skipped" else null,
         )
-        return "Imported to $where$extra." + (if (shaping.isEmpty()) "" else " " + shaping.joinToString(", ") + ".") + " UNDO takes it back."
+        return "Imported to $where$extra." + (if (shaping.isEmpty()) "" else " " + shaping.joinToString(", ") + ".") + (if (chain) " Chain set." else "") + " UNDO takes it back."
     }
 
     /**

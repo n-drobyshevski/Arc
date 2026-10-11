@@ -8,6 +8,7 @@
 //   times; TAKE's words are Android's only.
 
 import type { ArpNote, ArpOrder } from '../features/arp'
+import { Chain, ChainPlay, type ChainStep } from '../features/chain'
 import { FactorySounds } from '../features/factorySounds'
 import { FxSettings, FxType } from '../features/fxSettings'
 import { Keys, NoteNames, Scale } from '../features/keys'
@@ -1162,6 +1163,62 @@ export const MirrorText = {
   /** The pattern sheet's SCENE CHANGE row, the same setting: its caption and a line under the choices. */
   SCENE_CHANGE: 'Scene change',
   SCENE_CHANGE_NOTE: "Playing: a new pattern or scene waits for the bar's or pattern's end. Stopped: always at once.",
+
+  // The CHAIN row (upper-cased where shown): the order the scenes play in, with the passes each plays.
+  /** The row's caption, its ON switch, and ＋ (adds the scene shown). */
+  CHAIN: 'Chain',
+  CHAIN_ON: 'On',
+  CHAIN_ADD: 'Add',
+
+  /** "S03": a step; "S03 ×2": a step of 2 passes (1 pass is not written). */
+  chainStep(step: ChainStep): string {
+    return MirrorText.sceneLabel(step.scene) + (step.passes > 1 ? ` \u00D7${step.passes}` : '')
+  },
+
+  /** "×2": the passes a tap on the step cycles to (×1 ×2 ×4 ×8). */
+  chainPasses(passes: number): string {
+    return `\u00D7${passes}`
+  },
+
+  /** "Pass 2/4": where the playing chain is in its step, the readout under the row. */
+  chainPass(play: ChainPlay, chain: Chain): string {
+    return `Pass ${play.pass}/${ChainPlay.passes(play, chain)}`
+  },
+
+  /** The row's status words: nothing in it yet, 64 steps already, and (the toast) a scene picked by hand turning the chain off. */
+  CHAIN_EMPTY: 'Chain empty. + adds the scene shown',
+  CHAIN_FULL: 'Chain is full',
+  CHAIN_OFF_BY_HAND: 'Chain off: you picked a scene.',
+
+  /** "S03 added to chain": ＋ added the scene at [index]. */
+  chainAdded(index: number): string {
+    return `${MirrorText.sceneLabel(index)} added to chain`
+  },
+
+  /** What the row does, for a line under it. */
+  CHAIN_NOTE:
+    'Plays the steps in order, each scene for its passes, then the next at the end of its longest pattern. Tap a step for x1 x2 x4 x8, hold it to remove. Picking a scene by hand turns the chain off.',
+
+  // The CHAIN row for screen readers.
+  chainName(steps: number, on: boolean): string {
+    return `Chain, ${steps === 1 ? '1 step' : `${steps} steps`}, ${on ? 'on' : 'off'}`
+  },
+  chainAddName(index: number): string {
+    return `Add scene ${index + 1} to the chain`
+  },
+  chainOnName(on: boolean): string {
+    return on ? 'Chain on: plays the scenes in order. Tap to turn off' : 'Chain off. Tap to turn on'
+  },
+  chainStepName(position: number, count: number, step: ChainStep): string {
+    return `Chain step ${position} of ${count}, scene ${step.scene + 1}, ${step.passes === 1 ? '1 pass' : `${step.passes} passes`}`
+  },
+  /** The step's actions for a screen reader: the same as a tap and a long press, in words. */
+  CHAIN_MORE_PASSES: 'More passes',
+  CHAIN_FEWER_PASSES: 'Fewer passes',
+  CHAIN_REMOVE: 'Remove step',
+  chainPassSpoken(position: number, count: number, play: ChainPlay, chain: Chain): string {
+    return `Chain step ${position} of ${count}, pass ${play.pass} of ${ChainPlay.passes(play, chain)}`
+  },
 
   /** CLIP: PTN, BAR and PAD (their names for screen readers), COPY and PASTE, and the bar pages' row ("Group A · bar", "Clip · A bar 2"). */
   CLIP: 'Clip',

@@ -45,6 +45,29 @@ Go in order, a sentence or two each, and start with something that works.
 6. **Arrangement.** One bar on repeat? Beats change every 4 or 8 bars, with a fill in the bar before. Does the card use B, C, D (bass, chords, lead) or only drums?
 7. **Tempo.** Does the BPM fit the style (genres.md)? A half-time genre at 70 can be felt as 140.
 
+## Arrangement: a card of scenes
+
+A card from **SHARE CHAIN** (or one you wrote) has `scene` lines and a `chain` line. `check` reads them, and `analyse` adds two parts to the report (`--json` has them as `scenes` and `arrangement`; `patterns` still lists every section, scene by scene). `grid` prints the chain and each scene.
+
+| Field | Meaning | How to read it |
+|---|---|---|
+| `arrangement.steps` | The chain in play order: `scene`, `passes`, `bars_per_pass` (the scene's longest pattern, since that is where the next step takes over) and `bars` | The shape of the track. Without a `chain` line it is each scene once, in the card's order |
+| `arrangement.total_bars`, `seconds` | The length of one lap, and its time at the card's tempo | Loop-based tracks usually run 16 to 64 bars a lap. Under 8 is a loop, over 64 asks for an ending |
+| `arrangement.energy` | For each scene: `pad_hits_per_bar` (pad hits a bar, over the patterns it plays, carried ones included) and `groups_playing` | The energy curve. Read it in play order, not scene order |
+| `arrangement.transitions` | For each step to the next (and the loop back from the last): `changed`, `entered`, `kept` groups, `same_scene` and `unknown` (a group the first scene leaves out, which the loop can't know) | What the listener hears change. Nothing changing is a repeat, not a transition |
+| `arrangement.not_in_chain` | Scenes the chain never plays | A forgotten scene, or one the user means to add. Say which |
+| `scenes[].carried`, `bars`, `changes_from_previous` | For each scene: the groups it carries on from an earlier scene, its length, and what differs from the scene before it | A scene that changes nothing adds nothing. A group that never changes anywhere is static |
+
+Comment in this order, a sentence each:
+
+1. **Energy curve.** Does it climb to a drop, fall away in a breakdown and climb again? A flat curve (the same hits a bar everywhere) is a loop, not a track. A drop should be clearly busier than the build before it, and a breakdown clearly quieter (often no kick).
+2. **Contrast.** What is different between neighbouring scenes: a group enters or leaves, the kick drops out, the hats double. One or two changes a step is plenty; four groups all changing at once is a hard cut, none is a repeat.
+3. **Length.** The intro (4 to 8 bars on a loop-based track), the drop (8 to 16), the breakdown (4 to 8). Passes that make a scene run past 16 bars without a change wear thin; a scene of one bar with `x1` is a stab, not a section.
+4. **Transitions.** What happens in the last pass before a change: a fill, a build, a held note, a cut to silence. The transition into a drop is the one that matters; at the loop back to the first scene, a clean drop-out helps.
+5. **FX.** The effect lines are the project's, one set for every scene. If the style needs the sound to change between scenes (a filter sweep into the drop), say it is a punch-in to play live, not a card line.
+
+**Edits to propose for an arrangement** (still two or three): add a short build scene before a drop (a snare roll on a 1/32 grid, hats doubling); take the kick out of the breakdown; give the second drop one more layer than the first; change the chain's passes (`2x4` for a longer drop); cut an intro that never changes; add the scene the chain forgot. Return the whole card, with its `chain` line, and say what changed in a line each. To import it as a change of an arrangement the user already has, remember a card with a `chain` line replaces the project's chain (SET CHAIN on the sheet) and always adds scenes: it never overwrites theirs.
+
 ## Edits to propose
 
 Two or three, not ten. Each is concrete (a pad, a step, a number) and says what it changes in the sound. Then return a complete new card in one fenced block and say in a line each what changed. Keep the user's pad names and tempo unless changing them on purpose. Remind them that pasting adds a new pattern and overwrites nothing.

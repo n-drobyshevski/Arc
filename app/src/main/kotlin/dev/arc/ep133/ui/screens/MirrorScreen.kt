@@ -104,7 +104,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import dev.arc.ep133.controller.ClipMode
 import dev.arc.ep133.controller.MirrorUi
 import dev.arc.ep133.controller.StepHosting
 import dev.arc.ep133.controller.StepView
@@ -1025,7 +1024,7 @@ fun MirrorScreen(
                 val lineMorph: @Composable (Modifier, SamplePanelFit, Dp, Dp, Dp, @Composable () -> Unit, @Composable () -> Unit) -> Unit = { m, fit, width, gap, corner, line, fnKeys ->
                     val kind = panel.kind
                     val wave = when (kind) {
-                        PanelKind.SCENE -> sceneDeckHeight(sceneNow.ui.clipMode == ClipMode.BAR)
+                        PanelKind.SCENE -> sceneDeckHeight(sceneNow.ui, width - WaveSide * 2)
                         PanelKind.STEP -> stepDeckHeight(width - WaveSide * 2)
                         PanelKind.SAMPLE -> fit.wave
                     }

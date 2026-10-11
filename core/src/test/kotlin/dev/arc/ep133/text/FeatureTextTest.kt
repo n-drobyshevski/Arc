@@ -3,6 +3,9 @@ package dev.arc.ep133.text
 import dev.arc.ep133.features.ArpNote
 import dev.arc.ep133.features.ArpOrder
 import dev.arc.ep133.features.CardProblem
+import dev.arc.ep133.features.Chain
+import dev.arc.ep133.features.ChainPlay
+import dev.arc.ep133.features.ChainStep
 import dev.arc.ep133.features.Comp
 import dev.arc.ep133.features.DiffResult
 import dev.arc.ep133.features.CardFx
@@ -445,6 +448,7 @@ class FeatureTextTest {
         assertEquals(listOf("Group B", "P03 \u00B7 4 bars", "P03 \u00B7 1 bar"), listOf(MirrorText.gridTitle(1), MirrorText.gridDetail(3, 4), MirrorText.gridDetail(3, 1)))
         assertEquals(listOf("Pattern 5, has notes", "Pattern 6"), listOf(MirrorText.patternCell(5, true), MirrorText.patternCell(6, false)))
         assertEquals("Pick patterns and scenes, copy and paste", CoachText.SCENE)
+        assertEquals("Chain scenes: tap a step for passes, hold to remove", CoachText.CHAIN)
     }
 
     @Test
@@ -716,5 +720,58 @@ class FeatureTextTest {
                 ClaudeText.padRowName(ClaudeText.Change("A9", "Pitch 0", "Pitch 2"), PhysicalPad(0, 11), false),
             ),
         )
+    }
+    @Test
+    fun `chain row text`() {
+        assertEquals(listOf("Chain", "On", "Add"), listOf(MirrorText.CHAIN, MirrorText.CHAIN_ON, MirrorText.CHAIN_ADD))
+        assertEquals(listOf("S03", "S03 \u00D72", "S01 \u00D78"), listOf(ChainStep(2), ChainStep(2, 2), ChainStep(0, 8)).map(MirrorText::chainStep))
+        assertEquals(listOf("\u00D71", "\u00D74"), listOf(MirrorText.chainPasses(1), MirrorText.chainPasses(4)))
+        val chain = Chain(listOf(ChainStep(0, 2), ChainStep(1, 4)), true)
+        assertEquals("Pass 1/2", MirrorText.chainPass(ChainPlay(0, 1), chain))
+        assertEquals("Pass 3/4", MirrorText.chainPass(ChainPlay(1, 3), chain))
+        assertEquals("Pass 2/1", MirrorText.chainPass(ChainPlay(9, 2), chain))
+        assertEquals("S04 added to chain", MirrorText.chainAdded(3))
+        assertEquals(listOf("Chain empty. + adds the scene shown", "Chain is full", "Chain off: you picked a scene."), listOf(MirrorText.CHAIN_EMPTY, MirrorText.CHAIN_FULL, MirrorText.CHAIN_OFF_BY_HAND))
+        assertEquals(
+            listOf("Chain, 1 step, off", "Chain, 4 steps, on", "Add scene 3 to the chain", "Chain on: plays the scenes in order. Tap to turn off", "Chain off. Tap to turn on"),
+            listOf(MirrorText.chainName(1, false), MirrorText.chainName(4, true), MirrorText.chainAddName(2), MirrorText.chainOnName(true), MirrorText.chainOnName(false)),
+        )
+        assertEquals("Chain step 2 of 5, scene 4, 1 pass", MirrorText.chainStepName(2, 5, ChainStep(3)))
+        assertEquals("Chain step 2 of 5, scene 4, 4 passes", MirrorText.chainStepName(2, 5, ChainStep(3, 4)))
+        assertEquals("Chain step 2 of 2, pass 3 of 4", MirrorText.chainPassSpoken(2, 2, ChainPlay(1, 3), chain))
+        assertEquals(listOf("More passes", "Fewer passes", "Remove step"), listOf(MirrorText.CHAIN_MORE_PASSES, MirrorText.CHAIN_FEWER_PASSES, MirrorText.CHAIN_REMOVE))
+        assertTrue("x1 x2 x4 x8" in MirrorText.CHAIN_NOTE)
+    }
+
+    @Test
+    fun `claude text for cards of scenes`() {
+        assertEquals(listOf("Share chain", "Share the chain with Claude, 1 step", "Share the chain with Claude, 4 steps"), listOf(ClaudeText.SHARE_CHAIN, ClaudeText.shareChainName(1), ClaudeText.shareChainName(4)))
+        assertEquals(listOf("Scene 2", "Scene 2 \u00B7 Drop"), listOf(ClaudeText.cardScene(2, null), ClaudeText.cardScene(2, "Drop")))
+        assertEquals("S05 \u00B7 A04 B02 C01 D01", ClaudeText.cardSceneGoes(4, listOf(4, 2, 1, 1)))
+        assertEquals("Plays the same patterns as the scene before.", ClaudeText.SCENE_SAME)
+        assertEquals(listOf("Share chain \u00B7 1 scene", "Share chain \u00B7 3 scenes"), listOf(ClaudeText.shareChainKey(1), ClaudeText.shareChainKey(3)))
+        assertEquals("new S03 \u00B7 A 04 \u00B7 B 02 \u00B7 C (same)", ClaudeText.cardSceneTarget(2, listOf(0 to 4, 1 to 2, 2 to null)))
+        assertEquals("S03\u00D72 \u2192 S04 \u2192 S03\u00D72 \u2192 S05", ClaudeText.chainImport(listOf(ChainStep(2, 2), ChainStep(3), ChainStep(2, 2), ChainStep(4))))
+        assertEquals("Scene 2, Drop, becomes S05, patterns A 4, B 2, C 1, D 1", ClaudeText.cardSceneName(2, "Drop", 4, listOf(4, 2, 1, 1)))
+        assertEquals("Scene 1, becomes S02, patterns A 1, B 1, C 1, D 1", ClaudeText.cardSceneName(1, null, 1, listOf(1, 1, 1, 1)))
+        assertEquals("1\u00D72 2 1\u00D72 3", ClaudeText.chainText(listOf(1 to 2, 2 to 1, 1 to 2, 3 to 1)))
+        assertEquals(
+            listOf("Set the project's chain from the card, 4 steps", "Leave the project's chain as it is, 1 step"),
+            listOf(ClaudeText.setChainName(true, 4), ClaudeText.setChainName(false, 1)),
+        )
+        assertEquals(
+            listOf(
+                "Imported to scenes S04\u2013S06. Chain set. UNDO takes it back.",
+                "Imported to scene S04. UNDO takes it back.",
+                "Imported to scenes S04\u2013S06 and 2 sounds. FX applied. Chain set. UNDO takes it back.",
+            ),
+            listOf(
+                ClaudeText.imported(emptyList(), "S04\u2013S06", scenes = 3, chain = true),
+                ClaudeText.imported(emptyList(), "S04", scenes = 1),
+                ClaudeText.imported(emptyList(), "S04\u2013S06", sounds = 2, fx = true, scenes = 3, chain = true),
+            ),
+        )
+        assertTrue("arrangement" in ClaudeText.SHARE_CHAIN_PROMPT && "energy curve" in ClaudeText.SHARE_CHAIN_PROMPT)
+        assertEquals("Arc beat Chain", ClaudeText.shareSubject(ClaudeText.CHAIN_CARD_NAME))
     }
 }

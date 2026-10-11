@@ -1,6 +1,6 @@
 # Genre recipes
 
-Twenty-eight starting points, including a techno family of twelve (Techno, Detroit, minimal, dub, acid, hypnotic, peak-time, melodic, industrial, hard techno, schranz and hard groove), each a complete ARC BEAT card (see [beat-card.md](beat-card.md) for the format). Use them as a base: change the tempo and a few steps and say what you changed. The cards are checked by the skill's test, so they are valid as written.
+Twenty-nine starting points, including a techno family of twelve (Techno, Detroit, minimal, dub, acid, hypnotic, peak-time, melodic, industrial, hard techno, schranz and hard groove), each a complete ARC BEAT card (see [beat-card.md](beat-card.md) for the format). One of them, Breakcore arrangement, is a whole track idea: a card of five scenes with a chain. Use them as a base: change the tempo and a few steps and say what you changed. The cards are checked by the skill's test, so they are valid as written.
 
 `scripts/beatcard.py analyse` compares a user's beat with these recipes, reading the `BPM:` and `Swing:` lines and the card of each section below. Keep that shape if you add a recipe: a `##` heading, the two lines, then one fenced card.
 
@@ -679,6 +679,82 @@ B7 at 2.4.1 note G1 gate 1/8 vel 110
 ```
 
 The snare roll and the stutters sit in the `notes` list because they fall between sixteenths (`+12` is half a sixteenth, a 32nd). Bar 2 is the chaos bar: swap it for bar 1 on most passes and bring it in every fourth bar. The hat burst (`xxxx`) in bar 2 is a double-time moment; the roll takes over from it. The effect lines crush the break: `fx distortion 55 50` is a hard, neutral drive, `send A 45 B 30` mixes the drums and the sub into it, and `comp 60 15` is a very fast compressor that pumps the whole loop.
+
+## Breakcore arrangement
+- BPM: 160-200
+- Swing: 50
+- Feel: a track idea, not a loop: five scenes and a chain. A stripped intro (a hat, one kick, a held sub), the amen shred as the drop, a breakdown with no kick or snare under a held sub, a snare-roll build, then a second drop that is denser (every sixteenth a hat). Arc imports each scene as a scene of its own and plays them in the chain's order.
+
+```
+ARC BEAT 1
+name Breakcore track
+tempo 180
+swing 50
+fx distortion 55 50
+send A 45 B 30
+comp 60 15
+chain 1x2 2x2 3 4 5x2
+
+scene Intro
+[A] bars 2 step 1/16
+A7 kick        | X... .... .... .... | X... .... .... .... |
+A4 closed hat  | x.x. x.x. x.x. x.x. | x.x. x.x. x.x. x.x. |
+AENTER crash   | X... .... .... .... | .... .... .... .... |
+
+[B] bars 2
+notes
+B7 at 1.1.1 note E1 gate 384 vel 100
+B7 at 2.1.1 note E1 gate 384 vel 100
+
+scene Drop
+[A] bars 2 step 1/16
+A7 kick        | X.x. ..x. .xx. .... | X..x ..x. xx.x ..x. |
+A8 kick 2      | x... .... .x.. .... | x..x .... x... .... |
+A9 snare       | .... X..o .o.. ..X. | .... X.oX .oX. .... |
+A5 open hat    | x.x. x.x. x.x. x.x. | x... x... x... .... |
+A4 closed hat  | .... .... .... .... | .... .... .... xxxx |
+AENTER crash   | X... .... .... .... | .... .... .... .... |
+
+[B] bars 2
+notes
+B7 at 1.1.1 note E1 gate 1/4 vel 120
+B7 at 1.3.3 note E1 gate 1/8 vel 90
+B7 at 2.1.1 note E1 gate 1/4 vel 120
+B7 at 2.4.1 note G1 gate 1/8 vel 110
+
+scene Breakdown
+[A] bars 2 step 1/16
+A4 closed hat  | x... x... x... x... | x... x... x... x... |
+
+[B] bars 2
+notes
+B7 at 1.1.1 note E1 gate 384 vel 110
+B7 at 2.1.1 note G1 gate 384 vel 110
+
+scene Build
+[A] bars 2 step 1/16
+A7 kick        | X... .... X... .... | X... X... X... X... |
+A9 snare       | .... .... .... .... | 3.5. 6.7. 8.9. XXXX |
+A4 closed hat  | x.x. x.x. x.x. x.x. | xxxx xxxx xxxx xxxx |
+
+scene Drop 2
+[A] bars 2 step 1/16
+A7 kick        | X.x. ..x. .xx. ..x. | X..x ..x. xx.x ..xx |
+A8 kick 2      | x... .x.. .x.. .... | x..x .... x.x. x... |
+A9 snare       | .... X..o .oX. ..X. | .... X.oX .oX. X.XX |
+A4 closed hat  | xxxx xxxx xxxx xxxx | xxxx xxxx xxxx xxxx |
+A5 open hat    | ..x. ..x. ..x. ..x. | ..x. ..x. ..x. .... |
+AENTER crash   | X... .... .... .... | X... .... .... .... |
+
+[B] bars 2
+notes
+B7 at 1.1.1 note E1 gate 1/4 vel 127
+B7 at 1.3.3 note E1 gate 1/8 vel 100
+B7 at 2.1.1 note E1 gate 1/4 vel 127
+B7 at 2.4.1 note G1 gate 1/8 vel 115
+```
+
+The `chain` line plays the intro twice, the drop twice, the breakdown, the build and the second drop twice: 16 bars, then it loops. Each scene lasts as long as its longest pattern (2 bars here). A group a scene leaves out plays the previous scene's pattern: the build has no `[B]`, so the breakdown's sub carries on under the roll. The `fx`, `send` and `comp` lines are the project's, so they apply to every scene; to change the sound between scenes, play punch-ins live. For a longer drop, raise its passes (`2x4`); to take the track further, add a scene and put its number in the chain.
 
 ## UK garage
 - BPM: 130-136

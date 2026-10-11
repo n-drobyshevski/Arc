@@ -1,6 +1,6 @@
 ---
 name: arc-beats
-description: Build, analyse and teach beats for the teenage engineering EP-133 K.O. II (KO2) together with the Arc companion app. Writes drum patterns, grooves and basslines as ARC BEAT text cards the user pastes into Arc, reads and improves cards copied out of Arc, and teaches the EP-133 and beat making step by step with the official key combos. Use whenever the user mentions the EP-133, K.O. II, KO2, Arc, a beat card or ARC BEAT, a drum pattern, groove, swing, hi-hats, scenes or patterns for the EP-133, FX, sidechain or punch-in effects, tempo or genre recipes (house, boom bap, trap, drill, dnb, breakcore, garage, dembow and more), or wants to learn the EP-133 or beat making.
+description: Build, analyse and teach beats for the teenage engineering EP-133 K.O. II (KO2) together with the Arc companion app. Writes drum patterns, grooves and basslines as ARC BEAT text cards the user pastes into Arc, reads and improves cards copied out of Arc, and teaches the EP-133 and beat making step by step with the official key combos. Use whenever the user mentions the EP-133, K.O. II, KO2, Arc, a beat card or ARC BEAT, a drum pattern, groove, swing, hi-hats, scenes, a chain or an arrangement (a whole track idea) or patterns for the EP-133, FX, sidechain or punch-in effects, tempo or genre recipes (house, boom bap, trap, drill, dnb, breakcore, garage, dembow and more), or wants to learn the EP-133 or beat making.
 ---
 
 # Arc beats
@@ -56,6 +56,35 @@ A1 at 1.1.1 note C4 gate 1/8
 - `pad A7 pitch -7 level 90` inside a section shapes how a pad plays (see below). An `fx`, `send`, `comp` or `sidechain` line in the header sets the project's FX (see below).
 - Write sharps as `C#4`. Anything after ` #` is a comment. Do not start any line of your reply with the words `ARC BEAT` except the card's own first line; Arc takes the first such line as the card.
 
+### Scenes and a chain (a track idea)
+
+Optional. One card can hold several scenes and the order to play them in; the rules are in "Scenes and chains" in [beat-card.md](references/beat-card.md).
+
+```
+ARC BEAT 1
+name Short track
+tempo 128
+chain 1x2 2x4 3 2x4
+scene Intro
+[A] bars 1
+A7 kick | X... X... X... X... |
+[B] bars 1
+B7 bass | ..x. ..x. ..x. ..x. |
+scene Drop
+[A] bars 1
+A7 kick | X... X... X... X... |
+A9 snare | .... X... .... X... |
+A4 hat | x.x. x.x. x.x. x.x. |
+scene Breakdown
+[A] bars 1
+A4 hat | x... x... x... x... |
+```
+
+- `scene Name` starts a scene (the name is optional, 40 characters at most); its `[A]`-`[D]` sections follow, each group once. Up to 16 scenes. A card with no `scene` line is one scene, as above. Once there is a `scene` line, every section must sit under one.
+- **A group a scene leaves out plays the previous scene's pattern** (the same pattern, not a copy): above, the bass `[B]` carries on through the drop and the breakdown. In the first scene it keeps whatever the scene playing in Arc gives it, so give the groups you need in the first scene.
+- `chain 1x2 2x4 3 2x4` is a header line (before the first `scene`): the play order, as scene numbers from 1, each with its passes (`x2`, 1-8; one pass when left out). It holds up to 64 steps, may repeat scenes, and loops. Each scene plays its passes, then the next step takes over at the end of the scene's longest pattern. A step naming a scene the card does not have is an error. A second `chain` line replaces the first.
+- **Effect lines stay in the header and are the project's, one set for the whole card.** Arc keeps FX per project, not per scene; to change the sound between scenes, suggest punch-ins in your reply.
+
 The pad letters and numbers are as printed on the device: the keypad runs `7 8 9 / 4 5 6 / 1 2 3 / . 0 ENTER` in each of the groups A, B, C and D.
 
 ### FX and pad shaping
@@ -88,9 +117,20 @@ Optional. The ranges, the errors and what the import sheet does with them are in
    - The full button names and what the sheet shows are in [arc-app.md](references/arc-app.md), for when the user asks.
 7. Offer one next step: a variation, a fill, a bass line or a MIDI file for a DAW (`scripts/beatcard.py midi`).
 
+### BUILD: a track idea, an arrangement, a second scene
+
+When the user asks for a **track idea**, an **arrangement**, a **song**, "what comes after this", "**continue this**" or "a **second scene**", write a card of scenes instead of one loop. Steps 1-5 above still apply.
+
+- **Scene blocks and a chain.** Typically an intro, a drop, a breakdown, a build and a second drop (`scene Intro` ... `scene Drop 2`), each 1-4 bars of its own, with a `chain` line that gives the passes (`chain 1x2 2x4 3 4 5x4`). Aim for 16-64 bars in all, and change one or two things from scene to scene (a breakdown drops the kick, a build adds a snare roll, the second drop gets busier hats) rather than everything. Use the scene names as labels only: Arc shows them on the import sheet and keeps none.
+- **Left-out groups carry on.** Write only the groups that change in a scene; the others play the previous scene's pattern (a sustained bass can sit in the first scene and carry through the rest). Give the first scene every group it needs.
+- **Keep FX lines out of a continuation card.** FX are per project, one set for the whole card; effect lines on a card that only adds scenes would replace the project's FX. Put them on a first, full card only, and say in a line what they do.
+- **Say how to play it in Arc** in two lines: *PASTE BEAT → IMPORT adds one scene for each of the card's scenes after yours, and SET CHAIN (on at first) copies the chain. In the SCENE panel the CHAIN row shows it: ON plays it, a tap on a step cycles its passes (x1 x2 x4 x8), a long press removes it.* Patterns and scenes stay in Arc.
+- **"Continue this idea"** with a card the user already has: either (a) write **only the new scene or scenes** as a card (it imports after their existing scenes, with no `chain` line so their chain stays; they add the new scenes to the CHAIN row with + while each is showing), or (b) write a **full card of scenes that includes the original** as scene 1, with a `chain` line (it imports as new scenes next to the old ones, and SET CHAIN gives them the whole order). Pick (a) for one or two extra scenes, (b) when they want the whole track at once, and say which and why in one line. In (a), give the first scene every group it needs, since a group it leaves out keeps what the scene playing has.
+- Check it with `scripts/beatcard.py check` (it reads scenes and chains), then `analyse` to see the arrangement part: bars for each step, the energy of each scene and what changes at each step.
+
 ## ANALYSE: improve a beat
 
-1. **Get the card.** If the user describes a beat without one, ask them to use **SHARE SCENE** or **SHARE** under CLAUDE in Live tools and send it to you. If they paste a card with errors, run `check`, tell them the lines in plain words and fix them.
+1. **Get the card.** If the user describes a beat without one, ask them to use **SHARE SCENE** or **SHARE** under CLAUDE in Live tools and send it to you (**SHARE CHAIN** for a whole arrangement). If they paste a card with errors, run `check`, tell them the lines in plain words and fix them.
 2. **Run the script** when code execution is available: `check`, then `analyse` (and `grid` to see it). In the report, *density* is the share of 16th slots that have a hit, a *ghost* is a velocity of 70 or less and an *accent* 120 or more, *syncopation* is labelled straight (2 or less), some (up to 6) or syncopated, and *closest genre recipes* compares the beat with [genres.md](references/genres.md). When the top match is marked *outside the usual range* and the next one fits the tempo, call the beat closest to the one that fits, and mention the other as the drum pattern it borrows. [analysis.md](references/analysis.md) says what each field means. Without code execution, read the card yourself with the same checklist and say your numbers are estimates.
 3. **Say what you see**, briefly and in this order, starting with something good:
    - groove and feel (where the backbeat is, where the kick sits, what style it is closest to),
@@ -99,6 +139,7 @@ Optional. The ranges, the errors and what the import sheet does with them are in
    - swing (value, and whether it suits the tempo),
    - space (where nothing plays),
    - arrangement (does it change over the bars? is there a fill?),
+   - **a card of scenes** (Arc's **SHARE CHAIN**, with `scene` lines and a `chain` line; the `analyse` report has `scenes` and an `arrangement` part): the **energy curve** (pad hits a bar for each scene, in play order: does it build, drop and build again?), **contrast** (what changes from one scene to the next: a scene that changes nothing adds nothing), **length** (total bars, the passes and whether each scene earns them), **transitions** (what changes at each step and at the loop back to the start: a build or fill before a drop, a breakdown that takes something away) and any scene the chain never plays. [analysis.md](references/analysis.md) has the checklist.
    - silent pads, when the share has a comment `# no sound on: D7` (Arc writes it when it knows the pads): those pads have no sound on the user's EP-133, so their notes play nothing. Say so, and either suggest a `sound` line for each from their list (a melodic sound for a lead on D7, a bass for C7) or, with no list, ask them to share again with **With my sound list**. They can also pick a sound on Arc's import sheet (**SILENT PADS**, **PICK SOUND**). The `analyse` report lists them as `silent_pads`.
    - FX and pad shaping, when the share has `fx`, `send`, `comp`, `sidechain` or `pad` lines (the `analyse` report has an `fx` part): say what they do to the sound ("the delay on the chords is a dotted eighth with long repeats", "the kick ducks the bass by 25") and whether they suit the style. No FX lines means the project's FX are the default (nothing on); mention it only when the style wants them.
 4. **Suggest 2 or 3 concrete edits**: a pad, a step, a number, and what it will change in the sound. Not a list of ten. When the user asks for a direction ("harder", "darker", "more swing"), group the changes into 2 or 3 themed edits ("grit in, reverb out", "accents", "a harder fill"), each of which may touch several steps or lines. When several sounds don't fit their rows, swap the one that matters most (usually the kick) and list the others in a line for the user to decide. If the user shared their sound list, a swap can be one of them: a snare that is too long for the tempo, a hat that is too bright. Suggest another sound from the list and write it as a `sound` line (see [analysis.md](references/analysis.md)); never suggest a sound that is not in the list. An FX or pad edit is fair too: more or less send, a longer delay, a harder `comp`, a pad pitched down or a hat's release shortened. Write it as the line itself (`send C 45`, `pad A4 mode key release 20`); see [analysis.md](references/analysis.md).
@@ -144,9 +185,9 @@ Python 3.9+, no installs. Run from the skill folder (or use the full path to the
 |---|---|
 | `python3 scripts/beatcard.py check CARD` | Reads the card by the rules in beat-card.md. Prints problems with line numbers (`line 7: error: ...`) and exits 1 on errors; otherwise prints a summary. Reads standard input without a file |
 | `python3 scripts/beatcard.py check CARD --sounds sounds.txt` | Also checks every sound line against the user's sound list (save their share text, or lines of `slot name`, in the file): a warning for each slot or name that is not in it, naming the slot that holds the sound if it moved |
-| `python3 scripts/beatcard.py analyse CARD` | Groove report: hits for each group and pad, density, velocity spread, swing, syncopation, longest gap, which steps carry kick, snare and hat sounds by name (a pad's sound line name first, then its row label), the sound lines, the FX (effect, sends, comp, sidechain, in readable values) and the pad lines, the closest genre recipes. `--json` for the fields |
-| `python3 scripts/beatcard.py grid CARD` | Prints the step grid, with the swing, the FX, the sound lines and the pad lines shown, for looking at |
-| `python3 scripts/beatcard.py midi CARD -o beat.mid` | Writes a standard MIDI file at the card's tempo for a DAW. Pads become the EP-133's notes 36-83 and KEYS notes 60 + semi on separate tracks |
+| `python3 scripts/beatcard.py analyse CARD` | Groove report (a card of scenes: a report for each scene and an `arrangement` part with the order and passes, the bars, the energy of each scene and which groups change at each step): hits for each group and pad, density, velocity spread, swing, syncopation, longest gap, which steps carry kick, snare and hat sounds by name (a pad's sound line name first, then its row label), the sound lines, the FX (effect, sends, comp, sidechain, in readable values) and the pad lines, the closest genre recipes. `--json` for the fields |
+| `python3 scripts/beatcard.py grid CARD` | Prints the step grid, with the swing, the FX, the sound lines and the pad lines shown, for looking at; a card of scenes prints the chain and each scene |
+| `python3 scripts/beatcard.py midi CARD -o beat.mid` | Writes a standard MIDI file at the card's tempo for a DAW. Pads become the EP-133's notes 36-83 and KEYS notes 60 + semi on separate tracks. A card of scenes is written in the chain's order, each scene for its passes (`--loops 2` plays the chain twice), with a marker for each pass |
 
 `CARD` is a file; the card may sit inside a longer chat message or a code fence, as Arc does. When a user pastes an error message from Arc, treat it like the script's: it names a line and a reason.
 
@@ -165,6 +206,7 @@ These are what `check` catches. Look for them by hand when you cannot run it.
 - **Sound lines:** a slot that is not in the user's list (or not 1-999), a name that is not the list's spelling, a pad from another group than the section, a sound line before the first `[X]` section, or any sound line at all when you have no list. A sound line is `sound A7 12 Kick 808`, never a row with a `|`.
 - **Effect lines:** one after the first `[X]` section (they belong in the header), an effect that is not one of the seven, a knob outside 0-100 (or with more than one decimal), a group outside A-D in `send` or `sidechain`, a `sidechain` with no groups, `comp` with a drive but no speed.
 - **Pad lines:** a pad from another group, a line with no setting, a pitch beyond 12 semitones either way, a level over 100, a pan beyond 16, an attack or release over 255, or a mode that is not `oneshot`, `key` or `legato`. A second line for a pad merges into the first.
+- **Scenes and chains:** a section before the first `scene` line, a `chain` line after a `scene` or a section (or in a card with no `scene` line), a chain step for a scene the card does not have, passes outside 1-8, more than 64 steps, more than 16 scenes, the same group twice in one scene, a header line (`fx`, `send`, `comp`, `sidechain`) after a `scene` line.
 - Two notes on the same pad at the same tick (only the louder stays; it is a warning).
 - Text before the card is fine; text that starts a line with `ARC BEAT` is not.
 
@@ -172,9 +214,9 @@ These are what `check` catches. Look for them by hand when you cannot run it.
 
 | File | Read it when |
 |---|---|
-| [beat-card.md](references/beat-card.md) | Writing or fixing any card. The spec: reading rules, header, rows, notes list, sound lines, effect lines, pad shaping and its ranges, limits, import, the sound list |
-| [genres.md](references/genres.md) | Building. The assumed kit and 28 genre recipes with a valid card each, FX lines included where the style needs them |
+| [beat-card.md](references/beat-card.md) | Writing or fixing any card. The spec: reading rules, header, rows, notes list, sound lines, scenes and chains, effect lines, pad shaping and its ranges, limits, import, the sound list |
+| [genres.md](references/genres.md) | Building. The assumed kit and 29 genre recipes with a valid card each, FX lines included where the style needs them |
 | [lessons.md](references/lessons.md) | Teaching. Twelve lessons with device steps, Arc steps, exercises and checks |
 | [ep133-guide.md](references/ep133-guide.md) | Any question about key combinations. 100 official OS 2.5 combos by section, with steps and sources. Generated; do not edit |
-| [analysis.md](references/analysis.md) | Analysing. What the script's numbers mean, the checklist, edits worth proposing (sound swaps, FX and pad shaping too) and the vocabulary |
-| [arc-app.md](references/arc-app.md) | Explaining Arc, or telling the user where to tap, including SHARE, With my sound list, PASTE BEAT and the sounds, FX and pad shaping on the import sheet |
+| [analysis.md](references/analysis.md) | Analysing. What the script's numbers mean, the checklist, the arrangement of a card of scenes, edits worth proposing (sound swaps, FX and pad shaping too) and the vocabulary |
+| [arc-app.md](references/arc-app.md) | Explaining Arc, or telling the user where to tap, including SHARE, SHARE CHAIN, With my sound list, PASTE BEAT, the CHAIN row, and the scenes, sounds, FX and pad shaping on the import sheet |

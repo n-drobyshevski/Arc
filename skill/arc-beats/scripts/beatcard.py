@@ -15,6 +15,12 @@ input. Anything before the first line starting with ARC BEAT is ignored, so
 a whole chat reply works too. Exit status: 0 fine, 1 the card has errors,
 2 the command line or a file is wrong.
 
+A card may hold several scenes and a chain ("scene" lines, a "chain" line; see
+"Scenes and chains" in references/beat-card.md). check reads them by the same
+rules as Arc; analyse reports each scene and an arrangement part (the order with
+passes, the bars, which groups change from scene to scene); grid prints every
+scene; midi renders the chain in order, each scene for its passes.
+
 Effect lines (fx, send, comp, sidechain) in the header and pad lines inside
 a section are read and checked the way Arc reads them; grid and analyse show
 them. SOUNDS.txt is the user's sound list as Arc's share adds it after the card
@@ -45,6 +51,10 @@ TICKS_PER_BEAT = 96
 TICKS_PER_BAR = 384
 MAX_NOTES = 2048
 NAME_MAX = 40
+#: A card holds at most this many scenes, and a chain this many steps, each with 1 to 8 passes.
+MAX_SCENES = 16
+CHAIN_MAX_STEPS = 64
+PASSES_MIN, PASSES_MAX = 1, 8
 TEMPO_MIN, TEMPO_MAX = 40.0, 240.0
 SWING_MIN, SWING_MAX = 50, 75
 #: The EP-133's sound slots.
@@ -245,15 +255,43 @@ class Pattern:
 
 
 @dataclass
+class Scene:
+    """One scene of a card: what follows a `scene` line, or the card's one implicit scene. A group it leaves out plays the previous scene's pattern."""
+
+    number: int  # from 1
+    name: str = ""
+    line: int = 0  # the scene line (0 for the implicit scene)
+    patterns: List[Pattern] = field(default_factory=list)  # its sections, one for each group at most
+
+
+@dataclass
 class Card:
     name: str = ""
     tempo: Optional[float] = None
     swing: int = 50
+    #: The first scene's sections: all of a card's without scene lines. Use `all_patterns` or `scenes` for a card of scenes.
     patterns: List[Pattern] = field(default_factory=list)
     problems: List[Problem] = field(default_factory=list)
     fx: Optional[Fx] = None
     #: The pads Arc's share says have no sound, from its comment "# no sound on: D7 C7" (empty when it has none).
     silent_pads: List[str] = field(default_factory=list)
+    #: The scenes, never empty: one implicit scene when the card has no `scene` line.
+    scenes: List[Scene] = field(default_factory=list)
+    #: Whether the card had a `scene` line.
+    scene_lines: bool = False
+    #: The `chain` line as (card scene number from 1, passes) steps, None when the card has none; its line number.
+    chain: Optional[List[Tuple[int, int]]] = None
+    chain_line: int = 0
+
+    @property
+    def all_patterns(self) -> List[Pattern]:
+        """The sections of every scene, in order."""
+        return [p for sc in self.scenes for p in sc.patterns] if self.scenes else list(self.patterns)
+
+    @property
+    def multi_scene(self) -> bool:
+        """Whether the card is a card of scenes: it has scene lines, more than one scene or a chain."""
+        return self.scene_lines or len(self.scenes) > 1 or self.chain is not None
 
     @property
     def errors(self) -> List[Problem]:
@@ -398,6 +436,12 @@ class _Reader:
         self.section_lines = 0
         self.seen_groups: Dict[int, int] = {}
         self.fx = Fx()
+        self.scenes: List[Scene] = []  # the scenes finished; the one being read is self.current
+        self.current = Scene(1)
+        self.scene_count = 0  # the scene lines read
+        self.first_section = 0  # the line of the first section, when no scene line came before it
+        self.chain: Optional[List[Tuple[int, int]]] = None
+        self.chain_line = 0
 
     def err(self, line: int, code: str, message: str) -> None:
         self.card.problems.append(Problem(line, ERROR, code, message))
@@ -422,10 +466,30 @@ class _Reader:
                 continue
             self.line(i + 1, text)
         self.close()
+        self.scenes.append(self.current)
         if self.section_lines == 0:
             self.err(start + 1, "no-sections", "the card has no section: add [A], [B], [C] or [D] with grid rows")
+        self.check_chain()
         self.card.fx = self.fx if self.fx.kinds() else None
+        self.card.scenes = self.scenes
+        self.card.patterns = self.scenes[0].patterns
+        self.card.scene_lines = self.scene_count > 0
+        self.card.chain, self.card.chain_line = self.chain, self.chain_line
         return self.card
+
+    def check_chain(self) -> None:
+        """The chain names scenes the card has, and the card has scenes at all."""
+        chain = self.chain
+        if chain is None:
+            return
+        if self.scene_count == 0:
+            self.err(self.chain_line, "chain-without-scenes", "a chain needs scenes: start each scene with a scene line")
+            return
+        for i, (scene, _passes) in enumerate(chain):
+            if scene > self.scene_count:
+                self.err(self.chain_line, "chain-unknown-scene", "chain step %d names scene %d, but the card has %d scene%s" % (
+                    i + 1, scene, self.scene_count, "" if self.scene_count == 1 else "s"))
+                break
 
     def version(self, start: int) -> bool:
         line = start + 1
@@ -440,6 +504,13 @@ class _Reader:
         return True
 
     def line(self, n: int, text: str) -> None:
+        first = _tokens(text)[0].lower()
+        if first == "scene":
+            self.scene_line(n, text)
+            return
+        if first == "chain":
+            self.chain_header(n, text)
+            return
         if text.startswith("["):
             self.start_section(n, text)
             return
@@ -475,7 +546,11 @@ class _Reader:
         word = _tokens(text)[0]
         key = word.lower()
         rest = _trim(text[len(word) :])
-        if key == "notes":
+        if self.scene_count > 0 and key in _HEADER_WORDS:
+            self.warn(n, "late-header", "'%s' belongs before the first scene; ignored here" % word)
+        elif self.scene_count > 0 and key in FX_WORDS:
+            self.err(n, "late-fx", "'%s' belongs before the first scene" % word)
+        elif key == "notes":
             self.err(n, "notes-outside-section", "'notes' has to come inside a section like [A]")
         elif key == "sound":
             self.err(n, "sound-outside-section", "'sound' has to come after a section line like [A]")
@@ -528,6 +603,8 @@ class _Reader:
     def start_section(self, n: int, text: str) -> None:
         self.close()
         self.section_lines += 1
+        if self.scene_count == 0 and self.first_section == 0:
+            self.first_section = n
         end = text.find("]")
         if end < 0:
             self.skipped(n, "bad-section", "a section line looks like [A] or [B12], with the bracket closed")
@@ -593,7 +670,57 @@ class _Reader:
             self.err(pattern.line, "too-many-notes", "[%s] has %d notes, the most is %d" % (pattern.letter, len(pattern.hits), MAX_NOTES))
         if self.dropped:
             return
-        self.card.patterns.append(pattern)
+        self.current.patterns.append(pattern)
+
+    # -- scenes and chain ---------------------------------------------------
+
+    def scene_line(self, n: int, text: str) -> None:
+        """scene [name]: starts a scene; the sections up to the next scene line are its."""
+        self.close()
+        if self.scene_count > 0:
+            self.scenes.append(self.current)
+        elif self.first_section:
+            self.err(self.first_section, "section-before-scene", "a section comes before the first scene line: once a card has scenes, every section belongs to one")
+        self.scene_count += 1
+        self.seen_groups = {}
+        if self.scene_count == MAX_SCENES + 1:
+            self.err(n, "too-many-scenes", "the card has more than %d scenes, the most is %d" % (MAX_SCENES, MAX_SCENES))
+        name = _trim(text[len(_tokens(text)[0]) :])
+        if len(name) > NAME_MAX:
+            self.warn(n, "long-scene-name", "the scene name is longer than %d characters; shortened" % NAME_MAX)
+            name = _trim(name[:NAME_MAX])
+        self.current = Scene(self.scene_count, name, n)
+
+    def chain_header(self, n: int, text: str) -> None:
+        """chain <step> ...: a step is a scene number from 1, with its passes as in 2x4 (1 to 8, default 1). A line with a fault changes nothing."""
+        word = _tokens(text)[0]
+        if self.section_lines > 0 or self.scene_count > 0:
+            self.err(n, "late-chain", "'%s' belongs before the first scene" % word)
+            return
+        tokens = _tokens(text[len(word) :])
+        if not tokens:
+            self.err(n, "empty-chain", "chain needs at least one scene, as in chain 1 2x2 3")
+            return
+        steps: List[Tuple[int, int]] = []
+        for tok in tokens:
+            m = re.fullmatch(r"([0-9]{1,6})(?:[xX]([0-9]{1,6}))?", tok)
+            if not m:
+                self.err(n, "bad-chain-step", "'%s' isn't a chain step: write a scene number, and its passes after an x, as in 2 or 2x4" % tok)
+                return
+            scene, passes = int(m.group(1)), int(m.group(2) or 1)
+            if scene < 1:
+                self.err(n, "chain-scene-zero", "chain step '%s': scenes count from 1" % tok)
+                return
+            if not PASSES_MIN <= passes <= PASSES_MAX:
+                self.err(n, "bad-passes", "chain step '%s': passes must be %d to %d" % (tok, PASSES_MIN, PASSES_MAX))
+                return
+            steps.append((scene, passes))
+        if len(steps) > CHAIN_MAX_STEPS:
+            self.err(n, "chain-too-long", "the chain has %d steps, the most is %d" % (len(steps), CHAIN_MAX_STEPS))
+            return
+        if self.chain is not None:
+            self.warn(n, "duplicate-chain", "two chain lines: the later one is kept")
+        self.chain, self.chain_line = steps, n
 
     # -- grid rows ---------------------------------------------------------
 
@@ -1023,6 +1150,48 @@ def parse_card(text: str) -> Card:
 
 
 # ---------------------------------------------------------------------------
+# Scenes and the chain
+# ---------------------------------------------------------------------------
+
+
+def effective_scenes(card: Card) -> List[Dict[int, Pattern]]:
+    """For each scene, the pattern each group plays (group 0..3 to Pattern): its own section, else the one the scene before gave it (a group left out plays the previous scene's pattern). In the first scene a group it leaves out is missing: Arc keeps the pattern the scene playing gives it, which a card can't know."""
+    out: List[Dict[int, Pattern]] = []
+    now: Dict[int, Pattern] = {}
+    for sc in card.scenes:
+        now = {**now, **{p.group: p for p in sc.patterns}}
+        out.append(dict(now))
+    return out
+
+
+def scene_origins(card: Card) -> List[Dict[int, int]]:
+    """For each scene, the scene number (from 1) each of its groups' patterns comes from: itself, or the earlier scene that gave it."""
+    out: List[Dict[int, int]] = []
+    now: Dict[int, int] = {}
+    for sc in card.scenes:
+        now = {**now, **{p.group: sc.number for p in sc.patterns}}
+        out.append(dict(now))
+    return out
+
+
+def scene_ticks(effective: Dict[int, Pattern]) -> int:
+    """How long a scene lasts: its longest pattern (a bar when it has none)."""
+    return max([p.length for p in effective.values()] or [TICKS_PER_BAR])
+
+
+def play_order(card: Card) -> List[Tuple[int, int]]:
+    """The steps Arc plays, as (scene index from 0, passes): the card's chain, or each scene once in the card's order when it has no chain. The chain loops."""
+    if card.chain:
+        return [(scene - 1, passes) for scene, passes in card.chain if 1 <= scene <= len(card.scenes)]
+    return [(i, 1) for i in range(len(card.scenes))]
+
+
+def pattern_signature(p: Pattern) -> tuple:
+    """What makes two patterns the same: the bars and the notes that play."""
+    return (p.bars, tuple(sorted((h.tick, h.pad, h.gate, -1000 if h.semi is None else h.semi, h.vel) for h in p.hits if h.tick < p.length)))
+
+
+# ---------------------------------------------------------------------------
 # Sound lists: the user's sounds, as Arc's share adds them after a card
 # ---------------------------------------------------------------------------
 
@@ -1066,7 +1235,7 @@ def check_sounds(card: Card, available: Dict[int, str]) -> List[Problem]:
     """A warning for each sound line whose slot or name isn't in [available] (slot -> name): the slot holds another sound, the sound is in another slot (which Arc would use) or in none. Lines that use a slot listed unnamed ("200.pcm") get one note between them, at the first: their names can't be checked."""
     out: List[Problem] = []
     unnamed: List[Tuple[int, str, int]] = []  # (line, pad, slot): one note for them all, not one a line
-    for pattern in card.patterns:
+    for pattern in card.all_patterns:
         for pad in KEYPAD_ORDER:
             sound = pattern.sounds.get(pad)
             if sound is None:
@@ -1528,11 +1697,24 @@ def load_recipes(path: str) -> List[dict]:
     return recipes
 
 
+def _fingerprint_patterns(card: Card) -> List[Pattern]:
+    """The patterns a card is compared by: its sections, or for a card of scenes the patterns of its busiest scene (the first when they tie)."""
+    if not card.multi_scene:
+        return card.patterns
+    best: List[Pattern] = []
+    best_energy = -1.0
+    for eff in effective_scenes(card):
+        energy = _energy(eff)
+        if energy > best_energy:
+            best, best_energy = [eff[g] for g in sorted(eff)], energy
+    return best
+
+
 def fingerprint(card: Card) -> Dict[str, set]:
     """The slots (0..15 of a bar) a card's kick, backbeat and hat play on in most of its bars, over all groups."""
     out: Dict[str, List[int]] = {"kick": [], "backbeat": [], "hat": []}
     bars_total = 0
-    for pattern in card.patterns:
+    for pattern in _fingerprint_patterns(card):
         roles = pad_roles(pattern)
         hits = [h for h in pattern.hits if h.semi is None]
         if not hits:
@@ -1604,23 +1786,116 @@ def similarity(card: Card, recipes: List[dict], top: int = 3) -> List[dict]:
     return scored[:top]
 
 
-def analyse_card(card: Card, recipes: Optional[List[dict]] = None) -> dict:
-    """Everything the analyse command reports, as plain data."""
-    patterns = [pattern_report(p, card) for p in card.patterns]
-    all_hits = [h for p in card.patterns for h in p.hits if h.semi is None]
+def _energy(effective: Dict[int, Pattern]) -> float:
+    """A scene's pad hits in a bar, summed over the patterns it plays (each over its own length)."""
+    return sum(sum(1 for h in p.hits if h.semi is None) / p.bars for p in effective.values())
+
+
+def _changes(before: Dict[int, Pattern], after: Dict[int, Pattern]) -> dict:
+    """The groups that change from one scene's patterns to the next's: a different pattern, one that enters, one that stays, one that is no longer known (only when a chain loops back to a first scene that leaves the group out)."""
+    changed, entered, kept, unknown = [], [], [], []
+    for g in range(4):
+        a, b = before.get(g), after.get(g)
+        if a is None and b is None:
+            continue
+        if a is None:
+            entered.append(GROUPS[g])
+        elif b is None:
+            unknown.append(GROUPS[g])
+        elif pattern_signature(a) == pattern_signature(b):
+            kept.append(GROUPS[g])
+        else:
+            changed.append(GROUPS[g])
+    return {"changed": changed, "entered": entered, "kept": kept, "unknown": unknown}
+
+
+def _chain_text(chain: List[Tuple[int, int]]) -> str:
+    return " ".join(str(s) if n == 1 else "%dx%d" % (s, n) for s, n in chain)
+
+
+def scene_reports(card: Card) -> List[dict]:
+    """One report for each scene of a card: its patterns' reports, what it carries from the scenes before, how long it is, how busy, and what changes from the scene before."""
+    effective, origin = effective_scenes(card), scene_origins(card)
+    out = []
+    for i, sc in enumerate(card.scenes):
+        own = {p.group for p in sc.patterns}
+        eff = effective[i]
+        out.append({
+            "number": sc.number,
+            "name": sc.name or None,
+            "line": sc.line,
+            "groups": [p.letter for p in sc.patterns],
+            "carried": [{"group": GROUPS[g], "from_scene": origin[i][g]} for g in sorted(eff) if g not in own],
+            "bars": scene_ticks(eff) // TICKS_PER_BAR,
+            "pad_hits_per_bar": round(_energy(eff), 1),
+            "groups_playing": [GROUPS[g] for g in sorted(eff) if eff[g].hits],
+            "changes_from_previous": _changes(effective[i - 1], eff) if i else None,
+            "patterns": [pattern_report(p, card) for p in sc.patterns],
+        })
+    return out
+
+
+def arrangement_report(card: Card) -> dict:
+    """The order the scenes play in (the chain, else each scene once) with passes and bars, the total length, the energy of each scene and what changes at each step."""
+    effective = effective_scenes(card)
+    order = play_order(card)
+    steps = []
+    total = 0
+    for i, (idx, passes) in enumerate(order):
+        bars = scene_ticks(effective[idx]) // TICKS_PER_BAR
+        total += bars * passes
+        steps.append({"step": i + 1, "scene": idx + 1, "name": card.scenes[idx].name or None, "passes": passes, "bars_per_pass": bars, "bars": bars * passes})
+    transitions = []
+    for i in range(len(order)):
+        j = (i + 1) % len(order)
+        a, b = order[i][0], order[j][0]
+        if len(order) == 1 or (j == 0 and not card.chain):
+            continue  # one step has nothing to change to, and scenes without a chain don't loop
+        t = {"from_step": i + 1, "to_step": j + 1, "from_scene": a + 1, "to_scene": b + 1, "loop": j == 0, "same_scene": a == b}
+        t.update({"changed": [], "entered": [], "kept": [], "unknown": []} if a == b else _changes(effective[a], effective[b]))
+        transitions.append(t)
+    used = {idx for idx, _ in order}
+    seconds = round(total * 4 * 60 / card.tempo, 1) if card.tempo else None
     return {
+        "has_chain": card.chain is not None,
+        "chain": _chain_text(card.chain) if card.chain else None,
+        "scenes": len(card.scenes),
+        "steps": steps,
+        "total_bars": total,
+        "seconds": seconds,
+        "energy": [{"scene": sc.number, "pad_hits_per_bar": round(_energy(effective[i]), 1), "groups_playing": [GROUPS[g] for g in sorted(effective[i]) if effective[i][g].hits]} for i, sc in enumerate(card.scenes)],
+        "transitions": transitions,
+        "not_in_chain": [sc.number for i, sc in enumerate(card.scenes) if i not in used],
+    }
+
+
+def analyse_card(card: Card, recipes: Optional[List[dict]] = None) -> dict:
+    """Everything the analyse command reports, as plain data. A card of scenes adds "scenes" (a report each) and "arrangement"; "patterns" then holds every section's report, scene by scene."""
+    if card.multi_scene:
+        scenes = scene_reports(card)
+        patterns = [r for sc in scenes for r in sc["patterns"]]
+    else:
+        scenes = None
+        patterns = [pattern_report(p, card) for p in card.patterns]
+    every = card.all_patterns
+    all_hits = [h for p in every for h in p.hits if h.semi is None]
+    report = {
         "name": card.name,
         "tempo": card.tempo,
         "swing": card.swing,
-        "groups": [p.letter for p in card.patterns],
+        "groups": [GROUPS[g] for g in sorted({p.group for p in every})] if card.multi_scene else [p.letter for p in card.patterns],
         "fx": describe_fx(card.fx) if card.fx is not None else None,
         "silent_pads": list(card.silent_pads),
         "pad_hits": len(all_hits),
-        "keys_notes": sum(1 for p in card.patterns for h in p.hits if h.semi is not None),
+        "keys_notes": sum(1 for p in every for h in p.hits if h.semi is not None),
         "velocity": _velocity([h.vel for h in all_hits]),
         "patterns": patterns,
         "similar_to": similarity(card, recipes) if recipes else [],
     }
+    if scenes is not None:
+        report["scenes"] = scenes
+        report["arrangement"] = arrangement_report(card)
+    return report
 
 
 # ---------------------------------------------------------------------------
@@ -1772,6 +2047,62 @@ def vel_char(vel: int) -> str:
     return str(max(1, min(9, round(vel / 14))))
 
 
+def _grid_pattern(out: List[str], pattern: Pattern, card: Card) -> None:
+    """The lines of one section's grid."""
+    t = pattern.step_ticks
+    per_beat = TICKS_PER_BEAT // t if TICKS_PER_BEAT % t == 0 else 4
+    per_bar = TICKS_PER_BAR // t
+    names = {**pattern.sound_names(), **pattern.pad_names()}  # a row's own name first, the sound line's when it has none
+    out.append("")
+    out.append("[%s%s] %d bar%s, step %s%s" % (
+        pattern.letter, "%02d" % pattern.number if pattern.number else "", pattern.bars, "" if pattern.bars == 1 else "s",
+        pattern.step, ", swung" if pattern.step in SWING_STEPS and card.swing > 50 else ""))
+    for pad in KEYPAD_ORDER:
+        if pad in pattern.sounds:
+            out.append("sound " + _sound_text(pad_label(pattern.group, pad), pattern.sounds[pad]))
+    for label, shape in pad_shaping(pattern).items():
+        out.append("pad %s: %s" % (label, shape["reads"]))
+    label_width = max([len(pad_label(pattern.group, o)) + 1 + len(names.get(o, "")) for o in range(12)] + [4])
+    # Beat numbers over the steps.
+    head = ""
+    for k in range(pattern.bars * per_bar):
+        if k % per_bar == 0 and k:
+            head += "| "
+        if k % per_beat == 0:
+            head += "%-*s" % (per_beat + 1, (k % per_bar) // per_beat + 1 if per_beat > 1 else "")
+    out.append("%-*s  %s" % (label_width, "", head.rstrip()))
+    rows = []
+    for pad in KEYPAD_ORDER:
+        mine = [h for h in pattern.hits if h.pad == pad and h.semi is None and h.row is not None]
+        if not mine:
+            continue
+        cells = ["."] * (pattern.bars * per_bar)
+        for h in mine:
+            if h.step is None or h.step >= len(cells):
+                continue
+            cells[h.step] = vel_char(h.vel)
+            for extra in range(1, max(1, h.gate // t)):
+                if h.step + extra < len(cells) and cells[h.step + extra] == ".":
+                    cells[h.step + extra] = "-"
+        rows.append((pad, cells))
+    total = [0] * (pattern.bars * per_bar)
+    for pad, cells in rows:
+        for k, c in enumerate(cells):
+            if c in _STEP_CHARS:
+                total[k] += 1
+        out.append("%-*s  %s" % (label_width, (pad_label(pattern.group, pad) + " " + names.get(pad, "")).rstrip(), _group(cells, per_beat, per_bar)))
+    if rows:
+        cells = [str(min(9, n)) if n else "." for n in total]
+        out.append("%-*s  %s" % (label_width, "hits", _group(cells, per_beat, per_bar)))
+    extras = [h for h in pattern.hits if h.row is None]
+    if extras:
+        out.append("")
+        out.append("notes (off the grid or KEYS):")
+        for h in extras:
+            what = "pad hit" if h.semi is None else "KEYS %s" % note_name(KEYS_ROOT + h.semi)
+            out.append("  %s at %s  vel %d  gate %d ticks  %s" % (pad_label(pattern.group, h.pad), position(h.tick), h.vel, h.gate, what))
+
+
 def render_grid(card: Card) -> str:
     out: List[str] = []
     title = card.name or "(no name)"
@@ -1783,59 +2114,22 @@ def render_grid(card: Card) -> str:
     if card.fx is not None:
         for text in fx_lines(describe_fx(card.fx)):
             out.append(text)
-    for pattern in card.patterns:
-        t = pattern.step_ticks
-        per_beat = TICKS_PER_BEAT // t if TICKS_PER_BEAT % t == 0 else 4
-        per_bar = TICKS_PER_BAR // t
-        names = {**pattern.sound_names(), **pattern.pad_names()}  # a row's own name first, the sound line's when it has none
-        out.append("")
-        out.append("[%s%s] %d bar%s, step %s%s" % (
-            pattern.letter, "%02d" % pattern.number if pattern.number else "", pattern.bars, "" if pattern.bars == 1 else "s",
-            pattern.step, ", swung" if pattern.step in SWING_STEPS and card.swing > 50 else ""))
-        for pad in KEYPAD_ORDER:
-            if pad in pattern.sounds:
-                out.append("sound " + _sound_text(pad_label(pattern.group, pad), pattern.sounds[pad]))
-        for label, shape in pad_shaping(pattern).items():
-            out.append("pad %s: %s" % (label, shape["reads"]))
-        label_width = max([len(pad_label(pattern.group, o)) + 1 + len(names.get(o, "")) for o in range(12)] + [4])
-        # Beat numbers over the steps.
-        head = ""
-        for k in range(pattern.bars * per_bar):
-            if k % per_bar == 0 and k:
-                head += "| "
-            if k % per_beat == 0:
-                head += "%-*s" % (per_beat + 1, (k % per_bar) // per_beat + 1 if per_beat > 1 else "")
-        out.append("%-*s  %s" % (label_width, "", head.rstrip()))
-        rows = []
-        for pad in KEYPAD_ORDER:
-            mine = [h for h in pattern.hits if h.pad == pad and h.semi is None and h.row is not None]
-            if not mine:
-                continue
-            cells = ["."] * (pattern.bars * per_bar)
-            for h in mine:
-                if h.step is None or h.step >= len(cells):
-                    continue
-                cells[h.step] = vel_char(h.vel)
-                for extra in range(1, max(1, h.gate // t)):
-                    if h.step + extra < len(cells) and cells[h.step + extra] == ".":
-                        cells[h.step + extra] = "-"
-            rows.append((pad, cells))
-        total = [0] * (pattern.bars * per_bar)
-        for pad, cells in rows:
-            for k, c in enumerate(cells):
-                if c in _STEP_CHARS:
-                    total[k] += 1
-            out.append("%-*s  %s" % (label_width, (pad_label(pattern.group, pad) + " " + names.get(pad, "")).rstrip(), _group(cells, per_beat, per_bar)))
-        if rows:
-            cells = [str(min(9, n)) if n else "." for n in total]
-            out.append("%-*s  %s" % (label_width, "hits", _group(cells, per_beat, per_bar)))
-        extras = [h for h in pattern.hits if h.row is None]
-        if extras:
+    if card.multi_scene:
+        if card.chain:
+            out.append("chain %s (loops)" % _chain_text(card.chain))
+        origin = scene_origins(card)
+        for i, sc in enumerate(card.scenes):
             out.append("")
-            out.append("notes (off the grid or KEYS):")
-            for h in extras:
-                what = "pad hit" if h.semi is None else "KEYS %s" % note_name(KEYS_ROOT + h.semi)
-                out.append("  %s at %s  vel %d  gate %d ticks  %s" % (pad_label(pattern.group, h.pad), position(h.tick), h.vel, h.gate, what))
+            out.append("scene %d%s" % (sc.number, " " + sc.name if sc.name else ""))
+            own = {p.group for p in sc.patterns}
+            carried = ["%s (scene %d)" % (GROUPS[g], origin[i][g]) for g in sorted(origin[i]) if g not in own]
+            if carried:
+                out.append("carries on: " + ", ".join(carried))
+            for pattern in sc.patterns:
+                _grid_pattern(out, pattern, card)
+    else:
+        for pattern in card.patterns:
+            _grid_pattern(out, pattern, card)
     return "\n".join(out)
 
 
@@ -1888,7 +2182,17 @@ def card_to_midi(card: Card, loops: int = 1, channel: Optional[int] = None) -> b
     track of its KEYS notes (60 + semi). The channel is the group's (A is 1,
     B 2, C 3, D 4) unless [channel] 1-16 is given. Each pattern repeats to fill
     [loops] times the longest one; swing is already in the ticks.
+
+    A card of scenes is rendered in the order Arc plays it: the chain's steps, each
+    scene for its passes (the card's scenes once each in order when it has no chain).
+    A scene lasts as long as its longest pattern, and each group's pattern for it
+    (its own, or the one it carries on from an earlier scene) repeats to fill that;
+    a group the first scene leaves out is silent until a scene gives it a pattern.
+    The tempo track has a marker at every pass ("Intro (scene 1), pass 1/2"). [loops]
+    repeats the whole chain that many times.
     """
+    if card.multi_scene:
+        return _arrangement_midi(card, loops, channel)
     tempo = card.tempo if card.tempo is not None else 120.0
     longest = max([p.length for p in card.patterns] or [TICKS_PER_BAR])
     total = longest * max(1, loops)
@@ -1928,14 +2232,71 @@ def card_to_midi(card: Card, loops: int = 1, channel: Optional[int] = None) -> b
     return header + b"".join(tracks)
 
 
+def _arrangement_midi(card: Card, loops: int, channel: Optional[int]) -> bytes:
+    tempo = card.tempo if card.tempo is not None else 120.0
+    effective = effective_scenes(card)
+    # The timeline: (start tick, length, scene index, pass, passes) for every pass of every step, [loops] times over.
+    timeline: List[Tuple[int, int, int, int, int]] = []
+    now = 0
+    for _ in range(max(1, loops)):
+        for idx, passes in play_order(card):
+            length = scene_ticks(effective[idx])
+            for k in range(passes):
+                timeline.append((now, length, idx, k + 1, passes))
+                now += length
+    total = now
+    meta: List[Tuple[int, int, bytes]] = [
+        (0, 0, _meta_text(0x03, card.name or "ARC BEAT")),
+        (0, 1, bytes([0xFF, 0x51, 0x03]) + int(round(60_000_000 / tempo)).to_bytes(3, "big")),
+        (0, 2, bytes([0xFF, 0x58, 0x04, 4, 2, 24, 8])),
+    ]
+    for start, _length, idx, k, passes in timeline:
+        sc = card.scenes[idx]
+        label = "%s (scene %d)" % (sc.name, sc.number) if sc.name else "scene %d" % sc.number
+        meta.append((start, 3, _meta_text(0x06, "%s, pass %d/%d" % (label, k, passes))))
+    tracks = [_track(meta, total)]
+    for group in range(4):
+        ch = (channel - 1) if channel else group
+        pad_events: List[Tuple[int, int, bytes]] = [(0, 0, _meta_text(0x03, "%s pads" % GROUPS[group]))]
+        key_events: List[Tuple[int, int, bytes]] = [(0, 0, _meta_text(0x03, "%s keys" % GROUPS[group]))]
+        has_keys = False
+        for start, length, idx, _k, _passes in timeline:
+            pattern = effective[idx].get(group)
+            if pattern is None:
+                continue
+            seg_end = start + length
+            for rep in range((length + pattern.length - 1) // pattern.length):
+                base = start + rep * pattern.length
+                for h in pattern.hits:
+                    at = base + h.tick
+                    if at >= seg_end:
+                        continue
+                    end = max(min(at + h.gate, base + pattern.length, seg_end), at + 1)
+                    if h.semi is None:
+                        note, events = pad_note(group, h.pad), pad_events
+                    else:
+                        note, events = KEYS_ROOT + h.semi, key_events
+                        has_keys = True
+                        if not 0 <= note <= 127:
+                            continue
+                    events.append((at, 1, bytes([0x90 | ch, note, h.vel])))
+                    events.append((end, 0, bytes([0x80 | ch, note, 0])))
+        if len(pad_events) > 1:
+            tracks.append(_track(pad_events, total))
+        if has_keys:
+            tracks.append(_track(key_events, total))
+    header = b"MThd" + struct.pack(">IHHH", 6, 1, len(tracks), TICKS_PER_BEAT)
+    return header + b"".join(tracks)
+
+
 # ---------------------------------------------------------------------------
 # Text output
 # ---------------------------------------------------------------------------
 
 
-def summary_line(card: Card) -> str:
+def _patterns_summary(patterns: List[Pattern]) -> str:
     parts = []
-    for p in card.patterns:
+    for p in patterns:
         pads = len({h.pad for h in p.hits if h.semi is None})
         keys = sum(1 for h in p.hits if h.semi is not None)
         parts.append("%s: %d bar%s step %s, %d pad%s, %d hit%s%s%s" % (
@@ -1944,6 +2305,10 @@ def summary_line(card: Card) -> str:
             ", %d KEYS note%s" % (keys, "" if keys == 1 else "s") if keys else "",
             ", %d sound%s" % (len(p.sounds), "" if len(p.sounds) == 1 else "s") if p.sounds else "") + (
             ", %d pad line%s" % (len(p.pads), "" if len(p.pads) == 1 else "s") if p.pads else ""))
+    return "; ".join(parts)
+
+
+def summary_line(card: Card) -> str:
     head = "OK"
     if card.name:
         head += ' "%s"' % card.name
@@ -1952,11 +2317,128 @@ def summary_line(card: Card) -> str:
     head += ", swing %d" % card.swing
     if card.fx is not None:
         head += ", fx (%s)" % ", ".join(card.fx.kinds())
-    return head + " | " + "; ".join(parts)
+    if not card.multi_scene:
+        return head + " | " + _patterns_summary(card.patterns)
+    parts = []
+    for sc in card.scenes:
+        inner = _patterns_summary(sc.patterns) or "no sections, the groups carry on"
+        parts.append("scene %d%s: %s" % (sc.number, " " + sc.name if sc.name else "", inner))
+    head += ", %d scene%s" % (len(card.scenes), "" if len(card.scenes) == 1 else "s")
+    if card.chain:
+        head += ", chain %s" % _chain_text(card.chain)
+    return head + " | " + " | ".join(parts)
 
 
 def _sound_line(label: str, snd: dict) -> str:
     return "%s slot %d%s" % (label, snd["slot"], " " + snd["name"] if snd["name"] else "")
+
+
+def _render_pattern(out: List[str], p: dict) -> None:
+    """The lines of one pattern's report."""
+    out.append("")
+    bars = "%d bar%s, step %s" % (p["bars"], "" if p["bars"] == 1 else "s", p["step"])
+    if p["pad_hits"] == 0:
+        # A group of KEYS notes only (bass, chords, a lead): the drum figures would all read 0.
+        out.append("[%s] %s, KEYS notes only" % (p["group"], bars))
+        for label, k in p["keys"].items():
+            out.append("  KEYS %-5s %d notes, %s to %s, %d pitches" % (label, k["notes"], k["lowest"], k["highest"], k["distinct_pitches"]))
+        for label, snd in p["sounds"].items():
+            out.append("  sound %s" % _sound_line(label, snd))
+        for label, shape in p["pad_shaping"].items():
+            out.append("  pad %s%s: %s" % (label, " " + shape["name"] if shape["name"] else "", shape["reads"]))
+        var = p["variation"]
+        out.append("  variation: %d distinct bar%s of %d" % (var["distinct_bars"], "" if var["distinct_bars"] == 1 else "s", var["bars"]))
+        return
+    per_bar = p["hits_per_bar"]
+    if len(set(per_bar)) <= 1:
+        spread = "%d a bar" % (per_bar[0] if per_bar else 0)
+    else:
+        spread = "by bar: %s" % ", ".join(str(n) for n in per_bar)
+    out.append("[%s] %s, %d pad hits (%s), density %s%% of 16th slots" % (p["group"], bars, p["pad_hits"], spread, p["density_pct"]))
+    for label, pad in p["pads"].items():
+        gap = pad["longest_gap"]
+        vel = pad["velocity"]
+        name = pad["name"] + (" (assumed)" if pad["name_assumed"] else "")
+        out.append("  %-7s %-12s %2d hits, vel %s-%s, longest gap %s steps%s" % (
+            label, name, pad["hits"], vel["min"], vel["max"], gap["steps"] if gap else "-", ", ghosts %d" % vel["ghosts"] if vel["ghosts"] else ""))
+    for label, snd in p["sounds"].items():
+        out.append("  sound %s" % _sound_line(label, snd))
+    for label, shape in p["pad_shaping"].items():
+        out.append("  pad %s%s: %s" % (label, " " + shape["name"] if shape["name"] else "", shape["reads"]))
+    for m in p.get("sound_mismatches", []):
+        out.append("  mismatch %s: the rhythm reads as %s%s, but slot %d is a %s by %s" % (m["pad"], m["row_role"], " (assumed kit)" if m["row_assumed"] else "", m["slot"], m["sound_role"], m["by"]))
+    for role, r in p["roles"].items():
+        out.append("  role %-7s slots of a bar %s (%d hits, syncopation %s)" % (role, r["slots"], r["hits"], r["syncopation"]))
+    for label, k in p["keys"].items():
+        out.append("  KEYS %-5s %d notes, %s to %s, %d pitches" % (label, k["notes"], k["lowest"], k["highest"], k["distinct_pitches"]))
+    s = p["swing"]
+    out.append("  swing: header %d%%%s; measured %s; %d swung hits" % (
+        s["header"], "" if s["applies"] else " (not applied: step is not 1/8 or 1/16)", "%s%%" % s["measured"] if s["measured"] is not None else "-", s["swung_hits"]))
+    out.append("  syncopation %s (%s), counting %s" % (p["syncopation"]["score"], p["syncopation"]["label"], " ".join(p["syncopation"]["counted_pads"]) or "nothing"))
+    g = p["longest_gap"]
+    if g:
+        out.append("  longest gap %s steps (%d ticks) after %s" % (g["steps"], g["ticks"], g["after"]))
+    out.append("  features: %s" % (", ".join(p["features"]) or "none detected"))
+    var = p["variation"]
+    out.append("  variation: %d distinct bar%s of %d%s" % (var["distinct_bars"], "" if var["distinct_bars"] == 1 else "s", var["bars"], ", last bar busier (a fill?)" if var["last_bar_busier"] else ""))
+
+
+def _clock(seconds: float) -> str:
+    total = int(round(seconds))
+    return "%d:%02d" % (total // 60, total % 60)
+
+
+def _changes_text(c: dict) -> str:
+    parts = []
+    if c["changed"]:
+        parts.append("%s change%s" % (" ".join(c["changed"]), "s" if len(c["changed"]) == 1 else ""))
+    if c["entered"]:
+        parts.append("%s come%s in" % (" ".join(c["entered"]), "s" if len(c["entered"]) == 1 else ""))
+    if c["kept"]:
+        parts.append("%s kept" % " ".join(c["kept"]))
+    if c["unknown"]:
+        parts.append("%s not set by the first scene" % " ".join(c["unknown"]))
+    return ", ".join(parts) or "nothing changes"
+
+
+def _scene_title(number: int, name: Optional[str]) -> str:
+    return "scene %d%s" % (number, " " + name if name else "")
+
+
+def _render_arrangement(out: List[str], a: dict) -> None:
+    out.append("")
+    out.append("arrangement: %d scene%s, %s" % (a["scenes"], "" if a["scenes"] == 1 else "s",
+                                                 "chain %s (loops)" % a["chain"] if a["has_chain"] else "no chain line: the scenes in the card's order, one pass each"))
+    for st in a["steps"]:
+        out.append("  step %d: %s x%d, %d bar%s a pass = %d bar%s" % (
+            st["step"], _scene_title(st["scene"], st["name"]), st["passes"], st["bars_per_pass"], "" if st["bars_per_pass"] == 1 else "s", st["bars"], "" if st["bars"] == 1 else "s"))
+    total = "  total %d bars" % a["total_bars"]
+    if a["seconds"] is not None:
+        total += ", about %s at the card's tempo" % _clock(a["seconds"])
+    out.append(total + ", then it loops" if a["has_chain"] else total)
+    out.append("  energy (pad hits a bar): " + ", ".join("scene %d %s%s" % (e["scene"], e["pad_hits_per_bar"], " (%s)" % "".join(e["groups_playing"]) if e["groups_playing"] else "") for e in a["energy"]))
+    for t in a["transitions"]:
+        if t["same_scene"]:
+            what = "same scene again"
+        else:
+            what = _changes_text(t)
+        out.append("  step %d to %d%s: scene %d to %d: %s" % (t["from_step"], t["to_step"], " (the loop)" if t["loop"] else "", t["from_scene"], t["to_scene"], what))
+    if a["not_in_chain"]:
+        out.append("  not in the chain: scene%s %s" % ("" if len(a["not_in_chain"]) == 1 else "s", ", ".join(str(n) for n in a["not_in_chain"])))
+
+
+def _render_scenes(out: List[str], report: dict) -> None:
+    _render_arrangement(out, report["arrangement"])
+    for sc in report["scenes"]:
+        out.append("")
+        head = "%s: %d bar%s, pad hits a bar %s" % (_scene_title(sc["number"], sc["name"]), sc["bars"], "" if sc["bars"] == 1 else "s", sc["pad_hits_per_bar"])
+        out.append(head)
+        if sc["carried"]:
+            out.append("  carries on: " + ", ".join("%s from scene %d" % (c["group"], c["from_scene"]) for c in sc["carried"]))
+        if sc["changes_from_previous"] is not None:
+            out.append("  against the scene before: " + _changes_text(sc["changes_from_previous"]))
+        for p in sc["patterns"]:
+            _render_pattern(out, p)
 
 
 def render_analysis(report: dict) -> str:
@@ -1972,53 +2454,11 @@ def render_analysis(report: dict) -> str:
     v = report["velocity"]
     out.append("pad hits %d, KEYS notes %d, velocity %s-%s (mean %s, stdev %s, %d distinct; %d ghost, %d normal, %d accent)" % (
         report["pad_hits"], report["keys_notes"], v["min"], v["max"], v["mean"], v["stdev"], v["distinct"], v["ghosts"], v["normal"], v["accents"]))
-    for p in report["patterns"]:
-        out.append("")
-        bars = "%d bar%s, step %s" % (p["bars"], "" if p["bars"] == 1 else "s", p["step"])
-        if p["pad_hits"] == 0:
-            # A group of KEYS notes only (bass, chords, a lead): the drum figures would all read 0.
-            out.append("[%s] %s, KEYS notes only" % (p["group"], bars))
-            for label, k in p["keys"].items():
-                out.append("  KEYS %-5s %d notes, %s to %s, %d pitches" % (label, k["notes"], k["lowest"], k["highest"], k["distinct_pitches"]))
-            for label, snd in p["sounds"].items():
-                out.append("  sound %s" % _sound_line(label, snd))
-            for label, shape in p["pad_shaping"].items():
-                out.append("  pad %s%s: %s" % (label, " " + shape["name"] if shape["name"] else "", shape["reads"]))
-            var = p["variation"]
-            out.append("  variation: %d distinct bar%s of %d" % (var["distinct_bars"], "" if var["distinct_bars"] == 1 else "s", var["bars"]))
-            continue
-        per_bar = p["hits_per_bar"]
-        if len(set(per_bar)) <= 1:
-            spread = "%d a bar" % (per_bar[0] if per_bar else 0)
-        else:
-            spread = "by bar: %s" % ", ".join(str(n) for n in per_bar)
-        out.append("[%s] %s, %d pad hits (%s), density %s%% of 16th slots" % (p["group"], bars, p["pad_hits"], spread, p["density_pct"]))
-        for label, pad in p["pads"].items():
-            gap = pad["longest_gap"]
-            vel = pad["velocity"]
-            name = pad["name"] + (" (assumed)" if pad["name_assumed"] else "")
-            out.append("  %-7s %-12s %2d hits, vel %s-%s, longest gap %s steps%s" % (
-                label, name, pad["hits"], vel["min"], vel["max"], gap["steps"] if gap else "-", ", ghosts %d" % vel["ghosts"] if vel["ghosts"] else ""))
-        for label, snd in p["sounds"].items():
-            out.append("  sound %s" % _sound_line(label, snd))
-        for label, shape in p["pad_shaping"].items():
-            out.append("  pad %s%s: %s" % (label, " " + shape["name"] if shape["name"] else "", shape["reads"]))
-        for m in p.get("sound_mismatches", []):
-            out.append("  mismatch %s: the rhythm reads as %s%s, but slot %d is a %s by %s" % (m["pad"], m["row_role"], " (assumed kit)" if m["row_assumed"] else "", m["slot"], m["sound_role"], m["by"]))
-        for role, r in p["roles"].items():
-            out.append("  role %-7s slots of a bar %s (%d hits, syncopation %s)" % (role, r["slots"], r["hits"], r["syncopation"]))
-        for label, k in p["keys"].items():
-            out.append("  KEYS %-5s %d notes, %s to %s, %d pitches" % (label, k["notes"], k["lowest"], k["highest"], k["distinct_pitches"]))
-        s = p["swing"]
-        out.append("  swing: header %d%%%s; measured %s; %d swung hits" % (
-            s["header"], "" if s["applies"] else " (not applied: step is not 1/8 or 1/16)", "%s%%" % s["measured"] if s["measured"] is not None else "-", s["swung_hits"]))
-        out.append("  syncopation %s (%s), counting %s" % (p["syncopation"]["score"], p["syncopation"]["label"], " ".join(p["syncopation"]["counted_pads"]) or "nothing"))
-        g = p["longest_gap"]
-        if g:
-            out.append("  longest gap %s steps (%d ticks) after %s" % (g["steps"], g["ticks"], g["after"]))
-        out.append("  features: %s" % (", ".join(p["features"]) or "none detected"))
-        var = p["variation"]
-        out.append("  variation: %d distinct bar%s of %d%s" % (var["distinct_bars"], "" if var["distinct_bars"] == 1 else "s", var["bars"], ", last bar busier (a fill?)" if var["last_bar_busier"] else ""))
+    if report.get("scenes"):
+        _render_scenes(out, report)
+    else:
+        for p in report["patterns"]:
+            _render_pattern(out, p)
     if report["similar_to"]:
         out.append("")
         out.append("closest genre recipes:")
@@ -2144,9 +2584,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="print the report as JSON")
     p.add_argument("--recipes", help="genres.md to compare with (default: the skill's own)")
     add("grid", cmd_grid, "print the card as a step grid")
-    p = add("midi", cmd_midi, "write the card as a type-1 .mid file")
+    p = add("midi", cmd_midi, "write the card as a type-1 .mid file (a card of scenes: the chain in order, each scene for its passes)")
     p.add_argument("-o", "--output", help="output file (default: the card's name .mid); '-' for standard output")
-    p.add_argument("--loops", type=int, default=1, help="repeat the longest pattern this many times (default 1)")
+    p.add_argument("--loops", type=int, default=1, help="repeat the longest pattern this many times; for a card of scenes, the whole chain (default 1)")
     p.add_argument("--channel", type=int, help="MIDI channel 1-16 for every track (default: the group's, A is 1 ... D is 4)")
     return parser
 

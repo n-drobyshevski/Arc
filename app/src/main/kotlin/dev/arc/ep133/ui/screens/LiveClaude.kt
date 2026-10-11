@@ -101,7 +101,8 @@ import dev.arc.ep133.ui.theme.LocalArcColors
  * group's playing pattern number ([numbers], A to D) and whether it has notes
  * ([hasNotes]), which the share keys name and are off without; how many
  * sounds Arc knows ([sounds]; 0 hides "With my sound list", [withSounds] being
- * its tick box); and what its keys and links do. SHARE A · 01 is the group
+ * its tick box); the project's chain ([chainSteps] steps over [chainScenes] scenes; none
+ * hides SHARE CHAIN); and what its keys and links do. SHARE A · 01 is the group
  * shown, as [MirrorScreen] has it.
  */
 class ClaudeUi(
@@ -110,21 +111,28 @@ class ClaudeUi(
     val hasNotes: List<Boolean> = List(4) { false },
     val sounds: Int = 0,
     val withSounds: Boolean = true,
+    val chainSteps: Int = 0,
+    val chainScenes: Int = 0,
     val onWithSounds: (Boolean) -> Unit = {},
     val onShareScene: () -> Unit = {},
+    val onShareChain: () -> Unit = {},
     val onSharePattern: (group: Int) -> Unit = {},
     val onPaste: () -> Unit = {},
     val onGetSkill: () -> Unit = {},
     val onLearn: () -> Unit = {},
 ) {
     val sceneHasNotes: Boolean get() = hasNotes.any { it }
+
+    /** The project's chain has steps to share. */
+    val hasChain: Boolean get() = chainSteps > 0
 }
 
 /**
  * Live tools' CLAUDE: the header with its info key (what a beat card is, and
  * how to give Claude the arc-beats skill), a card with SHARE SCENE, SHARE for
  * the [group] shown (the shares are dimmed, and still announced, when there is
- * nothing to share), the tick box "With my sound list" under them (when Arc
+ * nothing to share), SHARE CHAIN · N SCENES when the project's chain has steps
+ * (the chain as a card of scenes), the tick box "With my sound list" under them (when Arc
  * knows sounds) and PASTE BEAT, and under it two links: the skill's zip, and a
  * starter prompt to learn the EP-133 with Claude.
  */
@@ -158,6 +166,16 @@ internal fun ClaudeSection(claude: ClaudeUi, group: Int) {
                 size = KeySize.Small,
                 enabled = !patternEmpty,
             )
+            if (claude.hasChain) {
+                ArcKey(
+                    ClaudeText.shareChainKey(claude.chainScenes),
+                    claude.onShareChain,
+                    Modifier
+                        .fillMaxWidth()
+                        .semantics(mergeDescendants = true) { contentDescription = ClaudeText.shareChainName(claude.chainSteps) },
+                    size = KeySize.Small,
+                )
+            }
             if (claude.sounds > 0) SoundListTick(claude.sounds, claude.withSounds, claude.onWithSounds)
             ArcKey(
                 ClaudeText.PASTE_BEAT,
@@ -236,7 +254,7 @@ private fun SoundListTick(count: Int, on: Boolean, onChange: (Boolean) -> Unit) 
 fun ColumnScope.BeatImportSheetContent(
     ui: BeatImportUi,
     onCancel: () -> Unit,
-    onImport: (setTempo: Boolean, soundPads: Set<PhysicalPad>, applyFx: Boolean, shapePads: Set<PhysicalPad>, picked: Map<PhysicalPad, Int>) -> Unit,
+    onImport: (setTempo: Boolean, soundPads: Set<PhysicalPad>, applyFx: Boolean, shapePads: Set<PhysicalPad>, picked: Map<PhysicalPad, Int>, setChain: Boolean) -> Unit,
     onCopyProblems: (List<CardProblem>) -> Unit,
     /** For screenshots: start with the tempo chip chosen. */
     initialSetTempo: Boolean = false,
@@ -257,6 +275,8 @@ fun ColumnScope.BeatImportSheetContent(
     var picking by rememberSaveable { mutableStateOf(initialPicking?.let(::padKey) ?: -1) }
     // The FX: applied unless switched off. The pad shaping rows: all ticked, bar the ones unticked.
     var applyFx by rememberSaveable { mutableStateOf(true) }
+    // The card's chain: set as the project's unless switched off.
+    var setChain by rememberSaveable { mutableStateOf(true) }
     var shapeOff by rememberSaveable { mutableStateOf(emptyList<Int>()) }
     val silent = ui.silent
     if (silent != null && picking >= 0) {
@@ -291,9 +311,19 @@ fun ColumnScope.BeatImportSheetContent(
         Text(ui.title, style = ArcType.heading, color = c.ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
         ui.summary?.let { Text(it, style = ArcType.small, color = c.graphite) }
     }
-    for (g in ui.grids) BeatGrid(g)
+    if (ui.scenes.isEmpty()) {
+        for (g in ui.grids) BeatGrid(g)
+    } else {
+        // A card of scenes: the grids of each scene under its title.
+        for (sc in ui.scenes) {
+            Text(ClaudeText.cardScene(sc.number, sc.name).uppercase(), style = ArcType.caps, color = c.graphite, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (sc.grids.isEmpty()) Text(ClaudeText.SCENE_SAME, style = ArcType.small, color = c.graphite)
+            for (g in sc.grids) BeatGrid(g)
+        }
+    }
     val tempo = ui.tempo
-    val rows = ui.grids.count { it.goesTo != null } + (if (ui.scene != null) 1 else 0) + (if (tempo != null) 1 else 0)
+    val sceneRows = ui.scenes.count { it.index != null }
+    val rows = (if (ui.scenes.isEmpty()) ui.grids.count { it.goesTo != null } + (if (ui.scene != null) 1 else 0) else sceneRows + (if (ui.chain != null) 1 else 0)) + (if (tempo != null) 1 else 0)
     if (rows > 0) {
         GridPlate {
             var first = true
@@ -302,14 +332,33 @@ fun ColumnScope.BeatImportSheetContent(
                 if (!first) PlateLine()
                 first = false
             }
-            for (g in ui.grids) {
-                val n = g.goesTo ?: continue
-                line()
-                ValueRow(ClaudeText.GOES_TO, ClaudeText.goesTo(g.group, n))
-            }
-            ui.scene?.let {
-                line()
-                ValueRow(MirrorText.NEW_SCENE, MirrorText.sceneLabel(it))
+            if (ui.scenes.isEmpty()) {
+                for (g in ui.grids) {
+                    val n = g.goesTo ?: continue
+                    line()
+                    ValueRow(ClaudeText.GOES_TO, ClaudeText.goesTo(g.group, n))
+                }
+                ui.scene?.let {
+                    line()
+                    ValueRow(MirrorText.NEW_SCENE, MirrorText.sceneLabel(it))
+                }
+            } else {
+                // One row for each scene: "Scene 1 · Drop" and where it goes, "new S03 · A 04 · B (same)".
+                for (sc in ui.scenes) {
+                    val index = sc.index ?: continue
+                    line()
+                    StackedRow(
+                        ClaudeText.cardScene(sc.number, sc.name),
+                        ClaudeText.cardSceneTarget(index, sc.parts),
+                        description = sc.patterns?.let { ClaudeText.cardSceneName(sc.number, sc.name, index, it) },
+                    )
+                }
+                ui.chain?.let { chain ->
+                    line()
+                    StackedRow(MirrorText.CHAIN, ClaudeText.chainImport(chain.steps), description = ClaudeText.setChainName(setChain, chain.steps.size)) {
+                        SwitchChip(ClaudeText.SET_CHAIN, ClaudeText.setChainName(setChain, chain.steps.size), setChain) { setChain = !setChain }
+                    }
+                }
             }
             if (tempo != null) {
                 line()
@@ -319,6 +368,8 @@ fun ColumnScope.BeatImportSheetContent(
             }
         }
     }
+    if (ui.chain != null && setChain) Text(ClaudeText.SET_CHAIN_NOTE, style = ArcType.small, color = c.graphite)
+    if (ui.noRoom) Text(ClaudeText.NO_ROOM_FOR_SCENES, style = ArcType.small, color = c.warn)
     ui.fx?.let { FxBlock(it, applyFx) { applyFx = !applyFx } }
     if (silent != null) {
         SilentBlock(
@@ -372,7 +423,7 @@ fun ColumnScope.BeatImportSheetContent(
                 val shaped = ui.shaping?.rows.orEmpty().filter { it.changes(soundGoing(it.pad)) && padKey(it.pad) !in shapeOff }.mapTo(HashSet()) { it.pad }
                 // The picked sounds that are ticked: they are in [pads] too, being SOUNDS rows.
                 val chosen = pickedRows.filter { it.pad in pads }.associate { it.pad to it.pick.slot!! }
-                onImport(setTempo && tempo != null, pads, applyFx && ui.fx != null, shaped, chosen)
+                onImport(setTempo && tempo != null, pads, applyFx && ui.fx != null, shaped, chosen, setChain && ui.chain != null)
             },
             Modifier.weight(1f),
             style = KeyStyle.Signal,
@@ -816,6 +867,32 @@ private fun ValueRow(label: String, value: String, end: (@Composable () -> Unit)
     ) {
         Text(label, style = ArcType.small, color = c.graphite, maxLines = 1)
         Text(value, style = ArcType.bold, color = c.ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        end?.invoke()
+    }
+}
+
+/**
+ * A row of the sheet with its [value] under its [label] (a long value wraps to a second line), and [end] (a chip) at the end:
+ * a card scene's row ("Scene 1 · Drop" over "new S03 · A 04 · B (same)") and the chain's. Screen readers hear [description] for it.
+ */
+@Composable
+private fun StackedRow(label: String, value: String, description: String? = null, end: (@Composable () -> Unit)? = null) {
+    val c = LocalArcColors.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Column(
+            Modifier.weight(1f).semantics(mergeDescendants = true) { if (description != null) contentDescription = description },
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(label, style = ArcType.small, color = c.graphite, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(value, style = ArcType.bold, color = c.ink, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        }
         end?.invoke()
     }
 }

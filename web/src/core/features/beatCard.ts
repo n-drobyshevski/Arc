@@ -21,12 +21,21 @@
 //   ReadonlyMap from group to send). Knobs are floats kept with Math.fround, as
 //   in fxSettings.ts. CardPad's methods are the functions `cardPadIsEmpty` and
 //   `mergedCardPad`.
+// - BeatCard keeps `sections` (the first scene's) as a field next to `scenes`,
+//   so build one with `beatCard()` (a single scene from sections) or
+//   `beatCardOfScenes()`; `withSections(card, sections)` is the Kotlin
+//   `card.withSections(sections)`. The Kotlin properties `allSections` and
+//   `multiScene` are the functions `allSections(card)` and `isMultiScene(card)`.
+//   The card's chain is a list of [card scene number, passes] tuples; the
+//   import's `chain` is a list of ChainSteps; BeatCards.fromScenes takes the
+//   chain as ChainSteps, the seq's by default (pass `undefined`).
 
 import { clamp01 } from '../formats/fx/fxMath'
+import { Chain, chainStep, type ChainStep } from './chain'
 import { FX_TYPES, FxSettings, FxType, comp, sidechain, type Comp, type Sidechain } from './fxSettings'
 import { Keys } from './keys'
-import { LABELS, ROWS, noteName, physicalPad, type PhysicalPad } from './padNotes'
-import { Pattern, ProjectSeq, Seq, Timing, TimingSettings, pattern, patternNote, scene, timingTicks, type PatternNote } from './pattern'
+import { LABELS, ROWS, noteName, padKey, physicalPad, type PhysicalPad } from './padNotes'
+import { Pattern, ProjectSeq, Seq, Timing, TimingSettings, pattern, patternNote, scene, timingTicks, type PatternNote, type Scene } from './pattern'
 import { PadSettings, PlayMode } from './padSettings'
 import { PadSoundCache } from './padSoundCache'
 import { unnamed } from './factorySounds'
@@ -38,18 +47,32 @@ import { ClaudeText } from '../text/claudeText'
 /**
  * A beat as an ARC BEAT text card: an optional [name] (up to 40 characters),
  * the [tempo] it is meant for (40 to 240 BPM), the [swing] of its grid rows
- * (50..75, 50 straight, as the device's TIMING) and its [sections], one for
- * each group at most. [fx] is the project's effect lines, null when the card
- * has none.
+ * (50..75, 50 straight, as the device's TIMING) and its [scenes]. [fx] is the
+ * project's effect lines, null when the card has none; they are project-wide,
+ * so they apply to every scene.
+ *
+ * [scenes] is never empty. A card with no `scene` line has one implicit scene
+ * with no name, which holds the card's sections, one for each group at most;
+ * [sections] is that first scene's sections, so code written for single-scene
+ * cards keeps working (on a multi-scene card it is the first scene only: use
+ * allSections or [scenes]). [sceneLines] is set when the card's text had a
+ * `scene` line (or is to be written with them), even for one scene: a card with
+ * `scene` lines imports as new scenes (BeatCards.plan), one without as
+ * patterns. [chain] is the `chain` line, null when the card has none: its steps
+ * as [card scene number from 1, passes 1..8].
  */
 export interface BeatCard {
   readonly name: string | null
   readonly tempo: number | null
   readonly swing: number
+  readonly scenes: readonly CardScene[]
   readonly sections: readonly CardSection[]
   readonly fx: CardFx | null
+  readonly chain: readonly (readonly [number, number])[] | null
+  readonly sceneLines: boolean
 }
 
+/** A single-scene card of [sections] (what `BeatCard(...)` is in Kotlin). */
 export function beatCard(
   name: string | null = null,
   tempo: number | null = null,
@@ -57,7 +80,51 @@ export function beatCard(
   sections: readonly CardSection[] = [],
   fx: CardFx | null = null,
 ): BeatCard {
-  return { name, tempo, swing, sections, fx }
+  return { name, tempo, swing, scenes: [cardScene(null, sections)], sections, fx, chain: null, sceneLines: false }
+}
+
+/** A card of [scenes] (never empty: an empty list is one scene with no sections). */
+export function beatCardOfScenes(
+  name: string | null,
+  tempo: number | null,
+  swing: number,
+  scenes: readonly CardScene[],
+  fx: CardFx | null = null,
+  chain: readonly (readonly [number, number])[] | null = null,
+  sceneLines = false,
+): BeatCard {
+  const all = scenes.length === 0 ? [cardScene(null, [])] : scenes
+  return { name, tempo, swing, scenes: all, sections: all[0]!.sections, fx, chain, sceneLines }
+}
+
+/** The same card with [sections] as its first scene's. */
+export function withSections(card: BeatCard, sections: readonly CardSection[]): BeatCard {
+  return { ...card, scenes: [{ ...card.scenes[0]!, sections }, ...card.scenes.slice(1)], sections }
+}
+
+/** The sections of every scene, in order. */
+export function allSections(card: BeatCard): CardSection[] {
+  return card.scenes.flatMap((sc) => sc.sections)
+}
+
+/** Whether the card is written, and imported, as scenes: it has `scene` lines, more than one scene or a chain. */
+export function isMultiScene(card: BeatCard): boolean {
+  return card.sceneLines || card.scenes.length > 1 || card.chain !== null
+}
+
+/**
+ * One scene of a card (a `scene` line and what follows it): its optional [name]
+ * (up to 40 characters; Arc keeps no scene names) and its [sections], one for
+ * each group at most. A group the scene leaves out plays the previous scene's
+ * pattern; in the first scene, the pattern the scene playing gives it.
+ */
+export interface CardScene {
+  readonly name: string | null
+  readonly sections: readonly CardSection[]
+}
+
+export function cardScene(name: string | null = null, sections: readonly CardSection[] = []): CardScene {
+  return { name, sections }
 }
 
 /**
@@ -203,20 +270,29 @@ export interface CardRead {
 
 /**
  * A card planned into a project's sequencer: the [seq] after it, the
- * [group, pattern number] slots it filled ([placed], in the card's order), and
- * whether it added a scene ([newScene]). [fullGroup] is the group whose bank
- * had no free pattern when nothing could be placed: then [seq] is the very one
- * given and [placed] is empty. It is null otherwise.
+ * [group, pattern number] slots it filled ([placed], in the card's order: for a
+ * card of scenes, scene by scene), and whether it added a scene ([newScene]).
+ * [scenes] are the indices of the scenes it added, in the card's order (empty
+ * when [newScene] is false); [chain] is the card's chain mapped to them, as
+ * steps of those scene indices (null when the card has no chain or added no
+ * scenes). [fullGroup] is the group whose bank had no free pattern when
+ * nothing could be placed: then [seq] is the very one given and [placed] is
+ * empty. It is null otherwise.
  */
 export interface CardImport {
   readonly seq: ProjectSeq
   readonly placed: readonly (readonly [number, number])[]
   readonly newScene: boolean
   readonly fullGroup: number | null
+  readonly scenes: readonly number[]
+  readonly chain: readonly ChainStep[] | null
 }
 
 const VERSION = 1
 const MAX_NAME = 40
+
+/** The most scenes a card holds. */
+const MAX_SCENES = 16
 
 /** The comment a tidied card carries. */
 const TIDY_COMMENT = '# tidied: velocities and short gates rounded'
@@ -270,6 +346,7 @@ const PAD = /^([A-D])(ENTER|[E.0-9])$/
 const SECTION = /^([A-D])(\d*)$/
 const AT = /^(\d{1,6})\.(\d{1,6})\.(\d{1,6})([+-]\d{1,6})?$/
 const NOTE_NAME = /^[A-G]#?(?:-1|\d)$/
+const CHAIN_STEP = /^(\d{1,6})(?:[xX](\d{1,6}))?$/
 const TEXT_BREAKS = /[#|\t\r\n\u00A0 ]+/g
 const INT = /^\d{1,9}$/
 const SIGNED = /^[+-]?\d{1,9}$/
@@ -423,10 +500,21 @@ function read(text: string): CardRead {
   let fxSends: Map<number, number> | null = null
   let fxComp: Comp | null = null
   let fxSidechain: Sidechain | null = null
+  // The sections of the scene being read (of the one implicit scene when the card has no scene line).
   const sections: CardSection[] = []
   const groups = new Set<number>()
   let draft: Draft | null = null
   let sectionLines = 0
+
+  // The scenes read, the scene line count, the name of the scene being read, and the line of the first section when no scene line came before it.
+  const scenes: CardScene[] = []
+  let sceneLines = 0
+  let sceneName: string | null = null
+  let firstSection = 0
+
+  // The chain line read (card scene numbers from 1, passes) and its line.
+  let chain: [number, number][] | null = null
+  let chainAt = 0
 
   const error = (line: number, message: string): void => {
     problems.push({ line, message, error: true })
@@ -437,7 +525,19 @@ function read(text: string): CardRead {
   const result = (): CardRead => {
     // Array.prototype.sort is stable, as Kotlin's sortedBy.
     const sorted = [...problems].sort((a, b) => a.line - b.line)
-    return { card: sorted.some((p) => p.error) ? null : { name, tempo, swing, sections, fx: readFx() }, problems: sorted }
+    const card = sorted.some((p) => p.error) ? null : beatCardOfScenes(name, tempo, swing, [...scenes], readFx(), chain, sceneLines > 0)
+    return { card, problems: sorted }
+  }
+  // The chain names scenes the card has, and the card has scenes at all.
+  const checkChain = (): void => {
+    const c = chain
+    if (c === null) return
+    if (sceneLines === 0) {
+      error(chainAt, 'A chain needs scenes: start each scene with a scene line.')
+      return
+    }
+    const i = c.findIndex((x) => x[0] > sceneLines)
+    if (i >= 0) error(chainAt, `chain step ${i + 1} names scene ${c[i]![0]}, but the card has ${sceneLines} ${sceneLines === 1 ? 'scene' : 'scenes'}.`)
   }
   // The effect lines read, or null when the card has none.
   const readFx = (): CardFx | null =>
@@ -491,6 +591,7 @@ function read(text: string): CardRead {
   const section = (no: number, line: string): void => {
     close()
     sectionLines++
+    if (sceneLines === 0 && firstSection === 0) firstSection = no
     const end = line.indexOf(']')
     if (end < 0) {
       skipped(no, 'A section needs a closing ], as in [A].')
@@ -543,11 +644,72 @@ function read(text: string): CardRead {
     draft = newDraft(no, group, num, bars, step, bad, dropped)
   }
 
+  // scene [name]: starts a scene; the sections up to the next scene line are its.
+  const sceneLine = (no: number, line: string): void => {
+    close()
+    if (sceneLines > 0) scenes.push(cardScene(sceneName, [...sections]))
+    else if (firstSection !== 0) error(firstSection, 'A section comes before the first scene line: once a card has scenes, every section belongs to one.')
+    sections.length = 0
+    groups.clear()
+    sceneLines++
+    if (sceneLines === MAX_SCENES + 1) error(no, `The card has more than ${MAX_SCENES} scenes, the most is ${MAX_SCENES}.`)
+    const rest = trim(line.slice(tokens(line)[0]!.length))
+    if (rest === '') sceneName = null
+    else if (Array.from(rest).length > MAX_NAME) {
+      warn(no, `Scene name is longer than ${MAX_NAME} characters, shortened.`)
+      sceneName = trim(cut(rest, MAX_NAME))
+    } else sceneName = rest
+  }
+
+  // chain <step> ...: a step is a scene number from 1, with its passes as in 2x4 (1..8, default 1). A line with a fault changes nothing.
+  const chainLine = (no: number, line: string): void => {
+    const word = tokens(line)[0]!
+    if (sectionLines > 0 || sceneLines > 0) {
+      error(no, `'${word}' belongs before the first scene.`)
+      return
+    }
+    const t = tokens(line.slice(word.length))
+    if (t.length === 0) {
+      error(no, 'chain needs at least one scene, as in chain 1 2x2 3.')
+      return
+    }
+    const steps: [number, number][] = []
+    for (const tok of t) {
+      const m = CHAIN_STEP.exec(tok)
+      if (m === null) {
+        error(no, `'${tok}' isn't a chain step. Write a scene number, and its passes after an x, as in 2 or 2x4.`)
+        return
+      }
+      const sc = Number(m[1])
+      const passes = m[2] === undefined || m[2] === '' ? 1 : Number(m[2])
+      if (sc < 1) {
+        error(no, `chain step '${tok}': scenes count from 1.`)
+        return
+      }
+      if (passes < Chain.MIN_PASSES || passes > Chain.MAX_PASSES) {
+        error(no, `chain step '${tok}': passes must be ${Chain.MIN_PASSES} to ${Chain.MAX_PASSES}.`)
+        return
+      }
+      steps.push([sc, passes])
+    }
+    if (steps.length > Chain.MAX_STEPS) {
+      error(no, `The chain has ${steps.length} steps, the most is ${Chain.MAX_STEPS}.`)
+      return
+    }
+    if (chain !== null) warn(no, 'Two chain lines, kept the later.')
+    chain = steps
+    chainAt = no
+  }
+
   const header = (no: number, line: string): void => {
     const word = tokens(line)[0]!
     const key = word.toLowerCase()
     const rest = trim(line.slice(word.length))
-    if (line.includes('|') || firstIsPad(line) || key === 'notes' || key === 'sound' || key === 'pad') {
+    if (sceneLines > 0 && HEADER_KEYS.has(key)) {
+      warn(no, `'${word}' belongs before the first scene, ignored.`)
+    } else if (sceneLines > 0 && FX_KEYS.has(key)) {
+      error(no, `'${word}' belongs before the first scene.`)
+    } else if (line.includes('|') || firstIsPad(line) || key === 'notes' || key === 'sound' || key === 'pad') {
       error(no, `'${word}' needs a section first, such as [A].`)
     } else if (FX_KEYS.has(key)) {
       fxLine(no, word, key, tokens(rest))
@@ -928,6 +1090,15 @@ function read(text: string): CardRead {
   }
 
   const lineAt = (no: number, line: string): void => {
+    const first = tokens(line)[0]!.toLowerCase()
+    if (first === 'scene') {
+      sceneLine(no, line)
+      return
+    }
+    if (first === 'chain') {
+      chainLine(no, line)
+      return
+    }
     if (line.startsWith('[')) {
       section(no, line)
       return
@@ -965,7 +1136,9 @@ function read(text: string): CardRead {
     lineAt(i + 1, line)
   }
   close()
+  scenes.push(cardScene(sceneLines > 0 ? sceneName : null, [...sections]))
   if (sectionLines === 0) error(start + 1, 'The card has no section, such as [A].')
+  checkChain()
   return result()
 }
 
@@ -978,7 +1151,12 @@ function read(text: string): CardRead {
  * has one. With [tidy], velocities are rounded to 127, 100 or 64 (ties up) and gates under a step
  * become a step, for every note, and the card says so in a comment. The [silent]
  * pads (silentPads) are listed in a comment of their own right after the header
- * (ClaudeText.noSoundOn); readers ignore it. The text ends in a newline.
+ * (ClaudeText.noSoundOn); readers ignore it. A card of scenes (isMultiScene) is
+ * written as the spec's writing rule has it: the `chain` line after the effect
+ * lines (steps that name no scene are left out), then each scene as a `scene`
+ * line with its name if it has one, followed by its sections in group order. A
+ * section that only repeats the previous scene's pattern for its group (the
+ * same pattern, sounds and pad shaping) is left out. The text ends in a newline.
  */
 function write(card: BeatCard, names: (pad: PhysicalPad) => string | null = () => null, tidy = false, silent: readonly PhysicalPad[] = []): string {
   const swing = TimingSettings.clampSwing(card.swing)
@@ -989,13 +1167,72 @@ function write(card: BeatCard, names: (pad: PhysicalPad) => string | null = () =
   if (card.tempo !== null) out.push(`tempo ${tempoText(card.tempo)}`)
   out.push(`swing ${swing}`)
   if (card.fx !== null) writeFx(out, card.fx)
+  if (isMultiScene(card) && card.chain !== null) writeChain(out, card.chain, card.scenes.length)
   if (silent.length > 0) out.push(ClaudeText.noSoundOn(silent))
   if (tidy) out.push(TIDY_COMMENT)
-  for (const s of [...card.sections].sort((a, b) => a.group - b.group)) {
+  if (!isMultiScene(card)) {
+    for (const s of [...card.sections].sort((a, b) => a.group - b.group)) {
+      out.push('')
+      writeSection(out, s, swing, names, tidy)
+    }
+    return out.join('\n') + '\n'
+  }
+  const before: (CardSection | null)[] = [null, null, null, null]
+  for (const sc of card.scenes) {
     out.push('')
-    writeSection(out, s, swing, names, tidy)
+    const sceneTitle = sc.name === null ? '' : cleanText(sc.name, MAX_NAME)
+    out.push('scene' + (sceneTitle === '' ? '' : ` ${sceneTitle}`))
+    let first = true
+    for (const s of [...sc.sections].sort((a, b) => a.group - b.group)) {
+      const prev = s.group >= 0 && s.group < 4 ? before[s.group]! : null
+      if (prev !== null && repeats(prev, s)) continue
+      if (!first) out.push('')
+      first = false
+      writeSection(out, s, swing, names, tidy)
+      if (s.group >= 0 && s.group < 4) before[s.group] = s
+    }
   }
   return out.join('\n') + '\n'
+}
+
+// The chain line: steps as 2 or 2x4; those naming a scene the card hasn't, or passes out of range, are left out, and so is a chain left with none.
+function writeChain(out: string[], chain: readonly (readonly [number, number])[], sceneCount: number): void {
+  const steps = chain.filter(([sc, passes]) => sc >= 1 && sc <= sceneCount && passes >= Chain.MIN_PASSES && passes <= Chain.MAX_PASSES).slice(0, Chain.MAX_STEPS)
+  if (steps.length === 0) return
+  out.push('chain ' + steps.map(([sc, passes]) => (passes === 1 ? `${sc}` : `${sc}x${passes}`)).join(' '))
+}
+
+// Whether section [s] only repeats [prev], the previous scene's for its group: the same pattern as written (not the notes' ids), sounds and pad shaping.
+function repeats(prev: CardSection, s: CardSection): boolean {
+  return sameMap(s.sounds, prev.sounds, (a, b) => a.slot === b.slot && a.name === b.name) && sameMap(s.pads, prev.pads, sameCardPad) && sameWritten(prev.pattern, s.pattern)
+}
+
+function sameCardPad(a: CardPad, b: CardPad): boolean {
+  return a.pitch === b.pitch && a.level === b.level && a.pan === b.pan && a.attack === b.attack && a.release === b.release && a.mode === b.mode
+}
+
+function sameMap<V>(a: ReadonlyMap<number, V>, b: ReadonlyMap<number, V>, same: (x: V, y: V) => boolean): boolean {
+  if (a.size !== b.size) return false
+  for (const [k, v] of a) {
+    const o = b.get(k)
+    if (o === undefined || !same(v, o)) return false
+  }
+  return true
+}
+
+// Whether two patterns are written the same: the bars and the notes that play, in order, whatever their ids.
+function sameWritten(a: Pattern, b: Pattern): boolean {
+  if (a.bars !== b.bars) return false
+  const x = keyed(a)
+  const y = keyed(b)
+  return x.length === y.length && x.every((n, i) => n.tick === y[i]!.tick && n.offset === y[i]!.offset && n.semitones === y[i]!.semitones && n.velocity === y[i]!.velocity && n.gate === y[i]!.gate)
+}
+
+function keyed(p: Pattern): PatternNote[] {
+  const len = Pattern.lengthTicks(p)
+  return unique(p.notes.filter((n) => n.tick >= 0 && n.tick < len)).sort(
+    (a, b) => a.tick - b.tick || a.offset - b.offset || (a.semitones ?? -Infinity) - (b.semitones ?? -Infinity) || a.velocity - b.velocity || a.gate - b.gate,
+  )
 }
 
 // The effect lines: fx (when there is an effect line), send, comp, sidechain; knobs as whole percents.
@@ -1217,7 +1454,83 @@ function fromPatterns(
     .map((s) => ({ ...s, sounds: new Map([...s.sounds, ...soundsUsed(s, sounds)]), pads: new Map([...s.pads, ...padsUsed(s, pads)]) }))
   const s = TimingSettings.clampSwing(timingSwing)
   const swing = s > TimingSettings.SWING_MIN && kept.every((x) => fitsSwung(x.pattern, s)) ? s : TimingSettings.SWING_MIN
-  return { name, tempo, swing, sections: kept, fx: fx === null ? null : fxOf(fx) }
+  return beatCard(name, tempo, swing, kept, fx === null ? null : fxOf(fx))
+}
+
+/**
+ * A card for a project's chain (a share of the arrangement): the chain's
+ * distinct scenes in the order they first play become the card's scenes (with
+ * `scene` lines, no names), and the chain, mapped to the card's scene numbers,
+ * its `chain` line. Null when [chain] has no step that names a scene of [seq].
+ * [chain] is the seq's by default.
+ *
+ * Each scene's sections come from the patterns [seq] gives it, as fromPatterns
+ * has them. The first scene has the groups with notes (all four when none has);
+ * a later scene has a group only when its pattern differs from the one the
+ * group last had in the card's earlier scenes (one it left out counts as
+ * blank), so a card never repeats a pattern (write leaves such a section out in
+ * any case). The swing is [timingSwing] when every pad hit of every section
+ * sits on the swung 1/16 grid, else 50. [sounds], [fx] and [pads] are as in
+ * fromPatterns for the whole card: a pad's sound line and `pad` line are
+ * written once, in the first section whose notes use the pad, and again only
+ * when they change.
+ */
+function fromScenes(
+  name: string | null,
+  tempo: number | null,
+  timingSwing: number,
+  seq: ProjectSeq,
+  chain: readonly ChainStep[] = seq.chain.steps,
+  sounds: (pad: PhysicalPad) => CardSound | null = () => null,
+  fx: FxSettings | null = null,
+  pads: (pad: PhysicalPad) => PadSettings | null = () => null,
+): BeatCard | null {
+  const steps = chain.filter((st) => st.scene >= 0 && st.scene < seq.scenes.length).slice(0, Chain.MAX_STEPS)
+  if (steps.length === 0) return null
+  const order = [...new Set(steps.map((st) => st.scene))]
+  const given = new Map<number, CardSound>()
+  const shaped = new Map<number, CardPad>()
+  // The pattern each group last had in the card; null before it has a section.
+  const last: (Pattern | null)[] = [null, null, null, null]
+  const scenes = order.map((index, k) => {
+    const numbers = seq.scenes[index]!.patterns
+    const all = [0, 1, 2, 3].map((g) => cardSection(g, numbers[g]!, ProjectSeq.pattern(seq, g, numbers[g]!)))
+    let chosen: CardSection[]
+    if (k === 0) {
+      const withNotes = all.filter((x) => !Pattern.isEmpty(x.pattern))
+      chosen = withNotes.length > 0 ? withNotes : all
+    } else {
+      chosen = all.filter((x) => {
+        const l = last[x.group]!
+        return l !== null ? !sameWritten(l, x.pattern) : !Pattern.isEmpty(x.pattern)
+      })
+    }
+    return cardScene(
+      null,
+      chosen.map((x) => {
+        last[x.group] = x.pattern
+        const own = new Map<number, CardSound>()
+        for (const [offset, snd] of soundsUsed(x, sounds)) {
+          const key = padKey(physicalPad(x.group, offset))
+          const prev = given.get(key)
+          given.set(key, snd)
+          if (prev === undefined || prev.slot !== snd.slot || prev.name !== snd.name) own.set(offset, snd)
+        }
+        const shaping = new Map<number, CardPad>()
+        for (const [offset, pad] of padsUsed(x, pads)) {
+          const key = padKey(physicalPad(x.group, offset))
+          const prev = shaped.get(key)
+          shaped.set(key, pad)
+          if (prev === undefined || !sameCardPad(prev, pad)) shaping.set(offset, pad)
+        }
+        return { ...x, sounds: own, pads: shaping }
+      }),
+    )
+  })
+  const s = TimingSettings.clampSwing(timingSwing)
+  const swing = s > TimingSettings.SWING_MIN && scenes.every((sc) => sc.sections.every((x) => fitsSwung(x.pattern, s))) ? s : TimingSettings.SWING_MIN
+  const mapped = steps.map((st): [number, number] => [order.indexOf(st.scene) + 1, Math.min(Math.max(st.passes, Chain.MIN_PASSES), Chain.MAX_PASSES)])
+  return beatCardOfScenes(name, tempo, swing, scenes, fx === null ? null : fxOf(fx), mapped, true)
 }
 
 // The sound of each pad the section's notes use, for those [sounds] knows.
@@ -1347,21 +1660,24 @@ function notesByPad(s: CardSection): Map<number, number> {
 
 /**
  * The pads [card]'s notes use (pad hits and KEYS notes alike; a note past its pattern's end doesn't play) that would
- * be silent: [slotOf] gives no sound for them now (null) and no sound line of the card puts one on them. In keypad
- * order for each group. Empty when the pads are not [known] (nothing read yet): then a pad with no slot is not
+ * be silent: [slotOf] gives no sound for them now (null) and no sound line of the card (in any scene) puts one on them.
+ * In keypad order for each group, scene by scene. Empty when the pads are not [known] (nothing read yet): then a pad with no slot is not
  * known to be empty.
  */
 function silentPads(card: BeatCard, slotOf: (pad: PhysicalPad) => number | null, known: boolean): PhysicalPad[] {
   if (!known) return []
   const out: PhysicalPad[] = []
-  for (const s of [...card.sections].sort((a, b) => a.group - b.group)) {
-    const used = notesByPad(s)
-    for (const offset of KEYPAD) {
-      if (!used.has(offset)) continue
-      const line = s.sounds.get(offset)
-      if (line !== undefined && line.slot >= SLOT_MIN && line.slot <= SLOT_MAX) continue
-      const pad = physicalPad(s.group, offset)
-      if (slotOf(pad) === null && !out.some((p) => p.group === pad.group && p.offset === pad.offset)) out.push(pad)
+  // A sound line in any scene puts a sound on its pad: the sounds are the project's.
+  const given = new Set<number>()
+  for (const s of allSections(card)) for (const [offset, line] of s.sounds) if (line.slot >= SLOT_MIN && line.slot <= SLOT_MAX) given.add(padKey(physicalPad(s.group, offset)))
+  for (const scene of card.scenes) {
+    for (const s of [...scene.sections].sort((a, b) => a.group - b.group)) {
+      const used = notesByPad(s)
+      for (const offset of KEYPAD) {
+        const pad = physicalPad(s.group, offset)
+        if (!used.has(offset) || given.has(padKey(pad))) continue
+        if (slotOf(pad) === null && !out.some((p) => p.group === pad.group && p.offset === pad.offset)) out.push(pad)
+      }
     }
   }
   return out
@@ -1412,11 +1728,14 @@ function unnamedIn(available: ReadonlyMap<number, string>, slot: number): boolea
  * that is there but unnamed ("200.pcm", a factory sound whose name can't be
  * checked) is used all the same, as a pick that is `unverified`; else the line
  * is MISSING. A line without a name uses its slot when [available] has it. A
- * pick whose slot is already on the pad is SAME, found by name or not.
+ * pick whose slot is already on the pad is SAME, found by name or not. The
+ * sounds are the project's, not a scene's: the lines of all the card's scenes
+ * are matched, and a pad given a line in more than one scene takes the last
+ * (one pick, in the place of its first).
  */
 function resolveSounds(card: BeatCard, available: ReadonlyMap<number, string>, current: (pad: PhysicalPad) => number | null): SoundPick[] {
-  const picks: SoundPick[] = []
-  for (const s of card.sections) {
+  const picks = new Map<number, SoundPick>()
+  for (const s of allSections(card)) {
     for (const offset of KEYPAD) {
       const wanted = s.sounds.get(offset)
       if (wanted === undefined) continue
@@ -1428,15 +1747,15 @@ function resolveSounds(card: BeatCard, available: ReadonlyMap<number, string>, c
       const byName = direct === null && name !== null ? lookUp(available, name, now) : null
       const slot = direct ?? byName ?? (unnamedIn(available, wanted.slot) ? wanted.slot : null)
       if (slot === null) {
-        picks.push({ pad, wanted, slot: null, name: null, currentSlot: now, status: SoundStatus.MISSING, unverified: false })
+        picks.set(padKey(pad), { pad, wanted, slot: null, name: null, currentSlot: now, status: SoundStatus.MISSING, unverified: false })
         continue
       }
       const unverified = unnamedIn(available, slot)
       const status = slot === now ? SoundStatus.SAME : byName !== null ? SoundStatus.FOUND_BY_NAME : SoundStatus.CHANGE
-      picks.push({ pad, wanted, slot, name: available.get(slot) ?? null, currentSlot: now, status, unverified })
+      picks.set(padKey(pad), { pad, wanted, slot, name: available.get(slot) ?? null, currentSlot: now, status, unverified })
     }
   }
-  return picks
+  return [...picks.values()]
 }
 
 /**
@@ -1470,25 +1789,99 @@ function soundList(source: string, available: ReadonlyMap<number, string>): stri
  * leaves the scene alone: the caller picks the pattern from `placed`. When a
  * group has no free pattern (all 99 hold notes), nothing is placed: the result
  * has [seq] as it was, no `placed` and that group in `fullGroup`.
+ *
+ * A card of scenes (isMultiScene, from `scene` lines) is planned by planScenes
+ * instead, which also takes [setChain].
  */
-function plan(seq: ProjectSeq, card: BeatCard): CardImport {
+function plan(seq: ProjectSeq, card: BeatCard, setChain = true): CardImport {
+  if (isMultiScene(card)) return planScenes(seq, card, setChain)
   let out = seq
   const placed: [number, number][] = []
   for (const s of card.sections) {
     if (s.group < 0 || s.group > 3) continue
     const n = SceneOps.nextFree(out, s.group)
-    if (!Pattern.isEmpty(ProjectSeq.pattern(out, s.group, n))) return { seq, placed: [], newScene: false, fullGroup: s.group }
+    if (!Pattern.isEmpty(ProjectSeq.pattern(out, s.group, n))) return { seq, placed: [], newScene: false, fullGroup: s.group, scenes: [], chain: null }
     const p = s.pattern
     out = ProjectSeq.withPattern(out, s.group, n, pattern(p.bars, p.notes.slice(0, Seq.MAX_NOTES).map((x) => ({ ...x, id: 0 }))))
     placed.push([s.group, n])
   }
-  if (placed.length < 2) return { seq: out, placed, newScene: false, fullGroup: null }
+  if (placed.length < 2) return { seq: out, placed, newScene: false, fullGroup: null, scenes: [], chain: null }
   const withScene = SceneOps.newScene(out)
-  if (withScene.scenes.length === out.scenes.length) return { seq: out, placed, newScene: false, fullGroup: null }
+  if (withScene.scenes.length === out.scenes.length) return { seq: out, placed, newScene: false, fullGroup: null, scenes: [], chain: null }
   const numbers = [0, 1, 2, 3].map((g) => [...placed].reverse().find((x) => x[0] === g)?.[1] ?? ProjectSeq.selected(seq, g))
   const scenes = [...withScene.scenes.slice(0, -1), scene(numbers)]
-  return { seq: ProjectSeq.withScenes(withScene, scenes, withScene.scene), placed, newScene: true, fullGroup: null }
+  return {
+    seq: ProjectSeq.withScenes(withScene, scenes, withScene.scene),
+    placed,
+    newScene: true,
+    fullGroup: null,
+    scenes: [withScene.scenes.length - 1],
+    chain: null,
+  }
+}
+
+/**
+ * A card of scenes planned into [seq]: one new scene for each card scene,
+ * appended after the project's scenes, in the card's order. Each section's
+ * pattern goes into its group's next free pattern (after the ones the card has
+ * placed already, so no two sections share one, and nothing is overwritten); a
+ * group a scene leaves out takes the pattern number of the scene before it (the
+ * first scene: the numbers of the scene playing). The first new scene is
+ * selected. `placed` lists the sections in the card's order, `scenes` the new
+ * scenes' indices.
+ *
+ * `chain` is the card's chain mapped to the new scenes (null when the card has
+ * none). With [setChain] on (the default) and a chain, the result's `seq` has
+ * it as the project's chain, replacing the one there and turned on; with it off
+ * the project's chain is left alone.
+ *
+ * Limits, as for the card without scenes: when a group has no free pattern for
+ * a section, nothing is placed (`fullGroup`, [seq] as it was). When the new
+ * scenes don't all fit in 99, none is added (`newScene` false, no scenes, no
+ * chain), and the patterns are still placed.
+ */
+function planScenes(seq: ProjectSeq, card: BeatCard, setChain = true): CardImport {
+  let out = seq
+  const placed: [number, number][] = []
+  const taken = new Set<number>()
+  let numbers = [0, 1, 2, 3].map((g) => ProjectSeq.selected(seq, g))
+  const made: Scene[] = []
+  for (const sc of card.scenes) {
+    const now = [...numbers]
+    for (const s of sc.sections) {
+      if (s.group < 0 || s.group > 3) continue
+      const n = freePattern(out, s.group, taken)
+      if (n === null) return { seq, placed: [], newScene: false, fullGroup: s.group, scenes: [], chain: null }
+      const p = s.pattern
+      out = ProjectSeq.withPattern(out, s.group, n, pattern(p.bars, p.notes.slice(0, Seq.MAX_NOTES).map((x) => ({ ...x, id: 0 }))))
+      taken.add(s.group * 100 + n)
+      placed.push([s.group, n])
+      now[s.group] = n
+    }
+    numbers = now
+    made.push(scene(now))
+  }
+  if (seq.scenes.length + made.length > Seq.MAX_SCENES) return { seq: out, placed, newScene: false, fullGroup: null, scenes: [], chain: null }
+  const first = seq.scenes.length
+  const indices = made.map((_, i) => first + i)
+  const mapped = (card.chain ?? [])
+    .filter(([sc]) => sc >= 1 && sc <= card.scenes.length)
+    .slice(0, Chain.MAX_STEPS)
+    .map(([sc, passes]) => chainStep(first + sc - 1, Math.min(Math.max(passes, Chain.MIN_PASSES), Chain.MAX_PASSES)))
+  const steps = mapped.length > 0 ? mapped : null
+  const chain = setChain && steps !== null ? { steps, on: true } : seq.chain
+  return { seq: ProjectSeq.withScenes(out, [...seq.scenes, ...made], first, chain), placed, newScene: true, fullGroup: null, scenes: indices, chain: steps }
+}
+
+// The first pattern of [group] after the one selected that has no notes and isn't in [taken] (group * 100 + number), round 1..99; null when there is none.
+function freePattern(seq: ProjectSeq, group: number, taken: ReadonlySet<number>): number | null {
+  const from = ProjectSeq.selected(seq, group)
+  for (let i = 1; i < Seq.MAX_PATTERNS; i++) {
+    const n = ((from - 1 + i) % Seq.MAX_PATTERNS) + 1
+    if (Pattern.isEmpty(ProjectSeq.pattern(seq, group, n)) && !taken.has(group * 100 + n)) return n
+  }
+  return null
 }
 
 /** The Kotlin `BeatCards` object. */
-export const BeatCards = { VERSION, MAX_NAME, TIDY_COMMENT, read, hasCard, write, fromPatterns, fxOf, padOf, applyFx, applyPad, resolveSounds, soundNames, soundList, silentPads, notesByPad, plan } as const
+export const BeatCards = { VERSION, MAX_NAME, MAX_SCENES, TIDY_COMMENT, read, hasCard, write, fromPatterns, fromScenes, fxOf, padOf, applyFx, applyPad, resolveSounds, soundNames, soundList, silentPads, notesByPad, plan, planScenes } as const

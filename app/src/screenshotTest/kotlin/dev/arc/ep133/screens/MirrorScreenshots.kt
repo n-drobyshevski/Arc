@@ -80,6 +80,7 @@ import dev.arc.ep133.ui.screens.LiveStep
 import dev.arc.ep133.controller.ClipMode
 import dev.arc.ep133.controller.ClipUi
 import dev.arc.ep133.controller.PadStage
+import dev.arc.ep133.controller.ChainUi
 import dev.arc.ep133.controller.SceneGroupUi
 import dev.arc.ep133.controller.SceneUi
 import dev.arc.ep133.features.SwitchTime
@@ -107,6 +108,9 @@ import dev.arc.ep133.controller.beatImportUi
 import dev.arc.ep133.controller.silentUi
 import dev.arc.ep133.controller.soundsUi
 import dev.arc.ep133.features.BeatCard
+import dev.arc.ep133.features.Chain
+import dev.arc.ep133.features.ChainPlay
+import dev.arc.ep133.features.ChainStep
 import dev.arc.ep133.text.ClaudeText
 import dev.arc.ep133.features.BeatCards
 import dev.arc.ep133.features.Pattern
@@ -1363,7 +1367,7 @@ private val sceneGroups = listOf(
     SceneGroupUi(1, null, setOf(1, 3), 2, 1),
     SceneGroupUi(2, null, setOf(1, 2), 3, 1),
 )
-private val scenePanel = SceneUi(open = true, index = 1, count = 3, label = "S02", group = 0, groups = sceneGroups, switchTime = SwitchTime.BAR)
+private val scenePanel = SceneUi(open = true, index = 1, count = 3, label = "S02", group = 0, groups = sceneGroups, switchTime = SwitchTime.BAR, chain = ChainUi(scene = 1))
 
 // Open while stopped: nothing said yet, so the status is where the scene is.
 @PreviewTest
@@ -1375,6 +1379,28 @@ fun LiveScenePanelPreview() = Live(lastRead, oneGroup = true, transport = patter
 @Preview(name = "Live scene panel dark", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
 fun LiveScenePanelDarkPreview() = Live(lastRead, dark = true, oneGroup = true, transport = patternUi(canUndo = true), scene = LiveScene(scenePanel, still = true))
+
+// The CHAIN row: S03 ×2 → S04 → S03 ×2 → S05 on, playing its first step (pass 1 of 2, caught 40% along) with S03 showing; a project of five scenes.
+private val sceneChain = Chain(listOf(ChainStep(2, 2), ChainStep(3), ChainStep(2, 2), ChainStep(4)), on = true)
+private val sceneChained = scenePanel.copy(index = 2, count = 5, label = "S03", chain = ChainUi(sceneChain, scene = 2, play = ChainPlay(0, 1)))
+
+@PreviewTest
+@Preview(name = "Live scene chain playing", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSceneChainPlayingPreview() = Live(
+    playing, oneGroup = true, playingPads = patternPads, voices = emptySet(),
+    transport = patternUi(TransportPhase.PLAYING, at = PatternPosition(1, 3, 2, 0.25f), canUndo = true),
+    scene = LiveScene(sceneChained, running = true, still = true, chainProgress = { 0.4f }),
+)
+
+// Empty chain, dark: ON dimmed (nothing to play), only ＋ S03 to add the scene shown.
+@PreviewTest
+@Preview(name = "Live scene chain empty dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveSceneChainEmptyDarkPreview() = Live(
+    lastRead, dark = true, oneGroup = true, transport = patternUi(canUndo = true),
+    scene = LiveScene(scenePanel.copy(index = 2, count = 5, label = "S03", chain = ChainUi(Chain.EMPTY, scene = 2)), still = true),
+)
 
 // Playing with B waiting for pattern 5 at the bar's end: its number reads 03→05 (blinking, caught lit), the column and the group
 // key outlined in signal orange; ■ stops it, and the panel stays open with the pads playable under it.
@@ -2079,6 +2105,12 @@ private val claudeShares = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2),
 @Composable
 fun LiveToolsClaudePreview() = Live(lastRead, oneGroup = true, tools = true, claude = claudeShares)
 
+// The project has a chain (S03 ×2, S04, S03 ×2, S05 over three scenes): SHARE CHAIN · 3 SCENES joins the two SHARE keys.
+@PreviewTest
+@Preview(name = "Live tools claude chain", widthDp = 412, heightDp = 960, showBackground = true)
+@Composable
+fun LiveToolsClaudeChainPreview() = Live(lastRead, oneGroup = true, tools = true, claude = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212, chainSteps = 4, chainScenes = 3))
+
 // Nothing to share: both SHARE keys dimmed (and still announced), PASTE BEAT as it was; the dark theme, with TAKES under it.
 // "With my sound list" is left unticked (kept like the other Live preferences).
 @PreviewTest
@@ -2128,6 +2160,32 @@ B8 bass d1   | .... .... ..x. .... | .... X... .... .... |
 C2 vox chop  | .... .... .... X... | .... .... .... .... | .... .... X... .... | .... .... .... X... |
 """
 
+// A card of three scenes and a chain: Intro (A and B), Drop (A and B) and Breakdown (B only, A plays the Drop's).
+private const val TRACK = """ARC BEAT 1
+name Breakcore track
+tempo 168
+chain 1x2 2 1x2 3
+
+scene Intro
+[A] bars 1 step 1/16
+A7 kick      | X... .... X... .... |
+A4 hat       | x.x. x.x. x.x. x.x. |
+[B] bars 2 step 1/16
+B7 bass c1   | X... .... .... X... | .... .... X... .... |
+
+scene Drop
+[A] bars 1 step 1/16
+A7 kick      | X.x. X.x. X.x. X.x. |
+A9 snare     | .... X... .... X..o |
+A4 hat       | xxxx xxxx xxxx xxxx |
+[B] bars 2 step 1/16
+B7 bass c1   | X.x. ..x. X... x... | X.x. ..x. X... x... |
+
+scene Breakdown
+[B] bars 2 step 1/16
+B8 bass d1   | X... .... .... .... | .... .... .... .... |
+"""
+
 private const val BROKEN = """ARC BEAT 1
 name Half a beat
 tempo 400
@@ -2157,7 +2215,7 @@ private fun BeatSheet(
         MirrorScreen(mirror = MirrorUi(lastRead, loading = false), nameOf = { names[it] }, fixedNow = NOW, oneGroup = true)
         ArcSheet(visible = true, onDismiss = {}) {
             BeatImportSheetContent(
-                ui, onCancel = {}, onImport = { _, _, _, _, _ -> }, onCopyProblems = {},
+                ui, onCancel = {}, onImport = { _, _, _, _, _, _ -> }, onCopyProblems = {},
                 initialSetTempo = initialSetTempo, initialPicked = initialPicked, initialPicking = initialPicking,
             )
         }
@@ -2175,6 +2233,13 @@ fun BeatSheetOneGroupPreview() = BeatSheet(BOOM_BAP)
 @Preview(name = "Beat sheet scene dark", widthDp = 393, heightDp = 1100, showBackground = true)
 @Composable
 fun BeatSheetSceneDarkPreview() = BeatSheet(NIGHT_DRIVE, dark = true, initialSetTempo = true)
+
+// Three scenes and a chain: each scene's grids under its title, a row for each scene ("Scene 1 · Intro" over where it goes: new S02 with
+// the patterns it takes, a group it leaves out "(same)"), and the CHAIN row with SET CHAIN on, on a small phone.
+@PreviewTest
+@Preview(name = "Beat sheet scenes chain", widthDp = 360, heightDp = 1500, showBackground = true)
+@Composable
+fun BeatSheetScenesChainPreview() = BeatSheet(TRACK)
 
 // A card that can't be read: its errors and warning by line, COPY PROBLEMS, and IMPORT off with the reason.
 @PreviewTest

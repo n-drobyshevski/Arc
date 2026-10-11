@@ -61,7 +61,7 @@ class PatternTest {
         val a = Pattern(2, listOf(PatternNote(96, 3, 24, semitones = 5, id = 7)))
         val all = Patterns.EMPTY.put(1, seq(ProjectPatterns().with(0, a)))
         assertEquals(
-            """{"v":2,"projects":[{"project":1,"scene":0,"scenes":[[1,1,1,1]],"groups":[{"group":0,"patterns":[""" +
+            """{"v":3,"projects":[{"project":1,"scene":0,"scenes":[[1,1,1,1]],"groups":[{"group":0,"patterns":[""" +
                 """{"n":1,"bars":2,"notes":[{"t":96,"pad":3,"gate":24,"semi":5}]}]}]}]}""",
             all.toJson(),
         )
@@ -71,7 +71,7 @@ class PatternTest {
             .put(0, seq(ProjectPatterns().with(3, Pattern(1, listOf(PatternNote(0, 0, 1, velocity = 64))))))
             .put(2, seq(ProjectPatterns().with(1, Pattern(4))))
         assertEquals(
-            """{"v":2,"projects":[{"project":0,"scene":0,"scenes":[[1,1,1,1]],"groups":[{"group":3,"patterns":[""" +
+            """{"v":3,"projects":[{"project":0,"scene":0,"scenes":[[1,1,1,1]],"groups":[{"group":3,"patterns":[""" +
                 """{"n":1,"bars":1,"notes":[{"t":0,"pad":0,"gate":1,"vel":64}]}]}]},""" +
                 """{"project":2,"scene":0,"scenes":[[1,1,1,1]],"groups":[{"group":1,"patterns":[{"n":1,"bars":4,"notes":[]}]}]}]}""",
             more.toJson(),
@@ -79,7 +79,7 @@ class PatternTest {
         assertEquals(more, Patterns.fromJson(more.toJson()))
         assertFalse(Patterns.EMPTY.put(1, seq(ProjectPatterns().with(0, a.copy(open = true)))).toJson().contains("open"))
         assertEquals(Patterns.EMPTY, Patterns.fromJson(Patterns.EMPTY.toJson()))
-        assertEquals("""{"v":2,"projects":[]}""", Patterns.EMPTY.toJson())
+        assertEquals("""{"v":3,"projects":[]}""", Patterns.EMPTY.toJson())
     }
 
     @Test
@@ -92,7 +92,7 @@ class PatternTest {
         )
         val all = Patterns.EMPTY.put(7, p)
         assertEquals(
-            """{"v":2,"projects":[{"project":7,"scene":1,"scenes":[[1,1,1,1],[3,5,2,99]],"groups":[""" +
+            """{"v":3,"projects":[{"project":7,"scene":1,"scenes":[[1,1,1,1],[3,5,2,99]],"groups":[""" +
                 """{"group":0,"patterns":[{"n":1,"bars":1,"notes":[{"t":0,"pad":0,"gate":24}]},{"n":3,"bars":2,"notes":[{"t":384,"pad":1,"gate":12}]}]},""" +
                 """{"group":2,"patterns":[{"n":2,"bars":4,"notes":[]}]},""" +
                 """{"group":3,"patterns":[{"n":99,"bars":1,"notes":[{"t":0,"pad":0,"gate":24}]}]}]}]}""",
@@ -103,7 +103,7 @@ class PatternTest {
     }
 
     @Test
-    fun `a version 1 file reads as pattern 1 of each group, in one scene, and is written as version 2`() {
+    fun `a version 1 file reads as pattern 1 of each group, in one scene, and is written as version 3`() {
         val v1 = """{"v":1,"projects":[{"project":1,"groups":[{"group":0,"bars":2,"notes":[{"t":96,"pad":3,"gate":24,"semi":5}]},""" +
             """{"group":2,"bars":4,"notes":[]}]}]}"""
         val read = Patterns.fromJson(v1)!!
@@ -113,7 +113,7 @@ class PatternTest {
         assertEquals(want, read.of(1))
         assertEquals(listOf(Scene(listOf(1, 1, 1, 1))), read.of(1).scenes)
         assertEquals(
-            """{"v":2,"projects":[{"project":1,"scene":0,"scenes":[[1,1,1,1]],"groups":[""" +
+            """{"v":3,"projects":[{"project":1,"scene":0,"scenes":[[1,1,1,1]],"groups":[""" +
                 """{"group":0,"patterns":[{"n":1,"bars":2,"notes":[{"t":96,"pad":3,"gate":24,"semi":5}]}]},""" +
                 """{"group":2,"patterns":[{"n":1,"bars":4,"notes":[]}]}]}]}""",
             read.toJson(),
@@ -125,7 +125,7 @@ class PatternTest {
     fun `junk reads as nothing, and entries it can't read are skipped`() {
         assertNull(Patterns.fromJson("not json"))
         assertNull(Patterns.fromJson("[]"))
-        assertNull(Patterns.fromJson("""{"v":3,"projects":[]}"""))
+        assertNull(Patterns.fromJson("""{"v":4,"projects":[]}"""))
         assertNull(Patterns.fromJson("""{"v":"2","projects":[]}"""))
         assertNull(Patterns.fromJson("""{"projects":[]}"""))
         assertEquals(Patterns.EMPTY, Patterns.fromJson("""{"v":1}"""))

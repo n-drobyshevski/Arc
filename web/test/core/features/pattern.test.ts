@@ -75,7 +75,7 @@ describe('PatternTest', () => {
     const a = pattern(2, [patternNote(96, 3, 24, 5, 127, 7)])
     const all = Patterns.put(Patterns.EMPTY, 1, seq(ProjectPatterns.with(projectPatterns(), 0, a)))
     expect(Patterns.toJson(all)).toBe(
-      '{"v":2,"projects":[{"project":1,"scene":0,"scenes":[[1,1,1,1]],"groups":[{"group":0,"patterns":[' +
+      '{"v":3,"projects":[{"project":1,"scene":0,"scenes":[[1,1,1,1]],"groups":[{"group":0,"patterns":[' +
         '{"n":1,"bars":2,"notes":[{"t":96,"pad":3,"gate":24,"semi":5}]}]}]}]}',
     )
     expect(Patterns.fromJson(Patterns.toJson(all))).toEqual(
@@ -88,14 +88,14 @@ describe('PatternTest', () => {
       seq(ProjectPatterns.with(projectPatterns(), 1, pattern(4))),
     )
     expect(Patterns.toJson(more)).toBe(
-      '{"v":2,"projects":[{"project":0,"scene":0,"scenes":[[1,1,1,1]],"groups":[{"group":3,"patterns":[' +
+      '{"v":3,"projects":[{"project":0,"scene":0,"scenes":[[1,1,1,1]],"groups":[{"group":3,"patterns":[' +
         '{"n":1,"bars":1,"notes":[{"t":0,"pad":0,"gate":1,"vel":64}]}]}]},' +
         '{"project":2,"scene":0,"scenes":[[1,1,1,1]],"groups":[{"group":1,"patterns":[{"n":1,"bars":4,"notes":[]}]}]}]}',
     )
     expect(Patterns.fromJson(Patterns.toJson(more))).toEqual(more)
     expect(Patterns.toJson(Patterns.put(Patterns.EMPTY, 1, seq(ProjectPatterns.with(projectPatterns(), 0, { ...a, open: true }))))).not.toContain('open')
     expect(Patterns.fromJson(Patterns.toJson(Patterns.EMPTY))).toEqual(Patterns.EMPTY)
-    expect(Patterns.toJson(Patterns.EMPTY)).toBe('{"v":2,"projects":[]}')
+    expect(Patterns.toJson(Patterns.EMPTY)).toBe('{"v":3,"projects":[]}')
   })
 
   it('scenes and banks survive the round trip, blank patterns left out', () => {
@@ -107,7 +107,7 @@ describe('PatternTest', () => {
     )
     const all = Patterns.put(Patterns.EMPTY, 7, p)
     expect(Patterns.toJson(all)).toBe(
-      '{"v":2,"projects":[{"project":7,"scene":1,"scenes":[[1,1,1,1],[3,5,2,99]],"groups":[' +
+      '{"v":3,"projects":[{"project":7,"scene":1,"scenes":[[1,1,1,1],[3,5,2,99]],"groups":[' +
         '{"group":0,"patterns":[{"n":1,"bars":1,"notes":[{"t":0,"pad":0,"gate":24}]},{"n":3,"bars":2,"notes":[{"t":384,"pad":1,"gate":12}]}]},' +
         '{"group":2,"patterns":[{"n":2,"bars":4,"notes":[]}]},' +
         '{"group":3,"patterns":[{"n":99,"bars":1,"notes":[{"t":0,"pad":0,"gate":24}]}]}]}]}',
@@ -116,7 +116,7 @@ describe('PatternTest', () => {
     expect(Patterns.of(Patterns.fromJson(Patterns.toJson(all))!, 7).scene).toBe(1)
   })
 
-  it('a version 1 file reads as pattern 1 of each group, in one scene, and is written as version 2', () => {
+  it('a version 1 file reads as pattern 1 of each group, in one scene, and is written as version 3', () => {
     const v1 =
       '{"v":1,"projects":[{"project":1,"groups":[{"group":0,"bars":2,"notes":[{"t":96,"pad":3,"gate":24,"semi":5}]},' +
       '{"group":2,"bars":4,"notes":[]}]}]}'
@@ -125,7 +125,7 @@ describe('PatternTest', () => {
     expect(Patterns.of(read, 1)).toEqual(want)
     expect(Patterns.of(read, 1).scenes).toEqual([scene([1, 1, 1, 1])])
     expect(Patterns.toJson(read)).toBe(
-      '{"v":2,"projects":[{"project":1,"scene":0,"scenes":[[1,1,1,1]],"groups":[' +
+      '{"v":3,"projects":[{"project":1,"scene":0,"scenes":[[1,1,1,1]],"groups":[' +
         '{"group":0,"patterns":[{"n":1,"bars":2,"notes":[{"t":96,"pad":3,"gate":24,"semi":5}]}]},' +
         '{"group":2,"patterns":[{"n":1,"bars":4,"notes":[]}]}]}]}',
     )
@@ -135,7 +135,7 @@ describe('PatternTest', () => {
   it("junk reads as nothing, and entries it can't read are skipped", () => {
     expect(Patterns.fromJson('not json')).toBeNull()
     expect(Patterns.fromJson('[]')).toBeNull()
-    expect(Patterns.fromJson('{"v":3,"projects":[]}')).toBeNull()
+    expect(Patterns.fromJson('{"v":4,"projects":[]}')).toBeNull()
     expect(Patterns.fromJson('{"v":"2","projects":[]}')).toBeNull()
     expect(Patterns.fromJson('{"projects":[]}')).toBeNull()
     expect(Patterns.fromJson('{"v":1}')).toEqual(Patterns.EMPTY)

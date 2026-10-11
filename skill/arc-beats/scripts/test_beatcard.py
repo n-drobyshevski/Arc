@@ -344,6 +344,16 @@ class Errors(unittest.TestCase):
         "late-fx": "ARC BEAT 1\n" + kick() + "fx delay\n",
         "pad-outside-section": "ARC BEAT 1\npad A7 level 5\n" + kick(),
         "bad-pad-line": "ARC BEAT 1\n" + kick() + "pad A7 level 101\n",
+        "section-before-scene": "ARC BEAT 1\n" + kick() + "scene\n" + kick(),
+        "too-many-scenes": "ARC BEAT 1\n" + ("scene\n" + kick()) * 17,
+        "late-chain": "ARC BEAT 1\nscene\n" + kick() + "chain 1\n",
+        "empty-chain": "ARC BEAT 1\nchain\nscene\n" + kick(),
+        "bad-chain-step": "ARC BEAT 1\nchain two\nscene\n" + kick(),
+        "chain-scene-zero": "ARC BEAT 1\nchain 0\nscene\n" + kick(),
+        "bad-passes": "ARC BEAT 1\nchain 1x9\nscene\n" + kick(),
+        "chain-too-long": "ARC BEAT 1\nchain " + "1 " * 65 + "\nscene\n" + kick(),
+        "chain-unknown-scene": "ARC BEAT 1\nchain 1 2\nscene\n" + kick(),
+        "chain-without-scenes": "ARC BEAT 1\nchain 1\n" + kick(),
     }
 
     def test_every_case_gives_its_error(self):
@@ -1578,6 +1588,350 @@ D7 at 1.1.1 note E4
             self.assertEqual(json.loads(out.stdout)["silent_pads"], ["C7", "D7", "AE"])
             out = subprocess.run([sys.executable, "-B", os.path.join(HERE, "beatcard.py"), "analyse", path], capture_output=True, text=True)
             self.assertIn("silent pads", out.stdout)
+
+
+#: A track idea: an intro, a drop and a B-only break, in a chain that repeats the drop. The same card as BeatCardScenesTest.kt and beatCardScenes.test.ts.
+TRACK = "\n".join([
+    "ARC BEAT 1", "name Track", "tempo 120", "chain 1x2 2 3x4 2",
+    "scene Intro", "[A] bars 1", "A7 | X... .... .... .... |", "[B]", "B4 | x... .... x... .... |",
+    "scene Drop", "[A]", "A7 | X.x. X.x. X.x. X.x. |",
+    "scene", "[B] bars 2", "B4 | x... .... x... .... | x... .... x... .... |",
+]) + "\n"
+
+
+def at_lines(card):
+    """(line, level) of every problem: what the script and Arc's readers agree on, whatever their words."""
+    return [(p.line, p.level) for p in card.problems]
+
+
+class Scenes(unittest.TestCase):
+    """Scene and chain lines, read by the rules of "Scenes and chains" in the spec; the cases and line numbers are those of BeatCardScenesTest.kt."""
+
+    def test_a_card_with_scene_lines_reads_as_scenes_with_a_chain(self):
+        card = bc.parse_card(TRACK)
+        self.assertEqual(card.problems, [])
+        self.assertEqual([sc.name for sc in card.scenes], ["Intro", "Drop", ""])
+        self.assertEqual([[p.letter for p in sc.patterns] for sc in card.scenes], [["A", "B"], ["A"], ["B"]])
+        self.assertEqual([sc.number for sc in card.scenes], [1, 2, 3])
+        self.assertEqual([sc.line for sc in card.scenes], [5, 10, 13])
+        self.assertEqual(card.chain, [(1, 2), (2, 1), (3, 4), (2, 1)])
+        self.assertEqual(card.chain_line, 4)
+        self.assertTrue(card.scene_lines and card.multi_scene)
+        # `patterns` is the first scene's, all_patterns every scene's.
+        self.assertEqual(card.patterns, card.scenes[0].patterns)
+        self.assertEqual(len(card.all_patterns), 4)
+        self.assertEqual(card.scenes[2].patterns[0].bars, 2)
+
+    def test_a_card_with_no_scene_line_is_one_implicit_scene(self):
+        card = one(kick() + "[B]\nB7 | X... .... .... .... |\n")
+        self.assertEqual(len(card.scenes), 1)
+        self.assertEqual(card.scenes[0].name, "")
+        self.assertFalse(card.scene_lines or card.multi_scene)
+        self.assertIsNone(card.chain)
+        self.assertEqual(card.patterns, card.all_patterns)
+        self.assertEqual(len(card.scenes[0].patterns), 2)
+        # A scene line alone makes a card of scenes, even for one scene.
+        self.assertTrue(one("scene\n" + kick()).multi_scene)
+
+    def test_scenes_may_leave_groups_out_repeat_a_group_and_hold_no_section(self):
+        self.assertEqual(one("scene\n" + kick() + "scene\n" + kick()).problems, [])
+        card = one("scene\nscene\n" + kick())
+        self.assertEqual([len(sc.patterns) for sc in card.scenes], [0, 1])
+        self.assertEqual(codes(one("scene\n")), ["no-sections"])
+        # A notes list ends at the next scene line; the keywords don't depend on case; a comment isn't part of the name.
+        card = one("SCENE Drop # loud\n" + kick() + "notes\nA9 at 1.1.1\nScene\n" + kick())
+        self.assertEqual(card.problems, [])
+        self.assertEqual([sc.name for sc in card.scenes], ["Drop", ""])
+        self.assertEqual(len(card.scenes[0].patterns[0].hits), 2)
+        # Sound and pad lines belong to the scene's section.
+        card = one("scene\n[A]\nsound A7 12 Kick\n" + BAR + "\nscene\n[A]\nsound A7 13\npad A7 level 90\n" + BAR + "\n")
+        self.assertEqual((card.scenes[0].patterns[0].sounds[9].slot, card.scenes[1].patterns[0].sounds[9].slot), (12, 13))
+        self.assertEqual(card.scenes[1].patterns[0].pads[9].given(), {"level": 90})
+
+    def test_scene_problems_are_on_the_lines_arc_gives_them(self):
+        # A section before the first scene line: on the section's line.
+        card = one(kick() + "scene\n[B]\nB7 | X... .... .... .... |\n")
+        self.assertEqual([(p.line, p.code) for p in card.errors], [(2, "section-before-scene")])
+        # A group twice in one scene; once in each of two is fine.
+        self.assertEqual([(p.line, p.code) for p in one("scene\n" + kick() + kick()).errors], [(5, "duplicate-group")])
+        # Header lines after a scene line.
+        card = one("scene\nname Foo\ntempo 100\nfx delay\n" + kick())
+        self.assertEqual([(p.line, p.level, p.code) for p in card.problems], [(3, bc.WARNING, "late-header"), (4, bc.WARNING, "late-header"), (5, bc.ERROR, "late-fx")])
+        # A long name is cut at 40 characters with a warning.
+        card = one("scene " + "y" * 50 + "\n" + kick())
+        self.assertEqual([(p.line, p.code) for p in card.problems], [(2, "long-scene-name")])
+        self.assertEqual(card.scenes[0].name, "y" * 40)
+        # 16 scenes, not 17: the error is on the 17th scene line.
+        self.assertEqual(one(("scene\n" + kick()) * 16).problems, [])
+        card = one(("scene\n" + kick()) * 17)
+        self.assertEqual([(p.line, p.code) for p in card.errors], [(50, "too-many-scenes")])
+        self.assertFalse(card.ok)
+
+    def test_chain_lines(self):
+        tail = "scene\n" + kick() + "scene\n" + kick()
+
+        def chain(*words):
+            return one("".join(w + "\n" for w in words) + tail)
+
+        self.assertEqual(chain("chain 1 2x8 2").chain, [(1, 1), (2, 8), (2, 1)])
+        self.assertEqual(chain("chain 1 2x8 2").problems, [])
+        # Any case; a step may repeat scenes; up to 64 steps.
+        self.assertEqual(chain("CHAIN 1X2").chain, [(1, 2)])
+        self.assertEqual(len(chain("chain " + " ".join(["1"] * 64)).chain), 64)
+        self.assertEqual(at_lines(chain("chain " + " ".join(["1"] * 65))), [(2, bc.ERROR)])
+        # Scenes the card doesn't have, passes out of range, words that aren't steps, an empty line.
+        for line, code in (("chain 1 3", "chain-unknown-scene"), ("chain 1x0", "bad-passes"), ("chain 1 2x9", "bad-passes"), ("chain 0", "chain-scene-zero"),
+                           ("chain two", "bad-chain-step"), ("chain x2", "bad-chain-step"), ("chain", "empty-chain")):
+            card = chain(line)
+            self.assertEqual([(p.line, p.code) for p in card.errors], [(2, code)], line)
+        self.assertIn("scene 3", chain("chain 1 3").errors[0].message)
+        self.assertIn("2 scenes", chain("chain 1 3").errors[0].message)
+        # A line with a fault changes nothing: the earlier line stands, and the card is refused all the same.
+        faulty = chain("chain 2", "chain 1x0")
+        self.assertFalse(faulty.ok)
+        self.assertEqual(faulty.chain, [(2, 1)])
+        # A second chain line replaces the first, with a warning.
+        twice = chain("chain 1", "chain 1x2 2")
+        self.assertEqual([(p.line, p.code) for p in twice.problems], [(3, "duplicate-chain")])
+        self.assertEqual(twice.chain, [(1, 2), (2, 1)])
+        # A chain needs scene lines, and is a header line: before the first scene, so before any section.
+        self.assertEqual([(p.line, p.code) for p in one("chain 1\n" + kick()).errors], [(2, "chain-without-scenes")])
+        self.assertEqual([(p.line, p.code) for p in one("scene\nchain 1\n" + kick()).errors], [(3, "late-chain")])
+        self.assertEqual([(p.line, p.code) for p in one("scene\n" + kick() + "chain 1\n").errors], [(5, "late-chain")])
+        self.assertEqual([(p.line, p.code) for p in one(kick() + "chain 1\n").errors], [(4, "late-chain")])
+
+    def test_what_each_scene_plays(self):
+        card = bc.parse_card(TRACK)
+        eff = bc.effective_scenes(card)
+        # Scene 2 carries B from scene 1, scene 3 carries A from scene 2.
+        self.assertEqual([sorted(e) for e in eff], [[0, 1], [0, 1], [0, 1]])
+        self.assertIs(eff[1][1], card.scenes[0].patterns[1])
+        self.assertIs(eff[2][0], card.scenes[1].patterns[0])
+        self.assertEqual(bc.scene_origins(card), [{0: 1, 1: 1}, {0: 2, 1: 1}, {0: 2, 1: 3}])
+        self.assertEqual([bc.scene_ticks(e) for e in eff], [384, 384, 768])
+        self.assertEqual(bc.play_order(card), [(0, 2), (1, 1), (2, 4), (1, 1)])
+        # No chain: each scene once, in order. A group the first scene leaves out is missing from it.
+        plain = one("scene\n" + kick() + "scene\n[B]\nB7 | X... .... .... .... |\n")
+        self.assertEqual(bc.play_order(plain), [(0, 1), (1, 1)])
+        self.assertEqual([sorted(e) for e in bc.effective_scenes(plain)], [[0], [0, 1]])
+        self.assertEqual(bc.scene_ticks({}), 384)
+
+    def test_check_summarises_the_scenes_and_the_chain(self):
+        line = bc.summary_line(bc.parse_card(TRACK))
+        self.assertTrue(line.startswith('OK "Track", 120 BPM, swing 50, 3 scenes, chain 1x2 2 3x4 2 | scene 1 Intro: A: 1 bar'), line)
+        self.assertIn("| scene 3: B: 2 bars", line)
+        # A scene with no section says so.
+        self.assertIn("scene 1: no sections, the groups carry on", bc.summary_line(one("scene\nscene\n" + kick())))
+
+    def test_sound_checks_look_at_every_scene(self):
+        card = one("scene\n[A]\nsound A7 12 Kick\n" + BAR + "\nscene\n[A]\nsound A7 99 Other\n" + BAR + "\n")
+        found = bc.check_sounds(card, {12: "Kick"})
+        self.assertEqual([(p.line, p.code) for p in found], [(8, "sound-missing")])
+
+
+class Arrangement(unittest.TestCase):
+    """analyse: a report each scene, and the arrangement part."""
+
+    def setUp(self):
+        self.card = bc.parse_card(TRACK)
+        self.report = bc.analyse_card(self.card)
+        self.arr = self.report["arrangement"]
+
+    def test_the_report_has_a_part_for_each_scene(self):
+        scenes = self.report["scenes"]
+        self.assertEqual([(s["number"], s["name"]) for s in scenes], [(1, "Intro"), (2, "Drop"), (3, None)])
+        self.assertEqual([s["bars"] for s in scenes], [1, 1, 2])
+        self.assertEqual([s["pad_hits_per_bar"] for s in scenes], [3.0, 10.0, 10.0])
+        self.assertEqual([s["groups"] for s in scenes], [["A", "B"], ["A"], ["B"]])
+        self.assertEqual(scenes[1]["carried"], [{"group": "B", "from_scene": 1}])
+        self.assertEqual(scenes[2]["carried"], [{"group": "A", "from_scene": 2}])
+        self.assertEqual(scenes[0]["carried"], [])
+        self.assertIsNone(scenes[0]["changes_from_previous"])
+        self.assertEqual(scenes[1]["changes_from_previous"], {"changed": ["A"], "entered": [], "kept": ["B"], "unknown": []})
+        self.assertEqual(scenes[2]["changes_from_previous"]["changed"], ["B"])
+        # "patterns" holds every section's report, scene by scene, and the totals count every section.
+        self.assertEqual([p["group"] for p in self.report["patterns"]], ["A", "B", "A", "B"])
+        self.assertEqual(self.report["groups"], ["A", "B"])
+        self.assertEqual(self.report["pad_hits"], 1 + 2 + 8 + 4)
+
+    def test_the_arrangement_lists_the_steps_with_passes_and_bars(self):
+        self.assertTrue(self.arr["has_chain"])
+        self.assertEqual(self.arr["chain"], "1x2 2 3x4 2")
+        self.assertEqual([(s["scene"], s["passes"], s["bars_per_pass"], s["bars"]) for s in self.arr["steps"]], [(1, 2, 1, 2), (2, 1, 1, 1), (3, 4, 2, 8), (2, 1, 1, 1)])
+        self.assertEqual(self.arr["total_bars"], 12)
+        self.assertEqual(self.arr["seconds"], 24.0)
+        self.assertEqual(self.arr["not_in_chain"], [])
+        self.assertEqual([e["pad_hits_per_bar"] for e in self.arr["energy"]], [3.0, 10.0, 10.0])
+        self.assertEqual(self.arr["energy"][1]["groups_playing"], ["A", "B"])
+
+    def test_the_arrangement_says_which_groups_change_at_each_step_and_at_the_loop(self):
+        t = self.arr["transitions"]
+        self.assertEqual([(x["from_scene"], x["to_scene"], x["loop"]) for x in t], [(1, 2, False), (2, 3, False), (3, 2, False), (2, 1, True)])
+        self.assertEqual([(x["changed"], x["kept"]) for x in t], [(["A"], ["B"]), (["B"], ["A"]), (["B"], ["A"]), (["A"], ["B"])])
+        # The same scene twice in a row is no change.
+        card = one("chain 1x2 1 2\nscene\n" + kick() + "scene\n" + kick("X.X. X.X. X.X. X.X."))
+        t = bc.analyse_card(card)["arrangement"]["transitions"]
+        self.assertEqual([(x["from_scene"], x["to_scene"], x["same_scene"]) for x in t], [(1, 1, True), (1, 2, False), (2, 1, False)])
+        self.assertEqual(t[0]["changed"], [])
+
+    def test_a_card_without_a_chain_plays_the_scenes_once_each_and_names_the_ones_a_chain_leaves_out(self):
+        card = one("scene\n" + kick() + "scene\n" + kick("X.X. X.X. X.X. X.X."))
+        arr = bc.analyse_card(card)["arrangement"]
+        self.assertFalse(arr["has_chain"])
+        self.assertIsNone(arr["chain"])
+        self.assertEqual([s["scene"] for s in arr["steps"]], [1, 2])
+        self.assertIsNone(arr["seconds"])
+        self.assertEqual(arr["total_bars"], 2)
+        card = one("chain 1\nscene\n" + kick() + "scene\n" + kick())
+        self.assertEqual(bc.analyse_card(card)["arrangement"]["not_in_chain"], [2])
+        # One step: nothing to change to.
+        self.assertEqual(bc.analyse_card(card)["arrangement"]["transitions"], [])
+
+    def test_a_group_the_first_scene_leaves_out_is_not_known_at_the_loop(self):
+        card = one("chain 1 2\nscene\n" + kick() + "scene\n[B]\nB7 | X... .... .... .... |\n")
+        t = bc.analyse_card(card)["arrangement"]["transitions"]
+        self.assertEqual((t[0]["entered"], t[0]["changed"], t[0]["kept"]), (["B"], [], ["A"]))
+        self.assertEqual((t[1]["unknown"], t[1]["kept"]), (["B"], ["A"]))
+
+    def test_a_card_without_scene_lines_reports_as_before(self):
+        report = bc.analyse_card(bc.parse_card(spec_card()))
+        self.assertNotIn("scenes", report)
+        self.assertNotIn("arrangement", report)
+
+    def test_the_text_report(self):
+        text = bc.render_analysis(self.report)
+        for part in ("arrangement: 3 scenes, chain 1x2 2 3x4 2 (loops)", "step 1: scene 1 Intro x2, 1 bar a pass = 2 bars", "step 3: scene 3 x4, 2 bars a pass = 8 bars",
+                     "total 12 bars, about 0:24 at the card's tempo, then it loops", "energy (pad hits a bar): scene 1 3.0 (AB), scene 2 10.0 (AB)",
+                     "step 4 to 1 (the loop): scene 2 to 1: A changes, B kept", "scene 2 Drop: 1 bar, pad hits a bar 10.0", "carries on: B from scene 1",
+                     "against the scene before: A changes, B kept", "[B] 2 bars, step 1/16"):
+            self.assertIn(part, text)
+        self.assertNotIn("not in the chain", text)
+        plain = bc.render_analysis(bc.analyse_card(one("scene\n" + kick() + "scene\n" + kick())))
+        self.assertIn("no chain line: the scenes in the card's order, one pass each", plain)
+        self.assertIn("step 1 to 2: scene 1 to 2: A kept", plain)
+        self.assertNotIn("the loop", plain)
+
+    def test_a_card_of_scenes_is_compared_by_its_busiest_scene(self):
+        recipes = bc.load_recipes(os.path.join(REFS, "genres.md"))
+        single = bc.parse_card(spec_card())
+        head, _, rest = spec_card().partition("\n[A]")
+        multi = bc.parse_card(head + "\nscene\n" + kick() + "scene\n[A]" + rest)
+        self.assertTrue(multi.ok, multi.problems)
+        self.assertEqual(bc.fingerprint(multi), bc.fingerprint(single))
+        self.assertEqual(bc.similarity(multi, recipes), bc.similarity(single, recipes))
+
+
+class SceneGrid(unittest.TestCase):
+    def test_the_grid_prints_the_chain_and_every_scene_with_what_it_carries_on(self):
+        text = bc.render_grid(bc.parse_card(TRACK))
+        lines = text.splitlines()
+        self.assertEqual(lines[1], "chain 1x2 2 3x4 2 (loops)")
+        self.assertEqual([l for l in lines if l.startswith("scene")], ["scene 1 Intro", "scene 2 Drop", "scene 3"])
+        self.assertIn("carries on: B (scene 1)", lines)
+        self.assertIn("carries on: A (scene 2)", lines)
+        self.assertIn("X.x. X.x. X.x. X.x.", text)
+        self.assertIn("x... .... x... .... | x... .... x... ....", text)
+
+    def test_a_card_without_scene_lines_prints_as_before(self):
+        text = bc.render_grid(bc.parse_card(spec_card()))
+        self.assertNotIn("scene", text)
+        self.assertNotIn("chain", text)
+
+
+class SceneMidi(unittest.TestCase):
+    def setUp(self):
+        self.card = bc.parse_card(TRACK)
+        self.data = bc.card_to_midi(self.card)
+        _, self.ntrks, _, self.tracks = read_smf(self.data)
+
+    def ons(self, track):
+        return [(t, a) for t, what, a in track if what == "on"]
+
+    def test_tracks_and_length(self):
+        self.assertEqual(self.ntrks, 3)  # tempo, A pads, B pads
+        # 12 bars of 384 ticks: 2 + 1 + 8 + 1.
+        self.assertEqual(self.tracks[0][-1][0], 12 * 384)
+        for tr in self.tracks:
+            self.assertEqual(tr[-1][0], 12 * 384)
+
+    def test_the_tempo_track_marks_every_pass(self):
+        marks = [(t, body.decode()) for t, what, (kind, body) in self.tracks[0] if what == "meta" and kind == 0x06]
+        self.assertEqual(marks[:3], [(0, "Intro (scene 1), pass 1/2"), (384, "Intro (scene 1), pass 2/2"), (768, "Drop (scene 2), pass 1/1")])
+        self.assertEqual([t for t, _ in marks], [0, 384, 768, 1152, 1920, 2688, 3456, 4224])
+        self.assertEqual(marks[3][1], "scene 3, pass 1/4")
+        self.assertEqual(marks[-1][1], "Drop (scene 2), pass 1/1")
+
+    def test_each_scene_plays_its_passes_in_the_chains_order(self):
+        a = self.ons(self.tracks[1])
+        self.assertEqual({x[1] for _, x in a}, {45})  # A7
+        # Intro twice (one kick each), the drop (8), scene 3 four passes of two bars with the drop's bar repeated (16 each), the drop again (8).
+        self.assertEqual(len(a), 2 + 8 + 4 * 16 + 8)
+        self.assertEqual([t for t, _ in a[:3]], [0, 384, 768])
+        self.assertEqual([t for t, _ in a[10:13]], [1152, 1152 + 48, 1152 + 96])
+        # The second bar of a 768 tick scene repeats the one-bar pattern: the same hits 384 later.
+        self.assertIn(1152 + 384, [t for t, _ in a])
+        # B: the hat (2 hits) twice, carried through the drop (2), the 2 bar pattern four times (4 each), the drop again (2).
+        b = self.ons(self.tracks[2])
+        self.assertEqual({x[1] for _, x in b}, {54})  # B4: 48 + 6
+        self.assertEqual({x[0] for _, x in b}, {1})
+        self.assertEqual(len(b), 2 * 2 + 2 + 4 * 4 + 2)
+        self.assertEqual(b[-1][0], 4224 + 192)
+
+    def test_loops_repeat_the_whole_chain(self):
+        _, _, _, tracks = read_smf(bc.card_to_midi(self.card, loops=2))
+        self.assertEqual(tracks[0][-1][0], 24 * 384)
+        self.assertEqual(len([1 for t, what, (kind, body) in tracks[0] if what == "meta" and kind == 0x06]), 16)
+        self.assertEqual(len(self.ons(tracks[1])), 2 * 82)
+
+    def test_no_chain_plays_each_scene_once_and_a_group_is_silent_until_a_scene_gives_it_a_pattern(self):
+        card = one("scene\n" + kick() + "scene\n[B]\nB7 | X... .... .... .... |\n")
+        _, ntrks, _, tracks = read_smf(bc.card_to_midi(card))
+        self.assertEqual(ntrks, 3)
+        self.assertEqual([t for t, what, a in tracks[1] if what == "on"], [0, 384])  # A carries into scene 2
+        self.assertEqual([t for t, what, a in tracks[2] if what == "on"], [384])  # B starts with scene 2
+        _, _, _, forced = read_smf(bc.card_to_midi(card, channel=10))
+        self.assertEqual({a[0] for tr in forced[1:] for t, what, a in tr if what == "on"}, {9})
+
+    def test_keys_notes_get_a_track_and_a_card_without_scenes_is_as_before(self):
+        card = one("scene\n[A]\nA7 | X... .... .... .... |\nnotes\nA9 at 1.1.1 note C4 gate 96\n")
+        _, ntrks, _, tracks = read_smf(bc.card_to_midi(card))
+        self.assertEqual(ntrks, 3)
+        self.assertEqual([a[1] for t, what, a in tracks[2] if what == "on"], [60])
+        plain = bc.parse_card(spec_card())
+        _, _, _, plain_tracks = read_smf(bc.card_to_midi(plain))
+        self.assertEqual([m for m in plain_tracks[0] if m[1] == "meta" and m[2][0] == 0x06], [])
+
+
+class SceneCli(unittest.TestCase):
+    def run_cli(self, *args, stdin=None):
+        return subprocess.run([sys.executable, os.path.join(HERE, "beatcard.py")] + list(args), input=stdin, capture_output=True, text=True)
+
+    def test_check_analyse_grid_and_midi_take_a_card_of_scenes(self):
+        r = self.run_cli("check", stdin=TRACK)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("3 scenes, chain 1x2 2 3x4 2", r.stdout)
+        r = self.run_cli("analyse", "--json", stdin=TRACK)
+        data = json.loads(r.stdout)
+        self.assertEqual(data["arrangement"]["total_bars"], 12)
+        self.assertEqual(len(data["scenes"]), 3)
+        r = self.run_cli("analyse", stdin=TRACK)
+        self.assertIn("arrangement: 3 scenes", r.stdout)
+        r = self.run_cli("grid", stdin=TRACK)
+        self.assertIn("scene 2 Drop", r.stdout)
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "track.mid")
+            r = self.run_cli("midi", "-o", out, "--loops", "2", stdin=TRACK)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            with open(out, "rb") as f:
+                self.assertEqual(read_smf(f.read())[3][0][-1][0], 24 * 384)
+
+    def test_check_json_and_errors_carry_the_scene_lines(self):
+        r = self.run_cli("check", "--json", stdin="ARC BEAT 1\nchain 1 3\nscene\n" + kick() + "scene\n" + kick())
+        data = json.loads(r.stdout)
+        self.assertFalse(data["ok"])
+        self.assertEqual([(p["line"], p["code"]) for p in data["problems"]], [(2, "chain-unknown-scene")])
+        self.assertEqual(r.returncode, 1)
+
 
 
 class SkillFiles(unittest.TestCase):

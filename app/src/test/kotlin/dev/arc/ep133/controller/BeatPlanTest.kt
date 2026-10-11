@@ -3,6 +3,8 @@ package dev.arc.ep133.controller
 import dev.arc.ep133.features.BeatCard
 import dev.arc.ep133.features.BeatCards
 import dev.arc.ep133.features.CardFx
+import dev.arc.ep133.features.Chain
+import dev.arc.ep133.features.ChainStep
 import dev.arc.ep133.features.CardProblem
 import dev.arc.ep133.features.CardPad
 import dev.arc.ep133.features.CardSection
@@ -252,6 +254,136 @@ class BeatPlanTest {
         assertSame(seq, applied.seq)
         assertTrue(applied.placed.isEmpty())
         assertFalse(recorder.canUndo)
+    }
+
+    // ---- scenes and the chain ----
+
+    private val track = """ARC BEAT 1
+name Track
+tempo 168
+chain 1x2 2 1x2 3
+
+scene Intro
+[A] bars 1 step 1/16
+A7 kick | X... .... X... .... |
+[B] bars 2 step 1/16
+B7 bass | X... .... .... X... | .... .... X... .... |
+
+scene Drop
+[A] bars 1 step 1/16
+A7 kick | X.x. X.x. X.x. X.x. |
+A9 snare | .... X... .... X..o |
+[B] bars 2 step 1/16
+B7 bass | X.x. ..x. X... x... | X.x. ..x. X... x... |
+
+scene Breakdown
+[B] bars 2 step 1/16
+B8 bass | X... .... .... .... | .... .... .... .... |
+"""
+
+    @Test
+    fun `a card of scenes adds a scene for each of its own and sets the chain, in the one undo step`() {
+        val recorder = PatternRecorder()
+        // The project has a chain of its own, which the card's replaces.
+        val seq = ProjectSeq.DEFAULT.withChain(Chain(listOf(ChainStep(0, 4)), on = false))
+        recorder.seq = seq
+        val applied = applyBeat(seq, BeatCards.read(track).card!!, recorder)
+        assertEquals(1, applied.scene)
+        assertEquals(3, applied.scenes)
+        assertTrue(applied.chainSet)
+        assertEquals(4, applied.seq.scenes.size)
+        assertEquals(1, applied.seq.scene)
+        assertEquals(Chain(listOf(ChainStep(1, 2), ChainStep(2), ChainStep(1, 2), ChainStep(3)), on = true), applied.seq.chain)
+        // Scene 3 has no A section: it plays scene 2's pattern.
+        assertEquals(applied.seq.scenes[2].patterns[0], applied.seq.scenes[3].patterns[0])
+        assertEquals("Imported to scenes S02\u2013S04. Chain set. UNDO takes it back.", beatImported(applied))
+        // One UNDO: the scenes, the patterns and the chain as they were.
+        assertEquals(seq, recorder.undo(applied.seq))
+        assertFalse(recorder.canUndo)
+    }
+
+    @Test
+    fun `with SET CHAIN off the project's chain stays and the toast does not say it was set`() {
+        val recorder = PatternRecorder()
+        val seq = ProjectSeq.DEFAULT.withChain(Chain(listOf(ChainStep(0, 4)), on = true))
+        recorder.seq = seq
+        val applied = applyBeat(seq, BeatCards.read(track).card!!, recorder, setChain = false)
+        assertFalse(applied.chainSet)
+        assertEquals(seq.chain, applied.seq.chain)
+        assertEquals(4, applied.seq.scenes.size)
+        assertEquals("Imported to scenes S02\u2013S04. UNDO takes it back.", beatImported(applied))
+    }
+
+    @Test
+    fun `the sheet lists a card's scenes with where each goes, a group left out as same, and the chain on the new scenes`() {
+        val read = BeatCards.read(track)
+        val ui = beatImportUi(read, ProjectSeq.DEFAULT, 120.0, nameOf)
+        assertEquals(3, ui.scenes.size)
+        assertEquals(listOf("Intro", "Drop", "Breakdown"), ui.scenes.map { it.name })
+        assertEquals(listOf(2, 2, 1), ui.scenes.map { it.grids.size })
+        assertEquals(5, ui.grids.size)
+        assertEquals(listOf(1, 2, 3), ui.scenes.map { it.index })
+        // Groups A and B are in the card: the Breakdown leaves out A.
+        assertEquals(listOf(0, 1), ui.scenes[2].parts.map { it.first })
+        assertNull(ui.scenes[2].parts[0].second)
+        val b = ui.scenes[2].parts[1].second!!
+        assertEquals("new S04 \u00B7 A (same) \u00B7 B 0$b", ClaudeText.cardSceneTarget(3, ui.scenes[2].parts))
+        assertEquals(listOf(ChainStep(1, 2), ChainStep(2), ChainStep(1, 2), ChainStep(3)), ui.chain?.steps)
+        assertEquals("S02\u00D72 \u2192 S03 \u2192 S02\u00D72 \u2192 S04", ClaudeText.chainImport(ui.chain!!.steps))
+        assertEquals(1, ui.scene)
+        assertFalse(ui.noRoom)
+        assertNull(ui.blocked)
+        // A card with no scene lines has none of it.
+        val plain = beatImportUi(read(card(section(0, pattern(hit(0))))), ProjectSeq.DEFAULT, 120.0, nameOf)
+        assertTrue(plain.scenes.isEmpty())
+        assertNull(plain.chain)
+    }
+
+    @Test
+    fun `with no room for the scenes the sheet says so, shows no chain, and the import picks the first scene's patterns`() {
+        var seq = ProjectSeq.DEFAULT
+        repeat(Seq.MAX_SCENES - 2) { seq = SceneOps.newScene(seq) }
+        val ui = beatImportUi(BeatCards.read(track), seq, 120.0, nameOf)
+        assertTrue(ui.noRoom)
+        assertNull(ui.chain)
+        assertTrue(ui.scenes.all { it.index == null })
+        val recorder = PatternRecorder()
+        recorder.seq = seq
+        val applied = applyBeat(seq, BeatCards.read(track).card!!, recorder)
+        assertNull(applied.scene)
+        assertFalse(applied.chainSet)
+        assertEquals(seq.scenes.size, applied.seq.scenes.size)
+        // A and B each take the pattern of the card's first scene that has them.
+        assertEquals(listOf(applied.placed[0].second, applied.placed[1].second), listOf(applied.seq.selected(0), applied.seq.selected(1)))
+    }
+
+    @Test
+    fun `a chain is shared as a card of its scenes in the order they first play, with the passes`() {
+        var seq = with(ProjectSeq.DEFAULT, 0, 1, pattern(hit(0)))
+        seq = SceneOps.newScene(seq)
+        seq = with(seq, 0, 2, pattern(hit(0), hit(96)))
+        seq = seq.withChain(Chain(listOf(ChainStep(1, 2), ChainStep(0), ChainStep(1, 2)), on = true))
+        val share = beatShareChain(seq, 120.0, 50, nameOf)!!
+        assertEquals("Arc beat Chain", share.subject)
+        assertTrue(share.text.startsWith(ClaudeText.SHARE_CHAIN_PROMPT + "\n\n```\nARC BEAT 1\nname Chain\ntempo 120"))
+        val card = BeatCards.read(share.text).card!!
+        assertEquals(2, card.scenes.size)
+        // Scene 2 (S02) plays first, so it is the card's scene 1.
+        assertEquals(listOf(1 to 2, 2 to 1, 1 to 2), card.chain)
+        // No chain, nothing to share.
+        assertNull(beatShareChain(ProjectSeq.DEFAULT, 120.0, 50, nameOf))
+    }
+
+    @Test
+    fun `a chain of more scenes than a card holds is cut before the scene that would not fit`() {
+        val steps = (0 until 20).map { ChainStep(it) } + ChainStep(0)
+        val cut = chainForCard(steps)
+        assertEquals(BeatCards.MAX_SCENES, cut.size)
+        assertEquals(BeatCards.MAX_SCENES, chainSceneCount(steps))
+        // A scene already in the card can come again after the cut would have been.
+        val again = chainForCard((0 until 16).map { ChainStep(it) } + ChainStep(3) + ChainStep(17))
+        assertEquals(17, again.size)
+        assertEquals(3, chainSceneCount(listOf(ChainStep(0), ChainStep(2), ChainStep(0), ChainStep(5))))
     }
 
     // ---- sounds ----

@@ -381,7 +381,7 @@ class BeatCardTest {
             "[C] bars 1 step 1/16", "C7 | X... .... .... .... |",
         ) + "\n"
         assertEquals(want, BeatCards.write(c))
-        assertEquals(BeatCards.write(c), BeatCards.write(c.copy(sections = c.sections.reversed())))
+        assertEquals(BeatCards.write(c), BeatCards.write(c.withSections(c.sections.reversed())))
         // Tempo is whole or one decimal; the name keeps to 40 characters; no title, no tempo, no line.
         assertTrue(BeatCards.write(c.copy(tempo = 90.0)).contains("\ntempo 90\n"))
         assertTrue(BeatCards.write(c.copy(tempo = 92.04)).contains("\ntempo 92\n"))
@@ -731,7 +731,7 @@ class BeatCardTest {
             mapOf(9 to snd(40, "Tom")),
             mapOf(0 to snd(999, "Shaker.wav"), 2 to snd(1)),
         )
-        val c = base.copy(sections = base.sections.zip(sounds) { s, m -> s.copy(sounds = m) })
+        val c = base.withSections(base.sections.zip(sounds) { s, m -> s.copy(sounds = m) })
         val text = BeatCards.write(c)
         val back = BeatCards.read(text)
         assertEquals(emptyList<String>(), problems(back), text)
@@ -804,7 +804,7 @@ class BeatCardTest {
         assertEquals(listOf("A7 FOUND_BY_NAME 20 Hat 12"), moved.map(::pick))
         // A card with no sound lines, or no sounds to choose from.
         assertEquals(emptyList<SoundPick>(), BeatCards.resolveSounds(BeatCard(null, null, 50, listOf(a(hit(0, 9)))), library) { null })
-        assertEquals(listOf(SoundStatus.MISSING), BeatCards.resolveSounds(c.copy(sections = listOf(a(sounds = mapOf(9 to snd(12, "Kick"))))), emptyMap()) { null }.map { it.status })
+        assertEquals(listOf(SoundStatus.MISSING), BeatCards.resolveSounds(c.withSections(listOf(a(sounds = mapOf(9 to snd(12, "Kick"))))), emptyMap()) { null }.map { it.status })
     }
 
     @Test
@@ -1175,7 +1175,7 @@ class BeatCardTest {
         val c = BeatCards.fromPatterns(null, null, 50, sections, fx = fx)
         // Whole percents, the groups above 0 only: 0.004 is 0.
         assertEquals(CardFx(FxType.REVERB, 0.34f, 0.5f, mapOf(0 to 0.2f, 3 to 0.5f), Comp(true, 0.4f, 0.6f), Sidechain(true, 0, 9, 0b0110, 0.25f, 0.7f)), c.fx)
-        assertEquals(c, BeatCards.read(BeatCards.write(c)).card!!.copy(sections = c.sections))
+        assertEquals(c, BeatCards.read(BeatCards.write(c)).card!!.withSections(c.sections))
         // Only a compressor on: the effect line is there too.
         val only = BeatCards.fromPatterns(null, null, 50, sections, fx = FxSettings(comp = Comp(true, 0.5f, 0.5f)))
         assertEquals(CardFx(FxType.NONE, 0.5f, 0.5f, null, Comp(true, 0.5f, 0.5f), null), only.fx)
@@ -1344,7 +1344,7 @@ class BeatCardTest {
     fun `every recipe card in the skill reads cleanly, and the ones with effect lines carry them`() {
         val genres = File(System.getProperty("arc.beatCardSpec")!!).parentFile.resolve("genres.md").readText()
         val cards = Regex("```\\n(ARC BEAT 1\\n.*?)\\n```", RegexOption.DOT_MATCHES_ALL).findAll(genres).map { it.groupValues[1] }.toList()
-        assertTrue(cards.size >= 28)
+        assertTrue(cards.size >= 29)
         for (text in cards) {
             val r = BeatCards.read(text)
             assertEquals(emptyList<String>(), problems(r), text.lines().getOrNull(1))
@@ -1352,9 +1352,19 @@ class BeatCardTest {
             assertEquals(r.card!!.fx, BeatCards.read(BeatCards.write(r.card!!)).card!!.fx)
         }
         val withFx = cards.map { BeatCards.read(it).card!! }.filter { it.fx != null }
-        assertEquals(setOf("House groove", "Dub chord echo", "Industrial pressure", "Hard techno pound", "Schranz pressure", "Hard groove workout", "Dusty lo-fi", "Amen shred"), withFx.map { it.name }.toSet())
+        assertEquals(setOf("House groove", "Dub chord echo", "Industrial pressure", "Hard techno pound", "Schranz pressure", "Hard groove workout", "Dusty lo-fi", "Amen shred", "Breakcore track"), withFx.map { it.name }.toSet())
         val house = withFx.first { it.name == "House groove" }.fx!!
         assertEquals(Sidechain(true, 0, 9, 0b0010, 0.3f, 0.55f), house.sidechain)
         assertEquals(FxType.FILTER, withFx.first { it.name == "Dusty lo-fi" }.fx!!.type)
+        // The one card of scenes: five scenes and a chain, and it reads back as itself.
+        val track = withFx.first { it.name == "Breakcore track" }
+        assertEquals(listOf("Intro", "Drop", "Breakdown", "Build", "Drop 2"), track.scenes.map { it.name })
+        assertEquals(listOf(1 to 2, 2 to 2, 3 to 1, 4 to 1, 5 to 2), track.chain)
+        assertEquals(listOf(listOf(0, 1), listOf(0, 1), listOf(0, 1), listOf(0), listOf(0, 1)), track.scenes.map { s -> s.sections.map { it.group } })
+        assertEquals(track, BeatCards.read(BeatCards.write(track)).card)
+        // Planned into a project, it adds its five scenes and chain.
+        val plan = BeatCards.plan(ProjectSeq.DEFAULT, track)
+        assertEquals(listOf(1, 2, 3, 4, 5), plan.scenes)
+        assertEquals(Chain(listOf(ChainStep(1, 2), ChainStep(2, 2), ChainStep(3, 1), ChainStep(4, 1), ChainStep(5, 2)), true), plan.seq.chain)
     }
 }

@@ -9,16 +9,61 @@ import kotlin.math.roundToInt
  * A beat as an ARC BEAT text card (skill/arc-beats/references/beat-card.md):
  * an optional [name] (up to 40 characters), the [tempo] it is meant for (40
  * to 240 BPM), the [swing] of its grid rows (50..75, 50 straight, as the
- * device's TIMING) and its [sections], one for each group at most. [fx] is
- * the project's effect lines, null when the card has none.
+ * device's TIMING) and its [scenes]. [fx] is the project's effect lines, null
+ * when the card has none; they are project-wide, so they apply to every scene.
+ *
+ * [scenes] is never empty. A card with no `scene` line has one implicit scene
+ * with no name, which holds the card's sections, one for each group at most;
+ * [sections] is that first scene's sections, so code written for single-scene
+ * cards keeps working (on a multi-scene card it is the first scene only: use
+ * [allSections] or [scenes]). [sceneLines] is set when the card's text had a
+ * `scene` line (or is to be written with them), even for one scene: a card
+ * with `scene` lines imports as new scenes ([BeatCards.plan]), one without as
+ * patterns. [chain] is the `chain` line, null when the card has none: its
+ * steps as (card scene number from 1, passes 1..8).
+ *
+ * `BeatCard(name, tempo, swing, sections, fx)` builds a single-scene card
+ * from its sections.
  */
 data class BeatCard(
     val name: String? = null,
     val tempo: Double? = null,
     val swing: Int = TimingSettings.SWING_MIN,
-    val sections: List<CardSection> = emptyList(),
+    val scenes: List<CardScene> = listOf(CardScene()),
     val fx: CardFx? = null,
-)
+    val chain: List<Pair<Int, Int>>? = null,
+    val sceneLines: Boolean = false,
+) {
+    init {
+        require(scenes.isNotEmpty()) { "A card has at least one scene." }
+    }
+
+    /** The first scene's sections: all of a single-scene card's. */
+    val sections: List<CardSection> get() = scenes[0].sections
+
+    /** The sections of every scene, in order. */
+    val allSections: List<CardSection> get() = scenes.flatMap { it.sections }
+
+    /** Whether the card is written, and imported, as scenes: it has `scene` lines, more than one scene or a chain. */
+    val multiScene: Boolean get() = sceneLines || scenes.size > 1 || chain != null
+
+    /** The same card with [sections] as its (only) scene. */
+    fun withSections(sections: List<CardSection>): BeatCard = copy(scenes = listOf(scenes[0].copy(sections = sections)) + scenes.drop(1))
+
+    companion object {
+        /** A single-scene card of [sections] (what `BeatCard(...)` was before scenes). */
+        operator fun invoke(name: String?, tempo: Double?, swing: Int, sections: List<CardSection>, fx: CardFx? = null): BeatCard =
+            BeatCard(name, tempo, swing, listOf(CardScene(null, sections)), fx)
+    }
+}
+
+/**
+ * One scene of a card (a `scene` line and what follows it): its optional
+ * [name] (up to 40 characters; Arc keeps no scene names) and its [sections],
+ * one for each group at most. A group the scene leaves out plays the previous
+ * scene's pattern; in the first scene, the pattern the scene playing gives it.
+ */
+data class CardScene(val name: String? = null, val sections: List<CardSection> = emptyList())
 
 /**
  * The effect lines of a card (the spec's "Effects"), each kind apart and null
@@ -128,16 +173,22 @@ data class CardRead(val card: BeatCard?, val problems: List<CardProblem>)
 
 /**
  * A card planned into a project's sequencer: the [seq] after it, the
- * (group, pattern number) slots it filled ([placed], in the card's order),
- * and whether it added a scene ([newScene]). [fullGroup] is the group whose
- * bank had no free pattern when nothing could be placed: then [seq] is the
- * very one given and [placed] is empty. It is null otherwise.
+ * (group, pattern number) slots it filled ([placed], in the card's order: for
+ * a card of scenes, scene by scene), and whether it added a scene
+ * ([newScene]). [scenes] are the indices of the scenes it added, in the card's
+ * order (empty when [newScene] is false); [chain] is the card's chain mapped to
+ * them, as steps of those scene indices (null when the card has no chain or
+ * added no scenes). [fullGroup] is the group whose bank had no free pattern
+ * when nothing could be placed: then [seq] is the very one given and [placed]
+ * is empty. It is null otherwise.
  */
 data class CardImport(
     val seq: ProjectSeq,
     val placed: List<Pair<Int, Int>>,
     val newScene: Boolean,
     val fullGroup: Int? = null,
+    val scenes: List<Int> = emptyList(),
+    val chain: List<ChainStep>? = null,
 )
 
 /**
@@ -149,6 +200,9 @@ data class CardImport(
 object BeatCards {
     const val VERSION = 1
     const val MAX_NAME = 40
+
+    /** The most scenes a card holds. */
+    const val MAX_SCENES = 16
 
     /** The comment a tidied card carries. */
     const val TIDY_COMMENT = "# tidied: velocities and short gates rounded"
@@ -195,6 +249,7 @@ object BeatCards {
     private val SECTION = Regex("^([A-D])(\\d*)$")
     private val AT = Regex("^(\\d{1,6})\\.(\\d{1,6})\\.(\\d{1,6})([+-]\\d{1,6})?$")
     private val NOTE_NAME = Regex("^[A-G]#?(?:-1|\\d)$")
+    private val CHAIN_STEP = Regex("^(\\d{1,6})(?:[xX](\\d{1,6}))?$")
     private val TEXT_BREAKS = Regex("[#|\\t\\r\\n\\u00A0 ]+")
 
     /** MIDI note by name, C-1 (0) to G9 (127), as [PadNotes.noteName] names them. */
@@ -248,10 +303,21 @@ object BeatCards {
         private var fxSends: LinkedHashMap<Int, Float>? = null
         private var fxComp: Comp? = null
         private var fxSidechain: Sidechain? = null
+        // The sections of the scene being read (of the one implicit scene when the card has no scene line).
         private val sections = ArrayList<CardSection>()
         private val groups = HashSet<Int>()
         private var draft: Draft? = null
         private var sectionLines = 0
+
+        // The scenes read, the scene line count, the name of the scene being read, and the line of the first section when no scene line came before it.
+        private val scenes = ArrayList<CardScene>()
+        private var sceneLines = 0
+        private var sceneName: String? = null
+        private var firstSection = 0
+
+        // The chain line read (card scene numbers from 1, passes) and its line.
+        private var chain: List<Pair<Int, Int>>? = null
+        private var chainAt = 0
 
         fun run(): CardRead {
             val start = lines.indexOfFirst { CARD_START.containsMatchIn(trim(it)) }
@@ -267,13 +333,27 @@ object BeatCards {
                 lineAt(i + 1, line)
             }
             close()
+            scenes += CardScene(if (sceneLines > 0) sceneName else null, sections.toList())
             if (sectionLines == 0) error(start + 1, "The card has no section, such as [A].")
+            checkChain()
             return result()
         }
 
         private fun result(): CardRead {
             val sorted = problems.sortedBy { it.line }
-            return CardRead(if (sorted.any { it.error }) null else BeatCard(name, tempo, swing, sections, cardFx()), sorted)
+            val card = if (sorted.any { it.error }) null else BeatCard(name, tempo, swing, scenes.toList(), cardFx(), chain, sceneLines > 0)
+            return CardRead(card, sorted)
+        }
+
+        // The chain names scenes the card has, and the card has scenes at all.
+        private fun checkChain() {
+            val c = chain ?: return
+            if (sceneLines == 0) {
+                error(chainAt, "A chain needs scenes: start each scene with a scene line.")
+                return
+            }
+            val i = c.indexOfFirst { it.first > sceneLines }
+            if (i >= 0) error(chainAt, "chain step ${i + 1} names scene ${c[i].first}, but the card has $sceneLines ${if (sceneLines == 1) "scene" else "scenes"}.")
         }
 
         // The effect lines read, or null when the card has none.
@@ -305,6 +385,15 @@ object BeatCards {
         }
 
         private fun lineAt(no: Int, line: String) {
+            val first = tokens(line)[0].lowercase()
+            if (first == "scene") {
+                scene(no, line)
+                return
+            }
+            if (first == "chain") {
+                chainLine(no, line)
+                return
+            }
             if (line.startsWith("[")) {
                 section(no, line)
                 return
@@ -331,6 +420,68 @@ object BeatCards {
             }
         }
 
+        // ---- scenes and chain ----
+
+        // scene [name]: starts a scene; the sections up to the next scene line are its.
+        private fun scene(no: Int, line: String) {
+            close()
+            if (sceneLines > 0) scenes += CardScene(sceneName, sections.toList())
+            else if (firstSection != 0) error(firstSection, "A section comes before the first scene line: once a card has scenes, every section belongs to one.")
+            sections.clear()
+            groups.clear()
+            sceneLines++
+            if (sceneLines == MAX_SCENES + 1) error(no, "The card has more than $MAX_SCENES scenes, the most is $MAX_SCENES.")
+            val rest = trim(line.substring(tokens(line)[0].length))
+            sceneName = when {
+                rest.isEmpty() -> null
+                rest.codePointCount(0, rest.length) > MAX_NAME -> {
+                    warn(no, "Scene name is longer than $MAX_NAME characters, shortened.")
+                    trim(cut(rest, MAX_NAME))
+                }
+                else -> rest
+            }
+        }
+
+        // chain <step> ...: a step is a scene number from 1, with its passes as in 2x4 (1..8, default 1). A line with a fault changes nothing.
+        private fun chainLine(no: Int, line: String) {
+            val word = tokens(line)[0]
+            if (sectionLines > 0 || sceneLines > 0) {
+                error(no, "'$word' belongs before the first scene.")
+                return
+            }
+            val t = tokens(line.substring(word.length))
+            if (t.isEmpty()) {
+                error(no, "chain needs at least one scene, as in chain 1 2x2 3.")
+                return
+            }
+            val steps = ArrayList<Pair<Int, Int>>()
+            for (tok in t) {
+                val m = CHAIN_STEP.find(tok)
+                if (m == null) {
+                    error(no, "'$tok' isn't a chain step. Write a scene number, and its passes after an x, as in 2 or 2x4.")
+                    return
+                }
+                val scene = m.groupValues[1].toInt()
+                val passes = m.groupValues[2].ifEmpty { "1" }.toInt()
+                if (scene < 1) {
+                    error(no, "chain step '$tok': scenes count from 1.")
+                    return
+                }
+                if (passes !in Chain.MIN_PASSES..Chain.MAX_PASSES) {
+                    error(no, "chain step '$tok': passes must be ${Chain.MIN_PASSES} to ${Chain.MAX_PASSES}.")
+                    return
+                }
+                steps += scene to passes
+            }
+            if (steps.size > Chain.MAX_STEPS) {
+                error(no, "The chain has ${steps.size} steps, the most is ${Chain.MAX_STEPS}.")
+                return
+            }
+            if (chain != null) warn(no, "Two chain lines, kept the later.")
+            chain = steps
+            chainAt = no
+        }
+
         // ---- header ----
 
         private fun header(no: Int, line: String) {
@@ -338,6 +489,8 @@ object BeatCards {
             val key = word.lowercase()
             val rest = trim(line.substring(word.length))
             when {
+                sceneLines > 0 && key in HEADER_KEYS -> warn(no, "'$word' belongs before the first scene, ignored.")
+                sceneLines > 0 && key in FX_KEYS -> error(no, "'$word' belongs before the first scene.")
                 '|' in line || firstIsPad(line) || key == "notes" || key == "sound" || key == "pad" -> error(no, "'$word' needs a section first, such as [A].")
                 key in FX_KEYS -> fxLine(no, word, key, tokens(rest))
                 key == "name" -> when {
@@ -369,6 +522,7 @@ object BeatCards {
         private fun section(no: Int, line: String) {
             close()
             sectionLines++
+            if (sceneLines == 0 && firstSection == 0) firstSection = no
             val end = line.indexOf(']')
             if (end < 0) {
                 skipped(no, "A section needs a closing ], as in [A].")
@@ -868,7 +1022,13 @@ object BeatCards {
      * step become a step, for every note, and the card says so in a comment.
      * The [silent] pads ([silentPads]) are listed in a comment of their own
      * right after the header ([ClaudeText.noSoundOn]); readers ignore it.
-     * The text ends in a newline.
+     * A card of scenes ([BeatCard.multiScene]) is written as the spec's
+     * writing rule has it: the `chain` line after the effect lines (steps
+     * that name no scene are left out), then each scene as a `scene` line
+     * with its name if it has one, followed by its sections in group order. A
+     * section that only repeats the previous scene's pattern for its group
+     * (the same pattern, sounds and pad shaping) is left out. The text ends in
+     * a newline.
      */
     fun write(card: BeatCard, names: (PhysicalPad) -> String? = { null }, tidy: Boolean = false, silent: List<PhysicalPad> = emptyList()): String {
         val swing = TimingSettings.clampSwing(card.swing)
@@ -878,14 +1038,50 @@ object BeatCards {
         card.tempo?.let { out += "tempo ${tempoText(it)}" }
         out += "swing $swing"
         card.fx?.let { writeFx(out, it) }
+        if (card.multiScene) card.chain?.let { writeChain(out, it, card.scenes.size) }
         if (silent.isNotEmpty()) out += ClaudeText.noSoundOn(silent)
         if (tidy) out += TIDY_COMMENT
-        for (s in card.sections.sortedBy { it.group }) {
+        if (!card.multiScene) {
+            for (s in card.sections.sortedBy { it.group }) {
+                out += ""
+                writeSection(out, s, swing, names, tidy)
+            }
+            return out.joinToString("\n", postfix = "\n")
+        }
+        val before = arrayOfNulls<CardSection>(4)
+        for (sc in card.scenes) {
             out += ""
-            writeSection(out, s, swing, names, tidy)
+            out += "scene" + (sc.name?.let { cleanText(it, MAX_NAME) }?.takeIf { it.isNotEmpty() }?.let { " $it" } ?: "")
+            var first = true
+            for (s in sc.sections.sortedBy { it.group }) {
+                val prev = before.getOrNull(s.group)
+                if (prev != null && repeats(prev, s)) continue
+                if (!first) out += ""
+                first = false
+                writeSection(out, s, swing, names, tidy)
+                if (s.group in 0..3) before[s.group] = s
+            }
         }
         return out.joinToString("\n", postfix = "\n")
     }
+
+    // The chain line: steps as 2 or 2x4; those naming a scene the card hasn't, or passes out of range, are left out, and so is a chain left with none.
+    private fun writeChain(out: MutableList<String>, chain: List<Pair<Int, Int>>, sceneCount: Int) {
+        val steps = chain.filter { (scene, passes) -> scene in 1..sceneCount && passes in Chain.MIN_PASSES..Chain.MAX_PASSES }.take(Chain.MAX_STEPS)
+        if (steps.isEmpty()) return
+        out += "chain " + steps.joinToString(" ") { (scene, passes) -> if (passes == 1) "$scene" else "${scene}x$passes" }
+    }
+
+    // Whether section [s] only repeats [prev], the previous scene's for its group: the same pattern as written (not the notes' ids), sounds and pad shaping.
+    private fun repeats(prev: CardSection, s: CardSection): Boolean =
+        s.sounds == prev.sounds && s.pads == prev.pads && samePattern(prev.pattern, s.pattern)
+
+    // Whether two patterns are written the same: the bars and the notes that play, in order, whatever their ids.
+    private fun samePattern(a: Pattern, b: Pattern): Boolean = a.bars == b.bars && keyed(a) == keyed(b)
+
+    private fun keyed(p: Pattern): List<PatternNote> =
+        unique(p.notes.filter { it.tick in 0 until p.lengthTicks }).map { it.copy(id = 0) }
+            .sortedWith(compareBy<PatternNote>({ it.tick }, { it.offset }, { it.semitones ?: Int.MIN_VALUE }, { it.velocity }, { it.gate }))
 
     // The effect lines: fx (when there is an effect line), send, comp, sidechain; knobs as whole percents.
     private fun writeFx(out: MutableList<String>, fx: CardFx) {
@@ -1079,6 +1275,59 @@ object BeatCards {
         return BeatCard(name, tempo, swing, kept, fx?.let(::fxOf))
     }
 
+    /**
+     * A card for a project's chain (a share of the arrangement): the chain's
+     * distinct scenes in the order they first play become the card's scenes
+     * (with `scene` lines, no names), and the chain, mapped to the card's
+     * scene numbers, its `chain` line. Null when [chain] has no step that
+     * names a scene of [seq].
+     *
+     * Each scene's sections come from the patterns [seq] gives it, as
+     * [fromPatterns] has them. The first scene has the groups with notes (all
+     * four when none has); a later scene has a group only when its pattern
+     * differs from the one the group last had in the card's earlier scenes
+     * (one it left out counts as blank), so a card never repeats a pattern
+     * ([write] leaves such a section out in any case). The swing is
+     * [timingSwing] when every pad hit of every section sits on the swung
+     * 1/16 grid, else 50. [sounds], [fx] and [pads] are as in [fromPatterns]
+     * for the whole card: a pad's sound line and `pad` line are written once,
+     * in the first section whose notes use the pad, and again only when they
+     * change.
+     */
+    fun fromScenes(
+        name: String?,
+        tempo: Double?,
+        timingSwing: Int,
+        seq: ProjectSeq,
+        chain: List<ChainStep> = seq.chain.steps,
+        sounds: (PhysicalPad) -> CardSound? = { null },
+        fx: FxSettings? = null,
+        pads: (PhysicalPad) -> PadSettings? = { null },
+    ): BeatCard? {
+        val steps = chain.filter { it.scene in seq.scenes.indices }.take(Chain.MAX_STEPS)
+        if (steps.isEmpty()) return null
+        val order = steps.map { it.scene }.distinct()
+        val given = HashMap<PhysicalPad, CardSound>()
+        val shaped = HashMap<PhysicalPad, CardPad>()
+        // The pattern each group last had in the card; null before it has a section.
+        val last = arrayOfNulls<Pattern>(4)
+        val scenes = order.mapIndexed { k, index ->
+            val numbers = seq.scenes[index].patterns
+            val all = List(4) { g -> CardSection(g, numbers[g], seq.pattern(g, numbers[g])) }
+            val chosen = if (k == 0) all.filter { !it.pattern.isEmpty }.ifEmpty { all } else all.filter { s -> last[s.group]?.let { !samePattern(it, s.pattern) } ?: !s.pattern.isEmpty }
+            CardScene(null, chosen.map { s ->
+                last[s.group] = s.pattern
+                val own = soundsUsed(s, sounds).filter { (offset, snd) -> given.put(PhysicalPad(s.group, offset), snd) != snd }
+                val shaping = padsUsed(s, pads).filter { (offset, pad) -> shaped.put(PhysicalPad(s.group, offset), pad) != pad }
+                s.copy(sounds = own, pads = shaping)
+            })
+        }
+        val s = TimingSettings.clampSwing(timingSwing)
+        val swing = if (s > TimingSettings.SWING_MIN && scenes.all { sc -> sc.sections.all { fitsSwung(it.pattern, s) } }) s else TimingSettings.SWING_MIN
+        val mapped = steps.map { order.indexOf(it.scene) + 1 to it.passes.coerceIn(Chain.MIN_PASSES, Chain.MAX_PASSES) }
+        return BeatCard(name, tempo, swing, scenes, fx?.let(::fxOf), mapped, sceneLines = true)
+    }
+
     // The sound of each pad the section's notes use, for those [sounds] knows.
     private fun soundsUsed(s: CardSection, sounds: (PhysicalPad) -> CardSound?): Map<Int, CardSound> {
         val out = LinkedHashMap<Int, CardSound>()
@@ -1189,19 +1438,23 @@ object BeatCards {
 
     /**
      * The pads [card]'s notes use (pad hits and KEYS notes alike; a note past its pattern's end doesn't play) that would
-     * be silent: [slotOf] gives no sound for them now (null) and no sound line of the card puts one on them. In keypad
-     * order for each group. Empty when the pads are not [known] (nothing read yet): then a pad with no slot is not
+     * be silent: [slotOf] gives no sound for them now (null) and no sound line of the card (in any scene) puts one on them.
+     * In keypad order for each group, scene by scene. Empty when the pads are not [known] (nothing read yet): then a pad with no slot is not
      * known to be empty.
      */
     fun silentPads(card: BeatCard, slotOf: (PhysicalPad) -> Int?, known: Boolean): List<PhysicalPad> {
         if (!known) return emptyList()
         val out = ArrayList<PhysicalPad>()
-        for (s in card.sections.sortedBy { it.group }) {
-            val used = usedOffsets(s)
-            for (offset in KEYPAD) {
-                if (offset !in used || s.sounds[offset]?.slot in SLOT_MIN..SLOT_MAX) continue
-                val pad = PhysicalPad(s.group, offset)
-                if (slotOf(pad) == null && pad !in out) out += pad
+        // A sound line in any scene puts a sound on its pad: the sounds are the project's.
+        val given = card.allSections.flatMap { s -> s.sounds.filterValues { it.slot in SLOT_MIN..SLOT_MAX }.keys.map { PhysicalPad(s.group, it) } }.toSet()
+        for (scene in card.scenes) {
+            for (s in scene.sections.sortedBy { it.group }) {
+                val used = usedOffsets(s)
+                for (offset in KEYPAD) {
+                    val pad = PhysicalPad(s.group, offset)
+                    if (offset !in used || pad in given) continue
+                    if (slotOf(pad) == null && pad !in out) out += pad
+                }
             }
         }
         return out
@@ -1242,11 +1495,13 @@ object BeatCards {
      * that is [SoundPick.unverified]; else the line is [SoundStatus.MISSING].
      * A line without a name uses its slot when [available] has it. A pick
      * whose slot is already on the pad is [SoundStatus.SAME], found by name
-     * or not.
+     * or not. The sounds are the project's, not a scene's: the lines of all
+     * the card's scenes are matched, and a pad given a line in more than one
+     * scene takes the last (one pick, in the place of its first).
      */
     fun resolveSounds(card: BeatCard, available: Map<Int, String>, current: (PhysicalPad) -> Int?): List<SoundPick> {
-        val picks = ArrayList<SoundPick>()
-        for (s in card.sections) {
+        val picks = LinkedHashMap<PhysicalPad, SoundPick>()
+        for (s in card.allSections) {
             for (offset in KEYPAD) {
                 val wanted = s.sounds[offset] ?: continue
                 val pad = PhysicalPad(s.group, offset)
@@ -1257,14 +1512,14 @@ object BeatCards {
                 val byName = if (direct == null && name != null) lookUp(available, name, now) else null
                 val slot = direct ?: byName ?: wanted.slot.takeIf { unnamedIn(available, it) }
                 val unverified = slot != null && unnamedIn(available, slot)
-                picks += when {
+                picks[pad] = when {
                     slot == null -> SoundPick(pad, wanted, null, null, now, SoundStatus.MISSING)
                     slot == now -> SoundPick(pad, wanted, slot, available[slot], now, SoundStatus.SAME, unverified)
                     else -> SoundPick(pad, wanted, slot, available[slot], now, if (byName != null) SoundStatus.FOUND_BY_NAME else SoundStatus.CHANGE, unverified)
                 }
             }
         }
-        return picks
+        return picks.values.toList()
     }
 
     // Whether [slot] is in [available] under the name the EP-133 gives a sound nobody named ("200.pcm").
@@ -1311,8 +1566,12 @@ object BeatCards {
      * [CardImport.placed]. When a group has no free pattern (all 99 hold
      * notes), nothing is placed: the result has [seq] as it was, no
      * [CardImport.placed] and that group in [CardImport.fullGroup].
+     *
+     * A card of scenes ([BeatCard.multiScene], from `scene` lines) is planned
+     * by [planScenes] instead, which also takes [setChain].
      */
-    fun plan(seq: ProjectSeq, card: BeatCard): CardImport {
+    fun plan(seq: ProjectSeq, card: BeatCard, setChain: Boolean = true): CardImport {
+        if (card.multiScene) return planScenes(seq, card, setChain)
         var out = seq
         val placed = ArrayList<Pair<Int, Int>>()
         for (s in card.sections) {
@@ -1328,6 +1587,66 @@ object BeatCards {
         if (withScene.scenes.size == out.scenes.size) return CardImport(out, placed, false)
         val numbers = List(4) { g -> placed.lastOrNull { it.first == g }?.second ?: seq.selected(g) }
         val scenes = withScene.scenes.dropLast(1) + Scene(numbers)
-        return CardImport(withScene.withScenes(scenes, withScene.scene), placed, true)
+        return CardImport(withScene.withScenes(scenes, withScene.scene), placed, true, scenes = listOf(withScene.scenes.lastIndex))
+    }
+
+    /**
+     * A card of scenes planned into [seq]: one new scene for each card scene,
+     * appended after the project's scenes, in the card's order. Each section's
+     * pattern goes into its group's next free pattern (after the ones the
+     * card has placed already, so no two sections share one, and nothing is
+     * overwritten); a group a scene leaves out takes the pattern number of the
+     * scene before it (the first scene: the numbers of the scene playing). The
+     * first new scene is selected. [CardImport.placed] lists the sections in
+     * the card's order, [CardImport.scenes] the new scenes' indices.
+     *
+     * [CardImport.chain] is the card's chain mapped to the new scenes (null
+     * when the card has none). With [setChain] on (the default) and a chain,
+     * [CardImport.seq] has it as the project's chain, replacing the one there
+     * and turned on; with it off the project's chain is left alone.
+     *
+     * Limits, as for the card without scenes: when a group has no free
+     * pattern for a section, nothing is placed ([CardImport.fullGroup], [seq]
+     * as it was). When the new scenes don't all fit in 99, none is added
+     * ([CardImport.newScene] false, no scenes, no chain), and the patterns are
+     * still placed.
+     */
+    fun planScenes(seq: ProjectSeq, card: BeatCard, setChain: Boolean = true): CardImport {
+        var out = seq
+        val placed = ArrayList<Pair<Int, Int>>()
+        val taken = HashSet<Pair<Int, Int>>()
+        var numbers = List(4) { g -> seq.selected(g) }
+        val made = ArrayList<Scene>()
+        for (sc in card.scenes) {
+            val now = numbers.toMutableList()
+            for (s in sc.sections) {
+                if (s.group !in 0..3) continue
+                val n = freePattern(out, s.group, taken) ?: return CardImport(seq, emptyList(), false, s.group)
+                val p = s.pattern
+                out = out.withPattern(s.group, n, Pattern(p.bars, p.notes.take(Seq.MAX_NOTES).map { it.copy(id = 0) }))
+                taken += s.group to n
+                placed += s.group to n
+                now[s.group] = n
+            }
+            numbers = now
+            made += Scene(now)
+        }
+        if (seq.scenes.size + made.size > Seq.MAX_SCENES) return CardImport(out, placed, false)
+        val first = seq.scenes.size
+        val indices = made.indices.map { first + it }
+        val steps = card.chain?.filter { it.first in 1..card.scenes.size }?.take(Chain.MAX_STEPS)
+            ?.map { (scene, passes) -> ChainStep(first + scene - 1, passes.coerceIn(Chain.MIN_PASSES, Chain.MAX_PASSES)) }?.ifEmpty { null }
+        val chain = if (setChain && steps != null) Chain(steps, true) else seq.chain
+        return CardImport(out.withScenes(seq.scenes + made, first, chain), placed, true, scenes = indices, chain = steps)
+    }
+
+    // The first pattern of [group] after the one selected that has no notes and isn't in [taken], round 1..99; null when there is none.
+    private fun freePattern(seq: ProjectSeq, group: Int, taken: Set<Pair<Int, Int>>): Int? {
+        val from = seq.selected(group)
+        for (i in 1 until Seq.MAX_PATTERNS) {
+            val n = (from - 1 + i) % Seq.MAX_PATTERNS + 1
+            if (seq.pattern(group, n).isEmpty && (group to n) !in taken) return n
+        }
+        return null
     }
 }

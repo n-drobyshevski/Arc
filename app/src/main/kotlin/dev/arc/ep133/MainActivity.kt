@@ -252,6 +252,12 @@ class MainActivity : ComponentActivity() {
     }
 
     /** SHARE (scene when [group] is null) through the system chooser: the card's prompt and text, as plain text. */
+    /** SHARE CHAIN: the project's chain as a card of scenes, to Claude. */
+    private fun shareChain() {
+        val share = controller.beatShareChain() ?: return
+        sendText(share.subject, share.text, dev.arc.ep133.text.ClaudeText.SHARE_CHAIN_TITLE)
+    }
+
     private fun shareBeat(group: Int?) {
         val share = controller.beatShare(group) ?: return
         sendText(share.subject, share.text, dev.arc.ep133.text.ClaudeText.SHARE_TITLE)
@@ -900,6 +906,12 @@ class MainActivity : ComponentActivity() {
                 onBar = controller::setClipBar,
                 onCopy = controller::clipCopy,
                 onPaste = controller::clipPaste,
+                onChainOn = controller::chainOn,
+                onChainAdd = controller::chainAdd,
+                onChainMore = controller::chainCyclePasses,
+                onChainFewer = controller::chainFewerPasses,
+                onChainRemove = controller::chainRemove,
+                chainProgress = controller::chainProgress,
             )
         }
         val functions = dev.arc.ep133.ui.screens.FunctionKeysUi(
@@ -1221,7 +1233,10 @@ class MainActivity : ComponentActivity() {
                                 sounds = dev.arc.ep133.controller.soundSetOf(mirror, state.factoryNames)?.size ?: 0,
                                 withSounds = appSettings.shareSounds,
                                 onWithSounds = controller::setShareSounds,
+                                chainSteps = scene.chain.chain.steps.size,
+                                chainScenes = dev.arc.ep133.controller.chainSceneCount(scene.chain.chain.steps),
                                 onShareScene = { shareBeat(null) },
+                                onShareChain = ::shareChain,
                                 onSharePattern = ::shareBeat,
                                 onPaste = { controller.receiveBeat(clipboardText()) },
                                 onGetSkill = ::openSkill,
@@ -1345,9 +1360,9 @@ class MainActivity : ComponentActivity() {
                             BeatImportSheetContent(
                                 ui = b,
                                 onCancel = { closeBeatSheet() },
-                                onImport = { tempo, soundPads, fx, shapePads, picked ->
+                                onImport = { tempo, soundPads, fx, shapePads, picked, setChain ->
                                     if (playing?.startsWith("device:") == true || playing?.startsWith("factory:") == true) controller.stopPlayback()
-                                    controller.importBeat(tempo, soundPads, fx, shapePads, picked)
+                                    controller.importBeat(tempo, soundPads, fx, shapePads, picked, setChain)
                                 },
                                 onCopyProblems = ::copyProblems,
                                 // PICK SOUND lists the sounds the card's sound lines choose from, played as the pad sheet plays them.

@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import { ARP_ORDERS, arpNote } from '../../../src/core/features/arp'
 import { cardFx, type CardProblem } from '../../../src/core/features/beatCard'
+import { chain, chainPlay, chainStep } from '../../../src/core/features/chain'
 import { DiffResult, ProjectDiff, ProjectState, SoundDiff, SoundState } from '../../../src/core/features/backupDiff'
 import { NoteNames, SCALES } from '../../../src/core/features/keys'
 import { FX_TYPES, FxSettings, FxType, comp, sidechain } from '../../../src/core/features/fxSettings'
@@ -428,6 +429,7 @@ describe('FeatureTextTest', () => {
     expect([MirrorText.gridTitle(1), MirrorText.gridDetail(3, 4), MirrorText.gridDetail(3, 1)]).toEqual(['Group B', 'P03 \u00B7 4 bars', 'P03 \u00B7 1 bar'])
     expect([MirrorText.patternCell(5, true), MirrorText.patternCell(6, false)]).toEqual(['Pattern 5, has notes', 'Pattern 6'])
     expect(CoachText.SCENE).toBe('Pick patterns and scenes, copy and paste')
+    expect(CoachText.CHAIN).toBe('Chain scenes: tap a step for passes, hold to remove')
   })
 
   it('step text', () => {
@@ -671,5 +673,57 @@ describe('FeatureTextTest', () => {
       ClaudeText.padRowName(null, physicalPad(0, 11), false),
       ClaudeText.padRowName({ label: 'A9', old: 'Pitch 0', new: 'Pitch 2' }, physicalPad(0, 11), false),
     ]).toEqual(['A9: no sound on this pad', 'A9: already set', 'A9: Pitch 0 becomes Pitch 2'])
+  })
+  it('chain row text', () => {
+    expect([MirrorText.CHAIN, MirrorText.CHAIN_ON, MirrorText.CHAIN_ADD]).toEqual(['Chain', 'On', 'Add'])
+    expect([chainStep(2), chainStep(2, 2), chainStep(0, 8)].map(MirrorText.chainStep)).toEqual(['S03', 'S03 \u00D72', 'S01 \u00D78'])
+    expect([MirrorText.chainPasses(1), MirrorText.chainPasses(4)]).toEqual(['\u00D71', '\u00D74'])
+    const c = chain([chainStep(0, 2), chainStep(1, 4)], true)
+    expect(MirrorText.chainPass(chainPlay(0, 1), c)).toBe('Pass 1/2')
+    expect(MirrorText.chainPass(chainPlay(1, 3), c)).toBe('Pass 3/4')
+    expect(MirrorText.chainPass(chainPlay(9, 2), c)).toBe('Pass 2/1')
+    expect(MirrorText.chainAdded(3)).toBe('S04 added to chain')
+    expect([MirrorText.CHAIN_EMPTY, MirrorText.CHAIN_FULL, MirrorText.CHAIN_OFF_BY_HAND]).toEqual(['Chain empty. + adds the scene shown', 'Chain is full', 'Chain off: you picked a scene.'])
+    expect([
+      MirrorText.chainName(1, false),
+      MirrorText.chainName(4, true),
+      MirrorText.chainAddName(2),
+      MirrorText.chainOnName(true),
+      MirrorText.chainOnName(false),
+    ]).toEqual(['Chain, 1 step, off', 'Chain, 4 steps, on', 'Add scene 3 to the chain', 'Chain on: plays the scenes in order. Tap to turn off', 'Chain off. Tap to turn on'])
+    expect(MirrorText.chainStepName(2, 5, chainStep(3))).toBe('Chain step 2 of 5, scene 4, 1 pass')
+    expect(MirrorText.chainStepName(2, 5, chainStep(3, 4))).toBe('Chain step 2 of 5, scene 4, 4 passes')
+    expect(MirrorText.chainPassSpoken(2, 2, chainPlay(1, 3), c)).toBe('Chain step 2 of 2, pass 3 of 4')
+    expect([MirrorText.CHAIN_MORE_PASSES, MirrorText.CHAIN_FEWER_PASSES, MirrorText.CHAIN_REMOVE]).toEqual(['More passes', 'Fewer passes', 'Remove step'])
+    expect(MirrorText.CHAIN_NOTE).toContain('x1 x2 x4 x8')
+  })
+
+  it('claude text for cards of scenes', () => {
+    expect([ClaudeText.SHARE_CHAIN, ClaudeText.shareChainName(1), ClaudeText.shareChainName(4)]).toEqual(['Share chain', 'Share the chain with Claude, 1 step', 'Share the chain with Claude, 4 steps'])
+    expect([ClaudeText.cardScene(2, null), ClaudeText.cardScene(2, 'Drop')]).toEqual(['Scene 2', 'Scene 2 \u00B7 Drop'])
+    expect(ClaudeText.cardSceneGoes(4, [4, 2, 1, 1])).toBe('S05 \u00B7 A04 B02 C01 D01')
+    expect(ClaudeText.SCENE_SAME).toBe('Plays the same patterns as the scene before.')
+    expect([ClaudeText.shareChainKey(1), ClaudeText.shareChainKey(3)]).toEqual(['Share chain \u00B7 1 scene', 'Share chain \u00B7 3 scenes'])
+    expect(ClaudeText.cardSceneTarget(2, [[0, 4], [1, 2], [2, null]])).toBe('new S03 \u00B7 A 04 \u00B7 B 02 \u00B7 C (same)')
+    expect(ClaudeText.chainImport([chainStep(2, 2), chainStep(3), chainStep(2, 2), chainStep(4)])).toBe('S03\u00D72 \u2192 S04 \u2192 S03\u00D72 \u2192 S05')
+    expect(ClaudeText.cardSceneName(2, 'Drop', 4, [4, 2, 1, 1])).toBe('Scene 2, Drop, becomes S05, patterns A 4, B 2, C 1, D 1')
+    expect(ClaudeText.cardSceneName(1, null, 1, [1, 1, 1, 1])).toBe('Scene 1, becomes S02, patterns A 1, B 1, C 1, D 1')
+    expect(ClaudeText.chainText([[1, 2], [2, 1], [1, 2], [3, 1]])).toBe('1\u00D72 2 1\u00D72 3')
+    expect([ClaudeText.setChainName(true, 4), ClaudeText.setChainName(false, 1)]).toEqual([
+      "Set the project's chain from the card, 4 steps",
+      "Leave the project's chain as it is, 1 step",
+    ])
+    expect([
+      ClaudeText.imported([], 'S04\u2013S06', 0, 0, false, 0, 0, 3, true),
+      ClaudeText.imported([], 'S04', 0, 0, false, 0, 0, 1),
+      ClaudeText.imported([], 'S04\u2013S06', 2, 0, true, 0, 0, 3, true),
+    ]).toEqual([
+      'Imported to scenes S04\u2013S06. Chain set. UNDO takes it back.',
+      'Imported to scene S04. UNDO takes it back.',
+      'Imported to scenes S04\u2013S06 and 2 sounds. FX applied. Chain set. UNDO takes it back.',
+    ])
+    expect(ClaudeText.SHARE_CHAIN_PROMPT).toContain('arrangement')
+    expect(ClaudeText.SHARE_CHAIN_PROMPT).toContain('energy curve')
+    expect(ClaudeText.shareSubject(ClaudeText.CHAIN_CARD_NAME)).toBe('Arc beat Chain')
   })
 })
