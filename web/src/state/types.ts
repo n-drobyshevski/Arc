@@ -136,6 +136,10 @@ export interface MirrorUi {
   readonly offline?: string | null | undefined
   /** Offline: the sounds to preview and put on the pads in arc only. */
   readonly offlineSounds?: OfflineSounds | null | undefined
+  /** Offline: the projects PROJECT steps through (the last read's and the factory pack's), in order. */
+  readonly offlineProjects?: readonly number[] | undefined
+  /** Connected: the project PROJECT asked the device for while it switches (null: none). */
+  readonly projectTarget?: number | null | undefined
 }
 
 /** A backup opened for its contents screen (sounds and projects, playback, export). */

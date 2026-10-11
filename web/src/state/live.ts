@@ -61,6 +61,7 @@ import { padKey, physicalPad, type PhysicalPad } from '../core/features/padNotes
 import { PadSoundCache } from '../core/features/padSoundCache'
 import { newestBackupWith, unavailable } from '../core/features/padSounds'
 import { decodeWav, encodeWav, isSilent } from '../core/formats/wav'
+import type { VoiceShape } from '../core/formats/voiceMixer'
 import type { SoundEntry } from '../core/protocol/device'
 import { download } from '../core/protocol/fs'
 import type { Session } from '../core/protocol/session'
@@ -180,6 +181,8 @@ export interface LiveHost {
   toast(text: string, error?: boolean): void
   /** A toast, unless the same text is already showing (a press can raise one, and a slide presses many). */
   toastOnce(text: string, error?: boolean): void
+  /** How a voice of [pad] plays (its FX bus, whether it ducks the sidechain); the defaults when left out. */
+  shapeOf?(pad: { readonly group: number; readonly offset: number }): Partial<VoiceShape>
 }
 
 export class LiveSounds {
@@ -191,6 +194,8 @@ export class LiveSounds {
   private openPak: { id: string; pak: Pak } | null = null
   // The factory sounds' first project as Live shows it, by the library entry it came from.
   private factorySnap: { id: string; snap: LiveSnapshot | null } | null = null
+  // Every factory project with pads, by the library entry they came from (PROJECT offline).
+  private factorySnaps: { id: string; snaps: Map<number, LiveSnapshot> } | null = null
   // Live's pad samples decoded and ready ("slot:name"), least recently played first.
   private readonly padMemory = new Map<string, PadAudio>()
   private padMemoryBytes = 0
@@ -629,6 +634,28 @@ export class LiveSounds {
     return snap
   }
 
+  /**
+   * Every factory project with pads as Live shows it, by number, when the
+   * library has the pack (PROJECT steps through them offline); empty without it.
+   */
+  async factorySnapshots(): Promise<Map<number, LiveSnapshot>> {
+    const b = FactorySounds.inLibrary(this.host.store.get().backups)
+    if (b === null) return new Map()
+    if (this.factorySnaps?.id === b.id) return this.factorySnaps.snaps
+    const snaps = new Map<number, LiveSnapshot>()
+    try {
+      const pak = await this.pakOf(b.id)
+      for (const n of FactorySounds.projects(pak)) {
+        const snap = FactorySounds.snapshot(pak, b.createdAt, n)
+        if (snap !== null) snaps.set(n, snap)
+      }
+    } catch {
+      snaps.clear()
+    }
+    this.factorySnaps = { id: b.id, snaps }
+    return snaps
+  }
+
   /** The sound on [pad] (its offline change first), when the mirror knows it. */
   private padSample(pad: PhysicalPad): PadSample | null {
     return this.host.mirror()?.sampleOf(pad) ?? null
@@ -823,7 +850,7 @@ export class LiveSounds {
     // In memory: plays now, without waiting a turn.
     const sample = this.padSample(pad)
     const mem = sample ? this.fromMemory(memoryKey(sample.slot, sample.name)) : null
-    if (sample && mem) this.startHeld(id, hold, memoryKey(sample.slot, sample.name), mem, 0, pressedAt, true)
+    if (sample && mem) this.startHeld(id, pad, hold, memoryKey(sample.slot, sample.name), mem, 0, pressedAt, true)
     if (unsure && hold) {
       // Not yet the latest press either: a scroll mustn't drop another press's late load.
       this.unsure.set(id, { started: mem !== null, pressedAt, token })
@@ -855,7 +882,7 @@ export class LiveSounds {
   /** Loads [pad]'s sample (copy, backup or device) and starts its voice, unless a stop came meanwhile. */
   private async loadAndStart(pad: PhysicalPad, id: string, hold: boolean, pressedAt: number, token: number): Promise<void> {
     const got = await this.padAudio(pad)
-    if (got !== null && token === this.host.playToken()) this.startHeld(id, hold, got.key, got.audio, 0, pressedAt, false)
+    if (got !== null && token === this.host.playToken()) this.startHeld(id, pad, hold, got.key, got.audio, 0, pressedAt, false)
   }
 
   /** The finger left the pad: its sound fades out. */
@@ -897,12 +924,12 @@ export class LiveSounds {
     const sample = this.padSample(pad)
     const mem = sample ? this.fromMemory(memoryKey(sample.slot, sample.name)) : null
     if (sample && mem) {
-      this.startHeld(id, hold, memoryKey(sample.slot, sample.name), mem, pitch, pressedAt, true)
+      this.startHeld(id, pad, hold, memoryKey(sample.slot, sample.name), mem, pitch, pressedAt, true)
       return Promise.resolve()
     }
     return (async () => {
       const got = await this.padAudio(pad)
-      if (got !== null && token === host.playToken()) this.startHeld(id, hold, got.key, got.audio, pitch, pressedAt, false)
+      if (got !== null && token === host.playToken()) this.startHeld(id, pad, hold, got.key, got.audio, pitch, pressedAt, false)
     })()
   }
 
@@ -924,9 +951,10 @@ export class LiveSounds {
    * every note it slid over.
    *
    * [measured]: the sample was in memory at the press, so its latency goes
-   * into the latency test; a load's time would only blur it.
+   * into the latency test; a load's time would only blur it. [pad]: whose
+   * voice it is (KEYS': the sound's pad), for its shape (host.shapeOf).
    */
-  private startHeld(id: string, hold: boolean, key: string, a: PadAudio, semitones: number, pressedAt: number, measured: boolean): void {
+  private startHeld(id: string, pad: { readonly group: number; readonly offset: number }, hold: boolean, key: string, a: PadAudio, semitones: number, pressedAt: number, measured: boolean): void {
     const { host } = this
     const out = host.deps.liveAudio
     if (this.cuts.delete(id)) return
@@ -941,7 +969,8 @@ export class LiveSounds {
     // loaded voice that was never heard (cut first).
     if (measured) this.unmeasured.delete(id)
     else this.unmeasured.add(id)
-    if (!out.press(id, key, { pitch: semitones, gate: hold, pressedAt })) {
+    const shape = host.shapeOf?.(pad)
+    if (!out.press(id, key, shape === undefined ? { pitch: semitones, gate: hold, pressedAt } : { pitch: semitones, gate: hold, pressedAt, shape })) {
       this.unmeasured.delete(id)
       host.toastOnce(FeatureText.NO_AUDIO_OUTPUT, true)
       return

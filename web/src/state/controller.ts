@@ -67,6 +67,7 @@ import type { PadOrder } from '../core/features/padPush'
 import { compare as comparePaks } from '../core/features/pakCompare'
 import { frames, seconds, type TrimRange } from '../core/features/sampleTrim'
 import { nameFor, nextFree, upload, UploadItem } from '../core/features/sampleUpload'
+import { FxControl } from '../core/formats/fx/fxBus'
 import { decodeWav } from '../core/formats/wav'
 import { REC_IDLE, type RecState } from '../core/features/takeRecorder'
 import type { RecordedTake } from '../platform/audio/liveAudio'
@@ -95,7 +96,9 @@ import { keepScreenOn } from '../platform/wakelock/wakeLock'
 import { Connection, connectionPhase, type ConnectionPhase } from './connection'
 import type { Deps, LiveEngineInfo } from './deps'
 import { LiveSounds, noteVoice, padVoice, pressTime, type LiveLatency } from './live'
+import { FxKeeper } from './fx'
 import { PatternDesk } from './pattern'
+import { patternBpm } from './patternPlan'
 import { MirrorController } from './mirror'
 import { PreviewCache, type DecodedSound } from './previewCache'
 import { createStore, type Store } from './store'
@@ -162,6 +165,8 @@ export class ArcController {
   readonly rec: ReadonlySignal<RecState>
   /** PATTERN: Live's own patterns, recorded and played on its output (state/pattern.ts). */
   readonly pattern: PatternDesk
+  /** FX: every project's settings, the one Live shows, the punch-ins held. */
+  readonly fx: FxKeeper
   // Presses in ERASE on the scrolling page that may still turn into a scroll: when each went down, by pad key.
   private readonly eraseUnsure = new Map<number, number>()
   /** The pads sounding on the phone, as padKey numbers (MainActivity's playingPads). */
@@ -265,6 +270,10 @@ export class ArcController {
       toast,
       onDropped: () => this.onDropped(),
     })
+    this.fx = new FxKeeper((what, index, x, y) => deps.liveAudio.control?.(what, index, x, y), deps.library, {
+      setTimeout: (fn, ms) => deps.setTimeout(fn, ms),
+      clearTimeout: (h) => deps.clearTimeout(h),
+    })
     this.live = new LiveSounds({
       store: this.store,
       deps,
@@ -275,6 +284,7 @@ export class ArcController {
       playToken: () => this.playToken,
       toast,
       toastOnce: (text, error) => this.toastOnce(text, error),
+      shapeOf: (pad) => this.fx.shapeOf(pad),
     })
     this.liveLatency = this.live.latency
     this.pattern = new PatternDesk({
@@ -283,6 +293,10 @@ export class ArcController {
       prefs: deps.patternPrefs ?? new PatternPrefs(memoryStorage()),
       live: this.live,
       toast,
+      duckPad: () => {
+        const c = this.fx.desk.fx.peek().sidechain
+        return c.on ? c.group * 12 + c.pad : null
+      },
     })
     this.store.update((s) => ({ ...s, keysPad: deps.mirrorPrefs.savedKeysPad() }))
     this.mirror = new MirrorController({
@@ -342,24 +356,46 @@ export class ArcController {
     }
     if (audio.onLog) this.cleanups.push(audio.onLog((line) => this.trafficLog.note(line)))
     // PATTERN: the kept patterns, the project Live shows (its own patterns) and the device's tempo.
+    // FX: the kept settings, the project's own, and the tempo its delays and punch-ins follow.
     void this.pattern.load()
+    void this.fx.load()
     let project: number | null = null
     let bpm: number | null = null
+    let fxBpm: number | null = null
+    const fxTempo = (): void => {
+      const t = patternBpm(this.store.get().mirror?.state.bpm, this.pattern.metronome.peek().bpm)
+      if (t === fxBpm) return
+      fxBpm = t
+      deps.liveAudio.control?.(FxControl.TEMPO, 0, t, 0)
+    }
     this.cleanups.push(
       this.store.subscribe((st) => {
         const p = st.mirror?.state.activeProject ?? null
         if (p !== null && p !== project) {
           project = p
           void this.pattern.switchProject(p)
+          this.fx.desk.switchTo(p)
         }
         const b = st.mirror?.state.bpm ?? null
         if (b !== bpm) {
           bpm = b
           this.pattern.tempoChanged()
+          fxTempo()
         }
       }),
     )
+    this.cleanups.push(this.pattern.metronome.subscribe(fxTempo))
+    // The sidechain's source is in the pattern's voices' shapes.
+    let duck: string | null = null
+    this.cleanups.push(
+      this.fx.desk.fx.subscribe((fx) => {
+        const d = fx.sidechain.on ? `${fx.sidechain.group}:${fx.sidechain.pad}` : ''
+        if (duck !== null && d !== duck) this.pattern.refreshPlan()
+        duck = d
+      }),
+    )
     this.cleanups.push(() => this.pattern.dispose())
+    this.cleanups.push(() => this.fx.dispose())
     if (audio.onTake) this.cleanups.push(audio.onTake((take, limit) => void this.takeDone(take, limit)))
     void this.loadTakes()
     this.cleanups.push(lib.subscribe(() => void this.reloadLibrary()))
@@ -555,6 +591,8 @@ export class ArcController {
     // The pattern and the click stop with the sound (Android's focus lost).
     this.pattern.stop()
     this.pattern.setClick(false)
+    // A punch-in lasts while it is held.
+    this.fx.desk.punchAllUp()
     this.live.suspendAudio()
     this.audioClose = this.deps.setTimeout(() => {
       this.audioClose = null
@@ -1106,6 +1144,19 @@ export class ArcController {
     return done
   }
 
+  /**
+   * The FX sheet's cap: [pad] plays as Live plays it, through the effects,
+   * until [releaseTry]; a try, so never a pattern's note, nor ERASE's.
+   */
+  tryPad(pad: PhysicalPad, at?: number): Promise<void> {
+    return this.live.playPad(pad, true, false, at)
+  }
+
+  /** The finger left the FX sheet's cap. */
+  releaseTry(pad: PhysicalPad): void {
+    this.live.releasePad(pad)
+  }
+
   /** The unsure press on the pad was a press after all: it becomes the KEYS sound (and one not in memory loads). */
   keepPad(pad: PhysicalPad): Promise<void> {
     const erasedAt = this.eraseUnsure.get(padKey(pad))
@@ -1137,6 +1188,20 @@ export class ArcController {
     this.pattern.eraseCut(pad)
     this.live.cutPad(pad)
     this.pattern.cut(padVoice(pad))
+  }
+
+  /**
+   * PROJECT's tap: connected, the EP-133 switches to the next project and
+   * Live follows it; offline, Live shows the next of its views (the last
+   * read's project and the factory pack's), in arc only.
+   */
+  stepProject(): void {
+    this.mirror.stepProject()
+  }
+
+  /** PROJECT held, project [n] (1..9) picked on the pads or the sheet: as [stepProject] would go there. */
+  selectProject(n: number): void {
+    this.mirror.selectProject(n)
   }
 
   /** The sound KEYS plays: the pad last tapped, or last played on the device in the pads view. */

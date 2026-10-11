@@ -48,6 +48,8 @@ export interface FakeLiveAudio extends LiveAudioDeps {
   readonly clickLog: string[]
   /** A click heard, as the output tells it. */
   beat(b: Beat): void
+  /** FX bus commands in order: [what, index, x, y]. */
+  readonly controls: [number, number, number, number][]
 }
 
 /** [withLate]: with a `late` signal of its own, as the real LiveAudio (the controller then follows it). */
@@ -68,6 +70,7 @@ export function fakeLiveAudio(withLate = false): FakeLiveAudio {
   const a: FakeLiveAudio = {
     loaded: new Map(),
     presses: [],
+    controls: [],
     releases: [],
     cuts: [],
     log: [],
@@ -106,6 +109,9 @@ export function fakeLiveAudio(withLate = false): FakeLiveAudio {
       a.presses.push({ id, key, options })
       set((s) => s.add(id))
       return true
+    },
+    control(what, index, x, y) {
+      a.controls.push([what, index, x, y])
     },
     release(id) {
       a.releases.push(id)

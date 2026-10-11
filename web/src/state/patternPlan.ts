@@ -6,8 +6,9 @@
 // Web deltas:
 // - PatternUiState's pads with notes are pad keys (group × 12 + offset).
 // - patternVoices maps pad keys to the sample keys Live's output holds (a
-//   PadVoice is the worklet's, liveMixer.ts), with no shapes: the web plays
-//   every pad as the mixer's DEFAULT, as its presses do.
+//   PadVoice is the worklet's, liveMixer.ts); their shapes are only the FX
+//   bus's (each pad's group, and the sidechain's source, LiveSeqPlan.duckPad):
+//   otherwise the web plays every pad as the mixer's DEFAULT, as its presses do.
 // - pressPlace has no OutputDelay: the web keeps no Bluetooth make-up, so the
 //   tick heard is the tick stamped.
 // - Times are performance.now() milliseconds where Kotlin's are System.nanoTime.

@@ -83,6 +83,8 @@ export interface PatternHost {
   prefs: PatternPrefs
   live: Pick<LiveSounds, 'patternVoice' | 'loadForPattern'>
   toast(text: string, error?: boolean): void
+  /** The pad (pad key) whose voices duck the sidechain (FX), if any. */
+  duckPad?(): number | null
 }
 
 /** The plan last handed to the sequencer, to tell when a new one changes anything. */
@@ -91,6 +93,7 @@ interface SentPlan {
   readonly skip: ReadonlyMap<number, number>
   readonly bpm: number
   readonly voices: ReadonlyMap<number, string>
+  readonly duckPad: number | null
 }
 
 export class PatternDesk {
@@ -288,10 +291,11 @@ export class PatternDesk {
     const p = this.current
     const { voices, missing } = patternVoices(ProjectPatterns.usedPads(p), (pad) => this.host.live.patternVoice(pad))
     const bpm = this.bpm()
+    const duckPad = this.host.duckPad?.() ?? null
     const old = this.sent
-    if (old === null || old.patterns !== p || old.skip !== this.skip || old.bpm !== bpm || !sameVoices(old.voices, voices)) {
-      this.sent = { patterns: p, skip: this.skip, bpm, voices }
-      audio.seqPlan({ patterns: p, voices, skip: this.skip, bpm, phase: PhaseAnchors.ZERO })
+    if (old === null || old.patterns !== p || old.skip !== this.skip || old.bpm !== bpm || old.duckPad !== duckPad || !sameVoices(old.voices, voices)) {
+      this.sent = { patterns: p, skip: this.skip, bpm, voices, duckPad }
+      audio.seqPlan({ patterns: p, voices, skip: this.skip, bpm, phase: PhaseAnchors.ZERO, duckPad })
     }
     for (const pad of missing) this.loadPad(pad)
     if (this._ui.peek().missing !== missing.size) this._ui.value = { ...this._ui.peek(), missing: missing.size }

@@ -160,8 +160,10 @@ import { tick } from '../../platform/haptics'
 import { PickWord, WordButton } from '../live/Words'
 import { TakeBadge, TakesSection, type TakeUi, type TakesUi } from '../live/Takes'
 import { PatternLine, TransportContext } from '../live/PatternLine'
-import { FunctionRow } from '../live/FunctionRow'
+import { FunctionKeysContext, FunctionRow, ProjectHoldContext } from '../live/FunctionRow'
 import { DeviceView } from '../live/DeviceView'
+import { PunchPad, usePunch } from '../live/LivePunch'
+import { punchSlotForPad } from '../../state/fx'
 import { useDesk, useFinePointer, useWindowSize } from '../useDesk'
 import './MirrorScreen.css'
 
@@ -688,19 +690,34 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   const dockHead = tabbed ? <ToolsTabs tab={toolsTab} onTab={setToolsTab} /> : undefined
 
   const hasPad = onPad !== null
+  // PROJECT held: a pad printed 1 to 9 picks that project instead of sounding, and the others stay still.
+  const projectHold = useContext(ProjectHoldContext)
+  const fnKeys = useContext(FunctionKeysContext)
+  const fnKeysNow = useRef(fnKeys)
+  fnKeysNow.current = fnKeys
   const padPress = useMemo(
     () =>
       (pad: PhysicalPad): PressTarget | null => {
         if (!hasPad) return null
+        const key = `pad:${padKey(pad)}`
         return {
           // Unsure only when something will settle it.
-          press: (hold, unsure, at) => latest.current.onPad?.(pad, hold, (unsure ?? false) && latest.current.onPadKept !== undefined, at),
-          release: () => latest.current.onPadUp?.(pad),
-          cut: () => (latest.current.onPadCut ?? latest.current.onPadUp)?.(pad),
+          press: (hold, unsure, at) => {
+            if (projectHold?.press(key, pad.label, fnKeysNow.current?.project ?? null)) return
+            latest.current.onPad?.(pad, hold, (unsure ?? false) && latest.current.onPadKept !== undefined, at)
+          },
+          release: () => {
+            if (projectHold?.release(key)) return
+            latest.current.onPadUp?.(pad)
+          },
+          cut: () => {
+            if (projectHold?.release(key)) return
+            ;(latest.current.onPadCut ?? latest.current.onPadUp)?.(pad)
+          },
           keep: () => latest.current.onPadKept?.(pad),
         }
       },
-    [hasPad],
+    [hasPad, projectHold],
   )
   const hasEdit = edit !== null
   const editPad = useMemo(() => (hasEdit ? (pad: PhysicalPad) => latest.current.edit?.onPad(pad) : null), [hasEdit])
@@ -859,8 +876,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   const modeLead = <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} plan={plan} part="lead" />
   const modePicks = <ModeRow keys={keys} actions={actions} picker={props.onPicker ? picker : undefined} onPicker={props.onPicker} plan={plan} part="picks" />
   // On a phone on its side the line is in the top bar instead.
-  // TEMPO (and, in later rounds, the other function keys) over the pads, upright; none sideways or in EDIT.
-  const fnRow = inBar || editing ? null : <FunctionRow class="live__fn" />
+  // The function keys over the pads, upright (none sideways); SOUND turns EDIT off again, so they stay in EDIT.
+  const fnRow = inBar ? null : <FunctionRow class="live__fn" />
   const displayStrip = inBar ? null : editing ? <EditStrip /> : <DisplayStrip st={st} mirror={mirror} take={take} still={fixedNow !== null} />
   const allGroups = (
     <div class="live__all">
@@ -1246,6 +1263,20 @@ function PianoLegend(): JSX.Element {
  */
 function DisplayStrip(props: { st: MirrorState; mirror: MirrorUi | null; compact?: boolean; take?: TakeUi | null; still?: boolean }): JSX.Element {
   const { st, mirror } = props
+  // The punch-ins held name the line, in the order pressed.
+  const punch = usePunch()
+  if (punch !== null && punch.held.size > 0) {
+    return (
+      <div class={`live-strip${props.compact ? ' live-strip--bar' : ''}`} aria-live="polite">
+        <PatternLine compact={props.compact} still={props.still}>
+          <span class="live-strip__line live-strip__punch" aria-label={MirrorText.punchSpoken(punch.held)}>
+            {MirrorText.punchLine(punch.held)}
+          </span>
+        </PatternLine>
+        <TakeBadge take={props.take} still={props.still} />
+      </div>
+    )
+  }
   return (
     <div class={`live-strip${props.compact ? ' live-strip--bar' : ''}`} aria-live="polite">
       <PatternLine compact={props.compact} still={props.still}>
@@ -1388,6 +1419,7 @@ interface GroupProps {
 
 function Group(props: GroupProps): JSX.Element {
   const { group, st, nameOf, now, big = false, fill = false, ui, tracker } = props
+  const punch = usePunch()
   const letter = MirrorText.groupKey(group)
   return (
     <div
@@ -1425,6 +1457,9 @@ function Group(props: GroupProps): JSX.Element {
             <div class="live-deck__row">
               {offsets.map((o) => {
                 const pad = physicalPad(group, o)
+                // FX held: the big grid's pads are the punch-ins, by the label printed on each.
+                const slot = big && punch !== null ? punchSlotForPad(o) : -1
+                if (slot >= 0) return <PunchPad key={o} slot={slot} punch={punch!} />
                 return (
                   <Pad
                     key={o}
