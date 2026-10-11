@@ -165,6 +165,7 @@ import { DeviceView } from '../live/DeviceView'
 import { PunchPad, usePunch } from '../live/LivePunch'
 import { StepPanel, useStep, useStepNoteMark, useStepPadMark } from '../live/StepPanel'
 import { ArpWords, useArpLine, useArpNote, useArpPad } from '../live/ArpWords'
+import { ClaudeSection } from '../live/ClaudeSection'
 import { ScenePanel, useScene } from '../live/ScenePanel'
 import { punchSlotForPad } from '../../state/fx'
 import { useDesk, useFinePointer, useWindowSize } from '../useDesk'
@@ -650,12 +651,15 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   )
   const take = props.take ?? null
   const takesSection = take && props.takes ? <TakesSection takes={props.takes} take={take} /> : null
+  // CLAUDE: beat cards to and from Claude, for the group shown (KEYS: the KEYS sound's), before TAKES.
+  const claudeSection = <ClaudeSection group={stepGroup ?? group} />
   const tools = keys.on ? (
     <>
       {settingsRow}
       {factoryRow}
       {offlinePadsRow}
       <KeysPanel keys={keys} actions={actions} piano={pianoRange !== null} hint={!plan.switchShown} keyboard={keyHints} />
+      {claudeSection}
       {takesSection}
     </>
   ) : (
@@ -693,6 +697,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
       </RowCard>
       {st.lastKeysNote !== null && <KeysStrip st={st} last={st.lastKeysNote} names={keys.names} />}
       {keyHints && <p class="t-small live-tools__note">{WebText.LIVE_PADS_KEYS_HINT}</p>}
+      {claudeSection}
       {takesSection}
       <Notes st={st} mirror={mirror} tapToPlay={onPad !== null} hint={!plan.switchShown} transport={inBar} />
     </>

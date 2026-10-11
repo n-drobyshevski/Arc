@@ -7,7 +7,7 @@
 // UNDO, ERASE (on, the sheet makes way for the pads) and CLEAR (a group's notes or every group's, asked here first). Pads
 // the pattern plays whose sounds aren't on the phone yet are counted.
 //
-// Web deltas: no SCENE CHANGE (the web has no scenes yet); a group's length cell is a radio of a radiogroup, where Kotlin's
+// Web deltas: no SCENE CHANGE here (the scene panel has it); a group's length cell is a radio of a radiogroup, where Kotlin's
 // is a selectable tab.
 import type { JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'

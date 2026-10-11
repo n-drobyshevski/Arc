@@ -102,6 +102,9 @@ import { PunchContext, type PunchUi } from './ui/live/LivePunch'
 import { StepContext, type StepActions } from './ui/live/StepPanel'
 import { SceneContext, type SceneActions } from './ui/live/ScenePanel'
 import { ArpContext, type ArpActions } from './ui/live/ArpWords'
+import { ClaudeContext, learnUrl, type ClaudeActions } from './ui/live/ClaudeSection'
+import { BeatImportSheet } from './ui/sheets/BeatImportSheet'
+import { BeatCards } from './core/features/beatCard'
 import { stepWord } from './state/stepPlan'
 import { projectChoicesOf, projectKeyOf, projectKeyState } from './ui/live/projectKey'
 import { ProjectSheet } from './ui/sheets/ProjectSheet'
@@ -117,6 +120,7 @@ const PROGRESS = 'progress'
 const KEYS_SHEET = 'keys'
 /** Live's pattern sheet (RECORD held). */
 const PATTERN_SHEET = 'pattern'
+const BEAT_SHEET = 'beat'
 /** Live's tempo sheet (TEMPO held). */
 const TEMPO_SHEET = 'tempo'
 /** Live's project sheet (PROJECT held). */
@@ -218,6 +222,7 @@ function Root(): JSX.Element {
   const step = useMemo(() => stepUi(c), [c])
   const scenes = useMemo(() => sceneUi(c), [c])
   const arp = useMemo(() => arpUi(c), [c])
+  const claude = useMemo(() => claudeUi(c), [c])
   // PROJECT held: the pads printed 1 to 9 pick a project instead of sounding.
   const projectHold = useMemo(() => new ProjectHold(), [])
   // Live's EDIT (giving a pad another sound): on Live, in PADS, until switched off or left.
@@ -479,6 +484,7 @@ function Root(): JSX.Element {
     <StepContext.Provider value={step}>
     <SceneContext.Provider value={scenes}>
     <ArpContext.Provider value={arp}>
+    <ClaudeContext.Provider value={claude}>
     <TempoContext.Provider value={tempo}>
     <FunctionKeysContext.Provider value={fnKeys}>
     <ProjectHoldContext.Provider value={projectHold}>
@@ -511,7 +517,7 @@ function Root(): JSX.Element {
       {/* The Device tab's sheets: pads 'pads:device:<n>', upload / trim from state.browser.draft. */}
       {tabs && v.tab === 'device' && <><DevicePadsSheet view={v} /><DeviceUploadSheet view={v} /></>}
       {/* Live's EDIT: the pad sheet 'edit:<group>:<offset>', and the upload / trim sheets for a new sample. */}
-      {tabs && v.tab === 'live' && <><PadEditSheet view={v} /><DeviceUploadSheet view={v} /><LivePatternSheet view={v} /><LiveTempoSheet view={v} /><LiveProjectSheet view={v} /><LiveFxSheet view={v} /></>}
+      {tabs && v.tab === 'live' && <><PadEditSheet view={v} /><DeviceUploadSheet view={v} /><LivePatternSheet view={v} /><LiveTempoSheet view={v} /><LiveProjectSheet view={v} /><LiveFxSheet view={v} /><LiveBeatSheet view={v} /></>}
       {/* The Backups tab's sheets: detail 'detail:<id>', compare picker 'comparePick:<id>',
           restore 'restore:<id>', the delete dialog 'delete'. */}
       {tabs && v.tab === 'backups' && <BackupsSheets view={v} />}
@@ -537,6 +543,7 @@ function Root(): JSX.Element {
     </ProjectHoldContext.Provider>
     </FunctionKeysContext.Provider>
     </TempoContext.Provider>
+    </ClaudeContext.Provider>
     </ArpContext.Provider>
     </SceneContext.Provider>
     </StepContext.Provider>
@@ -687,6 +694,27 @@ function sceneUi(c: ArcController): SceneActions | null {
   }
 }
 
+/** Live tools' CLAUDE (Kotlin ClaudeUi), its state read from the controller's signals as the section renders. */
+function claudeUi(c: ArcController): ClaudeActions | null {
+  const p = c.pattern
+  if (!p.available) return null
+  return {
+    get scene() {
+      return p.scene.value.label
+    },
+    get numbers() {
+      return p.scene.value.groups.map((g) => g.number)
+    },
+    get hasNotes() {
+      return p.ui.value.hasNotes
+    },
+    onShareScene: () => void c.shareBeat(null),
+    onSharePattern: (g) => void c.shareBeat(g),
+    onPaste: () => void c.pasteBeat(),
+    learnUrl: learnUrl(),
+  }
+}
+
 /** ARP / RPT and LATCH for Live (Kotlin LiveArp), its state read from the controller's signal as each part renders. */
 function arpUi(c: ArcController): ArpActions | null {
   const p = c.pattern
@@ -751,6 +779,67 @@ function transportUi(c: ArcController, openSheet: () => void): TransportUi | nul
 }
 
 /** RECORD held: the pattern sheet 'pattern', on Live. */
+/**
+ * A beat card's sheet over Live, open while a card waits (pasted, or read from
+ * PASTE BEAT) or PASTE BEAT waits for a paste; a layer of its own, so Back
+ * closes it as CANCEL does.
+ */
+function LiveBeatSheet(props: { view: NavView }): JSX.Element | null {
+  const c = useController()
+  const nav = useNav()
+  const p = c.pattern
+  const beat = p.beat.value
+  const pasting = c.beatPasting.value
+  const shown = beat !== null || pasting
+  const has = props.view.sheets.includes(BEAT_SHEET)
+  // The layer opens with the card; the layer closed (Back) while the card waits is a CANCEL.
+  const opened = useRef(false)
+  useEffect(() => {
+    if (shown && !has) {
+      if (opened.current) {
+        opened.current = false
+        p.dismissBeat()
+        c.cancelBeatPaste()
+      } else {
+        nav.open(sheetLayer(BEAT_SHEET))
+      }
+    } else if (!shown && has) {
+      nav.close(sheetLayer(BEAT_SHEET))
+    }
+    if (has) opened.current = true
+    if (!shown && !has) opened.current = false
+  }, [shown, has])
+  // Web delta (no ACTION_SEND): a paste anywhere on Live with an ARC BEAT line in it opens the card's
+  // sheet; one into a text field, or without a card, is left alone.
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent): void => {
+      const t = e.target
+      if (t instanceof HTMLElement && (t.isContentEditable || t.closest('input, textarea, select') !== null)) return
+      const text = e.clipboardData?.getData('text/plain') ?? ''
+      if (!BeatCards.hasCard(text)) return
+      e.preventDefault()
+      void c.receiveBeat(text)
+    }
+    document.addEventListener('paste', onPaste)
+    return () => document.removeEventListener('paste', onPaste)
+  }, [c])
+  if (!p.available) return null
+  return (
+    <BeatImportSheet
+      open={shown && has}
+      ui={beat}
+      pasting={pasting}
+      onCancel={() => {
+        p.dismissBeat()
+        c.cancelBeatPaste()
+      }}
+      onImport={(setTempo) => p.importBeat(setTempo)}
+      onCopyProblems={(problems) => void c.copyProblems(problems)}
+      onPaste={(text) => void c.receiveBeat(text)}
+    />
+  )
+}
+
 function LivePatternSheet(props: { view: NavView }): JSX.Element | null {
   const c = useController()
   const nav = useNav()
