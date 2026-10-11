@@ -28,6 +28,7 @@ import { MirrorText } from '../../core/text/mirrorText'
 import { WebText } from '../../core/text/webText'
 import type { MirrorUi } from '../../state/types'
 import { ComboLine } from '../components/GuideKeys'
+import { TempoContext, useTempoPress, type TempoUi } from './FunctionRow'
 import {
   TransportContext,
   hasWords,
@@ -166,6 +167,8 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
 
   // PATTERN: RECORD and PLAY are the pattern's, the display's ● and ▶ light with it and the plate counts it.
   const transport = useContext(TransportContext)
+  // TEMPO: a tap turns the click on or off, held the tempo sheet; the display's metronome lights with the click.
+  const tempo = useContext(TempoContext)
   const pat = transport?.ui ?? null
   const patLight = pat !== null ? recordLight(pat) : null
   const recLight: 'live' | 'armed' | null =
@@ -241,7 +244,7 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
           <span class={`ep-a ep-dtxt ep-bpm${digits.bpm ? ' ep-lit' : ' ep-dim'}`} aria-hidden="true">BPM</span>
           <span class={`ep-a ep-rec${recLight === 'live' ? ' is-on' : recLight === 'armed' ? (props.still ? ' is-on' : ' is-armed') : ''}`} aria-hidden="true" />
           <span class={`ep-a ep-play${st.playing === true || patternOn ? ' is-on' : ''}`} aria-hidden="true" />
-          <svg class={`ep-a ep-metro${st.playing === true ? ' is-on' : ''}`} viewBox="0 0 40 52" aria-hidden="true">
+          <svg class={`ep-a ep-metro${st.playing === true || tempo?.clickOn === true ? ' is-on' : ''}`} viewBox="0 0 40 52" aria-hidden="true">
             <path d="M14 4 h12 l10 44 h-32 z M20 40 L32 8" />
           </svg>
           <span class="ep-a ep-bars" style={at(795, 704)} aria-hidden="true" />
@@ -280,7 +283,7 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
           <button type="button" class="ep-a ep-knob ep-knob--vol" style={at(68, 950)} aria-label="Volume" aria-haspopup="dialog" onClick={(e) => openCard('VOLUME', e)} />
           {split('SOUND', 265, 950, 'SOUND', 'EDIT', 'ep-h--black', 'ep-h--light')}
           {split('MAIN', 461, 950, 'MAIN', 'COMMIT', 'ep-h--black', 'ep-h--orange')}
-          {split('TEMPO', 657, 950, 'TEMPO', 'LOOP', 'ep-h--black', 'ep-h--grey')}
+          {tempo !== null ? <DeviceTempoKey t={tempo} /> : split('TEMPO', 657, 950, 'TEMPO', 'LOOP', 'ep-h--black', 'ep-h--grey')}
           <span class="ep-a ep-line" style={at(722, 917, 2, 30)} aria-hidden="true" />
           <span class="ep-a ep-line" style={at(722, 917, 345, 2)} aria-hidden="true" />
           {label(1090, 917, 'BPM')}
@@ -567,5 +570,27 @@ function PlateWords(props: { t: TransportUi; still?: boolean }): JSX.Element {
     <span class="ep-a ep-plate__status" aria-hidden="true">
       {patternWordsText(props.t.ui, beat)}
     </span>
+  )
+}
+
+/** The drawn TEMPO / LOOP key as TEMPO: a tap turns the click on or off, held (or right-clicked) the tempo sheet. */
+function DeviceTempoKey(props: { t: TempoUi }): JSX.Element {
+  const { t } = props
+  const press = useTempoPress(t)
+  const bpm = t.deviceBpm !== null ? Math.round(t.deviceBpm) : t.bpm
+  return (
+    <button
+      type="button"
+      class={`ep-a ep-key ep-key--split${t.clickOn ? ' is-lit' : ''}`}
+      style={at(657, 950, 130, 130)}
+      role="switch"
+      aria-checked={t.clickOn}
+      aria-label={MirrorText.CLICK}
+      aria-description={`${MirrorText.clickState(t.clickOn, bpm, t.deviceBpm !== null)}. ${MirrorText.SET_TEMPO}: hold`}
+      {...press}
+    >
+      <span class="ep-h ep-h--black">TEMPO</span>
+      <span class="ep-h ep-h--grey">LOOP</span>
+    </button>
   )
 }

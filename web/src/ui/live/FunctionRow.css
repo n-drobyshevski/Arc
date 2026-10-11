@@ -1,0 +1,72 @@
+/* LiveFunctionKeys.kt's look: a key up to 132px wide, its LED line 14px over a 6px gap, a two-tier dark cap. */
+
+.fn-row { display: flex; gap: 8px; width: 100%; max-width: calc(132px * 4 + 8px * 3); }
+.fn-key {
+  flex: 0 1 132px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.fn-key:focus-visible { outline: var(--focus-ring); outline-offset: 2px; border-radius: 8px; }
+.fn-key__line { display: flex; align-items: center; justify-content: center; gap: 5px; min-height: 14px; padding: 0 2px; }
+.fn-key__led {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ko-light-edge, #A9A8A2);
+  flex: none;
+}
+.fn-key__led.is-blink { animation: fn-blink 110ms ease-out; }
+.fn-key__led.is-blink-long { animation: fn-blink 220ms ease-out; }
+@keyframes fn-blink {
+  from { background: var(--signal); box-shadow: 0 0 0 3px color-mix(in srgb, var(--signal) 35%, transparent); }
+  to { background: var(--ko-light-edge, #A9A8A2); box-shadow: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fn-key__led.is-blink, .fn-key__led.is-blink-long { animation-duration: 1ms; }
+}
+.fn-key__label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1;
+  color: var(--graphite);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.fn-key.is-lit .fn-key__label { color: var(--ink); }
+.fn-key__cap {
+  display: flex;
+  flex-direction: column;
+  height: 44px;
+  border-radius: 8px;
+  overflow: hidden;
+  --cap-face: var(--ko-dark-face, #232425);
+  --cap-edge: var(--ko-dark-edge, #050505);
+  background: var(--ko-dark-face, #232425);
+}
+@media (min-width: 600px) { .fn-key__cap { height: 48px; } }
+.fn-key__word,
+.fn-key__sub {
+  flex: 1 1 0;
+  display: grid;
+  place-items: center;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  white-space: nowrap;
+}
+.fn-key__word { color: var(--ko-dark-ink, #EDECE8); }
+.fn-key__sub { background: var(--ko-light-face, #EEEDE9); color: var(--ko-tier-ink, #5A5B5D); }
+.fn-key__sub--signal { background: var(--signal); color: var(--on-signal); }

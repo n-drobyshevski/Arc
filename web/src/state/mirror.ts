@@ -45,6 +45,7 @@ import type { LiveSounds } from './live'
 import type { Store } from './store'
 import type { Tasks } from './tasks'
 import { emptyMirrorState, type MirrorUi, type UiState } from './types'
+import type { MidiEvent } from '../core/protocol/midiInput'
 
 /** Where the host has no frame clock: a change is published after about one frame. */
 export const MIRROR_FRAME_MS = 16
@@ -72,6 +73,8 @@ export interface MirrorHost {
   fmtDateTime(ms: number): string
   /** The EP-133 started ([playing]) or stopped (MIDI Start/Continue, Stop): TAKE follows it. */
   transport?(playing: boolean): void
+  /** Every MIDI event Live hears from the EP-133 (its clock, for TEMPO). */
+  midi?(e: MidiEvent): void
   /** The device's sounds and pads were read: offline pad changes kept may be written now. */
   deviceRead(): void
 }
@@ -237,6 +240,7 @@ export class MirrorController {
     // Each event is shown at the next frame, at most once a frame.
     this.unlisten = events((e) => {
       m.onMidi(e)
+      host.midi?.(e)
       // An armed take starts with the device's PLAY, and one it started ends with its STOP.
       if (e.type === 'Start' || e.type === 'Continue') host.transport?.(true)
       else if (e.type === 'Stop') host.transport?.(false)

@@ -36,7 +36,10 @@ import { TakeRecorder, type RecState } from '../../core/features/takeRecorder'
 import type { ProjectPatterns } from '../../core/features/pattern'
 import type { PhaseAnchors, TransportClock } from '../../core/features/sequencer'
 import { VoiceMixer, VoiceShape } from '../../core/formats/voiceMixer'
-import { ClickSound, PatternScheduler, type PadVoice, type ScheduleSink } from './patternScheduler'
+import { PatternScheduler, type PadVoice, type ScheduleSink } from './patternScheduler'
+import { ClickScheduler, ClickTrack, type Click, type FrameGrid } from './clickScheduler'
+import { Seq } from '../../core/features/pattern'
+import { framesPerTick, frameOf } from '../../core/features/sequencer'
 
 /** The AudioWorkletProcessor's registered name. */
 export const LIVE_PROCESSOR = 'arc-live-mixer'
@@ -87,6 +90,12 @@ export type ToMixer =
   | { readonly t: 'stopSeq' }
   /** RECORD waits for a press: the mix's stamps are wanted. */
   | { readonly t: 'seqArmed'; readonly armed: boolean }
+  /**
+   * TEMPO's click: on or off, the phone's [bpm] for a free run, and the
+   * EP-133's beats ([grid], in mix frames) while it sends its clock. While
+   * the pattern runs it clicks on the pattern's beats; it counts in either way.
+   */
+  | { readonly t: 'click'; readonly on: boolean; readonly bpm: number; readonly grid: FrameGrid | null }
 
 /** A pad's sound in a plan: pad key (group × 12 + offset) and the loaded sample [id]; the shapes' fields over the defaults. */
 export interface PlanVoice {
@@ -135,9 +144,10 @@ export type FromMixer =
   | { readonly t: 'missing'; readonly pad: number }
   /** Mix frame [frame] plays at context time [time] (s). */
   | { readonly t: 'stamp'; readonly frame: number; readonly time: number }
+  /** A click: beat [index], played at context time [time] (s), [accent] on a bar's first. */
+  | { readonly t: 'beat'; readonly index: number; readonly time: number; readonly accent: boolean }
 
-// The count-in's click: straight to the mix, a little quieter than a pad.
-const CLICK_SHAPE = VoiceShape.of({ releaseMs: 2 })
+const NO_CLICKS: readonly Click[] = []
 
 /** A VoiceMixer at [rate] that takes ToMixer commands and [post]s FromMixer reports. */
 export class MixerHost {
@@ -158,8 +168,14 @@ export class MixerHost {
   readonly seq = new PatternScheduler()
   private seqArmed = false
   private stampedAt = Number.NEGATIVE_INFINITY
-  private readonly clicks: [Int16Array, Int16Array]
   private readonly sink: ScheduleSink
+  // TEMPO's click: on, its free tempo and the EP-133's grid; where the clicks fall and their sound.
+  private clickOn = false
+  private clickBpm = 120
+  private clickGrid: FrameGrid | null = null
+  private readonly clickTimes: ClickScheduler
+  private readonly clickTrack: ClickTrack
+  private clicking = false
 
   constructor(
     readonly rate: number,
@@ -168,10 +184,10 @@ export class MixerHost {
     this.mixer = new VoiceMixer(rate)
     this.lastKeys = this.mixer.keys
     this.maxTakeFrames = TakeRecorder.MAX_SECONDS * rate
-    this.clicks = [ClickSound.render(rate, false), ClickSound.render(rate, true)]
+    this.clickTimes = new ClickScheduler(rate)
+    this.clickTrack = new ClickTrack(rate)
     const mixer = this.mixer
     const samples = this.samples
-    const clickFrames = this.clicks[0].length
     this.sink = {
       startAt(key, v, semitones, tag, shape, frame) {
         const pcm = samples.get(v.id)
@@ -180,10 +196,6 @@ export class MixerHost {
         return true
       },
       releaseAt: (key, frame, tag) => mixer.release(key, frame, tag),
-      click: (frame, accent, tag) => {
-        mixer.start('click', this.clicks[accent ? 1 : 0], 1, rate, 0, tag, CLICK_SHAPE, frame)
-        mixer.release('click', frame + clickFrames, tag)
-      },
       flushTimed: () => mixer.flushTimed(),
     }
     this.seq.onMissing = (pad) => post({ t: 'missing', pad })
@@ -256,6 +268,12 @@ export class MixerHost {
         this.seqArmed = m.armed
         this.stampedAt = Number.NEGATIVE_INFINITY
         return
+      case 'click':
+        this.clickOn = m.on
+        this.clickBpm = m.bpm
+        this.clickGrid = m.grid
+        this.stampedAt = Number.NEGATIVE_INFINITY
+        return
       case 'transport': {
         const r = this.recorder
         if (r === null) return
@@ -264,6 +282,31 @@ export class MixerHost {
         return
       }
     }
+  }
+
+  /**
+   * TEMPO's click into the block, on while it is on or the pattern counts in:
+   * on the pattern's beats while it runs, else the EP-133's, else free at the
+   * phone's tempo. Each click is told ('beat') for TEMPO's light.
+   */
+  private click(left: Float32Array, right: Float32Array, frames: number, before: number, time: number): void {
+    const c = this.seq.clockNow
+    const on = this.clickOn || this.seq.countingIn(before) || this.seq.countingIn(before + frames - 1)
+    let clicks: readonly Click[] = NO_CLICKS
+    if (on) {
+      if (!this.clicking) this.clickTimes.reset()
+      const grid: FrameGrid | null =
+        c !== null ? { anchorFrame: frameOf(c, 0), beatIndex: 0, periodFrames: framesPerTick(c) * Seq.PPQN, barKnown: true } : this.clickGrid
+      clicks = this.clickTimes.block(before, frames, this.clickBpm, grid)
+      // Off, it only counts in: nothing from bar 1 on.
+      if (!this.clickOn && c !== null) {
+        const zero = frameOf(c, 0)
+        if (clicks.some((k) => k.frame >= zero)) clicks = clicks.filter((k) => k.frame < zero)
+      }
+      for (const k of clicks) this.post({ t: 'beat', index: k.index, time: time + (k.frame - before) / this.rate, accent: k.accent })
+    }
+    this.clicking = on
+    if (clicks.length > 0 || this.clickTrack.sounding) this.clickTrack.mix(left, right, frames, before, clicks)
   }
 
   private setRec(state: RecState): void {
@@ -329,13 +372,15 @@ export class MixerHost {
   render(left: Float32Array, right: Float32Array, frames: number, time: number): void {
     const before = this.mixer.frame
     this.seq.fill(this.sink, before, this.rate)
-    // Where the mix is, a few times a second while the pattern runs or RECORD waits: the main thread's stamp.
-    if ((this.seq.running || this.seqArmed) && before - this.stampedAt >= this.rate / 4) {
+    // Where the mix is, a few times a second while the pattern runs, RECORD waits or the click sounds: the main thread's stamp.
+    if ((this.seq.running || this.seqArmed || this.clickOn) && before - this.stampedAt >= this.rate / 4) {
       this.stampedAt = before
       this.post({ t: 'stamp', frame: before, time })
     }
     this.mixer.renderPlanar(left, right, frames)
     this.record(left, right, frames, before)
+    // The click after TAKE has the block: a take leaves it out.
+    this.click(left, right, frames, before, time)
     const started = this.mixer.started
     if (started.length !== 0) {
       this.post({

@@ -1,0 +1,59 @@
+/* TempoSheet.kt's look: the tempo big on a display, − TAP + (56 / 96 / 56), the click; TIMING's page. */
+
+.tempo-sheet .sheet__panel > * { flex-shrink: 0; }
+.tempo-sheet__head { display: flex; align-items: center; gap: 12px; }
+.tempo-sheet__title { flex: 1 1 auto; margin: 0; color: var(--ink); }
+.tempo-sheet__tabs { flex: none; width: 200px; max-width: 55%; }
+.tempo-sheet__display { padding: 10px 14px; }
+.tempo-sheet__bpm {
+  margin: 0;
+  text-align: center;
+  font-size: 48px;
+  line-height: 1.1;
+  color: var(--display-ink);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tempo-sheet__keys { display: flex; align-items: center; justify-content: center; gap: 20px; }
+.tempo-step {
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  border: 1px solid var(--key-edge);
+  background: var(--key);
+  color: var(--ink);
+  font: inherit;
+  font-size: 26px;
+  line-height: 1;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  touch-action: none;
+}
+.tempo-step:disabled { opacity: 0.45; cursor: default; }
+.tempo-tap {
+  width: 96px;
+  height: 96px;
+  border-radius: 14px;
+  border: 1px solid color-mix(in oklab, var(--signal) 70%, black);
+  background: var(--signal);
+  color: var(--on-signal);
+  font: inherit;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.tempo-tap:disabled { opacity: 0.45; cursor: default; }
+.tempo-sheet__note { margin: 0; color: var(--graphite); }
+.tempo-sheet__note.is-signal { color: var(--signal); }
+.tempo-sheet__row { display: flex; align-items: center; gap: 16px; padding: 12px 16px; }
+.tempo-sheet__row--swing { flex-direction: column; align-items: stretch; gap: 8px; }
+.tempo-sheet__row-text { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.tempo-sheet__row-title { margin: 0; color: var(--ink); }
+.tempo-sheet__swing { display: flex; align-items: center; gap: 12px; color: var(--ink); }
+.tempo-sheet__swing input { flex: 1 1 auto; min-width: 0; accent-color: var(--signal); }
+.tempo-sheet__swing-value { width: 3.5em; text-align: end; font-variant-numeric: tabular-nums; }

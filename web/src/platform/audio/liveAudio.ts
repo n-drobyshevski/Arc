@@ -91,6 +91,8 @@ import type { VoiceShape } from '../../core/formats/voiceMixer'
 import type { ProjectPatterns } from '../../core/features/pattern'
 import { frameAt, type FrameClock } from '../../core/features/sampleTiming'
 import type { PhaseAnchors, TransportClock } from '../../core/features/sequencer'
+import type { Beat, BeatGrid } from '../../core/features/tempo'
+import type { FrameGrid } from './clickScheduler'
 import { FxSetup } from './fxSetup'
 import { LIVE_PROCESSOR, MixerHost, transferable, type FromMixer, type PlanVoice, type ToMixer } from './liveMixer'
 // The AudioWorklet module's URL: Vite bundles liveWorklet.ts (with the core
@@ -448,6 +450,9 @@ export class LiveAudio {
   private readonly logListeners = new Set<(line: string) => void>()
   private readonly takeListeners = new Set<(take: RecordedTake | null, limit: boolean) => void>()
   private readonly missingListeners = new Set<(pad: number) => void>()
+  private readonly beatListeners = new Set<(beat: Beat) => void>()
+  // TEMPO's click as last asked: on, the phone's tempo and the EP-133's beats (ms); sent again with each new stamp.
+  private clickAsk: { on: boolean; bpm: number; grid: BeatGrid | null } = { on: false, bpm: 120, grid: null }
   private readonly _timeline = signal<LiveTimeline | null>(null)
   /** Where the pattern's transport is in heard time; null while stopped (LiveAudioDeps.timeline). */
   readonly timeline: ReadonlySignal<LiveTimeline | null> = this._timeline
@@ -602,6 +607,44 @@ export class LiveAudio {
     return add(this.missingListeners, listener)
   }
 
+  /**
+   * TEMPO's click on or off: free at [bpm], or on the EP-133's beats ([grid],
+   * performance.now() ms) while it sends its clock; on the pattern's while it
+   * runs. Opens the output to turn it on. False when there is no output.
+   */
+  setClick(on: boolean, bpm: number, grid: BeatGrid | null): boolean {
+    this.clickAsk = { on, bpm, grid }
+    if (!on) {
+      if (this.stream) this.sendClick(this.stream)
+      return true
+    }
+    const s = this.ensure()
+    if (!s) {
+      this.clickAsk = { on: false, bpm, grid }
+      return false
+    }
+    s.parked = false
+    wake(s.ctx)
+    this.sendClick(s)
+    return true
+  }
+
+  /** Each click, with when it is heard (performance.now() ms): TEMPO's light. */
+  onBeat(listener: (beat: Beat) => void): () => void {
+    return add(this.beatListeners, listener)
+  }
+
+  /** The click as asked, the EP-133's beats in mix frames through the output's stamp (none without one yet). */
+  private sendClick(s: Stream): void {
+    const a = this.clickAsk
+    const f = s.stamp
+    const grid: FrameGrid | null =
+      a.grid !== null && f !== null
+        ? { anchorFrame: frameAt(f, a.grid.anchor), beatIndex: a.grid.beatIndex, periodFrames: (a.grid.periodMs * f.rate) / 1000, barKnown: a.grid.barKnown }
+        : null
+    send(s, { t: 'click', on: a.on, bpm: a.bpm, grid })
+  }
+
   private sendPlan(s: Stream, plan: LiveSeqPlan): void {
     const voices: PlanVoice[] = []
     for (const [pad, key] of plan.voices) {
@@ -682,7 +725,8 @@ export class LiveAudio {
     this._engine.value = null
     const recording = this._rec.value.kind !== 'idle'
     this._rec.value = REC_IDLE
-    // The pattern stops with its output (the controller is told by the timeline going).
+    // The pattern stops with its output (the controller is told by the timeline going), and so does the click.
+    this.clickAsk = { ...this.clickAsk, on: false }
     this.seqClock = null
     this._timeline.value = null
     if (!s) return
@@ -878,6 +922,8 @@ export class LiveAudio {
     for (const c of this.fx.commands()) send(s, { t: 'control', what: c.what, index: c.index, x: c.x, y: c.y })
     // RECORD waiting for a press: the new output's stamps are wanted at once.
     if (this.seqArmed) send(s, { t: 'seqArmed', armed: true })
+    // The click goes on with the new output.
+    if (this.clickAsk.on) this.sendClick(s)
     ctx.addEventListener?.('statechange', () => this.stateChanged(s))
     this.backend.connect(ctx, (m) => this.received(s, m)).then(
       (link) => {
@@ -998,10 +1044,19 @@ export class LiveAudio {
         this.seqClock = m.clock
         this.showTimeline(s)
         return
-      case 'stamp':
+      case 'stamp': {
+        const first = s.stamp === null
         s.stamp = { frame: m.frame, ms: heardAt(m.time, this.backend.now(), s.ctx), rate: s.ctx.sampleRate }
         this.showTimeline(s)
+        // The EP-133's beats could wait for a stamp to be mapped.
+        if (first && this.clickAsk.on && this.clickAsk.grid !== null) this.sendClick(s)
         return
+      }
+      case 'beat': {
+        const at = heardAt(m.time, this.backend.now(), s.ctx)
+        for (const f of [...this.beatListeners]) f({ index: m.index, at, accent: m.accent })
+        return
+      }
       case 'missing':
         for (const f of [...this.missingListeners]) f(m.pad)
         return

@@ -8,7 +8,7 @@ import { readFile } from '../../src/platform/files/pick'
 import { openMidi, probePermission, requestMidiAccess, watchMidi, webMidiSupported } from '../../src/platform/midi/webmidi'
 import { nullChannel } from '../../src/platform/storage/channel'
 import { Library } from '../../src/platform/storage/library'
-import { CoachPrefs, LastReadPrefs, OfflinePadsPrefs, MirrorPrefs, SettingsStore, memoryStorage } from '../../src/platform/storage/settings'
+import { CoachPrefs, LastReadPrefs, OfflinePadsPrefs, MirrorPrefs, PatternPrefs, SettingsStore, memoryStorage } from '../../src/platform/storage/settings'
 import { createController, type ArcController } from '../../src/state/controller'
 import type { Deps, FactoryDeps } from '../../src/state/deps'
 import type { ToastMsg, UiState } from '../../src/state/types'
@@ -89,6 +89,7 @@ export async function liveHarness(opts: LiveHarnessOptions = {}): Promise<LiveHa
     settings: new SettingsStore(storage),
     mirrorPrefs: new MirrorPrefs(storage),
     coach: new CoachPrefs(storage),
+    patternPrefs: new PatternPrefs(storage),
     files: { pick: async () => [], read: (f) => readFile(f), save: async () => 'saved', canPickFolder: () => false, pickFolder: async () => null },
     share: { share: async () => 'shared' },
     player: new NullPlayer(),

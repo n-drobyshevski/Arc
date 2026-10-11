@@ -135,6 +135,8 @@ export const WebText = {
   NO_SHORTCUTS: 'No shortcuts in the guide use this key on its own.',
   /** Live tools' third view on the desk: the EP-133 drawn whole. */
   VIEW_DEVICE: 'Device',
+  /** Replaces MirrorText.TIMING_NOTE (the web has no arp or note repeat yet). */
+  TIMING_NOTE: 'The interval is the grid recording snaps to.',
   /** The plate's line while TAKE waits. */
   TAKE_ARMED: 'Take armed: play a pad or start the EP-133',
   /** −/+ in the pads view. */

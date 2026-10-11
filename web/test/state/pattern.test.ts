@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Patterns, ProjectPatterns, Seq } from '../../src/core/features/pattern'
 import { physicalPad } from '../../src/core/features/padNotes'
 import { MirrorText } from '../../src/core/text/mirrorText'
+import { FeatureText } from '../../src/core/text/featureText'
 import { memoryStorage } from '../../src/platform/storage/settings'
 import { countInBeat, patternBpm, pressSkip, pressTickAt } from '../../src/state/patternPlan'
 import { disposeAll, liveHarness, until, type LiveHarness } from './liveHarness'
@@ -252,5 +253,131 @@ describe('PATTERN', () => {
     h.c.pattern.setTiming('1/8')
     h.c.pattern.setAutoLength(true)
     expect(h.c.pattern.ui.value).toMatchObject({ timing: '1/8', autoLength: true })
+  })
+
+  it('ERASE: a tap on a pad erases its notes and plays nothing', async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    p.recordDown(now())
+    await h.c.playPad(A0, true, false, now())
+    h.c.releasePad(A0)
+    p.stop()
+    expect(p.ui.value.hasNotes[0]).toBe(true)
+    p.setErase(true)
+    expect(p.ui.value.erase).toBe(true)
+    const presses = h.liveAudio.presses.length
+    await h.c.playPad(A0, true, false, now())
+    h.c.releasePad(A0, now())
+    expect(h.liveAudio.presses.length).toBe(presses)
+    expect(p.ui.value.hasNotes[0]).toBe(false)
+    expect(h.toasts.at(-1)?.text).toBe(MirrorText.erased(A0))
+    // An unsure press that turned into a scroll erases nothing.
+    p.setErase(false)
+    p.undo()
+    p.setErase(true)
+    await h.c.playPad(A0, true, true, now())
+    h.c.cutPad(A0)
+    expect(p.ui.value.hasNotes[0]).toBe(true)
+  })
+
+  it('ERASE: a pad held while playing erases its notes as they pass, only there', async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    // The pad's sound in memory first: the timed presses below don't wait for a load.
+    await h.c.playPad(A0)
+    h.c.releasePad(A0)
+    p.setCountIn(false)
+    p.setTiming('1/4')
+    // The clock held still, so a slow run can't age the presses' own times (they count only up to a second back).
+    const held = performance.now()
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => held)
+    p.recordDown(now())
+    p.play()
+    // 240 BPM: 250 ms a beat.
+    const zero = now() - 900
+    h.liveAudio.runAt(zero, 240)
+    for (const b of [0, 1, 2, 3]) {
+      await h.c.playPad(A0, true, false, zero + b * 250)
+      h.c.releasePad(A0, zero + b * 250 + 50)
+    }
+    p.recordDown(now())
+    expect(notes(h, 0).map((n) => n.tick)).toEqual([0, 96, 192, 288])
+    p.setErase(true)
+    // Held from tick 88 to tick 215: beats 2 and 3 go.
+    await h.c.playPad(A0, true, false, zero + 230)
+    h.c.releasePad(A0, zero + 560)
+    expect(notes(h, 0).map((n) => n.tick)).toEqual([0, 288])
+    clock.mockRestore()
+  })
+
+  it('ERASE: KEYS notes erase their own pitch on the KEYS pad', async () => {
+    const h = await liveOn()
+    const p = h.c.pattern
+    await h.c.playPad(A0)
+    h.c.releasePad(A0)
+    p.setCountIn(false)
+    p.recordDown(now())
+    p.play()
+    h.liveAudio.runAt(now())
+    await h.c.playNote(67, true, now())
+    h.c.releaseNote(67)
+    await h.c.playNote(64, true, now())
+    h.c.releaseNote(64)
+    p.stop()
+    p.setErase(true)
+    await h.c.playNote(67, true, now())
+    h.c.releaseNote(67, now())
+    expect(notes(h, 0).map((n) => n.semitones)).toEqual([4])
+  })
+
+  it("TEMPO: the click on and off, at the phone's tempo, and its beats light TEMPO", async () => {
+    const h = await liveHarness()
+    const p = h.c.pattern
+    p.setClick(true)
+    expect(p.metronome.value).toEqual({ on: true, bpm: 120 })
+    expect(h.liveAudio.clickLog).toEqual(['click:true:120:free'])
+    h.liveAudio.beat({ index: 0, at: 1000, accent: true })
+    expect(p.beats.value).toEqual({ index: 0, at: 1000, accent: true })
+    p.setTempo(97.4)
+    expect(p.metronome.value.bpm).toBe(97)
+    expect(h.liveAudio.clickLog.at(-1)).toBe('click:true:97:free')
+    // The pattern plays at the phone's tempo too while the EP-133 sends no clock.
+    expect(h.liveAudio.plans.at(-1)?.bpm).toBe(97)
+    p.setTempo(500)
+    expect(p.metronome.value.bpm).toBe(240)
+    p.setClick(false)
+    expect(h.liveAudio.clickLog.at(-1)).toBe('click:false:240:free')
+    // The tempo is kept (the click isn't): a new controller starts at it, off.
+    const h2 = await liveHarness({ storage: h.storage })
+    expect(h2.c.pattern.metronome.value).toEqual({ on: false, bpm: 240 })
+  })
+
+  it('TEMPO: no output says so, and the click stays off', async () => {
+    const h = await liveHarness()
+    h.liveAudio.available = false
+    h.c.pattern.setClick(true)
+    expect(h.c.pattern.metronome.value.on).toBe(false)
+    expect(h.toasts.at(-1)?.text).toBe(FeatureText.NO_AUDIO_OUTPUT)
+  })
+
+  it('TEMPO: tap tempo sets the tempo from the second tap', async () => {
+    const h = await liveHarness()
+    const p = h.c.pattern
+    expect(p.tapTempo(1000)).toBeNull()
+    expect(p.tapTempo(1500)).toBe(120)
+    expect(p.tapTempo(1900)).toBe(133)
+    expect(p.metronome.value.bpm).toBe(133)
+  })
+
+  it("TEMPO: the EP-133's clock lights TEMPO, and the click follows its beats", async () => {
+    const h = await liveHarness()
+    const p = h.c.pattern
+    const t0 = now()
+    // 30 clocks at 120 BPM (24 a beat, 500 ms): a beat on the first and the 25th.
+    p.midi({ type: 'Start', time: t0 } as never)
+    for (let i = 0; i < 30; i++) p.midi({ type: 'Clock', time: t0 + (i * 500) / 24 } as never)
+    expect(p.beats.value).toMatchObject({ index: 1, accent: false })
+    p.setClick(true)
+    expect(h.liveAudio.clickLog.at(-1)).toBe('click:true:120:grid')
   })
 })

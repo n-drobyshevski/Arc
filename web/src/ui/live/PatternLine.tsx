@@ -36,6 +36,10 @@ export interface TransportUi {
   onPlay(recordHeld: boolean): void
   /** RECORD held: the pattern sheet. */
   onSheet(): void
+  /** ERASE on or off. */
+  onErase(on: boolean): void
+  /** ↶: back to before the last pass recorded, erase, clear or length change. */
+  onUndo(): void
 }
 
 /** Where the focus group is, a beat at a time. */
@@ -51,9 +55,9 @@ const running = (ui: PatternUiState): boolean => ui.phase === 'PLAYING' || ui.ph
 const recordLive = (ui: PatternUiState): boolean => ui.recording && ui.phase === 'PLAYING'
 const recordArmed = (ui: PatternUiState): boolean => ui.phase === 'ARMED' || (ui.phase === 'COUNT_IN' && ui.recording)
 
-/** Whether the pattern has words for the line (armed, counting in or playing). */
+/** Whether the pattern has words for the line (armed, counting in, playing, or erasing). */
 export function hasWords(ui: PatternUiState): boolean {
-  return ui.phase !== 'STOPPED'
+  return ui.phase !== 'STOPPED' || ui.erase
 }
 
 /**
@@ -113,7 +117,7 @@ export function patternWordsText(ui: PatternUiState, beat: LineBeat | null): str
       return ui.recording ? MirrorText.patternRecording(b.bar, b.beat, b.bars, ui.timing) : MirrorText.patternPosition(b.bar, b.beat, b.bars)
     }
     case 'STOPPED':
-      return null
+      return ui.erase ? MirrorText.ERASE_NOTE : null
   }
 }
 
@@ -310,12 +314,12 @@ export function PatternWords(props: { t: TransportUi; compact?: boolean; still?:
       break
     }
     case 'STOPPED':
-      words = <></>
+      words = ui.erase ? <span class="pattern-words__note">{MirrorText.ERASE_NOTE}</span> : <></>
   }
   return (
     <div class="pattern-words">
       <span class="sr-only" aria-live="polite">
-        {MirrorText.transportAnnouncement(stateOf(ui))}
+        {MirrorText.transportAnnouncement(stateOf(ui)) + (ui.erase ? ', ' + MirrorText.ERASE_NOTE : '')}
       </span>
       <span class="pattern-words__shown" aria-hidden="true">
         {words}
@@ -367,6 +371,40 @@ export function PatternFrame(props: { t: TransportUi; still?: boolean }): JSX.El
   )
 }
 
+/**
+ * ERASE (a latch: while on, a pad erases its notes) and ↶ (undo) as one
+ * segmented key: ERASE while the project has notes, and always while on (so
+ * it can go off); ↶ while there is something to undo. Its border is signal
+ * while ERASE is on. Null when neither shows.
+ */
+export function EditKeys(props: { t: TransportUi; compact?: boolean }): JSX.Element | null {
+  const { t } = props
+  const ui = t.ui
+  const erase = ui.erase || ui.hasNotes.some((h) => h)
+  const undo = ui.canUndo
+  if (!erase && !undo) return null
+  return (
+    <div class={`transport-keys${props.compact ? ' transport-keys--compact' : ''}${ui.erase ? ' is-signal' : ''}`}>
+      {erase && (
+        <button
+          type="button"
+          class={`transport-key transport-key--erase${ui.erase ? ' is-on' : ''}`}
+          aria-pressed={ui.erase}
+          onClick={() => t.onErase(!ui.erase)}
+        >
+          {MirrorText.ERASE.toUpperCase()}
+        </button>
+      )}
+      {erase && undo && <span class="transport-keys__divide" aria-hidden="true" />}
+      {undo && (
+        <button type="button" class="transport-key transport-key--undo" aria-label={MirrorText.UNDO} onClick={() => t.onUndo()}>
+          <span aria-hidden="true">↶</span>
+        </button>
+      )}
+    </div>
+  )
+}
+
 /** The pattern Live's display lines show; null: none (no output to play it on, or not Live). */
 export const TransportContext = createContext<TransportUi | null>(null)
 
@@ -382,6 +420,8 @@ export function PatternLine(props: { compact?: boolean; still?: boolean; word?: 
   return (
     <>
       <TransportKeys t={t} compact={props.compact} still={props.still} word={props.word} />
+      {/* ERASE and ↶: while it plays or erases, and on a wide line ([word]) while stopped too; never armed or counting in. */}
+      {(t.ui.phase === 'PLAYING' || t.ui.phase === 'STOPPED') && (hasWords(t.ui) || props.word) && <EditKeys t={t} compact={props.compact} />}
       {hasWords(t.ui) ? <PatternWords t={t} compact={props.compact} still={props.still} /> : props.children}
       <PatternFrame t={t} still={props.still} />
     </>

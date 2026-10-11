@@ -17,9 +17,9 @@
 //   press with no stamp anchors on the frames rendered (Kotlin's fallback).
 // - No lost(): a new stream is a new worklet, and a new scheduler.
 // - No queued switches (scenes) and no arp (ArpRunner): the web has neither yet.
-// - The count-in's click is the scheduler's own (Kotlin's ClickScheduler and
-//   MetronomeOutput are a stream of their own): ClickSound's blips go into
-//   the mix as voices "click", on the count-in's beats only.
+// - The count-in's click is MixerHost's (clickScheduler.ts), on [clock]'s
+//   beats while [countingIn]: Kotlin's controller turns its click stream on
+//   for it.
 // - Times are frames and milliseconds; Kotlin's Long ticks are whole numbers.
 
 import { Arp } from '../../core/features/arp'
@@ -74,8 +74,6 @@ export const EMPTY_PLAN: SeqPlan = {
 export interface ScheduleSink {
   startAt(key: string, voice: PadVoice, semitones: number, tag: number, shape: VoiceShape, frame: number): boolean
   releaseAt(key: string, frame: number, tag: number): void
-  /** A count-in click (accented on a bar's first beat) at [frame]. */
-  click(frame: number, accent: boolean, tag: number): void
   flushTimed(): void
 }
 
@@ -184,6 +182,19 @@ export class PatternScheduler {
     return this.on
   }
 
+  /** The anchored clock (null while stopped): the click follows its beats. */
+  get clockNow(): TransportClock | null {
+    return this.clock
+  }
+
+  /** Whether mix frame [frame] is in the count-in (the bars before tick 0 that [play] asked for). */
+  countingIn(frame: number): boolean {
+    const c = this.clock
+    if (c === null || this.countFrom >= 0) return false
+    const t = tickAt(c, frame)
+    return t < 0 && t >= this.countFrom - Seq.PPQN / 2
+  }
+
   /**
    * Starts the transport from tick 0, [countInBars] bars after the next
    * render's lookahead, and [leadMs] later still (time for a count-in's click
@@ -225,7 +236,6 @@ export class PatternScheduler {
     // From the first tick not sent; one fallen further behind than the lookahead is let go.
     const from = Math.max(frameOf(c, this.nextTick), rendered - ahead)
     if (to > from) {
-      this.clicks(sink, c, from, to)
       PatternPlayer.window(p.patterns, c, from, to, p.skip, this.notes, p.phase)
       for (const n of this.notes) this.start(sink, p, n)
       this.nextTick = firstTick(c, to)
@@ -252,18 +262,6 @@ export class PatternScheduler {
     if (this.published === this.clock) return
     this.published = this.clock
     this.onTimeline(this.clock)
-  }
-
-  // The count-in's beats in [from, to): a click each, the bar's first accented.
-  private clicks(sink: ScheduleSink, c: TransportClock, from: number, to: number): void {
-    if (this.countFrom >= 0) return
-    const first = Math.max(Math.ceil(Math.max(tickAt(c, from), this.countFrom) / Seq.PPQN) * Seq.PPQN, this.countFrom)
-    for (let t = first; t < 0; t += Seq.PPQN) {
-      const f = frameOf(c, t)
-      if (f >= to) break
-      if (f < from) continue
-      sink.click(f, (t - this.countFrom) % Seq.TICKS_PER_BAR === 0, this.nextTag--)
-    }
   }
 
   private start(sink: ScheduleSink, p: SeqPlan, n: SeqNote): void {

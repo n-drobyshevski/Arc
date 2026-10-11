@@ -26,6 +26,9 @@ import { PatternRecorder } from '../core/features/patternRecorder'
 import { frameAt } from '../core/features/sampleTiming'
 import { PhaseAnchors, passOf, positionOf, tickAt as clockTickAt, msOf, type PatternPosition } from '../core/features/sequencer'
 import { Transport, type TransportAction } from '../core/features/transport'
+import { ClockFollow, TapTempo, Tempo, type Beat } from '../core/features/tempo'
+import type { MidiEvent } from '../core/protocol/midiInput'
+import { FeatureText } from '../core/text/featureText'
 import { MirrorText } from '../core/text/mirrorText'
 import type { PatternPrefs, PatternSettings } from '../platform/storage/settings'
 import type { Deps, LiveTimeline } from './deps'
@@ -51,6 +54,28 @@ export const COUNT_IN_LEAD_MS = 150
 
 /** The transport's loop wakes at least this often (ms). */
 export const PATTERN_LOOP_MS = 100
+
+/** And this often while ERASE is held on a pad, so the notes go before the sequencer sends them. */
+export const PATTERN_ERASE_MS = 20
+
+/** How often the click looks whether the EP-133's clock came or went (ms). */
+const CLICK_WATCH_MS = 500
+
+/** A pad held in ERASE shorter than this is a tap: it erases the pad's every note. */
+export const ERASE_TAP_MS = 200
+
+/** How far ahead of the mix the sequencer sends notes (PatternScheduler's LOOKAHEAD_MS). */
+const LOOKAHEAD_MS = 50
+
+/** A pad (a KEYS note on it: [semitones]) held in ERASE from [downAt]; [from] is the tick it has erased to, once it holds. */
+interface EraseHold {
+  readonly pad: PhysicalPad
+  readonly semitones: number | null
+  readonly downAt: number
+  from: number | null
+}
+
+const eraseKey = (pad: PhysicalPad, semitones: number | null): string => `${pad.group}:${pad.offset}:${semitones ?? 'n'}`
 
 export interface PatternHost {
   store: Store<UiState>
@@ -101,14 +126,28 @@ export class PatternDesk {
   // The timeline of the run before the transport last started: not this run's.
   private stale: LiveTimeline | null = null
   private sent: SentPlan | null = null
+  // ERASE held on pads while playing, by eraseKey.
+  private readonly eraseHolds = new Map<string, EraseHold>()
   private readonly cleanups: (() => void)[] = []
+  // TEMPO: the click (on or off, never kept) and the phone's tempo; the EP-133's clock followed; tap tempo.
+  private readonly _metronome: Signal<Metronome>
+  /** TEMPO's click: on or off, and the phone's tempo (Kotlin MetronomeUi). */
+  readonly metronome: ReadonlySignal<Metronome>
+  private readonly _beats = signal<Beat | null>(null)
+  /** Each beat for TEMPO's light, with when it is heard: the click's while it sounds, else the EP-133's from its clock. */
+  readonly beats: ReadonlySignal<Beat | null> = this._beats
+  private readonly clockFollow = new ClockFollow()
+  private readonly taps = new TapTempo()
 
   constructor(private readonly host: PatternHost) {
     this.settings = host.prefs.load()
     this._ui = signal(this.withSettings(PATTERN_UI))
     this.ui = this._ui
+    this._metronome = signal<Metronome>({ on: false, bpm: this.settings.liveTempo })
+    this.metronome = this._metronome
     const audio = host.deps.liveAudio
     if (audio.onSeqMissing) this.cleanups.push(audio.onSeqMissing(() => this.refreshPlan()))
+    if (audio.onBeat) this.cleanups.push(audio.onBeat((b) => (this._beats.value = b)))
     // The output went (Live left the screen long, or a new output): the transport stops with it.
     if (audio.timeline) {
       this.cleanups.push(
@@ -128,6 +167,7 @@ export class PatternDesk {
 
   dispose(): void {
     this.stopLoop()
+    this.watchClick(false)
     for (const c of this.cleanups.splice(0)) c()
   }
 
@@ -229,7 +269,7 @@ export class PatternDesk {
 
   private withSettings(ui: PatternUiState): PatternUiState {
     const s = this.settings
-    return { ...ui, timing: TimingSettings.record(s.timing), countInOn: s.countIn, autoLength: s.autoLength }
+    return { ...ui, timing: TimingSettings.record(s.timing), timingSettings: s.timing, countInOn: s.countIn, autoLength: s.autoLength }
   }
 
   /** The pattern's tempo: the EP-133's while it sends its clock, else Live's own. */
@@ -399,6 +439,7 @@ export class PatternDesk {
     this.host.deps.liveAudio.seqStop?.()
     this.pressAt = null
     this.held.clear()
+    this.eraseHolds.clear()
     this.skip = new Map()
     this._ui.value = { ...this._ui.peek(), countIn: null }
     this.refreshPlan()
@@ -434,7 +475,7 @@ export class PatternDesk {
         const tick = clockTickAt(tl.clock, frameAt(tl.frames, now))
         this.followTick(tick)
         const next = msOf(tl.clock, (Math.floor(tick / Seq.PPQN) + 1) * Seq.PPQN, tl.frames)
-        wait = Math.min(Math.max(Math.floor(next - now) + 1, 1), PATTERN_LOOP_MS)
+        wait = Math.min(Math.max(Math.floor(next - now) + 1, 1), this.eraseHolds.size === 0 ? PATTERN_LOOP_MS : PATTERN_ERASE_MS)
       } else {
         wait = 20
       }
@@ -457,6 +498,82 @@ export class PatternDesk {
       this.markPasses(tick)
       this.setPatterns(this.recorder.grow(this.current, tick))
     }
+    this.eraseHeld()
+  }
+
+  // ---------- ERASE ----------
+
+  /** ERASE on or off: on, a pad tapped erases its notes, and one held while playing erases them as they pass. */
+  setErase(on: boolean): void {
+    if (!on) this.eraseHolds.clear()
+    if (this._ui.peek().erase === on) return
+    this._ui.value = { ...this._ui.peek(), erase: on }
+  }
+
+  /** Whether ERASE takes the pads' presses (it is on). */
+  get erasing(): boolean {
+    return this._ui.peek().erase
+  }
+
+  /** A pad (a KEYS note on it: [semitones]) pressed in ERASE at [at]: what it erases is known as it is let go of, or held. */
+  erasePadDown(pad: PhysicalPad, at: number, semitones: number | null = null): void {
+    this.eraseHolds.set(eraseKey(pad, semitones), { pad, semitones, downAt: at, from: null })
+    // Held while playing: the loop looks more often.
+    if (this.running() && this.loop !== null) {
+      this.stopLoop()
+      this.follow()
+    }
+  }
+
+  /**
+   * The pad pressed in ERASE let go of at [releasedAt]. A tap, or any press
+   * while not playing, erases its every note (a toast says so); held while
+   * playing, it erased its notes as they passed, up to here.
+   */
+  erasePadUp(pad: PhysicalPad, releasedAt: number, semitones: number | null = null): void {
+    const k = eraseKey(pad, semitones)
+    const h = this.eraseHolds.get(k)
+    if (h === undefined) return
+    this.eraseHolds.delete(k)
+    const tl = this.timeline()
+    if (tl === null || this.transport.state.phase !== 'PLAYING' || (h.from === null && releasedAt - h.downAt < ERASE_TAP_MS)) {
+      const p = this.recorder.erasePad(this.current, pad, semitones)
+      if (p === this.current) return
+      this.setPatterns(p)
+      this.host.toast(MirrorText.erased(pad))
+      return
+    }
+    const from = h.from ?? Math.max(clockTickAt(tl.clock, frameAt(tl.frames, h.downAt)), 0)
+    const to = clockTickAt(tl.clock, frameAt(tl.frames, releasedAt))
+    if (to > from) this.setPatterns(this.recorder.eraseRange(this.current, pad, semitones, from, to))
+  }
+
+  /** The press in ERASE turned into a scroll: it erases nothing. */
+  eraseCut(pad: PhysicalPad, semitones: number | null = null): void {
+    this.eraseHolds.delete(eraseKey(pad, semitones))
+  }
+
+  /**
+   * The pads held in ERASE while playing erase their notes as the playhead
+   * passes, from where each was pressed on, a lookahead ahead: the notes
+   * about to be sent go before they are. A hold shorter than a tap erases
+   * nothing here ([erasePadUp] takes the pad's every note).
+   */
+  private eraseHeld(): void {
+    if (this.eraseHolds.size === 0 || this.transport.state.phase !== 'PLAYING') return
+    const tl = this.timeline()
+    if (tl === null) return
+    const now = this.host.deps.perfNow()
+    const to = clockTickAt(tl.clock, frameAt(tl.frames, now + LOOKAHEAD_MS))
+    let p = this.current
+    for (const h of this.eraseHolds.values()) {
+      if (now - h.downAt < ERASE_TAP_MS) continue
+      const from = h.from ?? Math.max(clockTickAt(tl.clock, frameAt(tl.frames, h.downAt)), 0)
+      if (to <= from) continue
+      p = this.recorder.eraseRange(p, h.pad, h.semitones, from, to)
+      h.from = to
+    }
+    this.setPatterns(p)
   }
 
   private stopLoop(): void {
@@ -564,6 +681,21 @@ export class PatternDesk {
     this.changeSettings({ ...this.settings, timing })
   }
 
+  /** TIMING's interval: the step the grid recording snaps to (kept). */
+  setTimingInterval(t: Timing): void {
+    this.changeSettings({ ...this.settings, timing: TimingSettings.withInterval(this.settings.timing, t) })
+  }
+
+  /** TIMING's swing, 50 to 75 % (kept). */
+  setTimingSwing(percent: number): void {
+    this.changeSettings({ ...this.settings, timing: TimingSettings.withSwing(this.settings.timing, Math.round(percent)) })
+  }
+
+  /** TIMING's quantize (true) or free time (false), for recording (kept). */
+  setTimingQuantize(on: boolean): void {
+    this.changeSettings({ ...this.settings, timing: TimingSettings.withQuantize(this.settings.timing, on) })
+  }
+
   /** COUNT-IN: RECORD then PLAY counts a bar in first. Kept. */
   setCountIn(on: boolean): void {
     this.changeSettings({ ...this.settings, countIn: on })
@@ -580,10 +712,93 @@ export class PatternDesk {
     this._ui.value = this.withSettings(this._ui.peek())
   }
 
+  // ---------- TEMPO: a click on the phone (an addition) ----------
+
+  /** Whether Live's output has a click to give. */
+  get canClick(): boolean {
+    return this.host.deps.liveAudio.setClick !== undefined
+  }
+
+  /**
+   * TEMPO's tap: the click on or off. On, it plays at the phone's tempo, or
+   * on the EP-133's beats while it sends MIDI clock, or on the pattern's while
+   * the transport runs. No output: a toast, and it stays off.
+   */
+  setClick(on: boolean): void {
+    const audio = this.host.deps.liveAudio
+    if (!audio.setClick) return
+    if (on === this._metronome.peek().on) return
+    if (on && !audio.setClick(true, this.settings.liveTempo, this.clockFollow.grid(this.host.deps.perfNow()))) {
+      this.host.toast(FeatureText.NO_AUDIO_OUTPUT, true)
+      return
+    }
+    if (!on) audio.setClick(false, this.settings.liveTempo, null)
+    this.followed = on && this.clockFollow.grid(this.host.deps.perfNow()) !== null
+    this._metronome.value = { ...this._metronome.peek(), on }
+    this.watchClick(on)
+  }
+
+  /** The phone's tempo, clamped to Tempo.MIN..MAX and kept; a click on takes it from the beat after the next. */
+  setTempo(bpm: number): void {
+    const t = Tempo.clamp(Math.round(bpm))
+    if (t === this.settings.liveTempo) return
+    this.changeSettings({ ...this.settings, liveTempo: t })
+    this._metronome.value = { ...this._metronome.peek(), bpm: t }
+    this.refreshPlan()
+    this.sendClick()
+  }
+
+  /** A tap on the tempo sheet's TAP pad at [at]: from a run's second tap on, the tempo the taps give is set and returned. */
+  tapTempo(at: number): number | null {
+    const bpm = this.taps.tap(at)
+    if (bpm !== null) this.setTempo(bpm)
+    return bpm
+  }
+
+  /** The EP-133's MIDI, as Live hears it: its clock is followed for the click and TEMPO's light. */
+  midi(e: MidiEvent): void {
+    const beat = this.clockFollow.onMidi(e)
+    if (beat === null) return
+    // The click's own beats light TEMPO while it sounds; the device's moved it on the grid it gives.
+    if (this._metronome.peek().on) this.sendClick()
+    else this._beats.value = beat
+  }
+
+  private sendClick(): void {
+    if (!this._metronome.peek().on) return
+    const grid = this.clockFollow.grid(this.host.deps.perfNow())
+    this.followed = grid !== null
+    this.host.deps.liveAudio.setClick?.(true, this.settings.liveTempo, grid)
+  }
+
+  // Whether the click last sent followed the EP-133, and the watch that notices its clock stopping.
+  private followed = false
+  private clickWatch: unknown = null
+
+  /** While the click is on: the EP-133's clock stopping (or starting) is noticed, and the click runs free (or follows). */
+  private watchClick(on: boolean): void {
+    const { deps } = this.host
+    if (this.clickWatch !== null) deps.clearTimeout(this.clickWatch)
+    this.clickWatch = null
+    if (!on) return
+    const check = (): void => {
+      if (!this._metronome.peek().on) return
+      if ((this.clockFollow.grid(deps.perfNow()) !== null) !== this.followed) this.sendClick()
+      this.clickWatch = deps.setTimeout(check, CLICK_WATCH_MS)
+    }
+    this.clickWatch = deps.setTimeout(check, CLICK_WATCH_MS)
+  }
+
   /** The patterns of the project shown, for tests and the beat card. */
   get patternsNow(): ProjectPatterns {
     return this.current
   }
+}
+
+/** TEMPO's click: on or off (never kept), and the phone's tempo. */
+export interface Metronome {
+  readonly on: boolean
+  readonly bpm: number
 }
 
 /** A pad key's pad. */

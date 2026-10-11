@@ -162,6 +162,8 @@ export class ArcController {
   readonly rec: ReadonlySignal<RecState>
   /** PATTERN: Live's own patterns, recorded and played on its output (state/pattern.ts). */
   readonly pattern: PatternDesk
+  // Presses in ERASE on the scrolling page that may still turn into a scroll: when each went down, by pad key.
+  private readonly eraseUnsure = new Map<number, number>()
   /** The pads sounding on the phone, as padKey numbers (MainActivity's playingPads). */
   readonly playingPads: ReadonlySignal<ReadonlySet<number>>
   /** The KEYS notes sounding on the phone (grid and piano), first pressed first (MainActivity's playingNotes). */
@@ -299,6 +301,7 @@ export class ArcController {
       fmtDateTime: (ms) => this.fmtDateTime(ms),
       deviceRead: () => void this.offerOfflinePads(),
       transport: (playing) => (playing ? deps.liveAudio.transportStarted?.() : deps.liveAudio.transportStopped?.()),
+      midi: (e) => this.pattern.midi(e),
     })
   }
 
@@ -549,8 +552,9 @@ export class ArcController {
       void this.live.openAudio()
       return
     }
-    // The pattern stops with the sound (Android's focus lost).
+    // The pattern and the click stop with the sound (Android's focus lost).
     this.pattern.stop()
+    this.pattern.setClick(false)
     this.live.suspendAudio()
     this.audioClose = this.deps.setTimeout(() => {
       this.audioClose = null
@@ -1084,24 +1088,53 @@ export class ArcController {
    * [at]: the press's event timeStamp, for the latency note.
    */
   playPad(pad: PhysicalPad, hold = true, unsure = false, at?: number): Promise<void> {
+    const pressedAt = pressTime(at, this.deps.perfNow())
+    // ERASE takes the press: nothing sounds, the pad's notes go (a screen reader's click is a tap).
+    if (this.pattern.erasing) {
+      if (!hold) {
+        this.pattern.erasePadDown(pad, pressedAt)
+        this.pattern.erasePadUp(pad, pressedAt)
+      } else if (unsure) {
+        this.eraseUnsure.set(padKey(pad), pressedAt)
+      } else {
+        this.pattern.erasePadDown(pad, pressedAt)
+      }
+      return Promise.resolve()
+    }
     const done = this.live.playPad(pad, hold, unsure, at)
-    this.pattern.press(pad, null, padVoice(pad), pressTime(at, this.deps.perfNow()), hold)
+    this.pattern.press(pad, null, padVoice(pad), pressedAt, hold)
     return done
   }
 
   /** The unsure press on the pad was a press after all: it becomes the KEYS sound (and one not in memory loads). */
   keepPad(pad: PhysicalPad): Promise<void> {
+    const erasedAt = this.eraseUnsure.get(padKey(pad))
+    if (erasedAt !== undefined) {
+      this.eraseUnsure.delete(padKey(pad))
+      this.pattern.erasePadDown(pad, erasedAt)
+      return Promise.resolve()
+    }
     return this.live.keepPad(pad)
   }
 
   /** The finger left the pad: its sound fades out. [at]: the lift's event timeStamp, for the note's gate. */
   releasePad(pad: PhysicalPad, at?: number): void {
+    const releasedAt = pressTime(at, this.deps.perfNow())
+    // Unsure in ERASE and lifted inside the scroll window: a tap.
+    const erasedAt = this.eraseUnsure.get(padKey(pad))
+    if (erasedAt !== undefined) {
+      this.eraseUnsure.delete(padKey(pad))
+      this.pattern.erasePadDown(pad, erasedAt)
+    }
+    this.pattern.erasePadUp(pad, releasedAt)
     this.live.releasePad(pad)
-    this.pattern.release(padVoice(pad), pressTime(at, this.deps.perfNow()))
+    this.pattern.release(padVoice(pad), releasedAt)
   }
 
   /** The press on the pad turned into a scroll (the all-groups page): its sound ends at once. */
   cutPad(pad: PhysicalPad): void {
+    this.eraseUnsure.delete(padKey(pad))
+    this.pattern.eraseCut(pad)
     this.live.cutPad(pad)
     this.pattern.cut(padVoice(pad))
   }
@@ -1113,9 +1146,18 @@ export class ArcController {
 
   /** Plays MIDI [note] on the KEYS sound (a grid key or a piano key) until [releaseNote]; [hold] false plays to the end. Call from the press ([at]: its timeStamp). */
   playNote(note: number, hold = true, at?: number): Promise<void> {
-    const done = this.live.playNote(note, hold, at)
+    const pressedAt = pressTime(at, this.deps.perfNow())
     const pad = this.store.get().keysPad
-    if (pad !== null) this.pattern.press(pad, note - Keys.ROOT_NOTE, noteVoice(note), pressTime(at, this.deps.perfNow()), hold)
+    // ERASE takes the note: its notes on the KEYS sound go.
+    if (this.pattern.erasing) {
+      if (pad !== null) {
+        this.pattern.erasePadDown(pad, pressedAt, note - Keys.ROOT_NOTE)
+        if (!hold) this.pattern.erasePadUp(pad, pressedAt, note - Keys.ROOT_NOTE)
+      }
+      return Promise.resolve()
+    }
+    const done = this.live.playNote(note, hold, at)
+    if (pad !== null) this.pattern.press(pad, note - Keys.ROOT_NOTE, noteVoice(note), pressedAt, hold)
     return done
   }
 
@@ -1131,6 +1173,8 @@ export class ArcController {
 
   /** The last finger left the note: it fades out. */
   releaseNote(note: number, at?: number): void {
+    const pad = this.store.get().keysPad
+    if (pad !== null) this.pattern.erasePadUp(pad, pressTime(at, this.deps.perfNow()), note - Keys.ROOT_NOTE)
     this.live.releaseNote(note)
     this.pattern.release(noteVoice(note), pressTime(at, this.deps.perfNow()))
   }

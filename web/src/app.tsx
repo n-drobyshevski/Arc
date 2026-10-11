@@ -97,6 +97,8 @@ import { useAppKeys } from './ui/useAppKeys'
 import { KeyboardKeysSheet } from './ui/sheets/KeyboardKeysSheet'
 import { PatternSheet } from './ui/sheets/PatternSheet'
 import { TransportContext, type TransportUi } from './ui/live/PatternLine'
+import { TempoContext, type TempoUi } from './ui/live/FunctionRow'
+import { TempoSheet } from './ui/sheets/TempoSheet'
 import { computerKeys, setComputerKeys } from './ui/keyPrefs'
 import './app.css'
 
@@ -106,6 +108,8 @@ const PROGRESS = 'progress'
 const KEYS_SHEET = 'keys'
 /** Live's pattern sheet (RECORD held). */
 const PATTERN_SHEET = 'pattern'
+/** Live's tempo sheet (TEMPO held). */
+const TEMPO_SHEET = 'tempo'
 
 export interface AppProps {
   controller: ArcController
@@ -197,6 +201,7 @@ function Root(): JSX.Element {
   })
   // PATTERN: RECORD and PLAY on Live's display lines, read through the context (its signal re-renders the lines only).
   const transport = useMemo(() => transportUi(c, () => nav.open(sheetLayer(PATTERN_SHEET))), [c])
+  const tempo = useMemo(() => tempoUi(c, () => nav.open(sheetLayer(TEMPO_SHEET))), [c])
   // Live's EDIT (giving a pad another sound): on Live, in PADS, until switched off or left.
   const [editPads, setEditPads] = useState(false)
   const canEdit = v.tab === 'live' && !settings.liveKeys
@@ -391,6 +396,7 @@ function Root(): JSX.Element {
   const guide = screenLayer({ kind: 'guide' })
   return (
     <TransportContext.Provider value={transport}>
+    <TempoContext.Provider value={tempo}>
     <div class={desk ? 'app is-desk' : 'app'}>
       {desk ? (
         <CoachHost visible={v.coach && view === 'shell'} onDismiss={() => nav.close(overlayLayer('coach'))}>
@@ -419,7 +425,7 @@ function Root(): JSX.Element {
       {/* The Device tab's sheets: pads 'pads:device:<n>', upload / trim from state.browser.draft. */}
       {tabs && v.tab === 'device' && <><DevicePadsSheet view={v} /><DeviceUploadSheet view={v} /></>}
       {/* Live's EDIT: the pad sheet 'edit:<group>:<offset>', and the upload / trim sheets for a new sample. */}
-      {tabs && v.tab === 'live' && <><PadEditSheet view={v} /><DeviceUploadSheet view={v} /><LivePatternSheet view={v} /></>}
+      {tabs && v.tab === 'live' && <><PadEditSheet view={v} /><DeviceUploadSheet view={v} /><LivePatternSheet view={v} /><LiveTempoSheet view={v} /></>}
       {/* The Backups tab's sheets: detail 'detail:<id>', compare picker 'comparePick:<id>',
           restore 'restore:<id>', the delete dialog 'delete'. */}
       {tabs && v.tab === 'backups' && <BackupsSheets view={v} />}
@@ -441,7 +447,55 @@ function Root(): JSX.Element {
         <UpdatePrompt />
       </ToastLayer>
     </div>
+    </TempoContext.Provider>
     </TransportContext.Provider>
+  )
+}
+
+/** TEMPO's key over the pads (Kotlin FunctionKeysUi's TEMPO part), read from the controller's signals as it renders. */
+function tempoUi(c: ArcController, openSheet: () => void): TempoUi | null {
+  const p = c.pattern
+  if (!p.canClick) return null
+  return {
+    get clickOn() {
+      return p.metronome.value.on
+    },
+    get bpm() {
+      return p.metronome.value.bpm
+    },
+    get deviceBpm() {
+      return c.state.value.mirror?.state.bpm ?? null
+    },
+    get beat() {
+      return p.beats.value
+    },
+    onClick: (on) => p.setClick(on),
+    onSheet: openSheet,
+  }
+}
+
+/** TEMPO held: the tempo sheet 'tempo', on Live. */
+function LiveTempoSheet(props: { view: NavView }): JSX.Element | null {
+  const c = useController()
+  const nav = useNav()
+  const p = c.pattern
+  if (!p.canClick) return null
+  const m = p.metronome.value
+  return (
+    <TempoSheet
+      open={props.view.sheets.includes(TEMPO_SHEET)}
+      bpm={m.bpm}
+      deviceBpm={c.state.value.mirror?.state.bpm ?? null}
+      clickOn={m.on}
+      timing={p.ui.value.timingSettings}
+      onClick={(on) => p.setClick(on)}
+      onBpm={(bpm) => p.setTempo(bpm)}
+      onTap={(at) => p.tapTempo(at)}
+      onInterval={(t) => p.setTimingInterval(t)}
+      onSwing={(v) => p.setTimingSwing(v)}
+      onQuantize={(on) => p.setTimingQuantize(on)}
+      onDismiss={() => nav.close(sheetLayer(TEMPO_SHEET))}
+    />
   )
 }
 
@@ -458,6 +512,8 @@ function transportUi(c: ArcController, openSheet: () => void): TransportUi | nul
     onRecordUp: (at) => p.recordUp(at),
     onPlay: (held) => p.play(held),
     onSheet: openSheet,
+    onErase: (on) => p.setErase(on),
+    onUndo: () => p.undo(),
   }
 }
 
@@ -480,6 +536,11 @@ function LivePatternSheet(props: { view: NavView }): JSX.Element | null {
         onAutoLength: (on) => p.setAutoLength(on),
         onUndo: () => p.undo(),
         onClear: (g) => p.clear(g),
+        onErase: (on) => {
+          p.setErase(on)
+          // On, the sheet makes way for the pads.
+          if (on) nav.close(sheetLayer(PATTERN_SHEET))
+        },
       }}
     />
   )

@@ -4,11 +4,10 @@
 // picked to change (the group recorded into last first): − and + a bar (held,
 // they repeat), the lengths offered first (1, 2, 4, 8), and ×2, which copies
 // the notes in. TIMING, the grid notes snap to; the count-in and AUTO length;
-// UNDO and CLEAR (a group's notes or every group's, asked here first). Pads
+// UNDO, ERASE (on, the sheet makes way for the pads) and CLEAR (a group's notes or every group's, asked here first). Pads
 // the pattern plays whose sounds aren't on the phone yet are counted.
 //
-// Web deltas: no SCENE CHANGE and no ERASE (the web has neither scenes nor
-// ERASE yet); a group's length cell is a radio of a radiogroup, where Kotlin's
+// Web deltas: no SCENE CHANGE (the web has no scenes yet); a group's length cell is a radio of a radiogroup, where Kotlin's
 // is a selectable tab.
 import type { JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
@@ -33,6 +32,7 @@ export interface PatternSheetActions {
   onAutoLength(on: boolean): void
   onUndo(): void
   onClear(group: number | null): void
+  onErase(on: boolean): void
 }
 
 export interface PatternSheetProps {
@@ -142,6 +142,14 @@ export function PatternSheet(props: PatternSheetProps): JSX.Element {
       {ask === null ? (
         <div class="pattern-sheet__keys">
           <Key text={MirrorText.UNDO} size="small" disabled={!ui.canUndo} onClick={a.onUndo} />
+          <Key
+            text={MirrorText.ERASE}
+            size="small"
+            variant={ui.erase ? 'signal' : 'normal'}
+            aria-pressed={ui.erase}
+            disabled={!ui.erase && !any}
+            onClick={() => a.onErase(!ui.erase)}
+          />
           <Key text={MirrorText.CLEAR} size="small" disabled={!any} textColor={any ? 'var(--signal)' : undefined} onClick={() => setAsk(group)} />
         </div>
       ) : (

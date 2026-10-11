@@ -12,7 +12,7 @@
 //   tick heard is the tick stamped.
 // - Times are performance.now() milliseconds where Kotlin's are System.nanoTime.
 
-import { Pattern, ProjectPatterns, Seq, Timing } from '../core/features/pattern'
+import { Pattern, ProjectPatterns, Seq, Timing, TimingSettings } from '../core/features/pattern'
 import type { PatternRecorder } from '../core/features/patternRecorder'
 import { Tempo } from '../core/features/tempo'
 import type { TransportPhase, TransportState } from '../core/features/transport'
@@ -23,8 +23,8 @@ import type { TransportPhase, TransportState } from '../core/features/transport'
  * as it is heard ([countIn], 1..4; null outside it), the settings ([timing],
  * [countInOn], [autoLength]), each group's length and whether it has notes
  * ([bars], [hasNotes], A..D), the pads with notes ([notePads]), the group
- * last played into ([focusGroup], whose position the line counts), whether
- * UNDO has something ([canUndo]), how many pads the patterns play have
+ * last played into ([focusGroup], whose position the line counts), ERASE
+ * ([erase]), whether UNDO has something ([canUndo]), how many pads the patterns play have
  * sounds not in memory yet ([missing]) and the project they are [project]'s
  * (0: none known).
  */
@@ -33,12 +33,16 @@ export interface PatternUiState {
   readonly recording: boolean
   readonly countIn: number | null
   readonly timing: Timing
+  /** TIMING whole: the interval, its swing and quantize or free time (the tempo sheet's TIMING page). */
+  readonly timingSettings: TimingSettings
   readonly countInOn: boolean
   readonly autoLength: boolean
   readonly bars: readonly number[]
   readonly hasNotes: readonly boolean[]
   readonly notePads: ReadonlySet<number>
   readonly focusGroup: number
+  /** ERASE: a pad tapped erases its notes, one held while playing erases them as they pass. */
+  readonly erase: boolean
   readonly canUndo: boolean
   readonly missing: number
   readonly project: number
@@ -49,12 +53,14 @@ export const PATTERN_UI: PatternUiState = Object.freeze({
   recording: false,
   countIn: null,
   timing: Timing.DEFAULT,
+  timingSettings: TimingSettings.DEFAULT,
   countInOn: true,
   autoLength: false,
   bars: [Seq.DEFAULT_BARS, Seq.DEFAULT_BARS, Seq.DEFAULT_BARS, Seq.DEFAULT_BARS],
   hasNotes: [false, false, false, false],
   notePads: new Set<number>(),
   focusGroup: 0,
+  erase: false,
   canUndo: false,
   missing: 0,
   project: 0,
