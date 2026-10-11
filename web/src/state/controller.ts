@@ -1139,6 +1139,20 @@ export class ArcController {
     this.pattern.cut(padVoice(pad))
   }
 
+  /**
+   * PROJECT's tap: connected, the EP-133 switches to the next project and
+   * Live follows it; offline, Live shows the next of its views (the last
+   * read's project and the factory pack's), in arc only.
+   */
+  stepProject(): void {
+    this.mirror.stepProject()
+  }
+
+  /** PROJECT held, project [n] (1..9) picked on the pads or the sheet: as [stepProject] would go there. */
+  selectProject(n: number): void {
+    this.mirror.selectProject(n)
+  }
+
   /** The sound KEYS plays: the pad last tapped, or last played on the device in the pads view. */
   selectKeysPad(pad: PhysicalPad): void {
     this.live.selectKeysPad(pad)

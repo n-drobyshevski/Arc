@@ -191,6 +191,8 @@ export class LiveSounds {
   private openPak: { id: string; pak: Pak } | null = null
   // The factory sounds' first project as Live shows it, by the library entry it came from.
   private factorySnap: { id: string; snap: LiveSnapshot | null } | null = null
+  // Every factory project with pads, by the library entry they came from (PROJECT offline).
+  private factorySnaps: { id: string; snaps: Map<number, LiveSnapshot> } | null = null
   // Live's pad samples decoded and ready ("slot:name"), least recently played first.
   private readonly padMemory = new Map<string, PadAudio>()
   private padMemoryBytes = 0
@@ -627,6 +629,28 @@ export class LiveSounds {
     }
     this.factorySnap = { id: b.id, snap }
     return snap
+  }
+
+  /**
+   * Every factory project with pads as Live shows it, by number, when the
+   * library has the pack (PROJECT steps through them offline); empty without it.
+   */
+  async factorySnapshots(): Promise<Map<number, LiveSnapshot>> {
+    const b = FactorySounds.inLibrary(this.host.store.get().backups)
+    if (b === null) return new Map()
+    if (this.factorySnaps?.id === b.id) return this.factorySnaps.snaps
+    const snaps = new Map<number, LiveSnapshot>()
+    try {
+      const pak = await this.pakOf(b.id)
+      for (const n of FactorySounds.projects(pak)) {
+        const snap = FactorySounds.snapshot(pak, b.createdAt, n)
+        if (snap !== null) snaps.set(n, snap)
+      }
+    } catch {
+      snaps.clear()
+    }
+    this.factorySnaps = { id: b.id, snaps }
+    return snaps
   }
 
   /** The sound on [pad] (its offline change first), when the mirror knows it. */

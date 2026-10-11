@@ -28,10 +28,12 @@
 //   host ([MirrorHost.deviceRead]), which asks whether to write them.
 
 import { getMetadata, isJsonObject, type JsonValue } from '../core/protocol/fs'
-import { PROJECTS_NODE, projectOfActive, type SoundEntry } from '../core/protocol/device'
+import { PROJECTS_NODE, PROJECT_COUNT, activeProject as deviceActiveProject, projectOfActive, setActiveProject, type SoundEntry } from '../core/protocol/device'
 import type { Session } from '../core/protocol/session'
 import { contents, projectLayout } from '../core/features/deviceBrowser'
 import { LearnedLinks } from '../core/features/learnedLinks'
+import { ProjectStep } from '../core/features/projectStep'
+import { FactorySounds } from '../core/features/factorySounds'
 import { CLOCK_TIMEOUT_MS, FADE_MS, LiveMirror, type Hit, type MirrorState, type PadLight, type PadTarget } from '../core/features/liveMirror'
 import type { PhysicalPad } from '../core/features/padNotes'
 import { SoundSource } from '../core/features/offlinePads'
@@ -150,6 +152,12 @@ export class MirrorController {
   /** The publish for the soonest time-based change (a fade over, a tempo gone stale), or null. */
   private settle: unknown = null
   private openGen = 0
+  // PROJECT, connected: the project the newest tap asked for, until the device's read of it lands, and
+  // whether the one worker writing it runs (taps meanwhile only move the target).
+  private projectTarget: number | null = null
+  private switching = false
+  // PROJECT, offline: the view stepped to (null: the last read, else the pack's first project).
+  private offlineProject: number | null = null
 
   constructor(private readonly host: MirrorHost) {}
 
@@ -288,6 +296,8 @@ export class MirrorController {
     }
     if (this.mirror === m) {
       if (ok === true) {
+        // PROJECT's offline view is forgotten after a good read of the device.
+        this.offlineProject = null
         host.deviceRead()
         host.live.saveLastRead(m)
         void host.live.preloadPads(m)
@@ -307,8 +317,18 @@ export class MirrorController {
     this.stop()
     const gen = this.openGen
     const lastRead = await host.live.loadLastRead()
-    // Never read: the factory sounds, if the library has them.
-    const snap = lastRead ?? (await host.live.factorySnapshot())
+    const factory = await host.live.factorySnapshots()
+    if (gen !== this.openGen) return
+    const views = ProjectStep.offlineViews(lastRead?.activeProject ?? null, factory.keys())
+    // The view PROJECT stepped to; else the last read; never read, the factory sounds' first project.
+    const n = this.offlineProject !== null && views.includes(this.offlineProject) ? this.offlineProject : null
+    const snap =
+      n === null
+        ? (lastRead ?? factory.get(FactorySounds.PROJECT) ?? factory.values().next().value ?? (await host.live.factorySnapshot()))
+        : n === lastRead?.activeProject
+          ? lastRead
+          : (factory.get(n) ?? null)
+    const fromRead = snap !== null && snap === lastRead
     if (gen !== this.openGen) return
     if (snap === null || (host.session() !== null && host.store.get().device !== null)) {
       if (snap === null) host.store.update((st) => ({ ...st, mirror: this.notConnected() }))
@@ -316,7 +336,7 @@ export class MirrorController {
     }
     // The pad changes made offline go over it, and the sounds offered without the device beside it.
     const pads = await host.live.loadOfflinePads()
-    const offlineSounds = await host.live.offlineSounds(lastRead !== null ? SoundSource.DEVICE : SoundSource.FACTORY, lastRead)
+    const offlineSounds = await host.live.offlineSounds(fromRead ? SoundSource.DEVICE : SoundSource.FACTORY, fromRead ? lastRead : null)
     if (gen !== this.openGen) return
     if (host.session() !== null && host.store.get().device !== null) return
     // Nothing can be learned without the device: pads unlearned are numbered from the top, and nothing is saved.
@@ -326,11 +346,143 @@ export class MirrorController {
     this.mirror = m
     this.mirrorSession = null
     void host.live.preloadPads(m)
-    const offline = lastRead !== null ? MirrorText.lastSeen(host.fmtDateTime(lastRead.savedAt)) : MirrorText.FACTORY
+    // Every factory project's line is FACTORY (refreshOffline goes by it).
+    const offline = fromRead && lastRead !== null ? MirrorText.lastSeen(host.fmtDateTime(lastRead.savedAt)) : MirrorText.FACTORY
     host.store.update((st) => ({
       ...st,
-      mirror: { state: m.snapshot(host.perfNow()), loading: false, error: null, offline, offlineSounds },
+      mirror: { state: m.snapshot(host.perfNow()), loading: false, error: null, offline, offlineSounds, offlineProjects: views },
     }))
+  }
+
+  // ---------- PROJECT: the next project (an addition) ----------
+
+  /**
+   * PROJECT's tap. Connected, the EP-133 switches to the next project
+   * (ProjectStep.next) and Live follows it once it is read; taps while it
+   * switches move the target on, and one worker writes the newest. Offline,
+   * Live shows the next of its views instead (the last read's project and
+   * the factory pack's), in arc only.
+   */
+  stepProject(): void {
+    const mi = this.host.store.get().mirror
+    if (!mi) return
+    if (mi.offline != null) {
+      const views = mi.offlineProjects ?? []
+      // A tap before the last one's view opened steps on from that one.
+      const cur = this.offlineProject !== null && views.includes(this.offlineProject) ? this.offlineProject : mi.state.activeProject
+      const n = ProjectStep.nextOffline(cur, views)
+      if (n !== null) this.selectProject(n)
+      return
+    }
+    const m = this.mirror
+    if (!m) return
+    this.selectProject(ProjectStep.next(this.projectTarget ?? m.snapshot(this.host.perfNow()).activeProject))
+  }
+
+  /**
+   * PROJECT held, a project picked: [n] (1..9). Connected, the EP-133
+   * switches to it (a pick while it switches moves the target); offline, Live
+   * shows that view, when it is one. Nothing for the project already shown.
+   */
+  selectProject(n: number): void {
+    if (!(Number.isInteger(n) && n >= 1 && n <= PROJECT_COUNT)) return
+    const { host } = this
+    const mi = host.store.get().mirror
+    if (!mi) return
+    if (mi.offline != null) {
+      // Offline: a view of what arc has (no device, nothing written).
+      const views = mi.offlineProjects ?? []
+      const cur = this.offlineProject !== null && views.includes(this.offlineProject) ? this.offlineProject : mi.state.activeProject
+      if (!views.includes(n) || n === cur) return
+      this.offlineProject = n
+      void this.openOffline()
+      return
+    }
+    const s = host.session()
+    const m = this.mirror
+    if (s === null || m === null || this.mirrorSession !== s || host.store.get().device === null || mi.loading) return
+    // Another action holds the device (the key is greyed out); PROJECT's own switch takes more.
+    if (host.store.get().busy && this.projectTarget === null) return
+    if (this.projectTarget === null && n === m.snapshot(host.perfNow()).activeProject) return
+    this.projectTarget = n
+    this.showProjectTarget()
+    if (!this.switching) void this.switchProjects()
+  }
+
+  /**
+   * Writes the target as the device's active project and reads it back,
+   * again while taps moved it on meanwhile. Only the newest's read goes
+   * further: its pads, the saved read, preload and copies. A failed switch
+   * says why, and Live stays on the project it read last.
+   */
+  private async switchProjects(): Promise<void> {
+    const { host } = this
+    this.switching = true
+    try {
+      for (;;) {
+        const want = this.projectTarget
+        const s = host.session()
+        const m = this.mirror
+        if (want === null || s === null || m === null || this.mirrorSession !== s) {
+          this.projectTarget = null
+          this.showProjectTarget()
+          return
+        }
+        let failed: string | null = null
+        let tapped = false
+        const read = await host.tasks.exclusive('liveProject', true, async (ss) => {
+          try {
+            await setActiveProject(ss, want)
+            const now = await deviceActiveProject(ss)
+            // Tapped on: the next pass writes the newest, these pads aren't needed.
+            tapped = this.projectTarget !== want
+            if (tapped) return null
+            // Empty projects may have no pads to read: they show empty.
+            let groups: PadGroup[] = []
+            if (now !== null) {
+              try {
+                groups = (await projectLayout(ss, now)).pads
+              } catch {
+                groups = []
+              }
+            }
+            return { now, groups }
+          } catch (e) {
+            failed = e instanceof Error ? e.message || String(e) : String(e)
+            return null
+          }
+        })
+        // Closed, reopened or disconnected meanwhile, or tapped on: the next pass sees.
+        if (this.mirror !== m || host.session() !== s) continue
+        if (tapped) continue
+        if (read === null && failed === null && this.projectTarget === want) {
+          // The device was busy with another action: try again once it is free.
+          await host.store.waitFor((st) => !st.busy || st.mirror === null)
+          continue
+        }
+        this.projectTarget = null
+        if (read === null) {
+          this.showProjectTarget()
+          host.toast(MirrorText.projectFailed(failed ?? MirrorText.EDIT_OFFLINE), true)
+          return
+        }
+        m.setProject(read.now, read.groups)
+        host.live.saveLastRead(m)
+        void host.live.preloadPads(m)
+        void host.live.copyPadSounds(m, s)
+        this.showProjectTarget()
+        this.publish(m)
+        return
+      }
+    } finally {
+      this.switching = false
+    }
+  }
+
+  /** The mirror shows the project asked for (connected; null when not switching). */
+  private showProjectTarget(): void {
+    const t = this.projectTarget
+    this.host.store.update((cur) => (cur.mirror && cur.mirror.projectTarget !== t ? { ...cur, mirror: { ...cur.mirror, projectTarget: t } } : cur))
   }
 
   /**

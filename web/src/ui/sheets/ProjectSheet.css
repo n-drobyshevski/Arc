@@ -1,0 +1,29 @@
+/* ProjectSheet.kt's look: dark keys 64 high in the keypad's order, the project shown orange. */
+
+.project-sheet__title { margin: 0; color: var(--ink); }
+.project-sheet__pad { display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 420px; margin: 0 auto 4px; }
+.project-sheet__row { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.project-pick {
+  height: 64px;
+  border-radius: 8px;
+  border: 1px solid var(--ko-dark-edge, #050505);
+  background: var(--ko-dark-face, #232425);
+  --cap-face: var(--ko-dark-face, #232425);
+  --cap-edge: var(--ko-dark-edge, #050505);
+  color: var(--ko-dark-ink, #EDECE8);
+  font: inherit;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.project-pick.is-shown {
+  background: var(--signal);
+  border-color: color-mix(in oklab, var(--signal) 70%, black);
+  --cap-face: var(--signal);
+  color: var(--on-signal);
+}
+.project-pick:disabled { cursor: default; }
+.project-pick:disabled:not(.is-shown) { opacity: 0.45; }
+.project-pick__n { font-size: 26px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }

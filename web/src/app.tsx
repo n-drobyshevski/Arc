@@ -97,7 +97,9 @@ import { useAppKeys } from './ui/useAppKeys'
 import { KeyboardKeysSheet } from './ui/sheets/KeyboardKeysSheet'
 import { PatternSheet } from './ui/sheets/PatternSheet'
 import { TransportContext, type TransportUi } from './ui/live/PatternLine'
-import { FunctionKeysContext, TempoContext, type FunctionKeysUi, type TempoUi } from './ui/live/FunctionRow'
+import { FunctionKeysContext, ProjectHold, ProjectHoldContext, TempoContext, type FunctionKeysUi, type ProjectUi, type TempoUi } from './ui/live/FunctionRow'
+import { projectChoicesOf, projectKeyOf, projectKeyState } from './ui/live/projectKey'
+import { ProjectSheet } from './ui/sheets/ProjectSheet'
 import { TempoSheet } from './ui/sheets/TempoSheet'
 import { computerKeys, setComputerKeys } from './ui/keyPrefs'
 import './app.css'
@@ -110,6 +112,8 @@ const KEYS_SHEET = 'keys'
 const PATTERN_SHEET = 'pattern'
 /** Live's tempo sheet (TEMPO held). */
 const TEMPO_SHEET = 'tempo'
+/** Live's project sheet (PROJECT held). */
+const PROJECT_SHEET = 'project'
 
 export interface AppProps {
   controller: ArcController
@@ -202,6 +206,8 @@ function Root(): JSX.Element {
   // PATTERN: RECORD and PLAY on Live's display lines, read through the context (its signal re-renders the lines only).
   const transport = useMemo(() => transportUi(c, () => nav.open(sheetLayer(PATTERN_SHEET))), [c])
   const tempo = useMemo(() => tempoUi(c, () => nav.open(sheetLayer(TEMPO_SHEET))), [c])
+  // PROJECT held: the pads printed 1 to 9 pick a project instead of sounding.
+  const projectHold = useMemo(() => new ProjectHold(), [])
   // Live's EDIT (giving a pad another sound): on Live, in PADS, until switched off or left.
   const [editPads, setEditPads] = useState(false)
   const canEdit = v.tab === 'live' && !settings.liveKeys
@@ -239,7 +245,7 @@ function Root(): JSX.Element {
         else if (c.editTarget(pad) !== null) nav.open(sheetLayer(`${EDIT_PREFIX}${pad.group}:${pad.offset}`))
       },
     },
-    project: null,
+    project: v.tab === 'live' ? projectUi(c, state.busy, () => nav.open(sheetLayer(PROJECT_SHEET))) : null,
     fx: null,
   }
   // On a phone on its side, Live's display line rides in the top bar; the piano's
@@ -421,6 +427,7 @@ function Root(): JSX.Element {
     <TransportContext.Provider value={transport}>
     <TempoContext.Provider value={tempo}>
     <FunctionKeysContext.Provider value={fnKeys}>
+    <ProjectHoldContext.Provider value={projectHold}>
     <div class={desk ? 'app is-desk' : 'app'}>
       {desk ? (
         <CoachHost visible={v.coach && view === 'shell'} onDismiss={() => nav.close(overlayLayer('coach'))}>
@@ -449,7 +456,7 @@ function Root(): JSX.Element {
       {/* The Device tab's sheets: pads 'pads:device:<n>', upload / trim from state.browser.draft. */}
       {tabs && v.tab === 'device' && <><DevicePadsSheet view={v} /><DeviceUploadSheet view={v} /></>}
       {/* Live's EDIT: the pad sheet 'edit:<group>:<offset>', and the upload / trim sheets for a new sample. */}
-      {tabs && v.tab === 'live' && <><PadEditSheet view={v} /><DeviceUploadSheet view={v} /><LivePatternSheet view={v} /><LiveTempoSheet view={v} /></>}
+      {tabs && v.tab === 'live' && <><PadEditSheet view={v} /><DeviceUploadSheet view={v} /><LivePatternSheet view={v} /><LiveTempoSheet view={v} /><LiveProjectSheet view={v} /></>}
       {/* The Backups tab's sheets: detail 'detail:<id>', compare picker 'comparePick:<id>',
           restore 'restore:<id>', the delete dialog 'delete'. */}
       {tabs && v.tab === 'backups' && <BackupsSheets view={v} />}
@@ -471,6 +478,7 @@ function Root(): JSX.Element {
         <UpdatePrompt />
       </ToastLayer>
     </div>
+    </ProjectHoldContext.Provider>
     </FunctionKeysContext.Provider>
     </TempoContext.Provider>
     </TransportContext.Provider>
@@ -497,6 +505,34 @@ function tempoUi(c: ArcController, openSheet: () => void): TempoUi | null {
     onClick: (on) => p.setClick(on),
     onSheet: openSheet,
   }
+}
+
+/** PROJECT as its key shows it (Kotlin projectKeyOf), and what it does. */
+function projectUi(c: ArcController, busy: boolean, openSheet: () => void): ProjectUi {
+  const k = projectKeyOf(liveMirror(c), busy)
+  return {
+    shown: k.shown,
+    state: projectKeyState(k),
+    enabled: k.enabled,
+    switching: k.switching,
+    onStep: () => c.stepProject(),
+    onPick: openSheet,
+    onSelect: (n) => c.selectProject(n),
+  }
+}
+
+/** PROJECT held and let go of: the project sheet 'project', on Live. */
+function LiveProjectSheet(props: { view: NavView }): JSX.Element {
+  const c = useController()
+  const nav = useNav()
+  return (
+    <ProjectSheet
+      open={props.view.sheets.includes(PROJECT_SHEET)}
+      choices={projectChoicesOf(liveMirror(c), c.state.value.busy)}
+      onPick={(n) => c.selectProject(n)}
+      onDismiss={() => nav.close(sheetLayer(PROJECT_SHEET))}
+    />
+  )
 }
 
 /** TEMPO held: the tempo sheet 'tempo', on Live. */
