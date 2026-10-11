@@ -699,12 +699,12 @@ export class LiveSounds {
     return true
   }
 
-  /** A pad's sample from the first place that has it; null after a toast says why. */
-  async padAudio(pad: PhysicalPad): Promise<{ key: string; audio: PadAudio } | null> {
+  /** A pad's sample from the first place that has it; null after a toast says why ([quiet]: none for a pad with no known sample). */
+  async padAudio(pad: PhysicalPad, quiet = false): Promise<{ key: string; audio: PadAudio } | null> {
     const { host } = this
     const sample = this.padSample(pad)
     if (sample === null) {
-      host.toastOnce(MirrorText.NO_SAMPLE)
+      if (!quiet) host.toastOnce(MirrorText.NO_SAMPLE)
       return null
     }
     const { slot, name, factory } = sample

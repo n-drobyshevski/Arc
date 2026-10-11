@@ -307,7 +307,8 @@ export class ArcController {
       tasks: this.tasks,
       session: () => this.conn.session,
       connected: () => this.deviceReady,
-      padAudio: (pad) => this.live.padAudio(pad),
+      // TRIM's length and waveform load quietly: the sheet says nothing of a sample not known yet.
+      padAudio: (pad) => this.live.padAudio(pad, true),
       prefs: deps.offlinePadSettings ?? new OfflinePadsPrefs(memoryStorage(), LIVE_PAD_SETTINGS_KEY),
       toast,
       setTimeout: (fn, ms) => deps.setTimeout(fn, ms),

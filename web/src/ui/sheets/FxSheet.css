@@ -137,7 +137,3 @@
 .fx-duck.is-on { --cap-face: var(--navy); --cap-edge: color-mix(in oklab, var(--navy) 70%, black); color: var(--on-navy); }
 
 .fx-knobs { display: flex; gap: 16px; padding: 12px 16px; }
-.fx-knob { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 4px; color: var(--ink); }
-.fx-knob__label { color: var(--ink); }
-.fx-knob input { width: 100%; accent-color: var(--signal); }
-.fx-knob__value { font-size: var(--size-small); color: var(--graphite); font-variant-numeric: tabular-nums; }

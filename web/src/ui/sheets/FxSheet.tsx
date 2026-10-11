@@ -20,6 +20,7 @@ import { MirrorText } from '../../core/text/mirrorText'
 import { Strings } from '../../core/text/strings'
 import { GridPlate, PlateLine } from '../components/GridPlate'
 import { Key } from '../components/Key'
+import { KnobSlider } from '../components/KnobSlider'
 import { Segmented } from '../components/Segmented'
 import { Sheet } from '../components/Sheet'
 import { SwitchRow } from '../components/SwitchRow'
@@ -375,20 +376,5 @@ function OutputPage(props: FxSheetProps): JSX.Element {
 
 /** One of the sheet's knobs, 0..1 in hundredths, back to [def] on a double click. */
 function FxKnob(props: { label: string; value: number; readout: string; def: number; onChange(v: number): void }): JSX.Element {
-  return (
-    <label class="fx-knob" onDblClick={() => props.onChange(props.def)}>
-      <span class="t-bold fx-knob__label">{props.label}</span>
-      <input
-        type="range"
-        min={0}
-        max={1}
-        step={0.01}
-        value={props.value}
-        aria-valuetext={props.readout}
-        aria-description={MirrorText.knobDescription(props.label, props.readout)}
-        onInput={(e) => props.onChange(Number((e.currentTarget as HTMLInputElement).value))}
-      />
-      <span class="fx-knob__value">{props.readout}</span>
-    </label>
-  )
+  return <KnobSlider {...props} description={MirrorText.knobDescription(props.label, props.readout)} />
 }

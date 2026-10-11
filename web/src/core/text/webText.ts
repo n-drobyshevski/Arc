@@ -16,6 +16,8 @@ import { bytes, plural } from './format'
 const TOO_LARGE = 'This file is too large to be a backup'
 
 export const WebText = {
+  /** EDIT's page keys for screen readers (Kotlin's are plain keys under the knobs). */
+  EDIT_PAGES: 'Sound edit pages',
   // ---------- no WebMIDI (Strings.NO_MIDI_*, reference app.js:69-72) ----------
   NO_MIDI_TITLE: 'No MIDI in this browser',
   NO_MIDI_HINT:
