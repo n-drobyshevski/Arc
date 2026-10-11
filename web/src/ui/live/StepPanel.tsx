@@ -134,6 +134,26 @@ export function useStepNoteMark(note: number, pad: PhysicalPad | null): '' | 'li
   }).value
 }
 
+/** The piano's marks while the STEP panel is open on the KEYS sound's group ([pad]): its notes on the cursor's step, and the one picked; null otherwise. */
+export function useStepPiano(pad: PhysicalPad | null): PianoStep | null {
+  const s = useStep()
+  const at = useRef(pad)
+  at.current = pad
+  return useComputed(() => {
+    if (s === null) return null
+    const ui = s.ui
+    const p = at.current
+    if (!ui.open || p === null || ui.group !== p.group) return null
+    return { lit: stepLitNotes(ui, p), picked: stepPickedNote(ui, p) }
+  }).value
+}
+
+/** The piano's STEP marks (PianoKeyboard's [step]): the notes on the cursor's step outlined, the one picked ringed. */
+export interface PianoStep {
+  readonly lit: ReadonlySet<number>
+  readonly picked: number | null
+}
+
 /** How many steps the strip shows: one bar of them at [interval]. */
 export function stripSteps(interval: Timing): number {
   return Math.max(1, Math.trunc(Seq.TICKS_PER_BAR / timingTicks(interval)))

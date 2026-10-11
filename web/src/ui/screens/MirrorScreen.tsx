@@ -163,7 +163,7 @@ import { PatternLine, TransportContext } from '../live/PatternLine'
 import { FunctionKeysContext, FunctionRow, ProjectHoldContext } from '../live/FunctionRow'
 import { DeviceView } from '../live/DeviceView'
 import { PunchPad, usePunch } from '../live/LivePunch'
-import { StepPanel, useStep, useStepNoteMark, useStepPadMark } from '../live/StepPanel'
+import { StepPanel, useStep, useStepNoteMark, useStepPadMark, useStepPiano } from '../live/StepPanel'
 import { ArpWords, useArpLine, useArpNote, useArpPad } from '../live/ArpWords'
 import { ClaudeSection } from '../live/ClaudeSection'
 import { ScenePanel, useScene } from '../live/ScenePanel'
@@ -488,6 +488,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   // The device view plays KEYS on its own pads, as the EP-133 does, unless the piano was chosen.
   const plan: PianoPlan = device && shape.view !== KeysView.PIANO ? { ...shape, range: null } : shape
   const pianoRange = keys.on ? plan.range : null
+  // STEP open on the KEYS sound's group: the piano's keys on the cursor's step outlined, the one picked ringed.
+  const pianoStep = useStepPiano(keys.pad)
   // The line in the top bar names a device note past the piano's ends.
   const rangeKey = pianoRange ? `${pianoRange.first}:${pianoRange.last}` : null
   useEffect(() => {
@@ -988,6 +990,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
               onNoteUp={(n) => actions.onNoteUp?.(n)}
               computer={desk || fine}
               onOctave={(o) => actions.onOctave?.(o)}
+              step={pianoStep}
+              onPick={(n) => stepCtx?.onNotePick(n)}
             />
           </div>
         </div>
