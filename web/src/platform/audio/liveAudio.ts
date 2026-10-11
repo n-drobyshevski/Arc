@@ -88,8 +88,11 @@ import { wavHeader } from '../../core/formats/wav'
 import { LatencyText, WebLatencyHint } from '../../core/text/latencyText'
 import { WebText } from '../../core/text/webText'
 import type { VoiceShape } from '../../core/formats/voiceMixer'
+import type { ProjectPatterns } from '../../core/features/pattern'
+import { frameAt, type FrameClock } from '../../core/features/sampleTiming'
+import type { PhaseAnchors, TransportClock } from '../../core/features/sequencer'
 import { FxSetup } from './fxSetup'
-import { LIVE_PROCESSOR, MixerHost, transferable, type FromMixer, type ToMixer } from './liveMixer'
+import { LIVE_PROCESSOR, MixerHost, transferable, type FromMixer, type PlanVoice, type ToMixer } from './liveMixer'
 // The AudioWorklet module's URL: Vite bundles liveWorklet.ts (with the core
 // mixer) into one self-contained script. (`new URL('./liveWorklet.ts',
 // import.meta.url)` would copy the TypeScript unbuilt: Vite only bundles that
@@ -301,6 +304,30 @@ export function heardAt(
   return now + (time - ctx.currentTime) * 1000 + l.baseMs + l.outputMs
 }
 
+/**
+ * What the pattern sequencer plays (PatternScheduler's SeqPlan): the
+ * project's [patterns], each pad's sound by its preloaded sample key ([voices],
+ * by pad key group × 12 + offset), the notes' passes not to play ([skip]), the
+ * tempo and where each group's pattern started ([phase]).
+ */
+export interface LiveSeqPlan {
+  readonly patterns: ProjectPatterns
+  readonly voices: ReadonlyMap<number, string>
+  readonly skip: ReadonlyMap<number, number>
+  readonly bpm: number
+  readonly phase: PhaseAnchors
+}
+
+/**
+ * Where the transport is (PatternScheduler.kt's Timeline): its [clock] (ticks
+ * to mix frames) and the output's stamp [frames] (mix frames to the
+ * performance.now() they are heard at).
+ */
+export interface LiveTimeline {
+  readonly clock: TransportClock
+  readonly frames: FrameClock
+}
+
 /** A take TAKE recorded: a 16-bit stereo WAV of [frames] frames at [rate]. */
 export interface RecordedTake {
   readonly wav: Blob
@@ -379,6 +406,8 @@ interface Stream {
   ending: boolean
   /** The take being received from this output. */
   receiving: Receiving | null
+  /** The mix's latest stamp: mix frame to the performance.now() it is heard at (PATTERN). */
+  stamp: FrameClock | null
 }
 
 const EMPTY: ReadonlySet<string> = new Set()
@@ -418,6 +447,14 @@ export class LiveAudio {
   private readonly slowListeners = new Set<(outputMs: number) => void>()
   private readonly logListeners = new Set<(line: string) => void>()
   private readonly takeListeners = new Set<(take: RecordedTake | null, limit: boolean) => void>()
+  private readonly missingListeners = new Set<(pad: number) => void>()
+  private readonly _timeline = signal<LiveTimeline | null>(null)
+  /** Where the pattern's transport is in heard time; null while stopped (LiveAudioDeps.timeline). */
+  readonly timeline: ReadonlySignal<LiveTimeline | null> = this._timeline
+  // The pattern's clock as the mixer last told it, the plan it plays, and whether RECORD waits for a press.
+  private seqClock: TransportClock | null = null
+  private plan: LiveSeqPlan | null = null
+  private seqArmed = false
   private readonly _rec = signal<RecState>(REC_IDLE)
   /** The TAKE key's state. */
   readonly rec: ReadonlySignal<RecState> = this._rec
@@ -526,6 +563,69 @@ export class LiveAudio {
     if (this._rec.value.kind !== 'idle' && this.stream) send(this.stream, { t: 'transport', playing: false })
   }
 
+  // ---------- PATTERN (LiveAudio.kt's sequencer) ----------
+
+  /** What the pattern sequencer plays: its pads' sounds are sent over, the plan with them; kept for the next output. */
+  seqPlan(plan: LiveSeqPlan): void {
+    this.plan = plan
+    if (this.stream) this.sendPlan(this.stream, plan)
+  }
+
+  /** Starts the pattern (LiveAudioDeps.seqPlay). False when there is no output. */
+  seqPlay(countInBars: number, leadMs: number, atMs: number | null): boolean {
+    const s = this.ensure()
+    if (!s) return false
+    s.parked = false
+    wake(s.ctx)
+    if (this.plan) this.sendPlan(s, this.plan)
+    const stamp = s.stamp
+    const atFrame = atMs !== null && stamp !== null ? frameAt(stamp, atMs) : null
+    send(s, { t: 'play', countInBars, leadMs, atFrame, atPress: atMs !== null })
+    return true
+  }
+
+  /** Stops the pattern: what waits is dropped, what sounds let go of. */
+  seqStop(): void {
+    this.seqClock = null
+    this._timeline.value = null
+    if (this.stream) send(this.stream, { t: 'stopSeq' })
+  }
+
+  /** RECORD waits for a press: the mixer sends its stamps meanwhile. */
+  seqArm(armed: boolean): void {
+    this.seqArmed = armed
+    if (this.stream) send(this.stream, { t: 'seqArmed', armed })
+  }
+
+  /** A pad the patterns play has no sound in the plan (pad key). */
+  onSeqMissing(listener: (pad: number) => void): () => void {
+    return add(this.missingListeners, listener)
+  }
+
+  private sendPlan(s: Stream, plan: LiveSeqPlan): void {
+    const voices: PlanVoice[] = []
+    for (const [pad, key] of plan.voices) {
+      const sample = this.samples.get(key)
+      if (!sample || !(sample.channels >= 1 && sample.channels <= 2)) continue
+      this.load(s, sample)
+      voices.push({ pad, id: sample.id, channels: sample.channels, sampleRate: sample.sampleRate })
+    }
+    send(s, { t: 'plan', patterns: plan.patterns, voices, skip: [...plan.skip], bpm: plan.bpm, phase: plan.phase })
+  }
+
+  /** The timeline anew when the clock changed, or the stamp drifted from the one shown by more than a millisecond. */
+  private showTimeline(s: Stream): void {
+    const c = this.seqClock
+    const f = s.stamp
+    if (c === null || f === null) {
+      if (this._timeline.peek() !== null) this._timeline.value = null
+      return
+    }
+    const shown = this._timeline.peek()
+    if (shown !== null && shown.clock === c && Math.abs(frameAt(shown.frames, f.ms) - f.frame) <= f.rate / 1000) return
+    this._timeline.value = { clock: c, frames: f }
+  }
+
   /**
    * Live came on screen: sets the output up now, before any press (the
    * worklet loaded, the samples sent), or wakes a suspended one. Before the
@@ -582,6 +682,9 @@ export class LiveAudio {
     this._engine.value = null
     const recording = this._rec.value.kind !== 'idle'
     this._rec.value = REC_IDLE
+    // The pattern stops with its output (the controller is told by the timeline going).
+    this.seqClock = null
+    this._timeline.value = null
     if (!s) return
     this.checkGlitches(s)
     s.closed = true
@@ -767,11 +870,14 @@ export class LiveAudio {
       engine: null,
       ending: false,
       receiving: null,
+      stamp: null,
     }
     this.stream = s
     // The samples loaded, ready again, and the FX bus as it was set up (before any press).
     for (const sample of this.samples.values()) this.load(s, sample)
     for (const c of this.fx.commands()) send(s, { t: 'control', what: c.what, index: c.index, x: c.x, y: c.y })
+    // RECORD waiting for a press: the new output's stamps are wanted at once.
+    if (this.seqArmed) send(s, { t: 'seqArmed', armed: true })
     ctx.addEventListener?.('statechange', () => this.stateChanged(s))
     this.backend.connect(ctx, (m) => this.received(s, m)).then(
       (link) => {
@@ -853,8 +959,8 @@ export class LiveAudio {
    * samples go over again, as for any new one), woken when the page has had a tap.
    */
   private replaceStale(s: Stream): void {
-    // Not while a take goes: it would be cut in two.
-    if (s.closed || this.stream !== s || s.hint === this.hint || this._voices.value.size !== 0 || this._rec.value.kind !== 'idle') return
+    // Not while a take goes (it would be cut in two), nor while the pattern plays.
+    if (s.closed || this.stream !== s || s.hint === this.hint || this._voices.value.size !== 0 || this._rec.value.kind !== 'idle' || this.seqClock !== null) return
     const wait = s.pressedAt + REPLACE_QUIET_MS - this.backend.now()
     if (wait > 0) {
       if (!s.recheck) {
@@ -888,6 +994,17 @@ export class LiveAudio {
     }
     if (s.closed || this.stream !== s) return
     switch (m.t) {
+      case 'timeline':
+        this.seqClock = m.clock
+        this.showTimeline(s)
+        return
+      case 'stamp':
+        s.stamp = { frame: m.frame, ms: heardAt(m.time, this.backend.now(), s.ctx), rate: s.ctx.sampleRate }
+        this.showTimeline(s)
+        return
+      case 'missing':
+        for (const f of [...this.missingListeners]) f(m.pad)
+        return
       case 'rec':
         this._rec.value = m.state
         return

@@ -1302,3 +1302,14 @@
   padding: var(--space-8) var(--space-16) var(--space-16);
 }
 .live__device > .live-mode { flex: none; width: 100%; max-width: var(--one-group-max); align-self: center; }
+
+/* PATTERN: the line's frame lies over it; the all-groups display's row. */
+.live-strip { position: relative; }
+.live-display__pattern {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+  min-height: 36px;
+  padding-bottom: 6px;
+}

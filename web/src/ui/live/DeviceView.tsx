@@ -6,10 +6,11 @@
 //   they are the 12 notes. They glow from the device like the grid's, through
 //   the same [data-pad] / [data-key] / [data-group] glow the screen writes.
 // - A–D pick the group shown, KEYS switches PADS / KEYS, and −/+ change the
-//   octave in KEYS or step through the groups in PADS. RECORD is the
-//   pattern's on Android; the web has no pattern recording yet, so it shows
-//   its shortcuts as the other keys do. TAKE stays in Live tools; a take going
-//   shows on the display (● and the time) and the plate.
+//   octave in KEYS or step through the groups in PADS. RECORD and PLAY are
+//   the pattern's (PatternLine.tsx): a tap on RECORD arms it, held it opens
+//   the pattern sheet, and PLAY plays and stops; with no pattern (no output)
+//   they show their shortcuts as the other keys do. TAKE stays in Live tools;
+//   a take going shows on the display (● and the time) and the plate.
 // - PLAY lights while the device plays (MIDI clock); the display shows the
 //   tempo in seven segments, ▶ and ● (REC), the A–D boxes, a ring with a
 //   quarter per group, and the piano in KEYS. The plate, where the unit
@@ -17,7 +18,7 @@
 // - Every other key and control opens a card with its shortcuts from the
 //   guide: arc never sends anything to the device.
 import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, JSX, TargetedMouseEvent } from 'preact'
-import { useLayoutEffect, useRef, useState } from 'preact/hooks'
+import { useContext, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { Keys, MAX_OCTAVE, MIN_OCTAVE } from '../../core/features/keys'
 import type { MirrorState } from '../../core/features/liveMirror'
 import { ROWS, padKey, physicalPad, type PhysicalPad } from '../../core/features/padNotes'
@@ -27,6 +28,18 @@ import { MirrorText } from '../../core/text/mirrorText'
 import { WebText } from '../../core/text/webText'
 import type { MirrorUi } from '../../state/types'
 import { ComboLine } from '../components/GuideKeys'
+import {
+  TransportContext,
+  hasWords,
+  patternRuns,
+  patternWordsText,
+  playName,
+  recordLight,
+  recordName,
+  usePatternBeat,
+  useTransportPress,
+  type TransportUi,
+} from './PatternLine'
 import { of as keymapOf } from '../../core/text/guideKeymap'
 import { displayLine, glow, glowCss, groupGlow } from './glow'
 import { keysLit, upperOctave, type KeysShown } from './keys'
@@ -151,6 +164,13 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
   }
   const canStep = (d: number): boolean => (keys.on ? keys.octave + d >= MIN_OCTAVE && keys.octave + d <= MAX_OCTAVE : group + d >= 0 && group + d <= 3)
 
+  // PATTERN: RECORD and PLAY are the pattern's, the display's ● and ▶ light with it and the plate counts it.
+  const transport = useContext(TransportContext)
+  const pat = transport?.ui ?? null
+  const patLight = pat !== null ? recordLight(pat) : null
+  const recLight: 'live' | 'armed' | null =
+    patLight ?? (take?.state.kind === 'recording' ? 'live' : take?.state.kind === 'armed' ? 'armed' : null)
+  const patternOn = pat !== null && patternRuns(pat)
   const openCard = (key: CardKey, e: TargetedMouseEvent<HTMLElement>): void => {
     const b = box.current?.getBoundingClientRect()
     const r = e.currentTarget.getBoundingClientRect()
@@ -185,7 +205,11 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
           <div class="ep-a ep-plate" aria-hidden="true" />
           {[[18, 112], [928, 112], [18, 438], [928, 438]].map(([x, y]) => <span key={`${x}:${y}`} class="ep-a ep-screw" style={at(x!, y!)} aria-hidden="true" />)}
           <span class="ep-a ep-plate__title" aria-hidden="true">K.O. Ⅱ</span>
-          <span class="ep-a ep-plate__status" aria-live="polite">{plateStatus(st, mirror, take)}</span>
+          {transport !== null && hasWords(transport.ui) ? (
+            <PlateWords t={transport} still={props.still} />
+          ) : (
+            <span class="ep-a ep-plate__status" aria-live="polite">{plateStatus(st, mirror, take)}</span>
+          )}
           <span class="ep-a ep-plate__hit" aria-live="polite">
             {keys.on ? (keys.pad !== null ? MirrorText.keysSound(keys.pad, keys.padName) : MirrorText.NO_SOUND) : displayLine(st, mirror)}
           </span>
@@ -215,8 +239,8 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
             {[...digits.text].map((ch, i) => <Digit key={i} ch={ch} dot={digits.dot && i === 0} />)}
           </span>
           <span class={`ep-a ep-dtxt ep-bpm${digits.bpm ? ' ep-lit' : ' ep-dim'}`} aria-hidden="true">BPM</span>
-          <span class={`ep-a ep-rec${take?.state.kind === 'recording' ? ' is-on' : take?.state.kind === 'armed' ? (props.still ? ' is-on' : ' is-armed') : ''}`} aria-hidden="true" />
-          <span class={`ep-a ep-play${st.playing === true ? ' is-on' : ''}`} aria-hidden="true" />
+          <span class={`ep-a ep-rec${recLight === 'live' ? ' is-on' : recLight === 'armed' ? (props.still ? ' is-on' : ' is-armed') : ''}`} aria-hidden="true" />
+          <span class={`ep-a ep-play${st.playing === true || patternOn ? ' is-on' : ''}`} aria-hidden="true" />
           <svg class={`ep-a ep-metro${st.playing === true ? ' is-on' : ''}`} viewBox="0 0 40 52" aria-hidden="true">
             <path d="M14 4 h12 l10 44 h-32 z M20 40 L32 8" />
           </svg>
@@ -406,25 +430,31 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
           >
             +
           </button>
-          <button
-            type="button"
-            class="ep-a ep-key ep-key--orange ep-key--word"
-            style={at(1050, 1735, 130, 128)}
-            aria-haspopup="dialog"
-            onClick={(e) => openCard('RECORD', e)}
-          >
-            RECORD
-          </button>
-          <button
-            type="button"
-            class={`ep-a ep-key ep-key--grey ep-key--word${st.playing === true ? ' is-lit' : ''}`}
-            style={at(1246, 1735, 130, 128)}
-            aria-label={`PLAY, ${st.playing === true ? MirrorText.PLAYING : st.playing === false ? MirrorText.STOPPED : MirrorText.OFFLINE}`}
-            aria-haspopup="dialog"
-            onClick={(e) => openCard('PLAY', e)}
-          >
-            PLAY
-          </button>
+          {transport !== null ? (
+            <DeviceTransport t={transport} still={props.still} />
+          ) : (
+            <>
+              <button
+                type="button"
+                class="ep-a ep-key ep-key--orange ep-key--word"
+                style={at(1050, 1735, 130, 128)}
+                aria-haspopup="dialog"
+                onClick={(e) => openCard('RECORD', e)}
+              >
+                RECORD
+              </button>
+              <button
+                type="button"
+                class={`ep-a ep-key ep-key--grey ep-key--word${st.playing === true ? ' is-lit' : ''}`}
+                style={at(1246, 1735, 130, 128)}
+                aria-label={`PLAY, ${st.playing === true ? MirrorText.PLAYING : st.playing === false ? MirrorText.STOPPED : MirrorText.OFFLINE}`}
+                aria-haspopup="dialog"
+                onClick={(e) => openCard('PLAY', e)}
+              >
+                PLAY
+              </button>
+            </>
+          )}
         </div>
         {card && <ShortcutCard card={card} boxWidth={DEVICE_W * scale} boxHeight={DEVICE_H * scale} onClose={() => setCard(null)} onGuide={props.onGuide} />}
       </div>
@@ -495,5 +525,47 @@ function ShortcutCard(props: {
         </button>
       )}
     </div>
+  )
+}
+
+/** The drawn RECORD and PLAY as the pattern's keys: a tap on RECORD arms (held, the pattern sheet), PLAY plays and stops. */
+function DeviceTransport(props: { t: TransportUi; still?: boolean }): JSX.Element {
+  const { t } = props
+  const ui = t.ui
+  const press = useTransportPress(t)
+  const beat = usePatternBeat(t, props.still === true)
+  const light = recordLight(ui)
+  return (
+    <>
+      <button
+        type="button"
+        class={`ep-a ep-key ep-key--orange ep-key--word${light !== null ? ' is-lit' : ''}`}
+        style={at(1050, 1735, 130, 128)}
+        aria-label={recordName(ui)}
+        aria-description={MirrorText.RECORD_HOLD}
+        {...press.record}
+      >
+        RECORD
+      </button>
+      <button
+        type="button"
+        class={`ep-a ep-key ep-key--grey ep-key--word${patternRuns(ui) ? ' is-lit' : ''}`}
+        style={at(1246, 1735, 130, 128)}
+        aria-label={playName(ui, beat)}
+        {...press.play}
+      >
+        PLAY
+      </button>
+    </>
+  )
+}
+
+/** The plate's orange line while the pattern is on: what PLAY will do, the count-in or the counter. */
+function PlateWords(props: { t: TransportUi; still?: boolean }): JSX.Element {
+  const beat = usePatternBeat(props.t, props.still === true)
+  return (
+    <span class="ep-a ep-plate__status" aria-hidden="true">
+      {patternWordsText(props.t.ui, beat)}
+    </span>
   )
 }

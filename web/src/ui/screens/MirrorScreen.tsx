@@ -106,7 +106,7 @@
 // only, from the last read's sounds or the factory pack's ([EditUi.offline]);
 // the tools then count those changes, with Reset pads ([offlinePads]).
 import { Fragment, h, type ButtonHTMLAttributes, type Component, type ComponentChildren, type FunctionComponent, type JSX, type TargetedDragEvent } from 'preact'
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { computed, signal, type ReadonlySignal } from '@preact/signals'
 import { Keys, MAX_OCTAVE, MIN_OCTAVE, SCALES, type NoteNames, type Scale } from '../../core/features/keys'
 import type { MirrorState, PadLight } from '../../core/features/liveMirror'
@@ -159,6 +159,7 @@ import { dragMayHaveAudio, isAudioFile } from '../../platform/files/pick'
 import { tick } from '../../platform/haptics'
 import { PickWord, WordButton } from '../live/Words'
 import { TakeBadge, TakesSection, type TakeUi, type TakesUi } from '../live/Takes'
+import { PatternLine, TransportContext } from '../live/PatternLine'
 import { DeviceView } from '../live/DeviceView'
 import { useDesk, useFinePointer, useWindowSize } from '../useDesk'
 import './MirrorScreen.css'
@@ -1237,14 +1238,16 @@ function DisplayStrip(props: { st: MirrorState; mirror: MirrorUi | null; compact
   const { st, mirror } = props
   return (
     <div class={`live-strip${props.compact ? ' live-strip--bar' : ''}`} aria-live="polite">
+      <PatternLine compact={props.compact} still={props.still}>
+        {st.playing === true && <span class="live-strip__sub live-strip__ink" role="img" aria-label={MirrorText.PLAYING}>{'▶'}</span>}
+        {st.playing === false && <span class="live-strip__sub live-strip__dim" role="img" aria-label={MirrorText.STOPPED}>{'■'}</span>}
+        {/* Offline and the project are only read out: the top bar and the PROJECT key show them. */}
+        {st.playing === null && mirror?.offline != null && <span class="sr-only">{MirrorText.OFFLINE}</span>}
+        {st.bpm !== null && <span class="live-strip__sub live-strip__ink">{MirrorText.bpm(st.bpm)}</span>}
+        {st.activeProject !== null && <span class="sr-only">{MirrorText.project(st.activeProject)}</span>}
+        <span class="live-strip__line">{displayLine(st, mirror)}</span>
+      </PatternLine>
       <TakeBadge take={props.take} still={props.still} />
-      {st.playing === true && <span class="live-strip__sub live-strip__ink" role="img" aria-label={MirrorText.PLAYING}>{'▶'}</span>}
-      {st.playing === false && <span class="live-strip__sub live-strip__dim" role="img" aria-label={MirrorText.STOPPED}>{'■'}</span>}
-      {/* Offline and the project are only read out: the top bar and the PROJECT key show them. */}
-      {st.playing === null && mirror?.offline != null && <span class="sr-only">{MirrorText.OFFLINE}</span>}
-      {st.bpm !== null && <span class="live-strip__sub live-strip__ink">{MirrorText.bpm(st.bpm)}</span>}
-      {st.activeProject !== null && <span class="sr-only">{MirrorText.project(st.activeProject)}</span>}
-      <span class="live-strip__line">{displayLine(st, mirror)}</span>
     </div>
   )
 }
@@ -1285,6 +1288,7 @@ function Display(props: {
         )}
         <TakeBadge take={props.take} still={props.still} />
       </div>
+      <PatternRow still={props.still} />
       <p class={`live-display__line t-stat-free${displayLineSmall(st, mirror) ? ' live-display__line--small' : ''}`}>
         {displayLine(st, mirror)}
       </p>
@@ -1303,6 +1307,21 @@ function Display(props: {
         st.playing === null && st.bpm === null && <p class="live-display__hint t-display-hint">{MirrorText.NO_TRANSPORT}</p>
       )}
     </DisplayPanel>
+  )
+}
+
+/**
+ * The pattern's row in the all-groups display (Kotlin PatternRow): RECORD
+ * and PLAY, and its words while it has some. There while stopped too, so the
+ * pads don't move as the pattern starts; none without a pattern.
+ */
+function PatternRow(props: { still?: boolean }): JSX.Element | null {
+  const t = useContext(TransportContext)
+  if (t === null) return null
+  return (
+    <div class="live-display__pattern">
+      <PatternLine still={props.still} word />
+    </div>
   )
 }
 
@@ -2068,12 +2087,14 @@ function KeysDisplay(props: {
   const note = keysNoteText(shown, st.lastNote, props.pianoRange)
   return (
     <div class={`live-strip${compact ? ' live-strip--bar' : ''}`} aria-live="polite">
-      <span class={`live-strip__sub live-strip__dim${compact ? ' sr-only' : ''}`}>{MirrorText.MODE_KEYS.toUpperCase()}</span>
-      {note !== null && <span class="live-strip__sub live-strip__ink live-strip__note">{note}</span>}
-      {mirror?.offline != null && <span class="sr-only">{MirrorText.OFFLINE}</span>}
-      <span class="live-strip__line">
-        {keys.pad !== null ? MirrorText.keysSound(keys.pad, keys.padName) : MirrorText.NO_SOUND}
-      </span>
+      <PatternLine compact={compact}>
+        <span class={`live-strip__sub live-strip__dim${compact ? ' sr-only' : ''}`}>{MirrorText.MODE_KEYS.toUpperCase()}</span>
+        {note !== null && <span class="live-strip__sub live-strip__ink live-strip__note">{note}</span>}
+        {mirror?.offline != null && <span class="sr-only">{MirrorText.OFFLINE}</span>}
+        <span class="live-strip__line">
+          {keys.pad !== null ? MirrorText.keysSound(keys.pad, keys.padName) : MirrorText.NO_SOUND}
+        </span>
+      </PatternLine>
     </div>
   )
 }

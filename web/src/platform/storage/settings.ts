@@ -29,6 +29,8 @@ import { LearnedLinks } from '../../core/features/learnedLinks'
 import { physicalPad, type PhysicalPad } from '../../core/features/padNotes'
 import { PadOrder } from '../../core/features/padPush'
 import { KeysView, choiceOf as pianoChoiceOf, keysViewOf } from '../../core/features/piano'
+import { Timing, TimingSettings } from '../../core/features/pattern'
+import { Tempo } from '../../core/features/tempo'
 import { ThemeChoice } from '../../core/text/settingsText'
 
 /** The settings page's choices (an addition to the web version). */
@@ -654,6 +656,76 @@ export class OfflinePadsPrefs {
     try {
       if (json === null) this.storage.removeItem(LIVE_PADS_KEY)
       else this.storage.setItem(LIVE_PADS_KEY, json)
+    } catch {
+      // Kept in memory for this session (the controller holds them).
+    }
+  }
+}
+
+/**
+ * PATTERN's settings (AppSettings.kt's timingInterval, timingSwing,
+ * timingQuantize, patternCountIn, patternAutoLength and liveTempo), under
+ * Android's names. Web delta: kept apart from AppSettings, in their own
+ * localStorage key, and not written into library.json.
+ */
+export interface PatternSettings {
+  readonly timing: TimingSettings
+  /** RECORD then PLAY counts a bar in first. */
+  readonly countIn: boolean
+  /** An empty group recorded from stop ends where recording stops. */
+  readonly autoLength: boolean
+  /** The pattern's tempo while the EP-133 sends no clock. */
+  readonly liveTempo: number
+}
+
+export const DEFAULT_PATTERN_SETTINGS: PatternSettings = Object.freeze({
+  timing: TimingSettings.DEFAULT,
+  countIn: true,
+  autoLength: false,
+  liveTempo: Tempo.DEFAULT,
+})
+
+export const PATTERN_KEY = 'arc.pattern'
+
+export class PatternPrefs {
+  constructor(private readonly storage: KeyValueStorage = browserStorage()) {}
+
+  load(): PatternSettings {
+    let o: Record<string, unknown>
+    try {
+      const raw = this.storage.getItem(PATTERN_KEY)
+      const v: unknown = raw === null ? null : JSON.parse(raw)
+      if (typeof v !== 'object' || v === null || Array.isArray(v)) return DEFAULT_PATTERN_SETTINGS
+      o = v as Record<string, unknown>
+    } catch {
+      return DEFAULT_PATTERN_SETTINGS
+    }
+    const d = DEFAULT_PATTERN_SETTINGS
+    const interval = typeof o.timingInterval === 'string' ? Timing.of(o.timingInterval) : null
+    const swing = typeof o.timingSwing === 'number' && Number.isInteger(o.timingSwing) ? o.timingSwing : null
+    return {
+      timing: TimingSettings.of({
+        interval: interval ?? d.timing.interval,
+        swing: swing !== null && swing >= TimingSettings.SWING_MIN && swing <= TimingSettings.SWING_MAX ? swing : d.timing.swing,
+        quantize: typeof o.timingQuantize === 'boolean' ? o.timingQuantize : d.timing.quantize,
+      }),
+      countIn: typeof o.patternCountIn === 'boolean' ? o.patternCountIn : d.countIn,
+      autoLength: typeof o.patternAutoLength === 'boolean' ? o.patternAutoLength : d.autoLength,
+      liveTempo: typeof o.liveTempo === 'number' && Number.isFinite(o.liveTempo) ? Tempo.clamp(Math.round(o.liveTempo)) : d.liveTempo,
+    }
+  }
+
+  save(p: PatternSettings): void {
+    const o = {
+      timingInterval: p.timing.interval,
+      timingSwing: p.timing.swing,
+      timingQuantize: p.timing.quantize,
+      patternCountIn: p.countIn,
+      patternAutoLength: p.autoLength,
+      liveTempo: p.liveTempo,
+    }
+    try {
+      this.storage.setItem(PATTERN_KEY, JSON.stringify(o))
     } catch {
       // Kept in memory for this session (the controller holds them).
     }
