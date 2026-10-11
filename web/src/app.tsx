@@ -101,6 +101,7 @@ import { FunctionKeysContext, ProjectHold, ProjectHoldContext, TempoContext, typ
 import { PunchContext, type PunchUi } from './ui/live/LivePunch'
 import { StepContext, type StepActions } from './ui/live/StepPanel'
 import { SceneContext, type SceneActions } from './ui/live/ScenePanel'
+import { ArpContext, type ArpActions } from './ui/live/ArpWords'
 import { stepWord } from './state/stepPlan'
 import { projectChoicesOf, projectKeyOf, projectKeyState } from './ui/live/projectKey'
 import { ProjectSheet } from './ui/sheets/ProjectSheet'
@@ -216,6 +217,7 @@ function Root(): JSX.Element {
   const tempo = useMemo(() => tempoUi(c, () => nav.open(sheetLayer(TEMPO_SHEET))), [c])
   const step = useMemo(() => stepUi(c), [c])
   const scenes = useMemo(() => sceneUi(c), [c])
+  const arp = useMemo(() => arpUi(c), [c])
   // PROJECT held: the pads printed 1 to 9 pick a project instead of sounding.
   const projectHold = useMemo(() => new ProjectHold(), [])
   // Live's EDIT (giving a pad another sound): on Live, in PADS, until switched off or left.
@@ -473,6 +475,7 @@ function Root(): JSX.Element {
     <TransportContext.Provider value={transport}>
     <StepContext.Provider value={step}>
     <SceneContext.Provider value={scenes}>
+    <ArpContext.Provider value={arp}>
     <TempoContext.Provider value={tempo}>
     <FunctionKeysContext.Provider value={fnKeys}>
     <ProjectHoldContext.Provider value={projectHold}>
@@ -531,6 +534,7 @@ function Root(): JSX.Element {
     </ProjectHoldContext.Provider>
     </FunctionKeysContext.Provider>
     </TempoContext.Provider>
+    </ArpContext.Provider>
     </SceneContext.Provider>
     </StepContext.Provider>
     </TransportContext.Provider>
@@ -607,6 +611,11 @@ function LiveTempoSheet(props: { view: NavView }): JSX.Element | null {
       onInterval={(t) => p.setTimingInterval(t)}
       onSwing={(v) => p.setTimingSwing(v)}
       onQuantize={(on) => p.setTimingQuantize(on)}
+      arp={p.arp.value.settings}
+      onArpOrder={(o) => p.setArpOrder(o)}
+      onArpOctaves={(n) => p.setArpOctaves(n)}
+      onArpGate={(v) => p.setArpGate(v)}
+      onArpLatch={(on) => p.setArpLatch(on)}
       onDismiss={() => nav.close(sheetLayer(TEMPO_SHEET))}
     />
   )
@@ -672,6 +681,19 @@ function sceneUi(c: ArcController): SceneActions | null {
     onBar: (b) => p.setClipBar(b),
     onCopy: () => p.clipCopy(),
     onPaste: () => p.clipPaste(),
+  }
+}
+
+/** ARP / RPT and LATCH for Live (Kotlin LiveArp), its state read from the controller's signal as each part renders. */
+function arpUi(c: ArcController): ArpActions | null {
+  const p = c.pattern
+  if (!p.available) return null
+  return {
+    get ui() {
+      return p.arp.value
+    },
+    onOn: (on) => p.setArpOn(on),
+    onLatch: (on) => p.setArpLatch(on),
   }
 }
 
@@ -867,6 +889,7 @@ function TabScreen(props: {
           onPadKept={(pad) => void c.keepPad(pad)}
           onPadUp={(pad) => c.releasePad(pad)}
           onPadCut={(pad) => c.cutPad(pad)}
+          onPadPressure={(pad, p) => c.padPressure(pad, p)}
           // Signals, read by each pad and key: a voice doesn't re-render this screen.
           playing={livePlaying(c)}
           haptics={settings.haptics}
@@ -899,6 +922,7 @@ function TabScreen(props: {
             onOctave: (o) => c.setKeysOctave(o),
             onNote: (n, hold, at) => void c.playNote(n, hold, at),
             onNoteUp: (n) => c.releaseNote(n),
+            onNotePressure: (n, p) => c.notePressure(n, p),
             onView: (wide, view) => c.setKeysView(wide, view),
             onSelect: (pad) => c.selectKeysPad(pad),
           }}

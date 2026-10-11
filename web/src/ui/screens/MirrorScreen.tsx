@@ -164,6 +164,7 @@ import { FunctionKeysContext, FunctionRow, ProjectHoldContext } from '../live/Fu
 import { DeviceView } from '../live/DeviceView'
 import { PunchPad, usePunch } from '../live/LivePunch'
 import { StepPanel, useStep, useStepNoteMark, useStepPadMark } from '../live/StepPanel'
+import { ArpWords, useArpLine, useArpNote, useArpPad } from '../live/ArpWords'
 import { ScenePanel, useScene } from '../live/ScenePanel'
 import { punchSlotForPad } from '../../state/fx'
 import { useDesk, useFinePointer, useWindowSize } from '../useDesk'
@@ -194,6 +195,8 @@ export interface KeysActions {
    */
   onNote?: (note: number, hold: boolean, at?: number) => void
   onNoteUp?: (note: number) => void
+  /** A note held at [pressure] (the pointer's own): the arp's velocity for it. */
+  onNotePressure?: (note: number, pressure: number) => void
   /** The Pads ⇄ Piano switch, for a wide window ([wide]) or a tall one. */
   onView?: (wide: boolean, view: KeysView) => void
   /** A pad played on the device in the pads view becomes the KEYS sound. */
@@ -269,6 +272,8 @@ export interface MirrorScreenProps {
   onPadUp?: (pad: PhysicalPad) => void
   /** The press on a pad turned into a scroll (the all-groups page): its sound ends at once (default: [onPadUp]). */
   onPadCut?: (pad: PhysicalPad) => void
+  /** A pad held at [pressure] (the pointer's own): note repeat's velocity for it. */
+  onPadPressure?: (pad: PhysicalPad, pressure: number) => void
   /** What sounds on the phone (several pads at once for a chord), ringed; none by default. */
   playing?: LivePlaying | null
   /** A light tick (navigator.vibrate) when a finger presses a pad or key (Settings → Haptics). */
@@ -385,9 +390,12 @@ function holdHandlers(
       capDown(e.currentTarget)
       ids?.add(e.pointerId)
       tracker.down(e.pointerId, e.clientX, e.clientY, pressed, inScroll, e.timeStamp)
+      target.pressure?.(e.pressure)
     },
     onPointerMove: (e) => {
       tracker.move(e.pointerId, e.clientX, e.clientY)
+      // A held note's pressure: the arp's velocity for it.
+      if (tracker.has(e.pointerId)) target.pressure?.(e.pressure)
       // A press the drag turned into a scroll lets the cap up.
       if (!tracker.has(e.pointerId) && ids?.delete(e.pointerId)) lift(e.currentTarget)
     },
@@ -730,6 +738,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
             ;(latest.current.onPadCut ?? latest.current.onPadUp)?.(pad)
           },
           keep: () => latest.current.onPadKept?.(pad),
+          pressure: (p) => latest.current.onPadPressure?.(pad, p),
         }
       },
     [hasPad, projectHold],
@@ -1285,6 +1294,7 @@ function DisplayStrip(props: { st: MirrorState; mirror: MirrorUi | null; compact
   const { st, mirror } = props
   // The punch-ins held name the line, in the order pressed.
   const punch = usePunch()
+  const arpLine = useArpLine()
   if (punch !== null && punch.held.size > 0) {
     return (
       <div class={`live-strip${props.compact ? ' live-strip--bar' : ''}`} aria-live="polite">
@@ -1292,6 +1302,17 @@ function DisplayStrip(props: { st: MirrorState; mirror: MirrorUi | null; compact
           <span class="live-strip__line live-strip__punch" aria-label={MirrorText.punchSpoken(punch.held)}>
             {MirrorText.punchLine(punch.held)}
           </span>
+        </PatternLine>
+        <TakeBadge take={props.take} still={props.still} />
+      </div>
+    )
+  }
+  // The arp playing names the line: "ARP · 1/16 · DO FA LA".
+  if (arpLine !== null) {
+    return (
+      <div class={`live-strip${props.compact ? ' live-strip--bar' : ''}`} aria-live="polite">
+        <PatternLine compact={props.compact} still={props.still}>
+          <span class="live-strip__line live-strip__punch">{arpLine}</span>
         </PatternLine>
         <TakeBadge take={props.take} still={props.still} />
       </div>
@@ -1324,6 +1345,8 @@ function Display(props: {
   const { st, mirror } = props
   const offline = showOffline(st, mirror)
   const getFactory = mirror?.error === MirrorText.NOT_CONNECTED ? props.onGetFactory : null
+  // The arp playing names the line, in signal orange.
+  const arpLine = useArpLine()
   // Why it is offline stays folded under the word until asked for, so the pads keep the room.
   const [noteOpen, setNoteOpen] = useState(props.initialNoteOpen)
   return (
@@ -1350,8 +1373,8 @@ function Display(props: {
         <TakeBadge take={props.take} still={props.still} />
       </div>
       <PatternRow still={props.still} />
-      <p class={`live-display__line t-stat-free${displayLineSmall(st, mirror) ? ' live-display__line--small' : ''}`}>
-        {displayLine(st, mirror)}
+      <p class={`live-display__line t-stat-free${arpLine !== null ? ' live-display__line--small live-display__line--arp' : displayLineSmall(st, mirror) ? ' live-display__line--small' : ''}`}>
+        {arpLine ?? displayLine(st, mirror)}
       </p>
       {/* Offline, the folded note; never read, the factory sounds to get; else the all-groups view explains clock out. */}
       {offline ? (
@@ -1729,18 +1752,22 @@ function PadCap(props: PadProps): JSX.Element {
   const mark = useEraseMark(key)
   // STEP open on this group: the pads on the cursor's step outlined, the one picked for − / + ringed.
   const stepMark = useStepPadMark(pad)
+  // Held for note repeat: ringed.
+  const arpHeld = useArpPad(pad)
   const label =
     `${pad.groupLetter} ${pad.label}` +
     (name !== null ? `, ${name}` : '') +
     (mark === true ? MirrorText.PAD_HAS_NOTES : '') +
-    (stepMark === 'picked' ? MirrorText.PICKED : stepMark === 'lit' ? MirrorText.ON_STEP : '')
+    (stepMark === 'picked' ? MirrorText.PICKED : stepMark === 'lit' ? MirrorText.ON_STEP : '') +
+    (arpHeld ? WebText.ARP_HELD : '')
   const dropping = ui.drop !== null && ui.drop.at === key
   const cls =
     `live-pad cap-3d${big ? ' live-pad--big' : ''}${playing ? ' is-playing' : ''}` +
     (ui.editing ? ' is-editing' : '') +
     (dropping ? ' is-drop' : '') +
     (mark === true ? ' is-erase-dot' : mark === false ? ' is-erase-dim' : '') +
-    (stepMark === 'picked' ? ' is-step-picked' : stepMark === 'lit' ? ' is-step-lit' : '')
+    (stepMark === 'picked' ? ' is-step-picked' : stepMark === 'lit' ? ' is-step-lit' : '') +
+    (arpHeld ? ' is-arp-held' : '')
   // Over a pad, a dragged sound shows what it would replace: "snare 2 → vox chop".
   const shown = dropping && ui.drop?.name != null ? MirrorText.dropPreview(name ?? ui.drop.nameNow(pad), ui.drop.name) : name
   const content = (
@@ -1957,6 +1984,8 @@ function ModeRow(props: {
   const viewSwitch = keys.on && plan.switchShown && (
     <KeysViewSwitch piano={piano} room={plan.room} onView={(p) => actions.onView?.(plan.wide, chosenView(p))} vertical={part === 'lead'} />
   )
+  // ARP (RPT in PADS) and LATCH after the mode word (LiveArp.kt's ArpRowWords).
+  const arpWords = <ArpWords repeat={!keys.on} top={!piano && part === undefined} />
   if (part === 'lead') {
     return (
       <div class="live-mode live-mode--lead">
@@ -1968,6 +1997,7 @@ function ModeRow(props: {
   if (part === 'picks') {
     return (
       <div class="live-mode live-mode--picks">
+        {arpWords}
         <PickWord
           label={MirrorText.scaleName(keys.scale)}
           options={SCALES}
@@ -1996,19 +2026,16 @@ function ModeRow(props: {
       </div>
     )
   }
-  if (piano) return <SidewaysRow keys={keys} actions={actions} pick={pick} mode={modeWord} view={viewSwitch} />
+  if (piano) return <SidewaysRow keys={keys} actions={actions} pick={pick} mode={modeWord} view={viewSwitch} arp={arpWords} />
   return (
     // Spread across the row: mode at the start, octave at the end, scale between; pulled
     // up close under the grid (the words keep their full touch height).
     <div class="live-mode">
-      {viewSwitch ? (
-        <span class="live-mode__lead">
-          {modeWord}
-          {viewSwitch}
-        </span>
-      ) : (
-        modeWord
-      )}
+      <span class="live-mode__lead">
+        {modeWord}
+        {viewSwitch}
+        {arpWords}
+      </span>
       {keys.on && (
         <>
           <PickWord
@@ -2057,6 +2084,7 @@ function SidewaysRow(props: {
   pick: (which: KeysPicker) => { open?: boolean; onOpen?: (open: boolean) => void }
   mode: JSX.Element
   view: JSX.Element | false
+  arp: JSX.Element
 }): JSX.Element {
   const { keys, actions, pick } = props
   const row = useRef<HTMLDivElement | null>(null)
@@ -2068,6 +2096,7 @@ function SidewaysRow(props: {
     <div ref={row} class="live-mode live-mode--sideways">
       {props.mode}
       {props.view}
+      {props.arp}
       <PickWord
         label={scale}
         options={SCALES}
@@ -2208,15 +2237,19 @@ function KeysDisplay(props: {
   // The note last pressed here: this line re-renders with what plays, not the screen.
   const shown = { ...keys, playingNotes: playing.notes.value }
   const note = keysNoteText(shown, st.lastNote, props.pianoRange)
+  // The arp playing names the line instead of the KEYS sound.
+  const arpLine = useArpLine()
   return (
     <div class={`live-strip${compact ? ' live-strip--bar' : ''}`} aria-live="polite">
       <PatternLine compact={compact}>
         <span class={`live-strip__sub live-strip__dim${compact ? ' sr-only' : ''}`}>{MirrorText.MODE_KEYS.toUpperCase()}</span>
         {note !== null && <span class="live-strip__sub live-strip__ink live-strip__note">{note}</span>}
         {mirror?.offline != null && <span class="sr-only">{MirrorText.OFFLINE}</span>}
-        <span class="live-strip__line">
-          {keys.pad !== null ? MirrorText.keysSound(keys.pad, keys.padName) : MirrorText.NO_SOUND}
-        </span>
+        {arpLine !== null ? (
+          <span class="live-strip__line live-strip__punch">{arpLine}</span>
+        ) : (
+          <span class="live-strip__line">{keys.pad !== null ? MirrorText.keysSound(keys.pad, keys.padName) : MirrorText.NO_SOUND}</span>
+        )}
       </PatternLine>
     </div>
   )
@@ -2283,6 +2316,7 @@ function KeysGrid(props: {
         play(touches.down(k, note), at)
       },
       up: (k: number): void => play(touches.up(k)),
+      pressure: (note: number, pressure: number): void => act.current.onNotePressure?.(note, pressure),
     }),
     [touches],
   )
@@ -2368,6 +2402,8 @@ const KEYBOARD_FINGER = -100
 interface KeyPress {
   down: (index: number, note: number, hold: boolean, at?: number) => void
   up: (index: number) => void
+  /** The note a finger pressed held at [pressure]. */
+  pressure?: (note: number, pressure: number) => void
 }
 
 interface KeyCapProps {
@@ -2404,23 +2440,33 @@ function KeyCapView(props: KeyCapProps): JSX.Element {
   const playing = useHas(props.playing, note)
   // STEP open on the KEYS sound's group: its notes on the cursor's step outlined, the one picked ringed.
   const stepMark = useStepNoteMark(note, keys.pad)
+  // Held for the arp: outlined, and numbered in the order pressed.
+  const arpOrder = useArpNote(note)
   const stepCtx = useStep()
   const pickTimer = useLongPress()
+  // The note the finger pressed, whose pressure it reports (a new key or octave under it keeps it).
+  const pressed = useRef(note)
   const target: PressTarget = {
-    press: (hold, _unsure, at) => press.down(k, note, hold, at),
+    press: (hold, _unsure, at) => {
+      pressed.current = note
+      press.down(k, note, hold, at)
+    },
     release: () => press.up(k),
+    pressure: (p) => press.pressure?.(pressed.current, p),
   }
   const cls =
     'live-key cap-3d' +
     (upperOctave(note, keys.octave) ? ' live-key--upper' : '') +
     (playing ? ' is-playing' : '') +
-    (stepMark === 'picked' ? ' is-step-picked' : stepMark === 'lit' ? ' is-step-lit' : '')
+    (stepMark === 'picked' ? ' is-step-picked' : stepMark === 'lit' ? ' is-step-lit' : '') +
+    (arpOrder > 0 ? ' is-arp-held' : '')
   const handlers = holdHandlers(props.tracker, target, false, props.haptic)
   return (
     <button
       type="button"
       class={cls}
-      aria-label={MirrorText.noteName(note, keys.names) + (stepMark === 'picked' ? MirrorText.PICKED : stepMark === 'lit' ? MirrorText.ON_STEP : '')}
+      aria-label={MirrorText.noteName(note, keys.names) + (stepMark === 'picked' ? MirrorText.PICKED : stepMark === 'lit' ? MirrorText.ON_STEP : '') + (arpOrder > 0 ? WebText.ARP_HELD : '')}
+      data-arp-order={arpOrder > 0 ? arpOrder : undefined}
       aria-description={MirrorText.PLAY}
       data-key={k}
       style={{ '--glow': glowCss(props.lit) }}

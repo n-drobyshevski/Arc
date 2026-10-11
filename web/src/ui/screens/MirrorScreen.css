@@ -1333,6 +1333,24 @@
   pointer-events: none;
 }
 
+/* The arp playing (MirrorScreen.kt's Display): its line in signal orange. */
+.live-display__line--arp { color: var(--signal); }
+/* Held for the arp or note repeat (LiveArp): the keys outlined and numbered in the order pressed,
+ * the pads ringed, in signal orange. */
+.live-pad.is-arp-held,
+.live-key.is-arp-held { outline: 2px solid var(--signal); outline-offset: -4px; }
+.live-key[data-arp-order]::after {
+  content: attr(data-arp-order);
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--signal);
+  pointer-events: none;
+}
+
 /* STEP open (LiveStep.kt PadStep): the pads (KEYS keys) on the cursor's step outlined in signal orange,
  * their digit orange; the one picked for − / + ringed thicker. An outline, so the cap keeps its edge. */
 .live-pad.is-step-lit,

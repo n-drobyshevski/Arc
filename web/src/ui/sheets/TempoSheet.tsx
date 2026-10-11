@@ -4,23 +4,23 @@
 // and + a step of 1 (held, they repeat), a big TAP pad for tapping it in, and
 // the click on or off. While the EP-133 sends MIDI clock its tempo leads: the
 // display shows it, and − + and TAP rest. TEMPO and TIMING tabs beside the
-// title; TIMING's page the interval, quantize or free time, and swing.
+// title; TIMING's page the interval, quantize or free time, and swing, then
+// the arp's ORDER, OCTAVES, GATE and LATCH.
 //
-// Web deltas: no arp section on TIMING's page (the web has no arp or note
-// repeat yet), and its note says so (WebText.TIMING_NOTE); SWING is a slider
-// where Kotlin has a knob.
+// Web delta: SWING and GATE are sliders where Kotlin has knobs.
 import type { JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
+import { ARP_ORDERS, ArpSettings, type ArpOrder } from '../../core/features/arp'
 import { TIMING_INTERVALS, TimingSettings, timingSwings, type Timing } from '../../core/features/pattern'
 import { MAX as TEMPO_MAX, MIN as TEMPO_MIN, round as roundTempo } from '../../core/features/tempo'
 import { MirrorText } from '../../core/text/mirrorText'
 import { Strings } from '../../core/text/strings'
-import { WebText } from '../../core/text/webText'
 import { Caption } from '../components/Caption'
 import { DisplayPanel } from '../components/DisplayPanel'
 import { GridPlate, PlateLine } from '../components/GridPlate'
 import { Key } from '../components/Key'
 import { Segmented } from '../components/Segmented'
+import { SettingRow } from '../components/SettingRow'
 import { Sheet } from '../components/Sheet'
 import { SwitchRow } from '../components/SwitchRow'
 import './TempoSheet.css'
@@ -38,6 +38,12 @@ export interface TempoSheetProps {
   onInterval(t: Timing): void
   onSwing(percent: number): void
   onQuantize(on: boolean): void
+  /** The arp's settings, and their changes (kept). */
+  arp: ArpSettings
+  onArpOrder(order: ArpOrder): void
+  onArpOctaves(n: number): void
+  onArpGate(percent: number): void
+  onArpLatch(on: boolean): void
   onDismiss: () => void
 }
 
@@ -113,10 +119,19 @@ function TempoPage(props: TempoSheetProps): JSX.Element {
   )
 }
 
-/** TIMING's page: INTERVAL, how recording takes it (QUANTIZE or FREE TIME), and SWING (at 1/8 and 1/16 only). */
+/** OCTAVES' three keys. */
+const OCTAVES: readonly number[] = Array.from({ length: ArpSettings.MAX_OCTAVES - ArpSettings.MIN_OCTAVES + 1 }, (_, i) => ArpSettings.MIN_OCTAVES + i)
+
+/**
+ * TIMING's page: INTERVAL, the step the arp and note repeat play at and the
+ * grid recording snaps to; how recording takes it (QUANTIZE or FREE TIME)
+ * and SWING (at 1/8 and 1/16 only); then the arp's ORDER (KEYS only: note
+ * repeat plays every pad held at once), OCTAVES, GATE and LATCH.
+ */
 function TimingPage(props: TempoSheetProps): JSX.Element {
   const t = props.timing
   const swings = timingSwings(t.interval)
+  const a = props.arp
   return (
     <>
       <Caption text={MirrorText.INTERVAL} align="start" as="h3" />
@@ -160,8 +175,59 @@ function TimingPage(props: TempoSheetProps): JSX.Element {
             />
             <span class="tempo-sheet__swing-value">{MirrorText.percent(t.swing)}</span>
           </label>
-          <p class={`t-small tempo-sheet__note${swings ? '' : ' is-signal'}`}>{swings ? WebText.TIMING_NOTE : MirrorText.SWING_NOTE}</p>
+          <p class={`t-small tempo-sheet__note${swings ? '' : ' is-signal'}`}>{swings ? MirrorText.TIMING_NOTE : MirrorText.SWING_NOTE}</p>
         </div>
+      </GridPlate>
+      <Caption text={MirrorText.ARP_SECTION} align="start" as="h3" />
+      <GridPlate>
+        {/* Note repeat plays every pad held on each step: the order is the arp's (KEYS) alone. */}
+        <SettingRow
+          title={MirrorText.ORDER}
+          stack
+          control={(ids) => (
+            <Segmented
+              options={ARP_ORDERS.map((o) => MirrorText.arpOrderName(o))}
+              selected={ARP_ORDERS.indexOf(a.order)}
+              onSelect={(i) => props.onArpOrder(ARP_ORDERS[i]!)}
+              labelledBy={ids.titleId}
+              descriptions={ARP_ORDERS.map((o) => MirrorText.arpOrderSpoken(o))}
+              compact
+            />
+          )}
+        />
+        <PlateLine />
+        <SettingRow
+          title={MirrorText.OCTAVES}
+          control={(ids) => (
+            <Segmented
+              class="tempo-sheet__octaves"
+              options={OCTAVES.map(String)}
+              selected={a.octaves - ArpSettings.MIN_OCTAVES}
+              onSelect={(i) => props.onArpOctaves(OCTAVES[i]!)}
+              labelledBy={ids.titleId}
+              compact
+            />
+          )}
+        />
+        <PlateLine />
+        <div class="tempo-sheet__row tempo-sheet__row--swing">
+          <label class="tempo-sheet__swing">
+            <span class="t-bold">{MirrorText.GATE}</span>
+            <input
+              type="range"
+              min={ArpSettings.MIN_GATE}
+              max={ArpSettings.MAX_GATE}
+              step={1}
+              value={a.gate}
+              aria-valuetext={MirrorText.percent(a.gate)}
+              onInput={(e) => props.onArpGate(Number((e.currentTarget as HTMLInputElement).value))}
+            />
+            <span class="tempo-sheet__swing-value">{MirrorText.percent(a.gate)}</span>
+          </label>
+          <p class="t-small tempo-sheet__note">{MirrorText.GATE_NOTE}</p>
+        </div>
+        <PlateLine />
+        <SwitchRow title={MirrorText.LATCH} note={MirrorText.ARP_LATCH_NOTE} on={a.latch} onChange={props.onArpLatch} />
       </GridPlate>
     </>
   )

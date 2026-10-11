@@ -53,6 +53,11 @@
 import { computed, signal, type ReadonlySignal, type Signal } from '@preact/signals'
 import { Keys, MAX_OCTAVE, MIN_OCTAVE, type NoteNames, type Scale } from '../core/features/keys'
 import { arpNote } from '../core/features/arp'
+
+// An arp voice's key split at ':': "arp", group, offset, and semitones or "n" (a pad hit).
+function arpVoiceKey(p: readonly string[]): boolean {
+  return p.length === 4 && p[0] === 'arp' && (p[3] === 'n' || Number.isInteger(Number(p[3])))
+}
 import { choiceOf as pianoChoiceOf, type KeysView } from '../core/features/piano'
 import { padKey, type PhysicalPad } from '../core/features/padNotes'
 import type { PadTarget } from '../core/features/liveMirror'
@@ -253,7 +258,9 @@ export class ArcController {
       const out = new Set<number>()
       for (const k of this.liveVoices.value) {
         const p = k.split(':')
-        if (p.length !== 3 || p[0] !== 'live') continue
+        // A pad's own voice; a pattern's KEYS note, and the arp's, ring the pad it plays on (LiveVoices.pads).
+        const pad = (p.length === 3 && p[0] === 'live') || (p.length === 4 && p[0] === 'seq') || arpVoiceKey(p)
+        if (!pad) continue
         const g = Number(p[1])
         const o = Number(p[2])
         if (Number.isInteger(g) && Number.isInteger(o)) out.add(padKey({ group: g, offset: o }))
@@ -262,10 +269,17 @@ export class ArcController {
     })
     this.playingNotes = computed(() => {
       const out = new Set<number>()
+      const keysPad = this.store.state.value.keysPad
       for (const k of this.liveVoices.value) {
-        if (!k.startsWith('note:')) continue
-        const n = Number(k.slice(5))
-        if (Number.isInteger(n)) out.add(n)
+        if (k.startsWith('note:')) {
+          const n = Number(k.slice(5))
+          if (Number.isInteger(n)) out.add(n)
+          continue
+        }
+        // The note the arp sounds now on the KEYS sound lights its key (LiveVoices.arpNotes).
+        const p = k.split(':')
+        if (keysPad === null || !arpVoiceKey(p) || p[3] === 'n' || Number(p[1]) !== keysPad.group || Number(p[2]) !== keysPad.offset) continue
+        out.add(Keys.ROOT_NOTE + Number(p[3]))
       }
       return out
     })

@@ -74,6 +74,7 @@ export const COACH_IDS = [
   'live.pads',
   'live.keys',
   'live.mode',
+  'live.arp',
   'live.scale',
   'live.octave',
   'live.key',
@@ -125,6 +126,8 @@ export const COACH_MARKS: Readonly<Record<CoachId, CoachMarkSpec>> = Object.free
   // The KEYS grid: the same tip as the pads (MirrorScreen.kt).
   'live.keys': yellowTag(CoachText.PADS),
   'live.mode': navyTag(CoachText.MODE),
+  // ARP / RPT and LATCH after the mode word (LiveArp.kt).
+  'live.arp': navyTag(CoachText.ARP),
   'live.scale': navyTag(CoachText.SCALE),
   'live.octave': navyTag(CoachText.OCTAVE),
   // The row over the piano: the key word, and the Pads ⇄ Piano switch.
