@@ -1,7 +1,7 @@
 // A LiveAudioDeps that records what the controller asks of Live's output (state tests).
 import { signal, type Signal } from '@preact/signals'
 import { WebLatencyHint } from '../../src/core/text/latencyText'
-import type { ArpStep, LiveArpPlan, LiveAudioDeps, LiveEngineInfo, LivePress, LiveSeqPlan, LiveTimeline } from '../../src/state/deps'
+import type { ArpStep, LiveArpPlan, LiveAudioDeps, LiveEngineInfo, LivePress, LiveSeqPlan, LiveTimeline, MicOpened } from '../../src/state/deps'
 import { transportClock } from '../../src/core/features/sequencer'
 import type { Beat } from '../../src/core/features/tempo'
 import type { RecState } from '../../src/core/features/takeRecorder'
@@ -64,6 +64,9 @@ export interface FakeLiveAudio extends LiveAudioDeps {
   readonly sampleLevel: Signal<{ readonly level: number; readonly clip: boolean }>
   /** A take the tap made, as the output tells it (its phase back to ready first). */
   sampleTake(t: TapTake): void
+  /** Whether it offers a mic (off by default), and what opening it answers. */
+  micSupported: boolean
+  micAnswer: MicOpened
 }
 
 /** [withLate]: with a `late` signal of its own, as the real LiveAudio (the controller then follows it). */
@@ -236,9 +239,15 @@ export function fakeLiveAudio(withLate = false): FakeLiveAudio {
     samplePhase: signal<TapPhase>({ kind: 'ready' }),
     sampleLevel: signal({ level: 0, clip: false }),
     sampleRate: 48000,
-    sampleOpen(stereo, gain, threshold) {
-      a.sampleLog.push(`open:${stereo}:${gain}:${threshold}`)
+    sampleOpen(stereo, gain, threshold, input) {
+      a.sampleLog.push(`open:${stereo}:${gain}:${threshold}${input === true ? ':mic' : ''}`)
       return a.available
+    },
+    micSupported: false,
+    micAnswer: { ok: true, channels: 1 },
+    async sampleMic(stereo) {
+      a.sampleLog.push(`mic:${stereo}`)
+      return a.micAnswer
     },
     sampleSet(gain, threshold) {
       a.sampleLog.push(`set:${gain}:${threshold}`)

@@ -3,11 +3,17 @@
 // into it (the header counts the take, the pad lit); let go, the review sheet opens
 // with the slot it goes into; DISCARD lets it go with UNDO on the toast, and UNDO
 // brings it back; KEEP uploads it. LATCH reads STOP while a hands-free take goes on.
+// The mic is refused here, so RSP (Live's own mix) stands in, as it does for a
+// person who says no (sampleMic.spec.ts records from a fake mic).
 import { expect, test } from './fixtures'
 
 test.use({ viewport: { width: 412, height: 915 } })
 
 test('SAMPLE: the panel, a held take, the review sheet, UNDO and KEEP', async ({ page }) => {
+  // The mic refused, as a person can.
+  await page.addInitScript(() => {
+    navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException('Permission denied', 'NotAllowedError'))
+  })
   await page.goto('/?demo')
   await expect(page.locator('.live-strip')).toContainText('Project 1')
   const mic = page.getByRole('button', { name: 'Sample' })
@@ -16,6 +22,9 @@ test('SAMPLE: the panel, a held take, the review sheet, UNDO and KEEP', async ({
   await expect(mic).toHaveAttribute('aria-pressed', 'true')
   const panel = page.getByRole('region', { name: 'Sample' })
   await expect(panel).toBeVisible()
+  // Refused: RSP stands in, and the toast says why.
+  await expect(page.locator('.toast')).toContainText('arc needs the microphone to sample it. RSP works without it.')
+  await expect(panel).toContainText('RSP')
   await expect(panel).toContainText('Hold a pad to record')
   // In the function keys' place.
   await expect(page.getByRole('button', { name: 'Effects' })).toHaveCount(0)

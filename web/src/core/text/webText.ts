@@ -280,6 +280,11 @@ export const WebText = {
   // ---------- SAMPLE (Live) ----------
   /** The SAMPLE panel's ✕ (Kotlin closes it with a swipe or Back). */
   CLOSE_SAMPLE: 'Close sampling',
+  /** The mic refused (MirrorText.NO_MIC's web wording: no USB, and no app settings to open). */
+  NO_MIC: 'arc needs the microphone to sample it. RSP works without it.',
+  /** MirrorText.inputFailed's reasons for the mic on the web. */
+  NO_MIC_FOUND: 'no microphone found',
+  MIC_FAILED: "this browser can't sample the microphone here",
   /**
    * A source's name for screen readers: MirrorText.sourceName with arc's
    * sound for RSP (the web resamples arc's own mix, not the phone's).

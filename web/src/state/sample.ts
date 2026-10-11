@@ -10,8 +10,11 @@
 // question as a recorded change. A take with no pad to go on goes to Takes.
 //
 // Web deltas:
-// - RSP only so far (Live's mix, SampleTap in the audio worklet): the mic and
-//   the EP-133 over USB aren't offered, and the inputs are RSP and RSP ST.
+// - The inputs are the mic (getUserMedia, as raw as the browser gives it,
+//   into the audio worklet's input; MIC ST where it has two channels) and
+//   RSP (Live's mix); the EP-133 over USB isn't offered. The mic is asked
+//   for when SAMPLE opens on it or steps to it; refused, it isn't offered
+//   again this page, and RSP stands in (as when it can't be opened).
 // - BARS, the count-in, waiting for PLAY and PTN aren't here yet: a latched
 //   take runs Free whatever BARS says.
 // - Times are performance.now() ms; a press is placed by the output's stamp
@@ -28,6 +31,7 @@ import { SamplePhase } from '../core/features/sampleCapture'
 import { toWavBytes } from '../core/features/sampleEdit'
 import { SampleInput, SampleLimits, SampleName, type SampleSource } from '../core/features/sampleSource'
 import { MirrorText } from '../core/text/mirrorText'
+import { WebText } from '../core/text/webText'
 import type { TapPhase, TapTake } from '../platform/audio/sampleTap'
 import { decodeWav } from '../core/formats/wav'
 import {
@@ -130,6 +134,12 @@ export class SampleDesk {
 
   private on = false
   private stereo = false
+  // The input the tap is open on (null: none yet, or the mic still being asked for), and each opening's number.
+  private opened: SampleInput | null = null
+  private opening = 0
+  // The mic refused for good this page (it isn't offered again), and whether it has two channels.
+  private micRefused = false
+  private micStereo = false
   private latch = false
   private tapPhase: TapPhase = { kind: 'ready' }
   private uploading: SamplePhase | null = null
@@ -205,22 +215,69 @@ export class SampleDesk {
   }
 
   /**
-   * The SAMPLE panel opened: the mode opens on the input last chosen (RSP
-   * standing in for the mic here), metering it at once; nothing records until
-   * a pad is held. STEP's and the scene panel and the pad sheet close, TEMPO's
-   * click stops, and PATTERN stops recording (and plays on).
+   * The SAMPLE panel opened: the mode opens on the input last chosen,
+   * metering it at once (the mic asked for the first time); nothing records
+   * until a pad is held. STEP's and the scene panel and the pad sheet close,
+   * TEMPO's click stops (the speaker would play into a mic take), and
+   * PATTERN stops recording (and plays on).
    */
   enter(): void {
     if (this.on || !this.available) return
     this.host.makeRoom()
-    const input = this.inputNow()
-    if (!this.host.deps.liveAudio.sampleOpen?.(input.stereo, this.gainNow(input.source), this.host.settings().sampleThreshold)) {
+    this.on = true
+    if (!this.openInput(this.inputNow())) {
+      this.on = false
       this.host.toast(MirrorText.NO_OUTPUT, true)
       return
     }
-    this.on = true
-    this.stereo = input.stereo
     this.publish()
+  }
+
+  /**
+   * Opens the tap on [want] (or the input offered in its place): RSP at
+   * once, the mic once the browser gives it (RSP standing in, with a toast
+   * saying why, when it doesn't). False when there is no output.
+   */
+  private openInput(want: SampleInput): boolean {
+    const input = pickSampleInput(want, this.inputs())
+    const gen = ++this.opening
+    if (input.source !== 'mic') return this.openTap(input)
+    const audio = this.host.deps.liveAudio
+    if (!audio.sampleMic) return this.openTap({ source: 'rsp', stereo: input.stereo })
+    // Nothing records until the mic is open: the panel shows it opening.
+    this.opened = null
+    void audio.sampleMic(true).then((r) => {
+      if (gen !== this.opening || !this.on) {
+        // Let go of: another input took its place, or SAMPLE closed meanwhile.
+        if (r.ok) this.letMicGo()
+        return
+      }
+      if (r.ok) {
+        this.micStereo = r.channels === 2
+        if (this.openTap(pickSampleInput(input, this.inputs()))) return
+      } else {
+        if (r.why === 'denied') this.micRefused = true
+        this.host.toast(micFailed(r.why), true)
+      }
+      if (!this.openTap({ source: 'rsp', stereo: input.stereo })) this.host.toast(MirrorText.NO_OUTPUT, true)
+    })
+    return true
+  }
+
+  // The tap open on [input] (the mic already open for it).
+  private openTap(input: SampleInput): boolean {
+    const ok = this.host.deps.liveAudio.sampleOpen?.(input.stereo, this.gainNow(input.source), this.host.settings().sampleThreshold, input.source === 'mic') ?? false
+    this.opened = ok ? input : null
+    if (ok) this.stereo = input.stereo
+    this.publish()
+    return ok
+  }
+
+  // A mic opened too late for anything: the tap goes back to what is open (RSP lets the mic go), or closes.
+  private letMicGo(): void {
+    const o = this.opened
+    if (this.on && o !== null && o.source !== 'mic') this.openTap(o)
+    else if (!this.on) this.host.deps.liveAudio.sampleClose?.()
   }
 
   /** Leaves SAMPLE: the input closes, and a take going on ends with what it has, kept like any other. */
@@ -234,6 +291,8 @@ export class SampleDesk {
     for (const k of this.played) this.host.releasePad(padFromKey(k))
     this.played.clear()
     this.armed = false
+    this.opening++
+    this.opened = null
     this.host.deps.liveAudio.sampleClose?.()
     this.on = false
     this.publish()
@@ -241,8 +300,7 @@ export class SampleDesk {
 
   /** −/+: the input [step] places on in the device's order, among those offered. */
   stepInput(step: number): void {
-    const s = this.host.settings()
-    this.setInput(SampleInput.cycle(this.inputs(), { source: s.sampleSource, stereo: s.sampleStereo }, step))
+    this.setInput(SampleInput.cycle(this.inputs(), this.shownInput(), step))
   }
 
   /** Records from [i] from now on (kept); one not offered is left alone. */
@@ -250,19 +308,16 @@ export class SampleDesk {
     if (!this.inputs().some((x) => x.source === i.source && x.stereo === i.stereo)) return
     this.host.changeSettings((s) => ({ ...s, sampleSource: i.source, sampleStereo: i.stereo }))
     if (!this.on) return this.publish()
-    const input = this.inputNow()
-    if (input.stereo !== this.stereo) {
-      // Another channel count is another tap: what waited goes with the one let go of.
-      this.host.deps.liveAudio.sampleOpen?.(input.stereo, this.gainNow(input.source), this.host.settings().sampleThreshold)
-      this.stereo = input.stereo
-    }
+    const o = this.opened
+    // Another input or channel count is another tap: what waited goes with the one let go of.
+    if (o === null || o.source !== i.source || o.stereo !== i.stereo) this.openInput(i)
     this.publish()
   }
 
   /** LEVEL: the input's gain in dB (SAMPLE_GAINS), kept per source. */
   setGain(db: number): void {
     const v = Math.min(Math.max(db, SAMPLE_GAINS.min), SAMPLE_GAINS.max)
-    const source = this.inputNow().source
+    const source = this.shownInput().source
     this.host.changeSettings((s) => withSampleGain(s, source, v))
     this.host.deps.liveAudio.sampleSet?.(v, this.host.settings().sampleThreshold)
     this.publish()
@@ -272,7 +327,7 @@ export class SampleDesk {
   setThreshold(db: number | null): void {
     const v = db === null ? null : Math.min(Math.max(db, SAMPLE_THRESHOLDS.min), SAMPLE_THRESHOLDS.max)
     this.host.changeSettings((s) => ({ ...s, sampleThreshold: v }))
-    this.host.deps.liveAudio.sampleSet?.(this.gainNow(this.inputNow().source), v)
+    this.host.deps.liveAudio.sampleSet?.(this.gainNow(this.shownInput().source), v)
     this.publish()
   }
 
@@ -421,6 +476,8 @@ export class SampleDesk {
 
   // Arms a take into [pad]; false after a toast when there is no room left for one.
   private arm(pad: PhysicalPad, at: number, latched: boolean): boolean {
+    // The mic still being asked for: nothing to record from yet.
+    if (this.opened === null) return false
     const audio = this.host.deps.liveAudio
     const rate = audio.sampleRate ?? null
     const max = rate === null ? 0 : sampleMaxFrames(this.stereo, rate, this.on ? this.host.free() : null)
@@ -441,7 +498,7 @@ export class SampleDesk {
     this.latched = latchAfterTake(this.latched, real, this.tapGoing())
     const s = this.host.settings()
     const occupied = this.host.online() ? this.slotsTakenNow() : null
-    const input: SampleInput = { source: 'rsp', stereo: t.channels === 2 }
+    const input: SampleInput = { source: this.opened?.source ?? 'rsp', stereo: t.channels === 2 }
     const name = SampleName.of(input.source, this.host.deps.now())
     const r = await this.backed(sampleReviewOf(real, input, t.pcm, t.channels, t.rate, t.end, t.latched, name, s.sampleNormalize, s.sampleTrimSilence, occupied))
     this._lastTake.value = r.peaks
@@ -749,8 +806,14 @@ export class SampleDesk {
   // ---------- what shows ----------
 
   private inputs(): SampleInput[] {
-    // RSP only on the web so far.
-    return sampleInputs(false, false, false, false)
+    // The mic where the browser has one and it wasn't refused; no USB on the web.
+    const mic = this.host.deps.liveAudio.micSupported === true && !this.micRefused
+    return sampleInputs(mic, this.micStereo, false, false)
+  }
+
+  // The input the panel shows: the one open, else the one chosen (the mic while it is being asked for).
+  private shownInput(): SampleInput {
+    return this.opened ?? this.inputNow()
   }
 
   private inputNow(): SampleInput {
@@ -771,7 +834,7 @@ export class SampleDesk {
 
   private uiNow(): SampleUiState {
     const s = this.host.settings()
-    const input = this.inputNow()
+    const input = this.on ? this.shownInput() : this.inputNow()
     const rate = this.host.deps.liveAudio.sampleRate ?? 48000
     const free = this.on ? this.host.free() : null
     return {
@@ -799,4 +862,18 @@ export class SampleDesk {
 // A WAV's bytes as a Blob (a copy: the bytes' buffer may be shared).
 function wavBlob(wav: Uint8Array): Blob {
   return new Blob([wav.slice()], { type: 'audio/wav' })
+}
+
+// Why the mic didn't open, for the toast: refused (it isn't offered again), in use, or not there.
+function micFailed(why: 'denied' | 'none' | 'busy' | 'failed'): string {
+  switch (why) {
+    case 'denied':
+      return WebText.NO_MIC
+    case 'busy':
+      return MirrorText.MIC_BUSY
+    case 'none':
+      return MirrorText.inputFailed(WebText.NO_MIC_FOUND)
+    case 'failed':
+      return MirrorText.inputFailed(WebText.MIC_FAILED)
+  }
 }

@@ -311,7 +311,7 @@ function SampleControls(props: { s: SampleActions }): JSX.Element {
         <button type="button" class="sample-key sample-key--step" aria-label={MirrorText.PREV_SOURCE} onClick={() => s.onSource(-1)}>
           −
         </button>
-        <span class="sample-panel__window" aria-live="polite" aria-label={WebText.sampleSourceName(input.source, input.stereo)}>
+        <span class="sample-panel__window" role="status" aria-label={WebText.sampleSourceName(input.source, input.stereo)}>
           <span aria-hidden="true">{MirrorText.sourceShort(input.source, input.stereo).toUpperCase()}</span>
         </span>
         <button type="button" class="sample-key sample-key--step" aria-label={MirrorText.NEXT_SOURCE} onClick={() => s.onSource(1)}>

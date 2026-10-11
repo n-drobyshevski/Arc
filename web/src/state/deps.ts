@@ -18,7 +18,7 @@
 // [Deps.offlinePads] its pad changes made offline (files/live-pads.json).
 
 import type { RecState } from '../core/features/takeRecorder'
-import type { LiveArpPlan, LiveSeqPlan, LiveTimeline, RecordedTake } from '../platform/audio/liveAudio'
+import type { LiveArpPlan, LiveSeqPlan, LiveTimeline, MicOpened, RecordedTake } from '../platform/audio/liveAudio'
 import type { ArpStep } from '../platform/audio/patternScheduler'
 import type { TapPhase, TapTake } from '../platform/audio/sampleTap'
 import type { SampleStore } from '../platform/storage/sampleStore'
@@ -236,9 +236,17 @@ export interface LiveAudioDeps {
   setClick?(on: boolean, bpm: number, grid: BeatGrid | null): boolean
   /** Each click, with when it is heard: TEMPO's light. */
   onBeat?(listener: (beat: Beat) => void): () => void
-  // SAMPLE (LiveAudio.kt's SampleRecorder, its mix side: RSP); an output without them has no SAMPLE.
-  /** Opens RSP on Live's mix ([stereo] or mixed down) at [gainDb], a take waiting for [thresholdDb] (null: none). False when there is no output. */
-  sampleOpen?(stereo: boolean, gainDb: number, thresholdDb: number | null): boolean
+  // SAMPLE (LiveAudio.kt's SampleRecorder: RSP, and the mic); an output without them has no SAMPLE.
+  /**
+   * Opens SAMPLE on Live's mix (RSP), or on the mic opened with [sampleMic]
+   * ([input]), [stereo] or mixed down, at [gainDb], a take waiting for
+   * [thresholdDb] (null: none). False when there is no output (or no mic).
+   */
+  sampleOpen?(stereo: boolean, gainDb: number, thresholdDb: number | null, input?: boolean): boolean
+  /** Whether there is a mic to sample (getUserMedia); absent: none. */
+  readonly micSupported?: boolean
+  /** Opens the mic into Live's mixer, asking for it the first time: its channels, or why not. */
+  sampleMic?(stereo: boolean): Promise<MicOpened>
   /** RSP's level and threshold, from the next block. */
   sampleSet?(gainDb: number, thresholdDb: number | null): void
   /** Closes RSP: a take going on ends with what was recorded. */
@@ -259,7 +267,7 @@ export interface LiveAudioDeps {
   onSampleTake?(listener: (take: TapTake) => void): () => void
 }
 
-export type { ArpStep, LiveArpPlan, LiveSeqPlan, LiveTimeline }
+export type { ArpStep, LiveArpPlan, LiveSeqPlan, LiveTimeline, MicOpened }
 
 /** A Live output that never opens (tests, or a browser without Web Audio). */
 export function nullLiveAudio(): LiveAudioDeps {

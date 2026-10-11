@@ -216,6 +216,25 @@ export interface MixerLink {
   readonly kind: string
   send(m: ToMixer): void
   close(): void
+  /** The mixer's input from [media] (SAMPLE's mic), or none (null); absent: the mixer takes no input. */
+  listen?(media: MediaStream | null): void
+}
+
+/** What opening the mic for SAMPLE came to: its channels, or why not. */
+export type MicOpened =
+  | { readonly ok: true; readonly channels: number }
+  | { readonly ok: false; readonly why: 'denied' | 'none' | 'busy' | 'failed' }
+
+/** A mic's own delay, from the air to the mixer's input, where the browser doesn't say (ms). */
+export const MIC_LATENCY_MS = 10
+
+/** Why [e] (getUserMedia's rejection) kept the mic closed. */
+export function micWhy(e: unknown): 'denied' | 'none' | 'busy' | 'failed' {
+  const name = (e as { name?: unknown } | null)?.name
+  if (name === 'NotAllowedError' || name === 'SecurityError' || name === 'PermissionDeniedError') return 'denied'
+  if (name === 'NotFoundError' || name === 'OverconstrainedError' || name === 'DevicesNotFoundError') return 'none'
+  if (name === 'NotReadableError' || name === 'AbortError' || name === 'TrackStartError') return 'busy'
+  return 'failed'
 }
 
 /** What [LiveAudio] needs from the browser; tests pass a fake. */
@@ -230,6 +249,8 @@ export interface LiveBackend {
   createContext(sampleRate: number | undefined, latencyHint: LiveLatencyHint): LiveContextLike | null
   /** Starts a mixer on [ctx] whose reports go to [onMessage]. */
   connect(ctx: LiveContextLike, onMessage: (m: FromMixer) => void): Promise<MixerLink>
+  /** The mic as raw as it comes ([stereo]: two channels where it has them); absent: no mic (getUserMedia). */
+  micStream?(stereo: boolean): Promise<MediaStream>
   /** performance.now(): the clock press times are on. */
   now(): number
   /** Whether the page has had a tap, so an output woken now (outside a tap) is allowed to sound. */
@@ -517,7 +538,9 @@ export class LiveAudio {
   private plan: LiveSeqPlan | null = null
   private arp: LiveArpPlan | null = null
   // SAMPLE's RSP as asked: open on each new output while wanted.
-  private sampleAsk: { stereo: boolean; gain: number; threshold: number | null } | null = null
+  private sampleAsk: { stereo: boolean; gain: number; threshold: number | null; input: boolean } | null = null
+  // SAMPLE's mic while open: its stream, channels and own delay (ms).
+  private mic: { readonly media: MediaStream; readonly channels: number; readonly latencyMs: number } | null = null
   private readonly sampleTakeListeners = new Set<(take: TapTake) => void>()
   private readonly _samplePhase = signal<TapPhase>({ kind: 'ready' })
   /** SAMPLE's take as the audio thread has it: waiting, recording, or ready. */
@@ -702,12 +725,14 @@ export class LiveAudio {
   // ---------- SAMPLE: RSP, Live's mix recorded into a pad (SampleRecorder's mix side) ----------
 
   /**
-   * Opens RSP on Live's mix ([stereo] or mixed down) at [gainDb], an armed
-   * take waiting for [thresholdDb] (null: none). Opens the output; false
-   * when there is none.
+   * Opens SAMPLE on Live's mix (RSP), or on the mic opened with [sampleMic]
+   * ([input]), [stereo] or mixed down, at [gainDb], an armed take waiting
+   * for [thresholdDb] (null: none). Opens the output; false when there is
+   * none, or [input] with no mic open.
    */
-  sampleOpen(stereo: boolean, gainDb: number, thresholdDb: number | null): boolean {
-    this.sampleAsk = { stereo, gain: PeakMeter.fromDb(gainDb), threshold: thresholdDb === null ? null : PeakMeter.fromDb(thresholdDb) }
+  sampleOpen(stereo: boolean, gainDb: number, thresholdDb: number | null, input = false): boolean {
+    if (input && this.mic === null) return false
+    this.sampleAsk = { stereo, gain: PeakMeter.fromDb(gainDb), threshold: thresholdDb === null ? null : PeakMeter.fromDb(thresholdDb), input }
     const s = this.ensure()
     if (!s) {
       this.sampleAsk = null
@@ -715,8 +740,56 @@ export class LiveAudio {
     }
     s.parked = false
     wake(s.ctx)
-    send(s, { t: 'sampleOpen', stereo, gain: this.sampleAsk.gain })
+    send(s, { t: 'sampleOpen', stereo, gain: this.sampleAsk.gain, input })
+    // RSP lets the mic go.
+    if (!input) this.micClose()
     return true
+  }
+
+  /** Whether this browser offers a mic (getUserMedia) to sample from. */
+  get micSupported(): boolean {
+    return this.backend.micStream !== undefined
+  }
+
+  /**
+   * Opens the mic ([stereo]: two channels where it has them) into Live's
+   * mixer, asking for it the first time; [sampleOpen] then records from it.
+   * The output opens first. Its channels, or why not.
+   */
+  async sampleMic(stereo: boolean): Promise<MicOpened> {
+    const want = this.backend.micStream
+    if (want === undefined || this.ensure() === null) return { ok: false, why: 'failed' }
+    let media: MediaStream
+    try {
+      media = await want(stereo)
+    } catch (e) {
+      this.note(`sample mic: ${message(e)}`)
+      return { ok: false, why: micWhy(e) }
+    }
+    this.micClose()
+    const settings = (media.getAudioTracks()[0]?.getSettings?.() ?? {}) as { channelCount?: number; latency?: number }
+    const channels = settings.channelCount === 2 ? 2 : 1
+    const latencyMs = typeof settings.latency === 'number' && Number.isFinite(settings.latency) && settings.latency > 0 ? settings.latency * 1000 : MIC_LATENCY_MS
+    this.mic = { media, channels, latencyMs }
+    const link = this.stream?.link
+    if (link) {
+      // A mixer that takes no input (the main-thread one) has no mic.
+      if (!link.listen || !tryListen(link, media)) {
+        this.micClose()
+        return { ok: false, why: 'failed' }
+      }
+    }
+    return { ok: true, channels }
+  }
+
+  // The mic let go: off the mixer, and its tracks stopped (the browser's mic light goes).
+  private micClose(): void {
+    const m = this.mic
+    if (m === null) return
+    this.mic = null
+    const link = this.stream?.link
+    if (link?.listen) quietly(() => link.listen?.(null))
+    for (const t of m.media.getTracks()) quietly(() => t.stop())
   }
 
   /** RSP's level and threshold, from the next block. */
@@ -731,6 +804,7 @@ export class LiveAudio {
   sampleClose(): void {
     this.sampleAsk = null
     if (this.stream) send(this.stream, { t: 'sampleClose' })
+    this.micClose()
     this._samplePhase.value = { kind: 'ready' }
     this._sampleLevel.value = { level: 0, clip: false }
   }
@@ -748,7 +822,7 @@ export class LiveAudio {
   sampleArm(pad: number, atMs: number | null, latched: boolean, maxFrames: number): void {
     const s = this.stream
     if (!s || this.sampleAsk === null) return
-    send(s, { t: 'sampleAsk', ask: { kind: 'arm', pad, at: this.mixFrameAt(s, atMs), latched, maxFrames, threshold: this.sampleAsk.threshold } })
+    send(s, { t: 'sampleAsk', ask: { kind: 'arm', pad, at: this.tapFrameAt(s, atMs), latched, maxFrames, threshold: this.sampleAsk.threshold } })
   }
 
   /** Schedules a take of exactly [length] frames into [pad] from mix frame [start] (bars, a pattern's loop). */
@@ -765,7 +839,7 @@ export class LiveAudio {
   /** Stops the take at what was heard at [atMs] (null: where the mix is), keeping what came before. */
   sampleStop(atMs: number | null = null): void {
     const s = this.stream
-    if (s) send(s, { t: 'sampleAsk', ask: { kind: 'stop', at: this.mixFrameAt(s, atMs) } })
+    if (s) send(s, { t: 'sampleAsk', ask: { kind: 'stop', at: this.tapFrameAt(s, atMs) } })
   }
 
   /** Throws the take away (a tap, or a press that became a scroll). */
@@ -776,6 +850,18 @@ export class LiveAudio {
   /** Each take SAMPLE made. */
   onSampleTake(listener: (take: TapTake) => void): () => void {
     return add(this.sampleTakeListeners, listener)
+  }
+
+  /**
+   * The frame of what SAMPLE takes for [atMs]: the mix's frame heard then,
+   * or the mic's frame of sound made then (a block's mic frames came in its
+   * output's delay before it is heard, and the mic's own before that).
+   */
+  private tapFrameAt(s: Stream, atMs: number | null): number | null {
+    const m = this.mic
+    if (atMs === null || m === null || this.sampleAsk?.input !== true) return this.mixFrameAt(s, atMs)
+    const l = outputLatency(s.ctx)
+    return this.mixFrameAt(s, atMs + l.baseMs + l.outputMs + m.latencyMs)
   }
 
   private mixFrameAt(s: Stream, atMs: number | null): number | null {
@@ -1137,7 +1223,7 @@ export class LiveAudio {
     // The arp playing on: from where the new output's mix is.
     if (this.arp !== null) this.sendArp(s, this.arp)
     // SAMPLE's RSP on the new output's mix.
-    if (this.sampleAsk !== null) send(s, { t: 'sampleOpen', stereo: this.sampleAsk.stereo, gain: this.sampleAsk.gain })
+    if (this.sampleAsk !== null) send(s, { t: 'sampleOpen', stereo: this.sampleAsk.stereo, gain: this.sampleAsk.gain, input: this.sampleAsk.input })
     // The click goes on with the new output.
     if (this.clickAsk.on) this.sendClick(s)
     ctx.addEventListener?.('statechange', () => this.stateChanged(s))
@@ -1149,6 +1235,8 @@ export class LiveAudio {
         }
         s.link = link
         flush(s, link)
+        // SAMPLE's mic into the new mixer.
+        if (this.mic !== null && (!link.listen || !tryListen(link, this.mic.media))) this.note('sample mic: this output takes no input')
         this._description = describeOutput(ctx, link.kind)
         this.note(`live audio: ${this._description}`)
         // Its row shows from now, before the first press.
@@ -1430,12 +1518,18 @@ export const FALLBACK_FRAMES = 256
 async function workletLink(ctx: AudioContext, onMessage: (m: FromMixer) => void): Promise<MixerLink> {
   await ctx.audioWorklet.addModule(workletUrl)
   const node = new AudioWorkletNode(ctx, LIVE_PROCESSOR, {
-    numberOfInputs: 0,
+    // SAMPLE's mic, while it is open (else nothing is connected).
+    numberOfInputs: 1,
     numberOfOutputs: 1,
     outputChannelCount: [2],
   })
   node.port.onmessage = (e: MessageEvent<FromMixer>) => onMessage(e.data)
   node.connect(ctx.destination)
+  let source: MediaStreamAudioSourceNode | null = null
+  const unlisten = (): void => {
+    source?.disconnect()
+    source = null
+  }
   return {
     kind: 'AudioWorklet',
     send: (m) => {
@@ -1443,9 +1537,16 @@ async function workletLink(ctx: AudioContext, onMessage: (m: FromMixer) => void)
       node.port.postMessage(msg, transfer)
     },
     close: () => {
+      unlisten()
       node.port.onmessage = null
       node.disconnect()
       node.port.close()
+    },
+    listen: (media) => {
+      unlisten()
+      if (media === null) return
+      source = ctx.createMediaStreamSource(media)
+      source.connect(node)
     },
   }
 }
@@ -1453,18 +1554,36 @@ async function workletLink(ctx: AudioContext, onMessage: (m: FromMixer) => void)
 /** The main-thread mixer, for browsers without AudioWorklet (or where it fails to load). */
 function scriptLink(ctx: AudioContext, onMessage: (m: FromMixer) => void): MixerLink {
   const host = new MixerHost(ctx.sampleRate, onMessage)
-  const node = ctx.createScriptProcessor(FALLBACK_FRAMES, 1, 2)
+  // Two input channels: SAMPLE's mic, while it is open.
+  const node = ctx.createScriptProcessor(FALLBACK_FRAMES, 2, 2)
+  let source: MediaStreamAudioSourceNode | null = null
   node.onaudioprocess = (e) => {
     const out = e.outputBuffer
+    if (source !== null) {
+      const inp = e.inputBuffer
+      const left = inp.getChannelData(0)
+      host.input(left, inp.numberOfChannels > 1 ? inp.getChannelData(1) : left, inp.length)
+    }
     host.render(out.getChannelData(0), out.getChannelData(1), out.length, e.playbackTime)
   }
   node.connect(ctx.destination)
+  const unlisten = (): void => {
+    source?.disconnect()
+    source = null
+  }
   return {
     kind: 'ScriptProcessor',
     send: (m) => host.handle(m),
     close: () => {
+      unlisten()
       node.onaudioprocess = null
       node.disconnect()
+    },
+    listen: (media) => {
+      unlisten()
+      if (media === null) return
+      source = ctx.createMediaStreamSource(media)
+      source.connect(node)
     },
   }
 }
@@ -1507,6 +1626,16 @@ export function browserLiveBackend(): LiveBackend {
       if (typeof ctx.createScriptProcessor !== 'function') throw why ?? new Error('no AudioWorklet')
       return scriptLink(ctx, onMessage)
     },
+    ...(typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getUserMedia === 'function'
+      ? {
+          // As raw as it comes: no echo cancelling, noise suppression or gain riding.
+          micStream: (stereo: boolean) =>
+            navigator.mediaDevices.getUserMedia({
+              audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: { ideal: stereo ? 2 : 1 } },
+              video: false,
+            }),
+        }
+      : {}),
     now: () => performance.now(),
     gestureSeen: () => {
       const ua = (globalThis.navigator as { userActivation?: { hasBeenActive?: boolean } } | undefined)?.userActivation
@@ -1541,5 +1670,15 @@ export function browserLiveBackend(): LiveBackend {
         // Storage blocked or full: the choice lasts the page.
       }
     },
+  }
+}
+
+// [media] into [link]'s mixer; false when it can't be (another rate, say).
+function tryListen(link: MixerLink, media: MediaStream): boolean {
+  try {
+    link.listen?.(media)
+    return true
+  } catch {
+    return false
   }
 }

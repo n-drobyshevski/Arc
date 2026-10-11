@@ -9,6 +9,7 @@ import { physicalPad } from '../../src/core/features/padNotes'
 import { SampleCapture } from '../../src/core/features/sampleCapture'
 import { SoundSource } from '../../src/core/features/offlinePads'
 import { MirrorText } from '../../src/core/text/mirrorText'
+import { WebText } from '../../src/core/text/webText'
 import type { TapTake } from '../../src/platform/audio/sampleTap'
 import { memoryStorage } from '../../src/platform/storage/settings'
 import { disposeAll, liveHarness, until, type LiveHarness } from './liveHarness'
@@ -215,6 +216,60 @@ describe('SAMPLE', () => {
     h.c.runToastAction(t!.id)
     await vi.waitFor(() => expect(s.review.value?.file).toBeTruthy())
     expect(s.review.value!.frames).toBe(24000)
+  })
+
+  it('the mic: asked for on opening, then recorded from, at its own level; a take from it is named for it', async () => {
+    const h = await liveOn()
+    h.liveAudio.micSupported = true
+    const s = h.c.sample
+    s.setInput({ source: 'mic', stereo: false })
+    s.enter()
+    await vi.waitFor(() => expect(h.liveAudio.sampleLog).toEqual(['mic:true', 'open:false:12:null:mic']))
+    expect(s.ui.value.input).toEqual({ source: 'mic', stereo: false })
+    // A mono mic: no MIC ST.
+    expect(s.ui.value.inputs.map((i) => `${i.source}${i.stereo ? ' st' : ''}`)).toEqual(['mic', 'rsp', 'rsp st'])
+    await hold(h)
+    h.liveAudio.sampleTake(take())
+    await vi.waitFor(() => expect(s.review.value).not.toBeNull())
+    expect(s.review.value!.input.source).toBe('mic')
+    expect(s.review.value!.name).toMatch(/^mic /)
+    // Back to RSP: the mic is let go of (RSP opens on the mix).
+    s.stepInput(1)
+    expect(h.liveAudio.sampleLog.at(-1)).toBe('open:false:0:null')
+    expect(s.ui.value.input).toEqual({ source: 'rsp', stereo: false })
+  })
+
+  it('the mic refused: RSP stands in with a toast, and the mic is no longer offered', async () => {
+    const h = await liveOn()
+    h.liveAudio.micSupported = true
+    h.liveAudio.micAnswer = { ok: false, why: 'denied' }
+    const s = h.c.sample
+    s.setInput({ source: 'mic', stereo: false })
+    s.enter()
+    await vi.waitFor(() => expect(h.liveAudio.sampleLog).toEqual(['mic:true', 'open:false:0:null']))
+    expect(h.toasts.at(-1)?.text).toBe(WebText.NO_MIC)
+    expect(s.ui.value.input).toEqual({ source: 'rsp', stereo: false })
+    expect(s.ui.value.inputs.some((i) => i.source === 'mic')).toBe(false)
+  })
+
+  it('a pad held while the mic is still being asked for records nothing', async () => {
+    const h = await liveOn()
+    h.liveAudio.micSupported = true
+    let answer: (r: { ok: true; channels: number }) => void = () => {}
+    h.liveAudio.sampleMic = (stereo) => {
+      h.liveAudio.sampleLog.push(`mic:${stereo}`)
+      return new Promise((r) => (answer = r))
+    }
+    const s = h.c.sample
+    s.setInput({ source: 'mic', stereo: false })
+    s.enter()
+    await h.c.playPad(A5, true, false, now() - 400)
+    expect(h.liveAudio.sampleLog.some((l) => l.startsWith('arm:'))).toBe(false)
+    h.c.releasePad(A5, now())
+    // Closed before the answer: the mic opened late is let go of.
+    s.exit()
+    answer({ ok: true, channels: 2 })
+    await vi.waitFor(() => expect(h.liveAudio.sampleLog.filter((l) => l === 'close').length).toBe(2))
   })
 
   it('leaving Live closes SAMPLE', async () => {

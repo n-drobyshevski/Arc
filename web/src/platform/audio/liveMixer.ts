@@ -92,9 +92,13 @@ export type ToMixer =
   /** PatternScheduler.play: tick 0 at mix frame [atFrame] (a press), else a lookahead and [leadMs] on, after [countInBars]. */
   | { readonly t: 'play'; readonly countInBars: number; readonly leadMs: number; readonly atFrame: number | null; readonly atPress: boolean }
   | { readonly t: 'stopSeq' }
-  /** SAMPLE's RSP opens on the mix: [stereo] or mixed down, its level [gain] (linear); an arm brings its threshold. */
-  | { readonly t: 'sampleOpen'; readonly stereo: boolean; readonly gain: number }
-  /** SAMPLE's RSP closes: a take going on ends with what was recorded. */
+  /**
+   * SAMPLE opens on the mix (RSP), or on the node's input ([input]: the
+   * mic): [stereo] or mixed down, its level [gain] (linear); an arm brings
+   * its threshold.
+   */
+  | { readonly t: 'sampleOpen'; readonly stereo: boolean; readonly gain: number; readonly input?: boolean }
+  /** SAMPLE closes: a take going on ends with what was recorded. */
   | { readonly t: 'sampleClose' }
   /** RSP's level, from the next block. */
   | { readonly t: 'sampleSet'; readonly gain: number }
@@ -213,6 +217,10 @@ export class MixerHost {
   private recorder: TakeRecorder | null = null
   // SAMPLE's RSP, while open.
   private tap: SampleTap | null = null
+  // The tap takes the node's input (the mic) rather than the mix; that input's block, as 16-bit stereo frames.
+  private tapInput = false
+  private inBurst = new Int16Array(0)
+  private inFrames = 0
   private lastRec: RecState = { kind: 'idle' }
   private burst = new Int16Array(0)
   private chunk = new Int16Array(MixerHost.TAKE_CHUNK_FRAMES * 2)
@@ -320,6 +328,7 @@ export class MixerHost {
         })
         tap.gain = m.gain
         this.tap = tap
+        this.tapInput = m.input === true
         // A press finds its frame by the stamps: they go while SAMPLE is open.
         this.stampedAt = Number.NEGATIVE_INFINITY
         return
@@ -327,6 +336,7 @@ export class MixerHost {
       case 'sampleClose':
         this.tap?.close()
         this.tap = null
+        this.tapInput = false
         return
       case 'sampleSet':
         if (this.tap !== null) this.tap.gain = m.gain
@@ -404,7 +414,7 @@ export class MixerHost {
       out[2 * i + 1] = Math.trunc(right[i]! * 32768)
     }
     // SAMPLE's RSP takes the same mix, before the click (LiveAudio's sampleTap).
-    tap?.mixed(out, frames, at)
+    if (!this.tapInput) tap?.mixed(out, frames, at)
     if (r === null) return
     let first: number | null = null
     for (const s of this.mixer.started) if (first === null || s.frame < first) first = s.frame
@@ -445,6 +455,22 @@ export class MixerHost {
   }
 
   /**
+   * The node's input for the block about to render (the mic, while SAMPLE
+   * records from it): planar −1..1, [right] the same as [left] for a mono
+   * input. Taken as 16-bit stereo frames, as the mix is.
+   */
+  input(left: Float32Array, right: Float32Array, frames: number): void {
+    if (this.tap === null || !this.tapInput) return
+    if (this.inBurst.length < frames * 2) this.inBurst = new Int16Array(frames * 2)
+    const out = this.inBurst
+    for (let i = 0; i < frames; i++) {
+      out[2 * i] = toS16(left[i]!)
+      out[2 * i + 1] = toS16(right[i]!)
+    }
+    this.inFrames = frames
+  }
+
+  /**
    * Mixes [frames] frames into [left]/[right]; [time] is the context time the
    * first one plays at. A quantum allocates only when it has news to post.
    */
@@ -458,6 +484,15 @@ export class MixerHost {
     }
     this.mixer.renderPlanar(left, right, frames)
     this.record(left, right, frames, before)
+    // SAMPLE on the mic: its block, tagged with the mix's frames (silence until the mic is connected).
+    if (this.tap !== null && this.tapInput) {
+      if (this.inFrames !== frames) {
+        if (this.inBurst.length < frames * 2) this.inBurst = new Int16Array(frames * 2)
+        this.inBurst.fill(0, 0, frames * 2)
+      }
+      this.tap.mixed(this.inBurst, frames, before)
+    }
+    this.inFrames = 0
     // The click after TAKE has the block: a take leaves it out.
     this.click(left, right, frames, before, time)
     const started = this.mixer.started
@@ -473,4 +508,9 @@ export class MixerHost {
       this.post({ t: 'keys', keys: [...keys] })
     }
   }
+}
+
+// A float sample as 16-bit, clipped (the mic can be driven past full scale).
+function toS16(x: number): number {
+  return Math.max(-32768, Math.min(32767, Math.trunc(x * 32768)))
 }

@@ -674,7 +674,8 @@ describe('webText', () => {
       WebText.copyFailed('m'),
     )
     for (const s of all) {
-      expect(s).not.toMatch(/phone|share sheet/i)
+      // "phone" the word ("microphone" is fine).
+      expect(s).not.toMatch(/\bphones?\b|share sheet/i)
       if (s !== WebText.FOLDER_NOTE_OFF) expect(s).not.toMatch(/Documents/)
     }
   })
