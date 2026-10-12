@@ -12,8 +12,9 @@
 // - The patterns are kept in the library database's kv store
 //   (Library.readPatterns / writePatterns), Android's files/patterns.json.
 // - The settings are PatternPrefs (localStorage), not AppSettings.
-// - No arp, SAMPLE's PTN take or Bluetooth delay make-up yet: the tick heard
-//   is the tick stamped.
+// - The arp (ArpDesk), SAMPLE's PTN take (playForTake, takeSpan) and the
+//   Bluetooth delay make-up (the tick heard, the output's delay past the tick
+//   stamped) are here, as ArcController has them.
 // - SCENES (ScenePlan.kt's SceneDesk) are this desk's too: ArcController's
 //   SCENES section lives here, a pick's tick no earlier than the
 //   sequencer's free tick as the output's stamps last told it.

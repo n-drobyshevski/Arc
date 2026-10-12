@@ -15,8 +15,9 @@
 //   RSP (Live's mix); the EP-133 over USB isn't offered. The mic is asked
 //   for when SAMPLE opens on it or steps to it; refused, it isn't offered
 //   again this page, and RSP stands in (as when it can't be opened).
-// - BARS, the count-in, waiting for PLAY and PTN aren't here yet: a latched
-//   take runs Free whatever BARS says.
+// - BARS counts its bar in on the phone's click (sampleTiming's CountIn), and
+//   PTN takes the patterns' length from their next loop start (PatternDesk's
+//   playForTake / takeSpan); waiting for the EP-133's PLAY is USB's, not here.
 // - Times are performance.now() ms; a press is placed by the output's stamp
 //   (LiveAudio.sampleArm), not System.nanoTime.
 // - Recordings live in the samples store (IndexedDB), not files/samples.
