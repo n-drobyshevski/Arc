@@ -1,7 +1,7 @@
 /* The device view (DeviceView.tsx): the EP-133 K.O. II at the product photo's
  * 1444 × 2000, scaled to fit. The device keeps its own colours in both themes. */
 
-.device {
+.ko-device {
   flex: 1 1 0;
   min-height: 0;
   min-width: 0;
@@ -10,10 +10,10 @@
   align-items: flex-start;
   justify-content: center;
 }
-.device__box { position: relative; flex: none; }
+.ko-device__box { position: relative; flex: none; }
 /* The open panel (SAMPLE, STEP, SCENE) over the plate and the display, the device's width. */
 .ep-area { pointer-events: none; }
-.device__panel { position: absolute; z-index: 4; left: 0; right: 0; top: 0; max-height: 100%; overflow: auto; }
+.ko-device__panel { position: absolute; z-index: 4; left: 0; right: 0; top: 0; max-height: 100%; overflow: auto; }
 .ep {
   position: absolute;
   left: 0;

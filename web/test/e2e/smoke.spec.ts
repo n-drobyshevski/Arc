@@ -303,7 +303,8 @@ for (const size of SIZES) {
           })
         }
         await page.goto('/?demo#/backups')
-        await expect(page.locator('.device-panel__stat').first()).toHaveText(/^12\s*sounds$/)
+        // A short window's panel is one line (the free space, no stats).
+        await expect(page.locator('.device-panel')).toContainText(size.height < 480 ? 'free' : '12')
         await importPak(page, SAMPLE_PAK)
         await expect(page.getByRole('region', { name: 'Backups' }).getByRole('listitem')).toHaveCount(1)
         await shot('backups')

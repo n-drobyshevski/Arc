@@ -14,9 +14,9 @@
 // with the Contents, Compare and Search screens, so they are exported here;
 // RangeKey (Kotlin's, in PadSheet.kt) comes from live/SoundPicker.
 //
-// Both at once: Android shows the projects and the sounds side by side from
-// 840dp wide (WideDevice); the web does it on the desk only (from 1024px,
-// theme/desk.css; useDesk), so tablets keep the switch as phones do. On the
+// Both at once (WideDevice): from 840 wide, unless the window is short (under
+// 480 high; ui/useDesk.ts WIDE_QUERY), the projects and the sounds side by
+// side, the row up to 1360 wide (the desk's page column on a computer). On the
 // left the head, the storage, the projects as pads and the picked project's
 // card; on the right the sounds binder, a paper sheet under an orange bar
 // ("Sounds · 12 · 2.1 MB") with find and All / In P3, the blocks in as many
@@ -42,7 +42,7 @@ import { Key } from '../components/Key'
 import { PlayKey } from '../components/PlayKey'
 import { Segmented } from '../components/Segmented'
 import { RangeKey } from '../live/SoundPicker'
-import { useDesk } from '../useDesk'
+import { WIDE_QUERY, useMedia } from '../useDesk'
 import './DeviceScreen.css'
 
 export interface DeviceScreenProps {
@@ -147,7 +147,7 @@ export function DeviceScreen(props: DeviceScreenProps): JSX.Element {
   // 0: sounds, 1: projects.
   const [section, setSection] = useState(initialSection)
   const [query, setQuery] = useState('')
-  // The desk's All / In P3.
+  // Side by side, the binder's All / In P3.
   const [onlyUsed, setOnlyUsed] = useState(false)
 
   // Read the contents when the screen opens, and again once a reconnected device is ready
@@ -165,19 +165,20 @@ export function DeviceScreen(props: DeviceScreenProps): JSX.Element {
     }
   }, [ready, state.busy])
 
-  const desk = useDesk()
+  // Side by side from 840 wide, unless short (Kotlin WideDevice).
+  const wide = useMedia(WIDE_QUERY)
   const names = useMemo(() => soundNames(contents?.sounds), [contents])
-  // The desk's binder: the sounds the picked project uses, once its download is in.
+  // The binder (side by side): the sounds the picked project uses, once its download is in.
   const project = openProject !== null && contents?.projects.some((p) => p.project === openProject) ? openProject : null
   const usedSlots = project !== null ? b.projectSounds.get(project) : undefined
   const used = useMemo(() => (usedSlots !== undefined ? new Set(usedSlots) : null), [usedSlots])
-  const filter = desk && onlyUsed && used !== null
+  const filter = wide && onlyUsed && used !== null
   const groups = useMemo(
     () => (contents ? soundBlocks(contents.sounds, query, filter ? used : null) : []),
     [contents, query, filter, used],
   )
 
-  // The block in view: its range key (phone) or binder tab (desk) is down; null: the first one.
+  // The block in view: its range key (phone) or binder tab (side by side) is down; null: the first one.
   // While a jump's smooth scroll runs, the scroll does not pick another.
   const [tabbed, setTabbed] = useState<number | null>(null)
   const jumping = useRef<number | undefined>(undefined)
@@ -200,18 +201,18 @@ export function DeviceScreen(props: DeviceScreenProps): JSX.Element {
     if (next === p && !b.projectSounds.has(p)) onProjectSounds(p)
   }
 
-  // Jump to a block: the desk scrolls its sheet, the phone the page, out from under the
+  // Jump to a block: side by side the sheet scrolls, the phone the page, out from under the
   // pinned range keys. Focus moves to the block.
   const jumpTo = (from: number): void => {
     setTabbed(from)
     picked.current = from
     const el = groupAt(from)
-    const box = desk ? leaves.current : scrollParent(root.current)
+    const box = wide ? leaves.current : scrollParent(root.current)
     if (!box || !el) return
     const smooth = smoothScroll()
     window.clearTimeout(jumping.current)
     jumping.current = window.setTimeout(() => { jumping.current = undefined }, smooth ? 800 : 100)
-    const pinned = desk ? 0 : (jumps.current?.offsetHeight ?? 0)
+    const pinned = wide ? 0 : (jumps.current?.offsetHeight ?? 0)
     const top = el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - pinned
     box.scrollTo({ top, behavior: smooth ? 'smooth' : 'auto' })
     el.focus({ preventScroll: true })
@@ -236,7 +237,7 @@ export function DeviceScreen(props: DeviceScreenProps): JSX.Element {
   }
 
   // Phone: the block under the pinned range keys (Kotlin rangeInView), as the page scrolls.
-  const keysShown = !desk && section === 0 && groups.length > 1
+  const keysShown = !wide && section === 0 && groups.length > 1
   const followPage = useRef<() => void>(() => {})
   followPage.current = (): void => {
     const keys = jumps.current
@@ -307,8 +308,8 @@ export function DeviceScreen(props: DeviceScreenProps): JSX.Element {
       maxLength={40}
       type="search"
       enterKeyHint="search"
-      // On the desk's pale sheet, a field the page's colour (Kotlin background = c.shell).
-      background={desk ? 'var(--shell)' : undefined}
+      // On the binder's pale sheet, a field the page's colour (Kotlin background = c.shell).
+      background={wide ? 'var(--shell)' : undefined}
     />
   )
   const blocks = groups.map((g, gi) => (
@@ -320,7 +321,7 @@ export function DeviceScreen(props: DeviceScreenProps): JSX.Element {
           b={b}
           // The guide overlay points at the first row's play key.
           mark={gi === 0 && i === 0}
-          badge={desk && used?.has(e.slot) ? project : null}
+          badge={wide && used?.has(e.slot) ? project : null}
           open={openSlot === e.slot}
           enabled={!state.busy}
           playing={playing === `device:${e.slot}`}
@@ -334,7 +335,7 @@ export function DeviceScreen(props: DeviceScreenProps): JSX.Element {
   const chosen = contents?.projects.find((x) => x.project === openProject) ?? null
   const pickNote = <p key="pick" class="t-small device__dim">{FeatureText.PICK_PROJECT}</p>
 
-  if (!desk) {
+  if (!wide) {
     const body: ComponentChildren[] = []
     if (!state.connected) {
       body.push(missing)
@@ -412,7 +413,7 @@ export function DeviceScreen(props: DeviceScreenProps): JSX.Element {
     )
   }
 
-  // The desk's left column: the head, the storage, the projects as pads and the picked one's card.
+  // The left column (side by side): the head, the storage, the projects as pads and the picked one's card.
   const side: ComponentChildren[] = [head]
   if (!state.connected) {
     side.push(missing)
@@ -492,7 +493,7 @@ export function DeviceScreen(props: DeviceScreenProps): JSX.Element {
     )
   }
   return (
-    <div ref={root} class="device device--desk" data-screen="device">
+    <div ref={root} class="device device--wide" data-screen="device">
       <div class="device__side">{side}</div>
       {sheet}
     </div>
@@ -710,7 +711,7 @@ function DetailChips(props: { d: SoundDetails }): JSX.Element {
   )
 }
 
-/** A desk binder tab: a range ("100–199" over "SNARES") on a cap rounded on its outer side; the one in view is dark and down. */
+/** A binder tab (side by side): a range ("100–199" over "SNARES") on a cap rounded on its outer side; the one in view is dark and down. */
 function BinderTab(props: { range: SlotBlock; on: boolean; onClick: () => void }): JSX.Element {
   const kind = FeatureText.factoryCategory(props.range.from)
   return (
@@ -731,7 +732,7 @@ function BinderTab(props: { range: SlotBlock; on: boolean; onClick: () => void }
  * The nine project slots as the K.O. II's pads, 7 8 9 / 4 5 6 / 1 2 3, in the
  * grey body: dark keys with their size for the projects there, outlined
  * "empty" slots for the rest (nothing to open), and the picked one orange and
- * held down. [small]: the desk's narrower column.
+ * held down. [small]: the side-by-side page's narrower column.
  */
 function ProjectPads(props: {
   projects: readonly ProjectEntry[]

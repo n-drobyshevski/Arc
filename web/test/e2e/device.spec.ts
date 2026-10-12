@@ -102,7 +102,7 @@ test("the drawn keys are Live's: SOUND, MAIN as PROJECT, ERASE, SAMPLE, FX, and 
   // SAMPLE opens its panel over the device's top; again closes it.
   const sample = ep.getByRole('button', { name: 'SAMPLE / CHOP' })
   await sample.click()
-  const panel = page.locator('.device__panel').getByRole('region', { name: 'Sample' })
+  const panel = page.locator('.ko-device__panel').getByRole('region', { name: 'Sample' })
   await expect(panel).toBeVisible()
   await expect(sample).toHaveAttribute('aria-pressed', 'true')
   await sample.click()
@@ -110,9 +110,9 @@ test("the drawn keys are Live's: SOUND, MAIN as PROJECT, ERASE, SAMPLE, FX, and 
 
   // The line over the device has STEP: its panel unrolls over the device's top too.
   await page.getByRole('button', { name: 'Step editing' }).first().click()
-  await expect(page.locator('.device__panel').getByRole('region', { name: 'Step editing' })).toBeVisible()
+  await expect(page.locator('.ko-device__panel').getByRole('region', { name: 'Step editing' })).toBeVisible()
   await page.keyboard.press('Escape')
-  await expect(page.locator('.device__panel')).toHaveCount(0)
+  await expect(page.locator('.ko-device__panel')).toHaveCount(0)
 
   // FX: a tap opens the FX sheet.
   await ep.getByRole('button', { name: 'Effects' }).click()

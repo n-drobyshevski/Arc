@@ -216,9 +216,9 @@
 }
 .guide__footer p { margin: 0; }
 
-/* ---------- the desk (web only) ---------- */
+/* ---------- wide (Kotlin GuideScreen: from 840 wide, not short) ---------- */
 
-@media (min-width: 1024px) {
+@media (min-width: 840px) and (min-height: 480px) {
   .guide__column { max-width: none; }
 
   /* The list and the device side by side (padding 24, bottom 16, gap 24),
@@ -229,8 +229,8 @@
     padding: 0 24px 16px;
     container-type: size;
   }
-  /* The list takes the room the device leaves. */
-  .guide__list-col { flex: 1 1 0; }
+  /* The list takes the room the device leaves, at most 620 wide. */
+  .guide__list-col { flex: 1 1 0; max-width: 620px; }
 
   /* The tabs wrap instead of scrolling. */
   .guide-tabs {
@@ -239,12 +239,12 @@
   }
   .guide-tabs::after { display: none; }
 
-  /* The device as tall as the room allows (its own aspect), at most half the
-   * room's width (the drawing scales to any size). */
+  /* The device as tall as the room allows (its own aspect), at most 0.55 of the
+   * room's width and 640 (the drawing scales to any size). */
   .guide__device {
     flex: none;
     align-self: flex-start;
-    width: min(50cqw, calc((100cqh - 8px) * var(--ko-aspect)));
+    width: min(55cqw, calc((100cqh - 8px) * var(--ko-aspect)), 640px);
     padding-top: 4px;
   }
 }

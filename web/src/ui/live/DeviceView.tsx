@@ -206,8 +206,8 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
   )
 
   return (
-    <div class="device" ref={box}>
-      <div class="device__box" style={{ width: `${DEVICE_W * scale}px`, height: `${DEVICE_H * scale}px` }}>
+    <div class="ko-device" ref={box}>
+      <div class="ko-device__box" style={{ width: `${DEVICE_W * scale}px`, height: `${DEVICE_H * scale}px` }}>
         <div class="ep" role="group" aria-label={WebText.DEVICE_VIEW} style={{ transform: `scale(${scale})` }}>
           {/* The top: jacks, the plate and the speaker. */}
           <span class="ep-a ep-jack ep-jack--out" aria-hidden="true">OUTPUT</span>
@@ -464,7 +464,7 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
             </>
           )}
         </div>
-        {props.panel && <div class="device__panel">{props.panel}</div>}
+        {props.panel && <div class="ko-device__panel">{props.panel}</div>}
         {card && <ShortcutCard card={card} boxWidth={DEVICE_W * scale} boxHeight={DEVICE_H * scale} onClose={() => setCard(null)} onGuide={props.onGuide} />}
       </div>
     </div>

@@ -66,6 +66,27 @@
   text-align: end;
 }
 .device-panel__num { color: var(--display-ink); }
+
+/* A short window (a phone on its side; Kotlin DevicePanel(line)): one display line, the
+ * name and OS, the meter growing between, the free space; or the hint in their place. */
+.device-panel--line {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-12);
+  min-height: 52px;
+  padding: var(--space-8) var(--space-16);
+}
+.device-panel--line > p { margin: 0; white-space: nowrap; }
+.device-panel--line .device-panel__title { flex: none; }
+.device-panel--line .device-panel__hint {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.device-panel__meter { flex: 1 1 0; min-width: 40px; }
+.device-panel__line-free { flex: none; }
 .device-panel__label { color: var(--display-dim); }
 
 /* ---------- the library ---------- */

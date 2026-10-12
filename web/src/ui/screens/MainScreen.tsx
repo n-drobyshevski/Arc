@@ -33,7 +33,7 @@ import { IconBlock } from '../components/IconBlock'
 import { ArcIcon } from '../components/Icons'
 import { Key } from '../components/Key'
 import { Meter } from '../components/Meter'
-import { useDesk } from '../useDesk'
+import { SHORT_QUERY, useDesk, useMedia } from '../useDesk'
 import './MainScreen.css'
 
 export interface MainScreenProps {
@@ -123,6 +123,8 @@ export function folderModel(
 export function MainScreen(props: MainScreenProps): JSX.Element {
   const { state } = props
   const desk = useDesk()
+  // On a short window (a phone on its side) the panel is one line, so the backups show without scrolling.
+  const short = useMedia(SHORT_QUERY)
   const hasBackups = state.backups.length > 0
   const folder = folderModel(state)
   const totalSize = state.backups.reduce((sum, b) => sum + b.size, 0)
@@ -133,7 +135,7 @@ export function MainScreen(props: MainScreenProps): JSX.Element {
   const device = (
     <>
       <Caption text={NavText.DEVICE_CAPTION} />
-      <DevicePanel state={state} />
+      <DevicePanel state={state} line={short} />
 
       {/* The big key stays until the first backup; after it, the orange block opens the caption row below. */}
       {!hasBackups && (
@@ -253,8 +255,31 @@ export function MainScreen(props: MainScreenProps): JSX.Element {
   )
 }
 
-function DevicePanel(props: { state: UiState }): JSX.Element {
+/** [line]: one display line (Kotlin DevicePanel(line)): the name and OS, then the meter and free space, or the hint in their place. */
+function DevicePanel(props: { state: UiState; line?: boolean }): JSX.Element {
   const m = devicePanel(props.state)
+  if (props.line) {
+    return (
+      <DisplayPanel class="device-panel device-panel--line">
+        <p class="t-display-head device-panel__title">{m.title}</p>
+        {m.sub.length !== 0 && <p class="t-display-sub device-panel__sub">{m.sub}</p>}
+        {m.hint !== null ? (
+          <p class="t-display-hint device-panel__hint">{m.hint}</p>
+        ) : (
+          <>
+            <div class="device-panel__meter" role={m.meterText ? 'img' : undefined} aria-label={m.meterText || undefined}>
+              <Meter fraction={m.fraction} height={14} />
+            </div>
+            {m.stats?.free != null && (
+              <p class="t-display-sub device-panel__line-free">
+                <span class="device-panel__num">{bytes(m.stats.free)}</span> <span class="device-panel__label">{Strings.FREE}</span>
+              </p>
+            )}
+          </>
+        )}
+      </DisplayPanel>
+    )
+  }
   return (
     <DisplayPanel class="device-panel">
       {/* .display-head: space-between, aligned on the text baseline */}

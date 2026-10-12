@@ -8,7 +8,7 @@
 // The last message stays rendered while the toast fades out.
 //
 // Web: a toast may carry a key (Live's UNDO, ToastMsg.action) at its end, in
-// signal orange; it stays as long as an error, so there is time to press it.
+// signal orange; it stays 6 s (Kotlin's toast with an action), so there is time to press it.
 //
 // Swiping it sideways or down dismisses it at once, as with a notification
 // (past 30% of its width sideways, half its height down, or a fling faster
@@ -24,12 +24,14 @@ import './Toast.css'
 
 export const TOAST_MS = 3200
 export const ERROR_TOAST_MS = 7000
+/** A toast with a key to press (UNDO), as Components.kt's 6000. */
+export const ACTION_TOAST_MS = 6000
 /** The fade (Compose fadeIn() / fadeOut() default tween). */
 const FADE_MS = 150
 
-/** How long a toast stays: longer for an error, or one with a key to press. */
+/** How long a toast stays: longest for an error, longer for one with a key to press. */
 export function toastDuration(error: boolean, action = false): number {
-  return error || action ? ERROR_TOAST_MS : TOAST_MS
+  return error ? ERROR_TOAST_MS : action ? ACTION_TOAST_MS : TOAST_MS
 }
 
 /** A fling faster than this (px/s, Kotlin 700.dp) dismisses the toast that way. */
