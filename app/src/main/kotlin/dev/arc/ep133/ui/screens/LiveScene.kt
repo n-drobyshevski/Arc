@@ -7,8 +7,13 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
@@ -26,8 +31,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,6 +42,9 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
@@ -51,6 +61,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -59,7 +72,9 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.onLongClick
@@ -75,19 +90,24 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import dev.arc.ep133.controller.ChainUi
 import dev.arc.ep133.controller.ClipMode
 import dev.arc.ep133.controller.PadStage
 import dev.arc.ep133.controller.SceneUi
 import dev.arc.ep133.controller.cycled
+import dev.arc.ep133.features.ChainPlay
 import dev.arc.ep133.features.Seq
 import dev.arc.ep133.features.SwitchTime
+import dev.arc.ep133.text.CoachText
 import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.ui.components.ArcWindow
+import dev.arc.ep133.ui.components.coachMark
 import dev.arc.ep133.ui.theme.ArcType
 import dev.arc.ep133.ui.theme.LocalArcColors
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
+import kotlin.math.ceil
 
 /*
  * Scenes on Live (an addition, after the EP-133's own patterns and scenes:
@@ -97,9 +117,12 @@ import kotlinx.coroutines.launch
  * panel over the function keys, as STEP's does ([SampleMorph],
  * [PanelKind.SCENE]), all of it on the line's dark screen: ▶, the scene's −
  * and + and the status in the line's own row ([SceneHeader]); then the four
- * groups' columns, each its pattern's number with − / + and NEXT FREE, COMMIT,
- * CLR (held 2 s; DEL on an empty scene) and CHANGE, and the CLIP row with its
- * bar pages ([SceneDeck]). Where the line rides in the top bar, the panel
+ * groups' columns, each its pattern's number with − / + and NEXT FREE; the
+ * CHAIN row (the order the scenes play in: ON, its steps with their passes,
+ * ＋ for the scene shown, and while it plays the step lit with its pass and a
+ * thin bar for the pass's progress: [ChainBlock]); COMMIT, CLR (held 2 s; DEL
+ * on an empty scene) and CHANGE, and the CLIP row with its bar pages
+ * ([SceneDeck]). Where the line rides in the top bar, the panel
  * comes out in the function keys' column with its own header ([SceneBodyFace]).
  * Unlike STEP's, the panel stays open while the pattern plays, so the pads
  * under it stay playable and a pick made on it waits for its bar or pattern
@@ -119,6 +142,10 @@ import kotlinx.coroutines.launch
  * the grid ([onPatternPick]), COMMIT ([onCommit]), CLR / DEL once held 2 s
  * ([onErase]), CHANGE ([onSwitch]), the CLIP row's PTN, BAR and PAD
  * ([onClipMode]), a bar page ([onBar]), COPY and PASTE ([onCopy], [onPaste]).
+ * The CHAIN row: ON ([onChainOn]), ＋ ([onChainAdd]), a tap on a step for its
+ * next passes ([onChainMore]), a long press to remove it ([onChainRemove]) and
+ * for a screen reader "Fewer passes" ([onChainFewer]); [chainProgress] says how
+ * far along its pass the chain is at a frame time (read as it draws).
  * [unroll] catches the panel that far along its motion, [holding] CLR / DEL
  * that far along its hold, and [still] keeps the blinks steady (screenshots).
  */
@@ -144,6 +171,12 @@ class LiveScene(
     val onBar: (bar: Int) -> Unit = {},
     val onCopy: () -> Unit = {},
     val onPaste: () -> Unit = {},
+    val onChainOn: (Boolean) -> Unit = {},
+    val onChainAdd: () -> Unit = {},
+    val onChainMore: (step: Int) -> Unit = {},
+    val onChainFewer: (step: Int) -> Unit = {},
+    val onChainRemove: (step: Int) -> Unit = {},
+    val chainProgress: (now: Long) -> Float? = { null },
 )
 
 /**
@@ -202,11 +235,24 @@ private val SceneMinHeight = 330.dp
 /**
  * The SCENE panel's controls on the panel's dark screen, under its header
  * (or under the header in its own body, [SceneBodyFace]), as tall as [bar]
- * says: the four groups' columns; COMMIT, CLR and CHANGE; the CLIP row, and
- * under it, in BAR, the focused group's bar pages.
+ * says: the four groups' columns; the CHAIN row with [chainLines] lines of
+ * steps; COMMIT, CLR and CHANGE; the CLIP row, and under it, in BAR, the
+ * focused group's bar pages.
  */
-internal fun sceneDeckHeight(bar: Boolean): Dp =
-    SceneColumnsRow + SceneGap + SceneKeyRow + SceneGap + SceneKeyRow + if (bar) SceneGap + SceneBarRow else 0.dp
+internal fun sceneDeckHeight(bar: Boolean, chainLines: Int = 1): Dp =
+    SceneColumnsRow + SceneGap + chainBlockHeight(chainLines) + SceneGap + SceneKeyRow + SceneGap + SceneKeyRow + if (bar) SceneGap + SceneBarRow else 0.dp
+
+/** [sceneDeckHeight] for [ui] in a deck [deckWidth] wide: the chain's steps take [chainLinesFor]'s lines. */
+internal fun sceneDeckHeight(ui: SceneUi, deckWidth: Dp): Dp =
+    sceneDeckHeight(ui.clipMode == ClipMode.BAR, chainLinesFor(ui.chain.chain.steps.size, deckWidth))
+
+/**
+ * The lines the CHAIN row's [steps] wrap into in a deck [deckWidth] wide: none for an empty chain (its ＋ goes along
+ * the head), at most one on a narrow deck (a small phone's, so the pads keep their room; more steps scroll), else as
+ * many as the width takes, up to [ChainMaxLines].
+ */
+internal fun chainLinesFor(steps: Int, deckWidth: Dp): Int =
+    if (steps == 0) 0 else minOf(chainLines(steps, deckWidth), if (deckWidth < SceneTight) 1 else ChainMaxLines)
 
 /**
  * SCENE's header, in the display line's own row as the line grows into the
@@ -322,6 +368,11 @@ internal fun SceneDeck(scene: LiveScene, panel: SamplePanel, hold: SceneHold, ha
     BoxWithConstraints(modifier.fillMaxSize()) {
         // A narrow deck (a small phone's) sets its words a size down and its keys closer.
         val tight = maxWidth < SceneTight
+        // The chain's steps take the lines the width gives them, no more than the deck's room leaves (a window on its side).
+        val deckWidth = maxWidth
+        val rest = sceneDeckHeight(ui.clipMode == ClipMode.BAR, 0)
+        val room = ((maxHeight - rest) / ChainLine).toInt()
+        val lines = minOf(chainLinesFor(ui.chain.chain.steps.size, deckWidth), room).coerceAtLeast(0)
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(SceneGap)) {
             Row(
                 Modifier.fadeIn { panel.row(false) }.fillMaxWidth().height(SceneColumnsRow),
@@ -329,6 +380,7 @@ internal fun SceneDeck(scene: LiveScene, panel: SamplePanel, hold: SceneHold, ha
             ) {
                 for (g in 0..3) GroupColumn(g, scene, haptics, tight, Modifier.weight(1f).fillMaxHeight())
             }
+            ChainBlock(scene, haptics, tight, deckWidth, lines, Modifier.fadeIn { panel.row(true) })
             Row(
                 Modifier.fadeIn { panel.row(true) }.fillMaxWidth().height(SceneKeyRow),
                 verticalAlignment = Alignment.CenterVertically,
@@ -404,11 +456,293 @@ internal fun SceneDeck(scene: LiveScene, panel: SamplePanel, hold: SceneHold, ha
 internal fun SceneBodyFace(scene: LiveScene, panel: SamplePanel, hold: SceneHold, haptics: Boolean, modifier: Modifier = Modifier) {
     val c = LocalArcColors.current
     BoxWithConstraints(modifier.fillMaxSize()) {
-        val deck = sceneDeckHeight(scene.ui.clipMode == ClipMode.BAR)
+        val deck = sceneDeckHeight(scene.ui, maxWidth - WaveSide * 2)
         Column(Modifier.fillMaxWidth().heightIn(max = maxHeight).clip(RoundedCornerShape(BodyCorner)).background(c.display)) {
             Box(Modifier.fillMaxWidth().height(BodyHeader)) { SceneHeader(scene, hold, haptics) }
             SceneDeck(scene, panel, hold, haptics, Modifier.weight(1f, fill = false).height(deck + WaveFoot).padding(start = WaveSide, end = WaveSide, bottom = WaveFoot))
         }
+    }
+}
+
+// ---------- the CHAIN row ----------
+
+/** The CHAIN row's rows: its head (CHAIN, ON, the readout), a line of steps, and the pass's thin bar. */
+private val ChainHeadRow = 30.dp
+private val ChainLine = 32.dp
+private val ChainBarRow = 6.dp
+
+/** The most lines of steps the row shows at once (a longer chain scrolls, the lit step kept in view). */
+private const val ChainMaxLines = 3
+
+/** A step's chip and the joint after it (→, and ↻ after ＋), by the deck's width: tight (a small phone's) closes them up. */
+private val ChainChip = 56.dp
+private val ChainChipTight = 50.dp
+private val ChainJoint = 14.dp
+private val ChainJointTight = 12.dp
+
+// How many steps (and ＋) a line takes in a deck [width] wide.
+private fun chainPerLine(width: Dp): Int {
+    val tight = width < SceneTight
+    return (width / ((if (tight) ChainChipTight else ChainChip) + (if (tight) ChainJointTight else ChainJoint))).toInt().coerceAtLeast(1)
+}
+
+/** The lines the CHAIN row's [steps] and its ＋ take in a deck [width] wide, 1 to [ChainMaxLines]. */
+internal fun chainLines(steps: Int, width: Dp): Int = ceil((steps + 1).toFloat() / chainPerLine(width)).toInt().coerceIn(1, ChainMaxLines)
+
+/** The CHAIN row as tall as it is with [lines] lines of steps (none: the head alone, where a window on its side has no room). */
+internal fun chainBlockHeight(lines: Int): Dp = ChainHeadRow + if (lines > 0) ChainLine * lines + ChainBarRow else 0.dp
+
+/**
+ * The CHAIN row (a coach mark "live.chain"): its caption, the ON chip (dimmed with no steps) and, while the chain
+ * plays, the readout in signal orange ("S03 · PASS 1/2", the step lit below); then the steps as chips with a → after
+ * each ("S03 ×2 → S04 →"), wrapping into [lines] lines (a longer chain scrolls, following the step lit), a tap on one
+ * for its next passes (×1 ×2 ×4 ×8), a long press to remove it, and a dashed "＋ S03" after them that adds the scene
+ * shown, with ↻ (the chain loops) once there are steps; under them a thin bar for how far along its pass the chain is.
+ * A screen reader gets each step's passes as actions ("More passes", "Fewer passes", "Remove step").
+ */
+@Composable
+private fun ChainBlock(scene: LiveScene, haptics: Boolean, tight: Boolean, width: Dp, lines: Int, modifier: Modifier = Modifier) {
+    val c = LocalArcColors.current
+    val ui = scene.ui.chain
+    val steps = ui.chain.steps
+    val lit = ui.step
+    val playing = lit != null
+    val now = remember { mutableLongStateOf(System.nanoTime()) }
+    LaunchedEffect(playing, scene.still) {
+        if (playing && !scene.still) while (true) withFrameNanos { now.longValue = System.nanoTime() }
+    }
+    Column(modifier.fillMaxWidth().height(chainBlockHeight(lines)).coachMark("live.chain", CoachText.CHAIN, c.signal, c.onSignal)) {
+        Row(
+            Modifier.fillMaxWidth().height(ChainHeadRow),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(if (tight) 4.dp else 6.dp),
+        ) {
+            SceneWord(MirrorText.CHAIN)
+            ChainOnChip(scene, tight)
+            if (lines == 0) {
+                // No room for lines of steps (a window on its side): the steps and ＋ go along the head, scrolling.
+                ChainStrip(scene, haptics, tight, Modifier.weight(1f))
+            } else {
+                Spacer(Modifier.weight(1f))
+            }
+            if (lit != null && lines > 0) {
+                val readout = MirrorText.sceneLabel(steps[lit].scene) + " \u00B7 " + MirrorText.chainPass(ChainPlay(lit, ui.pass), ui.chain)
+                Text(
+                    readout.uppercase(),
+                    style = viewWordStyle(if (tight) 9.dp else 10.dp, 0.07f).copy(fontFeatureSettings = "tnum"),
+                    color = c.signal,
+                    maxLines = 1,
+                    softWrap = false,
+                    modifier = Modifier.clearAndSetSemantics { },
+                )
+            }
+        }
+        if (lines > 0) {
+            ChainSteps(scene, haptics, tight, width, lines)
+            // The pass's progress: a thin bar under the steps, only while the chain plays.
+            Box(Modifier.fillMaxWidth().height(ChainBarRow).padding(vertical = 2.dp).clearAndSetSemantics { }) {
+                if (playing) {
+                    val track = c.displayDim.copy(alpha = 0.3f)
+                    Box(
+                        Modifier.fillMaxSize().drawBehind {
+                            drawRect(track)
+                            val f = scene.chainProgress(now.longValue) ?: 0f
+                            drawRect(c.signal, size = Size(size.width * f, size.height))
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** ON on the CHAIN row: lit signal orange while the chain is on; dimmed, and not pressable, with no steps to play. */
+@Composable
+private fun ChainOnChip(scene: LiveScene, tight: Boolean) {
+    val c = LocalArcColors.current
+    val ui = scene.ui.chain
+    val on = ui.chain.on
+    val can = ui.canTurnOn
+    val face = lerp(c.display, c.displayDim, SceneKeyShade)
+    Box(
+        Modifier
+            .heightIn(min = ChainHeadRow)
+            .toggleable(value = on, enabled = can, role = Role.Switch, interactionSource = remember { MutableInteractionSource() }, indication = null) { scene.onChainOn(it) }
+            .semantics {
+                contentDescription = MirrorText.chainOnName(on)
+                stateDescription = if (can) MirrorText.chainName(ui.chain.steps.size, on) else MirrorText.CHAIN_EMPTY
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            MirrorText.CHAIN_ON.uppercase(),
+            style = viewWordStyle(if (tight) 10.dp else 11.dp, 0.07f),
+            color = if (on) c.onSignal else c.displayInk,
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier
+                .graphicsLayer { alpha = if (can) 1f else 0.4f }
+                .clip(RoundedCornerShape(7.dp))
+                .background(if (on) c.signal else face)
+                .padding(horizontal = if (tight) 6.dp else 9.dp, vertical = 4.dp)
+                .clearAndSetSemantics { },
+        )
+    }
+}
+
+/** The steps and ＋ in one scrolling line, in the head row where there is no room for lines ([ChainBlock]); the step lit comes into view. */
+@Composable
+private fun ChainStrip(scene: LiveScene, haptics: Boolean, tight: Boolean, modifier: Modifier) {
+    val ui = scene.ui.chain
+    val steps = ui.chain.steps
+    val scroll = rememberScrollState()
+    val item = with(androidx.compose.ui.platform.LocalDensity.current) { ((if (tight) ChainChipTight else ChainChip) + (if (tight) ChainJointTight else ChainJoint)).roundToPx() }
+    LaunchedEffect(ui.step) {
+        val lit = ui.step
+        if (lit != null && !scene.still) scroll.animateScrollTo(lit * item)
+    }
+    Row(modifier.horizontalScroll(scroll), verticalAlignment = Alignment.CenterVertically) {
+        for (i in steps.indices) ChainStepItem(scene, haptics, tight, i, ChainHeadRow)
+        ChainAddItem(scene, tight, steps.isNotEmpty(), ChainHeadRow)
+    }
+}
+
+/** The steps and ＋ in [lines] lines of [chainPerLine] each. */
+@Composable
+private fun ChainSteps(scene: LiveScene, haptics: Boolean, tight: Boolean, width: Dp, lines: Int) {
+    val ui = scene.ui.chain
+    val steps = ui.chain.steps
+    val per = chainPerLine(width)
+    val items = steps.size + 1
+    val rows = ceil(items.toFloat() / per).toInt()
+    val scroll = rememberScrollState()
+    // A chain longer than the room scrolls; the line of the step lit comes into view.
+    val litLine = ui.step?.let { it / per }
+    val lineHeight = with(androidx.compose.ui.platform.LocalDensity.current) { ChainLine.roundToPx() }
+    LaunchedEffect(litLine, rows > lines) {
+        if (litLine != null && rows > lines && !scene.still) scroll.animateScrollTo(minOf(litLine, rows - lines) * lineHeight)
+    }
+    Column(Modifier.fillMaxWidth().height(ChainLine * lines).verticalScroll(scroll)) {
+        for (row in 0 until rows) {
+            Row(Modifier.fillMaxWidth().height(ChainLine), verticalAlignment = Alignment.CenterVertically) {
+                for (i in row * per until minOf(items, (row + 1) * per)) {
+                    if (i < steps.size) ChainStepItem(scene, haptics, tight, i) else ChainAddItem(scene, tight, steps.isNotEmpty())
+                }
+            }
+        }
+    }
+}
+
+/** A step: its chip ("S03 ×2", outlined in signal orange while it plays) and the → after it. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ChainStepItem(scene: LiveScene, haptics: Boolean, tight: Boolean, index: Int, line: Dp = ChainLine) {
+    val c = LocalArcColors.current
+    val ui = scene.ui.chain
+    val step = ui.chain.steps[index]
+    val lit = ui.step == index
+    val tick = if (haptics) LocalHapticFeedback.current else null
+    val shape = RoundedCornerShape(7.dp)
+    val chip = if (tight) ChainChipTight else ChainChip
+    val count = ui.chain.steps.size
+    val current by rememberUpdatedState(scene)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .size(chip, line)
+                .combinedClickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    role = Role.Button,
+                    onClick = {
+                        tick?.performHapticFeedback(HapticFeedbackType.KeyboardTap)
+                        current.onChainMore(index)
+                    },
+                    onLongClick = {
+                        tick?.performHapticFeedback(HapticFeedbackType.LongPress)
+                        current.onChainRemove(index)
+                    },
+                )
+                .semantics {
+                    contentDescription = MirrorText.chainStepName(index + 1, count, step)
+                    selected = lit
+                    customActions = listOf(
+                        CustomAccessibilityAction(MirrorText.CHAIN_MORE_PASSES) { current.onChainMore(index); true },
+                        CustomAccessibilityAction(MirrorText.CHAIN_FEWER_PASSES) { current.onChainFewer(index); true },
+                        CustomAccessibilityAction(MirrorText.CHAIN_REMOVE) { current.onChainRemove(index); true },
+                    )
+                    onLongClick(label = MirrorText.CHAIN_REMOVE) {
+                        current.onChainRemove(index)
+                        true
+                    }
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                MirrorText.chainStep(step).uppercase(),
+                style = viewWordStyle(if (tight) 9.dp else 10.dp, 0.04f).copy(fontFeatureSettings = "tnum"),
+                color = if (lit) lerp(c.signal, c.displayInk, 0.35f) else c.displayInk,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier
+                    .size(chip, line - 6.dp)
+                    .clip(shape)
+                    .background(lerp(c.display, c.displayDim, 0.10f))
+                    .border(if (lit) 1.5.dp else 1.dp, if (lit) c.signal else c.displayDim.copy(alpha = 0.6f), shape)
+                    .wrapContentSize(Alignment.Center)
+                    .clearAndSetSemantics { },
+            )
+        }
+        ChainJointGlyph("\u2192", tight, line)
+    }
+}
+
+/** ＋ and the scene it adds ("＋ S03"), a dashed chip; after it ↻ once there are [looping] steps to loop. */
+@Composable
+private fun ChainAddItem(scene: LiveScene, tight: Boolean, looping: Boolean, line: Dp = ChainLine) {
+    val c = LocalArcColors.current
+    val ui = scene.ui.chain
+    val chip = if (tight) ChainChipTight else ChainChip
+    val shape = RoundedCornerShape(7.dp)
+    val dash = c.displayDim.copy(alpha = if (ui.canAdd) 0.9f else 0.4f)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .size(chip, line)
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = scene.onChainAdd)
+                .semantics { contentDescription = MirrorText.chainAddName(ui.scene) },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                "\uFF0B " + MirrorText.sceneLabel(ui.scene),
+                style = viewWordStyle(if (tight) 9.dp else 10.dp, 0.04f).copy(fontFeatureSettings = "tnum"),
+                color = if (ui.canAdd) c.displayInk else c.displayDim,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier
+                    .size(chip, line - 6.dp)
+                    .clip(shape)
+                    .drawBehind {
+                        drawRoundRect(
+                            dash,
+                            cornerRadius = CornerRadius(7.dp.toPx()),
+                            style = Stroke(1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(5.dp.toPx(), 3.dp.toPx()))),
+                        )
+                    }
+                    .wrapContentSize(Alignment.Center)
+                    .clearAndSetSemantics { },
+            )
+        }
+        if (looping) ChainJointGlyph("\u21BB", tight, line)
+    }
+}
+
+// The glyph after a chip: → between steps, ↻ at the chain's end.
+@Composable
+private fun ChainJointGlyph(glyph: String, tight: Boolean, line: Dp = ChainLine) {
+    val c = LocalArcColors.current
+    Box(Modifier.size(if (tight) ChainJointTight else ChainJoint, line).clearAndSetSemantics { }, contentAlignment = Alignment.Center) {
+        Text(glyph, style = viewWordStyle(10.dp, 0f).copy(lineHeight = 1.em), color = c.displayDim, maxLines = 1, softWrap = false)
     }
 }
 

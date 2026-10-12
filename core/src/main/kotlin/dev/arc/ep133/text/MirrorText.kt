@@ -1,5 +1,8 @@
 package dev.arc.ep133.text
 
+import dev.arc.ep133.features.Chain
+import dev.arc.ep133.features.ChainPlay
+import dev.arc.ep133.features.ChainStep
 import dev.arc.ep133.features.FactorySounds
 import dev.arc.ep133.features.FxSettings
 import dev.arc.ep133.features.FxType
@@ -250,6 +253,45 @@ object MirrorText {
     const val TAB_SOUNDS = "Sounds"
     /** The hint beside the one-octave key picker. */
     const val KEY_HINT = "tap a note"
+
+    // Live tools as a front page: the now display, and the rows that open its pages.
+    /** The back control on a page, for screen readers (it shows "\u2039 Play"). */
+    const val BACK_TO_TOOLS = "Back to Live tools"
+    const val HELP = "Help"
+    /** On the now display while a take records: what the take holds. */
+    const val PHONE_MIX = "phone mix"
+    /** On the now display while a take is armed: nothing records until the first sound. */
+    const val TAKE_ARMED = "Waiting for the first sound"
+    /** On the now display before anything is played on the EP-133 (the phone's own taps don't reach it). */
+    const val PLAY_HINT = "Play the EP-133's pads or keys"
+
+    /** "Group A \u00B7 Follow" (Follow on) or "Group A": the now display's state line for one group. */
+    fun groupLine(group: Int, follow: Boolean) = "$GROUP ${'A' + group}" + if (follow) " \u00B7 $FOLLOW" else ""
+
+    /** "Keys \u00B7 DO major": the now display's state line in KEYS ([root] is a pitch class). */
+    fun keysLine(root: Int, scale: dev.arc.ep133.features.Scale, names: dev.arc.ep133.features.NoteNames) =
+        "$KEYS \u00B7 ${dev.arc.ep133.features.Keys.name(root, names)} ${scaleName(scale).lowercase()}"
+
+    /** "last note", or "last note \u00B7 ch 1" while the channel is known: dim beside the big note name. */
+    const val LAST_NOTE = "last note"
+    fun lastNoteChannel(ch: Int) = "$LAST_NOTE \u00B7 ${channel(ch)}"
+
+    /** The Play row's summary: "One group \u00B7 Follow on", "All groups \u00B7 Pads \u00B7 Repeat off" ([repeat] null: no note repeat), "Key DO \u00B7 Major". */
+    fun playOneGroup(follow: Boolean) = "$ONE_GROUP \u00B7 $FOLLOW ${onOff(follow).lowercase()}"
+    fun playAllGroups(repeat: Boolean?) = "$ALL_GROUPS \u00B7 $MODE_PADS" + (repeat?.let { " \u00B7 Repeat ${onOff(it).lowercase()}" } ?: "")
+    fun playKeys(root: Int, scale: dev.arc.ep133.features.Scale, names: dev.arc.ep133.features.NoteNames) =
+        "$KEY ${dev.arc.ep133.features.Keys.name(root, names)} \u00B7 ${scaleName(scale)}"
+
+    /** The Takes row's summary: "Recording 0:12", "Waiting for the first sound" (armed, [TAKE_ARMED]), "2 takes \u00B7 last Oct 5, 2:23 PM", "No takes yet". */
+    fun takesRecording(seconds: Double) = "Recording ${takeLength(seconds)}"
+    fun takesSummary(count: Int, last: String) = "${Format.plural(count, "take")} \u00B7 last $last"
+    const val NO_TAKES = "No takes yet"
+
+    /** A row that opens a page, for screen readers: "Play, One group \u00B7 Follow on". */
+    fun toolsRow(name: String, summary: String) = "$name, $summary"
+
+    /** The foot of the Takes page: its hints, folded. */
+    const val ABOUT_TAKES = "About takes"
 
     /** "Keys \u00B7 MI4", the small display of the last note in the tools (upper-cased where shown). */
     fun lastNote(note: Int, names: dev.arc.ep133.features.NoteNames) = "$KEYS \u00B7 ${noteName(note, names)}"
@@ -898,6 +940,44 @@ object MirrorText {
     /** The pattern sheet's SCENE CHANGE row, the same setting: its caption and a line under the choices. */
     const val SCENE_CHANGE = "Scene change"
     const val SCENE_CHANGE_NOTE = "Playing: a new pattern or scene waits for the bar's or pattern's end. Stopped: always at once."
+
+    // The CHAIN row (upper-cased where shown): the order the scenes play in, with the passes each plays.
+    /** The row's caption, its ON switch, and ＋ (adds the scene shown). */
+    const val CHAIN = "Chain"
+    const val CHAIN_ON = "On"
+    const val CHAIN_ADD = "Add"
+
+    /** "S03": a step; "S03 ×2": a step of 2 passes (1 pass is not written). */
+    fun chainStep(step: ChainStep) = sceneLabel(step.scene) + if (step.passes > 1) " \u00D7${step.passes}" else ""
+
+    /** "×2": the passes a tap on the step cycles to (×1 ×2 ×4 ×8). */
+    fun chainPasses(passes: Int) = "\u00D7$passes"
+
+    /** "Pass 2/4": where the playing chain is in its step, the readout under the row. */
+    fun chainPass(play: ChainPlay, chain: Chain) = "Pass ${play.pass}/${play.passes(chain)}"
+
+    /** The row's status words: nothing in it yet, 64 steps already, and (the toast) a scene picked by hand turning the chain off. */
+    const val CHAIN_EMPTY = "Chain empty. + adds the scene shown"
+    const val CHAIN_FULL = "Chain is full"
+    const val CHAIN_OFF_BY_HAND = "Chain off: you picked a scene."
+
+    /** "S03 added to chain": ＋ added the scene at [index]. */
+    fun chainAdded(index: Int) = "${sceneLabel(index)} added to chain"
+
+    /** What the row does, for a line under it. */
+    const val CHAIN_NOTE = "Plays the steps in order, each scene for its passes, then the next at the end of its longest pattern. Tap a step for x1 x2 x4 x8, hold it to remove. Picking a scene by hand turns the chain off."
+
+    // The CHAIN row for screen readers.
+    fun chainName(steps: Int, on: Boolean) = "Chain, ${if (steps == 1) "1 step" else "$steps steps"}, ${if (on) "on" else "off"}"
+    fun chainAddName(index: Int) = "Add scene ${index + 1} to the chain"
+    fun chainOnName(on: Boolean) = if (on) "Chain on: plays the scenes in order. Tap to turn off" else "Chain off. Tap to turn on"
+    fun chainStepName(position: Int, count: Int, step: ChainStep) =
+        "Chain step $position of $count, scene ${step.scene + 1}, ${if (step.passes == 1) "1 pass" else "${step.passes} passes"}"
+    /** The step's actions for a screen reader: the same as a tap and a long press, in words. */
+    const val CHAIN_MORE_PASSES = "More passes"
+    const val CHAIN_FEWER_PASSES = "Fewer passes"
+    const val CHAIN_REMOVE = "Remove step"
+    fun chainPassSpoken(position: Int, count: Int, play: ChainPlay, chain: Chain) = "Chain step $position of $count, pass ${play.pass} of ${play.passes(chain)}"
 
     /** CLIP: PTN, BAR and PAD (their names for screen readers), COPY and PASTE, and the bar pages' row ("Group A · bar", "Clip · A bar 2"). */
     const val CLIP = "Clip"

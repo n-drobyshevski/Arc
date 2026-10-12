@@ -111,14 +111,15 @@ function selectScene(seq: ProjectSeq, index: number): ProjectSeq {
 function newScene(seq: ProjectSeq): ProjectSeq {
   if (seq.scenes.length >= Seq.MAX_SCENES) return seq
   const s: Scene = { patterns: [0, 1, 2, 3].map((g) => nextFree(seq, g)) }
-  return ProjectSeq.withScenes(seq, [...seq.scenes, s], seq.scenes.length)
+  return ProjectSeq.withSceneInserted(seq, seq.scenes.length, s)
 }
 
 /**
  * COMMIT (SHIFT + MAIN): a copy of the scene, right after it, selected. Each
  * group's pattern with notes is copied into the group's next free pattern,
  * which the new scene plays; an empty one is shared as it is. A group with no
- * free pattern left shares its pattern too. None past 99 scenes.
+ * free pattern left shares its pattern too. None past 99 scenes. The chain's
+ * steps naming the scenes after it name the next ones (the copy is in no step).
  */
 function commit(seq: ProjectSeq): ProjectSeq {
   if (seq.scenes.length >= Seq.MAX_SCENES) return seq
@@ -131,7 +132,7 @@ function commit(seq: ProjectSeq): ProjectSeq {
     return to
   })
   const at = seq.scene + 1
-  return ProjectSeq.withScenes(out, [...seq.scenes.slice(0, at), { patterns: numbers }, ...seq.scenes.slice(at)], at)
+  return ProjectSeq.withSceneInserted(out, at, { patterns: numbers })
 }
 
 /** CLR: the scene's four patterns lose their notes; the lengths stay, as PatternRecorder.clear keeps them. */
@@ -142,11 +143,12 @@ function clearScene(seq: ProjectSeq): ProjectSeq {
 /**
  * DEL: the scene goes, when its four patterns have no notes and it isn't the
  * only one; the later ones move down and the index stays (on the last one
- * when it was the last).
+ * when it was the last). The chain loses the scene's steps and the later
+ * scenes' steps name the scene before.
  */
 function deleteScene(seq: ProjectSeq): ProjectSeq {
   if (!ProjectPatterns.isEmpty(ProjectSeq.playing(seq)) || seq.scenes.length <= 1) return seq
-  return ProjectSeq.withScenes(seq, seq.scenes.filter((_, i) => i !== seq.scene), seq.scene)
+  return ProjectSeq.withSceneRemoved(seq, seq.scene, seq.scene)
 }
 
 /** ERASE + MAIN held: deleteScene when it can (the scene empty, and not the only one), else clearScene. */

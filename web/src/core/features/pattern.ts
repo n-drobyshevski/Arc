@@ -29,7 +29,12 @@
 //   (`s.record` is `TimingSettings.record(s)`).
 // - fromJson reads through JSON.parse, with kotlinx's intOrNull as in
 //   offlinePads.
+// - The project's chain (Chain, in chain.ts) is a field of ProjectSeq;
+//   `projectSeq()` holds it to the scenes as Kotlin's `ProjectSeq(...)` does,
+//   and withChain, withSceneRemoved and withSceneInserted are on the
+//   ProjectSeq object.
 
+import { Chain } from './chain'
 import { padKey } from './padNotes'
 import { BEATS_PER_BAR } from './tempo'
 
@@ -189,23 +194,33 @@ export const Scene = { with: sceneWith } as const
  * bank is blank (a bar, no notes): a bank never holds one, so projects with
  * the same patterns are equal. `projectSeq()` keeps that true, with 4 banks,
  * 1 to 99 scenes and the index on one of them; the default is one scene of
- * patterns 1 and nothing in the banks.
+ * patterns 1 and nothing in the banks. The [chain] is the order the scenes
+ * play in (Chain); its steps name scenes by index, so only the functions that
+ * change the scenes together with the chain (withSceneRemoved,
+ * withSceneInserted, withScenes with a chain) keep it pointing at the right
+ * ones.
  */
 export interface ProjectSeq {
   readonly banks: readonly ReadonlyMap<number, Pattern>[]
   readonly scenes: readonly Scene[]
   readonly scene: number
+  readonly chain: Chain
 }
 
 const BLANK = pattern()
 
 /** A project's sequencer with blank patterns left out of the banks, 1 to 99 scenes and [index] held to them. */
-export function projectSeq(banks: readonly ReadonlyMap<number, Pattern>[] = [], scenes: readonly Scene[] = [scene()], index = 0): ProjectSeq {
+export function projectSeq(
+  banks: readonly ReadonlyMap<number, Pattern>[] = [],
+  scenes: readonly Scene[] = [scene()],
+  index = 0,
+  chain: Chain = Chain.EMPTY,
+): ProjectSeq {
   const b = [0, 1, 2, 3].map(
     (g) => new Map([...(banks[g] ?? new Map<number, Pattern>())].filter(([n, p]) => n >= 1 && n <= Seq.MAX_PATTERNS && !samePattern(p, BLANK))),
   )
   const s = scenes.length === 0 ? [scene()] : scenes.slice(0, Seq.MAX_SCENES)
-  return { banks: b, scenes: s, scene: Math.min(Math.max(index, 0), s.length - 1) }
+  return { banks: b, scenes: s, scene: Math.min(Math.max(index, 0), s.length - 1), chain: Chain.held(chain, s.length) }
 }
 
 /** The scene playing. */
@@ -247,9 +262,43 @@ function withPattern(p: ProjectSeq, group: number, n: number, pat: Pattern): Pro
   return { ...p, banks: p.banks.map((old, g) => (g === group ? bank : old)) }
 }
 
-/** Other [scenes], the one at [index] playing (held to them). */
-function withScenes(p: ProjectSeq, scenes: readonly Scene[], index: number = p.scene): ProjectSeq {
-  return projectSeq(p.banks, scenes, index)
+/**
+ * Other [scenes], the one at [index] playing (held to them), and [chain] (the
+ * chain as it is by default) held to them: a step naming a scene past the last
+ * is dropped. Nothing is renumbered; for scenes taken out or put in the middle
+ * use withSceneRemoved or withSceneInserted.
+ */
+function withScenes(p: ProjectSeq, scenes: readonly Scene[], index: number = p.scene, chain: Chain = p.chain): ProjectSeq {
+  return projectSeq(p.banks, scenes, index, chain)
+}
+
+/** Another [chain], held to the scenes there are (Chain.held). */
+function withChain(p: ProjectSeq, chain: Chain): ProjectSeq {
+  return Chain.same(chain, p.chain) ? p : projectSeq(p.banks, p.scenes, p.scene, chain)
+}
+
+/**
+ * Scene [index] taken out, the later ones moving down: the chain loses its
+ * steps and the later scenes' steps name the scene before. The scene playing
+ * becomes [select] (an index in the scenes left; the one that moved into
+ * [index]'s place, held to the scenes left, when it was the one playing; the
+ * same scene when it was another one).
+ */
+function withSceneRemoved(p: ProjectSeq, index: number, select: number = p.scene > index ? p.scene - 1 : p.scene): ProjectSeq {
+  if (index < 0 || index >= p.scenes.length || p.scenes.length <= 1) return p
+  return projectSeq(p.banks, p.scenes.filter((_, i) => i !== index), select, Chain.withoutScene(p.chain, index))
+}
+
+/**
+ * [s] inserted as scene [index] (0..the scene count; past the end it goes
+ * last), the later ones moving up: the chain's steps naming them name the scene
+ * after. The scene playing becomes [select] (an index in the new scenes;
+ * [index] by default). None past Seq.MAX_SCENES scenes.
+ */
+function withSceneInserted(p: ProjectSeq, index: number, s: Scene, select?: number): ProjectSeq {
+  if (p.scenes.length >= Seq.MAX_SCENES) return p
+  const at = Math.min(Math.max(index, 0), p.scenes.length)
+  return projectSeq(p.banks, [...p.scenes.slice(0, at), s, ...p.scenes.slice(at)], select ?? at, Chain.withSceneInsertedAt(p.chain, at))
 }
 
 /** No pattern has notes, whatever the lengths and scenes. */
@@ -260,7 +309,7 @@ function seqIsEmpty(p: ProjectSeq): boolean {
 /** Whether [a] and [b] are the same project's sequencer (Kotlin's data class equals). */
 export function sameSeq(a: ProjectSeq, b: ProjectSeq): boolean {
   if (a === b) return true
-  if (a.scene !== b.scene || a.scenes.length !== b.scenes.length || !a.scenes.every((s, i) => sameScene(s, b.scenes[i]!))) return false
+  if (a.scene !== b.scene || a.scenes.length !== b.scenes.length || !a.scenes.every((s, i) => sameScene(s, b.scenes[i]!)) || !Chain.same(a.chain, b.chain)) return false
   return a.banks.every((bank, g) => {
     const other = b.banks[g]!
     if (bank.size !== other.size) return false
@@ -285,6 +334,9 @@ export const ProjectSeq = {
   withPlaying,
   withPattern,
   withScenes,
+  withChain,
+  withSceneRemoved,
+  withSceneInserted,
   isEmpty: seqIsEmpty,
 } as const
 
@@ -301,7 +353,7 @@ const EMPTY: Patterns = { projects: new Map() }
 
 const blankPattern = (p: Pattern): boolean => patternIsEmpty(p) && p.bars === Seq.DEFAULT_BARS
 const blankProject = (p: ProjectSeq): boolean =>
-  p.scenes.length === 1 && sameScene(p.scenes[0]!, scene()) && p.banks.every((bank) => [...bank.values()].every(blankPattern))
+  p.scenes.length === 1 && sameScene(p.scenes[0]!, scene()) && Chain.isBlank(p.chain) && p.banks.every((bank) => [...bank.values()].every(blankPattern))
 
 function of(all: Patterns, project: number): ProjectSeq {
   return all.projects.get(project) ?? ProjectSeq.DEFAULT
@@ -316,8 +368,10 @@ function put(all: Patterns, project: number, p: ProjectSeq): Patterns {
 }
 
 /**
- * Version 2: each project's scenes and the patterns in its banks with notes
- * or another length only; the open flag and the notes' ids aren't written.
+ * Version 3: each project's scenes and the patterns in its banks with notes or
+ * another length only, and its chain (`"chain":{"on":true,"steps":[[scene
+ * index, passes], ...]}`) unless it is blank; the open flag and the notes' ids
+ * aren't written.
  */
 function toJson(all: Patterns): string {
   // Non-numeric keys: JSON.stringify keeps them in the Kotlin order.
@@ -328,6 +382,7 @@ function toJson(all: Patterns): string {
       project,
       scene: p.scene,
       scenes: p.scenes.map((s) => s.patterns),
+      ...(Chain.isBlank(p.chain) ? {} : { chain: { on: p.chain.on, steps: p.chain.steps.map((st) => [st.scene, st.passes]) } }),
       groups: p.banks.flatMap((bank, g) => {
         const kept = [...bank.entries()].filter(([, pat]) => !blankPattern(pat)).sort(([a], [b]) => a - b)
         if (kept.length === 0) return []
@@ -349,7 +404,7 @@ function toJson(all: Patterns): string {
         ]
       }),
     }))
-  return JSON.stringify({ v: 2, projects })
+  return JSON.stringify({ v: 3, projects })
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -364,12 +419,13 @@ const inRange = (v: number | null, lo: number, hi: number): v is number => v !==
 const arrayOf = (v: unknown): unknown[] => (Array.isArray(v) ? (v as unknown[]) : [])
 
 /**
- * Null when the text is not a version this one can read (1 or 2); entries it
- * can't read are skipped (as OfflinePads.fromJson): a project, a scene, a
- * group, a pattern or a note. Version 1 kept one pattern a group: it reads as
- * pattern 1, in the one scene. A later entry for the same group (version 1)
- * or pattern (version 2) wins; in version 2 a later entry for the same
- * project replaces it.
+ * Null when the text is not a version this one can read (1, 2 or 3); entries
+ * it can't read are skipped (as OfflinePads.fromJson): a project, a scene, a
+ * group, a pattern, a note or a chain step. Version 1 kept one pattern a
+ * group: it reads as pattern 1, in the one scene. Version 2 added the scenes
+ * and the banks, version 3 the chain (a version 2 file has none). A later entry
+ * for the same group (version 1) or pattern (versions 2 and 3) wins; in
+ * versions 2 and 3 a later entry for the same project replaces it.
  */
 function fromJson(text: string): Patterns | null {
   let o: unknown
@@ -380,13 +436,13 @@ function fromJson(text: string): Patterns | null {
   }
   if (!isObject(o)) return null
   const v = intOrNull(o['v'])
-  if (v !== 1 && v !== 2) return null
+  if (v !== 1 && v !== 2 && v !== 3) return null
   let out = EMPTY
   for (const f of arrayOf(o['projects'])) {
     if (!isObject(f)) continue
     const project = intOrNull(f['project'])
     if (!inRange(project, 0, 99)) continue
-    out = put(out, project, v === 1 ? readV1(f, of(out, project)) : readV2(f))
+    out = put(out, project, v === 1 ? readV1(f, of(out, project)) : readV2(f, v >= 3))
   }
   return out
 }
@@ -405,15 +461,15 @@ function readV1(f: Record<string, unknown>, from: ProjectSeq): ProjectSeq {
   return p
 }
 
-/** A version 2 project: its scenes (one of patterns 1 when none can be read) and its banks. */
-function readV2(f: Record<string, unknown>): ProjectSeq {
+/** A version 2 or 3 project: its scenes (one of patterns 1 when none can be read), its banks and, from version 3, its chain. */
+function readV2(f: Record<string, unknown>, withChain: boolean): ProjectSeq {
   const scenes: Scene[] = []
   for (const se of arrayOf(f['scenes'])) {
     if (!Array.isArray(se)) continue
     const ns = (se as unknown[]).map(intOrNull)
     if (ns.length === 4 && ns.every((n) => inRange(n, 1, Seq.MAX_PATTERNS))) scenes.push(scene(ns as number[]))
   }
-  let p = projectSeq([], scenes, intOrNull(f['scene']) ?? 0)
+  let p = projectSeq([], scenes, intOrNull(f['scene']) ?? 0, withChain ? readChain(f) : Chain.EMPTY)
   for (const gf of arrayOf(f['groups'])) {
     if (!isObject(gf)) continue
     const g = intOrNull(gf['group'])
@@ -428,6 +484,22 @@ function readV2(f: Record<string, unknown>): ProjectSeq {
     }
   }
   return p
+}
+
+/** A project's chain: the steps it can read (a scene index from 0 and passes, held to 1..8; the project holds them to its scenes) and whether it is on. */
+function readChain(f: Record<string, unknown>): Chain {
+  const c = f['chain']
+  if (!isObject(c)) return Chain.EMPTY
+  const steps: { scene: number; passes: number }[] = []
+  for (const se of arrayOf(c['steps'])) {
+    if (!Array.isArray(se) || se.length !== 2) continue
+    const scene = intOrNull(se[0])
+    if (scene === null || scene < 0) continue
+    const passes = intOrNull(se[1])
+    if (passes === null) continue
+    steps.push({ scene, passes: Math.min(Math.max(passes, Chain.MIN_PASSES), Chain.MAX_PASSES) })
+  }
+  return { steps, on: c['on'] === true }
 }
 
 /** A pattern's notes, at most its cap; those it can't read are skipped. */

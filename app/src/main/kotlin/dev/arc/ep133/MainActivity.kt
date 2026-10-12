@@ -252,9 +252,18 @@ class MainActivity : ComponentActivity() {
     }
 
     /** SHARE (scene when [group] is null) through the system chooser: the card's prompt and text, as plain text. */
-    private fun shareBeat(group: Int?) {
+    /** SHARE CHAIN: the project's chain as a card of scenes, to Claude. */
+    private fun shareChain() {
+        val share = controller.beatShareChain() ?: return
+        if (sendText(share.subject, share.text, dev.arc.ep133.text.ClaudeText.SHARE_CHAIN_TITLE)) {
+            controller.waitForClaude(dev.arc.ep133.text.ClaudeText.CHAIN_CARD_NAME)
+        }
+    }
+
+    /** [what] is named on the display while Claude's reply is awaited ("Scene S02", "A \u00B7 01"). */
+    private fun shareBeat(group: Int?, what: String) {
         val share = controller.beatShare(group) ?: return
-        sendText(share.subject, share.text, dev.arc.ep133.text.ClaudeText.SHARE_TITLE)
+        if (sendText(share.subject, share.text, dev.arc.ep133.text.ClaudeText.SHARE_TITLE)) controller.waitForClaude(what)
     }
 
     /** Learn with Claude: a starter prompt to send to the Claude app. */
@@ -262,12 +271,13 @@ class MainActivity : ComponentActivity() {
         sendText(dev.arc.ep133.text.ClaudeText.LEARN, dev.arc.ep133.text.ClaudeText.LEARN_PROMPT, dev.arc.ep133.text.ClaudeText.LEARN_TITLE)
     }
 
-    private fun sendText(subject: String, text: String, title: String) {
-        try {
-            Files.shareText(this, subject, text, title)
-        } catch (e: java.io.IOException) {
-            controller.toast(dev.arc.ep133.text.ClaudeText.NO_APP, error = true)
-        }
+    /** Whether the system chooser opened. */
+    private fun sendText(subject: String, text: String, title: String): Boolean = try {
+        Files.shareText(this, subject, text, title)
+        true
+    } catch (e: java.io.IOException) {
+        controller.toast(dev.arc.ep133.text.ClaudeText.NO_APP, error = true)
+        false
     }
 
     /** Get the arc-beats skill: its zip, opened as a link. */
@@ -731,6 +741,8 @@ class MainActivity : ComponentActivity() {
         val scene by controller.scene.collectAsStateWithLifecycle()
         // A beat card waiting on its sheet: pasted in Live tools, or shared to arc (which opens over Live).
         val beatImport by controller.beatImport.collectAsStateWithLifecycle()
+        // A card shared to Claude, its reply awaited: Live tools' display asks for it.
+        val claudeWaiting by controller.claudeWaiting.collectAsStateWithLifecycle()
         LaunchedEffect(beatImport != null) {
             if (beatImport == null) return@LaunchedEffect
             // Shared to arc from another app, or pasted: its sheet opens over Live, whatever was on.
@@ -900,6 +912,12 @@ class MainActivity : ComponentActivity() {
                 onBar = controller::setClipBar,
                 onCopy = controller::clipCopy,
                 onPaste = controller::clipPaste,
+                onChainOn = controller::chainOn,
+                onChainAdd = controller::chainAdd,
+                onChainMore = controller::chainCyclePasses,
+                onChainFewer = controller::chainFewerPasses,
+                onChainRemove = controller::chainRemove,
+                chainProgress = controller::chainProgress,
             )
         }
         val functions = dev.arc.ep133.ui.screens.FunctionKeysUi(
@@ -1218,9 +1236,17 @@ class MainActivity : ComponentActivity() {
                                 scene = scene.label,
                                 numbers = scene.groups.map { it.number },
                                 hasNotes = scene.groups.map { it.number in it.filled },
-                                onShareScene = { shareBeat(null) },
-                                onSharePattern = ::shareBeat,
+                                sounds = dev.arc.ep133.controller.soundSetOf(mirror, state.factoryNames)?.size ?: 0,
+                                withSounds = appSettings.shareSounds,
+                                onWithSounds = controller::setShareSounds,
+                                chainSteps = scene.chain.chain.steps.size,
+                                chainScenes = dev.arc.ep133.controller.chainSceneCount(scene.chain.chain.steps),
+                                onShareScene = { shareBeat(null, dev.arc.ep133.text.ClaudeText.sharedScene(scene.label)) },
+                                onShareChain = ::shareChain,
+                                onSharePattern = { g -> shareBeat(g, dev.arc.ep133.text.ClaudeText.sharedPattern(g, scene.groups.getOrNull(g)?.number ?: 1)) },
                                 onPaste = { controller.receiveBeat(clipboardText()) },
+                                waiting = claudeWaiting,
+                                onDismissWaiting = controller::stopWaitingForClaude,
                                 onGetSkill = ::openSkill,
                                 onLearn = ::learnWithClaude,
                             ),
@@ -1332,13 +1358,28 @@ class MainActivity : ComponentActivity() {
                     }
                     // A beat card, read and planned into the project's patterns: IMPORT is one UNDO step. It keeps showing while it closes.
                     val lastBeat = remember { mutableStateOf(beatImport) }.apply { if (beatImport != null) value = beatImport }.value
-                    ArcSheet(visible = beatImport != null, onDismiss = controller::dismissBeat) {
+                    // A preview started by PICK SOUND stops with the sheet, as the pad sheet's does.
+                    fun closeBeatSheet() {
+                        if (playing?.startsWith("device:") == true || playing?.startsWith("factory:") == true) controller.stopPlayback()
+                        controller.dismissBeat()
+                    }
+                    ArcSheet(visible = beatImport != null, onDismiss = { closeBeatSheet() }) {
                         lastBeat?.let { b ->
                             BeatImportSheetContent(
                                 ui = b,
-                                onCancel = controller::dismissBeat,
-                                onImport = controller::importBeat,
+                                onCancel = { closeBeatSheet() },
+                                onImport = { tempo, soundPads, fx, shapePads, picked, setChain ->
+                                    if (playing?.startsWith("device:") == true || playing?.startsWith("factory:") == true) controller.stopPlayback()
+                                    controller.importBeat(tempo, soundPads, fx, shapePads, picked, setChain)
+                                },
                                 onCopyProblems = ::copyProblems,
+                                // PICK SOUND lists the sounds the card's sound lines choose from, played as the pad sheet plays them.
+                                player = dev.arc.ep133.ui.screens.PickPlayerUi(
+                                    playing = playing,
+                                    busy = state.busy && ready,
+                                    onPlay = { slot, source -> controller.playLiveSound(slot, source) },
+                                    onStop = controller::stopPlayback,
+                                ),
                             )
                         }
                     }

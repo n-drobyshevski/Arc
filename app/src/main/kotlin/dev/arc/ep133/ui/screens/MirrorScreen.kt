@@ -7,11 +7,6 @@ import androidx.compose.ui.semantics.customActions
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.runtime.mutableStateOf
-import dev.arc.ep133.ui.components.SwitchRow
-import dev.arc.ep133.ui.components.SettingRow
-import dev.arc.ep133.ui.components.PlateLine
-import dev.arc.ep133.ui.components.CaptionInfo
-import dev.arc.ep133.ui.components.Disclosure
 import dev.arc.ep133.ui.components.MiniPiano
 import dev.arc.ep133.ui.components.SideStripWidth
 import dev.arc.ep133.ui.components.SideZone
@@ -48,7 +43,6 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.stateDescription
-import dev.arc.ep133.ui.components.Segmented
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -97,14 +91,12 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
-import dev.arc.ep133.controller.ClipMode
 import dev.arc.ep133.controller.MirrorUi
 import dev.arc.ep133.controller.StepHosting
 import dev.arc.ep133.controller.StepView
@@ -120,7 +112,6 @@ import dev.arc.ep133.features.Tempo
 import dev.arc.ep133.features.MirrorState
 import dev.arc.ep133.features.PadLight
 import dev.arc.ep133.features.PadNotes
-import dev.arc.ep133.features.PadOrder
 import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.SampleSource
 import dev.arc.ep133.features.Keys
@@ -136,10 +127,8 @@ import dev.arc.ep133.features.Timing
 import dev.arc.ep133.features.TransportPhase
 import dev.arc.ep133.features.TransportState
 import dev.arc.ep133.data.TakeInfo
-import dev.arc.ep133.text.FeatureText
 import dev.arc.ep133.text.GuideText
 import dev.arc.ep133.text.MirrorText
-import dev.arc.ep133.ui.components.ArcKey
 import dev.arc.ep133.ui.components.Caption
 import dev.arc.ep133.ui.components.CapDx
 import dev.arc.ep133.ui.components.CapDy
@@ -158,8 +147,6 @@ import androidx.compose.ui.graphics.shadow.Shadow
 import dev.arc.ep133.ui.components.CloseKey
 import dev.arc.ep133.ui.components.DisplayPanel
 import dev.arc.ep133.ui.components.DisplayLine
-import dev.arc.ep133.ui.components.KeySize
-import dev.arc.ep133.ui.components.KeyStyle
 import dev.arc.ep133.ui.components.LocalArcWindow
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsetsSides
@@ -185,7 +172,6 @@ import dev.arc.ep133.features.Piano
 import dev.arc.ep133.ui.components.ArcWindow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import androidx.compose.runtime.CompositionLocalProvider
 import kotlinx.coroutines.flow.StateFlow
 import dev.arc.ep133.ui.theme.ArcType
@@ -397,6 +383,8 @@ fun MirrorScreen(
     initialGroup: Int = 0,
     /** For screenshots: start with the tools panel open. */
     initialToolsOpen: Boolean = false,
+    /** For screenshots: start with that page of the tools open (null: the front page). */
+    initialToolsPage: ToolsPage? = null,
     /** For screenshots: start with the offline note unfolded. */
     initialNoteOpen: Boolean = false,
     /** Not connected: download the factory sounds (FactorySounds); null when they are in the library. */
@@ -818,6 +806,18 @@ fun MirrorScreen(
     val clock = { fixedNow ?: if (fading) frame else System.nanoTime() }
     // The secondary controls live in a side panel, opened from the strip on the right.
     var toolsOpen by rememberSaveable { mutableStateOf(initialToolsOpen) }
+    // The page Live tools show (null: the front page), back on the front page once they have closed.
+    var toolsPage by rememberSaveable { mutableStateOf(initialToolsPage) }
+    val toolsScroll = rememberScrollState()
+    val toolsHeader: (@Composable RowScope.() -> Unit)? = toolsPage?.let { p -> { ToolsBack(p) { toolsPage = null } } }
+    val toolsActions: (@Composable RowScope.() -> Unit)? =
+        if (toolsPage == null && onSettings != null) ({ SettingsKey { toolsOpen = false; onSettings() } }) else null
+    LaunchedEffect(toolsOpen) {
+        if (!toolsOpen) {
+            delay(TOOLS_CLOSE_MS)
+            toolsPage = null
+        }
+    }
     val hitGroup = st.lastHit?.pad?.group
     LaunchedEffect(hitGroup, st.lastHit, follow, oneGroup) {
         if (oneGroup && follow && hitGroup != null) group = hitGroup
@@ -949,55 +949,23 @@ fun MirrorScreen(
                 onOpen = { toolsOpen = true },
                 onClose = { toolsOpen = false },
                 title = MirrorText.TOOLS,
+                // On a page the back control takes the caption's place; Settings (the tools close behind it) is on the front page.
+                header = toolsHeader,
+                actions = toolsActions,
+                scroll = toolsScroll,
                 panel = {
-                    // Settings left the top bar: its way in is here, and the tools close behind it.
-                    if (onSettings != null) SettingsRow { toolsOpen = false; onSettings() }
-                    FactoryRow(mirror, onGetFactory)
-                    OfflinePadsRow(offlinePads, onResetPads)
-                    if (keys.on) {
-                        KeysPanel(keys, keysActions, piano = piano != null)
-                        if (claude != null) ClaudeSection(claude, stepGroup ?: group)
-                        if (take != null) TakesSection(takes, take)
-                    } else {
-                        GridPlate {
-                            SettingRow(MirrorText.VIEW, stacked = true) {
-                                Segmented(
-                                    listOf(MirrorText.ALL_GROUPS, MirrorText.ONE_GROUP),
-                                    selected = if (oneGroup) 1 else 0,
-                                    onSelect = { onOneGroup(it == 1) },
-                                    compact = true,
-                                )
-                            }
-                            if (oneGroup) {
-                                PlateLine()
-                                SwitchRow(MirrorText.FOLLOW, MirrorText.FOLLOW_NOTE, follow, onFollow)
-                            } else {
-                                // The four groups have no one plate to print KEYS / PADS on (ModeStrip): the mode is here.
-                                PlateLine()
-                                SettingRow(MirrorText.MODE, stacked = true) {
-                                    Segmented(
-                                        listOf(MirrorText.MODE_PADS, MirrorText.MODE_KEYS),
-                                        selected = 0,
-                                        onSelect = { if (it == 1) keysActions.onMode(true) },
-                                        compact = true,
-                                    )
-                                }
-                                // Nor ARP / RPT and LATCH: note repeat is here too.
-                                if (arp != null) {
-                                    PlateLine()
-                                    SwitchRow(MirrorText.RPT_NAME, null, arp.ui.on, arp.onOn)
-                                    if (arp.ui.on) {
-                                        PlateLine()
-                                        SwitchRow(MirrorText.LATCH, MirrorText.ARP_LATCH_NOTE, arp.ui.latch, arp.onLatch)
-                                    }
-                                }
-                            }
-                        }
-                        KeysMonitor(st, keys.names)
-                        if (claude != null) ClaudeSection(claude, stepGroup ?: group)
-                        if (take != null) TakesSection(takes, take)
-                        Notes(st, mirror, tapToPlay = onPad != null, sideways = sideways)
-                    }
+                    LiveToolsPanel(
+                        ToolsUi(
+                            mirror = mirror, keys = keys, keysActions = keysActions, piano = piano != null,
+                            oneGroup = oneGroup, onOneGroup = onOneGroup, follow = follow, onFollow = onFollow, arp = arp,
+                            group = stepGroup ?: group,
+                            claude = claude, take = take, takes = takes,
+                            onGetFactory = onGetFactory, offlinePads = offlinePads, onResetPads = onResetPads,
+                            tapToPlay = onPad != null, sideways = sideways,
+                            still = fixedNow != null || reduceMotion,
+                        ),
+                        toolsPage, { toolsPage = it }, toolsScroll,
+                    )
                 },
                 // On its side the strip keeps to the edge's upper part, clear of where the white keys are struck.
                 stripAlignment = if (sideways) Alignment.TopEnd else Alignment.CenterEnd,
@@ -1025,7 +993,7 @@ fun MirrorScreen(
                 val lineMorph: @Composable (Modifier, SamplePanelFit, Dp, Dp, Dp, @Composable () -> Unit, @Composable () -> Unit) -> Unit = { m, fit, width, gap, corner, line, fnKeys ->
                     val kind = panel.kind
                     val wave = when (kind) {
-                        PanelKind.SCENE -> sceneDeckHeight(sceneNow.ui.clipMode == ClipMode.BAR)
+                        PanelKind.SCENE -> sceneDeckHeight(sceneNow.ui, width - WaveSide * 2)
                         PanelKind.STEP -> stepDeckHeight(width - WaveSide * 2)
                         PanelKind.SAMPLE -> fit.wave
                     }
@@ -1841,50 +1809,6 @@ private fun RowScope.SpokenLine(said: String, content: @Composable RowScope.() -
     )
 }
 
-/** Settings, first in the tools: the gear, its name and a chevron on a plate (the tools close, then Settings opens). */
-@Composable
-private fun SettingsRow(onClick: () -> Unit) {
-    val c = LocalArcColors.current
-    GridPlate {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = onClick)
-                .coachMark("tools.settings", CoachText.SETTINGS, c.graphite, c.shell)
-                .heightIn(min = 56.dp)
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            dev.arc.ep133.ui.components.Icon(ArcIcon.GEAR, c.ink, size = 22.dp)
-            Text(CoachText.SETTINGS, style = ArcType.semi, color = c.ink, modifier = Modifier.weight(1f))
-            dev.arc.ep133.ui.components.Chevron(Modifier.padding(horizontal = 6.dp))
-        }
-    }
-}
-
-/** Not connected (nothing read, or offline from the last read): the factory sounds to get, first in the tools. */
-@Composable
-private fun FactoryRow(mirror: MirrorUi?, onGetFactory: (() -> Unit)?) {
-    if (onGetFactory == null || mirror?.error != MirrorText.NOT_CONNECTED && mirror?.offline == null) return
-    GridPlate {
-        SettingRow(FeatureText.FACTORY_SOUNDS, note = FeatureText.FACTORY_NOTE) {
-            ArcKey(FeatureText.GET, onGetFactory, size = KeySize.Small, style = KeyStyle.Quiet)
-        }
-    }
-}
-
-/** Pads changed offline, in arc only: how many, and the key that puts the device's sounds back on them. */
-@Composable
-private fun OfflinePadsRow(count: Int, onReset: () -> Unit) {
-    if (count == 0) return
-    GridPlate {
-        SettingRow(MirrorText.OFFLINE_PADS, note = MirrorText.offlinePadsNote(count)) {
-            ArcKey(MirrorText.RESET_PADS, onReset, size = KeySize.Small, style = KeyStyle.Quiet)
-        }
-    }
-}
-
 /**
  * The all-groups page's display. Offline, why it is stays folded under the
  * word until asked for, so the pads keep the room: [noteOpen] whether it is
@@ -2668,89 +2592,6 @@ private fun Pad(
 }
 
 /**
- * The last note sent outside the pads (the EP-133's own KEYS mode), in a small
- * display: "KEYS · MI4" and its channel while held, over two octaves around
- * it with the held notes lit.
- */
-@Composable
-private fun KeysMonitor(st: MirrorState, names: NoteNames) {
-    val c = LocalArcColors.current
-    val last = st.lastKeysNote ?: return
-    val start = ((last / 12) * 12 - 12).coerceIn(0, 103)
-    val black = setOf(1, 3, 6, 8, 10)
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(c.display)
-            .padding(start = 12.dp, end = 12.dp, top = 10.dp, bottom = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(MirrorText.lastNote(last, names).uppercase(), style = ArcType.displaySub, color = c.displayInk, modifier = Modifier.weight(1f))
-            st.keysHeld[last]?.let { Text(MirrorText.channel(it), style = ArcType.displaySub, color = c.displayDim) }
-        }
-        Canvas(
-            Modifier
-                .fillMaxWidth()
-                .height(54.dp)
-                .semantics { contentDescription = MirrorText.KEYS + " " + MirrorText.noteName(last, names) },
-        ) {
-            val whites = (start until start + 25).filter { it % 12 !in black }
-            val w = size.width / whites.size
-            whites.forEachIndexed { i, n ->
-                val on = st.keysHeld.containsKey(n)
-                drawRoundRect(
-                    if (on) c.signal else c.pianoWhite,
-                    topLeft = Offset(i * w + 1, 0f),
-                    size = Size(w - 2, size.height),
-                    cornerRadius = CornerRadius(3.dp.toPx()),
-                )
-            }
-            for (n in start until start + 25) {
-                if (n % 12 !in black) continue
-                val leftWhites = whites.count { it < n }
-                val on = st.keysHeld.containsKey(n)
-                drawRoundRect(
-                    if (on) c.signal else c.pianoBlack,
-                    topLeft = Offset(leftWhites * w - w * 0.3f, 0f),
-                    size = Size(w * 0.6f, size.height * 0.6f),
-                    cornerRadius = CornerRadius(2.dp.toPx()),
-                )
-            }
-        }
-    }
-}
-
-/**
- * The pads' notes: the missing clock in the open on its side (the display
- * can't say it there), and the rest (offline, no pad messages, how Live
- * reads the EP-133) folded away.
- */
-@Composable
-private fun Notes(st: MirrorState, mirror: MirrorUi?, tapToPlay: Boolean = false, sideways: Boolean = false) {
-    val c = LocalArcColors.current
-    val learning = st.padOrder == PadOrder.FROM_TOP
-    // On its side the display is one line (in the top bar), so what clock out is for is told here.
-    if (sideways && mirror?.offline == null && st.playing == null && st.bpm == null) {
-        Text(MirrorText.NO_TRANSPORT, style = ArcType.small, color = c.graphite)
-    }
-    Disclosure(MirrorText.HOW_LIVE_READS) {
-        if (tapToPlay) Text(MirrorText.TAP_NOTE, style = ArcType.small, color = c.graphite)
-        // Pads that play on the phone mean keys that do too, and sideways they are a piano.
-        if (tapToPlay && !sideways) Text(MirrorText.PIANO_HINT, style = ArcType.small, color = c.graphite)
-        // Offline the display line says so too, with this note under a tap.
-        if (mirror?.offline != null) Text(MirrorText.offlineNote(mirror.offline, st.activeProject ?: FactorySounds.PROJECT), style = ArcType.small, color = c.graphite)
-        if (learning) Text(MirrorText.LEARN_NOTE, style = ArcType.small, color = c.graphite)
-        if (learning && !st.pushesSeen && st.learned.isEmpty() && st.lastHit?.pad != null && mirror?.loading == false) {
-            Text(MirrorText.NO_PUSHES, style = ArcType.small, color = c.graphite)
-        }
-        Text(MirrorText.COMMUNITY_NOTE, style = ArcType.small, color = c.graphite)
-        Text(MirrorText.LISTEN_ONLY, style = ArcType.small, color = c.graphite)
-    }
-}
-
-/**
  * The row right under the grid, as the PO app's DRUMS / KEYPAD: in KEYS the
  * scale and the octave, a tap on either of which lists the choices, after
  * the view switch where there is one. [mode]: one word for the mode first,
@@ -3400,12 +3241,12 @@ private fun KeysGrid(
 }
 
 /**
- * The KEYS tools: the key picked on one octave of piano keys, what the keys'
- * colours mean as compact chips, and how Keys works folded away. [piano]: the
- * piano is showing, so the chips are the piano's.
+ * The KEYS tools on the Play page: the key picked on one octave of piano keys,
+ * and what the keys' colours mean as compact chips. [piano]: the piano is
+ * showing, so the chips are the piano's.
  */
 @Composable
-private fun KeysPanel(keys: KeysUi, actions: KeysActions, piano: Boolean = false) {
+internal fun KeysPanel(keys: KeysUi, actions: KeysActions, piano: Boolean = false) {
     val c = LocalArcColors.current
     GridPlate {
         Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -3421,11 +3262,6 @@ private fun KeysPanel(keys: KeysUi, actions: KeysActions, piano: Boolean = false
             Text(MirrorText.LEGEND, style = ArcType.semi, color = c.ink)
             KeysChips(piano, named = keys.showNames)
         }
-    }
-    Disclosure(MirrorText.HOW_KEYS_WORKS) {
-        Text(MirrorText.KEYS_NOTE, style = ArcType.small, color = c.graphite)
-        // Sideways already, the piano is there (or there's no room for one).
-        if (!LocalArcWindow.current.landscape) Text(MirrorText.PIANO_HINT, style = ArcType.small, color = c.graphite)
     }
 }
 
@@ -3766,71 +3602,4 @@ private fun tapToEdit(
                 )
             }
         }
-}
-
-/**
- * Live tools' takes: the TAKE key, which starts a take (it records from the
- * first sound) and stops it, its time on it while it records; then the
- * takes, each of which plays, and unfolds to share, save, send to the EP-133
- * or delete. How to record and what a take holds wait behind the info key
- * after TAKES.
- */
-@Composable
-private fun TakesSection(t: TakesUi, take: TakeUi) {
-    val c = LocalArcColors.current
-    var open by rememberSaveable { mutableStateOf<String?>(null) }
-    var confirm by rememberSaveable { mutableStateOf<String?>(null) }
-    CaptionInfo(MirrorText.TAKES, listOf(MirrorText.TAKES_HINT, MirrorText.TAKES_NOTE))
-    val recording = take.state as? RecState.Recording
-    ArcKey(
-        "\u25CF " + (recording?.let { MirrorText.takeBadge(it.seconds.toDouble()) } ?: MirrorText.TAKE),
-        take.onTake,
-        Modifier
-            .fillMaxWidth()
-            .semantics(mergeDescendants = true) {
-                contentDescription = MirrorText.takeDescription(take.state)
-                stateDescription = MirrorText.onOff(take.state != RecState.Idle)
-            },
-        style = if (take.state != RecState.Idle) KeyStyle.Signal else KeyStyle.Normal,
-        size = KeySize.Small,
-    )
-    for (take in t.list) {
-        val playing = t.playing == t.keyOf(take)
-        val unfolded = open == take.name
-        Plate(onClick = { open = if (unfolded) null else take.name; confirm = null }, enabled = true) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Column(Modifier.weight(1f)) {
-                    dev.arc.ep133.ui.components.OneLine(t.fmtWhen(take.createdAt), ArcType.bold, c.ink)
-                    Text(MirrorText.takeLength(take.seconds), style = ArcType.small, color = c.graphite)
-                }
-                ArcKey(
-                    if (playing) dev.arc.ep133.text.FeatureText.STOP else dev.arc.ep133.text.FeatureText.PLAY,
-                    { if (playing) t.onStop() else t.onPlay(take) },
-                    size = KeySize.Small,
-                )
-            }
-            if (unfolded) {
-                if (confirm == take.name) {
-                    Text(MirrorText.DELETE_TAKE, style = ArcType.small, color = c.graphite, modifier = Modifier.padding(top = 6.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        ArcKey(dev.arc.ep133.text.Strings.DELETE, {
-                            confirm = null
-                            open = null
-                            t.onDelete(take)
-                        }, Modifier.weight(1f), size = KeySize.Small, style = KeyStyle.Signal)
-                        ArcKey(dev.arc.ep133.text.Strings.CANCEL, { confirm = null }, Modifier.weight(1f), size = KeySize.Small)
-                    }
-                } else {
-                    Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        ArcKey(dev.arc.ep133.text.FeatureText.SHARE_WAV, { t.onShare(take) }, Modifier.weight(1f), size = KeySize.Small)
-                        ArcKey(dev.arc.ep133.text.FeatureText.SAVE_WAV, { t.onSave(take) }, Modifier.weight(1f), size = KeySize.Small)
-                    }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        if (t.connected) ArcKey(MirrorText.TO_DEVICE, { t.onToDevice(take) }, Modifier.weight(1f), size = KeySize.Small)
-                        ArcKey(dev.arc.ep133.text.Strings.DELETE, { confirm = take.name }, Modifier.weight(1f), size = KeySize.Small)
-                    }
-                }
-            }
-        }
-    }
 }

@@ -40,6 +40,8 @@ export const CoachText = {
   STEP: 'Step through the pattern',
   /** The scene chip beside it (and the readout while the pattern plays): the scene panel. */
   SCENE: 'Pick patterns and scenes, copy and paste',
+  /** The CHAIN row in the SCENE panel: the order the scenes play in. */
+  CHAIN: 'Chain scenes: tap a step for passes, hold to remove',
   OCTAVE: 'Octave',
   SCALE: 'Scale',
   KEY: 'Key',

@@ -283,6 +283,22 @@ class LiveMirror(
         return slotAt(pad.group, numberOf(pad) ?: return null)
     }
 
+    /**
+     * Whether the active project's pads have been read (or loaded from the last read), so that a pad with no [slotOf] has
+     * no sound, rather than none being known yet. False while nothing was read and while the device is in a project not
+     * read yet.
+     */
+    @Synchronized
+    fun padsKnown(): Boolean = activeProject != null && layout.isNotEmpty() && !(pushedProject != null && pushedProject != activeProject)
+
+    /**
+     * The slot that tells whether [pad] has a sound, for a pad Arc is to call silent when it has none ([padsKnown]): its
+     * [slotOf]; 0 for a sample recorded in arc (it has no slot until uploaded, but it plays); else the layout's slot at the
+     * number a write would use ([target]), which a pad not pressed yet has though [slotOf] doesn't. Null: no sound.
+     */
+    @Synchronized
+    fun soundSlot(pad: PhysicalPad): Int? = slotOf(pad) ?: if (localOf(pad) != null) 0 else target(pad)?.slot
+
     /** The name on a physical pad: its offline change's, else the sound list's for its slot. */
     @Synchronized
     fun nameOf(pad: PhysicalPad): String? = localOf(pad)?.name ?: slotOf(pad)?.let { names[it] }

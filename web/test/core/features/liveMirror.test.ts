@@ -86,6 +86,27 @@ describe('LiveMirrorTest', () => {
     expect(MirrorText.hit(s.lastHit!)).toBe('A . \u00B7 100')
   })
 
+  it("the pads are known once read, and a pad's sound slot is found before it is learned", () => {
+    expect(new LiveMirror().padsKnown()).toBe(false)
+    const m = mirror()
+    expect(m.padsKnown()).toBe(true)
+    const a7 = physicalPad(0, 9)
+    // Not pressed yet: no slot to show, but the layout at the number a write would use has one.
+    expect(m.slotOf(a7)).toBeNull()
+    expect(m.soundSlot(a7)).toBe(5)
+    expect(m.soundSlot(physicalPad(0, 0))).toBe(1)
+    expect(m.soundSlot(physicalPad(1, 9))).toBe(20)
+    // Group C has nothing: no sound.
+    expect(m.soundSlot(physicalPad(2, 9))).toBeNull()
+    // A sample recorded offline plays, though it has no slot yet.
+    m.setLocal(OfflinePads.put(OfflinePads.EMPTY, { ...local(1, 2, 1, 0, 'mic', SoundSource.RECORDED), file: 'rec-1.wav' }))
+    expect(m.soundSlot(physicalPad(2, 9))).toBe(0)
+    // The device moved to a project not read yet: nothing is known.
+    m.onPadPush(Fid(2, 0, 10), 50 * ms)
+    expect(m.padsKnown()).toBe(false)
+    expect(m.soundSlot(a7)).toBeNull()
+  })
+
   it('a note and a push together link the pad, in either order, and are kept', () => {
     const saved: Map<number, number>[] = []
     const m = mirror(undefined, saved)

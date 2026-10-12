@@ -171,6 +171,24 @@ internal class FxDesk(private val send: FxSend, private val edited: () -> Unit =
         if (edit(s)) send(FxControl.SIDECHAIN, sidechainIndex(s.sidechain), s.sidechain.x, s.sidechain.y)
     }
 
+    /** The FX of project [p]: the one shown, or the one kept for when Live shows it. */
+    fun of(p: Int): FxSettings = if (p == project) _fx.value else book[p] ?: FxSettings.DEFAULT
+
+    /**
+     * [s] whole as project [p]'s FX (a beat card's, or taken back): the project shown has them sent at once, another
+     * project keeps them for when Live shows it. Both are kept in fx.json.
+     */
+    fun replace(p: Int, s: FxSettings) {
+        val c = s.clamped()
+        if (p == project) {
+            if (edit(c)) sendFx(c, send)
+            return
+        }
+        book = book + (p to c)
+        if (!loaded) touched += p
+        edited()
+    }
+
     /** Punch-in [slot] (0..11) pressed, at [depth] (held to (0, 1]). */
     fun punchDown(slot: Int, depth: Float) {
         if (slot !in 0 until FxControl.SLOTS) return

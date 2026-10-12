@@ -3,10 +3,17 @@ package dev.arc.ep133.text
 import dev.arc.ep133.features.ArpNote
 import dev.arc.ep133.features.ArpOrder
 import dev.arc.ep133.features.CardProblem
+import dev.arc.ep133.features.Chain
+import dev.arc.ep133.features.ChainPlay
+import dev.arc.ep133.features.ChainStep
+import dev.arc.ep133.features.Comp
 import dev.arc.ep133.features.DiffResult
+import dev.arc.ep133.features.CardFx
+import dev.arc.ep133.features.FxSettings
 import dev.arc.ep133.features.FxType
 import dev.arc.ep133.features.KeyMark
 import dev.arc.ep133.features.NoteNames
+import dev.arc.ep133.features.PadSettings
 import dev.arc.ep133.features.PhysicalPad
 import dev.arc.ep133.features.ProjectDiff
 import dev.arc.ep133.features.ProjectSeq
@@ -14,9 +21,11 @@ import dev.arc.ep133.features.ProjectSource
 import dev.arc.ep133.features.ProjectState
 import dev.arc.ep133.features.RecState
 import dev.arc.ep133.features.SampleSource
+import dev.arc.ep133.features.PlayMode
 import dev.arc.ep133.features.Scale
 import dev.arc.ep133.features.SceneOps
 import dev.arc.ep133.features.SoundDiff
+import dev.arc.ep133.features.Sidechain
 import dev.arc.ep133.features.SoundState
 import dev.arc.ep133.features.SwitchTime
 import dev.arc.ep133.features.Timing
@@ -439,6 +448,7 @@ class FeatureTextTest {
         assertEquals(listOf("Group B", "P03 \u00B7 4 bars", "P03 \u00B7 1 bar"), listOf(MirrorText.gridTitle(1), MirrorText.gridDetail(3, 4), MirrorText.gridDetail(3, 1)))
         assertEquals(listOf("Pattern 5, has notes", "Pattern 6"), listOf(MirrorText.patternCell(5, true), MirrorText.patternCell(6, false)))
         assertEquals("Pick patterns and scenes, copy and paste", CoachText.SCENE)
+        assertEquals("Chain scenes: tap a step for passes, hold to remove", CoachText.CHAIN)
     }
 
     @Test
@@ -505,6 +515,14 @@ class FeatureTextTest {
         assertEquals("Arc beat P01 S02", ClaudeText.shareSubject("P01 S02"))
         assertEquals("Analyse this beat:\n\n```\nARC BEAT 1\nswing 50\n```\n", ClaudeText.shareText("Analyse this beat:", "ARC BEAT 1\nswing 50\n"))
         assertEquals("No beat card in that text.", ClaudeText.NO_CARD)
+        // The prompt asks for the sound lines kept, or sounds chosen from the list that follows the card.
+        assertTrue(ClaudeText.SHARE_PROMPT.contains("sound list") && ClaudeText.SHARE_PROMPT.contains("FX and pad lines") && ClaudeText.SHARE_PROMPT.endsWith(":"))
+        assertEquals(listOf("With my sound list \u00B7 212 sounds", "With my sound list \u00B7 1 sound"), listOf(212, 1).map(ClaudeText::withSoundList))
+        // The sound list after a shared card.
+        assertEquals(
+            listOf("My EP-133's sounds (slot name), from the EP-133:", "My EP-133's sounds (slot name), from the last read:", "My EP-133's sounds (slot name), from the factory pack:"),
+            listOf(ClaudeText.SOUNDS_FROM_DEVICE, ClaudeText.SOUNDS_FROM_LAST_READ, ClaudeText.SOUNDS_FROM_FACTORY).map(ClaudeText::soundListHeader),
+        )
         // The sheet.
         assertEquals(
             listOf("Beat card \u00B7 4 bars \u00B7 5 pads \u00B7 23 hits", "Beat card \u00B7 1 bar \u00B7 1 pad \u00B7 1 hit"),
@@ -536,6 +554,56 @@ class FeatureTextTest {
         // IMPORT, and why it can't.
         assertEquals(listOf("COPY PROBLEMS", "IMPORT"), listOf(ClaudeText.COPY_PROBLEMS, ClaudeText.IMPORT).map { it.uppercase() })
         assertEquals("Group B has no free pattern.", ClaudeText.groupFull(1))
+        // The sounds a card puts on pads: the block, its rows and its notes.
+        assertEquals(listOf("SOUNDS", "PUT ON PADS"), listOf(ClaudeText.SOUNDS, ClaudeText.PUT_ON_PADS).map { it.uppercase() })
+        assertEquals(listOf("Put 2 sounds on the pads", "Leave the pads' sounds as they are"), listOf(ClaudeText.putOnPadsName(true, 2), ClaudeText.putOnPadsName(false, 2)))
+        assertEquals(listOf("012 Micro kick", "012"), listOf(ClaudeText.soundName(12, "Micro kick"), ClaudeText.soundName(12, null)))
+        assertEquals(listOf("Not on your EP-133: 301 Rim dusty", "Not on your EP-133: 301"), listOf(ClaudeText.soundMissing(301, "Rim dusty"), ClaudeText.soundMissing(301, null)))
+        assertEquals("Already there", ClaudeText.ALREADY_THERE)
+        assertEquals("Card says HH CLOSED \u00B7 name not checked", ClaudeText.cardSays("HH CLOSED"))
+        assertEquals("None of these sounds are on your EP-133. Share a beat with your sound list so Claude picks from yours.", ClaudeText.NONE_ON_DEVICE)
+        assertEquals(
+            listOf("A7: Kick dusty becomes 012 Micro kick", "A7: 012 Micro kick", "A7: 012 Micro kick, already there", "AE: Not on your EP-133: 301 Rim dusty"),
+            listOf(
+                ClaudeText.soundRowName(PhysicalPad(0, 9), "Kick dusty", "012 Micro kick"),
+                ClaudeText.soundRowName(PhysicalPad(0, 9), null, "012 Micro kick"),
+                ClaudeText.soundRowSame(PhysicalPad(0, 9), "012 Micro kick"),
+                ClaudeText.soundRowMissing(PhysicalPad(0, 2), 301, "Rim dusty"),
+            ),
+        )
+        assertEquals(
+            "Writes 2 pads in project 3 on the EP-133. Their pitch, level and other settings reset to the sound's. UNDO puts the old sounds back.",
+            ClaudeText.soundsNote(2, 3),
+        )
+        assertEquals(
+            "Writes 1 pad in the active project on the EP-133. Their pitch, level and other settings reset to the sound's. UNDO puts the old sounds back.",
+            ClaudeText.soundsNote(1, null),
+        )
+        assertEquals(
+            "Writes 1 pad in project 3 on the EP-133. Their pitch, level and other settings reset to the sound's. UNDO puts the old sounds back, but a pad that had none keeps its new one.",
+            ClaudeText.soundsNote(1, 3, keeps = true),
+        )
+        assertEquals(
+            "The sound goes on the pad with IMPORT, in the same step as the card. UNDO takes the patterns back; connected, the pad keeps the sound.",
+            ClaudeText.PICK_NOTE,
+        )
+        assertEquals("Saved as offline pad changes; they go to the EP-133 when you reconnect.", ClaudeText.SOUNDS_OFFLINE_NOTE)
+        assertEquals(
+            listOf(
+                "Imported to A \u00B7 04 and 2 sounds. UNDO takes it back.",
+                "Imported to A \u00B7 04 and 1 sound, 1 skipped. UNDO takes it back.",
+                "Imported to A \u00B7 04, 3 sounds skipped. UNDO takes it back.",
+            ),
+            listOf(ClaudeText.imported(listOf(0 to 4), null, 2), ClaudeText.imported(listOf(0 to 4), null, 1, 1), ClaudeText.imported(listOf(0 to 4), null, 0, 3)),
+        )
+        assertEquals(
+            listOf(
+                "The pad's sound couldn't be changed: busy. The patterns stay imported. UNDO takes it back.",
+                "The pad's sound couldn't be changed: busy. The patterns stay imported and 2 pads changed. UNDO takes it back.",
+            ),
+            listOf(ClaudeText.soundsFailed("busy", 0), ClaudeText.soundsFailed("busy", 2)),
+        )
+        assertEquals(listOf("Old sounds back on 2 pads.", "Old sounds back on 1 pad, 1 had none before."), listOf(ClaudeText.soundsRestored(2, 0), ClaudeText.soundsRestored(1, 1)))
         assertEquals(
             listOf("Imported to A \u00B7 04. UNDO takes it back.", "Imported to scene S03. UNDO takes it back.", "Imported to A \u00B7 04, B \u00B7 02. UNDO takes it back."),
             listOf(
@@ -544,5 +612,202 @@ class FeatureTextTest {
                 ClaudeText.imported(listOf(0 to 4, 1 to 2), null),
             ),
         )
+    }
+
+    @Test
+    fun `claude fx and pad shaping text`() {
+        assertEquals(listOf("FX", "Apply FX", "Pad shaping"), listOf(ClaudeText.FX, ClaudeText.APPLY_FX, ClaudeText.PAD_SHAPING))
+        assertEquals(
+            listOf("Apply the card's FX to this project", "Leave this project's FX as they are"),
+            listOf(ClaudeText.applyFxName(true), ClaudeText.applyFxName(false)),
+        )
+        val off = FxSettings.DEFAULT
+        val on = FxSettings(
+            FxType.DELAY, 0.7f, 0.45f, listOf(0.2f, 0f, 0.355f, 0f), Comp(true, 0.4f, 0.6f),
+            Sidechain(true, 0, 9, 0b0110, 0.25f, 0.7f),
+        )
+        assertEquals(
+            listOf("OFF", "A 0 \u00B7 B 0 \u00B7 C 0 \u00B7 D 0", "OFF", "OFF"),
+            listOf(ClaudeText.fxEffectText(off), ClaudeText.fxSendsText(off), ClaudeText.fxCompText(off), ClaudeText.fxSidechainText(off)),
+        )
+        assertEquals(
+            listOf(
+                "DELAY \u00B7 LENGTH 1/4 \u00B7 43%",
+                "A 20% \u00B7 B 0 \u00B7 C 36% \u00B7 D 0",
+                "ON \u00B7 DRIVE 2.1x \u00B7 10/200",
+                "A7 ducks B C \u00B7 ${MirrorText.sidechainLength(0.25f)} \u00B7 ${MirrorText.sidechainShape(0.7f)}",
+            ),
+            listOf(ClaudeText.fxEffectText(on), ClaudeText.fxSendsText(on), ClaudeText.fxCompText(on), ClaudeText.fxSidechainText(on)),
+        )
+        assertEquals("DISTORTION \u00B7 DRIVE 13x \u00B7 LP 20", ClaudeText.fxEffectText(FxSettings(FxType.DISTORTION, 0.55f, 0.4f)))
+        // Rows are the kinds the card has a line for, in the order effect, sends, comp, duck; an unchanged one says so.
+        val all = CardFx(FxType.DELAY, sends = mapOf(0 to 0.2f), comp = Comp(true), sidechain = Sidechain(true))
+        val rows = ClaudeText.fxRows(off, on, all)
+        assertEquals(listOf("Effect", "Sends", "Comp", "Duck"), rows.map { it.label })
+        assertEquals(listOf(false, false, false, false), rows.map { it.same })
+        assertEquals(ClaudeText.Change("Effect", "OFF", "DELAY \u00B7 LENGTH 1/4 \u00B7 43%"), rows[0])
+        assertEquals(listOf("Effect", "Comp"), ClaudeText.fxRows(off, on, CardFx(type = FxType.DELAY, comp = Comp(false))).map { it.label })
+        assertEquals(listOf(true, true, true, true), ClaudeText.fxRows(on, on, all).map { it.same })
+        assertEquals(emptyList<ClaudeText.Change>(), ClaudeText.fxRows(off, on, CardFx()))
+        assertEquals("OFF", ClaudeText.fxSidechainText(on.copy(sidechain = Sidechain(on = true, dests = 0))))
+        assertEquals("Already set", ClaudeText.ALREADY_SET)
+        assertEquals("Effect: OFF becomes REVERB", ClaudeText.changeName(ClaudeText.Change("Effect", "OFF", "REVERB")))
+        assertEquals("Comp: OFF, already set", ClaudeText.changeName(ClaudeText.Change("Comp", "OFF", "OFF")))
+
+        val pad = PhysicalPad(0, 9)
+        val d = PadSettings()
+        assertEquals(null, ClaudeText.padChange(pad, d, d.copy(start = 5, muteGroup = true, midiChannel = 2)))
+        assertEquals(
+            ClaudeText.Change("A7", "Pitch 0 \u00B7 Level 100", "Pitch -7 \u00B7 Level 90"),
+            ClaudeText.padChange(pad, d, d.copy(pitch = -7.0, level = 90)),
+        )
+        assertEquals(
+            ClaudeText.Change("AE", "Pan C \u00B7 Attack 0 \u00B7 Release 255 \u00B7 Mode Oneshot", "Pan L4 \u00B7 Attack 3 \u00B7 Release 20 \u00B7 Mode Key"),
+            ClaudeText.padChange(PhysicalPad(0, 2), d, d.copy(pan = -4, attack = 3, release = 20, mode = PlayMode.KEY)),
+        )
+        assertEquals(
+            listOf(ClaudeText.PadPart("Pitch", "0", MirrorText.pitchLabel(2.0)), ClaudeText.PadPart("Release", "255", "40")),
+            ClaudeText.padParts(d, d.copy(pitch = 2.0, release = 40, start = 9)),
+        )
+        assertEquals(
+            listOf(
+                "Old sounds back on 2 pads, 1 had none before.",
+                "Old settings back on 3 pads.",
+                "Old sounds back on 1 pad, old settings back on 2 pads, old FX back.",
+                "Old FX back.",
+                "Import taken back.",
+            ),
+            listOf(
+                ClaudeText.importUndone(2, 1, 0, false),
+                ClaudeText.importUndone(0, 0, 3, false),
+                ClaudeText.importUndone(1, 0, 2, true),
+                ClaudeText.importUndone(0, 0, 0, true),
+                ClaudeText.importUndone(0, 0, 0, false),
+            ),
+        )
+        assertEquals(ClaudeText.soundsRestored(2, 1), ClaudeText.importUndone(2, 1, 0, false))
+        assertEquals(
+            "The pad's settings couldn't be changed: busy. The patterns stay imported, the FX applied and 2 pads shaped. UNDO takes it back.",
+            ClaudeText.shapingFailed("busy", 2, true),
+        )
+        assertEquals(
+            listOf(
+                "Imported to A \u00B7 04. FX applied. UNDO takes it back.",
+                "Imported to A \u00B7 04. 1 pad setting applied. UNDO takes it back.",
+                "Imported to A \u00B7 04 and 2 sounds. FX and 3 pad settings applied. UNDO takes it back.",
+            ),
+            listOf(
+                ClaudeText.imported(listOf(0 to 4), null, fx = true),
+                ClaudeText.imported(listOf(0 to 4), null, pads = 1),
+                ClaudeText.imported(listOf(0 to 4), null, 2, fx = true, pads = 3),
+            ),
+        )
+        assertEquals(
+            listOf(
+                "Imported to A \u00B7 04. FX and 3 pad settings applied, 1 pad setting skipped. UNDO takes it back.",
+                "Imported to A \u00B7 04. 2 pad settings skipped. UNDO takes it back.",
+            ),
+            listOf(
+                ClaudeText.imported(listOf(0 to 4), null, fx = true, pads = 3, padsSkipped = 1),
+                ClaudeText.imported(listOf(0 to 4), null, padsSkipped = 2),
+            ),
+        )
+        assertEquals(
+            listOf("A9: no sound on this pad", "A9: already set", "A9: Pitch 0 becomes Pitch 2"),
+            listOf(
+                ClaudeText.padRowName(null, PhysicalPad(0, 11), true),
+                ClaudeText.padRowName(null, PhysicalPad(0, 11), false),
+                ClaudeText.padRowName(ClaudeText.Change("A9", "Pitch 0", "Pitch 2"), PhysicalPad(0, 11), false),
+            ),
+        )
+    }
+    @Test
+    fun `chain row text`() {
+        assertEquals(listOf("Chain", "On", "Add"), listOf(MirrorText.CHAIN, MirrorText.CHAIN_ON, MirrorText.CHAIN_ADD))
+        assertEquals(listOf("S03", "S03 \u00D72", "S01 \u00D78"), listOf(ChainStep(2), ChainStep(2, 2), ChainStep(0, 8)).map(MirrorText::chainStep))
+        assertEquals(listOf("\u00D71", "\u00D74"), listOf(MirrorText.chainPasses(1), MirrorText.chainPasses(4)))
+        val chain = Chain(listOf(ChainStep(0, 2), ChainStep(1, 4)), true)
+        assertEquals("Pass 1/2", MirrorText.chainPass(ChainPlay(0, 1), chain))
+        assertEquals("Pass 3/4", MirrorText.chainPass(ChainPlay(1, 3), chain))
+        assertEquals("Pass 2/1", MirrorText.chainPass(ChainPlay(9, 2), chain))
+        assertEquals("S04 added to chain", MirrorText.chainAdded(3))
+        assertEquals(listOf("Chain empty. + adds the scene shown", "Chain is full", "Chain off: you picked a scene."), listOf(MirrorText.CHAIN_EMPTY, MirrorText.CHAIN_FULL, MirrorText.CHAIN_OFF_BY_HAND))
+        assertEquals(
+            listOf("Chain, 1 step, off", "Chain, 4 steps, on", "Add scene 3 to the chain", "Chain on: plays the scenes in order. Tap to turn off", "Chain off. Tap to turn on"),
+            listOf(MirrorText.chainName(1, false), MirrorText.chainName(4, true), MirrorText.chainAddName(2), MirrorText.chainOnName(true), MirrorText.chainOnName(false)),
+        )
+        assertEquals("Chain step 2 of 5, scene 4, 1 pass", MirrorText.chainStepName(2, 5, ChainStep(3)))
+        assertEquals("Chain step 2 of 5, scene 4, 4 passes", MirrorText.chainStepName(2, 5, ChainStep(3, 4)))
+        assertEquals("Chain step 2 of 2, pass 3 of 4", MirrorText.chainPassSpoken(2, 2, ChainPlay(1, 3), chain))
+        assertEquals(listOf("More passes", "Fewer passes", "Remove step"), listOf(MirrorText.CHAIN_MORE_PASSES, MirrorText.CHAIN_FEWER_PASSES, MirrorText.CHAIN_REMOVE))
+        assertTrue("x1 x2 x4 x8" in MirrorText.CHAIN_NOTE)
+    }
+
+    @Test
+    fun `claude text for cards of scenes`() {
+        assertEquals(listOf("Share chain", "Share the chain with Claude, 1 step", "Share the chain with Claude, 4 steps"), listOf(ClaudeText.SHARE_CHAIN, ClaudeText.shareChainName(1), ClaudeText.shareChainName(4)))
+        assertEquals(listOf("Scene 2", "Scene 2 \u00B7 Drop"), listOf(ClaudeText.cardScene(2, null), ClaudeText.cardScene(2, "Drop")))
+        assertEquals("S05 \u00B7 A04 B02 C01 D01", ClaudeText.cardSceneGoes(4, listOf(4, 2, 1, 1)))
+        assertEquals("Plays the same patterns as the scene before.", ClaudeText.SCENE_SAME)
+        assertEquals(listOf("Share chain \u00B7 1 scene", "Share chain \u00B7 3 scenes"), listOf(ClaudeText.shareChainKey(1), ClaudeText.shareChainKey(3)))
+        assertEquals("new S03 \u00B7 A 04 \u00B7 B 02 \u00B7 C (same)", ClaudeText.cardSceneTarget(2, listOf(0 to 4, 1 to 2, 2 to null)))
+        assertEquals("S03\u00D72 \u2192 S04 \u2192 S03\u00D72 \u2192 S05", ClaudeText.chainImport(listOf(ChainStep(2, 2), ChainStep(3), ChainStep(2, 2), ChainStep(4))))
+        assertEquals("Scene 2, Drop, becomes S05, patterns A 4, B 2, C 1, D 1", ClaudeText.cardSceneName(2, "Drop", 4, listOf(4, 2, 1, 1)))
+        assertEquals("Scene 1, becomes S02, patterns A 1, B 1, C 1, D 1", ClaudeText.cardSceneName(1, null, 1, listOf(1, 1, 1, 1)))
+        assertEquals("1\u00D72 2 1\u00D72 3", ClaudeText.chainText(listOf(1 to 2, 2 to 1, 1 to 2, 3 to 1)))
+        assertEquals(
+            listOf("Set the project's chain from the card, 4 steps", "Leave the project's chain as it is, 1 step"),
+            listOf(ClaudeText.setChainName(true, 4), ClaudeText.setChainName(false, 1)),
+        )
+        assertEquals(
+            listOf(
+                "Imported to scenes S04\u2013S06. Chain set. UNDO takes it back.",
+                "Imported to scene S04. UNDO takes it back.",
+                "Imported to scenes S04\u2013S06 and 2 sounds. FX applied. Chain set. UNDO takes it back.",
+            ),
+            listOf(
+                ClaudeText.imported(emptyList(), "S04\u2013S06", scenes = 3, chain = true),
+                ClaudeText.imported(emptyList(), "S04", scenes = 1),
+                ClaudeText.imported(emptyList(), "S04\u2013S06", sounds = 2, fx = true, scenes = 3, chain = true),
+            ),
+        )
+        assertTrue("arrangement" in ClaudeText.SHARE_CHAIN_PROMPT && "energy curve" in ClaudeText.SHARE_CHAIN_PROMPT)
+        assertEquals("Arc beat Chain", ClaudeText.shareSubject(ClaudeText.CHAIN_CARD_NAME))
+    }
+
+    @Test
+    fun `live tools front page text`() {
+        assertEquals(listOf("Group A \u00B7 Follow", "Group C"), listOf(MirrorText.groupLine(0, true), MirrorText.groupLine(2, false)))
+        assertEquals("Keys \u00B7 DO major", MirrorText.keysLine(0, Scale.MAJOR, NoteNames.SOLFEGE))
+        assertEquals("Keys \u00B7 A minor penta", MirrorText.keysLine(9, Scale.MINOR_PENTATONIC, NoteNames.LETTERS))
+        assertEquals(listOf("last note", "last note \u00B7 ch 1"), listOf(MirrorText.LAST_NOTE, MirrorText.lastNoteChannel(1)))
+        assertEquals(
+            listOf("One group \u00B7 Follow on", "One group \u00B7 Follow off", "All groups \u00B7 Pads", "All groups \u00B7 Pads \u00B7 Repeat on", "Key DO \u00B7 Major"),
+            listOf(
+                MirrorText.playOneGroup(true),
+                MirrorText.playOneGroup(false),
+                MirrorText.playAllGroups(null),
+                MirrorText.playAllGroups(true),
+                MirrorText.playKeys(0, Scale.MAJOR, NoteNames.SOLFEGE),
+            ),
+        )
+        assertEquals(
+            listOf("Recording 0:12", "1 take \u00B7 last Oct 5, 2:23 PM", "3 takes \u00B7 last Oct 4", "No takes yet"),
+            listOf(MirrorText.takesRecording(12.9), MirrorText.takesSummary(1, "Oct 5, 2:23 PM"), MirrorText.takesSummary(3, "Oct 4"), MirrorText.NO_TAKES),
+        )
+        assertEquals("Play, One group \u00B7 Follow on", MirrorText.toolsRow(MirrorText.PLAY, MirrorText.playOneGroup(true)))
+        assertEquals(
+            listOf("Back to Live tools", "Help", "phone mix", "Waiting for the first sound", "Play the EP-133's pads or keys", "About takes"),
+            listOf(MirrorText.BACK_TO_TOOLS, MirrorText.HELP, MirrorText.PHONE_MIX, MirrorText.TAKE_ARMED, MirrorText.PLAY_HINT, MirrorText.ABOUT_TAKES),
+        )
+        assertEquals(
+            listOf("Scene S02", "A \u00B7 01", "Chain"),
+            listOf(ClaudeText.sharedScene("S02"), ClaudeText.sharedPattern(0, 1), ClaudeText.CHAIN_CARD_NAME),
+        )
+        assertEquals(
+            listOf("Shared to Claude", "Paste Claude's reply when it's ready", "Stop waiting for Claude's reply", "About beat cards"),
+            listOf(ClaudeText.SHARED_TO_CLAUDE, ClaudeText.WAITING_HINT, ClaudeText.STOP_WAITING, ClaudeText.ABOUT_CARDS),
+        )
+        assertEquals(listOf("Share a beat \u00B7 paste a card", "Waiting for Claude's reply"), listOf(ClaudeText.ROW_IDLE, ClaudeText.ROW_WAITING))
     }
 }

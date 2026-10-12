@@ -41,6 +41,18 @@ class AppSettingsTest {
     }
 
     @Test
+    fun `sharing the sound list is on by default, stored like the other switches and read back from library json`() {
+        assertTrue(AppSettings().shareSounds)
+        assertEquals("true", AppSettings().values()["shareSounds"])
+        assertEquals("false", AppSettings(shareSounds = false).values()["shareSounds"])
+        assertFalse(AppSettings().withIndex(mapOf("app.shareSounds" to "false")).shareSounds)
+        assertTrue(AppSettings(shareSounds = false).withIndex(mapOf("app.shareSounds" to "true")).shareSounds)
+        // Missing or unreadable: left as it is.
+        assertFalse(AppSettings(shareSounds = false).withIndex(emptyMap()).shareSounds)
+        assertTrue(AppSettings().withIndex(mapOf("app.shareSounds" to "maybe")).shareSounds)
+    }
+
+    @Test
     fun `every setting round-trips through library json`() {
         val chosen = AppSettings(
             autoConnect = false,
@@ -53,6 +65,7 @@ class AppSettingsTest {
             haptics = false,
             makeUpDelay = false,
             liveTempo = 98,
+            shareSounds = false,
         )
         val index = chosen.values().mapKeys { "app." + it.key }
         assertEquals(chosen, AppSettings().withIndex(index))

@@ -49,6 +49,8 @@ function roundHalfEven(x: number): number {
   return f % 2 === 0 ? f : f + 1
 }
 
+const FACTORY_KINDS = ['Kicks', 'Snares', 'Hats', 'Perc', 'Bass', 'Melodic']
+
 function slot(n: number): string {
   return String(n).padStart(3, '0')
 }
@@ -104,20 +106,26 @@ export const FeatureText = {
   },
   FREE: 'Free',
 
+  /** The factory layout's blocks of slots, in order (the guide's): kicks, snares, hi-hats, percussion, bass and melodic. */
+  FACTORY_BLOCKS: [
+    [1, 99],
+    [100, 199],
+    [200, 299],
+    [300, 399],
+    [400, 499],
+    [500, 599],
+  ] as readonly (readonly [number, number])[],
+
   /**
    * The factory layout's kind of sound for the range of slots starting at
    * [first] (from the official guide's note on SOUND mode: kicks 1-99,
    * snares 100-199, hi-hats 200-299, percussion 300-399, bass 400-499,
-   * melodic 500-599), or null from 600 up, which the guide leaves free.
+   * melodic 500-599; FACTORY_BLOCKS), or null from 600 up, which the
+   * guide leaves free.
    */
   factoryCategory(first: number): string | null {
-    if (first >= 1 && first <= 99) return 'Kicks'
-    if (first >= 100 && first <= 199) return 'Snares'
-    if (first >= 200 && first <= 299) return 'Hats'
-    if (first >= 300 && first <= 399) return 'Perc'
-    if (first >= 400 && first <= 499) return 'Bass'
-    if (first >= 500 && first <= 599) return 'Melodic'
-    return null
+    const i = FeatureText.FACTORY_BLOCKS.findIndex(([from, to]) => first >= from && first <= to)
+    return i < 0 ? null : FACTORY_KINDS[i]!
   },
 
   /** "12 · 2.1 MB", the sounds binder's bar after "Sounds". */
