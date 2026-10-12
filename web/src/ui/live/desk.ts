@@ -1,10 +1,13 @@
-// Web only: Live's all-groups view on the desk (the desktop layout, from
-// 1024px wide). It ports the rule of Android's sideways all-groups row
-// (ui/screens/MirrorScreen.kt, allGroupsSideways): the four groups side by side
-// in one row that doesn't scroll, as long as every pad keeps 40 px both ways,
-// its rows no taller than square pads; else the scrolling grid stays.
+// Live's all-groups view in one row: on the desk (the desktop layout, from
+// 1024px wide; web only) and on a phone on its side (Android's sideways
+// all-groups row, ui/screens/MirrorScreen.kt allGroupsSideways): the four
+// groups side by side in one row that doesn't scroll, as long as every pad
+// keeps 40 px both ways, its rows no taller than square pads; else the
+// scrolling grid stays. On its side the function keys are a column left of
+// the groups (or the open panel in its place).
 //
-// The numbers are the row's CSS (MirrorScreen.css, .live-row): change both together.
+// The numbers are the row's CSS (MirrorScreen.css, .live-row and
+// .live__side--row) and the side page's (.live__one): change both together.
 
 /** Android's floor: a pad smaller than this either way and the row gives way to the scrolling grid. */
 export const ROW_PAD_MIN = 40
@@ -31,4 +34,37 @@ export function rowPadSize(width: number, height: number): number | null {
   const byHeight = (height - FIXED_H) / 4
   const side = Math.floor(Math.min(byWidth, byHeight))
   return side >= ROW_PAD_MIN ? side : null
+}
+
+/** The side page's padding across (the edge tab's 22 + 8 at the start, the strip's 24 + 4 at the end) and down (4 + 12). */
+const PAGE_X = 22 + 8 + 24 + 4
+const PAGE_Y = 4 + 12
+/** The mode row over the groups (its 44 to touch) and the page's 10 gap under it; the display line (56) and its gap, when on the page. */
+const MODE_ROW = 44 + 10
+const LINE = 56 + 10
+/** The function keys' column and its gap (FunctionRow.css, Kotlin SideFunctions and SideControlsGap). */
+const COLUMN = 60 + 12
+/** The column's least height that keeps its LED lines (Kotlin FunctionColumnLed). */
+export const COLUMN_LED_HEIGHT = 226
+/** An open panel in the column's place: as wide as the groups at three fifths of the room leave, 240 to 380 (Kotlin sidePanelWidth). */
+const panelWidth = (room: number): number => Math.min(380, Math.max(240, room * 0.4))
+
+/**
+ * The pads' side in the one-row all-groups view on a phone on its side, in
+ * Live's [width] x [height] box ([line]: with the display line on the page,
+ * not in the top bar), whole pixels; null when the row doesn't fit (a pad
+ * under [ROW_PAD_MIN] either way, or too short a room for the column's LED
+ * lines): then the page scrolls. [panel]: a panel open in the column's
+ * place, the groups narrower beside it (no floor then: the row stays, as
+ * Android's).
+ */
+export function sidewaysRowPad(width: number, height: number, line: boolean, panel = false): number | null {
+  const roomW = width - PAGE_X
+  const roomH = height - PAGE_Y - MODE_ROW - (line ? LINE : 0)
+  if (roomW <= 0 || roomH < COLUMN_LED_HEIGHT) return null
+  const pad = (columnW: number): number => ((roomW - columnW - 3 * GROUP_GAP) / 4 - DECK_X - 2 * PAD_GAP) / 3
+  const byHeight = (roomH - CAPTION - DECK_Y - 3 * PAD_GAP) / 4
+  const closed = Math.floor(Math.min(pad(COLUMN), byHeight))
+  if (closed < ROW_PAD_MIN) return null
+  return panel ? Math.max(1, Math.floor(Math.min(pad(panelWidth(roomW) + 12), byHeight))) : closed
 }

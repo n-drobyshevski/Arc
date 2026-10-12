@@ -73,7 +73,8 @@
 // - All groups: the four in one row that doesn't scroll while every pad keeps
 //   40 px (Android's allGroupsSideways, live/desk.ts rowPadSize, measured with
 //   a ResizeObserver); in a room too small for that, the phone's scrolling grid
-//   on a paper card.
+//   on a paper card. A phone on its side has the row too (live/desk.ts
+//   sidewaysRowPad), the function keys a column on its left.
 // - The tools panel is docked: a column beside the panel (SideZone docked),
 //   no strip; in KEYS the tools go back behind the edge strip, so the keys
 //   get the page's width. With EDIT available the docked column has two tabs,
@@ -147,7 +148,7 @@ import {
 } from '../live/glow'
 import { GLYPHS } from '../components/KoPanel'
 import { capDown, capUp } from '../live/capDown'
-import { rowPadSize } from '../live/desk'
+import { rowPadSize, sidewaysRowPad } from '../live/desk'
 import { chosenView, pianoFor, type PianoPlan } from '../live/keyboard'
 import { holdCap, releaseCap, useLiveKeys } from '../live/useLiveKeys'
 import { computerKeys } from '../keyPrefs'
@@ -1033,6 +1034,11 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   // On a phone on its side the function keys are a column left of the pads or KEYS' grid (Kotlin FunctionColumn),
   // the open panel taking their place; the all-groups page, which scrolls, keeps its row.
   const fnColumn = panelShown ? null : <FunctionRow class={`live__fn${keysReturn ? ' fn-return' : ''}`} column />
+  // All four groups on a phone on its side, in one row where every pad keeps 40 px (live/desk.ts sidewaysRowPad); the
+  // open panel in the function keys' column's place.
+  const sideRow =
+    sideways && !desk && !oneGroup && !keys.on && !device ? sidewaysRowPad(live.width, live.height, !inBar, panelShown) : null
+  const rowPanel = sampleOpen ? <SamplePanel class="live__fn" /> : stepOpen ? <StepPanel class="live__fn" /> : sceneOpen ? <ScenePanel class="live__fn" /> : null
   const fnRowAll = inBar && !panelShown ? <FunctionRow class={`live__fn${keysReturn ? ' fn-return' : ''}`} /> : fnRow
   const sideStep = sampleOpen ? (
     <SamplePanel class="live__fn live__side-step" />
@@ -1277,6 +1283,29 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
             <GroupKeys keyboard={keyHints} group={group} st={st} now={now} onSelect={setGroup} />
           </>
         )}
+      </div>
+    )
+  } else if (sideRow !== null) {
+    // All four groups on a phone on its side, in one row that doesn't scroll (Kotlin allGroupsSideways): the function
+    // keys a column on their left (the open panel in its place, the groups narrower beside it), so a press plays at once.
+    page = (
+      <div class="live__one live__one--side live__one--row" style={{ '--row-pad': `${sideRow}px` }}>
+        {onBack && (
+          <div class="live__head">
+            <Caption text={MirrorText.TITLE} />
+            <CloseKey class="live__close" onClick={onBack} description={GUIDE_CLOSE} />
+          </div>
+        )}
+        {displayStrip}
+        {modeRow}
+        <div class={`live__side live__side--row${panelShown ? ' live__side--open' : ''}`}>
+          {panelShown ? <div class="live__side-panel">{rowPanel}</div> : fnColumn}
+          <div class="live-row__groups">
+            {[0, 1, 2, 3].map((g) => (
+              <Group key={g} group={g} st={st} nameOf={nameOf} now={now} fill ui={padUi} tracker={tracker} target={keyHints && g === group} keyHints={keyHints && g === group} edited={stepEdited === g} />
+            ))}
+          </div>
+        </div>
       </div>
     )
   } else {

@@ -1531,3 +1531,24 @@
   from { opacity: 0; transform: translateY(6px) scale(0.94); }
   to { opacity: 1; transform: none; }
 }
+
+/* All four groups on a phone on its side, in one row that doesn't scroll (Kotlin allGroupsSideways, live/desk.ts
+ * sidewaysRowPad): the function keys' column on the left (the open panel in its place, 240 to 380 wide), then the four
+ * groups sharing the width, pads [--row-pad] high (square at most, 40 at least). */
+.live__one--row { max-width: none; }
+.live__side--row {
+  --side-panel: clamp(240px, 40cqw, 380px);
+  align-items: stretch;
+}
+.live__side--row > .live-row__groups {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-14);
+}
+.live__side--row .live-group { flex: 1 1 0; min-width: 0; }
+.live__side--row .live-pad {
+  aspect-ratio: auto;
+  height: var(--row-pad);
+}

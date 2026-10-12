@@ -1,6 +1,7 @@
 // The function keys on a phone on its side (Kotlin FunctionColumn): SOUND, PROJECT, TEMPO and FX
 // in a column left of one group's pads and of KEYS' grid, sized to its height; STEP's panel takes
-// its place while open; the all-groups page, which scrolls, keeps the row.
+// its place while open; the all-groups page, where it scrolls (too small for one row of
+// groups: sideRow.spec.ts), keeps the row.
 import type { Page } from '@playwright/test'
 import { expect, test } from './fixtures'
 
@@ -71,8 +72,8 @@ for (const [width, height] of [
   })
 }
 
-test.describe('all four groups on its side', () => {
-  test.use({ viewport: { width: 852, height: 393 } })
+test.describe('all four groups on its side, too small for one row', () => {
+  test.use({ viewport: { width: 568, height: 320 } })
 
   test('the page that scrolls keeps the row', async ({ page }) => {
     await page.goto('/?demo')
