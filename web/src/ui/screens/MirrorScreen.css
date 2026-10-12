@@ -511,8 +511,11 @@
 }
 .live__side {
   --side-tools: 44px;
+  /* The function keys' column on the left and its gap (FunctionRow.css), where it shows. */
+  --side-fn: 0px;
   gap: var(--space-12);
 }
+.live__side.live__side--fn { --side-fn: calc(60px + var(--space-12)); }
 /* The mode word turned a quarter turn as the edge tabs' words are, in a narrow column left of
  * the body, in the middle of its height (Android's SidewaysPadsControls). */
 .live__side-tools {
@@ -571,12 +574,12 @@
 }
 .live__side--keys > .live-kgrid { flex: none !important; }
 .live__one--side > .live__side--keys > .live-kgrid > .live-deck--ko {
-  --u: clamp(0px, min((100cqw - var(--side-tools) - var(--side-end) - 2 * var(--space-12) - var(--cap-dx) - 2px - 16px) / 4.046, (100cqh - var(--cap-dy) - 2px) / 5.72), 170px);
+  --u: clamp(0px, min((100cqw - var(--side-fn) - var(--side-tools) - var(--side-end) - 2 * var(--space-12) - var(--cap-dx) - 2px - 16px) / 4.046, (100cqh - var(--cap-dy) - 2px) / 5.72), 170px);
 }
 .live__side > .ko-body {
   --ko-cols: 4;
   /* As .ko-body's, less KEYS / PADS' 16 (the plate's right margin wider by it). */
-  --u: clamp(0px, min((100cqw - var(--cap-dx) - 2px - 16px) / (var(--ko-cols) * 1.215 + 0.401), (100cqh - var(--cap-dy) - 2px) / 5.72), 170px);
+  --u: clamp(0px, min((100cqw - var(--side-fn) - var(--cap-dx) - 2px - 16px) / (var(--ko-cols) * 1.215 + 0.401), (100cqh - var(--cap-dy) - 2px) / 5.72), 170px);
   display: flex;
   gap: var(--kd-gx);
 }

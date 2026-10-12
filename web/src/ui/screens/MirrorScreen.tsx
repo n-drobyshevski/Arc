@@ -1030,6 +1030,10 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   ) : inBar ? null : (
     <FunctionRow class={`live__fn${keysReturn ? ' fn-return' : ''}`} />
   )
+  // On a phone on its side the function keys are a column left of the pads or KEYS' grid (Kotlin FunctionColumn),
+  // the open panel taking their place; the all-groups page, which scrolls, keeps its row.
+  const fnColumn = panelShown ? null : <FunctionRow class={`live__fn${keysReturn ? ' fn-return' : ''}`} column />
+  const fnRowAll = inBar && !panelShown ? <FunctionRow class={`live__fn${keysReturn ? ' fn-return' : ''}`} /> : fnRow
   const sideStep = sampleOpen ? (
     <SamplePanel class="live__fn live__side-step" />
   ) : stepOpen ? (
@@ -1045,7 +1049,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         {onBack && <CloseKey class="live__close" onClick={onBack} description={GUIDE_CLOSE} />}
       </div>
       {inBar ? null : editing ? <EditStrip /> : <Display st={st} mirror={mirror} initialNoteOpen={props.initialNoteOpen ?? false} onGetFactory={props.onGetFactory ?? null} take={take} still={fixedNow !== null} />}
-      {fnRow}
+      {fnRowAll}
       {modeRow}
       {/* Four groups in a row when there is room, two by two on a phone. */}
       <div class="live__groups">
@@ -1227,12 +1231,15 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           <>
             {!inBar && <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={null} />}
             {!stepColumn && sideStep}
-            <div class={`live__side live__side--keys${plan.switchShown ? '' : ' live__side--bare'}${stepColumn ? ' live__side--panel' : ''}`}>
-              {/* STEP's panel in a column left of the keys, which narrow beside it (Kotlin's StepHosting.SLOT). */}
-              {stepColumn && (
+            <div class={`live__side live__side--keys${plan.switchShown ? '' : ' live__side--bare'}${stepColumn ? ' live__side--panel' : ''}${fnColumn ? ' live__side--fn' : ''}`}>
+              {/* The function keys' column left of the keys, STEP's panel in its place while it is open (Kotlin's
+                  functionSlot, StepHosting.SLOT): the keys narrow beside it. */}
+              {stepColumn ? (
                 <div class="live__side-panel">
                   <StepPanel class="live__fn" />
                 </div>
+              ) : (
+                fnColumn
               )}
               {plan.switchShown && <div class="live__side-tools">{modeLead}</div>}
               <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} haptic={haptic} keysRef={gridKeys} strip={modeStrip} />
@@ -1253,7 +1260,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           <>
             {displayStrip}
             {sideStep}
-            <div class="live__side">
+            <div class={`live__side${fnColumn ? ' live__side--fn' : ''}`}>
+              {fnColumn}
               <div class="ko-body ko-body--strip">
                 <GroupKeys keyboard={keyHints} group={group} st={st} now={now} onSelect={setGroup} vertical />
                 <Group group={group} st={st} nameOf={nameOf} now={now} big coach ui={padUi} tracker={tracker} keyHints={keyHints} />

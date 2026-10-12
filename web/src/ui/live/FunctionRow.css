@@ -76,3 +76,26 @@
 .fn-key[aria-disabled='true'] { opacity: 0.45; cursor: default; }
 /* FX held: the upper half lit. */
 .fn-key.is-held .fn-key__word { background: var(--signal); color: var(--on-signal); }
+
+/* The column on a phone on its side (Kotlin FunctionColumn, SideFunctions 60), the keys in the middle of its height and
+ * sized to it (columnFit): a 38px cap under its 6 + 14 LED line, gaps up to 12; shorter, the gaps close to 6, then the caps
+ * shrink to 32; shorter still the LED lines go (aria-hidden already: the keys' descriptions say it) and the caps go to 30. */
+.fn-row--column {
+  flex: none;
+  flex-direction: column;
+  justify-content: center;
+  align-self: stretch;
+  width: 60px;
+  max-width: none;
+  container-type: size;
+  gap: clamp(6px, (100cqh - 4 * 58px) / 3, 12px);
+}
+.fn-row--column .fn-key { flex: none; max-width: none; }
+.fn-row--column .fn-key__cap { height: clamp(32px, (100cqh - 3 * 6px) / 4 - 20px, 38px); }
+.fn-row--column .fn-key__word,
+.fn-row--column .fn-key__sub { font-size: 9.5px; letter-spacing: 0.04em; }
+.fn-row--column .fn-key__label { font-size: 10px; }
+@container (max-height: 225px) {
+  .fn-row--column .fn-key__line { display: none; }
+  .fn-row--column .fn-key__cap { height: clamp(30px, (100cqh - 3 * 6px) / 4, 38px); }
+}
