@@ -67,7 +67,6 @@ import {
 } from './ui/nav'
 import { CoachHost, useCoachFirstRun } from './ui/components/Coach'
 import { Dialog } from './ui/components/Dialog'
-import { EditEdgeTab } from './ui/components/EditEdgeTab'
 import { Key } from './ui/components/Key'
 import { NavRail } from './ui/components/NavRail'
 import { Sheet } from './ui/components/Sheet'
@@ -467,7 +466,6 @@ function Root(): JSX.Element {
         guide={<GuideScreen onBack={() => nav.close(screenLayer({ kind: 'guide' }))} search={guideSearch.value} />}
         desk={desk}
         // Live's EDIT tab under GUIDE (on the desk it hangs on the K.O. II panel instead).
-        edgeTab={canEdit && !desk ? <EditEdgeTab on={editPads} onChange={setEditPads} inert={v.menu} /> : undefined}
         middle={liveBar ? <LiveBar pianoRange={pianoRange} editing={editPads} /> : undefined}
       >
         <TabScreen view={v} editPads={editPads} onEditPads={setEditPads} inBar={liveBar} onPianoRange={setPianoRange} />

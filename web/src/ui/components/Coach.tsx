@@ -68,13 +68,19 @@ export const COACH_IDS = [
   'top.help',
   'top.theme',
   'edge.guide',
-  'edge.edit',
   'backups.backup',
   'backups.search',
   'backups.import',
   'backups.open',
   'live.pads',
   'live.keys',
+  'live.record',
+  'live.erase',
+  'live.step',
+  'live.scene',
+  'live.sound',
+  'live.project',
+  'live.tempo',
   'live.mode',
   'live.arp',
   'live.claude',
@@ -102,6 +108,7 @@ export interface CoachMarkSpec {
 
 const navyTag = (label: string): CoachMarkSpec => ({ label, face: 'var(--navy)', ink: 'var(--on-navy)' })
 const yellowTag = (label: string): CoachMarkSpec => ({ label, face: COACH_YELLOW, ink: COACH_YELLOW_INK })
+const signalTag = (label: string): CoachMarkSpec => ({ label, face: 'var(--signal)', ink: 'var(--on-signal)' })
 
 /**
  * The tags of the Kotlin coachMark call sites (Chrome.kt, MainScreen.kt,
@@ -115,14 +122,12 @@ export const COACH_MARKS: Readonly<Record<CoachId, CoachMarkSpec>> = Object.free
   'top.bluetooth': { label: CoachText.BLUETOOTH, face: 'var(--warn)', ink: 'var(--tag-ink)' },
   'top.connection': navyTag(CoachText.CONNECTION),
   // Live's mic key (Chrome.kt: the signal tag).
-  'top.sample': { label: CoachText.SAMPLE, face: 'var(--signal)', ink: 'var(--on-signal)' },
+  'top.sample': signalTag(CoachText.SAMPLE),
   'top.help': { label: CoachText.HELP, face: 'var(--ink)', ink: 'var(--shell)' },
   // Web: the desk's theme switch, after the ? key (the nav rail's Settings key
   // says Settings in words).
   'top.theme': navyTag(CoachText.THEME),
   'edge.guide': navyTag(CoachText.GUIDE_TAB),
-  // Live's EDIT tab (under GUIDE): an edge-hook side tag on the phone.
-  'edge.edit': navyTag(CoachText.EDIT),
   'backups.backup': { label: CoachText.BACK_UP, face: 'var(--signal)', ink: 'var(--on-signal)' },
   'backups.search': navyTag(CoachText.SEARCH),
   'backups.import': navyTag(CoachText.IMPORT),
@@ -130,6 +135,15 @@ export const COACH_MARKS: Readonly<Record<CoachId, CoachMarkSpec>> = Object.free
   'live.pads': yellowTag(CoachText.PADS),
   // The KEYS grid: the same tip as the pads (MirrorScreen.kt).
   'live.keys': yellowTag(CoachText.PADS),
+  // The display line's keys (PatternLine.kt): signal tags.
+  'live.record': signalTag(CoachText.RECORD),
+  'live.erase': signalTag(CoachText.ERASE),
+  'live.step': signalTag(CoachText.STEP),
+  'live.scene': signalTag(CoachText.SCENE),
+  // The function keys (LiveFunctionKeys.kt): SOUND says what EDIT does, in signal; PROJECT and TEMPO navy.
+  'live.sound': signalTag(CoachText.EDIT),
+  'live.project': navyTag(CoachText.PROJECT),
+  'live.tempo': navyTag(CoachText.TEMPO),
   'live.mode': navyTag(CoachText.MODE),
   // ARP / RPT and LATCH after the mode word (LiveArp.kt).
   'live.arp': navyTag(CoachText.ARP),
@@ -152,6 +166,22 @@ export const COACH_MARKS: Readonly<Record<CoachId, CoachMarkSpec>> = Object.free
   // Web: "Play it here" replaces CoachText.PLAY "Play on the phone".
   'device.play': yellowTag(WebText.COACH_PLAY),
 })
+
+/**
+ * The attributes marking a control [id] (data-coach), or, [clear] (Kotlin
+ * coachClear: the line's keys while compact, in the top bar), none but tags
+ * keep off it (data-coach-clear).
+ */
+export function coachAttrs(id: CoachId, clear = false): { 'data-coach'?: CoachId; 'data-coach-clear'?: '' } {
+  return clear ? { 'data-coach-clear': '' } : { 'data-coach': id }
+}
+
+/**
+ * The tags that give way, the first first, where not every tag can stand clear (a web delta:
+ * a 360 phone with Live's Bluetooth key): the display line's and the function keys', the
+ * scene's and STEP's first, SOUND's (EDIT's only tag) last.
+ */
+export const COACH_SPARE: readonly CoachId[] = ['live.scene', 'live.step', 'live.erase', 'live.tempo', 'live.project', 'live.record', 'live.sound']
 
 const isCoachId = (id: string): id is CoachId => (COACH_IDS as readonly string[]).includes(id)
 
@@ -404,7 +434,7 @@ export function CoachOverlay(props: CoachOverlayProps): JSX.Element | null {
     const from = JSON.stringify([vp, safe, clear, marks])
     if (!force && from === placedFrom.current) return
     placedFrom.current = from
-    const placed = layoutTags(marks, vp, (text, max) => measureWith(measurer.current, text, max), { clear, safe })
+    const placed = layoutTags(marks, vp, (text, max) => measureWith(measurer.current, text, max), { clear, safe, spare: COACH_SPARE })
     const h = hint.current?.getBoundingClientRect()
     const hintSize = h && h.width > 0 ? { width: h.width, height: h.height } : undefined
     setLayout({ placed, vp, hint: hintTop(vp, placed, hintSize, safe) })

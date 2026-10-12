@@ -19,6 +19,7 @@ import { useContext, useEffect, useRef } from 'preact/hooks'
 import { signal, type ReadonlySignal } from '@preact/signals'
 import { round as roundTempo, type Beat } from '../../core/features/tempo'
 import { MirrorText } from '../../core/text/mirrorText'
+import type { CoachId } from '../components/Coach'
 import './FunctionRow.css'
 
 /** A function key held this long is held (Compose's long-press time). */
@@ -249,6 +250,8 @@ function FnKey(props: {
   ledRef?: { current: HTMLSpanElement | null }
   held?: boolean
   enabled?: boolean
+  /** Its tag in the guide overlay (FX has none, as on Android). */
+  coach?: CoachId
   attrs: ButtonHTMLAttributes<HTMLButtonElement>
 }): JSX.Element {
   const enabled = props.enabled ?? true
@@ -257,6 +260,7 @@ function FnKey(props: {
       type="button"
       class={`fn-key${props.lit ? ' is-lit' : ''}${props.held ? ' is-held' : ''}`}
       aria-disabled={enabled ? undefined : true}
+      data-coach={props.coach}
       {...props.attrs}
     >
       <span class="fn-key__line" aria-hidden="true">
@@ -287,6 +291,7 @@ export function SoundKey(props: { s: SoundUi }): JSX.Element {
       lit={s.editOn}
       led={s.editOn}
       enabled={s.enabled}
+      coach="live.sound"
       attrs={{
         role: 'switch',
         'aria-checked': s.editOn,
@@ -317,6 +322,7 @@ export function ProjectKey(props: { p: ProjectUi; hold: ProjectHold }): JSX.Elem
       lit={p.switching || held}
       led={p.switching || held}
       enabled={p.enabled}
+      coach="live.project"
       attrs={{
         'aria-label': MirrorText.FN_PROJECT,
         'aria-description': `${p.state}. ${MirrorText.PROJECT_NEXT}; ${MirrorText.PICK_PROJECT}: hold`,
@@ -387,6 +393,7 @@ export function TempoKey(props: { t: TempoUi }): JSX.Element {
       lit={t.clickOn}
       led={false}
       ledRef={led}
+      coach="live.tempo"
       attrs={{
         role: 'switch',
         'aria-checked': t.clickOn,

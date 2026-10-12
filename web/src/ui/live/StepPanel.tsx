@@ -30,6 +30,7 @@ import type { PhysicalPad } from '../../core/features/padNotes'
 import { Seq, timingTicks, type Timing } from '../../core/features/pattern'
 import { MirrorText } from '../../core/text/mirrorText'
 import { STEP_GATES, snapGate, type StepUi } from '../../state/stepPlan'
+import { coachAttrs } from '../components/Coach'
 import './StepPanel.css'
 
 /**
@@ -197,11 +198,11 @@ function StepGlyph(): JSX.Element {
  * PatternLine.tsx's SceneStepKeys): its word on a wide line ([word]), else
  * its glyph; a tap opens the STEP panel in the function keys' place.
  */
-export function StepCell(props: { word: boolean }): JSX.Element | null {
+export function StepCell(props: { word: boolean; compact?: boolean }): JSX.Element | null {
   const s = useStep()
   if (s === null) return null
   return (
-    <button type="button" class="transport-key transport-key--step" aria-label={MirrorText.STEP_NAME} onClick={() => s.onOpen()}>
+    <button type="button" class="transport-key transport-key--step" aria-label={MirrorText.STEP_NAME} {...coachAttrs('live.step', props.compact)} onClick={() => s.onOpen()}>
       {props.word ? <span class="transport-key__word" aria-hidden="true">{MirrorText.STEP.toUpperCase()}</span> : <StepGlyph />}
     </button>
   )

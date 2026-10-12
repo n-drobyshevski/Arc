@@ -31,6 +31,7 @@ import type { SwitchTime } from '../../core/features/scenes'
 import { FeatureText } from '../../core/text/featureText'
 import { MirrorText } from '../../core/text/mirrorText'
 import { CLIP_MODES, cycledSwitch, type ClipMode, type SceneUi } from '../../state/scenePlan'
+import { coachAttrs } from '../components/Coach'
 import './ScenePanel.css'
 
 /** How long CLR / DEL is held (ERASE + MAIN on the device) before it acts. */
@@ -96,7 +97,7 @@ export function sceneSaid(ui: SceneUi): string {
  * SceneStepKeys): S01, a tap opens the panel; while the pattern plays and the
  * scene is worth saying, its [readout] instead (a change waiting blinks).
  */
-export function SceneCell(props: { readout: readonly string[] | null }): JSX.Element | null {
+export function SceneCell(props: { readout: readonly string[] | null; compact?: boolean }): JSX.Element | null {
   const s = useScene()
   if (s === null) return null
   const ui = s.ui
@@ -107,6 +108,7 @@ export function SceneCell(props: { readout: readonly string[] | null }): JSX.Ele
       class="transport-key scene-chip"
       aria-label={MirrorText.sceneChipName(ui.index, ui.count)}
       aria-description={readout !== null ? sceneSaid(ui) : undefined}
+      {...coachAttrs('live.scene', props.compact === true && readout === null)}
       onClick={() => s.onOpen()}
     >
       {readout === null ? (

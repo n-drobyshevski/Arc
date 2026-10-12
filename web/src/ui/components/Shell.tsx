@@ -1,8 +1,8 @@
 // Port of app/src/main/kotlin/dev/arc/ep133/ui/components/Chrome.kt (ArcFrame, ArcShell)
 //
 // The page under the top bar: TopBar, then the section's page with the GUIDE
-// tab on the left edge (centred, 80px up; [edgeTab], Live's EDIT, under it)
-// and the section list over it (under
+// tab on the left edge (centred, 80px up; Live's EDIT is the SOUND key, as
+// on Android) and the section list over it (under
 // the top bar, so the tag stays in view; Settings is its last entry). The guide slides in from the left
 // over everything. The page box has a fixed height; [children] scroll inside
 // .shell__page (screens that fill it, like Live's one-group view, use height: 100%).
@@ -58,8 +58,6 @@ export interface ShellProps {
   children?: ComponentChildren
   /** The desktop layout (ui/useDesk.ts): the nav rail's Guide key opens the guide, not the edge tab. */
   desk?: boolean
-  /** A second tab on the left edge, under GUIDE (Live's EDIT, EditEdgeTab). */
-  edgeTab?: ComponentChildren
 }
 
 /** slideInHorizontally / slideOutHorizontally: Compose's default spring settles in about this long. */
@@ -99,7 +97,6 @@ export function Shell(props: ShellProps): JSX.Element {
           {props.children}
         </main>
         <GuideEdgeTab class="shell__edge-tab" inert={menuOpen} onClick={() => props.onGuide(true)} />
-        {props.edgeTab && <div class="shell__edge-tab shell__edge-tab--second">{props.edgeTab}</div>}
         <SectionMenu
           id={MENU_ID}
           open={menuOpen}

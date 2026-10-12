@@ -28,6 +28,7 @@ import { canvasMeasure, lineFit, stepFit, stepRowFit, WIDE_LINE, type LineFit, t
 import { SceneCell, sceneReadout, useScene, worthSaying } from './ScenePanel'
 import { CorrectKey, StepCell, useStep } from './StepPanel'
 import { TakeBadge, type TakeUi } from './Takes'
+import { coachAttrs } from '../components/Coach'
 import './PatternLine.css'
 
 /** RECORD held this long while stopped or armed opens the pattern sheet. */
@@ -275,6 +276,7 @@ export function TransportKeys(props: { t: TransportUi; compact?: boolean; still?
         class={`transport-key transport-key--record${live ? ' is-filled' : ''}${armed ? ' is-armed' : ''}${props.still ? ' is-still' : ''}`}
         aria-label={recordName(ui)}
         aria-description={MirrorText.RECORD_HOLD}
+        {...coachAttrs('live.record', props.compact)}
         {...press.record}
       >
         <span class="transport-key__dot" aria-hidden="true" />
@@ -402,6 +404,7 @@ export function EditKeys(props: { t: TransportUi; compact?: boolean }): JSX.Elem
           type="button"
           class={`transport-key transport-key--erase${ui.erase ? ' is-on' : ''}`}
           aria-pressed={ui.erase}
+          {...coachAttrs('live.erase', props.compact)}
           onClick={() => t.onErase(!ui.erase)}
         >
           {MirrorText.ERASE.toUpperCase()}
@@ -431,9 +434,9 @@ function SceneStepKeys(props: { scene: boolean; readout: readonly string[] | nul
   if (!props.scene && !step) return null
   return (
     <div class={`transport-keys${props.compact ? ' transport-keys--compact' : ''}${props.scene ? ' is-scene' : ''}`}>
-      {props.scene && <SceneCell readout={props.readout} />}
+      {props.scene && <SceneCell readout={props.readout} compact={props.compact} />}
       {props.scene && step && <span class="transport-keys__divide" aria-hidden="true" />}
-      {step && <StepCell word={props.step === 'WORD'} />}
+      {step && <StepCell word={props.step === 'WORD'} compact={props.compact} />}
     </div>
   )
 }

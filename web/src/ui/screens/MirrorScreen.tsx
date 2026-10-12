@@ -100,7 +100,7 @@
 // display line is in the top bar ([inBar], [LivePill]) and the page leaves it
 // out; the tools then say what clock out is for (MirrorText.NO_TRANSPORT).
 //
-// EDIT (giving a pad another sound, Kotlin's EditEdgeTab and pad sheet): with
+// EDIT (giving a pad another sound, SOUND's tap and Kotlin's pad sheet): with
 // it on, the display line says so, the pads get a signal outline and a ⇄
 // badge, and a tap opens the pad sheet ([EditUi.onPad]); a long press still
 // plays the pad while held. Offline (an addition) it changes the pads in arc
@@ -116,7 +116,7 @@ import { NoteTouches, type NoteEvent } from '../../core/features/noteTouches'
 import type { SoundEntry } from '../../core/protocol/device'
 import { SoundSource } from '../../core/features/offlinePads'
 import { PadOrder } from '../../core/features/padPush'
-import { ROWS, noteName, padKey, physicalPad, type PhysicalPad } from '../../core/features/padNotes'
+import { LABELS as PAD_LABELS, ROWS, noteName, padKey, physicalPad, type PhysicalPad } from '../../core/features/padNotes'
 import { CoachText } from '../../core/text/coachText'
 import { CLOSE as GUIDE_CLOSE, LED_ROWS } from '../../core/text/guideText'
 import { MirrorText } from '../../core/text/mirrorText'
@@ -128,7 +128,6 @@ import { COACH_YELLOW, COACH_YELLOW_INK } from '../components/Coach'
 import { DisplayPanel } from '../components/DisplayPanel'
 import { CloseKey } from '../components/GuideKeys'
 import { HwToggle } from '../components/HwToggle'
-import { EditEdgeTab } from '../components/EditEdgeTab'
 import { MiniPiano } from '../components/MiniPiano'
 import { Segmented, handleRovingKey } from '../components/Segmented'
 import { ArcIcon } from '../components/Icons'
@@ -1067,10 +1066,6 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
       </div>
     </div>
   )
-  // On the desk, EDIT's tab on the panel's left side (the shell draws it on a phone).
-  const editTab = desk && edit !== null && !keys.on ? (
-    <EditEdgeTab class="live-edit-tab" on={edit.on} onChange={edit.onChange} keyShortcut={keyHints ? 'E' : undefined} />
-  ) : null
 
   // KEYS on a phone on its side (the grid or the piano) has no height to give: STEP's panel comes out in a column left
   // of the keys (Kotlin's StepHosting.SLOT), the keys narrowing beside it.
@@ -1175,7 +1170,6 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     } else if (oneGroup) {
       body = (
         <div class="live-ko live-ko--pads">
-          {editTab}
           {displayStrip}
           {fnRow}
           <div class="live-ko__body">
@@ -1189,7 +1183,6 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
       // All four in one row, nothing to scroll, so a press plays at once.
       body = (
         <div class="live-row desk-paper" style={{ '--row-pad': `${rowPad}px` }}>
-          {editTab}
           {displayStrip}
           {fnRow}
           {modeRow}
@@ -1203,7 +1196,6 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     } else {
       body = (
         <div class="live-scroll-wrap">
-          {editTab}
           <div class="live-scroll desk-paper">{allGroups}</div>
         </div>
       )
@@ -2570,8 +2562,17 @@ function KeysGrid(props: {
   const touches = useMemo(() => new NoteTouches(), [])
   const act = useRef(props.actions)
   act.current = props.actions
+  // PROJECT held: a key where a pad prints 1 to 9 picks that project instead of sounding (Kotlin keysKey, padDigit).
+  const projectHold = useContext(ProjectHoldContext)
+  const holdNow = useRef(projectHold)
+  holdNow.current = projectHold
+  const fnKeys = useContext(FunctionKeysContext)
+  const fnKeysNow = useRef(fnKeys)
+  fnKeysNow.current = fnKeys
   const press = useMemo(
     () => ({
+      take: (k: number): boolean => holdNow.current?.press(`keys:${k}`, PAD_LABELS[k] ?? '', fnKeysNow.current?.project ?? null) ?? false,
+      give: (k: number): boolean => holdNow.current?.release(`keys:${k}`) ?? false,
       down: (k: number, note: number, hold: boolean, at?: number): void => {
         // A screen reader's Play sounds the whole note, outside the fingers' count.
         if (!hold) {
@@ -2666,6 +2667,10 @@ const KEYBOARD_FINGER = -100
 
 /** A grid key's press and release, through the grid's NoteTouches (kept the same across renders). */
 interface KeyPress {
+  /** Whether PROJECT's hold takes key [index]'s press (it then neither sounds nor lets go). */
+  take?: (index: number) => boolean
+  /** Whether key [index]'s release was PROJECT's hold's. */
+  give?: (index: number) => boolean
   down: (index: number, note: number, hold: boolean, at?: number) => void
   up: (index: number) => void
   /** The note a finger pressed held at [pressure]. */
@@ -2714,10 +2719,13 @@ function KeyCapView(props: KeyCapProps): JSX.Element {
   const pressed = useRef(note)
   const target: PressTarget = {
     press: (hold, _unsure, at) => {
+      if (press.take?.(k)) return
       pressed.current = note
       press.down(k, note, hold, at)
     },
-    release: () => press.up(k),
+    release: () => {
+      if (!press.give?.(k)) press.up(k)
+    },
     pressure: (p) => press.pressure?.(pressed.current, p),
   }
   const cls =

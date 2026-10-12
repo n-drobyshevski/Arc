@@ -38,18 +38,18 @@ test('PADS: pad keys hold pads, A–D pick the group, V the view, E EDIT and Esc
   await expect(page.locator('[data-pad]')).toHaveCount(12)
 
   // E: EDIT on; a pad key opens that pad's sound; Esc closes the sheet, then leaves EDIT.
-  const tab = page.locator('.live-edit-tab')
+  const tab = page.getByRole('switch', { name: 'Sound' })
   await page.keyboard.press('KeyE')
-  await expect(tab).toHaveAttribute('aria-pressed', 'true')
+  await expect(tab).toHaveAttribute('aria-checked', 'true')
   await page.keyboard.press('Digit7')
   const sheet = page.getByRole('dialog')
   await expect(sheet).toBeVisible()
   await expect(sheet).toContainText('B 7')
   await page.keyboard.press('Escape')
   await expect(sheet).toBeHidden()
-  await expect(tab).toHaveAttribute('aria-pressed', 'true')
+  await expect(tab).toHaveAttribute('aria-checked', 'true')
   await page.keyboard.press('Escape')
-  await expect(tab).toHaveAttribute('aria-pressed', 'false')
+  await expect(tab).toHaveAttribute('aria-checked', 'false')
 
   // / opens the Sounds tab's search; typing there plays nothing and switches nothing.
   await page.keyboard.press('Slash')
@@ -58,7 +58,7 @@ test('PADS: pad keys hold pads, A–D pick the group, V the view, E EDIT and Esc
   await page.keyboard.type('e5ab')
   await expect(find).toHaveValue('e5ab')
   expect(await downPads(page)).toEqual([])
-  await expect(tab).toHaveAttribute('aria-pressed', 'false')
+  await expect(tab).toHaveAttribute('aria-checked', 'false')
   await expect(page.getByRole('tab', { name: 'Group B' })).toHaveAttribute('aria-selected', 'true')
 })
 

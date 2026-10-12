@@ -1278,26 +1278,10 @@
   /* The tools behind the strip (KEYS): the page keeps clear of it. */
   .side-zone:not(.side-zone--docked) .live-stage { padding-right: calc(var(--side-strip-width) + var(--space-4)); }
 
-  /* EDIT's tab on the panel's left side: outside the K.O. II, rounded on its left; on a card's edge elsewhere. */
   .live-ko,
   .live-row,
   .live-scroll-wrap { position: relative; }
   .live-scroll-wrap { width: 100%; height: 100%; }
-  .live-edit-tab {
-    position: absolute;
-    z-index: 2;
-    top: 50%;
-    transform: translateY(-50%);
-  }
-  .live-ko > .live-edit-tab {
-    right: 100%;
-    border-radius: var(--radius-key) 0 0 var(--radius-key);
-  }
-  /* Room for it beside the rail when the panel fills the width (1024 wide). */
-  .live-stage__box:has(> .live-ko > .live-edit-tab) { padding-inline-start: var(--edge-tab-width); }
-  .live-row > .live-edit-tab,
-  .live-scroll-wrap > .live-edit-tab { left: -2px; }
-  .live-scroll-wrap .live-scroll .live__all { padding-left: var(--space-24); }
 
   /* The piano across the page column, on the device's body, the legend under it; centred in the height. */
   .live-piano.live-piano--desk {
