@@ -5224,6 +5224,24 @@ class ArcController(
         return beatShareChain(projectSeq, bpm, settings.value.timingSwing, ::mirrorName, sounds, list, fxDesk.fx.value, shaping, held, m?.padsKnown() == true)
     }
 
+    private val _claudeWaiting = MutableStateFlow<String?>(null)
+
+    /**
+     * What a share sent to Claude ("Scene S02", "A \u00B7 01", "Chain") while its reply is awaited, else null: Live tools' display
+     * asks for the card. In memory only. A card coming in ([receiveBeat]), its import and [stopWaitingForClaude] end it.
+     */
+    val claudeWaiting: StateFlow<String?> = _claudeWaiting
+
+    /** A share went to Claude: the display waits for [what] to be answered. */
+    fun waitForClaude(what: String) {
+        _claudeWaiting.value = what
+    }
+
+    /** The display's dismiss key: stop waiting. */
+    fun stopWaitingForClaude() {
+        _claudeWaiting.value = null
+    }
+
     /** "With my sound list" on or off (kept like the other Live preferences). */
     fun setShareSounds(on: Boolean) = changeSettings { it.copy(shareSounds = on) }
 
@@ -5238,6 +5256,8 @@ class ArcController(
             toast(dev.arc.ep133.text.ClaudeText.NO_CARD)
             return
         }
+        // The reply is here.
+        _claudeWaiting.value = null
         scope.launch {
             loadPatterns()
             showBeat(dev.arc.ep133.features.BeatCards.read(text))
@@ -5322,6 +5342,7 @@ class ArcController(
             return
         }
         _beatImport.value = null
+        _claudeWaiting.value = null
         if (setTempo) card.tempo?.let { setTempo(dev.arc.ep133.features.Tempo.round(it)) }
         val entry = BeatUndo(patternRecorder, before, a.seq)
         beatUndos.addLast(entry)

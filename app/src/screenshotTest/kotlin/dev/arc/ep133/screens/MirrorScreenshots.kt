@@ -94,6 +94,7 @@ import dev.arc.ep133.features.TimingSettings
 import dev.arc.ep133.ui.screens.PatternSheetContent
 import dev.arc.ep133.ui.screens.BeatImportSheetContent
 import dev.arc.ep133.ui.screens.ClaudeUi
+import dev.arc.ep133.ui.screens.ToolsPage
 import dev.arc.ep133.controller.BeatFxUi
 import dev.arc.ep133.controller.beatFxUi
 import dev.arc.ep133.controller.padShapingUi
@@ -225,7 +226,7 @@ private fun Framed(
 }
 
 @Composable
-private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null, arp: LiveArp? = null, voices: Set<String>? = null, step: LiveStep? = null, scene: LiveScene? = null, holdProgress: Float = 0f, claude: ClaudeUi? = null) {
+private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = false, oneGroup: Boolean = false, guide: Boolean = false, tools: Boolean = false, offline: String? = null, noteOpen: Boolean = false, playingPads: Set<PhysicalPad> = emptySet(), keys: dev.arc.ep133.ui.screens.KeysUi = dev.arc.ep133.ui.screens.KeysUi(), rec: dev.arc.ep133.features.RecState = dev.arc.ep133.features.RecState.Idle, takes: List<dev.arc.ep133.data.TakeInfo> = emptyList(), piano: IntRange? = null, toast: String? = null, barMiddle: DpRect? = null, edit: Boolean? = null, toastAction: String? = null, wireless: Boolean = false, error: String? = null, getFactory: Boolean = false, offlineProjects: List<Int> = emptyList(), clickOn: Boolean = false, sample: SampleUiState? = null, unroll: Float? = null, lastTake: Boolean = false, transport: TransportUi? = null, ptn: Boolean = false, fx: FxType = FxType.NONE, punch: PunchUi? = null, arp: LiveArp? = null, voices: Set<String>? = null, step: LiveStep? = null, scene: LiveScene? = null, holdProgress: Float = 0f, claude: ClaudeUi? = null, toolsPage: ToolsPage? = null) {
     // As the controller has it: the last read's day alone for a short line ("Seen Oct 5").
     val offlineShort = offline?.takeIf { it.startsWith("Last seen ") }?.let { MirrorText.seen(it.removePrefix("Last seen ").substringBefore(",")) }
     val mirror = MirrorUi(state, loading = loading, error = error, offline = offline, offlineShort = offlineShort, offlineProjects = offlineProjects)
@@ -263,6 +264,7 @@ private fun Live(state: MirrorState, loading: Boolean = false, dark: Boolean = f
             // The last hit (A 7) is in group A; B is sounding too.
             follow = true,
             initialToolsOpen = tools,
+            initialToolsPage = toolsPage,
             initialNoteOpen = noteOpen,
             onGetFactory = if (getFactory) ({}) else null,
             onPad = if (playingPads.isNotEmpty()) ({ _, _, _, _ -> }) else null,
@@ -306,13 +308,19 @@ fun LiveOneGroupDarkPreview() = Live(playing, dark = true, oneGroup = true)
 @PreviewTest
 @Preview(name = "Live tools open", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
-fun LiveToolsOpenPreview() = Live(playing, oneGroup = true, tools = true)
+fun LiveToolsOpenPreview() = Live(playing, oneGroup = true, tools = true, claude = claudeShares, takes = someTakes)
 
-// All four groups have no plate to print KEYS / PADS on: the mode is in the tools.
+// All four groups, the tools' front page: what was played last on the display, and the Play row saying PADS.
 @PreviewTest
 @Preview(name = "Live all groups tools", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
 fun LiveAllGroupsToolsPreview() = Live(playing, tools = true)
+
+// All four groups have no plate to print KEYS / PADS on, nor RPT and LATCH: the Play page holds View, Mode and note repeat (on, so LATCH shows).
+@PreviewTest
+@Preview(name = "Live all groups play page", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveAllGroupsPlayPagePreview() = Live(playing, tools = true, toolsPage = ToolsPage.PLAY, arp = LiveArp(ArpUi(on = true)))
 
 // A smaller phone (360 x 740 dp, less the bars): still one screen, the pads just get shorter.
 @PreviewTest
@@ -487,7 +495,7 @@ fun LiveRecordingKeysPreview() = Live(keysPlaying, keys = keysUi, rec = dev.arc.
 @PreviewTest
 @Preview(name = "Live tools takes", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
-fun LiveToolsTakesPreview() = Live(lastRead, oneGroup = true, tools = true, offline = "Last seen Oct 5, 2:02 PM", takes = someTakes)
+fun LiveToolsTakesPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.TAKES, offline = "Last seen Oct 5, 2:02 PM", takes = someTakes)
 
 @PreviewTest
 @Preview(name = "Live offline note open", widthDp = 393, heightDp = 852, showBackground = true)
@@ -1603,11 +1611,17 @@ private fun PatternSheet(dark: Boolean = false) {
     }
 }
 
-// Live tools' takes: the TAKE key, lit while a take records, its time on it.
+// Live tools' front page while a take records: the display shows its time large, with a STOP key; the Takes row says so too.
 @PreviewTest
 @Preview(name = "Live tools take recording", widthDp = 412, heightDp = 843, showBackground = true)
 @Composable
-fun LiveToolsTakeRecordingPreview() = Live(lastRead, oneGroup = true, tools = true, offline = "Last seen Oct 5, 2:02 PM", takes = someTakes, rec = dev.arc.ep133.features.RecState.Recording(12))
+fun LiveToolsTakeRecordingPreview() = Live(lastRead, oneGroup = true, tools = true, offline = "Last seen Oct 5, 2:02 PM", takes = someTakes, rec = dev.arc.ep133.features.RecState.Recording(12), claude = claudeShares)
+
+// A take armed: the display waits for the first sound (the dot still), the key calls it off, and the Takes row says so.
+@PreviewTest
+@Preview(name = "Live tools take armed", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsTakeArmedPreview() = Live(lastRead, oneGroup = true, tools = true, offline = "Last seen Oct 5, 2:02 PM", takes = someTakes, rec = dev.arc.ep133.features.RecState.Armed, claude = claudeShares)
 
 // PROJECT held: projects 1 to 9 in the keypad's order, the one shown orange.
 @PreviewTest
@@ -2103,23 +2117,55 @@ private val claudeShares = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2),
 @PreviewTest
 @Preview(name = "Live tools claude", widthDp = 412, heightDp = 960, showBackground = true)
 @Composable
-fun LiveToolsClaudePreview() = Live(lastRead, oneGroup = true, tools = true, claude = claudeShares)
+fun LiveToolsClaudePreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE, claude = claudeShares)
 
 // The project has a chain (S03 ×2, S04, S03 ×2, S05 over three scenes): SHARE CHAIN · 3 SCENES joins the two SHARE keys.
 @PreviewTest
 @Preview(name = "Live tools claude chain", widthDp = 412, heightDp = 960, showBackground = true)
 @Composable
-fun LiveToolsClaudeChainPreview() = Live(lastRead, oneGroup = true, tools = true, claude = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212, chainSteps = 4, chainScenes = 3))
+fun LiveToolsClaudeChainPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE, claude = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212, chainSteps = 4, chainScenes = 3))
 
-// Nothing to share: both SHARE keys dimmed (and still announced), PASTE BEAT as it was; the dark theme, with TAKES under it.
+// Nothing to share: both SHARE keys dimmed (and still announced), PASTE BEAT as it was; the dark theme.
 // "With my sound list" is left unticked (kept like the other Live preferences).
 @PreviewTest
 @Preview(name = "Live tools claude dark", widthDp = 412, heightDp = 960, showBackground = true)
 @Composable
 fun LiveToolsClaudeDarkPreview() = Live(
-    lastRead, dark = true, oneGroup = true, tools = true, takes = someTakes, offline = "Last seen Oct 5, 2:02 PM",
+    lastRead, dark = true, oneGroup = true, tools = true, toolsPage = ToolsPage.CLAUDE, takes = someTakes, offline = "Last seen Oct 5, 2:02 PM",
     claude = ClaudeUi(scene = "S01", numbers = listOf(1, 1, 1, 1), sounds = 212, withSounds = false),
 )
+
+// Live tools' front page after a share: the display waits for Claude's reply, with PASTE BEAT and a dismiss.
+@PreviewTest
+@Preview(name = "Live tools waiting for card", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsWaitingPreview() = Live(
+    playing, oneGroup = true, tools = true, takes = someTakes,
+    claude = ClaudeUi(scene = "S02", numbers = listOf(1, 3, 1, 2), hasNotes = listOf(true, true, false, true), sounds = 212, waiting = "Scene S02"),
+)
+
+// The front page in the dark theme, a few things to say: the display (a pad just hit), the Claude row and the takes.
+@PreviewTest
+@Preview(name = "Live tools front dark", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsFrontDarkPreview() = Live(playing, dark = true, oneGroup = true, tools = true, takes = someTakes, claude = claudeShares)
+
+// The Play page: one group's view switches (pads), and the key and colours (KEYS).
+@PreviewTest
+@Preview(name = "Live tools play pads", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsPlayPadsPreview() = Live(playing, oneGroup = true, tools = true, toolsPage = ToolsPage.PLAY)
+
+@PreviewTest
+@Preview(name = "Live tools play keys", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsPlayKeysPreview() = Live(keysPlaying, keys = keysUi, tools = true, toolsPage = ToolsPage.PLAY)
+
+// The Help page: how Live reads the EP-133, in the open (offline here, so its note too).
+@PreviewTest
+@Preview(name = "Live tools help", widthDp = 412, heightDp = 843, showBackground = true)
+@Composable
+fun LiveToolsHelpPreview() = Live(lastRead, oneGroup = true, tools = true, toolsPage = ToolsPage.HELP, offline = "Last seen Oct 5, 2:02 PM")
 
 // The beat card sheet, as a card arrives (pasted, or Claude's reply shared to arc). A project whose A has patterns 1 to 3 with
 // notes, playing at 122 BPM: a card of one group goes into A's next free pattern, 4.

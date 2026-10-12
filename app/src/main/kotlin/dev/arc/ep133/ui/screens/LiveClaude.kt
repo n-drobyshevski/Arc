@@ -74,7 +74,6 @@ import dev.arc.ep133.features.SoundSource
 import dev.arc.ep133.features.SoundStatus
 import dev.arc.ep133.features.Tempo
 import dev.arc.ep133.text.ClaudeText
-import dev.arc.ep133.text.CoachText
 import dev.arc.ep133.text.Format
 import dev.arc.ep133.text.MirrorText
 import dev.arc.ep133.text.SettingsText
@@ -86,7 +85,6 @@ import dev.arc.ep133.ui.components.KeySize
 import dev.arc.ep133.ui.components.KeyStyle
 import dev.arc.ep133.ui.components.LinkRow
 import dev.arc.ep133.ui.components.PlateLine
-import dev.arc.ep133.ui.components.coachMark
 import dev.arc.ep133.ui.theme.ArcType
 import dev.arc.ep133.ui.theme.LocalArcColors
 
@@ -103,7 +101,8 @@ import dev.arc.ep133.ui.theme.LocalArcColors
  * sounds Arc knows ([sounds]; 0 hides "With my sound list", [withSounds] being
  * its tick box); the project's chain ([chainSteps] steps over [chainScenes] scenes; none
  * hides SHARE CHAIN); and what its keys and links do. SHARE A · 01 is the group
- * shown, as [MirrorScreen] has it.
+ * shown, as [MirrorScreen] has it. [waiting] is what a share sent and Claude has not answered yet: the now display of
+ * Live tools asks for the reply ([onPaste]) until it is pasted or [onDismissWaiting].
  */
 class ClaudeUi(
     val scene: String = MirrorText.sceneLabel(0),
@@ -120,6 +119,10 @@ class ClaudeUi(
     val onPaste: () -> Unit = {},
     val onGetSkill: () -> Unit = {},
     val onLearn: () -> Unit = {},
+    /** What was shared to Claude and not yet answered ("Scene S02", "A \u00B7 01", "Chain"); null when no reply is awaited. */
+    val waiting: String? = null,
+    /** The dismiss key on the display's waiting card: stop waiting. */
+    val onDismissWaiting: () -> Unit = {},
 ) {
     val sceneHasNotes: Boolean get() = hasNotes.any { it }
 
@@ -128,23 +131,25 @@ class ClaudeUi(
 }
 
 /**
- * Live tools' CLAUDE: the header with its info key (what a beat card is, and
- * how to give Claude the arc-beats skill), a card with SHARE SCENE, SHARE for
+ * Live tools' Claude page: a card with SHARE SCENE, SHARE for
  * the [group] shown (the shares are dimmed, and still announced, when there is
  * nothing to share), SHARE CHAIN · N SCENES when the project's chain has steps
  * (the chain as a card of scenes), the tick box "With my sound list" under them (when Arc
  * knows sounds) and PASTE BEAT, and under it two links: the skill's zip, and a
- * starter prompt to learn the EP-133 with Claude.
+ * starter prompt to learn the EP-133 with Claude. With [header] the section
+ * starts with a CLAUDE caption and the info key (what a beat card is, and how
+ * to give Claude the arc-beats skill); the page has the Claude row's name for
+ * a title instead and folds those notes at its foot.
  */
 @Composable
-internal fun ClaudeSection(claude: ClaudeUi, group: Int) {
+internal fun ClaudeSection(claude: ClaudeUi, group: Int, header: Boolean = true) {
     val c = LocalArcColors.current
     val g = group.coerceIn(0, 3)
     val number = claude.numbers.getOrElse(g) { 1 }
     val patternEmpty = !claude.hasNotes.getOrElse(g) { false }
     val sceneEmpty = !claude.sceneHasNotes
-    CaptionInfo(ClaudeText.CLAUDE, listOf(ClaudeText.INFO_CARDS, ClaudeText.INFO_SKILL))
-    GridPlate(Modifier.coachMark("live.claude", CoachText.CLAUDE, c.navy, c.onNavy)) {
+    if (header) CaptionInfo(ClaudeText.CLAUDE, listOf(ClaudeText.INFO_CARDS, ClaudeText.INFO_SKILL))
+    GridPlate {
         Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(ClaudeText.BEAT_CARDS, style = ArcType.semi, color = c.ink)
             Text(ClaudeText.BEAT_HINT, style = ArcType.small, color = c.graphite)

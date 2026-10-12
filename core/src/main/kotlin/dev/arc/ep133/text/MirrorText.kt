@@ -254,6 +254,45 @@ object MirrorText {
     /** The hint beside the one-octave key picker. */
     const val KEY_HINT = "tap a note"
 
+    // Live tools as a front page: the now display, and the rows that open its pages.
+    /** The back control on a page, for screen readers (it shows "\u2039 Play"). */
+    const val BACK_TO_TOOLS = "Back to Live tools"
+    const val HELP = "Help"
+    /** On the now display while a take records: what the take holds. */
+    const val PHONE_MIX = "phone mix"
+    /** On the now display while a take is armed: nothing records until the first sound. */
+    const val TAKE_ARMED = "Waiting for the first sound"
+    /** On the now display before anything is played on the EP-133 (the phone's own taps don't reach it). */
+    const val PLAY_HINT = "Play the EP-133's pads or keys"
+
+    /** "Group A \u00B7 Follow" (Follow on) or "Group A": the now display's state line for one group. */
+    fun groupLine(group: Int, follow: Boolean) = "$GROUP ${'A' + group}" + if (follow) " \u00B7 $FOLLOW" else ""
+
+    /** "Keys \u00B7 DO major": the now display's state line in KEYS ([root] is a pitch class). */
+    fun keysLine(root: Int, scale: dev.arc.ep133.features.Scale, names: dev.arc.ep133.features.NoteNames) =
+        "$KEYS \u00B7 ${dev.arc.ep133.features.Keys.name(root, names)} ${scaleName(scale).lowercase()}"
+
+    /** "last note", or "last note \u00B7 ch 1" while the channel is known: dim beside the big note name. */
+    const val LAST_NOTE = "last note"
+    fun lastNoteChannel(ch: Int) = "$LAST_NOTE \u00B7 ${channel(ch)}"
+
+    /** The Play row's summary: "One group \u00B7 Follow on", "All groups \u00B7 Pads \u00B7 Repeat off" ([repeat] null: no note repeat), "Key DO \u00B7 Major". */
+    fun playOneGroup(follow: Boolean) = "$ONE_GROUP \u00B7 $FOLLOW ${onOff(follow).lowercase()}"
+    fun playAllGroups(repeat: Boolean?) = "$ALL_GROUPS \u00B7 $MODE_PADS" + (repeat?.let { " \u00B7 Repeat ${onOff(it).lowercase()}" } ?: "")
+    fun playKeys(root: Int, scale: dev.arc.ep133.features.Scale, names: dev.arc.ep133.features.NoteNames) =
+        "$KEY ${dev.arc.ep133.features.Keys.name(root, names)} \u00B7 ${scaleName(scale)}"
+
+    /** The Takes row's summary: "Recording 0:12", "Waiting for the first sound" (armed, [TAKE_ARMED]), "2 takes \u00B7 last Oct 5, 2:23 PM", "No takes yet". */
+    fun takesRecording(seconds: Double) = "Recording ${takeLength(seconds)}"
+    fun takesSummary(count: Int, last: String) = "${Format.plural(count, "take")} \u00B7 last $last"
+    const val NO_TAKES = "No takes yet"
+
+    /** A row that opens a page, for screen readers: "Play, One group \u00B7 Follow on". */
+    fun toolsRow(name: String, summary: String) = "$name, $summary"
+
+    /** The foot of the Takes page: its hints, folded. */
+    const val ABOUT_TAKES = "About takes"
+
     /** "Keys \u00B7 MI4", the small display of the last note in the tools (upper-cased where shown). */
     fun lastNote(note: Int, names: dev.arc.ep133.features.NoteNames) = "$KEYS \u00B7 ${noteName(note, names)}"
 

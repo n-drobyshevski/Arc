@@ -64,8 +64,27 @@ export const ClaudeText = {
     'A beat card is a beat as plain text: the tempo, the swing and a row of steps for each pad, named by its sound. ' +
     'Claude reads one to analyse or improve it, and writes one back. Pasting it brings it into Arc as a new pattern.',
   INFO_SKILL:
-    'Claude knows the cards through the arc-beats skill. In the Claude app, download its zip below, then open ' +
+    'Claude knows the cards through the arc-beats skill. In the Claude app, download its zip with the first link above, then open ' +
     'claude.ai → Settings → Capabilities → Skills and upload it. In Claude Code, put the arc-beats folder in ~/.claude/skills.',
+
+  /** The foot of the Claude page: the two info notes above, folded. */
+  ABOUT_CARDS: 'About beat cards',
+
+  /** The Claude row on Live tools' front page: its summary, idle and while a shared card's reply is awaited. */
+  ROW_IDLE: 'Share a beat \u00B7 paste a card',
+  ROW_WAITING: "Waiting for Claude's reply",
+
+  /** The now display after a share: what went to Claude ("Scene S02", "A \u00B7 01", "Chain"), and what to do next. */
+  SHARED_TO_CLAUDE: 'Shared to Claude',
+  WAITING_HINT: "Paste Claude's reply when it's ready",
+  sharedScene(scene: string): string {
+    return `Scene ${scene}`
+  },
+  sharedPattern(group: number, n: number): string {
+    return place(group, n)
+  },
+  /** The dismiss key beside it, for screen readers. */
+  STOP_WAITING: "Stop waiting for Claude's reply",
 
   /** The card's title and its one-line hint. */
   BEAT_CARDS: 'Beat cards',

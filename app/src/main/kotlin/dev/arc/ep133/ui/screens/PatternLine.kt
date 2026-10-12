@@ -619,7 +619,7 @@ private fun RecordChip(t: TransportUi, hold: RecordHold, compact: Boolean, stead
 }
 
 /** RECORD's blink while armed, each way. */
-private const val RECORD_BLINK_MS = 450
+internal const val RECORD_BLINK_MS = 450
 
 @Composable
 private fun PlayChip(t: TransportUi, hold: RecordHold, beat: LineBeat?, compact: Boolean) {

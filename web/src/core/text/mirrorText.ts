@@ -338,6 +338,61 @@ export const MirrorText = {
   /** The hint beside the one-octave key picker. */
   KEY_HINT: 'tap a note',
 
+  // Live tools as a front page: the now display, and the rows that open its pages.
+  /** The back control on a page, for screen readers (it shows "\u2039 Play"). */
+  BACK_TO_TOOLS: 'Back to Live tools',
+  HELP: 'Help',
+  /** On the now display while a take records: what the take holds. */
+  PHONE_MIX: 'phone mix',
+  /** On the now display while a take is armed: nothing records until the first sound. */
+  TAKE_ARMED: 'Waiting for the first sound',
+  /** On the now display before anything is played on the EP-133 (the phone's own taps don't reach it). */
+  PLAY_HINT: "Play the EP-133's pads or keys",
+
+  /** "Group A \u00B7 Follow" (Follow on) or "Group A": the now display's state line for one group. */
+  groupLine(group: number, follow: boolean): string {
+    return `${MirrorText.GROUP} ${String.fromCharCode(65 + group)}` + (follow ? ` \u00B7 ${MirrorText.FOLLOW}` : '')
+  },
+
+  /** "Keys \u00B7 DO major": the now display's state line in KEYS (root is a pitch class). */
+  keysLine(root: number, scale: Scale, names: NoteNames): string {
+    return `${MirrorText.KEYS} \u00B7 ${Keys.name(root, names)} ${MirrorText.scaleName(scale).toLowerCase()}`
+  },
+
+  /** "last note", or "last note \u00B7 ch 1" while the channel is known: dim beside the big note name. */
+  LAST_NOTE: 'last note',
+  lastNoteChannel(ch: number): string {
+    return `${MirrorText.LAST_NOTE} \u00B7 ${MirrorText.channel(ch)}`
+  },
+
+  /** The Play row's summary: "One group \u00B7 Follow on", "All groups \u00B7 Pads \u00B7 Repeat off" (repeat null: no note repeat), "Key DO \u00B7 Major". */
+  playOneGroup(follow: boolean): string {
+    return `${MirrorText.ONE_GROUP} \u00B7 ${MirrorText.FOLLOW} ${MirrorText.onOff(follow).toLowerCase()}`
+  },
+  playAllGroups(repeat: boolean | null): string {
+    return `${MirrorText.ALL_GROUPS} \u00B7 ${MirrorText.MODE_PADS}` + (repeat !== null ? ` \u00B7 Repeat ${MirrorText.onOff(repeat).toLowerCase()}` : '')
+  },
+  playKeys(root: number, scale: Scale, names: NoteNames): string {
+    return `${MirrorText.KEY} ${Keys.name(root, names)} \u00B7 ${MirrorText.scaleName(scale)}`
+  },
+
+  /** The Takes row's summary: "Recording 0:12", "Waiting for the first sound" (armed, TAKE_ARMED), "2 takes \u00B7 last Oct 5, 2:23 PM", "No takes yet". */
+  takesRecording(seconds: number): string {
+    return `Recording ${MirrorText.takeLength(seconds)}`
+  },
+  takesSummary(count: number, last: string): string {
+    return `${plural(count, 'take')} \u00B7 last ${last}`
+  },
+  NO_TAKES: 'No takes yet',
+
+  /** A row that opens a page, for screen readers: "Play, One group \u00B7 Follow on". */
+  toolsRow(name: string, summary: string): string {
+    return `${name}, ${summary}`
+  },
+
+  /** The foot of the Takes page: its hints, folded. */
+  ABOUT_TAKES: 'About takes',
+
   /** "Keys · MI4", the small display of the last note in the tools (upper-cased where shown). */
   lastNote(note: number, names: NoteNames): string {
     return `${MirrorText.KEYS} \u00B7 ${MirrorText.noteName(note, names)}`

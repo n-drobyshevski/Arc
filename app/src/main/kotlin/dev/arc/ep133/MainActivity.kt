@@ -255,12 +255,15 @@ class MainActivity : ComponentActivity() {
     /** SHARE CHAIN: the project's chain as a card of scenes, to Claude. */
     private fun shareChain() {
         val share = controller.beatShareChain() ?: return
-        sendText(share.subject, share.text, dev.arc.ep133.text.ClaudeText.SHARE_CHAIN_TITLE)
+        if (sendText(share.subject, share.text, dev.arc.ep133.text.ClaudeText.SHARE_CHAIN_TITLE)) {
+            controller.waitForClaude(dev.arc.ep133.text.ClaudeText.CHAIN_CARD_NAME)
+        }
     }
 
-    private fun shareBeat(group: Int?) {
+    /** [what] is named on the display while Claude's reply is awaited ("Scene S02", "A \u00B7 01"). */
+    private fun shareBeat(group: Int?, what: String) {
         val share = controller.beatShare(group) ?: return
-        sendText(share.subject, share.text, dev.arc.ep133.text.ClaudeText.SHARE_TITLE)
+        if (sendText(share.subject, share.text, dev.arc.ep133.text.ClaudeText.SHARE_TITLE)) controller.waitForClaude(what)
     }
 
     /** Learn with Claude: a starter prompt to send to the Claude app. */
@@ -268,12 +271,13 @@ class MainActivity : ComponentActivity() {
         sendText(dev.arc.ep133.text.ClaudeText.LEARN, dev.arc.ep133.text.ClaudeText.LEARN_PROMPT, dev.arc.ep133.text.ClaudeText.LEARN_TITLE)
     }
 
-    private fun sendText(subject: String, text: String, title: String) {
-        try {
-            Files.shareText(this, subject, text, title)
-        } catch (e: java.io.IOException) {
-            controller.toast(dev.arc.ep133.text.ClaudeText.NO_APP, error = true)
-        }
+    /** Whether the system chooser opened. */
+    private fun sendText(subject: String, text: String, title: String): Boolean = try {
+        Files.shareText(this, subject, text, title)
+        true
+    } catch (e: java.io.IOException) {
+        controller.toast(dev.arc.ep133.text.ClaudeText.NO_APP, error = true)
+        false
     }
 
     /** Get the arc-beats skill: its zip, opened as a link. */
@@ -737,6 +741,8 @@ class MainActivity : ComponentActivity() {
         val scene by controller.scene.collectAsStateWithLifecycle()
         // A beat card waiting on its sheet: pasted in Live tools, or shared to arc (which opens over Live).
         val beatImport by controller.beatImport.collectAsStateWithLifecycle()
+        // A card shared to Claude, its reply awaited: Live tools' display asks for it.
+        val claudeWaiting by controller.claudeWaiting.collectAsStateWithLifecycle()
         LaunchedEffect(beatImport != null) {
             if (beatImport == null) return@LaunchedEffect
             // Shared to arc from another app, or pasted: its sheet opens over Live, whatever was on.
@@ -1235,10 +1241,12 @@ class MainActivity : ComponentActivity() {
                                 onWithSounds = controller::setShareSounds,
                                 chainSteps = scene.chain.chain.steps.size,
                                 chainScenes = dev.arc.ep133.controller.chainSceneCount(scene.chain.chain.steps),
-                                onShareScene = { shareBeat(null) },
+                                onShareScene = { shareBeat(null, dev.arc.ep133.text.ClaudeText.sharedScene(scene.label)) },
                                 onShareChain = ::shareChain,
-                                onSharePattern = ::shareBeat,
+                                onSharePattern = { g -> shareBeat(g, dev.arc.ep133.text.ClaudeText.sharedPattern(g, scene.groups.getOrNull(g)?.number ?: 1)) },
                                 onPaste = { controller.receiveBeat(clipboardText()) },
+                                waiting = claudeWaiting,
+                                onDismissWaiting = controller::stopWaitingForClaude,
                                 onGetSkill = ::openSkill,
                                 onLearn = ::learnWithClaude,
                             ),

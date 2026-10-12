@@ -774,4 +774,40 @@ class FeatureTextTest {
         assertTrue("arrangement" in ClaudeText.SHARE_CHAIN_PROMPT && "energy curve" in ClaudeText.SHARE_CHAIN_PROMPT)
         assertEquals("Arc beat Chain", ClaudeText.shareSubject(ClaudeText.CHAIN_CARD_NAME))
     }
+
+    @Test
+    fun `live tools front page text`() {
+        assertEquals(listOf("Group A \u00B7 Follow", "Group C"), listOf(MirrorText.groupLine(0, true), MirrorText.groupLine(2, false)))
+        assertEquals("Keys \u00B7 DO major", MirrorText.keysLine(0, Scale.MAJOR, NoteNames.SOLFEGE))
+        assertEquals("Keys \u00B7 A minor penta", MirrorText.keysLine(9, Scale.MINOR_PENTATONIC, NoteNames.LETTERS))
+        assertEquals(listOf("last note", "last note \u00B7 ch 1"), listOf(MirrorText.LAST_NOTE, MirrorText.lastNoteChannel(1)))
+        assertEquals(
+            listOf("One group \u00B7 Follow on", "One group \u00B7 Follow off", "All groups \u00B7 Pads", "All groups \u00B7 Pads \u00B7 Repeat on", "Key DO \u00B7 Major"),
+            listOf(
+                MirrorText.playOneGroup(true),
+                MirrorText.playOneGroup(false),
+                MirrorText.playAllGroups(null),
+                MirrorText.playAllGroups(true),
+                MirrorText.playKeys(0, Scale.MAJOR, NoteNames.SOLFEGE),
+            ),
+        )
+        assertEquals(
+            listOf("Recording 0:12", "1 take \u00B7 last Oct 5, 2:23 PM", "3 takes \u00B7 last Oct 4", "No takes yet"),
+            listOf(MirrorText.takesRecording(12.9), MirrorText.takesSummary(1, "Oct 5, 2:23 PM"), MirrorText.takesSummary(3, "Oct 4"), MirrorText.NO_TAKES),
+        )
+        assertEquals("Play, One group \u00B7 Follow on", MirrorText.toolsRow(MirrorText.PLAY, MirrorText.playOneGroup(true)))
+        assertEquals(
+            listOf("Back to Live tools", "Help", "phone mix", "Waiting for the first sound", "Play the EP-133's pads or keys", "About takes"),
+            listOf(MirrorText.BACK_TO_TOOLS, MirrorText.HELP, MirrorText.PHONE_MIX, MirrorText.TAKE_ARMED, MirrorText.PLAY_HINT, MirrorText.ABOUT_TAKES),
+        )
+        assertEquals(
+            listOf("Scene S02", "A \u00B7 01", "Chain"),
+            listOf(ClaudeText.sharedScene("S02"), ClaudeText.sharedPattern(0, 1), ClaudeText.CHAIN_CARD_NAME),
+        )
+        assertEquals(
+            listOf("Shared to Claude", "Paste Claude's reply when it's ready", "Stop waiting for Claude's reply", "About beat cards"),
+            listOf(ClaudeText.SHARED_TO_CLAUDE, ClaudeText.WAITING_HINT, ClaudeText.STOP_WAITING, ClaudeText.ABOUT_CARDS),
+        )
+        assertEquals(listOf("Share a beat \u00B7 paste a card", "Waiting for Claude's reply"), listOf(ClaudeText.ROW_IDLE, ClaudeText.ROW_WAITING))
+    }
 }

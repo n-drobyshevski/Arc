@@ -4,7 +4,7 @@ import { ARP_ORDERS, arpNote } from '../../../src/core/features/arp'
 import { cardFx, type CardProblem } from '../../../src/core/features/beatCard'
 import { chain, chainPlay, chainStep } from '../../../src/core/features/chain'
 import { DiffResult, ProjectDiff, ProjectState, SoundDiff, SoundState } from '../../../src/core/features/backupDiff'
-import { NoteNames, SCALES } from '../../../src/core/features/keys'
+import { NoteNames, SCALES, Scale } from '../../../src/core/features/keys'
 import { FX_TYPES, FxSettings, FxType, comp, sidechain } from '../../../src/core/features/fxSettings'
 import { KeyMark } from '../../../src/core/features/piano'
 import { physicalPad } from '../../../src/core/features/padNotes'
@@ -725,5 +725,48 @@ describe('FeatureTextTest', () => {
     expect(ClaudeText.SHARE_CHAIN_PROMPT).toContain('arrangement')
     expect(ClaudeText.SHARE_CHAIN_PROMPT).toContain('energy curve')
     expect(ClaudeText.shareSubject(ClaudeText.CHAIN_CARD_NAME)).toBe('Arc beat Chain')
+  })
+
+  it('live tools front page text', () => {
+    expect([MirrorText.groupLine(0, true), MirrorText.groupLine(2, false)]).toEqual(['Group A \u00B7 Follow', 'Group C'])
+    expect(MirrorText.keysLine(0, Scale.MAJOR, NoteNames.SOLFEGE)).toBe('Keys \u00B7 DO major')
+    expect(MirrorText.keysLine(9, Scale.MINOR_PENTATONIC, NoteNames.LETTERS)).toBe('Keys \u00B7 A minor penta')
+    expect([MirrorText.LAST_NOTE, MirrorText.lastNoteChannel(1)]).toEqual(['last note', 'last note \u00B7 ch 1'])
+    expect([
+      MirrorText.playOneGroup(true),
+      MirrorText.playOneGroup(false),
+      MirrorText.playAllGroups(null),
+      MirrorText.playAllGroups(true),
+      MirrorText.playKeys(0, Scale.MAJOR, NoteNames.SOLFEGE),
+    ]).toEqual([
+      'One group \u00B7 Follow on',
+      'One group \u00B7 Follow off',
+      'All groups \u00B7 Pads',
+      'All groups \u00B7 Pads \u00B7 Repeat on',
+      'Key DO \u00B7 Major',
+    ])
+    expect([
+      MirrorText.takesRecording(12.9),
+      MirrorText.takesSummary(1, 'Oct 5, 2:23 PM'),
+      MirrorText.takesSummary(3, 'Oct 4'),
+      MirrorText.NO_TAKES,
+    ]).toEqual(['Recording 0:12', '1 take \u00B7 last Oct 5, 2:23 PM', '3 takes \u00B7 last Oct 4', 'No takes yet'])
+    expect(MirrorText.toolsRow(MirrorText.PLAY, MirrorText.playOneGroup(true))).toBe('Play, One group \u00B7 Follow on')
+    expect([
+      MirrorText.BACK_TO_TOOLS,
+      MirrorText.HELP,
+      MirrorText.PHONE_MIX,
+      MirrorText.TAKE_ARMED,
+      MirrorText.PLAY_HINT,
+      MirrorText.ABOUT_TAKES,
+    ]).toEqual(['Back to Live tools', 'Help', 'phone mix', 'Waiting for the first sound', "Play the EP-133's pads or keys", 'About takes'])
+    expect([ClaudeText.sharedScene('S02'), ClaudeText.sharedPattern(0, 1), ClaudeText.CHAIN_CARD_NAME]).toEqual(['Scene S02', 'A \u00B7 01', 'Chain'])
+    expect([ClaudeText.SHARED_TO_CLAUDE, ClaudeText.WAITING_HINT, ClaudeText.STOP_WAITING, ClaudeText.ABOUT_CARDS]).toEqual([
+      'Shared to Claude',
+      "Paste Claude's reply when it's ready",
+      "Stop waiting for Claude's reply",
+      'About beat cards',
+    ])
+    expect([ClaudeText.ROW_IDLE, ClaudeText.ROW_WAITING]).toEqual(['Share a beat \u00B7 paste a card', "Waiting for Claude's reply"])
   })
 })
