@@ -166,9 +166,9 @@ import { FunctionKeysContext, FunctionRow, ProjectHoldContext } from '../live/Fu
 import { DeviceView, padPlace } from '../live/DeviceView'
 import { PunchPad, usePunch } from '../live/LivePunch'
 import { StepPanel, useStep, useStepNoteMark, useStepPadMark, useStepPiano } from '../live/StepPanel'
-import { ArpWords, useArpLine, useArpNote, useArpPad } from '../live/ArpWords'
+import { ArpWords, arpHeldNotes, useArp, useArpLine, useArpNote, useArpPad } from '../live/ArpWords'
 import { ClaudeSection } from '../live/ClaudeSection'
-import { ScenePanel, useScene } from '../live/ScenePanel'
+import { PatternGridOver, ScenePanel, useScene, worthSaying } from '../live/ScenePanel'
 import { SamplePanel, useSample, useSamplePadLed } from '../live/SamplePanel'
 import { punchSlotForPad } from '../../state/fx'
 import { useDesk, useFinePointer, useWindowSize } from '../useDesk'
@@ -184,7 +184,13 @@ export type { KeysPicker, KeysShown, KeysUi } from '../live/keys'
 export interface LivePlaying {
   readonly pads: ReadonlySignal<ReadonlySet<number>>
   readonly notes: ReadonlySignal<ReadonlySet<number>>
+  /** The pads and KEYS notes the arp sounds now: lit full, as Android's arpLit. */
+  readonly arpPads?: ReadonlySignal<ReadonlySet<number>>
+  readonly arpNotes?: ReadonlySignal<ReadonlySet<number>>
 }
+
+/** No pads or notes (where the arp isn't). */
+const NONE: ReadonlySignal<ReadonlySet<number>> = signal(new Set<number>())
 
 /** What the KEYS controls do (Kotlin KeysActions). */
 export interface KeysActions {
@@ -768,8 +774,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   const hasEdit = edit !== null
   const editPad = useMemo(() => (hasEdit ? (pad: PhysicalPad) => latest.current.edit?.onPad(pad) : null), [hasEdit])
   const padUi: PadUi = useMemo(
-    () => ({ press: padPress, edit: editPad, editing, drop, haptic, playing: playing.pads, fixedNow }),
-    [padPress, editPad, editing, drop, haptic, playing.pads, fixedNow],
+    () => ({ press: padPress, edit: editPad, editing, drop, haptic, playing: playing.pads, arpLit: playing.arpPads ?? NONE, fixedNow }),
+    [padPress, editPad, editing, drop, haptic, playing.pads, playing.arpPads, fixedNow],
   )
   const keyPress = useMemo(
     () => ({
@@ -909,17 +915,20 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
       }
     },
     escape: () => {
-      // The open panel first, one a press (Android's Back): SAMPLE, STEP, SCENE.
-      if (sampleOpen && sampleCtx !== null) {
+      // The open panel first, one a press (Android's Back): SAMPLE, STEP, SCENE. Read as they are
+      // now, not as at the last render (a key can come before the panel's render lands).
+      if (sampleCtx !== null && sampleCtx.ui.on) {
         sampleCtx.onClose()
         return true
       }
-      if (stepOpen && stepCtx !== null) {
+      if (stepCtx !== null && stepCtx.ui.open) {
         stepCtx.onClose()
         return true
       }
-      if (sceneOpen && sceneCtx !== null) {
-        sceneCtx.onClose()
+      if (sceneCtx !== null && sceneCtx.ui.open) {
+        // The 1–99 grid first, then the panel (Kotlin's Back).
+        if (sceneCtx.ui.gridGroup !== null) sceneCtx.onGrid(null)
+        else sceneCtx.onClose()
         return true
       }
       if (editing && edit !== null) {
@@ -1076,6 +1085,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
             <Group key={g} group={g} st={st} nameOf={nameOf} now={now} ui={padUi} tracker={tracker} target={keyHints && g === group} keyHints={keyHints && g === group} edited={stepEdited === g} />
           ))}
         </div>
+        <PatternGridOver />
       </div>
     </div>
   )
@@ -1083,6 +1093,12 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   // KEYS on a phone on its side (the grid or the piano) has no height to give: STEP's panel comes out in a column left
   // of the keys (Kotlin's StepHosting.SLOT), the keys narrowing beside it.
   const stepColumn = sideways && stepOpen && !sampleOpen
+  // The piano: the notes held for the arp stay down with what sounds (Kotlin's playingNotes with arpHeld), LATCH or not.
+  const arpCtx = useArp()
+  const pianoNotes = useComputed(() => {
+    const held = arpCtx !== null ? arpHeldNotes(arpCtx.ui) : []
+    return held.length === 0 ? playing.notes.value : new Set([...playing.notes.value, ...held])
+  })
   const pianoKeys = pianoRange !== null ? (
     <div
       class="live-piano__keys"
@@ -1096,7 +1112,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         range={pianoRange}
         st={st}
         keys={keys}
-        playingNotes={playing.notes}
+        playingNotes={pianoNotes}
         haptics={haptic}
         now={now}
         onNote={(n, hold, at) => actions.onNote?.(n, hold, at)}
@@ -1142,7 +1158,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     // The drawn EP-133's pads are Live's own, each in its place: in KEYS the keys, FX held the punch-ins.
     const devicePads =
       keys.on && keyNotes ? (
-        <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} haptic={haptic} keysRef={gridKeys} place={padPlace} />
+        <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} arp={playing.arpNotes} haptic={haptic} keysRef={gridKeys} place={padPlace} />
       ) : (
         ROWS.flat().map((o) => {
           const slot = devicePunch !== null ? punchSlotForPad(o) : -1
@@ -1183,7 +1199,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           {fnRow}
           {plateRow}
           <div class="live-ko__body">
-            <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} haptic={haptic} keysRef={gridKeys} />
+            <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} arp={playing.arpNotes} haptic={haptic} keysRef={gridKeys} />
             {modeStrip}
           </div>
         </div>
@@ -1211,6 +1227,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
             {[0, 1, 2, 3].map((g) => (
               <Group key={g} group={g} st={st} nameOf={nameOf} now={now} fill ui={padUi} tracker={tracker} target={keyHints && g === group} keyHints={keyHints && g === group} edited={stepEdited === g} />
             ))}
+            <PatternGridOver />
           </div>
         </div>
       )
@@ -1261,7 +1278,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
                 fnColumn
               )}
               {plan.switchShown && <div class="live__side-tools">{modeLead}</div>}
-              <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} haptic={haptic} keysRef={gridKeys} strip={modeStrip} />
+              <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} arp={playing.arpNotes} haptic={haptic} keysRef={gridKeys} strip={modeStrip} />
               <div class="live__side-end">{modePicks}</div>
             </div>
           </>
@@ -1269,7 +1286,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           <>
             {!inBar && <KeysDisplay st={st} mirror={mirror} keys={keys} playing={playing} pianoRange={null} />}
             {fnRow}
-            <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} haptic={haptic} keysRef={gridKeys} strip={modeStrip} />
+            <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} arp={playing.arpNotes} haptic={haptic} keysRef={gridKeys} strip={modeStrip} />
             {plateRow}
           </>
         ) : sideways ? (
@@ -1317,6 +1334,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
             {[0, 1, 2, 3].map((g) => (
               <Group key={g} group={g} st={st} nameOf={nameOf} now={now} fill ui={padUi} tracker={tracker} target={keyHints && g === group} keyHints={keyHints && g === group} edited={stepEdited === g} />
             ))}
+            <PatternGridOver />
           </div>
         </div>
       </div>
@@ -1664,6 +1682,8 @@ interface PadUi {
   haptic: boolean
   /** The pads sounding on the phone (padKey), each pad reading its own ring. */
   playing: ReadonlySignal<ReadonlySet<number>>
+  /** The pads the arp sounds now: lit full. */
+  arpLit: ReadonlySignal<ReadonlySet<number>>
   /** A fixed time for screenshots; null: a pad's glow is taken at the time it renders. */
   fixedNow: number | null
 }
@@ -1765,6 +1785,8 @@ function Group(props: GroupProps): JSX.Element {
         ))}
         {props.strip}
       </div>
+      {/* The one group's pads: the 1–99 grid over them while it is open (Kotlin's gridOver). */}
+      {big && <PatternGridOver />}
     </div>
   )
 }
@@ -1818,6 +1840,9 @@ function GroupKeys(props: {
 }): JSX.Element {
   const { group, st, now, onSelect, vertical = false } = props
   const row = useRef<HTMLDivElement | null>(null)
+  // Each group's pattern where the scene is worth saying (Kotlin groupNumbers): "03", "03→05" blinking while queued.
+  const scene = useScene()
+  const numbers = scene !== null && worthSaying(scene.ui) ? scene.ui.groups : null
   return (
     <div
       ref={row}
@@ -1829,6 +1854,8 @@ function GroupKeys(props: {
     >
       {[0, 1, 2, 3].map((g) => {
         const on = g === group
+        const col = numbers?.[g] ?? null
+        const queued = col?.queued ?? null
         return (
           <div
             key={g}
@@ -1841,21 +1868,28 @@ function GroupKeys(props: {
               type="button"
               role="tab"
               aria-selected={on}
-              aria-label={`${MirrorText.GROUP} ${MirrorText.groupKey(g)}`}
+              aria-label={`${MirrorText.GROUP} ${MirrorText.groupKey(g)}` + (col !== null ? MirrorText.groupKeyPattern(col.number, queued) : '')}
               aria-keyshortcuts={props.keyboard ? MirrorText.groupKey(g) : undefined}
               tabIndex={on ? 0 : -1}
               data-roving=""
               data-coach={g === 0 ? 'live.groups' : undefined}
               // A's tag points at the row; the guide overlay's tags keep off the others.
               data-coach-clear={g === 0 ? undefined : ''}
-              class={`live-keys__key cap-3d${on ? ' is-on is-down' : ''}`}
+              class={`live-keys__key cap-3d${on ? ' is-on is-down' : ''}${queued !== null ? ' is-queued' : ''}`}
               onClick={() => onSelect(g)}
             >
-              {/* As printed on the K.O. II: the letter in the corner, its function's glyph under it. */}
+              {/* As printed on the K.O. II: the letter in the corner, its function's glyph under it; the
+                  group's pattern in the glyph's place where the scene is worth saying. */}
               <span class="live-keys__letter">{MirrorText.groupKey(g)}</span>
-              <svg class="live-keys__glyph" viewBox="0 0 12 12" aria-hidden="true">
-                <path d={GLYPHS[MirrorText.groupKey(g) as 'A' | 'B' | 'C' | 'D']} />
-              </svg>
+              {col !== null ? (
+                <span class={`live-keys__num${queued !== null ? ' is-queued' : ''}`} aria-hidden="true">
+                  {queued === null ? MirrorText.patternNumber(col.number) : MirrorText.numberMove(col.number, queued)}
+                </span>
+              ) : (
+                <svg class="live-keys__glyph" viewBox="0 0 12 12" aria-hidden="true">
+                  <path d={GLYPHS[MirrorText.groupKey(g) as 'A' | 'B' | 'C' | 'D']} />
+                </svg>
+              )}
             </button>
           </div>
         )
@@ -2023,10 +2057,12 @@ function PadCap(props: PadProps): JSX.Element {
     holds.current.clear()
     if (btn.current) capUp(btn.current)
   }, [editMode, tracker])
-  // The glow at this render (the screen's frame loop keeps it moving while it fades).
+  const key = padKey(pad)
+  // The glow at this render (the screen's frame loop keeps it moving while it fades); while the arp
+  // sounds it, lit full (is-arp-lit: the CSS holds its glow at 1 over the frame loop's).
+  const arpLit = useHas(ui.arpLit, key)
   const g = light ? glow(light, ui.fixedNow ?? perfNow()) : 0
   const wide = pad.label.length > 1
-  const key = padKey(pad)
   // ERASE on: a dot on the pads with notes, the others dimmed (Kotlin eraseDot).
   const mark = useEraseMark(key)
   // STEP open on this group: the pads on the cursor's step outlined, the one picked for − / + ringed.
@@ -2046,6 +2082,7 @@ function PadCap(props: PadProps): JSX.Element {
   const placed = props.place !== undefined
   const cls =
     (placed ? `ep-a ep-pad${playing ? ' is-playing' : ''}` : `live-pad cap-3d${big ? ' live-pad--big' : ''}${playing ? ' is-playing' : ''}`) +
+    (arpLit ? ' is-arp-lit' : '') +
     (ui.editing ? ' is-editing' : '') +
     (dropping ? ' is-drop' : '') +
     (mark === true ? ' is-erase-dot' : mark === false ? ' is-erase-dim' : '') +
@@ -2582,6 +2619,8 @@ function KeysGrid(props: {
   tracker: PressTracker
   /** The notes sounding on the phone, as MIDI notes. */
   playing: ReadonlySignal<ReadonlySet<number>>
+  /** The notes the arp sounds now: lit full. */
+  arp?: ReadonlySignal<ReadonlySet<number>> | undefined
   haptic: boolean
   /** Filled with the computer keyboard's way in (web): its keys are fingers of their own. */
   keysRef?: { current: GridKeys | null }
@@ -2658,6 +2697,7 @@ function KeysGrid(props: {
       press={press}
       tracker={tracker}
       playing={props.playing}
+      arp={props.arp ?? NONE}
       haptic={props.haptic}
       place={props.place?.(k)}
     />
@@ -2688,6 +2728,7 @@ function KeysGrid(props: {
         ))}
         {props.strip}
       </div>
+      <PatternGridOver />
     </div>
   )
 }
@@ -2722,6 +2763,7 @@ interface KeyCapProps {
   press: KeyPress
   tracker: PressTracker
   playing: ReadonlySignal<ReadonlySet<number>>
+  arp: ReadonlySignal<ReadonlySet<number>>
   haptic: boolean
   /** The device view: where on the drawn EP-133 it sits, drawn as its pad. */
   place?: CSSProperties | undefined
@@ -2740,6 +2782,7 @@ const KeyCap = memo(
     a.press === b.press &&
     a.tracker === b.tracker &&
     a.playing === b.playing &&
+    a.arp === b.arp &&
     a.haptic === b.haptic &&
     a.place === b.place,
 )
@@ -2748,6 +2791,8 @@ const KeyCap = memo(
 function KeyCapView(props: KeyCapProps): JSX.Element {
   const { index: k, note, keys, press } = props
   const playing = useHas(props.playing, note)
+  // The arp sounding it: lit full (Kotlin's arpLit).
+  const arpOn = useHas(props.arp, note)
   // STEP open on the KEYS sound's group: its notes on the cursor's step outlined, the one picked ringed.
   const stepMark = useStepNoteMark(note, keys.pad)
   // Held for the arp: outlined, and numbered in the order pressed.
@@ -2772,7 +2817,8 @@ function KeyCapView(props: KeyCapProps): JSX.Element {
     (placed ? 'ep-a ep-pad ep-pad--key' + (upperOctave(note, keys.octave) ? ' ep-pad--upper' : '') : 'live-key cap-3d' + (upperOctave(note, keys.octave) ? ' live-key--upper' : '')) +
     (playing ? ' is-playing' : '') +
     (stepMark === 'picked' ? ' is-step-picked' : stepMark === 'lit' ? ' is-step-lit' : '') +
-    (arpOrder > 0 ? ' is-arp-held' : '')
+    (arpOrder > 0 ? ' is-arp-held' : '') +
+    (arpOn ? ' is-arp-lit' : '')
   const handlers = holdHandlers(props.tracker, target, false, props.haptic)
   return (
     <button

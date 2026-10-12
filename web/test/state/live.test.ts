@@ -1,6 +1,7 @@
 // Live's sounds and last read in the controller (main's ArcController delta: copying the pad sounds
 // in the background, playing pads and keys from a copy / backup / the device, the offline mirror,
 // KEYS settings, clearing the copies, the guide flag, restoring live.json and learned links).
+import type { Signal } from '@preact/signals'
 import 'fake-indexeddb/auto'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { physicalPad, padKey } from '../../src/core/features/padNotes'
@@ -270,6 +271,25 @@ describe('Live: copies of the pad sounds', () => {
 })
 
 describe('Live: playing pads', () => {
+  it("the arp's sounding pads and KEYS notes, apart from the rest (Kotlin's arpLit: lit full)", async () => {
+    const h = await liveOn()
+    await copied(h)
+    await h.c.playPad(A1)
+    await h.c.releasePad(A1)
+    expect(h.c.state.value.keysPad).toMatchObject({ group: 0, offset: 0 })
+    // A pad hit by note repeat, a note of the KEYS sound up 3 semitones, and a pad of its own.
+    // The fake's voices are a plain signal (the worklet's report).
+    const voices = h.liveAudio.voices as Signal<ReadonlySet<string>>
+    voices.value = new Set(['arp:0:4:n', 'arp:0:0:3', 'live:0:1'])
+    expect([...h.c.arpPads.value].sort()).toEqual([padKey(A1), padKey(A5)].sort())
+    expect([...h.c.arpNotes.value]).toEqual([60 + 3])
+    // The rings still count every voice.
+    expect(h.c.playingPads.value.has(padKey(physicalPad(0, 1)))).toBe(true)
+    voices.value = new Set()
+    expect(h.c.arpPads.value.size).toBe(0)
+    expect(h.c.arpNotes.value.size).toBe(0)
+  })
+
   it('plays a pad from the copy while held, rings it, and fades it on release', async () => {
     const h = await liveOn()
     await copied(h)

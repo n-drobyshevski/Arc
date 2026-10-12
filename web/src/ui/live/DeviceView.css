@@ -170,6 +170,10 @@
 .ep-h--grey { background: linear-gradient(180deg, #9A9995, #8A8985); color: #F4F4F4; }
 .ep-key--group { text-align: start; }
 .ep-key__letter { position: absolute; left: 20px; top: 8px; font-size: 56px; font-weight: 300; line-height: 1.1; color: #8A8984; }
+.ep-key__num { position: absolute; right: 16px; bottom: 16px; font-size: 30px; font-weight: 700; line-height: 1; color: #555; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ep-key__num.is-queued { color: #FF4C00; animation: scene-blink 700ms ease-in-out infinite alternate; }
+.ep-key--group.is-queued { outline: 6px solid #FF4C00; outline-offset: -6px; }
+@media (prefers-reduced-motion: reduce) { .ep-key__num.is-queued { animation: none; } }
 .ep-key__icon { position: absolute; left: 0; right: 0; bottom: 18px; text-align: center; font-size: 38px; line-height: 1; color: #8A8984; }
 .ep-key--sign { display: grid; place-items: center; font-size: 76px; font-weight: 200; line-height: 1; color: #555; }
 .ep-key--sign:disabled { opacity: 0.6; }

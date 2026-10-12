@@ -1003,7 +1003,7 @@ function liveKeys(c: ArcController): KeysShown {
 
 /** What sounds on the phone, as signals read by each pad and key: a voice doesn't re-render the screen. */
 function livePlaying(c: ArcController): LivePlaying {
-  return { pads: c.playingPads, notes: c.playingNotes }
+  return { pads: c.playingPads, notes: c.playingNotes, arpPads: c.arpPads, arpNotes: c.arpNotes }
 }
 
 /** The section under the top bar (Root's `when (tab)`). */

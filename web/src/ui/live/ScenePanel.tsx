@@ -11,20 +11,20 @@
 // − / + and NEXT FREE, COMMIT, CLR (held 2 s; DEL on an empty scene) and
 // CHANGE, and the CLIP row with its bar pages. The panel stays open while the
 // pattern plays: a pick made on it waits for its bar or pattern end, blinking
-// where it will show. A tap on a number opens the 1–99 grid.
+// where it will show. A tap on a number opens the 1–99 grid over the pads
+// ([PatternGridOver], Kotlin's gridOver), and the group keys carry each
+// group's number ([GroupNumber]).
 //
 // Web deltas:
 // - The panel takes the function keys' place (Kotlin's SLOT hosting, with
 //   its own header), unrolling there as it mounts (MirrorScreen.css), and
-//   Escape closes it; the 1–99 grid opens inside the panel, under its rows,
-//   rather than over the pads. Not in the desk's Device view yet, and the
-//   group keys don't carry the numbers.
+//   Escape closes it (the grid first, as Back).
 // - The readout while the pattern plays is in the scene's cell (Android: in
 //   the line's words, beside the counter).
 // - CLR / DEL's 2 s hold is a pointer (or Enter / Space) held on the key, its
 //   fill moved by CSS; a screen reader's click (no hold) acts at once.
 
-import { createContext, type JSX } from 'preact'
+import { createContext, type CSSProperties, type JSX } from 'preact'
 import { useContext, useEffect, useRef, useState } from 'preact/hooks'
 import { Seq } from '../../core/features/pattern'
 import type { SwitchTime } from '../../core/features/scenes'
@@ -135,7 +135,6 @@ export function ScenePanel(props: { class?: string }): JSX.Element | null {
     <section class={`scene-panel${props.class ? ` ${props.class}` : ''}`} aria-label={MirrorText.SCENE_NAME}>
       <SceneHeader s={s} holding={hold} />
       <SceneDeck s={s} onHold={setHold} />
-      {s.ui.gridGroup !== null && <PatternGrid s={s} group={s.ui.gridGroup} />}
     </section>
   )
 }
@@ -354,9 +353,25 @@ function EraseKey(props: { s: SceneActions; onHold(on: boolean): void }): JSX.El
 }
 
 /**
+ * The 1–99 grid laid over the pads (Kotlin's gridOver: MirrorScreen lays it
+ * over whichever pads, keys or device the page shows) while the SCENE panel
+ * is open and a group's number was tapped; nothing otherwise. Touches on it
+ * stay on it.
+ */
+export function PatternGridOver(props: { class?: string; style?: CSSProperties }): JSX.Element | null {
+  const s = useScene()
+  if (s === null || !s.ui.open || s.ui.gridGroup === null) return null
+  return (
+    <div class={`scene-grid-over${props.class ? ` ${props.class}` : ''}`} style={props.style}>
+      <PatternGrid s={s} group={s.ui.gridGroup} />
+    </div>
+  )
+}
+
+/**
  * The 1–99 grid for [group]: ten to a row, a pattern with notes filled, the
- * one playing in signal orange, the next free one outlined; a tap picks it
- * and the grid closes. ✕ closes it without.
+ * one playing in signal orange, the next free one (not the one playing)
+ * outlined; a tap picks it and the grid closes. ✕ closes it without.
  */
 function PatternGrid(props: { s: SceneActions; group: number }): JSX.Element {
   const { s, group } = props
@@ -375,7 +390,7 @@ function PatternGrid(props: { s: SceneActions; group: number }): JSX.Element {
           const n = i + 1
           const notes = col.filled.has(n)
           const playing = n === col.number
-          const free = n === col.nextFree
+          const free = n === col.nextFree && !playing
           return (
             <button
               key={n}

@@ -133,3 +133,20 @@ test('the grid chosen instead is kept for the next visit, and the Device view ag
   await page.reload()
   await expect(page.getByRole('group', { name: 'EP-133 K.O. II' })).toBeVisible()
 })
+
+test('the 1–99 grid lies over the drawn device, and A–D carry the numbers', async ({ page }) => {
+  await page.goto('/?demo')
+  const ep = page.getByRole('group', { name: 'EP-133 K.O. II' })
+  await expect(ep).toBeVisible()
+  // The project's patterns in (they set the scene).
+  await expect(page.locator('.ep-plate__status')).toHaveText(/project 1/i)
+  await expect(page.locator('.live-strip')).toContainText('Press a pad')
+  await page.getByRole('button', { name: 'Scenes, scene 1 of 1' }).click()
+  const panel = page.getByRole('region', { name: 'Scenes and patterns' })
+  await panel.getByRole('button', { name: /^Group C, pattern 1.*Pick a pattern/ }).click()
+  const grid = page.locator('.ko-device__box .scene-grid-over').getByRole('group', { name: /pattern grid/i })
+  await expect(grid).toBeVisible()
+  await grid.getByRole('button', { name: /^Pattern 7\b/ }).click()
+  await expect(grid).toHaveCount(0)
+  await expect(ep.getByRole('tab', { name: /^Group C, pattern 7$/ })).toContainText('07')
+})

@@ -493,6 +493,21 @@
 .live-keys__key.is-on {
   --cap-ink: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--ko-dark-face));
 }
+/* The group's pattern in the glyph's place (Kotlin GroupKey's number): "03", or "03→05" blinking
+ * while a pick waits, the key ringed in signal orange. */
+.live-keys__num {
+  align-self: flex-end;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.live-keys__num.is-queued { color: var(--signal-edge); animation: scene-blink 700ms ease-in-out infinite alternate; }
+.live-keys__key.is-queued { outline: 2px solid var(--signal); outline-offset: -2px; }
+@media (prefers-reduced-motion: reduce) {
+  .live-keys__num.is-queued { animation: none; }
+}
 
 /* The group keys as a column on the K.O. II's body (the desk, a phone on its side; sized below,
  * with the deck). */
@@ -717,6 +732,8 @@
 }
 .ko-body .live-keys__letter,
 .live-ko .live-keys__letter { font-size: clamp(15px, calc(var(--u) * 0.277), 34px); }
+.ko-body .live-keys__num,
+.live-ko .live-keys__num { font-size: clamp(10px, calc(var(--u) * 0.16), 17px); }
 .ko-body .live-keys__glyph,
 .live-ko .live-keys__glyph {
   width: clamp(10px, calc(var(--u) * 0.185), 18px);
@@ -1345,6 +1362,10 @@
 .live-display__line--arp { color: var(--signal); }
 /* Held for the arp or note repeat (LiveArp): the keys outlined and numbered in the order pressed,
  * the pads ringed, in signal orange. */
+/* The pads and keys the arp sounds now: lit full (Kotlin's arpLit), over the frame loop's glow. */
+.live-pad.is-arp-lit,
+.live-key.is-arp-lit,
+.ep-pad.is-arp-lit { --glow: 1 !important; }
 .live-pad.is-arp-held,
 .live-key.is-arp-held { outline: 2px solid var(--signal); outline-offset: -4px; }
 .live-key[data-arp-order]::after {

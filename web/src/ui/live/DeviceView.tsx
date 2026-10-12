@@ -35,6 +35,7 @@ import { WebText } from '../../core/text/webText'
 import type { MirrorUi } from '../../state/types'
 import { ComboLine } from '../components/GuideKeys'
 import { FunctionKeysContext, FxKey, ProjectHoldContext, ProjectKey, SoundKey, TempoContext, TempoKey, type DrawnKey } from './FunctionRow'
+import { PatternGridOver, useScene, worthSaying } from './ScenePanel'
 import { useSample } from './SamplePanel'
 import {
   TransportContext,
@@ -59,6 +60,8 @@ import './DeviceView.css'
 export const DEVICE_W = 1444
 export const DEVICE_H = 2000
 
+/** Where the controls start under the display (the scene grid covers them). */
+const CONTROLS_Y = 900
 const COLS = [461, 657, 853]
 const ROW_Y = [1147, 1343, 1538, 1735]
 const GROUP_ICONS = ['✳', '↩', '↥', '↧'] as const
@@ -180,6 +183,8 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
   const fn = useContext(FunctionKeysContext)
   const projectHold = useContext(ProjectHoldContext)
   const sample = useSample()
+  const scene = useScene()
+  const numbers = scene !== null && worthSaying(scene.ui) ? scene.ui.groups : null
   const pat = transport?.ui ?? null
   const patLight = pat !== null ? recordLight(pat) : null
   const recLight: 'live' | 'armed' | null =
@@ -364,21 +369,32 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
           <span class="ep-a ep-area" style={at(265, 1147, 130, 716)} data-coach="live.groups" aria-hidden="true" />
           <span class="ep-a ep-area" style={at(461, 1147, 522, 716)} data-coach={keys.on ? 'live.keys' : 'live.pads'} aria-hidden="true" />
           <div role="tablist" aria-label={MirrorText.GROUP}>
-            {[0, 1, 2, 3].map((g) => (
-              <button
-                key={g}
-                type="button"
-                role="tab"
-                aria-selected={g === group}
-                aria-label={`${MirrorText.GROUP} ${MirrorText.groupKey(g)}`}
-                class="ep-a ep-key ep-key--light ep-key--group"
-                style={at(265, ROW_Y[g]!, 130, 128)}
-                onClick={() => props.onGroup(g)}
-              >
-                <span class="ep-key__letter" aria-hidden="true">{MirrorText.groupKey(g)}</span>
-                <span class="ep-key__icon" aria-hidden="true">{GROUP_ICONS[g]}</span>
-              </button>
-            ))}
+            {[0, 1, 2, 3].map((g) => {
+              // The group's pattern in the icon's place where the scene is worth saying (as Live's group keys).
+              const col = numbers?.[g] ?? null
+              const queued = col?.queued ?? null
+              return (
+                <button
+                  key={g}
+                  type="button"
+                  role="tab"
+                  aria-selected={g === group}
+                  aria-label={`${MirrorText.GROUP} ${MirrorText.groupKey(g)}` + (col !== null ? MirrorText.groupKeyPattern(col.number, queued) : '')}
+                  class={`ep-a ep-key ep-key--light ep-key--group${queued !== null ? ' is-queued' : ''}`}
+                  style={at(265, ROW_Y[g]!, 130, 128)}
+                  onClick={() => props.onGroup(g)}
+                >
+                  <span class="ep-key__letter" aria-hidden="true">{MirrorText.groupKey(g)}</span>
+                  {col !== null ? (
+                    <span class={`ep-key__num${queued !== null ? ' is-queued' : ''}`} aria-hidden="true">
+                      {queued === null ? MirrorText.patternNumber(col.number) : MirrorText.numberMove(col.number, queued)}
+                    </span>
+                  ) : (
+                    <span class="ep-key__icon" aria-hidden="true">{GROUP_ICONS[g]}</span>
+                  )}
+                </button>
+              )
+            })}
           </div>
 
           <div role="group" aria-label={keys.on ? MirrorText.MODE_KEYS : `${MirrorText.GROUP} ${MirrorText.groupKey(group)}`}>
@@ -465,6 +481,8 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
           )}
         </div>
         {props.panel && <div class="ko-device__panel">{props.panel}</div>}
+        {/* The 1–99 grid over the controls and the pads (Kotlin's gridOver), as wide as the device. */}
+        <PatternGridOver style={{ top: `${CONTROLS_Y * scale}px` }} />
         {card && <ShortcutCard card={card} boxWidth={DEVICE_W * scale} boxHeight={DEVICE_H * scale} onClose={() => setCard(null)} onGuide={props.onGuide} />}
       </div>
     </div>
