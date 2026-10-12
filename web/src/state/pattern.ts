@@ -12,9 +12,11 @@
 // - The patterns are kept in the library database's kv store
 //   (Library.readPatterns / writePatterns), Android's files/patterns.json.
 // - The settings are PatternPrefs (localStorage), not AppSettings.
-// - No scenes, arp, SAMPLE's PTN take or Bluetooth delay make-up yet: the
-//   web plays and records the patterns of the scene a project starts on,
-//   and the tick heard is the tick stamped.
+// - No arp, SAMPLE's PTN take or Bluetooth delay make-up yet: the tick heard
+//   is the tick stamped.
+// - SCENES (ScenePlan.kt's SceneDesk) are this desk's too: ArcController's
+//   SCENES section lives here, a pick's tick no earlier than the
+//   sequencer's free tick as the output's stamps last told it.
 // - STEP (StepPlan.kt's StepDesk) and CORRECT are this desk's, as ERASE is:
 //   ArcController's STEP section lives here, the controller routing the
 //   presses to it.
@@ -28,16 +30,21 @@ import { Pattern, Patterns, ProjectPatterns, ProjectSeq, Seq, TimingSettings, ty
 import { PatternRecorder } from '../core/features/patternRecorder'
 import { frameAt } from '../core/features/sampleTiming'
 import { Steps } from '../core/features/steps'
+import type { SwitchTime } from '../core/features/scenes'
 import { NoteNames, ROOT_NOTE } from '../core/features/keys'
-import { PhaseAnchors, passOf, positionOf, tickAt as clockTickAt, msOf, type PatternPosition } from '../core/features/sequencer'
+import { PhaseAnchors, frameOf, nextLoopStart, passOf, positionOf, tickAt as clockTickAt, msOf, type PatternPosition } from '../core/features/sequencer'
 import { Transport, type TransportAction } from '../core/features/transport'
-import { ClockFollow, TapTempo, Tempo, type Beat } from '../core/features/tempo'
+import { ClockFollow, TapTempo, Tempo, type Beat, type BeatGrid } from '../core/features/tempo'
 import type { MidiEvent } from '../core/protocol/midiInput'
+import { ArpSettings, type ArpNote, type ArpOrder } from '../core/features/arp'
+import { OutputDelay } from '../core/features/outputDelay'
+import { BeatCards, type CardRead } from '../core/features/beatCard'
+import { ClaudeText } from '../core/text/claudeText'
 import { FeatureText } from '../core/text/featureText'
 import { MirrorText } from '../core/text/mirrorText'
 import type { PatternPrefs, PatternSettings } from '../platform/storage/settings'
 import type { VoiceShape } from '../core/formats/voiceMixer'
-import type { Deps, LiveTimeline } from './deps'
+import type { ArpStep, Deps, LiveTimeline } from './deps'
 import type { LiveSounds } from './live'
 import { sameShape } from './padShape'
 import {
@@ -48,18 +55,25 @@ import {
   patternBpm,
   patternShown,
   patternVoices,
+  pressPlace,
   pressSkip,
   pressTickAt,
   sameVoices,
   withoutNote,
   type PatternUiState,
 } from './patternPlan'
-import { CORRECT_SHOWN_MS, STEP_UI, StepDesk, auditionMs, stepOpens, stepWord, type StepNote, type StepUi } from './stepPlan'
+import { ARP_PRESSURE_MS, ARP_UI, ArpDesk, type ArpUi } from './arpPlan'
+import { applyBeat, beatImportUi, beatImported, beatShare, type BeatApplied, type BeatImportUi, type BeatShare } from './beatPlan'
+import { ClipMode, PadStage, SCENE_UI, SceneDesk, type SceneUi } from './scenePlan'
+import { CORRECT_SHOWN_MS, STEP_UI, StepDesk, arpTakesPress, auditionMs, stepOpens, stepWord, type StepNote, type StepUi } from './stepPlan'
 import type { Store } from './store'
 import type { UiState } from './types'
 
 /** A count-in's bar 1 starts this much later still: time for the click to start before its first beat. */
 export const COUNT_IN_LEAD_MS = 150
+
+/** How far ahead the patterns start for a SAMPLE take from stop (ArcController's PATTERN_TAKE_LEAD_NS). */
+export const TAKE_LEAD_MS = 100
 
 /** The transport's loop wakes at least this often (ms). */
 export const PATTERN_LOOP_MS = 100
@@ -70,6 +84,9 @@ export const PATTERN_ERASE_MS = 20
 /** How often the click looks whether the EP-133's clock came or went (ms). */
 const CLICK_WATCH_MS = 500
 
+
+/** A pick waiting takes over once the playhead heard is this far past its tick (Kotlin SCENE_GRACE_NS). */
+const SCENE_GRACE_MS = 100
 
 /** How far ahead of the mix the sequencer sends notes (PatternScheduler's LOOKAHEAD_MS). */
 const LOOKAHEAD_MS = 50
@@ -96,6 +113,10 @@ export interface PatternHost {
   shapeOf?(pad: number, keys: boolean): Partial<VoiceShape>
   /** A note as STEP's status line names it (stepWord: the KEYS note, the pad's sound, else the pad). */
   stepWord?(n: StepNote): string
+  /** How KEYS names its notes (the arp's line); letters when not given. */
+  noteNames?(): NoteNames
+  /** [pad]'s sound name as Live shows it (a beat card's rows), or null. */
+  padName?(pad: PhysicalPad): string | null
 }
 
 /** The plan last handed to the sequencer, to tell when a new one changes anything. */
@@ -106,6 +127,8 @@ interface SentPlan {
   readonly voices: ReadonlyMap<number, string>
   readonly shapes: ReadonlyMap<number, Partial<VoiceShape>>
   readonly keysShapes: ReadonlyMap<number, Partial<VoiceShape>>
+  readonly queued: ReadonlyMap<number, { readonly pattern: Pattern; readonly atTick: number }>
+  readonly phase: PhaseAnchors
 }
 
 export class PatternDesk {
@@ -128,6 +151,8 @@ export class PatternDesk {
   // The pads and notes held while recording, by their voice's key: their notes, for the gate.
   private readonly held = new Map<string, number>()
   private countedIn = false
+  // A held note's start moved off where it was heard (pressPlace): its release moves as far.
+  private readonly shifts = new Map<number, number>()
   // The pass of each note recorded that was heard live as it was played (by its id): not played again.
   private skip: ReadonlyMap<number, number> = new Map()
   // The groups recorded into since the punch-in: each of their passes is an UNDO step.
@@ -158,6 +183,13 @@ export class PatternDesk {
   /** STEP as Live shows it: the panel, its cursor's step, CORRECT and the status line. */
   readonly step: ReadonlySignal<StepUi> = this._step
   private stepShown: unknown = null
+  // SCENES: the scenes, the picks waiting and the CLIP row (ScenePlan.kt's SceneDesk), what Live shows of them,
+  // and the pads whose unsure press the PAD flow waits to take.
+  private readonly sceneDesk: SceneDesk
+  private readonly _scene: Signal<SceneUi> = signal(SCENE_UI)
+  /** SCENES as Live shows them: the scene, its groups' patterns and what waits, the panel and its CLIP row. */
+  readonly scene: ReadonlySignal<SceneUi> = this._scene
+  private readonly sceneTaps = new Set<string>()
   private readonly taps = new TapTempo()
 
   constructor(private readonly host: PatternHost) {
@@ -166,9 +198,13 @@ export class PatternDesk {
     this.ui = this._ui
     this._metronome = signal<Metronome>({ on: false, bpm: this.settings.liveTempo })
     this.stepDesk = new StepDesk((n) => host.stepWord?.(n) ?? stepWord(n, null, NoteNames.LETTERS))
+    this.sceneDesk = new SceneDesk((pad) => host.stepWord?.({ pad, semitones: null }) ?? stepWord({ pad, semitones: null }, null, NoteNames.LETTERS))
     this.metronome = this._metronome
     const audio = host.deps.liveAudio
     if (audio.onSeqMissing) this.cleanups.push(audio.onSeqMissing(() => this.refreshPlan()))
+    // A step the arp played while the pattern runs: recorded here.
+    if (audio.onArpStep) this.cleanups.push(audio.onArpStep((step) => this.recordArpStep(step)))
+    this._arp.value = this.arpDesk.ui(this.settings.arpOn, this.settings.arp, this.settings.timing, this.noteNames())
     if (audio.onBeat) this.cleanups.push(audio.onBeat((b) => (this._beats.value = b)))
     // The output went (Live left the screen long, or a new output): the transport stops with it.
     if (audio.timeline) {
@@ -188,6 +224,7 @@ export class PatternDesk {
   }
 
   dispose(): void {
+    this.cancelArpPressure()
     this.stopLoop()
     this.cancelCorrectedShown()
     this.watchClick(false)
@@ -243,6 +280,13 @@ export class PatternDesk {
   async switchProject(project: number): Promise<void> {
     await this.load()
     if (project === this.project) return
+    // STEP opened before any project was known (the patterns still loading) stays open, on the project read.
+    const stepping = this.project === 0 && this.stepDesk.open ? this.stepDesk.group : null
+    // The scene panel and its picks waiting are the other project's: dropped, not applied by the STOP.
+    this.sceneDesk.reset()
+    this.sceneTaps.clear()
+    // The arp's notes were the other project's pads.
+    this.arpClear()
     this.stop()
     this.closeStep()
     this.save()
@@ -254,11 +298,16 @@ export class PatternDesk {
     this._ui.value = { ...this._ui.peek(), project }
     this.refreshPlan()
     this.show()
+    if (stepping !== null) {
+      this.stepDesk.openOn(project, stepping)
+      this.publishStep()
+    }
   }
 
   /** The device's tempo changed (or stopped coming): the plan follows. */
   tempoChanged(): void {
     this.refreshPlan()
+    this.publishArp()
   }
 
   private get recorder(): PatternRecorder {
@@ -291,6 +340,20 @@ export class PatternDesk {
   private show(): void {
     this._ui.value = this.withSettings(patternShown(this._ui.peek(), this.current, this.transport.state, this.recorder.canUndo))
     this.publishStep()
+    this.publishScene()
+    // A beat card waiting on its sheet is planned into the patterns as they are now (another project, a pick, a recording).
+    const waiting = this._beat.peek()
+    if (waiting !== null) this.showBeat(waiting.read)
+  }
+
+  /** The project's sequencer is [seq] now (a scene or pattern picked, a scene edited): the plan and Live follow, and it is kept. */
+  private setSeq(seq: ProjectSeq): void {
+    if (seq === this.seq) return
+    this.useSeq(seq)
+    this.touched = true
+    this.refreshPlan()
+    this.show()
+    if (!this.transport.state.recording) this.save()
   }
 
   private withSettings(ui: PatternUiState): PatternUiState {
@@ -312,7 +375,15 @@ export class PatternDesk {
     const audio = this.host.deps.liveAudio
     if (!audio.seqPlan) return
     const p = this.current
-    const { voices, missing } = patternVoices(ProjectPatterns.usedPads(p), (pad) => this.host.live.patternVoice(pad))
+    // Where each pattern started, for the recording's ticks as for the sequencer's.
+    const phase = this.sceneDesk.phase
+    this.recorder.phase = phase
+    // The picks waiting, as the patterns that take over: read from the sequencer as it stands.
+    const queued = new Map<number, { readonly pattern: Pattern; readonly atTick: number }>()
+    for (const [g, q] of this.sceneDesk.targets(this.seq)) queued.set(g, { pattern: ProjectSeq.pattern(this.seq, g, q.to), atTick: q.at })
+    const pads = ProjectPatterns.usedPads(p)
+    for (const [g, q] of queued) for (const n of Pattern.playable(q.pattern)) pads.add(g * 12 + n.offset)
+    const { voices, missing } = patternVoices(pads, (pad) => this.host.live.patternVoice(pad))
     const bpm = this.bpm()
     const shapes = new Map<number, Partial<VoiceShape>>()
     const keysShapes = new Map<number, Partial<VoiceShape>>()
@@ -329,12 +400,14 @@ export class PatternDesk {
       old.patterns !== p ||
       old.skip !== this.skip ||
       old.bpm !== bpm ||
+      old.phase !== phase ||
+      !sameQueued(old.queued, queued) ||
       !sameVoices(old.voices, voices) ||
       !sameShapes(old.shapes, shapes) ||
       !sameShapes(old.keysShapes, keysShapes)
     ) {
-      this.sent = { patterns: p, skip: this.skip, bpm, voices, shapes, keysShapes }
-      audio.seqPlan({ patterns: p, voices, skip: this.skip, bpm, phase: PhaseAnchors.ZERO, shapes, keysShapes })
+      this.sent = { patterns: p, skip: this.skip, bpm, voices, shapes, keysShapes, queued, phase }
+      audio.seqPlan({ patterns: p, voices, skip: this.skip, bpm, phase, shapes, keysShapes, queued })
     }
     for (const pad of missing) this.loadPad(pad)
     if (this._ui.peek().missing !== missing.size) this._ui.value = { ...this._ui.peek(), missing: missing.size }
@@ -373,6 +446,27 @@ export class PatternDesk {
     return this.pressAt !== null && this.running() ? pressTickAt(ms, this.pressAt, this.sent?.bpm ?? this.bpm()) : null
   }
 
+  /**
+   * How late Live's output is heard now (ms): what is made up for
+   * (OutputDelay); 0 wired, with the setting off, or closed.
+   */
+  private heardDelay(): number {
+    return this.host.deps.liveAudio.delayMs ?? 0
+  }
+
+  /**
+   * The tick the player hears at [ms], as [tickAt] but through the output's
+   * delay: what the playhead shows and where a live press lands. The
+   * pattern's clock is arc's own and its notes stay where they are; only
+   * what is lined up with the ear moves.
+   */
+  private heardTickAt(ms: number): number | null {
+    const d = this.heardDelay()
+    const tl = this.timeline()
+    if (tl !== null) return clockTickAt(tl.clock, frameAt(tl.frames, ms)) - OutputDelay.ticks(d, tl.clock.bpm)
+    return this.pressAt !== null && this.running() ? pressTickAt(ms - d, this.pressAt, this.sent?.bpm ?? this.bpm()) : null
+  }
+
   private running(): boolean {
     const ph = this.transport.state.phase
     return ph === 'COUNT_IN' || ph === 'PLAYING'
@@ -388,7 +482,7 @@ export class PatternDesk {
     const tl = this.timeline()
     if (tl === null) return null
     const g = Math.min(Math.max(this._ui.peek().focusGroup, 0), 3)
-    return positionOf(clockTickAt(tl.clock, frameAt(tl.frames, ms)), ProjectPatterns.group(this.current, g), 0)
+    return positionOf(clockTickAt(tl.clock, frameAt(tl.frames, ms)) - OutputDelay.ticks(this.heardDelay(), tl.clock.bpm), ProjectPatterns.group(this.current, g), 0)
   }
 
   // ---------- the transport ----------
@@ -415,6 +509,74 @@ export class PatternDesk {
   /** Stops the transport (and recording, kept), and disarms RECORD. */
   stop(): void {
     this.act(() => this.transport.stop())
+  }
+
+  /** Recording stops (kept); PLAY goes on (SAMPLE opening, for a take of what it plays). */
+  recordOff(): void {
+    this.act(() => this.transport.punchOut())
+  }
+
+  // ---------- SAMPLE: takes in step with the patterns ----------
+
+  // The lead a start for a SAMPLE take has (0 otherwise).
+  private takeLead = 0
+
+  /** Whether the patterns play (counting in or playing): a take of set bars goes by them. */
+  get playing(): boolean {
+    return this.running()
+  }
+
+  /** The tempo the click and the patterns go at. */
+  tempo(): number {
+    return this.bpm()
+  }
+
+  /** Whether TEMPO's click is on. */
+  get clickOn(): boolean {
+    return this._metronome.peek().on
+  }
+
+  /** The patterns start for a take, from bar 1, a moment ahead (armed: disarmed; never recording). False when they couldn't. */
+  playForTake(): boolean {
+    this.act(() => this.transport.punchOut())
+    this.takeLead = TAKE_LEAD_MS
+    try {
+      this.act(() => this.transport.play(false, false))
+    } finally {
+      this.takeLead = 0
+    }
+    return this.running()
+  }
+
+  /**
+   * Where a take in step with the patterns goes, once their timeline is out:
+   * [bars] bars from the next bar, or (null: PTN) the longest group's length
+   * from the patterns' next loop start; from bar 1 when they just started
+   * for it ([fromStop]). The ticks [start, end), the mix frames they play at,
+   * and when the start is heard (ms, [late] the delay made up for, as the mic
+   * hears it). Null before the timeline is out, or with no pattern for PTN.
+   */
+  takeSpan(bars: number | null, fromStop: boolean, late: number): { start: number; end: number; startFrame: number; endFrame: number; heardMs: number } | null {
+    const tl = this.timeline()
+    if (tl === null) return null
+    const p = this.current
+    const len = bars !== null ? bars * Seq.TICKS_PER_BAR : ProjectPatterns.longestTicks(p)
+    if (len <= 0) return null
+    // The patterns' loop is the longest group's, from where it started; a bar count goes by the transport's bars.
+    let anchor = 0
+    if (bars === null) {
+      for (let g = 0; g < 4; g++) {
+        if (Pattern.lengthTicks(ProjectPatterns.group(p, g)) === len) {
+          anchor = PhaseAnchors.of(this.sceneDesk.phase, g)
+          break
+        }
+      }
+    }
+    // A moment ahead, so the take is asked for before it starts.
+    const heard = clockTickAt(tl.clock, frameAt(tl.frames, this.host.deps.perfNow() + LOOKAHEAD_MS)) - OutputDelay.ticks(late, tl.clock.bpm)
+    const start = fromStop ? 0 : nextLoopStart(heard, bars === null ? len : Seq.TICKS_PER_BAR, anchor)
+    const end = start + len
+    return { start, end, startFrame: Math.round(frameOf(tl.clock, start)), endFrame: Math.round(frameOf(tl.clock, end)), heardMs: msOf(tl.clock, start, tl.frames) + late }
   }
 
   /**
@@ -459,16 +621,19 @@ export class PatternDesk {
     // PLAY starts the passes from 0: what was heard live in another run is played again.
     this.skip = new Map()
     this.held.clear()
+    this.shifts.clear()
     this.groups.clear()
     this.tried.clear()
     this.pressAt = at
     this.sawTimeline = false
+    // Every pattern starts at bar 1.
+    this.sceneDesk.restart()
     this.countedIn = countInBars > 0
     this.stale = audio.timeline?.peek() ?? null
     this._ui.value = { ...this._ui.peek(), countIn: null }
     if (record) this.setPatterns(this.recorder.punchIn(this.current, true, this.settings.autoLength))
     this.refreshPlan()
-    if (!audio.seqPlay || !audio.seqPlay(countInBars, countInBars > 0 ? COUNT_IN_LEAD_MS : 0, at)) {
+    if (!audio.seqPlay || !audio.seqPlay(countInBars, countInBars > 0 ? COUNT_IN_LEAD_MS : this.takeLead, at)) {
       this.transport.stop()
       this.host.toast(MirrorText.NO_OUTPUT, true)
       return
@@ -483,8 +648,11 @@ export class PatternDesk {
       this.setPatterns(this.recorder.punchOut(heldNotesEnded(this.current, this.recorder, this.held.values(), tick), tick))
     }
     this.host.deps.liveAudio.seqStop?.()
+    // A pick still waiting takes over at once, as every change does while stopped.
+    this.sceneFlush()
     this.pressAt = null
     this.held.clear()
+    this.shifts.clear()
     this.eraseHolds.clear()
     if (this.stepDesk.holding) {
       this.stepDesk.holdsEnd(this.recorder)
@@ -506,6 +674,7 @@ export class PatternDesk {
     // A pad or key still held ends its note here: a lift after the punch-out records nothing.
     const p = heldNotesEnded(this.current, this.recorder, this.held.values(), tick)
     this.held.clear()
+    this.shifts.clear()
     this.setPatterns(this.recorder.punchOut(p, tick))
     this.save()
   }
@@ -537,13 +706,17 @@ export class PatternDesk {
   private followTick(tick: number): void {
     if (this.transport.state.phase === 'COUNT_IN') {
       if (tick < 0) {
-        const beat = countInBeat(tick)
+        // The count-in's beat as it is heard.
+        const tl = this.timeline()
+        const beat = countInBeat(tl === null ? tick : tick - OutputDelay.ticks(this.heardDelay(), tl.clock.bpm))
         if (this._ui.peek().countIn !== beat) this._ui.value = { ...this._ui.peek(), countIn: beat }
         return
       }
       this.transport.countedIn()
       this.show()
     }
+    const graced = this.tickAt(this.host.deps.perfNow() - SCENE_GRACE_MS)
+    if (graced !== null) this.sceneDue(graced)
     if (this.transport.state.recording && tick >= 0) {
       this.markPasses(tick)
       this.setPatterns(this.recorder.grow(this.current, tick))
@@ -559,6 +732,7 @@ export class PatternDesk {
     if (!on) this.eraseHolds.clear()
     // ERASE and CORRECT take the same presses: one goes off as the other comes on.
     if (on && this.stepDesk.correct) this.setStepCorrect(false)
+    if (on) this.endPadStage()
     if (this._ui.peek().erase === on) return
     this._ui.value = { ...this._ui.peek(), erase: on }
   }
@@ -596,7 +770,7 @@ export class PatternDesk {
       this.host.toast(MirrorText.erased(pad))
       return
     }
-    const from = h.from ?? Math.max(clockTickAt(tl.clock, frameAt(tl.frames, h.downAt)), 0)
+    const from = h.from ?? Math.max(this.heardTickAt(h.downAt) ?? 0, 0)
     const to = clockTickAt(tl.clock, frameAt(tl.frames, releasedAt))
     if (to > from) this.setPatterns(this.recorder.eraseRange(this.current, pad, semitones, from, to))
   }
@@ -621,7 +795,7 @@ export class PatternDesk {
     let p = this.current
     for (const h of this.eraseHolds.values()) {
       if (now - h.downAt < ERASE_TAP_MS) continue
-      const from = h.from ?? Math.max(clockTickAt(tl.clock, frameAt(tl.frames, h.downAt)), 0)
+      const from = h.from ?? Math.max(this.heardTickAt(h.downAt) ?? 0, 0)
       if (to <= from) continue
       p = this.recorder.eraseRange(p, h.pad, h.semitones, from, to)
       h.from = to
@@ -654,9 +828,15 @@ export class PatternDesk {
   press(pad: PhysicalPad, semitones: number | null, key: string, pressedAt: number, hold: boolean): void {
     const first = this.padDown(pressedAt)
     if (!this.transport.state.recording) return
-    const tick = this.tickAt(pressedAt)
-    if (tick === null) return
+    const stamped = this.tickAt(pressedAt)
+    // The player reacts to what is heard, which Bluetooth plays late: the press is where it was heard
+    // (before the run is heard, see OutputDelay.placed). The press that started the run is its tick 0.
+    const heard = this.heardTickAt(pressedAt)
+    if (stamped === null || heard === null) return
+    // A pick whose tick the press is past takes over first: the note goes to the pattern playing then.
+    this.sceneDue(heard)
     this.groups.add(pad.group)
+    const tick = pressPlace(first, stamped, heard, this.countedIn)
     this.markPasses(tick)
     const now = this.tickAt(this.host.deps.perfNow()) ?? tick
     const r = this.recorder.noteOn(this.current, pad, semitones, tick, now, TimingSettings.record(this.settings.timing), this.settings.timing.swing)
@@ -667,7 +847,12 @@ export class PatternDesk {
     const before = this.held.get(key)
     this.held.delete(key)
     const p = before !== undefined ? this.recorder.noteOff(r.patterns, before, tick) : r.patterns
-    if (hold) this.held.set(key, r.id)
+    if (before !== undefined) this.shifts.delete(before)
+    if (hold) {
+      this.held.set(key, r.id)
+      // Its release follows the note: it is heard where it is let go, and moved as far as the start was.
+      if (tick !== heard) this.shifts.set(r.id, tick - heard)
+    }
     this._ui.value = { ...this._ui.peek(), focusGroup: pad.group }
     this.setPatterns(p)
   }
@@ -677,9 +862,11 @@ export class PatternDesk {
     const id = this.held.get(key)
     if (id === undefined) return
     this.held.delete(key)
-    const tick = this.tickAt(releasedAt)
-    if (tick === null) return
-    this.setPatterns(this.recorder.noteOff(this.current, id, tick))
+    const shift = this.shifts.get(id) ?? 0
+    this.shifts.delete(id)
+    const heard = this.heardTickAt(releasedAt)
+    if (heard === null) return
+    this.setPatterns(this.recorder.noteOff(this.current, id, heard + shift))
   }
 
   /** The press on [key] was a scroll after all: the note it recorded goes. */
@@ -720,6 +907,8 @@ export class PatternDesk {
     if (!stepOpens(this.transport.state.phase)) return
     if (this.transport.state.phase === 'ARMED') this.stop()
     this.setErase(false)
+    this.closeScene()
+    this.arpClear()
     this.stepDesk.openOn(this.project, group)
     this.publishStep()
   }
@@ -838,6 +1027,8 @@ export class PatternDesk {
    */
   setStepCorrect(on: boolean): void {
     if (on) this.setErase(false)
+    // A pad tapped is corrected, not the PAD flow's.
+    if (on) this.endPadStage()
     this.stepDesk.setCorrect(on, this.recorder)
     this.cancelCorrectedShown()
     this.publishStep()
@@ -940,6 +1131,497 @@ export class PatternDesk {
     this.stepShown = null
   }
 
+  // ---------- SCENES: the pattern each group plays, switched while playing, and copy and paste (an addition) ----------
+
+  /**
+   * The scene panel opened ([on]) with column [group] focused, or closed (✕).
+   * It opens whatever the transport does and stays open while it plays; it
+   * shares the function keys' place with STEP's panel: opening it closes it.
+   * Closing drops the grid and the PAD flow; the picks waiting and the clipboard stay.
+   */
+  setSceneOpen(on: boolean, group: number = this.sceneDesk.group): void {
+    if (!on) {
+      this.closeScene()
+      return
+    }
+    if (this.sceneDesk.open) {
+      this.setSceneGroup(group)
+      return
+    }
+    this.closeStep()
+    this.sceneDesk.openOn(group)
+    this.publishScene()
+  }
+
+  /** Live shows [group] now (or its column was tapped): the CLIP row's pattern and bar work on it. */
+  setSceneGroup(group: number): void {
+    this.sceneDesk.focus(group)
+    this.publishScene()
+  }
+
+  /** [group]'s − (-1) or + (+1): the pattern number as shown a step on, wrapping round 1..99; at once while stopped, else queued. */
+  scenePatternStep(group: number, dir: number): void {
+    this.scenePick((at, time) => this.sceneDesk.stepPattern(this.seq, group, dir, at, time))
+  }
+
+  /** [group]'s pattern [n] picked on the 1–99 grid: as [scenePatternStep]. The grid closes. */
+  scenePatternPick(group: number, n: number): void {
+    this.scenePick((at, time) => this.sceneDesk.pickPattern(this.seq, group, n, at, time))
+  }
+
+  /** NEXT FREE: the first pattern of [group] after the number shown with no notes, as [scenePatternStep]. */
+  scenePatternNextFree(group: number): void {
+    this.scenePick((at, time) => this.sceneDesk.pickNextFree(this.seq, group, at, time))
+  }
+
+  /** The 1–99 grid opens over the pads for [group], or closes (null). */
+  sceneGrid(group: number | null): void {
+    this.sceneDesk.grid(group)
+    this.publishScene()
+  }
+
+  /** The scene's − (-1) or + (+1), from the one shown; + past the last is a new one. At once while stopped, else queued for all four groups. */
+  sceneStep(dir: number): void {
+    this.scenePick((at, time) => this.sceneDesk.stepScene(this.seq, dir, at, time))
+  }
+
+  /** COMMIT: the scene copied right after itself, into the groups' next free patterns, and selected (one UNDO step). */
+  sceneCommit(): void {
+    this.sceneEdit(() => this.sceneDesk.commit(this.seq, this.recorder))
+  }
+
+  /** The CLR / DEL key held its 2 s: an empty scene that isn't the only one is deleted, any other emptied (one UNDO step). */
+  sceneEraseHold(): void {
+    const at = this.sceneTickNow()
+    if (at !== null) this.sceneDue(at)
+    const r = this.sceneDesk.erase(this.seq, this.recorder)
+    if (r !== null) {
+      this.setSeq(r.seq)
+      this.host.toast(r.erase === 'cleared' ? MirrorText.CLEARED_SCENE : MirrorText.DELETED_SCENE)
+    }
+    this.publishScene()
+  }
+
+  /** CHANGE (kept): when a pick made while playing takes over. */
+  setSceneSwitch(time: SwitchTime): void {
+    this.changeSettings({ ...this.settings, sceneSwitch: time })
+    this.publishScene()
+  }
+
+  /** The CLIP row's PTN, BAR or PAD; a PAD flow waiting is dropped. */
+  setClipMode(mode: ClipMode): void {
+    this.sceneDesk.mode(mode)
+    this.publishScene()
+  }
+
+  /** The bar page BAR copies and pastes, [bar] from 0. */
+  setClipBar(bar: number): void {
+    this.sceneDesk.page(bar)
+    this.publishScene()
+  }
+
+  /** COPY: in PTN the focused group's pattern, in BAR its bar page; in PAD it waits for a tap on the pad to copy. */
+  clipCopy(): void {
+    this.sceneDesk.copy(this.seq)
+    this.stageBegun()
+    this.publishScene()
+  }
+
+  /** PASTE: in PTN the clipboard's pattern, in BAR its notes (one UNDO step each); in PAD it waits for the pad to paste onto. */
+  clipPaste(): void {
+    this.sceneEdit(() => {
+      const out = this.sceneDesk.paste(this.seq, this.recorder)
+      this.stageBegun()
+      return out
+    })
+  }
+
+  /** Whether the PAD flow waits for a pad: a pad's press is its tap, neither played nor recorded. */
+  get padStaged(): boolean {
+    return this.sceneDesk.padStage !== PadStage.NONE
+  }
+
+  /**
+   * A pad pressed while the PAD flow waits, by voice [key]: the pad COPY
+   * takes, or the pad PASTE puts the clipboard's notes on. An [unsure] press
+   * (the scrolling page) waits for [sceneTapKept]. False when none waits.
+   */
+  scenePadTap(pad: PhysicalPad, key: string, unsure = false): boolean {
+    if (this.sceneDesk.padStage === PadStage.NONE) return false
+    if (unsure) {
+      this.sceneTaps.add(key)
+      return true
+    }
+    this.sceneEdit(() => this.sceneDesk.padTap(pad, this.seq, this.recorder))
+    return true
+  }
+
+  /** The unsure press by [key] the PAD flow waited for was a press after all: its tap. False when none waited for it. */
+  sceneTapKept(pad: PhysicalPad, key: string): boolean {
+    if (!this.sceneTaps.delete(key)) return false
+    this.sceneEdit(() => this.sceneDesk.padTap(pad, this.seq, this.recorder))
+    return true
+  }
+
+  /** The unsure press by [key] was a scroll: no tap. False when none waited for it. */
+  sceneTapCut(key: string): boolean {
+    return this.sceneTaps.delete(key)
+  }
+
+  /** Live's SCENE follows the sequencer, the settings and the desk. */
+  private publishScene(): void {
+    if (this.sceneDesk === undefined) return
+    this._scene.value = this.sceneDesk.ui(this.seq, this.settings.sceneSwitch)
+  }
+
+  // A pick: the desk plays it at once while stopped ([at] null) or queues it for its tick; the sequencer, its plan and Live follow.
+  // A pick waiting that the sequencer may have played from already takes over first, not replaced.
+  private scenePick(pick: (at: number | null, time: SwitchTime) => ProjectSeq): void {
+    const at = this.sceneTickNow()
+    if (at !== null) this.sceneDue(at)
+    this.setSeq(pick(at, this.settings.sceneSwitch))
+    // A queue made or dropped: the plan has it.
+    this.refreshPlan()
+    this.publishScene()
+    // On its tick, not the next beat's.
+    if (this.sceneDesk.waiting > 0 && this.loop !== null) this.follow()
+  }
+
+  // An edit of the sequencer on the desk (already one UNDO step), and Live follows; a pick passed takes over first.
+  private sceneEdit(edit: () => ProjectSeq): void {
+    const at = this.sceneTickNow()
+    if (at !== null) this.sceneDue(at)
+    this.setSeq(edit())
+    this.publishScene()
+  }
+
+  // The PAD flow began waiting for a pad: ERASE and CORRECT go off, whose taps are their own.
+  private stageBegun(): void {
+    if (this.sceneDesk.padStage === PadStage.NONE) return
+    if (this.erasing) this.setErase(false)
+    if (this.stepDesk.correct) this.setStepCorrect(false)
+  }
+
+  // Running, the tick a pick made now goes from: the one heard, but no earlier than the sequencer can still switch at.
+  // Null while stopped (or not heard yet): a pick plays at once.
+  private sceneTickNow(): number | null {
+    if (!this.running()) return null
+    const now = this.host.deps.perfNow()
+    const heard = this.tickAt(now)
+    if (heard === null) return null
+    const free = this.host.deps.liveAudio.seqFreeTick?.(now) ?? null
+    return free === null ? heard : Math.max(heard, free)
+  }
+
+  // The PAD flow is dropped (ERASE or CORRECT came on).
+  private endPadStage(): void {
+    if (this.sceneDesk === undefined || this.sceneDesk.padStage === PadStage.NONE) return
+    this.sceneDesk.endStage()
+    this.publishScene()
+  }
+
+  /** The panel closes (✕, STEP, another project), if it was open. */
+  private closeScene(): void {
+    if (!this.sceneDesk.open) return
+    this.sceneDesk.close()
+    this.sceneTaps.clear()
+    this.publishScene()
+  }
+
+  // The picks waiting whose tick the playhead has passed ([tick], as heard) take over: the sequencer takes the pattern,
+  // which the sequencer's plan was playing from the tick already.
+  private sceneDue(tick: number): void {
+    const waiting = this.sceneDesk.waiting
+    if (waiting === 0) return
+    const started = this.sceneDesk.phase
+    const out = this.sceneDesk.due(this.seq, tick)
+    if (this.sceneDesk.waiting === waiting && out === this.seq) return
+    // The notes heard live in a pattern left are not of the one that starts: its passes are counted from its own start.
+    if (this.skip.size > 0) {
+      const left = new Set<number>()
+      for (let g = 0; g < 4; g++) {
+        if (PhaseAnchors.of(this.sceneDesk.phase, g) === PhaseAnchors.of(started, g)) continue
+        for (const n of ProjectPatterns.group(this.current, g).notes) left.add(n.id)
+      }
+      if (left.size > 0) this.skip = new Map([...this.skip].filter(([id]) => !left.has(id)))
+    }
+    this.setSeq(out)
+    // The queue went: the plan has none.
+    this.refreshPlan()
+    this.publishScene()
+  }
+
+  // STOP: every pick waiting takes over at once.
+  private sceneFlush(): void {
+    if (this.sceneDesk.waiting === 0) return
+    this.setSeq(this.sceneDesk.flush(this.seq))
+    this.refreshPlan()
+    this.publishScene()
+  }
+
+  // ---------- ARP: the arpeggiator (KEYS) and note repeat (PADS), on TIMING's interval (an addition) ----------
+
+  // The arp's notes, the pads loading for it and those found nowhere this run, and pressure's last plan and the next.
+  private readonly arpDesk = new ArpDesk()
+  private readonly arpLoading = new Set<number>()
+  private readonly arpTried = new Set<number>()
+  private arpPressureAt = Number.NEGATIVE_INFINITY
+  private arpPressureTimer: unknown = null
+  private readonly _arp = signal<ArpUi>(ARP_UI)
+  /** The arp as Live shows it: on, LATCH, the notes held, and the display line while it plays. */
+  readonly arp: ReadonlySignal<ArpUi> = this._arp
+
+  /** ARP (KEYS) / RPT (PADS) on or off (kept); off, the notes it held go and it stops. */
+  setArpOn(on: boolean): void {
+    if (!on) this.arpClear()
+    this.changeSettings({ ...this.settings, arpOn: on })
+  }
+
+  /** The order KEYS's held notes play in (kept). */
+  setArpOrder(order: ArpOrder): void {
+    this.changeSettings({ ...this.settings, arp: ArpSettings.withOrder(this.settings.arp, order) })
+  }
+
+  /** Over 1 to 3 octaves (kept). */
+  setArpOctaves(n: number): void {
+    this.changeSettings({ ...this.settings, arp: ArpSettings.withOctaves(this.settings.arp, n) })
+  }
+
+  /** Each note held for 10..100 % of a step (kept). */
+  setArpGate(percent: number): void {
+    this.changeSettings({ ...this.settings, arp: ArpSettings.withGate(this.settings.arp, Math.round(percent)) })
+  }
+
+  /** LATCH (kept): the notes play on after the fingers are up; off, those no finger holds go. */
+  setArpLatch(on: boolean): void {
+    if (!on) this.arpDesk.unlatch()
+    this.changeSettings({ ...this.settings, arp: ArpSettings.withLatch(this.settings.arp, on) })
+  }
+
+  /** Whether the arp takes a press: it is on, and the press holds (a screen reader's tap only latched); not in the STEP panel. */
+  arpTakes(hold: boolean): boolean {
+    return arpTakesPress(this.settings.arpOn, this.settings.arp.latch, hold, this.stepDesk.open)
+  }
+
+  /**
+   * A press on voice [key] at [pressedAt] while the arp is on: [note]
+   * joins the arp's notes ([keys]: a KEYS note; else a pad for note
+   * repeat), neither played nor recorded itself; the sequencer plays it on
+   * the next step (the first of a run on the press). With RECORD armed,
+   * the recording starts on it, as on a press's (one [unsure], once kept:
+   * [arpKeep]); the arp's steps are what it records.
+   */
+  arpPress(key: string, note: ArpNote, keys: boolean, pressedAt: number, hold: boolean, unsure = false): void {
+    if (!unsure) this.padDown(pressedAt)
+    const latch = this.settings.arp.latch
+    if (this.arpDesk.press(key, note, keys, pressedAt, latch, unsure)) this.arpTried.clear()
+    // A tap that never lets go (latched, or it wouldn't be here): up at once, its note kept.
+    if (!hold) this.arpDesk.release(key, latch)
+    this.publishArp()
+  }
+
+  /** The unsure press on voice [key] the arp holds was a press after all: RECORD armed starts on it. False when the arp doesn't hold it. */
+  arpKeep(key: string): boolean {
+    const at = this.arpDesk.keep(key)
+    if (at === null) return false
+    this.padDown(at)
+    return true
+  }
+
+  /** The finger left voice [key]: a note the arp holds goes with it (unless latched). */
+  arpRelease(key: string): void {
+    if (this.arpDesk.release(key, this.settings.arp.latch)) this.publishArp()
+  }
+
+  /** The press on voice [key] was a scroll after all: nor does it repeat. */
+  arpCut(key: string): void {
+    if (this.arpDesk.cut(key)) this.publishArp()
+  }
+
+  /** Voice [key] held at [pressure] (the touch's own, while the arp is on): its velocity, on a device that tells pressure. */
+  arpPressure(key: string, pressure: number): void {
+    if (!this.arpDesk.pressure(key, pressure)) return
+    if (this.arpPressureTimer !== null) return
+    const deps = this.host.deps
+    const wait = ARP_PRESSURE_MS - (deps.perfNow() - this.arpPressureAt)
+    if (wait <= 0) {
+      this.arpPressureAt = deps.perfNow()
+      this.publishArp()
+      return
+    }
+    this.arpPressureTimer = deps.setTimeout(() => {
+      this.arpPressureTimer = null
+      this.arpPressureAt = deps.perfNow()
+      this.publishArp()
+    }, wait)
+  }
+
+  /** The arp's notes go (another project, the output closed, playback stopped); it stays on. */
+  arpClear(): void {
+    this.cancelArpPressure()
+    this.arpDesk.clear()
+    this.publishArp()
+  }
+
+  /**
+   * Hands the sequencer what the arp plays: on, its notes, on their pads'
+   * sounds in memory as a press plays them, at TIMING and the arp's
+   * settings and the pattern's tempo; null (it stops) off or with none. A
+   * pad whose sound isn't in memory loads, and the plan follows. Live's
+   * line follows too. (The KEYS names changed: [refreshArp].)
+   */
+  private publishArp(): void {
+    const s = this.settings
+    let plan = null
+    if (s.arpOn && this.arpDesk.notes.length > 0) {
+      const pads = new Set(this.arpDesk.notes.map((n) => n.pad.group * 12 + n.pad.offset))
+      const { voices, missing } = patternVoices(pads, (pad) => this.host.live.patternVoice(pad))
+      const shapes = new Map<number, Partial<VoiceShape>>()
+      const keysShapes = new Map<number, Partial<VoiceShape>>()
+      const shapeOf = this.host.shapeOf
+      if (shapeOf) {
+        for (const pad of voices.keys()) {
+          shapes.set(pad, shapeOf(pad, false))
+          keysShapes.set(pad, shapeOf(pad, true))
+        }
+      }
+      for (const pad of missing) this.loadArpPad(pad)
+      plan = this.arpDesk.plan({ voices, shapes, keysShapes }, s.timing, s.arp, this.bpm())
+    }
+    this.host.deps.liveAudio.arpPlan?.(plan)
+    this._arp.value = this.arpDesk.ui(s.arpOn, s.arp, s.timing, this.noteNames())
+  }
+
+  /** The KEYS names changed (or a pad's sound): the line and the plan follow. */
+  refreshArp(): void {
+    this.publishArp()
+  }
+
+  // [pad]'s sound into memory for the arp, as a press loads it (once a run: one found nowhere isn't asked again).
+  private loadArpPad(pad: number): void {
+    if (this.arpTried.has(pad) || this.arpLoading.has(pad)) return
+    this.arpLoading.add(pad)
+    void this.host.live.loadForPattern(pad).then(
+      (ok) => {
+        this.arpLoading.delete(pad)
+        if (ok) this.publishArp()
+        else this.arpTried.add(pad)
+      },
+      () => {
+        this.arpLoading.delete(pad)
+        this.arpTried.add(pad)
+      },
+    )
+  }
+
+  /**
+   * A step the arp played on the pattern's clock (told by the output once
+   * mixed): while recording, a note of the pattern where it played, at its
+   * velocity and as long as its gate. It is on the grid already, so TIMING
+   * doesn't move it.
+   */
+  private recordArpStep(step: ArpStep): void {
+    if (!this.transport.state.recording) return
+    const n = step.note
+    const tick = step.globalTick
+    this.sceneDue(tick)
+    this.groups.add(n.pad.group)
+    this.markPasses(tick)
+    const r = this.recorder.noteOn(this.current, n.pad, n.semitones, tick, tick, 'off', this.settings.timing.swing, n.velocity)
+    if (r.id === 0) return
+    this._ui.value = { ...this._ui.peek(), focusGroup: n.pad.group }
+    this.setPatterns(this.recorder.noteOff(r.patterns, r.id, tick + step.gateTicks))
+  }
+
+  private cancelArpPressure(): void {
+    if (this.arpPressureTimer === null) return
+    this.host.deps.clearTimeout(this.arpPressureTimer)
+    this.arpPressureTimer = null
+  }
+
+  private noteNames(): NoteNames {
+    return this.host.noteNames?.() ?? NoteNames.LETTERS
+  }
+
+  // ---------- BEAT CARDS: share a pattern or scene to Claude, paste Claude's card back (an addition) ----------
+
+  private readonly _beat = signal<BeatImportUi | null>(null)
+  /** The beat card sheet's state while a card waits on it (pasted or shared to arc), else null. */
+  readonly beat: ReadonlySignal<BeatImportUi | null> = this._beat
+
+  /**
+   * What SHARE sends: [group]'s playing pattern, or (null) the scene playing,
+   * as an ARC BEAT card at the tempo Live plays at and the TIMING swing, with
+   * the pads' names; null when there are no notes in it. The patterns are the
+   * project's as they stand, a pattern still recording included.
+   */
+  beatShare(group: number | null): BeatShare | null {
+    if (group !== null && (group < 0 || group > 3)) return null
+    return beatShare(this.seq, group, this.bpm(), this.settings.timing.swing, (pad) => this.padName(pad))
+  }
+
+  /**
+   * A text pasted (PASTE BEAT, or a paste on Live): with an ARC BEAT line in
+   * it, the card is read and planned into the project's patterns as they stand
+   * (BeatCards.plan) and its sheet opens ([beat]); with none the toast says so.
+   * Nothing changes until [importBeat]. The plan reads the patterns once they
+   * are loaded, so a card never lands on a project's notes before they are read.
+   */
+  async receiveBeat(text: string | null): Promise<void> {
+    if (text === null || !BeatCards.hasCard(text)) {
+      this.host.toast(ClaudeText.NO_CARD)
+      return
+    }
+    await this.load()
+    this.showBeat(BeatCards.read(text))
+  }
+
+  // The sheet for [read], planned into the project's patterns as they are now.
+  private showBeat(read: CardRead): void {
+    this._beat.value = beatImportUi(read, this.seq, this.bpm(), (pad) => this.padName(pad))
+  }
+
+  /** The sheet closes (CANCEL, a tap outside, Back, another section): nothing was imported. */
+  dismissBeat(): void {
+    this._beat.value = null
+  }
+
+  /**
+   * IMPORT: the card is planned again into the patterns as they are now and
+   * applied as one UNDO step (applyBeat: its patterns into the next free
+   * slots, a new scene for a card of several groups, else the patterns picked
+   * in the scene playing), kept, and the sheet closes. With [setTempo] the
+   * card's tempo becomes the phone's. It takes over at once, stopped or
+   * playing, as COMMIT does; the picks waiting go. Where a group has no free
+   * pattern now the sheet stays, with the reason.
+   */
+  importBeat(setTempo: boolean): void {
+    const ui = this._beat.peek()
+    const card = ui?.read.card ?? null
+    if (ui === null || card === null) return
+    let applied: BeatApplied | null = null
+    this.sceneEdit(() => {
+      const a = applyBeat(this.seq, card, this.recorder)
+      applied = a
+      if (a.seq !== this.seq) this.sceneDesk.cancel()
+      return a.seq
+    })
+    const a = applied as BeatApplied | null
+    if (a === null) return
+    if (a.fullGroup !== null) {
+      this.showBeat(ui.read)
+      this.host.toast(ClaudeText.groupFull(a.fullGroup), true)
+      return
+    }
+    this._beat.value = null
+    if (setTempo && card.tempo !== null) this.setTempo(Tempo.round(card.tempo))
+    this.host.toast(beatImported(a))
+  }
+
+  private padName(pad: PhysicalPad): string | null {
+    return this.host.padName?.(pad) ?? null
+  }
+
   // ---------- the sheet ----------
 
   /** [group]'s length, 1 to 99 bars; notes past the end are kept, not played. */
@@ -968,6 +1650,8 @@ export class PatternDesk {
   /** UNDO: back to before the last pass recorded, clear or length change. */
   undo(): void {
     const seq = this.recorder.undo(this.seq)
+    // A pick waiting goes.
+    if (seq !== null) this.sceneDesk.cancel()
     if (seq !== null && seq !== this.seq) {
       this.useSeq(seq)
       this.touched = true
@@ -1010,9 +1694,15 @@ export class PatternDesk {
   }
 
   private changeSettings(s: PatternSettings): void {
+    const was = this.settings
     this.settings = s
     this.host.prefs.save(s)
     this._ui.value = this.withSettings(this._ui.peek())
+    // TIMING, the arp's settings, ARP on or off (off, its notes go): the arp follows.
+    if (s.timing !== was.timing || s.arp !== was.arp || s.arpOn !== was.arpOn) {
+      if (!s.arpOn) this.arpDesk.clear()
+      this.publishArp()
+    }
   }
 
   // ---------- TEMPO: a click on the phone (an addition) ----------
@@ -1031,7 +1721,7 @@ export class PatternDesk {
     const audio = this.host.deps.liveAudio
     if (!audio.setClick) return
     if (on === this._metronome.peek().on) return
-    if (on && !audio.setClick(true, this.settings.liveTempo, this.clockFollow.grid(this.host.deps.perfNow()))) {
+    if (on && !audio.setClick(true, this.settings.liveTempo, this.clickGrid())) {
       this.host.toast(FeatureText.NO_AUDIO_OUTPUT, true)
       return
     }
@@ -1048,6 +1738,7 @@ export class PatternDesk {
     this.changeSettings({ ...this.settings, liveTempo: t })
     this._metronome.value = { ...this._metronome.peek(), bpm: t }
     this.refreshPlan()
+    this.publishArp()
     this.sendClick()
   }
 
@@ -1069,9 +1760,15 @@ export class PatternDesk {
 
   private sendClick(): void {
     if (!this._metronome.peek().on) return
-    const grid = this.clockFollow.grid(this.host.deps.perfNow())
+    const grid = this.clickGrid()
     this.followed = grid !== null
     this.host.deps.liveAudio.setClick?.(true, this.settings.liveTempo, grid)
+  }
+
+  /** The EP-133's beats while it sends its clock, sent earlier by the delay made up for, so they are heard on the device's (OutputDelay.earlier). */
+  private clickGrid(): BeatGrid | null {
+    const g = this.clockFollow.grid(this.host.deps.perfNow())
+    return g === null ? null : OutputDelay.earlier(g, this.heardDelay())
   }
 
   // Whether the click last sent followed the EP-133, and the watch that notices its clock stopping.
@@ -1113,5 +1810,18 @@ export function padOf(key: number): PhysicalPad {
 function sameShapes(a: ReadonlyMap<number, Partial<VoiceShape>>, b: ReadonlyMap<number, Partial<VoiceShape>>): boolean {
   if (a.size !== b.size) return false
   for (const [pad, sh] of a) if (!b.has(pad) || !sameShape(sh, b.get(pad))) return false
+  return true
+}
+
+/** Whether two plans' queued switches are the same: the same groups, each to the same pattern at the same tick. */
+function sameQueued(
+  a: ReadonlyMap<number, { readonly pattern: Pattern; readonly atTick: number }>,
+  b: ReadonlyMap<number, { readonly pattern: Pattern; readonly atTick: number }>,
+): boolean {
+  if (a.size !== b.size) return false
+  for (const [g, q] of a) {
+    const o = b.get(g)
+    if (o === undefined || o.pattern !== q.pattern || o.atTick !== q.atTick) return false
+  }
   return true
 }

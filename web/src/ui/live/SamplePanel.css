@@ -1,0 +1,158 @@
+/* LiveSampler.kt's look: SAMPLE's header and wave strip on the display line's dark screen, the
+ * controls on a pale plate under it, one rounded body in the function keys' place; the pads' lights
+ * in SAMPLE mode (MirrorScreen.css's .live-pad is-sample-*). */
+
+.sample-panel {
+  display: flex;
+  flex-direction: column;
+  border-radius: 14px;
+  background: var(--display);
+  color: var(--display-ink);
+  overflow: hidden;
+  min-width: 0;
+  container-type: inline-size;
+}
+.sample-panel__head { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 4px 0 12px; }
+.sample-panel__led {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--signal);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--signal) 30%, transparent);
+}
+.sample-panel__source {
+  flex: none;
+  padding: 1px 6px;
+  border: 1px solid var(--display-dim);
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+.sample-panel__status {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: end;
+  font-size: var(--size-display-head);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sample-panel__status.is-long { font-size: 12px; }
+
+.sample-meter {
+  position: relative;
+  flex: none;
+  width: 72px;
+  height: 8px;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--display) 70%, var(--display-dim));
+  overflow: hidden;
+}
+.sample-meter__bar {
+  position: absolute;
+  inset: 0 6px 0 0;
+  background: var(--display-ink);
+  transform-origin: left;
+  transform: scaleX(0);
+}
+.sample-meter__mark { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--signal); }
+.sample-meter__clip { position: absolute; top: 0; right: 0; bottom: 0; width: 4px; background: var(--display-dim); }
+.sample-meter.is-clip .sample-meter__clip { background: var(--signal); }
+
+.sample-wave {
+  display: block;
+  width: 100%;
+  height: 48px;
+  padding: 0 12px;
+  box-sizing: border-box;
+  color: color-mix(in srgb, var(--display-ink) 80%, transparent);
+  fill: currentColor;
+}
+.sample-scope { padding: 0; margin: 0 12px; width: calc(100% - 24px); color: var(--display-dim); }
+.sample-scope.is-recording { color: var(--signal); }
+.sample-wave--line { position: relative; }
+.sample-wave--line::after { content: ''; position: absolute; left: 12px; right: 12px; top: 50%; border-top: 1px solid var(--display-dim); }
+.sample-wave--words { display: flex; align-items: center; justify-content: center; color: var(--display-dim); font-size: 12px; }
+
+.sample-panel__plate {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 10px 12px 12px;
+  border-radius: 12px 12px 14px 14px;
+  background: var(--plate);
+  color: var(--ink);
+}
+.sample-panel__row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.sample-panel__window {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
+  height: 36px;
+  padding: 0 6px;
+  border-radius: 6px;
+  background: var(--display);
+  color: var(--display-ink);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+.sample-panel__knobs { display: flex; align-items: center; gap: 16px; }
+.sample-key--bars { flex: none; flex-direction: column; gap: 0; height: 44px; line-height: 1.2; }
+.sample-key__dim { color: var(--hw-dark-dim); font-size: 9px; }
+
+.sample-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 40px;
+  height: 36px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--hw-dark-face);
+  box-shadow: 1px 2px 0 var(--hw-dark-edge);
+  color: var(--hw-dark-ink);
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.sample-key:active:not(:disabled) { transform: translate(1px, 2px); box-shadow: none; }
+.sample-key:disabled { color: var(--hw-dark-dim); cursor: default; }
+.sample-key:focus-visible { outline: var(--focus-ring); outline-offset: 1px; }
+.sample-key--step { padding: 0; width: 40px; font-size: 20px; font-weight: 400; letter-spacing: 0; }
+.sample-key__led { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--hw-led-off); }
+.sample-key__led.is-on { background: var(--signal); box-shadow: 0 0 0 2px color-mix(in srgb, var(--signal) 35%, transparent); }
+.sample-key:disabled .sample-key__led { opacity: 0.5; }
+
+/* A narrow panel (a phone's): the smaller meter, the status a size down, as Kotlin's autosized line. */
+@container (max-width: 420px) {
+  .sample-meter { width: 44px; }
+  .sample-panel__status { font-size: 13px; }
+  .sample-panel__status.is-long { font-size: 11px; }
+}
+
+/* The pads in SAMPLE mode: empty ones blink, those with a sound ringed, the take's pad lit (orange recording).
+ * Outlines, as STEP's marks: the caps' own shadow is their edge. */
+.live-pad.is-sample-empty { outline: 2px solid var(--signal); outline-offset: -4px; animation: sample-blink 900ms ease-in-out infinite alternate; }
+.live-pad.is-sample-filled { outline: 2px solid var(--signal); outline-offset: -4px; }
+.live-pad.is-sample-waiting { outline: 3px solid var(--signal); outline-offset: -5px; }
+.live-pad.is-sample-recording { outline: 3px solid var(--signal); outline-offset: -5px; background: var(--signal); color: var(--on-signal); }
+@keyframes sample-blink { to { outline-color: color-mix(in srgb, var(--signal) 15%, transparent); } }
+@media (prefers-reduced-motion: reduce) {
+  .live-pad.is-sample-empty { animation: none; outline-color: color-mix(in srgb, var(--signal) 45%, transparent); }
+}

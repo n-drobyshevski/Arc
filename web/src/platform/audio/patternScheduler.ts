@@ -16,18 +16,24 @@
 //   stamp), so there is no waiting for a stamp here, nor PRESS_WAIT_NS: a
 //   press with no stamp anchors on the frames rendered (Kotlin's fallback).
 // - No lost(): a new stream is a new worklet, and a new scheduler.
-// - No queued switches (scenes) and no arp (ArpRunner): the web has neither yet.
+// - A queued switch's [freeTick] goes back to the main thread with the
+//   output's stamps (liveMixer.ts), not as a volatile.
+// - ArpPlan's press comes as the frame it was heard at ([ArpPlan.atFrame],
+//   from the main thread's stamp; null: the frames rendered) and the run's
+//   identity as its press time ([ArpPlan.pressMs]), not System.nanoTime; a
+//   step for RECORD goes back as a message ([onArpStep]). No frames lost.
 // - The count-in's click is MixerHost's (clickScheduler.ts), on [clock]'s
 //   beats while [countingIn]: Kotlin's controller turns its click stream on
 //   for it.
 // - Times are frames and milliseconds; Kotlin's Long ticks are whole numbers.
 
-import { Arp } from '../../core/features/arp'
+import { Arp, type ArpNote, type ArpSettings } from '../../core/features/arp'
 import { Keys } from '../../core/features/keys'
-import { ProjectPatterns, Seq, projectPatterns } from '../../core/features/pattern'
+import { ProjectPatterns, Seq, projectPatterns, swingOffset, timingTicks, type Pattern, type Timing, type TimingSettings } from '../../core/features/pattern'
 import {
   PatternPlayer,
   PhaseAnchors,
+  framesPerTick,
   frameOf,
   retempo,
   tickAt,
@@ -47,12 +53,21 @@ export interface PadVoice {
   readonly keysShape: VoiceShape
 }
 
+/** A pattern waiting to take over a group (a pick made while the sequencer plays): [pattern] plays from global tick [atTick] on. */
+export interface QueuedSwitch {
+  readonly pattern: Pattern
+  readonly atTick: number
+}
+
 /**
  * What the sequencer plays: the project's [patterns], the sounds on their
  * pads ([voices], by pad key group × 12 + offset; a note on a pad not in it
  * is told to [PatternScheduler.onMissing]), [skip] (a note's id to the pass
- * not to play) and the tempo, [bpm]. Each group's pattern loops from its own
- * anchor in [phase]. Made anew for each change, never changed in place.
+ * not to play) and the tempo, [bpm]. [queued] gives a group (0..3) the
+ * pattern that takes over from a tick: its notes before the tick come from
+ * [patterns], those from it on from the queued one, which starts at its bar
+ * 1 on that tick. Each group's pattern loops from its own anchor in [phase].
+ * Made anew for each change, never changed in place.
  */
 export interface SeqPlan {
   readonly patterns: ProjectPatterns
@@ -60,6 +75,7 @@ export interface SeqPlan {
   readonly skip: ReadonlyMap<number, number>
   readonly bpm: number
   readonly phase: PhaseAnchors
+  readonly queued?: ReadonlyMap<number, QueuedSwitch>
 }
 
 export const EMPTY_PLAN: SeqPlan = {
@@ -68,6 +84,35 @@ export const EMPTY_PLAN: SeqPlan = {
   skip: new Map(),
   bpm: DEFAULT_BPM,
   phase: PhaseAnchors.ZERO,
+}
+
+/**
+ * What the arp or note repeat plays (an addition): the [notes] held, in the
+ * order pressed (latched ones too), the sounds on their pads ([voices], by
+ * pad key), whether it is KEYS's arp ([keys]) or PADS's note repeat, TIMING
+ * and the arp's settings, the tempo ([bpm]), the RANDOM order's [seed], and
+ * the press that started the run: when ([pressMs]; another one starts the run
+ * again, its first step on that press) and the mix frame it was heard at
+ * ([atFrame]; null when not known: the frames rendered). Made anew for each
+ * change, never changed in place.
+ */
+export interface ArpPlan {
+  readonly notes: readonly ArpNote[]
+  readonly voices: ReadonlyMap<number, PadVoice>
+  readonly keys: boolean
+  readonly timing: TimingSettings
+  readonly settings: ArpSettings
+  readonly bpm: number
+  readonly seed: number
+  readonly pressMs: number
+  readonly atFrame: number | null
+}
+
+/** A note the arp played at [globalTick] of the pattern's clock, [gateTicks] long: for RECORD. */
+export interface ArpStep {
+  readonly note: ArpNote
+  readonly globalTick: number
+  readonly gateTicks: number
 }
 
 /** Where the scheduler's timed commands go (Kotlin ScheduleSink): the mixer, with its samples. */
@@ -161,6 +206,18 @@ export class PatternScheduler {
   /** The anchored clock, each time it changes (a start, a tempo); null when stopped. */
   onTimeline: (clock: TransportClock | null) => void = () => {}
 
+  /** What the arp or note repeat plays: set from the main thread's 'arp' messages; null (or no notes) stops it. */
+  arp: ArpPlan | null = null
+
+  /** A step the arp played while the pattern's clock runs, once mixed: for RECORD. */
+  get onArpStep(): ((s: ArpStep) => void) | null {
+    return this.arpRunner.onStep
+  }
+
+  set onArpStep(f: ((s: ArpStep) => void) | null) {
+    this.arpRunner.onStep = f
+  }
+
   private readonly asks: Ask[] = []
   private on = false
   private clock: TransportClock | null = null
@@ -171,14 +228,33 @@ export class PatternScheduler {
   private countFrom = 0
   private nextTag = -1
   private readonly notes: SeqNote[] = []
+  // The queued patterns of the plan last switched in, as patterns playing from their own anchors.
+  private switchOf: SeqPlan | null = null
+  private switched: ProjectPatterns = projectPatterns()
+  private switchedPhase: PhaseAnchors = PhaseAnchors.ZERO
+  private readonly switchedNotes: SeqNote[] = []
+  /**
+   * The first tick a plan published now is sure to reach before it is sent
+   * (for a [SeqPlan.queued] switch while it plays): a lookahead past the
+   * first tick not sent yet. A switch at an earlier tick would find the old
+   * pattern's notes from it sent already, and the queued one's never.
+   * -Infinity until the transport's first block is sent.
+   */
+  freeTick = Number.NEGATIVE_INFINITY
   private held: Held[] = []
+  private readonly arpRunner = new ArpRunner(() => this.nextTag--)
   private missingOf: SeqPlan | null = null
   private readonly missing = new Set<number>()
 
   constructor(private readonly lookaheadMs = LOOKAHEAD_MS) {}
 
-  /** The transport plays (or counts in). */
+  /** The transport plays (or counts in), or the arp does: the output's stamp is wanted. */
   get running(): boolean {
+    return this.on || (this.arp !== null && this.arp.notes.length > 0)
+  }
+
+  /** The transport plays (or counts in); the arp alone doesn't count. */
+  get transportOn(): boolean {
     return this.on
   }
 
@@ -204,17 +280,28 @@ export class PatternScheduler {
    */
   play(countInBars: number, leadMs = 0, atFrame: number | null = null, atPress = atFrame !== null): void {
     this.on = true
+    this.freeTick = Number.NEGATIVE_INFINITY
     this.asks.push({ kind: 'play', countInBars: Math.max(countInBars, 0), leadMs: Math.max(leadMs, 0), atFrame, atPress })
   }
 
   /** Stops it: on the next [fill], what waits is dropped and the notes sounding let go of. */
   stop(): void {
     this.on = false
+    this.freeTick = Number.NEGATIVE_INFINITY
     this.asks.push({ kind: 'stop' })
   }
 
   /** Before a render: [rendered] mix frames are done, at [rate]; what falls ahead goes to [sink]. */
   fill(sink: ScheduleSink, rendered: number, rate: number): void {
+    // The arp's steps mixed by now go to RECORD, before a flush below drops those not yet.
+    this.arpRunner.mixed(rendered, false)
+    this.fillPattern(sink, rendered, rate)
+    const ahead = Math.floor((this.lookaheadMs * rate) / 1000)
+    this.arpRunner.fill(sink, rendered, rate, ahead, this.arp, this.clock)
+  }
+
+  // The pattern's part of [fill]: the transport's asks, its anchor and the notes and gates of this window.
+  private fillPattern(sink: ScheduleSink, rendered: number, rate: number): void {
     for (let a = this.asks.shift(); a !== undefined; a = this.asks.shift()) {
       this.flush(sink)
       if (a.kind === 'play') {
@@ -237,12 +324,44 @@ export class PatternScheduler {
     const from = Math.max(frameOf(c, this.nextTick), rendered - ahead)
     if (to > from) {
       PatternPlayer.window(p.patterns, c, from, to, p.skip, this.notes, p.phase)
+      if (p.queued !== undefined && p.queued.size > 0) this.switchIn(p, c, from, to)
       for (const n of this.notes) this.start(sink, p, n)
       this.nextTick = firstTick(c, to)
     }
+    this.freeTick = Math.max(this.nextTick, firstTick(c, to + ahead))
     this.scheduledTo = to
     this.releases(sink, c, to, rendered)
     this.publish()
+  }
+
+  // [notes] (the plan's patterns' window) with each queued group's notes from its switch's tick on taken from the queued pattern instead.
+  private switchIn(p: SeqPlan, c: TransportClock, from: number, to: number): void {
+    const queued = p.queued!
+    if (this.switchOf !== p) {
+      this.switchOf = p
+      let q = projectPatterns()
+      let ph = PhaseAnchors.ZERO
+      for (const [g, sw] of queued) {
+        if (g < 0 || g > 3) continue
+        q = ProjectPatterns.with(q, g, sw.pattern)
+        // The queued pattern starts at its bar 1 where it takes over.
+        ph = PhaseAnchors.with(ph, g, sw.atTick)
+      }
+      this.switched = q
+      this.switchedPhase = ph
+    }
+    PatternPlayer.window(this.switched, c, from, to, new Map(), this.switchedNotes, this.switchedPhase)
+    const kept = this.notes.filter((n) => {
+      const sw = queued.get(n.group)
+      return sw === undefined || n.startTick < sw.atTick
+    })
+    for (const n of this.switchedNotes) {
+      const sw = queued.get(n.group)
+      if (sw !== undefined && n.startTick >= sw.atTick) kept.push(n)
+    }
+    kept.sort((a, b) => a.startTick - b.startTick || a.group - b.group)
+    this.notes.length = 0
+    this.notes.push(...kept)
   }
 
   private anchor(a: Extract<Ask, { kind: 'play' }>, rendered: number, rate: number): void {
@@ -306,11 +425,12 @@ export class PatternScheduler {
     this.held = kept
   }
 
-  // What waits is dropped first, then every note sent and not over is let go of now.
+  // What waits is dropped first, then every note sent and not over is let go of now (the arp's too).
   private flush(sink: ScheduleSink): void {
     sink.flushTimed()
     for (const h of this.held) sink.releaseAt(h.key, VoiceMixer.NOW, h.tag)
     this.held = []
+    this.arpRunner.flushed(sink)
   }
 }
 
@@ -319,4 +439,230 @@ function firstTick(c: TransportClock, frame: number): number {
   let t = Math.ceil(tickAt(c, frame)) - 1
   while (frameOf(c, t) < frame) t++
   return t
+}
+
+/** A note the arp sent and that isn't over: its key, tag, start and end frame, and whether its release is sent. */
+interface ArpHeld {
+  key: string
+  tag: number
+  start: number
+  end: number
+  sent: boolean
+}
+
+/**
+ * The arp and note repeat as [PatternScheduler] plays them (an addition),
+ * in the audio thread, after the pattern's notes in each [fill]. A step is
+ * TIMING's interval, swung on its odd steps: while the transport runs, on
+ * the pattern's own grid (step k at k × interval + swing, from tick 0), else
+ * on a clock of its own whose step 0 is the frame the run's press was heard
+ * at (with none known, the frames rendered). A run that starts while the
+ * transport runs plays its first step at the press all the same, and the
+ * grid's after it, leaving out one less than half a step on.
+ *
+ * KEYS (the arp) plays one note of Arp.cycle a step, PADS (note repeat)
+ * every pad held. Each step's notes play as "arp:<group>:<offset>:<semitones>"
+ * ("n" for a pad hit), with a tag of their own below 0 ([tag]), and let go
+ * of Arp.gateTicks later. Steps are counted across windows, so a tempo or
+ * plan change neither repeats a step nor skips one; a new plan's notes play
+ * from the next step on (what was sent, at most a lookahead, plays out).
+ * With no plan, every arp voice sounding is let go of where the mix is.
+ *
+ * Its gates are kept in frames, not ticks: a run may go from its own clock
+ * to the pattern's (PLAY) and back (STOP) while a note sounds.
+ */
+export class ArpRunner {
+  /** A step played on the pattern's clock (not on the arp's own), told once mixed ([mixed]): for RECORD. */
+  onStep: ((s: ArpStep) => void) | null = null
+
+  // The plan the cycle is of, and the run's press (a new one starts the run again); active while it plays.
+  private shown: ArpPlan | null = null
+  private cycle: readonly ArpNote[] = []
+  private runPress = 0
+  private active = false
+  // The steps played this run: the cycle's index.
+  private count = 0
+  // The arp's own clock while the transport is stopped; whether it steps on the pattern's grid instead.
+  private free: TransportClock | null = null
+  private onGrid = false
+  // The next step of the grid in use, its interval and swing, and the frame scheduling has got to.
+  private nextStep = 0
+  private stepInterval: Timing | null = null
+  private stepSwing = 50
+  private scheduledTo = 0
+  // What was sent may be gone (flushed): steps go from the frames rendered again.
+  private resync = false
+  private held: ArpHeld[] = []
+  // The steps for [onStep] not mixed yet, and their frames: a flush drops them, unheard, unrecorded.
+  private told: { step: ArpStep; frame: number }[] = []
+
+  constructor(private readonly tag: () => number) {}
+
+  /**
+   * Before a block: [rendered] frames done at [rate], [ahead] frames of
+   * lookahead. [grid] is the pattern's clock while it runs.
+   */
+  fill(sink: ScheduleSink, rendered: number, rate: number, ahead: number, plan: ArpPlan | null, grid: TransportClock | null): void {
+    const to = rendered + ahead
+    const p = plan !== null && plan.notes.length > 0 ? plan : null
+    if (p === null) {
+      if (this.active) this.stop(sink, rendered)
+      this.releases(sink, to, rendered)
+      return
+    }
+    const restart = !this.active || p.pressMs !== this.runPress
+    if (p !== this.shown) {
+      this.shown = p
+      this.cycle = p.keys ? Arp.cycle(p.notes, p.settings.order, p.settings.octaves) : Arp.repeatNotes(p.notes)
+    }
+    if (restart) {
+      this.active = true
+      this.runPress = p.pressMs
+      this.count = 0
+    }
+    const interval = p.timing.interval
+    const ticks = timingTicks(interval)
+    const swing = p.timing.swing
+    const gate = Arp.gateTicks(interval, p.settings.gate)
+    // Where the press was heard; up to a lookahead behind the mix, as a press's pattern notes go.
+    const press = restart ? Math.max(p.atFrame ?? rendered, rendered - ahead) : 0
+    let c: TransportClock
+    if (grid !== null) {
+      c = grid
+      if (restart) {
+        // The press plays at once; the grid's steps go on from half a step after it.
+        const t = tickAt(c, press)
+        this.step(sink, p, c, Math.floor(t + 0.5), press, gate, true)
+        const after = t + ticks / 2
+        this.nextStep = firstStep(after, ticks, (k) => k * ticks + swingOffset(interval, k, swing) >= after)
+      } else if (!this.onGrid || this.resync || interval !== this.stepInterval) {
+        // From the pattern's next step on: the transport started, steps were dropped, or another interval.
+        const from = this.onGrid && !this.resync ? this.scheduledTo : rendered
+        this.nextStep = firstStep(tickAt(c, from), ticks, (k) => frameOf(c, k * ticks + swingOffset(interval, k, swing)) >= from)
+      }
+      this.onGrid = true
+      this.free = null
+    } else {
+      const bpm = p.bpm > 0 ? p.bpm : DEFAULT_BPM
+      let f = this.free
+      if (restart || f === null || this.onGrid || this.resync || f.rate !== rate) {
+        // Step 0 on the press, or (the transport stopped, steps dropped) where the mix is.
+        f = transportClock(restart ? press : rendered, rate, bpm)
+        this.nextStep = 0
+      } else if (interval !== this.stepInterval) {
+        // Another interval: its step 0 where the old one's next step was.
+        const old = this.stepInterval ?? interval
+        f = transportClock(frameOf(f, this.nextStep * timingTicks(old) + swingOffset(old, this.nextStep, this.stepSwing)), rate, f.bpm)
+        this.nextStep = 0
+      } else if (bpm !== f.bpm) {
+        f = retempo(f, Math.max(this.scheduledTo, rendered), bpm)
+      }
+      this.onGrid = false
+      this.free = f
+      c = f
+    }
+    this.stepInterval = interval
+    this.stepSwing = swing
+    this.resync = false
+    let k = this.nextStep
+    for (;;) {
+      const t = k * ticks + swingOffset(interval, k, swing)
+      const f = frameOf(c, t)
+      if (f >= to) break
+      // One fallen further behind than the lookahead is let go.
+      if (f >= rendered - ahead) this.step(sink, p, c, t, f, gate, grid !== null)
+      k++
+    }
+    this.nextStep = k
+    this.scheduledTo = to
+    this.releases(sink, to, rendered)
+  }
+
+  /** What was sent and waits is gone (ScheduleSink.flushTimed): every arp voice is let go of now, and steps go on from the mix. */
+  flushed(sink: ScheduleSink): void {
+    for (const h of this.held) sink.releaseAt(h.key, VoiceMixer.NOW, h.tag)
+    this.held = []
+    this.resync = true
+    // Never heard, so not for RECORD either.
+    this.mixed(Number.NEGATIVE_INFINITY, true)
+  }
+
+  /**
+   * Before a block, [rendered] frames done: the steps on the pattern's clock
+   * mixed by now are told ([onStep]); [lost] (the frames gone), none still
+   * waiting ever is.
+   */
+  mixed(rendered: number, lost: boolean): void {
+    if (this.told.length === 0) return
+    const kept: { step: ArpStep; frame: number }[] = []
+    for (const t of this.told) {
+      if (lost) continue
+      if (t.frame < rendered) this.onStep?.(t.step)
+      else kept.push(t)
+    }
+    this.told = kept
+  }
+
+  // The run ends: the voices sounding are let go of at [rendered]; those sent to start later play out their gate.
+  private stop(sink: ScheduleSink, rendered: number): void {
+    for (const h of this.held) {
+      if (h.start >= rendered || (h.sent && h.end <= rendered)) continue
+      sink.releaseAt(h.key, rendered, h.tag)
+      h.end = rendered
+      h.sent = true
+    }
+    this.active = false
+    this.shown = null
+    this.cycle = []
+    this.free = null
+    this.onGrid = false
+  }
+
+  // Step [tick] at [frame]: the arp's note, or every pad held; [recorded] on the pattern's clock.
+  private step(sink: ScheduleSink, p: ArpPlan, c: TransportClock, tick: number, frame: number, gate: number, recorded: boolean): void {
+    const end = frame + Math.floor(gate * framesPerTick(c) + 0.5)
+    if (p.keys) {
+      const n = Arp.noteAt(this.count, this.cycle, p.settings.order, p.seed)
+      if (n !== null) this.play(sink, p, n, tick, frame, end, gate, recorded)
+    } else {
+      for (const n of this.cycle) this.play(sink, p, n, tick, frame, end, gate, recorded)
+    }
+    this.count++
+  }
+
+  private play(sink: ScheduleSink, p: ArpPlan, n: ArpNote, tick: number, frame: number, end: number, gate: number, recorded: boolean): void {
+    const { group, offset } = n.pad
+    if (group < 0 || group > 3 || offset < 0 || offset > 11) return
+    const v = p.voices.get(group * 12 + offset)
+    if (v === undefined) return
+    const semis = n.semitones
+    const key = `arp:${group}:${offset}:${semis ?? 'n'}`
+    const t = this.tag()
+    const shape = velocityShape(semis === null ? v.shape : v.keysShape, n.velocity)
+    if (!sink.startAt(key, v, semis ?? 0, t, shape, frame)) return
+    this.held.push({ key, tag: t, start: frame, end, sent: false })
+    if (recorded && this.onStep !== null) this.told.push({ step: { note: n, globalTick: tick, gateTicks: gate }, frame })
+  }
+
+  // The releases that fall before [to] are sent; a note is forgotten once its release is rendered.
+  private releases(sink: ScheduleSink, to: number, rendered: number): void {
+    if (this.held.length === 0) return
+    const kept: ArpHeld[] = []
+    for (const h of this.held) {
+      if (!h.sent && h.end < to) {
+        sink.releaseAt(h.key, h.end, h.tag)
+        h.sent = true
+      }
+      if (h.sent && h.end < rendered) continue
+      kept.push(h)
+    }
+    this.held = kept
+  }
+}
+
+// The first step [at] holds for, the steps rising: from two below the one at [tick] (a swing is under a step).
+function firstStep(tick: number, ticks: number, at: (k: number) => boolean): number {
+  let k = Math.floor(tick / ticks) - 2
+  while (!at(k)) k++
+  return k
 }

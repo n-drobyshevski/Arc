@@ -57,3 +57,4 @@
 .tempo-sheet__swing { display: flex; align-items: center; gap: 12px; color: var(--ink); }
 .tempo-sheet__swing input { flex: 1 1 auto; min-width: 0; accent-color: var(--signal); }
 .tempo-sheet__swing-value { width: 3.5em; text-align: end; font-variant-numeric: tabular-nums; }
+.tempo-sheet__octaves { width: 150px; }

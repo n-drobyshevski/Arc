@@ -155,6 +155,14 @@
   border-radius: var(--radius-strip);
   background: var(--display);
 }
+/* The one-group line's own words (MirrorScreen.tsx IdleWords), measured to give the hit its room. */
+.live-strip__idle {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-10);
+}
 /* ArcType.displaySub */
 .live-strip__sub {
   flex: none;
@@ -503,8 +511,11 @@
 }
 .live__side {
   --side-tools: 44px;
+  /* The function keys' column on the left and its gap (FunctionRow.css), where it shows. */
+  --side-fn: 0px;
   gap: var(--space-12);
 }
+.live__side.live__side--fn { --side-fn: calc(60px + var(--space-12)); }
 /* The mode word turned a quarter turn as the edge tabs' words are, in a narrow column left of
  * the body, in the middle of its height (Android's SidewaysPadsControls). */
 .live__side-tools {
@@ -533,12 +544,14 @@
 }
 .live__side-tools .word svg { transform: rotate(90deg); }
 
-/* KEYS' grid on its side: the turned word over the view switch on the left, the scale and the
- * octave on the right, both in the middle of the keys' height; the body as big as what's left. */
+/* KEYS' grid on its side: the view switch on the left (none where it isn't offered: no column,
+ * nor the gap before it), the scale and the octave on the right, both in the middle of the keys'
+ * height; the body as big as what's left. */
 .live__side--keys {
   --side-tools: 44px;
   --side-end: 44px;
 }
+.live__side--keys.live__side--bare { --side-tools: calc(0px - var(--space-12)); }
 .live-mode--lead {
   flex-direction: column;
   align-items: center;
@@ -561,12 +574,12 @@
 }
 .live__side--keys > .live-kgrid { flex: none !important; }
 .live__one--side > .live__side--keys > .live-kgrid > .live-deck--ko {
-  --u: clamp(0px, min((100cqw - var(--side-tools) - var(--side-end) - 2 * var(--space-12) - var(--cap-dx) - 2px) / 4.046, (100cqh - var(--cap-dy) - 2px) / 5.72), 170px);
+  --u: clamp(0px, min((100cqw - var(--side-fn) - var(--side-tools) - var(--side-end) - 2 * var(--space-12) - var(--cap-dx) - 2px - 16px) / 4.046, (100cqh - var(--cap-dy) - 2px) / 5.72), 170px);
 }
 .live__side > .ko-body {
   --ko-cols: 4;
-  /* As .ko-body's, less the column on the left and its gap. */
-  --u: clamp(0px, min((100cqw - var(--side-tools) - var(--space-12) - var(--cap-dx) - 2px) / (var(--ko-cols) * 1.215 + 0.401), (100cqh - var(--cap-dy) - 2px) / 5.72), 170px);
+  /* As .ko-body's, less KEYS / PADS' 16 (the plate's right margin wider by it). */
+  --u: clamp(0px, min((100cqw - var(--side-fn) - var(--cap-dx) - 2px - 16px) / (var(--ko-cols) * 1.215 + 0.401), (100cqh - var(--cap-dy) - 2px) / 5.72), 170px);
   display: flex;
   gap: var(--kd-gx);
 }
@@ -1196,22 +1209,32 @@
 
   /* The K.O. II's body drawn as the Guide draws it (live-deck--ko): the group keys and three
    * pads across (KEYS: three keys), as big as the room lets them: wide, cols x 1.215 + 0.401;
-   * high, the 18 over the strip, the strip, the mode row and their gaps (130 in all), then the
-   * four rows, 0.31 and the edge (5.505). */
+   * high, the 18 over the strip, the strip, the function keys, KEYS' mode row and their gaps
+   * (204 in all; the pads, no mode row: 154), then the four rows, 0.31 and the edge (5.505).
+   * KEYS / PADS in the right margin, 16 wider (Kotlin ModeStripWidth). */
   .live-ko {
     --ko-cols: 4;
-    --u: clamp(0px, min((100cqw - var(--cap-dx) - 8px) / (var(--ko-cols) * 1.215 + 0.401), (100cqh - 130px - var(--cap-dy) - 8px) / 5.505), 190px);
-    width: calc(var(--u) * (var(--ko-cols) * 1.215 + 0.339) + var(--cap-dx));
+    --ko-over: 204px;
+    --u: clamp(0px, min((100cqw - var(--cap-dx) - 8px - 16px) / (var(--ko-cols) * 1.215 + 0.401), (100cqh - var(--ko-over) - var(--cap-dy) - 8px) / 5.505), 190px);
+    width: calc(var(--u) * (var(--ko-cols) * 1.215 + 0.339) + var(--cap-dx) + 16px);
     height: auto;
-    padding: 18px calc(var(--u) * 0.277 + var(--cap-dx)) calc(var(--u) * 0.31 + var(--cap-dy)) calc(var(--u) * 0.277);
+    padding: 18px calc(var(--u) * 0.277 + var(--cap-dx) + 16px) calc(var(--u) * 0.31 + var(--cap-dy)) calc(var(--u) * 0.277);
     border-radius: calc(var(--u) * 0.277);
     background: var(--ko-body);
     box-shadow: calc(var(--u) * 0.062) calc(var(--u) * 0.092) 0 var(--ko-edge);
   }
   .live-ko--keys { --ko-cols: 3; }
+  .live-ko--pads { --ko-over: 154px; }
   .live-ko > .live-ko__body {
     flex: none;
+    position: relative;
     gap: var(--kd-gx);
+  }
+  /* KEYS / PADS beside the keys, in the margin right of them. */
+  .live-ko__body > .mode-strip {
+    top: 0;
+    bottom: 0;
+    right: calc(0px - var(--u) * 0.277 - 16px);
   }
   .live-ko .live-kgrid { min-width: 0; }
   .live-ko .live-group--big,
@@ -1333,6 +1356,24 @@
   pointer-events: none;
 }
 
+/* The arp playing (MirrorScreen.kt's Display): its line in signal orange. */
+.live-display__line--arp { color: var(--signal); }
+/* Held for the arp or note repeat (LiveArp): the keys outlined and numbered in the order pressed,
+ * the pads ringed, in signal orange. */
+.live-pad.is-arp-held,
+.live-key.is-arp-held { outline: 2px solid var(--signal); outline-offset: -4px; }
+.live-key[data-arp-order]::after {
+  content: attr(data-arp-order);
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--signal);
+  pointer-events: none;
+}
+
 /* STEP open (LiveStep.kt PadStep): the pads (KEYS keys) on the cursor's step outlined in signal orange,
  * their digit orange; the one picked for − / + ringed thicker. An outline, so the cap keeps its edge. */
 .live-pad.is-step-lit,
@@ -1343,3 +1384,150 @@
 .live-pad.is-step-picked .live-pad__label { color: var(--signal); }
 /* On a phone on its side, the panel over the side columns. */
 .live__side-step { flex: none; }
+
+/* KEYS / PADS printed in the plate's right margin (Kotlin ModeStrip, ModeStripWidth 16): one
+ * group and KEYS' grid give the strip 16px of their width, the margin widening by it (on its
+ * side and on the desk, their --u rules above). */
+.live__one > .live-group--big > .live-deck--strip,
+.live__one > .live-kgrid > .live-deck--strip,
+.live__side--keys > .live-kgrid > .live-deck--strip,
+.ko-body--strip {
+  position: relative;
+  padding-right: calc(var(--u) * 0.277 + var(--cap-dx) + 16px);
+}
+/* Upright, as tall as a tall phone lets them. */
+.live__one > .live-group--big > .live-deck--strip,
+.live__one > .live-kgrid > .live-deck--strip {
+  --u: clamp(0px, min((100cqw - var(--cap-dx) - 2px - 16px) / (var(--ko-cols) * 1.215 + 0.401), (100cqh - var(--cap-dy) - 2px) / 5.72), 170px);
+  /* Bigger pads on tall phones (Kotlin padFit, tall): where the width limits the pads, the four
+   * rows share the height the body leaves, the pads growing taller (never wider), up to 1.15 times
+   * their width; a room the body already fills (a small phone) is as it was. */
+  --kd-h: calc(var(--u) / 1.08 + clamp(0px, (100cqh - var(--cap-dy) - 2px - var(--u) * 5.72) / 4, var(--u) * 1.15 - var(--u) / 1.08));
+}
+.mode-strip {
+  position: absolute;
+  top: calc(var(--u) * 0.215);
+  bottom: calc(var(--u) * 0.31 + var(--cap-dy));
+  right: var(--cap-dx);
+  width: calc(var(--u) * 0.277 + 16px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+/* The words read from the bottom up, as the edge tabs' are; the mode shown in the plate's print, the other grey. */
+.mode-strip__key {
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.mode-strip__key:focus-visible { outline: var(--focus-ring); outline-offset: -2px; }
+.mode-strip__word {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: clamp(9px, calc(var(--u) * 0.11), 12px);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  color: var(--ko-led-off);
+  white-space: nowrap;
+}
+.mode-strip__word.is-on { color: var(--ko-label); font-weight: 700; }
+.mode-strip__line { flex: none; width: 1.5px; height: 14px; border-radius: 1px; background: var(--ko-edge); }
+/* ARP (RPT) and LATCH in the strip's lower half, turned as the words are. */
+.arp-words--strip { flex: 1 1 0; min-height: 0; flex-direction: column; justify-content: center; gap: 2px; }
+.arp-words--strip .arp-word {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  min-height: 0;
+  min-width: 32px;
+  padding: 4px 0;
+  font-size: clamp(9px, calc(var(--u) * 0.11), 12px);
+}
+
+/* STEP on a phone on its side, KEYS on the grid or the piano: the panel in a column left of the keys (Kotlin's
+ * StepHosting.SLOT, sidePanelWidth 240–380; the piano's at least StepColumnMin 272), the keys narrowing beside it.
+ * A window too short for the panel scrolls it, never the keys. */
+/* The panel takes what the keys at their full height leave (Kotlin sidePanelWidth(room - others - gaps, deck)). The
+ * value is substituted where it is used, inside the side row's size container. */
+.live__side--panel {
+  --side-panel: clamp(240px, 100cqw - var(--side-tools) - var(--side-end) - 3 * var(--space-12) - ((100cqh - var(--cap-dy) - 2px) / 5.72 * 4.046 + var(--cap-dx) + 2px + 16px), 380px);
+}
+.live__side-panel {
+  flex: none;
+  align-self: stretch;
+  width: var(--side-panel);
+  min-height: 0;
+  overflow-y: auto;
+}
+.live__one--side > .live__side--keys.live__side--panel > .live-kgrid > .live-deck--strip {
+  --u: clamp(0px, min((100cqw - var(--side-panel) - var(--side-tools) - var(--side-end) - 3 * var(--space-12) - var(--cap-dx) - 2px - 16px) / 4.046, (100cqh - var(--cap-dy) - 2px) / 5.72), 170px);
+}
+.live-piano__row {
+  flex: 1 1 auto !important;
+  min-height: 0;
+  display: flex;
+  gap: var(--space-12);
+  align-items: flex-start;
+}
+.live-piano__step {
+  flex: none;
+  align-self: stretch;
+  width: clamp(272px, 40%, 380px);
+  min-height: 0;
+  overflow-y: auto;
+}
+.live-piano__row > .live-piano__keys { flex: 1 1 0; min-width: 0; }
+
+/* All four groups: the group the STEP panel edits, its caption in signal orange. */
+.live-group__caption.is-step-edited { --live-caption: var(--signal); }
+/* With the panel beside them the keys keep their size: the row may take the window's width. */
+.live__one--side:has(> .live__side--panel) { max-width: none; }
+
+/* The panels unrolling from the display line as they open (Kotlin SamplePanel.kt's timeline, panelMotion.ts):
+ * PANEL_OPEN_MS 300 on Material's emphasised decelerate, the header fading in over the first 120, then the rows at
+ * 40, 70 and 100 ms over 200 each; in a column on a phone on its side, from the left. Closing, the panel goes at once
+ * and the function keys come back over PANEL_CLOSE_MS 240, rising and growing back (web delta). None of it where the
+ * system asks for less motion (Android's animations off). */
+@media (prefers-reduced-motion: no-preference) {
+  .live__fn:is(.sample-panel, .step-panel, .scene-panel) {
+    animation: panel-unroll 300ms cubic-bezier(0.05, 0.7, 0.1, 1) both;
+  }
+  :is(.live__side-panel, .live-piano__step) > .live__fn:is(.step-panel) {
+    animation-name: panel-unroll-side;
+  }
+  .live__fn:is(.sample-panel, .step-panel, .scene-panel) > * {
+    animation: panel-fade 200ms cubic-bezier(0, 0, 0.2, 1) both;
+  }
+  .live__fn:is(.sample-panel, .step-panel, .scene-panel) > :first-child { animation-duration: 120ms; }
+  .live__fn:is(.sample-panel, .step-panel, .scene-panel) > :nth-child(2) { animation-delay: 40ms; }
+  .live__fn:is(.sample-panel, .step-panel, .scene-panel) > :nth-child(3) { animation-delay: 70ms; }
+  .live__fn:is(.sample-panel, .step-panel, .scene-panel) > :nth-child(n + 4) { animation-delay: 100ms; }
+  .live__fn.fn-return { animation: fn-return 240ms cubic-bezier(0.3, 0, 1, 1) both; }
+}
+@keyframes panel-unroll {
+  from { clip-path: inset(0 0 100% 0 round 14px); }
+  to { clip-path: inset(0 0 0 0 round 14px); }
+}
+@keyframes panel-unroll-side {
+  from { clip-path: inset(0 100% 0 0 round 14px); }
+  to { clip-path: inset(0 0 0 0 round 14px); }
+}
+@keyframes panel-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+/* The keys coming back from where they went (sunk 6 px, 6 % smaller, faded), at the timeline's pace run back. */
+@keyframes fn-return {
+  from { opacity: 0; transform: translateY(6px) scale(0.94); }
+  to { opacity: 1; transform: none; }
+}

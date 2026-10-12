@@ -6,7 +6,9 @@
 // keeps in SharedPreferences "external" (picked folder, file overrides).
 // Version 3 adds "padSounds", Live's copies of the device's pad sounds
 // (Android's files/pad-sounds folder, PadSoundCache). Version 4 adds "takes",
-// Live's recorded takes (Android's files/takes folder, Takes.kt). The upgrades never
+// Live's recorded takes (Android's files/takes folder, Takes.kt). Version 5 adds
+// "samples", SAMPLE's recordings kept and not yet on the EP-133 (Android's
+// files/samples folder, SampleFiles.kt). The upgrades never
 // touch existing stores, like MIGRATION_1_2 (no destructive fallback): a
 // reference library on the same origin carries over.
 //
@@ -19,6 +21,7 @@
 // | kv       | key                 |           | prefs "external"            |
 // | padSounds| name                |           | files/pad-sounds/*          |
 // | takes    | name                |           | files/takes/*.wav           |
+// | samples  | name                |           | files/samples/*.wav         |
 //
 // Web deltas:
 // - Converters.kt (JSON text columns) is not needed: IndexedDB stores arrays
@@ -31,7 +34,7 @@ import { BackupDevice, type BackupRecord } from '../../core/text/libraryRules'
 export const DB_NAME = 'arc'
 /** ?demo's own database, so the demo never touches the real library. */
 export const DEMO_DB_NAME = 'arc-demo'
-export const DB_VERSION = 4
+export const DB_VERSION = 5
 
 export const STORE = {
   backups: 'backups',
@@ -41,6 +44,7 @@ export const STORE = {
   kv: 'kv',
   padSounds: 'padSounds',
   takes: 'takes',
+  samples: 'samples',
 } as const
 export type StoreName = (typeof STORE)[keyof typeof STORE]
 
@@ -76,6 +80,13 @@ export interface TakeRow {
   frames: number
   rate: number
   wav: Blob
+}
+
+/** A row in "samples": a SAMPLE recording's WAV (SampleFiles' smp-yyyyMMdd-HHmmss.wav) and when it was written. */
+export interface SampleRow {
+  name: string
+  createdAt: number
+  wav: Uint8Array
 }
 
 /** A row in "kv". */
@@ -131,6 +142,9 @@ export function upgrade(db: IDBDatabase, oldVersion: number, tx: IDBTransaction)
   }
   if (oldVersion < 4) {
     if (!db.objectStoreNames.contains(STORE.takes)) db.createObjectStore(STORE.takes, { keyPath: 'name' })
+  }
+  if (oldVersion < 5) {
+    if (!db.objectStoreNames.contains(STORE.samples)) db.createObjectStore(STORE.samples, { keyPath: 'name' })
   }
 }
 

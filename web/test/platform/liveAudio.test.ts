@@ -779,6 +779,42 @@ describe('LiveAudio', () => {
     expect(slow).toEqual([255])
   })
 
+  it('makes up for what a slow output leaves out of a typical Bluetooth delay, with the setting on', async () => {
+    const backend = new FakeBackend()
+    const { live } = await opened(backend)
+    backend.ctx.setState('running')
+    live.preload('s', tone(), 1, RATE)
+    // The latency is read again at each press.
+    const pressAt = (latency: number): void => {
+      backend.ctx.outputLatency = latency
+      live.press('k', 's', PAD)
+      backend.link.render(0)
+    }
+    // 25 ms: not taken for Bluetooth, nothing made up.
+    expect(live.delayMs).toBe(0)
+    expect(live.madeUpFor.value).toBeNull()
+    expect(live.bluetooth.value).toBeNull()
+    // 135 ms counted (5 + 130): the other 45 of a typical 180 is made up for.
+    pressAt(0.13)
+    expect(live.bluetooth.value).toBe(135)
+    expect(live.delayMs).toBe(45)
+    expect(live.madeUpFor.value).toBe(180)
+    // Off: nothing is, though it is still taken for Bluetooth.
+    live.makeUpDelay(false)
+    expect(live.delayMs).toBe(0)
+    expect(live.madeUpFor.value).toBeNull()
+    expect(live.bluetooth.value).toBe(135)
+    live.makeUpDelay(true)
+    // A stamp that counts all of it (255 ms) leaves nothing to add.
+    pressAt(0.25)
+    expect(live.delayMs).toBe(0)
+    expect(live.madeUpFor.value).toBe(255)
+    // Closed: none.
+    live.close()
+    expect(live.madeUpFor.value).toBeNull()
+    expect(live.bluetooth.value).toBeNull()
+  })
+
   it('notices an output that turned slow at the next press', async () => {
     const { live, backend, slow } = await opened()
     backend.ctx.setState('running')

@@ -1,0 +1,29 @@
+/* SampleReviewSheet.kt's look: the title and its line, the take's waveform, START / LENGTH and the
+ * play key, the switches, the slot's − and +, KEEP over RETAKE and DISCARD. */
+.sample-review__head { display: flex; flex-direction: column; gap: 2px; }
+.sample-review__head h2 { margin: 0; }
+.sample-review__line,
+.sample-review__dim { margin: 0; color: var(--graphite); }
+.sample-review__trim { display: flex; align-items: center; gap: 16px; }
+.sample-review__trim .play-key { flex: none; }
+.sample-review__slot { display: flex; align-items: center; gap: 10px; }
+.sample-review__slot-key {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--key);
+  color: var(--ink);
+  font: inherit;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+.sample-review__slot-key:disabled { opacity: 0.45; cursor: default; }
+.sample-review__slot-key:focus-visible { outline: var(--focus-ring); outline-offset: 2px; }
+.sample-review__slot-line { flex: 1 1 auto; min-width: 0; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sample-review__slot-line.is-dim { color: var(--graphite); }
+.sample-review__keys { display: flex; flex-direction: column; gap: 10px; }
+.sample-review__pair { display: flex; gap: 10px; }
+.sample-review__pair > * { flex: 1 1 0; min-width: 0; }

@@ -105,6 +105,19 @@ describe('STEP', () => {
     p.stepRecordUp()
     expect(ProjectPatterns.group(p.patternsNow, 0).notes.map((n) => n.semitones)).toEqual([4])
   })
+  it('opened before any project is known, it stays open on the project read; another project closes it', async () => {
+    const h = await liveHarness({ storage: memoryStorage(ORDER) })
+    const p = h.c.pattern
+    expect(p.ui.value.project).toBe(0)
+    p.setStepOpen(true, 0)
+    expect(p.step.value.open).toBe(true)
+    // The patterns load late, then the device's project comes in.
+    await p.switchProject(1)
+    expect(p.ui.value.project).toBe(1)
+    expect(p.step.value.open).toBe(true)
+    await p.switchProject(2)
+    expect(p.step.value.open).toBe(false)
+  })
 })
 
 describe('CORRECT', () => {

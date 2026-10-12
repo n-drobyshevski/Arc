@@ -2,10 +2,10 @@
 // cases the web's scheduler has: no lost output, arp or queued switches), and
 // ClickSoundTest's shape; plus the count-in's clicks, which are the web's own.
 import { describe, expect, it } from 'vitest'
-import { Seq, pattern, patternNote, projectPatterns, type Pattern } from '../../src/core/features/pattern'
+import { ProjectPatterns, Seq, pattern, patternNote, projectPatterns, type Pattern } from '../../src/core/features/pattern'
 import { PhaseAnchors, type TransportClock } from '../../src/core/features/sequencer'
 import { VoiceMixer, VoiceShape, VoiceMode } from '../../src/core/formats/voiceMixer'
-import { ClickSound, EMPTY_PLAN, PatternScheduler, type PadVoice, type ScheduleSink, type SeqPlan } from '../../src/platform/audio/patternScheduler'
+import { ClickSound, EMPTY_PLAN, PatternScheduler, type PadVoice, type QueuedSwitch, type ScheduleSink, type SeqPlan } from '../../src/platform/audio/patternScheduler'
 import { MixerHost, type FromMixer } from '../../src/platform/audio/liveMixer'
 
 // 48 kHz at 120 BPM: 250 frames a tick, a bar 96000 frames; the lookahead 2400.
@@ -255,5 +255,214 @@ describe('MixerHost and the pattern', () => {
     host.handle({ t: 'stopSeq' })
     host.render(l, r, 128, 1)
     expect(posted[posted.length - 1]).toEqual(expect.objectContaining({ t: 'timeline', clock: null }))
+  })
+})
+
+// Port of PatternSchedulerTest.kt's queued switches (scenes: a pick made while the sequencer plays).
+describe('PatternScheduler: queued switches', () => {
+  // A scheduler and its sink, rendered block by block up to a frame.
+  class Rig {
+    readonly s = new PatternScheduler()
+    readonly sink = new FakeSink()
+    rendered = 0
+    runTo(to: number): void {
+      for (; this.rendered < to; this.rendered += 128) this.s.fill(this.sink, this.rendered, rate)
+    }
+  }
+
+  // A plan with [now] playing in each queued group, and the group's queued pattern from its tick; [also] other groups' patterns.
+  const switching = (now: Pattern, queued: [number, QueuedSwitch][], also: [number, Pattern][] = []): SeqPlan => {
+    let p = projectPatterns()
+    for (const [g, pat] of also) p = ProjectPatterns.with(p, g, pat)
+    for (const [g] of queued) p = ProjectPatterns.with(p, g, now)
+    return { patterns: p, voices: voices(), skip: new Map(), bpm: 120, phase: PhaseAnchors.ZERO, queued: new Map(queued) }
+  }
+
+  // What started up to tick [until]: its tick (250 frames each at this tempo) and voice.
+  const startsBefore = (r: Rig, until: number): [number, string][] =>
+    r.sink.starts.filter((n) => n.at < ahead + until * 250).map((n) => [(n.at - ahead) / 250, n.key])
+
+  // A bar with a hit on pad [pad] (0..11) at each of [ticks].
+  const hits = (pad: number, ...ticks: number[]): Pattern => pattern(1, ticks.map((t, i) => patternNote(t, pad, 24, null, 127, i + 1)))
+
+  // Kotlin's beats(): a hit on pad 0 on each beat of a bar.
+  const beats0 = pattern(1, [0, 1, 2, 3].map((b) => patternNote(b * Seq.PPQN, 0, 24, null, 127, b + 1)))
+
+  const twoBars = (): Pattern => pattern(2, [patternNote(0, 1, 24, null, 127, 1), patternNote(384, 2, 24, null, 127, 2)])
+
+  it('a switch at a bar line plays the old pattern before it and the queued one from it', () => {
+    const r = new Rig()
+    r.s.plan = switching(beats0, [[0, { pattern: hits(1, 0, 192), atTick: 2 * Seq.TICKS_PER_BAR }]])
+    r.s.play(0)
+    r.runTo(ahead + 4 * bar)
+    const a = [0, 96, 192, 288, 384, 480, 576, 672].map((t): [number, string] => [t, 'live:0:0'])
+    const b = [768, 960, 1152, 1344].map((t): [number, string] => [t, 'live:0:1'])
+    expect(startsBefore(r, 4 * Seq.TICKS_PER_BAR)).toEqual([...a, ...b])
+  })
+
+  it("a switch at a pattern end drops the old pattern's second pass and starts the queued one on its tick", () => {
+    const r = new Rig()
+    const a = pattern(2, [patternNote(0, 0, 24, null, 127, 1), patternNote(400, 0, 24, null, 127, 2)])
+    r.s.plan = switching(a, [[0, { pattern: hits(1, 0), atTick: 768 }]])
+    r.s.play(0)
+    r.runTo(ahead + 4 * bar)
+    expect(startsBefore(r, 4 * Seq.TICKS_PER_BAR)).toEqual([
+      [0, 'live:0:0'],
+      [400, 'live:0:0'],
+      [768, 'live:0:1'],
+      [1152, 'live:0:1'],
+    ])
+  })
+
+  it('an immediate switch starts the queued pattern at its bar 1, whatever tick it comes at', () => {
+    const r = new Rig()
+    r.s.plan = switching(beats0, [[0, { pattern: hits(1, 0, 192), atTick: 100 }]])
+    r.s.play(0)
+    r.runTo(ahead + 2 * bar)
+    expect(startsBefore(r, 2 * Seq.TICKS_PER_BAR)).toEqual([
+      [0, 'live:0:0'],
+      [96, 'live:0:0'],
+      [100, 'live:0:1'],
+      [292, 'live:0:1'],
+      [484, 'live:0:1'],
+      [676, 'live:0:1'],
+    ])
+  })
+
+  it('a 2-bar pattern switched in on an odd bar starts at its bar 1', () => {
+    const r = new Rig()
+    r.s.plan = switching(beats0, [[0, { pattern: twoBars(), atTick: 384 }]])
+    r.s.play(0)
+    r.runTo(ahead + 4 * bar)
+    const b = startsBefore(r, 4 * Seq.TICKS_PER_BAR).filter((n) => n[1] !== 'live:0:0')
+    expect(b).toEqual([
+      [384, 'live:0:1'],
+      [768, 'live:0:2'],
+      [1152, 'live:0:1'],
+    ])
+  })
+
+  it('the plan taking a switched-in pattern in place of the queue goes on from its start', () => {
+    const queued = switching(beats0, [[0, { pattern: twoBars(), atTick: 384 }]])
+    const whole = new Rig()
+    whole.s.plan = queued
+    whole.s.play(0)
+    whole.runTo(ahead + 6 * bar)
+    const applied = new Rig()
+    applied.s.plan = queued
+    applied.s.play(0)
+    applied.runTo(ahead + 384 * 250 + 4800)
+    applied.s.plan = { patterns: ProjectPatterns.with(projectPatterns(), 0, twoBars()), voices: voices(), skip: new Map(), bpm: 120, phase: PhaseAnchors.with(PhaseAnchors.ZERO, 0, 384) }
+    applied.runTo(ahead + 6 * bar)
+    expect(startsBefore(applied, 6 * Seq.TICKS_PER_BAR)).toEqual(startsBefore(whole, 6 * Seq.TICKS_PER_BAR))
+    expect(applied.sink.starts.map((n) => n.at)).toEqual(whole.sink.starts.map((n) => n.at))
+    // Another switch, out of a pattern that started late, leaves the old one at the tick and starts the new one there.
+    const later = new Rig()
+    later.s.plan = {
+      patterns: ProjectPatterns.with(projectPatterns(), 0, twoBars()),
+      voices: voices(),
+      skip: new Map(),
+      bpm: 120,
+      phase: PhaseAnchors.with(PhaseAnchors.ZERO, 0, 100),
+      queued: new Map([[0, { pattern: hits(3, 0), atTick: 1000 }]]),
+    }
+    later.s.play(0)
+    later.runTo(ahead + 4 * bar)
+    expect(startsBefore(later, 4 * Seq.TICKS_PER_BAR).filter((n) => n[0] <= 1384)).toEqual([
+      [100, 'live:0:1'],
+      [484, 'live:0:2'],
+      [868, 'live:0:1'],
+      [1000, 'live:0:3'],
+      [1384, 'live:0:3'],
+    ])
+  })
+
+  it('two groups switch at their own ticks', () => {
+    const r = new Rig()
+    const a = pattern(1, [patternNote(0, 0, 24, null, 127, 1), patternNote(192, 0, 24, null, 127, 2)])
+    const b = pattern(1, [patternNote(96, 1, 24, null, 127, 3)])
+    r.s.plan = switching(a, [
+      [0, { pattern: b, atTick: 384 }],
+      [1, { pattern: b, atTick: 768 }],
+    ])
+    r.s.play(0)
+    r.runTo(ahead + 3 * bar)
+    expect(startsBefore(r, 3 * Seq.TICKS_PER_BAR)).toEqual([
+      [0, 'live:0:0'],
+      [0, 'live:1:0'],
+      [192, 'live:0:0'],
+      [192, 'live:1:0'],
+      [384, 'live:1:0'],
+      [480, 'live:0:1'],
+      [576, 'live:1:0'],
+      [864, 'live:0:1'],
+      [864, 'live:1:1'],
+    ])
+  })
+
+  it('a group with no queue is left as it was', () => {
+    const r = new Rig()
+    const other = pattern(1, [patternNote(48, 5, 24, null, 127, 9)])
+    r.s.plan = switching(beats0, [[0, { pattern: hits(1, 0), atTick: 384 }]], [[2, other]])
+    r.s.play(0)
+    r.runTo(ahead + 2 * bar)
+    const c = startsBefore(r, 2 * Seq.TICKS_PER_BAR).filter((n) => n[1] === 'live:2:5')
+    expect(c.map((n) => n[0])).toEqual([48, 432])
+  })
+
+  it('the plan taking the queued pattern in place of the queue neither repeats nor skips a note', () => {
+    const b = hits(1, 0, 96, 192, 288)
+    const queued = switching(beats0, [[0, { pattern: b, atTick: 384 }]])
+    const whole = new Rig()
+    whole.s.plan = queued
+    whole.s.play(0)
+    whole.runTo(ahead + 4 * bar)
+    const applied = new Rig()
+    applied.s.plan = queued
+    applied.s.play(0)
+    applied.runTo(ahead + 384 * 250 + 4800)
+    applied.s.plan = { patterns: ProjectPatterns.with(projectPatterns(), 0, b), voices: voices(), skip: new Map(), bpm: 120, phase: PhaseAnchors.ZERO }
+    applied.runTo(ahead + 4 * bar)
+    expect(startsBefore(applied, 1536)).toEqual(startsBefore(whole, 1536))
+    expect(applied.sink.starts.map((n) => n.at)).toEqual(whole.sink.starts.map((n) => n.at))
+  })
+
+  it('a switch queued at the free tick finds nothing of the old pattern sent from it, and the queued one whole', () => {
+    const every = Array.from({ length: 16 }, (_, i) => i * 24)
+    const r = new Rig()
+    expect(r.s.freeTick).toBe(Number.NEGATIVE_INFINITY)
+    r.s.plan = plan(0, hits(0, ...every))
+    r.s.play(0)
+    r.runTo(ahead + bar / 2 + 1234)
+    const at = r.s.freeTick
+    expect(r.sink.starts.every((n) => (n.at - ahead) / 250 < at)).toBe(true)
+    expect(at).toBeGreaterThan((r.rendered - ahead) / 250)
+    r.s.plan = switching(hits(0, ...every), [[0, { pattern: hits(1, ...every), atTick: at }]])
+    r.runTo(ahead + 2 * bar)
+    const heard = startsBefore(r, 2 * Seq.TICKS_PER_BAR)
+    expect(heard.some((n) => n[1] === 'live:0:0' && n[0] >= at)).toBe(false)
+    const queuedTicks: [number, string][] = []
+    for (let t = at; t < 2 * Seq.TICKS_PER_BAR; t += 24) queuedTicks.push([t, 'live:0:1'])
+    expect(heard.filter((n) => n[1] === 'live:0:1')).toEqual(queuedTicks)
+    r.s.stop()
+    r.runTo(r.rendered + 192)
+    expect(r.s.freeTick).toBe(Number.NEGATIVE_INFINITY)
+  })
+
+  it('a note of the old pattern sounding at the switch is let go of at its own gate', () => {
+    const r = new Rig()
+    const a = pattern(1, [patternNote(300, 0, 200, null, 127, 1)])
+    r.s.plan = switching(a, [[0, { pattern: hits(1, 0), atTick: 384 }]])
+    r.s.play(0)
+    r.runTo(ahead + 2 * bar)
+    const held = r.sink.starts.find((n) => n.key === 'live:0:0')!
+    const release = r.sink.releases.find((n) => n.key === 'live:0:0')!
+    expect(release.tag).toBe(held.tag)
+    expect(release.at).toBe(ahead + 500 * 250)
+    expect(startsBefore(r, 768)).toEqual([
+      [300, 'live:0:0'],
+      [384, 'live:0:1'],
+    ])
+    expect(r.sink.events.filter((e) => e === 'flush').length).toBe(1)
   })
 })

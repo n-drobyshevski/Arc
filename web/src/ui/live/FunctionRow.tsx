@@ -1,15 +1,18 @@
-// Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/LiveFunctionKeys.kt (FunctionRow, FunctionKeys, FunctionKey, ProjectHold, beatBlink)
+// Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/LiveFunctionKeys.kt (FunctionRow, FunctionColumn, columnFit, FunctionKeys, FunctionKey, ProjectHold, beatBlink)
 //
 // Live's function keys as the EP-133 prints its two-tier keys: a dark cap
 // with its word on the upper half and the lower half filled with a colour
 // carrying a second word, under an LED and a printed label. SOUND, PROJECT,
-// TEMPO and FX in a row over the pads (and the keys).
+// TEMPO and FX in a row over the pads (and the keys), or on a phone on its
+// side in a column left of them ([column]), as tall as the room lets them
+// (columnFit: the gaps close up, then the caps shrink, then the LED lines go,
+// a screen reader still hearing what they say).
 //
 // Web deltas:
 // - A key's hold is [FN_HOLD_MS] (Compose's long-press time); a right-click
 //   is a hold (FX: punch-ins on until clicked again, as a screen reader's
 //   long click is on Android); Enter or Space is a tap.
-// - No column on a phone on its side: the row shows on upright pages only.
+// - The column's sizes are CSS (FunctionRow.css, on the column's own height).
 // - TEMPO's LED blink is a CSS animation started on each beat when it is heard.
 import { createContext, type ButtonHTMLAttributes, type JSX } from 'preact'
 import { useContext, useEffect, useRef } from 'preact/hooks'
@@ -154,14 +157,14 @@ export class ProjectHold {
 /** PROJECT's hold, shared by the row's key and the pads it takes. */
 export const ProjectHoldContext = createContext<ProjectHold | null>(null)
 
-/** The function keys over the pads; none when none has anything to do. */
-export function FunctionRow(props: { class?: string }): JSX.Element | null {
+/** The function keys over the pads ([column]: left of them); none when none has anything to do. */
+export function FunctionRow(props: { class?: string; column?: boolean }): JSX.Element | null {
   const tempo = useContext(TempoContext)
   const keys = useContext(FunctionKeysContext)
   const hold = useContext(ProjectHoldContext)
   if (tempo === null && (keys === null || (keys.sound === null && keys.project === null && keys.fx === null))) return null
   return (
-    <div class={`fn-row${props.class ? ` ${props.class}` : ''}`}>
+    <div class={`fn-row${props.column ? ' fn-row--column' : ''}${props.class ? ` ${props.class}` : ''}`}>
       {keys?.sound && <SoundKey s={keys.sound} />}
       {keys?.project && hold && <ProjectKey p={keys.project} hold={hold} />}
       {tempo && <TempoKey t={tempo} />}

@@ -55,17 +55,22 @@ export interface TakesUi {
  * The display's TAKE badge, only while a take is armed or recorded: a dot,
  * blinking while armed, and "TAKE 0:12". A tap stops the take (or the arm).
  */
-export function TakeBadge(props: { take: TakeUi | null | undefined; still?: boolean }): JSX.Element | null {
+export function TakeBadge(props: { take: TakeUi | null | undefined; still?: boolean; word?: boolean }): JSX.Element | null {
   const take = props.take
   if (!take || take.state.kind === 'idle') return null
   const s = take.state
+  // Where the line is short the word gives way: the time alone while it records, the dot alone while armed.
+  const word = props.word !== false
+  const label = s.kind === 'recording' ? (word ? MirrorText.takeBadge(s.seconds) : MirrorText.takeLength(s.seconds)) : word ? MirrorText.TAKE : null
   const cls = ['take-badge', s.kind === 'armed' && !props.still ? 'is-armed' : ''].filter(Boolean).join(' ')
   return (
     <button type="button" class={cls} aria-label={MirrorText.takeDescription(s)} onClick={take.onTake}>
       <span class="take-badge__dot" aria-hidden="true" />
-      <span class="take-badge__label" aria-hidden="true">
-        {(s.kind === 'recording' ? MirrorText.takeBadge(s.seconds) : MirrorText.TAKE).toUpperCase()}
-      </span>
+      {label !== null && (
+        <span class="take-badge__label" aria-hidden="true">
+          {label.toUpperCase()}
+        </span>
+      )}
     </button>
   )
 }

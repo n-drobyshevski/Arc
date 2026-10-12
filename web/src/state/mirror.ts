@@ -72,6 +72,8 @@ export interface MirrorHost {
   live: LiveSounds
   /** "5 Oct, 14:02" for the offline line. */
   fmtDateTime(ms: number): string
+  /** "5 Oct", the day alone, for the offline line's short form. */
+  fmtMonthDay(ms: number): string
   /** The EP-133 started ([playing]) or stopped (MIDI Start/Continue, Stop): TAKE follows it. */
   transport?(playing: boolean): void
   /** Every MIDI event Live hears from the EP-133 (its clock, for TEMPO). */
@@ -356,9 +358,10 @@ export class MirrorController {
     void host.live.preloadPads(m)
     // Every factory project's line is FACTORY (refreshOffline goes by it).
     const offline = fromRead && lastRead !== null ? MirrorText.lastSeen(host.fmtDateTime(lastRead.savedAt)) : MirrorText.FACTORY
+    const offlineShort = fromRead && lastRead !== null ? MirrorText.seen(host.fmtMonthDay(lastRead.savedAt)) : null
     host.store.update((st) => ({
       ...st,
-      mirror: { state: m.snapshot(host.perfNow()), loading: false, error: null, offline, offlineSounds, offlineProjects: views },
+      mirror: { state: m.snapshot(host.perfNow()), loading: false, error: null, offline, offlineShort, offlineSounds, offlineProjects: views },
     }))
   }
 

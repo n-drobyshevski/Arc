@@ -5,7 +5,6 @@
 .step-glyph span { width: 4px; height: 10px; border-radius: 1px; background: var(--display-ink); }
 .step-glyph span.is-on { background: var(--signal); }
 .transport-key--step { gap: 6px; }
-.step-corrected { cursor: default; color: var(--signal); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .step-panel {
   display: flex;

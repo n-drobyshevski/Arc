@@ -1,6 +1,6 @@
 // Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/LiveStep.kt (LiveStep, PadStep's helpers,
 // StepHeader, StepDeck, StepStrip, StepKey, StepKnobs, BarPageKeys, NudgeLatch, CorrectLatch) and
-// PatternLine.kt's StepChip and CorrectChip
+// PatternLine.kt's StepChip (a cell of the scene's key) and CorrectChip
 //
 // STEP on Live (an addition, after the EP-133's own step sequencing: − / +
 // while stopped, RECORD + pad, SHIFT + KNOB X / Y, SHIFT + pad then − / +,
@@ -14,12 +14,13 @@
 //
 // Web deltas:
 // - The panel takes the function keys' place (Kotlin's SLOT hosting, with
-//   its own header) wherever Live shows them, and the column of tools on a
-//   phone on its side; there is no morph of the line into it. Not in the
-//   desk's Device view yet.
+//   its own header) wherever Live shows them, and a column left of KEYS on a
+//   phone on its side, unrolling there as it mounts rather than the line
+//   morphing into it (MirrorScreen.css, panelMotion.ts's times); Escape closes
+//   it. Not in the desk's Device view yet.
 // - VEL and LEN are sliders, back to their default on a double click; a
 //   turn ends (one UNDO step) with the slider's change event.
-// - The STEP chip has its word on every line (no measuring of what fits).
+// - CORRECT is a key of one cell (PatternLine.tsx's lineFit measures it as one).
 
 import { createContext, type JSX } from 'preact'
 import { useComputed } from '@preact/signals'
@@ -134,6 +135,26 @@ export function useStepNoteMark(note: number, pad: PhysicalPad | null): '' | 'li
   }).value
 }
 
+/** The piano's marks while the STEP panel is open on the KEYS sound's group ([pad]): its notes on the cursor's step, and the one picked; null otherwise. */
+export function useStepPiano(pad: PhysicalPad | null): PianoStep | null {
+  const s = useStep()
+  const at = useRef(pad)
+  at.current = pad
+  return useComputed(() => {
+    if (s === null) return null
+    const ui = s.ui
+    const p = at.current
+    if (!ui.open || p === null || ui.group !== p.group) return null
+    return { lit: stepLitNotes(ui, p), picked: stepPickedNote(ui, p) }
+  }).value
+}
+
+/** The piano's STEP marks (PianoKeyboard's [step]): the notes on the cursor's step outlined, the one picked ringed. */
+export interface PianoStep {
+  readonly lit: ReadonlySet<number>
+  readonly picked: number | null
+}
+
 /** How many steps the strip shows: one bar of them at [interval]. */
 export function stripSteps(interval: Timing): number {
   return Math.max(1, Math.trunc(Seq.TICKS_PER_BAR / timingTicks(interval)))
@@ -172,34 +193,31 @@ function StepGlyph(): JSX.Element {
 }
 
 /**
- * The STEP chip and, while the pattern plays with CORRECT on, CORRECT's (the
- * count corrected beside it; a tap turns it off). STEP shows while the
- * pattern is stopped and ERASE is off.
+ * STEP's cell on the stopped line (in one key with the scene's,
+ * PatternLine.tsx's SceneStepKeys): its word on a wide line ([word]), else
+ * its glyph; a tap opens the STEP panel in the function keys' place.
  */
-export function StepKeys(props: { phase: string; erase: boolean; compact?: boolean }): JSX.Element | null {
+export function StepCell(props: { word: boolean }): JSX.Element | null {
   const s = useStep()
   if (s === null) return null
-  const ui = s.ui
-  if (props.phase === 'PLAYING' && ui.correct) {
-    return (
-      <div class={`transport-keys${props.compact ? ' transport-keys--compact' : ''} is-signal`}>
-        <button type="button" class="transport-key transport-key--erase is-on" aria-pressed="true" aria-description={MirrorText.CORRECT_NOTE} onClick={() => s.onCorrect(false)}>
-          {MirrorText.CORRECT.toUpperCase()}
-        </button>
-        {ui.status !== null && (
-          <span class="transport-key step-corrected" role="status">
-            {ui.status}
-          </span>
-        )}
-      </div>
-    )
-  }
-  if (props.phase !== 'STOPPED' || props.erase || ui.open) return null
   return (
-    <div class={`transport-keys${props.compact ? ' transport-keys--compact' : ''}`}>
-      <button type="button" class="transport-key transport-key--step" aria-label={MirrorText.STEP_NAME} onClick={() => s.onOpen()}>
-        <StepGlyph />
-        {!props.compact && <span class="transport-key__word" aria-hidden="true">{MirrorText.STEP.toUpperCase()}</span>}
+    <button type="button" class="transport-key transport-key--step" aria-label={MirrorText.STEP_NAME} onClick={() => s.onOpen()}>
+      {props.word ? <span class="transport-key__word" aria-hidden="true">{MirrorText.STEP.toUpperCase()}</span> : <StepGlyph />}
+    </button>
+  )
+}
+
+/**
+ * CORRECT's key while the pattern plays with it on (Kotlin CorrectChip): lit
+ * signal, a tap turns it off. The count corrected is in the pattern's words.
+ */
+export function CorrectKey(props: { compact?: boolean }): JSX.Element | null {
+  const s = useStep()
+  if (s === null) return null
+  return (
+    <div class={`transport-keys${props.compact ? ' transport-keys--compact' : ''} is-signal`}>
+      <button type="button" class="transport-key transport-key--erase is-on" aria-pressed="true" aria-description={MirrorText.CORRECT_NOTE} onClick={() => s.onCorrect(false)}>
+        {MirrorText.CORRECT.toUpperCase()}
       </button>
     </div>
   )

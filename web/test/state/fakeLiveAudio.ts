@@ -1,11 +1,12 @@
 // A LiveAudioDeps that records what the controller asks of Live's output (state tests).
 import { signal, type Signal } from '@preact/signals'
 import { WebLatencyHint } from '../../src/core/text/latencyText'
-import type { LiveAudioDeps, LiveEngineInfo, LivePress, LiveSeqPlan, LiveTimeline } from '../../src/state/deps'
+import type { ArpStep, LiveArpPlan, LiveAudioDeps, LiveEngineInfo, LivePress, LiveSeqPlan, LiveTimeline, MicOpened } from '../../src/state/deps'
 import { transportClock } from '../../src/core/features/sequencer'
 import type { Beat } from '../../src/core/features/tempo'
 import type { RecState } from '../../src/core/features/takeRecorder'
 import type { RecordedTake } from '../../src/platform/audio/liveAudio'
+import type { TapPhase, TapTake } from '../../src/platform/audio/sampleTap'
 
 export interface FakeLiveAudio extends LiveAudioDeps {
   readonly loaded: Map<string, { pcm: Int16Array; channels: number; sampleRate: number }>
@@ -44,12 +45,28 @@ export interface FakeLiveAudio extends LiveAudioDeps {
   runAt(zeroMs: number, bpm?: number): void
   /** Tells a pad the patterns play has no sound. */
   missing(pad: number): void
+  /** The Bluetooth delay made up for (ms); 0 unless a test sets it. */
+  delayMs: number
+  /** The arp's plans, in order (null: it stopped). */
+  readonly arps: (LiveArpPlan | null)[]
+  /** A step the arp played on the pattern's clock, as the output tells it. */
+  arpStep(step: ArpStep): void
   /** TEMPO's click calls in order: "click:<on>:<bpm>:<grid|free>". */
   readonly clickLog: string[]
   /** A click heard, as the output tells it. */
   beat(b: Beat): void
   /** FX bus commands in order: [what, index, x, y]. */
   readonly controls: [number, number, number, number][]
+  // SAMPLE
+  /** SAMPLE calls in order: "open:<stereo>:<gain>:<threshold>", "set:…", "close", "arm:<pad>:<latched>:<max>", "stop", "cancel". */
+  readonly sampleLog: string[]
+  readonly samplePhase: Signal<TapPhase>
+  readonly sampleLevel: Signal<{ readonly level: number; readonly clip: boolean }>
+  /** A take the tap made, as the output tells it (its phase back to ready first). */
+  sampleTake(t: TapTake): void
+  /** Whether it offers a mic (off by default), and what opening it answers. */
+  micSupported: boolean
+  micAnswer: MicOpened
 }
 
 /** [withLate]: with a `late` signal of its own, as the real LiveAudio (the controller then follows it). */
@@ -61,7 +78,9 @@ export function fakeLiveAudio(withLate = false): FakeLiveAudio {
   const rec = signal<RecState>({ kind: 'idle' })
   const timeline = signal<LiveTimeline | null>(null)
   const missingL = new Set<(pad: number) => void>()
+  const arpStepL = new Set<(step: ArpStep) => void>()
   const beatL = new Set<(b: Beat) => void>()
+  const sampleL = new Set<(t: TapTake) => void>()
   const set = (f: (s: Set<string>) => void): void => {
     const next = new Set(voices.peek())
     f(next)
@@ -192,6 +211,18 @@ export function fakeLiveAudio(withLate = false): FakeLiveAudio {
     missing(pad) {
       for (const l of [...missingL]) l(pad)
     },
+    delayMs: 0,
+    arps: [],
+    arpPlan(plan) {
+      a.arps.push(plan)
+    },
+    onArpStep(l) {
+      arpStepL.add(l)
+      return () => arpStepL.delete(l)
+    },
+    arpStep(step) {
+      for (const l of [...arpStepL]) l(step)
+    },
     clickLog: [],
     setClick(on, bpm, grid) {
       a.clickLog.push(`click:${on}:${bpm}:${grid === null ? 'free' : 'grid'}`)
@@ -203,6 +234,54 @@ export function fakeLiveAudio(withLate = false): FakeLiveAudio {
     },
     beat(b) {
       for (const l of [...beatL]) l(b)
+    },
+    sampleLog: [],
+    samplePhase: signal<TapPhase>({ kind: 'ready' }),
+    sampleLevel: signal({ level: 0, clip: false }),
+    sampleRate: 48000,
+    sampleOpen(stereo, gain, threshold, input) {
+      a.sampleLog.push(`open:${stereo}:${gain}:${threshold}${input === true ? ':mic' : ''}`)
+      return a.available
+    },
+    micSupported: false,
+    micAnswer: { ok: true, channels: 1 },
+    async sampleMic(stereo) {
+      a.sampleLog.push(`mic:${stereo}`)
+      return a.micAnswer
+    },
+    sampleSet(gain, threshold) {
+      a.sampleLog.push(`set:${gain}:${threshold}`)
+    },
+    sampleClose() {
+      a.sampleLog.push('close')
+      a.samplePhase.value = { kind: 'ready' }
+    },
+    sampleArm(pad, _at, latched, max) {
+      a.sampleLog.push(`arm:${pad}:${latched}:${max}`)
+      a.samplePhase.value = { kind: 'waiting', pad, latched }
+    },
+    sampleSchedule(pad, start, length) {
+      a.sampleLog.push(`schedule:${pad}:${start}:${length}`)
+      a.samplePhase.value = { kind: 'waiting', pad, latched: true }
+    },
+    sampleScheduleAt(pad, atMs, length) {
+      a.sampleLog.push(`scheduleAt:${pad}:${Math.round(atMs)}:${length}`)
+      a.samplePhase.value = { kind: 'waiting', pad, latched: true }
+    },
+    sampleStop() {
+      a.sampleLog.push('stop')
+    },
+    sampleCancel() {
+      a.sampleLog.push('cancel')
+      a.samplePhase.value = { kind: 'ready' }
+    },
+    onSampleTake(l) {
+      sampleL.add(l)
+      return () => sampleL.delete(l)
+    },
+    sampleTake(t) {
+      a.samplePhase.value = { kind: 'ready' }
+      for (const l of [...sampleL]) l(t)
     },
     latencyHint: signal<WebLatencyHint>(WebLatencyHint.ZERO),
     engine: signal<LiveEngineInfo | null>(null),

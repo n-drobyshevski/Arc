@@ -13,6 +13,7 @@
 //   tick heard is the tick stamped.
 // - Times are performance.now() milliseconds where Kotlin's are System.nanoTime.
 
+import { OutputDelay } from '../core/features/outputDelay'
 import { Pattern, ProjectPatterns, Seq, Timing, TimingSettings } from '../core/features/pattern'
 import type { PatternRecorder } from '../core/features/patternRecorder'
 import { Tempo } from '../core/features/tempo'
@@ -151,6 +152,18 @@ export function pressTickAt(ms: number, pressAt: number, bpm: number): number {
  */
 export function pressSkip(skipPass: number | null, first: boolean, early: boolean): number | null {
   return skipPass ?? (first || early ? 0 : null)
+}
+
+/**
+ * The global tick a live press is recorded at: the tick the player [heard]
+ * at it (some of the output's delay is left out of the clock, OutputDelay)
+ * rather than the one the [stamped] clock has; before the run is heard,
+ * OutputDelay.placed says where ([countedIn]: the run began with a
+ * count-in). The [first] note of a run a press started is its tick 0. Without
+ * a delay the two ticks are the same, and so is the result.
+ */
+export function pressPlace(first: boolean, stamped: number, heard: number, countedIn: boolean): number {
+  return first ? stamped : OutputDelay.placed(stamped, heard, countedIn)
 }
 
 /** The count-in's beat heard at global [tick], 1..4 through the bar before tick 0; null before it and from tick 0. */

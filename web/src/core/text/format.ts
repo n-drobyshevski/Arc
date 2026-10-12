@@ -53,6 +53,12 @@ export const DAY_PATTERN: Readonly<Intl.DateTimeFormatOptions> = Object.freeze({
   year: 'numeric',
 })
 
+/** Month and day: "Oct 4" in en-US (reference fmtMonthDay, the offline line's short form). */
+export const MONTH_DAY_PATTERN: Readonly<Intl.DateTimeFormatOptions> = Object.freeze({
+  month: 'short',
+  day: 'numeric',
+})
+
 /**
  * A date in the given (default: the browser's) locale and time zone.
  * Narrow and no-break spaces become plain spaces, so titles and file names
@@ -81,4 +87,5 @@ export const Format = {
   date,
   DATE_TIME_PATTERN,
   DAY_PATTERN,
+  MONTH_DAY_PATTERN,
 } as const

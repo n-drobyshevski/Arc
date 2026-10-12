@@ -1,5 +1,6 @@
 // Port of app/src/main/kotlin/dev/arc/ep133/ui/screens/PatternLine.kt
-// (TransportChips, RecordChip, PlayChip, PatternWords, patternTrack, patternFrame)
+// (PatternLine, PatternRow's fit, TransportChips, RecordChip, PlayChip,
+// SceneStepKeys, EditChips, PatternWords, patternTrack, patternFrame)
 //
 // The pattern on Live's display line: ● RECORD and ▶ PLAY as one segmented
 // key, the words while it is on (armed: what PLAY will do; counting in: the
@@ -12,17 +13,21 @@
 //   a right-click opens it too. Enter or Space is a tap.
 // - The frame time is requestAnimationFrame's; the counter re-renders once a
 //   beat, the hairline is moved straight on its element each frame.
-// - No scene keys on the line yet; no measuring of what fits (the counter
-//   keeps its room, RECORD's word only where [word]). STEP and CORRECT's
-//   chips are StepPanel.tsx's StepKeys.
+// - What fits is measured on the line's content width (lineFit.ts), read
+//   from the line PatternLine sits in with a ResizeObserver; unlaid out (no
+//   width), everything shows. STEP's and CORRECT's cells are StepPanel.tsx's
+//   StepCell and CorrectKey, the scene's ScenePanel.tsx's SceneCell.
 import { createContext, type ButtonHTMLAttributes, type ComponentChildren, type JSX } from 'preact'
-import { useContext, useEffect, useRef, useState } from 'preact/hooks'
+import { useContext, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import type { PatternPosition } from '../../core/features/sequencer'
 import { BEATS_PER_BAR } from '../../core/features/tempo'
 import type { TransportState } from '../../core/features/transport'
 import { MirrorText } from '../../core/text/mirrorText'
 import type { PatternUiState } from '../../state/patternPlan'
-import { StepKeys } from './StepPanel'
+import { canvasMeasure, lineFit, stepFit, stepRowFit, WIDE_LINE, type LineFit, type LineState, type LineWords, type Measure, type StepFit, type TakeWords } from './lineFit'
+import { SceneCell, sceneReadout, useScene, worthSaying } from './ScenePanel'
+import { CorrectKey, StepCell, useStep } from './StepPanel'
+import { TakeBadge, type TakeUi } from './Takes'
 import './PatternLine.css'
 
 /** RECORD held this long while stopped or armed opens the pattern sheet. */
@@ -289,7 +294,7 @@ export function TransportKeys(props: { t: TransportUi; compact?: boolean; still?
  * grid too while recording). Read as one polite live region that changes
  * with the transport only, not on every beat.
  */
-export function PatternWords(props: { t: TransportUi; compact?: boolean; still?: boolean }): JSX.Element {
+export function PatternWords(props: { t: TransportUi; compact?: boolean; still?: boolean; corrected?: string | null }): JSX.Element {
   const { t } = props
   const ui = t.ui
   const beat = usePatternBeat(t, props.still === true)
@@ -307,6 +312,11 @@ export function PatternWords(props: { t: TransportUi; compact?: boolean; still?:
       )
       break
     case 'PLAYING': {
+      // CORRECT on: what it has corrected, in the counter's place.
+      if (props.corrected) {
+        words = <span class="pattern-words__note pattern-words__corrected">{props.corrected.toUpperCase()}</span>
+        break
+      }
       const b = beat ?? { bar: 1, beat: 1, bars: ui.bars[ui.focusGroup] ?? 1 }
       words = (
         <span class="pattern-words__num">
@@ -321,7 +331,7 @@ export function PatternWords(props: { t: TransportUi; compact?: boolean; still?:
   return (
     <div class="pattern-words">
       <span class="sr-only" aria-live="polite">
-        {MirrorText.transportAnnouncement(stateOf(ui)) + (ui.erase ? ', ' + MirrorText.ERASE_NOTE : '')}
+        {MirrorText.transportAnnouncement(stateOf(ui)) + (ui.erase ? ', ' + MirrorText.ERASE_NOTE : '') + (props.corrected ? ', ' + props.corrected : '')}
       </span>
       <span class="pattern-words__shown" aria-hidden="true">
         {words}
@@ -411,23 +421,168 @@ export function EditKeys(props: { t: TransportUi; compact?: boolean }): JSX.Elem
 export const TransportContext = createContext<TransportUi | null>(null)
 
 /**
- * The pattern's part of a display line (Kotlin PatternLine): its keys first,
- * its words in place of the line's own ([children]) while it has some, and
- * its frame over the line, which is position: relative. Without a pattern,
- * the line's own words alone.
+ * The scene's cell and STEP's as one segmented key, each where it shows
+ * ([scene]: its readout or its label; [step]; with one the key is that cell,
+ * with neither nothing): the scene's brighter, so the key's border is the
+ * display's dim with it, the fainter border without.
  */
-export function PatternLine(props: { compact?: boolean; still?: boolean; word?: boolean; children?: ComponentChildren }): JSX.Element {
+function SceneStepKeys(props: { scene: boolean; readout: readonly string[] | null; step: StepFit; compact?: boolean }): JSX.Element | null {
+  const step = props.step !== 'NONE'
+  if (!props.scene && !step) return null
+  return (
+    <div class={`transport-keys${props.compact ? ' transport-keys--compact' : ''}${props.scene ? ' is-scene' : ''}`}>
+      {props.scene && <SceneCell readout={props.readout} />}
+      {props.scene && step && <span class="transport-keys__divide" aria-hidden="true" />}
+      {step && <StepCell word={props.step === 'WORD'} />}
+    </div>
+  )
+}
+
+/** The words a line's measure needs. */
+const LINE_WORDS: LineWords = {
+  record: MirrorText.RECORD.toUpperCase(),
+  erase: MirrorText.ERASE.toUpperCase(),
+  step: MirrorText.STEP.toUpperCase(),
+  correct: MirrorText.CORRECT.toUpperCase(),
+  take: MirrorText.TAKE.toUpperCase(),
+}
+
+/** The pattern as the measure needs it: its words at their widest (the counter for its length, the count-in's). */
+function lineState(ui: PatternUiState): LineState {
+  const bars = ui.bars[ui.focusGroup] ?? 1
+  const words =
+    ui.phase === 'PLAYING'
+      ? ui.recording
+        ? MirrorText.patternRecording(bars, BEATS_PER_BAR, bars, ui.timing)
+        : MirrorText.patternPosition(bars, BEATS_PER_BAR, bars)
+      : ui.phase === 'COUNT_IN'
+        ? MirrorText.countInOf(BEATS_PER_BAR)
+        : ''
+  return { phase: ui.phase, erase: ui.erase, hasNotes: ui.hasNotes.some((h) => h), canUndo: ui.canUndo, words }
+}
+
+/** TAKE's badge's words while one is armed or records, for the measure. */
+function takeWords(take: TakeUi | null | undefined): TakeWords | null {
+  if (!take || take.state.kind === 'idle') return null
+  const s = take.state
+  return s.kind === 'recording'
+    ? { word: MirrorText.takeBadge(s.seconds).toUpperCase(), short: MirrorText.takeLength(s.seconds).toUpperCase() }
+    : { word: MirrorText.TAKE.toUpperCase(), short: '' }
+}
+
+const measures = new Map<string, Measure>()
+
+/**
+ * The content width of the line [probe] sits in ([self]: of [probe] itself),
+ * and a [Measure] in its font, kept up to date as it resizes; null until it
+ * is laid out (and in a DOM with no layout).
+ */
+export function useLineMeasure(probe: { current: HTMLElement | null }, self = false): { width: number | null; measure: Measure | null } {
+  const [width, setWidth] = useState<number | null>(null)
+  const [measure, setMeasure] = useState<Measure | null>(null)
+  useLayoutEffect(() => {
+    const line = self ? probe.current : probe.current?.parentElement
+    if (!line) return
+    const read = (): void => {
+      const cs = getComputedStyle(line)
+      const w = line.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0)
+      setWidth(w > 0 ? Math.floor(w) : null)
+    }
+    const family = getComputedStyle(line).fontFamily || 'sans-serif'
+    let m = measures.get(family)
+    if (m === undefined) {
+      m = canvasMeasure(family)
+      measures.set(family, m)
+    }
+    const kept = m
+    setMeasure(() => kept)
+    read()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(read)
+    ro.observe(line)
+    return () => ro.disconnect()
+  }, [])
+  return { width, measure }
+}
+
+/**
+ * The pattern's part of a display line (Kotlin PatternLine): its keys first
+ * (RECORD and PLAY; the scene and STEP; ERASE and ↶; CORRECT), its words in
+ * place of the line's own ([children]) while it has some, TAKE's badge
+ * ([take]) last, and its frame over the line, which is position: relative.
+ * What shows is measured on the line, so the counter is never cut. [row]: the
+ * all-groups display's pattern row (Kotlin PatternRow): no scene, no words of
+ * its own while stopped. Without a pattern, the line's own words alone.
+ */
+export function PatternLine(props: { compact?: boolean; still?: boolean; row?: boolean; take?: TakeUi | null; children?: ComponentChildren }): JSX.Element {
   const t = useContext(TransportContext)
-  if (t === null) return <>{props.children}</>
+  const scene = useScene()
+  const step = useStep()
+  const probe = useRef<HTMLSpanElement>(null)
+  const { width: measured, measure } = useLineMeasure(probe)
+  const compact = props.compact === true
+  const probeSpan = <span ref={probe} class="pattern-line__probe" aria-hidden="true" />
+  const badge = (word: boolean): JSX.Element | null => (props.take !== undefined ? <TakeBadge take={props.take} still={props.still} word={word} /> : null)
+  if (t === null) {
+    return (
+      <>
+        {props.children}
+        {badge(true)}
+        {probeSpan}
+      </>
+    )
+  }
+  const ui = t.ui
+  // Unlaid out, everything shows.
+  const width = measured === null || measure === null ? Number.POSITIVE_INFINITY : measured
+  const m: Measure = measure ?? (() => 0)
+  const s = lineState(ui)
+  const words = hasWords(ui)
+  // CORRECT lit while the pattern plays with it on; STEP while it is stopped (not erasing), where the panel isn't open.
+  const correct = step !== null && step.ui.correct && ui.phase === 'PLAYING'
+  const stepping = step !== null && !step.ui.open && ui.phase === 'STOPPED' && !ui.erase
+  // The scene, where its panel isn't open: its chip while stopped (not erasing) and while playing with nothing worth
+  // saying, its readout while playing with something (CORRECT keeps the line to itself). Not in the all-groups row.
+  const sceneShown = !props.row && scene !== null && !scene.ui.open
+  const playing = sceneShown && ui.phase === 'PLAYING' && !correct
+  const readout = playing && scene !== null && scene.running && worthSaying(scene.ui) ? sceneReadout(scene.ui) : null
+  const stopped = sceneShown && ui.phase === 'STOPPED' && !ui.erase
+  const chipWord = scene !== null && (stopped || (playing && readout === null)) ? scene.ui.label : null
+  const tw = takeWords(props.take)
+  const wide = !props.row && width >= WIDE_LINE
+  const fit: LineFit =
+    words || props.row
+      ? lineFit(s, LINE_WORDS, m, compact, width, { take: props.row ? null : tw, correct, scene: chipWord, readout })
+      : { edit: true, recordWord: wide && !compact, takeWord: true, scene: false }
+  const recordWord = fit.recordWord
+  // While it plays the chip comes last: only where everything else fits with it.
+  const sceneCell = readout !== null || (chipWord !== null && (stopped || fit.scene))
+  const edit = fit.edit && ui.phase !== 'COUNT_IN' && ui.phase !== 'ARMED'
+  const stepShown: StepFit = !stepping
+    ? 'NONE'
+    : props.row
+      ? stepRowFit(s, LINE_WORDS, m, width, { ...fit, recordWord }, edit)
+      : stepFit(s, LINE_WORDS, m, compact, width, { take: tw, scene: chipWord })
   return (
     <>
-      <TransportKeys t={t} compact={props.compact} still={props.still} word={props.word} />
-      {/* STEP while stopped (the panel opens in the function keys' place); CORRECT while it plays with it on. */}
-      <StepKeys phase={t.ui.phase} erase={t.ui.erase} compact={props.compact} />
-      {/* ERASE and ↶: while it plays or erases, and on a wide line ([word]) while stopped too; never armed or counting in. */}
-      {(t.ui.phase === 'PLAYING' || t.ui.phase === 'STOPPED') && (hasWords(t.ui) || props.word) && <EditKeys t={t} compact={props.compact} />}
-      {hasWords(t.ui) ? <PatternWords t={t} compact={props.compact} still={props.still} /> : props.children}
+      <TransportKeys t={t} compact={compact} still={props.still} word={recordWord} />
+      <SceneStepKeys scene={sceneCell} readout={readout} step={stepShown} compact={compact} />
+      {words || props.row ? (
+        <>
+          {edit && <EditKeys t={t} compact={compact} />}
+          {correct && <CorrectKey compact={compact} />}
+          {words ? <PatternWords t={t} compact={compact} still={props.still} corrected={correct ? step?.ui.status : null} /> : <span class="pattern-words" />}
+        </>
+      ) : (
+        <>
+          {/* On a wide line ERASE and ↶ fit beside the line's own words too; else only while the pattern runs. */}
+          {wide && <EditKeys t={t} compact={compact} />}
+          {props.children}
+        </>
+      )}
+      {badge(fit.takeWord)}
       <PatternFrame t={t} still={props.still} />
+      {probeSpan}
     </>
   )
 }

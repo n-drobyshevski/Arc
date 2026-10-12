@@ -50,12 +50,20 @@
 //   the web's stand-in for Android's audio engine choice (LatencyText). Play
 //   actions take the press's event timeStamp ([at]) for the latency note.
 
-import { computed, signal, type ReadonlySignal, type Signal } from '@preact/signals'
+import { computed, effect, signal, type ReadonlySignal, type Signal } from '@preact/signals'
 import { Keys, MAX_OCTAVE, MIN_OCTAVE, type NoteNames, type Scale } from '../core/features/keys'
+import { arpNote } from '../core/features/arp'
+import type { CardProblem } from '../core/features/beatCard'
+import { ClaudeText } from '../core/text/claudeText'
+
+// An arp voice's key split at ':': "arp", group, offset, and semitones or "n" (a pad hit).
+function arpVoiceKey(p: readonly string[]): boolean {
+  return p.length === 4 && p[0] === 'arp' && (p[3] === 'n' || Number.isInteger(Number(p[3])))
+}
 import { choiceOf as pianoChoiceOf, type KeysView } from '../core/features/piano'
 import { padKey, type PhysicalPad } from '../core/features/padNotes'
 import type { PadTarget } from '../core/features/liveMirror'
-import { OfflinePads, SoundSource } from '../core/features/offlinePads'
+import { OfflinePads, SoundSource, type OfflinePad } from '../core/features/offlinePads'
 import { backupDevice, restorePak } from '../core/backup/backup'
 import { describePak, openPak, type PakDescription, type PakSound } from '../core/backup/pak'
 import { project as exportProject, projectFileName, soundFileName, soundWav } from '../core/backup/pakExport'
@@ -66,7 +74,7 @@ import { search as searchLibrary, type NameEntry } from '../core/features/librar
 import type { PadOrder } from '../core/features/padPush'
 import { compare as comparePaks } from '../core/features/pakCompare'
 import { frames, seconds, type TrimRange } from '../core/features/sampleTrim'
-import { nameFor, nextFree, upload, UploadItem } from '../core/features/sampleUpload'
+import { nameFor, nextFree, upload, uploadToPad, UploadItem } from '../core/features/sampleUpload'
 import { FxControl } from '../core/formats/fx/fxBus'
 import type { VoiceShape } from '../core/formats/voiceMixer'
 import type { PadSettings } from '../core/features/padSettings'
@@ -82,7 +90,7 @@ import type { TrafficLog } from '../core/protocol/trafficLog'
 import { FeatureText } from '../core/text/featureText'
 import type { WebLatencyHint } from '../core/text/latencyText'
 import { MirrorText } from '../core/text/mirrorText'
-import { DATE_TIME_PATTERN, DAY_PATTERN, date as formatDate } from '../core/text/format'
+import { DATE_TIME_PATTERN, DAY_PATTERN, MONTH_DAY_PATTERN, date as formatDate } from '../core/text/format'
 import { BackupDevice, fileNameFor, importTitle, toPrune, type BackupRecord, type RestoreSelection } from '../core/text/libraryRules'
 import { SettingsText, type ThemeChoice } from '../core/text/settingsText'
 import { Strings } from '../core/text/strings'
@@ -104,6 +112,8 @@ import { voiceShape } from './padShape'
 import { stepWord } from './stepPlan'
 import { PadEditDesk } from './padEdit'
 import { PatternDesk } from './pattern'
+import { SampleDesk } from './sample'
+import { physicalPadOf } from './samplePlan'
 import { patternBpm } from './patternPlan'
 import { MirrorController } from './mirror'
 import { PreviewCache, type DecodedSound } from './previewCache'
@@ -175,6 +185,8 @@ export class ArcController {
   readonly fx: FxKeeper
   /** EDIT: the pads' sound settings as arc knows them, and the pad sheet's. */
   readonly padEdit: PadEditDesk
+  /** SAMPLE: recording into a pad (Live's mix). */
+  readonly sample: SampleDesk
   // Presses in ERASE on the scrolling page that may still turn into a scroll: when each went down, by pad key.
   private readonly eraseUnsure = new Map<number, number>()
   // The pads and KEYS notes whose press went to the STEP panel or CORRECT (pad key, or 1000 + MIDI note),
@@ -191,6 +203,10 @@ export class ArcController {
    * From LiveAudioDeps.late, or, without it, the slow output it reports.
    */
   readonly liveLate: ReadonlySignal<number | null>
+  /** The Bluetooth delay in ms while it is made up for, else null: the Bluetooth key's words (LiveAudio.madeUpFor). */
+  readonly delayMadeUpFor: ReadonlySignal<number | null>
+  /** The output's latency (ms) while it is taken for Bluetooth, else null: Settings' note on what is made up. */
+  readonly liveBluetooth: ReadonlySignal<number | null>
   private readonly slowMs = signal<number | null>(null)
   /** The debug screen's latency test: each engine's press-to-sound times this session. */
   readonly liveLatency: ReadonlySignal<LiveLatency>
@@ -252,7 +268,9 @@ export class ArcController {
       const out = new Set<number>()
       for (const k of this.liveVoices.value) {
         const p = k.split(':')
-        if (p.length !== 3 || p[0] !== 'live') continue
+        // A pad's own voice; a pattern's KEYS note, and the arp's, ring the pad it plays on (LiveVoices.pads).
+        const pad = (p.length === 3 && p[0] === 'live') || (p.length === 4 && p[0] === 'seq') || arpVoiceKey(p)
+        if (!pad) continue
         const g = Number(p[1])
         const o = Number(p[2])
         if (Number.isInteger(g) && Number.isInteger(o)) out.add(padKey({ group: g, offset: o }))
@@ -261,15 +279,26 @@ export class ArcController {
     })
     this.playingNotes = computed(() => {
       const out = new Set<number>()
+      const keysPad = this.store.state.value.keysPad
       for (const k of this.liveVoices.value) {
-        if (!k.startsWith('note:')) continue
-        const n = Number(k.slice(5))
-        if (Number.isInteger(n)) out.add(n)
+        if (k.startsWith('note:')) {
+          const n = Number(k.slice(5))
+          if (Number.isInteger(n)) out.add(n)
+          continue
+        }
+        // The note the arp sounds now on the KEYS sound lights its key (LiveVoices.arpNotes).
+        const p = k.split(':')
+        if (keysPad === null || !arpVoiceKey(p) || p[3] === 'n' || Number(p[1]) !== keysPad.group || Number(p[2]) !== keysPad.offset) continue
+        out.add(Keys.ROOT_NOTE + Number(p[3]))
       }
       return out
     })
     const late = deps.liveAudio.late
     this.liveLate = late ?? this.slowMs
+    this.delayMadeUpFor = deps.liveAudio.madeUpFor ?? signal(null)
+    this.liveBluetooth = deps.liveAudio.bluetooth ?? signal(null)
+    // Make up for Bluetooth delay: the setting, to Live's output.
+    this.cleanups.push(effect(() => deps.liveAudio.makeUpDelay?.(this.settings.value.makeUpDelay)))
     this.liveEngine = deps.liveAudio.engine ?? signal(null)
     this.liveLatencyHint = deps.liveAudio.latencyHint ?? null
     this.visible = deps.visibility.visible()
@@ -307,6 +336,8 @@ export class ArcController {
       toast,
       stepWord: (n) => stepWord(n, n.semitones === null ? this.mirrorName(n.pad) : null, this.deps.settings.settings.keysNames),
       shapeOf: (pad, keys) => this.shapeFor({ group: Math.floor(pad / 12), offset: pad % 12 }, keys),
+      noteNames: () => this.deps.settings.settings.keysNames,
+      padName: (pad) => this.mirrorName(pad),
     })
     this.padEdit = new PadEditDesk({
       store: this.store,
@@ -336,12 +367,54 @@ export class ArcController {
       toast,
       live: this.live,
       fmtDateTime: (ms) => this.fmtDateTime(ms),
-      deviceRead: () => void this.offerOfflinePads(),
+      fmtMonthDay: (ms) => this.fmtMonthDay(ms),
+      deviceRead: () => {
+        void this.offerOfflinePads()
+        void this.sample.shownAgain()
+      },
       transport: (playing) => (playing ? deps.liveAudio.transportStarted?.() : deps.liveAudio.transportStopped?.()),
       midi: (e) => this.pattern.midi(e),
       padsRead: (project, layout) => this.padEdit.padsRead(project, layout),
       padsOffline: () => void this.padEdit.padsOffline(),
       padAssigned: (t) => this.padEdit.forget(t),
+    })
+    this.sample = new SampleDesk({
+      deps,
+      live: this.live,
+      settings: () => this.settingsSignal.peek(),
+      changeSettings: (change) => this.changeSettings(change),
+      toast,
+      toastWith: (text, label, run) => this.toastWith(text, label, run),
+      editTarget: (pad, quiet) => this.editTarget(pad, quiet),
+      online: () => this.deviceReady && this.mirror.current !== null && this.mirror.offline === null,
+      free: () => (this.deviceReady ? (this.store.get().device?.storage.free ?? null) : null),
+      deviceSlots: () => this.store.get().browser.contents?.occupiedSlots ?? new Set(this.live.deviceSoundList().map((snd) => snd.slot)),
+      padHasSound: (pad) => this.padSoundName(pad) !== null,
+      playPad: (pad, hold, unsure, at) => void this.live.playPad(pad, hold, unsure, at),
+      releasePad: (pad) => this.live.releasePad(pad),
+      keepPad: (pad) => void this.live.keepPad(pad),
+      cutPad: (pad) => this.live.cutPad(pad),
+      makeRoom: () => {
+        // The panels share the function keys' place: SAMPLE's closes STEP's and SCENE's.
+        this.pattern.setStepOpen(false)
+        this.pattern.setSceneOpen(false)
+        this.closePadEdit()
+        this.pattern.setClick(false)
+        // PATTERN stops recording; PLAY goes on, for a take of what it plays.
+        this.pattern.recordOff()
+      },
+      localChanged: (pads) => {
+        const m = this.mirror.current
+        if (m === null) return
+        m.setLocal(pads)
+        this.mirror.localChanged()
+        this.pattern.refreshPlan()
+      },
+      forgetPadSettings: (t) => this.padEdit.forget(t),
+      upload: (name, wav, t, slot, onProgress) => this.uploadRecording(name, wav, t, slot, onProgress),
+      takesChanged: () => void this.loadTakes(),
+      patterns: this.pattern,
+      hasNotes: () => this.pattern.ui.peek().hasNotes.some(Boolean),
     })
   }
 
@@ -424,6 +497,9 @@ export class ArcController {
     this.cleanups.push(() => this.fx.dispose())
     if (audio.onTake) this.cleanups.push(audio.onTake((take, limit) => void this.takeDone(take, limit)))
     void this.loadTakes()
+    // SAMPLE: recordings left from before this start that no pad change names go to Takes.
+    this.cleanups.push(() => this.sample.dispose())
+    void this.sample.moveStrays(deps.now())
     this.cleanups.push(lib.subscribe(() => void this.reloadLibrary()))
     this.cleanups.push(
       deps.settings.subscribe((s) => {
@@ -550,6 +626,9 @@ export class ArcController {
     if (prev === next) return
     if (prev === 'live') {
       this.liveTab = false
+      // The beat card sheet goes with Live.
+      this.pattern.dismissBeat()
+      this._beatPasting.value = false
       this.closeMirror()
       this.stopPlayback()
       // closeMirror leaves [mirrorWanted] alone; settle it now, even when no state changed.
@@ -614,8 +693,10 @@ export class ArcController {
       void this.live.openAudio()
       return
     }
-    // The pattern and the click stop with the sound (Android's focus lost).
+    // SAMPLE closes (a take going on is kept), and the pattern, the arp and the click stop with the sound (Android's focus lost).
+    this.sample.exit()
     this.pattern.stop()
+    this.pattern.arpClear()
     this.pattern.setClick(false)
     // A punch-in lasts while it is held.
     this.fx.desk.punchAllUp()
@@ -635,6 +716,9 @@ export class ArcController {
   /** Live's output let go at once (the page goes away, or the controller is disposed). */
   private dropLiveAudio(): void {
     this.cancelAudioClose()
+    this.sample.exit()
+    // The arp's notes go with the output; it stays on.
+    this.pattern.arpClear()
     this.live.closeAudio()
     // Coming back (from the back-forward cache) opens it again.
     this.audioWanted = false
@@ -736,6 +820,11 @@ export class ArcController {
 
   fmtDateTime(ms: number): string {
     return this.fmtDate(ms)
+  }
+
+  /** The day alone, "Oct 5" (in the browser's order). */
+  fmtMonthDay(ms: number): string {
+    return formatDate(ms, MONTH_DAY_PATTERN)
   }
 
   async backup(): Promise<void> {
@@ -986,6 +1075,7 @@ export class ArcController {
 
   stopPlayback(): void {
     this.playToken++
+    this.pattern.arpClear()
     this.live.stopAll()
     this.deps.player.stop()
   }
@@ -1140,6 +1230,7 @@ export class ArcController {
 
   /** Closes it (Live left the screen); driven by [setLive] / [tabChanged]. */
   closeLiveAudio(): void {
+    this.pattern.arpClear()
     this.live.closeAudio()
   }
 
@@ -1154,6 +1245,12 @@ export class ArcController {
   playPad(pad: PhysicalPad, hold = true, unsure = false, at?: number): Promise<void> {
     const pressedAt = pressTime(at, this.deps.perfNow())
     const k = padKey(pad)
+    // SAMPLE takes the press: held, it records into the pad (a screen reader's click latches a take).
+    if (this.sample.open) {
+      if (hold) this.sample.padDown(pad, pressedAt, unsure)
+      else this.sample.latchTake(pad, pressedAt)
+      return Promise.resolve()
+    }
     // The order a press goes: STEP, ERASE, CORRECT, then play.
     if (this.pattern.stepping) {
       // Placed and sounded once it is a press, not a scroll ([keepPad]).
@@ -1179,6 +1276,9 @@ export class ArcController {
       }
       return Promise.resolve()
     }
+    // The PAD flow of SCENE's CLIP row waiting for a pad: the tap is its, neither played nor recorded
+    // (one a scroll may yet take, once kept: [keepPad]).
+    if (!this.pattern.erasing && this.pattern.scenePadTap(pad, padVoice(pad), hold && unsure)) return Promise.resolve()
     // ERASE takes the press: nothing sounds, the pad's notes go (a screen reader's click is a tap).
     if (this.pattern.erasing) {
       if (!hold) {
@@ -1189,6 +1289,13 @@ export class ArcController {
       } else {
         this.pattern.erasePadDown(pad, pressedAt)
       }
+      return Promise.resolve()
+    }
+    // The arp on (RPT): the press holds the pad for note repeat, not played or recorded itself.
+    // One a scroll may yet take becomes the KEYS sound, and starts RECORD armed, once kept ([keepPad]).
+    if (this.pattern.arpTakes(hold)) {
+      if (!unsure) this.live.selectKeysPad(pad)
+      this.pattern.arpPress(padVoice(pad), arpNote(pad, null), false, pressedAt, hold, unsure)
       return Promise.resolve()
     }
     const done = this.live.playPad(pad, hold, unsure, at)
@@ -1251,6 +1358,17 @@ export class ArcController {
 
   /** The unsure press on the pad was a press after all: it becomes the KEYS sound (and one not in memory loads). */
   keepPad(pad: PhysicalPad): Promise<void> {
+    if (this.sample.open) {
+      this.sample.padKept(pad)
+      return Promise.resolve()
+    }
+    // One the PAD flow was waiting for: its tap.
+    if (this.pattern.sceneTapKept(pad, padVoice(pad))) return Promise.resolve()
+    // One the arp holds: neither played nor recorded itself.
+    if (this.pattern.arpKeep(padVoice(pad))) {
+      this.live.selectKeysPad(pad)
+      return Promise.resolve()
+    }
     const k = padKey(pad)
     const u = this.pressUnsure.get(k)
     if (u !== undefined) {
@@ -1273,6 +1391,12 @@ export class ArcController {
 
   /** The finger left the pad: its sound fades out. [at]: the lift's event timeStamp, for the note's gate. */
   releasePad(pad: PhysicalPad, at?: number): void {
+    if (this.sample.open) return this.sample.padUp(pad, pressTime(at, this.deps.perfNow()))
+    // Unsure for the PAD flow and lifted inside the scroll window: its tap.
+    if (this.pattern.sceneTapKept(pad, padVoice(pad))) return
+    // One the arp holds, unsure and lifted inside the scroll window, was a tap; its note goes with the finger (unless latched).
+    if (this.pattern.arpKeep(padVoice(pad))) this.live.selectKeysPad(pad)
+    this.pattern.arpRelease(padVoice(pad))
     const releasedAt = pressTime(at, this.deps.perfNow())
     const k = padKey(pad)
     // Unsure in STEP or CORRECT and lifted inside the scroll window: a tap.
@@ -1312,6 +1436,10 @@ export class ArcController {
 
   /** The press on the pad turned into a scroll (the all-groups page): its sound ends at once. */
   cutPad(pad: PhysicalPad): void {
+    if (this.sample.open) return this.sample.padCut(pad)
+    if (this.pattern.sceneTapCut(padVoice(pad))) return
+    // Nor does it repeat.
+    this.pattern.arpCut(padVoice(pad))
     const k = padKey(pad)
     if (this.pressUnsure.delete(k)) return
     const taken = this.pressTaken.get(k)
@@ -1383,6 +1511,12 @@ export class ArcController {
       }
       return Promise.resolve()
     }
+    // The arp on: the note joins the arp's, neither played nor recorded itself.
+    if (this.pattern.arpTakes(hold)) {
+      if (pad === null) this.toastOnce(MirrorText.PICK_SOUND)
+      else this.pattern.arpPress(noteVoice(note), arpNote(pad, note - Keys.ROOT_NOTE), true, pressedAt, hold)
+      return Promise.resolve()
+    }
     const done = this.live.playNote(note, hold, at)
     if (pad !== null) this.pattern.press(pad, note - Keys.ROOT_NOTE, noteVoice(note), pressedAt, hold)
     return done
@@ -1393,6 +1527,16 @@ export class ArcController {
     this.deps.liveAudio.setLatencyHint?.(choice)
   }
 
+  /** KEYS [note] held at [pressure] (the pointer's own, while the arp is on): its velocity, on a device that tells pressure. */
+  notePressure(note: number, pressure: number): void {
+    this.pattern.arpPressure(noteVoice(note), pressure)
+  }
+
+  /** [pad] held at [pressure] (the pointer's own, while note repeat is on): its velocity, on a device that tells pressure. */
+  padPressure(pad: PhysicalPad, pressure: number): void {
+    this.pattern.arpPressure(padVoice(pad), pressure)
+  }
+
   /** The latency test's Reset: every engine's times go (the engines tried keep their rows). */
   resetLatency(): void {
     this.live.resetLatency()
@@ -1400,6 +1544,8 @@ export class ArcController {
 
   /** The last finger left the note: it fades out. */
   releaseNote(note: number, at?: number): void {
+    // A note the arp holds goes with the finger (unless latched).
+    this.pattern.arpRelease(noteVoice(note))
     const pad = this.store.get().keysPad
     const taken = this.pressTaken.get(1000 + note)
     if (taken !== undefined) {
@@ -1599,24 +1745,86 @@ export class ArcController {
     return true
   }
 
-  /** Reset pads: the offline changes go, and the pads show what the last read had. */
-  resetOfflinePads(): void {
-    this.live.setOfflinePads(OfflinePads.EMPTY)
+  /** Reset pads: the offline changes go (recordings to Takes), and the pads show what the last read had. */
+  async resetOfflinePads(): Promise<void> {
+    const moved = await this.dropOfflinePads()
     this.padEdit.saveOffline(OfflinePadSettings.EMPTY)
     void this.padEdit.padsOffline()
     const m = this.mirror.offline
     if (m !== null) {
-      m.setLocal(OfflinePads.EMPTY)
+      m.setLocal(await this.live.loadOfflinePads())
       this.mirror.localChanged()
+      this.pattern.refreshPlan()
     }
-    this.toast(MirrorText.PADS_RESET)
+    this.toast(MirrorText.PADS_RESET + samplesMoved(moved))
+  }
+
+  /** Drops the offline pad changes but the recordings uploading now, the other recordings moved to Takes; how many were. */
+  private async dropOfflinePads(): Promise<number> {
+    const uploading = this.sample.uploadingNow()
+    const list = (await this.live.loadOfflinePads()).list
+    const going = (p: OfflinePad): boolean => p.file != null && uploading.has(p.file)
+    this.live.setOfflinePads({ list: list.filter(going) })
+    return this.sample.recordingsToTakes(list.filter((p) => !going(p)))
+  }
+
+  /**
+   * SAMPLE's upload of a recording kept: [wav] into a free slot ([slot] when
+   * the review picked one), then onto [t]'s pad, while Live plays on, its
+   * progress to [onProgress]. The pad's copy is kept, then the mirror's
+   * names and the pad follow. The slot, or null once a toast said why not.
+   */
+  private async uploadRecording(name: string, wav: Uint8Array, t: PadTarget, slot: number | null, onProgress: (fraction: number) => void): Promise<number | null> {
+    const s = this.conn.session
+    if (s === null) {
+      this.toast(MirrorText.EDIT_OFFLINE)
+      return null
+    }
+    let error: string | null = null
+    let into: number | null = null
+    // After whatever holds the device, waiting again when something took it first.
+    while (into === null && error === null && this.conn.session === s) {
+      await this.store.waitFor((st) => !st.busy)
+      const occupied = this.store.get().browser.contents?.occupiedSlots ?? new Set(this.live.deviceSoundList().map((snd) => snd.slot))
+      into = await this.tasks.exclusive('upload', true, async (ss) => {
+        try {
+          return await uploadToPad(ss, name, wav, occupied, t, null, { onProgress: (p) => onProgress(p.fraction) }, slot)
+        } catch (e) {
+          error = errorText(e)
+          return null
+        }
+      })
+    }
+    if (error !== null) this.toast(MirrorText.uploadFailed(error), true)
+    if (into === null) {
+      if (this.conn.session !== s) this.toast(MirrorText.EDIT_OFFLINE)
+      return null
+    }
+    // The new sound's name and size, and the space left (SAMPLE's "Disk low").
+    await this.refreshAll(true)
+    const e = this.store.get().browser.contents?.sounds.find((snd) => snd.slot === into)
+    // Kept before the pad's copy is looked for, so the copy never reads it back.
+    if (e !== undefined) {
+      try {
+        const w = decodeWav(wav)
+        await this.live.keepPadSound(into, e.name, e.size, w.pcm, w.channels, w.sampleRate)
+      } catch {
+        // Its copy is read from the device instead.
+      }
+    }
+    const m = this.mirror.current
+    this.mirror.assigned({ ...t, slot: t.slot ?? m?.slotAt(t.group, t.pad) ?? null }, into)
+    return into
   }
 
   /** The EP-133 was read: with offline pad changes kept, it asks whether to write them (UiState.offlinePrompt). */
   async offerOfflinePads(): Promise<void> {
     // Still writing them (Live left and came back meanwhile): not asked again.
     if (this.offlineWrite !== null) return
-    const n = OfflinePads.size(await this.live.loadOfflinePads()) + (await this.padEdit.offlineCount())
+    // Recordings uploading now aren't asked about: they are on their way already.
+    const uploading = this.sample.uploadingNow()
+    const pads = (await this.live.loadOfflinePads()).list.filter((p) => p.file == null || !uploading.has(p.file))
+    const n = pads.length + (await this.padEdit.offlineCount())
     if (n === 0 || !this.deviceReady) return
     this.store.update((st) => ({ ...st, offlinePrompt: n }))
   }
@@ -1648,13 +1856,37 @@ export class ArcController {
       this.toast(MirrorText.EDIT_OFFLINE)
       return
     }
-    const pads = (await this.live.loadOfflinePads()).list
+    // Recordings uploading now are left to their upload (SampleDesk).
+    const uploading = this.sample.uploadingNow()
+    const pads = (await this.live.loadOfflinePads()).list.filter((p) => p.file == null || !uploading.has(p.file))
     let written = 0
     let skipped = 0
+    // Recordings that couldn't go on: to Takes, never dropped.
+    const unplaced: OfflinePad[] = []
+    // What the connection going keeps: the changes not written yet (and what came since).
+    const keepUnwritten = async (i: number): Promise<void> => {
+      const done = pads.slice(0, i)
+      this.live.setOfflinePads({ list: (await this.live.loadOfflinePads()).list.filter((x) => !done.some((d) => sameChange(d, x))) })
+      await this.sample.recordingsToTakes(unplaced)
+    }
     for (const [i, p] of pads.entries()) {
+      // Replaced meanwhile by a take kept on its pad (which goes up on its own, the old one into Takes).
+      if (!(await this.live.loadOfflinePads()).list.some((x) => sameChange(x, p))) continue
       const names = new Map(this.liveSounds().map((snd) => [snd.slot, snd.name]))
       if (!OfflinePads.fits(p, m.snapshot(this.deps.perfNow()).activeProject, names)) {
         skipped++
+        if (p.source === SoundSource.RECORDED) unplaced.push(p)
+        continue
+      }
+      // A recording: never on the device yet, whatever the pad has now it goes on it.
+      if (p.source === SoundSource.RECORDED) {
+        const into = this.conn.session === s ? await this.sample.uploadRecorded(p, physicalPadOf(m, p.group, p.pad)) : null
+        if (into !== null) written++
+        else if (this.conn.session !== s) return keepUnwritten(i)
+        else {
+          skipped++
+          unplaced.push(p)
+        }
         continue
       }
       const now = m.slotAt(p.group, p.pad)
@@ -1671,14 +1903,15 @@ export class ArcController {
         written++
       } else if (this.conn.session !== s) {
         // The connection went: this change and the rest are kept.
-        this.live.setOfflinePads({ list: pads.slice(i) })
-        return
+        return keepUnwritten(i)
       } else {
         if (r !== null && r.error !== null) this.toast(MirrorText.assignFailed(r.error), true)
         skipped++
       }
     }
-    this.live.setOfflinePads(OfflinePads.EMPTY)
+    // Changes made meanwhile (a recording kept) stay for their own upload or the next question.
+    this.live.setOfflinePads({ list: (await this.live.loadOfflinePads()).list.filter((x) => !pads.some((d) => sameChange(d, x))) })
+    await this.sample.recordingsToTakes(unplaced)
     // Then the settings turned offline, on the pads of the project they were turned in that still
     // hold the sound they were turned for: only what was turned changes, the rest is the device's now.
     const turned = await this.padEdit.writeOffline(s, m.snapshot(this.deps.perfNow()).activeProject, (g, p) => m.slotAt(g, p))
@@ -1687,11 +1920,11 @@ export class ArcController {
   }
 
   /** Discard: the offline changes go; the EP-133 keeps what it has. */
-  discardOfflinePads(): void {
+  async discardOfflinePads(): Promise<void> {
     this.store.update((st) => ({ ...st, offlinePrompt: null }))
-    this.live.setOfflinePads(OfflinePads.EMPTY)
+    const moved = await this.dropOfflinePads()
     this.padEdit.saveOffline(OfflinePadSettings.EMPTY)
-    this.toast(MirrorText.OFFLINE_DISCARDED)
+    this.toast(MirrorText.OFFLINE_DISCARDED + samplesMoved(moved))
   }
 
   /**
@@ -2058,6 +2291,30 @@ export class ArcController {
   }
 
   /** Live plays the keys (one sound as notes) instead of the pads. */
+  /**
+   * The mic key in Live's top bar: SAMPLE opens (from KEYS too: Live goes to
+   * the pads for it), or closes while it is open. Call from the tap: the
+   * output wakes in it.
+   */
+  toggleSample(): void {
+    if (this.sample.open) return this.sample.exit()
+    this.deps.liveAudio.resumeInGesture()
+    if (this.settingsSignal.peek().liveKeys) this.setLiveKeys(false)
+    this.sample.enter()
+  }
+
+  /** The review sheet's play key: the part kept, as KEEP would put it on the pad. Call from the tap. */
+  playReview(): void {
+    const r = this.sample.reviewSound()
+    if (r === null) return
+    void this.playNow(REVIEW_KEY, new Uint8Array(r.pcm.buffer, r.pcm.byteOffset, r.pcm.byteLength), r.channels, r.rate)
+  }
+
+  /** The review's sound stops (its key again, or the sheet closing). */
+  stopReview(): void {
+    if (this.deps.player.playing.peek() === REVIEW_KEY) this.deps.player.stop()
+  }
+
   setLiveKeys(on: boolean): void {
     this.changeSettings((s) => ({ ...s, liveKeys: on }))
   }
@@ -2079,6 +2336,8 @@ export class ArcController {
   /** How KEYS names its notes (Settings → Live → Note names). */
   setKeysNames(names: NoteNames): void {
     this.changeSettings((s) => ({ ...s, keysNames: names }))
+    // The arp's line names its notes so.
+    this.pattern.refreshArp()
   }
 
   setKeysShowNames(on: boolean): void {
@@ -2096,6 +2355,11 @@ export class ArcController {
   }
 
   /** A light tick when a pad or key goes down (Settings → Live → Haptics). */
+  /** Make up for Bluetooth delay (Settings → Live). */
+  setMakeUpDelay(on: boolean): void {
+    this.changeSettings((s) => ({ ...s, makeUpDelay: on }))
+  }
+
   setHaptics(on: boolean): void {
     this.changeSettings((s) => ({ ...s, haptics: on }))
   }
@@ -2347,6 +2611,85 @@ export class ArcController {
     return this.shareBytes(this.logFileName(), TEXT_MIME, Strings.DEBUG_TITLE, new TextEncoder().encode(text), Strings.DEBUG_TITLE)
   }
 
+  // ---------- BEAT CARDS: Live tools' CLAUDE section (MainActivity's shareBeat, clipboardText, copyProblems) ----------
+
+  private readonly _beatPasting = signal(false)
+  /** PASTE BEAT found the clipboard closed to the page: a box waits for a paste (web delta). */
+  readonly beatPasting: ReadonlySignal<boolean> = this._beatPasting
+
+  /**
+   * SHARE (the scene playing when [group] is null): the card's prompt and text
+   * through the share sheet, or, where the browser has none, copied to the
+   * clipboard with a toast saying so. Nothing when there are no notes.
+   */
+  async shareBeat(group: number | null): Promise<void> {
+    const share = this.pattern.beatShare(group)
+    if (share === null) return
+    await this.sendText(share.subject, share.text)
+  }
+
+  /** Learn with Claude where there is no link to follow: the starter prompt, shared or copied. */
+  async learnWithClaude(): Promise<void> {
+    await this.sendText(ClaudeText.LEARN_TITLE, WebText.LEARN_PROMPT)
+  }
+
+  private async sendText(subject: string, text: string): Promise<void> {
+    try {
+      const r = (await this.deps.share.shareText?.(subject, text)) ?? 'unsupported'
+      if (r !== 'unsupported') return
+      const cb = this.deps.clipboard
+      if (!cb) throw new Error(ClaudeText.NO_APP)
+      await cb.writeText(text)
+      this.toast(WebText.CARD_COPIED)
+    } catch (e) {
+      this.toast(errorText(e), true)
+    }
+  }
+
+  /**
+   * PASTE BEAT: the clipboard's text, read as a beat card (its sheet opens, or
+   * a toast says there is no card). Where the page can't read the clipboard
+   * (the browser has no readText, or says no), a box waits for a paste
+   * instead ([beatPasting]).
+   */
+  async pasteBeat(): Promise<void> {
+    const read = this.deps.clipboard?.readText
+    if (read) {
+      try {
+        const text = await read.call(this.deps.clipboard)
+        this._beatPasting.value = false
+        await this.pattern.receiveBeat(text)
+        return
+      } catch {
+        // Denied: the paste box below.
+      }
+    }
+    this._beatPasting.value = true
+  }
+
+  /** A text pasted on Live, or into PASTE BEAT's box: a beat card's sheet opens, else the toast says there is none. */
+  async receiveBeat(text: string | null): Promise<void> {
+    this._beatPasting.value = false
+    await this.pattern.receiveBeat(text)
+  }
+
+  /** PASTE BEAT's box closed without a paste. */
+  cancelBeatPaste(): void {
+    this._beatPasting.value = false
+  }
+
+  /** COPY PROBLEMS: what the sheet lists, for Claude to read when pasted back into the chat. */
+  async copyProblems(problems: readonly CardProblem[]): Promise<void> {
+    try {
+      const cb = this.deps.clipboard
+      if (!cb) throw new Error(ClaudeText.NO_APP)
+      await cb.writeText(ClaudeText.problemsReport(problems))
+      this.toast(ClaudeText.PROBLEMS_COPIED)
+    } catch (e) {
+      this.toast(errorText(e), true)
+    }
+  }
+
   /** Copies the latest part of the log (MainActivity.copyLog's COPY_LIMIT). */
   async copyLog(): Promise<void> {
     const full = this.logText()
@@ -2360,4 +2703,25 @@ export class ArcController {
       this.toast(errorText(e), true)
     }
   }
+}
+
+/** The key the review sheet's take plays under (SoundPlayer.playing). */
+export const REVIEW_KEY = 'sample:review'
+
+/** " 2 samples kept in Takes." after a toast, when [n] recordings went there. */
+function samplesMoved(n: number): string {
+  return n > 0 ? ' ' + MirrorText.samplesToTakes(n) : ''
+}
+
+/** Whether two offline changes are the same one (OfflinePad's equality). */
+function sameChange(a: OfflinePad, b: OfflinePad): boolean {
+  return (
+    a.project === b.project &&
+    a.group === b.group &&
+    a.pad === b.pad &&
+    a.slot === b.slot &&
+    a.name === b.name &&
+    a.source === b.source &&
+    (a.file ?? null) === (b.file ?? null)
+  )
 }

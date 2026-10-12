@@ -131,6 +131,8 @@ export interface IconBlockProps {
   onHold?: () => void
   /** Web only: id of the element that says how to use the key (aria-describedby). */
   describedBy?: string
+  /** Web only: a toggle (aria-pressed), lit by its [face] while on (Live's SAMPLE key). */
+  pressed?: boolean
   /** Web only: a radio of a group (role=radio, aria-checked), held down while true. */
   checked?: boolean
   /** The roving tab stop of a radio group (0 on the checked one, -1 on the rest). */
@@ -255,6 +257,7 @@ export function IconBlock(props: IconBlockProps): JSX.Element {
         disabled={disabled}
         role={radio ? 'radio' : undefined}
         aria-checked={radio ? checked : undefined}
+        aria-pressed={props.pressed}
         tabIndex={props.tabIndex}
         data-roving={radio ? '' : undefined}
         aria-label={props.ariaLabel ?? label}

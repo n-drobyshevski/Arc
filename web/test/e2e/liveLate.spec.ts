@@ -2,14 +2,16 @@
 // key (a Bluetooth glyph and a clock) right before the connection key, in
 // Chromium with the simulated EP-133 of ?demo. The output's latency is made long
 // (140 ms) before the app loads; once a press wakes the output, LiveAudio.late
-// reaches the bar through ArcController.liveLate. The display lines no longer
+// reaches the bar through ArcController.liveLate. Taken for Bluetooth (120 ms
+// and up) with Make up for Bluetooth delay on (the default), the key says arc
+// makes up for the delay (a typical link's 180 ms). The display lines no longer
 // carry it: their words stay the hit or "Press a pad on the EP-133.". A tap on
 // the key says why in the toast, a long press names it, the guide overlay tags
 // it, and it is on Live only.
 import type { Page } from '@playwright/test'
 import { coachHides, demo, expect, test } from './fixtures'
 
-const SENTENCE = 'Bluetooth plays late: wired or the speaker is quicker'
+const SENTENCE = 'Bluetooth plays late (about 180 ms): arc makes up for it'
 const WAITING = 'Press a pad on the EP-133.'
 
 /** Live on the demo device, its output [ms] late (baseLatency 0), woken by a press. */
@@ -69,8 +71,9 @@ test.describe('on a phone', () => {
     expect(bt!.width).toBe(20)
     expect(clock!.width).toBe(20)
     expect(clock!.x - (bt!.x + bt!.width)).toBeCloseTo(0, 0)
-    // The bar has nothing else new: the tag, this key, the connection key, ? (and the screen readers' Disconnect).
-    await expect(bar(page).getByRole('button')).toHaveCount(5)
+    // The bar has nothing else new: the tag, this key, the connection key, Live's mic key (SAMPLE), ?
+    // (and the screen readers' Disconnect).
+    await expect(bar(page).getByRole('button')).toHaveCount(6)
   })
 
   test('the lines no longer have a chip: the hit shows, and the words are the same', async ({ page }) => {
@@ -81,9 +84,10 @@ test.describe('on a phone', () => {
     await demo(page, (d) => d.clock('start'))
     await demo(page, (d) => d.noteOn(37, 127))
     const strip = page.locator('.live-strip').first()
-    await expect(strip.getByRole('img', { name: 'Playing' })).toBeVisible()
-    await expect(strip.getByText(/ BPM$/)).not.toHaveClass(/sr-only/)
     await expect(strip.locator('.live-strip__line')).toHaveText(/^A .+ · 127$/)
+    // The device's ▶ and tempo give way to the hit on a phone's line (as Android's), and are still said.
+    await expect(strip).toContainText('Playing')
+    await expect(strip.getByText(/ BPM$/)).toHaveCount(1)
     // KEYS keeps its word on the line, too.
     await page.keyboard.press('KeyM')
     await expect(strip.getByText('KEYS', { exact: true })).not.toHaveClass(/sr-only/)

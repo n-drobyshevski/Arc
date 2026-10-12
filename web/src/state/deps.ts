@@ -18,7 +18,10 @@
 // [Deps.offlinePads] its pad changes made offline (files/live-pads.json).
 
 import type { RecState } from '../core/features/takeRecorder'
-import type { LiveSeqPlan, LiveTimeline, RecordedTake } from '../platform/audio/liveAudio'
+import type { LiveArpPlan, LiveSeqPlan, LiveTimeline, MicOpened, RecordedTake } from '../platform/audio/liveAudio'
+import type { ArpStep } from '../platform/audio/patternScheduler'
+import type { TapPhase, TapTake } from '../platform/audio/sampleTap'
+import type { SampleStore } from '../platform/storage/sampleStore'
 import type { Beat, BeatGrid } from '../core/features/tempo'
 import type { TakeStore } from '../platform/storage/takeStore'
 import type { ReadonlySignal } from '@preact/signals'
@@ -34,7 +37,7 @@ import type { CoachPrefs, MirrorPrefs, PatternPrefs, SettingsStore } from '../pl
 import type { ExternalTarget } from '../platform/storage/external'
 import type { PickOptions, ReadableFile } from '../platform/files/pick'
 import type { FileData, SaveResult } from '../platform/files/save'
-import type { ShareResult } from '../platform/share/share'
+import type { ShareResult, TextShareResult } from '../platform/share/share'
 import type { SoundPlayer } from '../platform/audio/player'
 
 /** MidiConnector: support, the silent permission probe, access, open and attach/detach. */
@@ -174,6 +177,14 @@ export interface LiveAudioDeps {
    * the finger, else null (absent: from [onSlowOutput] only): Live's display line says so.
    */
   readonly late?: ReadonlySignal<number | null>
+  /** The Bluetooth delay in all (ms) while it is made up for, else null: the Bluetooth key's words (LiveAudio.madeUpFor). */
+  readonly madeUpFor?: ReadonlySignal<number | null>
+  /** The open output's latency (ms) while it is taken for Bluetooth, else null (LiveAudio.bluetooth). */
+  readonly bluetooth?: ReadonlySignal<number | null>
+  /** Whether the delay of an output taken for Bluetooth is made up for (Settings). */
+  makeUpDelay?(on: boolean): void
+  /** The part of the output's delay its stamp leaves out (ms), made up for; 0 when nothing is (LiveAudio.delayMs). */
+  readonly delayMs?: number
   /** Lines for the debug log (how the output was set up, or why there is none). */
   onLog?(listener: (line: string) => void): () => void
   /** The debug screen's latencyHint choice (absent: no choice to make). */
@@ -206,12 +217,18 @@ export interface LiveAudioDeps {
   seqPlay?(countInBars: number, leadMs: number, atMs: number | null): boolean
   /** Stops it: what waits is dropped, and the notes sounding let go of. */
   seqStop?(): void
+  /** The first tick a queued switch (scenes) made at [atMs] can take over at; null while stopped (LiveAudio.seqFreeTick). */
+  seqFreeTick?(atMs: number): number | null
   /** RECORD waits for a press: the output keeps its stamp, so the press finds its frame. */
   seqArm?(armed: boolean): void
   /** Where the transport is in heard time: null while stopped and until the output's first stamp. */
   readonly timeline?: ReadonlySignal<LiveTimeline | null>
   /** A pad the patterns play has no sound in the plan (pad key group × 12 + offset): the controller loads it. */
   onSeqMissing?(listener: (pad: number) => void): () => void
+  /** What the arp or note repeat plays; null (or no notes) stops it (LiveAudio.arpPlan). */
+  arpPlan?(plan: LiveArpPlan | null): void
+  /** A step the arp played on the pattern's clock, for RECORD (LiveAudio.onArpStep). */
+  onArpStep?(listener: (step: ArpStep) => void): () => void
   /**
    * TEMPO's click on or off: free at [bpm], on the EP-133's beats ([grid])
    * while it sends its clock, on the pattern's while it runs. False when there is no output.
@@ -219,9 +236,42 @@ export interface LiveAudioDeps {
   setClick?(on: boolean, bpm: number, grid: BeatGrid | null): boolean
   /** Each click, with when it is heard: TEMPO's light. */
   onBeat?(listener: (beat: Beat) => void): () => void
+  // SAMPLE (LiveAudio.kt's SampleRecorder: RSP, and the mic); an output without them has no SAMPLE.
+  /**
+   * Opens SAMPLE on Live's mix (RSP), or on the mic opened with [sampleMic]
+   * ([input]), [stereo] or mixed down, at [gainDb], a take waiting for
+   * [thresholdDb] (null: none). False when there is no output (or no mic).
+   */
+  sampleOpen?(stereo: boolean, gainDb: number, thresholdDb: number | null, input?: boolean): boolean
+  /** Whether there is a mic to sample (getUserMedia); absent: none. */
+  readonly micSupported?: boolean
+  /** Opens the mic into Live's mixer, asking for it the first time: its channels, or why not. */
+  sampleMic?(stereo: boolean): Promise<MicOpened>
+  /** RSP's level and threshold, from the next block. */
+  sampleSet?(gainDb: number, thresholdDb: number | null): void
+  /** Closes RSP: a take going on ends with what was recorded. */
+  sampleClose?(): void
+  /** The rate a take is made at: the open output's (null: none open). */
+  readonly sampleRate?: number | null
+  /** Arms a take into [pad] (pad key) from what was heard at [atMs] (null: now); [latched] hands-free; at most [maxFrames]. */
+  sampleArm?(pad: number, atMs: number | null, latched: boolean, maxFrames: number): void
+  /** Schedules a take of exactly [length] frames into [pad] from mix frame [start] (RSP in step with the patterns). */
+  sampleSchedule?(pad: number, start: number, length: number, maxFrames: number): void
+  /** The same from what is heard at [atMs] (a count-in's downbeat; on the mic, the sound made then). */
+  sampleScheduleAt?(pad: number, atMs: number, length: number, maxFrames: number): void
+  /** Stops the take at what was heard at [atMs] (null: now), keeping what came before. */
+  sampleStop?(atMs?: number | null): void
+  /** Throws the take away. */
+  sampleCancel?(): void
+  /** What RSP's take is doing, for SAMPLE's header. */
+  readonly samplePhase?: ReadonlySignal<TapPhase>
+  /** RSP's level (0..1) and whether it clipped, for the meter. */
+  readonly sampleLevel?: ReadonlySignal<{ readonly level: number; readonly clip: boolean }>
+  /** Each take SAMPLE made. */
+  onSampleTake?(listener: (take: TapTake) => void): () => void
 }
 
-export type { LiveSeqPlan, LiveTimeline }
+export type { ArpStep, LiveArpPlan, LiveSeqPlan, LiveTimeline, MicOpened }
 
 /** A Live output that never opens (tests, or a browser without Web Audio). */
 export function nullLiveAudio(): LiveAudioDeps {
@@ -275,6 +325,8 @@ export interface ShareDeps {
   share(name: string, data: FileData, mime: string, title: string, text?: string): Promise<ShareResult>
   /** Whether this browser can share a file (navigator.canShare with files); where not, Share is left out. */
   canShareFiles?(): boolean
+  /** Plain text through the share sheet (a beat card); 'unsupported' where there is none. */
+  shareText?(title: string, text: string): Promise<TextShareResult>
 }
 
 /**
@@ -323,6 +375,8 @@ export interface Deps {
   padSounds: PadSoundStore
   /** Where Live's takes are kept (Android files/takes); without it there is no TAKE. */
   takes?: TakeStore
+  /** Where SAMPLE's recordings wait until they are on the EP-133 (Android files/samples); without it there is no SAMPLE. */
+  samples?: SampleStore
   /** Live's last read, shown while the device is not connected. */
   lastRead: LastReadDeps
   /** Live's pad changes made offline, until the EP-133 connects (or Reset pads). */
@@ -352,8 +406,8 @@ export interface Deps {
   title: TitleDeps
   /** launchQueue: files opened with the installed app. False when nothing will ever arrive. */
   launchFiles(onFiles: (files: File[]) => void): boolean
-  /** navigator.clipboard.writeText, where there is one. */
-  clipboard?: { writeText(text: string): Promise<void> } | undefined
+  /** navigator.clipboard.writeText (and readText, where the browser lets a page read it), where there is one. */
+  clipboard?: { writeText(text: string): Promise<void>; readText?(): Promise<string> } | undefined
   /** For the debug log header (Build fields on Android). */
   userAgent: string
   /** Settings changed in another tab (the window "storage" event). */

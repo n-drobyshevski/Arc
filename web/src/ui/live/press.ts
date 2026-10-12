@@ -52,6 +52,8 @@ export interface PressTarget {
   release: () => void
   /** The press turned into a scroll: the sound ends at once (default: [release]). */
   cut?: () => void
+  /** The finger held presses at [pressure] (the pointer's own, 0..1): the arp's velocity for its note. */
+  pressure?: (pressure: number) => void
 }
 
 /**

@@ -43,6 +43,10 @@
 //   for the latency note.
 // - [playingNotes] is the controller's signal, read here, so a voice starting
 //   or ending re-renders the piano, not Live's whole screen.
+// - STEP open on the KEYS sound's group ([step], Kotlin's PadStep on the
+//   piano): the keys with a note on the cursor's step are outlined in signal
+//   orange, the one picked for − / + ringed, and a long press on a key picks
+//   it ([onPick]), as the grid's keys do.
 // - [computer] (a desktop or a fine pointer): the letter row plays it
 //   (live/keyboard.ts), a small letter on each key it reaches; Z / X step
 //   the octave. Ignored while typing in a field, in a dialog, or with a
@@ -59,6 +63,7 @@ import { tick } from '../../platform/haptics'
 import { glow, glowCss } from './glow'
 import { COMPUTER_KEYS, computerHint, computerNote, octaveStep, playsKeys } from './keyboard'
 import type { KeysShown } from './keys'
+import type { PianoStep } from './StepPanel'
 import { capDown, capUp } from './capDown'
 import { rawMovesSupported } from './press'
 import './PianoKeyboard.css'
@@ -92,8 +97,15 @@ export interface PianoKeyboardProps {
   computer?: boolean
   /** Z / X: the octave down or up. */
   onOctave?: (octave: number) => void
+  /** STEP open on the KEYS sound's group: its notes on the cursor's step, and the one picked; null (or absent) otherwise. */
+  step?: PianoStep | null
+  /** A long press on a key while STEP is open: its note picked for − / +. */
+  onPick?: (note: number) => void
   class?: string
 }
+
+/** A long press on a key picks it in STEP (MirrorScreen's STEP_PICK_MS). */
+const PICK_MS = 500
 
 /**
  * One finger on the keys: its note (null off them), where it last moved, the
@@ -144,6 +156,16 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
   const cb = useRef(props)
   cb.current = props
 
+  // STEP's long press: one finger's, on the key it went down on; a move to another key, or the lift, ends it.
+  const pick = useRef<{ pointer: number; note: number; timer: ReturnType<typeof setTimeout> } | null>(null)
+  const stopPick = (pointer?: number): void => {
+    const p = pick.current
+    if (p === null || (pointer !== undefined && p.pointer !== pointer)) return
+    clearTimeout(p.timer)
+    pick.current = null
+  }
+  useEffect(() => () => stopPick(), [])
+
   const touches = useMemo(() => new NoteTouches(), [])
   const fingers = useRef(new Map<number, Finger>())
   const [fingered, setFingered] = useState<ReadonlySet<number>>(() => new Set())
@@ -193,6 +215,18 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
     const note = Piano.keyAt(laidRef.current, x, y, null, 0)
     fingers.current.set(e.pointerId, { note, x, y, generation: generation.current, raw: false })
     if (note !== null) play(touches.down(e.pointerId, note), true, e.timeStamp)
+    if (note !== null && cb.current.step != null && cb.current.onPick) {
+      stopPick()
+      const pointer = e.pointerId
+      pick.current = {
+        pointer,
+        note,
+        timer: setTimeout(() => {
+          pick.current = null
+          cb.current.onPick?.(note)
+        }, PICK_MS),
+      }
+    }
   }
   /** A finger moved on [el] (the plate, which captures it); [raw]: from pointerrawupdate. */
   const moved = (e: PointerEvent, el: HTMLElement, raw: boolean): void => {
@@ -208,6 +242,7 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
     // After − or +, a finger resting on a key keeps the note it pressed until it really moves.
     if (f.generation !== generation.current && Math.hypot(x - f.x, y - f.y) <= TOUCH_SLOP) return
     const note = Piano.keyAt(laidRef.current, x, y, f.note, SLIDE_SLOP)
+    if (pick.current?.pointer === e.pointerId && pick.current.note !== note) stopPick()
     fingers.current.set(e.pointerId, { note, x, y, generation: generation.current, raw: f.raw })
     play(touches.move(e.pointerId, note), true, e.timeStamp)
   }
@@ -223,6 +258,7 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
     return () => el.removeEventListener('pointerrawupdate', onRaw)
   }, [])
   const onPointerEnd = (e: TargetedPointerEvent<HTMLDivElement>): void => {
+    stopPick(e.pointerId)
     if (!fingers.current.delete(e.pointerId)) return
     play(touches.up(e.pointerId))
   }
@@ -341,10 +377,13 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
       >
         {laid.map((k) => {
           const mark = Piano.mark(k.note, keys.root, keys.scale)
+          const step = props.step
+          const stepMark = step == null ? null : step.picked === k.note ? 'picked' : step.lit.has(k.note) ? 'lit' : ''
           const cls =
             `piano__key piano__key--${k.black ? 'black' : 'white'} cap-3d` +
             (mark === KeyMark.ROOT ? ' is-root' : mark === KeyMark.OUT ? ' is-out' : '') +
-            (playingNotes.has(k.note) ? ' is-playing' : '')
+            (playingNotes.has(k.note) ? ' is-playing' : '') +
+            (stepMark === 'picked' ? ' is-step-picked' : stepMark === 'lit' ? ' is-step-lit' : '')
           const r = k.rect
           const gap = k.black ? 0 : WHITE_GAP / 2
           const hint = hints ? computerHint(k.note, keys.octave) : null
@@ -354,7 +393,7 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
               type="button"
               class={cls}
               data-note={k.note}
-              aria-label={MirrorText.pianoKey(k.note, keys.names, mark)}
+              aria-label={MirrorText.pianoKey(k.note, keys.names, mark) + (stepMark === 'picked' ? MirrorText.PICKED : stepMark === 'lit' ? MirrorText.ON_STEP : '')}
               aria-description={MirrorText.PLAY}
               tabIndex={k.note === tabNote ? 0 : -1}
               onFocus={() => setFocusNote(k.note)}

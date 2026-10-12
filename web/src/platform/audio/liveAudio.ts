@@ -67,6 +67,9 @@
 //   as ArcController's toldBluetooth). [late] is the output's delay while it
 //   is long enough to be heard ([LATE_OUTPUT_MS]), for the top bar's Bluetooth
 //   key, where Android names Bluetooth from the route (LiveAudio.wireless).
+//   Make up for Bluetooth delay ([makeUpDelay], [delayMs], [madeUpFor]) takes
+//   the same guess for wireless: the latency the context reports is what its
+//   stamp counts, and OutputDelay.ms the rest of a typical link's delay.
 // - Listeners are added after construction (the controller is made after its
 //   deps); the debug-log lines ("live audio: …") come through [onLog].
 // - The latency test's row ([engine], [OutputEngine]) is named from the
@@ -88,13 +91,18 @@ import { wavHeader } from '../../core/formats/wav'
 import { LatencyText, WebLatencyHint } from '../../core/text/latencyText'
 import { WebText } from '../../core/text/webText'
 import type { VoiceShape } from '../../core/formats/voiceMixer'
-import type { ProjectPatterns } from '../../core/features/pattern'
+import type { ArpNote, ArpSettings } from '../../core/features/arp'
+import { Seq, type Pattern, type ProjectPatterns, type TimingSettings } from '../../core/features/pattern'
 import { frameAt, type FrameClock } from '../../core/features/sampleTiming'
 import type { PhaseAnchors, TransportClock } from '../../core/features/sequencer'
 import type { Beat, BeatGrid } from '../../core/features/tempo'
 import type { FrameGrid } from './clickScheduler'
 import { FxSetup } from './fxSetup'
+import { OutputDelay } from '../../core/features/outputDelay'
 import { LIVE_PROCESSOR, MixerHost, transferable, type FromMixer, type PlanVoice, type ToMixer } from './liveMixer'
+import type { ArpStep } from './patternScheduler'
+import type { TapPhase, TapTake } from './sampleTap'
+import { PeakMeter } from '../../core/features/peakMeter'
 // The AudioWorklet module's URL: Vite bundles liveWorklet.ts (with the core
 // mixer) into one self-contained script. (`new URL('./liveWorklet.ts',
 // import.meta.url)` would copy the TypeScript unbuilt: Vite only bundles that
@@ -208,6 +216,25 @@ export interface MixerLink {
   readonly kind: string
   send(m: ToMixer): void
   close(): void
+  /** The mixer's input from [media] (SAMPLE's mic), or none (null); absent: the mixer takes no input. */
+  listen?(media: MediaStream | null): void
+}
+
+/** What opening the mic for SAMPLE came to: its channels, or why not. */
+export type MicOpened =
+  | { readonly ok: true; readonly channels: number }
+  | { readonly ok: false; readonly why: 'denied' | 'none' | 'busy' | 'failed' }
+
+/** A mic's own delay, from the air to the mixer's input, where the browser doesn't say (ms). */
+export const MIC_LATENCY_MS = 10
+
+/** Why [e] (getUserMedia's rejection) kept the mic closed. */
+export function micWhy(e: unknown): 'denied' | 'none' | 'busy' | 'failed' {
+  const name = (e as { name?: unknown } | null)?.name
+  if (name === 'NotAllowedError' || name === 'SecurityError' || name === 'PermissionDeniedError') return 'denied'
+  if (name === 'NotFoundError' || name === 'OverconstrainedError' || name === 'DevicesNotFoundError') return 'none'
+  if (name === 'NotReadableError' || name === 'AbortError' || name === 'TrackStartError') return 'busy'
+  return 'failed'
 }
 
 /** What [LiveAudio] needs from the browser; tests pass a fake. */
@@ -222,6 +249,8 @@ export interface LiveBackend {
   createContext(sampleRate: number | undefined, latencyHint: LiveLatencyHint): LiveContextLike | null
   /** Starts a mixer on [ctx] whose reports go to [onMessage]. */
   connect(ctx: LiveContextLike, onMessage: (m: FromMixer) => void): Promise<MixerLink>
+  /** The mic as raw as it comes ([stereo]: two channels where it has them); absent: no mic (getUserMedia). */
+  micStream?(stereo: boolean): Promise<MediaStream>
   /** performance.now(): the clock press times are on. */
   now(): number
   /** Whether the page has had a tap, so an output woken now (outside a tap) is allowed to sound. */
@@ -325,6 +354,29 @@ export interface LiveSeqPlan {
    */
   readonly shapes?: ReadonlyMap<number, Partial<VoiceShape>>
   readonly keysShapes?: ReadonlyMap<number, Partial<VoiceShape>>
+  /** The patterns waiting to take over a group (scenes): each from its global tick, at its bar 1 there. */
+  readonly queued?: ReadonlyMap<number, { readonly pattern: Pattern; readonly atTick: number }>
+}
+
+/**
+ * What the arp or note repeat plays (PatternScheduler's ArpPlan): the notes
+ * held, their pads' sounds by preloaded sample key ([voices], by pad key) and
+ * how they play ([shapes], [keysShapes]; a pad left out plays on its group's
+ * bus), KEYS's arp or PADS's note repeat ([keys]), TIMING, the arp's
+ * settings, the tempo, the RANDOM order's [seed] and the run's press
+ * ([pressMs], performance.now(): another one starts the run again).
+ */
+export interface LiveArpPlan {
+  readonly notes: readonly ArpNote[]
+  readonly voices: ReadonlyMap<number, string>
+  readonly shapes?: ReadonlyMap<number, Partial<VoiceShape>>
+  readonly keysShapes?: ReadonlyMap<number, Partial<VoiceShape>>
+  readonly keys: boolean
+  readonly timing: TimingSettings
+  readonly settings: ArpSettings
+  readonly bpm: number
+  readonly seed: number
+  readonly pressMs: number
 }
 
 /**
@@ -417,6 +469,8 @@ interface Stream {
   receiving: Receiving | null
   /** The mix's latest stamp: mix frame to the performance.now() it is heard at (PATTERN). */
   stamp: FrameClock | null
+  /** The sequencer's free tick at the stamp's frame (-Infinity stopped): what a queued switch may take over at. */
+  freeTick: number
 }
 
 const EMPTY: ReadonlySet<string> = new Set()
@@ -434,6 +488,22 @@ export class LiveAudio {
    * and changed only by [LATE_STEP_MS] or more.
    */
   readonly late: ReadonlySignal<number | null> = this._late
+  private readonly _madeUp = signal<number | null>(null)
+  /**
+   * The delay in all (ms, OutputDelay.totalMs) while it is made up for (the
+   * output taken for Bluetooth, [makeUpDelay] on), else null: the Bluetooth
+   * key's words.
+   */
+  readonly madeUpFor: ReadonlySignal<number | null> = this._madeUp
+  private readonly _bluetooth = signal<number | null>(null)
+  /** The open output's latency (ms) while it is long enough to be taken for Bluetooth, else null: Settings' note on what is made up. */
+  readonly bluetooth: ReadonlySignal<number | null> = this._bluetooth
+  // Whether a wireless output's delay is made up for, and the delay made up for now (ms).
+  private makingUp = true
+  private delay = 0
+  // The open output's latency as last read: taken for Bluetooth, and the part of it the stamp counts.
+  private wireless = false
+  private counted: number | null = null
   private readonly _latencyHint: Signal<WebLatencyHint>
   /** The debug screen's latencyHint choice ([setLatencyHint]); ZERO unless changed there. */
   readonly latencyHint: ReadonlySignal<WebLatencyHint>
@@ -466,6 +536,19 @@ export class LiveAudio {
   // The pattern's clock as the mixer last told it, the plan it plays, and whether RECORD waits for a press.
   private seqClock: TransportClock | null = null
   private plan: LiveSeqPlan | null = null
+  private arp: LiveArpPlan | null = null
+  // SAMPLE's RSP as asked: open on each new output while wanted.
+  private sampleAsk: { stereo: boolean; gain: number; threshold: number | null; input: boolean } | null = null
+  // SAMPLE's mic while open: its stream, channels and own delay (ms).
+  private mic: { readonly media: MediaStream; readonly channels: number; readonly latencyMs: number } | null = null
+  private readonly sampleTakeListeners = new Set<(take: TapTake) => void>()
+  private readonly _samplePhase = signal<TapPhase>({ kind: 'ready' })
+  /** SAMPLE's take as the audio thread has it: waiting, recording, or ready. */
+  readonly samplePhase: ReadonlySignal<TapPhase> = this._samplePhase
+  private readonly _sampleLevel = signal<{ readonly level: number; readonly clip: boolean }>({ level: 0, clip: false })
+  /** RSP's level (0..1 across −60..0 dBFS) and its clip light, a few times a second while open. */
+  readonly sampleLevel: ReadonlySignal<{ readonly level: number; readonly clip: boolean }> = this._sampleLevel
+  private readonly arpStepListeners = new Set<(step: ArpStep) => void>()
   private seqArmed = false
   private readonly _rec = signal<RecState>(REC_IDLE)
   /** The TAKE key's state. */
@@ -596,11 +679,205 @@ export class LiveAudio {
     return true
   }
 
+  /**
+   * The first tick a queued switch made at [atMs] (performance.now()) can
+   * take over at (PatternScheduler.freeTick, as of the latest stamp and
+   * carried on to [atMs] at the transport's tempo); null while stopped.
+   */
+  seqFreeTick(atMs: number): number | null {
+    const s = this.stream
+    const c = this.seqClock
+    if (s === null || c === null || s.stamp === null || !Number.isFinite(s.freeTick)) return null
+    const later = frameAt(s.stamp, atMs) - s.stamp.frame
+    return s.freeTick + Math.max(later, 0) * ((c.bpm * Seq.PPQN) / (60 * c.rate))
+  }
+
   /** Stops the pattern: what waits is dropped, what sounds let go of. */
   seqStop(): void {
     this.seqClock = null
     this._timeline.value = null
     if (this.stream) send(this.stream, { t: 'stopSeq' })
+  }
+
+  /**
+   * What the arp or note repeat plays (null, or no notes: it stops); a run's
+   * press is placed by the output's latest stamp. Opens the output for notes.
+   */
+  arpPlan(plan: LiveArpPlan | null): void {
+    const on = plan !== null && plan.notes.length > 0
+    this.arp = on ? plan : null
+    if (!on) {
+      if (this.stream) send(this.stream, { t: 'arp', plan: null })
+      return
+    }
+    const s = this.ensure()
+    if (!s) return
+    s.parked = false
+    wake(s.ctx)
+    this.sendArp(s, plan)
+  }
+
+  /** A step the arp played on the pattern's clock: for RECORD. */
+  onArpStep(listener: (step: ArpStep) => void): () => void {
+    return add(this.arpStepListeners, listener)
+  }
+
+  // ---------- SAMPLE: RSP, Live's mix recorded into a pad (SampleRecorder's mix side) ----------
+
+  /**
+   * Opens SAMPLE on Live's mix (RSP), or on the mic opened with [sampleMic]
+   * ([input]), [stereo] or mixed down, at [gainDb], an armed take waiting
+   * for [thresholdDb] (null: none). Opens the output; false when there is
+   * none, or [input] with no mic open.
+   */
+  sampleOpen(stereo: boolean, gainDb: number, thresholdDb: number | null, input = false): boolean {
+    if (input && this.mic === null) return false
+    this.sampleAsk = { stereo, gain: PeakMeter.fromDb(gainDb), threshold: thresholdDb === null ? null : PeakMeter.fromDb(thresholdDb), input }
+    const s = this.ensure()
+    if (!s) {
+      this.sampleAsk = null
+      return false
+    }
+    s.parked = false
+    wake(s.ctx)
+    send(s, { t: 'sampleOpen', stereo, gain: this.sampleAsk.gain, input })
+    // RSP lets the mic go.
+    if (!input) this.micClose()
+    return true
+  }
+
+  /** Whether this browser offers a mic (getUserMedia) to sample from. */
+  get micSupported(): boolean {
+    return this.backend.micStream !== undefined
+  }
+
+  /**
+   * Opens the mic ([stereo]: two channels where it has them) into Live's
+   * mixer, asking for it the first time; [sampleOpen] then records from it.
+   * The output opens first. Its channels, or why not.
+   */
+  async sampleMic(stereo: boolean): Promise<MicOpened> {
+    const want = this.backend.micStream
+    if (want === undefined || this.ensure() === null) return { ok: false, why: 'failed' }
+    let media: MediaStream
+    try {
+      media = await want(stereo)
+    } catch (e) {
+      this.note(`sample mic: ${message(e)}`)
+      return { ok: false, why: micWhy(e) }
+    }
+    this.micClose()
+    const settings = (media.getAudioTracks()[0]?.getSettings?.() ?? {}) as { channelCount?: number; latency?: number }
+    const channels = settings.channelCount === 2 ? 2 : 1
+    const latencyMs = typeof settings.latency === 'number' && Number.isFinite(settings.latency) && settings.latency > 0 ? settings.latency * 1000 : MIC_LATENCY_MS
+    this.mic = { media, channels, latencyMs }
+    const link = this.stream?.link
+    if (link) {
+      // A mixer that takes no input (the main-thread one) has no mic.
+      if (!link.listen || !tryListen(link, media)) {
+        this.micClose()
+        return { ok: false, why: 'failed' }
+      }
+    }
+    return { ok: true, channels }
+  }
+
+  // The mic let go: off the mixer, and its tracks stopped (the browser's mic light goes).
+  private micClose(): void {
+    const m = this.mic
+    if (m === null) return
+    this.mic = null
+    const link = this.stream?.link
+    if (link?.listen) quietly(() => link.listen?.(null))
+    for (const t of m.media.getTracks()) quietly(() => t.stop())
+  }
+
+  /** RSP's level and threshold, from the next block. */
+  sampleSet(gainDb: number, thresholdDb: number | null): void {
+    const a = this.sampleAsk
+    if (a === null) return
+    this.sampleAsk = { ...a, gain: PeakMeter.fromDb(gainDb), threshold: thresholdDb === null ? null : PeakMeter.fromDb(thresholdDb) }
+    if (this.stream) send(this.stream, { t: 'sampleSet', gain: this.sampleAsk.gain })
+  }
+
+  /** Closes RSP: a take going on ends with what was recorded. */
+  sampleClose(): void {
+    this.sampleAsk = null
+    if (this.stream) send(this.stream, { t: 'sampleClose' })
+    this.micClose()
+    this._samplePhase.value = { kind: 'ready' }
+    this._sampleLevel.value = { level: 0, clip: false }
+  }
+
+  /** The rate a take is made at: the open output's (null: none open). */
+  get sampleRate(): number | null {
+    return this.stream?.ctx.sampleRate ?? null
+  }
+
+  /**
+   * Arms a take into [pad] (pad key) from what was heard at [atMs]
+   * (performance.now(); null: where the mix is), or from the threshold's
+   * crossing after it; [latched] hands-free; at most [maxFrames].
+   */
+  sampleArm(pad: number, atMs: number | null, latched: boolean, maxFrames: number): void {
+    const s = this.stream
+    if (!s || this.sampleAsk === null) return
+    send(s, { t: 'sampleAsk', ask: { kind: 'arm', pad, at: this.tapFrameAt(s, atMs), latched, maxFrames, threshold: this.sampleAsk.threshold } })
+  }
+
+  /** Schedules a take of exactly [length] frames into [pad] from mix frame [start] (bars, a pattern's loop). */
+  sampleSchedule(pad: number, start: number, length: number, maxFrames: number): void {
+    if (this.stream && this.sampleAsk !== null) send(this.stream, { t: 'sampleAsk', ask: { kind: 'schedule', pad, start, length, maxFrames } })
+  }
+
+  /**
+   * Schedules a take of exactly [length] frames into [pad] from what is
+   * heard at [atMs] (a count-in's downbeat; on the mic, the sound made then).
+   * Nothing without a stamp to place it by.
+   */
+  sampleScheduleAt(pad: number, atMs: number, length: number, maxFrames: number): void {
+    const s = this.stream
+    if (!s || this.sampleAsk === null) return
+    const start = this.tapFrameAt(s, atMs)
+    if (start !== null) send(s, { t: 'sampleAsk', ask: { kind: 'schedule', pad, start, length, maxFrames } })
+  }
+
+  /** The mix frame heard at [atMs] (performance.now()), by the latest stamp; null without one. */
+  sampleFrameAt(atMs: number): number | null {
+    const s = this.stream
+    return s ? this.mixFrameAt(s, atMs) : null
+  }
+
+  /** Stops the take at what was heard at [atMs] (null: where the mix is), keeping what came before. */
+  sampleStop(atMs: number | null = null): void {
+    const s = this.stream
+    if (s) send(s, { t: 'sampleAsk', ask: { kind: 'stop', at: this.tapFrameAt(s, atMs) } })
+  }
+
+  /** Throws the take away (a tap, or a press that became a scroll). */
+  sampleCancel(): void {
+    if (this.stream) send(this.stream, { t: 'sampleAsk', ask: { kind: 'cancel' } })
+  }
+
+  /** Each take SAMPLE made. */
+  onSampleTake(listener: (take: TapTake) => void): () => void {
+    return add(this.sampleTakeListeners, listener)
+  }
+
+  /**
+   * The frame of what SAMPLE takes for [atMs]: the mix's frame heard then,
+   * or the mic's frame of sound made then (a block's mic frames came in its
+   * output's delay before it is heard, and the mic's own before that).
+   */
+  private tapFrameAt(s: Stream, atMs: number | null): number | null {
+    const m = this.mic
+    if (atMs === null || m === null || this.sampleAsk?.input !== true) return this.mixFrameAt(s, atMs)
+    const l = outputLatency(s.ctx)
+    return this.mixFrameAt(s, atMs + l.baseMs + l.outputMs + m.latencyMs)
+  }
+
+  private mixFrameAt(s: Stream, atMs: number | null): number | null {
+    return atMs !== null && s.stamp !== null ? Math.round(frameAt(s.stamp, atMs)) : null
   }
 
   /** RECORD waits for a press: the mixer sends its stamps meanwhile. */
@@ -663,7 +940,23 @@ export class LiveAudio {
       const keysShape = plan.keysShapes?.get(pad) ?? bus
       voices.push({ pad, id: sample.id, channels: sample.channels, sampleRate: sample.sampleRate, shape, keysShape })
     }
-    send(s, { t: 'plan', patterns: plan.patterns, voices, skip: [...plan.skip], bpm: plan.bpm, phase: plan.phase })
+    const queued = plan.queued !== undefined ? [...plan.queued].map(([group, q]) => ({ group, pattern: q.pattern, atTick: q.atTick })) : undefined
+    send(s, { t: 'plan', patterns: plan.patterns, voices, skip: [...plan.skip], bpm: plan.bpm, phase: plan.phase, queued })
+  }
+
+  private sendArp(s: Stream, plan: LiveArpPlan): void {
+    const voices: PlanVoice[] = []
+    for (const [pad, key] of plan.voices) {
+      const sample = this.samples.get(key)
+      if (!sample || !(sample.channels >= 1 && sample.channels <= 2)) continue
+      this.load(s, sample)
+      const bus: Partial<VoiceShape> = { bus: Math.floor(pad / 12) }
+      voices.push({ pad, id: sample.id, channels: sample.channels, sampleRate: sample.sampleRate, shape: plan.shapes?.get(pad) ?? bus, keysShape: plan.keysShapes?.get(pad) ?? bus })
+    }
+    const stamp = s.stamp
+    const atFrame = stamp !== null ? frameAt(stamp, plan.pressMs) : null
+    const { notes, keys, timing, settings, bpm, seed, pressMs } = plan
+    send(s, { t: 'arp', plan: { notes, voices, keys, timing, settings, bpm, seed, pressMs, atFrame } })
   }
 
   /** The timeline anew when the clock changed, or the stamp drifted from the one shown by more than a millisecond. */
@@ -732,6 +1025,12 @@ export class LiveAudio {
     this.ungated.clear()
     this._voices.value = EMPTY
     this._late.value = null
+    // SAMPLE's take goes with the output; RSP opens again on the next one while wanted.
+    this._samplePhase.value = { kind: 'ready' }
+    this._sampleLevel.value = { level: 0, clip: false }
+    this.wireless = false
+    this.counted = null
+    this.refreshDelay()
     this._engine.value = null
     const recording = this._rec.value.kind !== 'idle'
     this._rec.value = REC_IDLE
@@ -925,6 +1224,7 @@ export class LiveAudio {
       ending: false,
       receiving: null,
       stamp: null,
+      freeTick: Number.NEGATIVE_INFINITY,
     }
     this.stream = s
     // The samples loaded, ready again, and the FX bus as it was set up (before any press).
@@ -932,6 +1232,10 @@ export class LiveAudio {
     for (const c of this.fx.commands()) send(s, { t: 'control', what: c.what, index: c.index, x: c.x, y: c.y })
     // RECORD waiting for a press: the new output's stamps are wanted at once.
     if (this.seqArmed) send(s, { t: 'seqArmed', armed: true })
+    // The arp playing on: from where the new output's mix is.
+    if (this.arp !== null) this.sendArp(s, this.arp)
+    // SAMPLE's RSP on the new output's mix.
+    if (this.sampleAsk !== null) send(s, { t: 'sampleOpen', stereo: this.sampleAsk.stereo, gain: this.sampleAsk.gain, input: this.sampleAsk.input })
     // The click goes on with the new output.
     if (this.clickAsk.on) this.sendClick(s)
     ctx.addEventListener?.('statechange', () => this.stateChanged(s))
@@ -943,6 +1247,8 @@ export class LiveAudio {
         }
         s.link = link
         flush(s, link)
+        // SAMPLE's mic into the new mixer.
+        if (this.mic !== null && (!link.listen || !tryListen(link, this.mic.media))) this.note('sample mic: this output takes no input')
         this._description = describeOutput(ctx, link.kind)
         this.note(`live audio: ${this._description}`)
         // Its row shows from now, before the first press.
@@ -987,9 +1293,40 @@ export class LiveAudio {
     this.checkSlow(s)
   }
 
-  /** [late], and the Bluetooth guess (once per LiveAudio), from the output's latency now. */
+  /** Whether the delay of an output taken for Bluetooth is made up for (Settings; on until set otherwise). */
+  makeUpDelay(on: boolean): void {
+    this.makingUp = on
+    this.refreshDelay()
+  }
+
+  /**
+   * The part of the output's delay its stamp leaves out, in ms, to be made up
+   * for (OutputDelay.ms): 0 when it isn't taken for Bluetooth, closed, or
+   * with [makeUpDelay] off.
+   */
+  get delayMs(): number {
+    return this.delay
+  }
+
+  private refreshDelay(): void {
+    this.delay = OutputDelay.ms(this.makingUp, this.wireless, this.counted)
+    const madeUp = this.makingUp && this.wireless ? OutputDelay.totalMs(this.counted) : null
+    if (madeUp !== this._madeUp.peek()) this._madeUp.value = madeUp
+    const bluetooth = this.wireless ? this.counted : null
+    if (bluetooth !== this._bluetooth.peek()) this._bluetooth.value = bluetooth
+  }
+
+  /** [late], the Bluetooth guess (once per LiveAudio), and the delay made up for, from the output's latency now. */
   private checkSlow(s: Stream): void {
     const l = outputLatency(s.ctx)
+    // Browsers don't name the route: a long latency is taken for Bluetooth, and is what the stamp counts.
+    const wireless = isSlowOutput(l)
+    const counted = Math.round(l.baseMs + l.outputMs)
+    if (wireless !== this.wireless || counted !== this.counted) {
+      this.wireless = wireless
+      this.counted = counted
+      this.refreshDelay()
+    }
     const late = lateBy(l)
     const shown = this._late.value
     if (late === null || shown === null || Math.abs(late - shown) >= LATE_STEP_MS) this._late.value = late
@@ -1057,16 +1394,30 @@ export class LiveAudio {
       case 'stamp': {
         const first = s.stamp === null
         s.stamp = { frame: m.frame, ms: heardAt(m.time, this.backend.now(), s.ctx), rate: s.ctx.sampleRate }
+        s.freeTick = m.freeTick
         this.showTimeline(s)
         // The EP-133's beats could wait for a stamp to be mapped.
         if (first && this.clickAsk.on && this.clickAsk.grid !== null) this.sendClick(s)
         return
       }
       case 'beat': {
-        const at = heardAt(m.time, this.backend.now(), s.ctx)
+        // Heard the delay made up for after the stamp has it (TEMPO's light follows the ear).
+        const at = heardAt(m.time, this.backend.now(), s.ctx) + this.delay
         for (const f of [...this.beatListeners]) f({ index: m.index, at, accent: m.accent })
         return
       }
+      case 'samplePhase':
+        this._samplePhase.value = m.phase
+        return
+      case 'sampleLevel':
+        this._sampleLevel.value = { level: m.level, clip: m.clip }
+        return
+      case 'sampleTake':
+        for (const f of [...this.sampleTakeListeners]) f(m.take)
+        return
+      case 'arpStep':
+        for (const f of [...this.arpStepListeners]) f(m.step)
+        return
       case 'missing':
         for (const f of [...this.missingListeners]) f(m.pad)
         return
@@ -1179,12 +1530,18 @@ export const FALLBACK_FRAMES = 256
 async function workletLink(ctx: AudioContext, onMessage: (m: FromMixer) => void): Promise<MixerLink> {
   await ctx.audioWorklet.addModule(workletUrl)
   const node = new AudioWorkletNode(ctx, LIVE_PROCESSOR, {
-    numberOfInputs: 0,
+    // SAMPLE's mic, while it is open (else nothing is connected).
+    numberOfInputs: 1,
     numberOfOutputs: 1,
     outputChannelCount: [2],
   })
   node.port.onmessage = (e: MessageEvent<FromMixer>) => onMessage(e.data)
   node.connect(ctx.destination)
+  let source: MediaStreamAudioSourceNode | null = null
+  const unlisten = (): void => {
+    source?.disconnect()
+    source = null
+  }
   return {
     kind: 'AudioWorklet',
     send: (m) => {
@@ -1192,9 +1549,16 @@ async function workletLink(ctx: AudioContext, onMessage: (m: FromMixer) => void)
       node.port.postMessage(msg, transfer)
     },
     close: () => {
+      unlisten()
       node.port.onmessage = null
       node.disconnect()
       node.port.close()
+    },
+    listen: (media) => {
+      unlisten()
+      if (media === null) return
+      source = ctx.createMediaStreamSource(media)
+      source.connect(node)
     },
   }
 }
@@ -1202,18 +1566,36 @@ async function workletLink(ctx: AudioContext, onMessage: (m: FromMixer) => void)
 /** The main-thread mixer, for browsers without AudioWorklet (or where it fails to load). */
 function scriptLink(ctx: AudioContext, onMessage: (m: FromMixer) => void): MixerLink {
   const host = new MixerHost(ctx.sampleRate, onMessage)
-  const node = ctx.createScriptProcessor(FALLBACK_FRAMES, 1, 2)
+  // Two input channels: SAMPLE's mic, while it is open.
+  const node = ctx.createScriptProcessor(FALLBACK_FRAMES, 2, 2)
+  let source: MediaStreamAudioSourceNode | null = null
   node.onaudioprocess = (e) => {
     const out = e.outputBuffer
+    if (source !== null) {
+      const inp = e.inputBuffer
+      const left = inp.getChannelData(0)
+      host.input(left, inp.numberOfChannels > 1 ? inp.getChannelData(1) : left, inp.length)
+    }
     host.render(out.getChannelData(0), out.getChannelData(1), out.length, e.playbackTime)
   }
   node.connect(ctx.destination)
+  const unlisten = (): void => {
+    source?.disconnect()
+    source = null
+  }
   return {
     kind: 'ScriptProcessor',
     send: (m) => host.handle(m),
     close: () => {
+      unlisten()
       node.onaudioprocess = null
       node.disconnect()
+    },
+    listen: (media) => {
+      unlisten()
+      if (media === null) return
+      source = ctx.createMediaStreamSource(media)
+      source.connect(node)
     },
   }
 }
@@ -1256,6 +1638,16 @@ export function browserLiveBackend(): LiveBackend {
       if (typeof ctx.createScriptProcessor !== 'function') throw why ?? new Error('no AudioWorklet')
       return scriptLink(ctx, onMessage)
     },
+    ...(typeof navigator !== 'undefined' && typeof navigator.mediaDevices?.getUserMedia === 'function'
+      ? {
+          // As raw as it comes: no echo cancelling, noise suppression or gain riding.
+          micStream: (stereo: boolean) =>
+            navigator.mediaDevices.getUserMedia({
+              audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: { ideal: stereo ? 2 : 1 } },
+              video: false,
+            }),
+        }
+      : {}),
     now: () => performance.now(),
     gestureSeen: () => {
       const ua = (globalThis.navigator as { userActivation?: { hasBeenActive?: boolean } } | undefined)?.userActivation
@@ -1290,5 +1682,15 @@ export function browserLiveBackend(): LiveBackend {
         // Storage blocked or full: the choice lasts the page.
       }
     },
+  }
+}
+
+// [media] into [link]'s mixer; false when it can't be (another rate, say).
+function tryListen(link: MixerLink, media: MediaStream): boolean {
+  try {
+    link.listen?.(media)
+    return true
+  } catch {
+    return false
   }
 }

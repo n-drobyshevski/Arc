@@ -5,13 +5,16 @@
   flex: none;
   display: inline-flex;
   align-items: stretch;
-  border: 1px solid var(--display-dim);
+  border: 1px solid color-mix(in srgb, var(--display-dim) 50%, transparent);
   border-radius: 8px;
   overflow: hidden;
 }
+/* With the scene's cell, a shade brighter (Kotlin groupBorder's lit). */
+.transport-keys.is-scene { border-color: var(--display-dim); }
 .transport-keys.is-lit { border-color: var(--display-ink); }
 .transport-keys.is-signal { border-color: var(--signal); }
-.transport-keys__divide { width: 1px; background: currentColor; color: var(--display-dim); opacity: 0.6; }
+.transport-keys__divide { width: 1px; background: currentColor; color: color-mix(in srgb, var(--display-dim) 50%, transparent); }
+.transport-keys.is-scene .transport-keys__divide { color: var(--display-dim); }
 .transport-keys.is-lit .transport-keys__divide { color: var(--display-ink); }
 .transport-keys.is-signal .transport-keys__divide { color: var(--signal); }
 
@@ -20,7 +23,7 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-width: 36px;
+  min-width: 32px;
   min-height: 30px;
   padding: 4px 10px;
   border: none;
@@ -35,7 +38,7 @@
   -webkit-user-select: none;
   user-select: none;
 }
-.transport-keys--compact .transport-key { min-width: 32px; padding: 3px 8px; }
+.transport-keys--compact .transport-key { min-width: 32px; padding: 3px 7px; }
 .transport-key:focus-visible { outline: var(--focus-ring); outline-offset: -3px; }
 .transport-key__dot { width: 10px; height: 10px; border-radius: 50%; background: var(--display-dim); }
 .transport-key--record.is-armed .transport-key__dot { background: var(--signal); animation: rec-blink 450ms ease-in-out infinite alternate; }
@@ -107,3 +110,8 @@
 .transport-key--erase { letter-spacing: 0.04em; }
 .transport-key--erase.is-on { color: var(--signal); }
 .transport-key--undo { font-size: 18px; }
+
+/* Where PatternLine reads its line's width from (lineFit.ts). */
+.pattern-line__probe { position: absolute; width: 0; height: 0; overflow: hidden; pointer-events: none; }
+/* CORRECT on: what it has corrected, in the counter's place. */
+.pattern-words__corrected { color: var(--signal); }
