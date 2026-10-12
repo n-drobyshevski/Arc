@@ -50,6 +50,8 @@ export interface GuideScreenProps {
   /** The entry open at first ([entryId]), for tests and previews. */
   initialOpen?: string | null
   class?: string
+  /** A search to show (web: the device view's "All … shortcuts"); a new object each time it is asked for. */
+  search?: { readonly query: string } | null
 }
 
 /** The id an entry is opened by: its section and its action. */
@@ -98,6 +100,11 @@ export function GuideScreen(props: GuideScreenProps): JSX.Element {
   const list = useRef<HTMLDivElement>(null)
   const root = useRef<HTMLDivElement>(null)
   const ids = useId()
+
+  // Asked to search (from a key's shortcuts): the field shows it.
+  useEffect(() => {
+    if (props.search) setQuery(props.search.query)
+  }, [props.search])
 
   // A new tab starts at its top.
   useEffect(() => {

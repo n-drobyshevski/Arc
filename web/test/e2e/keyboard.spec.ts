@@ -173,6 +173,8 @@ test('Ctrl+Z runs a new pad sound\'s UNDO', async ({ page }) => {
     await page.keyboard.press('Digit7')
     await expect(sheet).toBeVisible({ timeout: 1000 })
   }).toPass()
+  // The sounds wait behind CHANGE SOUND while the pad's settings show.
+  await sheet.getByRole('button', { name: /change sound/i }).click()
   // The first row is the pad's own sound: pick another.
   await sheet.locator('button.snd__pick').nth(1).click()
   const undo = page.getByRole('button', { name: 'Undo' })

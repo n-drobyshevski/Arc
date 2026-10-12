@@ -16,6 +16,8 @@ import { bytes, plural } from './format'
 const TOO_LARGE = 'This file is too large to be a backup'
 
 export const WebText = {
+  /** EDIT's page keys for screen readers (Kotlin's are plain keys under the knobs). */
+  EDIT_PAGES: 'Sound edit pages',
   // ---------- no WebMIDI (Strings.NO_MIDI_*, reference app.js:69-72) ----------
   NO_MIDI_TITLE: 'No MIDI in this browser',
   NO_MIDI_HINT:
@@ -111,6 +113,46 @@ export const WebText = {
    */
   LIVE_SLOW_OUTPUT:
     'Sound plays late here (often 0.2 s or more), as it does over Bluetooth. A wired output or the built-in speakers are much quicker.',
+  /** Replaces MirrorText.TAKES_NOTE "A take holds the pads and keys played on the phone, …". */
+  TAKES_NOTE:
+    "A take holds the pads and keys played in this browser, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save or Share copies one out.",
+  /** Takes' "Save or Share" where the browser can't share files: Save WAV is the only way out. */
+  TAKES_NOTE_SAVE_ONLY:
+    "A take holds the pads and keys played in this browser, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save WAV copies one out.",
+  // ---------- Live's device view (web only: the EP-133 drawn on a wide screen) ----------
+  /** The device view's label for screen readers. */
+  DEVICE_VIEW: 'EP-133 K.O. II',
+  /** A key's shortcuts card: "SOUND on the EP-133". */
+  keyOnDevice(key: string): string {
+    return `${key} on the EP-133`
+  },
+  /** Under a key's shortcuts: what the key does in arc. */
+  DEVICE_KEY_NOTE: 'arc only listens in Live. This key works on the device.',
+  DEVICE_PLAY_NOTE: 'Lit while the EP-133 plays. arc never starts or stops the device.',
+  DEVICE_VOLUME_NOTE: "The device's own volume. Sound played in arc follows this computer's volume.",
+  /** The link to the guide, searched for the key. */
+  allShortcuts(key: string): string {
+    return `All ${key} shortcuts`
+  },
+  NO_SHORTCUTS: 'No shortcuts in the guide use this key on its own.',
+  /** Live tools' third view on the desk: the EP-133 drawn whole. */
+  VIEW_DEVICE: 'Device',
+  /** A beat card or prompt copied where the browser has no share sheet (Android's chooser). */
+  CARD_COPIED: 'Copied. Paste it to Claude.',
+  /** PASTE BEAT where the page can't read the clipboard: the box a paste goes into. */
+  PASTE_HERE: 'Paste the beat card here',
+  PASTE_HERE_NOTE: 'This browser lets a page read the clipboard only from a paste: press Ctrl+V (⌘V), or long-press and Paste.',
+  /** Replaces ClaudeText.LEARN_PROMPT, which says Android. */
+  LEARN_PROMPT: 'Use the arc-beats skill. Teach me the EP-133 K.O. II from lesson 1, one step at a time. I use the Arc web app.',
+  /** After a pad's or KEYS key's name for screen readers while it is held for the arp or note repeat (Android outlines it only). */
+  ARP_HELD: ', held for the arp',
+  /** The plate's line while TAKE waits. */
+  TAKE_ARMED: 'Take armed: play a pad or start the EP-133',
+  /** −/+ in the pads view. */
+  PREV_GROUP: 'Previous group',
+  NEXT_GROUP: 'Next group',
+  OCTAVE_DOWN: 'Octave down',
+  OCTAVE_UP: 'Octave up',
   /** Replaces SettingsText.PAD_SOUNDS "Pad sounds saved on the phone". */
   PAD_SOUNDS: 'Pad sounds saved in this browser',
   /** SettingsText.padSounds with [PAD_SOUNDS]. */
@@ -233,6 +275,23 @@ export const WebText = {
   /** A control's tooltip with its key: "EDIT (E)". */
   keyHint(label: string, key: string): string {
     return `${label} (${key})`
+  },
+
+  // ---------- SAMPLE (Live) ----------
+  /** The SAMPLE panel's ✕ (Kotlin closes it with a swipe or Back). */
+  CLOSE_SAMPLE: 'Close sampling',
+  /** The mic refused (MirrorText.NO_MIC's web wording: no USB, and no app settings to open). */
+  NO_MIC: 'arc needs the microphone to sample it. RSP works without it.',
+  /** MirrorText.inputFailed's reasons for the mic on the web. */
+  NO_MIC_FOUND: 'no microphone found',
+  MIC_FAILED: "this browser can't sample the microphone here",
+  /**
+   * A source's name for screen readers: MirrorText.sourceName with arc's
+   * sound for RSP (the web resamples arc's own mix, not the phone's).
+   */
+  sampleSourceName(source: 'mic' | 'rsp' | 'usb', stereo: boolean): string {
+    const name = source === 'mic' ? 'Microphone' : source === 'rsp' ? "Resample arc's sound" : 'EP-133 over USB'
+    return name + (stereo ? ', stereo' : ', mono')
   },
 
   // ---------- app updates (PWA; no Android counterpart) ----------

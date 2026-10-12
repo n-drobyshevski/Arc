@@ -1,0 +1,29 @@
+/* PadEditPages.kt's look: PITCH and LEVEL over the page's X and Y, TRIM's waveform, the page keys. */
+.pad-pages { display: flex; flex-direction: column; gap: 12px; }
+.pad-pages__knobs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 16px; }
+@media (min-width: 640px) { .pad-pages__knobs { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.pad-pages__empty { min-height: 1px; }
+.pad-pages__keys { display: flex; gap: 8px; }
+.pad-pages__key {
+  --cap-face: var(--hw-dark-face);
+  --cap-edge: var(--hw-dark-edge);
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 36px;
+  border: 0;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  color: var(--hw-dark-ink);
+  font: inherit;
+  font-size: var(--size-caps-key-small);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+.pad-pages__key.is-on { --cap-face: var(--signal); --cap-edge: var(--signal-edge); color: var(--on-signal); }
+.pad-pages__note { margin: 0; color: var(--graphite); }
+
+.trim-wave { display: block; width: 100%; height: 44px; border-radius: 8px; background: var(--display); }
+.trim-wave rect { fill: color-mix(in srgb, var(--display-dim) 50%, transparent); }
+.trim-wave rect.is-in { fill: var(--signal); }

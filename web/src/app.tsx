@@ -38,8 +38,9 @@
 // On a phone on its side (ui/live/window.ts liveInBar; never on the desk),
 // Live's display line rides in the top bar's middle (LiveBar, MirrorScreen's
 // LivePill) and the page leaves it out.
+import { computed, signal, useComputed } from '@preact/signals'
 import { Component, type ComponentChildren, type JSX } from 'preact'
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { FactorySounds } from './core/features/factorySounds'
 import { MirrorText } from './core/text/mirrorText'
 import { SettingsText } from './core/text/settingsText'
@@ -47,7 +48,7 @@ import { Strings } from './core/text/strings'
 import { WebText } from './core/text/webText'
 import { attachDrop, isPakName } from './platform/files/pick'
 import { supported as hapticsSupported } from './platform/haptics'
-import type { ArcController } from './state/controller'
+import { REVIEW_KEY, type ArcController } from './state/controller'
 import { emptyMirrorState, type MirrorUi, type TaskUi } from './state/types'
 import { APP_BUILD } from './version'
 import { AppProvider, useController, useNav } from './ui/AppContext'
@@ -94,6 +95,24 @@ import { DeviceUploadSheet } from './ui/sheets/UploadSheet'
 import { useDesk, useFinePointer, useWindowSize } from './ui/useDesk'
 import { useAppKeys } from './ui/useAppKeys'
 import { KeyboardKeysSheet } from './ui/sheets/KeyboardKeysSheet'
+import { PatternSheet } from './ui/sheets/PatternSheet'
+import { TransportContext, type TransportUi } from './ui/live/PatternLine'
+import { FunctionKeysContext, ProjectHold, ProjectHoldContext, TempoContext, type FunctionKeysUi, type ProjectUi, type TempoUi } from './ui/live/FunctionRow'
+import { PunchContext, type PunchUi } from './ui/live/LivePunch'
+import { StepContext, type StepActions } from './ui/live/StepPanel'
+import { SceneContext, type SceneActions } from './ui/live/ScenePanel'
+import { ArpContext, type ArpActions } from './ui/live/ArpWords'
+import { ClaudeContext, learnUrl, type ClaudeActions } from './ui/live/ClaudeSection'
+import { BeatImportSheet } from './ui/sheets/BeatImportSheet'
+import { SampleContext, type SampleActions } from './ui/live/SamplePanel'
+import { SampleReviewSheet } from './ui/sheets/SampleReviewSheet'
+import { BeatCards } from './core/features/beatCard'
+import { stepWord } from './state/stepPlan'
+import { projectChoicesOf, projectKeyOf, projectKeyState } from './ui/live/projectKey'
+import { ProjectSheet } from './ui/sheets/ProjectSheet'
+import { TempoSheet } from './ui/sheets/TempoSheet'
+import { FxSheet } from './ui/sheets/FxSheet'
+import { patternBpm } from './state/patternPlan'
 import { computerKeys, setComputerKeys } from './ui/keyPrefs'
 import './app.css'
 
@@ -101,6 +120,17 @@ import './app.css'
 const PROGRESS = 'progress'
 /** The Keyboard keys sheet (web, desktop: ?). */
 const KEYS_SHEET = 'keys'
+/** Live's pattern sheet (RECORD held). */
+const PATTERN_SHEET = 'pattern'
+const BEAT_SHEET = 'beat'
+/** SAMPLE's review sheet after a take. */
+const REVIEW_SHEET = 'sample-review'
+/** Live's tempo sheet (TEMPO held). */
+const TEMPO_SHEET = 'tempo'
+/** Live's project sheet (PROJECT held). */
+const PROJECT_SHEET = 'project'
+/** FX tapped: the effect, its sends, the compressor and the sidechain. */
+const FX_SHEET = 'fx'
 
 export interface AppProps {
   controller: ArcController
@@ -147,6 +177,32 @@ export function App(props: AppProps): JSX.Element {
 }
 
 /** Root(): the screens by priority, the sheets over them, the toast over everything. */
+
+/** The guide's search when a device key's card asks for it (web only). */
+const guideSearch = signal<{ readonly query: string } | null>(null)
+
+/** Live's device view on the desk (web only), remembered in this browser. */
+const DEVICE_VIEW_KEY = 'arc.liveDeviceView'
+const deviceView = signal<boolean>(readDeviceView())
+
+function readDeviceView(): boolean {
+  try {
+    return globalThis.localStorage?.getItem(DEVICE_VIEW_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function setDeviceView(on: boolean): void {
+  deviceView.value = on
+  try {
+    if (on) globalThis.localStorage?.setItem(DEVICE_VIEW_KEY, '1')
+    else globalThis.localStorage?.removeItem(DEVICE_VIEW_KEY)
+  } catch {
+    // Kept for this page only.
+  }
+}
+
 function Root(): JSX.Element {
   const c = useController()
   const nav = useNav()
@@ -164,6 +220,18 @@ function Root(): JSX.Element {
     openHelp: () => nav.open(sheetLayer(KEYS_SHEET)),
     back: () => nav.back(),
   })
+  // PATTERN: RECORD and PLAY on Live's display lines, read through the context (its signal re-renders the lines only).
+  const transport = useMemo(() => transportUi(c, () => nav.open(sheetLayer(PATTERN_SHEET))), [c])
+  const tempo = useMemo(() => tempoUi(c, () => nav.open(sheetLayer(TEMPO_SHEET))), [c])
+  const step = useMemo(() => stepUi(c), [c])
+  const scenes = useMemo(() => sceneUi(c), [c])
+  const arp = useMemo(() => arpUi(c), [c])
+  const claude = useMemo(() => claudeUi(c), [c])
+  const sample = useMemo(() => sampleUi(c), [c])
+  // The top bar's mic key: its light read there alone.
+  const micKey = useMemo(() => (sample === null ? null : { on: computed(() => c.sample.ui.value.on), onTap: () => c.toggleSample() }), [c, sample])
+  // PROJECT held: the pads printed 1 to 9 pick a project instead of sounding.
+  const projectHold = useMemo(() => new ProjectHold(), [])
   // Live's EDIT (giving a pad another sound): on Live, in PADS, until switched off or left.
   const [editPads, setEditPads] = useState(false)
   const canEdit = v.tab === 'live' && !settings.liveKeys
@@ -181,6 +249,65 @@ function Root(): JSX.Element {
     const pad = editPadOf(v.sheets)
     if (pad !== null) nav.close(sheetLayer(`${EDIT_PREFIX}${pad.group}:${pad.offset}`))
   }, [ready])
+  // FX held: the pads play the punch-ins until it lets go, which lets go of every one held (MainActivity punchMode).
+  const [fxHeld, setFxHeld] = useState(false)
+  const punchOff = (): void => {
+    c.fx.desk.punchAllUp()
+    setFxHeld(false)
+  }
+  useEffect(() => {
+    if (v.tab !== 'live' && fxHeld) punchOff()
+  }, [v.tab])
+  // Only the effect's type re-renders the shell (its knobs turn many times a second).
+  const fxType = useComputed(() => c.fx.desk.fx.value.type).value
+  const punches = c.fx.desk.punches.value
+  const punchOn = fxHeld && v.tab === 'live' && !settings.liveKeys
+  const punch: PunchUi | null = useMemo(
+    () =>
+      punchOn
+        ? {
+            held: punches,
+            onDown: (slot, depth) => c.fx.desk.punchDown(slot, depth),
+            onMove: (slot, depth) => c.fx.desk.punchMove(slot, depth),
+            onUp: (slot) => c.fx.desk.punchUp(slot),
+            haptic: settings.haptics,
+          }
+        : null,
+    [c, punchOn, punches, settings.haptics],
+  )
+  // Live's function keys over the pads: SOUND (EDIT, and the pad played last's sheet); TEMPO is [tempo].
+  const fnKeys: FunctionKeysUi = {
+    sound: {
+      editOn: editPads && !settings.liveKeys,
+      enabled: v.tab === 'live',
+      onTap: () => {
+        // In KEYS it goes back to the pads with EDIT on.
+        if (settings.liveKeys) {
+          c.setLiveKeys(false)
+          setEditPads(true)
+        } else {
+          setEditPads(!editPads)
+        }
+      },
+      onHold: () => {
+        const pad = state.keysPad
+        if (pad === null) c.toast(MirrorText.PLAY_A_PAD)
+        else if (c.editTarget(pad) !== null) nav.open(sheetLayer(`${EDIT_PREFIX}${pad.group}:${pad.offset}`))
+      },
+    },
+    project: v.tab === 'live' ? projectUi(c, state.busy, () => nav.open(sheetLayer(PROJECT_SHEET))) : null,
+    fx:
+      v.tab === 'live'
+        ? {
+            label: MirrorText.fxKeyLabel(fxType),
+            name: MirrorText.fxName(fxType),
+            on: fxType !== 'NONE',
+            held: fxHeld,
+            onSheet: () => nav.open(sheetLayer(FX_SHEET)),
+            onHold: (down) => (down ? setFxHeld(true) : punchOff()),
+          }
+        : null,
+  }
   // On a phone on its side, Live's display line rides in the top bar; the piano's
   // notes (while it shows) let it name a device note past them.
   const win = useWindowSize()
@@ -254,6 +381,9 @@ function Root(): JSX.Element {
         onPianoWhites={(w) => c.setPianoWhites(w)}
         hapticsSupported={hapticsSupported()}
         onHaptics={(on) => c.setHaptics(on)}
+        onMakeUpDelay={(on) => c.setMakeUpDelay(on)}
+        onReviewSamples={c.sample.available ? (on) => c.sample.setReviewSamples(on) : undefined}
+        bluetooth={c.liveBluetooth.value}
         onRestoreFolder={() => void c.pickFolder()}
         onReconnectFolder={() => void c.reconnectFolder()}
         onExportLibrary={() => void c.exportLibrary()}
@@ -324,6 +454,8 @@ function Root(): JSX.Element {
         onNote={(text) => c.toast(text)}
         // Read by the top bar alone, so a new delay re-renders only that.
         late={v.tab === 'live' ? c.liveLate : null}
+        madeUp={v.tab === 'live' ? c.delayMadeUpFor : null}
+        sample={v.tab === 'live' ? micKey : null}
         onDebug={() => nav.openScreen({ kind: 'debug' })}
         // The section list's last entry: the list closes and Settings opens in its place.
         onSettings={() => nav.replace(overlayLayer('menu'), screenLayer({ kind: 'settings' }))}
@@ -332,7 +464,7 @@ function Root(): JSX.Element {
         onTheme={(t) => c.setTheme(t)}
         guideOpen={v.guide}
         onGuide={(open) => (open ? nav.openScreen({ kind: 'guide' }) : nav.close(screenLayer({ kind: 'guide' })))}
-        guide={<GuideScreen onBack={() => nav.close(screenLayer({ kind: 'guide' }))} />}
+        guide={<GuideScreen onBack={() => nav.close(screenLayer({ kind: 'guide' }))} search={guideSearch.value} />}
         desk={desk}
         // Live's EDIT tab under GUIDE (on the desk it hangs on the K.O. II panel instead).
         edgeTab={canEdit && !desk ? <EditEdgeTab on={editPads} onChange={setEditPads} inert={v.menu} /> : undefined}
@@ -357,6 +489,16 @@ function Root(): JSX.Element {
   const screen = <div class="app__screen" data-view={view}>{page}</div>
   const guide = screenLayer({ kind: 'guide' })
   return (
+    <TransportContext.Provider value={transport}>
+    <StepContext.Provider value={step}>
+    <SceneContext.Provider value={scenes}>
+    <SampleContext.Provider value={sample}>
+    <ArpContext.Provider value={arp}>
+    <ClaudeContext.Provider value={claude}>
+    <TempoContext.Provider value={tempo}>
+    <FunctionKeysContext.Provider value={fnKeys}>
+    <ProjectHoldContext.Provider value={projectHold}>
+    <PunchContext.Provider value={punch}>
     <div class={desk ? 'app is-desk' : 'app'}>
       {desk ? (
         <CoachHost visible={v.coach && view === 'shell'} onDismiss={() => nav.close(overlayLayer('coach'))}>
@@ -385,7 +527,7 @@ function Root(): JSX.Element {
       {/* The Device tab's sheets: pads 'pads:device:<n>', upload / trim from state.browser.draft. */}
       {tabs && v.tab === 'device' && <><DevicePadsSheet view={v} /><DeviceUploadSheet view={v} /></>}
       {/* Live's EDIT: the pad sheet 'edit:<group>:<offset>', and the upload / trim sheets for a new sample. */}
-      {tabs && v.tab === 'live' && <><PadEditSheet view={v} /><DeviceUploadSheet view={v} /></>}
+      {tabs && v.tab === 'live' && <><PadEditSheet view={v} /><DeviceUploadSheet view={v} /><LivePatternSheet view={v} /><LiveTempoSheet view={v} /><LiveProjectSheet view={v} /><LiveFxSheet view={v} /><LiveBeatSheet view={v} /><LiveReviewSheet view={v} /></>}
       {/* The Backups tab's sheets: detail 'detail:<id>', compare picker 'comparePick:<id>',
           restore 'restore:<id>', the delete dialog 'delete'. */}
       {tabs && v.tab === 'backups' && <BackupsSheets view={v} />}
@@ -400,13 +542,426 @@ function Root(): JSX.Element {
         cancel={MirrorText.DISCARD}
         confirmColor="var(--navy)"
         onConfirm={() => void c.writeOfflinePads()}
-        onDismiss={() => c.discardOfflinePads()}
+        onDismiss={() => void c.discardOfflinePads()}
       />
       <ToastLayer raise={state.toast?.id ?? null}>
         <ControllerToast controller={c} />
         <UpdatePrompt />
       </ToastLayer>
     </div>
+    </PunchContext.Provider>
+    </ProjectHoldContext.Provider>
+    </FunctionKeysContext.Provider>
+    </TempoContext.Provider>
+    </ClaudeContext.Provider>
+    </ArpContext.Provider>
+    </SampleContext.Provider>
+    </SceneContext.Provider>
+    </StepContext.Provider>
+    </TransportContext.Provider>
+  )
+}
+
+/** TEMPO's key over the pads (Kotlin FunctionKeysUi's TEMPO part), read from the controller's signals as it renders. */
+function tempoUi(c: ArcController, openSheet: () => void): TempoUi | null {
+  const p = c.pattern
+  if (!p.canClick) return null
+  return {
+    get clickOn() {
+      return p.metronome.value.on
+    },
+    get bpm() {
+      return p.metronome.value.bpm
+    },
+    get deviceBpm() {
+      return c.state.value.mirror?.state.bpm ?? null
+    },
+    get beat() {
+      return p.beats.value
+    },
+    onClick: (on) => p.setClick(on),
+    onSheet: openSheet,
+  }
+}
+
+/** PROJECT as its key shows it (Kotlin projectKeyOf), and what it does. */
+function projectUi(c: ArcController, busy: boolean, openSheet: () => void): ProjectUi {
+  const k = projectKeyOf(liveMirror(c), busy)
+  return {
+    shown: k.shown,
+    state: projectKeyState(k),
+    enabled: k.enabled,
+    switching: k.switching,
+    onStep: () => c.stepProject(),
+    onPick: openSheet,
+    onSelect: (n) => c.selectProject(n),
+  }
+}
+
+/** PROJECT held and let go of: the project sheet 'project', on Live. */
+function LiveProjectSheet(props: { view: NavView }): JSX.Element {
+  const c = useController()
+  const nav = useNav()
+  return (
+    <ProjectSheet
+      open={props.view.sheets.includes(PROJECT_SHEET)}
+      choices={projectChoicesOf(liveMirror(c), c.state.value.busy)}
+      onPick={(n) => c.selectProject(n)}
+      onDismiss={() => nav.close(sheetLayer(PROJECT_SHEET))}
+    />
+  )
+}
+
+/** TEMPO held: the tempo sheet 'tempo', on Live. */
+function LiveTempoSheet(props: { view: NavView }): JSX.Element | null {
+  const c = useController()
+  const nav = useNav()
+  const p = c.pattern
+  if (!p.canClick) return null
+  const m = p.metronome.value
+  return (
+    <TempoSheet
+      open={props.view.sheets.includes(TEMPO_SHEET)}
+      bpm={m.bpm}
+      deviceBpm={c.state.value.mirror?.state.bpm ?? null}
+      clickOn={m.on}
+      timing={p.ui.value.timingSettings}
+      onClick={(on) => p.setClick(on)}
+      onBpm={(bpm) => p.setTempo(bpm)}
+      onTap={(at) => p.tapTempo(at)}
+      onInterval={(t) => p.setTimingInterval(t)}
+      onSwing={(v) => p.setTimingSwing(v)}
+      onQuantize={(on) => p.setTimingQuantize(on)}
+      arp={p.arp.value.settings}
+      onArpOrder={(o) => p.setArpOrder(o)}
+      onArpOctaves={(n) => p.setArpOctaves(n)}
+      onArpGate={(v) => p.setArpGate(v)}
+      onArpLatch={(on) => p.setArpLatch(on)}
+      onDismiss={() => nav.close(sheetLayer(TEMPO_SHEET))}
+    />
+  )
+}
+
+/** FX tapped: the project's effect, its sends, the compressor and the sidechain; the pad played last to hear them on. */
+function LiveFxSheet(props: { view: NavView }): JSX.Element {
+  const c = useController()
+  const nav = useNav()
+  const d = c.fx.desk
+  const fx = d.fx.value
+  const state = c.state.value
+  const selected = state.keysPad
+  return (
+    <FxSheet
+      open={props.view.sheets.includes(FX_SHEET)}
+      settings={fx}
+      bpm={patternBpm(state.mirror?.state.bpm, c.pattern.metronome.value.bpm)}
+      selected={selected}
+      nameOf={(pad) => c.mirrorName(pad)}
+      // An effect put on with no send anywhere: the group of the pad played last sends to it.
+      onType={(t) => d.setType(t, selected?.group ?? null)}
+      onXY={(x, y) => d.setXY(x, y)}
+      onSend={(g, v) => d.setSend(g, v)}
+      onComp={(on, x, y) => d.setComp({ on, x, y })}
+      onSidechainOn={(on) => d.setSidechainOn(on)}
+      onSidechainSource={(g, pad) => d.setSidechainSource(g, pad)}
+      onSidechainDest={(g) => d.toggleSidechainDest(g)}
+      onSidechainXY={(x, y) => d.setSidechainXY(x, y)}
+      // The cap plays the pad as Live does, through the effects (a try, never a pattern's note).
+      onPadDown={(pad, at) => void c.tryPad(pad, at)}
+      onPadUp={(pad) => c.releaseTry(pad)}
+      onDismiss={() => nav.close(sheetLayer(FX_SHEET))}
+    />
+  )
+}
+
+/** SCENES' chip and panel for Live (Kotlin LiveScene), its state read from the controller's signals as each part renders. */
+function sceneUi(c: ArcController): SceneActions | null {
+  const p = c.pattern
+  if (!p.available) return null
+  return {
+    get ui() {
+      return p.scene.value
+    },
+    get running() {
+      const ph = p.ui.value.phase
+      return ph === 'PLAYING' || ph === 'COUNT_IN'
+    },
+    onOpen: () => {
+      // The panels share the function keys' place.
+      c.sample.exit()
+      p.setSceneOpen(true)
+    },
+    onClose: () => p.setSceneOpen(false),
+    onGroup: (g) => p.setSceneGroup(g),
+    onPlay: () => p.play(),
+    onScene: (dir) => p.sceneStep(dir),
+    onPatternStep: (g, dir) => p.scenePatternStep(g, dir),
+    onPatternPick: (g, n) => p.scenePatternPick(g, n),
+    onNextFree: (g) => p.scenePatternNextFree(g),
+    onGrid: (g) => p.sceneGrid(g),
+    onCommit: () => p.sceneCommit(),
+    onErase: () => p.sceneEraseHold(),
+    onSwitch: (t) => p.setSceneSwitch(t),
+    onClipMode: (m) => p.setClipMode(m),
+    onBar: (b) => p.setClipBar(b),
+    onCopy: () => p.clipCopy(),
+    onPaste: () => p.clipPaste(),
+  }
+}
+
+/** SAMPLE's panel and pads for Live (Kotlin SampleUi), its state read from the controller's signals as each part renders. */
+function sampleUi(c: ArcController): SampleActions | null {
+  const d = c.sample
+  if (!d.available) return null
+  return {
+    get ui() {
+      return d.ui.value
+    },
+    level: d.level,
+    get lastTake() {
+      return d.lastTake.value
+    },
+    onToggle: () => c.toggleSample(),
+    onClose: () => d.exit(),
+    onStop: () => d.stop(),
+    onSource: (step) => d.stepInput(step),
+    onStereo: (on) => d.setInput({ source: d.ui.peek().input.source, stereo: on }),
+    onGain: (db) => d.setGain(db),
+    onThreshold: (db) => d.setThreshold(db),
+    onLatch: (on) => d.setLatch(on),
+    onBars: (bars) => d.setBars(bars),
+    onPattern: (on) => d.setPattern(on),
+    get hasPattern() {
+      return c.pattern.ui.value.hasNotes.some(Boolean)
+    },
+  }
+}
+
+/**
+ * SAMPLE's review sheet (Kotlin's review sheet layer): open while a take
+ * waits on it. Back, or the scrim, is a DISCARD (with UNDO on the toast).
+ */
+function LiveReviewSheet(props: { view: NavView }): JSX.Element | null {
+  const c = useController()
+  const nav = useNav()
+  const d = c.sample
+  const review = d.review.value
+  const playing = c.playing.value === REVIEW_KEY
+  const has = props.view.sheets.includes(REVIEW_SHEET)
+  const opened = useRef(false)
+  useEffect(() => {
+    if (review !== null && !has) {
+      if (opened.current) {
+        // The layer closed (Back) while the take waits.
+        opened.current = false
+        c.stopReview()
+        d.discardSample()
+      } else {
+        nav.open(sheetLayer(REVIEW_SHEET))
+      }
+    } else if (review === null && has) {
+      nav.close(sheetLayer(REVIEW_SHEET))
+    }
+    if (has) opened.current = true
+    if (review === null && !has) opened.current = false
+  }, [review !== null, has])
+  if (!d.available) return null
+  const done = (run: () => void) => () => {
+    c.stopReview()
+    run()
+  }
+  return (
+    <SampleReviewSheet
+      open={review !== null && has}
+      review={review}
+      playing={playing}
+      onTrim={(start, length) => d.setReviewTrim(start, length)}
+      onNormalize={(on) => d.setReviewNormalize(on)}
+      onTrimSilence={(on) => d.setReviewTrimSilence(on)}
+      onSlot={(step) => d.stepReviewSlot(step)}
+      onPlay={() => c.playReview()}
+      onStop={() => c.stopReview()}
+      onRetake={done(() => d.retakeSample())}
+      onKeep={done(() => d.keepSample())}
+      onDiscard={done(() => d.discardSample())}
+    />
+  )
+}
+
+/** Live tools' CLAUDE (Kotlin ClaudeUi), its state read from the controller's signals as the section renders. */
+function claudeUi(c: ArcController): ClaudeActions | null {
+  const p = c.pattern
+  if (!p.available) return null
+  return {
+    get scene() {
+      return p.scene.value.label
+    },
+    get numbers() {
+      return p.scene.value.groups.map((g) => g.number)
+    },
+    get hasNotes() {
+      return p.ui.value.hasNotes
+    },
+    onShareScene: () => void c.shareBeat(null),
+    onSharePattern: (g) => void c.shareBeat(g),
+    onPaste: () => void c.pasteBeat(),
+    learnUrl: learnUrl(),
+  }
+}
+
+/** ARP / RPT and LATCH for Live (Kotlin LiveArp), its state read from the controller's signal as each part renders. */
+function arpUi(c: ArcController): ArpActions | null {
+  const p = c.pattern
+  if (!p.available) return null
+  return {
+    get ui() {
+      return p.arp.value
+    },
+    onOn: (on) => p.setArpOn(on),
+    onLatch: (on) => p.setArpLatch(on),
+  }
+}
+
+/** STEP's chip, panel and pads for Live (Kotlin LiveStep), its state read from the controller's signal as each part renders. */
+function stepUi(c: ArcController): StepActions | null {
+  const p = c.pattern
+  if (!p.available) return null
+  return {
+    get ui() {
+      return p.step.value
+    },
+    get pickedWord() {
+      const n = p.step.value.picked
+      return n === null ? null : stepWord(n, n.semitones === null ? c.mirrorName(n.pad) : null, c.settings.value.keysNames)
+    },
+    onOpen: () => {
+      c.sample.exit()
+      p.setStepOpen(true)
+    },
+    onClose: () => p.setStepOpen(false),
+    onRecordDown: () => p.stepRecordDown(),
+    onRecordUp: () => p.stepRecordUp(),
+    onPlay: () => p.stepPlay(),
+    onMinus: () => p.stepBy(-1),
+    onPlus: () => p.stepBy(1),
+    onJump: (step) => p.stepJump(step),
+    onPage: (bar) => p.stepPageTo(bar),
+    onVelocity: (v) => p.setStepVelocity(v),
+    onGate: (t) => p.setStepGate(t),
+    onKnobEnd: () => p.stepKnobEnd(),
+    onNudge: (on) => p.setStepNudge(on),
+    onCorrect: (on) => p.setStepCorrect(on),
+    onPadPick: (pad) => c.stepPadPick(pad),
+    onNotePick: (note) => c.stepNotePick(note),
+    onGroup: (g) => p.setStepGroup(g),
+  }
+}
+
+/** PATTERN's keys for Live's lines (Kotlin TransportUi), its state read from the controller's signal as each line renders. */
+function transportUi(c: ArcController, openSheet: () => void): TransportUi | null {
+  const p = c.pattern
+  if (!p.available) return null
+  return {
+    get ui() {
+      return p.ui.value
+    },
+    position: (ms) => p.position(ms),
+    onRecordDown: (at) => p.recordDown(at),
+    onRecordUp: (at) => p.recordUp(at),
+    onPlay: (held) => p.play(held),
+    onSheet: openSheet,
+    onErase: (on) => p.setErase(on),
+    onUndo: () => p.undo(),
+  }
+}
+
+/** RECORD held: the pattern sheet 'pattern', on Live. */
+/**
+ * A beat card's sheet over Live, open while a card waits (pasted, or read from
+ * PASTE BEAT) or PASTE BEAT waits for a paste; a layer of its own, so Back
+ * closes it as CANCEL does.
+ */
+function LiveBeatSheet(props: { view: NavView }): JSX.Element | null {
+  const c = useController()
+  const nav = useNav()
+  const p = c.pattern
+  const beat = p.beat.value
+  const pasting = c.beatPasting.value
+  const shown = beat !== null || pasting
+  const has = props.view.sheets.includes(BEAT_SHEET)
+  // The layer opens with the card; the layer closed (Back) while the card waits is a CANCEL.
+  const opened = useRef(false)
+  useEffect(() => {
+    if (shown && !has) {
+      if (opened.current) {
+        opened.current = false
+        p.dismissBeat()
+        c.cancelBeatPaste()
+      } else {
+        nav.open(sheetLayer(BEAT_SHEET))
+      }
+    } else if (!shown && has) {
+      nav.close(sheetLayer(BEAT_SHEET))
+    }
+    if (has) opened.current = true
+    if (!shown && !has) opened.current = false
+  }, [shown, has])
+  // Web delta (no ACTION_SEND): a paste anywhere on Live with an ARC BEAT line in it opens the card's
+  // sheet; one into a text field, or without a card, is left alone.
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent): void => {
+      const t = e.target
+      if (t instanceof HTMLElement && (t.isContentEditable || t.closest('input, textarea, select') !== null)) return
+      const text = e.clipboardData?.getData('text/plain') ?? ''
+      if (!BeatCards.hasCard(text)) return
+      e.preventDefault()
+      void c.receiveBeat(text)
+    }
+    document.addEventListener('paste', onPaste)
+    return () => document.removeEventListener('paste', onPaste)
+  }, [c])
+  if (!p.available) return null
+  return (
+    <BeatImportSheet
+      open={shown && has}
+      ui={beat}
+      pasting={pasting}
+      onCancel={() => {
+        p.dismissBeat()
+        c.cancelBeatPaste()
+      }}
+      onImport={(setTempo) => p.importBeat(setTempo)}
+      onCopyProblems={(problems) => void c.copyProblems(problems)}
+      onPaste={(text) => void c.receiveBeat(text)}
+    />
+  )
+}
+
+function LivePatternSheet(props: { view: NavView }): JSX.Element | null {
+  const c = useController()
+  const nav = useNav()
+  const p = c.pattern
+  if (!p.available) return null
+  return (
+    <PatternSheet
+      open={props.view.sheets.includes(PATTERN_SHEET)}
+      ui={p.ui.value}
+      onDismiss={() => nav.close(sheetLayer(PATTERN_SHEET))}
+      actions={{
+        onLength: (g, bars) => p.setLength(g, bars),
+        onDouble: (g) => p.double(g),
+        onTiming: (t) => p.setTiming(t),
+        onCountIn: (on) => p.setCountIn(on),
+        onAutoLength: (on) => p.setAutoLength(on),
+        onUndo: () => p.undo(),
+        onClear: (g) => p.clear(g),
+        onErase: (on) => {
+          p.setErase(on)
+          // On, the sheet makes way for the pads.
+          if (on) nav.close(sheetLayer(PATTERN_SHEET))
+        },
+      }}
+    />
   )
 }
 
@@ -474,8 +1029,32 @@ function TabScreen(props: {
       return (
         <MirrorScreen
           mirror={liveMirror(c)}
+          take={c.canRecord ? { state: c.rec.value, onTake: () => c.toggleTake() } : null}
+          deviceView={deviceView.value}
+          onDeviceView={(on) => setDeviceView(on)}
+          onGuide={(query) => {
+            guideSearch.value = { query }
+            nav.openScreen({ kind: 'guide' })
+          }}
+          takes={{
+            list: state.takes,
+            playing: c.playing.value,
+            keyOf: (t) => c.takeKey(t),
+            fmtWhen: (ms) => c.fmtDateTime(ms),
+            connected: state.device !== null,
+            canShare: c.canShareTakes,
+            onPlay: (t) => void c.playTake(t),
+            onStop: () => c.stopPlayback(),
+            onShare: (t) => void c.shareTake(t),
+            onSave: (t) => void c.saveTake(t),
+            onToDevice: (t) => {
+              void c.takeToDevice(t)
+              nav.selectTab('device')
+            },
+            onDelete: (t) => void c.deleteTake(t),
+          }}
           onGetFactory={c.canGetFactory && FactorySounds.inLibrary(state.backups) === null ? () => void c.getFactorySounds() : null}
-          offlinePads={state.offlinePads > 0 ? { count: state.offlinePads, onReset: () => c.resetOfflinePads() } : null}
+          offlinePads={state.offlinePads > 0 ? { count: state.offlinePads, onReset: () => void c.resetOfflinePads() } : null}
           onStop={() => c.stopPlayback()}
           nameOf={(pad) => c.mirrorName(pad)}
           oneGroup={settings.liveOneGroup}
@@ -499,6 +1078,7 @@ function TabScreen(props: {
           onPadKept={(pad) => void c.keepPad(pad)}
           onPadUp={(pad) => c.releasePad(pad)}
           onPadCut={(pad) => c.cutPad(pad)}
+          onPadPressure={(pad, p) => c.padPressure(pad, p)}
           // Signals, read by each pad and key: a voice doesn't re-render this screen.
           playing={livePlaying(c)}
           haptics={settings.haptics}
@@ -531,6 +1111,7 @@ function TabScreen(props: {
             onOctave: (o) => c.setKeysOctave(o),
             onNote: (n, hold, at) => void c.playNote(n, hold, at),
             onNoteUp: (n) => c.releaseNote(n),
+            onNotePressure: (n, p) => c.notePressure(n, p),
             onView: (wide, view) => c.setKeysView(wide, view),
             onSelect: (pad) => c.selectKeysPad(pad),
           }}

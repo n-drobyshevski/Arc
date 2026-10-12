@@ -644,6 +644,8 @@ describe('Live offline', () => {
     await until(h, (s) => s.mirror?.offline != null)
     const m = h.c.state.value.mirror!
     expect(m.offline).toBe(MirrorText.lastSeen(h.c.fmtDateTime(Date.UTC(2026, 9, 5, 12, 2))))
+    // Where the line is short, the day alone (MirrorScreen's IdleWords).
+    expect(m.offlineShort).toBe(MirrorText.seen(h.c.fmtMonthDay(Date.UTC(2026, 9, 5, 12, 2))))
     expect(m.error).toBeNull()
     expect(h.c.mirrorName(A1)).toBe('kick')
   })
@@ -1305,7 +1307,7 @@ describe('Live offline: pads changed in arc only', () => {
     expect(h.c.mirrorName(A5)).toBe('snare')
     expect(h.c.state.value.offlinePads).toBe(1)
     await vi.waitFor(() => expect(h.liveAudio.loaded.has('2:snare')).toBe(true))
-    h.c.resetOfflinePads()
+    await h.c.resetOfflinePads()
     expect(h.toasts.at(-1)?.text).toBe(MirrorText.PADS_RESET)
     expect(h.c.mirrorName(A5)).toBe('clap')
     expect(h.c.state.value.offlinePads).toBe(0)
@@ -1363,7 +1365,7 @@ describe('Live offline: pads changed in arc only', () => {
     const h = await readThenUnplugged({ pack: false })
     expect(await h.c.assignPad(A5, 2, 'device')).toBe(true)
     await plugged(h)
-    h.c.discardOfflinePads()
+    await h.c.discardOfflinePads()
     expect(h.toasts.at(-1)?.text).toBe(MirrorText.OFFLINE_DISCARDED)
     expect(h.c.state.value).toMatchObject({ offlinePrompt: null, offlinePads: 0 })
     expect(h.storage.getItem(PADS_KEY)).toBeNull()

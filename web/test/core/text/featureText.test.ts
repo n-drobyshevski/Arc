@@ -162,8 +162,8 @@ describe('FeatureTextTest', () => {
     expect(MirrorText.offlineNote(MirrorText.FACTORY)).toBe(MirrorText.factoryNote(1))
     expect(MirrorText.offlineNote(MirrorText.lastSeen('5 Oct, 14:02'), 3)).toBe(MirrorText.OFFLINE_NOTE)
     expect(MirrorText.seen('5 Oct')).toBe('Seen 5 Oct')
-    // Web delta: no PROJECT key on the web.
-    expect(MirrorText.LISTEN_ONLY.endsWith('another sound in EDIT.')).toBe(true)
+    // PROJECT and SAMPLE write to the device too, as on Android.
+    expect(MirrorText.LISTEN_ONLY.endsWith('switch projects with PROJECT, or keep a sample in SAMPLE.')).toBe(true)
     expect(CoachText.PROJECT).toBe('Next project: tap; hold + pad 1–9 to pick')
     expect(MirrorText.projectChoice(3, true)).toBe('Project 3, shown')
     expect(MirrorText.projectChoice(4, false)).toBe('Project 4')

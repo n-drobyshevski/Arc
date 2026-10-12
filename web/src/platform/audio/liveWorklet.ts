@@ -22,10 +22,14 @@ class LiveProcessor extends AudioWorkletProcessor {
     this.port.onmessage = (e: MessageEvent<ToMixer>) => this.host.handle(e.data)
   }
 
-  process(_inputs: Float32Array[][], outputs: Float32Array[][]): boolean {
+  process(inputs: Float32Array[][], outputs: Float32Array[][]): boolean {
     const out = outputs[0]
     const left = out?.[0]
     if (!left) return true
+    // The mic, while SAMPLE takes it: a mono input feeds both sides.
+    const inp = inputs[0]
+    const inLeft = inp?.[0]
+    if (inLeft !== undefined && inLeft.length === left.length) this.host.input(inLeft, inp![1] ?? inLeft, inLeft.length)
     let right = out[1]
     if (!right) {
       // A mono output (it is asked for stereo): the right channel goes nowhere.

@@ -21,7 +21,9 @@ import { Library } from '../platform/storage/library'
 import { IdbPadSoundStore } from '../platform/storage/padSoundStore'
 import {
   CoachPrefs,
+  PatternPrefs,
   LastReadPrefs,
+  LIVE_PAD_SETTINGS_KEY,
   OfflinePadsPrefs,
   MirrorPrefs,
   SettingsStore,
@@ -33,7 +35,9 @@ import { canPickFolder, pickFolder } from '../platform/storage/external'
 import { pickFiles, readFile } from '../platform/files/pick'
 import { saveBytes } from '../platform/files/save'
 import { onLaunchFiles } from '../platform/files/launchQueue'
-import { shareFile } from '../platform/share/share'
+import { canShareFiles, shareFile, shareText } from '../platform/share/share'
+import { IdbSampleStore, MemorySampleStore, type SampleStore } from '../platform/storage/sampleStore'
+import { IdbTakeStore, memoryTakeStore, type TakeStore } from '../platform/storage/takeStore'
 import { WebAudioPlayer } from '../platform/audio/player'
 import { LiveAudio } from '../platform/audio/liveAudio'
 import { createWakeLock } from '../platform/wakelock/wakeLock'
@@ -99,6 +103,8 @@ export async function createBrowserDeps(options: BrowserDepsOptions = {}): Promi
   const storage = options.storage ?? pageStorage(demo)
   let library: LibraryApi
   let padSounds: PadSoundStore
+  let takes: TakeStore
+  let samples: SampleStore
   try {
     const dbOptions: OpenOptions = {}
     if (demo) dbOptions.name = DEMO_DB_NAME
@@ -107,11 +113,16 @@ export async function createBrowserDeps(options: BrowserDepsOptions = {}): Promi
     const lib = await Library.open(demo ? { dbOptions, channel: browserChannel(DEMO_CHANNEL_NAME) } : { dbOptions })
     library = lib
     padSounds = new IdbPadSoundStore(lib.db)
+    takes = new IdbTakeStore(lib.db)
+    samples = new IdbSampleStore(lib.db)
   } catch (e) {
     // Without a database the app still starts; every library action says why it failed.
     library = unavailableLibrary(e)
     // Live's pad copies then last for the session.
     padSounds = memoryPadSoundStore()
+    // And takes too, and SAMPLE's recordings.
+    takes = memoryTakeStore()
+    samples = new MemorySampleStore()
   }
   const settings = new SettingsStore(storage)
   const mirrorPrefs = new MirrorPrefs(storage)
@@ -134,6 +145,7 @@ export async function createBrowserDeps(options: BrowserDepsOptions = {}): Promi
     settings,
     mirrorPrefs,
     coach: new CoachPrefs(storage),
+    patternPrefs: new PatternPrefs(storage),
     files: {
       pick: (options) => pickFiles(options),
       read: (file) => readFile(file),
@@ -143,12 +155,17 @@ export async function createBrowserDeps(options: BrowserDepsOptions = {}): Promi
     },
     share: {
       share: (name, data, mime, title, text) => shareFile(name, data, mime, title, text === undefined ? {} : { text }),
+      canShareFiles: () => canShareFiles(),
+      shareText: (title, text) => shareText(title, text),
     },
     player,
     liveAudio,
     padSounds,
+    takes,
+    samples,
     lastRead: new LastReadPrefs(storage),
     offlinePads: new OfflinePadsPrefs(storage),
+    offlinePadSettings: new OfflinePadsPrefs(storage, LIVE_PAD_SETTINGS_KEY),
     factory: browserFactory(() => doc?.baseURI ?? globalThis.location.href),
     wakeLock,
     trafficLog: new TrafficLog(),
@@ -196,7 +213,12 @@ export async function createBrowserDeps(options: BrowserDepsOptions = {}): Promi
       },
     },
     launchFiles: (onFiles) => onLaunchFiles(onFiles),
-    clipboard: nav?.clipboard ? { writeText: (t) => nav.clipboard.writeText(t) } : undefined,
+    clipboard: nav?.clipboard
+      ? {
+          writeText: (t) => nav.clipboard.writeText(t),
+          ...(typeof nav.clipboard.readText === 'function' ? { readText: () => nav.clipboard.readText() } : {}),
+        }
+      : undefined,
     userAgent: nav?.userAgent ?? '',
     onStorageChange(listener) {
       // ?demo's settings are in memory: another tab's change is not its own.

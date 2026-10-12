@@ -445,9 +445,9 @@ describe('shareFile', () => {
     expect(d.title).toBe('My')
     expect(d.text).toBe('EP-133 backup: My')
     expect(d.files).toHaveLength(1)
-    expect(d.files[0]?.name).toBe('my.pak')
-    expect(d.files[0]?.type).toBe('application/zip')
-    expect(new Uint8Array(await (d.files[0] as File).arrayBuffer())).toEqual(bytes(1, 2))
+    expect(d.files?.[0]?.name).toBe('my.pak')
+    expect(d.files?.[0]?.type).toBe('application/zip')
+    expect(new Uint8Array(await (d.files?.[0] as File).arrayBuffer())).toEqual(bytes(1, 2))
     expect(s.save.downloads).toEqual([])
   })
 
@@ -674,7 +674,8 @@ describe('webText', () => {
       WebText.copyFailed('m'),
     )
     for (const s of all) {
-      expect(s).not.toMatch(/phone|share sheet/i)
+      // "phone" the word ("microphone" is fine).
+      expect(s).not.toMatch(/\bphones?\b|share sheet/i)
       if (s !== WebText.FOLDER_NOTE_OFF) expect(s).not.toMatch(/Documents/)
     }
   })

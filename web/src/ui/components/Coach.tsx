@@ -13,8 +13,9 @@
 // turned, with a hooked arrow above pointing at the edge.
 // Tap anywhere (or Escape) to close.
 //
-// A control scrolled out of view, or under a layer marked data-coach-cover (the
-// open Live tools panel), gets no tag. Where a marked element's touch area
+// A control scrolled out of view, mostly cut off by a scrolling panel it is in
+// (the docked tools), or under a layer marked data-coach-cover (the open Live tools
+// panel), gets no tag. Where a marked element's touch area
 // reaches past what shows (a word), its data-coach-box part is pointed at.
 //
 // Marking a control, two ways:
@@ -63,6 +64,7 @@ export const COACH_IDS = [
   'top.sections',
   'top.bluetooth',
   'top.connection',
+  'top.sample',
   'top.help',
   'top.theme',
   'edge.guide',
@@ -74,6 +76,8 @@ export const COACH_IDS = [
   'live.pads',
   'live.keys',
   'live.mode',
+  'live.arp',
+  'live.claude',
   'live.scale',
   'live.octave',
   'live.key',
@@ -110,6 +114,8 @@ export const COACH_MARKS: Readonly<Record<CoachId, CoachMarkSpec>> = Object.free
   // Live's amber key while the sound plays late (the face of the key itself; Chrome.kt's TagInk).
   'top.bluetooth': { label: CoachText.BLUETOOTH, face: 'var(--warn)', ink: 'var(--tag-ink)' },
   'top.connection': navyTag(CoachText.CONNECTION),
+  // Live's mic key (Chrome.kt: the signal tag).
+  'top.sample': { label: CoachText.SAMPLE, face: 'var(--signal)', ink: 'var(--on-signal)' },
   'top.help': { label: CoachText.HELP, face: 'var(--ink)', ink: 'var(--shell)' },
   // Web: the desk's theme switch, after the ? key (the nav rail's Settings key
   // says Settings in words).
@@ -125,6 +131,10 @@ export const COACH_MARKS: Readonly<Record<CoachId, CoachMarkSpec>> = Object.free
   // The KEYS grid: the same tip as the pads (MirrorScreen.kt).
   'live.keys': yellowTag(CoachText.PADS),
   'live.mode': navyTag(CoachText.MODE),
+  // ARP / RPT and LATCH after the mode word (LiveArp.kt).
+  'live.arp': navyTag(CoachText.ARP),
+  // Live tools' CLAUDE card (LiveClaude.kt).
+  'live.claude': navyTag(CoachText.CLAUDE),
   'live.scale': navyTag(CoachText.SCALE),
   'live.octave': navyTag(CoachText.OCTAVE),
   // The row over the piano: the key word, and the Pads ⇄ Piano switch.
@@ -254,6 +264,8 @@ function collectMarks(root: Element | null, reg: CoachRegistry, origin: DOMRect)
     if (r.width === 0 && r.height === 0) continue
     // Scrolled out of view, or under a panel: no tag pointing at what can't be seen.
     if (r.bottom <= origin.top || r.top >= origin.bottom || r.right <= origin.left || r.left >= origin.right) continue
+    // Mostly scrolled away in a panel (the docked tools): its tag would have nowhere to go.
+    if (cutByScroller(el, r)) continue
     if (covered(el, r)) continue
     out.push({
       id,
@@ -264,6 +276,21 @@ function collectMarks(root: Element | null, reg: CoachRegistry, origin: DOMRect)
     })
   }
   return out
+}
+
+/** Whether a scrolling ancestor of [el] shows less than half of its box [r] (the rest scrolled out of the scroller's view). */
+function cutByScroller(el: Element, r: DOMRect): boolean {
+  if (typeof getComputedStyle !== 'function') return false
+  for (let a = el.parentElement; a !== null && a !== document.body; a = a.parentElement) {
+    if (a.scrollHeight <= a.clientHeight + 1 && a.scrollWidth <= a.clientWidth + 1) continue
+    const s = getComputedStyle(a)
+    if (!/(auto|scroll)/.test(s.overflowY + s.overflowX)) continue
+    const b = a.getBoundingClientRect()
+    const shownH = Math.min(r.bottom, b.bottom) - Math.max(r.top, b.top)
+    const shownW = Math.min(r.right, b.right) - Math.max(r.left, b.left)
+    if (shownH < r.height / 2 || shownW < r.width / 2) return true
+  }
+  return false
 }
 
 /** The controls with no tag that the tags keep off (data-coach-clear under [root]), in the overlay's coordinates. */

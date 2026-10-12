@@ -19,6 +19,7 @@
 //   lists), UiState.offlinePads (changes kept) and UiState.offlinePrompt (the
 //   question once the EP-133 connects).
 
+import type { TakeInfo } from '../platform/storage/takeStore'
 import type { Pak } from '../core/backup/pak'
 import type { DiffResult } from '../core/features/backupDiff'
 import type { DeviceContents, SoundDetails } from '../core/features/deviceBrowser'
@@ -133,8 +134,14 @@ export interface MirrorUi {
   readonly error: string | null
   /** Not connected, showing the last read instead: when it was made ("Last seen 5 Oct, 14:02"). */
   readonly offline?: string | null | undefined
+  /** [offline] where the line is too short for it: the day alone ("Seen 5 Oct"); null with the factory sounds. */
+  readonly offlineShort?: string | null | undefined
   /** Offline: the sounds to preview and put on the pads in arc only. */
   readonly offlineSounds?: OfflineSounds | null | undefined
+  /** Offline: the projects PROJECT steps through (the last read's and the factory pack's), in order. */
+  readonly offlineProjects?: readonly number[] | undefined
+  /** Connected: the project PROJECT asked the device for while it switches (null: none). */
+  readonly projectTarget?: number | null | undefined
 }
 
 /** A backup opened for its contents screen (sounds and projects, playback, export). */
@@ -190,6 +197,8 @@ export interface UiState {
   readonly offlinePads: number
   /** The EP-133 connected with offline pad changes kept: how many, while it asks to write them. */
   readonly offlinePrompt: number | null
+  /** Live's takes, newest first (ArcController.takes). */
+  readonly takes: readonly TakeInfo[]
 }
 
 /** The three tabs under the top bar (ui/components Tab). */
@@ -230,6 +239,7 @@ export function emptyMirrorState(padOrder: PadOrder = PadOrder.FROM_TOP): Mirror
 /** UiState(midiSupported = midi.supported) with every other field at its default. */
 export function initialState(midiSupported = true, canPickFolder = false): UiState {
   return {
+    takes: [],
     midiSupported,
     connected: false,
     device: null,

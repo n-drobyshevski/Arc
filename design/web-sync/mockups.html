@@ -1,0 +1,1113 @@
+<title>Arc Web Sync</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap">
+<style>
+/* Layout: one long review page in Arc's own skin (web/src/ui/theme/tokens.css).
+   Each section is a mock "screen" on the shell colour, followed by notes in the plate style. */
+:root {
+  --shell: #E6E2DB; --key: #F4F2EE; --key-edge: #C6C2B9; --ink: #1F2558; --graphite: #6B6A72;
+  --signal: #FF4C00; --signal-edge: #C23A00; --on-signal: #FFFFFF;
+  --display: #262823; --display-ink: #E9E7DF; --display-dim: #8A8C83; --segment-off: #3A3D36;
+  --danger: #B3261E; --navy: #1F2558; --on-navy: #F4F2EE; --tab-off: #D3D2DA; --on-tab-off: #5C5B6C;
+  --plate: #D7D8D4; --line: #1E1F21; --ok: #17613F; --on-ok: #F4F2EE;
+  --tag-face: #C9A227; --tag-ink: #1E1F21; --coach: #D4A300;
+  --page: #E9E6E0; --frame: #CFCBC3; --scrim: rgba(20,20,18,.45);
+  /* The drawn EP-133 is a physical object: same colours in both themes. */
+  --dev-body: #D9D8D2; --dev-body-hi: #E7E6E1; --dev-body-lo: #BDBCB5; --dev-print: #55575A;
+  --dev-dark: #4A4B4D; --dev-dark-edge: #1E1F21; --dev-dark-ink: #EDECE8;
+  --dev-light: #ECEBE7; --dev-light-edge: #A9A8A2; --dev-pad: #E3E2DD; --dev-pad-edge: #B4B3AC;
+  --dev-knob: #3B3C3E; --dev-hole: #8F8E88;
+  --font: "Manrope", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --shell: #1C1D1E; --key: #2B2C2E; --key-edge: #0E0F10; --ink: #ECEBE6; --graphite: #9A9B9D;
+  --signal-edge: #A83200; --display: #121410; --display-dim: #7C7E76; --segment-off: #2A2D27;
+  --danger: #FF8A80; --navy: #AEB4F0; --on-navy: #14162B; --tab-off: #3A3B44; --on-tab-off: #A3A4AE;
+  --plate: #2E2F33; --line: #0E0F10; --ok: #3FA877; --on-ok: #0E1A14;
+  --page: #161718; --frame: #2A2B2D; --scrim: rgba(0,0,0,.55); color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --shell: #1C1D1E; --key: #2B2C2E; --key-edge: #0E0F10; --ink: #ECEBE6; --graphite: #9A9B9D;
+  --signal-edge: #A83200; --display: #121410; --display-dim: #7C7E76; --segment-off: #2A2D27;
+  --danger: #FF8A80; --navy: #AEB4F0; --on-navy: #14162B; --tab-off: #3A3B44; --on-tab-off: #A3A4AE;
+  --plate: #2E2F33; --line: #0E0F10; --ok: #3FA877; --on-ok: #0E1A14;
+  --page: #161718; --frame: #2A2B2D; --scrim: rgba(0,0,0,.55); color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { background: var(--page); color: var(--ink); font-family: var(--font); font-weight: 500; font-size: 16px; line-height: 1.5; font-variant-numeric: tabular-nums; }
+.wrap { max-width: 1240px; margin: 0 auto; padding-inline: 16px; padding-block: 24px 80px; }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+p { margin: 0; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 3px solid var(--signal); outline-offset: 2px; }
+.caps { font-size: 13px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--graphite); }
+.dim { color: var(--graphite); }
+.small { font-size: 14px; }
+
+/* ---------- header ---------- */
+.head { display: grid; gap: 18px; padding-block: 8px 28px; }
+.head__row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
+.tag { display: inline-flex; align-items: center; height: 44px; padding: 0 30px 0 16px; background: var(--tag-face); color: var(--tag-ink);
+  font-weight: 800; font-size: 17px; letter-spacing: .05em; clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 50%, calc(100% - 18px) 100%, 0 100%); }
+.head h1 { font-size: clamp(30px, 5vw, 46px); font-weight: 800; letter-spacing: -.03em; line-height: 1.08; max-width: 18ch; }
+.head__lede { max-width: 64ch; color: var(--graphite); font-size: 17px; }
+.seg { display: inline-flex; gap: 6px; }
+.seg button { border: 0; border-radius: 10px; padding: 9px 14px; font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  background: var(--tab-off); color: var(--on-tab-off); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--navy); color: var(--on-navy); }
+
+.toc { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: var(--page); border-bottom: 1px solid var(--key-edge);
+  display: flex; gap: 22px; overflow-x: auto; padding-block: 12px; margin-bottom: 8px; scrollbar-width: none; }
+.toc a { white-space: nowrap; text-decoration: none; color: var(--graphite); font-size: 14px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; padding-bottom: 4px; }
+.toc a:hover { color: var(--ink); box-shadow: inset 0 -2px 0 var(--ink); }
+
+section.s { padding-block: 44px 8px; display: grid; gap: 20px; scroll-margin-top: 56px; }
+.s__head { display: grid; gap: 8px; max-width: 72ch; }
+.s__head h2 { font-size: clamp(22px, 3vw, 30px); font-weight: 800; letter-spacing: -.02em; }
+.s__head p { color: var(--graphite); }
+
+.chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.chip { border: 0; border-radius: 10px; padding: 8px 12px; font-size: 13px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase;
+  background: var(--tab-off); color: var(--on-tab-off); cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--navy); color: var(--on-navy); }
+.hint { font-size: 14px; color: var(--graphite); }
+
+/* ---------- scaled stage: a fixed-size design scaled to fit ---------- */
+.stage { width: 100%; position: relative; overflow: hidden; border-radius: 18px; }
+.stage__inner { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+
+/* ---------- desktop window ---------- */
+.win { width: 1200px; height: 1000px; background: var(--shell); border-radius: 18px; border: 1px solid var(--frame); overflow: hidden; position: relative;
+  display: grid; grid-template-rows: 40px 1fr; }
+.win__bar { background: var(--frame); display: flex; align-items: center; gap: 8px; padding: 0 16px; }
+.win__dot { width: 12px; height: 12px; border-radius: 50%; background: var(--key-edge); }
+.win__url { margin-left: 18px; flex: 1; max-width: 460px; height: 26px; border-radius: 8px; background: var(--shell); color: var(--graphite); font-size: 13px; display: flex; align-items: center; padding: 0 12px; }
+.app { position: relative; display: grid; grid-template-columns: 1fr 344px; min-height: 0; }
+.app__main { position: relative; display: grid; grid-template-rows: auto 1fr; min-width: 0; }
+
+.topbar { display: flex; align-items: center; gap: 10px; padding: 14px 24px 0 24px; }
+.topbar .tag { height: 46px; font-size: 18px; }
+.topbar__keys { margin-left: auto; display: flex; gap: 10px; }
+.ikey { width: 46px; height: 46px; border-radius: 8px; border: 0; display: grid; place-items: center; cursor: default; }
+.ikey--signal { background: var(--signal); box-shadow: 0 2px 0 var(--signal-edge); }
+.ikey--ok { background: var(--ok); box-shadow: 0 2px 0 rgba(0,0,0,.3); }
+.ikey--navy { background: var(--navy); }
+.ikey--round { border-radius: 50%; background: var(--tab-off); color: var(--navy); font-weight: 800; font-size: 20px; }
+.ikey .d { width: 14px; height: 14px; border-radius: 50%; background: #fff; }
+.ikey--ok .d { width: 10px; height: 10px; background: var(--on-ok); }
+.ikey--navy .d { width: 14px; height: 14px; background: transparent; border: 2.5px solid var(--on-navy); }
+.ikey.is-pale { opacity: .45; }
+
+.edge-guide { position: absolute; left: 0; top: 300px; width: 30px; height: 140px; background: var(--tab-off); border-radius: 0 10px 10px 0;
+  display: grid; place-items: center; color: var(--on-tab-off); font-weight: 700; font-size: 13px; letter-spacing: .1em; z-index: 3; }
+.edge-guide span { transform: rotate(-90deg); }
+
+.devwrap { display: grid; place-items: center; padding: 10px 20px 30px 40px; min-height: 0; }
+
+/* ---------- docked Live tools ---------- */
+.tools { background: var(--shell); border-left: 1px solid var(--key-edge); padding: 22px 22px 22px 22px; display: grid; align-content: start; gap: 16px; overflow: auto; }
+.tools__title { display: flex; justify-content: space-between; align-items: center; }
+.tt { display: flex; gap: 18px; }
+.tt button { background: none; border: 0; padding: 4px 0 6px; font-size: 13px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--graphite); cursor: pointer; }
+.tt button[aria-pressed="true"] { color: var(--ink); box-shadow: inset 0 -2px 0 var(--ink); }
+.takes { display: grid; gap: 8px; }
+.take { background: var(--plate); border-radius: 14px; overflow: hidden; }
+.take__row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; cursor: pointer; }
+.take__meta { flex: 1; min-width: 0; display: grid; }
+.take__date { font-weight: 800; font-size: 16px; }
+.take__len { color: var(--graphite); font-size: 14px; }
+.akey { border: 0; border-radius: 8px; background: var(--key); box-shadow: 0 2px 0 var(--key-edge); padding: 9px 12px; font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink); cursor: pointer; }
+.akey:active { transform: translateY(2px); box-shadow: 0 0 0 var(--key-edge); }
+.akey--signal { background: var(--signal); color: var(--on-signal); box-shadow: 0 2px 0 var(--signal-edge); }
+.akey--danger { color: var(--danger); }
+.akey[disabled] { opacity: .45; cursor: not-allowed; }
+.take__more { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 0 14px 14px; }
+.take__confirm { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; justify-content: space-between; background: var(--shell); border-radius: 10px; padding: 8px 10px; font-size: 14px; font-weight: 700; }
+.tools p { font-size: 14px; color: var(--graphite); }
+.segrow { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.segrow span { border-radius: 10px; padding: 10px; text-align: center; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; background: var(--key); box-shadow: 0 2px 0 var(--key-edge); }
+.segrow span.on { background: var(--navy); color: var(--on-navy); box-shadow: none; }
+
+/* ---------- the EP-133 K.O. II, drawn at the photo's 1444 × 2000 and scaled by --k ---------- */
+.epbox { --k: .43; width: calc(1444px * var(--k)); height: calc(2000px * var(--k)); position: relative; }
+.ep { position: absolute; left: 0; top: 0; width: 1444px; height: 2000px; transform: scale(var(--k)); transform-origin: 0 0; border-radius: 34px; overflow: hidden;
+  background: linear-gradient(180deg, var(--dev-body-hi) 0%, var(--dev-body) 55%, var(--dev-body-lo) 100%); font-family: var(--font); color: var(--dev-print);
+  box-shadow: inset 0 2px 0 rgba(255,255,255,.7), inset 0 -3px 0 rgba(0,0,0,.08); }
+.epbox::after { content: ""; position: absolute; inset: 8px 4px -10px; border-radius: 20px; box-shadow: 0 24px 40px -18px rgba(0,0,0,.55); z-index: -1; }
+.ep .a { position: absolute; }
+/* jack strip */
+.jack { top: 35px; height: 65px; display: grid; place-items: center; font-size: 27px; letter-spacing: .03em; }
+.jack--out { left: 68px; width: 130px; background: var(--dev-light); color: #444; }
+.jack--in { left: 330px; width: 130px; background: var(--signal); color: #fff; }
+.jack--sync { left: 527px; width: 325px; background: #161617; color: #eee; grid-template-columns: 1fr 1fr; padding-top: 10px; }
+.jack--sync::before { content: "I        O                I        O"; position: absolute; top: 2px; left: 60px; font-size: 14px; white-space: pre; color: #bbb; }
+.jack--usb { left: 1050px; width: 130px; background: #8B8A86; color: #f2f2f2; }
+.jack--pow { left: 1245px; width: 130px; color: #444; }
+.pow-nub { left: 1312px; top: 4px; width: 34px; height: 32px; border-radius: 6px 6px 0 0; background: linear-gradient(90deg, #FF6A2A, var(--signal)); }
+/* plate + grille */
+.plate { left: 5px; top: 100px; width: 980px; height: 390px; background: linear-gradient(180deg, #EEEDEA, #E5E4E0); }
+.screw { width: 36px; height: 36px; border-radius: 50%; background: #E1E0DC; box-shadow: inset 0 2px 4px rgba(0,0,0,.14), 0 1px 0 rgba(255,255,255,.8); }
+.plate__title { left: 66px; top: 150px; font-size: 96px; font-weight: 300; letter-spacing: -.05em; line-height: 1; color: #262625; }
+.plate__status { left: 70px; top: 256px; font-size: 40px; letter-spacing: .01em; color: var(--signal); white-space: nowrap; }
+.plate__hit { left: 68px; top: 430px; width: 880px; font-size: 42px; letter-spacing: .01em; color: #262625; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.grille { left: 985px; top: 100px; width: 455px; height: 390px;
+  background: radial-gradient(circle, #121212 0 10.5px, transparent 11.5px) 3px 3px / 32.4px 32.4px, linear-gradient(160deg, #828285, #5d5d60); }
+/* display */
+.disp { left: 5px; top: 490px; width: 1435px; height: 395px; background: linear-gradient(180deg, #151516, #0A0A0B 40%, #0C0C0D); box-shadow: inset 0 0 0 2px #000; }
+.disp::after { content: ""; position: absolute; inset: 0; background: linear-gradient(100deg, transparent 55%, rgba(255,255,255,.035) 56%, transparent 75%); }
+.dg { color: #262628; }
+.lit { color: #F2F2F2; }
+.d-batt { left: 78px; top: 566px; width: 46px; height: 22px; background: #E5321B; border-radius: 3px; }
+.d-batt::after { content: ""; position: absolute; right: -8px; top: 6px; width: 6px; height: 10px; background: #E5321B; }
+.d-txt { font-size: 26px; letter-spacing: .04em; }
+.d-grp { left: 212px; width: 42px; height: 50px; border: 2px solid #2a2a2c; border-radius: 4px; display: grid; place-items: center; font-size: 30px; color: #2e2e30; }
+.d-grp.on { background: #F2F2F2; border-color: #F2F2F2; color: #111; }
+.d-grp.snd { background: var(--signal); border-color: var(--signal); color: #fff; }
+.d-piano { left: 76px; top: 694px; width: 56px; height: 52px; display: flex; gap: 3px; }
+.d-piano i { flex: 1; background: #232325; border-radius: 1px; }
+.d-piano.on i { background: #F2F2F2; }
+.d-mode { left: 275px; top: 765px; width: 112px; height: 38px; display: grid; place-items: center; font-size: 26px; background: #262628; color: #0b0b0b; }
+.d-mode.on { background: #F2F2F2; }
+.d-bar { left: 468px; top: 563px; font-size: 27px; padding: 2px 8px; border: 2px solid #2a1512; color: #2a1512; border-radius: 4px; }
+.d-bpm { left: 798px; top: 568px; font-size: 27px; }
+.seg7 { left: 548px; top: 568px; display: flex; gap: 8px; }
+.seg7 svg { width: 66px; height: 108px; display: block; }
+.seg7 .on { fill: #F2F2F2; } .seg7 .off { fill: #1E1E20; }
+.d-rec { left: 536px; top: 697px; width: 46px; height: 46px; border-radius: 50%; background: #2a1310; }
+.d-rec.on { background: #FF2A00; box-shadow: 0 0 18px rgba(255,42,0,.6); }
+.d-rec.blink { background: #FF2A00; animation: blink .9s steps(1) infinite; }
+.d-play { left: 606px; top: 698px; width: 0; height: 0; border-left: 40px solid #262628; border-top: 22px solid transparent; border-bottom: 22px solid transparent; }
+.d-play.on { border-left-color: #F2F2F2; }
+.d-metro { left: 802px; top: 628px; width: 40px; height: 52px; }
+.d-metro path { fill: none; stroke: #2a2a2c; stroke-width: 4; }
+.d-metro.on path { stroke: #F2F2F2; }
+.d-fx { left: 862px; top: 694px; font-size: 46px; font-weight: 500; }
+.d-bars { width: 54px; height: 32px; background: repeating-linear-gradient(90deg, #3a1210 0 5px, transparent 5px 9px); }
+.d-ring { left: 1056px; top: 562px; width: 118px; height: 118px; }
+.d-ring circle { fill: none; stroke-width: 22; }
+.d-stereo { left: 990px; top: 565px; font-size: 16px; text-align: center; }
+.d-stereo b { display: block; font-size: 40px; line-height: .9; letter-spacing: -.25em; margin-left: -.2em; font-weight: 400; }
+.d-dots { width: 22px; height: 46px; background: radial-gradient(circle, #1d2a3d 0 4px, transparent 4.5px) 0 0 / 11px 11px; }
+.d-q { left: 1258px; top: 694px; font-size: 52px; font-weight: 400; }
+/* controls: printed labels and LEDs */
+.lbl { font-size: 26px; letter-spacing: .03em; color: #4a4a48; white-space: nowrap; }
+.lbl--red { color: #E8441A; }
+.led { width: 20px; height: 20px; border-radius: 50%; background: #74736F; box-shadow: inset 0 2px 3px rgba(0,0,0,.4); }
+.led.on { background: #FF3300; box-shadow: 0 0 14px 4px rgba(255,60,0,.6); }
+.line { background: #4a4a48; }
+.line--red { background: #E8441A; }
+.knob { border: 0; padding: 0; border-radius: 50%; cursor: pointer; width: 130px; height: 130px; }
+.knob::after { content: ""; position: absolute; left: 30px; top: 30px; width: 70px; height: 70px; border-radius: 50%; }
+.knob--vol { background: radial-gradient(circle at 45% 35%, #FBFBF9, #E3E2DE 70%, #CFCECA); box-shadow: 0 8px 0 #A9A8A3, 0 14px 18px rgba(0,0,0,.25); }
+.knob--vol::after { background: radial-gradient(circle at 45% 35%, #FFFFFF, #ECEBE8); box-shadow: 0 3px 6px rgba(0,0,0,.18); }
+.knob--x { background: radial-gradient(circle at 45% 35%, #FF7A3A, var(--signal) 60%, #D63E00); box-shadow: 0 8px 0 #9E2F00, 0 14px 18px rgba(0,0,0,.3); }
+.knob--x::after { background: radial-gradient(circle at 45% 35%, #FF7F45, #F04800); box-shadow: 0 4px 8px rgba(0,0,0,.25); }
+.knob--y { background: radial-gradient(circle at 45% 35%, #3A3A3B, #161617 65%); box-shadow: 0 8px 0 #000, 0 14px 18px rgba(0,0,0,.35); }
+.knob--y::after { background: radial-gradient(circle at 45% 35%, #333, #111); box-shadow: 0 4px 8px rgba(0,0,0,.5); }
+.badge { width: 32px; height: 32px; display: grid; place-items: center; font-size: 24px; border-radius: 3px; color: #fff; }
+/* keys */
+.key { border: 0; padding: 0; border-radius: 12px; cursor: pointer; font-family: var(--font); transition: transform 60ms, box-shadow 60ms; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; }
+.key--black { background: linear-gradient(180deg, #2C2C2D, #1B1B1C); color: #F1F1F1; box-shadow: 0 9px 0 #040404, 0 14px 16px rgba(0,0,0,.35); }
+.key--light { background: linear-gradient(180deg, #EFEEEB, #DDDCD8); color: #3d3d3b; box-shadow: 0 9px 0 #9C9B96, 0 14px 16px rgba(0,0,0,.22); }
+.key--orange { background: linear-gradient(180deg, #FF6220, #F04700); color: #fff; box-shadow: 0 9px 0 #A33000, 0 14px 16px rgba(0,0,0,.25); }
+.key--grey { background: linear-gradient(180deg, #7C7C7B, #676766); color: #EDEDED; box-shadow: 0 9px 0 #383837, 0 14px 16px rgba(0,0,0,.25); }
+.key:active, .key.is-down { transform: translateY(7px); box-shadow: 0 2px 0 rgba(0,0,0,.55); }
+.key--slim { display: grid; place-items: center; font-size: 28px; letter-spacing: .02em; }
+.key--split { display: grid; grid-template-rows: 1fr 1fr; gap: 3px; background: #121213; box-shadow: 0 9px 0 #6d6c68, 0 14px 16px rgba(0,0,0,.25); }
+.key--split .h { display: grid; place-items: center; font-size: 28px; letter-spacing: .02em; }
+.h--black { background: linear-gradient(180deg, #2C2C2D, #1D1D1E); color: #F1F1F1; }
+.h--light { background: linear-gradient(180deg, #EAE9E6, #DEDDD9); color: #3d3d3b; }
+.h--lighter { background: linear-gradient(180deg, #F2F1EE, #E4E3DF); color: #3d3d3b; }
+.h--orange { background: linear-gradient(180deg, #FF6220, #F04700); color: #fff; }
+.h--grey { background: linear-gradient(180deg, #9A9995, #8A8985); color: #f4f4f4; }
+.key--group { text-align: left; }
+.key__letter { position: absolute; left: 20px; top: 8px; font-size: 56px; font-weight: 300; color: #8A8984; line-height: 1.1; }
+.key__icon { position: absolute; left: 0; right: 0; bottom: 18px; text-align: center; font-size: 38px; color: #8A8984; line-height: 1; }
+.key--sign { font-size: 76px; font-weight: 200; line-height: 1; color: #555; display: grid; place-items: center; }
+.key--word { display: grid; justify-items: center; align-content: start; padding-top: 16px; font-size: 28px; letter-spacing: .02em; }
+.key.is-sel { color: #FF6A2A; }
+.key.is-dimk { opacity: .6; }
+.key--orange.is-armed { animation: armed .9s steps(1) infinite; }
+.key--orange.is-on { box-shadow: 0 9px 0 #A33000, 0 0 0 6px rgba(255,255,255,.85), 0 0 30px 8px rgba(255,76,0,.55); }
+.key--grey.is-lit { background: linear-gradient(180deg, #8E8E8D, #7A7A79); box-shadow: 0 9px 0 #383837, 0 0 26px 6px rgba(255,255,255,.35); }
+@keyframes armed { 50% { box-shadow: 0 9px 0 #A33000, 0 0 0 6px rgba(255,255,255,.85); } }
+/* pads: black keys that take the signal colour as they sound */
+.pad { --glow: 0; border: 0; padding: 0; border-radius: 12px; cursor: pointer; touch-action: none; user-select: none; -webkit-user-select: none; font-family: var(--font); text-align: left; color: #F1F1F1;
+  background: color-mix(in oklab, var(--signal) calc(var(--glow) * 100%), #1E1E1F);
+  box-shadow: 0 9px 0 color-mix(in oklab, #A33000 calc(var(--glow) * 100%), #040404), 0 14px 16px rgba(0,0,0,.35); transition: transform 60ms; }
+.pad.is-down { transform: translateY(7px); box-shadow: 0 2px 0 #040404; }
+.pad__num { position: absolute; left: 22px; top: 6px; font-size: 58px; font-weight: 300; line-height: 1.1; }
+.pad__num.word { left: 0; right: 0; top: 20px; text-align: center; font-size: 28px; font-weight: 400; letter-spacing: .02em; }
+.pad__num.dot { top: 0; left: 26px; font-size: 50px; }
+.pad__name { position: absolute; left: 18px; right: 12px; bottom: 12px; font-size: 24px; line-height: 1.1; color: #8C8C8C; }
+.pad.is-lit .pad__name { color: #fff; }
+.pad.is-playing::after { content: ""; position: absolute; inset: -9px; border-radius: 18px; border: 6px solid var(--signal); pointer-events: none; }
+.pad__ring { position: absolute; left: 50%; top: 52%; width: 84px; height: 84px; margin: -42px 0 0 -42px; border-radius: 50%; border: 9px solid #D9D8D3; display: grid; place-items: center; font-size: 24px; font-weight: 700; color: #F1F1F1; }
+.pad__ring.hi { border-color: var(--signal); }
+.pad.is-lit .pad__ring { border-color: #fff; }
+.pad__oct { position: absolute; right: 12px; bottom: 8px; font-size: 20px; color: #8C8C8C; }
+.pad.is-lit .pad__oct { color: #fff; }
+/* fader */
+.fader { left: 70px; top: 1420px; width: 126px; height: 306px; border: 0; padding: 0; background: none; cursor: pointer; }
+.fader__slot { position: absolute; left: 54px; top: 8px; width: 18px; height: 290px; border-radius: 9px; background: #111; box-shadow: inset 0 3px 4px #000; }
+.fader__tick { position: absolute; left: 8px; right: 6px; top: 149px; height: 2px; background: #6b6b69; }
+.fader__cap { position: absolute; left: 33px; top: 120px; width: 60px; height: 60px; border-radius: 50%; background: radial-gradient(circle at 45% 35%, #A3A3A1, #7B7B79 70%); box-shadow: 0 4px 0 #4a4a49, 0 8px 10px rgba(0,0,0,.35); }
+.ep.is-offline .disp ~ .seg7 .on { fill: #6a6a6c; }
+
+.rec { display: inline-flex; align-items: center; gap: 7px; border: 1.5px solid var(--display-dim); color: var(--display-dim); border-radius: 9px; padding: 3px 9px; font-size: 13px; font-weight: 700; letter-spacing: .04em; }
+.rec i { width: 9px; height: 9px; border-radius: 50%; background: var(--display-dim); }
+.rec.is-armed i { background: var(--signal); animation: blink .9s steps(1) infinite; }
+.rec.is-armed { color: var(--display-ink); }
+.rec.is-on { border-color: var(--signal); color: var(--display-ink); }
+.rec.is-on i { background: var(--signal); }
+@keyframes blink { 50% { opacity: 0; } }
+
+/* guide tags on the device */
+.ctag { position: absolute; z-index: 6; background: var(--navy); color: var(--on-navy); font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+  padding: 6px 9px; border-radius: 6px; white-space: nowrap; pointer-events: none; box-shadow: 0 2px 6px rgba(0,0,0,.25); }
+.ctag.y { background: var(--coach); color: #1E1F21; }
+.ctag.o { background: var(--signal); color: #fff; }
+.ctag.g { background: var(--ok); color: var(--on-ok); }
+.cscrim { position: absolute; inset: 0; background: color-mix(in oklab, var(--shell) 55%, transparent); z-index: 5; pointer-events: none; }
+.cclose { position: absolute; left: 0; right: 0; bottom: 22px; text-align: center; z-index: 6; font-size: 13px; font-weight: 700; letter-spacing: .12em; color: var(--graphite); }
+
+/* shortcut popover */
+.pop { position: absolute; z-index: 8; width: 300px; background: var(--key); color: var(--ink); border-radius: 14px; padding: 14px 16px; box-shadow: 0 12px 30px rgba(0,0,0,.28); display: grid; gap: 10px; }
+.pop h4 { margin: 0; font-size: 13px; letter-spacing: .1em; text-transform: uppercase; color: var(--graphite); font-weight: 700; display: flex; justify-content: space-between; }
+.pop h4 button { border: 0; background: none; cursor: pointer; color: var(--graphite); font-size: 16px; line-height: 1; padding: 0; }
+.pop .row { display: grid; gap: 2px; }
+.pop code { font-family: var(--mono); font-size: 12px; font-weight: 700; background: var(--dev-dark); color: var(--dev-dark-ink); border-radius: 5px; padding: 2px 6px; justify-self: start; }
+.pop p { font-size: 14px; }
+.pop .note { font-size: 13px; color: var(--graphite); border-top: 1px solid var(--key-edge); padding-top: 8px; }
+
+.toast { position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); z-index: 9; background: var(--display); color: var(--display-ink); border-left: 5px solid var(--signal);
+  border-radius: 12px; padding: 12px 16px; font-size: 15px; white-space: nowrap; }
+
+/* ---------- legend / notes ---------- */
+.legend { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.lg { background: var(--plate); border-radius: 18px; padding: 16px 18px; display: grid; gap: 8px; align-content: start; }
+.lg h3 { font-size: 17px; font-weight: 800; display: flex; align-items: center; gap: 10px; }
+.lg ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 15px; }
+.sw { display: inline-block; width: 18px; height: 18px; border-radius: 5px; flex: none; }
+.sw--acts { background: var(--dev-dark); box-shadow: inset 0 -4px 0 var(--signal); }
+.sw--mirror { background: var(--dev-dark); box-shadow: inset 0 0 0 5px var(--dev-dark), inset 0 0 0 9px var(--signal); }
+.sw--guide { background: var(--dev-light); border: 1px solid var(--dev-light-edge); }
+.callout { border-left: 4px solid var(--coach); background: var(--plate); padding: 12px 16px; border-radius: 4px 14px 14px 4px; font-size: 15px; max-width: 80ch; }
+
+/* ---------- phones ---------- */
+.phones { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 18px; align-items: start; }
+.ph { display: grid; gap: 10px; min-width: 0; }
+.ph__cap { display: grid; gap: 2px; }
+.ph__cap b { font-size: 16px; font-weight: 800; }
+.ph__screen { width: 100%; max-width: 100%; aspect-ratio: 412 / 843; border-radius: 22px; overflow: hidden; border: 1px solid var(--frame); background: var(--shell); position: relative; }
+.ph img { width: 100%; height: auto; display: block; border-radius: 22px; border: 1px solid var(--frame); }
+.pm { width: 412px; height: 843px; background: var(--shell); position: absolute; left: 0; top: 0; transform-origin: 0 0; padding: 12px 16px; display: grid; grid-template-rows: auto auto 1fr auto auto; gap: 12px; }
+.pm__bar { display: flex; align-items: center; gap: 8px; }
+.pm__bar .tag { height: 44px; font-size: 17px; }
+.pm__bar .ikey { width: 44px; height: 44px; }
+.pm__strip { background: var(--display); color: var(--display-ink); border-radius: 18px; height: 56px; display: flex; align-items: center; gap: 12px; padding: 0 16px; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; }
+.pm__strip .last { margin-left: auto; font-weight: 800; font-size: 17px; }
+.pm__grid { background: var(--dev-body); border-radius: 18px; padding: 10px; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(4, 1fr); gap: 10px 10px; }
+.pm__cell { --glow: 0; position: relative; border-radius: 10px; padding: 6px 12px 10px; display: grid; grid-template-rows: auto 1fr;
+  background: color-mix(in oklab, var(--signal) calc(var(--glow) * 100%), #1E1E1F); box-shadow: 0 5px 0 color-mix(in oklab, #A33000 calc(var(--glow) * 100%), #040404); }
+.pm__cell .n { font-size: 34px; font-weight: 300; line-height: 1.15; color: #F1F1F1; }
+.pm__cell .n.word { font-size: 15px; font-weight: 500; letter-spacing: .04em; justify-self: center; padding-top: 8px; }
+.pm__cell .nm { align-self: end; font-size: 14px; line-height: 1.2; color: #8C8C8C; }
+.pm__cell.lit .nm { color: #fff; }
+.pm__words { display: flex; justify-content: space-between; color: var(--graphite); font-size: 15px; letter-spacing: .04em; padding: 0 4px; }
+.pm__groups { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; background: var(--dev-body); border-radius: 14px; padding: 12px 10px 14px; }
+.pm__groups span { position: relative; height: 54px; border-radius: 9px; background: linear-gradient(180deg, #EFEEEB, #DDDCD8); box-shadow: 0 4px 0 #9C9B96; color: #8A8984; }
+.pm__groups b { position: absolute; left: 8px; top: 2px; font-size: 22px; font-weight: 300; }
+.pm__groups i { position: absolute; left: 0; right: 0; bottom: 6px; text-align: center; font-style: normal; font-size: 16px; }
+.pm__groups span::after { content: ""; position: absolute; right: 7px; top: 7px; width: 8px; height: 8px; border-radius: 50%; background: #74736F; }
+.pm__groups span.on::after { background: #FF3300; box-shadow: 0 0 8px 2px rgba(255,60,0,.6); }
+.pm__groups span.glow::after { background: #FF3300; opacity: .6; }
+.pm__groups span.rec { background: linear-gradient(180deg, #FF6220, #F04700); box-shadow: 0 4px 0 #A33000; display: grid; place-items: center; }
+.pm__groups span.rec::after { display: none; }
+.pm__groups span.rec em { width: 16px; height: 16px; border-radius: 50%; background: #fff; }
+.pm__groups span.rec.armed { animation: armed2 .9s steps(1) infinite; }
+.pm__groups span.rec.on { box-shadow: 0 4px 0 #A33000, 0 0 0 3px #fff; }
+@keyframes armed2 { 50% { box-shadow: 0 4px 0 #A33000, 0 0 0 3px #fff; } }
+.pm__sheet { position: absolute; inset: 70px 0 0 60px; background: var(--shell); border-radius: 22px 0 0 0; box-shadow: -10px 0 30px rgba(0,0,0,.25); padding: 22px 18px; display: grid; align-content: start; gap: 14px; }
+.pm__scrim { position: absolute; inset: 70px 0 0 0; background: var(--scrim); }
+
+/* ---------- widths ---------- */
+.widths { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.wd { background: var(--plate); border-radius: 18px; padding: 16px; display: grid; gap: 12px; align-content: start; }
+.wd__px { font-weight: 800; font-size: 20px; }
+.wd__px small { font-size: 13px; color: var(--graphite); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; display: block; }
+.sch { height: 130px; background: var(--shell); border-radius: 10px; padding: 8px; display: grid; gap: 6px; }
+.sch div { border-radius: 4px; }
+.sch .b { background: var(--tab-off); }
+.sch .d { background: var(--dev-body); border: 1px solid var(--dev-body-lo); border-radius: 8px; }
+.sch .o { background: color-mix(in oklab, var(--signal) 30%, var(--tab-off)); }
+.sch .hat { background: repeating-linear-gradient(45deg, var(--tab-off) 0 3px, transparent 3px 7px); }
+
+/* ---------- audit ---------- */
+.filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.audit { display: grid; gap: 16px; }
+.au { background: var(--plate); border-radius: 18px; padding: 16px; display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); gap: 20px; align-items: start; }
+.au__imgs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.au__imgs figure { margin: 0; display: grid; gap: 6px; }
+.au__imgs figcaption { font-size: 12px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--graphite); }
+.au__imgs img { width: 100%; height: auto; border-radius: 10px; display: block; border: 1px solid var(--frame); background: var(--shell); }
+.au__body { display: grid; gap: 10px; min-width: 0; align-content: start; }
+.au__title { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.au__title h3 { font-size: 19px; font-weight: 800; }
+.au ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 15px; }
+.pill { font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; padding: 3px 9px; border-radius: 999px; }
+.pill--fix { background: var(--signal); color: #fff; }
+.pill--check { background: var(--coach); color: #1E1F21; }
+.pill--same { background: var(--ok); color: var(--on-ok); }
+@media (max-width: 720px) { .au { grid-template-columns: 1fr; } }
+
+/* ---------- backlog ---------- */
+.backlog { display: grid; gap: 10px; counter-reset: b; }
+.bl { background: var(--plate); border-radius: 14px; padding: 14px 16px 14px 56px; position: relative; display: grid; gap: 4px; }
+.bl::before { counter-increment: b; content: counter(b); position: absolute; left: 16px; top: 13px; width: 28px; height: 28px; border-radius: 8px; background: var(--navy); color: var(--on-navy); display: grid; place-items: center; font-weight: 800; font-size: 15px; }
+.bl b { font-size: 17px; font-weight: 800; }
+.bl p { font-size: 15px; color: var(--graphite); }
+.bl code, .notes code { font-family: var(--mono); font-size: 13px; background: var(--shell); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
+.foot { margin-top: 40px; color: var(--graphite); font-size: 14px; border-top: 1px solid var(--key-edge); padding-top: 16px; }
+
+@media (prefers-reduced-motion: reduce) { .rec.is-armed i, .d-rec.blink, .key--orange.is-armed, .pm__groups span.rec.armed { animation: none; } .key, .pad { transition: none; } }
+</style>
+
+<div class="wrap">
+  <header class="head">
+    <div class="head__row">
+      <span class="tag">WEB SYNC</span>
+      <div class="seg" role="group" aria-label="Theme">
+        <button type="button" data-theme-set="system" aria-pressed="true">System</button>
+        <button type="button" data-theme-set="light" aria-pressed="false">Light</button>
+        <button type="button" data-theme-set="dark" aria-pressed="false">Dark</button>
+      </div>
+    </div>
+    <h1>The web app, caught up with Android</h1>
+    <p class="head__lede">Mockups for review before any code. On a wide screen, Live draws the EP-133 itself: the pads play, A–D, KEYS, RECORD and −/+ act in arc, and the rest of the keys show their shortcuts. REC and takes come over from Android. Phones keep the grid they have now. Everything below is clickable.</p>
+  </header>
+
+  <nav class="toc" aria-label="On this page">
+    <a href="#device">Device view</a>
+    <a href="#keys">What each key does</a>
+    <a href="#phone">Phone REC</a>
+    <a href="#widths">Widths</a>
+    <a href="#audit">Audit</a>
+    <a href="#build">Build order</a>
+  </nav>
+
+  <!-- ================= 1. DEVICE VIEW ================= -->
+  <section class="s" id="device">
+    <div class="s__head">
+      <span class="caps">Live · 1200 px window</span>
+      <h2>The EP-133 on a wide screen</h2>
+      <p>The K.O. II replaces the four-group grid when the window is wide. Live tools sit docked on the right, with Takes at the top. Pick a state or play it yourself: hold the black pads, tap A–D, KEYS, RECORD, −/+, or any other key or knob.</p>
+    </div>
+    <div class="chips" role="group" aria-label="Device state">
+      <button type="button" class="chip" data-preset="idle" aria-pressed="false">Connected</button>
+      <button type="button" class="chip" data-preset="playing" aria-pressed="true">Playing</button>
+      <button type="button" class="chip" data-preset="keys" aria-pressed="false">KEYS mode</button>
+      <button type="button" class="chip" data-preset="armed" aria-pressed="false">REC armed</button>
+      <button type="button" class="chip" data-preset="recording" aria-pressed="false">Recording</button>
+      <button type="button" class="chip" data-preset="offline" aria-pressed="false">Offline</button>
+      <button type="button" class="chip" data-preset="coach" aria-pressed="false">Guide tags</button>
+    </div>
+    <div class="stage" id="deskStage" data-w="1200" data-h="1000">
+      <div class="stage__inner">
+        <div class="win" id="win">
+          <div class="win__bar"><span class="win__dot"></span><span class="win__dot"></span><span class="win__dot"></span><span class="win__url">arc-pi-mauve.vercel.app/#/live</span></div>
+          <div class="app">
+            <div class="app__main">
+              <div class="topbar">
+                <span class="tag">LIVE</span>
+                <div class="topbar__keys">
+                  <span class="ikey ikey--signal" id="tbBackup"><span class="d"></span></span>
+                  <span class="ikey ikey--ok" id="tbConn"><span class="d"></span></span>
+                  <span class="ikey ikey--round">?</span>
+                  <span class="ikey ikey--round" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 24 24"><path fill="currentColor" d="M19.4 13a7.5 7.5 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7 7 0 0 0-1.7 1l-2.4-1-2 3.4L6.6 11a7.5 7.5 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.3 2.5h4l.4-2.5a7 7 0 0 0 1.7-1l2.4 1 2-3.4zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/></svg></span>
+                </div>
+              </div>
+              <div class="devwrap"><div id="ep"></div></div>
+              <div class="edge-guide"><span>GUIDE</span></div>
+            </div>
+            <aside class="tools" id="tools"></aside>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="hint">The window is drawn at 1200 px and scaled to fit this page. The device is traced from the K.O. II product photo: the same positions, colours, two-tone keys, printed labels and LEDs.</p>
+  </section>
+
+  <!-- ================= 2. KEY MAP ================= -->
+  <section class="s" id="keys">
+    <div class="s__head">
+      <span class="caps">Behaviour</span>
+      <h2>What each key does in arc</h2>
+      <p>Over MIDI, arc only hears notes, the clock and a few SysEx messages. It can't tell when SOUND or FX is pressed on the device, so those keys don't pretend to light up. A tap on one of them opens its shortcuts from the guide instead.</p>
+    </div>
+    <div class="legend">
+      <div class="lg">
+        <h3><span class="sw sw--acts"></span>Acts in arc</h3>
+        <ul>
+          <li><b>Pads</b>: hold to hear the sample in the browser. Several fingers play a chord.</li>
+          <li><b>A–D</b>: pick the group the pads play. The navy key is the group shown.</li>
+          <li><b>KEYS</b>: switch between PADS and KEYS. In KEYS the pads become notes of the last sound.</li>
+          <li><b>RECORD</b>: arm REC. Recording starts with the first sound or when the EP-133 starts playing (MIDI clock start). It stops on a second tap, when the EP-133 stops, or at 10 minutes, and the take is saved.</li>
+          <li><b>− / +</b>: octave down or up in KEYS, previous or next group in PADS. Their LEDs show which way can still move.</li>
+        </ul>
+      </div>
+      <div class="lg">
+        <h3><span class="sw sw--mirror"></span>Lights from the EP-133</h3>
+        <ul>
+          <li><b>Pads</b> glow orange with velocity and fade over 300 ms, the same as the grid.</li>
+          <li><b>Group LEDs</b> (the dots above A–D) light for the group shown and flicker with the groups that sound. Follow moves the selection.</li>
+          <li><b>PLAY</b> brightens while the device plays, from MIDI clock start and stop.</li>
+          <li><b>Display</b>: BPM in the seven-segment digits, ▶ while playing, ● for REC (blinking when armed), the A–D boxes, the four-colour ring (one quarter per group), the piano icon in KEYS, and the metronome ticking on the beat.</li>
+          <li><b>Plate</b>: where the unit prints its name, arc writes the project and connection (orange line) and the last hit (black line).</li>
+        </ul>
+      </div>
+      <div class="lg">
+        <h3><span class="sw sw--guide"></span>Shows its shortcuts</h3>
+        <ul>
+          <li>The two-tone keys (<b>SOUND/EDIT, MAIN/COMMIT, TEMPO/LOOP, SAMPLE/CHOP, TIMING/CORRECT, FX/OUTPUT, ERASE/SYSTEM</b>), <b>SHIFT</b>, <b>FADER</b>, the <b>X / Y knobs</b> and the fader open a card with their combos from the shortcut guide.</li>
+          <li><b>VOLUME</b> explains that arc's sound follows the computer's volume.</li>
+          <li>The printed LEDs next to LEVEL, PITCH, LPF and the other fader labels stay dark: arc can't see the fader's assignment.</li>
+          <li>The card links to the full guide, already filtered to that key.</li>
+          <li>Nothing is ever sent to the device. arc only reads in Live.</li>
+        </ul>
+      </div>
+    </div>
+    <p class="callout"><b>Keyboard:</b> the numpad plays the pads as laid out on the device (7 8 9 / 4 5 6 / 1 2 3 / . 0 Enter). Laptops without one use four QWERTY rows: 1 2 3 / Q W E / A S D / Z X C. Holding a key holds the gate. F1–F4 pick A–D, K toggles KEYS, R arms or stops REC, and − / + do what the device's −/+ do. The guide overlay lists them. Try them on the device above.</p>
+  </section>
+
+  <!-- ================= 3. PHONE ================= -->
+  <section class="s" id="phone">
+    <div class="s__head">
+      <span class="caps">Phone · 412 px · one-group grid</span>
+      <h2>REC and takes on the phone</h2>
+      <p>The phone keeps its one-group layout and takes on the K.O. II's colours. The display strip gains Android's REC chip, the group row gains an orange RECORD key, and Live tools gain the Takes list. Each web mock below has the Android screen it copies next to it.</p>
+    </div>
+    <div class="phones" id="phones"></div>
+  </section>
+
+  <!-- ================= 4. WIDTHS ================= -->
+  <section class="s" id="widths">
+    <div class="s__head">
+      <span class="caps">Breakpoints</span>
+      <h2>Which width gets the device</h2>
+      <p>Live picks its layout from its own width (a container query, as the four-across grid does today), not from the device. The saved "All groups / One group" choice still applies below 900 px.</p>
+    </div>
+    <div class="widths">
+      <div class="wd"><div class="wd__px"><small>1200 px and wider</small>Device + docked tools</div>
+        <div class="sch" style="grid-template-columns: 1fr 70px;"><div class="d"></div><div class="b"></div></div>
+        <p class="small dim">Live tools stay open on the right. The takes list is always visible.</p></div>
+      <div class="wd"><div class="wd__px"><small>900 – 1199 px</small>Device, tools slide in</div>
+        <div class="sch" style="grid-template-columns: 1fr 10px;"><div class="d"></div><div class="hat"></div></div>
+        <p class="small dim">The device fills the width. Tools open from the hatched strip, as they do today.</p></div>
+      <div class="wd"><div class="wd__px"><small>640 – 899 px</small>Four groups across</div>
+        <div class="sch" style="grid-template-columns: repeat(4,1fr); grid-template-rows: 30px 1fr;"><div class="b" style="grid-column: 1 / -1; background: var(--display);"></div><div class="o"></div><div class="b"></div><div class="b"></div><div class="b"></div></div>
+        <p class="small dim">Today's tablet layout, the same as Android's Live tablet.</p></div>
+      <div class="wd"><div class="wd__px"><small>Under 640 px</small>One group</div>
+        <div class="sch" style="grid-template-rows: 16px 1fr 18px; justify-self: center; width: 70px;"><div class="b" style="background: var(--display);"></div><div class="b"></div><div class="o"></div></div>
+        <p class="small dim">Today's phone layout, plus REC.</p></div>
+    </div>
+  </section>
+
+  <!-- ================= 5. AUDIT ================= -->
+  <section class="s" id="audit">
+    <div class="s__head">
+      <span class="caps">Android reference vs web ?demo · 412 px</span>
+      <h2>Screen-by-screen audit</h2>
+      <p>The left images are Android's screenshot-test references. The right images are the web app, captured today in demo mode at the same width. Apart from REC and takes, the port is close. The differences found are listed under each pair.</p>
+    </div>
+    <div class="filters" role="group" aria-label="Filter">
+      <button type="button" class="chip" data-filter="all" aria-pressed="true">All</button>
+      <button type="button" class="chip" data-filter="fix" aria-pressed="false">Fix</button>
+      <button type="button" class="chip" data-filter="check" aria-pressed="false">Check</button>
+      <button type="button" class="chip" data-filter="same" aria-pressed="false">Same</button>
+    </div>
+    <div class="audit" id="audit-list"></div>
+  </section>
+
+  <!-- ================= 6. BUILD ================= -->
+  <section class="s" id="build">
+    <div class="s__head">
+      <span class="caps">After sign-off</span>
+      <h2>Build order</h2>
+      <p>The repo rule still holds: Kotlin <code>core/</code> first, then the web port, which carries the "Port of …" header. Every step is committed to <code>claude/zealous-shannon-p1p9ip</code> and passes <code>npm run check</code> (and the Gradle tests where Kotlin changes). One PR at the end.</p>
+    </div>
+    <div class="backlog">
+      <div class="bl"><b>REC engine</b><p>Port <code>TakeRecorder.kt</code> to <code>web/src/core/features/takeRecorder.ts</code>, with the same tests. Tap the mix in <code>MixerHost.render</code> (<code>platform/audio/liveMixer.ts</code>), so a take holds exactly what the browser played. Cap a take at 10 minutes, as Android does. New rule: armed REC also starts on MIDI clock start, and a take that began that way stops on clock stop. Put this in <code>TakeRecorder.kt</code> first, so Android follows the transport too, then port it. Takes are named by date and time, as on Android.</p></div>
+      <div class="bl"><b>Takes storage and actions</b><p>Add an IndexedDB <code>takes</code> store in <code>platform/storage/db.ts</code>, kept apart from <code>arc-demo</code>. Also copy takes into the library folder when one is picked (<code>platform/storage/external.ts</code>), as Android keeps them in Documents/arc. Wire Play/Stop, Save WAV (<code>files/save</code>), and Delete with the inline confirmation. Share shows only where <code>navigator.canShare({ files })</code> is true, which is mostly phones; desktop rows have no Share. To EP-133 works as on Android: it switches to Device and opens <code>UploadSheet</code> with the take loaded, so you can pick a slot and trim first.</p></div>
+      <div class="bl"><b>REC chip and Takes UI on the existing grid</b><p>Copy the REC and take strings from <code>MirrorText.kt</code> into <code>mirrorText.ts</code>. Add the chip to the display strip and the panel, and a Takes section in Live tools. Add Playwright steps for arm, record, stop and the new row.</p></div>
+      <div class="bl"><b>Phone grid in the K.O. II's colours</b><p>Restyle the one-group grid with black pads, light A–D keys with their icons and LEDs, and an orange RECORD key next to D. The layout and touch behaviour stay the same. This is web only for now: Android keeps its PO-style grid, so this step doesn't touch Kotlin and diverges from Android on purpose.</p></div>
+      <div class="bl"><b>Device view</b><p>New <code>web/src/ui/live/DeviceView.tsx</code>. It reuses <code>glow.ts</code>, the <code>press.ts</code> gate and chord logic, the KEYS note maths in <code>keys.ts</code>, and the Knob and Fader visuals from <code>GuideKeys.tsx</code>. <code>MirrorScreen.tsx</code> picks the view at 900 px or wider. Add the keyboard map (numpad, QWERTY rows, F1–F4, K, R, −/+), and −/+ stepping through groups in PADS.</p></div>
+      <div class="bl"><b>Shortcut cards</b><p>Filter <code>guideData.ts</code> by key name for the card, and add a "show all" link to <code>#/guide</code> with the filter applied. Add the new tags to the guide overlay.</p></div>
+      <div class="bl"><b>Docked tools at 1200 px</b><p><code>SideZone</code> becomes a docked column at that width. Back no longer closes it there.</p></div>
+      <div class="bl"><b>Later: record the EP-133's own sound</b><p>A source switch on REC: arc's sound, or the device's sound over USB audio through <code>getUserMedia</code> (asks for microphone permission). This goes beyond Android, so it comes after everything above.</p></div>
+      <div class="bl"><b>Clear the "Check" items</b><p>Clear the open questions from the audit: the first-run overlay, the toast lifetime, the Settings storage line, the project tile sizes, and the pads sheet rows.</p></div>
+    </div>
+    <p class="foot">Made from <code>app/src/screenshotTestDebug/reference</code> and <code>npm run dev</code> with <code>?demo</code>. Source is in <code>design/web-sync/</code>. arc is not affiliated with teenage engineering.</p>
+  </section>
+</div>
+
+<script>
+(() => {
+  'use strict'
+  const COMBOS = {"SOUND":[{"combo":"SOUND > A-D > pad","action":"Load a sample onto a pad: in SOUND mode, pick a group and then press the pad you want to load"},{"combo":"[In SOUND mode] -/+","action":"Step through the sample library one slot at a time to change the sound on the selected pad"},{"combo":"SHIFT + SOUND > -/+","action":"Open SOUND EDIT for the selected sound and move between its six edit pages"}],"MAIN":[{"combo":"MAIN","action":"Leave sample mode."},{"combo":"hold:MAIN + 1-9","action":"Load a different project (there are 9 project slots)"},{"combo":"hold:MAIN + ENTER","action":"Song mode: open the song list editor and arrange scenes"}],"TEMPO":[{"combo":"hold:SAMPLE + TEMPO","action":"Detect the tempo of audio coming in through line in or the mic. The device shows the tempo it found and sets the project tempo to match."},{"combo":"TEMPO > turn:KNOB Y","action":"Metronome volume, and making the metronome play during normal playback"},{"combo":"MAIN + TEMPO > turn:KNOB X / turn:KNOB Y","action":"Set the current pattern's time signature"}],"SAMPLE":[{"combo":"SAMPLE","action":"Enter sample mode. Every pad lights up and the LEDs blink to show the sampler is ready."},{"combo":"SAMPLE > + > pad","action":"Resample a chord into another group. Pick the sound and turn on KEYS mode. Enter the sampler, choose resampling as the source, pick the destination group, and start hands-free sampling on a pad. Go back to the group with the sound, play the chord, then stop."},{"combo":"hold:SAMPLE + TEMPO","action":"Detect the tempo of audio coming in through line in or the mic. The device shows the tempo it found and sets the project tempo to match."}],"FX":[{"combo":"FX > -/+","action":"Cycle through the available master effects: delay, reverb, distortion, chorus, filter and compressor"},{"combo":"SHIFT + FX > +","action":"Go to the sidechain page inside the output settings"},{"combo":"[While playing] FX","action":"Open the FX page while the pattern is running. This is where you choose the single master effect that all groups send to."}],"TIMING":[{"combo":"TIMING > - / +","action":"Switch between quantized recording and free-time recording"},{"combo":"hold:TIMING + pad","action":"Note repeat: play a pad over and over at the current interval (also used to record hi-hat rolls)"},{"combo":"TIMING > turn:KNOB X","action":"Choose the step resolution (note interval)"}],"ERASE":[{"combo":"SHIFT + ERASE","action":"Open the system settings"},{"combo":"RECORD > ERASE > +","action":"Overwrite recording: clear the existing recording and replace it with the new take"},{"combo":"hold:ERASE + FADER","action":"Delete fader automation. With playback stopped, hold the combo (about 2 seconds, until FDR then DEL shows) to clear automation for all assignments. During playback, it removes fader moves as the pattern runs. Add the assignment's pad to clear only that one parameter."}],"SHIFT":[{"combo":"SHIFT + B","action":"Undo"},{"combo":"SHIFT + FADER","action":"Put the fader's virtual position back to the default for every assignment in the current group (screen shows RES). Doing the combo again reverses the reset (screen shows SET)."},{"combo":"SHIFT + ERASE","action":"Open the system settings"}],"KNOBX":[{"combo":"TIMING > turn:KNOB X","action":"Choose the step resolution (note interval)"},{"combo":"[In sample mode] turn:KNOB X","action":"Set the input recording level."},{"combo":"SHIFT + SOUND > + > turn:KNOB X","action":"Make a sample play backwards"}],"KNOBY":[{"combo":"TEMPO > turn:KNOB Y","action":"Metronome volume, and making the metronome play during normal playback"},{"combo":"TIMING > turn:KNOB Y","action":"Set the swing amount"},{"combo":"[In sample mode] turn:KNOB Y","action":"Set the threshold, so recording only starts once the incoming sound is loud enough."}],"FADER":[{"combo":"SHIFT + FADER","action":"Put the fader's virtual position back to the default for every assignment in the current group (screen shows RES). Doing the combo again reverses the reset (screen shows SET)."},{"combo":"hold:FADER + pad","action":"Pick which parameter the fader controls for the current group. By default it controls group level. The other options are the labels printed above the pads."},{"combo":"hold:ERASE + FADER","action":"Delete fader automation. With playback stopped, hold the combo (about 2 seconds, until FDR then DEL shows) to clear automation for all assignments. During playback, it removes fader moves as the pattern runs. Add the assignment's pad to clear only that one parameter."}],"PLAY":[{"combo":"RECORD > PLAY","action":"Start live recording after a four-beat count-in (from stopped)"},{"combo":"RECORD + PLAY","action":"Start live recording right away, with no count-in"},{"combo":"RECORD > SHIFT + PLAY","action":"Record from the start of the pattern instead of from the current bar"}],"RECORD":[{"combo":"RECORD > -/+","action":"Set the pattern length in bars (shorter or longer)"},{"combo":"RECORD > PLAY","action":"Start live recording after a four-beat count-in (from stopped)"},{"combo":"RECORD + PLAY","action":"Start live recording right away, with no count-in"}],"KEYS":[{"combo":"pad > KEYS","action":"Turn on keys mode, which plays the selected pad's sample chromatically across all 12 pads"},{"combo":"hold:KEYS + -/+ | hold:KEYS + pad","action":"Keys mode: move up or down an octave, or transpose the root note"},{"combo":"hold:KEYS + turn:KNOB X | hold:KEYS + turn:KNOB Y","action":"Keys mode: change the key, or change the scale"}]}
+
+  // ---------- theme ----------
+  const root = document.documentElement
+  const themeBtns = document.querySelectorAll('[data-theme-set]')
+  function setTheme(t) {
+    if (t === 'system') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', t)
+    themeBtns.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.themeSet === t)))
+    try { localStorage.setItem('arc-sync-theme', t) } catch (e) {}
+  }
+  themeBtns.forEach((b) => b.addEventListener('click', () => setTheme(b.dataset.themeSet)))
+  try { const t = localStorage.getItem('arc-sync-theme'); if (t) setTheme(t) } catch (e) {}
+
+  // ---------- scaled stages ----------
+  function fitStage(stage) {
+    const inner = stage.firstElementChild
+    const w = Number(stage.dataset.w), h = Number(stage.dataset.h)
+    const s = Math.min(1, stage.clientWidth / w)
+    inner.style.transform = `scale(${s})`
+    stage.style.height = h * s + 'px'
+  }
+  function fitPhone(screen) {
+    const pm = screen.firstElementChild
+    pm.style.transform = `scale(${screen.clientWidth / 412})`
+  }
+  const ro = new ResizeObserver((entries) => entries.forEach((e) => {
+    if (e.target.classList.contains('stage')) fitStage(e.target); else fitPhone(e.target)
+  }))
+
+  // ---------- music data (padNotes: rows 7 8 9 / 4 5 6 / 1 2 3 / . 0 ENTER) ----------
+  const ROWS = [['7', '8', '9'], ['4', '5', '6'], ['1', '2', '3'], ['.', '0', 'ENTER']]
+  const LABELS = ['.', '0', 'ENTER', '1', '2', '3', '4', '5', '6', '7', '8', '9']
+  const GROUPS = ['A', 'B', 'C', 'D']
+  const NAMES = [
+    { '7': 'kick', '8': 'kick 2', '9': 'snare', '4': 'hat closed', '5': 'hat open', '6': 'clap', '1': 'rim', '2': 'tom low', '.': 'perc' },
+    { '7': 'bass c1', '8': 'bass d1' },
+    { '2': 'vox chop' },
+    { '7': 'stab', '1': 'riser' },
+  ]
+  const SLOTS = { kick: '001', 'kick 2': '002', snare: '003', 'hat closed': '004', 'hat open': '005', clap: '006', rim: '007', 'tom low': '008', perc: '009', 'bass c1': '101', 'bass d1': '102', 'vox chop': '140', stab: '205', riser: '206' }
+  const SOLFEGE = ['DO', 'DI', 'RE', 'RI', 'MI', 'FA', 'FI', 'SO', 'SI', 'LA', 'LI', 'TI']
+  const MAJOR = [0, 2, 4, 5, 7, 9, 11]
+  const note = (label) => LABELS.indexOf(label)
+
+  // KEYS: 12 keys from bottom-left, left to right, then up (Android's KEYS grid).
+  function keyNotes(oct) {
+    const out = []
+    for (let i = 0; i < 12; i++) {
+      const deg = MAJOR[i % 7] + 12 * Math.floor(i / 7)
+      out.push({ name: SOLFEGE[deg % 12], oct: oct + Math.floor(deg / 12) })
+    }
+    return out
+  }
+  function keyIndexAt(r, c) { return (3 - r) * 3 + c }
+
+  // ---------- state ----------
+  const S = {
+    connected: true, playing: true, bpm: '122.0', project: 3, group: 0, keys: false, octave: 4,
+    rec: 'idle', recStart: 0, recSecs: 0, offline: false, coach: false, keysFromDevice: false,
+    glow: [new Map(), new Map(), new Map(), new Map()], playingPads: new Set(), groupGlow: [0, 0, 0, 0],
+    last: 'A 7 · 001 kick · 124', pop: null, toast: null, view: 'device',
+    takes: [
+      { id: 2, date: 'Oct 10, 9:12 PM', secs: 47, open: false, confirm: false, playing: false },
+      { id: 1, date: 'Oct 9, 6:40 PM', secs: 73, open: false, confirm: false, playing: false },
+    ],
+  }
+  const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`
+  const el = (h) => { const t = document.createElement('template'); t.innerHTML = h.trim(); return t.content.firstElementChild }
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+
+  // ---------- device (EP-133 K.O. II, coordinates from the product photo, 1444 × 2000) ----------
+  const epHost = document.getElementById('ep')
+  const win = document.getElementById('win')
+  const at = (x, y, w, h) => `left:${x}px;top:${y}px;${w ? `width:${w}px;` : ''}${h ? `height:${h}px;` : ''}`
+  const COLS = [461, 657, 853]
+  const ROWY = [1147, 1343, 1538, 1735]
+  const GROUP_ICONS = ['✳', '↩', '↥', '↧']
+  function split(id, x, y, top, bottom, topCls, botCls) {
+    return `<button type="button" class="a key key--split" data-key="${id}" style="${at(x, y, 130, 130)}" aria-label="${top} / ${bottom}">
+      <span class="h ${topCls}">${top}</span><span class="h ${botCls}">${bottom}</span></button>`
+  }
+  function slim(id, x, y, label, cls) { return `<button type="button" class="a key key--slim ${cls}" data-key="${id}" style="${at(x, y, 130, 64)}">${label}</button>` }
+  function led(x, y, id) { return `<span class="a led" ${id ? `id="${id}"` : ''} style="${at(x - 10, y - 10)}"></span>` }
+  function lbl(x, y, t, cls = '') { return `<span class="a lbl ${cls}" style="${at(x, y - 16)}">${t}</span>` }
+
+  // Seven-segment digits like the K.O. II's display, with the unlit segments faintly visible.
+  const SEG = { '0': 'abcdef', '1': 'bc', '2': 'abdeg', '3': 'abcdg', '4': 'bcfg', '5': 'acdfg', '6': 'acdefg', '7': 'abc', '8': 'abcdefg', '9': 'abcdfg', O: 'abcdef', F: 'aefg', '-': 'g', ' ': '' }
+  const SEGR = { a: [10, 0, 46, 11], b: [56, 9, 11, 44], c: [56, 57, 11, 44], d: [10, 97, 46, 11], e: [0, 57, 11, 44], f: [0, 9, 11, 44], g: [10, 48.5, 46, 11] }
+  function digit(ch, dp) {
+    const on = SEG[ch] ?? ''
+    const rects = Object.entries(SEGR).map(([k, [x, y, w, h]]) => `<rect class="${on.includes(k) ? 'on' : 'off'}" x="${x}" y="${y}" width="${w}" height="${h}" rx="4"/>`).join('')
+    return `<svg viewBox="0 0 80 108" aria-hidden="true">${rects}<circle class="${dp ? 'on' : 'off'}" cx="74" cy="102" r="6"/></svg>`
+  }
+
+  function renderDevice() {
+    const screws = [[18, 112], [928, 112], [18, 438], [928, 438]].map(([x, y]) => `<span class="a screw" style="${at(x, y)}"></span>`).join('')
+    const groups = GROUPS.map((g, i) => `<span class="a d-grp" data-dgrp="${i}" style="${at(212, 562 + i * 66)}">${g}</span>`).join('')
+    const gkeys = GROUPS.map((g, i) => `<button type="button" class="a key key--light key--group" data-key="G${i}" style="${at(265, ROWY[i], 130, 128)}" aria-label="Group ${g}">
+        <span class="key__letter">${g}</span><span class="key__icon" aria-hidden="true">${GROUP_ICONS[i]}</span></button>`).join('')
+    const pads = ROWS.map((row, r) => row.map((l, c) => `<button type="button" class="a pad" data-label="${l}" style="${at(COLS[c], ROWY[r], 130, 128)}"></button>`).join('')).join('')
+    const ledRow = (y, labels, red = []) => [297, 493, 689, 885].map((x, i) => led(x, y, i === 0 ? `gled${[1112, 1307, 1503, 1700].indexOf(y)}` : '') + (labels[i - 1] ? lbl(x + 30, y, labels[i - 1], red.includes(i) ? '' : '') : '')).join('')
+    epHost.replaceWith(el(`<div class="epbox" id="ep"><div class="ep">
+      <span class="a jack jack--out">OUTPUT</span><span class="a jack jack--in">INPUT</span>
+      <span class="a jack jack--sync"><span>SYNC</span><span>MIDI</span></span><span class="a jack jack--usb">USB</span><span class="a jack jack--pow">POWER</span><span class="a pow-nub"></span>
+      <div class="a plate"></div>${screws}
+      <span class="a plate__title">K.O. Ⅱ</span>
+      <span class="a plate__status" id="plStatus"></span>
+      <span class="a plate__hit" id="plHit"></span>
+      <div class="a grille" aria-hidden="true"></div>
+      <div class="a disp"></div>
+      <span class="a d-batt"></span>
+      <span class="a d-txt dg" style="${at(78, 634)}">MUTE</span>
+      <span class="a d-piano" id="dPiano"><i></i><i></i><i></i><i></i><i></i></span>
+      ${groups}
+      <span class="a d-mode" id="dMode">PADS</span>
+      <span class="a d-txt dg" style="${at(300, 566)}">SYNC</span>
+      <span class="a d-txt dg" style="${at(345, 634)}">PASTE</span>
+      <span class="a d-txt dg" style="${at(470, 634)}">TIC</span>
+      <span class="a d-bar">BAR</span>
+      <span class="a seg7" id="dSeg"></span>
+      <span class="a d-txt d-bpm dg" id="dBpm">BPM</span>
+      <span class="a d-rec" id="dRec"></span>
+      <span class="a d-play" id="dPlay"></span>
+      <svg class="a d-metro" id="dMetro" viewBox="0 0 40 52" aria-hidden="true"><path d="M14 4 h12 l10 44 h-32 z M20 40 L32 8"/></svg>
+      <span class="a d-bars" style="${at(795, 704)}"></span><span class="a d-fx dg">FX</span><span class="a d-bars" style="${at(928, 704)}"></span>
+      <span class="a d-stereo dg"><b>OO</b>STEREO</span>
+      <svg class="a d-ring" id="dRing" viewBox="0 0 118 118" aria-hidden="true"></svg>
+      <span class="a d-dots" style="${at(1203, 630)}"></span><span class="a d-dots" style="${at(1203, 694)}"></span><span class="a d-dots" style="${at(1203, 760)}"></span>
+      <span class="a d-q dg">Q</span><span class="a d-txt dg" style="${at(1318, 730)}">FREE</span>
+      <span class="a d-txt dg" style="${at(1310, 760)}">SWING</span>
+
+      <span class="a lbl" style="${at(90, 902)}">VOLUME</span>
+      <button type="button" class="a knob knob--vol" data-key="VOLUME" style="${at(68, 950)}" aria-label="Volume"></button>
+      ${split('SOUND', 265, 950, 'SOUND', 'EDIT', 'h--black', 'h--light')}
+      ${split('MAIN', 461, 950, 'MAIN', 'COMMIT', 'h--black', 'h--orange')}
+      ${split('TEMPO', 657, 950, 'TEMPO', 'LOOP', 'h--black', 'h--grey')}
+      <span class="a line" style="${at(722, 917, 2, 30)}"></span><span class="a line" style="${at(722, 917, 345, 2)}"></span>
+      <span class="a lbl" style="${at(1090, 917)}">BPM</span><span class="a line" style="${at(1160, 917, 70, 2)}"></span><span class="a lbl" style="${at(1242, 917)}">METRONOME</span>
+      <button type="button" class="a knob knob--x" data-key="KNOBX" style="${at(1049, 950)}" aria-label="Knob X"></button>
+      <button type="button" class="a knob knob--y" data-key="KNOBY" style="${at(1245, 950)}" aria-label="Knob Y"></button>
+      <span class="a badge" style="${at(1098, 1098)}background:#F23A1A">X</span><span class="a badge" style="${at(1294, 1098)}background:#111">Y</span>
+      <span class="a line--red" style="${at(1016, 1015, 2, 162)}"></span><span class="a line--red" style="${at(1016, 1015, 30, 2)}"></span><span class="a line--red" style="${at(1016, 1175, 34, 2)}"></span>
+      <span class="a lbl lbl--red" style="${at(986, 1110)}transform:rotate(-90deg);background:var(--dev-body);padding:0 6px">GAIN</span>
+      <span class="a line" style="${at(1408, 1015, 2, 162)}"></span><span class="a line" style="${at(1380, 1015, 30, 2)}"></span><span class="a line" style="${at(1380, 1175, 30, 2)}"></span>
+      <span class="a lbl" style="${at(1370, 1104)}transform:rotate(-90deg);background:var(--dev-body);padding:0 6px">SWING</span>
+
+      ${ledRow(1112, ['LEVEL', 'PITCH', 'TIME'])}
+      ${ledRow(1307, ['LPF', 'HPF', '→ FX'])}
+      ${ledRow(1503, ['ATK', 'REL', 'PAN'])}
+      ${ledRow(1700, ['TUNE', 'VEL', 'MOD'])}
+      ${led(1082, 1700, 'ledMinus')}${led(1147, 1700, 'ledPlus')}
+
+      ${slim('KEYS', 68, 1147, 'KEYS', 'key--black')}
+      ${slim('FADERKEY', 68, 1277, 'FADER', 'key--black')}
+      <button type="button" class="a fader" data-key="FADER" aria-label="Fader"><span class="fader__slot"></span><span class="fader__tick"></span><span class="fader__cap"></span></button>
+      ${slim('SHIFT', 68, 1800, 'SHIFT', 'key--light')}
+      ${gkeys}
+      <div id="pads">${pads}</div>
+      ${split('SAMPLE', 1050, 1147, 'SAMPLE', 'CHOP', 'h--orange', 'h--light')}
+      ${split('TIMING', 1246, 1147, 'TIMING', 'CORRECT', 'h--black', 'h--light')}
+      ${split('FX', 1050, 1343, 'FX', 'OUTPUT', 'h--black', 'h--light')}
+      ${split('ERASE', 1246, 1343, 'ERASE', 'SYSTEM', 'h--lighter', 'h--light')}
+      <button type="button" class="a key key--light key--sign" data-key="MINUS" style="${at(1050, 1538, 130, 128)}" aria-label="minus">−</button>
+      <button type="button" class="a key key--light key--sign" data-key="PLUS" style="${at(1246, 1538, 130, 128)}" aria-label="plus">+</button>
+      <button type="button" class="a key key--orange key--word" data-key="RECORD" style="${at(1050, 1735, 130, 128)}">RECORD</button>
+      <button type="button" class="a key key--grey key--word" data-key="PLAY" style="${at(1246, 1735, 130, 128)}">PLAY</button>
+    </div></div>`))
+    const ep = document.getElementById('ep')
+    ep.addEventListener('click', onKey)
+    bindPads(ep.querySelector('#pads'))
+  }
+
+  function padName(g, l) { return NAMES[g][l] || '' }
+  function ringSvg() {
+    // Four quarter arcs, one per group: A top-left, B top-right, C bottom-right, D bottom-left.
+    const C = 2 * Math.PI * 47, q = C / 4
+    const cols = ['#FF4C00', '#E5397A', '#3E8FDA', '#FF6A2A']
+    const starts = [2, 3, 0, 1]
+    return cols.map((c, i) => {
+      const o = i === S.group ? 1 : 0.18 + 0.82 * S.groupGlow[i]
+      return `<circle cx="59" cy="59" r="47" stroke="${c}" stroke-opacity="${S.offline ? 0.15 : o.toFixed(2)}" stroke-dasharray="${q - 6} ${C - q + 6}" stroke-dashoffset="${-starts[i] * q}" transform="rotate(0 59 59)"/>`
+    }).join('')
+  }
+  function update() {
+    const box = document.getElementById('ep')
+    const ep = box.firstElementChild
+    ep.classList.toggle('is-offline', S.offline)
+    const $ = (id) => document.getElementById(id)
+    const kn = keyNotes(S.octave)
+    // plate: arc's own lines where the unit prints its name
+    $('plStatus').textContent = S.offline ? 'OFFLINE · LAST SEEN OCT 5, 2:04 PM'
+      : S.rec === 'rec' ? `REC ${fmt(S.recSecs)} · TAP RECORD TO STOP`
+      : S.rec === 'armed' ? 'REC ARMED · PLAY A PAD OR START THE EP-133'
+      : `LIVE · PROJECT ${S.project}`
+    $('plHit').textContent = S.keys ? `KEYS · ${kn[0].name}${S.octave} · ${GROUPS[S.group]}7 ${(padName(S.group, '7') || 'kick').toUpperCase()}` : S.last.toUpperCase()
+    // display
+    const digits = S.offline ? 'OFF' : S.rec === 'rec' ? String(Math.floor(S.recSecs / 60)) + String(Math.floor(S.recSecs % 60)).padStart(2, '0') : S.bpm.split('.')[0].padStart(3, ' ')
+    $('dSeg').innerHTML = [...digits].map((d, i) => digit(d, S.rec === 'rec' && !S.offline && i === 0)).join('')
+    $('dBpm').className = 'a d-txt d-bpm ' + (!S.offline && S.rec !== 'rec' ? 'lit' : 'dg')
+    $('dRec').className = 'a d-rec' + (S.rec === 'rec' ? ' on' : S.rec === 'armed' ? ' blink' : '')
+    $('dPlay').className = 'a d-play' + (S.playing && !S.offline ? ' on' : '')
+    $('dPiano').className = 'a d-piano' + (S.keys ? ' on' : '')
+    $('dMode').className = 'a d-mode on'; $('dMode').textContent = S.keys ? 'KEYS' : 'PADS'
+    $('dRing').innerHTML = ringSvg()
+    ep.querySelectorAll('[data-dgrp]').forEach((d) => {
+      const i = Number(d.dataset.dgrp)
+      d.className = 'a d-grp' + (S.offline ? '' : i === S.group ? ' on' : S.groupGlow[i] > 0.1 ? ' snd' : '')
+    })
+    // keys and LEDs
+    const keyEl = (id) => ep.querySelector(`[data-key="${id}"]`)
+    keyEl('PLAY').classList.toggle('is-lit', S.playing && !S.offline)
+    keyEl('KEYS').classList.toggle('is-sel', S.keys)
+    keyEl('RECORD').classList.toggle('is-armed', S.rec === 'armed')
+    keyEl('RECORD').classList.toggle('is-on', S.rec === 'rec')
+    $('ledMinus').classList.toggle('on', S.keys ? S.octave > 0 : S.group > 0)
+    $('ledPlus').classList.toggle('on', S.keys ? S.octave < 8 : S.group < 3)
+    GROUPS.forEach((_, i) => {
+      const l = $('gled' + i)
+      l.classList.toggle('on', !S.offline && (i === S.group || S.groupGlow[i] > 0.1))
+      l.style.opacity = i === S.group || S.offline ? '' : String(0.35 + 0.65 * S.groupGlow[i])
+    })
+    // pads
+    ep.querySelectorAll('.pad').forEach((p, idx) => {
+      const r = Math.floor(idx / 3), c = idx % 3, l = p.dataset.label
+      const g = S.glow[S.group].get(l) || 0
+      p.style.setProperty('--glow', g.toFixed(3))
+      p.classList.toggle('is-lit', g > 0.35)
+      p.classList.toggle('is-playing', S.playingPads.has(S.group + l))
+      if (S.keys) {
+        const n = kn[keyIndexAt(r, c)]
+        p.innerHTML = `<span class="pad__ring ${n.oct > S.octave ? 'hi' : ''}">${n.name}</span><span class="pad__oct">${n.oct}</span>`
+        p.setAttribute('aria-label', n.name + n.oct)
+      } else {
+        const nm = padName(S.group, l)
+        const cls = l === 'ENTER' ? 'word' : l === '.' ? 'dot' : ''
+        p.innerHTML = `<span class="pad__num ${cls}">${l === '.' ? '•' : l}</span><span class="pad__name">${esc(nm)}</span>`
+        p.setAttribute('aria-label', `${GROUPS[S.group]} ${l}${nm ? ', ' + nm : ''}`)
+      }
+    })
+    // top bar
+    const conn = $('tbConn')
+    conn.className = 'ikey ' + (S.offline ? 'ikey--navy' : 'ikey--ok')
+    $('tbBackup').classList.toggle('is-pale', S.offline)
+    renderTools(); renderOverlay()
+  }
+
+  // The metronome icon ticks on each beat of the MIDI clock.
+  let beat = 0
+  setInterval(() => {
+    if (!S.playing || S.offline) return
+    beat = (beat + 1) % 4
+    const m = document.getElementById('dMetro'); if (m) m.classList.toggle('on', beat === 0 || beat === 2)
+  }, 60000 / 122 / 2)
+  setInterval(() => { if (S.rec === 'rec') { const s = Math.floor((Date.now() - S.recStart) / 1000); if (s !== Math.floor(S.recSecs)) { S.recSecs = s; update() } } }, 250)
+
+  // ---------- glow fade (300 ms, as ui/live/glow.ts) ----------
+  const fading = new Map()
+  let raf = 0
+  function fade() {
+    const now = performance.now()
+    let alive = false
+    fading.forEach((f, key) => {
+      const t = Math.min(1, (now - f.t0) / 300)
+      const v = f.from * (1 - t)
+      S.glow[f.g].set(f.l, v)
+      if (t >= 1) { fading.delete(key); S.glow[f.g].delete(f.l) } else alive = true
+    })
+    for (let g = 0; g < 4; g++) S.groupGlow[g] = Math.max(0, ...S.glow[g].values())
+    update()
+    raf = alive ? requestAnimationFrame(fade) : 0
+  }
+  function hit(g, l, vel) {
+    fading.delete(g + l)
+    S.glow[g].set(l, 0.45 + 0.55 * vel)
+    S.groupGlow[g] = Math.max(S.groupGlow[g], 0.45 + 0.55 * vel)
+  }
+  function release(g, l) {
+    fading.set(g + l, { g, l, from: S.glow[g].get(l) || 0, t0: performance.now() })
+    if (!raf) raf = requestAnimationFrame(fade)
+  }
+
+  // ---------- pads (hold = gate) ----------
+  let dragging = false
+  function bindPads(host) {
+    const down = new Map()
+    host.addEventListener('pointerdown', (e) => {
+      const p = e.target.closest('.pad'); if (!p) return
+      e.preventDefault(); p.setPointerCapture(e.pointerId)
+      const l = p.dataset.label, g = S.group
+      down.set(e.pointerId, { g, l, p }); p.classList.add('is-down')
+      S.playingPads.add(g + l); hit(g, l, 0.9)
+      if (S.rec === 'armed') { S.rec = 'rec'; S.recStart = Date.now(); S.recSecs = 0 }
+      const nm = padName(g, l)
+      if (!S.keys) S.last = `${GROUPS[g]} ${l}${nm ? ' · ' + nm : ''}`
+      closePop(); update()
+    })
+    const up = (e) => {
+      const d = down.get(e.pointerId); if (!d) return
+      down.delete(e.pointerId); d.p.classList.remove('is-down')
+      S.playingPads.delete(d.g + d.l); release(d.g, d.l)
+    }
+    host.addEventListener('pointerup', up); host.addEventListener('pointercancel', up)
+  }
+
+  // ---------- keys ----------
+  function onKey(e) {
+    const k = e.target.closest('[data-key]'); if (!k) return
+    const id = k.dataset.key
+    if (id.startsWith('G')) { S.group = Number(id.slice(1)); closePop(); return update() }
+    if (id === 'KEYS') { S.keys = !S.keys; closePop(); return update() }
+    if (id === 'MINUS' || id === 'PLUS') { step(id === 'PLUS' ? 1 : -1); return }
+    if (id === 'RECORD') { toggleRec(); return }
+    openPop(k, id)
+  }
+  // − / +: octave in KEYS, previous / next group in PADS.
+  function step(d) {
+    if (S.keys) S.octave = Math.max(0, Math.min(8, S.octave + d)); else S.group = Math.max(0, Math.min(3, S.group + d))
+    closePop(); update()
+  }
+  function toggleRec() {
+    if (S.rec === 'idle') { S.rec = 'armed'; update(); return }
+    if (S.rec === 'armed') { S.rec = 'idle'; update(); return }
+    const secs = Math.max(1, Math.round((Date.now() - S.recStart) / 1000))
+    S.rec = 'idle'
+    S.takes.unshift({ id: Date.now(), date: 'Oct 10, ' + new Date().toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }), secs, open: false, confirm: false, playing: false })
+    showToast(`Take saved (${fmt(secs)}). It's in Live tools.`)
+    update()
+  }
+  const KEY_NAMES = { KNOBX: 'Knob X', KNOBY: 'Knob Y', FADER: 'Fader', FADERKEY: 'FADER', PLAY: 'PLAY', VOLUME: 'Volume', SOUND: 'SOUND', MAIN: 'MAIN', TEMPO: 'TEMPO', SAMPLE: 'SAMPLE', TIMING: 'TIMING', FX: 'FX', ERASE: 'ERASE', SHIFT: 'SHIFT' }
+  function openPop(k, id) {
+    closePop()
+    const list = COMBOS[id === 'FADERKEY' ? 'FADER' : id] || []
+    const r = k.getBoundingClientRect(), w = win.getBoundingClientRect()
+    const s = w.width / win.offsetWidth
+    let x = (r.left - w.left) / s, y = (r.bottom - w.top) / s + 10
+    if (x + 300 > 1180) x = 1180 - 300
+    const note = id === 'PLAY' ? 'Lit while the EP-133 plays. arc never starts or stops the device.' : id === 'VOLUME' ? 'The device\'s own volume. Sound played in arc follows this computer\'s volume.' : 'arc only reads in Live. This key works on the device.'
+    const pop = el(`<div class="pop" role="dialog" aria-label="${esc(KEY_NAMES[id] || id)} shortcuts" style="left:${x}px;top:${y}px">
+      <h4>${esc(KEY_NAMES[id] || id)} on the EP-133 <button type="button" aria-label="Close">×</button></h4>
+      ${list.slice(0, 3).map((c) => `<div class="row"><code>${esc(c.combo.replace(/hold:|turn:/g, ''))}</code><p>${esc(c.action.split('. ')[0].replace(/\.$/, ''))}.</p></div>`).join('')}
+      <p class="note">${note} <b>All ${esc(KEY_NAMES[id] || id)} shortcuts →</b></p></div>`)
+    pop.querySelector('button').addEventListener('click', closePop)
+    win.appendChild(pop); S.pop = pop
+    const ph = pop.offsetHeight
+    if (y + ph > 986) { x = Math.min((r.right - w.left) / s + 12, 1180 - 300); y = Math.max(52, 986 - ph) ; pop.style.left = x + 'px'; pop.style.top = y + 'px' }
+  }
+  function closePop() { if (S.pop) { S.pop.remove(); S.pop = null } }
+  let toastT = 0
+  function showToast(msg) {
+    document.querySelectorAll('#win .toast').forEach((t) => t.remove())
+    const t = el(`<div class="toast" role="status">${esc(msg)}</div>`)
+    win.querySelector('.app__main').appendChild(t)
+    clearTimeout(toastT); toastT = setTimeout(() => t.remove(), 3200)
+  }
+
+  // ---------- tools panel ----------
+  const tools = document.getElementById('tools')
+  function renderTools() {
+    tools.innerHTML = `
+      <div class="tools__title"><span class="caps">Live tools</span></div>
+      <span class="caps">View</span>
+      <div class="tt" role="group" aria-label="View">
+        <button type="button" aria-pressed="true">Device</button><button type="button" aria-pressed="false">All groups</button><button type="button" aria-pressed="false">One group</button>
+      </div>
+      <span class="caps">Takes</span>
+      <div class="takes">${S.takes.length ? S.takes.map(takeHtml).join('') : `<p>Tap RECORD, then play or start the EP-133: recording starts with the first sound or the device's PLAY, and stops when you tap RECORD again or the device stops.</p>`}</div>
+      <p>A take holds the pads and keys played in this browser, connected or not, not the EP-133's own sound. Takes stay in arc until you delete them; Save or Share copies one out.</p>
+      <span class="caps">Pad numbers in project files</span>
+      <div class="segrow"><span class="on">From the top</span><span>From the bottom</span></div>`
+  }
+  function takeHtml(t) {
+    const live = S.connected && !S.offline
+    return `<div class="take" data-take="${t.id}">
+      <div class="take__row" data-act="open" role="button" tabindex="0" aria-expanded="${t.open}">
+        <span class="take__meta"><span class="take__date">${esc(t.date)}</span><span class="take__len">${fmt(t.secs)}</span></span>
+        <button type="button" class="akey" data-act="play">${t.playing ? 'Stop' : 'Play'}</button>
+      </div>
+      ${t.open ? `<div class="take__more">
+        <button type="button" class="akey">Save WAV</button>
+        <button type="button" class="akey" ${live ? '' : 'disabled title="Connect the EP-133 first"'}>To EP-133</button>
+        <button type="button" class="akey akey--danger" data-act="del" style="grid-column:1 / -1">Delete</button>
+        ${t.confirm ? `<div class="take__confirm"><span>Delete this take?</span><span style="display:flex;gap:6px"><button type="button" class="akey" data-act="cancel">Cancel</button><button type="button" class="akey akey--signal" data-act="really">Delete</button></span></div>` : ''}
+      </div>` : ''}
+    </div>`
+  }
+  tools.addEventListener('click', (e) => {
+    const box = e.target.closest('[data-take]'); if (!box) return
+    const t = S.takes.find((x) => String(x.id) === box.dataset.take); if (!t) return
+    const act = e.target.closest('[data-act]')?.dataset.act
+    if (act === 'play') { S.takes.forEach((x) => { if (x !== t) x.playing = false }); t.playing = !t.playing }
+    else if (act === 'del') t.confirm = true
+    else if (act === 'cancel') t.confirm = false
+    else if (act === 'really') S.takes = S.takes.filter((x) => x !== t)
+    else if (act === 'open') { t.open = !t.open; t.confirm = false }
+    renderTools()
+  })
+
+  // ---------- guide overlay ----------
+  function renderOverlay() {
+    win.querySelectorAll('.ctag, .cscrim, .cclose').forEach((n) => n.remove())
+    if (!S.coach) return
+    const at = (sel, text, cls, dx = 0, dy = 0) => {
+      const n = win.querySelector(sel); if (!n) return
+      const r = n.getBoundingClientRect(), w = win.getBoundingClientRect(), s = w.width / win.offsetWidth
+      win.appendChild(el(`<span class="ctag ${cls}" style="left:${(r.left - w.left) / s + dx}px;top:${(r.top - w.top) / s + dy}px">${text}</span>`))
+    }
+    win.appendChild(el('<div class="cscrim"></div>'))
+    at('.topbar .tag', 'Sections', '', 0, 52)
+    at('#tbBackup', 'Back up', 'o', -20, 52)
+    at('#tbConn', 'Connection', 'g', -24, 88)
+    at('[data-label="5"]', 'Pads light as you play', 'y', -60, 70)
+    at('[data-key="G1"]', 'Pick a group', '', -40, 20)
+    at('[data-key="KEYS"]', 'Pads or keys', '', -10, -34)
+    at('[data-key="RECORD"]', 'Record a take', 'o', -40, -34)
+    at('[data-key="PLAY"]', 'Lit while it plays', '', -60, 62)
+    at('[data-key="TEMPO"]', 'Tap any other key for its shortcuts', '', -80, -34)
+    at('#dSeg', 'Tempo, play, REC, groups', '', -20, 50)
+    at('.tools .takes', 'Your takes', '', 0, -30)
+    at('.edge-guide', 'EP-133 shortcuts', '', 36, 50)
+    win.appendChild(el('<div class="cclose">TAP ANYWHERE TO CLOSE</div>'))
+  }
+  win.addEventListener('click', (e) => { if (S.coach && !e.target.closest('.chip')) { S.coach = false; setPresetChip(null); update() } }, true)
+
+  // ---------- presets ----------
+  const chips = document.querySelectorAll('[data-preset]')
+  function setPresetChip(id) { chips.forEach((c) => c.setAttribute('aria-pressed', String(c.dataset.preset === id))) }
+  function clearGlow() { S.glow.forEach((m) => m.clear()); fading.clear(); S.groupGlow = [0, 0, 0, 0]; S.playingPads.clear() }
+  const PRESETS = {
+    idle() { Object.assign(S, { playing: false, offline: false, keys: false, rec: 'idle', group: 0, last: 'A 7 · 001 kick · 124', keysFromDevice: false }) },
+    playing() {
+      Object.assign(S, { playing: true, offline: false, keys: false, rec: 'idle', group: 0, last: 'A 7 · 001 kick · 124', keysFromDevice: false })
+      S.glow[0].set('7', 1); S.glow[0].set('4', 0.55); S.glow[1].set('7', 0.85); S.glow[2].set('2', 0.7)
+      S.groupGlow = [1, 0.85, 0.7, 0]
+    },
+    keys() {
+      Object.assign(S, { playing: true, offline: false, keys: true, rec: 'idle', group: 0, octave: 4, keysFromDevice: true })
+      S.glow[0].set('9', 0.6); S.glow[0].set('ENTER', 1)
+    },
+    armed() { PRESETS.idle(); S.rec = 'armed'; S.playing = true },
+    recording() { PRESETS.playing(); S.rec = 'rec'; S.recStart = Date.now() - 12000; S.recSecs = 12 },
+    offline() { Object.assign(S, { playing: false, offline: true, keys: false, rec: 'idle', group: 0, keysFromDevice: false }) },
+    coach() { PRESETS.idle(); S.coach = true },
+  }
+  chips.forEach((c) => c.addEventListener('click', (e) => {
+    e.stopPropagation()
+    clearGlow(); closePop(); S.coach = false
+    PRESETS[c.dataset.preset](); setPresetChip(c.dataset.preset); update()
+  }))
+
+  // ---------- keyboard ----------
+  // Numpad as on the device, and QWERTY rows for laptops: 1 2 3 / Q W E / A S D / Z X C.
+  const KB = { Numpad7: '7', Numpad8: '8', Numpad9: '9', Numpad4: '4', Numpad5: '5', Numpad6: '6', Numpad1: '1', Numpad2: '2', Numpad3: '3', NumpadDecimal: '.', Numpad0: '0', NumpadEnter: 'ENTER',
+    Digit1: '7', Digit2: '8', Digit3: '9', KeyQ: '4', KeyW: '5', KeyE: '6', KeyA: '1', KeyS: '2', KeyD: '3', KeyZ: '.', KeyX: '0', KeyC: 'ENTER' }
+  const held = new Set()
+  document.addEventListener('keydown', (e) => {
+    if (e.repeat || e.target.closest('input, textarea') || document.getElementById('deskStage').getBoundingClientRect().bottom < 0) return
+    const l = KB[e.code]
+    if (l && !held.has(l)) { held.add(l); S.playingPads.add(S.group + l); hit(S.group, l, 0.9); if (!S.keys) S.last = `${GROUPS[S.group]} ${l}${padName(S.group, l) ? ' · ' + padName(S.group, l) : ''}`; if (S.rec === 'armed') { S.rec = 'rec'; S.recStart = Date.now() } update(); return }
+    if (/^F[1-4]$/.test(e.key)) { e.preventDefault(); S.group = Number(e.key[1]) - 1; update() }
+    else if (e.key === 'k' || e.key === 'K') { S.keys = !S.keys; update() }
+    else if (e.key === 'r' || e.key === 'R') toggleRec()
+    else if (e.key === '-' || e.key === '+' || e.key === '=') step(e.key === '-' ? -1 : 1)
+    else if (e.key === 'Escape') closePop()
+  })
+  document.addEventListener('keyup', (e) => { const l = KB[e.code]; if (l && held.has(l)) { held.delete(l); S.playingPads.delete(S.group + l); release(S.group, l) } })
+
+  // ---------- phones ----------
+  function phoneHtml(o) {
+    const recCls = o.rec === 'armed' ? 'is-armed' : o.rec === 'rec' ? 'is-on' : ''
+    const cells = ROWS.flat().map((l) => {
+      const g = (o.glow || {})[l] || 0
+      const inner = o.keys
+        ? (() => { const idx = ROWS.flat().indexOf(l); const n = keyNotes(4)[keyIndexAt(Math.floor(idx / 3), idx % 3)]; return `<span class="pad__ring ${n.oct > 4 ? 'hi' : ''}" style="width:96px;height:96px;margin:-48px 0 0 -48px;border-width:9px;font-size:24px;${g > .35 ? 'border-color:#fff;color:#fff' : ''}">${n.name}</span><span class="pad__oct" style="font-size:14px;${g > .35 ? 'color:#fff' : ''}">${n.oct}</span>` })()
+        : `<span class="n ${l === 'ENTER' ? 'word' : ''}">${l === '.' ? '•' : l}</span><span class="nm">${esc(NAMES[0][l] || '')}</span>`
+      return `<div class="pm__cell ${g > .35 ? 'lit' : ''}" style="--glow:${g}">${inner}</div>`
+    }).join('')
+    const strip = o.keys
+      ? `<span class="rec ${recCls}"><i></i>${o.rec === 'rec' ? '0:12' : 'REC'}</span><span style="color:var(--display-dim)">KEYS</span><span>DO5</span><span class="last">A 7 · kick</span>`
+      : `<span class="rec ${recCls}"><i></i>${o.rec === 'rec' ? '0:12' : 'REC'}</span><span>▶</span><span>122.0 BPM</span><span style="color:var(--display-dim)">P3</span><span class="last">A 7 · 001 kick</span>`
+    const sheet = o.tools ? `<div class="pm__scrim"></div><div class="pm__sheet">
+        <span class="caps">Live tools</span>
+        <span class="caps">Takes</span>
+        <div class="takes">${[{ date: 'Oct 10, 9:12 PM', secs: 47, playing: true }, { date: 'Oct 9, 6:40 PM', secs: 73 }].map((t, i) => `<div class="take"><div class="take__row"><span class="take__meta"><span class="take__date">${t.date}</span><span class="take__len">${fmt(t.secs)}</span></span><span class="akey">${t.playing ? 'Stop' : 'Play'}</span></div>${i === 0 ? '<div class="take__more"><span class="akey" style="text-align:center">Save WAV</span><span class="akey" style="text-align:center">Share</span><span class="akey" style="text-align:center">To EP-133</span><span class="akey akey--danger" style="text-align:center">Delete</span></div>' : ''}</div>`).join('')}</div>
+        <p class="small dim">A take holds the pads and keys played in this browser, connected or not, not the EP-133's own sound.</p></div>` : ''
+    return `<div class="pm">
+      <div class="pm__bar"><span class="tag">LIVE</span><span style="margin-left:auto" class="ikey ikey--signal"><span class="d"></span></span><span class="ikey ikey--ok"><span class="d"></span></span><span class="ikey ikey--round">?</span></div>
+      <div class="pm__strip">${strip}</div>
+      <div class="pm__grid">${cells}</div>
+      <div class="pm__words"><span>⧉ ${o.keys ? 'KEYS' : 'PADS'}</span>${o.keys ? '<span>MAJOR ▾</span><span>OCT 4 ▾</span>' : ''}</div>
+      ${o.keys ? '<div></div>' : `<div class="pm__groups">${GROUPS.map((g, i) => `<span class="${i === 0 ? 'on' : i === 1 ? 'glow' : ''}"><b>${g}</b><i>${GROUP_ICONS[i]}</i></span>`).join('')}<span class="rec ${o.rec === 'armed' ? 'armed' : o.rec === 'rec' ? 'on' : ''}"><em></em></span></div>`}
+      ${sheet}</div>`
+  }
+  const PHONES = [
+    { t: 'Web · REC idle', d: 'Same one-group layout, in the K.O. II\'s colours: black pads, light A–D keys with their icons and LED, and an orange RECORD key. The REC chip in the strip shows the state, as on Android.', o: { rec: 'idle', glow: { '7': 1, '4': 0.5 } } },
+    { t: 'Android · REC armed', img: 'audit/android/rec-armed.jpg', d: 'The reference. Armed: the dot blinks until the first sound.' },
+    { t: 'Web · REC armed', d: 'The chip\'s dot and the RECORD key blink every 450 ms. Recording starts at the first sound or when the EP-133 starts playing.', o: { rec: 'armed' } },
+    { t: 'Web · Recording in KEYS', d: 'The chip turns into an orange-ringed timer. Tapping it stops and saves the take.', o: { rec: 'rec', keys: true, glow: { '9': 0.6, 'ENTER': 1 } } },
+    { t: 'Android · Recording in KEYS', img: 'audit/android/rec-recording-keys.jpg', d: 'The reference for the timer chip.' },
+    { t: 'Web · Live tools with takes', d: 'Takes come first in the panel. Tapping a row unfolds Save WAV, Share (on phones that can share files), To EP-133 and Delete.', o: { tools: true } },
+    { t: 'Android · Live tools with takes', img: 'audit/android/tools-takes.jpg', d: 'The reference. The web copy says "in this browser" in place of "on the phone".' },
+  ]
+  const phones = document.getElementById('phones')
+  PHONES.forEach((p) => {
+    const node = el(`<div class="ph"><div class="ph__cap"><b>${esc(p.t)}</b><span class="small dim">${esc(p.d)}</span></div>
+      ${p.img ? `<img src="${p.img}" alt="${esc(p.t)}" loading="lazy" width="412" height="842">` : `<div class="ph__screen">${phoneHtml(p.o)}</div>`}</div>`)
+    phones.appendChild(node)
+    const sc = node.querySelector('.ph__screen'); if (sc) { ro.observe(sc); fitPhone(sc) }
+  })
+
+  // ---------- audit ----------
+  const AUDIT = [
+    { k: 'live-one-group', t: 'Live, one group', s: 'fix', n: ['The REC chip is missing at the left of the display strip.', 'Pad names: the Android preview has every name learned already. The web demo learns them as pads are pressed, so blank pads are expected here.', 'Group keys, Follow, the PADS word and the hatched tools strip all match.'] },
+    { k: 'live-all-groups', t: 'Live, all groups', s: 'fix', n: ['The REC chip is missing from the right of the last hit in the display panel.', 'The panel, captions, 2×2 groups and glow match.'] },
+    { k: 'live-keys', t: 'Live, KEYS', s: 'fix', n: ['The REC chip is missing.', 'Rings, octave colours, note names and the scale and octave words match. The scale differs only because the two captures used different settings.'] },
+    { k: 'live-tools', t: 'Live tools', s: 'fix', n: ['There is no Takes section and no takes note (see the Android reference in Phone REC above).', 'View, Follow, the notes and pad order match.'] },
+    { k: 'live-offline', t: 'Live, offline', s: 'fix', n: ['REC only: Android can still record while offline, from arc\'s copy of the pad sounds.', 'Offline, Project and Last seen match. The web capture is the all-groups view.'] },
+    { k: 'live-guide-overlay', t: 'Guide overlay', s: 'check', n: ['The tags and colours match.', 'In two dev-server runs the overlay didn\'t open by itself on the first visit, so I opened it with ?. The e2e smoke test expects it on the built app. Check on a fresh profile.', 'Once REC lands, it needs a tag on both apps.'] },
+    { k: 'section-menu', t: 'Section menu', s: 'same', n: ['Same three keys, the same navy for the current section, and the same scrim.'] },
+    { k: 'backups', t: 'Backups', s: 'same', n: ['Same device panel, meter and stats.', 'The web shows its empty state because the demo starts with no backups. "Restore from a folder" is the browser\'s version of Documents/arc, on purpose.'] },
+    { k: 'device-sounds', t: 'Device, sounds', s: 'same', n: ['Same storage panel, grouping by hundreds, sizes and Play keys.'] },
+    { k: 'device-projects', t: 'Device, projects', s: 'check', n: ['Project tiles read 0 B in the demo. This is likely the simulator\'s empty project files; confirm on hardware.', 'The web adds "Tap a project to see its sounds and pads." under the tiles. Android has no such line.'] },
+    { k: 'pads-sheet', t: 'Pads sheet', s: 'check', n: ['Android (from a backup) draws all 12 pads per group, with "Empty" under the unused ones.', 'The web sheet from the device draws one row per group here, with hatched cells and no "Empty" label. Check whether it trims empty rows or the demo project only has those pads.'] },
+    { k: 'settings', t: 'Settings', s: 'check', n: ['Android opens Library with "3 backups, 137 MB stored on this phone". The web capture had no backups, so the line may only be hidden. Check with one backup.', 'The browser wording ("in this browser", "Pick a library folder") is intended.'] },
+    { k: 'guide', t: 'Shortcut guide', s: 'same', n: ['Same tabs, search and key caps. guideData.ts is generated and checked against GuideText.kt.'] },
+    { k: 'live-one-group-dark', t: 'Live, dark', s: 'fix', n: ['The REC chip is missing. The dark tokens match: navy turns lavender and the plate is charcoal.'] },
+    { k: 'live-keys-dark', t: 'KEYS, dark', s: 'fix', n: ['The REC chip is missing. Otherwise the same.'] },
+    { k: 'backups-dark', t: 'Backups, dark', s: 'same', n: ['The same tokens in both apps.'] },
+    { k: 'device-sounds-dark', t: 'Device, dark', s: 'check', n: ['Same layout. The "EP-133 was disconnected" toast stayed up across several screens after the cable went back in. Android toasts can be swiped away; check whether the web toast times out.'] },
+    { k: 'settings-dark', t: 'Settings, dark', s: 'same', n: ['Same as the light theme.'] },
+  ]
+  const list = document.getElementById('audit-list')
+  const PILL = { fix: 'Fix', check: 'Check', same: 'Same' }
+  AUDIT.forEach((a) => list.appendChild(el(`<article class="au" data-s="${a.s}">
+    <div class="au__imgs">
+      <figure><figcaption>Android</figcaption><img src="audit/android/${a.k}.jpg" alt="Android: ${esc(a.t)}" loading="lazy" width="412" height="843"></figure>
+      <figure><figcaption>Web</figcaption><img src="audit/web/${a.k}.jpg" alt="Web: ${esc(a.t)}" loading="lazy" width="412" height="843"></figure>
+    </div>
+    <div class="au__body"><div class="au__title"><h3>${esc(a.t)}</h3><span class="pill pill--${a.s}">${PILL[a.s]}</span></div>
+      <ul>${a.n.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>
+  </article>`)))
+  document.querySelectorAll('[data-filter]').forEach((b) => b.addEventListener('click', () => {
+    document.querySelectorAll('[data-filter]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)))
+    list.querySelectorAll('.au').forEach((n) => { n.hidden = b.dataset.filter !== 'all' && n.dataset.s !== b.dataset.filter })
+  }))
+
+  // ---------- boot ----------
+  renderDevice()
+  PRESETS.playing(); update()
+  const stage = document.getElementById('deskStage'); ro.observe(stage); fitStage(stage)
+  window.addEventListener('resize', () => { if (S.coach) renderOverlay() })
+})()
+</script>

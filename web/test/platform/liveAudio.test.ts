@@ -12,6 +12,9 @@ import {
   MixerHost,
   REPLACE_QUIET_MS,
   SLOW_OUTPUT_MS,
+  TAKE_END_WAIT_MS,
+  takeWav,
+  type RecordedTake,
   browserLiveBackend,
   describeOutput,
   heardAt,
@@ -33,7 +36,10 @@ import {
   type ToMixer,
 } from '../../src/platform/audio/liveAudio'
 import { WebLatencyHint } from '../../src/core/text/latencyText'
+import { pattern, patternNote, projectPatterns } from '../../src/core/features/pattern'
+import { PhaseAnchors } from '../../src/core/features/sequencer'
 import { VoiceMixer, VoiceShape } from '../../src/core/formats/voiceMixer'
+import { decodeWav } from '../../src/core/formats/wav'
 import { FxControl } from '../../src/core/formats/fx/fxBus'
 import { WebText } from '../../src/core/text/webText'
 import type { LiveAudioDeps } from '../../src/state/deps'
@@ -773,6 +779,42 @@ describe('LiveAudio', () => {
     expect(slow).toEqual([255])
   })
 
+  it('makes up for what a slow output leaves out of a typical Bluetooth delay, with the setting on', async () => {
+    const backend = new FakeBackend()
+    const { live } = await opened(backend)
+    backend.ctx.setState('running')
+    live.preload('s', tone(), 1, RATE)
+    // The latency is read again at each press.
+    const pressAt = (latency: number): void => {
+      backend.ctx.outputLatency = latency
+      live.press('k', 's', PAD)
+      backend.link.render(0)
+    }
+    // 25 ms: not taken for Bluetooth, nothing made up.
+    expect(live.delayMs).toBe(0)
+    expect(live.madeUpFor.value).toBeNull()
+    expect(live.bluetooth.value).toBeNull()
+    // 135 ms counted (5 + 130): the other 45 of a typical 180 is made up for.
+    pressAt(0.13)
+    expect(live.bluetooth.value).toBe(135)
+    expect(live.delayMs).toBe(45)
+    expect(live.madeUpFor.value).toBe(180)
+    // Off: nothing is, though it is still taken for Bluetooth.
+    live.makeUpDelay(false)
+    expect(live.delayMs).toBe(0)
+    expect(live.madeUpFor.value).toBeNull()
+    expect(live.bluetooth.value).toBe(135)
+    live.makeUpDelay(true)
+    // A stamp that counts all of it (255 ms) leaves nothing to add.
+    pressAt(0.25)
+    expect(live.delayMs).toBe(0)
+    expect(live.madeUpFor.value).toBe(255)
+    // Closed: none.
+    live.close()
+    expect(live.madeUpFor.value).toBeNull()
+    expect(live.bluetooth.value).toBeNull()
+  })
+
   it('notices an output that turned slow at the next press', async () => {
     const { live, backend, slow } = await opened()
     backend.ctx.setState('running')
@@ -1371,5 +1413,248 @@ describe('browserLiveBackend latency choice', () => {
     } finally {
       store.localStorage = before
     }
+  })
+})
+
+describe('MixerHost REC (LiveAudio.kt takes)', () => {
+  const recHost = () => {
+    const out: FromMixer[] = []
+    const h = new MixerHost(RATE, (m) => out.push(m))
+    h.handle({ t: 'load', id: 1, pcm: tone(300) })
+    return { h, out, render: (n = 128) => h.render(new Float32Array(n), new Float32Array(n), n, 0) }
+  }
+  const takeFrames = (out: FromMixer[]) => out.reduce((n, m) => n + (m.t === 'take' ? m.pcm.length / 2 : 0), 0)
+  const recs = (out: FromMixer[]) => out.flatMap((m) => (m.t === 'rec' ? [m.state.kind] : []))
+
+  it('arms, starts with the first sound, and keeps up to its last sound', () => {
+    const { h, out, render } = recHost()
+    h.handle({ t: 'arm' })
+    render()
+    expect(takeFrames(out)).toBe(0)
+    h.handle({ t: 'start', key: 'k', id: 1, channels: 1, sampleRate: RATE, semitones: 0, tag: 0 })
+    render()
+    render()
+    render()
+    h.handle({ t: 'stopRec' })
+    const end = out.find((m) => m.t === 'takeEnd')
+    // The tone's 300 frames are kept; the silence after it is sent but not kept.
+    expect(end).toEqual({ t: 'takeEnd', keep: 300, limit: false })
+    expect(takeFrames(out)).toBe(384)
+    expect(recs(out)).toEqual(['armed', 'recording', 'idle'])
+    const first = out.find((m) => m.t === 'take')
+    expect(first?.t === 'take' && first.pcm[0]).toBe(10000)
+  })
+
+  it('a take with nothing played keeps nothing', () => {
+    const { h, out, render } = recHost()
+    h.handle({ t: 'arm' })
+    render()
+    h.handle({ t: 'stopRec' })
+    expect(out.filter((m) => m.t === 'takeEnd')).toEqual([{ t: 'takeEnd', keep: 0, limit: false }])
+  })
+
+  it("the device's PLAY starts an armed take and its STOP ends it", () => {
+    const { h, out, render } = recHost()
+    h.handle({ t: 'arm' })
+    h.handle({ t: 'transport', playing: true })
+    render()
+    h.handle({ t: 'start', key: 'k', id: 1, channels: 1, sampleRate: RATE, semitones: 0, tag: 0 })
+    render(512)
+    h.handle({ t: 'transport', playing: false })
+    // 128 silent frames in front, then the tone.
+    expect(out.find((m) => m.t === 'takeEnd')).toEqual({ t: 'takeEnd', keep: 128 + 300, limit: false })
+  })
+
+  it("the device stopping doesn't end a take a sound started", () => {
+    const { h, out, render } = recHost()
+    h.handle({ t: 'arm' })
+    h.handle({ t: 'start', key: 'k', id: 1, channels: 1, sampleRate: RATE, semitones: 0, tag: 0 })
+    render()
+    h.handle({ t: 'transport', playing: false })
+    expect(out.some((m) => m.t === 'takeEnd')).toBe(false)
+    h.handle({ t: 'stopRec' })
+    expect(out.some((m) => m.t === 'takeEnd')).toBe(true)
+  })
+
+  it('stops by itself at the limit, sending long takes in chunks', () => {
+    const { h, out, render } = recHost()
+    h.maxTakeFrames = MixerHost.TAKE_CHUNK_FRAMES + 100
+    h.handle({ t: 'arm' })
+    h.handle({ t: 'transport', playing: true })
+    for (let i = 0; i < 80; i++) render()
+    const chunks = out.filter((m) => m.t === 'take')
+    expect(chunks.map((m) => (m.t === 'take' ? m.pcm.length / 2 : 0))).toEqual([MixerHost.TAKE_CHUNK_FRAMES, 100])
+    expect(out.filter((m) => m.t === 'takeEnd')).toEqual([{ t: 'takeEnd', keep: 0, limit: true }])
+    expect(recs(out).at(-1)).toBe('idle')
+  })
+})
+
+describe('LiveAudio REC', () => {
+  async function recording() {
+    const b = new FakeBackend()
+    const live = new LiveAudio(b)
+    const takes: { take: RecordedTake | null; limit: boolean }[] = []
+    live.onTake((take, limit) => takes.push({ take, limit }))
+    live.preload('kick', tone(300), 1, RATE)
+    expect(live.arm()).toBe(true)
+    await flush()
+    return { b, live, takes }
+  }
+  const wavOf = async (t: RecordedTake) => decodeWav(new Uint8Array(await t.wav.arrayBuffer()))
+
+  it('arms, records the pads played and hands over a WAV of them', async () => {
+    const { b, live, takes } = await recording()
+    expect(live.rec.value).toEqual({ kind: 'armed' })
+    live.press('live:0:9', 'kick', { pitch: 0, gate: false })
+    b.link.render(0)
+    expect(live.rec.value).toEqual({ kind: 'recording', seconds: 0 })
+    b.link.render(128 / RATE)
+    b.link.render(256 / RATE)
+    live.stopRecording()
+    expect(live.rec.value).toEqual({ kind: 'idle' })
+    expect(takes).toHaveLength(1)
+    const t = takes[0]!.take!
+    expect(t.frames).toBe(300)
+    expect(t.seconds).toBeCloseTo(300 / RATE, 9)
+    const w = await wavOf(t)
+    expect(w.channels).toBe(2)
+    expect(w.sampleRate).toBe(RATE)
+    expect(w.pcm.length).toBe(300 * 4)
+    expect(new DataView(w.pcm.buffer, w.pcm.byteOffset).getInt16(0, true)).toBe(10000)
+  })
+
+  it('nothing played: no take', async () => {
+    const { b, live, takes } = await recording()
+    b.link.render(0)
+    live.stopRecording()
+    expect(takes).toEqual([{ take: null, limit: false }])
+  })
+
+  it("follows the EP-133's PLAY and STOP", async () => {
+    const { b, live, takes } = await recording()
+    live.transportStarted()
+    b.link.render(0)
+    expect(live.rec.value.kind).toBe('recording')
+    live.press('live:0:9', 'kick', { pitch: 0, gate: false })
+    b.link.render(128 / RATE, 512)
+    live.transportStopped()
+    expect(takes[0]!.take!.frames).toBe(128 + 300)
+    expect(live.rec.value.kind).toBe('idle')
+  })
+
+  it('Live closing mid-take saves it before the output goes', async () => {
+    const { b, live, takes } = await recording()
+    live.press('live:0:9', 'kick', { pitch: 0, gate: false })
+    b.link.render(0)
+    const link = b.link
+    live.close()
+    // The fake mixer ends the take as the stop arrives, so the output closes at once.
+    expect(takes[0]!.take!.frames).toBe(128)
+    expect(link.closed).toBe(true)
+    expect(b.ctx.closed).toBe(true)
+    expect(live.rec.value.kind).toBe('idle')
+  })
+
+  it('a mixer that never answers: the take is cut where it is', async () => {
+    const { b, live, takes } = await recording()
+    live.press('live:0:9', 'kick', { pitch: 0, gate: false })
+    b.link.render(0)
+    b.link.host.handle = () => undefined
+    const link = b.link
+    const real = globalThis.setTimeout
+    let later: (() => void) | null = null
+    globalThis.setTimeout = ((fn: () => void, ms: number) => {
+      if (ms === TAKE_END_WAIT_MS) later = fn
+      return 0
+    }) as typeof setTimeout
+    try {
+      live.close()
+    } finally {
+      globalThis.setTimeout = real
+    }
+    expect(link.closed).toBe(false)
+    // Nothing reached the main thread yet: the chunk is still on the audio side.
+    later!()
+    expect(takes).toEqual([{ take: null, limit: false }])
+    expect(link.closed).toBe(true)
+  })
+
+  it('takeWav cuts the chunks to the frames kept', async () => {
+    const a = Int16Array.from([1, 2, 3, 4])
+    const c = Int16Array.from([5, 6, 7, 8])
+    const w = decodeWav(new Uint8Array(await takeWav([a, c], 3, 1000).arrayBuffer()))
+    expect([...new Int16Array(w.pcm.slice().buffer)]).toEqual([1, 2, 3, 4, 5, 6])
+  })
+})
+
+describe('LiveAudio PATTERN', () => {
+  const plan = (voices: Map<number, string>) => ({
+    patterns: projectPatterns([pattern(1, [patternNote(0, 0, 24)]), pattern(), pattern(), pattern()]),
+    voices,
+    skip: new Map<number, number>(),
+    bpm: 120,
+    phase: PhaseAnchors.ZERO,
+  })
+
+  it('sends the plan with its sounds, plays it and follows its clock', async () => {
+    const b = new FakeBackend()
+    const live = new LiveAudio(b)
+    live.preload('kick', tone(300), 1, RATE)
+    live.seqPlan(plan(new Map([[0, 'kick'], [1, 'nothing']])))
+    expect(live.seqPlay(0, 0, null)).toBe(true)
+    await flush()
+    const sent = b.link.sent.find((m) => m.t === 'plan')
+    expect(sent).toMatchObject({ t: 'plan', voices: [{ pad: 0, id: 1, channels: 1, sampleRate: RATE, shape: { bus: 0 } }], bpm: 120 })
+    b.ctx.timestamp = { contextTime: 1, performanceTime: 5000 }
+    for (let i = 0; i < 20; i++) b.link.render(1 + (i * 128) / RATE)
+    const tl = live.timeline.value
+    expect(tl?.clock).toEqual({ anchorFrame: 2400, rate: RATE, bpm: 120 })
+    expect(tl?.frames).toEqual({ frame: 0, ms: 5000, rate: RATE })
+    // The note's voice sounds from tick 0 on.
+    expect(live.voices.value.has('live:0:0')).toBe(true)
+    live.seqStop()
+    expect(live.timeline.value).toBeNull()
+    expect(b.link.sent.at(-1)).toEqual({ t: 'stopSeq' })
+  })
+
+  it("plays each pad as its shapes say, else on its group's FX bus", async () => {
+    const b = new FakeBackend()
+    const live = new LiveAudio(b)
+    live.preload('kick', tone(300), 1, RATE)
+    live.open()
+    await flush()
+    live.seqPlan({
+      ...plan(new Map([[0, 'kick'], [13, 'kick']])),
+      shapes: new Map([[13, { bus: 1, duckSource: true, semitones: -3 }]]),
+      keysShapes: new Map([[13, { bus: 1, mode: 'GATE' as const }]]),
+    })
+    const sent = b.link.sent.filter((m) => m.t === 'plan').at(-1)
+    expect(sent).toMatchObject({
+      voices: [
+        { pad: 0, shape: { bus: 0 }, keysShape: { bus: 0 } },
+        { pad: 13, shape: { bus: 1, duckSource: true, semitones: -3 }, keysShape: { bus: 1, mode: 'GATE' } },
+      ],
+    })
+  })
+
+  it("armed, a press's frame comes from the mix's stamp", async () => {
+    const b = new FakeBackend()
+    const live = new LiveAudio(b)
+    live.open()
+    await flush()
+    live.seqArm(true)
+    b.ctx.timestamp = { contextTime: 1, performanceTime: 5000 }
+    b.link.render(1)
+    expect(live.seqPlay(0, 0, 5010)).toBe(true)
+    expect(b.link.sent.at(-1)).toEqual({ t: 'play', countInBars: 0, leadMs: 0, atFrame: 480, atPress: true })
+  })
+
+  it('a new output is told RECORD waits', async () => {
+    const b = new FakeBackend()
+    const live = new LiveAudio(b)
+    live.seqArm(true)
+    live.open()
+    await flush()
+    expect(b.link.sent.map((m) => m.t)).toContain('seqArmed')
   })
 })

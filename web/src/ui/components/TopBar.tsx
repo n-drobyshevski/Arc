@@ -13,16 +13,16 @@
 //
 // Web deltas: the Bluetooth key shows when Live's output delay is long enough
 // to be heard (LiveAudio.late), as the web can't tell Bluetooth from any other
-// slow output, and it never makes up for it, so its sentence is always
-// MirrorText.WIRELESS_DELAY (never wirelessMadeUp). Screen readers, for whom a
+// slow output; its sentence is MirrorText.wirelessMadeUp while the delay is
+// made up for ([madeUp]), else MirrorText.WIRELESS_DELAY. Screen readers, for whom a
 // hold is no gesture, hear the hint as the connected key's description and find
 // a Disconnect button of its own beside it (visually hidden, out of the tab
 // order: the keyboard holds Enter or Space).
 //
 // Web only, on the desk (from 1024px wide, [themeSwitch] set by Shell): the
 // theme switch (ThemeSwitch.tsx: System / Light / Dark) after the ? key; the
-// nav rail's Settings key opens Settings there. Live's mic key (SAMPLE) isn't
-// ported.
+// nav rail's Settings key opens Settings there. Live's mic key (SAMPLE, [sample])
+// is a toggle (aria-pressed) to screen readers, where Kotlin gives its state in words.
 import type { ComponentChildren, JSX } from 'preact'
 import type { ReadonlySignal } from '@preact/signals'
 import { CoachText } from '../../core/text/coachText'
@@ -55,10 +55,14 @@ export interface TopBarProps {
    * re-renders the bar, not the page.
    */
   late?: ReadonlySignal<number | null> | null
+  /** The Bluetooth delay in all (ms) while it is made up for, else null (LiveAudio.madeUpFor); null off Live. */
+  madeUp?: ReadonlySignal<number | null> | null
   onDebug: () => void
   onHelp: () => void
   /** The desk: the theme switch after the ? key. */
   themeSwitch?: ThemeSwitchProps
+  /** Live's SAMPLE key (Kotlin SampleKey): lit while SAMPLE's panel is open ([on], read here alone); null for none. */
+  sample?: { readonly on: ReadonlySignal<boolean>; onTap(): void } | null
   /** In place of the gap after the tag: Live's display line on a phone on its side. */
   middle?: ComponentChildren
 }
@@ -67,7 +71,9 @@ export interface TopBarProps {
 const HOLD_HINT_ID = 'arc-hold-to-disconnect'
 
 export function TopBar(props: TopBarProps): JSX.Element {
-  const wireless = (props.late?.value ?? null) !== null
+  const madeUp = props.madeUp?.value ?? null
+  const wireless = (props.late?.value ?? null) !== null || madeUp !== null
+  const words = madeUp !== null ? MirrorText.wirelessMadeUp(madeUp) : MirrorText.WIRELESS_DELAY
   return (
     <header class="top-bar">
       <div class="top-bar__row">
@@ -86,10 +92,10 @@ export function TopBar(props: TopBarProps): JSX.Element {
                 icon={ArcIcon.BLUETOOTH}
                 iconAlso={ArcIcon.CLOCK}
                 label={CoachText.BLUETOOTH}
-                ariaLabel={MirrorText.WIRELESS_DELAY}
+                ariaLabel={words}
                 face="var(--warn)"
                 ink="var(--tag-ink)"
-                onClick={() => props.onNote(MirrorText.WIRELESS_DELAY)}
+                onClick={() => props.onNote(words)}
                 iconSize={20}
               />
             </span>
@@ -131,6 +137,7 @@ export function TopBar(props: TopBarProps): JSX.Element {
           )}
         </span>
         <span class="top-bar__gap top-bar__gap--wide" />
+        {props.sample && <SampleKey sample={props.sample} />}
         <span data-coach="top.help" class="top-bar__item">
           <IconBlock
             icon={ArcIcon.HELP}
@@ -151,5 +158,26 @@ export function TopBar(props: TopBarProps): JSX.Element {
         )}
       </div>
     </header>
+  )
+}
+
+/** The mic key before ?: round as it is, orange while SAMPLE's panel is open. */
+function SampleKey(props: { sample: NonNullable<TopBarProps['sample']> }): JSX.Element {
+  const on = props.sample.on.value
+  return (
+    <>
+      <span data-coach="top.sample" class="top-bar__item">
+        <IconBlock
+          icon={ArcIcon.MIC}
+          label={MirrorText.SAMPLE_TAG}
+          face={on ? 'var(--signal)' : 'var(--tab-off)'}
+          ink={on ? 'var(--on-signal)' : 'var(--navy)'}
+          onClick={props.sample.onTap}
+          pressed={on}
+          round
+        />
+      </span>
+      <span class="top-bar__gap" />
+    </>
   )
 }

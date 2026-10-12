@@ -8,7 +8,7 @@ import { readFile } from '../../src/platform/files/pick'
 import { openMidi, probePermission, requestMidiAccess, watchMidi, webMidiSupported } from '../../src/platform/midi/webmidi'
 import { nullChannel } from '../../src/platform/storage/channel'
 import { Library } from '../../src/platform/storage/library'
-import { CoachPrefs, LastReadPrefs, OfflinePadsPrefs, MirrorPrefs, SettingsStore, memoryStorage } from '../../src/platform/storage/settings'
+import { CoachPrefs, LastReadPrefs, LIVE_PAD_SETTINGS_KEY, OfflinePadsPrefs, MirrorPrefs, PatternPrefs, SettingsStore, memoryStorage } from '../../src/platform/storage/settings'
 import { createController, type ArcController } from '../../src/state/controller'
 import type { Deps, FactoryDeps } from '../../src/state/deps'
 import type { ToastMsg, UiState } from '../../src/state/types'
@@ -16,6 +16,8 @@ import { DemoData } from '../helpers/demoData'
 import { connectMock, fakeNavigator, type FakeEp } from '../helpers/fakeMidiAccess'
 import type { MockEP133 } from '../helpers/mockDevice'
 import { fakeLiveAudio, type FakeLiveAudio } from './fakeLiveAudio'
+import { MemorySampleStore } from '../../src/platform/storage/sampleStore'
+import { memoryTakeStore } from '../../src/platform/storage/takeStore'
 
 let dbCount = 0
 
@@ -28,6 +30,8 @@ export interface LiveHarness {
   storage: ReturnType<typeof memoryStorage>
   padSounds: ReturnType<typeof memoryPadSoundStore>
   liveAudio: FakeLiveAudio
+  takes: ReturnType<typeof memoryTakeStore>
+  samples: MemorySampleStore
   toasts: ToastMsg[]
   setVisible(v: boolean): void
   /** The page is going away (pagehide). */
@@ -70,6 +74,8 @@ export async function liveHarness(opts: LiveHarnessOptions = {}): Promise<LiveHa
   const storage = opts.storage ?? memoryStorage()
   const padSounds = opts.padSounds ?? memoryPadSoundStore()
   const liveAudio = fakeLiveAudio(opts.late ?? false)
+  const takes = memoryTakeStore()
+  const samples = new MemorySampleStore()
   const visListeners = new Set<(v: boolean) => void>()
   const hideListeners = new Set<() => void>()
   let visible = true
@@ -86,13 +92,17 @@ export async function liveHarness(opts: LiveHarnessOptions = {}): Promise<LiveHa
     settings: new SettingsStore(storage),
     mirrorPrefs: new MirrorPrefs(storage),
     coach: new CoachPrefs(storage),
+    patternPrefs: new PatternPrefs(storage),
     files: { pick: async () => [], read: (f) => readFile(f), save: async () => 'saved', canPickFolder: () => false, pickFolder: async () => null },
     share: { share: async () => 'shared' },
     player: new NullPlayer(),
     liveAudio,
     padSounds,
+    takes,
+    samples,
     lastRead: new LastReadPrefs(storage),
     offlinePads: new OfflinePadsPrefs(storage),
+    offlinePadSettings: new OfflinePadsPrefs(storage, LIVE_PAD_SETTINGS_KEY),
     factory: opts.factory,
     wakeLock: { set: async () => {} },
     trafficLog: new TrafficLog(),
@@ -130,6 +140,8 @@ export async function liveHarness(opts: LiveHarnessOptions = {}): Promise<LiveHa
     storage,
     padSounds,
     liveAudio,
+    takes,
+    samples,
     toasts,
     setVisible(v) {
       visible = v
