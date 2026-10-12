@@ -3,9 +3,10 @@
 // pointerrawupdate, so a held finger's moves are read from it as they arrive:
 // with every pointermove stopped before the page sees it, a slide still
 // reaches the next keys, and lets go of the one it left.
-import { expect, test } from './fixtures'
+import { expect, gridOnDesk, test } from './fixtures'
 
 test('a mouse glissando on the piano follows pointerrawupdate alone', async ({ page }) => {
+  await gridOnDesk(page)
   await page.addInitScript(() => {
     // Before any of the app's handlers: the frame-aligned moves never arrive.
     window.addEventListener('pointermove', (e) => e.stopImmediatePropagation(), true)

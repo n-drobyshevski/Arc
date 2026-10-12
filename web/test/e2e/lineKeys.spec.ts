@@ -3,7 +3,7 @@
 // its word where the line is wide), ERASE and ↶ a third; what doesn't fit
 // gives way so the counter is never cut.
 import type { Page } from '@playwright/test'
-import { demo, expect, test } from './fixtures'
+import { demo, expect, gridOnDesk, test } from './fixtures'
 
 /** A pad named by the device, then RECORD armed and the pad played: recording, with notes. */
 async function record(page: Page): Promise<void> {
@@ -72,6 +72,7 @@ test.describe('on the desk', () => {
   test.use({ viewport: { width: 1280, height: 800 } })
 
   test("a wide line (all groups in a row) has RECORD's and STEP's words", async ({ page }) => {
+    await gridOnDesk(page)
     await page.goto('/?demo')
     await expect(page.locator('.live-strip')).toContainText('Project 1')
     await page.getByRole('radio', { name: /All groups/i }).first().click()

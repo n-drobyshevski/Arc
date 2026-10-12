@@ -101,3 +101,17 @@ export async function importPak(page: Page, file: string): Promise<void> {
   const fc = await chooser
   await fc.element().setInputFiles(file)
 }
+
+/**
+ * Live's grid on the desk (One group or All groups) instead of the drawn EP-133, the desk's
+ * default: for tests of the grid's own layout. Set before each load, as a person who chose it.
+ */
+export async function gridOnDesk(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    try {
+      localStorage.setItem('arc.liveDeviceView', '0')
+    } catch {
+      // No storage: the test sees the default.
+    }
+  })
+}

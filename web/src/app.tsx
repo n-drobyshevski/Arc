@@ -180,23 +180,22 @@ export function App(props: AppProps): JSX.Element {
 /** The guide's search when a device key's card asks for it (web only). */
 const guideSearch = signal<{ readonly query: string } | null>(null)
 
-/** Live's device view on the desk (web only), remembered in this browser. */
+/** Live's device view on the desk (web only): the drawn EP-133 unless the grid was chosen, remembered in this browser. */
 const DEVICE_VIEW_KEY = 'arc.liveDeviceView'
 const deviceView = signal<boolean>(readDeviceView())
 
 function readDeviceView(): boolean {
   try {
-    return globalThis.localStorage?.getItem(DEVICE_VIEW_KEY) === '1'
+    return globalThis.localStorage?.getItem(DEVICE_VIEW_KEY) !== '0'
   } catch {
-    return false
+    return true
   }
 }
 
 function setDeviceView(on: boolean): void {
   deviceView.value = on
   try {
-    if (on) globalThis.localStorage?.setItem(DEVICE_VIEW_KEY, '1')
-    else globalThis.localStorage?.removeItem(DEVICE_VIEW_KEY)
+    globalThis.localStorage?.setItem(DEVICE_VIEW_KEY, on ? '1' : '0')
   } catch {
     // Kept for this page only.
   }

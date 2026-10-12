@@ -2,7 +2,7 @@
 // appKeys.ts). Live's pads and controls in PADS and KEYS, the Keyboard keys
 // sheet on ?, Esc for screens and EDIT, and Settings → Computer keyboard.
 import type { Page } from '@playwright/test'
-import { expect, test } from './fixtures'
+import { expect, gridOnDesk, test } from './fixtures'
 
 const downPads = (page: Page): Promise<string[]> =>
   page.evaluate(() => [...document.querySelectorAll('[data-pad][data-down]')].map((e) => e.getAttribute('aria-label') ?? ''))
@@ -63,6 +63,9 @@ test('PADS: pad keys hold pads, A–D pick the group, V the view, E EDIT and Esc
 })
 
 test('KEYS: M switches, the piano keeps its letters, the grid plays the pad keys, [ ] and Shift step key and scale', async ({ page }) => {
+  await gridOnDesk(page)
+  await page.reload()
+  await expect(page.locator('[data-pad]')).toHaveCount(12)
   await page.keyboard.press('KeyM')
   // A wide window: the piano. Its letters play as before.
   const piano = page.locator('.live-piano__keys')
@@ -117,6 +120,9 @@ test('KEYS: M switches, the piano keeps its letters, the grid plays the pad keys
 })
 
 test('? lists the keys, Esc closes screens but never leaves a section, and the Settings switch silences single keys', async ({ page }) => {
+  await gridOnDesk(page)
+  await page.reload()
+  await expect(page.locator('[data-pad]')).toHaveCount(12)
   await page.keyboard.press('Shift+Slash')
   const sheet = page.getByRole('dialog', { name: 'Keyboard keys' })
   await expect(sheet).toBeVisible()
@@ -219,6 +225,9 @@ test('a pad held while the window loses focus is let go', async ({ page }) => {
 })
 
 test('NumLock-off number pad arrows still move a control where Live takes no such key', async ({ page }) => {
+  await gridOnDesk(page)
+  await page.reload()
+  await expect(page.locator('[data-pad]')).toHaveCount(12)
   const send = (key: string, code: string): Promise<void> =>
     page.evaluate(
       ([k, c]) => {

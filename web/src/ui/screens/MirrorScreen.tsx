@@ -106,7 +106,7 @@
 // plays the pad while held. Offline (an addition) it changes the pads in arc
 // only, from the last read's sounds or the factory pack's ([EditUi.offline]);
 // the tools then count those changes, with Reset pads ([offlinePads]).
-import { Fragment, h, type ButtonHTMLAttributes, type Component, type ComponentChildren, type FunctionComponent, type JSX, type TargetedDragEvent } from 'preact'
+import { Fragment, h, type ButtonHTMLAttributes, type Component, type ComponentChildren, type CSSProperties, type FunctionComponent, type JSX, type TargetedDragEvent } from 'preact'
 import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { computed, signal, useComputed, type ReadonlySignal } from '@preact/signals'
 import { Keys, MAX_OCTAVE, MIN_OCTAVE, SCALES, type NoteNames, type Scale } from '../../core/features/keys'
@@ -163,7 +163,7 @@ import { TakeBadge, TakesSection, type TakeUi, type TakesUi } from '../live/Take
 import { idleFit } from '../live/lineFit'
 import { PatternLine, TransportContext, useLineMeasure } from '../live/PatternLine'
 import { FunctionKeysContext, FunctionRow, ProjectHoldContext } from '../live/FunctionRow'
-import { DeviceView } from '../live/DeviceView'
+import { DeviceView, padPlace } from '../live/DeviceView'
 import { PunchPad, usePunch } from '../live/LivePunch'
 import { StepPanel, useStep, useStepNoteMark, useStepPadMark, useStepPiano } from '../live/StepPanel'
 import { ArpWords, useArpLine, useArpNote, useArpPad } from '../live/ArpWords'
@@ -730,6 +730,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   const hasPad = onPad !== null
   // PROJECT held: a pad printed 1 to 9 picks that project instead of sounding, and the others stay still.
   const projectHold = useContext(ProjectHoldContext)
+  // FX held: the device view's pads are the punch-ins, as the big grid's.
+  const devicePunch = usePunch()
   const fnKeys = useContext(FunctionKeysContext)
   const fnKeysNow = useRef(fnKeys)
   fnKeysNow.current = fnKeys
@@ -852,8 +854,19 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           return
         case 'view':
           if (!keys.on) {
-            props.onOneGroup(!oneGroup)
-            setAnnounce(oneGroup ? MirrorText.ALL_GROUPS : MirrorText.ONE_GROUP)
+            // On the desk: the device, all groups, one group, and round again.
+            const canDevice = desk && props.onDeviceView !== undefined
+            if (device) {
+              props.onDeviceView?.(false)
+              props.onOneGroup(false)
+              setAnnounce(MirrorText.ALL_GROUPS)
+            } else if (oneGroup && canDevice) {
+              props.onDeviceView?.(true)
+              setAnnounce(WebText.VIEW_DEVICE)
+            } else {
+              props.onOneGroup(!oneGroup)
+              setAnnounce(oneGroup ? MirrorText.ALL_GROUPS : MirrorText.ONE_GROUP)
+            }
           } else {
             const piano = pianoRange === null
             actions.onView?.(plan.wide, chosenView(piano))
@@ -1126,28 +1139,36 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
       </div>
     )
   } else if (device) {
+    // The drawn EP-133's pads are Live's own, each in its place: in KEYS the keys, FX held the punch-ins.
+    const devicePads =
+      keys.on && keyNotes ? (
+        <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} haptic={haptic} keysRef={gridKeys} place={padPlace} />
+      ) : (
+        ROWS.flat().map((o) => {
+          const slot = devicePunch !== null ? punchSlotForPad(o) : -1
+          if (slot >= 0) return <PunchPad key={`x${o}`} slot={slot} punch={devicePunch!} place={padPlace(o)} />
+          const pad = physicalPad(group, o)
+          return <Pad key={o} pad={pad} light={st.pads.get(padKey(pad))} name={nameOf(pad)} big={false} scroll={false} ui={padUi} tracker={tracker} keyHint={keyHints} place={padPlace(o)} />
+        })
+      )
+    // Over it the desk's display line (S01 and STEP, ERASE, the words); an open panel over the device's top.
     page = (
       <div class="live__device">
+        {displayStrip && <div class="live__device-line">{displayStrip}</div>}
         <DeviceView
           st={st}
           mirror={mirror}
           keys={keys}
-          keyNotes={keyNotes}
-          playingNotes={playing.notes.value}
-          nameOf={nameOf}
+          pads={devicePads}
           now={now}
           group={group}
           onGroup={setGroup}
           onMode={actions.onMode}
           onOctave={actions.onOctave}
-          press={padPress}
-          keyPress={(n) => ({ press: (hold) => keyPress.onNote(n, hold), release: () => keyPress.onNoteUp(n) })}
-          playingPads={playing.pads.value}
-          tracker={tracker}
           take={take}
           still={fixedNow !== null}
           onGuide={props.onGuide}
-          hold={(target) => holdHandlers(tracker, target, false, haptic)}
+          panel={rowPanel}
         />
         {keys.on && modeRow}
       </div>
@@ -1854,6 +1875,8 @@ interface PadProps {
   tracker: PressTracker
   /** Web: the computer keyboard's pad keys play this pad (it says its key). */
   keyHint: boolean
+  /** The device view: where on the drawn EP-133 it sits (DeviceView's padPlace), drawn as its pad. */
+  place?: CSSProperties
 }
 
 /** A press on a pad in EDIT, kept across renders (the mirror re-renders the pads while a finger is down). */
@@ -1953,7 +1976,8 @@ const Pad = memo(
     a.scroll === b.scroll &&
     a.ui === b.ui &&
     a.tracker === b.tracker &&
-    a.keyHint === b.keyHint,
+    a.keyHint === b.keyHint &&
+    a.place === b.place,
 )
 
 /** STEP's long press (Kotlin's pick for − / +): [start] runs its action after STEP_PICK_MS unless [stop] comes first. */
@@ -2019,8 +2043,9 @@ function PadCap(props: PadProps): JSX.Element {
     (arpHeld ? WebText.ARP_HELD : '') +
     (sampleLight === 'RECORDING' ? ', ' + MirrorText.REC : sampleLight === 'WAITING' ? ', ' + MirrorText.SAMPLE_WAITING : '')
   const dropping = ui.drop !== null && ui.drop.at === key
+  const placed = props.place !== undefined
   const cls =
-    `live-pad cap-3d${big ? ' live-pad--big' : ''}${playing ? ' is-playing' : ''}` +
+    (placed ? `ep-a ep-pad${playing ? ' is-playing' : ''}` : `live-pad cap-3d${big ? ' live-pad--big' : ''}${playing ? ' is-playing' : ''}`) +
     (ui.editing ? ' is-editing' : '') +
     (dropping ? ' is-drop' : '') +
     (mark === true ? ' is-erase-dot' : mark === false ? ' is-erase-dim' : '') +
@@ -2029,7 +2054,15 @@ function PadCap(props: PadProps): JSX.Element {
     (sampleLight !== null ? ` is-sample-${sampleLight.toLowerCase()}` : '')
   // Over a pad, a dragged sound shows what it would replace: "snare 2 → vox chop".
   const shown = dropping && ui.drop?.name != null ? MirrorText.dropPreview(name ?? ui.drop.nameNow(pad), ui.drop.name) : name
-  const content = (
+  const content = placed ? (
+    <>
+      {/* As the drawn EP-133 prints it (DeviceView.css). */}
+      <span class={`ep-pad__num${pad.label === 'ENTER' ? ' ep-pad__num--word' : ''}`}>{pad.label === '.' ? '•' : pad.label}</span>
+      {shown !== null && <span class="ep-pad__name">{shown}</span>}
+      {ui.editing && !dropping && <span class="ep-pad__swap" aria-hidden="true">{'\u21C4'}</span>}
+      {dropping && <span class="ep-pad__drop" aria-hidden="true">{WebText.DROP}</span>}
+    </>
+  ) : (
     <>
       {/* The key's own label in the corner (web: top left, where the K.O. II prints it). */}
       <span class={`live-pad__label${wide ? ' live-pad__label--wide' : ''}`}>
@@ -2081,7 +2114,7 @@ function PadCap(props: PadProps): JSX.Element {
   const open = ui.edit
   if (press === null && !(ui.editing && open)) {
     return (
-      <div class={cls} role="img" aria-label={label} data-pad={key} style={{ '--glow': glowCss(g) }} {...dropHandlers}>
+      <div class={cls} role="img" aria-label={label} data-pad={key} style={{ ...props.place, '--glow': glowCss(g) }} {...dropHandlers}>
         {content}
       </div>
     )
@@ -2096,12 +2129,12 @@ function PadCap(props: PadProps): JSX.Element {
     <button
       ref={btn}
       type="button"
-      class={`${cls} live-pad--press${scroll ? ' live-pad--scroll' : ''}`}
+      class={placed ? cls : `${cls} live-pad--press${scroll ? ' live-pad--scroll' : ''}`}
       aria-label={label}
       aria-description={ui.editing ? MirrorText.EDIT_LINE : mark !== null ? MirrorText.ERASE : MirrorText.PLAY}
       aria-keyshortcuts={props.keyHint ? (pad.label === 'ENTER' ? 'Enter' : pad.label) : undefined}
       data-pad={key}
-      style={{ '--glow': glowCss(g) }}
+      style={{ ...props.place, '--glow': glowCss(g) }}
       {...handlers}
       {...dropHandlers}
       onPointerDown={(e) => {
@@ -2554,6 +2587,8 @@ function KeysGrid(props: {
   keysRef?: { current: GridKeys | null }
   /** KEYS / PADS printed in the plate's right margin ([ModeStrip]). */
   strip?: JSX.Element
+  /** The device view: each key in its pad's place on the drawn EP-133 (DeviceView's padPlace), the keys alone. */
+  place?: (k: number) => CSSProperties
 }): JSX.Element {
   const { st, keys, keyNotes, now, tracker } = props
   // How lit each key is: the brightest device note that falls on it.
@@ -2613,6 +2648,21 @@ function KeysGrid(props: {
       keysRef.current = null
     }
   }, [keysRef, press])
+  const cap = (k: number): JSX.Element => (
+    <KeyCap
+      key={k}
+      index={k}
+      note={keyNotes[k]!}
+      keys={keys}
+      lit={lit.get(k) ?? 0}
+      press={press}
+      tracker={tracker}
+      playing={props.playing}
+      haptic={props.haptic}
+      place={props.place?.(k)}
+    />
+  )
+  if (props.place) return <>{ROWS.flat().map(cap)}</>
   return (
     <div
       class="live-kgrid"
@@ -2633,21 +2683,7 @@ function KeysGrid(props: {
                 </span>
               ))}
             </div>
-            <div class="live-deck__row">
-              {offsets.map((k) => (
-                <KeyCap
-                  key={k}
-                  index={k}
-                  note={keyNotes[k]!}
-                  keys={keys}
-                  lit={lit.get(k) ?? 0}
-                  press={press}
-                  tracker={tracker}
-                  playing={props.playing}
-                  haptic={props.haptic}
-                />
-              ))}
-            </div>
+            <div class="live-deck__row">{offsets.map(cap)}</div>
           </Fragment>
         ))}
         {props.strip}
@@ -2687,6 +2723,8 @@ interface KeyCapProps {
   tracker: PressTracker
   playing: ReadonlySignal<ReadonlySet<number>>
   haptic: boolean
+  /** The device view: where on the drawn EP-133 it sits, drawn as its pad. */
+  place?: CSSProperties | undefined
 }
 
 /** A key renders again only when what it shows or does changed (not with every mirror state). */
@@ -2702,7 +2740,8 @@ const KeyCap = memo(
     a.press === b.press &&
     a.tracker === b.tracker &&
     a.playing === b.playing &&
-    a.haptic === b.haptic,
+    a.haptic === b.haptic &&
+    a.place === b.place,
 )
 
 /** One KEYS key: its note in a ring, ringed in signal orange while its note sounds here (read by the key itself). */
@@ -2728,9 +2767,9 @@ function KeyCapView(props: KeyCapProps): JSX.Element {
     },
     pressure: (p) => press.pressure?.(pressed.current, p),
   }
+  const placed = props.place !== undefined
   const cls =
-    'live-key cap-3d' +
-    (upperOctave(note, keys.octave) ? ' live-key--upper' : '') +
+    (placed ? 'ep-a ep-pad ep-pad--key' + (upperOctave(note, keys.octave) ? ' ep-pad--upper' : '') : 'live-key cap-3d' + (upperOctave(note, keys.octave) ? ' live-key--upper' : '')) +
     (playing ? ' is-playing' : '') +
     (stepMark === 'picked' ? ' is-step-picked' : stepMark === 'lit' ? ' is-step-lit' : '') +
     (arpOrder > 0 ? ' is-arp-held' : '')
@@ -2743,7 +2782,7 @@ function KeyCapView(props: KeyCapProps): JSX.Element {
       data-arp-order={arpOrder > 0 ? arpOrder : undefined}
       aria-description={MirrorText.PLAY}
       data-key={k}
-      style={{ '--glow': glowCss(props.lit) }}
+      style={{ ...props.place, '--glow': glowCss(props.lit) }}
       {...handlers}
       onPointerDown={(e) => {
         handlers.onPointerDown?.(e)
@@ -2759,15 +2798,20 @@ function KeyCapView(props: KeyCapProps): JSX.Element {
       }}
     >
       {/* Named, the name alone, in the ring's colour; unnamed, a ring the digit's height. Both where
-          a pad prints its digit, the octave where a pad shows its sample. */}
-      {keys.showNames ? (
+          a pad prints its digit, the octave where a pad shows its sample. On the drawn EP-133, its ring. */}
+      {placed ? (
+        <>
+          <span class="ep-pad__ring">{Keys.name(note, keys.names)}</span>
+          <span class="ep-pad__oct">{Keys.octaveOf(note)}</span>
+        </>
+      ) : keys.showNames ? (
         <span class="live-key__name">{Keys.name(note, keys.names)}</span>
       ) : (
         <svg class="live-key__ring" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
           <circle cx="50" cy="50" r="45.5" fill="none" stroke-width="9" />
         </svg>
       )}
-      <span class="live-key__octave">{Keys.octaveOf(note)}</span>
+      {!placed && <span class="live-key__octave">{Keys.octaveOf(note)}</span>}
     </button>
   )
 }

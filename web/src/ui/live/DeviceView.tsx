@@ -1,34 +1,41 @@
-// The device view (web only): on a wide screen, Live draws the EP-133 K.O. II
-// itself, from the product photo's layout (1444 × 2000, scaled to fit), and the
-// mirror drives it.
+// The device view (web only): on the desk Live draws the EP-133 K.O. II by
+// default (Live tools' View: All groups, One group, Device), from the product
+// photo's layout (1444 × 2000, scaled to fit), and the mirror drives it.
 //
-// - The pads play as the grid's do (hold = gate, a finger per pad); in KEYS
-//   they are the 12 notes. They glow from the device like the grid's, through
-//   the same [data-pad] / [data-key] / [data-group] glow the screen writes.
-// - A–D pick the group shown, KEYS switches PADS / KEYS, and −/+ change the
-//   octave in KEYS or step through the groups in PADS. RECORD and PLAY are
-//   the pattern's (PatternLine.tsx): a tap on RECORD arms it, held it opens
-//   the pattern sheet, and PLAY plays and stops; with no pattern (no output)
-//   they show their shortcuts as the other keys do. TAKE stays in Live tools;
-//   a take going shows on the display (● and the time) and the plate.
+// - The pads are Live's own (MirrorScreen's Pad and KeyCap, [pads]) in the
+//   drawn ones' places ([padPlace]): they play as the grid's do (hold = gate,
+//   a finger per pad), EDIT, ERASE, STEP, ARP and SAMPLE mark them, sounds
+//   drop on them, PROJECT held takes 1 to 9; in KEYS they are the 12 notes,
+//   FX held the punch-ins. They glow from the device like the grid's.
+// - The keys are Live's where Live has one, as the EP-133 prints them: SOUND
+//   (EDIT; held, the pad's sheet), MAIN as PROJECT (as the EP-133 loads a
+//   project: held, a pad 1 to 9), TEMPO (the click; held, the tempo sheet),
+//   SAMPLE (its panel), FX (the FX sheet; held, the punch-ins), ERASE, KEYS,
+//   A–D, −/+ (the octave in KEYS, the group in PADS), RECORD and PLAY (the
+//   pattern's, PatternLine.tsx). TAKE stays in Live tools; a take going shows
+//   on the display (● and the time) and the plate.
+// - The open panel (SAMPLE, STEP, SCENE) lies over the plate and the display
+//   ([panel]); the display line (S01 and STEP, ERASE, the words) is over the
+//   device (MirrorScreen).
 // - PLAY lights while the device plays (MIDI clock); the display shows the
 //   tempo in seven segments, ▶ and ● (REC), the A–D boxes, a ring with a
 //   quarter per group, and the piano in KEYS. The plate, where the unit
 //   prints its name, carries arc's status and the last hit.
-// - Every other key and control opens a card with its shortcuts from the
-//   guide: arc never sends anything to the device.
-import type { ButtonHTMLAttributes, CSSProperties, HTMLAttributes, JSX, TargetedMouseEvent } from 'preact'
+// - Every other key and control (TIMING, the knobs, the fader, SHIFT) opens a
+//   card with its shortcuts from the guide: arc never sends anything to the device.
+import type { ComponentChildren, CSSProperties, HTMLAttributes, JSX, TargetedMouseEvent } from 'preact'
 import { useContext, useLayoutEffect, useRef, useState } from 'preact/hooks'
-import { Keys, MAX_OCTAVE, MIN_OCTAVE } from '../../core/features/keys'
+import { MAX_OCTAVE, MIN_OCTAVE } from '../../core/features/keys'
 import type { MirrorState } from '../../core/features/liveMirror'
-import { ROWS, padKey, physicalPad, type PhysicalPad } from '../../core/features/padNotes'
+import { ROWS } from '../../core/features/padNotes'
 import { parse } from '../../core/text/guideCombo'
 import { CLOSE } from '../../core/text/guideText'
 import { MirrorText } from '../../core/text/mirrorText'
 import { WebText } from '../../core/text/webText'
 import type { MirrorUi } from '../../state/types'
 import { ComboLine } from '../components/GuideKeys'
-import { TempoContext, useTempoPress, type TempoUi } from './FunctionRow'
+import { FunctionKeysContext, FxKey, ProjectHoldContext, ProjectKey, SoundKey, TempoContext, TempoKey, type DrawnKey } from './FunctionRow'
+import { useSample } from './SamplePanel'
 import {
   TransportContext,
   hasWords,
@@ -42,9 +49,8 @@ import {
   type TransportUi,
 } from './PatternLine'
 import { of as keymapOf } from '../../core/text/guideKeymap'
-import { displayLine, glow, glowCss, groupGlow } from './glow'
-import { keysLit, upperOctave, type KeysShown } from './keys'
-import type { PressTarget, PressTracker } from './press'
+import { displayLine, glowCss, groupGlow } from './glow'
+import type { KeysShown } from './keys'
 import { cardName, cardSearch, shortcutsFor, type CardKey } from './shortcuts'
 import type { TakeUi } from './Takes'
 import './DeviceView.css'
@@ -102,30 +108,32 @@ export interface DeviceViewProps {
   st: MirrorState
   mirror: MirrorUi | null
   keys: KeysShown
-  /** The notes playing here (KEYS rings them). */
-  playingNotes: ReadonlySet<number>
-  /** KEYS's 12 notes by pad offset (null in PADS). */
-  keyNotes: readonly number[] | null
-  nameOf: (pad: PhysicalPad) => string | null
+  /**
+   * The pads (or KEYS' keys), each in its place ([padPlace]): Live's own (MirrorScreen's Pad
+   * and KeyCap), so they play, EDIT, ERASE, STEP, ARP and SAMPLE as the grid's do.
+   */
+  pads: ComponentChildren
   now: number
   group: number
   onGroup: (g: number) => void
   onMode?: ((on: boolean) => void) | undefined
   onOctave?: ((octave: number) => void) | undefined
-  /** What a press on a pad plays (null: the pads stay still). */
-  press: (pad: PhysicalPad) => PressTarget | null
-  /** A KEYS key's press, by its note. */
-  keyPress: (note: number) => PressTarget
-  playingPads: ReadonlySet<number>
-  tracker: PressTracker
   /** TAKE, for the display (null: no TAKE). */
   take: TakeUi | null
   still: boolean
   /** Opens the shortcut guide searched for [query]. */
   onGuide?: ((query: string) => void) | undefined
-  /** The pointer handlers of a pad or key that sounds while held. */
-  hold: (target: PressTarget) => ButtonHTMLAttributes<HTMLButtonElement>
+  /** The open panel (SAMPLE, STEP, SCENE), over the device's top as Android's unrolls from the display. */
+  panel?: ComponentChildren
 }
+
+/** Where pad [offset] sits on the drawn EP-133 (kept the same across renders, so a pad renders only when it changes). */
+export function padPlace(offset: number): CSSProperties {
+  if (padPlaces.length === 0) ROWS.forEach((offsets, r) => offsets.forEach((o, c) => (padPlaces[o] = at(COLS[c]!, ROW_Y[r]!, 130, 128))))
+  return padPlaces[offset]!
+}
+
+const padPlaces: CSSProperties[] = []
 
 const at = (x: number, y: number, w?: number, h?: number): CSSProperties => ({
   left: `${x}px`,
@@ -135,7 +143,7 @@ const at = (x: number, y: number, w?: number, h?: number): CSSProperties => ({
 })
 
 export function DeviceView(props: DeviceViewProps): JSX.Element {
-  const { st, mirror, keys, keyNotes, nameOf, now, group, take } = props
+  const { st, mirror, keys, now, group, take } = props
   const box = useRef<HTMLDivElement | null>(null)
   const [scale, setScale] = useState(0.4)
   const [card, setCard] = useState<{ key: CardKey; x: number; y: number; above: number } | null>(null)
@@ -157,7 +165,6 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
 
   const offline = mirror?.offline != null && st.playing === null
   const digits = displayDigits(st, mirror, take)
-  const lit = keyNotes ? keysLit(st.notes, keyNotes, now) : null
 
   const step = (d: number): void => {
     if (keys.on) props.onOctave?.(Math.max(MIN_OCTAVE, Math.min(MAX_OCTAVE, keys.octave + d)))
@@ -169,6 +176,10 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
   const transport = useContext(TransportContext)
   // TEMPO: a tap turns the click on or off, held the tempo sheet; the display's metronome lights with the click.
   const tempo = useContext(TempoContext)
+  // SOUND, MAIN (PROJECT) and FX as Live's function keys; SAMPLE opens its panel.
+  const fn = useContext(FunctionKeysContext)
+  const projectHold = useContext(ProjectHoldContext)
+  const sample = useSample()
   const pat = transport?.ui ?? null
   const patLight = pat !== null ? recordLight(pat) : null
   const recLight: 'live' | 'armed' | null =
@@ -281,9 +292,14 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
           {/* The controls. */}
           {label(90, 917, 'VOLUME')}
           <button type="button" class="ep-a ep-knob ep-knob--vol" style={at(68, 950)} aria-label="Volume" aria-haspopup="dialog" onClick={(e) => openCard('VOLUME', e)} />
-          {split('SOUND', 265, 950, 'SOUND', 'EDIT', 'ep-h--black', 'ep-h--light')}
-          {split('MAIN', 461, 950, 'MAIN', 'COMMIT', 'ep-h--black', 'ep-h--orange')}
-          {tempo !== null ? <DeviceTempoKey t={tempo} /> : split('TEMPO', 657, 950, 'TEMPO', 'LOOP', 'ep-h--black', 'ep-h--grey')}
+          {fn?.sound ? <SoundKey s={fn.sound} drawn={DRAWN.SOUND} /> : split('SOUND', 265, 950, 'SOUND', 'EDIT', 'ep-h--black', 'ep-h--light')}
+          {/* MAIN is PROJECT, as the EP-133 loads a project: held, a pad 1 to 9. */}
+          {fn?.project && projectHold ? (
+            <ProjectKey p={fn.project} hold={projectHold} drawn={DRAWN.MAIN} />
+          ) : (
+            split('MAIN', 461, 950, 'MAIN', 'COMMIT', 'ep-h--black', 'ep-h--orange')
+          )}
+          {tempo !== null ? <TempoKey t={tempo} drawn={DRAWN.TEMPO} /> : split('TEMPO', 657, 950, 'TEMPO', 'LOOP', 'ep-h--black', 'ep-h--grey')}
           <span class="ep-a ep-line" style={at(722, 917, 2, 30)} aria-hidden="true" />
           <span class="ep-a ep-line" style={at(722, 917, 345, 2)} aria-hidden="true" />
           {label(1090, 917, 'BPM')}
@@ -327,6 +343,7 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
             style={at(68, 1147, 130, 64)}
             aria-pressed={keys.on}
             aria-label={MirrorText.MODE_KEYS}
+            data-coach="live.mode"
             onClick={() => props.onMode?.(!keys.on)}
           >
             KEYS
@@ -343,6 +360,9 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
             SHIFT
           </button>
 
+          {/* The guide's tags on the group keys and the pads: boxes over them (their keys are placed one by one). */}
+          <span class="ep-a ep-area" style={at(265, 1147, 130, 716)} data-coach="live.groups" aria-hidden="true" />
+          <span class="ep-a ep-area" style={at(461, 1147, 522, 716)} data-coach={keys.on ? 'live.keys' : 'live.pads'} aria-hidden="true" />
           <div role="tablist" aria-label={MirrorText.GROUP}>
             {[0, 1, 2, 3].map((g) => (
               <button
@@ -362,57 +382,42 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
           </div>
 
           <div role="group" aria-label={keys.on ? MirrorText.MODE_KEYS : `${MirrorText.GROUP} ${MirrorText.groupKey(group)}`}>
-            {ROWS.map((offsets, r) =>
-              offsets.map((o, c) => {
-                const style = at(COLS[c]!, ROW_Y[r]!, 130, 128)
-                if (keys.on && keyNotes && lit) {
-                  const note = keyNotes[o]!
-                  return (
-                    <button
-                      key={`k${o}`}
-                      type="button"
-                      class={`ep-a ep-pad ep-pad--key${upperOctave(note, keys.octave) ? ' ep-pad--upper' : ''}${props.playingNotes.has(note) ? ' is-playing' : ''}`}
-                      style={{ ...style, '--glow': glowCss(lit.get(o) ?? 0) }}
-                      data-key={o}
-                      aria-label={MirrorText.noteName(note, keys.names)}
-                      aria-description={MirrorText.PLAY}
-                      {...props.hold(props.keyPress(note))}
-                    >
-                      <span class="ep-pad__ring">{Keys.name(note, keys.names)}</span>
-                      <span class="ep-pad__oct">{Keys.octaveOf(note)}</span>
-                    </button>
-                  )
-                }
-                const pad = physicalPad(group, o)
-                const light = st.pads.get(padKey(pad))
-                const name = nameOf(pad)
-                const target = props.press(pad)
-                const g = light ? glow(light, now) : 0
-                const word = pad.label === 'ENTER'
-                return (
-                  <button
-                    key={`p${o}`}
-                    type="button"
-                    class={`ep-a ep-pad${props.playingPads.has(padKey(pad)) ? ' is-playing' : ''}`}
-                    style={{ ...style, '--glow': glowCss(g) }}
-                    data-pad={padKey(pad)}
-                    aria-label={`${pad.groupLetter} ${pad.label}` + (name !== null ? `, ${name}` : '')}
-                    aria-description={target ? MirrorText.PLAY : undefined}
-                    disabled={target === null}
-                    {...(target ? props.hold(target) : {})}
-                  >
-                    <span class={`ep-pad__num${word ? ' ep-pad__num--word' : ''}`}>{pad.label === '.' ? '•' : pad.label}</span>
-                    {name !== null && <span class="ep-pad__name">{name}</span>}
-                  </button>
-                )
-              }),
-            )}
+            {props.pads}
           </div>
 
-          {split('SAMPLE', 1050, 1147, 'SAMPLE', 'CHOP', 'ep-h--orange', 'ep-h--light')}
+          {sample !== null ? (
+            <button
+              type="button"
+              class={`ep-a ep-key ep-key--split${sample.ui.on ? ' is-lit' : ''}`}
+              style={at(1050, 1147, 130, 130)}
+              aria-label="SAMPLE / CHOP"
+              aria-pressed={sample.ui.on}
+              onClick={() => sample.onToggle()}
+            >
+              <span class="ep-h ep-h--orange">SAMPLE</span>
+              <span class="ep-h ep-h--light">CHOP</span>
+            </button>
+          ) : (
+            split('SAMPLE', 1050, 1147, 'SAMPLE', 'CHOP', 'ep-h--orange', 'ep-h--light')
+          )}
           {split('TIMING', 1246, 1147, 'TIMING', 'CORRECT', 'ep-h--black', 'ep-h--light')}
-          {split('FX', 1050, 1343, 'FX', 'OUTPUT', 'ep-h--black', 'ep-h--light')}
-          {split('ERASE', 1246, 1343, 'ERASE', 'SYSTEM', 'ep-h--lighter', 'ep-h--light')}
+          {fn?.fx ? <FxKey f={fn.fx} drawn={DRAWN.FX} /> : split('FX', 1050, 1343, 'FX', 'OUTPUT', 'ep-h--black', 'ep-h--light')}
+          {pat !== null && transport !== null ? (
+            <button
+              type="button"
+              class={`ep-a ep-key ep-key--split${pat.erase ? ' is-lit' : ''}`}
+              style={at(1246, 1343, 130, 130)}
+              aria-label={MirrorText.ERASE}
+              aria-pressed={pat.erase}
+              data-coach="live.erase"
+              onClick={() => transport.onErase(!pat.erase)}
+            >
+              <span class="ep-h ep-h--lighter">ERASE</span>
+              <span class="ep-h ep-h--light">SYSTEM</span>
+            </button>
+          ) : (
+            split('ERASE', 1246, 1343, 'ERASE', 'SYSTEM', 'ep-h--lighter', 'ep-h--light')
+          )}
           <button
             type="button"
             class="ep-a ep-key ep-key--light ep-key--sign"
@@ -459,6 +464,7 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
             </>
           )}
         </div>
+        {props.panel && <div class="device__panel">{props.panel}</div>}
         {card && <ShortcutCard card={card} boxWidth={DEVICE_W * scale} boxHeight={DEVICE_H * scale} onClose={() => setCard(null)} onGuide={props.onGuide} />}
       </div>
     </div>
@@ -546,6 +552,7 @@ function DeviceTransport(props: { t: TransportUi; still?: boolean }): JSX.Elemen
         style={at(1050, 1735, 130, 128)}
         aria-label={recordName(ui)}
         aria-description={MirrorText.RECORD_HOLD}
+        data-coach="live.record"
         {...press.record}
       >
         RECORD
@@ -573,24 +580,10 @@ function PlateWords(props: { t: TransportUi; still?: boolean }): JSX.Element {
   )
 }
 
-/** The drawn TEMPO / LOOP key as TEMPO: a tap turns the click on or off, held (or right-clicked) the tempo sheet. */
-function DeviceTempoKey(props: { t: TempoUi }): JSX.Element {
-  const { t } = props
-  const press = useTempoPress(t)
-  const bpm = t.deviceBpm !== null ? Math.round(t.deviceBpm) : t.bpm
-  return (
-    <button
-      type="button"
-      class={`ep-a ep-key ep-key--split${t.clickOn ? ' is-lit' : ''}`}
-      style={at(657, 950, 130, 130)}
-      role="switch"
-      aria-checked={t.clickOn}
-      aria-label={MirrorText.CLICK}
-      aria-description={`${MirrorText.clickState(t.clickOn, bpm, t.deviceBpm !== null)}. ${MirrorText.SET_TEMPO}: hold`}
-      {...press}
-    >
-      <span class="ep-h ep-h--black">TEMPO</span>
-      <span class="ep-h ep-h--grey">LOOP</span>
-    </button>
-  )
+/** The function keys' places and prints on the drawn EP-133. */
+const DRAWN: Record<'SOUND' | 'MAIN' | 'TEMPO' | 'FX', DrawnKey> = {
+  SOUND: { place: at(265, 950, 130, 130), top: 'SOUND', bottom: 'EDIT', topCls: 'ep-h--black', bottomCls: 'ep-h--light' },
+  MAIN: { place: at(461, 950, 130, 130), top: 'MAIN', bottom: 'COMMIT', topCls: 'ep-h--black', bottomCls: 'ep-h--orange' },
+  TEMPO: { place: at(657, 950, 130, 130), top: 'TEMPO', bottom: 'LOOP', topCls: 'ep-h--black', bottomCls: 'ep-h--grey' },
+  FX: { place: at(1050, 1343, 130, 130), top: 'FX', bottom: 'OUTPUT', topCls: 'ep-h--black', bottomCls: 'ep-h--light' },
 }

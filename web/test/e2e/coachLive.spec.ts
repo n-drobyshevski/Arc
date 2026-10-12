@@ -34,20 +34,24 @@ for (const [name, width, height] of SIZES) {
     test('PROJECT held, a KEYS key printed 3 picks project 3 and sounds nothing', async ({ page }) => {
       await page.goto('/?demo')
       await expect(page.locator('.live-strip')).toContainText('Project 1')
+      // On the desk the drawn EP-133: its KEYS key, its pads the keys, MAIN as PROJECT (the plate says the project).
+      const desk = width >= 1024
       await page.locator('[data-pad="9"]').click()
-      await page.getByRole('button', { name: 'Pads. Tap for keys.' }).click()
-      // Where there is room for the piano, the grid instead (a portrait phone has the grid alone).
-      const grid = page.getByRole('radiogroup', { name: 'Keys view' }).getByRole('radio', { name: 'Keys on the pads' })
-      if (await grid.isVisible()) await grid.click()
-      const key = page.locator('.live-kgrid [data-key="5"]')
+      if (desk) {
+        await page.getByRole('button', { name: 'Keys', exact: true }).click()
+      } else {
+        await page.getByRole('button', { name: 'Pads. Tap for keys.' }).click()
+      }
+      const key = page.locator('[data-key="5"]')
       await expect(key).toBeVisible()
       const center = async (l: Locator): Promise<{ x: number; y: number }> => {
         const b = (await l.boundingBox())!
         return { x: b.x + b.width / 2, y: b.y + b.height / 2 }
       }
       const projectKey = page.getByRole('button', { name: 'Project' })
-      // KEYS' line shows the sound, not the project: PROJECT's own label says it.
-      await expect(projectKey.locator('.fn-key__label')).toHaveText('P1')
+      // KEYS' line shows the sound, not the project: PROJECT's own label (the drawn plate) says it.
+      const shown = desk ? page.locator('.ep-plate__status') : projectKey.locator('.fn-key__label')
+      await expect(shown).toHaveText(desk ? 'Project 1' : 'P1')
       const project = await center(projectKey)
       const three = await center(key)
       const cdp = await page.context().newCDPSession(page)
@@ -59,7 +63,7 @@ for (const [name, width, height] of SIZES) {
       await expect(key).not.toHaveClass(/is-playing/)
       await touch('touchEnd', [project])
       await touch('touchEnd', [])
-      await expect(projectKey.locator('.fn-key__label')).toHaveText('P3')
+      await expect(shown).toHaveText(desk ? 'Project 3' : 'P3')
       // Neither stepped on nor the project sheet: the pick is all it did.
       await expect(page.getByRole('dialog')).toHaveCount(0)
     })

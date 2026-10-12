@@ -123,7 +123,8 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
     await expect.poll(() => coachHides(page)).toEqual([])
     await page.keyboard.press('Escape')
     await expect(coach).toBeHidden()
-    // In KEYS the tools go behind the edge strip, and slide out over the page.
+    // The grid (the drawn EP-133 is the desk's default): in KEYS the tools go behind the edge strip, and slide out over the page.
+    await page.getByRole('radio', { name: 'One group' }).click()
     await page.getByRole('button', { name: 'Pads. Tap for keys.' }).click()
     await page.getByRole('button', { name: 'Live tools' }).click()
     const panel = page.getByRole('dialog', { name: 'Live tools' })
@@ -314,7 +315,12 @@ for (const size of SIZES) {
         await demo(page, (d) => d.noteOn(36, 127))
         await shot('live')
         await demo(page, (d) => d.noteOff(36))
-        if (size.width > size.height) {
+        if (size.width >= 1024) {
+          // The desk draws the EP-133: its KEYS key makes the pads notes.
+          await page.getByRole('group', { name: 'EP-133 K.O. II' }).getByRole('button', { name: 'Keys', exact: true }).click()
+          await expect(page.locator('[data-key]')).toHaveCount(12)
+          await shot('live-keys')
+        } else if (size.width > size.height) {
           await page.getByRole('button', { name: 'Pads. Tap for keys.' }).click()
           await expect(page.locator('.piano')).toBeVisible()
           await shot('live-keys')

@@ -11,6 +11,9 @@
   justify-content: center;
 }
 .device__box { position: relative; flex: none; }
+/* The open panel (SAMPLE, STEP, SCENE) over the plate and the display, the device's width. */
+.ep-area { pointer-events: none; }
+.device__panel { position: absolute; z-index: 4; left: 0; right: 0; top: 0; max-height: 100%; overflow: auto; }
 .ep {
   position: absolute;
   left: 0;
@@ -176,6 +179,10 @@
 .ep-key--orange.is-armed { animation: ep-armed 450ms steps(1) infinite alternate; }
 .ep-key--orange.is-on { box-shadow: 0 9px 0 #A33000, 0 0 0 6px rgb(255 255 255 / 0.85), 0 0 30px 8px rgb(255 76 0 / 0.55); }
 .ep-key--grey.is-lit { background: linear-gradient(180deg, #8E8E8D, #7A7A79); box-shadow: 0 9px 0 #383837, 0 0 26px 6px rgb(255 255 255 / 0.35); }
+/* Live's function keys on the drawn ones (SOUND, MAIN as PROJECT, TEMPO, FX, SAMPLE, ERASE): a signal ring while on. */
+.ep-key--split.is-lit { box-shadow: 0 9px 0 #6D6C68, 0 0 0 6px #FF4C00, 0 0 30px 8px rgb(255 76 0 / 0.45); }
+.ep-key--split.is-held > .ep-h:first-child { background: #FF4C00; color: #FFFFFF; }
+.ep-key[aria-disabled='true'] { opacity: 0.6; cursor: default; }
 @keyframes ep-armed { to { box-shadow: 0 9px 0 #A33000, 0 0 0 6px rgb(255 255 255 / 0.85); } }
 @media (prefers-reduced-motion: reduce) {
   .ep-rec.is-armed, .ep-key--orange.is-armed { animation: none; }
@@ -233,6 +240,79 @@
 }
 .ep-pad--upper .ep-pad__ring { border-color: color-mix(in oklab, #FFFFFF var(--hot-pct), #FF4C00); }
 .ep-pad__oct { position: absolute; right: 12px; bottom: 8px; font-size: 20px; color: color-mix(in oklab, #FFFFFF var(--hot-pct), #8C8C8C); }
+
+/* ---- Live's states on the drawn pads (MirrorScreen.css's .live-pad ones, in the drawing's units) ---- */
+.ep-pad[data-down] { transform: translateY(7px); box-shadow: 0 2px 0 #040404; }
+.ep-pad.is-editing::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border: 6px solid color-mix(in oklab, #FF4C00 75%, transparent);
+  border-radius: inherit;
+  pointer-events: none;
+}
+.ep-pad__swap,
+.ep-pad__drop {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: #FF4C00;
+  color: #FFFFFF;
+  line-height: 1;
+}
+.ep-pad__swap { top: auto; bottom: 14px; width: 46px; height: 46px; font-size: 30px; }
+.ep-pad__drop { padding: 8px 12px; font-size: 22px; font-weight: 800; }
+.ep-pad.is-drop { outline: 8px dashed #FF4C00; outline-offset: 8px; }
+.ep-pad.is-erase-dim { opacity: 0.45; }
+.ep-pad.is-erase-dot::before {
+  content: '';
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #FF4C00;
+  pointer-events: none;
+}
+.ep-pad.is-step-lit,
+.ep-pad.is-arp-held,
+.ep-pad.is-sample-empty,
+.ep-pad.is-sample-filled { outline: 6px solid #FF4C00; outline-offset: -12px; }
+.ep-pad.is-step-picked,
+.ep-pad.is-sample-waiting,
+.ep-pad.is-sample-recording { outline: 9px solid #FF4C00; outline-offset: -14px; }
+.ep-pad.is-step-lit .ep-pad__num,
+.ep-pad.is-step-picked .ep-pad__num { color: #FF4C00; }
+.ep-pad.is-sample-recording { background: #FF4C00; }
+.ep-pad.is-sample-empty { animation: sample-blink 900ms ease-in-out infinite alternate; }
+@media (prefers-reduced-motion: reduce) {
+  .ep-pad.is-sample-empty { animation: none; outline-color: color-mix(in srgb, #FF4C00 45%, transparent); }
+}
+.ep-pad[data-arp-order]::after {
+  content: attr(data-arp-order);
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  font-size: 26px;
+  font-weight: 700;
+  color: #FF4C00;
+}
+/* FX held: the pads are the punch-ins, the effect's name where the pad prints its sound. */
+.ep-punch {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 14px 8px 14px 12px;
+  --glow-pct: calc(var(--glow, 0) * 100%);
+}
+.ep-punch .live-punch__name { font-size: 23px; letter-spacing: 0; overflow-wrap: normal; word-break: normal; hyphens: none; }
+.ep-punch .live-punch__hold { font-size: 22px; color: #8C8C8C; }
+.ep-punch.is-held .live-punch__hold { color: #FFFFFF; }
+.ep-punch .live-punch__bar { height: 12px; margin-bottom: 6px; }
 
 /* ---- a key's shortcuts ---- */
 .ep-card {

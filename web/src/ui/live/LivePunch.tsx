@@ -12,7 +12,7 @@
 
 import { createContext } from 'preact'
 import { useContext, useEffect, useRef, useState } from 'preact/hooks'
-import type { JSX } from 'preact'
+import type { CSSProperties, JSX } from 'preact'
 import { MirrorText } from '../../core/text/mirrorText'
 import { tick } from '../../platform/haptics'
 import { capDown, capUp } from './capDown'
@@ -55,7 +55,8 @@ const sense = new PressureSense()
  * click puts the punch-in in (all the way) until clicked again: there's no
  * finger to hold.
  */
-export function PunchPad(props: { slot: number; punch: PunchUi; class?: string }): JSX.Element {
+/** [place]: on the drawn EP-133 (DeviceView's padPlace), drawn as its pad. */
+export function PunchPad(props: { slot: number; punch: PunchUi; class?: string; place?: CSSProperties }): JSX.Element {
   const { slot, punch } = props
   const latest = useRef(punch)
   latest.current = punch
@@ -86,8 +87,8 @@ export function PunchPad(props: { slot: number; punch: PunchUi; class?: string }
     <button
       ref={btn}
       type="button"
-      class={`live-pad cap-3d live-pad--big live-pad--press live-punch${lit ? ' is-held' : ''}${props.class ? ` ${props.class}` : ''}`}
-      style={{ '--glow': lit ? 1 : 0 }}
+      class={`${props.place ? 'ep-a ep-pad ep-punch' : 'live-pad cap-3d live-pad--big live-pad--press'} live-punch${lit ? ' is-held' : ''}${props.class ? ` ${props.class}` : ''}`}
+      style={{ ...props.place, '--glow': lit ? 1 : 0 }}
       aria-label={MirrorText.punchDescription(slot)}
       aria-description={lit ? `${MirrorText.PUNCHED_IN}. ${MirrorText.PUNCH_OUT}` : MirrorText.PUNCH_IN}
       aria-pressed={lit}
