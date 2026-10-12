@@ -16,9 +16,12 @@
 // a sound are ringed, the take's pad lit.
 //
 // Web deltas:
-// - No morph: the panel takes the function keys' place as STEP's and SCENE's
-//   do (Kotlin's SampleSlot), with a ✕ of its own; the swipe on the pads
-//   that opens it isn't here, and the mic key and the ✕ close it, not Back.
+// - The panel takes the function keys' place as STEP's and SCENE's do
+//   (Kotlin's SampleSlot), with a ✕ of its own, and unrolls there as it
+//   mounts (CSS keyframes on panelMotion.ts's times, MirrorScreen.css); it
+//   goes at once as it closes, the function keys coming back. The swipe on the
+//   pads opens and closes it (MirrorScreen, panelMotion.ts), and Escape closes
+//   it where Android's Back does.
 // - The knobs are sliders (KnobSlider), as the web's other knobs.
 // - RSP only, so − / + and STEREO step between RSP and RSP ST; the sources'
 //   names say arc's sound, not the phone's (WebText.sampleSourceName).

@@ -14,9 +14,10 @@
 //
 // Web deltas:
 // - The panel takes the function keys' place (Kotlin's SLOT hosting, with
-//   its own header) wherever Live shows them, and the column of tools on a
-//   phone on its side; there is no morph of the line into it. Not in the
-//   desk's Device view yet.
+//   its own header) wherever Live shows them, and a column left of KEYS on a
+//   phone on its side, unrolling there as it mounts rather than the line
+//   morphing into it (MirrorScreen.css, panelMotion.ts's times); Escape closes
+//   it. Not in the desk's Device view yet.
 // - VEL and LEN are sliders, back to their default on a double click; a
 //   turn ends (one UNDO step) with the slider's change event.
 // - CORRECT is a key of one cell (PatternLine.tsx's lineFit measures it as one).

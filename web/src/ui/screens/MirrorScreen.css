@@ -1489,3 +1489,42 @@
 .live-group__caption.is-step-edited { --live-caption: var(--signal); }
 /* With the panel beside them the keys keep their size: the row may take the window's width. */
 .live__one--side:has(> .live__side--panel) { max-width: none; }
+
+/* The panels unrolling from the display line as they open (Kotlin SamplePanel.kt's timeline, panelMotion.ts):
+ * PANEL_OPEN_MS 300 on Material's emphasised decelerate, the header fading in over the first 120, then the rows at
+ * 40, 70 and 100 ms over 200 each; in a column on a phone on its side, from the left. Closing, the panel goes at once
+ * and the function keys come back over PANEL_CLOSE_MS 240, rising and growing back (web delta). None of it where the
+ * system asks for less motion (Android's animations off). */
+@media (prefers-reduced-motion: no-preference) {
+  .live__fn:is(.sample-panel, .step-panel, .scene-panel) {
+    animation: panel-unroll 300ms cubic-bezier(0.05, 0.7, 0.1, 1) both;
+  }
+  :is(.live__side-panel, .live-piano__step) > .live__fn:is(.step-panel) {
+    animation-name: panel-unroll-side;
+  }
+  .live__fn:is(.sample-panel, .step-panel, .scene-panel) > * {
+    animation: panel-fade 200ms cubic-bezier(0, 0, 0.2, 1) both;
+  }
+  .live__fn:is(.sample-panel, .step-panel, .scene-panel) > :first-child { animation-duration: 120ms; }
+  .live__fn:is(.sample-panel, .step-panel, .scene-panel) > :nth-child(2) { animation-delay: 40ms; }
+  .live__fn:is(.sample-panel, .step-panel, .scene-panel) > :nth-child(3) { animation-delay: 70ms; }
+  .live__fn:is(.sample-panel, .step-panel, .scene-panel) > :nth-child(n + 4) { animation-delay: 100ms; }
+  .live__fn.fn-return { animation: fn-return 240ms cubic-bezier(0.3, 0, 1, 1) both; }
+}
+@keyframes panel-unroll {
+  from { clip-path: inset(0 0 100% 0 round 14px); }
+  to { clip-path: inset(0 0 0 0 round 14px); }
+}
+@keyframes panel-unroll-side {
+  from { clip-path: inset(0 100% 0 0 round 14px); }
+  to { clip-path: inset(0 0 0 0 round 14px); }
+}
+@keyframes panel-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+/* The keys coming back from where they went (sunk 6 px, 6 % smaller, faded), at the timeline's pace run back. */
+@keyframes fn-return {
+  from { opacity: 0; transform: translateY(6px) scale(0.94); }
+  to { opacity: 1; transform: none; }
+}

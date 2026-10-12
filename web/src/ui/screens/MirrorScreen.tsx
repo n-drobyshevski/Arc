@@ -157,6 +157,7 @@ import { PressTracker, rawMovesSupported, ticking, type PressTarget } from '../l
 import { SLOT_MIME, SOURCE_MIME, SoundPicker } from '../live/SoundPicker'
 import { dragMayHaveAudio, isAudioFile } from '../../platform/files/pick'
 import { tick } from '../../platform/haptics'
+import { PANEL_CLOSE_MS, swipeClaims, swipeLands, swipeRefused } from '../live/panelMotion'
 import { PickWord, WordButton } from '../live/Words'
 import { TakeBadge, TakesSection, type TakeUi, type TakesUi } from '../live/Takes'
 import { idleFit } from '../live/lineFit'
@@ -895,6 +896,19 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
       }
     },
     escape: () => {
+      // The open panel first, one a press (Android's Back): SAMPLE, STEP, SCENE.
+      if (sampleOpen && sampleCtx !== null) {
+        sampleCtx.onClose()
+        return true
+      }
+      if (stepOpen && stepCtx !== null) {
+        stepCtx.onClose()
+        return true
+      }
+      if (sceneOpen && sceneCtx !== null) {
+        sceneCtx.onClose()
+        return true
+      }
       if (editing && edit !== null) {
         edit.onChange(false)
         setAnnounce(WebText.switched(MirrorText.EDIT_TAB, false))
@@ -905,6 +919,73 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
       return true
     },
   })
+
+  // The swipe on the pads (Kotlin panelSwipe): right to left opens SAMPLE, left to right closes it, once the finger
+  // has gone PANEL_SWIPE_AT of the page's width or is flung; the pad under it sounds at once and is cut once it is a
+  // swipe. Not while STEP's or SCENE's panel has the place, nor in the Device view.
+  const swiping = useRef<{ id: number; x: number; y: number; width: number; opening: boolean; claimed: boolean; fired: boolean; last: [number, number][] } | null>(null)
+  const swipeOffered = sampleCtx !== null && !device && !stepOpen && !sceneOpen
+  const swipeFire = (opening: boolean): void => {
+    if (opening !== !(sampleCtx?.ui.on ?? false)) return
+    sampleCtx?.onToggle()
+    if (haptic) tick()
+  }
+  const swipe = {
+    onPointerDownCapture: (e: PointerEvent): void => {
+      if (!swipeOffered || (e.pointerType === 'mouse' && e.button !== 0)) return
+      if (!(e.target instanceof Element) || e.target.closest('[data-pad]') === null) return
+      swiping.current = {
+        id: e.pointerId,
+        x: e.clientX,
+        y: e.clientY,
+        width: Math.max(1, root.current?.clientWidth ?? 1),
+        opening: !sampleOpen,
+        claimed: false,
+        fired: false,
+        last: [[e.timeStamp, e.clientX]],
+      }
+    },
+    onPointerMoveCapture: (e: PointerEvent): void => {
+      const g = swiping.current
+      if (g === null || g.id !== e.pointerId) return
+      const dx = e.clientX - g.x
+      g.last = [...g.last.slice(-4), [e.timeStamp, e.clientX]]
+      if (!g.claimed) {
+        if (swipeRefused(dx, e.clientY - g.y, g.opening)) {
+          swiping.current = null
+          return
+        }
+        if (!swipeClaims(dx, e.clientY - g.y, g.opening)) return
+        // A swipe: the pad's press is cut, as a scroll cuts it; the page keeps the pointer, so a mouse that leaves
+        // the window still lands it.
+        g.claimed = true
+        tracker.cancel(e.pointerId, true)
+        try {
+          root.current?.setPointerCapture(e.pointerId)
+        } catch {
+          // Gone already: the lift will not come.
+        }
+      }
+      // Far enough: it goes now, not at the lift.
+      if (!g.fired && swipeLands(((g.opening ? -1 : 1) * dx) / g.width, 0)) {
+        g.fired = true
+        swipeFire(g.opening)
+      }
+    },
+    onPointerUpCapture: (e: PointerEvent): void => {
+      const g = swiping.current
+      if (g === null || g.id !== e.pointerId) return
+      swiping.current = null
+      if (!g.claimed || g.fired) return
+      const [t0, x0] = g.last[0]!
+      const dt = (e.timeStamp - t0) / 1000
+      const velocity = dt > 0 ? ((g.opening ? -1 : 1) * (e.clientX - x0)) / dt : 0
+      if (swipeLands(((g.opening ? -1 : 1) * (e.clientX - g.x)) / g.width, velocity)) swipeFire(g.opening)
+    },
+    onPointerCancelCapture: (e: PointerEvent): void => {
+      if (swiping.current?.id === e.pointerId) swiping.current = null
+    },
+  }
 
   const modeRow = (
     <ModeRow
@@ -927,6 +1008,19 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   // The function keys over the pads, upright (none sideways); SOUND turns EDIT off again, so they stay in EDIT.
   // STEP's panel takes the function keys' place while it is open (on a phone on its side, the tools' column).
   // So does SCENE's (the two never open together).
+  // A panel just closed: the function keys come back (MirrorScreen.css fn-return), for as long as that takes.
+  const panelShown = sampleOpen || stepOpen || sceneOpen
+  const panelWas = useRef(panelShown)
+  const [keysReturn, setKeysReturn] = useState(false)
+  useLayoutEffect(() => {
+    const was = panelWas.current
+    panelWas.current = panelShown
+    if (panelShown) setKeysReturn(false)
+    if (panelShown || !was) return
+    setKeysReturn(true)
+    const t = setTimeout(() => setKeysReturn(false), PANEL_CLOSE_MS)
+    return () => clearTimeout(t)
+  }, [panelShown])
   const fnRow = sampleOpen ? (
     <SamplePanel class="live__fn" />
   ) : stepOpen ? (
@@ -934,7 +1028,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   ) : sceneOpen ? (
     <ScenePanel class="live__fn" />
   ) : inBar ? null : (
-    <FunctionRow class="live__fn" />
+    <FunctionRow class={`live__fn${keysReturn ? ' fn-return' : ''}`} />
   )
   const sideStep = sampleOpen ? (
     <SamplePanel class="live__fn live__side-step" />
@@ -1182,7 +1276,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   }
 
   return (
-    <div ref={root} class="live" data-screen="live">
+    <div ref={root} class="live" data-screen="live" {...swipe}>
       <SideZone
         open={props.toolsOpen}
         onOpen={() => props.onTools(true)}

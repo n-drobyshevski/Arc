@@ -15,7 +15,8 @@
 //
 // Web deltas:
 // - The panel takes the function keys' place (Kotlin's SLOT hosting, with
-//   its own header); the 1–99 grid opens inside the panel, under its rows,
+//   its own header), unrolling there as it mounts (MirrorScreen.css), and
+//   Escape closes it; the 1–99 grid opens inside the panel, under its rows,
 //   rather than over the pads. Not in the desk's Device view yet, and the
 //   group keys don't carry the numbers.
 // - The readout while the pattern plays is in the scene's cell (Android: in
