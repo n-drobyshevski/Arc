@@ -134,23 +134,22 @@
 }
 .toast__action:focus-visible { outline: var(--focus-ring); outline-offset: -3px; }
 
-/* A short window wider than tall (a phone on its side, where Live's display line is in
- * the top bar: ui/live/window.ts liveInBar): at the top, over the top bar's middle
- * between the tag and the keys, never over the keys of the piano or the bar's icons.
- * Two lines at most there, a size down. Not on the desk (its own column, above). */
-@media (orientation: landscape) and (max-height: 479px) and (min-width: 600px) and (max-width: 1023px) {
-  .toast-host {
-    top: 0;
+/* A short window (under 480 high, Kotlin Window.kt's short) with a top bar whose middle is at
+ * least 200 wide (TopBar's data-bar-slot): the toast sits over that middle, between the tag and the
+ * keys, centred on the bar (Kotlin: the slot's middle less 22), as wide as it. Two lines at most
+ * there, a size down; a tap unfolds the rest. Elsewhere, at the bottom as ever. */
+@media (max-height: 479.98px) {
+  :root[data-bar-slot] .toast-host {
+    top: max(0px, calc(var(--bar-slot-mid) - 22px));
     bottom: auto;
-    padding:
-      6px
-      calc(244px + env(safe-area-inset-right, 0px))
-      0
-      calc(148px + env(safe-area-inset-left, 0px));
+    left: var(--bar-slot-left);
+    right: auto;
+    width: var(--bar-slot-width);
+    padding: 0;
   }
-  .toast-live { padding: 0; }
-  .toast-frame { max-width: 560px; }
-  .toast__text {
+  :root[data-bar-slot] .toast-live { padding: 0; }
+  :root[data-bar-slot] .toast-frame { max-width: none; }
+  :root[data-bar-slot] .toast__text {
     display: -webkit-box;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 2;
@@ -158,6 +157,7 @@
     padding-block: 12px;
     font-size: 13px;
   }
+  :root[data-bar-slot] .toast.is-unfolded .toast__text { display: block; -webkit-line-clamp: unset; }
   /* One line is as tall as the display line beside it (44). */
-  .toast { min-height: 44px; }
+  :root[data-bar-slot] .toast { min-height: 44px; }
 }

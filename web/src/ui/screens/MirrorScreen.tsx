@@ -1043,6 +1043,23 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     const t = setTimeout(() => setKeysReturn(false), PANEL_CLOSE_MS)
     return () => clearTimeout(t)
   }, [panelShown])
+  // A panel opening on the all-groups page scrolled down: the page goes back to its top, where the
+  // panel is (Kotlin: page.animateScrollTo(0), at once with reduced motion).
+  useEffect(() => {
+    if (!panelShown) return
+    const all = root.current?.querySelector<HTMLElement>('.live__all') ?? null
+    let box: HTMLElement | null = null
+    for (let p = all?.parentElement ?? null; p; p = p.parentElement) {
+      const y = getComputedStyle(p).overflowY
+      if ((y === 'auto' || y === 'scroll') && p.scrollHeight > p.clientHeight) {
+        box = p
+        break
+      }
+    }
+    if (all === null || box === null || box.scrollTop <= 0) return
+    const smooth = !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    box.scrollTo({ top: 0, behavior: smooth ? 'smooth' : 'auto' })
+  }, [panelShown])
   const fnRow = sampleOpen ? (
     <SamplePanel class="live__fn" />
   ) : stepOpen ? (
@@ -1068,14 +1085,18 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   ) : sceneOpen ? (
     <ScenePanel class="live__fn live__side-step" />
   ) : null
-  const displayStrip = inBar ? null : editing ? <EditStrip /> : <DisplayStrip st={st} mirror={mirror} take={take} still={fixedNow !== null} />
+  // EDIT's line gives way to the punch-ins held and to the arp playing (Kotlin: editing && punchHeld.isEmpty() && arpLine == null);
+  // the all-groups display, to the arp only.
+  const arpNow = useArpLine()
+  const editLine = editing && (devicePunch?.held.size ?? 0) === 0 && arpNow === null
+  const displayStrip = inBar ? null : editLine ? <EditStrip /> : <DisplayStrip st={st} mirror={mirror} take={take} still={fixedNow !== null} />
   const allGroups = (
     <div class="live__all">
       <div class="live__head">
         <Caption text={MirrorText.TITLE} as="h1" />
         {onBack && <CloseKey class="live__close" onClick={onBack} description={GUIDE_CLOSE} />}
       </div>
-      {inBar ? null : editing ? <EditStrip /> : <Display st={st} mirror={mirror} initialNoteOpen={props.initialNoteOpen ?? false} onGetFactory={props.onGetFactory ?? null} take={take} still={fixedNow !== null} />}
+      {inBar ? null : editing && arpNow === null ? <EditStrip /> : <Display st={st} mirror={mirror} initialNoteOpen={props.initialNoteOpen ?? false} onGetFactory={props.onGetFactory ?? null} take={take} still={fixedNow !== null} />}
       {fnRowAll}
       {modeRow}
       {/* Four groups in a row when there is room, two by two on a phone. */}
@@ -2095,7 +2116,7 @@ function PadCap(props: PadProps): JSX.Element {
     <>
       {/* As the drawn EP-133 prints it (DeviceView.css). */}
       <span class={`ep-pad__num${pad.label === 'ENTER' ? ' ep-pad__num--word' : ''}`}>{pad.label === '.' ? '•' : pad.label}</span>
-      {shown !== null && <span class="ep-pad__name">{shown}</span>}
+      {stepMark === 'picked' ? <span class="ep-pad__nudge" aria-hidden="true">{MirrorText.NUDGE.toUpperCase()}</span> : shown !== null && <span class="ep-pad__name">{shown}</span>}
       {ui.editing && !dropping && <span class="ep-pad__swap" aria-hidden="true">{'\u21C4'}</span>}
       {dropping && <span class="ep-pad__drop" aria-hidden="true">{WebText.DROP}</span>}
     </>
@@ -2106,7 +2127,12 @@ function PadCap(props: PadProps): JSX.Element {
         {/* The dot key's label is a dot, drawn as the K.O. II prints it. */}
         {pad.label === '.' ? <span class="live-pad__dot" /> : pad.label}
       </span>
-      {shown !== null && <span class="live-pad__name">{shown}</span>}
+      {/* Picked for − / + in STEP: NUDGE at its foot in the name's place (Kotlin NudgeTag). */}
+      {stepMark === 'picked' ? (
+        <span class="live-pad__nudge" aria-hidden="true">{MirrorText.NUDGE.toUpperCase()}</span>
+      ) : (
+        shown !== null && <span class="live-pad__name">{shown}</span>
+      )}
       {ui.editing && !dropping && <span class="live-pad__swap" aria-hidden="true">{'\u21C4'}</span>}
       {dropping && <span class="live-pad__drop" aria-hidden="true">{WebText.DROP}</span>}
     </>
@@ -2595,8 +2621,11 @@ export function LivePill(props: {
 }): JSX.Element {
   const { mirror, keys } = props
   const st = mirror?.state ?? emptyMirrorState()
+  const punch = usePunch()
+  const arp = useArpLine()
   if (keys.on) return <KeysDisplay st={st} mirror={mirror} keys={keys} playing={props.playing} pianoRange={props.pianoRange} compact />
-  if (props.editing) return <EditStrip compact />
+  // EDIT gives way to the punch-ins held and the arp playing, as on the pads' line.
+  if (props.editing && (punch?.held.size ?? 0) === 0 && arp === null) return <EditStrip compact />
   return <DisplayStrip st={st} mirror={mirror} compact />
 }
 
@@ -2848,7 +2877,11 @@ function KeyCapView(props: KeyCapProps): JSX.Element {
       {placed ? (
         <>
           <span class="ep-pad__ring">{Keys.name(note, keys.names)}</span>
-          <span class="ep-pad__oct">{Keys.octaveOf(note)}</span>
+          {stepMark === 'picked' ? (
+            <span class="ep-pad__nudge" aria-hidden="true">{MirrorText.NUDGE.toUpperCase()}</span>
+          ) : (
+            <span class="ep-pad__oct">{Keys.octaveOf(note)}</span>
+          )}
         </>
       ) : keys.showNames ? (
         <span class="live-key__name">{Keys.name(note, keys.names)}</span>
@@ -2857,7 +2890,13 @@ function KeyCapView(props: KeyCapProps): JSX.Element {
           <circle cx="50" cy="50" r="45.5" fill="none" stroke-width="9" />
         </svg>
       )}
-      {!placed && <span class="live-key__octave">{Keys.octaveOf(note)}</span>}
+      {/* Picked for − / + in STEP: NUDGE in the octave's place (Kotlin KeysGrid). */}
+      {!placed &&
+        (stepMark === 'picked' ? (
+          <span class="live-pad__nudge live-key__nudge" aria-hidden="true">{MirrorText.NUDGE.toUpperCase()}</span>
+        ) : (
+          <span class="live-key__octave">{Keys.octaveOf(note)}</span>
+        ))}
     </button>
   )
 }

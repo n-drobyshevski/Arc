@@ -292,6 +292,21 @@
 .ep-pad.is-step-lit .ep-pad__num,
 .ep-pad.is-step-picked .ep-pad__num { color: #FF4C00; }
 .ep-pad.is-sample-recording { background: #FF4C00; }
+.ep-pad.is-step-picked { box-shadow: 0 9px 0 #040404, 0 0 0 10px rgb(255 76 0 / 0.28); }
+.ep-pad__nudge {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 12px;
+  padding: 4px 0;
+  border-radius: 6px;
+  background: #FF4C00;
+  color: #FFFFFF;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-align: center;
+}
 .ep-pad.is-sample-empty { animation: sample-blink 900ms ease-in-out infinite alternate; }
 @media (prefers-reduced-motion: reduce) {
   .ep-pad.is-sample-empty { animation: none; outline-color: color-mix(in srgb, #FF4C00 45%, transparent); }

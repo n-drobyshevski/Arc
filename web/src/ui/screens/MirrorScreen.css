@@ -1385,7 +1385,31 @@
 .live-pad.is-step-lit,
 .live-key.is-step-lit { outline: 2px solid var(--signal); outline-offset: -4px; }
 .live-pad.is-step-picked,
-.live-key.is-step-picked { outline: 3px solid var(--signal); outline-offset: -5px; }
+.live-key.is-step-picked {
+  outline: 3px solid var(--signal);
+  outline-offset: -5px;
+  /* The soft ring just outside the cap (Kotlin pickHalo: 4 dp out, 28 %). */
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--signal) 28%, transparent);
+}
+/* NUDGE at the foot of the pad or key picked for − / + (Kotlin NudgeTag): a small signal-orange tag. */
+.live-pad__nudge {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 6px;
+  padding: 2px 0;
+  border-radius: 3px;
+  background: var(--signal);
+  color: var(--on-signal);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.live-pad--big .live-pad__nudge { font-size: 9px; }
 .live-pad.is-step-lit .live-pad__label,
 .live-pad.is-step-picked .live-pad__label { color: var(--signal); }
 /* On a phone on its side, the panel over the side columns. */

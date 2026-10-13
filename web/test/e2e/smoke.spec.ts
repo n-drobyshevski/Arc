@@ -76,8 +76,10 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
     await sheet.getByRole('button', { name: 'Restore 12 sounds and 3 projects' }).click()
     const progress = page.getByRole('dialog', { name: 'Restoring' })
     await expect(progress).toBeVisible()
-    await expect(progress).toBeHidden({ timeout: 60_000 })
-    await expect(page.getByRole('status').filter({ hasText: 'Restored 12 sounds and 3 projects.' })).toBeVisible()
+    // The toast comes as the restore ends and stays 3.2 s: watched for first, as a slow run can
+    // spend that long confirming the progress dialog has gone.
+    await expect(page.getByRole('status').filter({ hasText: 'Restored 12 sounds and 3 projects.' })).toBeVisible({ timeout: 60_000 })
+    await expect(progress).toBeHidden()
     const after = await demo(page, (d) => ({ dropped: d.mock.dropped, sounds: d.mock.sounds.size, handled: d.mock.log.length }))
     expect(after.dropped).toBe(0)
     expect(after.sounds).toBe(12)
