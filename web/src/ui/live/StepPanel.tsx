@@ -32,6 +32,7 @@ import { MirrorText } from '../../core/text/mirrorText'
 import { STEP_GATES, snapGate, type StepUi } from '../../state/stepPlan'
 import { coachAttrs } from '../components/Coach'
 import { useFingerTick } from '../useHaptic'
+import { Spoken } from './spoken'
 import './StepPanel.css'
 
 /**
@@ -287,9 +288,7 @@ function StepHeader(props: { s: StepActions }): JSX.Element {
       <span class={`step-panel__status${status !== null ? ' is-signal' : ''}`} aria-hidden="true">
         {(status ?? MirrorText.stepStatus(ui.label)).toUpperCase()}
       </span>
-      <span class="sr-only" aria-live="polite">
-        {ui.said ?? status ?? MirrorText.stepSpoken(ui.label, 0)}
-      </span>
+      <Spoken text={ui.said ?? status ?? MirrorText.stepSpoken(ui.label, 0)} />
       <button type="button" class="step-panel__close" aria-label={MirrorText.CLOSE_STEP} onClick={() => s.onClose()}>
         <span aria-hidden="true">✕</span>
       </button>

@@ -42,6 +42,7 @@ import { SAMPLE_BARS, SAMPLE_GAINS, SAMPLE_GAIN_MIC } from '../../platform/stora
 import { SAMPLE_TAP_MS, type SampleUiState } from '../../state/samplePlan'
 import { KnobSlider } from '../components/KnobSlider'
 import { useFingerTick, useHaptic } from '../useHaptic'
+import { Spoken } from './spoken'
 import './SamplePanel.css'
 
 /**
@@ -270,9 +271,7 @@ function SampleHeader(props: { s: SampleActions }): JSX.Element {
       <span class={`sample-panel__status${status.length > 22 ? ' is-long' : ''}`} aria-hidden="true">
         {status}
       </span>
-      <span class="sr-only" aria-live="polite">
-        {sampleSpoken(ui)}
-      </span>
+      <Spoken text={sampleSpoken(ui)} />
       <button type="button" class="step-panel__close" aria-label={WebText.CLOSE_SAMPLE} onClick={() => s.onClose()}>
         <span aria-hidden="true">✕</span>
       </button>

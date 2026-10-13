@@ -149,7 +149,7 @@ Common optional props on most: `class`, `id`, `ref`. Colours are CSS values
 | `Waveform` | TrimSheet waveform | `pcm`, `channels`, `start`, `end`, `label`, `height?`, `columns?` |
 | `Sheet` | ArcSheet | `open`, `onDismiss: (() => void) \| null`, `grip?`, `label?` / `labelledBy?`, `children` |
 | `Dialog` | AlertDialog (Delete/Confirm) | `open`, `text`, `confirm`, `cancel?`, `confirmColor?`, `onConfirm`, `onDismiss` |
-| `Toast` / `ControllerToast` | ArcToast | `toast`, `onTimeout(id)`, `onAction?(id)` (the toast's key, `ToastMsg.action`: Live's UNDO), `bottomInset?` / `controller` (app.tsx mounts it). Swipe sideways or down to dismiss (`swipeOutcome`); a Dismiss key outside the live region is shown on focus for screen readers |
+| `Toast` / `ControllerToast` | ArcToast | `toast`, `onTimeout(id)`, `onAction?(id)` (the toast's key, `ToastMsg.action`: Live's UNDO), `bottomInset?` / `controller` (app.tsx mounts it). Swipe sideways or down to dismiss (`swipeOutcome`; up, out of the top bar, on a short window); a Dismiss key outside the live region is shown on focus for screen readers |
 | `SideZone` | SideZone (Live tools) | `open`, `onOpen`, `onClose`, `title`, `panel`, `children`, `docked?` (the desk's column), `dockHead?` (replaces the docked caption: Live's TOOLS / SOUNDS tabs) |
 | `ComboLine`, `KeymapSteps`, `StepBadge`, `CloseKey` | GuideKeys | `combo`, `keymap`, `spoken` (a line of small caps with HOLD / TYPE / TURN and mode tags) / `keymap` (the open row's numbered steps) / `n`, `hold` / `onClick`, `description` |
 | `KoPanel` | KoPanel | `keymap: GuideKeymap \| null` (the K.O. II as an SVG in 560-wide drawing units, the keymap's keys outlined with step badges, the rest dimmed; `KO_ASPECT`; the Guide's desk column) |

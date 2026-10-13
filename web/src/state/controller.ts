@@ -1330,6 +1330,15 @@ export class ArcController {
   }
 
   /**
+   * [pad]'s sound heard whole, whatever the pads do now (SAMPLE's Play, a
+   * screen reader's custom action on Android): not recorded into, not erased,
+   * not put on the pattern.
+   */
+  hearPad(pad: PhysicalPad): Promise<void> {
+    return this.live.playPad(pad, false)
+  }
+
+  /**
    * How [pad] plays on the phone: its sound settings as known, made a voice
    * shape; unknown, as a pad always has. KEYS ([keys]) plays each note on its
    * own, so LEGATO's one voice across notes becomes a held note there. Either

@@ -54,6 +54,7 @@ import { displayLine, glowCss, groupGlow } from './glow'
 import type { KeysShown } from './keys'
 import { cardName, cardSearch, shortcutsFor, type CardKey } from './shortcuts'
 import type { TakeUi } from './Takes'
+import { Spoken } from './spoken'
 import './DeviceView.css'
 
 /** The photo's size: everything below is placed in these units, then scaled. */
@@ -210,6 +211,7 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
     <span class={`ep-a ep-lbl ${cls}`} style={at(x, y - 16)} aria-hidden="true">{text}</span>
   )
 
+  const plateHit = keys.on ? (keys.pad !== null ? MirrorText.keysSound(keys.pad, keys.padName) : MirrorText.NO_SOUND) : displayLine(st, mirror)
   return (
     <div class="ko-device" ref={box}>
       <div class="ko-device__box" style={{ width: `${DEVICE_W * scale}px`, height: `${DEVICE_H * scale}px` }}>
@@ -229,9 +231,9 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
           ) : (
             <span class="ep-a ep-plate__status" aria-live="polite">{plateStatus(st, mirror, take)}</span>
           )}
-          <span class="ep-a ep-plate__hit" aria-live="polite">
-            {keys.on ? (keys.pad !== null ? MirrorText.keysSound(keys.pad, keys.padName) : MirrorText.NO_SOUND) : displayLine(st, mirror)}
-          </span>
+          {/* The hit, said at most once a second (Kotlin's spoken()): a run of hits is read where it ends. */}
+          <span class="ep-a ep-plate__hit" aria-hidden="true">{plateHit}</span>
+          <Spoken text={plateHit} />
           <div class="ep-a ep-grille" aria-hidden="true" />
 
           {/* The display. */}

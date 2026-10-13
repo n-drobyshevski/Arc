@@ -69,6 +69,7 @@ import { rawMovesSupported } from './press'
 import './PianoKeyboard.css'
 import { altGraph, composing, inField } from '../keyGuard'
 import { computerKeys } from '../keyPrefs'
+import { describe, isSecondaryKey, shortcuts } from './secondary'
 
 /** How far past a key's edge a sliding finger keeps it, so it doesn't flicker between two keys. */
 const SLIDE_SLOP = 6
@@ -394,8 +395,16 @@ export function PianoKeyboard(props: PianoKeyboardProps): JSX.Element {
               class={cls}
               data-note={k.note}
               aria-label={MirrorText.pianoKey(k.note, keys.names, mark) + (stepMark === 'picked' ? MirrorText.PICKED : stepMark === 'lit' ? MirrorText.ON_STEP : '')}
-              aria-description={MirrorText.PLAY}
+              aria-description={describe(MirrorText.PLAY, stepMark !== null && props.onPick ? MirrorText.PICK : null)}
+              aria-keyshortcuts={shortcuts(undefined, stepMark !== null && props.onPick !== undefined)}
               tabIndex={k.note === tabNote ? 0 : -1}
+              // STEP's Pick to nudge (Kotlin's custom action) on Shift+Enter.
+              onKeyDown={(e) => {
+                if (stepMark === null || !isSecondaryKey(e) || !cb.current.onPick) return
+                e.preventDefault()
+                e.stopPropagation()
+                if (!e.repeat) cb.current.onPick(k.note)
+              }}
               onFocus={() => setFocusNote(k.note)}
               style={{
                 left: `${r.left + gap}px`,

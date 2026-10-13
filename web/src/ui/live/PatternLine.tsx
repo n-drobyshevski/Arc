@@ -30,6 +30,7 @@ import { CorrectKey, StepCell, useStep } from './StepPanel'
 import { TakeBadge, type TakeUi } from './Takes'
 import { coachAttrs } from '../components/Coach'
 import { useHaptic } from '../useHaptic'
+import { useSpoken } from './spoken'
 import './PatternLine.css'
 
 /** RECORD held this long while stopped or armed opens the pattern sheet. */
@@ -301,6 +302,9 @@ export function PatternWords(props: { t: TransportUi; compact?: boolean; still?:
   const { t } = props
   const ui = t.ui
   const beat = usePatternBeat(t, props.still === true)
+  // CORRECT's count said at most once a second (Kotlin PatternWords' spoken(corrected)).
+  const counted = useSpoken(props.corrected ?? '')
+  const count = props.corrected ? counted : ''
   let words: JSX.Element
   switch (ui.phase) {
     case 'ARMED':
@@ -334,7 +338,7 @@ export function PatternWords(props: { t: TransportUi; compact?: boolean; still?:
   return (
     <div class="pattern-words">
       <span class="sr-only" aria-live="polite">
-        {MirrorText.transportAnnouncement(stateOf(ui)) + (ui.erase ? ', ' + MirrorText.ERASE_NOTE : '') + (props.corrected ? ', ' + props.corrected : '')}
+        {MirrorText.transportAnnouncement(stateOf(ui)) + (ui.erase ? ', ' + MirrorText.ERASE_NOTE : '') + (count ? ', ' + count : '')}
       </span>
       <span class="pattern-words__shown" aria-hidden="true">
         {words}

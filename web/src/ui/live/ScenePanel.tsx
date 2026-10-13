@@ -33,6 +33,7 @@ import { MirrorText } from '../../core/text/mirrorText'
 import { CLIP_MODES, cycledSwitch, type ClipMode, type SceneUi } from '../../state/scenePlan'
 import { coachAttrs } from '../components/Coach'
 import { useHaptic } from '../useHaptic'
+import { Spoken } from './spoken'
 import './ScenePanel.css'
 
 /** How long CLR / DEL is held (ERASE + MAIN on the device) before it acts. */
@@ -165,9 +166,7 @@ function SceneHeader(props: { s: SceneActions; holding: boolean }): JSX.Element 
       <span class={`step-panel__status${status !== null ? ' is-signal' : ' is-dim'}`} aria-hidden="true">
         {(status ?? MirrorText.sceneStatus(ui.index, ui.count)).toUpperCase()}
       </span>
-      <span class="sr-only" aria-live="polite">
-        {ui.said ?? status ?? MirrorText.sceneStatus(ui.index, ui.count)}
-      </span>
+      <Spoken text={ui.said ?? status ?? MirrorText.sceneStatus(ui.index, ui.count)} />
       <button type="button" class="step-panel__close" aria-label={MirrorText.CLOSE_SCENE} onClick={() => s.onClose()}>
         <span aria-hidden="true">✕</span>
       </button>

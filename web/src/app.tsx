@@ -1075,6 +1075,7 @@ function TabScreen(props: {
             else if (cur !== PICK + p) nav.replace(dialogLayer(cur), dialogLayer(PICK + p))
           }}
           onPad={(pad, hold, unsure, at) => void c.playPad(pad, hold, unsure, at)}
+          onPadHear={(pad) => void c.hearPad(pad)}
           onPadKept={(pad) => void c.keepPad(pad)}
           onPadUp={(pad) => c.releasePad(pad)}
           onPadCut={(pad) => c.cutPad(pad)}
