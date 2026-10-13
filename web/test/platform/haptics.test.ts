@@ -1,6 +1,6 @@
-// Tests for platform/haptics.ts (the pads' haptic tick), with a fake navigator.
+// Tests for platform/haptics.ts (Live's haptic feedback), with a fake navigator.
 import { describe, expect, it } from 'vitest'
-import { TICK_MS, supported, tick } from '../../src/platform/haptics'
+import { HANDLE_GAP_MS, PATTERNS, TICK_MS, buzz, supported, tick } from '../../src/platform/haptics'
 
 describe('haptics', () => {
   it('is supported only where navigator.vibrate is a function, on a touch screen', () => {
@@ -42,5 +42,29 @@ describe('haptics', () => {
         },
       }),
     ).not.toThrow()
+  })
+
+  it("plays each of Android's feedback types as its own pattern", () => {
+    const calls: unknown[] = []
+    const nav = { vibrate: (p: unknown) => calls.push(p) > 0 }
+    buzz('tick', nav)
+    buzz('longPress', nav)
+    buzz('confirm', nav)
+    buzz('reject', nav)
+    expect(calls).toEqual([10, 30, [15, 40, 15], [30, 30, 30]])
+    expect(PATTERNS.handle).toBeLessThan(TICK_MS)
+  })
+
+  it("keeps a knob's steps at least HANDLE_GAP_MS apart", () => {
+    const calls: unknown[] = []
+    const nav = { vibrate: (p: unknown) => calls.push(p) > 0 }
+    const t = 1_000_000
+    buzz('handle', nav, t)
+    buzz('handle', nav, t + 10)
+    buzz('handle', nav, t + HANDLE_GAP_MS - 1)
+    buzz('handle', nav, t + HANDLE_GAP_MS)
+    // Other types don't wait.
+    buzz('tick', nav, t + HANDLE_GAP_MS + 1)
+    expect(calls).toEqual([5, 5, 10])
   })
 })

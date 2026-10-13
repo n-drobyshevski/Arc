@@ -19,6 +19,7 @@ import type { PhysicalPad } from '../../core/features/padNotes'
 import { CoachText } from '../../core/text/coachText'
 import { MirrorText } from '../../core/text/mirrorText'
 import type { ArpUi } from '../../state/arpPlan'
+import { useFingerTick } from '../useHaptic'
 import './ArpWords.css'
 
 /** The arp on Live (Kotlin LiveArp): its state, read as it renders, and ARP / LATCH switched. */
@@ -81,12 +82,15 @@ export function useArpNote(note: number): number {
  */
 export function ArpWords(props: { repeat: boolean; top?: boolean; strip?: boolean }): JSX.Element | null {
   const a = useArp()
+  // ARP and LATCH tick under a finger (Kotlin ArpSwitch's KeyboardTap).
+  const feel = useFingerTick()
   if (a === null) return null
   const ui = a.ui
   const { repeat } = props
   return (
     <span
       class={`arp-words${props.top ? ' arp-words--top' : ''}${props.strip ? ' arp-words--strip' : ''}`}
+      onPointerDownCapture={feel}
       data-coach="live.arp"
       data-coach-label={CoachText.ARP}
       data-coach-face="var(--navy)"

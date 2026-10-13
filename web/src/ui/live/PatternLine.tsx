@@ -29,6 +29,7 @@ import { SceneCell, sceneReadout, useScene, worthSaying } from './ScenePanel'
 import { CorrectKey, StepCell, useStep } from './StepPanel'
 import { TakeBadge, type TakeUi } from './Takes'
 import { coachAttrs } from '../components/Coach'
+import { useHaptic } from '../useHaptic'
 import './PatternLine.css'
 
 /** RECORD held this long while stopped or armed opens the pattern sheet. */
@@ -422,6 +423,19 @@ export function EditKeys(props: { t: TransportUi; compact?: boolean }): JSX.Elem
 
 /** The pattern Live's display lines show; null: none (no output to play it on, or not Live). */
 export const TransportContext = createContext<TransportUi | null>(null)
+
+/**
+ * A light tick on each beat of the pattern's count-in (Kotlin
+ * PatternHaptics), as SAMPLE's count-in ticks; only where Settings → Haptics
+ * is on.
+ */
+export function usePatternHaptics(t: TransportUi | null): void {
+  const feel = useHaptic()
+  const beat = t !== null && t.ui.phase === 'COUNT_IN' ? (t.ui.countIn ?? 1) : null
+  useEffect(() => {
+    if (beat !== null) feel('tick')
+  }, [beat])
+}
 
 /**
  * The scene's cell and STEP's as one segmented key, each where it shows

@@ -22,6 +22,7 @@
 import type { CSSProperties, JSX, Ref, TargetedKeyboardEvent, TargetedPointerEvent } from 'preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { Icon, type ArcIcon } from './Icons'
+import { useHaptic } from '../useHaptic'
 import './IconBlock.css'
 
 /** Material's long-press timeout (ViewConfiguration.longPressTimeoutMillis). */
@@ -166,10 +167,15 @@ export function IconBlock(props: IconBlockProps): JSX.Element {
   const [holding, setHolding] = useState(false)
   const holdRef = useRef(onHold)
   holdRef.current = onHold
+  // A hold done is felt as Android's Confirm, a tap on a hold key as its SegmentTick (Kotlin rememberHeldKey).
+  const feel = useHaptic()
+  const feelRef = useRef(feel)
+  feelRef.current = feel
   const keyHold = useRef(false)
   const hold = useMemo(
     () => createLongPress(() => {
       setHolding(false)
+      feelRef.current('confirm')
       holdRef.current?.()
     }, browserTimers, HOLD_MS),
     [],
@@ -232,7 +238,9 @@ export function IconBlock(props: IconBlockProps): JSX.Element {
     if (!keyHold.current) return
     const done = hold.consumeClick()
     stopHold()
-    if (!done) onClick()
+    if (done) return
+    feel('tick')
+    onClick()
   }
 
   const style: CSSProperties = {
@@ -276,6 +284,7 @@ export function IconBlock(props: IconBlockProps): JSX.Element {
           // Both are asked, so each forgets its long press; the hold's swallows the click that ends it.
           const swallow = [press.consumeClick(), hold.consumeClick()].some(Boolean)
           if (swallow) return
+          if (onHold) feel('tick')
           onClick()
         }}
       >

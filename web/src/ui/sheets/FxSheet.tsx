@@ -10,7 +10,8 @@
 // Web deltas: the knobs (DRIVE, SPEED, LENGTH, SHAPE) are sliders, as the
 // tempo sheet's SWING is, back to their default on a double click; the XY
 // pad and the send faders take the arrow keys (Kotlin: a screen reader's
-// custom actions and setProgress); there is no haptic tick on a knob's step.
+// custom actions and setProgress); a knob's step is felt as Android's
+// (KnobSlider, under Settings → Haptics).
 import type { JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { FxSettings, FxType, type FxType as FxTypeT } from '../../core/features/fxSettings'

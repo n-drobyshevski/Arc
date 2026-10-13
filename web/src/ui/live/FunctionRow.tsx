@@ -20,6 +20,7 @@ import { signal, type ReadonlySignal } from '@preact/signals'
 import { round as roundTempo, type Beat } from '../../core/features/tempo'
 import { MirrorText } from '../../core/text/mirrorText'
 import type { CoachId } from '../components/Coach'
+import { fingerPress, useHaptic } from '../useHaptic'
 import './FunctionRow.css'
 
 /** A function key held this long is held (Compose's long-press time). */
@@ -271,6 +272,7 @@ function FnKey(props: {
 }): JSX.Element {
   const enabled = props.enabled ?? true
   const d = props.drawn
+  const attrs = useFeltPress(props.attrs, enabled)
   if (d) {
     return (
       <button
@@ -279,7 +281,7 @@ function FnKey(props: {
         style={d.place}
         aria-disabled={enabled ? undefined : true}
         data-coach={props.coach}
-        {...props.attrs}
+        {...attrs}
       >
         <span class={`ep-h ${d.topCls}`}>{d.top}</span>
         <span class={`ep-h ${d.bottomCls}`}>{d.bottom}</span>
@@ -292,7 +294,7 @@ function FnKey(props: {
       class={`fn-key${props.lit ? ' is-lit' : ''}${props.held ? ' is-held' : ''}`}
       aria-disabled={enabled ? undefined : true}
       data-coach={props.coach}
-      {...props.attrs}
+      {...attrs}
     >
       <span class="fn-key__line" aria-hidden="true">
         <span ref={props.ledRef} class={`fn-key__led${props.led ? ' is-on' : ''}`} />
@@ -304,6 +306,42 @@ function FnKey(props: {
       </span>
     </button>
   )
+}
+
+/**
+ * A function key's feel (Kotlin FunctionKey's KeyboardTap on a press and
+ * LongPress as its hold comes): [attrs] with a tick under a finger and a
+ * longer buzz once held [FN_HOLD_MS], while Settings → Haptics is on.
+ */
+function useFeltPress(attrs: ButtonHTMLAttributes<HTMLButtonElement>, enabled: boolean): ButtonHTMLAttributes<HTMLButtonElement> {
+  const feel = useHaptic()
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const stop = (): void => {
+    if (timer.current !== null) clearTimeout(timer.current)
+    timer.current = null
+  }
+  useEffect(() => stop, [])
+  return {
+    ...attrs,
+    onPointerDown: (e) => {
+      attrs.onPointerDown?.(e)
+      if (e.button !== 0 || !enabled || !fingerPress(e)) return
+      feel('tick')
+      stop()
+      timer.current = setTimeout(() => {
+        timer.current = null
+        feel('longPress')
+      }, FN_HOLD_MS)
+    },
+    onPointerUp: (e) => {
+      stop()
+      attrs.onPointerUp?.(e)
+    },
+    onPointerCancel: (e) => {
+      stop()
+      attrs.onPointerCancel?.(e)
+    },
+  }
 }
 
 /** SOUND: Live's EDIT on or off (from KEYS: the pads, EDIT on); held, the sheet of the pad played last. */

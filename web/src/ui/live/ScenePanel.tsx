@@ -32,6 +32,7 @@ import { FeatureText } from '../../core/text/featureText'
 import { MirrorText } from '../../core/text/mirrorText'
 import { CLIP_MODES, cycledSwitch, type ClipMode, type SceneUi } from '../../state/scenePlan'
 import { coachAttrs } from '../components/Coach'
+import { useHaptic } from '../useHaptic'
 import './ScenePanel.css'
 
 /** How long CLR / DEL is held (ERASE + MAIN on the device) before it acts. */
@@ -299,6 +300,10 @@ function EraseKey(props: { s: SceneActions; onHold(on: boolean): void }): JSX.El
   const [held, setHeld] = useState(false)
   const latest = useRef(s)
   latest.current = s
+  // The hold done is felt (Kotlin EraseKey's LongPress).
+  const feel = useHaptic()
+  const feelRef = useRef(feel)
+  feelRef.current = feel
   const stop = (): void => {
     if (timer.current !== null) clearTimeout(timer.current)
     timer.current = null
@@ -313,6 +318,7 @@ function EraseKey(props: { s: SceneActions; onHold(on: boolean): void }): JSX.El
       timer.current = null
       setHeld(false)
       props.onHold(false)
+      feelRef.current('longPress')
       latest.current.onErase()
     }, SCENE_HOLD_MS)
   }

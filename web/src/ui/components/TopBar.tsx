@@ -34,6 +34,7 @@ import { ArcIcon } from './Icons'
 import { IconBlock } from './IconBlock'
 import { SectionTag } from './SectionTag'
 import { ThemeSwitch, type ThemeSwitchProps } from './ThemeSwitch'
+import { useHaptic } from '../useHaptic'
 import './TopBar.css'
 
 export interface TopBarProps {
@@ -206,6 +207,7 @@ export function TopBar(props: TopBarProps): JSX.Element {
 /** The mic key before ?: round as it is, orange while SAMPLE's panel is open. */
 function SampleKey(props: { sample: NonNullable<TopBarProps['sample']> }): JSX.Element {
   const on = props.sample.on.value
+  const feel = useHaptic()
   return (
     <>
       <span data-coach="top.sample" class="top-bar__item">
@@ -214,7 +216,11 @@ function SampleKey(props: { sample: NonNullable<TopBarProps['sample']> }): JSX.E
           label={MirrorText.SAMPLE_TAG}
           face={on ? 'var(--signal)' : 'var(--tab-off)'}
           ink={on ? 'var(--on-signal)' : 'var(--navy)'}
-          onClick={props.sample.onTap}
+          // A tap opens or closes SAMPLE's panel with a tick, as the swipe does (Kotlin MainActivity's SegmentTick).
+          onClick={() => {
+            feel('tick')
+            props.sample.onTap()
+          }}
           pressed={on}
           round
         />

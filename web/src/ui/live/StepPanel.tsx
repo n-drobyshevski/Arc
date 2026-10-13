@@ -31,6 +31,7 @@ import { Seq, timingTicks, type Timing } from '../../core/features/pattern'
 import { MirrorText } from '../../core/text/mirrorText'
 import { STEP_GATES, snapGate, type StepUi } from '../../state/stepPlan'
 import { coachAttrs } from '../components/Coach'
+import { useFingerTick } from '../useHaptic'
 import './StepPanel.css'
 
 /**
@@ -227,9 +228,11 @@ export function CorrectKey(props: { compact?: boolean }): JSX.Element | null {
 /** The STEP panel, on the line's dark screen: its header, then the strip with − and +, the knobs, BAR's pages, NUDGE and CORRECT. */
 export function StepPanel(props: { class?: string }): JSX.Element | null {
   const s = useStep()
+  // Its keys tick under a finger (Kotlin StepKey's and StepRecordChip's KeyboardTap).
+  const feel = useFingerTick()
   if (s === null || !s.ui.open) return null
   return (
-    <section class={`step-panel${props.class ? ` ${props.class}` : ''}`} aria-label={MirrorText.STEP_NAME}>
+    <section class={`step-panel${props.class ? ` ${props.class}` : ''}`} aria-label={MirrorText.STEP_NAME} onPointerDownCapture={feel}>
       <StepHeader s={s} />
       <StepDeck s={s} />
     </section>

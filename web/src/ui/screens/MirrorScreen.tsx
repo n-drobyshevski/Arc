@@ -156,20 +156,21 @@ import { PianoKeyboard } from '../live/PianoKeyboard'
 import { PressTracker, rawMovesSupported, ticking, type PressTarget } from '../live/press'
 import { SLOT_MIME, SOURCE_MIME, SoundPicker } from '../live/SoundPicker'
 import { dragMayHaveAudio, isAudioFile } from '../../platform/files/pick'
-import { tick } from '../../platform/haptics'
+import { tick, type Haptic } from '../../platform/haptics'
+import { useFingerTick, useHaptic } from '../useHaptic'
 import { PANEL_CLOSE_MS, swipeClaims, swipeLands, swipeRefused } from '../live/panelMotion'
 import { PickWord, WordButton } from '../live/Words'
 import { TakeBadge, TakesSection, type TakeUi, type TakesUi } from '../live/Takes'
 import { idleFit } from '../live/lineFit'
-import { PatternLine, TransportContext, useLineMeasure } from '../live/PatternLine'
-import { FunctionKeysContext, FunctionRow, ProjectHoldContext } from '../live/FunctionRow'
+import { PatternLine, TransportContext, useLineMeasure, usePatternHaptics } from '../live/PatternLine'
+import { FunctionKeysContext, FunctionRow, ProjectHoldContext, TempoContext } from '../live/FunctionRow'
 import { DeviceView, padPlace } from '../live/DeviceView'
 import { PunchPad, usePunch } from '../live/LivePunch'
 import { StepPanel, useStep, useStepNoteMark, useStepPadMark, useStepPiano } from '../live/StepPanel'
 import { ArpWords, arpHeldNotes, useArp, useArpLine, useArpNote, useArpPad } from '../live/ArpWords'
 import { ClaudeSection } from '../live/ClaudeSection'
 import { PatternGridOver, ScenePanel, useScene, worthSaying } from '../live/ScenePanel'
-import { SamplePanel, useSample, useSamplePadLed } from '../live/SamplePanel'
+import { SamplePanel, useSample, useSampleHaptics, useSamplePadLed } from '../live/SamplePanel'
 import { punchSlotForPad } from '../../state/fx'
 import { useDesk, useFinePointer, useWindowSize } from '../useDesk'
 import './MirrorScreen.css'
@@ -371,6 +372,11 @@ function applyGlow(
       setGlow(el, glowCss(l ? glow(l, now) : 0))
     }
   }
+}
+
+/** STEP's long-press pick felt (Kotlin's LongPress when picked, Reject when not); [picked]: undefined without STEP. */
+function feelPick(feel: (kind: Haptic) => void, picked: boolean | undefined): void {
+  if (picked !== undefined) feel(picked ? 'longPress' : 'reject')
 }
 
 /**
@@ -581,6 +587,11 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   // SAMPLE: the panel open (its pads light as the K.O. II's do).
   const sampleCtx = useSample()
   const sampleOpen = useComputed(() => sampleCtx?.ui.on ?? false).value
+  // The count-ins' ticks and SAMPLE's takes felt (Kotlin PatternHaptics, SampleHaptics).
+  const tempoCtx = useContext(TempoContext)
+  const feel = useHaptic()
+  usePatternHaptics(useContext(TransportContext))
+  useSampleHaptics(sampleOpen ? sampleCtx!.ui : null, st.bpm ?? tempoCtx?.deviceBpm ?? tempoCtx?.bpm ?? 0)
   useEffect(() => {
     if (sceneOpen && stepGroup !== null) sceneCtx?.onGroup(stepGroup)
   }, [sceneOpen, stepGroup])
@@ -917,18 +928,24 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     escape: () => {
       // The open panel first, one a press (Android's Back): SAMPLE, STEP, SCENE. Read as they are
       // now, not as at the last render (a key can come before the panel's render lands).
+      // A panel rolls up with a tick (Kotlin closePanel).
       if (sampleCtx !== null && sampleCtx.ui.on) {
         sampleCtx.onClose()
+        feel('tick')
         return true
       }
       if (stepCtx !== null && stepCtx.ui.open) {
         stepCtx.onClose()
+        feel('tick')
         return true
       }
       if (sceneCtx !== null && sceneCtx.ui.open) {
         // The 1–99 grid first, then the panel (Kotlin's Back).
         if (sceneCtx.ui.gridGroup !== null) sceneCtx.onGrid(null)
-        else sceneCtx.onClose()
+        else {
+          sceneCtx.onClose()
+          feel('tick')
+        }
         return true
       }
       if (editing && edit !== null) {
@@ -1141,7 +1158,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         computer={desk || fine}
         onOctave={(o) => actions.onOctave?.(o)}
         step={pianoStep}
-        onPick={(n) => stepCtx?.onNotePick(n)}
+        onPick={(n) => feelPick(feel, stepCtx?.onNotePick(n))}
       />
     </div>
   ) : null
@@ -1823,12 +1840,15 @@ function Group(props: GroupProps): JSX.Element {
  */
 function ModeStrip(props: { keysOn: boolean; onMode?: (keysOn: boolean) => void }): JSX.Element {
   const { keysOn } = props
+  // A tick under the finger (Kotlin ModeStrip's KeyboardTap).
+  const feel = useFingerTick()
   return (
     <div class="mode-strip">
       <button
         type="button"
         class="mode-strip__key"
         aria-label={MirrorText.modeSwitch(keysOn)}
+        onPointerDown={feel}
         onClick={() => props.onMode?.(!keysOn)}
         data-coach="live.mode"
         data-coach-label={CoachText.MODE}
@@ -2066,6 +2086,7 @@ function PadCap(props: PadProps): JSX.Element {
   const holds = useRef(new Set<number>())
   const stepCtx = useStep()
   const pickTimer = useLongPress()
+  const feel = useHaptic()
   const btn = useRef<HTMLButtonElement>(null)
   const editMode = ui.editing && ui.edit !== null
   // EDIT on or off, or the pad gone (another view), with a finger still down: the
@@ -2204,7 +2225,7 @@ function PadCap(props: PadProps): JSX.Element {
         edit.current.pointer = e.pointerType
         onPointerDown?.(e)
         // STEP: a long press picks the pad for − / +.
-        if (stepMark !== null && e.button === 0) pickTimer.start(() => stepCtx?.onPadPick(pad))
+        if (stepMark !== null && e.button === 0) pickTimer.start(() => feelPick(feel, stepCtx?.onPadPick(pad)))
       }}
       onPointerUp={(e) => {
         pickTimer.stop()
@@ -2828,6 +2849,7 @@ function KeyCapView(props: KeyCapProps): JSX.Element {
   const arpOrder = useArpNote(note)
   const stepCtx = useStep()
   const pickTimer = useLongPress()
+  const feel = useHaptic()
   // The note the finger pressed, whose pressure it reports (a new key or octave under it keeps it).
   const pressed = useRef(note)
   const target: PressTarget = {
@@ -2861,7 +2883,7 @@ function KeyCapView(props: KeyCapProps): JSX.Element {
       {...handlers}
       onPointerDown={(e) => {
         handlers.onPointerDown?.(e)
-        if (stepMark !== null && e.button === 0) pickTimer.start(() => stepCtx?.onNotePick(note))
+        if (stepMark !== null && e.button === 0) pickTimer.start(() => feelPick(feel, stepCtx?.onNotePick(note)))
       }}
       onPointerUp={(e) => {
         pickTimer.stop()

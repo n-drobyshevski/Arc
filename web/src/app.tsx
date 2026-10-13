@@ -52,6 +52,7 @@ import { REVIEW_KEY, type ArcController } from './state/controller'
 import { emptyMirrorState, type MirrorUi, type TaskUi } from './state/types'
 import { APP_BUILD } from './version'
 import { AppProvider, useController, useNav } from './ui/AppContext'
+import { HapticsContext } from './ui/useHaptic'
 import {
   Nav,
   bindViewHooks,
@@ -486,6 +487,7 @@ function Root(): JSX.Element {
   const screen = <div class="app__screen" data-view={view}>{page}</div>
   const guide = screenLayer({ kind: 'guide' })
   return (
+    <HapticsContext.Provider value={settings.haptics && hapticsSupported()}>
     <TransportContext.Provider value={transport}>
     <StepContext.Provider value={step}>
     <SceneContext.Provider value={scenes}>
@@ -556,6 +558,7 @@ function Root(): JSX.Element {
     </SceneContext.Provider>
     </StepContext.Provider>
     </TransportContext.Provider>
+    </HapticsContext.Provider>
   )
 }
 
