@@ -4,6 +4,7 @@ import dev.arc.ep133.protocol.MidiEvent
 import dev.arc.ep133.protocol.MidiInput
 import dev.arc.ep133.text.MirrorText
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -109,6 +110,28 @@ class LiveMirrorTest {
         assertEquals(Hit(PhysicalPad(0, 0), 36, 1, 100, null, null), s.lastHit)
         assertTrue(s.learned.isEmpty())
         assertEquals("A . \u00B7 100", MirrorText.hit(s.lastHit!!))
+    }
+
+    @Test
+    fun `the pads are known once read, and a pad's sound slot is found before it is learned`() {
+        assertFalse(LiveMirror().padsKnown())
+        val m = mirror()
+        assertTrue(m.padsKnown())
+        val a7 = PhysicalPad(0, 9)
+        // Not pressed yet: no slot to show, but the layout at the number a write would use has one.
+        assertNull(m.slotOf(a7))
+        assertEquals(5, m.soundSlot(a7))
+        assertEquals(1, m.soundSlot(PhysicalPad(0, 0)))
+        assertEquals(20, m.soundSlot(PhysicalPad(1, 9)))
+        // Group C has nothing: no sound.
+        assertNull(m.soundSlot(PhysicalPad(2, 9)))
+        // A sample recorded offline plays, though it has no slot yet.
+        m.setLocal(OfflinePads.EMPTY.put(OfflinePad(1, 2, 1, 0, "mic", SoundSource.RECORDED, "rec-1.wav")))
+        assertEquals(0, m.soundSlot(PhysicalPad(2, 9)))
+        // The device moved to a project not read yet: nothing is known.
+        m.onPadPush(PadFid(2, 0, 10), 50 * ms)
+        assertFalse(m.padsKnown())
+        assertNull(m.soundSlot(a7))
     }
 
     @Test

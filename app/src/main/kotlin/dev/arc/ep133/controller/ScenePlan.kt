@@ -1,5 +1,7 @@
 package dev.arc.ep133.controller
 
+import dev.arc.ep133.features.ChainOps
+import dev.arc.ep133.features.ChainPlay
 import dev.arc.ep133.features.Clip
 import dev.arc.ep133.features.Pattern
 import dev.arc.ep133.features.PatternRecorder
@@ -14,6 +16,7 @@ import dev.arc.ep133.features.SwitchTime
 import dev.arc.ep133.features.localTick
 import dev.arc.ep133.text.MirrorText
 import kotlin.math.ceil
+import kotlin.math.floor
 
 // ---------- SCENES: the pattern each group plays, switched while playing, and copy and paste (the device's GROUP, MAIN, SHIFT + C / D) ----------
 
@@ -51,7 +54,7 @@ data class SceneGroupUi(val number: Int, val queued: Int?, val filled: Set<Int>,
  * PAD flow's [padStage]), the 1–99 grid open for a group ([gridGroup]), the
  * status line ([status]: "B → 05 at bar end", "S03 committed", "Tap a pad";
  * null shows the scene), and what a screen reader says of the last change
- * ([said]: "Group B, pattern 5, 4 bars").
+ * ([said]: "Group B, pattern 5, 4 bars"). The CHAIN row is [chain].
  */
 data class SceneUi(
     val open: Boolean = false,
@@ -70,6 +73,7 @@ data class SceneUi(
     val gridGroup: Int? = null,
     val status: String? = null,
     val said: String? = null,
+    val chain: ChainUi = ChainUi(),
 )
 
 /** A pattern change waiting: its group goes to pattern [to] at global tick [at] ([time], the setting it was made at). */
@@ -128,6 +132,12 @@ internal fun closedAt(pat: Pattern, tick: Double, anchor: Long = 0L): Pattern {
  * A pattern taking over a group starts at its bar 1 on the tick it takes over at: the desk keeps where each group's
  * pattern started ([phase]; all 0 once the transport starts, [restart]), and the lines of Bar end and Pattern end
  * for a group's pick are those of its own pattern, from there.
+ *
+ * The chain playing ([run]) uses the same machinery: its pass ends at the end of the scene's longest pattern (the line
+ * Pattern end gives a scene change, whatever the CHANGE setting says), and where that takes the chain to another scene
+ * the change is a scene change queued for that tick ([targets] has it for the sequencer's plan, so it switches to the
+ * frame; [due] takes it over as it does a pick). A pass that stays on its scene only counts. The chain is not a pick:
+ * the panel doesn't show it as waiting ([pickTargets]). Choosing a pattern or scene by hand turns the chain off.
  */
 internal class SceneDesk(private val word: (PhysicalPad) -> String) {
     /** The panel is shown. */
@@ -174,11 +184,15 @@ internal class SceneDesk(private val word: (PhysicalPad) -> String) {
     private val picks = LinkedHashMap<Int, QueuedPick>()
     private var scene: QueuedScene? = null
 
+    /** The chain playing (the transport runs with the chain on); null for none. */
+    var run: ChainRun? = null
+        private set
+
     /** How many picks wait for their tick: a group's each, or the scene's. */
     val waiting: Int get() = picks.size + if (scene != null) 1 else 0
 
-    /** The global tick the first pick waiting takes over at; null for none. */
-    fun dueTick(): Long? = listOfNotNull(scene?.at, picks.values.minOfOrNull { it.at }).minOrNull()
+    /** The global tick the first pick waiting, or the chain's pass, ends at; null for none. */
+    fun dueTick(): Long? = listOfNotNull(scene?.at, picks.values.minOfOrNull { it.at }, run?.end).minOrNull()
 
     /** The panel opens with column [group] focused. */
     fun open(group: Int) {
@@ -202,6 +216,7 @@ internal class SceneDesk(private val word: (PhysicalPad) -> String) {
         close()
         picks.clear()
         scene = null
+        run = null
         phase = PhaseAnchors.ZERO
         clipMode = ClipMode.PTN
         bar = 0
@@ -245,13 +260,13 @@ internal class SceneDesk(private val word: (PhysicalPad) -> String) {
         scene = null
         if (at == null || k == seq.selected(group)) {
             picks.remove(group)
-            val out = SceneOps.selectPattern(seq, group, k)
+            val out = SceneOps.selectPattern(byHand(seq, k != seq.selected(group)), group, k)
             said = patternSaid(out, group)
             return out
         }
         picks[group] = QueuedPick(k, queueTick(time, at, seq.pattern(group, seq.selected(group)).lengthTicks, phase.of(group)), time)
         said = if (time == SwitchTime.IMMEDIATE) MirrorText.patternSpoken(group, k, seq.pattern(group, k).bars) else MirrorText.patternQueuedSpoken(group, k, time)
-        return seq
+        return byHand(seq, true)
     }
 
     /** − or + ([dir] -1 or +1) on [group]'s number as shown (the queued one, if any), wrapping round 1..99: a pick. */
@@ -274,13 +289,13 @@ internal class SceneDesk(private val word: (PhysicalPad) -> String) {
         val k = to.coerceIn(0, if (count < Seq.MAX_SCENES) count else count - 1)
         if (at == null || k == seq.scene) {
             scene = null
-            val out = pickedScene(seq, k)
+            val out = pickedScene(byHand(seq, k != seq.scene), k)
             said = sceneSaid(out)
             return out
         }
         scene = QueuedScene(k, sceneTick(seq, at, time), time)
         said = if (time == SwitchTime.IMMEDIATE) sceneSaid(pickedScene(seq, k)) else MirrorText.sceneQueuedSpoken(k, time)
-        return seq
+        return byHand(seq, true)
     }
 
     /** − or + ([dir]) on the scene as shown (the queued one, if any); past the last scene is a new one. */
@@ -294,12 +309,15 @@ internal class SceneDesk(private val word: (PhysicalPad) -> String) {
     fun commit(seq: ProjectSeq, recorder: PatternRecorder): ProjectSeq {
         status = null
         gridGroup = null
-        val out = recorder.editSeq(seq, SceneOps.commit(seq))
+        // The copy is selected, a scene picked: the chain goes off, in the same step.
+        val committed = SceneOps.commit(seq)
+        val out = recorder.editSeq(seq, if (committed === seq) seq else ChainOps.handPicked(committed))
         if (out === seq) {
             if (seq.scenes.size >= Seq.MAX_SCENES) status = MirrorText.SCENES_FULL
             return seq
         }
         cancel()
+        run = null
         status = MirrorText.sceneCommitted(out.scene)
         said = MirrorText.sceneCommittedSpoken(out.scene)
         return out
@@ -448,10 +466,21 @@ internal class SceneDesk(private val word: (PhysicalPad) -> String) {
     fun flush(seq: ProjectSeq): ProjectSeq = takeOver(seq, null) { true }
 
     /**
-     * What waits for its tick on [seq], by group: the pattern each group goes to and when. A group's own pick, or
-     * the scene's pattern for each group it changes (a group whose pattern is the same goes on playing it).
+     * What waits for its tick on [seq], by group, for the sequencer's plan: the pattern each group goes to and when. A
+     * group's own pick, or the scene's pattern for each group it changes (a group whose pattern is the same goes on
+     * playing it), or the chain's change of scene at the end of its pass. A pick that is due before the chain's change
+     * stays; the chain's takes the group over after it.
      */
     fun targets(seq: ProjectSeq): Map<Int, QueuedPick> {
+        val own = pickTargets(seq)
+        val c = chainSwitch(seq) ?: return own
+        val to = pickedScene(seq, c.to)
+        val chained = (0 until 4).filter { to.selected(it) != seq.selected(it) }.associateWith { QueuedPick(to.selected(it), c.at, c.time) }
+        return chained + own.filter { (_, q) -> q.at < c.at }
+    }
+
+    // What the panel shows waiting: the picks made by hand (a group's own, or the scene's), not the chain's change.
+    private fun pickTargets(seq: ProjectSeq): Map<Int, QueuedPick> {
         val s = scene
         if (s != null) {
             val to = pickedScene(seq, s.to)
@@ -460,9 +489,132 @@ internal class SceneDesk(private val word: (PhysicalPad) -> String) {
         return picks.filter { (g, q) -> q.to != seq.selected(g) }
     }
 
+    // The scene change the chain makes at the end of its pass, when that takes it to another scene than the one playing.
+    private fun chainSwitch(seq: ProjectSeq): QueuedScene? {
+        val r = run ?: return null
+        val to = r.play.onSceneEnd(seq.chain)?.play?.scene(seq.chain) ?: return null
+        return if (to == seq.scene) null else QueuedScene(to, r.end, SwitchTime.PATTERN)
+    }
+
+    // ---------- the chain playing ----------
+
+    /**
+     * The transport starts (after [restart]): with the chain on, it starts at the first step that has the scene
+     * showing, else the first step ([ChainPlay.start]); then the scene of that step is picked at once, the transport
+     * being stopped. The first pass ends at the end of the scene's longest pattern. The sequencer after it.
+     */
+    fun chainStart(seq: ProjectSeq): ProjectSeq {
+        run = null
+        if (!seq.chain.on) return seq
+        val play = ChainPlay.start(seq) ?: return seq
+        val to = play.scene(seq.chain) ?: return seq
+        val out = if (to == seq.scene) seq else SceneOps.selectScene(seq, to)
+        run = ChainRun(play, 0L, passEnd(out, 1.0))
+        return out
+    }
+
+    /** The transport stopped: the pass count goes (the chain keeps its ON and its steps; PLAY starts it again, [chainStart]). */
+    fun chainStop() {
+        run = null
+    }
+
+    /**
+     * The chain follows the sequencer while the transport [running]: with it on, the chain plays (joined at [tick], the
+     * first tick a change made now can reach: the scene showing finishes the pass it is on, and the chain goes on from there);
+     * off, or stopped, it doesn't. A chain edited or a scene changed under it so that the step lit isn't the scene playing
+     * is found again by the scene showing. Whether the chain playing changed (the panel follows).
+     */
+    fun chainSync(seq: ProjectSeq, running: Boolean, tick: Double?): Boolean {
+        val r = run
+        if (!running || !seq.chain.on) {
+            run = null
+            return r != null
+        }
+        if (r != null && r.play.scene(seq.chain) == seq.scene) return false
+        val play = chainPlayFor(seq)
+        if (play == null) {
+            run = null
+            return r != null
+        }
+        if (r != null) {
+            // The same place again (the scene showing is in no step, still): nothing changed.
+            if (r.play == play) return false
+            run = ChainRun(play, r.from, r.end)
+            return true
+        }
+        // Joining: the chain takes the arrangement over, so a pick waiting for its tick goes.
+        val at = tick ?: return false
+        cancel()
+        // In the count-in (at <= 0) the pass starts at tick 0 and ends where a pass from tick 1 does, as chainStart: the scene showing plays its pass.
+        run = ChainRun(play, floor(maxOf(at, 0.0)).toLong(), passEnd(seq, maxOf(at, 1.0)))
+        return true
+    }
+
+    /**
+     * [seq] with the chain off, when [picked] a scene or pattern by hand (the chain playing stops with it); the very
+     * one when the pick changes nothing or the chain was off.
+     */
+    private fun byHand(seq: ProjectSeq, picked: Boolean): ProjectSeq {
+        if (!picked) return seq
+        run = null
+        return ChainOps.handPicked(seq)
+    }
+
+    // The tick the scene's pass ends at, from [from]: the first end of the longest pattern playing at or after it (of those as long, the first to end, from where each started), as Pattern end gives a scene change.
+    private fun passEnd(seq: ProjectSeq, from: Double): Long {
+        val playing = seq.playing()
+        val longest = playing.longestTicks
+        return (0 until 4).filter { playing.group(it).lengthTicks == longest }.minOf { queueTick(SwitchTime.PATTERN, from, longest, phase.of(it)) }
+    }
+
+    // ---------- the chain's edits (one UNDO step each, through the recorder) ----------
+
+    /** ＋: a step for the scene shown, one pass, at the end; the status says so (or that the chain is full). */
+    fun chainAdd(seq: ProjectSeq, recorder: PatternRecorder): ProjectSeq {
+        val out = recorder.editSeq(seq, ChainOps.add(seq))
+        if (out === seq) {
+            status = MirrorText.CHAIN_FULL
+            said = MirrorText.CHAIN_FULL
+            return seq
+        }
+        status = MirrorText.chainAdded(seq.scene)
+        said = status
+        return out
+    }
+
+    /** A tap on step [index]: its passes to the next of ×1 ×2 ×4 ×8. */
+    fun chainCycle(seq: ProjectSeq, index: Int, recorder: PatternRecorder): ProjectSeq {
+        status = null
+        val out = recorder.editSeq(seq, ChainOps.cyclePasses(seq, index))
+        out.chain.steps.getOrNull(index)?.let { said = MirrorText.chainStepName(index + 1, out.chain.steps.size, it) }
+        return out
+    }
+
+    /** The screen reader's "Fewer passes" on step [index]: its passes to the one before of ×1 ×2 ×4 ×8, round to ×8. */
+    fun chainFewer(seq: ProjectSeq, index: Int, recorder: PatternRecorder): ProjectSeq {
+        status = null
+        val out = recorder.editSeq(seq, ChainOps.fewerPasses(seq, index))
+        out.chain.steps.getOrNull(index)?.let { said = MirrorText.chainStepName(index + 1, out.chain.steps.size, it) }
+        return out
+    }
+
+    /** A long press on step [index]: it goes (the chain turns off with its last step). */
+    fun chainRemove(seq: ProjectSeq, index: Int, recorder: PatternRecorder): ProjectSeq {
+        status = null
+        return recorder.editSeq(seq, ChainOps.remove(seq, index))
+    }
+
+    /** ON: the chain on or off (it can't be on with no steps). */
+    fun chainOn(seq: ProjectSeq, on: Boolean, recorder: PatternRecorder): ProjectSeq {
+        status = null
+        val out = recorder.editSeq(seq, ChainOps.setOn(seq, on))
+        said = MirrorText.chainOnName(out.chain.on)
+        return out
+    }
+
     /** What Live shows: the panel and the scene of [seq], with [time] the setting for when a pick takes over. */
     fun ui(seq: ProjectSeq, time: SwitchTime): SceneUi {
-        val targets = targets(seq)
+        val targets = pickTargets(seq)
         val groups = List(4) { g ->
             val n = seq.selected(g)
             SceneGroupUi(
@@ -491,6 +643,7 @@ internal class SceneDesk(private val word: (PhysicalPad) -> String) {
             gridGroup = gridGroup,
             status = status ?: stageStatus() ?: gridGroup?.let(MirrorText::gridStatus) ?: queueStatus(),
             said = said,
+            chain = ChainUi(seq.chain, seq.scene, run?.play),
         )
     }
 
@@ -503,7 +656,7 @@ internal class SceneDesk(private val word: (PhysicalPad) -> String) {
     }
 
     // The number [group] shows: the one waiting for its tick, else the one playing.
-    private fun shown(seq: ProjectSeq, group: Int): Int = targets(seq)[group]?.to ?: seq.selected(group)
+    private fun shown(seq: ProjectSeq, group: Int): Int = pickTargets(seq)[group]?.to ?: seq.selected(group)
 
     // [seq] on scene [to]: an existing one, or (the number of scenes) a new one.
     private fun pickedScene(seq: ProjectSeq, to: Int): ProjectSeq =
@@ -559,6 +712,32 @@ internal class SceneDesk(private val word: (PhysicalPad) -> String) {
             out = leaving(out, SceneOps.selectPattern(out, g, q.to), q.at.takeIf { tick != null })
             said = patternSaid(out, g)
             status = null
+        }
+        // The chain's passes that end by the tick: the next pass or step, and where that is another scene, the change of scene.
+        if (tick != null) out = chainAdvance(out, passed)
+        return out
+    }
+
+    // The chain's pass ends passed by [passed] (they can be several if the follow loop was late): each goes on to the next pass, or to the next step, taking its scene over at the tick the pass ended.
+    private inline fun chainAdvance(seq: ProjectSeq, passed: (Long) -> Boolean): ProjectSeq {
+        var out = seq
+        while (true) {
+            val r = run ?: break
+            if (!passed(r.end)) break
+            val adv = r.play.onSceneEnd(out.chain)
+            val to = adv?.play?.scene(out.chain)
+            if (adv == null || to == null) {
+                run = null
+                break
+            }
+            if (to != out.scene) {
+                // As a scene change: the picks waiting for the old scene go, the groups that change start at the tick.
+                picks.clear()
+                out = leaving(out, SceneOps.selectScene(out, to), r.end)
+            }
+            if (adv.play.step != r.play.step) said = MirrorText.chainPassSpoken(adv.play.step + 1, out.chain.steps.size, adv.play, out.chain)
+            status = null
+            run = ChainRun(adv.play, r.end, passEnd(out, r.end + 1.0))
         }
         return out
     }

@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -56,6 +58,10 @@ val SideStripWidth = 24.dp
  * would be Android's back gesture). The panel closes on Back, on a tap
  * outside it, or with its close key. Strip and panel keep clear of a
  * navigation bar or cutout on that side.
+ *
+ * The panel's head is the [title] in a caption and the close key; a [header]
+ * takes the caption's place (a page's back control), and [actions] sit before
+ * the close key. The panel scrolls with [scroll], which a caller can reset.
  */
 @Composable
 fun SideZone(
@@ -67,6 +73,9 @@ fun SideZone(
     /** Where the strip sits on the edge (CenterEnd or TopEnd), and how much of the height it takes. */
     stripAlignment: Alignment = Alignment.CenterEnd,
     stripHeight: Float = 0.5f,
+    header: (@Composable RowScope.() -> Unit)? = null,
+    actions: (@Composable RowScope.() -> Unit)? = null,
+    scroll: ScrollState = rememberScrollState(),
     content: @Composable () -> Unit,
 ) {
     val c = LocalArcColors.current
@@ -130,12 +139,13 @@ fun SideZone(
                     // Its face reaches under a side navigation bar; the close key and controls stay clear of it.
                     .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.End))
                     .width(min(320.dp, maxWidth * 0.85f))
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(scroll)
                     .padding(start = 18.dp, end = 16.dp, top = 12.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Caption(title, Modifier.weight(1f), align = TextAlign.Start)
+                    if (header != null) header() else Caption(title, Modifier.weight(1f), align = TextAlign.Start)
+                    actions?.invoke(this)
                     CloseKey(onClose, dev.arc.ep133.text.GuideText.CLOSE)
                 }
                 panel()

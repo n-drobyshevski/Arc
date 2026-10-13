@@ -120,25 +120,8 @@ fun ColumnScope.PadSheetContent(
 ) {
     val c = LocalArcColors.current
     val now = target.slot
-    val switch = factory != null && sounds.isNotEmpty()
-    var picked by rememberSaveable(pad, padSource) { mutableStateOf(padSource) }
-    // Only the lists there are: without the device's, the factory's; without the pack, the device's.
-    val source = when {
-        factory == null -> SoundSource.DEVICE
-        sounds.isEmpty() -> SoundSource.FACTORY
-        else -> picked
-    }
-    val list = if (source == SoundSource.FACTORY) factory.orEmpty() else sounds
     // The pad's sound, in the list it is from.
-    val onPadSlot = now.takeIf { source == padSource }
     val nowName = (if (padSource == SoundSource.FACTORY) factory.orEmpty() else sounds).firstOrNull { it.slot == now }?.name ?: localName
-    var query by rememberSaveable { mutableStateOf("") }
-    // The hundred of slots listed (its first slot): the pad's own at first.
-    var shown by rememberSaveable { mutableStateOf<Int?>(null) }
-    val groups = remember(list, query) { DeviceBrowser.hundreds(DeviceBrowser.findSounds(list, query)) }
-    val range = groups.firstOrNull { it.first.first == shown }
-        ?: groups.firstOrNull { onPadSlot != null && onPadSlot in it.first }
-        ?: groups.firstOrNull()
 
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
         PadCap(pad, nowName, onPadDown, onPadUp)
@@ -184,6 +167,70 @@ fun ColumnScope.PadSheetContent(
         )
     }
     if (!listOpen) return
+    SoundChooser(
+        key = pad,
+        now = now,
+        sounds = sounds,
+        playing = playing,
+        busy = busy,
+        onPlay = onPlay,
+        onStop = onStop,
+        onPick = onPick,
+        note = if (offline) MirrorText.ASSIGN_NOTE_OFFLINE else MirrorText.ASSIGN_NOTE,
+        onUpload = onUpload,
+        factory = factory,
+        unavailable = unavailable,
+        padSource = padSource,
+        offline = offline,
+        readSlot = readSlot,
+    )
+}
+
+/**
+ * The sound list of a pad sheet (and of the beat card sheet's PICK SOUND): a Device / Factory switch when both lists are
+ * there, a search field, a key for each hundred of slots, and the sounds of the one listed, each with a preview key; a tap
+ * on one goes to [onPick] with its slot and list. [key] keeps the search and the hundred listed for one pad. [now] is the
+ * slot on the pad (marked ON PAD, and the hundred listed first); [padSource] the list it is from. [note] is the line under the
+ * list, and "Upload a new sample…" follows when [onUpload] is given. For the lists, [unavailable], [offline] and [readSlot]
+ * see [PadSheetContent].
+ */
+@Composable
+internal fun ColumnScope.SoundChooser(
+    key: Any,
+    now: Int?,
+    sounds: List<SoundEntry>,
+    playing: String?,
+    busy: Boolean,
+    onPlay: (Int, SoundSource) -> Unit,
+    onStop: () -> Unit,
+    onPick: (Int, SoundSource) -> Unit,
+    note: String,
+    onUpload: (() -> Unit)? = null,
+    factory: List<SoundEntry>? = null,
+    unavailable: Set<Int> = emptySet(),
+    padSource: SoundSource = SoundSource.DEVICE,
+    offline: Boolean = false,
+    readSlot: Int? = null,
+) {
+    val c = LocalArcColors.current
+    val switch = factory != null && sounds.isNotEmpty()
+    var picked by rememberSaveable(key, padSource) { mutableStateOf(padSource) }
+    // Only the lists there are: without the device's, the factory's; without the pack, the device's.
+    val source = when {
+        factory == null -> SoundSource.DEVICE
+        sounds.isEmpty() -> SoundSource.FACTORY
+        else -> picked
+    }
+    val list = if (source == SoundSource.FACTORY) factory.orEmpty() else sounds
+    // The pad's sound, in the list it is from.
+    val onPadSlot = now.takeIf { source == padSource }
+    var query by rememberSaveable { mutableStateOf("") }
+    // The hundred of slots listed (its first slot): the pad's own at first.
+    var shown by rememberSaveable { mutableStateOf<Int?>(null) }
+    val groups = remember(list, query) { DeviceBrowser.hundreds(DeviceBrowser.findSounds(list, query)) }
+    val range = groups.firstOrNull { it.first.first == shown }
+        ?: groups.firstOrNull { onPadSlot != null && onPadSlot in it.first }
+        ?: groups.firstOrNull()
     if (switch) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(MirrorText.SOURCE, style = ArcType.small, color = c.graphite)
@@ -231,7 +278,7 @@ fun ColumnScope.PadSheetContent(
             }
         }
     }
-    Text(if (offline) MirrorText.ASSIGN_NOTE_OFFLINE else MirrorText.ASSIGN_NOTE, style = ArcType.small, color = c.graphite)
+    Text(note, style = ArcType.small, color = c.graphite)
     if (onUpload != null) ArcKey(MirrorText.UPLOAD_NEW, onUpload, Modifier.fillMaxWidth(), enabled = !busy, textColor = c.navy)
 }
 

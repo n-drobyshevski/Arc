@@ -77,7 +77,7 @@ object SceneOps {
     fun newScene(seq: ProjectSeq): ProjectSeq {
         if (seq.scenes.size >= Seq.MAX_SCENES) return seq
         val s = Scene(List(4) { g -> nextFree(seq, g) })
-        return seq.withScenes(seq.scenes + s, seq.scenes.size)
+        return seq.withSceneInserted(seq.scenes.size, s)
     }
 
     /**
@@ -85,7 +85,8 @@ object SceneOps {
      * Each group's pattern with notes is copied into the group's next free
      * pattern, which the new scene plays; an empty one is shared as it is.
      * A group with no free pattern left shares its pattern too. None past
-     * 99 scenes.
+     * 99 scenes. The chain's steps naming the scenes after it name the next
+     * ones (the copy is in no step).
      */
     fun commit(seq: ProjectSeq): ProjectSeq {
         if (seq.scenes.size >= Seq.MAX_SCENES) return seq
@@ -98,7 +99,7 @@ object SceneOps {
             to
         }
         val at = seq.scene + 1
-        return out.withScenes(seq.scenes.take(at) + Scene(numbers) + seq.scenes.drop(at), at)
+        return out.withSceneInserted(at, Scene(numbers))
     }
 
     /** CLR: the scene's four patterns lose their notes; the lengths stay, as [PatternRecorder.clear] keeps them. */
@@ -108,11 +109,12 @@ object SceneOps {
     /**
      * DEL: the scene goes, when its four patterns have no notes and it isn't
      * the only one; the later ones move down and the index stays (on the
-     * last one when it was the last).
+     * last one when it was the last). The chain loses the scene's steps and
+     * the later scenes' steps name the scene before.
      */
     fun deleteScene(seq: ProjectSeq): ProjectSeq {
         if (!seq.playing().isEmpty || seq.scenes.size <= 1) return seq
-        return seq.withScenes(seq.scenes.filterIndexed { i, _ -> i != seq.scene }, seq.scene)
+        return seq.withSceneRemoved(seq.scene, seq.scene)
     }
 
     /** ERASE + MAIN held: [deleteScene] when it can (the scene empty, and not the only one), else [clearScene]. */

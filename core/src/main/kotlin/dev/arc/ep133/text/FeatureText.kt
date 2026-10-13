@@ -42,21 +42,19 @@ object FeatureText {
     fun freeOf(total: Double) = "free of ${Format.bytes(total)}"
     const val FREE = "Free"
 
+    /** The factory layout's blocks of slots, in order (the guide's): kicks, snares, hi-hats, percussion, bass and melodic. */
+    val FACTORY_BLOCKS: List<IntRange> = listOf(1..99, 100..199, 200..299, 300..399, 400..499, 500..599)
+
+    private val FACTORY_KINDS = listOf("Kicks", "Snares", "Hats", "Perc", "Bass", "Melodic")
+
     /**
      * The factory layout's kind of sound for the range of slots starting at
      * [first] (from the official guide's note on SOUND mode: kicks 1-99,
      * snares 100-199, hi-hats 200-299, percussion 300-399, bass 400-499,
-     * melodic 500-599), or null from 600 up, which the guide leaves free.
+     * melodic 500-599; [FACTORY_BLOCKS]), or null from 600 up, which the
+     * guide leaves free.
      */
-    fun factoryCategory(first: Int): String? = when (first) {
-        in 1..99 -> "Kicks"
-        in 100..199 -> "Snares"
-        in 200..299 -> "Hats"
-        in 300..399 -> "Perc"
-        in 400..499 -> "Bass"
-        in 500..599 -> "Melodic"
-        else -> null
-    }
+    fun factoryCategory(first: Int): String? = FACTORY_BLOCKS.indexOfFirst { first in it }.takeIf { it >= 0 }?.let { FACTORY_KINDS[it] }
 
     /** "12 \u00B7 2.1 MB", the sounds binder's bar after "Sounds". */
     fun soundsTotal(n: Int, bytes: Double) = "$n \u00B7 ${Format.bytes(bytes)}"

@@ -1,14 +1,15 @@
 // Port of core/src/test/kotlin/dev/arc/ep133/text/FeatureTextTest.kt
 import { describe, expect, it } from 'vitest'
 import { ARP_ORDERS, arpNote } from '../../../src/core/features/arp'
-import type { CardProblem } from '../../../src/core/features/beatCard'
+import { cardFx, type CardProblem } from '../../../src/core/features/beatCard'
+import { chain, chainPlay, chainStep } from '../../../src/core/features/chain'
 import { DiffResult, ProjectDiff, ProjectState, SoundDiff, SoundState } from '../../../src/core/features/backupDiff'
-import { NoteNames, SCALES } from '../../../src/core/features/keys'
-import { FX_TYPES, FxType } from '../../../src/core/features/fxSettings'
+import { NoteNames, SCALES, Scale } from '../../../src/core/features/keys'
+import { FX_TYPES, FxSettings, FxType, comp, sidechain } from '../../../src/core/features/fxSettings'
 import { KeyMark } from '../../../src/core/features/piano'
 import { physicalPad } from '../../../src/core/features/padNotes'
 import { ProjectSeq, TIMINGS, Timing } from '../../../src/core/features/pattern'
-import { PLAY_MODES } from '../../../src/core/features/padSettings'
+import { PLAY_MODES, PadSettings } from '../../../src/core/features/padSettings'
 import { ProjectSource } from '../../../src/core/features/projectStep'
 import { SampleSource } from '../../../src/core/features/sampleSource'
 import { SWITCH_TIMES, SceneOps, SwitchTime } from '../../../src/core/features/scenes'
@@ -428,6 +429,7 @@ describe('FeatureTextTest', () => {
     expect([MirrorText.gridTitle(1), MirrorText.gridDetail(3, 4), MirrorText.gridDetail(3, 1)]).toEqual(['Group B', 'P03 \u00B7 4 bars', 'P03 \u00B7 1 bar'])
     expect([MirrorText.patternCell(5, true), MirrorText.patternCell(6, false)]).toEqual(['Pattern 5, has notes', 'Pattern 6'])
     expect(CoachText.SCENE).toBe('Pick patterns and scenes, copy and paste')
+    expect(CoachText.CHAIN).toBe('Chain scenes: tap a step for passes, hold to remove')
   })
 
   it('step text', () => {
@@ -496,6 +498,15 @@ describe('FeatureTextTest', () => {
     expect(ClaudeText.shareSubject('P01 S02')).toBe('Arc beat P01 S02')
     expect(ClaudeText.shareText('Analyse this beat:', 'ARC BEAT 1\nswing 50\n')).toBe('Analyse this beat:\n\n```\nARC BEAT 1\nswing 50\n```\n')
     expect(ClaudeText.NO_CARD).toBe('No beat card in that text.')
+    // The prompt asks for the sound lines kept, or sounds chosen from the list that follows the card.
+    expect(ClaudeText.SHARE_PROMPT.includes('sound list') && ClaudeText.SHARE_PROMPT.includes('FX and pad lines') && ClaudeText.SHARE_PROMPT.endsWith(':')).toBe(true)
+    expect([212, 1].map((n) => ClaudeText.withSoundList(n))).toEqual(['With my sound list \u00B7 212 sounds', 'With my sound list \u00B7 1 sound'])
+    // The sound list after a shared card.
+    expect([ClaudeText.SOUNDS_FROM_DEVICE, ClaudeText.SOUNDS_FROM_LAST_READ, ClaudeText.SOUNDS_FROM_FACTORY].map((s) => ClaudeText.soundListHeader(s))).toEqual([
+      "My EP-133's sounds (slot name), from the EP-133:",
+      "My EP-133's sounds (slot name), from the last read:",
+      "My EP-133's sounds (slot name), from the factory pack:",
+    ])
     // The sheet.
     expect([ClaudeText.summary(4, 5, 23), ClaudeText.summary(1, 1, 1)]).toEqual(['Beat card \u00B7 4 bars \u00B7 5 pads \u00B7 23 hits', 'Beat card \u00B7 1 bar \u00B7 1 pad \u00B7 1 hit'])
     expect([ClaudeText.place(0, 4), ClaudeText.place(3, 99)]).toEqual(['A \u00B7 04', 'D \u00B7 99'])
@@ -524,6 +535,41 @@ describe('FeatureTextTest', () => {
     // IMPORT, and why it can't.
     expect([ClaudeText.COPY_PROBLEMS, ClaudeText.IMPORT].map((w) => w.toUpperCase())).toEqual(['COPY PROBLEMS', 'IMPORT'])
     expect(ClaudeText.groupFull(1)).toBe('Group B has no free pattern.')
+    // The sounds a card puts on pads: the block, its rows and its notes.
+    expect([ClaudeText.SOUNDS, ClaudeText.PUT_ON_PADS].map((w) => w.toUpperCase())).toEqual(['SOUNDS', 'PUT ON PADS'])
+    expect([ClaudeText.putOnPadsName(true, 2), ClaudeText.putOnPadsName(false, 2)]).toEqual(['Put 2 sounds on the pads', "Leave the pads' sounds as they are"])
+    expect([ClaudeText.soundName(12, 'Micro kick'), ClaudeText.soundName(12, null)]).toEqual(['012 Micro kick', '012'])
+    expect([ClaudeText.soundMissing(301, 'Rim dusty'), ClaudeText.soundMissing(301, null)]).toEqual(['Not on your EP-133: 301 Rim dusty', 'Not on your EP-133: 301'])
+    expect(ClaudeText.ALREADY_THERE).toBe('Already there')
+    expect(ClaudeText.cardSays('HH CLOSED')).toBe('Card says HH CLOSED \u00B7 name not checked')
+    expect(ClaudeText.NONE_ON_DEVICE).toBe('None of these sounds are on your EP-133. Share a beat with your sound list so Claude picks from yours.')
+    expect([
+      ClaudeText.soundRowName(physicalPad(0, 9), 'Kick dusty', '012 Micro kick'),
+      ClaudeText.soundRowName(physicalPad(0, 9), null, '012 Micro kick'),
+      ClaudeText.soundRowSame(physicalPad(0, 9), '012 Micro kick'),
+      ClaudeText.soundRowMissing(physicalPad(0, 2), 301, 'Rim dusty'),
+    ]).toEqual(['A7: Kick dusty becomes 012 Micro kick', 'A7: 012 Micro kick', 'A7: 012 Micro kick, already there', 'AE: Not on your EP-133: 301 Rim dusty'])
+    expect(ClaudeText.soundsNote(2, 3)).toBe("Writes 2 pads in project 3 on the EP-133. Their pitch, level and other settings reset to the sound's. UNDO puts the old sounds back.")
+    expect(ClaudeText.soundsNote(1, null)).toBe(
+      "Writes 1 pad in the active project on the EP-133. Their pitch, level and other settings reset to the sound's. UNDO puts the old sounds back.",
+    )
+    expect(ClaudeText.soundsNote(1, 3, true)).toBe(
+      "Writes 1 pad in project 3 on the EP-133. Their pitch, level and other settings reset to the sound's. UNDO puts the old sounds back, but a pad that had none keeps its new one.",
+    )
+    expect(ClaudeText.PICK_NOTE).toBe(
+      'The sound goes on the pad with IMPORT, in the same step as the card. UNDO takes the patterns back; connected, the pad keeps the sound.',
+    )
+    expect(ClaudeText.SOUNDS_OFFLINE_NOTE).toBe('Saved as offline pad changes; they go to the EP-133 when you reconnect.')
+    expect([ClaudeText.imported([[0, 4]], null, 2), ClaudeText.imported([[0, 4]], null, 1, 1), ClaudeText.imported([[0, 4]], null, 0, 3)]).toEqual([
+      'Imported to A \u00B7 04 and 2 sounds. UNDO takes it back.',
+      'Imported to A \u00B7 04 and 1 sound, 1 skipped. UNDO takes it back.',
+      'Imported to A \u00B7 04, 3 sounds skipped. UNDO takes it back.',
+    ])
+    expect([ClaudeText.soundsFailed('busy', 0), ClaudeText.soundsFailed('busy', 2)]).toEqual([
+      "The pad's sound couldn't be changed: busy. The patterns stay imported. UNDO takes it back.",
+      "The pad's sound couldn't be changed: busy. The patterns stay imported and 2 pads changed. UNDO takes it back.",
+    ])
+    expect([ClaudeText.soundsRestored(2, 0), ClaudeText.soundsRestored(1, 1)]).toEqual(['Old sounds back on 2 pads.', 'Old sounds back on 1 pad, 1 had none before.'])
     expect([
       ClaudeText.imported([[0, 4]], null),
       ClaudeText.imported(
@@ -541,5 +587,186 @@ describe('FeatureTextTest', () => {
         null,
       ),
     ]).toEqual(['Imported to A \u00B7 04. UNDO takes it back.', 'Imported to scene S03. UNDO takes it back.', 'Imported to A \u00B7 04, B \u00B7 02. UNDO takes it back.'])
+  })
+
+  it('claude fx and pad shaping text', () => {
+    expect([ClaudeText.FX, ClaudeText.APPLY_FX, ClaudeText.PAD_SHAPING]).toEqual(['FX', 'Apply FX', 'Pad shaping'])
+    expect([ClaudeText.applyFxName(true), ClaudeText.applyFxName(false)]).toEqual(["Apply the card's FX to this project", "Leave this project's FX as they are"])
+    const off = FxSettings.DEFAULT
+    const on = FxSettings.of({
+      type: FxType.DELAY,
+      x: 0.7,
+      y: 0.45,
+      sends: [0.2, 0, 0.355, 0],
+      comp: comp({ on: true, x: 0.4, y: 0.6 }),
+      sidechain: sidechain({ on: true, group: 0, pad: 9, dests: 0b0110, x: 0.25, y: 0.7 }),
+    })
+    expect([ClaudeText.fxEffectText(off), ClaudeText.fxSendsText(off), ClaudeText.fxCompText(off), ClaudeText.fxSidechainText(off)]).toEqual([
+      'OFF',
+      'A 0 \u00B7 B 0 \u00B7 C 0 \u00B7 D 0',
+      'OFF',
+      'OFF',
+    ])
+    expect([ClaudeText.fxEffectText(on), ClaudeText.fxSendsText(on), ClaudeText.fxCompText(on), ClaudeText.fxSidechainText(on)]).toEqual([
+      'DELAY \u00B7 LENGTH 1/4 \u00B7 43%',
+      'A 20% \u00B7 B 0 \u00B7 C 36% \u00B7 D 0',
+      'ON \u00B7 DRIVE 2.1x \u00B7 10/200',
+      `A7 ducks B C \u00B7 ${MirrorText.sidechainLength(0.25)} \u00B7 ${MirrorText.sidechainShape(0.7)}`,
+    ])
+    expect(ClaudeText.fxEffectText(FxSettings.of({ type: FxType.DISTORTION, x: 0.55, y: 0.4 }))).toBe('DISTORTION \u00B7 DRIVE 13x \u00B7 LP 20')
+    // Rows are the kinds the card has a line for, in the order effect, sends, comp, duck; an unchanged one says so.
+    const all = cardFx({ type: FxType.DELAY, sends: new Map([[0, 0.2]]), comp: comp({ on: true }), sidechain: sidechain({ on: true }) })
+    const rows = ClaudeText.fxRows(off, on, all)
+    expect(rows.map((r) => r.label)).toEqual(['Effect', 'Sends', 'Comp', 'Duck'])
+    expect(rows.map((r) => ClaudeText.isSame(r))).toEqual([false, false, false, false])
+    expect(rows[0]).toEqual({ label: 'Effect', old: 'OFF', new: 'DELAY \u00B7 LENGTH 1/4 \u00B7 43%' })
+    expect(ClaudeText.fxRows(off, on, cardFx({ type: FxType.DELAY, comp: comp({ on: false }) })).map((r) => r.label)).toEqual(['Effect', 'Comp'])
+    expect(ClaudeText.fxRows(on, on, all).map((r) => ClaudeText.isSame(r))).toEqual([true, true, true, true])
+    expect(ClaudeText.fxRows(off, on, cardFx())).toEqual([])
+    expect(ClaudeText.fxSidechainText({ ...on, sidechain: sidechain({ on: true, dests: 0 }) })).toBe('OFF')
+    expect(ClaudeText.ALREADY_SET).toBe('Already set')
+    expect(ClaudeText.changeName({ label: 'Effect', old: 'OFF', new: 'REVERB' })).toBe('Effect: OFF becomes REVERB')
+    expect(ClaudeText.changeName({ label: 'Comp', old: 'OFF', new: 'OFF' })).toBe('Comp: OFF, already set')
+
+    const pad = physicalPad(0, 9)
+    const d = PadSettings.DEFAULT
+    expect(ClaudeText.padChange(pad, d, { ...d, start: 5, muteGroup: true, midiChannel: 2 })).toBeNull()
+    expect(ClaudeText.padChange(pad, d, { ...d, pitch: -7, level: 90 })).toEqual({ label: 'A7', old: 'Pitch 0 \u00B7 Level 100', new: 'Pitch -7 \u00B7 Level 90' })
+    expect(ClaudeText.padChange(physicalPad(0, 2), d, { ...d, pan: -4, attack: 3, release: 20, mode: 'key' })).toEqual({
+      label: 'AE',
+      old: 'Pan C \u00B7 Attack 0 \u00B7 Release 255 \u00B7 Mode Oneshot',
+      new: 'Pan L4 \u00B7 Attack 3 \u00B7 Release 20 \u00B7 Mode Key',
+    })
+    expect(ClaudeText.padParts(d, { ...d, pitch: 2, release: 40, start: 9 })).toEqual([
+      { name: 'Pitch', old: '0', new: MirrorText.pitchLabel(2) },
+      { name: 'Release', old: '255', new: '40' },
+    ])
+    expect([ClaudeText.importUndone(2, 1, 0, false), ClaudeText.importUndone(0, 0, 3, false), ClaudeText.importUndone(1, 0, 2, true), ClaudeText.importUndone(0, 0, 0, true), ClaudeText.importUndone(0, 0, 0, false)]).toEqual([
+      'Old sounds back on 2 pads, 1 had none before.',
+      'Old settings back on 3 pads.',
+      'Old sounds back on 1 pad, old settings back on 2 pads, old FX back.',
+      'Old FX back.',
+      'Import taken back.',
+    ])
+    expect(ClaudeText.importUndone(2, 1, 0, false)).toBe(ClaudeText.soundsRestored(2, 1))
+    expect(ClaudeText.shapingFailed('busy', 2, true)).toBe(
+      "The pad's settings couldn't be changed: busy. The patterns stay imported, the FX applied and 2 pads shaped. UNDO takes it back.",
+    )
+    expect([
+      ClaudeText.imported([[0, 4]], null, 0, 0, true),
+      ClaudeText.imported([[0, 4]], null, 0, 0, false, 1),
+      ClaudeText.imported([[0, 4]], null, 2, 0, true, 3),
+    ]).toEqual([
+      'Imported to A \u00B7 04. FX applied. UNDO takes it back.',
+      'Imported to A \u00B7 04. 1 pad setting applied. UNDO takes it back.',
+      'Imported to A \u00B7 04 and 2 sounds. FX and 3 pad settings applied. UNDO takes it back.',
+    ])
+    expect([
+      ClaudeText.imported([[0, 4]], null, 0, 0, true, 3, 1),
+      ClaudeText.imported([[0, 4]], null, 0, 0, false, 0, 2),
+    ]).toEqual([
+      'Imported to A \u00B7 04. FX and 3 pad settings applied, 1 pad setting skipped. UNDO takes it back.',
+      'Imported to A \u00B7 04. 2 pad settings skipped. UNDO takes it back.',
+    ])
+    expect([
+      ClaudeText.padRowName(null, physicalPad(0, 11), true),
+      ClaudeText.padRowName(null, physicalPad(0, 11), false),
+      ClaudeText.padRowName({ label: 'A9', old: 'Pitch 0', new: 'Pitch 2' }, physicalPad(0, 11), false),
+    ]).toEqual(['A9: no sound on this pad', 'A9: already set', 'A9: Pitch 0 becomes Pitch 2'])
+  })
+  it('chain row text', () => {
+    expect([MirrorText.CHAIN, MirrorText.CHAIN_ON, MirrorText.CHAIN_ADD]).toEqual(['Chain', 'On', 'Add'])
+    expect([chainStep(2), chainStep(2, 2), chainStep(0, 8)].map(MirrorText.chainStep)).toEqual(['S03', 'S03 \u00D72', 'S01 \u00D78'])
+    expect([MirrorText.chainPasses(1), MirrorText.chainPasses(4)]).toEqual(['\u00D71', '\u00D74'])
+    const c = chain([chainStep(0, 2), chainStep(1, 4)], true)
+    expect(MirrorText.chainPass(chainPlay(0, 1), c)).toBe('Pass 1/2')
+    expect(MirrorText.chainPass(chainPlay(1, 3), c)).toBe('Pass 3/4')
+    expect(MirrorText.chainPass(chainPlay(9, 2), c)).toBe('Pass 2/1')
+    expect(MirrorText.chainAdded(3)).toBe('S04 added to chain')
+    expect([MirrorText.CHAIN_EMPTY, MirrorText.CHAIN_FULL, MirrorText.CHAIN_OFF_BY_HAND]).toEqual(['Chain empty. + adds the scene shown', 'Chain is full', 'Chain off: you picked a scene.'])
+    expect([
+      MirrorText.chainName(1, false),
+      MirrorText.chainName(4, true),
+      MirrorText.chainAddName(2),
+      MirrorText.chainOnName(true),
+      MirrorText.chainOnName(false),
+    ]).toEqual(['Chain, 1 step, off', 'Chain, 4 steps, on', 'Add scene 3 to the chain', 'Chain on: plays the scenes in order. Tap to turn off', 'Chain off. Tap to turn on'])
+    expect(MirrorText.chainStepName(2, 5, chainStep(3))).toBe('Chain step 2 of 5, scene 4, 1 pass')
+    expect(MirrorText.chainStepName(2, 5, chainStep(3, 4))).toBe('Chain step 2 of 5, scene 4, 4 passes')
+    expect(MirrorText.chainPassSpoken(2, 2, chainPlay(1, 3), c)).toBe('Chain step 2 of 2, pass 3 of 4')
+    expect([MirrorText.CHAIN_MORE_PASSES, MirrorText.CHAIN_FEWER_PASSES, MirrorText.CHAIN_REMOVE]).toEqual(['More passes', 'Fewer passes', 'Remove step'])
+    expect(MirrorText.CHAIN_NOTE).toContain('x1 x2 x4 x8')
+  })
+
+  it('claude text for cards of scenes', () => {
+    expect([ClaudeText.SHARE_CHAIN, ClaudeText.shareChainName(1), ClaudeText.shareChainName(4)]).toEqual(['Share chain', 'Share the chain with Claude, 1 step', 'Share the chain with Claude, 4 steps'])
+    expect([ClaudeText.cardScene(2, null), ClaudeText.cardScene(2, 'Drop')]).toEqual(['Scene 2', 'Scene 2 \u00B7 Drop'])
+    expect(ClaudeText.cardSceneGoes(4, [4, 2, 1, 1])).toBe('S05 \u00B7 A04 B02 C01 D01')
+    expect(ClaudeText.SCENE_SAME).toBe('Plays the same patterns as the scene before.')
+    expect([ClaudeText.shareChainKey(1), ClaudeText.shareChainKey(3)]).toEqual(['Share chain \u00B7 1 scene', 'Share chain \u00B7 3 scenes'])
+    expect(ClaudeText.cardSceneTarget(2, [[0, 4], [1, 2], [2, null]])).toBe('new S03 \u00B7 A 04 \u00B7 B 02 \u00B7 C (same)')
+    expect(ClaudeText.chainImport([chainStep(2, 2), chainStep(3), chainStep(2, 2), chainStep(4)])).toBe('S03\u00D72 \u2192 S04 \u2192 S03\u00D72 \u2192 S05')
+    expect(ClaudeText.cardSceneName(2, 'Drop', 4, [4, 2, 1, 1])).toBe('Scene 2, Drop, becomes S05, patterns A 4, B 2, C 1, D 1')
+    expect(ClaudeText.cardSceneName(1, null, 1, [1, 1, 1, 1])).toBe('Scene 1, becomes S02, patterns A 1, B 1, C 1, D 1')
+    expect(ClaudeText.chainText([[1, 2], [2, 1], [1, 2], [3, 1]])).toBe('1\u00D72 2 1\u00D72 3')
+    expect([ClaudeText.setChainName(true, 4), ClaudeText.setChainName(false, 1)]).toEqual([
+      "Set the project's chain from the card, 4 steps",
+      "Leave the project's chain as it is, 1 step",
+    ])
+    expect([
+      ClaudeText.imported([], 'S04\u2013S06', 0, 0, false, 0, 0, 3, true),
+      ClaudeText.imported([], 'S04', 0, 0, false, 0, 0, 1),
+      ClaudeText.imported([], 'S04\u2013S06', 2, 0, true, 0, 0, 3, true),
+    ]).toEqual([
+      'Imported to scenes S04\u2013S06. Chain set. UNDO takes it back.',
+      'Imported to scene S04. UNDO takes it back.',
+      'Imported to scenes S04\u2013S06 and 2 sounds. FX applied. Chain set. UNDO takes it back.',
+    ])
+    expect(ClaudeText.SHARE_CHAIN_PROMPT).toContain('arrangement')
+    expect(ClaudeText.SHARE_CHAIN_PROMPT).toContain('energy curve')
+    expect(ClaudeText.shareSubject(ClaudeText.CHAIN_CARD_NAME)).toBe('Arc beat Chain')
+  })
+
+  it('live tools front page text', () => {
+    expect([MirrorText.groupLine(0, true), MirrorText.groupLine(2, false)]).toEqual(['Group A \u00B7 Follow', 'Group C'])
+    expect(MirrorText.keysLine(0, Scale.MAJOR, NoteNames.SOLFEGE)).toBe('Keys \u00B7 DO major')
+    expect(MirrorText.keysLine(9, Scale.MINOR_PENTATONIC, NoteNames.LETTERS)).toBe('Keys \u00B7 A minor penta')
+    expect([MirrorText.LAST_NOTE, MirrorText.lastNoteChannel(1)]).toEqual(['last note', 'last note \u00B7 ch 1'])
+    expect([
+      MirrorText.playOneGroup(true),
+      MirrorText.playOneGroup(false),
+      MirrorText.playAllGroups(null),
+      MirrorText.playAllGroups(true),
+      MirrorText.playKeys(0, Scale.MAJOR, NoteNames.SOLFEGE),
+    ]).toEqual([
+      'One group \u00B7 Follow on',
+      'One group \u00B7 Follow off',
+      'All groups \u00B7 Pads',
+      'All groups \u00B7 Pads \u00B7 Repeat on',
+      'Key DO \u00B7 Major',
+    ])
+    expect([
+      MirrorText.takesRecording(12.9),
+      MirrorText.takesSummary(1, 'Oct 5, 2:23 PM'),
+      MirrorText.takesSummary(3, 'Oct 4'),
+      MirrorText.NO_TAKES,
+    ]).toEqual(['Recording 0:12', '1 take \u00B7 last Oct 5, 2:23 PM', '3 takes \u00B7 last Oct 4', 'No takes yet'])
+    expect(MirrorText.toolsRow(MirrorText.PLAY, MirrorText.playOneGroup(true))).toBe('Play, One group \u00B7 Follow on')
+    expect([
+      MirrorText.BACK_TO_TOOLS,
+      MirrorText.HELP,
+      MirrorText.PHONE_MIX,
+      MirrorText.TAKE_ARMED,
+      MirrorText.PLAY_HINT,
+      MirrorText.ABOUT_TAKES,
+    ]).toEqual(['Back to Live tools', 'Help', 'phone mix', 'Waiting for the first sound', "Play the EP-133's pads or keys", 'About takes'])
+    expect([ClaudeText.sharedScene('S02'), ClaudeText.sharedPattern(0, 1), ClaudeText.CHAIN_CARD_NAME]).toEqual(['Scene S02', 'A \u00B7 01', 'Chain'])
+    expect([ClaudeText.SHARED_TO_CLAUDE, ClaudeText.WAITING_HINT, ClaudeText.STOP_WAITING, ClaudeText.ABOUT_CARDS]).toEqual([
+      'Shared to Claude',
+      "Paste Claude's reply when it's ready",
+      "Stop waiting for Claude's reply",
+      'About beat cards',
+    ])
+    expect([ClaudeText.ROW_IDLE, ClaudeText.ROW_WAITING]).toEqual(['Share a beat \u00B7 paste a card', "Waiting for Claude's reply"])
   })
 })

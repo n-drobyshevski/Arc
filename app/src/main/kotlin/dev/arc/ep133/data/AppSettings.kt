@@ -59,6 +59,8 @@ data class AppSettings(
     val makeUpDelay: Boolean = true,
     /** Live's click (TEMPO): the phone's tempo in BPM, Tempo.MIN..MAX. The click itself always starts off. */
     val liveTempo: Int = Tempo.DEFAULT,
+    /** CLAUDE's "With my sound list": a shared beat card is followed by the sounds Arc knows, for Claude to choose from. */
+    val shareSounds: Boolean = true,
     /**
      * Which output Live plays through, a debug choice for the latency test
      * (Debug screen): kept on this phone only, never copied into library.json.
@@ -190,6 +192,7 @@ class SettingsStore internal constructor(private val prefs: SharedPreferences) {
         haptics = prefs.getBoolean("haptics", true),
         makeUpDelay = prefs.getBoolean("makeUpDelay", true),
         liveTempo = Tempo.clamp(prefs.getInt("liveTempo", Tempo.DEFAULT)),
+        shareSounds = prefs.getBoolean("shareSounds", true),
         liveEngine = liveEngineOf(prefs.getString(LIVE_ENGINE, null)),
         sampleSource = SampleSource.of(prefs.getString("sampleSource", null) ?: "") ?: SampleSource.MIC,
         sampleStereo = prefs.getBoolean("sampleStereo", false),
@@ -310,6 +313,7 @@ internal fun AppSettings.values(): Map<String, String> = linkedMapOf(
     "haptics" to haptics.toString(),
     "makeUpDelay" to makeUpDelay.toString(),
     "liveTempo" to liveTempo.toString(),
+    "shareSounds" to shareSounds.toString(),
     "sampleSource" to sampleSource.id,
     "sampleStereo" to sampleStereo.toString(),
     "sampleGainMic" to sampleGainMic.toString(),
@@ -365,6 +369,7 @@ internal fun AppSettings.withIndex(map: Map<String, String>): AppSettings = copy
     makeUpDelay = map["app.makeUpDelay"]?.toBooleanStrictOrNull() ?: makeUpDelay,
     // A tempo arc doesn't offer leaves the choice as it is.
     liveTempo = map["app.liveTempo"]?.toIntOrNull()?.takeIf { it in Tempo.MIN..Tempo.MAX } ?: liveTempo,
+    shareSounds = map["app.shareSounds"]?.toBooleanStrictOrNull() ?: shareSounds,
     sampleSource = map["app.sampleSource"]?.let(SampleSource::of) ?: sampleSource,
     sampleStereo = map["app.sampleStereo"]?.toBooleanStrictOrNull() ?: sampleStereo,
     sampleGainMic = sampleGainOf(map["app.sampleGainMic"]?.toFloatOrNull()) ?: sampleGainMic,
