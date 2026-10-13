@@ -189,11 +189,11 @@ const isCoachId = (id: string): id is CoachId => (COACH_IDS as readonly string[]
 export function coachSpecFor(id: string, el: Element): CoachMarkSpec | null {
   const base: CoachMarkSpec | null = isCoachId(id) ? COACH_MARKS[id] : null
   let spec = base
-  // Chrome.kt: the connection tag is green (ok) while connected, navy while not.
+  // Chrome.kt: the connection tag is green (ok) and says to hold while connected, navy while not.
   if (id === 'top.connection') {
     const label = CoachText.CONNECTED_NAME.replace(/"/g, '\\"')
     const on = el.getAttribute('aria-label') === CoachText.CONNECTED_NAME || el.querySelector(`[aria-label="${label}"]`) !== null
-    if (on) spec = { label: CoachText.CONNECTION, face: 'var(--ok)', ink: 'var(--on-ok)' }
+    if (on) spec = { label: CoachText.CONNECTION_HOLD, face: 'var(--ok)', ink: 'var(--on-ok)' }
   }
   const label = el.getAttribute('data-coach-label') ?? spec?.label
   if (!label) return null

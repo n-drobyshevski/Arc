@@ -32,7 +32,7 @@ describe('the moved keys\' tags', () => {
     expect(CoachText.DISCONNECT).toBe('Disconnect')
     // The overlay still tells the connected key from the other by its name.
     const el = { getAttribute: (n: string) => (n === 'aria-label' ? CoachText.CONNECTED_NAME : null), querySelector: () => null } as unknown as Element
-    expect(coachSpecFor('top.connection', el)).toEqual({ label: CoachText.CONNECTION, face: 'var(--ok)', ink: 'var(--on-ok)' })
+    expect(coachSpecFor('top.connection', el)).toEqual({ label: CoachText.CONNECTION_HOLD, face: 'var(--ok)', ink: 'var(--on-ok)' })
   })
 
   it('every id has a tag', () => {

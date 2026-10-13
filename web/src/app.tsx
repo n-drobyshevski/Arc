@@ -534,7 +534,7 @@ function Root(): JSX.Element {
       {/* The EP-133 connected with offline pad changes kept: write them, or discard them. */}
       <Dialog
         open={state.offlinePrompt !== null}
-        text={MirrorText.putOffline(state.offlinePrompt ?? 0)}
+        text={MirrorText.putOffline(state.offlinePrompt?.changes ?? 0, state.offlinePrompt?.samples ?? 0)}
         confirm={MirrorText.WRITE}
         cancel={MirrorText.DISCARD}
         confirmColor="var(--navy)"

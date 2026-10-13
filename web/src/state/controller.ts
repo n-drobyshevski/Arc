@@ -1850,9 +1850,11 @@ export class ArcController {
     // Recordings uploading now aren't asked about: they are on their way already.
     const uploading = this.sample.uploadingNow()
     const pads = (await this.live.loadOfflinePads()).list.filter((p) => p.file == null || !uploading.has(p.file))
-    const n = pads.length + (await this.padEdit.offlineCount())
-    if (n === 0 || !this.deviceReady) return
-    this.store.update((st) => ({ ...st, offlinePrompt: n }))
+    // The recordings counted apart from the other changes (ArcController's samples / changes).
+    const samples = pads.filter((p) => p.source === SoundSource.RECORDED).length
+    const changes = pads.length - samples + (await this.padEdit.offlineCount())
+    if (changes + samples === 0 || !this.deviceReady) return
+    this.store.update((st) => ({ ...st, offlinePrompt: { changes, samples } }))
   }
 
   /**

@@ -195,8 +195,8 @@ export interface UiState {
   readonly folderName: string | null
   /** Live's pad changes made offline and kept (Reset pads), 0 when none. */
   readonly offlinePads: number
-  /** The EP-133 connected with offline pad changes kept: how many, while it asks to write them. */
-  readonly offlinePrompt: number | null
+  /** The EP-133 connected with offline pad changes kept: how many (new samples apart), while it asks to write them. */
+  readonly offlinePrompt: { readonly changes: number; readonly samples: number } | null
   /** Live's takes, newest first (ArcController.takes). */
   readonly takes: readonly TakeInfo[]
 }

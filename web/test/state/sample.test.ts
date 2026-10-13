@@ -168,7 +168,9 @@ describe('SAMPLE', () => {
     s.exit()
     h.ep.access.plug(h.ep.input, h.ep.output)
     await until(h, (st) => st.offlinePrompt !== null && st.mirror !== null && !st.mirror.loading && !st.busy)
-    expect(h.c.state.value.offlinePrompt).toBe(1)
+    // A recording is a new sample, not a pad change (ArcController's samples).
+    expect(h.c.state.value.offlinePrompt).toEqual({ changes: 0, samples: 1 })
+    expect(MirrorText.putOffline(0, 1)).toBe('Put 1 new sample on the EP-133?')
     await h.c.writeOfflinePads()
     expect(h.toasts.at(-1)?.text).toBe(MirrorText.offlineWritten(1, 0))
     const slot = await onDevice(h, 5)
