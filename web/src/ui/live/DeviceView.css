@@ -1,5 +1,6 @@
-/* The device view (DeviceView.tsx): the EP-133 K.O. II at the product photo's
- * 1444 × 2000, scaled to fit. The device keeps its own colours in both themes. */
+/* The device view (DeviceView.tsx): the EP-133 K.O. II at the unit's 176 × 240 mm
+ * (1444 × 1969 units), scaled to fit. The device keeps its own colours in both
+ * themes and prints in Jost; the cards and panels around it are Live's. */
 
 .ko-device {
   flex: 1 1 0;
@@ -15,269 +16,523 @@
 .ep-area { pointer-events: none; }
 .ko-device__panel { position: absolute; z-index: 4; left: 0; right: 0; top: 0; max-height: 100%; overflow: auto; }
 .ep {
+  --ep-font: 'Jost', var(--font);
+  --ep-thin: 300;
+  --ep-label: #2E2D2C;
+  --ep-ink: #231F20;
+  --ep-orange: #F15A22;
+
   position: absolute;
   left: 0;
   top: 0;
   width: 1444px;
-  height: 2000px;
+  height: 1969px;
   transform-origin: 0 0;
   overflow: hidden;
-  border-radius: 34px;
-  background: linear-gradient(180deg, #E7E6E1 0%, #D9D8D2 55%, #BDBCB5 100%);
-  box-shadow: inset 0 2px 0 rgb(255 255 255 / 0.7), inset 0 -3px 0 rgb(0 0 0 / 0.08), 0 30px 50px -24px rgb(0 0 0 / 0.55);
-  color: #4A4A48;
-  font-family: var(--font);
-  font-weight: 400;
+  border-radius: 9px;
+  isolation: isolate;
+  /* Matte bead-blasted plastic: a neutral grey with a soft falloff. */
+  background:
+    radial-gradient(120% 70% at 45% 38%, rgb(255 255 255 / 0.1), transparent 70%),
+    linear-gradient(180deg, #C9C8C5 0%, #C5C4C1 55%, #B2B1AE 100%);
+  box-shadow:
+    inset 1px 1px 0 rgb(255 255 255 / 0.55),
+    inset -2px -2px 0 rgb(0 0 0 / 0.16),
+    0 0 0 1.5px rgb(0 0 0 / 0.18),
+    0 34px 60px -26px rgb(0 0 0 / 0.6),
+    0 8px 18px -8px rgb(0 0 0 / 0.25);
+  color: var(--ep-label);
+  font-family: var(--ep-font);
+  font-weight: var(--ep-thin);
+  -webkit-font-smoothing: antialiased;
+}
+/* The grain: one noise tile, soft-light, under every control. */
+.ep::before,
+.ep-plate::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='256' height='256'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.95' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 0 1'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 256px 256px;
+  mix-blend-mode: soft-light;
+  opacity: 0.22;
+  z-index: 0;
 }
 .ep-a { position: absolute; }
-.ep button { font-family: var(--font); -webkit-tap-highlight-color: transparent; }
-.ep button:focus-visible { outline: 8px solid var(--navy); outline-offset: 6px; }
+.ep button { font-family: var(--ep-font); -webkit-tap-highlight-color: transparent; }
+/* The focus ring is the light theme's navy in both themes: it sits on the grey body, which never changes. */
+.ep button:focus-visible { outline: 8px solid #1F2558; outline-offset: 6px; }
 
-/* ---- jacks, plate, speaker ---- */
-.ep-jack { top: 35px; height: 65px; display: grid; place-items: center; font-size: 27px; letter-spacing: 0.03em; }
-.ep-jack--out { left: 68px; width: 130px; background: #ECEBE7; color: #444; }
-.ep-jack--in { left: 330px; width: 130px; background: #FF4C00; color: #fff; }
-.ep-jack--sync { left: 527px; width: 325px; background: #161617; color: #EEE; grid-template-columns: 1fr 1fr; }
-.ep-jack--usb { left: 1050px; width: 130px; background: #8B8A86; color: #F2F2F2; }
-.ep-jack--pow { left: 1245px; width: 130px; color: #444; }
-.ep-pow { left: 1312px; top: 4px; width: 34px; height: 32px; border-radius: 6px 6px 0 0; background: linear-gradient(90deg, #FF6A2A, #FF4C00); }
-.ep-plate { left: 5px; top: 100px; width: 980px; height: 390px; background: linear-gradient(180deg, #EEEDEA, #E5E4E0); }
-.ep-screw { width: 36px; height: 36px; border-radius: 50%; background: #E1E0DC; box-shadow: inset 0 2px 4px rgb(0 0 0 / 0.14), 0 1px 0 rgb(255 255 255 / 0.8); }
-.ep-plate__title { left: 66px; top: 150px; font-size: 96px; font-weight: 300; letter-spacing: -0.05em; line-height: 1; color: #262625; }
+/* ---- the jacks: tabs flush with the top edge ---- */
+.ep-jack {
+  top: 0;
+  height: 62px;
+  display: grid;
+  place-items: center;
+  font-size: 22px;
+  font-weight: 400;
+  letter-spacing: 0.07em;
+  border-radius: 0 0 3px 3px;
+  box-shadow: 0 3px 3px -1px rgb(0 0 0 / 0.28), 0 1px 0 rgb(0 0 0 / 0.18), inset 0 -2px 0 rgb(0 0 0 / 0.12);
+}
+.ep-jack--out { left: 68px; width: 130px; background: linear-gradient(180deg, #F7F4F1, #ECE9E5); color: #3A3837; box-shadow: 0 3px 3px -1px rgb(0 0 0 / 0.22), inset 0 0 0 1px #CFCBC7; }
+.ep-jack--in { left: 330px; width: 130px; background: linear-gradient(180deg, #F66130, #EE531B); color: #FFF6F0; }
+.ep-jack--sync { left: 527px; width: 325px; padding: 0 34px; background: linear-gradient(180deg, #363636, #2D2D2D); color: #E8E8E8; grid-template-columns: 1fr 1fr; }
+.ep-jack--sync > span { position: relative; padding-top: 12px; }
+.ep-jack--sync i { position: absolute; top: -2px; font: 400 13px/1 var(--ep-font); color: #CFCFCF; }
+.ep-jack--usb { left: 1050px; width: 130px; background: linear-gradient(180deg, #7A7A78, #6E6E6C); color: #F2F2F2; }
+.ep-jack--pow { left: 1245px; width: 130px; color: #3A3837; box-shadow: none; background: none; }
+.ep-pow { left: 1280px; top: 0; width: 32px; height: 9px; border-radius: 0 0 2px 2px; background: #EE531B; box-shadow: 0 2px 2px rgb(0 0 0 / 0.25); }
+
+/* ---- the plate (the battery cover) and the speaker ---- */
+.ep-plate {
+  left: 0;
+  top: 66px;
+  width: 985px;
+  height: 393px;
+  overflow: hidden;
+  background: linear-gradient(180deg, #E7E6E2, #E4E3DF 40%, #E0DFDB);
+  box-shadow: inset 0 2px 0 rgb(0 0 0 / 0.1), inset 0 3px 0 rgb(255 255 255 / 0.5), inset -2px 0 0 #2E2E2E, inset 1px 0 0 rgb(255 255 255 / 0.6);
+}
+.ep-plate::before { opacity: 0.16; }
+.ep-screw {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%, #E6E5E1 0 15px, #DEDDD9 17px);
+  box-shadow: inset 1.5px 1.5px 2px rgb(0 0 0 / 0.18), inset -1px -1px 1px rgb(255 255 255 / 0.9), 0 0 0 1px rgb(0 0 0 / 0.05);
+}
+.ep-plate__title { left: 62px; top: 120px; display: flex; align-items: flex-start; gap: 14px; font-size: 82px; font-weight: var(--ep-thin); letter-spacing: 0.03em; line-height: 1; color: var(--ep-ink); }
+.ep-plate__title svg { width: 50px; height: 58px; margin-top: 14px; }
+.ep-plate__title path { fill: none; stroke: var(--ep-ink); stroke-width: 3.6; }
+/* Both lines end clear of the plate's right-hand screws. */
 .ep-plate__status,
 .ep-plate__hit {
-  left: 68px;
-  width: 880px;
+  left: 66px;
+  width: 840px;
+  line-height: 1.25;
+  padding-bottom: 4px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   text-transform: uppercase;
 }
-.ep-plate__status { top: 256px; font-size: 40px; letter-spacing: 0.01em; color: #FF4C00; }
-.ep-plate__hit { top: 430px; font-size: 42px; color: #262625; font-variant-numeric: tabular-nums; }
-.ep-grille {
-  left: 985px;
-  top: 100px;
-  width: 455px;
-  height: 390px;
-  background: radial-gradient(circle, #121212 0 10.5px, transparent 11.5px) 3px 3px / 32.4px 32.4px, linear-gradient(160deg, #828285, #5D5D60);
+.ep-plate__status { top: 214px; font-size: 40px; font-weight: 400; letter-spacing: 0.01em; color: var(--ep-orange); }
+.ep-plate__hit { top: 398px; font-size: 42px; color: var(--ep-ink); font-variant-numeric: tabular-nums; }
+.ep-grille { left: 985px; top: 66px; width: 459px; height: 393px; }
+.ep-grille svg { display: block; width: 100%; height: 100%; }
+
+/* ---- the display: a black glass band, its icons printed faintly, the lit ones bright ---- */
+.ep-disp {
+  left: 0;
+  top: 459px;
+  width: 1444px;
+  height: 396px;
+  background:
+    linear-gradient(180deg, rgb(0 0 0 / 0.55), transparent 10px),
+    linear-gradient(180deg, #1A1A1A, #141414 50%, #171717);
+  box-shadow:
+    inset 22px 0 18px -14px rgb(255 255 255 / 0.08),
+    inset -22px 0 18px -14px rgb(255 255 255 / 0.08),
+    inset 0 -1px 0 rgb(255 255 255 / 0.1),
+    0 10px 14px -6px rgb(0 0 0 / 0.45),
+    0 2px 0 rgb(0 0 0 / 0.35);
 }
-
-/* ---- the display ---- */
-.ep-disp { left: 5px; top: 490px; width: 1435px; height: 395px; background: linear-gradient(180deg, #151516, #0A0A0B 40%, #0C0C0D); box-shadow: inset 0 0 0 2px #000; }
-.ep-dim { color: #29292B; }
-.ep-lit { color: #F2F2F2; }
-.ep-dtxt { font-size: 26px; letter-spacing: 0.04em; }
-.ep-batt { left: 78px; top: 566px; width: 46px; height: 22px; border-radius: 3px; background: #E5321B; }
-.ep-piano { left: 76px; top: 694px; width: 56px; height: 52px; display: flex; gap: 3px; }
-.ep-piano i { flex: 1; border-radius: 1px; background: #232325; }
-.ep-piano.is-on i { background: #F2F2F2; }
-.ep-dgrp {
-  left: 212px;
-  width: 42px;
-  height: 50px;
-  display: grid;
-  place-items: center;
-  border: 2px solid #2A2A2C;
-  border-radius: 4px;
-  font-size: 30px;
-  color: #2E2E30;
-  /* Sounding: the signal colour, as strong as the group's glow. */
-  background: color-mix(in oklab, #FF4C00 var(--glow-pct), transparent);
+/* The glass's reflection, top left: under the icons, so the lit ones stay pure. It is cut from
+ * x 838 at the top to x 693 at y 705 (120.6°), with a soft edge. */
+.ep-disp__gloss {
+  left: 0;
+  top: 459px;
+  width: 1444px;
+  height: 246px;
+  pointer-events: none;
+  z-index: 1;
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.17), rgb(255 255 255 / 0.07) 45%, rgb(255 255 255 / 0));
+  -webkit-mask-image: linear-gradient(120.6deg, #000 719px, transparent 722px);
+  mask-image: linear-gradient(120.6deg, #000 719px, transparent 722px);
+  mix-blend-mode: screen;
 }
-.ep-dgrp.is-on { background: #F2F2F2; border-color: #F2F2F2; color: #111; }
-.ep-mode { left: 275px; top: 765px; width: 112px; height: 38px; display: grid; place-items: center; font-size: 26px; background: #F2F2F2; color: #0B0B0B; }
-.ep-bar { left: 468px; top: 563px; padding: 2px 8px; border: 2px solid #2A1512; border-radius: 4px; font-size: 27px; color: #2A1512; }
-.ep-seg { left: 548px; top: 568px; display: flex; gap: 8px; }
-.ep-seg svg { display: block; width: 66px; height: 108px; }
-.ep-seg .on { fill: #F2F2F2; }
-.ep-seg .off { fill: #1E1E20; }
-.ep-bpm { left: 798px; top: 568px; font-size: 27px; }
-.ep-rec { left: 536px; top: 697px; width: 46px; height: 46px; border-radius: 50%; background: #2A1310; }
-.ep-rec.is-on { background: #FF2A00; box-shadow: 0 0 18px rgb(255 42 0 / 0.6); }
-.ep-rec.is-armed { background: #FF2A00; animation: rec-blink 450ms ease-in-out infinite alternate; }
-.ep-play { left: 606px; top: 698px; width: 0; height: 0; border-left: 40px solid #262628; border-top: 22px solid transparent; border-bottom: 22px solid transparent; }
-.ep-play.is-on { border-left-color: #F2F2F2; }
-.ep-metro { left: 802px; top: 628px; width: 40px; height: 52px; }
-.ep-metro path { fill: none; stroke: #2A2A2C; stroke-width: 4; }
-.ep-metro.is-on path { stroke: #F2F2F2; }
-.ep-bars { width: 54px; height: 32px; background: repeating-linear-gradient(90deg, #3A1210 0 5px, transparent 5px 9px); }
-.ep-fx { left: 862px; top: 694px; font-size: 46px; font-weight: 500; }
-.ep-stereo { left: 990px; top: 565px; font-size: 16px; text-align: center; }
-.ep-stereo b { display: block; margin-left: -0.2em; font-size: 40px; font-weight: 400; line-height: 0.9; letter-spacing: -0.25em; }
-.ep-ring { left: 1056px; top: 562px; width: 118px; height: 118px; }
-.ep-ring__q { fill: none; stroke-width: 22; stroke-opacity: calc(0.18 + 0.82 * var(--glow, 0)); }
-.ep-ring__q.is-on { stroke-opacity: 1; }
-.ep-ring__q--0 { stroke: #FF4C00; }
-.ep-ring__q--1 { stroke: #E5397A; }
-.ep-ring__q--2 { stroke: #3E8FDA; }
-.ep-ring__q--3 { stroke: #FF6A2A; }
-.ep-dots { width: 22px; height: 46px; background: radial-gradient(circle, #1D2A3D 0 4px, transparent 4.5px) 0 0 / 11px 11px; }
-.ep-q { left: 1258px; top: 694px; font-size: 52px; }
+.ep-disp__pin { width: 14px; height: 14px; border-radius: 50%; background: #0E0E0E; box-shadow: 0 0 0 1px #262626, inset 0 1px 1px rgb(255 255 255 / 0.06); }
+.ep-lcd { --lcd-ghost: 0.06; --lcd-ghost-w: 0.05; left: 0; top: 459px; width: 1444px; height: 396px; z-index: 1; overflow: visible; }
+.ep-lcd text { font-family: var(--ep-font); }
+.ep-lcd .ic { opacity: var(--lcd-ghost); }
+.ep-lcd .ic.w { opacity: var(--lcd-ghost-w); }
+.ep-lcd .ic.on { opacity: 1; }
+.ep-lcd .ic * { fill: var(--c); }
+.ep-lcd .ic .s { fill: none; stroke: var(--c); }
+.ep-lcd .ic .k { fill: #121212; }
+.ep-lcd .ic text.w { fill: #F1F2F2; }
+.ep-lcd .seg .off { fill: #262626; }
+.ep-lcd .seg .on { fill: #EEF3FF; }
+.ep-lcd .seg-lit { filter: drop-shadow(0 0 4px rgb(200 225 255 / 0.55)); }
+.ep-rec.is-armed { animation: rec-blink 450ms ease-in-out infinite alternate; }
 
-/* ---- printed labels, lines, LEDs ---- */
-.ep-lbl { font-size: 26px; letter-spacing: 0.03em; white-space: nowrap; color: #4A4A48; }
-.ep-lbl--red { color: #E8441A; }
-.ep-lbl--up { transform: rotate(-90deg); padding: 0 6px; background: #D7D6D0; }
-.ep-line { background: #4A4A48; }
-.ep-line--red { background: #E8441A; }
-.ep-led { width: 20px; height: 20px; border-radius: 50%; background: #74736F; box-shadow: inset 0 2px 3px rgb(0 0 0 / 0.4); }
-.ep-led.is-on { background: #FF3300; box-shadow: 0 0 14px 4px rgb(255 60 0 / 0.6); }
-/* A group's LED glows while it sounds; the group shown is lit. */
-.ep-led--group { background: color-mix(in oklab, #FF3300 var(--glow-pct), #74736F); }
+/* ---- the printing: thin capitals and lines ---- */
+.ep-lbl { font-size: 22px; font-weight: 400; letter-spacing: 0.06em; white-space: nowrap; color: var(--ep-label); line-height: 1; z-index: 1; }
+.ep-lbl--red { color: #E8461C; }
+.ep-lbl--up { transform: translate(-50%, -50%) rotate(-90deg); }
+/* Jost has no arrow: Live's font draws it. */
+.ep-arr { font-family: var(--font); }
+.ep-line { background: #3B3A39; z-index: 1; }
+.ep-line--red { background: #E8461C; }
 
-/* ---- knobs, fader ---- */
-.ep-knob { width: 130px; height: 130px; padding: 0; border: 0; border-radius: 50%; cursor: pointer; }
-.ep-knob::after { content: ''; position: absolute; left: 30px; top: 30px; width: 70px; height: 70px; border-radius: 50%; }
-.ep-knob--vol { background: radial-gradient(circle at 45% 35%, #FBFBF9, #E3E2DE 70%, #CFCECA); box-shadow: 0 8px 0 #A9A8A3, 0 14px 18px rgb(0 0 0 / 0.25); }
-.ep-knob--vol::after { background: radial-gradient(circle at 45% 35%, #FFF, #ECEBE8); box-shadow: 0 3px 6px rgb(0 0 0 / 0.18); }
-.ep-knob--x { background: radial-gradient(circle at 45% 35%, #FF7A3A, #FF4C00 60%, #D63E00); box-shadow: 0 8px 0 #9E2F00, 0 14px 18px rgb(0 0 0 / 0.3); }
-.ep-knob--x::after { background: radial-gradient(circle at 45% 35%, #FF7F45, #F04800); box-shadow: 0 4px 8px rgb(0 0 0 / 0.25); }
-.ep-knob--y { background: radial-gradient(circle at 45% 35%, #3A3A3B, #161617 65%); box-shadow: 0 8px 0 #000, 0 14px 18px rgb(0 0 0 / 0.35); }
-.ep-knob--y::after { background: radial-gradient(circle at 45% 35%, #333, #111); box-shadow: 0 4px 8px rgb(0 0 0 / 0.5); }
-.ep-badge { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 3px; font-size: 24px; color: #fff; }
-.ep-badge--x { background: #F23A1A; }
-.ep-badge--y { background: #111; }
-.ep-fader { left: 70px; top: 1420px; width: 126px; height: 306px; padding: 0; border: 0; background: none; cursor: pointer; }
-.ep-fader__slot { position: absolute; left: 54px; top: 8px; width: 18px; height: 290px; border-radius: 9px; background: #111; box-shadow: inset 0 3px 4px #000; }
-.ep-fader__tick { position: absolute; left: 8px; right: 6px; top: 149px; height: 2px; background: #6B6B69; }
-.ep-fader__cap { position: absolute; left: 33px; top: 120px; width: 60px; height: 60px; border-radius: 50%; background: radial-gradient(circle at 45% 35%, #A3A3A1, #7B7B79 70%); box-shadow: 0 4px 0 #4A4A49, 0 8px 10px rgb(0 0 0 / 0.35); }
+/* ---- the LEDs: a dark lens in a rim, --glow mixing it from off to on and lighting its halo ---- */
+.ep-led {
+  --g: var(--glow, 0);
+  width: 16px;
+  height: 16px;
+  margin: 2px;
+  border-radius: 50%;
+  z-index: 1;
+  background:
+    radial-gradient(circle at 42% 36%, rgb(255 255 255 / calc(0.15 * (1 - var(--g)) + 0.55 * var(--g))) 0 2.5px, transparent 4px),
+    radial-gradient(circle at 50% 50%, color-mix(in oklab, #FF5A1A calc(var(--g) * 100%), #4E4C4A) 0 5.5px, color-mix(in oklab, #E8400A calc(var(--g) * 100%), #3D3B39) 8px);
+  box-shadow:
+    0 0 0 1.5px rgb(0 0 0 / 0.22),
+    0 1.5px 0 1px rgb(255 255 255 / 0.35),
+    inset 0 1px 2px rgb(0 0 0 / calc(0.5 * (1 - var(--g)))),
+    0 0 calc(10px * var(--g)) calc(2px * var(--g)) rgb(255 70 10 / calc(0.6 * var(--g)));
+}
+.ep-led.is-on { --g: 1; }
+/* A sounding group that is not the one shown: a dim ember that breathes. */
+.ep-led.is-sounding { animation: led-pulse 1.2s ease-in-out infinite alternate; }
+@keyframes led-pulse { to { opacity: 0.55; } }
 
-/* ---- keys ---- */
-.ep-key {
+/* ---- the knobs: matte two-tier cylinders ---- */
+.ep-knob {
+  width: 130px;
+  height: 130px;
   padding: 0;
   border: 0;
-  border-radius: 12px;
-  overflow: hidden;
+  border-radius: 50%;
+  cursor: pointer;
+  z-index: 1;
+  background: radial-gradient(circle at 42% 30%, var(--k-hi), var(--k) 62%, var(--k-lo) 100%);
+  box-shadow:
+    inset 0 2px 1px rgb(255 255 255 / var(--k-rim)),
+    inset 0 -3px 5px rgb(0 0 0 / 0.14),
+    0 0 0 1px rgb(0 0 0 / 0.14),
+    0 2px 1px rgb(0 0 0 / 0.22),
+    5px 10px 14px rgb(0 0 0 / 0.3),
+    2px 3px 4px rgb(0 0 0 / 0.16);
+}
+/* The cap's soft shadow on the skirt, then the cap. */
+.ep-knob::before {
+  content: '';
+  position: absolute;
+  left: 30px;
+  top: 34px;
+  width: 74px;
+  height: 74px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgb(0 0 0 / 0.32), rgb(0 0 0 / 0.12) 55%, transparent 72%);
+}
+.ep-knob::after {
+  content: '';
+  position: absolute;
+  left: 32px;
+  top: 30px;
+  width: 66px;
+  height: 66px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 44% 32%, var(--c-hi), var(--c) 70%, var(--c-lo));
+  box-shadow: inset 0 2px 1px rgb(255 255 255 / var(--c-rim)), inset 0 -2px 2px rgb(0 0 0 / 0.16), 0 0 0 1px rgb(0 0 0 / 0.1), 0 3px 2px rgb(0 0 0 / 0.2);
+}
+.ep-knob--vol { --k: #E7E4DF; --k-hi: #F2F0EC; --k-lo: #D6D3CE; --k-rim: 0.8; --c: #ECE8E3; --c-hi: #F6F4F1; --c-lo: #DEDAD5; --c-rim: 0.9; }
+.ep-knob--x { --k: #F8521A; --k-hi: #FF6B33; --k-lo: #E2440F; --k-rim: 0.35; --c: #FA5820; --c-hi: #FF7442; --c-lo: #E84A12; --c-rim: 0.45; }
+.ep-knob--y { --k: #1E1E1E; --k-hi: #2A2A2A; --k-lo: #161616; --k-rim: 0.12; --c: #1D1D1D; --c-hi: #2B2B2B; --c-lo: #151515; --c-rim: 0.2; }
+.ep-knob--y::before { background: radial-gradient(circle, rgb(0 0 0 / 0.55), rgb(0 0 0 / 0.25) 55%, transparent 72%); }
+.ep-badge { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 3px; font-size: 21px; font-weight: 400; color: #FFFFFF; z-index: 1; box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.12); }
+.ep-badge--x { background: #EE4F1E; }
+.ep-badge--y { background: #1C1C1C; }
+
+/* ---- the fader: a cut slot, a flat warm-grey disc ---- */
+.ep-fader { left: 70px; top: 1389px; width: 126px; height: 306px; padding: 0; border: 0; background: none; cursor: pointer; z-index: 1; }
+.ep-fader__slot {
+  position: absolute;
+  left: 54px;
+  top: 8px;
+  width: 19px;
+  height: 290px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #2E1E13 0, #160E09 18%, #0F0A07 60%, #120D0A);
+  box-shadow: inset 0 6px 7px #000, inset 2px 0 3px rgb(0 0 0 / 0.8), 0 -1px 0 rgb(0 0 0 / 0.25), 0 1.5px 0 rgb(255 255 255 / 0.45), 1px 0 0 rgb(255 255 255 / 0.2);
+}
+.ep-fader__tick { position: absolute; left: 5px; right: 8px; top: 149px; height: 2px; background: #1A1816; opacity: 0.85; }
+.ep-fader__cap {
+  position: absolute;
+  left: 32px;
+  top: 119px;
+  width: 62px;
+  height: 62px;
+  border-radius: 50%;
+  background: #6A6867;
+  box-shadow: inset 1px 2px 0 rgb(255 255 255 / 0.28), inset 0 -2px 0 rgb(0 0 0 / 0.25), 0 0 0 1px rgb(0 0 0 / 0.28), 5px 7px 10px rgb(0 0 0 / 0.35);
+}
+
+/* ---- the wells: each key sits in a near-black square ---- */
+.ep-well {
+  pointer-events: none;
+  background: #0A0908;
+  border-radius: 3px;
+  z-index: 1;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.3), -1px -1px 0 1px rgb(0 0 0 / 0.06), 1px 1px 0 1.5px rgb(255 255 255 / 0.28), 4px 7px 10px rgb(0 0 0 / 0.26);
+}
+
+/* ---- the caps: a top face, its lit top and left rim and the shaded lower lip (--cap, --lip) ----
+ * Each key is its whole well, so a press on the rim counts: a clear border is the well showing round
+ * the cap (3 units at the top and left, 6 to 7 at the bottom and right), the cap painted inside it
+ * with corners of 9. Outlines go round the border, so the inset ones count it in. */
+.ep-key,
+.ep-pad {
+  --cap: #262626;
+  --cap-hi: #2E2E2E;
+  --lip: #141414;
+  --rim: 0.13;
+  --sheen: 0.07;
+  padding: 0;
+  border: solid transparent;
+  border-width: 3px 6px 7px 3px;
+  border-radius: 12px 15px 15px 12px / 12px 12px 16px 16px;
+  z-index: 2;
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
+  background:
+    radial-gradient(140% 90% at 22% 0%, rgb(255 255 255 / var(--sheen)), transparent 65%),
+    linear-gradient(180deg, var(--cap-hi), var(--cap) 55%);
+  background-clip: padding-box;
+  box-shadow:
+    inset 0 2px 0 rgb(255 255 255 / var(--rim)),
+    inset 2px 0 0 rgb(255 255 255 / calc(var(--rim) * 0.45)),
+    inset -2px -6px 0 var(--lip),
+    inset -3px -8px 2px -1px color-mix(in srgb, var(--lip) 60%, transparent),
+    inset 0 -14px 12px -8px color-mix(in srgb, var(--lip) 35%, transparent),
+    inset 0 0 0 1px rgb(0 0 0 / 0.18);
   transition: transform 60ms, box-shadow 60ms;
 }
-.ep-key:active:not(:disabled) { transform: translateY(7px); box-shadow: 0 2px 0 rgb(0 0 0 / 0.55); }
-.ep-key:disabled { cursor: default; }
-.ep-key--black { background: linear-gradient(180deg, #2C2C2D, #1B1B1C); color: #F1F1F1; box-shadow: 0 9px 0 #040404, 0 14px 16px rgb(0 0 0 / 0.35); }
-.ep-key--light { background: linear-gradient(180deg, #EFEEEB, #DDDCD8); color: #3D3D3B; box-shadow: 0 9px 0 #9C9B96, 0 14px 16px rgb(0 0 0 / 0.22); }
-.ep-key--orange { background: linear-gradient(180deg, #FF6220, #F04700); color: #fff; box-shadow: 0 9px 0 #A33000, 0 14px 16px rgb(0 0 0 / 0.25); }
-.ep-key--grey { background: linear-gradient(180deg, #7C7C7B, #676766); color: #EDEDED; box-shadow: 0 9px 0 #383837, 0 14px 16px rgb(0 0 0 / 0.25); }
-.ep-key--slim { display: grid; place-items: center; font-size: 28px; letter-spacing: 0.02em; }
-.ep-key--split { display: grid; grid-template-rows: 1fr 1fr; gap: 3px; background: #121213; box-shadow: 0 9px 0 #6D6C68, 0 14px 16px rgb(0 0 0 / 0.25); }
-.ep-h { display: grid; place-items: center; font-size: 28px; letter-spacing: 0.02em; }
-.ep-h--black { background: linear-gradient(180deg, #2C2C2D, #1D1D1E); color: #F1F1F1; }
-.ep-h--light { background: linear-gradient(180deg, #EAE9E6, #DEDDD9); color: #3D3D3B; }
-.ep-h--lighter { background: linear-gradient(180deg, #F2F1EE, #E4E3DF); color: #3D3D3B; }
-.ep-h--orange { background: linear-gradient(180deg, #FF6220, #F04700); color: #fff; }
-.ep-h--grey { background: linear-gradient(180deg, #9A9995, #8A8985); color: #F4F4F4; }
-.ep-key--group { text-align: start; }
-.ep-key__letter { position: absolute; left: 20px; top: 8px; font-size: 56px; font-weight: 300; line-height: 1.1; color: #8A8984; }
-.ep-key__num { position: absolute; right: 16px; bottom: 16px; font-size: 30px; font-weight: 700; line-height: 1; color: #555; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.ep-key__num.is-queued { color: #FF4C00; animation: scene-blink 700ms ease-in-out infinite alternate; }
-.ep-key--group.is-queued { outline: 6px solid #FF4C00; outline-offset: -6px; }
-@media (prefers-reduced-motion: reduce) { .ep-key__num.is-queued { animation: none; } }
-.ep-key__icon { position: absolute; left: 0; right: 0; bottom: 18px; text-align: center; font-size: 38px; line-height: 1; color: #8A8984; }
-.ep-key--sign { display: grid; place-items: center; font-size: 76px; font-weight: 200; line-height: 1; color: #555; }
-.ep-key--sign:disabled { opacity: 0.6; }
-.ep-key--word { display: grid; justify-items: center; align-content: start; padding-top: 16px; font-size: 28px; letter-spacing: 0.02em; }
-.ep-key--orange:disabled { opacity: 0.6; }
-.ep-key.is-sel { color: #FF6A2A; }
-.ep-key--orange.is-armed { animation: ep-armed 450ms steps(1) infinite alternate; }
-.ep-key--orange.is-on { box-shadow: 0 9px 0 #A33000, 0 0 0 6px rgb(255 255 255 / 0.85), 0 0 30px 8px rgb(255 76 0 / 0.55); }
-.ep-key--grey.is-lit { background: linear-gradient(180deg, #8E8E8D, #7A7A79); box-shadow: 0 9px 0 #383837, 0 0 26px 6px rgb(255 255 255 / 0.35); }
-/* Live's function keys on the drawn ones (SOUND, MAIN as PROJECT, TEMPO, FX, SAMPLE, ERASE): a signal ring while on. */
-.ep-key--split.is-lit { box-shadow: 0 9px 0 #6D6C68, 0 0 0 6px #FF4C00, 0 0 30px 8px rgb(255 76 0 / 0.45); }
-.ep-key--split.is-held > .ep-h:first-child { background: #FF4C00; color: #FFFFFF; }
-.ep-key[aria-disabled='true'] { opacity: 0.6; cursor: default; }
-@keyframes ep-armed { to { box-shadow: 0 9px 0 #A33000, 0 0 0 6px rgb(255 255 255 / 0.85); } }
-@media (prefers-reduced-motion: reduce) {
-  .ep-rec.is-armed, .ep-key--orange.is-armed { animation: none; }
-  .ep-key { transition: none; }
+.ep-key:active:not(:disabled),
+.ep-pad:active:not(:disabled),
+.ep-pad[data-down] {
+  transform: translate(1px, 3px);
+  box-shadow: inset 0 2px 0 rgb(255 255 255 / calc(var(--rim) * 0.6)), inset -2px -4px 0 var(--lip), inset 0 0 0 1px rgb(0 0 0 / 0.25);
 }
+.ep-key:disabled { cursor: default; }
+.ep-key[aria-disabled='true'] { opacity: 0.6; cursor: default; }
+.ep-key--black { color: #EDEDEC; }
+.ep-key--light { --cap: #DCD8D4; --cap-hi: #E6E3DF; --lip: #B6B2AE; --rim: 0.75; --sheen: 0.25; color: #3A3836; }
+.ep-key--group,
+.ep-key--shift { --cap: #C2BEBB; --cap-hi: #CCC8C5; --lip: #A29E9A; --rim: 0.55; --sheen: 0.2; color: #F7F6F4; }
+.ep-key--shift { --cap: #B2AEAB; --cap-hi: #BBB7B4; --lip: #8F8B87; text-shadow: 0 1px 0 rgb(0 0 0 / 0.18); }
+.ep-key--orange { --cap: #EE4410; --cap-hi: #F65219; --lip: #B83002; --rim: 0.32; --sheen: 0.12; color: #FFF4EE; }
+.ep-key--grey { --cap: #555352; --cap-hi: #5E5C5A; --lip: #383635; --rim: 0.16; --sheen: 0.07; color: #E2E0DD; }
+.ep-key--slim { display: grid; place-items: center; padding-bottom: 5px; font-size: 22px; font-weight: 400; letter-spacing: 0.06em; }
+.ep-key--word { display: grid; justify-items: center; align-content: start; padding-top: 17px; font-size: 22px; font-weight: 400; letter-spacing: 0.06em; }
+.ep-key--sign { display: grid; place-items: center; padding: 0 3px 6px 0; }
+.ep-key--sign svg { width: 44px; height: 44px; }
+.ep-key--sign path { fill: none; stroke: #2E2D2C; stroke-width: 2.2; }
+.ep-key.is-sel { color: #FF6A2A; }
+/* Lit: cues in the cap (a brighter face, a glow), no rings. */
+.ep-key--grey.is-lit {
+  --cap: #77736F;
+  --cap-hi: #837F7B;
+  --lip: #4A4745;
+  --rim: 0.28;
+  --sheen: 0.1;
+  color: #FFFFFF;
+  text-shadow: 0 0 8px rgb(255 255 255 / 0.8);
+  filter: drop-shadow(0 0 7px rgb(255 255 255 / 0.3));
+}
+/* RECORD: lit while recording, blinking while armed. Lit is white-hot (a lighter cap, a bright sheen,
+ * the legend glowing white, a wide halo), well clear of the idle cap's orange. */
+.ep-key--orange.is-on {
+  --cap: #FF7A3C;
+  --cap-hi: #FF9A62;
+  --lip: #D24A10;
+  --rim: 0.6;
+  --sheen: 0.45;
+  color: #FFFFFF;
+  text-shadow: 0 0 6px #FFFFFF, 0 0 12px rgb(255 255 255 / 0.8);
+  filter: drop-shadow(0 0 22px rgb(255 90 20 / 0.8));
+}
+.ep-key--orange.is-armed { animation: ep-armed 900ms step-end infinite; }
+@keyframes ep-armed {
+  50% {
+    --cap: #FF7A3C;
+    --cap-hi: #FF9A62;
+    --lip: #D24A10;
+    --rim: 0.6;
+    --sheen: 0.45;
+    color: #FFFFFF;
+    text-shadow: 0 0 6px #FFFFFF, 0 0 12px rgb(255 255 255 / 0.8);
+    filter: drop-shadow(0 0 22px rgb(255 90 20 / 0.8));
+  }
+}
+.ep-key--group { text-align: start; }
+.ep-key__letter { position: absolute; left: 18px; top: 9px; font-size: 38px; font-weight: var(--ep-thin); line-height: 1; text-shadow: 0 1px 0 rgb(0 0 0 / 0.1); }
+.ep-key__icon { position: absolute; left: 19px; bottom: 25px; width: 24px; height: 24px; }
+.ep-key__icon path { fill: none; stroke: #F4F3F1; stroke-width: 1.15; stroke-linecap: round; stroke-linejoin: round; }
+/* The group's pattern where the scene is worth saying, in the glyph's place; the one waiting blinks. */
+/* The numbers are state, not print: dark ink (and a deep orange waiting) so they read on the grey cap. */
+.ep-key__num { position: absolute; left: 19px; bottom: 20px; font-size: 26px; font-weight: 400; line-height: 1; letter-spacing: 0.04em; font-variant-numeric: tabular-nums; white-space: nowrap; color: #2E2D2C; text-shadow: none; }
+.ep-key__num.is-queued { color: #A82C00; animation: scene-blink 700ms ease-in-out infinite alternate; }
+.ep-key--group.is-queued { outline: 6px solid #FF4C00; outline-offset: -9px; }
 
-/* ---- pads: black keys that take the signal colour as they sound ---- */
-.ep-pad {
-  padding: 0;
-  border: 0;
-  border-radius: 12px;
-  cursor: pointer;
-  text-align: start;
-  color: #F1F1F1;
-  touch-action: none;
-  user-select: none;
-  -webkit-user-select: none;
-  -webkit-touch-callout: none;
-  background: color-mix(in oklab, #FF4C00 var(--glow-pct), #1E1E1F);
-  box-shadow: 0 9px 0 color-mix(in oklab, #A33000 var(--glow-pct), #040404), 0 14px 16px rgb(0 0 0 / 0.35);
+/* Two-word keys: a short raised cap over a flat printed tile, in one well. Live's function keys on
+ * the drawn ones (SOUND, MAIN as PROJECT, TEMPO, FX, SAMPLE, ERASE) light a signal ring in the cap
+ * while on, and the cap orange while held. */
+.ep-key--split { border: 0; background: none; box-shadow: none; border-radius: 3px; overflow: visible; }
+.ep-key--split:active:not(:disabled) { transform: none; box-shadow: none; }
+.ep-h { position: absolute; display: grid; place-items: center; font-size: 22px; font-weight: 400; letter-spacing: 0.05em; white-space: nowrap; }
+.ep-key--split > .ep-h:first-child {
+  left: 4px;
+  top: 3px;
+  right: 6px;
+  height: 56px;
+  padding-bottom: 5px;
+  border-radius: 8px;
+  z-index: 1;
+  background:
+    radial-gradient(140% 90% at 22% 0%, rgb(255 255 255 / var(--sheen)), transparent 65%),
+    linear-gradient(180deg, var(--cap-hi), var(--cap) 55%);
+  box-shadow:
+    inset 0 2px 0 rgb(255 255 255 / var(--rim)),
+    inset 2px 0 0 rgb(255 255 255 / calc(var(--rim) * 0.45)),
+    inset -3px -6px 0 var(--lip),
+    inset -4px -8px 5px -3px color-mix(in srgb, var(--lip) 55%, transparent),
+    inset 0 0 0 1px rgb(0 0 0 / 0.2),
+    1px 5px 5px rgb(0 0 0 / 0.55);
   transition: transform 60ms;
 }
-.ep-pad:active:not(:disabled) { transform: translateY(7px); box-shadow: 0 2px 0 #040404; }
+.ep-key--split:active > .ep-h:first-child {
+  transform: translate(1px, 3px);
+  box-shadow: inset 0 2px 0 rgb(255 255 255 / calc(var(--rim) * 0.6)), inset -2px -3px 0 var(--lip), 0 2px 2px rgb(0 0 0 / 0.5);
+}
+.ep-key--split > .ep-h:last-child {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  top: 66px;
+  padding-top: 2px;
+  border-radius: 0 0 3px 3px;
+  background: linear-gradient(180deg, rgb(0 0 0 / 0.32) 0, rgb(0 0 0 / 0.08) 9px, transparent 16px), var(--tile);
+  box-shadow: inset 0 -1px 0 rgb(0 0 0 / 0.12), inset 0 1px 0 rgb(0 0 0 / 0.2);
+}
+.ep-h--black { --cap: #262626; --cap-hi: #2F2F2F; --lip: #131313; --rim: 0.14; --sheen: 0.05; color: #EDEDEC; }
+.ep-h--orange:first-child { --cap: #F24C14; --cap-hi: #F95A1E; --lip: #B83204; --rim: 0.32; --sheen: 0.12; color: #FFF4EE; }
+.ep-h--lighter { --cap: #CDC9C6; --cap-hi: #D7D3D0; --lip: #A29E9A; --rim: 0.7; --sheen: 0.2; color: #3A3836; }
+.ep-h--light { --tile: #DEDAD6; color: #3A3836; }
+.ep-h--light.ep-h--edit { --tile: #E4E1DD; }
+.ep-h--orange:last-child { --tile: #F7531A; color: #FFF4EE; }
+.ep-h--grey { --tile: #858583; color: #F1F1F0; }
+.ep-key--split.is-lit > .ep-h:first-child {
+  --ring: #FF4C00;
+  box-shadow: inset 0 0 0 3px var(--ring), inset 0 2px 0 rgb(255 255 255 / var(--rim)), inset -3px -6px 0 var(--lip), 1px 5px 5px rgb(0 0 0 / 0.55), 0 0 18px 2px rgb(255 76 0 / 0.45);
+}
+/* On SAMPLE's orange cap the ring is white. */
+.ep-key--split.is-lit > .ep-h--orange:first-child { --ring: #FFF4EE; }
+.ep-key--split.is-held > .ep-h:first-child { --cap: #F24C14; --cap-hi: #FF5A1E; --lip: #B83204; --rim: 0.32; --sheen: 0.12; color: #FFFFFF; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ep-rec.is-armed,
+  .ep-key--orange.is-armed,
+  .ep-led.is-sounding,
+  .ep-key__num.is-queued { animation: none; }
+  .ep-key,
+  .ep-pad,
+  .ep-key--split > .ep-h:first-child { transition: none; }
+}
+
+/* ---- the pads: black caps; a sounding one lights whole, from a deep ember to signal orange with its
+ * glow (--glow: the grid's, 0..1; --on: lit at all, fading out below a quarter) ---- */
+.ep-pad {
+  --on: clamp(0, var(--glow, 0) * 4, 1);
+  --on-pct: calc(var(--on) * 100%);
+  --glow-pct: calc(var(--glow, 0) * 100%);
+  --cap: color-mix(in oklab, color-mix(in oklab, #FF5A1E var(--glow-pct), #B8360A) var(--on-pct), #242424);
+  --cap-hi: color-mix(in oklab, color-mix(in oklab, #FF6E33 var(--glow-pct), #C4400F) var(--on-pct), #2D2D2D);
+  --lip: color-mix(in oklab, color-mix(in oklab, #A33000 var(--glow-pct), #7A2200) var(--on-pct), #121212);
+  --rim: calc(0.13 + 0.2 * var(--on));
+  text-align: start;
+  color: #EEEEED;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  filter: drop-shadow(0 0 calc(24px * var(--glow, 0)) rgb(255 76 0 / calc(0.55 * var(--glow, 0))));
+}
 .ep-pad:disabled { cursor: default; }
-.ep-pad.is-playing::after { content: ''; position: absolute; inset: -9px; border: 6px solid #FF4C00; border-radius: 18px; pointer-events: none; }
-.ep-pad__num { position: absolute; left: 22px; top: 6px; font-size: 58px; font-weight: 300; line-height: 1.1; }
-.ep-pad__num--word { left: 0; right: 0; top: 20px; text-align: center; font-size: 28px; font-weight: 400; letter-spacing: 0.02em; }
+.ep-pad.is-playing::after { content: ''; position: absolute; inset: -3px; border: 4px solid #FF4C00; border-radius: 11px; pointer-events: none; }
+.ep-pad__num { position: absolute; left: 19px; top: 12px; font-size: 40px; font-weight: var(--ep-thin); line-height: 1; letter-spacing: 0; }
+.ep-pad__num--word { left: 0; right: 3px; top: 17px; text-align: center; font-size: 22px; font-weight: 400; letter-spacing: 0.06em; }
+.ep-pad__num--dot { left: 25px; top: 27px; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .ep-pad__name {
   position: absolute;
   left: 18px;
   right: 12px;
-  bottom: 12px;
+  bottom: 14px;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
-  font-size: 24px;
+  font-size: 22px;
+  font-weight: 400;
   line-height: 1.1;
   overflow-wrap: anywhere;
   color: color-mix(in oklab, #FFFFFF var(--hot-pct), #8C8C8C);
 }
+/* KEYS: the note in a thin ring that goes white and glows as it sounds; orange for the octave above. */
 .ep-pad__ring {
   position: absolute;
   left: 50%;
-  top: 52%;
-  width: 84px;
-  height: 84px;
-  margin: -42px 0 0 -42px;
+  top: 47%;
+  width: 72px;
+  height: 72px;
+  margin: -36px 0 0 -38px;
   display: grid;
   place-items: center;
-  border: 9px solid color-mix(in oklab, #FFFFFF var(--hot-pct), #D9D8D3);
+  border: 2.5px solid color-mix(in oklab, #FFFFFF var(--glow-pct), #CFCDC9);
   border-radius: 50%;
-  font-size: 24px;
-  font-weight: 700;
+  font-size: 22px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  text-indent: 0.06em;
+  box-shadow: inset 0 0 calc(10px * var(--glow, 0)) rgb(255 255 255 / calc(0.25 * var(--glow, 0)));
 }
-.ep-pad--upper .ep-pad__ring { border-color: color-mix(in oklab, #FFFFFF var(--hot-pct), #FF4C00); }
-.ep-pad__oct { position: absolute; right: 12px; bottom: 8px; font-size: 20px; color: color-mix(in oklab, #FFFFFF var(--hot-pct), #8C8C8C); }
+.ep-pad--upper .ep-pad__ring { border-color: color-mix(in oklab, #FFFFFF var(--hot-pct), #FF5A1E); }
+.ep-pad__oct { position: absolute; right: 16px; bottom: 14px; font-size: 18px; font-weight: 400; color: color-mix(in oklab, rgb(255 255 255 / 0.75) var(--hot-pct), #8C8C8C); }
 
 /* ---- Live's states on the drawn pads (MirrorScreen.css's .live-pad ones, in the drawing's units) ---- */
-.ep-pad[data-down] { transform: translateY(7px); box-shadow: 0 2px 0 #040404; }
 .ep-pad.is-editing::before {
   content: '';
   position: absolute;
   inset: 0;
-  border: 6px solid color-mix(in oklab, #FF4C00 75%, transparent);
-  border-radius: inherit;
+  border: 5px solid color-mix(in oklab, #FF4C00 75%, transparent);
+  border-radius: 9px;
   pointer-events: none;
 }
 .ep-pad__swap,
 .ep-pad__drop {
   position: absolute;
-  top: 14px;
-  right: 14px;
+  top: 12px;
+  right: 12px;
   display: grid;
   place-items: center;
-  border-radius: 10px;
+  border-radius: 8px;
   background: #FF4C00;
   color: #FFFFFF;
   line-height: 1;
 }
-.ep-pad__swap { top: auto; bottom: 14px; width: 46px; height: 46px; font-size: 30px; }
-.ep-pad__drop { padding: 8px 12px; font-size: 22px; font-weight: 800; }
-.ep-pad.is-drop { outline: 8px dashed #FF4C00; outline-offset: 8px; }
+.ep-pad__swap { top: auto; bottom: 14px; width: 42px; height: 42px; font-size: 28px; }
+.ep-pad__drop { padding: 7px 10px; font-size: 20px; font-weight: 500; letter-spacing: 0.04em; }
+.ep-pad.is-drop { outline: 6px dashed #FF4C00; outline-offset: 6px; }
 .ep-pad.is-erase-dim { opacity: 0.45; }
 .ep-pad.is-erase-dot::before {
   content: '';
   position: absolute;
   top: 18px;
   right: 18px;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   background: #FF4C00;
   pointer-events: none;
@@ -285,25 +540,25 @@
 .ep-pad.is-step-lit,
 .ep-pad.is-arp-held,
 .ep-pad.is-sample-empty,
-.ep-pad.is-sample-filled { outline: 6px solid #FF4C00; outline-offset: -12px; }
+.ep-pad.is-sample-filled { outline: 5px solid #FF4C00; outline-offset: -14px; }
 .ep-pad.is-step-picked,
 .ep-pad.is-sample-waiting,
-.ep-pad.is-sample-recording { outline: 9px solid #FF4C00; outline-offset: -14px; }
+.ep-pad.is-sample-recording { outline: 8px solid #FF4C00; outline-offset: -16px; }
 .ep-pad.is-step-lit .ep-pad__num,
 .ep-pad.is-step-picked .ep-pad__num { color: #FF4C00; }
-.ep-pad.is-sample-recording { background: #FF4C00; }
-.ep-pad.is-step-picked { box-shadow: 0 9px 0 #040404, 0 0 0 10px rgb(255 76 0 / 0.28); }
+.ep-pad.is-step-picked { filter: drop-shadow(0 0 10px rgb(255 76 0 / 0.45)); }
+.ep-pad.is-sample-recording { --cap: #FF4C00; --cap-hi: #FF5A1E; --lip: #A33000; }
 .ep-pad__nudge {
   position: absolute;
   left: 14px;
-  right: 14px;
-  bottom: 12px;
+  right: 16px;
+  bottom: 14px;
   padding: 4px 0;
-  border-radius: 6px;
+  border-radius: 5px;
   background: #FF4C00;
   color: #FFFFFF;
-  font-size: 20px;
-  font-weight: 700;
+  font-size: 18px;
+  font-weight: 500;
   letter-spacing: 0.1em;
   text-align: center;
 }
@@ -316,22 +571,21 @@
   position: absolute;
   top: 12px;
   right: 16px;
-  font-size: 26px;
-  font-weight: 700;
-  color: #FF4C00;
+  font-size: 24px;
+  font-weight: 500;
+  color: color-mix(in oklab, #FFFFFF var(--hot-pct), #FF4C00);
 }
 /* FX held: the pads are the punch-ins, the effect's name where the pad prints its sound. */
 .ep-punch {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  padding: 14px 8px 14px 12px;
-  --glow-pct: calc(var(--glow, 0) * 100%);
+  padding: 14px 10px 16px 14px;
 }
-.ep-punch .live-punch__name { font-size: 23px; letter-spacing: 0; overflow-wrap: normal; word-break: normal; hyphens: none; }
-.ep-punch .live-punch__hold { font-size: 22px; color: #8C8C8C; }
+.ep-punch .live-punch__name { font-size: 21px; font-weight: 400; letter-spacing: 0.02em; overflow-wrap: normal; word-break: normal; hyphens: none; }
+.ep-punch .live-punch__hold { font-size: 20px; font-weight: 400; color: #8C8C8C; }
 .ep-punch.is-held .live-punch__hold { color: #FFFFFF; }
-.ep-punch .live-punch__bar { height: 12px; margin-bottom: 6px; }
+.ep-punch .live-punch__bar { height: 10px; margin-bottom: 4px; }
 
 /* ---- a key's shortcuts ---- */
 .ep-card {
