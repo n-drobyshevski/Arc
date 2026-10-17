@@ -76,8 +76,10 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
     await sheet.getByRole('button', { name: 'Restore 12 sounds and 3 projects' }).click()
     const progress = page.getByRole('dialog', { name: 'Restoring' })
     await expect(progress).toBeVisible()
-    await expect(progress).toBeHidden({ timeout: 60_000 })
-    await expect(page.getByRole('status').filter({ hasText: 'Restored 12 sounds and 3 projects.' })).toBeVisible()
+    // The toast comes as the restore ends and stays 3.2 s: watched for first, as a slow run can
+    // spend that long confirming the progress dialog has gone.
+    await expect(page.getByRole('status').filter({ hasText: 'Restored 12 sounds and 3 projects.' })).toBeVisible({ timeout: 60_000 })
+    await expect(progress).toBeHidden()
     const after = await demo(page, (d) => ({ dropped: d.mock.dropped, sounds: d.mock.sounds.size, handled: d.mock.log.length }))
     expect(after.dropped).toBe(0)
     expect(after.sounds).toBe(12)
@@ -123,7 +125,8 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
     await expect.poll(() => coachHides(page)).toEqual([])
     await page.keyboard.press('Escape')
     await expect(coach).toBeHidden()
-    // In KEYS the tools go behind the edge strip, and slide out over the page.
+    // The grid (the drawn EP-133 is the desk's default): in KEYS the tools go behind the edge strip, and slide out over the page.
+    await page.getByRole('radio', { name: 'One group' }).click()
     await page.getByRole('button', { name: 'Pads. Tap for keys.' }).click()
     await page.getByRole('button', { name: 'Live tools' }).click()
     const panel = page.getByRole('dialog', { name: 'Live tools' })
@@ -180,7 +183,7 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
   })
 
   await test.step('7c. EDIT: a pad gets another sound at once, and UNDO puts the old one back', async () => {
-    await page.getByRole('button', { name: "Edit pads: change a pad's sound." }).click()
+    await page.getByRole('switch', { name: 'Sound' }).click()
     await page.locator('[data-pad]', { hasText: 'kick' }).first().click()
     const sheet = page.getByRole('dialog', { name: /^Pad A / })
     await expect(sheet).toBeVisible()
@@ -192,7 +195,7 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
     await page.getByRole('button', { name: 'Undo' }).click()
     await expect(page.getByRole('status')).toContainText('back to kick')
     await expect(page.locator('[data-pad]', { hasText: 'kick' })).toHaveCount(1)
-    await page.getByRole('button', { name: /^Editing pads/ }).click()
+    await page.getByRole('switch', { name: 'Sound' }).click()
   })
 
   await test.step('8. import sample.pak: a second row', async () => {
@@ -302,7 +305,8 @@ for (const size of SIZES) {
           })
         }
         await page.goto('/?demo#/backups')
-        await expect(page.locator('.device-panel__stat').first()).toHaveText(/^12\s*sounds$/)
+        // A short window's panel is one line (the free space, no stats).
+        await expect(page.locator('.device-panel')).toContainText(size.height < 480 ? 'free' : '12')
         await importPak(page, SAMPLE_PAK)
         await expect(page.getByRole('region', { name: 'Backups' }).getByRole('listitem')).toHaveCount(1)
         await shot('backups')
@@ -314,7 +318,12 @@ for (const size of SIZES) {
         await demo(page, (d) => d.noteOn(36, 127))
         await shot('live')
         await demo(page, (d) => d.noteOff(36))
-        if (size.width > size.height) {
+        if (size.width >= 1024) {
+          // The desk draws the EP-133: its KEYS key makes the pads notes.
+          await page.getByRole('group', { name: 'EP-133 K.O. II' }).getByRole('button', { name: 'Keys', exact: true }).click()
+          await expect(page.locator('[data-key]')).toHaveCount(12)
+          await shot('live-keys')
+        } else if (size.width > size.height) {
           await page.getByRole('button', { name: 'Pads. Tap for keys.' }).click()
           await expect(page.locator('.piano')).toBeVisible()
           await shot('live-keys')

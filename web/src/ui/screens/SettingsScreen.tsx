@@ -39,9 +39,11 @@
 //   left dead.
 // - The keys view (keysViewWide / keysViewTall) has no row here: Live's
 //   Pads / Piano switch remembers it per window shape.
-// - Web only, the desktop page (from 1024px wide, theme/desk.css): one paper
-//   card, a section nav on its left (the section in view lit by its LED, as
-//   the nav rail's keys) and the sections scrolling in the pane beside it.
+// - From 720 wide (Kotlin WideSettings): a 220 wide section nav on the left,
+//   the title and the close key at its head (the section in view lit by its
+//   LED, as the nav rail's keys; a tap scrolls to one), a hairline, and the
+//   sections scrolling in the pane beside it. Web only, on the desk (from
+//   1024px, theme/desk.css): the two on one paper card.
 import type { ComponentChildren, JSX } from 'preact'
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { NOTE_NAMES, type NoteNames } from '../../core/features/keys'
@@ -65,7 +67,7 @@ import { Segmented } from '../components/Segmented'
 import { LinkRow, RowAction, RowCard, SettingRow } from '../components/SettingRow'
 import { pianoWidth } from '../live/keyboard'
 import { dialogLayer } from '../nav'
-import { useDesk } from '../useDesk'
+import { SETTINGS_WIDE_QUERY, useMedia } from '../useDesk'
 import './SettingsScreen.css'
 
 export interface SettingsScreenProps {
@@ -253,7 +255,8 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
   const factory = props.factorySounds
   const nav = useNav()
   const v = nav.view.value
-  const desk = useDesk()
+  // Two panes from 720 wide (Kotlin WideSettings).
+  const wide = useMedia(SETTINGS_WIDE_QUERY)
   const win = useWindowSize()
   const root = useRef<HTMLDivElement | null>(null)
   const pane = useRef<HTMLDivElement | null>(null)
@@ -285,13 +288,13 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
     root.current?.focus({ preventScroll: true })
   }, [])
 
-  // The desk's section nav: the section in view is lit; a tap scrolls to one.
+  // The two panes' section nav: the section in view is lit; a tap scrolls to one.
   const [active, setActive] = useState(0)
   // After a tap, the tapped section stays lit while the pane scrolls to it.
   const holdUntil = useRef(0)
   useEffect(() => {
     const el = pane.current
-    if (!desk || !el) return
+    if (!wide || !el) return
     let raf = 0
     const spy = (): void => {
       raf = 0
@@ -309,7 +312,7 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
       el.removeEventListener('scroll', onScroll)
       if (raf) cancelAnimationFrame(raf)
     }
-  }, [desk])
+  }, [wide])
   const goTo = (i: number): void => {
     const el = pane.current
     const section = el?.querySelector<HTMLElement>(`[data-section="${SECTIONS[i]}"]`)
@@ -352,9 +355,12 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
   return (
     <div ref={root} class="settings" data-screen="settings" tabIndex={-1} aria-labelledby={titleId}>
       <div class="settings__column">
-        {desk ? (
+        {wide ? (
           <nav class="settings__nav" aria-labelledby={titleId}>
-            {title}
+            <div class="settings__nav-head">
+              {title}
+              {close}
+            </div>
             <ul class="settings__nav-list">
               {SECTIONS.map((s, i) => (
                 <li key={s}>
@@ -379,7 +385,6 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
         )}
 
         <div class="settings__pane">
-          {desk && <div class="settings__pane-head">{close}</div>}
           <div ref={pane} class="settings__scroll">
             <Section id="appearance">
               <RowCard>
@@ -535,19 +540,6 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
                     />
                   )}
                 />
-                {/* What the output's clock counts of the delay and what arc makes up beyond it; nothing off Bluetooth. */}
-                <SettingRow
-                  title={SettingsText.MAKE_UP_DELAY}
-                  note={SettingsText.MAKE_UP_DELAY_NOTE}
-                  info={
-                    props.bluetooth != null
-                      ? SettingsText.delayNow(props.bluetooth > 0 ? props.bluetooth : null, OutputDelay.ms(true, true, props.bluetooth))
-                      : SettingsText.DELAY_NONE
-                  }
-                  control={(ids) => (
-                    <HwToggle on={settings.makeUpDelay} onChange={(on) => props.onMakeUpDelay?.(on)} labelledBy={ids.titleId} describedBy={ids.noteId} />
-                  )}
-                />
                 {props.hapticsSupported === true && (
                   <SettingRow
                     title={SettingsText.HAPTICS}
@@ -562,6 +554,19 @@ export function SettingsScreen(props: SettingsScreenProps): JSX.Element {
                     )}
                   />
                 )}
+                {/* What the output's clock counts of the delay and what arc makes up beyond it; nothing off Bluetooth. */}
+                <SettingRow
+                  title={SettingsText.MAKE_UP_DELAY}
+                  note={SettingsText.MAKE_UP_DELAY_NOTE}
+                  info={
+                    props.bluetooth != null
+                      ? SettingsText.delayNow(props.bluetooth > 0 ? props.bluetooth : null, OutputDelay.ms(true, true, props.bluetooth))
+                      : SettingsText.DELAY_NONE
+                  }
+                  control={(ids) => (
+                    <HwToggle on={settings.makeUpDelay} onChange={(on) => props.onMakeUpDelay?.(on)} labelledBy={ids.titleId} describedBy={ids.noteId} />
+                  )}
+                />
                 {props.onReviewSamples !== undefined && (
                   <SettingRow
                     title={SettingsText.REVIEW_SAMPLES}

@@ -52,6 +52,7 @@ import { REVIEW_KEY, type ArcController } from './state/controller'
 import { emptyMirrorState, type MirrorUi, type TaskUi } from './state/types'
 import { APP_BUILD } from './version'
 import { AppProvider, useController, useNav } from './ui/AppContext'
+import { HapticsContext } from './ui/useHaptic'
 import {
   Nav,
   bindViewHooks,
@@ -67,7 +68,6 @@ import {
 } from './ui/nav'
 import { CoachHost, useCoachFirstRun } from './ui/components/Coach'
 import { Dialog } from './ui/components/Dialog'
-import { EditEdgeTab } from './ui/components/EditEdgeTab'
 import { Key } from './ui/components/Key'
 import { NavRail } from './ui/components/NavRail'
 import { Sheet } from './ui/components/Sheet'
@@ -181,23 +181,22 @@ export function App(props: AppProps): JSX.Element {
 /** The guide's search when a device key's card asks for it (web only). */
 const guideSearch = signal<{ readonly query: string } | null>(null)
 
-/** Live's device view on the desk (web only), remembered in this browser. */
+/** Live's device view on the desk (web only): the drawn EP-133 unless the grid was chosen, remembered in this browser. */
 const DEVICE_VIEW_KEY = 'arc.liveDeviceView'
 const deviceView = signal<boolean>(readDeviceView())
 
 function readDeviceView(): boolean {
   try {
-    return globalThis.localStorage?.getItem(DEVICE_VIEW_KEY) === '1'
+    return globalThis.localStorage?.getItem(DEVICE_VIEW_KEY) !== '0'
   } catch {
-    return false
+    return true
   }
 }
 
 function setDeviceView(on: boolean): void {
   deviceView.value = on
   try {
-    if (on) globalThis.localStorage?.setItem(DEVICE_VIEW_KEY, '1')
-    else globalThis.localStorage?.removeItem(DEVICE_VIEW_KEY)
+    globalThis.localStorage?.setItem(DEVICE_VIEW_KEY, on ? '1' : '0')
   } catch {
     // Kept for this page only.
   }
@@ -467,7 +466,6 @@ function Root(): JSX.Element {
         guide={<GuideScreen onBack={() => nav.close(screenLayer({ kind: 'guide' }))} search={guideSearch.value} />}
         desk={desk}
         // Live's EDIT tab under GUIDE (on the desk it hangs on the K.O. II panel instead).
-        edgeTab={canEdit && !desk ? <EditEdgeTab on={editPads} onChange={setEditPads} inert={v.menu} /> : undefined}
         middle={liveBar ? <LiveBar pianoRange={pianoRange} editing={editPads} /> : undefined}
       >
         <TabScreen view={v} editPads={editPads} onEditPads={setEditPads} inBar={liveBar} onPianoRange={setPianoRange} />
@@ -489,6 +487,7 @@ function Root(): JSX.Element {
   const screen = <div class="app__screen" data-view={view}>{page}</div>
   const guide = screenLayer({ kind: 'guide' })
   return (
+    <HapticsContext.Provider value={settings.haptics && hapticsSupported()}>
     <TransportContext.Provider value={transport}>
     <StepContext.Provider value={step}>
     <SceneContext.Provider value={scenes}>
@@ -537,7 +536,7 @@ function Root(): JSX.Element {
       {/* The EP-133 connected with offline pad changes kept: write them, or discard them. */}
       <Dialog
         open={state.offlinePrompt !== null}
-        text={MirrorText.putOffline(state.offlinePrompt ?? 0)}
+        text={MirrorText.putOffline(state.offlinePrompt?.changes ?? 0, state.offlinePrompt?.samples ?? 0)}
         confirm={MirrorText.WRITE}
         cancel={MirrorText.DISCARD}
         confirmColor="var(--navy)"
@@ -559,6 +558,7 @@ function Root(): JSX.Element {
     </SceneContext.Provider>
     </StepContext.Provider>
     </TransportContext.Provider>
+    </HapticsContext.Provider>
   )
 }
 
@@ -1006,7 +1006,7 @@ function liveKeys(c: ArcController): KeysShown {
 
 /** What sounds on the phone, as signals read by each pad and key: a voice doesn't re-render the screen. */
 function livePlaying(c: ArcController): LivePlaying {
-  return { pads: c.playingPads, notes: c.playingNotes }
+  return { pads: c.playingPads, notes: c.playingNotes, arpPads: c.arpPads, arpNotes: c.arpNotes }
 }
 
 /** The section under the top bar (Root's `when (tab)`). */
@@ -1075,6 +1075,7 @@ function TabScreen(props: {
             else if (cur !== PICK + p) nav.replace(dialogLayer(cur), dialogLayer(PICK + p))
           }}
           onPad={(pad, hold, unsure, at) => void c.playPad(pad, hold, unsure, at)}
+          onPadHear={(pad) => void c.hearPad(pad)}
           onPadKept={(pad) => void c.keepPad(pad)}
           onPadUp={(pad) => c.releasePad(pad)}
           onPadCut={(pad) => c.cutPad(pad)}

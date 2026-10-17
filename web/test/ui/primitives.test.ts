@@ -8,6 +8,8 @@ import { rovingIndex, rovingIndexSkipping } from '../../src/ui/components/Segmen
 import { octaveKeys } from '../../src/ui/components/MiniPiano'
 import { takeChars } from '../../src/ui/components/Field'
 import { toastDuration, TOAST_MS, ERROR_TOAST_MS } from '../../src/ui/components/Toast'
+import { readFileSync } from 'node:fs'
+import { SETTINGS_WIDE_QUERY, SHORT_QUERY, WIDE_QUERY } from '../../src/ui/useDesk'
 import { plateRowClass } from '../../src/ui/components/GridPlate'
 import {
   clampRange, keyStep, keyValue, moveThumb, nearestThumb, snap, valueAt,
@@ -337,5 +339,20 @@ describe('MiniPiano', () => {
     expect(di.width * 7).toBeCloseTo(0.6)
     // FI on the gap after FA (the fourth white).
     expect((keys[6]!.left + keys[6]!.width / 2) * 7).toBeCloseTo(4)
+  })
+})
+
+describe('window queries (Window.kt rules as media queries)', () => {
+  it('match the CSS breakpoints', () => {
+    expect(SETTINGS_WIDE_QUERY).toBe('(min-width: 720px)')
+    expect(WIDE_QUERY).toBe('(min-width: 840px) and (min-height: 480px)')
+    expect(SHORT_QUERY).toBe('(max-height: 479.98px)')
+  })
+
+  it('are the queries the screens CSS switches on', () => {
+    const css = (f: string): string => readFileSync(new URL(`../../src/ui/screens/${f}`, import.meta.url), 'utf8')
+    expect(css('SettingsScreen.css')).toContain(`@media ${SETTINGS_WIDE_QUERY}`)
+    expect(css('DeviceScreen.css')).toContain(`@media ${WIDE_QUERY}`)
+    expect(css('GuideScreen.css')).toContain(`@media ${WIDE_QUERY}`)
   })
 })

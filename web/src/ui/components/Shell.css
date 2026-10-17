@@ -46,12 +46,6 @@
   z-index: 10;
 }
 
-/* A second edge tab (Live's EDIT): under GUIDE, 18 apart. */
-.shell__edge-tab--second {
-  display: flex;
-  transform: translateY(calc(-50% - 80px + var(--edge-tab-height) + 18px));
-}
-
 /* The guide slides in from the left over everything (top bar too). */
 .shell__guide {
   position: absolute;

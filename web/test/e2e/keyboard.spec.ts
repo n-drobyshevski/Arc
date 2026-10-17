@@ -2,7 +2,7 @@
 // appKeys.ts). Live's pads and controls in PADS and KEYS, the Keyboard keys
 // sheet on ?, Esc for screens and EDIT, and Settings → Computer keyboard.
 import type { Page } from '@playwright/test'
-import { expect, test } from './fixtures'
+import { expect, gridOnDesk, test } from './fixtures'
 
 const downPads = (page: Page): Promise<string[]> =>
   page.evaluate(() => [...document.querySelectorAll('[data-pad][data-down]')].map((e) => e.getAttribute('aria-label') ?? ''))
@@ -38,18 +38,18 @@ test('PADS: pad keys hold pads, A–D pick the group, V the view, E EDIT and Esc
   await expect(page.locator('[data-pad]')).toHaveCount(12)
 
   // E: EDIT on; a pad key opens that pad's sound; Esc closes the sheet, then leaves EDIT.
-  const tab = page.locator('.live-edit-tab')
+  const tab = page.getByRole('switch', { name: 'Sound' })
   await page.keyboard.press('KeyE')
-  await expect(tab).toHaveAttribute('aria-pressed', 'true')
+  await expect(tab).toHaveAttribute('aria-checked', 'true')
   await page.keyboard.press('Digit7')
   const sheet = page.getByRole('dialog')
   await expect(sheet).toBeVisible()
   await expect(sheet).toContainText('B 7')
   await page.keyboard.press('Escape')
   await expect(sheet).toBeHidden()
-  await expect(tab).toHaveAttribute('aria-pressed', 'true')
+  await expect(tab).toHaveAttribute('aria-checked', 'true')
   await page.keyboard.press('Escape')
-  await expect(tab).toHaveAttribute('aria-pressed', 'false')
+  await expect(tab).toHaveAttribute('aria-checked', 'false')
 
   // / opens the Sounds tab's search; typing there plays nothing and switches nothing.
   await page.keyboard.press('Slash')
@@ -58,11 +58,14 @@ test('PADS: pad keys hold pads, A–D pick the group, V the view, E EDIT and Esc
   await page.keyboard.type('e5ab')
   await expect(find).toHaveValue('e5ab')
   expect(await downPads(page)).toEqual([])
-  await expect(tab).toHaveAttribute('aria-pressed', 'false')
+  await expect(tab).toHaveAttribute('aria-checked', 'false')
   await expect(page.getByRole('tab', { name: 'Group B' })).toHaveAttribute('aria-selected', 'true')
 })
 
 test('KEYS: M switches, the piano keeps its letters, the grid plays the pad keys, [ ] and Shift step key and scale', async ({ page }) => {
+  await gridOnDesk(page)
+  await page.reload()
+  await expect(page.locator('[data-pad]')).toHaveCount(12)
   await page.keyboard.press('KeyM')
   // A wide window: the piano. Its letters play as before.
   const piano = page.locator('.live-piano__keys')
@@ -117,6 +120,9 @@ test('KEYS: M switches, the piano keeps its letters, the grid plays the pad keys
 })
 
 test('? lists the keys, Esc closes screens but never leaves a section, and the Settings switch silences single keys', async ({ page }) => {
+  await gridOnDesk(page)
+  await page.reload()
+  await expect(page.locator('[data-pad]')).toHaveCount(12)
   await page.keyboard.press('Shift+Slash')
   const sheet = page.getByRole('dialog', { name: 'Keyboard keys' })
   await expect(sheet).toBeVisible()
@@ -219,6 +225,9 @@ test('a pad held while the window loses focus is let go', async ({ page }) => {
 })
 
 test('NumLock-off number pad arrows still move a control where Live takes no such key', async ({ page }) => {
+  await gridOnDesk(page)
+  await page.reload()
+  await expect(page.locator('[data-pad]')).toHaveCount(12)
   const send = (key: string, code: string): Promise<void> =>
     page.evaluate(
       ([k, c]) => {

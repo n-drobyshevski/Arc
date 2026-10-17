@@ -6,11 +6,20 @@
 // Read synchronously on the first render, so the first paint already has the
 // right layout, and followed through matchMedia's change event. False where
 // matchMedia is missing (node tests, old browsers): the phone layout.
-// Also the window's size and whether the pointer is fine, for Live's piano.
+// Also the window's size and whether the pointer is fine, for Live's piano,
+// and Window.kt's other rules as media queries ([useMedia]): Settings' two
+// panes from 720 wide, Device's and the Guide's side by side from 840 wide
+// unless short, and short (under 480 high) for Backups' one-line panel.
 import { useEffect, useState } from 'preact/hooks'
 
 /** The desktop breakpoint, as in the CSS (media queries cannot share a custom property). */
 export const DESK_QUERY = '(min-width: 1024px)'
+/** Settings' two panes (Kotlin WideSettings, 720 dp), as SettingsScreen.css. */
+export const SETTINGS_WIDE_QUERY = '(min-width: 720px)'
+/** Wide and not short (Kotlin WideWidth 840 dp, Window.kt's short under 480 dp): Device's and the Guide's two columns. */
+export const WIDE_QUERY = '(min-width: 840px) and (min-height: 480px)'
+/** Short (Window.kt: under 480 dp high): Backups' one-line device panel. */
+export const SHORT_QUERY = '(max-height: 479.98px)'
 
 /** Just what useDesk reads of a MediaQueryList (old Safari has only addListener). */
 export interface DeskMedia {
@@ -21,10 +30,10 @@ export interface DeskMedia {
   removeListener?: (fn: () => void) => void
 }
 
-/** The window's desktop query; null where matchMedia is missing. */
-export function deskMedia(): DeskMedia | null {
+/** The window's desktop query (or [query]); null where matchMedia is missing. */
+export function deskMedia(query: string = DESK_QUERY): DeskMedia | null {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return null
-  return window.matchMedia(DESK_QUERY)
+  return window.matchMedia(query)
 }
 
 /** Whether the window is wide enough for the desktop layout now. */
@@ -34,9 +43,14 @@ export function isDesk(media: DeskMedia | null = deskMedia()): boolean {
 
 /** True while the window is at least 1024px wide (re-renders when that changes). */
 export function useDesk(): boolean {
-  const [desk, setDesk] = useState(() => isDesk())
+  return useMedia(DESK_QUERY)
+}
+
+/** True while the window matches [query] (re-renders when that changes); false without matchMedia. */
+export function useMedia(query: string): boolean {
+  const [desk, setDesk] = useState(() => isDesk(deskMedia(query)))
   useEffect(() => {
-    const media = deskMedia()
+    const media = deskMedia(query)
     if (!media) return
     const sync = (): void => setDesk(media.matches)
     sync()
@@ -46,7 +60,7 @@ export function useDesk(): boolean {
     }
     media.addListener?.(sync)
     return () => media.removeListener?.(sync)
-  }, [])
+  }, [query])
   return desk
 }
 

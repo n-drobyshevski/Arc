@@ -27,3 +27,21 @@
 .sample-review__keys { display: flex; flex-direction: column; gap: 10px; }
 .sample-review__pair { display: flex; gap: 10px; }
 .sample-review__pair > * { flex: 1 1 0; min-width: 0; }
+
+/* The columns: nothing of their own on a phone (the sheet's column holds every part), two side by
+ * side on a short window (Kotlin's short layout: the take left, the rest right, small keys). */
+.sample-review__split,
+.sample-review__main,
+.sample-review__side { display: contents; }
+@media (max-height: 479.98px) {
+  .sample-review__split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 20px;
+    align-items: start;
+  }
+  .sample-review__main,
+  .sample-review__side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+  .sample-review__side .key { min-height: 40px; }
+  .sample-review__side .sample-review__keys { gap: 8px; }
+}

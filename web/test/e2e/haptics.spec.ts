@@ -1,9 +1,11 @@
-// End-to-end: the pads' haptic tick (platform/haptics.ts) in Chromium, with
+// End-to-end: Live's haptic feedback (platform/haptics.ts) in Chromium, with
 // the simulated EP-133 of ?demo. navigator.vibrate is replaced by a recorder
 // before the app loads. On an emulated phone (touch screen, coarse pointer) a
 // finger's press on a pad, a KEYS key or a piano key ticks once while
-// Settings → Haptics is on, and not once it is off; on the desktop
-// (vibrate there, but no touch screen) the Settings row is not shown at all.
+// Settings → Haptics is on, and not once it is off; a function key ticks and
+// buzzes longer once held; STEP's keys and the KEYS / PADS strip tick; the
+// connected key ticks on a tap and confirms its hold. On the desktop (vibrate
+// there, but no touch screen) the Settings row is not shown at all.
 import type { Page } from '@playwright/test'
 import { expect, openSettings, test } from './fixtures'
 
@@ -26,6 +28,17 @@ async function recordVibrate(page: Page): Promise<void> {
 const vibrations = (page: Page): Promise<unknown[]> => page.evaluate(() => (window as unknown as { __arcVibrate: unknown[] }).__arcVibrate)
 
 const PHONE = { hasTouch: true, isMobile: true, deviceScaleFactor: 2 }
+
+/** A finger held on [selector]'s middle for [ms] (CDP touch events: the page sees a touch pointer). */
+async function holdFinger(page: Page, selector: string, ms: number): Promise<void> {
+  const b = (await page.locator(selector).first().boundingBox())!
+  const cdp = await page.context().newCDPSession(page)
+  const at = [{ x: b.x + b.width / 2, y: b.y + b.height / 2 }]
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: at })
+  await page.waitForTimeout(ms)
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  await cdp.detach()
+}
 
 test.describe('on a phone', () => {
   test.use({ ...PHONE, viewport: { width: 393, height: 852 } })
@@ -57,6 +70,49 @@ test.describe('on a phone', () => {
     // Give a late tick the time to show.
     await page.waitForTimeout(200)
     expect(await vibrations(page)).toEqual([10, 10])
+  })
+})
+
+test.describe('function keys, STEP and the connection on a phone', () => {
+  test.use({ ...PHONE, viewport: { width: 393, height: 852 } })
+
+  test('a function key ticks on a tap, and buzzes longer once held', async ({ page }) => {
+    await recordVibrate(page)
+    await page.goto('/?demo#/live')
+    await expect(page.locator('[data-pad]')).toHaveCount(12)
+    const sound = page.getByRole('switch', { name: 'Sound' })
+    await sound.tap()
+    await expect.poll(() => vibrations(page)).toEqual([10])
+    await holdFinger(page, '.fn-key[aria-label="Effects"]', 700)
+    await expect.poll(() => vibrations(page)).toEqual([10, 10, 30])
+  })
+
+  test("STEP's keys and the KEYS / PADS strip tick under a finger, a mouse's click doesn't", async ({ page }) => {
+    await recordVibrate(page)
+    await page.goto('/?demo#/live')
+    await expect(page.locator('[data-pad]')).toHaveCount(12)
+    await page.getByRole('button', { name: 'Step editing' }).first().click()
+    const panel = page.getByRole('region', { name: 'Step editing' })
+    await expect(panel).toBeVisible()
+    expect(await vibrations(page)).toEqual([])
+    await panel.getByRole('button', { name: 'Next step' }).tap()
+    await expect.poll(() => vibrations(page)).toEqual([10])
+    await panel.getByRole('button', { name: 'Next step' }).click()
+    await page.waitForTimeout(200)
+    expect(await vibrations(page)).toEqual([10])
+    await page.locator('.mode-strip__key').tap()
+    await expect.poll(() => vibrations(page)).toEqual([10, 10])
+  })
+
+  test('the connected key ticks on a tap and confirms its hold', async ({ page }) => {
+    await recordVibrate(page)
+    await page.goto('/?demo#/live')
+    const key = page.getByRole('button', { name: 'EP-133 connected' })
+    await expect(key).toBeVisible()
+    await key.tap()
+    await expect.poll(() => vibrations(page)).toEqual([10])
+    await holdFinger(page, '[aria-label="EP-133 connected"]', 1300)
+    await expect.poll(() => vibrations(page)).toEqual([10, [15, 40, 15]])
   })
 })
 

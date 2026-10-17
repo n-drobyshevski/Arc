@@ -4,7 +4,7 @@
  * projects as K.O. II pads. The phone's range keys stick to the top of the
  * page as it scrolls (Kotlin's stickyHeader).
  *
- * Web only, from 1024px wide (the desk, theme/desk.css): .device--desk, two
+ * Web only, from 1024px wide (the desk, theme/desk.css): .device--wide, two
  * columns up to 1200 on the top bar's sides (--desk-pad): a 380 side column
  * (head, storage, projects) and the sounds binder, a paper sheet under an
  * orange bar that scrolls by itself, its blocks in as many 320px columns as
@@ -388,20 +388,20 @@
 }
 .plate--button[aria-disabled=true] { cursor: default; }
 
-/* ---------- the desk (web only) ---------- */
+/* ---------- side by side (Kotlin WideDevice: from 840 wide, not short) ---------- */
 
-@media (min-width: 1024px) {
+@media (min-width: 840px) and (min-height: 480px) {
   /* One window high in the page column (.shell__page): the side column and the
    * sheet scroll by themselves; a short window scrolls the page instead. */
-  .device--desk {
+  .device--wide {
     display: grid;
     grid-template-columns: 380px minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
     column-gap: 20px;
-    max-width: var(--top-bar-max);
+    max-width: 1360px;
     height: 100%;
-    min-height: 520px;
-    padding: var(--space-4) var(--desk-pad) 22px;
+    min-height: 460px;
+    padding: var(--space-4) var(--space-16) 22px;
   }
   .device__side {
     display: flex;
@@ -421,9 +421,8 @@
     display: flex;
     min-width: 0;
     min-height: 0;
-    max-width: 960px;
   }
-  .device--desk .device__sheet {
+  .device--wide .device__sheet {
     flex: 1 1 auto;
     min-width: 0;
     display: flex;
@@ -460,12 +459,12 @@
     padding: var(--space-14);
   }
   /* The blocks flow down as many columns as fit (Kotlin's Adaptive(330) staggered grid). */
-  .device--desk .device__blocks {
+  .device--wide .device__blocks {
     display: block;
     columns: 320px;
     column-gap: var(--space-14);
   }
-  .device--desk .device__block {
+  .device--wide .device__block {
     break-inside: avoid;
     margin-bottom: var(--space-14);
     background: var(--plate);
@@ -517,5 +516,14 @@
     letter-spacing: 0.08em;
     text-transform: uppercase;
     opacity: 0.75;
+  }
+}
+
+/* The desk (web only): in the page column, lined up with the top bar's row. */
+@media (min-width: 1024px) {
+  .device--wide {
+    max-width: var(--top-bar-max);
+    min-height: 520px;
+    padding-inline: var(--desk-pad);
   }
 }

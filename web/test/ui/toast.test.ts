@@ -63,3 +63,16 @@ describe('swipeTarget / swipeAlpha / velocityOf', () => {
     expect(v.vy).toBeCloseTo(200)
   })
 })
+
+describe('the toast in the top bar (a short window)', () => {
+  const bar = { dx: 0, dy: 0, vx: 0, vy: 0, width: 300, height: 60, up: true }
+  it('leaves up, or sideways, never down', () => {
+    expect(swipeOutcome({ ...bar, dy: -31 })).toBe('up')
+    expect(swipeOutcome({ ...bar, dy: -29 })).toBe('back')
+    expect(swipeOutcome({ ...bar, dy: 40 })).toBe('back')
+    expect(swipeOutcome({ ...bar, vy: -(TOAST_FLING + 1) })).toBe('up')
+    expect(swipeOutcome({ ...bar, dx: 91 })).toBe('side')
+    expect(swipeTarget('up', 0, 300, 60)).toEqual({ x: 0, y: -90 })
+    expect(swipeAlpha(0, -60, 300, 60)).toBeCloseTo(0.3)
+  })
+})

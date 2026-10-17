@@ -30,6 +30,9 @@ import type { PhysicalPad } from '../../core/features/padNotes'
 import { Seq, timingTicks, type Timing } from '../../core/features/pattern'
 import { MirrorText } from '../../core/text/mirrorText'
 import { STEP_GATES, snapGate, type StepUi } from '../../state/stepPlan'
+import { coachAttrs } from '../components/Coach'
+import { useFingerTick } from '../useHaptic'
+import { Spoken } from './spoken'
 import './StepPanel.css'
 
 /**
@@ -197,11 +200,11 @@ function StepGlyph(): JSX.Element {
  * PatternLine.tsx's SceneStepKeys): its word on a wide line ([word]), else
  * its glyph; a tap opens the STEP panel in the function keys' place.
  */
-export function StepCell(props: { word: boolean }): JSX.Element | null {
+export function StepCell(props: { word: boolean; compact?: boolean }): JSX.Element | null {
   const s = useStep()
   if (s === null) return null
   return (
-    <button type="button" class="transport-key transport-key--step" aria-label={MirrorText.STEP_NAME} onClick={() => s.onOpen()}>
+    <button type="button" class="transport-key transport-key--step" aria-label={MirrorText.STEP_NAME} {...coachAttrs('live.step', props.compact)} onClick={() => s.onOpen()}>
       {props.word ? <span class="transport-key__word" aria-hidden="true">{MirrorText.STEP.toUpperCase()}</span> : <StepGlyph />}
     </button>
   )
@@ -226,9 +229,11 @@ export function CorrectKey(props: { compact?: boolean }): JSX.Element | null {
 /** The STEP panel, on the line's dark screen: its header, then the strip with − and +, the knobs, BAR's pages, NUDGE and CORRECT. */
 export function StepPanel(props: { class?: string }): JSX.Element | null {
   const s = useStep()
+  // Its keys tick under a finger (Kotlin StepKey's and StepRecordChip's KeyboardTap).
+  const feel = useFingerTick()
   if (s === null || !s.ui.open) return null
   return (
-    <section class={`step-panel${props.class ? ` ${props.class}` : ''}`} aria-label={MirrorText.STEP_NAME}>
+    <section class={`step-panel${props.class ? ` ${props.class}` : ''}`} aria-label={MirrorText.STEP_NAME} onPointerDownCapture={feel}>
       <StepHeader s={s} />
       <StepDeck s={s} />
     </section>
@@ -283,9 +288,7 @@ function StepHeader(props: { s: StepActions }): JSX.Element {
       <span class={`step-panel__status${status !== null ? ' is-signal' : ''}`} aria-hidden="true">
         {(status ?? MirrorText.stepStatus(ui.label)).toUpperCase()}
       </span>
-      <span class="sr-only" aria-live="polite">
-        {ui.said ?? status ?? MirrorText.stepSpoken(ui.label, 0)}
-      </span>
+      <Spoken text={ui.said ?? status ?? MirrorText.stepSpoken(ui.label, 0)} />
       <button type="button" class="step-panel__close" aria-label={MirrorText.CLOSE_STEP} onClick={() => s.onClose()}>
         <span aria-hidden="true">✕</span>
       </button>

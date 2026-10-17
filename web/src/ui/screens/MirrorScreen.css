@@ -493,6 +493,21 @@
 .live-keys__key.is-on {
   --cap-ink: color-mix(in oklab, var(--on-signal) var(--hot-pct), var(--ko-dark-face));
 }
+/* The group's pattern in the glyph's place (Kotlin GroupKey's number): "03", or "03→05" blinking
+ * while a pick waits, the key ringed in signal orange. */
+.live-keys__num {
+  align-self: flex-end;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.live-keys__num.is-queued { color: var(--signal-edge); animation: scene-blink 700ms ease-in-out infinite alternate; }
+.live-keys__key.is-queued { outline: 2px solid var(--signal); outline-offset: -2px; }
+@media (prefers-reduced-motion: reduce) {
+  .live-keys__num.is-queued { animation: none; }
+}
 
 /* The group keys as a column on the K.O. II's body (the desk, a phone on its side; sized below,
  * with the deck). */
@@ -717,6 +732,8 @@
 }
 .ko-body .live-keys__letter,
 .live-ko .live-keys__letter { font-size: clamp(15px, calc(var(--u) * 0.277), 34px); }
+.ko-body .live-keys__num,
+.live-ko .live-keys__num { font-size: clamp(10px, calc(var(--u) * 0.16), 17px); }
 .ko-body .live-keys__glyph,
 .live-ko .live-keys__glyph {
   width: clamp(10px, calc(var(--u) * 0.185), 18px);
@@ -1278,26 +1295,10 @@
   /* The tools behind the strip (KEYS): the page keeps clear of it. */
   .side-zone:not(.side-zone--docked) .live-stage { padding-right: calc(var(--side-strip-width) + var(--space-4)); }
 
-  /* EDIT's tab on the panel's left side: outside the K.O. II, rounded on its left; on a card's edge elsewhere. */
   .live-ko,
   .live-row,
   .live-scroll-wrap { position: relative; }
   .live-scroll-wrap { width: 100%; height: 100%; }
-  .live-edit-tab {
-    position: absolute;
-    z-index: 2;
-    top: 50%;
-    transform: translateY(-50%);
-  }
-  .live-ko > .live-edit-tab {
-    right: 100%;
-    border-radius: var(--radius-key) 0 0 var(--radius-key);
-  }
-  /* Room for it beside the rail when the panel fills the width (1024 wide). */
-  .live-stage__box:has(> .live-ko > .live-edit-tab) { padding-inline-start: var(--edge-tab-width); }
-  .live-row > .live-edit-tab,
-  .live-scroll-wrap > .live-edit-tab { left: -2px; }
-  .live-scroll-wrap .live-scroll .live__all { padding-left: var(--space-24); }
 
   /* The piano across the page column, on the device's body, the legend under it; centred in the height. */
   .live-piano.live-piano--desk {
@@ -1330,6 +1331,7 @@
   padding: var(--space-8) var(--space-16) var(--space-16);
 }
 .live__device > .live-mode { flex: none; width: 100%; max-width: var(--one-group-max); align-self: center; }
+.live__device-line { flex: none; width: 100%; max-width: var(--one-group-max); align-self: center; }
 
 /* PATTERN: the line's frame lies over it; the all-groups display's row. */
 .live-strip { position: relative; }
@@ -1360,6 +1362,10 @@
 .live-display__line--arp { color: var(--signal); }
 /* Held for the arp or note repeat (LiveArp): the keys outlined and numbered in the order pressed,
  * the pads ringed, in signal orange. */
+/* The pads and keys the arp sounds now: lit full (Kotlin's arpLit), over the frame loop's glow. */
+.live-pad.is-arp-lit,
+.live-key.is-arp-lit,
+.ep-pad.is-arp-lit { --glow: 1 !important; }
 .live-pad.is-arp-held,
 .live-key.is-arp-held { outline: 2px solid var(--signal); outline-offset: -4px; }
 .live-key[data-arp-order]::after {
@@ -1379,7 +1385,31 @@
 .live-pad.is-step-lit,
 .live-key.is-step-lit { outline: 2px solid var(--signal); outline-offset: -4px; }
 .live-pad.is-step-picked,
-.live-key.is-step-picked { outline: 3px solid var(--signal); outline-offset: -5px; }
+.live-key.is-step-picked {
+  outline: 3px solid var(--signal);
+  outline-offset: -5px;
+  /* The soft ring just outside the cap (Kotlin pickHalo: 4 dp out, 28 %). */
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--signal) 28%, transparent);
+}
+/* NUDGE at the foot of the pad or key picked for − / + (Kotlin NudgeTag): a small signal-orange tag. */
+.live-pad__nudge {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 6px;
+  padding: 2px 0;
+  border-radius: 3px;
+  background: var(--signal);
+  color: var(--on-signal);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.live-pad--big .live-pad__nudge { font-size: 9px; }
 .live-pad.is-step-lit .live-pad__label,
 .live-pad.is-step-picked .live-pad__label { color: var(--signal); }
 /* On a phone on its side, the panel over the side columns. */

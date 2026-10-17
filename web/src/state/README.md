@@ -82,7 +82,7 @@ sound: unlike `busy`, keep every key enabled; an action just waits a moment),
 (`'none' \| 'granted' \| 'prompt' \| 'denied'`; `'prompt'` shows the "Reconnect
 library folder" banner), `canPickFolder`, `folderName` (the folder in use, for `WebText.folderNote`),
 `offlinePads` (Live's pad changes made offline and kept: the tools' Reset pads row),
-`offlinePrompt` (their count while the EP-133, connected again, asks whether to write them).
+`offlinePrompt` (their count, new samples apart, while the EP-133, connected again, asks whether to write them).
 
 ## Actions
 

@@ -12,8 +12,11 @@
 // again, DISCARD lets it go (with UNDO on the toast); the sheet dismissed is
 // a DISCARD.
 //
-// Web deltas: the knobs are sliders (KnobSlider); no two-column layout for a
-// phone on its side (the sheet scrolls); no haptics.
+// On a short window (a phone on its side, under 480 high) two columns: the
+// title and the take (waveform and knobs) on the left, the switches, the slot
+// and the keys on the right (SampleReviewSheet.css).
+//
+// Web deltas: the knobs are sliders (KnobSlider).
 
 import type { JSX } from 'preact'
 import { FeatureText } from '../../core/text/featureText'
@@ -57,7 +60,8 @@ function ReviewContent(props: SampleReviewSheetProps & { r: SampleReview }): JSX
   const { r } = props
   const rate = Math.max(1, r.rate)
   return (
-    <>
+    <div class="sample-review__split">
+      <div class="sample-review__main">
       <div class="sample-review__head">
         <h2 id="sample-review-title" class="t-heading">{MirrorText.REVIEW_TITLE}</h2>
         <p class="t-small sample-review__line">{MirrorText.reviewLine(r.pad, r.length / rate, r.input.source, r.input.stereo)}</p>
@@ -71,6 +75,8 @@ function ReviewContent(props: SampleReviewSheetProps & { r: SampleReview }): JSX
         height={64}
       />
       <TrimKnobs {...props} />
+      </div>
+      <div class="sample-review__side">
       <GridPlate>
         <SwitchRow title={MirrorText.NORMALIZE} note={MirrorText.NORMALIZE_NOTE} on={r.normalize} onChange={props.onNormalize} />
         <PlateLine />
@@ -84,7 +90,8 @@ function ReviewContent(props: SampleReviewSheetProps & { r: SampleReview }): JSX
           <Key text={MirrorText.DISCARD} variant="quiet" onClick={props.onDiscard} block />
         </div>
       </div>
-    </>
+      </div>
+    </div>
   )
 }
 

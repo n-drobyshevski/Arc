@@ -28,6 +28,9 @@ import { canvasMeasure, lineFit, stepFit, stepRowFit, WIDE_LINE, type LineFit, t
 import { SceneCell, sceneReadout, useScene, worthSaying } from './ScenePanel'
 import { CorrectKey, StepCell, useStep } from './StepPanel'
 import { TakeBadge, type TakeUi } from './Takes'
+import { coachAttrs } from '../components/Coach'
+import { useHaptic } from '../useHaptic'
+import { useSpoken } from './spoken'
 import './PatternLine.css'
 
 /** RECORD held this long while stopped or armed opens the pattern sheet. */
@@ -275,6 +278,7 @@ export function TransportKeys(props: { t: TransportUi; compact?: boolean; still?
         class={`transport-key transport-key--record${live ? ' is-filled' : ''}${armed ? ' is-armed' : ''}${props.still ? ' is-still' : ''}`}
         aria-label={recordName(ui)}
         aria-description={MirrorText.RECORD_HOLD}
+        {...coachAttrs('live.record', props.compact)}
         {...press.record}
       >
         <span class="transport-key__dot" aria-hidden="true" />
@@ -298,6 +302,9 @@ export function PatternWords(props: { t: TransportUi; compact?: boolean; still?:
   const { t } = props
   const ui = t.ui
   const beat = usePatternBeat(t, props.still === true)
+  // CORRECT's count said at most once a second (Kotlin PatternWords' spoken(corrected)).
+  const counted = useSpoken(props.corrected ?? '')
+  const count = props.corrected ? counted : ''
   let words: JSX.Element
   switch (ui.phase) {
     case 'ARMED':
@@ -331,7 +338,7 @@ export function PatternWords(props: { t: TransportUi; compact?: boolean; still?:
   return (
     <div class="pattern-words">
       <span class="sr-only" aria-live="polite">
-        {MirrorText.transportAnnouncement(stateOf(ui)) + (ui.erase ? ', ' + MirrorText.ERASE_NOTE : '') + (props.corrected ? ', ' + props.corrected : '')}
+        {MirrorText.transportAnnouncement(stateOf(ui)) + (ui.erase ? ', ' + MirrorText.ERASE_NOTE : '') + (count ? ', ' + count : '')}
       </span>
       <span class="pattern-words__shown" aria-hidden="true">
         {words}
@@ -402,6 +409,7 @@ export function EditKeys(props: { t: TransportUi; compact?: boolean }): JSX.Elem
           type="button"
           class={`transport-key transport-key--erase${ui.erase ? ' is-on' : ''}`}
           aria-pressed={ui.erase}
+          {...coachAttrs('live.erase', props.compact)}
           onClick={() => t.onErase(!ui.erase)}
         >
           {MirrorText.ERASE.toUpperCase()}
@@ -421,6 +429,19 @@ export function EditKeys(props: { t: TransportUi; compact?: boolean }): JSX.Elem
 export const TransportContext = createContext<TransportUi | null>(null)
 
 /**
+ * A light tick on each beat of the pattern's count-in (Kotlin
+ * PatternHaptics), as SAMPLE's count-in ticks; only where Settings → Haptics
+ * is on.
+ */
+export function usePatternHaptics(t: TransportUi | null): void {
+  const feel = useHaptic()
+  const beat = t !== null && t.ui.phase === 'COUNT_IN' ? (t.ui.countIn ?? 1) : null
+  useEffect(() => {
+    if (beat !== null) feel('tick')
+  }, [beat])
+}
+
+/**
  * The scene's cell and STEP's as one segmented key, each where it shows
  * ([scene]: its readout or its label; [step]; with one the key is that cell,
  * with neither nothing): the scene's brighter, so the key's border is the
@@ -431,9 +452,9 @@ function SceneStepKeys(props: { scene: boolean; readout: readonly string[] | nul
   if (!props.scene && !step) return null
   return (
     <div class={`transport-keys${props.compact ? ' transport-keys--compact' : ''}${props.scene ? ' is-scene' : ''}`}>
-      {props.scene && <SceneCell readout={props.readout} />}
+      {props.scene && <SceneCell readout={props.readout} compact={props.compact} />}
       {props.scene && step && <span class="transport-keys__divide" aria-hidden="true" />}
-      {step && <StepCell word={props.step === 'WORD'} />}
+      {step && <StepCell word={props.step === 'WORD'} compact={props.compact} />}
     </div>
   )
 }

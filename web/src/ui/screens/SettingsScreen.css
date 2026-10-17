@@ -3,10 +3,11 @@
  * The Step 1c page: each section a caption over a card of rows
  * (components/SettingRow.css), in one scroll on a phone.
  *
- * Web only, from 1024px wide (the desk, theme/desk.css): one paper card up to
- * 1040 wide, the window's height, a 210 wide section nav on its left (an LED
- * per section, lit for the one in view) and the sections scrolling in the
- * pane beside it. */
+ * From 720 wide (Kotlin WideSettings): the window's height, up to 1040 wide,
+ * a 220 wide section nav on the left (the title and the close key at its
+ * head, an LED per section, lit for the one in view), a hairline, and the
+ * sections scrolling in the pane beside it. Web only, from 1024px wide (the
+ * desk, theme/desk.css): the two on one paper card. */
 
 /* Box(fillMaxSize, shell, TopCenter) > Column(widthIn(max 560), verticalScroll,
  * padding 16 / 16, top 12, bottom 32). Full screens scroll the page (app.css);
@@ -77,37 +78,42 @@
 }
 .settings__keys > * { flex: 1 1 0; min-width: 0; }
 
-/* ---------- the desk (web only) ---------- */
+/* ---------- two panes (Kotlin WideSettings, from 720 wide) ---------- */
 
-@media (min-width: 1024px) {
-  /* The card is one window high; the pane scrolls inside it. */
+@media (min-width: 720px) {
+  /* One window high; the pane scrolls inside it. */
   .settings {
     align-items: stretch;
     height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
     min-height: 0;
-    padding: var(--space-18) var(--desk-pad) var(--space-22);
   }
 
   .settings__column {
     display: grid;
-    grid-template-columns: 210px minmax(0, 1fr);
+    grid-template-columns: 220px minmax(0, 1fr);
     max-width: 1040px;
     padding: 0;
     overflow: hidden;
-    background: var(--desk-paper);
-    border-radius: var(--radius-plate);
   }
 
   .settings__nav {
     display: flex;
     flex-direction: column;
     gap: var(--space-4);
-    padding: 26px var(--space-14);
-    border-right: 1px solid var(--row-rule);
+    padding: var(--space-12) var(--space-14) 26px;
+    border-right: 1px solid color-mix(in srgb, var(--line) 12%, transparent);
     overflow-y: auto;
   }
+  /* The title and the close key at the nav's head (Kotlin WideSettings' head row). */
+  .settings__nav-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-8);
+    padding: 0 0 var(--space-14) var(--space-12);
+  }
   .settings__nav .settings__title {
-    padding: 0 var(--space-12) var(--space-14);
+    padding: 0;
     text-align: start;
   }
   .settings__nav-list {
@@ -148,24 +154,29 @@
     box-shadow: 0 0 6px var(--hw-led-on);
   }
 
-  /* The pane: the close key's row on top, the sections scrolling under it. */
+  /* The pane: the sections scrolling (Kotlin: padded 24 start, 8 end). */
   .settings__pane { min-height: 0; }
-  .settings__pane-head {
-    flex: none;
-    display: flex;
-    justify-content: flex-end;
-    padding: var(--space-14) var(--space-16) 0;
-  }
   .settings__scroll {
     position: relative;
     flex: 1 1 0;
     min-height: 0;
-    padding: 0 30px 40px;
+    padding: var(--space-12) 30px 40px 24px;
     overflow-y: auto;
     overscroll-behavior: contain;
   }
   .settings__group { padding-top: var(--space-10); }
   .settings__group:first-of-type { padding-top: 0; }
+}
+
+/* ---------- the desk (web only): the two panes on one paper card ---------- */
+
+@media (min-width: 1024px) {
+  .settings { padding: var(--space-18) var(--desk-pad) var(--space-22); }
+  .settings__column {
+    background: var(--desk-paper);
+    border-radius: var(--radius-plate);
+  }
+  .settings__nav { padding-top: 26px; border-right-color: var(--row-rule); }
 }
 
 /* Web: Computer keyboard's two controls, the keys sheet and the switch. */

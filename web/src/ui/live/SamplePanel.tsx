@@ -25,7 +25,7 @@
 // - The knobs are sliders (KnobSlider), as the web's other knobs.
 // - RSP only, so − / + and STEREO step between RSP and RSP ST; the sources'
 //   names say arc's sound, not the phone's (WebText.sampleSourceName).
-// - No haptics.
+// - Its keys tick under a finger, as Android's; a mouse's press doesn't.
 
 import { createContext, type JSX } from 'preact'
 import { useContext, useEffect, useRef } from 'preact/hooks'
@@ -34,12 +34,15 @@ import type { PhysicalPad } from '../../core/features/padNotes'
 import { PeakMeter } from '../../core/features/peakMeter'
 import type { SamplePhase } from '../../core/features/sampleCapture'
 import type { Peak } from '../../core/features/sampleTrim'
+import { BEATS_PER_BAR } from '../../core/features/tempo'
 import { FeatureText } from '../../core/text/featureText'
 import { MirrorText } from '../../core/text/mirrorText'
 import { WebText } from '../../core/text/webText'
 import { SAMPLE_BARS, SAMPLE_GAINS, SAMPLE_GAIN_MIC } from '../../platform/storage/settings'
-import type { SampleUiState } from '../../state/samplePlan'
+import { SAMPLE_TAP_MS, type SampleUiState } from '../../state/samplePlan'
 import { KnobSlider } from '../components/KnobSlider'
+import { useFingerTick, useHaptic } from '../useHaptic'
+import { Spoken } from './spoken'
 import './SamplePanel.css'
 
 /**
@@ -74,6 +77,61 @@ export const SampleContext = createContext<SampleActions | null>(null)
 
 export function useSample(): SampleActions | null {
   return useContext(SampleContext)
+}
+
+/**
+ * Whether a take that recorded as [last] and then ended stopped by itself
+ * rather than by a hand (Kotlin autoStopped): its pad still [held] (it hit
+ * the limit), its time at the longest a take can be, or a hands-free take of
+ * [bars] bars at [bpm] that ran its length.
+ */
+export function autoStopped(last: Extract<SamplePhase, { type: 'Recording' }>, held: boolean, bars: number | null, bpm: number): boolean {
+  if (held) return true
+  if (last.seconds >= last.max - 1) return true
+  if (!last.latched || bars === null || bpm <= 0) return false
+  const length = Math.floor((bars * BEATS_PER_BAR * 60) / bpm)
+  return last.seconds >= length - 1
+}
+
+/**
+ * SAMPLE's haptics on Live's page (Kotlin SampleHaptics): a tick on each
+ * count-in beat, a long press as a take starts recording and as one stops by
+ * itself ([autoStopped]; [bpm]: the tempo its bars run at). A held take's
+ * long press waits until it has lasted past a tap ([SAMPLE_TAP_MS]) still
+ * recording, so a tap that only plays the pad gets the pad's tick alone; a
+ * hands-free take's comes at once.
+ * Web delta: whether the pad is still held isn't known here; a held take
+ * still recording after the tap's time is taken for one, and a held take
+ * that stops by itself has reached its longest.
+ */
+export function useSampleHaptics(ui: SampleUiState | null, bpm: number): void {
+  const feel = useHaptic()
+  const phase = ui?.phase ?? null
+  const last = useRef<SamplePhase | null>(null)
+  const now = useRef(phase)
+  now.current = phase
+  useEffect(() => {
+    const before = last.current
+    last.current = phase
+    if (phase === null || before === phase) return
+    if (phase.type === 'CountIn' && (before?.type !== 'CountIn' || before.beat !== phase.beat)) feel('tick')
+    else if (before?.type === 'Recording' && phase.type !== 'Recording' && autoStopped(before, false, ui?.bars ?? null, bpm)) feel('longPress')
+  }, [phase])
+  // The take recording, by its pad and whether it is hands-free: its seconds ticking on don't start it again.
+  const take = phase?.type === 'Recording' ? `${phase.pad.group}.${phase.pad.offset}.${phase.latched}` : null
+  useEffect(() => {
+    if (phase?.type !== 'Recording') return
+    if (phase.latched) {
+      feel('longPress')
+      return
+    }
+    const pad = phase.pad
+    const id = setTimeout(() => {
+      const p = now.current
+      if (p?.type === 'Recording' && p.pad.group === pad.group && p.pad.offset === pad.offset) feel('longPress')
+    }, SAMPLE_TAP_MS)
+    return () => clearTimeout(id)
+  }, [take, feel])
 }
 
 /** A pad's light in SAMPLE mode: blinking while EMPTY, ringed with a sound (FILLED), lit while a take into it WAITING or RECORDING. */
@@ -188,9 +246,11 @@ export function useSamplePadLed(pad: PhysicalPad, filled: boolean): SampleLed | 
 /** The SAMPLE panel in the function keys' place: its header, the wave strip, the controls. */
 export function SamplePanel(props: { class?: string }): JSX.Element | null {
   const s = useSample()
+  // Its keys tick under a finger (Kotlin SampleKey's KeyboardTap).
+  const feel = useFingerTick()
   if (s === null || !s.ui.on) return null
   return (
-    <section class={`sample-panel${props.class ? ` ${props.class}` : ''}`} aria-label={MirrorText.SAMPLE_TAG}>
+    <section class={`sample-panel${props.class ? ` ${props.class}` : ''}`} aria-label={MirrorText.SAMPLE_TAG} onPointerDownCapture={feel}>
       <SampleHeader s={s} />
       <SampleWave s={s} />
       <SampleControls s={s} />
@@ -211,9 +271,7 @@ function SampleHeader(props: { s: SampleActions }): JSX.Element {
       <span class={`sample-panel__status${status.length > 22 ? ' is-long' : ''}`} aria-hidden="true">
         {status}
       </span>
-      <span class="sr-only" aria-live="polite">
-        {sampleSpoken(ui)}
-      </span>
+      <Spoken text={sampleSpoken(ui)} />
       <button type="button" class="step-panel__close" aria-label={WebText.CLOSE_SAMPLE} onClick={() => s.onClose()}>
         <span aria-hidden="true">✕</span>
       </button>

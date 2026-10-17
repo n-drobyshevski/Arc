@@ -115,7 +115,28 @@
 .scene-modes { display: flex; gap: 4px; }
 .scene-row--bar { min-height: 36px; }
 
-.scene-grid { display: flex; flex-direction: column; gap: 6px; padding-top: 4px; border-top: 1px solid color-mix(in srgb, var(--display-dim) 40%, transparent); }
+/* The grid over the pads (Kotlin PatternGrid over matchParentSize): the display's face on top of them.
+ * Its hosts (MirrorScreen's one group, KEYS' grid, the groups' rows) hold it. */
+.live-group:has(> .scene-grid-over),
+.live-kgrid:has(> .scene-grid-over),
+.live__groups:has(> .scene-grid-over),
+.live-row__groups:has(> .scene-grid-over) { position: relative; }
+.scene-grid-over {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px;
+  overflow: auto;
+  border-radius: 14px;
+  background: var(--display);
+  color: var(--display-ink);
+  box-shadow: var(--display-shadow);
+}
+.scene-grid { display: flex; flex-direction: column; gap: 8px; }
+.scene-grid-over .scene-grid__cells { gap: 4px; }
+.scene-grid-over .scene-cell { min-height: 26px; }
 .scene-grid__head { display: flex; align-items: center; gap: 10px; }
 .scene-grid__title { font-size: 12px; font-weight: 800; letter-spacing: 0.12em; }
 .scene-grid__detail { flex: 1 1 auto; font-size: 10px; color: var(--display-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

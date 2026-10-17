@@ -5,6 +5,7 @@
 // the FX sheet's knobs, EDIT's pages). [tone] is the knob's cap colour on the
 // device (EDIT: PITCH and LEVEL white, a page's X orange and its Y black).
 import type { JSX } from 'preact'
+import { useHaptic } from '../useHaptic'
 import './KnobSlider.css'
 
 export interface KnobSliderProps {
@@ -26,11 +27,18 @@ export interface KnobSliderProps {
 
 export function KnobSlider(props: KnobSliderProps): JSX.Element {
   const { label, value, min = 0, max = 1, step = 0.01, readout, def, disabled = false, tone = 'signal' } = props
+  // Each step felt as Android's TextHandleMove (Kotlin Knob's set), a hair being no step.
+  const feel = useHaptic()
+  const change = (v: number): void => {
+    if (Math.abs(v - value) < 1e-6) return
+    feel('handle')
+    props.onChange(v)
+  }
   return (
     <label
       class={`knob-slider knob-slider--${tone}${disabled ? ' is-disabled' : ''}`}
       onDblClick={() => {
-        if (!disabled) props.onChange(def)
+        if (!disabled) change(def)
       }}
     >
       <span class="t-bold knob-slider__label">{label}</span>
@@ -43,7 +51,7 @@ export function KnobSlider(props: KnobSliderProps): JSX.Element {
         disabled={disabled}
         aria-valuetext={readout}
         aria-description={props.description ?? `${label}: ${readout}.`}
-        onInput={(e) => props.onChange(Number((e.currentTarget as HTMLInputElement).value))}
+        onInput={(e) => change(Number((e.currentTarget as HTMLInputElement).value))}
       />
       <span class="knob-slider__value">{readout}</span>
     </label>

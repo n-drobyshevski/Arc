@@ -24,6 +24,7 @@
 // nav rail's Settings key opens Settings there. Live's mic key (SAMPLE, [sample])
 // is a toggle (aria-pressed) to screen readers, where Kotlin gives its state in words.
 import type { ComponentChildren, JSX } from 'preact'
+import { useLayoutEffect, useRef } from 'preact/hooks'
 import type { ReadonlySignal } from '@preact/signals'
 import { CoachText } from '../../core/text/coachText'
 import { NavText } from '../../core/text/navText'
@@ -33,6 +34,7 @@ import { ArcIcon } from './Icons'
 import { IconBlock } from './IconBlock'
 import { SectionTag } from './SectionTag'
 import { ThemeSwitch, type ThemeSwitchProps } from './ThemeSwitch'
+import { useHaptic } from '../useHaptic'
 import './TopBar.css'
 
 export interface TopBarProps {
@@ -70,10 +72,45 @@ export interface TopBarProps {
 /** Id of the hint a screen reader hears with the connected key. */
 const HOLD_HINT_ID = 'arc-hold-to-disconnect'
 
+/** The narrowest middle that takes the toast on a short window (Kotlin BarToastMin). */
+export const BAR_TOAST_MIN = 200
+
+/**
+ * Publishes the bar's middle (between the tag and the keys) for the toast on a short window
+ * (Kotlin LocalBarSlot): --bar-slot-left, --bar-slot-width and --bar-slot-mid on the root, and
+ * data-bar-slot while it is at least [BAR_TOAST_MIN] wide.
+ */
+function useBarSlot(el: { current: HTMLElement | null }, key: unknown): void {
+  useLayoutEffect(() => {
+    const node = el.current
+    if (!node || typeof document === 'undefined') return
+    const root = document.documentElement
+    const put = (): void => {
+      const r = node.getBoundingClientRect()
+      root.style.setProperty('--bar-slot-left', `${r.left}px`)
+      root.style.setProperty('--bar-slot-width', `${r.width}px`)
+      root.style.setProperty('--bar-slot-mid', `${r.top + r.height / 2}px`)
+      if (r.width >= BAR_TOAST_MIN) root.setAttribute('data-bar-slot', '')
+      else root.removeAttribute('data-bar-slot')
+    }
+    put()
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(put) : null
+    ro?.observe(node)
+    window.addEventListener('resize', put)
+    return () => {
+      ro?.disconnect()
+      window.removeEventListener('resize', put)
+      root.removeAttribute('data-bar-slot')
+    }
+  }, [key])
+}
+
 export function TopBar(props: TopBarProps): JSX.Element {
   const madeUp = props.madeUp?.value ?? null
   const wireless = (props.late?.value ?? null) !== null || madeUp !== null
   const words = madeUp !== null ? MirrorText.wirelessMadeUp(madeUp) : MirrorText.WIRELESS_DELAY
+  const slot = useRef<HTMLElement | null>(null)
+  useBarSlot(slot, props.middle ? 'middle' : 'spacer')
   return (
     <header class="top-bar">
       <div class="top-bar__row">
@@ -84,7 +121,13 @@ export function TopBar(props: TopBarProps): JSX.Element {
           expanded={props.sectionsOpen ?? false}
           {...(props.sectionsId ? { controls: props.sectionsId } : {})}
         />
-        {props.middle ? <div class="top-bar__middle">{props.middle}</div> : <span class="top-bar__spacer" />}
+        {props.middle ? (
+          <div ref={slot as { current: HTMLDivElement | null }} class="top-bar__middle">
+            {props.middle}
+          </div>
+        ) : (
+          <span ref={slot} class="top-bar__spacer" />
+        )}
         {wireless && (
           <>
             <span data-coach="top.bluetooth" class="top-bar__item">
@@ -164,6 +207,7 @@ export function TopBar(props: TopBarProps): JSX.Element {
 /** The mic key before ?: round as it is, orange while SAMPLE's panel is open. */
 function SampleKey(props: { sample: NonNullable<TopBarProps['sample']> }): JSX.Element {
   const on = props.sample.on.value
+  const feel = useHaptic()
   return (
     <>
       <span data-coach="top.sample" class="top-bar__item">
@@ -172,7 +216,11 @@ function SampleKey(props: { sample: NonNullable<TopBarProps['sample']> }): JSX.E
           label={MirrorText.SAMPLE_TAG}
           face={on ? 'var(--signal)' : 'var(--tab-off)'}
           ink={on ? 'var(--on-signal)' : 'var(--navy)'}
-          onClick={props.sample.onTap}
+          // A tap opens or closes SAMPLE's panel with a tick, as the swipe does (Kotlin MainActivity's SegmentTick).
+          onClick={() => {
+            feel('tick')
+            props.sample.onTap()
+          }}
           pressed={on}
           round
         />

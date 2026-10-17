@@ -11,7 +11,7 @@ import { physicalPad } from '../../src/core/features/padNotes'
 import { KeysView, rangeNotes } from '../../src/core/features/piano'
 import { MirrorText } from '../../src/core/text/mirrorText'
 import { COACH_METRICS, placeTags, type CoachMarkInput, type MeasureTag } from '../../src/ui/coachPlace'
-import { ERROR_TOAST_MS, TOAST_MS, toastDuration } from '../../src/ui/components/Toast'
+import { ACTION_TOAST_MS, ERROR_TOAST_MS, TOAST_MS, toastDuration } from '../../src/ui/components/Toast'
 import {
   COMPUTER_KEYS,
   PIANO_MAX_DESK,
@@ -207,10 +207,12 @@ describe('EDIT', () => {
     expect(editPadOf([])).toBeNull()
   })
 
-  it('keeps a toast with UNDO up as long as an error', () => {
+  it('keeps a toast with UNDO up 6 s (Components.kt), an error 7 s', () => {
     expect(toastDuration(false)).toBe(TOAST_MS)
-    expect(toastDuration(false, true)).toBe(ERROR_TOAST_MS)
+    expect(toastDuration(false, true)).toBe(ACTION_TOAST_MS)
+    expect(ACTION_TOAST_MS).toBe(6000)
     expect(toastDuration(true)).toBe(ERROR_TOAST_MS)
+    expect(toastDuration(true, true)).toBe(ERROR_TOAST_MS)
   })
 })
 

@@ -9,10 +9,11 @@
 // shell's slide-in guide layer (opened from the GUIDE edge tab, the rail's
 // Guide key or at #/guide), or the viewport when nothing above it is positioned.
 //
-// Web delta: the K.O. II (components/KoPanel) is drawn beside the list on the
-// desk (from 1024px wide, ui/useDesk.ts), where the docked guide panel widens
-// for it; Android draws it on a window at least 840dp wide that isn't short.
-// Below the desk the list is alone, as on a phone.
+// On a window at least 840 wide that isn't short (ui/useDesk.ts WIDE_QUERY),
+// the K.O. II (components/KoPanel) is drawn beside the list (at most 620
+// wide), as tall as the room allows, at most 0.55 of the width and 640; on
+// the desk the docked guide panel widens for it. Otherwise the list is alone,
+// as on a phone.
 import type { JSX } from 'preact'
 import { useEffect, useId, useMemo, useRef, useState } from 'preact/hooks'
 import { parse as parseCombo } from '../../core/text/guideCombo'
@@ -41,7 +42,7 @@ import { CloseKey, ComboLine, KeymapSteps } from '../components/GuideKeys'
 import { ArcIcon } from '../components/Icons'
 import { Key } from '../components/Key'
 import { KO_ASPECT, KoPanel } from '../components/KoPanel'
-import { useDesk } from '../useDesk'
+import { WIDE_QUERY, useMedia } from '../useDesk'
 import './GuideScreen.css'
 
 export interface GuideScreenProps {
@@ -85,7 +86,8 @@ function openUrl(url: string): void {
 
 export function GuideScreen(props: GuideScreenProps): JSX.Element {
   const { onBack } = props
-  const desk = useDesk()
+  // The device beside the list from 840 wide, unless short (Kotlin GuideScreen's wide).
+  const wide = useMedia(WIDE_QUERY)
   const [tab, setTab] = useState(0)
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState<string | null>(props.initialOpen ?? null)
@@ -136,7 +138,7 @@ export function GuideScreen(props: GuideScreenProps): JSX.Element {
   return (
     <div
       ref={root}
-      class={`guide${desk ? ' guide--desk' : ''}${props.class ? ` ${props.class}` : ''}`}
+      class={`guide${wide ? ' guide--wide' : ''}${props.class ? ` ${props.class}` : ''}`}
       data-screen="guide"
       role="region"
       aria-label={TITLE}
@@ -197,8 +199,8 @@ export function GuideScreen(props: GuideScreenProps): JSX.Element {
               </footer>
             </div>
           </div>
-          {/* The device as tall as the room allows, beside the list (the desk only). */}
-          {desk && (
+          {/* The device as tall as the room allows, beside the list (wide windows). */}
+          {wide && (
             <div class="guide__device">
               <KoPanel keymap={keymap} />
             </div>
@@ -221,7 +223,7 @@ interface TabsProps {
 
 /**
  * One cap per section with its count; the selected one is navy and down. In
- * a row that scrolls on a phone, wrapped on the desk.
+ * a row that scrolls on a phone, wrapped on a wide window.
  */
 function Tabs(props: TabsProps): JSX.Element {
   const { selected, onSelect } = props

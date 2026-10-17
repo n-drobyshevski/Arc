@@ -19,6 +19,7 @@ import type { UploadDraftItem } from '../../state/types'
 import { Key } from '../components/Key'
 import { RangeSlider } from '../components/RangeSlider'
 import { Waveform } from '../components/Waveform'
+import { SHORT_QUERY, useMedia } from '../useDesk'
 import './TrimSheet.css'
 
 /** The playback key of the selection preview (Kotlin TRIM_PLAY_KEY). */
@@ -100,9 +101,12 @@ function TrimBody(props: TrimSheetContentProps & { w: DecodedWav }): JSX.Element
   const playable = canPlay(w.channels, rate)
   const isPlaying = playing === TRIM_PLAY_KEY
   const selection = FeatureText.selection(startS, endS)
+  // A short window (a phone on its side): the waveform 72 high, the keys a column on the right.
+  const short = useMedia(SHORT_QUERY)
   return (
-    <>
-      <Waveform pcm={w.pcm} channels={w.channels} start={start} end={end} label={selection} />
+    <div class="trim-sheet__split">
+      <div class="trim-sheet__main">
+      <Waveform pcm={w.pcm} channels={w.channels} start={start} end={end} label={selection} height={short ? 72 : 96} />
       <RangeSlider
         start={start}
         end={end}
@@ -116,6 +120,8 @@ function TrimBody(props: TrimSheetContentProps & { w: DecodedWav }): JSX.Element
         valueText={(v) => FeatureText.duration(seconds(v, rate))}
       />
       <p class="t-small trim-sheet__dim" aria-live="polite">{selection}</p>
+      </div>
+      <div class="trim-sheet__keys">
       <div class="trim-sheet__row">
         <Key
           text={isPlaying ? FeatureText.STOP : FeatureText.PLAY_SELECTION}
@@ -132,6 +138,7 @@ function TrimBody(props: TrimSheetContentProps & { w: DecodedWav }): JSX.Element
       </div>
       <Key text={Strings.DONE} onClick={() => props.onDone(trimResult(start, end, n))} variant="signal" block disabled={empty} />
       <Key text={Strings.CANCEL} onClick={props.onCancel} variant="quiet" block />
-    </>
+      </div>
+    </div>
   )
 }

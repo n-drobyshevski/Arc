@@ -197,6 +197,10 @@ export class ArcController {
   readonly playingPads: ReadonlySignal<ReadonlySet<number>>
   /** The KEYS notes sounding on the phone (grid and piano), first pressed first (MainActivity's playingNotes). */
   readonly playingNotes: ReadonlySignal<ReadonlySet<number>>
+  /** The pads the arp sounds now, as padKey numbers (LiveVoices.arpPads): lit full. */
+  readonly arpPads: ReadonlySignal<ReadonlySet<number>>
+  /** The KEYS notes the arp sounds now on the KEYS sound (LiveVoices.arpNotes): lit full. */
+  readonly arpNotes: ReadonlySignal<ReadonlySet<number>>
   /**
    * Live's output delay in ms while it is long enough to be heard against the
    * finger, else null: Live's top bar shows its Bluetooth key then.
@@ -289,6 +293,28 @@ export class ArcController {
         // The note the arp sounds now on the KEYS sound lights its key (LiveVoices.arpNotes).
         const p = k.split(':')
         if (keysPad === null || !arpVoiceKey(p) || p[3] === 'n' || Number(p[1]) !== keysPad.group || Number(p[2]) !== keysPad.offset) continue
+        out.add(Keys.ROOT_NOTE + Number(p[3]))
+      }
+      return out
+    })
+    this.arpPads = computed(() => {
+      const out = new Set<number>()
+      for (const k of this.liveVoices.value) {
+        const p = k.split(':')
+        if (!arpVoiceKey(p)) continue
+        const g = Number(p[1])
+        const o = Number(p[2])
+        if (Number.isInteger(g) && Number.isInteger(o)) out.add(padKey({ group: g, offset: o }))
+      }
+      return out
+    })
+    this.arpNotes = computed(() => {
+      const out = new Set<number>()
+      const keysPad = this.store.state.value.keysPad
+      if (keysPad === null) return out
+      for (const k of this.liveVoices.value) {
+        const p = k.split(':')
+        if (!arpVoiceKey(p) || p[3] === 'n' || Number(p[1]) !== keysPad.group || Number(p[2]) !== keysPad.offset) continue
         out.add(Keys.ROOT_NOTE + Number(p[3]))
       }
       return out
@@ -1304,6 +1330,15 @@ export class ArcController {
   }
 
   /**
+   * [pad]'s sound heard whole, whatever the pads do now (SAMPLE's Play, a
+   * screen reader's custom action on Android): not recorded into, not erased,
+   * not put on the pattern.
+   */
+  hearPad(pad: PhysicalPad): Promise<void> {
+    return this.live.playPad(pad, false)
+  }
+
+  /**
    * How [pad] plays on the phone: its sound settings as known, made a voice
    * shape; unknown, as a pad always has. KEYS ([keys]) plays each note on its
    * own, so LEGATO's one voice across notes becomes a held note there. Either
@@ -1824,9 +1859,11 @@ export class ArcController {
     // Recordings uploading now aren't asked about: they are on their way already.
     const uploading = this.sample.uploadingNow()
     const pads = (await this.live.loadOfflinePads()).list.filter((p) => p.file == null || !uploading.has(p.file))
-    const n = pads.length + (await this.padEdit.offlineCount())
-    if (n === 0 || !this.deviceReady) return
-    this.store.update((st) => ({ ...st, offlinePrompt: n }))
+    // The recordings counted apart from the other changes (ArcController's samples / changes).
+    const samples = pads.filter((p) => p.source === SoundSource.RECORDED).length
+    const changes = pads.length - samples + (await this.padEdit.offlineCount())
+    if (changes + samples === 0 || !this.deviceReady) return
+    this.store.update((st) => ({ ...st, offlinePrompt: { changes, samples } }))
   }
 
   /**

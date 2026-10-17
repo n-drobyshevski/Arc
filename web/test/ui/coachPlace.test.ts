@@ -202,12 +202,22 @@ describe('placeTags', () => {
     expect(ps[1]!.rect.top).toBe(386 + 2 * STEP)
   })
 
-  it('moves a tall area’s tag at most 8 times', () => {
+  it('moves a tall area’s tag down while the area holds it, then to the nearest clear place in it (web)', () => {
     const tall = (i: number) => mark(`t${i}`, at(40, 200, 320, 400))
     const ps = placeTags(Array.from({ length: 11 }, (_, i) => tall(i)), VP, measure)
     const top0 = ps[0]!.rect.top
-    expect(ps[8]!.rect.top).toBe(top0 + 8 * STEP)
-    expect(ps[9]!.rect.top).toBe(top0 + 8 * STEP)
+    // Kotlin's steps down, as far as the area's bottom (600).
+    const fits = ps.filter((_, i) => top0 + i * STEP + TH <= 600).length
+    expect(fits).toBeGreaterThan(2)
+    for (let i = 0; i < fits; i++) expect(ps[i]!.rect.top).toBe(top0 + i * STEP)
+    // Then beside them or above the middle: every tag in the area, none on another.
+    for (const p of ps) {
+      expect(p.rect.top).toBeGreaterThanOrEqual(200)
+      expect(p.rect.bottom).toBeLessThanOrEqual(600)
+      expect(p.rect.left).toBeGreaterThanOrEqual(40)
+      expect(p.rect.right).toBeLessThanOrEqual(360)
+    }
+    for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) expect(overlaps(ps[i]!.rect, ps[j]!.rect), `${i} ${j}`).toBe(false)
   })
 
   it('places tags of multi-line labels with their measured height', () => {
@@ -482,6 +492,20 @@ describe('occlusions', () => {
 })
 
 describe('layoutTags (the overlay’s placement)', () => {
+  it('the spare tags give way, the first first, only while that hides less (web)', () => {
+    const keep = mark('keep', at(100, 100, 40, 40))
+    const spare = mark('spare', at(260, 100, 40, 40))
+    // Every tag clear: nothing gives way.
+    expect(layoutTags([keep, spare], VP, measure, { spare: ['spare'] }).map((p) => p.mark.id).sort()).toEqual(['keep', 'spare'])
+    // Small untagged keys all over the window: any tag hides some, so the spare one goes, the other stays.
+    const clear: Box[] = []
+    for (let x = 0; x < VP.width; x += 20) for (let y = 0; y < VP.height; y += 20) if (!overlaps(at(x, y, 20, 20), keep.bounds) && !overlaps(at(x, y, 20, 20), spare.bounds)) clear.push(at(x, y, 20, 20))
+    const placed = layoutTags([keep, spare], VP, measure, { clear, spare: ['spare'] })
+    expect(placed.map((p) => p.mark.id)).toEqual(['keep'])
+    // Not spare: kept, hidden or not.
+    expect(layoutTags([keep, spare], VP, measure, { clear }).map((p) => p.mark.id).sort()).toEqual(['keep', 'spare'])
+  })
+
   it('is crowded in a short window', () => {
     const short = { width: 800, height: 479 }
     const marks = [mark('a', at(100, 20, 40, 40)), mark('b', at(100, 70, 40, 40))]

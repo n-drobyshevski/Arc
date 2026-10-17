@@ -14,11 +14,13 @@
 //   long click is on Android); Enter or Space is a tap.
 // - The column's sizes are CSS (FunctionRow.css, on the column's own height).
 // - TEMPO's LED blink is a CSS animation started on each beat when it is heard.
-import { createContext, type ButtonHTMLAttributes, type JSX } from 'preact'
+import { createContext, type ButtonHTMLAttributes, type CSSProperties, type JSX } from 'preact'
 import { useContext, useEffect, useRef } from 'preact/hooks'
 import { signal, type ReadonlySignal } from '@preact/signals'
 import { round as roundTempo, type Beat } from '../../core/features/tempo'
 import { MirrorText } from '../../core/text/mirrorText'
+import type { CoachId } from '../components/Coach'
+import { fingerPress, useHaptic } from '../useHaptic'
 import './FunctionRow.css'
 
 /** A function key held this long is held (Compose's long-press time). */
@@ -235,9 +237,23 @@ export function useTempoPress(t: TempoUi): PressHandlers {
 }
 
 /**
+ * The device view's own print of a function key (web only): where it sits on
+ * the drawn EP-133 and the two words the K.O. II prints on it, with their
+ * DeviceView.css colours ('ep-h--black', 'ep-h--light', …).
+ */
+export interface DrawnKey {
+  readonly place: CSSProperties
+  readonly top: string
+  readonly bottom: string
+  readonly topCls: string
+  readonly bottomCls: string
+}
+
+/**
  * One two-tier key: [word] on the dark cap's upper half, [sub] on its lower
  * half (signal or light), under its LED ([led]) and [label], in ink while
  * [lit]. [held]: the upper half lit signal (FX held). Greyed out when not [enabled].
+ * [drawn]: the drawn EP-133's key instead, as it prints it, lit the same way.
  */
 function FnKey(props: {
   word: string
@@ -249,15 +265,36 @@ function FnKey(props: {
   ledRef?: { current: HTMLSpanElement | null }
   held?: boolean
   enabled?: boolean
+  /** Its tag in the guide overlay (FX has none, as on Android). */
+  coach?: CoachId
+  drawn?: DrawnKey | undefined
   attrs: ButtonHTMLAttributes<HTMLButtonElement>
 }): JSX.Element {
   const enabled = props.enabled ?? true
+  const d = props.drawn
+  const attrs = useFeltPress(props.attrs, enabled)
+  if (d) {
+    return (
+      <button
+        type="button"
+        class={`ep-a ep-key ep-key--split${props.lit ? ' is-lit' : ''}${props.held ? ' is-held' : ''}`}
+        style={d.place}
+        aria-disabled={enabled ? undefined : true}
+        data-coach={props.coach}
+        {...attrs}
+      >
+        <span class={`ep-h ${d.topCls}`}>{d.top}</span>
+        <span class={`ep-h ${d.bottomCls}`}>{d.bottom}</span>
+      </button>
+    )
+  }
   return (
     <button
       type="button"
       class={`fn-key${props.lit ? ' is-lit' : ''}${props.held ? ' is-held' : ''}`}
       aria-disabled={enabled ? undefined : true}
-      {...props.attrs}
+      data-coach={props.coach}
+      {...attrs}
     >
       <span class="fn-key__line" aria-hidden="true">
         <span ref={props.ledRef} class={`fn-key__led${props.led ? ' is-on' : ''}`} />
@@ -271,8 +308,44 @@ function FnKey(props: {
   )
 }
 
+/**
+ * A function key's feel (Kotlin FunctionKey's KeyboardTap on a press and
+ * LongPress as its hold comes): [attrs] with a tick under a finger and a
+ * longer buzz once held [FN_HOLD_MS], while Settings → Haptics is on.
+ */
+function useFeltPress(attrs: ButtonHTMLAttributes<HTMLButtonElement>, enabled: boolean): ButtonHTMLAttributes<HTMLButtonElement> {
+  const feel = useHaptic()
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const stop = (): void => {
+    if (timer.current !== null) clearTimeout(timer.current)
+    timer.current = null
+  }
+  useEffect(() => stop, [])
+  return {
+    ...attrs,
+    onPointerDown: (e) => {
+      attrs.onPointerDown?.(e)
+      if (e.button !== 0 || !enabled || !fingerPress(e)) return
+      feel('tick')
+      stop()
+      timer.current = setTimeout(() => {
+        timer.current = null
+        feel('longPress')
+      }, FN_HOLD_MS)
+    },
+    onPointerUp: (e) => {
+      stop()
+      attrs.onPointerUp?.(e)
+    },
+    onPointerCancel: (e) => {
+      stop()
+      attrs.onPointerCancel?.(e)
+    },
+  }
+}
+
 /** SOUND: Live's EDIT on or off (from KEYS: the pads, EDIT on); held, the sheet of the pad played last. */
-export function SoundKey(props: { s: SoundUi }): JSX.Element {
+export function SoundKey(props: { s: SoundUi; drawn?: DrawnKey }): JSX.Element {
   const { s } = props
   const press = useTapHold(
     () => s.onTap(),
@@ -287,6 +360,8 @@ export function SoundKey(props: { s: SoundUi }): JSX.Element {
       lit={s.editOn}
       led={s.editOn}
       enabled={s.enabled}
+      coach="live.sound"
+      drawn={props.drawn}
       attrs={{
         role: 'switch',
         'aria-checked': s.editOn,
@@ -303,7 +378,7 @@ export function SoundKey(props: { s: SoundUi }): JSX.Element {
  * go of, the project sheet. Its light is on while it is held and while the
  * device switches.
  */
-export function ProjectKey(props: { p: ProjectUi; hold: ProjectHold }): JSX.Element {
+export function ProjectKey(props: { p: ProjectUi; hold: ProjectHold; drawn?: DrawnKey }): JSX.Element {
   const { p, hold } = props
   const latest = useRef(p)
   latest.current = p
@@ -317,6 +392,8 @@ export function ProjectKey(props: { p: ProjectUi; hold: ProjectHold }): JSX.Elem
       lit={p.switching || held}
       led={p.switching || held}
       enabled={p.enabled}
+      coach="live.project"
+      drawn={props.drawn}
       attrs={{
         'aria-label': MirrorText.FN_PROJECT,
         'aria-description': `${p.state}. ${MirrorText.PROJECT_NEXT}; ${MirrorText.PICK_PROJECT}: hold`,
@@ -354,7 +431,7 @@ export function ProjectKey(props: { p: ProjectUi; hold: ProjectHold }): JSX.Elem
  * While the EP-133 sends MIDI clock its tempo is the one shown (and the one
  * the click follows). Its LED blinks on each beat, longer on a bar's first.
  */
-export function TempoKey(props: { t: TempoUi }): JSX.Element {
+export function TempoKey(props: { t: TempoUi; drawn?: DrawnKey }): JSX.Element {
   const { t } = props
   const bpm = t.deviceBpm !== null ? roundTempo(t.deviceBpm) : t.bpm
   const led = useRef<HTMLSpanElement | null>(null)
@@ -387,6 +464,8 @@ export function TempoKey(props: { t: TempoUi }): JSX.Element {
       lit={t.clickOn}
       led={false}
       ledRef={led}
+      coach="live.tempo"
+      drawn={props.drawn}
       attrs={{
         role: 'switch',
         'aria-checked': t.clickOn,
@@ -403,7 +482,7 @@ export function TempoKey(props: { t: TempoUi }): JSX.Element {
  * lets go (its upper half lit meanwhile). A right-click (Android: a screen
  * reader's long click) turns the punch-ins on and off instead.
  */
-export function FxKey(props: { f: FxKeyUi }): JSX.Element {
+export function FxKey(props: { f: FxKeyUi; drawn?: DrawnKey }): JSX.Element {
   const { f } = props
   const latest = useRef(f)
   latest.current = f
@@ -423,6 +502,7 @@ export function FxKey(props: { f: FxKeyUi }): JSX.Element {
       lit={f.on || f.held}
       led={f.on || f.held}
       held={f.held}
+      drawn={props.drawn}
       attrs={{
         'aria-label': MirrorText.FX_EFFECTS,
         'aria-description': `${f.name}. ${MirrorText.FX_SHEET}; ${MirrorText.PUNCH_INS}: hold`,

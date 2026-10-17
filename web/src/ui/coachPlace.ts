@@ -435,9 +435,32 @@ function placeOnce(marks: readonly CoachMarkInput[], viewport: Size, measure: Me
     // kept on screen, so a strip at the edge still shows its whole tag.
     if (tall(m)) {
       const left = coerceIn(centerX(m.bounds) - w / 2, M.margin, vw - M.margin - w)
-      let rect = box(left, centerY(m.bounds) - h / 2, w, h)
+      const top = centerY(m.bounds) - h / 2
+      const free = (r: Box): boolean => !placed.some((p) => overlaps(inflate(roomOf(p), M.clearance), r))
+      let rect = box(left, top, w, h)
       let tries = 0
-      while (placed.some((p) => overlaps(inflate(roomOf(p), M.clearance), rect)) && tries++ < M.maxTries) rect = translateY(rect, h + M.clearance)
+      while (!free(rect) && tries++ < M.maxTries) rect = translateY(rect, h + M.clearance)
+      if (!free(rect) || rect.bottom > Math.min(m.bounds.bottom, vh - M.margin)) {
+        // Web delta: where Kotlin's steps down from the middle end on a tag or under the area (a
+        // crowded window: a 360 phone with every key tagged), the nearest clear place inside the
+        // area and on the screen, up or down (in steps) and sideways, if there is one.
+        const lo = Math.max(m.bounds.top, M.margin)
+        const hi = Math.min(m.bounds.bottom, vh - M.margin) - h
+        const minLeft = Math.max(m.bounds.left, M.margin)
+        const maxLeft = Math.min(m.bounds.right, vw - M.margin) - w
+        const step = 4 * M.slideStep
+        const near = (t: number): Box | null => {
+          if (t < lo || t > hi) return null
+          if (free(box(left, t, w, h))) return box(left, t, w, h)
+          for (let i = 1; i <= Math.trunc(Math.max(left - minLeft, maxLeft - left) / step); i++) {
+            for (const l of [left - i * step, left + i * step]) if (l >= minLeft && l <= maxLeft && free(box(l, t, w, h))) return box(l, t, w, h)
+          }
+          return null
+        }
+        let found = near(top)
+        for (let d = step; found === null && d <= Math.max(top - lo, hi - top); d += step) found = near(top + d) ?? near(top - d)
+        if (found !== null) rect = found
+      }
       placed.push({ mark: m, text, textSize, rect, tip: null, tail: null, side: 0 })
       return
     }
@@ -752,10 +775,43 @@ export function clearArrows(placed: readonly PlacedTag[], viewport: Size, opts: 
  * tags), unless a tag there hides a control (or another tag) and the crowded
  * rules hide fewer (a web delta: Device's keys under the top bar, upright or on
  * a computer). Then tags slide off the arrows running under them where they
- * can ([clearArrows], also a web delta).
+ * can ([clearArrows], also a web delta). Where some tag still hides something,
+ * the [LayoutOptions.spare] tags give way, one at a time, while that helps.
  */
-export function layoutTags(marks: readonly CoachMarkInput[], viewport: Size, measure: MeasureTag, opts: Omit<PlaceOptions, 'crowded'> = {}): PlacedTag[] {
+export function layoutTags(marks: readonly CoachMarkInput[], viewport: Size, measure: MeasureTag, opts: LayoutOptions = {}): PlacedTag[] {
   const sized = memoised(measure)
+  let shown = marks
+  let clear = opts.clear ?? []
+  let placed = layoutAll(shown, viewport, sized, { ...opts, clear })
+  let hidden = occlusions(placed, viewport, { ...opts, clear })
+  // Web delta: where every tag can't stand clear (a 360 phone with the Bluetooth key and all of
+  // Live's keys tagged), the spare tags give way one at a time, while that hides less; their
+  // controls are then kept clear as untagged ones are.
+  for (const id of opts.spare ?? []) {
+    if (hidden === 0) break
+    const gone = shown.find((m) => m.id === id)
+    if (gone === undefined) continue
+    const fewer = shown.filter((m) => m !== gone)
+    const fewerClear = [...clear, gone.bounds]
+    const tried = layoutAll(fewer, viewport, sized, { ...opts, clear: fewerClear })
+    const n = occlusions(tried, viewport, { ...opts, clear: fewerClear })
+    if (n < hidden) {
+      shown = fewer
+      clear = fewerClear
+      placed = tried
+      hidden = n
+    }
+  }
+  return placed
+}
+
+/** [layoutTags]' options: [spare], the ids of the tags that give way where not all fit, the first first. */
+export interface LayoutOptions extends Omit<PlaceOptions, 'crowded'> {
+  readonly spare?: readonly string[]
+}
+
+/** Every tag of [marks] placed, as [layoutTags] describes. */
+function layoutAll(marks: readonly CoachMarkInput[], viewport: Size, sized: MeasureTag, opts: Omit<PlaceOptions, 'crowded'>): PlacedTag[] {
   const chosen = ((): PlacedTag[] => {
     if (viewport.height < M.shortHeight) return placeTags(marks, viewport, sized, { ...opts, crowded: true })
     // The plain places, in the order that leaves the fewest arrows across tags (the top bar's
