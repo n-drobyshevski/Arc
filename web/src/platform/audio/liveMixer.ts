@@ -30,6 +30,10 @@
 // or is armed, where the mix is ('stamp': mix frame [frame] plays at context
 // time [time]), for the main thread's own stamp.
 //
+// TEMPO's click ('click') is mixed in after TAKE has the block, at the
+// metronome level's gain ('clickLevel', web only: the drawn EP-133's TEMPO
+// Y), which the click's sound glides to.
+//
 // Imports only core modules (and the scheduler, which does too): this file is bundled into the worklet.
 
 import { TakeRecorder, type RecState } from '../../core/features/takeRecorder'
@@ -70,7 +74,7 @@ export type ToMixer =
   /** VoiceMixer.cut: the voice ends in CHOKE_MS, minimum gate or not (a press that became a scroll). */
   | { readonly t: 'cut'; readonly key: string }
   | { readonly t: 'stopAll' }
-  /** VoiceMixer.control: FxControl command [what] (FX_TYPE to GROUP_LEVEL) with its [index], [x] and [y]. */
+  /** VoiceMixer.control: FxControl command [what] (FX_TYPE to GROUP_ENV) with its [index], [x] and [y]. */
   | { readonly t: 'control'; readonly what: number; readonly index: number; readonly x: number; readonly y: number }
   /** Arms TAKE: the next sound (or the device's PLAY) starts a take. */
   | { readonly t: 'arm' }
@@ -114,6 +118,8 @@ export type ToMixer =
    * the pattern runs it clicks on the pattern's beats; it counts in either way.
    */
   | { readonly t: 'click'; readonly on: boolean; readonly bpm: number; readonly grid: FrameGrid | null }
+  /** The click's gain, 0..1 (web only: the metronome level's levelGain); 1 until sent. */
+  | { readonly t: 'clickLevel'; readonly gain: number }
 
 /** A pad's sound in a plan: pad key (group × 12 + offset) and the loaded sample [id]; the shapes' fields over the defaults. */
 export interface PlanVoice {
@@ -358,6 +364,9 @@ export class MixerHost {
         this.clickBpm = m.bpm
         this.clickGrid = m.grid
         this.stampedAt = Number.NEGATIVE_INFINITY
+        return
+      case 'clickLevel':
+        this.clickTrack.gain = m.gain
         return
       case 'transport': {
         const r = this.recorder

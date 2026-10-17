@@ -14,20 +14,51 @@
 // Web deltas: no lock (one thread); [commands] lists the settings (Kotlin's
 // replay hands them to a function); a suspended output keeps its mixer, so
 // only a new one is replayed to (Android: a native stream reopened too). The
-// groups' levels (GROUP_LEVEL, the drawn EP-133's fader) are the web's own.
+// groups' levels (GROUP_LEVEL, the drawn EP-133's fader) are the web's own,
+// and so are their mutes, filters, balances, pitches and envelopes
+// (GROUP_MUTE to GROUP_ENV: solo and mute, the fader's other parameters),
+// kept the same way, one a group each, after the levels.
 
 import { FxControl } from '../../core/formats/fx/fxBus'
 
-// Where each setting is kept: the effect, the four sends, the compressor, the sidechain, the four levels, the tempo.
+// Where each setting is kept: the effect, the four sends, the compressor, the sidechain, the four levels,
+// then (web) four each of mutes, filters, balances, pitches and envelopes, the tempo.
 const EFFECT = 0
 const SENDS = 1
 const COMP = SENDS + FxControl.GROUPS
 const SIDECHAIN = COMP + 1
 const LEVELS = SIDECHAIN + 1
-const TEMPO = LEVELS + FxControl.GROUPS
+const MUTES = LEVELS + FxControl.GROUPS
+const FILTERS = MUTES + FxControl.GROUPS
+const PANS = FILTERS + FxControl.GROUPS
+const PITCHES = PANS + FxControl.GROUPS
+const ENVS = PITCHES + FxControl.GROUPS
+const TEMPO = ENVS + FxControl.GROUPS
 const SLOTS = TEMPO + 1
 
-/** One of FxControl's commands (FX_TYPE to GROUP_LEVEL), as VoiceMixer.control takes it. */
+/** Where a group's command [what] is kept (its first group's slot), or -1 for none. */
+function groupSlot(what: number): number {
+  switch (what) {
+    case FxControl.SEND:
+      return SENDS
+    case FxControl.GROUP_LEVEL:
+      return LEVELS
+    case FxControl.GROUP_MUTE:
+      return MUTES
+    case FxControl.GROUP_FILTER:
+      return FILTERS
+    case FxControl.GROUP_PAN:
+      return PANS
+    case FxControl.GROUP_PITCH:
+      return PITCHES
+    case FxControl.GROUP_ENV:
+      return ENVS
+    default:
+      return -1
+  }
+}
+
+/** One of FxControl's commands (FX_TYPE to GROUP_ENV), as VoiceMixer.control takes it. */
 export interface FxCommand {
   readonly what: number
   readonly index: number
@@ -53,22 +84,19 @@ export class FxSetup {
         this.effect = { what: FxControl.FX_TYPE, index: this.effect.index, x, y }
         this.kept[EFFECT] = this.effect
         return
-      case FxControl.SEND:
-        if (Number.isInteger(index) && index >= 0 && index < FxControl.GROUPS) this.kept[SENDS + index] = { what, index, x, y }
-        return
       case FxControl.COMP:
         this.kept[COMP] = { what, index, x, y }
         return
       case FxControl.SIDECHAIN:
         this.kept[SIDECHAIN] = { what, index, x, y }
         return
-      case FxControl.GROUP_LEVEL:
-        if (Number.isInteger(index) && index >= 0 && index < FxControl.GROUPS) this.kept[LEVELS + index] = { what, index, x, y }
-        return
       case FxControl.TEMPO:
         this.kept[TEMPO] = { what, index, x, y }
         return
     }
+    // A group's own: each group's last.
+    const slot = groupSlot(what)
+    if (slot >= 0 && Number.isInteger(index) && index >= 0 && index < FxControl.GROUPS) this.kept[slot + index] = { what, index, x, y }
   }
 
   /** Every setting kept, as the commands that set it: the effect first, the tempo last. */
