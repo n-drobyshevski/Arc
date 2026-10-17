@@ -129,4 +129,16 @@ describe('Live on the computer keyboard', () => {
     expect(liveCommand(key('Slash', '?', { shift: true }), PADS)).toBeNull()
     expect(liveCommand(key('Escape', 'Escape'), PADS)).toBeNull()
   })
+
+  it("on the drawn EP-133, − and = (and the number pad's) are its − and +, Shift with them its SHIFT", () => {
+    const DEVICE: LiveContext = { ...PADS, device: true }
+    expect(liveCommand(key('Minus', '-'), DEVICE)).toEqual({ kind: 'minusPlus', step: -1, shift: false })
+    expect(liveCommand(key('Equal', '+', { shift: true }), DEVICE)).toEqual({ kind: 'minusPlus', step: 1, shift: true })
+    expect(liveCommand(key('NumpadAdd', '+'), { ...GRID, device: true })).toEqual({ kind: 'minusPlus', step: 1, shift: false })
+    expect(liveCommand(key('NumpadSubtract', '-'), DEVICE)).toEqual({ kind: 'minusPlus', step: -1, shift: false })
+    // Off the drawn device they are nobody's; A to D stay the group keys, Z X the octave in KEYS.
+    expect(liveCommand(key('Minus', '-'), PADS)).toBeNull()
+    expect(liveCommand(key('KeyA', 'a'), DEVICE)).toEqual({ kind: 'group', group: 0 })
+    expect(liveCommand(key('KeyX', 'x'), { ...GRID, device: true })).toEqual({ kind: 'octave', step: 1 })
+  })
 })

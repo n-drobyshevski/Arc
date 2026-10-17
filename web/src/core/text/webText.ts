@@ -132,9 +132,10 @@ export const WebText = {
   /** Under the knobs' and the fader's shortcuts: what turning them does in arc (nothing goes to the device). */
   DEVICE_VOLUME_NOTE: "Turn it for arc's own volume: the pads, the click and the effects as this computer plays them. Takes record before it; the device keeps its own volume.",
   DEVICE_KNOB_X_NOTE:
-    "Turn it for the effect's X in arc. With a pad's sheet open it is the page's X, with SAMPLE its LEVEL, with STEP the step's VEL, and with TEMPO held the tempo.",
-  DEVICE_KNOB_Y_NOTE: "Turn it for the effect's Y in arc. With a pad's sheet open it is the page's Y, with SAMPLE its THRESH, and with STEP the step's LEN.",
-  DEVICE_FADER_NOTE: "Drag the fader for the shown group's level in arc's sound. Each group keeps its own, with the project's effects.",
+    "Turn it for the effect's X in arc. It follows the device: KEYS held the key, TEMPO the tempo, SOUND the pad's level, EDIT or a pad's sheet the page's X, TIMING the interval, OUTPUT the drive, SIDECHAIN the length, SAMPLE its LEVEL, STEP the step's VEL.",
+  DEVICE_KNOB_Y_NOTE:
+    "Turn it for the effect's Y in arc. It follows the device: KEYS held the scale, SOUND the pad's pitch, EDIT or a pad's sheet the page's Y, TIMING the swing, OUTPUT the speed, SIDECHAIN the shape, SAMPLE its THRESH, STEP the step's LEN, TEMPO the click's level.",
+  DEVICE_FADER_NOTE: "Drag the fader for the shown group's level in arc's sound, or what FADER + a pad gave it (on the FX page, its send to the effect). Each group keeps its own, with the project's effects.",
   /** A knob's or the fader's second action, for screen readers. */
   DEVICE_TURN_HINT: 'Arrow keys turn it, Enter shows its shortcuts',
   // What the drawn knobs and fader change, for screen readers ("Knob X", "effect X, 62%").
@@ -155,6 +156,148 @@ export const WebText = {
   turnShown(name: string, value: string): string {
     return `${name} \u00B7 ${value}`
   },
+  TURN_CLICK: "the click's level",
+  /** TEMPO's Y at the bottom: the click off. */
+  CLICK_OFF: 'OFF',
+  TURN_KEY: "KEYS' key",
+  TURN_SCALE: "KEYS' scale",
+  TURN_INTERVAL: 'the note interval',
+  TURN_SWING: 'swing',
+  /** OUTPUT's compressor knob: "output drive". */
+  turnOutput(label: string): string {
+    return `output ${label.toLowerCase()}`
+  },
+  /** The sidechain's knob: "sidechain length". */
+  turnSidechain(label: string): string {
+    return `sidechain ${label.toLowerCase()}`
+  },
+  /** The fader assigned to [param] (FADER + a pad): "group B's LPF". */
+  turnFader(param: string, g: string): string {
+    return `group ${g}'s ${param}`
+  },
+  /** FX + the group keys: "SOLO · A C", or "SOLO · OFF" once none is. */
+  soloShown(groups: readonly string[]): string {
+    return `SOLO \u00B7 ${groups.length === 0 ? 'OFF' : groups.join(' ')}`
+  },
+  /** The fader on the FX page: "group B's send to the effect". */
+  turnSend(g: string): string {
+    return `group ${g}'s send to the effect`
+  },
+  // ---------- the drawn EP-133's keys, as the device's combos (ui/live/deviceKeys.ts) ----------
+  /** What the device does with a combo arc has nothing for, on the plate: "SYSTEM · NOT IN ARC". */
+  notInArc(word: string): string {
+    return `${word} \u00B7 NOT IN ARC`
+  },
+  /** The combos arc has nothing for, by deviceKeys' NotInArc, as the plate names them. */
+  DEVICE_NOT_IN_ARC: {
+    SYSTEM: 'SYSTEM',
+    CHOP: 'CHOP',
+    CROP: 'CROP',
+    SONG: 'SONG',
+    TEMPO_DETECT: 'TEMPO DETECT',
+    TIME_SIGNATURE: 'TIME SIGNATURE',
+    DELETE_SAMPLE: 'DELETE SAMPLE',
+    COPY_SOUND: 'COPY SOUND',
+    AUTOMATION: 'AUTOMATION',
+    SOLO: 'SOLO',
+    FADER_RESET: 'FADER RESET',
+  } as Readonly<Record<string, string>>,
+  /** The drawn FADER and SHIFT keys' names (the fader itself is "Fader"). */
+  DEVICE_FADER_KEY: 'Fader key',
+  DEVICE_SHIFT_KEY: 'Shift',
+  DEVICE_MAIN_KEY: 'Main',
+  DEVICE_TIMING_KEY: 'Timing',
+  /** The guide overlay's tags on the drawn MAIN and TEMPO, which take the device's combos (CoachText's are the row's keys). */
+  COACH_DEVICE_MAIN: 'Main page; hold + pad 1–9: project',
+  COACH_DEVICE_TEMPO: 'Tempo page; tap again: tap tempo',
+  /** A drawn group key's state, first in its description (a tab has no pressed state): "Held, soloed". */
+  groupKeyState(latched: boolean, held: boolean, soloed: boolean, silenced: boolean): string {
+    const words = [latched ? 'Latched' : held ? 'Held' : null, soloed ? 'soloed' : silenced ? 'silenced' : null].filter((w): w is string => w !== null)
+    const t = words.join(', ')
+    return t === '' ? '' : t.charAt(0).toUpperCase() + t.slice(1)
+  },
+  /** A page asked for while SAMPLE takes: it would end the take. */
+  DEVICE_TAKE_GOING: 'SAMPLING \u00B7 STOP THE TAKE FIRST',
+  /** SHIFT + SOUND held: arc keeps every turn as it goes. */
+  DEVICE_SAVED: 'SAVED',
+  /** The pages' names on the plate. */
+  DEVICE_PAGES: {
+    MAIN: 'MAIN',
+    SOUND: 'SOUND',
+    EDIT: 'EDIT',
+    TEMPO: 'TEMPO',
+    TIMING: 'TIMING',
+    FX: 'FX',
+    OUTPUT: 'OUTPUT',
+    SIDECHAIN: 'SIDECHAIN',
+  } as Readonly<Record<string, string>>,
+  /** What − / + do on each page, after its knobs on the plate's page line. */
+  DEVICE_PAGE_STEPS: {
+    SOUND: '\u2212/+ SOUND',
+    EDIT: '\u2212/+ PAGE',
+    TEMPO: 'TAP TEMPO',
+    TIMING: '\u2212 QUANTIZE \u00B7 + FREE',
+    FX: '\u2212/+ EFFECT \u00B7 FADER SEND',
+    OUTPUT: '+ SIDECHAIN',
+    SIDECHAIN: '\u2212 OUTPUT',
+  } as Readonly<Record<string, string>>,
+  /** The plate's page line: "EDIT · TRIM — X START · Y LENGTH · −/+ PAGE". */
+  devicePageLine(head: string, parts: readonly string[]): string {
+    return parts.length === 0 ? head : `${head} \u2014 ${parts.join(' \u00B7 ')}`
+  },
+  /** The page line's key, for screen readers: what it opens. */
+  DEVICE_PAGE_SHEET: "Open arc's full sheet",
+  /** SOUND's − / +: "002 SNARE" (the slot, and its sound's name). */
+  slotShown(slot: number, name: string | null): string {
+    const n = String(slot).padStart(3, '0')
+    return name === null ? n : `${n} ${name}`
+  },
+  /** SOUND's − / + with no pad played yet. */
+  DEVICE_PLAY_A_PAD: 'PLAY A PAD FIRST',
+  /** A pattern's length on the plate: "4 BARS". */
+  barsShown(n: number): string {
+    return `${n} ${n === 1 ? 'BAR' : 'BARS'}`
+  },
+  /** A slot typed (or stepped to) with no sound in it. */
+  noSoundAt(slot: number): string {
+    return `NO SOUND AT ${String(slot).padStart(3, '0')}`
+  },
+  /** The plate's line for a value set: "LENGTH · 4 BARS". */
+  deviceSet(name: string, value: string): string {
+    return `${name} \u00B7 ${value}`
+  },
+  /** Each drawn key's combos, for screen readers (its aria-description). */
+  DEVICE_KEY_HINTS: {
+    SOUND: 'Sound page. Shift: edit page. Held: type a slot on the pads; held and let go: the pad sheet',
+    MAIN: 'Main page. Held: a pad 1 to 9 picks a project, minus and plus the scene; held and let go: the project sheet. Shift: commit the scene',
+    TEMPO: 'Tempo page; on it, tap the tempo. Held: type the tempo on the pads, or turn knob X; held and let go: the tempo sheet',
+    KEYS: 'Pads or keys. Held: minus and plus the octave, a pad the key, knob X the key, knob Y the scale',
+    FADER: 'Held: a pad gives the fader what is printed over it. Shift: its parameters reset, again restored',
+    SHIFT: 'Held with another key: its second action. A click holds it for the next key',
+    SAMPLE: 'Sample panel; while a hands-free take runs, stops it',
+    TIMING: 'Timing page. Held: a pad repeats. Shift: timing correct',
+    FX: 'Effect page. Held: the pads are the punch-ins, a group key solos it. Shift: output page',
+    ERASE: 'A tap latches erase. Held: erase while held; with a group, clear its pattern',
+    GROUP: 'Held: minus and plus its pattern, or type the pattern on the pads. Shift with A: next free pattern, B: undo, C: copy, D: paste',
+    RIGHT_CLICK: 'Right-click holds it until the next right-click',
+  } as Readonly<Record<string, string>>,
+  /** − and + on the drawn device, by what they step (deviceKeys' MinusPlusRoute): [minus, plus]. */
+  DEVICE_MINUS_PLUS: {
+    octave: ['Octave down', 'Octave up'],
+    group: ['Previous group', 'Next group'],
+    pattern: ['Previous pattern', 'Next pattern'],
+    scene: ['Previous scene', 'Next scene'],
+    length: ['Shorter pattern', 'Longer pattern'],
+    step: ['Previous step', 'Next step'],
+    sampleSource: ['Previous source', 'Next source'],
+    sampleBars: ['Fewer bars', 'More bars'],
+    slot: ['Previous sound', 'Next sound'],
+    editPage: ['Previous page', 'Next page'],
+    timing: ['Quantize', 'Free time'],
+    fx: ['Previous effect', 'Next effect'],
+    output: ['Minus', 'Sidechain'],
+    sidechain: ['Output', 'Plus'],
+  } as Readonly<Record<string, readonly [string, string]>>,
   /** The link to the guide, searched for the key. */
   allShortcuts(key: string): string {
     return `All ${key} shortcuts`
@@ -286,6 +429,10 @@ export const WebText = {
   KEY_HELP: 'These keys',
   KEY_ESCAPE: 'Close a screen; in Live, leave EDIT or stop the sound',
   KEY_UNDO: 'Undo a new pad sound, while its UNDO shows',
+  KEYS_DEVICE: 'Live, the drawn EP-133',
+  KEY_MINUS_PLUS: "The device's − and +",
+  KEY_SHIFT_HELD: "The device's SHIFT, while held",
+  KEY_GROUP_HELD: 'A group key, held while it is down (held a moment, the pads type its pattern)',
   /** The tools panel's line in PADS. */
   LIVE_PADS_KEYS_HINT: 'Keyboard: 1 to 9 or the number pad play pads · A to D group · E edit · M keys · ? all keys',
   /** The KEYS tools panel's line. */

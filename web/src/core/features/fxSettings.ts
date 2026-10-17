@@ -22,7 +22,20 @@
 //   fader, web only), 1 by default: the book writes "levels" only when one
 //   isn't 1, so its text stays the Kotlin twin's otherwise, and settings
 //   written without them read at 1. [levelGain] is how a level is heard.
+// - And the drawn EP-133's fader parameters (web only): the labels printed
+//   over the pads ([FADER_PARAMS], FaderParam), each group's position of
+//   each (0..1, [FADER_DEFAULTS] where never moved) and the one its fader
+//   is assigned to ([FxSettings.assign], LEVEL by default). LEVEL is the
+//   group's level and FX its send (one value each, as above); PITCH, TUNE,
+//   LPF, HPF, ATK, REL and PAN are kept in [FxSettings.faders]; TIME, VEL
+//   and MOD aren't in arc ([faderParamSupported]). The book writes "faders"
+//   (each group's moved ones only) and "assign" only when one is off its
+//   default, so its text stays the Kotlin twin's otherwise, and settings
+//   written without them read at the defaults. [groupSemitones],
+//   [groupPan], [groupAttackMs], [groupReleaseMs] and [faderReadout] are how
+//   they are heard and shown.
 
+import { FxBus } from '../formats/fx/fxBus'
 import { clamp01, knobHz, lerp } from '../formats/fx/fxMath'
 import { DEFAULT as DEFAULT_BPM } from './tempo'
 
@@ -108,6 +121,123 @@ export interface FxSettings {
   readonly sidechain: Sidechain
   /** Each group's level (A..D, 0..1; web only: the drawn EP-133's fader), 1 by default. */
   readonly levels: readonly number[]
+  /** Each group's fader parameters besides LEVEL and FX (A..D; web only), FADER_DEFAULTS where never moved. */
+  readonly faders: readonly GroupFaders[]
+  /** The parameter each group's fader is assigned to (A..D; web only), LEVEL by default; never one arc hasn't. */
+  readonly assign: readonly FaderParam[]
+}
+
+/**
+ * The drawn EP-133's fader parameters (web only): the labels printed over
+ * the pads, in pad order 7 8 9 / 4 5 6 / 1 2 3 / . 0 ENTER.
+ */
+export type FaderParam = 'LEVEL' | 'PITCH' | 'TIME' | 'LPF' | 'HPF' | 'FX' | 'ATK' | 'REL' | 'PAN' | 'TUNE' | 'VEL' | 'MOD'
+
+/** Every FaderParam, in pad order (7 8 9 / 4 5 6 / 1 2 3 / . 0 ENTER). */
+export const FADER_PARAMS: readonly FaderParam[] = ['LEVEL', 'PITCH', 'TIME', 'LPF', 'HPF', 'FX', 'ATK', 'REL', 'PAN', 'TUNE', 'VEL', 'MOD']
+
+/**
+ * Each parameter's fader position where it was never moved (0..1): LEVEL
+ * full, FX no send, the filters open, PITCH, TUNE and PAN centred, nothing
+ * added to the envelopes. TIME, VEL and MOD aren't in arc; theirs are what
+ * the fader would show.
+ */
+export const FADER_DEFAULTS: Readonly<Record<FaderParam, number>> = {
+  LEVEL: 1,
+  PITCH: 0.5,
+  TIME: 0.5,
+  LPF: 1,
+  HPF: 0,
+  FX: 0,
+  ATK: 0,
+  REL: 0,
+  PAN: 0.5,
+  TUNE: 0.5,
+  VEL: 1,
+  MOD: 0,
+}
+
+/** The parameters arc plays: all but TIME (time stretch), VEL (velocity) and MOD (modulation). */
+export function faderParamSupported(p: FaderParam): boolean {
+  return p !== 'TIME' && p !== 'VEL' && p !== 'MOD'
+}
+
+/** The parameters FxSettings.faders keeps (LEVEL is [levels], FX [sends]). */
+export type GroupFaderParam = 'PITCH' | 'LPF' | 'HPF' | 'ATK' | 'REL' | 'PAN' | 'TUNE'
+
+/** A group's fader positions (0..1) for the parameters [faders] keeps. */
+export type GroupFaders = Readonly<Record<GroupFaderParam, number>>
+
+const GROUP_FADER_PARAMS: readonly GroupFaderParam[] = ['PITCH', 'LPF', 'HPF', 'ATK', 'REL', 'PAN', 'TUNE']
+
+const isGroupFader = (p: FaderParam): p is GroupFaderParam => (GROUP_FADER_PARAMS as readonly string[]).includes(p)
+
+const DEFAULT_FADERS: GroupFaders = Object.freeze({ PITCH: 0.5, LPF: 1, HPF: 0, ATK: 0, REL: 0, PAN: 0.5, TUNE: 0.5 })
+
+/** The longest ATK or REL adds to a group's voices, in ms (the pads' own envelope's reach, about). */
+export const FADER_ENV_MS = 2550
+
+/** The semitones a group's voices are read higher for its PITCH (whole, ±12) and TUNE (±1, fine). */
+export function groupSemitones(g: GroupFaders): number {
+  return Math.round((g.PITCH - 0.5) * 24) + (g.TUNE - 0.5) * 2
+}
+
+/** A group's balance for its PAN: -1 (left) to 1 (right), 0 centred. */
+export function groupPan(g: GroupFaders): number {
+  return clamp01(g.PAN) * 2 - 1
+}
+
+/** What a group's ATK adds to its voices' attack, in ms: FADER_ENV_MS v², 0 at the bottom. */
+export function groupAttackMs(g: GroupFaders): number {
+  const v = clamp01(g.ATK)
+  return v * v * FADER_ENV_MS
+}
+
+/** What a group's REL adds to its voices' release, in ms. */
+export function groupReleaseMs(g: GroupFaders): number {
+  const v = clamp01(g.REL)
+  return v * v * FADER_ENV_MS
+}
+
+/** Group [g]'s position of [p] in [s] (0..1): its level, its send, a fader kept, or the default of one arc hasn't. */
+function faderOf(s: FxSettings, g: number, p: FaderParam): number {
+  if (p === 'LEVEL') return s.levels[g] ?? 1
+  if (p === 'FX') return s.sends[g] ?? 0
+  if (isGroupFader(p)) return s.faders[g]?.[p] ?? FADER_DEFAULTS[p]
+  return FADER_DEFAULTS[p]
+}
+
+/**
+ * What the display says for [p] at [v]: LEVEL, FX, TIME, VEL and MOD in
+ * percent ('72'); PITCH in semitones ('+3', '0'); TUNE in cents ('-25');
+ * the filters' cutoff ('1.2k', 'OPEN' at their open end); PAN ('L40', 'C',
+ * 'R40'); ATK and REL in ms ('120', '1.2s').
+ */
+export function faderReadout(p: FaderParam, v: number): string {
+  const k = clamp01(f(v))
+  const signed = (n: number): string => (n > 0 ? `+${n}` : `${n}`)
+  const g: GroupFaders = { ...DEFAULT_FADERS, [p]: k }
+  switch (p) {
+    case 'PITCH':
+      return signed(Math.round((k - 0.5) * 24))
+    case 'TUNE':
+      return signed(Math.round((k - 0.5) * 200))
+    case 'LPF':
+      return k === 1 ? 'OPEN' : hz(FxBus.lpfHz(k))
+    case 'HPF':
+      return k === 0 ? 'OPEN' : hz(FxBus.hpfHz(k))
+    case 'PAN': {
+      const pan = Math.round((k - 0.5) * 200)
+      return pan < 0 ? `L${-pan}` : pan > 0 ? `R${pan}` : 'C'
+    }
+    case 'ATK':
+    case 'REL': {
+      const ms = Math.round(p === 'ATK' ? groupAttackMs(g) : groupReleaseMs(g))
+      return ms < 1000 ? `${ms}` : `${tenths(ms / 1000)}s`
+    }
+    default:
+      return `${Math.round(k * 100)}`
+  }
 }
 
 /** The send groups, A..D. */
@@ -115,17 +245,49 @@ const GROUPS = 4
 /** Sidechain.dests with every group. */
 const ALL_GROUPS = (1 << GROUPS) - 1
 
+/** [g] with every position a float (missing ones at their defaults). */
+function faders(g: Partial<GroupFaders> | undefined): GroupFaders {
+  const out = {} as Record<GroupFaderParam, number>
+  for (const p of GROUP_FADER_PARAMS) out[p] = f(g?.[p] ?? DEFAULT_FADERS[p])
+  return out
+}
+
 /** Settings: [fields] over the defaults (Kotlin's FxSettings constructor). */
 function of(fields: Partial<FxSettings> = {}): FxSettings {
-  const s = { type: FxType.NONE as FxType, x: 0.5, y: 0.5, sends: [0, 0, 0, 0], comp: comp(), sidechain: sidechain(), levels: [1, 1, 1, 1], ...fields }
-  return { type: s.type, x: f(s.x), y: f(s.y), sends: s.sends.map(f), comp: s.comp, sidechain: s.sidechain, levels: s.levels.map(f) }
+  const s = {
+    type: FxType.NONE as FxType,
+    x: 0.5,
+    y: 0.5,
+    sends: [0, 0, 0, 0],
+    comp: comp(),
+    sidechain: sidechain(),
+    levels: [1, 1, 1, 1],
+    faders: [DEFAULT_FADERS, DEFAULT_FADERS, DEFAULT_FADERS, DEFAULT_FADERS],
+    assign: ['LEVEL', 'LEVEL', 'LEVEL', 'LEVEL'] as readonly FaderParam[],
+    ...fields,
+  }
+  return {
+    type: s.type,
+    x: f(s.x),
+    y: f(s.y),
+    sends: s.sends.map(f),
+    comp: s.comp,
+    sidechain: s.sidechain,
+    levels: s.levels.map(f),
+    faders: s.faders.map(faders),
+    assign: s.assign,
+  }
 }
 
 const DEFAULT: FxSettings = of()
 
 const coerceIn = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
 
-/** Every knob, send and level held to 0..1 (NaN to 0), four sends and levels, the sidechain's pad, group and groups in range. */
+/** A fader assignment arc plays: [p] when it is one, else LEVEL. */
+const assignable = (p: unknown): FaderParam =>
+  typeof p === 'string' && (FADER_PARAMS as readonly string[]).includes(p) && faderParamSupported(p as FaderParam) ? (p as FaderParam) : 'LEVEL'
+
+/** Every knob, send, level and fader held to 0..1 (NaN to 0), four of each, the sidechain's pad, group and groups in range. */
 function clamped(s: FxSettings): FxSettings {
   const sc = s.sidechain
   return {
@@ -143,7 +305,31 @@ function clamped(s: FxSettings): FxSettings {
       y: clamp01(f(sc.y)),
     },
     levels: Array.from({ length: GROUPS }, (_, g) => clamp01(f(s.levels[g] ?? 1))),
+    faders: Array.from({ length: GROUPS }, (_, g) => {
+      const out = {} as Record<GroupFaderParam, number>
+      for (const p of GROUP_FADER_PARAMS) out[p] = clamp01(f(s.faders[g]?.[p] ?? DEFAULT_FADERS[p]))
+      return out
+    }),
+    assign: Array.from({ length: GROUPS }, (_, g) => assignable(s.assign[g])),
   }
+}
+
+/**
+ * Group [g]'s [p] at [v] (0..1): LEVEL its level, FX its send, the rest
+ * kept in faders; one arc hasn't (TIME, VEL, MOD) leaves [s] as it is.
+ */
+function withFader(s: FxSettings, g: number, p: FaderParam, v: number): FxSettings {
+  if (g < 0 || g >= GROUPS) return s
+  if (p === 'LEVEL') return withLevel(s, g, v)
+  if (p === 'FX') return withSend(s, g, v)
+  if (!isGroupFader(p)) return s
+  return { ...s, faders: s.faders.map((old, i) => (i === g ? { ...old, [p]: clamp01(f(v)) } : old)) }
+}
+
+/** Group [g]'s fader assigned to [p]; one arc hasn't leaves [s] as it is. */
+function withAssign(s: FxSettings, g: number, p: FaderParam): FxSettings {
+  if (g < 0 || g >= GROUPS || !faderParamSupported(p)) return s
+  return { ...s, assign: s.assign.map((old, i) => (i === g ? p : old)) }
 }
 
 /** Another effect; the knobs stay where they are. */
@@ -308,6 +494,9 @@ export const FxSettings = {
   withXY,
   withSend,
   withLevel,
+  withFader,
+  withAssign,
+  faderOf,
   withComp,
   withSidechain,
   xLabel,
@@ -481,9 +670,24 @@ function toJson(map: ReadonlyMap<number, FxSettings>): string {
         sidechain: { on: sc.on, group: sc.group, pad: sc.pad, dests: sc.dests, x: sc.x, y: sc.y },
         // The levels only where one isn't 1 (web only): otherwise the Kotlin twin's text.
         ...(s.levels.some((v) => v !== 1) ? { levels: s.levels } : {}),
+        // The faders likewise (web only): each group's moved ones, by their lower-case names.
+        ...(s.faders.some(movedFaders) ? { faders: s.faders.map(fadersJson) } : {}),
+        ...(s.assign.some((p) => p !== 'LEVEL') ? { assign: s.assign } : {}),
       }
     })
   return JSON.stringify({ v: 1, projects })
+}
+
+/** Whether any of [g]'s positions is off its default. */
+function movedFaders(g: GroupFaders): boolean {
+  return GROUP_FADER_PARAMS.some((p) => g[p] !== DEFAULT_FADERS[p])
+}
+
+/** [g]'s moved positions, as the book writes them: {"lpf":0.25}. */
+function fadersJson(g: GroupFaders): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const p of GROUP_FADER_PARAMS) if (g[p] !== DEFAULT_FADERS[p]) out[p.toLowerCase()] = g[p]
+  return out
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -558,7 +762,38 @@ function entry(o: Record<string, unknown>): FxSettings | null {
     }
     levels = read
   }
-  return clamped({ type, x, y, sends, comp: c, sidechain: sc, levels })
+  let fs: readonly GroupFaders[] = d.faders
+  if ('faders' in o) {
+    const list = o['faders']
+    if (!Array.isArray(list)) return null
+    const read: GroupFaders[] = []
+    for (let g = 0; g < GROUPS; g++) {
+      const go: unknown = g < list.length ? list[g] : {}
+      if (!isObject(go)) return null
+      const one = {} as Record<GroupFaderParam, number>
+      for (const p of GROUP_FADER_PARAMS) {
+        const v = field(go, p.toLowerCase(), floatOrNull, DEFAULT_FADERS[p])
+        if (v === null) return null
+        one[p] = v
+      }
+      read.push(one)
+    }
+    fs = read
+  }
+  let assign: readonly FaderParam[] = d.assign
+  if ('assign' in o) {
+    const list = o['assign']
+    if (!Array.isArray(list)) return null
+    const read: FaderParam[] = []
+    for (let g = 0; g < GROUPS; g++) {
+      const v: unknown = g < list.length ? list[g] : 'LEVEL'
+      if (typeof v !== 'string') return null
+      // A name this one doesn't play (a later one's, say): LEVEL.
+      read.push(assignable(v))
+    }
+    assign = read
+  }
+  return clamped({ type, x, y, sends, comp: c, sidechain: sc, levels, faders: fs, assign })
 }
 
 /**

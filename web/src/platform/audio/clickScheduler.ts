@@ -10,9 +10,16 @@
 //   and a click's Beat carries its frame where Kotlin's carries when it is heard.
 // - The click is mixed into Live's own output (after TAKE has taken the
 //   block, so a take leaves it out, as Kotlin's own click stream does).
+// - The click has a level (ClickTrack.gain, web only: the drawn EP-133's
+//   metronome level on TEMPO's Y), a gain on its sound that glides to a new
+//   value over about CLICK_GLIDE_MS; at 1, its default, the click is as
+//   before, and at 0 it is silent (its beats still fall, and are told).
 
 import { BEATS_PER_BAR, clamp } from '../../core/features/tempo'
 import { ClickSound } from './patternScheduler'
+
+/** How long a sounding click takes to follow a new level, about (web only). */
+export const CLICK_GLIDE_MS = 5
 
 /** Beats in mix frames: beat [beatIndex] at [anchorFrame], the rest every [periodFrames]; the bar known: 0, 4, 8 … are accented. */
 export interface FrameGrid {
@@ -123,10 +130,15 @@ export class ClickTrack {
   // The click sounding and how far into it, across blocks.
   private sound: Int16Array | null = null
   private pos = 0
+  // Its level (web only): the gain heard now, the one it glides to, and the glide's per-frame step.
+  private level = 1
+  private levelTo = 1
+  private readonly glide: number
 
   constructor(rate: number) {
     this.plain = ClickSound.render(rate, false)
     this.accented = ClickSound.render(rate, true)
+    this.glide = 1 / (1 + (CLICK_GLIDE_MS * rate) / 1000)
   }
 
   /** Whether a click still sounds (its tail goes into the next block). */
@@ -134,18 +146,33 @@ export class ClickTrack {
     return this.sound !== null
   }
 
+  /** The click's gain (web only), 0..1: 1 as it always was, 0 silent. A sounding click glides to it. */
+  get gain(): number {
+    return this.levelTo
+  }
+
+  set gain(g: number) {
+    this.levelTo = g > 0 ? (g < 1 ? g : 1) : 0
+  }
+
   /** Adds [clicks] (in order, inside the block from mix frame [from]) to [left] and [right]'s first [frames]. */
   mix(left: Float32Array, right: Float32Array, frames: number, from: number, clicks: readonly Click[]): void {
     let c = 0
     for (let i = 0; i < frames; i++) {
       while (c < clicks.length && clicks[c]!.frame - from <= i) {
+        // Nothing sounding: the click starts at the level as it is now.
+        if (this.sound === null) this.level = this.levelTo
         this.sound = clicks[c]!.accent ? this.accented : this.plain
         this.pos = 0
         c++
       }
       const s = this.sound
       if (s === null) continue
-      const v = s[this.pos++]! / 32768
+      if (this.level !== this.levelTo) {
+        const d = this.levelTo - this.level
+        this.level = Math.abs(d) < 1e-4 ? this.levelTo : this.level + this.glide * d
+      }
+      const v = this.level === 1 ? s[this.pos++]! / 32768 : (s[this.pos++]! / 32768) * this.level
       left[i] = left[i]! + v
       right[i] = right[i]! + v
       if (this.pos >= s.length) this.sound = null

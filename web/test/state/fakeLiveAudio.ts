@@ -55,6 +55,8 @@ export interface FakeLiveAudio extends LiveAudioDeps {
   readonly clickLog: string[]
   /** A click heard, as the output tells it. */
   beat(b: Beat): void
+  /** The click's level as set (web: the metronome level), 1 unless turned. */
+  readonly clickLevel: Signal<number>
   /** FX bus commands in order: [what, index, x, y]. */
   readonly controls: [number, number, number, number][]
   // SAMPLE
@@ -131,6 +133,10 @@ export function fakeLiveAudio(withLate = false): FakeLiveAudio {
     },
     control(what, index, x, y) {
       a.controls.push([what, index, x, y])
+    },
+    clickLevel: signal(1),
+    setClickLevel(v) {
+      a.clickLevel.value = Math.min(Math.max(v, 0), 1)
     },
     release(id) {
       a.releases.push(id)

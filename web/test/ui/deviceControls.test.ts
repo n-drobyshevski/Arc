@@ -1,21 +1,25 @@
 // The drawn EP-133's knobs and fader (web only: ui/live/DeviceControls.tsx): what each turns, by
 // what is open, and how a turn reaches the controller.
 import { describe, expect, it, vi } from 'vitest'
-import { FxSettings, FxType } from '../../src/core/features/fxSettings'
+import { FADER_DEFAULTS, faderReadout, FxSettings, FxType } from '../../src/core/features/fxSettings'
+import { NoteNames, Scale, SCALES } from '../../src/core/features/keys'
+import { TIMING_INTERVALS, TimingSettings } from '../../src/core/features/pattern'
 import { PadSettings } from '../../src/core/features/padSettings'
 import { Tempo } from '../../src/core/features/tempo'
 import { MirrorText } from '../../src/core/text/mirrorText'
 import { WebText } from '../../src/core/text/webText'
 import { SAMPLE_UI } from '../../src/state/samplePlan'
 import { STEP_GATES, STEP_UI } from '../../src/state/stepPlan'
-import { faderTarget, knobTarget, share, volumeTarget, type KnobInputs } from '../../src/ui/live/DeviceControls'
+import { assignedTarget, faderFor, faderTarget, knobTarget, sendTarget, share, volumeTarget, type KnobInputs, type KnobPage } from '../../src/ui/live/DeviceControls'
 import { THRESHOLD_OFF } from '../../src/ui/live/SamplePanel'
 
 /** Nothing open: the effect's knobs; [over] opens what a case needs. */
 function inputs(over: Partial<KnobInputs> = {}): KnobInputs & { setXY: ReturnType<typeof vi.fn> } {
   const setXY = vi.fn()
   return {
+    keys: null,
     pad: null,
+    page: null,
     sample: null,
     step: null,
     tempo: null,
@@ -52,21 +56,27 @@ describe('knobTarget', () => {
     expect(x.what).toBe(`${MirrorText.fxName(FxType.DELAY)} ${FxSettings.xLabel(FxType.DELAY).toLowerCase()}`)
   })
 
-  it('follows what is open, first the pad sheet, then SAMPLE, STEP and TEMPO held', () => {
-    const all = inputs({ pad: pad(), sample: sample(), step: step(), tempo: tempo() })
-    expect(knobTarget('x', all)!.name).toBe(MirrorText.MODE.toUpperCase())
-    expect(knobTarget('y', all)!.name).toBe(MirrorText.PAN.toUpperCase())
-    const noPad = { ...all, pad: null }
-    expect(knobTarget('x', noPad)!.name).toBe(MirrorText.LEVEL.toUpperCase())
-    expect(knobTarget('y', noPad)!.name).toBe(MirrorText.THRESHOLD.toUpperCase())
-    const noSample = { ...noPad, sample: sample(false) }
+  it('follows what is held, then what is open: KEYS, TEMPO, the pad sheet, the page, SAMPLE, STEP', () => {
+    const keys = { root: 2, scale: Scale.MINOR, names: NoteNames.LETTERS, setRoot: vi.fn(), setScale: vi.fn() }
+    const all = inputs({ keys, tempo: tempo(), pad: pad(), page: { kind: 'TIMING', timing: TimingSettings.DEFAULT, setInterval: vi.fn(), setSwing: vi.fn() }, sample: sample(), step: step() })
+    expect(knobTarget('x', all)!.name).toBe(MirrorText.KEY.toUpperCase())
+    expect(knobTarget('y', all)!.name).toBe(MirrorText.SCALE.toUpperCase())
+    const noKeys = { ...all, keys: null }
+    expect(knobTarget('x', noKeys)!.name).toBe(MirrorText.FN_TEMPO.toUpperCase())
+    // TEMPO held: Y has nothing while arc's click has no level.
+    expect(knobTarget('y', noKeys)).toBeNull()
+    const noTempo = { ...noKeys, tempo: null }
+    expect(knobTarget('x', noTempo)!.name).toBe(MirrorText.MODE.toUpperCase())
+    expect(knobTarget('y', noTempo)!.name).toBe(MirrorText.PAN.toUpperCase())
+    const noPad = { ...noTempo, pad: null }
+    expect(knobTarget('x', noPad)!.name).toBe(MirrorText.INTERVAL.toUpperCase())
+    const noPage = { ...noPad, page: null }
+    expect(knobTarget('x', noPage)!.name).toBe(MirrorText.LEVEL.toUpperCase())
+    expect(knobTarget('y', noPage)!.name).toBe(MirrorText.THRESHOLD.toUpperCase())
+    const noSample = { ...noPage, sample: sample(false) }
     expect(knobTarget('x', noSample)!.name).toBe(MirrorText.VEL.toUpperCase())
     expect(knobTarget('y', noSample)!.name).toBe(MirrorText.LEN.toUpperCase())
-    const noStep = { ...noSample, step: step(false) }
-    expect(knobTarget('x', noStep)!.name).toBe(MirrorText.FN_TEMPO.toUpperCase())
-    // TEMPO held: Y has nothing (arc's click has no level).
-    expect(knobTarget('y', noStep)).toBeNull()
-    expect(knobTarget('x', { ...noStep, tempo: null })!.name).toBe('FX X')
+    expect(knobTarget('x', { ...noSample, step: step(false) })!.name).toBe('FX X')
   })
 
   it("on the pad sheet turns the page's X and Y into the pad's settings, and rests while it is read", () => {
@@ -109,6 +119,125 @@ describe('knobTarget', () => {
     expect(bpm).toMatchObject({ value: 128, min: Tempo.MIN, max: Tempo.MAX, readout: '128', spoken: MirrorText.tempoValue(128) })
     bpm.set(140.4)
     expect(t.set).toHaveBeenLastCalledWith(140)
+  })
+})
+
+describe("knobTarget on the drawn device's pages and keys held", () => {
+  const padKnobs = (adjust = vi.fn()) => ({ settings: PadSettings.DEFAULT, frames: 46875, sampleRate: 46875, enabled: true, adjust })
+
+  it("KEYS held: X the key (0..11, named), Y the scale, each set as turned", () => {
+    const keys = { root: 4, scale: Scale.MAJOR, names: NoteNames.LETTERS, setRoot: vi.fn(), setScale: vi.fn() }
+    const x = knobTarget('x', inputs({ keys }))!
+    expect(x).toMatchObject({ value: 4, min: 0, max: 11, step: 1, readout: 'E', what: WebText.TURN_KEY })
+    x.set(7.4)
+    expect(keys.setRoot).toHaveBeenLastCalledWith(7)
+    const y = knobTarget('y', inputs({ keys }))!
+    expect(y).toMatchObject({ value: SCALES.indexOf(Scale.MAJOR), max: SCALES.length - 1, readout: MirrorText.scaleName(Scale.MAJOR) })
+    y.set(SCALES.indexOf(Scale.BLUES))
+    expect(keys.setScale).toHaveBeenLastCalledWith(Scale.BLUES)
+    // Past the ends it stays on the last scale.
+    y.set(99)
+    expect(keys.setScale).toHaveBeenLastCalledWith(SCALES[SCALES.length - 1])
+  })
+
+  it("SOUND: X the played pad's LEVEL, Y its PITCH; nothing with no pad open", () => {
+    const adjust = vi.fn()
+    const page: KnobPage = { kind: 'SOUND', pad: padKnobs(adjust) }
+    const x = knobTarget('x', inputs({ page }))!
+    expect(x).toMatchObject({ name: MirrorText.LEVEL.toUpperCase(), value: PadSettings.DEFAULT.level, max: PadSettings.LEVEL_MAX })
+    x.set(72.3)
+    expect(adjust).toHaveBeenLastCalledWith({ ...PadSettings.DEFAULT, level: 72 })
+    const y = knobTarget('y', inputs({ page }))!
+    expect(y).toMatchObject({ name: MirrorText.PITCH.toUpperCase(), step: 0.1, min: -PadSettings.PITCH_MAX })
+    y.set(-2)
+    expect(adjust).toHaveBeenLastCalledWith({ ...PadSettings.DEFAULT, pitch: -2 })
+    expect(knobTarget('x', inputs({ page: { kind: 'SOUND', pad: null } }))).toBeNull()
+  })
+
+  it("EDIT: the page's X and Y on the played pad, as the sheet's", () => {
+    expect(knobTarget('x', inputs({ page: { kind: 'EDIT', page: 'TRIM', pad: padKnobs() } }))!.name).toBe(MirrorText.START.toUpperCase())
+    expect(knobTarget('y', inputs({ page: { kind: 'EDIT', page: 'TRIM', pad: padKnobs() } }))!.name).toBe(MirrorText.LENGTH.toUpperCase())
+    expect(knobTarget('y', inputs({ page: { kind: 'EDIT', page: 'MUTE', pad: padKnobs() } }))).toBeNull()
+    // The pad sheet open has the knobs before the page.
+    expect(knobTarget('x', inputs({ pad: pad(), page: { kind: 'EDIT', page: 'TRIM', pad: padKnobs() } }))!.name).toBe(MirrorText.MODE.toUpperCase())
+  })
+
+  it("TEMPO: X the tempo; Y the click's level once there is one", () => {
+    const t = tempo()
+    expect(knobTarget('x', inputs({ page: { kind: 'TEMPO', tempo: t } }))!.value).toBe(128)
+    expect(knobTarget('y', inputs({ page: { kind: 'TEMPO', tempo: t } }))).toBeNull()
+    const click = { level: 0.4, set: vi.fn() }
+    const y = knobTarget('y', inputs({ page: { kind: 'TEMPO', tempo: { ...t, click } } }))!
+    expect(y).toMatchObject({ name: MirrorText.CLICK.toUpperCase(), value: 0.4, readout: '40' })
+    y.set(0.2)
+    expect(click.set).toHaveBeenLastCalledWith(0.2)
+    // At the bottom it reads OFF (the click off).
+    const off = knobTarget('y', inputs({ page: { kind: 'TEMPO', tempo: { ...t, click: { level: 0, set: vi.fn() } } } }))!
+    expect(off).toMatchObject({ value: 0, readout: 'OFF', spoken: MirrorText.onOff(false) })
+    // TEMPO held has it too.
+    expect(knobTarget('y', inputs({ tempo: { ...t, click } }))!.name).toBe(MirrorText.CLICK.toUpperCase())
+  })
+
+  it('TIMING: X the interval, Y the swing (resting where the interval does not swing)', () => {
+    const setInterval = vi.fn()
+    const setSwing = vi.fn()
+    const page: KnobPage = { kind: 'TIMING', timing: TimingSettings.DEFAULT, setInterval, setSwing }
+    const x = knobTarget('x', inputs({ page }))!
+    expect(x).toMatchObject({ value: TIMING_INTERVALS.indexOf('1/16'), readout: '1/16', max: TIMING_INTERVALS.length - 1 })
+    x.set(TIMING_INTERVALS.indexOf('1/8T'))
+    expect(setInterval).toHaveBeenLastCalledWith('1/8T')
+    const y = knobTarget('y', inputs({ page }))!
+    expect(y).toMatchObject({ value: 50, min: 50, max: 75, readout: '50%', enabled: true })
+    y.set(62.4)
+    expect(setSwing).toHaveBeenLastCalledWith(62)
+    const triplets: KnobPage = { ...page, timing: TimingSettings.withInterval(TimingSettings.DEFAULT, '1/16T') }
+    expect(knobTarget('y', inputs({ page: triplets }))!.enabled).toBe(false)
+  })
+
+  it("FX the effect's knobs, OUTPUT the compressor, SIDECHAIN the duck", () => {
+    const setComp = vi.fn()
+    const setSidechainXY = vi.fn()
+    const fx = { settings: FxSettings.DEFAULT, bpm: 120, setXY: vi.fn(), setComp, setSidechainXY }
+    expect(knobTarget('x', inputs({ fx, page: { kind: 'FX' }, sample: sample() }))!.name).toBe('FX X')
+    const drive = knobTarget('x', inputs({ fx, page: { kind: 'OUTPUT' } }))!
+    expect(drive).toMatchObject({ name: MirrorText.DRIVE.toUpperCase(), readout: FxSettings.xReadout(FxType.COMPRESSOR, FxSettings.DEFAULT.comp.x) })
+    drive.set(0.8)
+    expect(setComp).toHaveBeenLastCalledWith(0.8, FxSettings.DEFAULT.comp.y)
+    const shape = knobTarget('y', inputs({ fx, page: { kind: 'SIDECHAIN' } }))!
+    expect(shape).toMatchObject({ name: MirrorText.SHAPE.toUpperCase(), readout: MirrorText.sidechainShape(FxSettings.DEFAULT.sidechain.y) })
+    shape.set(0.1)
+    expect(setSidechainXY).toHaveBeenLastCalledWith(FxSettings.DEFAULT.sidechain.x, 0.1)
+  })
+
+  it("the fader on the FX page is the group's send", () => {
+    const set = vi.fn()
+    const fx = FxSettings.withSend(FxSettings.DEFAULT, 2, 0.35)
+    const c = sendTarget(2, fx, set)
+    expect(c).toMatchObject({ name: '→FX C', value: Math.fround(0.35), def: 0, what: WebText.turnSend('C') })
+    c.set(0.6)
+    expect(set).toHaveBeenLastCalledWith(2, 0.6)
+  })
+})
+
+describe('the fader assigned (FADER + a pad)', () => {
+  it("turns that parameter, read as the device's display reads it, back to its default", () => {
+    const set = vi.fn()
+    const lpf = assignedTarget(1, 'LPF', 0.5, set)
+    expect(lpf).toMatchObject({ name: 'LPF', what: WebText.turnFader('LPF', 'B'), value: 0.5, def: FADER_DEFAULTS.LPF, readout: faderReadout('LPF', 0.5) })
+    lpf.set(0.3)
+    expect(set).toHaveBeenLastCalledWith(0.3)
+    expect(assignedTarget(0, 'PAN', 0.5, set).readout).toBe('C')
+    expect(assignedTarget(0, 'LPF', 1, set).readout).toBe('OPEN')
+  })
+
+  it('gives way to the send on the FX page and to the level with a group key held', () => {
+    const fx = FxSettings.withSend(FxSettings.withLevel(FxSettings.DEFAULT, 2, 0.6), 2, 0.2)
+    const assigned = assignedTarget(2, 'PAN', 0.5, vi.fn())
+    const base = { group: 2, fx, page: 'MAIN', groupHeld: false, assigned, setLevel: vi.fn(), setSend: vi.fn() }
+    expect(faderFor(base).name).toBe('PAN')
+    expect(faderFor({ ...base, page: 'FX' }).name).toBe('→FX C')
+    expect(faderFor({ ...base, groupHeld: true }).name).toBe('GROUP C')
+    expect(faderFor({ ...base, assigned: null }).value).toBeCloseTo(0.6)
   })
 })
 

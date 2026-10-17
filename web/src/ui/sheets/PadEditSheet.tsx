@@ -25,6 +25,7 @@ import { MirrorText } from '../../core/text/mirrorText'
 import { useController, useNav } from '../AppContext'
 import { Key } from '../components/Key'
 import { Sheet } from '../components/Sheet'
+import { useDeviceKeys } from '../live/DeviceKeys'
 import { SoundPicker } from '../live/SoundPicker'
 import { sheetLayer, type NavView } from '../nav'
 import { PadEditPages } from './PadEditPages'
@@ -67,6 +68,8 @@ export function PadEditSheet(props: { view: NavView }): JSX.Element {
     return () => c.closePadEdit()
   }, [id, slot, connected])
   const edit = c.padEdit.edit.value
+  // The drawn device's EDIT page shares its page with the sheet (PadEditPages' padPage).
+  const fromDeviceEdit = useDeviceKeys()?.layer.state.peek().page === 'EDIT'
   const editing = edit !== null && pad !== null && edit.pad.group === pad.group && edit.pad.offset === pad.offset && slot !== null
   // With the settings shown, the sounds fold away until asked for; only a choice made is kept.
   const [listChoice, setListChoice] = useState<boolean | null>(null)
@@ -136,6 +139,8 @@ export function PadEditSheet(props: { view: NavView }): JSX.Element {
             <>
               <PadEditPages
                 key={id}
+                // A pad's sheet opens on SOUND, as on Android; opened from the drawn device's EDIT page, on its page.
+                initialPage={fromDeviceEdit ? undefined : 'SOUND'}
                 settings={edit.settings}
                 onChange={(v) => c.adjustPad(v)}
                 frames={edit.frames}

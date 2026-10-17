@@ -10,6 +10,32 @@ describe('FxSetup', () => {
     expect(new FxSetup().commands()).toEqual([])
   })
 
+  it("(web) each group's mute, filters, balance, pitch and envelopes, its last, after the levels and before the tempo", () => {
+    const fx = new FxSetup()
+    fx.record(FxControl.TEMPO, 0, 100, 0)
+    fx.record(FxControl.GROUP_ENV, 2, 100, 200)
+    fx.record(FxControl.GROUP_PITCH, 0, 3, 0)
+    fx.record(FxControl.GROUP_PAN, 3, -0.5, 0)
+    fx.record(FxControl.GROUP_FILTER, 1, 0.5, 0.1)
+    fx.record(FxControl.GROUP_FILTER, 1, 0.25, 0.2)
+    fx.record(FxControl.GROUP_MUTE, 2, 1, 0)
+    fx.record(FxControl.GROUP_MUTE, 2, 0, 0)
+    fx.record(FxControl.GROUP_MUTE, 0, 1, 0)
+    fx.record(FxControl.GROUP_MUTE, 4, 1, 0)
+    fx.record(FxControl.GROUP_PITCH, 1.5, 1, 0)
+    fx.record(FxControl.GROUP_LEVEL, 3, 0.5, 0)
+    expect(fx.commands()).toEqual([
+      { what: FxControl.GROUP_LEVEL, index: 3, x: 0.5, y: 0 },
+      { what: FxControl.GROUP_MUTE, index: 0, x: 1, y: 0 },
+      { what: FxControl.GROUP_MUTE, index: 2, x: 0, y: 0 },
+      { what: FxControl.GROUP_FILTER, index: 1, x: 0.25, y: 0.2 },
+      { what: FxControl.GROUP_PAN, index: 3, x: -0.5, y: 0 },
+      { what: FxControl.GROUP_PITCH, index: 0, x: 3, y: 0 },
+      { what: FxControl.GROUP_ENV, index: 2, x: 100, y: 200 },
+      { what: FxControl.TEMPO, index: 0, x: 100, y: 0 },
+    ])
+  })
+
   it("each setting's last value, the effect first", () => {
     const fx = new FxSetup()
     fx.record(FxControl.TEMPO, 0, 140, 0)

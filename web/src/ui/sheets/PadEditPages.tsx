@@ -11,10 +11,14 @@
 // Web deltas: the knobs are sliders (KnobSlider), back to their default on a
 // double click, a fine step throughout (Kotlin's fine drag); they sit two by
 // two, PITCH and LEVEL over the page's X and Y; TrimWave is an SVG. A page's
-// X and Y are [pageKnobs], and the page shown is [padPageShown], so the
-// drawn EP-133's knobs X and Y follow them while the sheet is open.
+// X and Y are [pageKnobs] (PITCH and LEVEL [levelPitchKnobs]), and the page
+// shown is [padPageShown], so the drawn EP-133's knobs X and Y follow them
+// while the sheet is open. The page picked is [padPage], one for the sheet
+// and the drawn device's EDIT page (its − / + step it, [setPadPage]): a
+// sheet opens on SOUND ([initialPage]), but from the device's EDIT page on
+// the page it shows, and the device then shows the sheet's.
 import type { JSX } from 'preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useLayoutEffect } from 'preact/hooks'
 import { signal, type ReadonlySignal } from '@preact/signals'
 import { PadSettings, PLAY_MODES, type PlayMode } from '../../core/features/padSettings'
 import type { Peak } from '../../core/features/sampleTrim'
@@ -43,6 +47,42 @@ export interface PageKnob {
 /** The page shown on the open pad sheet; null with none open. */
 const pageShown = signal<EditPage | null>(null)
 export const padPageShown: ReadonlySignal<EditPage | null> = pageShown
+
+/** EDIT's page picked: the sheet's and the drawn device's EDIT page (SOUND until another is picked). */
+const pagePicked = signal<EditPage>('SOUND')
+export const padPage: ReadonlySignal<EditPage> = pagePicked
+
+export function setPadPage(page: EditPage): void {
+  pagePicked.value = page
+}
+
+/** PITCH and LEVEL, always at hand (the device's PTC and AMP; the drawn device's SOUND page turns them with Y and X). */
+export function levelPitchKnobs(s: PadSettings): { level: PageKnob; pitch: PageKnob } {
+  return {
+    level: {
+      label: MirrorText.LEVEL,
+      value: s.level,
+      min: 0,
+      max: PadSettings.LEVEL_MAX,
+      step: 1,
+      readout: MirrorText.levelLabel(s.level),
+      def: PadSettings.DEFAULT.level,
+      disabled: false,
+      apply: (v) => ({ ...s, level: Math.round(v) }),
+    },
+    pitch: {
+      label: MirrorText.PITCH,
+      value: s.pitch,
+      min: -PadSettings.PITCH_MAX,
+      max: PadSettings.PITCH_MAX,
+      step: 0.1,
+      readout: MirrorText.pitchLabel(s.pitch),
+      def: 0,
+      disabled: false,
+      apply: (v) => ({ ...s, pitch: v }),
+    },
+  }
+}
 
 /**
  * Page [page]'s knobs X (orange) and Y (black) for [s], a sound of [frames]
@@ -129,12 +169,17 @@ export interface PadEditPagesProps {
   peaks: readonly Peak[] | null
   /** False while the pad is read (or couldn't be): every knob rests. */
   enabled: boolean
+  /** The page it opens on; none: the one picked last (the drawn device's EDIT page's). */
   initialPage?: EditPage
 }
 
 export function PadEditPages(props: PadEditPagesProps): JSX.Element {
   const { settings: s, onChange, enabled } = props
-  const [page, setPage] = useState<EditPage>(props.initialPage ?? 'SOUND')
+  const page = padPage.value
+  // Before it paints, so it never shows the page picked last first.
+  useLayoutEffect(() => {
+    if (props.initialPage !== undefined) setPadPage(props.initialPage)
+  }, [])
   const oneshot = s.mode === 'oneshot'
   const knob = (
     label: string,
@@ -171,8 +216,9 @@ export function PadEditPages(props: PadEditPagesProps): JSX.Element {
     },
     [],
   )
-  const tone = (k: PageKnob, t: 'orange' | 'black'): JSX.Element =>
+  const tone = (k: PageKnob, t: 'white' | 'orange' | 'black'): JSX.Element =>
     knob(k.label, k.value, k.min, k.max, k.readout, k.def, t, (v) => onChange(k.apply(v)), { step: k.step, disabled: k.disabled })
+  const lp = levelPitchKnobs(s)
   const pk = pageKnobs(page, s, props.frames, props.sampleRate)
   const x = pk.x !== null ? tone(pk.x, 'orange') : null
   const y = pk.y !== null ? tone(pk.y, 'black') : null
@@ -181,10 +227,8 @@ export function PadEditPages(props: PadEditPagesProps): JSX.Element {
   return (
     <div class="pad-pages">
       <div class="pad-pages__knobs">
-        {knob(MirrorText.PITCH, s.pitch, -PadSettings.PITCH_MAX, PadSettings.PITCH_MAX, MirrorText.pitchLabel(s.pitch), 0, 'white', (v) => onChange({ ...s, pitch: v }), {
-          step: 0.1,
-        })}
-        {knob(MirrorText.LEVEL, s.level, 0, PadSettings.LEVEL_MAX, MirrorText.levelLabel(s.level), PadSettings.DEFAULT.level, 'white', (v) => onChange({ ...s, level: Math.round(v) }))}
+        {tone(lp.pitch, 'white')}
+        {tone(lp.level, 'white')}
         {x ?? <span class="pad-pages__empty" />}
         {y ?? <span class="pad-pages__empty" />}
       </div>
@@ -197,7 +241,7 @@ export function PadEditPages(props: PadEditPagesProps): JSX.Element {
             role="radio"
             aria-checked={p === page}
             class={`pad-pages__key cap-3d${p === page ? ' is-on is-down' : ''}`}
-            onClick={() => setPage(p)}
+            onClick={() => setPadPage(p)}
           >
             {MirrorText.pageName(i).toUpperCase()}
           </button>

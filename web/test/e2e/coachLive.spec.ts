@@ -19,19 +19,21 @@ for (const [name, width, height] of SIZES) {
       await expect(page.locator('.live-strip')).toContainText('Project 1')
       await page.getByRole('banner').getByRole('button', { name: "What's what" }).click()
       const coach = page.getByRole('dialog', { name: "What's what" })
+      // The drawn EP-133's MAIN and TEMPO take the device's combos: their tags say so.
+      const desk = width >= 1024
       for (const [id, text] of [
         ['live.record', 'RECORD A PATTERN: TAP, THEN PLAY; HOLD FOR ITS SETTINGS'],
         ['live.step', 'STEP THROUGH THE PATTERN'],
         ['live.sound', "CHANGE A PAD'S SOUND"],
-        ['live.project', 'NEXT PROJECT: TAP; HOLD + PAD 1–9 TO PICK'],
-        ['live.tempo', 'CLICK: TAP; HOLD FOR TEMPO'],
+        ['live.project', desk ? 'MAIN PAGE; HOLD + PAD 1–9: PROJECT' : 'NEXT PROJECT: TAP; HOLD + PAD 1–9 TO PICK'],
+        ['live.tempo', desk ? 'TEMPO PAGE; TAP AGAIN: TAP TEMPO' : 'CLICK: TAP; HOLD FOR TEMPO'],
       ] as const) {
         await expect(coach.locator(`[data-coach-tag="${id}"]`), id).toHaveText(text)
       }
       expect(await coachHides(page)).toEqual([])
     })
 
-    test('PROJECT held, a KEYS key printed 3 picks project 3 and sounds nothing', async ({ page }) => {
+    test('PROJECT (the drawn MAIN) held, a KEYS key printed 3 picks project 3 and sounds nothing', async ({ page }) => {
       await page.goto('/?demo')
       await expect(page.locator('.live-strip')).toContainText('Project 1')
       // On the desk the drawn EP-133: its KEYS key, its pads the keys, MAIN as PROJECT (the plate says the project).
@@ -48,7 +50,8 @@ for (const [name, width, height] of SIZES) {
         const b = (await l.boundingBox())!
         return { x: b.x + b.width / 2, y: b.y + b.height / 2 }
       }
-      const projectKey = page.getByRole('button', { name: 'Project' })
+      // The drawn EP-133's MAIN takes PROJECT's hold (a pad 1 to 9).
+      const projectKey = desk ? page.getByRole('button', { name: 'Main', exact: true }) : page.getByRole('button', { name: 'Project' })
       // KEYS' line shows the sound, not the project: PROJECT's own label (the drawn plate) says it.
       const shown = desk ? page.locator('.ep-plate__status') : projectKey.locator('.fn-key__label')
       await expect(shown).toHaveText(desk ? 'Project 1' : 'P1')

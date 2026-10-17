@@ -47,15 +47,39 @@
 //   alike, after the duck and the dry law, gliding as a send does. At 1, its
 //   default, it changes nothing, so dry stays null and the mix bit for bit
 //   the Kotlin one's.
+// - Each group also has the drawn EP-133's mute and fader parameters (web
+//   only; Android sends none of them), each at a default that changes
+//   nothing:
+//   - GROUP_MUTE (solo and mute): a gain of 1 (heard) or 0 (muted) on the
+//     group's dry and send, after the level, gliding as a send does.
+//   - GROUP_FILTER (the fader's LPF and HPF) and GROUP_PAN (its PAN): while
+//     one is off its default (or gliding back to it), the group's voices are
+//     summed into a buffer of the group's own ([group]) rather than into the
+//     mix, and process runs it, before the effect, through a low-pass and a
+//     high-pass (a Butterworth Svf each, one a channel, their knobs gliding;
+//     the filtered sound fades in from the dry over the first twentieth of
+//     each fader's travel from its open end, so leaving or landing on that
+//     end doesn't click; a filter at its open end isn't run, and starts from
+//     silence when it comes back), then its balance, then into the mix at
+//     the group's dry gains and into the send at its send gains, frame by
+//     frame.
+//   - GROUP_PITCH (the fader's PITCH and TUNE): the group's voices are read
+//     [rate] times as fast, 2^(semitones / 12), the semitones gliding once a
+//     block (a voice keeps its place in its sound, so a change never clicks).
+//   - GROUP_ENV (the fader's ATK and REL): ms the mixer adds to a starting
+//     voice's attack and release ([attackMs], [releaseMs]).
+//   At their defaults group is null, rate exactly 1 and both envelopes 0, so
+//   the mixer plays as before them, bit for bit.
 
 import { Chorus } from './chorus'
 import { Compressor } from './compressor'
 import { Delay } from './delay'
 import { Distortion } from './distortion'
 import { Filter } from './filter'
-import { clamp01, lerp, onePoleCoef } from './fxMath'
+import { clamp01, knobHz, lerp, onePoleCoef, svfG } from './fxMath'
 import { Punch } from './punch'
 import { Reverb } from './reverb'
+import { Svf } from './svf'
 
 const f = Math.fround
 
@@ -83,6 +107,16 @@ export const FxControl = {
   PUNCH: 7,
   /** index: the group, 0..3; x: its level, a gain of 0..1 on its dry and send (web only: the drawn fader). */
   GROUP_LEVEL: 8,
+  /** index: the group, 0..3; x: 1 muted, 0 heard (web only: solo and mute). */
+  GROUP_MUTE: 9,
+  /** index: the group, 0..3; x: its low-pass, 0..1 (1 open), y: its high-pass, 0..1 (0 open) (web only: the fader's LPF and HPF). */
+  GROUP_FILTER: 10,
+  /** index: the group, 0..3; x: its balance, -1 (left) to 1 (right), 0 centred (web only: the fader's PAN). */
+  GROUP_PAN: 11,
+  /** index: the group, 0..3; x: the semitones its voices are read higher, -24..24 (web only: the fader's PITCH and TUNE). */
+  GROUP_PITCH: 12,
+  /** index: the group, 0..3; x: ms added to its voices' attack, y: to their release, 0..10000 (web only: the fader's ATK and REL). */
+  GROUP_ENV: 13,
 
   NONE: 0,
   DELAY: 1,
@@ -161,6 +195,30 @@ export class FxBus {
   static readonly BPM_DEFAULT = 120
   static readonly BPM_MIN = 20
   static readonly BPM_MAX = 300
+  /** A group's low-pass (web only): its cutoff from 60 Hz (x = 0) to 20 kHz (held to 0.4 of the rate), on knobHz's curve. */
+  static readonly GROUP_LPF_FROM = 60
+  static readonly GROUP_LPF_TO = 20000
+  /** A group's high-pass (web only): 20 Hz (x = 0) to 8 kHz. */
+  static readonly GROUP_HPF_FROM = 20
+  static readonly GROUP_HPF_TO = 8000
+  /** The groups' filters' Q: Butterworth, no resonance. */
+  static readonly GROUP_Q = f(Math.SQRT1_2)
+  /** How much of a group filter's travel, from its open end, fades it in from the dry. */
+  static readonly GROUP_FADE = f(0.05)
+  /** How far a group's pitch reaches either way, in semitones. */
+  static readonly GROUP_SEMITONES = 24
+  /** The most a group adds to its voices' attack or release, in ms. */
+  static readonly GROUP_ENV_MS = 10000
+
+  /** A group's low-pass cutoff (Hz) at [x] (0..1; at 1 it is open, and not run). */
+  static lpfHz(x: number): number {
+    return knobHz(clamp01(f(x)), FxBus.GROUP_LPF_FROM, FxBus.GROUP_LPF_TO)
+  }
+
+  /** A group's high-pass cutoff (Hz) at [x] (0..1; at 0 it is open, and not run). */
+  static hpfHz(x: number): number {
+    return knobHz(clamp01(f(x)), FxBus.GROUP_HPF_FROM, FxBus.GROUP_HPF_TO)
+  }
 
   private readonly delay: Delay
   private readonly reverb: Reverb
@@ -190,6 +248,27 @@ export class FxBus {
   private readonly sendsTo = new Float32Array(GROUPS)
   private readonly levels = new Float32Array(GROUPS).fill(1)
   private readonly levelsTo = new Float32Array(GROUPS).fill(1)
+  // Web only: each group's mute gain, filters, balance, pitch and envelopes (FxControl.GROUP_MUTE to GROUP_ENV).
+  private readonly mutes = new Float32Array(GROUPS).fill(1)
+  private readonly mutesTo = new Float32Array(GROUPS).fill(1)
+  private readonly lpfs = new Float32Array(GROUPS).fill(1)
+  private readonly lpfsTo = new Float32Array(GROUPS).fill(1)
+  private readonly hpfs = new Float32Array(GROUPS)
+  private readonly hpfsTo = new Float32Array(GROUPS)
+  private readonly pans = new Float32Array(GROUPS)
+  private readonly pansTo = new Float32Array(GROUPS)
+  private readonly semis = new Float32Array(GROUPS)
+  private readonly semisTo = new Float32Array(GROUPS)
+  private readonly rates = new Float64Array(GROUPS).fill(1)
+  private readonly attacks = new Float64Array(GROUPS)
+  private readonly releases = new Float64Array(GROUPS)
+  /** Each group's low-pass (left, right) and high-pass (left, right), and the knob each was last tuned to (NaN: not yet). */
+  private readonly svfs: readonly (readonly Svf[])[] = Array.from({ length: GROUPS }, () => [new Svf(), new Svf(), new Svf(), new Svf()])
+  private readonly tunedLp = new Float32Array(GROUPS).fill(Number.NaN)
+  private readonly tunedHp = new Float32Array(GROUPS).fill(Number.NaN)
+  /** Whether the group's voices go to its own buffer this block (a filter or the balance off its default). */
+  private readonly grouped: boolean[] = [false, false, false, false]
+  private groupBufs: Float32Array[] = []
 
   private compOn = false
   private compX = f(0.5)
@@ -267,6 +346,31 @@ export class FxBus {
       case FxControl.GROUP_LEVEL:
         if (index >= 0 && index < GROUPS) this.levelsTo[index] = clamp01(x)
         return
+      case FxControl.GROUP_MUTE:
+        if (index >= 0 && index < GROUPS) this.mutesTo[index] = x > 0 ? 0 : 1
+        return
+      case FxControl.GROUP_FILTER:
+        if (index >= 0 && index < GROUPS) {
+          this.lpfsTo[index] = clamp01(x)
+          this.hpfsTo[index] = clamp01(y)
+        }
+        return
+      case FxControl.GROUP_PAN:
+        if (index >= 0 && index < GROUPS) this.pansTo[index] = x > -1 ? (x < 1 ? x : 1) : -1
+        return
+      case FxControl.GROUP_PITCH: {
+        const max = FxBus.GROUP_SEMITONES
+        if (index >= 0 && index < GROUPS) this.semisTo[index] = x > -max ? (x < max ? x : max) : -max
+        return
+      }
+      case FxControl.GROUP_ENV: {
+        const max = FxBus.GROUP_ENV_MS
+        if (index >= 0 && index < GROUPS) {
+          this.attacks[index] = x > 0 ? (x < max ? x : max) : 0
+          this.releases[index] = y > 0 ? (y < max ? y : max) : 0
+        }
+        return
+      }
       case FxControl.COMP: {
         // Switched on: from silence, not from where it was left.
         const on = index !== 0
@@ -308,15 +412,55 @@ export class FxBus {
       this.fadeNew = new Float32Array(n)
       this.dryGains = []
       this.sendGains = []
+      this.groupBufs = []
       for (let g = 0; g < GROUPS; g++) {
         this.dryGains.push(new Float32Array(frames))
         this.sendGains.push(new Float32Array(frames))
+        this.groupBufs.push(new Float32Array(n))
       }
       this.dirty = 0
     }
     if (this.dirty > 0) this.input.fill(0, 0, this.dirty)
     this.dirty = 0
     this.sent = false
+    // Web only: which groups have a buffer of their own this block, and each group's pitch.
+    for (let g = 0; g < GROUPS; g++) {
+      const own =
+        this.lpfs[g] !== 1 || this.lpfsTo[g] !== 1 || this.hpfs[g] !== 0 || this.hpfsTo[g] !== 0 || this.pans[g] !== 0 || this.pansTo[g] !== 0
+      this.grouped[g] = own
+      if (own) this.groupBufs[g]!.fill(0, 0, n)
+      if (this.semis[g] !== this.semisTo[g]) {
+        const s = this.glide(this.semis[g]!, this.semisTo[g]!, frames)
+        this.semis[g] = s
+        this.rates[g] = s === 0 ? 1 : Math.pow(2, s / 12)
+      }
+    }
+  }
+
+  /**
+   * Group [bus]'s own buffer for the block (stereo, interleaved; web only):
+   * its voices add themselves to it, before the dry and send gains, rather
+   * than to the mix, and process takes it from there. Null while the
+   * group's filters and balance are at their defaults: the voices go as
+   * before.
+   */
+  group(bus: number): Float32Array | null {
+    return this.grouped[bus] ? this.groupBufs[bus]! : null
+  }
+
+  /** How much faster group [bus]'s voices are read this block (its pitch; web only): exactly 1 at its default. */
+  rate(bus: number): number {
+    return this.rates[bus]!
+  }
+
+  /** The ms group [bus] adds to a starting voice's attack (web only): 0 at its default. */
+  attackMs(bus: number): number {
+    return this.attacks[bus]!
+  }
+
+  /** The ms group [bus] adds to a starting voice's release (web only): 0 at its default. */
+  releaseMs(bus: number): number {
+    return this.releases[bus]!
   }
 
   /**
@@ -332,10 +476,14 @@ export class FxBus {
     const sendsTo = this.sendsTo
     const levels = this.levels
     const levelsTo = this.levelsTo
+    const mutes = this.mutes
+    const mutesTo = this.mutesTo
     for (let g = 0; g < GROUPS; g++) {
       this.dryOn[g] = false
       this.sendOn[g] = false
       if (sends[g] !== 0 || sendsTo[g] !== 0 || levels[g] !== 1 || levelsTo[g] !== 1) live = true
+      // Web only: a group muted, or one with a buffer of its own (process reads its gains for every frame).
+      if (mutes[g] !== 1 || mutesTo[g] !== 1 || this.grouped[g]) live = true
     }
     const ducking = this.dests !== 0 && this.duckAt !== IDLE
     if (!live && !ducking) return
@@ -348,8 +496,11 @@ export class FxBus {
         const gd = ((this.dests >> g) & 1) !== 0 ? d : 1
         const lv = this.smooth(levels[g]!, levelsTo[g]!)
         levels[g] = lv
-        const dry = f(f(gd * this.dryLaw(s)) * lv)
-        const send = f(f(gd * s) * lv)
+        const mt = this.smooth(mutes[g]!, mutesTo[g]!)
+        mutes[g] = mt
+        // Heard (mt exactly 1): as without mutes.
+        const dry = mt === 1 ? f(f(gd * this.dryLaw(s)) * lv) : f(f(f(gd * this.dryLaw(s)) * lv) * mt)
+        const send = mt === 1 ? f(f(gd * s) * lv) : f(f(f(gd * s) * lv) * mt)
         this.dryGains[g]![offset + i] = dry
         this.sendGains[g]![offset + i] = send
         if (dry !== 1) this.dryOn[g] = true
@@ -380,6 +531,7 @@ export class FxBus {
    * compressor. Each is skipped when it has nothing to do.
    */
   process(mix: Float32Array, frames: number): void {
+    for (let g = 0; g < GROUPS; g++) if (this.grouped[g]) this.mixGroup(g, mix, frames)
     const x = this.fxX
     const y = this.fxY
     this.fxX = this.glide(this.fxX, this.fxXTo, frames)
@@ -400,6 +552,94 @@ export class FxBus {
     if (this.compOn) {
       this.compressor.setParams(cx, cy, this.bpm)
       this.compressor.processInPlace(mix, frames)
+    }
+  }
+
+  /**
+   * Group [g]'s own buffer (web only) into [mix] and the send: through its
+   * low-pass and high-pass while each is off its open end, then its balance,
+   * at the group's dry and send gains, frame by frame; the filters' knobs and
+   * the balance glide as a send does. A filter that has landed on its open
+   * end is reset, so it comes back from silence.
+   */
+  private mixGroup(g: number, mix: Float32Array, frames: number): void {
+    const buf = this.groupBufs[g]!
+    const dry = this.dryGains[g]!
+    const send = this.sendGains[g]!
+    const fxIn = this.input
+    const svf = this.svfs[g]!
+    const lpL = svf[0]!
+    const lpR = svf[1]!
+    const hpL = svf[2]!
+    const hpR = svf[3]!
+    const lpTo = this.lpfsTo[g]!
+    const hpTo = this.hpfsTo[g]!
+    const panTo = this.pansTo[g]!
+    const fade = FxBus.GROUP_FADE
+    const q = FxBus.GROUP_Q
+    let lp = this.lpfs[g]!
+    let hp = this.hpfs[g]!
+    let pan = this.pans[g]!
+    let sent = false
+    for (let i = 0; i < frames; i++) {
+      lp = this.smooth(lp, lpTo)
+      hp = this.smooth(hp, hpTo)
+      pan = this.smooth(pan, panTo)
+      let l = buf[2 * i]!
+      let r = buf[2 * i + 1]!
+      if (lp !== 1) {
+        if (lp !== this.tunedLp[g]) {
+          const k = svfG(FxBus.lpfHz(lp), this.outRate)
+          lpL.set(k, q)
+          lpR.set(k, q)
+          this.tunedLp[g] = lp
+        }
+        lpL.process(l)
+        lpR.process(r)
+        const open = f(1 - lp)
+        const w = open < fade ? f(open / fade) : 1
+        l = f(l + f(w * f(lpL.lp - l)))
+        r = f(r + f(w * f(lpR.lp - r)))
+      }
+      if (hp !== 0) {
+        if (hp !== this.tunedHp[g]) {
+          const k = svfG(FxBus.hpfHz(hp), this.outRate)
+          hpL.set(k, q)
+          hpR.set(k, q)
+          this.tunedHp[g] = hp
+        }
+        hpL.process(l)
+        hpR.process(r)
+        const w = hp < fade ? f(hp / fade) : 1
+        l = f(l + f(w * f(hpL.hp - l)))
+        r = f(r + f(w * f(hpR.hp - r)))
+      }
+      // The balance: the far side turned down, as VoiceShape's pan.
+      if (pan > 0) l = f(l * f(1 - pan))
+      else if (pan < 0) r = f(r * f(1 + pan))
+      mix[2 * i] = mix[2 * i]! + f(l * dry[i]!)
+      mix[2 * i + 1] = mix[2 * i + 1]! + f(r * dry[i]!)
+      const s = send[i]!
+      if (s !== 0) {
+        fxIn[2 * i] = fxIn[2 * i]! + f(l * s)
+        fxIn[2 * i + 1] = fxIn[2 * i + 1]! + f(r * s)
+        sent = true
+      }
+    }
+    this.lpfs[g] = lp
+    this.hpfs[g] = hp
+    this.pans[g] = pan
+    if (lp === 1) {
+      lpL.reset()
+      lpR.reset()
+    }
+    if (hp === 0) {
+      hpL.reset()
+      hpR.reset()
+    }
+    if (sent) {
+      this.sent = true
+      this.dirty = this.frames * 2
     }
   }
 

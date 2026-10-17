@@ -75,6 +75,14 @@
 // - The FX bus also takes a level per group (FxControl.GROUP_LEVEL, the drawn
 //   EP-133's fader): a voice on a group's bus is heard and sent at its
 //   level, through dry and send as above. A voice on bus -1 has no level.
+// - And the drawn EP-133's mute and fader parameters (FxControl.GROUP_MUTE
+//   to GROUP_ENV, web only): while the bus gives a group a buffer of its own
+//   (FxBus.group: its filters or balance off their defaults), the group's
+//   voices add themselves there, before the dry and send gains, and the bus
+//   mixes it; a voice is read at its group's rate (FxBus.rate: PITCH and
+//   TUNE) as it plays, and starts with its group's added attack and release
+//   (ATK and REL). At their defaults (no buffer, a rate of exactly 1, nothing
+//   added) a voice plays as before them, bit for bit.
 
 import { FxBus, FxControl } from './fx/fxBus'
 
@@ -488,6 +496,10 @@ export class VoiceMixer {
         }
         const max = VoiceMixer.PAN_MAX
         const pan = coerceIn(shape.pan, -max, max)
+        const bus = shape.bus >= 0 && shape.bus < FxControl.GROUPS ? shape.bus : -1
+        // The group's ATK and REL (web only): nothing added, the shape's own, exactly.
+        const addAttack = bus >= 0 ? this.fx.attackMs(bus) : 0
+        const addRelease = bus >= 0 ? this.fx.releaseMs(bus) : 0
         this.voices.push(
           new Voice(
             c.key,
@@ -501,11 +513,11 @@ export class VoiceMixer {
             coerceIn(f(shape.gain), 0, 1),
             Math.min(1, f((max - pan) / max)),
             Math.min(1, f((max + pan) / max)),
-            this.framesOf(shape.attackMs),
-            Math.max(this.fade, this.framesOf(shape.releaseMs)),
+            this.framesOf(addAttack === 0 ? shape.attackMs : shape.attackMs + addAttack),
+            Math.max(this.fade, this.framesOf(addRelease === 0 ? shape.releaseMs : shape.releaseMs + addRelease)),
             shape.mode,
             shape.muteGroup,
-            shape.bus >= 0 && shape.bus < FxControl.GROUPS ? shape.bus : -1,
+            bus,
           ),
         )
         this.started.push({ key: c.key, tag: c.tag, frame: this.frameCount })
@@ -595,6 +607,10 @@ export class VoiceMixer {
     const dry = v.bus >= 0 ? this.fx.dry(v.bus) : null
     const send = v.bus >= 0 ? this.fx.send(v.bus) : null
     const fxIn = this.fx.fxIn
+    // Web only: the group's own buffer (its filters or balance moved), and its pitch.
+    const own = v.bus >= 0 ? this.fx.group(v.bus) : null
+    const rate = v.bus >= 0 ? this.fx.rate(v.bus) : 1
+    const step = rate === 1 ? v.step : v.step * rate
     for (let i = 0; i < frames; i++) {
       const p = v.pos
       if (p > last) return false
@@ -615,18 +631,21 @@ export class VoiceMixer {
       const left = f(f(l * g) * v.left)
       const right = f(f(r * g) * v.right)
       const j = 2 * (offset + i)
-      if (dry === null) {
+      if (own !== null) {
+        own[j] = own[j]! + left
+        own[j + 1] = own[j + 1]! + right
+      } else if (dry === null) {
         mix[j] = mix[j]! + left
         mix[j + 1] = mix[j + 1]! + right
       } else {
         mix[j] = mix[j]! + f(left * dry[offset + i]!)
         mix[j + 1] = mix[j + 1]! + f(right * dry[offset + i]!)
       }
-      if (send !== null) {
+      if (send !== null && own === null) {
         fxIn[j] = fxIn[j]! + f(left * send[offset + i]!)
         fxIn[j + 1] = fxIn[j + 1]! + f(right * send[offset + i]!)
       }
-      v.pos = p + v.step
+      v.pos = p + step
     }
     return true
   }

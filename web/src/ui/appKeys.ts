@@ -105,7 +105,7 @@ export function keyScope(): KeyScopeHandler | null {
   return scope
 }
 
-/** The Keyboard keys sheet's rows (pads, edit, grid, piano, everywhere). */
+/** The Keyboard keys sheet's rows (pads, edit, grid, piano, the drawn device, everywhere). */
 export const KEY_ROWS: readonly KeyRow[] = Object.freeze([
   { keys: ['7 8 9', '4 5 6', '1 2 3', '. 0 Enter'], label: WebText.KEY_PADS, scope: 'pads' },
   { keys: ['1–9', '0', '.'], label: WebText.KEY_PADS_ROW, scope: 'pads' },
@@ -128,6 +128,9 @@ export const KEY_ROWS: readonly KeyRow[] = Object.freeze([
   { keys: ['Shift+[', 'Shift+]'], label: WebText.KEY_SCALE, scope: 'piano' },
   { keys: ['V'], label: WebText.KEY_VIEW_KEYS, scope: 'piano' },
   { keys: ['M'], label: WebText.KEY_MODE, scope: 'piano' },
+  { keys: ['\u2212', '='], label: WebText.KEY_MINUS_PLUS, scope: 'device' },
+  { keys: ['Shift'], label: WebText.KEY_SHIFT_HELD, scope: 'device' },
+  { keys: ['A', 'B', 'C', 'D'], label: WebText.KEY_GROUP_HELD, scope: 'device' },
   { keys: ['?'], label: WebText.KEY_HELP, scope: 'everywhere' },
   { keys: ['Esc'], label: WebText.KEY_ESCAPE, scope: 'everywhere' },
   { keys: ['Ctrl+Z', '⌘Z'], label: WebText.KEY_UNDO, scope: 'everywhere' },
@@ -180,6 +183,8 @@ export function keyHelp(ctx: KeyHelpContext): KeyGroup[] {
   } else {
     groups.push({ title: WebText.KEYS_GRID, rows: of('grid').filter((r) => r.label !== WebText.KEY_VIEW_KEYS || live.viewSwitchable) })
   }
+  // The drawn EP-133: its − / +, SHIFT and group keys held.
+  if (live?.device === true) groups.push({ title: WebText.KEYS_DEVICE, rows: of('device') })
   groups.push({ title: WebText.KEYS_EVERYWHERE, rows: everywhere })
   return groups
 }
