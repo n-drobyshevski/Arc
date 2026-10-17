@@ -523,7 +523,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   // In KEYS the tools go behind the strip, so the keys get the page's width.
   const docked = desk && !keys.on
   // EDIT is for the pads (the tab shows in PADS only).
-  const editing = edit !== null && edit.on && !keys.on
+  // Not on the drawn device, whose SOUND is the device's (its pads play, or open a sheet with a right-click).
+  const editing = edit !== null && edit.on && !keys.on && !device
   // Web: a computer keyboard is at hand (a desktop, or a fine pointer): its keys play. They say so
   // (hints, aria-keyshortcuts, the target group) only while Settings → Computer keyboard is on.
   const keyboard = desk || fine
@@ -778,6 +779,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   }
   useEffect(() => {
     if (layerNow === null) return
+    // EDIT left on in another view would make the pads open sheets under the device's SOUND page: it goes.
+    if (latest.current.edit?.on === true) latest.current.edit.onChange(false)
     return layerNow.attach({ group: () => groupNow.current, setGroup: (g) => setGroup(g) })
   }, [layerNow])
   // PROJECT held: a pad printed 1 to 9 picks that project instead of sounding, and the others stay still.
@@ -851,7 +854,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     context: () => ({
       keys: keys.on,
       pianoShown: pianoRange !== null,
-      editAvailable: edit !== null && !keys.on,
+      editAvailable: edit !== null && !keys.on && !device,
       editOn: editing,
       oneGroup,
       viewSwitchable: keys.on && plan.switchShown && plan.room,
@@ -909,15 +912,18 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     run: (cmd) => {
       switch (cmd.kind) {
         case 'group': {
-          setAnnounce(`${MirrorText.GROUP} ${MirrorText.groupKey(cmd.group)}`)
+          const said = `${MirrorText.GROUP} ${MirrorText.groupKey(cmd.group)}`
           // The drawn device's group key, held while the computer's key is down (its press picks the group).
           const layer = deviceLayer.current
           if (layer === null) {
+            setAnnounce(said)
             setGroup(cmd.group)
             return
           }
+          // With FX, ERASE or SHIFT held it solos, clears or steps instead: the plate says what it did, not the group.
+          if (!(layer.held('FX') || layer.held('ERASE') || layer.shiftHeld())) setAnnounce(said)
           const k = groupKey(cmd.group)
-          layer.down(k)
+          layer.down(k, performance.now(), false, true)
           return () => layer.up(k)
         }
         case 'minusPlus':

@@ -741,8 +741,8 @@ const SLOT_REST_MS = 400
 function deviceKeysUi(c: ArcController, acts: () => DeviceKeysActs | null, hooks: DeviceSoundHooks = {}): DeviceKeysUi {
   const p = c.pattern
   const d = c.fx.desk
-  // The slot SOUND's − / + stepped to, waiting for the stepping to rest.
-  const pending = signal<{ readonly pad: PhysicalPad; readonly slot: number } | null>(null)
+  // The slot SOUND's − / + stepped to, waiting for the stepping to rest, in the project it was stepped in.
+  const pending = signal<{ readonly pad: PhysicalPad; readonly slot: number; readonly project: number } | null>(null)
   let pendingTimer: ReturnType<typeof setTimeout> | null = null
   const sounds = () => [...c.liveSounds()].sort((a, b) => a.slot - b.slot)
   // Offline the pads change in arc only, from the list they show.
@@ -756,11 +756,21 @@ function deviceKeysUi(c: ArcController, acts: () => DeviceKeysActs | null, hooks
     const w = pending.peek()
     return w !== null && samePad(w.pad, pad) ? w.slot : (c.editTarget(pad, true)?.slot ?? null)
   }
+  // Written once the stepping rests; another project by then is not the one it was stepped in: dropped.
   const writeSlot = (): void => {
     pendingTimer = null
     const w = pending.peek()
     pending.value = null
-    if (w !== null) void c.assignPad(w.pad, w.slot, source())
+    if (w !== null && c.editTarget(w.pad, true)?.project === w.project) void c.assignPad(w.pad, w.slot, source())
+  }
+  const flushSlot = (): void => {
+    if (pendingTimer !== null) clearTimeout(pendingTimer)
+    writeSlot()
+  }
+  const dropSlot = (): void => {
+    if (pendingTimer !== null) clearTimeout(pendingTimer)
+    pendingTimer = null
+    pending.value = null
   }
   const pad3 = (n: number): string => String(n).padStart(3, '0').slice(-3)
   const say = (text: string): void => layer.say(text)
@@ -866,7 +876,11 @@ function deviceKeysUi(c: ArcController, acts: () => DeviceKeysActs | null, hooks
           return
         }
         // Not changeable (offline with nothing read, the project not read): the toast says why.
-        if (c.editTarget(keysPad) === null) return
+        const target = c.editTarget(keysPad)
+        if (target === null) return
+        // Another pad's step (or another project's) is written first: one step never takes another's place.
+        const w = pending.peek()
+        if (w !== null && (!samePad(w.pad, keysPad) || w.project !== target.project)) flushSlot()
         const list = sounds()
         const next = slotStep(
           list.map((snd) => snd.slot),
@@ -874,7 +888,7 @@ function deviceKeysUi(c: ArcController, acts: () => DeviceKeysActs | null, hooks
           a.step,
         )
         if (next === null) return
-        pending.value = { pad: keysPad, slot: next }
+        pending.value = { pad: keysPad, slot: next, project: target.project }
         layer.show(pad3(next))
         say(WebText.slotShown(next, list.find((snd) => snd.slot === next)?.name ?? null))
         if (pendingTimer !== null) clearTimeout(pendingTimer)
@@ -891,6 +905,10 @@ function deviceKeysUi(c: ArcController, acts: () => DeviceKeysActs | null, hooks
           say(WebText.noSoundAt(a.slot))
           return
         }
+        // The slot typed is the pad's now: a step waiting on it goes (another pad's is written).
+        const w = pending.peek()
+        if (w !== null && samePad(w.pad, keysPad)) dropSlot()
+        else if (w !== null) flushSlot()
         layer.show(pad3(a.slot))
         say(WebText.slotShown(a.slot, snd.name))
         void c.assignPad(keysPad, a.slot, source())
@@ -955,8 +973,8 @@ function deviceKeysUi(c: ArcController, acts: () => DeviceKeysActs | null, hooks
       case 'correct': {
         const on = !p.step.peek().correct
         p.setStepCorrect(on)
-        // Stopped, timing correct works in the STEP panel (a pad tapped corrects its notes).
-        if (on && p.ui.peek().phase === 'STOPPED' && !p.step.peek().open) {
+        // Stopped, timing correct works in the STEP panel (a pad tapped corrects its notes); never over a take going on.
+        if (on && p.ui.peek().phase === 'STOPPED' && !p.step.peek().open && !sampleBusy()) {
           c.sample.exit()
           p.setStepOpen(true)
         }
@@ -1023,7 +1041,16 @@ function deviceKeysUi(c: ArcController, acts: () => DeviceKeysActs | null, hooks
       case 'notInArc':
         say(WebText.notInArc(WebText.DEVICE_NOT_IN_ARC[a.what] ?? a.what))
         return
+      case 'sampleBusy':
+        say(WebText.DEVICE_TAKE_GOING)
+        return
     }
+  }
+  // A take going on (waiting for its sound or PLAY, counting in, recording): SAMPLE's panel stays.
+  function sampleBusy(): boolean {
+    const sample = c.sample.ui.value
+    const t = sample.phase.type
+    return sample.on && (t === 'Waiting' || t === 'WaitingForPlay' || t === 'CountIn' || t === 'Recording')
   }
   const layer = new DeviceKeys({
     context: () => {
@@ -1039,6 +1066,7 @@ function deviceKeysUi(c: ArcController, acts: () => DeviceKeysActs | null, hooks
         sampleOn: sample.on,
         handsFree: sample.latch,
         sampleTaking: ((ph.type === 'Recording' || ph.type === 'Waiting') && ph.latched) || ph.type === 'CountIn' || ph.type === 'WaitingForPlay',
+        sampleBusy: sampleBusy(),
         recordArmed: ui.phase === 'ARMED',
         erase: ui.erase,
         arpOn: p.arp.value.on,
@@ -1078,6 +1106,10 @@ function deviceKeysUi(c: ArcController, acts: () => DeviceKeysActs | null, hooks
     get faderAssign() {
       return d.faderAssign.value
     },
+    projectChanged: () => {
+      dropSlot()
+      layer.endSolo()
+    },
     openSheet: (page: DevicePage) => {
       const a = acts()
       if (a === null) return
@@ -1092,11 +1124,17 @@ function deviceKeysUi(c: ArcController, acts: () => DeviceKeysActs | null, hooks
   }
 }
 
+/** On SOUND and EDIT, a pad played after another opens for the knobs once the playing settles this long (one read, not one a hit). */
+const PAD_SETTLE_MS = 250
+
 /**
  * The drawn device's pages beside the sheets (web only): on SOUND and EDIT the
  * pad played last is open for the knobs (PadEditDesk, as its sheet opens it;
- * the sheet has it while open), and SAMPLE, STEP or SCENE opening takes the
- * page back to MAIN (they share the plate's place).
+ * the sheet has it while open), at once as the page opens and, as other pads
+ * are played, once the playing settles (each open reads the pad from the
+ * EP-133; the knobs stay on the pad open until then); SAMPLE, STEP or SCENE
+ * opening takes the page back to MAIN (they share the plate's place); and
+ * another project drops SOUND's step waiting and FX's solos.
  */
 function DevicePages(props: { dk: DeviceKeysUi; view: NavView }): null {
   const c = useController()
@@ -1110,17 +1148,39 @@ function DevicePages(props: { dk: DeviceKeysUi; view: NavView }): null {
   // The sheet opening takes the pad over (its own effect, before this one, has opened it): left open for it.
   const sheetNow = useRef(sheet)
   sheetNow.current = sheet
+  // Whether a pad is open for the page: the first opens at once, the next ones once the playing settles.
+  const opened = useRef(false)
   useEffect(() => {
-    if (!sound || sheet || pad === null) return
-    c.openPadEdit(pad)
+    if (!sound || sheet) return
     return () => {
+      opened.current = false
       if (!sheetNow.current) c.closePadEdit()
     }
+  }, [sound, sheet])
+  useEffect(() => {
+    if (!sound || sheet || pad === null) return
+    const open = (): void => {
+      opened.current = true
+      c.openPadEdit(pad)
+    }
+    if (!opened.current) {
+      open()
+      return
+    }
+    const t = setTimeout(open, PAD_SETTLE_MS)
+    return () => clearTimeout(t)
   }, [sound, sheet, padId, slot, connected])
   const panel = c.sample.ui.value.on || c.pattern.step.value.open || c.pattern.scene.value.open
   useEffect(() => {
     if (panel) props.dk.layer.panelOpened()
   }, [panel])
+  const project = c.state.value.mirror?.state.activeProject ?? null
+  const projectWas = useRef(project)
+  useEffect(() => {
+    if (projectWas.current === project) return
+    projectWas.current = project
+    props.dk.projectChanged()
+  }, [project])
   return null
 }
 

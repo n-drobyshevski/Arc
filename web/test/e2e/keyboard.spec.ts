@@ -172,6 +172,10 @@ test('? lists the keys, Esc closes screens but never leaves a section, and the S
 })
 
 test('Ctrl+Z runs a new pad sound\'s UNDO', async ({ page }) => {
+  // EDIT is the grid's (the drawn device's SOUND is the device's own).
+  await gridOnDesk(page)
+  await page.reload()
+  await expect(page.locator('[data-pad]')).toHaveCount(12)
   await page.keyboard.press('KeyE')
   const sheet = page.getByRole('dialog')
   // EDIT needs the device's project read: try until the pad's sheet opens.

@@ -13,6 +13,7 @@ import {
   DeviceKeys,
   EDIT_PAGE_COUNT,
   faderParamAt,
+  dropAll,
   keyCancel,
   keyDown,
   keyLatch,
@@ -42,6 +43,7 @@ const CTX: DeviceContext = {
   sampleOn: false,
   handsFree: false,
   sampleTaking: false,
+  sampleBusy: false,
   recordArmed: false,
   erase: false,
   arpOn: false,
@@ -65,8 +67,8 @@ class Run {
     this.actions.push(...r.actions)
     return this
   }
-  down(k: DeviceKey): this {
-    return this.take(keyDown(this.s, k, this.c))
+  down(k: DeviceKey, keyboard = false): this {
+    return this.take(keyDown(this.s, k, this.c, keyboard))
   }
   up(k: DeviceKey, long = false): this {
     return this.take(keyUp(this.s, k, this.c, long))
@@ -343,6 +345,63 @@ describe('numbers typed on the pads', () => {
     expect(r.out()).toEqual([{ kind: 'sidechainSource', group: 1, offset: 1 }])
     r.tap('SHIFT').tap('D')
     expect(r.out()).toEqual([{ kind: 'sidechainDest', group: 3 }])
+  })
+})
+
+describe('the device view going, a take going on, a knob turned', () => {
+  it('lets go of every key, latched ones too: solos, punch-ins, repeat, SHIFT clicked, the page', () => {
+    const r = new Run()
+    r.latch('FX')
+    r.tap('B')
+    r.latch('TIMING')
+    r.pad('1')
+    r.latch('ERASE')
+    r.tap('SHIFT')
+    r.s = { ...r.s, page: 'TIMING' }
+    r.out()
+    r.take(dropAll(r.s, ctx({ arpOn: false })))
+    const out = r.out()
+    expect(out).toContainEqual({ kind: 'solo', groups: new Set() })
+    expect(out).toContainEqual({ kind: 'punch', on: false })
+    expect(out).toContainEqual({ kind: 'repeat', on: false })
+    expect(out).toContainEqual({ kind: 'erase', on: false })
+    expect(out).toContainEqual({ kind: 'enter', page: 'MAIN' })
+    expect(r.s.latched.size + r.s.down.size).toBe(0)
+    expect(r.s.shiftOnce).toBe(false)
+  })
+
+  it("a group key held on the computer's keyboard types only once held: a key rolled into a pad key plays it", () => {
+    const r = new Run(DEVICE_KEYS_IDLE, ctx({ now: 1000 }))
+    r.down('B', true)
+    r.c = ctx({ now: 1000 + DEVICE_HOLD_MS - 1, group: 1 })
+    expect(r.pad('7')).toBe(false)
+    r.c = ctx({ now: 1000 + DEVICE_HOLD_MS, group: 1 })
+    expect(r.pad('7')).toBe(true)
+    r.up('B')
+    expect(r.out()).toContainEqual({ kind: 'patternPick', group: 1, n: 7 })
+    // A pointer's hold types at once.
+    r.c = ctx({ now: 5000, group: 1 })
+    r.down('C')
+    expect(r.pad('2')).toBe(true)
+  })
+
+  it('no page opens over a take going on (it would end it): the plate says so', () => {
+    const r = new Run(DEVICE_KEYS_IDLE, ctx({ sampleBusy: true, sampleOn: true }))
+    r.tap('SOUND').tap('TEMPO')
+    expect(r.s.page).toBe('MAIN')
+    expect(r.out()).toEqual([{ kind: 'sampleBusy' }, { kind: 'sampleBusy' }])
+  })
+
+  it('a knob turned with SOUND or a group held spends them: no sheet, no number', () => {
+    const r = new Run()
+    r.down('SOUND')
+    r.s = knobTurned(r.s)
+    r.up('SOUND', true)
+    expect(r.out()).toEqual([])
+    r.down('D')
+    r.out()
+    r.s = knobTurned(r.s)
+    expect(r.s.spent.has('D')).toBe(true)
   })
 })
 
@@ -638,6 +697,20 @@ describe('DeviceKeys, the layer', () => {
     expect(l.said.value).toBeNull()
     l.blink('COPY')
     expect(l.lcd.value).toBe('COPY')
+  })
+
+  it('the view going lets go of latched keys too, ending the solos; another project ends them as well', () => {
+    const { l, run, detach } = layer()
+    l.latch('FX')
+    l.tap('C')
+    expect(run).toHaveBeenLastCalledWith({ kind: 'solo', groups: new Set([2]) })
+    l.endSolo()
+    expect(run).toHaveBeenLastCalledWith({ kind: 'solo', groups: new Set() })
+    l.tap('A')
+    detach()
+    expect(run).toHaveBeenCalledWith({ kind: 'punch', on: false })
+    expect(l.state.value.latched.size).toBe(0)
+    expect(l.state.value.soloing.size).toBe(0)
   })
 
   it('Esc and a panel opening go back to MAIN; releaseAll lets go of what is down, not what is latched', () => {

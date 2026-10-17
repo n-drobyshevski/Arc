@@ -380,6 +380,12 @@ test('SHIFT + SOUND is EDIT: − / + its pages, knob X their X; the sheet opens 
   const sheet = page.getByRole('dialog', { name: /^Pad A \./ })
   await expect(sheet).toBeVisible()
   await expect(sheet.getByRole('radio', { name: /^Env/i })).toHaveAttribute('aria-checked', 'true')
+  // Opened anywhere else (MAIN, a right-click), a pad's sheet opens on SOUND, as before.
+  await page.keyboard.press('Escape')
+  await expect(sheet).toHaveCount(0)
+  await ep.getByRole('button', { name: 'Main', exact: true }).click()
+  await ep.locator('[data-pad="0"]').click({ button: 'right' })
+  await expect(sheet.getByRole('radio', { name: /^Sound/i })).toHaveAttribute('aria-checked', 'true')
 })
 
 test('KEYS latched by a right-click: knob Y the scale, − / + the octave, let go with no switch', async ({ page }) => {
@@ -546,4 +552,54 @@ test("TEMPO's knob Y is the click's level: OFF at the bottom, turned up the clic
   await expect(knobY).toHaveAttribute('aria-valuetext', "the click's level, Off")
   await expect(page.locator('.ep-plate__hit')).toHaveText('CLICK · OFF')
   await expect(page.locator('.ep-lcd .ep-metro')).not.toHaveClass(/\bon\b/)
+})
+
+test('leaving the Device view lets go of its latched keys: the solo ends, FX lets the grid play', async ({ page }) => {
+  await page.goto('/?demo')
+  const ep = page.getByRole('group', { name: 'EP-133 K.O. II' })
+  await expect(page.locator('.ep-plate__status')).toHaveText(/project 1/i)
+  await ep.getByRole('button', { name: 'Effects' }).click({ button: 'right' })
+  await ep.getByRole('tab', { name: /^Group B/ }).click()
+  await expect(page.locator('.ep-lcd .ep-mute')).toHaveClass(/\bon\b/)
+  await expect(ep.getByRole('tab', { name: /^Group A/ })).toHaveAttribute('aria-description', /^Silenced\./)
+  await page.getByRole('radio', { name: 'All groups' }).click()
+  // The grid's pads are pads again, not the punch-ins.
+  await expect(page.locator('[data-pad]')).toHaveCount(48)
+  await page.getByRole('radio', { name: 'Device' }).click()
+  await expect(page.locator('.ep-lcd .ep-mute')).not.toHaveClass(/\bon\b/)
+  await expect(page.getByRole('group', { name: 'EP-133 K.O. II' }).getByRole('button', { name: 'Effects' })).toHaveAttribute('aria-pressed', 'false')
+})
+
+test("a group key typed fast into a pad key on the keyboard plays the pad (it types a pattern only once held)", async ({ page }) => {
+  await page.goto('/?demo')
+  const ep = page.getByRole('group', { name: 'EP-133 K.O. II' })
+  await expect(page.locator('.ep-plate__status')).toHaveText(/project 1/i)
+  await page.keyboard.down('b')
+  await page.keyboard.down('Digit7')
+  await expect.poll(() => page.evaluate(() => [...document.querySelectorAll('[data-pad][data-down]')].map((e) => e.getAttribute('aria-label') ?? ''))).toEqual(['B 7'])
+  await page.keyboard.up('Digit7')
+  await page.keyboard.up('b')
+  await expect(ep.getByRole('tab', { name: /^Group B/ })).toHaveAttribute('aria-selected', 'true')
+  await expect(page.locator('.ep-plate__hit')).not.toHaveText(/GROUP B · 07/)
+  // Held past the hold time, the pads type its pattern.
+  await page.keyboard.down('b')
+  await page.waitForTimeout(600)
+  await page.keyboard.press('Digit7')
+  await page.keyboard.up('b')
+  await expect(page.locator('.ep-plate__hit')).toHaveText('GROUP B · 07')
+})
+
+test('EDIT left on in the grid goes as the Device view shows: SOUND page pads play, open no sheet', async ({ page }) => {
+  await page.goto('/?demo')
+  await expect(page.locator('.ep-plate__status')).toHaveText(/project 1/i)
+  await page.getByRole('radio', { name: 'One group' }).click()
+  await page.keyboard.press('e')
+  await expect(page.locator('[data-pad].is-editing')).toHaveCount(12)
+  await page.getByRole('radio', { name: 'Device' }).click()
+  const ep = page.getByRole('group', { name: 'EP-133 K.O. II' })
+  await ep.getByRole('button', { name: 'Sound', exact: true }).click()
+  await expect(ep.locator('[data-pad].is-editing')).toHaveCount(0)
+  await ep.locator('[data-pad="9"]').click()
+  await page.waitForTimeout(300)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
 })

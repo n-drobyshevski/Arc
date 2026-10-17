@@ -282,7 +282,8 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
   const shiftLit = layer !== null && layer.shiftHeld()
   // − and +: what they step now (their names), and where they can.
   const steps = layer?.route() ?? null
-  // The computer's Shift held is SHIFT, while the device shows.
+  // The computer's Shift held is SHIFT, while the device shows. The window left (or the page hidden) lets go of
+  // every key held down, by the mouse, a finger or the keyboard (no key up comes then); latched ones stay.
   useEffect(() => {
     if (layer === null || typeof window === 'undefined') return
     const key = (on: boolean) => (e: KeyboardEvent): void => {
@@ -290,15 +291,20 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
     }
     const down = key(true)
     const up = key(false)
-    const off = (): void => layer.setShiftKey(false)
+    const off = (): void => layer.releaseAll()
+    const hidden = (): void => {
+      if (document.visibilityState === 'hidden') off()
+    }
     window.addEventListener('keydown', down)
     window.addEventListener('keyup', up)
     window.addEventListener('blur', off)
+    document.addEventListener('visibilitychange', hidden)
     return () => {
       window.removeEventListener('keydown', down)
       window.removeEventListener('keyup', up)
       window.removeEventListener('blur', off)
-      off()
+      document.removeEventListener('visibilitychange', hidden)
+      layer.setShiftKey(false)
     }
   }, [layer])
 
@@ -427,7 +433,9 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
               While a knob or the fader turns it shows its value instead (the slider says it itself); what a
               key just did shows a moment ("LENGTH · 4 BARS"), and is said. */}
           <PlateHit hit={said?.text ?? plateHit} turning={turning} group={group} />
-          <Spoken text={said?.text ?? plateHit} />
+          <Spoken text={plateHit} />
+          {/* What a key did is said while it shows, and no more (the hit isn't said again after it). */}
+          <Spoken text={said?.text ?? ''} />
           <div class="ep-a ep-grille" aria-hidden="true"><Grille /></div>
 
           {/* The display: the glass, its reflection, the icons and two pins. */}
@@ -537,7 +545,7 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
           {ROW_Y.map((y) => well(265, y, 130, 128))}
           <div role="tablist" aria-label={MirrorText.GROUP}>
             {[0, 1, 2, 3].map((g) => (
-              <GroupKey key={g} layer={layer} g={g} selected={g === group} held={lit(groupKey(g))} col={numbers?.[g] ?? null} />
+              <GroupKey key={g} layer={layer} g={g} selected={g === group} held={lit(groupKey(g))} latched={ks?.latched.has(groupKey(g)) === true} soloed={dk?.soloed.has(g) === true} silenced={dk?.silenced.has(g) === true} col={numbers?.[g] ?? null} />
             ))}
           </div>
 
@@ -647,7 +655,16 @@ function LayerKey(props: {
 }
 
 /** Group [g]'s key: a tab, its group's pattern in the glyph's place where the scene is worth saying (as Live's group keys); on the layer, held as the device's. */
-function GroupKey(props: { layer: DeviceKeys | null; g: number; selected: boolean; held: boolean; col: { readonly number: number; readonly queued: number | null } | null }): JSX.Element {
+function GroupKey(props: {
+  layer: DeviceKeys | null
+  g: number
+  selected: boolean
+  held: boolean
+  latched: boolean
+  soloed: boolean
+  silenced: boolean
+  col: { readonly number: number; readonly queued: number | null } | null
+}): JSX.Element {
   const { g, col } = props
   const press = useLayerPress(props.layer, groupKey(g))
   const queued = col?.queued ?? null
@@ -657,7 +674,8 @@ function GroupKey(props: { layer: DeviceKeys | null; g: number; selected: boolea
       role="tab"
       aria-selected={props.selected}
       aria-label={`${MirrorText.GROUP} ${MirrorText.groupKey(g)}` + (col !== null ? MirrorText.groupKeyPattern(col.number, queued) : '')}
-      aria-description={`${WebText.DEVICE_KEY_HINTS.GROUP}. ${WebText.DEVICE_KEY_HINTS.RIGHT_CLICK}`}
+      // A tab has no pressed state: held, latched, soloed or silenced is said first in its description.
+      aria-description={[WebText.groupKeyState(props.latched, props.held, props.soloed, props.silenced), WebText.DEVICE_KEY_HINTS.GROUP, WebText.DEVICE_KEY_HINTS.RIGHT_CLICK].filter((t) => t !== '').join('. ')}
       class={`ep-a ep-key ep-key--group${queued !== null ? ' is-queued' : ''}${props.held ? ' is-held' : ''}`}
       style={at(265, ROW_Y[g]!, 130, 128)}
       {...press}
@@ -707,12 +725,15 @@ function PageLine(props: { dk: DeviceKeysUi; page: DevicePage; group: number }):
   const head = detail !== null ? `${word} · ${detail}` : word
   const parts = [x !== null ? `X ${x.name}` : null, y !== null ? `Y ${y.name}` : null, WebText.DEVICE_PAGE_STEPS[page] ?? null].filter((p): p is string => p !== null)
   const text = WebText.devicePageLine(head, parts)
+  // Said as the page opens; a change on it (a value, an effect, EDIT's page) is the hit line's to say.
+  const opened = useRef<{ page: DevicePage; text: string } | null>(null)
+  if (opened.current?.page !== page) opened.current = { page, text }
   return (
     <>
       <button type="button" class="ep-a ep-plate__status ep-plate__page" aria-label={`${text}. ${WebText.DEVICE_PAGE_SHEET}`} onClick={() => dk.openSheet(page)}>
         {text}
       </button>
-      <Spoken text={text} />
+      <Spoken text={opened.current.text} />
     </>
   )
 }

@@ -34,6 +34,8 @@ export interface DeviceKeysUi {
   readonly soloed: ReadonlySet<number>
   /** What each group's fader is assigned to (FADER + a pad; LEVEL by default): its pad's LED lights while FADER is held. */
   readonly faderAssign: readonly FaderParam[]
+  /** Another project shows: SOUND's step waiting is dropped (it was the other project's pad), and FX's solos end. */
+  projectChanged(): void
   /** The plate's page line tapped: arc's own sheet for [page] (the pad's, the tempo's, the FX sheet). */
   openSheet(page: DevicePage): void
 }

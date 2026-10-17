@@ -15,8 +15,10 @@
 // - The drawn EP-133 (the Device view, [LiveContext.device]): − and = (and
 //   the number pad's − and +) are its − and +, with Shift its SHIFT + − / +
 //   ([minusPlus]); A to D are its group keys, held while the key is down
-//   (useLiveKeys keeps the press). The computer's Shift held is its SHIFT
-//   (DeviceView listens for that itself).
+//   (useLiveKeys keeps the press; the pads type its pattern only once it is
+//   held a moment, deviceKeys' dialFrom). The computer's Shift held is its
+//   SHIFT (DeviceView listens for that itself). EDIT (E) is the grids': the
+//   drawn device's SOUND is the device's.
 // - Nothing with Ctrl, Cmd, Alt or AltGr, nothing while composing (but [ ]
 //   on a dead key's place step), and nothing the piano plays while it shows
 //   (its letters, Z and X, by code). Letters by what they type, by place

@@ -210,6 +210,14 @@ export const WebText = {
   /** The guide overlay's tags on the drawn MAIN and TEMPO, which take the device's combos (CoachText's are the row's keys). */
   COACH_DEVICE_MAIN: 'Main page; hold + pad 1–9: project',
   COACH_DEVICE_TEMPO: 'Tempo page; tap again: tap tempo',
+  /** A drawn group key's state, first in its description (a tab has no pressed state): "Held, soloed". */
+  groupKeyState(latched: boolean, held: boolean, soloed: boolean, silenced: boolean): string {
+    const words = [latched ? 'Latched' : held ? 'Held' : null, soloed ? 'soloed' : silenced ? 'silenced' : null].filter((w): w is string => w !== null)
+    const t = words.join(', ')
+    return t === '' ? '' : t.charAt(0).toUpperCase() + t.slice(1)
+  },
+  /** A page asked for while SAMPLE takes: it would end the take. */
+  DEVICE_TAKE_GOING: 'SAMPLING \u00B7 STOP THE TAKE FIRST',
   /** SHIFT + SOUND held: arc keeps every turn as it goes. */
   DEVICE_SAVED: 'SAVED',
   /** The pages' names on the plate. */
@@ -424,7 +432,7 @@ export const WebText = {
   KEYS_DEVICE: 'Live, the drawn EP-133',
   KEY_MINUS_PLUS: "The device's − and +",
   KEY_SHIFT_HELD: "The device's SHIFT, while held",
-  KEY_GROUP_HELD: 'A group key, held while it is down',
+  KEY_GROUP_HELD: 'A group key, held while it is down (held a moment, the pads type its pattern)',
   /** The tools panel's line in PADS. */
   LIVE_PADS_KEYS_HINT: 'Keyboard: 1 to 9 or the number pad play pads · A to D group · E edit · M keys · ? all keys',
   /** The KEYS tools panel's line. */

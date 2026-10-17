@@ -16,8 +16,10 @@
 //   held for the next key that uses it ([shiftOnce]); the computer's Shift
 //   (or a press made with it) counts as SHIFT held ([DeviceContext.shift]).
 // - SOUND, TEMPO and a group key held take the pads as a number pad ([dial]):
-//   let go of (or ENTER), the number is the slot, the tempo or the pattern.
-//   Held and let go of with nothing done, SOUND and TEMPO open arc's sheets
+//   let go of (or ENTER), the number is the slot, the tempo or the pattern (a
+//   group key held on the computer's keyboard types only once held
+//   DEVICE_HOLD_MS, so "b7" typed fast plays pad 7). Held and let go of with
+//   nothing done, SOUND and TEMPO open arc's sheets
 //   (the pad's, the tempo's), MAIN the project sheet.
 // - − / + by what is held or shown, first that applies ([minusPlusRoute]):
 //   KEYS held the octave, a group held its pattern, MAIN held the scene,
@@ -25,6 +27,11 @@
 //   SAMPLE the source (hands-free: the bars), then the page (SOUND the slot,
 //   ten with SHIFT; EDIT the page; TIMING quantize or free; FX the effect;
 //   OUTPUT and SIDECHAIN each other), KEYS the octave, else the group.
+// - The device view going lets go of every key, latched ones too ([dropAll]:
+//   FX's solos and punch-ins, TIMING's repeat, ERASE held, SHIFT clicked), and
+//   the window left lets go of those held down ([DeviceKeys.releaseAll]). No
+//   page opens over a SAMPLE take going on (it would close the panel and end
+//   the take).
 // - What arc can't do on the device's own terms (the system settings, CHOP,
 //   cropping a sample, songs, tempo detect, time signatures, deleting a
 //   sample, copying sounds, automation) is said on the plate ([NotInArc]) and
@@ -105,6 +112,8 @@ export interface DeviceKeysState {
   /** The key the pads type a number for (SOUND, TEMPO, a group), and what they typed. */
   readonly dialKey: DeviceKey | null
   readonly dial: string
+  /** When the pads start typing for [dialKey] (null: at once): a group key held on the computer's keyboard waits out DEVICE_HOLD_MS, so a key rolled over into a pad key ("b7") plays the pad. */
+  readonly dialFrom: number | null
   /** ERASE was on before ERASE went down (null: it isn't down): a tap latches it, a hold lets go. */
   readonly eraseWas: boolean | null
   /** Note repeat put on by TIMING held (it goes with it). */
@@ -128,6 +137,7 @@ export const DEVICE_KEYS_IDLE: DeviceKeysState = Object.freeze({
   shiftOnce: false,
   dialKey: null,
   dial: '',
+  dialFrom: null,
   eraseWas: null,
   repeat: false,
   punch: false,
@@ -150,6 +160,8 @@ export interface DeviceContext {
   readonly handsFree: boolean
   /** A hands-free take goes on (SAMPLE stops it). */
   readonly sampleTaking: boolean
+  /** Any take going on (waiting, counting in, recording, going onto the pad): no page opens over it. */
+  readonly sampleBusy: boolean
   readonly recordArmed: boolean
   readonly erase: boolean
   /** RPT (note repeat) is on of itself: TIMING held leaves it be. */
@@ -210,6 +222,7 @@ export type DeviceAction =
   | { readonly kind: 'sidechainSource'; readonly group: number; readonly offset: number }
   | { readonly kind: 'sidechainDest'; readonly group: number }
   | { readonly kind: 'notInArc'; readonly what: NotInArc }
+  | { readonly kind: 'sampleBusy' }
 
 /**
  * What arc's own sound adds to the combos (app.tsx gives them, on the FX
@@ -290,6 +303,8 @@ class Tx {
   constructor(
     public s: DeviceKeysState,
     readonly ctx: DeviceContext,
+    /** The press came from the computer's keyboard. */
+    readonly keyboard = false,
   ) {}
 
   get shift(): boolean {
@@ -313,6 +328,11 @@ class Tx {
 
   enter(page: DevicePage): void {
     if (page === this.s.page) return
+    // A page would close SAMPLE's panel, and with it a take going on: it waits.
+    if (page !== 'MAIN' && this.ctx.sampleBusy) {
+      this.emit({ kind: 'sampleBusy' })
+      return
+    }
     this.s = { ...this.s, page }
     this.emit({ kind: 'enter', page })
   }
@@ -329,7 +349,8 @@ class Tx {
   }
 
   startDial(k: DeviceKey): void {
-    this.s = { ...this.s, dialKey: k, dial: '' }
+    const wait = this.keyboard && groupOf(k) !== null
+    this.s = { ...this.s, dialKey: k, dial: '', dialFrom: wait ? this.ctx.now + DEVICE_HOLD_MS : null }
   }
 
   /** The number typed for [k], let go of or ENTERed. */
@@ -566,10 +587,10 @@ function release(tx: Tx, k: DeviceKey, how: 'up' | 'unlatch' | 'cancel', long: b
   }
 }
 
-/** [k] goes down. A key latched already is only let go of by this press's release. */
-export function keyDown(s: DeviceKeysState, k: DeviceKey, ctx: DeviceContext): DeviceStep {
+/** [k] goes down ([keyboard]: a computer key holds it). A key latched already is only let go of by this press's release. */
+export function keyDown(s: DeviceKeysState, k: DeviceKey, ctx: DeviceContext, keyboard = false): DeviceStep {
   if (s.down.has(k)) return { state: s, actions: [] }
-  const tx = new Tx({ ...s, down: add(s.down, k) }, ctx)
+  const tx = new Tx({ ...s, down: add(s.down, k) }, ctx, keyboard)
   if (!s.latched.has(k)) press(tx, k)
   return tx.done()
 }
@@ -643,7 +664,7 @@ export function padDown(s: DeviceKeysState, pad: PadPress, ctx: DeviceContext): 
     return taken()
   }
   const dk = s.dialKey
-  if (dk !== null && held(s, dk)) {
+  if (dk !== null && held(s, dk) && (s.dialFrom === null || ctx.now >= s.dialFrom)) {
     tx.spend(dk)
     const g = groupOf(dk)
     if (g !== null && s.page === 'SIDECHAIN') {
@@ -810,11 +831,39 @@ export function slotStep(slots: readonly number[], cur: number, step: number): n
   return (up ? end > cur : end < cur) ? end : null
 }
 
-/** A knob turned: KEYS or TEMPO held for it are spent (no tap, no sheet as they let go). */
+/** A knob turned: KEYS, TEMPO, SOUND and a key typing a number, held, are spent (no tap, no sheet as they let go). */
 export function knobTurned(s: DeviceKeysState): DeviceKeysState {
   let spent = s.spent
-  for (const k of ['KEYS', 'TEMPO'] as const) if (held(s, k)) spent = add(spent, k)
+  const keys: DeviceKey[] = ['KEYS', 'TEMPO', 'SOUND']
+  if (s.dialKey !== null) keys.push(s.dialKey)
+  for (const k of keys) if (held(s, k)) spent = add(spent, k)
   return spent === s.spent ? s : { ...s, spent }
+}
+
+/**
+ * Every key let go of, latched ones too, as taken away (no tap, no number):
+ * the device view going (another view, a narrow window, another section). So
+ * FX's solos and punch-ins end, TIMING's repeat, ERASE held, MAIN's project
+ * hold; SHIFT clicked is dropped, and the page goes back to MAIN.
+ */
+export function dropAll(s: DeviceKeysState, ctx: DeviceContext): DeviceStep {
+  const tx = new Tx(s, ctx)
+  for (const k of new Set([...s.down, ...s.latched])) release(tx, k, 'cancel', false)
+  if (tx.s.soloing.size > 0) tx.solo(NONE)
+  if (tx.s.punch) {
+    tx.s = { ...tx.s, punch: false }
+    tx.emit({ kind: 'punch', on: false })
+  }
+  tx.s = { ...tx.s, shiftOnce: false, dialKey: null, dial: '', dialFrom: null }
+  tx.enter('MAIN')
+  return tx.done()
+}
+
+/** FX's solos ended from outside (another project): none left. */
+export function endSolo(s: DeviceKeysState, ctx: DeviceContext): DeviceStep {
+  const tx = new Tx(s, ctx)
+  if (s.soloing.size > 0) tx.solo(NONE)
+  return tx.done()
 }
 
 /** To [page] (Esc and the panels going back to MAIN). */
@@ -896,9 +945,11 @@ export class DeviceKeys {
     this.view = view
     return () => {
       if (this.view !== view) return
-      this.releaseAll()
+      this.downAt.clear()
+      for (const k of [...this.holds.keys()]) this.clearHold(k)
+      this._shiftKey.value = false
+      this.apply(dropAll(this._state.peek(), this.ctx()))
       this.view = null
-      this.apply(goTo(this._state.peek(), 'MAIN', this.ctx()))
     }
   }
 
@@ -920,11 +971,11 @@ export class DeviceKeys {
     }
   }
 
-  /** [k] goes down at [at] ([shift]: the press was made with Shift held). */
-  down(k: DeviceKey, at: number = this.clock.now(), shift = false): void {
+  /** [k] goes down at [at] ([shift]: the press was made with Shift held; [keyboard]: a computer key holds it). */
+  down(k: DeviceKey, at: number = this.clock.now(), shift = false, keyboard = false): void {
     if (this._state.peek().down.has(k)) return
     this.downAt.set(k, at)
-    this.apply(keyDown(this._state.peek(), k, this.ctx(shift)))
+    this.apply(keyDown(this._state.peek(), k, this.ctx(shift), keyboard))
     if (k === 'FX') {
       this.clearHold(k)
       this.holds.set(
@@ -1027,6 +1078,11 @@ export class DeviceKeys {
     return true
   }
 
+  /** FX's solos end (another project shows). */
+  endSolo(): void {
+    this.apply(endSolo(this._state.peek(), this.ctx()))
+  }
+
   /** SAMPLE, STEP or SCENE opened: they have the plate's place, so the page goes back to MAIN. */
   panelOpened(): void {
     this.toMain()
@@ -1053,7 +1109,7 @@ export class DeviceKeys {
     this.later('lcd', SAID_MS, () => (this._lcd.value = null))
   }
 
-  /** Every key held by a pointer or the keyboard let go of (the view going, the window left); latched ones stay. */
+  /** Every key held down by a pointer or the keyboard let go of, as taken away (the window left, the page hidden); latched ones stay. */
   releaseAll(): void {
     for (const k of [...this._state.peek().down]) this.cancel(k)
     this._shiftKey.value = false

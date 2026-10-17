@@ -14,10 +14,11 @@
 // X and Y are [pageKnobs] (PITCH and LEVEL [levelPitchKnobs]), and the page
 // shown is [padPageShown], so the drawn EP-133's knobs X and Y follow them
 // while the sheet is open. The page picked is [padPage], one for the sheet
-// and the drawn device's EDIT page (its − / + step it, [setPadPage]), so the
-// sheet opens on the page the device shows, and the device on the sheet's.
+// and the drawn device's EDIT page (its − / + step it, [setPadPage]): a
+// sheet opens on SOUND ([initialPage]), but from the device's EDIT page on
+// the page it shows, and the device then shows the sheet's.
 import type { JSX } from 'preact'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useLayoutEffect } from 'preact/hooks'
 import { signal, type ReadonlySignal } from '@preact/signals'
 import { PadSettings, PLAY_MODES, type PlayMode } from '../../core/features/padSettings'
 import type { Peak } from '../../core/features/sampleTrim'
@@ -168,13 +169,15 @@ export interface PadEditPagesProps {
   peaks: readonly Peak[] | null
   /** False while the pad is read (or couldn't be): every knob rests. */
   enabled: boolean
+  /** The page it opens on; none: the one picked last (the drawn device's EDIT page's). */
   initialPage?: EditPage
 }
 
 export function PadEditPages(props: PadEditPagesProps): JSX.Element {
   const { settings: s, onChange, enabled } = props
   const page = padPage.value
-  useEffect(() => {
+  // Before it paints, so it never shows the page picked last first.
+  useLayoutEffect(() => {
     if (props.initialPage !== undefined) setPadPage(props.initialPage)
   }, [])
   const oneshot = s.mode === 'oneshot'
