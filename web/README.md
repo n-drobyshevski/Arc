@@ -2,7 +2,7 @@
 
 The arc Android app ported to the browser: Vite, Preact, `@preact/signals` and TypeScript (strict, `noUncheckedIndexedAccess`). It talks to the EP-133 over WebMIDI, keeps the library in IndexedDB and installs as a PWA. What it does for users, the browser table and how it differs from Android are in the [root README](../README.md#web-app).
 
-Production: https://arc-pi-mauve.vercel.app. Every other branch gets a Vercel preview.
+Production: https://arc-ko.vercel.app (also still at https://arc-pi-mauve.vercel.app, which keeps its own browser storage). Every other branch gets a Vercel preview.
 
 ## Scripts
 

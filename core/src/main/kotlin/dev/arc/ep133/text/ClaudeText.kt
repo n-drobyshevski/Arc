@@ -75,7 +75,7 @@ object ClaudeText {
     const val LEARN = "Learn with Claude"
 
     /** Where the skill's zip is (the web app's public folder). */
-    const val SKILL_URL = "https://arc-pi-mauve.vercel.app/arc-beats-skill.zip"
+    const val SKILL_URL = "https://arc-ko.vercel.app/arc-beats-skill.zip"
 
     /** What Learn with Claude shares, to be sent to the Claude app as the first message. */
     const val LEARN_PROMPT =
