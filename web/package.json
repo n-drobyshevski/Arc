@@ -20,6 +20,7 @@
     "check": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
+    "@fontsource/jost": "^5.3.0",
     "@fontsource/manrope": "^5.3.0",
     "@preact/signals": "^2.11.3",
     "preact": "^11.0.0"

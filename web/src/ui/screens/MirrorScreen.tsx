@@ -2191,8 +2191,14 @@ function PadCap(props: PadProps): JSX.Element {
   const shown = dropping && ui.drop?.name != null ? MirrorText.dropPreview(name ?? ui.drop.nameNow(pad), ui.drop.name) : name
   const content = placed ? (
     <>
-      {/* As the drawn EP-133 prints it (DeviceView.css). */}
-      <span class={`ep-pad__num${pad.label === 'ENTER' ? ' ep-pad__num--word' : ''}`}>{pad.label === '.' ? '•' : pad.label}</span>
+      {/* As the drawn EP-133 prints it (DeviceView.css): the dot drawn, 1 a bar and 0 round (the button's name says the key). */}
+      {pad.label === '.' ? (
+        <span class="ep-pad__num ep-pad__num--dot" aria-hidden="true" />
+      ) : (
+        <span class={`ep-pad__num${pad.label === 'ENTER' ? ' ep-pad__num--word' : ''}`} aria-hidden="true">
+          {pad.label === '1' ? 'I' : pad.label === '0' ? 'O' : pad.label}
+        </span>
+      )}
       {stepMark === 'picked' ? <span class="ep-pad__nudge" aria-hidden="true">{MirrorText.NUDGE.toUpperCase()}</span> : shown !== null && <span class="ep-pad__name">{shown}</span>}
       {ui.editing && !dropping && <span class="ep-pad__swap" aria-hidden="true">{'\u21C4'}</span>}
       {dropping && <span class="ep-pad__drop" aria-hidden="true">{WebText.DROP}</span>}
