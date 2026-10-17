@@ -183,8 +183,8 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
   })
 
   await test.step('7c. EDIT: a pad gets another sound at once, and UNDO puts the old one back', async () => {
-    await page.getByRole('switch', { name: 'Sound' }).click()
-    await page.locator('[data-pad]', { hasText: 'kick' }).first().click()
+    // The drawn EP-133's SOUND is the device's SOUND page: a right-click (the desk's) opens a pad's sheet.
+    await page.locator('[data-pad]', { hasText: 'kick' }).first().click({ button: 'right' })
     const sheet = page.getByRole('dialog', { name: /^Pad A / })
     await expect(sheet).toBeVisible()
     // The pad's settings show first; its sounds wait behind CHANGE SOUND.
@@ -195,7 +195,6 @@ test('back up, look inside, restore, browse the device, live pads, import, no MI
     await page.getByRole('button', { name: 'Undo' }).click()
     await expect(page.getByRole('status')).toContainText('back to kick')
     await expect(page.locator('[data-pad]', { hasText: 'kick' })).toHaveCount(1)
-    await page.getByRole('switch', { name: 'Sound' }).click()
   })
 
   await test.step('8. import sample.pak: a second row', async () => {

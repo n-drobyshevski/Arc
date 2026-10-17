@@ -169,6 +169,8 @@ import { idleFit } from '../live/lineFit'
 import { PatternLine, TransportContext, useLineMeasure, usePatternHaptics } from '../live/PatternLine'
 import { FunctionKeysContext, FunctionRow, ProjectHoldContext, TempoContext } from '../live/FunctionRow'
 import { DeviceView, padPlace } from '../live/DeviceView'
+import { useDeviceKeys } from '../live/DeviceKeys'
+import { groupKey } from '../live/deviceKeys'
 import { PunchPad, usePunch } from '../live/LivePunch'
 import { StepPanel, useStep, useStepNoteMark, useStepPadMark, useStepPiano } from '../live/StepPanel'
 import { ArpWords, arpHeldNotes, useArp, useArpLine, useArpNote, useArpPad } from '../live/ArpWords'
@@ -521,7 +523,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   // In KEYS the tools go behind the strip, so the keys get the page's width.
   const docked = desk && !keys.on
   // EDIT is for the pads (the tab shows in PADS only).
-  const editing = edit !== null && edit.on && !keys.on
+  // Not on the drawn device, whose SOUND is the device's (its pads play, or open a sheet with a right-click).
+  const editing = edit !== null && edit.on && !keys.on && !device
   // Web: a computer keyboard is at hand (a desktop, or a fine pointer): its keys play. They say so
   // (hints, aria-keyshortcuts, the target group) only while Settings → Computer keyboard is on.
   const keyboard = desk || fine
@@ -753,6 +756,33 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
   const dockHead = tabbed ? <ToolsTabs tab={toolsTab} onTab={setToolsTab} /> : undefined
 
   const hasPad = onPad !== null
+  // The drawn device's key layer (web only, live/deviceKeys.ts): while it shows, its held keys take pads and KEYS keys
+  // first, it knows the group shown and sets it, and it goes back to MAIN when the view goes.
+  const deviceKeys = useDeviceKeys()
+  const layerNow = device ? (deviceKeys?.layer ?? null) : null
+  const deviceLayer = useRef(layerNow)
+  deviceLayer.current = layerNow
+  const groupNow = useRef(group)
+  groupNow.current = group
+  // The drawn device's held keys take a KEYS key as they take a pad (KEYS held: its note's key), before PROJECT's hold.
+  const deviceKeyTake = useMemo(
+    () => ({
+      press: (k: number, note: number): boolean => deviceLayer.current?.pad(`keys:${k}`, { offset: k, label: PAD_LABELS[k] ?? '', note }) === true,
+      release: (k: number): boolean => deviceLayer.current?.padUp(`keys:${k}`) === true,
+    }),
+    [],
+  )
+  // A pad's note in KEYS' layout (KEYS held on the drawn device takes it as the key), as the keys would play it.
+  const keysNoteAt = (offset: number): number => {
+    const k = latest.current.keys ?? DEFAULT_KEYS
+    return Keys.notes(k.root, k.scale, k.octave)[offset] ?? Keys.ROOT_NOTE
+  }
+  useEffect(() => {
+    if (layerNow === null) return
+    // EDIT left on in another view would make the pads open sheets under the device's SOUND page: it goes.
+    if (latest.current.edit?.on === true) latest.current.edit.onChange(false)
+    return layerNow.attach({ group: () => groupNow.current, setGroup: (g) => setGroup(g) })
+  }, [layerNow])
   // PROJECT held: a pad printed 1 to 9 picks that project instead of sounding, and the others stay still.
   const projectHold = useContext(ProjectHoldContext)
   // FX held: the device view's pads are the punch-ins, as the big grid's.
@@ -772,15 +802,20 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
         return {
           // Unsure only when something will settle it.
           press: (hold, unsure, at) => {
+            // The drawn device's held keys first (a number typed, KEYS' key, …), then PROJECT's.
+            const layer = deviceLayer.current
+            if (layer !== null && layer.pad(key, { offset: pad.offset, label: pad.label, note: keysNoteAt(pad.offset) })) return
             if (projectHold?.press(key, pad.label, fnKeysNow.current?.project ?? null)) return
             stepFollow.current?.(pad)
             latest.current.onPad?.(pad, hold, (unsure ?? false) && latest.current.onPadKept !== undefined, at)
           },
           release: () => {
+            if (deviceLayer.current?.padUp(key) === true) return
             if (projectHold?.release(key)) return
             latest.current.onPadUp?.(pad)
           },
           cut: () => {
+            if (deviceLayer.current?.padUp(key) === true) return
             if (projectHold?.release(key)) return
             ;(latest.current.onPadCut ?? latest.current.onPadUp)?.(pad)
           },
@@ -819,11 +854,12 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     context: () => ({
       keys: keys.on,
       pianoShown: pianoRange !== null,
-      editAvailable: edit !== null && !keys.on,
+      editAvailable: edit !== null && !keys.on && !device,
       editOn: editing,
       oneGroup,
       viewSwitchable: keys.on && plan.switchShown && plan.room,
       soundsTab,
+      device: layerNow !== null,
     }),
     pad: (offset) => {
       const pad = physicalPad(group, offset)
@@ -852,14 +888,22 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
       let el: Element | null = null
       // A finger of its own: after an octave or key change the same key is another note, a press of its own.
       const finger = nextFinger.current--
+      // Taken by a key held on the drawn device: neither played nor let go of.
+      let taken = false
       return {
         id: `key:${offset}:${note}`,
         down: (at) => {
+          taken = deviceKeyTake.press(offset, note)
+          if (taken) return
           grid.down(offset, finger, at)
           el = root.current?.querySelector(`.live-kgrid [data-key="${offset}"]`) ?? null
           if (el) holdCap(el, (e) => capDown(e))
         },
         up: () => {
+          if (taken) {
+            deviceKeyTake.release(offset)
+            return
+          }
           grid.up(finger)
           if (el) releaseCap(el, (e) => capUp(e))
         },
@@ -867,9 +911,23 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     },
     run: (cmd) => {
       switch (cmd.kind) {
-        case 'group':
-          setGroup(cmd.group)
-          setAnnounce(`${MirrorText.GROUP} ${MirrorText.groupKey(cmd.group)}`)
+        case 'group': {
+          const said = `${MirrorText.GROUP} ${MirrorText.groupKey(cmd.group)}`
+          // The drawn device's group key, held while the computer's key is down (its press picks the group).
+          const layer = deviceLayer.current
+          if (layer === null) {
+            setAnnounce(said)
+            setGroup(cmd.group)
+            return
+          }
+          // With FX, ERASE or SHIFT held it solos, clears or steps instead: the plate says what it did, not the group.
+          if (!(layer.held('FX') || layer.held('ERASE') || layer.shiftHeld())) setAnnounce(said)
+          const k = groupKey(cmd.group)
+          layer.down(k, performance.now(), false, true)
+          return () => layer.up(k)
+        }
+        case 'minusPlus':
+          deviceLayer.current?.minusPlus(cmd.step, cmd.shift)
           return
         case 'editPad':
           editPad?.(physicalPad(group, cmd.offset))
@@ -936,6 +994,8 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
       }
     },
     escape: () => {
+      // The drawn device's page first: back to MAIN.
+      if (deviceLayer.current?.toMain() === true) return true
       // The open panel first, one a press (Android's Back): SAMPLE, STEP, SCENE. Read as they are
       // now, not as at the last render (a key can come before the panel's render lands).
       // A panel rolls up with a tick (Kotlin closePanel).
@@ -1206,7 +1266,7 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
     // The drawn EP-133's pads are Live's own, each in its place: in KEYS the keys, FX held the punch-ins.
     const devicePads =
       keys.on && keyNotes ? (
-        <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} arp={playing.arpNotes} haptic={haptic} keysRef={gridKeys} place={padPlace} />
+        <KeysGrid st={st} keys={keys} keyNotes={keyNotes} now={now} actions={keyPress} tracker={tracker} playing={playing.notes} arp={playing.arpNotes} haptic={haptic} keysRef={gridKeys} place={padPlace} take={deviceKeyTake} />
       ) : (
         ROWS.flat().map((o) => {
           const slot = devicePunch !== null ? punchSlotForPad(o) : -1
@@ -1226,9 +1286,6 @@ export function MirrorScreen(props: MirrorScreenProps): JSX.Element {
           pads={devicePads}
           now={now}
           group={group}
-          onGroup={setGroup}
-          onMode={actions.onMode}
-          onOctave={actions.onOctave}
           take={take}
           still={fixedNow !== null}
           onGuide={props.onGuide}
@@ -2750,6 +2807,8 @@ function KeysGrid(props: {
   strip?: JSX.Element
   /** The device view: each key in its pad's place on the drawn EP-133 (DeviceView's padPlace), the keys alone. */
   place?: (k: number) => CSSProperties
+  /** The device view's key layer: a key [press] takes (KEYS held, a number typed) neither sounds nor, at [release], lets go. */
+  take?: { press(k: number, note: number): boolean; release(k: number): boolean }
 }): JSX.Element {
   const { st, keys, keyNotes, now, tracker } = props
   // How lit each key is: the brightest device note that falls on it.
@@ -2765,10 +2824,14 @@ function KeysGrid(props: {
   const fnKeys = useContext(FunctionKeysContext)
   const fnKeysNow = useRef(fnKeys)
   fnKeysNow.current = fnKeys
+  const takeNow = useRef(props.take)
+  takeNow.current = props.take
   const press = useMemo(
     () => ({
-      take: (k: number): boolean => holdNow.current?.press(`keys:${k}`, PAD_LABELS[k] ?? '', fnKeysNow.current?.project ?? null) ?? false,
-      give: (k: number): boolean => holdNow.current?.release(`keys:${k}`) ?? false,
+      take: (k: number): boolean =>
+        takeNow.current?.press(k, notesNow.current[k] ?? Keys.ROOT_NOTE) === true ||
+        (holdNow.current?.press(`keys:${k}`, PAD_LABELS[k] ?? '', fnKeysNow.current?.project ?? null) ?? false),
+      give: (k: number): boolean => takeNow.current?.release(k) === true || (holdNow.current?.release(`keys:${k}`) ?? false),
       down: (k: number, note: number, hold: boolean, at?: number): void => {
         // A screen reader's Play sounds the whole note, outside the fingers' count.
         if (!hold) {

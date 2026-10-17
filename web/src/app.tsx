@@ -38,6 +38,15 @@
 // On a phone on its side (ui/live/window.ts liveInBar; never on the desk),
 // Live's display line rides in the top bar's middle (LiveBar, MirrorScreen's
 // LivePill) and the page leaves it out.
+//
+// Web only, the drawn EP-133's keys (ui/live/deviceKeys.ts, DeviceKeys.tsx):
+// [deviceKeysUi] is their layer, carrying the device's combos out on the
+// controller (the pattern, the FX bus, SAMPLE, KEYS, a pad's sound through
+// assignPad), and [DevicePages] keeps the pad played last open for the SOUND
+// and EDIT pages' knobs. Arc's sound gives it solo, the fader's assignments
+// and their reset ([fxSoundHooks], on the FX bus), and the drawn knobs the
+// click's level and the assigned fader (deviceControlsUi's click and
+// faderAssigned).
 import { computed, signal, useComputed } from '@preact/signals'
 import { Component, type ComponentChildren, type JSX } from 'preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
@@ -97,8 +106,20 @@ import { useAppKeys } from './ui/useAppKeys'
 import { KeyboardKeysSheet } from './ui/sheets/KeyboardKeysSheet'
 import { PatternSheet } from './ui/sheets/PatternSheet'
 import { TransportContext, type TransportUi } from './ui/live/PatternLine'
-import { FunctionKeysContext, ProjectHold, ProjectHoldContext, TempoContext, TempoHold, type FunctionKeysUi, type ProjectUi, type TempoUi } from './ui/live/FunctionRow'
-import { DeviceControlsContext, type DeviceControlsUi } from './ui/live/DeviceControls'
+import { FunctionKeysContext, ProjectHold, ProjectHoldContext, TempoContext, type FunctionKeysUi, type ProjectUi, type TempoUi } from './ui/live/FunctionRow'
+import { assignedTarget, DeviceControlsContext, type DeviceControlsUi } from './ui/live/DeviceControls'
+import type { GroupParamSnapshot } from './state/fx'
+import { DeviceKeysContext, type DeviceKeysUi } from './ui/live/DeviceKeys'
+import { DeviceKeys, slotStep, type DeviceAction, type DevicePage, type DeviceSoundHooks } from './ui/live/deviceKeys'
+import { editWord, pageWord } from './ui/live/DeviceView'
+import { EDIT_PAGES, padPage, setPadPage } from './ui/sheets/PadEditPages'
+import { FX_TYPES } from './core/features/fxSettings'
+import { Keys } from './core/features/keys'
+import { padKey, physicalPad, type PhysicalPad } from './core/features/padNotes'
+import { SoundSource } from './core/features/offlinePads'
+import { Tempo } from './core/features/tempo'
+import { SAMPLE_BARS } from './platform/storage/settings'
+import { ClipMode } from './state/scenePlan'
 import { PunchContext, type PunchUi } from './ui/live/LivePunch'
 import { StepContext, type StepActions } from './ui/live/StepPanel'
 import { SceneContext, type SceneActions } from './ui/live/ScenePanel'
@@ -234,6 +255,9 @@ function Root(): JSX.Element {
   const micKey = useMemo(() => (sample === null ? null : { on: computed(() => c.sample.ui.value.on), onTap: () => c.toggleSample() }), [c, sample])
   // PROJECT held: the pads printed 1 to 9 pick a project instead of sounding.
   const projectHold = useMemo(() => new ProjectHold(), [])
+  // The drawn EP-133's keys (web only): the device's combos, carried out here; what Root holds is read at each press.
+  const deviceActs = useRef<DeviceKeysActs | null>(null)
+  const deviceKeys = useMemo(() => deviceKeysUi(c, () => deviceActs.current, fxSoundHooks(c)), [c])
   // Live's EDIT (giving a pad another sound): on Live, in PADS, until switched off or left.
   const [editPads, setEditPads] = useState(false)
   const canEdit = v.tab === 'live' && !settings.liveKeys
@@ -309,6 +333,14 @@ function Root(): JSX.Element {
             onHold: (down) => (down ? setFxHeld(true) : punchOff()),
           }
         : null,
+  }
+  deviceActs.current = {
+    projectHold,
+    punch: (on) => (on ? setFxHeld(true) : punchOff()),
+    openPadSheet: (pad) => {
+      if (c.editTarget(pad) !== null) nav.open(sheetLayer(`${EDIT_PREFIX}${pad.group}:${pad.offset}`))
+    },
+    openSheet: (id) => nav.open(sheetLayer(id)),
   }
   // On a phone on its side, Live's display line rides in the top bar; the piano's
   // notes (while it shows) let it name a device note past them.
@@ -500,6 +532,7 @@ function Root(): JSX.Element {
     <TempoContext.Provider value={tempo}>
     <FunctionKeysContext.Provider value={fnKeys}>
     <DeviceControlsContext.Provider value={controls}>
+    <DeviceKeysContext.Provider value={deviceKeys}>
     <ProjectHoldContext.Provider value={projectHold}>
     <PunchContext.Provider value={punch}>
     <div class={desk ? 'app is-desk' : 'app'}>
@@ -531,6 +564,8 @@ function Root(): JSX.Element {
       {tabs && v.tab === 'device' && <><DevicePadsSheet view={v} /><DeviceUploadSheet view={v} /></>}
       {/* Live's EDIT: the pad sheet 'edit:<group>:<offset>', and the upload / trim sheets for a new sample. */}
       {tabs && v.tab === 'live' && <><PadEditSheet view={v} /><DeviceUploadSheet view={v} /><LivePatternSheet view={v} /><LiveTempoSheet view={v} /><LiveProjectSheet view={v} /><LiveFxSheet view={v} /><LiveBeatSheet view={v} /><LiveReviewSheet view={v} /></>}
+      {/* The drawn device's pages: SOUND and EDIT keep the pad played last open for its knobs (after the pad sheet, which has it while open). */}
+      {v.tab === 'live' && <DevicePages dk={deviceKeys} view={v} />}
       {/* The Backups tab's sheets: detail 'detail:<id>', compare picker 'comparePick:<id>',
           restore 'restore:<id>', the delete dialog 'delete'. */}
       {tabs && v.tab === 'backups' && <BackupsSheets view={v} />}
@@ -554,6 +589,7 @@ function Root(): JSX.Element {
     </div>
     </PunchContext.Provider>
     </ProjectHoldContext.Provider>
+    </DeviceKeysContext.Provider>
     </DeviceControlsContext.Provider>
     </FunctionKeysContext.Provider>
     </TempoContext.Provider>
@@ -608,13 +644,544 @@ function deviceControlsUi(c: ArcController): DeviceControlsUi {
     },
     setFxXY: (x, y) => c.fx.desk.setXY(x, y),
     setGroupLevel: (g, v) => c.fx.desk.setGroupLevel(g, v),
+    setSend: (g, v) => c.fx.desk.setSend(g, v),
+    setComp: (x, y) => c.fx.desk.setComp({ on: true, x, y }),
+    setSidechainXY: (x, y) => c.fx.desk.setSidechainXY(x, y),
     get padEdit() {
       return c.padEdit.edit.value
     },
     adjustPad: (s) => c.adjustPad(s),
     setTempo: (bpm) => c.pattern.setTempo(bpm),
-    tempoHold: new TempoHold(),
+    get keys() {
+      const s = c.settings.value
+      return { root: s.keysRoot, scale: s.keysScale, names: s.keysNames }
+    },
+    setKeysRoot: (r) => c.setKeysRoot(r),
+    setKeysScale: (sc) => c.setKeysScale(sc),
+    get timing() {
+      return c.pattern.ui.value.timingSettings
+    },
+    setTimingInterval: (t) => c.pattern.setTimingInterval(t),
+    setTimingSwing: (v) => c.pattern.setTimingSwing(v),
+    // TEMPO's Y: the click's level, off at the bottom; turned up from there the click comes on, down to it it goes off.
+    get click() {
+      const p = c.pattern
+      if (!p.canClick) return null
+      const on = p.metronome.value.on
+      return {
+        level: on ? c.clickLevel.value : 0,
+        set: (v: number) => {
+          if (v <= 0) {
+            if (p.metronome.peek().on) p.setClick(false)
+            return
+          }
+          c.setClickLevel(v)
+          if (!p.metronome.peek().on) p.setClick(true)
+        },
+      }
+    },
+    // The shown group's fader assigned (FADER + a pad) to other than LEVEL: that parameter.
+    faderAssigned: (g) => {
+      const d = c.fx.desk
+      const param = d.faderAssign.value[g] ?? 'LEVEL'
+      return param === 'LEVEL' ? null : assignedTarget(g, param, d.groupParam(g, param), (v) => d.setGroupParam(g, param, v))
+    },
   }
+}
+
+/** What the drawn device's key layer needs of Root beside the controller (kept up to date as Root renders). */
+interface DeviceKeysActs {
+  /** PROJECT's hold: MAIN held, a pad 1 to 9 picks a project (the row's PROJECT too). */
+  readonly projectHold: ProjectHold
+  /** FX's punch-ins on or off. */
+  punch(on: boolean): void
+  openPadSheet(pad: PhysicalPad): void
+  openSheet(id: string): void
+}
+
+/**
+ * What arc's sound gives the drawn device's combos, on the FX bus: FX + the
+ * group keys solo (FxDesk.setSolo, for the session), FADER + a pad assigns the
+ * shown group's fader (false for what arc hasn't: TIME, VEL, MOD), and SHIFT +
+ * FADER resets the group's parameters (RES), its next press puts them back
+ * (SET), the snapshot kept per project and group meanwhile.
+ */
+function fxSoundHooks(c: ArcController): DeviceSoundHooks {
+  const d = c.fx.desk
+  const snapshots = new Map<string, GroupParamSnapshot>()
+  return {
+    solo: (groups) => d.setSolo(groups),
+    assignFader: (g, param) => d.setFaderAssign(g, param),
+    resetFader: (g) => {
+      const key = `${d.project}:${g}`
+      const snap = snapshots.get(key)
+      if (snap !== undefined) {
+        snapshots.delete(key)
+        d.restoreGroupParams(g, snap)
+        return 'SET'
+      }
+      snapshots.set(key, d.resetGroupParams(g))
+      return 'RES'
+    },
+  }
+}
+
+/** SOUND's − / + write the slot stepped to once the stepping rests this long (one write, one UNDO). */
+const SLOT_REST_MS = 400
+
+/**
+ * The drawn EP-133's key layer (web only, ui/live/deviceKeys.ts) and what it
+ * does: the device's combos carried out on the controller (the pattern, the
+ * FX bus, SAMPLE, KEYS, the pads' sounds), its changes said on the plate and
+ * shown on the digits. SOUND's − / + step the pad played last through the
+ * device's sounds, the slot and name at once, written (assignPad, with its
+ * UNDO) once the stepping rests. [hooks]: what arc's sound adds (solo, the
+ * fader's assignments): none yet.
+ */
+function deviceKeysUi(c: ArcController, acts: () => DeviceKeysActs | null, hooks: DeviceSoundHooks = {}): DeviceKeysUi {
+  const p = c.pattern
+  const d = c.fx.desk
+  // The slot SOUND's − / + stepped to, waiting for the stepping to rest, in the project it was stepped in.
+  const pending = signal<{ readonly pad: PhysicalPad; readonly slot: number; readonly project: number } | null>(null)
+  let pendingTimer: ReturnType<typeof setTimeout> | null = null
+  const sounds = () => [...c.liveSounds()].sort((a, b) => a.slot - b.slot)
+  // Offline the pads change in arc only, from the list they show.
+  const source = (): SoundSource => {
+    const st = c.state.peek()
+    const off = st.device === null ? (st.mirror?.offlineSounds ?? null) : null
+    return off !== null ? off.base : SoundSource.DEVICE
+  }
+  const samePad = (a: PhysicalPad, b: PhysicalPad): boolean => a.group === b.group && a.offset === b.offset
+  const slotOf = (pad: PhysicalPad): number | null => {
+    const w = pending.peek()
+    return w !== null && samePad(w.pad, pad) ? w.slot : (c.editTarget(pad, true)?.slot ?? null)
+  }
+  // Written once the stepping rests; another project by then is not the one it was stepped in: dropped.
+  const writeSlot = (): void => {
+    pendingTimer = null
+    const w = pending.peek()
+    pending.value = null
+    if (w !== null && c.editTarget(w.pad, true)?.project === w.project) void c.assignPad(w.pad, w.slot, source())
+  }
+  const flushSlot = (): void => {
+    if (pendingTimer !== null) clearTimeout(pendingTimer)
+    writeSlot()
+  }
+  const dropSlot = (): void => {
+    if (pendingTimer !== null) clearTimeout(pendingTimer)
+    pendingTimer = null
+    pending.value = null
+  }
+  const pad3 = (n: number): string => String(n).padStart(3, '0').slice(-3)
+  const say = (text: string): void => layer.say(text)
+  const sayPattern = (g: number): void => {
+    const col = p.scene.peek().groups[g]
+    if (col === undefined) return
+    const n = col.queued ?? col.number
+    layer.show(pad3(n))
+    say(WebText.deviceSet(`${MirrorText.GROUP} ${MirrorText.groupKey(g)}`.toUpperCase(), MirrorText.patternNumber(n)))
+  }
+  const sayBars = (g: number): void => {
+    const bars = p.ui.peek().bars[g] ?? 1
+    layer.show(String(bars).padStart(3, ' '))
+    say(WebText.deviceSet(MirrorText.LENGTH.toUpperCase(), WebText.barsShown(bars)))
+  }
+  const run = (a: DeviceAction): void => {
+    const keysPad = c.state.peek().keysPad
+    switch (a.kind) {
+      case 'enter': {
+        // A page has the plate's place: the panels there close.
+        if (a.page !== 'MAIN') {
+          c.sample.exit()
+          if (p.step.peek().open) p.setStepOpen(false)
+          if (p.scene.peek().open) p.setSceneOpen(false)
+        }
+        const i = EDIT_PAGES.indexOf(padPage.peek())
+        if (a.page === 'EDIT') layer.show('EDT', undefined, editWord(i))
+        else {
+          const word = pageWord(a.page, d.fx.peek().type, i)
+          if (word !== null) layer.show(word)
+        }
+        return
+      }
+      case 'sheet':
+        if (a.sheet === 'SOUND') {
+          if (keysPad === null) c.toast(MirrorText.PLAY_A_PAD)
+          else acts()?.openPadSheet(keysPad)
+        } else if (a.sheet === 'TEMPO') {
+          if (p.canClick) acts()?.openSheet(TEMPO_SHEET)
+        } else acts()?.openSheet(PROJECT_SHEET)
+        return
+      case 'keysMode':
+        c.setLiveKeys(a.on)
+        return
+      case 'group':
+        return
+      case 'octave': {
+        const o = Math.min(Keys.MAX_OCTAVE, Math.max(Keys.MIN_OCTAVE, c.settings.peek().keysOctave + a.step))
+        c.setKeysOctave(o)
+        layer.show(String(o).padStart(3, ' '))
+        say(MirrorText.octave(o).toUpperCase())
+        return
+      }
+      case 'pattern':
+        p.scenePatternStep(a.group, a.step)
+        sayPattern(a.group)
+        return
+      case 'patternPick':
+        p.scenePatternPick(a.group, a.n)
+        sayPattern(a.group)
+        return
+      case 'nextFree':
+        p.scenePatternNextFree(a.group)
+        sayPattern(a.group)
+        return
+      case 'scene':
+        p.sceneStep(a.step)
+        layer.show(p.scene.peek().label.slice(-3))
+        say(p.scene.peek().label.toUpperCase())
+        return
+      case 'sceneCommit':
+        p.sceneCommit()
+        say(WebText.deviceSet('COMMIT', p.scene.peek().label.toUpperCase()))
+        return
+      case 'sceneErase':
+        p.sceneEraseHold()
+        return
+      case 'length':
+        p.setLength(a.group, (p.ui.peek().bars[a.group] ?? 1) + a.step)
+        sayBars(a.group)
+        return
+      case 'double':
+        p.double(a.group)
+        sayBars(a.group)
+        return
+      case 'stepBy':
+        p.stepBy(a.step)
+        return
+      case 'sampleSource':
+        c.sample.stepInput(a.step)
+        return
+      case 'sampleBars': {
+        const choices: (number | null)[] = [null, ...SAMPLE_BARS]
+        const i = Math.max(0, choices.indexOf(c.sample.ui.peek().bars))
+        const next = choices[Math.min(choices.length - 1, Math.max(0, i + a.step))] ?? null
+        c.sample.setBars(next)
+        say(WebText.deviceSet('BARS', next === null ? 'FREE' : String(next)))
+        return
+      }
+      case 'slot': {
+        if (keysPad === null) {
+          say(WebText.DEVICE_PLAY_A_PAD)
+          return
+        }
+        // Not changeable (offline with nothing read, the project not read): the toast says why.
+        const target = c.editTarget(keysPad)
+        if (target === null) return
+        // Another pad's step (or another project's) is written first: one step never takes another's place.
+        const w = pending.peek()
+        if (w !== null && (!samePad(w.pad, keysPad) || w.project !== target.project)) flushSlot()
+        const list = sounds()
+        const next = slotStep(
+          list.map((snd) => snd.slot),
+          slotOf(keysPad) ?? 0,
+          a.step,
+        )
+        if (next === null) return
+        pending.value = { pad: keysPad, slot: next, project: target.project }
+        layer.show(pad3(next))
+        say(WebText.slotShown(next, list.find((snd) => snd.slot === next)?.name ?? null))
+        if (pendingTimer !== null) clearTimeout(pendingTimer)
+        pendingTimer = setTimeout(writeSlot, SLOT_REST_MS)
+        return
+      }
+      case 'assign': {
+        if (keysPad === null) {
+          say(WebText.DEVICE_PLAY_A_PAD)
+          return
+        }
+        const snd = sounds().find((e) => e.slot === a.slot)
+        if (snd === undefined) {
+          say(WebText.noSoundAt(a.slot))
+          return
+        }
+        // The slot typed is the pad's now: a step waiting on it goes (another pad's is written).
+        const w = pending.peek()
+        if (w !== null && samePad(w.pad, keysPad)) dropSlot()
+        else if (w !== null) flushSlot()
+        layer.show(pad3(a.slot))
+        say(WebText.slotShown(a.slot, snd.name))
+        void c.assignPad(keysPad, a.slot, source())
+        return
+      }
+      case 'editPage': {
+        const i = Math.min(EDIT_PAGES.length - 1, Math.max(0, EDIT_PAGES.indexOf(padPage.peek()) + a.step))
+        setPadPage(EDIT_PAGES[i]!)
+        layer.show(editWord(i))
+        say(WebText.deviceSet(WebText.DEVICE_PAGES.EDIT!, MirrorText.pageName(i).toUpperCase()))
+        return
+      }
+      case 'quantize':
+        p.setTimingQuantize(a.on)
+        say((a.on ? MirrorText.QUANTIZE : MirrorText.FREE_TIME).toUpperCase())
+        return
+      case 'fxType': {
+        const cur = d.fx.peek().type
+        const t = FX_TYPES[Math.min(FX_TYPES.length - 1, Math.max(0, FX_TYPES.indexOf(cur) + a.step))]!
+        // An effect put on with no send anywhere: the group of the pad played last sends to it (as the FX sheet).
+        if (t !== cur) d.setType(t, keysPad?.group ?? null)
+        layer.show(MirrorText.fxCode(t))
+        say(WebText.deviceSet('FX', MirrorText.fxName(t).toUpperCase()))
+        return
+      }
+      case 'tapTempo': {
+        const bpm = p.tapTempo(performance.now())
+        if (bpm !== null) say(WebText.deviceSet(MirrorText.FN_TEMPO.toUpperCase(), String(bpm)))
+        return
+      }
+      case 'tempo':
+        p.setTempo(a.bpm)
+        say(WebText.deviceSet(MirrorText.FN_TEMPO.toUpperCase(), String(Tempo.clamp(a.bpm))))
+        return
+      case 'keysRoot':
+        c.setKeysRoot(a.root)
+        say(WebText.deviceSet(MirrorText.KEY.toUpperCase(), Keys.name(a.root, c.settings.peek().keysNames)))
+        return
+      case 'erase':
+        p.setErase(a.on)
+        return
+      case 'clear':
+        p.clear(a.group)
+        return
+      case 'undo':
+        p.undo()
+        say(MirrorText.UNDO.toUpperCase())
+        return
+      case 'copy':
+        p.setSceneGroup(a.group)
+        p.setClipMode(a.pattern ? ClipMode.PTN : ClipMode.BAR)
+        p.clipCopy()
+        layer.blink('COPY')
+        say(WebText.deviceSet('COPY', a.pattern ? 'PATTERN' : 'BAR'))
+        return
+      case 'paste':
+        p.setSceneGroup(a.group)
+        p.clipPaste()
+        layer.blink('PASTE')
+        say('PASTE')
+        return
+      case 'correct': {
+        const on = !p.step.peek().correct
+        p.setStepCorrect(on)
+        // Stopped, timing correct works in the STEP panel (a pad tapped corrects its notes); never over a take going on.
+        if (on && p.ui.peek().phase === 'STOPPED' && !p.step.peek().open && !sampleBusy()) {
+          c.sample.exit()
+          p.setStepOpen(true)
+        }
+        say(WebText.deviceSet('CORRECT', MirrorText.onOff(on).toUpperCase()))
+        return
+      }
+      case 'repeat':
+        p.setArpOn(a.on)
+        return
+      case 'sample':
+        c.toggleSample()
+        return
+      case 'sampleStop':
+        c.sample.stop()
+        return
+      case 'leaveSample':
+        c.sample.exit()
+        return
+      case 'handsFree':
+        c.sample.latchTake(physicalPad(a.group, a.offset))
+        return
+      case 'punch':
+        acts()?.punch(a.on)
+        return
+      case 'mainHold': {
+        const h = acts()?.projectHold
+        if (a.on) h?.down()
+        else h?.cancel()
+        return
+      }
+      case 'saved':
+        say(WebText.DEVICE_SAVED)
+        return
+      case 'solo':
+        if (hooks.solo !== undefined) {
+          hooks.solo(a.groups)
+          say(WebText.soloShown([...a.groups].sort().map((g) => MirrorText.groupKey(g))))
+        } else if (a.groups.size > 0) say(WebText.notInArc(WebText.DEVICE_NOT_IN_ARC.SOLO!))
+        return
+      case 'faderAssign':
+        if (hooks.assignFader?.(a.group, a.param) === true) {
+          layer.show(a.param.slice(0, 3))
+          say(WebText.deviceSet(`FADER ${MirrorText.groupKey(a.group)}`, a.param))
+        } else say(WebText.notInArc(a.param))
+        return
+      case 'faderReset': {
+        const word = hooks.resetFader?.(a.group) ?? null
+        if (word === null) {
+          say(WebText.notInArc(WebText.DEVICE_NOT_IN_ARC.FADER_RESET!))
+          return
+        }
+        layer.show(word)
+        say(WebText.deviceSet(`FADER ${MirrorText.groupKey(a.group)}`, word))
+        return
+      }
+      case 'sidechainSource':
+        d.setSidechainSource(a.group, a.offset)
+        say(WebText.deviceSet(MirrorText.SIDECHAIN.toUpperCase(), physicalPad(a.group, a.offset).groupLetter + ' ' + physicalPad(a.group, a.offset).label))
+        return
+      case 'sidechainDest':
+        d.toggleSidechainDest(a.group)
+        say(WebText.deviceSet(MirrorText.SIDECHAIN.toUpperCase(), MirrorText.groupKey(a.group)))
+        return
+      case 'notInArc':
+        say(WebText.notInArc(WebText.DEVICE_NOT_IN_ARC[a.what] ?? a.what))
+        return
+      case 'sampleBusy':
+        say(WebText.DEVICE_TAKE_GOING)
+        return
+    }
+  }
+  // A take going on (waiting for its sound or PLAY, counting in, recording): SAMPLE's panel stays.
+  function sampleBusy(): boolean {
+    const sample = c.sample.ui.value
+    const t = sample.phase.type
+    return sample.on && (t === 'Waiting' || t === 'WaitingForPlay' || t === 'CountIn' || t === 'Recording')
+  }
+  const layer = new DeviceKeys({
+    context: () => {
+      const settings = c.settings.value
+      const ui = p.ui.value
+      const sample = c.sample.ui.value
+      const ph = sample.phase
+      return {
+        keysOn: settings.liveKeys,
+        octave: settings.keysOctave,
+        bars: ui.bars,
+        stepOpen: p.step.value.open,
+        sampleOn: sample.on,
+        handsFree: sample.latch,
+        sampleTaking: ((ph.type === 'Recording' || ph.type === 'Waiting') && ph.latched) || ph.type === 'CountIn' || ph.type === 'WaitingForPlay',
+        sampleBusy: sampleBusy(),
+        recordArmed: ui.phase === 'ARMED',
+        erase: ui.erase,
+        arpOn: p.arp.value.on,
+        fxIndex: FX_TYPES.indexOf(d.fx.value.type),
+        editPage: EDIT_PAGES.indexOf(padPage.value),
+        quantize: ui.timingSettings.quantize,
+      }
+    },
+    run,
+  })
+  return {
+    layer,
+    get selected() {
+      const pad = c.state.value.keysPad
+      if (pad === null) return null
+      // Read, so a step re-renders the slot shown.
+      void pending.value
+      const slot = slotOf(pad)
+      const name = slot !== null ? (c.liveSounds().find((snd) => snd.slot === slot)?.name ?? null) : null
+      return { pad, slot, name: name ?? c.mirrorName(pad) }
+    },
+    get quantize() {
+      return p.ui.value.timingSettings.quantize
+    },
+    get fxType() {
+      return d.fx.value.type
+    },
+    get muted() {
+      return d.silenced.value.size > 0 || d.soloed.value.size > 0
+    },
+    get silenced() {
+      return d.silenced.value
+    },
+    get soloed() {
+      return d.soloed.value
+    },
+    get faderAssign() {
+      return d.faderAssign.value
+    },
+    projectChanged: () => {
+      dropSlot()
+      layer.endSolo()
+    },
+    openSheet: (page: DevicePage) => {
+      const a = acts()
+      if (a === null) return
+      if (page === 'SOUND' || page === 'EDIT') {
+        const pad = c.state.peek().keysPad
+        if (pad === null) c.toast(MirrorText.PLAY_A_PAD)
+        else a.openPadSheet(pad)
+      } else if (page === 'TEMPO' || page === 'TIMING') {
+        if (p.canClick) a.openSheet(TEMPO_SHEET)
+      } else a.openSheet(FX_SHEET)
+    },
+  }
+}
+
+/** On SOUND and EDIT, a pad played after another opens for the knobs once the playing settles this long (one read, not one a hit). */
+const PAD_SETTLE_MS = 250
+
+/**
+ * The drawn device's pages beside the sheets (web only): on SOUND and EDIT the
+ * pad played last is open for the knobs (PadEditDesk, as its sheet opens it;
+ * the sheet has it while open), at once as the page opens and, as other pads
+ * are played, once the playing settles (each open reads the pad from the
+ * EP-133; the knobs stay on the pad open until then); SAMPLE, STEP or SCENE
+ * opening takes the page back to MAIN (they share the plate's place); and
+ * another project drops SOUND's step waiting and FX's solos.
+ */
+function DevicePages(props: { dk: DeviceKeysUi; view: NavView }): null {
+  const c = useController()
+  const page = props.dk.layer.state.value.page
+  const pad = c.state.value.keysPad
+  const sheet = editPadOf(props.view.sheets) !== null
+  const slot = pad !== null ? (c.editTarget(pad, true)?.slot ?? null) : null
+  const connected = c.state.value.device !== null
+  const sound = page === 'SOUND' || page === 'EDIT'
+  const padId = pad !== null ? padKey(pad) : null
+  // The sheet opening takes the pad over (its own effect, before this one, has opened it): left open for it.
+  const sheetNow = useRef(sheet)
+  sheetNow.current = sheet
+  // Whether a pad is open for the page: the first opens at once, the next ones once the playing settles.
+  const opened = useRef(false)
+  useEffect(() => {
+    if (!sound || sheet) return
+    return () => {
+      opened.current = false
+      if (!sheetNow.current) c.closePadEdit()
+    }
+  }, [sound, sheet])
+  useEffect(() => {
+    if (!sound || sheet || pad === null) return
+    const open = (): void => {
+      opened.current = true
+      c.openPadEdit(pad)
+    }
+    if (!opened.current) {
+      open()
+      return
+    }
+    const t = setTimeout(open, PAD_SETTLE_MS)
+    return () => clearTimeout(t)
+  }, [sound, sheet, padId, slot, connected])
+  const panel = c.sample.ui.value.on || c.pattern.step.value.open || c.pattern.scene.value.open
+  useEffect(() => {
+    if (panel) props.dk.layer.panelOpened()
+  }, [panel])
+  const project = c.state.value.mirror?.state.activeProject ?? null
+  const projectWas = useRef(project)
+  useEffect(() => {
+    if (projectWas.current === project) return
+    projectWas.current = project
+    props.dk.projectChanged()
+  }, [project])
+  return null
 }
 
 /** PROJECT as its key shows it (Kotlin projectKeyOf), and what it does. */

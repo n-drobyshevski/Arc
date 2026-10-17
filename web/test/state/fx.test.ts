@@ -2,14 +2,19 @@
 // punchDepth, sidechainIndex, duckSource), plus the web's FxKeeper (the library's kv row "fx",
 // written once the knobs rest) and the controller's FX: the voices' bus, the tempo, the project.
 import 'fake-indexeddb/auto'
+import { effect } from '@preact/signals'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { FxBook, FxSettings, levelGain } from '../../src/core/features/fxSettings'
+import { FADER_ENV_MS, FxBook, FxSettings, levelGain } from '../../src/core/features/fxSettings'
 import { physicalPad } from '../../src/core/features/padNotes'
 import { FxControl } from '../../src/core/formats/fx/fxBus'
 import { memoryStorage } from '../../src/platform/storage/settings'
 import {
+  FADER_DEFAULTS,
+  FADER_PARAMS,
   FIRST_SEND,
   FX_SAVE_MS,
+  faderParamSupported,
+  silencedGroup,
   FxDesk,
   FxKeeper,
   PUNCH_MIN_DEPTH,
@@ -122,7 +127,8 @@ describe('FxDesk', () => {
     sent.length = 0
     d.switchTo(1)
     expect(d.fx.value.x).toBeCloseTo(0.2)
-    // Whole: the effect, four sends, the compressor, the sidechain (and the web's four levels).
+    // Whole: the effect, four sends, the compressor, the sidechain (and the web's four levels, then each group's faders).
+    const faders = [FxControl.GROUP_FILTER, FxControl.GROUP_PAN, FxControl.GROUP_PITCH, FxControl.GROUP_ENV]
     expect(sent.map((s) => s[0])).toEqual([
       FxControl.FX_TYPE,
       FxControl.SEND,
@@ -135,6 +141,10 @@ describe('FxDesk', () => {
       FxControl.GROUP_LEVEL,
       FxControl.GROUP_LEVEL,
       FxControl.GROUP_LEVEL,
+      ...faders,
+      ...faders,
+      ...faders,
+      ...faders,
     ])
     expect([...d.kept().keys()]).toEqual([1])
     d.setXY(0.5, 0.5)
@@ -186,6 +196,196 @@ describe('FxDesk', () => {
     expect(d.fx.value.x).toBeCloseTo(0.3)
     // Read once.
     expect(d.load(new Map())).toBe(false)
+  })
+})
+
+describe("(web) FxDesk: the drawn EP-133's fader parameters, mute and solo", () => {
+  it('supports all but TIME, VEL and MOD, in pad order', () => {
+    expect(FADER_PARAMS).toEqual(['LEVEL', 'PITCH', 'TIME', 'LPF', 'HPF', 'FX', 'ATK', 'REL', 'PAN', 'TUNE', 'VEL', 'MOD'])
+    expect(FADER_PARAMS.filter((p) => !faderParamSupported(p))).toEqual(['TIME', 'VEL', 'MOD'])
+  })
+
+  it('each parameter goes to the bus as it is heard, is read back, and is kept with the project', () => {
+    const { d, sent, edits } = desk()
+    d.load(null)
+    d.switchTo(1)
+    sent.length = 0
+    expect(FADER_PARAMS.map((p) => d.groupParam(1, p))).toEqual(FADER_PARAMS.map((p) => FADER_DEFAULTS[p]))
+    expect(d.setGroupParam(1, 'LPF', 0.25)).toBe(true)
+    expect(d.setGroupParam(1, 'HPF', 0.5)).toBe(true)
+    expect(d.setGroupParam(1, 'PAN', 0.75)).toBe(true)
+    expect(d.setGroupParam(1, 'PITCH', 1)).toBe(true)
+    expect(d.setGroupParam(1, 'TUNE', 0.25)).toBe(true)
+    expect(d.setGroupParam(1, 'ATK', 0.5)).toBe(true)
+    expect(d.setGroupParam(1, 'REL', 1)).toBe(true)
+    expect(sent).toEqual([
+      [FxControl.GROUP_FILTER, 1, 0.25, 0],
+      [FxControl.GROUP_FILTER, 1, 0.25, 0.5],
+      [FxControl.GROUP_PAN, 1, 0.5, 0],
+      [FxControl.GROUP_PITCH, 1, 12, 0],
+      [FxControl.GROUP_PITCH, 1, 11.5, 0],
+      [FxControl.GROUP_ENV, 1, 0.25 * FADER_ENV_MS, 0],
+      [FxControl.GROUP_ENV, 1, 0.25 * FADER_ENV_MS, FADER_ENV_MS],
+    ])
+    expect(edits[0]).toBe(7)
+    expect(d.groupParam(1, 'LPF')).toBe(0.25)
+    expect(d.groupParam(1, 'TUNE')).toBe(0.25)
+    expect(d.groupParam(0, 'LPF')).toBe(1)
+    // LEVEL and FX are the level and the send: one value each.
+    sent.length = 0
+    d.setGroupParam(2, 'LEVEL', 0.5)
+    d.setGroupParam(2, 'FX', 0.3)
+    expect(sent).toEqual([
+      [FxControl.GROUP_LEVEL, 2, levelGain(0.5), 0],
+      [FxControl.SEND, 2, Math.fround(0.3), 0],
+    ])
+    expect(d.fx.value.levels[2]).toBe(0.5)
+    expect(d.groupParam(2, 'FX')).toBe(Math.fround(0.3))
+    // Not in arc, or no such group: false, nothing.
+    sent.length = 0
+    expect(d.setGroupParam(1, 'TIME', 0.1)).toBe(false)
+    expect(d.setGroupParam(1, 'VEL', 0.1)).toBe(false)
+    expect(d.setGroupParam(1, 'MOD', 0.1)).toBe(false)
+    expect(d.setGroupParam(4, 'LPF', 0.1)).toBe(false)
+    expect(d.groupParam(1, 'VEL')).toBe(FADER_DEFAULTS.VEL)
+    // The same again: nothing sent.
+    d.setGroupParam(1, 'LPF', 0.25)
+    expect(sent).toEqual([])
+    // Kept, sent whole when shown again; another project has its own.
+    const kept = FxBook.fromJson(d.json()!)?.get(1)
+    expect(kept?.faders[1]).toEqual({ PITCH: 1, LPF: 0.25, HPF: 0.5, ATK: 0.5, REL: 1, PAN: 0.75, TUNE: 0.25 })
+    d.switchTo(2)
+    expect(d.groupParam(1, 'LPF')).toBe(1)
+    expect(sent.filter((c) => c[0] === FxControl.GROUP_FILTER)).toEqual([0, 1, 2, 3].map((g) => [FxControl.GROUP_FILTER, g, 1, 0]))
+    sent.length = 0
+    d.switchTo(1)
+    expect(sent.filter((c) => c[1] === 1 && c[0] >= FxControl.GROUP_FILTER)).toEqual([
+      [FxControl.GROUP_FILTER, 1, 0.25, 0.5],
+      [FxControl.GROUP_PAN, 1, 0.5, 0],
+      [FxControl.GROUP_PITCH, 1, 11.5, 0],
+      [FxControl.GROUP_ENV, 1, 0.25 * FADER_ENV_MS, FADER_ENV_MS],
+    ])
+  })
+
+  it('groupParam and faderAssign are read through signals', () => {
+    const { d } = desk()
+    const seen: number[] = []
+    const assigned: string[] = []
+    const stop = effect(() => {
+      seen.push(d.groupParam(3, 'PAN'))
+      assigned.push(d.faderAssign.value[3]!)
+    })
+    d.setGroupParam(3, 'PAN', 0)
+    d.setFaderAssign(3, 'PAN')
+    stop()
+    expect(seen).toEqual([0.5, 0, 0])
+    expect(assigned).toEqual(['LEVEL', 'LEVEL', 'PAN'])
+  })
+
+  it("each group's fader is assigned to a parameter arc has, LEVEL by default, kept with the project", () => {
+    const { d, sent } = desk()
+    d.load(null)
+    d.switchTo(1)
+    sent.length = 0
+    expect(d.faderAssign.value).toEqual(['LEVEL', 'LEVEL', 'LEVEL', 'LEVEL'])
+    expect(d.setFaderAssign(2, 'LPF')).toBe(true)
+    expect(d.setFaderAssign(2, 'VEL')).toBe(false)
+    expect(d.setFaderAssign(5, 'PAN')).toBe(false)
+    expect(d.faderAssign.value).toEqual(['LEVEL', 'LEVEL', 'LPF', 'LEVEL'])
+    // Nothing for the bus to hear.
+    expect(sent).toEqual([])
+    expect(FxBook.fromJson(d.json()!)?.get(1)?.assign).toEqual(['LEVEL', 'LEVEL', 'LPF', 'LEVEL'])
+    d.switchTo(2)
+    expect(d.faderAssign.value[2]).toBe('LEVEL')
+    d.switchTo(1)
+    expect(d.faderAssign.value[2]).toBe('LPF')
+    d.setFaderAssign(2, 'LEVEL')
+    expect(d.json()).toBeNull()
+  })
+
+  it("resets a group's parameters as one edit, and restores them", () => {
+    const { d, sent, edits } = desk()
+    d.load(null)
+    d.setGroupParam(0, 'LEVEL', 0.5)
+    d.setGroupParam(0, 'FX', 0.25)
+    d.setGroupParam(0, 'LPF', 0.2)
+    d.setGroupParam(0, 'PITCH', 0.75)
+    d.setGroupParam(1, 'PAN', 0)
+    d.setFaderAssign(0, 'LPF')
+    const before = FADER_PARAMS.map((p) => d.groupParam(0, p))
+    sent.length = 0
+    edits[0] = 0
+    const snap = d.resetGroupParams(0)
+    expect(FADER_PARAMS.map((p) => snap[p])).toEqual(before)
+    expect(FADER_PARAMS.map((p) => d.groupParam(0, p))).toEqual(FADER_PARAMS.map((p) => FADER_DEFAULTS[p]))
+    expect(edits[0]).toBe(1)
+    // The group whole, as heard at the defaults; group B and the assignment untouched.
+    expect(sent).toEqual([
+      [FxControl.SEND, 0, 0, 0],
+      [FxControl.GROUP_LEVEL, 0, 1, 0],
+      [FxControl.GROUP_FILTER, 0, 1, 0],
+      [FxControl.GROUP_PAN, 0, 0, 0],
+      [FxControl.GROUP_PITCH, 0, 0, 0],
+      [FxControl.GROUP_ENV, 0, 0, 0],
+    ])
+    expect(d.groupParam(1, 'PAN')).toBe(0)
+    expect(d.faderAssign.value[0]).toBe('LPF')
+    // Reset again: nothing to change, nothing sent.
+    sent.length = 0
+    d.resetGroupParams(0)
+    expect(sent).toEqual([])
+    d.restoreGroupParams(0, snap)
+    expect(FADER_PARAMS.map((p) => d.groupParam(0, p))).toEqual(before)
+    expect(edits[0]).toBe(2)
+    expect(sent.find((c) => c[0] === FxControl.GROUP_PITCH)).toEqual([FxControl.GROUP_PITCH, 0, 6, 0])
+  })
+
+  it('mutes and solos: what is silenced goes to the bus, never kept', () => {
+    const { d, sent, edits } = desk()
+    d.load(null)
+    sent.length = 0
+    d.setMute(1, true)
+    expect([...d.muted.value]).toEqual([1])
+    expect([...d.silenced.value]).toEqual([1])
+    expect(sent).toEqual([[FxControl.GROUP_MUTE, 1, 1, 0]])
+    // Soloing C: the others silenced, B already was.
+    sent.length = 0
+    d.setSolo(new Set([2]))
+    expect([...d.soloed.value]).toEqual([2])
+    expect([...d.silenced.value].sort()).toEqual([0, 1, 3])
+    expect(sent).toEqual([
+      [FxControl.GROUP_MUTE, 0, 1, 0],
+      [FxControl.GROUP_MUTE, 3, 1, 0],
+    ])
+    // A muted group soloed is heard; the same solo again, or groups out of range, change nothing.
+    sent.length = 0
+    d.setSolo(new Set([2, 1, 9]))
+    expect([...d.silenced.value].sort()).toEqual([0, 3])
+    expect(sent).toEqual([[FxControl.GROUP_MUTE, 1, 0, 0]])
+    sent.length = 0
+    d.setSolo(new Set([1, 2]))
+    d.setMute(1, true)
+    d.setMute(7, true)
+    expect(sent).toEqual([])
+    // The solo ends: the mutes as they were.
+    d.setSolo(new Set())
+    expect([...d.silenced.value]).toEqual([1])
+    expect(sent).toEqual([
+      [FxControl.GROUP_MUTE, 0, 0, 0],
+      [FxControl.GROUP_MUTE, 1, 1, 0],
+      [FxControl.GROUP_MUTE, 3, 0, 0],
+    ])
+    d.setMute(1, false)
+    expect(d.silenced.value.size).toBe(0)
+    expect(edits[0]).toBe(0)
+    expect(d.json()).toBeNull()
+    // The same across projects.
+    d.setMute(0, true)
+    d.switchTo(4)
+    expect([...d.silenced.value]).toEqual([0])
+    expect(silencedGroup(0, new Set([0]), new Set())).toBe(true)
+    expect(silencedGroup(0, new Set([0]), new Set([0]))).toBe(false)
+    expect(silencedGroup(2, new Set(), new Set([0]))).toBe(true)
   })
 })
 
@@ -286,6 +486,17 @@ describe('FX in the controller', () => {
     h.c.fx.desk.punchDown(3, 0.5)
     h.c.setLive(false)
     expect(h.liveAudio.controls.at(-1)).toEqual([FxControl.PUNCH, 3, 0, 0])
+  })
+
+  it("(web) the controller's click level is Live's, and setting it leaves the click on or off", async () => {
+    const h = await liveHarness({ storage: memoryStorage(ORDER) })
+    expect(h.c.clickLevel.value).toBe(1)
+    h.c.setClickLevel(0.4)
+    expect(h.c.clickLevel.value).toBe(0.4)
+    expect(h.liveAudio.clickLevel.value).toBe(0.4)
+    h.c.setClickLevel(0)
+    expect(h.c.clickLevel.value).toBe(0)
+    expect(h.liveAudio.clickLog).toEqual([])
   })
 
   it("the sheet's cap plays a pad through the effects, and lets it go", async () => {

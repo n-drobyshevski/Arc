@@ -1,35 +1,15 @@
-// The device view's shortcut cards (web only): a key's combinations from the
-// shortcut guide (core/text/guideData.ts, GuideText.kt), those that use the
-// key, shortest first.
+// The device view's shortcut cards (web only): a control's combinations from
+// the shortcut guide (core/text/guideData.ts, GuideText.kt), those that use
+// it, shortest first. The knobs and the fader keep their cards (a tap shows
+// them); the keys take the device's combos instead (deviceKeys.ts), so only
+// RECORD and PLAY keep one, where the pattern isn't there to drive them.
 import { filter, type GuideEntry } from '../../core/text/guideText'
 
-/** The device's keys and controls that open a shortcuts card. */
-export type CardKey =
-  | 'SOUND'
-  | 'MAIN'
-  | 'TEMPO'
-  | 'SAMPLE'
-  | 'TIMING'
-  | 'FX'
-  | 'ERASE'
-  | 'SHIFT'
-  | 'FADER'
-  | 'KNOBX'
-  | 'KNOBY'
-  | 'PLAY'
-  | 'RECORD'
-  | 'VOLUME'
+/** The device's controls that open a shortcuts card. */
+export type CardKey = 'FADER' | 'KNOBX' | 'KNOBY' | 'PLAY' | 'RECORD' | 'VOLUME'
 
 /** How each key is named in the guide's combos, and on the card. */
 const KEYS: Record<CardKey, { readonly match: RegExp | null; readonly name: string; readonly search: string }> = {
-  SOUND: { match: /\bSOUND\b/, name: 'SOUND', search: 'SOUND' },
-  MAIN: { match: /\bMAIN\b/, name: 'MAIN', search: 'MAIN' },
-  TEMPO: { match: /\bTEMPO\b/, name: 'TEMPO', search: 'TEMPO' },
-  SAMPLE: { match: /\bSAMPLE\b/, name: 'SAMPLE', search: 'SAMPLE' },
-  TIMING: { match: /\bTIMING\b/, name: 'TIMING', search: 'TIMING' },
-  FX: { match: /\bFX\b/, name: 'FX', search: 'FX' },
-  ERASE: { match: /\bERASE\b/, name: 'ERASE', search: 'ERASE' },
-  SHIFT: { match: /\bSHIFT\b/, name: 'SHIFT', search: 'SHIFT' },
   FADER: { match: /\bFADER\b/, name: 'FADER', search: 'FADER' },
   KNOBX: { match: /KNOB ?X\b/, name: 'Knob X', search: 'knob X' },
   KNOBY: { match: /KNOB ?Y\b/, name: 'Knob Y', search: 'knob Y' },

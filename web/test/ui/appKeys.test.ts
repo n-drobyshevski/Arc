@@ -65,6 +65,10 @@ describe('the app-wide keys', () => {
     expect(labels(editing[1]!.rows)).toEqual([WebText.KEY_EDIT, WebText.KEY_EDIT_PAD, WebText.KEY_FIND])
     expect(titles(keyHelp({ live: { ...pads, keys: true, pianoShown: true }, enabled: true }))).toEqual([WebText.KEYS_PIANO, WebText.KEYS_EVERYWHERE])
     expect(titles(keyHelp({ live: { ...pads, keys: true }, enabled: true }))).toEqual([WebText.KEYS_GRID, WebText.KEYS_EVERYWHERE])
+    // The drawn EP-133: its − / +, SHIFT and group keys held, before Everywhere.
+    const device = keyHelp({ live: { ...pads, device: true }, enabled: true })
+    expect(titles(device)).toEqual([WebText.KEYS_PADS, WebText.KEYS_EDIT, WebText.KEYS_DEVICE, WebText.KEYS_EVERYWHERE])
+    expect(labels(device[2]!.rows)).toEqual([WebText.KEY_MINUS_PLUS, WebText.KEY_SHIFT_HELD, WebText.KEY_GROUP_HELD])
     // Away from Live (Settings' Show keys): all of Live's keys.
     expect(titles(keyHelp({ live: null, enabled: true }))).toEqual([
       WebText.KEYS_PADS,
