@@ -10,9 +10,12 @@
 //
 // Web deltas: the knobs are sliders (KnobSlider), back to their default on a
 // double click, a fine step throughout (Kotlin's fine drag); they sit two by
-// two, PITCH and LEVEL over the page's X and Y; TrimWave is an SVG.
+// two, PITCH and LEVEL over the page's X and Y; TrimWave is an SVG. A page's
+// X and Y are [pageKnobs], and the page shown is [padPageShown], so the
+// drawn EP-133's knobs X and Y follow them while the sheet is open.
 import type { JSX } from 'preact'
-import { useState } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
+import { signal, type ReadonlySignal } from '@preact/signals'
 import { PadSettings, PLAY_MODES, type PlayMode } from '../../core/features/padSettings'
 import type { Peak } from '../../core/features/sampleTrim'
 import { MirrorText } from '../../core/text/mirrorText'
@@ -23,6 +26,99 @@ import './PadEditPages.css'
 /** The EP-133's SOUND EDIT pages arc edits (TIME and the root note are the sample's, for every pad on it). */
 export const EDIT_PAGES = ['SOUND', 'TRIM', 'ENV', 'MIDI', 'MUTE'] as const
 export type EditPage = (typeof EDIT_PAGES)[number]
+
+/** A page's knob X or Y: its name, value, range and readout, and the settings a turn to [v] gives. */
+export interface PageKnob {
+  readonly label: string
+  readonly value: number
+  readonly min: number
+  readonly max: number
+  readonly step: number
+  readonly readout: string
+  readonly def: number
+  readonly disabled: boolean
+  apply(v: number): PadSettings
+}
+
+/** The page shown on the open pad sheet; null with none open. */
+const pageShown = signal<EditPage | null>(null)
+export const padPageShown: ReadonlySignal<EditPage | null> = pageShown
+
+/**
+ * Page [page]'s knobs X (orange) and Y (black) for [s], a sound of [frames]
+ * at [sampleRate] (TRIM rests without it); null where the page has none.
+ */
+export function pageKnobs(page: EditPage, s: PadSettings, frames: number | null, sampleRate: number): { x: PageKnob | null; y: PageKnob | null } {
+  const knob = (
+    label: string,
+    value: number,
+    min: number,
+    max: number,
+    readout: string,
+    def: number,
+    apply: (v: number) => PadSettings,
+    opts: { step?: number; disabled?: boolean } = {},
+  ): PageKnob => ({ label, value, min, max, step: opts.step ?? 1, readout, def, disabled: opts.disabled ?? false, apply })
+  switch (page) {
+    case 'SOUND':
+      return {
+        x: knob(MirrorText.MODE, PLAY_MODES.indexOf(s.mode), 0, PLAY_MODES.length - 1, MirrorText.modeLabel(s.mode), 0, (v) =>
+          PadSettings.withMode(s, PLAY_MODES[Math.min(Math.max(Math.round(v), 0), PLAY_MODES.length - 1)] as PlayMode),
+        ),
+        y: knob(MirrorText.PAN, s.pan, -PadSettings.PAN_MAX, PadSettings.PAN_MAX, MirrorText.panLabel(s.pan), 0, (v) => ({ ...s, pan: Math.round(v) })),
+      }
+    case 'TRIM': {
+      const n = frames !== null && frames > 1 ? frames : null
+      const start = Math.min(Math.max(s.start, 0), (n ?? 1) - 1)
+      const length = n !== null ? PadSettings.length(s, n) : 0
+      const fine = n !== null ? Math.max(1, Math.floor(n / 4000)) : 1
+      return {
+        x: knob(
+          MirrorText.START,
+          start,
+          0,
+          (n ?? 2) - 1,
+          n !== null ? MirrorText.secondsLabel(start, sampleRate) : MirrorText.NO_VALUE,
+          0,
+          (v) => {
+            const newStart = Math.round(v)
+            // The length stays, as far as the sound allows.
+            const end = s.end === null ? null : Math.min(newStart + (s.end - s.start), n ?? s.end)
+            return PadSettings.clamped({ ...s, start: newStart, end }, n)
+          },
+          { step: fine, disabled: n === null },
+        ),
+        y: knob(
+          MirrorText.LENGTH,
+          Math.max(1, length),
+          1,
+          Math.max(1, (n ?? 2) - start),
+          n !== null ? MirrorText.secondsLabel(length, sampleRate) : MirrorText.NO_VALUE,
+          Math.max(1, (n ?? 2) - start),
+          (v) => {
+            const end = start + Math.round(v)
+            return PadSettings.clamped({ ...s, end: n !== null && end >= n ? null : end }, n)
+          },
+          { step: fine, disabled: n === null },
+        ),
+      }
+    }
+    case 'ENV':
+      return {
+        x: knob(MirrorText.ATTACK, s.attack, 0, PadSettings.ENV_MAX, MirrorText.envLabel(s.attack), 0, (v) => ({ ...s, attack: Math.round(v) })),
+        y: knob(MirrorText.RELEASE, s.release, 0, PadSettings.ENV_MAX, MirrorText.envLabel(s.release), PadSettings.KEY_RELEASE, (v) => ({ ...s, release: Math.round(v) }), {
+          disabled: s.mode === 'oneshot',
+        }),
+      }
+    case 'MIDI':
+      return {
+        x: knob(MirrorText.CHANNEL, s.midiChannel, 0, PadSettings.CHANNELS - 1, MirrorText.channelLabel(s.midiChannel), 0, (v) => ({ ...s, midiChannel: Math.round(v) })),
+        y: null,
+      }
+    case 'MUTE':
+      return { x: knob(MirrorText.MUTE_GROUP, s.muteGroup ? 1 : 0, 0, 1, MirrorText.onOff(s.muteGroup), 0, (v) => ({ ...s, muteGroup: v >= 0.5 })), y: null }
+  }
+}
 
 export interface PadEditPagesProps {
   settings: PadSettings
@@ -65,67 +161,21 @@ export function PadEditPages(props: PadEditPagesProps): JSX.Element {
       onChange={change}
     />
   )
-  let x: JSX.Element | null = null
-  let y: JSX.Element | null = null
-  switch (page) {
-    case 'SOUND':
-      x = knob(MirrorText.MODE, PLAY_MODES.indexOf(s.mode), 0, PLAY_MODES.length - 1, MirrorText.modeLabel(s.mode), 0, 'orange', (v) =>
-        onChange(PadSettings.withMode(s, PLAY_MODES[Math.min(Math.max(Math.round(v), 0), PLAY_MODES.length - 1)] as PlayMode)),
-      )
-      y = knob(MirrorText.PAN, s.pan, -PadSettings.PAN_MAX, PadSettings.PAN_MAX, MirrorText.panLabel(s.pan), 0, 'black', (v) => onChange({ ...s, pan: Math.round(v) }))
-      break
-    case 'TRIM': {
-      const n = props.frames !== null && props.frames > 1 ? props.frames : null
-      const start = Math.min(Math.max(s.start, 0), (n ?? 1) - 1)
-      const length = n !== null ? PadSettings.length(s, n) : 0
-      const fine = n !== null ? Math.max(1, Math.floor(n / 4000)) : 1
-      x = knob(
-        MirrorText.START,
-        start,
-        0,
-        (n ?? 2) - 1,
-        n !== null ? MirrorText.secondsLabel(start, props.sampleRate) : MirrorText.NO_VALUE,
-        0,
-        'orange',
-        (v) => {
-          const newStart = Math.round(v)
-          // The length stays, as far as the sound allows.
-          const end = s.end === null ? null : Math.min(newStart + (s.end - s.start), n ?? s.end)
-          onChange(PadSettings.clamped({ ...s, start: newStart, end }, n))
-        },
-        { step: fine, disabled: n === null },
-      )
-      y = knob(
-        MirrorText.LENGTH,
-        Math.max(1, length),
-        1,
-        Math.max(1, (n ?? 2) - start),
-        n !== null ? MirrorText.secondsLabel(length, props.sampleRate) : MirrorText.NO_VALUE,
-        Math.max(1, (n ?? 2) - start),
-        'black',
-        (v) => {
-          const end = start + Math.round(v)
-          onChange(PadSettings.clamped({ ...s, end: n !== null && end >= n ? null : end }, n))
-        },
-        { step: fine, disabled: n === null },
-      )
-      break
-    }
-    case 'ENV':
-      x = knob(MirrorText.ATTACK, s.attack, 0, PadSettings.ENV_MAX, MirrorText.envLabel(s.attack), 0, 'orange', (v) => onChange({ ...s, attack: Math.round(v) }))
-      y = knob(MirrorText.RELEASE, s.release, 0, PadSettings.ENV_MAX, MirrorText.envLabel(s.release), PadSettings.KEY_RELEASE, 'black', (v) => onChange({ ...s, release: Math.round(v) }), {
-        disabled: oneshot,
-      })
-      break
-    case 'MIDI':
-      x = knob(MirrorText.CHANNEL, s.midiChannel, 0, PadSettings.CHANNELS - 1, MirrorText.channelLabel(s.midiChannel), 0, 'orange', (v) =>
-        onChange({ ...s, midiChannel: Math.round(v) }),
-      )
-      break
-    case 'MUTE':
-      x = knob(MirrorText.MUTE_GROUP, s.muteGroup ? 1 : 0, 0, 1, MirrorText.onOff(s.muteGroup), 0, 'orange', (v) => onChange({ ...s, muteGroup: v >= 0.5 }))
-      break
-  }
+  // The page shown, for the drawn EP-133's knobs X and Y.
+  useEffect(() => {
+    pageShown.value = page
+  }, [page])
+  useEffect(
+    () => () => {
+      pageShown.value = null
+    },
+    [],
+  )
+  const tone = (k: PageKnob, t: 'orange' | 'black'): JSX.Element =>
+    knob(k.label, k.value, k.min, k.max, k.readout, k.def, t, (v) => onChange(k.apply(v)), { step: k.step, disabled: k.disabled })
+  const pk = pageKnobs(page, s, props.frames, props.sampleRate)
+  const x = pk.x !== null ? tone(pk.x, 'orange') : null
+  const y = pk.y !== null ? tone(pk.y, 'black') : null
   const note = page === 'ENV' && oneshot ? MirrorText.ONESHOT_RELEASE : page === 'MUTE' ? MirrorText.MUTE_NOTE : null
   const n = props.frames
   return (

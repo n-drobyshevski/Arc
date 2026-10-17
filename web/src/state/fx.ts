@@ -13,9 +13,12 @@
 // - The desk follows the project and the tempo through its [FxHost]; Live's
 //   voices ask it for their shape ([shapeOf]): the FX bus of their group, and
 //   whether they duck the sidechain.
+// - Each group's level ([FxDesk.setGroupLevel], the drawn EP-133's fader) is
+//   the web's own: kept with the sends, sent whole with them (as its gain,
+//   levelGain), 1 where it was never moved.
 
 import { signal, type ReadonlySignal, type Signal } from '@preact/signals'
-import { FxBook, FxSettings, fxTypeIndex, type Comp, type FxType, type Sidechain } from '../core/features/fxSettings'
+import { FxBook, FxSettings, fxTypeIndex, levelGain, type Comp, type FxType, type Sidechain } from '../core/features/fxSettings'
 import { LABELS } from '../core/features/padNotes'
 import { FxControl } from '../core/formats/fx/fxBus'
 import type { VoiceShape } from '../core/formats/voiceMixer'
@@ -61,19 +64,20 @@ export function duckSource(fx: FxSettings, pad: { readonly group: number; readon
   return fx.sidechain.on && pad.group === fx.sidechain.group && pad.offset === fx.sidechain.pad
 }
 
-/** [s] whole, as the FX bus's commands to [send]: the effect with its knobs, each group's send, the compressor and the sidechain. */
+/** [s] whole, as the FX bus's commands to [send]: the effect with its knobs, each group's send, the compressor, the sidechain and (web) each group's level. */
 export function sendFx(s: FxSettings, send: FxSend): void {
   send(FxControl.FX_TYPE, fxTypeIndex(s.type), s.x, s.y)
   for (let g = 0; g < FxSettings.GROUPS; g++) send(FxControl.SEND, g, s.sends[g] ?? 0, 0)
   send(FxControl.COMP, s.comp.on ? 1 : 0, s.comp.x, s.comp.y)
   send(FxControl.SIDECHAIN, sidechainIndex(s.sidechain), s.sidechain.x, s.sidechain.y)
+  for (let g = 0; g < FxSettings.GROUPS; g++) send(FxControl.GROUP_LEVEL, g, levelGain(s.levels[g] ?? 1), 0)
 }
 
 const sameComp = (a: Comp, b: Comp): boolean => a.on === b.on && a.x === b.x && a.y === b.y
 const sameSidechain = (a: Sidechain, b: Sidechain): boolean =>
   a.on === b.on && a.group === b.group && a.pad === b.pad && a.dests === b.dests && a.x === b.x && a.y === b.y
 
-/** Kotlin's FxSettings equality. */
+/** Kotlin's FxSettings equality (and the web's levels). */
 export function sameFx(a: FxSettings, b: FxSettings): boolean {
   return (
     a.type === b.type &&
@@ -82,7 +86,9 @@ export function sameFx(a: FxSettings, b: FxSettings): boolean {
     a.sends.length === b.sends.length &&
     a.sends.every((v, i) => v === b.sends[i]) &&
     sameComp(a.comp, b.comp) &&
-    sameSidechain(a.sidechain, b.sidechain)
+    sameSidechain(a.sidechain, b.sidechain) &&
+    a.levels.length === b.levels.length &&
+    a.levels.every((v, i) => v === b.levels[i])
   )
 }
 
@@ -182,6 +188,13 @@ export class FxDesk {
     if (group < 0 || group >= FxSettings.GROUPS) return
     const s = FxSettings.withSend(this._fx.peek(), group, v)
     if (this.edit(s)) this.send(FxControl.SEND, group, s.sends[group] ?? 0, 0)
+  }
+
+  /** Group [group]'s (0..3) level (0..1; web: the drawn EP-133's fader), heard at its levelGain. */
+  setGroupLevel(group: number, v: number): void {
+    if (group < 0 || group >= FxSettings.GROUPS) return
+    const s = FxSettings.withLevel(this._fx.peek(), group, v)
+    if (this.edit(s)) this.send(FxControl.GROUP_LEVEL, group, levelGain(s.levels[group] ?? 1), 0)
   }
 
   /** The master compressor: [on], its drive [x] and speed [y] (0..1); what is left out stays. */

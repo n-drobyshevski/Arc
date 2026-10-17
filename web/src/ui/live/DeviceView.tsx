@@ -32,14 +32,23 @@
 //   LEDs light the group shown and breathe with the other groups sounding;
 //   − and + light where they can step. The plate, where the unit prints its
 //   name, carries arc's status and the last hit.
-// - Every other key and control (TIMING, the knobs, the fader, SHIFT) opens a
-//   card with its shortcuts from the guide: arc never sends anything to the device.
+// - The knobs and the fader turn arc's own sound (DeviceControls.tsx): VOLUME
+//   arc's output, X and Y the effect's X and Y (with a pad's sheet open its
+//   page's X and Y, with SAMPLE LEVEL and THRESH, with STEP VEL and LEN, with
+//   TEMPO held X the tempo), the fader the shown group's level. Their caps
+//   show where they are, and while one turns the plate's hit line shows its
+//   name and value, as the EP-133's display does. A tap (or Enter) still
+//   opens its card.
+// - Every key and control with nothing of arc's (TIMING, SHIFT), and the
+//   knobs and the fader tapped, open a card with its shortcuts from the
+//   guide: arc never sends anything to the device.
 import '@fontsource/jost/latin-300.css'
 import '@fontsource/jost/latin-400.css'
 import '@fontsource/jost/latin-500.css'
 import '@fontsource/jost/latin-700.css'
-import type { Component, ComponentChildren, CSSProperties, FunctionComponent, HTMLAttributes, JSX, TargetedMouseEvent } from 'preact'
-import { useContext, useLayoutEffect, useRef, useState } from 'preact/hooks'
+import type { Component, ComponentChildren, CSSProperties, FunctionComponent, HTMLAttributes, JSX } from 'preact'
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { signal, type ReadonlySignal } from '@preact/signals'
 import { MAX_OCTAVE, MIN_OCTAVE } from '../../core/features/keys'
 import type { MirrorState } from '../../core/features/liveMirror'
 import { ROWS } from '../../core/features/padNotes'
@@ -52,6 +61,7 @@ import { ComboLine } from '../components/GuideKeys'
 import { FunctionKeysContext, FxKey, ProjectHoldContext, ProjectKey, SoundKey, TempoContext, TempoKey, type DrawnKey } from './FunctionRow'
 import { PatternGridOver, useScene, worthSaying } from './ScenePanel'
 import { useSample } from './SamplePanel'
+import { DeviceControlsContext, DrawnFader, DrawnKnob, useTurnable, type DeviceControl } from './DeviceControls'
 import {
   TransportContext,
   hasWords,
@@ -75,6 +85,9 @@ import './DeviceView.css'
 /** The unit's size (176 × 240 mm): everything below is placed in these units, then scaled. */
 export const DEVICE_W = 1444
 export const DEVICE_H = 1969
+
+/** How long the plate's hit line shows a knob's or the fader's value after it last turned (ms). */
+const TURN_SHOWN_MS = 1500
 
 /** Where the controls start under the display (the scene grid covers them). */
 const CONTROLS_Y = 869
@@ -203,15 +216,33 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
   const recLight: 'live' | 'armed' | null =
     patLight ?? (take?.state.kind === 'recording' ? 'live' : take?.state.kind === 'armed' ? 'armed' : null)
   const patternOn = pat !== null && patternRuns(pat)
-  const openCard = (key: CardKey, e: TargetedMouseEvent<HTMLElement>): void => {
+  // The knobs and the fader: what each turns now, and the one turned last, shown on the plate for a moment.
+  const controls = useContext(DeviceControlsContext)
+  const turning = useMemo(() => signal<DeviceControl | null>(null), [])
+  const turnTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(
+    () => () => {
+      if (turnTimer.current !== null) clearTimeout(turnTimer.current)
+    },
+    [],
+  )
+  const turned = (which: DeviceControl): void => {
+    turning.value = which
+    if (turnTimer.current !== null) clearTimeout(turnTimer.current)
+    turnTimer.current = setTimeout(() => {
+      turnTimer.current = null
+      turning.value = null
+    }, TURN_SHOWN_MS)
+  }
+  const openCard = (key: CardKey, el: HTMLElement): void => {
     const b = box.current?.getBoundingClientRect()
-    const r = e.currentTarget.getBoundingClientRect()
+    const r = el.getBoundingClientRect()
     if (!b) return
     setCard(card?.key === key ? null : { key, x: r.left - b.left, y: r.bottom - b.top + 8, above: r.top - b.top - 8 })
   }
 
   const split = (key: CardKey, x: number, y: number, top: string, bottom: string, topCls: string, botCls: string): JSX.Element => (
-    <button type="button" class="ep-a ep-key ep-key--split" style={at(x, y, 130, 130)} aria-label={`${top} / ${bottom}`} aria-haspopup="dialog" onClick={(e) => openCard(key, e)}>
+    <button type="button" class="ep-a ep-key ep-key--split" style={at(x, y, 130, 130)} aria-label={`${top} / ${bottom}`} aria-haspopup="dialog" onClick={(e) => openCard(key, e.currentTarget)}>
       <span class={`ep-h ${topCls}`}>{top}</span>
       <span class={`ep-h ${botCls}`}>{bottom}</span>
     </button>
@@ -256,8 +287,9 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
           ) : (
             <span class="ep-a ep-plate__status" aria-live="polite">{plateStatus(st, mirror, take)}</span>
           )}
-          {/* The hit, said at most once a second (Kotlin's spoken()): a run of hits is read where it ends. */}
-          <span class="ep-a ep-plate__hit" aria-hidden="true">{plateHit}</span>
+          {/* The hit, said at most once a second (Kotlin's spoken()): a run of hits is read where it ends.
+              While a knob or the fader turns it shows its value instead (the slider says it itself). */}
+          <PlateHit hit={plateHit} turning={turning} group={group} />
           <Spoken text={plateHit} />
           <div class="ep-a ep-grille" aria-hidden="true"><Grille /></div>
 
@@ -304,7 +336,7 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
           {label(1114, 886, 'BPM', true)}
           <span class="ep-a ep-line" style={at(1160, 885, 68, 2)} aria-hidden="true" />
           {label(1310, 886, 'METRONOME', true)}
-          <button type="button" class="ep-a ep-knob ep-knob--vol" style={at(68, KROW)} aria-label="Volume" aria-haspopup="dialog" onClick={(e) => openCard('VOLUME', e)} />
+          <Knob kind="vol" which="volume" label="Volume" card="VOLUME" place={at(68, KROW)} group={group} onCard={openCard} onTurned={turned} />
           {[265, 461, 657].map((x) => well(x, KROW, 130, 130))}
           {fn?.sound ? <SoundKey s={fn.sound} drawn={DRAWN.SOUND} /> : split('SOUND', 265, KROW, 'SOUND', 'EDIT', 'ep-h--black', 'ep-h--light ep-h--edit')}
           {/* MAIN is PROJECT, as the EP-133 loads a project: held, a pad 1 to 9. */}
@@ -313,9 +345,13 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
           ) : (
             split('MAIN', 461, KROW, 'MAIN', 'COMMIT', 'ep-h--black', 'ep-h--orange')
           )}
-          {tempo !== null ? <TempoKey t={tempo} drawn={DRAWN.TEMPO} /> : split('TEMPO', 657, KROW, 'TEMPO', 'LOOP', 'ep-h--black', 'ep-h--grey')}
-          <button type="button" class="ep-a ep-knob ep-knob--x" style={at(1049, KROW)} aria-label="Knob X" aria-haspopup="dialog" onClick={(e) => openCard('KNOBX', e)} />
-          <button type="button" class="ep-a ep-knob ep-knob--y" style={at(1245, KROW)} aria-label="Knob Y" aria-haspopup="dialog" onClick={(e) => openCard('KNOBY', e)} />
+          {tempo !== null ? (
+            <TempoKey t={tempo} drawn={DRAWN.TEMPO} hold={controls?.tempoHold} />
+          ) : (
+            split('TEMPO', 657, KROW, 'TEMPO', 'LOOP', 'ep-h--black', 'ep-h--grey')
+          )}
+          <Knob kind="x" which="x" label="Knob X" card="KNOBX" place={at(1049, KROW)} group={group} onCard={openCard} onTurned={turned} />
+          <Knob kind="y" which="y" label="Knob Y" card="KNOBY" place={at(1245, KROW)} group={group} onCard={openCard} onTurned={turned} />
           <span class="ep-a ep-badge ep-badge--x" style={at(1098, 1067)} aria-hidden="true">X</span>
           <span class="ep-a ep-badge ep-badge--y" style={at(1294, 1067)} aria-hidden="true">Y</span>
           {/* GAIN (orange) and SWING (black) brackets, the line broken round the word. */}
@@ -362,16 +398,12 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
             KEYS
           </button>
           {well(68, 1246, 130, 64)}
-          <button type="button" class="ep-a ep-key ep-key--black ep-key--slim" style={at(68, 1246, 130, 64)} aria-haspopup="dialog" onClick={(e) => openCard('FADER', e)}>
+          <button type="button" class="ep-a ep-key ep-key--black ep-key--slim" style={at(68, 1246, 130, 64)} aria-haspopup="dialog" onClick={(e) => openCard('FADER', e.currentTarget)}>
             FADER
           </button>
-          <button type="button" class="ep-a ep-fader" aria-label="Fader" aria-haspopup="dialog" onClick={(e) => openCard('FADER', e)}>
-            <span class="ep-fader__slot" />
-            <span class="ep-fader__tick" />
-            <span class="ep-fader__cap" />
-          </button>
+          <Fader group={group} onCard={openCard} onTurned={turned} />
           {well(68, 1769, 130, 64)}
-          <button type="button" class="ep-a ep-key ep-key--shift ep-key--slim" style={at(68, 1769, 130, 64)} aria-haspopup="dialog" onClick={(e) => openCard('SHIFT', e)}>
+          <button type="button" class="ep-a ep-key ep-key--shift ep-key--slim" style={at(68, 1769, 130, 64)} aria-haspopup="dialog" onClick={(e) => openCard('SHIFT', e.currentTarget)}>
             SHIFT
           </button>
 
@@ -479,7 +511,7 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
                 class="ep-a ep-key ep-key--orange ep-key--word"
                 style={at(1050, ROW_Y[3]!, 130, 128)}
                 aria-haspopup="dialog"
-                onClick={(e) => openCard('RECORD', e)}
+                onClick={(e) => openCard('RECORD', e.currentTarget)}
               >
                 RECORD
               </button>
@@ -489,7 +521,7 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
                 style={at(1246, ROW_Y[3]!, 130, 128)}
                 aria-label={`PLAY, ${st.playing === true ? MirrorText.PLAYING : st.playing === false ? MirrorText.STOPPED : MirrorText.OFFLINE}`}
                 aria-haspopup="dialog"
-                onClick={(e) => openCard('PLAY', e)}
+                onClick={(e) => openCard('PLAY', e.currentTarget)}
               >
                 PLAY
               </button>
@@ -781,6 +813,49 @@ const Grille = once(function Grille(): JSX.Element {
   )
 })
 
+/** Under a card's shortcuts, what the key does in arc where it does more than listen. */
+const NOTES: Partial<Record<CardKey, string>> = {
+  PLAY: WebText.DEVICE_PLAY_NOTE,
+  VOLUME: WebText.DEVICE_VOLUME_NOTE,
+  KNOBX: WebText.DEVICE_KNOB_X_NOTE,
+  KNOBY: WebText.DEVICE_KNOB_Y_NOTE,
+  FADER: WebText.DEVICE_FADER_NOTE,
+}
+
+/** A drawn knob ([which]: VOLUME, X or Y) turning what it turns now; a tap opens its [card]. */
+function Knob(props: {
+  kind: 'vol' | 'x' | 'y'
+  which: DeviceControl
+  label: string
+  card: CardKey
+  place: CSSProperties
+  group: number
+  onCard: (key: CardKey, el: HTMLElement) => void
+  onTurned: (which: DeviceControl) => void
+}): JSX.Element {
+  const t = useTurnable(props.which, props.group)
+  return (
+    <DrawnKnob kind={props.kind} label={props.label} place={props.place} t={t} onTap={(el) => props.onCard(props.card, el)} onTurned={() => props.onTurned(props.which)} />
+  )
+}
+
+/** The drawn fader on group [group]'s level; a tap opens FADER's card. */
+function Fader(props: { group: number; onCard: (key: CardKey, el: HTMLElement) => void; onTurned: (which: DeviceControl) => void }): JSX.Element {
+  const t = useTurnable('fader', props.group)
+  return <DrawnFader t={t} onTap={(el) => props.onCard('FADER', el)} onTurned={() => props.onTurned('fader')} />
+}
+
+/** The plate's hit line: [hit], or while a control turns ([turning]) its name and value ("FX X · 62"). */
+function PlateHit(props: { hit: string; turning: ReadonlySignal<DeviceControl | null>; group: number }): JSX.Element {
+  const which = props.turning.value
+  const t = useTurnable(which, props.group)
+  return (
+    <span class="ep-a ep-plate__hit" aria-hidden="true">
+      {t !== null ? WebText.turnShown(t.name, t.readout) : props.hit}
+    </span>
+  )
+}
+
 /** "Delete fader automation. With playback …" → "Delete fader automation." (the guide has the rest). */
 export function firstSentence(text: string): string {
   const i = text.indexOf('. ')
@@ -798,7 +873,7 @@ function ShortcutCard(props: {
   const { key } = props.card
   const name = cardName(key)
   const entries = shortcutsFor(key)
-  const note = key === 'PLAY' ? WebText.DEVICE_PLAY_NOTE : key === 'VOLUME' ? WebText.DEVICE_VOLUME_NOTE : WebText.DEVICE_KEY_NOTE
+  const note = NOTES[key] ?? WebText.DEVICE_KEY_NOTE
   const x = Math.max(0, Math.min(props.card.x, props.boxWidth - 300))
   const ref = useRef<HTMLDivElement | null>(null)
   // Under the key; above it when there is no room below; else as low as fits.

@@ -9,9 +9,11 @@
 //
 // Web deltas: the knobs (DRIVE, SPEED, LENGTH, SHAPE) are sliders, as the
 // tempo sheet's SWING is, back to their default on a double click; the XY
-// pad and the send faders take the arrow keys (Kotlin: a screen reader's
-// custom actions and setProgress); a knob's step is felt as Android's
-// (KnobSlider, under Settings → Haptics).
+// pad and the send faders follow a pointer and take the arrow keys (the
+// faders PageUp, PageDown, Home and End too: components/drag.ts, shared with
+// the drawn EP-133's knobs; Kotlin: a screen reader's custom actions and
+// setProgress); a knob's step is felt as Android's (KnobSlider, under
+// Settings → Haptics).
 import type { JSX } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { FxSettings, FxType, type FxType as FxTypeT } from '../../core/features/fxSettings'
@@ -19,6 +21,7 @@ import type { PhysicalPad } from '../../core/features/padNotes'
 import { physicalPad } from '../../core/features/padNotes'
 import { MirrorText } from '../../core/text/mirrorText'
 import { Strings } from '../../core/text/strings'
+import { clamp01, drag, sliderKey } from '../components/drag'
 import { GridPlate, PlateLine } from '../components/GridPlate'
 import { Key } from '../components/Key'
 import { KnobSlider } from '../components/KnobSlider'
@@ -59,8 +62,6 @@ const EFFECTS = (Object.values(FxType) as FxTypeT[]).filter((t) => t !== FxType.
 
 /** How far a step (an arrow key) moves X, Y or a send. */
 const XY_STEP = 0.05
-
-const clamp01 = (v: number): number => Math.min(Math.max(v, 0), 1)
 
 export function FxSheet(props: FxSheetProps): JSX.Element {
   const [page, setPage] = useState(0)
@@ -176,29 +177,6 @@ function EffectPage(props: FxSheetProps): JSX.Element {
   )
 }
 
-/** Follows one pointer from its press on [el]: [at] with where it is, 0..1 across and up. */
-function drag(e: PointerEvent, at: (x: number, y: number) => void): void {
-  const el = e.currentTarget as HTMLElement
-  el.setPointerCapture?.(e.pointerId)
-  const r = el.getBoundingClientRect()
-  const to = (ev: PointerEvent): void => {
-    at(r.width > 0 ? clamp01((ev.clientX - r.left) / r.width) : 0, r.height > 0 ? clamp01(1 - (ev.clientY - r.top) / r.height) : 0)
-  }
-  to(e)
-  const move = (ev: PointerEvent): void => {
-    if (ev.pointerId === e.pointerId) to(ev)
-  }
-  const end = (ev: PointerEvent): void => {
-    if (ev.pointerId !== e.pointerId) return
-    el.removeEventListener('pointermove', move)
-    el.removeEventListener('pointerup', end)
-    el.removeEventListener('pointercancel', end)
-  }
-  el.addEventListener('pointermove', move)
-  el.addEventListener('pointerup', end)
-  el.addEventListener('pointercancel', end)
-}
-
 /**
  * The effect's X and Y as one pad on the display: the dot is where they are,
  * X across and Y up; a finger puts it where it touches and drags it. The
@@ -287,14 +265,10 @@ function SendFader(props: { group: number; value: number; selected: boolean; onC
           drag(e, (_, py) => change.current(py))
         }}
         onKeyDown={(e) => {
-          const next =
-            e.key === 'ArrowUp' || e.key === 'ArrowRight' ? v + XY_STEP
-            : e.key === 'ArrowDown' || e.key === 'ArrowLeft' ? v - XY_STEP
-            : e.key === 'Home' ? 0
-            : e.key === 'End' ? 1
-            : null
-          if (next === null) return
+          const k = sliderKey(e.key)
+          if (k === null) return
           e.preventDefault()
+          const next = 'step' in k ? v + k.step * XY_STEP : k.to === 'min' ? 0 : 1
           change.current(clamp01(Math.round(next * 100) / 100))
         }}
       >

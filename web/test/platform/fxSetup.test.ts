@@ -43,6 +43,22 @@ describe('FxSetup', () => {
     expect(fx.commands()).toEqual([{ what: FxControl.FX_TYPE, index: FxControl.CHORUS, x: 0.1, y: 0.2 }])
   })
 
+  it("(web) each group's level, its last, before the tempo", () => {
+    const fx = new FxSetup()
+    fx.record(FxControl.TEMPO, 0, 100, 0)
+    fx.record(FxControl.GROUP_LEVEL, 3, 0.5, 0)
+    fx.record(FxControl.GROUP_LEVEL, 1, 0.2, 0)
+    fx.record(FxControl.GROUP_LEVEL, 3, 0.25, 0)
+    fx.record(FxControl.GROUP_LEVEL, 4, 0, 0)
+    fx.record(FxControl.SIDECHAIN, 0, 0.3, 0.5)
+    expect(fx.commands()).toEqual([
+      { what: FxControl.SIDECHAIN, index: 0, x: 0.3, y: 0.5 },
+      { what: FxControl.GROUP_LEVEL, index: 1, x: 0.2, y: 0 },
+      { what: FxControl.GROUP_LEVEL, index: 3, x: 0.25, y: 0 },
+      { what: FxControl.TEMPO, index: 0, x: 100, y: 0 },
+    ])
+  })
+
   it("punch-ins and unknown commands aren't kept", () => {
     const fx = new FxSetup()
     fx.record(FxControl.PUNCH, FxControl.STUTTER, 1, 0)

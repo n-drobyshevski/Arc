@@ -218,6 +218,8 @@ export class ArcController {
   readonly liveEngine: ReadonlySignal<LiveEngineInfo | null>
   /** The debug screen's latencyHint choice; null where the output has none. */
   readonly liveLatencyHint: ReadonlySignal<WebLatencyHint> | null
+  /** Live's VOLUME (0..1; web: the drawn EP-133's knob). */
+  readonly liveVolume: ReadonlySignal<number>
 
   private readonly settingsSignal: Signal<AppSettings>
   private readonly tasks: Tasks
@@ -327,6 +329,7 @@ export class ArcController {
     this.cleanups.push(effect(() => deps.liveAudio.makeUpDelay?.(this.settings.value.makeUpDelay)))
     this.liveEngine = deps.liveAudio.engine ?? signal(null)
     this.liveLatencyHint = deps.liveAudio.latencyHint ?? null
+    this.liveVolume = deps.liveAudio.volume ?? signal(1)
     this.visible = deps.visibility.visible()
     const toast = (text: string, error?: boolean): void => this.toast(text, error)
     this.tasks = new Tasks({ store: this.store, deps, toast, session: () => this.conn.session })
@@ -1560,6 +1563,11 @@ export class ArcController {
   /** The debug screen's latencyHint choice: Live's output reopens at the new hint. */
   setLiveLatencyHint(choice: WebLatencyHint): void {
     this.deps.liveAudio.setLatencyHint?.(choice)
+  }
+
+  /** Live's VOLUME (0..1): the speakers' share of the mix, kept in this browser. */
+  setLiveVolume(v: number): void {
+    this.deps.liveAudio.setOutputVolume?.(v)
   }
 
   /** KEYS [note] held at [pressure] (the pointer's own, while the arp is on): its velocity, on a device that tells pressure. */

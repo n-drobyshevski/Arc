@@ -129,7 +129,32 @@ export const WebText = {
   /** Under a key's shortcuts: what the key does in arc. */
   DEVICE_KEY_NOTE: 'arc only listens in Live. This key works on the device.',
   DEVICE_PLAY_NOTE: 'Lit while the EP-133 plays. arc never starts or stops the device.',
-  DEVICE_VOLUME_NOTE: "The device's own volume. Sound played in arc follows this computer's volume.",
+  /** Under the knobs' and the fader's shortcuts: what turning them does in arc (nothing goes to the device). */
+  DEVICE_VOLUME_NOTE: "Turn it for arc's own volume: the pads, the click and the effects as this computer plays them. Takes record before it; the device keeps its own volume.",
+  DEVICE_KNOB_X_NOTE:
+    "Turn it for the effect's X in arc. With a pad's sheet open it is the page's X, with SAMPLE its LEVEL, with STEP the step's VEL, and with TEMPO held the tempo.",
+  DEVICE_KNOB_Y_NOTE: "Turn it for the effect's Y in arc. With a pad's sheet open it is the page's Y, with SAMPLE its THRESH, and with STEP the step's LEN.",
+  DEVICE_FADER_NOTE: "Drag the fader for the shown group's level in arc's sound. Each group keeps its own, with the project's effects.",
+  /** A knob's or the fader's second action, for screen readers. */
+  DEVICE_TURN_HINT: 'Arrow keys turn it, Enter shows its shortcuts',
+  // What the drawn knobs and fader change, for screen readers ("Knob X", "effect X, 62%").
+  TURN_VOLUME: "arc's volume",
+  TURN_FX_X: 'effect X',
+  TURN_FX_Y: 'effect Y',
+  TURN_TEMPO: 'tempo',
+  TURN_NOTHING: 'nothing here',
+  /** The fader on group [g]: "group B's level". */
+  turnGroup(g: string): string {
+    return `group ${g}'s level`
+  },
+  /** A knob's or the fader's value for screen readers: "effect X, 62%". */
+  turnValue(what: string, value: string): string {
+    return `${what}, ${value}`
+  },
+  /** The plate's hit line while a knob or the fader turns, as the EP-133's display shows it: "FX X · 62". */
+  turnShown(name: string, value: string): string {
+    return `${name} \u00B7 ${value}`
+  },
   /** The link to the guide, searched for the key. */
   allShortcuts(key: string): string {
     return `All ${key} shortcuts`

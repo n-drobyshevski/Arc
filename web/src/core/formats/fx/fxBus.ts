@@ -42,6 +42,11 @@
 //   (silent a getter in each effect). The companion's constants are statics.
 // - Frames are numbers; "no duck running" is -Infinity (Kotlin's
 //   Long.MIN_VALUE).
+// - Each group has a level too (GROUP_LEVEL, the drawn EP-133's fader, web
+//   only; Android doesn't send it): a gain of 0..1 on the group's dry and send
+//   alike, after the duck and the dry law, gliding as a send does. At 1, its
+//   default, it changes nothing, so dry stays null and the mix bit for bit
+//   the Kotlin one's.
 
 import { Chorus } from './chorus'
 import { Compressor } from './compressor'
@@ -76,6 +81,8 @@ export const FxControl = {
   TEMPO: 6,
   /** index: the slot (PITCH_RANDOM to DECIMATOR); x: its depth, 0..1 (0 or less lets go of it). */
   PUNCH: 7,
+  /** index: the group, 0..3; x: its level, a gain of 0..1 on its dry and send (web only: the drawn fader). */
+  GROUP_LEVEL: 8,
 
   NONE: 0,
   DELAY: 1,
@@ -181,6 +188,8 @@ export class FxBus {
 
   private readonly sends = new Float32Array(GROUPS)
   private readonly sendsTo = new Float32Array(GROUPS)
+  private readonly levels = new Float32Array(GROUPS).fill(1)
+  private readonly levelsTo = new Float32Array(GROUPS).fill(1)
 
   private compOn = false
   private compX = f(0.5)
@@ -255,6 +264,9 @@ export class FxBus {
       case FxControl.SEND:
         if (index >= 0 && index < GROUPS) this.sendsTo[index] = clamp01(x)
         return
+      case FxControl.GROUP_LEVEL:
+        if (index >= 0 && index < GROUPS) this.levelsTo[index] = clamp01(x)
+        return
       case FxControl.COMP: {
         // Switched on: from silence, not from where it was left.
         const on = index !== 0
@@ -318,10 +330,12 @@ export class FxBus {
     let live = boost > 0
     const sends = this.sends
     const sendsTo = this.sendsTo
+    const levels = this.levels
+    const levelsTo = this.levelsTo
     for (let g = 0; g < GROUPS; g++) {
       this.dryOn[g] = false
       this.sendOn[g] = false
-      if (sends[g] !== 0 || sendsTo[g] !== 0) live = true
+      if (sends[g] !== 0 || sendsTo[g] !== 0 || levels[g] !== 1 || levelsTo[g] !== 1) live = true
     }
     const ducking = this.dests !== 0 && this.duckAt !== IDLE
     if (!live && !ducking) return
@@ -332,8 +346,10 @@ export class FxBus {
         sends[g] = s0
         const s = boost > s0 ? boost : s0
         const gd = ((this.dests >> g) & 1) !== 0 ? d : 1
-        const dry = f(gd * this.dryLaw(s))
-        const send = f(gd * s)
+        const lv = this.smooth(levels[g]!, levelsTo[g]!)
+        levels[g] = lv
+        const dry = f(f(gd * this.dryLaw(s)) * lv)
+        const send = f(f(gd * s) * lv)
         this.dryGains[g]![offset + i] = dry
         this.sendGains[g]![offset + i] = send
         if (dry !== 1) this.dryOn[g] = true

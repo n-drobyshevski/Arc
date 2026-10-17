@@ -62,7 +62,8 @@
 .ep-a { position: absolute; }
 .ep button { font-family: var(--ep-font); -webkit-tap-highlight-color: transparent; }
 /* The focus ring is the light theme's navy in both themes: it sits on the grey body, which never changes. */
-.ep button:focus-visible { outline: 8px solid #1F2558; outline-offset: 6px; }
+.ep button:focus-visible,
+.ep [role='slider']:focus-visible { outline: 8px solid #1F2558; outline-offset: 6px; }
 
 /* ---- the jacks: tabs flush with the top edge ---- */
 .ep-jack {
@@ -199,14 +200,15 @@
 .ep-led.is-sounding { animation: led-pulse 1.2s ease-in-out infinite alternate; }
 @keyframes led-pulse { to { opacity: 0.55; } }
 
-/* ---- the knobs: matte two-tier cylinders ---- */
+/* ---- the knobs: matte two-tier cylinders, a mark on the cap where they point (--turn) ---- */
 .ep-knob {
   width: 130px;
   height: 130px;
   padding: 0;
   border: 0;
   border-radius: 50%;
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none;
   z-index: 1;
   background: radial-gradient(circle at 42% 30%, var(--k-hi), var(--k) 62%, var(--k-lo) 100%);
   box-shadow:
@@ -239,6 +241,35 @@
   background: radial-gradient(circle at 44% 32%, var(--c-hi), var(--c) 70%, var(--c-lo));
   box-shadow: inset 0 2px 1px rgb(255 255 255 / var(--c-rim)), inset 0 -2px 2px rgb(0 0 0 / 0.16), 0 0 0 1px rgb(0 0 0 / 0.1), 0 3px 2px rgb(0 0 0 / 0.2);
 }
+/* The mark: a short line from the cap's middle toward its rim, over the cap, sweeping 270°. */
+.ep-knob__mark {
+  position: absolute;
+  left: 32px;
+  top: 30px;
+  width: 66px;
+  height: 66px;
+  border-radius: 50%;
+  z-index: 1;
+  transform: rotate(var(--turn, 0deg));
+  pointer-events: none;
+}
+.ep-knob__mark::before {
+  content: '';
+  position: absolute;
+  left: 30px;
+  top: 5px;
+  width: 6px;
+  height: 22px;
+  border-radius: 3px;
+  background: var(--mark);
+  box-shadow: 0 1px 0 rgb(255 255 255 / var(--mark-lip));
+}
+/* Nothing to turn here (a page with no Y, TEMPO held for Y): the mark dims. */
+.ep-knob.is-resting { cursor: pointer; }
+.ep-knob.is-resting .ep-knob__mark { opacity: 0.35; }
+.ep-knob--vol { --mark: #3A3836; --mark-lip: 0.5; }
+.ep-knob--x { --mark: #2A1408; --mark-lip: 0.25; }
+.ep-knob--y { --mark: #D9D6D1; --mark-lip: 0; }
 .ep-knob--vol { --k: #E7E4DF; --k-hi: #F2F0EC; --k-lo: #D6D3CE; --k-rim: 0.8; --c: #ECE8E3; --c-hi: #F6F4F1; --c-lo: #DEDAD5; --c-rim: 0.9; }
 .ep-knob--x { --k: #F8521A; --k-hi: #FF6B33; --k-lo: #E2440F; --k-rim: 0.35; --c: #FA5820; --c-hi: #FF7442; --c-lo: #E84A12; --c-rim: 0.45; }
 .ep-knob--y { --k: #1E1E1E; --k-hi: #2A2A2A; --k-lo: #161616; --k-rim: 0.12; --c: #1D1D1D; --c-hi: #2B2B2B; --c-lo: #151515; --c-rim: 0.2; }
@@ -248,7 +279,8 @@
 .ep-badge--y { background: #1C1C1C; }
 
 /* ---- the fader: a cut slot, a flat warm-grey disc ---- */
-.ep-fader { left: 70px; top: 1389px; width: 126px; height: 306px; padding: 0; border: 0; background: none; cursor: pointer; z-index: 1; }
+/* The cap sits at the group's level (--level, 0 at the bottom to 1 at the top; mid-slot without one). */
+.ep-fader { left: 70px; top: 1389px; width: 126px; height: 306px; padding: 0; border: 0; background: none; cursor: grab; touch-action: none; z-index: 1; }
 .ep-fader__slot {
   position: absolute;
   left: 54px;
@@ -263,7 +295,7 @@
 .ep-fader__cap {
   position: absolute;
   left: 32px;
-  top: 119px;
+  top: calc(8px + (1 - var(--level, 0.513)) * 228px);
   width: 62px;
   height: 62px;
   border-radius: 50%;

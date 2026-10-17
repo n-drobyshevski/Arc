@@ -6,26 +6,28 @@
 //
 // One value per setting, the last one sent: the effect (its type and knobs,
 // FX_TYPE and FX_XY together, so a type change's own knobs aren't undone by
-// an older drag), each group's send, the compressor, the sidechain and the
-// tempo. Punch-ins aren't kept: one lasts only while it is held, and a new
+// an older drag), each group's send, the compressor, the sidechain, each
+// group's level and the tempo. Punch-ins aren't kept: one lasts only while it is held, and a new
 // output starts with none. Nothing sent, nothing replayed, so a mixer at its
 // defaults stays at them.
 //
 // Web deltas: no lock (one thread); [commands] lists the settings (Kotlin's
 // replay hands them to a function); a suspended output keeps its mixer, so
-// only a new one is replayed to (Android: a native stream reopened too).
+// only a new one is replayed to (Android: a native stream reopened too). The
+// groups' levels (GROUP_LEVEL, the drawn EP-133's fader) are the web's own.
 
 import { FxControl } from '../../core/formats/fx/fxBus'
 
-// Where each setting is kept: the effect, the four sends, the compressor, the sidechain, the tempo.
+// Where each setting is kept: the effect, the four sends, the compressor, the sidechain, the four levels, the tempo.
 const EFFECT = 0
 const SENDS = 1
 const COMP = SENDS + FxControl.GROUPS
 const SIDECHAIN = COMP + 1
-const TEMPO = SIDECHAIN + 1
+const LEVELS = SIDECHAIN + 1
+const TEMPO = LEVELS + FxControl.GROUPS
 const SLOTS = TEMPO + 1
 
-/** One FX_TYPE to TEMPO command, as VoiceMixer.control takes it. */
+/** One of FxControl's commands (FX_TYPE to GROUP_LEVEL), as VoiceMixer.control takes it. */
 export interface FxCommand {
   readonly what: number
   readonly index: number
@@ -59,6 +61,9 @@ export class FxSetup {
         return
       case FxControl.SIDECHAIN:
         this.kept[SIDECHAIN] = { what, index, x, y }
+        return
+      case FxControl.GROUP_LEVEL:
+        if (Number.isInteger(index) && index >= 0 && index < FxControl.GROUPS) this.kept[LEVELS + index] = { what, index, x, y }
         return
       case FxControl.TEMPO:
         this.kept[TEMPO] = { what, index, x, y }

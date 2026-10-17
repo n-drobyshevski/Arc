@@ -191,6 +191,10 @@ export interface LiveAudioDeps {
   readonly latencyHint?: ReadonlySignal<WebLatencyHint>
   /** Changes it: kept, and an open output is reopened at the new hint. */
   setLatencyHint?(choice: WebLatencyHint): void
+  /** Live's VOLUME (0..1, web: the drawn EP-133's knob), 1 unless turned (absent: none). */
+  readonly volume?: ReadonlySignal<number>
+  /** Turns it: what the speakers get of the mix, kept in this browser; takes record before it. */
+  setOutputVolume?(v: number): void
   /** The open output's latency-test row once it is set up (again whenever its reported delay changes), else null. */
   readonly engine?: ReadonlySignal<LiveEngineInfo | null>
   // TAKE (LiveAudio.kt's takes); an output without them has no TAKE.
