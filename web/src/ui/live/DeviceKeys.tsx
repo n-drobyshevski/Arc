@@ -10,7 +10,7 @@
 // useFeltPress: a tick under a finger, a longer buzz once held).
 import { createContext, type ButtonHTMLAttributes } from 'preact'
 import { useContext, useRef } from 'preact/hooks'
-import type { FxType } from '../../core/features/fxSettings'
+import type { FaderParam, FxType } from '../../core/features/fxSettings'
 import type { PhysicalPad } from '../../core/features/padNotes'
 import { useFeltPress } from './FunctionRow'
 import type { DeviceKey, DeviceKeys, DevicePage } from './deviceKeys'
@@ -27,8 +27,13 @@ export interface DeviceKeysUi {
   /** TIMING records on its grid (else free time: the display's FREE). */
   readonly quantize: boolean
   readonly fxType: FxType
-  /** A group muted or soloed: the display's MUTE (none yet: the FX bus has no mute). */
+  /** A group muted or soloed (the FX bus's): the display's MUTE. */
   readonly muted: boolean
+  /** The groups the FX bus silences (their LEDs dark) and those soloed (theirs lit). */
+  readonly silenced: ReadonlySet<number>
+  readonly soloed: ReadonlySet<number>
+  /** What each group's fader is assigned to (FADER + a pad; LEVEL by default): its pad's LED lights while FADER is held. */
+  readonly faderAssign: readonly FaderParam[]
   /** The plate's page line tapped: arc's own sheet for [page] (the pad's, the tempo's, the FX sheet). */
   openSheet(page: DevicePage): void
 }

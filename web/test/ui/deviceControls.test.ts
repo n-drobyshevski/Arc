@@ -1,7 +1,7 @@
 // The drawn EP-133's knobs and fader (web only: ui/live/DeviceControls.tsx): what each turns, by
 // what is open, and how a turn reaches the controller.
 import { describe, expect, it, vi } from 'vitest'
-import { FxSettings, FxType } from '../../src/core/features/fxSettings'
+import { FADER_DEFAULTS, faderReadout, FxSettings, FxType } from '../../src/core/features/fxSettings'
 import { NoteNames, Scale, SCALES } from '../../src/core/features/keys'
 import { TIMING_INTERVALS, TimingSettings } from '../../src/core/features/pattern'
 import { PadSettings } from '../../src/core/features/padSettings'
@@ -10,7 +10,7 @@ import { MirrorText } from '../../src/core/text/mirrorText'
 import { WebText } from '../../src/core/text/webText'
 import { SAMPLE_UI } from '../../src/state/samplePlan'
 import { STEP_GATES, STEP_UI } from '../../src/state/stepPlan'
-import { faderTarget, knobTarget, sendTarget, share, volumeTarget, type KnobInputs, type KnobPage } from '../../src/ui/live/DeviceControls'
+import { assignedTarget, faderFor, faderTarget, knobTarget, sendTarget, share, volumeTarget, type KnobInputs, type KnobPage } from '../../src/ui/live/DeviceControls'
 import { THRESHOLD_OFF } from '../../src/ui/live/SamplePanel'
 
 /** Nothing open: the effect's knobs; [over] opens what a case needs. */
@@ -171,6 +171,11 @@ describe("knobTarget on the drawn device's pages and keys held", () => {
     expect(y).toMatchObject({ name: MirrorText.CLICK.toUpperCase(), value: 0.4, readout: '40' })
     y.set(0.2)
     expect(click.set).toHaveBeenLastCalledWith(0.2)
+    // At the bottom it reads OFF (the click off).
+    const off = knobTarget('y', inputs({ page: { kind: 'TEMPO', tempo: { ...t, click: { level: 0, set: vi.fn() } } } }))!
+    expect(off).toMatchObject({ value: 0, readout: 'OFF', spoken: MirrorText.onOff(false) })
+    // TEMPO held has it too.
+    expect(knobTarget('y', inputs({ tempo: { ...t, click } }))!.name).toBe(MirrorText.CLICK.toUpperCase())
   })
 
   it('TIMING: X the interval, Y the swing (resting where the interval does not swing)', () => {
@@ -211,6 +216,28 @@ describe("knobTarget on the drawn device's pages and keys held", () => {
     expect(c).toMatchObject({ name: '→FX C', value: Math.fround(0.35), def: 0, what: WebText.turnSend('C') })
     c.set(0.6)
     expect(set).toHaveBeenLastCalledWith(2, 0.6)
+  })
+})
+
+describe('the fader assigned (FADER + a pad)', () => {
+  it("turns that parameter, read as the device's display reads it, back to its default", () => {
+    const set = vi.fn()
+    const lpf = assignedTarget(1, 'LPF', 0.5, set)
+    expect(lpf).toMatchObject({ name: 'LPF', what: WebText.turnFader('LPF', 'B'), value: 0.5, def: FADER_DEFAULTS.LPF, readout: faderReadout('LPF', 0.5) })
+    lpf.set(0.3)
+    expect(set).toHaveBeenLastCalledWith(0.3)
+    expect(assignedTarget(0, 'PAN', 0.5, set).readout).toBe('C')
+    expect(assignedTarget(0, 'LPF', 1, set).readout).toBe('OPEN')
+  })
+
+  it('gives way to the send on the FX page and to the level with a group key held', () => {
+    const fx = FxSettings.withSend(FxSettings.withLevel(FxSettings.DEFAULT, 2, 0.6), 2, 0.2)
+    const assigned = assignedTarget(2, 'PAN', 0.5, vi.fn())
+    const base = { group: 2, fx, page: 'MAIN', groupHeld: false, assigned, setLevel: vi.fn(), setSend: vi.fn() }
+    expect(faderFor(base).name).toBe('PAN')
+    expect(faderFor({ ...base, page: 'FX' }).name).toBe('→FX C')
+    expect(faderFor({ ...base, groupHeld: true }).name).toBe('GROUP C')
+    expect(faderFor({ ...base, assigned: null }).value).toBeCloseTo(0.6)
   })
 })
 

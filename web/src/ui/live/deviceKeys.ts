@@ -29,11 +29,13 @@
 //   cropping a sample, songs, tempo detect, time signatures, deleting a
 //   sample, copying sounds, automation) is said on the plate ([NotInArc]) and
 //   nothing else happens.
-//   Solo, the fader's assignment and its reset are left to the host's hooks
-//   (app.tsx: none yet, so the plate says they aren't in arc either).
+//   Solo (FX + a group), the fader's assignment (FADER + a pad) and its
+//   reset (SHIFT + FADER) are the host's hooks on arc's FX bus
+//   ([DeviceSoundHooks]); without them the plate says they aren't in arc.
 import { signal, type ReadonlySignal } from '@preact/signals'
-import { FX_TYPES } from '../../core/features/fxSettings'
+import { FADER_PARAMS, FX_TYPES, type FaderParam } from '../../core/features/fxSettings'
 import { MAX_OCTAVE, MIN_OCTAVE } from '../../core/features/keys'
+import { ROWS } from '../../core/features/padNotes'
 import { Seq } from '../../core/features/pattern'
 
 /** A key held this long is held: its release is no tap (FunctionRow's FN_HOLD_MS, Compose's long-press time). */
@@ -68,9 +70,11 @@ export function groupOf(k: DeviceKey | null): number | null {
   return g < 0 ? null : g
 }
 
-/** What the fader can be given (the words printed over the pads), by pad offset ('.' 0, '0' 1, ENTER 2, '1' 3 … '9' 11): LEVEL over 7, → FX over 6, … */
-export type FaderParam = 'LEVEL' | 'PITCH' | 'TIME' | 'LPF' | 'HPF' | 'FX' | 'ATK' | 'REL' | 'PAN' | 'TUNE' | 'VEL' | 'MOD'
-export const FADER_PARAMS: readonly FaderParam[] = ['TUNE', 'VEL', 'MOD', 'ATK', 'REL', 'PAN', 'LPF', 'HPF', 'FX', 'LEVEL', 'PITCH', 'TIME']
+/** What FADER + pad [offset] gives the fader: the word printed over that pad (fxSettings' FADER_PARAMS, in the pads' rows: LEVEL over 7, LPF over 4, …). */
+export function faderParamAt(offset: number): FaderParam {
+  const i = ROWS.flat().indexOf(offset)
+  return FADER_PARAMS[i] ?? 'LEVEL'
+}
 
 /** The device's combos arc has nothing for: the plate names them. */
 export type NotInArc =
@@ -107,7 +111,7 @@ export interface DeviceKeysState {
   readonly repeat: boolean
   /** FX's punch-ins on (held past the hold time, or latched). */
   readonly punch: boolean
-  /** The groups soloed by FX + their key (let go with it). */
+  /** The groups FX soloes: those whose key is held with FX held, or tapped (each tap on, off) with FX latched; all let go with FX. */
   readonly soloing: ReadonlySet<number>
   /** When SHIFT + C last copied a bar (again soon: the pattern). */
   readonly copiedAt: number | null
@@ -200,7 +204,7 @@ export type DeviceAction =
   | { readonly kind: 'punch'; readonly on: boolean }
   | { readonly kind: 'mainHold'; readonly on: boolean }
   | { readonly kind: 'saved' }
-  | { readonly kind: 'solo'; readonly group: number; readonly on: boolean }
+  | { readonly kind: 'solo'; readonly groups: ReadonlySet<number> }
   | { readonly kind: 'faderAssign'; readonly group: number; readonly param: FaderParam }
   | { readonly kind: 'faderReset'; readonly group: number }
   | { readonly kind: 'sidechainSource'; readonly group: number; readonly offset: number }
@@ -208,14 +212,15 @@ export type DeviceAction =
   | { readonly kind: 'notInArc'; readonly what: NotInArc }
 
 /**
- * What arc's own sound adds to the combos, where it can (app.tsx gives them):
- * a group soloed while FX + its key is held ([solo]), the fader given what
- * FADER + a pad names ([assignFader]: false where arc has none of it), and
- * SHIFT + FADER's reset and restore ([resetFader]: what the plate says, RES or
- * SET). Without one the plate says the combo isn't in arc.
+ * What arc's own sound adds to the combos (app.tsx gives them, on the FX
+ * bus): the groups FX soloes now ([solo]: every change, none to end it), the
+ * fader given what FADER + a pad names ([assignFader]: false where arc has
+ * none of it), and SHIFT + FADER's reset and restore ([resetFader]: what the
+ * digits and the plate say, RES or SET). Without one the plate says the combo
+ * isn't in arc.
  */
 export interface DeviceSoundHooks {
-  solo?(group: number, on: boolean): void
+  solo?(groups: ReadonlySet<number>): void
   assignFader?(group: number, param: FaderParam): boolean
   resetFader?(group: number): string
 }
@@ -317,6 +322,12 @@ class Tx {
     this.enter(this.s.page === page ? 'MAIN' : page)
   }
 
+  /** FX's solos now [groups]. */
+  solo(groups: ReadonlySet<number>): void {
+    this.s = { ...this.s, soloing: groups }
+    this.emit({ kind: 'solo', groups })
+  }
+
   startDial(k: DeviceKey): void {
     this.s = { ...this.s, dialKey: k, dial: '' }
   }
@@ -365,9 +376,11 @@ function press(tx: Tx, k: DeviceKey): void {
       tx.spend('ERASE', k)
       tx.emit({ kind: 'clear', group: g })
     } else if (held(s, 'FX')) {
+      // FX held: solo while the key is held (several, several); FX latched: a tap soloes or lets go.
       tx.spend('FX', k)
-      tx.s = { ...tx.s, soloing: add(tx.s.soloing, g) }
-      tx.emit({ kind: 'solo', group: g, on: true })
+      const toggles = s.latched.has('FX') && !s.down.has('FX')
+      if (toggles) tx.spend(k)
+      tx.solo(toggles && s.soloing.has(g) ? del(s.soloing, g) : add(s.soloing, g))
     } else {
       if (g !== tx.ctx.group) tx.emit({ kind: 'group', group: g })
       tx.startDial(k)
@@ -483,10 +496,8 @@ function release(tx: Tx, k: DeviceKey, how: 'up' | 'unlatch' | 'cancel', long: b
   const ctx = tx.ctx
   const g = groupOf(k)
   if (g !== null) {
-    if (s0.soloing.has(g)) {
-      tx.s = { ...tx.s, soloing: del(tx.s.soloing, g) }
-      tx.emit({ kind: 'solo', group: g, on: false })
-    }
+    // Held with FX held, its solo goes with it (a latched FX's taps stay).
+    if (s0.soloing.has(g) && !(s0.latched.has('FX') && !s0.down.has('FX'))) tx.solo(del(s0.soloing, g))
     if (digits !== '') tx.commit(k, digits)
     return
   }
@@ -525,6 +536,8 @@ function release(tx: Tx, k: DeviceKey, how: 'up' | 'unlatch' | 'cancel', long: b
       if (tap) tx.emit({ kind: 'keysMode', on: !ctx.keysOn })
       return
     case 'FX':
+      // Every solo goes with FX.
+      if (s0.soloing.size > 0) tx.solo(NONE)
       if (s0.punch) {
         tx.s = { ...tx.s, punch: false }
         tx.emit({ kind: 'punch', on: false })
@@ -620,7 +633,7 @@ export function padDown(s: DeviceKeysState, pad: PadPress, ctx: DeviceContext): 
   }
   if (held(s, 'FADER')) {
     tx.spend('FADER')
-    tx.emit({ kind: 'faderAssign', group: ctx.group, param: FADER_PARAMS[pad.offset] ?? 'LEVEL' })
+    tx.emit({ kind: 'faderAssign', group: ctx.group, param: faderParamAt(pad.offset) })
     return taken()
   }
   if (held(s, 'MAIN')) {

@@ -12,7 +12,7 @@ import {
   DEVICE_KEYS_IDLE,
   DeviceKeys,
   EDIT_PAGE_COUNT,
-  FADER_PARAMS,
+  faderParamAt,
   keyCancel,
   keyDown,
   keyLatch,
@@ -305,7 +305,8 @@ describe('numbers typed on the pads', () => {
     r.down('FADER')
     expect(r.pad('7')).toBe(true)
     expect(r.out()).toEqual([{ kind: 'faderAssign', group: 0, param: 'LEVEL' }])
-    expect(FADER_PARAMS).toHaveLength(12)
+    // Each pad gives what is printed over it: 7 8 9 / 4 5 6 / 1 2 3 / . 0 ENTER.
+    expect([9, 10, 11, 6, 7, 8, 3, 4, 5, 0, 1, 2].map(faderParamAt)).toEqual(['LEVEL', 'PITCH', 'TIME', 'LPF', 'HPF', 'FX', 'ATK', 'REL', 'PAN', 'TUNE', 'VEL', 'MOD'])
   })
 
   it('TIMING held: the pad repeats (RPT on while it is held), unless RPT is on already', () => {
@@ -395,13 +396,47 @@ describe('ERASE, SHIFT and the group keys', () => {
     expect(r.out()).toEqual([{ kind: 'sceneCommit' }, { kind: 'mainHold', on: false }, { kind: 'correct' }, { kind: 'notInArc', what: 'CHOP' }])
   })
 
-  it('FX + a group solos it while held; SAMPLE + TEMPO and MAIN + TEMPO are not in arc', () => {
+  it('FX + group keys solo them while held (several, several); SAMPLE + TEMPO and MAIN + TEMPO are not in arc', () => {
     const r = new Run()
-    r.down('FX').down('C').up('C').up('FX')
-    expect(r.out()).toEqual([{ kind: 'solo', group: 2, on: true }, { kind: 'solo', group: 2, on: false }])
+    r.down('FX').down('C').down('A').up('C').up('A').up('FX')
+    expect(r.out()).toEqual([
+      { kind: 'solo', groups: new Set([2]) },
+      { kind: 'solo', groups: new Set([2, 0]) },
+      { kind: 'solo', groups: new Set([0]) },
+      { kind: 'solo', groups: new Set() },
+    ])
     expect(r.s.page).toBe('MAIN')
+    // FX let go first: every solo goes with it.
+    r.down('FX').down('B').up('FX')
+    expect(r.out()).toEqual([{ kind: 'solo', groups: new Set([1]) }, { kind: 'solo', groups: new Set() }])
+    r.up('B')
+    expect(r.out()).toEqual([])
     r.down('SAMPLE').down('TEMPO').up('TEMPO').up('SAMPLE')
     expect(r.out()).toEqual([{ kind: 'notInArc', what: 'TEMPO_DETECT' }])
+  })
+
+  it('FX latched: a group tap soloes it, again lets it go; FX let go of ends them all', () => {
+    const r = new Run()
+    r.latch('FX')
+    r.out()
+    r.tap('B').tap('D')
+    expect(r.out()).toEqual([
+      { kind: 'solo', groups: new Set([1]) },
+      { kind: 'solo', groups: new Set([1, 3]) },
+    ])
+    // The taps select no group.
+    r.tap('B')
+    expect(r.out()).toEqual([{ kind: 'solo', groups: new Set([3]) }])
+    r.latch('FX')
+    expect(r.out()).toEqual([{ kind: 'solo', groups: new Set() }, { kind: 'punch', on: false }])
+  })
+
+  it('SHIFT + FADER resets (and restores) the shown group, ERASE + FADER is automation, not in arc', () => {
+    const r = new Run(DEVICE_KEYS_IDLE, ctx({ group: 3 }))
+    r.tap('SHIFT').tap('FADER')
+    expect(r.out()).toEqual([{ kind: 'faderReset', group: 3 }])
+    r.down('ERASE').down('FADER').up('FADER').up('ERASE')
+    expect(r.out()).toContainEqual({ kind: 'notInArc', what: 'AUTOMATION' })
   })
 
   it('SAMPLE tapped opens or closes its panel; during a hands-free take it stops it', () => {

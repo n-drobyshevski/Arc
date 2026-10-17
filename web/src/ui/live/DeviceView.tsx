@@ -43,8 +43,11 @@
 //   fourteen segments, BPM, ● (RECORD or a take), the metronome with the
 //   click, the group's card A–D and its quarter of the ring (a sounding
 //   group's too), the level meter, and the piano and KEYS in KEYS. The group
-//   LEDs light the group shown and breathe with the other groups sounding;
-//   − and + light where they can step. The plate, where the unit prints its
+//   LEDs light the group shown and breathe with the other groups sounding; a
+//   group soloed (FX + its key) is lit, one silenced dark, and MUTE lights on
+//   the display. While FADER is held the LEDs over the pads light: the shown
+//   group's fader's parameter bright, the others arc has dim (TIME, VEL and
+//   MOD stay dark). − and + light where they can step. The plate, where the unit prints its
 //   name, carries arc's status (or the page) and the last hit, or what was
 //   just done ("LENGTH · 4 BARS"), said once for screen readers.
 // - The knobs and the fader turn arc's own sound (DeviceControls.tsx): VOLUME
@@ -52,8 +55,9 @@
 //   (KEYS held its key and scale, TEMPO the tempo, a pad's sheet or EDIT its
 //   page's X and Y, SOUND the pad's LEVEL and PITCH, TIMING the interval and
 //   the swing, FX the effect, OUTPUT the compressor, SIDECHAIN the duck,
-//   SAMPLE LEVEL and THRESH, STEP VEL and LEN), the fader the shown group's
-//   level (its send on FX). Their caps show where they are, and while one
+//   SAMPLE LEVEL and THRESH, STEP VEL and LEN; TEMPO's Y the click's level),
+//   the fader the shown group's level, or what FADER + a pad gave it (its
+//   send on FX). Their caps show where they are, and while one
 //   turns the digits and the plate's hit line show its value, as the EP-133's
 //   display does. A tap on a knob or the fader (or Enter) still opens its
 //   card with its shortcuts from the guide; arc never sends anything to the
@@ -65,7 +69,7 @@ import '@fontsource/jost/latin-700.css'
 import type { ButtonHTMLAttributes, Component, ComponentChildren, CSSProperties, FunctionComponent, HTMLAttributes, JSX } from 'preact'
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { signal, type ReadonlySignal } from '@preact/signals'
-import type { FxType } from '../../core/features/fxSettings'
+import { FADER_PARAMS, faderParamSupported, type FaderParam, type FxType } from '../../core/features/fxSettings'
 import type { MirrorState } from '../../core/features/liveMirror'
 import { ROWS } from '../../core/features/padNotes'
 import { parse } from '../../core/text/guideCombo'
@@ -362,6 +366,19 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
     </LayerKey>
   )
 
+  // The group LEDs: a group the FX bus silences dark, a soloed one lit, else the group shown lit and the sounding ones breathing.
+  const groupLed = (g: number): string =>
+    dk?.silenced.has(g) === true
+      ? ' is-silenced'
+      : dk?.soloed.has(g) === true || (!offline && g === group)
+        ? ' is-on'
+        : glows[g]! > 0
+          ? ' is-sounding'
+          : ''
+  // FADER held: the LED over each pad's parameter, the shown group's assigned one bright, the others arc has dim.
+  const faderHeld = lit('FADER')
+  const faderLed = (p: FaderParam): string =>
+    !faderHeld ? '' : (dk?.faderAssign[group] ?? 'LEVEL') === p ? ' is-on' : faderParamSupported(p) ? ' is-avail' : ''
   const fxType = dk?.fxType ?? 'NONE'
   const fxPage = page === 'FX' || page === 'OUTPUT' || page === 'SIDECHAIN'
   const plateHit = keys.on ? (keys.pad !== null ? MirrorText.keysSound(keys.pad, keys.padName) : MirrorText.NO_SOUND) : displayLine(st, mirror)
@@ -491,13 +508,13 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
           {LED_Y.map((y, r) => (
             <span key={y}>
               {led(297, y, {
-                class: `ep-a ep-led ep-led--group${!offline && r === group ? ' is-on' : glows[r]! > 0 ? ' is-sounding' : ''}`,
+                class: `ep-a ep-led ep-led--group${groupLed(r)}`,
                 'data-group': String(r),
                 style: { ...at(287, y - 10), '--glow': glowCss(r === group ? glows[r]! : glows[r]! * 0.5) },
               } as HTMLAttributes<HTMLSpanElement>)}
               {COLS.map((x, i) => (
                 <span key={x}>
-                  {led(x + 32, y)}
+                  {led(x + 32, y, { class: `ep-a ep-led ep-led--pad${faderLed(FADER_PARAMS[r * 3 + i]!)}` })}
                   {label(x + 62, y, LED_LABELS[r]![i] === '→ FX' ? <><span class="ep-arr">→</span> FX</> : LED_LABELS[r]![i])}
                 </span>
               ))}
@@ -986,7 +1003,7 @@ const fxBars = (x: number, on: boolean): JSX.Element =>
 function LcdLit(props: { fx: boolean; swing: boolean; free: boolean; main: boolean; tempo: boolean; erase: boolean; mute: boolean; clip: 'COPY' | 'PASTE' | null }): JSX.Element {
   return (
     <>
-      {ic(98, R[1], C.white, <><path d="M-26 -17h52a4 4 0 0 1 4 4v20a4 4 0 0 1-4 4h-19l-7 10v-10h-26a4 4 0 0 1-4-4v-20a4 4 0 0 1 4-4z" />{t(0, -3, 'MUTE', 14, 'k', 700)}</>, props.mute)}
+      {ic(98, R[1], C.white, <><path d="M-26 -17h52a4 4 0 0 1 4 4v20a4 4 0 0 1-4 4h-19l-7 10v-10h-26a4 4 0 0 1-4-4v-20a4 4 0 0 1 4-4z" />{t(0, -3, 'MUTE', 14, 'k', 700)}</>, props.mute, 'ep-mute')}
       {ic(299, R[1], C.red, <><path d="M0 -24v12M-9 -15l9 -9 9 9" class="s" stroke-width="3" /><rect x="-22" y="-8" width="44" height="22" rx="2" />{t(0, 3, 'COPY', 14, 'k', 700)}</>, props.clip === 'COPY')}
       {ic(361, R[1], C.white, <><rect x="-22" y="-22" width="44" height="20" rx="3" />{t(0, -12, 'PASTE', 13, 'k', 700)}<path d="M0 -2v22M-9 11l9 9 9 -9" class="s" stroke-width="3" /></>, props.clip === 'PASTE')}
       {fxBars(820, props.fx)}

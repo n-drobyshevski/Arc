@@ -214,6 +214,10 @@
     0 0 calc(10px * var(--g)) calc(2px * var(--g)) rgb(255 70 10 / calc(0.6 * var(--g)));
 }
 .ep-led.is-on { --g: 1; }
+/* FADER held: a parameter the fader can take, dimly lit. */
+.ep-led.is-avail { --g: 0.3; }
+/* A group the FX bus silences (another soloed, or muted): dark, whatever sounds. */
+.ep-led.is-silenced { --g: 0 !important; opacity: 0.45; }
 /* A sounding group that is not the one shown: a dim ember that breathes. */
 .ep-led.is-sounding { animation: led-pulse 1.2s ease-in-out infinite alternate; }
 @keyframes led-pulse { to { opacity: 0.55; } }

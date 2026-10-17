@@ -134,8 +134,8 @@ export const WebText = {
   DEVICE_KNOB_X_NOTE:
     "Turn it for the effect's X in arc. It follows the device: KEYS held the key, TEMPO the tempo, SOUND the pad's level, EDIT or a pad's sheet the page's X, TIMING the interval, OUTPUT the drive, SIDECHAIN the length, SAMPLE its LEVEL, STEP the step's VEL.",
   DEVICE_KNOB_Y_NOTE:
-    "Turn it for the effect's Y in arc. It follows the device: KEYS held the scale, SOUND the pad's pitch, EDIT or a pad's sheet the page's Y, TIMING the swing, OUTPUT the speed, SIDECHAIN the shape, SAMPLE its THRESH, STEP the step's LEN.",
-  DEVICE_FADER_NOTE: "Drag the fader for the shown group's level in arc's sound (on the FX page, its send to the effect). Each group keeps its own, with the project's effects.",
+    "Turn it for the effect's Y in arc. It follows the device: KEYS held the scale, SOUND the pad's pitch, EDIT or a pad's sheet the page's Y, TIMING the swing, OUTPUT the speed, SIDECHAIN the shape, SAMPLE its THRESH, STEP the step's LEN, TEMPO the click's level.",
+  DEVICE_FADER_NOTE: "Drag the fader for the shown group's level in arc's sound, or what FADER + a pad gave it (on the FX page, its send to the effect). Each group keeps its own, with the project's effects.",
   /** A knob's or the fader's second action, for screen readers. */
   DEVICE_TURN_HINT: 'Arrow keys turn it, Enter shows its shortcuts',
   // What the drawn knobs and fader change, for screen readers ("Knob X", "effect X, 62%").
@@ -157,6 +157,8 @@ export const WebText = {
     return `${name} \u00B7 ${value}`
   },
   TURN_CLICK: "the click's level",
+  /** TEMPO's Y at the bottom: the click off. */
+  CLICK_OFF: 'OFF',
   TURN_KEY: "KEYS' key",
   TURN_SCALE: "KEYS' scale",
   TURN_INTERVAL: 'the note interval',
@@ -168,6 +170,14 @@ export const WebText = {
   /** The sidechain's knob: "sidechain length". */
   turnSidechain(label: string): string {
     return `sidechain ${label.toLowerCase()}`
+  },
+  /** The fader assigned to [param] (FADER + a pad): "group B's LPF". */
+  turnFader(param: string, g: string): string {
+    return `group ${g}'s ${param}`
+  },
+  /** FX + the group keys: "SOLO · A C", or "SOLO · OFF" once none is. */
+  soloShown(groups: readonly string[]): string {
+    return `SOLO \u00B7 ${groups.length === 0 ? 'OFF' : groups.join(' ')}`
   },
   /** The fader on the FX page: "group B's send to the effect". */
   turnSend(g: string): string {
@@ -254,11 +264,11 @@ export const WebText = {
     MAIN: 'Main page. Held: a pad 1 to 9 picks a project, minus and plus the scene; held and let go: the project sheet. Shift: commit the scene',
     TEMPO: 'Tempo page; on it, tap the tempo. Held: type the tempo on the pads, or turn knob X; held and let go: the tempo sheet',
     KEYS: 'Pads or keys. Held: minus and plus the octave, a pad the key, knob X the key, knob Y the scale',
-    FADER: 'Held: a pad gives the fader what is printed over it',
+    FADER: 'Held: a pad gives the fader what is printed over it. Shift: its parameters reset, again restored',
     SHIFT: 'Held with another key: its second action. A click holds it for the next key',
     SAMPLE: 'Sample panel; while a hands-free take runs, stops it',
     TIMING: 'Timing page. Held: a pad repeats. Shift: timing correct',
-    FX: 'Effect page. Held: the pads are the punch-ins. Shift: output page',
+    FX: 'Effect page. Held: the pads are the punch-ins, a group key solos it. Shift: output page',
     ERASE: 'A tap latches erase. Held: erase while held; with a group, clear its pattern',
     GROUP: 'Held: minus and plus its pattern, or type the pattern on the pads. Shift with A: next free pattern, B: undo, C: copy, D: paste',
     RIGHT_CLICK: 'Right-click holds it until the next right-click',

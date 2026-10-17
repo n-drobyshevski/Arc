@@ -6,7 +6,8 @@
 //   browser. Takes record before it.
 // - X and Y follow what is held, open or shown, as the device's knobs do
 //   ([knobTarget]), first that applies: KEYS held, its key and scale; TEMPO
-//   held, X the tempo (Y the click's level, once arc's click has one: [click]);
+//   held, X the tempo, Y the click's level (OFF at the bottom; up from there
+//   the click comes on, down to it it goes off: [click]);
 //   a pad's sheet open, its page's X and Y (PadEditPages' pageKnobs); the
 //   drawn device's page (deviceKeys.ts): SOUND the played pad's LEVEL and
 //   PITCH, EDIT its page's X and Y (on the pad played last, not in a sheet),
@@ -16,10 +17,12 @@
 //   the effect's X and Y (the FX sheet's).
 // - The fader is the shown group's level in the FX bus (FxDesk.setGroupLevel),
 //   0 to 100 %, kept with the project's effects; it moves to a group's own
-//   level when the group changes. On the FX page it is the group's send to
-//   the effect (FxDesk.setSend). A group's other fader assignments (FADER +
-//   a pad) are the host's ([faderAssigned]: none yet). With RECORD held it
-//   rests: arc records no automation.
+//   level when the group changes. FADER + a pad gives it that pad's printed
+//   parameter instead ([faderAssigned], [assignedTarget]: LPF, PAN, PITCH …,
+//   FxDesk.setGroupParam, read as the device's display reads it); with a
+//   group key held it is that group's level again, and on the FX page the
+//   group's send to the effect (FxDesk.setSend) ([faderFor]). With RECORD
+//   held it rests: arc records no automation.
 //
 // A drag up or to the right turns a knob up, a full turn for about 220 px as
 // Android's Knob (FULL_TURN), SHIFT held five times finer (the drawn SHIFT,
@@ -33,7 +36,7 @@
 // device prints it, its value saying what it changes now.
 import { createContext, type CSSProperties, type HTMLAttributes, type JSX, type TargetedKeyboardEvent, type TargetedPointerEvent, type TargetedWheelEvent } from 'preact'
 import { useContext, useEffect, useRef } from 'preact/hooks'
-import { FxSettings, FxType } from '../../core/features/fxSettings'
+import { FADER_DEFAULTS, faderReadout, FxSettings, FxType, type FaderParam } from '../../core/features/fxSettings'
 import { Keys, SCALES, type NoteNames, type Scale } from '../../core/features/keys'
 import type { PadSettings } from '../../core/features/padSettings'
 import { Timing, TIMING_INTERVALS, TimingSettings, timingSwings, timingTicks } from '../../core/features/pattern'
@@ -46,7 +49,7 @@ import { follow, sliderKey } from '../components/drag'
 import { levelPitchKnobs, padPage, padPageShown, pageKnobs, type EditPage, type PageKnob } from '../sheets/PadEditPages'
 import { useHaptic } from '../useHaptic'
 import { useDeviceKeys } from './DeviceKeys'
-import { held } from './deviceKeys'
+import { held, heldGroup } from './deviceKeys'
 import { TempoContext } from './FunctionRow'
 import { THRESHOLD_OFF, thresholdKnob, thresholdOfKnob, useSample, type SampleActions } from './SamplePanel'
 import { gateKnob, useStep, type StepActions } from './StepPanel'
@@ -161,11 +164,13 @@ function padKnob(k: PageKnob | null, pad: PadKnobs): Turnable | null {
   }
 }
 
-/** TEMPO's X (the tempo) or Y (the click's level, where arc's click has one). */
+/** TEMPO's X (the tempo) or Y (the click's level, OFF at the bottom; none without a click). */
 function tempoKnob(x: boolean, tempo: TempoKnobs): Turnable | null {
   if (!x) {
     const click = tempo.click ?? null
-    return click === null ? null : unit(MirrorText.CLICK.toUpperCase(), WebText.TURN_CLICK, click.level, 1, (v) => click.set(v))
+    if (click === null) return null
+    const t = unit(MirrorText.CLICK.toUpperCase(), WebText.TURN_CLICK, click.level, 1, (v) => click.set(v))
+    return click.level <= 0 ? { ...t, readout: WebText.CLICK_OFF, spoken: MirrorText.onOff(false) } : t
   }
   return {
     name: MirrorText.FN_TEMPO.toUpperCase(),
@@ -399,6 +404,36 @@ export function faderTarget(group: number, fx: FxSettings, set: (group: number, 
   return unit(`${MirrorText.GROUP.toUpperCase()} ${g}`, WebText.turnGroup(g), fx.levels[group] ?? 1, 1, (v) => set(group, v))
 }
 
+/**
+ * The fader on group [group] assigned to [param] (FADER + a pad), at [value]
+ * (0..1), turned by [set]: named as the device prints it, read as its display
+ * does ("LPF · 1.2K"), back to the parameter's default.
+ */
+export function assignedTarget(group: number, param: FaderParam, value: number, set: (v: number) => void): Turnable {
+  const readout = faderReadout(param, value)
+  return { ...unit(param, WebText.turnFader(param, MirrorText.groupKey(group)), value, FADER_DEFAULTS[param], set), readout, spoken: readout }
+}
+
+/**
+ * What the fader turns on group [group], first that applies: on the FX page
+ * the group's send (the device's FX page); with a group key held its level
+ * (the device's project-wide group level); else what FADER + a pad assigned
+ * ([assigned], null for LEVEL), else its level.
+ */
+export function faderFor(o: {
+  group: number
+  fx: FxSettings
+  page: string
+  groupHeld: boolean
+  assigned: Turnable | null
+  setLevel: (group: number, v: number) => void
+  setSend: (group: number, v: number) => void
+}): Turnable {
+  if (o.page === 'FX') return sendTarget(o.group, o.fx, o.setSend)
+  if (!o.groupHeld && o.assigned !== null) return o.assigned
+  return faderTarget(o.group, o.fx, o.setLevel)
+}
+
 /** The fader on the FX page: group [group]'s send to the effect, turned by [set]. */
 export function sendTarget(group: number, fx: FxSettings, set: (group: number, v: number) => void): Turnable {
   const g = MirrorText.groupKey(group)
@@ -453,7 +488,15 @@ export function useTurnable(which: DeviceControl | null, group: number): Turnabl
   if (which === 'volume') return volumeTarget(c.volume, (v) => c.setVolume(v))
   const page = keysState?.page ?? 'MAIN'
   if (which === 'fader') {
-    const t = c.faderAssigned?.(group) ?? (page === 'FX' ? sendTarget(group, c.fx, (g, v) => c.setSend(g, v)) : faderTarget(group, c.fx, (g, v) => c.setGroupLevel(g, v)))
+    const t = faderFor({
+      group,
+      fx: c.fx,
+      page,
+      groupHeld: keysState !== null && heldGroup(keysState) !== null,
+      assigned: c.faderAssigned?.(group) ?? null,
+      setLevel: (g, v) => c.setGroupLevel(g, v),
+      setSend: (g, v) => c.setSend(g, v),
+    })
     // RECORD held: the device records the fader's moves; arc doesn't, so it rests.
     return keysState !== null && held(keysState, 'RECORD') ? { ...t, enabled: false } : t
   }

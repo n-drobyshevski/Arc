@@ -43,9 +43,10 @@
 // [deviceKeysUi] is their layer, carrying the device's combos out on the
 // controller (the pattern, the FX bus, SAMPLE, KEYS, a pad's sound through
 // assignPad), and [DevicePages] keeps the pad played last open for the SOUND
-// and EDIT pages' knobs. What arc's sound may add later (solo, the fader's
-// assignments, the click's level) are its DeviceSoundHooks and
-// DeviceControlsUi's click and faderAssigned: none yet.
+// and EDIT pages' knobs. Arc's sound gives it solo, the fader's assignments
+// and their reset ([fxSoundHooks], on the FX bus), and the drawn knobs the
+// click's level and the assigned fader (deviceControlsUi's click and
+// faderAssigned).
 import { computed, signal, useComputed } from '@preact/signals'
 import { Component, type ComponentChildren, type JSX } from 'preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
@@ -106,7 +107,8 @@ import { KeyboardKeysSheet } from './ui/sheets/KeyboardKeysSheet'
 import { PatternSheet } from './ui/sheets/PatternSheet'
 import { TransportContext, type TransportUi } from './ui/live/PatternLine'
 import { FunctionKeysContext, ProjectHold, ProjectHoldContext, TempoContext, type FunctionKeysUi, type ProjectUi, type TempoUi } from './ui/live/FunctionRow'
-import { DeviceControlsContext, type DeviceControlsUi } from './ui/live/DeviceControls'
+import { assignedTarget, DeviceControlsContext, type DeviceControlsUi } from './ui/live/DeviceControls'
+import type { GroupParamSnapshot } from './state/fx'
 import { DeviceKeysContext, type DeviceKeysUi } from './ui/live/DeviceKeys'
 import { DeviceKeys, slotStep, type DeviceAction, type DevicePage, type DeviceSoundHooks } from './ui/live/deviceKeys'
 import { editWord, pageWord } from './ui/live/DeviceView'
@@ -255,7 +257,7 @@ function Root(): JSX.Element {
   const projectHold = useMemo(() => new ProjectHold(), [])
   // The drawn EP-133's keys (web only): the device's combos, carried out here; what Root holds is read at each press.
   const deviceActs = useRef<DeviceKeysActs | null>(null)
-  const deviceKeys = useMemo(() => deviceKeysUi(c, () => deviceActs.current), [c])
+  const deviceKeys = useMemo(() => deviceKeysUi(c, () => deviceActs.current, fxSoundHooks(c)), [c])
   // Live's EDIT (giving a pad another sound): on Live, in PADS, until switched off or left.
   const [editPads, setEditPads] = useState(false)
   const canEdit = v.tab === 'live' && !settings.liveKeys
@@ -661,6 +663,29 @@ function deviceControlsUi(c: ArcController): DeviceControlsUi {
     },
     setTimingInterval: (t) => c.pattern.setTimingInterval(t),
     setTimingSwing: (v) => c.pattern.setTimingSwing(v),
+    // TEMPO's Y: the click's level, off at the bottom; turned up from there the click comes on, down to it it goes off.
+    get click() {
+      const p = c.pattern
+      if (!p.canClick) return null
+      const on = p.metronome.value.on
+      return {
+        level: on ? c.clickLevel.value : 0,
+        set: (v: number) => {
+          if (v <= 0) {
+            if (p.metronome.peek().on) p.setClick(false)
+            return
+          }
+          c.setClickLevel(v)
+          if (!p.metronome.peek().on) p.setClick(true)
+        },
+      }
+    },
+    // The shown group's fader assigned (FADER + a pad) to other than LEVEL: that parameter.
+    faderAssigned: (g) => {
+      const d = c.fx.desk
+      const param = d.faderAssign.value[g] ?? 'LEVEL'
+      return param === 'LEVEL' ? null : assignedTarget(g, param, d.groupParam(g, param), (v) => d.setGroupParam(g, param, v))
+    },
   }
 }
 
@@ -672,6 +697,33 @@ interface DeviceKeysActs {
   punch(on: boolean): void
   openPadSheet(pad: PhysicalPad): void
   openSheet(id: string): void
+}
+
+/**
+ * What arc's sound gives the drawn device's combos, on the FX bus: FX + the
+ * group keys solo (FxDesk.setSolo, for the session), FADER + a pad assigns the
+ * shown group's fader (false for what arc hasn't: TIME, VEL, MOD), and SHIFT +
+ * FADER resets the group's parameters (RES), its next press puts them back
+ * (SET), the snapshot kept per project and group meanwhile.
+ */
+function fxSoundHooks(c: ArcController): DeviceSoundHooks {
+  const d = c.fx.desk
+  const snapshots = new Map<string, GroupParamSnapshot>()
+  return {
+    solo: (groups) => d.setSolo(groups),
+    assignFader: (g, param) => d.setFaderAssign(g, param),
+    resetFader: (g) => {
+      const key = `${d.project}:${g}`
+      const snap = snapshots.get(key)
+      if (snap !== undefined) {
+        snapshots.delete(key)
+        d.restoreGroupParams(g, snap)
+        return 'SET'
+      }
+      snapshots.set(key, d.resetGroupParams(g))
+      return 'RES'
+    },
+  }
 }
 
 /** SOUND's − / + write the slot stepped to once the stepping rests this long (one write, one UNDO). */
@@ -939,15 +991,27 @@ function deviceKeysUi(c: ArcController, acts: () => DeviceKeysActs | null, hooks
         say(WebText.DEVICE_SAVED)
         return
       case 'solo':
-        if (hooks.solo !== undefined) hooks.solo(a.group, a.on)
-        else if (a.on) say(WebText.notInArc(WebText.DEVICE_NOT_IN_ARC.SOLO!))
+        if (hooks.solo !== undefined) {
+          hooks.solo(a.groups)
+          say(WebText.soloShown([...a.groups].sort().map((g) => MirrorText.groupKey(g))))
+        } else if (a.groups.size > 0) say(WebText.notInArc(WebText.DEVICE_NOT_IN_ARC.SOLO!))
         return
       case 'faderAssign':
-        say(hooks.assignFader?.(a.group, a.param) === true ? WebText.deviceSet('FADER', a.param) : WebText.notInArc(a.param))
+        if (hooks.assignFader?.(a.group, a.param) === true) {
+          layer.show(a.param.slice(0, 3))
+          say(WebText.deviceSet(`FADER ${MirrorText.groupKey(a.group)}`, a.param))
+        } else say(WebText.notInArc(a.param))
         return
-      case 'faderReset':
-        say(hooks.resetFader !== undefined ? hooks.resetFader(a.group) : WebText.notInArc(WebText.DEVICE_NOT_IN_ARC.FADER_RESET!))
+      case 'faderReset': {
+        const word = hooks.resetFader?.(a.group) ?? null
+        if (word === null) {
+          say(WebText.notInArc(WebText.DEVICE_NOT_IN_ARC.FADER_RESET!))
+          return
+        }
+        layer.show(word)
+        say(WebText.deviceSet(`FADER ${MirrorText.groupKey(a.group)}`, word))
         return
+      }
       case 'sidechainSource':
         d.setSidechainSource(a.group, a.offset)
         say(WebText.deviceSet(MirrorText.SIDECHAIN.toUpperCase(), physicalPad(a.group, a.offset).groupLetter + ' ' + physicalPad(a.group, a.offset).label))
@@ -1002,7 +1066,18 @@ function deviceKeysUi(c: ArcController, acts: () => DeviceKeysActs | null, hooks
     get fxType() {
       return d.fx.value.type
     },
-    muted: false,
+    get muted() {
+      return d.silenced.value.size > 0 || d.soloed.value.size > 0
+    },
+    get silenced() {
+      return d.silenced.value
+    },
+    get soloed() {
+      return d.soloed.value
+    },
+    get faderAssign() {
+      return d.faderAssign.value
+    },
     openSheet: (page: DevicePage) => {
       const a = acts()
       if (a === null) return
