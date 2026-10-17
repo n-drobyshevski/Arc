@@ -150,4 +150,25 @@ class OfflinePadsTest {
         assertFalse(OfflinePads.fits(take, 2, emptyMap()))
         assertFalse(OfflinePads.fits(take, null, emptyMap()))
     }
+
+    @Test
+    fun `an EP-1320 factory sound keeps its kit, and entries without one are the EP-133's`() {
+        val medieval = kick.copy(group = 2, kit = FactoryKit.EP1320)
+        val p = OfflinePads.EMPTY.put(kick).put(medieval)
+        val json = p.toJson()
+        assertEquals(
+            """{"v":1,"pads":[{"project":1,"group":0,"pad":5,"slot":343,"name":"kick","source":"factory"},""" +
+                """{"project":1,"group":2,"pad":5,"slot":343,"name":"kick","source":"factory","kit":"ep1320"}]}""",
+            json,
+        )
+        assertEquals(p, OfflinePads.fromJson(json))
+        // Written before kits (or by a later version with a kit this one doesn't know): the EP-133's.
+        val old = """{"v":1,"pads":[{"project":1,"group":0,"pad":5,"slot":343,"name":"kick","source":"factory","kit":"ep9"}]}"""
+        assertEquals(FactoryKit.EP133, OfflinePads.fromJson(old)!!.list.single().kit)
+        // Only a factory sound has a kit.
+        val device = """{"v":1,"pads":[{"project":1,"group":0,"pad":5,"slot":7,"name":"snare","source":"device","kit":"ep1320"}]}"""
+        assertEquals(FactoryKit.EP133, OfflinePads.fromJson(device)!!.list.single().kit)
+        // Fitting goes by the device's slots alone, whichever kit.
+        assertTrue(OfflinePads.fits(medieval, 1, mapOf(343 to "343.pcm")))
+    }
 }

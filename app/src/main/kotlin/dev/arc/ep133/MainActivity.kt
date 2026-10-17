@@ -1035,6 +1035,7 @@ class MainActivity : ComponentActivity() {
                     padSoundsSize = controller::padSoundsSize,
                     onClearPadSounds = { controller.clearPadSounds() },
                     onGetFactory = { controller.getFactorySounds() },
+                    onFactoryKit = controller::setFactoryKit,
                     onNoteNames = controller::setKeysNames,
                     onShowNames = controller::setKeysShowNames,
                     onPianoWhites = controller::setPianoWhites,
@@ -1147,6 +1148,10 @@ class MainActivity : ComponentActivity() {
                             mirror = mirror,
                             nameOf = controller::mirrorName,
                             onGetFactory = if (dev.arc.ep133.features.FactorySounds.inLibrary(state.backups) == null) ({ controller.getFactorySounds() }) else null,
+                            // Both kits saved: the factory line switches between them.
+                            factoryKit = dev.arc.ep133.controller.activeKitOf(appSettings.factoryKit, state.backups)
+                                .takeIf { dev.arc.ep133.controller.kitsSaved(state.backups) },
+                            onFactoryKit = controller::setFactoryKit,
                             offlinePads = state.offlinePads,
                             onResetPads = { controller.resetOfflinePads() },
                             onPad = { pad, hold, unsure, pressedAt -> controller.playPad(pad, hold, unsure, pressedAt) },
@@ -1523,6 +1528,14 @@ class MainActivity : ComponentActivity() {
                                 {
                                     closeDetail(save = true)
                                     comparePickFor = b.id
+                                }
+                            } else {
+                                null
+                            },
+                            onUseAsFactory = if (dev.arc.ep133.features.FactorySounds.canUseAsFactory(b)) {
+                                {
+                                    closeDetail(save = true)
+                                    controller.useAsFactory(b)
                                 }
                             } else {
                                 null

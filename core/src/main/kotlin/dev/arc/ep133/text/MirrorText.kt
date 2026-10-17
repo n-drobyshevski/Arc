@@ -3,6 +3,7 @@ package dev.arc.ep133.text
 import dev.arc.ep133.features.Chain
 import dev.arc.ep133.features.ChainPlay
 import dev.arc.ep133.features.ChainStep
+import dev.arc.ep133.features.FactoryKit
 import dev.arc.ep133.features.FactorySounds
 import dev.arc.ep133.features.FxSettings
 import dev.arc.ep133.features.FxType
@@ -38,11 +39,23 @@ object MirrorText {
     fun seen(day: String) = "Seen $day"
     // Not connected, with the factory sounds in the library: one of their projects (the first unless PROJECT steps on).
     const val FACTORY = "Factory sounds"
-    fun factoryNote(project: Int) = "Not connected: these are the EP-133's factory sounds, project $project as it ships. Connect your EP-133 to see it live."
+    /** [kit] the one shown (FactoryKit): its sounds are named the EP-133's or the EP-1320's. */
+    fun factoryNote(project: Int, kit: FactoryKit = FactoryKit.EP133) =
+        "Not connected: these are the ${kit.model}'s factory sounds, project $project as it ships. Connect your EP-133 to see it live."
+    // The kit switch's keys, when both kits are saved (FactoryKit's models).
+    const val KIT_EP133 = "EP-133"
+    const val KIT_EP1320 = "EP-1320"
+
+    /** The kit switch's key for [kit]. */
+    fun kit(kit: FactoryKit) = when (kit) {
+        FactoryKit.EP133 -> KIT_EP133
+        FactoryKit.EP1320 -> KIT_EP1320
+    }
     // Not connected and never read: a way to play without it.
     const val GET_FACTORY = "Get the factory sounds to play without it"
     /** The note under "Offline" for the display's offline line ([lastSeen] or [FACTORY]), showing [project]. */
-    fun offlineNote(offline: String, project: Int = FactorySounds.PROJECT) = if (offline == FACTORY) factoryNote(project) else OFFLINE_NOTE
+    fun offlineNote(offline: String, project: Int = FactorySounds.PROJECT, kit: FactoryKit = FactoryKit.EP133) =
+        if (offline == FACTORY) factoryNote(project, kit) else OFFLINE_NOTE
     const val PLAYING = "Playing"
     const val STOPPED = "Stopped"
     const val NO_TRANSPORT = "Play/stop and tempo need MIDI clock out: SHIFT + ERASE, then 102 and ENTER."

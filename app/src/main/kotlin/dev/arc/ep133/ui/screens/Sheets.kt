@@ -100,6 +100,8 @@ fun ColumnScope.DetailSheetContent(
     onDone: () -> Unit,
     onContents: () -> Unit = {},
     onCompareBackups: (() -> Unit)? = null,
+    /** Copies a Medieval's backup in as the EP-1320's factory sounds (FactorySounds.canUseAsFactory); null hides the key. */
+    onUseAsFactory: (() -> Unit)? = null,
 ) {
     val c = LocalArcColors.current
     ArcField(Strings.NAME, title, onTitle, maxLength = 80)
@@ -145,6 +147,7 @@ fun ColumnScope.DetailSheetContent(
         half { m -> ArcKey(Strings.SAVE_PAK, onSave, m) }
         // Addition to the web version: play and export what is inside.
         wide { m -> ArcKey(FeatureText.CONTENTS, onContents, m) }
+        if (onUseAsFactory != null) wide { m -> ArcKey(FeatureText.USE_AS_FACTORY, onUseAsFactory, m) }
         if (onCompareBackups != null) wide { m -> ArcKey(FeatureText.COMPARE_BACKUPS, onCompareBackups, m) }
         wide { m -> ArcKey(Strings.DELETE, onDelete, m, style = KeyStyle.Quiet, textColor = c.danger) }
     }
@@ -293,7 +296,12 @@ fun ColumnScope.ProgressSheetContent(task: TaskUi, onCancel: () -> Unit) {
         modifier = Modifier.heightIn(min = 24.dp),
     )
     Text(
-        if (task.title == dev.arc.ep133.text.FeatureText.GETTING_FACTORY) dev.arc.ep133.text.FeatureText.FACTORY_KEEP_OPEN else Strings.KEEP_SCREEN_ON,
+        // The factory sounds' tasks use no cable.
+        if (task.title == dev.arc.ep133.text.FeatureText.GETTING_FACTORY || task.title == dev.arc.ep133.text.FeatureText.SAVING_FACTORY) {
+            dev.arc.ep133.text.FeatureText.FACTORY_KEEP_OPEN
+        } else {
+            Strings.KEEP_SCREEN_ON
+        },
         style = ArcType.small,
         color = c.graphite,
     )

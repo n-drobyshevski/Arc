@@ -313,4 +313,18 @@ object FeatureText {
     fun factorySaved(sounds: Int) = "Factory sounds saved: ${plural(sounds, "sound")}. Live plays them until it has read your EP-133."
 
     fun factoryFailed(message: String) = "Couldn't get the factory sounds: $message"
+
+    // The EP-1320 Medieval's kit (FactoryKit.EP1320): a copy of the user's own backup, as there is no download.
+    const val FACTORY_TITLE_1320 = "EP-1320 Medieval factory sounds"
+    const val FACTORY_1320 = "EP-1320 Medieval"
+    const val FACTORY_1320_NOTE = "teenage engineering offers no download for the EP-1320. Open a backup of your Medieval (best made right after a factory reset) in Backups and choose Use as factory sounds."
+    const val FACTORY_1320_SAVED = "In your backups, copied from your own Medieval backup."
+    /** The detail sheet's key on a Medieval's backup (FactorySounds.canUseAsFactory). */
+    const val USE_AS_FACTORY = "Use as factory sounds"
+    const val SAVING_FACTORY = "Saving factory sounds"
+    const val NOT_MEDIEVAL = "This backup isn't from an EP-1320 Medieval, or it has no sounds."
+    /** Which kit Live plays offline, when both are saved: Settings' row and Live's switch. */
+    const val FACTORY_KIT = "Factory kit"
+
+    fun factory1320Saved(sounds: Int) = "EP-1320 factory sounds saved: ${plural(sounds, "sound")}. Live plays them until it has read your EP-1320."
 }

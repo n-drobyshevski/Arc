@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import androidx.core.content.edit
 import dev.arc.ep133.features.ArpOrder
 import dev.arc.ep133.features.ArpSettings
+import dev.arc.ep133.features.FactoryKit
 import dev.arc.ep133.features.Keys
 import dev.arc.ep133.features.KeysView
 import dev.arc.ep133.features.NoteNames
@@ -103,6 +104,11 @@ data class AppSettings(
     val arpLatch: Boolean = false,
     /** When a pattern or scene picked while the pattern plays takes over (the device's 410 to 412): at once, at bar end, or at pattern end. */
     val sceneSwitch: SwitchTime = SwitchTime.DEFAULT,
+    /**
+     * The factory kit Live plays offline (an addition), when its pack is saved: chosen in Settings or on Live's
+     * factory line, and set to the kit of each EP-133 or EP-1320 connected, so Live opens on the device used last.
+     */
+    val factoryKit: FactoryKit = FactoryKit.EP133,
 ) {
     /** TIMING as one: interval, swing and quantize. */
     val timing: TimingSettings get() = TimingSettings(timingInterval, timingSwing, timingQuantize)
@@ -216,6 +222,7 @@ class SettingsStore internal constructor(private val prefs: SharedPreferences) {
         arpGate = arpGateOf(prefs.getInt("arpGate", ArpSettings.DEFAULT.gate)) ?: ArpSettings.DEFAULT.gate,
         arpLatch = prefs.getBoolean("arpLatch", false),
         sceneSwitch = SwitchTime.of(prefs.getString("sceneSwitch", null) ?: "") ?: SwitchTime.DEFAULT,
+        factoryKit = FactoryKit.ofId(prefs.getString("factoryKit", null)) ?: FactoryKit.EP133,
     )
 
     // TIMING as an earlier version kept it: one choice, OFF or a grid.
@@ -239,7 +246,7 @@ class SettingsStore internal constructor(private val prefs: SharedPreferences) {
             for ((k, v) in changed) {
                 when (k) {
                     "theme", "keysScale", "keysNames", "keysViewWide", "keysViewTall", "sampleSource", "sampleThreshold", "patternTiming",
-                    "timingInterval", "arpOrder", "sceneSwitch" -> putString(k, v)
+                    "timingInterval", "arpOrder", "sceneSwitch", "factoryKit" -> putString(k, v)
                     "keepLast", "keysRoot", "keysOctave", "pianoWhites", "liveTempo", "sampleBars",
                     "timingSwing", "arpOctaves", "arpGate" -> putInt(k, v.toInt())
                     "sampleGainMic", "sampleGainRsp", "sampleGainUsb" -> putFloat(k, v.toFloat())
@@ -340,6 +347,7 @@ internal fun AppSettings.values(): Map<String, String> = linkedMapOf(
     "arpGate" to arpGate.toString(),
     "arpLatch" to arpLatch.toString(),
     "sceneSwitch" to sceneSwitch.id,
+    "factoryKit" to factoryKit.id,
 )
 
 /** These settings with what library.json held ("app.*" keys) taken back; anything missing or unreadable stays as it is. */
@@ -403,4 +411,5 @@ internal fun AppSettings.withIndex(map: Map<String, String>): AppSettings = copy
     arpGate = arpGateOf(map["app.arpGate"]?.toIntOrNull()) ?: arpGate,
     arpLatch = map["app.arpLatch"]?.toBooleanStrictOrNull() ?: arpLatch,
     sceneSwitch = map["app.sceneSwitch"]?.let(SwitchTime::of) ?: sceneSwitch,
+    factoryKit = FactoryKit.ofId(map["app.factoryKit"]) ?: factoryKit,
 )
