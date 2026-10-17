@@ -507,7 +507,7 @@ class FeatureTextTest {
             listOf("Share scene S02 with Claude", "Share scene S02 with Claude, no notes yet", "Share B \u00B7 12 with Claude", "Share B \u00B7 12 with Claude, no notes yet"),
             listOf(ClaudeText.shareSceneName("S02", false), ClaudeText.shareSceneName("S02", true), ClaudeText.sharePatternName(1, 12, false), ClaudeText.sharePatternName(1, 12, true)),
         )
-        assertEquals("https://arc-pi-mauve.vercel.app/arc-beats-skill.zip", ClaudeText.SKILL_URL)
+        assertEquals("https://arc-ko.vercel.app/arc-beats-skill.zip", ClaudeText.SKILL_URL)
         assertTrue(ClaudeText.LEARN_PROMPT.startsWith("Use the arc-beats skill."))
         assertEquals("Share a beat with Claude, paste one back", CoachText.CLAUDE)
         // What is shared: the card in a fenced block after the prompt, named by where it sits.

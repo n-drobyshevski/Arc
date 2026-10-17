@@ -1,6 +1,6 @@
 # Arc, screen by screen
 
-What Arc does, written so you can explain it to a user. Arc is a free, open-source companion for the teenage engineering EP-133 K.O. II. It runs as an Android app and in the browser (Chrome or Edge, at https://arc-pi-mauve.vercel.app). It talks to the EP-133 over USB-C. It has no account and no server; nothing leaves the phone unless the user shares it. It has a `?demo` mode in the browser (add `?demo` to the address) with a simulated EP-133, so someone without a device can still try it.
+What Arc does, written so you can explain it to a user. Arc is a free, open-source companion for the teenage engineering EP-133 K.O. II. It runs as an Android app and in the browser (Chrome or Edge, at https://arc-ko.vercel.app). It talks to the EP-133 over USB-C. It has no account and no server; nothing leaves the phone unless the user shares it. It has a `?demo` mode in the browser (add `?demo` to the address) with a simulated EP-133, so someone without a device can still try it.
 
 Not every screen is on both. The **web app** has the pads, KEYS, the guide and the backup library, and has the sequencer's *core* (patterns, steps, scenes, FX) with no screens yet. The **Android app** has everything below. If you are not sure which one the user has, ask before telling them to tap something.
 

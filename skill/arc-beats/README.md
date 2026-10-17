@@ -10,7 +10,7 @@ The card is plain text; see [references/beat-card.md](references/beat-card.md) f
 
 ## Install in the Claude app
 
-1. Download the zip: **https://arc-pi-mauve.vercel.app/arc-beats-skill.zip** (or build it yourself with `npm run gen:skill` in `web/`, which writes `web/public/arc-beats-skill.zip`).
+1. Download the zip: **https://arc-ko.vercel.app/arc-beats-skill.zip** (or build it yourself with `npm run gen:skill` in `web/`, which writes `web/public/arc-beats-skill.zip`).
 2. In claude.ai or the Claude app open **Settings, Capabilities, Skills** and upload the zip. The folder `arc-beats/` is at the zip's root with `SKILL.md` inside.
 3. Switch the skill on. Start a chat such as *"Make me a lazy boom bap for my EP-133"*.
 

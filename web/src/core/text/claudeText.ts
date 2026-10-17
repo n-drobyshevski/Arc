@@ -131,7 +131,7 @@ export const ClaudeText = {
   LEARN: 'Learn with Claude',
 
   /** Where the skill's zip is (the web app's public folder). */
-  SKILL_URL: 'https://arc-pi-mauve.vercel.app/arc-beats-skill.zip',
+  SKILL_URL: 'https://arc-ko.vercel.app/arc-beats-skill.zip',
 
   /** What Learn with Claude shares, to be sent to the Claude app as the first message. */
   LEARN_PROMPT: 'Use the arc-beats skill. Teach me the EP-133 K.O. II from lesson 1, one step at a time. I use the Arc app on Android.',

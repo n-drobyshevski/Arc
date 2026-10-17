@@ -490,7 +490,7 @@ describe('FeatureTextTest', () => {
       'Share B \u00B7 12 with Claude',
       'Share B \u00B7 12 with Claude, no notes yet',
     ])
-    expect(ClaudeText.SKILL_URL).toBe('https://arc-pi-mauve.vercel.app/arc-beats-skill.zip')
+    expect(ClaudeText.SKILL_URL).toBe('https://arc-ko.vercel.app/arc-beats-skill.zip')
     expect(ClaudeText.LEARN_PROMPT.startsWith('Use the arc-beats skill.')).toBe(true)
     expect(CoachText.CLAUDE).toBe('Share a beat with Claude, paste one back')
     // What is shared: the card in a fenced block after the prompt, named by where it sits.
