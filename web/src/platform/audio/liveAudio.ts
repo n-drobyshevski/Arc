@@ -89,6 +89,11 @@
 //   monitoring only: a take records the mix before it, as the device's own
 //   volume leaves its sampling alone. Kept in this browser's localStorage
 //   ([VOLUME_KEY]), as the debug screen's latencyHint choice is.
+// - [setClickLevel] (the drawn EP-133's metronome level, TEMPO's Y, web
+//   only): the click's gain in the mixer ('clickLevel', the level's
+//   levelGain, so v²), the count-in's too; 0 is silent. Sent to the open
+//   output and to each new one (while not 1), kept in localStorage
+//   ([CLICK_LEVEL_KEY]) as VOLUME is.
 
 import { signal, type ReadonlySignal, type Signal } from '@preact/signals'
 import { REC_ARMED, REC_IDLE, type RecState } from '../../core/features/takeRecorder'
@@ -275,6 +280,10 @@ export interface LiveBackend {
   savedVolume?(): number
   /** Keeps VOLUME (across sessions). */
   saveVolume?(volume: number): void
+  /** The metronome level as kept (0..1); absent or unreadable: 1. */
+  savedClickLevel?(): number
+  /** Keeps the metronome level (across sessions). */
+  saveClickLevel?(level: number): void
 }
 
 /** [LiveAudio.press]'s options (state/deps.ts LivePress). */
@@ -522,6 +531,9 @@ export class LiveAudio {
   private readonly _volume: Signal<number>
   /** Live's VOLUME (0..1, the drawn EP-133's knob; [setOutputVolume]): 1 unless turned. */
   readonly volume: ReadonlySignal<number>
+  private readonly _clickLevel: Signal<number>
+  /** The click's level (0..1, the drawn EP-133's metronome level; [setClickLevel]): 1 unless turned. */
+  readonly clickLevel: ReadonlySignal<number>
   private readonly _engine = signal<OutputEngine | null>(null)
   /** The open output's row in the latency test, once it is set up; null before, or with none open. */
   readonly engine: ReadonlySignal<OutputEngine | null> = this._engine
@@ -575,6 +587,21 @@ export class LiveAudio {
     this.latencyHint = this._latencyHint
     this._volume = signal(volumeOf(backend.savedVolume?.()))
     this.volume = this._volume
+    this._clickLevel = signal(volumeOf(backend.savedClickLevel?.()))
+    this.clickLevel = this._clickLevel
+  }
+
+  /**
+   * The metronome level: the click (and the count-in's) heard at [v] 0..1's
+   * levelGain, at once on the open output and on each new one; kept. 0 is
+   * silent; whether the click is on stays setClick's.
+   */
+  setClickLevel(v: number): void {
+    const next = volumeOf(v)
+    if (next === this._clickLevel.peek()) return
+    this._clickLevel.value = next
+    this.backend.saveClickLevel?.(next)
+    if (this.stream) send(this.stream, { t: 'clickLevel', gain: levelGain(next) })
   }
 
   /**
@@ -1266,7 +1293,8 @@ export class LiveAudio {
     if (this.arp !== null) this.sendArp(s, this.arp)
     // SAMPLE's RSP on the new output's mix.
     if (this.sampleAsk !== null) send(s, { t: 'sampleOpen', stereo: this.sampleAsk.stereo, gain: this.sampleAsk.gain, input: this.sampleAsk.input })
-    // The click goes on with the new output.
+    // The click goes on with the new output, at its level.
+    if (this._clickLevel.peek() !== 1) send(s, { t: 'clickLevel', gain: levelGain(this._clickLevel.peek()) })
     if (this.clickAsk.on) this.sendClick(s)
     ctx.addEventListener?.('statechange', () => this.stateChanged(s))
     this.backend.connect(ctx, (m) => this.received(s, m)).then(
@@ -1557,7 +1585,10 @@ export const CHOICE_KEY = 'arc.liveLatencyChoice'
 /** Where it keeps VOLUME (localStorage: this browser's, like the latencyHint choice; not in library.json). */
 export const VOLUME_KEY = 'arc.liveVolume'
 
-/** A volume as kept: 0..1, 1 where it is missing or not a number. */
+/** Where it keeps the metronome level (localStorage, as VOLUME). */
+export const CLICK_LEVEL_KEY = 'arc.clickLevel'
+
+/** A volume (or the metronome level) as kept: 0..1, 1 where it is missing or not a number. */
 export function volumeOf(v: number | null | undefined): number {
   return typeof v === 'number' && Number.isFinite(v) ? Math.min(Math.max(v, 0), 1) : 1
 }
@@ -1748,6 +1779,22 @@ export function browserLiveBackend(): LiveBackend {
         else globalThis.localStorage?.setItem(VOLUME_KEY, String(volume))
       } catch {
         // Storage blocked or full: the volume lasts the page.
+      }
+    },
+    savedClickLevel: () => {
+      try {
+        const v = globalThis.localStorage?.getItem(CLICK_LEVEL_KEY)
+        return volumeOf(v == null ? null : Number(v))
+      } catch {
+        return 1
+      }
+    },
+    saveClickLevel: (level) => {
+      try {
+        if (level === 1) globalThis.localStorage?.removeItem(CLICK_LEVEL_KEY)
+        else globalThis.localStorage?.setItem(CLICK_LEVEL_KEY, String(level))
+      } catch {
+        // Storage blocked or full: the level lasts the page.
       }
     },
   }

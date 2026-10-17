@@ -9,6 +9,7 @@ import {
   CHOICE_KEY,
   HINT_KEY,
   VOLUME_KEY,
+  CLICK_LEVEL_KEY,
   LiveAudio,
   MixerHost,
   REPLACE_QUIET_MS,
@@ -162,6 +163,8 @@ class FakeBackend implements LiveBackend {
   saveChoice?: (choice: WebLatencyHint) => void
   savedVolume?: () => number
   saveVolume?: (volume: number) => void
+  savedClickLevel?: () => number
+  saveClickLevel?: (level: number) => void
   get ctx(): FakeContext {
     return this.contexts[this.contexts.length - 1]!
   }
@@ -1498,6 +1501,86 @@ describe("LiveAudio VOLUME (web only: the drawn EP-133's knob)", () => {
       }
       expect(backend.savedVolume?.()).toBe(1)
       expect(() => backend.saveVolume?.(0.5)).not.toThrow()
+    } finally {
+      store.localStorage = before
+    }
+  })
+})
+
+describe("LiveAudio click level (web only: the drawn EP-133's metronome level)", () => {
+  const levels = (link: { sent: ToMixer[] }): number[] => link.sent.flatMap((m) => (m.t === 'clickLevel' ? [m.gain] : []))
+
+  it('sets the open output and each new one at its square, and is kept', async () => {
+    const backend = new FakeBackend()
+    const kept: number[] = []
+    backend.savedClickLevel = () => 0.5
+    backend.saveClickLevel = (v) => kept.push(v)
+    const { live } = await opened(backend)
+    expect(live.clickLevel.value).toBe(0.5)
+    expect(levels(backend.link)).toEqual([0.25])
+    live.setClickLevel(0)
+    expect(live.clickLevel.value).toBe(0)
+    expect(levels(backend.link)).toEqual([0.25, 0])
+    // The same again changes nothing; out of range is held.
+    live.setClickLevel(0)
+    live.setClickLevel(-3)
+    live.setClickLevel(4)
+    expect(kept).toEqual([0, 1])
+    expect(levels(backend.link)).toEqual([0.25, 0, 1])
+    // A new output at 1 needs no word; at another level it gets it, before the click.
+    live.close()
+    live.open()
+    await flush()
+    expect(levels(backend.link)).toEqual([])
+    live.setClickLevel(0.7)
+    live.close()
+    live.open()
+    await flush()
+    expect(levels(backend.link)).toEqual([levelGain(0.7)])
+    // Not the speakers' volume.
+    expect(backend.link.gains).toEqual([1])
+  })
+
+  it('starts at 1 with nothing kept, and works with no output open', () => {
+    const live = new LiveAudio(new FakeBackend())
+    expect(live.clickLevel.value).toBe(1)
+    live.setClickLevel(0.3)
+    expect(live.clickLevel.value).toBe(0.3)
+  })
+
+  it('browserLiveBackend keeps it in localStorage (1 by removing it), and carries on where storage is blocked', () => {
+    const store = globalThis as unknown as { localStorage?: unknown }
+    const before = store.localStorage
+    try {
+      const items = new Map<string, string>()
+      store.localStorage = {
+        getItem: (k: string) => items.get(k) ?? null,
+        setItem: (k: string, v: string) => items.set(k, v),
+        removeItem: (k: string) => items.delete(k),
+      }
+      const backend = browserLiveBackend()
+      expect(CLICK_LEVEL_KEY).toBe('arc.clickLevel')
+      expect(backend.savedClickLevel?.()).toBe(1)
+      backend.saveClickLevel?.(0)
+      expect(items.get(CLICK_LEVEL_KEY)).toBe('0')
+      expect(browserLiveBackend().savedClickLevel?.()).toBe(0)
+      backend.saveClickLevel?.(1)
+      expect(items.has(CLICK_LEVEL_KEY)).toBe(false)
+      items.set(CLICK_LEVEL_KEY, 'loud')
+      expect(backend.savedClickLevel?.()).toBe(1)
+      // The volume is its own.
+      backend.saveClickLevel?.(0.4)
+      expect(backend.savedVolume?.()).toBe(1)
+      store.localStorage = {
+        getItem: () => {
+          throw new Error('SecurityError')
+        },
+        setItem: () => {
+          throw new Error('SecurityError')
+        },
+      }
+      expect(backend.savedClickLevel?.()).toBe(1)
+      expect(() => backend.saveClickLevel?.(0.5)).not.toThrow()
     } finally {
       store.localStorage = before
     }

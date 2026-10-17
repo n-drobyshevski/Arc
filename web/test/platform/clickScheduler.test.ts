@@ -88,6 +88,49 @@ describe('ClickTrack', () => {
     t.mix(new Float32Array(1024), new Float32Array(1024), 1024, 2048, [])
     expect(t.sounding).toBe(false)
   })
+
+  it('(web) at its gain: 1 as before, 0 silent, a new click at the gain at once, a sounding one gliding to it', () => {
+    const click = (gain: number | null): Float32Array => {
+      const t = new ClickTrack(RATE)
+      if (gain !== null) t.gain = gain
+      const l = new Float32Array(2048)
+      t.mix(l, new Float32Array(2048), 2048, 0, [{ frame: 0, index: 0, accent: false }])
+      return l
+    }
+    const plain = click(null)
+    expect(click(1)).toEqual(plain)
+    expect(click(0).every((v) => v === 0)).toBe(true)
+    const quarter = click(0.25)
+    for (let i = 0; i < 2048; i++) expect(quarter[i]).toBeCloseTo(plain[i]! * 0.25, 6)
+    // Held to 0..1.
+    const t = new ClickTrack(RATE)
+    t.gain = 4
+    expect(t.gain).toBe(1)
+    t.gain = Number.NaN
+    expect(t.gain).toBe(0)
+    // Turned down while it sounds: no jump, down to the new gain within a few ms.
+    t.gain = 1
+    const l = new Float32Array(1440)
+    t.mix(l, new Float32Array(1440), 100, 0, [{ frame: 0, index: 0, accent: true }])
+    t.gain = 0
+    t.mix(l.subarray(100), new Float32Array(1340), 1340, 100, [])
+    const ref = new ClickTrack(RATE)
+    const full = new Float32Array(1440)
+    ref.mix(full, new Float32Array(1440), 1440, 0, [{ frame: 0, index: 0, accent: true }])
+    const share = (from: number, to: number): number => {
+      let a = 0
+      let b = 0
+      for (let i = from; i < to; i++) {
+        a += Math.abs(l[i]!)
+        b += Math.abs(full[i]!)
+      }
+      return a / b
+    }
+    expect(l.slice(0, 100)).toEqual(full.slice(0, 100))
+    expect(share(100, 110)).toBeGreaterThan(0.9)
+    expect(share(100, 110)).toBeLessThan(1)
+    expect(share(600, 1000)).toBeLessThan(0.1)
+  })
 })
 
 describe('MixerHost click', () => {
@@ -134,5 +177,28 @@ describe('MixerHost click', () => {
     for (let i = 0; i < 40; i++) host.render(l, r, 128, (i * 128) / RATE)
     // Nothing but the click sounded: the take never started.
     expect(out.some((m) => m.t === 'rec' && m.state.kind === 'recording')).toBe(false)
+  })
+
+  it('(web) the metronome level: the click at its gain, silent at 0 though its beats are still told', () => {
+    const peak = (gain: number | null): { peak: number; beats: number } => {
+      const out: FromMixer[] = []
+      const host = new MixerHost(RATE, (m) => out.push(m))
+      if (gain !== null) host.handle({ t: 'clickLevel', gain })
+      host.handle({ t: 'click', on: true, bpm: 120, grid: null })
+      const l = new Float32Array(128)
+      const r = new Float32Array(128)
+      let p = 0
+      for (let i = 0; i < 400; i++) {
+        l.fill(0)
+        host.render(l, r, 128, (i * 128) / RATE)
+        for (const v of l) p = Math.max(p, Math.abs(v))
+      }
+      return { peak: p, beats: beats(out).length }
+    }
+    const full = peak(null)
+    expect(full.peak).toBeGreaterThan(0)
+    expect(peak(1)).toEqual(full)
+    expect(peak(0.25).peak).toBeCloseTo(full.peak * 0.25, 6)
+    expect(peak(0)).toEqual({ peak: 0, beats: full.beats })
   })
 })

@@ -220,6 +220,8 @@ export class ArcController {
   readonly liveLatencyHint: ReadonlySignal<WebLatencyHint> | null
   /** Live's VOLUME (0..1; web: the drawn EP-133's knob). */
   readonly liveVolume: ReadonlySignal<number>
+  /** TEMPO's click level (0..1; web: the drawn EP-133's metronome level, TEMPO's Y), 1 unless turned. */
+  readonly clickLevel: ReadonlySignal<number>
 
   private readonly settingsSignal: Signal<AppSettings>
   private readonly tasks: Tasks
@@ -330,6 +332,7 @@ export class ArcController {
     this.liveEngine = deps.liveAudio.engine ?? signal(null)
     this.liveLatencyHint = deps.liveAudio.latencyHint ?? null
     this.liveVolume = deps.liveAudio.volume ?? signal(1)
+    this.clickLevel = deps.liveAudio.clickLevel ?? signal(1)
     this.visible = deps.visibility.visible()
     const toast = (text: string, error?: boolean): void => this.toast(text, error)
     this.tasks = new Tasks({ store: this.store, deps, toast, session: () => this.conn.session })
@@ -1568,6 +1571,15 @@ export class ArcController {
   /** Live's VOLUME (0..1): the speakers' share of the mix, kept in this browser. */
   setLiveVolume(v: number): void {
     this.deps.liveAudio.setOutputVolume?.(v)
+  }
+
+  /**
+   * TEMPO's click level (0..1, heard at its square; 0 silent): kept in this
+   * browser. Whether the click is on stays [pattern]'s setClick: the caller
+   * turns it on or off where the level leaves or reaches 0, if it wants to.
+   */
+  setClickLevel(v: number): void {
+    this.deps.liveAudio.setClickLevel?.(v)
   }
 
   /** KEYS [note] held at [pressure] (the pointer's own, while the arp is on): its velocity, on a device that tells pressure. */

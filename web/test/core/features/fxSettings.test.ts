@@ -3,7 +3,25 @@
 // Web delta: the book is a Map; settings are built with FxSettings.of(),
 // comp() and sidechain().
 import { describe, expect, it } from 'vitest'
-import { FX_TYPES, FxBook, FxKnobs, FxSettings, FxType, comp, fxTypeIndex, sidechain } from '../../../src/core/features/fxSettings'
+import {
+  FADER_DEFAULTS,
+  FADER_ENV_MS,
+  FADER_PARAMS,
+  FX_TYPES,
+  FxBook,
+  FxKnobs,
+  FxSettings,
+  FxType,
+  comp,
+  faderReadout,
+  fxTypeIndex,
+  groupAttackMs,
+  groupPan,
+  groupReleaseMs,
+  groupSemitones,
+  sidechain,
+  type GroupFaders,
+} from '../../../src/core/features/fxSettings'
 
 const f = Math.fround
 
@@ -161,6 +179,73 @@ describe('FxSettingsTest', () => {
     expect(FxBook.fromJson('{"v":1,"projects":[{"project":1,"type":"REVERB"}]}')?.get(1)?.levels).toEqual([1, 1, 1, 1])
     expect(FxBook.fromJson('{"v":1,"projects":[{"project":1,"levels":[0.5]}]}')?.get(1)?.levels).toEqual([0.5, 1, 1, 1])
     expect(FxBook.fromJson('{"v":1,"projects":[{"project":1,"levels":0.5},{"project":2,"levels":["1"]}]}')).toEqual(new Map())
+  })
+
+  it("(web) the groups' fader parameters and assignments: defaults unwritten, the moved ones written and read back exactly", () => {
+    const d = FxSettings.DEFAULT
+    expect(d.faders).toEqual([0, 1, 2, 3].map(() => ({ PITCH: 0.5, LPF: 1, HPF: 0, ATK: 0, REL: 0, PAN: 0.5, TUNE: 0.5 })))
+    expect(d.assign).toEqual(['LEVEL', 'LEVEL', 'LEVEL', 'LEVEL'])
+    expect(FADER_PARAMS.map((p) => FxSettings.faderOf(d, 2, p))).toEqual(FADER_PARAMS.map((p) => FADER_DEFAULTS[p]))
+    let s = FxSettings.withFader(d, 1, 'LPF', 0.3)
+    s = FxSettings.withFader(s, 1, 'PAN', -4)
+    s = FxSettings.withFader(s, 3, 'TUNE', 0.75)
+    // LEVEL and FX are the level and the send; not in arc, or no such group: unchanged.
+    s = FxSettings.withFader(s, 0, 'LEVEL', 0.5)
+    s = FxSettings.withFader(s, 0, 'FX', 0.25)
+    expect(FxSettings.withFader(s, 0, 'VEL', 0.1)).toBe(s)
+    expect(FxSettings.withFader(s, 4, 'LPF', 0.1)).toBe(s)
+    expect(s.levels[0]).toBe(0.5)
+    expect(s.sends[0]).toBe(0.25)
+    expect(s.faders[1]).toMatchObject({ LPF: f(0.3), PAN: 0 })
+    expect(FxSettings.faderOf(s, 3, 'TUNE')).toBe(0.75)
+    s = FxSettings.withAssign(s, 2, 'HPF')
+    expect(FxSettings.withAssign(s, 2, 'MOD')).toBe(s)
+    expect(s.assign).toEqual(['LEVEL', 'LEVEL', 'HPF', 'LEVEL'])
+    const json = FxBook.toJson(new Map([[4, s]]))
+    expect(json).toContain('"faders":[{},{"lpf":0.30000001192092896,"pan":0},{},{"tune":0.75}],"assign":["LEVEL","LEVEL","HPF","LEVEL"]')
+    expect(FxBook.fromJson(json)).toEqual(new Map([[4, s]]))
+    // Settings written before them (or by Android) read at the defaults; short lists are filled with them.
+    const old = FxBook.fromJson('{"v":1,"projects":[{"project":1,"type":"REVERB"}]}')?.get(1)
+    expect(old?.faders).toEqual(d.faders)
+    expect(old?.assign).toEqual(d.assign)
+    const short = FxBook.fromJson('{"v":1,"projects":[{"project":1,"faders":[{"hpf":2,"mod":0.3}],"assign":["PAN"]}]}')?.get(1)
+    expect(short?.faders[0]).toEqual({ ...d.faders[0], HPF: 1 })
+    expect(short?.faders[1]).toEqual(d.faders[1])
+    expect(short?.assign).toEqual(['PAN', 'LEVEL', 'LEVEL', 'LEVEL'])
+    // A name it doesn't play is LEVEL; junk skips the entry.
+    expect(FxBook.fromJson('{"v":1,"projects":[{"project":1,"assign":["VEL","WOBBLE"]}]}')?.get(1)?.assign).toEqual(['LEVEL', 'LEVEL', 'LEVEL', 'LEVEL'])
+    expect(
+      FxBook.fromJson('{"v":1,"projects":[{"project":1,"faders":{}},{"project":2,"faders":[1]},{"project":3,"faders":[{"lpf":"x"}]},{"project":4,"assign":[1]}]}'),
+    ).toEqual(new Map())
+  })
+
+  it('(web) how the fader parameters are heard and shown', () => {
+    const g = (fields: Partial<GroupFaders>): GroupFaders => ({ ...FxSettings.DEFAULT.faders[0]!, ...fields })
+    expect(groupSemitones(g({}))).toBe(0)
+    expect(groupSemitones(g({ PITCH: 1 }))).toBe(12)
+    expect(groupSemitones(g({ PITCH: 0 }))).toBe(-12)
+    // PITCH in whole semitones, TUNE a semitone either way, fine.
+    expect(groupSemitones(g({ PITCH: 0.52 }))).toBe(0)
+    expect(groupSemitones(g({ PITCH: 0.75, TUNE: 0.75 }))).toBe(6.5)
+    expect(groupPan(g({}))).toBe(0)
+    expect(groupPan(g({ PAN: 0 }))).toBe(-1)
+    expect(groupPan(g({ PAN: 1 }))).toBe(1)
+    expect(groupAttackMs(g({}))).toBe(0)
+    expect(groupAttackMs(g({ ATK: 1 }))).toBe(FADER_ENV_MS)
+    expect(groupReleaseMs(g({ REL: 0.5 }))).toBe(FADER_ENV_MS / 4)
+    expect(faderReadout('LEVEL', 0.72)).toBe('72')
+    expect(faderReadout('PITCH', 0.5)).toBe('0')
+    expect(faderReadout('PITCH', 1)).toBe('+12')
+    expect(faderReadout('TUNE', 0.375)).toBe('-25')
+    expect(faderReadout('LPF', 1)).toBe('OPEN')
+    expect(faderReadout('LPF', 0)).toBe('60')
+    expect(faderReadout('HPF', 0)).toBe('OPEN')
+    expect(faderReadout('HPF', 1)).toBe('8.0k')
+    expect(faderReadout('PAN', 0.5)).toBe('C')
+    expect(faderReadout('PAN', 0.3)).toBe('L40')
+    expect(faderReadout('PAN', 1)).toBe('R100')
+    expect(faderReadout('ATK', 0.2)).toBe('102')
+    expect(faderReadout('REL', 1)).toBe('2.6s')
   })
 
   it("junk reads as nothing, and entries it can't read are skipped", () => {

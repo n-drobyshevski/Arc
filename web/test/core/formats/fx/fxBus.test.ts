@@ -152,6 +152,192 @@ describe('FxBus', () => {
     expect(out[999]! / full[999]!).toBeCloseTo(0.25, 2)
   })
 
+  it('(web) leaves the mix exactly as it was with every group mute and fader parameter at its default', () => {
+    const plain = play(new VoiceMixer(48000), 6)
+    const controlled = play(new VoiceMixer(48000), 6, (m, r) => {
+      const g = int(r, 0, 4)
+      m.control(FxControl.GROUP_MUTE, g, 0, 0)
+      m.control(FxControl.GROUP_FILTER, g, 1, 0)
+      m.control(FxControl.GROUP_PAN, g, 0, 0)
+      m.control(FxControl.GROUP_PITCH, g, 0, 0)
+      m.control(FxControl.GROUP_ENV, g, 0, 0)
+    })
+    expect(controlled).toEqual(plain)
+    // And with sends, levels and an effect on: the same as with those alone.
+    const fx = (m: VoiceMixer, r: Lcg): void => {
+      m.control(FxControl.FX_TYPE, FxControl.REVERB, 0.5, 0.5)
+      m.control(FxControl.SEND, int(r, 0, 4), r.unit(), 0)
+      m.control(FxControl.GROUP_LEVEL, int(r, 0, 4), r.unit(), 0)
+    }
+    const busy = play(new VoiceMixer(48000), 7, fx)
+    const busyControlled = play(new VoiceMixer(48000), 7, (m, r) => {
+      fx(m, r)
+      m.control(FxControl.GROUP_MUTE, 2, 0, 0)
+      m.control(FxControl.GROUP_FILTER, 1, 1, 0)
+      m.control(FxControl.GROUP_PITCH, 0, 0, 0)
+    })
+    expect(busyControlled).toEqual(busy)
+    // The bus's own: no buffer, a rate of 1, nothing added.
+    const bus = new FxBus(48000)
+    bus.begin(128)
+    for (let g = 0; g < FxControl.GROUPS; g++) {
+      expect(bus.group(g)).toBeNull()
+      expect(bus.rate(g)).toBe(1)
+      expect(bus.attackMs(g)).toBe(0)
+      expect(bus.releaseMs(g)).toBe(0)
+    }
+  })
+
+  it("(web) mutes a group: its dry and send glide to 0 and back, the other groups whole", () => {
+    const bus = new FxBus(1000)
+    bus.control(FxControl.FX_TYPE, FxControl.DELAY, 0.5, 0.5)
+    bus.control(FxControl.SEND, 1, 0.5, 0)
+    bus.control(FxControl.GROUP_MUTE, 1, 1, 0)
+    bus.begin(2000)
+    bus.gains(0, 2000, 0)
+    const dry = bus.dry(1)!
+    for (let i = 1; i < 2000; i++) expect(dry[i]! <= dry[i - 1]!).toBe(true)
+    expect(dry[0]).toBeGreaterThan(0.5)
+    expect(dry[1999]).toBe(0)
+    expect(bus.send(1)![1999]).toBe(0)
+    expect(bus.dry(0)).toBeNull()
+    // Heard again: back up, and once landed, nothing to read for a group with no send.
+    bus.control(FxControl.GROUP_MUTE, 1, 0, 0)
+    bus.control(FxControl.GROUP_MUTE, 3, 1, 0)
+    bus.control(FxControl.GROUP_MUTE, 3, 0, 0)
+    bus.begin(2000)
+    bus.gains(0, 2000, 2000)
+    expect(bus.send(1)![1999]).toBe(0.5)
+    expect(bus.dry(3)).toBeNull()
+    // A voice on a muted group is silent, once glided; one on another group isn't.
+    const m = new VoiceMixer(1000)
+    m.control(FxControl.GROUP_MUTE, 2, 1, 0)
+    m.start('c', steady(4000), 1, 1000, 0, 0, VoiceShape.of({ bus: 2 }), VoiceMixer.NOW)
+    m.start('d', steady(4000), 1, 1000, 0, 0, VoiceShape.of({ bus: 3 }), VoiceMixer.NOW)
+    const out = left(render(m, 1000))
+    expect(out[999]).toBe(1000)
+    expect(out[0]).toBeGreaterThan(1500)
+  })
+
+  it('(web) filters a group: a low-pass takes the highs, a high-pass the lows, without a click, and lets go once open again', () => {
+    const rate = 48000
+    // A square wave at 6 kHz (high) over a DC offset (low): what each filter leaves is easy to tell.
+    const square = Int16Array.from({ length: 48000 }, (_, i) => 4000 + (Math.floor(i / 4) % 2 === 0 ? 4000 : -4000))
+    const run = (setup: (m: VoiceMixer) => void, blocks = 100): number[] => {
+      const m = new VoiceMixer(rate)
+      setup(m)
+      m.start('a', square, 1, rate, 0, 0, VoiceShape.of({ bus: 0 }), VoiceMixer.NOW)
+      const out: number[] = []
+      for (let b = 0; b < blocks; b++) out.push(...left(render(m, 128)))
+      return out
+    }
+    const swing = (xs: number[]): number => Math.max(...xs) - Math.min(...xs)
+    const mean = (xs: number[]): number => xs.reduce((a, b) => a + b, 0) / xs.length
+    const plain = run(() => {})
+    const tail = (xs: number[]): number[] => xs.slice(-1000)
+    expect(swing(tail(plain))).toBeGreaterThan(7000)
+    // Low-pass at 0.2 (about 220 Hz): the square's highs gone, its offset kept.
+    const lp = run((m) => m.control(FxControl.GROUP_FILTER, 0, 0.2, 0))
+    expect(swing(tail(lp))).toBeLessThan(800)
+    expect(mean(tail(lp))).toBeCloseTo(4000, -2)
+    // High-pass at 0.5 (about 1 kHz): the offset gone, the highs kept.
+    const hp = run((m) => m.control(FxControl.GROUP_FILTER, 0, 1, 0.5))
+    expect(Math.abs(mean(tail(hp)))).toBeLessThan(300)
+    expect(swing(tail(hp))).toBeGreaterThan(6000)
+    // No click while the low-pass glides in: no step bigger than the square's own.
+    for (let i = 1; i < lp.length; i++) expect(Math.abs(lp[i]! - lp[i - 1]!)).toBeLessThanOrEqual(8000)
+    // The other groups aren't filtered.
+    const m = new VoiceMixer(rate)
+    m.control(FxControl.GROUP_FILTER, 0, 0.2, 0)
+    m.start('b', square, 1, rate, 0, 0, VoiceShape.of({ bus: 1 }), VoiceMixer.NOW)
+    const other: number[] = []
+    for (let b = 0; b < 100; b++) other.push(...left(render(m, 128)))
+    expect(other).toEqual(plain)
+    // Back open: once landed, the group goes straight to the mix again.
+    const bus = new FxBus(rate)
+    bus.control(FxControl.GROUP_FILTER, 2, 0.5, 0.3)
+    bus.begin(128)
+    expect(bus.group(2)).not.toBeNull()
+    expect(bus.group(1)).toBeNull()
+    bus.control(FxControl.GROUP_FILTER, 2, 1, 0)
+    const mix = new Float32Array(256)
+    for (let i = 0; i < 400; i++) {
+      bus.begin(128)
+      bus.gains(0, 128, i * 128)
+      bus.process(mix, 128)
+    }
+    bus.begin(128)
+    expect(bus.group(2)).toBeNull()
+  })
+
+  it("(web) pans a group, gliding: the far side down, the near side whole", () => {
+    const m = new VoiceMixer(1000)
+    m.control(FxControl.GROUP_PAN, 1, 1, 0)
+    m.start('b', steady(4000), 1, 1000, 0, 0, VoiceShape.of({ bus: 1 }), VoiceMixer.NOW)
+    const out = render(m, 1000)
+    expect(out[1]).toBe(1000)
+    expect(out[0]).toBeGreaterThan(900)
+    expect(out[1998]).toBe(0)
+    expect(out[1999]).toBe(1000)
+    const n = new VoiceMixer(1000)
+    n.control(FxControl.GROUP_PAN, 1, -0.5, 0)
+    n.start('b', steady(4000), 1, 1000, 0, 0, VoiceShape.of({ bus: 1 }), VoiceMixer.NOW)
+    const o = render(n, 1000)
+    expect(o[1998]).toBe(1000)
+    expect(o[1999]).toBe(500)
+  })
+
+  it("(web) pitches a group: its voices read faster or slower, the other groups' not", () => {
+    const voiceLength = (setup: (m: VoiceMixer) => void, bus = 0): number => {
+      const m = new VoiceMixer(1000)
+      setup(m)
+      m.start('a', steady(1000), 1, 1000, 0, 0, VoiceShape.of({ bus, mode: 'ONESHOT' }), VoiceMixer.NOW)
+      const out = left(render(m, 3000))
+      return out.findIndex((v) => v === 0)
+    }
+    expect(voiceLength(() => {})).toBe(1000)
+    // An octave up: twice as fast, once the semitones have glided there (a block).
+    expect(voiceLength((m) => m.control(FxControl.GROUP_PITCH, 0, 12, 0))).toBe(500)
+    // An octave down: twice as long (its last half frame past the sound's last isn't read).
+    expect(voiceLength((m) => m.control(FxControl.GROUP_PITCH, 0, -12, 0))).toBe(1999)
+    expect(voiceLength((m) => m.control(FxControl.GROUP_PITCH, 1, 12, 0))).toBe(1000)
+    // Held to two octaves.
+    expect(voiceLength((m) => m.control(FxControl.GROUP_PITCH, 0, 99, 0))).toBe(250)
+    // Gliding, block by block.
+    const bus = new FxBus(48000)
+    bus.control(FxControl.GROUP_PITCH, 3, 7, 0)
+    bus.begin(128)
+    const first = bus.rate(3)
+    expect(first).toBeGreaterThan(1)
+    expect(first).toBeLessThan(Math.pow(2, 7 / 12))
+    for (let i = 0; i < 400; i++) bus.begin(128)
+    expect(bus.rate(3)).toBe(Math.pow(2, 7 / 12))
+  })
+
+  it("(web) adds to a group's voices' attack and release as they start", () => {
+    const m = new VoiceMixer(1000)
+    m.control(FxControl.GROUP_ENV, 2, 100, 200)
+    m.start('c', steady(4000), 1, 1000, 0, 0, VoiceShape.of({ bus: 2 }), VoiceMixer.NOW)
+    m.start('d', steady(4000), 1, 1000, 0, 0, VoiceShape.of({ bus: 3, attackMs: 10 }), VoiceMixer.NOW)
+    // C in over 100 ms, D over its own 10 ms.
+    const before = left(render(m, 200))
+    expect(before[0]).toBe(0)
+    expect(before[50]).toBe(500 + 1000)
+    expect(before[150]).toBe(2000)
+    m.release('c')
+    m.release('d')
+    // D gone after the usual fade; C fading over 200 ms more.
+    const after = left(render(m, 400))
+    expect(after[100]).toBeGreaterThan(400)
+    expect(after[100]).toBeLessThan(600)
+    expect(after[250]).toBe(0)
+    // Those already sounding keep theirs; held to 10 s.
+    const bus = new FxBus(1000)
+    bus.control(FxControl.GROUP_ENV, 0, 1e9, -5)
+    expect(bus.attackMs(0)).toBe(FxBus.GROUP_ENV_MS)
+    expect(bus.releaseMs(0)).toBe(0)
+  })
+
   it('glides a send to its new value and lands on it', () => {
     const bus = new FxBus(48000)
     bus.control(FxControl.SEND, 0, 1, 0)
