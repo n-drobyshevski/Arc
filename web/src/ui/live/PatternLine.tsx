@@ -10,7 +10,10 @@
 // Web deltas:
 // - RECORD's press waits to be a tap while stopped or armed: held
 //   [RECORD_HOLD_MS], it opens the pattern sheet (as Compose's long press);
-//   a right-click opens it too. Enter or Space is a tap.
+//   a right-click opens it too. Enter or Space is a tap. The drawn EP-133's
+//   RECORD (DeviceView) shares the press, and can end it when another key
+//   takes it (− / + with RECORD held set the length: [useTransportPress]'s
+//   cancelRecord).
 // - The frame time is requestAnimationFrame's; the counter re-renders once a
 //   beat, the hairline is moved straight on its element each frame.
 // - What fits is measured on the line's content width (lineFit.ts), read
@@ -136,11 +139,14 @@ export function patternWordsText(ui: PatternUiState, beat: LineBeat | null): str
  * for any key that is them (the line's, the drawn device's): RECORD's press
  * waits to be a tap while stopped or armed (held, the sheet), and goes at once
  * while the pattern runs (held, it records while held); PLAY with RECORD
- * down starts recording at once.
+ * down starts recording at once. [cancelRecord] ends a RECORD press another
+ * key took (the drawn device's − / + set the length with it held): one still
+ * waiting does nothing, one sent comes up.
  */
 export function useTransportPress(t: TransportUi): {
   record: Pick<ButtonHTMLAttributes<HTMLButtonElement>, 'onPointerDown' | 'onPointerUp' | 'onPointerCancel' | 'onClick' | 'onContextMenu'>
   play: Pick<ButtonHTMLAttributes<HTMLButtonElement>, 'onPointerDown' | 'onClick'>
+  cancelRecord(): void
 } {
   const latest = useRef(t)
   latest.current = t
@@ -158,6 +164,12 @@ export function useTransportPress(t: TransportUi): {
   }
   useEffect(() => reset, [])
   return {
+    cancelRecord: () => {
+      const h = hold.current
+      if (h.downAt !== null && h.sent && !h.spent) latest.current.onRecordUp(performance.now())
+      // Its lift is nothing now.
+      reset()
+    },
     record: {
       onPointerDown: (e) => {
         if (e.button !== 0) return

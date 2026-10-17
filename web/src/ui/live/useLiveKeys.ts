@@ -2,7 +2,9 @@
 // rules, useAppKeys the one listener). MirrorScreen plugs it into the app
 // layer's slot while Live is on screen; a key held plays until it comes up,
 // the pad or key it pressed (not whatever shows by then), and a pad held by
-// two keys (Numpad7 and 7) sounds until both are up.
+// two keys (Numpad7 and 7) sounds until both are up. A command [run] gives a
+// release for (the drawn EP-133's group keys, held) is let go of as its key
+// comes up.
 
 import { useEffect, useMemo, useRef } from 'preact/hooks'
 import { setKeyScope, type KeyScopeHandler } from '../appKeys'
@@ -45,8 +47,8 @@ export interface LiveKeysHost {
   pad(offset: number): Held | null
   /** The grid's key [offset], or null. */
   gridKey(offset: number): Held | null
-  /** Carries out a command that holds nothing (group, EDIT, view, …). */
-  run(cmd: LiveCommand): void
+  /** Carries out a command (group, EDIT, view, …); one held while its key is down gives its release. */
+  run(cmd: LiveCommand): void | (() => void)
   /** Esc with no screen to close: true when it did something. */
   escape(): boolean
 }
@@ -57,9 +59,16 @@ export function useLiveKeys(enabled: boolean, host: LiveKeysHost): void {
   // The key (code) to what it holds, and what each held pad or key's first press holds, with how many keys hold it.
   const held = useMemo(() => new Map<string, string>(), [])
   const counts = useMemo(() => new Map<string, { target: Held; n: number }>(), [])
+  // The key (code) to the release of the command it holds (the drawn device's group keys).
+  const holds = useMemo(() => new Map<string, () => void>(), [])
 
   const handler = useMemo((): KeyScopeHandler => {
     const release = (code: string): void => {
+      const letGo = holds.get(code)
+      if (letGo !== undefined) {
+        holds.delete(code)
+        letGo()
+      }
       const id = held.get(code)
       if (id === undefined) return
       held.delete(code)
@@ -72,7 +81,7 @@ export function useLiveKeys(enabled: boolean, host: LiveKeysHost): void {
       c.target.up()
     }
     const releaseAll = (): void => {
-      for (const code of [...held.keys()]) release(code)
+      for (const code of new Set([...held.keys(), ...holds.keys()])) release(code)
     }
     const outOfReach = (): boolean => latest.current.root()?.closest('[inert]') != null
     return {
@@ -99,10 +108,11 @@ export function useLiveKeys(enabled: boolean, host: LiveKeysHost): void {
           return true
         }
         // Toggles and steps act once a press, not again while the key repeats.
-        if (input.repeat) return true
+        if (input.repeat || holds.has(input.code)) return true
         // A change of mode or EDIT lets every held key go first.
         if (cmd.kind === 'mode' || cmd.kind === 'edit') releaseAll()
-        h.run(cmd)
+        const letGo = h.run(cmd)
+        if (typeof letGo === 'function') holds.set(input.code, letGo)
         return true
       },
       keyup(e: KeyboardEvent): void {
@@ -122,7 +132,7 @@ export function useLiveKeys(enabled: boolean, host: LiveKeysHost): void {
         return liveCommand(input, latest.current.context()) !== null
       },
     }
-  }, [held, counts])
+  }, [held, counts, holds])
 
   useEffect(() => {
     if (!enabled) return

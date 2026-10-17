@@ -12,44 +12,60 @@
 // - The pads are Live's own (MirrorScreen's Pad and KeyCap, [pads]) in the
 //   drawn ones' places ([padPlace]): they play as the grid's do (hold = gate,
 //   a finger per pad), EDIT, ERASE, STEP, ARP and SAMPLE mark them, sounds
-//   drop on them, PROJECT held takes 1 to 9; in KEYS they are the 12 notes,
-//   FX held the punch-ins. A pad sounding lights its whole cap orange, as
-//   strong as the grid's glow.
-// - The keys are Live's where Live has one, as the EP-133 prints them: SOUND
-//   (EDIT; held, the pad's sheet), MAIN as PROJECT (as the EP-133 loads a
-//   project: held, a pad 1 to 9), TEMPO (the click; held, the tempo sheet),
-//   SAMPLE (its panel), FX (the FX sheet; held, the punch-ins), ERASE, KEYS,
-//   A–D, −/+ (the octave in KEYS, the group in PADS), RECORD and PLAY (the
-//   pattern's, PatternLine.tsx). TAKE stays in Live tools; a take going shows
-//   on the display (● and the time) and the plate.
+//   drop on them; in KEYS they are the 12 notes, FX held the punch-ins. A pad
+//   sounding lights its whole cap orange, as strong as the grid's glow. A key
+//   held takes them as the device does (MAIN a project 1 to 9, SOUND, TEMPO
+//   or a group key a number typed, KEYS the key, FADER its assignment).
+// - The keys take the device's combos (live/deviceKeys.ts, DeviceKeys.tsx;
+//   the grid views and Live's function row keep arc's own keys): SOUND,
+//   SHIFT + SOUND (EDIT), TEMPO, TIMING, FX and SHIFT + FX (OUTPUT, then
+//   SIDECHAIN) are pages, MAIN goes back to MAIN; held, keys combine (KEYS + −
+//   / + the octave, a group + − / + its pattern, MAIN + − / + the scene, ERASE
+//   + a group clears it, SHIFT + B undoes, …), a right-click holds a key until
+//   the next, SHIFT clicked holds it for the next key, and the computer's
+//   Shift is SHIFT. − / + step what is held or shown (their names and LEDs
+//   say what). RECORD and PLAY are the pattern's (PatternLine.tsx; with STEP
+//   open RECORD is the panel's), held RECORD with − / + its length. TAKE
+//   stays in Live tools; a take going shows on the display (● and the time)
+//   and the plate. A combo arc has nothing for (the system settings, CHOP, …)
+//   says so on the plate.
+// - A page shows on the device, not in a sheet: the plate's orange line is the
+//   page's ("EDIT · TRIM — X START · Y LENGTH · −/+ PAGE"), a key that opens
+//   arc's own sheet for it; the digits show its word as it opens (SND, EDT,
+//   TRM, TMP, TIM, DLY, OUT, SCH …), then on SOUND the pad's slot; the
+//   display lights FX on FX, OUTPUT and SIDECHAIN, SWING on TIMING, FREE in
+//   free time, the TEMPO and MAIN boxes on their pages, ERASE's while it is
+//   on, COPY and PASTE as they go, and SOUND's box on SOUND and EDIT.
 // - The open panel (SAMPLE, STEP, SCENE) lies over the plate and the display
 //   ([panel]); the display line (S01 and STEP, ERASE, the words) is over the
-//   device (MirrorScreen).
+//   device (MirrorScreen). A page and a panel never show together.
 // - The display lights ▶ while the device plays (MIDI clock), the tempo in
 //   fourteen segments, BPM, ● (RECORD or a take), the metronome with the
 //   click, the group's card A–D and its quarter of the ring (a sounding
 //   group's too), the level meter, and the piano and KEYS in KEYS. The group
 //   LEDs light the group shown and breathe with the other groups sounding;
 //   − and + light where they can step. The plate, where the unit prints its
-//   name, carries arc's status and the last hit.
+//   name, carries arc's status (or the page) and the last hit, or what was
+//   just done ("LENGTH · 4 BARS"), said once for screen readers.
 // - The knobs and the fader turn arc's own sound (DeviceControls.tsx): VOLUME
-//   arc's output, X and Y the effect's X and Y (with a pad's sheet open its
-//   page's X and Y, with SAMPLE LEVEL and THRESH, with STEP VEL and LEN, with
-//   TEMPO held X the tempo), the fader the shown group's level. Their caps
-//   show where they are, and while one turns the plate's hit line shows its
-//   name and value, as the EP-133's display does. A tap (or Enter) still
-//   opens its card.
-// - Every key and control with nothing of arc's (TIMING, SHIFT), and the
-//   knobs and the fader tapped, open a card with its shortcuts from the
-//   guide: arc never sends anything to the device.
+//   arc's output, X and Y what is held, open or shown, as the device's do
+//   (KEYS held its key and scale, TEMPO the tempo, a pad's sheet or EDIT its
+//   page's X and Y, SOUND the pad's LEVEL and PITCH, TIMING the interval and
+//   the swing, FX the effect, OUTPUT the compressor, SIDECHAIN the duck,
+//   SAMPLE LEVEL and THRESH, STEP VEL and LEN), the fader the shown group's
+//   level (its send on FX). Their caps show where they are, and while one
+//   turns the digits and the plate's hit line show its value, as the EP-133's
+//   display does. A tap on a knob or the fader (or Enter) still opens its
+//   card with its shortcuts from the guide; arc never sends anything to the
+//   device.
 import '@fontsource/jost/latin-300.css'
 import '@fontsource/jost/latin-400.css'
 import '@fontsource/jost/latin-500.css'
 import '@fontsource/jost/latin-700.css'
-import type { Component, ComponentChildren, CSSProperties, FunctionComponent, HTMLAttributes, JSX } from 'preact'
+import type { ButtonHTMLAttributes, Component, ComponentChildren, CSSProperties, FunctionComponent, HTMLAttributes, JSX } from 'preact'
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { signal, type ReadonlySignal } from '@preact/signals'
-import { MAX_OCTAVE, MIN_OCTAVE } from '../../core/features/keys'
+import type { FxType } from '../../core/features/fxSettings'
 import type { MirrorState } from '../../core/features/liveMirror'
 import { ROWS } from '../../core/features/padNotes'
 import { parse } from '../../core/text/guideCombo'
@@ -57,11 +73,16 @@ import { CLOSE } from '../../core/text/guideText'
 import { MirrorText } from '../../core/text/mirrorText'
 import { WebText } from '../../core/text/webText'
 import type { MirrorUi } from '../../state/types'
+import type { CoachId } from '../components/Coach'
 import { ComboLine } from '../components/GuideKeys'
-import { FunctionKeysContext, FxKey, ProjectHoldContext, ProjectKey, SoundKey, TempoContext, TempoKey, type DrawnKey } from './FunctionRow'
+import { EDIT_PAGES, padPage } from '../sheets/PadEditPages'
+import { useDeviceKeys, useLayerPress, type DeviceKeysUi } from './DeviceKeys'
+import { groupKey, held, keyLit, type DeviceKey, type DeviceKeys, type DevicePage } from './deviceKeys'
+import { FunctionKeysContext, TempoContext } from './FunctionRow'
 import { PatternGridOver, useScene, worthSaying } from './ScenePanel'
 import { useSample } from './SamplePanel'
-import { DeviceControlsContext, DrawnFader, DrawnKnob, useTurnable, type DeviceControl } from './DeviceControls'
+import { useStep } from './StepPanel'
+import { DrawnFader, DrawnKnob, useTurnable, type DeviceControl } from './DeviceControls'
 import {
   TransportContext,
   hasWords,
@@ -129,6 +150,62 @@ export function plateStatus(st: MirrorState, mirror: MirrorUi | null, take: Take
   return st.activeProject !== null ? MirrorText.project(st.activeProject) : MirrorText.TITLE
 }
 
+/**
+ * A control's readout as the three digits show it ([dot]: the point lit after
+ * that digit, or null): a number right-aligned, its decimals as far as they fit
+ * ("62%" → " 62", "0.02 s" → "0.02", "+1.5" → " 1.5", "-12" → "-12"), an
+ * interval by its denominator ("1/16" → " 16", "1/8T" → " 8T"), else its
+ * first three letters or digits ("ONESHOT" → "ONE"); "---" for none.
+ */
+export function readoutDigits(readout: string): { text: string; dot: number | null } {
+  const r = readout.trim().toUpperCase()
+  const num = /^([+-]?)(\d+)(?:\.(\d+))?(?:%|\s*[A-Z]+)?$/.exec(r)
+  if (num !== null) {
+    const sign = num[1] === '-' ? '-' : ''
+    const whole = sign + num[2]!.replace(/^0+(?=\d)/, '')
+    if (whole.length >= 3) return { text: whole.slice(-3), dot: null }
+    const shown = (whole + (num[3] ?? '')).slice(0, 3)
+    const pad = 3 - shown.length
+    // The point after the whole part, where the digits have one (after the first two only).
+    const at = shown.length > whole.length ? pad + whole.length - 1 : -1
+    return { text: shown.padStart(3, ' '), dot: at >= 0 && at < 2 ? at : null }
+  }
+  const frac = /^1\/(\d+[A-Z]?)$/.exec(r)
+  if (frac !== null) return { text: frac[1]!.slice(-3).padStart(3, ' '), dot: null }
+  const word = r.replace(/[^A-Z0-9-]/g, '')
+  return { text: word === '' ? '---' : word.slice(0, 3).padEnd(3, ' '), dot: null }
+}
+
+/** EDIT's pages as the digits spell them (PadEditPages' EDIT_PAGES order). */
+const EDIT_WORDS = ['SND', 'TRM', 'ENV', 'MID', 'MUT'] as const
+
+/** The word the digits show as page [page] opens ([fx]: the effect on, for FX); null for none (MAIN). */
+export function pageWord(page: DevicePage, fx: FxType, editPage: number): string | null {
+  switch (page) {
+    case 'SOUND':
+      return 'SND'
+    case 'EDIT':
+      return EDIT_WORDS[editPage] ?? 'EDT'
+    case 'TEMPO':
+      return 'TMP'
+    case 'TIMING':
+      return 'TIM'
+    case 'FX':
+      return MirrorText.fxCode(fx)
+    case 'OUTPUT':
+      return 'OUT'
+    case 'SIDECHAIN':
+      return 'SCH'
+    default:
+      return null
+  }
+}
+
+/** The EDIT page's word on the digits, [i] in EDIT_PAGES. */
+export function editWord(i: number): string {
+  return EDIT_WORDS[i] ?? 'EDT'
+}
+
 export interface DeviceViewProps {
   st: MirrorState
   mirror: MirrorUi | null
@@ -140,9 +217,6 @@ export interface DeviceViewProps {
   pads: ComponentChildren
   now: number
   group: number
-  onGroup: (g: number) => void
-  onMode?: ((on: boolean) => void) | undefined
-  onOctave?: ((octave: number) => void) | undefined
   /** TAKE, for the display (null: no TAKE). */
   take: TakeUi | null
   still: boolean
@@ -195,19 +269,41 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
   const digits = displayDigits(st, mirror, take)
   const glows = [0, 1, 2, 3].map((g) => groupGlow(st.pads, g, now))
 
-  const step = (d: number): void => {
-    if (keys.on) props.onOctave?.(Math.max(MIN_OCTAVE, Math.min(MAX_OCTAVE, keys.octave + d)))
-    else props.onGroup(Math.max(0, Math.min(3, group + d)))
-  }
-  const canStep = (d: number): boolean => (keys.on ? keys.octave + d >= MIN_OCTAVE && keys.octave + d <= MAX_OCTAVE : group + d >= 0 && group + d <= 3)
+  // The key layer: the device's combos on the drawn keys, its page shown on the display and the plate.
+  const dk = useDeviceKeys()
+  const layer = dk?.layer ?? null
+  const ks = layer?.state.value ?? null
+  const page: DevicePage = ks?.page ?? 'MAIN'
+  const lit = (k: DeviceKey): boolean => ks !== null && keyLit(ks, k)
+  const shiftLit = layer !== null && layer.shiftHeld()
+  // − and +: what they step now (their names), and where they can.
+  const steps = layer?.route() ?? null
+  // The computer's Shift held is SHIFT, while the device shows.
+  useEffect(() => {
+    if (layer === null || typeof window === 'undefined') return
+    const key = (on: boolean) => (e: KeyboardEvent): void => {
+      if (e.key === 'Shift') layer.setShiftKey(on)
+    }
+    const down = key(true)
+    const up = key(false)
+    const off = (): void => layer.setShiftKey(false)
+    window.addEventListener('keydown', down)
+    window.addEventListener('keyup', up)
+    window.addEventListener('blur', off)
+    return () => {
+      window.removeEventListener('keydown', down)
+      window.removeEventListener('keyup', up)
+      window.removeEventListener('blur', off)
+      off()
+    }
+  }, [layer])
 
   // PATTERN: RECORD and PLAY are the pattern's, the display's ● and ▶ light with it and the plate counts it.
   const transport = useContext(TransportContext)
-  // TEMPO: a tap turns the click on or off, held the tempo sheet; the display's metronome lights with the click.
+  // TEMPO's click: the display's metronome lights with it.
   const tempo = useContext(TempoContext)
-  // SOUND, MAIN (PROJECT) and FX as Live's function keys; SAMPLE opens its panel.
+  // MAIN's project (its switching lights the key).
   const fn = useContext(FunctionKeysContext)
-  const projectHold = useContext(ProjectHoldContext)
   const sample = useSample()
   const scene = useScene()
   const numbers = scene !== null && worthSaying(scene.ui) ? scene.ui.groups : null
@@ -217,7 +313,6 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
     patLight ?? (take?.state.kind === 'recording' ? 'live' : take?.state.kind === 'armed' ? 'armed' : null)
   const patternOn = pat !== null && patternRuns(pat)
   // The knobs and the fader: what each turns now, and the one turned last, shown on the plate for a moment.
-  const controls = useContext(DeviceControlsContext)
   const turning = useMemo(() => signal<DeviceControl | null>(null), [])
   const turnTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(
@@ -227,6 +322,8 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
     [],
   )
   const turned = (which: DeviceControl): void => {
+    // A knob turned with KEYS or TEMPO held spends them (no tap, no sheet as they let go).
+    if (which === 'x' || which === 'y') layer?.turned()
     turning.value = which
     if (turnTimer.current !== null) clearTimeout(turnTimer.current)
     turnTimer.current = setTimeout(() => {
@@ -240,13 +337,8 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
     if (!b) return
     setCard(card?.key === key ? null : { key, x: r.left - b.left, y: r.bottom - b.top + 8, above: r.top - b.top - 8 })
   }
+  const fine = (): boolean => layer?.shiftHeld() === true
 
-  const split = (key: CardKey, x: number, y: number, top: string, bottom: string, topCls: string, botCls: string): JSX.Element => (
-    <button type="button" class="ep-a ep-key ep-key--split" style={at(x, y, 130, 130)} aria-label={`${top} / ${bottom}`} aria-haspopup="dialog" onClick={(e) => openCard(key, e.currentTarget)}>
-      <span class={`ep-h ${topCls}`}>{top}</span>
-      <span class={`ep-h ${botCls}`}>{bottom}</span>
-    </button>
-  )
   // An LED centred on (x, y).
   const led = (x: number, y: number, extra?: HTMLAttributes<HTMLSpanElement>): JSX.Element => (
     <span class="ep-a ep-led" style={at(x - 10, y - 10)} aria-hidden="true" {...extra} />
@@ -257,8 +349,32 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
       {text}
     </span>
   )
+  // A drawn key on the layer (inert without one).
+  const splitKey = (k: DeviceKey, d: DrawnKey, name: string, on: boolean, extra: { held?: boolean; coach?: CoachId; coachLabel?: string } = {}): JSX.Element => (
+    <LayerKey layer={layer} k={k} name={name} lit={on} held={extra.held ?? false} coach={extra.coach} coachLabel={extra.coachLabel} place={d.place} hint={WebText.DEVICE_KEY_HINTS[k] ?? ''}>
+      <span class={`ep-h ${d.topCls}`}>{d.top}</span>
+      <span class={`ep-h ${d.bottomCls}`}>{d.bottom}</span>
+    </LayerKey>
+  )
+  const slim = (k: DeviceKey, y: number, name: string, on: boolean, cls: string, extra: { coach?: CoachId; sel?: boolean } = {}): JSX.Element => (
+    <LayerKey layer={layer} k={k} name={name} lit={on} held={lit(k)} coach={extra.coach} place={at(68, y, 130, 64)} hint={WebText.DEVICE_KEY_HINTS[k] ?? ''} cls={`ep-key--slim ${cls}${extra.sel ? ' is-sel' : ''}`}>
+      {k}
+    </LayerKey>
+  )
 
+  const fxType = dk?.fxType ?? 'NONE'
+  const fxPage = page === 'FX' || page === 'OUTPUT' || page === 'SIDECHAIN'
   const plateHit = keys.on ? (keys.pad !== null ? MirrorText.keysSound(keys.pad, keys.padName) : MirrorText.NO_SOUND) : displayLine(st, mirror)
+  const said = layer?.said.value ?? null
+  // What a key just did is newer than a knob's value: it takes the line.
+  useEffect(() => {
+    if (said === null) return
+    if (turnTimer.current !== null) clearTimeout(turnTimer.current)
+    turnTimer.current = null
+    turning.value = null
+  }, [said?.n])
+  const minusName = steps !== null ? (WebText.DEVICE_MINUS_PLUS[steps.route]?.[0] ?? WebText.PREV_GROUP) : WebText.PREV_GROUP
+  const plusName = steps !== null ? (WebText.DEVICE_MINUS_PLUS[steps.route]?.[1] ?? WebText.NEXT_GROUP) : WebText.NEXT_GROUP
   return (
     <div class="ko-device" ref={box}>
       <div class="ko-device__box" style={{ width: `${DEVICE_W * scale}px`, height: `${DEVICE_H * scale}px` }}>
@@ -282,15 +398,19 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
               <path d="M2 1.8H48M2 56.2H48M15 1.8V56.2M35 1.8V56.2" />
             </svg>
           </span>
-          {transport !== null && hasWords(transport.ui) ? (
+          {/* A page's line (a key to arc's own sheet for it), else the pattern's words, else the status. */}
+          {dk !== null && page !== 'MAIN' ? (
+            <PageLine dk={dk} page={page} group={group} />
+          ) : transport !== null && hasWords(transport.ui) ? (
             <PlateWords t={transport} still={props.still} />
           ) : (
             <span class="ep-a ep-plate__status" aria-live="polite">{plateStatus(st, mirror, take)}</span>
           )}
           {/* The hit, said at most once a second (Kotlin's spoken()): a run of hits is read where it ends.
-              While a knob or the fader turns it shows its value instead (the slider says it itself). */}
-          <PlateHit hit={plateHit} turning={turning} group={group} />
-          <Spoken text={plateHit} />
+              While a knob or the fader turns it shows its value instead (the slider says it itself); what a
+              key just did shows a moment ("LENGTH · 4 BARS"), and is said. */}
+          <PlateHit hit={said?.text ?? plateHit} turning={turning} group={group} />
+          <Spoken text={said?.text ?? plateHit} />
           <div class="ep-a ep-grille" aria-hidden="true"><Grille /></div>
 
           {/* The display: the glass, its reflection, the icons and two pins. */}
@@ -298,9 +418,19 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
           <div class="ep-a ep-disp__gloss" aria-hidden="true" />
           <svg class="ep-a ep-lcd" viewBox="0 0 1444 396" aria-hidden="true">
             <LcdPrint />
-            {/* The piano and KEYS in KEYS (SOUND printed in its box otherwise). */}
+            <LcdLit
+              fx={fxPage}
+              swing={page === 'TIMING'}
+              free={dk !== null && !dk.quantize}
+              main={page === 'MAIN' && !offline}
+              tempo={page === 'TEMPO'}
+              erase={pat?.erase === true}
+              mute={dk?.muted === true}
+              clip={layer?.lcd.value ?? null}
+            />
+            {/* The piano and KEYS in KEYS (SOUND printed in its box otherwise, lit on SOUND and EDIT). */}
             {ic(98, R[2], C.white, PIANO, keys.on)}
-            {wordBox(273, 384, C.white, keys.on ? MirrorText.MODE_KEYS.toUpperCase() : 'SOUND', keys.on)}
+            {wordBox(273, 384, C.white, keys.on ? MirrorText.MODE_KEYS.toUpperCase() : 'SOUND', keys.on || page === 'SOUND' || page === 'EDIT')}
             {/* The group cards: the group shown lit, a sounding group's offset lit. */}
             {[0, 1, 2, 3].map((g) => {
               const on = !offline && g === group
@@ -315,7 +445,7 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
                 </g>
               )
             })}
-            {ic(815, R[0], C.blue, <>{t(-2, -1, 'BPM', 21, 'w', 700)}<path d="M24 -20v34l-6 6h-40" class="s" stroke-width="3" /></>, digits.bpm)}
+            <LcdDigits base={digits} turning={turning} group={group} dk={dk} />
             {ic(820, R[1] + 2, C.white, METRONOME, st.playing === true || tempo?.clickOn === true, 'ep-metro')}
             {ic(557, R[2], C.red, <circle r="21" />, recLight !== null, `ep-rec${recLight === 'armed' && !props.still ? ' is-armed' : ''}`)}
             {ic(624, R[2], C.white, <path d="M-15 -21L21 0L-15 21z" />, st.playing === true || patternOn, `ep-play${st.playing === true || patternOn ? ' is-on' : ''}`)}
@@ -324,7 +454,6 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
               {QUARTER_GROUP.map((g, k) => quarter(1113, RING_Y, k, GROUP_COLOURS[g]!, (!offline && g === group) || glows[g]! > 0 ? 1 : 'var(--lcd-ghost)'))}
             </g>
             <Meter level={Math.max(...glows)} />
-            {[...digits.text].map((ch, i) => <Digit key={i} ch={ch} i={i} dot={digits.dot && i === 0} />)}
           </svg>
           <span class="ep-a ep-disp__pin" style={at(715, 466)} aria-hidden="true" />
           <span class="ep-a ep-disp__pin" style={at(715, 818)} aria-hidden="true" />
@@ -336,22 +465,14 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
           {label(1114, 886, 'BPM', true)}
           <span class="ep-a ep-line" style={at(1160, 885, 68, 2)} aria-hidden="true" />
           {label(1310, 886, 'METRONOME', true)}
-          <Knob kind="vol" which="volume" label="Volume" card="VOLUME" place={at(68, KROW)} group={group} onCard={openCard} onTurned={turned} />
+          <Knob kind="vol" which="volume" label="Volume" card="VOLUME" place={at(68, KROW)} group={group} onCard={openCard} onTurned={turned} fine={fine} />
           {[265, 461, 657].map((x) => well(x, KROW, 130, 130))}
-          {fn?.sound ? <SoundKey s={fn.sound} drawn={DRAWN.SOUND} /> : split('SOUND', 265, KROW, 'SOUND', 'EDIT', 'ep-h--black', 'ep-h--light ep-h--edit')}
-          {/* MAIN is PROJECT, as the EP-133 loads a project: held, a pad 1 to 9. */}
-          {fn?.project && projectHold ? (
-            <ProjectKey p={fn.project} hold={projectHold} drawn={DRAWN.MAIN} />
-          ) : (
-            split('MAIN', 461, KROW, 'MAIN', 'COMMIT', 'ep-h--black', 'ep-h--orange')
-          )}
-          {tempo !== null ? (
-            <TempoKey t={tempo} drawn={DRAWN.TEMPO} hold={controls?.tempoHold} />
-          ) : (
-            split('TEMPO', 657, KROW, 'TEMPO', 'LOOP', 'ep-h--black', 'ep-h--grey')
-          )}
-          <Knob kind="x" which="x" label="Knob X" card="KNOBX" place={at(1049, KROW)} group={group} onCard={openCard} onTurned={turned} />
-          <Knob kind="y" which="y" label="Knob Y" card="KNOBY" place={at(1245, KROW)} group={group} onCard={openCard} onTurned={turned} />
+          {splitKey('SOUND', DRAWN.SOUND, MirrorText.FN_SOUND, page === 'SOUND' || page === 'EDIT' || lit('SOUND'), { coach: 'live.sound' })}
+          {/* MAIN: the MAIN page; held, a pad 1 to 9 picks a project (as the EP-133 loads one), − / + the scene. */}
+          {splitKey('MAIN', DRAWN.MAIN, WebText.DEVICE_MAIN_KEY, lit('MAIN') || fn?.project?.switching === true, { coach: 'live.project', coachLabel: WebText.COACH_DEVICE_MAIN })}
+          {splitKey('TEMPO', DRAWN.TEMPO, MirrorText.FN_TEMPO, page === 'TEMPO' || lit('TEMPO'), { coach: 'live.tempo', coachLabel: WebText.COACH_DEVICE_TEMPO })}
+          <Knob kind="x" which="x" label="Knob X" card="KNOBX" place={at(1049, KROW)} group={group} onCard={openCard} onTurned={turned} fine={fine} />
+          <Knob kind="y" which="y" label="Knob Y" card="KNOBY" place={at(1245, KROW)} group={group} onCard={openCard} onTurned={turned} fine={fine} />
           <span class="ep-a ep-badge ep-badge--x" style={at(1098, 1067)} aria-hidden="true">X</span>
           <span class="ep-a ep-badge ep-badge--y" style={at(1294, 1067)} aria-hidden="true">Y</span>
           {/* GAIN (orange) and SWING (black) brackets, the line broken round the word. */}
@@ -382,64 +503,25 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
               ))}
             </span>
           ))}
-          {led(1082, 1669, { class: `ep-a ep-led${canStep(-1) ? ' is-on' : ''}` })}
-          {led(1147, 1669, { class: `ep-a ep-led${canStep(1) ? ' is-on' : ''}` })}
+          {led(1082, 1669, { class: `ep-a ep-led${steps?.minus === true ? ' is-on' : ''}` })}
+          {led(1147, 1669, { class: `ep-a ep-led${steps?.plus === true ? ' is-on' : ''}` })}
 
           {well(68, ROW_Y[0]!, 130, 64)}
-          <button
-            type="button"
-            class={`ep-a ep-key ep-key--black ep-key--slim${keys.on ? ' is-sel' : ''}`}
-            style={at(68, ROW_Y[0]!, 130, 64)}
-            aria-pressed={keys.on}
-            aria-label={MirrorText.MODE_KEYS}
-            data-coach="live.mode"
-            onClick={() => props.onMode?.(!keys.on)}
-          >
-            KEYS
-          </button>
+          {slim('KEYS', ROW_Y[0]!, MirrorText.MODE_KEYS, keys.on || lit('KEYS'), 'ep-key--black', { coach: 'live.mode', sel: keys.on })}
           {well(68, 1246, 130, 64)}
-          <button type="button" class="ep-a ep-key ep-key--black ep-key--slim" style={at(68, 1246, 130, 64)} aria-haspopup="dialog" onClick={(e) => openCard('FADER', e.currentTarget)}>
-            FADER
-          </button>
-          <Fader group={group} onCard={openCard} onTurned={turned} />
+          {slim('FADER', 1246, WebText.DEVICE_FADER_KEY, lit('FADER'), 'ep-key--black')}
+          <Fader group={group} onCard={openCard} onTurned={turned} fine={fine} layer={layer} />
           {well(68, 1769, 130, 64)}
-          <button type="button" class="ep-a ep-key ep-key--shift ep-key--slim" style={at(68, 1769, 130, 64)} aria-haspopup="dialog" onClick={(e) => openCard('SHIFT', e.currentTarget)}>
-            SHIFT
-          </button>
+          {slim('SHIFT', 1769, WebText.DEVICE_SHIFT_KEY, shiftLit, 'ep-key--shift')}
 
           {/* The guide's tags on the group keys and the pads: boxes over them (their keys are placed one by one). */}
           <span class="ep-a ep-area" style={at(265, ROW_Y[0]!, 130, 716)} data-coach="live.groups" aria-hidden="true" />
           <span class="ep-a ep-area" style={at(461, ROW_Y[0]!, 522, 716)} data-coach={keys.on ? 'live.keys' : 'live.pads'} aria-hidden="true" />
           {ROW_Y.map((y) => well(265, y, 130, 128))}
           <div role="tablist" aria-label={MirrorText.GROUP}>
-            {[0, 1, 2, 3].map((g) => {
-              // The group's pattern in the glyph's place where the scene is worth saying (as Live's group keys).
-              const col = numbers?.[g] ?? null
-              const queued = col?.queued ?? null
-              return (
-                <button
-                  key={g}
-                  type="button"
-                  role="tab"
-                  aria-selected={g === group}
-                  aria-label={`${MirrorText.GROUP} ${MirrorText.groupKey(g)}` + (col !== null ? MirrorText.groupKeyPattern(col.number, queued) : '')}
-                  class={`ep-a ep-key ep-key--group${queued !== null ? ' is-queued' : ''}`}
-                  style={at(265, ROW_Y[g]!, 130, 128)}
-                  onClick={() => props.onGroup(g)}
-                >
-                  <span class="ep-key__letter" aria-hidden="true">{MirrorText.groupKey(g)}</span>
-                  {col !== null ? (
-                    <span class={`ep-key__num${queued !== null ? ' is-queued' : ''}`} aria-hidden="true">
-                      {queued === null ? MirrorText.patternNumber(col.number) : MirrorText.numberMove(col.number, queued)}
-                    </span>
-                  ) : (
-                    <svg class="ep-key__icon" viewBox="0 0 12 12" aria-hidden="true">
-                      <path d={GROUP_GLYPHS[g]} />
-                    </svg>
-                  )}
-                </button>
-              )
-            })}
+            {[0, 1, 2, 3].map((g) => (
+              <GroupKey key={g} layer={layer} g={g} selected={g === group} held={lit(groupKey(g))} col={numbers?.[g] ?? null} />
+            ))}
           </div>
 
           {ROW_Y.map((y) => COLS.map((x) => well(x, y, 130, 128)))}
@@ -448,47 +530,18 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
           </div>
 
           {[ROW_Y[0]!, ROW_Y[1]!].map((y) => [1050, 1246].map((x) => well(x, y, 130, 130)))}
-          {sample !== null ? (
-            <button
-              type="button"
-              class={`ep-a ep-key ep-key--split${sample.ui.on ? ' is-lit' : ''}`}
-              style={at(1050, ROW_Y[0]!, 130, 130)}
-              aria-label="SAMPLE / CHOP"
-              aria-pressed={sample.ui.on}
-              onClick={() => sample.onToggle()}
-            >
-              <span class="ep-h ep-h--orange">SAMPLE</span>
-              <span class="ep-h ep-h--light">CHOP</span>
-            </button>
-          ) : (
-            split('SAMPLE', 1050, ROW_Y[0]!, 'SAMPLE', 'CHOP', 'ep-h--orange', 'ep-h--light')
-          )}
-          {split('TIMING', 1246, ROW_Y[0]!, 'TIMING', 'CORRECT', 'ep-h--black', 'ep-h--light')}
-          {fn?.fx ? <FxKey f={fn.fx} drawn={DRAWN.FX} /> : split('FX', 1050, ROW_Y[1]!, 'FX', 'OUTPUT', 'ep-h--black', 'ep-h--light')}
-          {pat !== null && transport !== null ? (
-            <button
-              type="button"
-              class={`ep-a ep-key ep-key--split${pat.erase ? ' is-lit' : ''}`}
-              style={at(1246, ROW_Y[1]!, 130, 130)}
-              aria-label={MirrorText.ERASE}
-              aria-pressed={pat.erase}
-              data-coach="live.erase"
-              onClick={() => transport.onErase(!pat.erase)}
-            >
-              <span class="ep-h ep-h--lighter">ERASE</span>
-              <span class="ep-h ep-h--light">SYSTEM</span>
-            </button>
-          ) : (
-            split('ERASE', 1246, ROW_Y[1]!, 'ERASE', 'SYSTEM', 'ep-h--lighter', 'ep-h--light')
-          )}
+          {splitKey('SAMPLE', DRAWN.SAMPLE, 'SAMPLE / CHOP', sample?.ui.on === true || lit('SAMPLE'))}
+          {splitKey('TIMING', DRAWN.TIMING, WebText.DEVICE_TIMING_KEY, page === 'TIMING' || lit('TIMING'))}
+          {splitKey('FX', DRAWN.FX, MirrorText.FX_EFFECTS, fxType !== 'NONE' || fxPage || lit('FX'), { held: ks?.punch === true })}
+          {splitKey('ERASE', DRAWN.ERASE, MirrorText.ERASE, pat?.erase === true || lit('ERASE'), { coach: 'live.erase' })}
           {[ROW_Y[2]!, ROW_Y[3]!].map((y) => [1050, 1246].map((x) => well(x, y, 130, 128)))}
           <button
             type="button"
             class="ep-a ep-key ep-key--light ep-key--sign"
             style={at(1050, ROW_Y[2]!, 130, 128)}
-            aria-label={keys.on ? WebText.OCTAVE_DOWN : WebText.PREV_GROUP}
-            disabled={!canStep(-1)}
-            onClick={() => step(-1)}
+            aria-label={minusName}
+            disabled={steps?.minus !== true}
+            onClick={(e) => layer?.minusPlus(-1, e.shiftKey)}
           >
             <svg viewBox="0 0 44 44" aria-hidden="true"><path d="M4 22H40" /></svg>
           </button>
@@ -496,14 +549,14 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
             type="button"
             class="ep-a ep-key ep-key--light ep-key--sign"
             style={at(1246, ROW_Y[2]!, 130, 128)}
-            aria-label={keys.on ? WebText.OCTAVE_UP : WebText.NEXT_GROUP}
-            disabled={!canStep(1)}
-            onClick={() => step(1)}
+            aria-label={plusName}
+            disabled={steps?.plus !== true}
+            onClick={(e) => layer?.minusPlus(1, e.shiftKey)}
           >
             <svg viewBox="0 0 44 44" aria-hidden="true"><path d="M4 22H40M22 4V40" /></svg>
           </button>
           {transport !== null ? (
-            <DeviceTransport t={transport} still={props.still} />
+            <DeviceTransport t={transport} still={props.still} layer={layer} />
           ) : (
             <>
               <button
@@ -534,6 +587,153 @@ export function DeviceView(props: DeviceViewProps): JSX.Element {
         {card && <ShortcutCard card={card} boxWidth={DEVICE_W * scale} boxHeight={DEVICE_H * scale} onClose={() => setCard(null)} onGuide={props.onGuide} />}
       </div>
     </div>
+  )
+}
+
+/**
+ * A drawn key on the key layer ([k], named [name] for screen readers, its
+ * combos its description): lit (a ring in its cap, aria-pressed) while [lit],
+ * its cap orange while [held] (FX's punch-ins). Without a layer it rests.
+ */
+function LayerKey(props: {
+  layer: DeviceKeys | null
+  k: DeviceKey
+  name: string
+  lit: boolean
+  held: boolean
+  place: CSSProperties
+  hint: string
+  coach?: CoachId | undefined
+  /** The guide overlay's tag where the row's key says otherwise (MAIN, TEMPO). */
+  coachLabel?: string | undefined
+  cls?: string
+  children: ComponentChildren
+}): JSX.Element {
+  const press = useLayerPress(props.layer, props.k)
+  const cls = props.cls ?? 'ep-key--split'
+  return (
+    <button
+      type="button"
+      class={`ep-a ep-key ${cls}${props.lit ? ' is-lit' : ''}${props.held ? ' is-held' : ''}`}
+      style={props.place}
+      aria-label={props.name}
+      aria-pressed={props.lit}
+      aria-description={props.hint !== '' ? `${props.hint}. ${WebText.DEVICE_KEY_HINTS.RIGHT_CLICK}` : undefined}
+      aria-disabled={props.layer === null ? true : undefined}
+      data-coach={props.coach}
+      data-coach-label={props.coachLabel}
+      {...press}
+    >
+      {props.children}
+    </button>
+  )
+}
+
+/** Group [g]'s key: a tab, its group's pattern in the glyph's place where the scene is worth saying (as Live's group keys); on the layer, held as the device's. */
+function GroupKey(props: { layer: DeviceKeys | null; g: number; selected: boolean; held: boolean; col: { readonly number: number; readonly queued: number | null } | null }): JSX.Element {
+  const { g, col } = props
+  const press = useLayerPress(props.layer, groupKey(g))
+  const queued = col?.queued ?? null
+  return (
+    <button
+      type="button"
+      role="tab"
+      aria-selected={props.selected}
+      aria-label={`${MirrorText.GROUP} ${MirrorText.groupKey(g)}` + (col !== null ? MirrorText.groupKeyPattern(col.number, queued) : '')}
+      aria-description={`${WebText.DEVICE_KEY_HINTS.GROUP}. ${WebText.DEVICE_KEY_HINTS.RIGHT_CLICK}`}
+      class={`ep-a ep-key ep-key--group${queued !== null ? ' is-queued' : ''}${props.held ? ' is-held' : ''}`}
+      style={at(265, ROW_Y[g]!, 130, 128)}
+      {...press}
+    >
+      <span class="ep-key__letter" aria-hidden="true">{MirrorText.groupKey(g)}</span>
+      {col !== null ? (
+        <span class={`ep-key__num${queued !== null ? ' is-queued' : ''}`} aria-hidden="true">
+          {queued === null ? MirrorText.patternNumber(col.number) : MirrorText.numberMove(col.number, queued)}
+        </span>
+      ) : (
+        <svg class="ep-key__icon" viewBox="0 0 12 12" aria-hidden="true">
+          <path d={GROUP_GLYPHS[g]} />
+        </svg>
+      )}
+    </button>
+  )
+}
+
+/**
+ * The plate's orange line on a page: its name and what it shows, then what
+ * X, Y and − / + do there ("EDIT · TRIM — X START · Y LENGTH · −/+ PAGE"),
+ * a key that opens arc's own sheet for the page; said as it changes.
+ */
+function PageLine(props: { dk: DeviceKeysUi; page: DevicePage; group: number }): JSX.Element {
+  const { dk, page } = props
+  const x = useTurnable('x', props.group)
+  const y = useTurnable('y', props.group)
+  const tempo = useContext(TempoContext)
+  const word = WebText.DEVICE_PAGES[page] ?? page
+  const sel = dk.selected
+  const detail =
+    page === 'SOUND'
+      ? sel !== null
+        ? `${sel.pad.groupLetter} ${sel.pad.label}`
+        : null
+      : page === 'EDIT'
+        ? MirrorText.pageName(Math.max(0, EDIT_PAGES.indexOf(padPage.value))).toUpperCase()
+        : page === 'TEMPO'
+          ? tempo !== null
+            ? String(tempo.deviceBpm !== null ? Math.round(tempo.deviceBpm) : tempo.bpm)
+            : null
+          : page === 'TIMING'
+            ? (dk.quantize ? MirrorText.QUANTIZE : MirrorText.FREE_TIME).toUpperCase()
+            : page === 'FX'
+              ? MirrorText.fxName(dk.fxType).toUpperCase()
+              : null
+  const head = detail !== null ? `${word} · ${detail}` : word
+  const parts = [x !== null ? `X ${x.name}` : null, y !== null ? `Y ${y.name}` : null, WebText.DEVICE_PAGE_STEPS[page] ?? null].filter((p): p is string => p !== null)
+  const text = WebText.devicePageLine(head, parts)
+  return (
+    <>
+      <button type="button" class="ep-a ep-plate__status ep-plate__page" aria-label={`${text}. ${WebText.DEVICE_PAGE_SHEET}`} onClick={() => dk.openSheet(page)}>
+        {text}
+      </button>
+      <Spoken text={text} />
+    </>
+  )
+}
+
+/**
+ * The three digits: [base] (the tempo, a take's time, OFF), or, first that
+ * applies, a number typed while SOUND, TEMPO or a group is held, the value
+ * of the control turning, a page's word or a value just set ([DeviceKeys.flash]),
+ * SOUND's slot on its page, TEMPO's tempo on its. Read here alone, so a turn re-renders the digits only.
+ */
+function LcdDigits(props: { base: { text: string; dot: boolean; bpm: boolean }; turning: ReadonlySignal<DeviceControl | null>; group: number; dk: DeviceKeysUi | null }): JSX.Element {
+  const { base, dk } = props
+  const turn = useTurnable(props.turning.value, props.group)
+  const s = dk?.layer.state.value ?? null
+  const flash = dk?.layer.flash.value ?? null
+  const tempo = useContext(TempoContext)
+  const fixed = base.text === 'OFF' || base.dot
+  const slot = s?.page === 'SOUND' ? (dk?.selected?.slot ?? null) : null
+  // TEMPO's page: arc's tempo (the device's while it sends its clock).
+  const bpmNow = s?.page === 'TEMPO' && tempo !== null ? String(Math.min(999, Math.round(tempo.deviceBpm ?? tempo.bpm))).padStart(3, ' ') : null
+  const turned = !fixed && !(s !== null && s.dialKey !== null && s.dial !== '') && turn !== null ? readoutDigits(turn.readout) : null
+  const text = fixed
+    ? base.text
+    : s !== null && s.dialKey !== null && s.dial !== ''
+      ? s.dial.padStart(3, ' ')
+      : turned !== null
+        ? turned.text
+        : flash !== null
+          ? flash
+          : slot !== null
+            ? String(slot).padStart(3, '0').slice(-3)
+            : (bpmNow ?? base.text)
+  const bpm = (text === base.text && base.bpm) || (bpmNow !== null && text === bpmNow)
+  return (
+    <>
+      {ic(815, R[0], C.blue, <>{t(-2, -1, 'BPM', 21, 'w', 700)}<path d="M24 -20v34l-6 6h-40" class="s" stroke-width="3" /></>, bpm)}
+      {[...text.padEnd(3, ' ').slice(0, 3)].map((ch, i) => <Digit key={i} ch={ch} i={i} dot={fixed ? base.dot && i === 0 : turned?.dot === i} />)}
+    </>
   )
 }
 
@@ -669,9 +869,37 @@ const GLYPHS: Record<string, readonly string[]> = {
   '8': ['a', 'b', 'c', 'd', 'e', 'f', 'g1', 'g2'],
   '9': ['a', 'b', 'c', 'd', 'f', 'g1', 'g2'],
   '-': ['g1', 'g2'],
-  O: ['a', 'b', 'c', 'd', 'e', 'f'],
+  // The letters, as fourteen segments draw them (h and l the middle's halves, i j m n the diagonals).
+  A: ['a', 'b', 'c', 'e', 'f', 'g1', 'g2'],
+  B: ['a', 'b', 'c', 'd', 'h', 'l', 'g2'],
+  C: ['a', 'd', 'e', 'f'],
+  D: ['a', 'b', 'c', 'd', 'h', 'l'],
+  E: ['a', 'd', 'e', 'f', 'g1', 'g2'],
   F: ['a', 'e', 'f', 'g1', 'g2'],
+  G: ['a', 'c', 'd', 'e', 'f', 'g2'],
+  H: ['b', 'c', 'e', 'f', 'g1', 'g2'],
+  I: ['a', 'd', 'h', 'l'],
+  J: ['b', 'c', 'd', 'e'],
+  K: ['e', 'f', 'g1', 'j', 'n'],
+  L: ['d', 'e', 'f'],
+  M: ['b', 'c', 'e', 'f', 'i', 'j'],
+  N: ['b', 'c', 'e', 'f', 'i', 'n'],
+  O: ['a', 'b', 'c', 'd', 'e', 'f'],
+  P: ['a', 'b', 'e', 'f', 'g1', 'g2'],
+  Q: ['a', 'b', 'c', 'd', 'e', 'f', 'n'],
+  R: ['a', 'b', 'e', 'f', 'g1', 'g2', 'n'],
+  S: ['a', 'c', 'd', 'f', 'g1', 'g2'],
+  T: ['a', 'h', 'l'],
+  U: ['b', 'c', 'd', 'e', 'f'],
+  V: ['e', 'f', 'm', 'j'],
+  W: ['b', 'c', 'e', 'f', 'm', 'n'],
+  X: ['i', 'j', 'm', 'n'],
+  Y: ['i', 'j', 'l'],
+  Z: ['a', 'd', 'j', 'm'],
 }
+
+/** The characters the digits can draw. */
+export const DIGIT_GLYPHS: ReadonlySet<string> = new Set([' ', ...Object.keys(GLYPHS)])
 
 /** Digit [i] of three in fourteen segments, the unlit ones faintly visible; [dot]: the point after it. */
 function Digit(props: { ch: string; i: number; dot: boolean }): JSX.Element {
@@ -688,21 +916,18 @@ function Digit(props: { ch: string; i: number; dot: boolean }): JSX.Element {
   )
 }
 
-/** Everything the display prints that never lights here (the battery always does): drawn once. */
+/** Everything the display prints that never lights here (the battery always does): drawn once. What the key layer lights is [LcdLit]. */
 const LcdPrint = once(function LcdPrint(): JSX.Element {
   const grid = (k: number): JSX.Element => <path key={k} d={`M${-22 + k * 6} -22V22M-22 ${-22 + k * 11}H2`} class="s" stroke-width="1.3" style={{ stroke: C.tan }} />
   const slabs = ['M2 -22h20v44h-20z', 'M2 -22h20v44h-26z', 'M8 -22h14v44h-26z', 'M-2 -22h24v44h-26z']
   const lid = (stroke?: string): JSX.Element => <path d="M-22 -14v-8h44v8" class="s" stroke-width="3" style={stroke ? { stroke } : undefined} />
-  const fxBars = (x: number): JSX.Element =>
-    ic(x, R[2], C.red, <>{[-24, -18, -12, -6, 0, 6, 12, 18].map((bx) => <rect key={bx} x={bx} y="-13" width="4" height="26" />)}<rect x="-24" y="-3" width="46" height="2.5" class="k" /></>)
   const levels = [5, 10, 14, 9, 12, 7, 4]
   const yGrid: JSX.Element[] = []
   for (let k = 0; k <= 10; k++) yGrid.push(<path key={k} d={`M${1258 + k * 11.3} ${RING_Y - 56}V${RING_Y + 56}M1258 ${RING_Y - 56 + k * 11.2}H1371`} stroke={C.pink} stroke-width="1.4" />)
   return (
     <>
-      {/* Column 1: the battery, MUTE and the fader's page. */}
+      {/* Column 1: the battery and the fader's page (MUTE is LcdLit's). */}
       {ic(98, R[0], C.red, <><rect x="-24" y="-10" width="42" height="20" /><rect x="18" y="-5" width="6" height="10" /></>, true)}
-      {ic(98, R[1], C.white, <><path d="M-26 -17h52a4 4 0 0 1 4 4v20a4 4 0 0 1-4 4h-19l-7 10v-10h-26a4 4 0 0 1-4-4v-20a4 4 0 0 1 4-4z" />{t(0, -3, 'MUTE', 14, 'k', 700)}</>)}
       {ic(98, R[3], C.white, <><path d="M-20 20L18 -18" class="s" stroke-width="3" /><circle cx="-2" cy="-4" r="7" style={{ fill: C.red }} /><path d="M8 -18h10v10M-20 10v10h10" class="s" stroke-width="2.6" style={{ stroke: C.blue }} /></>)}
       {/* Column 2: the fader's values, a grid and a slab. */}
       {[C.orange, C.red, C.pink, C.blue].map((col, r) => (
@@ -722,8 +947,6 @@ const LcdPrint = once(function LcdPrint(): JSX.Element {
         {[0, 1, 2, 3].map((k) => quarter(1314, RING_Y, k, [C.red, C.pink, C.blue, C.orange][k]!, 1))}
       </g>
       {/* Row 2. */}
-      {ic(299, R[1], C.red, <><path d="M0 -24v12M-9 -15l9 -9 9 9" class="s" stroke-width="3" /><rect x="-22" y="-8" width="44" height="22" rx="2" />{t(0, 3, 'COPY', 14, 'k', 700)}</>)}
-      {ic(361, R[1], C.white, <><rect x="-22" y="-22" width="44" height="20" rx="3" />{t(0, -12, 'PASTE', 13, 'k', 700)}<path d="M0 -2v22M-9 11l9 9 9 -9" class="s" stroke-width="3" /></>)}
       {ic(423, R[1], C.red, <><path d="M-19 -21h32l6 6v36h-38z" /><rect x="-10" y="-21" width="16" height="11" class="k" /><rect x="-12" y="4" width="24" height="14" style={{ fill: C.white }} /></>)}
       {ic(493, R[1], C.pink, <><path d="M20 -20h-40v34l6 6h34" class="s" stroke-width="3" />{t(2, 0, 'TIC', 22, 'w', 700)}</>)}
       {ic(882, R[1], C.orange, <><circle cx="9" cy="-12" r="7" class="s" stroke-width="3" /><path d="M-18 4L6 -8M2 -20l-6 22" class="s" stroke-width="3" />{[-18, -8, 2, 12].map((x) => <rect key={x} x={x} y="12" width="7" height="7" style={{ fill: C.white }} />)}</>)}
@@ -736,27 +959,47 @@ const LcdPrint = once(function LcdPrint(): JSX.Element {
       {ic(487, R[2], C.white, <>{lid()}<path d="M-14 14a10 8 0 0 1 14 -10l6 -12a3 3 0 0 1 4 2l-3 12a8 8 0 0 1 3 8z" /><path d="M-22 20h36l8 -8" class="s" stroke-width="3" style={{ stroke: C.blue }} /></>)}
       {ic(689, R[2], C.white, <><path d="M-6 -14h-10a5 5 0 0 0 -5 5v18a5 5 0 0 0 5 5h32a5 5 0 0 0 5 -5v-18a5 5 0 0 0 -5 -5h-4" class="s" stroke-width="3.2" /><path d="M-8 -14l8 -7v14z" /></>)}
       {ic(753, R[2], C.blue, <><path d="M-21 -21h42v42h-42z" /><path d="M-12 8l10 -14h18M-4 -2h20M-2 4h16M-4 10h12" class="s" stroke-width="3.2" style={{ stroke: C.white }} /></>)}
-      {fxBars(820)}
-      {fxBars(951)}
-      {ic(886, R[2], C.white, t(0, 1, 'FX', 40, '', 400, 'middle', '0'))}
       {ic(1016, R[2], C.orange, <><rect x="-8" y="-22" width="16" height="6" rx="2" style={{ fill: C.tan }} /><rect x="-10" y="-16" width="20" height="26" rx="4" style={{ fill: C.tan }} /><rect x="-12" y="10" width="24" height="7" /><path d="M-7 18v5M-2 18v5M3 18v5M8 18v5" class="s" stroke-width="2" /></>)}
       {ic(1083, R[2], C.orange, <><rect x="-21" y="-21" width="42" height="42" rx="2" /><path d="M-21 21L4 -4" class="s" stroke-width="5" style={{ stroke: '#121212' }} /><circle cx="5" cy="-5" r="7" style={{ fill: C.white }} /></>)}
       {ic(1145, R[2], C.orange, <><rect x="-21" y="-21" width="42" height="42" rx="3" /><path d="M-21 0h10M10 0h11" class="s" stroke-width="3" style={{ stroke: C.white }} /><rect x="-11" y="-5" width="21" height="10" style={{ fill: C.white }} /></>)}
       {ic(1279, R[2], C.white, <><circle r="15" class="s" stroke-width="4" /><path d="M7 7l12 12" class="s" stroke-width="4" /></>)}
-      {ic(1340, R[2], C.blue, <><path d="M-20 -8c6 -14 12 -14 18 0s12 14 20 0" class="s" stroke-width="3" />{t(0, 13, 'FREE', 16, 'w', 700)}</>)}
       {/* Row 4: the words in their boxes. */}
       {ic(433, R[3], C.white, <><path d="M-14 -14h-6v28h6" class="s" stroke-width="3" style={{ stroke: C.orange }} /><path d="M-6 16v-8a14 14 0 1 1 18 -4l-2 12z" /></>)}
-      {wordBox(474, 578, C.orange, 'MAIN')}
       {ic(619, R[3], C.orange, <>{[...Array(12).keys()].map((k) => { const a = (k * Math.PI) / 6; return <path key={k} d={`M${(5 * Math.cos(a)).toFixed(1)} ${(5 * Math.sin(a)).toFixed(1)}L${(16 * Math.cos(a)).toFixed(1)} ${(16 * Math.sin(a)).toFixed(1)}`} class="s" stroke-width="3.5" /> })}<path d="M20 -16h4v32h-4" class="s" stroke-width="3" /></>)}
-      {wordBox(670, 773, C.blue, 'TEMPO')}
-      {wordBox(799, 908, C.red, 'ERASE', false, true)}
       {wordBox(928, 1037, C.pink, 'SYSTEM')}
       {ic(1083, R[3], C.white, <><rect x="-16" y="-18" width="32" height="24" rx="2" class="s" stroke-width="3" /><path d="M-22 18l6 -10h32l6 10z" /></>)}
       {ic(1145, R[3], C.red, <><path d="M0 -21L23 19H-23z" />{t(0, 9, 'CLIP', 11, 'w', 700)}</>)}
-      {ic(1312, R[3], C.red, <>{t(16, -8, 'SWING', 17, '', 700)}<path d="M-4 18c12 0 26 -4 36 -14" class="s" stroke-width="3" style={{ stroke: C.pink }} /><circle cx="-38" cy="-8" r="6" style={{ fill: C.tan }} /><rect x="-44" y="-2" width="13" height="14" style={{ fill: C.tan }} /><rect x="-44" y="12" width="13" height="10" style={{ fill: C.blue }} /><circle cx="-24" cy="-4" r="4" /></>)}
     </>
   )
 })
+
+/** The display's bars round FX (red, cut through the middle). */
+const fxBars = (x: number, on: boolean): JSX.Element =>
+  ic(x, R[2], C.red, <>{[-24, -18, -12, -6, 0, 6, 12, 18].map((bx) => <rect key={bx} x={bx} y="-13" width="4" height="26" />)}<rect x="-24" y="-3" width="46" height="2.5" class="k" /></>, on)
+
+/**
+ * The words the display prints that the key layer lights: FX (and its bars)
+ * on the FX, OUTPUT and SIDECHAIN pages, SWING on TIMING, FREE in free time,
+ * the MAIN and TEMPO boxes on their pages, ERASE's while erase is on, MUTE
+ * with a group muted or soloed, COPY and PASTE for a moment as they go.
+ */
+function LcdLit(props: { fx: boolean; swing: boolean; free: boolean; main: boolean; tempo: boolean; erase: boolean; mute: boolean; clip: 'COPY' | 'PASTE' | null }): JSX.Element {
+  return (
+    <>
+      {ic(98, R[1], C.white, <><path d="M-26 -17h52a4 4 0 0 1 4 4v20a4 4 0 0 1-4 4h-19l-7 10v-10h-26a4 4 0 0 1-4-4v-20a4 4 0 0 1 4-4z" />{t(0, -3, 'MUTE', 14, 'k', 700)}</>, props.mute)}
+      {ic(299, R[1], C.red, <><path d="M0 -24v12M-9 -15l9 -9 9 9" class="s" stroke-width="3" /><rect x="-22" y="-8" width="44" height="22" rx="2" />{t(0, 3, 'COPY', 14, 'k', 700)}</>, props.clip === 'COPY')}
+      {ic(361, R[1], C.white, <><rect x="-22" y="-22" width="44" height="20" rx="3" />{t(0, -12, 'PASTE', 13, 'k', 700)}<path d="M0 -2v22M-9 11l9 9 9 -9" class="s" stroke-width="3" /></>, props.clip === 'PASTE')}
+      {fxBars(820, props.fx)}
+      {fxBars(951, props.fx)}
+      {ic(886, R[2], C.white, t(0, 1, 'FX', 40, '', 400, 'middle', '0'), props.fx, 'ep-fx')}
+      {ic(1340, R[2], C.blue, <><path d="M-20 -8c6 -14 12 -14 18 0s12 14 20 0" class="s" stroke-width="3" />{t(0, 13, 'FREE', 16, 'w', 700)}</>, props.free, 'ep-free')}
+      {wordBox(474, 578, C.orange, 'MAIN', props.main)}
+      {wordBox(670, 773, C.blue, 'TEMPO', props.tempo)}
+      {wordBox(799, 908, C.red, 'ERASE', props.erase, true)}
+      {ic(1312, R[3], C.red, <>{t(16, -8, 'SWING', 17, '', 700)}<path d="M-4 18c12 0 26 -4 36 -14" class="s" stroke-width="3" style={{ stroke: C.pink }} /><circle cx="-38" cy="-8" r="6" style={{ fill: C.tan }} /><rect x="-44" y="-2" width="13" height="14" style={{ fill: C.tan }} /><rect x="-44" y="12" width="13" height="10" style={{ fill: C.blue }} /><circle cx="-24" cy="-4" r="4" /></>, props.swing, 'ep-swing')}
+    </>
+  )
+}
 
 /**
  * The speaker: 14 × 12 holes on a 4 mm pitch; only the middle's disc is
@@ -832,17 +1075,33 @@ function Knob(props: {
   group: number
   onCard: (key: CardKey, el: HTMLElement) => void
   onTurned: (which: DeviceControl) => void
+  /** SHIFT held on the drawn device: five times finer. */
+  fine: () => boolean
 }): JSX.Element {
   const t = useTurnable(props.which, props.group)
   return (
-    <DrawnKnob kind={props.kind} label={props.label} place={props.place} t={t} onTap={(el) => props.onCard(props.card, el)} onTurned={() => props.onTurned(props.which)} />
+    <DrawnKnob kind={props.kind} label={props.label} place={props.place} t={t} onTap={(el) => props.onCard(props.card, el)} onTurned={() => props.onTurned(props.which)} fine={props.fine} />
   )
 }
 
-/** The drawn fader on group [group]'s level; a tap opens FADER's card. */
-function Fader(props: { group: number; onCard: (key: CardKey, el: HTMLElement) => void; onTurned: (which: DeviceControl) => void }): JSX.Element {
+/**
+ * The drawn fader on group [group]'s level (its send on the FX page); a tap
+ * opens FADER's card. Moved with RECORD held it rests, and the plate says arc
+ * records no automation.
+ */
+function Fader(props: { group: number; onCard: (key: CardKey, el: HTMLElement) => void; onTurned: (which: DeviceControl) => void; fine: () => boolean; layer: DeviceKeys | null }): JSX.Element {
   const t = useTurnable('fader', props.group)
-  return <DrawnFader t={t} onTap={(el) => props.onCard('FADER', el)} onTurned={() => props.onTurned('fader')} />
+  const { layer } = props
+  return (
+    <div
+      style={{ display: 'contents' }}
+      onPointerDownCapture={() => {
+        if (layer !== null && held(layer.state.peek(), 'RECORD')) layer.say(WebText.notInArc(WebText.DEVICE_NOT_IN_ARC.AUTOMATION!))
+      }}
+    >
+      <DrawnFader t={t} onTap={(el) => props.onCard('FADER', el)} onTurned={() => props.onTurned('fader')} fine={props.fine} />
+    </div>
+  )
 }
 
 /** The plate's hit line: [hit], or while a control turns ([turning]) its name and value ("FX X · 62"). */
@@ -924,14 +1183,58 @@ function ShortcutCard(props: {
 
 /**
  * The drawn RECORD and PLAY as the pattern's keys: a tap on RECORD arms it (held, the pattern sheet), its cap
- * blinking while armed and lit while recording; PLAY plays and stops, lit while the pattern runs.
+ * blinking while armed and lit while recording; PLAY plays and stops, lit while the pattern runs. RECORD is
+ * held on the key layer too: − / + with it set the length, and a press so spent arms nothing (nor opens the
+ * sheet). With STEP open it is the panel's RECORD (held, a pad placed on the step).
  */
-function DeviceTransport(props: { t: TransportUi; still?: boolean }): JSX.Element {
-  const { t } = props
+function DeviceTransport(props: { t: TransportUi; still?: boolean; layer: DeviceKeys | null }): JSX.Element {
+  const { t, layer } = props
   const ui = t.ui
   const press = useTransportPress(t)
   const beat = usePatternBeat(t, props.still === true)
   const light = recordLight(ui)
+  const step = useStep()
+  const stepOpen = step?.ui.open === true
+  // STEP's RECORD held by this key (let go of with it, even if the panel closed meanwhile).
+  const stepHeld = useRef(false)
+  // − / + took RECORD while it waited to be a tap: the press ends there.
+  const spent = layer?.state.value.spent.has('RECORD') === true
+  useEffect(() => {
+    if (spent) press.cancelRecord()
+  }, [spent])
+  const record: ButtonHTMLAttributes<HTMLButtonElement> = {
+    ...press.record,
+    onPointerDown: (e) => {
+      if (e.button !== 0) return
+      layer?.down('RECORD', e.timeStamp, e.shiftKey)
+      if (stepOpen && step !== null) {
+        e.preventDefault()
+        ;(e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId)
+        stepHeld.current = true
+        step.onRecordDown()
+        return
+      }
+      press.record.onPointerDown?.(e)
+    },
+    onPointerUp: (e) => {
+      if (stepHeld.current) {
+        stepHeld.current = false
+        step?.onRecordUp()
+      } else if (layer?.state.peek().spent.has('RECORD') === true) {
+        press.record.onPointerCancel?.(e)
+      } else {
+        press.record.onPointerUp?.(e)
+      }
+      layer?.up('RECORD', e.timeStamp)
+    },
+    onPointerCancel: (e) => {
+      if (stepHeld.current) {
+        stepHeld.current = false
+        step?.onRecordUp()
+      } else press.record.onPointerCancel?.(e)
+      layer?.cancel('RECORD')
+    },
+  }
   return (
     <>
       <button
@@ -941,7 +1244,7 @@ function DeviceTransport(props: { t: TransportUi; still?: boolean }): JSX.Elemen
         aria-label={recordName(ui)}
         aria-description={MirrorText.RECORD_HOLD}
         data-coach="live.record"
-        {...press.record}
+        {...record}
       >
         RECORD
       </button>
@@ -968,10 +1271,22 @@ function PlateWords(props: { t: TransportUi; still?: boolean }): JSX.Element {
   )
 }
 
-/** The function keys' places and prints on the drawn EP-133 (each over a well DeviceView draws). */
-const DRAWN: Record<'SOUND' | 'MAIN' | 'TEMPO' | 'FX', DrawnKey> = {
+/** A two-word key's place on the drawn EP-133 and the words it prints, with their DeviceView.css colours. */
+interface DrawnKey {
+  readonly place: CSSProperties
+  readonly top: string
+  readonly bottom: string
+  readonly topCls: string
+  readonly bottomCls: string
+}
+
+/** The two-word keys' places and prints on the drawn EP-133 (each over a well DeviceView draws). */
+const DRAWN: Record<'SOUND' | 'MAIN' | 'TEMPO' | 'SAMPLE' | 'TIMING' | 'FX' | 'ERASE', DrawnKey> = {
   SOUND: { place: at(265, KROW, 130, 130), top: 'SOUND', bottom: 'EDIT', topCls: 'ep-h--black', bottomCls: 'ep-h--light ep-h--edit' },
   MAIN: { place: at(461, KROW, 130, 130), top: 'MAIN', bottom: 'COMMIT', topCls: 'ep-h--black', bottomCls: 'ep-h--orange' },
   TEMPO: { place: at(657, KROW, 130, 130), top: 'TEMPO', bottom: 'LOOP', topCls: 'ep-h--black', bottomCls: 'ep-h--grey' },
+  SAMPLE: { place: at(1050, ROW_Y[0]!, 130, 130), top: 'SAMPLE', bottom: 'CHOP', topCls: 'ep-h--orange', bottomCls: 'ep-h--light' },
+  TIMING: { place: at(1246, ROW_Y[0]!, 130, 130), top: 'TIMING', bottom: 'CORRECT', topCls: 'ep-h--black', bottomCls: 'ep-h--light' },
   FX: { place: at(1050, ROW_Y[1]!, 130, 130), top: 'FX', bottom: 'OUTPUT', topCls: 'ep-h--black', bottomCls: 'ep-h--light' },
+  ERASE: { place: at(1246, ROW_Y[1]!, 130, 130), top: 'ERASE', bottom: 'SYSTEM', topCls: 'ep-h--lighter', bottomCls: 'ep-h--light' },
 }

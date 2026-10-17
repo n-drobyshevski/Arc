@@ -120,6 +120,24 @@
   text-transform: uppercase;
 }
 .ep-plate__status { top: 214px; font-size: 40px; font-weight: 400; letter-spacing: 0.01em; color: var(--ep-orange); }
+/* A page's line (the key layer's SOUND, EDIT, TEMPO …): a key to arc's own sheet, smaller to hold its knobs' names. */
+/* Two lines at most, so the knobs' and − / +'s words all show. */
+.ep-plate__page {
+  z-index: 2;
+  margin: 0;
+  padding: 0 0 4px;
+  border: 0;
+  background: none;
+  text-align: start;
+  font-size: 31px;
+  letter-spacing: 0.02em;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  cursor: pointer;
+}
+.ep-plate__page:hover { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 6px; }
 .ep-plate__hit { top: 398px; font-size: 42px; color: var(--ep-ink); font-variant-numeric: tabular-nums; }
 .ep-grille { left: 985px; top: 66px; width: 459px; height: 393px; }
 .ep-grille svg { display: block; width: 100%; height: 100%; }
@@ -365,6 +383,15 @@
 .ep-key--sign svg { width: 44px; height: 44px; }
 .ep-key--sign path { fill: none; stroke: #2E2D2C; stroke-width: 2.2; }
 .ep-key.is-sel { color: #FF6A2A; }
+/* The key layer's slim keys (KEYS, FADER, SHIFT) and group keys held, latched or clicked for the next key:
+ * their word lit signal orange in a glowing cap. */
+.ep-key--slim.is-lit,
+.ep-key--group.is-held {
+  color: #FF6A2A;
+  text-shadow: 0 0 8px rgb(255 106 42 / 0.75);
+  filter: drop-shadow(0 0 10px rgb(255 76 0 / 0.45));
+}
+.ep-key--group.is-held .ep-key__icon path { stroke: #FF6A2A; }
 /* Lit: cues in the cap (a brighter face, a glow), no rings. */
 .ep-key--grey.is-lit {
   --cap: #77736F;

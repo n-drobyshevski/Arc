@@ -12,6 +12,11 @@
 // - KEYS: the pad keys play the grid's keys; Z X the octave (the piano does
 //   its own), [ ] the key, Shift+[ ] the scale, V grid or piano.
 // - Both: M pads or keys.
+// - The drawn EP-133 (the Device view, [LiveContext.device]): − and = (and
+//   the number pad's − and +) are its − and +, with Shift its SHIFT + − / +
+//   ([minusPlus]); A to D are its group keys, held while the key is down
+//   (useLiveKeys keeps the press). The computer's Shift held is its SHIFT
+//   (DeviceView listens for that itself).
 // - Nothing with Ctrl, Cmd, Alt or AltGr, nothing while composing (but [ ]
 //   on a dead key's place step), and nothing the piano plays while it shows
 //   (its letters, Z and X, by code). Letters by what they type, by place
@@ -94,6 +99,8 @@ export interface LiveContext {
   viewSwitchable: boolean
   /** The desk's Sounds tab is there (docked tools with EDIT). */
   soundsTab: boolean
+  /** The drawn EP-133 shows (the Device view): − / + are its keys, A to D held its group keys. */
+  device?: boolean
 }
 
 export type LiveCommand =
@@ -109,6 +116,10 @@ export type LiveCommand =
   | { readonly kind: 'octave'; readonly step: -1 | 1 }
   | { readonly kind: 'root'; readonly step: -1 | 1 }
   | { readonly kind: 'scale'; readonly step: -1 | 1 }
+  | { readonly kind: 'minusPlus'; readonly step: -1 | 1; readonly shift: boolean }
+
+/** The drawn EP-133's − and + by code: the main row's − and = (+ shifted), the number pad's − and +. */
+export const MINUS_PLUS: Readonly<Record<string, -1 | 1>> = Object.freeze({ Minus: -1, Equal: 1, NumpadSubtract: -1, NumpadAdd: 1 })
 
 /** What [input] does in Live as [ctx] shows it, or null (the key is someone else's, or nobody's). */
 export function liveCommand(input: KeyInput, ctx: LiveContext): LiveCommand | null {
@@ -121,6 +132,9 @@ export function liveCommand(input: KeyInput, ctx: LiveContext): LiveCommand | nu
   if (ctx.pianoShown && (COMPUTER_KEYS.includes(input.code) || input.code === 'KeyZ' || input.code === 'KeyX')) return null
   // The app's: help and Escape.
   if (input.key === '?' || input.key === 'Escape') return null
+  // The drawn device's − and +, by place (Shift with them is its SHIFT).
+  const sign = MINUS_PLUS[input.code]
+  if (ctx.device === true && sign !== undefined) return { kind: 'minusPlus', step: sign, shift: input.shift }
   // '/' finds in PADS by what it types (Shift+7 on some layouts, on [ 's place on Dvorak);
   // in KEYS [ ] go by place, so Dvorak's / place still steps the key.
   if (input.key === '/' && !ctx.keys) return ctx.soundsTab ? { kind: 'find' } : null
@@ -159,7 +173,7 @@ export function liveCommand(input: KeyInput, ctx: LiveContext): LiveCommand | nu
 }
 
 /** Where a row of the Keyboard keys sheet applies. */
-export type KeyScope = 'pads' | 'edit' | 'grid' | 'piano' | 'everywhere'
+export type KeyScope = 'pads' | 'edit' | 'grid' | 'piano' | 'device' | 'everywhere'
 
 /** One row of the Keyboard keys sheet: the keys (each a chip) and what they do. */
 export interface KeyRow {

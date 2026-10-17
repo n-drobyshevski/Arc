@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest'
 import { MirrorText } from '../../src/core/text/mirrorText'
 import { WebText } from '../../src/core/text/webText'
 import { emptyMirrorState, type MirrorUi } from '../../src/state/types'
-import { displayDigits, firstSentence, plateStatus } from '../../src/ui/live/DeviceView'
+import { DIGIT_GLYPHS, displayDigits, editWord, firstSentence, pageWord, plateStatus, readoutDigits } from '../../src/ui/live/DeviceView'
+import { EDIT_PAGES } from '../../src/ui/sheets/PadEditPages'
+import { FX_TYPES } from '../../src/core/features/fxSettings'
 import { cardSearch, shortcutsFor } from '../../src/ui/live/shortcuts'
 import type { TakeUi } from '../../src/ui/live/Takes'
 
@@ -27,6 +29,44 @@ describe('the seven-segment digits', () => {
   })
 })
 
+describe('the digits on the key layer', () => {
+  it("show a control's readout in three characters, a point where it has decimals", () => {
+    const d = (r: string): string => {
+      const o = readoutDigits(r)
+      return o.dot === null ? o.text : `${o.text.slice(0, o.dot + 1)}.${o.text.slice(o.dot + 1)}`
+    }
+    expect(d('62')).toBe(' 62')
+    expect(d('62%')).toBe(' 62')
+    expect(d('128')).toBe('128')
+    expect(d('1000')).toBe('000')
+    expect(d('-12')).toBe('-12')
+    expect(d('+1.5')).toBe(' 1.5')
+    expect(d('0.02 s')).toBe('0.02')
+    expect(d('12.75')).toBe('12.7')
+    expect(d('-1.5')).toBe('-1.5')
+    expect(d('1/16')).toBe(' 16')
+    expect(d('1/8T')).toBe(' 8T')
+    expect(d('Oneshot')).toBe('ONE')
+    expect(d('C')).toBe('C  ')
+    expect(d('L8')).toBe('L8 ')
+    expect(d(MirrorText.NO_VALUE)).toBe('---')
+  })
+
+  it("spell each page's word, and every character they use can be drawn", () => {
+    expect(pageWord('SOUND', 'NONE', 0)).toBe('SND')
+    expect(pageWord('EDIT', 'NONE', EDIT_PAGES.indexOf('TRIM'))).toBe('TRM')
+    expect(pageWord('FX', 'DELAY', 0)).toBe('DLY')
+    expect(pageWord('MAIN', 'NONE', 0)).toBeNull()
+    const words = [
+      ...(['SOUND', 'TEMPO', 'TIMING', 'OUTPUT', 'SIDECHAIN'] as const).map((p) => pageWord(p, 'NONE', 0)!),
+      ...EDIT_PAGES.map((_, i) => editWord(i)),
+      ...FX_TYPES.map((t) => pageWord('FX', t, 0)!),
+      'EDT',
+    ]
+    for (const w of words) for (const ch of w) expect(DIGIT_GLYPHS.has(ch), `${w}: ${ch}`).toBe(true)
+  })
+})
+
 describe('the plate', () => {
   it('names the project, else Live', () => {
     expect(plateStatus(st({ activeProject: 3 }), ui(), idle)).toBe(MirrorText.project(3))
@@ -40,11 +80,11 @@ describe('the plate', () => {
 })
 
 describe('shortcut cards', () => {
-  it("list a key's combinations from the guide, shortest first", () => {
-    const sound = shortcutsFor('SOUND')
-    expect(sound.length).toBe(3)
-    for (const e of sound) expect(e.combo).toMatch(/\bSOUND\b/)
-    expect(sound.map((e) => e.combo!.length)).toEqual([...sound.map((e) => e.combo!.length)].sort((a, b) => a - b))
+  it("list a control's combinations from the guide, shortest first", () => {
+    const fader = shortcutsFor('FADER')
+    expect(fader.length).toBe(3)
+    for (const e of fader) expect(e.combo).toMatch(/\bFADER\b/)
+    expect(fader.map((e) => e.combo!.length)).toEqual([...fader.map((e) => e.combo!.length)].sort((a, b) => a - b))
     expect(shortcutsFor('KNOBX').every((e) => /KNOB ?X/.test(e.combo!))).toBe(true)
     expect(shortcutsFor('KNOBX').length).toBeGreaterThan(0)
     expect(shortcutsFor('VOLUME')).toEqual([])
